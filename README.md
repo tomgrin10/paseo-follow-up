@@ -59,6 +59,10 @@ npm pack --dry-run
 
 Integration checks use a separate Paseo home, synthetic agents and fixtures. Never restart your main daemon for verification. Reload only this plugin with `paseo plugin reload follow-through`.
 
+## Releases
+
+Release tags (`vX.Y.Z`) run `.github/workflows/publish-npm.yml`. GitHub Actions verifies the plugin and packed installation, publishes through npm Trusted Publishing, verifies registry integrity, then creates the GitHub release. No npm token is stored in repository secrets.
+
 ## Other plugins
 
 Also available from [Tom Gringauz](https://github.com/tomgrin10):

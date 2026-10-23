@@ -70,6 +70,7 @@ jobs:
           console.log(`::add-mask::${body.token}`);
           console.log(`npm trusted publishing authorization verified for ${name}.`);
           JS
+
       - run: npm ci
       - name: Install Paseo for isolated integration checks
         run: npm install --global @getpaseo/cli@0.12.0
@@ -112,3 +113,32 @@ jobs:
             if (!verified) { console.error(`::error::Registry verification failed for ${spec}.`); process.exit(1); }
           }
           JS
+
+  release:
+    name: Create GitHub release
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: Publish release notes after npm verification
+        run: |
+          if gh release view "$RELEASE_TAG" --json tagName > /dev/null 2>&1; then
+            exit 0
+          fi
+          cat > /tmp/release-notes.md <<'NOTES'
+          Track workspace pull requests, queue follow-up work, and verify completion in Paseo.
+
+          Install with `paseo plugin install paseo-follow-up` on Paseo 0.11.0 or newer.
+
+          The installation ID remains `follow-through` to preserve saved work and settings.
+          This release passed plugin verification, isolated packed installation checks,
+          and npm registry integrity verification before these notes were published.
+          NOTES
+          gh release create "$RELEASE_TAG" --verify-tag \
+            --title "Paseo Follow-up $RELEASE_TAG" \
+            --notes-file /tmp/release-notes.md --latest
