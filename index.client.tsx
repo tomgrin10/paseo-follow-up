@@ -24,6 +24,7 @@ export default function contribute(host: PluginClientContext) {
   client.addCommandCenterItem({ id: "open-follow-through", title: "Open workspace follow-up", icon: "GitPullRequest", keywords: ["PR", "stack", "done", "archive"], context: "workspace", onSelect({ openPanel }) { openPanel(panel(), { location: location() }); } });
   client.addCommandCenterItem({ id: "follow-through-overview", title: "Open follow-up overview", icon: "GitPullRequest", keywords: ["workspaces", "attention", "done"], context: "global", onSelect({ openScreen }) { openScreen({ screenId: "follow-through" }); } });
   client.addSlashCommand({ name: "follow-through", description: "Open this workspace's PRs and remaining work", argumentHint: "", context: "agent", onSubmit({ openPanel }) { openPanel(panel(), { location: location() }); } });
+  client.addSlashCommand({ name: "follow-up", description: "Open this workspace's PRs and remaining work", argumentHint: "", context: "agent", onSubmit({ openPanel }) { openPanel(panel(), { location: location() }); } });
   const headers = new Map<string, PluginButtonRegistration>();
   let stopped = false;
   let releaseObservation: (() => Promise<void>) | null = null;
