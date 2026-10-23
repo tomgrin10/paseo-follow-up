@@ -15,6 +15,7 @@ const url = `ws://127.0.0.1:${port}/ws`;
 let daemon; let client; let api;
 const keep = process.argv.includes("--keep");
 try {
+  await Promise.all(["paseo", "claude", "codex"].map(command => exec(command, ["--version"], { timeout: 30000 })));
   await Promise.all([home, plugin, fixture, bin].map(p => mkdir(p, { recursive: true })));
   const codexFixture = '# Preserve surrounding text\nmodel = "fixture-model"\n[projects."/synthetic/project"]\ntrust_level = "trusted"\n# Keep this server after project settings\n[mcp_servers.keep-fixture]\nurl = "https://example.invalid/mcp"\nenabled = false\n';
   await mkdir(join(home, ".codex"), { recursive: true });
