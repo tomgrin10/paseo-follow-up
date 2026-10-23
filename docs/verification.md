@@ -9,3 +9,5 @@ The 0.1.0 release was checked on Paseo 0.12.0 in a separate daemon home with fix
 - No user's main daemon was restarted or real-agent messages sent for these checks.
 
 Release screenshots use synthetic PRs and workspace data. No local prek configuration exists in this repository.
+
+The packed integration suite requires the Paseo, Claude Code and Codex CLIs. The release workflow installs pinned versions before running it. The first clean-runner attempt exposed the missing provider binaries; the workflow prerequisite was corrected before CI publication.
