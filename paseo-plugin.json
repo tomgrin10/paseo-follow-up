@@ -1,0 +1,12 @@
+{
+  "id": "follow-through",
+  "name": "Follow-up",
+  "description": "Track every workspace PR stack, batch repairs to the main agent, and declare Done after follow-through.",
+  "media": [
+    "docs/screenshots/follow-up-workspace.png",
+    "docs/screenshots/follow-up-overview.png"
+  ],
+  "requirements": {
+    "paseo": ">=0.11.0"
+  }
+}
