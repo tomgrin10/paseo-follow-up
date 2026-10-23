@@ -1,0 +1,34 @@
+import assert from 'node:assert/strict';
+import {readFile,mkdtemp,rm} from 'node:fs/promises';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {createRequire} from 'node:module';
+import {DaemonClient} from '@getpaseo/client/internal/daemon-client';
+const p=JSON.parse(await readFile('.preview-isolated.json','utf8'));
+assert.ok(p.root.startsWith('/tmp/follow-install-'));
+const {chromium}=createRequire(process.env.SEND_TO_PASEO_SOURCE+'/extension/package.json')('playwright-core');
+const profile=await mkdtemp(join(tmpdir(),'follow-settings-browser-'));
+const context=await chromium.launchPersistentContext(profile,{executablePath:process.env.STP_CHROMIUM,headless:true,viewport:{width:1440,height:1050},args:['--disable-extensions','--no-first-run']});
+const client=new DaemonClient({url:`ws://127.0.0.1:${p.port}/ws`,clientId:'project-settings-ui',clientType:'cli',reconnect:{enabled:false}});await client.connect();
+const call=(method,input={})=>client.invokePluginRpc('follow-through',method,input);
+try{
+const page=await context.newPage();await fetch(`http://127.0.0.1:${p.port}/llms.txt`);await page.goto(`http://127.0.0.1:${p.port}/`);
+await page.getByRole('button',{name:'Settings',exact:true}).click();
+await page.getByRole('button',{name:'Plugins',exact:true}).click();
+await page.getByRole('button',{name:'Actions for follow-through',exact:true}).click();
+await page.getByRole('menuitem',{name:'Follow-through',exact:true}).click();
+await page.getByText('Default tracking by project',{exact:true}).waitFor();
+const hero=page.getByRole('switch',{name:/Default tracking for .*example\/hero-poc/});
+assert.equal(await hero.getAttribute('aria-checked'),'true');
+await page.screenshot({path:'docs/screenshots/project-settings-desktop.png'});
+await hero.click();await page.getByText('Project default saved.',{exact:true}).waitFor();
+assert.equal(await hero.getAttribute('aria-checked'),'false');
+const saved=(await call('follow.project-settings')).projects.find(x=>x.key==='remote:github.com/example/hero-poc');assert.equal(saved.enable_default_tracking,false);
+await page.reload();await page.getByText('Default tracking by project',{exact:true}).waitFor();assert.equal(await hero.getAttribute('aria-checked'),'false');
+await page.setViewportSize({width:390,height:844});
+assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),390);
+assert.ok((await hero.boundingBox()).height>=44);
+await page.screenshot({path:'docs/screenshots/project-settings-compact.png'});
+await hero.click();await page.getByText('Project default saved.',{exact:true}).waitFor();assert.equal(await hero.getAttribute('aria-checked'),'true');
+console.log('PASS: native Settings entry, desktop/compact project toggles, persistence through reload, saved RPC state, 44px target and no horizontal overflow.');
+}finally{await client.close();await context.close();await rm(profile,{recursive:true,force:true});}

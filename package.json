@@ -1,0 +1,57 @@
+{
+  "name": "paseo-follow-up",
+  "private": false,
+  "version": "0.1.0",
+  "description": "Track workspace pull requests, queue follow-up work, and verify completion in Paseo.",
+  "type": "module",
+  "files": [
+    "paseo-plugin.json",
+    "OVERVIEW.md",
+    "index.client.ts",
+    "index.client.tsx",
+    "index.server.ts",
+    "index.server.tsx",
+    "client/",
+    "server/",
+    "shared/",
+    "skills/",
+    "README.md",
+    "docs/screenshots/",
+    "scripts/build.mjs"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "verify": "npm run typecheck && npm test && node --test button-visibility.test.mjs",
+    "preview": "node scripts/check-install.mjs --keep",
+    "test:install": "node scripts/check-install.mjs",
+    "prepare": "node scripts/build.mjs"
+  },
+  "devDependencies": {
+    "@getpaseo/client": "0.11.0",
+    "@getpaseo/plugin": "0.11.0",
+    "@tanstack/react-query": "^5.90.11",
+    "@types/node": "^22.10.2",
+    "@types/react": "~19.2.0",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3",
+    "zod": "^4.4.3"
+  },
+  "license": "MIT",
+  "author": "Tom Gringauz",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tomgrin10/paseo-follow-up.git"
+  },
+  "homepage": "https://github.com/tomgrin10/paseo-follow-up#readme",
+  "bugs": "https://github.com/tomgrin10/paseo-follow-up/issues",
+  "keywords": [
+    "paseo",
+    "paseo-plugin",
+    "follow-up",
+    "pull-requests",
+    "workspaces"
+  ]
+}
