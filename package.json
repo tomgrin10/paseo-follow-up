@@ -1,7 +1,7 @@
 {
   "name": "paseo-follow-up",
   "private": false,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Track workspace pull requests, queue follow-up work, and verify completion in Paseo.",
   "type": "module",
   "files": [
