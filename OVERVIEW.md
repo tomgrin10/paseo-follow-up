@@ -2,7 +2,7 @@
 
 Follow-up keeps PR stacks, remaining tasks and explicit agent completion attached to a Paseo workspace. It groups workspaces by whether you or an agent can act next and retains settled PR history.
 
-Requires Paseo 0.11+, Node 22+ and authenticated gh on the daemon host. Graphite CLI authentication is used for readiness and explicit Merge. The optional Send to Paseo browser companion enables Graphite's Merge when ready setting; it is not needed for tracking, recovery or follow-up.
+Requires Paseo 0.14+, Node 22+ and authenticated gh on the daemon host. Graphite CLI authentication is used for readiness and explicit Merge. The optional Send to Paseo browser companion enables Graphite's Merge when ready setting; it is not needed for tracking, recovery or follow-up.
 
 Open the sidebar or Command-K, then Track this workspace. Project settings can enroll existing and new workspaces with original main-agent ownership; Auto always starts off. The retained development default enables canonical Git repositories named hero-poc, while other projects require opt-in. Disable that project default to stop further enrollment without losing records.
 

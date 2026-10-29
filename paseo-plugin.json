@@ -7,6 +7,6 @@
     "docs/screenshots/follow-up-overview.png"
   ],
   "requirements": {
-    "paseo": ">=0.11.0"
+    "paseo": ">=0.14.0"
   }
 }
