@@ -1,6 +1,6 @@
 # Paseo Follow-up
 
-Trusted Paseo plugin with separate client, server and shared boundaries. Minimum Paseo is 0.11.0. Use native React Native controls and host theme tokens.
+Trusted Paseo plugin with separate client, server and shared boundaries. Minimum Paseo is 0.14.0. Use native React Native controls and host theme tokens.
 
 The public name is Follow-up and the npm package is paseo-follow-up. Retain installation id follow-through, RPC names and plugin-data/follow-through for existing installations. Never reset tracked work or settings during an upgrade.
 

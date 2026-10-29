@@ -95,11 +95,9 @@ try {
   const fallbackEnv = { ...env, PASEO_AGENT_ID: agent.id }; delete fallbackEnv.FOLLOW_THROUGH_CLIENT_ENTRY;
   const fallback = JSON.parse((await exec(process.execPath, [bridgePath, "call", "workspace_status", "{}"], { env: fallbackEnv })).stdout);
   assert.equal(fallback.id, w.id, "a dependency-free bridge resolves the installed CLI client without a session env override");
-  const claudeMcp = JSON.parse(await readFile(join(home, ".claude.json"), "utf8")).mcpServers["follow-through"];
-  assert.ok(claudeMcp.args.includes(bridgePath)); assert.equal(claudeMcp.env.FOLLOW_THROUGH_MANAGED, "1"); assert.ok(!("PASEO_AGENT_ID" in claudeMcp.env));
-  const codexMcp = JSON.parse((await exec("codex", ["mcp", "get", "follow-through", "--json"], { env })).stdout);
-  assert.ok((await readFile(join(home, ".codex/config.toml"), "utf8")).startsWith(codexFixture.trimEnd()), "registration must preserve original comments, entry order and trust settings");
-  assert.ok(codexMcp.transport.env_vars.includes("PASEO_AGENT_ID")); assert.ok(!("PASEO_AGENT_ID" in codexMcp.transport.env));
+  const claudeGlobal = JSON.parse(await readFile(join(home, ".claude.json"), "utf8").catch(() => "{}"));
+  assert.equal(claudeGlobal.mcpServers?.["follow-through"], undefined, "session attachment must not register a global Claude MCP");
+  assert.equal(await readFile(join(home, ".codex/config.toml"), "utf8"), codexFixture, "session attachment must leave global Codex MCP settings unchanged");
   const hookScript = join(home, "plugin-data/follow-through/agent-hook.mjs");
   const runAgentHook = async (event, agentId = agent.id) => {
     const child = spawn(process.execPath, [hookScript], { env: { ...env, PASEO_AGENT_ID: agentId }, stdio: ["pipe", "pipe", "pipe"] });

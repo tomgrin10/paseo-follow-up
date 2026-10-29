@@ -18,7 +18,7 @@ import { applyHistory, applyDiscovery, extractHistory } from "./server/discovery
 import { lifecycleOnly, recoveryBatch } from "./shared/follow-up";
 import { Deployments } from "./server/deployments";
 import { AgentHooks } from "./server/agent-hooks";
-import { AgentMcp } from "./server/agent-mcp";
+import { withSessionMcp } from "./server/session-mcp";
 import { updateObligation } from "./server/obligations";
 
 export default function contribute(server: PluginServerContext) {
@@ -27,7 +27,6 @@ export default function contribute(server: PluginServerContext) {
   const bridge = join(directory, "mcp.mjs");
   const store = new Store(directory);
   const agentHooks = new AgentHooks(directory, clientEntry());
-  const agentMcp = new AgentMcp(directory, clientEntry(), paseoHome);
   const gateway = new PaseoGateway();
   const graphite = new Graphite();
   const github = new Github(undefined, graphite, new Deployments());
@@ -48,8 +47,6 @@ export default function contribute(server: PluginServerContext) {
     await engine.recover();
     hooksStarted = true;
     await agentHooks.start().catch(() => { hookError = "Automatic sidebar instructions could not be registered for every provider. Check Claude/Codex hook settings; tracking is still available."; });
-    const mcp = await agentMcp.start();
-    if ([mcp.claude, mcp.codex].some(status => ["unavailable", "name-conflict"].includes(status))) hookError = "Some agent MCP connections could not be registered. Existing CLI access remains available.";
     hookTimer = setInterval(() => void agentHooks.heartbeat().catch(() => {}), 30_000);
   })().catch(() => { loadError = "Follow-through could not start. Check its saved state and worker lock."; });
   const requireReady = async () => { await ready; if (loadError || stopped) throw new Error(loadError ?? "Follow-through is stopping"); };
@@ -252,9 +249,9 @@ export default function contribute(server: PluginServerContext) {
     }),
     server.before("agent.session_open", async ({ request }) => {
       await ready;
-      if (loadError || stopped) return request;
+      if (loadError || stopped || request.purpose !== "interactive") return request;
       const saved = await store.snapshot();
-      let w = saved.workspaces.find(w => w.enable_tracking && (w.mainAgentId === request.agentId || w.batches.some(b => b.recipientAgentId === request.agentId)));
+      let w = saved.workspaces.find(w => w.enable_tracking && !w.archived && (w.mainAgentId === request.agentId || w.batches.some(b => b.recipientAgentId === request.agentId && !b.settledAt && b.tasks.every(t => t.kind === "inventory") && ["sending", "sent", "uncertain", "blocked"].includes(b.state))));
       if (!w && request.workspaceId && !saved.workspaces.some(w => w.id === request.workspaceId && (w.archived || w.mainAgentId !== request.agentId))) {
         const project = await gateway.projectForWorkspace(saved, request.workspaceId).catch(() => null);
         if (project?.enable_default_tracking) {
@@ -267,9 +264,10 @@ export default function contribute(server: PluginServerContext) {
         }
       }
       if (!w) return request;
-      return { ...request, env: { ...request.env, FOLLOW_THROUGH_CLI: bridge, FOLLOW_THROUGH_CLIENT_ENTRY: clientEntry(), ...(w.mainAgentId !== request.agentId ? { FOLLOW_THROUGH_RECOVERY: "1" } : {}) } };
+      const recovery = w.mainAgentId !== request.agentId;
+      return withSessionMcp({ ...request, env: { ...request.env, FOLLOW_THROUGH_CLI: bridge, FOLLOW_THROUGH_CLIENT_ENTRY: clientEntry(), ...(recovery ? { FOLLOW_THROUGH_RECOVERY: "1" } : {}) } }, directory, clientEntry(), paseoHome, recovery);
     }),
-    server.on("agent.turn_ended", async event => {
+    server.on("agent.turn_ended", async (event, { paseo, signal }) => {
       await ready;
       if (stopped || loadError) return;
       const interruption = event.outcome.kind === "canceled" || event.outcome.kind === "failed" ? { turnId: event.turnId, at: new Date().toISOString(), kind: event.outcome.kind } : null;
@@ -281,9 +279,13 @@ export default function contribute(server: PluginServerContext) {
       }
       if (!(await store.snapshot()).workspaces.some(w => w.enable_tracking && w.mainAgentId === event.agent.id)) return;
       gateway.markDirty(event.agent.id);
-      await store.mutate(state => {
+      // Since Paseo 0.13 the lifecycle payload deliberately contains no history.
+      // Read a bounded tail through the plugin-owned API, outside the state lock.
+      const history = await paseo.agents.ref(event.agent.id).timeline.refetch({ direction: "tail", limit: 100, projection: "canonical" }).catch(() => null);
+      if (signal.aborted || stopped) return;
+      if (history) await store.mutate(state => {
         const w = state.workspaces.find(w => w.enable_tracking && w.mainAgentId === event.agent.id);
-        if (w) applyHistory(w, extractHistory(event.timeline), null);
+        if (w) applyHistory(w, extractHistory(history.entries.map(entry => entry.item), w.inventory?.historyComplete ?? false, w.inventory?.historyError ?? null), null);
       });
       const guarded = interruption && await sessionGuardOwnsInterruption(event.agent.id, interruption).catch(() => false);
       if (["canceled", "failed"].includes(event.outcome.kind) && !guarded) await store.mutate(state => {

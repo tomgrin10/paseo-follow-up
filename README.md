@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/paseo-follow-up?style=for-the-badge&color=cb3837)](https://www.npmjs.com/package/paseo-follow-up)
 [![npm downloads](https://img.shields.io/npm/dm/paseo-follow-up?style=for-the-badge&color=cb3837)](https://www.npmjs.com/package/paseo-follow-up)
-[![Paseo](https://img.shields.io/badge/Paseo-%E2%89%A5%200.11.0-8A63D2?style=for-the-badge)](https://paseo.sh)
+[![Paseo](https://img.shields.io/badge/Paseo-%E2%89%A5%200.14.0-8A63D2?style=for-the-badge)](https://paseo.sh)
 [![License](https://img.shields.io/github/license/tomgrin10/paseo-follow-up?style=for-the-badge&color=2563eb)](LICENSE)
 
 Keep long-lived Paseo workspaces moving through review, deployment, and completion. Follow-up retains PR stacks and remaining tasks, batches repairs for the existing main agent, and records the agent's explicit Done declaration.
@@ -13,7 +13,7 @@ Screenshots use synthetic workspaces and PRs.
 
 ## Requirements
 
-- Paseo 0.11.0 or newer and Node 22 or newer.
+- Paseo 0.14.0 or newer and Node 22 or newer.
 - Authenticated GitHub CLI (`gh`) on the daemon host.
 - Saved Graphite CLI authentication for Graphite readiness and explicit Merge controls.
 - Optional Send to Paseo browser companion for Graphite's actual Merge when ready switch. Core tracking and follow-up work without it.
@@ -62,6 +62,16 @@ Integration checks use a separate Paseo home, synthetic agents and fixtures. Nev
 ## Releases
 
 Release tags (`vX.Y.Z`) run `.github/workflows/publish-npm.yml`. GitHub Actions verifies the plugin and packed installation, publishes through npm Trusted Publishing, verifies registry integrity, then creates the GitHub release. No npm token is stored in repository secrets.
+
+## Paseo 0.14 agent integration
+
+The Follow-up MCP attaches when a tracked main or active recovery agent opens a Claude or Codex session. Normal startup no longer writes global Claude/Codex MCP settings. Existing global entries are preserved. Turn-ended discovery now fetches recent history through the SDK because Paseo 0.13+ sends an empty timeline in lifecycle events.
+
+Requires Paseo **0.14.0 or newer**. Agent tools are scoped to interactive Claude
+and Codex sessions; history-only opens receive none. They become available on
+the next idle session open after install or reload. The agent label
+`plugin-tools/enabled: "false"` opts a session out. Existing plugin data and
+settings are retained.
 
 ## Other plugins
 
