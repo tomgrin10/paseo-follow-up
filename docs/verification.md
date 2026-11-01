@@ -11,3 +11,17 @@ The 0.1.0 release was checked on Paseo 0.12.0 in a separate daemon home with fix
 Release screenshots use synthetic PRs and workspace data. No local prek configuration exists in this repository.
 
 The packed integration suite requires the Paseo, Claude Code and Codex CLIs. The release workflow installs pinned versions before running it. The first clean-runner attempt exposed the missing provider binaries; the workflow prerequisite was corrected before CI publication.
+
+
+## Prepared 0.3.0 integration (2026-11-01)
+
+- `npm run verify`: TypeScript, 135 behavior tests and the button visibility lifecycle regression pass.
+- `npm run test:install`: packed standalone lifecycle checks pass without Send to Paseo installed, including narrow PR ownership lookup and explicit re-registration.
+- `npm pack --dry-run`: new server modules are included; no credentials, transcripts or daemon state are packed.
+- The browser-control fixture with Send to Paseo 2.1 passes: installed RPC and HTTP transport, actual MV3 extension, native desktop controls, single-PR and downstack toggles, browser confirmation and separately allowed direct changes, cancellation, revocation, and one ordered synthetic merge. Extension settings pass wide/compact and light/dark checks.
+- Send's installed routing fixture selects the registering agent over a newer Main across multiple clones of the same repository, delivers once to a synthetic provider and honors a new-agent override.
+
+The old browser verification script had stale Follow-through labels and assumed the desktop
+workspace header shortcut persisted in compact Paseo. It now checks native controls on desktop
+and the changed extension settings in both viewport sizes. These checks do not claim compact
+Paseo merge-control coverage.
