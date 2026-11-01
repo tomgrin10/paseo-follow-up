@@ -44,7 +44,7 @@ export class PrActions {
     const w = findWorkspace(await this.store.snapshot(), workspaceId); active(w);
     const p = w.prs.find(p => p.key === key);
     if (!p) throw new Error("This PR is outside the workspace's inventory.");
-    const browser = this.browser.status();
+    const browser = this.browser.status(p.repo);
     if (!browser.ready || p.error || !p.snapshot?.complete || p.snapshot.state !== "OPEN") return { browser, pr: null, error: null };
     const cached = this.browser.cached(p.repo, p.number, p.snapshot.head);
     if (cached) return { browser, pr: cached, error: null };
@@ -148,7 +148,7 @@ export class PrActions {
       if (current.prActions.some(a => ["sending", "uncertain"].includes(a.state))) throw new Error("A PR action is already in progress or needs checking.");
       if (plan.kind === "merge" && current.prActions.some(a => a.kind === "merge" && a.state === "submitted" && prs.some(p => a.heads[p.key] === p.snapshot?.head) && this.now() - Date.parse(a.createdAt) < 30_000)) throw new Error("A merge was just submitted for this revision. Wait for Graphite's result.");
       if (identity(downstack(current.prs, plan.target)) !== saved.identity) throw new Error("The stack changed before submission.");
-      current.prActions.push({ id, kind: plan.kind, prs: prs.map(p => p.key), heads: Object.fromEntries(prs.map(p => [p.key, p.snapshot!.head])), createdAt: new Date(this.now()).toISOString(), state: "sending", result: "Waiting for Graphite to confirm." });
+      current.prActions.push({ id, kind: plan.kind, prs: prs.map(p => p.key), heads: Object.fromEntries(prs.map(p => [p.key, p.snapshot!.head])), createdAt: new Date(this.now()).toISOString(), state: "sending", result: plan.kind === "merge" ? "Waiting for Graphite to confirm." : "Confirm this PR setting change in the Send to Paseo extension in Chrome." });
       current.completion = null;
     });
     let state: "submitted" | "failed" | "uncertain" = "submitted";

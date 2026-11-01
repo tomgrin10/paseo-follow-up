@@ -41,3 +41,6 @@ export const projectSettingsRpc = defineRpc({ name: "follow.project-settings", i
 export const setProjectTrackingRpc = defineRpc({ name: "follow.set-project-tracking", input: z.object({ projectId: idSchema, enable_default_tracking: z.boolean() }), output: z.object({ projects: z.array(projectSchema) }) });
 export const refineTasksRpc = defineRpc({ name: "follow.refine-tasks", input: z.object({ workspaceId: idSchema, tasks: z.array(z.object({ id: idSchema, title: textSchema, afterPrs: z.array(idSchema), dependencyStage: z.enum(["merged", "deployed"]), enable_follow_up: z.boolean(), communication: communicationSchema.optional(), trigger: taskTriggerSchema.nullable().optional() })).max(50) }), output: workspaceSchema });
 export const taskTriggerRpc = defineRpc({ name: "follow.set-task-trigger", input: z.object({ workspaceId: idSchema, obligationId: idSchema, expectedRevision: z.number().int().nonnegative(), trigger: taskTriggerSchema.nullable(), afterPrs: z.array(idSchema) }), output: workspaceSchema });
+
+// Narrow integration: no inventory, messages, paths, or credentials cross this RPC.
+export const prOwnerRpc = defineRpc({ name: "follow.pr-owner", input: z.strictObject({ repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/), number: z.number().int().positive() }), output: z.object({ owner: z.object({ workspaceId: idSchema, agentId: idSchema }).nullable() }) });

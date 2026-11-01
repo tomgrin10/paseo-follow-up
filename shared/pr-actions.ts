@@ -13,7 +13,7 @@ export const browserCommandSchema = z.object({ id: idSchema, nonce: idSchema, ex
 export type BrowserCommand = z.infer<typeof browserCommandSchema>;
 export const browserResultSchema = z.object({ id: idSchema, nonce: idSchema, outcome: z.enum(["completed", "failed", "uncertain"]), prs: z.array(browserPrSchema).max(50).default([]), applied: z.array(z.number().int().positive()).max(50).default([]), error: z.string().max(500).default("") });
 export type BrowserResult = z.infer<typeof browserResultSchema>;
-export const browserExchangeSchema = z.object({ clientId: idSchema, ready: z.boolean(), acceptJobs: z.boolean().default(true), results: z.array(browserResultSchema).max(10).default([]) });
+export const browserExchangeSchema = z.object({ clientId: idSchema, ready: z.boolean(), acceptJobs: z.boolean().default(true), results: z.array(browserResultSchema).max(10).default([]), repositories: z.array(browserPrSchema.shape.repo).max(100).default([]) });
 export const browserStatusSchema = z.object({ ready: z.boolean(), reason: z.string().nullable() });
 export const actionResultSchema = z.object({ state: z.enum(["submitted", "failed", "uncertain"]), result: textSchema });
 

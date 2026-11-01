@@ -4,6 +4,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import * as rpc from "./shared/contracts";
+import { prOwner } from "./server/pr-owner";
 import { type Workspace } from "./shared/model";
 import { Store } from "./server/store";
 import { Engine, agentWorkspace, findWorkspace, interruptionHold } from "./server/engine";
@@ -93,6 +94,14 @@ export default function contribute(server: PluginServerContext) {
     void engine.tick();
     return { projects: await gateway.projects(await store.snapshot()) };
   });
+  server.handle(rpc.prOwnerRpc, async ({ repo, number }, { paseo }) => {
+    await requireReady();
+    const owner = prOwner(await store.snapshot(), repo, number);
+    if (!owner) return { owner: null };
+    const agent = (await paseo.agents.ref(owner.agentId).refresh())?.agent;
+    if (!agent || agent.archivedAt || agent.workspaceId !== owner.workspaceId) return { owner: null };
+    return { owner };
+  });
   server.handle(rpc.listRpc, async () => { await ready; return { workspaces: (await store.snapshot()).workspaces.filter(w => w.enable_tracking), error: loadError ?? hookError ?? engine.error }; });
   server.handle(rpc.getRpc, async ({ workspaceId }) => { await ready; return { workspace: (await store.snapshot()).workspaces.find(w => w.id === workspaceId && w.enable_tracking) ?? null, error: loadError ?? hookError ?? engine.error }; });
   server.handle(rpc.syncWorkspaceRpc, async ({ agentId, summary }, { paseo }) => {
@@ -145,8 +154,8 @@ export default function contribute(server: PluginServerContext) {
         seen.add(ancestor); ancestor = w.prs.find(p => p.key === ancestor)?.parent ?? null;
       }
       const altered = !existing || existing.stack !== stack || existing.parent !== parent || disposition !== undefined && existing.disposition !== disposition;
-      if (existing) { existing.stack = stack; existing.parent = parent; if (disposition !== undefined) existing.disposition = disposition; }
-      else w.prs.push({ key, repo, number, stack, parent, disposition: disposition ?? null, snapshot: null, error: null });
+      if (existing) { existing.registeredAgentId = agentId; existing.stack = stack; existing.parent = parent; if (disposition !== undefined) existing.disposition = disposition; }
+      else w.prs.push({ registeredAgentId: agentId, key, repo, number, stack, parent, disposition: disposition ?? null, snapshot: null, error: null });
       if (altered) changed(w); return w;
     });
     void engine.tick(); return result;
@@ -235,7 +244,7 @@ export default function contribute(server: PluginServerContext) {
     void engine.tick(); return result;
   });
   server.handle(rpc.browserStatusRpc, async () => { await requireReady(); return browser.status(); });
-  server.handle(rpc.browserExchangeRpc, async ({ clientId, ready: browserReady, acceptJobs, results }) => { await requireReady(); return { jobs: browser.exchange(clientId, browserReady, results, acceptJobs), accepted: results.map(r => r.id) }; });
+  server.handle(rpc.browserExchangeRpc, async ({ clientId, ready: browserReady, acceptJobs, results, repositories }) => { await requireReady(); return browser.exchange(clientId, browserReady, results, acceptJobs, repositories); });
   server.handle(rpc.prControlStatusRpc, async ({ workspaceId, prKey }) => { await requireReady(); return actions.status(workspaceId, prKey); });
   server.handle(rpc.preparePrActionRpc, async ({ workspaceId, prKey, kind }) => { await requireReady(); return actions.prepare(workspaceId, prKey, kind); });
   server.handle(rpc.confirmPrActionRpc, async ({ planId, scope }) => { await requireReady(); const result = await actions.confirm(planId, scope); void engine.tick(); return result; });

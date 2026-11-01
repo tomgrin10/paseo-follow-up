@@ -82,6 +82,7 @@ try {
   assert.ok(record.inventory.candidates.includes("example/unrelated#7"));
   assert.equal(record.prs.length, 0, "references must be reconciled by the agent before repairs");
   assert.equal(record.batches.length, 0);
+  assert.equal((await call("follow.pr-owner", { repo: "example/app", number: 1 })).owner, null, "history references do not establish PR ownership");
   const bridgePath = join(home, "plugin-data/follow-through/mcp.mjs");
   const nativeMcp = async (requests, caller = agent.id) => {
     const child = spawn(process.execPath, [bridgePath], { env: { ...env, PASEO_AGENT_ID: caller }, stdio: ["pipe", "pipe", "pipe"] });
@@ -152,6 +153,7 @@ try {
   assert.equal(record.prs.length, 1); assert.equal(record.prs[0].key, "example/app#1"); assert.equal(record.obligations.length, 1);
   await call("follow.enroll", { agentId: agent.id, goal: refinedGoal });
   await call("follow.register-pr", { agentId: agent.id, repo: "example/app", number: 1, stack: "Migration rollout" });
+  assert.deepEqual((await call("follow.pr-owner", { repo: "Example/App", number: 1 })).owner, { workspaceId: w.id, agentId: agent.id });
   for (let n = 0; n < 3; n++) await call("follow.obligation", { agentId: agent.id, title: `Regression requirement ${n}`, status: "done", evidence: "Verified by the isolated test fixture", afterPrs: ["example/app#1"], enable_follow_up: false });
   assert.equal((await call("follow.agent-status", { agentId: agent.id })).obligations.length, 4);
   await waitFor(w => w.batches.some(b => b.tasks.some(t => t.kind === "conflict") && b.state === "pending"), "queued conflict follow-up");
