@@ -3,6 +3,7 @@ import { completionBlockers, type Workspace, type State, type Batch } from "../s
 import { Store } from "./store";
 import { Github } from "./github";
 import { batchPrompt, tasksFor, isRecovery, needsPrObservations } from "./tasks";
+import { reconcileSubmittedStacks } from "./submissions";
 import { applyDiscovery, type DiscoveredWorkspace } from "./discovery";
 import { replyRecorded } from "../shared/communication";
 import { DeliveryDeferred } from "./delivery";
@@ -80,6 +81,7 @@ export class Engine {
           p.error = observed.error;
           if (observed.snapshot) recordSnapshot(p, observed.snapshot, this.now());
         }
+        reconcileSubmittedStacks(w);
         if (w.archived) return;
         this.reconcile(w);
         const unacknowledged = w.batches.find(b => b.state === "sent" && !isRecovery(b));
@@ -309,10 +311,11 @@ export function ownedWorkspace(state: State, agentId: string, workspaceId?: stri
   requireTracking(w, agentId);
   return w;
 }
-export function agentWorkspace(state: State, agentId: string, access: "read" | "write" = "write", workspaceId?: string): Workspace {
+export function agentWorkspace(state: State, agentId: string, access: "read" | "write" = "write", workspaceId?: string, scope: "owner" | "pr" = "owner"): Workspace {
   const w = relatedWorkspace(state, agentId, workspaceId);
   const recovery = w?.batches.some(b => b.recipientAgentId === agentId && isRecovery(b) && (access === "read" || ["sending", "sent", "uncertain"].includes(b.state) || b.state === "blocked" && !b.settledAt));
-  if (!w || (w.mainAgentId !== agentId && !recovery)) throw accessError(w, agentId, access, workspaceId);
+  const contributor = scope === "pr" && w?.enable_tracking && !w.archived && w.contributorAgentIds?.includes(agentId);
+  if (!w || (w.mainAgentId !== agentId && !recovery && !contributor)) throw accessError(w, agentId, access, workspaceId);
   if (access === "write") requireTracking(w, agentId);
   return w;
 }

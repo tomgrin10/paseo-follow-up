@@ -76,7 +76,8 @@ try {
   assert.equal(statusAfterEnroll.mainAgentId, agent.id); assert.equal(statusAfterEnroll.enable_tracking, true);
   assert.equal(statusAfterEnroll.goal, refinedGoal);
   const secondary = (await client.fetchAgents({ page: { limit: 100 } })).entries.map(e => e.agent).find(a => a.workspaceId === w.id && a.id !== agent.id);
-  await assert.rejects(call("follow.agent-status", { agentId: secondary.id }), error => error.message.includes(`expected main agent ${agent.id}`) && error.message.includes(`received agent ${secondary.id}`) && error.message.includes("Cannot read"));
+  assert.equal((await call("follow.agent-status", { agentId: secondary.id })).id, w.id);
+  await assert.rejects(call("follow.enroll", { agentId: secondary.id, goal: "Cannot replace owner" }), /expected main agent/);
   assert.equal(record.mainAgentId, agent.id, "the original root remains owner");
   assert.ok(record.inventory.candidates.includes("example/app#1"));
   assert.ok(record.inventory.candidates.includes("example/unrelated#7"));
@@ -92,7 +93,7 @@ try {
   };
   const native = await nativeMcp([{ method: "initialize", params: {} }, { method: "tools/list" }, { method: "tools/call", params: { name: "workspace_status", arguments: {} } }]);
   assert.equal(native[1].result.tools.length, 8); assert.equal(JSON.parse(native[2].result.content[0].text).detail, "summary");
-  assert.deepEqual((await nativeMcp([{ method: "tools/list" }], secondary.id))[0].result.tools, []);
+  assert.deepEqual((await nativeMcp([{ method: "tools/list" }], secondary.id))[0].result.tools.map(t => t.name).sort(), ["register_pr", "sync_workspace", "workspace_status"]);
   const fallbackEnv = { ...env, PASEO_AGENT_ID: agent.id }; delete fallbackEnv.FOLLOW_THROUGH_CLIENT_ENTRY;
   const fallback = JSON.parse((await exec(process.execPath, [bridgePath, "call", "workspace_status", "{}"], { env: fallbackEnv })).stdout);
   assert.equal(fallback.id, w.id, "a dependency-free bridge resolves the installed CLI client without a session env override");
@@ -110,17 +111,18 @@ try {
   };
   assert.ok(JSON.parse(await readFile(join(home, ".claude/settings.json"), "utf8")).hooks.UserPromptSubmit.some(group => group.hooks.some(hook => hook.command.includes("paseo-follow-through-hook"))));
   assert.ok(JSON.parse(await readFile(join(home, ".codex/hooks.json"), "utf8")).hooks.UserPromptSubmit.some(group => group.hooks.some(hook => hook.command.includes("paseo-follow-through-hook"))));
-  assert.equal(await runAgentHook({ hook_event_name: "UserPromptSubmit" }, secondary.id), null);
+  assert.match((await runAgentHook({ hook_event_name: "UserPromptSubmit" }, secondary.id)).hookSpecificOutput.additionalContext, /secondary git worktrees/);
   assert.match((await runAgentHook({ hook_event_name: "UserPromptSubmit" })).hookSpecificOutput.additionalContext, /sync_workspace/);
   assert.equal((await runAgentHook({ hook_event_name: "Stop" })).decision, "block");
   assert.equal(await runAgentHook({ hook_event_name: "Stop" }), null, "a missed update cannot loop");
   await runAgentHook({ hook_event_name: "UserPromptSubmit" });
-  await assert.rejects(call("follow.sync", { agentId: secondary.id, summary: "Must not confirm the main workspace" }), /received agent/);
+  await call("follow.sync", { agentId: secondary.id, summary: "Session PRs checked" });
+  assert.equal(await runAgentHook({ hook_event_name: "Stop" }, secondary.id), null);
   assert.deepEqual(await call("follow.sync", { agentId: agent.id, summary: "Goal is current; historical mentions remain unowned pending optional recovery" }), { workspaceId: w.id, synced: true });
   assert.equal(await runAgentHook({ hook_event_name: "Stop" }), null);
   assert.equal((await call("follow.agent-status", { agentId: agent.id })).completion, null, "sync is not Done");
   assert.equal((await call("follow.agent-status", { agentId: agent.id })).prs.length, 0, "hooks never claim referenced PRs");
-  console.log("PASS: packed agent hooks provide scoped normal-turn instructions and one missed-sync continuation; main-only sync changes neither ownership, PR inventory, Auto nor Done.");
+  console.log("PASS: packed agent hooks provide scoped normal-turn instructions and one missed-sync continuation; scoped root-session sync changes neither ownership, PR inventory, Auto nor Done.");
   console.log("Packed plugin installs without development dependencies; MCP and lifecycle hooks registered.");
   const config = JSON.parse(await readFile(join(home, "fixture-config.json"), "utf8")); assert.ok(!config.mcp.includes("follow-through")); assert.equal(config.bridge, undefined); assert.ok(!config.instructions?.includes("follow-through"), "unselected agents are not modified");
   for (let i = 0; i < 3; i++) await call("follow.refresh", {});
@@ -314,6 +316,19 @@ try {
   assert.equal(handoffRecord.excludedStacks[0].prs[0].key, "example/app#1");
   assert.equal(handoffRecord.excludedStacks[0].obligations[0].evidence, "Existing evidence remains");
   await assert.rejects(call("follow.register-pr", { agentId: handoffMain.id, repo: "example/app", number: 1, stack: "Renamed external stack" }), /excluded from workspace scope/);
+  }
+  if (!process.argv.includes("--projects-only")) {
+    const contributor = (await client.fetchAgents({ page: { limit: 100 } })).entries.map(e => e.agent).find(a => a.workspaceId === w.id && a.id !== agent.id && !a.labels["follow-through.recovery"]);
+    const child = spawn(process.execPath, [join(home, "plugin-data/follow-through/mcp.mjs")], { env: { ...env, PASEO_AGENT_ID: contributor.id }, stdio: ["pipe", "pipe", "pipe"] });
+    let output = ""; child.stdout.on("data", c => output += c);
+    const finished = new Promise((ok, bad) => { child.once("error", bad); child.once("exit", code => code === 0 ? ok() : bad(new Error("Contributor MCP exited"))); });
+    child.stdin.end(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "register_pr", arguments: { repo: "example/app", number: 99, stack: "Contributor work" } } }) + "\n");
+    await finished; assert.equal(JSON.parse(output.trim()).result.isError, undefined);
+    const record = (await call("follow.get", { workspaceId: w.id })).workspace;
+    assert.equal(record.prs.find(p => p.number === 99).registeredAgentId, contributor.id);
+    assert.equal(record.mainAgentId, agent.id);
+    await assert.rejects(call("follow.done", { agentId: contributor.id, summary: "Cannot declare completion" }), /expected main agent/);
+    console.log("PASS: packed MCP actually exposes and executes contributor PR registration while preserving the designated main agent's completion authority.");
   }
   const settingsBefore = await call("follow.project-settings", {});
   const rootProject = settingsBefore.projects.find(p => p.path === root);

@@ -87,3 +87,17 @@ test("compaction restores instructions; tracker calls, continued stops and backg
     await writeFile(join(f.directory, "state.json"), "broken"); assert.equal(await f.run({ hook_event_name: "Stop" }), null);
   } finally { await f.close(); }
 });
+
+
+test("contributor sessions get PR registration and CLI fallback instructions without goal or completion authority", async () => {
+  const f = await fixture();
+  try {
+    f.w.contributorAgentIds = ["root-session"]; await f.save();
+    const result = await f.run({ hook_event_name: "UserPromptSubmit" }, { PASEO_AGENT_ID: "root-session" });
+    const context = result.hookSpecificOutput.additionalContext;
+    assert.match(context, /secondary git worktrees/); assert.match(context, /register_pr/); assert.match(context, /sync_workspace/); assert.match(context, /CLI fallback/); assert.match(context, /main agent retains/);
+    assert.doesNotMatch(context, /enroll_workspace|update_obligation|declare_done/);
+    await f.hooks.confirm(f.w.id, "root-session", "Registered session PRs");
+    assert.equal(await f.run({ hook_event_name: "Stop" }, { PASEO_AGENT_ID: "root-session" }), null);
+  } finally { await f.close(); }
+});
