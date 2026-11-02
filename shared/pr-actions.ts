@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { idSchema, textSchema, type Pr } from "./model";
+import { idSchema, textSchema, type Pr, type Workspace } from "./model";
 
 export const prActionKind = z.enum(["merge", "enable_mwr", "disable_mwr"]);
 export const actionPrSchema = z.object({ key: idSchema, repo: z.string(), number: z.number(), title: z.string(), head: z.string(), parent: idSchema.nullable(), base: z.string(), trunk: z.string(), blockers: z.array(z.string()) });
@@ -44,4 +44,10 @@ export function mergeBlockers(pr: Pr): string[] {
   if (s.checksPending) blockers.push("Required checks pending");
   if (!["READY_TO_MERGE", "READY_TO_MERGE_AS_STACK", "READY_TO_MERGE_WITHOUT_CI", "READY_TO_MERGE_AS_STACK_WITHOUT_CI"].includes(s.graphiteMergeStatus ?? "")) blockers.push("Graphite is not ready to merge");
   return blockers;
+}
+
+/** Reviewer requests on other PRs do not own this PR's action slot. */
+export function prActionBlocks(action: Pick<Workspace["prActions"][number], "state" | "kind" | "prs">, keys: readonly string[]): boolean {
+  return ["sending", "uncertain"].includes(action.state) &&
+    (action.kind !== "request_reviewers" || action.prs.some(key => keys.includes(key)));
 }

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { downstack, mergeBlockers, type ActionPlan, type BrowserPr, type PrActionKind } from "../shared/pr-actions";
+import { downstack, mergeBlockers, prActionBlocks, type ActionPlan, type BrowserPr, type PrActionKind } from "../shared/pr-actions";
 import type { Workspace, Pr } from "../shared/model";
 import { findWorkspace } from "./engine";
 import { Store } from "./store";
@@ -19,6 +19,7 @@ export class PrActions {
   private plans = new Map<string, { plan: ActionPlan; identity: string }>();
   private reads = new Map<string, Promise<BrowserPr[]>>();
   private running = new Set<Promise<unknown>>();
+  private reviewerRequests = new Map<string, Promise<{ state: "submitted" | "failed" | "uncertain"; result: string }>>();
   constructor(private store: Store, private github: Pick<Github, "observe"> & Partial<Pick<Github, "requestReviewers">>, private graphite: Pick<Graphite, "merge" | "invalidate">, readonly browser: BrowserBridge, private now = Date.now, private reviewersFor = defaultReviewers) {}
 
   private async fresh(workspaceId: string): Promise<Workspace> {
@@ -59,7 +60,7 @@ export class PrActions {
     const prs = downstack(w.prs, key);
     if (!prs.length || prs.at(-1)?.key !== key) throw new Error("This PR is already merged.");
     const blockers: string[] = [];
-    if (w.prActions.some(a => ["sending", "uncertain"].includes(a.state))) blockers.push("Check the previous PR action before sending another.");
+    if (w.prActions.some(a => prActionBlocks(a, prs.map(p => p.key)))) blockers.push("Check the previous PR action before sending another.");
     if (kind === "merge" && w.prActions.some(a => a.kind === "merge" && a.state === "submitted" && prs.some(p => a.heads[p.key] === p.snapshot?.head) && this.now() - Date.parse(a.createdAt) < 30_000)) blockers.push("A merge was just submitted for this revision. Wait for Graphite's result.");
     const rows = prs.map(p => ({ key: p.key, repo: p.repo, number: p.number, title: p.snapshot?.title ?? p.stack, head: p.snapshot?.head ?? "", parent: p.parent, base: p.snapshot?.base ?? "", trunk: p.snapshot?.trunk ?? "", blockers: kind === "merge" ? mergeBlockers(p) : p.error || !p.snapshot?.complete || p.snapshot.state !== "OPEN" ? ["Refresh an open PR"] : kind === "enable_mwr" && p.snapshot.draft ? ["Draft"] : [] }));
     if (kind === "merge") {
@@ -83,8 +84,12 @@ export class PrActions {
     return work;
   }
   requestReviewers(workspaceId: string, key: string) {
-    const work = this.executeReviewers(workspaceId, key); this.running.add(work);
-    void work.finally(() => this.running.delete(work)).catch(() => undefined);
+    const requestKey = JSON.stringify([workspaceId, key]);
+    const pending = this.reviewerRequests.get(requestKey);
+    if (pending) return pending;
+    const work = this.executeReviewers(workspaceId, key);
+    this.reviewerRequests.set(requestKey, work); this.running.add(work);
+    void work.finally(() => { this.reviewerRequests.delete(requestKey); this.running.delete(work); }).catch(() => undefined);
     return work;
   }
   private async executeReviewers(workspaceId: string, key: string) {
@@ -101,7 +106,7 @@ export class PrActions {
     const id = randomUUID();
     await this.store.mutate(state => {
       const current = findWorkspace(state, workspaceId); active(current);
-      if (current.prActions.some(a => ["sending", "uncertain"].includes(a.state))) throw new Error("Check the previous PR action before sending another.");
+      if (current.prActions.some(a => prActionBlocks(a, [key]))) throw new Error("Check the previous PR action before sending another.");
       const latest = current.prs.find(p => p.key === key);
       if (!latest || latest.snapshot?.head !== pr.snapshot!.head || !noReviewers(latest)) throw new Error("PR status changed. Refresh before requesting reviews.");
       current.prActions.push({ id, kind: "request_reviewers", reviewers: reviewers.map(r => r.login), prs: [key], heads: { [key]: pr.snapshot!.head }, createdAt: new Date(this.now()).toISOString(), state: "sending", result: "Waiting for GitHub to confirm the review request." });
@@ -145,7 +150,7 @@ export class PrActions {
     const id = randomUUID();
     await this.store.mutate(state => {
       const current = findWorkspace(state, w.id); active(current);
-      if (current.prActions.some(a => ["sending", "uncertain"].includes(a.state))) throw new Error("A PR action is already in progress or needs checking.");
+      if (current.prActions.some(a => prActionBlocks(a, prs.map(p => p.key)))) throw new Error("A PR action is already in progress or needs checking.");
       if (plan.kind === "merge" && current.prActions.some(a => a.kind === "merge" && a.state === "submitted" && prs.some(p => a.heads[p.key] === p.snapshot?.head) && this.now() - Date.parse(a.createdAt) < 30_000)) throw new Error("A merge was just submitted for this revision. Wait for Graphite's result.");
       if (identity(downstack(current.prs, plan.target)) !== saved.identity) throw new Error("The stack changed before submission.");
       current.prActions.push({ id, kind: plan.kind, prs: prs.map(p => p.key), heads: Object.fromEntries(prs.map(p => [p.key, p.snapshot!.head])), createdAt: new Date(this.now()).toISOString(), state: "sending", result: plan.kind === "merge" ? "Waiting for Graphite to confirm." : "Confirm this PR setting change in the Send to Paseo extension in Chrome." });

@@ -25,3 +25,13 @@ The old browser verification script had stale Follow-through labels and assumed 
 workspace header shortcut persisted in compact Paseo. It now checks native controls on desktop
 and the changed extension settings in both viewport sizes. These checks do not claim compact
 Paseo merge-control coverage.
+
+
+## Release review (2026-11-02)
+
+The Add reviewers action is now independent per PR. Duplicate in-flight clicks on one PR share
+the same operation; uncertain requests still block that PR without resending notifications.
+Workspace merge/toggle guards remain in place. Verification includes 138 behavior tests plus
+the button lifecycle regression, packed standalone installation, and two real Add reviewers
+clicks against a delayed synthetic GitHub endpoint. Both requests overlap and finish once each.
+Restoring the old workspace-wide lock makes the new concurrency regressions fail.
