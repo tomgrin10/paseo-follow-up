@@ -15,7 +15,7 @@ const communication = { type: "object", properties: { threadUrl: string, recipie
 const trigger = { type: ["object", "null"], properties: { event: { type: "string", enum: ["now", "merge", "deploy"] }, delayDays: { type: "integer", minimum: 0, maximum: 3650 } }, required: ["event"], additionalProperties: false };
 const tools = [
   ["workspace_status", "Read the tracked workspace's durable goal, PRs, tasks, work queue and optional recovery history. Read after compaction. Returns current work by default; detail=full includes complete evidence/history. Normal follow-through does not require recovery.", "follow.agent-status", { detail: { type: "string", enum: ["summary", "full"] } }, []],
-  ["sync_workspace", "Silently confirm the sidebar matches your work before finishing, after registering owned PRs and substantive tasks. Call even when no changes are needed. Keep the summary in this tool; never announce sync or recap sidebar/plugin status to the developer. Does not declare Done, run recovery, or start repairs. Main agent only.", "follow.sync", { summary: { ...string, minLength: 1, maxLength: 1000 } }, ["summary"]],
+  ["sync_workspace", "Silently confirm the sidebar matches your work before finishing, after registering owned PRs and substantive tasks. Call even when no changes are needed. Keep the summary in this tool; never announce sync or recap sidebar/plugin status to the developer. Does not declare Done, run recovery, or start repairs. Tracked root agents only.", "follow.sync", { summary: { ...string, minLength: 1, maxLength: 1000 } }, ["summary"]],
   ["enroll_workspace", "Refine this developer-activated workspace's goal. Ownership is initialized by Track this workspace or the project’s default-tracking setting. This tool cannot activate another workspace. Never ask the developer to enter this. Keep the goal concise; new scope reopens completion.", "follow.enroll", { goal: string }, ["goal"]],
   ["register_pr", "Register a PR produced by this workspace. Call after every submission. Register parents first; repeat to update its stack or parent after restacking. Supply a disposition for a deliberately closed PR.", "follow.register-pr", { repo: string, number: integer, stack: string, parentNumber: { type: ["integer", "null"], minimum: 1 }, disposition: string }, ["repo", "number", "stack"]],
   ["exclude_stack", "Correct an unrelated stack registration. Preserve its PRs and requirements in an exclusion audit; future registration is blocked. reason must cite the scope/ownership evidence. obligationIds may include related tasks without PR dependencies. Keep external dependencies separate from owned work.", "follow.exclude-stack", { stack: string, reason: string, obligationIds: array }, ["stack", "reason"]],
@@ -24,7 +24,9 @@ const tools = [
   ["declare_done", "Declare that the workspace goal is fulfilled. Live PR status and remaining obligations are checked; returned blockers must be resolved first. Done labels the workspace but never archives it.", "follow.done", { summary: string }, ["summary"]],
 ];
 
-function toolList(recovery = process.env.FOLLOW_THROUGH_RECOVERY === "1") { return tools.filter(t => !recovery || !["declare_done", "sync_workspace"].includes(t[0])); }
+function toolList(recovery = process.env.FOLLOW_THROUGH_RECOVERY === "1", contributor = false) {
+  return tools.filter(t => contributor ? ["workspace_status", "register_pr", "sync_workspace"].includes(t[0]) : !recovery || !["declare_done", "sync_workspace"].includes(t[0]));
+}
 const schemas = list => list.map(([name, description, , properties, required]) => ({ name, description, inputSchema: { type: "object", properties, required, additionalProperties: false }, annotations: { readOnlyHint: name === "workspace_status", destructiveHint: false } }));
 async function scope(resolveRecovery = false) {
   const agentId = process.env.PASEO_AGENT_ID;
@@ -39,6 +41,7 @@ async function scope(resolveRecovery = false) {
       if (!w.enable_tracking || w.archived) continue;
       if (w.mainAgentId === agentId) return process.env.FOLLOW_THROUGH_RECOVERY === "1" ? "recovery" : "main";
       if (w.batches.some(b => b.recipientAgentId === agentId && !b.settledAt && ["sending", "sent", "blocked", "uncertain"].includes(b.state) && b.tasks.every(t => t.kind === "inventory"))) return "recovery";
+      if (w.contributorAgentIds?.includes(agentId)) return "contributor";
     }
     if (resolveRecovery && process.env.FOLLOW_THROUGH_RECOVERY === "1") {
       const w = await call("follow.agent-status", {});
@@ -140,10 +143,10 @@ if (command === "list" || command === "--help" || command === "help") {
       try {
         let result;
         const role = await scope(request.method === "initialize" || request.method === "tools/list");
-        const available = role ? toolList(role === "recovery") : [];
+        const available = role ? toolList(role === "recovery", role === "contributor") : [];
         if (request.method === "initialize") {
           initialized = true; lastScope = role;
-          result = { protocolVersion: request.params?.protocolVersion ?? "2024-11-05", capabilities: { tools: { listChanged: true } }, serverInfo: { name: "paseo-follow-through", version: "0.1.0" }, instructions: role ? (role === "recovery" ? "Recover tracking metadata from evidence, acknowledge your assigned batch, and leave completion to the main agent." : "Keep workspace follow-through updated after PR submission and scope changes. Read workspace_status after compaction. Track all post-merge work. " + batchInstructions) + " Perform bookkeeping silently: no sidebar-update announcements, plugin-status commentary or final sidebar recap. Put receipts and summaries in tools. Report actual work outcomes or decisions/blockers; discuss sidebar status only when explicitly asked." : "Follow-through tools are available only to a tracked workspace's main agent or active recovery agent." };
+          result = { protocolVersion: request.params?.protocolVersion ?? "2024-11-05", capabilities: { tools: { listChanged: true } }, serverInfo: { name: "paseo-follow-through", version: "0.3.1" }, instructions: role ? (role === "contributor" ? "Register PRs this session submits, including from secondary git worktrees. Read workspace_status and call sync_workspace before finishing. Goal, task, scope and completion changes remain with the designated main agent." : role === "recovery" ? "Recover tracking metadata from evidence, acknowledge your assigned batch, and leave completion to the main agent." : "Keep workspace follow-through updated after PR submission and scope changes. Read workspace_status after compaction. Track all post-merge work. " + batchInstructions) + " Perform bookkeeping silently: no sidebar-update announcements, plugin-status commentary or final sidebar recap. Put receipts and summaries in tools. Report actual work outcomes or decisions/blockers; discuss sidebar status only when explicitly asked." : "Follow-through tools are available to tracked workspace root agents and active recovery agents; contributor sessions receive PR registration and status tools." };
         } else if (request.method === "ping") result = {};
         else if (request.method === "tools/list") result = { tools: schemas(available) };
         else if (request.method === "tools/call") {

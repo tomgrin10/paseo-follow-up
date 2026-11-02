@@ -35,3 +35,17 @@ Workspace merge/toggle guards remain in place. Verification includes 138 behavio
 the button lifecycle regression, packed standalone installation, and two real Add reviewers
 clicks against a delayed synthetic GitHub endpoint. Both requests overlap and finish once each.
 Restoring the old workspace-wide lock makes the new concurrency regressions fail.
+
+
+## Cross-worktree discovery release (0.3.1, 2026-11-02)
+
+TypeScript, 144 behavioral tests and the native button lifecycle regression pass. The new regression
+creates an actual secondary git worktree, leaves the workspace branch on a merged PR, removes its
+recorded owner from the live directory, and verifies submission receipts from another root session
+populate the same workspace and preserve the submitting agent. A read-only replay of the reported
+session recognizes all twelve missing PR receipts; no transcript or private machine paths are committed.
+
+Additional coverage checks actual MCP tool listing for contributor roots, hook/CLI fallback context,
+permission boundaries, registration/exclusion precedence, repository scoping, quoted/read-only/failed
+commands, truncated Graphite output and inferred GitHub stack relationships. The packed lifecycle
+suite exercises contributor MCP registration and retains the recovery handoff regression.

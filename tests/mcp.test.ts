@@ -6,13 +6,13 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { workspace } from "./fixtures";
 
-async function handshake(agent: boolean, recovery = false): Promise<any[]> {
+async function handshake(agent: boolean, recovery = false, contributor = false): Promise<any[]> {
   const env = { ...process.env }; delete env.PASEO_AGENT_ID;
   if (agent) env.PASEO_AGENT_ID = "fixture-agent";
   if (recovery) env.FOLLOW_THROUGH_RECOVERY = "1"; else delete env.FOLLOW_THROUGH_RECOVERY;
   const root = await mkdtemp(join(tmpdir(), "follow-mcp-")); env.PASEO_HOME = root;
   const directory = join(root, "plugin-data/follow-through"); await mkdir(directory, { recursive: true });
-  const w = workspace({ mainAgentId: recovery ? "other-main" : "fixture-agent", batches: recovery ? [{ id: "recovery", state: "sent", recipientAgentId: "fixture-agent", settledAt: null, tasks: [{kind: "inventory"}] }] as any : [] });
+  const w = workspace({ mainAgentId: recovery || contributor ? "other-main" : "fixture-agent", contributorAgentIds: contributor ? ["fixture-agent"] : [], batches: recovery ? [{ id: "recovery", state: "sent", recipientAgentId: "fixture-agent", settledAt: null, tasks: [{kind: "inventory"}] }] as any : [] });
   await writeFile(join(directory, "state.json"), JSON.stringify({ workspaces: [w] }));
   await writeFile(join(directory, "hooks-enabled.json"), JSON.stringify({ expiresAt: Date.now() + 60_000 }));
   const child = spawn(process.execPath, [resolve("server/mcp.mjs")], { env, stdio: ["pipe", "pipe", "pipe"] });
@@ -39,4 +39,12 @@ test("recovery agents get metadata tools without completion authority", async ()
   assert.ok(result[1].result.tools.every((t: any) => !["declare_done", "sync_workspace"].includes(t.name)));
   assert.match(result[0].result.instructions, /leave completion to the main agent/);
   assert.match(result[0].result.instructions, /Perform bookkeeping silently/);
+});
+
+
+test("other root sessions get actual PR registration tools while completion authority stays with the owner", async () => {
+  const result = await handshake(true, false, true);
+  assert.deepEqual(result[1].result.tools.map((t: any) => t.name).sort(), ["register_pr", "sync_workspace", "workspace_status"]);
+  assert.match(result[0].result.instructions, /secondary git worktrees/);
+  assert.match(result[0].result.instructions, /designated main agent/);
 });
