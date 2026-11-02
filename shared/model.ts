@@ -27,6 +27,7 @@ export const prSchema = z.object({
   stack: textSchema, parent: idSchema.nullable(), disposition: z.string().nullable(),
   snapshot: snapshotSchema.nullable(), error: z.string().nullable(),
   registeredAgentId: idSchema.optional(),
+  discoveredFromSubmission: z.boolean().optional(),
   deploymentAnchor: z.object({ mergeCommit: z.string(), at: z.string() }).optional(),
 });
 export const obligationSchema = z.object({
@@ -56,6 +57,7 @@ export const batchSchema = z.object({
 });
 export const workspaceSchema = z.object({
   id: idSchema, title: textSchema, goal: textSchema, mainAgentId: idSchema,
+  contributorAgentIds: z.array(idSchema).optional(),
   enable_tracking: z.boolean().default(false), enable_auto_sends: z.boolean().default(false), hold: z.string().nullable(), archived: z.boolean(),
   prs: z.array(prSchema), obligations: z.array(obligationSchema), batches: z.array(batchSchema),
   excludedStacks: z.array(z.object({ name: textSchema, reason: textSchema, excludedAt: z.string(), prs: z.array(prSchema), obligations: z.array(obligationSchema) })).default([]),

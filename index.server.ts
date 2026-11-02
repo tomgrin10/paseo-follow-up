@@ -63,6 +63,8 @@ export default function contribute(server: PluginServerContext) {
   const callerWorkspaceId = async (agentId: string, paseo: PluginHandlerContext["paseo"], allowHandoff = true) => {
     const agent = (await paseo.agents.ref(agentId).refresh())?.agent;
     if (!agent?.workspaceId) throw new Error(`Cannot locate the caller's workspace: expected agent in a recorded workspace, received agent ${agentId}.`);
+    const record = (await store.snapshot()).workspaces.find(w => w.id === agent.workspaceId);
+    if (record?.contributorAgentIds?.includes(agentId) && !record.batches.some(b => b.recipientAgentId === agentId && !b.settledAt && b.tasks.every(t => t.kind === "inventory")) && (agent.archivedAt || agent.labels["paseo.parent-agent-id"] || agent.labels["follow-through.recovery"])) throw new Error("PR registration requires an available root agent in this tracked workspace.");
     if (allowHandoff) {
       const w = (await store.snapshot()).workspaces.find(w => w.id === agent.workspaceId);
       if (w && w.mainAgentId !== agentId && !w.batches.some(b => b.recipientAgentId === agentId)) {
@@ -75,6 +77,7 @@ export default function contribute(server: PluginServerContext) {
             const at = new Date().toISOString();
             b.recoveryHandoffs.push({ fromAgentId: handoff.fromAgentId, toAgentId: agentId, at });
             b.recipientAgentId = agentId; b.activityAt = at;
+            record.contributorAgentIds = record.contributorAgentIds?.filter(id => id !== agentId);
             if (b.state === "blocked") { b.state = "sent"; b.result = "Recovery continued in the replacement agent; prior inventory and evidence are preserved."; }
             if (record.hold === "Recovery stopped or failed. Check the recovery agent before retrying." || record.hold === "Recovery acknowledgment was refused. Check the identity error on this batch.") record.hold = null;
           });
@@ -107,12 +110,12 @@ export default function contribute(server: PluginServerContext) {
   server.handle(rpc.syncWorkspaceRpc, async ({ agentId, summary }, { paseo }) => {
     await requireReady();
     const workspaceId = await callerWorkspaceId(agentId, paseo, false);
-    const w = agentWorkspace(await store.snapshot(), agentId, "write", workspaceId);
-    if (w.mainAgentId !== agentId || w.archived) throw new Error(`Only the active workspace main agent can confirm sidebar sync: expected ${w.mainAgentId}, received ${agentId}.`);
+    const w = agentWorkspace(await store.snapshot(), agentId, "write", workspaceId, "pr");
+    if (w.archived) throw new Error(`Only an active workspace root agent can confirm sidebar sync: expected ${w.mainAgentId}, received ${agentId}.`);
     await agentHooks.confirm(w.id, agentId, summary);
     return { workspaceId: w.id, synced: true as const };
   });
-  server.handle(rpc.agentStatusRpc, async ({ agentId }, { paseo }) => { await requireReady(); const workspaceId = await callerWorkspaceId(agentId, paseo); return agentWorkspace(await store.snapshot(), agentId, "read", workspaceId); });
+  server.handle(rpc.agentStatusRpc, async ({ agentId }, { paseo }) => { await requireReady(); const workspaceId = await callerWorkspaceId(agentId, paseo); return agentWorkspace(await store.snapshot(), agentId, "read", workspaceId, "pr"); });
   server.handle(rpc.activateRpc, async ({ workspaceId }) => { await requireReady(); return engine.activate(workspaceId); });
   server.handle(rpc.sendRpc, async ({ workspaceId, batchId }) => { await requireReady(); return engine.sendPending(workspaceId, batchId); });
   server.handle(rpc.recoverRpc, async ({ workspaceId }) => { await requireReady(); return engine.startRecovery(workspaceId); });
@@ -139,7 +142,7 @@ export default function contribute(server: PluginServerContext) {
     await requireReady();
     const workspaceId = await callerWorkspaceId(agentId, paseo);
     const result = await store.mutate(state => {
-      const w = agentWorkspace(state, agentId, "write", workspaceId);
+      const w = agentWorkspace(state, agentId, "write", workspaceId, "pr");
       const key = `${repo}#${number}`;
       const excluded = w.excludedStacks.find(s => s.name === stack || s.prs.some(p => p.key === key));
       if (excluded) throw new Error(`This PR or stack was excluded from workspace scope: ${excluded.reason}. Read workspace_status and preserve the exclusion.`);
@@ -154,7 +157,7 @@ export default function contribute(server: PluginServerContext) {
         seen.add(ancestor); ancestor = w.prs.find(p => p.key === ancestor)?.parent ?? null;
       }
       const altered = !existing || existing.stack !== stack || existing.parent !== parent || disposition !== undefined && existing.disposition !== disposition;
-      if (existing) { existing.registeredAgentId = agentId; existing.stack = stack; existing.parent = parent; if (disposition !== undefined) existing.disposition = disposition; }
+      if (existing) { existing.registeredAgentId = agentId; existing.discoveredFromSubmission = false; existing.stack = stack; existing.parent = parent; if (disposition !== undefined) existing.disposition = disposition; }
       else w.prs.push({ registeredAgentId: agentId, key, repo, number, stack, parent, disposition: disposition ?? null, snapshot: null, error: null });
       if (altered) changed(w); return w;
     });
@@ -254,7 +257,7 @@ export default function contribute(server: PluginServerContext) {
   const removers = [
     server.on("agent.turn_started", async event => {
       await ready;
-      if (!stopped && !loadError) await store.mutate(state => { const w = state.workspaces.find(w => w.enable_tracking && w.mainAgentId === event.agent.id); if (w) w.completion = null; });
+      if (!stopped && !loadError) await store.mutate(state => { const w = state.workspaces.find(w => w.enable_tracking && (w.mainAgentId === event.agent.id || w.contributorAgentIds?.includes(event.agent.id))); if (w) w.completion = null; });
     }),
     server.before("agent.session_open", async ({ request }) => {
       await ready;
@@ -272,8 +275,15 @@ export default function contribute(server: PluginServerContext) {
             return { ...request, env: { ...request.env, FOLLOW_THROUGH_CLI: bridge, FOLLOW_THROUGH_CLIENT_ENTRY: clientEntry() } };
         }
       }
+      if (!w && request.workspaceId && !request.labels["paseo.parent-agent-id"] && !request.labels["follow-through.recovery"]) {
+        w = await store.mutate(state => {
+          const workspace = state.workspaces.find(w => w.id === request.workspaceId && w.enable_tracking && !w.archived);
+          if (workspace) workspace.contributorAgentIds = [...new Set([...(workspace.contributorAgentIds ?? []), request.agentId])];
+          return workspace;
+        });
+      }
       if (!w) return request;
-      const recovery = w.mainAgentId !== request.agentId;
+      const recovery = w.mainAgentId !== request.agentId && !w.contributorAgentIds?.includes(request.agentId);
       return withSessionMcp({ ...request, env: { ...request.env, FOLLOW_THROUGH_CLI: bridge, FOLLOW_THROUGH_CLIENT_ENTRY: clientEntry(), ...(recovery ? { FOLLOW_THROUGH_RECOVERY: "1" } : {}) } }, directory, clientEntry(), paseoHome, recovery);
     }),
     server.on("agent.turn_ended", async (event, { paseo, signal }) => {
@@ -286,20 +296,20 @@ export default function contribute(server: PluginServerContext) {
         if (["canceled", "failed"].includes(event.outcome.kind) && !guarded) await store.mutate(state => { const w = findWorkspace(state, assigned.id); const b = w.batches.find(b => b.recipientAgentId === event.agent.id && ["sending", "sent", "uncertain"].includes(b.state)); if (b) { b.state = "blocked"; b.result = b.acknowledgmentError ? `Recovery acknowledgment was refused: ${b.acknowledgmentError.error}` : "Recovery stopped or failed. Check its agent before retrying."; } });
         void engine.tick(); return;
       }
-      if (!(await store.snapshot()).workspaces.some(w => w.enable_tracking && w.mainAgentId === event.agent.id)) return;
+      if (!(await store.snapshot()).workspaces.some(w => w.enable_tracking && (w.mainAgentId === event.agent.id || w.contributorAgentIds?.includes(event.agent.id)))) return;
       gateway.markDirty(event.agent.id);
       // Since Paseo 0.13 the lifecycle payload deliberately contains no history.
       // Read a bounded tail through the plugin-owned API, outside the state lock.
       const history = await paseo.agents.ref(event.agent.id).timeline.refetch({ direction: "tail", limit: 100, projection: "canonical" }).catch(() => null);
       if (signal.aborted || stopped) return;
       if (history) await store.mutate(state => {
-        const w = state.workspaces.find(w => w.enable_tracking && w.mainAgentId === event.agent.id);
+        const w = state.workspaces.find(w => w.enable_tracking && (w.mainAgentId === event.agent.id || w.contributorAgentIds?.includes(event.agent.id)));
         if (w) applyHistory(w, extractHistory(history.entries.map(entry => entry.item), w.inventory?.historyComplete ?? false, w.inventory?.historyError ?? null), null);
       });
       const guarded = interruption && await sessionGuardOwnsInterruption(event.agent.id, interruption).catch(() => false);
       if (["canceled", "failed"].includes(event.outcome.kind) && !guarded) await store.mutate(state => {
-        const w = state.workspaces.find(w => w.enable_tracking && w.mainAgentId === event.agent.id);
-        if (w && interruption) { w.hold = interruptionHold(interruption.kind); w.interruption = interruption; w.completion = null; }
+        const w = state.workspaces.find(w => w.enable_tracking && (w.mainAgentId === event.agent.id || w.contributorAgentIds?.includes(event.agent.id)));
+        if (w && w.mainAgentId === event.agent.id && interruption) { w.hold = interruptionHold(interruption.kind); w.interruption = interruption; w.completion = null; }
       });
       void engine.tick();
     }),

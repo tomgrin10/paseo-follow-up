@@ -60,7 +60,7 @@ See the [integration and security contract](https://github.com/tomgrin10/send-to
 
 This is a trusted, unsandboxed plugin. It reads selected workspace metadata, agent history/configuration and GitHub PR status using your existing host credentials. Local state and private recovery evidence live under `$PASEO_HOME/plugin-data/follow-through`; credentials and provider configuration are not published or transferred.
 
-It registers scoped Claude/Codex MCP tools and reversible provider hooks for tracked main agents. Codex keeps its normal hook trust review. Repair and recovery prompts reach your configured agent provider. Follow-up itself has no Slack posting identity and never scans channels or authorizes replies from historical mentions.
+It registers scoped Claude/Codex MCP tools and reversible provider hooks for tracked root sessions. Contributor sessions receive PR registration, status and sync tools; goal, task and completion authority stays with the designated main agent. Codex keeps its normal hook trust review. Repair and recovery prompts reach your configured agent provider. Follow-up itself has no Slack posting identity and never scans channels or authorizes replies from historical mentions.
 
 Human-operated Merge and reviewer controls perform GitHub/Graphite writes only after an explicit click and fresh eligibility checks. Unknown or uncertain results require checking before retrying. Site-specific reviewer and Cloud Run deployment adapters remain limited to their configured repository; other deployment status remains unknown rather than being inferred from a merge.
 
@@ -81,7 +81,7 @@ Release tags (`vX.Y.Z`) run `.github/workflows/publish-npm.yml`. GitHub Actions 
 
 ## Paseo 0.14 agent integration
 
-The Follow-up MCP attaches when a tracked main or active recovery agent opens a Claude or Codex session. Normal startup no longer writes global Claude/Codex MCP settings. Existing global entries are preserved. Turn-ended discovery now fetches recent history through the SDK because Paseo 0.13+ sends an empty timeline in lifecycle events.
+The Follow-up MCP attaches when a root agent in a tracked workspace or an active recovery agent opens a Claude or Codex session. Other root sessions get `workspace_status`, `register_pr` and `sync_workspace`, even when the originally recorded main agent is unavailable. Normal startup no longer writes global Claude/Codex MCP settings. Existing global entries are preserved. Turn-ended discovery now fetches recent history through the SDK because Paseo 0.13+ sends an empty timeline in lifecycle events.
 
 Requires Paseo **0.14.0 or newer**. Agent tools are scoped to interactive Claude
 and Codex sessions; history-only opens receive none. They become available on
@@ -101,3 +101,13 @@ Also available from [Tom Gringauz](https://github.com/tomgrin10):
 - [Session Guard](https://github.com/tomgrin10/paseo-session-guard) — Pause at usage limits and resume after reset.
 - [Transfer](https://github.com/tomgrin10/paseo-transfer) — Copy or move workspaces and agent conversations between hosts.
 - [Transcript Search](https://github.com/tomgrin10/paseo-transcript-search) — Search active and archived conversations across hosts.
+
+
+Successful `gt submit` and `gh pr create` receipts in root-session history also discover submitted
+PRs automatically, including from secondary git worktrees. Discovery checks the workspace's GitHub
+repository identity; merely mentioned PRs and read-only commands do not establish ownership.
+Explicit registrations, exclusions and another tracked workspace's ownership take precedence.
+Observed GitHub base/head branches supply inferred stack relationships; explicit edits override them.
+Tracking continues after the checkout branch's PR merges, and the submitting session remains the
+recipient for Send to Paseo. Existing sessions can use the hook-provided CLI fallback before their
+next MCP session refresh. Automatic discovery does not transfer main-agent authority or enable Auto.
