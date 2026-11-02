@@ -3,7 +3,7 @@ import { Pressable, Text, View } from "react-native";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirmPrActionRpc, preparePrActionRpc, prControlStatusRpc, requestReviewersRpc } from "../shared/contracts";
-import type { ActionPlan, PrActionKind } from "../shared/pr-actions";
+import { prActionBlocks, type ActionPlan, type PrActionKind } from "../shared/pr-actions";
 import type { Pr, Workspace } from "../shared/model";
 import { Button, type Theme } from "./components";
 import { defaultReviewers, noReviewers } from "../shared/reviewers";
@@ -21,7 +21,7 @@ export function PrControls({ pr, workspace, theme, compact, browserReady }: { br
     if (result.kind !== "merge" && result.prs.length === 1 && !result.blockers.length && !result.prs[0].blockers.length) submit.mutate({ planId: result.id, scope: "target" });
     else setPlan(result);
   } });
-  const pendingAction = workspace.prActions.some(a => ["sending", "uncertain"].includes(a.state));
+  const pendingAction = workspace.prActions.some(a => prActionBlocks(a, [pr.key]));
   const busy = checking.isPending || submit.isPending;
   const actual = browserReady ? status.data?.pr : null;
   const known = !!actual && !status.error && !status.data?.error;

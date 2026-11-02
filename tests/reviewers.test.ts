@@ -7,6 +7,7 @@ import { Store } from "../server/store";
 import { PrActions } from "../server/pr-actions";
 import { BrowserBridge } from "../server/browser-bridge";
 import { Github, parsePr, ReviewRequestError } from "../server/github";
+import { prActionBlocks } from "../shared/pr-actions";
 import { noReviewers, defaultReviewers } from "../shared/reviewers";
 import { snapshot, pr, workspace, clock } from "./fixtures";
 import type { Snapshot } from "../shared/model";
@@ -71,4 +72,63 @@ test("GitHub review writes use repository-scoped argv and distinguish rejected f
   const denied = new Github(async () => { throw Object.assign(new Error("Denied"), { stderr: "HTTP 403" }); });
   await assert.rejects(denied.requestReviewers(pr(), ["reviewer-a"]), error => error instanceof ReviewRequestError && !error.uncertain);
   const timeout = new Github(async () => { throw Error("timeout"); }); await assert.rejects(timeout.requestReviewers(pr(), ["reviewer-a"]), error => error instanceof ReviewRequestError && error.uncertain);
+});
+
+test("two PRs can request reviewers while the first request is still in flight; duplicate clicks share one request", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "follow-reviewers-parallel-"));
+  const store = new Store(directory);
+  const rows = [1, 2].map(number => pr({ key: `example/app#${number}`, number, snapshot: snapshot({ reviewers: reviewers() }) }));
+  await store.mutate(s => { s.workspaces = [workspace({ prs: rows })]; });
+  let notifyStarted!: () => void; let releaseFirst!: () => void;
+  const started = new Promise<void>(resolve => { notifyStarted = resolve; });
+  const released = new Promise<void>(resolve => { releaseFirst = resolve; });
+  const writes: number[] = [];
+  const actions = new PrActions(store, {
+    observe: async targets => new Map(targets.map(p => [p.key, { snapshot: structuredClone(rows.find(row => row.key === p.key)!.snapshot), error: null }])),
+    requestReviewers: async (p, logins) => {
+      writes.push(p.number);
+      if (p.number === 1) { notifyStarted(); await released; }
+      rows.find(row => row.key === p.key)!.snapshot!.reviewers!.requested = logins;
+    },
+  }, { merge: async () => { throw new Error("Unexpected merge"); }, invalidate() {} }, new BrowserBridge(), () => clock, () => [{ name: "Reviewer", login: "reviewer" }]);
+  t.after(async () => { releaseFirst(); await actions.close(); await rm(directory, { recursive: true, force: true }); });
+  const first = actions.requestReviewers("workspace", rows[0].key);
+  await started;
+  assert.equal(actions.requestReviewers("workspace", rows[0].key), first, "another click on the same PR joins the pending operation");
+  const second = await actions.requestReviewers("workspace", rows[1].key);
+  assert.equal(second.state, "submitted", "the second PR succeeds before the first is released");
+  assert.deepEqual(writes, [1, 2]);
+  const pending = (await store.snapshot()).workspaces[0].prActions;
+  assert.equal(pending.find(a => a.prs.includes(rows[0].key))!.state, "sending");
+  releaseFirst(); assert.equal((await first).state, "submitted");
+  assert.deepEqual(writes, [1, 2]);
+});
+
+test("an uncertain reviewer request blocks only its PR and is never resent to unblock another PR", async t => {
+  const f = await fixture(t); f.fail(new ReviewRequestError("Timeout", true));
+  await f.actions.requestReviewers("workspace", "example/app#1");
+  f.fail(null);
+  await f.store.mutate(s => { s.workspaces[0].prs.push(pr({ key: "example/app#2", number: 2, snapshot: snapshot({ reviewers: reviewers() }) })); });
+  // The second PR has an independent fresh observation and request result.
+  const actions = new PrActions(f.store, {
+    observe: async targets => new Map(targets.map(p => [p.key, { snapshot: snapshot({ reviewers: p.number === 2 && secondWritten ? { ...reviewers(), requested: ["reviewer"] } : reviewers() }), error: null }])),
+    requestReviewers: async p => { assert.equal(p.number, 2); secondWritten = true; },
+  }, { merge: async () => { throw Error("Unexpected merge"); }, invalidate() {} }, new BrowserBridge(), () => clock, () => [{ name: "Reviewer", login: "reviewer" }]);
+  let secondWritten = false; t.after(() => actions.close());
+  assert.equal((await actions.requestReviewers("workspace", "example/app#2")).state, "submitted");
+  await assert.rejects(actions.requestReviewers("workspace", "example/app#1"), /previous PR action/);
+  assert.equal(f.writes.length, 1);
+  assert.equal((await f.get()).prActions[0].state, "uncertain");
+});
+
+test("PR controls allow another reviewer request but preserve same-PR and workspace merge guards", () => {
+  for (const state of ["sending", "uncertain"] as const) {
+    const review = { state, kind: "request_reviewers" as const, prs: ["example/app#1"] };
+    assert.equal(prActionBlocks(review, ["example/app#2"]), false);
+    assert.equal(prActionBlocks(review, ["example/app#1"]), true);
+    assert.equal(prActionBlocks(review, ["example/app#1", "example/app#2"]), true);
+    assert.equal(prActionBlocks({ ...review, kind: "merge" }, ["example/app#2"]), true);
+    assert.equal(prActionBlocks({ ...review, kind: "enable_mwr" }, ["example/app#2"]), true);
+  }
+  for (const state of ["submitted", "failed"] as const) assert.equal(prActionBlocks({ state, kind: "request_reviewers", prs: ["example/app#1"] }, ["example/app#1"]), false);
 });
