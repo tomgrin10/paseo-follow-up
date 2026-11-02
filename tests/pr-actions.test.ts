@@ -10,6 +10,9 @@ import { GraphiteWriteError } from "../server/graphite";
 import { downstack } from "../shared/pr-actions";
 import { pr, snapshot, workspace } from "./fixtures";
 
+function scopedExchange(browser: BrowserBridge, client: string, ready: boolean, results: Parameters<BrowserBridge["exchange"]>[2], acceptJobs = true) {
+  return browser.exchange(client, ready, results, acceptJobs, ["example/app"]).jobs;
+}
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "follow-actions-")); const store = new Store(root);
   const bottom = pr({ snapshot: snapshot({ headBranch: "bottom", head: "bottom-head", reviewDecision: "APPROVED", graphiteMergeStatus: "READY_TO_MERGE" }) });
@@ -63,12 +66,12 @@ test("uncertain merge is durable and never automatically retried", async () => {
 });
 test("browser writes are leased once, nonce-bound, and restricted to the requested PRs", async () => {
   const browser = new BrowserBridge(); try {
-    browser.exchange("browser", true, []);
+    scopedExchange(browser, "browser", true, []);
     const result = browser.request("disable_mwr", "example/app", [{ number: 2, head: "head", trunk: "main" }]);
-    const [job] = browser.exchange("browser", true, []); assert.ok(job); assert.deepEqual(browser.exchange("other", true, []), []);
-    browser.exchange("other", true, [{ id: job.id, nonce: job.nonce, outcome: "completed", prs: [], applied: [2], error: "" }]);
-    browser.exchange("browser", true, [{ id: job.id, nonce: job.nonce, outcome: "completed", prs: [], applied: [3], error: "" }]);
-    browser.exchange("browser", true, [{ id: job.id, nonce: job.nonce, outcome: "completed", prs: [], applied: [2], error: "" }]);
+    const [job] = scopedExchange(browser, "browser", true, []); assert.ok(job); assert.deepEqual(scopedExchange(browser, "other", true, []), []);
+    scopedExchange(browser, "other", true, [{ id: job.id, nonce: job.nonce, outcome: "completed", prs: [{ repo: "example/app", number: 2, head: "head", state: "OPEN", mergeWhenReady: false, merging: false }], applied: [2], error: "" }]);
+    scopedExchange(browser, "browser", true, [{ id: job.id, nonce: job.nonce, outcome: "completed", prs: [], applied: [3], error: "" }]);
+    scopedExchange(browser, "browser", true, [{ id: job.id, nonce: job.nonce, outcome: "completed", prs: [{ repo: "example/app", number: 2, head: "head", state: "OPEN", mergeWhenReady: false, merging: false }], applied: [2], error: "" }]);
     assert.deepEqual((await result).applied, [2]);
   } finally { browser.close(); }
 });
@@ -88,11 +91,11 @@ test("the actual browser toggle is independent of merge scheduling and target sc
   const f = await fixture(); let poll: ReturnType<typeof setInterval> | undefined;
   try {
     const enabled = new Set<number>(); const writes: number[][] = [];
-    f.browser.exchange("browser", true, []);
+    scopedExchange(f.browser, "browser", true, []);
     poll = setInterval(() => {
-      for (const job of f.browser.exchange("browser", true, [])) {
+      for (const job of scopedExchange(f.browser, "browser", true, [])) {
         if (job.op !== "read") { writes.push(job.prs.map(p => p.number)); for (const p of job.prs) { if (job.op === "enable_mwr") enabled.add(p.number); else enabled.delete(p.number); } }
-        f.browser.exchange("browser", true, [{ id: job.id, nonce: job.nonce, outcome: "completed", prs: job.prs.map(p => ({ repo: job.repo, number: p.number, head: p.head, state: "OPEN", mergeWhenReady: enabled.has(p.number), merging: false })), applied: job.op === "read" ? [] : job.prs.map(p => p.number), error: "" }]);
+        scopedExchange(f.browser, "browser", true, [{ id: job.id, nonce: job.nonce, outcome: "completed", prs: job.prs.map(p => ({ repo: job.repo, number: p.number, head: p.head, state: "OPEN", mergeWhenReady: enabled.has(p.number), merging: false })), applied: job.op === "read" ? [] : job.prs.map(p => p.number), error: "" }]);
       }
     }, 5);
     assert.equal((await f.actions.status("workspace", f.top.key)).pr?.mergeWhenReady, false);
@@ -128,4 +131,39 @@ test("a missing companion refuses only browser toggles without recording a write
     assert.deepEqual(w.prActions, []); assert.equal(w.mainAgentId, "main-agent"); assert.equal(w.enable_auto_sends, false);
     assert.equal(w.prs.length, 2); assert.deepEqual(f.merges, []);
   } finally { await f.close(); }
+});
+
+test("browser pairing with no repository consent cannot advertise readiness or lease work", async () => {
+  const b = new BrowserBridge();
+  try {
+    b.exchange("unconsented", true, []);
+    assert.equal(b.status().ready, false);
+    await assert.rejects(b.request("read", "example/app", [{ number: 1, head: "head", trunk: "main" }]), /grant this machine/);
+    b.exchange("scoped", true, [], true, ["example/app"]);
+    assert.equal(b.status("example/app").ready, true);
+    assert.equal(b.status("other/repo").ready, false);
+    const result = b.request("read", "example/app", [{ number: 1, head: "head", trunk: "main" }]);
+    assert.deepEqual(b.exchange("foreign", true, [], true, ["other/repo"]).jobs, []);
+    const [job] = b.exchange("scoped", true, [], true, ["example/app"]).jobs;
+    assert.ok(job);
+    const reply = { id: job.id, nonce: job.nonce, outcome: "completed" as const, prs: [{ repo: "example/app", number: 1, head: "head", state: "OPEN" as const, mergeWhenReady: false, merging: false }], applied: [], error: "" };
+    assert.deepEqual(b.exchange("scoped", true, [{ ...reply, nonce: "wrong-nonce" }], true, ["example/app"]).accepted, []);
+    b.exchange("scoped", true, [reply], true, []);
+    assert.equal(b.cached("example/app", 1, "head"), null);
+    assert.deepEqual(b.exchange("scoped", true, [reply], true, ["example/app"]).accepted, [job.id]);
+    assert.equal((await result).outcome, "completed");
+  } finally { b.close(); }
+});
+test("a completed write with missing state, changed head, or wrong toggle cannot settle the command", async () => {
+  const b = new BrowserBridge();
+  try {
+    scopedExchange(b, "browser", true, []);
+    const result = b.request("enable_mwr", "example/app", [{ number: 1, head: "head", trunk: "main" }]);
+    const [job] = scopedExchange(b, "browser", true, []);
+    const reply = { id: job.id, nonce: job.nonce, outcome: "completed" as const, prs: [{ repo: "example/app", number: 1, head: "head", state: "OPEN" as const, mergeWhenReady: true, merging: false }], applied: [1], error: "" };
+    for (const patch of [{ prs: [] }, { prs: [{ ...reply.prs[0], head: "new-head" }] }, { prs: [{ ...reply.prs[0], mergeWhenReady: false }] }, { applied: [] }]) scopedExchange(b, "browser", true, [{ ...reply, ...patch }]);
+    assert.equal(b.cached("example/app", 1, "head"), null);
+    scopedExchange(b, "browser", true, [reply]);
+    assert.equal((await result).outcome, "completed");
+  } finally { b.close(); }
 });
