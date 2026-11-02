@@ -16,7 +16,12 @@ async function save(path, value) {
   await writeFile(temporary, JSON.stringify(value), { mode: 0o600 });
   await rename(temporary, path);
 }
-function instructions(lease) {
+function instructions(lease, contributor = false) {
+  if (contributor) return [
+    "Maintain PR tracking for this session in its tracked workspace. Read workspace_status now and after compaction. Register every PR you submit, including from secondary git worktrees, with register_pr; register parents before children. References and external dependencies are not owned PRs. Call sync_workspace before finishing. The designated main agent retains goal, task, scope and completion authority.",
+    quietInstruction,
+    `Prefer native Follow-through tools. CLI fallback: FOLLOW_THROUGH_CLIENT_ENTRY=${quote(lease.clientEntry)} node ${quote(join(directory, "mcp.mjs"))} call <tool> '<json>' --compact. Do not ask the developer to maintain the sidebar.`,
+  ].join("\n\n");
   return [
     "Maintain this tracked workspace's Follow-through sidebar as part of your normal work; do not wait for a developer reminder.",
     quietInstruction,
@@ -39,19 +44,21 @@ async function main() {
   const lease = await json(join(directory, "hooks-enabled.json"));
   if (lease.expiresAt < Date.now() || !lease.clientEntry) return;
   const state = await json(join(directory, "state.json"));
-  const workspace = state.workspaces.find(w => w.mainAgentId === agentId && w.enable_tracking && !w.archived);
+  const workspace = state.workspaces.find(w => (w.mainAgentId === agentId || w.contributorAgentIds?.includes(agentId)) && w.enable_tracking && !w.archived);
   if (!workspace) return;
+  const contributor = workspace.mainAgentId !== agentId;
+  const context = () => instructions(lease, contributor);
   const name = event.hook_event_name;
   if (!["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"].includes(name)) return;
   const session = createHash("sha256").update(String(event.session_id ?? agentId)).digest("hex").slice(0, 24);
   const path = join(directory, "hook-state", `${agentId}-${session}.json`);
   const turn = await json(path).catch(() => null);
   const emit = text => process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: name, additionalContext: text } }) + "\n");
-  if (name === "SessionStart") { emit(instructions(lease)); return; }
+  if (name === "SessionStart") { emit(context()); return; }
   if (name === "UserPromptSubmit") {
     if (turn?.stopped && String(event.prompt ?? "").startsWith(stopReason)) return;
     await save(path, { startedAt: Date.now(), dirtyAt: null, stopped: false, quietRevision });
-    emit(instructions(lease)); return;
+    emit(context()); return;
   }
   if (name === "PostToolUse") {
     const tool = String(event.tool_name ?? "");
@@ -67,6 +74,6 @@ async function main() {
   const sync = await json(join(directory, "hook-state", `sync-${agentId}.json`)).catch(() => null);
   if (turn && sync?.workspaceId === workspace.id && sync.at >= Math.max(turn.startedAt, turn.dirtyAt ?? 0)) return;
   await save(path, { ...turn, startedAt: turn?.startedAt ?? Date.now(), stopped: true });
-  process.stdout.write(JSON.stringify({ decision: "block", reason: stopReason + " This is metadata bookkeeping only; do not start queued repairs or recovery.\n\n" + instructions(lease) }) + "\n");
+  process.stdout.write(JSON.stringify({ decision: "block", reason: stopReason + " This is metadata bookkeeping only; do not start queued repairs or recovery.\n\n" + context() }) + "\n");
 }
 main().catch(() => {});

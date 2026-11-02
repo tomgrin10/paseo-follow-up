@@ -40,3 +40,15 @@ test("legacy flag migration preserves ownership and readable history without act
   assert.equal(read.enable_tracking, false); assert.equal(read.enable_auto_sends, false);
   assert.throws(() => agentWorkspace(state, "main-agent", "write", "workspace"), /Tracking is inactive/);
 });
+
+
+test("tracked contributors can read and register PRs without receiving owner permissions", () => {
+  const w = workspace({ contributorAgentIds: ["root-session"] });
+  const state = { version: 1 as const, workspaces: [w] };
+  for (const access of ["read", "write"] as const) assert.equal(agentWorkspace(state, "root-session", access, w.id, "pr"), w);
+  assert.throws(() => agentWorkspace(state, "root-session", "write", w.id), /expected main agent/);
+  assert.throws(() => ownedWorkspace(state, "root-session", w.id), /Only the workspace's main agent/);
+  assert.throws(() => agentWorkspace(state, "outside", "write", w.id, "pr"), /expected main agent/);
+  w.archived = true; assert.throws(() => agentWorkspace(state, "root-session", "read", w.id, "pr"));
+  w.archived = false; w.enable_tracking = false; assert.throws(() => agentWorkspace(state, "root-session", "write", w.id, "pr"));
+});

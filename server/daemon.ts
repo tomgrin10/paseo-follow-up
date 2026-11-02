@@ -8,7 +8,8 @@ import type { State } from "../shared/model";
 import { defaultTracking, projectSetting, type Project } from "../shared/settings";
 import { recoveryHandoff } from "./recovery-handoff";
 import { recoveryConfig } from "./recovery-config";
-import { extractHistory, type DiscoveredWorkspace } from "./discovery";
+import { submittedPrs, type Submission } from "./submissions";
+import { extractHistory, type History, type DiscoveredWorkspace } from "./discovery";
 import type { PluginBeforeRequests } from "@getpaseo/plugin/server";
 import { SessionGuard } from "./session-guard";
 import { DeliveryDeferred } from "./delivery";
@@ -88,6 +89,7 @@ export class PaseoGateway implements Gateway {
   private directory: { agents: { agent: Agent }[]; workspaces: WorkspaceRow[] } | null = null;
   private dirty = new Set<string>();
   markDirty(agentId: string): void { this.dirty.add(agentId); }
+  private histories = new Map<string, { messageAt: string | null; at: number; history: History; submissions: Submission[] }>();
   async discover(state: State, workspaceId?: string): Promise<DiscoveredWorkspace[]> {
     return this.connect(async client => {
       const [agents, workspaces, catalog] = await Promise.all([
@@ -97,39 +99,58 @@ export class PaseoGateway implements Gateway {
       ]);
       this.directory = { agents, workspaces };
       const discovered: DiscoveredWorkspace[] = [];
-      let scans = 0;
+      const scans: { row: DiscoveredWorkspace; agent: Agent; repo: string | null }[] = [];
       const defaults = new Set(catalog.projects.filter(p => defaultTracking(p, state.projectDefaults)).map(p => p.projectId));
       for (const workspace of workspaces.filter(w => !w.archivingAt && (workspaceId ? w.id === workspaceId : defaults.has(w.projectId ?? "") || state.workspaces.some(saved => saved.id === w.id && saved.enable_tracking && !saved.archived)))) {
         const existing = state.workspaces.find(w => w.id === workspace.id);
         if (existing?.archived) continue;
         const roots = agents.map(row => row.agent).filter(a => a.workspaceId === workspace.id && !a.archivedAt && !a.labels["paseo.parent-agent-id"] && !a.labels["follow-through.recovery"]);
         const main = chooseMainAgent(roots, existing?.mainAgentId);
-        if (!main) continue;
-        const row: DiscoveredWorkspace = { id: workspace.id, title: workspace.name || main.title || "Untitled workspace", mainAgentId: main.id, projectId: workspace.projectId, messageAt: main.lastUserMessageAt, enable_default_tracking: defaults.has(workspace.projectId ?? "") };
-        const inventory = existing?.inventory;
-        const needsHistory = !inventory || (!inventory.historyComplete && !inventory.historyError) || inventory.scannedMessageAt !== main.lastUserMessageAt || this.dirty.has(main.id);
-        if (needsHistory && scans < 4 && !["running", "initializing"].includes(main.status)) {
-          scans++;
-          try {
-            const entries: { item: unknown; seqStart: number }[] = [];
-            let cursor: { epoch: string; seq: number } | null = null;
-            let complete = false;
-            for (let pageIndex = 0; pageIndex < 100; pageIndex++) {
-              const page = await client.fetchAgentTimeline(main.id, { direction: cursor ? "before" : "tail", ...(cursor ? { cursor } : {}), limit: 500, projection: "canonical", timeout: 15_000 });
-              if (page.error || page.gap || page.staleCursor) throw new Error("Conversation history was unavailable or changed during recovery");
-              entries.push(...page.entries);
-              if (!page.hasOlder) { complete = true; break; }
-              if (!page.startCursor || (cursor && page.startCursor.epoch === cursor.epoch && page.startCursor.seq >= cursor.seq)) throw new Error("Conversation history pagination was incomplete");
-              cursor = page.startCursor;
-            }
-            row.history = extractHistory(entries.sort((a, b) => a.seqStart - b.seqStart).map(e => e.item), complete, complete ? null : "History exceeds the recovery window; inspect older transcripts during inventory");
-          } catch {
-            row.history = extractHistory([], false, "History could not be read; the recovery agent must inspect the main conversation and local transcripts during inventory");
-          }
-          this.dirty.delete(main.id);
+        if (!main && !existing) continue;
+        const row: DiscoveredWorkspace = { id: workspace.id, title: workspace.name || main?.title || existing!.title, mainAgentId: existing?.mainAgentId ?? main!.id, projectId: workspace.projectId, messageAt: main?.lastUserMessageAt ?? null, enable_default_tracking: defaults.has(workspace.projectId ?? ""), contributorAgentIds: roots.filter(a => a.id !== existing?.mainAgentId && a.id !== main?.id).map(a => a.id) };
+        // Preserve the designated owner even when it is no longer indexed. Other root
+        // sessions can still contribute their PRs without acquiring completion authority.
+        const project = catalog.projects.find(p => p.projectId === workspace.projectId);
+        const repo = project?.projectKind === "git" ? /^remote:github\.com\/([\w.-]+\/[\w.-]+?)(?:\.git)?$/.exec(project.projectKey)?.[1] ?? null : null;
+        for (const agent of roots) {
+          const cached = this.histories.get(agent.id);
+          if (!cached || cached.messageAt !== agent.lastUserMessageAt || this.dirty.has(agent.id) || (cached.history.error && Date.now() - cached.at >= 15_000) || (["running", "initializing"].includes(agent.status) && Date.now() - cached.at >= 15_000)) scans.push({ row, agent, repo });
         }
         discovered.push(row);
       }
+      // Oldest scan first prevents busy workspaces from starving later sessions.
+      scans.sort((a, b) => (this.histories.get(a.agent.id)?.at ?? 0) - (this.histories.get(b.agent.id)?.at ?? 0) || (b.agent.lastUserMessageAt ?? "").localeCompare(a.agent.lastUserMessageAt ?? ""));
+      for (const { agent, repo } of scans.slice(0, 4)) {
+        let history: History; let submissions: Submission[] = [];
+        try {
+          const entries: { item: unknown; seqStart: number }[] = [];
+          let cursor: { epoch: string; seq: number } | null = null;
+          let complete = false;
+          for (let pageIndex = 0; pageIndex < 100; pageIndex++) {
+            const page = await client.fetchAgentTimeline(agent.id, { direction: cursor ? "before" : "tail", ...(cursor ? { cursor } : {}), limit: 500, projection: "canonical", timeout: 15_000 });
+            if (page.error || page.gap || page.staleCursor) throw new Error("Conversation history was unavailable or changed during recovery");
+            entries.push(...page.entries);
+            if (!page.hasOlder) { complete = true; break; }
+            if (!page.startCursor || (cursor && page.startCursor.epoch === cursor.epoch && page.startCursor.seq >= cursor.seq)) throw new Error("Conversation history pagination was incomplete");
+            cursor = page.startCursor;
+          }
+          const items = entries.sort((a, b) => a.seqStart - b.seqStart).map(e => e.item);
+          history = extractHistory(items, complete, complete ? null : "History exceeds the recovery window; inspect older transcripts during inventory");
+          submissions = submittedPrs(items, agent.id, repo);
+        } catch { history = extractHistory([], false, "History could not be read; inspect the session or register submitted PRs explicitly"); }
+        this.histories.set(agent.id, { messageAt: agent.lastUserMessageAt, at: Date.now(), history, submissions });
+        this.dirty.delete(agent.id);
+      }
+      for (const row of discovered) {
+        const ids = [row.mainAgentId, ...(row.contributorAgentIds ?? [])];
+        const cached = ids.flatMap(id => { const h = this.histories.get(id); return h ? [h] : []; });
+        if (cached.length) {
+          row.history = { candidates: [...new Set(cached.flatMap(c => c.history.candidates))].sort(), goal: this.histories.get(row.mainAgentId)?.history.goal ?? null, complete: cached.length === ids.length && cached.every(c => c.history.complete), error: cached.find(c => c.history.error)?.history.error ?? null };
+          row.submissions = cached.flatMap(c => c.submissions);
+        }
+      }
+      const known = new Set(agents.map(a => a.agent.id));
+      for (const id of this.histories.keys()) if (!known.has(id)) this.histories.delete(id);
       return discovered;
     });
   }
