@@ -40,6 +40,22 @@ Tasks default to manual. Explicit Now, After merge or After deploy triggers can 
 
 ![Follow-up overview with sample workspaces](docs/screenshots/follow-up-overview.png)
 
+## Send to Paseo and Graphite
+
+With Send to Paseo installed on the same daemon, its composer can return to the agent that
+registered a PR here. New registrations record that agent; older records retain the workspace’s
+main agent. You can still choose a fresh agent in Send to Paseo. Tracking and follow-up remain
+usable without the companion.
+
+To control Graphite’s **Merge when ready** here, install the Send to Paseo plugin and Chrome
+extension, pair them, and keep Graphite open in Chrome. In extension settings → **Graphite browser
+access**, find this machine and allow an exact repository. Check **Allow Follow Up to change Merge
+when ready directly** to use this plugin’s toggle without another Chrome prompt. Leave it unchecked
+to confirm each change in Chrome. Revoke access in those settings at any time.
+
+This is a PR setting, including later pushes. Send pairing alone grants no Graphite access.
+See the [integration and security contract](https://github.com/tomgrin10/send-to-paseo/blob/main/docs/follow-up-integration.md).
+
 ## Data and permissions
 
 This is a trusted, unsandboxed plugin. It reads selected workspace metadata, agent history/configuration and GitHub PR status using your existing host credentials. Local state and private recovery evidence live under `$PASEO_HOME/plugin-data/follow-through`; credentials and provider configuration are not published or transferred.

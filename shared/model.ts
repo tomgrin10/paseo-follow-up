@@ -26,6 +26,7 @@ export const prSchema = z.object({
   key: idSchema, repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/), number: z.number().int().positive(),
   stack: textSchema, parent: idSchema.nullable(), disposition: z.string().nullable(),
   snapshot: snapshotSchema.nullable(), error: z.string().nullable(),
+  registeredAgentId: idSchema.optional(),
   deploymentAnchor: z.object({ mergeCommit: z.string(), at: z.string() }).optional(),
 });
 export const obligationSchema = z.object({

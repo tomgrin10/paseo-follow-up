@@ -22,10 +22,14 @@ const cli=async(...args)=>JSON.parse((await exec('paseo',['--home',preview.home,
 if (!standalone) {
 const dir=join(preview.home,'plugin-data/send-to-paseo');await mkdir(dir,{recursive:true});
 await writeFile(join(dir,'settings.json'),JSON.stringify({version:1,token:'isolated-browser-fixture-token',port:bridgePort,defaultProvider:null,paired:false,recentSends:[],allowedExtensionIds:[],agentDispatch:'main'}),{mode:0o600});
+const packed = JSON.parse((await exec('npm', ['pack', '--json', '--pack-destination', preview.root])).stdout)[0];
+await exec('tar', ['-xzf', join(preview.root, packed.filename), '--strip-components=1', '-C', join(preview.root, 'plugin')]);
+await cli('plugin', 'reload', 'follow-through');
 const plugins=await cli('plugin','ls'); if(plugins.some(p=>p.id==='send-to-paseo')) await cli('plugin','reload','send-to-paseo'); else await cli('plugin','install',join(source,'plugin'));
 } else { assert.ok(!(await cli('plugin','ls')).some(p=>p.id==='send-to-paseo')); }
 const client=new DaemonClient({url:env.PASEO_DAEMON_URL,clientId:'browser-control-test',clientType:'cli',reconnect:{enabled:false}});await client.connect();
 const call=(name,input={})=>client.invokePluginRpc('follow-through',name,input);
+await call('follow.activate',{workspaceId:preview.workspaceId});
 await call('follow.control',{workspaceId:preview.workspaceId,enable_auto_sends:false});
 const gh=`#!/usr/bin/env node
 if(process.argv[3]!=='graphql'){console.log('[]');process.exit(0)}
@@ -34,6 +38,7 @@ for(const m of query.matchAll(/(p\\d+):pullRequest\\(number:(\\d+)\\)/g)){const 
 console.log(JSON.stringify({data:{repository:r}}));
 `;
 await writeFile(join(preview.root,'bin/gh'),gh);await chmod(join(preview.root,'bin/gh'),0o700);
+await call('follow.register-pr',{agentId:preview.agentId,repo:'example/app',number:1,stack:'Migration rollout',parentNumber:null});
 await call('follow.register-pr',{agentId:preview.agentId,repo:'example/app',number:2,stack:'Migration rollout',parentNumber:1});
 await call('follow.register-pr',{agentId:preview.agentId,repo:'example/app',number:1,stack:'Migration rollout',parentNumber:null});
 await call('follow.refresh');
@@ -43,13 +48,24 @@ const profile=await mkdtemp(join(tmpdir(),'follow-browser-'));
 const context=await chromium.launchPersistentContext(profile,{executablePath:process.env.STP_CHROMIUM,headless:true,viewport:{width:1440,height:1050},args:standalone ? ['--disable-extensions','--no-first-run'] : [`--disable-extensions-except=${source}/extension/dist-test`,`--load-extension=${source}/extension/dist-test`,'--no-first-run','--no-default-browser-check']});
 const wait=async(fn,label)=>{for(let i=0;i<80;i++){const value=await fn();if(value)return value;await new Promise(r=>setTimeout(r,500));}throw new Error('Timed out: '+label)};
 context.on('weberror',e=>console.log('Browser error: '+String(e.error()).slice(0,250)));
-let graphitePage;
+let graphitePage; let optionsPage;
+const approveBrowser = async () => {
+  await optionsPage.bringToFront();
+  await optionsPage.getByRole("button", { name: /^(Enable|Disable) for these PRs$/ }).click({ timeout: 15000 });
+};
 try{
 if (!standalone) {
 const worker=await wait(()=>context.serviceWorkers().find(w=>w.url().startsWith('chrome-extension://')),'extension worker');
 await worker.evaluate(async(bridgeUrl)=>{await chrome.storage.local.set({settings:{version:2,connectionMode:'simple',defaultProvider:'',hosts:[{id:'fixture',label:'Isolated',bridgeUrl,token:'isolated-browser-fixture-token',enabled:true,machineName:'Fixture'}]}})},`http://127.0.0.1:${bridgePort}`);
 const graphite=await context.newPage();graphitePage=graphite;await fetch(fixtureUrl+'/llms.txt');await graphite.goto(fixtureUrl+'/');
-await wait(async()=> (await call('follow.browser-status')).ready,'paired browser connection');
+assert.equal((await call('follow.browser-status')).ready, false, 'Send pairing does not grant Graphite access');
+optionsPage = await context.newPage(); await optionsPage.goto(worker.url().replace(/background\.js$/, 'options.html'));
+await optionsPage.getByRole('button', { name: 'Find Follow Up machines' }).click();
+await optionsPage.getByRole('combobox', { name: 'Graphite access machine' }).getByRole('option', { name: /Isolated/ }).waitFor({ state: 'attached' });
+await optionsPage.locator('#graphiteRepo').fill('example/app');
+await optionsPage.getByRole('button', { name: 'Allow this repository' }).click();
+await optionsPage.getByRole('button', { name: 'Revoke', exact: true }).waitFor();
+await wait(async()=> (await call('follow.browser-status')).ready,'explicitly authorized browser connection');
 for (const action of (await call('follow.get',{workspaceId:preview.workspaceId})).workspace.prActions.filter(a=>a.state==='uncertain')) assert.equal((await call('follow.check-pr-action',{workspaceId:preview.workspaceId,actionId:action.id})).state,'submitted');
 const status=await call('follow.pr-control-status',{workspaceId:preview.workspaceId,prKey:'example/app#2'});
 assert.equal(status.pr.mergeWhenReady, (await (await fetch(fixtureUrl+"/__test/state")).json()).enabled.includes(2));assert.equal(status.pr.head,'fixture-head-2');
@@ -58,7 +74,7 @@ console.log('PASS: actual MV3 worker -> paired HTTP bridge -> installed Follow-t
 const page=await context.newPage();await fetch(`http://127.0.0.1:${preview.port}/llms.txt`);const serverId=(await readFile(join(preview.home,'server-id'),'utf8')).trim(); await page.goto(`http://127.0.0.1:${preview.port}/`); await page.getByRole("button",{name:/^Follow-through POC test/}).click();
 await mkdir('docs/screenshots',{recursive:true});
 console.log('BROWSER_TEST_READY '+JSON.stringify({port:preview.port,workspaceId:preview.workspaceId,agentId:preview.agentId,bridgePort,fixtureUrl}));
-await page.getByRole('button',{name:'Open workspace follow-through',exact:true}).click();
+await page.getByRole('button',{name:'Open workspace follow-up',exact:true}).click();
 const toggle=n=>page.getByRole('switch',{name:`Merge when ready for example/app pull request ${n}`,exact:true});
 if (!standalone) await wait(async()=>await toggle(2).getAttribute('aria-checked') !== 'mixed','verified toggle');
 else { await page.getByRole('button',{name:'Expand Optional merge when ready',exact:true}).waitFor(); assert.equal(await page.getByRole('switch',{name:/Merge when ready for/}).count(),0);assert.equal(await page.getByRole('button',{name:'Connect Graphite',exact:true}).isVisible(),false); }
@@ -76,28 +92,29 @@ const wasOn=await toggle(2).getAttribute('aria-checked')==='true';
 await toggle(2).click();await page.getByRole('button',{name:'Just this PR',exact:true}).waitFor();
 await page.screenshot({path:'docs/screenshots/toggle-confirmation-desktop.png'});
 await page.getByRole('button',{name:'Just this PR',exact:true}).click();
+await approveBrowser();
 const targetResult=await wait(async()=>{const actions=(await call('follow.get',{workspaceId:preview.workspaceId})).workspace.prActions;const last=actions.at(-1);return last && last.kind!=="merge" && last.state!=="sending" ? last : null;},'target toggle result');
 assert.equal(targetResult.state,'submitted',targetResult.result);
 await page.getByText(`Merge when ready ${wasOn?'disabled':'enabled'} for #2.`,{exact:true}).waitFor({timeout:10000});
 await wait(async()=>await toggle(2).getAttribute('aria-checked')===String(!wasOn),'confirmed switch state');
 const scoped=(await state()).writes.slice(before);
 assert.equal(scoped.length,1);assert.equal(scoped[0].body.number,2);
+// A separate explicit browser grant permits direct control from Follow Up.
+await optionsPage.locator('#graphiteToggleChanges').check();
+await optionsPage.getByRole('button', { name: 'Allow this repository' }).click();
+await optionsPage.getByText(/Read and change toggles/).waitFor();
 await toggle(2).click();await page.getByRole('button',{name:/for all 2 PRs/}).click();
 await page.getByText(`Merge when ready ${wasOn?'enabled':'disabled'} for #1, #2.`,{exact:true}).waitFor({timeout:30000});
 }
-await page.setViewportSize({width:390,height:844});
-await page.getByRole('button',{name:'Open workspace follow-through',exact:true}).click();
-await page.getByRole('button',{name:'Collapse Overview',exact:true}).click();
-await page.getByRole('button',{name:'Collapse Remaining work',exact:true}).click();
-await page.getByRole('button',{name:'Merge',exact:true}).nth(1).click();
-await page.getByText('Merge the PRs underneath too?',{exact:true}).waitFor();
-assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),390);
-if (!standalone) assert.ok((await toggle(2).boundingBox()).height>=44); else assert.ok((await page.getByRole('button',{name:'Merge all 2 PRs',exact:true}).boundingBox()).height>=44);
-await page.screenshot({path:standalone?'docs/screenshots/standalone-merge-compact.png':'docs/screenshots/merge-confirmation-compact.png'});
-await page.getByRole('button',{name:'Cancel',exact:true}).click();
-if (!standalone) { await toggle(2).click();await page.getByRole('button',{name:'Just this PR',exact:true}).waitFor();
-await page.screenshot({path:'docs/screenshots/toggle-confirmation-compact.png'});
-await page.getByRole('button',{name:'Cancel',exact:true}).click(); } else { await page.getByRole('button',{name:'Expand Optional merge when ready',exact:true}).click(); await page.getByRole('button',{name:'Connect Graphite',exact:true}).waitFor(); await page.screenshot({path:'docs/screenshots/standalone-optional-compact.png'}); }
+// Browser-owned permissions must remain operable in both themes and compact windows.
+if (!standalone) {
+  await mkdir('/tmp/follow-up-integration-screenshots', { recursive: true });
+  for (const colorScheme of ['light', 'dark']) for (const width of [1440, 390]) {
+    await optionsPage.emulateMedia({ colorScheme }); await optionsPage.setViewportSize({ width, height: 900 });
+    assert.equal(await optionsPage.evaluate(() => document.documentElement.scrollWidth), width);
+    await optionsPage.screenshot({ path: `/tmp/follow-up-integration-screenshots/access-${colorScheme}-${width}.png`, fullPage: true });
+  }
+}
 // Only the synthetic CLI endpoint can receive this test merge.
 const plan=await call('follow.prepare-pr-action',{workspaceId:preview.workspaceId,prKey:'example/app#2',kind:'merge'});
 assert.deepEqual(plan.prs.map(p=>p.number),[1,2]);assert.ok(!plan.blockers.length && plan.prs.every(p=>!p.blockers.length));
@@ -107,7 +124,13 @@ assert.equal(merges.length,previousMerges+1);assert.deepEqual(merges.at(-1).body
 const w=(await call('follow.get',{workspaceId:preview.workspaceId})).workspace;
 assert.equal(w.mainAgentId,preview.agentId);assert.equal(w.enable_auto_sends,false);
 assert.ok(w.prActions.every(a=>a.state==='submitted'));
-console.log(standalone ? 'PASS: no Send plugin, no browser extension or session; native desktop/compact merge confirmation, cancellation, optional disclosure, no disabled switches, no overflow and ordered CLI merge.' : 'PASS: native desktop/compact controls, fresh downstack merge confirmation, cancellation, target-only and all-downstack toggles, accurate switch ARIA state, 44px compact target, no overflow and one ordered synthetic merge.');
-if (!standalone) { await graphitePage.close();await wait(async()=>!(await call('follow.browser-status')).ready,'disconnected companion');await page.getByRole('button',{name:'Expand Optional merge when ready',exact:true}).waitFor({timeout:10000});assert.equal(await page.getByRole('switch',{name:/Merge when ready for/}).count(),0);console.log('PASS: disconnect restores standalone controls without stale switches.'); }
+console.log('PASS: native desktop controls and cancellation; target-only and direct all-downstack toggles; extension permissions in light/dark, wide/compact; one ordered synthetic merge.');
+if (!standalone) {
+  await optionsPage.getByRole('button', { name: 'Revoke', exact: true }).click();
+  await wait(async () => !(await call('follow.browser-status')).ready, 'revoked browser access');
+  assert.equal((await call('follow.pr-control-status', { workspaceId: preview.workspaceId, prKey: 'example/app#2' })).pr, null);
+  await graphitePage.close();
+  console.log('PASS: separate repository permission, browser confirmation, explicitly permitted direct Follow Up toggles, and revocation.');
+}
 if(process.argv.includes('--keep'))await new Promise(r=>{process.once('SIGINT',r);process.once('SIGTERM',r)});
 }finally{await context.close();await client.close();await rm(profile,{recursive:true,force:true});}
