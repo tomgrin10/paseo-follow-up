@@ -7,3 +7,11 @@ export function prOwner(state: State, repo: string, number: number) {
       .map(p => ({ workspaceId: w.id, agentId: p.registeredAgentId ?? w.mainAgentId })));
   return claims.length === 1 ? claims[0] : null;
 }
+
+/** Only repository identities from active tracked PRs cross the browser bridge. */
+export function browserRepositories(state: State): string[] {
+  return [...new Set(state.workspaces.filter(w => w.enable_tracking && !w.archived)
+    .flatMap(w => w.prs.map(p => p.repo.toLowerCase())))]
+    .filter(repo => repo.length <= 201 && /^[\w.-]+\/[\w.-]+$/.test(repo) && repo.split("/").every(p => p !== "." && p !== ".."))
+    .sort().slice(0, 100);
+}

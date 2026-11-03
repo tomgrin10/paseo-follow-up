@@ -48,26 +48,25 @@ const profile=await mkdtemp(join(tmpdir(),'follow-browser-'));
 const context=await chromium.launchPersistentContext(profile,{executablePath:process.env.STP_CHROMIUM,headless:true,viewport:{width:1440,height:1050},args:standalone ? ['--disable-extensions','--no-first-run'] : [`--disable-extensions-except=${source}/extension/dist-test`,`--load-extension=${source}/extension/dist-test`,'--no-first-run','--no-default-browser-check']});
 const wait=async(fn,label)=>{for(let i=0;i<80;i++){const value=await fn();if(value)return value;await new Promise(r=>setTimeout(r,500));}throw new Error('Timed out: '+label)};
 context.on('weberror',e=>console.log('Browser error: '+String(e.error()).slice(0,250)));
-let graphitePage; let optionsPage;
-const approveBrowser = async () => {
+let graphitePage; let optionsPage; let worker;
+const approveBrowser = async (remember = false) => {
   await optionsPage.bringToFront();
+  if (remember) await optionsPage.getByRole("checkbox", { name: /Allow future toggle changes/ }).check();
   await optionsPage.getByRole("button", { name: /^(Enable|Disable) for these PRs$/ }).click({ timeout: 15000 });
 };
 try{
 if (!standalone) {
-const worker=await wait(()=>context.serviceWorkers().find(w=>w.url().startsWith('chrome-extension://')),'extension worker');
-await worker.evaluate(async(bridgeUrl)=>{await chrome.storage.local.set({settings:{version:2,connectionMode:'simple',defaultProvider:'',hosts:[{id:'fixture',label:'Isolated',bridgeUrl,token:'isolated-browser-fixture-token',enabled:true,machineName:'Fixture'}]}})},`http://127.0.0.1:${bridgePort}`);
+worker=await wait(()=>context.serviceWorkers().find(w=>w.url().startsWith('chrome-extension://')),'extension worker');
+await worker.evaluate(async(bridgeUrl)=>{await chrome.storage.local.set({settings:{version:2,connectionMode:'advanced',defaultProvider:'',hosts:[{id:'fixture',label:'Isolated',bridgeUrl,token:'isolated-browser-fixture-token',enabled:true,machineName:'Fixture'}]}})},`http://127.0.0.1:${bridgePort}`);
 const graphite=await context.newPage();graphitePage=graphite;await fetch(fixtureUrl+'/llms.txt');await graphite.goto(fixtureUrl+'/');
-assert.equal((await call('follow.browser-status')).ready, false, 'Send pairing does not grant Graphite access');
 optionsPage = await context.newPage(); await optionsPage.goto(worker.url().replace(/background\.js$/, 'options.html'));
-await optionsPage.getByRole('button', { name: 'Find Follow Up machines' }).click();
-await optionsPage.getByRole('combobox', { name: 'Graphite access machine' }).getByRole('option', { name: /Isolated/ }).waitFor({ state: 'attached' });
-await optionsPage.locator('#graphiteRepo').fill('example/app');
-await optionsPage.getByRole('button', { name: 'Allow this repository' }).click();
-await optionsPage.getByRole('button', { name: 'Revoke', exact: true }).waitFor();
-await wait(async()=> (await call('follow.browser-status')).ready,'explicitly authorized browser connection');
+assert.equal(await optionsPage.locator('#graphiteRepo, #graphiteMachine, #graphiteGrant').count(), 0, 'no separate machine/repository setup');
+await wait(async()=> (await call('follow.browser-status')).ready,'automatic existing Send connection');
+assert.equal(await worker.evaluate(async () => (await chrome.storage.local.get('graphiteBrowserGrants')).graphiteBrowserGrants?.length ?? 0), 0, 'reads need no second pairing or manual grant');
 for (const action of (await call('follow.get',{workspaceId:preview.workspaceId})).workspace.prActions.filter(a=>a.state==='uncertain')) assert.equal((await call('follow.check-pr-action',{workspaceId:preview.workspaceId,actionId:action.id})).state,'submitted');
+await wait(async () => (await call('follow.get', { workspaceId: preview.workspaceId })).workspace.prs.find(p => p.key === 'example/app#2')?.snapshot?.complete, 'background PR observation');
 const status=await call('follow.pr-control-status',{workspaceId:preview.workspaceId,prKey:'example/app#2'});
+assert.ok(status.pr, JSON.stringify(status));
 assert.equal(status.pr.mergeWhenReady, (await (await fetch(fixtureUrl+"/__test/state")).json()).enabled.includes(2));assert.equal(status.pr.head,'fixture-head-2');
 console.log('PASS: actual MV3 worker -> paired HTTP bridge -> installed Follow-through RPC -> first-party Graphite read.');
 } else { const status=await call('follow.pr-control-status',{workspaceId:preview.workspaceId,prKey:'example/app#2'}); assert.equal(status.browser.ready,false);assert.equal(status.pr,null);assert.equal(status.error,null); }
@@ -92,17 +91,15 @@ const wasOn=await toggle(2).getAttribute('aria-checked')==='true';
 await toggle(2).click();await page.getByRole('button',{name:'Just this PR',exact:true}).waitFor();
 await page.screenshot({path:'docs/screenshots/toggle-confirmation-desktop.png'});
 await page.getByRole('button',{name:'Just this PR',exact:true}).click();
-await approveBrowser();
+await approveBrowser(true);
 const targetResult=await wait(async()=>{const actions=(await call('follow.get',{workspaceId:preview.workspaceId})).workspace.prActions;const last=actions.at(-1);return last && last.kind!=="merge" && last.state!=="sending" ? last : null;},'target toggle result');
 assert.equal(targetResult.state,'submitted',targetResult.result);
 await page.getByText(`Merge when ready ${wasOn?'disabled':'enabled'} for #2.`,{exact:true}).waitFor({timeout:10000});
 await wait(async()=>await toggle(2).getAttribute('aria-checked')===String(!wasOn),'confirmed switch state');
 const scoped=(await state()).writes.slice(before);
 assert.equal(scoped.length,1);assert.equal(scoped[0].body.number,2);
-// A separate explicit browser grant permits direct control from Follow Up.
-await optionsPage.locator('#graphiteToggleChanges').check();
-await optionsPage.getByRole('button', { name: 'Allow this repository' }).click();
-await optionsPage.getByText(/Read and change toggles/).waitFor();
+// Only the checkbox on the real confirmation permits future direct changes.
+await optionsPage.getByRole('button', { name: 'Require confirmation', exact: true }).waitFor();
 await toggle(2).click();await page.getByRole('button',{name:/for all 2 PRs/}).click();
 await page.getByText(`Merge when ready ${wasOn?'enabled':'disabled'} for #1, #2.`,{exact:true}).waitFor({timeout:30000});
 }
@@ -126,11 +123,13 @@ assert.equal(w.mainAgentId,preview.agentId);assert.equal(w.enable_auto_sends,fal
 assert.ok(w.prActions.every(a=>a.state==='submitted'));
 console.log('PASS: native desktop controls and cancellation; target-only and direct all-downstack toggles; extension permissions in light/dark, wide/compact; one ordered synthetic merge.');
 if (!standalone) {
-  await optionsPage.getByRole('button', { name: 'Revoke', exact: true }).click();
+  await optionsPage.getByRole('button', { name: 'Require confirmation', exact: true }).click();
+  assert.equal(await worker.evaluate(async () => (await chrome.storage.local.get('graphiteBrowserGrants')).graphiteBrowserGrants?.length ?? 0), 0);
+  await optionsPage.getByRole('checkbox', { name: 'Use Graphite with Follow Up', exact: true }).uncheck();
   await wait(async () => !(await call('follow.browser-status')).ready, 'revoked browser access');
   assert.equal((await call('follow.pr-control-status', { workspaceId: preview.workspaceId, prKey: 'example/app#2' })).pr, null);
   await graphitePage.close();
-  console.log('PASS: separate repository permission, browser confirmation, explicitly permitted direct Follow Up toggles, and revocation.');
+  console.log('PASS: automatic existing connection, browser confirmation, explicitly remembered direct toggles, and revocation.');
 }
 if(process.argv.includes('--keep'))await new Promise(r=>{process.once('SIGINT',r);process.once('SIGTERM',r)});
 }finally{await context.close();await client.close();await rm(profile,{recursive:true,force:true});}

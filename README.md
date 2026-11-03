@@ -47,13 +47,13 @@ registered a PR here. New registrations record that agent; older records retain 
 main agent. You can still choose a fresh agent in Send to Paseo. Tracking and follow-up remain
 usable without the companion.
 
-To control Graphite’s **Merge when ready** here, install the Send to Paseo plugin and Chrome
-extension, pair them, and keep Graphite open in Chrome. In extension settings → **Graphite browser
-access**, find this machine and allow an exact repository. Check **Allow Follow Up to change Merge
-when ready directly** to use this plugin’s toggle without another Chrome prompt. Leave it unchecked
-to confirm each change in Chrome. Revoke access in those settings at any time.
+To control Graphite’s **Merge when ready** here, use Send to Paseo plugin/extension 2.2+ and
+Follow Up 0.3.4+, and keep Graphite open and signed in. Follow Up connects automatically through
+your existing Send to Paseo pairing and advertises the repositories of active tracked PRs.
 
-This is a PR setting, including later pushes. Send pairing alone grants no Graphite access.
+Toggle changes require confirmation in Chrome. The confirmation can remember permission for
+future changes from that machine for the exact repository. Revoke that permission or turn off
+browser access in extension settings → **Follow Up**. This is a PR setting, including later pushes.
 See the [integration and security contract](https://github.com/tomgrin10/send-to-paseo/blob/main/docs/follow-up-integration.md).
 
 ## Data and permissions
