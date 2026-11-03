@@ -130,8 +130,9 @@ export class Engine {
       applyDiscovery(state, rows.filter(row => row.id === workspaceId), this.now());
       findWorkspace(state, workspaceId).enable_tracking = true;
     });
-    await this.tick();
-    return findWorkspace(await this.store.snapshot(), workspaceId);
+    const activated = findWorkspace(await this.store.snapshot(), workspaceId);
+    void this.tick();
+    return activated;
   }
   async sendPending(workspaceId: string, batchId: string): Promise<Workspace> {
     const before = findWorkspace(await this.store.snapshot(), workspaceId).batches.find(b => b.id === batchId);

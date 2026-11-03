@@ -78,3 +78,26 @@ test("settled PRs trigger completion verification rather than Done or a human pr
   w.runtimeBusy = false; w.obligations.push({ id: "deploy", title: "Verify deployed revision", status: "waiting", afterPrs: [], evidence: "", enable_follow_up: false, revision: 0 });
   assert.equal(tasksFor(w).length, 0, "unfinished deployment work still blocks completion");
 });
+
+
+test("Track returns after persistence while unrelated global observation is still pending", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "follow-track-latency-")); t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = new Store(directory); let release!: () => void; let entered!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const gateway: Gateway = {
+    discover: async () => [{ id: "workspace", title: "Independent task", mainAgentId: "main-agent", messageAt: null }],
+    observe: async () => { entered(); await pending; return { busy: false, reason: null, archived: false }; },
+    send: async () => { throw new Error("Track must not send a message"); }, label: async () => {},
+    prepareRecovery: async () => { throw new Error("Track must not start recovery"); },
+  };
+  const engine = new Engine(store, { observe: async () => new Map() }, gateway);
+  const activation = engine.activate("workspace");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await started;
+    const w = await Promise.race([activation, new Promise<never>((_ok, reject) => { timer = setTimeout(() => reject(new Error("Track waited for the global refresh")), 500); })]);
+    assert.equal(w.enable_tracking, true); assert.equal(w.enable_auto_sends, false);
+    assert.equal((await store.snapshot()).workspaces[0].mainAgentId, "main-agent");
+  } finally { if (timer) clearTimeout(timer); release(); await activation; await engine.tick(); }
+});
