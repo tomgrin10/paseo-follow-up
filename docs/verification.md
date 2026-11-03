@@ -60,3 +60,15 @@ label. Tests preserve same-workspace child exclusions, archived-agent checks, un
 bounds and recovery handoff. The packed lifecycle test creates three independent workspaces and
 agents, checks their first-session bridge and goal access, and rejects local children and creator
 claims across workspace boundaries. All writes and messages in these checks are synthetic.
+
+
+## Track latency release (0.3.3, 2026-11-03)
+
+The live verification of 0.3.2 exposed an additional timeout: Track waited for the global refresh.
+Activation now returns after its ownership and tracking state are persisted. Targeted discovery for
+Track/session startup reads no transcripts; normal background polling retains history discovery.
+Regressions hold global observation behind an unresolved promise and assert activation still returns,
+and verify that targeted discovery skips transcript calls while background discovery still scans.
+Packed installation checks wait for background history instead of requiring it in the Track response.
+
+TypeScript, all 151 behavior tests and the native button lifecycle regression pass for 0.3.3.
