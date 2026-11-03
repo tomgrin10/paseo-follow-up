@@ -348,6 +348,29 @@ try {
   assert.ok(defaultRecord); assert.equal(defaultRecord.enable_auto_sends, false); assert.equal(defaultRecord.mainAgentId, defaultAgent.id);
   const defaultEnv = JSON.parse(await readFile(join(home, `fixture-settings-${defaultAgent.id}.json`), "utf8"));
   assert.ok(defaultEnv.FOLLOW_THROUGH_CLI, "the default main gets its bridge on its first session");
+  // Match agent-scoped CLI launches: the parent label survives even with a new workspace.
+  for (let index = 0; index < 3; index++) {
+    const launched = await api.workspaces.create({ title: `Created task ${index}`, source: { kind: "directory", path: heroPath } });
+    assert.equal((await call("follow.get", { workspaceId: launched.id })).workspace, null);
+    const localMain = await launched.agents.create({ config: { provider: "followthrough-fixture/fixture" }, labels: { "paseo.parent-agent-id": agent.id }, title: `Created main ${index}` });
+    let record;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      record = (await call("follow.get", { workspaceId: launched.id })).workspace;
+      if (record?.enable_tracking) break;
+      await call("follow.refresh", {}); await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    assert.equal(record.mainAgentId, localMain.id); assert.equal(record.enable_auto_sends, false);
+    const firstSession = JSON.parse(await readFile(join(home, `fixture-settings-${localMain.id}.json`), "utf8"));
+    assert.ok(firstSession.FOLLOW_THROUGH_CLI, "a cross-workspace launch gets its bridge on the first session");
+    assert.equal((await call("follow.activate", { workspaceId: launched.id })).mainAgentId, localMain.id, "Track must also succeed");
+    assert.equal((await call("follow.enroll", { agentId: localMain.id, goal: `Independent task ${index}` })).mainAgentId, localMain.id);
+    const nested = await launched.agents.create({ config: { provider: "followthrough-fixture/fixture" }, labels: { "paseo.parent-agent-id": localMain.id }, title: "Same-workspace child" });
+    const nestedEnv = JSON.parse(await readFile(join(home, `fixture-settings-${nested.id}.json`), "utf8"));
+    assert.equal(nestedEnv.FOLLOW_THROUGH_CLI, undefined);
+    await assert.rejects(call("follow.agent-status", { agentId: nested.id }), /received agent/);
+    await assert.rejects(call("follow.enroll", { agentId: agent.id, workspaceId: launched.id, goal: "Cannot claim the child workspace" }), /another workspace/);
+  }
+  console.log("PASS: workspace-first creation of three cross-workspace child agents auto-tracks each local main, provides the bridge on its first session, permits Track and enroll, and excludes same-workspace children and the creator's cross-workspace claims.");
   const heroProject = (await call("follow.project-settings", {})).projects.find(p => p.path === heroPath);
   assert.equal(heroProject.enable_default_tracking, true);
   await call("follow.set-project-tracking", { projectId: heroProject.id, enable_default_tracking: false });

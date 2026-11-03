@@ -111,3 +111,11 @@ Observed GitHub base/head branches supply inferred stack relationships; explicit
 Tracking continues after the checkout branch's PR merges, and the submitting session remains the
 recipient for Send to Paseo. Existing sessions can use the hook-provided CLI fallback before their
 next MCP session refresh. Automatic discovery does not transfer main-agent authority or enable Auto.
+
+
+Agents launched by another agent into a separate workspace can be that new workspace’s main agent.
+The creator’s parent-agent label records launch provenance; it excludes an agent from local main
+selection only when the parent belongs to the same workspace. Parent membership is checked from
+the daemon, including direct lookup when the creator is no longer in the live directory. Unknown
+membership does not grant new scope. Workspace-first creation is supported: tracking waits for an
+available local main, then applies the project default. Explicit Track also supports these launches.
