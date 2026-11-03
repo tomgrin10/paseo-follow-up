@@ -4,7 +4,6 @@ import { SettingsAction, SettingsCard, SettingsSection, SettingsSwitch } from "@
 import { useEffect } from "react";
 import { ActivityIndicator, ScrollView, Text, View } from "react-native";
 import { displayPreferences, displayRpc } from "../shared/display";
-import { withNavigation } from "./navigation";
 import { sidebarVisibility } from "./sidebar-visibility";
 
 type Display = import("zod").infer<typeof displayPreferences.schema>;
@@ -58,7 +57,7 @@ export function contributeDisplay(client: PluginClientContext, item: PluginSideb
   // Register synchronously, then reconcile the saved preference, so that an
   // already-open sidebar route can resolve its surface during that first render.
   sidebar.set(true);
-  const Settings = withNavigation(DisplaySettings, client, item.surface, "display");
+  const Settings = DisplaySettings;
   const removeSurface = client.addSurface("display-settings", Settings);
   const removeSettings = client.addSettingsScreen({ id: "display", title: "Display", icon: "PanelLeft", Component: Settings });
   const removeCommand = client.addCommandCenterItem({
