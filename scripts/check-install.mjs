@@ -79,10 +79,10 @@ try {
   assert.equal((await call("follow.agent-status", { agentId: secondary.id })).id, w.id);
   await assert.rejects(call("follow.enroll", { agentId: secondary.id, goal: "Cannot replace owner" }), /expected main agent/);
   assert.equal(record.mainAgentId, agent.id, "the original root remains owner");
-  for (let attempt = 0; attempt < 80; attempt++) {
+  for (let attempt = 0; attempt < 300; attempt++) {
     record = (await call("follow.get", { workspaceId: w.id })).workspace;
     if (record.inventory.candidates.includes("example/app#1")) break;
-    if (attempt === 79) throw new Error("Background discovery did not recover the fixture history");
+    if (attempt === 299) throw new Error("Background discovery did not recover the fixture history within two poll intervals");
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   assert.ok(record.inventory.candidates.includes("example/app#1"));
