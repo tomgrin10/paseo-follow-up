@@ -19,12 +19,16 @@ export function parsePr(pr: Node, trunk: string, observedAt: string, required: s
   const checks = contexts?.nodes ?? [];
   const seen = new Set<string>();
   const failedChecks: string[] = [];
+  const otherFailedChecks: string[] = [];
   let checksPending = false;
   for (const c of checks) {
     const name = c.name ?? c.context;
-    if (!requiredSet.has(name)) continue;
-    seen.add(name);
     const conclusion = c.conclusion ?? c.state;
+    if (!requiredSet.has(name)) {
+      if ((!c.status || c.status === "COMPLETED") && failed.has(conclusion)) otherFailedChecks.push(name);
+      continue;
+    }
+    seen.add(name);
     if ((c.status && c.status !== "COMPLETED") || !conclusion || conclusion === "PENDING") checksPending = true;
     else if (failed.has(conclusion)) failedChecks.push(name);
   }
@@ -42,7 +46,7 @@ export function parsePr(pr: Node, trunk: string, observedAt: string, required: s
     },
     mergeWhenReady: "unknown",
     threads: threads.nodes.filter((t: Node) => !t.isResolved).map((t: Node) => ({ id: t.id, updatedAt: t.comments.nodes[0]?.updatedAt ?? observedAt })),
-    failedChecks, checksPending,
+    failedChecks, otherFailedChecks, checksPending,
     complete: !threads.pageInfo.hasNextPage && !contexts?.pageInfo.hasNextPage && (pr.state !== "OPEN" || pr.mergeable !== "UNKNOWN"), observedAt,
   };
 }
@@ -51,7 +55,7 @@ const fields = `number title url state headRefOid headRefName baseRefName isDraf
 author{login}
 reviewRequests(first:100){pageInfo{hasNextPage} nodes{requestedReviewer{__typename ...on User{login} ...on Team{slug}}}}
 latestReviews(first:100){pageInfo{hasNextPage} nodes{state author{__typename login}}}
-baseRef{branchProtectionRule{requiredStatusCheckContexts}}
+baseRef{branchProtectionRule{requiredStatusCheckContexts} associatedPullRequests(first:100,states:[OPEN]){nodes{number headRefName state headRepository{nameWithOwner}}}}
 reviewThreads(first:100){pageInfo{hasNextPage} nodes{id isResolved comments(last:1){nodes{updatedAt}}}}
 commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){pageInfo{hasNextPage} nodes{
 ...on CheckRun{name status conclusion} ...on StatusContext{context state}
@@ -87,20 +91,32 @@ export class Github {
       for (let offset = 0; offset < targets.length; offset += 15) {
         const group = targets.slice(offset, offset + 15);
         const [owner, name] = repo.split("/");
-        const query = `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){defaultBranchRef{name} ${group.map((p, i) => `p${i}:pullRequest(number:${p.number}){${fields}}`).join(" ")}}}`;
+        const query = `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){defaultBranchRef{name branchProtectionRule{requiredStatusCheckContexts}} ${group.map((p, i) => `p${i}:pullRequest(number:${p.number}){${fields}}`).join(" ")}}}`;
         try {
           const payload = JSON.parse(await this.run(["api", "graphql", "-f", `owner=${owner}`, "-f", `name=${name}`, "-f", `query=${query}`], repo));
           if (payload.errors?.length) throw new Error("Partial GitHub response");
           const repository = payload.data?.repository;
           if (!repository) throw new Error("Repository unavailable");
+          const stacked = (data: Node) => data.baseRefName !== repository.defaultBranchRef.name &&
+            data.baseRef?.associatedPullRequests?.nodes.some((parent: Node) => parent.state === "OPEN" && parent.number !== data.number && parent.headRefName === data.baseRefName && parent.headRepository?.nameWithOwner?.toLowerCase() === repo.toLowerCase());
+          const branches = group.flatMap((_, i) => {
+            const data = repository[`p${i}`];
+            return data?.state === "OPEN" ? [data.baseRefName, ...(stacked(data) ? [repository.defaultBranchRef.name] : [])] : [];
+          });
           const rules = new Map<string, string[]>();
-          for (const branch of [...new Set(group.map((_, i) => repository[`p${i}`]?.state === "OPEN" ? repository[`p${i}`]?.baseRefName : null).filter(Boolean))] as string[]) {
+          for (const branch of [...new Set(branches)] as string[]) {
             rules.set(branch, await this.ruleContexts(repo, branch));
           }
           group.forEach((p, i) => {
             const data = repository[`p${i}`];
             if (!data) { result.set(p.key, { snapshot: null, error: "PR unavailable; check access and its number" }); return; }
-            const required = [...new Set([...(data.baseRef?.branchProtectionRule?.requiredStatusCheckContexts ?? []), ...(rules.get(data.baseRefName) ?? [])])];
+            // A stacked PR is eventually checked against trunk. An unprotected parent
+            // branch must not erase the required checks that apply to the stack.
+            const trunkChecks = stacked(data) ? [
+              ...(repository.defaultBranchRef.branchProtectionRule?.requiredStatusCheckContexts ?? []),
+              ...(rules.get(repository.defaultBranchRef.name) ?? []),
+            ] : [];
+            const required = [...new Set([...(data.baseRef?.branchProtectionRule?.requiredStatusCheckContexts ?? []), ...(rules.get(data.baseRefName) ?? []), ...trunkChecks])];
             result.set(p.key, { snapshot: parsePr(data, repository.defaultBranchRef.name, new Date().toISOString(), required), error: null });
           });
         } catch {

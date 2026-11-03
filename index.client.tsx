@@ -1,5 +1,5 @@
 import { contributeDisplay } from "./client/display";
-import { withNavigation } from "./client/navigation";
+import { withSettingsFooter } from "./client/navigation";
 import { withButtonVisibility } from "./client/button-visibility";
 import type { PluginClientContext, PluginButtonRegistration } from "@getpaseo/plugin/client";
 import { Dimensions } from "react-native";
@@ -13,14 +13,14 @@ export default function contribute(host: PluginClientContext) {
   const location = () => Dimensions.get("window").width < 768 ? "workspace" as const : "explorer" as const;
   const panel = () => location() === "workspace" ? "follow-through-tab" : "follow-through";
   const removeDisplay = contributeDisplay(client, { id: "follow-through-overview", title: "Follow-up", icon: "GitPullRequest", surface: "follow-through" });
-  client.addSettingsScreen({ id: "projects", title: "Follow-up", icon: "GitPullRequest", Component: withNavigation(FollowSettings, client, "follow-through", "projects") });
-  client.addScreen({ id: "follow-through-settings", title: "Follow-up settings", Component: withNavigation(FollowSettings, client, "follow-through", "projects") });
+  client.addSettingsScreen({ id: "projects", title: "Follow-up", icon: "GitPullRequest", Component: FollowSettings });
+  client.addScreen({ id: "follow-through-settings", title: "Follow-up settings", Component: FollowSettings });
   client.addCommandCenterItem({ id: "follow-through-settings", title: "Follow-up: project settings", icon: "Settings", keywords: ["default", "tracking", "project"], context: "global", onSelect({ openScreen }) { openScreen({ screenId: "follow-through-settings" }); } });
-  client.addSurface("follow-through", withNavigation(FollowOverview, client, "follow-through"));
-  client.addSurface("project-settings", withNavigation(FollowSettings, client, "follow-through", "projects"));
+  client.addSurface("follow-through", withSettingsFooter(FollowOverview, client));
+  client.addSurface("project-settings", FollowSettings);
 
-  client.addWorkspacePanel({ id: "follow-through", title: "Follow-up", icon: "GitPullRequest", context: "workspace", locations: ["workspace", "explorer"], Component: withNavigation(FollowPanel, client, "follow-through") });
-  client.addWorkspacePanel({ id: "follow-through-tab", title: "Follow-up", icon: "GitPullRequest", context: "workspace", locations: ["workspace"], Component: withNavigation(FollowPanel, client, "follow-through") });
+  client.addWorkspacePanel({ id: "follow-through", title: "Follow-up", icon: "GitPullRequest", context: "workspace", locations: ["workspace", "explorer"], Component: withSettingsFooter(FollowPanel, client) });
+  client.addWorkspacePanel({ id: "follow-through-tab", title: "Follow-up", icon: "GitPullRequest", context: "workspace", locations: ["workspace"], Component: withSettingsFooter(FollowPanel, client) });
   client.addCommandCenterItem({ id: "open-follow-through", title: "Open workspace follow-up", icon: "GitPullRequest", keywords: ["PR", "stack", "done", "archive"], context: "workspace", onSelect({ openPanel }) { openPanel(panel(), { location: location() }); } });
   client.addCommandCenterItem({ id: "follow-through-overview", title: "Open follow-up overview", icon: "GitPullRequest", keywords: ["workspaces", "attention", "done"], context: "global", onSelect({ openScreen }) { openScreen({ screenId: "follow-through" }); } });
   client.addSlashCommand({ name: "follow-through", description: "Open this workspace's PRs and remaining work", argumentHint: "", context: "agent", onSubmit({ openPanel }) { openPanel(panel(), { location: location() }); } });

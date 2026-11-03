@@ -5,7 +5,7 @@ import { pr } from "./fixtures";
 import { Graphite } from "../server/graphite";
 const data = () => ({ title: "Test PR", url: "https://github.com/example/app/pull/1", state: "OPEN", headRefOid: "head", baseRefName: "main", isDraft: false, mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", reviewDecision: "APPROVED", reviewThreads: { nodes: [{ id: "thread", isResolved: false, comments: { nodes: [{ updatedAt: "yesterday" }] } }], pageInfo: { hasNextPage: false } }, commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false }, nodes: [{ name: "required", status: "COMPLETED", conclusion: "FAILURE" }, { name: "optional", status: "COMPLETED", conclusion: "FAILURE" }] } } } }] } });
 test("only required failed checks trigger repairs; approval does not erase threads", () => {
-  const s = parsePr(data(), "main", new Date().toISOString(), ["required"]); assert.deepEqual(s.failedChecks, ["required"]); assert.equal(s.threads.length, 1); assert.equal(s.reviewDecision, "APPROVED");
+  const s = parsePr(data(), "main", new Date().toISOString(), ["required"]); assert.deepEqual(s.failedChecks, ["required"]); assert.deepEqual(s.otherFailedChecks, ["optional"]); assert.equal(s.threads.length, 1); assert.equal(s.reviewDecision, "APPROVED");
 });
 test("unknown mergeability and truncated connections are incomplete", () => {
   const d = data(); d.mergeable = "UNKNOWN"; assert.equal(parsePr(d, "main", "today", []).complete, false); d.mergeable = "MERGEABLE"; d.reviewThreads.pageInfo.hasNextPage = true; assert.equal(parsePr(d, "main", "today", []).complete, false);
@@ -42,4 +42,24 @@ test("merge event timestamps are retained separately from observation time", () 
   const value = { ...data(), state: "MERGED", mergedAt: "2026-01-01T10:00:00Z" };
   assert.equal(parsePr(value, "main", "2026-01-15T10:00:00Z", []).mergedAt, value.mergedAt);
   assert.equal(parsePr(data(), "main", "2026-01-15T10:00:00Z", []).mergedAt, null);
+});
+
+test("a stacked PR inherits trunk's legacy and ruleset checks instead of losing them on its unprotected parent", async () => {
+  const row = { ...data(), number: 1, baseRefName: "stack-parent", baseRef: { branchProtectionRule: null, associatedPullRequests: { nodes: [{ number: 2, headRefName: "stack-parent", state: "OPEN", headRepository: { nameWithOwner: "example/app" } }] } } };
+  const github = new Github(async args => args[1] === "graphql" ? JSON.stringify({ data: { repository: {
+    defaultBranchRef: { name: "main", branchProtectionRule: { requiredStatusCheckContexts: ["required"] } }, p0: row,
+  } } }) : args[1].endsWith("/main") ? JSON.stringify([{ type: "required_status_checks", parameters: { required_status_checks: [{ context: "optional" }] } }]) : "[]");
+  const observed = (await github.observe([pr()])).get("example/app#1")!;
+  assert.equal(observed.error, null);
+  assert.deepEqual(observed.snapshot!.failedChecks, ["required", "optional"]);
+  assert.deepEqual(observed.snapshot!.otherFailedChecks, []);
+});
+test("non-stack branch targets retain their own requirements while other failing CI remains visible", async () => {
+  const row = { ...data(), baseRefName: "release", baseRef: { associatedPullRequests: { nodes: [{ number: 2, headRefName: "release", state: "OPEN", headRepository: { nameWithOwner: "foreign/fork" } }] } } };
+  const github = new Github(async args => args[1] === "graphql" ? JSON.stringify({ data: { repository: {
+    defaultBranchRef: { name: "main", branchProtectionRule: { requiredStatusCheckContexts: ["required"] } }, p0: row,
+  } } }) : "[]");
+  const snapshot = (await github.observe([pr()])).get("example/app#1")!.snapshot!;
+  assert.deepEqual(snapshot.failedChecks, []);
+  assert.deepEqual(snapshot.otherFailedChecks, ["required", "optional"]);
 });

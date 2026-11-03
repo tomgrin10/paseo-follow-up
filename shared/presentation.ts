@@ -10,7 +10,7 @@ export function prPresentation(pr: Pr): { label: string; tone: "merged" | "appro
   if (s.state === "CLOSED") return { label: "Closed", tone: "neutral" };
   if (s.conflict) return { label: "Conflicts", tone: "warning" };
   if (s.threads.length) return { label: `${s.threads.length} review threads`, tone: "warning" };
-  if (s.failedChecks.length) return { label: "Checks failed", tone: "warning" };
+  if (s.failedChecks.length || s.otherFailedChecks?.length) return { label: "Checks failed", tone: "warning" };
   if (s.draft) return { label: "Draft", tone: "neutral" };
   if (s.checksPending) return { label: "Checks running", tone: "neutral" };
   return s.reviewDecision === "APPROVED" ? { label: "Approved", tone: "approved" } : { label: "In review", tone: "neutral" };
