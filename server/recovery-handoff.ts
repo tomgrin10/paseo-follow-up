@@ -1,3 +1,4 @@
+import { isWorkspaceRoot } from "./workspace-agent";
 import type { Workspace } from "../shared/model";
 import type { Agent, Daemon } from "./daemon";
 
@@ -19,7 +20,7 @@ async function userMessages(client: Daemon, agentId: string): Promise<string[]> 
 }
 
 export async function recoveryHandoff(client: Daemon, w: Workspace, caller: Agent): Promise<{ batchId: string; fromAgentId: string } | null> {
-  if (!w.enable_tracking || w.archived || caller.archivedAt || caller.workspaceId !== w.id || caller.id === w.mainAgentId || caller.labels["paseo.parent-agent-id"]) return null;
+  if (!w.enable_tracking || w.archived || caller.archivedAt || caller.workspaceId !== w.id || caller.id === w.mainAgentId || !await isWorkspaceRoot(caller, async id => (await client.fetchAgent(id))?.agent)) return null;
   const candidates = w.batches.filter(b => b.recipientAgentId && b.recipientAgentId !== w.mainAgentId && b.recipientAgentId !== caller.id && b.tasks.every(t => t.kind === "inventory") && ["sending", "sent", "uncertain", "blocked"].includes(b.state) && !b.settledAt);
   if (!candidates.length) return null;
   const initialTask = (await userMessages(client, caller.id))[0];

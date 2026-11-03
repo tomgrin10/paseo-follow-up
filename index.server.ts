@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import * as rpc from "./shared/contracts";
 import { prOwner } from "./server/pr-owner";
 import { type Workspace } from "./shared/model";
+import { isWorkspaceRoot } from "./server/workspace-agent";
 import { Store } from "./server/store";
 import { Engine, agentWorkspace, findWorkspace, interruptionHold } from "./server/engine";
 import { Github } from "./server/github";
@@ -64,7 +65,7 @@ export default function contribute(server: PluginServerContext) {
     const agent = (await paseo.agents.ref(agentId).refresh())?.agent;
     if (!agent?.workspaceId) throw new Error(`Cannot locate the caller's workspace: expected agent in a recorded workspace, received agent ${agentId}.`);
     const record = (await store.snapshot()).workspaces.find(w => w.id === agent.workspaceId);
-    if (record?.contributorAgentIds?.includes(agentId) && !record.batches.some(b => b.recipientAgentId === agentId && !b.settledAt && b.tasks.every(t => t.kind === "inventory")) && (agent.archivedAt || agent.labels["paseo.parent-agent-id"] || agent.labels["follow-through.recovery"])) throw new Error("PR registration requires an available root agent in this tracked workspace.");
+    if (record?.contributorAgentIds?.includes(agentId) && !record.batches.some(b => b.recipientAgentId === agentId && !b.settledAt && b.tasks.every(t => t.kind === "inventory")) && (!await isWorkspaceRoot(agent, async id => (await paseo.agents.ref(id).refresh())?.agent) || agent.labels["follow-through.recovery"])) throw new Error("PR registration requires an available root agent in this tracked workspace.");
     if (allowHandoff) {
       const w = (await store.snapshot()).workspaces.find(w => w.id === agent.workspaceId);
       if (w && w.mainAgentId !== agentId && !w.batches.some(b => b.recipientAgentId === agentId)) {
@@ -122,7 +123,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(rpc.enrollRpc, async ({ agentId, workspaceId, goal }, { paseo }) => {
     await requireReady();
     const agent = (await paseo.agents.ref(agentId).refresh())?.agent;
-    if (!agent?.workspaceId || agent.archivedAt || agent.labels["paseo.parent-agent-id"]) throw new Error("Choose an available main agent in this workspace.");
+    if (!agent?.workspaceId || !await isWorkspaceRoot(agent, async id => (await paseo.agents.ref(id).refresh())?.agent)) throw new Error("Choose an available main agent in this workspace.");
     if (workspaceId && workspaceId !== agent.workspaceId) throw new Error("The chosen agent belongs to another workspace.");
     await callerWorkspaceId(agentId, paseo);
     const workspace = await paseo.workspaces.ref(agent.workspaceId).refresh();
@@ -259,7 +260,7 @@ export default function contribute(server: PluginServerContext) {
       await ready;
       if (!stopped && !loadError) await store.mutate(state => { const w = state.workspaces.find(w => w.enable_tracking && (w.mainAgentId === event.agent.id || w.contributorAgentIds?.includes(event.agent.id))); if (w) w.completion = null; });
     }),
-    server.before("agent.session_open", async ({ request }) => {
+    server.before("agent.session_open", async ({ request }, { paseo }) => {
       await ready;
       if (loadError || stopped || request.purpose !== "interactive") return request;
       const saved = await store.snapshot();
@@ -275,7 +276,7 @@ export default function contribute(server: PluginServerContext) {
             return { ...request, env: { ...request.env, FOLLOW_THROUGH_CLI: bridge, FOLLOW_THROUGH_CLIENT_ENTRY: clientEntry() } };
         }
       }
-      if (!w && request.workspaceId && !request.labels["paseo.parent-agent-id"] && !request.labels["follow-through.recovery"]) {
+      if (!w && request.workspaceId && !request.labels["follow-through.recovery"] && await isWorkspaceRoot({ id: request.agentId, workspaceId: request.workspaceId, labels: request.labels }, async id => (await paseo.agents.ref(id).refresh())?.agent)) {
         w = await store.mutate(state => {
           const workspace = state.workspaces.find(w => w.id === request.workspaceId && w.enable_tracking && !w.archived);
           if (workspace) workspace.contributorAgentIds = [...new Set([...(workspace.contributorAgentIds ?? []), request.agentId])];
