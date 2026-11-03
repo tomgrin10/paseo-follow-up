@@ -60,6 +60,7 @@ test("Track succeeds for an independently launched workspace and fetches a creat
   f.gateway.label = async () => {};
   const engine = new Engine(f.store, { observe: async () => new Map() }, f.gateway);
   const w = await engine.activate("new-workspace");
+  await engine.stop(); // Drain activation’s background refresh before fixture directory cleanup.
   assert.equal(w.mainAgentId, f.created.id); assert.equal(w.enable_tracking, true); assert.equal(w.enable_auto_sends, false);
   assert.equal(w.batches.length, 0); assert.deepEqual(w.contributorAgentIds, []);
 });
