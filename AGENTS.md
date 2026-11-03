@@ -21,3 +21,8 @@ repository-wide worktree scan or plain PR mentions. Constrain receipts by the wo
 GitHub repository identity; preserve explicit registrations, exclusions and existing owners. Root
 contributors get PR status/registration/sync only; goal/task/scope/completion authority stays with
 the recorded main agent. Tests must cover secondary worktrees and an unavailable recorded owner.
+
+A parent-agent label alone does not identify a workspace subagent. Resolve the parent’s workspace:
+launches into a different workspace are eligible local roots; same-workspace children stay excluded.
+Use server/workspace-agent.ts consistently for discovery, tool access and recovery handoff. Unknown
+parent membership must not grant new scope. Cover workspace-first agent creation in packed tests.

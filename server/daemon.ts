@@ -11,6 +11,7 @@ import { recoveryConfig } from "./recovery-config";
 import { submittedPrs, type Submission } from "./submissions";
 import { extractHistory, type History, type DiscoveredWorkspace } from "./discovery";
 import type { PluginBeforeRequests } from "@getpaseo/plugin/server";
+import { isWorkspaceRoot, type WorkspaceAgent } from "./workspace-agent";
 import { SessionGuard } from "./session-guard";
 import { DeliveryDeferred } from "./delivery";
 type RecoveryAgentOptions = Partial<PluginBeforeRequests["agent.create"]["config"]> & { workspaceId: string; labels: Record<string, string>; idempotencyKey: string; env: Record<string, string> };
@@ -98,13 +99,20 @@ export class PaseoGateway implements Gateway {
         client.listProjects(),
       ]);
       this.directory = { agents, workspaces };
+      const parents = new Map<string, WorkspaceAgent | null>(agents.map(({ agent }) => [agent.id, agent]));
+      const findParent = async (id: string) => {
+        if (!parents.has(id)) parents.set(id, (await client.fetchAgent(id).catch(() => null))?.agent ?? null);
+        return parents.get(id);
+      };
       const discovered: DiscoveredWorkspace[] = [];
       const scans: { row: DiscoveredWorkspace; agent: Agent; repo: string | null }[] = [];
       const defaults = new Set(catalog.projects.filter(p => defaultTracking(p, state.projectDefaults)).map(p => p.projectId));
       for (const workspace of workspaces.filter(w => !w.archivingAt && (workspaceId ? w.id === workspaceId : defaults.has(w.projectId ?? "") || state.workspaces.some(saved => saved.id === w.id && saved.enable_tracking && !saved.archived)))) {
         const existing = state.workspaces.find(w => w.id === workspace.id);
         if (existing?.archived) continue;
-        const roots = agents.map(row => row.agent).filter(a => a.workspaceId === workspace.id && !a.archivedAt && !a.labels["paseo.parent-agent-id"] && !a.labels["follow-through.recovery"]);
+        const candidates = agents.map(row => row.agent).filter(a => a.workspaceId === workspace.id && !a.archivedAt && !a.labels["follow-through.recovery"]);
+        const roots: Agent[] = [];
+        for (const agent of candidates) if (await isWorkspaceRoot(agent, findParent)) roots.push(agent);
         const main = chooseMainAgent(roots, existing?.mainAgentId);
         if (!main && !existing) continue;
         const row: DiscoveredWorkspace = { id: workspace.id, title: workspace.name || main?.title || existing!.title, mainAgentId: existing?.mainAgentId ?? main!.id, projectId: workspace.projectId, messageAt: main?.lastUserMessageAt ?? null, enable_default_tracking: defaults.has(workspace.projectId ?? ""), contributorAgentIds: roots.filter(a => a.id !== existing?.mainAgentId && a.id !== main?.id).map(a => a.id) };

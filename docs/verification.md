@@ -49,3 +49,14 @@ Additional coverage checks actual MCP tool listing for contributor roots, hook/C
 permission boundaries, registration/exclusion precedence, repository scoping, quoted/read-only/failed
 commands, truncated Graphite output and inferred GitHub stack relationships. The packed lifecycle
 suite exercises contributor MCP registration and retains the recovery handoff regression.
+
+
+## Agent-created workspace release (0.3.2, 2026-11-03)
+
+TypeScript, 149 behavior checks and the native button lifecycle regression pass. Added regressions
+cover workspace-first creation with an agent whose creator is in another workspace; automatic
+project enrollment and explicit Track select the new local agent instead of rejecting its parent
+label. Tests preserve same-workspace child exclusions, archived-agent checks, unavailable-parent
+bounds and recovery handoff. The packed lifecycle test creates three independent workspaces and
+agents, checks their first-session bridge and goal access, and rejects local children and creator
+claims across workspace boundaries. All writes and messages in these checks are synthetic.
