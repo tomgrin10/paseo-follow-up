@@ -50,3 +50,14 @@ Existing Graphite, Defer, Smart Session, and Session Guard plugin code; the deve
 The workspace view leads with compact PR headlines: icon/number/status in one column, a two-line title beside them, with full detail available on demand. Tasks are secondary concrete checks, migrations and decisions. Approval/merge/deploy checklist duplicates remain in legacy history and are omitted from Tasks. Goals, evidence and recovery details use disclosures.
 
 For herosecurity/hero-poc production, the plugin reads serving Cloud Run revisions and immutable build source commits, then checks the actual PR merge commit's git ancestry. PR status progresses from Merged to Deployed once deployment is confirmed; pending, partial or unknown deployment keeps the Merged label, with evidence available in details. Known production deployment must be verified before Done. Other repositories currently have no deployment adapter. Tasks default to manual. Explicit Now, merge or verified-deploy triggers can schedule delivery, with a delay in days and owned PR selection. Delays begin at the last selected event; deployment timers retain the first verified serving observation across polls and restarts. Unscheduled and future tasks never join repair batches; delivery retains explicit workspace Auto consent or a click, idle/hold guards and deduplication. Tasks with multiple dependencies wait for all of them.
+
+
+## Sidebar settings and CI status
+
+The sidebar opens directly to PRs and remaining work, with one fixed settings cog at the bottom.
+It opens native Follow-up settings. Project and display preferences remain available in Paseo’s
+plugin settings and Command-K; the former top navigation strip is removed.
+
+Stacked PRs inherit trunk check requirements when GitHub confirms their parent branch is an open
+PR head in the same repository. Other observed failing checks remain visible in PR status and
+details without becoming automatic repair tasks or new required merge checks.

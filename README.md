@@ -28,7 +28,7 @@ The installation ID remains `follow-through` to preserve existing development in
 
 ## Use
 
-Open **Follow-up** from the sidebar or Command-K. In a workspace, use the header button or the Follow-up panel and click **Track this workspace**. The original main agent owns PRs, tasks and completion; optional history recovery runs in a separate agent only after your click.
+Open **Follow-up** from the sidebar or Command-K. The cog at the bottom opens native project settings; display settings remain in Paseo’s plugin settings. In a workspace, use the header button or the Follow-up panel and click **Track this workspace**. The original main agent owns PRs, tasks and completion; optional history recovery runs in a separate agent only after your click.
 
 Use **Overview**, **Project settings** and **Display settings** to move between views. Settings are also available directly from Command-K. Display settings can hide the workspace header button or sidebar entry independently; Command-K remains available.
 
