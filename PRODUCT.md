@@ -59,5 +59,6 @@ It opens native Follow-up settings. Project and display preferences remain avail
 plugin settings and Command-K; the former top navigation strip is removed.
 
 Stacked PRs inherit trunk check requirements when GitHub confirms their parent branch is an open
-PR head in the same repository. Other observed failing checks remain visible in PR status and
-details without becoming automatic repair tasks or new required merge checks.
+PR head in the same repository. Other observed failing checks remain visible as Optional check
+failed (or Optional checks failed), with their names in details, without becoming automatic
+repair tasks or new required merge checks. Required failures retain the Checks failed label.
