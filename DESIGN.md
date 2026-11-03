@@ -41,8 +41,10 @@ The footer uses a 36px desktop or 44px compact target with an accessible setting
 Refresh stay with the workspace header; the footer remains reachable while content scrolls.
 
 
-All observed failing CI is visible as Checks failed, including checks outside the immediate
-branch requirements. Expanded PR details distinguish required failures from other failures.
+Required CI failures display Checks failed. Failures outside the effective branch requirements
+display Optional check failed (or Optional checks failed), including in compact PR rows.
+Expanded PR details name required and optional failures separately; optional failures are not
+required for merge.
 Stacked PRs inherit trunk check requirements when GitHub confirms their base branch is an open
 PR's head; an unprotected stack parent must not hide trunk CI. Other failed checks affect the
 warning and stack ordering, while automatic repair and merge gating continue to use requirements.
