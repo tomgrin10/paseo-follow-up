@@ -17,7 +17,7 @@ export const snapshotSchema = z.object({
   reviewers: z.object({ author: z.string().nullable(), requested: z.array(z.string()), teams: z.array(z.string()), reviewed: z.array(z.string()), complete: z.boolean() }).optional(),
   mergeWhenReady: z.enum(["on", "off", "unknown"]).default("unknown"),
   threads: z.array(z.object({ id: z.string(), updatedAt: z.string() })),
-  failedChecks: z.array(z.string()), checksPending: z.boolean(),
+  failedChecks: z.array(z.string()), otherFailedChecks: z.array(z.string()).optional(), checksPending: z.boolean(),
   complete: z.boolean(), observedAt: z.string(),
   mergeCommit: z.string().nullable().optional(), deployment: deploymentSchema.nullable().optional(),
   mergedAt: z.string().nullable().optional(),

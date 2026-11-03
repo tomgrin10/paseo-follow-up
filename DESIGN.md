@@ -31,3 +31,18 @@ PR headline rows use a fixed identifier/status column beside a two-line title an
 An open PR with complete reviewer data and no human reviewers shows **No reviewers** in a compact supporting row. Keep it separate from approval status: a pending request or completed human review suppresses this hint, as does a team request. Bot/self reviews do not count. For configured acme-poc PRs that are ready for review, put **Add reviewers** at the right of that row; its accessible label identifies Uri/Yuval and the PR. Drafts show the hint without an unavailable action. Preserve the two-line headline and separate Graphite link. Use the existing secondary button, loading/disabled state, actionable error and brief success receipt; reviewer names live in details.
 
 Task details contain a compact **Send task** radio group: **Manual**, **Now**, **After merge**, **After deploy**. Merge/deploy reveals **Delay (days)** and owned PR checkboxes; require a selection before enabling **Save trigger**. Keep this editor inside the existing task disclosure so PRs remain the focus. Collapsed rows show Manual or the short schedule, and expanded details show a known due date. Preserve dependencies when returning to Manual. Show stale-edit/assigned-task errors inline and let refresh restore current data. Scheduling keeps the workspace Auto choice.
+
+
+Workspace panels and the global overview lead directly with their content. Keep a single icon-only
+settings cog in a fixed footer outside the scroll view, aligned to the trailing edge. It opens the
+native Follow-up project settings; display preferences remain in native plugin settings and
+Command-K. Do not add Overview / Display settings / Project settings tabs above the sidebar.
+The footer uses a 36px desktop or 44px compact target with an accessible settings label. Auto and
+Refresh stay with the workspace header; the footer remains reachable while content scrolls.
+
+
+All observed failing CI is visible as Checks failed, including checks outside the immediate
+branch requirements. Expanded PR details distinguish required failures from other failures.
+Stacked PRs inherit trunk check requirements when GitHub confirms their base branch is an open
+PR's head; an unprotected stack parent must not hide trunk CI. Other failed checks affect the
+warning and stack ordering, while automatic repair and merge gating continue to use requirements.

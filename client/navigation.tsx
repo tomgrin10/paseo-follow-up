@@ -1,14 +1,23 @@
 import type { ComponentType } from "react";
 import type { PluginClientContext, PluginSurfaceProps } from "@getpaseo/plugin/client";
-import { Pressable, Text, View } from "react-native";
+import { Icon } from "@getpaseo/plugin/client/ui";
+import { Pressable, View } from "react-native";
 
-export function withNavigation<P extends PluginSurfaceProps>(Component: ComponentType<P>, client: PluginClientContext, home: string, active = "overview") {
+/** Keep settings outside the scrolling workspace content and its primary controls. */
+export function withSettingsFooter<P extends PluginSurfaceProps>(Component: ComponentType<P>, client: PluginClientContext) {
   return function PluginView(props: P) {
-    return <View style={{ flex: 1, backgroundColor: props.theme.colors.surface0 }}>
-      <View accessibilityRole="toolbar" style={{ flexDirection: "row", flexWrap: "wrap", gap: 4, padding: 8, borderBottomWidth: 1, borderColor: props.theme.colors.border }}>
-        {[{ id: "overview", title: "Overview", target: home }, { id: "display", title: "Display settings", target: "display-settings" }, { id: "projects", title: "Project settings", target: "project-settings" }].map(item => <Pressable key={item.id} accessibilityRole="button" accessibilityState={{ selected: active === item.id }} onPress={() => client.openSurface(item.target)} style={({ pressed }) => ({ minHeight: 44, paddingHorizontal: 12, justifyContent: "center", borderRadius: 6, backgroundColor: pressed || active === item.id ? props.theme.colors.surface2 : "transparent" })}><Text style={{ color: active === item.id ? props.theme.colors.foreground : props.theme.colors.foregroundMuted, fontSize: 13, fontWeight: active === item.id ? "600" : "400" }}>{item.title}</Text></Pressable>)}
+    const size = props.layout.compact ? 44 : 36;
+    return <View style={{ flex: 1, minHeight: 0, backgroundColor: props.theme.colors.surface0 }}>
+      <View style={{ flex: 1, minHeight: 0 }}><Component {...props} /></View>
+      <View style={{ flexShrink: 0, alignItems: "flex-end", paddingHorizontal: 8, paddingVertical: 4, borderTopWidth: 1, borderColor: props.theme.colors.border }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Follow-up settings"
+          accessibilityHint="Open Follow-up project settings"
+          onPress={() => client.openSettings("projects")}
+          style={({ pressed }) => ({ width: size, height: size, alignItems: "center", justifyContent: "center", borderRadius: 6, backgroundColor: pressed ? props.theme.colors.surface2 : "transparent" })}
+        ><Icon name="Settings" size={16} color={props.theme.colors.foregroundMuted} /></Pressable>
       </View>
-      <Component {...props} />
     </View>;
   };
 }

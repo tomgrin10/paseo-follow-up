@@ -18,3 +18,12 @@ test("merged and approved have distinct tones, and failed checks cannot look app
   assert.equal(prPresentation(pr({ snapshot: snapshot({ reviewDecision: "APPROVED" }) })).tone, "approved");
   assert.deepEqual(prPresentation(pr({ snapshot: snapshot({ reviewDecision: "APPROVED", failedChecks: ["Required test"] }) })), { label: "Checks failed", tone: "warning" });
 });
+
+test("failed CI outside the immediate branch requirements cannot look in review or approved", () => {
+  for (const reviewDecision of ["", "APPROVED"]) {
+    assert.deepEqual(prPresentation(pr({ snapshot: snapshot({ reviewDecision, failedChecks: [], otherFailedChecks: ["backend-prek"] }) })), { label: "Checks failed", tone: "warning" });
+  }
+  const bad = pr({ stack: "Failing CI", snapshot: snapshot({ otherFailedChecks: ["backend-prek"] }) });
+  const good = pr({ stack: "Passing CI", snapshot: snapshot({ reviewDecision: "APPROVED" }) });
+  assert.deepEqual(orderedStacks([good, bad]).map(s => s.name), ["Failing CI", "Passing CI"]);
+});
