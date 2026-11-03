@@ -1,22 +1,15 @@
-# Paseo Follow-up
+# paseo-follow-up
 
 [![npm version](https://img.shields.io/npm/v/paseo-follow-up?style=for-the-badge&color=cb3837)](https://www.npmjs.com/package/paseo-follow-up)
 [![npm downloads](https://img.shields.io/npm/dm/paseo-follow-up?style=for-the-badge&color=cb3837)](https://www.npmjs.com/package/paseo-follow-up)
 [![Paseo](https://img.shields.io/badge/Paseo-%E2%89%A5%200.14.0-8A63D2?style=for-the-badge)](https://paseo.sh)
 [![License](https://img.shields.io/github/license/tomgrin10/paseo-follow-up?style=for-the-badge&color=2563eb)](LICENSE)
 
-Keep long-lived Paseo workspaces moving through review, deployment, and completion. Follow-up retains PR stacks and remaining tasks, batches repairs for the existing main agent, and records the agent's explicit Done declaration.
+Keep long-lived workspaces moving through review, deployment and completion. Follow-up tracks each workspace's PR stack and remaining tasks, batches repairs for its main agent, and records when that agent declares the work done.
 
 ![Follow-up workspace panel with sample pull requests and remaining tasks](docs/screenshots/follow-up-workspace.png)
 
 Screenshots use synthetic workspaces and PRs.
-
-## Requirements
-
-- Paseo 0.14.0 or newer and Node 22 or newer.
-- Authenticated GitHub CLI (`gh`) on the daemon host.
-- Saved Graphite CLI authentication for Graphite readiness and explicit Merge controls.
-- Optional Send to Paseo browser companion for Graphite's actual Merge when ready switch. Core tracking and follow-up work without it.
 
 ## Install
 
@@ -24,103 +17,50 @@ Screenshots use synthetic workspaces and PRs.
 paseo plugin install paseo-follow-up
 ```
 
-The installation ID remains `follow-through` to preserve existing development installations, saved settings and tracked work. The public name is **Follow-up**.
+Needs Node 22+ and an authenticated GitHub CLI (`gh`) on the daemon host, plus saved Graphite CLI authentication for Graphite readiness and Merge controls. The installed plugin ID stays `follow-through` so existing settings and tracked work carry over.
 
 ## Use
 
-Open **Follow-up** from the sidebar or Command-K. The cog at the bottom opens native project settings; display settings remain in Paseo’s plugin settings. In a workspace, use the header button or the Follow-up panel and click **Track this workspace**. The original main agent owns PRs, tasks and completion; optional history recovery runs in a separate agent only after your click.
+Open **Follow-up** from the sidebar or ⌘K / Ctrl+K. In a workspace, use the header button or panel and click **Track this workspace**.
 
-Use **Overview**, **Project settings** and **Display settings** to move between views. Settings are also available directly from Command-K. Display settings can hide the workspace header button or sidebar entry independently; Command-K remains available.
-
-Project settings control existing and future eligible workspaces by stable project ID. The retained development default enables canonical Git projects named `acme-poc`; other projects start off. Turning a project off stops enrollment while preserving tracked records. New enrollments always have Auto off.
-
-With **Auto** off, review and send each repair batch yourself. Auto authorizes follow-up messages only for that workspace after fresh idle, permission and Session Guard checks. It never merges PRs, enables merge when ready, requests reviewers, starts recovery or archives workspaces.
-
-Tasks default to manual. Explicit Now, After merge or After deploy triggers can include a delay; deployment tasks wait for verified serving-revision evidence. Merged PRs alone do not mean the work is Done. Agents retain evidence and record sent reply URLs for developer-authorized stakeholder updates.
+- The workspace's main agent owns its PRs, tasks and the Done declaration. Other agents in the workspace can register PRs and check status.
+- With **Auto** off, you review and send each repair batch. With Auto on, Follow-up sends them itself after fresh idle, permission and Session Guard checks. It never merges, enables merge when ready, requests reviewers or archives workspaces.
+- Tasks run manually, or **Now**, **After merge** or **After deploy**, with an optional delay. A merged PR alone does not count as done.
+- **Project settings** choose which projects are tracked. New workspaces start with Auto off.
 
 ![Follow-up overview with sample workspaces](docs/screenshots/follow-up-overview.png)
 
 ## Send to Paseo and Graphite
 
-With Send to Paseo installed on the same daemon, its composer can return to the agent that
-registered a PR here. New registrations record that agent; older records retain the workspace’s
-main agent. You can still choose a fresh agent in Send to Paseo. Tracking and follow-up remain
-usable without the companion.
+With [Send to Paseo](https://github.com/tomgrin10/send-to-paseo) on the same daemon, its composer picks the agent that registered the PR. With Send to Paseo 2.2+, Follow-up can also toggle Graphite's **Merge when ready** through your existing pairing, while Graphite is open and signed in. Each change is confirmed in Chrome, which can remember the permission per repository. See the [integration and security contract](https://github.com/tomgrin10/send-to-paseo/blob/main/docs/follow-up-integration.md).
 
-To control Graphite’s **Merge when ready** here, use Send to Paseo plugin/extension 2.2+ and
-Follow Up 0.3.4+, and keep Graphite open and signed in. Follow Up connects automatically through
-your existing Send to Paseo pairing and advertises the repositories of active tracked PRs.
+## Data and access
 
-Toggle changes require confirmation in Chrome. The confirmation can remember permission for
-future changes from that machine for the exact repository. Revoke that permission or turn off
-browser access in extension settings → **Follow Up**. This is a PR setting, including later pushes.
-See the [integration and security contract](https://github.com/tomgrin10/send-to-paseo/blob/main/docs/follow-up-integration.md).
+Paseo plugins run trusted, unsandboxed code on the daemon host. Follow-up reads workspace metadata, agent history and GitHub PR status with your existing credentials, and keeps its state in `$PASEO_HOME/plugin-data/follow-through`. It registers scoped MCP tools and reversible provider hooks only for tracked sessions. GitHub and Graphite writes happen only after an explicit click and a fresh eligibility check.
 
-## Data and permissions
-
-This is a trusted, unsandboxed plugin. It reads selected workspace metadata, agent history/configuration and GitHub PR status using your existing host credentials. Local state and private recovery evidence live under `$PASEO_HOME/plugin-data/follow-through`; credentials and provider configuration are not published or transferred.
-
-It registers scoped Claude/Codex MCP tools and reversible provider hooks for tracked root sessions. Contributor sessions receive PR registration, status and sync tools; goal, task and completion authority stays with the designated main agent. Codex keeps its normal hook trust review. Repair and recovery prompts reach your configured agent provider. Follow-up itself has no Slack posting identity and never scans channels or authorizes replies from historical mentions.
-
-Human-operated Merge and reviewer controls perform GitHub/Graphite writes only after an explicit click and fresh eligibility checks. Unknown or uncertain results require checking before retrying. Site-specific reviewer and Cloud Run deployment adapters remain limited to their configured repository; other deployment status remains unknown rather than being inferred from a merge.
-
-## Develop
+## Development
 
 ```sh
 npm ci
 npm run verify
 npm run test:install
-npm pack --dry-run
+paseo plugin reload follow-through   # after changes
 ```
 
-Integration checks use a separate Paseo home, synthetic agents and fixtures. Never restart your main daemon for verification. Reload only this plugin with `paseo plugin reload follow-through`.
+Integration checks use a separate Paseo home with synthetic agents. Version tags (`vX.Y.Z`) publish to npm through Trusted Publishing.
 
-## Releases
+## License
 
-Release tags (`vX.Y.Z`) run `.github/workflows/publish-npm.yml`. GitHub Actions verifies the plugin and packed installation, publishes through npm Trusted Publishing, verifies registry integrity, then creates the GitHub release. No npm token is stored in repository secrets.
-
-## Paseo 0.14 agent integration
-
-The Follow-up MCP attaches when a root agent in a tracked workspace or an active recovery agent opens a Claude or Codex session. Other root sessions get `workspace_status`, `register_pr` and `sync_workspace`, even when the originally recorded main agent is unavailable. Normal startup no longer writes global Claude/Codex MCP settings. Existing global entries are preserved. Turn-ended discovery now fetches recent history through the SDK because Paseo 0.13+ sends an empty timeline in lifecycle events.
-
-Requires Paseo **0.14.0 or newer**. Agent tools are scoped to interactive Claude
-and Codex sessions; history-only opens receive none. They become available on
-the next idle session open after install or reload. The agent label
-`plugin-tools/enabled: "false"` opts a session out. Existing plugin data and
-settings are retained.
+[MIT](LICENSE) © 2026 Tom Gringauz.
 
 ## Other plugins
 
-Also available from [Tom Gringauz](https://github.com/tomgrin10):
-
-- [Defer](https://github.com/tomgrin10/paseo-defer) — Schedule messages to agents for later delivery.
-- [Graphite](https://github.com/tomgrin10/paseo-graphite) — Workspace stack status and PR action radar.
+- [Defer](https://github.com/tomgrin10/paseo-defer) — Schedule messages for later delivery.
+- [Graphite](https://github.com/tomgrin10/paseo-graphite) — Graphite stacks and PR status.
 - [Send to Paseo](https://github.com/tomgrin10/send-to-paseo) — Send GitHub and Graphite PRs to Paseo from Chrome.
-- [Smart Session](https://github.com/tomgrin10/paseo-smart-session) — Context-aware compaction and plan usage insights.
-- [Vitals](https://github.com/tomgrin10/paseo-vitals) — Host, Paseo, agent and Docker health.
-- [Session Guard](https://github.com/tomgrin10/paseo-session-guard) — Pause at usage limits and resume after reset.
-- [Transfer](https://github.com/tomgrin10/paseo-transfer) — Copy or move workspaces and agent conversations between hosts.
-- [Transcript Search](https://github.com/tomgrin10/paseo-transcript-search) — Search active and archived conversations across hosts.
-
-
-Successful `gt submit` and `gh pr create` receipts in root-session history also discover submitted
-PRs automatically, including from secondary git worktrees. Discovery checks the workspace's GitHub
-repository identity; merely mentioned PRs and read-only commands do not establish ownership.
-Explicit registrations, exclusions and another tracked workspace's ownership take precedence.
-Observed GitHub base/head branches supply inferred stack relationships; explicit edits override them.
-Tracking continues after the checkout branch's PR merges, and the submitting session remains the
-recipient for Send to Paseo. Existing sessions can use the hook-provided CLI fallback before their
-next MCP session refresh. Automatic discovery does not transfer main-agent authority or enable Auto.
-
-
-Agents launched by another agent into a separate workspace can be that new workspace’s main agent.
-The creator’s parent-agent label records launch provenance; it excludes an agent from local main
-selection only when the parent belongs to the same workspace. Parent membership is checked from
-the daemon, including direct lookup when the creator is no longer in the live directory. Unknown
-membership does not grant new scope. Workspace-first creation is supported: tracking waits for an
-available local main, then applies the project default. Explicit Track also supports these launches.
-
-
-Track persists activation and returns without waiting for transcript scans or the daemon-wide PR
-refresh. Initial session attachment also uses ownership metadata only. PR/history discovery and
-status refresh continue in the background; a slow GitHub or agent observation does not hold Track.
+- [Session Guard](https://github.com/tomgrin10/paseo-session-guard) — Pause at session limits and continue after reset.
+- [Smart Session](https://github.com/tomgrin10/paseo-smart-session) — Context compaction and usage insights.
+- [Transcript Search](https://github.com/tomgrin10/paseo-transcript-search) — Search conversations across connected hosts.
+- [Transfer](https://github.com/tomgrin10/paseo-transfer) — Copy or move workspaces between hosts.
+- [Vitals](https://github.com/tomgrin10/paseo-vitals) — Host, process, agent and Docker monitoring.
+- [Workspace Switcher](https://github.com/tomgrin10/paseo-switcher) — Arc-style Ctrl+Tab between recent workspaces.

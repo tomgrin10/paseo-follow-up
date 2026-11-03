@@ -6,6 +6,7 @@
   "type": "module",
   "files": [
     "paseo-plugin.json",
+    "assets/",
     "OVERVIEW.md",
     "index.client.ts",
     "index.client.tsx",

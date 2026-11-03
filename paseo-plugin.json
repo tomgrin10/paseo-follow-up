@@ -1,6 +1,7 @@
 {
   "id": "follow-through",
   "name": "Follow-up",
+  "icon": "assets/icon.png",
   "description": "Track every workspace PR stack, batch repairs to the main agent, and declare Done after follow-through.",
   "media": [
     "docs/screenshots/follow-up-workspace.png",
