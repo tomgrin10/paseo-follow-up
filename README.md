@@ -119,3 +119,8 @@ selection only when the parent belongs to the same workspace. Parent membership 
 the daemon, including direct lookup when the creator is no longer in the live directory. Unknown
 membership does not grant new scope. Workspace-first creation is supported: tracking waits for an
 available local main, then applies the project default. Explicit Track also supports these launches.
+
+
+Track persists activation and returns without waiting for transcript scans or the daemon-wide PR
+refresh. Initial session attachment also uses ownership metadata only. PR/history discovery and
+status refresh continue in the background; a slow GitHub or agent observation does not hold Track.

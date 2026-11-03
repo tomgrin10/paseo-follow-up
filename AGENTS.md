@@ -26,3 +26,7 @@ A parent-agent label alone does not identify a workspace subagent. Resolve the p
 launches into a different workspace are eligible local roots; same-workspace children stay excluded.
 Use server/workspace-agent.ts consistently for discovery, tool access and recovery handoff. Unknown
 parent membership must not grant new scope. Cover workspace-first agent creation in packed tests.
+
+Track and interactive session startup must not scan transcripts or wait for a daemon-wide refresh.
+Persist activation before returning; leave history and external status observation to background work.
+Keep a regression with a blocked global refresh so successful activation cannot time out again.
