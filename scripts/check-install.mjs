@@ -55,6 +55,7 @@ try {
   await cli("plugin", "install", plugin);
   assert.ok(!(await cli("plugin", "ls")).some(p => p.id === "send-to-paseo"), "the complete lifecycle suite runs without the companion");
   assert.equal((await call("follow.browser-status", {})).ready, false);
+  assert.deepEqual((await call("follow.browser-exchange", { clientId: "inventory-probe", ready: false, acceptJobs: false })).repositories, []);
   const inactiveStatus = await call("follow.agent-status", { agentId: agent.id });
   assert.equal(inactiveStatus.mainAgentId, agent.id); assert.equal(inactiveStatus.enable_tracking, false);
   await assert.rejects(call("follow.enroll", { agentId: agent.id, goal: "Must not activate" }), /Tracking is inactive/);

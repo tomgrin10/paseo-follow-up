@@ -29,7 +29,7 @@ export const recoverRpc = defineRpc({ name: "follow.recover", input: z.object({ 
 
 export const excludeStackRpc = defineRpc({ name: "follow.exclude-stack", input: z.strictObject({ agentId: idSchema, stack: textSchema, reason: textSchema, obligationIds: z.array(idSchema).default([]) }), output: workspaceSchema });
 
-export const browserExchangeRpc = defineRpc({ name: "follow.browser-exchange", input: browserExchangeSchema, output: z.object({ jobs: z.array(browserCommandSchema), accepted: z.array(idSchema) }) });
+export const browserExchangeRpc = defineRpc({ name: "follow.browser-exchange", input: browserExchangeSchema, output: z.object({ jobs: z.array(browserCommandSchema), accepted: z.array(idSchema), repositories: z.array(browserPrSchema.shape.repo).max(100).optional() }) });
 export const browserStatusRpc = defineRpc({ name: "follow.browser-status", input: z.object({}), output: browserStatusSchema });
 export const prControlStatusRpc = defineRpc({ name: "follow.pr-control-status", input: z.object({ workspaceId: idSchema, prKey: idSchema }), output: z.object({ browser: browserStatusSchema, pr: browserPrSchema.nullable(), error: z.string().nullable() }) });
 export const preparePrActionRpc = defineRpc({ name: "follow.prepare-pr-action", input: z.object({ workspaceId: idSchema, prKey: idSchema, kind: prActionKind }), output: actionPlanSchema });
