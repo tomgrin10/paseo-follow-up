@@ -72,3 +72,10 @@ and verify that targeted discovery skips transcript calls while background disco
 Packed installation checks wait for background history instead of requiring it in the Track response.
 
 TypeScript, all 151 behavior tests and the native button lifecycle regression pass for 0.3.3.
+
+
+The tagged 0.3.3 release check exposed an installation-test deadline below the normal fifteen-second
+poll interval when activation coalesced with an existing refresh. The harness now allows two poll
+intervals for asynchronous history discovery; its expected references and ownership assertions are
+unchanged. This harness-only correction is excluded from the npm package and does not change the
+immutable 0.3.3 tag or published package integrity.
