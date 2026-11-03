@@ -8,7 +8,7 @@ Never commit credentials, daemon state, transcripts or local machine paths. Bool
 
 The optional Send to Paseo integration uses only `follow.pr-owner` and the scoped browser exchange.
 Record the latest explicit registering agent on each PR; legacy registrations retain their workspace
-main. Browser exchange defaults to no repository scopes. Unknown toggle state never means off.
+main. Browser exchange advertises at most 100 repository identities from active tracked PRs so the paired extension can connect without a second setup. Browser exchange defaults to no repository scopes until the extension echoes its selected exact scopes. Unknown toggle state never means off.
 
 Run npm run verify, npm run test:install and npm pack --dry-run. Integration checks use isolated Paseo/provider homes and synthetic agents. Never restart the user's daemon or send test messages into real conversations.
 
