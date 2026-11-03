@@ -29,3 +29,13 @@ test("recovery handoff refuses active recipients, other workspaces, quotes, and 
   f = fixture(); f.w.batches[0].settledAt = "2026-01-01T10:01:00Z"; assert.equal(await recoveryHandoff(f.client, f.w, f.caller), null);
   f = fixture(); f.w.batches[0].recipientAgentId = f.w.mainAgentId; assert.equal(await recoveryHandoff(f.client, f.w, f.caller), null);
 });
+
+
+test("a replacement launched from another workspace can hand off, while a local child cannot", async () => {
+  const f = fixture(); f.caller.labels["paseo.parent-agent-id"] = "launcher";
+  const fetch = f.client.fetchAgent;
+  f.client.fetchAgent = async id => id === "launcher" ? { agent: { id, workspaceId: "another-workspace", labels: {} } as Agent } : fetch(id);
+  assert.deepEqual(await recoveryHandoff(f.client, f.w, f.caller), { batchId: "recovery", fromAgentId: "old-helper" });
+  f.client.fetchAgent = async id => id === "launcher" ? { agent: { id, workspaceId: f.w.id, labels: {} } as Agent } : fetch(id);
+  assert.equal(await recoveryHandoff(f.client, f.w, f.caller), null);
+});
