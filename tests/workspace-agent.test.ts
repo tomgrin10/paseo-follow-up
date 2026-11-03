@@ -29,6 +29,7 @@ test("unknown, malformed and self parent references cannot grant root scope", as
 
 async function fixture(t: any, enableDefault = true, parentIndexed = true) {
   const directory = await mkdtemp(join(tmpdir(), "follow-created-agent-")); t.after(() => rm(directory, { recursive: true, force: true }));
+  let timelineCalls = 0;
   const parent = agent("creator", "creator-workspace"); let agents: Agent[] = parentIndexed ? [parent] : [];
   const created = agent("created", "new-workspace", parent.id);
   const client = {
@@ -36,13 +37,13 @@ async function fixture(t: any, enableDefault = true, parentIndexed = true) {
     fetchWorkspaces: async () => ({ entries: [{ id: "new-workspace", name: "Independent task", projectId: "project" }], pageInfo: { hasMore: false } }),
     listProjects: async () => ({ projects: [{ projectId: "project", projectKey: "remote:github.com/example/acme-poc", projectKind: "git" }] }),
     fetchAgent: async (id: string) => ({ agent: id === parent.id ? parent : agents.find(a => a.id === id) }),
-    fetchAgentTimeline: async () => ({ entries: [], hasOlder: false, error: null, gap: false, staleCursor: false }),
+    fetchAgentTimeline: async () => { timelineCalls++; return { entries: [], hasOlder: false, error: null, gap: false, staleCursor: false }; },
   } as unknown as Daemon;
   const gateway = new PaseoGateway((async work => work(client)) as typeof withDaemon);
   const store = new Store(directory);
   const state: State = { version: 1, workspaces: [], projectDefaults: { project: enableDefault } };
   await store.mutate(s => Object.assign(s, state));
-  return { gateway, store, state, created, parent, populate: () => { agents.push(created, agent("same-workspace-child", created.workspaceId!, created.id)); } };
+  return { gateway, store, state, created, parent, timelineCalls: () => timelineCalls, populate: () => { agents.push(created, agent("same-workspace-child", created.workspaceId!, created.id)); } };
 }
 test("workspace-first creation automatically tracks its later cross-workspace child as the local main", async t => {
   const f = await fixture(t);
@@ -61,4 +62,13 @@ test("Track succeeds for an independently launched workspace and fetches a creat
   const w = await engine.activate("new-workspace");
   assert.equal(w.mainAgentId, f.created.id); assert.equal(w.enable_tracking, true); assert.equal(w.enable_auto_sends, false);
   assert.equal(w.batches.length, 0); assert.deepEqual(w.contributorAgentIds, []);
+});
+
+
+test("targeted startup and Track discovery skip transcript reads; background discovery retains them", async t => {
+  const f = await fixture(t); f.populate();
+  const rows = await f.gateway.discover(f.state, "new-workspace");
+  assert.equal(rows[0].mainAgentId, f.created.id); assert.equal(f.timelineCalls(), 0);
+  assert.equal(rows[0].history, undefined);
+  await f.gateway.discover(f.state); assert.equal(f.timelineCalls(), 1);
 });

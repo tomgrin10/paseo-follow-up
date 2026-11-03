@@ -128,7 +128,8 @@ export class PaseoGateway implements Gateway {
       }
       // Oldest scan first prevents busy workspaces from starving later sessions.
       scans.sort((a, b) => (this.histories.get(a.agent.id)?.at ?? 0) - (this.histories.get(b.agent.id)?.at ?? 0) || (b.agent.lastUserMessageAt ?? "").localeCompare(a.agent.lastUserMessageAt ?? ""));
-      for (const { agent, repo } of scans.slice(0, 4)) {
+      // Session opening and Track need only ownership metadata. Read transcripts in the poll.
+      for (const { agent, repo } of scans.slice(0, workspaceId ? 0 : 4)) {
         let history: History; let submissions: Submission[] = [];
         try {
           const entries: { item: unknown; seqStart: number }[] = [];
