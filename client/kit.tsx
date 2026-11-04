@@ -13,6 +13,8 @@ export function useNow(intervalMs = 30_000): number {
   return now;
 }
 
+export { errorText } from "../shared/errors";
+
 export const text = (colors: Colors) => ({
   title: { color: colors.foreground, fontSize: 15, lineHeight: 21, fontWeight: "600" as const },
   body: { color: colors.foreground, fontSize: 13, lineHeight: 18 },

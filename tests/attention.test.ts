@@ -105,3 +105,10 @@ test("Graphite blockers say why and what to do", async () => {
   const approved = pr({ snapshot: snapshot({ reviewDecision: "APPROVED", graphiteMergeStatus: "READY_TO_MERGE" }) });
   assert.deepEqual(mergeBlockers(approved), []);
 });
+
+test("RPC errors show only the reason", async () => {
+  const { errorText } = await import("../shared/errors");
+  assert.equal(errorText(new Error("Request failed: Tasks changed during refresh. Review the updated batch before sending. requestType=plugin.rpc.invoke.request code=handler_error")), "Tasks changed during refresh. Review the updated batch before sending.");
+  assert.equal(errorText(new Error("Plain message")), "Plain message");
+  assert.equal(errorText(new Error("")), "Something went wrong. Try again.");
+});

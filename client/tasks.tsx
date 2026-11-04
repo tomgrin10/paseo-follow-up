@@ -7,7 +7,7 @@ import type { Obligation, Workspace } from "../shared/model";
 import { followUpObligations } from "../shared/follow-up";
 import { taskSchedule, type TaskTrigger } from "../shared/task-trigger";
 import { taskTriggerRpc } from "../shared/contracts";
-import { Button, Card, Chip, FoldRow, text, type Theme } from "./kit";
+import { Button, Card, Chip, FoldRow, errorText, text, type Theme } from "./kit";
 import { Spinner } from "./motion";
 import type { Colors } from "./theme";
 
@@ -50,7 +50,7 @@ function TriggerEditor({ obligation: o, workspace, theme, compact }: { obligatio
         </Pressable>)}
       </View>
     </>}
-    {save.error && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusDanger }]}>{save.error.message}</Text>}
+    {save.error && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusDanger }]}>{errorText(save.error)}</Text>}
     <Button title="Save schedule" kind="primary" accessibilityLabel={`Save trigger for ${o.title}`} disabled={busy || !valid} loading={busy} onPress={() => save.mutate()} theme={theme} compact={compact} />
   </View>;
 }

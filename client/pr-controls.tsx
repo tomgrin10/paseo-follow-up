@@ -7,7 +7,7 @@ import { confirmPrActionRpc, preparePrActionRpc, prControlStatusRpc, requestRevi
 import { mergeBlockers, prActionBlocks, type ActionPlan, type PrActionKind } from "../shared/pr-actions";
 import { mergeQueued, mergeReady } from "../shared/attention";
 import type { Pr, Workspace } from "../shared/model";
-import { Button, Switch, text, type Theme } from "./kit";
+import { Button, Switch, errorText, text, type Theme } from "./kit";
 import { defaultReviewers, noReviewers } from "../shared/reviewers";
 
 /**
@@ -41,7 +41,8 @@ export function PrControls({ pr, workspace, theme, compact, browserReady, intent
   const missingReviewers = noReviewers(pr);
   const reviewers = defaultReviewers(pr.repo).filter(r => r.login.toLowerCase() !== pr.snapshot?.reviewers?.author?.toLowerCase());
   const begin = (kind: PrActionKind) => { setPlan(null); setNotice(null); submit.reset(); checking.reset(); checking.mutate(kind); };
-  const error = checking.error?.message ?? submit.error?.message ?? reviewRequest.error?.message ?? (browserReady ? status.data?.error : null) ?? null;
+  const failure = checking.error ?? submit.error ?? reviewRequest.error;
+  const error = failure ? errorText(failure) : (browserReady ? status.data?.error : null) ?? null;
   const scopeBlocked = (scope: "target" | "downstack") => !!plan && (plan.blockers.length > 0 || (scope === "target" ? plan.prs.slice(-1) : plan.prs).some(p => p.blockers.length > 0));
   const act = (scope: "target" | "downstack") => { if (plan) submit.mutate({ planId: plan.id, scope }); };
   // Opening the sheet from "Merge…" starts the read-only check; the merge itself still needs the confirm click.
