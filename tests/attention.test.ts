@@ -122,6 +122,9 @@ test("questions join Needs you: stop-mode first, blocked tasks fold into their q
   askQuestion(w, "main-agent", { title: "Public API name", question: "Which name?", options: [{ letter: "A", label: "retries" }], recommend: "A" }, "stop", clock);
   const items = needsYou(w, clock);
   assert.deepEqual(items.map(i => i.kind === "question" ? i.questionId : i.kind), ["Q3", "Q1", "Q2"]);
+  w.hold = "You stopped the main agent. Resume follow-up when ready.";
+  assert.deepEqual(needsYou(w, clock).slice(0, 2).map(i => i.kind === "question" ? i.questionId : i.kind), ["Q3", "hold"], "a question that stopped the agent outranks a pause");
+  w.hold = null;
   assert.equal(items[0].title, "Q3 · Public API name");
   assert.deepEqual(pillFor(w, clock), { label: "3 questions", urgent: true, count: 3 });
   assert.equal(liveLine(w, clock).text, "Main agent stopped until you answer Q3");

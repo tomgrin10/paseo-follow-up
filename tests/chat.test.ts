@@ -54,9 +54,9 @@ test("question and spec tools read as one line; answers sent from Follow-up beco
   const { parseAnswerMessage, answerMessage } = await import("../shared/questions");
   assert.equal(followToolName("mcp__follow-through__ask_question"), "ask_question");
   const asked = toolRow("ask_question", "completed", { title: "Retry window", question: "How long should retries run?" }, JSON.stringify({ question: { id: "Q4", title: "Retry window" }, mode: "work-around", instruction: "Asked Q4. Question mode: Work around." }));
-  assert.equal(asked.line, "Asked Q4: Retry window"); assert.equal(asked.tone, "warning"); assert.match(asked.more!, /How long should retries run\?\n\nAsked Q4/);
-  assert.equal(toolRow("record_answer", "completed", { id: "Q4", choice: "B" }, "{}").line, "Recorded the Q4 answer: B");
-  assert.equal(toolRow("withdraw_question", "completed", { id: "Q4", reason: "Settled in review" }, "{}").line, "Withdrew Q4 · Settled in review");
+  assert.equal(asked.line, "Q4 · Retry window · asked"); assert.equal(asked.tone, "warning"); assert.match(asked.more!, /How long should retries run\?\n\nAsked Q4/);
+  assert.equal(toolRow("record_answer", "completed", { id: "Q4", choice: "B" }, "{}").line, "Q4 · answer recorded: B");
+  assert.equal(toolRow("withdraw_question", "completed", { id: "Q4", reason: "Settled in review" }, "{}").line, "Q4 · withdrawn: Settled in review");
   assert.equal(toolRow("set_spec", "completed", { url: "https://claude.ai/code/artifact/abc" }, JSON.stringify({ applied: true, message: "Spec link saved." })).line, "Spec link: claude.ai");
   assert.equal(toolRow("set_spec", "completed", { url: "https://claude.ai/code/artifact/abc", title: "Retry spec" }, JSON.stringify({ applied: false, message: "The developer chose…" })).line, "Spec link kept · the developer chose it");
   assert.deepEqual(followShellCall(`node ~/.paseo/plugin-data/follow-through/mcp.mjs call set_spec '{"url":"https://claude.ai/artifact/x"}'`), { tool: "set_spec", input: { url: "https://claude.ai/artifact/x" } });

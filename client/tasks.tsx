@@ -55,16 +55,21 @@ function TriggerEditor({ obligation: o, workspace, theme, compact }: { obligatio
   </View>;
 }
 
+/** The question a blocked task became, if the server has mirrored it. */
+const linkedQuestion = (o: Obligation, w: Workspace) => o.status === "blocked" ? [...(w.questions ?? [])].reverse().find(q => q.taskId === o.id && q.taskRevision !== null) ?? null : null;
+
 function statusOf(o: Obligation, w: Workspace) {
   const schedule = taskSchedule(o, w);
   if (finished(o)) return o.status === "done" ? "Done" : "Waived";
+  const q = linkedQuestion(o, w);
+  if (q) return q.answer ? `${q.id} · answered, waiting on the agent` : `${q.id} · waiting on your answer`;
   if (o.status === "blocked") return "Needs a decision";
   if (o.status === "working") return "Agent working";
   return schedule.ready ? "Ready to send" : schedule.label;
 }
 function TaskGlyph({ o, w, colors }: { o: Obligation; w: Workspace; colors: Colors }) {
   if (finished(o)) return <Icon name={o.status === "done" ? "Check" : "CircleSlash"} size={14} color={o.status === "done" ? colors.statusSuccess : colors.foregroundMuted} />;
-  if (o.status === "blocked") return <Icon name="MessageCircleQuestion" size={14} color={colors.statusWarning} />;
+  if (o.status === "blocked") return <Icon name="MessageCircleQuestion" size={14} color={linkedQuestion(o, w) ? colors.foregroundMuted : colors.statusWarning} />;
   if (o.status === "working") return <Spinner color={colors.accent} size={13} />;
   if (o.enable_follow_up && o.trigger && !taskSchedule(o, w).ready) return <Icon name="Clock" size={14} color={colors.foregroundMuted} />;
   return <View style={{ width: 14, height: 14, alignItems: "center", justifyContent: "center" }}><View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: colors.foregroundMuted, opacity: 0.6 }} /></View>;
@@ -82,7 +87,7 @@ function TaskRow({ o, w, theme, onOpen, compact }: { o: Obligation; w: Workspace
       <Text numberOfLines={3} style={[t.body, finished(o) ? { color: c.foregroundMuted } : null]}>{o.title}</Text>
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
         {scheduled && !finished(o) ? <Chip theme={theme} label={`${status}${prs ? ` · ${prs}` : ""}`} color={c.foregroundMuted} />
-          : <Text style={[t.meta, o.status === "blocked" ? { color: c.statusWarning } : null, { fontVariant: ["tabular-nums"] }]}>{status}{prs && !finished(o) ? ` · waits for ${prs}` : ""}</Text>}
+          : <Text style={[t.meta, o.status === "blocked" && !linkedQuestion(o, w) ? { color: c.statusWarning } : null, { fontVariant: ["tabular-nums"] }]}>{status}{prs && !finished(o) && !linkedQuestion(o, w) ? ` · waits for ${prs}` : ""}</Text>}
       </View>
     </View>
     <View style={{ paddingTop: 2 }}><Icon name="ChevronRight" size={14} color={c.foregroundMuted} /></View>
@@ -111,7 +116,7 @@ function TaskSheet({ o, w, theme, compact, onClose }: { o: Obligation | null; w:
   </Modal>;
 }
 
-export function TasksCard({ workspace: w, theme, compact, open, toggle }: { workspace: Workspace; theme: Theme; compact: boolean; open: (key: string) => boolean; toggle: (key: string) => void }) {
+export function TasksCard({ workspace: w, theme, compact, open, toggle, onOpenQuestion }: { workspace: Workspace; theme: Theme; compact: boolean; open: (key: string) => boolean; toggle: (key: string) => void; onOpenQuestion?: (id: string) => void }) {
   const c = theme.colors; const t = text(c);
   const [selected, setSelected] = useState<string | null>(null);
   const all = followUpObligations(w);
@@ -122,7 +127,7 @@ export function TasksCard({ workspace: w, theme, compact, open, toggle }: { work
     {!all.length && <View style={{ paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border }}>
       <Text style={t.meta}>No follow-up tasks. The agent records work that outlives a merge here, like a migration to run or a production check.</Text>
     </View>}
-    {outstanding.map(o => <TaskRow key={o.id} o={o} w={w} theme={theme} compact={compact} onOpen={() => setSelected(o.id)} />)}
+    {outstanding.map(o => { const q = linkedQuestion(o, w); return <TaskRow key={o.id} o={o} w={w} theme={theme} compact={compact} onOpen={() => q && onOpenQuestion ? onOpenQuestion(q.id) : setSelected(o.id)} />; })}
     {completed.length > 0 && <FoldRow theme={theme} open={showDone} onPress={() => toggle("tasks-done")} icon="Check" iconColor={c.statusSuccess} label={`${completed.length} done`} />}
     {showDone && completed.map(o => <TaskRow key={o.id} o={o} w={w} theme={theme} compact={compact} onOpen={() => setSelected(o.id)} />)}
     <TaskSheet o={all.find(o => o.id === selected) ?? null} w={w} theme={theme} compact={compact} onClose={() => setSelected(null)} />

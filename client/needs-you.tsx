@@ -108,7 +108,7 @@ function QuestionState({ workspace: w, questionId, theme }: { workspace: Workspa
   const state = meanwhile(w, q);
   return <View style={{ flexDirection: "row", gap: 5 }}>
     <View style={{ paddingTop: 2 }}><Icon name={state.icon} size={11} color={state.color(c)} /></View>
-    <Text numberOfLines={2} style={[text(c).small, { flex: 1, color: state.color(c) }]}>{state.text}</Text>
+    <Text numberOfLines={4} style={[text(c).small, { flex: 1, color: state.color(c) }]}>{state.text}</Text>
   </View>;
 }
 

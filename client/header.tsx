@@ -41,10 +41,12 @@ function LiveGlyph({ icon, colors }: { icon: LiveIcon; colors: Colors }) {
   }
 }
 
-export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings, onRefresh, refreshing, onAuto, autoPending, notice, onOpenPr, resize }: {
+export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings, onRefresh, refreshing, onAuto, autoPending, notice, onOpenPr, resize, hideTitle = false }: {
   workspace: Workspace; theme: Theme; compact: boolean; now: number; onSettings: () => void; onRefresh: () => void; refreshing: boolean; onAuto: (next: boolean) => void; autoPending: boolean; notice: string | null; onOpenPr?: (key: string) => void;
   /** Expand to the larger view, or collapse back to the panel. Absent where the panel is already as wide as it gets. */
   resize?: { icon: "Maximize2" | "Minimize2"; label: string; onPress: () => void } | null;
+  /** The larger view's screen bar already names the workspace. */
+  hideTitle?: boolean;
 }) {
   const c = theme.colors; const t = text(c);
   const parts = headline(w, now);
@@ -56,7 +58,7 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
   return <View style={{ paddingHorizontal: pad, paddingTop: compact ? 14 : 12, paddingBottom: 10, gap: 6, borderBottomWidth: 1, borderBottomColor: c.border }}>
     <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
       {/* On phones the host header right above already shows the workspace name. */}
-      {compact ? <Text numberOfLines={2} style={[t.meta, { flex: 1, paddingTop: 2 }]}>{w.goal}</Text>
+      {compact || hideTitle ? <Text numberOfLines={2} style={[t.meta, { flex: 1, paddingTop: 2 }, hideTitle && !compact ? { fontSize: 13, lineHeight: 19, color: c.foreground } : null]}>{w.goal}</Text>
         : <Text accessibilityRole="header" style={[t.title, { flex: 1 }]}>{w.title}</Text>}
       <View style={{ flexDirection: "row", alignItems: "center", gap: 2, marginVertical: compact ? -12 : -4, marginRight: compact ? -10 : -4 }}>
         {!!w.spec?.url && <View style={{ marginRight: 4 }}><SpecChip workspace={w} theme={theme} compact={compact} /></View>}
@@ -64,7 +66,7 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
         <IconButton icon="Settings" label="Follow-up settings" onPress={onSettings} theme={theme} compact={compact} />
       </View>
     </View>
-    {!compact && w.goal && w.goal !== w.title && <Text numberOfLines={2} style={t.meta}>{w.goal}</Text>}
+    {!compact && !hideTitle && w.goal && w.goal !== w.title && <Text numberOfLines={2} style={t.meta}>{w.goal}</Text>}
     <Text accessibilityLiveRegion="polite" style={[t.meta, { color: c.foregroundMuted, marginTop: 2 }]}>
       {parts.map((part, i) => <Text key={part.text} style={toneOf(part.tone) ? { color: toneOf(part.tone), fontWeight: "600" } : { color: c.foreground }}>{i ? <Text style={{ color: c.foregroundMuted, fontWeight: "400" }}>{" · "}</Text> : null}{part.text}</Text>)}
     </Text>

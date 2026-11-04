@@ -88,6 +88,10 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 export function needsYou(w: Workspace, now = Date.now()): NeedItem[] {
   if (!w.enable_tracking || w.archived) return [];
   const items: NeedItem[] = [];
+  const questions = w.questions ?? [];
+  // A question that stopped the agent outranks everything: nothing moves until it's answered.
+  const open = questions.filter(questionOpen);
+  for (const q of open.filter(q => questionState(q) === "stopped")) items.push({ kind: "question", key: `question:${q.id}`, questionId: q.id, title: `${q.id} · ${q.title}`, detail: q.question, state: "stopped", big: q.big });
   if (w.hold) items.push({ kind: "hold", key: "hold", title: "Follow-up is paused", detail: w.hold });
   for (const b of w.batches.filter(b => !recoveryBatch(b) && ["blocked", "uncertain"].includes(b.state))) {
     items.push({ kind: "retry", key: `retry:${b.id}`, batchId: b.id, exhausted: b.attempts >= 3,
@@ -98,13 +102,10 @@ export function needsYou(w: Workspace, now = Date.now()): NeedItem[] {
     const numbers = a.prs.map(key => `#${key.split("#")[1]}`).join(", ");
     items.push({ kind: "check", key: `check:${a.id}`, actionId: a.id, title: `Check the ${a.kind === "merge" ? "merge" : a.kind === "request_reviewers" ? "reviewer request" : "merge-when-ready change"} on ${numbers}`, detail: a.result });
   }
-  const questions = w.questions ?? [];
   // Answers Paseo didn't confirm need a look before anything is sent again.
   for (const q of questions.filter(q => q.answer?.delivery.state === "unconfirmed"))
     items.push({ kind: "answer", key: `answer:${q.id}`, questionId: q.id, title: `Check that the agent got your ${q.id} answer`, detail: q.answer!.delivery.reason ?? "Paseo didn't confirm the message." });
-  // Questions that stop the agent come first, then the rest in the order they were asked.
-  const open = questions.filter(questionOpen).sort((a, b) => Number(questionState(b) === "stopped") - Number(questionState(a) === "stopped"));
-  for (const q of open) items.push({ kind: "question", key: `question:${q.id}`, questionId: q.id, title: `${q.id} · ${q.title}`, detail: q.question, state: questionState(q), big: q.big });
+  for (const q of open.filter(q => questionState(q) !== "stopped")) items.push({ kind: "question", key: `question:${q.id}`, questionId: q.id, title: `${q.id} · ${q.title}`, detail: q.question, state: questionState(q), big: q.big });
   // A blocked task is a question once the server mirrors it; until then it still shows as a decision.
   for (const o of followUpObligations(w).filter(o => o.status === "blocked" && !questions.some(q => q.taskId === o.id && q.taskRevision !== null)))
     items.push({ kind: "decision", key: `decision:${o.id}`, obligationId: o.id, title: o.title, detail: o.evidence });
