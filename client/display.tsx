@@ -1,4 +1,4 @@
-import type { PluginClientContext, PluginSidebarContribution, PluginSurfaceProps } from "@getpaseo/plugin/client";
+import type { PluginClientContext, PluginSidebarItemContribution, PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useSettings } from "@getpaseo/plugin/client";
 import { SettingsAction, SettingsCard, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { useEffect } from "react";
@@ -30,19 +30,14 @@ function DisplaySettings({ theme }: PluginSurfaceProps) {
     </View>
   );
 
+  const save = (patch: Partial<Display>) => void settings.save({ ...settings.values, ...patch }, settings.revision);
   return (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 16 }}>
-    <SettingsSection title="Navigation">
+    <SettingsSection title="Where Follow-up appears" info="Every entry point opens the same panel. Command-K (Ctrl-K on Windows and Linux) works whatever you hide here.">
       <SettingsCard>
-        <SettingsSwitch
-          label="Show in sidebar"
-          hint="Open this plugin from Command-K (Ctrl-K on Windows and Linux) while viewing a workspace or plugin on this host."
-          value={settings.values.showSidebar}
-          disabled={settings.saving}
-          onValueChange={(showSidebar) => void settings.save({ ...settings.values, showSidebar }, settings.revision)}
-        />
-
-        <SettingsSwitch label="Show workspace header button" hint="Command-K and the sidebar remain available when this button is hidden." value={settings.values.enable_header_button} disabled={settings.saving} onValueChange={(enable_header_button) => void settings.save({ ...settings.values, enable_header_button }, settings.revision)} />
+        <SettingsSwitch label="Sidebar row" hint="Opens all tracked workspaces, with a count when some need you." value={settings.values.showSidebar} disabled={settings.saving} onValueChange={(showSidebar) => save({ showSidebar })} />
+        <SettingsSwitch label="Workspace header button" hint="An icon in each workspace header. A dot appears when that workspace needs you." value={settings.values.enable_header_button} disabled={settings.saving} onValueChange={(enable_header_button) => save({ enable_header_button })} />
+        <SettingsSwitch label="Composer pill" hint="Shows above the message box only while the workspace needs you." value={settings.values.enable_composer_pill} disabled={settings.saving} onValueChange={(enable_composer_pill) => save({ enable_composer_pill })} />
       </SettingsCard>
       {settings.saveError && <Text accessibilityRole="alert" style={{ color: theme.colors.statusDanger }}>{settings.saveError}</Text>}
     </SettingsSection>
@@ -51,22 +46,22 @@ function DisplaySettings({ theme }: PluginSurfaceProps) {
 }
 
 /** Settings notifications reach mounted screens; poll for changes made on other clients. */
-export function contributeDisplay(client: PluginClientContext, item: PluginSidebarContribution) {
-  const sidebar = sidebarVisibility(() => client.addSidebarItem(item));
+export function contributeDisplay(client: PluginClientContext, item: PluginSidebarItemContribution) {
+  const sidebar = sidebarVisibility(() => client.addSidebarHeaderItem(item));
   // Paseo 0.10.1 memoizes sidebar route resolution when an installation mounts.
   // Register synchronously, then reconcile the saved preference, so that an
   // already-open sidebar route can resolve its surface during that first render.
   sidebar.set(true);
   const Settings = DisplaySettings;
-  const removeSurface = client.addSurface("display-settings", Settings);
+  const removeSurface = client.addScreen({ id: "display-settings", title: "Follow-up display", Component: Settings });
   const removeSettings = client.addSettingsScreen({ id: "display", title: "Display", icon: "PanelLeft", Component: Settings });
   const removeCommand = client.addCommandCenterItem({
     id: "display-settings",
-    title: `${item.title}: display settings`,
+    title: "Follow-up: display settings",
     icon: "PanelLeft",
-    keywords: [item.title, "sidebar", "show", "hide", "display", "settings"],
+    keywords: ["Follow-up", "sidebar", "pill", "header", "show", "hide", "display", "settings"],
     context: "global",
-    onSelect({ openSurface }) { openSurface("display-settings"); },
+    onSelect({ openScreen }) { openScreen({ screenId: "display-settings" }); },
   });
   let disposed = false;
   let pending = false;
