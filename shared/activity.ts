@@ -14,7 +14,7 @@ export function duration(from: string | null | undefined, to: string | null | un
   if (m < 1) return "under a minute";
   if (m < 60) return `${m}m`;
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ${String(m % 60).padStart(2, "0")}m`;
+  if (h < 24) return m % 60 ? `${h}h ${m % 60}m` : `${h}h`;
   return `${Math.floor(h / 24)}d`;
 }
 
@@ -43,9 +43,13 @@ export function activity(w: Workspace): Activity[] {
     rows.push({ key: `action:${a.id}`, at: a.createdAt, icon: a.kind === "request_reviewers" ? "UserPlus" : "GitMerge", tone: a.state === "failed" ? "danger" : a.state === "uncertain" ? "warning" : "muted", text: what, detail: a.state === "submitted" ? null : a.result || null, took: null });
   }
   for (const q of w.questions ?? []) {
-    rows.push({ key: `asked:${q.id}`, at: q.askedAt, icon: "MessageCircleQuestion", tone: "warning", text: `${q.id} asked: ${q.title}`, detail: null, took: null });
-    if (q.answer) rows.push({ key: `answered:${q.id}`, at: q.answer.at, icon: "MessageCircleReply", tone: "success", text: `${q.id} answered: ${q.answer.choice}${q.options.find(o => o.letter === q.answer!.choice) ? ` · ${q.options.find(o => o.letter === q.answer!.choice)!.label}` : ""}`, detail: q.answer.by === "agent" ? "Answered in chat" : null, took: duration(q.askedAt, q.answer.at) });
-    if (q.closed) rows.push({ key: `withdrawn:${q.id}`, at: q.closed.at, icon: "MessageCircleOff", tone: "muted", text: `${q.id} withdrawn`, detail: q.closed.reason, took: null });
+    const ref = `${q.id} · ${q.title}`;
+    rows.push({ key: `asked:${q.id}`, at: q.askedAt, icon: "MessageCircleQuestion", tone: "warning", text: ref, detail: "Asked", took: null });
+    if (q.answer) {
+      const option = q.options.find(o => o.letter === q.answer!.choice);
+      rows.push({ key: `answered:${q.id}`, at: q.answer.at, icon: "MessageCircleReply", tone: "success", text: ref, detail: `${q.answer.by === "agent" ? "Answered in chat" : "Answered"}: ${q.answer.choice}${option ? ` · ${option.label}` : ""}`, took: duration(q.askedAt, q.answer.at) });
+    }
+    if (q.closed) rows.push({ key: `withdrawn:${q.id}`, at: q.closed.at, icon: "MessageCircleOff", tone: "muted", text: ref, detail: `Withdrawn: ${q.closed.reason}`, took: null });
   }
   if (w.completion) rows.push({ key: "done", at: w.completion.declaredAt, icon: "CircleCheck", tone: "success", text: "Main agent declared Done", detail: null, took: null });
   return rows.filter(r => Number.isFinite(Date.parse(r.at))).sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || a.key.localeCompare(b.key));

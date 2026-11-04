@@ -20,7 +20,11 @@ export const statusColor = (c: Colors, status: Status) => status === "done" ? c.
 const statusIcon = (status: Status) => status === "done" ? "CircleCheck" : status === "needs-you" ? "CircleAlert" : status === "handling" ? "LoaderCircle" : status === "waiting" ? "Clock" : "GitPullRequest";
 
 function reasonFor(w: Workspace, status: Status, now: number): string {
-  if (status === "needs-you") { const items = needsYou(w, now); return items.length > 1 ? `${items[0].title} · and ${items.length - 1} more` : items[0]?.title ?? summary(w, now).reason; }
+  if (status === "needs-you") {
+    const items = needsYou(w, now);
+    const first = items[0]?.kind === "question" && items[0].state === "stopped" ? `Agent stopped · ${items[0].title}` : items[0]?.title;
+    return items.length > 1 ? `${first} · and ${items.length - 1} more` : first ?? summary(w, now).reason;
+  }
   if (status === "done") return w.completion?.summary ?? "Ready to archive";
   return liveLine(w, now).text;
 }
@@ -100,7 +104,9 @@ export function FollowOverview({ theme, layout, navigation, openSettings }: Plug
       <Button theme={theme} compact={compact} icon="Settings" title="Project settings" onPress={openSettings} />
     </View>}
     {groups.map(group => {
-      const rows = workspaces.filter(w => overviewStatus(w, now) === group.status).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+      // Within Needs you, a workspace whose agent stopped for a question comes first.
+      const stopped = (w: Workspace) => Number(needsYou(w, now).some(i => i.kind === "question" && i.state === "stopped"));
+      const rows = workspaces.filter(w => overviewStatus(w, now) === group.status).sort((a, b) => stopped(b) - stopped(a) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
       if (!rows.length) return null;
       return <View key={group.status} style={{ gap: 8, marginTop: 4 }}>
         <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>

@@ -79,21 +79,24 @@ export function contributePills(client: PluginClientContext, store: LiveStore, o
     const [question, setQuestion] = useState<string | null>(null);
     const w = query.data?.workspace ?? store.get(props.workspaceId);
     const touch = props.layout.compact;
+    const asking = !!w?.questions.some(questionOpen);
+    const others = w ? needsYou(w).filter(i => i.kind !== "question") : [];
     const open = () => { props.close(); openPanel(props.workspaceId); };
     return <View style={{ width: 360, maxWidth: "100%", gap: 10 }}>
       {w ? <>
-        {/* On phones the sheet already carries the button's title. */}
-        <View style={{ gap: 2 }}>
-          {!touch && <Text style={t.label}>{needsYou(w).length === 1 ? "Follow-up needs you" : `Follow-up · ${needsYou(w).length} need you`}</Text>}
-          <Text numberOfLines={1} style={t.meta}>{w.title}</Text>
-        </View>
-        {w.questions.some(questionOpen) && <View style={{ paddingTop: 10, borderTopWidth: 1, borderTopColor: c.border }}>
-          <QuestionStepper workspace={w} theme={props.theme} compact={touch} onAnswered={() => store.refresh()} />
-        </View>}
-        <View style={w.questions.some(questionOpen) && needsYou(w).some(i => i.kind !== "question") ? { borderTopWidth: 1, borderTopColor: c.border } : null}>
-          <NeedsYouList workspace={w} theme={props.theme} compact={touch} flush skip={["question"]}
+        {/* Open questions take the whole popover, one at a time; the rest is a line and a click away. */}
+        {asking ? <>
+          <QuestionStepper workspace={w} theme={props.theme} compact={touch} bodyMaxHeight={touch ? undefined : 220} onDetails={setQuestion} onAnswered={() => store.refresh()} />
+          {others.length > 0 && <Text numberOfLines={2} style={[t.small, { paddingTop: 8, borderTopWidth: 1, borderTopColor: c.border }]}>Also needs you: {others.map(i => i.title).join(" · ")}</Text>}
+        </> : <>
+          {/* On phones the sheet already carries the button's title. */}
+          {!touch && <View style={{ gap: 2 }}>
+            <Text style={t.label}>{others.length === 1 ? "Follow-up needs you" : `Follow-up · ${others.length} need you`}</Text>
+            <Text numberOfLines={1} style={t.meta}>{w.title}</Text>
+          </View>}
+          <NeedsYouList workspace={w} theme={props.theme} compact={touch} flush
             actions={{ after: () => { store.refresh(); }, openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion }} />
-        </View>
+        </>}
         <PrSheet workspace={w} prKey={sheet?.key ?? null} intent={sheet?.intent ?? null} theme={props.theme} compact={touch} browserReady={browser.data?.ready ?? false} onClose={() => { setSheet(null); store.refresh(); }} />
         <QuestionSheet workspace={w} questionId={question} theme={props.theme} compact={touch} onClose={() => { setQuestion(null); store.refresh(); }} />
       </> : <Text style={t.meta}>{query.error ? `Couldn't read Follow-up: ${errorText(query.error)}` : "Loading…"}</Text>}

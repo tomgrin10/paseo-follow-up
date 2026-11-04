@@ -109,10 +109,10 @@ export function toolRow(tool: FollowTool, status: "running" | "completed" | "fai
     case "ask_question": {
       const question = record(result?.question) ? result!.question as Record<string, unknown> : null;
       const id = str(question?.id);
-      return { ...base, state: "done", tone: "warning", line: `${id ? `Asked ${id}` : "Asked a question"}: ${firstLine(str(input.title) || str(question?.title))}`, more: [str(input.question), str(result?.instruction)].filter(Boolean).join("\n\n") || more };
+      return { ...base, state: "done", tone: "warning", line: `${id ? `${id} · ` : ""}${firstLine(str(input.title) || str(question?.title))} · asked`, more: [str(input.question), str(result?.instruction)].filter(Boolean).join("\n\n") || more };
     }
-    case "record_answer": return { ...base, state: "done", line: `Recorded the ${str(input.id)} answer: ${firstLine(str(input.choice))}`, more: str(input.words) || more };
-    case "withdraw_question": return { ...base, state: "done", line: `Withdrew ${str(input.id)} · ${firstLine(str(input.reason))}`, more };
+    case "record_answer": return { ...base, state: "done", line: `${str(input.id)} · answer recorded: ${firstLine(str(input.choice))}`, more: str(input.words) || more };
+    case "withdraw_question": return { ...base, state: "done", line: `${str(input.id)} · withdrawn: ${firstLine(str(input.reason))}`, more };
     case "set_spec": {
       const kept = result?.applied === false;
       return { ...base, state: "done", line: kept ? "Spec link kept · the developer chose it" : `Spec link: ${firstLine(str(input.title)) || specHost(str(input.url))}`, more: str(result?.message) || more };

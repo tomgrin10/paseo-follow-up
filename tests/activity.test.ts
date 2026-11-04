@@ -11,9 +11,10 @@ test("the activity log lists what happened newest first, with how long repairs a
     completion: { summary: "Shipped", declaredAt: "2026-01-01T13:00:00Z" },
   });
   const rows = activity(w);
-  assert.deepEqual(rows.map(r => r.text), ["Main agent declared Done", "#1 merged", "Q1 answered: A · An hour", "Q1 asked: Retry window", "Main agent finished 1 repair", "Sent 1 repair to the main agent"]);
+  assert.deepEqual(rows.map(r => [r.text, r.detail]), [["Main agent declared Done", null], ["#1 merged", "Retry backoff"], ["Q1 · Retry window", "Answered: A · An hour"], ["Q1 · Retry window", "Asked"], ["Main agent finished 1 repair", "Rebased onto main"], ["Sent 1 repair to the main agent", "Resolve merge conflicts on #1"]]);
   assert.equal(rows.find(r => r.key === "done:b1")!.took, "42m");
   assert.equal(rows.find(r => r.key === "answered:Q1")!.took, "1h 30m");
+  assert.equal(duration("2026-01-01T00:00:00Z", "2026-01-01T03:00:00Z"), "3h");
   assert.equal(rows.find(r => r.key === "sent:b1")!.detail, "Resolve merge conflicts on #1");
   assert.equal(duration("2026-01-01T00:00:00Z", "2026-01-03T05:00:00Z"), "2d");
   assert.equal(duration(null, "2026-01-01T00:00:00Z"), null);
