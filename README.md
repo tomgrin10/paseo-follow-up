@@ -56,7 +56,7 @@ Tap a PR, or its segment in the bar, for a sheet with its checks, reviewers and 
 
 ![The PR sheet for a PR whose required checks failed](docs/screenshots/follow-up-pr.png)
 
-The expand icon next to the gear (or **Follow-up: open the larger view** in ⌘K) opens the workspace as a full screen in two columns: what needs you on the left, the stacks on the right. Esc or the collapse icon takes you back.
+The expand icon next to the gear (or **Follow-up: open the larger view** in ⌘K) opens the workspace as a full screen, in two columns when there is room: what needs you on the left, the stacks and activity on the right. Esc or the collapse icon takes you back.
 
 ![The larger view: Needs you, tasks and activity on the left, pull request stacks on the right](docs/screenshots/follow-up-large.png)
 
