@@ -47,13 +47,13 @@ export function PrRow({ pr, theme, first, last, showRepo, onOpen, compact, wide 
       <Node pr={pr} colors={c} />
       <View style={{ width: 2, flex: 1, minHeight: 4, backgroundColor: last ? "transparent" : line }} />
     </View>
-    {/* Wide views give each row a status column, so titles stay on one line and states line up. */}
+    {/* Wide views give each row a status column, so states line up; long titles wrap once. */}
     {wide ? <>
       <View style={{ flex: 1, minWidth: 0, paddingVertical: 8, gap: 2 }}>
-        <Text numberOfLines={1} style={[t.body, s?.state !== "OPEN" && s ? { color: c.foregroundMuted } : null]}>{s?.title ?? `${pr.repo} pull request`}</Text>
+        <Text numberOfLines={2} style={[t.body, s?.state !== "OPEN" && s ? { color: c.foregroundMuted } : null]}>{s?.title ?? `${pr.repo} pull request`}</Text>
         <Text numberOfLines={1} style={t.meta}>{showRepo ? `${pr.repo} ` : ""}#{pr.number}{extras.map(e => ` · ${e}`).join("")}</Text>
       </View>
-      <View style={{ width: 150, paddingTop: 8, alignItems: "flex-end" }}>
+      <View style={{ width: 120, paddingTop: 8, alignItems: "flex-end" }}>
         <Text numberOfLines={1} style={[t.meta, { color: statusColor(c, pr), fontWeight: "600" }]}>{label}</Text>
       </View>
     </> : <View style={{ flex: 1, minWidth: 0, paddingVertical: 8, gap: 2 }}>

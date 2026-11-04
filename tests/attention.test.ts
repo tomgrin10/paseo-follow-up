@@ -112,3 +112,25 @@ test("RPC errors show only the reason", async () => {
   assert.equal(errorText(new Error("Plain message")), "Plain message");
   assert.equal(errorText(new Error("")), "Something went wrong. Try again.");
 });
+
+test("questions join Needs you: stop-mode first, blocked tasks fold into their question, unconfirmed answers ask for a check", async () => {
+  const { askQuestion, syncTaskQuestions, developerAnswer } = await import("../server/questions");
+  const w = workspace({ prs: [], obligations: [{ id: "cohort", title: "Choose the rollout cohort", status: "blocked", afterPrs: [], enable_follow_up: true, evidence: "Needs a product call", revision: 1 }] });
+  assert.deepEqual(needsYou(w, clock).map(i => i.kind), ["decision"], "before the server mirrors it, a blocked task is a decision");
+  syncTaskQuestions(w, clock);
+  askQuestion(w, "main-agent", { title: "Retry window", question: "How long?", options: [{ letter: "A", label: "An hour" }, { letter: "B", label: "A day" }], recommend: "A" }, "work-around", clock);
+  askQuestion(w, "main-agent", { title: "Public API name", question: "Which name?", options: [{ letter: "A", label: "retries" }], recommend: "A" }, "stop", clock);
+  const items = needsYou(w, clock);
+  assert.deepEqual(items.map(i => i.kind === "question" ? i.questionId : i.kind), ["Q3", "Q1", "Q2"]);
+  assert.equal(items[0].title, "Q3 · Public API name");
+  assert.deepEqual(pillFor(w, clock), { label: "3 questions", urgent: true, count: 3 });
+  assert.equal(liveLine(w, clock).text, "Main agent stopped until you answer Q3");
+  developerAnswer(w, "Q3", "A", undefined, "send", clock);
+  w.questions[2].answer!.delivery.state = "unconfirmed";
+  developerAnswer(w, "Q2", "A", undefined, "copy", clock);
+  developerAnswer(w, "Q1", "Internal users first", undefined, "copy", clock);
+  assert.deepEqual(needsYou(w, clock).map(i => i.kind), ["answer"]);
+  assert.deepEqual(pillFor(w, clock), { label: "Check Q3 answer", urgent: true, count: 1 });
+  w.questions[2].answer!.delivery.state = "sent";
+  assert.deepEqual(needsYou(w, clock), [], "an answered blocked-task question doesn't ask again while the agent catches up");
+});

@@ -3,6 +3,7 @@ import { followUpObligations, recoveryBatch } from "./follow-up";
 import { orderedStacks, settledForDisplay } from "./presentation";
 import { graphiteReady, prActionBlocks } from "./pr-actions";
 import { defaultReviewers, noReviewers } from "./reviewers";
+import { isOpen as questionOpen, questionState, type QuestionState } from "./questions";
 
 /** One colour language for the stack bar, rail nodes and overview bars. */
 export type PrTone = "merged" | "approved" | "danger" | "warning" | "pending" | "draft" | "closed" | "unknown";
@@ -75,6 +76,8 @@ export type NeedItem =
   | { kind: "retry"; key: string; batchId: string; title: string; detail: string; exhausted: boolean }
   | { kind: "send"; key: string; batchId: string; title: string; tasks: string[]; blocker: string | null }
   | { kind: "decision"; key: string; obligationId: string; title: string; detail: string }
+  | { kind: "question"; key: string; questionId: string; title: string; detail: string; state: QuestionState; big: string | null }
+  | { kind: "answer"; key: string; questionId: string; title: string; detail: string }
   | { kind: "check"; key: string; actionId: string; title: string; detail: string }
   | { kind: "merge"; key: string; prKey: string; number: number; title: string; detail: string }
   | { kind: "reviewers"; key: string; prKey: string; number: number; title: string; detail: string };
@@ -95,7 +98,16 @@ export function needsYou(w: Workspace, now = Date.now()): NeedItem[] {
     const numbers = a.prs.map(key => `#${key.split("#")[1]}`).join(", ");
     items.push({ kind: "check", key: `check:${a.id}`, actionId: a.id, title: `Check the ${a.kind === "merge" ? "merge" : a.kind === "request_reviewers" ? "reviewer request" : "merge-when-ready change"} on ${numbers}`, detail: a.result });
   }
-  for (const o of followUpObligations(w).filter(o => o.status === "blocked")) items.push({ kind: "decision", key: `decision:${o.id}`, obligationId: o.id, title: o.title, detail: o.evidence });
+  const questions = w.questions ?? [];
+  // Answers Paseo didn't confirm need a look before anything is sent again.
+  for (const q of questions.filter(q => q.answer?.delivery.state === "unconfirmed"))
+    items.push({ kind: "answer", key: `answer:${q.id}`, questionId: q.id, title: `Check that the agent got your ${q.id} answer`, detail: q.answer!.delivery.reason ?? "Paseo didn't confirm the message." });
+  // Questions that stop the agent come first, then the rest in the order they were asked.
+  const open = questions.filter(questionOpen).sort((a, b) => Number(questionState(b) === "stopped") - Number(questionState(a) === "stopped"));
+  for (const q of open) items.push({ kind: "question", key: `question:${q.id}`, questionId: q.id, title: `${q.id} · ${q.title}`, detail: q.question, state: questionState(q), big: q.big });
+  // A blocked task is a question once the server mirrors it; until then it still shows as a decision.
+  for (const o of followUpObligations(w).filter(o => o.status === "blocked" && !questions.some(q => q.taskId === o.id && q.taskRevision !== null)))
+    items.push({ kind: "decision", key: `decision:${o.id}`, obligationId: o.id, title: o.title, detail: o.evidence });
   if (!w.enable_auto_sends) for (const b of pendingSends(w)) {
     items.push({ kind: "send", key: `send:${b.id}`, batchId: b.id, tasks: b.tasks.map(t => t.title), blocker: sendBlocker(w, b),
       title: `${plural(b.tasks.length, "repair")} ready for the main agent` });
@@ -132,6 +144,8 @@ export function liveLine(w: Workspace, now = Date.now()): { icon: LiveIcon; text
   const state = summary(w, now);
   if (state.status === "done") return { icon: "done", text: "Ready to archive", since: w.completion?.declaredAt ?? null };
   if (w.hold) return { icon: "paused", text: "Paused until you resume", since: w.interruption?.at ?? null };
+  const stopped = (w.questions ?? []).filter(questionOpen).find(q => questionState(q) === "stopped");
+  if (stopped) return { icon: "paused", text: `Main agent stopped until you answer ${stopped.id}`, since: stopped.askedAt };
   const sent = openBatches(w).find(b => ["sending", "sent"].includes(b.state));
   if (sent) {
     const who = sent.recipientAgentId && sent.recipientAgentId !== w.mainAgentId ? "Recovery agent" : "Main agent";
@@ -153,10 +167,10 @@ export function liveLine(w: Workspace, now = Date.now()): { icon: LiveIcon; text
 export function pillFor(w: Workspace, now = Date.now()): { label: string; urgent: boolean; count: number } | null {
   const items = needsYou(w, now);
   if (!items.length) return null;
-  const urgent = items.some(i => i.kind === "hold" || i.kind === "retry" || i.kind === "check");
-  if (items.length > 1) return { label: `${items.length} need you`, urgent, count: items.length };
+  const urgent = items.some(i => i.kind === "hold" || i.kind === "retry" || i.kind === "check" || i.kind === "answer" || i.kind === "question" && i.state === "stopped");
+  if (items.length > 1) return { label: items.every(i => i.kind === "question") ? `${items.length} questions` : `${items.length} need you`, urgent, count: items.length };
   const [item] = items;
-  const label = item.kind === "send" ? `Send ${plural(item.tasks.length, "repair")}` : item.kind === "merge" ? `Merge #${item.number}` : item.kind === "reviewers" ? `Reviewers for #${item.number}` : item.kind === "hold" ? "Follow-up paused" : item.kind === "decision" ? "Decision needed" : item.kind === "retry" ? "Repairs blocked" : "Check PR action";
+  const label = item.kind === "send" ? `Send ${plural(item.tasks.length, "repair")}` : item.kind === "merge" ? `Merge #${item.number}` : item.kind === "reviewers" ? `Reviewers for #${item.number}` : item.kind === "hold" ? "Follow-up paused" : item.kind === "decision" ? "Decision needed" : item.kind === "question" ? `Question ${item.questionId}` : item.kind === "answer" ? `Check ${item.questionId} answer` : item.kind === "retry" ? "Repairs blocked" : "Check PR action";
   return { label, urgent, count: 1 };
 }
 

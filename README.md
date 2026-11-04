@@ -85,6 +85,8 @@ Integration checks use a separate Paseo home with synthetic agents. Version tags
 
 [MIT](LICENSE) © 2026 Tom Gringauz.
 
+Questions, question modes and the activity log are adapted from [Progress](https://github.com/stevecastaneda/paseo-plugins/tree/main/progress) by Steve Castaneda (MIT). Its notice is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ## Other plugins
 
 - [Defer](https://github.com/tomgrin10/paseo-defer) — Schedule messages for later delivery.

@@ -1,6 +1,6 @@
 import { contributeDisplay } from "./client/display";
 import { withButtonVisibility } from "./client/button-visibility";
-import type { PluginClientContext, PluginButtonRegistration, PluginScreenProps, PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
+import { openExternalUrl, type PluginClientContext, type PluginButtonRegistration, type PluginScreenProps, type PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { Dimensions } from "react-native";
 import { FollowSettings } from "./client/settings";
 import { FollowPanel } from "./client/panel";
@@ -36,6 +36,11 @@ export default function contribute(host: PluginClientContext) {
     client.addWorkspacePanel({ id: "follow-through-tab", title: "Follow-up", icon: "GitPullRequest", locations: ["workspace"], Component: Panel }),
     client.addCommandCenterItem({ id: "open-follow-through", title: "Follow-up: open for this workspace", icon: "GitPullRequest", keywords: ["PR", "stack", "repairs", "done", "archive", "follow-through"], context: "workspace", onSelect({ openPanel }) { openPanel(panel(), { location: location() }); } }),
     client.addCommandCenterItem({ id: "open-follow-through-large", title: "Follow-up: open the larger view", icon: "Maximize2", keywords: ["expand", "full screen", "maximize", "PR", "stack"], context: "workspace", onSelect({ workspace, openScreen }) { openScreen({ screenId: LARGE_SCREEN, params: { workspaceId: workspace.id } }); } }),
+    client.addCommandCenterItem({ id: "open-follow-through-spec", title: "Follow-up: open the spec", icon: "FileText", keywords: ["spec", "artifact", "plan", "doc", "design"], context: "workspace", onSelect({ workspace, openPanel }) {
+      const url = store.get(workspace.id)?.spec?.url;
+      // Without a link yet, open the panel, where the spec link can be added.
+      if (url) void openExternalUrl(url).catch(() => undefined); else openPanel(panel(), { location: location() });
+    } }),
     client.addCommandCenterItem({ id: "follow-through-overview", title: "Follow-up: all tracked workspaces", icon: "LayoutList", keywords: ["workspaces", "needs you", "attention", "done", "overview"], context: "global", onSelect({ openScreen }) { openScreen({ screenId: OVERVIEW }); } }),
     client.addCommandCenterItem({ id: "follow-through-settings", title: "Follow-up: project settings", icon: "Settings", keywords: ["default", "tracking", "project"], context: "global", onSelect({ openScreen }) { openScreen({ screenId: "follow-through-settings" }); } }),
     client.addSlashCommand({ name: "follow-up", description: "Open this workspace's PRs and remaining work", argumentHint: "", context: "agent", onSubmit({ openPanel }) { openPanel(panel(), { location: location() }); } }),

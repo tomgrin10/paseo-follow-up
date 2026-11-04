@@ -13,6 +13,7 @@ import { StackBar } from "./header";
 import { Skeleton } from "./motion";
 import { raised, type Colors } from "./theme";
 import { overviewKey } from "./needs-you";
+import { SpecChip } from "./spec";
 
 // Accent stays for actions: working is plain foreground, waiting is muted, and only Done is green.
 export const statusColor = (c: Colors, status: Status) => status === "done" ? c.statusSuccess : status === "needs-you" ? c.statusWarning : status === "handling" ? c.foreground : c.foregroundMuted;
@@ -34,8 +35,9 @@ function WorkspaceRow({ w, theme, compact, now, onOpen, first }: { w: Workspace;
     style={state => ({ flexDirection: "row", gap: 12, paddingHorizontal: 14, paddingVertical: 12, borderTopWidth: first ? 0 : 1, borderTopColor: c.border, backgroundColor: state.pressed ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
     <View style={{ paddingTop: 2 }}><Icon name={statusIcon(status)} size={16} color={statusColor(c, status)} /></View>
     <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
-      <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <Text numberOfLines={1} style={[t.label, { flex: 1, fontSize: 14, lineHeight: 19 }]}>{w.title}{w.archived ? <Text style={{ color: c.foregroundMuted, fontWeight: "400" }}> · archived</Text> : null}</Text>
+        {!!w.spec?.url && <View style={{ marginVertical: -4 }}><SpecChip workspace={w} theme={theme} compact={false} /></View>}
         <Text style={[t.small, { fontVariant: ["tabular-nums"] }]}>{ago(w.updatedAt, now)}</Text>
       </View>
       <Text numberOfLines={2} style={[t.meta, { color: status === "needs-you" ? c.foreground : c.foregroundMuted }]}>{reasonFor(w, status, now)}</Text>

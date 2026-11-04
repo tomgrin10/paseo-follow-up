@@ -34,7 +34,7 @@ export const QUESTION_MODE_RULES: Record<QuestionMode, { label: string; hint: st
     hint: "Agents build their recommendation while you decide and change course if you pick another. Big questions still wait.",
     rule: ({ recommend, big }) => big || !recommend
       ? `This question waits like Work around. ${HOLD}`
-      : `Build option ${recommend} now and keep working. If the developer picks another option, undo the work built on ${recommend} and build their choice first.`,
+      : `Build option ${recommend} now and keep working. If the developer picks another option, undo the work built on ${recommend} and build their choice first. If everything else is done while it's still open, leave it open and say so in chat; don't withdraw it.`,
   },
 };
 
@@ -112,9 +112,9 @@ export function answerMessage(q: Question, choice: string, words?: string): stri
 }
 
 /** Parses an answer message back into its parts, for the chat card. */
-export function parseAnswerMessage(text: string): { id: string; title: string; choice: string; words: string | null } | null {
-  const match = /^Follow-up answer (Q\d+) \((.+?)\): ([^\n—]+?)(?: — [^\n]+)?\n(?:The developer added: ([^\n]+))?/.exec(text.trim() + "\n");
-  return match ? { id: match[1], title: match[2], choice: match[3].trim(), words: match[4]?.trim() ?? null } : null;
+export function parseAnswerMessage(text: string): { id: string; title: string; choice: string; label: string | null; words: string | null } | null {
+  const match = /^Follow-up answer (Q\d+) \((.+?)\): ([^\n—]+?)(?: — ([^\n]+))?\n(?:The developer added: ([^\n]+))?/.exec(text.trim() + "\n");
+  return match ? { id: match[1], title: match[2], choice: match[3].trim(), label: match[4]?.trim() ?? null, words: match[5]?.trim() ?? null } : null;
 }
 
 /** The answer is a known option letter, or free words when the question has no options. */

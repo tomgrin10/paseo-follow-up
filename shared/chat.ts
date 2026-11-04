@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /** Follow-up's own messages and tool calls, recognised in agent chats so they render as compact rows. */
-export const FOLLOW_TOOLS = ["workspace_status", "sync_workspace", "enroll_workspace", "register_pr", "exclude_stack", "update_obligation", "acknowledge_batch", "declare_done"] as const;
+export const FOLLOW_TOOLS = ["workspace_status", "sync_workspace", "enroll_workspace", "register_pr", "exclude_stack", "update_obligation", "acknowledge_batch", "declare_done", "ask_question", "record_answer", "withdraw_question", "set_spec"] as const;
 export type FollowTool = (typeof FOLLOW_TOOLS)[number];
 
 /** Claude records mcp__follow-through__register_pr; Codex records follow-through.register_pr. */
@@ -64,16 +64,19 @@ function json(text: string | undefined): Record<string, unknown> | null {
 }
 const str = (value: unknown) => typeof value === "string" ? value : typeof value === "number" ? String(value) : "";
 const firstLine = (text: string) => text.split("\n").map(l => l.trim()).find(Boolean) ?? "";
+const specHost = (url: string) => { try { return new URL(url).host.replace(/^www\./, ""); } catch { return url; } };
 const prKey = (key: string) => key.includes("#") ? `#${key.split("#")[1]}` : key;
 
 const RUNNING: Record<FollowTool, string> = {
   workspace_status: "Reading Follow-up status…", sync_workspace: "Syncing Follow-up…", enroll_workspace: "Updating the goal…",
   register_pr: "Registering a PR…", exclude_stack: "Excluding a stack…", update_obligation: "Updating a task…",
   acknowledge_batch: "Reporting repair results…", declare_done: "Checking whether the work is done…",
+  ask_question: "Asking you a question…", record_answer: "Recording your answer…", withdraw_question: "Withdrawing a question…", set_spec: "Saving the spec link…",
 };
 const NAMES: Record<FollowTool, string> = {
   workspace_status: "Follow-up status", sync_workspace: "Follow-up sync", enroll_workspace: "Goal update", register_pr: "PR registration",
   exclude_stack: "Stack exclusion", update_obligation: "Task update", acknowledge_batch: "Repair report", declare_done: "Done check",
+  ask_question: "Question", record_answer: "Answer record", withdraw_question: "Question withdrawal", set_spec: "Spec link",
 };
 
 /** One line for a finished Follow-up tool call, plus the text it opens to. */
@@ -103,6 +106,17 @@ export function toolRow(tool: FollowTool, status: "running" | "completed" | "fai
       const blocked = input.outcome === "blocked";
       return { ...base, state: "done", tone: blocked ? "warning" : "muted", line: `${blocked ? "Repairs blocked" : "Repairs finished"} · ${firstLine(str(input.result))}`, more: str(input.result) || more };
     }
+    case "ask_question": {
+      const question = record(result?.question) ? result!.question as Record<string, unknown> : null;
+      const id = str(question?.id);
+      return { ...base, state: "done", tone: "warning", line: `${id ? `Asked ${id}` : "Asked a question"}: ${firstLine(str(input.title) || str(question?.title))}`, more: [str(input.question), str(result?.instruction)].filter(Boolean).join("\n\n") || more };
+    }
+    case "record_answer": return { ...base, state: "done", line: `Recorded the ${str(input.id)} answer: ${firstLine(str(input.choice))}`, more: str(input.words) || more };
+    case "withdraw_question": return { ...base, state: "done", line: `Withdrew ${str(input.id)} · ${firstLine(str(input.reason))}`, more };
+    case "set_spec": {
+      const kept = result?.applied === false;
+      return { ...base, state: "done", line: kept ? "Spec link kept · the developer chose it" : `Spec link: ${firstLine(str(input.title)) || specHost(str(input.url))}`, more: str(result?.message) || more };
+    }
     case "declare_done": {
       const blockers = Array.isArray(result?.blockers) ? result!.blockers.map(str).filter(Boolean) : [];
       const completion = record(result?.completion) ? str(result!.completion.summary) : record(record(result?.workspace) ? (result!.workspace as Record<string, unknown>).completion : null) ? str(((result!.workspace as Record<string, unknown>).completion as Record<string, unknown>).summary) : "";
@@ -111,3 +125,6 @@ export function toolRow(tool: FollowTool, status: "running" | "completed" | "fai
     }
   }
 }
+
+export const answerCardSchema = z.object({ id: z.string(), title: z.string(), choice: z.string(), label: z.string().nullable(), words: z.string().nullable(), text: z.string() });
+export type AnswerCard = z.infer<typeof answerCardSchema>;

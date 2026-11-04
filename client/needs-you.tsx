@@ -7,9 +7,10 @@ import { needsYou, shortRefs, type NeedItem } from "../shared/attention";
 import type { Workspace } from "../shared/model";
 import { Button, Card, CardRow, errorText, text, type Theme } from "./kit";
 import type { Colors } from "./theme";
+import { meanwhile } from "./questions";
 
-export const workspaceKey = (id: string) => ["follow-through", "workspace", id];
-export const overviewKey = ["follow-through", "overview"];
+import { overviewKey, workspaceKey } from "./keys";
+export { overviewKey, workspaceKey };
 
 function glyph(item: NeedItem, colors: Colors): { name: string; color: string } {
   switch (item.kind) {
@@ -17,6 +18,8 @@ function glyph(item: NeedItem, colors: Colors): { name: string; color: string } 
     case "retry": return { name: "OctagonAlert", color: colors.statusDanger };
     case "check": return { name: "CircleHelp", color: colors.statusWarning };
     case "decision": return { name: "MessageCircleQuestion", color: colors.statusWarning };
+    case "question": return { name: item.state === "stopped" ? "CirclePause" : "MessageCircleQuestion", color: colors.statusWarning };
+    case "answer": return { name: "TriangleAlert", color: colors.statusWarning };
     case "send": return { name: "Send", color: colors.statusWarning };
     case "merge": return { name: "GitMerge", color: colors.statusSuccess };
     case "reviewers": return { name: "UserPlus", color: colors.foregroundMuted };
@@ -26,11 +29,12 @@ function glyph(item: NeedItem, colors: Colors): { name: string; color: string } 
 export type NeedActions = {
   openAgent?: (agentId: string) => void;
   openPr?: (prKey: string, intent: "merge" | "reviewers") => void;
+  openQuestion?: (questionId: string) => void;
   after?: () => void;
 };
 
 /** The developer's queue: one row per decision, each with its single action inline. */
-export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date.now(), flush = false }: { workspace: Workspace; theme: Theme; compact: boolean; actions: NeedActions; now?: number; flush?: boolean }) {
+export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date.now(), flush = false, skip = [] }: { workspace: Workspace; theme: Theme; compact: boolean; actions: NeedActions; now?: number; flush?: boolean; skip?: NeedItem["kind"][] }) {
   const c = theme.colors; const t = text(c);
   const toast = useToast();
   const cache = useQueryClient();
@@ -49,7 +53,7 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
     refresh(); actions.after?.();
   }, onError: fail });
   const inspect = useMutation({ mutationFn: (actionId: string) => check({ workspaceId: w.id, actionId }), onSuccess: reply => { toast.show(reply.result, { variant: reply.state === "failed" ? "warning" : "info" }); refresh(); }, onError: fail });
-  const items = needsYou(w, now);
+  const items = needsYou(w, now).filter(item => !skip.includes(item.kind));
   if (!items.length) return null;
   const busy = resume.isPending || retry.isPending || deliver.isPending || inspect.isPending;
   const openMain = actions.openAgent ? () => actions.openAgent!(w.mainAgentId) : undefined;
@@ -64,6 +68,8 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
         </>;
       case "check": return <Button theme={theme} compact={compact} icon="RefreshCw" title="Check state" loading={inspect.isPending} disabled={busy} onPress={() => inspect.mutate(item.actionId)} />;
       case "decision": return openMain && <Button theme={theme} compact={compact} icon="MessageSquare" title="Answer in chat" onPress={openMain} />;
+      case "question": return actions.openQuestion && <Button theme={theme} compact={compact} icon="MessageCircleReply" title="Answer" accessibilityLabel={`Answer ${item.title}`} onPress={() => actions.openQuestion!(item.questionId)} />;
+      case "answer": return actions.openQuestion && <Button theme={theme} compact={compact} icon="Eye" title="Check" accessibilityLabel={`Check the ${item.questionId} answer`} onPress={() => actions.openQuestion!(item.questionId)} />;
       case "send": return <Button theme={theme} compact={compact} kind="primary" icon="Send" title="Send to main agent" accessibilityLabel={`Send ${item.tasks.length} repairs to the main agent`} loading={deliver.isPending} disabled={busy || !!item.blocker} onPress={() => deliver.mutate(item.batchId)} />;
       case "merge": return actions.openPr && <Button theme={theme} compact={compact} icon="GitMerge" title={`Merge #${item.number}`} accessibilityLabel={`Review and merge pull request ${item.number}`} onPress={() => actions.openPr!(item.prKey, "merge")} />;
       case "reviewers": return actions.openPr && <Button theme={theme} compact={compact} icon="UserPlus" title="Add reviewers" onPress={() => actions.openPr!(item.prKey, "reviewers")} />;
@@ -78,7 +84,8 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
           <View style={{ paddingTop: 2 }}><Icon name={g.name} size={14} color={g.color} /></View>
           <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
             <Text style={t.body}>{item.title}</Text>
-            {"detail" in item && !!item.detail && <Text numberOfLines={3} style={t.meta}>{item.detail}</Text>}
+            {"detail" in item && !!item.detail && <Text numberOfLines={item.kind === "question" ? 2 : 3} style={t.meta}>{item.detail}</Text>}
+            {item.kind === "question" && <QuestionState workspace={w} questionId={item.questionId} theme={theme} />}
             {item.kind === "send" && <View style={{ gap: 2 }}>
               {item.tasks.slice(0, 4).map((task, i) => <Text key={i} numberOfLines={2} style={t.meta}><Text style={{ fontVariant: ["tabular-nums"] }}>{`${i + 1}. `}</Text>{shortRefs(task, w)}</Text>)}
               {item.tasks.length > 4 && <Text style={t.meta}>{`and ${item.tasks.length - 4} more`}</Text>}
@@ -91,6 +98,17 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
         </View>
       </CardRow>;
     })}
+  </View>;
+}
+
+function QuestionState({ workspace: w, questionId, theme }: { workspace: Workspace; questionId: string; theme: Theme }) {
+  const c = theme.colors;
+  const q = w.questions.find(x => x.id === questionId);
+  if (!q) return null;
+  const state = meanwhile(w, q);
+  return <View style={{ flexDirection: "row", gap: 5 }}>
+    <View style={{ paddingTop: 2 }}><Icon name={state.icon} size={11} color={state.color(c)} /></View>
+    <Text numberOfLines={2} style={[text(c).small, { flex: 1, color: state.color(c) }]}>{state.text}</Text>
   </View>;
 }
 
