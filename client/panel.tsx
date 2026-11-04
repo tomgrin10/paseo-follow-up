@@ -16,6 +16,8 @@ import { NeedsYouCard, overviewKey, workspaceKey } from "./needs-you";
 import { StacksCard } from "./stacks";
 import { TasksCard } from "./tasks";
 import { PrSheet } from "./pr-sheet";
+import { ActivityCard, QuestionSheet } from "./questions";
+import { SpecRow, SpecSheet } from "./spec";
 import { mergedColor, tint } from "./theme";
 
 export { overviewKey, workspaceKey };
@@ -133,7 +135,7 @@ function ShippedCard({ workspace: w, theme, compact, now }: { workspace: Workspa
 }
 
 /** Quiet extras: the main agent, optional recovery and the Graphite merge-when-ready connection. */
-function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, browserReady, openOverview }: { workspace: Workspace; theme: Theme; compact: boolean; open: (key: string) => boolean; toggle: (key: string) => void; openAgent?: (id: string) => void; browserReady: boolean | null; openOverview: () => void }) {
+function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, browserReady, openOverview, editSpec }: { workspace: Workspace; theme: Theme; compact: boolean; open: (key: string) => boolean; toggle: (key: string) => void; openAgent?: (id: string) => void; browserReady: boolean | null; openOverview: () => void; editSpec: () => void }) {
   const c = theme.colors; const t = text(c);
   const control = useRpc(controlRpc); const send = useRpc(sendRpc); const runRecovery = useRpc(recoverRpc); const cache = useQueryClient(); const toast = useToast();
   const invalidate = () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); };
@@ -147,8 +149,9 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
   const shown = open("workspace");
   const openUrl = (url: string) => { void openExternalUrl(url).catch(() => undefined); };
   return <View style={{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 8, borderWidth: 1, borderColor: c.border, overflow: "hidden" }}>
-    <View style={{ marginTop: -1 }}><FoldRow theme={theme} open={shown} onPress={() => toggle("workspace")} icon="SlidersHorizontal" iconColor={c.foregroundMuted} label="Agent, recovery and Graphite" /></View>
+    <View style={{ marginTop: -1 }}><FoldRow theme={theme} open={shown} onPress={() => toggle("workspace")} icon="SlidersHorizontal" iconColor={c.foregroundMuted} label="Spec, agent and recovery" /></View>
     {shown && <>
+      <SpecRow workspace={w} theme={theme} compact={compact} onEdit={editSpec} />
       <CardRow theme={theme}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <View style={{ flex: 1, minWidth: 160, gap: 2 }}>
@@ -216,7 +219,7 @@ function PanelWorkspace(props: PanelProps & { workspace: Workspace; loadError?: 
 }
 
 /** Two columns from this content width: actions on the left, the stacks on the right. */
-export const WIDE_MIN = 680;
+export const WIDE_MIN = 820;
 
 export function WorkspaceView({ theme, layout, workspace: w, navigation, loadError, openSettings, openOverview, folds: { isOpen, toggle }, resize, large = false }: PluginHostProps & {
   navigation?: PluginWorkspacePanelProps["navigation"]; workspace: Workspace; loadError?: string | null; openSettings: () => void; openOverview: () => void;
@@ -229,6 +232,8 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const [width, setWidth] = useState(0);
   const wide = !compact && width >= WIDE_MIN;
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" | null } | null>(null);
+  const [question, setQuestion] = useState<string | null>(null);
+  const [specOpen, setSpecOpen] = useState(false);
   const browser = useQuery({ queryKey: ["follow-through", "browser"], queryFn: () => browserRead({}), refetchInterval: 5000 });
   const invalidated = () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); };
   const auto = useMutation({ mutationFn: (next: boolean) => control({ workspaceId: w.id, enable_auto_sends: next }), onSuccess: (_, next) => { toast.show(next ? "Auto-send on for this workspace" : "Auto-send off · repairs wait for your click"); invalidated(); }, onError: e => toast.error(errorText(e)) });
@@ -240,7 +245,7 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const resizeShown = compact ? null : resize?.icon === "Maximize2" && wide ? null : resize;
   const header = <WorkspaceHeader workspace={w} theme={theme} compact={compact} now={now} onSettings={openSettings} onRefresh={() => update.mutate()} refreshing={update.isPending} onAuto={next => auto.mutate(next)} autoPending={auto.isPending} notice={loadError ?? null} onOpenPr={openPr} resize={resizeShown} />;
   const shipped = <ShippedCard workspace={w} theme={theme} compact={compact} now={now} />;
-  const needs = <NeedsYouCard workspace={w} theme={theme} compact={compact} now={now} actions={{ openAgent, openPr: (key, intent) => setSheet({ key, intent }) }} />;
+  const needs = <NeedsYouCard workspace={w} theme={theme} compact={compact} now={now} actions={{ openAgent, openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion }} />;
   const agent = <AgentCard workspace={w} theme={theme} compact={compact} now={now} openAgent={openAgent} />;
   // Once shipped, the stack and tasks are history: one quiet fold instead of two near-empty cards.
   const history = done && <View style={{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.colors.border, overflow: "hidden" }}>
@@ -249,15 +254,18 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const showWork = !done || isOpen("history");
   const stacks = showWork && <StacksCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} onOpen={openPr} wide={wide} />;
   const tasks = showWork && <TasksCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} />;
-  const extras = <WorkspaceCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} openAgent={openAgent} browserReady={browser.data ? browser.data.ready : null} openOverview={openOverview} />;
+  const log = <ActivityCard workspace={w} theme={theme} compact={compact} now={now} open={isOpen} toggle={toggle} onOpenQuestion={setQuestion} />;
+  const extras = <WorkspaceCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} openAgent={openAgent} browserReady={browser.data ? browser.data.ready : null} openOverview={openOverview} editSpec={() => setSpecOpen(true)} />;
   return <View onLayout={event => setWidth(event.nativeEvent.layout.width)} style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20, ...(large ? { maxWidth: 1240, width: "100%", alignSelf: "center", paddingHorizontal: 12 } : null) }}>
       {header}
       {wide ? <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
-        <View style={{ flex: 5, minWidth: 0 }}>{shipped}{needs}{agent}{history}{tasks}</View>
+        <View style={{ flex: 5, minWidth: 0 }}>{shipped}{needs}{agent}{history}{tasks}{log}</View>
         <View style={{ flex: 6, minWidth: 0 }}>{stacks}{extras}</View>
-      </View> : <>{shipped}{needs}{agent}{history}{stacks}{tasks}{extras}</>}
+      </View> : <>{shipped}{needs}{agent}{history}{stacks}{tasks}{log}{extras}</>}
     </ScrollView>
     <PrSheet workspace={w} prKey={sheet?.key ?? null} intent={sheet?.intent ?? null} theme={theme} compact={compact} browserReady={browser.data?.ready ?? false} onClose={() => setSheet(null)} />
+    <QuestionSheet workspace={w} questionId={question} theme={theme} compact={compact} openAgent={openAgent} onClose={() => setQuestion(null)} />
+    <SpecSheet workspace={w} open={specOpen} theme={theme} compact={compact} onClose={() => setSpecOpen(false)} />
   </View>;
 }

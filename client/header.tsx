@@ -5,6 +5,10 @@ import { ago, headline, liveLine, stackBar, type LiveIcon } from "../shared/atte
 import { IconButton, Switch, text, type Theme } from "./kit";
 import { IconSwap, Spinner } from "./motion";
 import { segmentPaint, type Colors } from "./theme";
+import { SpecChip } from "./spec";
+
+/** PR status older than this means the poll has stopped working; say so instead of looking current. */
+export const STALE_MS = 10 * 60_000;
 
 /** One segment per PR in stack order, coloured by state. The signature of the panel; a segment opens its PR. */
 export function StackBar({ workspace, theme, height = 6, onOpen }: { workspace: Pick<Workspace, "prs">; theme: Theme; height?: number; onOpen?: (key: string) => void }) {
@@ -46,6 +50,7 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
   const parts = headline(w, now);
   const live = liveLine(w, now);
   const checked = w.prs.map(p => p.snapshot?.observedAt).filter((v): v is string => !!v).sort().at(-1);
+  const stale = !!checked && w.prs.some(p => p.snapshot?.state === "OPEN") && now - Date.parse(checked) > STALE_MS;
   const toneOf = (tone?: string) => tone === "warning" ? c.statusWarning : tone === "danger" ? c.statusDanger : tone === "success" ? c.statusSuccess : undefined;
   const pad = compact ? 16 : 12;
   return <View style={{ paddingHorizontal: pad, paddingTop: compact ? 14 : 12, paddingBottom: 10, gap: 6, borderBottomWidth: 1, borderBottomColor: c.border }}>
@@ -53,7 +58,8 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
       {/* On phones the host header right above already shows the workspace name. */}
       {compact ? <Text numberOfLines={2} style={[t.meta, { flex: 1, paddingTop: 2 }]}>{w.goal}</Text>
         : <Text accessibilityRole="header" style={[t.title, { flex: 1 }]}>{w.title}</Text>}
-      <View style={{ flexDirection: "row", gap: 2, marginVertical: compact ? -12 : -4, marginRight: compact ? -10 : -4 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 2, marginVertical: compact ? -12 : -4, marginRight: compact ? -10 : -4 }}>
+        {!!w.spec?.url && <View style={{ marginRight: 4 }}><SpecChip workspace={w} theme={theme} compact={compact} /></View>}
         {resize && <IconButton icon={resize.icon} label={resize.label} onPress={resize.onPress} theme={theme} compact={compact} />}
         <IconButton icon="Settings" label="Follow-up settings" onPress={onSettings} theme={theme} compact={compact} />
       </View>
@@ -74,7 +80,7 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
       <Text style={[t.meta, { flex: 1, color: c.statusWarning }]}>{notice}</Text>
     </View>}
     <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2, minHeight: compact ? 44 : 28 }}>
-      <Text numberOfLines={1} style={[t.small, { flexShrink: 1 }]}>{checked ? `Checked ${ago(checked, now)}` : "Checks GitHub every 15s"}</Text>
+      <Text numberOfLines={1} style={[t.small, { flexShrink: 1 }, stale ? { color: c.statusWarning } : null]}>{checked ? `Checked ${ago(checked, now)}${stale ? " · may be out of date" : ""}` : "Checks GitHub every 15s"}</Text>
       <IconButton icon="RefreshCw" label="Refresh PR status" onPress={onRefresh} theme={theme} compact={compact} disabled={refreshing} spinning={refreshing} />
       <View style={{ flex: 1 }} />
       <Switch theme={theme} compact={compact} label="Auto-send" accessibilityLabel="Auto-send repairs" hint="Send repair batches to the main agent on its own when the agent is idle. Off means each batch waits for your click."

@@ -49,3 +49,18 @@ test("tool output text is read from Claude and Codex result shapes", () => {
   assert.equal(readText({ output: "plain" }), "plain");
   assert.equal(readText({ unknown: 1 }), undefined);
 });
+
+test("question and spec tools read as one line; answers sent from Follow-up become a card", async () => {
+  const { parseAnswerMessage, answerMessage } = await import("../shared/questions");
+  assert.equal(followToolName("mcp__follow-through__ask_question"), "ask_question");
+  const asked = toolRow("ask_question", "completed", { title: "Retry window", question: "How long should retries run?" }, JSON.stringify({ question: { id: "Q4", title: "Retry window" }, mode: "work-around", instruction: "Asked Q4. Question mode: Work around." }));
+  assert.equal(asked.line, "Asked Q4: Retry window"); assert.equal(asked.tone, "warning"); assert.match(asked.more!, /How long should retries run\?\n\nAsked Q4/);
+  assert.equal(toolRow("record_answer", "completed", { id: "Q4", choice: "B" }, "{}").line, "Recorded the Q4 answer: B");
+  assert.equal(toolRow("withdraw_question", "completed", { id: "Q4", reason: "Settled in review" }, "{}").line, "Withdrew Q4 · Settled in review");
+  assert.equal(toolRow("set_spec", "completed", { url: "https://claude.ai/code/artifact/abc" }, JSON.stringify({ applied: true, message: "Spec link saved." })).line, "Spec link: claude.ai");
+  assert.equal(toolRow("set_spec", "completed", { url: "https://claude.ai/code/artifact/abc", title: "Retry spec" }, JSON.stringify({ applied: false, message: "The developer chose…" })).line, "Spec link kept · the developer chose it");
+  assert.deepEqual(followShellCall(`node ~/.paseo/plugin-data/follow-through/mcp.mjs call set_spec '{"url":"https://claude.ai/artifact/x"}'`), { tool: "set_spec", input: { url: "https://claude.ai/artifact/x" } });
+  const q = { id: "Q4", title: "Retry window", question: "How long?", options: [{ letter: "B", label: "A day" }], recommend: "B", big: null, background: null, links: [], prKey: null, taskId: null, taskRevision: null, askedBy: "main-agent", askedAt: "2026-11-04T08:00:00Z", mode: "work-around" as const, answer: null, closed: null };
+  assert.deepEqual(parseAnswerMessage(answerMessage(q, "B", "Alert after that")), { id: "Q4", title: "Retry window", choice: "B", label: "A day", words: "Alert after that" });
+  assert.equal(parseBatchPrompt(answerMessage(q, "B")), null, "an answer is not a repair batch");
+});

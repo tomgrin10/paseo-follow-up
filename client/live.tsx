@@ -11,6 +11,9 @@ import { NeedsYouList, workspaceKey } from "./needs-you";
 import { Button, errorText, text } from "./kit";
 import { IconSwap } from "./motion";
 import { PrSheet } from "./pr-sheet";
+import { QuestionSheet, QuestionStepper } from "./questions";
+import { SpecChip } from "./spec";
+import { isOpen as questionOpen } from "../shared/questions";
 
 const POLL_MS = 8_000;
 
@@ -53,9 +56,17 @@ export function contributePills(client: PluginClientContext, store: LiveStore, o
   const pills = new Map<string, { workspaceId: string; label: string; urgent: boolean; pill: PluginButtonRegistration }>();
 
   function PillIcon(props: PluginButtonIconProps) {
-    const urgent = useLive(store, () => { const w = store.get(props.workspaceId); return !!w && !!pillFor(w)?.urgent; });
-    return <IconSwap swapKey={urgent ? "urgent" : "attention"} size={props.size}>
-      <Icon name={urgent ? "OctagonAlert" : "CircleAlert"} size={props.size} color={urgent ? props.theme.colors.statusDanger : props.theme.colors.statusWarning} />
+    const kind = useLive(store, () => {
+      const w = store.get(props.workspaceId);
+      if (!w) return "attention";
+      const items = needsYou(w);
+      if (items.some(i => ["hold", "retry", "check", "answer"].includes(i.kind))) return "urgent";
+      if (items.some(i => i.kind === "question" && i.state === "stopped")) return "stopped";
+      return items.every(i => i.kind === "question") ? "question" : "attention";
+    });
+    const c = props.theme.colors;
+    return <IconSwap swapKey={kind} size={props.size}>
+      <Icon name={kind === "urgent" ? "OctagonAlert" : kind === "stopped" ? "CirclePause" : kind === "question" ? "MessageCircleQuestion" : "CircleAlert"} size={props.size} color={kind === "urgent" ? c.statusDanger : c.statusWarning} />
     </IconSwap>;
   }
 
@@ -65,6 +76,7 @@ export function contributePills(client: PluginClientContext, store: LiveStore, o
     const query = useQuery({ queryKey: workspaceKey(props.workspaceId), queryFn: () => read({ workspaceId: props.workspaceId }), refetchInterval: 5000 });
     const browser = useQuery({ queryKey: ["follow-through", "browser"], queryFn: () => browserRead({}), refetchInterval: 5000 });
     const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" } | null>(null);
+    const [question, setQuestion] = useState<string | null>(null);
     const w = query.data?.workspace ?? store.get(props.workspaceId);
     const touch = props.layout.compact;
     const open = () => { props.close(); openPanel(props.workspaceId); };
@@ -75,12 +87,19 @@ export function contributePills(client: PluginClientContext, store: LiveStore, o
           {!touch && <Text style={t.label}>{needsYou(w).length === 1 ? "Follow-up needs you" : `Follow-up · ${needsYou(w).length} need you`}</Text>}
           <Text numberOfLines={1} style={t.meta}>{w.title}</Text>
         </View>
-        <NeedsYouList workspace={w} theme={props.theme} compact={touch} flush
-          actions={{ after: () => { store.refresh(); }, openPr: (key, intent) => setSheet({ key, intent }) }} />
+        {w.questions.some(questionOpen) && <View style={{ paddingTop: 10, borderTopWidth: 1, borderTopColor: c.border }}>
+          <QuestionStepper workspace={w} theme={props.theme} compact={touch} onAnswered={() => store.refresh()} />
+        </View>}
+        <View style={w.questions.some(questionOpen) && needsYou(w).some(i => i.kind !== "question") ? { borderTopWidth: 1, borderTopColor: c.border } : null}>
+          <NeedsYouList workspace={w} theme={props.theme} compact={touch} flush skip={["question"]}
+            actions={{ after: () => { store.refresh(); }, openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion }} />
+        </View>
         <PrSheet workspace={w} prKey={sheet?.key ?? null} intent={sheet?.intent ?? null} theme={props.theme} compact={touch} browserReady={browser.data?.ready ?? false} onClose={() => { setSheet(null); store.refresh(); }} />
+        <QuestionSheet workspace={w} questionId={question} theme={props.theme} compact={touch} onClose={() => { setQuestion(null); store.refresh(); }} />
       </> : <Text style={t.meta}>{query.error ? `Couldn't read Follow-up: ${errorText(query.error)}` : "Loading…"}</Text>}
-      <View style={{ paddingTop: 10, borderTopWidth: 1, borderTopColor: c.border }}>
-        <Button theme={props.theme} compact={touch} grow icon="PanelRight" title="Open Follow-up" onPress={open} />
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 10, borderTopWidth: 1, borderTopColor: c.border }}>
+        <View style={{ flex: 1 }}><Button theme={props.theme} compact={touch} grow icon="PanelRight" title="Open Follow-up" onPress={open} /></View>
+        {w?.spec?.url && <SpecChip workspace={w} theme={props.theme} compact={touch} />}
       </View>
     </View>;
   }
@@ -97,7 +116,8 @@ export function contributePills(client: PluginClientContext, store: LiveStore, o
     }
     for (const [agentId, next] of wanted) {
       const entry = pills.get(agentId);
-      const title = next.urgent ? "Follow-up: something is blocked" : "Follow-up needs you";
+      const asking = /^Question |questions$/.test(next.label);
+      const title = asking ? "Follow-up: the agent asked you a question" : next.urgent ? "Follow-up: something is blocked" : "Follow-up needs you";
       if (!entry) {
         const pill = client.addComposerPill({ id: "follow-up-attention", workspaceId: next.workspaceId, agentId, button: { title, label: next.label, icon: PillIcon, behavior: { kind: "popover", Content: PillContent } } });
         pills.set(agentId, { workspaceId: next.workspaceId, label: next.label, urgent: next.urgent, pill });
