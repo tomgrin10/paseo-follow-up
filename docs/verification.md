@@ -101,3 +101,36 @@ preferences gained `enable_composer_pill` with a default, so older saved documen
   card were reviewed in code only.
 - The manual browser scripts under `scripts/check-*.mjs` (other than `check-install.mjs`) still target
   the previous panel's labels and need updating before their next use.
+
+
+## Questions, spec links, activity and the larger view (unreleased, 2026-11-04)
+
+Agents can ask the developer questions (`ask_question`, `record_answer`, `withdraw_question`) and
+register the workspace's spec link (`set_spec`); the panel gained question rows and a dialog, a pill
+that steps through questions, an Activity card, a Spec chip and sheet, and a larger view. Saved
+states without `questions`, `spec` or `artifacts` parse with empty defaults; blocked tasks are
+mirrored as questions without changing the task. Question tools stay with the main agent, like goal,
+task and completion authority; contributor sessions keep PR registration, status and sync only.
+
+- `npm run verify`: TypeScript, 190 behaviour tests (new: question validation and main-agent
+  authority, unique refs, mode instructions, record/withdraw ownership, developer send/copy/resend,
+  answer message round trip, blocked-task mirroring and re-blocking, Done blockers, delivery sent /
+  queued-then-sent / unconfirmed-never-retried / Copy-never-sends / reload marks interrupted sends
+  unconfirmed, spec detection from Artifact publish receipts only, spec precedence developer > agent
+  > detection with remove and reset, persistence through discovery, activity ordering and durations,
+  needs-you ordering with stop-mode questions, chat rows and answer cards) and the button lifecycle
+  regression pass.
+- `npm run test:install`: passes with 12 native MCP tools for main agents, 6 for recovery and 3 for
+  contributors.
+- In the isolated harness (separate Paseo home, demo provider, fake `gh`), a real answer was sent to
+  the demo agent and arrived as a user message; spec detection picked the twice-published artifact
+  from a real timeline scan over a once-published one. Every new state was rendered at 1440×1000 and
+  390×844 in light and dark, the larger view also at 1024: question rows, dialog (unselected, picked
+  with a note, free-text task question, answered), pill stepper (two questions, single stop-mode
+  question, phone sheet), Activity timeline and Questions tabs, spec row and sheet (agent-registered
+  and detected with another artifact), stop-mode panel, overview with Spec chips, question mode
+  setting and chat rows. An overflow scan found no clipped text or horizontal scroll.
+- Not captured: the "may be out of date" header marker and the queued and unconfirmed delivery
+  states in the dialog (covered by unit tests). Answers to the demo agent after a plugin reload stay
+  unconfirmed because the demo provider times out its session refresh; the real Paseo path wasn't
+  exercised against a live agent.
