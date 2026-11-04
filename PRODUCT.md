@@ -21,15 +21,15 @@ Paseo native Explorer panel and workspace tab; global overview; persistent host-
 
 Canonical remote Git projects whose repository basename is `hero-poc` track by default, including organization and fork projects. Other projects start off. Native Settings → Plugins → Actions for follow-through → Follow-up and **Follow-up: project settings** provide per-project switches, persisted by stable project ID. On enrolls existing and future unarchived workspaces with a valid original main agent; Off stops further enrollment while preserving tracked records and settings. New enrollments have Auto off and do not send messages or create a recovery agent automatically. Existing tracked Auto choices remain unchanged.
 
-Existing-workspace inventory is an optional user action under Workspace → Recovery, repeatable after completion. It runs in a separate recovery agent. Its result and conversation remain accessible there; the original main agent retains ownership of repairs and Done. Recovery and repair prompts stay specific to their respective tasks. Manually registered PR repairs, dependency checks and Done never require inventory acknowledgment. Auto does not schedule recovery. Optional recovery activity, failures and permissions do not hold main-agent work.
+Existing-workspace inventory is an optional user action under the panel's Agent, recovery and Graphite disclosure, repeatable after completion. It runs in a separate recovery agent. Its result and conversation remain accessible there; the original main agent retains ownership of repairs and Done. Recovery and repair prompts stay specific to their respective tasks. Manually registered PR repairs, dependency checks and Done never require inventory acknowledgment. Auto does not schedule recovery. Optional recovery activity, failures and permissions do not hold main-agent work.
 
 Developer-corrected scope is retained through `exclude_stack`: unrelated stacks, their PRs, and associated obligations move into a durable audit with the reason and exclusion time. Excluded PRs and stack names are blocked from registration, so later recovery cannot silently restore them to owned work.
 
-Pull requests keeps active stacks visible and retains fully settled stacks under a collapsed **Settled** subsection, including their headings and counts. Expanding it reveals the historical stacks and their PRs.
+Pull requests keeps active stacks visible, folds merged PRs under each stack, and retains fully settled stacks behind one collapsed row with their counts. Expanding it reveals the historical stacks and their PRs. Once a workspace has shipped, stacks and tasks fold into a single History row under the Shipped card.
 
 Open PRs have human-operated Graphite **Merge** and **Merge when ready** controls in Follow-up. Merge always opens a fresh confirmation; an upper PR lists its owned unmerged downstack in order. MWR changes on an upper PR offer this PR or the listed downstack. A single-PR toggle applies after fresh checks. Changed revisions or membership invalidate confirmation; an uncertain result must be checked before another conflicting action. Reviewer requests on different PRs are independent; duplicate clicks on the same PR share the pending request. Submission reopens completion but never declares Done, changes ownership, or enables Auto.
 
-Tracking, recovery, follow-up, Done, and CLI-backed Merge work without Send to Paseo or a Graphite browser session. Merge and checking its result use saved Graphite CLI authentication. The optional browser companion supplies the signed-in session needed to read and change the actual MWR setting; all merge UI stays in Follow-up. Disconnected MWR switches are hidden and their individual browser reads pause. A collapsed **Optional merge when ready** subsection after PR stacks contains connection guidance; connecting restores the switches. Read-only Graphite readiness and queue observations still batch owned open PRs by repository with a 30-second cache. GitHub auto-merge remains separate. These adapters use internal Graphite APIs and require compatibility verification.
+Tracking, recovery, follow-up, Done, and CLI-backed Merge work without Send to Paseo or a Graphite browser session. Merge and checking its result use saved Graphite CLI authentication. The optional browser companion supplies the signed-in session needed to read and change the actual MWR setting; all merge UI stays in Follow-up. Disconnected MWR switches are hidden and their individual browser reads pause. Connection guidance lives in the collapsed Agent, recovery and Graphite disclosure; connecting restores the switches. Read-only Graphite readiness and queue observations still batch owned open PRs by repository with a 30-second cache. GitHub auto-merge remains separate. These adapters use internal Graphite APIs and require compatibility verification.
 
 ## Product Principles
 
@@ -47,16 +47,16 @@ Existing Graphite, Defer, Smart Session, and Session Guard plugin code; the deve
 
 ## Compact status and deployment follow-through
 
-The workspace view leads with compact PR headlines: icon/number/status in one column, a two-line title beside them, with full detail available on demand. Tasks are secondary concrete checks, migrations and decisions. Approval/merge/deploy checklist duplicates remain in legacy history and are omitted from Tasks. Goals, evidence and recovery details use disclosures.
+The workspace view leads with status: PRs merged, what needs the developer, what needs fixing, a stack bar and what the agent is doing now. Developer decisions sit in one Needs you card with an action each. PR rows are drawn as stack rails with a two-line title and `#n · status`; full detail opens in a PR sheet. Tasks are secondary concrete checks, migrations and decisions. Approval/merge/deploy checklist duplicates remain in legacy history and are omitted from Tasks. Goals, evidence and recovery details use disclosures.
 
 For herosecurity/hero-poc production, the plugin reads serving Cloud Run revisions and immutable build source commits, then checks the actual PR merge commit's git ancestry. PR status progresses from Merged to Deployed once deployment is confirmed; pending, partial or unknown deployment keeps the Merged label, with evidence available in details. Known production deployment must be verified before Done. Other repositories currently have no deployment adapter. Tasks default to manual. Explicit Now, merge or verified-deploy triggers can schedule delivery, with a delay in days and owned PR selection. Delays begin at the last selected event; deployment timers retain the first verified serving observation across polls and restarts. Unscheduled and future tasks never join repair batches; delivery retains explicit workspace Auto consent or a click, idle/hold guards and deduplication. Tasks with multiple dependencies wait for all of them.
 
 
 ## Sidebar settings and CI status
 
-The sidebar opens directly to PRs and remaining work, with one fixed settings cog at the bottom.
-It opens native Follow-up settings. Project and display preferences remain available in Paseo’s
-plugin settings and Command-K; the former top navigation strip is removed.
+The panel leads with its status header; the settings gear sits beside the workspace title. Project
+and display preferences remain available in Paseo’s plugin settings and Command-K. A composer pill
+and the header button's dot appear only while a workspace needs the developer.
 
 Stacked PRs inherit trunk check requirements when GitHub confirms their parent branch is an open
 PR head in the same repository. Other observed failing checks remain visible as Optional check
