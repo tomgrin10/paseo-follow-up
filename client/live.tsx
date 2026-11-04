@@ -82,7 +82,8 @@ export function contributePills(client: PluginClientContext, store: LiveStore, o
     const asking = !!w?.questions.some(questionOpen);
     const others = w ? needsYou(w).filter(i => i.kind !== "question") : [];
     const open = () => { props.close(); openPanel(props.workspaceId); };
-    return <View style={{ width: 360, maxWidth: "100%", gap: 10 }}>
+    // On phones the host sheet's own header already pads the top; tuck the content up to it.
+    return <View style={{ width: 360, maxWidth: "100%", gap: 10, marginTop: touch ? -12 : 0 }}>
       {w ? <>
         {/* Open questions take the whole popover, one at a time; the rest is a line and a click away. */}
         {asking ? <>
