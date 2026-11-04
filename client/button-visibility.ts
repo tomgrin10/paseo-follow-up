@@ -25,7 +25,8 @@ export function withButtonVisibility(client: PluginClientContext) {
   buttons.addComposerPill = input => gated("addComposerPill", input);
   const unsubscribe = subscribeDisplay(values => {
     enableHeader = values.enable_header_button;
-    
+    // Unknown is not off: older saved documents predate the pill preference.
+    enableComposer = values.enable_composer_pill !== false;
     for (const entry of entries) entry.reconcile();
   });
   return { client: buttons, dispose() { unsubscribe(); for (const entry of [...entries]) entry.remove(); } };

@@ -2,7 +2,7 @@
   "name": "paseo-follow-up",
   "private": false,
   "version": "0.3.6",
-  "description": "Track workspace pull requests, queue follow-up work, and verify completion in Paseo.",
+  "description": "Follow every workspace PR stack in Paseo, batch repairs for the main agent, and see what needs you.",
   "type": "module",
   "files": [
     "paseo-plugin.json",
