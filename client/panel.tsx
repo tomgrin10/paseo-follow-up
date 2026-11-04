@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
-import { useRpc, useTabState, openExternalUrl, type PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
+import { useRpc, useTabState, openExternalUrl, type PluginHostProps, type PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { getRpc, controlRpc, refreshRpc, activateRpc, browserStatusRpc, recoverRpc, sendRpc } from "../shared/contracts";
@@ -20,7 +20,7 @@ import { mergedColor, tint } from "./theme";
 
 export { overviewKey, workspaceKey };
 
-export type PanelLinks = { openSettings: () => void; openOverview: () => void };
+export type PanelLinks = { openSettings: () => void; openOverview: () => void; openLarge?: (workspaceId: string) => void };
 type PanelProps = PluginWorkspacePanelProps & PanelLinks;
 
 export function FollowPanel(props: PanelProps) {
@@ -38,7 +38,7 @@ export function FollowPanel(props: PanelProps) {
     </Card>
   </View>;
   if (!query.data?.workspace) return <StartTracking {...props} loadError={query.data?.error} />;
-  return <WorkspaceView {...props} workspace={query.data.workspace} loadError={query.error ? "Refresh failed. Showing the last saved state." : query.data.error} />;
+  return <PanelWorkspace {...props} workspace={query.data.workspace} loadError={query.error ? "Refresh failed. Showing the last saved state." : query.data.error} />;
 }
 
 function PanelSkeleton({ theme, compact }: { theme: Theme; compact: boolean }) {
@@ -197,38 +197,67 @@ function historyLabel(w: Workspace): string {
   const tasks = followUpObligations(w).filter(o => ["done", "waived"].includes(o.status)).length;
   return [`${w.prs.length} PR${w.prs.length === 1 ? "" : "s"} in ${stacks} stack${stacks === 1 ? "" : "s"}`, tasks ? `${tasks} task${tasks === 1 ? "" : "s"} done` : null].filter(Boolean).join(" · ");
 }
-export function WorkspaceView({ theme, layout, workspace: w, navigation, loadError, tab, openSettings, openOverview }: PanelProps & { workspace: Workspace; loadError?: string | null }) {
+
+export type Folds = { isOpen: (key: string) => boolean; toggle: (key: string) => void };
+/** Fold choices shared by a workspace's panel and its larger view during the app session. */
+const sessionFolds = new Map<string, string[]>();
+export function useSessionFolds(workspaceId: string): Folds {
+  const [open, setOpen] = useState<string[]>(() => sessionFolds.get(workspaceId) ?? []);
+  return { isOpen: key => open.includes(key), toggle: key => { const next = open.includes(key) ? open.filter(k => k !== key) : [...open, key]; sessionFolds.set(workspaceId, next); setOpen(next); } };
+}
+
+/** The panel keeps its folds in the tab's persisted state and mirrors them for the larger view. */
+function PanelWorkspace(props: PanelProps & { workspace: Workspace; loadError?: string | null }) {
+  const [state, setState] = useTabState(props.tab, folds, { open: sessionFolds.get(props.workspaceId) ?? [] });
+  const isOpen = (key: string) => state.open.includes(key);
+  const toggle = (key: string) => { const next = isOpen(key) ? state.open.filter(k => k !== key) : [...state.open, key]; sessionFolds.set(props.workspaceId, next); setState({ open: next }); };
+  const { openLarge } = props;
+  return <WorkspaceView {...props} folds={{ isOpen, toggle }} resize={openLarge ? { icon: "Maximize2", label: "Open the larger view", onPress: () => openLarge(props.workspaceId) } : null} />;
+}
+
+/** Two columns from this content width: actions on the left, the stacks on the right. */
+export const WIDE_MIN = 680;
+
+export function WorkspaceView({ theme, layout, workspace: w, navigation, loadError, openSettings, openOverview, folds: { isOpen, toggle }, resize, large = false }: PluginHostProps & {
+  navigation?: PluginWorkspacePanelProps["navigation"]; workspace: Workspace; loadError?: string | null; openSettings: () => void; openOverview: () => void;
+  folds: Folds; resize: { icon: "Maximize2" | "Minimize2"; label: string; onPress: () => void } | null; large?: boolean;
+}) {
   const control = useRpc(controlRpc); const refresh = useRpc(refreshRpc); const browserRead = useRpc(browserStatusRpc);
   const cache = useQueryClient(); const toast = useToast();
   const now = useNow(30_000);
   const compact = layout.compact;
-  const [state, setState] = useTabState(tab, folds, { open: [] });
+  const [width, setWidth] = useState(0);
+  const wide = !compact && width >= WIDE_MIN;
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" | null } | null>(null);
-  const isOpen = (key: string) => state.open.includes(key);
-  const toggle = (key: string) => setState({ open: isOpen(key) ? state.open.filter(k => k !== key) : [...state.open, key] });
   const browser = useQuery({ queryKey: ["follow-through", "browser"], queryFn: () => browserRead({}), refetchInterval: 5000 });
   const invalidated = () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); };
   const auto = useMutation({ mutationFn: (next: boolean) => control({ workspaceId: w.id, enable_auto_sends: next }), onSuccess: (_, next) => { toast.show(next ? "Auto-send on for this workspace" : "Auto-send off · repairs wait for your click"); invalidated(); }, onError: e => toast.error(errorText(e)) });
   const update = useMutation({ mutationFn: () => refresh({ workspaceId: w.id }), onSuccess: () => setTimeout(invalidated, 1200), onError: e => toast.error(errorText(e)) });
   const openAgent = navigation ? (agentId: string) => navigation.openAgent({ agentId }) : undefined;
   const done = summary(w, now).status === "done";
-  return <View style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>
-    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20 }}>
-      <WorkspaceHeader workspace={w} theme={theme} compact={compact} now={now} onSettings={openSettings} onRefresh={() => update.mutate()} refreshing={update.isPending} onAuto={next => auto.mutate(next)} autoPending={auto.isPending} notice={loadError ?? null} onOpenPr={key => setSheet({ key, intent: null })} />
-      <ShippedCard workspace={w} theme={theme} compact={compact} now={now} />
-      <NeedsYouCard workspace={w} theme={theme} compact={compact} now={now} actions={{ openAgent, openPr: (key, intent) => setSheet({ key, intent }) }} />
-      <AgentCard workspace={w} theme={theme} compact={compact} now={now} openAgent={openAgent} />
-      {/* Once shipped, the stack and tasks are history: one quiet fold instead of two near-empty cards. */}
-      {done && <View style={{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.colors.border, overflow: "hidden" }}>
-        <View style={{ marginTop: -1 }}><FoldRow theme={theme} open={isOpen("history")} onPress={() => toggle("history")} icon="History" iconColor={theme.colors.foregroundMuted} label={historyLabel(w)} /></View>
-      </View>}
-      {(!done || isOpen("history")) && <>
-        <StacksCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} onOpen={key => setSheet({ key, intent: null })} />
-        <TasksCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} />
-      </>}
-      <WorkspaceCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} openAgent={openAgent} browserReady={browser.data ? browser.data.ready : null} openOverview={openOverview} />
+  const openPr = (key: string) => setSheet({ key, intent: null });
+  // The expand button only appears while the panel is narrow; a wide panel or the larger view keeps its collapse button.
+  const resizeShown = compact ? null : resize?.icon === "Maximize2" && wide ? null : resize;
+  const header = <WorkspaceHeader workspace={w} theme={theme} compact={compact} now={now} onSettings={openSettings} onRefresh={() => update.mutate()} refreshing={update.isPending} onAuto={next => auto.mutate(next)} autoPending={auto.isPending} notice={loadError ?? null} onOpenPr={openPr} resize={resizeShown} />;
+  const shipped = <ShippedCard workspace={w} theme={theme} compact={compact} now={now} />;
+  const needs = <NeedsYouCard workspace={w} theme={theme} compact={compact} now={now} actions={{ openAgent, openPr: (key, intent) => setSheet({ key, intent }) }} />;
+  const agent = <AgentCard workspace={w} theme={theme} compact={compact} now={now} openAgent={openAgent} />;
+  // Once shipped, the stack and tasks are history: one quiet fold instead of two near-empty cards.
+  const history = done && <View style={{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.colors.border, overflow: "hidden" }}>
+    <View style={{ marginTop: -1 }}><FoldRow theme={theme} open={isOpen("history")} onPress={() => toggle("history")} icon="History" iconColor={theme.colors.foregroundMuted} label={historyLabel(w)} /></View>
+  </View>;
+  const showWork = !done || isOpen("history");
+  const stacks = showWork && <StacksCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} onOpen={openPr} wide={wide} />;
+  const tasks = showWork && <TasksCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} />;
+  const extras = <WorkspaceCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} openAgent={openAgent} browserReady={browser.data ? browser.data.ready : null} openOverview={openOverview} />;
+  return <View onLayout={event => setWidth(event.nativeEvent.layout.width)} style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20, ...(large ? { maxWidth: 1240, width: "100%", alignSelf: "center", paddingHorizontal: 12 } : null) }}>
+      {header}
+      {wide ? <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
+        <View style={{ flex: 5, minWidth: 0 }}>{shipped}{needs}{agent}{history}{tasks}</View>
+        <View style={{ flex: 6, minWidth: 0 }}>{stacks}{extras}</View>
+      </View> : <>{shipped}{needs}{agent}{history}{stacks}{tasks}{extras}</>}
     </ScrollView>
     <PrSheet workspace={w} prKey={sheet?.key ?? null} intent={sheet?.intent ?? null} theme={theme} compact={compact} browserReady={browser.data?.ready ?? false} onClose={() => setSheet(null)} />
   </View>;
 }
-

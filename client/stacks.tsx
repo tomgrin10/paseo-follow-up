@@ -30,7 +30,7 @@ function statusColor(colors: Colors, pr: Pr) {
   return tone === "merged" ? mergedColor(colors) : tone === "approved" ? colors.statusSuccess : tone === "warning" ? (prTone(pr) === "danger" ? colors.statusDanger : colors.statusWarning) : colors.foregroundMuted;
 }
 
-export function PrRow({ pr, theme, first, last, showRepo, onOpen, compact }: { pr: Pr; theme: Theme; first: boolean; last: boolean; showRepo: boolean; onOpen: (key: string) => void; compact: boolean }) {
+export function PrRow({ pr, theme, first, last, showRepo, onOpen, compact, wide = false }: { pr: Pr; theme: Theme; first: boolean; last: boolean; showRepo: boolean; onOpen: (key: string) => void; compact: boolean; wide?: boolean }) {
   const c = theme.colors; const t = text(c);
   const s = pr.snapshot;
   const status = compactPrStatus(pr);
@@ -47,19 +47,28 @@ export function PrRow({ pr, theme, first, last, showRepo, onOpen, compact }: { p
       <Node pr={pr} colors={c} />
       <View style={{ width: 2, flex: 1, minHeight: 4, backgroundColor: last ? "transparent" : line }} />
     </View>
-    <View style={{ flex: 1, minWidth: 0, paddingVertical: 8, gap: 2 }}>
+    {/* Wide views give each row a status column, so titles stay on one line and states line up. */}
+    {wide ? <>
+      <View style={{ flex: 1, minWidth: 0, paddingVertical: 8, gap: 2 }}>
+        <Text numberOfLines={1} style={[t.body, s?.state !== "OPEN" && s ? { color: c.foregroundMuted } : null]}>{s?.title ?? `${pr.repo} pull request`}</Text>
+        <Text numberOfLines={1} style={t.meta}>{showRepo ? `${pr.repo} ` : ""}#{pr.number}{extras.map(e => ` · ${e}`).join("")}</Text>
+      </View>
+      <View style={{ width: 150, paddingTop: 8, alignItems: "flex-end" }}>
+        <Text numberOfLines={1} style={[t.meta, { color: statusColor(c, pr), fontWeight: "600" }]}>{label}</Text>
+      </View>
+    </> : <View style={{ flex: 1, minWidth: 0, paddingVertical: 8, gap: 2 }}>
       <Text numberOfLines={2} style={[t.body, s?.state !== "OPEN" && s ? { color: c.foregroundMuted } : null]}>{s?.title ?? `${pr.repo} pull request`}</Text>
       <Text numberOfLines={1} style={t.meta}>
         <Text style={{ fontVariant: ["tabular-nums"] }}>{showRepo ? `${pr.repo.split("/")[1]} ` : ""}#{pr.number}</Text>
         {" · "}<Text style={{ color: statusColor(c, pr), fontWeight: "600" }}>{label}</Text>
         {extras.map(e => <Text key={e}>{` · ${e}`}</Text>)}
       </Text>
-    </View>
+    </View>}
     <View style={{ paddingTop: 11 }}><Icon name="ChevronRight" size={14} color={c.foregroundMuted} /></View>
   </Pressable>;
 }
 
-function StackRows({ name, prs, theme, open, toggle, onOpen, compact, showRepo, settled }: { name: string; prs: Pr[]; theme: Theme; open: (key: string) => boolean; toggle: (key: string) => void; onOpen: (key: string) => void; compact: boolean; showRepo: boolean; settled: boolean }) {
+function StackRows({ name, prs, theme, open, toggle, onOpen, compact, showRepo, settled, wide }: { name: string; prs: Pr[]; theme: Theme; open: (key: string) => boolean; toggle: (key: string) => void; onOpen: (key: string) => void; compact: boolean; showRepo: boolean; settled: boolean; wide: boolean }) {
   const c = theme.colors; const t = text(c);
   // Graphite's orientation: the top of the stack first, its base (merged first) at the bottom.
   const ordered = stackOrder(prs).reverse();
@@ -75,7 +84,7 @@ function StackRows({ name, prs, theme, open, toggle, onOpen, compact, showRepo, 
       <Text numberOfLines={1} style={[t.label, { flex: 1, fontSize: 12, lineHeight: 17 }]}>{name}</Text>
       <Text style={[t.small, { fontVariant: ["tabular-nums"] }]}>{settled ? `${prs.length} PR${prs.length === 1 ? "" : "s"}` : `${merged} of ${prs.length} merged`}</Text>
     </View>
-    {rows.map((pr, i) => <PrRow key={pr.key} pr={pr} theme={theme} first={i === 0} last={i === rows.length - 1 && !fold} showRepo={showRepo} onOpen={onOpen} compact={compact} />)}
+    {rows.map((pr, i) => <PrRow key={pr.key} pr={pr} theme={theme} first={i === 0} last={i === rows.length - 1 && !fold} showRepo={showRepo} onOpen={onOpen} compact={compact} wide={wide} />)}
     {fold && <Pressable accessibilityRole="button" aria-expanded={showDone} accessibilityState={{ expanded: showDone }} accessibilityLabel={`${showDone ? "Hide" : "Show"} ${done.length} merged PR${done.length === 1 ? "" : "s"} in ${name}`} onPress={() => toggle(foldKey)}
       style={state => ({ flexDirection: "row", gap: 10, paddingHorizontal: 12, minHeight: compact ? 44 : 30, backgroundColor: state.pressed ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
       <View style={{ width: NODE, alignItems: "center" }}>
@@ -90,7 +99,7 @@ function StackRows({ name, prs, theme, open, toggle, onOpen, compact, showRepo, 
   </View>;
 }
 
-export function StacksCard({ workspace: w, theme, compact, open, toggle, onOpen }: { workspace: Workspace; theme: Theme; compact: boolean; open: (key: string) => boolean; toggle: (key: string) => void; onOpen: (key: string) => void }) {
+export function StacksCard({ workspace: w, theme, compact, open, toggle, onOpen, wide = false }: { workspace: Workspace; theme: Theme; compact: boolean; open: (key: string) => boolean; toggle: (key: string) => void; onOpen: (key: string) => void; wide?: boolean }) {
   const c = theme.colors; const t = text(c);
   const stacks = orderedStacks(w.prs);
   const active = stacks.filter(s => !s.prs.every(settledForDisplay));
@@ -109,11 +118,11 @@ export function StacksCard({ workspace: w, theme, compact, open, toggle, onOpen 
       <Text style={t.body}>No PRs yet</Text>
       <Text style={t.meta}>The main agent registers each PR it opens, and Follow-up also picks up PRs submitted from this workspace's sessions.</Text>
     </View>}
-    {active.map(s => <StackRows key={s.name} name={s.name} prs={s.prs} theme={theme} open={open} toggle={toggle} onOpen={onOpen} compact={compact} showRepo={showRepo} settled={false} />)}
+    {active.map(s => <StackRows key={s.name} name={s.name} prs={s.prs} theme={theme} open={open} toggle={toggle} onOpen={onOpen} compact={compact} showRepo={showRepo} settled={false} wide={wide} />)}
     {settled.length > 0 && <>
       <FoldRow theme={theme} open={settledOpen} onPress={() => toggle("settled")} icon="Archive" iconColor={c.foregroundMuted}
         label={`${settled.length} settled stack${settled.length === 1 ? "" : "s"} · ${settledPrs} PR${settledPrs === 1 ? "" : "s"}`} />
-      {settledOpen && settled.map(s => <StackRows key={s.name} name={s.name} prs={s.prs} theme={theme} open={open} toggle={toggle} onOpen={onOpen} compact={compact} showRepo={showRepo} settled />)}
+      {settledOpen && settled.map(s => <StackRows key={s.name} name={s.name} prs={s.prs} theme={theme} open={open} toggle={toggle} onOpen={onOpen} compact={compact} showRepo={showRepo} settled wide={wide} />)}
     </>}
   </Card>;
 }
