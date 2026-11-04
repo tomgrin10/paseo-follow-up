@@ -5,7 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { checkPrActionRpc, controlRpc, sendRpc } from "../shared/contracts";
 import { needsYou, shortRefs, type NeedItem } from "../shared/attention";
 import type { Workspace } from "../shared/model";
-import { Button, Card, CardRow, text, type Theme } from "./kit";
+import { Button, Card, CardRow, errorText, text, type Theme } from "./kit";
 import type { Colors } from "./theme";
 
 export const workspaceKey = (id: string) => ["follow-through", "workspace", id];
@@ -36,10 +36,18 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
   const cache = useQueryClient();
   const control = useRpc(controlRpc); const send = useRpc(sendRpc); const check = useRpc(checkPrActionRpc);
   const refresh = () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); };
-  const fail = (error: Error) => { toast.error(error.message); refresh(); };
+  const fail = (error: Error) => { toast.error(errorText(error)); refresh(); };
   const resume = useMutation({ mutationFn: () => control({ workspaceId: w.id, clearHold: true }), onSuccess: () => { toast.show("Follow-up resumed", { variant: "success" }); refresh(); actions.after?.(); }, onError: fail });
   const retry = useMutation({ mutationFn: (batchId: string) => control({ workspaceId: w.id, retryBatchId: batchId }), onSuccess: () => { toast.show("Repairs queued again"); refresh(); actions.after?.(); }, onError: fail });
-  const deliver = useMutation({ mutationFn: (batchId: string) => send({ workspaceId: w.id, batchId }), onSuccess: () => { toast.show("Sent to the main agent", { variant: "success" }); refresh(); actions.after?.(); }, onError: fail });
+  // Say what actually happened to the batch: delivery can be deferred or unconfirmed without an error.
+  const deliver = useMutation({ mutationFn: (batchId: string) => send({ workspaceId: w.id, batchId }), onSuccess: (result, batchId) => {
+    const b = result.batches.find(x => x.id === batchId);
+    if (!b || ["sent", "sending", "completed"].includes(b.state)) toast.show("Sent to the main agent", { variant: "success" });
+    else if (b.state === "uncertain") toast.show("Delivery wasn't confirmed. Check the agent before retrying.", { variant: "warning" });
+    else if (b.state === "pending") toast.show("Queued. It goes out when the agent is free.", { variant: "info" });
+    else toast.error(b.result || "The repairs couldn't be sent.");
+    refresh(); actions.after?.();
+  }, onError: fail });
   const inspect = useMutation({ mutationFn: (actionId: string) => check({ workspaceId: w.id, actionId }), onSuccess: reply => { toast.show(reply.result, { variant: reply.state === "failed" ? "warning" : "info" }); refresh(); }, onError: fail });
   const items = needsYou(w, now);
   if (!items.length) return null;

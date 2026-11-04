@@ -9,7 +9,7 @@ import { summary, type Workspace } from "../shared/model";
 import { followUpObligations, recoveryBatch } from "../shared/follow-up";
 import { settledForDisplay } from "../shared/presentation";
 import { ago, sendBlocker, shortRefs } from "../shared/attention";
-import { Button, Card, CardRow, FoldRow, IconButton, text, useNow, type Theme } from "./kit";
+import { Button, Card, CardRow, FoldRow, IconButton, errorText, text, useNow, type Theme } from "./kit";
 import { Reveal, Skeleton, Spinner } from "./motion";
 import { WorkspaceHeader } from "./header";
 import { NeedsYouCard, overviewKey, workspaceKey } from "./needs-you";
@@ -32,7 +32,7 @@ export function FollowPanel(props: PanelProps) {
   if (query.error && !query.data?.workspace) return <View style={[base, { padding: props.layout.compact ? 16 : 12 }]}>
     <Card theme={props.theme} compact={props.layout.compact} icon="CloudOff" title="Can't reach Follow-up" style={{ marginHorizontal: 0, marginTop: 0 }}>
       <CardRow theme={props.theme}>
-        <Text accessibilityRole="alert" style={[text(c).meta, { marginBottom: 10 }]}>The plugin didn't answer: {query.error.message}. It may still be starting; your tracked work is saved on the host.</Text>
+        <Text accessibilityRole="alert" style={[text(c).meta, { marginBottom: 10 }]}>The plugin didn't answer: {errorText(query.error)}. It may still be starting; your tracked work is saved on the host.</Text>
         <Button title="Try again" icon="RefreshCw" theme={props.theme} compact={props.layout.compact} loading={query.isRefetching} onPress={() => void query.refetch()} />
       </CardRow>
     </Card>
@@ -84,7 +84,7 @@ function StartTracking({ theme, workspaceId, layout, loadError, openSettings }: 
       </View>)}
     </View>
     <Text style={t.meta}>Nothing is sent, merged or archived without your click. Auto-send stays off until you turn it on for this workspace.</Text>
-    {(loadError || start.error) && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusDanger }]}>{start.error?.message ?? loadError}</Text>}
+    {(loadError || start.error) && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusDanger }]}>{start.error ? errorText(start.error) : loadError}</Text>}
     <Button title="Track this workspace" kind="primary" icon="Plus" theme={theme} compact={compact} loading={start.isPending} onPress={() => start.mutate()} />
     <Text style={t.small}>To track every workspace in a project, turn it on in Settings. Tracking data stays on this host.</Text>
   </ScrollView>;
@@ -137,7 +137,7 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
   const c = theme.colors; const t = text(c);
   const control = useRpc(controlRpc); const send = useRpc(sendRpc); const runRecovery = useRpc(recoverRpc); const cache = useQueryClient(); const toast = useToast();
   const invalidate = () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); };
-  const fail = (e: Error) => toast.error(e.message);
+  const fail = (e: Error) => toast.error(errorText(e));
   const recovery = useMutation({ mutationFn: () => runRecovery({ workspaceId: w.id }), onSuccess: invalidate, onError: fail });
   const runQueued = useMutation({ mutationFn: (batchId: string) => send({ workspaceId: w.id, batchId }), onSuccess: invalidate, onError: fail });
   const retry = useMutation({ mutationFn: (batchId: string) => control({ workspaceId: w.id, retryBatchId: batchId }), onSuccess: invalidate, onError: fail });
@@ -208,8 +208,8 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const toggle = (key: string) => setState({ open: isOpen(key) ? state.open.filter(k => k !== key) : [...state.open, key] });
   const browser = useQuery({ queryKey: ["follow-through", "browser"], queryFn: () => browserRead({}), refetchInterval: 5000 });
   const invalidated = () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); };
-  const auto = useMutation({ mutationFn: (next: boolean) => control({ workspaceId: w.id, enable_auto_sends: next }), onSuccess: (_, next) => { toast.show(next ? "Auto-send on for this workspace" : "Auto-send off · repairs wait for your click"); invalidated(); }, onError: e => toast.error(e.message) });
-  const update = useMutation({ mutationFn: () => refresh({ workspaceId: w.id }), onSuccess: () => setTimeout(invalidated, 1200), onError: e => toast.error(e.message) });
+  const auto = useMutation({ mutationFn: (next: boolean) => control({ workspaceId: w.id, enable_auto_sends: next }), onSuccess: (_, next) => { toast.show(next ? "Auto-send on for this workspace" : "Auto-send off · repairs wait for your click"); invalidated(); }, onError: e => toast.error(errorText(e)) });
+  const update = useMutation({ mutationFn: () => refresh({ workspaceId: w.id }), onSuccess: () => setTimeout(invalidated, 1200), onError: e => toast.error(errorText(e)) });
   const openAgent = navigation ? (agentId: string) => navigation.openAgent({ agentId }) : undefined;
   const done = summary(w, now).status === "done";
   return <View style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>

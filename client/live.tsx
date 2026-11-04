@@ -8,7 +8,7 @@ import { getRpc, listRpc, browserStatusRpc } from "../shared/contracts";
 import type { Workspace } from "../shared/model";
 import { needsYou, pillFor } from "../shared/attention";
 import { NeedsYouList, workspaceKey } from "./needs-you";
-import { Button, text } from "./kit";
+import { Button, errorText, text } from "./kit";
 import { IconSwap } from "./motion";
 import { PrSheet } from "./pr-sheet";
 
@@ -78,7 +78,7 @@ export function contributePills(client: PluginClientContext, store: LiveStore, o
         <NeedsYouList workspace={w} theme={props.theme} compact={touch} flush
           actions={{ after: () => { store.refresh(); }, openPr: (key, intent) => setSheet({ key, intent }) }} />
         <PrSheet workspace={w} prKey={sheet?.key ?? null} intent={sheet?.intent ?? null} theme={props.theme} compact={touch} browserReady={browser.data?.ready ?? false} onClose={() => { setSheet(null); store.refresh(); }} />
-      </> : <Text style={t.meta}>{query.error ? `Couldn't read Follow-up: ${query.error.message}` : "Loading…"}</Text>}
+      </> : <Text style={t.meta}>{query.error ? `Couldn't read Follow-up: ${errorText(query.error)}` : "Loading…"}</Text>}
       <View style={{ paddingTop: 10, borderTopWidth: 1, borderTopColor: c.border }}>
         <Button theme={props.theme} compact={touch} grow icon="PanelRight" title="Open Follow-up" onPress={open} />
       </View>
