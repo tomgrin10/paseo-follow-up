@@ -5,9 +5,12 @@
 [![Paseo](https://img.shields.io/badge/Paseo-%E2%89%A5%200.14.0-8A63D2?style=for-the-badge)](https://paseo.sh)
 [![License](https://img.shields.io/github/license/tomgrin10/paseo-follow-up?style=for-the-badge&color=2563eb)](LICENSE)
 
-Keep long-lived workspaces moving through review, deployment and completion. Follow-up tracks each workspace's PR stack and remaining tasks, batches repairs for its main agent, and records when that agent declares the work done.
+Follow-up watches every pull request a Paseo workspace opens until the work is actually done. It shows the whole stack at a glance, gathers conflicts, failing checks and review threads into one repair batch for the workspace's main agent, and tells you when something needs you: an approved PR to merge, a question to answer, or a batch to send.
 
-![Follow-up workspace panel with sample pull requests and remaining tasks](docs/screenshots/follow-up-workspace.png)
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="docs/media/follow-up-hero-light.png">
+  <img alt="A Paseo workspace with the Follow-up panel open: 1 of 5 PRs merged, 3 need you, 2 to fix, a coloured stack bar, a Needs you card with Send to main agent and Merge #418, and Follow-up's tool calls shown as one-line rows in the chat" src="docs/screenshots/follow-up-hero.png">
+</picture>
 
 Screenshots use synthetic workspaces and PRs.
 
@@ -17,18 +20,47 @@ Screenshots use synthetic workspaces and PRs.
 paseo plugin install paseo-follow-up
 ```
 
-Needs Node 22+ and an authenticated GitHub CLI (`gh`) on the daemon host, plus saved Graphite CLI authentication for Graphite readiness and Merge controls. The installed plugin ID stays `follow-through` so existing settings and tracked work carry over.
+Needs Node 22+ and an authenticated GitHub CLI (`gh`) on the daemon host. Merge buttons use your saved Graphite CLI authentication. The installed plugin ID stays `follow-through`, so existing settings and tracked work carry over.
 
 ## Use
 
-Open **Follow-up** from the sidebar or ⌘K / Ctrl+K. In a workspace, use the header button or panel and click **Track this workspace**.
+Open a workspace, click the Follow-up icon in its header (or press ⌘K / Ctrl+K and choose **Follow-up: open for this workspace**), then **Track this workspace**. To track every workspace in a project, open the settings (the gear in the panel, or **Follow-up: project settings** in ⌘K) and turn the project on.
 
-- The workspace's main agent owns its PRs, tasks and the Done declaration. Other agents in the workspace can register PRs and check status.
-- With **Auto** off, you review and send each repair batch. With Auto on, Follow-up sends them itself after fresh idle, permission and Session Guard checks. It never merges, enables merge when ready, requests reviewers or archives workspaces.
-- Tasks run manually, or **Now**, **After merge** or **After deploy**, with an optional delay. A merged PR alone does not count as done.
-- **Project settings** choose which projects are tracked. New workspaces start with Auto off.
+The panel reads top to bottom:
 
-![Follow-up overview with sample workspaces](docs/screenshots/follow-up-overview.png)
+- **Status.** How many PRs have merged, how many things need you, how many PRs need fixing, and a bar with one segment per PR in merge order. Below it, what the agent is doing right now.
+- **Needs you.** One row per decision, each with its button: send repairs to the main agent, merge an approved PR, resume after you stopped the agent, retry a batch that didn't finish, or answer the agent's question in chat.
+- **Pull requests.** Each stack drawn top to base, the way Graphite shows it, with merged PRs folded away.
+- **Tasks.** Work that outlives a merge, such as a production check or a backfill. Tasks wait for you unless you schedule them for after a merge or deploy.
+
+![Four Follow-up panels side by side: a workspace that needs you, one where the agent is fixing two repairs, one that has shipped, and one that is not tracked yet](docs/screenshots/follow-up-states.png)
+
+When a workspace needs you, a pill appears above its main agent's message box with the same actions, and the sidebar's Follow-up row counts how many workspaces are waiting. Nothing shows when nothing needs you.
+
+![The composer pill "3 need you" opened into a popover with a question, three repairs ready to send, and an approved PR](docs/screenshots/follow-up-pill.png)
+
+Tap a PR, or its segment in the bar, for a sheet with its checks, reviewers and Merge controls. When Merge isn't available yet, the sheet says what it is waiting for.
+
+![The PR sheet for a PR whose required checks failed](docs/screenshots/follow-up-pr.png)
+
+In the agent's chat, Follow-up's own tool calls collapse into one-line rows, a repair batch shows as a short card instead of a raw prompt, and the agent's Done call gets a card of its own.
+
+![Follow-up rows and cards in an agent chat](docs/screenshots/follow-up-chat.png)
+
+**Follow-up: all tracked workspaces** (or the sidebar row) lists every tracked workspace, grouped by who's up next, with each stack's bar.
+
+![The tracked workspaces screen grouped into Needs you, Agent working, Waiting and Done](docs/screenshots/follow-up-overview.png)
+
+On a phone the panel opens as a tab, and the PR sheet and pill popover open as bottom sheets.
+
+![Follow-up at phone width: the panel, a PR sheet and the pill popover](docs/screenshots/follow-up-mobile.png)
+
+## How it works
+
+- The workspace's main agent owns its PRs, tasks and the Done call. Other agents in the workspace can register PRs and check status.
+- **Auto-send** is off for every newly tracked workspace, so each repair batch waits for your click. Turn it on per workspace and Follow-up sends batches itself once the agent is idle, after fresh permission and Session Guard checks.
+- Follow-up never merges, turns on merge when ready, requests reviewers or archives on its own. **Merge** re-checks the stack, lists any PRs underneath that would merge first, and asks again.
+- A merged PR is not the end: tasks such as production checks keep the workspace open until the main agent declares Done and everything has settled.
 
 ## Send to Paseo and Graphite
 

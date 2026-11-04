@@ -1,15 +1,24 @@
 # Follow-up
 
-Follow-up keeps PR stacks, remaining tasks and explicit agent completion attached to a Paseo workspace. It groups workspaces by whether you or an agent can act next and retains settled PR history.
+Follow-up watches every pull request a Paseo workspace opens until the work is actually done. It shows each PR stack at a glance, gathers conflicts, failing required checks and review threads into one repair batch for the workspace's main agent, and tells you when something needs you, such as an approved PR to merge, a question to answer or a batch to send.
 
-Requires Paseo 0.14+, Node 22+ and authenticated gh on the daemon host. Graphite CLI authentication is used for readiness and explicit Merge. The optional Send to Paseo browser companion enables Graphite's Merge when ready setting through the existing pairing, with confirmation or remembered permission for toggle changes in Chrome; it is not needed for tracking, recovery or follow-up.
+## What you see
 
-Open the sidebar or Command-K, then Track this workspace. Project settings can enroll existing and new workspaces with original main-agent ownership; Auto always starts off. The retained development default enables canonical Git repositories named acme-poc, while other projects require opt-in. Disable that project default to stop further enrollment without losing records.
+- A workspace panel that leads with status: PRs merged, what needs you, what needs fixing, a bar with one segment per PR, and what the agent is doing now.
+- A Needs you card with one button per decision: Send repairs, Merge, Resume, Retry, or answer in chat.
+- Each stack drawn top to base like Graphite, merged PRs folded away, and a sheet per PR with checks, reviewers and Merge.
+- Tasks for work that outlives a merge, manual or scheduled after a merge or deploy, with an optional delay.
+- A composer pill and a sidebar count that appear only when something needs you, and one screen listing every tracked workspace by who is up next.
+- Compact rows for Follow-up's own tool calls in agent chats, a card for each repair batch, and a card when the agent declares Done.
 
-Every main view links to the overview, project settings and display settings. You can hide the workspace button and sidebar independently and still use Command-K. The installation id and local state directory remain follow-through for compatibility.
+## Setup
 
-Repair batches go to the original main agent after a click, or after explicit per-workspace Auto consent and fresh delivery checks. Recovery is a separate manual action. Done requires the main agent's declaration and settled requirements; merging and archiving remain your actions. Tasks are manual unless you explicitly schedule Now, After merge or After deploy, optionally with a delay. Deployment gates require serving-revision evidence; merges alone never prove deployment.
+Requires Paseo 0.14+, Node 22+ and an authenticated `gh` on the daemon host. Merge uses saved Graphite CLI authentication. Open a workspace, open Follow-up from its header or Command-K, and choose Track this workspace. Project settings can track every workspace in a project. The optional Send to Paseo browser companion adds Graphite's Merge when ready switch through its existing pairing; it is not needed for anything else.
 
-This trusted unsandboxed plugin reads selected workspace metadata, saved agent history/configuration, GitHub status and existing CLI authentication. State and private recovery evidence remain in plugin-data/follow-through. Scoped MCP registration and reversible provider hooks support tracked root sessions; contributors can register PRs from any worktree without taking main-agent authority. Successful submission receipts are discovered automatically within the workspace repository, while mentions remain unowned; Codex's trust review remains in force. Prompts and repair context are sent to your configured agent/provider. Site-specific reviewer and Cloud Run adapters only apply to the configured repository; unsupported deployments remain unknown.
+## What it does on its own, and what it never does
 
-Merge, Merge when ready and reviewer requests require explicit developer controls. Optional direct browser grants trust that machine to change the PR toggle for the allowed repository, including later pushes; the existing Send pairing permits reads for active tracked repositories, while toggle changes require confirmation in Chrome unless explicitly remembered. Auto and agent tools cannot authorize them. Follow-up has no Slack posting identity or background channel scanner. Stakeholder replies require the developer's authorization, original destination and a verified sent-message receipt from the agent.
+Auto-send starts off for every workspace. Until you turn it on, each repair batch waits for your click; with it on, Follow-up sends batches once the main agent is idle, after fresh permission and Session Guard checks. Follow-up never merges, turns on merge when ready, requests reviewers or archives on its own, and Merge always re-checks the stack and asks again. Done needs the main agent's declaration and settled PRs and tasks. An optional recovery agent can rebuild missed PRs and tasks from a workspace's history; it runs only when you start it and never edits code. Deployment checks and reviewer shortcuts exist only for specifically configured repositories; elsewhere deployment stays unknown.
+
+## Data and access
+
+This is a trusted, unsandboxed plugin. It reads workspace metadata, saved agent history and configuration, GitHub status and existing CLI authentication, and keeps its state in `plugin-data/follow-through` on the daemon host. It registers scoped MCP tools and reversible provider hooks only for tracked sessions. Repair prompts go to your configured agent and provider. It has no Slack identity and no background channel scanning; replies to stakeholders need your authorization and a sent-message receipt from the agent.

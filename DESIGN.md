@@ -1,50 +1,61 @@
 # Paseo native surface
 
-Follow-up extends Paseo's existing interface. It inherits the host theme, typography, controls, icon names, and platform layout. Visitor mode: Operate.
+Follow-up extends Paseo's existing interface. It inherits the host theme, system type, controls, icon names and platform layout, and adds one signature: a status-first header whose stack bar and stack rails share a single state colour language. Visitor mode: Operate.
 
-The workspace panel shows a concise status line, Pull requests, secondary Tasks, then Activity and collapsed Workspace details. Goals and evidence stay behind disclosure controls. Merged history is collapsed. The global overview groups workspaces by who can act next. Use flat rows and separators, with status text as well as color. Data stays visible during refresh and errors name the recovery action.
+## Tokens
 
-Use `theme.colors.surface0`, `surface1`, `surface2`, `border`, `foreground`, `foregroundMuted`, `accent`, `accentForeground`, `statusSuccess`, `statusWarning`, and `statusDanger`. Body text is 13–14px, supporting text 12px, titles 18px. Controls have accessible names and at least 36px height on desktop and 44px in compact layouts. Padding is 12px in the panel and 16px in compact layouts. Long titles wrap; identifiers and statuses stay legible. Native panel hosting becomes a workspace tab on compact devices.
+Use only `theme.colors.surface0`, `surface1`, `surface2`, `border`, `foreground`, `foregroundMuted`, `accent`, `accentForeground`, `statusSuccess`, `statusWarning` and `statusDanger`, through `client/theme.ts`:
 
-## Components
+- `raised(colors)`: cards get a hairline ring plus a soft lift in light themes and a single 8% white ring in dark themes. Dividers and attention borders stay real borders.
+- `tint(color)`: tag and node fills are their own hue at 12% (light) or 16% (dark).
+- `mergedColor(colors)`: Paseo's purple merged token, which the plugin SDK omits; the fallback matches the host (`#7347af` light, `#a890d5` dark).
 
-Settings → Plugins → Actions for follow-through → Follow-up and **Follow-up: project settings** open the same native project-default screen. Use a named switch row with explicit On/Off text and the canonical remote key or local path below the project name, so similarly named projects remain distinguishable. Explain that On adds existing and future eligible workspaces, Off retains tracked records, and new enrollments keep Auto off. Use host theme controls, loading/error feedback, and the saved-state notice; project tracking and per-workspace Auto remain separate controls.
+Colour carries meaning and nothing else. Purple is merged. Green is approved, done or shipped. Red is a repair the agent must make (conflicts, failed required checks). Amber is review feedback, optional-check failures and anything that needs the developer. Muted is pending, draft or unknown. Accent is reserved for primary actions and switches, never for a state.
 
-Pull requests, Tasks, Activity, and Workspace expand independently. Pull requests and Tasks start expanded; idle Activity and Workspace start collapsed. Use a chevron and an accessible expand/collapse action on each section header. Remaining-work, PR, and queue counts remain visible when folded. Auto and Refresh sit outside the foldable sections and remain available when those sections close. Folding a parent section or refreshing data preserves child stack and settled-history expansion choices during the open panel session.
+Type is the system sans: 15/21 semibold panel titles, 13/18 body, 12/17 supporting text, 11/15 small labels, tabular numerals for every count and time. Controls are 32px on desktop with a hit slop and 44px in compact layouts. Panel padding is 12px, 16px in compact layouts. Motion is 140–300ms ease-out, opacity and transform only, and every animation checks reduced motion: press scale, icon cross-fades when a state changes, and one rise-in for the Shipped card.
 
-Activity contains main-agent work and **Send batch**. Optional recovery lives separately under Workspace → Recovery, collapsed by default, with **Run recovery**, result disclosure and **Open recovery agent**. Recovery can run during main-agent work and does not use the Auto toggle. Disable duplicate starts while an unresolved recovery is active; expose checked retry there. Keep **Open main agent** in Workspace. These controls use the existing native button and row styles.
+## Workspace panel
 
-Active PR stacks place conflicts, review feedback, failed checks, unavailable status, and unexplained closed PRs first, followed by other active stacks. Preserve existing order within each priority group and stack identity when reordering within that group. Only complete, error-free observations with settled outcomes belong in settled history.
+Top to bottom, every block optional except the header:
 
-Fully settled stacks live in a **Settled** subsection after active stacks inside Pull requests. It starts collapsed and shows the total settled PR count; stack headings and their individual counts stay inside this disclosure. Expanding Settled reveals each stack and its PR rows directly, with a settled count on the stack header. Mixed active stacks retain their separate **Show settled PRs** disclosure for historical rows.
+1. **Header.** Workspace title and the settings gear (compact layouts drop the title, which the host header already shows, and lead with the goal). The goal in two muted lines. A status sentence with coloured counts ("1 of 5 PRs merged · 3 need you · 2 to fix"). The stack bar: one segment per PR in merge order; merged segments are solid purple, every other PR is a neutral track with a short centred dash in its status colour, so the filled length is real progress. Segments open their PR. A live line with a spinner, clock, pause or check saying what is happening now and since when. A strip with "Checked 1m ago", a refresh icon and the **Auto-send** switch, always visible and off by default.
+2. **Shipped card** when the main agent has declared Done and every requirement has settled: a green check, the agent's summary, PR count and time, and a reminder that archiving is the developer's action. The stack and tasks fold into one History row beneath it.
+3. **Needs you card** (amber border, count chip). One row per decision with exactly one action: Resume follow-up, Retry (plus Open agent), Check state, Answer in chat, Send to main agent (with the batch's tasks listed and the reason when Send is unavailable), Merge (only when the PR is approved, checks pass and Graphite reports it ready), Add reviewers (only where reviewer defaults are configured). Send is the only primary button.
+4. **Agent card** while a batch is with the agent, or queued under Auto-send: what was sent and when, and Open.
+5. **Pull requests card.** Active stacks first, problems first within them. Each stack is a rail: a 2px line through 16px nodes, top of stack first and its base last, like Graphite. Merged PRs fold into a "N merged below" node; fully settled stacks fold into one row at the end. A row shows the title (two lines) and `#n · status` with extras such as No reviewers or Merge when ready. Approved stays green and merged/deployed purple, and Merged is shown until deployment is confirmed.
+6. **Tasks card.** Outstanding tasks with a status glyph, title and either "Manual · waits for #412" or a schedule chip ("2d after deploy · #418"); finished tasks fold into "N done". Approve/merge/deploy checklist items never appear here.
+7. **Agent, recovery and Graphite** disclosure, collapsed by default: open the main agent, run or retry optional recovery (separate agent, never edits code, not tied to Auto), the optional Merge-when-ready connection guidance, and a link to all tracked workspaces.
 
-Merged PRs use Paseo's purple merged color, while Approved stays green through `statusSuccess`. Use the host's `statusMerged` color when available; the current SDK omits it, so the fallback matches Paseo's light (`#7347af`) and dark (`#a890d5`) theme colors. Keep the **Merged**/**Approved** labels and merge/pull-request icons alongside color.
+Fold choices persist per tab through `useTabState`. Data stays on screen during refreshes; a failed refresh adds a warning line under the header instead of replacing the panel.
 
-Keep each PR's Graphite navigation link separate from its controls, including links in settled history. Open PR rows place a compact **Merge** button below the status row. When the optional browser companion connects, add a labeled **Merge when ready** switch reflecting the actual browser-read setting; unknown is explicit and disables it. Use the existing host accent for its selected state and neutral supporting text. Its compact visible label is **When ready**; the accessible name retains Merge when ready. Hide unavailable Merge buttons rather than repeating disabled actions beneath every draft. Keep Approved green, Merged purple, and settled rows read-only.
+### Sheets
 
-Merge opens an inline confirmation with the affected PR titles, bottom-to-top order, blockers, total, and Cancel. An upper PR's MWR control offers the listed downstack or **Just this PR**; a single-PR toggle applies after fresh checks. A ready Merge button uses the existing primary style. Loading, **Queued**, **Submitted**, and actionable errors describe the observed stage without claiming the PR is merged. Show **Check state** for uncertain actions and block another action until resolved. Use the existing surface, button, spacing, and accessibility conventions.
+A PR row (or a stack-bar segment) opens a Paseo `Modal`: a dialog on desktop, a bottom sheet on phones. It shows the full title, status chip, repository, stack position, parent, required and optional failed checks separately, unresolved threads, reviewers, deployment evidence and when it was last checked, then the controls, then Open in Graphite and GitHub.
 
-All merge decisions stay in Follow-up. Without the companion, hide MWR switches and pause their browser reads while retaining CLI Merge, queue labels, and core workspace functions. Put the connection explanation and **Connect Graphite** action inside a collapsed **Optional merge when ready** subsection after PR stacks. Connecting restores the switches. Preserve the Settled disclosure and other section states. GitHub auto-merge remains separate and is not inferred from these controls.
+Merge always prepares a fresh plan and shows it as a section of the sheet: the affected PRs bottom to top, each blocker, then Merge / Merge all N, and Cancel. An upper PR's Merge-when-ready change offers the listed downstack or Just this PR; a single-PR toggle applies after fresh checks. Loading, Queued to merge, Submitted and actionable errors describe the observed stage without claiming a merge happened. Uncertain actions block further actions on that PR until Check state resolves them. Without the browser companion the When ready switch is hidden and Merge still works through the Graphite CLI. When Merge isn't available the sheet says what it is waiting for, and Graphite blockers name the cause and the fix.
 
-PR headline rows use a fixed identifier/status column beside a two-line title and a separate details disclosure. Details reveal the full title, repository, error and deployment evidence. A known production PR awaiting deployment stays active; deployed history collapses under Settled. Approval remains green; merged/deployed stays purple, with Merged displayed until deployment is confirmed. Each task has a concise action title, dependency/status line, and disclosure for its evidence. Approve/merge/deploy lifecycle entries belong only in PR status.
+A task row opens a task sheet with its evidence, due date and the schedule editor: Manual, Now, After merge, After deploy; merge and deploy add a delay in days and the PRs to wait for, and Save is disabled until the selection is valid. Scheduling never changes Auto-send.
 
-An open PR with complete reviewer data and no human reviewers shows **No reviewers** in a compact supporting row. Keep it separate from approval status: a pending request or completed human review suppresses this hint, as does a team request. Bot/self reviews do not count. For configured acme-poc PRs that are ready for review, put **Add reviewers** at the right of that row; its accessible label identifies Uri/Yuval and the PR. Drafts show the hint without an unavailable action. Preserve the two-line headline and separate Graphite link. Use the existing secondary button, loading/disabled state, actionable error and brief success receipt; reviewer names live in details.
+## Pill, header button and sidebar
 
-Task details contain a compact **Send task** radio group: **Manual**, **Now**, **After merge**, **After deploy**. Merge/deploy reveals **Delay (days)** and owned PR checkboxes; require a selection before enabling **Save trigger**. Keep this editor inside the existing task disclosure so PRs remain the focus. Collapsed rows show Manual or the short schedule, and expanded details show a known due date. Preserve dependencies when returning to Manual. Show stale-edit/assigned-task errors inline and let refresh restore current data. Scheduling keeps the workspace Auto choice.
+The composer pill appears on a tracked workspace's main agent only while something needs the developer, labelled with the single action ("Merge #418", "Send 3 repairs") or a count ("3 need you"), with a red octagon when something is blocked. Its popover holds the same Needs you rows and an Open Follow-up button. The header button is an icon with a small amber dot when that workspace needs you. The sidebar row opens the tracked-workspaces screen and shows a count badge. Display settings can hide each of the three.
 
+## Tracked workspaces screen
 
-Workspace panels and the global overview lead directly with their content. Keep a single icon-only
-settings cog in a fixed footer outside the scroll view, aligned to the trailing edge. It opens the
-native Follow-up project settings; display preferences remain in native plugin settings and
-Command-K. Do not add Overview / Display settings / Project settings tabs above the sidebar.
-The footer uses a 36px desktop or 44px compact target with an accessible settings label. Auto and
-Refresh stay with the workspace header; the footer remains reachable while content scrolls.
+A title with refresh and settings, a filter row of status chips with counts, then raised groups: Needs you, Agent working, Waiting, In progress, Done · ready to archive. Each row: status glyph, name, relative time, the first thing that needs you (or what is happening), the stack bar at 4px and a meta line that omits zero counts. Rows open the workspace.
 
+## Chat
 
-Required CI failures display Checks failed. Failures outside the effective branch requirements
-display Optional check failed (or Optional checks failed), including in compact PR rows.
-Expanded PR details name required and optional failures separately; optional failures are not
-required for merge.
-Stacked PRs inherit trunk check requirements when GitHub confirms their base branch is an open
-PR's head; an unprotected stack parent must not hide trunk CI. Other failed checks affect the
-warning and stack ordering, while automatic repair and merge gating continue to use requirements.
+Follow-up's MCP tool calls, and its CLI fallback in a shell call, render as one-line rows sized like Paseo's tool rows that expand to the full result. Repair batches render as a card listing the tasks with the full message behind a toggle. A successful Done call renders a green Workspace done card.
+
+## Settings
+
+Project tracking uses Paseo's settings kit: one switch per project, with its remote or path as the hint and the explanation in the section's info tip. Display settings hold the sidebar row, header button and composer pill switches.
+
+## Empty, loading and error
+
+An untracked workspace teaches with the panel's own rail: three nodes for what Follow-up does, the safety promise, one primary Track button and a pointer to project settings. Loading shows a skeleton of the header and two cards. A failed first load shows a card with the error and Try again.
+
+## CI labels
+
+Required CI failures display Checks failed. Failures outside the effective branch requirements display Optional check failed (or Optional checks failed), including in rows, and the PR sheet names required and optional failures separately. Stacked PRs inherit trunk check requirements when GitHub confirms their base branch is an open PR's head; other failed checks affect the warning and ordering, while automatic repair and merge gating use requirements only.
