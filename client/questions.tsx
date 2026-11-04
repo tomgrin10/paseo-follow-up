@@ -11,7 +11,7 @@ import type { Workspace } from "../shared/model";
 import { isOpen, questionState, replyText, type Question } from "../shared/questions";
 import { ago } from "../shared/attention";
 import { activity, type ActivityTone } from "../shared/activity";
-import { Button, Card, CardRow, Chip, FoldRow, errorText, text, type Theme } from "./kit";
+import { Button, Card, CardRow, Chip, FoldRow, IconButton, errorText, text, type Theme } from "./kit";
 import { Spinner } from "./motion";
 import { mergedColor, tint, withAlpha, type Colors } from "./theme";
 import { overviewKey, workspaceKey } from "./keys";
@@ -76,6 +76,10 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   const open = isOpen(q);
   const [choice, setChoice] = useState<string | null>(q.answer?.choice ?? null);
   const [words, setWords] = useState(q.answer?.words ?? "");
+  const [noteOpen, setNoteOpen] = useState(false);
+  // The pill's scrolling body: track whether more sits below the fold, so it can say so.
+  const [scroll, setScroll] = useState({ content: 0, view: 0, offset: 0 });
+  const more = scroll.content - scroll.view - scroll.offset > 4;
   useEffect(() => { setChoice(q.answer?.choice ?? null); setWords(q.answer?.words ?? ""); }, [q.id]);
   const refresh = () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); };
   const free = !q.options.length;
@@ -120,6 +124,13 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
       <Text numberOfLines={2} style={[t.meta, { flexShrink: 1 }]}>Task: {task.title}</Text>
     </View>}
   </View>;
+  // In the pill popover the answer field and actions stay pinned below a scrolling body.
+  const pinned = dense && !!bodyMaxHeight;
+  const input = <View style={{ gap: 6 }}>
+    {free && !dense && <Text style={t.meta}>No options were given. Write the decision for the agent.</Text>}
+    <TextInput accessibilityLabel={free ? `Your answer to ${q.id}` : `Note for the agent about ${q.id}, optional`} placeholder={free ? "Your answer" : "Add a note for the agent (optional)"} placeholderTextColor={c.foregroundMuted}
+      multiline value={words} editable={!run.isPending} onChangeText={setWords} maxLength={2000} autoFocus={pinned && !free && noteOpen} style={inputStyle(c, compact, free && !dense ? 3 : 2)} />
+  </View>;
   // Context comes before the options so the developer reads why before choosing.
   const body = <View style={{ gap: dense ? 10 : 14 }}>
     <View style={{ gap: 6 }}>
@@ -149,11 +160,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
         <Text style={[t.meta, { flex: 1, color: deliveryColor }]}>{delivery.text}</Text>
       </View>}
     </View>}
-    {open && <View style={{ gap: 6 }}>
-      {free && !dense && <Text style={t.meta}>No options were given. Write the decision for the agent.</Text>}
-      <TextInput accessibilityLabel={free ? `Your answer to ${q.id}` : `Note for the agent about ${q.id}, optional`} placeholder={free ? "Your answer" : "Add a note for the agent (optional)"} placeholderTextColor={c.foregroundMuted}
-        multiline value={words} editable={!run.isPending} onChangeText={setWords} maxLength={2000} style={inputStyle(c, compact, free && !dense ? 3 : 2)} />
-    </View>}
+    {open && !pinned && input}
   </View>;
   const actions = (open || q.answer && ["queued", "unconfirmed", "copied"].includes(q.answer.delivery.state)) && <View style={{ gap: 6 }}>
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
@@ -163,15 +170,29 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
       {q.answer && ["queued", "unconfirmed"].includes(q.answer.delivery.state) && <Button theme={theme} compact={compact} icon="RotateCcw" title={q.answer.delivery.state === "queued" ? "Try now" : "Resend"} accessibilityLabel={`Send the ${q.id} answer again`} loading={run.isPending} onPress={() => run.mutate("resend")} />}
       {q.answer && ["queued", "unconfirmed"].includes(q.answer.delivery.state) && <Button theme={theme} compact={compact} kind="ghost" icon="Copy" title="Copy" accessibilityLabel={`Copy the ${q.id} answer`} onPress={() => { void copyText(replyText(q, q.answer!.choice, q.answer!.words)).then(() => toast.show("Copied", { variant: "success" }), () => toast.error("Couldn't copy here")); }} />}
       {q.answer?.delivery.state === "unconfirmed" && openAgent && <Button theme={theme} compact={compact} kind="ghost" icon="MessageSquare" title="Open agent" onPress={() => openAgent(q.askedBy ?? w.mainAgentId)} />}
-      {dense && onDetails && <Button theme={theme} compact={compact} kind="ghost" icon="Maximize2" title="Details" accessibilityLabel={`Open ${q.id} with its links and full context`} onPress={onDetails} />}
+      {pinned && open && !free && !noteOpen && <Button theme={theme} compact={compact} kind="ghost" icon="Pencil" title="Note" accessibilityLabel={`Add a note for the agent about ${q.id}`} onPress={() => setNoteOpen(true)} />}
+      {dense && onDetails && <IconButton theme={theme} compact={compact} icon="Maximize2" label={`Open ${q.id} with its links and full context`} onPress={onDetails} />}
     </View>
     {open && !dense && <Text style={t.small}>Send puts your answer straight into the asking agent's chat, even mid-turn. Follow-up keeps it under {q.id}.</Text>}
   </View>;
-  // In the pill popover the form scrolls and the actions stay put, so Send is never cut off.
-  if (dense && bodyMaxHeight) return <View style={{ gap: 10 }}>
-    <ScrollView style={{ maxHeight: bodyMaxHeight, flexGrow: 0 }} contentContainerStyle={{ paddingRight: 2 }}>{body}</ScrollView>
-    {actions}
-  </View>;
+  // In the pill popover the question scrolls and the answer field and actions stay put, so Send is never cut off.
+  if (pinned) {
+    const showInput = open && (free || noteOpen);
+    return <View style={{ gap: 10 }}>
+      <View>
+        <ScrollView style={{ maxHeight: bodyMaxHeight! - (showInput ? 62 : 0), flexGrow: 0 }} contentContainerStyle={{ paddingRight: 2 }} scrollEventThrottle={32}
+          onLayout={e => { const view = e.nativeEvent.layout.height; setScroll(s => ({ ...s, view })); }}
+          onContentSizeChange={(_, content) => setScroll(s => ({ ...s, content }))}
+          onScroll={e => { const offset = e.nativeEvent.contentOffset.y; setScroll(s => ({ ...s, offset })); }}>{body}</ScrollView>
+        {more && <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingTop: 6 }}>
+          <Icon name="ChevronDown" size={12} color={c.foregroundMuted} />
+          <Text style={t.small}>More below</Text>
+        </View>}
+      </View>
+      {showInput && input}
+      {actions}
+    </View>;
+  }
   return <View style={{ gap: dense ? 10 : 14 }}>
     {body}
     {actions}
