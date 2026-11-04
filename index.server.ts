@@ -1,4 +1,7 @@
 import { displayPreferences } from "./shared/display";
+import { DEFAULT_QUESTION_MODE, questionPreferences, type QuestionMode } from "./shared/questions";
+import { askQuestion, recordAnswer, syncTaskQuestions, withdrawQuestion } from "./server/questions";
+import { agentSetSpec, developerSetSpec } from "./server/spec";
 import type { PluginServerContext, PluginHandlerContext } from "@getpaseo/plugin/server";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -25,6 +28,9 @@ import { updateObligation } from "./server/obligations";
 
 export default function contribute(server: PluginServerContext) {
   server.registerSettings(displayPreferences);
+  const questionSettings = server.registerSettings(questionPreferences);
+  // An unreadable setting means the default, which never lets an agent build ahead of the developer.
+  const questionMode = async (): Promise<QuestionMode> => { try { const state = await questionSettings.read(); return state.status === "ready" ? state.values.mode : DEFAULT_QUESTION_MODE; } catch { return DEFAULT_QUESTION_MODE; } };
   const directory = join(paseoHome, "plugin-data", "follow-through");
   const bridge = join(directory, "mcp.mjs");
   const store = new Store(directory);
@@ -180,10 +186,57 @@ export default function contribute(server: PluginServerContext) {
     const result = await store.mutate(state => {
       const w = agentWorkspace(state, agentId, "write", workspaceId);
       const obligation = updateObligation(w, input);
+      syncTaskQuestions(w, Date.now());
       changed(w); return { ...w, updatedObligationId: obligation.id };
     });
     void engine.tick(); return result;
   });
+  server.handle(rpc.askQuestionRpc, async ({ agentId, ...input }, { paseo }) => {
+    await requireReady();
+    const workspaceId = await callerWorkspaceId(agentId, paseo);
+    const mode = await questionMode();
+    return store.mutate(state => {
+      const w = agentWorkspace(state, agentId, "write", workspaceId);
+      const { question, instruction } = askQuestion(w, agentId, input, mode, Date.now());
+      changed(w);
+      return { workspaceId: w.id, question, mode, instruction };
+    });
+  });
+  server.handle(rpc.recordAnswerRpc, async ({ agentId, id, choice, words }, { paseo }) => {
+    await requireReady();
+    const workspaceId = await callerWorkspaceId(agentId, paseo);
+    return store.mutate(state => {
+      const w = agentWorkspace(state, agentId, "write", workspaceId);
+      return { workspaceId: w.id, question: recordAnswer(w, agentId, id, choice, words, Date.now()) };
+    });
+  });
+  server.handle(rpc.withdrawQuestionRpc, async ({ agentId, id, reason }, { paseo }) => {
+    await requireReady();
+    const workspaceId = await callerWorkspaceId(agentId, paseo);
+    return store.mutate(state => {
+      const w = agentWorkspace(state, agentId, "write", workspaceId);
+      return { workspaceId: w.id, question: withdrawQuestion(w, agentId, id, reason, Date.now()) };
+    });
+  });
+  server.handle(rpc.setSpecRpc, async ({ agentId, url, title }, { paseo }) => {
+    await requireReady();
+    const workspaceId = await callerWorkspaceId(agentId, paseo);
+    return store.mutate(state => {
+      const w = agentWorkspace(state, agentId, "write", workspaceId);
+      const { applied, message } = agentSetSpec(w, agentId, url, title, Date.now());
+      return { workspaceId: w.id, spec: w.spec, applied, message };
+    });
+  });
+  server.handle(rpc.workspaceSpecRpc, async input => {
+    await requireReady();
+    return store.mutate(state => {
+      const w = findWorkspace(state, input.workspaceId);
+      if (!w.enable_tracking || w.archived) throw new Error("Track this workspace before changing its spec link.");
+      developerSetSpec(w, input, Date.now());
+      return w;
+    });
+  });
+  server.handle(rpc.answerQuestionRpc, async ({ workspaceId, questionId, choice, words, action }) => { await requireReady(); return engine.answer(workspaceId, questionId, choice, words, action); });
   server.handle(rpc.declareDoneRpc, async ({ agentId, summary }, { paseo }) => { await requireReady(); return engine.declareDone(agentId, summary, await callerWorkspaceId(agentId, paseo, false)); });
   server.handle(rpc.acknowledgeRpc, async ({ agentId, batchId, outcome, result }, { paseo }) => {
     await requireReady();

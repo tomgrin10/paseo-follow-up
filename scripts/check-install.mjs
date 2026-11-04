@@ -99,7 +99,7 @@ try {
     child.stdin.end(requests.map((r, i) => JSON.stringify({ jsonrpc: "2.0", id: i + 1, ...r })).join("\n") + "\n"); await finished; assert.equal(error, ""); return output.trim().split("\n").map(l => JSON.parse(l));
   };
   const native = await nativeMcp([{ method: "initialize", params: {} }, { method: "tools/list" }, { method: "tools/call", params: { name: "workspace_status", arguments: {} } }]);
-  assert.equal(native[1].result.tools.length, 8); assert.equal(JSON.parse(native[2].result.content[0].text).detail, "summary");
+  assert.equal(native[1].result.tools.length, 12); assert.equal(JSON.parse(native[2].result.content[0].text).detail, "summary");
   assert.deepEqual((await nativeMcp([{ method: "tools/list" }], secondary.id))[0].result.tools.map(t => t.name).sort(), ["register_pr", "sync_workspace", "workspace_status"]);
   const fallbackEnv = { ...env, PASEO_AGENT_ID: agent.id }; delete fallbackEnv.FOLLOW_THROUGH_CLIENT_ENTRY;
   const fallback = JSON.parse((await exec(process.execPath, [bridgePath, "call", "workspace_status", "{}"], { env: fallbackEnv })).stdout);
