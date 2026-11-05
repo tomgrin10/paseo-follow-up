@@ -87,12 +87,30 @@ export async function sessionGuardOwnsInterruption(agentId: string, interruption
   return !!guard.ownsInterruption(await guard.read(), agentId, interruption);
 }
 
+const HISTORY_RETRY_MS = 15_000;
+const HISTORY_RETRY_MAX_MS = 3_600_000;
+export function historyRetryDelay(failures: number): number {
+  return failures <= 0 ? HISTORY_RETRY_MS : Math.min(HISTORY_RETRY_MS * 2 ** (failures - 1), HISTORY_RETRY_MAX_MS);
+}
+/**
+ * A closed agent has no live runtime, so it cannot have running provider subagents. Asking the
+ * daemon anyway resumes the session from persistence (spawning its provider process) only for the
+ * idle-runtime collector to close it again, so each poll would resume it.
+ */
+async function subagentsRunning(client: Daemon, agent: Agent, failure: string): Promise<boolean> {
+  if (agent.status === "closed") return false;
+  const children = await client.listProviderSubagents(agent.id);
+  if (children.error) throw new Error(failure);
+  return children.subagents.some(child => child.status === "running");
+}
+
 export class PaseoGateway implements Gateway {
   constructor(private connect: typeof withDaemon = withDaemon, private guard = new SessionGuard(join(paseoHome, "plugin-data/session-guard")), private compacting = compactionPending) {}
   private directory: { agents: { agent: Agent }[]; workspaces: WorkspaceRow[] } | null = null;
   private dirty = new Set<string>();
   markDirty(agentId: string): void { this.dirty.add(agentId); }
-  private histories = new Map<string, { messageAt: string | null; at: number; history: History; submissions: Submission[]; artifacts: Artifact[] }>();
+  // `failures` counts consecutive unreadable reads of one transcript; `retryAt` backs them off.
+  private histories = new Map<string, { messageAt: string | null; at: number; failures: number; retryAt: number; history: History; submissions: Submission[]; artifacts: Artifact[] }>();
   async discover(state: State, workspaceId?: string): Promise<DiscoveredWorkspace[]> {
     return this.connect(async client => {
       const [agents, workspaces, catalog] = await Promise.all([
@@ -124,7 +142,7 @@ export class PaseoGateway implements Gateway {
         const repo = project?.projectKind === "git" ? /^remote:github\.com\/([\w.-]+\/[\w.-]+?)(?:\.git)?$/.exec(project.projectKey)?.[1] ?? null : null;
         for (const agent of roots) {
           const cached = this.histories.get(agent.id);
-          if (!cached || cached.messageAt !== agent.lastUserMessageAt || this.dirty.has(agent.id) || (cached.history.error && Date.now() - cached.at >= 15_000) || (["running", "initializing"].includes(agent.status) && Date.now() - cached.at >= 15_000)) scans.push({ row, agent, repo });
+          if (!cached || cached.messageAt !== agent.lastUserMessageAt || this.dirty.has(agent.id) || (cached.history.error && Date.now() >= cached.retryAt) || (["running", "initializing"].includes(agent.status) && Date.now() - cached.at >= 15_000)) scans.push({ row, agent, repo });
         }
         discovered.push(row);
       }
@@ -151,7 +169,13 @@ export class PaseoGateway implements Gateway {
           history = extractHistory(items, complete, complete ? null : "History exceeds the recovery window; inspect older transcripts during inventory");
           submissions = submittedPrs(items, agent.id, repo);
         } catch { history = extractHistory([], false, "History could not be read; inspect the session or register submitted PRs explicitly"); }
-        this.histories.set(agent.id, { messageAt: agent.lastUserMessageAt, at: Date.now(), history, submissions, artifacts });
+        // Reading a closed session's timeline resumes its runtime, so an unreadable one is retried
+        // with backoff instead of every poll. New user messages and live turns retry immediately.
+        const previous = this.histories.get(agent.id);
+        const live = ["running", "initializing"].includes(agent.status);
+        const failures = !history.error ? 0 : previous?.history.error && previous.messageAt === agent.lastUserMessageAt && !live ? previous.failures + 1 : 1;
+        const at = Date.now();
+        this.histories.set(agent.id, { messageAt: agent.lastUserMessageAt, at, failures, retryAt: at + historyRetryDelay(failures), history, submissions, artifacts });
         this.dirty.delete(agent.id);
       }
       for (const row of discovered) {
@@ -205,9 +229,7 @@ export class PaseoGateway implements Gateway {
       for (const { agent } of agents.filter(row => row.agent.workspaceId === w.id)) {
         if (recoveryIds.has(agent.id) || agent.labels["follow-through.recovery"]) continue;
         if (["running", "initializing"].includes(agent.status)) { busy = true; if (agent.id !== w.mainAgentId) backgroundBusy = true; }
-        const children = await client.listProviderSubagents(agent.id);
-        if (children.error) throw new Error("Subagent observation unavailable");
-        if (children.subagents.some(child => child.status === "running")) { busy = true; backgroundBusy = true; }
+        if (await subagentsRunning(client, agent, "Subagent observation unavailable")) { busy = true; backgroundBusy = true; }
       }
       return { ...context, busy, reason: null, archived: false, backgroundBusy };
     });
@@ -217,9 +239,8 @@ export class PaseoGateway implements Gateway {
       const agent = batch.recipientAgentId ? (await client.fetchAgent(batch.recipientAgentId))?.agent : null;
       if (!agent || agent.archivedAt || agent.workspaceId !== w.id) return { busy: false, reason: "Recovery agent is unavailable. Check its result before retrying." };
       if (this.guard.waiting(await this.guard.read(), { agentIds: [agent.id] })) return { busy: true, reason: "Waiting for Session Guard to resume recovery." };
-      const children = await client.listProviderSubagents(agent.id);
-      if (children.error) throw new Error("Recovery subagent status unavailable");
-      return { busy: ["running", "initializing"].includes(agent.status) || !!agent.pendingPermissions.length || children.subagents.some(child => child.status === "running"), reason: agent.pendingPermissions.length ? "Recovery is waiting for a permission or answer." : agent.status === "error" ? "Recovery failed. Check its agent before retrying." : null };
+      const children = await subagentsRunning(client, agent, "Recovery subagent status unavailable");
+      return { busy: ["running", "initializing"].includes(agent.status) || !!agent.pendingPermissions.length || children, reason: agent.pendingPermissions.length ? "Recovery is waiting for a permission or answer." : agent.status === "error" ? "Recovery failed. Check its agent before retrying." : null };
     });
   }
   async send(w: Workspace, batch: Batch, text: string): Promise<void> {
