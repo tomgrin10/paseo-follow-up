@@ -4,6 +4,8 @@ import { z } from "zod";
 import { idSchema, textSchema, workspaceSchema } from "./model";
 import { communicationSchema } from "./communication";
 import { taskTriggerSchema } from "./task-trigger";
+import { QUESTION_MODES, questionSchema } from "./questions";
+import { specSchema } from "./spec";
 import { actionPlanSchema, actionResultSchema, browserCommandSchema, browserExchangeSchema, browserPrSchema, browserStatusSchema, prActionKind } from "./pr-actions";
 
 const agentCommunicationSchema = z.strictObject({
@@ -44,3 +46,22 @@ export const taskTriggerRpc = defineRpc({ name: "follow.set-task-trigger", input
 
 // Narrow integration: no inventory, messages, paths, or credentials cross this RPC.
 export const prOwnerRpc = defineRpc({ name: "follow.pr-owner", input: z.strictObject({ repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/), number: z.number().int().positive() }), output: z.object({ owner: z.object({ workspaceId: idSchema, agentId: idSchema }).nullable() }) });
+
+// Questions. Agents ask, record an answer given in chat, or withdraw; the developer answers from the UI.
+const optionInput = z.strictObject({ letter: z.string().regex(/^[A-Z]$/), label: z.string().trim().min(1).max(200), consequence: z.string().trim().max(600).optional() });
+const linkInput = z.strictObject({ url: z.string().url().optional(), path: z.string().trim().min(1).max(1000).optional(), label: z.string().trim().max(200).optional() });
+export const askQuestionRpc = defineRpc({ name: "follow.ask-question", input: z.strictObject({
+  agentId: idSchema, title: z.string().trim().min(1).max(120), question: z.string().trim().min(1).max(2000),
+  options: z.array(optionInput).max(26).optional(), recommend: z.string().trim().max(200).optional(), big: z.string().trim().max(300).optional(),
+  background: z.string().trim().max(4000).optional(), links: z.array(linkInput).max(10).optional(),
+  pr: z.string().trim().max(200).optional(), task: idSchema.optional(),
+}), output: z.object({ workspaceId: idSchema, question: questionSchema, mode: z.enum(QUESTION_MODES), instruction: z.string() }) });
+export const recordAnswerRpc = defineRpc({ name: "follow.record-answer", input: z.strictObject({ agentId: idSchema, id: z.string().regex(/^Q\d+$/), choice: z.string().trim().min(1).max(200), words: z.string().trim().max(2000).optional() }), output: z.object({ workspaceId: idSchema, question: questionSchema }) });
+export const withdrawQuestionRpc = defineRpc({ name: "follow.withdraw-question", input: z.strictObject({ agentId: idSchema, id: z.string().regex(/^Q\d+$/), reason: z.string().trim().min(1).max(500) }), output: z.object({ workspaceId: idSchema, question: questionSchema }) });
+export const answerQuestionRpc = defineRpc({ name: "follow.answer-question", input: z.object({ workspaceId: idSchema, questionId: z.string().regex(/^Q\d+$/), choice: z.string().trim().min(1).max(200), words: z.string().trim().max(2000).optional(), action: z.enum(["send", "copy", "resend"]) }), output: z.object({ workspace: workspaceSchema, question: questionSchema }) });
+export const setSpecRpc = defineRpc({ name: "follow.set-spec", input: z.strictObject({ agentId: idSchema, url: z.string().trim().min(1).max(2000), title: z.string().trim().max(120).optional() }), output: z.object({ workspaceId: idSchema, spec: specSchema.nullable(), applied: z.boolean(), message: z.string() }) });
+export const workspaceSpecRpc = defineRpc({ name: "follow.workspace-spec", input: z.discriminatedUnion("action", [
+  z.object({ workspaceId: idSchema, action: z.literal("set"), url: z.string().trim().min(1).max(2000), title: z.string().trim().max(120).nullable().optional() }),
+  z.object({ workspaceId: idSchema, action: z.literal("remove") }),
+  z.object({ workspaceId: idSchema, action: z.literal("reset") }),
+]), output: workspaceSchema });

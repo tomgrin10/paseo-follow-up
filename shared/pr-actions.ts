@@ -32,6 +32,13 @@ export function downstack(prs: Pr[], target: string): Pr[] {
   return selected.reverse();
 }
 
+export const GRAPHITE_READY = ["READY_TO_MERGE", "READY_TO_MERGE_AS_STACK", "READY_TO_MERGE_WITHOUT_CI", "READY_TO_MERGE_AS_STACK_WITHOUT_CI"];
+export const graphiteReady = (status: string | null | undefined) => GRAPHITE_READY.includes(status ?? "");
+/** Says why Graphite won't merge yet and what to do about it. */
+export function graphiteBlocker(status: string | null | undefined): string {
+  if (!status) return "Graphite hasn't reported this PR ready to merge. Check the Graphite CLI sign-in on the daemon host, or open the PR in Graphite.";
+  return `Graphite says: ${status.toLowerCase().replace(/__/g, ": ").replace(/_/g, " ")}`;
+}
 export function mergeBlockers(pr: Pr): string[] {
   const s = pr.snapshot;
   if (pr.error || !s?.complete) return ["Refresh PR status"];
@@ -42,7 +49,7 @@ export function mergeBlockers(pr: Pr): string[] {
   if (s.conflict) blockers.push("Merge conflicts");
   if (s.failedChecks.length) blockers.push("Required checks failed");
   if (s.checksPending) blockers.push("Required checks pending");
-  if (!["READY_TO_MERGE", "READY_TO_MERGE_AS_STACK", "READY_TO_MERGE_WITHOUT_CI", "READY_TO_MERGE_AS_STACK_WITHOUT_CI"].includes(s.graphiteMergeStatus ?? "")) blockers.push("Graphite is not ready to merge");
+  if (!graphiteReady(s.graphiteMergeStatus)) blockers.push(graphiteBlocker(s.graphiteMergeStatus));
   return blockers;
 }
 

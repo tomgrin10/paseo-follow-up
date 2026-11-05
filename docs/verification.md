@@ -79,3 +79,58 @@ poll interval when activation coalesced with an existing refresh. The harness no
 intervals for asynchronous history discovery; its expected references and ownership assertions are
 unchanged. This harness-only correction is excluded from the npm package and does not change the
 immutable 0.3.3 tag or published package integrity.
+
+
+## Interface redesign (unreleased, 2026-11-04)
+
+The workspace panel, overview, settings, composer pill, header button, sidebar row and chat rows were
+redesigned. Server behaviour, RPC names, state format and safety rules are unchanged; display
+preferences gained `enable_composer_pill` with a default, so older saved documents still parse.
+
+- `npm run verify`: TypeScript, 170 behaviour tests (new: needs-you ordering and send guards, merge
+  readiness gated on Graphite, stack-bar order, headline/live-line/pill agreement, Graphite blocker
+  copy, chat transforms for MCP and CLI-fallback calls and batch prompts) and the button lifecycle
+  regression pass.
+- `npm run test:install` passes; `npm pack --dry-run` ships the new media and no harness files.
+- Every state was rendered in an isolated daemon with synthetic workspaces, a fake `gh` and a demo
+  provider, at 1440×900 and 390×844, light and dark: needs you, agent working, paused, shipped,
+  waiting, not tracked, PR sheet, merge confirmation, task sheet, pill popover, chat rows and cards,
+  overview, project and display settings. An overflow scan found no clipped text or horizontal scroll.
+- The harness has no Graphite authentication, so the Merge row was shown by injecting
+  `READY_TO_MERGE` into the saved state between polls. The loading skeleton and the first-load error
+  card were reviewed in code only.
+- The manual browser scripts under `scripts/check-*.mjs` (other than `check-install.mjs`) still target
+  the previous panel's labels and need updating before their next use.
+
+
+## Questions, spec links, activity and the larger view (unreleased, 2026-11-04)
+
+Agents can ask the developer questions (`ask_question`, `record_answer`, `withdraw_question`) and
+register the workspace's spec link (`set_spec`); the panel gained question rows and a dialog, a pill
+that steps through questions, an Activity card, a Spec chip and sheet, and a larger view. Saved
+states without `questions`, `spec` or `artifacts` parse with empty defaults; blocked tasks are
+mirrored as questions without changing the task. Question tools stay with the main agent, like goal,
+task and completion authority; contributor sessions keep PR registration, status and sync only.
+
+- `npm run verify`: TypeScript, 190 behaviour tests (new: question validation and main-agent
+  authority, unique refs, mode instructions, record/withdraw ownership, developer send/copy/resend,
+  answer message round trip, blocked-task mirroring and re-blocking, Done blockers, delivery sent /
+  queued-then-sent / unconfirmed-never-retried / Copy-never-sends / reload marks interrupted sends
+  unconfirmed, spec detection from Artifact publish receipts only, spec precedence developer > agent
+  > detection with remove and reset, persistence through discovery, activity ordering and durations,
+  needs-you ordering with stop-mode questions, chat rows and answer cards) and the button lifecycle
+  regression pass.
+- `npm run test:install`: passes with 12 native MCP tools for main agents, 6 for recovery and 3 for
+  contributors.
+- In the isolated harness (separate Paseo home, demo provider, fake `gh`), a real answer was sent to
+  the demo agent and arrived as a user message; spec detection picked the twice-published artifact
+  from a real timeline scan over a once-published one. Every new state was rendered at 1440×1000 and
+  390×844 in light and dark, the larger view also at 1024: question rows, dialog (unselected, picked
+  with a note, free-text task question, answered), pill stepper (two questions, single stop-mode
+  question, phone sheet), Activity timeline and Questions tabs, spec row and sheet (agent-registered
+  and detected with another artifact), stop-mode panel, overview with Spec chips, question mode
+  setting and chat rows. An overflow scan found no clipped text or horizontal scroll.
+- Not captured: the "may be out of date" header marker and the queued and unconfirmed delivery
+  states in the dialog (covered by unit tests). Answers to the demo agent after a plugin reload stay
+  unconfirmed because the demo provider times out its session refresh; the real Paseo path wasn't
+  exercised against a live agent.

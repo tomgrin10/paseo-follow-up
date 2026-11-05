@@ -3,6 +3,8 @@ import { completionBlockers, type Workspace, type State, type Batch } from "../s
 import { Store } from "./store";
 import { Github } from "./github";
 import { batchPrompt, tasksFor, isRecovery, needsPrObservations } from "./tasks";
+import { answerRecipients, developerAnswer, syncTaskQuestions } from "./questions";
+import { answerMessage, isOpen as isOpenQuestion, type Question } from "../shared/questions";
 import { reconcileSubmittedStacks } from "./submissions";
 import { applyDiscovery, type DiscoveredWorkspace } from "./discovery";
 import { replyRecorded } from "../shared/communication";
@@ -21,6 +23,8 @@ export interface Gateway {
   prepareRecovery(w: Workspace, batch: Batch): Promise<{ agentId: string; contextPath: string }>;
   recoveryRuntime?(w: Workspace, batch: Batch): Promise<{ busy: boolean; reason: string | null }>;
   label(w: Workspace, assigned: boolean): Promise<void>;
+  /** Sends a developer message to the first available recipient; DeliveryDeferred means try again later. */
+  deliver?(w: Workspace, recipients: string[], text: string, messageId: string): Promise<string>;
 }
 
 export class Engine {
@@ -42,6 +46,7 @@ export class Engine {
       }
 
       for (const w of state.workspaces) for (const a of w.prActions) if (a.state === "sending") { a.state = "uncertain"; a.result = `Follow-through reloaded before ${a.kind === "request_reviewers" ? "GitHub confirmed the review request" : "Graphite confirmed the action"}. Check state before sending another request.`; }
+      for (const w of state.workspaces) for (const q of w.questions) if (q.answer?.delivery.state === "sending") q.answer.delivery = { ...q.answer.delivery, state: "unconfirmed", reason: "Follow-up reloaded before Paseo confirmed the answer. Check the agent's chat before resending." };
       for (const w of state.workspaces) for (const b of w.batches) if (b.state === "sending") {
         b.state = "uncertain";
         b.result = "Delivery was interrupted. Check the assigned agent before retrying this batch.";
@@ -84,6 +89,7 @@ export class Engine {
         reconcileSubmittedStacks(w);
         if (w.archived) return;
         this.reconcile(w);
+        syncTaskQuestions(w, this.now());
         const unacknowledged = w.batches.find(b => b.state === "sent" && !isRecovery(b));
         if (unacknowledged && (runtime.guarded || runtime.busy || runtime.backgroundBusy || original.runtimeReason?.startsWith("Waiting for Session Guard"))) unacknowledged.activityAt = new Date(this.now()).toISOString();
         if (unacknowledged && !runtime.busy && !runtime.reason && this.now() - Date.parse(unacknowledged.activityAt ?? unacknowledged.sentAt!) > 120_000) {
@@ -104,6 +110,7 @@ export class Engine {
           current.state = "blocked"; current.result = current.acknowledgmentError ? `Acknowledgment was refused for agent ${current.acknowledgmentError.agentId}: ${current.acknowledgmentError.error}` : status?.reason ?? "Recovery finished without an accepted acknowledgment. Check its result before retrying.";
         });
       }
+      for (const q of findWorkspace(await this.store.snapshot(), original.id).questions.filter(q => q.answer?.delivery.state === "queued")) await this.deliverAnswer(original.id, q.id).catch(() => undefined);
       let current = findWorkspace(await this.store.snapshot(), original.id);
       const pending = current.batches.find(b => b.state === "pending" && !isRecovery(b));
       if (current.enable_auto_sends && !current.archived && !current.hold && pending &&
@@ -133,6 +140,38 @@ export class Engine {
     const activated = findWorkspace(await this.store.snapshot(), workspaceId);
     void this.tick();
     return activated;
+  }
+  /** Records the developer's answer, then sends it unless they chose to copy it. */
+  async answer(workspaceId: string, questionId: string, choice: string, words: string | undefined, action: "send" | "copy" | "resend"): Promise<{ workspace: Workspace; question: Question }> {
+    await this.store.mutate(state => {
+      const w = findWorkspace(state, workspaceId);
+      if (!w.enable_tracking || w.archived) throw new Error("Track this workspace before answering its questions.");
+      developerAnswer(w, questionId, choice, words, action, this.now());
+      if (!w.questions.some(isOpenQuestion)) w.updatedAt = new Date(this.now()).toISOString();
+    });
+    if (action !== "copy") await this.deliverAnswer(workspaceId, questionId);
+    const workspace = findWorkspace(await this.store.snapshot(), workspaceId);
+    return { workspace, question: workspace.questions.find(q => q.id === questionId)! };
+  }
+  private async deliverAnswer(workspaceId: string, questionId: string): Promise<void> {
+    const w = findWorkspace(await this.store.snapshot(), workspaceId);
+    const q = w.questions.find(q => q.id === questionId);
+    if (!q?.answer?.delivery.messageId || !["sending", "queued"].includes(q.answer.delivery.state)) return;
+    let outcome: { state: "sent" | "queued" | "unconfirmed"; to: string | null; reason: string | null };
+    try {
+      if (!this.gateway.deliver) throw new DeliveryDeferred("Messaging is unavailable in this Paseo version; copy the answer instead.");
+      const to = await this.gateway.deliver(w, answerRecipients(w, q), answerMessage(q, q.answer.choice, q.answer.words), q.answer.delivery.messageId);
+      outcome = { state: "sent", to, reason: null };
+    } catch (error) {
+      outcome = error instanceof DeliveryDeferred
+        ? { state: "queued", to: null, reason: error.message }
+        : { state: "unconfirmed", to: null, reason: "Paseo didn't confirm the message. Check the agent's chat before resending." };
+    }
+    await this.store.mutate(state => {
+      const current = findWorkspace(state, workspaceId).questions.find(x => x.id === questionId);
+      if (!current?.answer || current.answer.delivery.messageId !== q.answer!.delivery.messageId) return;
+      current.answer.delivery = { ...current.answer.delivery, ...outcome, at: new Date(this.now()).toISOString() };
+    });
   }
   async sendPending(workspaceId: string, batchId: string): Promise<Workspace> {
     const before = findWorkspace(await this.store.snapshot(), workspaceId).batches.find(b => b.id === batchId);

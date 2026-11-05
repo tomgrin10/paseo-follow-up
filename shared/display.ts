@@ -5,7 +5,8 @@ export const displayPreferences = defineSettings({
   id: "display",
   scope: "host",
   version: 1,
-  schema: z.object({ enable_header_button: z.boolean().default(true), showSidebar: z.boolean().default(true) }),
+  // Fields only ever gain defaults, so documents saved by older versions keep parsing unchanged.
+  schema: z.object({ enable_header_button: z.boolean().default(true), showSidebar: z.boolean().default(true), enable_composer_pill: z.boolean().default(true) }),
 });
 
 export const displayRpc = settingsRpc(displayPreferences.id);
