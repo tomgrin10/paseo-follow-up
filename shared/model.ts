@@ -2,6 +2,8 @@ import { z } from "zod";
 import { followUpObligations, deployed, recoveryBatch } from "./follow-up";
 import { communicationSchema, replyRecorded } from "./communication";
 import { taskTriggerSchema } from "./task-trigger";
+import { isOpen as questionOpen, questionSchema } from "./questions";
+import { artifactSchema, specSchema } from "./spec";
 
 export const textSchema = z.string().trim().min(1).max(2000);
 export const idSchema = z.string().min(1).max(200);
@@ -66,6 +68,11 @@ export const workspaceSchema = z.object({
   updatedAt: z.string(), managedDoneLabel: z.boolean(),
   runtimeReason: z.string().nullable(), runtimeBusy: z.boolean(), backgroundBusy: z.boolean().default(false),
   interruption: z.object({ turnId: z.string().nullable(), at: z.string(), kind: z.enum(["canceled", "failed"]), guardPauseId: z.string().optional() }).optional(),
+  // Added with questions; older saved states parse with none.
+  questions: z.array(questionSchema).default([]),
+  // Added with spec links; older saved states parse with none.
+  spec: specSchema.nullable().default(null),
+  artifacts: z.array(artifactSchema).default([]),
   inventory: z.object({
     revision: z.number().int().positive(), syncedRevision: z.number().int().nonnegative(),
     candidates: z.array(idSchema), historyComplete: z.boolean(), historyError: z.string().nullable(),
@@ -96,6 +103,7 @@ export function completionBlockers(w: Workspace, now = Date.now()): string[] {
   blockers.push(...followUpObligations(w).filter(o => o.status === "done" && o.communication && !replyRecorded(o.communication)).map(o => `Record the sent reply for ${o.title}`));
   if (w.batches.some(b => !recoveryBatch(b) && ["pending", "sending", "sent", "blocked", "uncertain"].includes(b.state))) blockers.push("Finish outstanding follow-up batches");
   if (w.prActions.some(a => ["sending", "uncertain"].includes(a.state))) blockers.push("Check the outstanding PR action");
+  blockers.push(...(w.questions ?? []).filter(questionOpen).map(q => `Answer or withdraw ${q.id} (${q.title})`));
   if (w.hold) blockers.push(w.hold);
   if (w.runtimeBusy) blockers.push("Wait for active agent work to finish");
   if (w.backgroundBusy) blockers.push("Wait for active background agents to finish");
@@ -108,6 +116,8 @@ export function summary(w: Workspace, now = Date.now()): { status: Status; label
   if (w.hold) return { status: "needs-you", label: "Needs you", reason: w.hold };
   const blocked = w.batches.find(b => !recoveryBatch(b) && ["blocked", "uncertain"].includes(b.state));
   if (blocked) return { status: "needs-you", label: "Needs you", reason: blocked.result || "Follow-up needs a decision" };
+  const question = (w.questions ?? []).find(questionOpen);
+  if (question) return { status: "needs-you", label: "Needs you", reason: `${question.id}: ${question.title}` };
   const obligation = obligations.find(o => o.status === "blocked");
   if (obligation) return { status: "needs-you", label: "Needs you", reason: obligation.title };
   if (w.completion && completionBlockers(w, now).length === 0) return { status: "done", label: "Done", reason: w.completion.summary };

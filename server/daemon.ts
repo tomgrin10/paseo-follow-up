@@ -9,6 +9,8 @@ import { defaultTracking, projectSetting, type Project } from "../shared/setting
 import { recoveryHandoff } from "./recovery-handoff";
 import { recoveryConfig } from "./recovery-config";
 import { submittedPrs, type Submission } from "./submissions";
+import { publishedArtifacts } from "./spec";
+import type { Artifact } from "../shared/spec";
 import { extractHistory, type History, type DiscoveredWorkspace } from "./discovery";
 import type { PluginBeforeRequests } from "@getpaseo/plugin/server";
 import { isWorkspaceRoot, type WorkspaceAgent } from "./workspace-agent";
@@ -25,7 +27,7 @@ export interface Daemon {
   fetchAgent(id: string): Promise<{ agent: Agent } | null>;
   fetchAgents(options?: unknown): Promise<{ entries: { agent: Agent }[]; pageInfo: { hasMore: boolean; nextCursor: string | null } }>;
   fetchWorkspaces(options?: unknown): Promise<{ entries: WorkspaceRow[]; pageInfo: { hasMore: boolean; nextCursor: string | null } }>;
-  fetchAgentTimeline(id: string, options: unknown): Promise<{ entries: { item: unknown; seqStart: number }[]; startCursor: { epoch: string; seq: number } | null; hasOlder: boolean; error: string | null; gap: boolean; staleCursor: boolean }>;
+  fetchAgentTimeline(id: string, options: unknown): Promise<{ entries: { item: unknown; seqStart: number; timestamp?: string }[]; startCursor: { epoch: string; seq: number } | null; hasOlder: boolean; error: string | null; gap: boolean; staleCursor: boolean }>;
   listProviderSubagents(id: string): Promise<{ subagents: { status: string }[]; error?: string | null }>;
   sendMessage(id: string, text: string, options: { messageId: string; activeTurnBehavior: "steer" }): Promise<void>;
   setWorkspaceLabel(input: { workspaceId: string; label: { name: string; color: "emerald" }; assigned: boolean }): Promise<unknown>;
@@ -90,7 +92,7 @@ export class PaseoGateway implements Gateway {
   private directory: { agents: { agent: Agent }[]; workspaces: WorkspaceRow[] } | null = null;
   private dirty = new Set<string>();
   markDirty(agentId: string): void { this.dirty.add(agentId); }
-  private histories = new Map<string, { messageAt: string | null; at: number; history: History; submissions: Submission[] }>();
+  private histories = new Map<string, { messageAt: string | null; at: number; history: History; submissions: Submission[]; artifacts: Artifact[] }>();
   async discover(state: State, workspaceId?: string): Promise<DiscoveredWorkspace[]> {
     return this.connect(async client => {
       const [agents, workspaces, catalog] = await Promise.all([
@@ -130,9 +132,9 @@ export class PaseoGateway implements Gateway {
       scans.sort((a, b) => (this.histories.get(a.agent.id)?.at ?? 0) - (this.histories.get(b.agent.id)?.at ?? 0) || (b.agent.lastUserMessageAt ?? "").localeCompare(a.agent.lastUserMessageAt ?? ""));
       // Session opening and Track need only ownership metadata. Read transcripts in the poll.
       for (const { agent, repo } of scans.slice(0, workspaceId ? 0 : 4)) {
-        let history: History; let submissions: Submission[] = [];
+        let history: History; let submissions: Submission[] = []; let artifacts: Artifact[] = [];
         try {
-          const entries: { item: unknown; seqStart: number }[] = [];
+          const entries: { item: unknown; seqStart: number; timestamp?: string }[] = [];
           let cursor: { epoch: string; seq: number } | null = null;
           let complete = false;
           for (let pageIndex = 0; pageIndex < 100; pageIndex++) {
@@ -143,11 +145,13 @@ export class PaseoGateway implements Gateway {
             if (!page.startCursor || (cursor && page.startCursor.epoch === cursor.epoch && page.startCursor.seq >= cursor.seq)) throw new Error("Conversation history pagination was incomplete");
             cursor = page.startCursor;
           }
-          const items = entries.sort((a, b) => a.seqStart - b.seqStart).map(e => e.item);
+          entries.sort((a, b) => a.seqStart - b.seqStart);
+          const items = entries.map(e => e.item);
+          artifacts = publishedArtifacts(entries, agent.id);
           history = extractHistory(items, complete, complete ? null : "History exceeds the recovery window; inspect older transcripts during inventory");
           submissions = submittedPrs(items, agent.id, repo);
         } catch { history = extractHistory([], false, "History could not be read; inspect the session or register submitted PRs explicitly"); }
-        this.histories.set(agent.id, { messageAt: agent.lastUserMessageAt, at: Date.now(), history, submissions });
+        this.histories.set(agent.id, { messageAt: agent.lastUserMessageAt, at: Date.now(), history, submissions, artifacts });
         this.dirty.delete(agent.id);
       }
       for (const row of discovered) {
@@ -156,6 +160,7 @@ export class PaseoGateway implements Gateway {
         if (cached.length) {
           row.history = { candidates: [...new Set(cached.flatMap(c => c.history.candidates))].sort(), goal: this.histories.get(row.mainAgentId)?.history.goal ?? null, complete: cached.length === ids.length && cached.every(c => c.history.complete), error: cached.find(c => c.history.error)?.history.error ?? null };
           row.submissions = cached.flatMap(c => c.submissions);
+          row.artifacts = cached.flatMap(c => c.artifacts);
         }
       }
       const known = new Set(agents.map(a => a.agent.id));
@@ -240,6 +245,32 @@ export class PaseoGateway implements Gateway {
       catch { throw new DeliveryDeferred("Session Guard state is unavailable; follow-up will wait and retry."); }
       if (guarded) throw new DeliveryDeferred("Waiting for Session Guard to resume the assigned session.");
       await client.sendMessage(recipient, text, { messageId: batch.messageId, activeTurnBehavior: "steer" });
+    });
+  }
+  /**
+   * A developer's answer, sent like the developer typing into the agent's chat (it steers an active turn).
+   * Session Guard pauses and pending permission prompts defer it; an unavailable agent falls back to the next.
+   */
+  async deliver(w: Workspace, recipients: string[], text: string, messageId: string): Promise<string> {
+    // Anything that fails before the message goes out is safe to retry; only a failed send itself is ambiguous.
+    let attempted = false;
+    return this.connect(async client => {
+      for (const id of recipients) {
+        const a = (await client.fetchAgent(id))?.agent;
+        if (!a || a.archivedAt || a.workspaceId !== w.id) continue;
+        let guarded: boolean;
+        try { guarded = !!this.guard.waiting(await this.guard.read(), { agentIds: [id] }); }
+        catch { throw new DeliveryDeferred("Session Guard state is unavailable; the answer will go out on the next check."); }
+        if (guarded) throw new DeliveryDeferred("Waiting for Session Guard to resume the agent.");
+        if (a.pendingPermissions.length) throw new DeliveryDeferred("The agent is waiting on a permission prompt; the answer goes out after it.");
+        attempted = true;
+        await client.sendMessage(id, text, { messageId, activeTurnBehavior: "steer" });
+        return id;
+      }
+      throw new DeliveryDeferred("No agent in this workspace can take the answer right now.");
+    }).catch(error => {
+      if (attempted || error instanceof DeliveryDeferred) throw error;
+      throw new DeliveryDeferred("Couldn't reach Paseo; the answer goes out on the next check.");
     });
   }
   async handoff(w: Workspace, callerId: string): Promise<{ batchId: string; fromAgentId: string } | null> {

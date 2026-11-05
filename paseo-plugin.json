@@ -2,10 +2,17 @@
   "id": "follow-through",
   "name": "Follow-up",
   "icon": "assets/icon.png",
-  "description": "Track every workspace PR stack, batch repairs to the main agent, and declare Done after follow-through.",
+  "description": "See every workspace PR stack at a glance, answer your agents' questions, send repairs in one batch, and know when something needs you.",
   "media": [
-    "docs/screenshots/follow-up-workspace.png",
-    "docs/screenshots/follow-up-overview.png"
+    "docs/screenshots/follow-up-hero.png",
+    "docs/screenshots/follow-up-questions.png",
+    "docs/screenshots/follow-up-states.png",
+    "docs/screenshots/follow-up-pill.png",
+    "docs/screenshots/follow-up-large.png",
+    "docs/screenshots/follow-up-pr.png",
+    "docs/screenshots/follow-up-chat.png",
+    "docs/screenshots/follow-up-overview.png",
+    "docs/screenshots/follow-up-mobile.png"
   ],
   "requirements": {
     "paseo": ">=0.14.0"
