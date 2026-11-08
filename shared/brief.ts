@@ -8,7 +8,7 @@ import type { Pr, Workspace } from "./model";
  * It never invents an ask: with no stated or structured source, the card says so.
  */
 
-export const BRIEF_KINDS = ["decision", "action", "review", "permission", "paused", "error", "done", "unknown"] as const;
+export const BRIEF_KINDS = ["decision", "action", "review", "reviewers", "permission", "paused", "error", "done", "unknown"] as const;
 export type BriefKind = typeof BRIEF_KINDS[number];
 export const BRIEF_SOURCES = ["permission", "paused", "error", "agent", "followup", "extracted", "none"] as const;
 export type BriefSource = typeof BRIEF_SOURCES[number];
@@ -25,7 +25,7 @@ export const briefDecisionSchema = z.object({
 });
 export const briefFactSchema = z.object({ icon: z.string(), label: z.string(), tone: z.enum(["ok", "warn", "bad", "muted"]).default("muted") });
 export const briefLinkSchema = z.object({ label: z.string(), url: z.string().nullable().default(null), path: z.string().nullable().default(null), pr: z.string().nullable().default(null) });
-export const MOVES = ["merge", "open_pr", "sign_off_next", "retry", "copy_error", "open_subagent"] as const;
+export const MOVES = ["merge", "open_pr", "sign_off_next", "retry", "copy_error", "open_subagent", "add_reviewers"] as const;
 export const briefMoveSchema = z.object({ kind: z.enum(MOVES), label: z.string(), prKey: z.string().nullable().default(null), url: z.string().nullable().default(null), agentId: z.string().nullable().default(null) });
 
 /** Stored on the inbox entry (additive; the store's `version` stays 1) and appended as the timeline row's data. */
@@ -83,9 +83,9 @@ export type NeedsYouCall = {
 export type NeedsYouRecord = { at: number; turnId: string | null; call: NeedsYouCall; questionIds?: string[] };
 
 /** The exact instruction appended to Follow-up's MCP instructions for root agents (design §7.2). */
-export const NEEDS_YOU_INSTRUCTION = "When you end a turn, call `needs_you` once, just before your final reply, with what the developer has to do next: a decision (give 2–3 options, what each means for them, and the one you recommend), an action only they can take (merge, approve, log in, run or send something), or \"Nothing needed\" plus what you finished, in one line. Keep `ask` to one line and `context` to what they need to decide. Don't repeat your report there; still write your normal reply. Don't call it while a permission prompt is waiting or while you're still working.";
+export const NEEDS_YOU_INSTRUCTION = "When you end a turn, call `needs_you` once, just before your final reply, with what the developer has to do next: a decision (give 2–3 options, what each means for them, and the one you recommend), an action only they can take (merge, approve, log in, run or send something), or kind=done (\"Nothing needed\" plus what you finished, in one line), which means there is nothing for the developer and won't flag you in their inbox. Keep `ask` to one line and `context` to what they need to decide. Don't repeat your report there; still write your normal reply. Don't call it while a permission prompt is waiting or while you're still working.";
 /** The Stop-hook nudge's reason (R2). Short, because it lands in the agent's context. */
-export const NEEDS_YOU_NUDGE = "Before you stop, call needs_you once with what the developer has to do next (a decision with options, an action only they can take, or \"Nothing needed\" plus what you finished). Then stop; don't repeat your reply.";
+export const NEEDS_YOU_NUDGE = "Before you stop, call needs_you once with what the developer has to do next: a decision with options, an action only they can take, or kind=done (\"Nothing needed\" plus what you finished), which means nothing for the developer and won't flag you. Then stop; don't repeat your reply.";
 
 /**
  * Validates a needs_you call the way ask_question is validated (§7.1). Throws with a message the agent can act on.
@@ -136,6 +136,8 @@ export type BriefSources = {
   error?: { message: string } | null;
   agent?: NeedsYouCall | null;
   pr?: PrState | null;
+  /** A PR with nobody asked to review it. `names` are the repository's default reviewers (may be empty). */
+  reviewers?: { prKey: string; number: number; url: string | null; names: string[] } | null;
   /** S6 extraction is out of scope (Phase 2); kept so the precedence reads like the design. */
   extracted?: null;
 };
@@ -184,11 +186,21 @@ export function pickBrief(s: BriefSources): BriefContent {
   if (s.agent) {
     const a = fromAgent(s.agent);
     const pr = s.pr;
-    const moves: BriefMove[] = a.kind === "done" ? [move("sign_off_next", "Sign off & next")]
+    // F7: "Nothing needed" doesn't flag, so it has nothing to sign off.
+    const moves: BriefMove[] = a.kind === "done" ? []
       : a.kind === "review" && pr ? [...(pr.mergeable ? [move("merge", `Squash & merge #${pr.number}`, { prKey: pr.key })] : []), ...(pr.url ? [move("open_pr", "Open PR", { url: pr.url, prKey: pr.key })] : [])]
       : [];
     return { ...base, ...a, source: "agent", slim: false, facts: a.kind === "done" ? [] : prFacts, moves,
       sourceLine: pr && prFacts.length && a.kind !== "done" ? "Stated by the agent. PR, CI and review state from Follow-up." : AGENT_LINE };
+  }
+  if (s.reviewers) {
+    const r = s.reviewers;
+    const named = r.names.length ? r.names.join(" and ") : null;
+    return { ...base, source: "followup", kind: "reviewers", slim: false,
+      ask: line(named ? `Add reviewers to #${r.number}: ${named}` : `#${r.number} has no reviewers yet. Add them on GitHub.`),
+      facts: (s.pr?.key === r.prKey ? s.pr.facts : []).slice(0, 3),
+      moves: [...(named ? [move("add_reviewers", "Add reviewers", { prKey: r.prKey })] : []), ...(r.url ? [move("open_pr", "Open PR", { url: r.url, prKey: r.prKey })] : [])],
+      sourceLine: named ? "From Follow-up's PR state. Open review threads go to the agent; reviewers are yours." : "From Follow-up's PR state. This repository has no default reviewers, so pick them on GitHub." };
   }
   if (s.pr?.event) {
     const pr = s.pr;
@@ -207,9 +219,6 @@ export function briefOrigin(source: BriefSource): BriefOrigin {
   return "structured";
 }
 
-/** The short label for the composer control, from the brief's kind, so it never disagrees with the card (§4). */
-export const BRIEF_WORD: Record<BriefKind, string> = { decision: "Asks", action: "Action", review: "Merge", permission: "Asks", paused: "Paused", error: "Error", done: "Finished", unknown: "Finished" };
-export const BRIEF_LABEL: Record<BriefKind, string> = { decision: "Decision", action: "Action for you", review: "Review", permission: "Permission", paused: "Paused", error: "Error", done: "Finished", unknown: "Finished" };
 /** The inbox row's reason line for an open brief: "Decision · Pick how…". The fallback reads "No ask stated". */
 export function briefLine(b: Pick<Brief, "source" | "ask" | "state">): string | null {
   if (b.state !== "open") return null;
@@ -341,4 +350,10 @@ export function briefStep(prev: Brief | null, event: BriefEvent, now: string): {
       if (prev?.state !== "open" || JSON.stringify(prev.facts) === JSON.stringify(event.facts.slice(0, 3))) return keep;
       { const b = { ...prev, facts: event.facts.slice(0, 3) }; return { brief: b, appends: [b] }; }
   }
+}
+
+/** F7: the one muted timeline line for a "Nothing needed" turn: "Nothing needed · <what was finished>". */
+export function nothingNeededLine(ask: string): string {
+  const rest = ask.replace(/^\s*nothing(?: is)? needed(?: from you)?\s*[.:·—–-]?\s*/i, "").trim();
+  return rest ? `Nothing needed · ${rest}` : "Nothing needed";
 }

@@ -43,7 +43,7 @@ test("defaults enroll existing and newly discovered workspaces without dispatch,
   const gateway: Gateway = { discover: async s => ids.filter(() => s.projectDefaults?.project !== false).map(id => ({ id, title: id, mainAgentId: id + "-main", projectId: "project", messageAt: null, enable_default_tracking: true, history: { candidates: [], goal: null, complete: true, error: null } })), observe: async () => ({ busy: false, archived: false, reason: null }), send: async () => { sends++; }, prepareRecovery: async () => { throw new Error("No recovery should launch"); }, label: async () => {} };
   const engine = new Engine(store, { observe: async () => new Map() }, gateway, () => clock + 70_000);
   await engine.tick(); ids.push("new"); await engine.tick();
-  let state = await store.snapshot(); assert.equal(state.workspaces.length, 2); assert.ok(state.workspaces.every(w => w.enable_tracking && !w.enable_auto_sends && w.batches.length === 0)); assert.equal(sends, 0);
+  let state = await store.snapshot(); assert.equal(state.workspaces.length, 2); assert.ok(state.workspaces.every(w => w.enable_tracking && w.enable_auto_sends && w.batches.length === 0)); assert.equal(sends, 0);
   await store.mutate(s => { s.projectDefaults = { project: false }; }); ids.push("later"); await engine.tick();
   state = await new Store(directory).snapshot(); assert.equal(state.projectDefaults?.project, false); assert.equal(state.workspaces.length, 2); assert.ok(state.workspaces.every(w => w.enable_tracking)); assert.equal(sends, 0);
 });

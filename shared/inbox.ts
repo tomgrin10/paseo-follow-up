@@ -7,7 +7,7 @@ import { briefSchema, BRIEF_KINDS, BRIEF_SOURCES, BRIEF_STATES } from "./brief";
  * Everything here is pure so the reducer can be tested row by row against the design's event table.
  */
 
-export const REASONS = ["permission", "error", "paused", "ci", "review", "finished", "pr_closed"] as const;
+export const REASONS = ["permission", "error", "paused", "ci", "review", "reviewers", "finished", "pr_closed"] as const;
 export type Reason = typeof REASONS[number];
 /** Most urgent first. The displayed reason is the first unresolved one in this order. */
 export const reasonRank = (reason: Reason) => REASONS.indexOf(reason);
@@ -71,7 +71,9 @@ export type InboxState = z.infer<typeof inboxStateSchema>;
 export const emptyInbox = (): InboxState => inboxStateSchema.parse({ version: 1 });
 
 export type InboxEvent =
-  | { type: "turn_end"; outcome: "completed"; detail: string; delegated?: boolean }
+  | { type: "turn_end"; outcome: "completed"; detail: string; delegated?: boolean;
+      /** F7: the agent said there is nothing for the developer (needs_you kind=done), or Paseo still shows it running. No finish flag. */
+      quiet?: boolean }
   | { type: "turn_end"; outcome: "failed"; detail: string }
   | { type: "turn_end"; outcome: "canceled"; guard: "attention" | "waiting" | null; detail: string }
   | { type: "message"; from: "tom" | "automation" }
@@ -80,7 +82,9 @@ export type InboxEvent =
   | { type: "crash"; detail: string }
   | { type: "paused"; pauseId: string; detail: string }
   | { type: "ci"; dedupeKey: string; detail: string; suppressed?: boolean }
-  | { type: "review"; dedupeKey: string; detail: string }
+  | { type: "review"; dedupeKey: string; detail: string; suppressed?: boolean }
+  /** An open, non-draft PR with nobody asked to review it: the developer's job (it never waits on open threads). */
+  | { type: "reviewers"; dedupeKey: string; detail: string; prKey: string; url: string | null; names: string[] }
   | { type: "pr_closed"; dedupeKey: string; detail: string; prKey: string }
   | { type: "sign_off"; seq?: number; muteTurn?: boolean }
   | { type: "undo" }
@@ -142,6 +146,8 @@ export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
       if (event.outcome === "completed") {
         // #1, #1b. D2 mute absorbs one finish; "Don't flag finishes" and D3 delegated agents skip it.
         if (e.muteTurn) { e.muteTurn = false; break; }
+        // F7: "Nothing needed" and still-running turns add nothing. An older open flag stays as it was.
+        if (event.quiet) break;
         if (!e.enable_finish_flags) break;
         if (event.delegated && !e.lastTomMessageAt) break;
         flag("finished", event.detail, "finished");
@@ -164,7 +170,8 @@ export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
     case "crash": flag("error", event.detail, "error"); break; // #6
     case "paused": if (!seen(e, `paused:${event.pauseId}`)) flag("paused", event.detail, "paused"); break; // #7
     case "ci": if (!seen(e, event.dedupeKey) && !event.suppressed) flag("ci", event.detail, "ci"); break; // #8
-    case "review": if (!seen(e, event.dedupeKey)) flag("review", event.detail, "review"); break; // #9
+    case "review": if (!seen(e, event.dedupeKey) && !event.suppressed) flag("review", event.detail, "review"); break; // #9
+    case "reviewers": if (!seen(e, event.dedupeKey)) flag("reviewers", event.detail, "reviewers"); break;
     case "pr_closed": // #10, and a "until this PR merges" snooze wakes here.
       if (!seen(e, event.dedupeKey)) { if (e.snooze?.until === `pr:${event.prKey}`) e.snooze = null; flag("pr_closed", event.detail, "pr_closed"); }
       break;
@@ -218,15 +225,6 @@ export function compareNeeds(a: { agentId: string; needs: Needs | null }, b: { a
   const ua = ra ? reasonRank(ra.reason) : REASONS.length, ub = rb ? reasonRank(rb.reason) : REASONS.length;
   return ua - ub || (a.needs?.since ?? "").localeCompare(b.needs?.since ?? "") || a.agentId.localeCompare(b.agentId);
 }
-
-export const REASON_LABEL: Record<Reason, string> = {
-  permission: "Asks", error: "Error", paused: "Paused at limit", ci: "Checks failed", review: "Review", finished: "Finished", pr_closed: "PR closed",
-};
-/** Composer status words. The host caps a pill at 160 px, so the pill reads "Finished · 12m"
- * and its tooltip carries the full "Needs you · finished 12m". */
-export const REASON_WORD: Record<Reason, string> = {
-  permission: "Asks", error: "Error", paused: "Paused", ci: "CI failed", review: "Review", finished: "Finished", pr_closed: "PR closed",
-};
 
 /** "12m", "3h", "2d": the compact age the rows and the composer control show. */
 export function age(iso: string | null | undefined, now: number): string {

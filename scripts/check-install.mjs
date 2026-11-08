@@ -67,7 +67,9 @@ try {
   await call("follow.refresh", {});
   assert.equal((await call("follow.list", {})).workspaces.length, 0, "install and agent creation must not activate anything");
   if (!process.argv.includes("--projects-only")) {
-  await call("follow.activate", { workspaceId: w.id });
+  const activated = await call("follow.activate", { workspaceId: w.id });
+  // 1.2.0-beta.1: first tracking turns Auto-send on. This scenario checks manual sends, so it turns Auto off.
+  assert.equal(activated.enable_auto_sends, true); await call("follow.control", { workspaceId: w.id, enable_auto_sends: false });
   assert.equal((await call("follow.list", {})).workspaces.length, 1, "activation is scoped to the clicked workspace");
   assert.equal((await call("follow.get", { workspaceId: other.id })).workspace, null);
   let record = (await call("follow.get", { workspaceId: w.id })).workspace;
@@ -226,7 +228,9 @@ try {
   await call("follow.obligation", { agentId: agent.id, title: "New follow-on work", status: "pending", evidence: "", afterPrs: [], enable_follow_up: false }); await waitFor(w => !w.managedDoneLabel, "Done label removed after new work"); for (let attempt = 0; ((await w.refresh()).labels ?? []).includes("Done") && attempt < 40; attempt++) await new Promise(r => setTimeout(r, 250)); assert.ok(!((await w.refresh()).labels ?? []).includes("Done"));
   await call("follow.activate", { workspaceId: other.id });
   const manual = (await call("follow.get", { workspaceId: other.id })).workspace;
-  assert.equal(manual.enable_auto_sends, false);
+  assert.equal(manual.enable_auto_sends, true, "first tracking turns Auto-send on");
+  // The rest checks that a workspace with Auto off is never sent to, so turn it off here.
+  await call("follow.control", { workspaceId: other.id, enable_auto_sends: false });
   await writeFile(join(home, "github-fixture.json"), JSON.stringify({ state: "OPEN", conflict: true, head: "auto-head" }));
   const guardDirectory = join(home, "plugin-data/session-guard"); await mkdir(guardDirectory, { recursive: true });
   const guardPause = { id: "fixture-guard-pause", agentId: agent.id, workspaceId: w.id, phase: "waiting", turnId: "fixture-turn", pausedAt: new Date().toISOString(), settledAt: null };
@@ -352,7 +356,7 @@ try {
     await call("follow.refresh", {}); defaultRecord = (await call("follow.get", { workspaceId: defaultWorkspace.id })).workspace;
     if (defaultRecord) break; await new Promise(r => setTimeout(r, 250));
   }
-  assert.ok(defaultRecord); assert.equal(defaultRecord.enable_auto_sends, false); assert.equal(defaultRecord.mainAgentId, defaultAgent.id);
+  assert.ok(defaultRecord); assert.equal(defaultRecord.enable_auto_sends, true); assert.equal(defaultRecord.mainAgentId, defaultAgent.id);
   const defaultEnv = JSON.parse(await readFile(join(home, `fixture-settings-${defaultAgent.id}.json`), "utf8"));
   assert.ok(defaultEnv.FOLLOW_THROUGH_CLI, "the default main gets its bridge on its first session");
   // Match agent-scoped CLI launches: the parent label survives even with a new workspace.
@@ -366,7 +370,7 @@ try {
       if (record?.enable_tracking) break;
       await call("follow.refresh", {}); await new Promise(resolve => setTimeout(resolve, 250));
     }
-    assert.equal(record.mainAgentId, localMain.id); assert.equal(record.enable_auto_sends, false);
+    assert.equal(record.mainAgentId, localMain.id); assert.equal(record.enable_auto_sends, true);
     const firstSession = JSON.parse(await readFile(join(home, `fixture-settings-${localMain.id}.json`), "utf8"));
     assert.ok(firstSession.FOLLOW_THROUGH_CLI, "a cross-workspace launch gets its bridge on the first session");
     assert.equal((await call("follow.activate", { workspaceId: launched.id })).mainAgentId, localMain.id, "Track must also succeed");

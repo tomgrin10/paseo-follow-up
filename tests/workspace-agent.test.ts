@@ -50,7 +50,7 @@ test("workspace-first creation automatically tracks its later cross-workspace ch
   applyDiscovery(f.state, await f.gateway.discover(f.state), Date.now()); assert.equal(f.state.workspaces.length, 0, "an empty workspace does not invent an owner");
   f.populate();
   applyDiscovery(f.state, await f.gateway.discover(f.state), Date.now());
-  const w = f.state.workspaces[0]; assert.equal(w.id, "new-workspace"); assert.equal(w.mainAgentId, f.created.id); assert.equal(w.enable_tracking, true); assert.equal(w.enable_auto_sends, false);
+  const w = f.state.workspaces[0]; assert.equal(w.id, "new-workspace"); assert.equal(w.mainAgentId, f.created.id); assert.equal(w.enable_tracking, true); assert.equal(w.enable_auto_sends, true);
   assert.deepEqual(w.contributorAgentIds, []); assert.equal(w.batches.length, 0);
 });
 test("Track succeeds for an independently launched workspace and fetches a creator missing from the live directory", async t => {
@@ -61,7 +61,7 @@ test("Track succeeds for an independently launched workspace and fetches a creat
   const engine = new Engine(f.store, { observe: async () => new Map() }, f.gateway);
   const w = await engine.activate("new-workspace");
   await engine.stop(); // Drain activation’s background refresh before fixture directory cleanup.
-  assert.equal(w.mainAgentId, f.created.id); assert.equal(w.enable_tracking, true); assert.equal(w.enable_auto_sends, false);
+  assert.equal(w.mainAgentId, f.created.id); assert.equal(w.enable_tracking, true); assert.equal(w.enable_auto_sends, true);
   assert.equal(w.batches.length, 0); assert.deepEqual(w.contributorAgentIds, []);
 });
 
