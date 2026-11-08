@@ -5,8 +5,7 @@ import { Icon, SidebarRow } from "@getpaseo/plugin/client/ui";
 import { age, displayReason, nextAfter, REASON_LABEL, REASON_WORD, rowTitle, sectionRows, snoozeUntil, wakeLabel, type InboxRow, type Reason } from "../shared/inbox";
 import { Button, IconButton, useNow, type Theme } from "./kit";
 import { Spinner } from "./motion";
-import { mergedColor, raised, type Colors } from "./theme";
-import { sidebarVisibility } from "./sidebar-visibility";
+import { mergedColor, raised, runningColor, type Colors } from "./theme";
 import type { InboxStore } from "./inbox-store";
 
 export const INBOX_SCREEN = "follow-through";
@@ -37,9 +36,9 @@ function Glyph({ row, theme, size }: { row: InboxRow; theme: Theme; size: number
   const shown = displayReason(row.needs);
   const g = shown ? reasonGlyph(shown.reason, c) : row.resumesAt ? { name: "CirclePause", color: c.foregroundMuted } : row.snooze ? { name: "AlarmClock", color: c.foregroundMuted } : row.signedOffAt && !running(row) ? { name: "Check", color: c.statusSuccess } : null;
   return <View style={{ width: size + 4, height: size + 4, alignItems: "center", justifyContent: "center" }}>
-    {g ? <Icon name={g.name} size={size} color={g.color} /> : <View accessibilityLabel="Running" style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: c.accent }} />}
+    {g ? <Icon name={g.name} size={size} color={g.color} /> : <View accessibilityLabel="Running" style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: runningColor(c) }} />}
     {g && running(row) && !row.snooze && <View accessibilityLabel="Running" style={{ position: "absolute", right: -3, bottom: -3, width: 11, height: 11, borderRadius: 6, backgroundColor: c.surface0, alignItems: "center", justifyContent: "center" }}>
-      <Spinner color={c.accent} size={8} label="Running" />
+      <Spinner color={runningColor(c)} size={8} label="Running" />
     </View>}
   </View>;
 }
@@ -68,11 +67,11 @@ export function InboxRowView({ row, theme, now, dense, touch, active, onOpen, on
   const reasonColor = shown ? reasonGlyph(shown.reason, c).color : c.foregroundMuted;
   const second: ReactNode[] = [];
   if (title.agent && narrow) second.push(<Text key="a" style={{ color: c.foreground }}>{title.agent} · </Text>);
-  if (shown) second.push(<Text key="r" style={{ color: reasonColor, fontWeight: "600" }}>{row.snooze ? `${REASON_LABEL[shown.reason]} · wakes ${wakeLabel(row.snooze, now)}` : REASON_LABEL[shown.reason]}</Text>);
+  if (shown) second.push(<Text key="r" style={{ color: reasonColor, fontWeight: "600" }}>{REASON_LABEL[shown.reason]}</Text>);
   else if (row.signedOffAt && !running(row)) second.push(<Text key="s" style={{ color: c.statusSuccess }}>Signed off</Text>);
   else if (row.resumesAt) second.push(<Text key="p">Paused at the limit</Text>);
   else if (running(row)) second.push(<Text key="w">Working</Text>);
-  if (shown?.detail && !row.snooze) second.push(<Text key="d">{` · ${shown.detail}`}</Text>);
+  if (shown?.detail) second.push(<Text key="d">{` · ${shown.detail}`}</Text>);
   if (more > 0) second.push(<Text key="m">{` · +${more}`}</Text>);
   if (!row.enable_finish_flags && !shown) second.push(<Text key="f">{second.length ? " · " : ""}Finishes not flagged</Text>);
   if (row.delegatedFrom && !shown) second.push(<Text key="g">{second.length ? " · " : ""}Delegated</Text>);
@@ -207,7 +206,7 @@ export function InboxSections({ store, theme, touch, dense, nav, runningCap = 8 
   </View>;
   const gap = dense ? 2 : 6;
   return <View style={{ gap }}>
-    {offline !== null && <Text accessibilityRole="alert" style={{ color: c.statusWarning, fontSize: 12, paddingHorizontal: dense ? 8 : 0 }}>Host offline · last updated {age(new Date(offline).toISOString(), now)} ago. Sign-offs sync when it's back.</Text>}
+    {offline !== null && <Text accessibilityRole="alert" style={{ color: c.statusWarning, fontSize: 12, paddingHorizontal: dense ? 8 : 0 }}>Can't reach the host. Showing what was loaded before; sign-offs sync when it's back.</Text>}
     {cameBack.length > 0 && <Pressable accessibilityRole="button" onPress={() => store.clearCameBack()} style={{ flexDirection: "row", gap: 6, alignItems: "center", paddingHorizontal: dense ? 8 : 0 }}>
       <Icon name="Info" size={13} color={c.statusWarning} />
       <Text style={{ flex: 1, color: c.foreground, fontSize: 12 }}>{cameBack.length === 1 ? "1 agent" : `${cameBack.length} agents`} came back while offline, so their sign-off didn't apply. Dismiss</Text>
@@ -272,30 +271,28 @@ export function InboxSections({ store, theme, touch, dense, nav, runningCap = 8 
   </View>;
 }
 
-/** Sidebar header item: "Needs you N", shown only while N > 0 unless the developer keeps it always on. */
+/**
+ * Sidebar header item: "Needs you N". Registered once, synchronously (the host resolves sidebar items
+ * when the installation mounts); it renders nothing at zero unless the developer keeps it always on.
+ */
 export function contributeHeaderItem(client: PluginClientContext, store: InboxStore) {
   function NeedsYouItem({ currentScreen, openScreen, theme }: PluginSidebarItemProps) {
     const count = useInbox(store, () => sectionRows(store.rows(), "needs", Date.now()).length);
+    const visible = useInbox(store, () => store.enabled() && (count > 0 || store.headerWhenEmpty()));
     const c = theme.colors;
-    return <SidebarRow icon="Inbox" label="Needs you" active={currentScreen?.screenId === INBOX_SCREEN} onPress={() => openScreen({ screenId: INBOX_SCREEN, params: { section: "needs" } })}
+    if (!visible) return null;
+    return <SidebarRow icon="Inbox" label="Needs you" active={currentScreen?.screenId === INBOX_SCREEN && currentScreen.params.section === "needs"} onPress={() => openScreen({ screenId: INBOX_SCREEN, params: { section: "needs" } })}
       trailing={count > 0 ? <View accessibilityLabel={`${count} need${count === 1 ? "s" : ""} you`} style={{ minWidth: 18, height: 18, paddingHorizontal: 5, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: c.statusWarning }}>
         <Text style={{ color: c.surface0, fontSize: 11, lineHeight: 14, fontWeight: "700", fontVariant: ["tabular-nums"] }}>{count}</Text>
       </View> : undefined} />;
   }
-  const visibility = sidebarVisibility(() => client.addSidebarHeaderItem({ id: "needs-you", title: "Needs you", Component: NeedsYouItem }));
-  const reconcile = () => {
-    const count = sectionRows(store.rows(), "needs", Date.now()).length;
-    visibility.set(store.enabled() && (count > 0 || store.headerWhenEmpty()));
-  };
-  const unsubscribe = store.subscribe(reconcile);
-  reconcile();
-  return () => { unsubscribe(); visibility.dispose(); };
+  return client.addSidebarHeaderItem({ id: "needs-you", title: "Needs you", Component: NeedsYouItem });
 }
 
 /**
  * Above the composer, one split control: the status ("Needs you · finished 12m") signs off on click,
- * and a chevron beside it opens "Sign off & next", "Later…", "Mute this turn" and the finish switch.
- * Paseo has no split pill, so these are two adjacent pills. After a sign-off the status pill turns
+ * and "More" beside it opens "Sign off & next", "Later…", "Mute this turn" and the finish switch.
+ * Paseo has no split pill and rejects an empty pill label, so these are two adjacent pills. After a sign-off the status pill turns
  * into "Signed off · Undo" for 6 s.
  */
 export function contributeInboxPills(client: PluginClientContext, store: InboxStore, openNext: (from: string) => void) {
@@ -323,31 +320,32 @@ export function contributeInboxPills(client: PluginClientContext, store: InboxSt
       if (!row.workspaceId) continue;
       const shown = displayReason(row.needs);
       if (shown && !row.snooze) {
-        wanted.set(row.agentId, { row, undo: false, label: `Needs you · ${REASON_WORD[shown.reason]} ${age(row.needs!.since, now)}`, title: store.data()?.firstRun ? `Sign off. ${RULE}` : "Sign off" });
+        const status = `Needs you · ${REASON_WORD[shown.reason].toLowerCase()} ${age(row.needs!.since, now)}`;
+        wanted.set(row.agentId, { row, undo: false, label: `${REASON_WORD[shown.reason]} · ${age(row.needs!.since, now)}`, title: store.data()?.firstRun ? `${status}. Click to sign off. ${RULE}` : `${status}. Click to sign off.` });
       } else if (recent && recent.agentIds.includes(row.agentId) && now - recent.at < 6_000) {
-        wanted.set(row.agentId, { row, undo: true, label: "Signed off · Undo", title: "Undo sign-off" });
+        wanted.set(row.agentId, { row, undo: true, label: "Undo sign-off", title: "Signed off. Click to undo." });
       }
     }
     for (const [agentId, entry] of pills) {
       const next = wanted.get(agentId);
       if (!next || next.row.workspaceId !== entry.workspaceId) { entry.status.remove(); entry.menu?.remove(); pills.delete(agentId); }
     }
-    for (const [agentId, next] of wanted) {
+    for (const [agentId, next] of wanted) try {
       const key = `${next.label}|${next.undo}|${next.row.enable_finish_flags}|${running(next.row)}`;
       const status = { title: next.title, label: next.label, behavior: { kind: "action" as const, onPress() { if (next.undo) void store.undo([agentId]); else void store.signOff([agentId]); } } };
       const entry = pills.get(agentId);
       if (!entry) {
         const registration = client.addComposerPill({ id: "needs-you", workspaceId: next.row.workspaceId!, agentId, button: { ...status, icon: statusIcon(agentId) } });
-        const menu = next.undo ? null : client.addComposerPill({ id: "needs-you-menu", workspaceId: next.row.workspaceId!, agentId, button: { title: "More sign-off options", label: "", icon: "ChevronUp", behavior: { kind: "menu", items: menuItems(next.row) } } });
+        const menu = next.undo ? null : client.addComposerPill({ id: "needs-you-menu", workspaceId: next.row.workspaceId!, agentId, button: { title: "More sign-off options", label: "More", icon: "ChevronUp", behavior: { kind: "menu", items: menuItems(next.row) } } });
         pills.set(agentId, { workspaceId: next.row.workspaceId!, key, status: registration, menu });
       } else if (entry.key !== key) {
         entry.status.update(status);
         if (next.undo) { entry.menu?.remove(); entry.menu = null; }
         else if (entry.menu) entry.menu.update({ behavior: { kind: "menu", items: menuItems(next.row) } });
-        else entry.menu = client.addComposerPill({ id: "needs-you-menu", workspaceId: next.row.workspaceId!, agentId, button: { title: "More sign-off options", label: "", icon: "ChevronUp", behavior: { kind: "menu", items: menuItems(next.row) } } });
+        else entry.menu = client.addComposerPill({ id: "needs-you-menu", workspaceId: next.row.workspaceId!, agentId, button: { title: "More sign-off options", label: "More", icon: "ChevronUp", behavior: { kind: "menu", items: menuItems(next.row) } } });
         entry.key = key;
       }
-    }
+    } catch { /* One agent's pill must never hide the others. */ }
     if (recent && Date.now() - recent.at < 6_000) { if (undoTimer) clearTimeout(undoTimer); undoTimer = setTimeout(publish, 6_000 - (Date.now() - recent.at) + 50); }
   };
   const unsubscribe = store.subscribe(publish);

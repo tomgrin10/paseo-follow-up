@@ -84,6 +84,10 @@ export function FollowOverview({ theme, layout, navigation, openSettings, params
     </Pressable>;
   };
   return <ScrollView style={{ flex: 1, backgroundColor: c.surface0 }} contentContainerStyle={{ padding: compact ? 16 : 28, paddingBottom: 48, maxWidth: 880, width: "100%", alignSelf: "center", gap: 14 }}>
+    {inboxOn && <View style={{ borderRadius: 10, backgroundColor: c.surface0, ...raised(c), paddingHorizontal: compact ? 4 : 8, paddingVertical: 6 }}>
+      <InboxSections store={inbox} theme={theme} touch={compact} dense={false} nav={{ openAgent }} />
+    </View>}
+    {inboxOn && <UndoBar store={inbox} theme={theme} touch={compact} />}
     <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
       <View style={{ flex: 1, gap: 4 }}>
         <Text accessibilityRole="header" style={[t.title, { fontSize: 20, lineHeight: 26 }]}>Tracked workspaces</Text>
@@ -96,10 +100,6 @@ export function FollowOverview({ theme, layout, navigation, openSettings, params
       <View style={{ paddingTop: 2 }}><Icon name="TriangleAlert" size={14} color={c.statusWarning} /></View>
       <Text style={[t.meta, { flex: 1, color: c.statusWarning }]}>{query.error ? "Couldn't refresh tracked workspaces. Showing what was last loaded." : query.data?.error}</Text>
     </View>}
-    {inboxOn && <View style={{ borderRadius: 10, backgroundColor: c.surface0, ...raised(c), paddingHorizontal: compact ? 4 : 8, paddingVertical: 6 }}>
-      <InboxSections store={inbox} theme={theme} touch={compact} dense={false} nav={{ openAgent }} />
-    </View>}
-    {inboxOn && <UndoBar store={inbox} theme={theme} touch={compact} />}
     {workspaces.length > 0 && <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginHorizontal: compact ? -16 : 0 }} contentContainerStyle={{ gap: 4, paddingHorizontal: compact ? 16 : 0 }}>
       <View accessibilityRole="tablist" style={{ flexDirection: "row", gap: 4 }}>
         {chip("all", "All", workspaces.length)}
