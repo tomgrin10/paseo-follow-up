@@ -8,6 +8,9 @@ import { FollowOverview } from "./client/overview";
 import { contributeChat } from "./client/chat";
 import { contributePills, createLiveStore, headerIcon, sidebarItem } from "./client/live";
 import { FollowLarge, LARGE_SCREEN } from "./client/large";
+import { createInboxStore } from "./client/inbox-store";
+import { contributeHeaderItem, contributeInboxCommands, contributeInboxPills } from "./client/inbox";
+import { inboxSidebarView, sidebarViewHost } from "./client/sidebar-view";
 
 const OVERVIEW = "follow-through";
 
@@ -21,9 +24,13 @@ export default function contribute(host: PluginClientContext) {
   const openOverview = () => client.openScreen({ screenId: OVERVIEW });
   const openLarge = (workspaceId: string) => client.openScreen({ screenId: LARGE_SCREEN, params: { workspaceId } });
   const store = createLiveStore(client);
+  const inbox = createInboxStore(host);
+  // "Sign off & next" from a pill or ⌘K: the screen relays it to the host's navigation.
+  let nextToken = 0;
+  const openNext = (from: string | null) => client.openScreen({ screenId: OVERVIEW, params: { next: String(++nextToken), ...(from ? { from } : {}) } });
 
   const removeDisplay = contributeDisplay(client, { id: "follow-through-overview", title: "Follow-up", Component: sidebarItem(store, OVERVIEW) });
-  const Overview = (props: PluginScreenProps) => <FollowOverview {...props} openSettings={openSettings} />;
+  const Overview = (props: PluginScreenProps) => <FollowOverview {...props} openSettings={openSettings} inbox={inbox} />;
   const Panel = (props: PluginWorkspacePanelProps) => <FollowPanel {...props} openSettings={openSettings} openOverview={openOverview} openLarge={openLarge} />;
   const Large = (props: PluginScreenProps) => <FollowLarge {...props} openSettings={openSettings} openOverview={openOverview} />;
   const removers: (() => unknown)[] = [
@@ -47,7 +54,13 @@ export default function contribute(host: PluginClientContext) {
     client.addSlashCommand({ name: "follow-through", description: "Open this workspace's PRs and remaining work", argumentHint: "", context: "agent", onSubmit({ openPanel }) { openPanel(panel(), { location: location() }); } }),
     contributeChat(client),
     contributePills(client, store, openPanel),
+    contributeInboxPills(client, inbox, openNext),
+    contributeInboxCommands(client, inbox, openNext),
+    contributeHeaderItem(host, inbox),
   ];
+  // Phase 2: only on hosts with the sidebar-view API (Paseo main after 2026-11-07).
+  const views = sidebarViewHost(host);
+  if (views) removers.push(views.addSidebarView({ id: "needs-you", title: "Follow-up: Needs you", description: "Agents that need you until you sign them off, then your workspaces.", Component: inboxSidebarView(inbox) }));
 
   const HeaderIcon = headerIcon(store);
   const headers = new Map<string, PluginButtonRegistration>();
@@ -76,7 +89,7 @@ export default function contribute(host: PluginClientContext) {
   })().catch(() => undefined);
   return async () => {
     stopped = true;
-    visibility.dispose(); removeDisplay(); remove(); store.stop();
+    visibility.dispose(); removeDisplay(); remove(); store.stop(); inbox.stop();
     for (const r of removers) void r();
     for (const button of headers.values()) button.remove();
     await releaseObservation?.();

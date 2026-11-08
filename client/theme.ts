@@ -43,6 +43,12 @@ export function mergedColor(colors: Colors): string {
   return provided ?? (isLight(colors) ? "#7347af" : "#a890d5");
 }
 
+/** Paseo's running blue (its status-dot token). The plugin SDK omits it, so match the host's values. */
+export function runningColor(colors: Colors): string {
+  const provided = (colors as Colors & { statusDotRunning?: string }).statusDotRunning;
+  return provided ?? (isLight(colors) ? "#268ae0" : "#5caaf6");
+}
+
 export function toneColor(colors: Colors, tone: PrTone): string {
   switch (tone) {
     case "merged": return mergedColor(colors);

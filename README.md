@@ -72,6 +72,34 @@ On a phone the panel opens as a tab, and the PR sheet and pill popover open as b
 
 ![Follow-up at phone width: the panel, a PR sheet and the pill popover](docs/screenshots/follow-up-mobile.png)
 
+## Needs-you inbox (beta)
+
+The 1.1 beta adds an inbox for your agents. An agent lands in **Needs you** when its turn ends, when it asks a permission or question, when it errors, when Session Guard pauses it and needs a decision, or when Follow-up sees its PR's checks fail, new review threads, or the PR merge. It stays there until you **sign it off** or **write to it yourself**, from any device. Opening it, reading it and Paseo marking it read change nothing.
+
+- **Sign off**: the ✓ on a row, the pill above the composer (it shows the reason and how long the agent has waited; **More** has *Sign off & next*, *Later…*, *Mute this turn* and *Don't flag finishes*), `/ok` in the composer (`/ok next` opens the next one), or ⌘K → `ok` → **Sign off & next**. Every sign-off can be undone for 24 hours.
+- **Needs you N** in Paseo's sidebar header opens the inbox on Follow-up's screen. It shows only while something needs you, unless you turn on *Show the sidebar item at zero*.
+- **Messages from automation don't count as yours**: agent-to-agent messages, Follow-up's own repairs, Defer, Smart Session and Session Guard continuations, and schedules leave the flag in place. Their turn end flags as usual. A script calling `paseo send` without an agent envelope counts as you until Paseo reports who sent a message.
+- **Don't flag finishes** (per agent, in the row's ⋯ or the composer's **More**): for agents that run on a schedule, such as a plugin auto-update. Permission prompts and errors still flag.
+- **First run** imports what Paseo marks unread and idle agents from the last 7 days you never replied to. Older idle agents wait in a one-time *Unsorted* list with a confirmed *Sign off all* that one Undo reverses.
+- On Paseo builds with sidebar views (Paseo `main` after 2026-11-07, expected in the next release), **Settings > Sidebar > Sidebar view > Follow-up: Needs you** puts the inbox in the sidebar, with your workspace list folded below it.
+- Turn the whole inbox off in **Follow-up: display settings** (⌘K). Off means nothing is flagged and no pill or sidebar item is shown.
+
+Install the beta:
+
+```sh
+paseo plugin update follow-through --version 1.1.0-beta.0
+# or, for a fresh install:
+paseo plugin install npm:paseo-follow-up@beta
+```
+
+Go back to the stable release (the inbox file stays on disk and is ignored by 1.0.1):
+
+```sh
+paseo plugin update follow-through --version 1.0.1
+```
+
+Betas publish to npm's `beta` dist-tag, so `paseo plugin update` without `--version`, and scheduled updates that follow `latest`, never pick one up.
+
 ## How it works
 
 - The workspace's main agent owns its PRs, tasks, questions, the spec link and the Done call. Other agents in the workspace can register PRs and check status.

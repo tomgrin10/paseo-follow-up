@@ -14,6 +14,9 @@ import { Skeleton } from "./motion";
 import { raised, type Colors } from "./theme";
 import { overviewKey } from "./needs-you";
 import { SpecChip } from "./spec";
+import { InboxSections, UndoBar, useInbox, useNextRelay } from "./inbox";
+import type { InboxStore } from "./inbox-store";
+import type { InboxRow } from "../shared/inbox";
 
 // Accent stays for actions: working is plain foreground, waiting is muted, and only Done is green.
 export const statusColor = (c: Colors, status: Status) => status === "done" ? c.statusSuccess : status === "needs-you" ? c.statusWarning : status === "handling" ? c.foreground : c.foregroundMuted;
@@ -54,8 +57,11 @@ function WorkspaceRow({ w, theme, compact, now, onOpen, first }: { w: Workspace;
   </Pressable>;
 }
 
-export function FollowOverview({ theme, layout, navigation, openSettings }: PluginScreenProps & { openSettings: () => void }) {
+export function FollowOverview({ theme, layout, navigation, openSettings, params = {}, inbox }: PluginScreenProps & { openSettings: () => void; inbox: InboxStore }) {
   const c = theme.colors; const t = text(c);
+  const openAgent = navigation ? (row: InboxRow) => navigation.openAgent({ agentId: row.agentId }) : undefined;
+  useNextRelay(inbox, params, openAgent);
+  const inboxOn = useInbox(inbox, () => inbox.enabled());
   const list = useRpc(listRpc);
   const now = useNow(30_000);
   const [showArchived, setShowArchived] = useState(false);
@@ -78,6 +84,10 @@ export function FollowOverview({ theme, layout, navigation, openSettings }: Plug
     </Pressable>;
   };
   return <ScrollView style={{ flex: 1, backgroundColor: c.surface0 }} contentContainerStyle={{ padding: compact ? 16 : 28, paddingBottom: 48, maxWidth: 880, width: "100%", alignSelf: "center", gap: 14 }}>
+    {inboxOn && <View style={{ borderRadius: 10, backgroundColor: c.surface0, ...raised(c), paddingHorizontal: compact ? 4 : 8, paddingVertical: 6 }}>
+      <InboxSections store={inbox} theme={theme} touch={compact} dense={false} nav={{ openAgent }} />
+    </View>}
+    {inboxOn && <UndoBar store={inbox} theme={theme} touch={compact} />}
     <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
       <View style={{ flex: 1, gap: 4 }}>
         <Text accessibilityRole="header" style={[t.title, { fontSize: 20, lineHeight: 26 }]}>Tracked workspaces</Text>
