@@ -5,7 +5,7 @@ import { useRpc, type PluginButtonContentProps, type PluginButtonIconProps, type
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { browserStatusRpc, getRpc } from "../shared/contracts";
 import { needsYou, type NeedItem } from "../shared/attention";
-import { HEADLINE_ICON, HEADLINE_TONE, pillState, todoLabel, type PillState } from "../shared/headline";
+import { briefQuestionIds, HEADLINE_ICON, HEADLINE_TONE, pillState, todoLabel, withoutBriefQuestions, type PillState } from "../shared/headline";
 import { snoozeUntil, type InboxRow } from "../shared/inbox";
 import { isOpen as questionOpen } from "../shared/questions";
 import type { Workspace } from "../shared/model";
@@ -88,7 +88,7 @@ export function contributeFollowUpPill(client: PluginClientContext, deps: Deps) 
       const undo = state.mode === "undo";
       const label = undo ? state.label : state.headline.label;
       // The tooltip (and accessible name) says whose pill it is, then the ask.
-      const title = undo ? "Follow-up: signed off. Click to undo." : `Follow-up: ${state.headline.line}${state.todo && state.mode === "flag" ? ` · ${todoLabel(target.items)} in this workspace` : ""}`;
+      const title = undo ? "Follow-up: signed off. Click to undo." : `Follow-up: ${state.headline.line}${state.todo && state.mode === "flag" ? ` · ${todoLabel(withoutBriefQuestions(target.items, target.row))} in this workspace` : ""}`;
       const key = `${state.mode}|${label}|${title}`;
       const button = { title, label, behavior: undo ? { kind: "action" as const, onPress() { void inbox.undo([agentId]); } } : { kind: "popover" as const, Content } };
       const entry = pills.get(agentId);
@@ -145,8 +145,10 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
   const row = target.row;
   const flagged = state?.mode === "flag";
   const running = !!row && ["running", "initializing"].includes(row.status);
-  const asking = !!w?.questions.some(questionOpen);
-  const items = w ? needsYou(w, now) : [];
+  // The flagged brief's own decision is its ask above; don't repeat it as Q1 in the stepper or the count.
+  const asked = briefQuestionIds(row);
+  const asking = !!w?.questions.some(q => questionOpen(q) && !asked.has(q.id));
+  const items = w ? withoutBriefQuestions(needsYou(w, now), row) : [];
   const done = (work: () => void) => { props.close(); work(); };
   const headline = state && state.mode !== "undo" ? state.headline : null;
   const tone = headline ? headlineColor(HEADLINE_TONE[headline.key], c) : c.foregroundMuted;
@@ -157,7 +159,7 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
       <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
         <Icon name={HEADLINE_ICON[headline.key]} size={14} color={tone} />
         <Text style={{ color: tone, fontSize: 12, lineHeight: 16, fontWeight: "600" }}>{headline.label}</Text>
-        {flagged && state.todo > 0 && <Text style={t.small}>· {todoLabel(items.length ? items : target.items)} in this workspace</Text>}
+        {flagged && state.todo > 0 && <Text style={t.small}>· {todoLabel(items.length ? items : withoutBriefQuestions(target.items, row))} in this workspace</Text>}
       </View>
       <Text numberOfLines={2} style={{ color: c.foreground, fontSize: 14, lineHeight: 20, fontWeight: "600" }}>{headline.line}</Text>
     </View> : <Text style={t.meta}>Nothing needs you here right now.</Text>}

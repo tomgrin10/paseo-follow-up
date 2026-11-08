@@ -56,7 +56,10 @@ export const inboxStateSchema = z.object({
   /** Follow-up's own deliveries, written before sending, so its messages never count as the developer's. */
   ledger: z.array(z.object({ agentId: z.string(), messageId: z.string().nullable(), at: isoSchema,
     /** "developer": a brief option or move the developer clicked. It counts as their message (design §6, F6). */
-    by: z.enum(["follow-up", "developer"]).optional() })).default([]),
+    /** "agent:<id>": a Follow-up action another agent took through its tools (agent parity). Never the developer's. */
+    by: z.union([z.enum(["follow-up", "developer"]), z.string().regex(/^agent:[\w-]+$/)]).optional(),
+    /** Set on an agent action's record (no message was sent), so the classifier never matches it to a message. */
+    action: z.string().max(60).optional() })).default([]),
   /** Last time the worker was alive; anything that finished after it was missed. */
   lastSeen: isoSchema.nullable().default(null),
   /** Set once Follow-up's existing PR states were recorded as already seen. */
@@ -295,7 +298,7 @@ export const inboxRowSchema = z.object({
   muteTurn: z.boolean(),
   enable_finish_flags: z.boolean(),
   /** The open or collapsed brief's one-liner, so every surface says the same thing (§4). */
-  brief: z.object({ kind: z.enum(BRIEF_KINDS), source: z.enum(BRIEF_SOURCES), state: z.enum(BRIEF_STATES), ask: z.string() }).nullable().optional(),
+  brief: z.object({ kind: z.enum(BRIEF_KINDS), source: z.enum(BRIEF_SOURCES), state: z.enum(BRIEF_STATES), ask: z.string(), questionIds: z.array(z.string()).optional() }).nullable().optional(),
 });
 export type InboxRow = z.infer<typeof inboxRowSchema>;
 

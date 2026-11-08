@@ -110,6 +110,16 @@ export function workspaceHeadline(items: NeedItem[]): Headline | null {
   }
 }
 
+/** Question ids the agent's open brief already asks. The popover shows that decision once, as the brief's ask. */
+export function briefQuestionIds(row: Pick<InboxRow, "brief"> | null): Set<string> {
+  return new Set(row?.brief?.state === "open" ? row.brief.questionIds ?? [] : []);
+}
+/** The workspace's items minus the questions the open brief already asks (decision 3: no repeat in the popover). */
+export function withoutBriefQuestions(items: NeedItem[], row: Pick<InboxRow, "brief"> | null): NeedItem[] {
+  const asked = briefQuestionIds(row);
+  return asked.size ? items.filter(i => !(i.kind === "question" && asked.has(i.questionId))) : items;
+}
+
 /** "3 to do": the workspace count shown inside the popover. Never on the pill, where it read like a count of agents. */
 export const todoLabel = (items: NeedItem[]) => items.length ? `${items.length} to do` : "";
 
@@ -132,7 +142,8 @@ export function pillState(input: {
   recent: { agentIds: string[]; at: number } | null;
   now: number;
 }): PillState {
-  const { row, items, recent, now } = input;
+  const { row, recent, now } = input;
+  const items = withoutBriefQuestions(input.items, row);
   const flag = row ? flagHeadline(row, now, items) : null;
   if (flag) return { mode: "flag", headline: flag, todo: items.length };
   if (row && recent && recent.agentIds.includes(row.agentId) && now - recent.at < UNDO_MS) return { mode: "undo", label: "Signed off · Undo" };
