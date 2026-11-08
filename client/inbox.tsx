@@ -57,6 +57,7 @@ export function InboxRowView({ row, theme, now, dense, touch, active, onOpen, on
   const c = theme.colors;
   const [width, setWidth] = useState(0);
   const [hover, setHover] = useState(false);
+  const [focused, setFocused] = useState(false);
   const title = rowTitle(row);
   const shown = displayReason(row.needs);
   const primary = dense ? 12 : 13; const secondary = dense ? 11 : 12;
@@ -67,7 +68,7 @@ export function InboxRowView({ row, theme, now, dense, touch, active, onOpen, on
   const more = (row.needs?.reasons.length ?? 0) - 1;
   const days = row.needs ? now - Date.parse(row.needs.since) > 86_400_000 : false;
   const right = trailing ?? (row.needs ? age(row.needs.since, now) : row.signedOffAt ? age(row.signedOffAt, now) : row.resumesAt ? `resumes ${wakeLabel({ until: row.resumesAt, at: "" }, now)}` : running(row) ? age(row.lastActivityAt, now) : "");
-  const reasonColor = shown ? reasonGlyph(shown.reason, c).color : c.foregroundMuted;
+  const reasonColor = shown && !row.snooze ? reasonGlyph(shown.reason, c).color : c.foregroundMuted;
   const second: ReactNode[] = [];
   if (title.agent && narrow) second.push(<Text key="a" style={{ color: c.foreground }}>{title.agent} · </Text>);
   if (shown) second.push(<Text key="r" style={{ color: reasonColor, fontWeight: "600" }}>{REASON_LABEL[shown.reason]}</Text>);
@@ -79,10 +80,10 @@ export function InboxRowView({ row, theme, now, dense, touch, active, onOpen, on
   if (!row.enable_finish_flags && !shown) second.push(<Text key="f">{second.length ? " · " : ""}Finishes not flagged</Text>);
   if (row.delegatedFrom && !shown) second.push(<Text key="g">{second.length ? " · " : ""}Delegated</Text>);
   const quiet = !row.needs || !!row.snooze;
-  const showCheck = !!onSignOff && !selecting && (touch || hover || !dense);
+  const showCheck = !!onSignOff && !selecting && (touch || hover || focused || !dense);
   const a11y = [label(row), shown ? `${REASON_LABEL[shown.reason]}${shown.detail ? `: ${shown.detail}` : ""}` : "", right ? `waiting ${right}` : ""].filter(Boolean).join(". ");
   return <View onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}
-    {...({ onMouseEnter: () => setHover(true), onMouseLeave: () => setHover(false) } as object)}
+    {...({ onMouseEnter: () => setHover(true), onMouseLeave: () => setHover(false), onFocus: () => setFocused(true), onBlur: () => setFocused(false) } as object)}
     style={{ flexDirection: "row", alignItems: "center", minHeight: touch ? 56 : dense ? 40 : 48, paddingLeft: dense ? 8 : 12, paddingRight: dense ? 4 : 8, borderRadius: dense ? 6 : 0, backgroundColor: active || moreOpen ? c.surface2 : hover && onOpen ? c.surface1 : "transparent" }}>
     {selecting && <Pressable accessibilityRole="checkbox" accessibilityState={{ checked }} aria-checked={checked} accessibilityLabel={`Select ${label(row)}`} onPress={onCheck} hitSlop={6}
       style={{ width: touch ? 44 : 24, height: touch ? 44 : 28, alignItems: "center", justifyContent: "center" }}>
@@ -99,11 +100,11 @@ export function InboxRowView({ row, theme, now, dense, touch, active, onOpen, on
             {title.primary}{title.agent && !narrow ? <Text style={{ color: c.foregroundMuted }}>{` › ${title.agent}`}</Text> : null}
           </Text>
         </View>
-        {second.length > 0 && <Text numberOfLines={shown?.reason === "permission" ? 2 : 1} style={{ color: c.foregroundMuted, fontSize: secondary, lineHeight: secondary + 4 }}>{second}</Text>}
+        {second.length > 0 && <Text numberOfLines={shown?.reason === "permission" || shown?.reason === "paused" ? 2 : 1} style={{ color: c.foregroundMuted, fontSize: secondary, lineHeight: secondary + 4 }}>{second}</Text>}
       </View>
     </Pressable>
     <View style={{ flexDirection: "row", alignItems: "center", gap: 2, marginLeft: 6 }}>
-      {!!right && !(showCheck && dense && !touch) && <Text numberOfLines={1} style={{ color: days ? c.statusWarning : c.foregroundMuted, fontSize: secondary, fontVariant: ["tabular-nums"], marginRight: onSignOff || onMore ? 2 : 4 }}>{right}</Text>}
+      {!!right && <Text numberOfLines={1} style={{ color: days ? c.statusWarning : c.foregroundMuted, fontSize: secondary, fontVariant: ["tabular-nums"], marginRight: onSignOff || onMore ? 2 : 4 }}>{right}</Text>}
       {onUndo && <Button theme={theme} compact={touch} kind="ghost" icon="Undo2" title="Undo" accessibilityLabel={`Undo sign-off for ${label(row)}`} onPress={onUndo} />}
       {onMore && !selecting && <IconButton theme={theme} compact={touch} icon="Ellipsis" label={`More for ${label(row)}`} onPress={onMore} />}
       {showCheck && <SignOffButton theme={theme} touch={touch} label={`Sign off ${label(row)}`} onPress={onSignOff!} />}
@@ -128,13 +129,13 @@ function RowMenu({ row, store, theme, touch, close }: { row: InboxRow; store: In
   return <View style={{ marginLeft: touch ? 12 : 34, marginRight: 8, marginBottom: 6, paddingVertical: 8, paddingHorizontal: 10, gap: 8, borderRadius: 8, backgroundColor: c.surface1, borderWidth: 1, borderColor: c.border }}>
     {row.needs && !row.snooze && <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
       <Text style={{ color: c.foregroundMuted, fontSize: 12, marginRight: 2 }}>Later</Text>
-      <Button theme={theme} compact={touch} title="1 hour" onPress={() => later("hour")} />
-      <Button theme={theme} compact={touch} title="Tonight" onPress={() => later("tonight")} />
+      <Button theme={theme} compact={touch} title="In 1 hour" onPress={() => later("hour")} />
+      <Button theme={theme} compact={touch} title="Tonight 18:00" onPress={() => later("tonight")} />
       <Button theme={theme} compact={touch} title="Tomorrow 09:00" onPress={() => later("tomorrow")} />
       <Button theme={theme} compact={touch} title="Next event" onPress={() => later("next-event")} />
     </View>}
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-      {running(row) && <Button theme={theme} compact={touch} icon="BellOff" title="Sign off · mute this turn" onPress={() => { void store.signOff([row.agentId], { muteTurn: true }); close(); }} />}
+      {running(row) && <Button theme={theme} compact={touch} icon="BellOff" title="Sign off & mute this turn" onPress={() => { void store.signOff([row.agentId], { muteTurn: true }); close(); }} />}
       <Button theme={theme} compact={touch} icon={row.enable_finish_flags ? "BellMinus" : "Bell"} title={row.enable_finish_flags ? "Don't flag finishes" : "Flag finishes again"}
         accessibilityHint="Permission prompts and errors still flag this agent" onPress={() => { void store.setFinishFlags(row.agentId, !row.enable_finish_flags); close(); }} />
     </View>
@@ -230,7 +231,7 @@ export function InboxSections({ store, theme, touch, dense, nav, runningCap = 8 
     </>}
     {selecting && <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: touch ? 52 : 40, paddingHorizontal: 10, borderRadius: 8, backgroundColor: c.surface1, borderWidth: 1, borderColor: c.border }}>
       <Text style={{ flex: 1, color: c.foreground, fontSize: 12, fontVariant: ["tabular-nums"] }}>{checked.size} selected</Text>
-      <Button theme={theme} compact={touch} title="Later" disabled={!checked.size} onPress={() => { void store.snooze([...checked], snoozeUntil("tomorrow", new Date())); exitSelect(); }} />
+      <Button theme={theme} compact={touch} title="Later · tomorrow 09:00" disabled={!checked.size} onPress={() => { void store.snooze([...checked], snoozeUntil("tomorrow", new Date())); exitSelect(); }} />
       <Button theme={theme} compact={touch} kind="primary" icon="Check" title={`Sign off ${checked.size || ""}`.trim()} disabled={!checked.size} onPress={() => { void store.signOff([...checked]); exitSelect(); }} />
     </View>}
 
@@ -278,10 +279,21 @@ export function InboxSections({ store, theme, touch, dense, nav, runningCap = 8 
  * Sidebar header item: "Needs you N". Registered once, synchronously (the host resolves sidebar items
  * when the installation mounts); it renders nothing at zero unless the developer keeps it always on.
  */
+const sidebarViews = { mounted: 0, listeners: new Set<() => void>() };
+const subscribeSidebarViews = (fn: () => void) => { sidebarViews.listeners.add(fn); return () => { sidebarViews.listeners.delete(fn); }; };
+/** Called by the Phase 2 sidebar view: while it is the sidebar, the header item would repeat the list right below it. */
+export function useSidebarViewMounted() {
+  useEffect(() => {
+    sidebarViews.mounted += 1; sidebarViews.listeners.forEach(fn => fn());
+    return () => { sidebarViews.mounted -= 1; sidebarViews.listeners.forEach(fn => fn()); };
+  }, []);
+}
+
 export function contributeHeaderItem(client: PluginClientContext, store: InboxStore) {
   function NeedsYouItem({ currentScreen, openScreen, theme }: PluginSidebarItemProps) {
     const count = useInbox(store, () => sectionRows(store.rows(), "needs", Date.now()).length);
-    const visible = useInbox(store, () => store.enabled() && (count > 0 || store.headerWhenEmpty()));
+    const inSidebarView = useSyncExternalStore(subscribeSidebarViews, () => sidebarViews.mounted > 0, () => false);
+    const visible = useInbox(store, () => store.enabled() && (count > 0 || store.headerWhenEmpty())) && !inSidebarView;
     const c = theme.colors;
     if (!visible) return null;
     return <SidebarRow icon="Inbox" label="Needs you" active={currentScreen?.screenId === INBOX_SCREEN && currentScreen.params.section === "needs"} onPress={() => openScreen({ screenId: INBOX_SCREEN, params: { section: "needs" } })}
@@ -305,13 +317,13 @@ export function contributeInboxPills(client: PluginClientContext, store: InboxSt
     const reason = useInbox(store, () => { const r = store.rows().find(x => x.agentId === agentId); return r?.needs ? displayReason(r.needs)?.reason ?? null : null; });
     const c = props.theme.colors;
     if (!reason) return <Icon name="Undo2" size={props.size} color={c.foregroundMuted} />;
-    const g = reasonGlyph(reason, c);
-    return <Icon name={g.name} size={props.size} color={g.color} />;
+    // A check, tinted with the reason's colour: the label says why, the icon says what a click does.
+    return <Icon name="Check" size={props.size} color={reasonGlyph(reason, c).color} />;
   };
   const menuItems = (row: InboxRow) => [
     { kind: "item" as const, id: "next", title: "Sign off & next", icon: "ArrowRight", behavior: { kind: "action" as const, onPress() { void store.signOff([row.agentId]); openNext(row.agentId); } } },
-    { kind: "item" as const, id: "later", title: "Later…", icon: "AlarmClock", behavior: { kind: "menu" as const, items: ([["hour", "In 1 hour"], ["tonight", "Tonight 18:00"], ["tomorrow", "Tomorrow 09:00"], ["next-event", "Until the next event"]] as const).map(([id, title]) => ({ kind: "item" as const, id, title, behavior: { kind: "action" as const, onPress() { void store.snooze([row.agentId], snoozeUntil(id, new Date())); } } })) } },
-    { kind: "item" as const, id: "mute", title: "Mute this turn", icon: "BellOff", visible: running(row), behavior: { kind: "action" as const, onPress() { void store.signOff([row.agentId], { muteTurn: true }); } } },
+    { kind: "item" as const, id: "later", title: "Later…", icon: "AlarmClock", behavior: { kind: "menu" as const, items: ([["hour", "In 1 hour"], ["tonight", "Tonight 18:00"], ["tomorrow", "Tomorrow 09:00"], ["next-event", "Next event"]] as const).map(([id, title]) => ({ kind: "item" as const, id, title, behavior: { kind: "action" as const, onPress() { void store.snooze([row.agentId], snoozeUntil(id, new Date())); } } })) } },
+    { kind: "item" as const, id: "mute", title: "Sign off & mute this turn", icon: "BellOff", visible: running(row), behavior: { kind: "action" as const, onPress() { void store.signOff([row.agentId], { muteTurn: true }); } } },
     { kind: "separator" as const, id: "sep" },
     { kind: "item" as const, id: "finishes", title: row.enable_finish_flags ? "Don't flag finishes" : "Flag finishes again", icon: row.enable_finish_flags ? "BellMinus" : "Bell", behavior: { kind: "action" as const, onPress() { void store.setFinishFlags(row.agentId, !row.enable_finish_flags); } } },
   ];
