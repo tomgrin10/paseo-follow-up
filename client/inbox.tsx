@@ -216,7 +216,7 @@ export function InboxSections({ store, theme, touch, dense, nav, runningCap = 8 
     <SectionHeader theme={theme} dense={dense} title="Needs you" count={needs.length} tone={needs.length ? undefined : c.foregroundMuted} open={open.needs} onToggle={() => toggle("needs")}
       right={needs.length > 0 && <View style={{ flexDirection: "row" }}>
         {selecting && finishedOnly.length > 0 && <Button theme={theme} compact={touch} kind="ghost" title="Select finished" onPress={() => setChecked(new Set(finishedOnly.map(r => r.agentId)))} />}
-        <IconButton theme={theme} compact={touch} icon={selecting ? "X" : "ListChecks"} label={selecting ? "Stop selecting" : "Select agents"} onPress={() => selecting ? exitSelect() : setSelecting(true)} />
+        <IconButton theme={theme} compact={touch} icon={selecting ? "X" : "ListChecks"} label={selecting ? "Stop selecting" : "Select agents"} onPress={() => { if (selecting) exitSelect(); else { setMenu(null); setSelecting(true); } }} />
       </View>} />
     {open.needs && <>
       {needs.map(r => row(r, { onSignOff: () => void store.signOff([r.agentId]), selecting, checked: checked.has(r.agentId), onCheck: () => pick(r.agentId) }))}
