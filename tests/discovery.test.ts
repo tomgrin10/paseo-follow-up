@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { applyDiscovery, applyHistory, extractHistory } from "../server/discovery";
-import { chooseMainAgent, type Agent } from "../server/daemon";
+import { chooseMainAgent, successorMainAgent, type Agent } from "../server/daemon";
 import { Engine, type Gateway } from "../server/engine";
 import { Store } from "../server/store";
 import { tasksFor, batchPrompt } from "../server/tasks";
@@ -100,4 +100,28 @@ test("Track returns after persistence while unrelated global observation is stil
     assert.equal(w.enable_tracking, true); assert.equal(w.enable_auto_sends, true, "first tracking sends repairs to the agent on its own");
     assert.equal((await store.snapshot()).workspaces[0].mainAgentId, "main-agent");
   } finally { if (timer) clearTimeout(timer); release(); await activation; await engine.tick(); }
+});
+
+test("a closed or gone main agent hands over to the workspace's live root; a live main is never replaced", () => {
+  const agent = (id: string, status: string, createdAt: string, lastUserMessageAt: string | null = null) => ({ id, status, createdAt, lastUserMessageAt } as Agent);
+  const closedMain = agent("old-main", "closed", "2026-09-22");
+  const live = agent("live", "idle", "2026-10-01", "2026-11-08T15:00:00Z");
+  const quiet = agent("quiet", "idle", "2026-10-05");
+  assert.equal(successorMainAgent([closedMain, live], "old-main")?.id, "live");
+  assert.equal(successorMainAgent([live], "old-main")?.id, "live", "a main missing from the index hands over too");
+  assert.equal(successorMainAgent([closedMain, quiet, live], "old-main")?.id, "live", "the one the developer wrote to last wins");
+  assert.equal(successorMainAgent([agent("old-main", "idle", "2026-09-22"), live], "old-main"), undefined, "a live main keeps the workspace");
+  assert.equal(successorMainAgent([closedMain], "old-main"), undefined, "no live root, no handover");
+  assert.equal(successorMainAgent([live], undefined), undefined);
+});
+
+test("applyDiscovery adopts a live successor only for the main agent it replaces", () => {
+  const clock = Date.parse("2026-11-08T15:00:00Z");
+  const state = { version: 1, workspaces: [] } as unknown as Parameters<typeof applyDiscovery>[0];
+  applyDiscovery(state, [{ id: "w", title: "W", mainAgentId: "old-main", messageAt: null }], clock);
+  const w = state.workspaces[0]; w.runtimeReason = "Main agent is unavailable or moved to another workspace";
+  applyDiscovery(state, [{ id: "w", title: "W", mainAgentId: "live", messageAt: null, replacesMainAgentId: "someone-else" }], clock);
+  assert.equal(w.mainAgentId, "old-main", "a successor for a different owner is ignored");
+  applyDiscovery(state, [{ id: "w", title: "W", mainAgentId: "live", messageAt: null, replacesMainAgentId: "old-main" }], clock);
+  assert.equal(w.mainAgentId, "live"); assert.equal(w.runtimeReason, null);
 });
