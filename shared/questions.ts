@@ -113,7 +113,7 @@ export function answerMessage(q: Question, choice: string, words?: string): stri
 
 /** Parses an answer message back into its parts, for the chat card. */
 export function parseAnswerMessage(text: string): { id: string; title: string; choice: string; label: string | null; words: string | null } | null {
-  const match = /^Follow-up answer (Q\d+) \((.+?)\): ([^\n—]+?)(?: — ([^\n]+))?\n(?:The developer added: ([^\n]+))?/.exec(text.trim() + "\n");
+  const match = /^Follow-up answer ([QD]\d+) \((.+?)\): ([^\n—]+?)(?: — ([^\n]+))?\n(?:The developer added: ([^\n]+))?/.exec(text.trim() + "\n");
   return match ? { id: match[1], title: match[2], choice: match[3].trim(), label: match[4]?.trim() ?? null, words: match[5]?.trim() ?? null } : null;
 }
 

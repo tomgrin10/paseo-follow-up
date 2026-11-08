@@ -29,7 +29,8 @@ import { Inbox, type GuardPause } from "./server/inbox";
 import { daemonDirectory, guardPath } from "./server/inbox-directory";
 import { fileSources } from "./server/inbox-classifier";
 import { onBeforeSend } from "./server/daemon";
-import { readFile } from "node:fs/promises";
+import { readFile, rename } from "node:fs/promises";
+import { BRIEF_KIND, BRIEF_VERSION, prState, validateNeedsYou, type Brief, type NeedsYouRecord } from "./shared/brief";
 
 export default function contribute(server: PluginServerContext) {
   const displaySettings = server.registerSettings(displayPreferences);
@@ -48,8 +49,50 @@ export default function contribute(server: PluginServerContext) {
   const engine = new Engine(store, github, gateway);
   // Unknown is not off: an unreadable document keeps the inbox on with its defaults.
   const inboxSettings = async () => { try { const state = await displaySettings.read(); if (state.status === "ready") return state.values; } catch {} return displayPreferences.schema.parse({}); };
+  // The brief's timeline rows need a plugin session; the handler contexts carry one. Rows wait until one is seen.
+  type PaseoApi = PluginHandlerContext["paseo"];
+  let api: PaseoApi | null = null;
+  const unsent = new Map<string, { agentId: string; brief: Brief }>();
+  const append = async (agentId: string, brief: Brief) => {
+    if (!api) { unsent.set(`${agentId}|${brief.id}`, { agentId, brief }); return; }
+    await api.agents.ref(agentId).timeline.append({ type: "plugin", id: brief.id, kind: BRIEF_KIND, version: BRIEF_VERSION, data: brief });
+  };
+  const seen = (paseo: PaseoApi) => {
+    api = paseo;
+    for (const [key, row] of unsent) { unsent.delete(key); void append(row.agentId, row.brief).catch(() => undefined); }
+  };
+  const needsYouPath = (agentId: string) => join(directory, "hook-state", `needs-you-${agentId}.json`);
+  const trackedMain = async (agentId: string) => (await store.snapshot()).workspaces.find(w => w.enable_tracking && !w.archived && w.mainAgentId === agentId) ?? null;
   const inbox: Inbox = new Inbox(directory, {
     enabled: inboxSettings,
+    briefs: {
+      sink: append,
+      async call(agentId) {
+        if (!/^[\w-]+$/.test(agentId)) return null;
+        try { return JSON.parse(await readFile(needsYouPath(agentId), "utf8")) as NeedsYouRecord; } catch { return null; }
+      },
+      async pr(agentId, event) {
+        const w = (await store.snapshot()).workspaces.find(w => w.enable_tracking && !w.archived && (w.mainAgentId === agentId || w.prs.some(p => p.registeredAgentId === agentId)));
+        return prState(w, agentId, event ?? null);
+      },
+      async workspaceId(agentId) { return (await trackedMain(agentId))?.id ?? null; },
+      // Decisions stored as questions follow the brief: a picked option is the developer's answer; a brief the agent
+      // moved past closes its still-open questions so the panel doesn't keep stale ones.
+      async settled(agentId, brief) {
+        if (brief.state !== "answered" && brief.state !== "superseded") return;
+        await store.mutate(state => {
+          const w = state.workspaces.find(w => w.enable_tracking && w.mainAgentId === agentId);
+          if (!w) return;
+          const at = brief.outcomeAt ?? new Date().toISOString();
+          for (const d of brief.decisions) {
+            const q = w.questions.find(q => q.id === d.id && brief.questionIds.includes(q.id));
+            if (!q || q.answer || q.closed) continue;
+            if (brief.state === "answered" && d.chosen) q.answer = { choice: d.chosen, at, by: "developer", delivery: { state: "sent", to: agentId, messageId: null, at, reason: null } };
+            else if (brief.state === "superseded") q.closed = { at, reason: "The agent kept going past this brief.", by: null };
+          }
+        });
+      },
+    },
     directory: daemonDirectory(),
     sources: fileSources(paseoHome, async (): Promise<{ agentId: string; messageId: string | null; at: string }[]> => (await inbox.store.snapshot()).ledger),
     guard: async () => {
@@ -58,12 +101,20 @@ export default function contribute(server: PluginServerContext) {
     },
   });
   onBeforeSend((agentId, messageId) => inbox.noteDelivery(agentId, messageId));
+  /** What the bridge and the Stop hook read: is the inbox on, may agents be nudged, who has a prompt showing. */
+  const writeBriefState = async () => {
+    const values = await inboxSettings();
+    const path = join(directory, "brief.json");
+    const temporary = `${path}.${randomUUID()}`;
+    await writeFile(temporary, JSON.stringify({ enable_inbox: values.enable_inbox, enable_brief_nudge: values.enable_brief_nudge, pending: inbox.pendingPermissions(), at: Date.now() }), { mode: 0o600 });
+    await rename(temporary, path);
+  };
   let inboxError: string | null = null;
   let inboxTimer: ReturnType<typeof setTimeout> | null = null;
   const inboxLoop = async () => {
     await ready;
     if (stopped || loadError) return;
-    try { await inbox.tick(); await inbox.observeGuard(); await inbox.observeFollowUp(await store.snapshot()); inboxError = null; }
+    try { await writeBriefState().catch(() => undefined); await inbox.tick(); await inbox.observeGuard(); await inbox.observeFollowUp(await store.snapshot()); inboxError = null; }
     catch (error) { inboxError = error instanceof Error ? error.message : "The Needs-you inbox couldn't update."; }
     if (!stopped) inboxTimer = setTimeout(() => void inboxLoop(), 15_000);
   };
@@ -84,6 +135,7 @@ export default function contribute(server: PluginServerContext) {
     hooksStarted = true;
     await agentHooks.start().catch(() => { hookError = "Automatic sidebar instructions could not be registered for every provider. Check Claude/Codex hook settings; tracking is still available."; });
     hookTimer = setInterval(() => void agentHooks.heartbeat().catch(() => {}), 30_000);
+    await writeBriefState().catch(() => undefined);
   })().catch(() => { loadError = "Follow-through could not start. Check its saved state and worker lock."; });
   const requireReady = async () => { await ready; if (loadError || stopped) throw new Error(loadError ?? "Follow-through is stopping"); };
   const loop = async () => {
@@ -339,12 +391,60 @@ export default function contribute(server: PluginServerContext) {
 
   server.handle(rpc.inboxListRpc, async () => { await requireReady(); return { ...await inbox.list(), error: inboxError }; });
   server.handle(rpc.inboxActRpc, async input => { await requireReady(); return inbox.act(input); });
+  server.handle(rpc.needsYouRpc, async ({ agentId, ...input }, { paseo }) => {
+    await requireReady(); seen(paseo);
+    if (!(await inboxSettings()).enable_inbox) throw new Error("The Needs-you inbox is off, so there's no brief to fill. Finish with your normal reply.");
+    if (!/^[\w-]+$/.test(agentId)) throw new Error("Unsupported agent identity.");
+    const agent = (await paseo.agents.ref(agentId).refresh())?.agent;
+    if (!agent?.workspaceId) throw new Error("Cannot locate the caller's workspace.");
+    const saved = await store.snapshot();
+    const tracked = saved.workspaces.find(w => w.id === agent.workspaceId && w.enable_tracking && !w.archived);
+    // F2: root agents only. Contributors and recovery sessions report to the main agent; subagents to their parent.
+    if (agent.labels["follow-through.recovery"] || tracked && tracked.mainAgentId !== agentId) throw new Error("needs_you is for the workspace's main agent. Report to the main agent instead.");
+    if (!await isWorkspaceRoot(agent, async id => (await paseo.agents.ref(id).refresh())?.agent)) throw new Error("needs_you is for root agents. Report to your parent agent instead.");
+    const call = validateNeedsYou(input, ref => {
+      const key = ref.trim().replace(/^#/, "");
+      const match = tracked?.prs.find(p => p.key.toLowerCase() === key.toLowerCase()) ?? (tracked?.prs.filter(p => String(p.number) === key).length === 1 ? tracked.prs.find(p => String(p.number) === key) : undefined);
+      if (!match) throw new Error(`No registered PR matches ${ref}. Register it with register_pr first, or give the link as url.`);
+      return match.key;
+    });
+    const turn = inbox.currentTurn(agentId);
+    const previous = await readFile(needsYouPath(agentId), "utf8").then(t => JSON.parse(t) as NeedsYouRecord).catch(() => null);
+    const sameTurn = !!previous && (turn?.turnId ? previous.turnId === turn.turnId : !!turn && previous.at >= turn.at);
+    let questionIds: string[] = [];
+    if (tracked) {
+      const mode = await questionMode();
+      questionIds = await store.mutate(state => {
+        const w = findWorkspace(state, tracked.id);
+        const now = Date.now();
+        // Called twice in one turn: the last call wins, so the first call's questions close.
+        if (sameTurn) for (const q of w.questions) if (previous!.questionIds?.includes(q.id) && !q.answer && !q.closed) q.closed = { at: new Date(now).toISOString(), reason: "Replaced by a newer needs_you call.", by: agentId };
+        const ids = (call.decisions ?? []).map(d => askQuestion(w, agentId, { title: d.question.slice(0, 120), question: d.question, options: (d.options ?? []).map((o, i) => ({ letter: String.fromCharCode(65 + i), label: o.label, ...(o.consequence ? { consequence: o.consequence } : {}) })), ...(d.options?.length ? { recommend: String.fromCharCode(65 + d.recommend!) } : {}) }, mode, now).question.id);
+        if (ids.length) changed(w);
+        return ids;
+      });
+    }
+    const record: NeedsYouRecord = { at: Date.now(), turnId: turn?.turnId ?? null, call, questionIds };
+    await mkdir(join(directory, "hook-state"), { recursive: true, mode: 0o700 });
+    const temporary = `${needsYouPath(agentId)}.${randomUUID()}`;
+    await writeFile(temporary, JSON.stringify(record), { mode: 0o600 });
+    await rename(temporary, needsYouPath(agentId));
+    return { ok: true as const, briefId: `brief:${turn?.turnId ?? record.at}` };
+  });
+  server.handle(rpc.briefActionRpc, async ({ agentId, briefId, decisionId, choice, move }, { paseo }) => {
+    await requireReady(); seen(paseo);
+    const brief = await inbox.briefAction(agentId, { briefId, decisionId, choice, move }, async (text, messageId) => {
+      await paseo.agents.ref(agentId).send(text, { messageId, activeTurnBehavior: "steer" });
+    });
+    return { brief };
+  });
 
   const removers = [
-    server.on("agent.turn_started", async event => inboxHook(() => inbox.turnStarted(event.agent))),
-    server.on("agent.turn_ended", async event => inboxHook(() => inbox.turnEnded(event.agent, event.outcome, event.turnId))),
-    server.on("agent.permission_requested", async event => inboxHook(() => inbox.permissionRequested(event.agent, event.request))),
-    server.on("agent.permission_resolved", async event => inboxHook(() => inbox.permissionResolved(event.agent, event.requestId))),
+    displaySettings.subscribe(() => void writeBriefState().catch(() => undefined)),
+    server.on("agent.turn_started", async (event, { paseo }) => { seen(paseo); inboxHook(() => inbox.turnStarted(event.agent, event.turnId)); }),
+    server.on("agent.turn_ended", async (event, { paseo }) => { seen(paseo); inboxHook(() => inbox.turnEnded(event.agent, event.outcome, event.turnId)); }),
+    server.on("agent.permission_requested", async (event, { paseo }) => { seen(paseo); inboxHook(async () => { await inbox.permissionRequested(event.agent, event.request); await writeBriefState(); }); }),
+    server.on("agent.permission_resolved", async (event, { paseo }) => { seen(paseo); inboxHook(async () => { await inbox.permissionResolved(event.agent, event.requestId); await writeBriefState(); }); }),
     server.on("agent.closed", async event => inboxHook(() => inbox.closed(event.agent))),
     server.on("agent.archived", async event => inboxHook(() => inbox.archived([event.agent.id]))),
     server.on("workspace.archived", async event => inboxHook(() => inbox.workspaceArchived(event.workspace.id))),
@@ -368,16 +468,23 @@ export default function contribute(server: PluginServerContext) {
             return { ...request, env: { ...request.env, FOLLOW_THROUGH_CLI: bridge, FOLLOW_THROUGH_CLIENT_ENTRY: clientEntry() } };
         }
       }
-      if (!w && request.workspaceId && !request.labels["follow-through.recovery"] && await isWorkspaceRoot({ id: request.agentId, workspaceId: request.workspaceId, labels: request.labels }, async id => (await paseo.agents.ref(id).refresh())?.agent)) {
+      const root = !!request.workspaceId && !request.labels["follow-through.recovery"] && await isWorkspaceRoot({ id: request.agentId, workspaceId: request.workspaceId, labels: request.labels }, async id => (await paseo.agents.ref(id).refresh())?.agent);
+      // F2: needs_you and the Stop-hook nudge reach every root agent while the inbox is on, tracked or not.
+      const brief = (await inboxSettings()).enable_inbox && ["claude", "codex"].includes(request.provider) ? request.provider : null;
+      if (!w && root) {
         w = await store.mutate(state => {
           const workspace = state.workspaces.find(w => w.id === request.workspaceId && w.enable_tracking && !w.archived);
           if (workspace) workspace.contributorAgentIds = [...new Set([...(workspace.contributorAgentIds ?? []), request.agentId])];
           return workspace;
         });
       }
-      if (!w) return request;
+      if (!w) {
+        if (!brief || !root) return request;
+        return withSessionMcp({ ...request, env: { ...request.env, FOLLOW_THROUGH_BRIEF: brief } }, directory, clientEntry(), paseoHome, false, process.env, brief);
+      }
       const recovery = w.mainAgentId !== request.agentId && !w.contributorAgentIds?.includes(request.agentId);
-      return withSessionMcp({ ...request, env: { ...request.env, FOLLOW_THROUGH_CLI: bridge, FOLLOW_THROUGH_CLIENT_ENTRY: clientEntry(), ...(recovery ? { FOLLOW_THROUGH_RECOVERY: "1" } : {}) } }, directory, clientEntry(), paseoHome, recovery);
+      const main = !recovery && w.mainAgentId === request.agentId ? brief : null;
+      return withSessionMcp({ ...request, env: { ...request.env, FOLLOW_THROUGH_CLI: bridge, FOLLOW_THROUGH_CLIENT_ENTRY: clientEntry(), ...(recovery ? { FOLLOW_THROUGH_RECOVERY: "1" } : {}), ...(main ? { FOLLOW_THROUGH_BRIEF: main } : {}) } }, directory, clientEntry(), paseoHome, recovery, process.env, main);
     }),
     server.on("agent.turn_ended", async (event, { paseo, signal }) => {
       await ready;

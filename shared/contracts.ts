@@ -2,6 +2,7 @@ import { projectSchema } from "./settings";
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import { inboxRowSchema } from "./inbox";
+import { briefSchema } from "./brief";
 import { idSchema, textSchema, workspaceSchema } from "./model";
 import { communicationSchema } from "./communication";
 import { taskTriggerSchema } from "./task-trigger";
@@ -68,9 +69,23 @@ export const workspaceSpecRpc = defineRpc({ name: "follow.workspace-spec", input
 ]), output: workspaceSchema });
 
 // Needs-you inbox. Names stay under follow. like the rest of the plugin.
-export const inboxListRpc = defineRpc({ name: "follow.inbox-list", input: z.object({}), output: z.object({ enabled: z.boolean(), rows: z.array(inboxRowSchema), unsorted: z.array(inboxRowSchema).nullable(), firstRun: z.boolean(), batchUndo: z.object({ at: z.string(), count: z.number().int() }).nullable(), signOffs: z.number().int(), error: z.string().nullable() }) });
+export const inboxListRpc = defineRpc({ name: "follow.inbox-list", input: z.object({}), output: z.object({ enabled: z.boolean(), rows: z.array(inboxRowSchema), unsorted: z.array(inboxRowSchema).nullable(), firstRun: z.boolean(), batchUndo: z.object({ at: z.string(), count: z.number().int() }).nullable(), signOffs: z.number().int(), error: z.string().nullable(),
+  /** Adoption share of needs_you over the last 7 days of flagged turns (R2). Optional for older daemons. */
+  briefStats: z.object({ days: z.number().int(), total: z.number().int(), tool: z.number().int(), structured: z.number().int(), extraction: z.number().int(), fallback: z.number().int() }).optional() }) });
 export const inboxActRpc = defineRpc({ name: "follow.inbox-act", input: z.strictObject({
   action: z.enum(["sign_off", "undo", "snooze", "mute_turn", "set_finish_flags", "unsorted_flag", "unsorted_sign_off", "batch_undo"]),
   agentIds: z.array(idSchema).max(500).optional(), seqs: z.record(z.string(), z.number().int()).optional(),
   until: z.string().max(200).optional(), value: z.boolean().optional(), muteTurn: z.boolean().optional(),
 }), output: z.object({ results: z.array(z.object({ agentId: z.string(), ok: z.boolean(), cameBack: z.boolean() })) }) });
+
+// The brief ("what you need to do"). needs_you comes from the agent's bridge; brief-action from the card.
+const needsYouOption = z.strictObject({ label: z.string(), consequence: z.string().optional() });
+export const needsYouRpc = defineRpc({ name: "follow.needs-you", input: z.strictObject({
+  agentId: idSchema, ask: z.string(), kind: z.enum(["decision", "action", "review", "done"]),
+  decisions: z.array(z.strictObject({ question: z.string(), options: z.array(needsYouOption).optional(), recommend: z.number().int().optional() })).optional(),
+  context: z.string().optional(),
+  links: z.array(z.strictObject({ label: z.string(), url: z.string().optional(), path: z.string().optional(), pr: z.string().optional() })).optional(),
+}), output: z.object({ ok: z.literal(true), briefId: z.string() }) });
+export const briefActionRpc = defineRpc({ name: "follow.brief-action", input: z.strictObject({
+  agentId: idSchema, briefId: z.string().max(300), decisionId: z.string().max(20).optional(), choice: z.string().regex(/^[A-Z]$/).optional(), move: z.enum(["retry"]).optional(),
+}), output: z.object({ brief: briefSchema }) });
