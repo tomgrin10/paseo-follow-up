@@ -101,7 +101,7 @@ The content comes from a new `needs_you` tool that every root agent gets while t
 Install the beta:
 
 ```sh
-paseo plugin update follow-through --version 1.2.0-beta.2
+paseo plugin update follow-through --version 1.2.0-beta.3
 # or, for a fresh install:
 paseo plugin install npm:paseo-follow-up@beta
 ```
@@ -117,7 +117,7 @@ Betas publish to npm's `beta` dist-tag, so `paseo plugin update` without `--vers
 ## How it works
 
 - The workspace's main agent owns its PRs, tasks, questions, the spec link and the Done call. Other agents in the workspace can register PRs and check status.
-- **Auto-send** is on for every workspace tracked for the first time (1.2.0-beta.2), so review threads and red CI go to the agent without you. Workspaces tracked before keep their setting. Turn it off per workspace and each repair batch waits for your click; with it on, Follow-up sends batches itself once the agent is idle, after fresh permission and Session Guard checks.
+- **Auto-send** is on for every workspace tracked for the first time (1.2.0-beta.3), so review threads and red CI go to the agent without you. Workspaces tracked before keep their setting. Turn it off per workspace and each repair batch waits for your click; with it on, Follow-up sends batches itself once the agent is idle, after fresh permission and Session Guard checks.
 - Follow-up never merges, turns on merge when ready, requests reviewers or archives on its own. **Merge** re-checks the stack, lists any PRs underneath that would merge first, and asks again.
 - A merged PR is not the end: tasks such as production checks and open questions keep the workspace open until the main agent declares Done and everything has settled.
 - Answers go out only when you click Send. Follow-up never answers for you.
