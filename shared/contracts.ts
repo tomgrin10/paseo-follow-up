@@ -89,3 +89,6 @@ export const needsYouRpc = defineRpc({ name: "follow.needs-you", input: z.strict
 export const briefActionRpc = defineRpc({ name: "follow.brief-action", input: z.strictObject({
   agentId: idSchema, briefId: z.string().max(300), decisionId: z.string().max(20).optional(), choice: z.string().regex(/^[A-Z]$/).optional(), move: z.enum(["retry"]).optional(),
 }), output: z.object({ brief: briefSchema }) });
+
+// Agent parity: one RPC carries every agent tool; the server runs the same path as the developer's button.
+export const agentActRpc = defineRpc({ name: "follow.agent-act", input: z.strictObject({ agentId: idSchema, tool: z.string().max(60), args: z.record(z.string(), z.unknown()).default({}) }), output: z.unknown() });

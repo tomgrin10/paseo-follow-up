@@ -83,22 +83,23 @@ export class PrActions {
     void work.finally(() => this.running.delete(work)).catch(() => undefined);
     return work;
   }
-  requestReviewers(workspaceId: string, key: string) {
-    const requestKey = JSON.stringify([workspaceId, key]);
+  /** The Add reviewers button: the repository's defaults. An agent may name logins instead (agent parity). */
+  requestReviewers(workspaceId: string, key: string, logins?: string[]) {
+    const requestKey = JSON.stringify([workspaceId, key, logins ?? null]);
     const pending = this.reviewerRequests.get(requestKey);
     if (pending) return pending;
-    const work = this.executeReviewers(workspaceId, key);
+    const work = this.executeReviewers(workspaceId, key, logins);
     this.reviewerRequests.set(requestKey, work); this.running.add(work);
     void work.finally(() => { this.reviewerRequests.delete(requestKey); this.running.delete(work); }).catch(() => undefined);
     return work;
   }
-  private async executeReviewers(workspaceId: string, key: string) {
+  private async executeReviewers(workspaceId: string, key: string, logins?: string[]) {
     const w = await this.fresh(workspaceId);
     const pr = w.prs.find(p => p.key === key);
     if (!pr) throw new Error("This PR is outside the workspace's inventory.");
     if (pr.error || !pr.snapshot?.complete || !pr.snapshot.reviewers?.complete) throw new Error("Reviewer status is unavailable. Refresh before requesting reviews.");
     if (pr.snapshot.state !== "OPEN" || pr.snapshot.draft) throw new Error("Request reviews on an open PR that is ready for review.");
-    const defaults = this.reviewersFor(pr.repo);
+    const defaults = logins?.length ? logins.map(login => ({ name: login, login })) : this.reviewersFor(pr.repo);
     if (!defaults.length || !this.github.requestReviewers) throw new Error("Default reviewers are not configured for this repository.");
     if (!noReviewers(pr)) return { state: "submitted" as const, result: "Reviewers already assigned." };
     const reviewers = defaults.filter(r => r.login.toLowerCase() !== pr.snapshot!.reviewers!.author?.toLowerCase());
