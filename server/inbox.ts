@@ -90,6 +90,8 @@ export type InboxOptions = {
   guard: () => Promise<GuardPause[] | null>;
   now?: () => number;
   graceMs?: number;
+  /** How long a turn end waits for Paseo to stop reporting "running" (F7). Tests shorten it. */
+  settleMs?: number; settleStepMs?: number;
 };
 /** Decides the brief step for one event from the entry before and after it. */
 export type BriefDecider = (prev: Entry, next: Entry, at: string) => BriefEvent | null;
@@ -128,6 +130,21 @@ export class Inbox {
   private cache: { at: number; agents: AgentInfo[]; workspaces: { id: string; name: string }[] } | null = null;
   constructor(directory: string, private o: InboxOptions) { this.store = new InboxStore(directory); }
   private now() { return this.o.now?.() ?? Date.now(); }
+  /**
+   * Paseo still reports "running" for a moment after a turn completes, so a status read at turn end would make
+   * every plain finish look like background work (F7) and flag nothing. Re-read until the agent leaves "running"
+   * or the window ends; only an agent still running after it counts as running.
+   */
+  private async settledStatus(agentId: string): Promise<string | null> {
+    const read = () => this.o.directory.agent(agentId).then(a => a?.status ?? null, () => null);
+    const step = this.o.settleStepMs ?? 500, steps = Math.max(1, Math.ceil((this.o.settleMs ?? 6_000) / step));
+    let status = await read();
+    for (let i = 0; i < steps && (status === "running" || status === "initializing"); i++) {
+      await new Promise(r => setTimeout(r, step));
+      status = await read();
+    }
+    return status;
+  }
   private iso() { return new Date(this.now()).toISOString(); }
   private async on() { try { return (await this.o.enabled()).enable_inbox; } catch { return true; } }
 
@@ -247,7 +264,7 @@ export class Inbox {
       const reply = [...items].reverse().find(i => (i as { type?: string })?.type === "assistant_message") as { text?: string } | undefined;
       // F7: needs_you kind=done means nothing for the developer, and while Paseo still shows the agent running
       // (background work) its own running state is enough. Neither flags; a decision, action or review still does.
-      const status = await this.o.directory.agent(agent.id).then(a => a?.status ?? null, () => null);
+      const status = await this.settledStatus(agent.id);
       const quiet = finishIsQuiet(stated.agent?.kind ?? null, status);
       // The ask replaces the reply's last line as the reason's detail (§4); the fallback keeps the old detail.
       const brief = await this.creator(root.rootId, turnId, "", "finished", stated, !quiet || stated.agent?.kind === "done", quiet);
