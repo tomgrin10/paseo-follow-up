@@ -58,12 +58,15 @@ export function InboxRowView({ row, theme, now, dense, touch, active, onOpen, on
   const [width, setWidth] = useState(0);
   const [hover, setHover] = useState(false);
   const title = rowTitle(row);
-  const narrow = width > 0 && width < (dense ? 320 : 420);
   const shown = displayReason(row.needs);
+  const primary = dense ? 12 : 13; const secondary = dense ? 11 : 12;
+  // Change 2: when "Title › Agent" won't fit, the agent name moves to the reason line so neither name is hidden.
+  // Estimated from the text length (≈0.56em per glyph) against the room left after the glyph, age and buttons.
+  const room = width - (dense ? 34 : 40) - (touch ? 132 : 88);
+  const narrow = width > 0 && !!title.agent && (title.primary.length + title.agent.length + 3) * primary * 0.56 > room;
   const more = (row.needs?.reasons.length ?? 0) - 1;
   const days = row.needs ? now - Date.parse(row.needs.since) > 86_400_000 : false;
   const right = trailing ?? (row.needs ? age(row.needs.since, now) : row.signedOffAt ? age(row.signedOffAt, now) : row.resumesAt ? `resumes ${wakeLabel({ until: row.resumesAt, at: "" }, now)}` : running(row) ? age(row.lastActivityAt, now) : "");
-  const primary = dense ? 12 : 13; const secondary = dense ? 11 : 12;
   const reasonColor = shown ? reasonGlyph(shown.reason, c).color : c.foregroundMuted;
   const second: ReactNode[] = [];
   if (title.agent && narrow) second.push(<Text key="a" style={{ color: c.foreground }}>{title.agent} · </Text>);
@@ -336,13 +339,13 @@ export function contributeInboxPills(client: PluginClientContext, store: InboxSt
       const entry = pills.get(agentId);
       if (!entry) {
         const registration = client.addComposerPill({ id: "needs-you", workspaceId: next.row.workspaceId!, agentId, button: { ...status, icon: statusIcon(agentId) } });
-        const menu = next.undo ? null : client.addComposerPill({ id: "needs-you-menu", workspaceId: next.row.workspaceId!, agentId, button: { title: "More sign-off options", label: "More", icon: "ChevronUp", behavior: { kind: "menu", items: menuItems(next.row) } } });
+        const menu = next.undo ? null : client.addComposerPill({ id: "needs-you-menu", workspaceId: next.row.workspaceId!, agentId, button: { title: "More sign-off options", label: "More", icon: "Ellipsis", behavior: { kind: "menu", items: menuItems(next.row) } } });
         pills.set(agentId, { workspaceId: next.row.workspaceId!, key, status: registration, menu });
       } else if (entry.key !== key) {
         entry.status.update(status);
         if (next.undo) { entry.menu?.remove(); entry.menu = null; }
         else if (entry.menu) entry.menu.update({ behavior: { kind: "menu", items: menuItems(next.row) } });
-        else entry.menu = client.addComposerPill({ id: "needs-you-menu", workspaceId: next.row.workspaceId!, agentId, button: { title: "More sign-off options", label: "More", icon: "ChevronUp", behavior: { kind: "menu", items: menuItems(next.row) } } });
+        else entry.menu = client.addComposerPill({ id: "needs-you-menu", workspaceId: next.row.workspaceId!, agentId, button: { title: "More sign-off options", label: "More", icon: "Ellipsis", behavior: { kind: "menu", items: menuItems(next.row) } } });
         entry.key = key;
       }
     } catch { /* One agent's pill must never hide the others. */ }
