@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compareNeeds, displayReason, newEntry, nextAfter, reduce, replay, rowTitle, sectionRows, StaleSignOff, stateOf, type Entry, type InboxEvent, type InboxRow } from "../shared/inbox";
 import { classify, fileSources, newestUserMessage, type Sources } from "../server/inbox-classifier";
-import { followUpEvents, Inbox, type AgentInfo, type Directory, type GuardPause } from "../server/inbox";
+import { followUpEvents, Inbox, REVISION, type AgentInfo, type Directory, type GuardPause } from "../server/inbox";
 import { pr, snapshot, workspace } from "./fixtures";
 
 const T0 = "2026-11-08T10:00:00.000Z";
@@ -145,8 +145,8 @@ function fake(agents: AgentInfo[], tails: Record<string, unknown[]> = {}, pauses
   return { directory, none, cleared, pauses };
 }
 const agent = (patch: Partial<AgentInfo> & { id: string }): AgentInfo => ({ workspaceId: "w1", parentAgentId: null, title: "Main", status: "idle", archivedAt: null, updatedAt: T0, lastUserMessageAt: null, requiresAttention: false, attentionReason: null, ...patch });
-async function service(agents: AgentInfo[], options: { tails?: Record<string, unknown[]>; sources?: Partial<Sources>; pauses?: GuardPause[]; now?: () => number; enable_inbox?: boolean } = {}) {
-  const dir = await mkdtemp(join(tmpdir(), "inbox-"));
+async function service(agents: AgentInfo[], options: { tails?: Record<string, unknown[]>; sources?: Partial<Sources>; pauses?: GuardPause[]; now?: () => number; enable_inbox?: boolean; dir?: string } = {}) {
+  const dir = options.dir ?? await mkdtemp(join(tmpdir(), "inbox-"));
   const f = fake(agents, options.tails, options.pauses ?? null);
   const inbox = new Inbox(dir, { enabled: async () => ({ enable_inbox: options.enable_inbox ?? true, enable_inbox_pr_closed: true }), directory: f.directory, sources: { ...f.none, ...options.sources }, guard: async () => options.pauses ?? null, graceMs: 5, now: options.now ?? (() => Date.parse(at(1))) });
   return { inbox, cleared: f.cleared, done: () => rm(dir, { recursive: true, force: true }) };
@@ -166,12 +166,16 @@ test("#19 a subagent's permission and error flag its parent; its finish doesn't"
   await done();
 });
 test("#20 a turn that ended while the worker was down flags on start", async () => {
-  const { inbox, done } = await service([agent({ id: "a1", updatedAt: at(30) }), agent({ id: "a2", updatedAt: at(0) })], { now: () => Date.parse(at(40)) });
+  // Both agents' updatedAt moved when the daemon came back; only a1 finished (Paseo marked it unread) after lastSeen.
+  const unread = { requiresAttention: true, attentionReason: "finished" };
+  const { inbox, done } = await service([agent({ id: "a1", updatedAt: at(39), ...unread, attentionTimestamp: at(30) }), agent({ id: "a2", updatedAt: at(39), ...unread, attentionTimestamp: at(0) }), agent({ id: "a3", updatedAt: at(39) })], { now: () => Date.parse(at(40)) });
   await mark(inbox);
   await inbox.start();
   const s = await inbox.store.snapshot();
   assert.equal(stateOf(s.entries.a1), "NEEDS"); assert.match(displayReason(s.entries.a1.needs)!.detail, /offline/);
+  assert.equal(s.entries.a1.needs!.since, at(30), "the flag dates from the finish, not the restart");
   assert.equal(s.entries.a2, undefined, "activity before the worker stopped isn't news");
+  assert.equal(s.entries.a3, undefined, "a bumped updatedAt alone isn't a finish");
   await done();
 });
 test("D3: a delegated agent's finish doesn't flag until the developer writes to it", async () => {
@@ -190,12 +194,13 @@ test("D3: a delegated agent's finish doesn't flag until the developer writes to 
 });
 test("D4 first run imports Paseo's unread and recent unanswered agents; older ones go to Unsorted", async () => {
   const now = Date.parse("2026-11-08T12:00:00.000Z");
+  const bumped = "2026-11-08T11:59:00.000Z"; // Paseo's updatedAt after a daemon restart: not activity.
   const agents = [
-    agent({ id: "unread", requiresAttention: true, attentionReason: "finished" }),
-    agent({ id: "perm", requiresAttention: true, attentionReason: "permission" }),
-    agent({ id: "recent", updatedAt: "2026-11-06T10:00:00.000Z", lastUserMessageAt: "2026-11-06T09:00:00.000Z" }),
-    agent({ id: "replied", updatedAt: "2026-11-06T10:00:00.000Z", lastUserMessageAt: "2026-11-06T10:00:00.000Z" }),
-    agent({ id: "old", updatedAt: "2026-10-01T10:00:00.000Z" }),
+    agent({ id: "unread", requiresAttention: true, attentionReason: "finished", attentionTimestamp: "2026-11-07T08:00:00.000Z", updatedAt: bumped }),
+    agent({ id: "perm", requiresAttention: true, attentionReason: "permission", attentionTimestamp: "2026-11-08T11:00:00.000Z", updatedAt: bumped }),
+    agent({ id: "recent", updatedAt: bumped, lastUserMessageAt: "2026-11-06T09:00:00.000Z" }),
+    agent({ id: "never-asked", updatedAt: bumped, createdAt: "2026-11-06T10:00:00.000Z" }), // nothing from the developer to answer
+    agent({ id: "old", updatedAt: bumped, lastUserMessageAt: "2026-10-01T10:00:00.000Z" }),
     agent({ id: "busy", status: "running" }),
     agent({ id: "child", parentAgentId: "unread" }),
   ];
@@ -203,17 +208,114 @@ test("D4 first run imports Paseo's unread and recent unanswered agents; older on
   await inbox.start();
   const s = await inbox.store.snapshot();
   assert.deepEqual(Object.keys(s.entries).filter(id => stateOf(s.entries[id]) === "NEEDS").sort(), ["perm", "recent", "unread"]);
-  assert.deepEqual(s.unsorted?.sort(), ["old", "replied"]);
+  assert.deepEqual(s.unsorted?.sort(), ["never-asked", "old"]);
   assert.ok(s.importedAt);
+  assert.equal(s.revision, REVISION, "a fresh import needs no migration");
   // A confirmed "Sign off all" empties Unsorted; one Undo restores the whole batch.
   await inbox.act({ action: "unsorted_sign_off" });
   assert.equal((await inbox.store.snapshot()).unsorted, null);
   await inbox.act({ action: "batch_undo" });
-  assert.deepEqual((await inbox.store.snapshot()).unsorted?.sort(), ["old", "replied"]);
+  assert.deepEqual((await inbox.store.snapshot()).unsorted?.sort(), ["never-asked", "old"]);
   await inbox.start();
-  assert.deepEqual((await inbox.store.snapshot()).unsorted?.sort(), ["old", "replied"], "import runs once");
+  assert.deepEqual((await inbox.store.snapshot()).unsorted?.sort(), ["never-asked", "old"], "import runs once");
   await done();
 });
+
+test("first run: closed and archived agents are not imported, and a closed agent without a flag stays hidden (§2.5)", async () => {
+  const now = Date.parse("2026-11-08T12:00:00.000Z");
+  const recentAt = "2026-11-08T09:00:00.000Z";
+  const agents = [
+    agent({ id: "closed", status: "closed", lastUserMessageAt: recentAt }),
+    agent({ id: "closed-unread", status: "closed", requiresAttention: true, attentionReason: "finished", attentionTimestamp: recentAt }),
+    agent({ id: "archived", archivedAt: "2026-11-07T10:00:00.000Z", lastUserMessageAt: recentAt }),
+    agent({ id: "open", lastUserMessageAt: recentAt }),
+  ];
+  const { inbox, done } = await service(agents, { now: () => now });
+  await inbox.start();
+  const s = await inbox.store.snapshot();
+  assert.deepEqual(Object.keys(s.entries).filter(id => stateOf(s.entries[id]) === "NEEDS"), ["open"]);
+  assert.equal(s.unsorted, null, "closed agents aren't parked in Unsorted either");
+  const list = await inbox.list();
+  assert.deepEqual(list.rows.map(r => r.agentId), ["open"]);
+  await done();
+});
+
+test("first run: the 7-day rule reads the agent's real last activity, not Paseo's updatedAt", async () => {
+  const now = Date.parse("2026-11-08T12:00:00.000Z");
+  const bumped = "2026-11-08T11:58:00.000Z"; // every agent's updatedAt after a daemon restart
+  const agents = [
+    agent({ id: "stale", updatedAt: bumped, lastUserMessageAt: "2026-09-20T10:00:00.000Z" }),
+    agent({ id: "stale-created", updatedAt: bumped, createdAt: "2026-09-20T10:00:00.000Z" }),
+    agent({ id: "fresh", updatedAt: bumped, lastUserMessageAt: "2026-11-05T10:00:00.000Z" }),
+  ];
+  const { inbox, done } = await service(agents, { now: () => now });
+  await inbox.start();
+  const s = await inbox.store.snapshot();
+  assert.equal(stateOf(s.entries.fresh), "NEEDS");
+  assert.equal(s.entries.stale?.needs ?? null, null);
+  assert.equal(s.entries["stale-created"]?.needs ?? null, null);
+  assert.deepEqual(s.unsorted?.sort(), ["stale", "stale-created"]);
+  await done();
+});
+
+test("first run: imported flags date from the agent's last activity, so D9 orders oldest first", async () => {
+  const now = Date.parse("2026-11-08T12:00:00.000Z");
+  const agents = [agent({ id: "newer", updatedAt: "2026-11-08T11:59:00.000Z", lastUserMessageAt: "2026-11-08T08:00:00.000Z" }), agent({ id: "older", updatedAt: "2026-11-08T11:59:00.000Z", lastUserMessageAt: "2026-11-04T08:00:00.000Z" })];
+  const { inbox, done } = await service(agents, { now: () => now });
+  await inbox.start();
+  const s = await inbox.store.snapshot();
+  assert.equal(s.entries.older.needs!.since, "2026-11-04T08:00:00.000Z");
+  assert.equal(s.entries.newer.needs!.since, "2026-11-08T08:00:00.000Z");
+  assert.deepEqual(sectionRows((await inbox.list()).rows, "needs", now).map(r => r.agentId), ["older", "newer"]);
+  await done();
+});
+
+test("migration: a store imported by 1.1.0-beta.0 is repaired once, and only entries the import wrote change", async () => {
+  const now = Date.parse("2026-11-08T12:00:00.000Z");
+  const importAt = "2026-11-08T10:46:52.000Z";
+  const dir = await mkdtemp(join(tmpdir(), "inbox-"));
+  const imported = (id: string, detail = "You haven't replied") => ({ ...newEntry(id), seq: 1, lastEventAt: importAt, needs: { since: importAt, reasons: [{ reason: "finished" as const, at: importAt, detail, dedupeKey: "finished" }] } });
+  // What beta.0 left on disk: no revision field, every imported flag dated at import time.
+  const beta0 = {
+    version: 1, importedAt: importAt, lastSeen: importAt, primedAt: importAt, signOffs: 0, unsorted: ["already-unsorted"],
+    entries: {
+      closed: imported("closed"), archived: imported("archived"), old: imported("old"), recent: imported("recent"), unread: imported("unread", "Unread in Paseo"),
+      "signed-off": { ...imported("signed-off"), needs: null, signedOffAt: "2026-11-08T11:00:00.000Z", seq: 2 },
+      snoozed: { ...imported("snoozed"), snooze: { until: "2026-11-09T09:00:00.000Z", at: "2026-11-08T11:00:00.000Z" }, seq: 2 },
+      "real-finish": { ...imported("real-finish"), seq: 2, needs: { since: "2026-11-08T11:30:00.000Z", reasons: [{ reason: "finished" as const, at: "2026-11-08T11:30:00.000Z", detail: "Opened PR #815.", dedupeKey: "finished" }] } },
+      "real-crash": { ...imported("real-crash", "Closed during a turn"), needs: { since: "2026-11-08T11:00:00.000Z", reasons: [{ reason: "error" as const, at: "2026-11-08T11:00:00.000Z", detail: "Closed during a turn", dedupeKey: "error" }] } },
+    },
+  };
+  await writeFile(join(dir, "inbox.json"), JSON.stringify(beta0));
+  const bumped = "2026-11-08T10:46:00.000Z";
+  const agents = [
+    agent({ id: "closed", status: "closed", updatedAt: bumped, lastUserMessageAt: "2026-11-08T09:00:00.000Z" }), agent({ id: "archived", archivedAt: "2026-11-07T10:00:00.000Z" }),
+    agent({ id: "old", updatedAt: bumped, lastUserMessageAt: "2026-09-30T10:00:00.000Z" }), agent({ id: "recent", updatedAt: bumped, lastUserMessageAt: "2026-11-06T10:00:00.000Z" }),
+    agent({ id: "unread", updatedAt: bumped, requiresAttention: true, attentionReason: "finished", attentionTimestamp: "2026-10-01T10:00:00.000Z" }),
+    agent({ id: "signed-off", updatedAt: bumped, lastUserMessageAt: "2026-09-01T10:00:00.000Z" }), agent({ id: "snoozed", updatedAt: bumped, lastUserMessageAt: "2026-09-01T10:00:00.000Z" }), agent({ id: "real-finish" }),
+    agent({ id: "real-crash", status: "closed" }), agent({ id: "already-unsorted", updatedAt: bumped }),
+  ];
+  const { inbox, done } = await service(agents, { now: () => now, dir });
+  await inbox.start();
+  const s = await inbox.store.snapshot();
+  assert.equal(s.revision, REVISION);
+  assert.equal(s.entries.closed.needs, null, "a closed agent's imported flag is dropped");
+  assert.equal(s.entries.archived.needs, null, "an archived agent's imported flag is dropped");
+  assert.equal(s.entries.old.needs, null, "really idle for 7+ days: moved to Unsorted");
+  assert.deepEqual(s.unsorted?.sort(), ["already-unsorted", "old"]);
+  assert.equal(s.entries.recent.needs!.since, "2026-11-06T10:00:00.000Z", "a kept flag dates from real activity");
+  assert.equal(s.entries.unread.needs!.since, "2026-10-01T10:00:00.000Z", "Paseo's unread stays, re-dated");
+  assert.equal(s.entries["signed-off"].needs, null); assert.equal(s.entries["signed-off"].seq, 2, "the developer's sign-off is untouched");
+  assert.ok(s.entries.snoozed.snooze && s.entries.snoozed.needs?.since === importAt, "a snoozed entry is untouched");
+  assert.equal(s.entries["real-finish"].needs!.reasons[0].detail, "Opened PR #815.", "a newer real event is untouched");
+  assert.equal(s.entries["real-crash"].needs!.reasons[0].reason, "error", "a closed agent's real flag keeps (§2.5)");
+  // Runs once: a later start with different activity changes nothing.
+  const after = JSON.stringify(s.entries);
+  await inbox.start();
+  assert.equal(JSON.stringify((await inbox.store.snapshot()).entries), after);
+  await done();
+});
+
 test("a permission answered within the grace period never flags", async () => {
   const { inbox, done } = await service([agent({ id: "a1" })]);
   await mark(inbox);
