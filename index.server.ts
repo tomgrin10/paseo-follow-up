@@ -16,6 +16,7 @@ import { Github } from "./server/github";
 import { Graphite } from "./server/graphite";
 import { BrowserBridge } from "./server/browser-bridge";
 import { PrActions } from "./server/pr-actions";
+import { AgentActions, AGENT_TOOLS, controlWorkspace, type AgentTool } from "./server/agent-actions";
 import { PaseoGateway, paseoHome, clientEntry, closeConnections, sessionGuardOwnsInterruption } from "./server/daemon";
 import { mcpSource } from "./server/mcp-source";
 import { excludeStack } from "./server/exclusions";
@@ -332,24 +333,9 @@ export default function contribute(server: PluginServerContext) {
       throw error;
     }
   });
-  server.handle(rpc.controlRpc, async ({ workspaceId, enable_auto_sends, clearHold, retryBatchId }) => {
+  server.handle(rpc.controlRpc, async input => {
     await requireReady();
-    return store.mutate(state => {
-      const w = findWorkspace(state, workspaceId);
-      if (!w.enable_tracking || w.archived) throw new Error("Activate this workspace before changing follow-up controls.");
-      if (enable_auto_sends !== undefined) w.enable_auto_sends = enable_auto_sends;
-      if (clearHold) w.hold = null;
-      if (retryBatchId) {
-        const b = w.batches.find(b => b.id === retryBatchId);
-        if (!b || !["blocked", "uncertain"].includes(b.state)) throw new Error("This batch cannot be retried.");
-        if (b.attempts >= 3) throw new Error("Three delivery attempts were made. Resolve this batch with the main agent.");
-        b.state = "cancelled";
-        w.batches.push({ ...b, ...(recoveryBatch(b) ? { enable_manual_recovery: true } : {}), id: randomUUID(), messageId: randomUUID(), state: "pending", attempts: b.attempts + 1, createdAt: new Date().toISOString(), sentAt: null, settledAt: null, result: "", activityAt: null, acknowledgmentError: null });
-      }
-      if (clearHold || retryBatchId && !recoveryBatch(w.batches.find(b => b.id === retryBatchId)!)) changed(w);
-      else w.updatedAt = new Date().toISOString();
-      return w;
-    });
+    return store.mutate(state => controlWorkspace(state, input));
   });
   server.handle(rpc.refreshRpc, async () => { await requireReady(); void engine.tick(); return { ok: true }; });
   server.handle(rpc.refineTasksRpc, async ({ workspaceId, tasks }) => {
@@ -389,6 +375,21 @@ export default function contribute(server: PluginServerContext) {
   server.handle(rpc.checkPrActionRpc, async ({ workspaceId, actionId }) => { await requireReady(); return actions.check(workspaceId, actionId); });
   server.handle(rpc.requestReviewersRpc, async ({ workspaceId, prKey }) => { await requireReady(); const result = await actions.requestReviewers(workspaceId, prKey); void engine.tick(); return result; });
 
+  const agentActions = new AgentActions({ store, prActions: actions, engine, inbox });
+  server.handle(rpc.agentActRpc, async ({ agentId, tool, args }, { paseo }) => {
+    await requireReady(); seen(paseo);
+    if (!(AGENT_TOOLS as readonly string[]).includes(tool)) throw new Error(`Unknown Follow-up tool ${tool}.`);
+    if (!/^[\w-]+$/.test(agentId)) throw new Error("Unsupported agent identity.");
+    // Root agents only, the same rule as needs_you: never recovery, contributors or subagents.
+    const agent = (await paseo.agents.ref(agentId).refresh())?.agent;
+    if (!agent?.workspaceId || agent.archivedAt) throw new Error("Cannot locate the caller's workspace.");
+    if (agent.labels["follow-through.recovery"]) throw new Error("Recovery sessions can't act for the developer. Acknowledge your batch instead.");
+    if ((await store.snapshot()).workspaces.some(w => w.enable_tracking && !w.archived && w.contributorAgentIds?.includes(agentId))) throw new Error("Contributor sessions can't act for the developer. Report to the main agent.");
+    if (!await isWorkspaceRoot(agent, async id => (await paseo.agents.ref(id).refresh())?.agent)) throw new Error("Follow-up's action tools are for root agents. Ask your parent agent.");
+    const result = await agentActions.run(agentId, tool as AgentTool, args);
+    void engine.tick();
+    return result;
+  });
   server.handle(rpc.inboxListRpc, async () => { await requireReady(); return { ...await inbox.list(), error: inboxError }; });
   server.handle(rpc.inboxActRpc, async input => { await requireReady(); return inbox.act(input); });
   server.handle(rpc.needsYouRpc, async ({ agentId, ...input }, { paseo }) => {
@@ -479,12 +480,13 @@ export default function contribute(server: PluginServerContext) {
         });
       }
       if (!w) {
-        if (!brief || !root) return request;
-        return withSessionMcp({ ...request, env: { ...request.env, FOLLOW_THROUGH_BRIEF: brief } }, directory, clientEntry(), paseoHome, false, process.env, brief);
+        // Root agents get the action tools (agent parity) and, while the inbox is on, needs_you.
+        if (!root) return request;
+        return withSessionMcp({ ...request, env: { ...request.env, ...(brief ? { FOLLOW_THROUGH_BRIEF: brief } : {}) } }, directory, clientEntry(), paseoHome, false, process.env, brief, true);
       }
       const recovery = w.mainAgentId !== request.agentId && !w.contributorAgentIds?.includes(request.agentId);
       const main = !recovery && w.mainAgentId === request.agentId ? brief : null;
-      return withSessionMcp({ ...request, env: { ...request.env, FOLLOW_THROUGH_CLI: bridge, FOLLOW_THROUGH_CLIENT_ENTRY: clientEntry(), ...(recovery ? { FOLLOW_THROUGH_RECOVERY: "1" } : {}), ...(main ? { FOLLOW_THROUGH_BRIEF: main } : {}) } }, directory, clientEntry(), paseoHome, recovery, process.env, main);
+      return withSessionMcp({ ...request, env: { ...request.env, FOLLOW_THROUGH_CLI: bridge, FOLLOW_THROUGH_CLIENT_ENTRY: clientEntry(), ...(recovery ? { FOLLOW_THROUGH_RECOVERY: "1" } : {}), ...(main ? { FOLLOW_THROUGH_BRIEF: main } : {}) } }, directory, clientEntry(), paseoHome, recovery, process.env, main, root && !recovery);
     }),
     server.on("agent.turn_ended", async (event, { paseo, signal }) => {
       await ready;

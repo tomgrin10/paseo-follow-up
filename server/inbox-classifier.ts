@@ -9,7 +9,7 @@ import { join } from "node:path";
  */
 export type Sender = "agent" | "follow-up" | "defer" | "session" | "schedule" | "tom";
 export type Message = { text: string; messageId?: string | null; clientMessageId?: string | null };
-export type Ledger = { agentId: string; messageId: string | null; at: string; by?: "follow-up" | "developer" }[];
+export type Ledger = { agentId: string; messageId: string | null; at: string; by?: string; action?: string }[];
 export type Sources = {
   /** Follow-up's own delivery ledger, written before each send. */
   ledger: () => Promise<Ledger>;
@@ -27,7 +27,7 @@ export async function classify(message: Message | null, agentId: string, at: num
   // Follow-up's own sends are automation, except a brief option or move the developer clicked: that is their message.
   const own = await (async () => {
     try {
-      const ledger = (await sources.ledger()).filter(l => l.agentId === agentId);
+      const ledger = (await sources.ledger()).filter(l => l.agentId === agentId && !l.action);
       const ids = [message?.messageId, message?.clientMessageId].filter((id): id is string => !!id);
       const exact = ledger.find(l => l.messageId && ids.includes(l.messageId));
       if (exact) return exact.by === "developer" ? "tom" as const : "follow-up" as const;
