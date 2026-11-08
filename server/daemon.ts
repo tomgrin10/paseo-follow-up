@@ -33,10 +33,14 @@ export interface Daemon {
   setWorkspaceLabel(input: { workspaceId: string; label: { name: string; color: "emerald" }; assigned: boolean }): Promise<unknown>;
   invokePluginRpc(id: string, method: string, input: unknown): Promise<unknown>;
   updateAgent(id: string, updates: { labels: Record<string, string> }): Promise<void>;
+  clearAgentAttention?(agentId: string | string[]): Promise<void>;
   createAgent(options: RecoveryAgentOptions): Promise<Agent>;
 }
 type Module = { DaemonClient: new (input: Record<string, unknown>) => Daemon };
 const clients = new Set<Daemon>();
+/** Called before Follow-up sends a message, so the Needs-you inbox can tell its own sends from the developer's. */
+let beforeSend: (agentId: string, messageId: string) => Promise<void> = async () => {};
+export function onBeforeSend(note: typeof beforeSend): void { beforeSend = note; }
 let stopped = false;
 export function clientEntry(): string { return createRequire(process.argv[1]).resolve(["@getpaseo", "client", "internal", "daemon-client"].join("/")); }
 export async function daemonOptions(): Promise<Record<string, unknown>> {
@@ -61,7 +65,7 @@ export async function withDaemon<T>(work: (client: Daemon) => Promise<T>): Promi
 }
 export async function closeConnections(): Promise<void> { stopped = true; await Promise.allSettled([...clients].map(c => c.close())); }
 
-async function pages<T>(fetch: (cursor?: string) => Promise<{ entries: T[]; pageInfo: { hasMore: boolean; nextCursor: string | null } }>): Promise<T[]> {
+export async function pages<T>(fetch: (cursor?: string) => Promise<{ entries: T[]; pageInfo: { hasMore: boolean; nextCursor: string | null } }>): Promise<T[]> {
   const rows: T[] = []; let cursor: string | undefined;
   for (let i = 0; i < 100; i++) {
     const page = await fetch(cursor); rows.push(...page.entries);
@@ -265,6 +269,7 @@ export class PaseoGateway implements Gateway {
       }
       catch { throw new DeliveryDeferred("Session Guard state is unavailable; follow-up will wait and retry."); }
       if (guarded) throw new DeliveryDeferred("Waiting for Session Guard to resume the assigned session.");
+      await beforeSend(recipient, batch.messageId).catch(() => undefined);
       await client.sendMessage(recipient, text, { messageId: batch.messageId, activeTurnBehavior: "steer" });
     });
   }
@@ -285,6 +290,7 @@ export class PaseoGateway implements Gateway {
         if (guarded) throw new DeliveryDeferred("Waiting for Session Guard to resume the agent.");
         if (a.pendingPermissions.length) throw new DeliveryDeferred("The agent is waiting on a permission prompt; the answer goes out after it.");
         attempted = true;
+        await beforeSend(id, messageId).catch(() => undefined);
         await client.sendMessage(id, text, { messageId, activeTurnBehavior: "steer" });
         return id;
       }

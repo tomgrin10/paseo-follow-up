@@ -176,13 +176,14 @@ export class Inbox {
   }
 
   async archived(agentIds: string[]): Promise<void> {
+    const state = await this.store.snapshot();
+    agentIds = agentIds.filter(id => state.entries[id]);
     await this.apply(agentIds.map(agentId => ({ agentId, event: { type: "archive" } as const })));
   }
 
   async workspaceArchived(workspaceId: string): Promise<void> {
     const agents = await this.o.directory.agents().catch(() => []);
-    const state = await this.store.snapshot();
-    await this.archived(agents.filter(a => a.workspaceId === workspaceId && state.entries[a.id]).map(a => a.id));
+    await this.archived(agents.filter(a => a.workspaceId === workspaceId).map(a => a.id));
   }
 
   /** Written before Follow-up sends, so the classifier recognises its own messages. */
