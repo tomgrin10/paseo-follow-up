@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { briefSchema, BRIEF_KINDS, BRIEF_SOURCES, BRIEF_STATES } from "./brief";
 
 /**
  * The "Needs you" inbox: one flag per root agent that only the developer clears, by signing it off or
@@ -38,6 +39,8 @@ export const entrySchema = z.object({
   seenKeys: z.array(z.string()).default([]),
   /** Last turn end or flag this entry saw; restart reconciliation compares agent activity against it. */
   lastEventAt: isoSchema.nullable().default(null),
+  /** The brief card for this agent's newest flagged turn (additive; older builds ignore it). */
+  brief: briefSchema.nullable().default(null),
 });
 export type Entry = z.infer<typeof entrySchema>;
 
@@ -51,7 +54,9 @@ export const inboxStateSchema = z.object({
   /** One Undo for a confirmed batch sign-off, kept 24 h. */
   batchUndo: z.object({ at: isoSchema, expires: isoSchema, entries: z.array(z.object({ agentId: z.string(), seq: z.number().int(), prev: needsSchema.nullable(), prevSnooze: snoozeSchema.nullable().default(null) })), unsorted: z.array(z.string()).nullable().default(null) }).nullable().default(null),
   /** Follow-up's own deliveries, written before sending, so its messages never count as the developer's. */
-  ledger: z.array(z.object({ agentId: z.string(), messageId: z.string().nullable(), at: isoSchema })).default([]),
+  ledger: z.array(z.object({ agentId: z.string(), messageId: z.string().nullable(), at: isoSchema,
+    /** "developer": a brief option or move the developer clicked. It counts as their message (design §6, F6). */
+    by: z.enum(["follow-up", "developer"]).optional() })).default([]),
   /** Last time the worker was alive; anything that finished after it was missed. */
   lastSeen: isoSchema.nullable().default(null),
   /** Set once Follow-up's existing PR states were recorded as already seen. */
@@ -59,6 +64,8 @@ export const inboxStateSchema = z.object({
   signOffs: z.number().int().default(0),
   /** One-time repairs applied to this store (additive; `version` stays 1 so older builds still read it). */
   revision: z.number().int().default(0),
+  /** Where each flagged turn's brief came from, newest last, for the adoption share (R2). Capped. */
+  briefOrigins: z.array(z.object({ at: isoSchema, origin: z.enum(["tool", "structured", "extraction", "fallback"]) })).default([]),
 });
 export type InboxState = z.infer<typeof inboxStateSchema>;
 export const emptyInbox = (): InboxState => inboxStateSchema.parse({ version: 1 });
@@ -289,6 +296,8 @@ export const inboxRowSchema = z.object({
   seq: z.number().int(),
   muteTurn: z.boolean(),
   enable_finish_flags: z.boolean(),
+  /** The open or collapsed brief's one-liner, so every surface says the same thing (§4). */
+  brief: z.object({ kind: z.enum(BRIEF_KINDS), source: z.enum(BRIEF_SOURCES), state: z.enum(BRIEF_STATES), ask: z.string() }).nullable().optional(),
 });
 export type InboxRow = z.infer<typeof inboxRowSchema>;
 

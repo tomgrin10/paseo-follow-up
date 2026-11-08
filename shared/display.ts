@@ -12,7 +12,9 @@ export const displayPreferences = defineSettings({
     // The "Needs you N" header item hides at zero unless this is on.
     enable_inbox_header_when_empty: z.boolean().default(false),
     // D6: a merged or closed PR flags its agent at the lowest priority.
-    enable_inbox_pr_closed: z.boolean().default(true) }),
+    enable_inbox_pr_closed: z.boolean().default(true),
+    // R2: Claude Code root agents that end a turn without needs_you are asked once to state what you need.
+    enable_brief_nudge: z.boolean().default(true) }),
 });
 
 export const displayRpc = settingsRpc(displayPreferences.id);

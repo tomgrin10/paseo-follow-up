@@ -1,5 +1,7 @@
 import type { PluginClientContext, PluginSidebarItemContribution, PluginSurfaceProps } from "@getpaseo/plugin/client";
-import { useSettings } from "@getpaseo/plugin/client";
+import { useRpc, useSettings } from "@getpaseo/plugin/client";
+import { useQuery } from "@tanstack/react-query";
+import { inboxListRpc } from "../shared/contracts";
 import { SettingsAction, SettingsCard, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { useEffect } from "react";
 import { ActivityIndicator, ScrollView, Text, View } from "react-native";
@@ -10,8 +12,19 @@ type Display = import("zod").infer<typeof displayPreferences.schema>;
 const listeners = new Set<(values: Display) => void>();
 export function subscribeDisplay(listener: (values: Display) => void) { listeners.add(listener); return () => { listeners.delete(listener); }; }
 
+/** R2's measurement, where it's cheap to look: how often agents stated what they need on a flagged turn. */
+export function briefShareText(stats: { days: number; total: number; tool: number; structured: number; fallback: number } | undefined): string {
+  if (!stats) return "";
+  if (!stats.total) return `No flagged turns in the last ${stats.days} days yet.`;
+  const pct = Math.round((stats.tool / stats.total) * 100);
+  const rest = [stats.structured ? `${stats.structured} from a permission, pause, error or PR` : "", stats.fallback ? `${stats.fallback} with nothing stated` : ""].filter(Boolean).join(", ");
+  return `Last ${stats.days} days: agents stated what they need on ${stats.tool} of ${stats.total} flagged turns (${pct}%).${rest ? ` ${rest[0].toUpperCase()}${rest.slice(1)}.` : ""}`;
+}
+
 function DisplaySettings({ theme }: PluginSurfaceProps) {
   const settings = useSettings(displayPreferences);
+  const list = useRpc(inboxListRpc);
+  const share = useQuery({ queryKey: ["follow-through", "brief-share"], queryFn: () => list({}), refetchInterval: 60_000 });
   const values = settings.status === "ready" ? settings.values : undefined;
   useEffect(() => {
     if (values !== undefined) for (const listener of listeners) listener(values);
@@ -46,7 +59,9 @@ function DisplaySettings({ theme }: PluginSurfaceProps) {
         <SettingsSwitch label="Needs-you inbox" hint="Off: nothing is flagged, and the pill and sidebar item are hidden." value={settings.values.enable_inbox} disabled={settings.saving} onValueChange={(enable_inbox) => save({ enable_inbox })} />
         <SettingsSwitch label="Show the sidebar item at zero" hint="By default the Needs you item appears only while something needs you." value={settings.values.enable_inbox_header_when_empty} disabled={settings.saving || !settings.values.enable_inbox} onValueChange={(enable_inbox_header_when_empty) => save({ enable_inbox_header_when_empty })} />
         <SettingsSwitch label="Flag merged and closed PRs" hint="At the lowest priority, as the cue to archive." value={settings.values.enable_inbox_pr_closed} disabled={settings.saving || !settings.values.enable_inbox} onValueChange={(enable_inbox_pr_closed) => save({ enable_inbox_pr_closed })} />
+        <SettingsSwitch label="Ask agents to state what they need" hint="A Claude Code agent that ends a turn without saying what you need is asked once to state it, for the card at the end of its chat. Other providers only get the instruction." value={settings.values.enable_brief_nudge} disabled={settings.saving || !settings.values.enable_inbox} onValueChange={(enable_brief_nudge) => save({ enable_brief_nudge })} />
       </SettingsCard>
+      {settings.values.enable_inbox && !!share.data?.briefStats && <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, lineHeight: 17, paddingHorizontal: 4 }}>{briefShareText(share.data.briefStats)}</Text>}
     </SettingsSection>
     </ScrollView>
   );

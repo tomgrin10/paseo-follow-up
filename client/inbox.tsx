@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } fro
 import { Pressable, Text, View, type LayoutChangeEvent } from "react-native";
 import type { PluginButtonIconProps, PluginButtonRegistration, PluginClientContext, PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { Icon, SidebarRow } from "@getpaseo/plugin/client/ui";
+import { BRIEF_LABEL, BRIEF_WORD, briefLine } from "../shared/brief";
 import { age, displayReason, nextAfter, REASON_LABEL, REASON_WORD, rowTitle, sectionRows, snoozeUntil, wakeLabel, type InboxRow, type Reason } from "../shared/inbox";
 import { Button, IconButton, useNow, type Theme } from "./kit";
 import { Spinner } from "./motion";
@@ -71,17 +72,20 @@ export function InboxRowView({ row, theme, now, dense, touch, active, onOpen, on
   const reasonColor = shown && !row.snooze ? reasonGlyph(shown.reason, c).color : c.foregroundMuted;
   const second: ReactNode[] = [];
   if (title.agent && narrow) second.push(<Text key="a" style={{ color: c.foreground }}>{title.agent} · </Text>);
-  if (shown) second.push(<Text key="r" style={{ color: reasonColor, fontWeight: "600" }}>{REASON_LABEL[shown.reason]}</Text>);
+  if (shown) second.push(<Text key="r" style={{ color: reasonColor, fontWeight: "600" }}>{row.brief?.state === "open" && shown.reason === "finished" ? BRIEF_LABEL[row.brief.kind] : REASON_LABEL[shown.reason]}</Text>);
   else if (row.signedOffAt && !running(row)) second.push(<Text key="s" style={{ color: c.statusSuccess }}>Signed off</Text>);
   else if (row.resumesAt) second.push(<Text key="p">Paused at the limit</Text>);
   else if (running(row)) second.push(<Text key="w">Working</Text>);
-  if (shown?.detail) second.push(<Text key="d">{` · ${shown.detail}`}</Text>);
+  // §4: an open brief's ask is the reason line, so the row, the card and the composer say the same thing.
+  const asked = row.brief && shown ? briefLine(row.brief) : null;
+  const detail = asked ?? shown?.detail;
+  if (detail) second.push(<Text key="d">{` · ${detail}`}</Text>);
   if (more > 0) second.push(<Text key="m">{` · +${more}`}</Text>);
   if (!row.enable_finish_flags && !shown) second.push(<Text key="f">{second.length ? " · " : ""}Finishes not flagged</Text>);
   if (row.delegatedFrom && !shown) second.push(<Text key="g">{second.length ? " · " : ""}Delegated</Text>);
   const quiet = !row.needs || !!row.snooze;
   const showCheck = !!onSignOff && !selecting && (touch || hover || focused || !dense);
-  const a11y = [label(row), shown ? `${REASON_LABEL[shown.reason]}${shown.detail ? `: ${shown.detail}` : ""}` : "", right ? `waiting ${right}` : ""].filter(Boolean).join(". ");
+  const a11y = [label(row), shown ? `${REASON_LABEL[shown.reason]}${detail ? `: ${detail}` : ""}` : "", right ? `waiting ${right}` : ""].filter(Boolean).join(". ");
   return <View onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}
     {...({ onMouseEnter: () => setHover(true), onMouseLeave: () => setHover(false), onFocus: () => setFocused(true), onBlur: () => setFocused(false) } as object)}
     style={{ flexDirection: "row", alignItems: "center", minHeight: touch ? 56 : dense ? 40 : 48, paddingLeft: dense ? 8 : 12, paddingRight: dense ? 4 : 8, borderRadius: dense ? 6 : 0, backgroundColor: active || moreOpen ? c.surface2 : hover && onOpen ? c.surface1 : "transparent" }}>
@@ -335,8 +339,11 @@ export function contributeInboxPills(client: PluginClientContext, store: InboxSt
       if (!row.workspaceId) continue;
       const shown = displayReason(row.needs);
       if (shown && !row.snooze) {
-        const status = `Needs you · ${REASON_WORD[shown.reason].toLowerCase()} ${age(row.needs!.since, now)}`;
-        wanted.set(row.agentId, { row, undo: false, label: `${REASON_WORD[shown.reason]} · ${age(row.needs!.since, now)}`, title: store.data()?.firstRun ? `${status}. Click to sign off. ${RULE}` : `${status}. Click to sign off.` });
+        // §4: with an open brief the label comes from its kind and the tooltip carries its ask, so the control never disagrees with the card.
+        const brief = row.brief?.state === "open" ? row.brief : null;
+        const word = brief && (shown.reason === "finished" || brief.kind === shown.reason) ? BRIEF_WORD[brief.kind] : REASON_WORD[shown.reason];
+        const status = brief ? `Needs you · ${briefLine(brief)}` : `Needs you · ${REASON_WORD[shown.reason].toLowerCase()} ${age(row.needs!.since, now)}`;
+        wanted.set(row.agentId, { row, undo: false, label: `${word} · ${age(row.needs!.since, now)}`, title: store.data()?.firstRun ? `${status}. Click to sign off. ${RULE}` : `${status}. Click to sign off.` });
       } else if (recent && recent.agentIds.includes(row.agentId) && now - recent.at < 6_000) {
         wanted.set(row.agentId, { row, undo: true, label: "Undo sign-off", title: "Signed off. Click to undo." });
       }
@@ -346,7 +353,7 @@ export function contributeInboxPills(client: PluginClientContext, store: InboxSt
       if (!next || next.row.workspaceId !== entry.workspaceId) { entry.status.remove(); entry.menu?.remove(); pills.delete(agentId); }
     }
     for (const [agentId, next] of wanted) try {
-      const key = `${next.label}|${next.undo}|${next.row.enable_finish_flags}|${running(next.row)}`;
+      const key = `${next.label}|${next.title}|${next.undo}|${next.row.enable_finish_flags}|${running(next.row)}`;
       const status = { title: next.title, label: next.label, behavior: { kind: "action" as const, onPress() { if (next.undo) void store.undo([agentId]); else void store.signOff([agentId]); } } };
       const entry = pills.get(agentId);
       if (!entry) {
@@ -401,7 +408,9 @@ export function useNextRelay(store: InboxStore, params: Record<string, string>, 
     const token = params.next;
     if (!token || !openAgent || !ready || done.current === token) return;
     done.current = token;
+    // The brief card can't navigate on its own (timeline items get no navigation), so it relays "open this agent" here.
+    if (params.open) { openAgent({ agentId: params.open } as InboxRow); return; }
     const target = nextTarget(store, params.from ?? null);
     if (target) openAgent(target);
-  }, [params.next, params.from, ready, openAgent, store]);
+  }, [params.next, params.from, params.open, ready, openAgent, store]);
 }
