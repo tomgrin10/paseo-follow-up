@@ -57,6 +57,8 @@ export const inboxStateSchema = z.object({
   /** Set once Follow-up's existing PR states were recorded as already seen. */
   primedAt: isoSchema.nullable().default(null),
   signOffs: z.number().int().default(0),
+  /** One-time repairs applied to this store (additive; `version` stays 1 so older builds still read it). */
+  revision: z.number().int().default(0),
 });
 export type InboxState = z.infer<typeof inboxStateSchema>;
 export const emptyInbox = (): InboxState => inboxStateSchema.parse({ version: 1 });
