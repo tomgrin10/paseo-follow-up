@@ -41,6 +41,13 @@ function DisplaySettings({ theme }: PluginSurfaceProps) {
       </SettingsCard>
       {settings.saveError && <Text accessibilityRole="alert" style={{ color: theme.colors.statusDanger }}>{settings.saveError}</Text>}
     </SettingsSection>
+    <SettingsSection title="Needs-you inbox (beta)" info="Agents stay in Needs you until you sign them off or write to them. Opening an agent doesn't clear it.">
+      <SettingsCard>
+        <SettingsSwitch label="Needs-you inbox" hint="Off: nothing is flagged, and the pill and sidebar item are hidden." value={settings.values.enable_inbox} disabled={settings.saving} onValueChange={(enable_inbox) => save({ enable_inbox })} />
+        <SettingsSwitch label="Show the sidebar item at zero" hint="By default the Needs you item appears only while something needs you." value={settings.values.enable_inbox_header_when_empty} disabled={settings.saving || !settings.values.enable_inbox} onValueChange={(enable_inbox_header_when_empty) => save({ enable_inbox_header_when_empty })} />
+        <SettingsSwitch label="Flag merged and closed PRs" hint="At the lowest priority, as the cue to archive." value={settings.values.enable_inbox_pr_closed} disabled={settings.saving || !settings.values.enable_inbox} onValueChange={(enable_inbox_pr_closed) => save({ enable_inbox_pr_closed })} />
+      </SettingsCard>
+    </SettingsSection>
     </ScrollView>
   );
 }
