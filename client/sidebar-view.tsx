@@ -3,7 +3,7 @@ import type { PluginClientContext, PluginHostProps } from "@getpaseo/plugin/clie
 import { useMemo, useState, type ComponentType } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { Icon } from "@getpaseo/plugin/client/ui";
-import { InboxSections, UndoBar, useInbox } from "./inbox";
+import { InboxSections, UndoBar, useInbox, useSidebarViewMounted } from "./inbox";
 import { sectionRows } from "../shared/inbox";
 import type { InboxStore } from "./inbox-store";
 
@@ -91,6 +91,7 @@ function AllWorkspaces({ view }: { view: SidebarViewProps }) {
 export function inboxSidebarView(store: InboxStore) {
   return function NeedsYouSidebar(view: SidebarViewProps) {
     const refs = sdk as unknown as RefSdk;
+    useSidebarViewMounted();
     const ids = useInbox(store, () => [...store.rows().map(r => r.agentId), ...(store.data()?.unsorted ?? []).map(r => r.agentId)].join(","));
     const wanted = useMemo(() => new Set(ids.split(",").filter(Boolean)), [ids]);
     const agents = refs.useAgents({ where: a => wanted.has(a.id) });
