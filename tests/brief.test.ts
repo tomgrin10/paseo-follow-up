@@ -155,7 +155,7 @@ async function service(agents: AgentInfo[], o: { tails?: Record<string, unknown[
   const inbox: Inbox = new Inbox(dir, {
     enabled: async () => ({ enable_inbox: true, enable_inbox_pr_closed: true }), directory,
     sources: { ledger: o.ledger ?? (async () => (await inbox.store.snapshot()).ledger), defer: async () => false, session: async () => false, schedule: async () => false },
-    guard: async () => o.pauses ?? null, graceMs: 5, now: () => now(),
+    guard: async () => o.pauses ?? null, graceMs: 5, settleMs: 40, settleStepMs: 5, now: () => now(),
     briefs: { async sink(agentId, brief) { appended.push({ agentId, brief }); }, async call(id) { return o.calls?.[id] ?? null; }, async pr(_id, event) { return o.pr ? { ...o.pr, event: event ?? null } : null; } },
   });
   await inbox.store.mutate(s => { s.importedAt = T0; s.lastSeen = at(0); s.primedAt = T0; });
@@ -444,6 +444,16 @@ test("F7 (2): while Paseo shows the agent running, a plain finish adds nothing",
   await s.inbox.turnEnded(main, { kind: "completed" }, "t1");
   const e = await s.entry();
   assert.equal(e.needs, null); assert.equal(e.brief ?? null, null);
+  await s.done();
+});
+test("F7 (2b): Paseo still says running at the turn-end instant, then goes idle: the finish flags", async () => {
+  const agents = [agent({ id: "main", status: "running" })];
+  const s = await service(agents);
+  await s.inbox.turnStarted(main, "t1");
+  setTimeout(() => { agents[0] = { ...agents[0], status: "idle" }; }, 10);
+  await s.inbox.turnEnded(main, { kind: "completed" }, "t1");
+  const e = await s.entry();
+  assert.deepEqual(e.needs?.reasons.map(r => r.reason), ["finished"]);
   await s.done();
 });
 test("F7 (3): a turn without needs_you on an idle agent still flags as finished", async () => {
