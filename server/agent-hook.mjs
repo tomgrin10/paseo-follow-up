@@ -8,6 +8,20 @@ const directory = dirname(fileURLToPath(import.meta.url));
 const quietRevision = 1;
 const quietInstruction = "Do routine bookkeeping silently. Do not announce tracker calls, say you updated/synced the sidebar, recap panel state, or add plugin-status commentary/final paragraphs. Put receipts and evidence in the tools. User-facing messages should cover the actual work outcome, or a decision/blocker requiring the developer; answer sidebar status only when explicitly asked. If this continuation is bookkeeping only, use the tools and finish without another recap or repeating your previous answer.";
 const stopReason = "Silently complete this workspace's sidebar bookkeeping before finishing.";
+// Kept identical to NEEDS_YOU_NUDGE in shared/brief.ts (a test checks it).
+const nudgeReason = "Before you stop, call needs_you once with what the developer has to do next (a decision with options, an action only they can take, or \"Nothing needed\" plus what you finished). Then stop; don't repeat your reply.";
+
+/**
+ * R2: whether to nudge a Claude Code root agent that ended its turn without needs_you. Pure, so every skip is testable.
+ * At most once per turn: Claude's stop_hook_active and our own per-turn `stopped` marker both end it.
+ */
+export function shouldNudge({ provider, brief, agentId, contributor, recovery, subagent, stopHookActive, turn, called }) {
+  if (provider !== "claude" || recovery || subagent || contributor || stopHookActive) return false;
+  if (!brief || brief.enable_inbox !== true || brief.enable_brief_nudge !== true) return false;
+  if (Array.isArray(brief.pending) && brief.pending.includes(agentId)) return false;
+  if (!turn || turn.stopped || !turn.startedAt) return false;
+  return !(called && called.at >= turn.startedAt);
+}
 const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
 async function json(path) { return JSON.parse(await readFile(path, "utf8")); }
 async function save(path, value) {
@@ -45,10 +59,13 @@ async function main() {
   if (event.agent_id || event.hook_event_name === "SubagentStop") return;
   const lease = await json(join(directory, "hooks-enabled.json"));
   if (lease.expiresAt < Date.now() || !lease.clientEntry) return;
-  const state = await json(join(directory, "state.json"));
+  const state = await json(join(directory, "state.json")).catch(() => ({ workspaces: [] }));
   const workspace = state.workspaces.find(w => (w.mainAgentId === agentId || w.contributorAgentIds?.includes(agentId)) && w.enable_tracking && !w.archived);
-  if (!workspace) return;
-  const contributor = workspace.mainAgentId !== agentId;
+  const contributor = !!workspace && workspace.mainAgentId !== agentId;
+  // The brief nudge applies to root agents launched with FOLLOW_THROUGH_BRIEF, tracked or not.
+  const provider = process.env.FOLLOW_THROUGH_BRIEF || null;
+  const brief = provider ? await json(join(directory, "brief.json")).catch(() => null) : null;
+  if (!workspace && !(brief?.enable_inbox && brief?.enable_brief_nudge)) return;
   const context = () => instructions(lease, contributor);
   const name = event.hook_event_name;
   if (!["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"].includes(name)) return;
@@ -56,13 +73,15 @@ async function main() {
   const path = join(directory, "hook-state", `${agentId}-${session}.json`);
   const turn = await json(path).catch(() => null);
   const emit = text => process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: name, additionalContext: text } }) + "\n");
-  if (name === "SessionStart") { emit(context()); return; }
+  if (name === "SessionStart") { if (workspace) emit(context()); return; }
   if (name === "UserPromptSubmit") {
     if (turn?.stopped && String(event.prompt ?? "").startsWith(stopReason)) return;
     await save(path, { startedAt: Date.now(), dirtyAt: null, stopped: false, quietRevision });
-    emit(context()); return;
+    if (workspace) emit(context());
+    return;
   }
   if (name === "PostToolUse") {
+    if (!workspace) return;
     const tool = String(event.tool_name ?? "");
     const args = JSON.stringify(event.tool_input ?? {});
     const trackedTool = /follow[\s_-]*through/i.test(tool) || args.includes(join(directory, "mcp.mjs"));
@@ -73,9 +92,17 @@ async function main() {
     return;
   }
   if (event.stop_hook_active || turn?.stopped || event.background_tasks?.length) return;
-  const sync = await json(join(directory, "hook-state", `sync-${agentId}.json`)).catch(() => null);
-  if (turn && sync?.workspaceId === workspace.id && sync.at >= Math.max(turn.startedAt, turn.dirtyAt ?? 0)) return;
-  await save(path, { ...turn, startedAt: turn?.startedAt ?? Date.now(), stopped: true });
-  process.stdout.write(JSON.stringify({ decision: "block", reason: stopReason + " This is metadata bookkeeping only; do not start queued repairs or recovery.\n\n" + context() }) + "\n");
+  let sync = false;
+  if (workspace) {
+    const confirmed = await json(join(directory, "hook-state", `sync-${agentId}.json`)).catch(() => null);
+    sync = !(turn && confirmed?.workspaceId === workspace.id && confirmed.at >= Math.max(turn.startedAt, turn.dirtyAt ?? 0));
+  }
+  const called = await json(join(directory, "hook-state", `needs-you-${agentId}.json`)).catch(() => null);
+  const nudge = shouldNudge({ provider, brief, agentId, contributor, recovery: false, subagent: false, stopHookActive: !!event.stop_hook_active, turn, called });
+  if (!sync && !nudge) return;
+  await save(path, { ...turn, startedAt: turn?.startedAt ?? Date.now(), stopped: true, ...(nudge ? { nudgedAt: Date.now() } : {}) });
+  const reasons = [sync ? stopReason + " This is metadata bookkeeping only; do not start queued repairs or recovery.\n\n" + context() : null, nudge ? nudgeReason : null].filter(Boolean);
+  process.stdout.write(JSON.stringify({ decision: "block", reason: reasons.join("\n\n") }) + "\n");
 }
-main().catch(() => {});
+// Tests import shouldNudge without running the hook.
+if (process.env.FOLLOW_THROUGH_HOOK_IMPORT !== "1") main().catch(() => {});

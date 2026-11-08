@@ -11,6 +11,7 @@ import { FollowLarge, LARGE_SCREEN } from "./client/large";
 import { createInboxStore } from "./client/inbox-store";
 import { contributeHeaderItem, contributeInboxCommands, contributeInboxPills } from "./client/inbox";
 import { inboxSidebarView, sidebarViewHost } from "./client/sidebar-view";
+import { contributeBrief } from "./client/brief";
 
 const OVERVIEW = "follow-through";
 
@@ -57,6 +58,11 @@ export default function contribute(host: PluginClientContext) {
     contributeInboxPills(client, inbox, openNext),
     contributeInboxCommands(client, inbox, openNext),
     contributeHeaderItem(host, inbox),
+    contributeBrief(client, {
+      signOff: agentId => void inbox.signOff([agentId]), openNext,
+      openAgent: agentId => client.openScreen({ screenId: OVERVIEW, params: { next: String(++nextToken), open: agentId } }),
+      workspace: id => store.get(id), openPanel,
+    }),
   ];
   // Phase 2: only on hosts with the sidebar-view API (Paseo main after 2026-11-07).
   const views = sidebarViewHost(host);
