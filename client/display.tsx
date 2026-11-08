@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { inboxListRpc } from "../shared/contracts";
 import { SettingsAction, SettingsCard, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { useEffect } from "react";
-import { ActivityIndicator, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Text, View } from "react-native";
 import { displayPreferences, displayRpc } from "../shared/display";
 import { sidebarVisibility } from "./sidebar-visibility";
 
@@ -21,7 +21,8 @@ export function briefShareText(stats: { days: number; total: number; tool: numbe
   return `Last ${stats.days} days: agents stated what they need on ${stats.tool} of ${stats.total} flagged turns (${pct}%).${rest ? ` ${rest[0].toUpperCase()}${rest.slice(1)}.` : ""}`;
 }
 
-function DisplaySettings({ theme }: PluginSurfaceProps) {
+/** "Sidebar & pills" and "Needs-you inbox", rendered inside the one Follow-up settings screen. */
+export function DisplaySections({ theme }: Pick<PluginSurfaceProps, "theme">) {
   const settings = useSettings(displayPreferences);
   const list = useRpc(inboxListRpc);
   const share = useQuery({ queryKey: ["follow-through", "brief-share"], queryFn: () => list({}), refetchInterval: 60_000 });
@@ -45,25 +46,24 @@ function DisplaySettings({ theme }: PluginSurfaceProps) {
 
   const save = (patch: Partial<Display>) => void settings.save({ ...settings.values, ...patch }, settings.revision);
   return (
-    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 16 }}>
-    <SettingsSection title="Where Follow-up appears" info="Every entry point opens the same panel. Command-K (Ctrl-K on Windows and Linux) works whatever you hide here.">
+    <>
+    <SettingsSection title="Sidebar & pills" info="Where Follow-up shows itself. Command-K (Ctrl-K on Windows and Linux) works whatever you hide here.">
       <SettingsCard>
-        <SettingsSwitch label="Sidebar row" hint="Opens all tracked workspaces, with a count when some need you." value={settings.values.showSidebar} disabled={settings.saving} onValueChange={(showSidebar) => save({ showSidebar })} />
+        <SettingsSwitch label="Sidebar item" hint="Opens Follow-up with Needs you first. Its badge counts the agents that need you." value={settings.values.showSidebar} disabled={settings.saving} onValueChange={(showSidebar) => save({ showSidebar })} />
         <SettingsSwitch label="Workspace header button" hint="An icon in each workspace header. A dot appears when that workspace needs you." value={settings.values.enable_header_button} disabled={settings.saving} onValueChange={(enable_header_button) => save({ enable_header_button })} />
-        <SettingsSwitch label="Composer pill" hint="Shows above the message box only while the workspace needs you." value={settings.values.enable_composer_pill} disabled={settings.saving} onValueChange={(enable_composer_pill) => save({ enable_composer_pill })} />
+        <SettingsSwitch label="Composer pill" hint="One pill above the message box, only while that agent or its workspace needs you." value={settings.values.enable_composer_pill} disabled={settings.saving} onValueChange={(enable_composer_pill) => save({ enable_composer_pill })} />
       </SettingsCard>
       {settings.saveError && <Text accessibilityRole="alert" style={{ color: theme.colors.statusDanger }}>{settings.saveError}</Text>}
     </SettingsSection>
     <SettingsSection title="Needs-you inbox (beta)" info="Agents stay in Needs you until you sign them off or write to them. Opening an agent doesn't clear it.">
       <SettingsCard>
-        <SettingsSwitch label="Needs-you inbox" hint="Off: nothing is flagged, and the pill and sidebar item are hidden." value={settings.values.enable_inbox} disabled={settings.saving} onValueChange={(enable_inbox) => save({ enable_inbox })} />
-        <SettingsSwitch label="Show the sidebar item at zero" hint="By default the Needs you item appears only while something needs you." value={settings.values.enable_inbox_header_when_empty} disabled={settings.saving || !settings.values.enable_inbox} onValueChange={(enable_inbox_header_when_empty) => save({ enable_inbox_header_when_empty })} />
+        <SettingsSwitch label="Needs-you inbox" hint="Off: no agent is flagged. The pill still shows workspace items, and the sidebar badge counts workspaces instead." value={settings.values.enable_inbox} disabled={settings.saving} onValueChange={(enable_inbox) => save({ enable_inbox })} />
         <SettingsSwitch label="Flag merged and closed PRs" hint="At the lowest priority, as the cue to archive." value={settings.values.enable_inbox_pr_closed} disabled={settings.saving || !settings.values.enable_inbox} onValueChange={(enable_inbox_pr_closed) => save({ enable_inbox_pr_closed })} />
         <SettingsSwitch label="Ask agents to state what they need" hint="A Claude Code agent that ends a turn without saying what you need is asked once to state it, for the card at the end of its chat. Other providers only get the instruction." value={settings.values.enable_brief_nudge} disabled={settings.saving || !settings.values.enable_inbox} onValueChange={(enable_brief_nudge) => save({ enable_brief_nudge })} />
       </SettingsCard>
       {settings.values.enable_inbox && !!share.data?.briefStats && <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, lineHeight: 17, paddingHorizontal: 4 }}>{briefShareText(share.data.briefStats)}</Text>}
     </SettingsSection>
-    </ScrollView>
+    </>
   );
 }
 
@@ -74,17 +74,6 @@ export function contributeDisplay(client: PluginClientContext, item: PluginSideb
   // Register synchronously, then reconcile the saved preference, so that an
   // already-open sidebar route can resolve its surface during that first render.
   sidebar.set(true);
-  const Settings = DisplaySettings;
-  const removeSurface = client.addScreen({ id: "display-settings", title: "Follow-up display", Component: Settings });
-  const removeSettings = client.addSettingsScreen({ id: "display", title: "Display", icon: "PanelLeft", Component: Settings });
-  const removeCommand = client.addCommandCenterItem({
-    id: "display-settings",
-    title: "Follow-up: display settings",
-    icon: "PanelLeft",
-    keywords: ["Follow-up", "sidebar", "pill", "header", "show", "hide", "display", "settings"],
-    context: "global",
-    onSelect({ openScreen }) { openScreen({ screenId: "display-settings" }); },
-  });
   let disposed = false;
   let pending = false;
   let generation = 0;
@@ -111,8 +100,5 @@ export function contributeDisplay(client: PluginClientContext, item: PluginSideb
     clearInterval(timer);
     listeners.delete(update);
     sidebar.dispose();
-    removeSurface();
-    removeSettings();
-    removeCommand();
   };
 }

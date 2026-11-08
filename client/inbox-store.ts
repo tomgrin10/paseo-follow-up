@@ -20,7 +20,8 @@ export function createInboxStore(client: PluginClientContext) {
   let failures = 0;
   let version = 0;
   let enabled = true;
-  let headerWhenEmpty = false;
+  /** Agents with a sign-off or snooze on the wire. A second identical click (or a double-mounted popover) is dropped. */
+  const inflight = new Set<string>();
   let pending: { agentId: string; seq: number }[] = [];
   let cameBack: string[] = [];
   let recent: Recent | null = null;
@@ -50,8 +51,8 @@ export function createInboxStore(client: PluginClientContext) {
   };
   const refresh = () => { if (timer) clearTimeout(timer); void poll(); };
   const unsubscribe = subscribeDisplay(values => {
-    const on = values.enable_inbox !== false; const header = values.enable_inbox_header_when_empty === true;
-    if (on !== enabled || header !== headerWhenEmpty) { enabled = on; headerWhenEmpty = header; emit(); if (on) refresh(); }
+    const on = values.enable_inbox !== false;
+    if (on !== enabled) { enabled = on; emit(); if (on) refresh(); }
   });
   void poll();
 
@@ -62,11 +63,26 @@ export function createInboxStore(client: PluginClientContext) {
   };
   const titleOf = (id: string) => { const r = data?.rows.find(x => x.agentId === id) ?? data?.unsorted?.find(x => x.agentId === id); return r ? r.workspaceTitle && r.multiRoot ? `${r.workspaceTitle} › ${r.title}` : r.workspaceTitle ?? r.title : "agent"; };
 
+  const signOffNow = async (agentIds: string[], options: { muteTurn?: boolean }) => {
+    const seqs = Object.fromEntries((data?.rows ?? []).filter(r => agentIds.includes(r.agentId)).map(r => [r.agentId, r.seq]));
+    const at = new Date().toISOString();
+    patch(agentIds, r => ({ ...r, needs: null, snooze: null, signedOffAt: at, undoable: true, muteTurn: !!options.muteTurn || r.muteTurn }));
+    recent = { agentIds, label: agentIds.length === 1 ? titleOf(agentIds[0]) : `${agentIds.length} agents`, at: Date.now(), batch: agentIds.length > 1 };
+    emit();
+    try {
+      const result = await act({ action: options.muteTurn ? "mute_turn" : "sign_off", agentIds, seqs });
+      cameBack = [...cameBack, ...result.results.filter(r => r.cameBack).map(r => r.agentId)];
+    } catch {
+      pending = [...pending.filter(p => !agentIds.includes(p.agentId)), ...agentIds.map(agentId => ({ agentId, seq: seqs[agentId] ?? 0 }))];
+      return;
+    }
+    refresh();
+  };
+
   return {
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     version: () => version,
     enabled: () => enabled && (data?.enabled ?? true),
-    headerWhenEmpty: () => headerWhenEmpty,
     data: () => data,
     rows: () => (enabled && data?.enabled ? data.rows : []),
     offlineSince: () => offlineSince,
@@ -78,19 +94,20 @@ export function createInboxStore(client: PluginClientContext) {
     stop() { stopped = true; if (timer) clearTimeout(timer); listeners.clear(); unsubscribe(); },
 
     /** Sign off now; queue for replay when the host can't be reached. */
-    async signOff(agentIds: string[], options: { muteTurn?: boolean } = {}) {
-      const seqs = Object.fromEntries((data?.rows ?? []).filter(r => agentIds.includes(r.agentId)).map(r => [r.agentId, r.seq]));
-      const at = new Date().toISOString();
-      patch(agentIds, r => ({ ...r, needs: null, snooze: null, signedOffAt: at, undoable: true, muteTurn: !!options.muteTurn || r.muteTurn }));
-      recent = { agentIds, label: agentIds.length === 1 ? titleOf(agentIds[0]) : `${agentIds.length} agents`, at: Date.now(), batch: agentIds.length > 1 };
-      emit();
+    async signOff(requested: string[], options: { muteTurn?: boolean } = {}) {
+      const agentIds = requested.filter(id => !inflight.has(id));
+      if (!agentIds.length) return;
+      for (const id of agentIds) inflight.add(id);
+      try { await signOffNow(agentIds, options); } finally { for (const id of agentIds) inflight.delete(id); }
+    },
+    async snooze(requested: string[], until: string) {
+      const agentIds = requested.filter(id => !inflight.has(id));
+      if (!agentIds.length) return;
+      for (const id of agentIds) inflight.add(id);
       try {
-        const result = await act({ action: options.muteTurn ? "mute_turn" : "sign_off", agentIds, seqs });
-        cameBack = [...cameBack, ...result.results.filter(r => r.cameBack).map(r => r.agentId)];
-      } catch {
-        pending = [...pending.filter(p => !agentIds.includes(p.agentId)), ...agentIds.map(agentId => ({ agentId, seq: seqs[agentId] ?? 0 }))];
-        return;
-      }
+        patch(agentIds, r => ({ ...r, snooze: { until, at: new Date().toISOString() } }));
+        await act({ action: "snooze", agentIds, until });
+      } finally { for (const id of agentIds) inflight.delete(id); }
       refresh();
     },
     async undo(agentIds?: string[]) {
@@ -101,10 +118,6 @@ export function createInboxStore(client: PluginClientContext) {
       emit();
       if (batch) await act({ action: "batch_undo" }); else if (target.length) await act({ action: "undo", agentIds: target });
       refresh();
-    },
-    async snooze(agentIds: string[], until: string) {
-      patch(agentIds, r => ({ ...r, snooze: { until, at: new Date().toISOString() } }));
-      await act({ action: "snooze", agentIds, until }); refresh();
     },
     async setFinishFlags(agentId: string, value: boolean) {
       patch([agentId], r => ({ ...r, enable_finish_flags: value }));

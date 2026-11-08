@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ago, headline, liveLine, mergeReady, needsYou, overviewStatus, pillFor, prTone, stackBar, stackOrder } from "../shared/attention";
+import { workspaceHeadline } from "../shared/headline";
+import { ago, headline, liveLine, mergeReady, needsYou, overviewStatus, prTone, stackBar, stackOrder } from "../shared/attention";
 import { clock, pr, snapshot, workspace } from "./fixtures";
 import type { Batch } from "../shared/model";
 
@@ -56,7 +57,7 @@ test("blocked and uncertain work surfaces as retry or check, and exhausted retri
   const items = needsYou(w, clock);
   assert.deepEqual(items.map(i => i.kind), ["retry", "check"]);
   assert.equal(items[0].kind === "retry" && items[0].exhausted, true);
-  assert.equal(pillFor(w, clock)?.urgent, true);
+  assert.equal(workspaceHeadline(needsYou(w, clock))?.key, "blocked");
 });
 
 test("merge readiness matches the PR controls and waits for queued or recent merges", () => {
@@ -72,9 +73,9 @@ test("merge readiness matches the PR controls and waits for queued or recent mer
 test("headline, live line and pill read the same state", () => {
   const w = workspace({ prs: stack(), batches: [batch()] });
   assert.deepEqual(headline(w, clock).map(p => p.text), ["1 of 4 PRs merged", "2 need you", "1 to fix"]);
-  assert.equal(pillFor(w, clock)?.label, "2 need you");
-  assert.equal(pillFor(workspace({ prs: [pr({ snapshot: snapshot({ reviewDecision: "APPROVED", graphiteMergeStatus: "READY_TO_MERGE_AS_STACK" }) })] }), clock)?.label, "Merge #1");
-  assert.equal(pillFor(workspace({ prs: [pr()] }), clock), null, "no pill unless something needs you");
+  assert.equal(workspaceHeadline(needsYou(w, clock))?.label, "Send 1 fix", "the pill names the top item, never \"N need you\"");
+  assert.equal(workspaceHeadline(needsYou(workspace({ prs: [pr({ snapshot: snapshot({ reviewDecision: "APPROVED", graphiteMergeStatus: "READY_TO_MERGE_AS_STACK" }) })] }), clock))?.label, "Merge #1");
+  assert.equal(workspaceHeadline(needsYou(workspace({ prs: [pr()] }), clock)), null, "no pill unless something needs you");
   const sent = { ...w, batches: [batch({ state: "sent", sentAt: new Date(clock - 120_000).toISOString() })] };
   assert.equal(liveLine(sent, clock).icon, "spinner");
   assert.match(liveLine(sent, clock).text, /Main agent is working on 1 repair/);
@@ -126,14 +127,14 @@ test("questions join Needs you: stop-mode first, blocked tasks fold into their q
   assert.deepEqual(needsYou(w, clock).slice(0, 2).map(i => i.kind === "question" ? i.questionId : i.kind), ["Q3", "hold"], "a question that stopped the agent outranks a pause");
   w.hold = null;
   assert.equal(items[0].title, "Q3 · Public API name");
-  assert.deepEqual(pillFor(w, clock), { label: "3 questions", urgent: true, count: 3 });
+  assert.equal(workspaceHeadline(needsYou(w, clock))?.label, "3 questions");
   assert.equal(liveLine(w, clock).text, "Main agent stopped until you answer Q3");
   developerAnswer(w, "Q3", "A", undefined, "send", clock);
   w.questions[2].answer!.delivery.state = "unconfirmed";
   developerAnswer(w, "Q2", "A", undefined, "copy", clock);
   developerAnswer(w, "Q1", "Internal users first", undefined, "copy", clock);
   assert.deepEqual(needsYou(w, clock).map(i => i.kind), ["answer"]);
-  assert.deepEqual(pillFor(w, clock), { label: "Check Q3 answer", urgent: true, count: 1 });
+  assert.equal(workspaceHeadline(needsYou(w, clock))?.label, "Check answer");
   w.questions[2].answer!.delivery.state = "sent";
   assert.deepEqual(needsYou(w, clock), [], "an answered blocked-task question doesn't ask again while the agent catches up");
 });

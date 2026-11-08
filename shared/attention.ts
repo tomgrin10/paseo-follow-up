@@ -164,17 +164,6 @@ export function liveLine(w: Workspace, now = Date.now()): { icon: LiveIcon; text
   return { icon: "idle", text: "Waiting for the main agent to declare Done", since: null };
 }
 
-/** The composer pill: absent unless something needs the developer. */
-export function pillFor(w: Workspace, now = Date.now()): { label: string; urgent: boolean; count: number } | null {
-  const items = needsYou(w, now);
-  if (!items.length) return null;
-  const urgent = items.some(i => i.kind === "hold" || i.kind === "retry" || i.kind === "check" || i.kind === "answer" || i.kind === "question" && i.state === "stopped");
-  if (items.length > 1) return { label: items.every(i => i.kind === "question") ? `${items.length} questions` : `${items.length} need you`, urgent, count: items.length };
-  const [item] = items;
-  const label = item.kind === "send" ? `Send ${plural(item.tasks.length, "repair")}` : item.kind === "merge" ? `Merge #${item.number}` : item.kind === "reviewers" ? `Reviewers for #${item.number}` : item.kind === "hold" ? "Follow-up paused" : item.kind === "decision" ? "Decision needed" : item.kind === "question" ? `Question ${item.questionId}` : item.kind === "answer" ? `Check ${item.questionId} answer` : item.kind === "retry" ? "Repairs blocked" : "Check PR action";
-  return { label, urgent, count: 1 };
-}
-
 export const statusGroups: { status: Status; title: string; short: string }[] = [
   { status: "needs-you", title: "Needs you", short: "Needs you" },
   { status: "handling", title: "Agent working", short: "Working" },

@@ -3,8 +3,11 @@ import { Platform, Pressable, Text, View, useWindowDimensions } from "react-nati
 import { useQuery } from "@tanstack/react-query";
 import { openExternalUrl, useRpc, type PluginClientContext, type PluginTimelineItemProps } from "@getpaseo/plugin/client";
 import { Icon, copyText } from "@getpaseo/plugin/client/ui";
-import { BRIEF_KIND, BRIEF_LABEL, BRIEF_VERSION, briefSchema, collapsedLine, extrasFit, isTight, type Brief, type BriefDecision, type BriefMove } from "../shared/brief";
+import { BRIEF_KIND, BRIEF_VERSION, briefSchema, collapsedLine, extrasFit, nothingNeededLine, isTight, type Brief, type BriefDecision, type BriefMove } from "../shared/brief";
 import { age } from "../shared/inbox";
+import { briefKey, HEADLINE_WORD } from "../shared/headline";
+/** The card's kind word comes from the same table as the pill and the Needs-you row. */
+const word = (kind: Brief["kind"]) => HEADLINE_WORD[briefKey(kind)];
 import { briefActionRpc, browserStatusRpc } from "../shared/contracts";
 import { errorText } from "../shared/errors";
 import type { Workspace } from "../shared/model";
@@ -27,8 +30,8 @@ export type BriefDeps = {
 
 const mono = () => (Platform.OS === "ios" ? "Menlo" : "ui-monospace, SFMono-Regular, Menlo, monospace");
 /** Kinds the developer has to act on wear the attention tone; a plain finish and the fallback stay neutral. */
-const ACTS: Brief["kind"][] = ["decision", "action", "review", "permission", "paused", "error"];
-const ICON: Record<Brief["kind"], string> = { decision: "MessageCircleQuestion", action: "Hand", review: "GitPullRequest", permission: "ShieldQuestion", paused: "CirclePause", error: "CircleX", done: "CircleCheck", unknown: "CircleDashed" };
+const ACTS: Brief["kind"][] = ["decision", "action", "review", "reviewers", "permission", "paused", "error"];
+const ICON: Record<Brief["kind"], string> = { decision: "MessageCircleQuestion", action: "Hand", review: "GitPullRequest", reviewers: "UserPlus", permission: "ShieldQuestion", paused: "CirclePause", error: "CircleX", done: "CircleCheck", unknown: "CircleDashed" };
 const kindTone = (kind: Brief["kind"], c: Colors) => kind === "error" ? c.statusDanger : kind === "review" || kind === "done" ? c.statusSuccess : kind === "unknown" ? c.foregroundMuted : c.statusWarning;
 const factTone = (tone: string, c: Colors) => tone === "ok" ? c.statusSuccess : tone === "warn" ? c.statusWarning : tone === "bad" ? c.statusDanger : c.foregroundMuted;
 const clock = (iso: string | null) => { if (!iso) return ""; const d = new Date(iso); return Number.isFinite(d.getTime()) ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) : ""; };
@@ -103,7 +106,7 @@ export function BriefCard({ item, theme, layout, agentId, deps }: PluginTimeline
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [details, setDetails] = useState(false);
-  const [sheet, setSheet] = useState<string | null>(null);
+  const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" } | null>(null);
   const workspace = b.workspaceId ? deps.workspace(b.workspaceId) : undefined;
   const browser = useQuery({ queryKey: ["follow-through", "browser"], queryFn: () => browserRead({}), refetchInterval: 5000, enabled: !!sheet });
   if (b.state !== "open") return <Collapsed b={b} c={c} now={now} />;
@@ -118,7 +121,7 @@ export function BriefCard({ item, theme, layout, agentId, deps }: PluginTimeline
     try { await work(); } catch (e) { setError(errorText(e)); } finally { setBusy(null); }
   };
   const press = (m: BriefMove) => {
-    if (m.kind === "merge" && m.prKey) { if (workspace?.prs.some(p => p.key === m.prKey)) setSheet(m.prKey); else if (b.workspaceId) deps.openPanel(b.workspaceId); }
+    if ((m.kind === "merge" || m.kind === "add_reviewers") && m.prKey) { if (workspace?.prs.some(p => p.key === m.prKey)) setSheet({ key: m.prKey, intent: m.kind === "merge" ? "merge" : "reviewers" }); else if (b.workspaceId) deps.openPanel(b.workspaceId); }
     else if (m.kind === "open_pr" && m.url) void openExternalUrl(m.url).catch(() => undefined);
     else if (m.kind === "sign_off_next") { deps.signOff(agentId); deps.openNext(agentId); }
     else if (m.kind === "retry") void run("retry", () => act({ agentId, briefId: b.id, move: "retry" }));
@@ -126,7 +129,15 @@ export function BriefCard({ item, theme, layout, agentId, deps }: PluginTimeline
     else if (m.kind === "open_subagent" && m.agentId) deps.openAgent(m.agentId);
   };
   // A merge runs Follow-up's own merge flow, so it needs the tracked workspace; without one it isn't offered.
-  const moves = b.moves.filter(m => m.kind !== "merge" || !!b.workspaceId);
+  const moves = b.moves.filter(m => (m.kind !== "merge" && m.kind !== "add_reviewers") || !!b.workspaceId);
+
+  // F7: "Nothing needed" is one muted line, no buttons. Paseo's own running and idle state says the rest.
+  if (b.kind === "done" && b.source === "agent" && !b.flagged) return <View accessibilityRole="summary" accessibilityLabel={nothingNeededLine(b.ask)}
+    style={{ marginVertical: 6, flexDirection: "row", alignItems: "center", gap: 8, minHeight: 28, paddingHorizontal: 4 }}>
+    <Icon name="Check" size={13} color={c.foregroundMuted} />
+    <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>{nothingNeededLine(b.ask)}</Text>
+    <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontVariant: ["tabular-nums"] }}>{ageText}</Text>
+  </View>;
 
   if (b.slim) {
     // One line. Permission: Paseo's own prompt below is the control (F9). Fallback: the paragraph is right above.
@@ -144,14 +155,14 @@ export function BriefCard({ item, theme, layout, agentId, deps }: PluginTimeline
   const extra = !!b.context || b.facts.length > 0 || b.links.length > 0;
   const showExtra = !tight || details || extrasFit(b, height);
   const pad = compact ? 14 : 16;
-  return <View accessibilityRole="summary" accessibilityLabel={`${acts ? "Needs you" : BRIEF_LABEL[b.kind]}: ${b.ask}`}
+  return <View accessibilityRole="summary" accessibilityLabel={`${acts ? "Needs you" : word(b.kind)}: ${b.ask}`}
     style={{ marginVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: border, backgroundColor: c.surface1, overflow: "hidden" }}>
     <View style={{ paddingHorizontal: pad, paddingTop: compact ? 12 : 14, paddingBottom: 14, gap: tight ? 10 : 12 }}>
       <View style={{ gap: 4 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
           <Icon name={ICON[b.kind]} size={14} color={tone} />
-          <Text style={{ color: acts ? attention : tone, fontSize: 12, lineHeight: 16, fontWeight: "600" }}>{acts ? "Needs you" : BRIEF_LABEL[b.kind]}</Text>
-          {acts && <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{BRIEF_LABEL[b.kind]}</Text>}
+          <Text style={{ color: acts ? attention : tone, fontSize: 12, lineHeight: 16, fontWeight: "600" }}>{acts ? "Needs you" : word(b.kind)}</Text>
+          {acts && <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{word(b.kind)}</Text>}
           <View style={{ flex: 1 }} />
           <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontVariant: ["tabular-nums"] }}>{ageText}</Text>
         </View>
@@ -209,11 +220,11 @@ export function BriefCard({ item, theme, layout, agentId, deps }: PluginTimeline
       <Icon name="Info" size={12} color={c.foregroundMuted} />
       <Text style={{ flex: 1, color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{b.sourceLine}</Text>
     </View>
-    {workspace && sheet && <PrSheet workspace={workspace} prKey={sheet} intent="merge" theme={theme} compact={compact} browserReady={browser.data?.ready ?? false} onClose={() => setSheet(null)} />}
+    {workspace && sheet && <PrSheet workspace={workspace} prKey={sheet.key} intent={sheet.intent} theme={theme} compact={compact} browserReady={browser.data?.ready ?? false} onClose={() => setSheet(null)} />}
   </View>;
 }
 
-const MOVE_ICON: Record<BriefMove["kind"], string> = { merge: "GitMerge", open_pr: "ExternalLink", sign_off_next: "ArrowRight", retry: "RotateCcw", copy_error: "Copy", open_subagent: "SquareArrowOutUpRight" };
+const MOVE_ICON: Record<BriefMove["kind"], string> = { merge: "GitMerge", open_pr: "ExternalLink", sign_off_next: "ArrowRight", retry: "RotateCcw", copy_error: "Copy", open_subagent: "SquareArrowOutUpRight", add_reviewers: "UserPlus" };
 
 export function contributeBrief(client: PluginClientContext, deps: BriefDeps) {
   const Component = (props: PluginTimelineItemProps<Brief>) => <BriefCard {...props} deps={deps} />;

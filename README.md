@@ -74,15 +74,16 @@ On a phone the panel opens as a tab, and the PR sheet and pill popover open as b
 
 ## Needs-you inbox (beta)
 
-The 1.1 beta adds an inbox for your agents. An agent lands in **Needs you** when its turn ends, when it asks a permission or question, when it errors, when Session Guard pauses it and needs a decision, or when Follow-up sees its PR's checks fail, new review threads, or the PR merge. It stays there until you **sign it off** or **write to it yourself**, from any device. Opening it, reading it and Paseo marking it read change nothing.
+The 1.1 beta adds an inbox for your agents. An agent lands in **Needs you** when its turn ends, when it asks a permission or question, when it errors, when Session Guard pauses it and needs a decision, when one of its PRs has nobody asked to review it, or when the PR merges. Red CI and review threads on a tracked workspace are the agent's work: with auto-send on (the default for newly tracked workspaces) Follow-up sends the repair to the agent and nothing flags; they flag only when you have to act (auto-send off, a hold, or a stuck repair). A turn that ends with `needs_you` kind=done ("Nothing needed") doesn't flag and leaves one muted line in the chat, and while Paseo still shows an agent running, a finished turn adds nothing. It stays there until you **sign it off** or **write to it yourself**, from any device. Opening it, reading it and Paseo marking it read change nothing.
 
-- **Sign off**: the ✓ on a row, the pill above the composer (it shows the reason and how long the agent has waited; **More** has *Sign off & next*, *Later…*, *Mute this turn* and *Don't flag finishes*), `/ok` in the composer (`/ok next` opens the next one), or ⌘K → `ok` → **Sign off & next**. Every sign-off can be undone for 24 hours.
-- **Needs you N** in Paseo's sidebar header opens the inbox on Follow-up's screen. It shows only while something needs you, unless you turn on *Show the sidebar item at zero*.
+- **One pill per agent** above the composer, only while something needs you there. It leads with the one thing that matters (*Decision 4m*, *Permission 2m*, *Send 2 fixes*, *Merge #812*, *Add reviewers #1499*, *Finished 12m*), using the same order as the brief card and the Needs-you row. Click it for **Sign off**, **Sign off & next**, **Later…**, the workspace's questions and PR actions, *Mute this turn*, *Don't flag finishes* and *Open Follow-up*. After a sign-off it reads *Signed off · Undo* for 6 s.
+- **Sign off** in one step: the ✓ on a row, `/ok` in the composer (`/ok next` opens the next one), or ⌘K → **Follow-up: sign off & next**. Every sign-off can be undone for 24 hours.
+- **One sidebar item, Follow-up**, badged with how many agents need you (hidden at zero). It opens the inbox and your tracked workspaces.
 - **Messages from automation don't count as yours**: agent-to-agent messages, Follow-up's own repairs, Defer, Smart Session and Session Guard continuations, and schedules leave the flag in place. Their turn end flags as usual. A script calling `paseo send` without an agent envelope counts as you until Paseo reports who sent a message.
 - **Don't flag finishes** (per agent, in the row's ⋯ or the composer's **More**): for agents that run on a schedule, such as a plugin auto-update. Permission prompts and errors still flag.
 - **First run** imports what Paseo marks unread and idle agents from the last 7 days you never replied to. Older idle agents wait in a one-time *Unsorted* list with a confirmed *Sign off all* that one Undo reverses.
 - On Paseo builds with sidebar views (Paseo `main` after 2026-11-07, expected in the next release), **Settings > Sidebar > Sidebar view > Follow-up: Needs you** puts the inbox in the sidebar, with your workspace list folded below it.
-- Turn the whole inbox off in **Follow-up: display settings** (⌘K). Off means nothing is flagged and no pill or sidebar item is shown.
+- Everything is in one settings page, **Settings > Follow-up** (⌘K → **Follow-up: settings**): Projects, Questions, Sidebar & pills, and the Needs-you inbox. Turn the whole inbox off there. Off means nothing is flagged and no pill or sidebar item is shown.
 
 ### What you need to do, front and center (1.2 beta)
 
@@ -100,7 +101,7 @@ The content comes from a new `needs_you` tool that every root agent gets while t
 Install the beta:
 
 ```sh
-paseo plugin update follow-through --version 1.2.0-beta.0
+paseo plugin update follow-through --version 1.2.0-beta.1
 # or, for a fresh install:
 paseo plugin install npm:paseo-follow-up@beta
 ```
@@ -116,7 +117,7 @@ Betas publish to npm's `beta` dist-tag, so `paseo plugin update` without `--vers
 ## How it works
 
 - The workspace's main agent owns its PRs, tasks, questions, the spec link and the Done call. Other agents in the workspace can register PRs and check status.
-- **Auto-send** is off for every newly tracked workspace, so each repair batch waits for your click. Turn it on per workspace and Follow-up sends batches itself once the agent is idle, after fresh permission and Session Guard checks.
+- **Auto-send** is on for every workspace tracked for the first time (1.2.0-beta.1), so review threads and red CI go to the agent without you. Workspaces tracked before keep their setting. Turn it off per workspace and each repair batch waits for your click; with it on, Follow-up sends batches itself once the agent is idle, after fresh permission and Session Guard checks.
 - Follow-up never merges, turns on merge when ready, requests reviewers or archives on its own. **Merge** re-checks the stack, lists any PRs underneath that would merge first, and asks again.
 - A merged PR is not the end: tasks such as production checks and open questions keep the workspace open until the main agent declares Done and everything has settled.
 - Answers go out only when you click Send. Follow-up never answers for you.

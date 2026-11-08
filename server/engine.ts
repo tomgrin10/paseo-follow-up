@@ -6,7 +6,7 @@ import { batchPrompt, tasksFor, isRecovery, needsPrObservations } from "./tasks"
 import { answerRecipients, developerAnswer, syncTaskQuestions } from "./questions";
 import { answerMessage, isOpen as isOpenQuestion, type Question } from "../shared/questions";
 import { reconcileSubmittedStacks } from "./submissions";
-import { applyDiscovery, type DiscoveredWorkspace } from "./discovery";
+import { applyDiscovery, firstTracking, type DiscoveredWorkspace } from "./discovery";
 import { replyRecorded } from "../shared/communication";
 import { DeliveryDeferred } from "./delivery";
 import { recordSnapshot } from "./deployment-anchor";
@@ -135,7 +135,9 @@ export class Engine {
     if (!rows.some(row => row.id === workspaceId)) throw new Error("This workspace has no available main agent");
     await this.store.mutate(state => {
       applyDiscovery(state, rows.filter(row => row.id === workspaceId), this.now());
-      findWorkspace(state, workspaceId).enable_tracking = true;
+      const w = findWorkspace(state, workspaceId);
+      if (firstTracking(w)) w.enable_auto_sends = true;
+      w.enable_tracking = true;
     });
     const activated = findWorkspace(await this.store.snapshot(), workspaceId);
     void this.tick();
