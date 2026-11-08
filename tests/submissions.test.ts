@@ -55,8 +55,8 @@ test("PRs submitted from a real secondary worktree are discovered after the work
   applyDiscovery(state, await gateway.discover(state), clock);
   assert.equal((await git("branch", "--show-current")).stdout.trim(), "workspace-branch");
   assert.equal((await exec("git", ["-C", secondary, "branch", "--show-current"])).stdout.trim(), "new-bottom");
-  assert.deepEqual(w.prs.map(p => p.number), [1, 2, 3]); assert.equal(w.mainAgentId, "old-owner");
-  assert.deepEqual(w.contributorAgentIds, [a.id]); assert.ok(w.prs.slice(1).every(p => p.registeredAgentId === a.id));
+  assert.deepEqual(w.prs.map(p => p.number), [1, 2, 3]); assert.equal(w.mainAgentId, "current-root", "the live root takes over from the vanished owner");
+  assert.deepEqual(w.contributorAgentIds ?? [], []); assert.ok(w.prs.slice(1).every(p => p.registeredAgentId === a.id));
   applyDiscovery(state, await gateway.discover(state), clock); assert.equal(calls, 1); assert.equal(w.prs.length, 3);
   items = [...items, shell(`cd ${secondary}; gh pr create --title Another`, "https://github.com/example/app/pull/4")];
   gateway.markDirty(a.id); applyDiscovery(state, await gateway.discover(state), clock);

@@ -137,9 +137,11 @@ export class PaseoGateway implements Gateway {
         const candidates = agents.map(row => row.agent).filter(a => a.workspaceId === workspace.id && !a.archivedAt && !a.labels["follow-through.recovery"]);
         const roots: Agent[] = [];
         for (const agent of candidates) if (await isWorkspaceRoot(agent, findParent)) roots.push(agent);
-        const main = chooseMainAgent(roots, existing?.mainAgentId);
+        const successor = successorMainAgent(roots, existing?.mainAgentId);
+        const main = successor ?? chooseMainAgent(roots, existing?.mainAgentId);
         if (!main && !existing) continue;
-        const row: DiscoveredWorkspace = { id: workspace.id, title: workspace.name || main?.title || existing!.title, mainAgentId: existing?.mainAgentId ?? main!.id, projectId: workspace.projectId, messageAt: main?.lastUserMessageAt ?? null, enable_default_tracking: defaults.has(workspace.projectId ?? ""), contributorAgentIds: roots.filter(a => a.id !== existing?.mainAgentId && a.id !== main?.id).map(a => a.id) };
+        const owner = successor?.id ?? existing?.mainAgentId ?? main!.id;
+        const row: DiscoveredWorkspace = { id: workspace.id, title: workspace.name || main?.title || existing!.title, mainAgentId: owner, ...(successor ? { replacesMainAgentId: existing!.mainAgentId } : {}), projectId: workspace.projectId, messageAt: main?.lastUserMessageAt ?? null, enable_default_tracking: defaults.has(workspace.projectId ?? ""), contributorAgentIds: roots.filter(a => a.id !== owner && a.id !== existing?.mainAgentId && a.id !== main?.id).map(a => a.id) };
         // Preserve the designated owner even when it is no longer indexed. Other root
         // sessions can still contribute their PRs without acquiring completion authority.
         const project = catalog.projects.find(p => p.projectId === workspace.projectId);
@@ -363,4 +365,16 @@ export class PaseoGateway implements Gateway {
 export function chooseMainAgent(roots: Agent[], existingId?: string): Agent | undefined {
   if (existingId) return roots.find(a => a.id === existingId);
   return [...roots].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))[0];
+}
+
+/**
+ * The recorded main agent is closed, archived or gone while the workspace still has a live root agent: the live
+ * one takes over (the one Tom wrote to last, then the newest). A live recorded main is never replaced.
+ */
+export function successorMainAgent(roots: Agent[], existingId: string | undefined): Agent | undefined {
+  if (!existingId) return undefined;
+  const current = roots.find(a => a.id === existingId);
+  if (current && current.status !== "closed") return undefined;
+  const live = roots.filter(a => a.id !== existingId && a.status !== "closed");
+  return live.sort((a, b) => (b.lastUserMessageAt ?? "").localeCompare(a.lastUserMessageAt ?? "") || b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id))[0];
 }
