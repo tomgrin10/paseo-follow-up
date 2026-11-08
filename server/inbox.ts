@@ -44,6 +44,8 @@ export type AgentInfo = {
   id: string; workspaceId: string | null; parentAgentId: string | null; title: string | null; status: string;
   archivedAt: string | null; updatedAt: string | null; lastUserMessageAt: string | null;
   requiresAttention: boolean; attentionReason: string | null;
+  /** When Paseo marked the agent as needing attention (a turn finished unread). Optional for older hosts and stubs. */
+  attentionTimestamp?: string | null; createdAt?: string | null;
 };
 export interface Directory {
   agents(): Promise<AgentInfo[]>;
@@ -241,31 +243,41 @@ export class Inbox {
     if (!await this.on()) return;
     const agents = await this.o.directory.agents();
     const roots: { agent: AgentInfo; root: Root }[] = [];
-    for (const agent of agents.filter(a => !a.archivedAt)) {
+    // §2.5: archived agents are gone and closed ones without a flag stay hidden, so neither is imported.
+    for (const agent of agents.filter(a => !a.archivedAt && a.status !== "closed")) {
       const root = await this.root(agent);
       if (!root.subagent && root.rootId === agent.id) roots.push({ agent, root });
     }
-    const at = this.iso(); const now = this.now();
+    const now = this.now();
+    const at = this.iso();
     await this.store.mutate(state => {
       if (!state.importedAt) {
         const unsorted: string[] = [];
         for (const { agent, root } of roots) {
           const idle = !["running", "initializing"].includes(agent.status);
           const reason = agent.requiresAttention ? agent.attentionReason : null;
+          const last = lastActivity(agent);
+          // The flag dates from the agent's last activity, so ages and D9 ordering mean something.
+          const since = last && last < at ? last : at;
           const e = state.entries[agent.id] ?? newEntry(agent.id);
-          if (reason === "permission") state.entries[agent.id] = reduce(e, { type: "permission", requestId: "import", detail: "Waiting for your answer" }, at);
-          else if (reason === "error") state.entries[agent.id] = reduce(e, { type: "crash", detail: "Errored before Follow-up started" }, at);
-          else if (agent.requiresAttention) state.entries[agent.id] = reduce(e, { type: "reconcile", detail: "Unread in Paseo" }, at);
-          else if (idle && !root.delegated && recent(agent, now) && unanswered(agent)) state.entries[agent.id] = reduce(e, { type: "reconcile", detail: "You haven't replied" }, at);
+          if (reason === "permission") state.entries[agent.id] = reduce(e, { type: "permission", requestId: "import", detail: "Waiting for your answer" }, since);
+          else if (reason === "error") state.entries[agent.id] = reduce(e, { type: "crash", detail: "Errored before Follow-up started" }, since);
+          else if (agent.requiresAttention) state.entries[agent.id] = reduce(e, { type: "reconcile", detail: IMPORT_UNREAD }, since);
+          else if (idle && !root.delegated && recent(last, now) && unanswered(agent, last)) state.entries[agent.id] = reduce(e, { type: "reconcile", detail: IMPORT_UNANSWERED }, since);
           else if (idle && !root.delegated) unsorted.push(agent.id);
         }
         state.importedAt = at;
         state.unsorted = unsorted.length ? unsorted : null;
-      } else if (state.lastSeen) {
-        for (const { agent, root } of roots) {
+        state.revision = REVISION;
+      } else {
+        if (state.revision < REVISION) migrateFirstRun(state, new Map(agents.map(a => [a.id, a])), now);
+        if (state.lastSeen) for (const { agent, root } of roots) {
           const e = state.entries[agent.id];
-          const finishedAfter = agent.updatedAt && agent.updatedAt > state.lastSeen! && agent.updatedAt > (e?.lastEventAt ?? "");
-          if (finishedAfter && agent.status === "idle" && !root.delegated && !e?.goneAt) state.entries[agent.id] = reduce(e ?? newEntry(agent.id), { type: "reconcile", detail: "Finished while Follow-up was offline" }, at);
+          // A finish missed while the worker was down is one Paseo itself marked unread after lastSeen.
+          // Paseo's updatedAt can't tell: the daemon bumps it in bulk (restarts, migrations).
+          const last = agent.requiresAttention && agent.attentionReason === "finished" ? agent.attentionTimestamp ?? null : null;
+          const finishedAfter = !!last && last > state.lastSeen && last > (e?.lastEventAt ?? "");
+          if (last && finishedAfter && agent.status === "idle" && !root.delegated && !e?.goneAt) state.entries[agent.id] = reduce(e ?? newEntry(agent.id), { type: "reconcile", detail: OFFLINE }, last);
         }
       }
       state.lastSeen = at;
@@ -366,10 +378,11 @@ export class Inbox {
     for (const { agent, delegatedFrom } of roots.values()) {
       const e = state.entries[agent.id];
       if (e?.goneAt) continue;
+      if (agent.status === "closed" && !e?.needs) continue; // §2.5
       const running = ["running", "initializing"].includes(agent.status) || this.waiting.has(agent.id);
       if (e?.needs || e?.signedOffAt && now - Date.parse(e.signedOffAt) < DAY || running || e && !e.enable_finish_flags) rows.push(row(agent, delegatedFrom, e));
     }
-    const unsorted = state.unsorted?.flatMap(id => { const r = roots.get(id); return r && !state.entries[id]?.needs ? [row(r.agent, r.delegatedFrom, state.entries[id])] : []; }) ?? null;
+    const unsorted = state.unsorted?.flatMap(id => { const r = roots.get(id); return r && r.agent.status !== "closed" && !state.entries[id]?.needs ? [row(r.agent, r.delegatedFrom, state.entries[id])] : []; }) ?? null;
     const batch = state.batchUndo && Date.parse(state.batchUndo.expires) > now ? { at: state.batchUndo.at, count: state.batchUndo.entries.length || (state.batchUndo.unsorted?.length ?? 0) } : null;
     return { enabled, rows, unsorted: unsorted?.length ? unsorted : null, firstRun: state.signOffs < 10, batchUndo: batch, signOffs: state.signOffs };
   }
@@ -380,9 +393,58 @@ export type InboxAction = {
   agentIds?: string[]; seqs?: Record<string, number>; until?: string; value?: boolean; muteTurn?: boolean;
 };
 
-const recent = (a: AgentInfo, now: number) => !!a.updatedAt && now - Date.parse(a.updatedAt) <= 7 * DAY;
-/** The agent spoke last: its activity is newer than the developer's last message. */
-const unanswered = (a: AgentInfo) => !!a.updatedAt && (!a.lastUserMessageAt || a.updatedAt > a.lastUserMessageAt);
+/**
+ * The agent's last activity, from fields Paseo doesn't rewrite in bulk: when a turn finished unread, else the
+ * developer's last message (an idle agent finished the turn it started), else creation. `updatedAt` is not
+ * used: the daemon bumps it on restarts and migrations, and reading timelines would load every agent.
+ */
+export const lastActivity = (a: AgentInfo): string | null => {
+  const stamps = [a.lastUserMessageAt, a.requiresAttention ? a.attentionTimestamp : null].filter((t): t is string => !!t && !Number.isNaN(Date.parse(t)));
+  return stamps.sort().at(-1) ?? a.createdAt ?? null;
+};
+/** D4's 7-day window, on the agent's real last activity. Unknown activity is not recent. */
+const recent = (last: string | null, now: number) => !!last && now - Date.parse(last) <= 7 * DAY;
+/** The agent spoke last: idle after the developer's last message, so the turn it started has ended. */
+const unanswered = (a: AgentInfo, last: string | null) => !!last && !!a.lastUserMessageAt && last >= a.lastUserMessageAt;
+
+const IMPORT_UNANSWERED = "You haven't replied";
+const IMPORT_UNREAD = "Unread in Paseo";
+const OFFLINE = "Finished while Follow-up was offline";
+/** Store revision: 1 = the first-run import fix below has been applied. */
+export const REVISION = 1;
+/** An entry untouched since 1.1.0-beta.0 created it on start: one finish reason it wrote, and nothing the developer did. */
+const importOnly = (e: Entry) => !!e.needs && e.needs.reasons.length === 1 && e.needs.reasons[0].reason === "finished"
+  && [IMPORT_UNANSWERED, IMPORT_UNREAD, OFFLINE].includes(e.needs.reasons[0].detail)
+  && !e.signedOffAt && !e.snooze && !e.undo && !e.muteTurn && e.enable_finish_flags && !e.goneAt;
+
+/**
+ * One-time repair of a store imported by 1.1.0-beta.0, which read Paseo's `updatedAt` as last activity and
+ * imported closed agents. Only entries that are still exactly what that import wrote change:
+ * - a closed or archived agent's imported flag is dropped (§2.5: closed without a real flag stays hidden);
+ * - an "unanswered" flag whose agent was really idle for more than 7 days moves to Unsorted (D4);
+ * - every other imported flag keeps its place but dates from the agent's real last activity.
+ * Entries with a newer real event, or that the developer acted on, are left alone.
+ */
+export function migrateFirstRun(state: InboxState, agents: Map<string, AgentInfo>, now: number): void {
+  const unsorted = new Set(state.unsorted ?? []);
+  for (const e of Object.values(state.entries)) {
+    if (!importOnly(e)) continue;
+    const agent = agents.get(e.agentId);
+    if (!agent) continue; // Unknown to the daemon right now: leave it for the archive and gone rules.
+    const last = lastActivity(agent);
+    const detail = e.needs!.reasons[0].detail;
+    const drop = agent.archivedAt || agent.status === "closed"
+      || detail !== IMPORT_UNREAD && (!recent(last, now) || !unanswered(agent, last));
+    if (drop) {
+      e.needs = null; e.seq += 1;
+      if (!agent.archivedAt && agent.status !== "closed") unsorted.add(e.agentId);
+    } else if (last && last < e.needs!.since) {
+      e.needs = { since: last, reasons: e.needs!.reasons.map(r => ({ ...r, at: last })) }; e.seq += 1;
+    }
+  }
+  state.unsorted = unsorted.size ? [...unsorted] : null;
+  state.revision = REVISION;
+}
 
 /** CI, review and PR-state events from Follow-up's tracked workspaces, keyed so the same state never re-flags. */
 export function followUpEvents(follow: FollowState, enablePrClosed: boolean): { agentId: string; event: InboxEvent }[] {
