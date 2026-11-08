@@ -9,7 +9,7 @@ import { join } from "node:path";
  */
 export type Sender = "agent" | "follow-up" | "defer" | "session" | "schedule" | "tom";
 export type Message = { text: string; messageId?: string | null; clientMessageId?: string | null };
-export type Ledger = { agentId: string; messageId: string | null; at: string }[];
+export type Ledger = { agentId: string; messageId: string | null; at: string; by?: "follow-up" | "developer" }[];
 export type Sources = {
   /** Follow-up's own delivery ledger, written before each send. */
   ledger: () => Promise<Ledger>;
@@ -24,11 +24,19 @@ const ENVELOPE = /^\s*<paseo-system\b[^>]*\bkind="(agent-message|agent-notificat
 export async function classify(message: Message | null, agentId: string, at: number, sources: Sources): Promise<Sender> {
   if (message && ENVELOPE.test(message.text)) return "agent";
   const safe = async (check: () => Promise<boolean>) => { try { return await check(); } catch { return false; } };
-  if (await safe(async () => {
-    const ledger = await sources.ledger();
-    const ids = [message?.messageId, message?.clientMessageId].filter((id): id is string => !!id);
-    return ledger.some(l => l.agentId === agentId && (l.messageId && ids.includes(l.messageId) || Math.abs(Date.parse(l.at) - at) <= WINDOW_MS));
-  })) return "follow-up";
+  // Follow-up's own sends are automation, except a brief option or move the developer clicked: that is their message.
+  const own = await (async () => {
+    try {
+      const ledger = (await sources.ledger()).filter(l => l.agentId === agentId);
+      const ids = [message?.messageId, message?.clientMessageId].filter((id): id is string => !!id);
+      const exact = ledger.find(l => l.messageId && ids.includes(l.messageId));
+      if (exact) return exact.by === "developer" ? "tom" as const : "follow-up" as const;
+      const near = ledger.filter(l => Math.abs(Date.parse(l.at) - at) <= WINDOW_MS);
+      if (!near.length) return null;
+      return near.every(l => l.by === "developer") ? "tom" as const : "follow-up" as const;
+    } catch { return null; }
+  })();
+  if (own) return own;
   if (await safe(() => sources.defer(agentId, at))) return "defer";
   if (await safe(() => sources.session(agentId, at))) return "session";
   if (await safe(() => sources.schedule(agentId, at))) return "schedule";

@@ -25,11 +25,27 @@ const tools = [
   ["record_answer", "Record the developer's answer when they answered a question in chat instead of in Follow-up. choice is an option letter, or their short answer when there were no options; words is what they said.", "follow.record-answer", { id: string, choice: string, words: string }, ["id", "choice"]],
   ["withdraw_question", "Withdraw a question that no longer matters, with a short reason.", "follow.withdraw-question", { id: string, reason: string }, ["id", "reason"]],
   ["set_spec", "Register the link to this workspace's spec: the Claude artifact (or doc) you keep summarizing the goal, decisions and status. Call it once after the first publish, with the URL from the publish result, and again only if the link changes. Follow-up shows it in the workspace header.", "follow.set-spec", { url: { ...string, maxLength: 2000 }, title: { ...string, maxLength: 120 } }, ["url"]],
+  ["needs_you", "Call once at the end of a turn, just before your final reply: what the developer has to do next. ask is one line (≤120). kind: decision (give decisions with 2–5 options, a consequence each and recommend=<option index>), action (something only they can do: merge, approve, log in, run or send), review (a PR to review and merge; link it with pr), or done (\"Nothing needed. <what you finished>.\"). context ≤400 chars: only what they need to decide. Never blocks and never changes what you should do next.", "follow.needs-you", { ask: { ...string, minLength: 1, maxLength: 120 }, kind: { type: "string", enum: ["decision", "action", "review", "done"] }, decisions: { type: "array", maxItems: 3, items: { type: "object", properties: { question: { ...string, minLength: 1, maxLength: 200 }, options: { type: "array", minItems: 2, maxItems: 5, items: { type: "object", properties: { label: { ...string, minLength: 1, maxLength: 60 }, consequence: { ...string, maxLength: 160 } }, required: ["label"], additionalProperties: false } }, recommend: { type: "integer", minimum: 0, maximum: 4 } }, required: ["question"], additionalProperties: false } }, context: { ...string, maxLength: 400 }, links: { type: "array", maxItems: 4, items: { type: "object", properties: { label: string, url: string, path: string, pr: string }, required: ["label"], additionalProperties: false } } }, ["ask", "kind"]],
   ["declare_done", "Declare that the workspace goal is fulfilled. Live PR status and remaining obligations are checked; returned blockers must be resolved first. Done labels the workspace but never archives it.", "follow.done", { summary: string }, ["summary"]],
 ];
 
-function toolList(recovery = process.env.FOLLOW_THROUGH_RECOVERY === "1", contributor = false) {
-  return tools.filter(t => contributor ? ["workspace_status", "register_pr", "sync_workspace"].includes(t[0]) : !recovery || !["declare_done", "sync_workspace", "ask_question", "record_answer", "withdraw_question", "set_spec"].includes(t[0]));
+// The brief's tool: every root agent while the Needs-you inbox is on; never contributors, recovery or subagents.
+// Kept identical to NEEDS_YOU_INSTRUCTION in shared/brief.ts (a test checks it).
+const needsYouInstruction = "When you end a turn, call `needs_you` once, just before your final reply, with what the developer has to do next: a decision (give 2–3 options, what each means for them, and the one you recommend), an action only they can take (merge, approve, log in, run or send something), or \"Nothing needed\" plus what you finished, in one line. Keep `ask` to one line and `context` to what they need to decide. Don't repeat your report there; still write your normal reply. Don't call it while a permission prompt is waiting or while you're still working.";
+function toolList(recovery = process.env.FOLLOW_THROUGH_RECOVERY === "1", contributor = false, brief = false, briefOnly = false) {
+  if (briefOnly) return brief ? tools.filter(t => t[0] === "needs_you") : [];
+  return tools.filter(t => t[0] === "needs_you" ? brief && !recovery && !contributor : contributor ? ["workspace_status", "register_pr", "sync_workspace"].includes(t[0]) : !recovery || !["declare_done", "sync_workspace", "ask_question", "record_answer", "withdraw_question", "set_spec"].includes(t[0]));
+}
+/** Whether this session may call needs_you: launched as a root agent (FOLLOW_THROUGH_BRIEF) and the inbox is on. */
+async function briefEnabled() {
+  if (!process.env.FOLLOW_THROUGH_BRIEF || process.env.FOLLOW_THROUGH_RECOVERY === "1") return false;
+  try {
+    const directory = join(process.env.PASEO_HOME ?? join(homedir(), ".paseo"), "plugin-data/follow-through");
+    const lease = JSON.parse(await readFile(join(directory, "hooks-enabled.json"), "utf8"));
+    if (!(lease.expiresAt > Date.now())) return false;
+    const brief = JSON.parse(await readFile(join(directory, "brief.json"), "utf8"));
+    return brief?.enable_inbox === true;
+  } catch { return false; }
 }
 const schemas = list => list.map(([name, description, , properties, required]) => ({ name, description, inputSchema: { type: "object", properties, required, additionalProperties: false }, annotations: { readOnlyHint: name === "workspace_status", destructiveHint: false } }));
 async function scope(resolveRecovery = false) {
@@ -81,6 +97,7 @@ function currentWork(w) {
 }
 function compact(tool, input, result) {
   if (tool === "workspace_status") return currentWork(result);
+  if (tool === "needs_you") return { ok: result.ok, briefId: result.briefId };
   if (tool === "declare_done") return { workspaceId: result.workspace.id, completion: result.workspace.completion, blockers: result.blockers };
   if (tool === "ask_question") return { workspaceId: result.workspaceId, question: { id: result.question.id, title: result.question.title, recommend: result.question.recommend, big: result.question.big }, mode: result.mode, instruction: result.instruction };
   if (tool === "record_answer" || tool === "withdraw_question") return { workspaceId: result.workspaceId, question: { id: result.question.id, answer: result.question.answer, closed: result.question.closed } };
@@ -125,10 +142,10 @@ async function call(method, input) {
 
 const command = process.argv[2];
 if (command === "list" || command === "--help" || command === "help") {
-  process.stdout.write(command === "list" ? JSON.stringify({ tools: schemas(toolList()) }, null, 2) + "\n" : "Usage: node mcp.mjs list | call <tool> '<json>' [--compact]\nNative MCP returns compact receipts; workspace_status({detail:full}) requests complete history. CLI calls retain full replies unless --compact is supplied.\n");
+  process.stdout.write(command === "list" ? JSON.stringify({ tools: schemas(toolList(undefined, false, true)) }, null, 2) + "\n" : "Usage: node mcp.mjs list | call <tool> '<json>' [--compact]\nNative MCP returns compact receipts; workspace_status({detail:full}) requests complete history. CLI calls retain full replies unless --compact is supplied.\n");
 } else if (command === "call") {
   try {
-    const tool = toolList().find(t => t[0] === process.argv[3]);
+    const tool = toolList(undefined, false, await briefEnabled()).find(t => t[0] === process.argv[3]);
     if (!tool) throw new Error("Unknown tool. Run list for names and input schemas.");
     const input = JSON.parse(process.argv[4] ?? "{}");
     validate(input, schemas([tool])[0].inputSchema);
@@ -142,7 +159,7 @@ if (command === "list" || command === "--help" || command === "help") {
   const lines = createInterface({ input: process.stdin });
   let tail = Promise.resolve(), initialized = false, lastScope = null;
   const timer = process.env.PASEO_AGENT_ID ? setInterval(() => {
-    void (async () => { const current = await scope(); if (initialized && current !== lastScope) process.stdout.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/tools/list_changed" }) + "\n"); lastScope = current; })().catch(() => {});
+    void (async () => { const current = `${await scope()}:${await briefEnabled()}`; if (initialized && current !== lastScope) process.stdout.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/tools/list_changed" }) + "\n"); lastScope = current; })().catch(() => {});
   }, 2000) : null;
   timer?.unref(); lines.on("close", () => { if (timer) clearInterval(timer); });
   lines.on("line", line => {
@@ -153,10 +170,11 @@ if (command === "list" || command === "--help" || command === "help") {
       try {
         let result;
         const role = await scope(request.method === "initialize" || request.method === "tools/list");
-        const available = role ? toolList(role === "recovery", role === "contributor") : [];
+        const brief = await briefEnabled();
+        const available = role ? toolList(role === "recovery", role === "contributor", brief) : toolList(false, false, brief, true);
         if (request.method === "initialize") {
-          initialized = true; lastScope = role;
-          result = { protocolVersion: request.params?.protocolVersion ?? "2024-11-05", capabilities: { tools: { listChanged: true } }, serverInfo: { name: "paseo-follow-through", version: "0.3.5" }, instructions: role ? (role === "contributor" ? "Register PRs this session submits, including from secondary git worktrees. Read workspace_status and call sync_workspace before finishing. Goal, task, scope and completion changes remain with the designated main agent." : role === "recovery" ? "Recover tracking metadata from evidence, acknowledge your assigned batch, and leave completion to the main agent." : "Keep workspace follow-through updated after PR submission and scope changes. Read workspace_status after compaction. Track all post-merge work. When a decision needs the developer, ask it with ask_question (lettered options and a recommendation) and follow the question mode in its reply. If you keep a spec artifact for this workspace, register its link once with set_spec. " + batchInstructions) + " Perform bookkeeping silently: no sidebar-update announcements, plugin-status commentary or final sidebar recap. Put receipts and summaries in tools. Report actual work outcomes or decisions/blockers; discuss sidebar status only when explicitly asked." : "Follow-through tools are available to tracked workspace root agents and active recovery agents; contributor sessions receive PR registration and status tools." };
+          initialized = true; lastScope = `${role}:${brief}`;
+          result = { protocolVersion: request.params?.protocolVersion ?? "2024-11-05", capabilities: { tools: { listChanged: true } }, serverInfo: { name: "paseo-follow-through", version: "0.3.5" }, instructions: (role ? (role === "contributor" ? "Register PRs this session submits, including from secondary git worktrees. Read workspace_status and call sync_workspace before finishing. Goal, task, scope and completion changes remain with the designated main agent." : role === "recovery" ? "Recover tracking metadata from evidence, acknowledge your assigned batch, and leave completion to the main agent." : "Keep workspace follow-through updated after PR submission and scope changes. Read workspace_status after compaction. Track all post-merge work. When a decision needs the developer, ask it with ask_question (lettered options and a recommendation) and follow the question mode in its reply. If you keep a spec artifact for this workspace, register its link once with set_spec. " + batchInstructions) + " Perform bookkeeping silently: no sidebar-update announcements, plugin-status commentary or final sidebar recap. Put receipts and summaries in tools. Report actual work outcomes or decisions/blockers; discuss sidebar status only when explicitly asked." : brief ? "" : "Follow-through tools are available to tracked workspace root agents and active recovery agents; contributor sessions receive PR registration and status tools.") + (brief && role !== "contributor" && role !== "recovery" ? (role ? " " : "") + needsYouInstruction : "") };
         } else if (request.method === "ping") result = {};
         else if (request.method === "tools/list") result = { tools: schemas(available) };
         else if (request.method === "tools/call") {

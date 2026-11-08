@@ -1,9 +1,10 @@
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { emptyInbox, expired, inboxStateSchema, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState } from "../shared/inbox";
+import { emptyInbox, expired, inboxStateSchema, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason } from "../shared/inbox";
 import type { State as FollowState } from "../shared/model";
 import { classify, newestUserMessage, type Sources } from "./inbox-classifier";
+import { briefOrigin, briefStep, pickBrief, type Brief, type BriefEvent, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
 
 /** The flag store: plugin-data/follow-through/inbox.json. A new file, so existing state never changes shape. */
 export class InboxStore {
@@ -56,14 +57,49 @@ export interface Directory {
   clearAttention(ids: string[]): Promise<void>;
 }
 export type GuardPause = { id: string; agentId: string; phase: string; turnId?: string | null; anchorResetsAt?: string; dismissed?: boolean; note?: string };
+/** What the brief needs from the rest of Follow-up. Absent in older tests: then no briefs are made. */
+export type BriefHost = {
+  /** Append or replace the timeline row. Failures are swallowed by the caller; the stored brief stays. */
+  sink(agentId: string, brief: Brief): Promise<void>;
+  /** The newest valid needs_you call this agent made, if any. */
+  call(agentId: string): Promise<NeedsYouRecord | null>;
+  /** The agent's newest open PR in a tracked workspace, with facts. */
+  pr(agentId: string, event?: string | null): Promise<PrState | null>;
+  /** The tracked workspace the agent is main in, for PR moves and questions. */
+  workspaceId?(agentId: string): Promise<string | null>;
+  /** A brief collapsed; its decisions stored as questions may need settling. */
+  settled?(agentId: string, brief: Brief): Promise<void>;
+};
 export type InboxOptions = {
   enabled: () => Promise<{ enable_inbox: boolean; enable_inbox_pr_closed: boolean }>;
+  briefs?: BriefHost;
   directory: Directory;
   sources: Sources;
   guard: () => Promise<GuardPause[] | null>;
   now?: () => number;
   graceMs?: number;
 };
+/** Decides the brief step for one event from the entry before and after it. */
+export type BriefDecider = (prev: Entry, next: Entry, at: string) => BriefEvent | null;
+/** Brief steps every inbox event implies: sign-off collapses, undo reopens, an answered prompt retires its slim brief. */
+export function autoBrief(event: InboxEvent): BriefEvent | null {
+  if (event.type === "sign_off") return { type: "sign_off" };
+  if (event.type === "undo") return { type: "undo" };
+  if (event.type === "permission_resolved") return { type: "permission_resolved" };
+  return null;
+}
+/** Session Guard's note and reset time, read defensively: anything unexpected shows as no detail. */
+export function pauseSource(p: GuardPause): { note: string | null; resetsAt: string | null } {
+  const note = typeof p.note === "string" && p.note.trim() ? p.note : null;
+  const at = typeof p.anchorResetsAt === "string" && Number.isFinite(Date.parse(p.anchorResetsAt)) ? new Date(p.anchorResetsAt) : null;
+  return { note, resetsAt: at ? `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}` : null };
+}
+/** The developer's option click, in the existing answer format so Follow-up's answer card renders it. */
+export function briefAnswer(id: string, question: string, letter: string, label: string): string {
+  const title = question.replace(/[()\n]/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+  return `Follow-up answer ${id} (${title}): ${letter} — ${label}\nContinue with this choice.`;
+}
+const ORIGINS = 500;
 export type Root = { rootId: string; subagent: AgentInfo | null; delegated: boolean };
 const DAY = 24 * 3_600_000;
 const stub = (a: { id: string; workspaceId: string | null; parentAgentId?: string | null }): AgentInfo => ({ id: a.id, workspaceId: a.workspaceId, parentAgentId: a.parentAgentId ?? null, title: null, status: "", archivedAt: null, updatedAt: null, lastUserMessageAt: null, requiresAttention: false, attentionReason: null });
@@ -83,13 +119,68 @@ export class Inbox {
   private iso() { return new Date(this.now()).toISOString(); }
   private async on() { try { return (await this.o.enabled()).enable_inbox; } catch { return true; } }
 
-  /** Apply events to entries in one write. Unknown agents get an entry on first flag. */
-  async apply(events: { agentId: string; event: InboxEvent }[]): Promise<void> {
+  /**
+   * Apply events to entries in one write. Unknown agents get an entry on first flag.
+   * `brief` decides the brief step from the entry before and after the event (null: none beyond the automatic ones).
+   */
+  async apply(events: { agentId: string; event: InboxEvent; brief?: BriefDecider }[]): Promise<void> {
     if (!events.length) return;
     const at = this.iso();
+    const appends: { agentId: string; brief: Brief }[] = [];
     await this.store.mutate(state => {
-      for (const { agentId, event } of events) state.entries[agentId] = reduce(state.entries[agentId] ?? newEntry(agentId), event, at);
+      for (const { agentId, event, brief } of events) {
+        const prev = state.entries[agentId] ?? newEntry(agentId);
+        const next = reduce(prev, event, at);
+        state.entries[agentId] = next;
+        const steps = [autoBrief(event), brief?.(prev, next, at) ?? null].filter((s): s is BriefEvent => !!s);
+        for (const step of steps) this.step(state, agentId, step, at, appends);
+      }
     });
+    await this.flush(appends);
+  }
+
+  /** One brief step on a stored entry, recording what to append and, for a new flagged brief, where it came from. */
+  private step(state: InboxState, agentId: string, event: BriefEvent, at: string, appends: { agentId: string; brief: Brief }[]): void {
+    const e = state.entries[agentId];
+    if (!e || !this.o.briefs) return;
+    if (event.type === "create" && e.goneAt) return;
+    const result = briefStep(e.brief, event, at);
+    if (result.brief === e.brief) return;
+    e.brief = result.brief;
+    for (const b of result.appends) appends.push({ agentId, brief: b });
+    if (event.type === "create" && event.flagged) state.briefOrigins = [...state.briefOrigins, { at, origin: briefOrigin(event.content.source) }].slice(-ORIGINS);
+  }
+
+  private async flush(appends: { agentId: string; brief: Brief }[]): Promise<void> {
+    for (const { agentId, brief } of appends) {
+      await this.o.briefs?.sink(agentId, brief).catch(() => undefined);
+      if (brief.state !== "open" && brief.questionIds.length) await this.o.briefs?.settled?.(agentId, brief).catch(() => undefined);
+    }
+  }
+
+  /** The current turn per agent, from turn starts, so a needs_you call is matched to the turn it was made in. */
+  private turns = new Map<string, { turnId: string | null; at: number }>();
+  currentTurn(agentId: string): { turnId: string | null; at: number } | null { return this.turns.get(agentId) ?? null; }
+
+  /** The sources every brief has: the agent's needs_you for this turn and its PR state. */
+  private async sources(agentId: string, since: number | null, turnId: string | null): Promise<Pick<BriefSources, "agent" | "pr">> {
+    const b = this.o.briefs;
+    if (!b) return {};
+    const [record, pr] = await Promise.all([b.call(agentId).catch(() => null), b.pr(agentId).catch(() => null)]);
+    const current = record && (turnId && record.turnId === turnId || since !== null && record.at >= since) ? record.call : null;
+    return { agent: current, pr };
+  }
+
+  /** A decider that creates a brief, flagged when the event's reason is newly on the entry. */
+  private async creator(agentId: string, turnId: string | null, suffix: string, reason: Reason | null, content: BriefSources, keepUnflagged = false): Promise<BriefDecider> {
+    const picked = pickBrief(content);
+    const workspaceId = await this.o.briefs?.workspaceId?.(agentId).catch(() => null) ?? null;
+    const questionIds = picked.source === "agent" ? (await this.o.briefs?.call(agentId).catch(() => null))?.questionIds ?? [] : [];
+    return (_prev, next, at) => {
+      const flagged = !!reason && !!next.needs?.reasons.some(r => r.reason === reason && r.at === at) && !next.goneAt;
+      if (!flagged && !(keepUnflagged && picked.source === "agent")) return null;
+      return { type: "create", id: `brief:${turnId ?? at}${suffix}`, turnId, content: picked, flagged, seq: next.seq, questionIds, workspaceId };
+    };
   }
 
   /** Same-workspace children roll up to their parent; a launch into another workspace is a delegated root. */
@@ -107,15 +198,19 @@ export class Inbox {
     return { rootId: current.id, subagent, delegated: false };
   }
 
-  async turnStarted(agent: { id: string; workspaceId: string | null; parentAgentId?: string | null }): Promise<void> {
+  async turnStarted(agent: { id: string; workspaceId: string | null; parentAgentId?: string | null }, turnId?: string | null): Promise<void> {
     this.live.add(agent.id);
     if (!await this.on()) return;
     const root = await this.root(agent);
     if (root.subagent) return;
     const at = this.now();
+    this.turns.set(agent.id, { turnId: turnId ?? null, at });
     const items = await this.o.directory.tail(agent.id, 20).catch(() => []);
-    const sender = await classify(newestUserMessage(items), agent.id, at, this.o.sources);
-    await this.apply([{ agentId: root.rootId, event: { type: "message", from: sender === "tom" ? "tom" : "automation" } }]);
+    const message = newestUserMessage(items);
+    const sender = await classify(message, agent.id, at, this.o.sources);
+    // The developer's message answers the open brief; anything else means the agent kept going.
+    const brief: BriefEvent = sender === "tom" ? { type: "message", text: message?.text ?? null } : { type: "turn_start" };
+    await this.apply([{ agentId: root.rootId, event: { type: "message", from: sender === "tom" ? "tom" : "automation" }, brief: () => brief }]);
   }
 
   async turnEnded(agent: { id: string; workspaceId: string | null; parentAgentId?: string | null }, outcome: { kind: "completed" } | { kind: "failed"; error: { message: string } } | { kind: "canceled"; reason: string }, turnId: string | null): Promise<void> {
@@ -123,21 +218,31 @@ export class Inbox {
     if (!await this.on()) return;
     const root = await this.root(agent);
     if (root.subagent) {
-      // Subagent finishes are covered by the parent's own turn end; failures surface on the parent.
-      if (outcome.kind === "failed") await this.apply([{ agentId: root.rootId, event: { type: "turn_end", outcome: "failed", detail: one(`Subagent ${root.subagent.title ?? ""}: ${outcome.error.message}`) } }]);
+      // Subagent finishes are covered by the parent's own turn end; failures surface on the parent's brief.
+      if (outcome.kind === "failed") {
+        const message = `Subagent ${root.subagent.title ?? ""}: ${outcome.error.message}`.replace("Subagent : ", "A subagent: ");
+        await this.apply([{ agentId: root.rootId, event: { type: "turn_end", outcome: "failed", detail: one(message) }, brief: await this.creator(root.rootId, turnId, `:sub:${agent.id}`, "error", { error: { message } }) }]);
+      }
       return;
     }
+    const since = this.turns.get(agent.id)?.at ?? null;
+    this.turns.delete(agent.id);
+    const stated = await this.sources(agent.id, since, turnId);
     if (outcome.kind === "completed") {
       const items = await this.o.directory.tail(agent.id, 20).catch(() => []);
       const reply = [...items].reverse().find(i => (i as { type?: string })?.type === "assistant_message") as { text?: string } | undefined;
-      await this.apply([{ agentId: root.rootId, event: { type: "turn_end", outcome: "completed", detail: reply?.text ? lastLine(reply.text) : "", delegated: root.delegated } }]);
+      // The ask replaces the reply's last line as the reason's detail (§4); the fallback keeps the old detail.
+      const brief = await this.creator(root.rootId, turnId, "", "finished", stated, true);
+      await this.apply([{ agentId: root.rootId, event: { type: "turn_end", outcome: "completed", detail: reply?.text ? lastLine(reply.text) : "", delegated: root.delegated }, brief }]);
     } else if (outcome.kind === "failed") {
-      await this.apply([{ agentId: root.rootId, event: { type: "turn_end", outcome: "failed", detail: one(outcome.error.message || "Turn failed") } }]);
+      const message = outcome.error.message || "Turn failed";
+      await this.apply([{ agentId: root.rootId, event: { type: "turn_end", outcome: "failed", detail: one(message) }, brief: await this.creator(root.rootId, turnId, "", "error", { ...stated, error: { message } }) }]);
     } else {
       const pauses = await this.o.guard().catch(() => null);
       const pause = turnId ? pauses?.find(p => p.agentId === agent.id && p.turnId === turnId && !p.dismissed) : undefined;
       const guard = !pause ? null : pause.phase === "attention" ? "attention" as const : "waiting" as const;
-      await this.apply([{ agentId: root.rootId, event: { type: "turn_end", outcome: "canceled", guard, detail: one(pause?.note ?? "Usage limit · pick an account to resume") } }]);
+      const brief = guard === "attention" ? await this.creator(root.rootId, turnId, ":paused", "paused", { ...stated, paused: pauseSource(pause!) }) : undefined;
+      await this.apply([{ agentId: root.rootId, event: { type: "turn_end", outcome: "canceled", guard, detail: one(pause?.note ?? "Usage limit · pick an account to resume") }, brief }]);
     }
   }
 
@@ -152,7 +257,11 @@ export class Inbox {
           if (this.resolved.has(key) || !await this.on()) return;
           const root = await this.root(agent);
           const question = one(request.title || request.description || request.name || "Permission requested");
-          await this.apply([{ agentId: root.rootId, event: { type: "permission", requestId: request.id, detail: root.subagent ? `Subagent asks · ${question}` : question } }]);
+          const turn = this.turns.get(root.rootId) ?? this.turns.get(agent.id);
+          const stated = await this.sources(root.rootId, turn?.at ?? null, turn?.turnId ?? null);
+          const brief = await this.creator(root.rootId, turn?.turnId ?? null, `:permission:${request.id}`, "permission", { ...stated, permission: { title: question, subagent: root.subagent ? { id: agent.id, title: root.subagent.title } : null } });
+          this.pending.add(root.rootId);
+          await this.apply([{ agentId: root.rootId, event: { type: "permission", requestId: request.id, detail: root.subagent ? `Subagent asks · ${question}` : question }, brief }]);
         })().catch(() => undefined).finally(resolve);
       }, this.o.graceMs ?? 3_000) });
     });
@@ -164,8 +273,13 @@ export class Inbox {
     const pending = this.grace.get(key);
     if (pending) { clearTimeout(pending.timer); this.grace.delete(key); pending.done(); return; }
     const root = await this.root(agent);
+    this.pending.delete(root.rootId);
     await this.apply([{ agentId: root.rootId, event: { type: "permission_resolved", requestId } }]);
   }
+
+  /** Root agents with a permission prompt showing, for the Stop-hook nudge to skip (R2). */
+  private pending = new Set<string>();
+  pendingPermissions(): string[] { return [...this.pending]; }
 
   /** Stop pending grace timers when the worker stops. */
   stop(): void { for (const { timer, done } of this.grace.values()) { clearTimeout(timer); done(); } this.grace.clear(); }
@@ -174,7 +288,8 @@ export class Inbox {
     const wasLive = this.live.delete(agent.id);
     if (!wasLive || !await this.on()) return;
     const root = await this.root(agent);
-    await this.apply([{ agentId: root.rootId, event: { type: "crash", detail: root.subagent ? "Subagent closed during a turn" : "Closed during a turn" } }]);
+    const detail = root.subagent ? "Subagent closed during a turn" : "Closed during a turn";
+    await this.apply([{ agentId: root.rootId, event: { type: "crash", detail }, brief: await this.creator(root.rootId, null, ":closed", "error", { error: { message: detail } }) }]);
   }
 
   async archived(agentIds: string[]): Promise<void> {
@@ -189,9 +304,39 @@ export class Inbox {
   }
 
   /** Written before Follow-up sends, so the classifier recognises its own messages. */
-  async noteDelivery(agentId: string, messageId: string | null): Promise<void> {
+  async noteDelivery(agentId: string, messageId: string | null, by?: "developer"): Promise<void> {
     const at = this.iso();
-    await this.store.mutate(state => { state.ledger = [...state.ledger.filter(l => this.now() - Date.parse(l.at) < 3_600_000), { agentId, messageId, at }].slice(-200); });
+    await this.store.mutate(state => { state.ledger = [...state.ledger.filter(l => this.now() - Date.parse(l.at) < 3_600_000), { agentId, messageId, at, ...(by ? { by } : {}) }].slice(-200); });
+  }
+
+  /**
+   * The developer clicked an option or a move on the brief. Validated against the stored brief (a stale card is refused),
+   * logged in the ledger as the developer's (so the classifier clears the flag, #11), then sent, then collapsed.
+   */
+  async briefAction(agentId: string, input: { briefId: string; decisionId?: string; choice?: string; move?: "retry" }, send: (text: string, messageId: string) => Promise<void>): Promise<Brief> {
+    const state = await this.store.snapshot();
+    const b = state.entries[agentId]?.brief;
+    if (!b || b.id !== input.briefId) throw new Error("This brief was replaced by a newer one. Read the newest card.");
+    if (b.state !== "open") throw new Error("This brief was already answered or signed off.");
+    let text: string; let event: BriefEvent;
+    if (input.move === "retry") {
+      if (b.kind !== "error") throw new Error("Only a failed turn can be retried from its brief.");
+      text = "Retry the turn that failed. Pick up from the last step that finished."; event = { type: "message", text: null };
+    } else {
+      const d = b.decisions.find(d => d.id === input.decisionId);
+      const o = d?.options.find(o => o.letter === input.choice);
+      if (!d || !o) throw new Error("Pick one of the options on the card.");
+      text = briefAnswer(d.id, d.question, o.letter, o.label);
+      event = { type: "option", decisionId: d.id, choice: o.letter };
+    }
+    const messageId = randomUUID();
+    await this.noteDelivery(agentId, messageId, "developer");
+    await send(text, messageId);
+    const appends: { agentId: string; brief: Brief }[] = [];
+    const at = this.iso();
+    const result = await this.store.mutate(s => { if (s.entries[agentId]?.brief?.id === b.id) this.step(s, agentId, event, at, appends); return s.entries[agentId]?.brief ?? b; });
+    await this.flush(appends);
+    return result;
   }
 
   /** #7: Session Guard pauses that need a decision flag; waiting ones show on the Running row. */
@@ -199,10 +344,10 @@ export class Inbox {
     const pauses = await this.o.guard().catch(() => null);
     this.waiting = new Map((pauses ?? []).filter(p => p.phase === "waiting" && p.anchorResetsAt).map(p => [p.agentId, p.anchorResetsAt!]));
     if (!pauses || !await this.on()) return;
-    const events: { agentId: string; event: InboxEvent }[] = [];
+    const events: { agentId: string; event: InboxEvent; brief?: BriefDecider }[] = [];
     for (const p of pauses.filter(p => p.phase === "attention" && !p.dismissed)) {
       const root = await this.root((await this.o.directory.agent(p.agentId).catch(() => null)) ?? { id: p.agentId, workspaceId: null });
-      events.push({ agentId: root.rootId, event: { type: "paused", pauseId: p.id, detail: one(p.note ?? "Paused at the usage limit") } });
+      events.push({ agentId: root.rootId, event: { type: "paused", pauseId: p.id, detail: one(p.note ?? "Paused at the usage limit") }, brief: await this.creator(root.rootId, p.turnId ?? null, `:paused:${p.id}`, "paused", { paused: pauseSource(p) }) });
     }
     await this.apply(events);
   }
@@ -222,7 +367,20 @@ export class Inbox {
       });
       return;
     }
-    await this.apply(events);
+    await this.apply(await Promise.all(events.map(async ({ agentId, event }) => ({ agentId, event, brief: await this.prBrief(agentId, event) }))));
+  }
+
+  /** CI red or review threads on an idle agent (#8–9): refresh the open brief's facts, or make an S5 brief. */
+  private async prBrief(agentId: string, event: InboxEvent): Promise<BriefDecider | undefined> {
+    if (!this.o.briefs || (event.type !== "ci" && event.type !== "review")) return undefined;
+    const reason = event.type;
+    const pr = await this.o.briefs.pr(agentId, `${reason === "ci" ? "Checks failed on" : "Review on"} ${event.detail}`).catch(() => null);
+    if (!pr) return undefined;
+    const create = await this.creator(agentId, null, `:${reason}:${event.dedupeKey.replace(/[^\w#:,.-]/g, "")}`, reason, { pr });
+    return (prev, next, at) => {
+      if (!next.needs?.reasons.some(r => r.reason === reason && r.at === at)) return null;
+      return next.brief?.state === "open" ? { type: "facts", facts: pr.facts } : create(prev, next, at);
+    };
   }
 
   /** Snooze expiry, undo expiry and the 7-day keep for archived agents. Records liveness for #20. */
@@ -250,6 +408,7 @@ export class Inbox {
     }
     const now = this.now();
     const at = this.iso();
+    const offline: string[] = [];
     await this.store.mutate(state => {
       if (!state.importedAt) {
         const unsorted: string[] = [];
@@ -277,23 +436,35 @@ export class Inbox {
           // Paseo's updatedAt can't tell: the daemon bumps it in bulk (restarts, migrations).
           const last = agent.requiresAttention && agent.attentionReason === "finished" ? agent.attentionTimestamp ?? null : null;
           const finishedAfter = !!last && last > state.lastSeen && last > (e?.lastEventAt ?? "");
-          if (last && finishedAfter && agent.status === "idle" && !root.delegated && !e?.goneAt) state.entries[agent.id] = reduce(e ?? newEntry(agent.id), { type: "reconcile", detail: OFFLINE }, last);
+          if (last && finishedAfter && agent.status === "idle" && !root.delegated && !e?.goneAt) { state.entries[agent.id] = reduce(e ?? newEntry(agent.id), { type: "reconcile", detail: OFFLINE }, last); offline.push(agent.id); }
         }
       }
       state.lastSeen = at;
     });
+    // §5.4: a turn that ended while Follow-up was offline gets its brief now, from what is still known.
+    if (this.o.briefs) for (const agentId of offline) {
+      const stated = await this.sources(agentId, null, null);
+      const content = pickBrief(stated);
+      const appends: { agentId: string; brief: Brief }[] = [];
+      await this.store.mutate(s => { const e = s.entries[agentId]; if (e?.needs) this.step(s, agentId, { type: "create", id: `brief:offline:${e.lastEventAt ?? at}`, turnId: null, content, flagged: true, seq: e.seq }, at, appends); });
+      await this.flush(appends);
+    }
   }
 
   async act(input: InboxAction): Promise<{ results: { agentId: string; ok: boolean; cameBack: boolean }[] }> {
     const at = this.iso(); const now = this.now();
     const results: { agentId: string; ok: boolean; cameBack: boolean }[] = [];
     const cleared: string[] = [];
+    const appends: { agentId: string; brief: Brief }[] = [];
     await this.store.mutate(state => {
       const each = (event: (id: string) => InboxEvent) => {
         for (const agentId of input.agentIds ?? []) {
           const prev = state.entries[agentId] ?? newEntry(agentId);
-          try { state.entries[agentId] = reduce(prev, event(agentId), at); results.push({ agentId, ok: true, cameBack: false }); }
-          catch (error) { if (!(error instanceof StaleSignOff)) throw error; results.push({ agentId, ok: false, cameBack: true }); }
+          const ev = event(agentId);
+          try { state.entries[agentId] = reduce(prev, ev, at); results.push({ agentId, ok: true, cameBack: false }); }
+          catch (error) { if (!(error instanceof StaleSignOff)) throw error; results.push({ agentId, ok: false, cameBack: true }); continue; }
+          const step = autoBrief(ev);
+          if (step) this.step(state, agentId, step, at, appends);
         }
       };
       switch (input.action) {
@@ -330,7 +501,7 @@ export class Inbox {
           if (!batch || Date.parse(batch.expires) < now) break;
           for (const b of batch.entries) {
             const e = state.entries[b.agentId];
-            if (e && !e.needs) state.entries[b.agentId] = { ...e, needs: b.prev, snooze: b.prevSnooze, undo: null, signedOffAt: null, seq: e.seq + 1 };
+            if (e && !e.needs) { state.entries[b.agentId] = { ...e, needs: b.prev, snooze: b.prevSnooze, undo: null, signedOffAt: null, seq: e.seq + 1 }; this.step(state, b.agentId, { type: "undo" }, at, appends); }
             results.push({ agentId: b.agentId, ok: true, cameBack: false });
           }
           if (batch.unsorted) state.unsorted = batch.unsorted;
@@ -339,16 +510,18 @@ export class Inbox {
         }
       }
     });
+    await this.flush(appends);
     // D8, one way: signing off also clears Paseo's own unread dot.
     if (cleared.length) await this.o.directory.clearAttention(cleared).catch(() => undefined);
     return { results };
   }
 
   /** Rows for every root agent that is flagged, snoozed, running or signed off today, plus Unsorted. */
-  async list(): Promise<{ enabled: boolean; rows: InboxRow[]; unsorted: InboxRow[] | null; firstRun: boolean; batchUndo: { at: string; count: number } | null; signOffs: number }> {
+  async list(): Promise<{ enabled: boolean; rows: InboxRow[]; unsorted: InboxRow[] | null; firstRun: boolean; batchUndo: { at: string; count: number } | null; signOffs: number; briefStats: BriefStats }> {
     const enabled = await this.on();
     const state = await this.store.snapshot();
-    if (!enabled) return { enabled, rows: [], unsorted: null, firstRun: false, batchUndo: null, signOffs: state.signOffs };
+    const briefStats = briefShare(state, this.now());
+    if (!enabled) return { enabled, rows: [], unsorted: null, firstRun: false, batchUndo: null, signOffs: state.signOffs, briefStats };
     const now = this.now();
     if (!this.cache || now - this.cache.at > 3_000) {
       const [agents, workspaces] = await Promise.all([this.o.directory.agents(), this.o.directory.workspaces()]);
@@ -373,6 +546,7 @@ export class Inbox {
       resumesAt: this.waiting.get(agent.id) ?? null, lastActivityAt: agent.updatedAt,
       needs: e?.needs ?? null, snooze: e?.snooze ?? null, signedOffAt: e?.signedOffAt ?? null,
       undoable: !!e?.undo && Date.parse(e.undo.expires) > now, seq: e?.seq ?? 0, muteTurn: e?.muteTurn ?? false, enable_finish_flags: e?.enable_finish_flags ?? true,
+      brief: e?.brief ? { kind: e.brief.kind, source: e.brief.source, state: e.brief.state, ask: e.brief.ask } : null,
     });
     const rows: InboxRow[] = [];
     for (const { agent, delegatedFrom } of roots.values()) {
@@ -384,8 +558,16 @@ export class Inbox {
     }
     const unsorted = state.unsorted?.flatMap(id => { const r = roots.get(id); return r && r.agent.status !== "closed" && !state.entries[id]?.needs ? [row(r.agent, r.delegatedFrom, state.entries[id])] : []; }) ?? null;
     const batch = state.batchUndo && Date.parse(state.batchUndo.expires) > now ? { at: state.batchUndo.at, count: state.batchUndo.entries.length || (state.batchUndo.unsorted?.length ?? 0) } : null;
-    return { enabled, rows, unsorted: unsorted?.length ? unsorted : null, firstRun: state.signOffs < 10, batchUndo: batch, signOffs: state.signOffs };
+    return { enabled, rows, unsorted: unsorted?.length ? unsorted : null, firstRun: state.signOffs < 10, batchUndo: batch, signOffs: state.signOffs, briefStats };
   }
+}
+
+export type BriefStats = { days: number; total: number; tool: number; structured: number; extraction: number; fallback: number };
+/** The adoption share over the last 7 days: how many flagged turns had a brief the agent stated. */
+export function briefShare(state: Pick<InboxState, "briefOrigins">, now: number, days = 7): BriefStats {
+  const recent = state.briefOrigins.filter(o => now - Date.parse(o.at) <= days * DAY);
+  const count = (origin: string) => recent.filter(o => o.origin === origin).length;
+  return { days, total: recent.length, tool: count("tool"), structured: count("structured"), extraction: count("extraction"), fallback: count("fallback") };
 }
 
 export type InboxAction = {
