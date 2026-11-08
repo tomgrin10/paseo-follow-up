@@ -87,7 +87,7 @@ The 1.1 beta adds an inbox for your agents. An agent lands in **Needs you** when
 Install the beta:
 
 ```sh
-paseo plugin update follow-through --version 1.1.0-beta.0
+paseo plugin update follow-through --version 1.1.0-beta.1
 # or, for a fresh install:
 paseo plugin install npm:paseo-follow-up@beta
 ```
