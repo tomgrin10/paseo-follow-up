@@ -17,6 +17,7 @@ const POLL_MS = 4_000;
 export function createInboxStore(client: PluginClientContext) {
   let data: List | null = null;
   let offlineSince: number | null = null;
+  let failures = 0;
   let version = 0;
   let enabled = true;
   let headerWhenEmpty = false;
@@ -39,11 +40,12 @@ export function createInboxStore(client: PluginClientContext) {
       }
       const next = await rpcList();
       if (stopped) return;
-      data = next; offlineSince = null;
+      data = next; offlineSince = null; failures = 0;
       // Rows signed off while offline stay hidden until the replay lands.
       emit();
     } catch {
-      if (offlineSince === null) { offlineSince = Date.now(); emit(); }
+      failures++;
+      if (failures >= 2 && offlineSince === null) { offlineSince = Date.now(); emit(); }
     } finally { if (!stopped) timer = setTimeout(() => void poll(), POLL_MS); }
   };
   const refresh = () => { if (timer) clearTimeout(timer); void poll(); };

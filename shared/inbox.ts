@@ -213,9 +213,10 @@ export function compareNeeds(a: { agentId: string; needs: Needs | null }, b: { a
 export const REASON_LABEL: Record<Reason, string> = {
   permission: "Asks", error: "Error", paused: "Paused at limit", ci: "Checks failed", review: "Review", finished: "Finished", pr_closed: "PR closed",
 };
-/** Composer status words: "Needs you · finished 12m". */
+/** Composer status words. The host caps a pill at 160 px, so the pill reads "Finished · 12m"
+ * and its tooltip carries the full "Needs you · finished 12m". */
 export const REASON_WORD: Record<Reason, string> = {
-  permission: "asks", error: "error", paused: "paused", ci: "checks failed", review: "review", finished: "finished", pr_closed: "PR closed",
+  permission: "Asks", error: "Error", paused: "Paused", ci: "CI failed", review: "Review", finished: "Finished", pr_closed: "PR closed",
 };
 
 /** "12m", "3h", "2d": the compact age the rows and the composer control show. */
