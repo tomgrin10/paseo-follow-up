@@ -4,7 +4,7 @@ import { mergeArtifacts } from "./spec";
 import type { State, Workspace } from "../shared/model";
 
 export type History = { candidates: string[]; goal: string | null; complete: boolean; error: string | null };
-export type DiscoveredWorkspace = { id: string; title: string; mainAgentId: string; messageAt: string | null; projectId?: string | null; enable_default_tracking?: boolean; history?: History; contributorAgentIds?: string[]; submissions?: Submission[]; artifacts?: Artifact[] };
+export type DiscoveredWorkspace = { id: string; title: string; mainAgentId: string; /** Set when mainAgentId is a live successor to this closed or gone main agent. */ replacesMainAgentId?: string; messageAt: string | null; projectId?: string | null; enable_default_tracking?: boolean; history?: History; contributorAgentIds?: string[]; submissions?: Submission[]; artifacts?: Artifact[] };
 
 export function extractHistory(items: readonly unknown[], complete = true, error: string | null = null): History {
   const candidates = new Set<string>();
@@ -42,7 +42,12 @@ export function applyDiscovery(state: State, discovered: DiscoveredWorkspace[], 
       state.workspaces.push(w);
     }
     w.title = row.title;
-    // An unavailable original owner is surfaced instead of silently transferring its authority.
+    // A closed or gone main agent hands the workspace to its live successor (discovery decides; see
+    // successorMainAgent). Any other mismatch keeps the recorded owner.
+    if (row.replacesMainAgentId && row.replacesMainAgentId === w.mainAgentId && !w.archived) {
+      w.mainAgentId = row.mainAgentId; w.runtimeReason = null;
+      for (const b of w.batches) if (b.state === "pending" && b.recipientAgentId === row.replacesMainAgentId) b.recipientAgentId = null;
+    }
     if (w.mainAgentId !== row.mainAgentId || w.archived) continue;
     if (row.contributorAgentIds) w.contributorAgentIds = row.contributorAgentIds;
     if (row.enable_default_tracking && !w.enable_tracking && (!row.projectId || state.projectDefaults?.[row.projectId] !== false)) { w.enable_auto_sends = firstTracking(w); w.enable_tracking = true; }
