@@ -25,9 +25,14 @@ import { Deployments } from "./server/deployments";
 import { AgentHooks } from "./server/agent-hooks";
 import { withSessionMcp } from "./server/session-mcp";
 import { updateObligation } from "./server/obligations";
+import { Inbox, type GuardPause } from "./server/inbox";
+import { daemonDirectory, guardPath } from "./server/inbox-directory";
+import { fileSources } from "./server/inbox-classifier";
+import { onBeforeSend } from "./server/daemon";
+import { readFile } from "node:fs/promises";
 
 export default function contribute(server: PluginServerContext) {
-  server.registerSettings(displayPreferences);
+  const displaySettings = server.registerSettings(displayPreferences);
   const questionSettings = server.registerSettings(questionPreferences);
   // An unreadable setting means the default, which never lets an agent build ahead of the developer.
   const questionMode = async (): Promise<QuestionMode> => { try { const state = await questionSettings.read(); return state.status === "ready" ? state.values.mode : DEFAULT_QUESTION_MODE; } catch { return DEFAULT_QUESTION_MODE; } };
@@ -41,6 +46,29 @@ export default function contribute(server: PluginServerContext) {
   const browser = new BrowserBridge();
   const actions = new PrActions(store, github, graphite, browser);
   const engine = new Engine(store, github, gateway);
+  // Unknown is not off: an unreadable document keeps the inbox on with its defaults.
+  const inboxSettings = async () => { try { const state = await displaySettings.read(); if (state.status === "ready") return state.values; } catch {} return displayPreferences.schema.parse({}); };
+  const inbox: Inbox = new Inbox(directory, {
+    enabled: inboxSettings,
+    directory: daemonDirectory(),
+    sources: fileSources(paseoHome, async (): Promise<{ agentId: string; messageId: string | null; at: string }[]> => (await inbox.store.snapshot()).ledger),
+    guard: async () => {
+      try { const state = JSON.parse(await readFile(guardPath(paseoHome), "utf8")); return state?.version === 1 && Array.isArray(state.pauses) ? state.pauses as GuardPause[] : null; }
+      catch { return null; }
+    },
+  });
+  onBeforeSend((agentId, messageId) => inbox.noteDelivery(agentId, messageId));
+  let inboxError: string | null = null;
+  let inboxTimer: ReturnType<typeof setTimeout> | null = null;
+  const inboxLoop = async () => {
+    await ready;
+    if (stopped || loadError) return;
+    try { await inbox.tick(); await inbox.observeGuard(); await inbox.observeFollowUp(await store.snapshot()); inboxError = null; }
+    catch (error) { inboxError = error instanceof Error ? error.message : "The Needs-you inbox couldn't update."; }
+    if (!stopped) inboxTimer = setTimeout(() => void inboxLoop(), 15_000);
+  };
+  // Hooks run in the background; an inbox failure never blocks the rest of Follow-up.
+  const inboxHook = (work: () => Promise<void>) => void (async () => { await ready; if (!stopped && !loadError) await work(); })().catch(error => { inboxError = error instanceof Error ? error.message : String(error); });
   let unlock: (() => Promise<void>) | null = null;
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -65,6 +93,7 @@ export default function contribute(server: PluginServerContext) {
     if (!stopped) timer = setTimeout(() => void loop(), 15_000);
   };
   void loop();
+  void (async () => { await ready; if (stopped || loadError) return; await inbox.start().catch(error => { inboxError = error instanceof Error ? error.message : String(error); }); void inboxLoop(); })();
   const changed = (w: Workspace) => { w.completion = null; w.updatedAt = new Date().toISOString(); };
 
   const callerWorkspaceId = async (agentId: string, paseo: PluginHandlerContext["paseo"], allowHandoff = true) => {
@@ -308,7 +337,17 @@ export default function contribute(server: PluginServerContext) {
   server.handle(rpc.checkPrActionRpc, async ({ workspaceId, actionId }) => { await requireReady(); return actions.check(workspaceId, actionId); });
   server.handle(rpc.requestReviewersRpc, async ({ workspaceId, prKey }) => { await requireReady(); const result = await actions.requestReviewers(workspaceId, prKey); void engine.tick(); return result; });
 
+  server.handle(rpc.inboxListRpc, async () => { await requireReady(); return { ...await inbox.list(), error: inboxError }; });
+  server.handle(rpc.inboxActRpc, async input => { await requireReady(); return inbox.act(input); });
+
   const removers = [
+    server.on("agent.turn_started", async event => inboxHook(() => inbox.turnStarted(event.agent))),
+    server.on("agent.turn_ended", async event => inboxHook(() => inbox.turnEnded(event.agent, event.outcome, event.turnId))),
+    server.on("agent.permission_requested", async event => inboxHook(() => inbox.permissionRequested(event.agent, event.request))),
+    server.on("agent.permission_resolved", async event => inboxHook(() => inbox.permissionResolved(event.agent, event.requestId))),
+    server.on("agent.closed", async event => inboxHook(() => inbox.closed(event.agent))),
+    server.on("agent.archived", async event => inboxHook(() => inbox.archived([event.agent.id]))),
+    server.on("workspace.archived", async event => inboxHook(() => inbox.workspaceArchived(event.workspace.id))),
     server.on("agent.turn_started", async event => {
       await ready;
       if (!stopped && !loadError) await store.mutate(state => { const w = state.workspaces.find(w => w.enable_tracking && (w.mainAgentId === event.agent.id || w.contributorAgentIds?.includes(event.agent.id))); if (w) w.completion = null; });
@@ -370,7 +409,7 @@ export default function contribute(server: PluginServerContext) {
     server.on("workspace.archived", async event => { await ready; if (!loadError && !stopped) await store.mutate(state => { const w = state.workspaces.find(w => w.id === event.workspace.id); if (w) w.archived = true; }); }),
   ];
   return async () => {
-    stopped = true; if (timer) clearTimeout(timer); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
+    stopped = true; if (timer) clearTimeout(timer); if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
     await ready; if (hooksStarted) await agentHooks.stop().catch(() => {});
     await actions.close(); await closeConnections(); await engine.stop(); await ready; await unlock?.();
   };
