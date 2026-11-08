@@ -1,6 +1,7 @@
 import { projectSchema } from "./settings";
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
+import { inboxRowSchema } from "./inbox";
 import { idSchema, textSchema, workspaceSchema } from "./model";
 import { communicationSchema } from "./communication";
 import { taskTriggerSchema } from "./task-trigger";
@@ -65,3 +66,11 @@ export const workspaceSpecRpc = defineRpc({ name: "follow.workspace-spec", input
   z.object({ workspaceId: idSchema, action: z.literal("remove") }),
   z.object({ workspaceId: idSchema, action: z.literal("reset") }),
 ]), output: workspaceSchema });
+
+// Needs-you inbox. Names stay under follow. like the rest of the plugin.
+export const inboxListRpc = defineRpc({ name: "follow.inbox-list", input: z.object({}), output: z.object({ enabled: z.boolean(), rows: z.array(inboxRowSchema), unsorted: z.array(inboxRowSchema).nullable(), firstRun: z.boolean(), batchUndo: z.object({ at: z.string(), count: z.number().int() }).nullable(), signOffs: z.number().int(), error: z.string().nullable() }) });
+export const inboxActRpc = defineRpc({ name: "follow.inbox-act", input: z.strictObject({
+  action: z.enum(["sign_off", "undo", "snooze", "mute_turn", "set_finish_flags", "unsorted_flag", "unsorted_sign_off", "batch_undo"]),
+  agentIds: z.array(idSchema).max(500).optional(), seqs: z.record(z.string(), z.number().int()).optional(),
+  until: z.string().max(200).optional(), value: z.boolean().optional(), muteTurn: z.boolean().optional(),
+}), output: z.object({ results: z.array(z.object({ agentId: z.string(), ok: z.boolean(), cameBack: z.boolean() })) }) });
