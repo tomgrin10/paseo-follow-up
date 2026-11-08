@@ -327,6 +327,12 @@ export class Inbox {
     await this.store.mutate(state => { state.ledger = [...state.ledger.filter(l => this.now() - Date.parse(l.at) < 3_600_000), { agentId, messageId, at, ...(by ? { by } : {}) }].slice(-200); });
   }
 
+  /** An agent's Follow-up action (agent parity), kept beside the deliveries as `by: "agent:<id>"`. Not a message. */
+  async noteAction(by: string, agentId: string, action: string): Promise<void> {
+    const at = this.iso();
+    await this.store.mutate(state => { state.ledger = [...state.ledger.filter(l => this.now() - Date.parse(l.at) < 3_600_000), { agentId, messageId: null, at, by, action }].slice(-200); });
+  }
+
   /**
    * The developer clicked an option or a move on the brief. Validated against the stored brief (a stale card is refused),
    * logged in the ledger as the developer's (so the classifier clears the flag, #11), then sent, then collapsed.
@@ -569,7 +575,7 @@ export class Inbox {
       resumesAt: this.waiting.get(agent.id) ?? null, lastActivityAt: agent.updatedAt,
       needs: e?.needs ?? null, snooze: e?.snooze ?? null, signedOffAt: e?.signedOffAt ?? null,
       undoable: !!e?.undo && Date.parse(e.undo.expires) > now, seq: e?.seq ?? 0, muteTurn: e?.muteTurn ?? false, enable_finish_flags: e?.enable_finish_flags ?? true,
-      brief: e?.brief ? { kind: e.brief.kind, source: e.brief.source, state: e.brief.state, ask: e.brief.ask } : null,
+      brief: e?.brief ? { kind: e.brief.kind, source: e.brief.source, state: e.brief.state, ask: e.brief.ask, questionIds: e.brief.questionIds } : null,
     });
     const rows: InboxRow[] = [];
     for (const { agent, delegatedFrom } of roots.values()) {

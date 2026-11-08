@@ -122,13 +122,27 @@ Betas publish to npm's `beta` dist-tag, so `paseo plugin update` without `--vers
 - A merged PR is not the end: tasks such as production checks and open questions keep the workspace open until the main agent declares Done and everything has settled.
 - Answers go out only when you click Send. Follow-up never answers for you.
 
+### Agents can do what you can click
+
+Tell an agent "the PRs look good, assign reviewers on all" and it can do it. Every root agent Paseo launches gets Follow-up's action tools, which run the same server code as the buttons, so the inbox, briefs and PR state change exactly as if you clicked:
+
+| Tool | Does what this button does |
+| --- | --- |
+| `list_prs` | Reads tracked PRs across all workspaces (draft, checks, threads, reviewers, merge blockers). Filters: `needs_reviewers`, `ready_to_merge`, `workspace`. |
+| `add_reviewers` | **Add reviewers**, on one PR or many. Repository defaults, or the logins you name. |
+| `merge`, `enable_merge_when_ready`, `disable_merge_when_ready` | **Merge** and the PR sheet's merge-when-ready switch, with the same plan and blockers. |
+| `send_repairs`, `set_auto_send`, `clear_hold`, `retry_batch`, `track` | **Send**, the **Auto-send** switch, **Resume**, **Retry**, **Track this workspace**. |
+| `inbox_list`, `sign_off`, `snooze`, `set_finish_flags` | The Needs-you list, **Sign off**, **Later** and **Don't flag finishes**, for other agents only. |
+
+Tools that act on a list, and merge, return a dry run first and act only when called again with `confirm: true` and that plan's id. Their descriptions tell the agent to use them only when you asked. An agent can't sign itself off. Recovery agents, contributors and subagents don't get these tools, and the daemon checks the caller again on every call.
+
 ## Send to Paseo and Graphite
 
 With [Send to Paseo](https://github.com/tomgrin10/send-to-paseo) on the same daemon, its composer picks the agent that registered the PR. With Send to Paseo 2.2+, Follow-up can also toggle Graphite's **Merge when ready** through your existing pairing, while Graphite is open and signed in. Each change is confirmed in Chrome, which can remember the permission per repository. See the [integration and security contract](https://github.com/tomgrin10/send-to-paseo/blob/main/docs/follow-up-integration.md).
 
 ## Data and access
 
-Paseo plugins run trusted, unsandboxed code on the daemon host. Follow-up reads workspace metadata, agent history and GitHub PR status with your existing credentials, and keeps its state in `$PASEO_HOME/plugin-data/follow-through`. It registers scoped MCP tools and reversible provider hooks only for tracked sessions. GitHub and Graphite writes happen only after an explicit click and a fresh eligibility check.
+Paseo plugins run trusted, unsandboxed code on the daemon host. Follow-up reads workspace metadata, agent history and GitHub PR status with your existing credentials, and keeps its state in `$PASEO_HOME/plugin-data/follow-through`. It registers scoped MCP tools and reversible provider hooks only for tracked sessions, plus the action tools for root agents (above). GitHub and Graphite writes happen only after an explicit click, or a root agent's confirmed plan, and a fresh eligibility check.
 
 ## Development
 
