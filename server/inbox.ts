@@ -2,7 +2,9 @@ import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { emptyInbox, expired, inboxStateSchema, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason } from "../shared/inbox";
-import type { State as FollowState } from "../shared/model";
+import type { State as FollowState, Workspace as FollowWorkspace } from "../shared/model";
+import { prActionBlocks } from "../shared/pr-actions";
+import { defaultReviewers, noReviewers } from "../shared/reviewers";
 import { classify, newestUserMessage, type Sources } from "./inbox-classifier";
 import { briefOrigin, briefStep, pickBrief, type Brief, type BriefEvent, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
 
@@ -39,6 +41,16 @@ export class InboxStore {
       await rename(temporary, this.path);
     } finally { await unlink(temporary).catch(() => undefined); }
   }
+}
+
+/**
+ * F7: whether a completed turn adds nothing. needs_you kind=done is "nothing for the developer"; and while Paseo
+ * still shows the agent running (background work after the reply), a plain finish waits for the real one.
+ * A turn without needs_you on an idle agent still flags as finished, since nothing says otherwise.
+ */
+export function finishIsQuiet(kind: string | null, status: string | null): boolean {
+  if (kind === "done") return true;
+  return (status === "running" || status === "initializing") && (kind === null);
 }
 
 export type AgentInfo = {
@@ -172,13 +184,15 @@ export class Inbox {
   }
 
   /** A decider that creates a brief, flagged when the event's reason is newly on the entry. */
-  private async creator(agentId: string, turnId: string | null, suffix: string, reason: Reason | null, content: BriefSources, keepUnflagged = false): Promise<BriefDecider> {
+  private async creator(agentId: string, turnId: string | null, suffix: string, reason: Reason | null, content: BriefSources, keepUnflagged = false, quiet = false): Promise<BriefDecider> {
     const picked = pickBrief(content);
     const workspaceId = await this.o.briefs?.workspaceId?.(agentId).catch(() => null) ?? null;
     const questionIds = picked.source === "agent" ? (await this.o.briefs?.call(agentId).catch(() => null))?.questionIds ?? [] : [];
     return (_prev, next, at) => {
       const flagged = !!reason && !!next.needs?.reasons.some(r => r.reason === reason && r.at === at) && !next.goneAt;
       if (!flagged && !(keepUnflagged && picked.source === "agent")) return null;
+      // F7: a quiet finish never replaces an older ask that still needs the developer; its card stays.
+      if (quiet && next.needs && next.brief?.state === "open" && next.brief.flagged) return null;
       return { type: "create", id: `brief:${turnId ?? at}${suffix}`, turnId, content: picked, flagged, seq: next.seq, questionIds, workspaceId };
     };
   }
@@ -231,9 +245,13 @@ export class Inbox {
     if (outcome.kind === "completed") {
       const items = await this.o.directory.tail(agent.id, 20).catch(() => []);
       const reply = [...items].reverse().find(i => (i as { type?: string })?.type === "assistant_message") as { text?: string } | undefined;
+      // F7: needs_you kind=done means nothing for the developer, and while Paseo still shows the agent running
+      // (background work) its own running state is enough. Neither flags; a decision, action or review still does.
+      const status = await this.o.directory.agent(agent.id).then(a => a?.status ?? null, () => null);
+      const quiet = finishIsQuiet(stated.agent?.kind ?? null, status);
       // The ask replaces the reply's last line as the reason's detail (§4); the fallback keeps the old detail.
-      const brief = await this.creator(root.rootId, turnId, "", "finished", stated, true);
-      await this.apply([{ agentId: root.rootId, event: { type: "turn_end", outcome: "completed", detail: reply?.text ? lastLine(reply.text) : "", delegated: root.delegated }, brief }]);
+      const brief = await this.creator(root.rootId, turnId, "", "finished", stated, !quiet || stated.agent?.kind === "done", quiet);
+      await this.apply([{ agentId: root.rootId, event: { type: "turn_end", outcome: "completed", detail: reply?.text ? lastLine(reply.text) : "", delegated: root.delegated, quiet }, brief }]);
     } else if (outcome.kind === "failed") {
       const message = outcome.error.message || "Turn failed";
       await this.apply([{ agentId: root.rootId, event: { type: "turn_end", outcome: "failed", detail: one(message) }, brief: await this.creator(root.rootId, turnId, "", "error", { ...stated, error: { message } }) }]);
@@ -372,14 +390,19 @@ export class Inbox {
 
   /** CI red or review threads on an idle agent (#8–9): refresh the open brief's facts, or make an S5 brief. */
   private async prBrief(agentId: string, event: InboxEvent): Promise<BriefDecider | undefined> {
-    if (!this.o.briefs || (event.type !== "ci" && event.type !== "review")) return undefined;
+    if (!this.o.briefs || (event.type !== "ci" && event.type !== "review" && event.type !== "reviewers")) return undefined;
     const reason = event.type;
-    const pr = await this.o.briefs.pr(agentId, `${reason === "ci" ? "Checks failed on" : "Review on"} ${event.detail}`).catch(() => null);
-    if (!pr) return undefined;
-    const create = await this.creator(agentId, null, `:${reason}:${event.dedupeKey.replace(/[^\w#:,.-]/g, "")}`, reason, { pr });
+    // The detail already reads as a sentence ("1 review thread to fix on #1499"); CI's is a list of checks.
+    const pr = await this.o.briefs.pr(agentId, reason === "ci" ? `Checks failed on ${event.detail}` : reason === "review" ? event.detail : null).catch(() => null);
+    if (!pr && reason !== "reviewers") return undefined;
+    const sources: BriefSources = event.type === "reviewers" ? { pr, reviewers: { prKey: event.prKey, number: Number(event.detail.slice(1)), url: event.url, names: event.names } } : { pr };
+    const create = await this.creator(agentId, null, `:${reason}:${event.dedupeKey.replace(/[^\w#:,.-]/g, "")}`, reason, sources);
     return (prev, next, at) => {
       if (!next.needs?.reasons.some(r => r.reason === reason && r.at === at)) return null;
-      return next.brief?.state === "open" ? { type: "facts", facts: pr.facts } : create(prev, next, at);
+      const open = next.brief?.state === "open" ? next.brief : null;
+      // Reviewers replace only a card that asks nothing (a plain finish); an agent's own ask stays on top.
+      if (event.type === "reviewers") return !open || open.kind === "unknown" || open.kind === "done" ? create(prev, next, at) : null;
+      return open ? (pr ? { type: "facts", facts: pr.facts } : null) : create(prev, next, at);
     };
   }
 
@@ -628,10 +651,20 @@ export function migrateFirstRun(state: InboxState, agents: Map<string, AgentInfo
   state.revision = REVISION;
 }
 
-/** CI, review and PR-state events from Follow-up's tracked workspaces, keyed so the same state never re-flags. */
+/**
+ * Whether red CI and review threads are the agent's work right now: Follow-up sends the repair batch on its own
+ * (auto-send on, no hold, no batch stuck or unconfirmed). Then the inbox doesn't flag them; it flags only when the
+ * developer has to act (auto-send off, a hold, or a blocked/unconfirmed repair).
+ */
+export function repairsGoToAgent(w: Pick<FollowWorkspace, "enable_auto_sends" | "hold" | "batches">): boolean {
+  return w.enable_auto_sends && !w.hold && !w.batches.some(b => ["blocked", "uncertain"].includes(b.state));
+}
+
+/** CI, review, reviewer and PR-state events from Follow-up's tracked workspaces, keyed so the same state never re-flags. */
 export function followUpEvents(follow: FollowState, enablePrClosed: boolean): { agentId: string; event: InboxEvent }[] {
   const events: { agentId: string; event: InboxEvent }[] = [];
   for (const w of follow.workspaces.filter(w => w.enable_tracking && !w.archived)) {
+    const automatic = repairsGoToAgent(w);
     for (const pr of w.prs) {
       const s = pr.snapshot;
       if (!s?.complete || pr.error) continue;
@@ -639,9 +672,14 @@ export function followUpEvents(follow: FollowState, enablePrClosed: boolean): { 
       // The agent is already repairing: its own turn end will flag when it's done.
       const repairing = w.batches.some(b => (b.recipientAgentId ?? w.mainAgentId) === agentId && ["sending", "sent"].includes(b.state) && !b.settledAt);
       if (s.state === "OPEN") {
-        if (s.failedChecks.length) events.push({ agentId, event: { type: "ci", dedupeKey: `${pr.key}:${s.head}:checks`, detail: `#${pr.number} ${s.failedChecks.slice(0, 3).join(", ")}`, suppressed: repairing } });
-        if (s.threads.length) events.push({ agentId, event: { type: "review", dedupeKey: `${pr.key}:threads:${s.threads.map(t => t.id).sort().join(",")}`, detail: `${s.threads.length} thread${s.threads.length === 1 ? "" : "s"} on #${pr.number}` } });
-        if (s.conflict) events.push({ agentId, event: { type: "review", dedupeKey: `${pr.key}:conflict:${s.head}`, detail: `Conflict on #${pr.number}` } });
+        if (s.failedChecks.length) events.push({ agentId, event: { type: "ci", dedupeKey: `${pr.key}:${s.head}:checks`, detail: `#${pr.number} ${s.failedChecks.slice(0, 3).join(", ")}`, suppressed: repairing || automatic } });
+        if (s.threads.length) events.push({ agentId, event: { type: "review", dedupeKey: `${pr.key}:threads:${s.threads.map(t => t.id).sort().join(",")}`, detail: `${s.threads.length} review thread${s.threads.length === 1 ? "" : "s"} to fix on #${pr.number}`, suppressed: repairing || automatic } });
+        if (s.conflict) events.push({ agentId, event: { type: "review", dedupeKey: `${pr.key}:conflict:${s.head}`, detail: `Merge conflict to fix on #${pr.number}`, suppressed: repairing || automatic } });
+        // Reviewers are the developer's job, and don't wait for threads or CI. Skipped only while a reviewer request
+        // or merge is already in flight for this PR (so a second request isn't asked for while GitHub catches up).
+        if (!s.draft && noReviewers(pr) && !w.prActions.some(a => prActionBlocks(a, [pr.key])))
+          events.push({ agentId, event: { type: "reviewers", dedupeKey: `${pr.key}:reviewers`, detail: `#${pr.number}`, prKey: pr.key, url: s.url ?? null,
+            names: defaultReviewers(pr.repo).filter(r => r.login.toLowerCase() !== s.reviewers?.author?.toLowerCase()).map(r => r.name) } });
       } else if (enablePrClosed && (s.state === "MERGED" || s.state === "CLOSED")) {
         events.push({ agentId, event: { type: "pr_closed", dedupeKey: `${pr.key}:${s.state}`, detail: `#${pr.number} ${s.state === "MERGED" ? "merged" : "closed"}`, prKey: pr.key } });
       }

@@ -4,9 +4,9 @@ import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { briefStep, collapsedLine, extrasFit, isTight, FALLBACK_ASK, matchOption, NEEDS_YOU_INSTRUCTION, NEEDS_YOU_NUDGE, pickBrief, prState, validateNeedsYou, type Brief, type BriefContent, type NeedsYouCall, type NeedsYouRecord, type PrState } from "../shared/brief";
+import { briefStep, collapsedLine, nothingNeededLine, extrasFit, isTight, FALLBACK_ASK, matchOption, NEEDS_YOU_INSTRUCTION, NEEDS_YOU_NUDGE, pickBrief, prState, validateNeedsYou, type Brief, type BriefContent, type NeedsYouCall, type NeedsYouRecord, type PrState } from "../shared/brief";
 import { classify, type Sources } from "../server/inbox-classifier";
-import { briefShare, Inbox, type AgentInfo, type Directory, type GuardPause } from "../server/inbox";
+import { briefShare, finishIsQuiet, Inbox, type AgentInfo, type Directory, type GuardPause } from "../server/inbox";
 import { pr, snapshot, workspace } from "./fixtures";
 
 const T0 = "2026-11-08T10:00:00.000Z";
@@ -61,9 +61,11 @@ test("§5.2 rows 4–5: with no extraction (out of scope) and nothing stated, th
   assert.equal(b.ask, FALLBACK_ASK); assert.deepEqual(b.decisions, []); assert.deepEqual(b.moves, []);
   assert.match(b.sourceLine, /nothing is guessed/);
 });
-test("a finish the agent states as done offers Sign off & next and nothing else", () => {
+test("F7: a finish the agent states as done has no moves: nothing to sign off, one muted line", () => {
   const b = pickBrief({ agent: { ask: "Nothing needed. Daily plugin updates are scheduled for 09:30.", kind: "done" }, pr: prFacts });
-  assert.deepEqual(b.moves.map(m => m.kind), ["sign_off_next"]); assert.deepEqual(b.facts, []);
+  assert.deepEqual(b.moves, []); assert.deepEqual(b.facts, []);
+  assert.equal(nothingNeededLine(b.ask), "Nothing needed · Daily plugin updates are scheduled for 09:30.");
+  assert.equal(nothingNeededLine("Nothing needed."), "Nothing needed");
 });
 
 // ---------- §6 lifecycle, one test per row (pure steps) ----------
@@ -406,4 +408,61 @@ test("prState reads the agent's newest open PR and only says merge-ready when it
   assert.equal(s.mergeable, true); assert.deepEqual(s.facts.map(f => f.label), ["Required checks pass", "Approved · no conflicts"]);
   assert.equal(prState(workspace({ prs: [pr({ snapshot: snapshot({ reviewDecision: "APPROVED", conflict: true }) })] }), ready.mainAgentId)!.mergeable, false);
   assert.equal(prState(null, "x"), null);
+});
+
+// ---------- F7: "Nothing needed" and still-running turns don't flag ----------
+
+const doneCall: NeedsYouCall = { ask: "Nothing needed. Background verification is still running.", kind: "done" };
+test("F7 (1): a turn ending with needs_you kind=done doesn't flag: no inbox flag, an unflagged muted brief", async () => {
+  const s = await service([agent({ id: "main" })], { calls: { main: { at: Date.parse(at(1)), turnId: "t1", call: doneCall } } });
+  await s.inbox.turnStarted(main, "t1");
+  await s.inbox.turnEnded(main, { kind: "completed" }, "t1");
+  const e = await s.entry();
+  assert.equal(e.needs, null, "no Needs-you flag");
+  assert.equal(e.brief?.kind, "done"); assert.equal(e.brief?.flagged, false); assert.deepEqual(e.brief?.moves, []);
+  assert.equal((await s.inbox.list()).rows.find(r => r.agentId === "main")?.needs ?? null, null);
+  await s.done();
+});
+test("F7 (1): an older open flag and its card stay when a later turn says nothing is needed", async () => {
+  const s = await service([agent({ id: "main" })], { calls: { main: { at: Date.parse(at(1)), turnId: "t1", call: decision } } });
+  await s.inbox.turnStarted(main, "t1");
+  await s.inbox.turnEnded(main, { kind: "completed" }, "t1");
+  const before = await s.entry();
+  assert.ok(before.needs); assert.equal(before.brief?.kind, "decision");
+  // The developer didn't answer; an automated continuation ends with kind=done.
+  const later = await service([agent({ id: "main" })], { calls: { main: { at: Date.parse(at(1)), turnId: "t2", call: doneCall } } });
+  await later.inbox.store.mutate(st => { st.entries.main = before; });
+  await later.inbox.turnEnded(main, { kind: "completed" }, "t2");
+  const after = await later.entry();
+  assert.deepEqual(after.needs, before.needs, "the decision flag stays");
+  assert.equal(after.brief?.id, before.brief?.id, "the decision card isn't replaced");
+  await s.done(); await later.done();
+});
+test("F7 (2): while Paseo shows the agent running, a plain finish adds nothing", async () => {
+  const s = await service([agent({ id: "main", status: "running" })]);
+  await s.inbox.turnStarted(main, "t1");
+  await s.inbox.turnEnded(main, { kind: "completed" }, "t1");
+  const e = await s.entry();
+  assert.equal(e.needs, null); assert.equal(e.brief ?? null, null);
+  await s.done();
+});
+test("F7 (3): a turn without needs_you on an idle agent still flags as finished", async () => {
+  const s = await service([agent({ id: "main", status: "idle" })]);
+  await s.inbox.turnStarted(main, "t1");
+  await s.inbox.turnEnded(main, { kind: "completed" }, "t1");
+  const e = await s.entry();
+  assert.deepEqual(e.needs?.reasons.map(r => r.reason), ["finished"]);
+  assert.equal(e.brief?.source, "none");
+  await s.done();
+});
+test("F7: finishIsQuiet covers done, running and the unknown case", () => {
+  assert.equal(finishIsQuiet("done", "idle"), true);
+  assert.equal(finishIsQuiet("done", "running"), true);
+  assert.equal(finishIsQuiet(null, "running"), true);
+  assert.equal(finishIsQuiet(null, "idle"), false, "nothing stated: we don't know, so it flags");
+  assert.equal(finishIsQuiet("decision", "running"), false, "an ask still flags while background work runs");
+  assert.equal(finishIsQuiet(null, null), false);
+});
+test("F7 (4): the nudge and the tool say kind=done won't flag", () => {
+  assert.match(NEEDS_YOU_NUDGE, /won't flag/); assert.match(NEEDS_YOU_INSTRUCTION, /won't flag/);
 });

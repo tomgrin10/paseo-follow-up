@@ -73,3 +73,8 @@ export function segmentPaint(colors: Colors, tone: PrTone): { fill: string; line
 }
 
 export const mono = { fontVariant: ["tabular-nums"] as ("tabular-nums")[] };
+
+/** The colour of a headline's tone (pill icon, row reason, popover header). */
+export function headlineColor(tone: import("../shared/headline").HeadlineTone, c: Colors): string {
+  return tone === "danger" ? c.statusDanger : tone === "warning" ? c.statusWarning : tone === "merged" ? mergedColor(c) : tone === "accent" ? c.accent : c.foregroundMuted;
+}

@@ -9,7 +9,7 @@ const quietRevision = 1;
 const quietInstruction = "Do routine bookkeeping silently. Do not announce tracker calls, say you updated/synced the sidebar, recap panel state, or add plugin-status commentary/final paragraphs. Put receipts and evidence in the tools. User-facing messages should cover the actual work outcome, or a decision/blocker requiring the developer; answer sidebar status only when explicitly asked. If this continuation is bookkeeping only, use the tools and finish without another recap or repeating your previous answer.";
 const stopReason = "Silently complete this workspace's sidebar bookkeeping before finishing.";
 // Kept identical to NEEDS_YOU_NUDGE in shared/brief.ts (a test checks it).
-const nudgeReason = "Before you stop, call needs_you once with what the developer has to do next (a decision with options, an action only they can take, or \"Nothing needed\" plus what you finished). Then stop; don't repeat your reply.";
+const nudgeReason = "Before you stop, call needs_you once with what the developer has to do next: a decision with options, an action only they can take, or kind=done (\"Nothing needed\" plus what you finished), which means nothing for the developer and won't flag you. Then stop; don't repeat your reply.";
 
 /**
  * R2: whether to nudge a Claude Code root agent that ended its turn without needs_you. Pure, so every skip is testable.

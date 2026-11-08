@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Pressable, Text, View, type LayoutChangeEvent } from "react-native";
-import type { PluginButtonIconProps, PluginButtonRegistration, PluginClientContext, PluginSidebarItemProps } from "@getpaseo/plugin/client";
-import { Icon, SidebarRow } from "@getpaseo/plugin/client/ui";
-import { BRIEF_LABEL, BRIEF_WORD, briefLine } from "../shared/brief";
-import { age, displayReason, nextAfter, REASON_LABEL, REASON_WORD, rowTitle, sectionRows, snoozeUntil, wakeLabel, type InboxRow, type Reason } from "../shared/inbox";
+import type { PluginClientContext } from "@getpaseo/plugin/client";
+import { Icon } from "@getpaseo/plugin/client/ui";
+import { flagHeadline, HEADLINE_ICON, HEADLINE_TONE, HEADLINE_WORD, type Headline } from "../shared/headline";
+import { age, nextAfter, rowTitle, sectionRows, snoozeUntil, wakeLabel, type InboxRow } from "../shared/inbox";
 import { Button, IconButton, useNow, type Theme } from "./kit";
 import { Spinner } from "./motion";
-import { mergedColor, raised, runningColor, type Colors } from "./theme";
+import { headlineColor, raised, runningColor } from "./theme";
 import type { InboxStore } from "./inbox-store";
 
 export const INBOX_SCREEN = "follow-through";
@@ -17,25 +17,16 @@ export function useInbox<T>(store: InboxStore, select: () => T): T {
   return select();
 }
 
-export function reasonGlyph(reason: Reason, c: Colors): { name: string; color: string } {
-  switch (reason) {
-    case "permission": return { name: "CircleHelp", color: c.statusWarning };
-    case "error": return { name: "CircleX", color: c.statusDanger };
-    case "paused": return { name: "CirclePause", color: c.statusWarning };
-    case "ci": return { name: "GitPullRequestClosed", color: c.statusDanger };
-    case "review": return { name: "MessageSquare", color: c.statusWarning };
-    case "finished": return { name: "CircleCheck", color: c.statusSuccess };
-    case "pr_closed": return { name: "GitMerge", color: mergedColor(c) };
-  }
-}
+/** The row's headline, the same one the pill and the brief card use. A snoozed row keeps its reason, in muted tones. */
+export const rowHeadline = (row: InboxRow, now: number): Headline | null => flagHeadline({ ...row, snooze: null }, now);
 const running = (row: InboxRow) => ["running", "initializing"].includes(row.status);
 const label = (row: InboxRow) => { const t = rowTitle(row); return t.agent ? `${t.primary} › ${t.agent}` : t.primary; };
 
 /** The status glyph. A flagged agent that is also running gets a small spinner on the glyph, not a second dot. */
 function Glyph({ row, theme, size }: { row: InboxRow; theme: Theme; size: number }) {
   const c = theme.colors;
-  const shown = displayReason(row.needs);
-  const g = shown ? reasonGlyph(shown.reason, c) : row.resumesAt ? { name: "CirclePause", color: c.foregroundMuted } : row.snooze ? { name: "AlarmClock", color: c.foregroundMuted } : row.signedOffAt && !running(row) ? { name: "Check", color: c.statusSuccess } : null;
+  const shown = rowHeadline(row, Date.now());
+  const g = shown ? { name: HEADLINE_ICON[shown.key], color: headlineColor(HEADLINE_TONE[shown.key], c) } : row.resumesAt ? { name: "CirclePause", color: c.foregroundMuted } : row.snooze ? { name: "AlarmClock", color: c.foregroundMuted } : row.signedOffAt && !running(row) ? { name: "Check", color: c.statusSuccess } : null;
   return <View style={{ width: size + 4, height: size + 4, alignItems: "center", justifyContent: "center" }}>
     {g ? <Icon name={g.name} size={size} color={g.color} /> : <View accessibilityLabel="Running" style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: runningColor(c) }} />}
     {g && running(row) && !row.snooze && <View accessibilityLabel="Running" style={{ position: "absolute", right: -3, bottom: -3, width: 11, height: 11, borderRadius: 6, backgroundColor: c.surface0, alignItems: "center", justifyContent: "center" }}>
@@ -60,7 +51,7 @@ export function InboxRowView({ row, theme, now, dense, touch, active, onOpen, on
   const [hover, setHover] = useState(false);
   const [focused, setFocused] = useState(false);
   const title = rowTitle(row);
-  const shown = displayReason(row.needs);
+  const shown = rowHeadline(row, now);
   const primary = dense ? 12 : 13; const secondary = dense ? 11 : 12;
   // Change 2: when "Title › Agent" won't fit, the agent name moves to the reason line so neither name is hidden.
   // Estimated from the text length (≈0.56em per glyph) against the room left after the glyph, age and buttons.
@@ -69,23 +60,22 @@ export function InboxRowView({ row, theme, now, dense, touch, active, onOpen, on
   const more = (row.needs?.reasons.length ?? 0) - 1;
   const days = row.needs ? now - Date.parse(row.needs.since) > 86_400_000 : false;
   const right = trailing ?? (row.needs ? age(row.needs.since, now) : row.signedOffAt ? age(row.signedOffAt, now) : row.resumesAt ? `resumes ${wakeLabel({ until: row.resumesAt, at: "" }, now)}` : running(row) ? age(row.lastActivityAt, now) : "");
-  const reasonColor = shown && !row.snooze ? reasonGlyph(shown.reason, c).color : c.foregroundMuted;
+  const reasonColor = shown && !row.snooze ? headlineColor(HEADLINE_TONE[shown.key], c) : c.foregroundMuted;
   const second: ReactNode[] = [];
   if (title.agent && narrow) second.push(<Text key="a" style={{ color: c.foreground }}>{title.agent} · </Text>);
-  if (shown) second.push(<Text key="r" style={{ color: reasonColor, fontWeight: "600" }}>{row.brief?.state === "open" && shown.reason === "finished" ? BRIEF_LABEL[row.brief.kind] : REASON_LABEL[shown.reason]}</Text>);
+  if (shown) second.push(<Text key="r" style={{ color: reasonColor, fontWeight: "600" }}>{HEADLINE_WORD[shown.key]}</Text>);
   else if (row.signedOffAt && !running(row)) second.push(<Text key="s" style={{ color: c.statusSuccess }}>Signed off</Text>);
   else if (row.resumesAt) second.push(<Text key="p">Paused at the limit</Text>);
   else if (running(row)) second.push(<Text key="w">Working</Text>);
-  // §4: an open brief's ask is the reason line, so the row, the card and the composer say the same thing.
-  const asked = row.brief && shown ? briefLine(row.brief) : null;
-  const detail = asked ?? shown?.detail;
+  // §4: the headline's line (an open brief's ask, else the reason's detail), so the row, the card and the pill say the same thing.
+  const detail = shown && shown.line !== HEADLINE_WORD[shown.key] ? shown.line : null;
   if (detail) second.push(<Text key="d">{` · ${detail}`}</Text>);
   if (more > 0) second.push(<Text key="m">{` · +${more}`}</Text>);
   if (!row.enable_finish_flags && !shown) second.push(<Text key="f">{second.length ? " · " : ""}Finishes not flagged</Text>);
   if (row.delegatedFrom && !shown) second.push(<Text key="g">{second.length ? " · " : ""}Delegated</Text>);
   const quiet = !row.needs || !!row.snooze;
   const showCheck = !!onSignOff && !selecting && (touch || hover || focused || !dense);
-  const a11y = [label(row), shown ? `${REASON_LABEL[shown.reason]}${detail ? `: ${detail}` : ""}` : "", right ? `waiting ${right}` : ""].filter(Boolean).join(". ");
+  const a11y = [label(row), shown ? `${HEADLINE_WORD[shown.key]}${detail ? `: ${detail}` : ""}` : "", right ? `waiting ${right}` : ""].filter(Boolean).join(". ");
   return <View onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}
     {...({ onMouseEnter: () => setHover(true), onMouseLeave: () => setHover(false), onFocus: () => setFocused(true), onBlur: () => setFocused(false) } as object)}
     style={{ flexDirection: "row", alignItems: "center", minHeight: touch ? 56 : dense ? 40 : 48, paddingLeft: dense ? 8 : 12, paddingRight: dense ? 4 : 8, borderRadius: dense ? 6 : 0, backgroundColor: active || moreOpen ? c.surface2 : hover && onOpen ? c.surface1 : "transparent" }}>
@@ -104,7 +94,7 @@ export function InboxRowView({ row, theme, now, dense, touch, active, onOpen, on
             {title.primary}{title.agent && !narrow ? <Text style={{ color: c.foregroundMuted }}>{` › ${title.agent}`}</Text> : null}
           </Text>
         </View>
-        {second.length > 0 && <Text numberOfLines={shown?.reason === "permission" || shown?.reason === "paused" ? 2 : 1} style={{ color: c.foregroundMuted, fontSize: secondary, lineHeight: secondary + 4 }}>{second}</Text>}
+        {second.length > 0 && <Text numberOfLines={shown?.key === "permission" || shown?.key === "paused" ? 2 : 1} style={{ color: c.foregroundMuted, fontSize: secondary, lineHeight: secondary + 4 }}>{second}</Text>}
       </View>
     </Pressable>
     <View style={{ flexDirection: "row", alignItems: "center", gap: 2, marginLeft: 6 }}>
@@ -279,115 +269,31 @@ export function InboxSections({ store, theme, touch, dense, nav, runningCap = 8 
   </View>;
 }
 
-/**
- * Sidebar header item: "Needs you N". Registered once, synchronously (the host resolves sidebar items
- * when the installation mounts); it renders nothing at zero unless the developer keeps it always on.
- */
+/** Whether the Phase 2 sidebar view is mounted: it lists the same agents, so the sidebar item's badge would repeat it. */
 const sidebarViews = { mounted: 0, listeners: new Set<() => void>() };
 const subscribeSidebarViews = (fn: () => void) => { sidebarViews.listeners.add(fn); return () => { sidebarViews.listeners.delete(fn); }; };
-/** Called by the Phase 2 sidebar view: while it is the sidebar, the header item would repeat the list right below it. */
 export function useSidebarViewMounted() {
   useEffect(() => {
     sidebarViews.mounted += 1; sidebarViews.listeners.forEach(fn => fn());
     return () => { sidebarViews.mounted -= 1; sidebarViews.listeners.forEach(fn => fn()); };
   }, []);
 }
-
-export function contributeHeaderItem(client: PluginClientContext, store: InboxStore) {
-  function NeedsYouItem({ currentScreen, openScreen, theme }: PluginSidebarItemProps) {
-    const count = useInbox(store, () => sectionRows(store.rows(), "needs", Date.now()).length);
-    const inSidebarView = useSyncExternalStore(subscribeSidebarViews, () => sidebarViews.mounted > 0, () => false);
-    const visible = useInbox(store, () => store.enabled() && (count > 0 || store.headerWhenEmpty())) && !inSidebarView;
-    const c = theme.colors;
-    if (!visible) return null;
-    return <SidebarRow icon="Inbox" label="Needs you" active={currentScreen?.screenId === INBOX_SCREEN && currentScreen.params.section === "needs"} onPress={() => openScreen({ screenId: INBOX_SCREEN, params: { section: "needs" } })}
-      trailing={count > 0 ? <View accessibilityLabel={`${count} need${count === 1 ? "s" : ""} you`} style={{ minWidth: 18, height: 18, paddingHorizontal: 5, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: c.statusWarning }}>
-        <Text style={{ color: c.surface0, fontSize: 11, lineHeight: 14, fontWeight: "700", fontVariant: ["tabular-nums"] }}>{count}</Text>
-      </View> : undefined} />;
-  }
-  return client.addSidebarHeaderItem({ id: "needs-you", title: "Needs you", Component: NeedsYouItem });
-}
-
-/**
- * Above the composer, one split control: the status ("Needs you · finished 12m") signs off on click,
- * and "More" beside it opens "Sign off & next", "Later…", "Mute this turn" and the finish switch.
- * Paseo has no split pill and rejects an empty pill label, so these are two adjacent pills. After a sign-off the status pill turns
- * into "Signed off · Undo" for 6 s.
- */
-export function contributeInboxPills(client: PluginClientContext, store: InboxStore, openNext: (from: string) => void) {
-  const pills = new Map<string, { workspaceId: string; key: string; status: PluginButtonRegistration; menu: PluginButtonRegistration | null }>();
-  let undoTimer: ReturnType<typeof setTimeout> | null = null;
-  const statusIcon = (agentId: string) => function StatusIcon(props: PluginButtonIconProps) {
-    const reason = useInbox(store, () => { const r = store.rows().find(x => x.agentId === agentId); return r?.needs ? displayReason(r.needs)?.reason ?? null : null; });
-    const c = props.theme.colors;
-    if (!reason) return <Icon name="Undo2" size={props.size} color={c.foregroundMuted} />;
-    // A check, tinted with the reason's colour: the label says why, the icon says what a click does.
-    return <Icon name="Check" size={props.size} color={reasonGlyph(reason, c).color} />;
-  };
-  const menuItems = (row: InboxRow) => [
-    { kind: "item" as const, id: "next", title: "Sign off & next", icon: "ArrowRight", behavior: { kind: "action" as const, onPress() { void store.signOff([row.agentId]); openNext(row.agentId); } } },
-    { kind: "item" as const, id: "later", title: "Later…", icon: "AlarmClock", behavior: { kind: "menu" as const, items: ([["hour", "In 1 hour"], ["tonight", "Tonight 18:00"], ["tomorrow", "Tomorrow 09:00"], ["next-event", "Next event"]] as const).map(([id, title]) => ({ kind: "item" as const, id, title, behavior: { kind: "action" as const, onPress() { void store.snooze([row.agentId], snoozeUntil(id, new Date())); } } })) } },
-    { kind: "item" as const, id: "mute", title: "Sign off & mute this turn", icon: "BellOff", visible: running(row), behavior: { kind: "action" as const, onPress() { void store.signOff([row.agentId], { muteTurn: true }); } } },
-    { kind: "separator" as const, id: "sep" },
-    { kind: "item" as const, id: "finishes", title: row.enable_finish_flags ? "Don't flag finishes" : "Flag finishes again", icon: row.enable_finish_flags ? "BellMinus" : "Bell", behavior: { kind: "action" as const, onPress() { void store.setFinishFlags(row.agentId, !row.enable_finish_flags); } } },
-  ];
-  const publish = () => {
-    const now = Date.now();
-    const recent = store.recent();
-    const wanted = new Map<string, { row: InboxRow; label: string; title: string; undo: boolean }>();
-    for (const row of store.rows()) {
-      if (!row.workspaceId) continue;
-      const shown = displayReason(row.needs);
-      if (shown && !row.snooze) {
-        // §4: with an open brief the label comes from its kind and the tooltip carries its ask, so the control never disagrees with the card.
-        const brief = row.brief?.state === "open" ? row.brief : null;
-        const word = brief && (shown.reason === "finished" || brief.kind === shown.reason) ? BRIEF_WORD[brief.kind] : REASON_WORD[shown.reason];
-        const status = brief ? `Needs you · ${briefLine(brief)}` : `Needs you · ${REASON_WORD[shown.reason].toLowerCase()} ${age(row.needs!.since, now)}`;
-        wanted.set(row.agentId, { row, undo: false, label: `${word} · ${age(row.needs!.since, now)}`, title: store.data()?.firstRun ? `${status}. Click to sign off. ${RULE}` : `${status}. Click to sign off.` });
-      } else if (recent && recent.agentIds.includes(row.agentId) && now - recent.at < 6_000) {
-        wanted.set(row.agentId, { row, undo: true, label: "Undo sign-off", title: "Signed off. Click to undo." });
-      }
-    }
-    for (const [agentId, entry] of pills) {
-      const next = wanted.get(agentId);
-      if (!next || next.row.workspaceId !== entry.workspaceId) { entry.status.remove(); entry.menu?.remove(); pills.delete(agentId); }
-    }
-    for (const [agentId, next] of wanted) try {
-      const key = `${next.label}|${next.title}|${next.undo}|${next.row.enable_finish_flags}|${running(next.row)}`;
-      const status = { title: next.title, label: next.label, behavior: { kind: "action" as const, onPress() { if (next.undo) void store.undo([agentId]); else void store.signOff([agentId]); } } };
-      const entry = pills.get(agentId);
-      if (!entry) {
-        const registration = client.addComposerPill({ id: "needs-you", workspaceId: next.row.workspaceId!, agentId, button: { ...status, icon: statusIcon(agentId) } });
-        const menu = next.undo ? null : client.addComposerPill({ id: "needs-you-menu", workspaceId: next.row.workspaceId!, agentId, button: { title: "More sign-off options", label: "More", icon: "Ellipsis", behavior: { kind: "menu", items: menuItems(next.row) } } });
-        pills.set(agentId, { workspaceId: next.row.workspaceId!, key, status: registration, menu });
-      } else if (entry.key !== key) {
-        entry.status.update(status);
-        if (next.undo) { entry.menu?.remove(); entry.menu = null; }
-        else if (entry.menu) entry.menu.update({ behavior: { kind: "menu", items: menuItems(next.row) } });
-        else entry.menu = client.addComposerPill({ id: "needs-you-menu", workspaceId: next.row.workspaceId!, agentId, button: { title: "More sign-off options", label: "More", icon: "Ellipsis", behavior: { kind: "menu", items: menuItems(next.row) } } });
-        entry.key = key;
-      }
-    } catch { /* One agent's pill must never hide the others. */ }
-    if (recent && Date.now() - recent.at < 6_000) { if (undoTimer) clearTimeout(undoTimer); undoTimer = setTimeout(publish, 6_000 - (Date.now() - recent.at) + 50); }
-  };
-  const unsubscribe = store.subscribe(publish);
-  // Ages count up between polls.
-  const ticker = setInterval(publish, 60_000);
-  return () => { unsubscribe(); clearInterval(ticker); if (undoTimer) clearTimeout(undoTimer); for (const p of pills.values()) { p.status.remove(); p.menu?.remove(); } pills.clear(); };
+export function useSidebarViewActive(): boolean {
+  return useSyncExternalStore(subscribeSidebarViews, () => sidebarViews.mounted > 0, () => false);
 }
 
 /** ⌘K items and /ok. The keyboard path is ⌘K, "ok", Enter. */
 export function contributeInboxCommands(client: PluginClientContext, store: InboxStore, openNext: (from: string | null) => void) {
   const removers = [
-    client.addCommandCenterItem({ id: "inbox-sign-off-next", title: "Sign off & next", icon: "ArrowRight", keywords: ["ok", "done", "ack", "needs you", "sign off", "next"], context: "agent",
+    client.addCommandCenterItem({ id: "inbox-sign-off-next", title: "Follow-up: sign off & next", icon: "ArrowRight", keywords: ["ok", "done", "ack", "needs you", "sign off", "next"], context: "agent",
       onSelect({ agent }) { void store.signOff([agent.id]); openNext(agent.id); } }),
-    client.addCommandCenterItem({ id: "inbox-sign-off", title: "Sign off", icon: "Check", keywords: ["ok", "done", "ack", "needs you", "sign off"], context: "agent",
+    client.addCommandCenterItem({ id: "inbox-sign-off", title: "Follow-up: sign off", icon: "Check", keywords: ["ok", "done", "ack", "needs you", "sign off"], context: "agent",
       onSelect({ agent }) { void store.signOff([agent.id]); } }),
-    client.addCommandCenterItem({ id: "inbox-later", title: "Later: tomorrow 09:00", icon: "AlarmClock", keywords: ["ok", "snooze", "later", "needs you"], context: "agent",
+    client.addCommandCenterItem({ id: "inbox-later", title: "Follow-up: later, tomorrow 09:00", icon: "AlarmClock", keywords: ["ok", "snooze", "later", "needs you"], context: "agent",
       onSelect({ agent }) { void store.snooze([agent.id], snoozeUntil("tomorrow", new Date())); } }),
-    client.addCommandCenterItem({ id: "inbox-undo", title: "Undo last sign-off", icon: "Undo2", keywords: ["ok", "undo", "needs you", "sign off"], context: "global",
+    client.addCommandCenterItem({ id: "inbox-undo", title: "Follow-up: undo last sign-off", icon: "Undo2", keywords: ["ok", "undo", "needs you", "sign off"], context: "global",
       onSelect() { void store.undo(); } }),
-    client.addCommandCenterItem({ id: "inbox-next", title: "Next needing me", icon: "Inbox", keywords: ["ok", "next", "needs you", "inbox"], context: "global",
+    client.addCommandCenterItem({ id: "inbox-next", title: "Follow-up: next agent that needs you", icon: "Inbox", keywords: ["ok", "next", "needs you", "inbox"], context: "global",
       onSelect() { openNext(null); } }),
     client.addSlashCommand({ name: "ok", description: "Sign off this agent (Needs you). /ok next opens the next one", argumentHint: "[next]", context: "agent",
       onSubmit({ agent, args }) { void store.signOff([agent.id]); if (/^\s*next\b/i.test(args)) openNext(agent.id); } }),
