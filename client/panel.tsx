@@ -85,7 +85,7 @@ function StartTracking({ theme, workspaceId, layout, loadError, openSettings }: 
         <Text style={[t.meta, { flex: 1, color: c.foreground, paddingTop: 1, paddingBottom: i < points.length - 1 ? 14 : 0 }]}>{p.line}</Text>
       </View>)}
     </View>
-    <Text style={t.meta}>Nothing is sent, merged or archived without your click. Auto-send stays off until you turn it on for this workspace.</Text>
+    <Text style={t.meta}>Nothing is merged or archived without your click. While Auto-send is on, repairs go to the agent on their own.</Text>
     {(loadError || start.error) && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusDanger }]}>{start.error ? errorText(start.error) : loadError}</Text>}
     <Button title="Track this workspace" kind="primary" icon="Plus" theme={theme} compact={compact} loading={start.isPending} onPress={() => start.mutate()} />
     <Text style={t.small}>To track every workspace in a project, turn it on in Settings. Tracking data stays on this host.</Text>

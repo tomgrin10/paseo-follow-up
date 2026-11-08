@@ -97,7 +97,7 @@ test("Track returns after persistence while unrelated global observation is stil
   try {
     await started;
     const w = await Promise.race([activation, new Promise<never>((_ok, reject) => { timer = setTimeout(() => reject(new Error("Track waited for the global refresh")), 500); })]);
-    assert.equal(w.enable_tracking, true); assert.equal(w.enable_auto_sends, false);
+    assert.equal(w.enable_tracking, true); assert.equal(w.enable_auto_sends, true, "first tracking sends repairs to the agent on its own");
     assert.equal((await store.snapshot()).workspaces[0].mainAgentId, "main-agent");
   } finally { if (timer) clearTimeout(timer); release(); await activation; await engine.tick(); }
 });
