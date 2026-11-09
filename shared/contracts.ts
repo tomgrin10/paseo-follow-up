@@ -1,4 +1,6 @@
 import { projectSchema } from "./settings";
+import { prioritySchema } from "./priorities";
+import { usageSchema } from "./usage";
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import { inboxRowSchema } from "./inbox";
@@ -43,6 +45,20 @@ export const requestReviewersRpc = defineRpc({ name: "follow.request-reviewers",
 
 export const projectSettingsRpc = defineRpc({ name: "follow.project-settings", input: z.object({}), output: z.object({ projects: z.array(projectSchema) }) });
 export const setProjectTrackingRpc = defineRpc({ name: "follow.set-project-tracking", input: z.object({ projectId: idSchema, enable_default_tracking: z.boolean() }), output: z.object({ projects: z.array(projectSchema) }) });
+/** Following (1.3.0-beta.2): the two global switches and the per-workspace exceptions, for Settings only. */
+const followSettingsSchema = z.object({
+  enable_follow_every: z.boolean(), enable_auto_sends_default: z.boolean(),
+  workspaces: z.array(z.object({ id: idSchema, title: z.string(), enable_tracking: z.boolean(), enable_auto_sends: z.boolean(), optedOut: z.boolean() })),
+});
+export const followSettingsRpc = defineRpc({ name: "follow.follow-settings", input: z.object({}), output: followSettingsSchema });
+export const setFollowSettingsRpc = defineRpc({ name: "follow.set-follow-settings", input: z.object({
+  enable_follow_every: z.boolean().optional(), enable_auto_sends_default: z.boolean().optional(),
+  workspace: z.object({ workspaceId: idSchema, follow: z.boolean().optional(), enable_auto_sends: z.boolean().optional() }).optional(),
+}), output: followSettingsSchema });
+/** External priorities for Home's Priority sort (written by the set_priorities agent tool). */
+export const prioritiesRpc = defineRpc({ name: "follow.priorities", input: z.object({}), output: z.object({ items: z.array(prioritySchema) }) });
+/** Provider session limits from the Smart Session plugin, for Home's meters. Hidden when it isn't installed. */
+export const usageRpc = defineRpc({ name: "follow.usage", input: z.object({}), output: usageSchema });
 export const refineTasksRpc = defineRpc({ name: "follow.refine-tasks", input: z.object({ workspaceId: idSchema, tasks: z.array(z.object({ id: idSchema, title: textSchema, afterPrs: z.array(idSchema), dependencyStage: z.enum(["merged", "deployed"]), enable_follow_up: z.boolean(), communication: communicationSchema.optional(), trigger: taskTriggerSchema.nullable().optional() })).max(50) }), output: workspaceSchema });
 export const taskTriggerRpc = defineRpc({ name: "follow.set-task-trigger", input: z.object({ workspaceId: idSchema, obligationId: idSchema, expectedRevision: z.number().int().nonnegative(), trigger: taskTriggerSchema.nullable(), afterPrs: z.array(idSchema) }), output: workspaceSchema });
 

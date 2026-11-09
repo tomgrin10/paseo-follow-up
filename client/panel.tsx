@@ -1,15 +1,19 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
-import { useRpc, openExternalUrl, type PluginHostProps, type PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
+import { useRpc, useTabState, openExternalUrl, type PluginHostProps, type PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
+import { z } from "zod";
+import type { InboxStore } from "./inbox-store";
+import { useInbox } from "./inbox";
+import { BriefCard, type BriefDeps } from "./brief";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { controlRpc, refreshRpc, browserStatusRpc, recoverRpc, sendRpc } from "../shared/contracts";
+import { getRpc, controlRpc, refreshRpc, browserStatusRpc, recoverRpc, sendRpc, inboxBriefRpc } from "../shared/contracts";
 import { summary, type Workspace } from "../shared/model";
 import { followUpObligations, recoveryBatch } from "../shared/follow-up";
 import { settledForDisplay } from "../shared/presentation";
 import { ago, sendBlocker, shortRefs } from "../shared/attention";
-import { Button, Card, CardRow, FoldRow, errorText, text, useNow, type Theme } from "./kit";
-import { Reveal } from "./motion";
+import { Button, Card, CardRow, FoldRow, IconButton, errorText, text, useNow, type Theme } from "./kit";
+import { Reveal, Skeleton } from "./motion";
 import { WorkspaceHeader } from "./header";
 import { NeedsYouCard, overviewKey, workspaceKey } from "./needs-you";
 import { StacksCard } from "./stacks";
@@ -22,6 +26,96 @@ import { tint } from "./theme";
 export { overviewKey, workspaceKey };
 
 export type PanelLinks = { openSettings: () => void; openOverview: () => void; openLarge?: (workspaceId: string) => void };
+type PanelProps = PluginWorkspacePanelProps & PanelLinks & { inbox?: InboxStore; briefDeps?: BriefDeps };
+
+/**
+ * The workspace panel (explorer column, or a tab on the phone): this workspace only. A Home button on top, then
+ * the main agent's open ask with its moves (sign off, decisions), and the workspace's own cards: repairs, PR stack,
+ * tasks, questions, spec, activity and Details. What needs you elsewhere lives on Home.
+ */
+export function FollowPanel(props: PanelProps) {
+  const read = useRpc(getRpc);
+  const query = useQuery({ queryKey: workspaceKey(props.workspaceId), queryFn: () => read({ workspaceId: props.workspaceId }), refetchInterval: 5000 });
+  const c = props.theme.colors;
+  const base = { flex: 1, backgroundColor: c.surface0 };
+  if (query.isPending) return <PanelSkeleton theme={props.theme} compact={props.layout.compact} />;
+  if (query.error && !query.data?.workspace) return <View style={[base, { padding: props.layout.compact ? 16 : 12 }]}>
+    <Card theme={props.theme} compact={props.layout.compact} icon="CloudOff" title="Can't reach Follow-up" style={{ marginHorizontal: 0, marginTop: 0 }}>
+      <CardRow theme={props.theme}>
+        <Text accessibilityRole="alert" style={[text(c).meta, { marginBottom: 10 }]}>The plugin didn't answer: {errorText(query.error)}. It may still be starting; your work is saved on the host.</Text>
+        <Button title="Try again" icon="RefreshCw" theme={props.theme} compact={props.layout.compact} loading={query.isRefetching} onPress={() => void query.refetch()} />
+      </CardRow>
+    </Card>
+  </View>;
+  if (!query.data?.workspace) return <NothingYet {...props} loadError={query.data?.error} />;
+  return <PanelWorkspace {...props} workspace={query.data.workspace} loadError={query.error ? "Refresh failed. Showing the last saved state." : query.data.error} />;
+}
+
+function PanelSkeleton({ theme, compact }: { theme: Theme; compact: boolean }) {
+  const c = theme.colors; const pad = compact ? 16 : 12;
+  return <View accessibilityLabel="Loading Follow-up" style={{ flex: 1, backgroundColor: c.surface0 }}>
+    <View style={{ padding: pad, gap: 10, borderBottomWidth: 1, borderBottomColor: c.border }}>
+      <Skeleton width="55%" height={14} color={c.surface2} />
+      <Skeleton width="85%" height={9} color={c.surface2} />
+      <Skeleton width="70%" height={9} color={c.surface2} />
+      <Skeleton width="100%" height={6} color={c.surface2} radius={3} />
+    </View>
+    {[0, 1].map(i => <View key={i} style={{ margin: pad, marginBottom: 0, padding: 12, gap: 10, borderRadius: 8, borderWidth: 1, borderColor: c.border }}>
+      <Skeleton width="35%" height={10} color={c.surface2} />
+      <Skeleton width="90%" height={9} color={c.surface2} />
+      <Skeleton width="75%" height={9} color={c.surface2} />
+    </View>)}
+  </View>;
+}
+
+/** A workspace Follow-up has nothing on yet (no agent, or opted out in Settings). Never a "Track" prompt. */
+function NothingYet({ theme, layout, loadError, openOverview, openSettings }: PanelProps & { loadError?: string | null }) {
+  const c = theme.colors; const t = text(c);
+  const compact = layout.compact;
+  return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
+    <PanelTop theme={theme} compact={compact} openOverview={openOverview} openSettings={openSettings} />
+    <View style={{ padding: compact ? 16 : 12, gap: 8 }}>
+      <Text style={t.meta}>Nothing to follow here yet. Once an agent opens a PR or records a task in this workspace, its stack and tasks show up here.</Text>
+      {loadError && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusDanger }]}>{loadError}</Text>}
+    </View>
+  </View>;
+}
+
+/** The panel's top bar: back to Home, and settings. No other workspace's counts. */
+export function PanelTop({ theme, compact, openOverview, openSettings }: { theme: Theme; compact: boolean; openOverview: () => void; openSettings?: () => void }) {
+  const c = theme.colors;
+  return <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: compact ? 12 : 8, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: c.border }}>
+    <Button theme={theme} compact={compact} kind="ghost" icon="House" title="Home" accessibilityHint="Opens Follow-up Home with every workspace" onPress={openOverview} />
+    <View style={{ flex: 1 }} />
+    {openSettings && <IconButton icon="Settings" label="Follow-up settings" onPress={openSettings} theme={theme} compact={compact} />}
+  </View>;
+}
+
+/** The main agent's open ask, as the chat's brief card with its own moves (decisions, Sign off, Later). */
+function MainAsk({ w, theme, compact, inbox, briefDeps }: { w: Workspace; theme: Theme; compact: boolean; inbox: InboxStore; briefDeps: BriefDeps }) {
+  const row = useInbox(inbox, () => inbox.rows().find(r => r.agentId === w.mainAgentId) ?? null);
+  const readBrief = useRpc(inboxBriefRpc);
+  const brief = useQuery({ queryKey: ["follow-through", "home-brief", w.mainAgentId, row?.seq ?? 0], queryFn: () => readBrief({ agentId: w.mainAgentId }), enabled: !!row?.needs && !!row?.brief });
+  const b = brief.data?.brief?.state === "open" ? brief.data.brief : null;
+  // "No ask stated" only repeats the chat beside it; the panel shows real asks.
+  if (!row?.needs || row.snooze || !b || b.source === "none") return null;
+  return <View style={{ marginHorizontal: compact ? 16 : 12, marginTop: 8 }}>
+    <BriefCard {...({ item: { data: b }, theme, layout: { compact }, agentId: w.mainAgentId, deps: briefDeps } as unknown as Parameters<typeof BriefCard>[0])} />
+  </View>;
+}
+
+function PanelWorkspace(props: PanelProps & { workspace: Workspace; loadError?: string | null }) {
+  const [state, setState] = useTabState(props.tab, folds, { open: sessionFolds.get(props.workspaceId) ?? [] });
+  const isOpen = (key: string) => state.open.includes(key);
+  const toggle = (key: string) => { const next = isOpen(key) ? state.open.filter(k => k !== key) : [...state.open, key]; sessionFolds.set(props.workspaceId, next); setState({ open: next }); };
+  const { openLarge } = props;
+  const compact = props.layout.compact;
+  const top = <PanelTop theme={props.theme} compact={compact} openOverview={props.openOverview} />;
+  const ask = props.inbox && props.briefDeps ? <MainAsk w={props.workspace} theme={props.theme} compact={compact} inbox={props.inbox} briefDeps={props.briefDeps} /> : null;
+  return <WorkspaceView {...props} top={top} ask={ask} folds={{ isOpen, toggle }} resize={openLarge ? { icon: "Maximize2", label: "Open the larger view", onPress: () => openLarge(props.workspaceId) } : null} />;
+}
+
+
 
 /** The main agent's current repairs: what was sent and when. Pending batches live in Needs you. */
 function AgentCard({ workspace: w, theme, compact, now, openAgent }: { workspace: Workspace; theme: Theme; compact: boolean; now: number; openAgent?: (id: string) => void }) {
@@ -118,9 +212,6 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
           <Button title="Open Graphite" icon="ExternalLink" theme={theme} compact={compact} accessibilityLabel="Connect Graphite" onPress={() => openUrl("https://app.graphite.com")} />
         </View>
       </CardRow>}
-      <CardRow theme={theme}>
-        <Button title="All tracked workspaces" kind="ghost" icon="LayoutList" theme={theme} compact={compact} onPress={openOverview} />
-      </CardRow>
     </>}
   </View>;
 }
@@ -139,11 +230,12 @@ export function useSessionFolds(workspaceId: string): Folds {
   return { isOpen: key => open.includes(key), toggle: key => { const next = open.includes(key) ? open.filter(k => k !== key) : [...open, key]; sessionFolds.set(workspaceId, next); setOpen(next); } };
 }
 
-/** The panel keeps its folds in the tab's persisted state and mirrors them for the larger view. */
+const folds = z.object({ open: z.array(z.string()) });
+/** Two columns from this content width: actions on the left, the stacks on the right. */
 export const WIDE_MIN = 820;
 
-export function WorkspaceView({ theme, layout, workspace: w, navigation, loadError, openSettings, openOverview, folds: { isOpen, toggle }, resize, large = false }: PluginHostProps & {
-  navigation?: PluginWorkspacePanelProps["navigation"]; workspace: Workspace; loadError?: string | null; openSettings: () => void; openOverview: () => void;
+export function WorkspaceView({ theme, layout, workspace: w, navigation, loadError, openSettings, openOverview, folds: { isOpen, toggle }, resize, large = false, top, ask }: PluginHostProps & {
+  navigation?: PluginWorkspacePanelProps["navigation"]; workspace: Workspace; loadError?: string | null; openSettings: () => void; openOverview: () => void; top?: ReactNode; ask?: ReactNode;
   folds: Folds; resize: { icon: "Maximize2" | "Minimize2"; label: string; onPress: () => void } | null; large?: boolean;
 }) {
   const control = useRpc(controlRpc); const refresh = useRpc(refreshRpc); const browserRead = useRpc(browserStatusRpc);
@@ -178,8 +270,10 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const log = <ActivityCard workspace={w} theme={theme} compact={compact} now={now} open={isOpen} toggle={toggle} onOpenQuestion={setQuestion} />;
   const extras = <WorkspaceCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} openAgent={openAgent} browserReady={browser.data ? browser.data.ready : null} openOverview={openOverview} editSpec={() => setSpecOpen(true)} />;
   return <View onLayout={event => setWidth(event.nativeEvent.layout.width)} style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>
+    {top}
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20, ...(large ? { maxWidth: 1240, width: "100%", alignSelf: "center", paddingHorizontal: 12 } : null) }}>
       {header}
+      {ask}
       {wide ? <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
         <View style={{ flex: 5, minWidth: 0 }}>{shipped}{needs}{agent}{history}{tasks}</View>
         <View style={{ flex: 6, minWidth: 0 }}>{stacks}{log}{extras}</View>

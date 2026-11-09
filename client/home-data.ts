@@ -3,9 +3,15 @@ import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { buildHome, type HomeModel, type PaseoWorkspaceLite } from "../shared/home";
 import type { InboxStore } from "./inbox-store";
 import type { LiveStore } from "./live";
+import type { HomeExtras } from "./home-view";
 
-type Descriptor = { id: string; name?: string | null; title?: string | null; projectDisplayName?: string | null; projectCustomName?: string | null; activityAt?: string | null; archivingAt?: string | null };
-const lite = (w: Descriptor): PaseoWorkspaceLite => ({ id: w.id, name: w.title || w.name || "Workspace", project: w.projectCustomName || w.projectDisplayName || null, activityAt: w.activityAt ?? null });
+type Descriptor = { id: string; name?: string | null; title?: string | null; projectDisplayName?: string | null; projectCustomName?: string | null; activityAt?: string | null; archivingAt?: string | null;
+  gitRuntime?: { currentBranch?: string | null } | null; githubRuntime?: { pullRequest?: { number?: number; title?: string } | null } | null };
+const lite = (w: Descriptor): PaseoWorkspaceLite => {
+  const pr = w.githubRuntime?.pullRequest;
+  return { id: w.id, name: w.title || w.name || "Workspace", project: w.projectCustomName || w.projectDisplayName || null, activityAt: w.activityAt ?? null,
+    branch: w.gitRuntime?.currentBranch ?? null, pr: pr?.title ? { number: pr.number ?? null, title: pr.title } : null };
+};
 
 /**
  * Paseo's own workspace list, for the rows Follow-up doesn't track (they land in Quiet). One subscription per
@@ -49,7 +55,7 @@ export function createPaseoWorkspaces(client: PluginClientContext, hooks: { onAd
 }
 export type PaseoWorkspaces = ReturnType<typeof createPaseoWorkspaces>;
 
-export type HomeSources = { inbox: InboxStore; live: LiveStore; paseo: PaseoWorkspaces };
+export type HomeSources = { inbox: InboxStore; live: LiveStore; paseo: PaseoWorkspaces; extras: HomeExtras };
 
 /** One shared minute clock. Ages subscribe to it themselves, so a tick never re-renders the list rows. */
 const clock = { now: Date.now(), listeners: new Set<() => void>(), timer: null as ReturnType<typeof setInterval> | null };
@@ -62,12 +68,15 @@ export const useMinute = () => useSyncExternalStore(subscribeClock, () => clock.
 
 /** Home's model from the three shared stores. Rebuilt when one of them changes or the minute ticks. */
 export function useHomeModel(sources: HomeSources): HomeModel {
-  const { inbox, live, paseo } = sources;
+  const { inbox, live, paseo, extras } = sources;
   const a = useSyncExternalStore(inbox.subscribe, inbox.version, inbox.version);
   const b = useSyncExternalStore(live.subscribe, live.version, live.version);
   const c = useSyncExternalStore(paseo.subscribe, paseo.version, paseo.version);
+  // Only the sort and priorities rebuild the model; agent titles and usage don't touch it.
+  const sort = useSyncExternalStore(extras.subscribe, extras.sort, extras.sort);
+  const priorities = useSyncExternalStore(extras.subscribe, extras.priorities, extras.priorities);
   const now = useMinute();
-  return useMemo(() => buildHome({ rows: inbox.rows(), tracked: live.all(), paseo: paseo.all(), now: Date.now() }), [a, b, c, now, inbox, live, paseo]);
+  return useMemo(() => buildHome({ rows: inbox.rows(), tracked: live.all(), paseo: paseo.all(), now: Date.now(), sort, priorities }), [a, b, c, now, sort, priorities, inbox, live, paseo]);
 }
 
 /** Rebuilds a value at most every `ms` while mounted (used for the brief pane's source ages). */

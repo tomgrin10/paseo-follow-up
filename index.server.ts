@@ -11,6 +11,8 @@ import { browserRepositories, prOwner } from "./server/pr-owner";
 import { type Workspace } from "./shared/model";
 import { isWorkspaceRoot } from "./server/workspace-agent";
 import { Store } from "./server/store";
+import { PriorityStore } from "./server/priorities";
+import { UsageReader } from "./server/usage";
 import { Engine, agentWorkspace, findWorkspace, interruptionHold } from "./server/engine";
 import { Github } from "./server/github";
 import { Graphite } from "./server/graphite";
@@ -30,7 +32,8 @@ import { Inbox, type GuardPause } from "./server/inbox";
 import { daemonDirectory, guardPath } from "./server/inbox-directory";
 import { fileSources } from "./server/inbox-classifier";
 import { onBeforeSend } from "./server/daemon";
-import { readFile, rename } from "node:fs/promises";
+import { copyFile, readFile, rename } from "node:fs/promises";
+import { autoSendsByDefault, FOLLOW_EVERY_MIGRATION, followsByDefault, followsEvery, migrateFollowEvery, optedOut } from "./shared/settings";
 import { BRIEF_KIND, BRIEF_VERSION, prState, validateNeedsYou, type Brief, type NeedsYouRecord } from "./shared/brief";
 
 export default function contribute(server: PluginServerContext) {
@@ -48,6 +51,7 @@ export default function contribute(server: PluginServerContext) {
   const browser = new BrowserBridge();
   const actions = new PrActions(store, github, graphite, browser);
   const engine = new Engine(store, github, gateway);
+  const usage = new UsageReader(paseoHome);
   // Unknown is not off: an unreadable document keeps the inbox on with its defaults.
   const inboxSettings = async () => { try { const state = await displaySettings.read(); if (state.status === "ready") return state.values; } catch {} return displayPreferences.schema.parse({}); };
   // The brief's timeline rows need a plugin session; the handler contexts carry one. Rows wait until one is seen.
@@ -128,13 +132,23 @@ export default function contribute(server: PluginServerContext) {
   let hooksStarted = false;
   let loadError: string | null = null;
   let hookError: string | null = null;
+  /**
+   * 1.3.0-beta.2: tracking is invisible. Once, back up state.json, then follow every known workspace with auto-send on.
+   * The backup is never overwritten (COPYFILE_EXCL), so a second start can't replace it with migrated state.
+   */
+  const migrateTracking = async () => {
+    if ((await store.snapshot()).migrations?.includes(FOLLOW_EVERY_MIGRATION)) return;
+    await copyFile(join(directory, "state.json"), join(directory, "state.before-follow-every.json.bak"), 1).catch(error => { if (!["ENOENT", "EEXIST"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error; });
+    await store.mutate(state => { migrateFollowEvery(state); });
+  };
   const ready = (async () => {
     unlock = await store.lock();
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await writeFile(bridge, mcpSource, { mode: 0o600 });
     await engine.recover();
+    await migrateTracking();
     hooksStarted = true;
-    await agentHooks.start().catch(() => { hookError = "Automatic sidebar instructions could not be registered for every provider. Check Claude/Codex hook settings; tracking is still available."; });
+    await agentHooks.start().catch(() => { hookError = "Automatic sidebar instructions could not be registered for every provider. Check Claude/Codex hook settings; following still works."; });
     hookTimer = setInterval(() => void agentHooks.heartbeat().catch(() => {}), 30_000);
     await writeBriefState().catch(() => undefined);
   })().catch(() => { loadError = "Follow-through could not start. Check its saved state and worker lock."; });
@@ -185,6 +199,30 @@ export default function contribute(server: PluginServerContext) {
     await store.mutate(state => { state.projectDefaults ??= {}; state.projectDefaults[projectId] = enable_default_tracking; });
     void engine.tick();
     return { projects: await gateway.projects(await store.snapshot()) };
+  });
+  const followSettings = async () => {
+    const state = await store.snapshot();
+    return { enable_follow_every: followsEvery(state), enable_auto_sends_default: autoSendsByDefault(state),
+      workspaces: state.workspaces.filter(w => !w.archived).map(w => ({ id: w.id, title: w.title, enable_tracking: w.enable_tracking, enable_auto_sends: w.enable_auto_sends, optedOut: optedOut(state, w.id) }))
+        .sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id)) };
+  };
+  server.handle(rpc.followSettingsRpc, async () => { await requireReady(); return followSettings(); });
+  server.handle(rpc.setFollowSettingsRpc, async ({ enable_follow_every, enable_auto_sends_default, workspace }) => {
+    await requireReady();
+    await store.mutate(state => {
+      if (enable_follow_every !== undefined) state.enable_follow_every = enable_follow_every;
+      if (enable_auto_sends_default !== undefined) state.enable_auto_sends_default = enable_auto_sends_default;
+      if (!workspace) return;
+      const w = state.workspaces.find(w => w.id === workspace.workspaceId && !w.archived);
+      if (!w) throw new Error("This workspace is no longer available. Refresh settings.");
+      if (workspace.enable_auto_sends !== undefined) w.enable_auto_sends = workspace.enable_auto_sends;
+      // Opting out stops following (discovery skips it); following again ends the opt-out below.
+      if (workspace.follow === false) { state.workspaceOptOuts = [...new Set([...state.workspaceOptOuts ?? [], w.id])]; w.enable_tracking = false; }
+      if (workspace.follow === true) state.workspaceOptOuts = (state.workspaceOptOuts ?? []).filter(id => id !== w.id);
+    });
+    if (workspace?.follow === true) await engine.activate(workspace.workspaceId).catch(() => store.mutate(state => { const w = state.workspaces.find(w => w.id === workspace.workspaceId); if (w) w.enable_tracking = true; }));
+    void engine.tick();
+    return followSettings();
   });
   server.handle(rpc.prOwnerRpc, async ({ repo, number }, { paseo }) => {
     await requireReady();
@@ -313,7 +351,7 @@ export default function contribute(server: PluginServerContext) {
     await requireReady();
     return store.mutate(state => {
       const w = findWorkspace(state, input.workspaceId);
-      if (!w.enable_tracking || w.archived) throw new Error("Track this workspace before changing its spec link.");
+      if (!w.enable_tracking || w.archived) throw new Error("Follow-up isn't following this workspace. Turn it back on in Follow-up settings, under Workspace exceptions.");
       developerSetSpec(w, input, Date.now());
       return w;
     });
@@ -342,7 +380,7 @@ export default function contribute(server: PluginServerContext) {
     await requireReady();
     const result = await store.mutate(state => {
       const w = findWorkspace(state, workspaceId);
-      if (!w.enable_tracking || w.archived) throw new Error("Workspace tracking is inactive.");
+      if (!w.enable_tracking || w.archived) throw new Error("Follow-up isn't following this workspace. Turn it back on in Follow-up settings, under Workspace exceptions.");
       for (const edit of tasks) {
         const o = w.obligations.find(o => o.id === edit.id);
         if (!o || ["done", "waived", "working"].includes(o.status)) throw new Error("Task changed or is no longer editable. Refresh before refining it.");
@@ -358,7 +396,7 @@ export default function contribute(server: PluginServerContext) {
     await requireReady();
     const result = await store.mutate(state => {
       const w = findWorkspace(state, workspaceId);
-      if (!w.enable_tracking || w.archived) throw new Error("Workspace tracking is inactive.");
+      if (!w.enable_tracking || w.archived) throw new Error("Follow-up isn't following this workspace. Turn it back on in Follow-up settings, under Workspace exceptions.");
       const o = w.obligations.find(o => o.id === obligationId);
       if (!o || o.revision !== expectedRevision || ["done", "waived", "working"].includes(o.status)) throw new Error("Task changed. Refresh it before saving the trigger.");
       if (w.batches.some(b => ["sending", "sent", "uncertain"].includes(b.state) && b.tasks.some(t => t.kind === "obligation" && t.target === o.id))) throw new Error("This task is assigned to the agent. Settle its batch before changing the trigger.");
@@ -375,7 +413,10 @@ export default function contribute(server: PluginServerContext) {
   server.handle(rpc.checkPrActionRpc, async ({ workspaceId, actionId }) => { await requireReady(); return actions.check(workspaceId, actionId); });
   server.handle(rpc.requestReviewersRpc, async ({ workspaceId, prKey }) => { await requireReady(); const result = await actions.requestReviewers(workspaceId, prKey); void engine.tick(); return result; });
 
-  const agentActions = new AgentActions({ store, prActions: actions, engine, inbox });
+  const priorityStore = new PriorityStore(directory);
+  const agentActions = new AgentActions({ store, prActions: actions, engine, inbox, priorities: priorityStore });
+  server.handle(rpc.prioritiesRpc, async () => ({ items: await priorityStore.read() }));
+  server.handle(rpc.usageRpc, async () => usage.read());
   server.handle(rpc.agentActRpc, async ({ agentId, tool, args }, { paseo }) => {
     await requireReady(); seen(paseo);
     if (!(AGENT_TOOLS as readonly string[]).includes(tool)) throw new Error(`Unknown Follow-up tool ${tool}.`);
@@ -461,9 +502,9 @@ export default function contribute(server: PluginServerContext) {
       let w = saved.workspaces.find(w => w.enable_tracking && !w.archived && (w.mainAgentId === request.agentId || w.batches.some(b => b.recipientAgentId === request.agentId && !b.settledAt && b.tasks.every(t => t.kind === "inventory") && ["sending", "sent", "uncertain", "blocked"].includes(b.state))));
       if (!w && request.workspaceId && !saved.workspaces.some(w => w.id === request.workspaceId && (w.archived || w.mainAgentId !== request.agentId))) {
         const project = await gateway.projectForWorkspace(saved, request.workspaceId).catch(() => null);
-        if (project?.enable_default_tracking) {
+        if (project?.enable_default_tracking && !optedOut(saved, request.workspaceId)) {
           const rows = await gateway.discover(saved, request.workspaceId).catch(() => []);
-          await store.mutate(state => applyDiscovery(state, rows.filter(row => row.enable_default_tracking && (!row.projectId || state.projectDefaults?.[row.projectId] !== false)), Date.now()));
+          await store.mutate(state => applyDiscovery(state, rows.filter(row => followsByDefault(state, row)), Date.now()));
           const current = await store.snapshot();
           w = current.workspaces.find(w => w.enable_tracking && w.mainAgentId === request.agentId);
           if (!current.workspaces.some(w => w.id === request.workspaceId) && current.projectDefaults?.[project.id] !== false)

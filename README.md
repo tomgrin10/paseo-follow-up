@@ -24,9 +24,9 @@ Needs Node 22+ and an authenticated GitHub CLI (`gh`) on the daemon host. Merge 
 
 ## Use
 
-Open a workspace, click the Follow-up icon in its header (or press ⌘K / Ctrl+K and choose **Follow-up: dock the navigator here**), then **Track this workspace**. To track every workspace in a project, open the settings (the gear in the panel, or **Follow-up: project settings** in ⌘K) and turn the project on.
+Follow-up follows every workspace as soon as it has an agent; there is nothing to turn on. Open a workspace and click the Follow-up icon in its header (or press ⌘K / Ctrl+K and choose **Follow-up: open for this workspace**) to see that workspace's panel. Its **Home** button opens Home, the list of every workspace. To leave a workspace or a project out, open the settings (**Follow-up: settings** in ⌘K): **Following** has the global switches, **Workspace exceptions** the per-workspace ones.
 
-The panel reads top to bottom:
+The panel shows this workspace only, top to bottom: a **Home** button, the main agent's open ask (its brief, with the decision options and **Sign off**), then:
 
 - **Status.** How many PRs have merged, how many things need you, how many PRs need fixing, and a bar with one segment per PR in merge order. Below it, what the agent is doing right now.
 - **Needs you.** One row per decision, each with its button: answer the agent's question, send repairs to the main agent, merge an approved PR, resume after you stopped the agent, or retry a batch that didn't finish.
@@ -36,7 +36,7 @@ The panel reads top to bottom:
 
 The **Spec** chip in the header opens the page that sums up the workspace, usually the Claude artifact the main agent keeps up to date. The agent registers it with a tool call, Follow-up also picks up artifacts the workspace's sessions publish, and you can set, change or remove it under **Spec, agent and recovery**. Your link wins over the agent's, which wins over detection.
 
-![Four Follow-up panels side by side: a workspace that needs you, one where the agent is fixing two repairs, one that has shipped, and one that is not tracked yet](docs/screenshots/follow-up-states.png)
+![Four Follow-up panels side by side: a workspace that needs you, one where the agent is fixing two repairs and one that has shipped](docs/screenshots/follow-up-states.png)
 
 ### Questions
 
@@ -64,7 +64,7 @@ In the agent's chat, Follow-up's own tool calls collapse into one-line rows, you
 
 ![Follow-up rows and cards in an agent chat](docs/screenshots/follow-up-chat.png)
 
-On a phone the navigator opens as a tab, and the PR sheet and pill popover open as bottom sheets.
+On a phone the workspace panel opens as a tab, and the PR sheet and pill popover open as bottom sheets.
 
 ![Follow-up at phone width: the panel, a PR sheet and the pill popover](docs/screenshots/follow-up-mobile.png)
 
@@ -101,15 +101,22 @@ The Follow-up sidebar row (and ⌘K → **Follow-up: Home**) opens **Home**: eve
 - **The list**, grouped by what it needs from you: **Morning brief**, **Needs you** (blocking asks first: permissions, errors, questions; then decisions only you make, like merge and add reviewers; then finished turns to sign off, oldest first), **Follow-up is fixing** (repairs in flight), **Running**, **Waiting on others**, **Later** (snoozed) and **Quiet**, folded by project and paged, with merged and signed-off work marked ready to archive. Each row has the last ask or action, up to two badges, the PR with its checks, and the age.
 - **The detail pane** for the selected row: the brief (the ask, decisions as buttons), Allow / Deny for a pending permission, merge and add-reviewer actions, **Sign off**, **Sign off & next**, **Later…**, the agent's last few steps (read only for that agent), and a reply box. Sending a reply is you writing to the agent, so it clears Needs you. Only one button on screen is filled.
 - **The brief pane** when nothing is selected: a headline that names the first move, who you're waiting on, what cleared since the last workday, **Done while you were away** (what Follow-up did on its own, with a link to the full log) and how fresh Paseo and GitHub data is.
-- **Open full** opens the agent's chat and docks the **navigator** in that workspace's explorer column: the same list, compact, with this workspace's row expanded to its decisions, PR stack, tasks left, repair budget, activity and **Details** (the larger view). Its **Home** button goes back. The Follow-up header button re-docks it. On a phone, Home is the list and a row opens a full-height detail.
+- **Open full** opens the agent's chat and docks that workspace's own panel in its explorer column (its PR stack, tasks, questions, repairs, activity and **Details**). Its **Home** button goes back. On a phone, Home is the list and a row opens a full-height detail.
+
+#### Beta 2: search, sort, status at a glance
+
+- **Status strip**, pinned above the list: counts for **Needs you · Fixing · Running · Waiting · Quiet** (plus Later and "to archive" when there are any). A count shows only that group; press it again or **Show all** to go back. Zero counts stay, muted. The sidebar badge and the brief headline use the same counts.
+- **Provider limits** under it, from the [Smart Session](https://www.npmjs.com/package/paseo-smart-session) plugin: one line per provider, such as "Claude 5h 62% · 7d 41% · resets 14:10". Amber from 80%, red at the limit; tap a line to see each ZeroSub account. The age shows when the reading is older than 15 minutes. Without Smart Session the line isn't there.
+- **Search** ("Search workspaces, branches, PRs"; `/` or ⌘K → **Follow-up: Search** focuses it) matches workspace names, branches, PR numbers ("#1402" or "1402") and titles, agent and subagent titles, the project, Linear keys such as HER-1312, and the current ask. Words can come in any order, prefixes count and one typo is forgiven. Results are one ranked list (name above branch and PR above the ask, then recency) with the matched words marked and each row's group as a chip; archived workspaces come last. ↑/↓ move, Enter opens the result on the right, Esc clears.
+- **Sort** (the menu beside search, remembered on this device): **Priority** (default), **Recent**, **Oldest waiting**, **Name** and **By project**. It orders rows inside each group; groups stay in place and search ignores it. Priority means urgency: blocking asks, then decisions only you make, then finished turns; inside those, a big open question first, then the nearest task deadline, then the oldest ask. When an agent has ranked workspaces with `set_priorities` in the last 6 hours, Priority uses those scores inside Needs you (blocking asks still first), each row shows the ranker's one-line reason and source, and the menu says "Ranked 12m ago"; otherwise it says "By urgency". Follow-up never writes a reason itself.
 ![Home: the list grouped into Needs you, Follow-up is fixing, Running and Waiting on others, with a permission selected and Allow / Deny, Sign off and the agent's last steps on the right](docs/screenshots/follow-up-home.png)
 
-- ⌘K: **Follow-up: Home**, **Follow-up: Sign off & next**, **Follow-up: Later (tomorrow 09:00)**, **Follow-up: Next needs-you**, **Follow-up: Done while you were away**.
+- ⌘K: **Follow-up: Home**, **Follow-up: Search**, **Follow-up: Sign off & next**, **Follow-up: Later (tomorrow 09:00)**, **Follow-up: Next needs-you**, **Follow-up: Done while you were away**.
 
 Install the beta:
 
 ```sh
-paseo plugin update follow-through --version 1.3.0-beta.1
+paseo plugin update follow-through --version 1.3.0-beta.2
 # or, for a fresh install:
 paseo plugin install npm:paseo-follow-up@beta
 ```
@@ -125,7 +132,7 @@ Betas publish to npm's `beta` dist-tag, so `paseo plugin update` without `--vers
 ## How it works
 
 - The workspace's main agent owns its PRs, tasks, questions, the spec link and the Done call. Other agents in the workspace can register PRs and check status.
-- **Auto-send** is on for every workspace tracked for the first time (1.2.0-beta.4), so review threads and red CI go to the agent without you. Workspaces tracked before keep their setting. Turn it off per workspace and each repair batch waits for your click; with it on, Follow-up sends batches itself once the agent is idle, after fresh permission and Session Guard checks.
+- **Follow every workspace** (on by default since 1.3.0-beta.2): every workspace with an agent is followed, and **Send repairs automatically** (also on by default) means review threads and red CI go to the agent without you. The first start of 1.3.0-beta.2 backs up `state.json` to `state.before-follow-every.json.bak`, then turns following and auto-send on for every workspace Follow-up already knew. Turn auto-send off for one workspace under **Workspace exceptions** and each repair batch waits for your click; with it on, Follow-up sends batches itself once the agent is idle, after fresh permission and Session Guard checks.
 - Follow-up never merges, turns on merge when ready, requests reviewers or archives on its own. **Merge** re-checks the stack, lists any PRs underneath that would merge first, and asks again.
 - A merged PR is not the end: tasks such as production checks and open questions keep the workspace open until the main agent declares Done and everything has settled.
 - Answers go out only when you click Send. Follow-up never answers for you.
@@ -139,7 +146,8 @@ Tell an agent "the PRs look good, assign reviewers on all" and it can do it. Eve
 | `list_prs` | Reads tracked PRs across all workspaces (draft, checks, threads, reviewers, merge blockers). Filters: `needs_reviewers`, `ready_to_merge`, `workspace`. |
 | `add_reviewers` | **Add reviewers**, on one PR or many. Repository defaults, or the logins you name. |
 | `merge`, `enable_merge_when_ready`, `disable_merge_when_ready` | **Merge** and the PR sheet's merge-when-ready switch, with the same plan and blockers. |
-| `send_repairs`, `set_auto_send`, `clear_hold`, `retry_batch`, `track` | **Send**, the **Auto-send** switch, **Resume**, **Retry**, **Track this workspace**. |
+| `send_repairs`, `set_auto_send`, `clear_hold`, `retry_batch`, `track` | **Send**, the **Auto-send** switch, **Resume**, **Retry**, following a workspace again after an opt-out. |
+| `set_priorities` | Stores external priorities for Home's Priority sort: per workspace a score 0–100, a one-line reason and sources (Linear, Slack, planning, GitHub, Paseo). Plans first; `confirm: true` with the plan id stores them. Used for 6 hours. |
 | `inbox_list`, `sign_off`, `snooze`, `set_finish_flags` | The Needs-you list, **Sign off**, **Later** and **Don't flag finishes**, for other agents only. |
 
 Tools that act on a list, and merge, return a dry run first and act only when called again with `confirm: true` and that plan's id. Their descriptions tell the agent to use them only when you asked. An agent can't sign itself off. Recovery agents, contributors and subagents don't get these tools, and the daemon checks the caller again on every call.

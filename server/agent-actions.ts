@@ -9,6 +9,7 @@ import type { Pr, State, Workspace } from "../shared/model";
 import { defaultReviewers, noReviewers } from "../shared/reviewers";
 import { findWorkspace } from "./engine";
 import type { InboxAction } from "./inbox";
+import { priorityInputSchema, type Priority } from "../shared/priorities";
 
 /**
  * Agent parity: every action the developer can click in Follow-up has a tool that runs the same server path.
@@ -18,14 +19,14 @@ import type { InboxAction } from "./inbox";
  * return a dry-run plan first; `confirm: true` with that plan's id runs it. Every agent write is recorded in
  * the inbox ledger as `by: "agent:<id>"`, which never counts as the developer writing to the agent.
  */
-export const AGENT_TOOLS = ["list_prs", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "track", "inbox_list", "sign_off", "snooze", "set_finish_flags"] as const;
+export const AGENT_TOOLS = ["list_prs", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "track", "inbox_list", "sign_off", "snooze", "set_finish_flags", "set_priorities"] as const;
 export type AgentTool = typeof AGENT_TOOLS[number];
 /** Tools that only read. */
 export const READ_ONLY_TOOLS: readonly AgentTool[] = ["list_prs", "inbox_list"];
 /** Tools that can't be undone from Follow-up. */
 export const DESTRUCTIVE_TOOLS: readonly AgentTool[] = ["merge"];
 /** Tools that plan first and run only with `confirm: true` and the plan's id. */
-export const PLANNED_TOOLS: readonly AgentTool[] = ["add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "sign_off", "snooze", "set_finish_flags"];
+export const PLANNED_TOOLS: readonly AgentTool[] = ["add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "sign_off", "snooze", "set_finish_flags", "set_priorities"];
 
 /** The developer's control panel switches (Auto-send, Resume, Retry). The button and the agent tool share it. */
 export function controlWorkspace(state: State, input: { workspaceId: string; enable_auto_sends?: boolean; clearHold?: boolean; retryBatchId?: string }, now = Date.now()): Workspace {
@@ -61,6 +62,7 @@ export type AgentActionDeps = {
     noteAction(by: string, agentId: string, action: string): Promise<void>;
   };
   reviewersFor?: (repo: string) => { name: string; login: string }[];
+  priorities?: { write(batch: Priority[], replace: boolean): Promise<Priority[]> };
   now?: () => number;
 };
 
@@ -84,6 +86,7 @@ export const TOOL_INPUT: Record<AgentTool, z.ZodType> = {
   sign_off: z.strictObject({ agentIds: agentIds.optional(), ...confirm }),
   snooze: z.strictObject({ agentIds: agentIds.optional(), until: z.string().trim().min(1).max(200).optional(), ...confirm }),
   set_finish_flags: z.strictObject({ agentIds: agentIds.optional(), value: z.boolean().optional(), ...confirm }),
+  set_priorities: z.strictObject({ priorities: z.array(priorityInputSchema).max(200).optional(), replace: z.boolean().optional(), ...confirm }),
 };
 
 /** One PR as an agent sees it: enough to decide "add reviewers on all" or "merge what's ready". */
@@ -122,6 +125,7 @@ export class AgentActions {
       case "enable_merge_when_ready": return this.planPr(caller, tool, "enable_mwr", args);
       case "disable_merge_when_ready": return this.planPr(caller, tool, "disable_mwr", args);
       case "sign_off": case "snooze": case "set_finish_flags": return this.planInbox(caller, tool, args);
+      case "set_priorities": return this.planPriorities(caller, args as { priorities?: z.infer<typeof priorityInputSchema>[]; replace?: boolean });
       case "send_repairs": return this.sendRepairs(caller, args as { workspace: string; batchId?: string });
       case "set_auto_send": return this.control(caller, tool, { workspaceId: args.workspace, enable_auto_sends: args.value });
       case "clear_hold": return this.control(caller, tool, { workspaceId: args.workspace, clearHold: true });
@@ -266,5 +270,29 @@ export class AgentActions {
       return { results };
     }) : null;
     return { dryRun: true, planId, rows: plan.map(({ seq: _seq, ...p }) => p), next: planId ? `Only on the developer's request: call ${tool} with confirm=true and planId=${planId}.` : "Nothing to do." };
+  }
+
+  /**
+   * Externally supplied priorities for Home's Priority sort. The dry run resolves each workspace (id or exact title)
+   * and shows what Home will display; confirm stores them. replace=true drops workspaces the batch leaves out.
+   */
+  private async planPriorities(caller: string, args: { priorities?: z.infer<typeof priorityInputSchema>[]; replace?: boolean }) {
+    if (!args.priorities?.length) throw new Error("set_priorities: give priorities [{ workspace, score 0-100, reason (one line), sources [{ kind: linear|slack|planning|github|paseo, label, url? }] }].");
+    if (!this.d.priorities) throw new Error("set_priorities is unavailable on this host.");
+    const state = await this.d.store.snapshot();
+    const live = state.workspaces.filter(w => !w.archived);
+    const at = new Date(this.now()).toISOString();
+    const rows = args.priorities.map(p => {
+      const matches = live.filter(w => w.id === p.workspace || w.title === p.workspace);
+      const blockers = !matches.length ? ["No workspace has this id or title."] : matches.length > 1 ? ["Several workspaces have this title; use the id."] : [];
+      return { workspace: p.workspace, workspaceId: matches.length === 1 ? matches[0].id : null, title: matches.length === 1 ? matches[0].title : null, score: p.score, reason: p.reason, sources: p.sources, blockers };
+    });
+    const ready = rows.filter(r => !r.blockers.length);
+    const replace = !!args.replace;
+    const planId = ready.length ? this.plan(caller, "set_priorities", async () => {
+      const stored = await this.d.priorities!.write(ready.map(r => ({ workspaceId: r.workspaceId!, score: r.score, reason: r.reason, sources: r.sources, at, by: `agent:${caller}` })), replace);
+      return { stored: ready.length, total: stored.length, rankedAt: at };
+    }) : null;
+    return { dryRun: true, planId, replace, rows, next: planId ? `Call set_priorities with confirm=true and planId=${planId} to store them. Home's Priority sort uses them for 6 hours.` : "Nothing to store." };
   }
 }
