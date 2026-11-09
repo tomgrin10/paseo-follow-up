@@ -92,6 +92,34 @@ try {
       const status = JSON.parse(reply.content[0].text);
       assert.equal(status.id, created[0].workspaceId, "the daemon's caller identity resolves the agent's own workspace");
       result.call = { tool: "follow_workspace_status", workspaceId: status.id, detail: status.detail };
+
+      // A plugin reload (every update) drops request.tools from open sessions; Paseo 0.15.2 re-attaches them only when a
+      // session reopens, which it does before that agent's next prompt.
+      const data = join(home, "plugin-data/follow-through");
+      const instanceBefore = JSON.parse(await readFile(join(data, "tools-instance.json"), "utf8")).instance;
+      await cli("plugin", "reload", "follow-through");
+      let instanceAfter = instanceBefore;
+      for (let i = 0; i < 80 && instanceAfter === instanceBefore; i++) { await sleep(250); instanceAfter = JSON.parse(await readFile(join(data, "tools-instance.json"), "utf8").catch(() => "{}")).instance ?? instanceBefore; }
+      assert.notEqual(instanceAfter, instanceBefore, "the reloaded worker records a new instance");
+      // Mid-turn: the old registration is gone, and the hook can tell (its marker names the previous worker)...
+      const stale = await mcp(server, session, { id: 4, method: "tools/call", params: { name: "follow_workspace_status", arguments: {} } }).then(r => r?.isError ? r.content?.[0]?.text ?? "error" : null, error => error.message);
+      assert.match(stale ?? "", /not found|unavailable/i, "the detached tool fails until the session reopens");
+      assert.equal(JSON.parse(await readFile(join(data, "hook-state", `native-${created[0].agentId}.json`), "utf8")).instance, instanceBefore, "the hook sees the tools as detached");
+      // ...and the bridge the hook points to works meanwhile, with the agent's own launch environment.
+      for (let i = 0; i < 80; i++) { try { await readFile(join(data, "mcp.mjs")); if (JSON.parse(await readFile(join(data, "hooks-enabled.json"), "utf8")).expiresAt > Date.now()) break; } catch {} await sleep(250); }
+      const bridged = JSON.parse((await exec(process.execPath, [join(data, "mcp.mjs"), "call", "workspace_status", "{}", "--compact"], { env: { ...env, ...configs[0].env, PASEO_DAEMON_URL: url, PASEO_HOME: home }, timeout: 60_000 })).stdout);
+      assert.equal(bridged.id, created[0].workspaceId, "the bridge serves the same tool mid-turn");
+      // The next prompt reopens the session under the new worker, and the native tools answer again.
+      await client.sendAgentMessage(created[0].agentId, "Synthetic follow-up prompt");
+      let reopened = null;
+      for (let i = 0; i < 80 && !reopened; i++) { await sleep(250); const marker = JSON.parse(await readFile(join(data, "hook-state", `native-${created[0].agentId}.json`), "utf8")); if (marker.instance === instanceAfter) reopened = JSON.parse(await readFile(join(home, `fixture-agent-config-${created[0].agentId}.json`), "utf8")); }
+      assert.ok(reopened, "the session reopened under the reloaded worker");
+      const server2 = Object.values(reopened.mcpServers ?? {}).find(s => s?.type === "http"); const session2 = {};
+      await mcp(server2, session2, { id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "follow-native-check", version: "1" } } });
+      await mcp(server2, session2, { method: "notifications/initialized" });
+      const again = JSON.parse((await mcp(server2, session2, { id: 2, method: "tools/call", params: { name: "follow_workspace_status", arguments: {} } })).content[0].text);
+      assert.equal(again.id, created[0].workspaceId, "follow_workspace_status works again after the reload");
+      result.reload = { midTurnNative: "fails (detached)", midTurnBridge: "ok", afterNextPrompt: "ok" };
     }
   }
   const pid = Number((await readFile(join(home, "plugin-data/follow-through/worker.lock"), "utf8").catch(() => "")).split(":")[0]);

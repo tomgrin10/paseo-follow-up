@@ -33,8 +33,7 @@ token code of your own.
 - **Memory.** Zero per agent; the calls run in the plugin process you already have.
 - **Identity.** `context.agent.id` comes from the daemon's per-agent MCP endpoint and token. A stdio bridge only knows
   `PASEO_AGENT_ID` from its environment, and any local process holding the daemon password could claim any id.
-- **Lifecycle.** Tools are detached when the agent closes or the plugin reloads (the daemon re-opens stale plugin
-  sessions), so nothing outlives your worker.
+- **Lifecycle.** Tools are detached when the agent closes or the plugin reloads, so nothing outlives your worker.
 
 ## Things to get right
 
@@ -59,7 +58,21 @@ token code of your own.
 6. **Tell the hooks and UI which names the agent has.** Sessions opened before the upgrade keep the old names
    until they reopen. Follow-up sets `FOLLOW_THROUGH_TOOLS=native|stdio` in the agent env and matches both
    name forms wherever it reads tool calls.
-7. **Reuse your handlers.** Follow-up records every `server.handle` handler in a map and calls it in-process from
+7. **Survive your own updates.** A plugin reload (every `paseo plugin update`) drops the tools of every open session,
+   and Paseo 0.15.2 has no way for a plugin to re-attach them: it reopens a stale session only before that agent's next
+   prompt (`reloadStalePluginSession`). An agent mid-turn keeps listing the tools and every call fails with
+   `-32602 Tool <name> not found` until the turn ends. Follow-up writes a per-worker instance id
+   (`tools-instance.json`) and, at each native attach, the instance that attached that session
+   (`hook-state/native-<agentId>.json`); when they differ the agent hook tells the agent once to use the stdio bridge
+   until the session reopens, and names the bridge's tools in its Stop text. `scripts/check-native-tools.mjs` reloads the
+   plugin under an open session and checks all three: the native call fails, the bridge works, and the native call
+   works again after the next prompt.
+8. **Gate on records, not tool names.** Anything that must know whether the agent did something (Follow-up's Stop hook:
+   did it sync?) should read a record the RPC handler wrote, because the same call can arrive natively, through the
+   stdio server, or through a shell bridge spelled however the agent likes (`node "$FOLLOW_THROUGH_CLI" call …`).
+   Follow-up dates a shell call from the end of the previous tool call, so a call that confirmed sync while it ran
+   satisfies the check.
+9. **Reuse your handlers.** Follow-up records every `server.handle` handler in a map and calls it in-process from
    `execute` with `{ paseo: context.paseo }`, so the stdio bridge and the native tools run the same code.
 
 ## Testing it
