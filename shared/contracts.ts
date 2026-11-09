@@ -138,6 +138,8 @@ export const needsYouRpc = defineRpc({ name: "follow.needs-you", input: z.strict
 export const inboxBriefRpc = defineRpc({ name: "follow.inbox-brief", input: z.strictObject({ agentId: idSchema }), output: z.object({ brief: briefSchema.nullable() }) });
 export const briefActionRpc = defineRpc({ name: "follow.brief-action", input: z.strictObject({
   agentId: idSchema, briefId: z.string().max(300), decisionId: z.string().max(20).optional(), choice: z.string().regex(/^[A-Z]$/).optional(), move: z.enum(["retry"]).optional(),
+  /** 1.4.0: every pick of a multi-decision card, sent together. */
+  choices: z.array(z.object({ decisionId: z.string().max(20), choice: z.string().regex(/^[A-Z]$/) })).min(1).max(10).optional(),
 }), output: z.object({ brief: briefSchema }) });
 
 // Agent parity: one RPC carries every agent tool; the server runs the same path as the developer's button.
