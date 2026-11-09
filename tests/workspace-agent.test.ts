@@ -10,7 +10,7 @@ import { Store } from "../server/store";
 import { applyDiscovery } from "../server/discovery";
 import type { State } from "../shared/model";
 
-const agent = (id: string, workspaceId: string, parent?: string): Agent => ({ id, workspaceId, createdAt: "2026-01-01T00:00:00Z", status: "idle", labels: parent ? { "paseo.parent-agent-id": parent } : {}, lastUserMessageAt: null, pendingPermissions: [], provider: "fixture", cwd: "/fixture" });
+const agent = (id: string, workspaceId: string, parent?: string): Agent => ({ id, workspaceId, createdAt: "2026-01-01T00:00:00Z", status: "idle", activeTurn: null, labels: parent ? { "paseo.parent-agent-id": parent } : {}, lastUserMessageAt: null, pendingPermissions: [], provider: "fixture", cwd: "/fixture" });
 test("a parent in another workspace is launch provenance; a parent in the same workspace is a child scope", async () => {
   const caller = agent("created", "new-workspace", "creator");
   const parent = agent("creator", "creator-workspace");
