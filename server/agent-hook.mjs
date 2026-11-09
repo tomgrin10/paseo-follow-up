@@ -22,6 +22,43 @@ export function shouldNudge({ provider, brief, agentId, contributor, recovery, s
   if (!turn || turn.stopped || !turn.startedAt) return false;
   return !(called && called.at >= turn.startedAt);
 }
+/**
+ * The Overseer's per-turn digest (1.4.0-beta.0). The daemon rewrites overseer-digest.json only when it changes (one line and a hash
+ * per workspace); this diffs it against what the Overseer saw last turn. Pure, so size and paging are testable.
+ * Kept to about 3k tokens: at most 20 needs lines and 30 changes, then a pointer to the workstreams tool.
+ */
+export function overseerDigest(file, seen, now = Date.now(), { needsMax = 20, changedMax = 30, restingMax = 40, chars = 12_000 } = {}) {
+  const all = Array.isArray(file?.rows) ? file.rows : [];
+  const rows = all.filter(r => !r.resting);
+  const resting = all.filter(r => r.resting);
+  const prior = seen && typeof seen.rows === "object" && seen.rows ? seen.rows : null;
+  const age = Math.max(0, Math.round((now - Date.parse(file?.at ?? "")) / 1000));
+  const lines = [`Follow-up digest (last change ${Number.isFinite(age) ? `${age}s` : "?"} ago): ${file?.total ?? all.length} workspaces, ${file?.needs ?? 0} need Tom. Paging: workstreams(page, group, query).`];
+  const needs = rows.filter(r => r.group === "needs");
+  if (needs.length) {
+    lines.push(`Needs Tom (${needs.length}):`);
+    for (const r of needs.slice(0, needsMax)) lines.push(`- ${r.line}`);
+    if (needs.length > needsMax) lines.push(`- …${needs.length - needsMax} more: workstreams(group="needs")`);
+  } else lines.push("Nothing needs Tom right now.");
+  if (!prior) {
+    const active = rows.filter(r => r.group === "running" || r.group === "fixing");
+    lines.push(`First turn. Running now (${active.length}):`);
+    for (const r of active.slice(0, changedMax)) lines.push(`- ${r.line}`);
+    if (active.length > changedMax) lines.push(`- …${active.length - changedMax} more: workstreams(group="running")`);
+  } else {
+    const current = new Set(all.map(r => r.id));
+    const changed = rows.filter(r => prior[r.id] !== r.hash && r.group !== "needs");
+    const gone = Object.keys(prior).filter(id => !current.has(id));
+    lines.push(changed.length || gone.length ? `Changed since your last turn (${changed.length + gone.length}):` : "No other changes since your last turn.");
+    for (const r of changed.slice(0, changedMax)) lines.push(`- [${r.group}] ${r.line}`);
+    if (changed.length > changedMax) lines.push(`- …${changed.length - changedMax} more changed: workstreams()`);
+    if (gone.length) lines.push(`- ${gone.length} workspace${gone.length === 1 ? "" : "s"} archived or removed: ${gone.slice(0, 5).join(", ")}`);
+  }
+  if (resting.length) lines.push(`Resting (${resting.length}; agents likely unloaded, sending wakes them): ${resting.slice(0, restingMax).map(r => r.line).join("; ")}${resting.length > restingMax ? `; …${resting.length - restingMax} more: workstreams()` : ""}`);
+  let text = "";
+  for (const l of lines) { if (text.length + l.length + 1 > chars) { text += "- …truncated: use workstreams()\n"; break; } text += l + "\n"; }
+  return { text: text.trimEnd(), seen: { at: now, rows: Object.fromEntries(all.map(r => [r.id, r.hash])) } };
+}
 const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
 async function json(path) { return JSON.parse(await readFile(path, "utf8")); }
 async function save(path, value) {
@@ -59,6 +96,17 @@ async function main() {
   if (event.agent_id || event.hook_event_name === "SubagentStop") return;
   const lease = await json(join(directory, "hooks-enabled.json"));
   if (lease.expiresAt < Date.now() || !lease.clientEntry) return;
+  // The Overseer: a fresh digest at the start of every turn; no sidebar bookkeeping and no Stop-hook nudge.
+  if (process.env.FOLLOW_THROUGH_OVERSEER === "1") {
+    if (event.hook_event_name !== "UserPromptSubmit") return;
+    const file = await json(join(directory, "overseer-digest.json")).catch(() => null);
+    if (!file || file.agentId !== agentId) return;
+    const seenPath = join(directory, "hook-state", `overseer-seen-${agentId}.json`);
+    const digest = overseerDigest(file, await json(seenPath).catch(() => null));
+    await save(seenPath, digest.seen);
+    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: digest.text } }) + "\n");
+    return;
+  }
   // scopes.json is a few KB; this hook runs on every tool call. Older workers don't write it: read state.json.
   const scopes = await json(join(directory, "scopes.json")).catch(() => null);
   let workspace = null; let contributor = false;

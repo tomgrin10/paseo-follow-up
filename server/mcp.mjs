@@ -51,8 +51,18 @@ const actionTools = [
   ["set_finish_flags", "Turn finish flags on or off for other agents, like Don't flag finishes." + ask, "follow.agent-act", { agentIds: array, value: boolean, ...planned }, []],
   ["set_priorities", "Rank workspaces for Home's Priority sort: per workspace (id or exact title) a score 0-100, a one-line reason the developer sees, and its sources [{kind: linear|slack|planning|github|paseo, label, url}]. replace=true drops workspaces you leave out. Used for 6 hours. Returns a dry run; store it with confirm=true and the planId.", "follow.agent-act", { priorities: { type: "array", items: { type: "object", properties: { workspace: string, score: { type: "integer", minimum: 0, maximum: 100 }, reason: { ...string, maxLength: 140 }, sources: { type: "array", items: { type: "object", properties: { kind: { type: "string", enum: ["linear", "slack", "planning", "github", "paseo"] }, label: string, url: string }, required: ["kind", "label"] } } }, required: ["workspace", "score", "reason"] } }, replace: boolean, ...planned }, ["priorities"]],
 ];
+// The Overseer's routing tools (1.4.0-beta.0): only in the session Follow-up started as its Overseer.
+const overseerTools = [
+  ["workstreams", "Every workspace Tom has, as Home groups them (needs, fixing, running, waiting, later, quiet): title, branch, PRs with checks, main agent and status, current ask, last activity, priority and reason, Linear keys. Paged (page, size ≤100); filter by group or query (name, branch, key, #PR).", "follow.overseer-act", { page: integer, size: integer, group: { type: "string", enum: ["needs", "fixing", "running", "waiting", "later", "quiet"] }, query: string }, []],
+  ["agent_digest", "One agent's last steps (default 10) summarised, its status and its open asks to Tom (flag, decisions, questions). Use before routing when the digest isn't enough.", "follow.overseer-act", { agentId: string, steps: integer }, ["agentId"]],
+  ["route_candidates", "Score every workspace for Tom's ask by Linear key, PR number, branch, workspace name, open asks and recent activity. Returns the top 3 and whether one is a confident match.", "follow.overseer-act", { ask: string }, ["ask"]],
+  ["send_to_agent", "Forward Tom's words to the agent that owns the work, prefixed \"From Tom via Overseer:\". reply_to_ask=true only when Tom is answering that agent's open ask (it then clears its Needs-you flag). Then tell Tom where it went in one line.", "follow.overseer-act", { agentId: string, text: string, reply_to_ask: boolean }, ["agentId", "text"]],
+  ["start_workspace", "Start a new workspace with an agent for a task, branched off main with the default model. Only when Tom asked for a new workspace or picked it. Returns a dry run (title from the task and Linear key, branch, project); run it with confirm=true and the planId.", "follow.overseer-act", { task: string, title: string, project: string, linear_key: string, base: string, planId: string, confirm: boolean }, []],
+];
+const overseerNames = new Set(overseerTools.map(t => t[0]));
+const overseerInstruction = "You are Follow-up's Overseer. Route Tom's asks with route_candidates and send_to_agent; ask with needs_you kind=decision when unsure; start_workspace only when Tom asked or approved. Never merge, post to people or archive.";
 const actionNames = new Set(actionTools.map(t => t[0]));
-const readOnlyTools = new Set(["workspace_status", "list_prs", "inbox_list"]);
+const readOnlyTools = new Set(["workspace_status", "list_prs", "inbox_list", "workstreams", "agent_digest", "route_candidates"]);
 const destructiveTools = new Set(["merge"]);
 const actionInstruction = "Follow-up's action tools let you do what the developer can click, across every tracked workspace: list_prs and inbox_list to read; add_reviewers, merge, enable/disable_merge_when_ready, send_repairs, set_auto_send, clear_hold, retry_batch, track, set_priorities, and sign_off/snooze/set_finish_flags for other agents. Use them only when the developer asks (\"the PRs look good, assign reviewers on all\": list_prs needs_reviewers=true, add_reviewers with those keys, then confirm the plan). Planned tools return a dry run; run it with confirm=true and its planId. Never sign yourself off.";
 
@@ -86,7 +96,15 @@ async function actionsEnabled() {
   } catch { return false; }
 }
 /** The bridge input for a tool: action tools travel as { tool, args } through follow.agent-act. */
-const callInput = (tool, input) => actionNames.has(tool[0]) ? { tool: tool[0], args: input } : input;
+const callInput = (tool, input) => actionNames.has(tool[0]) || overseerNames.has(tool[0]) ? { tool: tool[0], args: input } : input;
+/** The Overseer's routing tools: the session Follow-up launched as its Overseer, while Follow-up runs. */
+async function overseerEnabled() {
+  if (process.env.FOLLOW_THROUGH_OVERSEER !== "1" || !process.env.PASEO_AGENT_ID) return false;
+  try {
+    const lease = JSON.parse(await readFile(join(process.env.PASEO_HOME ?? join(homedir(), ".paseo"), "plugin-data/follow-through/hooks-enabled.json"), "utf8"));
+    return lease.expiresAt > Date.now();
+  } catch { return false; }
+}
 let scopeCache = null;
 async function scopeOf(directory, agentId) {
   try {
@@ -199,10 +217,10 @@ async function call(method, input) {
 
 const command = process.argv[2];
 if (command === "list" || command === "--help" || command === "help") {
-  process.stdout.write(command === "list" ? JSON.stringify({ tools: schemas(toolList(undefined, false, true, false, true)) }, null, 2) + "\n" : "Usage: node mcp.mjs list | call <tool> '<json>' [--compact]\nNative MCP returns compact receipts; workspace_status({detail:full}) requests complete history. CLI calls retain full replies unless --compact is supplied.\n");
+  process.stdout.write(command === "list" ? JSON.stringify({ tools: schemas([...toolList(undefined, false, true, false, true), ...overseerTools]) }, null, 2) + "\n" : "Usage: node mcp.mjs list | call <tool> '<json>' [--compact]\nNative MCP returns compact receipts; workspace_status({detail:full}) requests complete history. CLI calls retain full replies unless --compact is supplied.\n");
 } else if (command === "call") {
   try {
-    const tool = toolList(undefined, false, await briefEnabled(), false, await actionsEnabled()).find(t => t[0] === process.argv[3]);
+    const tool = [...toolList(undefined, false, await briefEnabled(), false, await actionsEnabled()), ...(await overseerEnabled() ? overseerTools : [])].find(t => t[0] === process.argv[3]);
     if (!tool) throw new Error("Unknown tool. Run list for names and input schemas.");
     const input = JSON.parse(process.argv[4] ?? "{}");
     validate(input, schemas([tool])[0].inputSchema);
@@ -216,7 +234,7 @@ if (command === "list" || command === "--help" || command === "help") {
   const lines = createInterface({ input: process.stdin });
   let tail = Promise.resolve(), initialized = false, lastScope = null;
   const timer = process.env.PASEO_AGENT_ID ? setInterval(() => {
-    void (async () => { const current = `${await scope()}:${await briefEnabled()}:${await actionsEnabled()}`; if (initialized && current !== lastScope) process.stdout.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/tools/list_changed" }) + "\n"); lastScope = current; })().catch(() => {});
+    void (async () => { const current = `${await scope()}:${await briefEnabled()}:${await actionsEnabled()}:${await overseerEnabled()}`; if (initialized && current !== lastScope) process.stdout.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/tools/list_changed" }) + "\n"); lastScope = current; })().catch(() => {});
   }, 2000) : null;
   timer?.unref(); lines.on("close", () => { if (timer) clearInterval(timer); });
   lines.on("line", line => {
@@ -229,10 +247,11 @@ if (command === "list" || command === "--help" || command === "help") {
         const role = await scope(request.method === "initialize" || request.method === "tools/list");
         const brief = await briefEnabled();
         const acting = await actionsEnabled();
-        const available = role ? toolList(role === "recovery", role === "contributor", brief, false, acting) : toolList(false, false, brief, true, acting);
+        const overseeing = await overseerEnabled();
+        const available = [...(role ? toolList(role === "recovery", role === "contributor", brief, false, acting) : toolList(false, false, brief, true, acting)), ...(overseeing ? overseerTools : [])];
         if (request.method === "initialize") {
-          initialized = true; lastScope = `${role}:${brief}:${acting}`;
-          result = { protocolVersion: request.params?.protocolVersion ?? "2024-11-05", capabilities: { tools: { listChanged: true } }, serverInfo: { name: "paseo-follow-through", version: "0.3.5" }, instructions: (role ? (role === "contributor" ? "Register PRs this session submits, including from secondary git worktrees. Read workspace_status and call sync_workspace before finishing. Goal, task, scope and completion changes remain with the designated main agent." : role === "recovery" ? "Recover tracking metadata from evidence, acknowledge your assigned batch, and leave completion to the main agent." : "Keep workspace follow-through updated after PR submission and scope changes. Read workspace_status after compaction. Track all post-merge work. When a decision needs the developer, ask it with ask_question (lettered options and a recommendation) and follow the question mode in its reply. If you keep a spec artifact for this workspace, register its link once with set_spec. " + batchInstructions) + " Perform bookkeeping silently: no sidebar-update announcements, plugin-status commentary or final sidebar recap. Put receipts and summaries in tools. Report actual work outcomes or decisions/blockers; discuss sidebar status only when explicitly asked." : brief ? "" : "Follow-through tools are available to tracked workspace root agents and active recovery agents; contributor sessions receive PR registration and status tools.") + (brief && role !== "contributor" && role !== "recovery" ? (role ? " " : "") + needsYouInstruction : "") + (acting && role !== "contributor" && role !== "recovery" ? " " + actionInstruction : "") };
+          initialized = true; lastScope = `${role}:${brief}:${acting}:${overseeing}`;
+          result = { protocolVersion: request.params?.protocolVersion ?? "2024-11-05", capabilities: { tools: { listChanged: true } }, serverInfo: { name: "paseo-follow-through", version: "0.3.5" }, instructions: (role ? (role === "contributor" ? "Register PRs this session submits, including from secondary git worktrees. Read workspace_status and call sync_workspace before finishing. Goal, task, scope and completion changes remain with the designated main agent." : role === "recovery" ? "Recover tracking metadata from evidence, acknowledge your assigned batch, and leave completion to the main agent." : "Keep workspace follow-through updated after PR submission and scope changes. Read workspace_status after compaction. Track all post-merge work. When a decision needs the developer, ask it with ask_question (lettered options and a recommendation) and follow the question mode in its reply. If you keep a spec artifact for this workspace, register its link once with set_spec. " + batchInstructions) + " Perform bookkeeping silently: no sidebar-update announcements, plugin-status commentary or final sidebar recap. Put receipts and summaries in tools. Report actual work outcomes or decisions/blockers; discuss sidebar status only when explicitly asked." : brief ? "" : "Follow-through tools are available to tracked workspace root agents and active recovery agents; contributor sessions receive PR registration and status tools.") + (brief && role !== "contributor" && role !== "recovery" ? (role ? " " : "") + needsYouInstruction : "") + (acting && role !== "contributor" && role !== "recovery" ? " " + actionInstruction : "") + (overseeing ? " " + overseerInstruction : "") };
         } else if (request.method === "ping") result = {};
         else if (request.method === "tools/list") result = { tools: schemas(available) };
         else if (request.method === "tools/call") {
