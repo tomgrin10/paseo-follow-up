@@ -5,7 +5,7 @@ import { Icon, useToast } from "@getpaseo/plugin/client/ui";
 import { useQuery } from "@tanstack/react-query";
 import { browserStatusRpc, inboxBriefRpc } from "../shared/contracts";
 import { needsYou } from "../shared/attention";
-import { briefPane, followUpLog, lastWorkdayEnd, nextNeeds, paneButtons, sinceLabel, tailSteps, type HomeModel, type LogLine, type TailStep, type Workstream } from "../shared/home";
+import { briefPane, followUpLog, lastWorkdayEnd, nextNeeds, paneButtons, sinceLabel, tailSteps, type HomeGroupId, type HomeModel, type LogLine, type TailStep, type Workstream } from "../shared/home";
 import { age, snoozeUntil, type InboxRow } from "../shared/inbox";
 import { errorText } from "../shared/errors";
 import { BriefCard, type BriefDeps } from "./brief";
@@ -14,6 +14,7 @@ import { NeedsYouList } from "./needs-you";
 import { PrSheet } from "./pr-sheet";
 import { QuestionSheet } from "./questions";
 import { Age, BadgeView, BRIEF_KEY, glyphColor, HomeList, PrChipView } from "./home-list";
+import { ListTop, SearchField, SortMenu, StatusStrip, UsageMeters, useOmnibox, useSlashToFocus } from "./home-chrome";
 import { useHomeModel, useTick, type HomeSources } from "./home-data";
 import { useInbox, UndoBar, useNextRelay } from "./inbox";
 import { Spinner } from "./motion";
@@ -25,7 +26,7 @@ const mono = Platform.OS === "ios" ? "Menlo" : "ui-monospace, SFMono-Regular, Me
 export type HomeDeps = {
   sources: HomeSources;
   openSettings(): void;
-  /** Docks the navigator in a workspace's explorer column. */
+  /** Docks the workspace's own panel in its explorer column. */
   openPanel(workspaceId: string): void;
   openLog(): void;
   openHome(): void;
@@ -42,6 +43,9 @@ export function FollowHome(props: PluginScreenProps & { deps: HomeDeps }) {
   const c = theme.colors;
   const compact = layout.compact;
   const model = useHomeModel(deps.sources);
+  const omnibox = useOmnibox(model, deps.sources);
+  useSlashToFocus(omnibox, params.view !== "log");
+  const [filter, setFilter] = useState<HomeGroupId | null>(null);
   const [selected, setSelected] = useState<string | null>(() => params.select ? `agent:${params.select}` : null);
   const openAgentRow = useMemo(() => navigation ? (row: InboxRow) => navigation.openAgent({ agentId: row.agentId }) : undefined, [navigation]);
   useNextRelay(inbox, params, openAgentRow);
@@ -56,7 +60,7 @@ export function FollowHome(props: PluginScreenProps & { deps: HomeDeps }) {
   const openFull = useCallback((s: Workstream) => {
     if (!navigation) return;
     if (s.agentId) navigation.openAgent({ agentId: s.agentId }); else if (s.workspaceId) navigation.openWorkspace({ workspaceId: s.workspaceId });
-    // The explorer needs the workspace route first; then dock the navigator beside the chat (design §2 B).
+    // The explorer needs the workspace route first; then dock that workspace's panel beside the chat.
     if (!compact && s.workspaceId) { const id = s.workspaceId; setTimeout(() => deps.openPanel(id), 900); }
   }, [navigation, compact, deps]);
   const signOffNext = useCallback((s: Workstream) => {
@@ -71,7 +75,15 @@ export function FollowHome(props: PluginScreenProps & { deps: HomeDeps }) {
     ? <DetailPane key={current.key} s={current} model={model} theme={theme} compact={compact} deps={deps} openFull={openFull} signOffNext={signOffNext} onBack={compact ? () => setSelected(null) : undefined} />
     : <BriefPane theme={theme} compact={compact} pane={pane} onSelect={key => setSelected(key)} openLog={deps.openLog} sources={deps.sources} />;
   const list = <HomeList model={model} theme={theme} dense={compact} touch={compact} selectedKey={selected} onSelect={onSelect} briefLine={briefLine}
-    header={<ListHeader theme={theme} compact={compact} onSettings={deps.openSettings} needs={model.needs} />} />;
+    results={omnibox.results} activeResult={omnibox.active} onResult={item => setSelected(item.key)} filter={filter}
+    top={<ListTop theme={theme} dense={compact} title={<ListHeader theme={theme} compact={compact} onSettings={deps.openSettings} />}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: compact ? 12 : 16 }}>
+        <SearchField theme={theme} omnibox={omnibox} dense={compact} onEnter={item => setSelected(item.key)} />
+        <SortMenu theme={theme} mode={model.sort} onChange={deps.sources.extras.setSort} rankedAt={model.rankedAt} touch={compact} />
+      </View>
+      {!omnibox.results && <StatusStrip theme={theme} model={model} filter={filter} onFilter={setFilter} touch={compact} dense={compact} />}
+      <UsageMeters theme={theme} sources={deps.sources} dense={compact} />
+    </ListTop>} />;
 
   if (compact) return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
     {current ? detail : list}
@@ -86,10 +98,10 @@ export function FollowHome(props: PluginScreenProps & { deps: HomeDeps }) {
   </View>;
 }
 
-function ListHeader({ theme, compact, onSettings, needs }: { theme: Theme; compact: boolean; onSettings: () => void; needs: number }) {
+function ListHeader({ theme, compact, onSettings }: { theme: Theme; compact: boolean; onSettings: () => void }) {
   const c = theme.colors;
-  return <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingTop: compact ? 12 : 10, paddingBottom: 6 }}>
-    <Text accessibilityRole="header" style={{ flex: 1, color: c.foreground, fontSize: compact ? 17 : 15, fontWeight: "600" }}>Home{needs ? <Text style={{ color: c.statusWarning, fontWeight: "500", fontSize: 13 }}>{`  ${needs} need${needs === 1 ? "s" : ""} you`}</Text> : null}</Text>
+  return <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16 }}>
+    <Text accessibilityRole="header" style={{ flex: 1, color: c.foreground, fontSize: compact ? 17 : 15, fontWeight: "600" }}>Home</Text>
     <IconButton theme={theme} compact={compact} icon="Settings" label="Follow-up settings" onPress={onSettings} />
   </View>;
 }
@@ -170,7 +182,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
     </View>
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
       {!!s.word && <Text style={{ color, fontSize: 12, fontWeight: "600" }}>{s.word}</Text>}
-      <Text style={t.meta}>{[s.at ? age(s.at, Date.now()) === "now" ? "just now" : `${age(s.at, Date.now())} ago` : "", s.project, w ? null : s.workspaceId ? "Not tracked" : ""].filter(Boolean).join(" · ")}</Text>
+      <Text style={t.meta}>{[s.at ? age(s.at, Date.now()) === "now" ? "just now" : `${age(s.at, Date.now())} ago` : "", s.project].filter(Boolean).join(" · ")}</Text>
       {s.badges.map(x => <BadgeView key={x.text} b={x} c={c} />)}
       <PrChipView s={s} c={c} />
     </View>

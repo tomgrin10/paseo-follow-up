@@ -1,7 +1,9 @@
-import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { FlatList, Pressable, Text, View } from "react-native";
 import { Icon } from "@getpaseo/plugin/client/ui";
-import { quietFolds, type Badge, type HomeGroupId, type HomeModel, type Workstream } from "../shared/home";
+import { GROUP_TITLE, quietFolds, type Badge, type HomeGroupId, type HomeModel, type Workstream } from "../shared/home";
+import type { OmniboxItem } from "../shared/search";
+import { PriorityLine, ResultRow } from "./home-chrome";
 import { age } from "../shared/inbox";
 import { headlineColor, mergedColor, runningColor, tint, toneColor, withAlpha, type Colors } from "./theme";
 import { useMinute } from "./home-data";
@@ -9,7 +11,7 @@ import { Spinner } from "./motion";
 import type { Theme } from "./kit";
 
 /**
- * The one list: Home's left side, the docked navigator in the explorer, and (on hosts that have it) the sidebar
+ * The one list: Home's left side and (on hosts that have it) the sidebar
  * view. Virtualised; rows are memoised on their signature and ages tick on their own, so a minute tick or a poll
  * that changes one row redraws only that row.
  */
@@ -22,7 +24,9 @@ type Entry =
   | { type: "header"; key: string; group: HomeGroupId; title: string; count: number; open: boolean }
   | { type: "row"; key: string; s: Workstream }
   | { type: "fold"; key: string; project: string; count: number; archivable: number; open: boolean }
-  | { type: "more"; key: string; project: string; left: number };
+  | { type: "more"; key: string; project: string; left: number }
+  | { type: "result"; key: string; item: OmniboxItem; index: number }
+  | { type: "label"; key: string; text: string };
 
 export type HomeListProps = {
   model: HomeModel;
@@ -32,15 +36,23 @@ export type HomeListProps = {
   touch: boolean;
   selectedKey: string | null;
   onSelect: (key: string) => void;
-  /** The brief row's one-liner. Absent: no brief row (the navigator). */
+  /** The brief row's one-liner. Absent: no brief row (the sidebar view). */
   briefLine?: string | null;
-  /** Content shown under the selected row (the navigator's expanded row). */
+  /** Content shown under the selected row (an expanded row). */
   renderExpanded?: (s: Workstream) => ReactNode;
   header?: ReactNode;
   footer?: ReactNode;
+  /** Chrome above the list that never scrolls away: search, sort, status, limits. */
+  top?: ReactNode;
+  /** While searching: one flat ranked list instead of the groups. */
+  results?: OmniboxItem[] | null;
+  activeResult?: number;
+  onResult?: (item: OmniboxItem) => void;
+  /** The status strip's filter: only this group, expanded. */
+  filter?: HomeGroupId | null;
 };
 
-export function HomeList({ model, theme, dense = false, touch, selectedKey, onSelect, briefLine, renderExpanded, header, footer }: HomeListProps) {
+export function HomeList({ model, theme, dense = false, touch, selectedKey, onSelect, briefLine, renderExpanded, header, footer, top, results, activeResult = 0, onResult, filter = null }: HomeListProps) {
   const c = theme.colors;
   const [closed, setClosed] = useState<Set<string>>(new Set(["quiet"]));
   const [openProjects, setOpenProjects] = useState<Set<string>>(new Set());
@@ -50,9 +62,20 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
 
   const data = useMemo(() => {
     const out: Entry[] = [];
-    if (briefLine !== undefined) out.push({ type: "brief", key: BRIEF_KEY });
+    if (results) {
+      // Search ignores the sort and the groups: ranked by match, archived ones last under their own label.
+      let archivedShown = false;
+      results.forEach((item, index) => {
+        if (item.hit.group === "archived" && !archivedShown) { archivedShown = true; out.push({ type: "label", key: "l:archived", text: "Archived" }); }
+        out.push({ type: "result", key: `r:${item.provider}:${item.key}`, item, index });
+      });
+      if (!results.length) out.push({ type: "label", key: "l:none", text: "No workspace, branch or PR matches." });
+      return out;
+    }
+    if (briefLine !== undefined && !filter) out.push({ type: "brief", key: BRIEF_KEY });
     for (const g of model.groups) {
-      const open = !closed.has(g.id);
+      if (filter && g.id !== filter) continue;
+      const open = !!filter || !closed.has(g.id);
       out.push({ type: "header", key: `h:${g.id}`, group: g.id, title: g.title, count: g.items.length, open });
       if (!open) continue;
       if (g.id !== "quiet") { for (const s of g.items) out.push({ type: "row", key: s.key, s }); continue; }
@@ -66,10 +89,15 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
       }
     }
     return out;
-  }, [model, closed, openProjects, pages, briefLine]);
+    if (filter && !out.length) out.push({ type: "label", key: "l:empty", text: `Nothing in ${GROUP_TITLE[filter as HomeGroupId]} right now.` });
+    return out;
+  }, [model, closed, openProjects, pages, briefLine, results, filter]);
 
   const render = useCallback(({ item }: { item: Entry }) => {
     switch (item.type) {
+      case "label": return <Text accessibilityRole={item.key === "l:archived" ? "header" : undefined} style={{ color: c.foregroundMuted, fontSize: item.key === "l:archived" ? 11 : 13, fontWeight: item.key === "l:archived" ? "600" : "400",
+        letterSpacing: item.key === "l:archived" ? 0.6 : 0, textTransform: item.key === "l:archived" ? "uppercase" : "none", paddingHorizontal: dense ? 8 : 16, paddingTop: 12, paddingBottom: 4 }}>{item.text}</Text>;
+      case "result": return <ResultRow item={item.item} theme={theme} active={item.index === activeResult} dense={dense} touch={touch} onPress={() => onResult?.(item.item)} />;
       case "brief": return <BriefRow theme={theme} line={briefLine ?? ""} selected={selectedKey === null || selectedKey === BRIEF_KEY} touch={touch} onSelect={onSelect} />;
       case "header": return <GroupHeader theme={theme} title={item.title} count={item.count} open={item.open} tone={item.group === "needs" && item.count ? c.statusWarning : undefined} dense={dense} touch={touch} onPress={() => toggle(item.group)} />;
       case "fold": return <Pressable accessibilityRole="button" aria-expanded={item.open} accessibilityState={{ expanded: item.open }} accessibilityLabel={`${item.project}, ${item.count}. ${item.open ? "Collapse" : "Expand"}`} onPress={() => toggleProject(item.project)}
@@ -91,12 +119,20 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
         </View>;
       }
     }
-  }, [theme, c, dense, touch, selectedKey, onSelect, briefLine, renderExpanded, toggle, toggleProject]);
+  }, [theme, c, dense, touch, selectedKey, onSelect, briefLine, renderExpanded, toggle, toggleProject, activeResult, onResult]);
 
-  return <FlatList data={data} keyExtractor={e => e.key} renderItem={render} extraData={selectedKey}
+  const listRef = useRef<FlatList<Entry>>(null);
+  // Keep the keyboard-active result in view.
+  useEffect(() => {
+    if (!results?.length) return;
+    const at = data.findIndex(e => e.type === "result" && e.index === activeResult);
+    if (at >= 0) listRef.current?.scrollToIndex({ index: at, viewPosition: 0.5, animated: false });
+  }, [activeResult, results, data]);
+  const list = <FlatList ref={listRef} data={data} keyExtractor={e => e.key} renderItem={render} extraData={`${selectedKey}:${activeResult}`} onScrollToIndexFailed={() => undefined}
     initialNumToRender={30} maxToRenderPerBatch={30} windowSize={9} removeClippedSubviews={false}
     ListHeaderComponent={header ? <>{header}</> : null} ListFooterComponent={footer ? <>{footer}</> : <View style={{ height: 32 }} />}
-    style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 8 }} />;
+    style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 8 }} keyboardShouldPersistTaps="handled" />;
+  return top ? <View style={{ flex: 1, minHeight: 0 }}>{top}{list}</View> : list;
 }
 
 function GroupHeader({ theme, title, count, open, tone, dense, touch, onPress }: { theme: Theme; title: string; count: number; open: boolean; tone?: string; dense: boolean; touch: boolean; onPress: () => void }) {
@@ -169,17 +205,18 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect }: Ro
       {(!!s.word || !!s.line) && <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>
         {s.word && s.group === "needs" ? <Text style={{ color, fontWeight: "600" }}>{s.word}</Text> : null}{s.word && s.group === "needs" && s.line ? " · " : ""}{line}
       </Text>}
+      {s.priority && <PriorityLine reason={s.priority.reason} source={s.priority.source} c={c} size={11} />}
       {touch && (s.pr || s.badges.length > 0) && <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
         {s.badges.map(b => <BadgeView key={b.text} b={b} c={c} />)}<PrChipView s={s} c={c} />
       </View>}
-    </View> : <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 10 }}>
+    </View> : <View style={{ flex: 1, minWidth: 0, gap: 1, paddingVertical: s.priority ? 4 : 0 }}><View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
       <Text numberOfLines={1} style={{ flexShrink: 0, maxWidth: "55%", color: muted ? c.foregroundMuted : c.foreground, fontSize: 13, fontWeight: muted ? "400" : "500" }}>{s.title}{s.agent ? <Text style={{ color: c.foregroundMuted, fontWeight: "400" }}>{` › ${s.agent}`}</Text> : null}</Text>
       <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, color: c.foregroundMuted, fontSize: 12 }}>
         {s.word && s.group === "needs" ? <Text style={{ color }}>{s.word}</Text> : null}{s.word && s.group === "needs" && s.line ? " · " : ""}{line}
       </Text>
       {s.badges.map(b => <BadgeView key={b.text} b={b} c={c} />)}
       <PrChipView s={s} c={c} />
-    </View>}
+    </View>{s.priority && <View style={{ paddingRight: 40 }}><PriorityLine reason={s.priority.reason} source={s.priority.source} c={c} /></View>}</View>}
     <Age iso={s.at} c={c} size={dense ? 11 : 12} />
   </Pressable>;
 }, (a, b) => a.sig === b.sig && a.selected === b.selected && a.theme === b.theme && a.dense === b.dense && a.touch === b.touch && a.onSelect === b.onSelect);

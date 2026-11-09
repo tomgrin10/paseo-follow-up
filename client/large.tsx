@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getRpc } from "../shared/contracts";
 import { Button, Card, CardRow, errorText, text } from "./kit";
 import { Skeleton } from "./motion";
-import { WorkspaceView, useSessionFolds, workspaceKey, type PanelLinks } from "./panel";
+import { PanelTop, WorkspaceView, useSessionFolds, workspaceKey, type PanelLinks } from "./panel";
 
 export const LARGE_SCREEN = "follow-through-workspace";
 
@@ -46,7 +46,7 @@ export function FollowLarge(props: PluginScreenProps & PanelLinks) {
   if (!w) return <View style={{ flex: 1, backgroundColor: c.surface0, padding: layout.compact ? 16 : 24 }}>
     <Card theme={theme} compact={layout.compact} icon="GitPullRequest" title="Nothing to show here" style={{ marginHorizontal: 0, marginTop: 0, maxWidth: 520 }}>
       <CardRow theme={theme}>
-        <Text style={[text(c).meta, { marginBottom: 10 }]}>{query.error ? `Couldn't read Follow-up: ${errorText(query.error)}` : "This workspace isn't tracked by Follow-up, or it no longer exists."}</Text>
+        <Text style={[text(c).meta, { marginBottom: 10 }]}>{query.error ? `Couldn't read Follow-up: ${errorText(query.error)}` : "Follow-up has nothing on this workspace yet, or it no longer exists."}</Text>
         {navigation && workspaceId ? <Button theme={theme} icon="ArrowLeft" title="Back to the workspace" onPress={back} /> : null}
       </CardRow>
     </Card>
@@ -54,5 +54,6 @@ export function FollowLarge(props: PluginScreenProps & PanelLinks) {
   return <WorkspaceView theme={theme} layout={layout} host={props.host} navigation={navigation} workspace={w} large
     loadError={query.error ? "Refresh failed. Showing the last saved state." : query.data?.error ?? null}
     openSettings={props.openSettings} openOverview={props.openOverview} folds={folds}
+    top={<PanelTop theme={theme} compact={layout.compact} openOverview={props.openOverview} />}
     resize={navigation ? { icon: "Minimize2", label: "Back to the workspace (Esc)", onPress: back } : null} />;
 }

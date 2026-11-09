@@ -79,7 +79,19 @@ export const workspaceSchema = z.object({
     scannedMessageAt: z.string().nullable(),
   }).nullable().default(null),
 });
-export const stateSchema = z.object({ version: z.literal(1), workspaces: z.array(workspaceSchema), projectDefaults: z.record(z.string(), z.boolean()).optional() });
+export const stateSchema = z.object({
+  version: z.literal(1), workspaces: z.array(workspaceSchema),
+  /** Per-project opt-outs (false) and, with Follow every workspace off, opt-ins (true). */
+  projectDefaults: z.record(z.string(), z.boolean()).optional(),
+  /** 1.3.0-beta.2: tracking is invisible. Absent means on. */
+  enable_follow_every: z.boolean().optional(),
+  /** Auto-send for a newly followed workspace. Absent means on. */
+  enable_auto_sends_default: z.boolean().optional(),
+  /** Workspaces the developer opted out of following, the rare exception. */
+  workspaceOptOuts: z.array(idSchema).optional(),
+  /** One-time migrations already applied, so they never run twice. */
+  migrations: z.array(z.string()).optional(),
+});
 export type Snapshot = z.infer<typeof snapshotSchema>;
 export type Deployment = z.infer<typeof deploymentSchema>;
 export type Pr = z.infer<typeof prSchema>;

@@ -6,7 +6,8 @@ import { batchPrompt, tasksFor, isRecovery, needsPrObservations } from "./tasks"
 import { answerRecipients, developerAnswer, syncTaskQuestions } from "./questions";
 import { answerMessage, isOpen as isOpenQuestion, type Question } from "../shared/questions";
 import { reconcileSubmittedStacks } from "./submissions";
-import { applyDiscovery, firstTracking, type DiscoveredWorkspace } from "./discovery";
+import { applyDiscovery, startsWithAutoSend, type DiscoveredWorkspace } from "./discovery";
+import { followsByDefault } from "../shared/settings";
 import { replyRecorded } from "../shared/communication";
 import { DeliveryDeferred } from "./delivery";
 import { recordSnapshot } from "./deployment-anchor";
@@ -64,7 +65,7 @@ export class Engine {
     if (this.stopped) return;
     if (this.gateway.discover) {
       const discovered = await this.gateway.discover(saved);
-      await this.store.mutate(state => applyDiscovery(state, discovered.filter(row => ((row.enable_default_tracking && (!row.projectId || state.projectDefaults?.[row.projectId] !== false)) || saved.workspaces.some(w => w.id === row.id && w.enable_tracking && !w.archived))), this.now()));
+      await this.store.mutate(state => applyDiscovery(state, discovered.filter(row => followsByDefault(state, row) || saved.workspaces.some(w => w.id === row.id && w.enable_tracking && !w.archived)), this.now()));
     }
     const active = (await this.store.snapshot()).workspaces.filter(w => w.enable_tracking && !w.archived);
     if (!active.length) { this.error = null; return; }
@@ -136,8 +137,10 @@ export class Engine {
     await this.store.mutate(state => {
       applyDiscovery(state, rows.filter(row => row.id === workspaceId), this.now());
       const w = findWorkspace(state, workspaceId);
-      if (firstTracking(w)) w.enable_auto_sends = true;
+      if (!w.enable_tracking && startsWithAutoSend(state, w)) w.enable_auto_sends = true;
       w.enable_tracking = true;
+      // Following again ends an opt-out.
+      if (state.workspaceOptOuts?.includes(workspaceId)) state.workspaceOptOuts = state.workspaceOptOuts.filter(id => id !== workspaceId);
     });
     const activated = findWorkspace(await this.store.snapshot(), workspaceId);
     void this.tick();
@@ -147,7 +150,7 @@ export class Engine {
   async answer(workspaceId: string, questionId: string, choice: string, words: string | undefined, action: "send" | "copy" | "resend"): Promise<{ workspace: Workspace; question: Question }> {
     await this.store.mutate(state => {
       const w = findWorkspace(state, workspaceId);
-      if (!w.enable_tracking || w.archived) throw new Error("Track this workspace before answering its questions.");
+      if (!w.enable_tracking || w.archived) throw new Error("Follow-up isn't following this workspace. Turn it back on in Follow-up settings, under Workspace exceptions.");
       developerAnswer(w, questionId, choice, words, action, this.now());
       if (!w.questions.some(isOpenQuestion)) w.updatedAt = new Date(this.now()).toISOString();
     });
@@ -181,7 +184,7 @@ export class Engine {
     const reviewedTasks = JSON.stringify(before?.tasks);
     await this.tick();
     const current = findWorkspace(await this.store.snapshot(), workspaceId);
-    if (!current.enable_tracking || current.archived || this.stopped) throw new Error("Tracking is inactive for this workspace");
+    if (!current.enable_tracking || current.archived || this.stopped) throw new Error("Follow-up isn't following this workspace. Turn it back on in Follow-up settings, under Workspace exceptions.");
     if (current.hold) throw new Error(current.hold);
     if (current.batches.some(b => !isRecovery(b) && ["sending", "sent", "blocked", "uncertain"].includes(b.state))) throw new Error("Resolve the outstanding batch before sending another");
     const batch = current.batches.find(b => b.id === batchId && b.state === "pending");
@@ -212,7 +215,7 @@ export class Engine {
     const batchId = randomUUID();
     await this.store.mutate(state => {
       const w = findWorkspace(state, workspaceId);
-      if (!w.enable_tracking || w.archived || this.stopped) throw new Error("Workspace tracking is inactive.");
+      if (!w.enable_tracking || w.archived || this.stopped) throw new Error("Follow-up isn't following this workspace. Turn it back on in Follow-up settings, under Workspace exceptions.");
       if (w.batches.some(b => isRecovery(b) && (["pending", "sending", "sent", "uncertain"].includes(b.state) || b.state === "blocked" && !b.settledAt))) throw new Error("Check the existing recovery before starting another.");
       w.batches.push({ id: batchId, enable_manual_recovery: true, messageId: randomUUID(), tasks: [{ key: `inventory:${w.id}`, kind: "inventory", target: w.id, title: "Recover workspace PR stacks and remaining work", fingerprint: String(w.inventory?.revision ?? 1) }], state: "pending", attempts: 1, createdAt: new Date(this.now()).toISOString(), sentAt: null, settledAt: null, result: "", recipientAgentId: null, contextPath: null, activityAt: null, acknowledgmentError: null, recoveryHandoffs: [] });
     });
