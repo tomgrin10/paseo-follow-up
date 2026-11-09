@@ -86,6 +86,8 @@ export const needsYouRpc = defineRpc({ name: "follow.needs-you", input: z.strict
   context: z.string().optional(),
   links: z.array(z.strictObject({ label: z.string(), url: z.string().optional(), path: z.string().optional(), pr: z.string().optional() })).optional(),
 }), output: z.object({ ok: z.literal(true), briefId: z.string() }) });
+/** Home's detail pane: the full stored brief for one agent (the list carries only its one-liner). */
+export const inboxBriefRpc = defineRpc({ name: "follow.inbox-brief", input: z.strictObject({ agentId: idSchema }), output: z.object({ brief: briefSchema.nullable() }) });
 export const briefActionRpc = defineRpc({ name: "follow.brief-action", input: z.strictObject({
   agentId: idSchema, briefId: z.string().max(300), decisionId: z.string().max(20).optional(), choice: z.string().regex(/^[A-Z]$/).optional(), move: z.enum(["retry"]).optional(),
 }), output: z.object({ brief: briefSchema }) });
