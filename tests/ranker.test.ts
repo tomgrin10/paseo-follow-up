@@ -343,6 +343,14 @@ test("sources: review requests come from every logged-in gh account, each with i
   const reviews = await liveRankSources(new AiJobs(), { run, slackUser: null }).github();
   assert.deepEqual(searches, ["token-personal", "token-work"]);
   assert.deepEqual(reviews.map(r => `${r.repo}#${r.number}`), ["w/r#7"], "the work account's request is found");
+  // The work account is rate-limited: nothing found plus a failed account reads as failed, not as "no requests".
+  const limited = async (c: string, args: string[], t: number, env?: Record<string, string>) => { if (env?.GH_TOKEN === "token-work") throw new Error("API rate limit already exceeded"); return run(c, args, t, env); };
+  await assert.rejects(liveRankSources(new AiJobs(), { run: limited, slackUser: null }).github(), /couldn't search/);
+});
+
+test("sources: review requests read from REST search (items with html_url and repository_url)", () => {
+  const rest = { total_count: 1, items: [{ number: 1579, title: "Pipeline health", html_url: "https://github.com/o/r/pull/1579", repository_url: "https://api.github.com/repos/o/r", user: { login: "yuval" } }] };
+  assert.deepEqual(parseReviewRequests(JSON.stringify(rest)), [{ repo: "o/r", number: 1579, title: "Pipeline health", url: "https://github.com/o/r/pull/1579", author: "yuval" }]);
 });
 
 test("sources: a plan read that comes back empty counts as failed", async () => {
