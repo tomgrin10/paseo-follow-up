@@ -65,6 +65,16 @@ try {
     const permission = (row?.needs?.reasons ?? []).filter(r => r.reason === "permission");
     return permission.length ? JSON.stringify(permission) : null;
   };
+  /**
+   * Waits for a state, never for a wall-clock grace: the inbox's grace ordering (an answer inside the grace period
+   * never flags, an unanswered prompt does) is proved with mock timers in tests/inbox.test.ts. Here only the end
+   * state counts, and both end states are final: a resolved prompt can't flag later, and a flagged one stays flagged.
+   */
+  const until = async (check, label, ms = 60_000) => {
+    const deadline = Date.now() + ms; let last;
+    while (Date.now() < deadline) { last = await check(); if (last) return last; await sleep(250); }
+    throw new Error(`timed out waiting for: ${label} (last: ${JSON.stringify(last)})`);
+  };
   const result = {};
 
   // Full trust: approved, finished, audited, never flagged.
@@ -73,10 +83,9 @@ try {
   const switched = await make("default", 2);
   await client.setAgentMode(switched.id, "bypassPermissions");
   for (const agent of [bypass, full, switched]) await agent.run("Fixture: permission tool Bash", { timeoutMs: 60_000 });
-  await sleep(4_500); // past the inbox's permission grace period
   for (const [name, agent] of [["bypassPermissions", bypass], ["full-access", full], ["switched to bypass", switched]]) {
-    assert.deepEqual(await pending(agent.id), [], `${name}: nothing left pending`);
-    assert.equal(await needs(agent.id), null, `${name}: no Needs-you row`);
+    await until(async () => (await pending(agent.id)).length === 0, `${name}: nothing left pending`);
+    await until(async () => await needs(agent.id) === null, `${name}: no Needs-you row`);
   }
   const approvals = await audit();
   assert.deepEqual(new Set(approvals.map(a => a.agentId)), new Set([bypass.id, full.id, switched.id]), "each approval audited");
@@ -91,10 +100,9 @@ try {
   await careful.send("Fixture: permission tool Bash");
   await auto.send("Fixture: permission tool Bash");
   await asking.send("Fixture: permission question AskUserQuestion");
-  await sleep(5_000);
   for (const [name, agent] of [["default", careful], ["auto", auto], ["bypass question", asking]]) {
+    assert.match(await until(() => needs(agent.id), `${name}: flagged Needs you`), /permission/i);
     assert.equal((await pending(agent.id)).length, 1, `${name}: the prompt stays pending`);
-    assert.match(await needs(agent.id) ?? "", /permission/i, `${name}: flagged Needs you`);
   }
   assert.equal((await audit()).length, 3, "nothing else approved");
   result.leftForTheDeveloper = ["default", "auto", "bypass question"];
@@ -105,17 +113,13 @@ try {
   await cli("plugin", "disable", "follow-through");
   const early = await make("bypassPermissions", 6);
   await early.send("Fixture: permission tool Bash");
-  for (let i = 0; i < 40 && !(await pending(early.id)).length; i++) await sleep(250);
-  await sleep(1_000);
-  assert.equal((await pending(early.id)).length, 1, "pending while Follow-up is off");
+  await until(async () => (await pending(early.id)).length === 1, "pending while Follow-up is off");
   await cli("plugin", "enable", "follow-through");
-  for (let i = 0; i < 120 && (await pending(early.id)).length; i++) await sleep(250);
-  assert.deepEqual(await pending(early.id), [], "the load sweep approved the prompt that was already pending");
-  const swept = await audit();
+  await until(async () => (await pending(early.id)).length === 0, "the load sweep approved the prompt that was already pending");
+  const swept = await until(async () => { const rows = await audit(); return rows.length >= 4 && rows; }, "the sweep's approval audited");
   assert.equal(swept.length, 4, "only that prompt");
   assert.equal(swept.at(-1).agentId, early.id);
-  await sleep(4_500);
-  assert.equal(await needs(early.id), null, "no Needs-you row for it");
+  await until(async () => await needs(early.id) === null, "no Needs-you row for it");
   result.sweptAtLoad = `${swept.at(-1).mode}: ${swept.at(-1).summary}`;
   console.log(process.argv.includes("--json") ? JSON.stringify(result) : result);
 } catch (error) { process.exitCode = 1; throw error; } finally {
