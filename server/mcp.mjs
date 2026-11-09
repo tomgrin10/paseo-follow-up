@@ -2,7 +2,7 @@
 import { createInterface } from "node:readline";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { existsSync, realpathSync } from "node:fs";
 import { join, delimiter } from "node:path";
 import { homedir } from "node:os";
@@ -87,6 +87,25 @@ async function actionsEnabled() {
 }
 /** The bridge input for a tool: action tools travel as { tool, args } through follow.agent-act. */
 const callInput = (tool, input) => actionNames.has(tool[0]) ? { tool: tool[0], args: input } : input;
+let scopeCache = null;
+async function scopeOf(directory, agentId) {
+  try {
+    const path = join(directory, "scopes.json");
+    const { mtimeMs } = await stat(path);
+    if (scopeCache?.mtimeMs !== mtimeMs) scopeCache = { mtimeMs, agents: JSON.parse(await readFile(path, "utf8")).agents ?? {} };
+    return scopeCache.agents[agentId]?.role ?? null;
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    const state = JSON.parse(await readFile(join(directory, "state.json"), "utf8"));
+    for (const w of state.workspaces) {
+      if (!w.enable_tracking || w.archived) continue;
+      if (w.mainAgentId === agentId) return "main";
+      if (w.batches.some(b => b.recipientAgentId === agentId && !b.settledAt && ["sending", "sent", "blocked", "uncertain"].includes(b.state) && b.tasks.every(t => t.kind === "inventory"))) return "recovery";
+      if (w.contributorAgentIds?.includes(agentId)) return "contributor";
+    }
+    return null;
+  }
+}
 async function scope(resolveRecovery = false) {
   const agentId = process.env.PASEO_AGENT_ID;
   if (!agentId) return null;
@@ -95,13 +114,11 @@ async function scope(resolveRecovery = false) {
     const directory = join(home, "plugin-data/follow-through");
     const lease = JSON.parse(await readFile(join(directory, "hooks-enabled.json"), "utf8"));
     if (!(lease.expiresAt > Date.now())) return null;
-    const state = JSON.parse(await readFile(join(directory, "state.json"), "utf8"));
-    for (const w of state.workspaces) {
-      if (!w.enable_tracking || w.archived) continue;
-      if (w.mainAgentId === agentId) return process.env.FOLLOW_THROUGH_RECOVERY === "1" ? "recovery" : "main";
-      if (w.batches.some(b => b.recipientAgentId === agentId && !b.settledAt && ["sending", "sent", "blocked", "uncertain"].includes(b.state) && b.tasks.every(t => t.kind === "inventory"))) return "recovery";
-      if (w.contributorAgentIds?.includes(agentId)) return "contributor";
-    }
+    // scopes.json (a few KB, rewritten only when a role changes) instead of the whole state.json; re-read only
+    // when its mtime changes. Older workers don't write it, so fall back to state.json.
+    const known = await scopeOf(directory, agentId);
+    if (known === "main") return process.env.FOLLOW_THROUGH_RECOVERY === "1" ? "recovery" : "main";
+    if (known) return known;
     if (resolveRecovery && process.env.FOLLOW_THROUGH_RECOVERY === "1") {
       const w = await call("follow.agent-status", {});
       if (w.enable_tracking && !w.archived && w.mainAgentId !== agentId && w.batches.some(b => b.recipientAgentId === agentId && !b.settledAt && ["sending", "sent", "blocked", "uncertain"].includes(b.state) && b.tasks.every(t => t.kind === "inventory"))) return "recovery";
