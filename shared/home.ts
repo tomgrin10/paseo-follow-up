@@ -344,8 +344,8 @@ export function tailSteps(items: TimelineItem[], n = 6): TailStep[] {
     } else if (it.type === "tool_call") {
       const d = it.detail ?? {};
       const what = [d.command, d.filePath, d.path, d.url, d.query, d.pattern].find(v => typeof v === "string" && v.trim()) as string | undefined;
-      // MCP tools read by their own name: "mcp__follow-through__send_to_agent" is "send_to_agent".
-      out.push({ kind: "tool", text: `${(it.name ?? "Tool").replace(/^mcp__.+?__/, "")}${what ? ` · ${what.split("\n")[0]}` : ""}`, failed: it.status === "failed" || !!it.error });
+      // MCP tools read by their own name: "mcp__follow-through__send_to_agent" and "mcp__paseo__follow_send_to_agent" are "send_to_agent".
+      out.push({ kind: "tool", text: `${(it.name ?? "Tool").replace(/^mcp__.+?__/, "").replace(/^follow_/, "")}${what ? ` · ${what.split("\n")[0]}` : ""}`, failed: it.status === "failed" || !!it.error });
     } else if (it.type === "error" && it.message) out.push({ kind: "error", text: it.message });
   }
   return out.slice(-n);

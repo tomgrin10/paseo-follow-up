@@ -29,12 +29,15 @@ import { lifecycleOnly, recoveryBatch } from "./shared/follow-up";
 import { Deployments } from "./server/deployments";
 import { AgentHooks } from "./server/agent-hooks";
 import { withSessionMcp } from "./server/session-mcp";
+import { nativeTools, nativeToolsAvailable, type Invoke, type Live } from "./server/native-tools";
+import { removeGlobalRegistrations } from "./server/mcp-registrations";
+import { scopes } from "./server/scopes";
 import { updateObligation } from "./server/obligations";
 import { Inbox, type GuardPause } from "./server/inbox";
 import { daemonDirectory, guardPath } from "./server/inbox-directory";
 import { fileSources } from "./server/inbox-classifier";
 import { onBeforeSend } from "./server/daemon";
-import { copyFile, readFile, rename } from "node:fs/promises";
+import { copyFile, readFile, rename, stat } from "node:fs/promises";
 import { HistoryCache } from "./server/history-cache";
 import { Governor } from "./server/governor";
 import { ListCache } from "./server/list-cache";
@@ -59,6 +62,9 @@ export default function contribute(server: PluginServerContext) {
   const questionMode = async (): Promise<QuestionMode> => { try { const state = await questionSettings.read(); return state.status === "ready" ? state.values.mode : DEFAULT_QUESTION_MODE; } catch { return DEFAULT_QUESTION_MODE; } };
   const directory = join(paseoHome, "plugin-data", "follow-through");
   const bridge = join(directory, "mcp.mjs");
+  // Every RPC handler, also callable in-process: native agent tools run the same handlers the stdio bridge reaches.
+  const handlers = new Map<string, { input: { parseAsync(value: unknown): Promise<unknown> }; run: (input: any, context: PluginHandlerContext) => unknown }>();
+  const handle: PluginServerContext["handle"] = (contract, handler) => { handlers.set(contract.name, { input: contract.input, run: handler as never }); server.handle(contract, handler); };
   const store = new Store(directory, 1_000);
   store.onChanged = scopeWriter(directory);
   const agentHooks = new AgentHooks(directory, clientEntry());
@@ -192,6 +198,8 @@ export default function contribute(server: PluginServerContext) {
     unlock = await store.lock();
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await writeFile(bridge, mcpSource, { mode: 0o600 });
+    // 1.4.0-beta.2: tools are per agent now; drop the old user-scope registrations that spawned mcp.mjs in every session.
+    void removeGlobalRegistrations().then(results => { const removed = results.filter(r => r.status === "removed").map(r => r.path); if (removed.length) console.warn(`[follow-up] removed the global follow-through MCP registration from ${removed.length} file(s); backups end in .follow-through-unregister.bak`); });
     governor.start();
     await engine.recover();
     await migrateTracking();
@@ -206,6 +214,28 @@ export default function contribute(server: PluginServerContext) {
     await writeBriefState().catch(() => undefined);
   })().catch(() => { loadError = "Follow-through could not start. Check its saved state and worker lock."; });
   const requireReady = async () => { await ready; if (loadError || stopped) throw new Error(loadError ?? "Follow-through is stopping"); };
+  // 1.4.0-beta.2: Follow-up's tools per agent: natively through Paseo's MCP when the host serves plugin tools,
+  // otherwise the stdio bridge for this launch only. FOLLOW_THROUGH_TOOLS tells the hooks which names the agent has.
+  let configCache: { mtimeMs: number; value: unknown } | null = null;
+  const paseoConfig = async () => {
+    try { const path = join(paseoHome, "config.json"); const { mtimeMs } = await stat(path); if (configCache?.mtimeMs !== mtimeMs) configCache = { mtimeMs, value: JSON.parse(await readFile(path, "utf8")) }; return configCache.value as Parameters<typeof nativeToolsAvailable>[1]; } catch { return null; }
+  };
+  const live = async (agentId: string): Promise<Live> => ({ role: scopes(await store.snapshot())[agentId]?.role ?? null, inbox: (await inboxSettings()).enable_inbox });
+  const invoke: Invoke = async (method, input, context) => {
+    const handler = handlers.get(method); if (!handler) throw new Error(`Unknown Follow-up method ${method}.`);
+    return handler.run(await handler.input.parseAsync(input), { paseo: context.paseo });
+  };
+  const withTools = async <R extends Parameters<typeof withSessionMcp>[0]>(request: R, recovery: boolean, brief: string | null, root: boolean, overseer = false): Promise<R> => {
+    // FOLLOW_THROUGH_TOOL_PROVIDERS / FOLLOW_THROUGH_FORCE_STDIO exist for the isolated harness (scripts/check-native-tools.mjs).
+    const providers = (process.env.FOLLOW_THROUGH_TOOL_PROVIDERS ?? "claude,codex").split(",");
+    if (request.purpose !== "interactive" || !providers.includes(request.provider) || request.labels["plugin-tools/enabled"] === "false") return request;
+    if (process.env.FOLLOW_THROUGH_FORCE_STDIO !== "1" && nativeToolsAvailable(request, await paseoConfig())) {
+      const flags = { recovery, brief: !!brief && !recovery, root: root && !recovery, overseer: overseer && !recovery };
+      const env = { ...request.env, FOLLOW_THROUGH_TOOLS: "native", FOLLOW_THROUGH_PROVIDER: request.provider, ...(flags.root ? { FOLLOW_THROUGH_ROOT: "1" } : {}), ...(flags.overseer ? { FOLLOW_THROUGH_OVERSEER: "1" } : {}) };
+      return { ...request, env, tools: [...request.tools, ...nativeTools(flags, live, invoke)] };
+    }
+    return withSessionMcp({ ...request, env: { ...request.env, FOLLOW_THROUGH_TOOLS: "stdio", FOLLOW_THROUGH_PROVIDER: request.provider } }, directory, clientEntry(), paseoHome, recovery, process.env, brief, root, overseer, providers) as R;
+  };
   const loop = async () => {
     await ready;
     if (stopped || loadError) return;
@@ -244,8 +274,8 @@ export default function contribute(server: PluginServerContext) {
     return agent.workspaceId;
   };
 
-  server.handle(rpc.projectSettingsRpc, async () => { await requireReady(); return { projects: await gateway.projects(await store.snapshot()) }; });
-  server.handle(rpc.setProjectTrackingRpc, async ({ projectId, enable_default_tracking }) => {
+  handle(rpc.projectSettingsRpc, async () => { await requireReady(); return { projects: await gateway.projects(await store.snapshot()) }; });
+  handle(rpc.setProjectTrackingRpc, async ({ projectId, enable_default_tracking }) => {
     await requireReady();
     const projects = await gateway.projects(await store.snapshot());
     if (!projects.some(p => p.id === projectId)) throw new Error("This project is no longer available. Refresh settings.");
@@ -259,8 +289,8 @@ export default function contribute(server: PluginServerContext) {
       workspaces: state.workspaces.filter(w => !w.archived).map(w => ({ id: w.id, title: w.title, enable_tracking: w.enable_tracking, enable_auto_sends: w.enable_auto_sends, optedOut: optedOut(state, w.id), dormant: !!w.dormant, parked: !!state.autoSendsParked?.includes(w.id) }))
         .sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id)) };
   };
-  server.handle(rpc.followSettingsRpc, async () => { await requireReady(); return followSettings(); });
-  server.handle(rpc.setFollowSettingsRpc, async ({ enable_follow_every, enable_auto_sends_default, activeWindowDays, workspace }) => {
+  handle(rpc.followSettingsRpc, async () => { await requireReady(); return followSettings(); });
+  handle(rpc.setFollowSettingsRpc, async ({ enable_follow_every, enable_auto_sends_default, activeWindowDays, workspace }) => {
     await requireReady();
     await store.mutate(state => {
       if (activeWindowDays !== undefined) state.activeWindowDays = activeWindowDays;
@@ -282,7 +312,7 @@ export default function contribute(server: PluginServerContext) {
     void engine.tick();
     return followSettings();
   });
-  server.handle(rpc.prOwnerRpc, async ({ repo, number }, { paseo }) => {
+  handle(rpc.prOwnerRpc, async ({ repo, number }, { paseo }) => {
     await requireReady();
     const owner = prOwner(await store.snapshot(), repo, number);
     if (!owner) return { owner: null };
@@ -290,7 +320,7 @@ export default function contribute(server: PluginServerContext) {
     if (!agent || agent.archivedAt || agent.workspaceId !== owner.workspaceId) return { owner: null };
     return { owner };
   });
-  server.handle(rpc.prWorkspacesRpc, async ({ repo, number }, { paseo }) => {
+  handle(rpc.prWorkspacesRpc, async ({ repo, number }, { paseo }) => {
     await requireReady();
     const state = await store.snapshot();
     if (!browserRepositories(state).includes(repo.toLowerCase())) return { tracked: false, workspaces: [], more: 0 };
@@ -301,9 +331,9 @@ export default function contribute(server: PluginServerContext) {
     const view = browserWorkspaces(entries);
     return { tracked: true, ...view, workspaces: view.workspaces.map(w => ({ ...w, title: w.title.slice(0, 200), agentStatus: w.agentStatus.slice(0, 40), state: w.state.slice(0, 200) })) };
   });
-  server.handle(rpc.listRpc, async ({ since }) => { await ready; return { ...listCache.answer(await store.snapshot(), since), error: loadError ?? hookError ?? engine.error }; });
-  server.handle(rpc.getRpc, async ({ workspaceId }) => { await ready; return { workspace: (await store.snapshot()).workspaces.find(w => w.id === workspaceId && w.enable_tracking) ?? null, error: loadError ?? hookError ?? engine.error }; });
-  server.handle(rpc.syncWorkspaceRpc, async ({ agentId, summary }, { paseo }) => {
+  handle(rpc.listRpc, async ({ since }) => { await ready; return { ...listCache.answer(await store.snapshot(), since), error: loadError ?? hookError ?? engine.error }; });
+  handle(rpc.getRpc, async ({ workspaceId }) => { await ready; return { workspace: (await store.snapshot()).workspaces.find(w => w.id === workspaceId && w.enable_tracking) ?? null, error: loadError ?? hookError ?? engine.error }; });
+  handle(rpc.syncWorkspaceRpc, async ({ agentId, summary }, { paseo }) => {
     await requireReady();
     const workspaceId = await callerWorkspaceId(agentId, paseo, false);
     const w = agentWorkspace(await store.snapshot(), agentId, "write", workspaceId, "pr");
@@ -311,11 +341,11 @@ export default function contribute(server: PluginServerContext) {
     await agentHooks.confirm(w.id, agentId, summary);
     return { workspaceId: w.id, synced: true as const };
   });
-  server.handle(rpc.agentStatusRpc, async ({ agentId }, { paseo }) => { await requireReady(); const workspaceId = await callerWorkspaceId(agentId, paseo); return agentWorkspace(await store.snapshot(), agentId, "read", workspaceId, "pr"); });
-  server.handle(rpc.activateRpc, async ({ workspaceId }) => { await requireReady(); return engine.activate(workspaceId); });
-  server.handle(rpc.sendRpc, async ({ workspaceId, batchId }) => { await requireReady(); return engine.sendPending(workspaceId, batchId); });
-  server.handle(rpc.recoverRpc, async ({ workspaceId }) => { await requireReady(); return engine.startRecovery(workspaceId); });
-  server.handle(rpc.enrollRpc, async ({ agentId, workspaceId, goal }, { paseo }) => {
+  handle(rpc.agentStatusRpc, async ({ agentId }, { paseo }) => { await requireReady(); const workspaceId = await callerWorkspaceId(agentId, paseo); return agentWorkspace(await store.snapshot(), agentId, "read", workspaceId, "pr"); });
+  handle(rpc.activateRpc, async ({ workspaceId }) => { await requireReady(); return engine.activate(workspaceId); });
+  handle(rpc.sendRpc, async ({ workspaceId, batchId }) => { await requireReady(); return engine.sendPending(workspaceId, batchId); });
+  handle(rpc.recoverRpc, async ({ workspaceId }) => { await requireReady(); return engine.startRecovery(workspaceId); });
+  handle(rpc.enrollRpc, async ({ agentId, workspaceId, goal }, { paseo }) => {
     await requireReady();
     const agent = (await paseo.agents.ref(agentId).refresh())?.agent;
     if (!agent?.workspaceId || !await isWorkspaceRoot(agent, async id => (await paseo.agents.ref(id).refresh())?.agent)) throw new Error("Choose an available main agent in this workspace.");
@@ -334,7 +364,7 @@ export default function contribute(server: PluginServerContext) {
       return w;
     });
   });
-  server.handle(rpc.registerPrRpc, async ({ agentId, repo, number, stack, parentNumber, disposition }, { paseo }) => {
+  handle(rpc.registerPrRpc, async ({ agentId, repo, number, stack, parentNumber, disposition }, { paseo }) => {
     await requireReady();
     const workspaceId = await callerWorkspaceId(agentId, paseo);
     const result = await store.mutate(state => {
@@ -359,7 +389,7 @@ export default function contribute(server: PluginServerContext) {
     });
     void engine.tick(); return result;
   });
-  server.handle(rpc.excludeStackRpc, async ({ agentId, stack, reason, obligationIds }, { paseo }) => {
+  handle(rpc.excludeStackRpc, async ({ agentId, stack, reason, obligationIds }, { paseo }) => {
     await requireReady();
     const workspaceId = await callerWorkspaceId(agentId, paseo);
     const result = await store.mutate(state => {
@@ -369,7 +399,7 @@ export default function contribute(server: PluginServerContext) {
     });
     void engine.tick(); return result;
   });
-  server.handle(rpc.obligationRpc, async ({ agentId, ...input }, { paseo }) => {
+  handle(rpc.obligationRpc, async ({ agentId, ...input }, { paseo }) => {
     await requireReady();
     const workspaceId = await callerWorkspaceId(agentId, paseo);
     const result = await store.mutate(state => {
@@ -380,7 +410,7 @@ export default function contribute(server: PluginServerContext) {
     });
     void engine.tick(); return result;
   });
-  server.handle(rpc.askQuestionRpc, async ({ agentId, ...input }, { paseo }) => {
+  handle(rpc.askQuestionRpc, async ({ agentId, ...input }, { paseo }) => {
     await requireReady();
     const workspaceId = await callerWorkspaceId(agentId, paseo);
     const mode = await questionMode();
@@ -391,7 +421,7 @@ export default function contribute(server: PluginServerContext) {
       return { workspaceId: w.id, question, mode, instruction };
     });
   });
-  server.handle(rpc.recordAnswerRpc, async ({ agentId, id, choice, words }, { paseo }) => {
+  handle(rpc.recordAnswerRpc, async ({ agentId, id, choice, words }, { paseo }) => {
     await requireReady();
     const workspaceId = await callerWorkspaceId(agentId, paseo);
     return store.mutate(state => {
@@ -399,7 +429,7 @@ export default function contribute(server: PluginServerContext) {
       return { workspaceId: w.id, question: recordAnswer(w, agentId, id, choice, words, Date.now()) };
     });
   });
-  server.handle(rpc.withdrawQuestionRpc, async ({ agentId, id, reason }, { paseo }) => {
+  handle(rpc.withdrawQuestionRpc, async ({ agentId, id, reason }, { paseo }) => {
     await requireReady();
     const workspaceId = await callerWorkspaceId(agentId, paseo);
     return store.mutate(state => {
@@ -407,7 +437,7 @@ export default function contribute(server: PluginServerContext) {
       return { workspaceId: w.id, question: withdrawQuestion(w, agentId, id, reason, Date.now()) };
     });
   });
-  server.handle(rpc.setSpecRpc, async ({ agentId, url, title }, { paseo }) => {
+  handle(rpc.setSpecRpc, async ({ agentId, url, title }, { paseo }) => {
     await requireReady();
     const workspaceId = await callerWorkspaceId(agentId, paseo);
     return store.mutate(state => {
@@ -416,7 +446,7 @@ export default function contribute(server: PluginServerContext) {
       return { workspaceId: w.id, spec: w.spec, applied, message };
     });
   });
-  server.handle(rpc.workspaceSpecRpc, async input => {
+  handle(rpc.workspaceSpecRpc, async input => {
     await requireReady();
     return store.mutate(state => {
       const w = findWorkspace(state, input.workspaceId);
@@ -425,9 +455,9 @@ export default function contribute(server: PluginServerContext) {
       return w;
     });
   });
-  server.handle(rpc.answerQuestionRpc, async ({ workspaceId, questionId, choice, words, action }) => { await requireReady(); return engine.answer(workspaceId, questionId, choice, words, action); });
-  server.handle(rpc.declareDoneRpc, async ({ agentId, summary }, { paseo }) => { await requireReady(); return engine.declareDone(agentId, summary, await callerWorkspaceId(agentId, paseo, false)); });
-  server.handle(rpc.acknowledgeRpc, async ({ agentId, batchId, outcome, result }, { paseo }) => {
+  handle(rpc.answerQuestionRpc, async ({ workspaceId, questionId, choice, words, action }) => { await requireReady(); return engine.answer(workspaceId, questionId, choice, words, action); });
+  handle(rpc.declareDoneRpc, async ({ agentId, summary }, { paseo }) => { await requireReady(); return engine.declareDone(agentId, summary, await callerWorkspaceId(agentId, paseo, false)); });
+  handle(rpc.acknowledgeRpc, async ({ agentId, batchId, outcome, result }, { paseo }) => {
     await requireReady();
     const agent = (await paseo.agents.ref(agentId).refresh())?.agent;
     try { return await engine.acknowledge(agentId, batchId, outcome, result, await callerWorkspaceId(agentId, paseo)); }
@@ -440,12 +470,12 @@ export default function contribute(server: PluginServerContext) {
       throw error;
     }
   });
-  server.handle(rpc.controlRpc, async input => {
+  handle(rpc.controlRpc, async input => {
     await requireReady();
     return store.mutate(state => controlWorkspace(state, input));
   });
-  server.handle(rpc.refreshRpc, async () => { await requireReady(); void engine.tick(); return { ok: true }; });
-  server.handle(rpc.refineTasksRpc, async ({ workspaceId, tasks }) => {
+  handle(rpc.refreshRpc, async () => { await requireReady(); void engine.tick(); return { ok: true }; });
+  handle(rpc.refineTasksRpc, async ({ workspaceId, tasks }) => {
     await requireReady();
     const result = await store.mutate(state => {
       const w = findWorkspace(state, workspaceId);
@@ -461,7 +491,7 @@ export default function contribute(server: PluginServerContext) {
     });
     void engine.tick(); return result;
   });
-  server.handle(rpc.taskTriggerRpc, async ({ workspaceId, obligationId, expectedRevision, trigger, afterPrs }) => {
+  handle(rpc.taskTriggerRpc, async ({ workspaceId, obligationId, expectedRevision, trigger, afterPrs }) => {
     await requireReady();
     const result = await store.mutate(state => {
       const w = findWorkspace(state, workspaceId);
@@ -474,13 +504,13 @@ export default function contribute(server: PluginServerContext) {
     });
     void engine.tick(); return result;
   });
-  server.handle(rpc.browserStatusRpc, async () => { await requireReady(); return browser.status(); });
-  server.handle(rpc.browserExchangeRpc, async ({ clientId, ready: browserReady, acceptJobs, results, repositories }) => { await requireReady(); return { ...browser.exchange(clientId, browserReady, results, acceptJobs, repositories), repositories: browserRepositories(await store.snapshot()) }; });
-  server.handle(rpc.prControlStatusRpc, async ({ workspaceId, prKey }) => { await requireReady(); return actions.status(workspaceId, prKey); });
-  server.handle(rpc.preparePrActionRpc, async ({ workspaceId, prKey, kind }) => { await requireReady(); return actions.prepare(workspaceId, prKey, kind); });
-  server.handle(rpc.confirmPrActionRpc, async ({ planId, scope }) => { await requireReady(); const result = await actions.confirm(planId, scope); void engine.tick(); return result; });
-  server.handle(rpc.checkPrActionRpc, async ({ workspaceId, actionId }) => { await requireReady(); return actions.check(workspaceId, actionId); });
-  server.handle(rpc.requestReviewersRpc, async ({ workspaceId, prKey, reviewers, remember }) => {
+  handle(rpc.browserStatusRpc, async () => { await requireReady(); return browser.status(); });
+  handle(rpc.browserExchangeRpc, async ({ clientId, ready: browserReady, acceptJobs, results, repositories }) => { await requireReady(); return { ...browser.exchange(clientId, browserReady, results, acceptJobs, repositories), repositories: browserRepositories(await store.snapshot()) }; });
+  handle(rpc.prControlStatusRpc, async ({ workspaceId, prKey }) => { await requireReady(); return actions.status(workspaceId, prKey); });
+  handle(rpc.preparePrActionRpc, async ({ workspaceId, prKey, kind }) => { await requireReady(); return actions.prepare(workspaceId, prKey, kind); });
+  handle(rpc.confirmPrActionRpc, async ({ planId, scope }) => { await requireReady(); const result = await actions.confirm(planId, scope); void engine.tick(); return result; });
+  handle(rpc.checkPrActionRpc, async ({ workspaceId, actionId }) => { await requireReady(); return actions.check(workspaceId, actionId); });
+  handle(rpc.requestReviewersRpc, async ({ workspaceId, prKey, reviewers, remember }) => {
     await requireReady();
     // "Remember for <repo>" saves first: it's the developer's choice whatever GitHub answers.
     if (reviewers && remember) await reviewerStore.save(prKey.split("#")[0], reviewers);
@@ -492,9 +522,9 @@ export default function contribute(server: PluginServerContext) {
     for (const w of (await store.snapshot()).workspaces) for (const p of w.prs) seen.add(repoKey(p.repo));
     return { config, repos: [...seen].sort() };
   };
-  server.handle(rpc.reviewerSettingsRpc, async () => { await requireReady(); return reviewerSettings(); });
-  server.handle(rpc.saveReviewersRpc, async ({ repo, reviewers }) => { await requireReady(); await reviewerStore.save(repo, reviewers); return reviewerSettings(); });
-  server.handle(rpc.reviewerSuggestionsRpc, async ({ repo }) => { await requireReady(); return reviewerSuggestions.suggest(repo); });
+  handle(rpc.reviewerSettingsRpc, async () => { await requireReady(); return reviewerSettings(); });
+  handle(rpc.saveReviewersRpc, async ({ repo, reviewers }) => { await requireReady(); await reviewerStore.save(repo, reviewers); return reviewerSettings(); });
+  handle(rpc.reviewerSuggestionsRpc, async ({ repo }) => { await requireReady(); return reviewerSuggestions.suggest(repo); });
 
   const priorityStore = new PriorityStore(directory);
   // Paseo's workspace descriptors for the Overseer (name, project, branch): metadata only, one paged read. The
@@ -510,9 +540,9 @@ export default function contribute(server: PluginServerContext) {
   overseer = new Overseer({ directory, store, inbox, priorities: priorityStore, workspaces: paseoWorkspaces, enabled: overseerOn, paseoHome, tight: async () => !governor.allowsBackground(),
     windowMs: async () => activeWindowMs(await store.snapshot()), provider: process.env.FOLLOW_UP_OVERSEER_PROVIDER || undefined });
   const overseerStatus = async () => { const s = await overseer!.state(); return { enabled: await overseerOn(), agentId: s.agentId, workspaceId: s.workspaceId, startedAt: s.startedAt, generation: s.generation, error: s.error }; };
-  server.handle(rpc.overseerStatusRpc, async () => { await requireReady(); return overseerStatus(); });
-  server.handle(rpc.overseerStartRpc, async (_input, { paseo }) => { await requireReady(); seen(paseo); await overseer!.start(paseo as unknown as OverseerPaseo); return overseerStatus(); });
-  server.handle(rpc.overseerActRpc, async ({ agentId, tool, args }, { paseo }) => {
+  handle(rpc.overseerStatusRpc, async () => { await requireReady(); return overseerStatus(); });
+  handle(rpc.overseerStartRpc, async (_input, { paseo }) => { await requireReady(); seen(paseo); await overseer!.start(paseo as unknown as OverseerPaseo); return overseerStatus(); });
+  handle(rpc.overseerActRpc, async ({ agentId, tool, args }, { paseo }) => {
     await requireReady(); seen(paseo);
     if (!(OVERSEER_TOOLS as readonly string[]).includes(tool)) throw new Error(`Unknown Overseer tool ${tool}.`);
     return overseer!.act(paseo as unknown as OverseerPaseo, agentId, tool as OverseerTool, args);
@@ -558,7 +588,7 @@ export default function contribute(server: PluginServerContext) {
     context: aboutContext, usage: () => usage.read(),
     firstMessage: async agentId => { await historyCache.load(); return historyCache.get(agentId)?.history.goal ?? null; }, roomForBackground: async () => governor.allowsBackground(), roomOnDemand: async () => governor.allowsExtras(),
   });
-  server.handle(rpc.workspaceAboutRpc, async ({ workspaceId, open, refresh }, { paseo }) => { await requireReady(); seen(paseo); return about.view(workspaceId, { open, refresh }); });
+  handle(rpc.workspaceAboutRpc, async ({ workspaceId, open, refresh }, { paseo }) => { await requireReady(); seen(paseo); return about.view(workspaceId, { open, refresh }); });
   // Pre-write overviews for what's in Needs you, so opening one there is instant. Every 10 minutes, capped per day.
   let aboutTimer: ReturnType<typeof setTimeout> | null = null;
   const aboutLoop = async () => {
@@ -575,10 +605,10 @@ export default function contribute(server: PluginServerContext) {
   };
   aboutTimer = setTimeout(() => void aboutLoop(), 60_000);
   const agentActions = new AgentActions({ store, prActions: actions, engine, inbox, priorities: priorityStore, about });
-  server.handle(rpc.prioritiesRpc, async () => ({ items: await priorityStore.read() }));
+  handle(rpc.prioritiesRpc, async () => ({ items: await priorityStore.read() }));
   // Provider limits are non-essential: at critical memory only the VM meter is served.
-  server.handle(rpc.usageRpc, async () => ({ ...(governor.allowsExtras() ? await usage.read() : NO_USAGE), resources: governor.current() }));
-  server.handle(rpc.agentActRpc, async ({ agentId, tool, args }, { paseo }) => {
+  handle(rpc.usageRpc, async () => ({ ...(governor.allowsExtras() ? await usage.read() : NO_USAGE), resources: governor.current() }));
+  handle(rpc.agentActRpc, async ({ agentId, tool, args }, { paseo }) => {
     await requireReady(); seen(paseo);
     if (!(AGENT_TOOLS as readonly string[]).includes(tool)) throw new Error(`Unknown Follow-up tool ${tool}.`);
     if (!/^[\w-]+$/.test(agentId)) throw new Error("Unsupported agent identity.");
@@ -592,10 +622,10 @@ export default function contribute(server: PluginServerContext) {
     void engine.tick();
     return result;
   });
-  server.handle(rpc.inboxListRpc, async () => { await requireReady(); return { ...await inbox.list(), error: inboxError }; });
-  server.handle(rpc.inboxBriefRpc, async ({ agentId }) => { await requireReady(); return { brief: await inbox.brief(agentId) }; });
-  server.handle(rpc.inboxActRpc, async input => { await requireReady(); return inbox.act(input); });
-  server.handle(rpc.needsYouRpc, async ({ agentId, ...input }, { paseo }) => {
+  handle(rpc.inboxListRpc, async () => { await requireReady(); return { ...await inbox.list(), error: inboxError }; });
+  handle(rpc.inboxBriefRpc, async ({ agentId }) => { await requireReady(); return { brief: await inbox.brief(agentId) }; });
+  handle(rpc.inboxActRpc, async input => { await requireReady(); return inbox.act(input); });
+  handle(rpc.needsYouRpc, async ({ agentId, ...input }, { paseo }) => {
     await requireReady(); seen(paseo);
     if (!(await inboxSettings()).enable_inbox) throw new Error("The Needs-you inbox is off, so there's no brief to fill. Finish with your normal reply.");
     if (!/^[\w-]+$/.test(agentId)) throw new Error("Unsupported agent identity.");
@@ -635,7 +665,7 @@ export default function contribute(server: PluginServerContext) {
     await rename(temporary, needsYouPath(agentId));
     return { ok: true as const, briefId: `brief:${turn?.turnId ?? record.at}` };
   });
-  server.handle(rpc.briefActionRpc, async ({ agentId, briefId, decisionId, choice, move }, { paseo }) => {
+  handle(rpc.briefActionRpc, async ({ agentId, briefId, decisionId, choice, move }, { paseo }) => {
     await requireReady(); seen(paseo);
     const brief = await inbox.briefAction(agentId, { briefId, decisionId, choice, move }, async (text, messageId) => {
       await paseo.agents.ref(agentId).send(text, { messageId, activeTurnBehavior: "steer" });
@@ -676,7 +706,7 @@ export default function contribute(server: PluginServerContext) {
       // The Overseer: needs_you (no Stop-hook nudge), the action tools and its routing tools. Never tracked.
       if (request.labels[OVERSEER_LABEL] === "1" && request.provider !== "codex") {
         const env = { ...request.env, FOLLOW_THROUGH_OVERSEER: "1", FOLLOW_THROUGH_BRIEF: "claude" };
-        return withSessionMcp({ ...request, env }, directory, clientEntry(), paseoHome, false, process.env, "claude", true, true);
+        return withTools({ ...request, env }, false, "claude", true, true);
       }
       const saved = await store.snapshot();
       let w = saved.workspaces.find(w => w.enable_tracking && !w.archived && (w.mainAgentId === request.agentId || w.batches.some(b => b.recipientAgentId === request.agentId && !b.settledAt && b.tasks.every(t => t.kind === "inventory") && ["sending", "sent", "uncertain", "blocked"].includes(b.state))));
@@ -704,11 +734,11 @@ export default function contribute(server: PluginServerContext) {
       if (!w) {
         // Root agents get the action tools (agent parity) and, while the inbox is on, needs_you.
         if (!root) return request;
-        return withSessionMcp({ ...request, env: { ...request.env, ...(brief ? { FOLLOW_THROUGH_BRIEF: brief } : {}) } }, directory, clientEntry(), paseoHome, false, process.env, brief, true);
+        return withTools({ ...request, env: { ...request.env, ...(brief ? { FOLLOW_THROUGH_BRIEF: brief } : {}) } }, false, brief, true);
       }
       const recovery = w.mainAgentId !== request.agentId && !w.contributorAgentIds?.includes(request.agentId);
       const main = !recovery && w.mainAgentId === request.agentId ? brief : null;
-      return withSessionMcp({ ...request, env: { ...request.env, FOLLOW_THROUGH_CLI: bridge, FOLLOW_THROUGH_CLIENT_ENTRY: clientEntry(), ...(recovery ? { FOLLOW_THROUGH_RECOVERY: "1" } : {}), ...(main ? { FOLLOW_THROUGH_BRIEF: main } : {}) } }, directory, clientEntry(), paseoHome, recovery, process.env, main, root && !recovery);
+      return withTools({ ...request, env: { ...request.env, FOLLOW_THROUGH_CLI: bridge, FOLLOW_THROUGH_CLIENT_ENTRY: clientEntry(), ...(recovery ? { FOLLOW_THROUGH_RECOVERY: "1" } : {}), ...(main ? { FOLLOW_THROUGH_BRIEF: main } : {}) } }, recovery, main, root && !recovery);
     }),
     server.on("agent.turn_ended", async (event, { paseo, signal }) => {
       await ready;
