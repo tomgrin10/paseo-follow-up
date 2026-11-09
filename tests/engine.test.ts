@@ -343,3 +343,16 @@ test("a fourteen-day deploy task keeps its clock through engine recovery and wai
   f.advance(61_000); await f.engine.tick(); assert.equal(f.sends.length, 1);
   await f.engine.recover(); await f.engine.tick(); assert.equal(f.sends.length, 1);
 });
+test("held auto-sends queue the batch and send it once the hold lifts", async t => {
+  const f = await fixture(t, workspace({ enable_auto_sends: true, prs: [pr({ snapshot: snapshot({ conflict: true }) })] }));
+  let held = true; f.engine.autoSendsHeld = () => held;
+  await f.engine.tick(); f.advance(61_000); await f.engine.tick(); await f.engine.tick();
+  assert.equal((await f.get()).batches[0].state, "pending"); assert.equal(f.sends.length, 0);
+  held = false; await f.engine.tick();
+  assert.equal((await f.get()).batches[0].state, "sent"); assert.equal(f.sends.length, 1);
+});
+test("a clicked send goes out while auto-sends are held", async t => {
+  const f = await fixture(t, workspace({ enable_auto_sends: true, prs: [pr({ snapshot: snapshot({ conflict: true }) })] }));
+  f.engine.autoSendsHeld = () => true;
+  await f.engine.tick(); await f.send(); assert.equal(f.sends.length, 1);
+});
