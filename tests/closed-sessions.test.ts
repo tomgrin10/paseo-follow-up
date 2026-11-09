@@ -8,12 +8,13 @@ import { SessionGuard } from "../server/session-guard";
 import { batchSchema, type State } from "../shared/model";
 import { clock, workspace } from "./fixtures";
 
-// Every daemon read below resumes a closed session's runtime, so these tests count them.
+// Every daemon read below resumes an unloaded session's runtime, so these tests count them. The main agent
+// starts loaded (a live snapshot carries activeTurn) so its transcript may be read; see never-wake.test.ts.
 async function fixture(t: any) {
   const directory = await mkdtemp(join(tmpdir(), "follow-closed-")); t.after(() => rm(directory, { recursive: true, force: true }));
   let now = clock; t.mock.method(Date, "now", () => now);
-  const main = { id: "main-agent", workspaceId: "workspace", provider: "codex", cwd: "/fixture", createdAt: "2026-01-01T00:00:00Z", status: "closed", labels: {}, lastUserMessageAt: "2026-01-01T00:00:00Z", pendingPermissions: [] } as Agent;
-  const recovery = { ...main, id: "recovery", labels: { "follow-through.recovery": "true" } };
+  const main = { id: "main-agent", workspaceId: "workspace", provider: "codex", cwd: "/fixture", createdAt: "2026-01-01T00:00:00Z", status: "idle", activeTurn: null, labels: {}, lastUserMessageAt: "2026-01-01T00:00:00Z", pendingPermissions: [] } as Agent;
+  const recovery = { ...main, id: "recovery", status: "closed", labels: { "follow-through.recovery": "true" } };
   const agents = [main, recovery];
   let timelineReads = 0; let readable = false; const subagentLists: string[] = [];
   const client = {
@@ -55,13 +56,16 @@ test("a new user message or a recovered read resets the backoff", async t => {
   const reads = f.reads(); f.advance(3_600_000); await f.gateway.discover(f.state); assert.equal(f.reads(), reads, "a readable idle transcript is not reread");
 });
 
-test("closed agents are not asked for provider subagents, which would resume them", async t => {
+test("closed and unloaded agents are not asked for provider subagents, which would resume them", async t => {
   const f = await fixture(t); const w = workspace();
-  assert.equal((await f.gateway.observe(w, true)).busy, false);
-  f.main.status = "idle"; assert.equal((await f.gateway.observe(w, true)).backgroundBusy, true);
+  f.main.status = "closed"; assert.equal((await f.gateway.observe(w, true)).busy, false);
+  // A stored (unloaded) snapshot reports its last status, usually idle, and has no activeTurn.
+  f.main.status = "idle"; delete f.main.activeTurn; assert.equal((await f.gateway.observe(w, true)).busy, false);
+  assert.deepEqual(f.subagentLists, []);
+  f.main.activeTurn = null; assert.equal((await f.gateway.observe(w, true)).backgroundBusy, true);
   assert.deepEqual(f.subagentLists, ["main-agent"], "only the loaded agent was queried; recovery agents are out of scope");
   const batch = batchSchema.parse({ id: "batch", tasks: [], state: "sent", createdAt: new Date(clock).toISOString(), sentAt: new Date(clock).toISOString(), settledAt: null, messageId: "message", attempts: 1, result: "", recipientAgentId: f.recovery.id });
   assert.equal((await f.gateway.recoveryRuntime(w, batch)).busy, false);
-  f.recovery.status = "idle"; assert.equal((await f.gateway.recoveryRuntime(w, batch)).busy, true);
+  f.recovery.status = "idle"; f.recovery.activeTurn = null; assert.equal((await f.gateway.recoveryRuntime(w, batch)).busy, true);
   assert.deepEqual(f.subagentLists, ["main-agent", "recovery"]);
 });

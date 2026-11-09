@@ -43,3 +43,21 @@ export function migrateFollowEvery(state: { workspaces: { id: string; archived: 
   }
   return { tracked, autoSends };
 }
+
+export const ACTIVE_SCOPE_MIGRATION = "active-scope-1";
+/**
+ * 1.3.0-beta.3: undo the beta.2 blast radius. Once, turn auto-send off for followed workspaces outside the active
+ * scope and remember them; each turns back on when its workspace becomes active (see applyDiscovery).
+ * `active` holds the workspace ids discovery found active. Returns how many were parked, or null if already applied.
+ */
+export function migrateActiveScope(state: { workspaces: { id: string; archived: boolean; enable_tracking: boolean; enable_auto_sends: boolean }[]; migrations?: string[]; autoSendsParked?: string[] }, active: Set<string>): number | null {
+  if (state.migrations?.includes(ACTIVE_SCOPE_MIGRATION)) return null;
+  state.migrations = [...state.migrations ?? [], ACTIVE_SCOPE_MIGRATION];
+  const parked = new Set(state.autoSendsParked ?? []);
+  for (const w of state.workspaces) {
+    if (w.archived || !w.enable_tracking || !w.enable_auto_sends || active.has(w.id)) continue;
+    w.enable_auto_sends = false; parked.add(w.id);
+  }
+  if (parked.size) state.autoSendsParked = [...parked];
+  return parked.size;
+}

@@ -15,11 +15,14 @@ import { extractHistory, type History, type DiscoveredWorkspace } from "./discov
 import type { PluginBeforeRequests } from "@getpaseo/plugin/server";
 import { isWorkspaceRoot, type WorkspaceAgent } from "./workspace-agent";
 import { SessionGuard } from "./session-guard";
-import { DeliveryDeferred } from "./delivery";
+import { DeliveryDeferred, ConversationGone } from "./delivery";
+export { ConversationGone } from "./delivery";
+import { activeWindowMs, isLoaded, recentlyUsed, workspaceActive, conversationGone, DEFAULT_ACTIVE_WINDOW_DAYS, DAY_MS } from "./agent-load";
+import { HistoryCache } from "./history-cache";
 type RecoveryAgentOptions = Partial<PluginBeforeRequests["agent.create"]["config"]> & { workspaceId: string; labels: Record<string, string>; idempotencyKey: string; env: Record<string, string> };
 
 export const paseoHome = process.env.PASEO_HOME ?? join(homedir(), ".paseo");
-export type Agent = { id: string; provider: string; cwd: string; model?: string | null; currentModeId?: string | null; thinkingOptionId?: string | null; features?: { id: string; value: unknown }[]; persistence?: { sessionId: string; nativeHandle?: string } | null; title?: string | null; createdAt: string; workspaceId?: string; status: string; archivedAt?: string | null; labels: Record<string, string>; lastUserMessageAt: string | null; pendingPermissions: unknown[] };
+export type Agent = { id: string; provider: string; cwd: string; model?: string | null; currentModeId?: string | null; thinkingOptionId?: string | null; features?: { id: string; value: unknown }[]; persistence?: { sessionId: string; nativeHandle?: string } | null; title?: string | null; createdAt: string; workspaceId?: string; status: string; archivedAt?: string | null; labels: Record<string, string>; lastUserMessageAt: string | null; pendingPermissions: unknown[]; activeTurn?: unknown; lastError?: string | null };
 type WorkspaceRow = { id: string; name: string; projectId?: string | null; labels?: string[]; archivingAt?: string | null };
 export interface Daemon {
   connect(): Promise<void>; close(): Promise<void>;
@@ -97,25 +100,32 @@ export function historyRetryDelay(failures: number): number {
   return failures <= 0 ? HISTORY_RETRY_MS : Math.min(HISTORY_RETRY_MS * 2 ** (failures - 1), HISTORY_RETRY_MAX_MS);
 }
 /**
- * A closed agent has no live runtime, so it cannot have running provider subagents. Asking the
- * daemon anyway resumes the session from persistence (spawning its provider process) only for the
- * idle-runtime collector to close it again, so each poll would resume it.
+ * An unloaded agent has no live runtime, so it cannot have running provider subagents. Asking the
+ * daemon anyway resumes the session from persistence (spawning its provider process) and keeps it
+ * loaded for an hour, so each poll would wake it. See isLoaded for how "unloaded" is told apart.
  */
 async function subagentsRunning(client: Daemon, agent: Agent, failure: string): Promise<boolean> {
-  if (agent.status === "closed") return false;
+  if (!isLoaded(agent)) return false;
   const children = await client.listProviderSubagents(agent.id);
   if (children.error) throw new Error(failure);
   return children.subagents.some(child => child.status === "running");
 }
 
 export class PaseoGateway implements Gateway {
-  constructor(private connect: typeof withDaemon = withDaemon, private guard = new SessionGuard(join(paseoHome, "plugin-data/session-guard")), private compacting = compactionPending) {}
+  constructor(private connect: typeof withDaemon = withDaemon, private guard = new SessionGuard(join(paseoHome, "plugin-data/session-guard")), private compacting = compactionPending, private histories = new HistoryCache(null), private now = Date.now) {}
   private directory: { agents: { agent: Agent }[]; workspaces: WorkspaceRow[] } | null = null;
   private dirty = new Set<string>();
   markDirty(agentId: string): void { this.dirty.add(agentId); }
   // `failures` counts consecutive unreadable reads of one transcript; `retryAt` backs them off.
-  private histories = new Map<string, { messageAt: string | null; at: number; failures: number; retryAt: number; history: History; submissions: Submission[]; artifacts: Artifact[] }>();
+  // Persisted (successful reads only) so restarts don't rescan; see HistoryCache.
+  /** Timeline reads discovery has made, for tests and the scale check. */
+  timelineReads = 0;
+  /** The active window from the last discovery's state. */
+  private windowMs = DEFAULT_ACTIVE_WINDOW_DAYS * DAY_MS;
   async discover(state: State, workspaceId?: string): Promise<DiscoveredWorkspace[]> {
+    await this.histories.load();
+    const now = this.now();
+    const windowMs = this.windowMs = activeWindowMs(state);
     return this.connect(async client => {
       const [agents, workspaces, catalog] = await Promise.all([
         pages(cursor => client.fetchAgents({ page: { limit: 100, ...(cursor ? { cursor } : {}) } })),
@@ -146,9 +156,13 @@ export class PaseoGateway implements Gateway {
         // sessions can still contribute their PRs without acquiring completion authority.
         const project = catalog.projects.find(p => p.projectId === workspace.projectId);
         const repo = project?.projectKind === "git" ? /^remote:github\.com\/([\w.-]+\/[\w.-]+?)(?:\.git)?$/.exec(project.projectKey)?.[1] ?? null : null;
-        for (const agent of roots) {
+        // Active scope: a dormant workspace stays listed but is never scanned. Within an active one only
+        // loaded agents are read, because a timeline read loads the agent (see isLoaded).
+        row.active = workspaceActive(roots, existing, windowMs, now);
+        if (row.active) for (const agent of roots) {
+          if (!isLoaded(agent)) continue;
           const cached = this.histories.get(agent.id);
-          if (!cached || cached.messageAt !== agent.lastUserMessageAt || this.dirty.has(agent.id) || (cached.history.error && Date.now() >= cached.retryAt) || (["running", "initializing"].includes(agent.status) && Date.now() - cached.at >= 15_000)) scans.push({ row, agent, repo });
+          if (!cached || cached.messageAt !== agent.lastUserMessageAt || this.dirty.has(agent.id) || (cached.history.error && now >= cached.retryAt) || (["running", "initializing"].includes(agent.status) && now - cached.at >= 15_000)) scans.push({ row, agent, repo });
         }
         discovered.push(row);
       }
@@ -157,6 +171,7 @@ export class PaseoGateway implements Gateway {
       // Session opening and Track need only ownership metadata. Read transcripts in the poll.
       for (const { agent, repo } of scans.slice(0, workspaceId ? 0 : 4)) {
         let history: History; let submissions: Submission[] = []; let artifacts: Artifact[] = [];
+        this.timelineReads++;
         try {
           const entries: { item: unknown; seqStart: number; timestamp?: string }[] = [];
           let cursor: { epoch: string; seq: number } | null = null;
@@ -175,12 +190,12 @@ export class PaseoGateway implements Gateway {
           history = extractHistory(items, complete, complete ? null : "History exceeds the recovery window; inspect older transcripts during inventory");
           submissions = submittedPrs(items, agent.id, repo);
         } catch { history = extractHistory([], false, "History could not be read; inspect the session or register submitted PRs explicitly"); }
-        // Reading a closed session's timeline resumes its runtime, so an unreadable one is retried
-        // with backoff instead of every poll. New user messages and live turns retry immediately.
+        // An unreadable timeline is retried with backoff instead of every poll. New user messages and
+        // live turns retry immediately.
         const previous = this.histories.get(agent.id);
         const live = ["running", "initializing"].includes(agent.status);
         const failures = !history.error ? 0 : previous?.history.error && previous.messageAt === agent.lastUserMessageAt && !live ? previous.failures + 1 : 1;
-        const at = Date.now();
+        const at = this.now();
         this.histories.set(agent.id, { messageAt: agent.lastUserMessageAt, at, failures, retryAt: at + historyRetryDelay(failures), history, submissions, artifacts });
         this.dirty.delete(agent.id);
       }
@@ -195,6 +210,7 @@ export class PaseoGateway implements Gateway {
       }
       const known = new Set(agents.map(a => a.agent.id));
       for (const id of this.histories.keys()) if (!known.has(id)) this.histories.delete(id);
+      await this.histories.save();
       return discovered;
     });
   }
@@ -230,6 +246,8 @@ export class PaseoGateway implements Gateway {
       const context = { guardedInterruptionId };
       if (guarded || !pauses && workspace.labels?.some(label => /^(Paused|Paused by Session Guard)$/i.test(label))) return { ...context, guarded: true, busy: false, reason: "Waiting for Session Guard to resume this workspace", archived: false };
       if (compacting) return { busy: true, reason: "Smart Session is compacting the main agent", archived: false };
+      const mainLoaded = isLoaded(a), mainRecent = recentlyUsed(a, this.windowMs, this.now());
+      if (conversationGone(a.lastError)) return { busy: false, reason: a.lastError ?? "Conversation not found", archived: false, gone: a.lastError ?? "Conversation not found", mainLoaded, mainRecent };
       if (a.pendingPermissions.length || a.status === "error") return { busy: false, reason: a.status === "error" ? "Main agent needs recovery" : "Main agent is waiting for a permission or answer", archived: false };
       let busy = false; let backgroundBusy = false;
       for (const { agent } of agents.filter(row => row.agent.workspaceId === w.id)) {
@@ -237,7 +255,7 @@ export class PaseoGateway implements Gateway {
         if (["running", "initializing"].includes(agent.status)) { busy = true; if (agent.id !== w.mainAgentId) backgroundBusy = true; }
         if (await subagentsRunning(client, agent, "Subagent observation unavailable")) { busy = true; backgroundBusy = true; }
       }
-      return { ...context, busy, reason: null, archived: false, backgroundBusy };
+      return { ...context, busy, reason: null, archived: false, backgroundBusy, mainLoaded, mainRecent };
     });
   }
   async recoveryRuntime(w: Workspace, batch: Batch): Promise<{ busy: boolean; reason: string | null }> {
@@ -271,8 +289,10 @@ export class PaseoGateway implements Gateway {
       }
       catch { throw new DeliveryDeferred("Session Guard state is unavailable; follow-up will wait and retry."); }
       if (guarded) throw new DeliveryDeferred("Waiting for Session Guard to resume the assigned session.");
+      if (conversationGone(a.lastError)) throw new ConversationGone(recipient, a.lastError!);
       await beforeSend(recipient, batch.messageId).catch(() => undefined);
-      await client.sendMessage(recipient, text, { messageId: batch.messageId, activeTurnBehavior: "steer" });
+      try { await client.sendMessage(recipient, text, { messageId: batch.messageId, activeTurnBehavior: "steer" }); }
+      catch (error) { if (conversationGone(error)) throw new ConversationGone(recipient, error instanceof Error ? error.message : String(error)); throw error; }
     });
   }
   /**
@@ -324,7 +344,9 @@ export class PaseoGateway implements Gateway {
       const entries: { item: unknown; seqStart: number }[] = [];
       let cursor: { epoch: string; seq: number } | null = null;
       let historyError: string | null = "History exceeds the recovery window; inspect local transcripts for older work";
-      try {
+      // Reading an unloaded main agent's timeline would wake it; the recovery agent reads local transcripts instead.
+      if (!isLoaded(main)) historyError = "The main agent isn't loaded, so its timeline wasn't read (that would wake it). Use its local provider transcript and git history.";
+      else try {
         for (let i = 0; i < 100; i++) {
           const page = await client.fetchAgentTimeline(main.id, { direction: cursor ? "before" : "tail", ...(cursor ? { cursor } : {}), limit: 500, projection: "canonical", timeout: 15_000 });
           if (page.error || page.gap || page.staleCursor) throw new Error("History changed or is unavailable");
