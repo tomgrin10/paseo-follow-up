@@ -176,7 +176,7 @@ export function toolsCheck({ config, nativeAgents, hookError }: ToolsInput): Che
   if (mcpOff || blocked.length) {
     const why = mcpOff ? "Paseo's MCP is off" : `Paseo's tools are off for ${joinNames(blocked.map(b => b === "claude" ? "Claude" : "Codex"))}`;
     row = { id: "tools", label, state: "warn", detail: `${why}, so each agent gets Follow-up's tools through a small extra process. It works, and uses a little more memory.`,
-      fix: fix(mcpOff ? "Turn on daemon.mcp in Paseo's config.json to serve them through Paseo instead." : "Turn Paseo tools back on for that provider in Paseo's config.json.") };
+      fix: mcpOff ? fix("Optional. To serve them through Paseo instead, set this in Paseo's config.json (in Paseo's home folder) and restart Paseo.", `"daemon": { "mcp": { "enabled": true } }`) : fix("Optional. Turn Paseo tools back on for that provider in Paseo's config.json, under agents.providers.") };
   } else if (!nativeAgents) {
     row = { id: "tools", label, state: "pending", detail: "Checked when your first agent starts. Nothing to do.", fix: null };
   } else row = { id: "tools", label, state: "ok", detail: `Agents get Follow-up's tools through Paseo.${seen}`, fix: null };
@@ -189,7 +189,7 @@ export function toolsCheck({ config, nativeAgents, hookError }: ToolsInput): Che
 export function checksSummary(checks: readonly Check[]): { state: CheckState; line: string } {
   const fails = checks.filter(c => c.state === "fail").length;
   const warns = checks.filter(c => c.state === "warn").length;
-  if (fails) return { state: "fail", line: `${fails} thing${fails === 1 ? "" : "s"} to fix` };
+  if (fails) return { state: "fail", line: warns ? `${fails} to fix, ${warns} to look at` : `${fails} thing${fails === 1 ? "" : "s"} to fix` };
   if (warns) return { state: "warn", line: `Ready, with ${warns} note${warns === 1 ? "" : "s"}` };
   if (checks.some(c => c.state === "pending")) return { state: "pending", line: "Ready so far" };
   return { state: "ok", line: "All set" };

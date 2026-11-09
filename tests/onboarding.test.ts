@@ -198,7 +198,7 @@ test("checks: a provider a helper uses is a failure; an unused one is optional; 
 
 test("checks: tools through the bridge, blocked by config, not seen yet, and hooks that failed", async () => {
   let tools = byId((await new ReadinessChecks(deps({ tools: async () => ({ config: { daemon: { mcp: { enabled: false } } }, nativeAgents: 0, hookError: null }) })).run()).checks, "tools");
-  assert.equal(tools.state, "warn"); assert.match(tools.detail, /Paseo's MCP is off/); assert.match(tools.fix!.text, /daemon\.mcp/);
+  assert.equal(tools.state, "warn"); assert.match(tools.detail, /Paseo's MCP is off/); assert.match(tools.fix!.command!, /"mcp": \{ "enabled": true \}/);
 
   tools = byId((await new ReadinessChecks(deps({ tools: async () => ({ config: { agents: { providers: { claude: { paseoTools: { disabledTools: ["follow_merge"] } } } } }, nativeAgents: 2, hookError: null }) })).run()).checks, "tools");
   assert.equal(tools.state, "warn"); assert.match(tools.detail, /off for Claude/);
