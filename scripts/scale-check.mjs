@@ -112,7 +112,8 @@ try {
     // The worker's own breakdown (heap vs native), from the governor's sample in follow.usage.
     const memory = async () => { try { return (await client.invokePluginRpc("follow-through", "follow.usage", {}))?.resources?.worker ?? null; } catch { return null; } };
     const memoryIdle = await memory();
-    if (heapDir) { process.kill(pid, "SIGUSR2"); await sleep(8_000); }
+    let memoryAfterGc = null;
+    if (heapDir) { process.kill(pid, "SIGUSR2"); await sleep(8_000); memoryAfterGc = await memory(); }
     // The host's own cost: other plugin processes under this daemon (the fixture provider), for comparison.
     const { stdout: ps } = await exec("ps", ["-eo", "pid=,ppid=,rss=,args="]);
     // `paseo daemon run` is a wrapper, so plugin processes are grandchildren: walk the daemon's whole tree.
@@ -120,7 +121,7 @@ try {
     const tree = new Set([daemon.pid]);
     for (let grew = true; grew;) { grew = false; for (const r of rows) if (!tree.has(r.pid) && tree.has(r.ppid)) { tree.add(r.pid); grew = true; } }
     const hostRss = rows.filter(r => tree.has(r.pid) && r.pid !== pid && /plugin-process/.test(r.args)).map(r => r.rssMb);
-    worker = { pid, memory: memoryIdle, hostPluginBaselineMb: hostRss.length ? Math.min(...hostRss) : null, rssMb: Math.round(await rss()), idlePeakRssMb: Math.round(peak), lifetimePeakRssMb: Math.round(await rss("VmHWM")), cpuPct, idleSeconds: IDLE_MS / 1000, stateWrites: writes, stateBytesBefore, stateBytesAfter: statSync(statePath).size };
+    worker = { pid, memory: memoryIdle, memoryAfterGc, hostPluginBaselineMb: hostRss.length ? Math.min(...hostRss) : null, rssMb: Math.round(await rss()), idlePeakRssMb: Math.round(peak), lifetimePeakRssMb: Math.round(await rss("VmHWM")), cpuPct, idleSeconds: IDLE_MS / 1000, stateWrites: writes, stateBytesBefore, stateBytesAfter: statSync(statePath).size };
   }
   const receipts = (await readFile(join(home, "fixture-receipts.jsonl"), "utf8").catch(() => "")).trim().split("\n").filter(l => /Follow-through (batch|recovery)/.test(l)).length;
   const state = JSON.parse(await readFile(join(home, "plugin-data/follow-through/state.json"), "utf8"));
