@@ -9,6 +9,7 @@ const info = (a: Snapshot): AgentInfo => ({
   title: a.title ?? null, status: a.status, archivedAt: a.archivedAt ?? null, updatedAt: a.updatedAt ?? null,
   lastUserMessageAt: a.lastUserMessageAt ?? null, requiresAttention: !!a.requiresAttention, attentionReason: a.attentionReason ?? null,
   attentionTimestamp: a.attentionTimestamp ?? null, createdAt: a.createdAt ?? null,
+  pendingPermissionIds: Array.isArray(a.pendingPermissions) ? a.pendingPermissions.flatMap(p => typeof (p as { id?: unknown })?.id === "string" ? [(p as { id: string }).id] : []) : null,
 });
 
 /** The daemon as the inbox sees it. One connection reads agents and workspaces together, cached briefly. */

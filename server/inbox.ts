@@ -59,6 +59,8 @@ export type AgentInfo = {
   requiresAttention: boolean; attentionReason: string | null;
   /** When Paseo marked the agent as needing attention (a turn finished unread). Optional for older hosts and stubs. */
   attentionTimestamp?: string | null; createdAt?: string | null;
+  /** Ids of the permission prompts Paseo shows for this agent right now. Absent or null: unknown, so nothing is cleared. */
+  pendingPermissionIds?: string[] | null;
 };
 export interface Directory {
   agents(): Promise<AgentInfo[]>;
@@ -90,6 +92,8 @@ export type InboxOptions = {
   guard: () => Promise<GuardPause[] | null>;
   now?: () => number;
   graceMs?: number;
+  /** How long a permission row stays before reconcilePermissions checks Paseo still shows its prompt. */
+  permissionSettleMs?: number;
   /** How long a turn end waits for Paseo to stop reporting "running" (F7). Tests shorten it. */
   settleMs?: number; settleStepMs?: number;
 };
@@ -301,6 +305,8 @@ export class Inbox {
           const turn = this.turns.get(root.rootId) ?? this.turns.get(agent.id);
           const stated = await this.sources(root.rootId, turn?.at ?? null, turn?.turnId ?? null);
           const brief = await this.creator(root.rootId, turn?.turnId ?? null, `:permission:${request.id}`, "permission", { ...stated, permission: { title: question, subagent: root.subagent ? { id: agent.id, title: root.subagent.title } : null } });
+          // Answered while the brief was being built: its resolve already ran against an unflagged entry, so flagging now would stick.
+          if (this.resolved.has(key)) return;
           this.pending.add(root.rootId);
           await this.apply([{ agentId: root.rootId, event: { type: "permission", requestId: request.id, detail: root.subagent ? `Subagent asks · ${question}` : question }, brief }]);
         })().catch(() => undefined).finally(resolve);
@@ -316,6 +322,36 @@ export class Inbox {
     const root = await this.root(agent);
     this.pending.delete(root.rootId);
     await this.apply([{ agentId: root.rootId, event: { type: "permission_resolved", requestId } }]);
+  }
+
+  /**
+   * A permission row whose prompt Paseo no longer shows is cleared, for resolves the hook never delivered (a mode change,
+   * a provider that answers on its own, a worker restart). Reads only the daemon's agent list, never a timeline, and only
+   * when a permission row has been up past the settle time. An agent whose pending prompts are unknown keeps its row.
+   */
+  async reconcilePermissions(): Promise<void> {
+    const now = this.now();
+    const settle = this.o.permissionSettleMs ?? 30_000;
+    const state = await this.store.snapshot();
+    const open = Object.entries(state.entries).flatMap(([rootId, e]) => (e.needs?.reasons ?? [])
+      .filter(r => r.reason === "permission" && now - Date.parse(r.at) >= settle)
+      .map(r => ({ rootId, requestId: r.dedupeKey.replace(/^permission:/, "") })));
+    if (!open.length) return;
+    const agents = await this.o.directory.agents();
+    const byId = new Map(agents.map(a => [a.id, a]));
+    const rootOf = (a: AgentInfo) => { let at = a; for (let i = 0; i < 8 && at.parentAgentId && byId.has(at.parentAgentId); i++) at = byId.get(at.parentAgentId)!; return at.id; };
+    const events: { agentId: string; event: InboxEvent }[] = [];
+    for (const { rootId, requestId } of open) {
+      if (!byId.has(rootId)) continue;
+      const family = agents.filter(a => rootOf(a) === rootId);
+      if (family.some(a => !Array.isArray(a.pendingPermissionIds))) continue;
+      const showing = family.flatMap(a => a.pendingPermissionIds!);
+      // "import" stands for whatever prompt was up when the worker started; it clears once none is.
+      if (requestId === "import" ? showing.length : showing.includes(requestId)) continue;
+      events.push({ agentId: rootId, event: { type: "permission_resolved", requestId } });
+      if (!showing.length) this.pending.delete(rootId);
+    }
+    await this.apply(events);
   }
 
   /** Root agents with a permission prompt showing, for the Stop-hook nudge to skip (R2). */
