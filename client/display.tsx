@@ -22,14 +22,59 @@ export function briefShareText(stats: { days: number; total: number; tool: numbe
   return `Last ${stats.days} days: agents stated what they need on ${stats.tool} of ${stats.total} flagged turns (${pct}%).${rest ? ` ${rest[0].toUpperCase()}${rest.slice(1)}.` : ""}`;
 }
 
-function TrustCount({ theme }: Pick<PluginSurfaceProps, "theme">) {
+function TrustCount({ theme, inCard = false }: Pick<PluginSurfaceProps, "theme"> & { inCard?: boolean }) {
   const read = useRpc(trustBypassRpc);
   const stats = useQuery({ queryKey: ["follow-through", "trust-bypass"], queryFn: () => read({}), refetchInterval: 60_000 });
   const text = trustCountText(stats.data);
-  return text ? <Text numberOfLines={1} style={{ color: theme.colors.foregroundMuted, fontSize: 12, lineHeight: 17, paddingHorizontal: 4 }}>{text}</Text> : null;
+  if (!text) return null;
+  return <View style={inCard ? { paddingHorizontal: 16, paddingVertical: 10 } : { paddingHorizontal: 4 }}>
+    <Text numberOfLines={1} style={{ color: theme.colors.foregroundMuted, fontSize: 12, lineHeight: 17 }}>{text}</Text>
+  </View>;
 }
 
-/** "Sidebar & pills" and "Needs-you inbox", rendered inside the one Follow-up settings screen. */
+/**
+ * The Overseer and AI priority switches, at the top of their cards in Settings → Agents. Same Display preferences as
+ * before (enable_overseer, enable_ranker); only where they show moved.
+ */
+export function PreferenceSwitch({ field, theme }: { field: "enable_overseer" | "enable_ranker"; theme: PluginSurfaceProps["theme"] }) {
+  const settings = useSettings(displayPreferences);
+  if (settings.status !== "ready") return null;
+  const copy = field === "enable_overseer"
+    ? { label: "Run the Overseer", hint: "Off hides its row on Home and stops its digest. An Overseer you already started stays in its workspace; Follow-up never archives it." }
+    : { label: "Rank with AI", hint: "Ranks Home's Priority sort from Linear, Slack, GitHub and the weekly plan. Read-only; runs hourly on workdays when something changed." };
+  return <>
+    <SettingsSwitch label={copy.label} hint={copy.hint} value={settings.values[field]} disabled={settings.saving}
+      onValueChange={value => void settings.save({ ...settings.values, [field]: value }, settings.revision)} />
+    {settings.saveError && <Text accessibilityRole="alert" style={{ color: theme.colors.statusDanger, paddingHorizontal: 16, paddingBottom: 8 }}>{settings.saveError}</Text>}
+  </>;
+}
+
+/**
+ * Permissions, in Settings → Following after Defaults: Trust bypass agents and how many prompts it approved.
+ * Same Display preference as before (enable_trust_bypass); only where it shows moved.
+ */
+export function PermissionsSection({ theme }: Pick<PluginSurfaceProps, "theme">) {
+  const settings = useSettings(displayPreferences);
+  if (settings.status !== "ready") return null;
+  // The hint stands on its own (the tooltip only adds who still asks); the count sits inside the card, under its switch.
+  return <SettingsSection title="Permissions" info="Agents in any other mode still ask, and so do questions and plan approval.">
+    <SettingsCard>
+      <SettingsSwitch label="Trust bypass agents" hint="Claude Code in Bypass and Codex in Full access still stop on some tool calls. This approves them while the agent is in that mode. Questions and plan approval still come to you." value={settings.values.enable_trust_bypass} disabled={settings.saving}
+        onValueChange={enable_trust_bypass => void settings.save({ ...settings.values, enable_trust_bypass }, settings.revision)} />
+      {settings.values.enable_trust_bypass && <TrustCount theme={theme} inCard />}
+    </SettingsCard>
+    {settings.saveError && <Text accessibilityRole="alert" style={{ color: theme.colors.statusDanger }}>{settings.saveError}</Text>}
+  </SettingsSection>;
+}
+
+/** A neutral "Beta" chip for section titles. */
+export function BetaChip({ theme }: Pick<PluginSurfaceProps, "theme">) {
+  return <View style={{ paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, backgroundColor: theme.colors.surface2 }}>
+    <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11, lineHeight: 15 }}>Beta</Text>
+  </View>;
+}
+
+/** "Sidebar & pills" and "Needs-you inbox", the Inbox & display tab of Follow-up's settings. */
 export function DisplaySections({ theme }: Pick<PluginSurfaceProps, "theme">) {
   const settings = useSettings(displayPreferences);
   const list = useRpc(inboxListRpc);
@@ -63,25 +108,13 @@ export function DisplaySections({ theme }: Pick<PluginSurfaceProps, "theme">) {
       </SettingsCard>
       {settings.saveError && <Text accessibilityRole="alert" style={{ color: theme.colors.statusDanger }}>{settings.saveError}</Text>}
     </SettingsSection>
-    <SettingsSection title="Needs-you inbox (beta)" info="Agents stay in Needs you until you sign them off or write to them. Opening an agent doesn't clear it.">
+    <SettingsSection title="Needs-you inbox" trailing={<BetaChip theme={theme} />} info="Agents stay in Needs you until you sign them off or write to them. Opening an agent doesn't clear it.">
       <SettingsCard>
         <SettingsSwitch label="Needs-you inbox" hint="Off: no agent is flagged. The pill still shows workspace items, and the sidebar badge counts workspaces instead." value={settings.values.enable_inbox} disabled={settings.saving} onValueChange={(enable_inbox) => save({ enable_inbox })} />
         <SettingsSwitch label="Flag merged and closed PRs" hint="At the lowest priority, as the cue to archive." value={settings.values.enable_inbox_pr_closed} disabled={settings.saving || !settings.values.enable_inbox} onValueChange={(enable_inbox_pr_closed) => save({ enable_inbox_pr_closed })} />
         <SettingsSwitch label="Ask agents to state what they need" hint="A Claude Code agent that ends a turn without saying what you need is asked once to state it, for the card at the end of its chat. Other providers only get the instruction." value={settings.values.enable_brief_nudge} disabled={settings.saving || !settings.values.enable_inbox} onValueChange={(enable_brief_nudge) => save({ enable_brief_nudge })} />
       </SettingsCard>
       {settings.values.enable_inbox && !!share.data?.briefStats && <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, lineHeight: 17, paddingHorizontal: 4 }}>{briefShareText(share.data.briefStats)}</Text>}
-    </SettingsSection>
-    <SettingsSection title="Permissions" info="Claude Code in Bypass and Codex in Full access still stop on some tool calls and wait for a yes.">
-      <SettingsCard>
-        <SettingsSwitch label="Trust bypass agents" hint="Approves those tool prompts for you, judged by the agent's mode at the time. Questions and plan approval still come to you, and agents in other modes still ask." value={settings.values.enable_trust_bypass} disabled={settings.saving} onValueChange={(enable_trust_bypass) => save({ enable_trust_bypass })} />
-      </SettingsCard>
-      {settings.values.enable_trust_bypass && <TrustCount theme={theme} />}
-    </SettingsSection>
-    <SettingsSection title="Overseer (beta)" info="One agent you can ask about all your work. It sends each task to the agent that owns it and asks you when it isn't sure.">
-      <SettingsCard>
-        <SettingsSwitch label="Overseer" hint="Off hides its row on Home and stops its digest. An Overseer you already started stays in its workspace; Follow-up never archives it." value={settings.values.enable_overseer} disabled={settings.saving} onValueChange={(enable_overseer) => save({ enable_overseer })} />
-        <SettingsSwitch label="AI priority" hint="Ranks Home's Priority sort from Linear, Slack, GitHub and the weekly plan. Read-only; runs hourly on workdays when something changed." value={settings.values.enable_ranker} disabled={settings.saving} onValueChange={(enable_ranker) => save({ enable_ranker })} />
-      </SettingsCard>
     </SettingsSection>
     </>
   );
