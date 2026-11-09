@@ -6,7 +6,7 @@ import { batchPrompt, tasksFor, isRecovery, needsPrObservations } from "./tasks"
 import { answerRecipients, developerAnswer, syncTaskQuestions } from "./questions";
 import { answerMessage, isOpen as isOpenQuestion, type Question } from "../shared/questions";
 import { reconcileSubmittedStacks } from "./submissions";
-import { applyDiscovery, startsWithAutoSend, type DiscoveredWorkspace } from "./discovery";
+import { applyDiscovery, interruptionHold, startsWithAutoSend, type DiscoveredWorkspace } from "./discovery";
 import { followsByDefault, migrateActiveScope } from "../shared/settings";
 import { replyRecorded } from "../shared/communication";
 import { DeliveryDeferred, ConversationGone } from "./delivery";
@@ -26,7 +26,7 @@ export interface Runtime {
 const GONE_REASON = "The main agent's conversation no longer exists, so Follow-up stopped sending to it. Start a new agent in this workspace to continue.";
 /** A batch that asks the agent to verify it's finished and declare Done. These never go out on their own. */
 export const completionBatch = (b: Batch): boolean => b.tasks.some(t => t.kind === "completion");
-export const interruptionHold = (kind: "canceled" | "failed") => kind === "canceled" ? "You stopped the main agent. Resume follow-up when ready." : "The main agent's turn failed. Check it before resuming follow-up.";
+export { interruptionHold };
 export interface Gateway {
   discover?(state: State, workspaceId?: string): Promise<DiscoveredWorkspace[]>;
   observe(w: Workspace, fresh?: boolean): Promise<Runtime>;

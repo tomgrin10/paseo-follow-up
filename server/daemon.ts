@@ -206,11 +206,13 @@ export class PaseoGateway implements Gateway {
       const candidates = agents.map(row => row.agent).filter(a => a.workspaceId === workspace.id && !a.archivedAt && !a.labels["follow-through.recovery"]);
       const roots: Agent[] = [];
       for (const agent of candidates) if (await isWorkspaceRoot(agent, findParent)) roots.push(agent);
-      const successor = successorMainAgent(roots, existing?.mainAgentId);
+      const recorded = existing ? roots.find(a => a.id === existing.mainAgentId) : undefined;
+      const handBack = existing ? handBackMainAgent(roots, existing) : undefined;
+      const successor = handBack ?? successorMainAgent(roots, existing?.mainAgentId, existing?.mainClosedSince, now);
       const main = successor ?? chooseMainAgent(roots, existing?.mainAgentId);
       if (!main && !existing) continue;
       const owner = successor?.id ?? existing?.mainAgentId ?? main!.id;
-      const row: DiscoveredWorkspace = { id: workspace.id, title: workspace.name || main?.title || existing!.title, mainAgentId: owner, ...(successor ? { replacesMainAgentId: existing!.mainAgentId } : {}), projectId: workspace.projectId, messageAt: main?.lastUserMessageAt ?? null, enable_default_tracking: defaults.has(workspace.projectId ?? "") && !optedOut(state, workspace.id), contributorAgentIds: roots.filter(a => a.id !== owner && a.id !== existing?.mainAgentId && a.id !== main?.id).map(a => a.id) };
+      const row: DiscoveredWorkspace = { id: workspace.id, title: workspace.name || main?.title || existing!.title, mainAgentId: owner, ...(successor ? { replacesMainAgentId: existing!.mainAgentId, ...(handBack ? { handBack: true } : {}) } : {}), mainClosed: !!recorded && recorded.status === "closed", projectId: workspace.projectId, messageAt: main?.lastUserMessageAt ?? null, enable_default_tracking: defaults.has(workspace.projectId ?? "") && !optedOut(state, workspace.id), contributorAgentIds: roots.filter(a => a.id !== owner).map(a => a.id) };
       // Preserve the designated owner even when it is no longer indexed. Other root
       // sessions can still contribute their PRs without acquiring completion authority.
       const project = projects.find(p => p.projectId === workspace.projectId);
@@ -460,14 +462,31 @@ export function chooseMainAgent(roots: Agent[], existingId?: string): Agent | un
   return [...roots].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))[0];
 }
 
+/** How long the recorded main agent must read closed, without a break, before another root agent takes over. */
+export const MAIN_CLOSED_HANDOVER_MS = 30 * 60_000;
+
 /**
- * The recorded main agent is closed, archived or gone while the workspace still has a live root agent: the live
- * one takes over (the one Tom wrote to last, then the newest). A live recorded main is never replaced.
+ * The recorded main agent is archived or gone, or has read "closed" continuously for MAIN_CLOSED_HANDOVER_MS, while
+ * the workspace still has a live root agent: the live one takes over (the one Tom wrote to last, then the newest).
+ * "closed" alone is not enough: a Claude session closes and reopens on its own (a plugin update reopens sessions, the
+ * process restarts between turns), so a short close never hands the workspace away. A live recorded main is never
+ * replaced. `closedSince` is when discovery first saw it closed (Workspace.mainClosedSince); unknown means just now.
  */
-export function successorMainAgent(roots: Agent[], existingId: string | undefined): Agent | undefined {
+export function successorMainAgent(roots: Agent[], existingId: string | undefined, closedSince?: string, now = Date.now()): Agent | undefined {
   if (!existingId) return undefined;
   const current = roots.find(a => a.id === existingId);
   if (current && current.status !== "closed") return undefined;
+  if (current && (!closedSince || now - Date.parse(closedSince) < MAIN_CLOSED_HANDOVER_MS)) return undefined;
   const live = roots.filter(a => a.id !== existingId && a.status !== "closed");
   return live.sort((a, b) => (b.lastUserMessageAt ?? "").localeCompare(a.lastUserMessageAt ?? "") || b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id))[0];
+}
+
+/**
+ * After a handover, the original main agent takes the workspace back once it reads live again, as long as the
+ * successor hasn't done main-agent work (a sync, task, question, needs_you or Done call) in the meantime.
+ */
+export function handBackMainAgent(roots: Agent[], w: { mainAgentId: string; handover?: { from: string; worked: boolean } }): Agent | undefined {
+  if (!w.handover || w.handover.worked || w.handover.from === w.mainAgentId) return undefined;
+  const original = roots.find(a => a.id === w.handover!.from);
+  return original && original.status !== "closed" ? original : undefined;
 }

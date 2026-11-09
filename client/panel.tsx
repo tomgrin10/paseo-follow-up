@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
-import { useRpc, useTabState, openExternalUrl, type PluginHostProps, type PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
+import { useAgent, useRpc, useTabState, openExternalUrl, type PluginHostProps, type PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { z } from "zod";
 import type { InboxStore } from "./inbox-store";
 import { useInbox } from "./inbox";
@@ -190,6 +190,7 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
           </View>
           {openAgent && <Button theme={theme} compact={compact} icon="MessageSquare" title="Open" accessibilityLabel="Open main agent" onPress={() => openAgent(w.mainAgentId)} />}
         </View>
+        {(w.contributorAgentIds ?? []).map(id => <OtherRootAgent key={id} agentId={id} workspace={w} theme={theme} compact={compact} openAgent={openAgent} />)}
       </CardRow>
       <CardRow theme={theme}>
         <View style={{ gap: 8 }}>
@@ -218,6 +219,29 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
         </View>
       </CardRow>}
     </>}
+  </View>;
+}
+
+/**
+ * Another root agent in this workspace: it can contribute PRs but not ask Tom or call Done. "Make main agent" is
+ * the developer's choice (a plugin RPC, never an agent tool). Its title comes from Paseo's client state, no fetch.
+ */
+function OtherRootAgent({ agentId, workspace: w, theme, compact, openAgent }: { agentId: string; workspace: Workspace; theme: Theme; compact: boolean; openAgent?: (id: string) => void }) {
+  const c = theme.colors; const t = text(c);
+  const title = useAgent(agentId, a => a.title) || `Agent ${agentId.slice(0, 8)}`;
+  const control = useRpc(controlRpc); const cache = useQueryClient(); const toast = useToast();
+  const promote = useMutation({
+    mutationFn: () => control({ workspaceId: w.id, mainAgentId: agentId }),
+    onSuccess: () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); toast.show(`${title} is now the main agent`, { variant: "success" }); },
+    onError: (e: Error) => toast.error(errorText(e)),
+  });
+  return <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: c.border }}>
+    <View style={{ flex: 1, minWidth: 160, gap: 2 }}>
+      <Text numberOfLines={1} style={[t.meta, { color: c.foreground }]}>{title}</Text>
+      <Text style={t.meta}>Also works here. Adds PRs, can't ask you or call Done.</Text>
+    </View>
+    {openAgent && <Button theme={theme} compact={compact} kind="ghost" title="Open" accessibilityLabel={`Open ${title}`} onPress={() => openAgent(agentId)} />}
+    <Button theme={theme} compact={compact} title="Make main agent" accessibilityLabel={`Make ${title} the main agent`} loading={promote.isPending} disabled={promote.isPending} onPress={() => promote.mutate()} />
   </View>;
 }
 
