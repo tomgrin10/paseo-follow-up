@@ -34,6 +34,8 @@ import { fileSources } from "./server/inbox-classifier";
 import { onBeforeSend } from "./server/daemon";
 import { copyFile, readFile, rename } from "node:fs/promises";
 import { HistoryCache } from "./server/history-cache";
+import { Governor } from "./server/governor";
+import { NO_USAGE } from "./shared/usage";
 import { conversationGone, DEFAULT_ACTIVE_WINDOW_DAYS } from "./server/agent-load";
 import { ACTIVE_SCOPE_MIGRATION, autoSendsByDefault, FOLLOW_EVERY_MIGRATION, followsByDefault, followsEvery, migrateFollowEvery, optedOut } from "./shared/settings";
 import { BRIEF_KIND, BRIEF_VERSION, prState, validateNeedsYou, type Brief, type NeedsYouRecord } from "./shared/brief";
@@ -53,6 +55,8 @@ export default function contribute(server: PluginServerContext) {
   const browser = new BrowserBridge();
   const actions = new PrActions(store, github, graphite, browser);
   const engine = new Engine(store, github, gateway);
+  const governor = new Governor();
+  engine.paused = () => !governor.allowsBackground();
   const usage = new UsageReader(paseoHome);
   // Unknown is not off: an unreadable document keeps the inbox on with its defaults.
   const inboxSettings = async () => { try { const state = await displaySettings.read(); if (state.status === "ready") return state.values; } catch {} return displayPreferences.schema.parse({}); };
@@ -121,6 +125,8 @@ export default function contribute(server: PluginServerContext) {
   const inboxLoop = async () => {
     await ready;
     if (stopped || loadError) return;
+    // Critical memory: the inbox's background reads wait too; hooks still record live events.
+    if (!governor.allowsExtras()) { if (!stopped) inboxTimer = setTimeout(() => void inboxLoop(), 15_000); return; }
     try { await writeBriefState().catch(() => undefined); await inbox.tick(); await inbox.observeGuard(); await inbox.observeFollowUp(await store.snapshot()); inboxError = null; }
     catch (error) { inboxError = error instanceof Error ? error.message : "The Needs-you inbox couldn't update."; }
     if (!stopped) inboxTimer = setTimeout(() => void inboxLoop(), 15_000);
@@ -152,6 +158,7 @@ export default function contribute(server: PluginServerContext) {
     unlock = await store.lock();
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await writeFile(bridge, mcpSource, { mode: 0o600 });
+    governor.start();
     await engine.recover();
     await migrateTracking();
     await backupActiveScope();
@@ -440,7 +447,8 @@ export default function contribute(server: PluginServerContext) {
   const priorityStore = new PriorityStore(directory);
   const agentActions = new AgentActions({ store, prActions: actions, engine, inbox, priorities: priorityStore });
   server.handle(rpc.prioritiesRpc, async () => ({ items: await priorityStore.read() }));
-  server.handle(rpc.usageRpc, async () => usage.read());
+  // Provider limits are non-essential: at critical memory only the VM meter is served.
+  server.handle(rpc.usageRpc, async () => ({ ...(governor.allowsExtras() ? await usage.read() : NO_USAGE), resources: governor.current() }));
   server.handle(rpc.agentActRpc, async ({ agentId, tool, args }, { paseo }) => {
     await requireReady(); seen(paseo);
     if (!(AGENT_TOOLS as readonly string[]).includes(tool)) throw new Error(`Unknown Follow-up tool ${tool}.`);
@@ -598,7 +606,7 @@ export default function contribute(server: PluginServerContext) {
     server.on("workspace.archived", async event => { await ready; if (!loadError && !stopped) await store.mutate(state => { const w = state.workspaces.find(w => w.id === event.workspace.id); if (w) w.archived = true; }); }),
   ];
   return async () => {
-    stopped = true; if (timer) clearTimeout(timer); if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
+    stopped = true; governor.stop(); if (timer) clearTimeout(timer); if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
     await ready; if (hooksStarted) await agentHooks.stop().catch(() => {});
     await actions.close(); await closeConnections(); await engine.stop(); await ready; await store.flush().catch(() => undefined); await unlock?.();
   };

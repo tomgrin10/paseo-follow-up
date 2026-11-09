@@ -42,6 +42,10 @@ export class Engine {
   private recoveryOperations = new Set<Promise<Workspace>>();
   private running: Promise<void> | null = null;
   private stopped = false;
+  /** Set by the resource governor: while true, background refresh (scans, observation, auto-sends) waits. */
+  paused: () => boolean = () => false;
+  /** Background refreshes skipped while paused, for tests and the resource check. */
+  skipped = 0;
   constructor(readonly store: Store, private github: Pick<Github, "observe">, private gateway: Gateway, private now = Date.now, private settleMs = 60_000) {}
   async recover(): Promise<void> {
     await this.store.mutate(state => {
@@ -70,6 +74,7 @@ export class Engine {
     return this.running;
   }
   private async run(): Promise<void> {
+    if (this.paused()) { this.skipped++; return; }
     const saved = await this.store.snapshot();
     if (this.stopped) return;
     if (this.gateway.discover) {
