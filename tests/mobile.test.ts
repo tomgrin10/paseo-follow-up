@@ -87,3 +87,10 @@ test("phones: the pill sheet has one primary; Sign off steps back while the work
   assert.match(pill, /kind=\{itemFirst \? "secondary" : "primary"\} icon="Check" title="Sign off"/);
   assert.match(pill, /<NeedsYouList [^>]*feature=\{touch\}/);
 });
+
+test("phones: only Home's search row stays pinned; the status chips and the setup offer scroll with the list", async () => {
+  const home = await source("client/home.tsx");
+  assert.match(home, /\{!compact && !omnibox\.results && <StatusStrip/);
+  assert.match(home, /\{!compact && !omnibox\.results && <SetupOffer/);
+  assert.match(home, /header=\{compact && !omnibox\.results \? <View[^>]*>\s*<StatusStrip[^]*?<SetupOffer theme=\{theme\} compact/);
+});
