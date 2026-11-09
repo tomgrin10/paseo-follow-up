@@ -55,7 +55,8 @@ export function PrSheet({ workspace: w, prKey, intent, theme, compact, browserRe
         </View>}
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, paddingTop: 12, borderTopWidth: 1, borderTopColor: c.border }}>
           {s?.prWorkflow !== "github" && <Button theme={theme} compact={compact} icon="ExternalLink" title="Open in Graphite" accessibilityLabel={`Open ${pr.repo} pull request ${pr.number} in Graphite`} onPress={() => open(graphitePrUrl(pr))} />}
-          {s?.url && <Button theme={theme} compact={compact} kind="ghost" icon="Github" title="GitHub" accessibilityLabel={`Open ${pr.repo} pull request ${pr.number} on GitHub`} onPress={() => open(s.url)} />}
+          {s?.url && s.prWorkflow === "github" && <Button theme={theme} compact={compact} icon="ExternalLink" title="Open on GitHub" accessibilityLabel={`Open ${pr.repo} pull request ${pr.number} on GitHub`} onPress={() => open(s.url)} />}
+          {s?.url && s.prWorkflow !== "github" && <Button theme={theme} compact={compact} kind="ghost" icon="Github" title="GitHub" accessibilityLabel={`Open ${pr.repo} pull request ${pr.number} on GitHub`} onPress={() => open(s.url)} />}
         </View>
       </>}
     </Modal.Content>

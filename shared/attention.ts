@@ -58,7 +58,8 @@ export function mergeReady(pr: Pr, w: Pick<Workspace, "prActions">, now = Date.n
   const s = pr.snapshot;
   const queued = QUEUED.includes(s?.graphiteMergeStatus ?? "");
   const recentlySubmitted = w.prActions.some(a => a.kind === "merge" && a.state === "submitted" && a.heads[pr.key] === s?.head && now - Date.parse(a.createdAt) < 30_000);
-  if (isGithubFlow(s)) return !pr.error && !!s?.complete && s!.state === "OPEN" && githubApproved(s!) && !s!.inMergeQueue && !recentlySubmitted;
+  // GitHub mode: the same verdict Needs you and the merge plan use, so the sheet never offers Merge on a draft, conflict or red check.
+  if (isGithubFlow(s)) return mergeBlockers(pr).length === 0 && !recentlySubmitted;
   return !pr.error && !!s?.complete && s.state === "OPEN" && s.reviewDecision === "APPROVED" && !s.draft && !s.conflict && !s.failedChecks.length && !s.checksPending && !queued && !recentlySubmitted;
 }
 export const mergeQueued = (pr: Pr) => isGithubFlow(pr.snapshot) ? !!pr.snapshot?.inMergeQueue : QUEUED.includes(pr.snapshot?.graphiteMergeStatus ?? "");

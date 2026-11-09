@@ -51,13 +51,13 @@ export function githubBlocker(s: Snapshot): string | null {
   const state = s.mergeStateStatus ?? "UNKNOWN";
   if (GITHUB_MERGEABLE.includes(state)) return null;
   if (state === "DIRTY" || state === "DRAFT") return null; // Reported as Merge conflicts / Draft already.
-  if (state === "BEHIND") return "Behind its base branch: update the branch before merging";
+  if (state === "BEHIND") return "Behind its base branch (update the branch)";
   if (state === "BLOCKED") {
-    if (s.threads.length) return `Resolve ${s.threads.length} review thread${s.threads.length === 1 ? "" : "s"}`;
+    if (s.threads.length) return `${s.threads.length} unresolved review thread${s.threads.length === 1 ? "" : "s"}`;
     if (s.failedChecks.length || s.checksPending || !githubApproved(s)) return null; // Already named.
-    return "GitHub says branch protection or a ruleset blocks it";
+    return "A branch protection rule or ruleset";
   }
-  return "GitHub is still checking whether it can merge";
+  return "GitHub’s mergeability check";
 }
 export function mergeBlockers(pr: Pr): string[] {
   const s = pr.snapshot;
