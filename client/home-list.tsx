@@ -5,7 +5,7 @@ import { GROUP_TITLE, quietFolds, type Badge, type HomeGroupId, type HomeModel, 
 import { ASK_KEY, type OmniboxItem, type WorkspaceItem } from "../shared/search";
 import { AskRow, PriorityLine, ResultRow } from "./home-chrome";
 import { age } from "../shared/inbox";
-import { headlineColor, mergedColor, runningColor, tint, toneColor, withAlpha, type Colors } from "./theme";
+import { headlineColor, mergedColor, readable, runningColor, tint, toneColor, withAlpha, type Colors } from "./theme";
 import { useMinute } from "./home-data";
 import { Spinner } from "./motion";
 import type { Theme } from "./kit";
@@ -172,6 +172,7 @@ function BriefRow({ theme, line, selected, touch, onSelect }: { theme: Theme; li
     <Icon name="Sun" size={touch ? 16 : 15} color={c.foregroundMuted} />
     <Text style={{ color: c.foreground, fontSize: touch ? 14 : 13, fontWeight: "600" }}>Morning brief</Text>
     <Text numberOfLines={1} style={{ flex: 1, color: c.foregroundMuted, fontSize: touch ? 13 : 12 }}>{line}</Text>
+    {touch && <Icon name="ChevronRight" size={16} color={c.foregroundMuted} />}
   </Pressable>;
 }
 
@@ -190,7 +191,9 @@ function OverseerRow({ theme, o, selected, touch, onSelect }: { theme: Theme; o:
   </Pressable>;
 }
 
-export function glyphColor(s: Pick<Workstream, "tone">, c: Colors): string {
+/** `text`: the colour carries the state word on its own (phones), so dark success is lifted to pass as text. */
+export function glyphColor(s: Pick<Workstream, "tone">, c: Colors, text = false): string {
+  if (text && s.tone === "success") return readable(c.statusSuccess, c);
   return s.tone === "running" ? runningColor(c) : s.tone === "success" ? c.statusSuccess : headlineColor(s.tone, c);
 }
 const badgeColor = (b: Badge, c: Colors) => b.tone === "danger" ? c.statusDanger : b.tone === "warning" ? c.statusWarning : b.tone === "success" ? c.statusSuccess : b.tone === "merged" ? mergedColor(c) : c.foregroundMuted;
@@ -230,7 +233,7 @@ export function Age({ iso, c, size = 12 }: { iso: string | null; c: Colors; size
 type RowProps = { s: Workstream; sig: string; theme: Theme; dense: boolean; touch: boolean; selected: boolean; onSelect: (key: string) => void };
 const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect }: RowProps) {
   const c = theme.colors;
-  const color = glyphColor(s, c);
+  const color = glyphColor(s, c, touch);
   const blocking = s.group === "needs" && s.tier === 0;
   const muted = s.group === "quiet" || s.group === "later";
   const line = [s.word && s.group !== "needs" ? s.word : null, s.line].filter(Boolean).join(" · ");

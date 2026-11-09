@@ -60,3 +60,30 @@ test("a Needs-you row doesn't repeat its question as its detail", async () => {
   assert.equal(guarded, 2, "both row layouts skip a detail that only repeats the title");
   assert.ok(sameText("Q1 · Which fix should ship?".replace(/^Q\d+ · /, ""), "Which fix should ship?"));
 });
+
+test("phones: the state word lifts dark success green to text contrast; light and passing hues are untouched", async () => {
+  const { readable } = await import("../client/theme");
+  const dark = { surface0: "#181b1a" } as never; const light = { surface0: "#ffffff" } as never;
+  const lum = (rgb: number[]) => { const [r, g, b] = rgb.map(v => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const lifted = readable("#20744a", dark);
+  const rgb = /rgb\((\d+), (\d+), (\d+)\)/.exec(lifted)!.slice(1).map(Number);
+  assert.ok((lum(rgb) + 0.05) / (lum([24, 27, 26]) + 0.05) >= 4.5, lifted);
+  assert.equal(readable("#20744a", light), "#20744a");
+  assert.equal(readable("#e0e0e0", dark), "#e0e0e0");
+});
+
+test("phones: About's footer is one meta line, and its open state isn't shared across workspaces", async () => {
+  const { shortFooter } = await import("../shared/about");
+  assert.equal(shortFooter("Summarized by Haiku · 2m ago from the chat, 2 PRs"), "Haiku · 2m ago");
+  assert.equal(shortFooter("Summarized 3h ago from the goal"), "3h ago");
+  const about = await source("client/about.tsx");
+  assert.match(about, /useState\(\(\) => compact \? false : readOpen\(\)\)/);
+  assert.match(about, /if \(!compact\) writeOpen\(next\)/);
+});
+
+test("phones: the pill sheet has one primary; Sign off steps back while the workspace has something to act on", async () => {
+  const pill = await source("client/pill.tsx");
+  assert.match(pill, /const itemFirst = touch && !!w && \(asking \|\| items\.length > 0\)/);
+  assert.match(pill, /kind=\{itemFirst \? "secondary" : "primary"\} icon="Check" title="Sign off"/);
+  assert.match(pill, /<NeedsYouList [^>]*feature=\{touch\}/);
+});

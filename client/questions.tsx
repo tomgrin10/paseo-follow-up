@@ -135,6 +135,8 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   const body = <View style={{ gap: dense ? 10 : 14 }}>
     <View style={{ gap: 6 }}>
       <Text selectable style={[t.body, { fontSize: dense ? 13 : 15, lineHeight: dense ? 19 : 22 }]}>{q.question}</Text>
+      {/* Phones: who asked and when is meta under the question, not a footnote after the buttons. */}
+      {compact && !dense && <Text style={t.small}>Asked {ago(q.askedAt, now)} by {who(w, q.askedBy)}{q.taskId && !q.options.length ? " (blocked task)" : ""}</Text>}
       {open && <View style={{ flexDirection: "row", gap: 6 }}>
         <View style={{ paddingTop: 2 }}><Icon name={state.icon} size={12} color={state.color(c)} /></View>
         <Text style={[t.meta, { flex: 1, color: state.color(c) }]}>{state.text}</Text>
@@ -196,7 +198,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   return <View style={{ gap: dense ? 10 : 14 }}>
     {body}
     {actions}
-    {!dense && <Text style={t.small}>Asked {ago(q.askedAt, now)} by {who(w, q.askedBy)}{q.taskId && !q.options.length ? " (blocked task)" : ""}</Text>}
+    {!dense && !compact && <Text style={t.small}>Asked {ago(q.askedAt, now)} by {who(w, q.askedBy)}{q.taskId && !q.options.length ? " (blocked task)" : ""}</Text>}
   </View>;
 }
 

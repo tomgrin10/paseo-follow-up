@@ -4,7 +4,7 @@ import { openExternalUrl, useRpc } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { workspaceAboutRpc } from "../shared/contracts";
-import { aboutDisplay, linkLine, SOURCE_LABEL, type AboutLink, type AboutView } from "../shared/about";
+import { aboutDisplay, linkLine, shortFooter, SOURCE_LABEL, type AboutLink, type AboutView } from "../shared/about";
 import { errorText } from "../shared/errors";
 import { Button, text, type Theme } from "./kit";
 import { Spinner } from "./motion";
@@ -31,7 +31,9 @@ export const aboutKey = (workspaceId: string) => ["follow-through", "about", wor
  */
 export function AboutSection({ workspaceId, theme, compact, flush = false }: { workspaceId: string; theme: Theme; compact: boolean; flush?: boolean }) {
   const c = theme.colors; const t = text(c, compact);
-  const [open, setOpenState] = useState(readOpen);
+  // Phones start every pane collapsed and keep the choice for this mount only: one tap mustn't push the ask below the
+  // fold in every workspace. Desktop keeps the per-device choice.
+  const [open, setOpenState] = useState(() => compact ? false : readOpen());
   const [refreshing, setRefreshing] = useState(false);
   const read = useRpc(workspaceAboutRpc);
   const client = useQueryClient();
@@ -45,7 +47,7 @@ export function AboutSection({ workspaceId, theme, compact, flush = false }: { w
   useTick(60_000);
   const view = query.data ?? null;
   const d = aboutDisplay(view, Date.now());
-  const toggle = () => { const next = !open; writeOpen(next); setOpenState(next); };
+  const toggle = () => { const next = !open; if (!compact) writeOpen(next); setOpenState(next); };
   const refresh = async () => {
     if (refreshing) return;
     setRefreshing(true);
@@ -83,8 +85,9 @@ export function AboutSection({ workspaceId, theme, compact, flush = false }: { w
           : <Text style={t.meta}>{d.empty}</Text>}
       </View>}
       {view?.record && <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <Text style={[t.small, { flex: 1, minWidth: 0 }]}>{d.footer}</Text>
-        <Button theme={theme} compact={compact} kind="ghost" icon="RefreshCw" title={busy ? "Summarizing…" : "Refresh"} accessibilityLabel="Summarize again" disabled={busy} onPress={() => void refresh()} />
+        {/* Phones: one meta line ("Haiku · 2m ago"); what it was built from goes to Refresh's hint. */}
+        <Text numberOfLines={compact ? 1 : undefined} style={[t.small, { flex: 1, minWidth: 0 }]}>{compact ? shortFooter(d.footer) : d.footer}</Text>
+        <Button theme={theme} compact={compact} kind="ghost" icon="RefreshCw" title={busy ? "Summarizing…" : "Refresh"} accessibilityLabel="Summarize again" accessibilityHint={compact ? d.footer ?? undefined : undefined} disabled={busy} onPress={() => void refresh()} />
       </View>}
       {!view?.record && view?.status === "failed" && <View style={{ flexDirection: "row" }}>
         <Button theme={theme} compact={compact} kind="ghost" icon="RefreshCw" title={busy ? "Summarizing…" : "Try again"} disabled={busy} onPress={() => void refresh()} />

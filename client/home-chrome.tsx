@@ -182,14 +182,20 @@ export function StatusStrip({ theme, model, filter, onFilter, touch, dense }: { 
   const chip = (key: string, label: string, n: number | null, selected: boolean, onPress: () => void, tone?: string) => {
     const muted = n === 0;
     const color = selected ? c.foreground : muted ? withAlpha(c.foregroundMuted, 0.6) : tone ?? c.foreground;
+    const pill = (hovered?: boolean) => ({ flexDirection: "row" as const, alignItems: "center" as const, gap: 5, height: touch ? 32 : 30, paddingHorizontal: touch ? 10 : 8, borderRadius: 16,
+      borderWidth: 1, borderColor: selected ? withAlpha(c.foreground, 0.4) : "transparent",
+      backgroundColor: selected ? c.surface2 : hovered ? c.surface1 : "transparent" });
     return <Pressable key={key} accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={n === null ? label : `${label}, ${n}${selected ? ". Showing only these; press to show all" : ". Show only these"}`} onPress={onPress}
-      hitSlop={touch ? { top: 6, bottom: 6 } : undefined}
-      style={state => ({ flexDirection: "row", alignItems: "center", gap: 5, height: touch ? 32 : 30, paddingHorizontal: touch ? 10 : 8, borderRadius: 16,
-        borderWidth: 1, borderColor: selected ? withAlpha(c.foreground, 0.4) : "transparent",
-        backgroundColor: selected ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
-      {n !== null && <Text style={{ color, fontSize: 13, fontWeight: "600", fontVariant: ["tabular-nums"] }}>{n}</Text>}
-      <Text style={{ color: selected ? c.foreground : muted ? withAlpha(c.foregroundMuted, 0.6) : c.foregroundMuted, fontSize: 12 }}>{label}</Text>
-      {selected && <Icon name="X" size={11} color={c.foregroundMuted} />}
+      // Phones: a 32-tall chip inside a real 44 touch box (react-native-web ignores hitSlop).
+      style={touch ? { paddingVertical: 6 } : state => pill((state as { hovered?: boolean }).hovered)}>
+      {state => {
+        const inner = <>
+          {n !== null && <Text style={{ color, fontSize: 13, fontWeight: "600", fontVariant: ["tabular-nums"] }}>{n}</Text>}
+          <Text style={{ color: selected ? c.foreground : muted ? withAlpha(c.foregroundMuted, 0.6) : c.foregroundMuted, fontSize: 12 }}>{label}</Text>
+          {selected && <Icon name="X" size={11} color={c.foregroundMuted} />}
+        </>;
+        return touch ? <View style={pill((state as { hovered?: boolean }).hovered)}>{inner}</View> : inner;
+      }}
     </Pressable>;
   };
   const chips = <>

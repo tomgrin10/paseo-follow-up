@@ -12,7 +12,7 @@ const word = (kind: Brief["kind"]) => HEADLINE_WORD[briefKey(kind)];
 import { briefActionRpc, browserStatusRpc } from "../shared/contracts";
 import { errorText } from "../shared/errors";
 import type { Workspace } from "../shared/model";
-import { useNow } from "./kit";
+import { text, useNow } from "./kit";
 import { PrSheet } from "./pr-sheet";
 import { isLight, withAlpha, type Colors } from "./theme";
 
@@ -328,12 +328,12 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
           <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontVariant: ["tabular-nums"] }}>{ageText}</Text>
           {/* Phones: where the card's facts come from sits behind ⓘ instead of a footer under every card. */}
           {compact && <Pressable accessibilityRole="button" accessibilityLabel={why ? "Hide where this comes from" : "Where this comes from"} aria-expanded={why} accessibilityState={{ expanded: why }}
-            onPress={() => setWhy(v => !v)} hitSlop={{ top: 14, bottom: 14, left: 10, right: 12 }} style={{ marginLeft: 4, padding: 2 }}>
+            onPress={() => setWhy(v => !v)} style={{ width: 44, height: 44, marginVertical: -15, marginRight: -14, alignItems: "center", justifyContent: "center" }}>
             <Icon name="Info" size={14} color={why ? c.foreground : c.foregroundMuted} />
           </Pressable>}
         </View>
-        {/* The ask role: 16/22 on phones; desktop keeps 19/26. */}
-        <Text accessibilityRole="header" style={{ color: c.foreground, fontSize: compact ? 16 : 19, lineHeight: compact ? 22 : 26, fontWeight: "600", letterSpacing: compact ? 0 : -0.2 }}>{b.ask}</Text>
+        {/* The ask role on phones (react-native-web ignores hitSlop, so the ⓘ above is a real 44 box); desktop keeps 19/26. */}
+        <Text accessibilityRole="header" style={compact ? text(c, true).ask : { color: c.foreground, fontSize: 19, lineHeight: 26, fontWeight: "600", letterSpacing: -0.2 }}>{b.ask}</Text>
       </View>
 
       <BriefBody b={b} c={c} compact={compact} tight={tight} embedded={embedded} height={height} mode={multi ? "select" : "send"} picks={picks}

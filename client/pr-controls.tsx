@@ -70,7 +70,18 @@ export function PrControls({ pr, workspace, theme, compact, browserReady: compan
   const showSwitch = browserReady && (!github || !canMerge || !!enabled);
   const autoMergeOff = github && !!pr.snapshot?.repoMerge && !pr.snapshot.repoMerge.autoMerge && !canMerge && !queued;
   return <View style={{ gap: 10 }}>
-    {missingReviewers && <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+    {/* Phones: the reviewer sentence gets its own line, the two actions share the row under it (no floating ghost). */}
+    {missingReviewers && compact && <View style={{ gap: 8 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <Icon name="UserX" size={14} color={c.statusWarning} />
+        <Text style={[t.meta, { flex: 1, minWidth: 120, color: c.statusWarning }]}>{!pr.snapshot?.draft && !picking && reviewers.length ? <>No reviewers yet<Text style={{ color: c.foregroundMuted }}>{` · will ask ${willAsk(reviewers)}`}</Text></> : "No reviewers yet"}</Text>
+      </View>
+      {!pr.snapshot?.draft && !picking && reviewerSettings.data && <View style={{ flexDirection: "row", gap: 8 }}>
+        {reviewers.length > 0 && <Button grow title={reviewRequest.isPending ? "Requesting…" : "Add reviewers"} accessibilityLabel={`Add reviewers: ${willAsk(reviewers)} for ${pr.repo} pull request ${pr.number}`} icon="UserPlus" theme={theme} compact disabled={disabled} loading={reviewRequest.isPending} onPress={() => { setNotice(null); reviewRequest.mutate(undefined); }} />}
+        <Button grow title={reviewers.length ? "Choose others…" : "Add reviewers…"} icon={reviewers.length ? "Users" : "UserPlus"} accessibilityLabel={reviewers.length ? "Pick different reviewers for this PR" : `Pick reviewers for ${pr.repo} pull request ${pr.number}`} theme={theme} compact disabled={disabled} onPress={() => { setNotice(null); setPicking(true); }} />
+      </View>}
+    </View>}
+    {missingReviewers && !compact && <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
       <Icon name="UserX" size={14} color={c.statusWarning} />
       <Text style={[t.meta, { flex: 1, minWidth: 120, color: c.statusWarning }]}>{!pr.snapshot?.draft && !picking && reviewers.length ? <>No reviewers yet<Text style={{ color: c.foregroundMuted }}>{` · will ask ${willAsk(reviewers)}`}</Text></> : "No reviewers yet"}</Text>
       {!pr.snapshot?.draft && !picking && reviewerSettings.data && <>
