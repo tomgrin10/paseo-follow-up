@@ -153,7 +153,7 @@ Turn it off under Settings → **Overseer (beta)**.
 Install the beta:
 
 ```sh
-paseo plugin update follow-through --version 1.4.0-beta.0
+paseo plugin update follow-through --version 1.4.0-beta.1
 # or, for a fresh install:
 paseo plugin install npm:paseo-follow-up@beta
 ```
