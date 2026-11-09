@@ -6,7 +6,8 @@
 //     appears (the inbox's grace period sees the resolve first);
 //   - an agent switched to bypassPermissions after it opened: approved too (the mode is read at request time);
 //   - default and auto: the prompt stays for the developer and flags Needs you;
-//   - a question from a bypass agent: never answered.
+//   - a question from a bypass agent: never answered;
+//   - a bypass prompt already pending when Follow-up loads: answered by the load sweep.
 //
 //   node scripts/check-trust-bypass.mjs [--json]
 import assert from "node:assert/strict";
@@ -98,6 +99,24 @@ try {
   assert.equal((await audit()).length, 3, "nothing else approved");
   result.leftForTheDeveloper = ["default", "auto", "bypass question"];
   for (const agent of [careful, auto, asking]) { const [p] = await pending(agent.id); await client.respondToPermission(agent.id, p.id, { behavior: "deny", message: "check done" }).catch(() => undefined); }
+
+  // A prompt already pending when Follow-up loads raises no new event: the load sweep answers it. Follow-up is off
+  // while the bypass agent asks, then turned back on (the same as an install or update landing mid-prompt).
+  await cli("plugin", "disable", "follow-through");
+  const early = await make("bypassPermissions", 6);
+  await early.send("Fixture: permission tool Bash");
+  for (let i = 0; i < 40 && !(await pending(early.id)).length; i++) await sleep(250);
+  await sleep(1_000);
+  assert.equal((await pending(early.id)).length, 1, "pending while Follow-up is off");
+  await cli("plugin", "enable", "follow-through");
+  for (let i = 0; i < 120 && (await pending(early.id)).length; i++) await sleep(250);
+  assert.deepEqual(await pending(early.id), [], "the load sweep approved the prompt that was already pending");
+  const swept = await audit();
+  assert.equal(swept.length, 4, "only that prompt");
+  assert.equal(swept.at(-1).agentId, early.id);
+  await sleep(4_500);
+  assert.equal(await needs(early.id), null, "no Needs-you row for it");
+  result.sweptAtLoad = `${swept.at(-1).mode}: ${swept.at(-1).summary}`;
   console.log(process.argv.includes("--json") ? JSON.stringify(result) : result);
 } catch (error) { process.exitCode = 1; throw error; } finally {
   await client?.close().catch(() => {});

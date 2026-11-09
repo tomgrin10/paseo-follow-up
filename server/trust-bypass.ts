@@ -49,6 +49,9 @@ export function summarize(request: PermissionRequestShape, max = 160): string {
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
 
+/** An agent as Paseo's agent list reports it (metadata only: listing never loads an agent). */
+export type ListedAgent = { id: string; status?: string; archivedAt?: string | null; pendingPermissions?: unknown[] | null };
+
 export type Approval = { at: string; agentId: string; tool: string; summary: string; mode: string };
 export type Decision = { approved: true; mode: string } | { approved: false; reason: "off" | "not-a-tool" | "mode" | "error"; mode?: string | null };
 
@@ -75,6 +78,24 @@ export class TrustBypass {
     try { await this.o.approve(agent.id, request.id); } catch { return { approved: false, reason: "error", mode }; }
     await this.record({ at: new Date((this.o.now ?? Date.now)()).toISOString(), agentId: agent.id, tool: String(request.name), summary: summarize(request), mode }).catch(() => undefined);
     return { approved: true, mode };
+  }
+
+  /**
+   * Prompts that were already pending when Follow-up loaded or updated never raise a new event, so they would wait for
+   * the developer. Runs each one through `handle`, the same checks as a new prompt (setting, plain tool, current mode).
+   * Only agents the list shows with a pending prompt: those are loaded (an unloaded agent has none), so nothing here
+   * loads or wakes an agent. Archived and closed agents are skipped.
+   */
+  async sweep(agents: readonly ListedAgent[]): Promise<Decision[]> {
+    const decisions: Decision[] = [];
+    for (const agent of agents) {
+      if (agent.archivedAt || agent.status === "closed" || !agent.pendingPermissions?.length) continue;
+      for (const request of agent.pendingPermissions) {
+        if (typeof request !== "object" || request === null || typeof (request as { id?: unknown }).id !== "string") continue;
+        decisions.push(await this.handle(agent, request as PermissionRequestShape));
+      }
+    }
+    return decisions;
   }
 
   /** Appends one line; past keep × 1.5 lines, keeps the newest `keep`. Serialized so concurrent approvals don't race the trim. */
