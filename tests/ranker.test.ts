@@ -4,8 +4,8 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { AiJobs, childEnv, type RunInput } from "../server/ai-jobs";
-import { canonicalArtifactUrl, inputsHash, PLAN_ENV, planReplySchema, parseLinearIssues, parseReviewRequests, parseSlackSearch, planArgs, Ranker, RANKER_ROLE_DEFAULT, type RankSources } from "../server/ranker";
-import { healthLine, inRankWindow, rankPrompt, rankWorkstream, toPriorities, type RankInputs } from "../shared/ranker";
+import { canonicalArtifactUrl, ghAccounts, inputsHash, liveRankSources, parseLinearPage, PLAN_ENV, planReplySchema, rankKey, salvageArray, parseLinearIssues, parseReviewRequests, parseSlackSearch, planArgs, Ranker, RANKER_ROLE_DEFAULT, type RankSources } from "../server/ranker";
+import { damped, emptyReasons, healthLine, inRankWindow, paseoReason, rankCost, rankPrompt, reasonInputs, workspaceInputs, RANK_SYSTEM, rankWorkstream, toPriorities, type RankInputs } from "../shared/ranker";
 import { PriorityStore } from "../server/priorities";
 import type { WorkstreamRow } from "../shared/overseer";
 
@@ -33,7 +33,7 @@ const reply = (over: object = {}) => JSON.stringify({
   ...over,
 });
 
-function fixture(t: any, opts: { sources?: Partial<RankSources>; reply?: () => string; rows?: WorkstreamRow[]; role?: Partial<typeof RANKER_ROLE_DEFAULT>; planningUrl?: string | null } = {}) {
+function fixture(t: any, opts: { sources?: Partial<RankSources>; reply?: () => string; rows?: WorkstreamRow[]; role?: Partial<typeof RANKER_ROLE_DEFAULT>; planningUrl?: string | null; log?: (line: string) => void } = {}) {
   const calls: RunInput[] = []; const reads: Record<string, number> = { linear: 0, slack: 0, github: 0, planning: 0 };
   let now = NOW;
   return (async () => {
@@ -49,7 +49,7 @@ function fixture(t: any, opts: { sources?: Partial<RankSources>; reply?: () => s
     };
     let rows = opts.rows ?? ROWS;
     const ranker = new Ranker({ directory: dir, jobs, sources, priorities, workstreams: async () => rows, role: async () => ({ ...RANKER_ROLE_DEFAULT, ...opts.role }), enabled: async () => true,
-      planningUrl: async () => opts.planningUrl === undefined ? "https://claude.ai/artifact/abc" : opts.planningUrl, now: () => now });
+      planningUrl: async () => opts.planningUrl === undefined ? "https://claude.ai/artifact/abc" : opts.planningUrl, now: () => now, log: opts.log ?? (() => {}) });
     return { dir, ranker, priorities, calls, reads, setNow: (n: number) => { now = n; }, setRows: (r: WorkstreamRow[]) => { rows = r; } };
   })();
 }
@@ -118,9 +118,11 @@ test("ranker: the daily cap and the cadence bound scheduled runs; Re-rank now st
 });
 
 test("ranker: a failing source is reported, not fatal; the plan is read once a day", async t => {
-  const f = await fixture(t, { sources: { async slack() { throw new Error("mcpproxy down"); } } });
+  const logged: string[] = [];
+  const f = await fixture(t, { sources: { async slack() { throw new Error("mcpproxy down"); } }, log: l => logged.push(l) });
   const r = await f.ranker.run({ trigger: "manual" });
   assert.equal(r.ok, true); assert.equal(r.health.slack, "failed"); assert.equal(r.healthLine, "Slack unavailable");
+  assert.deepEqual(logged, ["[follow-up] ranker: slack read failed: mcpproxy down"], "the daemon log says why");
   assert.match(f.calls[0].prompt, /SLACK[^\n]*:\n\(none\)/);
   assert.match(f.calls[0].prompt, /milestone · Okta GA · HER-1312/);
   f.setNow(NOW + 2 * 3_600_000); await f.ranker.run({ trigger: "manual", force: true });
@@ -150,8 +152,8 @@ test("rank inputs: the hash ignores order, the prompt stays inside its cap and d
 
 test("rank reply: unknown workspaces, duplicates and invented keys never reach Home", () => {
   const inputs: RankInputs = { workstreams: ROWS.map(rankWorkstream), linear: LINEAR, slack: [], github: [], planning: null };
-  const { priorities } = toPriorities({ priorities: [{ workspace: "scim", score: 10, reason: "a", sources: [] }, { workspace: "scim", score: 90, reason: "b", sources: [] }], notStarted: [] }, inputs, new Date(NOW).toISOString());
-  assert.deepEqual(priorities.map(p => [p.workspaceId, p.score, p.reason]), [["scim", 10, "a"]]);
+  const { priorities } = toPriorities({ priorities: [{ workspace: "scim", score: 10, reason: "first one", sources: [] }, { workspace: "scim", score: 90, reason: "second one", sources: [] }], notStarted: [] }, inputs, new Date(NOW).toISOString());
+  assert.deepEqual(priorities.map(p => [p.workspaceId, p.score, p.reason]), [["scim", 10, "first one"]]);
 });
 
 test("rank window: Sunday to Thursday, 08:00–20:00 Jerusalem time", () => {
@@ -188,14 +190,14 @@ test("plan reader: the Artifact tool's env survives the no-nonessential-traffic 
   assert.deepEqual(parsed.items, [{ level: "item", title: "HER-1312 Okta SCIM GA this week", keys: ["HER-1312"] }, { level: "milestone", title: "Compliance exports", keys: ["HER-1431"] }]);
 });
 
-test("rank reply: reasons never repeat the source chip, and no outside signal means no line", () => {
+test("rank reply: reasons never repeat the source chip, and a reply without one gets the workspace's own fact", () => {
   const inputs: RankInputs = { workstreams: ROWS.map(rankWorkstream), linear: LINEAR, slack: [], github: [], planning: null };
   const { priorities } = toPriorities({ priorities: [
     { workspace: "export", score: 80, reason: "Slack: Dana asked twice", sources: [{ kind: "slack", label: "Dana" }] },
     { workspace: "scim", score: 30, reason: "", sources: [{ kind: "paseo", label: "Activity" }] },
   ], notStarted: [] }, inputs, new Date(NOW).toISOString());
   assert.equal(priorities[0].reason, "Dana asked twice");
-  assert.deepEqual([priorities[1].reason, priorities[1].sources], ["", []], "scored, but nothing to show");
+  assert.deepEqual([priorities[1].reason, priorities[1].sources], ["Pick A or B for nested groups", [{ kind: "paseo", label: "Paseo" }]], "never an empty line: its open ask");
 });
 
 test("ranker: the ranker role picks the provider, model and effort (Settings → Agents)", async t => {
@@ -211,4 +213,139 @@ test("ranker: with no outside source readable it skips the model (no logins, an 
   assert.equal(r.skipped, "sources"); assert.equal(f.calls.length, 0);
   assert.equal(r.healthLine, "Linear unavailable · Slack unavailable · GitHub unavailable · Plan unavailable");
   assert.equal(await f.ranker.tick(), null, "and waits for the cadence before trying again");
+});
+
+// ---------- fix/ranker-codex ----------
+
+test("codex fix 1: changing the ranker's provider, model or effort re-ranks even when the inputs didn't change", async t => {
+  const inputs: RankInputs = { workstreams: ROWS.map(rankWorkstream), linear: LINEAR, slack: [], github: [], planning: null };
+  const sonnet = { provider: "claude", model: "sonnet", thinking: null };
+  assert.equal(rankKey(inputs, sonnet), rankKey(inputs, { ...sonnet }));
+  assert.notEqual(rankKey(inputs, sonnet), rankKey(inputs, { provider: "codex", model: "gpt-6.1-sol", thinking: "low" }));
+  assert.notEqual(rankKey(inputs, { provider: "codex", model: "gpt-6.1-sol", thinking: "low" }), rankKey(inputs, { provider: "codex", model: "gpt-6.1-sol", thinking: "medium" }));
+  let role = { provider: "claude", model: "sonnet", thinking: null as string | null };
+  const f = await fixture(t, { role: { get provider() { return role.provider; }, get model() { return role.model; }, get thinking() { return role.thinking; } } });
+  await f.ranker.run({ trigger: "schedule" });
+  role = { provider: "codex", model: "gpt-6.1-sol", thinking: "low" };
+  const again = await f.ranker.run({ trigger: "schedule" });
+  assert.equal(again.skipped, null, "not 'same': a different model ranks"); assert.equal(f.calls.length, 2);
+});
+
+test("codex fix 2: empty reasons get one small follow-up for just those workspaces; still empty falls back to Paseo's fact", async t => {
+  const many = [...ROWS.slice(0, 2), ...Array.from({ length: 8 }, (_, i) => ws(`w${i}`, { title: `Workspace ${i}`, prs: [{ key: `a/b#${700 + i}`, number: 700 + i, state: "OPEN", checks: i === 3 ? "failed" : "passed", threads: 0, url: null }] }))];
+  let n = 0;
+  const first = JSON.stringify({ priorities: many.map((w, i) => ({ workspace: w.workspaceId, score: 90 - i * 5, reason: i < 2 ? "Dana asked twice" : "", sources: [] })), notStarted: [] });
+  const f = await fixture(t, { rows: many, role: { provider: "codex", model: "gpt-6.1-sol", thinking: "low" }, reply: () => n++ === 0 ? first
+    : JSON.stringify({ reasons: many.slice(2, 9).map(w => ({ workspace: w.workspaceId, reason: `Fact about ${w.title}`, sources: [] })) }) });
+  const r = await f.ranker.run({ trigger: "manual" });
+  assert.equal(f.calls.length, 2, "one ranking call, one reasons call");
+  assert.match(f.calls[0].system, /every object in "priorities" has a "reason"/, "non-Claude models get the reason rule restated");
+  const retry = f.calls[1];
+  assert.match(retry.system, /write the one-line reason/);
+  for (const w of many.slice(0, 2)) assert.ok(!retry.prompt.includes(`${w.workspaceId} ·`), "workspaces that had a reason aren't sent again");
+  for (const w of many.slice(2)) assert.ok(retry.prompt.includes(`${w.workspaceId} ·`));
+  assert.ok(retry.prompt.length < f.calls[0].prompt.length);
+  const by = new Map(r.priorities.map(p => [p.workspaceId, p]));
+  assert.equal(by.get("w0")!.reason, "Fact about Workspace 0", "filled from the follow-up");
+  assert.equal(by.get("w0")!.score, 80, "the first reply's score stands");
+  assert.equal(by.get("w7")!.reason, "#707 open", "the follow-up skipped it too: Paseo's own fact");
+  assert.ok(r.priorities.every(p => p.reason.length >= 3), "no ranked workspace without a reason");
+  assert.equal((await f.ranker.state()).last?.retried, true);
+  assert.deepEqual(emptyReasons({ priorities: [{ workspace: "scim", score: 1, reason: "n/a", sources: [] }, { workspace: "export", score: 1, reason: "-", sources: [] }], notStarted: [] }, { workstreams: ROWS.map(rankWorkstream), linear: [], slack: [], github: [], planning: null }), ["scim", "export"]);
+  assert.equal(paseoReason(rankWorkstream(ws("x", { prs: [{ key: "a/b#9", number: 9, state: "OPEN", checks: "failed", threads: 0, url: null }] }))), "#9 checks failed");
+  const reduced = reasonInputs({ workstreams: ROWS.map(rankWorkstream), linear: LINEAR, slack: [], github: [], planning: null }, ["export"]);
+  assert.deepEqual([reduced.workstreams.map(w => w.id), reduced.linear.map(i => i.key)], [["export"], []], "only its own material");
+});
+
+test("codex fix 2: Claude replies with every reason make no second call", async t => {
+  const f = await fixture(t);
+  await f.ranker.run({ trigger: "manual" });
+  assert.equal(f.calls.length, 1); assert.doesNotMatch(f.calls[0].system, /every object in "priorities" has a "reason"/);
+});
+
+test("codex fix 3: rank-now starts the run and returns at once; status shows it running, then its outcome", async t => {
+  let release!: () => void;
+  const gate = new Promise<void>(r => { release = r; });
+  const f = await fixture(t, { sources: { async linear() { await gate; return LINEAR; } } });
+  assert.deepEqual(f.ranker.start({ trigger: "manual", force: true }), { started: true });
+  assert.deepEqual(f.ranker.start({ trigger: "manual" }), { started: false }, "joins, never doubles");
+  assert.equal((await f.ranker.status()).running, true);
+  release();
+  for (let i = 0; i < 50 && (await f.ranker.status()).running; i++) await new Promise(r => setTimeout(r, 10));
+  const st = await f.ranker.status();
+  assert.equal(st.running, false); assert.equal(st.last?.ok, true); assert.equal(st.last?.top, "Vendor risk CSV export", "the new top row, for the toast");
+  assert.equal(st.last?.provider, "claude");
+});
+
+test("codex fix: the header says the Codex subscription instead of a price, dollars for Claude, nothing before a model run", () => {
+  assert.equal(rankCost({ costUsd: null, last: { ok: true, skipped: null, provider: "codex" } }), "last run on Codex subscription");
+  assert.equal(rankCost({ costUsd: 0.0564, last: { ok: true, skipped: null, provider: "claude" } }), "last run $0.06");
+  assert.equal(rankCost({ costUsd: 0.004, last: { ok: true, skipped: null, provider: "claude" } }), "last run <$0.01");
+  assert.equal(rankCost({ costUsd: 0.0564, last: { ok: true, skipped: "same", provider: "claude" } }), "last run $0.06", "a skipped run keeps showing the standing ranking's cost");
+  assert.equal(rankCost({ costUsd: null, last: { ok: true, skipped: "sources", provider: null } }), "", "no model run yet");
+  assert.equal(rankCost(null), "");
+});
+
+test("codex fix 4: a workspace whose own inputs didn't change moves at most 10 points; one with news moves freely", async t => {
+  let n = 0;
+  const f = await fixture(t, { rows: [ws("a", { title: "Alpha", keys: ["HER-1"] }), ws("b", { title: "Beta", keys: ["HER-2"] })],
+    reply: () => JSON.stringify({ priorities: n++ === 0 ? [{ workspace: "a", score: 85, reason: "Plan milestone this week", sources: [] }, { workspace: "b", score: 40, reason: "Quiet for days now", sources: [] }]
+      : [{ workspace: "a", score: 48, reason: "Plan milestone this week", sources: [] }, { workspace: "b", score: 90, reason: "Uri asked for a review", sources: [] }], notStarted: [] }) });
+  await f.ranker.run({ trigger: "manual" });
+  const second = await f.ranker.run({ trigger: "manual", force: true });
+  const by = new Map(second.priorities.map(p => [p.workspaceId, p.score]));
+  assert.equal(by.get("a"), 75, "85 → 48 held to 75: nothing about it changed");
+  assert.equal(by.get("b"), 50, "b's own inputs didn't change either: 40 → at most 50");
+  assert.match(f.calls[1].prompt, /PREVIOUS RANKING \(id · score\):\na · 85\nb · 40/, "the model sees the last ranking");
+  // News for b (a Slack line naming its key): it may move freely.
+  const inputs: RankInputs = { workstreams: [rankWorkstream(ws("b", { keys: ["HER-2"] }))], linear: [], slack: [], github: [], planning: null };
+  const withNews = { ...inputs, slack: [{ where: "DM", who: "Uri", text: "HER-2 needs your review today", at: null }] };
+  assert.notEqual(workspaceInputs(inputs.workstreams[0], inputs), workspaceInputs(inputs.workstreams[0], withNews));
+  assert.equal(workspaceInputs(inputs.workstreams[0], inputs), workspaceInputs(inputs.workstreams[0], { ...inputs, slack: [{ where: "DM", who: "Avi", text: "lunch?", at: null }] }), "unrelated Slack isn't news for it");
+  const out = damped([{ workspaceId: "b", score: 90 }], new Map([["b", { score: 40, fp: "old" }]]), new Map([["b", "new"]]));
+  assert.equal(out[0].score, 90);
+});
+
+test("codex fix 5: the prompt weighs direct asks to Tom at least as much as plan milestones", () => {
+  assert.match(RANK_SYSTEM, /Direct asks to the developer weigh at least as much as this week's plan milestones/);
+  assert.match(RANK_SYSTEM, /Never rank a plan item above a direct ask of similar urgency/);
+});
+
+test("sources: a Linear reply mcpproxy cut off keeps its whole issues, pages of 25 follow the cursor, and an unreadable reply fails", async () => {
+  const issue = (n: number) => ({ id: `HER-${n}`, title: `Issue ${n} with a "quoted" {brace} title`, priority: { value: 2, name: "High" }, statusType: "started", url: `https://linear.app/x/issue/HER-${n}` });
+  const full = JSON.stringify({ issues: [issue(1), issue(2), issue(3)], hasNextPage: false });
+  const cut = full.slice(0, full.indexOf("HER-3") + 10) + "\n\n... [truncated]";
+  assert.deepEqual(salvageArray(cut, "issues").map((i: any) => i.id), ["HER-1", "HER-2"]);
+  assert.deepEqual(parseLinearPage(cut).issues.map(i => i.key), ["HER-1", "HER-2"], "the cut one is dropped, the whole ones kept");
+  assert.equal(parseLinearPage(JSON.stringify({ issues: [issue(4)], hasNextPage: true, cursor: "c2" })).next, "c2");
+  const calls: string[] = [];
+  const wrap = (o: unknown) => `banner\n${JSON.stringify({ content: [{ text: `[map[text:${JSON.stringify(o)} type:text]]` }], isError: false })}`;
+  const run = async (_c: string, args: string[]) => {
+    const a = JSON.parse(args.find(x => x.startsWith("--json_args="))!.slice(12)); calls.push(a.cursor ?? "first");
+    return wrap(a.cursor ? { issues: [issue(9)], hasNextPage: false } : { issues: [issue(8)], hasNextPage: true, cursor: "p2" });
+  };
+  const src = liveRankSources(new AiJobs(), { run, slackUser: null });
+  assert.deepEqual((await src.linear()).map(i => i.key), ["HER-8", "HER-9"]);
+  assert.deepEqual(calls, ["first", "p2"]);
+  const bad = liveRankSources(new AiJobs(), { run: async () => wrap("Internal error: rate limited"), slackUser: null });
+  await assert.rejects(bad.linear(), /couldn't be read/, "health says failed, not ok with nothing");
+});
+
+test("sources: review requests come from every logged-in gh account, each with its own token", async () => {
+  assert.deepEqual(ghAccounts("✓ Logged in to github.com account tomgrin10 (keyring)\n  - Active account: true\n✓ Logged in to github.com account herotomg (keyring)"), ["tomgrin10", "herotomg"]);
+  const searches: (string | undefined)[] = [];
+  const run = async (_c: string, args: string[], _t: number, env?: Record<string, string>) => {
+    if (args[0] === "auth" && args[1] === "status") return "Logged in to github.com account personal\nLogged in to github.com account work";
+    if (args[0] === "auth" && args[1] === "token") return `token-${args.at(-1)}\n`;
+    searches.push(env?.GH_TOKEN);
+    return JSON.stringify(env?.GH_TOKEN === "token-work" ? [{ number: 7, title: "Review me", url: "https://github.com/w/r/pull/7", repository: { nameWithOwner: "w/r" }, author: { login: "uri" } }] : []);
+  };
+  const reviews = await liveRankSources(new AiJobs(), { run, slackUser: null }).github();
+  assert.deepEqual(searches, ["token-personal", "token-work"]);
+  assert.deepEqual(reviews.map(r => `${r.repo}#${r.number}`), ["w/r#7"], "the work account's request is found");
+});
+
+test("sources: a plan read that comes back empty counts as failed", async () => {
+  const jobs = new AiJobs({ runner: async () => ({ text: JSON.stringify({ title: "Week", items: [] }), costUsd: 0.01, inputTokens: 1, outputTokens: 1 }) });
+  await assert.rejects(liveRankSources(jobs, { run: async () => "", slackUser: null }).planning("https://claude.ai/artifact/x"), /came back empty/);
 });
