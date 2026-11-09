@@ -1,6 +1,6 @@
 import { readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { applyOnboarding, classifyGhError, classifyInstall, ghCheck, initialOnboarding, offerVisible, onboardingFileSchema, onboardingView, providerChecks, toolsCheck,
+import { applyOnboarding, classifyGhError, holdsAutoSends, classifyInstall, ghCheck, initialOnboarding, offerVisible, onboardingFileSchema, onboardingView, providerChecks, toolsCheck,
   type Check, type Checks, type GhResult, type OnboardingAction, type OnboardingFile, type OnboardingStep, type OnboardingView, type ProviderInfo, type ProviderUse, type ToolsInput } from "../shared/onboarding";
 
 /**
@@ -43,6 +43,8 @@ export class OnboardingStore {
     this.tail = next.catch(() => undefined);
     return next;
   }
+  /** Whether the engine holds auto-sends (fresh install mid-setup). Synchronous: reads what init or the last write cached. */
+  holdsAutoSends(): boolean { return holdsAutoSends(this.cached); }
   /** The client's view. The first time the existing-install offer is shown, its day starts. */
   async view(): Promise<OnboardingView> {
     let file = (await this.load()) ?? await this.init();
