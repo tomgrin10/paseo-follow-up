@@ -19,8 +19,11 @@ export class Store {
   private saved: State | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private flushing: Promise<void> | null = null;
-  /** Called after each state.json write with what was saved (the worker derives scopes.json from it). */
-  onSaved: (state: State) => Promise<void> = async () => {};
+  /**
+   * Called inside each mutation with the new state, before it returns, so files derived from it (scopes.json)
+   * are current as soon as the mutation is, independent of the batched state.json write.
+   */
+  onChanged: (state: State) => Promise<void> = async () => {};
   /** Writes to state.json, for tests and the resource check. */
   writes = 0;
   /** `writeMs` 0 writes through inside each mutation (tools, tests); the worker batches with 1000. */
@@ -46,6 +49,7 @@ export class Store {
       // objects owned by callers (observations), so only the validated copy the write returns is frozen.
       if (this.writeMs <= 0) this.state = await this.write(draft);
       else { this.state = draft; this.schedule(); }
+      await this.onChanged(this.state).catch(() => undefined);
       return structuredClone(value);
     });
     this.tail = next.catch(() => undefined);
@@ -82,7 +86,6 @@ export class Store {
       await rename(temporary, join(this.directory, "state.json"));
       this.written = text; this.saved = parsed; this.writes++;
     } finally { await unlink(temporary).catch(() => undefined); }
-    await this.onSaved(parsed).catch(() => undefined);
     return parsed;
   }
   async lock(): Promise<() => Promise<void>> {
