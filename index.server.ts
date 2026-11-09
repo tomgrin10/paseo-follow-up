@@ -4,6 +4,7 @@ import { askQuestion, recordAnswer, syncTaskQuestions, withdrawQuestion } from "
 import { agentSetSpec, developerSetSpec } from "./server/spec";
 import type { PluginServerContext, PluginHandlerContext } from "@getpaseo/plugin/server";
 import { mkdir, writeFile } from "node:fs/promises";
+import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import * as rpc from "./shared/contracts";
@@ -64,6 +65,18 @@ export default function contribute(server: PluginServerContext) {
   const questionMode = async (): Promise<QuestionMode> => { try { const state = await questionSettings.read(); return state.status === "ready" ? state.values.mode : DEFAULT_QUESTION_MODE; } catch { return DEFAULT_QUESTION_MODE; } };
   const directory = join(paseoHome, "plugin-data", "follow-through");
   const bridge = join(directory, "mcp.mjs");
+  /**
+   * Native tools live in this process: a reload or update drops them from every open session (Paseo 0.15.2 re-attaches
+   * only when a session reopens, which it does before that agent's next prompt). Each worker gets an instance id and each
+   * native session records the instance that attached its tools, so the agent hook can tell an agent mid-turn that its
+   * follow_ tools are gone and the bridge still works. Written synchronously, before any session can open.
+   */
+  const toolsInstance = randomUUID();
+  try {
+    mkdirSync(join(directory, "hook-state"), { recursive: true, mode: 0o700 });
+    writeFileSync(join(directory, `tools-instance.json.${toolsInstance}`), JSON.stringify({ instance: toolsInstance }), { mode: 0o600 });
+    renameSync(join(directory, `tools-instance.json.${toolsInstance}`), join(directory, "tools-instance.json"));
+  } catch { /* Without it the hook assumes the tools are attached, as before. */ }
   // Every RPC handler, also callable in-process: native agent tools run the same handlers the stdio bridge reaches.
   const handlers = new Map<string, { input: { parseAsync(value: unknown): Promise<unknown> }; run: (input: any, context: PluginHandlerContext) => unknown }>();
   const handle: PluginServerContext["handle"] = (contract, handler) => { handlers.set(contract.name, { input: contract.input, run: handler as never }); server.handle(contract, handler); };
@@ -237,6 +250,7 @@ export default function contribute(server: PluginServerContext) {
     if (process.env.FOLLOW_THROUGH_FORCE_STDIO !== "1" && nativeToolsAvailable(request, await paseoConfig())) {
       const flags = { recovery, brief: !!brief && !recovery, root: root && !recovery, overseer: overseer && !recovery };
       const env = { ...request.env, FOLLOW_THROUGH_TOOLS: "native", FOLLOW_THROUGH_PROVIDER: request.provider, ...(flags.root ? { FOLLOW_THROUGH_ROOT: "1" } : {}), ...(flags.overseer ? { FOLLOW_THROUGH_OVERSEER: "1" } : {}) };
+      if (/^[\w-]+$/.test(request.agentId)) await writeFile(join(directory, "hook-state", `native-${request.agentId}.json`), JSON.stringify({ instance: toolsInstance }), { mode: 0o600 }).catch(() => undefined);
       return { ...request, env, tools: [...request.tools, ...nativeTools(flags, live, invoke)] };
     }
     return withSessionMcp({ ...request, env: { ...request.env, FOLLOW_THROUGH_TOOLS: "stdio", FOLLOW_THROUGH_PROVIDER: request.provider } }, directory, clientEntry(), paseoHome, recovery, process.env, brief, root, overseer, providers) as R;

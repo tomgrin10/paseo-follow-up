@@ -9,7 +9,7 @@ import { NEEDS_YOU_NUDGE } from "../shared/brief";
 
 process.env.FOLLOW_THROUGH_HOOK_IMPORT = "1";
 // @ts-expect-error plain JS hook, generated into hook-source.ts
-const hook = await import("../server/agent-hook.mjs") as { TOOL_NAMES: string[]; named: (text: string, native?: boolean) => string; isFollowTool: (tool: string) => boolean; shouldRepeat: (provider: string | undefined, turn: unknown, hash: string) => boolean };
+const hook = await import("../server/agent-hook.mjs") as { TOOL_NAMES: string[]; named: (text: string, native?: boolean) => string; isFollowTool: (tool: string) => boolean; isBridgeCall: (args: string, path: string) => boolean; toolsDetached: (native: boolean, current: unknown, mine: unknown) => boolean; shouldRepeat: (provider: string | undefined, turn: unknown, hash: string) => boolean };
 
 test("the hook's tool-name list is every underscore tool the bridge serves", () => {
   const bridge = [...tools, ...actionTools, ...overseerTools].map(t => t[0]).filter(name => name.includes("_"));
@@ -24,6 +24,17 @@ test("text names the set the agent has; both sets count as Follow-up's own calls
   for (const name of ["mcp__paseo__list_agents", "Bash", "mcp__other__follow_x"]) assert.equal(hook.isFollowTool(name), false, name);
 });
 
+test("bridge calls are recognised however they're spelled; detached tools are told apart by worker instance", () => {
+  for (const args of ['{"command":"node \\"$FOLLOW_THROUGH_CLI\\" call needs_you"}', '{"command":"node ${FOLLOW_THROUGH_CLI} call x"}', '{"command":"node /p/plugin-data/follow-through/mcp.mjs call sync_workspace"}'])
+    assert.equal(hook.isBridgeCall(args, "/elsewhere/mcp.mjs"), true, args);
+  assert.equal(hook.isBridgeCall('{"command":"gt submit"}', "/p/mcp.mjs"), false);
+  assert.equal(hook.toolsDetached(true, { instance: "b" }, { instance: "a" }), true, "attached by an earlier worker");
+  assert.equal(hook.toolsDetached(true, { instance: "b" }, null), true, "opened before markers existed, so before this worker");
+  assert.equal(hook.toolsDetached(true, { instance: "b" }, { instance: "b" }), false);
+  assert.equal(hook.toolsDetached(false, { instance: "b" }, null), false, "stdio sessions keep their own server");
+  assert.equal(hook.toolsDetached(true, null, null), false, "no worker record: assume attached");
+});
+
 async function home(t: { after: (f: () => Promise<void>) => void }) {
   const root = await mkdtemp(join(tmpdir(), "hook-native-")); t.after(() => rm(root, { recursive: true, force: true }));
   const directory = join(root, "plugin-data/follow-through"); await mkdir(join(directory, "hook-state"), { recursive: true });
@@ -36,8 +47,10 @@ async function home(t: { after: (f: () => Promise<void>) => void }) {
     let out = ""; child.stdout.on("data", c => out += c); child.once("error", bad); child.once("exit", () => ok(out.trim()));
     child.stdin.end(JSON.stringify({ session_id: "s1", ...event }));
   });
+  lastDirectory = directory;
   return fire;
 }
+let lastDirectory = "";
 const context = (out: string) => out ? JSON.parse(out).hookSpecificOutput.additionalContext as string : "";
 
 test("native Claude sessions: role text once per session with follow_ names, the bridge's instructions included", async t => {
@@ -63,4 +76,24 @@ test("stdio and pre-upgrade sessions keep the bridge names; Codex and unknown pr
   }
   const nudge = JSON.parse(await fire({ hook_event_name: "Stop" }, {}));
   assert.ok(nudge.reason.includes(NEEDS_YOU_NUDGE), "old sessions are nudged with the name they have");
+});
+
+test("after a reload mid-turn: the agent is told once to use the bridge, and Stop names the bridge's tools", async t => {
+  const fire = await home(t);
+  const env = { FOLLOW_THROUGH_TOOLS: "native", FOLLOW_THROUGH_PROVIDER: "claude", FOLLOW_THROUGH_ROOT: "1" };
+  await fire({ hook_event_name: "UserPromptSubmit", prompt: "a" }, env);
+  // This session's tools were attached by worker "old"; a reload started worker "new".
+  const data = lastDirectory;
+  await writeFile(join(data, "tools-instance.json"), JSON.stringify({ instance: "new" }));
+  await writeFile(join(data, "hook-state", "native-a1.json"), JSON.stringify({ instance: "old" }));
+  const first = context(await fire({ hook_event_name: "PostToolUse", tool_name: "mcp__paseo__follow_sync_workspace", tool_input: {} }, env));
+  assert.match(first, /follow_\* tools are detached/); assert.match(first, /"\$FOLLOW_THROUGH_CLI" call <tool>/);
+  assert.doesNotMatch(context(await fire({ hook_event_name: "PostToolUse", tool_name: "Read", tool_input: {} }, env)), /detached/, "said once");
+  const stop = JSON.parse(await fire({ hook_event_name: "Stop" }, env));
+  assert.match(stop.reason, /tools are detached/); assert.match(stop.reason, /call needs_you once/); assert.doesNotMatch(stop.reason, /follow_needs_you/);
+  // The session reopened (before the next prompt) under the new worker: native names again, no notice.
+  await writeFile(join(data, "hook-state", "native-a1.json"), JSON.stringify({ instance: "new" }));
+  await fire({ hook_event_name: "UserPromptSubmit", prompt: "b" }, env);
+  const stop2 = JSON.parse(await fire({ hook_event_name: "Stop" }, env));
+  assert.doesNotMatch(stop2.reason, /detached/); assert.match(stop2.reason, /follow_needs_you/);
 });
