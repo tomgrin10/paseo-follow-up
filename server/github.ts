@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import type { Graphite } from "./graphite";
 import type { Pr, Snapshot } from "../shared/model";
 import type { Deployments } from "./deployments";
+import { splitReviewers, TEAM_SLUG, USER_LOGIN } from "../shared/reviewers";
 const exec = promisify(execFile);
 type Node = Record<string, any>;
 export type Observation = { snapshot: Snapshot | null; error: string | null };
@@ -65,9 +66,11 @@ export class Github {
   private ruleCache = new Map<string, { until: number; contexts: string[] }>();
   constructor(private run: (args: string[], repo: string) => Promise<string> = async (args, repo) => (await exec("gh", args, { env: ghEnvironment(repo), timeout: 25_000, maxBuffer: 4 * 1024 * 1024 })).stdout, private graphite?: Pick<Graphite, "observe" | "status">, private deployments?: Pick<Deployments, "observe">) {}
   async requestReviewers(pr: Pr, reviewers: string[]): Promise<void> {
-    if (!reviewers.length || reviewers.some(login => !/^[\w-]+$/.test(login))) throw new Error("No eligible reviewers selected.");
+    if (!reviewers.length || reviewers.some(login => !USER_LOGIN.test(login) && !TEAM_SLUG.test(login))) throw new Error("No eligible reviewers selected.");
+    // People go in reviewers[], teams (org/slug) in team_reviewers[] by slug; GitHub resolves the slug in the repository's org.
+    const { users, teams } = splitReviewers(reviewers);
     try {
-      await this.run(["api", "--method", "POST", `repos/${pr.repo}/pulls/${pr.number}/requested_reviewers`, ...reviewers.flatMap(login => ["-f", `reviewers[]=${login}`])], pr.repo);
+      await this.run(["api", "--method", "POST", `repos/${pr.repo}/pulls/${pr.number}/requested_reviewers`, ...users.flatMap(login => ["-f", `reviewers[]=${login}`]), ...teams.flatMap(slug => ["-f", `team_reviewers[]=${slug}`])], pr.repo);
     } catch (error) {
       const denied = /HTTP (400|401|403|404|405|409|410|422|429)\b/.test(String((error as { stderr?: string }).stderr ?? ""));
       throw new ReviewRequestError(denied ? "GitHub refused the review request. Check repository write access and reviewer eligibility." : "GitHub did not confirm the review request. Check state before retrying.", !denied);

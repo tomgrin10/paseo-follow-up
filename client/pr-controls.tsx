@@ -8,7 +8,8 @@ import { mergeBlockers, prActionBlocks, type ActionPlan, type PrActionKind } fro
 import { mergeQueued, mergeReady } from "../shared/attention";
 import type { Pr, Workspace } from "../shared/model";
 import { Button, Switch, errorText, text, type Theme } from "./kit";
-import { defaultReviewers, noReviewers } from "../shared/reviewers";
+import { noReviewers, resolveReviewers, withoutAuthor, type ReviewerEntry } from "../shared/reviewers";
+import { ReviewerPicker, reviewerSettingsKey, useReviewerSettings, willAsk } from "./reviewers";
 
 /**
  * Merge, merge-when-ready and reviewer requests for one PR. Every write needs a click; Merge always
@@ -23,7 +24,11 @@ export function PrControls({ pr, workspace, theme, compact, browserReady, intent
   const statusKey = ["follow-through", "pr-controls", workspace.id, pr.key, pr.snapshot?.head];
   const status = useQuery({ queryKey: statusKey, queryFn: () => read({ workspaceId: workspace.id, prKey: pr.key }), refetchInterval: 5000, enabled: browserReady });
   const invalidate = () => { void cache.invalidateQueries({ queryKey: ["follow-through", "workspace", workspace.id] }); void cache.invalidateQueries({ queryKey: ["follow-through", "pr-controls", workspace.id] }); void cache.invalidateQueries({ queryKey: ["follow-through", "overview"] }); };
-  const reviewRequest = useMutation({ mutationFn: () => requestReviewers({ workspaceId: workspace.id, prKey: pr.key }), onSuccess: reply => { setNotice(reply.result); if (reply.state === "submitted") toast.show(reply.result, { variant: "success" }); invalidate(); }, onError: invalidate });
+  const [picking, setPicking] = useState(false);
+  const reviewerSettings = useReviewerSettings();
+  // `picked`: this PR only, from the picker; `remember` also saves them for the repository.
+  const reviewRequest = useMutation({ mutationFn: (input?: { picked: ReviewerEntry[]; remember: boolean }) => requestReviewers({ workspaceId: workspace.id, prKey: pr.key, ...(input ? { reviewers: input.picked, remember: input.remember } : {}) }),
+    onSuccess: (reply, input) => { setPicking(false); setNotice(reply.result); if (reply.state === "submitted") toast.show(reply.result, { variant: "success" }); if (input?.remember) void cache.invalidateQueries({ queryKey: reviewerSettingsKey }); invalidate(); }, onError: invalidate });
   const submit = useMutation({ mutationFn: (input: { planId: string; scope: "target" | "downstack" }) => confirm(input), onSuccess: reply => { setPlan(null); setNotice(reply.result); if (reply.state === "submitted") toast.show(reply.result, { variant: "success" }); invalidate(); }, onError: invalidate });
   const checking = useMutation({ mutationFn: (kind: PrActionKind) => prepare({ workspaceId: workspace.id, prKey: pr.key, kind }), onSuccess: result => {
     if (result.kind !== "merge" && result.prs.length === 1 && !result.blockers.length && !result.prs[0].blockers.length) submit.mutate({ planId: result.id, scope: "target" });
@@ -39,7 +44,7 @@ export function PrControls({ pr, workspace, theme, compact, browserReady, intent
   const canMerge = mergeReady(pr, workspace) && !actual?.merging;
   const disabled = busy || reviewRequest.isPending || pendingAction || workspace.archived;
   const missingReviewers = noReviewers(pr);
-  const reviewers = defaultReviewers(pr.repo).filter(r => r.login.toLowerCase() !== pr.snapshot?.reviewers?.author?.toLowerCase());
+  const reviewers = reviewerSettings.data ? withoutAuthor(resolveReviewers(reviewerSettings.data.config, pr.repo).reviewers, pr.snapshot?.reviewers?.author) : [];
   const begin = (kind: PrActionKind) => { setPlan(null); setNotice(null); submit.reset(); checking.reset(); checking.mutate(kind); };
   const failure = checking.error ?? submit.error ?? reviewRequest.error;
   const error = failure ? errorText(failure) : (browserReady ? status.data?.error : null) ?? null;
@@ -48,14 +53,22 @@ export function PrControls({ pr, workspace, theme, compact, browserReady, intent
   // Opening the sheet from "Merge…" starts the read-only check; the merge itself still needs the confirm click.
   const started = useRef(false);
   useEffect(() => { if (intent === "merge" && canMerge && !disabled && !started.current) { started.current = true; begin("merge"); } }, [intent, canMerge]);
+  // Opening from "Add reviewers" with nobody set goes straight to the picker instead of an error.
+  const loaded = !!reviewerSettings.data;
+  useEffect(() => { if (intent === "reviewers" && loaded && missingReviewers && !pr.snapshot?.draft && !reviewers.length) setPicking(true); }, [intent, loaded]);
   if (pr.snapshot?.state !== "OPEN") return null;
   const waitingFor = mergeBlockers(pr).filter(b => !b.startsWith("Graphite "));
   return <View style={{ gap: 10 }}>
     {missingReviewers && <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
       <Icon name="UserX" size={14} color={c.statusWarning} />
-      <Text style={[t.meta, { flex: 1, minWidth: 120, color: c.statusWarning }]}>No reviewers yet</Text>
-      {!pr.snapshot?.draft && reviewers.length > 0 && <Button title={reviewRequest.isPending ? "Requesting…" : "Add reviewers"} accessibilityLabel={`Add reviewers: ${reviewers.map(r => r.name).join(" and ")} for ${pr.repo} pull request ${pr.number}`} icon="UserPlus" theme={theme} compact={compact} disabled={disabled} loading={reviewRequest.isPending} onPress={() => { setNotice(null); reviewRequest.mutate(); }} />}
+      <Text style={[t.meta, { flex: 1, minWidth: 120, color: c.statusWarning }]}>{!pr.snapshot?.draft && !picking && reviewers.length ? <>No reviewers yet<Text style={{ color: c.foregroundMuted }}>{` · will ask ${willAsk(reviewers)}`}</Text></> : "No reviewers yet"}</Text>
+      {!pr.snapshot?.draft && !picking && reviewerSettings.data && <>
+        {reviewers.length > 0 && <Button title={reviewRequest.isPending ? "Requesting…" : "Add reviewers"} accessibilityLabel={`Add reviewers: ${willAsk(reviewers)} for ${pr.repo} pull request ${pr.number}`} icon="UserPlus" theme={theme} compact={compact} disabled={disabled} loading={reviewRequest.isPending} onPress={() => { setNotice(null); reviewRequest.mutate(undefined); }} />}
+        <Button title={reviewers.length ? "Choose others…" : "Add reviewers…"} kind={reviewers.length ? "ghost" : "secondary"} icon={reviewers.length ? undefined : "UserPlus"} accessibilityLabel={reviewers.length ? "Pick different reviewers for this PR" : `Pick reviewers for ${pr.repo} pull request ${pr.number}`} theme={theme} compact={compact} disabled={disabled} onPress={() => { setNotice(null); setPicking(true); }} />
+      </>}
     </View>}
+    {missingReviewers && !pr.snapshot?.draft && picking && <ReviewerPicker repo={pr.repo} author={pr.snapshot?.reviewers?.author ?? null} theme={theme} compact={compact} busy={reviewRequest.isPending}
+      onCancel={() => setPicking(false)} onRequest={(picked, remember) => reviewRequest.mutate({ picked, remember })} />}
     {!plan && <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
       {(canMerge || queued || recentlySubmitted || busy) ? <Button title={busy ? checking.isPending ? "Checking…" : "Submitting…" : queued ? "Queued to merge" : recentlySubmitted ? "Submitted" : `Merge #${pr.number}`} icon={queued ? "Clock" : "GitMerge"} theme={theme} compact={compact} kind={canMerge ? "primary" : "secondary"} loading={busy} disabled={disabled || !canMerge} onPress={() => begin("merge")} />
         : <Text style={[t.meta, { flex: 1 }]}>{waitingFor.length ? `Merge opens when it clears: ${waitingFor.join(", ").toLowerCase()}.` : "Waiting for Graphite to report it ready to merge."}</Text>}

@@ -136,8 +136,8 @@ export type BriefSources = {
   error?: { message: string } | null;
   agent?: NeedsYouCall | null;
   pr?: PrState | null;
-  /** A PR with nobody asked to review it. `names` are the repository's default reviewers (may be empty). */
-  reviewers?: { prKey: string; number: number; url: string | null; names: string[] } | null;
+  /** A PR with nobody asked to review it. `names` are the developer's saved reviewers for `repo` (may be empty). */
+  reviewers?: { prKey: string; repo?: string; number: number; url: string | null; names: string[] } | null;
   /** S6 extraction is out of scope (Phase 2); kept so the precedence reads like the design. */
   extracted?: null;
 };
@@ -197,10 +197,11 @@ export function pickBrief(s: BriefSources): BriefContent {
     const r = s.reviewers;
     const named = r.names.length ? r.names.join(" and ") : null;
     return { ...base, source: "followup", kind: "reviewers", slim: false,
-      ask: line(named ? `Add reviewers to #${r.number}: ${named}` : `#${r.number} has no reviewers yet. Add them on GitHub.`),
+      ask: line(named ? `Add reviewers to #${r.number}: ${named}` : `#${r.number} has no reviewers yet`),
       facts: (s.pr?.key === r.prKey ? s.pr.facts : []).slice(0, 3),
-      moves: [...(named ? [move("add_reviewers", "Add reviewers", { prKey: r.prKey })] : []), ...(r.url ? [move("open_pr", "Open PR", { url: r.url, prKey: r.prKey })] : [])],
-      sourceLine: named ? "From Follow-up's PR state. Open review threads go to the agent; reviewers are yours." : "From Follow-up's PR state. This repository has no default reviewers, so pick them on GitHub." };
+      // With nobody set, Add reviewers opens the picker; it never asks anyone without a click.
+      moves: [move("add_reviewers", "Add reviewers", { prKey: r.prKey }), ...(r.url ? [move("open_pr", "Open PR", { url: r.url, prKey: r.prKey })] : [])],
+      sourceLine: named ? "From Follow-up's PR state. Open review threads go to the agent; reviewers are yours." : `No reviewers set for ${r.repo ?? "this repository"}; Add reviewers lets you pick.` };
   }
   if (s.pr?.event) {
     const pr = s.pr;

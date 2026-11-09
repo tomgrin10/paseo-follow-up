@@ -8,7 +8,7 @@ import { PrActions } from "../server/pr-actions";
 import { BrowserBridge } from "../server/browser-bridge";
 import { Github, parsePr, ReviewRequestError } from "../server/github";
 import { prActionBlocks } from "../shared/pr-actions";
-import { noReviewers, defaultReviewers } from "../shared/reviewers";
+import { noReviewers, configuredReviewers, emptyReviewerConfig, setReviewerConfig } from "../shared/reviewers";
 import { snapshot, pr, workspace, clock } from "./fixtures";
 import type { Snapshot } from "../shared/model";
 
@@ -29,7 +29,8 @@ test("reviewer absence requires complete open PR data and counts human/team requ
   for (const patch of [{ requested: ["human"] }, { teams: ["team"] }, { reviewed: ["human"] }, { complete: false }]) { p.snapshot!.reviewers = { ...reviewers(), ...patch }; assert.equal(noReviewers(p), false); }
   for (const patch of [{ reviewers: undefined }, { reviewDecision: "APPROVED", reviewers: { ...reviewers(), reviewed: ["human"] } }, { state: "MERGED" as const }, { complete: false }]) assert.equal(noReviewers(pr({ snapshot: snapshot({ reviewers: reviewers(), ...patch }) })), false);
   assert.equal(noReviewers(pr({ snapshot: snapshot({ reviewers: reviewers(), reviewDecision: "APPROVED" }) })), true, "a bot-only approval is not a human reviewer");
-  assert.deepEqual(defaultReviewers("example/app"), []);
+  setReviewerConfig(emptyReviewerConfig()); assert.deepEqual(configuredReviewers("example/app"), [], "nothing is hardcoded for any repository");
+  assert.deepEqual(configuredReviewers("acme/acme-poc"), []);
 });
 test("GitHub bot/self/dismissed reviews do not hide missing human reviewers; unknown and truncated requests stay unknown", () => {
   const data: any = { title: "Test", url: "fixture", state: "OPEN", headRefOid: "head", baseRefName: "main", isDraft: false, mergeable: "MERGEABLE", author: { login: "author" }, reviewRequests: { nodes: [], pageInfo: { hasNextPage: false } }, latestReviews: { pageInfo: { hasNextPage: false }, nodes: [{ state: "COMMENTED", author: { __typename: "Bot", login: "review-bot" } }, { state: "COMMENTED", author: { __typename: "User", login: "author" } }, { state: "DISMISSED", author: { __typename: "User", login: "dismissed" } }] }, reviewThreads: { nodes: [], pageInfo: { hasNextPage: false } }, commits: { nodes: [] } };
