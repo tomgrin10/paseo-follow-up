@@ -125,17 +125,22 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
     : current
     ? <DetailPane key={current.key} s={current} model={model} theme={theme} compact={compact} deps={deps} openFull={openFull} signOffNext={signOffNext} onBack={compact && !route ? () => setSelected(null) : undefined} />
     : <BriefPane theme={theme} compact={compact} pane={pane} onSelect={key => route ? route(key) : setSelected(key)} openLog={deps.openLog} sources={deps.sources} />;
+  // Nothing followed at all: no sort, no meters, just the empty state and its action.
+  const nothing = model.groups.every(g => !g.items.length);
   const list = <HomeList model={model} theme={theme} dense={compact} touch={compact} selectedKey={selected} onSelect={onSelect} briefLine={briefLine}
     results={omnibox.results} activeResult={omnibox.active} onResult={item => void pick(item)} filter={filter} overseer={overseer} asking={asking}
     // Phones: the host header already says Follow-up, so no "Home" title row; search, sort and settings share one row and
     // the meters move to the end of the list.
-    footer={compact ? <View style={{ paddingTop: 16, paddingBottom: 96 }}><UsageMeters theme={theme} sources={deps.sources} dense /></View> : undefined}
+    footer={compact ? <View style={{ paddingTop: 16, paddingBottom: 96 }}>{!omnibox.results && !nothing && <UsageMeters theme={theme} sources={deps.sources} dense />}</View> : undefined}
+    // Phones: the setup offer goes after the Needs-you group when there is one, so the first ask stays high.
+    afterNeeds={compact && model.needs > 0 ? <SetupOffer theme={theme} compact view={props.onboarding} /> : undefined}
+    emptyAction={compact ? <Button theme={theme} compact kind="secondary" icon="Settings" title="Project settings" onPress={deps.openSettings} /> : undefined}
     top={<ListTop theme={theme} dense={compact} title={compact ? undefined : <ListHeader theme={theme} compact={compact} onSettings={deps.openSettings} />}>
       {/* zIndex: on web every View is its own stacking context, so the sort menu only paints and hit-tests above the
           strip and meters below if this row sits above them. */}
       <View style={{ zIndex: 2, flexDirection: "row", alignItems: "center", gap: compact ? 2 : 6, paddingLeft: compact ? 16 : 16, paddingRight: compact ? 6 : 16 }}>
         <SearchField theme={theme} omnibox={omnibox} dense={compact} onEnter={item => void pick(item)} />
-        <SortMenu theme={theme} mode={model.sort} onChange={deps.sources.extras.setSort} rankedAt={model.rankedAt} touch={compact} rank={rank} onRerank={deps.sources.extras.rankNow} />
+        {!(compact && nothing) && <SortMenu theme={theme} mode={model.sort} onChange={deps.sources.extras.setSort} rankedAt={model.rankedAt} touch={compact} rank={rank} onRerank={deps.sources.extras.rankNow} />}
         {compact && <IconButton theme={theme} compact icon="Settings" label="Follow-up settings" onPress={deps.openSettings} />}
       </View>
       {!compact && !omnibox.results && <StatusStrip theme={theme} model={model} filter={filter} onFilter={setFilter} touch={compact} dense={compact} />}
@@ -146,7 +151,7 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
     // scrolled list keeps the screen instead of sitting under a 250px block.
     header={compact && !omnibox.results ? <View style={{ gap: 8, paddingTop: 6, paddingBottom: 6 }}>
       <StatusStrip theme={theme} model={model} filter={filter} onFilter={setFilter} touch dense />
-      <SetupOffer theme={theme} compact view={props.onboarding} />
+      {model.needs === 0 && <SetupOffer theme={theme} compact view={props.onboarding} />}
     </View> : undefined} />;
 
   if (compact) return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
@@ -336,7 +341,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
       <Icon name="History" size={16} color={c.foregroundMuted} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={t.label}>Recent steps</Text>
-        <Text style={t.meta}>{tail.seenAt ? `Last seen ${age(new Date(tail.seenAt).toISOString(), Date.now())} ago. ` : ""}Not loaded. Loading keeps it in memory ~1 h.</Text>
+        <Text style={t.meta}>{tail.seenAt ? `Last seen ${age(new Date(tail.seenAt).toISOString(), Date.now())} ago. ` : ""}Not loaded. Loading keeps it in memory for about an hour.</Text>
       </View>
       <Button theme={theme} compact kind="ghost" title={tail.loading ? "Loading…" : "Load"} accessibilityLabel="Load recent steps" accessibilityHint="Loads the agent into memory for about an hour" loading={tail.loading} disabled={tail.loading} onPress={tail.load} />
     </View> : <>
@@ -442,7 +447,7 @@ function OverseerPane({ theme, compact, o, focus = 0, pending = null, agentId, m
     {header}
     <ScrollView contentContainerStyle={{ padding: compact ? 16 : 20, gap: 12 }}>
       <Text style={compact ? t.body : [t.body, { fontSize: 15, lineHeight: 22 }]}>One agent that knows every workspace's state. Tell it "the PRs look good, assign reviewers on all" or "tell the SCIM agent to use option B", and it finds the right agent and passes it on.</Text>
-      <Text style={t.meta}>It never merges, posts to people or archives. It starts a new workspace only when you say so. It runs on {configured ?? "Claude · Newest Opus"} in its own workspace, which stays off your lists. Change the model in Follow-up settings → Agents.</Text>
+      <Text style={t.meta}>It never merges, posts to people or archives. It starts a new workspace only when you say so.{compact ? " It works in its own workspace, which stays off your lists." : ` It runs on ${configured ?? "Claude · Newest Opus"} in its own workspace, which stays off your lists.`} Change the model in Follow-up settings → Agents.</Text>
       <View style={{ flexDirection: "row" }}><Button theme={theme} compact={compact} grow={compact} kind="primary" icon="Play" title="Start the Overseer" loading={starting} onPress={() => void start()} /></View>
     </ScrollView>
   </View>;
@@ -574,13 +579,16 @@ function BriefPane({ theme, compact, pane, onSelect, openLog, sources }: { theme
     {/* Phones: the headline leads and the date sits under it; desktop keeps the date as an eyebrow. */}
     {!compact && <Text style={t.meta}>{date} · {time}</Text>}
     <Text accessibilityRole="header" style={t.headline}>{pane.headline}</Text>
-    {compact && <Text style={t.meta}>{date} · {time}</Text>}
+    {compact && <Text style={t.meta}>Morning brief · {date} · {time}</Text>}
     {pane.first && <Button theme={theme} compact={compact} grow={compact} kind="primary" icon="ArrowRight" title={`Open ${pane.first.title.length > 40 ? `${pane.first.title.slice(0, 40)}…` : pane.first.title}`} onPress={() => onSelect(pane.first!.key)} />}
     {!!pane.waiting && <Text style={t.body}><Text style={{ color: c.foregroundMuted }}>Waiting on others: </Text>{pane.waiting}</Text>}
     <Text style={t.body}><Text style={{ color: c.foregroundMuted }}>Cleared since {sinceLabel(now)}: </Text>{pane.cleared ?? "nothing yet"}.</Text>
 
-    {/* Phones: the section head is itself a 44 row into the log ("· N · View log ›"), not a tiny "0 · log" link. */}
-    {compact
+    {/* Phones: the section head is itself a 44 row into the log ("· N · View log ›"), not a tiny "0 · log" link. With
+        nothing done, one muted line says so instead of a header, an empty log and the same "since" twice. */}
+    {compact && !pane.away.count
+      ? <Text style={[t.meta, { marginTop: 6 }]}>Nothing done on its own since {sinceLabel(now)} · no merges, no messages to people.</Text>
+      : compact
       ? <Pressable accessibilityRole="link" accessibilityLabel={`Done while you were away: ${pane.away.count}. View log`} onPress={openLog}
         style={state => ({ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 44, marginTop: 6, marginHorizontal: -8, paddingHorizontal: 8, borderRadius: 8, backgroundColor: state.pressed ? c.surface2 : "transparent" })}>
         <Text accessibilityRole="header" numberOfLines={1} style={[t.section, { flexShrink: 1 }]}>Done while you were away · {pane.away.count}</Text>
@@ -589,8 +597,10 @@ function BriefPane({ theme, compact, pane, onSelect, openLog, sources }: { theme
         <Icon name="ChevronRight" size={14} color={c.foregroundMuted} />
       </Pressable>
       : section("Done while you were away", <Pressable accessibilityRole="link" onPress={openLog} hitSlop={8}><Text style={[t.small, { color: c.foreground }]}>{pane.away.count} · log</Text></Pressable>)}
-    {pane.away.top.length ? pane.away.top.map(l => <LogRow key={l.key} l={l} c={c} />) : <Text style={t.meta}>Follow-up didn't act on its own since {sinceLabel(now)}.</Text>}
-    <Text style={t.meta}>No merges, no messages to people. Those stay yours.</Text>
+    {!(compact && !pane.away.count) && <>
+      {pane.away.top.length ? pane.away.top.map(l => <LogRow key={l.key} l={l} c={c} />) : <Text style={t.meta}>Follow-up didn't act on its own since {sinceLabel(now)}.</Text>}
+      <Text style={t.meta}>No merges, no messages to people. Those stay yours.</Text>
+    </>}
 
     {section("Sources")}
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 14 }}>
