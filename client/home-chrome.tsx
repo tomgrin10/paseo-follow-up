@@ -3,14 +3,14 @@ import { Platform, Pressable, ScrollView, Text, TextInput, View } from "react-na
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
 import { GROUP_TITLE, homeCounts, type HomeGroupId, type HomeModel } from "../shared/home";
 import { FIELD_LABEL, excerpt, highlightRuns, homeSearchDocs, indexDocs, defaultActive, omniboxResults, overseerProvider, workspaceProvider, type OmniboxItem, type OmniboxProvider, type Range, type WorkspaceItem } from "../shared/search";
-import { SORT_HINT, SORT_LABEL, SORT_MODES, type SortMode } from "../shared/sort";
+import { DEFAULT_SORT, SORT_HINT, SORT_LABEL, SORT_MODES, type SortMode } from "../shared/sort";
 import { priorityNote, PRIORITY_SOURCE_LABEL } from "../shared/priorities";
 import { rankCost } from "../shared/ranker";
 import { meters, meterText, type Meter } from "../shared/usage";
 import { resourceMeter, type Resources } from "../shared/resources";
 import type { HomeSources } from "./home-data";
 import type { Workstream } from "../shared/home";
-import { Age, PrChipView } from "./home-list";
+import { Age, glyphColor, PrChipView, PrSummaryText } from "./home-list";
 import { useMinute } from "./home-data";
 import { Spinner } from "./motion";
 import { withAlpha, type Colors } from "./theme";
@@ -140,7 +140,9 @@ export function SortMenu({ theme, mode, onChange, rankedAt, touch, rank = null, 
     <Pressable accessibilityRole="button" accessibilityLabel={`Sort: ${SORT_LABEL[mode]}${running ? ", ranking" : ""}`} aria-expanded={open} accessibilityState={{ expanded: open }} onPress={() => setOpen(o => !o)}
       style={state => ({ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, height: touch ? 44 : 30, minWidth: touch ? 44 : undefined, paddingHorizontal: touch ? 0 : 8, borderRadius: touch ? 8 : 6, backgroundColor: open || (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
       {/* Phones: an icon; the mode's name lives in the menu (and the accessible name). */}
-      {running ? <Spinner color={c.foreground} size={12} label="Ranking" /> : <Icon name="ArrowUpDown" size={touch ? 18 : 13} color={c.foregroundMuted} />}
+      {running ? <Spinner color={c.foreground} size={12} label="Ranking" /> : <Icon name="ArrowUpDown" size={touch ? 18 : 13} color={touch && mode !== DEFAULT_SORT ? c.foreground : c.foregroundMuted} />}
+      {/* Phones: the icon carries no label, so a non-default sort shows as a dot on it. */}
+      {touch && mode !== DEFAULT_SORT && <View style={{ position: "absolute", top: 9, right: 9, width: 7, height: 7, borderRadius: 4, backgroundColor: c.accent }} />}
       {!touch && <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 12 }}>{SORT_LABEL[mode]}</Text>}
       {!touch && <Icon name="ChevronDown" size={12} color={c.foregroundMuted} />}
     </Pressable>
@@ -160,7 +162,8 @@ export function SortMenu({ theme, mode, onChange, rankedAt, touch, rank = null, 
           <View style={{ width: 14 }}>{running ? <Spinner color={c.foregroundMuted} size={12} label="Ranking" /> : <Icon name="RefreshCw" size={13} color={c.foreground} />}</View>
           <Text style={{ color: running ? c.foregroundMuted : c.foreground, fontSize: 13 }}>{running ? "Ranking…" : "Re-rank now"}</Text>
         </Pressable>}
-        <Text style={{ color: c.foregroundMuted, fontSize: 11, paddingHorizontal: 10, paddingTop: 4, paddingBottom: 4 }}>Priority: {note}</Text>
+        {/* Phones: before anything is ranked, "Priority: By urgency" only repeats the checked row's hint. */}
+        {!(touch && !rankedAt) && <Text style={{ color: c.foregroundMuted, fontSize: 11, paddingHorizontal: 10, paddingTop: 4, paddingBottom: 4 }}>Priority: {note}</Text>}
       </View>
     </View>}
   </View>;
@@ -287,6 +290,28 @@ export function ResultRow({ item, theme, active, dense, touch, onPress, s: row }
   const { hit } = item;
   const via = hit.via ? excerpt(hit.via.text, hit.via.ranges, dense ? 56 : 90) : null;
   const archived = hit.group === "archived";
+  // Phones: the list's own row (glyph, two-line 15/20 title with the age, state word in tone, PRs as text, a divider),
+  // with the match highlighted. No group pill: the state word already says it.
+  if (touch) {
+    const tone = row ? glyphColor(row, c, true) : c.foregroundMuted;
+    return <Pressable accessibilityRole="button" accessibilityState={{ selected: active }} accessibilityLabel={`${hit.title}${row?.word ? `. ${row.word}` : ""}${hit.via ? `, ${FIELD_LABEL[hit.via.field]}: ${hit.via.text}` : ""}`} onPress={onPress}
+      style={state => ({ flexDirection: "row", alignItems: "flex-start", gap: 10, minHeight: 56, paddingLeft: 14, paddingRight: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: withAlpha(c.border, 0.6),
+        backgroundColor: active || state.pressed ? c.surface2 : "transparent" })}>
+      <View style={{ paddingTop: 2 }}><Icon name={archived ? "Archive" : row?.icon ?? "Circle"} size={17} color={archived ? c.foregroundMuted : tone} /></View>
+      <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+          <View style={{ flex: 1, minWidth: 0 }}><Highlighted text={hit.title} ranges={hit.titleRanges} color={archived ? c.foregroundMuted : c.foreground} hit={c.foreground} mark={c.statusWarning} size={15} weight="500" lines={2} /></View>
+          {row && <Age iso={row.at} c={c} size={12} />}
+        </View>
+        {via ? <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>{FIELD_LABEL[hit.via!.field]} · <Highlighted text={via.text} ranges={via.ranges} color={c.foregroundMuted} hit={c.foreground} mark={c.statusWarning} size={13} /></Text>
+          : archived ? <Text style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>Archived</Text>
+          : row && (row.word || row.line) ? <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>
+            {row.word ? <Text style={{ color: tone, fontWeight: "600" }}>{row.word}</Text> : null}{row.word && row.line ? " · " : ""}{row.line}
+          </Text> : null}
+        {row?.pr && <Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 17 }}><PrSummaryText s={row} c={c} /></Text>}
+      </View>
+    </Pressable>;
+  }
   return <Pressable accessibilityRole="button" accessibilityState={{ selected: active }} accessibilityLabel={`${hit.title}${hit.via ? `, ${FIELD_LABEL[hit.via.field]}: ${hit.via.text}` : ""}`} onPress={onPress}
     style={state => ({ flexDirection: "row", alignItems: "center", gap: 10, minHeight: touch ? 56 : dense ? 40 : 44, paddingHorizontal: dense ? 8 : 16, paddingVertical: 4,
       borderLeftWidth: 2, borderLeftColor: active ? withAlpha(c.foreground, 0.5) : "transparent",

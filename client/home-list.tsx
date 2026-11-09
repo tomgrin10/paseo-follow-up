@@ -32,7 +32,8 @@ type Entry =
   | { type: "result"; key: string; item: WorkspaceItem; index: number }
   | { type: "ask"; key: string; ask: string; index: number }
   | { type: "label"; key: string; text: string }
-  | { type: "empty"; key: string };
+  | { type: "empty"; key: string }
+  | { type: "slot"; key: string };
 
 export type HomeListProps = {
   model: HomeModel;
@@ -50,6 +51,10 @@ export type HomeListProps = {
   footer?: ReactNode;
   /** Chrome above the list that never scrolls away: search, sort, status, limits. */
   top?: ReactNode;
+  /** Phones: a row placed right after the Needs-you group (the setup offer), so it never pushes the first ask down. */
+  afterNeeds?: ReactNode;
+  /** Phones: the action under the "Nothing followed yet" empty state. */
+  emptyAction?: ReactNode;
   /** While searching: one flat ranked list instead of the groups. */
   results?: OmniboxItem[] | null;
   activeResult?: number;
@@ -62,7 +67,7 @@ export type HomeListProps = {
   asking?: boolean;
 };
 
-export function HomeList({ model, theme, dense = false, touch, selectedKey, onSelect, briefLine, renderExpanded, header, footer, top, results, activeResult = 0, onResult, filter = null, overseer = null, asking = false }: HomeListProps) {
+export function HomeList({ model, theme, dense = false, touch, selectedKey, onSelect, briefLine, renderExpanded, header, footer, top, afterNeeds, emptyAction, results, activeResult = 0, onResult, filter = null, overseer = null, asking = false }: HomeListProps) {
   const c = theme.colors;
   const [closed, setClosed] = useState<Set<string>>(new Set(["quiet"]));
   const [openProjects, setOpenProjects] = useState<Set<string>>(new Set());
@@ -93,9 +98,10 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
     for (const g of model.groups) {
       if (filter && g.id !== filter) continue;
       const open = !!filter || !closed.has(g.id);
-      out.push({ type: "header", key: `h:${g.id}`, group: g.id, title: g.title, count: g.items.length, open });
-      if (!open) continue;
-      if (g.id !== "quiet") { for (const s of g.items) out.push({ type: "row", key: s.key, s }); continue; }
+      // Phones with one group filtered: the chip above already says "N Needs you ×"; no header repeating it.
+      if (!(touch && filter)) out.push({ type: "header", key: `h:${g.id}`, group: g.id, title: g.title, count: g.items.length, open });
+      if (!open) { if (g.id === "needs" && afterNeeds && !filter) out.push({ type: "slot", key: "s:afterNeeds" }); continue; }
+      if (g.id !== "quiet") { for (const s of g.items) out.push({ type: "row", key: s.key, s }); if (g.id === "needs" && afterNeeds && !filter) out.push({ type: "slot", key: "s:afterNeeds" }); continue; }
       for (const f of quietFolds(g.items)) {
         const fopen = openProjects.has(f.project);
         out.push({ type: "fold", key: `f:${f.project}`, project: f.project, count: f.items.length, archivable: f.archivable, open: fopen });
@@ -110,7 +116,7 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
     return out;
     if (filter && !out.length) out.push({ type: "label", key: "l:empty", text: `Nothing in ${GROUP_TITLE[filter as HomeGroupId]} right now.` });
     return out;
-  }, [model, closed, openProjects, pages, briefLine, results, filter, !!overseer, touch]);
+  }, [model, closed, openProjects, pages, briefLine, results, filter, !!overseer, touch, !!afterNeeds]);
 
   const render = useCallback(({ item }: { item: Entry }) => {
     switch (item.type) {
@@ -119,7 +125,9 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
       case "empty": return <View accessibilityRole="summary" style={{ marginHorizontal: 16, marginTop: 20, gap: 6 }}>
         <Text accessibilityRole="header" style={{ color: c.foreground, fontSize: 17, lineHeight: 23, fontWeight: "600" }}>Nothing followed yet</Text>
         <Text style={{ color: c.foregroundMuted, fontSize: 14, lineHeight: 20 }}>Follow a workspace from its Follow-up panel, or turn a project on in Settings so its workspaces join on their own. They show up here once their agents work.</Text>
+        {emptyAction ? <View style={{ flexDirection: "row", marginTop: 6 }}>{emptyAction}</View> : null}
       </View>;
+      case "slot": return <View style={{ paddingVertical: 10 }}>{afterNeeds}</View>;
       case "result": return <ResultRow item={item.item} s={model.byKey.get(item.item.key)} theme={theme} active={item.index === activeResult} dense={dense} touch={touch} onPress={() => onResult?.(item.item)} />;
       case "ask": return <AskRow ask={item.ask} theme={theme} active={item.index === activeResult} dense={dense} touch={touch} sending={!!asking} onPress={() => onResult?.({ provider: "overseer", key: ASK_KEY, ask: item.ask })} />;
       case "brief": return <BriefRow theme={theme} line={briefLine ?? ""} selected={!touch && (selectedKey === null || selectedKey === BRIEF_KEY)} touch={touch} onSelect={onSelect} />;
@@ -144,7 +152,7 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
         </View>;
       }
     }
-  }, [theme, c, dense, touch, selectedKey, onSelect, briefLine, renderExpanded, toggle, toggleProject, activeResult, onResult, model, overseer?.state, overseer?.line, asking]);
+  }, [theme, c, dense, touch, selectedKey, onSelect, briefLine, renderExpanded, toggle, toggleProject, activeResult, onResult, model, overseer?.state, overseer?.line, asking, afterNeeds, emptyAction]);
 
   const listRef = useRef<FlatList<Entry>>(null);
   // Keep the keyboard-active result in view.
@@ -247,6 +255,8 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect }: Ro
   const blocking = s.group === "needs" && s.tier === 0;
   const muted = s.group === "quiet" || s.group === "later";
   const line = [s.word && s.group !== "needs" ? s.word : null, s.line].filter(Boolean).join(" · ");
+  // Phones: "Working" under every row of a "Running 9" group says nothing the header didn't; one line per row instead.
+  const generic = touch && !s.word && (s.line === "Working" || s.line === "Fixing");
   const label = [s.title + (s.agent ? ` › ${s.agent}` : ""), s.word, s.line].filter(Boolean).join(". ");
   return <Pressable accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={label} onPress={() => onSelect(s.key)}
     style={state => ({ flexDirection: "row", alignItems: dense ? "flex-start" : "center", gap: touch ? 10 : dense ? 8 : 10, minHeight: touch ? 56 : dense ? 36 : 38, paddingLeft: touch ? 14 : dense ? 8 : 16, paddingRight: touch ? 16 : dense ? 8 : 16, paddingVertical: touch ? 12 : dense ? 6 : 0,
@@ -262,7 +272,7 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect }: Ro
         <Text numberOfLines={2} style={{ flex: 1, minWidth: 0, color: muted ? c.foregroundMuted : c.foreground, fontSize: 15, lineHeight: 20, fontWeight: muted ? "400" : "500" }}>{s.title}</Text>
         <View style={{ paddingTop: 2 }}><Age iso={s.at} c={c} size={12} /></View>
       </View>
-      {(!!s.word || !!s.line) && <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>
+      {(!!s.word || !!s.line) && !generic && <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>
         {s.word && s.group === "needs" ? <Text style={{ color, fontWeight: "600" }}>{s.word}</Text> : null}{s.word && s.group === "needs" && s.line ? " · " : ""}{line}
       </Text>}
       {!!s.priority?.reason && <PriorityLine reason={s.priority.reason} source={s.priority.source} c={c} size={12} lines={2} />}
