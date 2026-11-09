@@ -116,7 +116,7 @@ The Follow-up sidebar row (and ⌘K → **Follow-up: Home**) opens **Home**: eve
 Install the beta:
 
 ```sh
-paseo plugin update follow-through --version 1.3.0-beta.4
+paseo plugin update follow-through --version 1.3.0-beta.5
 # or, for a fresh install:
 paseo plugin install npm:paseo-follow-up@beta
 ```
