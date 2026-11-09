@@ -7,15 +7,24 @@ import { answerRecipients, developerAnswer, syncTaskQuestions } from "./question
 import { answerMessage, isOpen as isOpenQuestion, type Question } from "../shared/questions";
 import { reconcileSubmittedStacks } from "./submissions";
 import { applyDiscovery, startsWithAutoSend, type DiscoveredWorkspace } from "./discovery";
-import { followsByDefault } from "../shared/settings";
+import { followsByDefault, migrateActiveScope } from "../shared/settings";
 import { replyRecorded } from "../shared/communication";
-import { DeliveryDeferred } from "./delivery";
+import { DeliveryDeferred, ConversationGone } from "./delivery";
 import { recordSnapshot } from "./deployment-anchor";
 
 export interface Runtime {
   busy: boolean; reason: string | null; archived: boolean; backgroundBusy?: boolean;
   guarded?: boolean; guardedInterruptionId?: string;
+  /** The main agent's runtime is loaded (see isLoaded). Undefined means unknown. */
+  mainLoaded?: boolean;
+  /** The main agent had a user message within the active window. Undefined means unknown. */
+  mainRecent?: boolean;
+  /** The main agent's provider conversation no longer exists. */
+  gone?: string | null;
 }
+const GONE_REASON = "The main agent's conversation no longer exists, so Follow-up stopped sending to it. Start a new agent in this workspace to continue.";
+/** A batch that asks the agent to verify it's finished and declare Done. These never go out on their own. */
+export const completionBatch = (b: Batch): boolean => b.tasks.some(t => t.kind === "completion");
 export const interruptionHold = (kind: "canceled" | "failed") => kind === "canceled" ? "You stopped the main agent. Resume follow-up when ready." : "The main agent's turn failed. Check it before resuming follow-up.";
 export interface Gateway {
   discover?(state: State, workspaceId?: string): Promise<DiscoveredWorkspace[]>;
@@ -65,9 +74,13 @@ export class Engine {
     if (this.stopped) return;
     if (this.gateway.discover) {
       const discovered = await this.gateway.discover(saved);
-      await this.store.mutate(state => applyDiscovery(state, discovered.filter(row => followsByDefault(state, row) || saved.workspaces.some(w => w.id === row.id && w.enable_tracking && !w.archived)), this.now()));
+      await this.store.mutate(state => {
+        applyDiscovery(state, discovered.filter(row => followsByDefault(state, row) || saved.workspaces.some(w => w.id === row.id && w.enable_tracking && !w.archived)), this.now());
+        migrateActiveScope(state, new Set(discovered.filter(row => row.active !== false).map(row => row.id)));
+      });
     }
-    const active = (await this.store.snapshot()).workspaces.filter(w => w.enable_tracking && !w.archived);
+    // Dormant workspaces stay listed but cost nothing: no PR or agent observation until they're active again.
+    const active = (await this.store.snapshot()).workspaces.filter(w => w.enable_tracking && !w.archived && !w.dormant);
     if (!active.length) { this.error = null; return; }
     const observations = await this.github.observe(active.flatMap(w => w.prs));
     for (const original of active) {
@@ -77,6 +90,8 @@ export class Engine {
         const w = findWorkspace(state, original.id);
         w.runtimeBusy = runtime.busy; w.runtimeReason = runtime.reason;
         w.backgroundBusy = runtime.backgroundBusy ?? false;
+        if (runtime.gone && w.goneAgent?.agentId !== w.mainAgentId) w.goneAgent = { agentId: w.mainAgentId, at: new Date(this.now()).toISOString(), reason: runtime.gone };
+        if (w.goneAgent?.agentId === w.mainAgentId) w.runtimeReason = GONE_REASON;
         if (runtime.guardedInterruptionId && w.interruption && w.hold === interruptionHold(w.interruption.kind)) {
           w.hold = null; w.interruption.guardPauseId = runtime.guardedInterruptionId;
         }
@@ -114,7 +129,10 @@ export class Engine {
       for (const q of findWorkspace(await this.store.snapshot(), original.id).questions.filter(q => q.answer?.delivery.state === "queued")) await this.deliverAnswer(original.id, q.id).catch(() => undefined);
       let current = findWorkspace(await this.store.snapshot(), original.id);
       const pending = current.batches.find(b => b.state === "pending" && !isRecovery(b));
-      if (current.enable_auto_sends && !current.archived && !current.hold && pending &&
+      // Auto-send only reaches an agent that is loaded and recently used: sending to a dormant one would wake it.
+      // Completion checks never go out on their own; they wait for Tom or the agent's next live turn.
+      if (current.enable_auto_sends && !current.archived && !current.hold && pending && !current.dormant && !current.goneAgent &&
+          !completionBatch(pending) && runtime.mainLoaded !== false && runtime.mainRecent !== false &&
           !runtime.busy && !runtime.backgroundBusy && !runtime.reason &&
           !current.batches.some(b => !isRecovery(b) && ["sending", "sent", "blocked", "uncertain"].includes(b.state)) &&
           this.now() - Date.parse(pending.createdAt) >= this.settleMs &&
@@ -197,6 +215,7 @@ export class Engine {
     const batch = current.batches.find(b => b.id === batchId && b.state === "pending");
     if (batch && isRecovery(batch)) throw new Error("Recovery requires its own explicit action.");
     if (!batch || !current.enable_tracking || current.archived || current.hold || this.stopped || (automatic && !current.enable_auto_sends)) throw new Error("Workspace or queue is no longer ready to send");
+    if (current.goneAgent?.agentId === current.mainAgentId) throw new Error(GONE_REASON);
     if (needsPrObservations(current, batch) && current.prs.some(p => p.error || !p.snapshot?.complete)) throw new Error("PR status is incomplete; refresh before sending repairs");
     const runtime = await this.gateway.observe(current, true);
     if (runtime.busy || runtime.backgroundBusy || runtime.reason || runtime.archived) throw new Error(runtime.reason ?? "The workspace has active agent work. Send when it is idle.");
@@ -256,6 +275,14 @@ export class Engine {
     } catch (error) {
       await this.store.mutate(state => {
         const b = findWorkspace(state, workspaceId).batches.find(b => b.id === batchId)!;
+        if (b.state === "sending" && error instanceof ConversationGone) {
+          // Nothing reached the agent. Keep the batch for a new agent and stop retrying this one.
+          const w = findWorkspace(state, workspaceId);
+          b.state = "pending"; b.result = ""; b.recipientAgentId = null;
+          w.goneAgent = { agentId: error.agentId, at: new Date(this.now()).toISOString(), reason: error.message };
+          w.runtimeReason = GONE_REASON;
+          return;
+        }
         if (b.state === "sending" && error instanceof DeliveryDeferred) {
           b.state = "pending"; b.result = "";
           if (!isRecovery(b)) findWorkspace(state, workspaceId).runtimeReason = error.message;

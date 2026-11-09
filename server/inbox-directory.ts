@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { pages, withDaemon, type Agent } from "./daemon";
 import type { AgentInfo, Directory } from "./inbox";
+import { isLoaded } from "./agent-load";
 
 type Snapshot = Agent & { updatedAt?: string; parentAgentId?: string | null; requiresAttention?: boolean; attentionReason?: string | null; attentionTimestamp?: string | null };
 const info = (a: Snapshot): AgentInfo => ({
@@ -36,6 +37,9 @@ export function daemonDirectory(connect: typeof withDaemon = withDaemon): Direct
     },
     async tail(id, limit) {
       return connect(async client => {
+        // Called from turn hooks, so the agent is normally live. Never wake one that isn't.
+        const row = await client.fetchAgent(id);
+        if (!isLoaded(row?.agent)) return [];
         const page = await client.fetchAgentTimeline(id, { direction: "tail", limit, projection: "canonical", timeout: 10_000 });
         return [...page.entries].sort((a, b) => a.seqStart - b.seqStart).map(e => e.item);
       });

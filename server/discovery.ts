@@ -5,7 +5,7 @@ import type { State, Workspace } from "../shared/model";
 import { autoSendsByDefault, followsByDefault } from "../shared/settings";
 
 export type History = { candidates: string[]; goal: string | null; complete: boolean; error: string | null };
-export type DiscoveredWorkspace = { id: string; title: string; mainAgentId: string; /** Set when mainAgentId is a live successor to this closed or gone main agent. */ replacesMainAgentId?: string; messageAt: string | null; projectId?: string | null; enable_default_tracking?: boolean; history?: History; contributorAgentIds?: string[]; submissions?: Submission[]; artifacts?: Artifact[] };
+export type DiscoveredWorkspace = { id: string; title: string; mainAgentId: string; /** Set when mainAgentId is a live successor to this closed or gone main agent. */ replacesMainAgentId?: string; messageAt: string | null; projectId?: string | null; enable_default_tracking?: boolean; history?: History; contributorAgentIds?: string[]; submissions?: Submission[]; artifacts?: Artifact[]; /** In the active scope (see workspaceActive). Undefined means unknown, treated as active. */ active?: boolean };
 
 export function extractHistory(items: readonly unknown[], complete = true, error: string | null = null): History {
   const candidates = new Set<string>();
@@ -48,6 +48,15 @@ export function applyDiscovery(state: State, discovered: DiscoveredWorkspace[], 
       state.workspaces.push(w);
     }
     w.title = row.title;
+    if (row.active !== undefined) {
+      if (row.active) delete w.dormant; else w.dormant = true;
+      // Auto-send parked by the active-scope migration comes back once the workspace is active again.
+      if (row.active && state.autoSendsParked?.includes(w.id)) {
+        if (w.enable_tracking && !w.archived) w.enable_auto_sends = true;
+        state.autoSendsParked = state.autoSendsParked.filter(id => id !== w.id);
+        if (!state.autoSendsParked.length) delete state.autoSendsParked;
+      }
+    }
     // A closed or gone main agent hands the workspace to its live successor (discovery decides; see
     // successorMainAgent). Any other mismatch keeps the recorded owner.
     if (row.replacesMainAgentId && row.replacesMainAgentId === w.mainAgentId && !w.archived) {
@@ -55,6 +64,8 @@ export function applyDiscovery(state: State, discovered: DiscoveredWorkspace[], 
       for (const b of w.batches) if (b.state === "pending" && b.recipientAgentId === row.replacesMainAgentId) b.recipientAgentId = null;
     }
     if (w.mainAgentId !== row.mainAgentId || w.archived) continue;
+    // A new main agent, or a new message to the gone one, means its conversation can be tried again.
+    if (w.goneAgent && (w.goneAgent.agentId !== w.mainAgentId || (row.messageAt && row.messageAt > w.goneAgent.at))) w.goneAgent = null;
     if (row.contributorAgentIds) w.contributorAgentIds = row.contributorAgentIds;
     if (!w.enable_tracking && followsByDefault(state, row)) { w.enable_auto_sends = startsWithAutoSend(state, w); w.enable_tracking = true; }
     if (!w.inventory) {

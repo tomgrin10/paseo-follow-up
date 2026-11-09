@@ -49,11 +49,14 @@ export const setProjectTrackingRpc = defineRpc({ name: "follow.set-project-track
 /** Following (1.3.0-beta.2): the two global switches and the per-workspace exceptions, for Settings only. */
 const followSettingsSchema = z.object({
   enable_follow_every: z.boolean(), enable_auto_sends_default: z.boolean(),
-  workspaces: z.array(z.object({ id: idSchema, title: z.string(), enable_tracking: z.boolean(), enable_auto_sends: z.boolean(), optedOut: z.boolean() })),
+  /** Days without a user message before a followed workspace goes dormant (1.3.0-beta.3). */
+  activeWindowDays: z.number().int().optional(),
+  workspaces: z.array(z.object({ id: idSchema, title: z.string(), enable_tracking: z.boolean(), enable_auto_sends: z.boolean(), optedOut: z.boolean(), dormant: z.boolean().optional(), parked: z.boolean().optional() })),
 });
 export const followSettingsRpc = defineRpc({ name: "follow.follow-settings", input: z.object({}), output: followSettingsSchema });
 export const setFollowSettingsRpc = defineRpc({ name: "follow.set-follow-settings", input: z.object({
   enable_follow_every: z.boolean().optional(), enable_auto_sends_default: z.boolean().optional(),
+  activeWindowDays: z.number().int().min(1).max(60).optional(),
   workspace: z.object({ workspaceId: idSchema, follow: z.boolean().optional(), enable_auto_sends: z.boolean().optional() }).optional(),
 }), output: followSettingsSchema });
 /** External priorities for Home's Priority sort (written by the set_priorities agent tool). */
