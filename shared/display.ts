@@ -26,9 +26,10 @@ export const displayPreferences = defineSettings({
 
 export const displayRpc = settingsRpc(displayPreferences.id);
 
-/** "3 approved today · last: Bash: cd repo && git status". Nothing until the first approval. */
+/** "3 prompts approved today · latest Bash: cd repo && git status". Nothing until the first approval. */
 export function trustCountText(stats: { today: number; recent: { summary: string }[] } | undefined): string | null {
   if (!stats || (!stats.today && !stats.recent.length)) return null;
+  const count = stats.today ? `${stats.today} ${stats.today === 1 ? "prompt" : "prompts"} approved today` : "None approved today";
   const last = stats.recent[0]?.summary;
-  return `${stats.today} approved today${last ? ` · last: ${last}` : ""}`;
+  return `${count}${last ? ` · latest ${last}` : ""}`;
 }

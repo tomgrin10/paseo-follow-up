@@ -71,9 +71,9 @@ export function DisplaySections({ theme }: Pick<PluginSurfaceProps, "theme">) {
       </SettingsCard>
       {settings.values.enable_inbox && !!share.data?.briefStats && <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, lineHeight: 17, paddingHorizontal: 4 }}>{briefShareText(share.data.briefStats)}</Text>}
     </SettingsSection>
-    <SettingsSection title="Permissions" info="For agents you started in Bypass (Claude Code) or Full access (Codex). Some tool calls still stop for a yes in those modes; Follow-up gives it.">
+    <SettingsSection title="Permissions" info="Claude Code in Bypass and Codex in Full access still stop on some tool calls and wait for a yes.">
       <SettingsCard>
-        <SettingsSwitch label="Trust bypass agents" hint="Approve their tool permission prompts automatically. Questions and plan approval still come to you, and agents in any other mode still ask." value={settings.values.enable_trust_bypass} disabled={settings.saving} onValueChange={(enable_trust_bypass) => save({ enable_trust_bypass })} />
+        <SettingsSwitch label="Trust bypass agents" hint="Approves those tool prompts for you, judged by the agent's mode at the time. Questions and plan approval still come to you, and agents in other modes still ask." value={settings.values.enable_trust_bypass} disabled={settings.saving} onValueChange={(enable_trust_bypass) => save({ enable_trust_bypass })} />
       </SettingsCard>
       {settings.values.enable_trust_bypass && <TrustCount theme={theme} />}
     </SettingsSection>
