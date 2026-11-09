@@ -18,7 +18,17 @@ export const displayPreferences = defineSettings({
     // 1.4.0-beta.0: the Overseer row on Home and its per-turn digest. Off never archives an existing Overseer.
     enable_overseer: z.boolean().default(true),
     // 1.4.0-beta.0: the ranker behind Home's Priority sort (Linear, Slack, GitHub reviews, the CPO's plan).
-    enable_ranker: z.boolean().default(true) }),
+    enable_ranker: z.boolean().default(true),
+    // Trust bypass agents: a plain tool permission from an agent whose current mode is bypassPermissions (Claude) or
+    // full-access (Codex) is approved automatically. Off restores the prompt.
+    enable_trust_bypass: z.boolean().default(true) }),
 });
 
 export const displayRpc = settingsRpc(displayPreferences.id);
+
+/** "3 approved today · last: Bash: cd repo && git status". Nothing until the first approval. */
+export function trustCountText(stats: { today: number; recent: { summary: string }[] } | undefined): string | null {
+  if (!stats || (!stats.today && !stats.recent.length)) return null;
+  const last = stats.recent[0]?.summary;
+  return `${stats.today} approved today${last ? ` · last: ${last}` : ""}`;
+}
