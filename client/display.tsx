@@ -22,11 +22,14 @@ export function briefShareText(stats: { days: number; total: number; tool: numbe
   return `Last ${stats.days} days: agents stated what they need on ${stats.tool} of ${stats.total} flagged turns (${pct}%).${rest ? ` ${rest[0].toUpperCase()}${rest.slice(1)}.` : ""}`;
 }
 
-function TrustCount({ theme }: Pick<PluginSurfaceProps, "theme">) {
+function TrustCount({ theme, inCard = false }: Pick<PluginSurfaceProps, "theme"> & { inCard?: boolean }) {
   const read = useRpc(trustBypassRpc);
   const stats = useQuery({ queryKey: ["follow-through", "trust-bypass"], queryFn: () => read({}), refetchInterval: 60_000 });
   const text = trustCountText(stats.data);
-  return text ? <Text numberOfLines={1} style={{ color: theme.colors.foregroundMuted, fontSize: 12, lineHeight: 17, paddingHorizontal: 4 }}>{text}</Text> : null;
+  if (!text) return null;
+  return <View style={inCard ? { paddingHorizontal: 16, paddingVertical: 10 } : { paddingHorizontal: 4 }}>
+    <Text numberOfLines={1} style={{ color: theme.colors.foregroundMuted, fontSize: 12, lineHeight: 17 }}>{text}</Text>
+  </View>;
 }
 
 /**
@@ -53,12 +56,13 @@ export function PreferenceSwitch({ field, theme }: { field: "enable_overseer" | 
 export function PermissionsSection({ theme }: Pick<PluginSurfaceProps, "theme">) {
   const settings = useSettings(displayPreferences);
   if (settings.status !== "ready") return null;
-  return <SettingsSection title="Permissions" info="Claude Code in Bypass and Codex in Full access still stop on some tool calls and wait for a yes.">
+  // The hint stands on its own (the tooltip only adds who still asks); the count sits inside the card, under its switch.
+  return <SettingsSection title="Permissions" info="Agents in any other mode still ask, and so do questions and plan approval.">
     <SettingsCard>
-      <SettingsSwitch label="Trust bypass agents" hint="Approves those tool prompts for you, judged by the agent's mode at the time. Questions and plan approval still come to you, and agents in other modes still ask." value={settings.values.enable_trust_bypass} disabled={settings.saving}
+      <SettingsSwitch label="Trust bypass agents" hint="Claude Code in Bypass and Codex in Full access still stop on some tool calls. This approves them while the agent is in that mode. Questions and plan approval still come to you." value={settings.values.enable_trust_bypass} disabled={settings.saving}
         onValueChange={enable_trust_bypass => void settings.save({ ...settings.values, enable_trust_bypass }, settings.revision)} />
+      {settings.values.enable_trust_bypass && <TrustCount theme={theme} inCard />}
     </SettingsCard>
-    {settings.values.enable_trust_bypass && <TrustCount theme={theme} />}
     {settings.saveError && <Text accessibilityRole="alert" style={{ color: theme.colors.statusDanger }}>{settings.saveError}</Text>}
   </SettingsSection>;
 }
