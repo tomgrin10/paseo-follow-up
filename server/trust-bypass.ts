@@ -28,11 +28,23 @@ export function plainToolPermission(request: PermissionRequestShape): boolean {
   return true;
 }
 
-/** "Bash: cd repo && git status" — the tool and a short, single-line view of what it ran, for the audit log. */
+/**
+ * Secret-looking values a command line can carry, masked before it reaches the audit log or Settings: values after
+ * token/key/secret/password flags or variables, Authorization headers, credentials in URLs, and long opaque tokens.
+ */
+export function redact(text: string): string {
+  return text
+    .replace(/((?:--?|\b)[\w-]*(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|private[_-]?key|credential)[\w-]*\s*[=:\s]\s*)("[^"]*"|'[^']*'|[^\s-]\S*)/gi, "$1•••")
+    .replace(/\b(authorization:\s*(?:bearer|basic|token)?\s*)\S+/gi, "$1•••")
+    .replace(/(\/\/[^\/\s:@]+:)[^@\s\/]+@/g, "$1•••@")
+    .replace(/\b(?:sk-[\w-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|xox[abpsr]-[\w-]{10,}|AKIA[0-9A-Z]{16}|ya29\.[\w-]{20,}|eyJ[\w-]{10,}\.[\w-]{10,}\.[\w-]{10,})/g, "•••");
+}
+
+/** "Bash: cd repo && git status" — the tool and a short, single-line, redacted view of what it ran, for the audit log. */
 export function summarize(request: PermissionRequestShape, max = 160): string {
   const input = request.input ?? {};
   const detail = [input.command, input.file_path, input.path, input.url, input.pattern].find(v => typeof v === "string") as string | undefined;
-  const text = (detail ?? request.title ?? request.description ?? "").replace(/\s+/g, " ").trim();
+  const text = redact((detail ?? request.title ?? request.description ?? "").replace(/\s+/g, " ").trim());
   const line = text ? `${request.name}: ${text}` : String(request.name ?? "tool");
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }

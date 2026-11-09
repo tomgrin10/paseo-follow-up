@@ -28,7 +28,9 @@ export const displayRpc = settingsRpc(displayPreferences.id);
 
 /** "3 prompts approved today · latest Bash: cd repo && git status". Nothing until the first approval. */
 export function trustCountText(stats: { today: number; recent: { summary: string }[] } | undefined): string | null {
-  if (!stats || (!stats.today && !stats.recent.length)) return null;
+  if (!stats) return null;
+  // On but unused reads differently from loading or failed (both blank).
+  if (!stats.today && !stats.recent.length) return "None approved yet";
   const count = stats.today ? `${stats.today} ${stats.today === 1 ? "prompt" : "prompts"} approved today` : "None approved today";
   const last = stats.recent[0]?.summary;
   return `${count}${last ? ` · latest ${last}` : ""}`;
