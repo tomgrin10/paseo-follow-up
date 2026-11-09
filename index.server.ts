@@ -25,7 +25,7 @@ import { AgentActions, AGENT_TOOLS, controlWorkspace, type AgentTool } from "./s
 import { PaseoGateway, paseoHome, clientEntry, closeConnections, sessionGuardOwnsInterruption } from "./server/daemon";
 import { mcpSource } from "./server/mcp-source";
 import { excludeStack } from "./server/exclusions";
-import { applyHistory, applyDiscovery, extractHistory } from "./server/discovery";
+import { applyHistory, applyDiscovery, extractHistory, markMainWork } from "./server/discovery";
 import { lifecycleOnly, recoveryBatch } from "./shared/follow-up";
 import { Deployments } from "./server/deployments";
 import { AgentHooks } from "./server/agent-hooks";
@@ -63,6 +63,9 @@ import { OnboardingStore, ReadinessChecks, nativeAgentCount } from "./server/onb
 import { execFile } from "node:child_process";
 import { BRIEF_KIND, BRIEF_VERSION, prState, validateNeedsYou, type Brief, type NeedsYouRecord } from "./shared/brief";
 
+/** Agent calls that only the main agent makes: one of these from a successor means the handover is in use. */
+const MAIN_WORK = new Set(["follow.sync", "follow.register-pr", "follow.obligation", "follow.done", "follow.acknowledge", "follow.exclude-stack", "follow.ask-question", "follow.record-answer", "follow.withdraw-question", "follow.set-spec", "follow.needs-you"]);
+
 export default function contribute(server: PluginServerContext) {
   const displaySettings = server.registerSettings(displayPreferences);
   const questionSettings = server.registerSettings(questionPreferences);
@@ -84,7 +87,16 @@ export default function contribute(server: PluginServerContext) {
   } catch { /* Without it the hook assumes the tools are attached, as before. */ }
   // Every RPC handler, also callable in-process: native agent tools run the same handlers the stdio bridge reaches.
   const handlers = new Map<string, { input: { parseAsync(value: unknown): Promise<unknown> }; run: (input: any, context: PluginHandlerContext) => unknown }>();
-  const handle: PluginServerContext["handle"] = (contract, handler) => { handlers.set(contract.name, { input: contract.input, run: handler as never }); server.handle(contract, handler); };
+  const handle: PluginServerContext["handle"] = (contract, handler) => {
+    // Main-agent work by a successor makes its handover stick (see handBackMainAgent): noted after the call succeeds.
+    const run = MAIN_WORK.has(contract.name) ? (async (input: { agentId?: string }, context: PluginHandlerContext) => { const out = await (handler as (i: unknown, c: PluginHandlerContext) => unknown)(input, context); if (input?.agentId) await noteMainWork(input.agentId).catch(() => undefined); return out; }) as typeof handler : handler;
+    handlers.set(contract.name, { input: contract.input, run: run as never }); server.handle(contract, run);
+  };
+  const noteMainWork = async (agentId: string) => {
+    // A cheap check on the snapshot first: almost every call has no open handover, so nothing is written.
+    if (!(await store.snapshot()).workspaces.some(w => w.mainAgentId === agentId && w.handover && !w.handover.worked)) return;
+    await store.mutate(state => { markMainWork(state, agentId); });
+  };
   const store = new Store(directory, 1_000);
   const onboarding = new OnboardingStore(directory);
   store.onChanged = scopeWriter(directory);
@@ -909,7 +921,7 @@ export default function contribute(server: PluginServerContext) {
         if (!w || w.mainAgentId !== event.agent.id || !interruption) return;
         // The provider lost the conversation: every later send fails the same way, so stop sending instead of holding.
         if (event.outcome.kind === "failed" && conversationGone(event.outcome.error.message)) { w.goneAgent = { agentId: event.agent.id, at: interruption.at, reason: event.outcome.error.message }; w.completion = null; return; }
-        w.hold = interruptionHold(interruption.kind); w.interruption = interruption; w.completion = null;
+        w.hold = interruptionHold(interruption.kind); w.interruption = { ...interruption, agentId: event.agent.id }; w.completion = null;
       });
       void engine.tick();
     }),
