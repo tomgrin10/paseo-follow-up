@@ -8,6 +8,7 @@ import type { InboxRow } from "../shared/inbox";
 import type { Pr, State, Workspace } from "../shared/model";
 import { configuredReviewers, reviewerLoginSchema, noReviewers, resolveReviewers, reviewerConfig, reviewerLabel, withoutAuthor, type ReviewerEntry } from "../shared/reviewers";
 import { findWorkspace } from "./engine";
+import { setMainAgent } from "./discovery";
 import type { InboxAction } from "./inbox";
 import { priorityInputSchema, type Priority } from "../shared/priorities";
 import type { AboutView } from "../shared/about";
@@ -31,9 +32,13 @@ export const DESTRUCTIVE_TOOLS: readonly AgentTool[] = ["merge"];
 export const PLANNED_TOOLS: readonly AgentTool[] = ["add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "sign_off", "snooze", "set_finish_flags", "set_priorities"];
 
 /** The developer's control panel switches (Auto-send, Resume, Retry). The button and the agent tool share it. */
-export function controlWorkspace(state: State, input: { workspaceId: string; enable_auto_sends?: boolean; clearHold?: boolean; retryBatchId?: string }, now = Date.now()): Workspace {
+export function controlWorkspace(state: State, input: { workspaceId: string; enable_auto_sends?: boolean; clearHold?: boolean; retryBatchId?: string; mainAgentId?: string }, now = Date.now()): Workspace {
   const w = findWorkspace(state, input.workspaceId);
   if (!w.enable_tracking || w.archived) throw new Error("Activate this workspace before changing follow-up controls.");
+  if (input.mainAgentId && input.mainAgentId !== w.mainAgentId) {
+    if (!w.contributorAgentIds?.includes(input.mainAgentId)) throw new Error("That agent isn't one of this workspace's root agents. Refresh and pick another.");
+    setMainAgent(w, input.mainAgentId, "developer", now);
+  }
   if (input.enable_auto_sends !== undefined) w.enable_auto_sends = input.enable_auto_sends;
   if (input.clearHold) w.hold = null;
   if (input.retryBatchId) {
