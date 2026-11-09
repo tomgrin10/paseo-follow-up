@@ -11,6 +11,7 @@ import { followsByDefault, migrateActiveScope } from "../shared/settings";
 import { replyRecorded } from "../shared/communication";
 import { DeliveryDeferred, ConversationGone } from "./delivery";
 import { recordSnapshot } from "./deployment-anchor";
+import { pruneUnsent } from "./batch-archive";
 
 export interface Runtime {
   busy: boolean; reason: string | null; archived: boolean; backgroundBusy?: boolean;
@@ -42,6 +43,12 @@ export class Engine {
   private recoveryOperations = new Set<Promise<Workspace>>();
   private running: Promise<void> | null = null;
   private stopped = false;
+  /** Set by the resource governor: while true, background refresh (scans, observation, auto-sends) waits. */
+  paused: () => boolean = () => false;
+  /** Where pruned never-sent batches go (see pruneUnsent); the worker appends them to an archive file. */
+  archive: (workspaceId: string, batches: Batch[]) => Promise<void> = async () => {};
+  /** Background refreshes skipped while paused, for tests and the resource check. */
+  skipped = 0;
   constructor(readonly store: Store, private github: Pick<Github, "observe">, private gateway: Gateway, private now = Date.now, private settleMs = 60_000) {}
   async recover(): Promise<void> {
     await this.store.mutate(state => {
@@ -70,6 +77,7 @@ export class Engine {
     return this.running;
   }
   private async run(): Promise<void> {
+    if (this.paused()) { this.skipped++; return; }
     const saved = await this.store.snapshot();
     if (this.stopped) return;
     if (this.gateway.discover) {
@@ -86,6 +94,7 @@ export class Engine {
     for (const original of active) {
       if (this.stopped) return;
       const runtime = await this.gateway.observe(original).catch((): Runtime => ({ busy: false, reason: "Agent state unavailable; refresh will retry", archived: false }));
+      const pruned: Batch[] = [];
       await this.store.mutate(state => {
         const w = findWorkspace(state, original.id);
         w.runtimeBusy = runtime.busy; w.runtimeReason = runtime.reason;
@@ -105,6 +114,7 @@ export class Engine {
         reconcileSubmittedStacks(w);
         if (w.archived) return;
         this.reconcile(w);
+        pruned.push(...pruneUnsent(w));
         syncTaskQuestions(w, this.now());
         const unacknowledged = w.batches.find(b => b.state === "sent" && !isRecovery(b));
         if (unacknowledged && (runtime.guarded || runtime.busy || runtime.backgroundBusy || original.runtimeReason?.startsWith("Waiting for Session Guard"))) unacknowledged.activityAt = new Date(this.now()).toISOString();
@@ -114,6 +124,7 @@ export class Engine {
         }
         if (w.completion && completionBlockers(w, this.now()).some(b => !b.startsWith("Wait for active agent"))) w.completion = null;
       });
+      if (pruned.length) await this.archive(original.id, pruned).catch(() => undefined);
       for (const b of (await this.store.snapshot()).workspaces.find(w => w.id === original.id)!.batches.filter(b => isRecovery(b) && b.state === "sent")) {
         const status = await this.gateway.recoveryRuntime?.(original, b).catch(() => ({ busy: true, reason: "Recovery status unavailable" }));
         if (status?.busy) await this.store.mutate(state => {

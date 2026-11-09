@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resourcesSchema } from "./resources";
 
 /**
  * Provider session limits at a glance (1.3.0-beta.2), read from the Smart Session plugin. One meter per provider
@@ -16,6 +17,8 @@ export const usageSchema = z.object({
   available: z.boolean(),
   source: z.enum(["rpc", "file"]).nullable(),
   accounts: z.array(accountSchema),
+  /** 1.3.0-beta.4: the VM's memory and CPU for Home's meter. Absent from older workers. */
+  resources: resourcesSchema.optional(),
 });
 export type UsageWindow = z.infer<typeof windowSchema>;
 export type UsageAccount = z.infer<typeof accountSchema>;
