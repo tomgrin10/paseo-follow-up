@@ -157,7 +157,7 @@ Turn it off under Settings → **Overseer (beta)**. While it's off, search has n
 Install the beta:
 
 ```sh
-paseo plugin update follow-through --version 1.4.0-beta.2
+paseo plugin update follow-through --version 1.4.0-beta.3
 # or, for a fresh install:
 paseo plugin install npm:paseo-follow-up@beta
 ```
