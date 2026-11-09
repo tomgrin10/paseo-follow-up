@@ -1,6 +1,7 @@
 import { isWorkspaceRoot } from "./workspace-agent";
 import type { Workspace } from "../shared/model";
 import type { Agent, Daemon } from "./daemon";
+import { isLoaded } from "./agent-load";
 
 async function userMessages(client: Daemon, agentId: string): Promise<string[]> {
   const entries: { item: unknown; seqStart: number }[] = [];
@@ -23,6 +24,8 @@ export async function recoveryHandoff(client: Daemon, w: Workspace, caller: Agen
   if (!w.enable_tracking || w.archived || caller.archivedAt || caller.workspaceId !== w.id || caller.id === w.mainAgentId || !await isWorkspaceRoot(caller, async id => (await client.fetchAgent(id))?.agent)) return null;
   const candidates = w.batches.filter(b => b.recipientAgentId && b.recipientAgentId !== w.mainAgentId && b.recipientAgentId !== caller.id && b.tasks.every(t => t.kind === "inventory") && ["sending", "sent", "uncertain", "blocked"].includes(b.state) && !b.settledAt);
   if (!candidates.length) return null;
+  // The caller is the agent making this tool call, so it's loaded and reading it wakes nothing.
+  if (!isLoaded(caller)) return null;
   const initialTask = (await userMessages(client, caller.id))[0];
   if (!initialTask) return null;
   for (const b of candidates) {
@@ -30,6 +33,9 @@ export async function recoveryHandoff(client: Daemon, w: Workspace, caller: Agen
     const prior = (await client.fetchAgent(b.recipientAgentId!))?.agent;
     if (!prior?.archivedAt || prior.workspaceId !== w.id || Date.parse(caller.createdAt) < Date.parse(b.sentAt ?? b.createdAt)) continue;
     // An archived recipient plus the exact initial user task proves a handoff, not a historical mention.
+    // Reading the prior's timeline would load it (even archived), so an unloaded prior is proven by the
+    // caller's first message carrying this batch's unguessable id, sent after the batch went out.
+    if (!isLoaded(prior)) return { batchId: b.id, fromAgentId: prior.id };
     if ((await userMessages(client, prior.id)).includes(initialTask)) return { batchId: b.id, fromAgentId: prior.id };
   }
   return null;

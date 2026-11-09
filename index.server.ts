@@ -33,7 +33,9 @@ import { daemonDirectory, guardPath } from "./server/inbox-directory";
 import { fileSources } from "./server/inbox-classifier";
 import { onBeforeSend } from "./server/daemon";
 import { copyFile, readFile, rename } from "node:fs/promises";
-import { autoSendsByDefault, FOLLOW_EVERY_MIGRATION, followsByDefault, followsEvery, migrateFollowEvery, optedOut } from "./shared/settings";
+import { HistoryCache } from "./server/history-cache";
+import { conversationGone, DEFAULT_ACTIVE_WINDOW_DAYS } from "./server/agent-load";
+import { ACTIVE_SCOPE_MIGRATION, autoSendsByDefault, FOLLOW_EVERY_MIGRATION, followsByDefault, followsEvery, migrateFollowEvery, optedOut } from "./shared/settings";
 import { BRIEF_KIND, BRIEF_VERSION, prState, validateNeedsYou, type Brief, type NeedsYouRecord } from "./shared/brief";
 
 export default function contribute(server: PluginServerContext) {
@@ -45,7 +47,7 @@ export default function contribute(server: PluginServerContext) {
   const bridge = join(directory, "mcp.mjs");
   const store = new Store(directory);
   const agentHooks = new AgentHooks(directory, clientEntry());
-  const gateway = new PaseoGateway();
+  const gateway = new PaseoGateway(undefined, undefined, undefined, HistoryCache.at(directory));
   const graphite = new Graphite();
   const github = new Github(undefined, graphite, new Deployments());
   const browser = new BrowserBridge();
@@ -141,12 +143,18 @@ export default function contribute(server: PluginServerContext) {
     await copyFile(join(directory, "state.json"), join(directory, "state.before-follow-every.json.bak"), 1).catch(error => { if (!["ENOENT", "EEXIST"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error; });
     await store.mutate(state => { migrateFollowEvery(state); });
   };
+  /** 1.3.0-beta.3: back up once before the active-scope migration (applied by the engine after its first discovery). */
+  const backupActiveScope = async () => {
+    if ((await store.snapshot()).migrations?.includes(ACTIVE_SCOPE_MIGRATION)) return;
+    await copyFile(join(directory, "state.json"), join(directory, "state.before-active-scope.json.bak"), 1).catch(error => { if (!["ENOENT", "EEXIST"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error; });
+  };
   const ready = (async () => {
     unlock = await store.lock();
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await writeFile(bridge, mcpSource, { mode: 0o600 });
     await engine.recover();
     await migrateTracking();
+    await backupActiveScope();
     hooksStarted = true;
     await agentHooks.start().catch(() => { hookError = "Automatic sidebar instructions could not be registered for every provider. Check Claude/Codex hook settings; following still works."; });
     hookTimer = setInterval(() => void agentHooks.heartbeat().catch(() => {}), 30_000);
@@ -202,20 +210,25 @@ export default function contribute(server: PluginServerContext) {
   });
   const followSettings = async () => {
     const state = await store.snapshot();
-    return { enable_follow_every: followsEvery(state), enable_auto_sends_default: autoSendsByDefault(state),
-      workspaces: state.workspaces.filter(w => !w.archived).map(w => ({ id: w.id, title: w.title, enable_tracking: w.enable_tracking, enable_auto_sends: w.enable_auto_sends, optedOut: optedOut(state, w.id) }))
+    return { enable_follow_every: followsEvery(state), enable_auto_sends_default: autoSendsByDefault(state), activeWindowDays: state.activeWindowDays ?? DEFAULT_ACTIVE_WINDOW_DAYS,
+      workspaces: state.workspaces.filter(w => !w.archived).map(w => ({ id: w.id, title: w.title, enable_tracking: w.enable_tracking, enable_auto_sends: w.enable_auto_sends, optedOut: optedOut(state, w.id), dormant: !!w.dormant, parked: !!state.autoSendsParked?.includes(w.id) }))
         .sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id)) };
   };
   server.handle(rpc.followSettingsRpc, async () => { await requireReady(); return followSettings(); });
-  server.handle(rpc.setFollowSettingsRpc, async ({ enable_follow_every, enable_auto_sends_default, workspace }) => {
+  server.handle(rpc.setFollowSettingsRpc, async ({ enable_follow_every, enable_auto_sends_default, activeWindowDays, workspace }) => {
     await requireReady();
     await store.mutate(state => {
+      if (activeWindowDays !== undefined) state.activeWindowDays = activeWindowDays;
       if (enable_follow_every !== undefined) state.enable_follow_every = enable_follow_every;
       if (enable_auto_sends_default !== undefined) state.enable_auto_sends_default = enable_auto_sends_default;
       if (!workspace) return;
       const w = state.workspaces.find(w => w.id === workspace.workspaceId && !w.archived);
       if (!w) throw new Error("This workspace is no longer available. Refresh settings.");
-      if (workspace.enable_auto_sends !== undefined) w.enable_auto_sends = workspace.enable_auto_sends;
+      if (workspace.enable_auto_sends !== undefined) {
+        w.enable_auto_sends = workspace.enable_auto_sends;
+        // An explicit choice replaces the migration's parking.
+        if (state.autoSendsParked) { state.autoSendsParked = state.autoSendsParked.filter(id => id !== w.id); if (!state.autoSendsParked.length) delete state.autoSendsParked; }
+      }
       // Opting out stops following (discovery skips it); following again ends the opt-out below.
       if (workspace.follow === false) { state.workspaceOptOuts = [...new Set([...state.workspaceOptOuts ?? [], w.id])]; w.enable_tracking = false; }
       if (workspace.follow === true) state.workspaceOptOuts = (state.workspaceOptOuts ?? []).filter(id => id !== w.id);
@@ -504,7 +517,18 @@ export default function contribute(server: PluginServerContext) {
     server.on("workspace.archived", async event => inboxHook(() => inbox.workspaceArchived(event.workspace.id))),
     server.on("agent.turn_started", async event => {
       await ready;
-      if (!stopped && !loadError) await store.mutate(state => { const w = state.workspaces.find(w => w.enable_tracking && (w.mainAgentId === event.agent.id || w.contributorAgentIds?.includes(event.agent.id))); if (w) w.completion = null; });
+      if (stopped || loadError) return;
+      // A turn in a dormant workspace makes it active again; discovery reads the now-loaded agent on the next poll.
+      const saved = await store.snapshot();
+      const owned = saved.workspaces.find(w => w.enable_tracking && (w.mainAgentId === event.agent.id || w.contributorAgentIds?.includes(event.agent.id)));
+      const waking = saved.workspaces.find(w => w.dormant && w.id === event.agent.workspaceId);
+      if (!owned && !waking) return;
+      if (owned) gateway.markDirty(event.agent.id);
+      await store.mutate(state => {
+        const w = owned && state.workspaces.find(w => w.id === owned.id); if (w) w.completion = null;
+        const d = waking && state.workspaces.find(w => w.id === waking.id); if (d) delete d.dormant;
+      });
+      if (waking) void engine.tick();
     }),
     server.before("agent.session_open", async ({ request }, { paseo }) => {
       await ready;
@@ -564,7 +588,10 @@ export default function contribute(server: PluginServerContext) {
       const guarded = interruption && await sessionGuardOwnsInterruption(event.agent.id, interruption).catch(() => false);
       if (["canceled", "failed"].includes(event.outcome.kind) && !guarded) await store.mutate(state => {
         const w = state.workspaces.find(w => w.enable_tracking && (w.mainAgentId === event.agent.id || w.contributorAgentIds?.includes(event.agent.id)));
-        if (w && w.mainAgentId === event.agent.id && interruption) { w.hold = interruptionHold(interruption.kind); w.interruption = interruption; w.completion = null; }
+        if (!w || w.mainAgentId !== event.agent.id || !interruption) return;
+        // The provider lost the conversation: every later send fails the same way, so stop sending instead of holding.
+        if (event.outcome.kind === "failed" && conversationGone(event.outcome.error.message)) { w.goneAgent = { agentId: event.agent.id, at: interruption.at, reason: event.outcome.error.message }; w.completion = null; return; }
+        w.hold = interruptionHold(interruption.kind); w.interruption = interruption; w.completion = null;
       });
       void engine.tick();
     }),

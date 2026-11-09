@@ -8,6 +8,7 @@ import { needsYou } from "../shared/attention";
 import { briefPane, followUpLog, lastWorkdayEnd, nextNeeds, paneButtons, sinceLabel, tailSteps, type HomeGroupId, type HomeModel, type LogLine, type TailStep, type Workstream } from "../shared/home";
 import { age, snoozeUntil, type InboxRow } from "../shared/inbox";
 import { errorText } from "../shared/errors";
+import { isLoaded, type LoadSignals } from "../shared/agent-load";
 import { BriefCard, type BriefDeps } from "./brief";
 import { Button, IconButton, text, type Theme } from "./kit";
 import { NeedsYouList } from "./needs-you";
@@ -127,21 +128,36 @@ function useAgentLive(agentId: string | null) {
   return { handle, permissions: (handle?.pendingPermissions ?? []) as unknown as Permission[], status: handle?.status ?? null };
 }
 
-/** "Recent · last N steps", read only for the selected agent, refreshed when its status or flag changes. */
+/** The last steps Home read per agent this session, shown while the agent is unloaded. */
+const seenSteps = new Map<string, TailStep[]>();
+/**
+ * "Recent · last N steps", read only for the selected agent, refreshed when its status or flag changes.
+ * Reading a timeline loads an unloaded agent for an hour (see server/agent-load.ts), so an unloaded agent
+ * shows the steps Home saw last and waits for an explicit "Load recent steps".
+ */
 function useTail(handle: ReturnType<typeof useAgentLive>["handle"], key: string) {
   const [steps, setSteps] = useState<TailStep[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [wake, setWake] = useState(0);
+  const [asleep, setAsleep] = useState(false);
+  useEffect(() => { setWake(0); }, [handle]);
   useEffect(() => {
     if (!handle) { setSteps([]); return; }
+    const current = handle.current();
+    if (!current) return;
+    const loaded = isLoaded(current as unknown as LoadSignals);
+    setAsleep(!loaded);
+    if (!loaded && !wake) { setSteps(seenSteps.get(handle.id) ?? []); setError(null); return; }
     let live = true;
     handle.timeline.refetch({ direction: "tail", limit: 40 }).then(page => {
       if (!live) return;
       const entries = [...(page as unknown as { entries: { seqStart: number; item: Parameters<typeof tailSteps>[0][number] }[] }).entries].sort((a, b) => a.seqStart - b.seqStart);
-      setSteps(tailSteps(entries.map(e => e.item), 6)); setError(null);
+      const next = tailSteps(entries.map(e => e.item), 6);
+      seenSteps.set(handle.id, next); setSteps(next); setError(null);
     }).catch(e => { if (live) { setError(errorText(e)); setSteps(s => s ?? []); } });
     return () => { live = false; };
-  }, [handle, key]);
-  return { steps, error };
+  }, [handle, key, wake]);
+  return { steps, error, asleep: asleep && !wake, load: () => setWake(n => n + 1) };
 }
 
 function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onBack }: {
@@ -216,8 +232,12 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
       {s.agentId && <View style={{ gap: 8 }}>
         <Text style={[t.small, { fontWeight: "600", letterSpacing: 0.5, textTransform: "uppercase" }]}>Recent · last {tail.steps?.length || 6} steps</Text>
         {tail.steps === null ? <Spinner color={c.foregroundMuted} size={12} label="Loading the agent's steps" />
-          : tail.steps.length === 0 ? <Text style={t.meta}>{tail.error ? `Couldn't load the agent's steps: ${tail.error}` : "No steps yet."}</Text>
+          : tail.steps.length === 0 ? <Text style={t.meta}>{tail.error ? `Couldn't load the agent's steps: ${tail.error}` : tail.asleep ? "This agent is asleep, so its steps aren't loaded." : "No steps yet."}</Text>
           : tail.steps.map((step, i) => <Step key={i} step={step} c={c} last={i === tail.steps!.length - 1} />)}
+        {tail.asleep && <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+          <Button theme={theme} compact={compact} kind="secondary" icon="RefreshCw" title="Load recent steps" accessibilityHint="Wakes the agent to read its steps. It stays loaded for about an hour." onPress={tail.load} />
+          <Text style={[t.small, { flex: 1, minWidth: 160 }]}>Wakes the agent, which keeps it in memory for about an hour.</Text>
+        </View>}
         <Text style={t.small}>A preview, not the whole session. Open full for the chat.</Text>
       </View>}
     </ScrollView>

@@ -78,6 +78,10 @@ export const workspaceSchema = z.object({
     candidates: z.array(idSchema), historyComplete: z.boolean(), historyError: z.string().nullable(),
     scannedMessageAt: z.string().nullable(),
   }).nullable().default(null),
+  /** 1.3.0-beta.3: outside the active scope (no loaded agent, no recent message, no open PR). Absent means active. */
+  dormant: z.boolean().optional(),
+  /** The main agent's provider conversation no longer exists; Follow-up stops sending to it. */
+  goneAgent: z.object({ agentId: idSchema, at: z.string(), reason: z.string() }).nullable().optional(),
 });
 export const stateSchema = z.object({
   version: z.literal(1), workspaces: z.array(workspaceSchema),
@@ -91,6 +95,10 @@ export const stateSchema = z.object({
   workspaceOptOuts: z.array(idSchema).optional(),
   /** One-time migrations already applied, so they never run twice. */
   migrations: z.array(z.string()).optional(),
+  /** Days without a user message before a followed workspace goes dormant. Absent means 3. */
+  activeWindowDays: z.number().int().min(1).max(60).optional(),
+  /** Workspaces whose auto-send the active-scope migration turned off; it turns back on when they become active. */
+  autoSendsParked: z.array(idSchema).optional(),
 });
 export type Snapshot = z.infer<typeof snapshotSchema>;
 export type Deployment = z.infer<typeof deploymentSchema>;
