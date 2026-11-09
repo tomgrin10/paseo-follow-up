@@ -89,7 +89,21 @@ async function briefEnabled() {
     return brief?.enable_inbox === true;
   } catch { return false; }
 }
-const schemas = list => list.map(([name, description, , properties, required]) => ({ name, description, inputSchema: { type: "object", properties, required, additionalProperties: false }, annotations: { readOnlyHint: readOnlyTools.has(name), destructiveHint: destructiveTools.has(name) } }));
+/**
+ * Merge and merge-when-ready say how they run. "github": every known repository ships plain GitHub, so Graphite is
+ * never named; "mixed": either, per list_prs prWorkflow; anything else keeps the Graphite wording it always had.
+ */
+function describeAction(name, description, workflows) {
+  if (workflows !== "github" && workflows !== "mixed") return description;
+  const how = workflows === "github"
+    ? { merge: "through GitHub (gh pr merge, with the repository's merge method)", on: "Turn on GitHub auto-merge", off: "Turn off GitHub auto-merge" }
+    : { merge: "the way its repository ships (Graphite, or GitHub's gh pr merge; list_prs shows prWorkflow)", on: "Turn on merge-when-ready (Graphite) or auto-merge (GitHub)", off: "Turn off merge-when-ready (Graphite) or auto-merge (GitHub)" };
+  if (name === "merge") return description.replace("through Graphite", how.merge);
+  if (name === "enable_merge_when_ready") return description.replace("Turn on Graphite merge-when-ready", how.on);
+  if (name === "disable_merge_when_ready") return description.replace("Turn off Graphite merge-when-ready", how.off);
+  return description;
+}
+const schemas = (list, workflows = null) => list.map(([name, description, , properties, required]) => ({ name, description: describeAction(name, description, workflows), inputSchema: { type: "object", properties, required, additionalProperties: false }, annotations: { readOnlyHint: readOnlyTools.has(name), destructiveHint: destructiveTools.has(name) } }));
 /** Action tools: a session Paseo launched as a root agent (FOLLOW_THROUGH_ROOT) while Follow-up runs (fresh hook lease). */
 async function actionsEnabled() {
   if (!process.env.PASEO_AGENT_ID || process.env.FOLLOW_THROUGH_ROOT !== "1" || process.env.FOLLOW_THROUGH_RECOVERY === "1") return false;
@@ -113,7 +127,7 @@ async function scopeOf(directory, agentId) {
   try {
     const path = join(directory, "scopes.json");
     const { mtimeMs } = await stat(path);
-    if (scopeCache?.mtimeMs !== mtimeMs) scopeCache = { mtimeMs, agents: JSON.parse(await readFile(path, "utf8")).agents ?? {} };
+    if (scopeCache?.mtimeMs !== mtimeMs) { const file = JSON.parse(await readFile(path, "utf8")); scopeCache = { mtimeMs, agents: file.agents ?? {}, workflows: file.workflows ?? null }; }
     return scopeCache.agents[agentId]?.role ?? null;
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
@@ -127,6 +141,10 @@ async function scopeOf(directory, agentId) {
     return null;
   }
 }
+/** This agent's PR workflow from scopes.json (undefined: an older worker, which meant Graphite with /fix-pr). */
+const workflowOf = agentId => scopeCache ? scopeCache.agents[agentId]?.workflow : undefined;
+/** Whether the repositories Follow-up knows ship through Graphite, GitHub or both ("mixed"); null: unknown, as before. */
+const workflowsOf = () => scopeCache?.workflows ?? null;
 async function scope(resolveRecovery = false) {
   const agentId = process.env.PASEO_AGENT_ID;
   if (!agentId) return null;
@@ -170,7 +188,7 @@ function currentWork(w) {
     spec: w.spec?.url ? { url: w.spec.url, title: w.spec.title, source: w.spec.source } : null,
     recentAnswers: (w.questions ?? []).filter(q => q.answer).slice(-5).map(q => ({ id: q.id, title: q.title, choice: q.answer.choice, words: q.answer.words, delivery: q.answer.delivery.state })),
     batches: w.batches.filter(b => !["completed", "cancelled"].includes(b.state)).map(b => ({ id: b.id, state: b.state, tasks: b.tasks, result: b.result, recipientAgentId: b.recipientAgentId, contextPath: b.contextPath })),
-    excludedStacks: w.excludedStacks.map(s => ({ name: s.name, reason: s.reason, prs: s.prs.map(p => p.key) })), detail: "summary" };
+    excludedStacks: w.excludedStacks.map(s => ({ name: s.name, reason: s.reason, prs: s.prs.map(p => p.key) })), ...(w.prWorkflow ? { prWorkflow: w.prWorkflow } : {}), detail: "summary" };
 }
 function compact(tool, input, result) {
   if (actionNames.has(tool)) return result;
@@ -202,7 +220,23 @@ async function loadClient() {
   for (const resolve of candidates) try { return await import(resolve()); } catch {}
   throw new Error("Cannot load the installed Paseo client. Reload Follow-through to refresh its runtime connection.");
 }
-const batchInstructions = "Follow-through batches contain a header with the batchId and ordered tasks. Read workspace_status and refresh live conditions; skip resolved tasks. Process PRs bottom to top, one fully before the next, using the repository's /fix-pr and safe reparent workflow. Validate feedback, verify changes, submit with Graphite --publish, reply/resolve addressed threads and preserve uncommitted work. Post-deploy tasks require verified serving revisions and existing production permissions. Stakeholder update requests are follow-through tasks: retain the original thread, recipient and developer authorization in communication. Use current evidence, distinguish fixed/deployed/verified, and read existing replies before posting. Record the sent replyUrl; a draft or uncertain send stays blocked and must be checked before retrying. Auto authorizes agent delivery only. Acknowledge the header's batchId with acknowledge_batch before finishing (completed with the result, or blocked with the reason), before declare_done for completion batches. Declare Done only after the whole goal and post-merge work are verified. Leave merging and archiving to the developer.";
+const batchInstructionsMain = "Follow-through batches contain a header with the batchId and ordered tasks. Read workspace_status and refresh live conditions; skip resolved tasks. Process PRs bottom to top, one fully before the next, using the repository's /fix-pr and safe reparent workflow. Validate feedback, verify changes, submit with Graphite --publish, reply/resolve addressed threads and preserve uncommitted work. Post-deploy tasks require verified serving revisions and existing production permissions. Stakeholder update requests are follow-through tasks: retain the original thread, recipient and developer authorization in communication. Use current evidence, distinguish fixed/deployed/verified, and read existing replies before posting. Record the sent replyUrl; a draft or uncertain send stays blocked and must be checked before retrying. Auto authorizes agent delivery only. Acknowledge the header's batchId with acknowledge_batch before finishing (completed with the result, or blocked with the reason), before declare_done for completion batches. Declare Done only after the whole goal and post-merge work are verified. Leave merging and archiving to the developer.";
+/**
+ * The batch rules for this workspace's PR workflow. Graphite with /fix-pr (and any agent from before workflows
+ * existed) gets the original text unchanged; plain GitHub never mentions Graphite, gt or a review command it doesn't have.
+ */
+function batchInstructions(workflow) {
+  const mode = workflow?.mode ?? "graphite";
+  const fix = workflow === undefined || workflow === null ? "/fix-pr" : workflow.reviewFix ?? null;
+  if (mode === "graphite" && fix === "/fix-pr") return batchInstructionsMain;
+  const fixing = fix ? `using the repository's ${fix} workflow for review comments` : "reading each PR's unresolved review threads with gh";
+  const restack = mode === "graphite" ? "the repository's safe reparent workflow" : "base branches kept in a chain (restack with git rebase --update-refs, push with --force-with-lease, and after a parent merges retarget its child with gh pr edit --base if GitHub didn't)";
+  const submit = mode === "graphite" ? "submit with Graphite --publish" : "push the branch (gh pr create for a new PR, gh pr ready when it leaves draft)";
+  const reply = fix ? "reply/resolve addressed threads" : "reply to each addressed thread and resolve it";
+  return batchInstructionsMain
+    .replace("using the repository's /fix-pr and safe reparent workflow.", `${fixing}, with ${restack}.`)
+    .replace("submit with Graphite --publish, reply/resolve addressed threads", `${submit}, ${reply}`);
+}
 
 async function call(method, input) {
   const agentId = process.env.PASEO_AGENT_ID;
@@ -221,7 +255,7 @@ async function call(method, input) {
 
 // The worker imports this file for the same tool tables, validation and receipts (1.4.0-beta.2: Follow-up's tools
 // served natively through Paseo's own MCP). Only a direct run is the CLI / stdio bridge.
-export { tools, actionTools, overseerTools, toolList, schemas, validate, compact, callInput, needsYouInstruction, actionInstruction, overseerInstruction };
+export { tools, actionTools, overseerTools, toolList, schemas, validate, compact, callInput, needsYouInstruction, actionInstruction, overseerInstruction, batchInstructions, describeAction };
 function isMain() {
   try { return !!process.argv[1] && !!import.meta.url && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href; } catch { return false; }
 }
@@ -260,12 +294,13 @@ if (command === "list" || command === "--help" || command === "help") {
         const brief = await briefEnabled();
         const acting = await actionsEnabled();
         const overseeing = await overseerEnabled();
+        const workflow = workflowOf(process.env.PASEO_AGENT_ID);
         const available = [...(role ? toolList(role === "recovery", role === "contributor", brief, false, acting) : toolList(false, false, brief, true, acting)), ...(overseeing ? overseerTools : [])];
         if (request.method === "initialize") {
           initialized = true; lastScope = `${role}:${brief}:${acting}:${overseeing}`;
-          result = { protocolVersion: request.params?.protocolVersion ?? "2024-11-05", capabilities: { tools: { listChanged: true } }, serverInfo: { name: "paseo-follow-through", version: "0.3.5" }, instructions: (role ? (role === "contributor" ? "Register PRs this session submits, including from secondary git worktrees. Read workspace_status and call sync_workspace before finishing. Goal, task, scope and completion changes remain with the designated main agent." : role === "recovery" ? "Recover tracking metadata from evidence, acknowledge your assigned batch, and leave completion to the main agent." : "Keep workspace follow-through updated after PR submission and scope changes. Read workspace_status after compaction. Track all post-merge work. When a decision needs the developer, ask it with ask_question (lettered options and a recommendation) and follow the question mode in its reply. If you keep a spec artifact for this workspace, register its link once with set_spec. " + batchInstructions) + " Perform bookkeeping silently: no sidebar-update announcements, plugin-status commentary or final sidebar recap. Put receipts and summaries in tools. Report actual work outcomes or decisions/blockers; discuss sidebar status only when explicitly asked." : brief ? "" : "Follow-through tools are available to tracked workspace root agents and active recovery agents; contributor sessions receive PR registration and status tools.") + (brief && role !== "contributor" && role !== "recovery" ? (role ? " " : "") + needsYouInstruction : "") + (acting && role !== "contributor" && role !== "recovery" ? " " + actionInstruction : "") + (overseeing ? " " + overseerInstruction : "") };
+          result = { protocolVersion: request.params?.protocolVersion ?? "2024-11-05", capabilities: { tools: { listChanged: true } }, serverInfo: { name: "paseo-follow-through", version: "0.3.5" }, instructions: (role ? (role === "contributor" ? "Register PRs this session submits, including from secondary git worktrees. Read workspace_status and call sync_workspace before finishing. Goal, task, scope and completion changes remain with the designated main agent." : role === "recovery" ? "Recover tracking metadata from evidence, acknowledge your assigned batch, and leave completion to the main agent." : "Keep workspace follow-through updated after PR submission and scope changes. Read workspace_status after compaction. Track all post-merge work. When a decision needs the developer, ask it with ask_question (lettered options and a recommendation) and follow the question mode in its reply. If you keep a spec artifact for this workspace, register its link once with set_spec. " + batchInstructions(workflow)) + " Perform bookkeeping silently: no sidebar-update announcements, plugin-status commentary or final sidebar recap. Put receipts and summaries in tools. Report actual work outcomes or decisions/blockers; discuss sidebar status only when explicitly asked." : brief ? "" : "Follow-through tools are available to tracked workspace root agents and active recovery agents; contributor sessions receive PR registration and status tools.") + (brief && role !== "contributor" && role !== "recovery" ? (role ? " " : "") + needsYouInstruction : "") + (acting && role !== "contributor" && role !== "recovery" ? " " + actionInstruction : "") + (overseeing ? " " + overseerInstruction : "") };
         } else if (request.method === "ping") result = {};
-        else if (request.method === "tools/list") result = { tools: schemas(available) };
+        else if (request.method === "tools/list") result = { tools: schemas(available, workflowsOf()) };
         else if (request.method === "tools/call") {
           const tool = available.find(t => t[0] === request.params?.name);
           try {

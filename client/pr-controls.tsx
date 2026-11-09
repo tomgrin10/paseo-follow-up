@@ -4,7 +4,8 @@ import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirmPrActionRpc, preparePrActionRpc, prControlStatusRpc, requestReviewersRpc } from "../shared/contracts";
-import { mergeBlockers, prActionBlocks, type ActionPlan, type PrActionKind } from "../shared/pr-actions";
+import { isGithubFlow, mergeBlockers, prActionBlocks, type ActionPlan, type PrActionKind } from "../shared/pr-actions";
+import { MERGE_METHOD_LABELS } from "../shared/pr-workflow";
 import { mergeQueued, mergeReady } from "../shared/attention";
 import type { Pr, Workspace } from "../shared/model";
 import { Button, Switch, errorText, text, type Theme } from "./kit";
@@ -13,13 +14,16 @@ import { ReviewerPicker, reviewerSettingsKey, useReviewerSettings, willAsk } fro
 
 /**
  * Merge, merge-when-ready and reviewer requests for one PR. Every write needs a click; Merge always
- * prepares a fresh plan and asks again before anything reaches Graphite.
+ * prepares a fresh plan and asks again before anything reaches Graphite or GitHub. In GitHub mode When ready is
+ * GitHub's auto-merge, read with the PR, so it needs no browser companion; it's hidden when the repository disallows it.
  */
-export function PrControls({ pr, workspace, theme, compact, browserReady, intent }: { browserReady: boolean; pr: Pr; workspace: Workspace; theme: Theme; compact: boolean; intent?: "merge" | "reviewers" | null }) {
+export function PrControls({ pr, workspace, theme, compact, browserReady: companionReady, intent }: { browserReady: boolean; pr: Pr; workspace: Workspace; theme: Theme; compact: boolean; intent?: "merge" | "reviewers" | null }) {
   const read = useRpc(prControlStatusRpc); const prepare = useRpc(preparePrActionRpc); const confirm = useRpc(confirmPrActionRpc); const cache = useQueryClient();
   const requestReviewers = useRpc(requestReviewersRpc);
   const toast = useToast();
   const c = theme.colors; const t = text(c);
+  const github = isGithubFlow(pr.snapshot);
+  const browserReady = github ? !!pr.snapshot?.repoMerge?.autoMerge : companionReady;
   const [plan, setPlan] = useState<ActionPlan | null>(null); const [notice, setNotice] = useState<string | null>(null);
   const statusKey = ["follow-through", "pr-controls", workspace.id, pr.key, pr.snapshot?.head];
   const status = useQuery({ queryKey: statusKey, queryFn: () => read({ workspaceId: workspace.id, prKey: pr.key }), refetchInterval: 10_000, enabled: browserReady });
@@ -71,14 +75,14 @@ export function PrControls({ pr, workspace, theme, compact, browserReady, intent
       onCancel={() => setPicking(false)} onRequest={(picked, remember) => reviewRequest.mutate({ picked, remember })} />}
     {!plan && <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
       {(canMerge || queued || recentlySubmitted || busy) ? <Button title={busy ? checking.isPending ? "Checking…" : "Submitting…" : queued ? "Queued to merge" : recentlySubmitted ? "Submitted" : `Merge #${pr.number}`} icon={queued ? "Clock" : "GitMerge"} theme={theme} compact={compact} kind={canMerge ? "primary" : "secondary"} loading={busy} disabled={disabled || !canMerge} onPress={() => begin("merge")} />
-        : <Text style={[t.meta, { flex: 1 }]}>{waitingFor.length ? `Merge opens when it clears: ${waitingFor.join(", ").toLowerCase()}.` : "Waiting for Graphite to report it ready to merge."}</Text>}
-      {browserReady && <Switch theme={theme} compact={compact} label={`When ready${known ? "" : " · unknown"}`} accessibilityLabel={`Merge when ready for ${pr.repo} pull request ${pr.number}`} value={known ? !!enabled : null} disabled={disabled} onChange={() => begin(enabled ? "disable_mwr" : "enable_mwr")} />}
+        : <Text style={[t.meta, { flex: 1 }]}>{waitingFor.length ? `Merge opens when it clears: ${waitingFor.join(", ").toLowerCase()}.` : github ? "Waiting for GitHub to report it mergeable." : "Waiting for Graphite to report it ready to merge."}</Text>}
+      {browserReady && <Switch theme={theme} compact={compact} label={`${github ? "Auto-merge" : "When ready"}${known ? "" : " · unknown"}`} accessibilityLabel={`${github ? "Auto-merge" : "Merge when ready"} for ${pr.repo} pull request ${pr.number}`} value={known ? !!enabled : null} disabled={disabled} onChange={() => begin(enabled ? "disable_mwr" : "enable_mwr")} />}
     </View>}
     {error && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusDanger }]}>{error}</Text>}
     {notice && <Text accessibilityLiveRegion="polite" style={t.meta}>{notice}</Text>}
     {plan && (plan.kind === "merge" || browserReady) && <View accessibilityRole="summary" style={{ gap: 8 }}>
       <Text accessibilityRole="header" style={[t.label, { fontSize: 14, lineHeight: 20 }]}>{plan.kind === "merge" ? plan.prs.length > 1 ? "Merge the PRs underneath too?" : "Merge this PR?" : `${plan.kind === "enable_mwr" ? "Enable" : "Disable"} for downstack too?`}</Text>
-      <Text style={t.meta}>{plan.kind === "merge" ? plan.prs.length > 1 ? `#${pr.number} depends on ${plan.prs.length - 1} unmerged PR${plan.prs.length === 2 ? "" : "s"}. Merge these ${plan.prs.length} PRs in order:` : "Graphite will merge using this repository’s settings and required protections." : `Change merge when ready for #${pr.number} only, or for all ${plan.prs.length} listed PRs.`}</Text>
+      <Text style={t.meta}>{plan.kind === "merge" ? plan.prs.length > 1 ? `#${pr.number} depends on ${plan.prs.length - 1} unmerged PR${plan.prs.length === 2 ? "" : "s"}. Merge these ${plan.prs.length} PRs in order:` : plan.via === "github" ? plan.mergeQueue ? "GitHub adds it to this repository’s merge queue, which merges it once its checks pass." : `GitHub will ${MERGE_METHOD_LABELS[plan.method ?? "squash"].toLowerCase()}, with this repository’s required protections.` : "Graphite will merge using this repository’s settings and required protections." : `Change ${plan.via === "github" ? "auto-merge" : "merge when ready"} for #${pr.number} only, or for all ${plan.prs.length} listed PRs.`}</Text>
       {plan.prs.map((p, i) => <View key={p.key} style={{ flexDirection: "row", gap: 8 }}>
         <Text style={[t.meta, { width: 16, textAlign: "right", fontVariant: ["tabular-nums"] }]}>{i + 1}.</Text>
         <View style={{ flex: 1, gap: 2 }}>

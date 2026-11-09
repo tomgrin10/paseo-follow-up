@@ -8,7 +8,12 @@ import { communicationReady } from "../shared/communication";
 import { taskSchedule } from "../shared/task-trigger";
 
 function fingerprint(value: unknown): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
-export function tasksFor(w: Workspace, now = Date.now()): Task[] {
+/**
+ * `reviewFix`: the repository's review-fix command ("/fix-pr"), or null for Follow-up's built-in steps. Undefined keeps
+ * the original "/fix-pr" wording. `github`: the workspace ships plain GitHub, so a merged parent means retargeting.
+ */
+export type TaskWording = { reviewFix?: (repo: string) => string | null; github?: (repo: string) => boolean };
+export function tasksFor(w: Workspace, now = Date.now(), wording: TaskWording = {}): Task[] {
   const tasks: Task[] = [];
   const add = (kind: Task["kind"], target: string, title: string, value: unknown) => tasks.push({ key: `${kind}:${target}`, kind, target, title, fingerprint: fingerprint(value) });
   for (const pr of w.prs) {
@@ -17,11 +22,12 @@ export function tasksFor(w: Workspace, now = Date.now()): Task[] {
     if (s.conflict) add("conflict", pr.key, `Resolve merge conflicts on ${pr.repo}#${pr.number}`, [s.head, s.base, "conflict"]);
     if (s.threads.length || s.reviewDecision === "CHANGES_REQUESTED") {
       const reason = s.threads.length ? `${s.threads.length} open thread${s.threads.length === 1 ? "" : "s"}` : "changes requested";
-      add("review", pr.key, `Use /fix-pr for ${pr.repo}#${pr.number} (${reason})`, [s.head, s.reviewDecision, [...s.threads].sort((a, b) => a.id.localeCompare(b.id))]);
+      const fix = wording.reviewFix ? wording.reviewFix(pr.repo) : "/fix-pr";
+      add("review", pr.key, fix ? `Use ${fix} for ${pr.repo}#${pr.number} (${reason})` : `Address review comments on ${pr.repo}#${pr.number} (${reason}): read the unresolved threads, fix, push, then reply and resolve`, [s.head, s.reviewDecision, [...s.threads].sort((a, b) => a.id.localeCompare(b.id))]);
     }
     if (s.failedChecks.length) add("checks", pr.key, `Fix required checks on ${pr.repo}#${pr.number}: ${s.failedChecks.join(", ")}`, [s.head, s.failedChecks.slice().sort()]);
     const parent = w.prs.find(p => p.key === pr.parent);
-    if (parent?.snapshot?.state === "MERGED") add("restack", pr.key, `Reconcile stack parent after ${parent.repo}#${parent.number} merged`, [parent.key, parent.snapshot.head]);
+    if (parent?.snapshot?.state === "MERGED") add("restack", pr.key, wording.github?.(pr.repo) || s.prWorkflow === "github" ? `Restack ${pr.repo}#${pr.number} onto ${s.trunk} after ${parent.repo}#${parent.number} merged: rebase, push with --force-with-lease, and retarget with gh pr edit --base ${s.trunk} if GitHub didn't` : `Reconcile stack parent after ${parent.repo}#${parent.number} merged`, [parent.key, parent.snapshot.head]);
   }
   for (const o of followUpObligations(w)) {
     if (!o.enable_follow_up || !["pending", "waiting"].includes(o.status) || !communicationReady(o.communication)) continue;

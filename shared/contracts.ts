@@ -15,6 +15,7 @@ import { taskTriggerSchema } from "./task-trigger";
 import { QUESTION_MODES, questionSchema } from "./questions";
 import { specSchema } from "./spec";
 import { HOME_GROUPS } from "./home";
+import { prWorkflowViewSchema, setPrWorkflowInputSchema } from "./pr-workflow";
 import { actionPlanSchema, actionResultSchema, browserCommandSchema, browserExchangeSchema, browserPrSchema, browserStatusSchema, prActionKind } from "./pr-actions";
 
 const agentCommunicationSchema = z.strictObject({
@@ -28,7 +29,8 @@ const agentCommunicationSchema = z.strictObject({
  */
 export const listRpc = defineRpc({ name: "follow.list", input: z.object({ since: z.number().optional() }), output: z.object({ workspaces: z.array(workspaceSchema), error: z.string().nullable(), revision: z.number().optional(), full: z.boolean().optional(), removed: z.array(z.string()).optional() }) });
 export const getRpc = defineRpc({ name: "follow.get", input: z.object({ workspaceId: idSchema }), output: z.object({ workspace: workspaceSchema.nullable(), error: z.string().nullable() }) });
-export const agentStatusRpc = defineRpc({ name: "follow.agent-status", input: z.strictObject({ agentId: idSchema, detail: z.enum(["summary", "full"]).optional() }), output: workspaceSchema });
+/** `prWorkflow` (1.4.0-beta.14): how this workspace ships PRs (graphite | github) and its review-fix command (null: built-in steps). */
+export const agentStatusRpc = defineRpc({ name: "follow.agent-status", input: z.strictObject({ agentId: idSchema, detail: z.enum(["summary", "full"]).optional() }), output: workspaceSchema.extend({ prWorkflow: z.object({ mode: z.enum(["graphite", "github"]), reviewFix: z.string().nullable() }).optional() }) });
 export const syncWorkspaceRpc = defineRpc({ name: "follow.sync", input: z.strictObject({ agentId: idSchema, summary: z.string().trim().min(1).max(1000) }), output: z.object({ workspaceId: idSchema, synced: z.literal(true) }) });
 export const enrollRpc = defineRpc({ name: "follow.enroll", input: z.strictObject({ workspaceId: idSchema.optional(), agentId: idSchema, goal: textSchema }), output: workspaceSchema });
 export const registerPrRpc = defineRpc({ name: "follow.register-pr", input: z.strictObject({ agentId: idSchema, repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/), number: z.number().int().positive(), stack: textSchema, parentNumber: z.number().int().positive().nullable().optional(), disposition: z.string().max(2000).optional() }), output: workspaceSchema });
@@ -170,3 +172,10 @@ export const onboardingRpc = defineRpc({ name: "follow.onboarding", input: z.obj
 export const setOnboardingRpc = defineRpc({ name: "follow.set-onboarding", input: z.strictObject({ action: z.enum(ONBOARDING_ACTIONS), step: z.enum(ONBOARDING_STEPS).optional() }), output: onboardingViewSchema });
 /** Run on demand while the flow is open, cached a minute; `fresh` is Check again. Never polled. */
 export const onboardingChecksRpc = defineRpc({ name: "follow.onboarding-checks", input: z.object({ fresh: z.boolean().optional() }), output: checksSchema });
+/**
+ * Settings → Following → Shipping PRs, and onboarding's "How do you ship PRs?": the global default, each repository's
+ * setting and what auto detected (filesystem checks only, cached; `refresh` re-checks). Never polled.
+ */
+export const prWorkflowRpc = defineRpc({ name: "follow.pr-workflow", input: z.object({ refresh: z.boolean().optional() }), output: prWorkflowViewSchema });
+/** `{ repo, setting }` sets one repository (`setting: null` inherits the default); `default` sets the default. */
+export const setPrWorkflowRpc = defineRpc({ name: "follow.set-pr-workflow", input: setPrWorkflowInputSchema, output: prWorkflowViewSchema });

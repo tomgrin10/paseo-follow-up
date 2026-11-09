@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { completionBlockers, type Workspace, type State, type Batch } from "../shared/model";
 import { Store } from "./store";
 import { Github } from "./github";
-import { batchPrompt, tasksFor, isRecovery, needsPrObservations } from "./tasks";
+import { batchPrompt, tasksFor, isRecovery, needsPrObservations, type TaskWording } from "./tasks";
 import { answerRecipients, developerAnswer, syncTaskQuestions } from "./questions";
 import { answerMessage, isOpen as isOpenQuestion, type Question } from "../shared/questions";
 import { reconcileSubmittedStacks } from "./submissions";
@@ -38,6 +38,23 @@ export interface Gateway {
   deliver?(w: Workspace, recipients: string[], text: string, messageId: string): Promise<string>;
 }
 
+/**
+ * Plain-GitHub stacks are chains of base branches: an open PR whose base isn't trunk sits on the tracked PR whose head
+ * branch is that base. Fills in parents agents didn't register; never overrides one they did. Graphite PRs are left alone.
+ */
+export function inferBaseChains(w: Workspace): void {
+  for (const pr of w.prs) {
+    const s = pr.snapshot;
+    if (pr.parent || s?.prWorkflow !== "github" || s.state !== "OPEN" || !s.base || s.base === s.trunk) continue;
+    const parent = w.prs.find(p => p !== pr && p.repo === pr.repo && p.snapshot?.headBranch === s.base);
+    if (!parent) continue;
+    // No cycles: the parent must not already sit on this PR.
+    let up: string | null = parent.key; const seen = new Set<string>();
+    while (up && !seen.has(up)) { if (up === pr.key) break; seen.add(up); up = w.prs.find(p => p.key === up)?.parent ?? null; }
+    if (up === pr.key) continue;
+    pr.parent = parent.key;
+  }
+}
 export class Engine {
   error: string | null = null;
   private recoveryOperations = new Set<Promise<Workspace>>();
@@ -55,7 +72,7 @@ export class Engine {
   async recover(): Promise<void> {
     await this.store.mutate(state => {
       for (const w of state.workspaces) {
-        const eligible = tasksFor(w, this.now());
+        const eligible = tasksFor(w, this.now(), this.wording);
         for (const b of w.batches.filter(b => b.state === "pending" && !isRecovery(b))) {
           b.tasks = b.tasks.filter(t => t.kind !== "obligation" || eligible.some(e => e.key === t.key && e.fingerprint === t.fingerprint));
           if (!b.tasks.length) { b.state = "cancelled"; b.result = "No triggered task is due. Unscheduled work remains in Tasks."; }
@@ -64,7 +81,7 @@ export class Engine {
         if (["Recovery stopped or failed. Check the recovery agent before retrying.", "Recovery acknowledgment was refused. Check the identity error on this batch."].includes(w.hold ?? "")) w.hold = null;
       }
 
-      for (const w of state.workspaces) for (const a of w.prActions) if (a.state === "sending") { a.state = "uncertain"; a.result = `Follow-through reloaded before ${a.kind === "request_reviewers" ? "GitHub confirmed the review request" : "Graphite confirmed the action"}. Check state before sending another request.`; }
+      for (const w of state.workspaces) for (const a of w.prActions) if (a.state === "sending") { a.state = "uncertain"; a.result = `Follow-through reloaded before ${a.kind === "request_reviewers" ? "GitHub confirmed the review request" : w.prs.some(p => a.prs.includes(p.key) && p.snapshot?.prWorkflow === "github") ? "GitHub confirmed the action" : "Graphite confirmed the action"}. Check state before sending another request.`; }
       for (const w of state.workspaces) for (const q of w.questions) if (q.answer?.delivery.state === "sending") q.answer.delivery = { ...q.answer.delivery, state: "unconfirmed", reason: "Follow-up reloaded before Paseo confirmed the answer. Check the agent's chat before resending." };
       for (const w of state.workspaces) for (const b of w.batches) if (b.state === "sending") {
         b.state = "uncertain";
@@ -72,6 +89,8 @@ export class Engine {
       }
     });
   }
+  /** How repair tasks are worded per repository (review-fix command, GitHub restacks). Empty: the original wording. */
+  wording: TaskWording = {};
   tick(): Promise<void> {
     if (this.stopped) return Promise.resolve();
     if (this.running) return this.running;
@@ -114,6 +133,7 @@ export class Engine {
           if (observed.snapshot) recordSnapshot(p, observed.snapshot, this.now());
         }
         reconcileSubmittedStacks(w);
+        inferBaseChains(w);
         if (w.archived) return;
         this.reconcile(w);
         pruned.push(...pruneUnsent(w));
@@ -236,7 +256,7 @@ export class Engine {
       const w = findWorkspace(state, workspaceId);
       const b = w.batches.find(b => b.id === batchId);
       if (this.stopped || !w.enable_tracking || w.archived || w.hold || (automatic && !w.enable_auto_sends) || !b || b.state !== "pending" || w.batches.some(other => other.id !== b.id && !isRecovery(other) && ["sending", "sent", "blocked", "uncertain"].includes(other.state))) throw new Error("Workspace or queue changed; refresh before sending");
-      const eligible = tasksFor(w, this.now());
+      const eligible = tasksFor(w, this.now(), this.wording);
       if (b.tasks.some(t => t.kind === "obligation" && !eligible.some(e => e.key === t.key && e.fingerprint === t.fingerprint))) throw new Error("Task dependencies changed or deployment evidence expired. Refresh before sending.");
       b.state = "sending";
       return { w, b };
@@ -307,7 +327,7 @@ export class Engine {
     return findWorkspace(await this.store.snapshot(), workspaceId);
   }
   private reconcile(w: Workspace): void {
-    const tasks = tasksFor(w, this.now());
+    const tasks = tasksFor(w, this.now(), this.wording);
     const delivered = new Set(w.batches.filter(b => ["sending", "sent", "completed", "blocked", "uncertain"].includes(b.state)).flatMap(b => b.tasks.map(t => `${t.key}:${t.fingerprint}`)));
     const fresh = tasks.filter(t => !delivered.has(`${t.key}:${t.fingerprint}`));
     let pending = w.batches.find(b => b.state === "pending" && !isRecovery(b));

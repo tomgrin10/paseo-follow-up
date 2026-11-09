@@ -1,7 +1,7 @@
 import { summary, type Batch, type Pr, type Workspace, type Status } from "./model";
 import { followUpObligations, recoveryBatch } from "./follow-up";
 import { orderedStacks, settledForDisplay } from "./presentation";
-import { graphiteReady, prActionBlocks } from "./pr-actions";
+import { githubApproved, graphiteReady, isGithubFlow, mergeBlockers, prActionBlocks } from "./pr-actions";
 import { configuredReviewers, noReviewers } from "./reviewers";
 import { isOpen as questionOpen, questionState, type QuestionState } from "./questions";
 
@@ -58,9 +58,12 @@ export function mergeReady(pr: Pr, w: Pick<Workspace, "prActions">, now = Date.n
   const s = pr.snapshot;
   const queued = QUEUED.includes(s?.graphiteMergeStatus ?? "");
   const recentlySubmitted = w.prActions.some(a => a.kind === "merge" && a.state === "submitted" && a.heads[pr.key] === s?.head && now - Date.parse(a.createdAt) < 30_000);
+  if (isGithubFlow(s)) return !pr.error && !!s?.complete && s!.state === "OPEN" && githubApproved(s!) && !s!.inMergeQueue && !recentlySubmitted;
   return !pr.error && !!s?.complete && s.state === "OPEN" && s.reviewDecision === "APPROVED" && !s.draft && !s.conflict && !s.failedChecks.length && !s.checksPending && !queued && !recentlySubmitted;
 }
-export const mergeQueued = (pr: Pr) => QUEUED.includes(pr.snapshot?.graphiteMergeStatus ?? "");
+export const mergeQueued = (pr: Pr) => isGithubFlow(pr.snapshot) ? !!pr.snapshot?.inMergeQueue : QUEUED.includes(pr.snapshot?.graphiteMergeStatus ?? "");
+/** Whether the workflow that ships this PR says it can merge now: Graphite's readiness, or GitHub's own verdict. */
+export const workflowReady = (pr: Pr) => isGithubFlow(pr.snapshot) ? mergeBlockers(pr).length === 0 : graphiteReady(pr.snapshot?.graphiteMergeStatus);
 
 /** Why a pending batch cannot be sent right now, or null when Send is available. Mirrors the server's guards. */
 export function sendBlocker(w: Workspace, batch: Batch): string | null {
@@ -115,8 +118,8 @@ export function needsYou(w: Workspace, now = Date.now()): NeedItem[] {
   }
   const blocking = (pr: Pr) => w.prActions.some(a => prActionBlocks(a, [pr.key]));
   for (const pr of stackOrder(w.prs)) {
-    // Only offer Merge here when Graphite agrees; otherwise the PR sheet explains what is missing.
-    if (mergeReady(pr, w, now) && graphiteReady(pr.snapshot?.graphiteMergeStatus) && !blocking(pr)) items.push({ kind: "merge", key: `merge:${pr.key}`, prKey: pr.key, number: pr.number, title: `#${pr.number} is approved`, detail: pr.snapshot!.title });
+    // Only offer Merge here when the PR's workflow (Graphite, or GitHub itself) agrees; otherwise the PR sheet explains what is missing.
+    if (mergeReady(pr, w, now) && workflowReady(pr) && !blocking(pr)) items.push({ kind: "merge", key: `merge:${pr.key}`, prKey: pr.key, number: pr.number, title: isGithubFlow(pr.snapshot) && pr.snapshot!.reviewDecision !== "APPROVED" ? `#${pr.number} is ready to merge` : `#${pr.number} is approved`, detail: pr.snapshot!.title });
     else if (noReviewers(pr) && !pr.snapshot!.draft && configuredReviewers(pr.repo).length && !blocking(pr)) items.push({ kind: "reviewers", key: `reviewers:${pr.key}`, prKey: pr.key, number: pr.number, title: `#${pr.number} has no reviewers`, detail: pr.snapshot!.title });
   }
   return items;
