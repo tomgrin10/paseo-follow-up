@@ -59,9 +59,15 @@ async function main() {
   if (event.agent_id || event.hook_event_name === "SubagentStop") return;
   const lease = await json(join(directory, "hooks-enabled.json"));
   if (lease.expiresAt < Date.now() || !lease.clientEntry) return;
-  const state = await json(join(directory, "state.json")).catch(() => ({ workspaces: [] }));
-  const workspace = state.workspaces.find(w => (w.mainAgentId === agentId || w.contributorAgentIds?.includes(agentId)) && w.enable_tracking && !w.archived);
-  const contributor = !!workspace && workspace.mainAgentId !== agentId;
+  // scopes.json is a few KB; this hook runs on every tool call. Older workers don't write it: read state.json.
+  const scopes = await json(join(directory, "scopes.json")).catch(() => null);
+  let workspace = null; let contributor = false;
+  if (scopes?.agents) { const entry = scopes.agents[agentId]; if (entry && entry.role !== "recovery") { workspace = { id: entry.workspaceId }; contributor = entry.role === "contributor"; } }
+  else {
+    const state = await json(join(directory, "state.json")).catch(() => ({ workspaces: [] }));
+    workspace = state.workspaces.find(w => (w.mainAgentId === agentId || w.contributorAgentIds?.includes(agentId)) && w.enable_tracking && !w.archived) ?? null;
+    contributor = !!workspace && workspace.mainAgentId !== agentId;
+  }
   // The brief nudge applies to root agents launched with FOLLOW_THROUGH_BRIEF, tracked or not.
   const provider = process.env.FOLLOW_THROUGH_BRIEF || null;
   const brief = provider ? await json(join(directory, "brief.json")).catch(() => null) : null;
