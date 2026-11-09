@@ -67,6 +67,7 @@ export function DisplaySections({ theme }: Pick<PluginSurfaceProps, "theme">) {
     <SettingsSection title="Overseer (beta)" info="One agent you can ask about all your work. It sends each task to the agent that owns it and asks you when it isn't sure.">
       <SettingsCard>
         <SettingsSwitch label="Overseer" hint="Off hides its row on Home and stops its digest. An Overseer you already started stays in its workspace; Follow-up never archives it." value={settings.values.enable_overseer} disabled={settings.saving} onValueChange={(enable_overseer) => save({ enable_overseer })} />
+        <SettingsSwitch label="AI priority" hint="Ranks Home's Priority sort from Linear, Slack, GitHub and the weekly plan. Read-only; runs hourly on workdays when something changed." value={settings.values.enable_ranker} disabled={settings.saving} onValueChange={(enable_ranker) => save({ enable_ranker })} />
       </SettingsCard>
     </SettingsSection>
     </>

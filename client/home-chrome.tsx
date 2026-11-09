@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Platform, Pressable, Text, TextInput, View } from "react-native";
-import { Icon } from "@getpaseo/plugin/client/ui";
+import { Icon, useToast } from "@getpaseo/plugin/client/ui";
 import { GROUP_TITLE, homeCounts, type HomeGroupId, type HomeModel } from "../shared/home";
 import { FIELD_LABEL, excerpt, highlightRuns, homeSearchDocs, indexDocs, defaultActive, omniboxResults, overseerProvider, workspaceProvider, type OmniboxItem, type OmniboxProvider, type Range, type WorkspaceItem } from "../shared/search";
 import { SORT_HINT, SORT_LABEL, SORT_MODES, type SortMode } from "../shared/sort";
@@ -112,14 +112,30 @@ export function SearchField({ theme, omnibox, dense, onEnter }: { theme: Theme; 
 
 // ---------- sort ----------
 
-export function SortMenu({ theme, mode, onChange, rankedAt, touch }: { theme: Theme; mode: SortMode; onChange: (m: SortMode) => void; rankedAt: string | null; touch: boolean }) {
+export type RankState = { enabled: boolean; running: boolean; healthLine: string; error: string | null } | null;
+
+export function SortMenu({ theme, mode, onChange, rankedAt, touch, rank = null, onRerank }: { theme: Theme; mode: SortMode; onChange: (m: SortMode) => void; rankedAt: string | null; touch: boolean; rank?: RankState; onRerank?: () => Promise<{ ok: boolean; skipped: string | null; error: string | null; top?: { title: string }[] }> }) {
   const c = theme.colors;
   const [open, setOpen] = useState(false);
   const now = useMinute();
+  const toast = useToast();
+  const running = !!rank?.running;
+  const rerank = async () => {
+    if (!onRerank || running) return;
+    setOpen(false);
+    try {
+      const r = await onRerank();
+      if (!r.ok) toast.error(r.error ?? "Couldn't re-rank.");
+      else if (r.skipped === "busy") toast.show("Already re-ranking");
+      else toast.show(r.skipped === "same" ? "Nothing new in Linear, Slack, GitHub or the plan since the last ranking" : r.top?.[0] ? `Re-ranked · ${r.top[0].title} first` : "Re-ranked", { variant: "success" });
+    } catch (e) { toast.error(e instanceof Error ? e.message : String(e)); }
+  };
+  // "Ranked 12m ago · Slack unavailable": the age, then any source the last run couldn't read.
+  const note = running ? "Re-ranking…" : [priorityNote(rankedAt, now), rank?.enabled ? rank.healthLine : ""].filter(Boolean).join(" · ");
   return <View style={{ position: "relative", zIndex: 20 }}>
     <Pressable accessibilityRole="button" accessibilityLabel={`Sort: ${SORT_LABEL[mode]}`} aria-expanded={open} accessibilityState={{ expanded: open }} onPress={() => setOpen(o => !o)}
       style={state => ({ flexDirection: "row", alignItems: "center", gap: 4, height: touch ? 36 : 30, paddingHorizontal: 8, borderRadius: 6, backgroundColor: open || (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
-      <Icon name="ArrowUpDown" size={13} color={c.foregroundMuted} />
+      {running ? <Spinner color={c.foregroundMuted} size={12} label="Re-ranking" /> : <Icon name="ArrowUpDown" size={13} color={c.foregroundMuted} />}
       <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 12 }}>{SORT_LABEL[mode]}</Text>
       <Icon name="ChevronDown" size={12} color={c.foregroundMuted} />
     </Pressable>
@@ -133,7 +149,14 @@ export function SortMenu({ theme, mode, onChange, rankedAt, touch }: { theme: Th
           <Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 11, lineHeight: 15 }}>{SORT_HINT[m]}</Text>
         </View>
       </Pressable>)}
-      <Text style={{ color: c.foregroundMuted, fontSize: 11, paddingHorizontal: 10, paddingTop: 6, paddingBottom: 4, marginTop: 4, borderTopWidth: 1, borderTopColor: c.border }}>Priority: {priorityNote(rankedAt, now)}</Text>
+      <View style={{ marginTop: 4, borderTopWidth: 1, borderTopColor: c.border, paddingTop: 2 }}>
+        {rank?.enabled && onRerank && <Pressable accessibilityRole="menuitem" accessibilityState={{ busy: running, disabled: running }} disabled={running} onPress={() => void rerank()}
+          style={state => ({ flexDirection: "row", alignItems: "center", gap: 8, minHeight: touch ? 44 : 34, paddingHorizontal: 10, backgroundColor: (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
+          <View style={{ width: 14 }}>{running ? <Spinner color={c.foregroundMuted} size={12} label="Re-ranking" /> : <Icon name="RefreshCw" size={13} color={c.foreground} />}</View>
+          <Text style={{ color: running ? c.foregroundMuted : c.foreground, fontSize: 13 }}>{running ? "Re-ranking…" : "Re-rank now"}</Text>
+        </Pressable>}
+        <Text style={{ color: c.foregroundMuted, fontSize: 11, paddingHorizontal: 10, paddingTop: 4, paddingBottom: 4 }}>Priority: {note}</Text>
+      </View>
     </View>}
   </View>;
 }
@@ -285,12 +308,12 @@ export function AskRow({ ask, theme, active, dense, touch, sending, onPress }: {
 }
 
 /** The muted reason and source chip a fresh external priority adds to a row. */
-export function PriorityLine({ reason, source, c, size = 12 }: { reason: string; source: { kind: keyof typeof PRIORITY_SOURCE_LABEL; label: string } | null; c: Colors; size?: number }) {
+export function PriorityLine({ reason, source, c, size = 12, lines = 1 }: { reason: string; source: { kind: keyof typeof PRIORITY_SOURCE_LABEL; label: string } | null; c: Colors; size?: number; lines?: number }) {
   return <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minWidth: 0 }}>
     {source && <View style={{ paddingHorizontal: 5, height: 16, justifyContent: "center", borderRadius: 3, backgroundColor: c.surface2 }}>
       <Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 10, lineHeight: 13 }}>{PRIORITY_SOURCE_LABEL[source.kind]}</Text>
     </View>}
-    <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, color: c.foregroundMuted, fontSize: size, fontStyle: "italic" }}>{reason}</Text>
+    <Text numberOfLines={lines} style={{ flex: 1, minWidth: 0, color: c.foregroundMuted, fontSize: size, fontStyle: "italic" }}>{reason}</Text>
   </View>;
 }
 

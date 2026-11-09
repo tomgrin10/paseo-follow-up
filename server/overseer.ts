@@ -56,10 +56,12 @@ export type OverseerDeps = {
   agent?: () => Promise<OverseerAgentSetting>;
   /** Harness override ("provider/model", from FOLLOW_UP_OVERSEER_PROVIDER): wins over the setting. */
   provider?: string;
+  /** Re-rank Home's Priority sort now (the ranker); Tom asked the Overseer for it. */
+  rerank?: () => Promise<unknown>;
   now?: () => number;
 };
 
-export const OVERSEER_TOOLS = ["workstreams", "agent_digest", "route_candidates", "send_to_agent", "start_workspace"] as const;
+export const OVERSEER_TOOLS = ["workstreams", "agent_digest", "route_candidates", "send_to_agent", "start_workspace", "rerank"] as const;
 export type OverseerTool = typeof OVERSEER_TOOLS[number];
 const id = z.string().trim().min(1).max(200);
 export const OVERSEER_INPUT: Record<OverseerTool, z.ZodType> = {
@@ -67,6 +69,7 @@ export const OVERSEER_INPUT: Record<OverseerTool, z.ZodType> = {
   agent_digest: z.strictObject({ agentId: id, steps: z.number().int().min(1).max(30).optional() }),
   route_candidates: z.strictObject({ ask: z.string().trim().min(1).max(4000) }),
   send_to_agent: z.strictObject({ agentId: id, text: z.string().trim().min(1).max(20_000), reply_to_ask: z.boolean().optional() }),
+  rerank: z.strictObject({}),
   start_workspace: z.strictObject({ task: z.string().trim().min(1).max(20_000).optional(), title: z.string().trim().min(1).max(80).optional(), project: id.optional(), linear_key: z.string().trim().max(30).optional(), base: z.string().trim().max(200).optional(), planId: id.optional(), confirm: z.boolean().optional() }),
 };
 
@@ -250,6 +253,7 @@ export class Overseer {
       }
       case "send_to_agent": return this.send(paseo, s, args as { agentId: string; text: string; reply_to_ask?: boolean });
       case "start_workspace": return args.confirm ? this.confirm(args.planId) : this.planWorkspace(paseo, s, args);
+      case "rerank": { if (!this.d.rerank) throw new Error("Re-ranking isn't available on this host."); return this.d.rerank(); }
     }
   }
 
@@ -355,7 +359,8 @@ export function handoffSummary(steps: { kind: string; text: string }[]): string 
   return steps.length ? steps.map(x => `- ${x.kind === "you" ? "Tom" : x.kind}: ${clip(x.text.replace(/\s+/g, " ").trim(), 240)}`).join("\n") : "(no history could be read)";
 }
 
-async function atomic(path: string, value: unknown) {
+/** Write JSON to a temp file, then rename: readers never see half a file. */
+export async function atomic(path: string, value: unknown) {
   const temporary = `${path}.${randomUUID()}`;
   await writeFile(temporary, JSON.stringify(value), { mode: 0o600 });
   await rename(temporary, path);
