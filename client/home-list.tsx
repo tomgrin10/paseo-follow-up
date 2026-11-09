@@ -115,7 +115,7 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
         letterSpacing: item.key === "l:archived" ? 0.6 : 0, textTransform: item.key === "l:archived" ? "uppercase" : "none", paddingHorizontal: dense ? 8 : 16, paddingTop: 12, paddingBottom: 4 }}>{item.text}</Text>;
       case "result": return <ResultRow item={item.item} s={model.byKey.get(item.item.key)} theme={theme} active={item.index === activeResult} dense={dense} touch={touch} onPress={() => onResult?.(item.item)} />;
       case "ask": return <AskRow ask={item.ask} theme={theme} active={item.index === activeResult} dense={dense} touch={touch} sending={!!asking} onPress={() => onResult?.({ provider: "overseer", key: ASK_KEY, ask: item.ask })} />;
-      case "brief": return <BriefRow theme={theme} line={briefLine ?? ""} selected={selectedKey === null || selectedKey === BRIEF_KEY} touch={touch} onSelect={onSelect} />;
+      case "brief": return <BriefRow theme={theme} line={briefLine ?? ""} selected={!touch && (selectedKey === null || selectedKey === BRIEF_KEY)} touch={touch} onSelect={onSelect} />;
       case "overseer": return overseer ? <OverseerRow theme={theme} o={overseer} selected={selectedKey === OVERSEER_KEY} touch={touch} onSelect={onSelect} /> : null;
       case "header": return <GroupHeader theme={theme} title={item.title} count={item.count} open={item.open} tone={item.group === "needs" && item.count ? c.statusWarning : undefined} dense={dense} touch={touch} onPress={() => toggle(item.group)} />;
       case "fold": return <Pressable accessibilityRole="button" aria-expanded={item.open} accessibilityState={{ expanded: item.open }} accessibilityLabel={`${item.project}, ${item.count}. ${item.open ? "Collapse" : "Expand"}`} onPress={() => toggleProject(item.project)}
@@ -156,10 +156,11 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
 function GroupHeader({ theme, title, count, open, tone, dense, touch, onPress }: { theme: Theme; title: string; count: number; open: boolean; tone?: string; dense: boolean; touch: boolean; onPress: () => void }) {
   const c = theme.colors;
   return <Pressable accessibilityRole="button" aria-expanded={open} accessibilityState={{ expanded: open }} accessibilityLabel={`${title}, ${count}. ${open ? "Collapse" : "Expand"}`} onPress={onPress}
-    style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: touch ? 44 : dense ? 28 : 34, paddingHorizontal: dense ? 8 : 16, paddingTop: dense ? 4 : 8 }}>
-    {dense && <Icon name={open ? "ChevronDown" : "ChevronRight"} size={12} color={c.foregroundMuted} />}
-    <Text accessibilityRole="header" style={{ color: tone ?? c.foregroundMuted, fontSize: 11, lineHeight: 14, fontWeight: "600", letterSpacing: 0.6, textTransform: "uppercase" }}>{title}</Text>
-    <Text style={{ color: tone ?? c.foregroundMuted, fontSize: 11, lineHeight: 14, fontVariant: ["tabular-nums"] }}>{count}</Text>
+    style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: touch ? 44 : dense ? 28 : 34, paddingHorizontal: touch ? 16 : dense ? 8 : 16, paddingTop: touch ? 8 : dense ? 4 : 8 }}>
+    {dense && <Icon name={open ? "ChevronDown" : "ChevronRight"} size={touch ? 14 : 12} color={c.foregroundMuted} />}
+    {/* Phones: sentence case at 13, the section role; desktop keeps the small caps. */}
+    <Text accessibilityRole="header" style={touch ? { color: tone ?? c.foregroundMuted, fontSize: 13, lineHeight: 18, fontWeight: "600" } : { color: tone ?? c.foregroundMuted, fontSize: 11, lineHeight: 14, fontWeight: "600", letterSpacing: 0.6, textTransform: "uppercase" }}>{touch ? title.charAt(0) + title.slice(1).toLowerCase() : title}</Text>
+    <Text style={{ color: tone ?? c.foregroundMuted, fontSize: touch ? 13 : 11, lineHeight: touch ? 18 : 14, fontVariant: ["tabular-nums"] }}>{count}</Text>
     {!dense && !open && <Icon name="ChevronRight" size={12} color={c.foregroundMuted} />}
   </Pressable>;
 }
@@ -168,9 +169,9 @@ function BriefRow({ theme, line, selected, touch, onSelect }: { theme: Theme; li
   const c = theme.colors;
   return <Pressable accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={`Morning brief. ${line}`} onPress={() => onSelect(BRIEF_KEY)}
     style={state => ({ flexDirection: "row", alignItems: "center", gap: 10, minHeight: touch ? 52 : 40, paddingHorizontal: 16, backgroundColor: selected ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
-    <Icon name="Sun" size={15} color={c.foregroundMuted} />
-    <Text style={{ color: c.foreground, fontSize: 13, fontWeight: "600" }}>Morning brief</Text>
-    <Text numberOfLines={1} style={{ flex: 1, color: c.foregroundMuted, fontSize: 12 }}>{line}</Text>
+    <Icon name="Sun" size={touch ? 16 : 15} color={c.foregroundMuted} />
+    <Text style={{ color: c.foreground, fontSize: touch ? 14 : 13, fontWeight: "600" }}>Morning brief</Text>
+    <Text numberOfLines={1} style={{ flex: 1, color: c.foregroundMuted, fontSize: touch ? 13 : 12 }}>{line}</Text>
   </Pressable>;
 }
 
@@ -182,9 +183,10 @@ function OverseerRow({ theme, o, selected, touch, onSelect }: { theme: Theme; o:
       // Its ask isn't a Needs-you row (it's yours to route), so the edge marks it the way blocking rows are marked.
       borderLeftWidth: 2, borderLeftColor: o.state === "asks" || o.state === "error" ? withAlpha(tone, 0.9) : "transparent",
       backgroundColor: selected ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
-    {o.state === "running" ? <Spinner color={tone} size={13} label="Overseer working" /> : <Icon name="MessagesSquare" size={15} color={o.state === "idle" || o.state === "start" ? c.foregroundMuted : tone} />}
-    <Text style={{ color: c.foreground, fontSize: 13, fontWeight: "600" }}>Overseer</Text>
-    <Text numberOfLines={1} style={{ flex: 1, color: o.state === "asks" || o.state === "error" ? tone : c.foregroundMuted, fontSize: 12 }}>{o.line}</Text>
+    {o.state === "running" ? <Spinner color={tone} size={13} label="Overseer working" /> : <Icon name="MessagesSquare" size={touch ? 16 : 15} color={o.state === "idle" || o.state === "start" ? c.foregroundMuted : tone} />}
+    <Text style={{ color: c.foreground, fontSize: touch ? 14 : 13, fontWeight: "600" }}>Overseer</Text>
+    <Text numberOfLines={1} style={{ flex: 1, color: o.state === "asks" || o.state === "error" ? tone : c.foregroundMuted, fontSize: touch ? 13 : 12 }}>{touch && o.state === "start" ? "Ask about any workspace" : o.line}</Text>
+    {touch && <Icon name="ChevronRight" size={16} color={c.foregroundMuted} />}
   </Pressable>;
 }
 
@@ -210,6 +212,14 @@ export function PrChipView({ s, c }: { s: Workstream; c: Colors }) {
   </View>;
 }
 
+/** Phones: the PR summary as plain text ("#1402 +1 · 1 thread") inside a meta line, no bordered chip. */
+export function PrSummaryText({ s, c, lead = "" }: { s: Workstream; c: Colors; lead?: string }) {
+  if (!s.pr) return null;
+  const checks = s.pr.checks;
+  return <Text>{lead}<Text style={{ color: c.foreground }}>{s.pr.label.replace(/\+(\d)/, " +$1")}</Text>
+    {checks && <Text style={{ color: checks.tone === "muted" ? c.foregroundMuted : badgeColor({ text: "", tone: checks.tone }, c) }}>{` ${checks.text}`}</Text>}</Text>;
+}
+
 /** The age on the right. It re-renders on the shared minute clock without touching its row. */
 export function Age({ iso, c, size = 12 }: { iso: string | null; c: Colors; size?: number }) {
   const now = useMinute();
@@ -226,13 +236,25 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect }: Ro
   const line = [s.word && s.group !== "needs" ? s.word : null, s.line].filter(Boolean).join(" · ");
   const label = [s.title + (s.agent ? ` › ${s.agent}` : ""), s.word, s.line].filter(Boolean).join(". ");
   return <Pressable accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={label} onPress={() => onSelect(s.key)}
-    style={state => ({ flexDirection: "row", alignItems: dense ? "flex-start" : "center", gap: dense ? 8 : 10, minHeight: touch ? 56 : dense ? 36 : 38, paddingLeft: dense ? 8 : 16, paddingRight: dense ? 8 : 16, paddingVertical: dense ? 6 : 0,
+    style={state => ({ flexDirection: "row", alignItems: dense ? "flex-start" : "center", gap: touch ? 10 : dense ? 8 : 10, minHeight: touch ? 56 : dense ? 36 : 38, paddingLeft: touch ? 14 : dense ? 8 : 16, paddingRight: touch ? 16 : dense ? 8 : 16, paddingVertical: touch ? 12 : dense ? 6 : 0,
+      ...(touch ? { borderBottomWidth: 1, borderBottomColor: withAlpha(c.border, 0.6) } : {}),
       borderLeftWidth: 2, borderLeftColor: blocking ? withAlpha(color, 0.9) : "transparent",
       backgroundColor: selected ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
-    <View style={{ width: 16, alignItems: "center", paddingTop: dense ? 1 : 0 }}>
-      {s.tone === "running" && s.icon === "LoaderCircle" ? <Spinner color={color} size={13} label="Running" /> : <Icon name={s.icon} size={15} color={color} />}
+    <View style={{ width: touch ? 18 : 16, alignItems: "center", paddingTop: touch ? 2 : dense ? 1 : 0 }}>
+      {s.tone === "running" && s.icon === "LoaderCircle" ? <Spinner color={color} size={13} label="Running" /> : <Icon name={s.icon} size={touch ? 17 : 15} color={color} />}
     </View>
-    {dense ? <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
+    {/* Phones: title 15/20 over two lines, then state · reason, then the PRs as plain text (no bordered chips). */}
+    {touch ? <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+        <Text numberOfLines={2} style={{ flex: 1, minWidth: 0, color: muted ? c.foregroundMuted : c.foreground, fontSize: 15, lineHeight: 20, fontWeight: muted ? "400" : "500" }}>{s.title}</Text>
+        <View style={{ paddingTop: 2 }}><Age iso={s.at} c={c} size={12} /></View>
+      </View>
+      {(!!s.word || !!s.line) && <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>
+        {s.word && s.group === "needs" ? <Text style={{ color, fontWeight: "600" }}>{s.word}</Text> : null}{s.word && s.group === "needs" && s.line ? " · " : ""}{line}
+      </Text>}
+      {!!s.priority?.reason && <PriorityLine reason={s.priority.reason} source={s.priority.source} c={c} size={12} lines={2} />}
+      {!!s.pr && <Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 17, fontVariant: ["tabular-nums"] }}><PrSummaryText s={s} c={c} /></Text>}
+    </View> : dense ? <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
       <Text numberOfLines={1} style={{ color: muted ? c.foregroundMuted : c.foreground, fontSize: 13, lineHeight: 18, fontWeight: muted ? "400" : "500" }}>{s.title}{s.agent ? <Text style={{ color: c.foregroundMuted }}>{` › ${s.agent}`}</Text> : null}</Text>
       {(!!s.word || !!s.line) && <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>
         {s.word && s.group === "needs" ? <Text style={{ color, fontWeight: "600" }}>{s.word}</Text> : null}{s.word && s.group === "needs" && s.line ? " · " : ""}{line}
@@ -249,6 +271,6 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect }: Ro
       {s.badges.map(b => <BadgeView key={b.text} b={b} c={c} />)}
       <PrChipView s={s} c={c} />
     </View>{!!s.priority?.reason && <View style={{ paddingRight: 40 }}><PriorityLine reason={s.priority.reason} source={s.priority.source} c={c} /></View>}</View>}
-    <Age iso={s.at} c={c} size={dense ? 11 : 12} />
+    {!touch && <Age iso={s.at} c={c} size={dense ? 11 : 12} />}
   </Pressable>;
 }, (a, b) => a.sig === b.sig && a.selected === b.selected && a.theme === b.theme && a.dense === b.dense && a.touch === b.touch && a.onSelect === b.onSelect);
