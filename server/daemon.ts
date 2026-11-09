@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import type { Workspace, Batch } from "../shared/model";
 import type { Gateway, Runtime } from "./engine";
 import type { State } from "../shared/model";
-import { defaultTracking, projectSetting, type Project } from "../shared/settings";
+import { defaultTracking, followsEvery, optedOut, projectSetting, type Project } from "../shared/settings";
 import { recoveryHandoff } from "./recovery-handoff";
 import { recoveryConfig } from "./recovery-config";
 import { submittedPrs, type Submission } from "./submissions";
@@ -130,8 +130,8 @@ export class PaseoGateway implements Gateway {
       };
       const discovered: DiscoveredWorkspace[] = [];
       const scans: { row: DiscoveredWorkspace; agent: Agent; repo: string | null }[] = [];
-      const defaults = new Set(catalog.projects.filter(p => defaultTracking(p, state.projectDefaults)).map(p => p.projectId));
-      for (const workspace of workspaces.filter(w => !w.archivingAt && (workspaceId ? w.id === workspaceId : defaults.has(w.projectId ?? "") || state.workspaces.some(saved => saved.id === w.id && saved.enable_tracking && !saved.archived)))) {
+      const defaults = new Set(catalog.projects.filter(p => defaultTracking(p, state.projectDefaults, followsEvery(state))).map(p => p.projectId));
+      for (const workspace of workspaces.filter(w => !w.archivingAt && (workspaceId ? w.id === workspaceId : (defaults.has(w.projectId ?? "") && !optedOut(state, w.id)) || state.workspaces.some(saved => saved.id === w.id && saved.enable_tracking && !saved.archived)))) {
         const existing = state.workspaces.find(w => w.id === workspace.id);
         if (existing?.archived) continue;
         const candidates = agents.map(row => row.agent).filter(a => a.workspaceId === workspace.id && !a.archivedAt && !a.labels["follow-through.recovery"]);
@@ -141,7 +141,7 @@ export class PaseoGateway implements Gateway {
         const main = successor ?? chooseMainAgent(roots, existing?.mainAgentId);
         if (!main && !existing) continue;
         const owner = successor?.id ?? existing?.mainAgentId ?? main!.id;
-        const row: DiscoveredWorkspace = { id: workspace.id, title: workspace.name || main?.title || existing!.title, mainAgentId: owner, ...(successor ? { replacesMainAgentId: existing!.mainAgentId } : {}), projectId: workspace.projectId, messageAt: main?.lastUserMessageAt ?? null, enable_default_tracking: defaults.has(workspace.projectId ?? ""), contributorAgentIds: roots.filter(a => a.id !== owner && a.id !== existing?.mainAgentId && a.id !== main?.id).map(a => a.id) };
+        const row: DiscoveredWorkspace = { id: workspace.id, title: workspace.name || main?.title || existing!.title, mainAgentId: owner, ...(successor ? { replacesMainAgentId: existing!.mainAgentId } : {}), projectId: workspace.projectId, messageAt: main?.lastUserMessageAt ?? null, enable_default_tracking: defaults.has(workspace.projectId ?? "") && !optedOut(state, workspace.id), contributorAgentIds: roots.filter(a => a.id !== owner && a.id !== existing?.mainAgentId && a.id !== main?.id).map(a => a.id) };
         // Preserve the designated owner even when it is no longer indexed. Other root
         // sessions can still contribute their PRs without acquiring completion authority.
         const project = catalog.projects.find(p => p.projectId === workspace.projectId);
@@ -203,11 +203,11 @@ export class PaseoGateway implements Gateway {
       const [catalog, workspaces] = await Promise.all([client.listProjects(), pages(cursor => client.fetchWorkspaces({ page: { limit: 100, ...(cursor ? { cursor } : {}) } }))]);
       const workspace = workspaces.find(w => w.id === workspaceId && !w.archivingAt);
       const project = catalog.projects.find(p => p.projectId === workspace?.projectId);
-      return project ? projectSetting(project, state.projectDefaults) : null;
+      return project ? projectSetting(project, state.projectDefaults, followsEvery(state)) : null;
     });
   }
   async projects(state: State) {
-    return this.connect(async client => (await client.listProjects()).projects.map(p => projectSetting(p, state.projectDefaults)).sort((a, b) => a.name.localeCompare(b.name) || a.key.localeCompare(b.key)));
+    return this.connect(async client => (await client.listProjects()).projects.map(p => projectSetting(p, state.projectDefaults, followsEvery(state))).sort((a, b) => a.name.localeCompare(b.name) || a.key.localeCompare(b.key)));
   }
   async observe(w: Workspace, fresh = false): Promise<Runtime> {
     return this.connect(async client => {

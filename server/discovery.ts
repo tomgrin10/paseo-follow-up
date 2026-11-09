@@ -2,6 +2,7 @@ import type { Submission } from "./submissions";
 import type { Artifact } from "../shared/spec";
 import { mergeArtifacts } from "./spec";
 import type { State, Workspace } from "../shared/model";
+import { autoSendsByDefault, followsByDefault } from "../shared/settings";
 
 export type History = { candidates: string[]; goal: string | null; complete: boolean; error: string | null };
 export type DiscoveredWorkspace = { id: string; title: string; mainAgentId: string; /** Set when mainAgentId is a live successor to this closed or gone main agent. */ replacesMainAgentId?: string; messageAt: string | null; projectId?: string | null; enable_default_tracking?: boolean; history?: History; contributorAgentIds?: string[]; submissions?: Submission[]; artifacts?: Artifact[] };
@@ -32,6 +33,11 @@ export function firstTracking(w: Pick<Workspace, "enable_tracking" | "prs" | "ob
   return !w.enable_tracking && !w.prs.length && !w.obligations.length && !w.batches.length;
 }
 
+/** Auto-send for a workspace Follow-up starts following: the global "Send repairs automatically" (default on). */
+export function startsWithAutoSend(state: Pick<State, "enable_auto_sends_default">, _w?: unknown): boolean {
+  return autoSendsByDefault(state);
+}
+
 export function applyDiscovery(state: State, discovered: DiscoveredWorkspace[], now: number): void {
   for (const row of discovered) {
     let w = state.workspaces.find(w => w.id === row.id);
@@ -50,7 +56,7 @@ export function applyDiscovery(state: State, discovered: DiscoveredWorkspace[], 
     }
     if (w.mainAgentId !== row.mainAgentId || w.archived) continue;
     if (row.contributorAgentIds) w.contributorAgentIds = row.contributorAgentIds;
-    if (row.enable_default_tracking && !w.enable_tracking && (!row.projectId || state.projectDefaults?.[row.projectId] !== false)) { w.enable_auto_sends = firstTracking(w); w.enable_tracking = true; }
+    if (!w.enable_tracking && followsByDefault(state, row)) { w.enable_auto_sends = startsWithAutoSend(state, w); w.enable_tracking = true; }
     if (!w.inventory) {
       w.inventory = { revision: 1, syncedRevision: 0, candidates: [], historyComplete: false, historyError: null, scannedMessageAt: null };
       w.completion = null;
