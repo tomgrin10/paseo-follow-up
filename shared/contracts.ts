@@ -80,6 +80,8 @@ export const prioritiesRpc = defineRpc({ name: "follow.priorities", input: z.obj
 /** "What's this about?": collapsed reads the cache; open may start an overview; refresh always does. */
 export const workspaceAboutRpc = defineRpc({ name: "follow.workspace-about", input: z.object({ workspaceId: idSchema, open: z.boolean().optional(), refresh: z.boolean().optional() }), output: aboutViewSchema });
 export const usageRpc = defineRpc({ name: "follow.usage", input: z.object({}), output: usageSchema });
+// Trust bypass agents: how many permission prompts were approved today, and the newest few (tool and a short summary).
+export const trustBypassRpc = defineRpc({ name: "follow.trust-bypass", input: z.object({}), output: z.object({ today: z.number().int().nonnegative(), recent: z.array(z.object({ at: z.string(), agentId: z.string(), tool: z.string(), summary: z.string(), mode: z.string() })).max(20) }) });
 export const refineTasksRpc = defineRpc({ name: "follow.refine-tasks", input: z.object({ workspaceId: idSchema, tasks: z.array(z.object({ id: idSchema, title: textSchema, afterPrs: z.array(idSchema), dependencyStage: z.enum(["merged", "deployed"]), enable_follow_up: z.boolean(), communication: communicationSchema.optional(), trigger: taskTriggerSchema.nullable().optional() })).max(50) }), output: workspaceSchema });
 export const taskTriggerRpc = defineRpc({ name: "follow.set-task-trigger", input: z.object({ workspaceId: idSchema, obligationId: idSchema, expectedRevision: z.number().int().nonnegative(), trigger: taskTriggerSchema.nullable(), afterPrs: z.array(idSchema) }), output: workspaceSchema });
 

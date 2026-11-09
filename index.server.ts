@@ -32,6 +32,7 @@ import { AgentHooks } from "./server/agent-hooks";
 import { withSessionMcp } from "./server/session-mcp";
 import { nativeTools, nativeToolsAvailable, type Invoke, type Live } from "./server/native-tools";
 import { removeGlobalRegistrations } from "./server/mcp-registrations";
+import { TrustBypass } from "./server/trust-bypass";
 import { scopes } from "./server/scopes";
 import { updateObligation } from "./server/obligations";
 import { Inbox, type GuardPause } from "./server/inbox";
@@ -746,7 +747,20 @@ export default function contribute(server: PluginServerContext) {
     return { brief };
   });
 
+  // Trust bypass agents: answer the plain tool prompts a full-trust agent still raises (server/trust-bypass.ts). The
+  // mode is re-read at request time; the inbox holds a permission row back for its grace period, and the resolve
+  // this approval causes cancels it, so an approved prompt never flags Needs you.
+  let trustApi: PaseoApi | null = null;
+  const trust = new TrustBypass(directory, {
+    enabled: async () => (await inboxSettings()).enable_trust_bypass,
+    // The mode the provider reports now; never the one the agent was created with.
+    mode: async agentId => { const agent = (await trustApi!.agents.ref(agentId).refresh())?.agent; return agent?.currentModeId ?? agent?.runtimeInfo?.modeId ?? null; },
+    approve: (agentId, requestId) => trustApi!.agents.ref(agentId).respondToPermission({ requestId, response: { behavior: "allow" } }),
+  });
+  handle(rpc.trustBypassRpc, async () => trust.recent(20));
+
   const removers = [
+    server.on("agent.permission_requested", async (event, { paseo }) => { trustApi = paseo; await trust.handle(event.agent, event.request as never).catch(() => undefined); }),
     displaySettings.subscribe(() => void writeBriefState().catch(() => undefined)),
     // The shared directory learns from events instead of polling Paseo (see DaemonDirectory). Registered first so the
     // handlers below read the patched rows.
