@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { usePaseo, useRpc, type PluginScreenProps } from "@getpaseo/plugin/client";
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
@@ -17,6 +17,7 @@ import { PrSheet } from "./pr-sheet";
 import { QuestionSheet } from "./questions";
 import { Age, BadgeView, BRIEF_KEY, glyphColor, HomeList, OVERSEER_KEY, PrChipView, type OverseerRowState } from "./home-list";
 import { answerLine, overseerRowState } from "../shared/overseer";
+import type { OmniboxItem } from "../shared/search";
 import { ListTop, SearchField, SortMenu, StatusStrip, UsageMeters, useOmnibox, useSlashToFocus } from "./home-chrome";
 import { useHomeModel, useTick, type HomeSources } from "./home-data";
 import { useInbox, UndoBar, useNextRelay } from "./inbox";
@@ -61,6 +62,27 @@ export function FollowHome(props: PluginScreenProps & { deps: HomeDeps }) {
   const overseerStatus = useSyncExternalStore(deps.sources.extras.subscribe, deps.sources.extras.overseer, deps.sources.extras.overseer);
   const overseerInbox = useInbox(inbox, () => inbox.overseer());
   const overseer = overseerRowState(overseerStatus, overseerInbox);
+  const toast = useToast();
+  // The omnibox's "Ask the Overseer" row: send, then show the conversation it lands in.
+  const [asking, setAsking] = useState(false);
+  const [pendingAsk, setPendingAsk] = useState<string | null>(null);
+  const pick = useCallback(async (item: OmniboxItem) => {
+    if (item.ask === undefined) { setSelected(item.key); return; }
+    if (asking) return;
+    setAsking(true);
+    // No toast: the conversation opens on the sent words, which says it more plainly.
+    try { await deps.sources.extras.askOverseer(item.ask); omnibox.setQuery(""); omnibox.inputRef.current?.blur(); setPendingAsk(item.ask); setSelected(OVERSEER_KEY); inbox.refresh(); }
+    catch (e) { toast.error(errorText(e)); } finally { setAsking(false); }
+  }, [asking, deps.sources.extras, omnibox, inbox, toast]);
+  // ⌘K "Follow-up: Ask the Overseer" opens Home with `?ask=<nonce>`: select it and focus its reply box. A param, not
+  // shared state, so it works whether Home was already open or mounts fresh.
+  const [replyFocus, setReplyFocus] = useState(0);
+  useEffect(() => {
+    if (!params.ask) return;
+    if (overseerStatus && !overseerStatus.enabled) { toast.show("The Overseer is off. Turn it on in Follow-up settings."); return; }
+    setSelected(OVERSEER_KEY); setReplyFocus(n => n + 1);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.ask]);
   const briefLine = [pane.counts.needs ? `${pane.counts.needs} need you` : "Nothing needs you", pane.counts.fixing ? `${pane.counts.fixing} being fixed` : "", pane.away.count ? `${pane.away.count} done while away` : ""].filter(Boolean).join(" · ");
 
   const openFull = useCallback((s: Workstream) => {
@@ -78,17 +100,17 @@ export function FollowHome(props: PluginScreenProps & { deps: HomeDeps }) {
   if (params.view === "log") return <LogView theme={theme} compact={compact} sources={deps.sources} onHome={deps.openHome} onOpen={key => { setSelected(key); deps.openHome(); }} />;
 
   const detail = selected === OVERSEER_KEY && overseer
-    ? <OverseerPane theme={theme} compact={compact} o={overseer} agentId={overseerStatus?.agentId ?? null} deps={deps} navigation={navigation} onBack={compact ? () => setSelected(null) : undefined} />
+    ? <OverseerPane theme={theme} compact={compact} o={overseer} focus={replyFocus} pending={pendingAsk} agentId={overseerStatus?.agentId ?? null} deps={deps} navigation={navigation} onBack={compact ? () => setSelected(null) : undefined} />
     : current
     ? <DetailPane key={current.key} s={current} model={model} theme={theme} compact={compact} deps={deps} openFull={openFull} signOffNext={signOffNext} onBack={compact ? () => setSelected(null) : undefined} />
     : <BriefPane theme={theme} compact={compact} pane={pane} onSelect={key => setSelected(key)} openLog={deps.openLog} sources={deps.sources} />;
   const list = <HomeList model={model} theme={theme} dense={compact} touch={compact} selectedKey={selected} onSelect={onSelect} briefLine={briefLine}
-    results={omnibox.results} activeResult={omnibox.active} onResult={item => setSelected(item.key)} filter={filter} overseer={overseer}
+    results={omnibox.results} activeResult={omnibox.active} onResult={item => void pick(item)} filter={filter} overseer={overseer} asking={asking}
     top={<ListTop theme={theme} dense={compact} title={<ListHeader theme={theme} compact={compact} onSettings={deps.openSettings} />}>
       {/* zIndex: on web every View is its own stacking context, so the sort menu only paints and hit-tests above the
           strip and meters below if this row sits above them. */}
       <View style={{ zIndex: 2, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: compact ? 12 : 16 }}>
-        <SearchField theme={theme} omnibox={omnibox} dense={compact} onEnter={item => setSelected(item.key)} />
+        <SearchField theme={theme} omnibox={omnibox} dense={compact} onEnter={item => void pick(item)} />
         <SortMenu theme={theme} mode={model.sort} onChange={deps.sources.extras.setSort} rankedAt={model.rankedAt} touch={compact} />
       </View>
       {!omnibox.results && <StatusStrip theme={theme} model={model} filter={filter} onFilter={setFilter} touch={compact} dense={compact} />}
@@ -274,7 +296,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
  * The Overseer's conversation on Home (1.4.0-beta.0): the tail and a reply box, like any agent's detail pane, plus its
  * decision card when it asks which agent should get a task. Before the first start, one Start button.
  */
-function OverseerPane({ theme, compact, o, agentId, deps, navigation, onBack }: { theme: Theme; compact: boolean; o: OverseerRowState; agentId: string | null; deps: HomeDeps; navigation: PluginScreenProps["navigation"]; onBack?: () => void }) {
+function OverseerPane({ theme, compact, o, focus = 0, pending = null, agentId, deps, navigation, onBack }: { theme: Theme; compact: boolean; o: OverseerRowState; focus?: number; pending?: string | null; agentId: string | null; deps: HomeDeps; navigation: PluginScreenProps["navigation"]; onBack?: () => void }) {
   const c = theme.colors; const t = text(c);
   const toast = useToast();
   const { inbox, extras } = deps.sources;
@@ -314,11 +336,13 @@ function OverseerPane({ theme, compact, o, agentId, deps, navigation, onBack }: 
       {tail.steps === null ? <Spinner color={c.foregroundMuted} size={12} label="Loading the conversation" />
         : tail.steps.length === 0 ? <Text style={t.meta}>{tail.error ? `Couldn't load the conversation: ${tail.error}` : "Nothing yet. Ask it what needs you, or give it a task for one of your agents."}</Text>
         : tail.steps.map((step, i) => <Step key={i} step={step} c={c} last={i === tail.steps!.length - 1} />)}
-      {o.state === "running" && <Spinner color={c.foregroundMuted} size={12} label="The Overseer is working" />}
+      {/* An ask just sent from the omnibox, until the conversation shows it. */}
+      {pending && tail.steps && !tail.steps.some(x => x.kind === "you" && x.text.trim() === pending) && <Step step={{ kind: "you", text: pending }} c={c} last={false} />}
+      {(o.state === "running" || pending && tail.steps && !tail.steps.some(x => x.kind === "you" && x.text.trim() === pending)) && <Spinner color={c.foregroundMuted} size={12} label="The Overseer is working" />}
       {/* Its open ask, after the conversation that led to it. Only something Tom can act on; never "No ask stated". */}
       {b && agentId && (b.kind === "decision" && b.decisions.some(d => d.options.length) || b.kind === "action") ? <BriefCard {...({ embedded: true, item: { data: b }, theme, layout: { compact }, agentId, deps: deps.briefDeps } as unknown as Parameters<typeof BriefCard>[0])} /> : null}
     </ScrollView>
-    {agentId && <ReplyBox theme={theme} compact={compact} agentName="the Overseer" placeholder="Ask or give a task: “assign reviewers on all ready PRs”" hint={null}
+    {agentId && <ReplyBox theme={theme} compact={compact} agentName="the Overseer" placeholder="Ask or give a task: “assign reviewers on all ready PRs”" hint={null} focus={focus}
       onSend={async message => { await agent.handle!.send(message); inbox.refresh(); }} />}
   </View>;
 }
@@ -363,8 +387,20 @@ function PermissionBlock({ p, theme, compact, busy, primary, onRespond }: { p: P
 }
 
 /** The reply box. Sending is the developer writing to the agent, which clears Needs you (binding rule). */
-function ReplyBox({ theme, compact, agentName, onSend, placeholder = "Answer in your own words", hint = "Sending clears Needs you. Sign off & next moves on without a reply." }: { theme: Theme; compact: boolean; agentName: string; onSend: (text: string) => Promise<void>; placeholder?: string; hint?: string | null }) {
+function ReplyBox({ theme, compact, agentName, onSend, placeholder = "Answer in your own words", hint = "Sending clears Needs you. Sign off & next moves on without a reply.", focus = 0 }: { theme: Theme; compact: boolean; agentName: string; onSend: (text: string) => Promise<void>; placeholder?: string; hint?: string | null; focus?: number }) {
   const c = theme.colors;
+  const inputRef = useRef<TextInput | null>(null);
+  // Focus when asked to (⌘K), never on a plain mount. The closing command palette hands focus back to where it was,
+  // after us, so keep claiming it for a moment until it sticks.
+  useEffect(() => {
+    if (!focus) return;
+    const timers = [0, 150, 400, 800, 1400].map(ms => setTimeout(() => {
+      const doc = (globalThis as { document?: { activeElement?: unknown } }).document;
+      const input = inputRef.current as unknown;
+      if (!doc || doc.activeElement !== input) inputRef.current?.focus();
+    }, ms));
+    return () => timers.forEach(clearTimeout);
+  }, [focus]);
   const toast = useToast();
   const [value, setValue] = useState("");
   const [sending, setSending] = useState(false);
@@ -377,7 +413,7 @@ function ReplyBox({ theme, compact, agentName, onSend, placeholder = "Answer in 
   };
   return <View style={{ padding: compact ? 12 : 14, borderTopWidth: 1, borderTopColor: c.border, gap: 6 }}>
     <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 10, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1, paddingLeft: 12, paddingRight: 6, paddingVertical: 6 }}>
-      <TextInput accessibilityLabel={`Reply to ${agentName}`} value={value} onChangeText={setValue} placeholder={placeholder} placeholderTextColor={c.foregroundMuted} multiline
+      <TextInput ref={inputRef} accessibilityLabel={`Reply to ${agentName}`} value={value} onChangeText={setValue} placeholder={placeholder} placeholderTextColor={c.foregroundMuted} multiline
         onKeyPress={e => { const k = e.nativeEvent as unknown as { key: string; metaKey?: boolean; ctrlKey?: boolean }; if (k.key === "Enter" && (k.metaKey || k.ctrlKey)) void send(); }}
         style={{ flex: 1, minHeight: compact ? 44 : 36, maxHeight: 140, color: c.foreground, fontSize: 14, lineHeight: 20, paddingVertical: 6, ...(Platform.OS === "web" ? { outlineStyle: "none" } as object : {}) }} />
       <IconButton theme={theme} compact={compact} icon="ArrowUp" label="Send" disabled={!value.trim() || sending} spinning={sending} onPress={() => void send()} color={value.trim() ? c.foreground : undefined} />
