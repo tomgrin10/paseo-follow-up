@@ -101,7 +101,7 @@ try {
   await mutate(d => { d.prs[21].reviewDecision = 'APPROVED'; });
   w = await refresh();
   plan = await call('follow.prepare-pr-action', { workspaceId: preview.workspaceId, prKey: 'example/app#21', kind: 'merge' });
-  assert.deepEqual(plan.prs[0].blockers, ['GitHub says branch protection or a ruleset blocks it']);
+  assert.deepEqual(plan.prs[0].blockers, ['A branch protection rule or ruleset']);
   // Ready: GitHub reports CLEAN.
   await mutate(d => { d.prs[21].mergeStateStatus = 'CLEAN'; });
   w = await refresh();
@@ -141,7 +141,10 @@ try {
       }
       await capture('panel', mobile);
       await page.getByRole('button', { name: new RegExp('^Pull request 21: ') }).first().click();
-      await page.getByText('Auto-merge').first().waitFor();
+      await page.getByRole('button', { name: 'Merge #21' }).first().waitFor();
+      // GitHub refuses auto-merge on a PR it can already merge, so a ready PR shows Merge alone.
+      assert.equal(await page.getByRole('dialog').getByText('Auto-merge', { exact: true }).count(), 0, 'no Auto-merge switch next to an enabled Merge');
+      await page.getByText('Open on GitHub', { exact: true }).first().waitFor();
       assert.equal(await page.getByText('Open in Graphite').count(), 0, 'no Graphite link in GitHub mode');
       assert.equal(await page.getByRole('dialog').getByText(/graphite/i).count(), 0, 'nothing on the sheet mentions Graphite');
       await capture('pr-sheet', mobile);
@@ -150,6 +153,18 @@ try {
       await capture('merge-confirm', mobile);
       await page.keyboard.press('Escape');
     }
+
+    // ── Waiting on GitHub (behind its base): no Merge, the reason as a noun phrase, and the Auto-merge switch.
+    await mutate(d => { d.prs[21].mergeStateStatus = 'BEHIND'; });
+    w = await refresh();
+    await page.setViewportSize({ width: 1440, height: 1000 }); await open();
+    await page.getByRole('button', { name: new RegExp('^Pull request 21: ') }).first().click();
+    await page.getByText('Merge opens when it clears: behind its base branch (update the branch).').first().waitFor();
+    await page.getByRole('dialog').getByText('Auto-merge', { exact: true }).first().waitFor();
+    await capture('pr-sheet-waiting', false);
+    await page.keyboard.press('Escape');
+    await mutate(d => { d.prs[21].mergeStateStatus = 'CLEAN'; });
+    w = await refresh();
 
     // ── Auto-merge on, then off, through the same plan/confirm path the switch uses.
     plan = await call('follow.prepare-pr-action', { workspaceId: preview.workspaceId, prKey: 'example/app#21', kind: 'enable_mwr' });

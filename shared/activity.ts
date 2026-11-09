@@ -1,6 +1,7 @@
 import type { Workspace } from "./model";
 import { recoveryBatch } from "./follow-up";
 import { shortRefs } from "./attention";
+import { isGithubFlow } from "./pr-actions";
 
 export type ActivityTone = "merged" | "success" | "warning" | "danger" | "muted";
 export type Activity = { key: string; at: string; icon: string; tone: ActivityTone; text: string; detail: string | null; took: string | null };
@@ -39,7 +40,8 @@ export function activity(w: Workspace): Activity[] {
     rows.push({ key: `merged:${p.key}`, at: p.snapshot.mergedAt, icon: "GitMerge", tone: "merged", text: `#${p.number} merged`, detail: p.snapshot.title, took: null });
   for (const a of w.prActions) {
     const numbers = a.prs.map(key => `#${key.split("#")[1]}`).join(", ");
-    const what = a.kind === "merge" ? `Merge requested for ${numbers}` : a.kind === "request_reviewers" ? `Reviewers requested on ${numbers}` : a.kind === "enable_mwr" ? `Merge when ready on for ${numbers}` : `Merge when ready off for ${numbers}`;
+    const toggle = isGithubFlow(w.prs.find(p => p.key === a.prs[0])?.snapshot) ? "Auto-merge" : "Merge when ready";
+    const what = a.kind === "merge" ? `Merge requested for ${numbers}` : a.kind === "request_reviewers" ? `Reviewers requested on ${numbers}` : a.kind === "enable_mwr" ? `${toggle} on for ${numbers}` : `${toggle} off for ${numbers}`;
     rows.push({ key: `action:${a.id}`, at: a.createdAt, icon: a.kind === "request_reviewers" ? "UserPlus" : "GitMerge", tone: a.state === "failed" ? "danger" : a.state === "uncertain" ? "warning" : "muted", text: what, detail: a.state === "submitted" ? null : a.result || null, took: null });
   }
   for (const q of w.questions ?? []) {

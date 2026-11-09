@@ -152,9 +152,9 @@ test("GitHub mode: Merge is offered when GitHub says it's mergeable, with no Gra
 test("GitHub mode: blockers name GitHub's cause and fix, never Graphite", () => {
   const cases: [Partial<Snapshot>, RegExp][] = [
     [{ mergeStateStatus: "BEHIND" }, /update the branch/],
-    [{ mergeStateStatus: "BLOCKED", threads: [{ id: "t", updatedAt: "x" }] }, /Resolve 1 review thread/],
-    [{ mergeStateStatus: "BLOCKED" }, /branch protection or a ruleset/],
-    [{ mergeStateStatus: "UNKNOWN" }, /still checking/],
+    [{ mergeStateStatus: "BLOCKED", threads: [{ id: "t", updatedAt: "x" }] }, /1 unresolved review thread/],
+    [{ mergeStateStatus: "BLOCKED" }, /branch protection rule or ruleset/],
+    [{ mergeStateStatus: "UNKNOWN" }, /mergeability check/],
     [{ reviewDecision: "CHANGES_REQUESTED", mergeStateStatus: "BLOCKED" }, /Changes requested/],
     [{ inMergeQueue: true }, /merge queue/],
   ];
@@ -164,6 +164,30 @@ test("GitHub mode: blockers name GitHub's cause and fix, never Graphite", () => 
     assert.doesNotMatch(blockers.join(" "), GRAPHITE_WORDS);
   }
   assert.deepEqual(mergeBlockers(pr({ snapshot: ghSnapshot({ mergeStateStatus: "UNSTABLE" }) })), [], "optional checks failing still merges");
+});
+
+test("GitHub mode: the sheet's Merge and Needs you agree; a draft, conflicted or red PR is never offered Merge", async () => {
+  const { mergeReady } = await import("../shared/attention");
+  for (const patch of [{ draft: true, mergeStateStatus: "DRAFT" }, { conflict: true, mergeStateStatus: "DIRTY" }, { failedChecks: ["ci"], mergeStateStatus: "BLOCKED" }, { checksPending: true, mergeStateStatus: "BLOCKED" }, { mergeStateStatus: "BEHIND" }] as Partial<Snapshot>[]) {
+    const p = pr({ snapshot: ghSnapshot(patch) });
+    const w = workspace({ prs: [p] });
+    assert.equal(mergeReady(p, w), false, JSON.stringify(patch));
+    assert.ok(!needsYou(w).some(i => i.kind === "merge"), JSON.stringify(patch));
+  }
+  const ready = pr({ snapshot: ghSnapshot() });
+  assert.equal(mergeReady(ready, workspace({ prs: [ready] })), true);
+});
+
+test("GitHub mode: the timeline says Auto-merge, not Merge when ready", async () => {
+  const { activity } = await import("../shared/activity");
+  const action = (key: string) => ({ id: `a-${key}`, kind: "enable_mwr" as const, prs: [key], heads: {}, createdAt: "2026-01-01T00:00:00Z", state: "submitted" as const, result: "" });
+  const gh = pr({ snapshot: ghSnapshot() });
+  const rows = activity(workspace({ prs: [gh], prActions: [action(gh.key)] })).map(r => r.text).join(" ");
+  assert.match(rows, /Auto-merge on for/);
+  assert.doesNotMatch(rows, GRAPHITE_WORDS);
+  assert.doesNotMatch(rows, /Merge when ready/);
+  const graphite = pr({ snapshot: snapshot() });
+  assert.match(activity(workspace({ prs: [graphite], prActions: [action(graphite.key)] })).map(r => r.text).join(" "), /Merge when ready on for/);
 });
 
 // ── gh arguments ──────────────────────────────────────────────────────────────
