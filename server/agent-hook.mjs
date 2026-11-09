@@ -77,6 +77,20 @@ export function overseerDigest(file, seen, now = Date.now(), { needsMax = 20, ch
   for (const l of lines) { if (text.length + l.length + 1 > chars) { text += "- …truncated: use workstreams()\n"; break; } text += l + "\n"; }
   return { text: text.trimEnd(), seen: { at: now, rows: Object.fromEntries(all.map(r => [r.id, r.hash])) } };
 }
+/**
+ * How batches are worked, for this workspace's PR workflow (from scopes.json). Graphite with /fix-pr, and agents of an
+ * older worker that wrote no workflow, keep the original text; plain GitHub never mentions Graphite, gt or /fix-pr.
+ */
+export function batchParagraph(workflow) {
+  const mode = workflow?.mode ?? "graphite";
+  const fix = workflow === undefined || workflow === null ? "/fix-pr" : workflow.reviewFix ?? null;
+  const steps = "Follow-through batches contain a batch ID and task list. Read workspace_status and refresh live conditions before acting; skip resolved tasks. Process dependent PRs bottom to top, one PR fully before the next.";
+  const review = fix ? `Use the repository's ${fix} workflow, validate feedback, verify changes,` : "For review comments, read the PR's unresolved threads with gh, validate the feedback, fix it and verify the change,";
+  const submit = mode === "graphite" ? "submit through Graphite with --publish" : "push the branch (gh pr create for a new PR, gh pr ready when it leaves draft)";
+  const reply = fix ? "reply/resolve addressed threads" : "reply to each addressed thread and resolve it";
+  const restack = mode === "graphite" ? "Follow the repository's safe reparent procedure for merged parents" : "Keep stacked PRs as a chain of base branches: restack with git rebase --update-refs and push with --force-with-lease, and when a parent merges retarget its child with gh pr edit --base if GitHub didn't already";
+  return `${steps} ${review} ${submit}, and ${reply}. ${restack} and preserve uncommitted work.`;
+}
 const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
 async function json(path) { return JSON.parse(await readFile(path, "utf8")); }
 async function save(path, value) {
@@ -85,10 +99,10 @@ async function save(path, value) {
   await writeFile(temporary, JSON.stringify(value), { mode: 0o600 });
   await rename(temporary, path);
 }
-function instructions(lease, contributor = false) {
-  return named(paragraphs(lease, contributor).filter(p => !(native && /^Prefer (?:the )?native/i.test(p))).join("\n\n"));
+function instructions(lease, contributor = false, workflow) {
+  return named(paragraphs(lease, contributor, workflow).filter(p => !(native && /^Prefer (?:the )?native/i.test(p))).join("\n\n"));
 }
-function paragraphs(lease, contributor) {
+function paragraphs(lease, contributor, workflow) {
   if (contributor) return [
     "Maintain PR tracking for this session in its tracked workspace. Read workspace_status now and after compaction. Register every PR you submit, including from secondary git worktrees, with register_pr; register parents before children. References and external dependencies are not owned PRs. Call sync_workspace before finishing. The designated main agent retains goal, task, scope and completion authority.",
     quietInstruction,
@@ -103,7 +117,7 @@ function paragraphs(lease, contributor) {
     "Keep actual follow-through tasks current with update_obligation: production behavior checks, migrations and decisions, with concise titles, PR dependencies and evidence. Do not add merge/approval/deploy checklist tasks. Deployment-dependent work waits for verified serving revisions and existing production permissions.",
     "Stakeholder replies are follow-through too. When asked to update a requester, capture the original Slack threadUrl, recipient and explicit developer authorization in the task's communication field; referenced messages alone do not authorize posting. Use a concise progress task now and, when needed, a verify-and-reply task with purpose=verified after the relevant deployed PRs. Read existing thread replies and refresh evidence before posting; distinguish fixed, deployed and verified. Record the actual sent replyUrl and result before marking done. If posting is unavailable or its outcome is uncertain, keep the task blocked and check the thread before any retry; never claim a draft was sent. Auto authorizes delivery to you, not external messages. Communication-only requests do not authorize repairs, benchmarks, migrations or other production writes.",
     "Tasks are manual unless explicitly scheduled with trigger={event:\"now\"|\"merge\"|\"deploy\",delayDays:0}. Only set a trigger from the developer\u2019s requested timing; never infer timing from a title or enable_follow_up alone. Merge/deploy triggers require owned afterPrs; delayDays=14 waits fourteen days after the last dependency event. Now requires no PR dependencies or delay. Deployment timing starts at the first verified fully serving observation and remains conservative when history is unknown. Preserve existing trigger fields on updates; trigger=null makes a task manual. Auto controls delivery, not timing or production permissions.",
-    "Follow-through batches contain a batch ID and task list. Read workspace_status and refresh live conditions before acting; skip resolved tasks. Process dependent PRs bottom to top, one PR fully before the next. Use the repository's /fix-pr workflow, validate feedback, verify changes, submit through Graphite with --publish, and reply/resolve addressed threads. Follow the repository's safe reparent procedure for merged parents and preserve uncommitted work. For post-deploy tasks, verify the currently serving revision contains every dependency and record behavioral results separately. Acknowledge the header's batch ID with acknowledge_batch before finishing: completed with the result, or blocked with the reason. Verify the entire goal and post-merge work before declare_done; acknowledge a completion batch first. Merging and archiving remain the developer's actions.",
+    batchParagraph(workflow) + " For post-deploy tasks, verify the currently serving revision contains every dependency and record behavioral results separately. Acknowledge the header's batch ID with acknowledge_batch before finishing: completed with the result, or blocked with the reason. Verify the entire goal and post-merge work before declare_done; acknowledge a completion batch first. Merging and archiving remain the developer's actions.",
     "Before ending this turn, reconcile the sidebar with what you actually did and call sync_workspace with a short summary, including when no changes are needed. Acknowledge any assigned batch. When the entire goal is fulfilled, use declare_done; otherwise preserve remaining work. Do not launch recovery, start queued repairs, merge, toggle merge-when-ready, or archive as part of this bookkeeping. Auto still governs separate follow-up sends. Subagents report to the main agent instead of claiming workspace ownership.",
     `Prefer the native follow-through MCP tools. For a full historical record, use workspace_status with detail=full. CLI compatibility fallback: FOLLOW_THROUGH_CLIENT_ENTRY=${quote(lease.clientEntry)} node ${quote(join(directory, "mcp.mjs"))} call <tool> '<json>' --compact. Omit --compact only when an existing script needs the full response. Never ask the developer to maintain the sidebar or run this bridge.`,
   ];
@@ -157,8 +171,8 @@ async function main() {
   }
   // scopes.json is a few KB; this hook runs on every tool call. Older workers don't write it: read state.json.
   const scopes = await json(join(directory, "scopes.json")).catch(() => null);
-  let workspace = null; let contributor = false;
-  if (scopes?.agents) { const entry = scopes.agents[agentId]; if (entry && entry.role !== "recovery") { workspace = { id: entry.workspaceId }; contributor = entry.role === "contributor"; } }
+  let workspace = null; let contributor = false; let workflow;
+  if (scopes?.agents) { const entry = scopes.agents[agentId]; if (entry && entry.role !== "recovery") { workspace = { id: entry.workspaceId }; contributor = entry.role === "contributor"; workflow = entry.workflow; } }
   else {
     const state = await json(join(directory, "state.json")).catch(() => ({ workspaces: [] }));
     workspace = state.workspaces.find(w => (w.mainAgentId === agentId || w.contributorAgentIds?.includes(agentId)) && w.enable_tracking && !w.archived) ?? null;
@@ -168,7 +182,7 @@ async function main() {
   const provider = process.env.FOLLOW_THROUGH_BRIEF || null;
   const brief = provider ? await json(join(directory, "brief.json")).catch(() => null) : null;
   if (!workspace && !(brief?.enable_inbox && brief?.enable_brief_nudge) && !(native && process.env.FOLLOW_THROUGH_ROOT === "1")) return;
-  const context = () => instructions(lease, contributor);
+  const context = () => instructions(lease, contributor, workflow);
   const sessionText = async () => [workspace ? context() : null, ...await nativeExtras(brief)].filter(Boolean).join("\n\n");
   const name = event.hook_event_name;
   if (!["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"].includes(name)) return;

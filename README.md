@@ -20,7 +20,7 @@ Screenshots use synthetic workspaces and PRs.
 paseo plugin install paseo-follow-up
 ```
 
-Needs Node 22+ and an authenticated GitHub CLI (`gh`) on the daemon host. Merge buttons use your saved Graphite CLI authentication. The installed plugin ID stays `follow-through`, so existing settings and tracked work carry over.
+Needs Node 22+ and an authenticated GitHub CLI (`gh`) on the daemon host. The installed plugin ID stays `follow-through`, so existing settings and tracked work carry over.
 
 ## Getting started
 
@@ -44,11 +44,19 @@ The panel shows this workspace only, top to bottom: a **Home** button, the main 
 
 - **Status.** How many PRs have merged, how many things need you, how many PRs need fixing, and a bar with one segment per PR in merge order. Below it, what the agent is doing right now.
 - **Needs you.** One row per decision, each with its button: answer the agent's question, send repairs to the main agent, merge an approved PR, resume after you stopped the agent, or retry a batch that didn't finish.
-- **Pull requests.** Each stack drawn top to base, the way Graphite shows it, with merged PRs folded away.
+- **Pull requests.** Each stack drawn top to base, with merged PRs folded away.
 - **Tasks.** Work that outlives a merge, such as a production check or a backfill. Tasks wait for you unless you schedule them for after a merge or deploy.
 - **Activity.** What happened and how long it took: repairs sent and finished, merges, merge and reviewer actions, and every question under its ref.
 
 The **Spec** chip in the header opens the page that sums up the workspace, usually the Claude artifact the main agent keeps up to date. The agent registers it with a tool call, Follow-up also picks up artifacts the workspace's sessions publish, and you can set, change or remove it under **Spec, agent and recovery**. Your link wins over the agent's, which wins over detection.
+
+## Works with GitHub; Graphite optional
+
+Follow-up works with plain GitHub out of the box: readiness comes from GitHub itself (its merge state, required checks, reviews, unresolved threads, branch protection and rulesets, and the merge queue if the repository has one), **Merge** runs `gh pr merge` with a merge method the repository allows, and **Auto-merge** is GitHub's own auto-merge. Stacks are chains of base branches: a PR whose base is another PR's branch sits on top of it, a stack merges bottom to top, and after a parent merges Follow-up retargets the child to trunk with `gh pr edit --base` if GitHub didn't already.
+
+If you use [Graphite](https://graphite.dev), Follow-up picks it up per repository: **Auto** chooses Graphite where the `gt` CLI is on the daemon's PATH, signed in, and the repository was set up with `gt init`; everywhere else it's GitHub. Detection only looks at files (it never runs `gt`) and is cached for ten minutes. In Graphite repositories, Merge goes through Graphite with your saved CLI sign-in, and Merge when ready works through the Send to Paseo companion (below).
+
+Auto is the default for every repository. Agents get instructions for the workflow their workspace uses, so a GitHub workspace never hears about Graphite, and they address review comments with Follow-up's built-in steps (read the unresolved threads with `gh`, fix, push, reply and resolve) unless an install already had a `/fix-pr` command or skill in `~/.claude`, which it keeps using.
 
 ![Four Follow-up panels side by side: a workspace that needs you, one where the agent is fixing two repairs and one that has shipped](docs/screenshots/follow-up-states.png)
 
@@ -236,11 +244,11 @@ Tools that act on a list, and merge, return a dry run first and act only when ca
 
 ## Send to Paseo and Graphite
 
-With [Send to Paseo](https://github.com/tomgrin10/send-to-paseo) on the same daemon, its composer picks the agent that registered the PR. With Send to Paseo 2.2+, Follow-up can also toggle Graphite's **Merge when ready** through your existing pairing, while Graphite is open and signed in. Each change is confirmed in Chrome, which can remember the permission per repository. With the next Send to Paseo release, its popover on a PR page also shows which tracked workspaces own the PR, with Follow-up's one line for each (for example "Needs you · Merge ready"), and opens the workspace's main agent in the Paseo app or web app. See the [integration and security contract](https://github.com/tomgrin10/send-to-paseo/blob/main/docs/follow-up-integration.md).
+With [Send to Paseo](https://github.com/tomgrin10/send-to-paseo) on the same daemon, its composer picks the agent that registered the PR. In Graphite repositories, with Send to Paseo 2.2+, Follow-up can also toggle Graphite's **Merge when ready** through your existing pairing, while Graphite is open and signed in. Each change is confirmed in Chrome, which can remember the permission per repository. With the next Send to Paseo release, its popover on a PR page also shows which tracked workspaces own the PR, with Follow-up's one line for each (for example "Needs you · Merge ready"), and opens the workspace's main agent in the Paseo app or web app. See the [integration and security contract](https://github.com/tomgrin10/send-to-paseo/blob/main/docs/follow-up-integration.md).
 
 ## Data and access
 
-Paseo plugins run trusted, unsandboxed code on the daemon host. Follow-up reads workspace metadata, agent history and GitHub PR status with your existing credentials, and keeps its state in `$PASEO_HOME/plugin-data/follow-through`. It registers scoped MCP tools and reversible provider hooks only for tracked sessions, plus the action tools for root agents (above). GitHub and Graphite writes happen only after an explicit click, or a root agent's confirmed plan, and a fresh eligibility check.
+Paseo plugins run trusted, unsandboxed code on the daemon host. Follow-up reads workspace metadata, agent history and GitHub PR status with your existing credentials, and keeps its state in `$PASEO_HOME/plugin-data/follow-through`. It registers scoped MCP tools and reversible provider hooks only for tracked sessions, plus the action tools for root agents (above). GitHub (and, in Graphite repositories, Graphite) writes happen only after an explicit click, or a root agent's confirmed plan, and a fresh eligibility check.
 
 ## Development
 
