@@ -2,6 +2,7 @@ import { projectSchema } from "./settings";
 import { MAX_REVIEWERS, REPO, reviewerConfigSchema, reviewerEntrySchema, reviewerListSchema } from "./reviewers";
 import { prioritySchema } from "./priorities";
 import { usageSchema } from "./usage";
+import { aboutViewSchema } from "./about";
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import { inboxRowSchema } from "./inbox";
@@ -75,6 +76,8 @@ export const setFollowSettingsRpc = defineRpc({ name: "follow.set-follow-setting
 /** External priorities for Home's Priority sort (written by the set_priorities agent tool). */
 export const prioritiesRpc = defineRpc({ name: "follow.priorities", input: z.object({}), output: z.object({ items: z.array(prioritySchema) }) });
 /** Provider session limits from the Smart Session plugin, for Home's meters. Hidden when it isn't installed. */
+/** "What's this about?": collapsed reads the cache; open may start an overview; refresh always does. */
+export const workspaceAboutRpc = defineRpc({ name: "follow.workspace-about", input: z.object({ workspaceId: idSchema, open: z.boolean().optional(), refresh: z.boolean().optional() }), output: aboutViewSchema });
 export const usageRpc = defineRpc({ name: "follow.usage", input: z.object({}), output: usageSchema });
 export const refineTasksRpc = defineRpc({ name: "follow.refine-tasks", input: z.object({ workspaceId: idSchema, tasks: z.array(z.object({ id: idSchema, title: textSchema, afterPrs: z.array(idSchema), dependencyStage: z.enum(["merged", "deployed"]), enable_follow_up: z.boolean(), communication: communicationSchema.optional(), trigger: taskTriggerSchema.nullable().optional() })).max(50) }), output: workspaceSchema });
 export const taskTriggerRpc = defineRpc({ name: "follow.set-task-trigger", input: z.object({ workspaceId: idSchema, obligationId: idSchema, expectedRevision: z.number().int().nonnegative(), trigger: taskTriggerSchema.nullable(), afterPrs: z.array(idSchema) }), output: workspaceSchema });
