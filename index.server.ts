@@ -46,6 +46,10 @@ import { ACTIVE_SCOPE_MIGRATION, PRUNE_MIGRATION, autoSendsByDefault, FOLLOW_EVE
 import { Overseer, OVERSEER_TOOLS, type OverseerPaseo, type OverseerTool } from "./server/overseer";
 import { OVERSEER_LABEL } from "./shared/overseer";
 import { pages, withDaemon } from "./server/daemon";
+import { AiJobs } from "./server/ai-jobs";
+import { AboutService, AboutStore, liveSources, rootHistory, type AboutContext } from "./server/about";
+import { readTranscript } from "./server/transcript";
+import type { LoadSignals } from "./shared/agent-load";
 import { BRIEF_KIND, BRIEF_VERSION, prState, validateNeedsYou, type Brief, type NeedsYouRecord } from "./shared/brief";
 
 export default function contribute(server: PluginServerContext) {
@@ -58,7 +62,8 @@ export default function contribute(server: PluginServerContext) {
   const store = new Store(directory, 1_000);
   store.onChanged = scopeWriter(directory);
   const agentHooks = new AgentHooks(directory, clientEntry());
-  const gateway = new PaseoGateway(undefined, undefined, undefined, HistoryCache.at(directory));
+  const historyCache = HistoryCache.at(directory);
+  const gateway = new PaseoGateway(undefined, undefined, undefined, historyCache);
   const graphite = new Graphite();
   const github = new Github(undefined, graphite, new Deployments());
   const browser = new BrowserBridge();
@@ -512,7 +517,64 @@ export default function contribute(server: PluginServerContext) {
     if (!(OVERSEER_TOOLS as readonly string[]).includes(tool)) throw new Error(`Unknown Overseer tool ${tool}.`);
     return overseer!.act(paseo as unknown as OverseerPaseo, agentId, tool as OverseerTool, args);
   });
-  const agentActions = new AgentActions({ store, prActions: actions, engine, inbox, priorities: priorityStore });
+  // "What's this about?": small model jobs through the shared runner, cached per workspace in about.json.
+  const aiJobs = new AiJobs({ concurrency: 1, logPath: join(directory, "ai-jobs.jsonl") });
+  // Agent metadata only (agents.list never loads an agent), cached for a minute and shared by every overview.
+  type AgentMeta = { id: string; title: string | null; parent: string | null; snapshot: LoadSignals };
+  let agentMeta: { at: number; rows: Map<string, AgentMeta> } | null = null;
+  const agentsMeta = async (paseo: PaseoApi) => {
+    if (agentMeta && Date.now() - agentMeta.at < 60_000) return agentMeta.rows;
+    const rows = new Map<string, AgentMeta>();
+    let cursor: string | null | undefined;
+    for (let i = 0; i < 5; i++) {
+      const page = await paseo.agents.list({ page: { limit: 200, ...(cursor ? { cursor } : {}) } });
+      for (const e of page.entries as unknown as { agent: LoadSignals & { id: string; title?: string | null; labels?: Record<string, string> } }[])
+        rows.set(e.agent.id, { id: e.agent.id, title: e.agent.title ?? null, parent: e.agent.labels?.["paseo.parent-agent-id"] ?? null, snapshot: e.agent });
+      if (!page.pageInfo.nextCursor || page.pageInfo.nextCursor === cursor) break;
+      cursor = page.pageInfo.nextCursor;
+    }
+    agentMeta = { at: Date.now(), rows };
+    return rows;
+  };
+  const aboutContext = (): AboutContext | null => {
+    const paseo = api;
+    if (!paseo) return null;
+    return {
+      async history(agentId, limit) {
+        const meta = (await agentsMeta(paseo)).get(agentId);
+        return rootHistory(meta?.snapshot, async () => {
+          const page = await paseo.agents.ref(agentId).timeline.refetch({ direction: "tail", limit, projection: "canonical" });
+          return [...(page as unknown as { entries: { seqStart: number; item: unknown }[] }).entries].sort((a, b) => a.seqStart - b.seqStart).map(e => e.item);
+        }, async () => { const disk = await readTranscript(paseoHome, agentId, limit); return disk ? { first: disk.first.map(i => i.text ?? ""), items: disk.tail } : null; });
+      },
+      async subagents(agentId) {
+        return [...(await agentsMeta(paseo)).values()].filter(r => r.parent === agentId && r.title).map(r => r.title!);
+      },
+    };
+  };
+  const about = new AboutService({
+    store: new AboutStore(directory), jobs: aiJobs, sources: liveSources(),
+    workspace: async id => (await store.snapshot()).workspaces.find(w => w.id === id && w.enable_tracking && !w.archived) ?? null,
+    context: aboutContext, usage: () => usage.read(),
+    firstMessage: async agentId => { await historyCache.load(); return historyCache.get(agentId)?.history.goal ?? null; }, roomForBackground: async () => governor.allowsBackground(), roomOnDemand: async () => governor.allowsExtras(),
+  });
+  server.handle(rpc.workspaceAboutRpc, async ({ workspaceId, open, refresh }, { paseo }) => { await requireReady(); seen(paseo); return about.view(workspaceId, { open, refresh }); });
+  // Pre-write overviews for what's in Needs you, so opening one there is instant. Every 10 minutes, capped per day.
+  let aboutTimer: ReturnType<typeof setTimeout> | null = null;
+  const aboutLoop = async () => {
+    await ready;
+    if (stopped || loadError) return;
+    try {
+      const rows = (await inbox.list()).rows.filter(r => r.needs && !r.snooze);
+      const state = await store.snapshot();
+      // Needs you only, and never dormant workspaces.
+      const ids = [...new Set(rows.map(r => state.workspaces.find(w => w.enable_tracking && !w.archived && !w.dormant && w.mainAgentId === r.agentId)?.id).filter((x): x is string => !!x))];
+      await about.background(ids);
+    } catch { /* background only; the section writes on open */ }
+    if (!stopped) aboutTimer = setTimeout(() => void aboutLoop(), 10 * 60_000);
+  };
+  aboutTimer = setTimeout(() => void aboutLoop(), 60_000);
+  const agentActions = new AgentActions({ store, prActions: actions, engine, inbox, priorities: priorityStore, about });
   server.handle(rpc.prioritiesRpc, async () => ({ items: await priorityStore.read() }));
   // Provider limits are non-essential: at critical memory only the VM meter is served.
   server.handle(rpc.usageRpc, async () => ({ ...(governor.allowsExtras() ? await usage.read() : NO_USAGE), resources: governor.current() }));
@@ -681,7 +743,7 @@ export default function contribute(server: PluginServerContext) {
     server.on("workspace.archived", async event => { await ready; if (!loadError && !stopped) await store.mutate(state => { const w = state.workspaces.find(w => w.id === event.workspace.id); if (w) w.archived = true; }); }),
   ];
   return async () => {
-    stopped = true; governor.stop(); if (timer) clearTimeout(timer); if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
+    stopped = true; governor.stop(); if (timer) clearTimeout(timer); if (aboutTimer) clearTimeout(aboutTimer); aiJobs.stop(); if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
     await ready; if (hooksStarted) await agentHooks.stop().catch(() => {});
     await actions.close(); await closeConnections(); await engine.stop(); await ready; await store.flush().catch(() => undefined); await unlock?.();
   };

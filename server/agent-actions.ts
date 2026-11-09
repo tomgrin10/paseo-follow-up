@@ -10,6 +10,7 @@ import { configuredReviewers, reviewerLoginSchema, noReviewers, resolveReviewers
 import { findWorkspace } from "./engine";
 import type { InboxAction } from "./inbox";
 import { priorityInputSchema, type Priority } from "../shared/priorities";
+import type { AboutView } from "../shared/about";
 
 /**
  * Agent parity: every action the developer can click in Follow-up has a tool that runs the same server path.
@@ -19,10 +20,10 @@ import { priorityInputSchema, type Priority } from "../shared/priorities";
  * return a dry-run plan first; `confirm: true` with that plan's id runs it. Every agent write is recorded in
  * the inbox ledger as `by: "agent:<id>"`, which never counts as the developer writing to the agent.
  */
-export const AGENT_TOOLS = ["list_prs", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "track", "inbox_list", "sign_off", "snooze", "set_finish_flags", "set_priorities"] as const;
+export const AGENT_TOOLS = ["list_prs", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "track", "inbox_list", "sign_off", "snooze", "set_finish_flags", "set_priorities", "workspace_about"] as const;
 export type AgentTool = typeof AGENT_TOOLS[number];
 /** Tools that only read. */
-export const READ_ONLY_TOOLS: readonly AgentTool[] = ["list_prs", "inbox_list"];
+export const READ_ONLY_TOOLS: readonly AgentTool[] = ["list_prs", "inbox_list", "workspace_about"];
 /** Tools that can't be undone from Follow-up. */
 export const DESTRUCTIVE_TOOLS: readonly AgentTool[] = ["merge"];
 /** Tools that plan first and run only with `confirm: true` and the plan's id. */
@@ -63,6 +64,8 @@ export type AgentActionDeps = {
   };
   reviewersFor?: (repo: string) => ReviewerEntry[];
   priorities?: { write(batch: Priority[], replace: boolean): Promise<Priority[]> };
+  /** "What's this about?": the overview and links for one workspace, written now if there is none yet. */
+  about?: { view(workspaceId: string, opts: { open?: boolean; wait?: boolean }): Promise<AboutView> };
   now?: () => number;
 };
 
@@ -83,6 +86,7 @@ export const TOOL_INPUT: Record<AgentTool, z.ZodType> = {
   retry_batch: z.strictObject({ workspace: id, batchId: id }),
   track: z.strictObject({ workspace: id }),
   inbox_list: z.strictObject({ flagged_only: z.boolean().optional() }),
+  workspace_about: z.strictObject({ workspaceId: id }),
   sign_off: z.strictObject({ agentIds: agentIds.optional(), ...confirm }),
   snooze: z.strictObject({ agentIds: agentIds.optional(), until: z.string().trim().min(1).max(200).optional(), ...confirm }),
   set_finish_flags: z.strictObject({ agentIds: agentIds.optional(), value: z.boolean().optional(), ...confirm }),
@@ -122,6 +126,7 @@ export class AgentActions {
     switch (tool) {
       case "list_prs": return this.listPrs(args);
       case "inbox_list": return this.inboxList(caller, args);
+      case "workspace_about": return this.workspaceAbout(args as { workspaceId: string });
       case "add_reviewers": return this.planReviewers(caller, args);
       case "merge": return this.planPr(caller, tool, "merge", args);
       case "enable_merge_when_ready": return this.planPr(caller, tool, "enable_mwr", args);
@@ -161,6 +166,19 @@ export class AgentActions {
     if (plan.tool !== tool || plan.caller !== caller) throw new Error("This plan belongs to a different tool or agent. Run the dry run again.");
     this.plans.delete(planId);
     return plan.run();
+  }
+
+  /** Read-only: the cached overview and links, or a fresh one when none is cached (waits for it). */
+  private async workspaceAbout(args: { workspaceId: string }) {
+    if (!this.d.about) throw new Error("workspace_about isn't available in this Follow-up.");
+    const state = await this.d.store.snapshot();
+    const w = this.tracked(state).find(w => w.id === args.workspaceId || w.title === args.workspaceId);
+    if (!w) throw new Error(`No tracked workspace matches ${args.workspaceId}.`);
+    const view = await this.d.about.view(w.id, { open: true, wait: true });
+    const r = view.record;
+    return { workspaceId: w.id, title: w.title, status: view.status, gist: r?.gist ?? null, overview: r?.overview ?? null, generatedAt: r?.generatedAt ?? null,
+      links: (r?.links ?? view.links).map(l => ({ kind: l.kind, key: l.key, url: l.url, title: l.title, state: l.state, priority: l.priority, due: l.due, who: l.who })),
+      failedSources: r?.failed ?? [], error: view.error };
   }
 
   private async listPrs(args: { workspace?: string; needs_reviewers?: boolean; ready_to_merge?: boolean; include_closed?: boolean }) {
