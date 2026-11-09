@@ -52,6 +52,8 @@ import { pages, withDaemon } from "./server/daemon";
 import { AiJobs } from "./server/ai-jobs";
 import { AboutService, AboutStore, liveSources, rootHistory, type AboutContext } from "./server/about";
 import { readTranscript } from "./server/transcript";
+import { AgentSettingsStore, ProviderCatalog, type CatalogSource } from "./server/agent-settings";
+import { labelsFor, providerName, resolveRole, roleSummary, type AgentSettingsView } from "./shared/agent-settings";
 import type { LoadSignals } from "./shared/agent-load";
 import { BRIEF_KIND, BRIEF_VERSION, prState, validateNeedsYou, type Brief, type NeedsYouRecord } from "./shared/brief";
 
@@ -70,6 +72,9 @@ export default function contribute(server: PluginServerContext) {
   const agentHooks = new AgentHooks(directory, clientEntry());
   const historyCache = HistoryCache.at(directory);
   const gateway = new PaseoGateway(undefined, undefined, undefined, historyCache);
+  // Settings → Agents: which agent each special role uses, in agents.json (defaults when absent).
+  const agentSettings = new AgentSettingsStore(directory);
+  gateway.recoveryRole = () => agentSettings.role("recovery");
   const graphite = new Graphite();
   const github = new Github(undefined, graphite, new Deployments());
   const browser = new BrowserBridge();
@@ -538,11 +543,41 @@ export default function contribute(server: PluginServerContext) {
   };
   const overseerOn = async () => (await inboxSettings()).enable_overseer !== false;
   overseer = new Overseer({ directory, store, inbox, priorities: priorityStore, workspaces: paseoWorkspaces, enabled: overseerOn, paseoHome, tight: async () => !governor.allowsBackground(),
-    windowMs: async () => activeWindowMs(await store.snapshot()), provider: process.env.FOLLOW_UP_OVERSEER_PROVIDER || undefined });
-  const overseerStatus = async () => { const s = await overseer!.state(); return { enabled: await overseerOn(), agentId: s.agentId, workspaceId: s.workspaceId, startedAt: s.startedAt, generation: s.generation, error: s.error }; };
+    windowMs: async () => activeWindowMs(await store.snapshot()), agent: () => agentSettings.role("overseer"),
+    // Harness override only (isolated test daemons): "provider/model" wins over Settings → Agents.
+    provider: process.env.FOLLOW_UP_OVERSEER_PROVIDER || undefined });
+  const overseerStatus = async () => {
+    const [s, info] = await Promise.all([overseer!.state(), overseer!.agentInfo()]);
+    // Labels from the last catalog Settings read (never fetched here: this is polled), so both surfaces say the same.
+    const catalog = providerCatalog.peek();
+    const runningModel = info.running?.model.replace(/^[^/]+\//, "") ?? "";
+    const running = info.running ? { ...resolveRole(null, "overseer"), provider: info.running.provider, model: runningModel || null } : null;
+    const model = running ? (runningModel ? roleSummary(running, labelsFor(running, catalog)) : `${providerName(running.provider, labelsFor(running, catalog).provider)} · Opus`) : null;
+    const role = await agentSettings.role("overseer");
+    const configured = roleSummary(role, labelsFor(role, catalog));
+    return { enabled: await overseerOn(), agentId: s.agentId, workspaceId: s.workspaceId, startedAt: s.startedAt, generation: s.generation, error: s.error,
+      model, restartWith: info.restart ? configured : null, configured };
+  };
   handle(rpc.overseerStatusRpc, async () => { await requireReady(); return overseerStatus(); });
   handle(rpc.overseerStartRpc, async (_input, { paseo }) => { await requireReady(); seen(paseo); await overseer!.start(paseo as unknown as OverseerPaseo); return overseerStatus(); });
   handle(rpc.overseerAskRpc, async ({ text }, { paseo }) => { await requireReady(); seen(paseo); await overseer!.ask(paseo as unknown as OverseerPaseo, text); return overseerStatus(); });
+  handle(rpc.overseerRestartRpc, async (_input, { paseo }) => { await requireReady(); seen(paseo); await overseer!.restart(paseo as unknown as OverseerPaseo); return overseerStatus(); });
+  // The provider catalog for Settings → Agents: read only when that screen asks, cached ten minutes.
+  const providerCatalog = new ProviderCatalog(async () => {
+    const paseo = api;
+    if (!paseo) throw new Error("Paseo isn't connected yet");
+    // Paseo discovers providers lazily: on the first read they're still loading, so wait a little for them.
+    const snapshot = await paseo.providers.snapshot() as unknown as { entries?: { status?: string }[] };
+    if (!snapshot.entries?.some(e => e.status === "loading")) return snapshot as Awaited<ReturnType<CatalogSource>>;
+    return await paseo.providers.waitForReady({ timeoutMs: 8000 }).catch(() => snapshot) as unknown as Awaited<ReturnType<CatalogSource>>;
+  });
+  const agentSettingsView = async (catalog: boolean, fresh = false): Promise<AgentSettingsView> => {
+    const [{ invalid }, roles] = await Promise.all([agentSettings.load(), agentSettings.all()]);
+    const cat = catalog ? await providerCatalog.read(fresh) : null;
+    return { roles: Object.values(roles).map(r => ({ ...r, summary: roleSummary(r, labelsFor(r, cat)) })), invalid, catalog: cat };
+  };
+  handle(rpc.agentSettingsRpc, async ({ catalog, fresh }, { paseo }) => { await requireReady(); seen(paseo); return agentSettingsView(!!catalog, !!fresh); });
+  handle(rpc.setAgentSettingRpc, async ({ role, entry }, { paseo }) => { await requireReady(); seen(paseo); await agentSettings.save(role, entry); return agentSettingsView(true); });
   handle(rpc.overseerActRpc, async ({ agentId, tool, args }, { paseo }) => {
     await requireReady(); seen(paseo);
     if (!(OVERSEER_TOOLS as readonly string[]).includes(tool)) throw new Error(`Unknown Overseer tool ${tool}.`);
@@ -584,6 +619,7 @@ export default function contribute(server: PluginServerContext) {
     };
   };
   const about = new AboutService({
+    role: () => agentSettings.role("about"),
     store: new AboutStore(directory), jobs: aiJobs, sources: liveSources(),
     workspace: async id => (await store.snapshot()).workspaces.find(w => w.id === id && w.enable_tracking && !w.archived) ?? null,
     context: aboutContext, usage: () => usage.read(),
@@ -605,7 +641,7 @@ export default function contribute(server: PluginServerContext) {
     if (!stopped) aboutTimer = setTimeout(() => void aboutLoop(), 10 * 60_000);
   };
   aboutTimer = setTimeout(() => void aboutLoop(), 60_000);
-  const agentActions = new AgentActions({ store, prActions: actions, engine, inbox, priorities: priorityStore, about });
+  const agentActions = new AgentActions({ store, prActions: actions, engine, inbox, priorities: priorityStore, about, agentSettings });
   handle(rpc.prioritiesRpc, async () => ({ items: await priorityStore.read() }));
   // Provider limits are non-essential: at critical memory only the VM meter is served.
   handle(rpc.usageRpc, async () => ({ ...(governor.allowsExtras() ? await usage.read() : NO_USAGE), resources: governor.current() }));
@@ -705,9 +741,9 @@ export default function contribute(server: PluginServerContext) {
       await ready;
       if (loadError || stopped || request.purpose !== "interactive") return request;
       // The Overseer: needs_you (no Stop-hook nudge), the action tools and its routing tools. Never tracked.
-      if (request.labels[OVERSEER_LABEL] === "1" && request.provider !== "codex") {
-        const env = { ...request.env, FOLLOW_THROUGH_OVERSEER: "1", FOLLOW_THROUGH_BRIEF: "claude" };
-        return withTools({ ...request, env }, false, "claude", true, true);
+      if (request.labels[OVERSEER_LABEL] === "1" && ["claude", "codex"].includes(request.provider)) {
+        const env = { ...request.env, FOLLOW_THROUGH_OVERSEER: "1", FOLLOW_THROUGH_BRIEF: request.provider };
+        return withTools({ ...request, env }, false, request.provider, true, true);
       }
       const saved = await store.snapshot();
       let w = saved.workspaces.find(w => w.enable_tracking && !w.archived && (w.mainAgentId === request.agentId || w.batches.some(b => b.recipientAgentId === request.agentId && !b.settledAt && b.tasks.every(t => t.kind === "inventory") && ["sending", "sent", "uncertain", "blocked"].includes(b.state))));

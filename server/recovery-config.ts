@@ -29,3 +29,20 @@ export async function recoveryConfig(home: string, main: Agent): Promise<Config>
   if (main.features) config.featureValues = { ...config.featureValues, ...Object.fromEntries(main.features.map(feature => [feature.id, feature.value])) };
   return config;
 }
+
+export type RecoveryRole = { same: boolean; provider: string; model: string | null; thinking: string | null; mode: string | null };
+
+/**
+ * Applies Settings → Agents' "recovery" role to the main agent's copied configuration. "Same as main agent" (the
+ * default) changes nothing. Another provider drops everything provider-specific (model, mode, effort, features,
+ * provider options) and keeps the system prompt, MCP servers and tool policy.
+ */
+export function applyRecoveryRole(main: Pick<Agent, "provider" | "model">, config: Config, role: RecoveryRole | null): { provider: string; model: string | null; config: Config } {
+  if (!role || role.same) return { provider: main.provider, model: main.model ?? null, config };
+  const next: Config = { ...config };
+  if (role.provider !== main.provider) { delete next.model; delete next.modeId; delete next.thinkingOptionId; delete next.featureValues; delete next.providerOptions; }
+  if (role.model) next.model = role.model; else if (role.provider !== main.provider) delete next.model;
+  if (role.thinking) next.thinkingOptionId = role.thinking;
+  if (role.mode) next.modeId = role.mode;
+  return { provider: role.provider, model: role.model ?? (role.provider === main.provider ? main.model ?? null : null), config: next };
+}

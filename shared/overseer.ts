@@ -25,6 +25,11 @@ export const overseerStateSchema = z.object({
   generation: z.number().int().nonnegative(),
   /** Set when the last recreation failed, shown on the pinned row. */
   error: z.string().nullable().default(null),
+  /**
+   * What it was created with (Settings → Agents). `key` is the setting it came from ("claude" = the default, newest
+   * Opus); a different key offers a restart. Older states have none and count as the default.
+   */
+  agent: z.object({ key: z.string(), provider: z.string(), model: z.string(), thinking: z.string().nullable(), mode: z.string().nullable() }).nullable().optional(),
 });
 export type OverseerState = z.infer<typeof overseerStateSchema>;
 export const EMPTY_OVERSEER: OverseerState = { version: 1, agentId: null, workspaceId: null, startedAt: null, generation: 0, error: null };

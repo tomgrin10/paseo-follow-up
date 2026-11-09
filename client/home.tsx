@@ -100,7 +100,7 @@ export function FollowHome(props: PluginScreenProps & { deps: HomeDeps }) {
   if (params.view === "log") return <LogView theme={theme} compact={compact} sources={deps.sources} onHome={deps.openHome} onOpen={key => { setSelected(key); deps.openHome(); }} />;
 
   const detail = selected === OVERSEER_KEY && overseer
-    ? <OverseerPane theme={theme} compact={compact} o={overseer} focus={replyFocus} pending={pendingAsk} agentId={overseerStatus?.agentId ?? null} deps={deps} navigation={navigation} onBack={compact ? () => setSelected(null) : undefined} />
+    ? <OverseerPane theme={theme} compact={compact} o={overseer} focus={replyFocus} pending={pendingAsk} agentId={overseerStatus?.agentId ?? null} model={overseerStatus?.model ?? null} restartWith={overseerStatus?.restartWith ?? null} configured={overseerStatus?.configured ?? null} deps={deps} navigation={navigation} onBack={compact ? () => setSelected(null) : undefined} />
     : current
     ? <DetailPane key={current.key} s={current} model={model} theme={theme} compact={compact} deps={deps} openFull={openFull} signOffNext={signOffNext} onBack={compact ? () => setSelected(null) : undefined} />
     : <BriefPane theme={theme} compact={compact} pane={pane} onSelect={key => setSelected(key)} openLog={deps.openLog} sources={deps.sources} />;
@@ -296,7 +296,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
  * The Overseer's conversation on Home (1.4.0-beta.0): the tail and a reply box, like any agent's detail pane, plus its
  * decision card when it asks which agent should get a task. Before the first start, one Start button.
  */
-function OverseerPane({ theme, compact, o, focus = 0, pending = null, agentId, deps, navigation, onBack }: { theme: Theme; compact: boolean; o: OverseerRowState; focus?: number; pending?: string | null; agentId: string | null; deps: HomeDeps; navigation: PluginScreenProps["navigation"]; onBack?: () => void }) {
+function OverseerPane({ theme, compact, o, focus = 0, pending = null, agentId, model, restartWith, configured, deps, navigation, onBack }: { theme: Theme; compact: boolean; o: OverseerRowState; focus?: number; pending?: string | null; agentId: string | null; model: string | null; restartWith: string | null; configured: string | null; deps: HomeDeps; navigation: PluginScreenProps["navigation"]; onBack?: () => void }) {
   const c = theme.colors; const t = text(c);
   const toast = useToast();
   const { inbox, extras } = deps.sources;
@@ -307,6 +307,11 @@ function OverseerPane({ theme, compact, o, focus = 0, pending = null, agentId, d
   const brief = useQuery({ queryKey: ["follow-through", "overseer-brief", agentId, row?.seq ?? 0], queryFn: () => readBrief({ agentId: agentId! }), enabled: !!agentId && !!row?.brief });
   const b = brief.data?.brief?.state === "open" ? brief.data.brief : null;
   const [starting, setStarting] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const restart = async () => {
+    if (restarting) return; setRestarting(true);
+    try { const next = await extras.restartOverseer(); toast.show(`The Overseer now runs on ${next?.model ?? restartWith}; its recent conversation was handed over`, { variant: "success" }); } catch (e) { toast.error(errorText(e)); } finally { setRestarting(false); }
+  };
   const start = async () => {
     if (starting) return; setStarting(true);
     try { await extras.startOverseer(); toast.show("The Overseer is ready", { variant: "success" }); } catch (e) { toast.error(errorText(e)); } finally { setStarting(false); }
@@ -315,17 +320,23 @@ function OverseerPane({ theme, compact, o, focus = 0, pending = null, agentId, d
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       {onBack && <IconButton theme={theme} compact icon="ChevronLeft" label="Back to Home" onPress={onBack} />}
       <Icon name="MessagesSquare" size={16} color={c.foreground} />
-      <Text accessibilityRole="header" style={[t.title, { flex: 1, fontSize: 16 }]}>Overseer</Text>
+      <Text accessibilityRole="header" style={[t.title, { fontSize: 16 }]}>Overseer</Text>
+      <Text numberOfLines={1} style={[t.meta, { flex: 1, minWidth: 0 }]}>{model ?? ""}</Text>
       {agentId && navigation && (compact
         ? <IconButton theme={theme} compact icon="PanelRightOpen" label="Open full" onPress={() => navigation.openAgent({ agentId })} />
         : <Button theme={theme} icon="PanelRightOpen" title="Open full" accessibilityHint="Opens the Overseer's whole chat" onPress={() => navigation.openAgent({ agentId })} />)}
     </View>
+    {/* Settings → Agents changed: offered, never done mid-conversation on its own. */}
+    {agentId && restartWith && <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap", paddingTop: 6 }}>
+      <Text style={[t.meta, { flex: 1, minWidth: 180 }]}>{`Running ${model ?? "its first model"} · Settings say ${restartWith}`}</Text>
+      <Button theme={theme} compact={compact} icon="RefreshCw" title={`Restart with ${short(restartWith)}`} accessibilityHint={`Starts a new Overseer on ${restartWith} and hands it the recent conversation`} loading={restarting} onPress={() => void restart()} />
+    </View>}
   </View>;
   if (o.state === "start") return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
     {header}
     <ScrollView contentContainerStyle={{ padding: compact ? 16 : 20, gap: 12 }}>
-      <Text style={[t.body, { fontSize: 15, lineHeight: 22 }]}>One Claude agent that knows every workspace's state. Tell it "the PRs look good, assign reviewers on all" or "tell the SCIM agent to use option B", and it finds the right agent and passes it on.</Text>
-      <Text style={t.meta}>It never merges, posts to people or archives. It starts a new workspace only when you say so. It runs on Opus in its own workspace, which stays off your lists.</Text>
+      <Text style={[t.body, { fontSize: 15, lineHeight: 22 }]}>One agent that knows every workspace's state. Tell it "the PRs look good, assign reviewers on all" or "tell the SCIM agent to use option B", and it finds the right agent and passes it on.</Text>
+      <Text style={t.meta}>It never merges, posts to people or archives. It starts a new workspace only when you say so. It runs on {configured ?? "Claude · Newest Opus"} in its own workspace, which stays off your lists. Change the model in Follow-up settings → Agents.</Text>
       <View style={{ flexDirection: "row" }}><Button theme={theme} compact={compact} kind="primary" icon="Play" title="Start the Overseer" loading={starting} onPress={() => void start()} /></View>
     </ScrollView>
   </View>;
@@ -346,6 +357,9 @@ function OverseerPane({ theme, compact, o, focus = 0, pending = null, agentId, d
       onSend={async message => { await agent.handle!.send(message); inbox.refresh(); }} />}
   </View>;
 }
+
+/** "Codex · GPT-6-Luna · low" → "GPT-6-Luna · low": the button already says it's the Overseer's provider change. */
+const short = (summary: string) => summary.split(" · ").slice(1).join(" · ") || summary;
 
 function Step({ step, c, last }: { step: TailStep; c: Colors; last: boolean }) {
   const t = text(c);

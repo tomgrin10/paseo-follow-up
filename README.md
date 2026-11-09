@@ -152,6 +152,19 @@ Turn it off under Settings → **Overseer (beta)**. While it's off, search has n
 
 ![Home's search with "scim" typed: the matching workspace, then the active row "Ask the Overseer: scim" with an Enter hint](docs/media/overseer/omnibox-ask-dark.png)
 
+### Choosing models
+
+Settings → **Agents** has one card for each agent Follow-up runs for you. Each card says what the agent does and what it uses now ("Claude · Haiku"). It lets you pick the provider, model, effort and, for full agents, the permission mode, and each card has **Reset to default**. The list comes from the providers and models Paseo knows about, read when you open the screen. Providers that aren't installed or are turned off are listed with the reason.
+
+| Agent | Default | Notes |
+|---|---|---|
+| What's this about? | Claude · Haiku | One small call per overview, no tools. Claude (`claude -p`) or Codex (`codex exec`). Also sets how many overviews are written ahead per day (60). |
+| Overseer | Claude · newest Opus, Bypass | A change applies when you restart it. Its pane on Home offers **Restart with …**, and the new Overseer gets the old one's last steps. |
+| Recovery | Same as main agent | Or pick a provider and model. Switching provider keeps the main agent's tools and instructions. |
+| Priority ranker | Claude · Sonnet, hourly, up to 24 a day | One call per run, no tools. Claude or Codex. |
+
+The choices live in `agents.json` in Follow-up's data folder. Anything missing or invalid there falls back to the default. Agents can read the choices with the read-only `agent_settings` tool. The About footer names the model that wrote each overview ("Summarized by Haiku · 2h ago").
+
 ![Home with the Overseer selected: the pinned row asks which agent should take a broken export, and the pane shows the conversation, the routed task and the decision with two candidates plus New workspace](docs/media/overseer/overseer-dark.png)
 
 Install the beta:

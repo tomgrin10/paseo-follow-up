@@ -214,7 +214,7 @@ export async function enrichLinks(links: AboutLink[], sources: AboutSources): Pr
   return { links: out.filter((l): l is AboutLink => !!l), failed: [...failed], issues, prBodies };
 }
 
-export function overviewPrompt(inputs: AboutInputs, extra: { issues: { key: string; title: string; description: string }[]; prBodies: { key: string; title: string; body: string }[] }): string {
+export function overviewPrompt(inputs: AboutInputs, extra: { issues: { key: string; title: string; description: string }[]; prBodies: { key: string; title: string; body: string }[] }, cap: number = LIMITS.promptChars): string {
   const section = (title: string, lines: string[]) => lines.length ? `## ${title}\n${lines.join("\n")}\n` : "";
   const prompt = [
     "You write the \"What's this about?\" note for one workspace in a developer's agent dashboard. The developer (Tom) opens it when the workspace name alone doesn't remind him what it is.",
@@ -230,7 +230,7 @@ export function overviewPrompt(inputs: AboutInputs, extra: { issues: { key: stri
     section("Subagents it launched", inputs.subagents.map(s => `- ${s}`)),
     section(`The latest conversation (last ${inputs.tail.length} items, oldest first)`, inputs.tail),
   ].join("\n");
-  return prompt.length > LIMITS.promptChars ? prompt.slice(0, LIMITS.promptChars) : prompt;
+  return prompt.length > cap ? prompt.slice(0, cap) : prompt;
 }
 
 // ---------- the store and the service ----------
@@ -283,6 +283,8 @@ export type AboutDeps = {
   roomForBackground?(): Promise<boolean>;
   /** Writing on open or Refresh only below the governor's higher threshold; above it, the cache is served. */
   roomOnDemand?(): Promise<boolean>;
+  /** The "about" role from Settings → Agents: provider, model, effort, daily cap and prompt cap. Default: Claude Haiku, 60 a day. */
+  role?(): Promise<{ provider: string; model: string | null; thinking: string | null; dailyCap: number | null; maxPromptChars: number | null }>;
   now?: () => number;
 };
 
@@ -344,6 +346,7 @@ export class AboutService {
     if (!usageAllows(usage.accounts)) return { started: 0, skipped: "usage" };
     const ctx = this.deps.context();
     if (!ctx) return { started: 0, skipped: "no-session" };
+    const cap = (await this.role()).dailyCap ?? DAILY_BACKGROUND_CAP;
     let started = 0;
     for (const id of workspaceIds) {
       if (this.inflight.has(id)) continue;
@@ -355,7 +358,7 @@ export class AboutService {
       const inputs = await collectInputs(w, ctx);
       const hash = inputsHash(inputs);
       if (!needsOverview(file.entries[id] ?? null, hash, this.now(), { failedAt: file.failures[id]?.at ?? null })) continue;
-      const budget = await this.deps.store.mutate(f => { const b = dailyBudget(f.daily, this.now(), DAILY_BACKGROUND_CAP); if (b.allowed) f.daily = b.next; return b.allowed; });
+      const budget = await this.deps.store.mutate(f => { const b = dailyBudget(f.daily, this.now(), cap); if (b.allowed) f.daily = b.next; return b.allowed; });
       if (!budget) return { started, skipped: "daily-cap" };
       // One at a time: the job runner's concurrency is shared with whatever the developer opens.
       await this.start(w, inputs, hash);
@@ -364,10 +367,17 @@ export class AboutService {
     return { started, skipped: null };
   }
 
+  private async role() {
+    const fallback = { provider: "claude", model: "haiku", thinking: null, dailyCap: DAILY_BACKGROUND_CAP, maxPromptChars: LIMITS.promptChars };
+    return this.deps.role ? await this.deps.role().catch(() => fallback) : fallback;
+  }
+
   private start(w: Workspace, inputs: AboutInputs, hash: string): Promise<void> {
     const work = (async () => {
       const enriched = await enrichLinks(workspaceLinks(inputs), this.deps.sources);
-      const result = await this.deps.jobs.run<OverviewOutput>({ name: "about", prompt: overviewPrompt(inputs, enriched), schema: overviewOutputSchema, maxOutputChars: 2000, timeoutMs: 90_000 });
+      const role = await this.role();
+      const result = await this.deps.jobs.run<OverviewOutput>({ name: "about", provider: role.provider, ...(role.model ? { model: role.model } : {}), thinking: role.thinking,
+        prompt: overviewPrompt(inputs, enriched, role.maxPromptChars ?? LIMITS.promptChars), maxPromptChars: Math.max(role.maxPromptChars ?? LIMITS.promptChars, LIMITS.promptChars), schema: overviewOutputSchema, maxOutputChars: 2000, timeoutMs: 90_000 });
       const at = this.now();
       if (!result.ok) { await this.deps.store.mutate(f => { f.failures[w.id] = { at, error: result.error }; }); return; }
       const record: AboutRecord = {
@@ -376,6 +386,7 @@ export class AboutService {
         links: enriched.links,
         basis: { chat: inputs.tail.length > 0, source: inputs.source, prs: inputs.prs.length, issues: enriched.issues.map(i => i.key) },
         failed: enriched.failed, costUsd: result.costUsd,
+        by: { provider: role.provider, model: role.model ?? role.provider },
       };
       await this.deps.store.mutate(f => { f.entries[w.id] = record; delete f.failures[w.id]; });
     })().catch(async error => { await this.deps.store.mutate(f => { f.failures[w.id] = { at: this.now(), error: (error instanceof Error ? error.message : String(error)).slice(0, 300) }; }).catch(() => undefined); })

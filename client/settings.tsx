@@ -9,6 +9,7 @@ import { followSettingsRpc, projectSettingsRpc, setFollowSettingsRpc, setProject
 import { errorText, text } from "./kit";
 import { DisplaySections } from "./display";
 import { ReviewerSettings } from "./reviewers";
+import { AgentSettings } from "./agents";
 
 const settingsKey = ["follow-through", "project-settings"];
 
@@ -119,6 +120,7 @@ export function FollowSettings({ theme, layout }: PluginSurfaceProps) {
     <SettingsSection title="Reviewers" info="Who Add reviewers asks on a PR. Set a list per repository, or a default for every repository without one. A login is a GitHub user (octocat) or a team (org/team). Teammates each keep their own lists.">
       <ReviewerSettings theme={theme} compact={layout.compact} />
     </SettingsSection>
+    <AgentSettings theme={theme} compact={layout.compact} />
     <QuestionSettings theme={theme} />
     <DisplaySections theme={theme} />
   </ScrollView>;
