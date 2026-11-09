@@ -51,7 +51,9 @@ try {
     await new Promise(r => setTimeout(r, 250));
   }
   await mkdir(join(home, "plugin-data/follow-through"), { recursive: true });
-  await writeFile(join(home, "plugin-data/follow-through/state.json"), JSON.stringify({ version: 1, workspaces: [{ id: w.id, title: "Follow-through POC test", goal: "Follow-through POC test", mainAgentId: agent.id, enable_auto_follow_up: true, hold: null, archived: false, prs: [], obligations: [], batches: [], completion: null, updatedAt: new Date().toISOString(), managedDoneLabel: false, runtimeReason: null, runtimeBusy: false, backgroundBusy: false, inventory: null }] }));
+  // This suite drives explicit activation, so Follow every workspace is off (and its one-time migration already
+  // done); tests/home-beta2.test.ts covers the default-on rule and the migration.
+  await writeFile(join(home, "plugin-data/follow-through/state.json"), JSON.stringify({ version: 1, enable_follow_every: false, migrations: ["follow-every-1"], workspaces: [{ id: w.id, title: "Follow-through POC test", goal: "Follow-through POC test", mainAgentId: agent.id, enable_auto_follow_up: true, hold: null, archived: false, prs: [], obligations: [], batches: [], completion: null, updatedAt: new Date().toISOString(), managedDoneLabel: false, runtimeReason: null, runtimeBusy: false, backgroundBusy: false, inventory: null }] }));
   await cli("plugin", "install", plugin);
   assert.ok(!(await cli("plugin", "ls")).some(p => p.id === "send-to-paseo"), "the complete lifecycle suite runs without the companion");
   assert.equal((await call("follow.browser-status", {})).ready, false);
