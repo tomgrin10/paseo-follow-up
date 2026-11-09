@@ -326,6 +326,27 @@ test("a permission answered within the grace period never flags", async () => {
   assert.equal((await inbox.store.snapshot()).entries.a1, undefined);
   await done();
 });
+test("the grace period on a mock clock: answered at 2.999 s never flags, unanswered at 3 s flags, a late answer clears it", async t => {
+  const dir = await mkdtemp(join(tmpdir(), "inbox-")); t.after(() => rm(dir, { recursive: true, force: true }));
+  const f = fake([agent({ id: "a1" }), agent({ id: "a2" })]);
+  // The production default grace (no graceMs); only setTimeout is mocked, so store I/O stays real.
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const inbox = new Inbox(dir, { enabled: async () => ({ enable_inbox: true, enable_inbox_pr_closed: true }), directory: f.directory, sources: f.none, guard: async () => null, now: () => Date.parse(at(1)) });
+  await mark(inbox);
+  const a1 = { id: "a1", workspaceId: "w1" }; const a2 = { id: "a2", workspaceId: "w1" };
+  const answered = inbox.permissionRequested(a1, { id: "p1", title: "Allow?" });
+  const unanswered = inbox.permissionRequested(a2, { id: "p2", title: "Allow?" });
+  t.mock.timers.tick(2_999);
+  await inbox.permissionResolved(a1, "p1");
+  await answered;
+  t.mock.timers.tick(1);
+  await unanswered;
+  const s = await inbox.store.snapshot();
+  assert.equal(s.entries.a1, undefined, "answered inside the grace period: never flagged");
+  assert.deepEqual(needs(s.entries.a2), ["permission"], "unanswered at the end of the grace period: flagged");
+  await inbox.permissionResolved(a2, "p2");
+  assert.deepEqual(needs((await inbox.store.snapshot()).entries.a2), [], "answered after flagging: cleared");
+});
 test("sign-off clears Paseo's unread dot too (D8), and a batch sign-off has one undo", async () => {
   const { inbox, cleared, done } = await service([agent({ id: "a1" }), agent({ id: "a2" })]);
   await mark(inbox);
