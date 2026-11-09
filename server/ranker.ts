@@ -112,11 +112,12 @@ export function parseSlackSearch(text: string, self: string | null): RankMessage
 /** `gh search prs --review-requested=@me --json number,title,url,repository,author`. */
 export function parseReviewRequests(stdout: string): RankReview[] {
   let j: unknown; try { j = JSON.parse(stdout); } catch { return []; }
-  if (!Array.isArray(j)) return [];
-  return j.flatMap(raw => {
-    const r = raw as { number?: unknown; title?: unknown; url?: unknown; repository?: { nameWithOwner?: unknown; name?: unknown }; author?: { login?: unknown } };
-    const repo = str(r.repository?.nameWithOwner) ?? str(r.repository?.name);
-    return typeof r.number === "number" && repo && str(r.title) ? [{ repo, number: r.number, title: str(r.title)!, url: str(r.url), author: str(r.author?.login) }] : [];
+  // REST `search/issues` ({items}) or `gh search prs --json` (an array).
+  const list = Array.isArray(j) ? j : Array.isArray((j as { items?: unknown })?.items) ? (j as { items: unknown[] }).items : [];
+  return list.flatMap(raw => {
+    const r = raw as { number?: unknown; title?: unknown; url?: unknown; html_url?: unknown; repository_url?: unknown; repository?: { nameWithOwner?: unknown; name?: unknown }; author?: { login?: unknown }; user?: { login?: unknown } };
+    const repo = str(r.repository?.nameWithOwner) ?? str(r.repository?.name) ?? /\/repos\/([^/]+\/[^/]+)$/.exec(str(r.repository_url) ?? "")?.[1] ?? null;
+    return typeof r.number === "number" && repo && str(r.title) ? [{ repo, number: r.number, title: str(r.title)!, url: str(r.html_url) ?? str(r.url), author: str(r.author?.login) ?? str(r.user?.login) }] : [];
   });
 }
 
@@ -198,17 +199,20 @@ export function liveRankSources(jobs: AiJobs, opts: { run?: Run; slackSelf?: str
       // that one gh child only, never stored.
       const status = await run("gh", ["auth", "status", "--hostname", "github.com"], 15_000).catch(e => String((e as { stdout?: string; stderr?: string }).stdout ?? "") + String((e as { stderr?: string }).stderr ?? ""));
       const accounts = ghAccounts(status);
-      const search = (env?: Record<string, string>) => run("gh", ["search", "prs", "--review-requested=@me", "--state=open", "--limit=30", "--json", "number,title,url,repository,author"], 30_000, env).then(parseReviewRequests);
+      // REST search: `gh search prs` goes through GraphQL search, whose secondary limit a busy work account hits often
+      // (it then read as "no review requests").
+      const search = (env?: Record<string, string>) => run("gh", ["api", "-X", "GET", "search/issues", "-f", "q=is:pr is:open archived:false review-requested:@me", "-f", "per_page=30"], 30_000, env).then(parseReviewRequests);
       if (accounts.length <= 1) return search();
-      const seen = new Set<string>(); const out: RankReview[] = []; let read = 0;
+      const seen = new Set<string>(); const out: RankReview[] = []; let read = 0; let failed = 0;
       for (const user of accounts) {
         try {
           const token = (await run("gh", ["auth", "token", "--hostname", "github.com", "--user", user], 15_000)).trim();
           for (const r of await search(token ? { GH_TOKEN: token } : undefined)) { const k = `${r.repo}#${r.number}`; if (!seen.has(k)) { seen.add(k); out.push(r); } }
           read++;
-        } catch { /* that account can't search; the others still count */ }
+        } catch { failed++; /* the others still count */ }
       }
-      if (!read) throw new Error("No gh account could search review requests.");
+      // An account that couldn't search may hold the requests: none found plus a failure is a failure, not "none".
+      if (!read || (failed && !out.length)) throw new Error(`${failed} gh account(s) couldn't search review requests.`);
       return out;
     },
     async planning(url) {
