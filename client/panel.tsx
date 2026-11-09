@@ -97,8 +97,9 @@ function MainAsk({ w, theme, compact, inbox, briefDeps }: { w: Workspace; theme:
   const readBrief = useRpc(inboxBriefRpc);
   const brief = useQuery({ queryKey: ["follow-through", "home-brief", w.mainAgentId, row?.seq ?? 0], queryFn: () => readBrief({ agentId: w.mainAgentId }), enabled: !!row?.needs && !!row?.brief });
   const b = brief.data?.brief?.state === "open" ? brief.data.brief : null;
-  if (!row?.needs || row.snooze || !b) return null;
-  return <View style={{ marginHorizontal: compact ? 16 : 12, marginTop: 4 }}>
+  // "No ask stated" only repeats the chat beside it; the panel shows real asks.
+  if (!row?.needs || row.snooze || !b || b.source === "none") return null;
+  return <View style={{ marginHorizontal: compact ? 16 : 12, marginTop: 8 }}>
     <BriefCard {...({ item: { data: b }, theme, layout: { compact }, agentId: w.mainAgentId, deps: briefDeps } as unknown as Parameters<typeof BriefCard>[0])} />
   </View>;
 }
@@ -109,11 +110,9 @@ function PanelWorkspace(props: PanelProps & { workspace: Workspace; loadError?: 
   const toggle = (key: string) => { const next = isOpen(key) ? state.open.filter(k => k !== key) : [...state.open, key]; sessionFolds.set(props.workspaceId, next); setState({ open: next }); };
   const { openLarge } = props;
   const compact = props.layout.compact;
-  const top = <>
-    <PanelTop theme={props.theme} compact={compact} openOverview={props.openOverview} />
-    {props.inbox && props.briefDeps && <MainAsk w={props.workspace} theme={props.theme} compact={compact} inbox={props.inbox} briefDeps={props.briefDeps} />}
-  </>;
-  return <WorkspaceView {...props} top={top} folds={{ isOpen, toggle }} resize={openLarge ? { icon: "Maximize2", label: "Open the larger view", onPress: () => openLarge(props.workspaceId) } : null} />;
+  const top = <PanelTop theme={props.theme} compact={compact} openOverview={props.openOverview} />;
+  const ask = props.inbox && props.briefDeps ? <MainAsk w={props.workspace} theme={props.theme} compact={compact} inbox={props.inbox} briefDeps={props.briefDeps} /> : null;
+  return <WorkspaceView {...props} top={top} ask={ask} folds={{ isOpen, toggle }} resize={openLarge ? { icon: "Maximize2", label: "Open the larger view", onPress: () => openLarge(props.workspaceId) } : null} />;
 }
 
 
@@ -235,8 +234,8 @@ const folds = z.object({ open: z.array(z.string()) });
 /** Two columns from this content width: actions on the left, the stacks on the right. */
 export const WIDE_MIN = 820;
 
-export function WorkspaceView({ theme, layout, workspace: w, navigation, loadError, openSettings, openOverview, folds: { isOpen, toggle }, resize, large = false, top }: PluginHostProps & {
-  navigation?: PluginWorkspacePanelProps["navigation"]; workspace: Workspace; loadError?: string | null; openSettings: () => void; openOverview: () => void; top?: ReactNode;
+export function WorkspaceView({ theme, layout, workspace: w, navigation, loadError, openSettings, openOverview, folds: { isOpen, toggle }, resize, large = false, top, ask }: PluginHostProps & {
+  navigation?: PluginWorkspacePanelProps["navigation"]; workspace: Workspace; loadError?: string | null; openSettings: () => void; openOverview: () => void; top?: ReactNode; ask?: ReactNode;
   folds: Folds; resize: { icon: "Maximize2" | "Minimize2"; label: string; onPress: () => void } | null; large?: boolean;
 }) {
   const control = useRpc(controlRpc); const refresh = useRpc(refreshRpc); const browserRead = useRpc(browserStatusRpc);
@@ -274,6 +273,7 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
     {top}
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20, ...(large ? { maxWidth: 1240, width: "100%", alignSelf: "center", paddingHorizontal: 12 } : null) }}>
       {header}
+      {ask}
       {wide ? <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
         <View style={{ flex: 5, minWidth: 0 }}>{shipped}{needs}{agent}{history}{tasks}</View>
         <View style={{ flex: 6, minWidth: 0 }}>{stacks}{log}{extras}</View>
