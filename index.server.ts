@@ -7,7 +7,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import * as rpc from "./shared/contracts";
-import { browserRepositories, prOwner } from "./server/pr-owner";
+import { browserRepositories, browserWorkspaces, prClaims, prOwner } from "./server/pr-owner";
 import { type Workspace } from "./shared/model";
 import { isWorkspaceRoot } from "./server/workspace-agent";
 import { Store } from "./server/store";
@@ -193,6 +193,17 @@ export default function contribute(server: PluginServerContext) {
     const agent = (await paseo.agents.ref(owner.agentId).refresh())?.agent;
     if (!agent || agent.archivedAt || agent.workspaceId !== owner.workspaceId) return { owner: null };
     return { owner };
+  });
+  server.handle(rpc.prWorkspacesRpc, async ({ repo, number }, { paseo }) => {
+    await requireReady();
+    const state = await store.snapshot();
+    if (!browserRepositories(state).includes(repo.toLowerCase())) return { tracked: false, workspaces: [], more: 0 };
+    const entries = await Promise.all(prClaims(state, repo, number).map(async workspace => {
+      const agent = (await paseo.agents.ref(workspace.mainAgentId).refresh().catch(() => null))?.agent;
+      return { workspace, agent: agent && !agent.archivedAt && agent.workspaceId === workspace.id ? agent : null };
+    }));
+    const view = browserWorkspaces(entries);
+    return { tracked: true, ...view, workspaces: view.workspaces.map(w => ({ ...w, title: w.title.slice(0, 200), agentStatus: w.agentStatus.slice(0, 40), state: w.state.slice(0, 200) })) };
   });
   server.handle(rpc.listRpc, async () => { await ready; return { workspaces: (await store.snapshot()).workspaces.filter(w => w.enable_tracking), error: loadError ?? hookError ?? engine.error }; });
   server.handle(rpc.getRpc, async ({ workspaceId }) => { await ready; return { workspace: (await store.snapshot()).workspaces.find(w => w.id === workspaceId && w.enable_tracking) ?? null, error: loadError ?? hookError ?? engine.error }; });

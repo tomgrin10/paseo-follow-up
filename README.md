@@ -146,7 +146,7 @@ Tools that act on a list, and merge, return a dry run first and act only when ca
 
 ## Send to Paseo and Graphite
 
-With [Send to Paseo](https://github.com/tomgrin10/send-to-paseo) on the same daemon, its composer picks the agent that registered the PR. With Send to Paseo 2.2+, Follow-up can also toggle Graphite's **Merge when ready** through your existing pairing, while Graphite is open and signed in. Each change is confirmed in Chrome, which can remember the permission per repository. See the [integration and security contract](https://github.com/tomgrin10/send-to-paseo/blob/main/docs/follow-up-integration.md).
+With [Send to Paseo](https://github.com/tomgrin10/send-to-paseo) on the same daemon, its composer picks the agent that registered the PR. With Send to Paseo 2.2+, Follow-up can also toggle Graphite's **Merge when ready** through your existing pairing, while Graphite is open and signed in. Each change is confirmed in Chrome, which can remember the permission per repository. With the next Send to Paseo release, its popover on a PR page also shows which tracked workspaces own the PR, with Follow-up's one line for each (for example "Needs you · Merge ready"), and opens the workspace's main agent in the Paseo app or web app. See the [integration and security contract](https://github.com/tomgrin10/send-to-paseo/blob/main/docs/follow-up-integration.md).
 
 ## Data and access
 
