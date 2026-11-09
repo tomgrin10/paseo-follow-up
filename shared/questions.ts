@@ -117,6 +117,23 @@ export function parseAnswerMessage(text: string): { id: string; title: string; c
   return match ? { id: match[1], title: match[2], choice: match[3].trim(), label: match[4]?.trim() ?? null, words: match[5]?.trim() ?? null } : null;
 }
 
+/**
+ * A multi-decision answer (1.4.0) parsed back for the chat card and the agent: one entry per decision, in order, with
+ * the picked letter and label, or `choice: null` for a decision the developer skipped.
+ */
+export function parseAnswersMessage(text: string): { title: string; answers: { id: string; question: string; choice: string | null; label: string | null }[] } | null {
+  const lines = text.trim().split("\n");
+  const head = /^Follow-up answer ((?:[QD]\d+, )+[QD]\d+) \((.*?)\): /.exec(lines[0] ?? "");
+  if (!head) return null;
+  const ids = head[1].split(", ");
+  const answers = ids.map(id => {
+    const line = lines.find(l => l.startsWith(`${id} (`));
+    const m = line ? /^[QD]\d+ \((.*?)\): (?:([A-Z]) — (.+)|skipped\b.*)$/.exec(line) : null;
+    return { id, question: m?.[1] ?? "", choice: m?.[2] ?? null, label: m?.[3]?.trim() ?? null };
+  });
+  return { title: head[2], answers };
+}
+
 /** The answer is a known option letter, or free words when the question has no options. */
 export function validChoice(q: Pick<Question, "options">, choice: string): boolean {
   return q.options.length ? q.options.some(o => o.letter === choice) : choice.trim().length > 0;

@@ -739,9 +739,9 @@ export default function contribute(server: PluginServerContext) {
     await rename(temporary, needsYouPath(agentId));
     return { ok: true as const, briefId: `brief:${turn?.turnId ?? record.at}` };
   });
-  handle(rpc.briefActionRpc, async ({ agentId, briefId, decisionId, choice, move }, { paseo }) => {
+  handle(rpc.briefActionRpc, async ({ agentId, briefId, decisionId, choice, choices, move }, { paseo }) => {
     await requireReady(); seen(paseo);
-    const brief = await inbox.briefAction(agentId, { briefId, decisionId, choice, move }, async (text, messageId) => {
+    const brief = await inbox.briefAction(agentId, { briefId, decisionId, choice, choices, move }, async (text, messageId) => {
       await paseo.agents.ref(agentId).send(text, { messageId, activeTurnBehavior: "steer" });
     });
     return { brief };
