@@ -134,7 +134,7 @@ export default function contribute(server: PluginServerContext) {
     if (stopped || loadError) return;
     // Critical memory: the inbox's background reads wait too; hooks still record live events.
     if (!governor.allowsExtras()) { if (!stopped) inboxTimer = setTimeout(() => void inboxLoop(), 15_000); return; }
-    try { await writeBriefState().catch(() => undefined); await inbox.tick(); await inbox.observeGuard(); await inbox.observeFollowUp(await store.snapshot()); inboxError = null; }
+    try { await writeBriefState().catch(() => undefined); await inbox.tick(); await inbox.reconcilePermissions(); await inbox.observeGuard(); await inbox.observeFollowUp(await store.snapshot()); inboxError = null; }
     catch (error) { inboxError = error instanceof Error ? error.message : "The Needs-you inbox couldn't update."; }
     if (!stopped) inboxTimer = setTimeout(() => void inboxLoop(), 15_000);
   };
