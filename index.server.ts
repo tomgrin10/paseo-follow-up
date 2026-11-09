@@ -52,6 +52,7 @@ import { OVERSEER_LABEL } from "./shared/overseer";
 import { withDaemon } from "./server/daemon";
 import { inboxAnswer } from "./server/etag";
 import { AiJobs } from "./server/ai-jobs";
+import { liveRankSources, planningUrl, Ranker, RANKER_ROLE_DEFAULT } from "./server/ranker";
 import { AboutService, AboutStore, liveSources, rootHistory, type AboutContext } from "./server/about";
 import { readTranscript } from "./server/transcript";
 import { AgentSettingsStore, ProviderCatalog, type CatalogSource } from "./server/agent-settings";
@@ -119,6 +120,7 @@ export default function contribute(server: PluginServerContext) {
   const needsYouPath = (agentId: string) => join(directory, "hook-state", `needs-you-${agentId}.json`);
   const trackedMain = async (agentId: string) => (await store.snapshot()).workspaces.find(w => w.enable_tracking && !w.archived && w.mainAgentId === agentId) ?? null;
   let overseer: Overseer | null = null;
+  let ranker: Ranker | null = null;
   const inbox: Inbox = new Inbox(directory, {
     enabled: inboxSettings,
     overseer: async () => (await overseer?.state())?.agentId ?? null,
@@ -177,6 +179,8 @@ export default function contribute(server: PluginServerContext) {
     catch (error) { inboxError = error instanceof Error ? error.message : "The Needs-you inbox couldn't update."; }
     // The Overseer's digest for its next turn, and its recreation if it was archived. Never blocks the inbox.
     if (overseer) { await overseer.writeDigest().catch(() => undefined); if (api) await overseer.ensure(api as unknown as OverseerPaseo, { periodic: true }).catch(() => undefined); }
+    // The ranker's scheduled run (window, cadence, cap and the governor are its own checks). Never awaited: it can take minutes.
+    if (ranker) void ranker.tick().catch(() => undefined);
     if (!stopped) inboxTimer = setTimeout(() => void inboxLoop(), 15_000);
   };
   // Hooks run in the background; an inbox failure never blocks the rest of Follow-up.
@@ -561,7 +565,8 @@ export default function contribute(server: PluginServerContext) {
   overseer = new Overseer({ directory, store, inbox, priorities: priorityStore, workspaces: paseoWorkspaces, enabled: overseerOn, paseoHome, tight: async () => !governor.allowsBackground(),
     windowMs: async () => activeWindowMs(await store.snapshot()), agent: () => agentSettings.role("overseer"),
     // Harness override only (isolated test daemons): "provider/model" wins over Settings → Agents.
-    provider: process.env.FOLLOW_UP_OVERSEER_PROVIDER || undefined });
+    provider: process.env.FOLLOW_UP_OVERSEER_PROVIDER || undefined,
+    rerank: async () => { if (!ranker) throw new Error("The ranker isn't ready yet."); return rankSummary(await ranker.run({ trigger: "overseer" })); } });
   const overseerStatus = async () => {
     const [s, info] = await Promise.all([overseer!.state(), overseer!.agentInfo()]);
     // Labels from the last catalog Settings read (never fetched here: this is polled), so both surfaces say the same.
@@ -601,6 +606,20 @@ export default function contribute(server: PluginServerContext) {
   });
   // "What's this about?": small model jobs through the shared runner, cached per workspace in about.json.
   const aiJobs = new AiJobs({ concurrency: 1, logPath: join(directory, "ai-jobs.jsonl") });
+  // The ranker behind Home's Priority sort (1.4.0-beta.0). Its provider, model and limits come from the ranker role
+  // in Settings → Agents. Inputs are read-only: Follow-up's state, mcpproxy, gh, the plan.
+  const rankerOn = async () => (await inboxSettings()).enable_ranker !== false;
+  const rankerRole = async () => {
+    const r = await agentSettings.role("ranker");
+    return { provider: r.provider, model: r.model, thinking: r.thinking, dailyCap: r.dailyCap ?? RANKER_ROLE_DEFAULT.dailyCap, maxPromptChars: r.maxPromptChars ?? RANKER_ROLE_DEFAULT.maxPromptChars, cadenceMinutes: r.cadenceMinutes ?? RANKER_ROLE_DEFAULT.cadenceMinutes };
+  };
+  ranker = new Ranker({ directory, jobs: aiJobs, priorities: priorityStore, role: rankerRole, enabled: rankerOn, tight: async () => !governor.allowsBackground(),
+    workstreams: () => overseer!.workstreams(), planningUrl: () => planningUrl(process.env.FOLLOW_UP_PLAN_URL),
+    sources: liveRankSources(aiJobs, { model: async () => { const r = await rankerRole(); return r.provider === "claude" ? r.model : null; } }) });
+  const rankSummary = (r: Awaited<ReturnType<Ranker["run"]>>) => ({ ok: r.ok, skipped: r.skipped, error: r.error, healthLine: r.healthLine, costUsd: r.costUsd, durationMs: r.durationMs,
+    top: r.priorities.slice(0, 10).map(p => ({ title: p.title, score: p.score, reason: p.reason })), notStarted: r.notStarted.length });
+  handle(rpc.rankStatusRpc, async () => { await requireReady(); return ranker!.status(); });
+  handle(rpc.rankNowRpc, async ({ force }) => { await requireReady(); return rankSummary(await ranker!.run({ trigger: "manual", force: !!force })); });
   // Agent metadata only (agents.list never loads an agent), cached for a minute and shared by every overview.
   type AgentMeta = { id: string; title: string | null; parent: string | null; snapshot: LoadSignals };
   let agentMeta: { at: number; rows: Map<string, AgentMeta> } | null = null;
@@ -838,7 +857,7 @@ export default function contribute(server: PluginServerContext) {
     server.on("workspace.archived", async event => { await ready; if (!loadError && !stopped) await store.mutate(state => { const w = state.workspaces.find(w => w.id === event.workspace.id); if (w) w.archived = true; }); }),
   ];
   return async () => {
-    stopped = true; governor.stop(); if (timer) clearTimeout(timer); if (aboutTimer) clearTimeout(aboutTimer); aiJobs.stop(); if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
+    stopped = true; governor.stop(); if (timer) clearTimeout(timer); if (aboutTimer) clearTimeout(aboutTimer); aiJobs.stop(); ranker = null; if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
     await ready; if (hooksStarted) await agentHooks.stop().catch(() => {});
     await actions.close(); await closeConnections(); await engine.stop(); await ready; await store.flush().catch(() => undefined); await unlock?.();
   };

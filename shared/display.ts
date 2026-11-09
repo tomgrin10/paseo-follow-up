@@ -16,7 +16,9 @@ export const displayPreferences = defineSettings({
     // R2: Claude Code root agents that end a turn without needs_you are asked once to state what you need.
     enable_brief_nudge: z.boolean().default(true),
     // 1.4.0-beta.0: the Overseer row on Home and its per-turn digest. Off never archives an existing Overseer.
-    enable_overseer: z.boolean().default(true) }),
+    enable_overseer: z.boolean().default(true),
+    // 1.4.0-beta.0: the ranker behind Home's Priority sort (Linear, Slack, GitHub reviews, the CPO's plan).
+    enable_ranker: z.boolean().default(true) }),
 });
 
 export const displayRpc = settingsRpc(displayPreferences.id);

@@ -1,5 +1,5 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
-import { overseerAskRpc, overseerRestartRpc, overseerStartRpc, overseerStatusRpc, prioritiesRpc, usageRpc } from "../shared/contracts";
+import { overseerAskRpc, overseerRestartRpc, overseerStartRpc, overseerStatusRpc, prioritiesRpc, rankNowRpc, rankStatusRpc, usageRpc } from "../shared/contracts";
 import type { RpcOutput } from "@getpaseo/plugin";
 import type { Priority } from "../shared/priorities";
 import { DEFAULT_SORT, isSortMode, type SortMode } from "../shared/sort";
@@ -29,6 +29,7 @@ export function createHomeExtras(client: PluginClientContext) {
   let priorities: Priority[] = [];
   let usage: Usage = NO_USAGE;
   let overseer: RpcOutput<typeof overseerStatusRpc> | null = null;
+  let rank: RpcOutput<typeof rankStatusRpc> | null = null;
   const agents = new Map<string, AgentLite>();
   let version = 0;
   let focusToken = 0;
@@ -59,6 +60,12 @@ export function createHomeExtras(client: PluginClientContext) {
     const next = (await client.rpc(prioritiesRpc, {})).items;
     if (JSON.stringify(next) === JSON.stringify(priorities)) return false;
     priorities = next; return true;
+  });
+  // The ranker's last run and source health, with the priorities (the ranker runs at most hourly).
+  poll(PRIORITY_POLL_MS, async () => {
+    const next = await client.rpc(rankStatusRpc, {});
+    if (JSON.stringify(next) === JSON.stringify(rank)) return false;
+    rank = next; return true;
   });
   poll(15_000, async () => {
     const next = await client.rpc(overseerStatusRpc, {});
@@ -117,6 +124,17 @@ export function createHomeExtras(client: PluginClientContext) {
     setSort(next: SortMode) { if (next === sort) return; sort = next; storage.set(SORT_KEY, next); emit(); },
     priorities: () => priorities,
     usage: () => usage,
+    /** The ranker: on or off, its last run and which sources it could read. */
+    rank: () => rank,
+    /** "Re-rank now": runs the ranker, then refreshes priorities and status. */
+    async rankNow() {
+      rank = rank ? { ...rank, running: true } : rank; emit();
+      try { return await client.rpc(rankNowRpc, { force: true }); }
+      finally {
+        const [p, st] = await Promise.all([client.rpc(prioritiesRpc, {}).catch(() => null), client.rpc(rankStatusRpc, {}).catch(() => null)]);
+        if (p) priorities = p.items; if (st) rank = st; emit();
+      }
+    },
     /** The Overseer: off, not started yet, or its agent and workspace. */
     overseer: () => overseer,
     async startOverseer() { overseer = await client.rpc(overseerStartRpc, {}); emit(); return overseer; },

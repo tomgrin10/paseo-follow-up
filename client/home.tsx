@@ -60,6 +60,7 @@ export function FollowHome(props: PluginScreenProps & { deps: HomeDeps }) {
   const tracked = useSyncExternalStore(deps.sources.live.subscribe, deps.sources.live.version, deps.sources.live.version);
   const rows = useInbox(inbox, () => inbox.rows());
   const pane = useMemo(() => briefPane({ model, rows, tracked: deps.sources.live.all(), now: Date.now() }), [model, rows, tracked, deps.sources.live]);
+  const rank = useSyncExternalStore(deps.sources.extras.subscribe, deps.sources.extras.rank, deps.sources.extras.rank);
   const overseerStatus = useSyncExternalStore(deps.sources.extras.subscribe, deps.sources.extras.overseer, deps.sources.extras.overseer);
   const overseerInbox = useInbox(inbox, () => inbox.overseer());
   const overseer = overseerRowState(overseerStatus, overseerInbox);
@@ -112,7 +113,7 @@ export function FollowHome(props: PluginScreenProps & { deps: HomeDeps }) {
           strip and meters below if this row sits above them. */}
       <View style={{ zIndex: 2, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: compact ? 12 : 16 }}>
         <SearchField theme={theme} omnibox={omnibox} dense={compact} onEnter={item => void pick(item)} />
-        <SortMenu theme={theme} mode={model.sort} onChange={deps.sources.extras.setSort} rankedAt={model.rankedAt} touch={compact} />
+        <SortMenu theme={theme} mode={model.sort} onChange={deps.sources.extras.setSort} rankedAt={model.rankedAt} touch={compact} rank={rank} onRerank={deps.sources.extras.rankNow} />
       </View>
       {!omnibox.results && <StatusStrip theme={theme} model={model} filter={filter} onFilter={setFilter} touch={compact} dense={compact} />}
       {!omnibox.results && <UsageMeters theme={theme} sources={deps.sources} dense={compact} />}

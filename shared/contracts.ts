@@ -148,6 +148,10 @@ export const overseerStatusSchema = z.object({ enabled: z.boolean(), agentId: z.
 export const overseerStatusRpc = defineRpc({ name: "follow.overseer-status", input: z.object({}), output: overseerStatusSchema });
 export const overseerStartRpc = defineRpc({ name: "follow.overseer-start", input: z.object({}), output: overseerStatusSchema });
 export const overseerAskRpc = defineRpc({ name: "follow.overseer-ask", input: z.strictObject({ text: z.string().trim().min(1).max(2000) }), output: overseerStatusSchema });
+export const rankStatusSchema = z.object({ enabled: z.boolean(), running: z.boolean(), lastRunAt: z.string().nullable(), healthLine: z.string(), error: z.string().nullable(), costUsd: z.number().nullable(), notStarted: z.number().int() });
+export const rankStatusRpc = defineRpc({ name: "follow.rank-status", input: z.object({}), output: rankStatusSchema });
+export const rankNowRpc = defineRpc({ name: "follow.rank-now", input: z.strictObject({ force: z.boolean().optional() }), output: z.object({ ok: z.boolean(), skipped: z.string().nullable(), error: z.string().nullable(), healthLine: z.string(), costUsd: z.number().nullable(), durationMs: z.number(),
+  top: z.array(z.object({ title: z.string(), score: z.number(), reason: z.string() })), notStarted: z.number().int() }) });
 export const overseerActRpc = defineRpc({ name: "follow.overseer-act", input: z.strictObject({ agentId: idSchema, tool: z.string().max(60), args: z.record(z.string(), z.unknown()).default({}) }), output: z.unknown() });
 export const overseerRestartRpc = defineRpc({ name: "follow.overseer-restart", input: z.object({}), output: overseerStatusSchema });
 /** Settings → Agents. `catalog` asks for Paseo's provider list (cached ten minutes; `fresh` re-reads it). */
