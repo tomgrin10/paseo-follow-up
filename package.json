@@ -24,7 +24,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
-    "verify": "npm run typecheck && npm test && node --test button-visibility.test.mjs && npm run test:scale && npm run test:native",
+    "verify": "npm run typecheck && npm test && node --test button-visibility.test.mjs && npm run test:scale && npm run test:native && npm run test:trust",
+    "test:trust": "node scripts/check-trust-bypass.mjs",
     "preview": "node scripts/check-install.mjs --keep",
     "test:install": "node scripts/check-install.mjs",
     "test:native": "node scripts/check-native-tools.mjs --agents 10",
