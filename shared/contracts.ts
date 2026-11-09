@@ -3,6 +3,7 @@ import { MAX_REVIEWERS, REPO, reviewerConfigSchema, reviewerEntrySchema, reviewe
 import { prioritySchema } from "./priorities";
 import { usageSchema } from "./usage";
 import { aboutViewSchema } from "./about";
+import { AGENT_ROLES, agentSettingsViewSchema, savedRoleSchema } from "./agent-settings";
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import { inboxRowSchema } from "./inbox";
@@ -137,8 +138,14 @@ export const briefActionRpc = defineRpc({ name: "follow.brief-action", input: z.
 export const agentActRpc = defineRpc({ name: "follow.agent-act", input: z.strictObject({ agentId: idSchema, tool: z.string().max(60), args: z.record(z.string(), z.unknown()).default({}) }), output: z.unknown() });
 
 // The Overseer (1.4.0-beta.0).
-export const overseerStatusSchema = z.object({ enabled: z.boolean(), agentId: z.string().nullable(), workspaceId: z.string().nullable(), startedAt: z.string().nullable(), generation: z.number().int(), error: z.string().nullable() });
+export const overseerStatusSchema = z.object({ enabled: z.boolean(), agentId: z.string().nullable(), workspaceId: z.string().nullable(), startedAt: z.string().nullable(), generation: z.number().int(), error: z.string().nullable(),
+  /** What it runs on ("Claude · Opus 5.5") and, when Settings → Agents changed since, what a restart would use. */
+  model: z.string().nullable().default(null), restartWith: z.string().nullable().default(null), configured: z.string().nullable().default(null) });
 export const overseerStatusRpc = defineRpc({ name: "follow.overseer-status", input: z.object({}), output: overseerStatusSchema });
 export const overseerStartRpc = defineRpc({ name: "follow.overseer-start", input: z.object({}), output: overseerStatusSchema });
 export const overseerAskRpc = defineRpc({ name: "follow.overseer-ask", input: z.strictObject({ text: z.string().trim().min(1).max(2000) }), output: overseerStatusSchema });
 export const overseerActRpc = defineRpc({ name: "follow.overseer-act", input: z.strictObject({ agentId: idSchema, tool: z.string().max(60), args: z.record(z.string(), z.unknown()).default({}) }), output: z.unknown() });
+export const overseerRestartRpc = defineRpc({ name: "follow.overseer-restart", input: z.object({}), output: overseerStatusSchema });
+/** Settings → Agents. `catalog` asks for Paseo's provider list (cached ten minutes; `fresh` re-reads it). */
+export const agentSettingsRpc = defineRpc({ name: "follow.agent-settings", input: z.object({ catalog: z.boolean().optional(), fresh: z.boolean().optional() }), output: agentSettingsViewSchema });
+export const setAgentSettingRpc = defineRpc({ name: "follow.set-agent-setting", input: z.strictObject({ role: z.enum(AGENT_ROLES), entry: savedRoleSchema.nullable() }), output: agentSettingsViewSchema });

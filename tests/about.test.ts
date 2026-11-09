@@ -248,7 +248,7 @@ test("the prompt is bounded and carries the inputs", async () => {
   assert.match(prompt, /Investigate and plan database query fix/); assert.match(prompt, /HER-1312: Slow query/); assert.match(prompt, /Benchmark the index/);
 });
 
-async function service(over: { runner?: Runner; sources?: AboutSources; usage?: number; room?: boolean; ws?: ReturnType<typeof workspace>[] } = {}) {
+async function service(over: { runner?: Runner; sources?: AboutSources; usage?: number; room?: boolean; ws?: ReturnType<typeof workspace>[]; role?: () => Promise<{ provider: string; model: string | null; thinking: string | null; dailyCap: number | null; maxPromptChars: number | null }> } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "about-"));
   let now = NOW;
   const all = over.ws ?? [workspace({ id: "w1", title: "Investigate and plan database query fix", goal: "Investigate why the vendor activity query is slow (HER-1312)", mainAgentId: "a1", prs: [] })];
@@ -257,7 +257,7 @@ async function service(over: { runner?: Runner; sources?: AboutSources; usage?: 
   const s = new AboutService({
     store: new AboutStore(dir), jobs: new AiJobs({ runner }), sources: over.sources ?? fakeSources(),
     workspace: async id => all.find(w => w.id === id) ?? null, context: () => ctx(),
-    usage: async () => ({ accounts: [{ family: "claude", windows: [{ pct: over.usage ?? 10 }] }] }), roomForBackground: async () => over.room ?? true, now: () => now,
+    usage: async () => ({ accounts: [{ family: "claude", windows: [{ pct: over.usage ?? 10 }] }] }), roomForBackground: async () => over.room ?? true, now: () => now, ...(over.role ? { role: over.role } : {}),
   });
   return { s, dir, advance: (ms: number) => { now += ms; }, calls: () => calls };
 }
@@ -444,4 +444,25 @@ test("the excerpt is the developer's first message, never the workspace title re
     assert.equal((await make(null).view("w1")).firstMessage, null);
     assert.equal((await make("Add saved filters to the asset inventory.").view("w1")).firstMessage, "Add saved filters to the asset inventory.");
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("Settings → Agents: the about role picks the job's provider, model and effort; the footer names the model", async () => {
+  const seen: { provider: string; model: string; thinking: string | null }[] = [];
+  const runner: Runner = async input => { seen.push({ provider: input.provider, model: input.model, thinking: input.thinking }); return { text: JSON.stringify({ gist: "Speed up the vendor query", overview: "Speeds up the vendor activity query with an index." }), costUsd: null, inputTokens: 1, outputTokens: 1 }; };
+  let role = { provider: "claude", model: "haiku" as string | null, thinking: null as string | null, dailyCap: 60, maxPromptChars: 40_000 };
+  const { s, dir, advance } = await service({ runner, role: async () => role });
+  try {
+    const first = await s.view("w1", { open: true, wait: true });
+    assert.equal(first.error, null);
+    assert.deepEqual(seen[0], { provider: "claude", model: "haiku", thinking: null });
+    assert.match(footerText(first.record!, NOW + 60_000), /^Summarized by Haiku · /);
+    role = { ...role, provider: "codex", model: "gpt-6-luna", thinking: "low" };
+    advance(1000);
+    const second = await s.view("w1", { open: true, refresh: true, wait: true });
+    assert.deepEqual(seen[1], { provider: "codex", model: "gpt-6-luna", thinking: "low" });
+    assert.deepEqual(second.record!.by, { provider: "codex", model: "gpt-6-luna" });
+    assert.match(footerText(second.record!, NOW + 2000), /^Summarized by GPT-6-Luna · /);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+  // Records written before 1.4.0-beta.2 have no model and keep the old footer.
+  assert.match(footerText({ generatedAt: new Date(NOW).toISOString(), basis: { chat: true, source: "live", prs: 0, issues: [] }, failed: [] }, NOW), /^Summarized just now/);
 });

@@ -18,6 +18,7 @@ import { overseerPrompt } from "./overseer-prompt-source";
 import { isLoaded, type LoadSignals } from "../shared/agent-load";
 import { conversationGone } from "./agent-load";
 import { transcriptTail } from "./transcript";
+import { modelName } from "../shared/agent-settings";
 
 type AgentSnapshot = LoadSignals & { id: string; workspaceId?: string | null; archivedAt?: string | null; title?: string | null; labels?: Record<string, string> };
 /** The slice of the plugin's Paseo API the Overseer uses. Typed loosely so tests can pass a fake. */
@@ -51,7 +52,9 @@ export type OverseerDeps = {
   /** The active window, for workspaces Follow-up doesn't track. */
   windowMs?: () => Promise<number>;
   enabled(): Promise<boolean>;
-  /** "provider/model" for the Overseer; default: the newest Claude Opus. */
+  /** The "overseer" role from Settings → Agents. Default: Claude, newest Opus, bypass. */
+  agent?: () => Promise<OverseerAgentSetting>;
+  /** Harness override ("provider/model", from FOLLOW_UP_OVERSEER_PROVIDER): wins over the setting. */
   provider?: string;
   now?: () => number;
 };
@@ -90,7 +93,7 @@ export class Overseer {
   private async save(state: OverseerState) { await atomic(this.path, state); }
 
   /** First start (the developer's one-time click) or a recreation with a handoff summary. Idempotent while alive. */
-  start(paseo: OverseerPaseo, handoff: string | null = null): Promise<OverseerState> {
+  start(paseo: OverseerPaseo, handoff: string | null = null, why = "which was archived or stopped"): Promise<OverseerState> {
     if (this.starting) return this.starting;
     this.starting = (async () => {
       if (!await this.d.enabled()) throw new Error("The Overseer is off. Turn it on in Follow-up settings.");
@@ -100,13 +103,14 @@ export class Overseer {
       await mkdir(home, { recursive: true, mode: 0o700 });
       await writeFile(join(home, "README.md"), "Follow-up's Overseer works here. It routes your asks to the agents that own them.\n").catch(() => undefined);
       const workspace = await paseo.workspaces.create({ title: OVERSEER_TITLE, source: { kind: "directory", path: home } });
-      const provider = this.d.provider ?? await providerModel(paseo, "claude", /opus/i);
+      const chosen = await this.chosen(paseo);
       const agent = await workspace.agents.create({
-        config: { provider, ...(provider.startsWith("claude") ? { modeId: "bypassPermissions" } : {}), systemPrompt: overseerPrompt },
+        config: { provider: chosen.provider, ...(chosen.mode ? { modeId: chosen.mode } : {}), ...(chosen.thinking ? { thinkingOptionId: chosen.thinking } : {}), systemPrompt: overseerPrompt },
         title: OVERSEER_TITLE, labels: { [OVERSEER_LABEL]: "1" },
-        ...(handoff ? { prompt: `Handoff from the previous Overseer, which was archived or stopped. Its last steps:\n${handoff}\n\nNothing to do until Tom writes. Reply "Ready." only.` } : {}),
+        ...(handoff ? { prompt: `Handoff from the previous Overseer, ${why}. Its last steps:\n${handoff}\n\nNothing to do until Tom writes. Reply "Ready." only.` } : {}),
       });
-      const next: OverseerState = { version: 1, agentId: agent.id, workspaceId: workspace.id, startedAt: new Date(this.now()).toISOString(), generation: current.generation + 1, error: null };
+      const next: OverseerState = { version: 1, agentId: agent.id, workspaceId: workspace.id, startedAt: new Date(this.now()).toISOString(), generation: current.generation + 1, error: null,
+        agent: { key: chosen.key, provider: chosen.provider.split("/")[0], model: chosen.provider.split("/").slice(1).join("/"), thinking: chosen.thinking, mode: chosen.mode } };
       await this.save(next);
       await this.writeDigest().catch(() => undefined);
       return next;
@@ -131,6 +135,41 @@ export class Overseer {
     else if (!await this.alive(paseo, s)) { await this.ensure(paseo); s = await this.state(); }
     await paseo.agents.ref(s.agentId!).send(ask);
     return s;
+  }
+
+  /** The configured agent as Paseo's "provider/model", its mode and effort, and the setting key it came from. */
+  private async chosen(paseo: OverseerPaseo): Promise<{ provider: string; mode: string | null; thinking: string | null; key: string }> {
+    if (this.d.provider) return { provider: this.d.provider, mode: this.d.provider.startsWith("claude") ? "bypassPermissions" : null, thinking: null, key: `env:${this.d.provider}` };
+    const s = await this.setting();
+    const provider = s.model ? `${s.provider}/${s.model}` : s.provider === "claude" ? await providerModel(paseo, "claude", /opus/i) : await providerModel(paseo, s.provider);
+    return { provider, mode: s.mode, thinking: s.thinking, key: settingKey(s) };
+  }
+  private async setting(): Promise<OverseerAgentSetting> {
+    return (await this.d.agent?.().catch(() => null)) ?? DEFAULT_OVERSEER_AGENT;
+  }
+
+  /**
+   * What the Overseer runs on now and, when Settings → Agents changed since it was created, what a restart would use.
+   * Cheap (no Paseo calls): read on every status poll.
+   */
+  async agentInfo(): Promise<{ running: { provider: string; model: string } | null; configured: OverseerAgentSetting; restart: boolean }> {
+    const [s, configured] = await Promise.all([this.state(), this.setting()]);
+    if (!s.agentId) return { running: null, configured, restart: false };
+    const running = s.agent ? { provider: s.agent.provider, model: s.agent.model } : { provider: "claude", model: "" };
+    const key = this.d.provider ? `env:${this.d.provider}` : settingKey(configured);
+    return { running, configured, restart: (s.agent?.key ?? settingKey(DEFAULT_OVERSEER_AGENT)) !== key };
+  }
+
+  /**
+   * The developer's "Restart the Overseer with …": a new Overseer on the configured agent, handed the old one's last
+   * steps the same way a recreation is (never a timeline read of an unloaded agent). The old agent is left as it is.
+   */
+  async restart(paseo: OverseerPaseo): Promise<OverseerState> {
+    const s = await this.state();
+    if (!s.agentId) return this.start(paseo);
+    const read = await this.steps(paseo, s.agentId, 12).catch(() => null);
+    const configured = await this.setting();
+    return this.start(paseo, handoffSummary(read?.steps ?? []), `which Tom replaced to run on ${configured.model ? modelName(configured.model) : configured.provider}`);
   }
 
   private async alive(paseo: OverseerPaseo, s: OverseerState): Promise<boolean> {
@@ -307,6 +346,11 @@ export class Overseer {
 }
 
 /** The handoff a recreated Overseer starts with: its predecessor's last steps, one line each. */
+export type OverseerAgentSetting = { provider: string; model: string | null; thinking: string | null; mode: string | null };
+export const DEFAULT_OVERSEER_AGENT: OverseerAgentSetting = { provider: "claude", model: null, thinking: null, mode: "bypassPermissions" };
+/** Identifies a setting: the default is plain "claude", so older Overseers (no recorded agent) match it. */
+export const settingKey = (s: OverseerAgentSetting) => s.provider === "claude" && !s.model && !s.thinking && s.mode === "bypassPermissions" ? "claude" : [s.provider, s.model ?? "", s.thinking ?? "", s.mode ?? ""].join("|");
+
 export function handoffSummary(steps: { kind: string; text: string }[]): string {
   return steps.length ? steps.map(x => `- ${x.kind === "you" ? "Tom" : x.kind}: ${clip(x.text.replace(/\s+/g, " ").trim(), 240)}`).join("\n") : "(no history could be read)";
 }

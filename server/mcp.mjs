@@ -46,6 +46,7 @@ const actionTools = [
   ["retry_batch", "Queue a blocked or uncertain repair batch again, like the Retry button. Only when the developer asked.", "follow.agent-act", { workspace: string, batchId: string }, ["workspace", "batchId"]],
   ["track", "Follow a workspace again after the developer opted it out in Settings. Follow-up follows every workspace by default. Only when the developer asked.", "follow.agent-act", { workspace: string }, ["workspace"]],
   ["workspace_about", "Read what a workspace is about: a short AI overview (goal, where it stands, what's left), a one-line gist, and its linked Linear issues, PRs, Slack threads and docs. Read-only; writes the overview first when none is cached (up to ~90 s). workspaceId is a workspace id or exact title from list_prs.", "follow.agent-act", { workspaceId: string }, ["workspaceId"]],
+  ["agent_settings", "Read which agent each of Follow-up's special roles uses (What's this about?, Overseer, Recovery, Priority ranker): provider, model, effort, mode and limits. Read-only; Tom changes them in Follow-up settings → Agents.", "follow.agent-act", {}, []],
   ["inbox_list", "Read the developer's Needs-you inbox: each root agent, whether it is flagged and why, snoozes and finish flags. Your own row has self=true.", "follow.agent-act", { flagged_only: boolean }, []],
   ["sign_off", "Sign off other agents' Needs-you flags on the developer's behalf, like Sign off. Never your own." + ask, "follow.agent-act", { agentIds: array, ...planned }, []],
   ["snooze", "Snooze other agents' flags (until: next-event, 1h, tomorrow or an ISO time), like Later." + ask, "follow.agent-act", { agentIds: array, until: string, ...planned }, []],
@@ -63,9 +64,9 @@ const overseerTools = [
 const overseerNames = new Set(overseerTools.map(t => t[0]));
 const overseerInstruction = "You are Follow-up's Overseer. Route Tom's asks with route_candidates and send_to_agent; ask with needs_you kind=decision when unsure; start_workspace only when Tom asked or approved. Never merge, post to people or archive.";
 const actionNames = new Set(actionTools.map(t => t[0]));
-const readOnlyTools = new Set(["workspace_status", "list_prs", "inbox_list", "workstreams", "agent_digest", "route_candidates", "workspace_about"]);
+const readOnlyTools = new Set(["workspace_status", "list_prs", "inbox_list", "workstreams", "agent_digest", "route_candidates", "workspace_about", "agent_settings"]);
 const destructiveTools = new Set(["merge"]);
-const actionInstruction = "Follow-up's action tools let you do what the developer can click, across every tracked workspace: list_prs, inbox_list and workspace_about to read; add_reviewers, merge, enable/disable_merge_when_ready, send_repairs, set_auto_send, clear_hold, retry_batch, track, set_priorities, and sign_off/snooze/set_finish_flags for other agents. Use them only when the developer asks (\"the PRs look good, assign reviewers on all\": list_prs needs_reviewers=true, add_reviewers with those keys, then confirm the plan). Planned tools return a dry run; run it with confirm=true and its planId. Never sign yourself off.";
+const actionInstruction = "Follow-up's action tools let you do what the developer can click, across every tracked workspace: list_prs, inbox_list, workspace_about and agent_settings to read; add_reviewers, merge, enable/disable_merge_when_ready, send_repairs, set_auto_send, clear_hold, retry_batch, track, set_priorities, and sign_off/snooze/set_finish_flags for other agents. Use them only when the developer asks (\"the PRs look good, assign reviewers on all\": list_prs needs_reviewers=true, add_reviewers with those keys, then confirm the plan). Planned tools return a dry run; run it with confirm=true and its planId. Never sign yourself off.";
 
 // The brief's tool: every root agent while the Needs-you inbox is on; never contributors, recovery or subagents.
 // Kept identical to NEEDS_YOU_INSTRUCTION in shared/brief.ts (a test checks it).
