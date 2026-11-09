@@ -144,7 +144,7 @@ test("needs_you validation mirrors ask_question: lengths, 2–5 options, a recom
 // ---------- the Inbox service: briefs at the real hook points ----------
 
 const agent = (patch: Partial<AgentInfo> & { id: string }): AgentInfo => ({ workspaceId: "w1", parentAgentId: null, title: "Main", status: "idle", archivedAt: null, updatedAt: T0, lastUserMessageAt: null, requiresAttention: false, attentionReason: null, ...patch });
-async function service(agents: AgentInfo[], o: { tails?: Record<string, unknown[]>; calls?: Record<string, NeedsYouRecord>; pr?: PrState | null; pauses?: GuardPause[]; now?: () => number; ledger?: Sources["ledger"] } = {}) {
+async function service(agents: AgentInfo[], o: { tails?: Record<string, unknown[]>; calls?: Record<string, NeedsYouRecord>; pr?: PrState | null; pauses?: GuardPause[]; now?: () => number; ledger?: Sources["ledger"]; callDelay?: number; settleMs?: number } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "brief-"));
   const appended: { agentId: string; brief: Brief }[] = [];
   const directory: Directory = {
@@ -155,8 +155,8 @@ async function service(agents: AgentInfo[], o: { tails?: Record<string, unknown[
   const inbox: Inbox = new Inbox(dir, {
     enabled: async () => ({ enable_inbox: true, enable_inbox_pr_closed: true }), directory,
     sources: { ledger: o.ledger ?? (async () => (await inbox.store.snapshot()).ledger), defer: async () => false, session: async () => false, schedule: async () => false },
-    guard: async () => o.pauses ?? null, graceMs: 5, settleMs: 40, settleStepMs: 5, now: () => now(),
-    briefs: { async sink(agentId, brief) { appended.push({ agentId, brief }); }, async call(id) { return o.calls?.[id] ?? null; }, async pr(_id, event) { return o.pr ? { ...o.pr, event: event ?? null } : null; } },
+    guard: async () => o.pauses ?? null, graceMs: 5, permissionSettleMs: o.settleMs ?? 30_000, settleMs: 40, settleStepMs: 5, now: () => now(),
+    briefs: { async sink(agentId, brief) { appended.push({ agentId, brief }); }, async call(id) { if (o.callDelay) await new Promise(r => setTimeout(r, o.callDelay)); return o.calls?.[id] ?? null; }, async pr(_id, event) { return o.pr ? { ...o.pr, event: event ?? null } : null; } },
   });
   await inbox.store.mutate(s => { s.importedAt = T0; s.lastSeen = at(0); s.primedAt = T0; });
   return { inbox, appended, setNow: (f: () => number) => { now = f; }, entry: async (id = "main") => (await inbox.store.snapshot()).entries[id], done: () => rm(dir, { recursive: true, force: true }) };
@@ -234,6 +234,38 @@ test("§6 permission pending: a slim brief after the grace; answered → superse
   b = (await s.entry()).brief!;
   assert.equal(b.ask, "Subagent Reviewer asks: Edit config.ts"); assert.equal(b.moves[0].agentId, "sub");
   assert.equal((await s.entry("sub"))?.brief ?? null, null, "subagents never get their own brief");
+  await s.done();
+});
+test("a permission answered while its brief is being built never leaves a stale row", async () => {
+  const s = await service([agent({ id: "main" }), agent({ id: "sub", parentAgentId: "main", title: "Follow-up: What's this about?" })], { callDelay: 40 });
+  const sub = { id: "sub", workspaceId: "w1", parentAgentId: "main" };
+  const pending = s.inbox.permissionRequested(sub, { id: "p1", title: "Bash" });
+  // The grace (5 ms) has passed and the brief is still reading its sources (40 ms) when the answer lands.
+  await new Promise(r => setTimeout(r, 15));
+  await s.inbox.permissionResolved(sub, "p1");
+  await pending;
+  const e = await s.entry();
+  assert.equal(e?.needs ?? null, null, "no Needs-you row for an answered prompt");
+  assert.notEqual(e?.brief?.state, "open", "no open 'asks: Bash' card");
+  assert.deepEqual(s.inbox.pendingPermissions(), []);
+  await s.done();
+});
+test("a permission row whose prompt Paseo no longer shows clears; one still showing, or unknown, stays", async () => {
+  const agents = [agent({ id: "main", pendingPermissionIds: [] }), agent({ id: "sub", parentAgentId: "main", pendingPermissionIds: [] }),
+    agent({ id: "other", pendingPermissionIds: ["q1"] }), agent({ id: "legacy" })];
+  let clock = Date.parse(at(1));
+  const s = await service(agents, { now: () => clock, settleMs: 30_000 });
+  for (const [who, id] of [[{ id: "sub", workspaceId: "w1", parentAgentId: "main" }, "p1"], [{ id: "other", workspaceId: "w1", parentAgentId: null }, "q1"], [{ id: "legacy", workspaceId: "w1", parentAgentId: null }, "r1"]] as const)
+    await s.inbox.permissionRequested(who, { id, title: "Bash" });
+  await s.inbox.reconcilePermissions();
+  assert.equal((await s.entry())?.brief?.state, "open", "inside the settle time nothing is checked");
+  clock += 31_000;
+  await s.inbox.reconcilePermissions();
+  const main = await s.entry();
+  assert.equal(main.needs, null); assert.equal(main.brief?.state, "superseded"); assert.equal(main.brief?.outcome, "Permission answered");
+  assert.equal((await s.entry("other")).brief?.state, "open", "a prompt Paseo still shows keeps its row");
+  assert.equal((await s.entry("legacy")).brief?.state, "open", "unknown pending prompts never clear a row");
+  assert.deepEqual(s.inbox.pendingPermissions().sort(), ["legacy", "other"]);
   await s.done();
 });
 test("§6 new turn: the agent kept going supersedes; the developer's message answers", async () => {
