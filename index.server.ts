@@ -15,6 +15,8 @@ import { PriorityStore } from "./server/priorities";
 import { UsageReader } from "./server/usage";
 import { Engine, agentWorkspace, findWorkspace, interruptionHold } from "./server/engine";
 import { Github } from "./server/github";
+import { ReviewerConfigStore, ReviewerSuggestions } from "./server/reviewer-config";
+import { repoKey } from "./shared/reviewers";
 import { Graphite } from "./server/graphite";
 import { BrowserBridge } from "./server/browser-bridge";
 import { PrActions } from "./server/pr-actions";
@@ -60,6 +62,8 @@ export default function contribute(server: PluginServerContext) {
   const graphite = new Graphite();
   const github = new Github(undefined, graphite, new Deployments());
   const browser = new BrowserBridge();
+  const reviewerStore = new ReviewerConfigStore(directory);
+  const reviewerSuggestions = new ReviewerSuggestions();
   const actions = new PrActions(store, github, graphite, browser);
   const engine = new Engine(store, github, gateway);
   const governor = new Governor();
@@ -187,6 +191,8 @@ export default function contribute(server: PluginServerContext) {
     await engine.recover();
     await migrateTracking();
     await backupActiveScope();
+    // Reviewers: the one-time seed from earlier requests, before history is pruned. An unreadable reviewers.json only affects Add reviewers.
+    await reviewerStore.migrate(await store.snapshot()).catch(() => undefined);
     await pruneHistory();
     await store.onChanged(await store.snapshot()).catch(() => undefined);
     hooksStarted = true;
@@ -469,7 +475,21 @@ export default function contribute(server: PluginServerContext) {
   server.handle(rpc.preparePrActionRpc, async ({ workspaceId, prKey, kind }) => { await requireReady(); return actions.prepare(workspaceId, prKey, kind); });
   server.handle(rpc.confirmPrActionRpc, async ({ planId, scope }) => { await requireReady(); const result = await actions.confirm(planId, scope); void engine.tick(); return result; });
   server.handle(rpc.checkPrActionRpc, async ({ workspaceId, actionId }) => { await requireReady(); return actions.check(workspaceId, actionId); });
-  server.handle(rpc.requestReviewersRpc, async ({ workspaceId, prKey }) => { await requireReady(); const result = await actions.requestReviewers(workspaceId, prKey); void engine.tick(); return result; });
+  server.handle(rpc.requestReviewersRpc, async ({ workspaceId, prKey, reviewers, remember }) => {
+    await requireReady();
+    // "Remember for <repo>" saves first: it's the developer's choice whatever GitHub answers.
+    if (reviewers && remember) await reviewerStore.save(prKey.split("#")[0], reviewers);
+    const result = await actions.requestReviewers(workspaceId, prKey, reviewers?.map(r => r.login)); void engine.tick(); return result;
+  });
+  const reviewerSettings = async () => {
+    const config = await reviewerStore.read();
+    const seen = new Set(Object.keys(config.repos));
+    for (const w of (await store.snapshot()).workspaces) for (const p of w.prs) seen.add(repoKey(p.repo));
+    return { config, repos: [...seen].sort() };
+  };
+  server.handle(rpc.reviewerSettingsRpc, async () => { await requireReady(); return reviewerSettings(); });
+  server.handle(rpc.saveReviewersRpc, async ({ repo, reviewers }) => { await requireReady(); await reviewerStore.save(repo, reviewers); return reviewerSettings(); });
+  server.handle(rpc.reviewerSuggestionsRpc, async ({ repo }) => { await requireReady(); return reviewerSuggestions.suggest(repo); });
 
   const priorityStore = new PriorityStore(directory);
   // Paseo's workspace descriptors for the Overseer (name, project, branch): metadata only, one paged read. The

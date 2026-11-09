@@ -1,4 +1,5 @@
 import { projectSchema } from "./settings";
+import { MAX_REVIEWERS, REPO, reviewerConfigSchema, reviewerEntrySchema, reviewerListSchema } from "./reviewers";
 import { prioritySchema } from "./priorities";
 import { usageSchema } from "./usage";
 import { defineRpc } from "@getpaseo/plugin";
@@ -46,7 +47,15 @@ export const prControlStatusRpc = defineRpc({ name: "follow.pr-control-status", 
 export const preparePrActionRpc = defineRpc({ name: "follow.prepare-pr-action", input: z.object({ workspaceId: idSchema, prKey: idSchema, kind: prActionKind }), output: actionPlanSchema });
 export const confirmPrActionRpc = defineRpc({ name: "follow.confirm-pr-action", input: z.object({ planId: idSchema, scope: z.enum(["target", "downstack"]) }), output: actionResultSchema });
 export const checkPrActionRpc = defineRpc({ name: "follow.check-pr-action", input: z.object({ workspaceId: idSchema, actionId: idSchema }), output: actionResultSchema });
-export const requestReviewersRpc = defineRpc({ name: "follow.request-reviewers", input: z.object({ workspaceId: idSchema, prKey: idSchema }), output: actionResultSchema });
+/** `reviewers` picks who to ask for this PR only (the picker); `remember` also saves them as the repository's list. */
+export const requestReviewersRpc = defineRpc({ name: "follow.request-reviewers", input: z.object({ workspaceId: idSchema, prKey: idSchema, reviewers: z.array(reviewerEntrySchema).min(1).max(MAX_REVIEWERS).optional(), remember: z.boolean().optional() }), output: actionResultSchema });
+const reviewerSettingsSchema = z.object({ config: reviewerConfigSchema, repos: z.array(z.string()) });
+/** Settings → Reviewers: the saved lists and the repositories Follow-up has seen PRs in. */
+export const reviewerSettingsRpc = defineRpc({ name: "follow.reviewer-settings", input: z.object({}), output: reviewerSettingsSchema });
+/** `repo: null` is the default for all repos. An empty list clears it. */
+export const saveReviewersRpc = defineRpc({ name: "follow.save-reviewers", input: z.object({ repo: z.string().regex(REPO).nullable(), reviewers: reviewerListSchema }), output: reviewerSettingsSchema });
+/** Autocomplete from the repository's collaborators and teams. Read on demand and cached; never polled. */
+export const reviewerSuggestionsRpc = defineRpc({ name: "follow.reviewer-suggestions", input: z.object({ repo: z.string().regex(REPO) }), output: z.object({ suggestions: z.array(z.object({ login: z.string(), name: z.string().nullable(), kind: z.enum(["user", "team"]) })), error: z.string().nullable() }) });
 
 export const projectSettingsRpc = defineRpc({ name: "follow.project-settings", input: z.object({}), output: z.object({ projects: z.array(projectSchema) }) });
 export const setProjectTrackingRpc = defineRpc({ name: "follow.set-project-tracking", input: z.object({ projectId: idSchema, enable_default_tracking: z.boolean() }), output: z.object({ projects: z.array(projectSchema) }) });

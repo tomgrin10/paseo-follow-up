@@ -46,6 +46,7 @@ const title='Reviewer controls test '+Date.now().toString(36);
 const workspace=await api.workspaces.create({title,source:{kind:'directory',path:directory}});
 const agent=await workspace.agents.create({config:{provider:'followthrough-fixture/fixture',model:'fixture'},title:'Synthetic reviewer main'});
 await call('follow.activate',{workspaceId:workspace.id});
+await call('follow.save-reviewers',{repo:'acme/acme-poc',reviewers:[{login:'reviewer-a',name:'Uri'},{login:'reviewer-b',name:'Yuval'}]});
 for(const number of [1,2,3,4,5])await call('follow.register-pr',{agentId:agent.id,repo:'acme/acme-poc',number,stack:'Vendor behavior',parentNumber:null});
 await call('follow.refresh');
 const {chromium}=createRequire(join(process.env.SEND_TO_PASEO_SOURCE,'extension/package.json'))('playwright-core');

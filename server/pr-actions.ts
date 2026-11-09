@@ -6,7 +6,7 @@ import { Store } from "./store";
 import type { Github } from "./github";
 import { GraphiteWriteError, type Graphite } from "./graphite";
 import { BrowserBridge } from "./browser-bridge";
-import { defaultReviewers, noReviewers } from "../shared/reviewers";
+import { allAssigned, configuredReviewers, noReviewers, reviewerLabel, sameLogin, withoutAuthor, type ReviewerEntry } from "../shared/reviewers";
 import { ReviewRequestError } from "./github";
 
 function active(w: Workspace) {
@@ -20,7 +20,7 @@ export class PrActions {
   private reads = new Map<string, Promise<BrowserPr[]>>();
   private running = new Set<Promise<unknown>>();
   private reviewerRequests = new Map<string, Promise<{ state: "submitted" | "failed" | "uncertain"; result: string }>>();
-  constructor(private store: Store, private github: Pick<Github, "observe"> & Partial<Pick<Github, "requestReviewers">>, private graphite: Pick<Graphite, "merge" | "invalidate">, readonly browser: BrowserBridge, private now = Date.now, private reviewersFor = defaultReviewers) {}
+  constructor(private store: Store, private github: Pick<Github, "observe"> & Partial<Pick<Github, "requestReviewers">>, private graphite: Pick<Graphite, "merge" | "invalidate">, readonly browser: BrowserBridge, private now = Date.now, private reviewersFor: (repo: string) => ReviewerEntry[] = configuredReviewers) {}
 
   private async fresh(workspaceId: string): Promise<Workspace> {
     const saved = findWorkspace(await this.store.snapshot(), workspaceId); active(saved);
@@ -99,11 +99,14 @@ export class PrActions {
     if (!pr) throw new Error("This PR is outside the workspace's inventory.");
     if (pr.error || !pr.snapshot?.complete || !pr.snapshot.reviewers?.complete) throw new Error("Reviewer status is unavailable. Refresh before requesting reviews.");
     if (pr.snapshot.state !== "OPEN" || pr.snapshot.draft) throw new Error("Request reviews on an open PR that is ready for review.");
-    const defaults = logins?.length ? logins.map(login => ({ name: login, login })) : this.reviewersFor(pr.repo);
-    if (!defaults.length || !this.github.requestReviewers) throw new Error("Default reviewers are not configured for this repository.");
+    // Explicit logins (the picker, or an agent) keep the saved display names where there are any.
+    const saved = this.reviewersFor(pr.repo);
+    const chosen: ReviewerEntry[] = logins?.length ? logins.map(login => saved.find(r => sameLogin(r.login, login)) ?? { login, name: null }) : saved;
+    if (!chosen.length) throw new Error(`No reviewers set for ${pr.repo}. Pick who to ask, or set them in Settings → Reviewers.`);
+    if (!this.github.requestReviewers) throw new Error("Requesting reviewers isn't available here.");
     if (!noReviewers(pr)) return { state: "submitted" as const, result: "Reviewers already assigned." };
-    const reviewers = defaults.filter(r => r.login.toLowerCase() !== pr.snapshot!.reviewers!.author?.toLowerCase());
-    if (!reviewers.length) throw new Error("No eligible default reviewers remain after excluding the PR author.");
+    const reviewers = withoutAuthor(chosen, pr.snapshot!.reviewers!.author);
+    if (!reviewers.length) throw new Error("Only the PR author was picked. Pick someone else to review.");
     const id = randomUUID();
     await this.store.mutate(state => {
       const current = findWorkspace(state, workspaceId); active(current);
@@ -119,8 +122,8 @@ export class PrActions {
       const observed = (await this.github.observe([pr])).get(key);
       if (observed) await this.store.mutate(saved => { const p = findWorkspace(saved, workspaceId).prs.find(p => p.key === key)!; p.error = observed.error; if (observed.snapshot) p.snapshot = observed.snapshot; });
       const assigned = observed?.snapshot?.reviewers;
-      if (!observed?.error && assigned?.complete && reviewers.every(r => [...assigned.requested, ...assigned.reviewed].some(login => login.toLowerCase() === r.login.toLowerCase()))) {
-        state = "submitted"; result = `Requested ${reviewers.map(r => r.name).join(" and ")}.`;
+      if (!observed?.error && assigned?.complete && allAssigned(reviewers.map(r => r.login), assigned)) {
+        state = "submitted"; result = `Requested ${names(reviewers.map(reviewerLabel))}.`;
       }
     } catch (error) {
       state = error instanceof ReviewRequestError && !error.uncertain ? "failed" : "uncertain";
@@ -214,3 +217,5 @@ export class PrActions {
     return { state, result };
   }
 }
+
+const names = (list: string[]) => list.length > 1 ? `${list.slice(0, -1).join(", ")} and ${list.at(-1)}` : list[0] ?? "";

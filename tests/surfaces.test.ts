@@ -164,12 +164,13 @@ test("(3) 'Add reviewers' is a Needs-you reason that doesn't wait for open threa
   const inFlight = workspace({ prs: [pr({ snapshot: snapshot({ reviewers: noOne }) })], prActions: [{ id: "a", kind: "request_reviewers", prs: ["example/app#1"], heads: {}, createdAt: since, state: "sending", result: "" }] });
   assert.deepEqual(flagsFrom(inFlight).reasons, []);
 });
-test("(3) the reviewers brief offers Add reviewers with defaults, and says to pick on GitHub without them", () => {
+test("(3) the reviewers brief offers Add reviewers with saved reviewers, and without them says none are set and opens the picker", () => {
   const withDefaults = pickBrief({ reviewers: { prKey: "acme/acme-poc#1499", number: 1499, url: "https://example.invalid/pr/1499", names: ["Reviewer A", "Reviewer B"] } });
   assert.equal(withDefaults.kind, "reviewers");
   assert.deepEqual(withDefaults.moves.map(m => m.kind), ["add_reviewers", "open_pr"]);
   assert.match(withDefaults.ask, /^Add reviewers to #1499/);
-  const none = pickBrief({ reviewers: { prKey: "example/app#1499", number: 1499, url: "https://example.invalid/pr/1499", names: [] } });
-  assert.deepEqual(none.moves.map(m => m.kind), ["open_pr"]);
-  assert.match(none.ask, /Add them on GitHub/);
+  const none = pickBrief({ reviewers: { prKey: "example/app#1499", repo: "example/app", number: 1499, url: "https://example.invalid/pr/1499", names: [] } });
+  assert.deepEqual(none.moves.map(m => m.kind), ["add_reviewers", "open_pr"]);
+  assert.equal(none.ask, "#1499 has no reviewers yet");
+  assert.equal(none.sourceLine, "No reviewers set for example/app; Add reviewers lets you pick.");
 });
