@@ -183,6 +183,14 @@ test("§6 turn completed without needs_you: the honest fallback, recorded as fal
   assert.deepEqual(briefShare(await s.inbox.store.snapshot(), Date.parse(at(1))), { days: 7, total: 1, tool: 0, structured: 0, extraction: 0, fallback: 1 });
   await s.done();
 });
+test("§6 plugin reloaded mid-turn: the turn start is lost, but a needs_you made after the previous brief still counts", async () => {
+  const s = await service([agent({ id: "main" })], { calls: { main: { at: Date.parse(at(1)) - 1000, turnId: null, call: decision } } });
+  await s.inbox.store.mutate(st => { st.entries.main = { needs: null, snooze: null, signedOffAt: null, lastTomMessageAt: null, seq: 1, undo: null, enable_finish_flags: true, goneAt: null, seenKeys: [], lastEventAt: at(0), brief: { ...open("brief:t0"), at: at(0), state: "answered" }, agentId: "main", muteTurn: false }; });
+  await s.inbox.turnEnded(main, { kind: "completed" }, "t1");
+  const e = await s.entry();
+  assert.equal(e.brief?.source, "agent"); assert.equal(e.brief?.ask, decision.ask);
+  await s.done();
+});
 test("§6 turn completed but not flagged (muted turn): an unflagged brief only if the agent stated one", async () => {
   for (const stated of [true, false]) {
     const s = await service([agent({ id: "main" })], { calls: stated ? { main: { at: Date.parse(at(1)), turnId: "t1", call: decision } } : {} });
