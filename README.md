@@ -197,7 +197,7 @@ The choices live in `agents.json` in Follow-up's data folder. Anything missing o
 Install the beta:
 
 ```sh
-paseo plugin update follow-through --version 1.4.0-beta.15
+paseo plugin update follow-through --version 1.4.0-beta.16
 # or, for a fresh install:
 paseo plugin install npm:paseo-follow-up@beta
 ```
