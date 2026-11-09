@@ -5,15 +5,17 @@ import { Icon, SidebarRow } from "@getpaseo/plugin/client/ui";
 import { listRpc } from "../shared/contracts";
 import type { Workspace } from "../shared/model";
 import { needsYou } from "../shared/attention";
-import { sectionRows } from "../shared/inbox";
-import { useInbox, useSidebarViewActive } from "./inbox";
-import type { InboxStore } from "./inbox-store";
+import { useSidebarViewActive } from "./inbox";
+import { homeCounts } from "../shared/home";
+import { useHomeModel, type HomeSources } from "./home-data";
 
 const POLL_MS = 8_000;
 
 /** One shared poll of tracked workspaces for the pills, header-button dots and the sidebar count. */
 export function createLiveStore(client: PluginClientContext) {
   let workspaces = new Map<string, Workspace>();
+  /** Archived ones, only for search ("Archived" at the bottom of results). */
+  let archived: Workspace[] = [];
   let version = 0;
   const listeners = new Set<() => void>();
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -24,6 +26,7 @@ export function createLiveStore(client: PluginClientContext) {
       const result = await client.rpc(listRpc, {});
       if (stopped) return;
       workspaces = new Map(result.workspaces.filter(w => !w.archived).map(w => [w.id, w]));
+      archived = result.workspaces.filter(w => w.archived);
       emit();
     } catch { /* Keep the last answer through restarts and disconnects. */ }
     finally { if (!stopped) timer = setTimeout(() => void poll(), POLL_MS); }
@@ -34,6 +37,7 @@ export function createLiveStore(client: PluginClientContext) {
     version: () => version,
     get: (id: string) => workspaces.get(id),
     all: () => [...workspaces.values()],
+    archived: () => archived,
     refresh: () => { if (timer) clearTimeout(timer); void poll(); },
     stop() { stopped = true; if (timer) clearTimeout(timer); listeners.clear(); },
   };
@@ -62,16 +66,15 @@ export function headerIcon(store: LiveStore) {
  * mounted, that view already lists the same agents right below, so the badge hides and the item stays as the
  * way into the full screen.
  */
-export function sidebarItem(store: LiveStore, inbox: InboxStore, screenId: string) {
+export function sidebarItem(sources: HomeSources, screenId: string) {
   return function FollowSidebarItem({ currentScreen, openScreen, theme }: PluginSidebarItemProps) {
-    const workspaces = useLive(store, () => store.all().filter(w => needsYou(w).length > 0).length);
-    const count = useInbox(inbox, () => inbox.enabled() ? sectionRows(inbox.rows(), "needs", Date.now()).length : workspaces);
+    // The same counts as Home's status strip and the brief headline.
+    const count = homeCounts(useHomeModel(sources)).needs;
     const inSidebarView = useSidebarViewActive();
     const c = theme.colors;
     const shown = count > 0 && !inSidebarView;
-    const what = inbox.enabled() ? `agent${count === 1 ? "" : "s"} need${count === 1 ? "s" : ""} you` : `workspace${count === 1 ? "" : "s"} need${count === 1 ? "s" : ""} you`;
     return <SidebarRow icon="GitPullRequest" active={currentScreen?.screenId === screenId} onPress={() => openScreen({ screenId, params: { section: "needs" } })}
-      trailing={shown ? <View accessibilityLabel={`${count} ${what}`} style={{ minWidth: 18, height: 18, paddingHorizontal: 5, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: c.statusWarning }}>
+      trailing={shown ? <View accessibilityLabel={`${count} need${count === 1 ? "s" : ""} you`} style={{ minWidth: 18, height: 18, paddingHorizontal: 5, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: c.statusWarning }}>
         <Text style={{ color: c.surface0, fontSize: 11, lineHeight: 14, fontWeight: "700", fontVariant: ["tabular-nums"] }}>{count}</Text>
       </View> : undefined} />;
   };

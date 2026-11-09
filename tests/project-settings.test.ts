@@ -12,15 +12,20 @@ import type { State } from "../shared/model";
 
 const project: Project = { projectId: "project", projectKey: "remote:github.com/example/hero-poc", projectDisplayName: "Renamed project", projectRootPath: "/work/hero-poc", projectKind: "git" };
 test("repository identity supplies the initial default and explicit overrides survive renaming", () => {
-  assert.equal(defaultTracking(project), true); assert.equal(defaultTracking(project, { project: false }), false);
-  assert.equal(defaultTracking({ ...project, projectKey: "remote:github.com/example/other", projectDisplayName: "hero-poc" }), false);
-  assert.equal(defaultTracking({ ...project, projectKey: "host:local/hero-poc", projectKind: "non_git" }), false);
-  assert.equal(defaultTracking({ ...project, projectKey: "remote:github.com/example/other" }, { project: true }), true);
+  // With Follow every workspace off, the pre-1.3.0-beta.2 rule.
+  assert.equal(defaultTracking(project, {}, false), true); assert.equal(defaultTracking(project, { project: false }, false), false);
+  assert.equal(defaultTracking({ ...project, projectKey: "remote:github.com/example/other", projectDisplayName: "hero-poc" }, {}, false), false);
+  assert.equal(defaultTracking({ ...project, projectKey: "host:local/hero-poc", projectKind: "non_git" }, {}, false), false);
+  assert.equal(defaultTracking({ ...project, projectKey: "remote:github.com/example/other" }, { project: true }, false), true);
+  // On (the default): every project, except one opted out.
+  assert.equal(defaultTracking({ ...project, projectKey: "host:local/notes", projectKind: "non_git" }), true);
+  assert.equal(defaultTracking(project, { project: false }), false);
 });
 test("project enrollment preserves existing records and cannot revive sends, archived workspaces or replace owners", () => {
   const old = workspace({ enable_tracking: false, enable_auto_sends: true });
   const archived = workspace({ id: "archived", archived: true, enable_tracking: false });
-  const state: State = { version: 1, workspaces: [old, archived] };
+  // "Send repairs automatically" off: a re-followed workspace with history keeps auto-send off.
+  const state: State = { version: 1, workspaces: [old, archived], enable_auto_sends_default: false };
   const row = { id: "workspace", title: "Rollout", mainAgentId: "main-agent", projectId: "project", messageAt: null, enable_default_tracking: true };
   applyDiscovery(state, [row, { ...row, id: "archived" }], clock);
   assert.equal(old.enable_tracking, true); assert.equal(old.enable_auto_sends, false); assert.equal(old.prs.length, 1); assert.equal(archived.enable_tracking, false);

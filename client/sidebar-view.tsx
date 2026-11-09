@@ -7,7 +7,7 @@ import { HomeList } from "./home-list";
 import { useHomeModel, type HomeSources } from "./home-data";
 
 /**
- * Phase 2: Home's list as Paseo's sidebar (the same HomeList component Home and the navigator use). `addSidebarView` and the ref queries exist on Paseo main
+ * Phase 2: Home's list as Paseo's sidebar (the same HomeList component Home uses). `addSidebarView` and the ref queries exist on Paseo main
  * (merged 2026-11-07) but not in 0.15.2 or the published SDK, so they are typed here and used only
  * when the host provides them. On older hosts nothing is registered and nothing else changes.
  */

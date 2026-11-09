@@ -1,9 +1,13 @@
 import { liveLine, needsYou, prTone, stackOrder, type NeedItem, type PrTone } from "./attention";
 import { activity, type Activity } from "./activity";
-import { recoveryBatch } from "./follow-up";
+import { followUpObligations, recoveryBatch } from "./follow-up";
 import { flagHeadline, HEADLINE_ICON, HEADLINE_TONE, HEADLINE_WORD, workspaceHeadline, withoutBriefQuestions, type Headline, type HeadlineKey, type HeadlineTone } from "./headline";
 import { rowTitle, sectionOf, type InboxRow } from "./inbox";
 import { settled, summary, type Pr, type Workspace } from "./model";
+import { isOpen as questionOpen } from "./questions";
+import { taskSchedule } from "./task-trigger";
+import { freshPriorities, type Priority, type PrioritySourceKind } from "./priorities";
+import { DEFAULT_SORT, sortItems, type SortMode } from "./sort";
 
 /**
  * Home (design §3): every workstream in one list, grouped by what it needs from the developer. Pure, so the
@@ -30,7 +34,13 @@ export type BadgeTone = "warning" | "danger" | "success" | "merged" | "muted";
 export type Badge = { text: string; tone: BadgeTone };
 export type PrChip = { label: string; tone: PrTone; checks: { text: string; tone: BadgeTone } | null; url: string | null };
 /** A Paseo workspace as Home needs it. Untracked workspaces still get a row, in Quiet. */
-export type PaseoWorkspaceLite = { id: string; name: string; project: string | null; activityAt: string | null };
+export type PaseoWorkspaceLite = {
+  id: string; name: string; project: string | null; activityAt: string | null;
+  /** From the descriptor's git runtime (0.15.x); refreshed by Paseo, never by spawning git here. */
+  branch?: string | null;
+  /** The descriptor's own PR, when Paseo's GitHub runtime knows one. */
+  pr?: { number: number | null; title: string } | null;
+};
 
 export type Workstream = {
   /** Stable list key: `agent:<id>` for an agent row, `ws:<id>` for a workspace row. */
@@ -54,12 +64,24 @@ export type Workstream = {
   /** The age shown on the right. */
   at: string | null;
   readyToArchive: boolean;
+  /** Latest activity anywhere on the workstream, for the Recent sort. */
+  activityAt?: string | null;
+  /** Existing importance data: a big open question. */
+  urgent?: boolean;
+  /** The nearest task deadline, when a scheduled task has one. */
+  due?: string | null;
+  /** A fresh external priority (Priority sort): the one-line reason and its sources. Never invented. */
+  priority?: { score: number; reason: string; source: { kind: PrioritySourceKind; label: string } | null } | null;
   /** Changes whenever anything shown on the row changes, so a memoised row re-renders only then. */
   sig: string;
 };
 
 export type HomeGroup = { id: HomeGroupId; title: string; items: Workstream[] };
-export type HomeModel = { groups: HomeGroup[]; needs: number; byKey: Map<string, Workstream> };
+export type HomeModel = {
+  groups: HomeGroup[]; needs: number; byKey: Map<string, Workstream>;
+  /** The sort the groups are in, and when fresh external priorities were ranked (null: "By urgency"). */
+  sort: SortMode; rankedAt: string | null;
+};
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const fixingBatch = (w: Workspace) => w.batches.find(b => !recoveryBatch(b) && (["sending", "sent"].includes(b.state) || b.state === "pending" && w.enable_auto_sends));
@@ -103,13 +125,17 @@ export function badges(input: { headline: Headline | null; row?: InboxRow; works
 }
 
 function sigOf(s: Omit<Workstream, "sig">): string {
-  return [s.group, s.tier, s.icon, s.tone, s.title, s.agent, s.line, s.word, s.at, s.readyToArchive, s.badges.map(b => b.text).join("|"), s.pr ? `${s.pr.label}:${s.pr.checks?.text}` : ""].join("\u0001");
+  return [s.group, s.tier, s.icon, s.tone, s.title, s.agent, s.line, s.word, s.at, s.readyToArchive, s.badges.map(b => b.text).join("|"), s.pr ? `${s.pr.label}:${s.pr.checks?.text}` : "",
+    s.priority ? `${s.priority.reason}:${s.priority.source?.label}` : ""].join("\u0001");
 }
 const make = (s: Omit<Workstream, "sig">): Workstream => ({ ...s, sig: sigOf(s) });
+const stripSig = ({ sig: _sig, ...s }: Workstream): Omit<Workstream, "sig"> => s;
 
 /** Build every group from the inbox rows, Follow-up's tracked workspaces and Paseo's workspace list. */
-export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo: PaseoWorkspaceLite[]; now: number }): HomeModel {
+export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo: PaseoWorkspaceLite[]; now: number; sort?: SortMode; priorities?: readonly Priority[] }): HomeModel {
   const { rows, now } = input;
+  const sort = input.sort ?? DEFAULT_SORT;
+  const fresh = freshPriorities(input.priorities ?? [], now);
   const tracked = new Map(input.tracked.filter(w => !w.archived).map(w => [w.id, w]));
   const paseo = new Map(input.paseo.map(w => [w.id, w]));
   const project = (id: string | null) => id ? paseo.get(id)?.project ?? null : null;
@@ -172,18 +198,42 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
       icon: "Circle", tone: "muted", word: null, line: "", badges: [], pr: null, at: p.activityAt, readyToArchive: false }));
   }
 
+  // Facts the sorts read: latest activity, importance, deadlines and fresh external priorities.
+  const lastActivity = new Map<string, string>();
+  const bump = (key: string | null, at: string | null | undefined) => { if (key && at && (!lastActivity.has(key) || lastActivity.get(key)! < at)) lastActivity.set(key, at); };
+  for (const r of rows) { bump(r.workspaceId, r.lastActivityAt); bump(`agent:${r.agentId}`, r.lastActivityAt); }
+  for (const p of paseo.values()) bump(p.id, p.activityAt);
+  for (const w of tracked.values()) bump(w.id, w.updatedAt);
+  const finished: Workstream[] = out.map(s => {
+    const w = s.workspaceId ? tracked.get(s.workspaceId) : undefined;
+    const p = s.workspaceId ? fresh.byWorkspace.get(s.workspaceId) : undefined;
+    const activityAt = [s.at, lastActivity.get(s.key) ?? null, s.workspaceId ? lastActivity.get(s.workspaceId) ?? null : null].filter((x): x is string => !!x).sort().at(-1) ?? null;
+    const urgent = !!w?.questions.some(q => questionOpen(q) && !!q.big);
+    const due = w ? followUpObligations(w).filter(o => !["done", "waived"].includes(o.status)).map(o => taskSchedule(o, w, now).dueAt).filter((x): x is string => !!x).sort()[0] ?? null : null;
+    const priority = p ? { score: p.score, reason: p.reason, source: p.sources[0] ? { kind: p.sources[0].kind, label: p.sources[0].label } : null } : null;
+    return make({ ...stripSig(s), activityAt, urgent, due, priority });
+  });
   const byGroup = new Map<HomeGroupId, Workstream[]>(HOME_GROUPS.map(g => [g, []]));
-  for (const s of out) byGroup.get(s.group)!.push(s);
-  const newest = (a: Workstream, b: Workstream) => (b.at ?? "").localeCompare(a.at ?? "") || a.key.localeCompare(b.key);
-  byGroup.get("needs")!.sort(compareNeedsItems);
-  byGroup.get("later")!.sort(newest);
-  byGroup.get("fixing")!.sort(newest);
-  byGroup.get("running")!.sort(newest);
-  byGroup.get("waiting")!.sort((a, b) => (a.at ?? "").localeCompare(b.at ?? "") || a.key.localeCompare(b.key));
-  // Quiet folds by project; ready-to-archive first inside each project, then newest.
-  byGroup.get("quiet")!.sort((a, b) => (a.project ?? "￿").localeCompare(b.project ?? "￿") || Number(b.readyToArchive) - Number(a.readyToArchive) || newest(a, b));
+  for (const s of finished) byGroup.get(s.group)!.push(s);
+  for (const id of HOME_GROUPS) {
+    const items = sortItems(byGroup.get(id)!, sort, id, fresh.byWorkspace);
+    // Quiet folds by project; each fold keeps the chosen order.
+    byGroup.set(id, id === "quiet" ? [...items].sort((a, b) => (a.project ?? "￿").localeCompare(b.project ?? "￿")) : items);
+  }
   const groups = HOME_GROUPS.map(id => ({ id, title: GROUP_TITLE[id], items: byGroup.get(id)! })).filter(g => g.items.length > 0);
-  return { groups, needs: byGroup.get("needs")!.length, byKey: new Map(out.map(s => [s.key, s])) };
+  return { groups, needs: byGroup.get("needs")!.length, byKey: new Map(finished.map(s => [s.key, s])), sort, rankedAt: fresh.rankedAt };
+}
+
+/**
+ * The status at a glance: one count per group (and ready to archive). Home's strip, the navigator, the sidebar badge
+ * and the brief headline all read this, so they never disagree.
+ */
+export type HomeCounts = Record<HomeGroupId, number> & { archivable: number };
+export function homeCounts(model: Pick<HomeModel, "groups">): HomeCounts {
+  const out = Object.fromEntries(HOME_GROUPS.map(g => [g, 0])) as HomeCounts;
+  out.archivable = 0;
+  for (const g of model.groups) { out[g.id] = g.items.length; if (g.id === "quiet") out.archivable = g.items.filter(s => s.readyToArchive).length; }
+  return out;
 }
 
 /** Needs you: tier, then the longest wait first, then key for a stable order. */
@@ -230,7 +280,7 @@ export type BriefPaneModel = {
   waiting: string | null;
   cleared: string | null;
   away: { count: number; top: LogLine[] };
-  counts: { needs: number; fixing: number; running: number; waiting: number };
+  counts: HomeCounts;
 };
 
 const MOVE: Partial<Record<HeadlineKey, string>> = {
@@ -263,7 +313,7 @@ export function briefPane(input: { model: HomeModel; rows: InboxRow[]; tracked: 
   const cleared = merged || signed ? [merged ? `${plural(merged, "PR")} merged` : "", signed ? `${signed} signed off` : ""].filter(Boolean).join(", ") : null;
   const log = followUpLog(tracked, since);
   return { headline, first, waiting: waitingNote, cleared, away: { count: log.length, top: log.slice(0, 4) },
-    counts: { needs: needs.length, fixing: fixing.length, running: live.length, waiting: waiting.length } };
+    counts: homeCounts(model) };
 }
 
 /** "Mon 18:00": when "since you were away" starts, for the pane's labels. */

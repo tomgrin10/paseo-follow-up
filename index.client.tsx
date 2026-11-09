@@ -4,8 +4,9 @@ import { openExternalUrl, type PluginClientContext, type PluginButtonRegistratio
 import { Dimensions } from "react-native";
 import { FollowSettings } from "./client/settings";
 import { FollowHome, HOME_SCREEN } from "./client/home";
-import { FollowNavigator } from "./client/navigator";
+import { FollowPanel } from "./client/panel";
 import { createPaseoWorkspaces } from "./client/home-data";
+import { createHomeExtras } from "./client/home-view";
 import { contributeChat } from "./client/chat";
 import { createLiveStore, headerIcon, sidebarItem } from "./client/live";
 import { contributeFollowUpPill } from "./client/pill";
@@ -18,7 +19,7 @@ import { contributeBrief } from "./client/brief";
 
 /** Home. The same screen id the Overview had, so the sidebar row, ⌘K and saved links land on Home. */
 const OVERVIEW = HOME_SCREEN;
-/** The workspace panel, now the navigator. One id for the side pane and the phone tab (1.2.0-beta.1 retired "follow-through-tab"). */
+/** The workspace panel: this workspace only, with a Home button. One id for the side pane and the phone tab (1.2.0-beta.1 retired "follow-through-tab"). */
 const PANEL = "follow-through";
 /** Old settings screen ids, kept only so saved links and restored routes still open the one settings page. */
 const LEGACY_SETTINGS_SCREENS = ["follow-through-settings", "project-settings", "display-settings"];
@@ -39,16 +40,17 @@ export default function contribute(host: PluginClientContext) {
   let stopped = false;
   const register = (workspaceId: string) => {
     if (stopped || headers.has(workspaceId)) return;
-    // The header button re-docks the navigator for this workspace (H10 A).
+    // The header button opens (docks) this workspace's panel.
     headers.set(workspaceId, client.addHeaderButton({ id: "follow-through", workspaceId, button: { title: "Follow-up", icon: HeaderIcon, behavior: { kind: "action", onPress() { openPanel(workspaceId); } } } }));
   };
   const paseoWorkspaces = createPaseoWorkspaces(client, { onAdd: register, onRemove: id => { headers.get(id)?.remove(); headers.delete(id); } });
-  const sources = { inbox, live: store, paseo: paseoWorkspaces };
+  const extras = createHomeExtras(client);
+  const sources = { inbox, live: store, paseo: paseoWorkspaces, extras };
   // "Sign off & next" from a pill or ⌘K: the screen relays it to the host's navigation.
   let nextToken = 0;
   const openNext = (from: string | null) => client.openScreen({ screenId: OVERVIEW, params: { next: String(++nextToken), ...(from ? { from } : {}) } });
 
-  const removeDisplay = contributeDisplay(client, { id: "follow-through-overview", title: "Follow-up", Component: sidebarItem(store, inbox, OVERVIEW) });
+  const removeDisplay = contributeDisplay(client, { id: "follow-through-overview", title: "Follow-up", Component: sidebarItem(sources, OVERVIEW) });
   const briefDeps: BriefDeps = {
     signOff: agentId => void inbox.signOff([agentId]), openNext,
     openAgent: agentId => client.openScreen({ screenId: OVERVIEW, params: { next: String(++nextToken), open: agentId } }),
@@ -56,8 +58,7 @@ export default function contribute(host: PluginClientContext) {
   };
   const homeDeps = { sources, openSettings, openPanel, openLog, openHome: openOverview, briefDeps };
   const Overview = (props: PluginScreenProps) => <FollowHome {...props} deps={homeDeps} />;
-  const navDeps = { sources, openHome: openOverview, openLarge, openSettings, openPanel };
-  const Panel = (props: PluginWorkspacePanelProps) => <FollowNavigator {...props} deps={navDeps} />;
+  const Panel = (props: PluginWorkspacePanelProps) => <FollowPanel {...props} openSettings={openSettings} openOverview={openOverview} openLarge={openLarge} inbox={inbox} briefDeps={briefDeps} />;
   const Large = (props: PluginScreenProps) => <FollowLarge {...props} openSettings={openSettings} openOverview={openOverview} />;
   const removers: (() => unknown)[] = [
     client.addScreen({ id: OVERVIEW, title: "Follow-up", Component: Overview }),
@@ -65,7 +66,7 @@ export default function contribute(host: PluginClientContext) {
     ...LEGACY_SETTINGS_SCREENS.map(id => client.addScreen({ id, title: "Follow-up settings", Component: FollowSettings })),
     client.addSettingsScreen({ id: "projects", title: "Follow-up", icon: "GitPullRequest", Component: FollowSettings }),
     client.addWorkspacePanel({ id: PANEL, title: "Follow-up", icon: "GitPullRequest", locations: ["workspace", "explorer"], Component: Panel }),
-    client.addCommandCenterItem({ id: "open-follow-through", title: "Follow-up: dock the navigator here", icon: "GitPullRequest", keywords: ["PR", "stack", "repairs", "done", "archive"], context: "workspace", onSelect({ openPanel }) { openPanel(PANEL, { location: location() }); } }),
+    client.addCommandCenterItem({ id: "open-follow-through", title: "Follow-up: open for this workspace", icon: "GitPullRequest", keywords: ["PR", "stack", "repairs", "done", "archive"], context: "workspace", onSelect({ openPanel }) { openPanel(PANEL, { location: location() }); } }),
     client.addCommandCenterItem({ id: "open-follow-through-large", title: "Follow-up: open the larger view", icon: "Maximize2", keywords: ["expand", "full screen", "maximize", "PR", "stack"], context: "workspace", onSelect({ workspace, openScreen }) { openScreen({ screenId: LARGE_SCREEN, params: { workspaceId: workspace.id } }); } }),
     client.addCommandCenterItem({ id: "open-follow-through-spec", title: "Follow-up: open the spec", icon: "FileText", keywords: ["spec", "artifact", "plan", "doc", "design"], context: "workspace", onSelect({ workspace, openPanel }) {
       const url = store.get(workspace.id)?.spec?.url;
@@ -73,8 +74,10 @@ export default function contribute(host: PluginClientContext) {
       if (url) void openExternalUrl(url).catch(() => undefined); else openPanel(PANEL, { location: location() });
     } }),
     client.addCommandCenterItem({ id: "follow-through-overview", title: "Follow-up: Home", icon: "House", keywords: ["home", "workspaces", "needs you", "inbox", "attention", "brief", "overview"], context: "global", onSelect({ openScreen }) { openScreen({ screenId: OVERVIEW }); } }),
+    // Opens Home and focuses its search field (also `/` while Home is on screen).
+    client.addCommandCenterItem({ id: "follow-through-search", title: "Follow-up: Search", icon: "Search", keywords: ["search", "find", "workspace", "branch", "PR", "omnibox"], context: "global", onSelect({ openScreen }) { openScreen({ screenId: OVERVIEW }); setTimeout(() => extras.focusSearch(), 150); } }),
     client.addCommandCenterItem({ id: "follow-through-log", title: "Follow-up: Done while you were away", icon: "History", keywords: ["log", "overnight", "away", "repairs", "activity"], context: "global", onSelect({ openScreen }) { openScreen({ screenId: OVERVIEW, params: { view: "log" } }); } }),
-    client.addCommandCenterItem({ id: "follow-through-settings", title: "Follow-up: settings", icon: "Settings", keywords: ["default", "tracking", "project", "display", "sidebar", "pill", "header", "inbox", "questions"], context: "global", onSelect() { openSettings(); } }),
+    client.addCommandCenterItem({ id: "follow-through-settings", title: "Follow-up: settings", icon: "Settings", keywords: ["default", "following", "project", "display", "sidebar", "pill", "header", "inbox", "questions"], context: "global", onSelect() { openSettings(); } }),
     client.addSlashCommand({ name: "follow-up", description: "Open this workspace's PRs and remaining work", argumentHint: "", context: "agent", onSubmit({ openPanel }) { openPanel(PANEL, { location: location() }); } }),
     contributeChat(client),
     contributeFollowUpPill(client, { inbox, live: store, openPanel, openNext }),
@@ -91,5 +94,6 @@ export default function contribute(host: PluginClientContext) {
     for (const r of removers) void r();
     for (const button of headers.values()) button.remove();
     await paseoWorkspaces.stop();
+    await extras.stop();
   };
 }
