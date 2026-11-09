@@ -8,7 +8,7 @@ import { z } from "zod";
  * (see `CHOICE_WRITES`); the flow keeps only its own progress in `plugin-data/follow-through/onboarding.json`.
  */
 
-export const ONBOARDING_STEPS = ["intro", "checks", "defaults", "reviewers", "helpers"] as const;
+export const ONBOARDING_STEPS = ["intro", "checks", "defaults", "shipping", "reviewers", "helpers"] as const;
 export type OnboardingStep = typeof ONBOARDING_STEPS[number];
 export const isStep = (v: unknown): v is OnboardingStep => typeof v === "string" && (ONBOARDING_STEPS as readonly string[]).includes(v);
 
@@ -219,6 +219,7 @@ export const CHOICE_WRITES = {
   autoSendDefault: { rpc: "follow.set-follow-settings", field: "enable_auto_sends_default" },
   autoSendWorkspace: { rpc: "follow.set-follow-settings", field: "workspace.enable_auto_sends" },
   reviewers: { rpc: "follow.save-reviewers", field: "reviewers" },
+  shipping: { rpc: "follow.set-pr-workflow", field: "setting" },
   overseer: { settings: "display", field: "enable_overseer" },
   ranker: { settings: "display", field: "enable_ranker" },
   trustBypass: { settings: "display", field: "enable_trust_bypass" },

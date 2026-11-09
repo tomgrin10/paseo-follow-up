@@ -35,7 +35,7 @@ const probe = (o: { gt: boolean; auth: boolean; init: boolean }): Probe => ({ gt
 async function storeWith(p: Probe, paths: Record<string, string> = { "example/app": "/src/app" }) {
   const dir = await mkdtemp(join(tmpdir(), "follow-workflow-"));
   const store = new PrWorkflowStore(dir, p);
-  store.paths = async () => new Map(Object.entries(paths));
+  store.paths = async () => new Map(Object.entries(paths).map(([k, v]) => [k, [v]]));
   return { store, dir, close: () => rm(dir, { recursive: true, force: true }) };
 }
 
@@ -54,8 +54,8 @@ test("auto: gt missing, sign-in missing or repo not initialised all resolve to G
       assert.equal(view.repos[0].detected, expected);
       assert.equal(view.repos[0].effective, expected);
       assert.equal(view.gt.installed, o.gt);
-      // GitHub rows never mention Graphite, whatever auto found.
-      if (expected === "github") assert.doesNotMatch(view.repos[0].reason, GRAPHITE_WORDS);
+      // GitHub rows lead with GitHub; Graphite is named at most once, as what isn't set up.
+      if (expected === "github") { assert.match(view.repos[0].reason, /^(Using GitHub\. Graphite isn’t set up on this machine\.|Using GitHub\. This repository isn’t set up for Graphite\.)$/); assert.doesNotMatch(view.repos[0].reason, /\bgt\b|\/fix-pr/); }
     } finally { await f.close(); }
   }
   // No local checkout to look at: GitHub, not an error.
@@ -93,13 +93,21 @@ test("Tom's setup (fakes): gt on PATH, Graphite sign-in, a gt-initialised repo o
 
     const environment = { PATH: `/nonexistent:${bin}`, XDG_CONFIG_HOME: join(root, "config"), HOME: root };
     const store = new PrWorkflowStore(join(root, "data"), fsProbe(environment));
-    store.paths = async () => new Map([["acme/acme-poc", worktree], ["tomgrin10/plain", plain]]);
+    store.paths = async () => new Map([["acme/acme-poc", [worktree]], ["tomgrin10/plain", [plain]]]);
     assert.equal(await store.workflow("acme/acme-poc"), "graphite");
     assert.equal(await store.workflow("tomgrin10/plain"), "github");
     // Same machine without gt on PATH: everything is GitHub.
     const bare = new PrWorkflowStore(join(root, "data2"), fsProbe({ ...environment, PATH: "/nonexistent" }));
     bare.paths = store.paths;
     assert.equal(await bare.workflow("acme/acme-poc"), "github");
+    // No checkout registered as a Paseo project: a tracked workspace's working directory for that repository is
+    // looked at next. The project's plain checkout comes first, the workspace's gt-initialised worktree still wins.
+    const fallback = new PrWorkflowStore(join(root, "data3"), fsProbe(environment));
+    fallback.paths = async () => new Map([["tomgrin10/transcripts", [plain, worktree]], ["tomgrin10/none", []]]);
+    assert.equal(await fallback.workflow("tomgrin10/transcripts"), "graphite");
+    const view = await fallback.view(["tomgrin10/transcripts", "tomgrin10/none"]);
+    assert.equal(view.repos.find(r => r.repo === "tomgrin10/transcripts")?.path, worktree);
+    assert.match(view.repos.find(r => r.repo === "tomgrin10/none")!.reason, /No local checkout/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -335,4 +343,40 @@ test("scopes.json carries each agent's workflow; the summary picks the action to
   assert.equal(workflowSummary(["github", "github"]), "github");
   assert.equal(workflowSummary(["github", "graphite"]), "mixed");
   assert.equal(workflowSummary([]), null);
+});
+
+test("Settings summaries: the glance lines count what each repository ships with and what's set by hand", async () => {
+  const { shippingSummary, repoShippingSummary, reposShippingSummary } = await import("../shared/pr-workflow");
+  const row = (repo: string, effective: "github" | "graphite", own: Partial<{ inherits: boolean; mergeMethod: "rebase" | null; setting: "auto" | "github" | "graphite" }> = {}) =>
+    ({ repo, setting: "auto" as const, detected: effective, effective, reason: "", path: null, inherits: true, mergeMethod: null, reviewFix: null, github: null, ...own });
+  const repos = [row("a/one", "github"), row("a/two", "github", { mergeMethod: "rebase" }), row("a/three", "graphite"), row("a/four", "github", { inherits: false, setting: "github" })];
+  assert.equal(shippingSummary({ default: "auto", repos }), "Auto · GitHub in 3, Graphite in 1");
+  assert.equal(shippingSummary({ default: "auto", repos: repos.filter(r => r.effective === "github") }), "Auto · GitHub everywhere");
+  assert.equal(shippingSummary({ default: "github", repos: [] }), "GitHub");
+  assert.equal(reposShippingSummary(repos), "3 GitHub · 1 Graphite · 2 set here");
+  assert.equal(reposShippingSummary(repos.filter(r => r.effective === "github" && r.inherits && !r.mergeMethod)), "1 GitHub");
+  assert.equal(repoShippingSummary(repos[0]), "GitHub · Auto");
+  assert.equal(repoShippingSummary(repos[1]), "GitHub · Rebase · Auto");
+  assert.equal(repoShippingSummary(repos[3]), "GitHub · set here");
+  // A GitHub-only machine never reads the word Graphite in these lines.
+  assert.doesNotMatch([shippingSummary({ default: "auto", repos: [repos[0]] }), reposShippingSummary([repos[0]]), repoShippingSummary(repos[0])].join(" "), GRAPHITE_WORDS);
+});
+
+test("setup's Auto means inherit, like Settings' Default, so trying Graphite then Auto leaves nothing pinned", async () => {
+  const { setupWrite, setupValue } = await import("../shared/pr-workflow");
+  const auto = { default: "auto" as const };
+  assert.deepEqual(setupWrite(auto, "acme/api", "graphite"), { repo: "acme/api", setting: "graphite" });
+  assert.deepEqual(setupWrite(auto, "acme/api", "auto"), { repo: "acme/api", setting: null });
+  // A GitHub default: choosing Auto is a real override for this repository.
+  assert.deepEqual(setupWrite({ default: "github" }, "acme/api", "auto"), { repo: "acme/api", setting: "auto" });
+  assert.equal(setupValue(auto, { inherits: true, setting: "auto" }), "auto");
+  assert.equal(setupValue(auto, { inherits: false, setting: "graphite" }), "graphite");
+  // Through the store: graphite, then back to Auto, inherits again.
+  const f = await storeWith(probe({ gt: false, auth: false, init: false }));
+  try {
+    await f.store.mutate(c => { c.repos["example/app"] = { workflow: "graphite" }; });
+    const { setting } = setupWrite(auto, "example/app", "auto");
+    await f.store.mutate(c => { if (setting === null) delete c.repos["example/app"]?.workflow; });
+    assert.equal((await f.store.view(["example/app"])).repos[0].inherits, true);
+  } finally { await f.close(); }
 });
