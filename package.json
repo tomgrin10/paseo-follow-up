@@ -24,9 +24,10 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
-    "verify": "npm run typecheck && npm test && node --test button-visibility.test.mjs && npm run test:scale",
+    "verify": "npm run typecheck && npm test && node --test button-visibility.test.mjs && npm run test:scale && npm run test:native",
     "preview": "node scripts/check-install.mjs --keep",
     "test:install": "node scripts/check-install.mjs",
+    "test:native": "node scripts/check-native-tools.mjs --agents 10",
     "prepare": "node scripts/build.mjs",
     "test:scale": "node scripts/scale-check.mjs --workspaces 120 --awake 5 --churn 35 --idle 30 --rss-budget 240 --cpu-budget 3"
   },

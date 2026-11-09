@@ -1,10 +1,19 @@
 #!/usr/bin/env node
 import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash, randomUUID } from "node:crypto";
 
 const directory = dirname(fileURLToPath(import.meta.url));
+/** 1.4.0-beta.2: launched with Follow-up's tools served by Paseo's MCP (follow_<name>), or the follow-through bridge (<name>). Agents opened before the upgrade carry no flag and keep the bridge names. */
+const native = process.env.FOLLOW_THROUGH_TOOLS === "native";
+// Tool names that read unambiguously in prose; kept identical to server/mcp.mjs's underscore names (a test checks it).
+export const TOOL_NAMES = ["workspace_status", "sync_workspace", "enroll_workspace", "register_pr", "exclude_stack", "update_obligation", "acknowledge_batch", "ask_question", "record_answer", "withdraw_question", "set_spec", "workspace_about", "needs_you", "declare_done", "list_prs", "add_reviewers", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "inbox_list", "sign_off", "set_finish_flags", "set_priorities", "agent_digest", "route_candidates", "send_to_agent", "start_workspace"];
+const toolPattern = new RegExp(`(?<![\\w])(${TOOL_NAMES.join("|")})(?![\\w])`, "g");
+/** Names Follow-up's tools the way this agent has them. */
+export function named(text, isNative = native) { return isNative ? text.replace(toolPattern, "follow_$1") : text; }
+/** Whether a tool call is Follow-up's own, under either name set (mcp__follow-through__x, follow-through.x, mcp__paseo__follow_x, paseo.follow_x). */
+export function isFollowTool(tool) { return /follow[\s_-]*through/i.test(tool) || /^(?:mcp__paseo__|paseo[.:/])follow_[a-z_]+$/.test(tool); }
 const quietRevision = 1;
 const quietInstruction = "Do routine bookkeeping silently. Do not announce tracker calls, say you updated/synced the sidebar, recap panel state, or add plugin-status commentary/final paragraphs. Put receipts and evidence in the tools. User-facing messages should cover the actual work outcome, or a decision/blocker requiring the developer; answer sidebar status only when explicitly asked. If this continuation is bookkeeping only, use the tools and finish without another recap or repeating your previous answer.";
 const stopReason = "Silently complete this workspace's sidebar bookkeeping before finishing.";
@@ -68,11 +77,14 @@ async function save(path, value) {
   await rename(temporary, path);
 }
 function instructions(lease, contributor = false) {
+  return named(paragraphs(lease, contributor).filter(p => !(native && /^Prefer (?:the )?native/i.test(p))).join("\n\n"));
+}
+function paragraphs(lease, contributor) {
   if (contributor) return [
     "Maintain PR tracking for this session in its tracked workspace. Read workspace_status now and after compaction. Register every PR you submit, including from secondary git worktrees, with register_pr; register parents before children. References and external dependencies are not owned PRs. Call sync_workspace before finishing. The designated main agent retains goal, task, scope and completion authority.",
     quietInstruction,
     `Prefer native Follow-through tools. CLI fallback: FOLLOW_THROUGH_CLIENT_ENTRY=${quote(lease.clientEntry)} node ${quote(join(directory, "mcp.mjs"))} call <tool> '<json>' --compact. Do not ask the developer to maintain the sidebar.`,
-  ].join("\n\n");
+  ];
   return [
     "Maintain this tracked workspace's Follow-through sidebar as part of your normal work; do not wait for a developer reminder.",
     quietInstruction,
@@ -85,8 +97,26 @@ function instructions(lease, contributor = false) {
     "Follow-through batches contain a batch ID and task list. Read workspace_status and refresh live conditions before acting; skip resolved tasks. Process dependent PRs bottom to top, one PR fully before the next. Use the repository's /fix-pr workflow, validate feedback, verify changes, submit through Graphite with --publish, and reply/resolve addressed threads. Follow the repository's safe reparent procedure for merged parents and preserve uncommitted work. For post-deploy tasks, verify the currently serving revision contains every dependency and record behavioral results separately. Acknowledge the header's batch ID with acknowledge_batch before finishing: completed with the result, or blocked with the reason. Verify the entire goal and post-merge work before declare_done; acknowledge a completion batch first. Merging and archiving remain the developer's actions.",
     "Before ending this turn, reconcile the sidebar with what you actually did and call sync_workspace with a short summary, including when no changes are needed. Acknowledge any assigned batch. When the entire goal is fulfilled, use declare_done; otherwise preserve remaining work. Do not launch recovery, start queued repairs, merge, toggle merge-when-ready, or archive as part of this bookkeeping. Auto still governs separate follow-up sends. Subagents report to the main agent instead of claiming workspace ownership.",
     `Prefer the native follow-through MCP tools. For a full historical record, use workspace_status with detail=full. CLI compatibility fallback: FOLLOW_THROUGH_CLIENT_ENTRY=${quote(lease.clientEntry)} node ${quote(join(directory, "mcp.mjs"))} call <tool> '<json>' --compact. Omit --compact only when an existing script needs the full response. Never ask the developer to maintain the sidebar or run this bridge.`,
-  ].join("\n\n");
+  ];
 }
+/** With native tools there's no MCP initialize reply, so the role text it carried comes from the hook instead. */
+async function nativeExtras(brief) {
+  if (!native) return [];
+  const bridge = await import(pathToFileURL(join(directory, "mcp.mjs")).href).catch(() => null);
+  if (!bridge) return [];
+  return [
+    brief?.enable_inbox && process.env.FOLLOW_THROUGH_BRIEF ? bridge.needsYouInstruction : null,
+    process.env.FOLLOW_THROUGH_ROOT === "1" ? bridge.actionInstruction : null,
+    process.env.FOLLOW_THROUGH_OVERSEER === "1" ? bridge.overseerInstruction : null,
+  ].filter(Boolean).map(text => named(text));
+}
+/**
+ * Claude Code keeps hook context for the whole session and re-runs SessionStart after compaction, so the same text
+ * on every prompt only costs tokens (~1.3k per turn for a tracked main agent): send it once per session and again
+ * only when it changes. Other providers keep the per-prompt text.
+ */
+export function shouldRepeat(provider, turn, hash) { return provider !== "claude" || turn?.contextHash !== hash; }
+const digest = text => createHash("sha256").update(text).digest("hex").slice(0, 16);
 async function main() {
   const agentId = process.env.PASEO_AGENT_ID;
   if (!agentId || !/^[\w-]+$/.test(agentId) || process.env.FOLLOW_THROUGH_RECOVERY === "1") return;
@@ -98,6 +128,11 @@ async function main() {
   if (lease.expiresAt < Date.now() || !lease.clientEntry) return;
   // The Overseer: a fresh digest at the start of every turn; no sidebar bookkeeping and no Stop-hook nudge.
   if (process.env.FOLLOW_THROUGH_OVERSEER === "1") {
+    if (event.hook_event_name === "SessionStart") {
+      const extras = await nativeExtras(await json(join(directory, "brief.json")).catch(() => null));
+      if (extras.length) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: extras.join("\n\n") } }) + "\n");
+      return;
+    }
     if (event.hook_event_name !== "UserPromptSubmit") return;
     const file = await json(join(directory, "overseer-digest.json")).catch(() => null);
     if (!file || file.agentId !== agentId) return;
@@ -119,26 +154,32 @@ async function main() {
   // The brief nudge applies to root agents launched with FOLLOW_THROUGH_BRIEF, tracked or not.
   const provider = process.env.FOLLOW_THROUGH_BRIEF || null;
   const brief = provider ? await json(join(directory, "brief.json")).catch(() => null) : null;
-  if (!workspace && !(brief?.enable_inbox && brief?.enable_brief_nudge)) return;
+  if (!workspace && !(brief?.enable_inbox && brief?.enable_brief_nudge) && !(native && process.env.FOLLOW_THROUGH_ROOT === "1")) return;
   const context = () => instructions(lease, contributor);
+  const sessionText = async () => [workspace ? context() : null, ...await nativeExtras(brief)].filter(Boolean).join("\n\n");
   const name = event.hook_event_name;
   if (!["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"].includes(name)) return;
   const session = createHash("sha256").update(String(event.session_id ?? agentId)).digest("hex").slice(0, 24);
   const path = join(directory, "hook-state", `${agentId}-${session}.json`);
   const turn = await json(path).catch(() => null);
   const emit = text => process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: name, additionalContext: text } }) + "\n");
-  if (name === "SessionStart") { if (workspace) emit(context()); return; }
+  if (name === "SessionStart") {
+    const text = await sessionText();
+    if (text) { emit(text); await save(path, { ...turn, contextHash: digest(text) }); }
+    return;
+  }
   if (name === "UserPromptSubmit") {
     if (turn?.stopped && String(event.prompt ?? "").startsWith(stopReason)) return;
-    await save(path, { startedAt: Date.now(), dirtyAt: null, stopped: false, quietRevision });
-    if (workspace) emit(context());
+    const text = await sessionText(); const hash = text ? digest(text) : null;
+    await save(path, { startedAt: Date.now(), dirtyAt: null, stopped: false, quietRevision, contextHash: hash });
+    if (text && shouldRepeat(process.env.FOLLOW_THROUGH_PROVIDER, turn, hash)) emit(text);
     return;
   }
   if (name === "PostToolUse") {
     if (!workspace) return;
     const tool = String(event.tool_name ?? "");
     const args = JSON.stringify(event.tool_input ?? {});
-    const trackedTool = /follow[\s_-]*through/i.test(tool) || args.includes(join(directory, "mcp.mjs"));
+    const trackedTool = isFollowTool(tool) || args.includes(join(directory, "mcp.mjs"));
     const dirty = !trackedTool && /(bash|shell|exec_command|write_stdin|edit|write|apply_patch|notebook)/i.test(tool);
     const upgrade = turn?.quietRevision !== quietRevision;
     if (dirty || upgrade) await save(path, { ...turn, startedAt: turn?.startedAt ?? (dirty ? Date.now() : 0), stopped: turn?.stopped ?? false, ...(dirty ? { dirtyAt: Date.now() } : {}), quietRevision });
@@ -155,7 +196,7 @@ async function main() {
   const nudge = shouldNudge({ provider, brief, agentId, contributor, recovery: false, subagent: false, stopHookActive: !!event.stop_hook_active, turn, called });
   if (!sync && !nudge) return;
   await save(path, { ...turn, startedAt: turn?.startedAt ?? Date.now(), stopped: true, ...(nudge ? { nudgedAt: Date.now() } : {}) });
-  const reasons = [sync ? stopReason + " This is metadata bookkeeping only; do not start queued repairs or recovery.\n\n" + context() : null, nudge ? nudgeReason : null].filter(Boolean);
+  const reasons = [sync ? stopReason + " This is metadata bookkeeping only; do not start queued repairs or recovery.\n\n" + context() : null, nudge ? named(nudgeReason) : null].filter(Boolean);
   process.stdout.write(JSON.stringify({ decision: "block", reason: reasons.join("\n\n") }) + "\n");
 }
 // Tests import shouldNudge without running the hook.

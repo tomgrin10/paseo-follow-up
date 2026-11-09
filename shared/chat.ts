@@ -4,9 +4,12 @@ import { z } from "zod";
 export const FOLLOW_TOOLS = ["workspace_status", "sync_workspace", "enroll_workspace", "register_pr", "exclude_stack", "update_obligation", "acknowledge_batch", "declare_done", "ask_question", "record_answer", "withdraw_question", "set_spec"] as const;
 export type FollowTool = (typeof FOLLOW_TOOLS)[number];
 
-/** Claude records mcp__follow-through__register_pr; Codex records follow-through.register_pr. */
+/**
+ * Claude records mcp__follow-through__register_pr; Codex records follow-through.register_pr. Since 1.4.0-beta.2 the
+ * tools are served through Paseo's own MCP as follow_register_pr: mcp__paseo__follow_register_pr / paseo.follow_register_pr.
+ */
 export function followToolName(name: string): FollowTool | null {
-  const match = /^(?:mcp__)?follow-through(?:__|\.|\/|:)([a-z_]+)$/.exec(name);
+  const match = /^(?:mcp__)?follow-through(?:__|\.|\/|:)([a-z_]+)$/.exec(name) ?? /^(?:mcp__)?paseo(?:__|\.|\/|:)follow_([a-z_]+)$/.exec(name);
   return match && (FOLLOW_TOOLS as readonly string[]).includes(match[1]) ? match[1] as FollowTool : null;
 }
 
