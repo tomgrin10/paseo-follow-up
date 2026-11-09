@@ -190,6 +190,7 @@ Betas publish to npm's `beta` dist-tag, so `paseo plugin update` without `--vers
 - Follow-up never merges, turns on merge when ready, requests reviewers or archives on its own. **Merge** re-checks the stack, lists any PRs underneath that would merge first, and asks again.
 - A merged PR is not the end: tasks such as production checks and open questions keep the workspace open until the main agent declares Done and everything has settled.
 - Answers go out only when you click Send. Follow-up never answers for you.
+- **It stays light on Paseo (1.4).** Follow-up keeps one shared view of Paseo's agents and workspaces. It reads the full list once at start, then updates it from Paseo's events: turns, permissions, archives and new agents or workspaces. It re-reads the list at most once a minute after a change, and every ten minutes otherwise. Home, the workspace panel, the pills and the Needs-you inbox all read that shared view, so opening them never makes Paseo list your workspaces again. In the app, the panel and pills draw from one shared poll that refreshes when an agent changes. The Needs-you list answers "unchanged" in a few bytes when nothing moved, and nothing polls while the app is in the background. At 120 workspaces and idle, Follow-up's worker makes about 1 request a minute to Paseo, down from about 60. With the app open it was about 140.
 
 ### Agents can do what you can click
 

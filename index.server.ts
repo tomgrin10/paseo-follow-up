@@ -48,7 +48,8 @@ import { activeWindowMs, conversationGone, DEFAULT_ACTIVE_WINDOW_DAYS } from "./
 import { ACTIVE_SCOPE_MIGRATION, PRUNE_MIGRATION, autoSendsByDefault, FOLLOW_EVERY_MIGRATION, followsByDefault, followsEvery, migrateFollowEvery, optedOut } from "./shared/settings";
 import { Overseer, OVERSEER_TOOLS, type OverseerPaseo, type OverseerTool } from "./server/overseer";
 import { OVERSEER_LABEL } from "./shared/overseer";
-import { pages, withDaemon } from "./server/daemon";
+import { withDaemon } from "./server/daemon";
+import { inboxAnswer } from "./server/etag";
 import { AiJobs } from "./server/ai-jobs";
 import { AboutService, AboutStore, liveSources, rootHistory, type AboutContext } from "./server/about";
 import { readTranscript } from "./server/transcript";
@@ -136,7 +137,7 @@ export default function contribute(server: PluginServerContext) {
         });
       },
     },
-    directory: daemonDirectory(),
+    directory: daemonDirectory(gateway.directory),
     sources: fileSources(paseoHome, async (): Promise<{ agentId: string; messageId: string | null; at: string }[]> => (await inbox.store.snapshot()).ledger),
     guard: async () => {
       try { const state = JSON.parse(await readFile(guardPath(paseoHome), "utf8")); return state?.version === 1 && Array.isArray(state.pauses) ? state.pauses as GuardPause[] : null; }
@@ -532,13 +533,14 @@ export default function contribute(server: PluginServerContext) {
   handle(rpc.reviewerSuggestionsRpc, async ({ repo }) => { await requireReady(); return reviewerSuggestions.suggest(repo); });
 
   const priorityStore = new PriorityStore(directory);
-  // Paseo's workspace descriptors for the Overseer (name, project, branch): metadata only, one paged read. The
-  // digest reuses it for a minute; the Overseer's own tool calls refresh it after 10 s.
+  // Paseo's workspace descriptors for the Overseer (name, project, branch), from the shared directory.
+  let lastFreshDescriptors = 0;
   type Descriptor = { id: string; name?: string | null; title?: string | null; projectId?: string | null; projectDisplayName?: string | null; projectCustomName?: string | null; activityAt?: string | null; archivingAt?: string | null; gitRuntime?: { currentBranch?: string | null } | null; githubRuntime?: { pullRequest?: { number?: number; title?: string } | null } | null };
-  let descriptors: { at: number; value: Promise<Descriptor[]> } | null = null;
   const paseoWorkspaces = async (fresh = false) => {
-    if (!descriptors || Date.now() - descriptors.at > (fresh ? 10_000 : 60_000)) { const value = withDaemon(client => pages(cursor => client.fetchWorkspaces({ page: { limit: 100, ...(cursor ? { cursor } : {}) } })) as Promise<Descriptor[]>); descriptors = { at: Date.now(), value }; value.catch(() => { descriptors = null; }); }
-    return (await descriptors.value).filter(w => !w.archivingAt).map(w => ({ id: w.id, name: w.title || w.name || "Workspace", project: w.projectCustomName || w.projectDisplayName || null, projectId: w.projectId ?? null, activityAt: w.activityAt ?? null,
+    // The shared directory: the Overseer's own tool calls may ask for a fresh read, at most every 10 s.
+    if (fresh && Date.now() - lastFreshDescriptors > 10_000) { lastFreshDescriptors = Date.now(); gateway.directory.markDirty(); }
+    const rows = (await gateway.directory.read()).workspaces as Descriptor[];
+    return rows.filter(w => !w.archivingAt).map(w => ({ id: w.id, name: w.title || w.name || "Workspace", project: w.projectCustomName || w.projectDisplayName || null, projectId: w.projectId ?? null, activityAt: w.activityAt ?? null,
       branch: w.gitRuntime?.currentBranch ?? null, pr: w.githubRuntime?.pullRequest?.title ? { number: w.githubRuntime.pullRequest.number ?? null, title: w.githubRuntime.pullRequest.title } : null }));
   };
   const overseerOn = async () => (await inboxSettings()).enable_overseer !== false;
@@ -659,7 +661,8 @@ export default function contribute(server: PluginServerContext) {
     void engine.tick();
     return result;
   });
-  handle(rpc.inboxListRpc, async () => { await requireReady(); return { ...await inbox.list(), error: inboxError }; });
+  // Home, the sidebar badge and the pills poll this; an unchanged list answers in a few bytes (see inboxAnswer).
+  handle(rpc.inboxListRpc, async ({ etag }) => { await requireReady(); return inboxAnswer({ ...await inbox.list(), error: inboxError }, etag); });
   handle(rpc.inboxBriefRpc, async ({ agentId }) => { await requireReady(); return { brief: await inbox.brief(agentId) }; });
   handle(rpc.inboxActRpc, async input => { await requireReady(); return inbox.act(input); });
   handle(rpc.needsYouRpc, async ({ agentId, ...input }, { paseo }) => {
@@ -712,6 +715,17 @@ export default function contribute(server: PluginServerContext) {
 
   const removers = [
     displaySettings.subscribe(() => void writeBriefState().catch(() => undefined)),
+    // The shared directory learns from events instead of polling Paseo (see DaemonDirectory). Registered first so the
+    // handlers below read the patched rows.
+    server.on("agent.turn_started", async event => gateway.directory.turnStarted(event.agent, event.turnId)),
+    server.on("agent.turn_ended", async event => gateway.directory.turnEnded(event.agent, event.outcome)),
+    server.on("agent.permission_requested", async event => gateway.directory.permissionRequested(event.agent.id, event.request as { id?: string })),
+    server.on("agent.permission_resolved", async event => gateway.directory.permissionResolved(event.agent.id, event.requestId)),
+    server.on("agent.archived", async event => gateway.directory.agentArchived(event.agent.id, event.archivedAt)),
+    server.on("agent.closed", async event => gateway.directory.agentClosed(event.agent.id)),
+    server.on("agent.created", async event => { await ready; await gateway.directory.agentCreated(event.agent); }),
+    server.on("workspace.created", async event => gateway.directory.workspaceCreated(event.workspace)),
+    server.on("workspace.archived", async event => gateway.directory.workspaceArchived(event.workspace.id)),
     server.on("agent.turn_started", async (event, { paseo }) => { seen(paseo); inboxHook(() => inbox.turnStarted(event.agent, event.turnId)); }),
     server.on("agent.turn_ended", async (event, { paseo }) => { seen(paseo); inboxHook(() => inbox.turnEnded(event.agent, event.outcome, event.turnId)); }),
     server.on("agent.permission_requested", async (event, { paseo }) => { seen(paseo); inboxHook(async () => { await inbox.permissionRequested(event.agent, event.request); await writeBriefState(); }); }),

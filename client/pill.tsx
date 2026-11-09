@@ -1,9 +1,11 @@
 import { useState, useSyncExternalStore } from "react";
+import { browserKey, BROWSER_POLL_MS } from "./keys";
+import { useWorkspace } from "./workspace-data";
 import { Pressable, Text, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { useRpc, type PluginButtonContentProps, type PluginButtonIconProps, type PluginButtonRegistration, type PluginClientContext } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/ui";
-import { browserStatusRpc, getRpc } from "../shared/contracts";
+import { browserStatusRpc } from "../shared/contracts";
 import { needsYou, type NeedItem } from "../shared/attention";
 import { briefQuestionIds, HEADLINE_ICON, HEADLINE_TONE, pillState, todoLabel, withoutBriefQuestions, type PillState } from "../shared/headline";
 import { snoozeUntil, type InboxRow } from "../shared/inbox";
@@ -14,7 +16,7 @@ import { headlineColor, withAlpha } from "./theme";
 import { useInbox } from "./inbox";
 import type { InboxStore } from "./inbox-store";
 import type { LiveStore } from "./live";
-import { NeedsYouList, workspaceKey } from "./needs-you";
+import { NeedsYouList } from "./needs-you";
 import { PrSheet } from "./pr-sheet";
 import { QuestionSheet, QuestionStepper } from "./questions";
 import { useReviewerSettings } from "./reviewers";
@@ -137,13 +139,15 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
   const c = props.theme.colors; const t = text(c);
   const touch = props.layout.compact;
   const { target, state, now } = useTarget(deps, agentId, props.workspaceId);
-  const read = useRpc(getRpc); const browserRead = useRpc(browserStatusRpc);
+  const browserRead = useRpc(browserStatusRpc);
   const main = !!target.workspace && target.workspace.mainAgentId === agentId;
-  const query = useQuery({ queryKey: workspaceKey(props.workspaceId), queryFn: () => read({ workspaceId: props.workspaceId }), refetchInterval: 5000, enabled: main });
-  const browser = useQuery({ queryKey: ["follow-through", "browser"], queryFn: () => browserRead({}), refetchInterval: 5000, enabled: main });
+  // The live store already holds this workspace; the popover reads it once on open (Paseo can leave a stray mounted
+  // copy, so nothing here polls it: 1.4.0).
+  const query = useWorkspace(deps.live, props.workspaceId, { enabled: main });
+  const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), refetchInterval: BROWSER_POLL_MS, enabled: main });
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" } | null>(null);
   const [question, setQuestion] = useState<string | null>(null);
-  const w = main ? query.data?.workspace ?? target.workspace : null;
+  const w = main ? query.workspace ?? target.workspace : null;
   const row = target.row;
   const flagged = state?.mode === "flag";
   const running = !!row && ["running", "initializing"].includes(row.status);

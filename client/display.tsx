@@ -7,6 +7,7 @@ import { useEffect } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
 import { displayPreferences, displayRpc } from "../shared/display";
 import { sidebarVisibility } from "./sidebar-visibility";
+import { appVisible, onVisible } from "./visibility";
 
 type Display = import("zod").infer<typeof displayPreferences.schema>;
 const listeners = new Set<(values: Display) => void>();
@@ -98,11 +99,14 @@ export function contributeDisplay(client: PluginClientContext, item: PluginSideb
       // Retain the last valid preference through temporary disconnects.
     } finally { pending = false; }
   };
+  // Changes made on this client notify at once; other clients' changes are picked up within a minute, and not at all
+  // while the app is hidden (it reads once on return).
   void refresh();
-  const timer = setInterval(() => void refresh(), 5000);
+  const timer = setInterval(() => { if (appVisible()) void refresh(); }, 60_000);
+  const offVisible = onVisible(() => void refresh());
   return () => {
     disposed = true;
-    clearInterval(timer);
+    clearInterval(timer); offVisible();
     listeners.delete(update);
     sidebar.dispose();
   };

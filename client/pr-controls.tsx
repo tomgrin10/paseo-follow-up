@@ -22,7 +22,7 @@ export function PrControls({ pr, workspace, theme, compact, browserReady, intent
   const c = theme.colors; const t = text(c);
   const [plan, setPlan] = useState<ActionPlan | null>(null); const [notice, setNotice] = useState<string | null>(null);
   const statusKey = ["follow-through", "pr-controls", workspace.id, pr.key, pr.snapshot?.head];
-  const status = useQuery({ queryKey: statusKey, queryFn: () => read({ workspaceId: workspace.id, prKey: pr.key }), refetchInterval: 5000, enabled: browserReady });
+  const status = useQuery({ queryKey: statusKey, queryFn: () => read({ workspaceId: workspace.id, prKey: pr.key }), refetchInterval: 10_000, enabled: browserReady });
   const invalidate = () => { void cache.invalidateQueries({ queryKey: ["follow-through", "workspace", workspace.id] }); void cache.invalidateQueries({ queryKey: ["follow-through", "pr-controls", workspace.id] }); void cache.invalidateQueries({ queryKey: ["follow-through", "overview"] }); };
   const [picking, setPicking] = useState(false);
   const reviewerSettings = useReviewerSettings();

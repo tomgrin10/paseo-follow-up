@@ -8,11 +8,10 @@ import { needsYou } from "../shared/attention";
 import { useSidebarViewActive } from "./inbox";
 import { homeCounts } from "../shared/home";
 import { useHomeModel, type HomeSources } from "./home-data";
-import { onVisible, pollDelay } from "./visibility";
+import { onVisible, whileVisible } from "./visibility";
 
-const POLL_MS = 8_000;
-/** While the app is hidden. */
-const HIDDEN_POLL_MS = 60_000;
+/** The backstop poll; agent changes `nudge` it sooner (1.4.0). Nothing while the app is hidden. */
+const POLL_MS = 15_000;
 
 /** One shared poll of tracked workspaces for the pills, header-button dots and the sidebar count. */
 export function createLiveStore(client: PluginClientContext) {
@@ -22,6 +21,7 @@ export function createLiveStore(client: PluginClientContext) {
   let version = 0;
   const listeners = new Set<() => void>();
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let nudged: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
   /** The worker's list revision this store holds; each poll asks only for what changed since (1.3.0-beta.4). */
   let revision: number | undefined;
@@ -41,7 +41,7 @@ export function createLiveStore(client: PluginClientContext) {
       archived = [...all.values()].filter(w => w.archived);
       emit();
     } catch { /* Keep the last answer through restarts and disconnects. */ }
-    finally { if (!stopped) timer = setTimeout(() => void poll(), pollDelay(POLL_MS, HIDDEN_POLL_MS)); }
+    finally { if (!stopped) timer = whileVisible(POLL_MS, () => void poll()); }
   };
   const offVisible = onVisible(() => { if (timer) clearTimeout(timer); void poll(); });
   void poll();
@@ -52,7 +52,9 @@ export function createLiveStore(client: PluginClientContext) {
     all: () => [...workspaces.values()],
     archived: () => archived,
     refresh: () => { if (timer) clearTimeout(timer); void poll(); },
-    stop() { stopped = true; offVisible(); if (timer) clearTimeout(timer); listeners.clear(); },
+    /** Paseo reported an agent change: one diff read soon, however many updates arrive together. */
+    nudge: () => { if (nudged || stopped) return; nudged = setTimeout(() => { nudged = null; if (timer) clearTimeout(timer); void poll(); }, 1_500); },
+    stop() { stopped = true; offVisible(); if (timer) clearTimeout(timer); if (nudged) clearTimeout(nudged); listeners.clear(); },
   };
 }
 export type LiveStore = ReturnType<typeof createLiveStore>;
