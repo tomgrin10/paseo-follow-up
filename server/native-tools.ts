@@ -47,9 +47,10 @@ export function nativeToolsAvailable(request: Pick<PluginSessionOpenRequest, "pr
 
 export type Invoke = (method: string, input: Record<string, unknown>, context: AgentToolContext) => Promise<unknown>;
 /** The tool definitions for one session. `live` reads the agent's current role and the inbox setting on each call. */
-export function nativeTools(flags: SessionFlags, live: (agentId: string) => Promise<Live>, invoke: Invoke): AgentToolDefinition[] {
+/** `workflows`: whether known repositories ship through Graphite, GitHub or both, for merge tools' wording. */
+export function nativeTools(flags: SessionFlags, live: (agentId: string) => Promise<Live>, invoke: Invoke, workflows: "graphite" | "github" | "mixed" | null = null): AgentToolDefinition[] {
   const list = attachableTools(flags);
-  const shapes = schemas(list);
+  const shapes = schemas(list, workflows);
   return list.map((tool, i) => ({
     name: PREFIX + tool[0],
     description: shapes[i].description,

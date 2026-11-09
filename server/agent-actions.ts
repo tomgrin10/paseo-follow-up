@@ -69,6 +69,8 @@ export type AgentActionDeps = {
   about?: { view(workspaceId: string, opts: { open?: boolean; wait?: boolean }): Promise<AboutView> };
   /** Settings → Agents, read-only: which agent each special role uses. No write tool. */
   agentSettings?: { all(): Promise<Record<string, RoleConfig>> };
+  /** Each known repository's PR workflow (Settings → Following → Shipping PRs). */
+  prWorkflows?: () => Promise<{ default: string; repos: { repo: string; effective: string; setting: string; reason: string; reviewFix: unknown }[]; reviewFix: unknown }>;
   now?: () => number;
 };
 
@@ -110,6 +112,8 @@ export function prRow(w: Workspace, p: Pr) {
     // Read-only: who Add reviewers would ask here and where that list comes from (Settings → Reviewers).
     configuredReviewers: (({ reviewers, source }) => ({ source, reviewers: reviewers.map(r => ({ login: r.login, name: reviewerLabel(r) })) }))(resolveReviewers(reviewerConfig(), p.repo)),
     needsReviewers: noReviewers(p) && !s!.draft, mergeable: blockers.length === 0, mergeBlockers: blockers,
+    // How this PR ships: "github" (gh pr merge, GitHub auto-merge) or "graphite". Older snapshots were Graphite's.
+    prWorkflow: s?.prWorkflow ?? "graphite",
   };
 }
 
@@ -134,7 +138,9 @@ export class AgentActions {
       case "agent_settings": {
         if (!this.d.agentSettings) throw new Error("agent_settings isn't available in this Follow-up.");
         const roles = await this.d.agentSettings.all();
-        return { roles: Object.values(roles).map(r => ({ ...r, summary: roleSummary(r), does: ROLE_INFO[r.role].does })), change: "Tom changes these in Follow-up settings → Agents." };
+        const workflows = await this.d.prWorkflows?.().catch(() => null);
+        return { roles: Object.values(roles).map(r => ({ ...r, summary: roleSummary(r), does: ROLE_INFO[r.role].does })), change: "Tom changes these in Follow-up settings → Agents.",
+          ...(workflows ? { prWorkflow: { default: workflows.default, reviewFix: workflows.reviewFix, repos: workflows.repos.map(r => ({ repo: r.repo, workflow: r.effective, setting: r.setting, why: r.reason, reviewFix: r.reviewFix ?? workflows.reviewFix })), change: "Tom changes these in Follow-up settings → Following → Shipping PRs." } } : {}) };
       }
       case "add_reviewers": return this.planReviewers(caller, args);
       case "merge": return this.planPr(caller, tool, "merge", args);

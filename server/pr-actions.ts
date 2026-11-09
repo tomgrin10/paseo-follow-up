@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { downstack, mergeBlockers, prActionBlocks, type ActionPlan, type BrowserPr, type PrActionKind } from "../shared/pr-actions";
+import { downstack, isGithubFlow, mergeBlockers, prActionBlocks, type ActionPlan, type BrowserPr, type PrActionKind } from "../shared/pr-actions";
+import type { MergeMethod } from "../shared/pr-workflow";
 import type { Workspace, Pr } from "../shared/model";
 import { findWorkspace } from "./engine";
 import { Store } from "./store";
@@ -7,12 +8,15 @@ import type { Github } from "./github";
 import { GraphiteWriteError, type Graphite } from "./graphite";
 import { BrowserBridge } from "./browser-bridge";
 import { allAssigned, configuredReviewers, noReviewers, reviewerLabel, sameLogin, withoutAuthor, type ReviewerEntry } from "../shared/reviewers";
-import { ReviewRequestError } from "./github";
+import { chooseMethod, GithubWriteError, ReviewRequestError } from "./github";
 
 function active(w: Workspace) {
   if (!w.enable_tracking || w.archived) throw new Error("This workspace is not actively tracked.");
 }
 function identity(prs: Pr[]) { return JSON.stringify(prs.map(p => [p.key, p.parent, p.snapshot?.head, p.snapshot?.base, p.snapshot?.trunk])); }
+/** The service that ships these PRs, for messages. */
+const via = (prs: Pr[]) => prs.some(p => isGithubFlow(p.snapshot)) ? "GitHub" : "Graphite";
+const AUTO_MERGE_OFF = "Auto-merge is off in this repository's settings. Turn on Allow auto-merge in the repository's GitHub settings to use When ready.";
 function wire(prs: Pr[]) { return prs.map(p => ({ number: p.number, head: p.snapshot!.head, trunk: p.snapshot!.trunk })); }
 
 export class PrActions {
@@ -20,7 +24,11 @@ export class PrActions {
   private reads = new Map<string, Promise<BrowserPr[]>>();
   private running = new Set<Promise<unknown>>();
   private reviewerRequests = new Map<string, Promise<{ state: "submitted" | "failed" | "uncertain"; result: string }>>();
-  constructor(private store: Store, private github: Pick<Github, "observe"> & Partial<Pick<Github, "requestReviewers">>, private graphite: Pick<Graphite, "merge" | "invalidate">, readonly browser: BrowserBridge, private now = Date.now, private reviewersFor: (repo: string) => ReviewerEntry[] = configuredReviewers) {}
+  /** The repository's saved merge method (Settings), used when GitHub still allows it. */
+  savedMethod: (repo: string) => MergeMethod | null = () => null;
+  /** Pause between a parent's merge and its child's, while GitHub recomputes the child's mergeability. */
+  settle = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+  constructor(private store: Store, private github: Pick<Github, "observe"> & Partial<Pick<Github, "requestReviewers" | "merge" | "autoMerge" | "retarget">>, private graphite: Pick<Graphite, "merge" | "invalidate">, readonly browser: BrowserBridge, private now = Date.now, private reviewersFor: (repo: string) => ReviewerEntry[] = configuredReviewers) {}
 
   private async fresh(workspaceId: string): Promise<Workspace> {
     const saved = findWorkspace(await this.store.snapshot(), workspaceId); active(saved);
@@ -45,6 +53,14 @@ export class PrActions {
     const w = findWorkspace(await this.store.snapshot(), workspaceId); active(w);
     const p = w.prs.find(p => p.key === key);
     if (!p) throw new Error("This PR is outside the workspace's inventory.");
+    if (isGithubFlow(p.snapshot)) {
+      // GitHub mode: auto-merge is read with the PR itself; no browser companion is involved.
+      const s = p.snapshot!;
+      const allowed = !!s.repoMerge?.autoMerge;
+      const browser = allowed ? { ready: true, reason: null } : { ready: false, reason: AUTO_MERGE_OFF };
+      if (!allowed || p.error || !s.complete || s.state !== "OPEN") return { browser, pr: null, error: null };
+      return { browser, pr: { repo: p.repo, number: p.number, head: s.head, state: s.state, mergeWhenReady: s.mergeWhenReady === "on", merging: !!s.inMergeQueue }, error: null };
+    }
     const browser = this.browser.status(p.repo);
     if (!browser.ready || p.error || !p.snapshot?.complete || p.snapshot.state !== "OPEN") return { browser, pr: null, error: null };
     const cached = this.browser.cached(p.repo, p.number, p.snapshot.head);
@@ -61,7 +77,7 @@ export class PrActions {
     if (!prs.length || prs.at(-1)?.key !== key) throw new Error("This PR is already merged.");
     const blockers: string[] = [];
     if (w.prActions.some(a => prActionBlocks(a, prs.map(p => p.key)))) blockers.push("Check the previous PR action before sending another.");
-    if (kind === "merge" && w.prActions.some(a => a.kind === "merge" && a.state === "submitted" && prs.some(p => a.heads[p.key] === p.snapshot?.head) && this.now() - Date.parse(a.createdAt) < 30_000)) blockers.push("A merge was just submitted for this revision. Wait for Graphite's result.");
+    if (kind === "merge" && w.prActions.some(a => a.kind === "merge" && a.state === "submitted" && prs.some(p => a.heads[p.key] === p.snapshot?.head) && this.now() - Date.parse(a.createdAt) < 30_000)) blockers.push(`A merge was just submitted for this revision. Wait for ${via(prs)}'s result.`);
     const rows = prs.map(p => ({ key: p.key, repo: p.repo, number: p.number, title: p.snapshot?.title ?? p.stack, head: p.snapshot?.head ?? "", parent: p.parent, base: p.snapshot?.base ?? "", trunk: p.snapshot?.trunk ?? "", blockers: kind === "merge" ? mergeBlockers(p) : p.error || !p.snapshot?.complete || p.snapshot.state !== "OPEN" ? ["Refresh an open PR"] : kind === "enable_mwr" && p.snapshot.draft ? ["Draft"] : [] }));
     if (kind === "merge") {
       for (let i = 0; i < prs.length; i++) {
@@ -69,11 +85,16 @@ export class PrActions {
         const expectedBase = i ? prs[i - 1].snapshot?.headBranch : s?.trunk;
         if (!s || !expectedBase || s.base !== expectedBase) rows[i].blockers.push("Refresh the stack's parent relationships");
       }
+    } else if (isGithubFlow(prs.at(-1)!.snapshot)) {
+      for (const [i, p] of prs.entries()) if (!p.snapshot?.repoMerge?.autoMerge && !rows[i].blockers.length) rows[i].blockers.push(AUTO_MERGE_OFF);
+      if (kind === "enable_mwr" && prs.at(-1)!.snapshot?.inMergeQueue) rows.at(-1)!.blockers.push("Merge already in progress");
     } else if (!rows.at(-1)!.blockers.length) {
       const remote = await this.read(prs.slice(-1));
       if (kind === "enable_mwr" && remote[0].merging && !remote[0].mergeWhenReady) rows.at(-1)!.blockers.push("Merge already in progress");
     }
-    const plan: ActionPlan = { id: randomUUID(), workspaceId, target: key, kind, expiresAt: new Date(this.now() + 60_000).toISOString(), prs: rows, blockers };
+    const github = isGithubFlow(prs.at(-1)!.snapshot);
+    const plan: ActionPlan = { id: randomUUID(), workspaceId, target: key, kind, expiresAt: new Date(this.now() + 60_000).toISOString(), prs: rows, blockers,
+      ...(github ? { via: "github" as const, method: chooseMethod(prs[0].snapshot?.repoMerge, this.savedMethod(prs[0].repo)), mergeQueue: !!prs[0].snapshot?.repoMerge?.mergeQueue } : {}) };
     for (const [id, saved] of this.plans) if (Date.parse(saved.plan.expiresAt) <= this.now()) this.plans.delete(id);
     this.plans.set(plan.id, { plan, identity: identity(prs) });
     return plan;
@@ -148,22 +169,28 @@ export class PrActions {
       if (identity(downstack(findWorkspace(await this.store.snapshot(), plan.workspaceId).prs, plan.target)) !== saved.identity) throw new Error("The stack changed during readiness verification.");
     } else {
       if (prs.some(p => p.error || !p.snapshot?.complete || p.snapshot.state !== "OPEN" || plan.kind === "enable_mwr" && p.snapshot.draft)) throw new Error("A selected PR is no longer eligible.");
-      const remote = await this.read(prs);
-      if (plan.kind === "enable_mwr" && remote.some(p => p.merging && !p.mergeWhenReady)) throw new Error("A selected PR is already merging.");
+      if (isGithubFlow(prs[0].snapshot)) {
+        if (prs.some(p => !p.snapshot!.repoMerge?.autoMerge)) throw new Error(AUTO_MERGE_OFF);
+        if (plan.kind === "enable_mwr" && prs.some(p => p.snapshot!.inMergeQueue)) throw new Error("A selected PR is already merging.");
+      } else {
+        const remote = await this.read(prs);
+        if (plan.kind === "enable_mwr" && remote.some(p => p.merging && !p.mergeWhenReady)) throw new Error("A selected PR is already merging.");
+      }
     }
     const id = randomUUID();
     await this.store.mutate(state => {
       const current = findWorkspace(state, w.id); active(current);
       if (current.prActions.some(a => prActionBlocks(a, prs.map(p => p.key)))) throw new Error("A PR action is already in progress or needs checking.");
-      if (plan.kind === "merge" && current.prActions.some(a => a.kind === "merge" && a.state === "submitted" && prs.some(p => a.heads[p.key] === p.snapshot?.head) && this.now() - Date.parse(a.createdAt) < 30_000)) throw new Error("A merge was just submitted for this revision. Wait for Graphite's result.");
+      if (plan.kind === "merge" && current.prActions.some(a => a.kind === "merge" && a.state === "submitted" && prs.some(p => a.heads[p.key] === p.snapshot?.head) && this.now() - Date.parse(a.createdAt) < 30_000)) throw new Error(`A merge was just submitted for this revision. Wait for ${via(prs)}'s result.`);
       if (identity(downstack(current.prs, plan.target)) !== saved.identity) throw new Error("The stack changed before submission.");
-      current.prActions.push({ id, kind: plan.kind, prs: prs.map(p => p.key), heads: Object.fromEntries(prs.map(p => [p.key, p.snapshot!.head])), createdAt: new Date(this.now()).toISOString(), state: "sending", result: plan.kind === "merge" ? "Waiting for Graphite to confirm." : "Confirm this PR setting change in the Send to Paseo extension in Chrome." });
+      current.prActions.push({ id, kind: plan.kind, prs: prs.map(p => p.key), heads: Object.fromEntries(prs.map(p => [p.key, p.snapshot!.head])), createdAt: new Date(this.now()).toISOString(), state: "sending", result: isGithubFlow(prs[0].snapshot) ? "Waiting for GitHub to confirm." : plan.kind === "merge" ? "Waiting for Graphite to confirm." : "Confirm this PR setting change in the Send to Paseo extension in Chrome." });
       current.completion = null;
     });
     let state: "submitted" | "failed" | "uncertain" = "submitted";
     let result: string;
     try {
-      if (plan.kind === "merge") {
+      if (isGithubFlow(prs[0].snapshot)) ({ state, result } = await this.githubExecute(plan.kind, prs));
+      else if (plan.kind === "merge") {
         await this.graphite.merge(prs[0].repo, prs.map(p => p.number), prs[0].snapshot!.trunk);
         result = `Merge submitted to Graphite for ${prs.length} PR${prs.length === 1 ? "" : "s"}. Waiting for the merge result.`;
       } else {
@@ -173,12 +200,51 @@ export class PrActions {
         result = reply.outcome === "completed" ? `Merge when ready ${plan.kind === "enable_mwr" ? "enabled" : "disabled"} for ${changed}.` : `${changed ? `Changed ${changed}. ` : ""}${reply.error || "Graphite could not confirm every selected PR."}`;
       }
     } catch (error) {
-      state = error instanceof GraphiteWriteError && error.uncertain ? "uncertain" : "failed";
-      result = error instanceof Error ? error.message : "Graphite action failed.";
+      state = (error instanceof GraphiteWriteError || error instanceof GithubWriteError) && error.uncertain ? "uncertain" : "failed";
+      result = error instanceof Error ? error.message : `${via(prs)} action failed.`;
     }
     await this.store.mutate(s => { const action = findWorkspace(s, w.id).prActions.find(a => a.id === id)!; action.state = state; action.result = result; });
     this.graphite.invalidate();
     return { state, result };
+  }
+  /**
+   * Plain GitHub. Merge goes bottom to top with `gh pr merge` pinned to each reviewed head; after a parent merges, its
+   * child is retargeted to trunk with `gh pr edit --base` when GitHub hasn't already, and gets a few seconds for
+   * GitHub to recompute mergeability. When ready is GitHub auto-merge. Partial progress is reported as it happened.
+   */
+  private async githubExecute(kind: PrActionKind, prs: Pr[]): Promise<{ state: "submitted" | "failed" | "uncertain"; result: string }> {
+    const gh = this.github;
+    if (!gh.merge || !gh.autoMerge || !gh.retarget) throw new Error("GitHub merging isn't available here.");
+    const done: string[] = [];
+    const partial = (error: unknown) => { const message = error instanceof Error ? error.message : "GitHub action failed."; return done.length ? `${done.join(" ")} Then: ${message}` : message; };
+    const method = (p: Pr) => chooseMethod(p.snapshot!.repoMerge, this.savedMethod(p.repo));
+    try {
+      if (kind === "merge") {
+        const queue = !!prs[0].snapshot!.repoMerge?.mergeQueue;
+        for (const [i, p] of prs.entries()) {
+          const s = p.snapshot!;
+          if (i > 0 && s.base !== s.trunk) { await gh.retarget(p, s.trunk); done.push(`Retargeted #${p.number} to ${s.trunk}.`); }
+          for (let attempt = 0; ; attempt++) {
+            try { await gh.merge(p, { method: method(p), head: s.head, mergeQueue: queue }); break; }
+            catch (error) {
+              // A child just behind its merged parent: GitHub needs a moment before it can merge it.
+              if (i === 0 || attempt >= 3 || !(error instanceof GithubWriteError) || error.uncertain) throw error;
+              await this.settle(3_000);
+            }
+          }
+          done.push(queue ? `Added #${p.number} to the merge queue.` : `Merged #${p.number}.`);
+          if (queue) break; // The queue merges the rest in order once the first lands; GitHub retargets nothing yet.
+        }
+        return { state: "submitted", result: done.join(" ") };
+      }
+      for (const p of prs) {
+        await gh.autoMerge(p, kind === "enable_mwr" ? { enable: true, method: method(p), head: p.snapshot!.head, mergeQueue: !!p.snapshot!.repoMerge?.mergeQueue } : { enable: false });
+        done.push(`#${p.number}`);
+      }
+      return { state: "submitted", result: `Auto-merge ${kind === "enable_mwr" ? "on" : "off"} for ${done.join(", ")}.` };
+    } catch (error) {
+      return { state: error instanceof GithubWriteError && !error.uncertain ? "failed" : "uncertain", result: partial(error) };
+    }
   }
   async close() { this.plans.clear(); this.browser.close(); await Promise.allSettled([...this.running]); }
   async check(workspaceId: string, actionId: string) {
@@ -200,8 +266,18 @@ export class PrActions {
     const open = (prs as Pr[]).filter(p => p.snapshot!.state === "OPEN");
     let confirmed = !open.length && (prs as Pr[]).every(p => p.snapshot!.state === "MERGED");
     let inactive = false;
-    if (open.some(p => action.heads[p.key] !== p.snapshot!.head)) return { state: "uncertain" as const, result: "A PR revision changed. Check its Graphite state before starting another action." };
-    if (action.kind === "merge") {
+    const github = (prs as Pr[]).some(p => isGithubFlow(p.snapshot));
+    if (open.some(p => action.heads[p.key] !== p.snapshot!.head)) return { state: "uncertain" as const, result: `A PR revision changed. Check its ${github ? "GitHub" : "Graphite"} state before starting another action.` };
+    if (github) {
+      const closed = (prs as Pr[]).some(p => p.snapshot!.state === "CLOSED");
+      if (action.kind === "merge") {
+        confirmed ||= open.length > 0 && !closed && open.every(p => !!p.snapshot!.inMergeQueue);
+        inactive = closed || open.length > 0 && open.every(p => !p.snapshot!.inMergeQueue && mergeBlockers(p).length === 0);
+      } else {
+        confirmed ||= !closed && open.length > 0 && open.every(p => p.snapshot!.mergeWhenReady === (action.kind === "enable_mwr" ? "on" : "off"));
+        inactive = closed || open.every(p => p.snapshot!.mergeWhenReady === (action.kind === "enable_mwr" ? "off" : "on"));
+      }
+    } else if (action.kind === "merge") {
       confirmed ||= open.length > 0 && !(prs as Pr[]).some(p => p.snapshot!.state === "CLOSED") && open.every(p => ["QUEUED_TO_MERGE", "WAITING_TO_MERGE", "REBASING", "HANDED_OFF_TO_EXTERNAL_MERGE_QUEUE"].includes(p.snapshot!.graphiteMergeStatus ?? ""));
       inactive = (prs as Pr[]).some(p => p.snapshot!.state === "CLOSED") || open.length > 0 && open.every(p => !!p.snapshot!.graphiteMergeStatus && mergeBlockers(p).length === 0);
     } else if ((prs as Pr[]).some(p => p.snapshot!.state === "CLOSED")) {
@@ -212,7 +288,7 @@ export class PrActions {
       inactive = rows.every(p => p.mergeWhenReady !== (action.kind === "enable_mwr"));
     }
     const state = confirmed ? "submitted" as const : inactive && this.now() - Date.parse(action.createdAt) >= 30_000 ? "failed" as const : "uncertain" as const;
-    const result = state === "submitted" ? "Current Graphite/PR state confirms the requested action." : state === "failed" ? "Current state shows the action is not active. A new explicit click is required to try again." : "The result is still uncertain. Check state again; no request was resent.";
+    const result = state === "submitted" ? `Current ${github ? "GitHub" : "Graphite/PR"} state confirms the requested action.` : state === "failed" ? "Current state shows the action is not active. A new explicit click is required to try again." : "The result is still uncertain. Check state again; no request was resent.";
     await this.store.mutate(s => { const a = findWorkspace(s, w.id).prActions.find(a => a.id === actionId)!; a.state = state; a.result = result; });
     return { state, result };
   }
