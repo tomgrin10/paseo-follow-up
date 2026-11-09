@@ -1,5 +1,5 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
-import { overseerAskRpc, overseerStartRpc, overseerStatusRpc, prioritiesRpc, usageRpc } from "../shared/contracts";
+import { overseerAskRpc, overseerRestartRpc, overseerStartRpc, overseerStatusRpc, prioritiesRpc, usageRpc } from "../shared/contracts";
 import type { RpcOutput } from "@getpaseo/plugin";
 import type { Priority } from "../shared/priorities";
 import { DEFAULT_SORT, isSortMode, type SortMode } from "../shared/sort";
@@ -99,6 +99,8 @@ export function createHomeExtras(client: PluginClientContext) {
     async startOverseer() { overseer = await client.rpc(overseerStartRpc, {}); emit(); return overseer; },
     /** Sends the omnibox's ask to the Overseer, starting it on first use. */
     async askOverseer(text: string) { overseer = await client.rpc(overseerAskRpc, { text }); emit(); return overseer; },
+    /** Settings → Agents changed: a new Overseer on the configured agent, handed the old one's last steps. */
+    async restartOverseer() { overseer = await client.rpc(overseerRestartRpc, {}); emit(); return overseer; },
     agents: () => [...agents.values()],
     /** Bumped by ⌘K "Follow-up: Search"; the visible search field focuses when it changes. */
     focusToken: () => focusToken,

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { modelName } from "./agent-settings";
 
 /**
  * "What's this about?" (1.3.0-beta.3): a short AI overview of one workspace plus the issues, PRs, threads and links
@@ -37,6 +38,8 @@ export const aboutRecordSchema = z.object({
   /** Sources that couldn't be read ("Linear", "Slack", "GitHub"); their rows show the bare link. */
   failed: z.array(z.string().max(40)).max(6),
   costUsd: z.number().nonnegative().nullable(),
+  /** Which agent wrote it (Settings → Agents): "Summarized by Haiku". Older records have none. */
+  by: z.object({ provider: z.string().max(60), model: z.string().max(120) }).nullable().optional(),
 });
 export type AboutRecord = z.infer<typeof aboutRecordSchema>;
 
@@ -179,12 +182,12 @@ function ageWords(iso: string, now: number): string {
   return `${Math.round(h / 24)}d ago`;
 }
 
-/** "Summarized 2h ago from the chat, 2 PRs, HER-1312". Sources that failed follow: "Linear unavailable". */
-export function footerText(r: Pick<AboutRecord, "generatedAt" | "basis" | "failed">, now: number): string {
+/** "Summarized by Haiku · 2h ago from the chat, 2 PRs, HER-1312". Sources that failed follow: "Linear unavailable". */
+export function footerText(r: Pick<AboutRecord, "generatedAt" | "basis" | "failed" | "by">, now: number): string {
   const chat = r.basis.source === "transcript" ? "the saved transcript" : r.basis.source === "none" ? "the goal" : "the chat";
   const parts = [r.basis.chat || r.basis.source === "none" ? chat : "", r.basis.prs ? `${r.basis.prs} PR${r.basis.prs === 1 ? "" : "s"}` : "", ...r.basis.issues.slice(0, 3), r.basis.issues.length > 3 ? `${r.basis.issues.length - 3} more issues` : ""].filter(Boolean);
   const from = parts.length ? ` from ${parts.join(", ")}` : "";
-  return `Summarized ${ageWords(r.generatedAt, now)}${from}`;
+  return r.by?.model ? `Summarized by ${modelName(r.by.model)} · ${ageWords(r.generatedAt, now)}${from}` : `Summarized ${ageWords(r.generatedAt, now)}${from}`;
 }
 export function failedText(failed: readonly string[]): string | null {
   return failed.length ? `${failed.join(" and ")} couldn't be read; ${failed.length === 1 ? "its" : "their"} links show bare.` : null;
