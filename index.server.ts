@@ -45,7 +45,7 @@ export default function contribute(server: PluginServerContext) {
   const questionMode = async (): Promise<QuestionMode> => { try { const state = await questionSettings.read(); return state.status === "ready" ? state.values.mode : DEFAULT_QUESTION_MODE; } catch { return DEFAULT_QUESTION_MODE; } };
   const directory = join(paseoHome, "plugin-data", "follow-through");
   const bridge = join(directory, "mcp.mjs");
-  const store = new Store(directory);
+  const store = new Store(directory, 1_000);
   const agentHooks = new AgentHooks(directory, clientEntry());
   const gateway = new PaseoGateway(undefined, undefined, undefined, HistoryCache.at(directory));
   const graphite = new Graphite();
@@ -600,6 +600,6 @@ export default function contribute(server: PluginServerContext) {
   return async () => {
     stopped = true; if (timer) clearTimeout(timer); if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
     await ready; if (hooksStarted) await agentHooks.stop().catch(() => {});
-    await actions.close(); await closeConnections(); await engine.stop(); await ready; await unlock?.();
+    await actions.close(); await closeConnections(); await engine.stop(); await ready; await store.flush().catch(() => undefined); await unlock?.();
   };
 }

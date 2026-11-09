@@ -3,37 +3,84 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { stateSchema, type State } from "../shared/model";
 
+/**
+ * Follow-up's saved state. 1.3.0-beta.4: the state lives in memory once loaded, and writes to state.json are
+ * batched (at most one per `writeMs`) and skipped when nothing changed, instead of re-reading, re-validating and
+ * rewriting the whole file on every snapshot and mutation. The worker lock makes this process the only writer;
+ * the hook and MCP bridge only read the file, which stays at most `writeMs` behind.
+ *
+ * Snapshots are shared (frozen once validated): read them, never mutate them. Mutations work on a copy and replace it,
+ * so a failed mutation leaves the state untouched.
+ */
 export class Store {
   private tail: Promise<unknown> = Promise.resolve();
-  constructor(readonly directory: string) {}
-  async read(): Promise<State> {
-    try { return stateSchema.parse(JSON.parse(await readFile(join(this.directory, "state.json"), "utf8"))); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { version: 1, workspaces: [] };
-      throw new Error("Saved follow-through state could not be read. Restore state.json before continuing.");
-    }
+  private state: State | null = null;
+  private written: string | null = null;
+  private saved: State | null = null;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private flushing: Promise<void> | null = null;
+  /** Writes to state.json, for tests and the resource check. */
+  writes = 0;
+  /** `writeMs` 0 writes through inside each mutation (tools, tests); the worker batches with 1000. */
+  constructor(readonly directory: string, private writeMs = 0) {}
+  private async load(): Promise<State> {
+    if (this.state) return this.state;
+    let text: string | null = null;
+    try { text = await readFile(join(this.directory, "state.json"), "utf8"); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error("Saved follow-through state could not be read. Restore state.json before continuing."); }
+    let state: State;
+    try { state = text === null ? { version: 1, workspaces: [] } : stateSchema.parse(JSON.parse(text)); }
+    catch { throw new Error("Saved follow-through state could not be read. Restore state.json before continuing."); }
+    this.state ??= deepFreeze(state);
+    return this.state;
   }
+  /** A private, mutable copy of the saved state (the old per-call read). */
+  async read(): Promise<State> { return structuredClone(await this.load()); }
   async mutate<T>(work: (state: State) => T | Promise<T>): Promise<T> {
     const next = this.tail.then(async () => {
-      const state = await this.read();
-      const value = await work(state);
-      await this.write(state);
+      const draft = structuredClone(await this.load());
+      const value = await work(draft);
+      // Write-through keeps the old contract: a failed write leaves the saved state as it was. The draft may hold
+      // objects owned by callers (observations), so only the validated copy the write returns is frozen.
+      if (this.writeMs <= 0) this.state = await this.write(draft);
+      else { this.state = draft; this.schedule(); }
       return structuredClone(value);
     });
     this.tail = next.catch(() => undefined);
     return next;
   }
-  async snapshot(): Promise<State> { await this.tail; return this.read(); }
-  private async write(state: State): Promise<void> {
-    stateSchema.parse(state);
+  /** The current state, shared and frozen. */
+  async snapshot(): Promise<State> { await this.tail; return this.load(); }
+  /** Writes pending changes now; call before reading state.json directly or on shutdown. */
+  async flush(): Promise<void> {
+    await this.tail;
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    while (this.flushing) await this.flushing;
+    const current = this.state;
+    if (!current) return;
+    this.flushing = this.write(current).then(saved => { if (this.state === current) this.state = saved; }).finally(() => { this.flushing = null; });
+    await this.flushing;
+  }
+  private schedule(): void {
+    this.timer ??= setTimeout(() => { this.timer = null; void this.flush().catch(() => undefined); }, this.writeMs);
+    (this.timer as { unref?: () => void }).unref?.();
+  }
+  /** Validates (applying schema defaults), writes when changed and returns the saved state, frozen. */
+  private async write(state: State): Promise<State> {
+    if (state === this.saved) return state;
+    const parsed = deepFreeze(stateSchema.parse(state));
+    const text = JSON.stringify(parsed);
+    if (text === this.written) { this.saved = parsed; return parsed; }
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     const temporary = join(this.directory, `state.${randomUUID()}.tmp`);
     try {
       const file = await open(temporary, "wx", 0o600);
-      try { await file.writeFile(JSON.stringify(state, null, 2)); await file.sync(); }
+      try { await file.writeFile(text); await file.sync(); }
       finally { await file.close(); }
       await rename(temporary, join(this.directory, "state.json"));
+      this.written = text; this.saved = parsed; this.writes++;
     } finally { await unlink(temporary).catch(() => undefined); }
+    return parsed;
   }
   async lock(): Promise<() => Promise<void>> {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
@@ -59,4 +106,12 @@ export class Store {
     }
     return async () => { if (await readFile(path, "utf8").catch(() => "") === token) await unlink(path); };
   }
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child);
+  }
+  return value;
 }
