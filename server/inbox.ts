@@ -119,6 +119,22 @@ export function briefAnswer(id: string, question: string, letter: string, label:
   const title = question.replace(/[()\n]/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
   return `Follow-up answer ${id} (${title}): ${letter} — ${label}\nContinue with this choice.`;
 }
+/**
+ * Several decisions answered together (1.4.0): one message, a summary line the developer reads at a glance, then one
+ * line per decision the agent can act on. Skipped decisions are named, so the agent knows they're still open.
+ */
+export function briefAnswers(ask: string, decisions: { id: string; question: string; options: { letter: string; label: string }[] }[], picks: Record<string, string>): string {
+  const clean = (t: string) => t.replace(/[()\n]/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+  const asked = decisions.filter(d => d.options.length);
+  const picked = (d: typeof asked[number]) => d.options.find(o => o.letter === picks[d.id]);
+  const summary = asked.map((d, i) => { const o = picked(d); return `${i + 1}. ${o ? `${o.letter} — ${o.label}` : "skipped"}`; }).join(" · ");
+  const lines = [`${ANSWERS_PREFIX} ${asked.map(d => d.id).join(", ")} (${clean(ask)}): ${summary}`];
+  for (const d of asked) { const o = picked(d); lines.push(o ? `${d.id} (${clean(d.question)}): ${o.letter} — ${o.label}` : `${d.id} (${clean(d.question)}): skipped — not answered yet; ask again if it still matters.`); }
+  const skipped = asked.filter(d => !picked(d));
+  lines.push(skipped.length ? `Continue with the answered ones; ${skipped.map(d => d.id).join(" and ")} ${skipped.length === 1 ? "is" : "are"} still open. The answers are already recorded.` : "Continue with these choices. The answers are already recorded.");
+  return lines.join("\n");
+}
+const ANSWERS_PREFIX = "Follow-up answer";
 const ORIGINS = 500;
 export type Root = { rootId: string; subagent: AgentInfo | null; delegated: boolean };
 const DAY = 24 * 3_600_000;
@@ -398,7 +414,7 @@ export class Inbox {
    * The developer clicked an option or a move on the brief. Validated against the stored brief (a stale card is refused),
    * logged in the ledger as the developer's (so the classifier clears the flag, #11), then sent, then collapsed.
    */
-  async briefAction(agentId: string, input: { briefId: string; decisionId?: string; choice?: string; move?: "retry" }, send: (text: string, messageId: string) => Promise<void>): Promise<Brief> {
+  async briefAction(agentId: string, input: { briefId: string; decisionId?: string; choice?: string; choices?: { decisionId: string; choice: string }[]; move?: "retry" }, send: (text: string, messageId: string) => Promise<void>): Promise<Brief> {
     const state = await this.store.snapshot();
     const b = state.entries[agentId]?.brief;
     if (!b || b.id !== input.briefId) throw new Error("This brief was replaced by a newer one. Read the newest card.");
@@ -407,6 +423,17 @@ export class Inbox {
     if (input.move === "retry") {
       if (b.kind !== "error") throw new Error("Only a failed turn can be retried from its brief.");
       text = "Retry the turn that failed. Pick up from the last step that finished."; event = { type: "message", text: null };
+    } else if (input.choices) {
+      // A multi-decision card sends every pick in one message; at least one, each a real option of its decision.
+      const picks: Record<string, string> = {};
+      for (const p of input.choices) {
+        const d = b.decisions.find(d => d.id === p.decisionId);
+        if (!d?.options.some(o => o.letter === p.choice)) throw new Error("Pick one of the options on the card.");
+        picks[d.id] = p.choice;
+      }
+      if (!Object.keys(picks).length) throw new Error("Pick at least one option before sending.");
+      text = briefAnswers(b.ask, b.decisions, picks);
+      event = { type: "options", picks: Object.entries(picks).map(([decisionId, choice]) => ({ decisionId, choice })) };
     } else {
       const d = b.decisions.find(d => d.id === input.decisionId);
       const o = d?.options.find(o => o.letter === input.choice);

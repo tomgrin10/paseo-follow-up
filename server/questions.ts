@@ -40,7 +40,7 @@ export function askQuestion(w: Workspace, agentId: string, input: AskInput, mode
   const rule = QUESTION_MODE_RULES[mode].rule({ recommend, big: question.big });
   const instruction = [
     `Asked ${question.id}. Question mode: ${QUESTION_MODE_RULES[mode].label}. ${rule}`,
-    `The developer answers in Follow-up and the answer arrives in this chat as "Follow-up answer ${question.id} …"; it is already recorded. If they answer in chat instead, call record_answer. Call withdraw_question if it stops mattering.`,
+    `The developer answers in Follow-up and the answer arrives in this chat as "Follow-up answer ${question.id} …"; it is already recorded. When one card asks several decisions, they are answered together in one message: a summary line, then one line per decision ("Q<n> (<question>): <letter> — <label>"), and any decision the developer skipped says "skipped" and stays open. If they answer in chat instead, call record_answer. Call withdraw_question if it stops mattering.`,
   ].join("\n");
   return { question, instruction };
 }

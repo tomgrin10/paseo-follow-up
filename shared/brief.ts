@@ -285,6 +285,8 @@ export type BriefEvent =
   | { type: "turn_start" }
   | { type: "message"; text: string | null }
   | { type: "option"; decisionId: string; choice: string }
+  /** Several decisions answered together (1.4.0): every pick at once; the rest were skipped on purpose. */
+  | { type: "options"; picks: { decisionId: string; choice: string }[] }
   | { type: "sign_off" }
   | { type: "undo" }
   | { type: "permission_resolved" }
@@ -338,6 +340,14 @@ export function briefStep(prev: Brief | null, event: BriefEvent, now: string): {
       const b = { ...collapse(prev, "answered", `You picked ${o.letter} · ${o.label}`), decisions: prev.decisions.map(x => x.id === d.id ? { ...x, chosen: o.letter } : x) };
       return { brief: b, appends: [b] };
     }
+    case "options": {
+      if (prev?.state !== "open") return keep;
+      const chosen = new Map(event.picks.map(p => [p.decisionId, p.choice]));
+      const decisions = prev.decisions.map(d => { const c = chosen.get(d.id); return c && d.options.some(o => o.letter === c) ? { ...d, chosen: c } : d; });
+      if (!decisions.some(d => d.chosen)) return keep;
+      const b = { ...collapse(prev, "answered", answeredOutcome(decisions)), decisions };
+      return { brief: b, appends: [b] };
+    }
     case "sign_off":
       if (prev?.state !== "open") return keep;
       { const b = collapse(prev, "signed", "Signed off"); return { brief: b, appends: [b] }; }
@@ -351,6 +361,40 @@ export function briefStep(prev: Brief | null, event: BriefEvent, now: string): {
       if (prev?.state !== "open" || JSON.stringify(prev.facts) === JSON.stringify(event.facts.slice(0, 3))) return keep;
       { const b = { ...prev, facts: event.facts.slice(0, 3) }; return { brief: b, appends: [b] }; }
   }
+}
+
+/** Decisions that have options to pick: the ones a multi-decision card sends together. */
+export const askedDecisions = (b: Pick<Brief, "decisions">): BriefDecision[] => b.decisions.filter(d => d.options.length > 0);
+/** Whether tapping an option only selects it (several decisions, sent together) instead of sending it (one decision). */
+export const selectsFirst = (b: Pick<Brief, "decisions">) => askedDecisions(b).length > 1;
+/** The send bar for a multi-decision card: all picked, some picked (names what's skipped), or nothing yet. */
+export function sendBar(b: Pick<Brief, "decisions">, picks: Record<string, string>): { label: string; skipped: string | null; ready: boolean; partial: boolean } {
+  const asked = askedDecisions(b);
+  const numbered = asked.map((d, i) => ({ d, n: i + 1 }));
+  const done = numbered.filter(x => picks[x.d.id]);
+  const left = numbered.filter(x => !picks[x.d.id]);
+  if (!done.length) return { label: "Send answers", skipped: null, ready: false, partial: false };
+  if (!left.length) return { label: "Send answers", skipped: null, ready: true, partial: false };
+  const names = left.map(x => String(x.n));
+  const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0];
+  return { label: `Send ${done.length} of ${asked.length}`, skipped: `${left.length === 1 ? "Question" : "Questions"} ${list} ${left.length === 1 ? "stays" : "stay"} open; the agent is told so.`, ready: true, partial: true };
+}
+
+/** How many asked decisions have a pick, for the card's "1 of 3 picked". */
+export const pickedCount = (b: Pick<Brief, "decisions">, picks: Record<string, string>) => askedDecisions(b).filter(d => picks[d.id]).length;
+/** The answered card's summary (1.4.0): each asked decision's question (numbered when there are several) and the pick. */
+export function pastRows(b: Pick<Brief, "decisions" | "ask">): { id: string; question: string | null; answer: string | null }[] {
+  const asked = askedDecisions(b); const numbered = asked.length > 1;
+  return asked.map((d, i) => { const o = d.options.find(o => o.letter === d.chosen); return { id: d.id, question: numbered || d.question.trim() !== b.ask.trim() ? `${numbered ? `${i + 1}. ` : ""}${d.question}` : null, answer: o ? `${o.letter} · ${o.label}` : null }; });
+}
+/** Whether a past card has more than its one line to show behind "Show full question" / "Show original". */
+export const hasOriginal = (b: Pick<Brief, "decisions" | "context" | "mono" | "facts" | "links">) => b.decisions.length > 0 || !!b.context || !!b.mono || b.facts.length > 0 || b.links.length > 0;
+
+/** "You picked 1. A · 2. B · 3. skipped" for a multi-decision answer; one decision reads as before. */
+export function answeredOutcome(decisions: BriefDecision[]): string {
+  const asked = decisions.filter(d => d.options.length);
+  if (asked.length <= 1) { const d = asked.find(d => d.chosen); const o = d?.options.find(o => o.letter === d.chosen); return o ? `You picked ${o.letter} · ${o.label}` : "You replied"; }
+  return `You picked ${asked.map((d, i) => `${i + 1}. ${d.chosen ?? "skipped"}`).join(" · ")}`;
 }
 
 /** F7: the one muted timeline line for a "Nothing needed" turn: "Nothing needed · <what was finished>". */

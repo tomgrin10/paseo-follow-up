@@ -3,7 +3,7 @@ import { Platform, Pressable, Text, View } from "react-native";
 import type { PluginClientContext, PluginTimelineItemProps } from "@getpaseo/plugin/client";
 import { Icon, ScrollView } from "@getpaseo/plugin/client/ui";
 import { answerCardSchema, batchCardSchema, followShellCall, followToolName, parseBatchPrompt, readText, toolRow, toolRowSchema, type AnswerCard, type BatchCard, type ToolRow } from "../shared/chat";
-import { parseAnswerMessage } from "../shared/questions";
+import { parseAnswerMessage, parseAnswersMessage } from "../shared/questions";
 import { Reveal } from "./motion";
 import { tint, withAlpha } from "./theme";
 
@@ -104,16 +104,22 @@ function AnswerCardView({ item, theme }: PluginTimelineItemProps<AnswerCard>) {
     <View style={{ borderRadius: 10, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1, overflow: "hidden" }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 6 }}>
         <Icon name="MessageCircleReply" size={14} color={c.statusSuccess} />
-        <Text numberOfLines={1} style={{ flex: 1, color: c.foreground, fontSize: 13, lineHeight: 18, fontWeight: "600" }}>Your answer{/^D\d+$/.test(card.id) ? "" : ` to ${card.id}`} · {card.title}</Text>
+        <Text numberOfLines={card.answers ? 2 : 1} style={{ flex: 1, color: c.foreground, fontSize: 13, lineHeight: 18, fontWeight: "600" }}>{card.answers ? `Your answers · ${card.title}` : <>Your answer{/^D\d+$/.test(card.id) ? "" : ` to ${card.id}`} · {card.title}</>}</Text>
         <Pressable accessibilityRole="button" aria-expanded={expanded} accessibilityLabel={expanded ? "Hide the full message" : "Show the full message"} onPress={() => setExpanded(v => !v)} hitSlop={6}
           style={state => ({ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: state.pressed ? c.surface2 : "transparent" })}>
           <Text style={{ color: c.foregroundMuted, fontSize: 12 }}>{expanded ? "Hide" : "Full message"}</Text>
         </Pressable>
       </View>
-      <View style={{ paddingHorizontal: 12, paddingBottom: 10, gap: 3 }}>
+      {card.answers ? <View style={{ paddingHorizontal: 12, paddingBottom: 10, gap: 8 }}>
+        {/* Each answer sits under the question it answers, so the chat says what was decided without scrolling back. */}
+        {card.answers.map((a, i) => <View key={a.id} style={{ gap: 1 }}>
+          {!!a.question && <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{i + 1}. {a.question}</Text>}
+          <Text selectable style={{ color: a.choice ? c.foreground : c.foregroundMuted, fontSize: 13, lineHeight: 19 }}>{a.choice ? <><Text style={{ fontWeight: "600" }}>{a.choice}</Text>{a.label ? ` · ${a.label}` : ""}</> : "Skipped · still open"}</Text>
+        </View>)}
+      </View> : <View style={{ paddingHorizontal: 12, paddingBottom: 10, gap: 3 }}>
         <Text selectable style={{ color: c.foreground, fontSize: 13, lineHeight: 19 }}><Text style={{ fontWeight: "600", fontVariant: ["tabular-nums"] }}>{card.choice}</Text>{card.label ? ` · ${card.label}` : ""}</Text>
         {!!card.words && <Text selectable style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 19 }}>{card.words}</Text>}
-      </View>
+      </View>}
       {expanded && <View style={{ borderTopWidth: 1, borderTopColor: c.border }}>
         <ScrollView style={[{ maxHeight: 300 }, Platform.OS === "web" ? ({ overscrollBehavior: "contain" } as object) : null]} contentContainerStyle={{ padding: 12 }}>
           <Text selectable style={{ color: c.foregroundMuted, fontFamily: mono(), fontSize: 12, lineHeight: 18 }}>{card.text}</Text>
@@ -149,6 +155,8 @@ export function contributeChat(client: PluginClientContext) {
     client.addTimelineTransformer({
       id: "follow-batch-prompts", query: { itemType: "user_message" },
       transform({ item }) {
+        const several = parseAnswersMessage(item.text);
+        if (several) return { items: [{ type: "plugin" as const, kind: ANSWER_KIND, version: 1, data: { id: several.answers.map(a => a.id).join(", "), title: several.title, choice: "", label: null, words: null, text: item.text, answers: several.answers } }] };
         const answer = parseAnswerMessage(item.text);
         if (answer) return { items: [{ type: "plugin" as const, kind: ANSWER_KIND, version: 1, data: { ...answer, text: item.text } }] };
         const card = parseBatchPrompt(item.text);

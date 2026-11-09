@@ -129,5 +129,7 @@ export function toolRow(tool: FollowTool, status: "running" | "completed" | "fai
   }
 }
 
-export const answerCardSchema = z.object({ id: z.string(), title: z.string(), choice: z.string(), label: z.string().nullable(), words: z.string().nullable(), text: z.string() });
+export const answerCardSchema = z.object({ id: z.string(), title: z.string(), choice: z.string(), label: z.string().nullable(), words: z.string().nullable(), text: z.string(),
+  /** 1.4.0: a multi-decision answer, one entry per decision with its question; `choice: null` was skipped. */
+  answers: z.array(z.object({ id: z.string(), question: z.string(), choice: z.string().nullable(), label: z.string().nullable() })).optional() });
 export type AnswerCard = z.infer<typeof answerCardSchema>;
