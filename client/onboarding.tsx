@@ -74,7 +74,7 @@ export function Setup({ theme, compact, view, deps }: { theme: Theme; compact: b
 
   const body = step === "intro" ? <IntroStep theme={theme} compact={compact} follow={follow.data ?? null} />
     : step === "checks" ? <ChecksStep theme={theme} compact={compact} checks={checks} deps={deps} />
-    : step === "defaults" ? <DefaultsStep theme={theme} compact={compact} />
+    : step === "defaults" ? <DefaultsStep theme={theme} compact={compact} held={view.holdsAutoSends} />
     : step === "reviewers" ? <ReviewerSettings theme={theme} compact={compact} />
     : <HelpersStep theme={theme} compact={compact} deps={deps} checks={checks.data?.checks ?? null} />;
   const lead: Record<OnboardingStep, string> = {
@@ -305,7 +305,7 @@ function SwitchRow({ theme, compact, label, hint, value, onChange, disabled, fir
   </View>;
 }
 
-function DefaultsStep({ theme, compact }: { theme: Theme; compact: boolean }) {
+function DefaultsStep({ theme, compact, held }: { theme: Theme; compact: boolean; held: boolean }) {
   const c = theme.colors; const t = text(c);
   const follow = useFollowSettings(); const write = useRpc(setFollowSettingsRpc); const cache = useQueryClient(); const toast = useToast();
   const display = useSettings(displayPreferences);
@@ -348,7 +348,7 @@ function DefaultsStep({ theme, compact }: { theme: Theme; compact: boolean }) {
         </View>}
       </SwitchRow>
       <SwitchRow theme={theme} compact={compact} label="Send repairs automatically" value={data?.enable_auto_sends_default ?? null} disabled={change.isPending}
-        hint={`Review threads and failed checks go to the workspace's agent on their own, once it's idle. Off: each batch waits for your click.${followed ? ` Here it also applies to the ${followed} already followed.` : ""}`}
+        hint={`Review threads and failed checks go to the workspace's agent on their own, once it's idle. Off: each batch waits for your click.${followed ? ` Here it also applies to the ${followed} already followed.` : ""}${held ? " Nothing goes out on its own until you finish setup." : ""}`}
         onChange={v => change.mutate(autoSendWrites(v, list))} />
       <SwitchRow theme={theme} compact={compact} label="Trust bypass agents" value={trust}
         hint="An agent you started in bypass or full access sometimes still stops on a tool prompt. Follow-up approves those so it keeps going, and logs each one. Off brings the prompts back."

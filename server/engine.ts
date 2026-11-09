@@ -45,6 +45,8 @@ export class Engine {
   private stopped = false;
   /** Set by the resource governor: while true, background refresh (scans, observation, auto-sends) waits. */
   paused: () => boolean = () => false;
+  /** Set by the worker: while true (a fresh install mid-setup), batches queue but nothing is sent on its own. */
+  autoSendsHeld: () => boolean = () => false;
   /** Where pruned never-sent batches go (see pruneUnsent); the worker appends them to an archive file. */
   archive: (workspaceId: string, batches: Batch[]) => Promise<void> = async () => {};
   /** Background refreshes skipped while paused, for tests and the resource check. */
@@ -142,7 +144,7 @@ export class Engine {
       const pending = current.batches.find(b => b.state === "pending" && !isRecovery(b));
       // Auto-send only reaches an agent that is loaded and recently used: sending to a dormant one would wake it.
       // Completion checks never go out on their own; they wait for Tom or the agent's next live turn.
-      if (current.enable_auto_sends && !current.archived && !current.hold && pending && !current.dormant && !current.goneAgent &&
+      if (current.enable_auto_sends && !this.autoSendsHeld() && !current.archived && !current.hold && pending && !current.dormant && !current.goneAgent &&
           !completionBatch(pending) && runtime.mainLoaded !== false && runtime.mainRecent !== false &&
           !runtime.busy && !runtime.backgroundBusy && !runtime.reason &&
           !current.batches.some(b => !isRecovery(b) && ["sending", "sent", "blocked", "uncertain"].includes(b.state)) &&
@@ -225,7 +227,7 @@ export class Engine {
     const current = findWorkspace(await this.store.snapshot(), workspaceId);
     const batch = current.batches.find(b => b.id === batchId && b.state === "pending");
     if (batch && isRecovery(batch)) throw new Error("Recovery requires its own explicit action.");
-    if (!batch || !current.enable_tracking || current.archived || current.hold || this.stopped || (automatic && !current.enable_auto_sends)) throw new Error("Workspace or queue is no longer ready to send");
+    if (!batch || !current.enable_tracking || current.archived || current.hold || this.stopped || (automatic && (!current.enable_auto_sends || this.autoSendsHeld()))) throw new Error("Workspace or queue is no longer ready to send");
     if (current.goneAgent?.agentId === current.mainAgentId) throw new Error(GONE_REASON);
     if (needsPrObservations(current, batch) && current.prs.some(p => p.error || !p.snapshot?.complete)) throw new Error("PR status is incomplete; refresh before sending repairs");
     const runtime = await this.gateway.observe(current, true);

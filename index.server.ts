@@ -104,6 +104,7 @@ export default function contribute(server: PluginServerContext) {
   const governor = new Governor();
   const listCache = new ListCache();
   engine.paused = () => !governor.allowsBackground();
+  engine.autoSendsHeld = () => onboarding.holdsAutoSends();
   const archive = batchArchive(directory);
   engine.archive = archive;
   const usage = new UsageReader(paseoHome);

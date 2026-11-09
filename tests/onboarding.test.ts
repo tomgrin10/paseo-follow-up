@@ -20,7 +20,7 @@ test("first run: an empty data folder is a fresh install and Home shows the flow
   const store = new OnboardingStore(dir, at("2026-11-09T10:00:00Z"));
   assert.equal((await store.init()).install, "fresh");
   const view = await store.view();
-  assert.deepEqual(view, { install: "fresh", status: "new", step: "intro", show: true, offer: false });
+  assert.deepEqual(view, { install: "fresh", status: "new", step: "intro", show: true, offer: false, holdsAutoSends: true });
 });
 
 test("first run: any Follow-up data on disk is an existing install, never shown the flow", async t => {
@@ -270,4 +270,43 @@ test("choices: auto-send sets the default and each followed workspace that diffe
 test("choices: picking workspaces only writes the ones that change", () => {
   assert.deepEqual(followWrites(new Set(["a", "c"]), rows), [{ workspace: { workspaceId: "b", follow: false } }, { workspace: { workspaceId: "c", follow: true } }]);
   assert.deepEqual(followWrites(new Set(["a", "b"]), rows), []);
+});
+
+// ---------- auto-send hold ----------
+
+test("auto-send hold: a fresh install holds until setup is finished or skipped; existing installs never hold", async t => {
+  const fresh = new OnboardingStore(await tmp(t), at("2026-11-09T10:00:00Z"));
+  await fresh.init(); assert.equal(fresh.holdsAutoSends(), true);
+  await fresh.act("step", "defaults"); assert.equal(fresh.holdsAutoSends(), true, "still mid-setup");
+  await fresh.act("finish"); assert.equal(fresh.holdsAutoSends(), false);
+  await fresh.act("restart"); assert.equal(fresh.holdsAutoSends(), false, "setting up again later doesn't hold");
+
+  const skipped = new OnboardingStore(await tmp(t), at("2026-11-09T10:00:00Z"));
+  await skipped.init(); await skipped.act("skip"); assert.equal(skipped.holdsAutoSends(), false);
+
+  const existing = new OnboardingStore(await tmp(t), at("2026-11-09T10:00:00Z"));
+  await existing.init(["state.json"]); assert.equal(existing.holdsAutoSends(), false);
+  await existing.act("restart"); assert.equal(existing.holdsAutoSends(), false);
+});
+
+test("auto-send hold: survives a reload mid-setup and lifts after it", async t => {
+  const dir = await tmp(t);
+  const first = new OnboardingStore(dir, at("2026-11-09T10:00:00Z"));
+  await first.init(); await first.act("step", "checks");
+  const reloaded = new OnboardingStore(dir, at("2026-11-09T10:05:00Z"));
+  await reloaded.init(); assert.equal(reloaded.holdsAutoSends(), true);
+  await reloaded.act("finish");
+  const again = new OnboardingStore(dir, at("2026-11-09T10:06:00Z"));
+  await again.init(); assert.equal(again.holdsAutoSends(), false);
+});
+
+test("auto-send hold: unknown or unreadable onboarding state never holds", async t => {
+  assert.equal(new OnboardingStore(await tmp(t)).holdsAutoSends(), false, "before init");
+  const dir = await tmp(t); await writeFile(join(dir, "onboarding.json"), "not json");
+  const store = new OnboardingStore(dir); await store.init(); assert.equal(store.holdsAutoSends(), false);
+});
+
+test("auto-send hold: the worker wires the engine to the onboarding store", async () => {
+  const source = await readFile(new URL("../index.server.ts", import.meta.url), "utf8");
+  assert.match(source, /engine\.autoSendsHeld = \(\) => onboarding\.holdsAutoSends\(\)/);
 });
