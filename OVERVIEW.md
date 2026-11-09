@@ -4,14 +4,15 @@ Follow-up watches every pull request a Paseo workspace opens until the work is a
 
 ## What you see
 
-- A workspace panel that leads with status: PRs merged, what needs you, what needs fixing, a bar with one segment per PR, and what the agent is doing now.
+- Home: every workspace grouped by what it needs from you (Needs you, Follow-up is fixing, Running, Waiting on others, Quiet), with the selected one beside the list so you can allow a permission, answer, merge, reply or sign off in place, and a brief with what Follow-up did while you were away. "Open full" opens the agent and docks the same list in the workspace's explorer column.
+- In that navigator, the open workspace's row leads with status: PRs merged, what needs you, what needs fixing, a bar with one segment per PR, and what the agent is doing now.
 - A Needs you card with one button per decision: Send repairs, Merge, Resume, Retry, or Answer.
 - Questions from the main agent, each with a permanent ref (Q1, Q2…), lettered options, the agent's recommendation and what it does while it waits. Pick an option, add a note and Send it to the agent, or Copy it instead. Answered questions stay listed under their ref, and the question mode setting (Stop, Work around, Keep building) tells agents what to do until you answer.
 - A Spec link in the header to the page that sums up the workspace, usually the Claude artifact the main agent keeps up to date.
 - An Activity card: repairs sent and finished with how long they took, merges, PR actions and questions.
 - Each stack drawn top to base like Graphite, merged PRs folded away, and a sheet per PR with checks, reviewers and Merge.
 - Tasks for work that outlives a merge, manual or scheduled after a merge or deploy, with an optional delay.
-- A composer pill and a sidebar count that appear only when something needs you; the pill steps through open questions so you can answer without leaving the chat. One screen lists every tracked workspace by who is up next, and a larger view opens a workspace in two columns.
+- A composer pill and a sidebar count that appear only when something needs you; the pill steps through open questions so you can answer without leaving the chat. Home lists every workspace by who is up next, and a larger view opens a workspace in two columns.
 - Compact rows for Follow-up's own tool calls in agent chats, a card for each repair batch, and a card when the agent declares Done.
 
 ## Setup
