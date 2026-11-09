@@ -168,14 +168,34 @@ export function excerpt(text: string, ranges: Range[], max = 80): { text: string
 // ---------- the omnibox seam ----------
 
 /**
- * One row of the omnibox. Home's own provider returns workstreams; the next build adds the Overseer's
- * "Ask the Overseer: <query>" row as a second provider, listed after the workspace results.
+ * One row of the omnibox. Home's own provider returns workstreams; the Overseer's provider adds one
+ * "Ask the Overseer: <query>" row (1.4.0-beta.0), always listed last.
  */
-export type OmniboxItem = { provider: string; key: string; hit: SearchHit };
+export type WorkspaceItem = { provider: string; key: string; hit: SearchHit; ask?: undefined };
+export type AskItem = { provider: "overseer"; key: typeof ASK_KEY; ask: string; hit?: undefined };
+export type OmniboxItem = WorkspaceItem | AskItem;
 export type OmniboxProvider = { id: string; results(query: string): OmniboxItem[] };
-/** Results of every provider, in provider order; each provider ranks its own. */
+export const ASK_KEY = "ask:overseer";
+/** The longest ask the omnibox sends; anything longer belongs in the Overseer's reply box. */
+export const ASK_MAX = 2000;
+/** Results of every provider, in provider order; each provider ranks its own. An ask row always goes last. */
 export function omniboxResults(providers: readonly OmniboxProvider[], query: string): OmniboxItem[] {
-  return providers.flatMap(p => p.results(query));
+  const all = providers.flatMap(p => p.results(query));
+  return [...all.filter(i => !i.ask), ...all.filter(i => i.ask)];
+}
+/** The Overseer's row: the query as it was typed, trimmed. Nothing while the Overseer is off or the query is blank. */
+export function overseerProvider(enabled: boolean): OmniboxProvider {
+  return { id: "overseer", results: query => {
+    const ask = query.trim().replace(/\s+/g, " ");
+    return enabled && ask && ask.length <= ASK_MAX ? [{ provider: "overseer", key: ASK_KEY, ask }] : [];
+  } };
+}
+/**
+ * The row Enter picks before any arrow key: the first one, except a lone one-word ask. That is usually a typo or
+ * a search that missed, and Enter must not send it to an agent; ↓ or a tap still picks it.
+ */
+export function defaultActive(results: readonly OmniboxItem[] | null): number {
+  return results?.length === 1 && results[0].ask !== undefined && !/\s/.test(results[0].ask) ? -1 : 0;
 }
 export function workspaceProvider(index: SearchIndex, now = Date.now()): OmniboxProvider {
   return { id: "workspaces", results: query => search(index, query, now).map(hit => ({ provider: "workspaces", key: hit.key, hit })) };

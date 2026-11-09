@@ -542,6 +542,7 @@ export default function contribute(server: PluginServerContext) {
   const overseerStatus = async () => { const s = await overseer!.state(); return { enabled: await overseerOn(), agentId: s.agentId, workspaceId: s.workspaceId, startedAt: s.startedAt, generation: s.generation, error: s.error }; };
   handle(rpc.overseerStatusRpc, async () => { await requireReady(); return overseerStatus(); });
   handle(rpc.overseerStartRpc, async (_input, { paseo }) => { await requireReady(); seen(paseo); await overseer!.start(paseo as unknown as OverseerPaseo); return overseerStatus(); });
+  handle(rpc.overseerAskRpc, async ({ text }, { paseo }) => { await requireReady(); seen(paseo); await overseer!.ask(paseo as unknown as OverseerPaseo, text); return overseerStatus(); });
   handle(rpc.overseerActRpc, async ({ agentId, tool, args }, { paseo }) => {
     await requireReady(); seen(paseo);
     if (!(OVERSEER_TOOLS as readonly string[]).includes(tool)) throw new Error(`Unknown Overseer tool ${tool}.`);

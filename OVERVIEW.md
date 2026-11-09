@@ -5,7 +5,7 @@ Follow-up watches every pull request a Paseo workspace opens until the work is a
 ## What you see
 
 - Home: every workspace grouped by what it needs from you (Needs you, Follow-up is fixing, Running, Waiting on others, Quiet), with the selected one beside the list so you can allow a permission, answer, merge, reply or sign off in place, and a brief with what Follow-up did while you were away. Above the list: the status counts, provider limits from Smart Session when it's installed, a search over names, branches, PRs, agents and asks, and a sort menu (Priority, Recent, Oldest waiting, Name, By project).
-- The Overseer (1.4 beta), pinned on Home: one agent you talk to about all your workspaces. It forwards your asks to the agent that owns them, asks you when it isn't sure, and starts a new workspace only when you say so.
+- The Overseer (1.4 beta), pinned on Home: one agent you talk to about all your workspaces. It forwards your asks to the agent that owns them, asks you when it isn't sure, and starts a new workspace only when you say so. You can ask it from Home's search box (the last row, "Ask the Overseer: …") or with ⌘K → Follow-up: Ask the Overseer.
 - What's this about?, a collapsible section at the top of Home's detail pane and the workspace panel: a one-line gist, a short AI overview of what the workspace is for and where it stands, and its linked Linear issues, PRs, Slack threads and docs.
 - A workspace panel for the open workspace only, with a Home button: PRs merged, what needs you, what needs fixing, a bar with one segment per PR, and what the agent is doing now. "Open full" on Home docks it beside the agent's chat.
 - A Needs you card with one button per decision: Send repairs, Merge, Resume, Retry, or Answer.
