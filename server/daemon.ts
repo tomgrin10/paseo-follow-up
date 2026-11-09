@@ -24,12 +24,13 @@ import { DaemonDirectory, type DirectoryRows } from "./directory";
 type RecoveryAgentOptions = Partial<PluginBeforeRequests["agent.create"]["config"]> & { workspaceId: string; labels: Record<string, string>; idempotencyKey: string; env: Record<string, string> };
 
 export const paseoHome = process.env.PASEO_HOME ?? join(homedir(), ".paseo");
-export type Agent = { id: string; provider: string; cwd: string; model?: string | null; currentModeId?: string | null; thinkingOptionId?: string | null; features?: { id: string; value: unknown }[]; persistence?: { sessionId: string; nativeHandle?: string } | null; title?: string | null; createdAt: string; workspaceId?: string; status: string; archivedAt?: string | null; labels: Record<string, string>; lastUserMessageAt: string | null; pendingPermissions: unknown[]; activeTurn?: unknown; lastError?: string | null };
+export type Agent = { id: string; provider: string; cwd: string; model?: string | null; currentModeId?: string | null; runtimeInfo?: { modeId?: string | null } | null; thinkingOptionId?: string | null; features?: { id: string; value: unknown }[]; persistence?: { sessionId: string; nativeHandle?: string } | null; title?: string | null; createdAt: string; workspaceId?: string; status: string; archivedAt?: string | null; labels: Record<string, string>; lastUserMessageAt: string | null; pendingPermissions: unknown[]; activeTurn?: unknown; lastError?: string | null };
 type WorkspaceRow = { id: string; name: string; projectId?: string | null; labels?: string[]; archivingAt?: string | null };
 export interface Daemon {
   connect(): Promise<void>; close(): Promise<void>;
   listProjects(): Promise<{ projects: Project[] }>;
   fetchAgent(id: string): Promise<{ agent: Agent } | null>;
+  respondToPermission(agentId: string, requestId: string, response: { behavior: "allow" }): Promise<void>;
   fetchAgents(options?: unknown): Promise<{ entries: { agent: Agent }[]; pageInfo: { hasMore: boolean; nextCursor: string | null } }>;
   fetchWorkspaces(options?: unknown): Promise<{ entries: WorkspaceRow[]; pageInfo: { hasMore: boolean; nextCursor: string | null } }>;
   fetchAgentTimeline(id: string, options: unknown): Promise<{ entries: { item: unknown; seqStart: number; timestamp?: string }[]; startCursor: { epoch: string; seq: number } | null; endCursor?: { epoch: string; seq: number } | null; epoch?: string; reset?: boolean; hasOlder: boolean; error: string | null; gap: boolean; staleCursor: boolean }>;
