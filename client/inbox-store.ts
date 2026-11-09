@@ -89,6 +89,8 @@ export function createInboxStore(client: PluginClientContext) {
     enabled: () => enabled && (data?.enabled ?? true),
     data: () => data,
     rows: () => (enabled && data?.enabled ? data.rows : []),
+    /** The Overseer's own row: never in rows, never counted (1.4.0-beta.0). */
+    overseer: () => data?.overseer ?? null,
     offlineSince: () => offlineSince,
     cameBack: () => cameBack,
     clearCameBack() { cameBack = []; emit(); },

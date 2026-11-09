@@ -96,6 +96,8 @@ export type InboxOptions = {
   permissionSettleMs?: number;
   /** How long a turn end waits for Paseo to stop reporting "running" (F7). Tests shorten it. */
   settleMs?: number; settleStepMs?: number;
+  /** The Overseer's agent id: it never counts in Needs you; list() returns its row apart (1.4.0-beta.0). */
+  overseer?: () => Promise<string | null>;
 };
 /** Decides the brief step for one event from the entry before and after it. */
 export type BriefDecider = (prev: Entry, next: Entry, at: string) => BriefEvent | null;
@@ -611,11 +613,12 @@ export class Inbox {
   }
 
   /** Rows for every root agent that is flagged, snoozed, running or signed off today, plus Unsorted. */
-  async list(): Promise<{ enabled: boolean; rows: InboxRow[]; unsorted: InboxRow[] | null; firstRun: boolean; batchUndo: { at: string; count: number } | null; signOffs: number; briefStats: BriefStats }> {
+  async list(): Promise<{ enabled: boolean; rows: InboxRow[]; unsorted: InboxRow[] | null; firstRun: boolean; batchUndo: { at: string; count: number } | null; signOffs: number; briefStats: BriefStats; overseer: InboxRow | null }> {
     const enabled = await this.on();
     const state = await this.store.snapshot();
     const briefStats = briefShare(state, this.now());
-    if (!enabled) return { enabled, rows: [], unsorted: null, firstRun: false, batchUndo: null, signOffs: state.signOffs, briefStats };
+    const overseerId = await this.o.overseer?.().catch(() => null) ?? null;
+    if (!enabled) return { enabled, rows: [], unsorted: null, firstRun: false, batchUndo: null, signOffs: state.signOffs, briefStats, overseer: null };
     const now = this.now();
     if (!this.cache || now - this.cache.at > 3_000) {
       const [agents, workspaces] = await Promise.all([this.o.directory.agents(), this.o.directory.workspaces()]);
@@ -643,16 +646,19 @@ export class Inbox {
       brief: e?.brief ? { kind: e.brief.kind, source: e.brief.source, state: e.brief.state, ask: e.brief.ask, questionIds: e.brief.questionIds } : null,
     });
     const rows: InboxRow[] = [];
+    let overseer: InboxRow | null = null;
     for (const { agent, delegatedFrom } of roots.values()) {
       const e = state.entries[agent.id];
+      // The Overseer stands apart: its own pinned row, never in Needs you or its counts.
+      if (agent.id === overseerId) { overseer = row(agent, delegatedFrom, e); continue; }
       if (e?.goneAt) continue;
       if (agent.status === "closed" && !e?.needs) continue; // §2.5
       const running = ["running", "initializing"].includes(agent.status) || this.waiting.has(agent.id);
       if (e?.needs || e?.signedOffAt && now - Date.parse(e.signedOffAt) < DAY || running || e && !e.enable_finish_flags) rows.push(row(agent, delegatedFrom, e));
     }
-    const unsorted = state.unsorted?.flatMap(id => { const r = roots.get(id); return r && r.agent.status !== "closed" && !state.entries[id]?.needs ? [row(r.agent, r.delegatedFrom, state.entries[id])] : []; }) ?? null;
+    const unsorted = state.unsorted?.flatMap(id => { const r = roots.get(id); return r && id !== overseerId && r.agent.status !== "closed" && !state.entries[id]?.needs ? [row(r.agent, r.delegatedFrom, state.entries[id])] : []; }) ?? null;
     const batch = state.batchUndo && Date.parse(state.batchUndo.expires) > now ? { at: state.batchUndo.at, count: state.batchUndo.entries.length || (state.batchUndo.unsorted?.length ?? 0) } : null;
-    return { enabled, rows, unsorted: unsorted?.length ? unsorted : null, firstRun: state.signOffs < 10, batchUndo: batch, signOffs: state.signOffs, briefStats };
+    return { enabled, rows, unsorted: unsorted?.length ? unsorted : null, firstRun: state.signOffs < 10, batchUndo: batch, signOffs: state.signOffs, briefStats, overseer };
   }
 }
 

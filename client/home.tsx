@@ -14,7 +14,8 @@ import { Button, IconButton, text, type Theme } from "./kit";
 import { NeedsYouList } from "./needs-you";
 import { PrSheet } from "./pr-sheet";
 import { QuestionSheet } from "./questions";
-import { Age, BadgeView, BRIEF_KEY, glyphColor, HomeList, PrChipView } from "./home-list";
+import { Age, BadgeView, BRIEF_KEY, glyphColor, HomeList, OVERSEER_KEY, PrChipView, type OverseerRowState } from "./home-list";
+import { answerLine, overseerRowState } from "../shared/overseer";
 import { ListTop, SearchField, SortMenu, StatusStrip, UsageMeters, useOmnibox, useSlashToFocus } from "./home-chrome";
 import { useHomeModel, useTick, type HomeSources } from "./home-data";
 import { useInbox, UndoBar, useNextRelay } from "./inbox";
@@ -56,6 +57,9 @@ export function FollowHome(props: PluginScreenProps & { deps: HomeDeps }) {
   const tracked = useSyncExternalStore(deps.sources.live.subscribe, deps.sources.live.version, deps.sources.live.version);
   const rows = useInbox(inbox, () => inbox.rows());
   const pane = useMemo(() => briefPane({ model, rows, tracked: deps.sources.live.all(), now: Date.now() }), [model, rows, tracked, deps.sources.live]);
+  const overseerStatus = useSyncExternalStore(deps.sources.extras.subscribe, deps.sources.extras.overseer, deps.sources.extras.overseer);
+  const overseerInbox = useInbox(inbox, () => inbox.overseer());
+  const overseer = overseerRowState(overseerStatus, overseerInbox);
   const briefLine = [pane.counts.needs ? `${pane.counts.needs} need you` : "Nothing needs you", pane.counts.fixing ? `${pane.counts.fixing} being fixed` : "", pane.away.count ? `${pane.away.count} done while away` : ""].filter(Boolean).join(" · ");
 
   const openFull = useCallback((s: Workstream) => {
@@ -72,11 +76,13 @@ export function FollowHome(props: PluginScreenProps & { deps: HomeDeps }) {
 
   if (params.view === "log") return <LogView theme={theme} compact={compact} sources={deps.sources} onHome={deps.openHome} onOpen={key => { setSelected(key); deps.openHome(); }} />;
 
-  const detail = current
+  const detail = selected === OVERSEER_KEY && overseer
+    ? <OverseerPane theme={theme} compact={compact} o={overseer} agentId={overseerStatus?.agentId ?? null} deps={deps} navigation={navigation} onBack={compact ? () => setSelected(null) : undefined} />
+    : current
     ? <DetailPane key={current.key} s={current} model={model} theme={theme} compact={compact} deps={deps} openFull={openFull} signOffNext={signOffNext} onBack={compact ? () => setSelected(null) : undefined} />
     : <BriefPane theme={theme} compact={compact} pane={pane} onSelect={key => setSelected(key)} openLog={deps.openLog} sources={deps.sources} />;
   const list = <HomeList model={model} theme={theme} dense={compact} touch={compact} selectedKey={selected} onSelect={onSelect} briefLine={briefLine}
-    results={omnibox.results} activeResult={omnibox.active} onResult={item => setSelected(item.key)} filter={filter}
+    results={omnibox.results} activeResult={omnibox.active} onResult={item => setSelected(item.key)} filter={filter} overseer={overseer}
     top={<ListTop theme={theme} dense={compact} title={<ListHeader theme={theme} compact={compact} onSettings={deps.openSettings} />}>
       {/* zIndex: on web every View is its own stacking context, so the sort menu only paints and hit-tests above the
           strip and meters below if this row sits above them. */}
@@ -89,7 +95,7 @@ export function FollowHome(props: PluginScreenProps & { deps: HomeDeps }) {
     </ListTop>} />;
 
   if (compact) return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
-    {current ? detail : list}
+    {current || selected === OVERSEER_KEY && overseer ? detail : list}
     <View style={{ position: "absolute", left: 12, right: 12, bottom: 12 }}><UndoBar store={inbox} theme={theme} touch /></View>
   </View>;
   return <View style={{ flex: 1, flexDirection: "row", backgroundColor: c.surface0 }}>
@@ -135,7 +141,7 @@ const seenSteps = new Map<string, { steps: TailStep[]; at: number }>();
  * Reading a timeline loads an unloaded agent for an hour (see shared/agent-load.ts), so an agent that isn't loaded
  * shows the steps Home saw last (marked with when) and waits for an explicit "Load recent steps".
  */
-function useTail(handle: ReturnType<typeof useAgentLive>["handle"], key: string) {
+function useTail(handle: ReturnType<typeof useAgentLive>["handle"], key: string, n = 6) {
   const [steps, setSteps] = useState<TailStep[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [seenAt, setSeenAt] = useState<number | null>(null);
@@ -160,12 +166,12 @@ function useTail(handle: ReturnType<typeof useAgentLive>["handle"], key: string)
     handle.timeline.refetch({ direction: "tail", limit: 40 }).then(page => {
       if (!live) return;
       const entries = [...(page as unknown as { entries: { seqStart: number; item: Parameters<typeof tailSteps>[0][number] }[] }).entries].sort((a, b) => a.seqStart - b.seqStart);
-      const next = tailSteps(entries.map(e => e.item), 6);
+      const next = tailSteps(entries.map(e => e.item), n);
       seenSteps.set(handle.id, { steps: next, at: Date.now() }); setSteps(next); setSeenAt(null); setError(null);
     }).catch(e => { if (live) { setError(errorText(e)); setSteps(s => s ?? []); } })
       .finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
-  }, [handle, key, wake, unknown]);
+  }, [handle, key, wake, unknown, n]);
   return { steps, error, seenAt, asleep, loading, woken: wake > 0, load: () => setWake(n => n + 1) };
 }
 
@@ -260,6 +266,59 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
   </View>;
 }
 
+/**
+ * The Overseer's conversation on Home (1.4.0-beta.0): the tail and a reply box, like any agent's detail pane, plus its
+ * decision card when it asks which agent should get a task. Before the first start, one Start button.
+ */
+function OverseerPane({ theme, compact, o, agentId, deps, navigation, onBack }: { theme: Theme; compact: boolean; o: OverseerRowState; agentId: string | null; deps: HomeDeps; navigation: PluginScreenProps["navigation"]; onBack?: () => void }) {
+  const c = theme.colors; const t = text(c);
+  const toast = useToast();
+  const { inbox, extras } = deps.sources;
+  const row = useInbox(inbox, () => inbox.overseer());
+  const agent = useAgentLive(agentId);
+  const tail = useTail(agent.handle, `${row?.seq ?? 0}:${agent.status ?? ""}`, 8);
+  const readBrief = useRpc(inboxBriefRpc);
+  const brief = useQuery({ queryKey: ["follow-through", "overseer-brief", agentId, row?.seq ?? 0], queryFn: () => readBrief({ agentId: agentId! }), enabled: !!agentId && !!row?.brief });
+  const b = brief.data?.brief?.state === "open" ? brief.data.brief : null;
+  const [starting, setStarting] = useState(false);
+  const start = async () => {
+    if (starting) return; setStarting(true);
+    try { await extras.startOverseer(); toast.show("The Overseer is ready", { variant: "success" }); } catch (e) { toast.error(errorText(e)); } finally { setStarting(false); }
+  };
+  const header = <View style={{ paddingHorizontal: compact ? 16 : 20, paddingTop: 12, paddingBottom: 12, gap: 4, borderBottomWidth: 1, borderBottomColor: c.border }}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+      {onBack && <IconButton theme={theme} compact icon="ChevronLeft" label="Back to Home" onPress={onBack} />}
+      <Icon name="MessagesSquare" size={16} color={c.foreground} />
+      <Text accessibilityRole="header" style={[t.title, { flex: 1, fontSize: 16 }]}>Overseer</Text>
+      {agentId && navigation && (compact
+        ? <IconButton theme={theme} compact icon="PanelRightOpen" label="Open full" onPress={() => navigation.openAgent({ agentId })} />
+        : <Button theme={theme} icon="PanelRightOpen" title="Open full" accessibilityHint="Opens the Overseer's whole chat" onPress={() => navigation.openAgent({ agentId })} />)}
+    </View>
+  </View>;
+  if (o.state === "start") return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
+    {header}
+    <ScrollView contentContainerStyle={{ padding: compact ? 16 : 20, gap: 12 }}>
+      <Text style={[t.body, { fontSize: 15, lineHeight: 22 }]}>One Claude agent that knows every workspace's state. Tell it "the PRs look good, assign reviewers on all" or "tell the SCIM agent to use option B", and it finds the right agent and passes it on.</Text>
+      <Text style={t.meta}>It never merges, posts to people or archives. It starts a new workspace only when you say so. It runs on Opus in its own workspace, which stays off your lists.</Text>
+      <View style={{ flexDirection: "row" }}><Button theme={theme} compact={compact} kind="primary" icon="Play" title="Start the Overseer" loading={starting} onPress={() => void start()} /></View>
+    </ScrollView>
+  </View>;
+  return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
+    {header}
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: compact ? 16 : 20, gap: 12, paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
+      {o.state === "error" && <Text accessibilityRole="alert" style={[t.body, { color: c.statusDanger }]}>{o.line}</Text>}
+      {tail.steps === null ? <Spinner color={c.foregroundMuted} size={12} label="Loading the conversation" />
+        : tail.steps.length === 0 ? <Text style={t.meta}>{tail.error ? `Couldn't load the conversation: ${tail.error}` : "Nothing yet. Ask it what needs you, or give it a task for one of your agents."}</Text>
+        : tail.steps.map((step, i) => <Step key={i} step={step} c={c} last={i === tail.steps!.length - 1} />)}
+      {o.state === "running" && <Spinner color={c.foregroundMuted} size={12} label="The Overseer is working" />}
+      {/* Its open ask, after the conversation that led to it. Only something Tom can act on; never "No ask stated". */}
+      {b && agentId && (b.kind === "decision" && b.decisions.some(d => d.options.length) || b.kind === "action") ? <BriefCard {...({ embedded: true, item: { data: b }, theme, layout: { compact }, agentId, deps: deps.briefDeps } as unknown as Parameters<typeof BriefCard>[0])} /> : null}
+    </ScrollView>
+    {agentId && <ReplyBox theme={theme} compact={compact} agentName="the Overseer" placeholder="Ask or give a task: “assign reviewers on all ready PRs”" hint={null}
+      onSend={async message => { await agent.handle!.send(message); inbox.refresh(); }} />}
+  </View>;
+}
+
 function Step({ step, c, last }: { step: TailStep; c: Colors; last: boolean }) {
   const t = text(c);
   if (step.kind === "tool") return <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -267,7 +326,7 @@ function Step({ step, c, last }: { step: TailStep; c: Colors; last: boolean }) {
     <Text numberOfLines={1} style={[t.meta, { flex: 1, fontFamily: mono }]}>{step.text}</Text>
   </View>;
   if (step.kind === "you") return <View style={{ padding: 10, borderRadius: 8, backgroundColor: c.surface1, gap: 3 }}>
-    <Text style={t.small}>You</Text><Text numberOfLines={3} style={t.body}>{step.text}</Text>
+    <Text style={t.small}>You</Text><Text numberOfLines={3} style={t.body}>{answerLine(step.text) ?? step.text}</Text>
   </View>;
   if (step.kind === "error") return <Text numberOfLines={4} style={[t.body, { color: c.statusDanger }]}>{step.text}</Text>;
   return <Text selectable numberOfLines={last ? 40 : 4} style={[t.body, { lineHeight: 19 }]}>{step.text.replace(/\*\*/g, "")}</Text>;
@@ -300,7 +359,7 @@ function PermissionBlock({ p, theme, compact, busy, primary, onRespond }: { p: P
 }
 
 /** The reply box. Sending is the developer writing to the agent, which clears Needs you (binding rule). */
-function ReplyBox({ theme, compact, agentName, onSend }: { theme: Theme; compact: boolean; agentName: string; onSend: (text: string) => Promise<void> }) {
+function ReplyBox({ theme, compact, agentName, onSend, placeholder = "Answer in your own words", hint = "Sending clears Needs you. Sign off & next moves on without a reply." }: { theme: Theme; compact: boolean; agentName: string; onSend: (text: string) => Promise<void>; placeholder?: string; hint?: string | null }) {
   const c = theme.colors;
   const toast = useToast();
   const [value, setValue] = useState("");
@@ -314,12 +373,12 @@ function ReplyBox({ theme, compact, agentName, onSend }: { theme: Theme; compact
   };
   return <View style={{ padding: compact ? 12 : 14, borderTopWidth: 1, borderTopColor: c.border, gap: 6 }}>
     <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 10, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1, paddingLeft: 12, paddingRight: 6, paddingVertical: 6 }}>
-      <TextInput accessibilityLabel={`Reply to ${agentName}`} value={value} onChangeText={setValue} placeholder="Answer in your own words" placeholderTextColor={c.foregroundMuted} multiline
+      <TextInput accessibilityLabel={`Reply to ${agentName}`} value={value} onChangeText={setValue} placeholder={placeholder} placeholderTextColor={c.foregroundMuted} multiline
         onKeyPress={e => { const k = e.nativeEvent as unknown as { key: string; metaKey?: boolean; ctrlKey?: boolean }; if (k.key === "Enter" && (k.metaKey || k.ctrlKey)) void send(); }}
         style={{ flex: 1, minHeight: compact ? 44 : 36, maxHeight: 140, color: c.foreground, fontSize: 14, lineHeight: 20, paddingVertical: 6, ...(Platform.OS === "web" ? { outlineStyle: "none" } as object : {}) }} />
       <IconButton theme={theme} compact={compact} icon="ArrowUp" label="Send" disabled={!value.trim() || sending} spinning={sending} onPress={() => void send()} color={value.trim() ? c.foreground : undefined} />
     </View>
-    <Text style={{ color: c.foregroundMuted, fontSize: 11, lineHeight: 15 }}>Sending clears Needs you. Sign off & next moves on without a reply.</Text>
+    {!!hint && <Text style={{ color: c.foregroundMuted, fontSize: 11, lineHeight: 15 }}>{hint}</Text>}
   </View>;
 }
 

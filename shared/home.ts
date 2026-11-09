@@ -132,12 +132,15 @@ const make = (s: Omit<Workstream, "sig">): Workstream => ({ ...s, sig: sigOf(s) 
 const stripSig = ({ sig: _sig, ...s }: Workstream): Omit<Workstream, "sig"> => s;
 
 /** Build every group from the inbox rows, Follow-up's tracked workspaces and Paseo's workspace list. */
-export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo: PaseoWorkspaceLite[]; now: number; sort?: SortMode; priorities?: readonly Priority[] }): HomeModel {
-  const { rows, now } = input;
+export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo: PaseoWorkspaceLite[]; now: number; sort?: SortMode; priorities?: readonly Priority[]; hidden?: readonly string[] }): HomeModel {
+  // Workspaces Follow-up keeps off the list (the Overseer's own): no row, no count.
+  const hidden = new Set(input.hidden ?? []);
+  const rows = input.rows.filter(r => !r.workspaceId || !hidden.has(r.workspaceId));
+  const { now } = input;
   const sort = input.sort ?? DEFAULT_SORT;
   const fresh = freshPriorities(input.priorities ?? [], now);
-  const tracked = new Map(input.tracked.filter(w => !w.archived).map(w => [w.id, w]));
-  const paseo = new Map(input.paseo.map(w => [w.id, w]));
+  const tracked = new Map(input.tracked.filter(w => !w.archived && !hidden.has(w.id)).map(w => [w.id, w]));
+  const paseo = new Map(input.paseo.filter(w => !hidden.has(w.id)).map(w => [w.id, w]));
   const project = (id: string | null) => id ? paseo.get(id)?.project ?? null : null;
   const out: Workstream[] = [];
   const covered = new Set<string>();
@@ -341,7 +344,8 @@ export function tailSteps(items: TimelineItem[], n = 6): TailStep[] {
     } else if (it.type === "tool_call") {
       const d = it.detail ?? {};
       const what = [d.command, d.filePath, d.path, d.url, d.query, d.pattern].find(v => typeof v === "string" && v.trim()) as string | undefined;
-      out.push({ kind: "tool", text: `${it.name ?? "Tool"}${what ? ` · ${what.split("\n")[0]}` : ""}`, failed: it.status === "failed" || !!it.error });
+      // MCP tools read by their own name: "mcp__follow-through__send_to_agent" is "send_to_agent".
+      out.push({ kind: "tool", text: `${(it.name ?? "Tool").replace(/^mcp__.+?__/, "")}${what ? ` · ${what.split("\n")[0]}` : ""}`, failed: it.status === "failed" || !!it.error });
     } else if (it.type === "error" && it.message) out.push({ kind: "error", text: it.message });
   }
   return out.slice(-n);

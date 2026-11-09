@@ -179,7 +179,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
       </View>
 
       {b.decisions.map((d, i) => <View key={d.id} style={{ gap: 8 }}>
-        <Text style={{ color: c.foreground, fontSize: 14, lineHeight: 20 }}>{b.decisions.length > 1 ? `${i + 1}. ` : ""}{d.question}</Text>
+        {(b.decisions.length > 1 || d.question.trim() !== b.ask.trim()) && <Text style={{ color: c.foreground, fontSize: 14, lineHeight: 20 }}>{b.decisions.length > 1 ? `${i + 1}. ` : ""}{d.question}</Text>}
         {d.options.length > 0 && <View style={{ gap: 6 }}>
           {d.options.map(o => <OptionRow key={o.letter} option={o} recommended={d.recommend === o.letter} sending={busy === `${d.id}:${o.letter}`} disabled={!!busy} tight={tight}
             open={!!open[`${d.id}:${o.letter}`]} onToggle={() => setOpen(v => ({ ...v, [`${d.id}:${o.letter}`]: !v[`${d.id}:${o.letter}`] }))}

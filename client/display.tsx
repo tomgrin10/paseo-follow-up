@@ -63,6 +63,11 @@ export function DisplaySections({ theme }: Pick<PluginSurfaceProps, "theme">) {
       </SettingsCard>
       {settings.values.enable_inbox && !!share.data?.briefStats && <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, lineHeight: 17, paddingHorizontal: 4 }}>{briefShareText(share.data.briefStats)}</Text>}
     </SettingsSection>
+    <SettingsSection title="Overseer (beta)" info="One agent you can ask about all your work. It sends each task to the agent that owns it and asks you when it isn't sure.">
+      <SettingsCard>
+        <SettingsSwitch label="Overseer" hint="Off hides its row on Home and stops its digest. An Overseer you already started stays in its workspace; Follow-up never archives it." value={settings.values.enable_overseer} disabled={settings.saving} onValueChange={(enable_overseer) => save({ enable_overseer })} />
+      </SettingsCard>
+    </SettingsSection>
     </>
   );
 }
