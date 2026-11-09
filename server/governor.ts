@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { governorLevel, type Resources, type ResourceLevel } from "../shared/resources";
+import { governorLevel, type Resources, type ResourceLevel, type WorkerMemory } from "../shared/resources";
 
 type Read = (path: string) => Promise<string>;
 const readText: Read = path => readFile(path, "utf8");
@@ -23,6 +23,11 @@ export function workingSet(current: number | null, stat: string | null): number 
   if (current === null) return null;
   const reclaimable = (statField(stat, "inactive_file") ?? 0) + (statField(stat, "slab_reclaimable") ?? 0);
   return Math.max(0, current - reclaimable);
+}
+const mb = (bytes: number) => Math.round(bytes / 1048576 * 10) / 10;
+export function workerMemory(): WorkerMemory {
+  const m = process.memoryUsage();
+  return { rssMb: mb(m.rss), heapUsedMb: mb(m.heapUsed), heapTotalMb: mb(m.heapTotal), externalMb: mb(m.external), arrayBuffersMb: mb(m.arrayBuffers) };
 }
 const number = (text: string | null): number | null => { const v = text?.trim(); if (!v || v === "max") return null; const n = Number(v); return Number.isFinite(n) && n > 0 ? n : null; };
 
@@ -73,7 +78,7 @@ export class Governor {
       if (this.cpu && total > this.cpu.total) cpuPct = Math.round((1 - (idle - this.cpu.idle) / (total - this.cpu.total)) * 100);
       this.cpu = { idle, total };
     }
-    const next: Resources = { memoryPct, memoryBytes, memoryHighBytes, cpuPct: cpuPct ?? this.last.cpuPct, memoryPressure: pressure(memPressure), cpuPressure: pressure(cpuPressure), level: "ok", at: new Date().toISOString() };
+    const next: Resources = { memoryPct, memoryBytes, memoryHighBytes, cpuPct: cpuPct ?? this.last.cpuPct, memoryPressure: pressure(memPressure), cpuPressure: pressure(cpuPressure), level: "ok", at: new Date().toISOString(), worker: workerMemory() };
     next.level = governorLevel(next);
     if (next.level !== this.last.level) this.log(`[follow-up] resource governor: ${this.last.level} → ${next.level} (memory ${memoryPct ?? "?"}% of memory.high, memory pressure ${next.memoryPressure ?? "?"}, cpu pressure ${next.cpuPressure ?? "?"})`);
     this.last = next;
