@@ -140,4 +140,5 @@ export const agentActRpc = defineRpc({ name: "follow.agent-act", input: z.strict
 export const overseerStatusSchema = z.object({ enabled: z.boolean(), agentId: z.string().nullable(), workspaceId: z.string().nullable(), startedAt: z.string().nullable(), generation: z.number().int(), error: z.string().nullable() });
 export const overseerStatusRpc = defineRpc({ name: "follow.overseer-status", input: z.object({}), output: overseerStatusSchema });
 export const overseerStartRpc = defineRpc({ name: "follow.overseer-start", input: z.object({}), output: overseerStatusSchema });
+export const overseerAskRpc = defineRpc({ name: "follow.overseer-ask", input: z.strictObject({ text: z.string().trim().min(1).max(2000) }), output: overseerStatusSchema });
 export const overseerActRpc = defineRpc({ name: "follow.overseer-act", input: z.strictObject({ agentId: idSchema, tool: z.string().max(60), args: z.record(z.string(), z.unknown()).default({}) }), output: z.unknown() });

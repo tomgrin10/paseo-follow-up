@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { Platform, Pressable, Text, TextInput, View } from "react-native";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { GROUP_TITLE, homeCounts, type HomeGroupId, type HomeModel } from "../shared/home";
-import { FIELD_LABEL, excerpt, highlightRuns, homeSearchDocs, indexDocs, omniboxResults, workspaceProvider, type OmniboxItem, type OmniboxProvider, type Range } from "../shared/search";
+import { FIELD_LABEL, excerpt, highlightRuns, homeSearchDocs, indexDocs, defaultActive, omniboxResults, overseerProvider, workspaceProvider, type OmniboxItem, type OmniboxProvider, type Range, type WorkspaceItem } from "../shared/search";
 import { SORT_HINT, SORT_LABEL, SORT_MODES, type SortMode } from "../shared/sort";
 import { priorityNote, PRIORITY_SOURCE_LABEL } from "../shared/priorities";
 import { meters, meterText, type Meter } from "../shared/usage";
@@ -11,6 +11,7 @@ import type { HomeSources } from "./home-data";
 import type { Workstream } from "../shared/home";
 import { Age, PrChipView } from "./home-list";
 import { useMinute } from "./home-data";
+import { Spinner } from "./motion";
 import { withAlpha, type Colors } from "./theme";
 import type { Theme } from "./kit";
 
@@ -29,33 +30,40 @@ export type Omnibox = {
   active: number;
   move(delta: number): void;
   inputRef: React.RefObject<TextInput | null>;
+  /** The Overseer is on, so a query can also be an ask. */
+  askOn: boolean;
 };
 
 /**
  * The search state for one list. The index is rebuilt only when Home's sources change, never per keystroke.
- * `extraProviders` is the seam for the next build's "Ask the Overseer" row, listed after the workspace results.
+ * The Overseer's "Ask the Overseer: <query>" row comes last while the Overseer is on; `extraProviders` go between.
  */
 export function useOmnibox(model: HomeModel, sources: HomeSources, extraProviders: readonly OmniboxProvider[] = []): Omnibox {
   const [query, setQueryState] = useState("");
-  const [active, setActive] = useState(0);
+  // null: the default row. -1: none, so Enter does nothing.
+  const [active, setActive] = useState<number | null>(null);
   const inputRef = useRef<TextInput | null>(null);
   const live = useSyncExternalStore(sources.live.subscribe, sources.live.version, sources.live.version);
   const paseo = useSyncExternalStore(sources.paseo.subscribe, sources.paseo.version, sources.paseo.version);
   const extras = useSyncExternalStore(sources.extras.subscribe, sources.extras.version, sources.extras.version);
   const searching = query.trim().length > 0;
+  const overseer = useSyncExternalStore(sources.extras.subscribe, sources.extras.overseer, sources.extras.overseer);
+  const askOn = !!overseer?.enabled;
   // Built lazily: nothing is indexed until the developer types.
   const index = useMemo(() => searching ? indexDocs(homeSearchDocs({ model, paseo: sources.paseo.all(), tracked: sources.live.all(), archived: sources.live.archived(), agents: sources.extras.agents() })) : null,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [searching, model, live, paseo, extras]);
-  const providers = useMemo(() => index ? [workspaceProvider(index), ...extraProviders] : [], [index, extraProviders]);
+  const providers = useMemo(() => index ? [workspaceProvider(index), ...extraProviders, overseerProvider(askOn)] : [], [index, extraProviders, askOn]);
   const results = useMemo(() => searching ? omniboxResults(providers, query) : null, [providers, query, searching]);
-  const setQuery = useCallback((q: string) => { setQueryState(q); setActive(0); }, []);
-  const move = useCallback((delta: number) => setActive(a => Math.max(0, Math.min((results?.length ?? 1) - 1, a + delta))), [results]);
+  const setQuery = useCallback((q: string) => { setQueryState(q); setActive(null); }, []);
+  const fallback = defaultActive(results);
+  const current = active ?? fallback;
+  const move = useCallback((delta: number) => setActive(a => Math.max(0, Math.min((results?.length ?? 1) - 1, (a ?? fallback) + delta))), [results, fallback]);
   // ⌘K "Follow-up: Search".
   const token = useSyncExternalStore(sources.extras.subscribe, sources.extras.focusToken, sources.extras.focusToken);
   const first = useRef(token);
   useEffect(() => { if (token !== first.current) inputRef.current?.focus(); }, [token]);
-  return { query, setQuery, results, active: Math.min(active, Math.max(0, (results?.length ?? 1) - 1)), move, inputRef };
+  return { query, setQuery, results, active: Math.min(current, Math.max(0, (results?.length ?? 1) - 1)), move, inputRef, askOn };
 }
 
 type DomKey = { key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; target: unknown; preventDefault(): void };
@@ -79,12 +87,13 @@ export function useSlashToFocus(omnibox: Omnibox, enabled = true) {
 export function SearchField({ theme, omnibox, dense, onEnter }: { theme: Theme; omnibox: Omnibox; dense: boolean; onEnter: (item: OmniboxItem) => void }) {
   const c = theme.colors;
   const [focused, setFocused] = useState(false);
-  const { query, setQuery, results, active, move, inputRef } = omnibox;
+  const { query, setQuery, results, active, move, inputRef, askOn } = omnibox;
+  const placeholder = askOn ? "Search, or ask the Overseer" : "Search workspaces, branches, PRs";
   return <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 6, height: dense ? 30 : 32, paddingHorizontal: 8, borderRadius: 6,
     borderWidth: 1, borderColor: focused ? withAlpha(c.foreground, 0.35) : c.border, backgroundColor: c.surface1 }}>
     <Icon name="Search" size={13} color={c.foregroundMuted} />
-    <TextInput ref={inputRef} value={query} onChangeText={setQuery} placeholder="Search workspaces, branches, PRs" placeholderTextColor={c.foregroundMuted}
-      accessibilityLabel="Search workspaces, branches, PRs" autoCorrect={false} autoCapitalize="none" spellCheck={false} returnKeyType="go"
+    <TextInput ref={inputRef} value={query} onChangeText={setQuery} placeholder={placeholder} placeholderTextColor={c.foregroundMuted}
+      accessibilityLabel={placeholder} autoCorrect={false} autoCapitalize="none" spellCheck={false} returnKeyType="go"
       onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
       onSubmitEditing={() => { const item = results?.[active]; if (item) onEnter(item); }}
       onKeyPress={e => {
@@ -232,7 +241,7 @@ export function GroupChip({ group, c }: { group: HomeGroupId | "archived"; c: Co
   </View>;
 }
 
-export function ResultRow({ item, theme, active, dense, touch, onPress, s: row }: { item: OmniboxItem; theme: Theme; active: boolean; dense: boolean; touch: boolean; onPress: () => void; s?: Workstream }) {
+export function ResultRow({ item, theme, active, dense, touch, onPress, s: row }: { item: WorkspaceItem; theme: Theme; active: boolean; dense: boolean; touch: boolean; onPress: () => void; s?: Workstream }) {
   const c = theme.colors;
   const { hit } = item;
   const via = hit.via ? excerpt(hit.via.text, hit.via.ranges, dense ? 56 : 90) : null;
@@ -252,6 +261,26 @@ export function ResultRow({ item, theme, active, dense, touch, onPress, s: row }
     {row && !dense && <PrChipView s={row} c={c} />}
     <GroupChip group={hit.group} c={c} />
     {row && <Age iso={row.at} c={c} size={dense ? 11 : 12} />}
+  </Pressable>;
+}
+
+/**
+ * The omnibox's last row: the query as an ask for the Overseer. Enter (or a tap) sends it as typed; the Overseer
+ * finds the agent that owns it. Quiet until it's the active row, so it never competes with real matches.
+ */
+export function AskRow({ ask, theme, active, dense, touch, sending, onPress }: { ask: string; theme: Theme; active: boolean; dense: boolean; touch: boolean; sending: boolean; onPress: () => void }) {
+  const c = theme.colors;
+  return <Pressable accessibilityRole="button" accessibilityState={{ selected: active, busy: sending }} accessibilityLabel={`Ask the Overseer: ${ask}`} accessibilityHint="Sends this to the Overseer, which passes it to the agent that owns it" disabled={sending} onPress={onPress}
+    style={state => ({ flexDirection: "row", alignItems: "center", gap: 10, minHeight: touch ? 56 : dense ? 40 : 44, paddingHorizontal: dense ? 8 : 16, paddingVertical: 4,
+      borderLeftWidth: 2, borderLeftColor: active ? withAlpha(c.foreground, 0.5) : "transparent",
+      backgroundColor: active ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
+    <Text numberOfLines={dense ? 2 : 1} style={{ flex: 1, minWidth: 0, fontSize: 13, lineHeight: 18 }}>
+      <Text style={{ color: c.foregroundMuted }}>Ask the Overseer: </Text>
+      <Text style={{ color: c.foreground, fontWeight: "500" }}>{ask}</Text>
+    </Text>
+    {sending ? <Spinner color={c.foregroundMuted} size={12} label="Sending to the Overseer" />
+      : active && Platform.OS === "web" && !touch ? <Text style={{ color: c.foregroundMuted, fontSize: 11, paddingHorizontal: 4, borderRadius: 3, borderWidth: 1, borderColor: withAlpha(c.foreground, 0.2) }}>↵</Text> : null}
+    <Icon name="MessagesSquare" size={14} color={active ? c.foreground : c.foregroundMuted} />
   </Pressable>;
 }
 

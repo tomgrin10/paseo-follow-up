@@ -8,6 +8,7 @@ import {
   workspaceTitleFor, workstreams, type WorkstreamRow,
 } from "../shared/overseer";
 import { buildHome } from "../shared/home";
+import { ASK_KEY, defaultActive, indexDocs, omniboxResults, overseerProvider, workspaceProvider, type OmniboxProvider } from "../shared/search";
 import type { InboxRow } from "../shared/inbox";
 import { Inbox, type AgentInfo, type Directory } from "../server/inbox";
 import { classify, type Ledger, type Sources } from "../server/inbox-classifier";
@@ -190,7 +191,7 @@ function fakePaseo(agents: Record<string, { workspaceId: string; status?: string
   return { paseo, sent, created, agents, timelineReads };
 }
 
-async function overseerFixture(t: any, rows: InboxRow[], tails: Record<string, unknown[]> = {}, extra: { paseoHome?: string; tight?: () => Promise<boolean> } = {}) {
+async function overseerFixture(t: any, rows: InboxRow[], tails: Record<string, unknown[]> = {}, extra: { paseoHome?: string; tight?: () => Promise<boolean>; start?: boolean; enabled?: () => Promise<boolean> } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "overseer-")); t.after(() => rm(dir, { recursive: true, force: true }));
   const ledger: Ledger = [];
   const inbox = {
@@ -198,11 +199,11 @@ async function overseerFixture(t: any, rows: InboxRow[], tails: Record<string, u
     async noteDelivery(agentId: string, messageId: string | null, by?: "developer") { ledger.push({ agentId, messageId, at: new Date(NOW).toISOString(), ...(by ? { by } : {}) }); },
   };
   const state: State = { version: 1, workspaces: [workspace({ id: "w1", title: "SCIM", mainAgentId: "a1", prs: [pr({ key: "acme/app#1402", repo: "acme/app", number: 1402, snapshot: snapshot({ title: "HER-1282 SCIM sync" }) })] })] };
-  const overseer = new Overseer({ directory: dir, store: { snapshot: async () => state }, inbox, priorities: { read: async () => [] }, enabled: async () => true, provider: "demo/claude-opus-5-5", now: () => NOW,
+  const overseer = new Overseer({ directory: dir, store: { snapshot: async () => state }, inbox, priorities: { read: async () => [] }, enabled: extra.enabled ?? (async () => true), provider: "demo/claude-opus-5-5", now: () => NOW,
     tight: extra.tight ?? (async () => false), paseoHome: extra.paseoHome,
     workspaces: async () => [{ id: "w1", name: "SCIM", project: "acme-app", projectId: "p", activityAt: at(5), branch: "tom/her-1282-scim" }, { id: "w2", name: "Export", project: "acme-app", projectId: "p", activityAt: at(9), branch: "tom/export" }] });
   const fake = fakePaseo({ a1: { workspaceId: "w1" }, a2: { workspaceId: "w2" } }, tails);
-  await overseer.start(fake.paseo);
+  if (extra.start !== false) await overseer.start(fake.paseo);
   const ov = (await overseer.state()).agentId!;
   return { dir, overseer, ledger, ...fake, ov };
 }
@@ -426,4 +427,55 @@ test("an answer Tom clicked reads as an answer in the Overseer's pane", async ()
   assert.equal(answerLine("Follow-up answer D1 (Which agent should take it?): C — New workspace\nContinue with this choice."), "Answered: C · New workspace");
   assert.equal(answerLine("Follow-up answer Q3: B - Keep the old API"), "Answered: B · Keep the old API");
   assert.equal(answerLine("tell the SCIM agent to use option A"), null);
+});
+
+// ---------- the omnibox and ⌘K (slice 2) ----------
+
+test("omnibox: \"Ask the Overseer\" is the last row, as typed, and only while the Overseer is on", () => {
+  const index = indexDocs([{ key: "ws:scim", title: "Fix HER-1282 SCIM group sync", group: "needs", at: at(5), fields: [{ field: "name", text: "Fix HER-1282 SCIM group sync" }] }]);
+  const ask = overseerProvider(true);
+  const extra: OmniboxProvider = { id: "extra", results: () => [] };
+  // Listed first on purpose: the ask still closes the list.
+  const rows = omniboxResults([ask, workspaceProvider(index, NOW), extra], "  scim   group ");
+  assert.deepEqual(rows.map(r => r.key), ["ws:scim", ASK_KEY]);
+  assert.equal(rows.at(-1)!.ask, "scim group", "trimmed, spaces collapsed");
+  assert.deepEqual(omniboxResults([workspaceProvider(index, NOW), ask], "what's for lunch").map(r => r.key), [ASK_KEY], "no match: the ask is the only row, so Enter sends it");
+  assert.deepEqual(omniboxResults([workspaceProvider(index, NOW), overseerProvider(false)], "scim").map(r => r.key), ["ws:scim"], "off: no ask row");
+  assert.deepEqual(overseerProvider(true).results("   "), [], "blank: nothing to ask");
+  assert.deepEqual(overseerProvider(true).results("x".repeat(2001)), [], "too long for the omnibox");
+});
+
+test("asking from the omnibox starts the Overseer on first use and sends Tom's words unchanged", async t => {
+  const f = await overseerFixture(t, [row("a1", { workspaceId: "w1" })], {}, { start: false });
+  assert.equal((await f.overseer.state()).agentId, null);
+  const s = await f.overseer.ask(f.paseo, "  the PRs look good, assign reviewers on all ");
+  assert.ok(s.agentId); assert.equal(s.generation, 1);
+  assert.equal(f.created.filter(c => c.kind === "agent").length, 1, "created once");
+  assert.deepEqual(f.sent, [{ agentId: s.agentId, text: "the PRs look good, assign reviewers on all", messageId: undefined }], "no \"via Overseer\" prefix: these are Tom's own words to it");
+  await f.overseer.ask(f.paseo, "and rebase #1425");
+  assert.equal(f.created.filter(c => c.kind === "agent").length, 1, "a second ask reuses it");
+  assert.equal(f.sent.at(-1)!.agentId, s.agentId);
+});
+
+test("asking brings an archived Overseer back first, and refuses while it's off", async t => {
+  const f = await overseerFixture(t, [row("a1", { workspaceId: "w1" })]);
+  f.agents[f.ov].archivedAt = at(0);
+  const s = await f.overseer.ask(f.paseo, "what needs me?");
+  assert.notEqual(s.agentId, f.ov); assert.equal(s.generation, 2);
+  assert.equal(f.sent.at(-1)!.agentId, s.agentId, "sent to the new one, never the archived one");
+  let on = true;
+  const g = await overseerFixture(t, [], {}, { enabled: async () => on });
+  on = false;
+  await assert.rejects(g.overseer.ask(g.paseo, "hello"), /The Overseer is off/);
+  await assert.rejects(g.overseer.ask(g.paseo, "   "), /Type what you want/);
+  assert.equal(g.sent.length, 0);
+});
+
+test("omnibox: Enter never sends a one-word miss to the Overseer; a sentence or a real match is picked as before", () => {
+  const index = indexDocs([{ key: "ws:scim", title: "Fix HER-1282 SCIM group sync", group: "needs", at: at(5), fields: [{ field: "name", text: "Fix HER-1282 SCIM group sync" }] }]);
+  const rows = (q: string) => omniboxResults([workspaceProvider(index, NOW), overseerProvider(true)], q);
+  assert.equal(defaultActive(rows("kubernetes")), -1, "a one-word miss: nothing is active");
+  assert.equal(defaultActive(rows("what needs me before standup")), 0, "a sentence: Enter sends it");
+  assert.equal(defaultActive(rows("scim")), 0, "a match: Enter opens it");
+  assert.equal(defaultActive(null), 0);
 });
