@@ -7,6 +7,8 @@ import { SORT_HINT, SORT_LABEL, SORT_MODES, type SortMode } from "../shared/sort
 import { priorityNote, PRIORITY_SOURCE_LABEL } from "../shared/priorities";
 import { meters, meterText, type Meter } from "../shared/usage";
 import type { HomeSources } from "./home-data";
+import type { Workstream } from "../shared/home";
+import { Age, PrChipView } from "./home-list";
 import { useMinute } from "./home-data";
 import { withAlpha, type Colors } from "./theme";
 import type { Theme } from "./kit";
@@ -115,12 +117,13 @@ export function SortMenu({ theme, mode, onChange, rankedAt, touch }: { theme: Th
       shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 8 }}>
       {SORT_MODES.map(m => <Pressable key={m} accessibilityRole="menuitem" accessibilityState={{ selected: m === mode }} onPress={() => { onChange(m); setOpen(false); }}
         style={state => ({ flexDirection: "row", alignItems: "center", gap: 8, minHeight: touch ? 44 : 34, paddingHorizontal: 10, backgroundColor: (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
-        <View style={{ width: 14 }}>{m === mode && <Icon name="Check" size={13} color={c.foreground} />}</View>
+        <View style={{ width: 14, alignSelf: "flex-start", paddingTop: 2 }}>{m === mode && <Icon name="Check" size={13} color={c.foreground} />}</View>
         <View style={{ flex: 1 }}>
-          <Text style={{ color: c.foreground, fontSize: 13 }}>{SORT_LABEL[m]}</Text>
-          <Text style={{ color: c.foregroundMuted, fontSize: 11 }}>{m === "priority" ? `${SORT_HINT[m]} · ${priorityNote(rankedAt, now)}` : SORT_HINT[m]}</Text>
+          <Text style={{ color: c.foreground, fontSize: 13, lineHeight: 17 }}>{SORT_LABEL[m]}</Text>
+          <Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 11, lineHeight: 15 }}>{SORT_HINT[m]}</Text>
         </View>
       </Pressable>)}
+      <Text style={{ color: c.foregroundMuted, fontSize: 11, paddingHorizontal: 10, paddingTop: 6, paddingBottom: 4, marginTop: 4, borderTopWidth: 1, borderTopColor: c.border }}>Priority: {priorityNote(rankedAt, now)}</Text>
     </View>}
   </View>;
 }
@@ -142,7 +145,7 @@ export function StatusStrip({ theme, model, filter, onFilter, touch, dense }: { 
     const muted = n === 0;
     const color = selected ? c.foreground : muted ? withAlpha(c.foregroundMuted, 0.6) : tone ?? c.foreground;
     return <Pressable key={key} accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={n === null ? label : `${label}, ${n}${selected ? ". Showing only these; press to show all" : ". Show only these"}`} onPress={onPress}
-      style={state => ({ flexDirection: "row", alignItems: "center", gap: 5, height: touch ? 34 : 26, paddingHorizontal: 8, borderRadius: 13,
+      style={state => ({ flexDirection: "row", alignItems: "center", gap: 5, height: touch ? 36 : 30, paddingHorizontal: 8, borderRadius: 15,
         borderWidth: 1, borderColor: selected ? withAlpha(c.foreground, 0.4) : "transparent",
         backgroundColor: selected ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
       {n !== null && <Text style={{ color, fontSize: 13, fontWeight: "600", fontVariant: ["tabular-nums"] }}>{n}</Text>}
@@ -154,7 +157,6 @@ export function StatusStrip({ theme, model, filter, onFilter, touch, dense }: { 
     {STRIP.map(s => chip(s.id, s.label, counts[s.id], filter === s.id, () => onFilter(filter === s.id ? null : s.id), s.id === "needs" && counts.needs ? c.statusWarning : undefined))}
     {counts.later > 0 && chip("later", "Later", counts.later, filter === "later", () => onFilter(filter === "later" ? null : "later"))}
     {counts.archivable > 0 && <Text style={{ color: c.statusSuccess, fontSize: 12, paddingHorizontal: 6 }}>{counts.archivable} to archive</Text>}
-    {filter && chip("all", "Show all", null, false, () => onFilter(null))}
   </View>;
 }
 
@@ -177,7 +179,7 @@ export function UsageMeters({ theme, sources, dense }: { theme: Theme; sources: 
         aria-expanded={open === m.family} onPress={() => setOpen(o => o === m.family ? null : m.family)}
         style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 22 }}>
         <Bar pct={Math.max(...m.windows.map(w => w.pct))} color={toneColor(m, c)} c={c} />
-        <Text numberOfLines={1} style={{ color: m.tone === "ok" ? c.foregroundMuted : toneColor(m, c), fontSize: 11, fontVariant: ["tabular-nums"] }}>
+        <Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 11, fontVariant: ["tabular-nums"] }}>
           {meterText(m, now)}{m.accounts.length > 1 ? ` · ${m.accounts.length} accounts` : ""}
         </Text>
       </Pressable>)}
@@ -190,7 +192,7 @@ export function UsageMeters({ theme, sources, dense }: { theme: Theme; sources: 
   </View>;
 }
 function Bar({ pct, color, c }: { pct: number; color: string; c: Colors }) {
-  return <View style={{ width: 28, height: 4, borderRadius: 2, backgroundColor: c.surface2, overflow: "hidden" }}>
+  return <View style={{ width: 28, height: 4, borderRadius: 2, backgroundColor: c.border, overflow: "hidden" }}>
     <View style={{ width: `${Math.min(100, pct)}%`, height: 4, backgroundColor: color === c.foregroundMuted ? withAlpha(c.foreground, 0.45) : color }} />
   </View>;
 }
@@ -212,7 +214,7 @@ export function GroupChip({ group, c }: { group: HomeGroupId | "archived"; c: Co
   </View>;
 }
 
-export function ResultRow({ item, theme, active, dense, touch, onPress }: { item: OmniboxItem; theme: Theme; active: boolean; dense: boolean; touch: boolean; onPress: () => void }) {
+export function ResultRow({ item, theme, active, dense, touch, onPress, s: row }: { item: OmniboxItem; theme: Theme; active: boolean; dense: boolean; touch: boolean; onPress: () => void; s?: Workstream }) {
   const c = theme.colors;
   const { hit } = item;
   const via = hit.via ? excerpt(hit.via.text, hit.via.ranges, dense ? 56 : 90) : null;
@@ -223,12 +225,15 @@ export function ResultRow({ item, theme, active, dense, touch, onPress }: { item
       backgroundColor: active ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
     <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
       <Highlighted text={hit.title} ranges={hit.titleRanges} color={archived ? c.foregroundMuted : c.foreground} hit={c.foreground} mark={c.statusWarning} size={13} weight="500" />
+      {!via && row && (row.word || row.line) ? <Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 12 }}>{[row.word, row.line].filter(Boolean).join(" · ")}</Text> : null}
       {via && <View style={{ flexDirection: "row", gap: 6, alignItems: "baseline" }}>
         <Text style={{ color: c.foregroundMuted, fontSize: 11 }}>{FIELD_LABEL[hit.via!.field]}</Text>
         <View style={{ flex: 1, minWidth: 0 }}><Highlighted text={via.text} ranges={via.ranges} color={c.foregroundMuted} hit={c.foreground} mark={c.statusWarning} size={12} /></View>
       </View>}
     </View>
+    {row && !dense && <PrChipView s={row} c={c} />}
     <GroupChip group={hit.group} c={c} />
+    {row && <Age iso={row.at} c={c} size={dense ? 11 : 12} />}
   </Pressable>;
 }
 

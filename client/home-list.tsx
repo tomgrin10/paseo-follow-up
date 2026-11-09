@@ -97,7 +97,7 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
     switch (item.type) {
       case "label": return <Text accessibilityRole={item.key === "l:archived" ? "header" : undefined} style={{ color: c.foregroundMuted, fontSize: item.key === "l:archived" ? 11 : 13, fontWeight: item.key === "l:archived" ? "600" : "400",
         letterSpacing: item.key === "l:archived" ? 0.6 : 0, textTransform: item.key === "l:archived" ? "uppercase" : "none", paddingHorizontal: dense ? 8 : 16, paddingTop: 12, paddingBottom: 4 }}>{item.text}</Text>;
-      case "result": return <ResultRow item={item.item} theme={theme} active={item.index === activeResult} dense={dense} touch={touch} onPress={() => onResult?.(item.item)} />;
+      case "result": return <ResultRow item={item.item} s={model.byKey.get(item.item.key)} theme={theme} active={item.index === activeResult} dense={dense} touch={touch} onPress={() => onResult?.(item.item)} />;
       case "brief": return <BriefRow theme={theme} line={briefLine ?? ""} selected={selectedKey === null || selectedKey === BRIEF_KEY} touch={touch} onSelect={onSelect} />;
       case "header": return <GroupHeader theme={theme} title={item.title} count={item.count} open={item.open} tone={item.group === "needs" && item.count ? c.statusWarning : undefined} dense={dense} touch={touch} onPress={() => toggle(item.group)} />;
       case "fold": return <Pressable accessibilityRole="button" aria-expanded={item.open} accessibilityState={{ expanded: item.open }} accessibilityLabel={`${item.project}, ${item.count}. ${item.open ? "Collapse" : "Expand"}`} onPress={() => toggleProject(item.project)}
@@ -119,7 +119,7 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
         </View>;
       }
     }
-  }, [theme, c, dense, touch, selectedKey, onSelect, briefLine, renderExpanded, toggle, toggleProject, activeResult, onResult]);
+  }, [theme, c, dense, touch, selectedKey, onSelect, briefLine, renderExpanded, toggle, toggleProject, activeResult, onResult, model]);
 
   const listRef = useRef<FlatList<Entry>>(null);
   // Keep the keyboard-active result in view.

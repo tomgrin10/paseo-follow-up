@@ -9,7 +9,7 @@ export function prPresentation(pr: Pr): { label: string; tone: "merged" | "appro
   if (s.state === "MERGED") return { label: "Merged", tone: "merged" };
   if (s.state === "CLOSED") return { label: "Closed", tone: "neutral" };
   if (s.conflict) return { label: "Conflicts", tone: "warning" };
-  if (s.threads.length) return { label: `${s.threads.length} review threads`, tone: "warning" };
+  if (s.threads.length) return { label: `${s.threads.length} review thread${s.threads.length === 1 ? "" : "s"}`, tone: "warning" };
   if (s.failedChecks.length) return { label: "Checks failed", tone: "warning" };
   if (s.otherFailedChecks?.length) return { label: s.otherFailedChecks.length === 1 ? "Optional check failed" : "Optional checks failed", tone: "warning" };
   if (s.draft) return { label: "Draft", tone: "neutral" };
@@ -21,7 +21,7 @@ export function settledForDisplay(pr: Pr): boolean {
 }
 export function compactPrStatus(pr: Pr): ReturnType<typeof prPresentation> {
   const status = prPresentation(pr);
-  if (status.label !== "Merged" || !pr.snapshot?.deployment) return { ...status, label: status.label.replace("Status unavailable", "Unknown").replace("review threads", "threads").replace("Checks running", "Checking") };
+  if (status.label !== "Merged" || !pr.snapshot?.deployment) return { ...status, label: status.label.replace("Status unavailable", "Unknown").replace(/review thread/, "thread").replace("Checks running", "Checking") };
   return { label: deployed(pr) ? "Deployed" : "Merged", tone: "merged" };
 }
 export function orderedStacks(prs: Pr[]): { name: string; prs: Pr[] }[] {
