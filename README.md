@@ -139,6 +139,8 @@ An overview is written when you open the section and none exists, or when the in
 
 One agent you talk to about all your workspaces. It sits pinned at the top of Home's list, under the morning brief. Click **Start the Overseer** once, and Follow-up creates it in its own workspace, which is never tracked, never shown under Needs you, and never sent repairs. Its row shows whether it is idle, working, or asking you something. Selecting it opens the conversation in the right pane with a reply box, and **Open full** opens its chat.
 
+**Ask from anywhere.** Type in Home's search box and the last row is always **Ask the Overseer: <what you typed>**. Arrow down to it and press Enter (or tap it), and it goes to the Overseer as you wrote it. The search clears and its conversation opens. If no workspace matches, it is the only row, so Enter sends it straight away; a single word that matches nothing waits for ↓ or a tap, so a typo never reaches an agent. The first ask starts the Overseer, so you don't have to click Start first. While the Overseer is on, ⌘K → **Follow-up: Ask the Overseer** opens it from any screen with the reply box focused. Both work on the phone too.
+
 - **It routes your asks; it doesn't do the work.** "Tell the HER-1312 agent to use option A" goes to the agent that owns HER-1312, and the Overseer answers in one line: "Sent to Okta SCIM sync (key HER-1312)". It scores candidates by Linear key, PR number, branch, workspace name, open asks and recent activity. When no candidate stands out, it asks you with a decision (the top two or three plus **New workspace**) instead of guessing.
 - **What it forwards keeps your voice.** A forwarded message starts "From Tom via Overseer:". It clears that agent's Needs-you flag only when it answers the agent's open ask. A new task leaves the ask standing.
 - **New workspaces only on your word.** It starts one, branched off main and named from the task, only after you asked or picked **New workspace**, and only through a dry run and confirm.
@@ -146,7 +148,9 @@ One agent you talk to about all your workspaces. It sits pinned at the top of Ho
 - **It is cheap to keep.** Each turn begins with a digest of what changed since the last one, built from Paseo's workspace metadata and Follow-up's own state. That's about 800 tokens at 100 workspaces, with resting workspaces in one line. The digest file is rewritten only when its content changes, and not at all while the resource governor pauses background work. The Overseer never reads the timeline of an agent that isn't loaded, because that would load the agent for an hour. Instead it reads the agent's transcript from disk, or Follow-up's cached goal and PRs. Sending to a resting agent wakes it, so that happens only when you ask for it, and the reply says "woke …".
 - **Archived it by accident?** Follow-up starts a new one with a handoff from the old one's last steps.
 
-Turn it off under Settings → **Overseer (beta)**.
+Turn it off under Settings → **Overseer (beta)**. While it's off, search has no ask row.
+
+![Home's search with "scim" typed: the matching workspace, then the active row "Ask the Overseer: scim" with an Enter hint](docs/media/overseer/omnibox-ask-dark.png)
 
 ![Home with the Overseer selected: the pinned row asks which agent should take a broken export, and the pane shows the conversation, the routed task and the decision with two candidates plus New workspace](docs/media/overseer/overseer-dark.png)
 

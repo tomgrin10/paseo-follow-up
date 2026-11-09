@@ -84,6 +84,15 @@ export default function contribute(host: PluginClientContext) {
     contributeInboxCommands(client, inbox, openNext),
     contributeBrief(client, briefDeps),
   ];
+  // ⌘K "Follow-up: Ask the Overseer": opens Home on the Overseer with its reply box focused (1.4.0-beta.0). Listed
+  // only while the Overseer is on, so it never leads to a dead end.
+  let removeAsk: (() => unknown) | null = null;
+  const syncAsk = () => {
+    const on = !!extras.overseer()?.enabled;
+    if (on && !removeAsk) removeAsk = client.addCommandCenterItem({ id: "follow-through-ask-overseer", title: "Follow-up: Ask the Overseer", icon: "MessagesSquare", keywords: ["overseer", "ask", "route", "tell", "delegate", "assign", "which agent"], context: "global", onSelect({ openScreen }) { openScreen({ screenId: OVERVIEW, params: { ask: String(Date.now()) } }); } });
+    else if (!on && removeAsk) { void removeAsk(); removeAsk = null; }
+  };
+  removers.push(extras.subscribe(syncAsk), () => removeAsk?.());
   // Phase 2: only on hosts with the sidebar-view API (Paseo main after 2026-11-07).
   const views = sidebarViewHost(host);
   if (views) removers.push(views.addSidebarView({ id: "needs-you", title: "Follow-up: Needs you", description: "Agents that need you until you sign them off, then your workspaces.", Component: inboxSidebarView(sources) }));

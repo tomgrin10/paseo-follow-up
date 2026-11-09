@@ -2,8 +2,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode
 import { FlatList, Pressable, Text, View } from "react-native";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { GROUP_TITLE, quietFolds, type Badge, type HomeGroupId, type HomeModel, type Workstream } from "../shared/home";
-import type { OmniboxItem } from "../shared/search";
-import { PriorityLine, ResultRow } from "./home-chrome";
+import { ASK_KEY, type OmniboxItem, type WorkspaceItem } from "../shared/search";
+import { AskRow, PriorityLine, ResultRow } from "./home-chrome";
 import { age } from "../shared/inbox";
 import { headlineColor, mergedColor, runningColor, tint, toneColor, withAlpha, type Colors } from "./theme";
 import { useMinute } from "./home-data";
@@ -29,7 +29,8 @@ type Entry =
   | { type: "row"; key: string; s: Workstream }
   | { type: "fold"; key: string; project: string; count: number; archivable: number; open: boolean }
   | { type: "more"; key: string; project: string; left: number }
-  | { type: "result"; key: string; item: OmniboxItem; index: number }
+  | { type: "result"; key: string; item: WorkspaceItem; index: number }
+  | { type: "ask"; key: string; ask: string; index: number }
   | { type: "label"; key: string; text: string };
 
 export type HomeListProps = {
@@ -56,9 +57,11 @@ export type HomeListProps = {
   filter?: HomeGroupId | null;
   /** The pinned Overseer row under the brief. Absent: the Overseer is off (or this surface has none). */
   overseer?: OverseerRowState | null;
+  /** An omnibox ask is on its way to the Overseer. */
+  asking?: boolean;
 };
 
-export function HomeList({ model, theme, dense = false, touch, selectedKey, onSelect, briefLine, renderExpanded, header, footer, top, results, activeResult = 0, onResult, filter = null, overseer = null }: HomeListProps) {
+export function HomeList({ model, theme, dense = false, touch, selectedKey, onSelect, briefLine, renderExpanded, header, footer, top, results, activeResult = 0, onResult, filter = null, overseer = null, asking = false }: HomeListProps) {
   const c = theme.colors;
   const [closed, setClosed] = useState<Set<string>>(new Set(["quiet"]));
   const [openProjects, setOpenProjects] = useState<Set<string>>(new Set());
@@ -72,6 +75,12 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
       // Search ignores the sort and the groups: ranked by match, archived ones last under their own label.
       let archivedShown = false;
       results.forEach((item, index) => {
+        if (item.ask !== undefined) {
+          // The ask row closes the list; with no match it follows the "no match" line.
+          if (index === 0) out.push({ type: "label", key: "l:none", text: "No workspace, branch or PR matches." });
+          out.push({ type: "ask", key: item.key, ask: item.ask, index });
+          return;
+        }
         if (item.hit.group === "archived" && !archivedShown) { archivedShown = true; out.push({ type: "label", key: "l:archived", text: "Archived" }); }
         out.push({ type: "result", key: `r:${item.provider}:${item.key}`, item, index });
       });
@@ -105,6 +114,7 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
       case "label": return <Text accessibilityRole={item.key === "l:archived" ? "header" : undefined} style={{ color: c.foregroundMuted, fontSize: item.key === "l:archived" ? 11 : 13, fontWeight: item.key === "l:archived" ? "600" : "400",
         letterSpacing: item.key === "l:archived" ? 0.6 : 0, textTransform: item.key === "l:archived" ? "uppercase" : "none", paddingHorizontal: dense ? 8 : 16, paddingTop: 12, paddingBottom: 4 }}>{item.text}</Text>;
       case "result": return <ResultRow item={item.item} s={model.byKey.get(item.item.key)} theme={theme} active={item.index === activeResult} dense={dense} touch={touch} onPress={() => onResult?.(item.item)} />;
+      case "ask": return <AskRow ask={item.ask} theme={theme} active={item.index === activeResult} dense={dense} touch={touch} sending={!!asking} onPress={() => onResult?.({ provider: "overseer", key: ASK_KEY, ask: item.ask })} />;
       case "brief": return <BriefRow theme={theme} line={briefLine ?? ""} selected={selectedKey === null || selectedKey === BRIEF_KEY} touch={touch} onSelect={onSelect} />;
       case "overseer": return overseer ? <OverseerRow theme={theme} o={overseer} selected={selectedKey === OVERSEER_KEY} touch={touch} onSelect={onSelect} /> : null;
       case "header": return <GroupHeader theme={theme} title={item.title} count={item.count} open={item.open} tone={item.group === "needs" && item.count ? c.statusWarning : undefined} dense={dense} touch={touch} onPress={() => toggle(item.group)} />;
@@ -127,16 +137,16 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
         </View>;
       }
     }
-  }, [theme, c, dense, touch, selectedKey, onSelect, briefLine, renderExpanded, toggle, toggleProject, activeResult, onResult, model, overseer?.state, overseer?.line]);
+  }, [theme, c, dense, touch, selectedKey, onSelect, briefLine, renderExpanded, toggle, toggleProject, activeResult, onResult, model, overseer?.state, overseer?.line, asking]);
 
   const listRef = useRef<FlatList<Entry>>(null);
   // Keep the keyboard-active result in view.
   useEffect(() => {
     if (!results?.length) return;
-    const at = data.findIndex(e => e.type === "result" && e.index === activeResult);
+    const at = data.findIndex(e => (e.type === "result" || e.type === "ask") && e.index === activeResult);
     if (at >= 0) listRef.current?.scrollToIndex({ index: at, viewPosition: 0.5, animated: false });
   }, [activeResult, results, data]);
-  const list = <FlatList ref={listRef} data={data} keyExtractor={e => e.key} renderItem={render} extraData={`${selectedKey}:${activeResult}`} onScrollToIndexFailed={() => undefined}
+  const list = <FlatList ref={listRef} data={data} keyExtractor={e => e.key} renderItem={render} extraData={`${selectedKey}:${activeResult}:${asking}`} onScrollToIndexFailed={() => undefined}
     initialNumToRender={30} maxToRenderPerBatch={30} windowSize={9} removeClippedSubviews={false}
     ListHeaderComponent={header ? <>{header}</> : null} ListFooterComponent={footer ? <>{footer}</> : <View style={{ height: 32 }} />}
     style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 8 }} keyboardShouldPersistTaps="handled" />;
