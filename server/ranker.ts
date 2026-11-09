@@ -10,7 +10,7 @@ import { atomic } from "./overseer";
 import { claudeArgs, claudeRunner, type AiJobs, type RunInput } from "./ai-jobs";
 import { mcpproxyText } from "./about";
 import {
-  healthLine, inRankWindow, jerusalem, stableInputs, rankPrompt, rankReplySchema, RANK_SYSTEM, rankWorkstream, toPriorities,
+  damped, emptyReasons, fillReasons, workspaceInputs, healthLine, inRankWindow, jerusalem, RANK_STRICT, REASON_SYSTEM, reasonInputs, reasonReplySchema, stableInputs, rankPrompt, rankReplySchema, RANK_SYSTEM, rankWorkstream, toPriorities,
   type NotStarted, type RankInputs, type RankIssue, type RankMessage, type RankPlanning, type RankReview, type RankSource, type SourceHealth,
 } from "../shared/ranker";
 import type { Priority } from "../shared/priorities";
@@ -20,6 +20,12 @@ const exec = promisify(execFile);
 
 /** The inputs' fingerprint: equal means the model would see the same material. */
 export const inputsHash = (inputs: RankInputs) => createHash("sha256").update(stableInputs(inputs)).digest("hex").slice(0, 32);
+/**
+ * What decides whether the model runs again: the inputs, plus who ranks and how (provider, model, effort, the
+ * prompt). Switching the ranker to another model in Settings → Agents re-ranks at the next run.
+ */
+export const rankKey = (inputs: RankInputs, role: Pick<RankerRole, "provider" | "model" | "thinking">) =>
+  createHash("sha256").update(stableInputs(inputs)).update(JSON.stringify([role.provider, role.model, role.thinking, RANK_SYSTEM, RANK_STRICT, REASON_SYSTEM])).digest("hex").slice(0, 32);
 
 // ---------- role ----------
 
@@ -43,11 +49,37 @@ export type RankSources = {
 
 const str = (v: unknown) => typeof v === "string" && v.trim() ? v.trim() : null;
 
-/** `linear:list_issues` (JSON `{issues: […]}`), open ones only. */
-export function parseLinearIssues(text: string): RankIssue[] {
-  let j: unknown; try { j = JSON.parse(text); } catch { return []; }
-  const issues = (j as { issues?: unknown[] })?.issues;
-  if (!Array.isArray(issues)) return [];
+/**
+ * The complete objects of a JSON array that was cut off (mcpproxy truncates replies near 20 k characters and appends
+ * a note, which leaves invalid JSON): every whole `{…}` element after `"key":[`, up to the cut.
+ */
+export function salvageArray(text: string, key: string): unknown[] {
+  const at = text.indexOf(`"${key}":[`);
+  if (at < 0) return [];
+  const out: unknown[] = [];
+  let depth = 0, start = -1, inString = false, escaped = false;
+  for (let i = at + key.length + 4; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) { if (escaped) escaped = false; else if (ch === "\\") escaped = true; else if (ch === '"') inString = false; continue; }
+    if (ch === '"') inString = true;
+    else if (ch === "{") { if (depth++ === 0) start = i; }
+    else if (ch === "}") { if (--depth === 0 && start >= 0) { try { out.push(JSON.parse(text.slice(start, i + 1))); } catch { /* skip */ } start = -1; } }
+    else if (ch === "]" && depth === 0) break;
+  }
+  return out;
+}
+
+/** `linear:list_issues` (JSON `{issues: […], hasNextPage, cursor}`), open ones only; a truncated reply keeps its whole issues. */
+export function parseLinearIssues(text: string): RankIssue[] { return parseLinearPage(text).issues; }
+export function parseLinearPage(text: string): { issues: RankIssue[]; next: string | null; readable: boolean } {
+  let j: { issues?: unknown[]; hasNextPage?: unknown; cursor?: unknown } | null = null;
+  try { j = JSON.parse(text); } catch { /* truncated: salvage below */ }
+  const issues = Array.isArray(j?.issues) ? j!.issues : salvageArray(text, "issues");
+  const readable = Array.isArray(j?.issues) || issues.length > 0;
+  const next = j && j.hasNextPage === true && typeof j.cursor === "string" ? j.cursor : null;
+  return { issues: toIssues(issues), next, readable };
+}
+function toIssues(issues: unknown[]): RankIssue[] {
   return issues.flatMap(raw => {
     const i = raw as Record<string, unknown>;
     const key = str(i.id) ?? str(i.identifier); const title = str(i.title);
@@ -126,10 +158,13 @@ export async function planningUrl(setting: string | null | undefined, registry =
   } catch { return null; }
 }
 
-type Run = (command: string, args: string[], timeoutMs: number) => Promise<string>;
+type Run = (command: string, args: string[], timeoutMs: number, env?: Record<string, string>) => Promise<string>;
 /** The developer's Slack user id, as the Slack tool describes it ("Current logged in user's user_id is U…"). */
 export function slackUserFrom(toolsList: string): string | null { return /user_id is (U[A-Z0-9]{6,})/.exec(toolsList)?.[1] ?? null; }
-const runFile: Run = async (command, args, timeout) => (await exec(command, args, { timeout, maxBuffer: 4 * 1024 * 1024 })).stdout;
+const runFile: Run = async (command, args, timeout, env) => (await exec(command, args, { timeout, maxBuffer: 4 * 1024 * 1024, ...(env ? { env: { ...process.env, ...env } } : {}) })).stdout;
+
+/** Every github.com account `gh` is logged in to: review requests can sit on a work account that isn't the active one. */
+export function ghAccounts(status: string): string[] { return [...new Set([...status.matchAll(/account (\S+)/g)].map(m => m[1]))]; }
 
 /** The live sources: read-only mcpproxy and gh calls, and one Artifact read for the plan. */
 export function liveRankSources(jobs: AiJobs, opts: { run?: Run; slackSelf?: string | null; slackUser?: string | null; model?: () => Promise<string | null> } = {}): RankSources {
@@ -139,7 +174,15 @@ export function liveRankSources(jobs: AiJobs, opts: { run?: Run; slackSelf?: str
   const call = async (tool: string, args: unknown) => mcpproxyText(await run("mcpproxy", ["call", "tool-read", `--tool-name=${tool}`, `--json_args=${JSON.stringify(args)}`, "--reason=Follow-up: rank today's workstreams", "--log-level=error", "-o", "json"], 60_000));
   return {
     async linear() {
-      return parseLinearIssues(await call("linear:list_issues", { assignee: "me", limit: 60, orderBy: "updatedAt", fields: ["id", "title", "priority", "dueDate", "status", "statusType", "project", "projectMilestone", "url"] }));
+      // Pages of 25 stay under mcpproxy's ~20 k reply cap (60 at once came back cut off and parsed as none).
+      const out: RankIssue[] = []; let cursor: string | null = null;
+      for (let page = 0; page < 3; page++) {
+        const r = parseLinearPage(await call("linear:list_issues", { assignee: "me", limit: 25, orderBy: "updatedAt", ...(cursor ? { cursor } : {}), fields: ["id", "title", "priority", "dueDate", "status", "statusType", "project", "projectMilestone", "url"] }));
+        if (!r.readable && page === 0) throw new Error("Linear's reply couldn't be read.");
+        out.push(...r.issues); cursor = r.next;
+        if (!cursor) break;
+      }
+      return out;
     },
     async slack(since) {
       const after = new Date(since).toISOString().slice(0, 10);
@@ -151,7 +194,22 @@ export function liveRankSources(jobs: AiJobs, opts: { run?: Run; slackSelf?: str
       return [...mentions, ...dms].filter(m => { const k = `${m.who}|${m.text}`; if (seen.has(k)) return false; seen.add(k); return true; });
     },
     async github() {
-      return parseReviewRequests(await run("gh", ["search", "prs", "--review-requested=@me", "--state=open", "--limit=30", "--json", "number,title,url,repository,author"], 30_000));
+      // Each logged-in account's own review requests (a work account is often not the active one). The token goes to
+      // that one gh child only, never stored.
+      const status = await run("gh", ["auth", "status", "--hostname", "github.com"], 15_000).catch(e => String((e as { stdout?: string; stderr?: string }).stdout ?? "") + String((e as { stderr?: string }).stderr ?? ""));
+      const accounts = ghAccounts(status);
+      const search = (env?: Record<string, string>) => run("gh", ["search", "prs", "--review-requested=@me", "--state=open", "--limit=30", "--json", "number,title,url,repository,author"], 30_000, env).then(parseReviewRequests);
+      if (accounts.length <= 1) return search();
+      const seen = new Set<string>(); const out: RankReview[] = []; let read = 0;
+      for (const user of accounts) {
+        try {
+          const token = (await run("gh", ["auth", "token", "--hostname", "github.com", "--user", user], 15_000)).trim();
+          for (const r of await search(token ? { GH_TOKEN: token } : undefined)) { const k = `${r.repo}#${r.number}`; if (!seen.has(k)) { seen.add(k); out.push(r); } }
+          read++;
+        } catch { /* that account can't search; the others still count */ }
+      }
+      if (!read) throw new Error("No gh account could search review requests.");
+      return out;
     },
     async planning(url) {
       const model = (await opts.model?.()) ?? "sonnet";
@@ -159,6 +217,8 @@ export function liveRankSources(jobs: AiJobs, opts: { run?: Run; slackSelf?: str
         // Always Claude: the Artifact tool is Claude Code's.
         provider: "claude", runner: claudeRunner("claude", planArgs, PLAN_ENV), timeoutMs: 180_000, maxOutputChars: 20_000 });
       if (!r.ok) throw new Error(r.error);
+      // A plan with nothing in it is a failed read (the model sometimes answers before reading), not an empty week.
+      if (!r.value.items.length) throw new Error("The plan came back empty.");
       return { title: r.value.title, url, items: r.value.items.map(i => ({ level: i.level, title: i.title, keys: i.keys.filter(k => /^[A-Z][A-Z0-9]+-\d+$/.test(k)) })) };
     },
   };
@@ -172,12 +232,19 @@ export const rankerStateSchema = z.object({
   lastHash: z.string().nullable(), lastRunAt: z.string().nullable(), lastModelAt: z.string().nullable(),
   day: z.string().nullable(), runsToday: z.number().int(),
   health: z.record(z.string(), healthSchema), notStarted: z.array(z.object({ key: z.string(), title: z.string(), url: z.string().nullable(), reason: z.string() })),
-  last: z.object({ ok: z.boolean(), trigger: z.string(), costUsd: z.number().nullable(), durationMs: z.number(), skipped: z.string().nullable(), error: z.string().nullable() }).nullable(),
+  last: z.object({ ok: z.boolean(), trigger: z.string(), costUsd: z.number().nullable(), durationMs: z.number(), skipped: z.string().nullable(), error: z.string().nullable(),
+    provider: z.string().nullable().default(null), inputTokens: z.number().nullable().default(null), outputTokens: z.number().nullable().default(null), top: z.string().nullable().default(null), retried: z.boolean().default(false),
+    /** Where the time went: reading inputs, the ranking call, the reasons follow-up. */
+    timing: z.object({ inputsMs: z.number(), modelMs: z.number(), reasonsMs: z.number() }).nullable().default(null) }).nullable(),
+  /** The last ranking that called a model: who ranked and what it cost (null for Codex, billed to its plan). */
+  model: z.object({ provider: z.string(), costUsd: z.number().nullable() }).nullable().default(null),
+  /** Each ranked workspace's last score and the fingerprint of its own inputs, for damping. */
+  prev: z.record(z.string(), z.object({ score: z.number(), fp: z.string() })).default({}),
   slackSince: z.number().nullable(),
   planning: z.object({ url: z.string(), at: z.string(), value: z.object({ title: z.string().nullable(), url: z.string().nullable(), items: z.array(z.object({ level: z.string(), title: z.string(), keys: z.array(z.string()) })) }) }).nullable(),
 });
 export type RankerState = z.infer<typeof rankerStateSchema>;
-const EMPTY: RankerState = { version: 1, lastHash: null, lastRunAt: null, lastModelAt: null, day: null, runsToday: 0, health: {}, notStarted: [], last: null, slackSince: null, planning: null };
+const EMPTY: RankerState = { version: 1, lastHash: null, lastRunAt: null, lastModelAt: null, day: null, runsToday: 0, health: {}, notStarted: [], last: null, slackSince: null, planning: null, prev: {}, model: null };
 
 export type RankTrigger = "schedule" | "manual" | "overseer";
 export type RankResult = {
@@ -200,6 +267,8 @@ export type RankerDeps = {
   tight?: () => Promise<boolean>;
   planningUrl?: () => Promise<string | null>;
   now?: () => number;
+  /** Why a source failed (one short line). Defaults to console.warn, the daemon log. */
+  log?: (line: string) => void;
 };
 
 const SLACK_WINDOW_MS = 48 * 3_600_000;
@@ -245,13 +314,17 @@ export class Ranker {
 
     // Inputs, one source at a time. A failing source is reported, never fatal.
     const health: Partial<Record<RankSource, SourceHealth>> = {};
-    const read = async <T>(source: RankSource, fn: () => Promise<T>, fallback: T): Promise<T> => { try { const v = await fn(); health[source] = "ok"; return v; } catch { health[source] = "failed"; return fallback; } };
-    const rows = await this.d.workstreams();
-    const linear = await read("linear", () => this.d.sources.linear(), []);
-    // The whole 48-hour window every run, so equal inputs hash equal; the last read time is kept for the log.
+    const read = async <T>(source: RankSource, fn: () => Promise<T>, fallback: T): Promise<T> => { try { const v = await fn(); health[source] = "ok"; return v; } catch (e) { health[source] = "failed"; (this.d.log ?? console.warn)(`[follow-up] ranker: ${source} read failed: ${String((e as Error)?.message ?? e).replace(/\s+/g, " ").slice(0, 200)}`); return fallback; } };
+    // The three outside reads are independent subprocesses (mcpproxy, gh), so they run side by side; the plan is
+    // cached for the day. Workstreams come from Follow-up's in-memory directory, no daemon request.
+    // The whole 48-hour Slack window every run, so equal inputs hash equal; the read time is kept for the log.
     const slackSince = started;
-    const slack = await read("slack", () => this.d.sources.slack(started - SLACK_WINDOW_MS), []);
-    const github = await read("github", () => this.d.sources.github(), []);
+    const [rows, linear, slack, github] = await Promise.all([
+      this.d.workstreams(),
+      read("linear", () => this.d.sources.linear(), []),
+      read("slack", () => this.d.sources.slack(started - SLACK_WINDOW_MS), []),
+      read("github", () => this.d.sources.github(), []),
+    ]);
     const url = await this.d.planningUrl?.().catch(() => null) ?? null;
     let planning: RankPlanning | null = null; let planCache = s.planning;
     if (!url) health.planning = "off";
@@ -262,13 +335,15 @@ export class Ranker {
       else if (s.planning?.url === url) planning = s.planning.value; // keep yesterday's plan over none
     }
     const inputs: RankInputs = { workstreams: rows.map(rankWorkstream), linear, slack, github, planning };
-    const hash = inputsHash(inputs);
+    const hash = rankKey(inputs, role);
+    const inputsMs = this.now() - started;
+    const last = (l: Partial<NonNullable<RankerState["last"]>> & { ok: boolean }): NonNullable<RankerState["last"]> => ({ trigger, costUsd: null, durationMs: this.now() - started, skipped: null, error: null, provider: role.provider, inputTokens: null, outputTokens: null, top: null, retried: false, timing: null, ...l });
     const save = async (patch: Partial<RankerState>) => dryRun ? undefined : (await mkdir(this.d.directory, { recursive: true, mode: 0o700 }), atomic(this.path, { ...s, day, runsToday, health, planning: planCache, slackSince, lastRunAt: new Date(started).toISOString(), ...patch }));
 
     // Nothing from outside could be read (no logins, mcpproxy down, an isolated test daemon): a ranking would have
     // nothing to go on, so don't spend a model call. The next tick tries again at the cadence.
     if (!(["linear", "slack", "github", "planning"] as const).some(k => health[k] === "ok")) {
-      await save({ last: { ok: false, trigger, costUsd: null, durationMs: this.now() - started, skipped: "sources", error: "No outside source could be read." } });
+      await save({ last: last({ ok: false, skipped: "sources", error: "No outside source could be read." }) });
       return base({ skipped: "sources", health, healthLine: healthLine(health), error: "No outside source could be read." });
     }
     // Nothing changed: keep the ranking, re-stamping it before it goes stale.
@@ -276,28 +351,53 @@ export class Ranker {
       const stored = (await this.d.priorities.read()).filter(p => p.by === "ranker");
       const newest = stored.reduce((m, p) => p.at > m ? p.at : m, "");
       if (!dryRun && stored.length && started - Date.parse(newest) > RESTAMP_MS) await this.d.priorities.write(stored.map(p => ({ ...p, at: new Date(started).toISOString() })), false);
-      await save({ last: { ok: true, trigger, costUsd: null, durationMs: this.now() - started, skipped: "same", error: null } });
+      await save({ last: last({ ok: true, skipped: "same", top: this.titled(stored, inputs).sort((a, b) => b.score - a.score)[0]?.title ?? null }) });
       return base({ ok: true, skipped: "same", health, healthLine: healthLine(health), notStarted: s.notStarted, priorities: this.titled(stored, inputs) });
     }
     if (runsToday >= role.dailyCap && trigger !== "manual") {
-      await save({ last: { ok: false, trigger, costUsd: null, durationMs: this.now() - started, skipped: "cap", error: null } });
+      await save({ last: last({ ok: false, skipped: "cap" }) });
       return base({ skipped: "cap", health, healthLine: healthLine(health) });
     }
 
     const maxPromptChars = role.maxPromptChars ?? 60_000;
-    const prompt = rankPrompt(inputs, day, maxPromptChars);
-    const r = await this.d.jobs.run({ name: "rank", prompt, system: RANK_SYSTEM, schema: rankReplySchema, provider: role.provider, model: role.model ?? undefined, thinking: role.thinking, maxPromptChars, maxOutputChars: 40_000, timeoutMs: 240_000 });
+    const previous = Object.entries(s.prev).map(([id, p]) => ({ id, score: p.score }));
+    const prompt = rankPrompt(inputs, day, maxPromptChars, previous);
+    const modelStart = this.now();
+    // Claude follows the rules as written; other models get the reason rule restated at the end.
+    const system = role.provider === "claude" ? RANK_SYSTEM : RANK_SYSTEM + RANK_STRICT;
+    let r = await this.d.jobs.run({ name: "rank", prompt, system, schema: rankReplySchema, provider: role.provider, model: role.model ?? undefined, thinking: role.thinking, maxPromptChars, maxOutputChars: 40_000, timeoutMs: 240_000 });
+    const add = (a: number | null | undefined, b: number | null | undefined) => a == null && b == null ? null : (a ?? 0) + (b ?? 0);
+    let cost = r.costUsd, inTok = r.inputTokens ?? null, outTok = r.outputTokens ?? null, retried = false;
+    // Reasons missing (Codex at low effort left most empty): one small follow-up for just those workspaces, with only
+    // their material, asking only for reasons. The first reply's scores stand. Still empty after it: Paseo's own fact.
+    const modelMs = this.now() - modelStart; const reasonsStart = this.now();
+    const missing = r.ok ? emptyReasons(r.value, inputs) : [];
+    if (r.ok && missing.length) {
+      retried = true;
+      const again = await this.d.jobs.run({ name: "rank-reasons", prompt: rankPrompt(reasonInputs(inputs, missing), day, maxPromptChars), system: role.provider === "claude" ? REASON_SYSTEM : REASON_SYSTEM + RANK_STRICT.replace('"priorities"', '"reasons"'),
+        schema: reasonReplySchema, provider: role.provider, model: role.model ?? undefined, thinking: role.thinking, maxPromptChars, maxOutputChars: 20_000, timeoutMs: 120_000 });
+      cost = add(cost, again.costUsd); inTok = add(inTok, again.inputTokens); outTok = add(outTok, again.outputTokens);
+      if (again.ok) r = { ...r, value: fillReasons(r.value, again.value) };
+    }
     const durationMs = this.now() - started;
+    const timing = { inputsMs, modelMs, reasonsMs: retried ? this.now() - reasonsStart : 0 };
+    const usage = { provider: role.provider, costUsd: cost, inputTokens: inTok, outputTokens: outTok, durationMs, retried, timing };
     if (!r.ok) {
-      await save({ runsToday: runsToday + 1, last: { ok: false, trigger, costUsd: r.costUsd, durationMs, skipped: null, error: r.error } });
-      return base({ health, healthLine: healthLine(health), costUsd: r.costUsd, error: r.error });
+      await save({ runsToday: runsToday + 1, last: last({ ok: false, error: r.error, ...usage }) });
+      return base({ health, healthLine: healthLine(health), costUsd: cost, error: r.error });
     }
     const at = new Date(this.now()).toISOString();
-    const { priorities, notStarted, dropped } = toPriorities(r.value, inputs, at);
+    const ranked = toPriorities(r.value, inputs, at);
+    const { notStarted, dropped } = ranked;
+    // Damping: a workspace whose own inputs didn't change moves at most STEADY_CAP from its last score.
+    const fps = new Map(inputs.workstreams.map(w => [w.id, createHash("sha256").update(workspaceInputs(w, inputs)).digest("hex").slice(0, 16)]));
+    const priorities = damped(ranked.priorities, new Map(Object.entries(s.prev)), fps);
+    const prev = Object.fromEntries(priorities.map(p => [p.workspaceId, { score: p.score, fp: fps.get(p.workspaceId) ?? "" }]));
     // The ranker's own job: stored directly (set_priorities without the confirm step), replacing its last ranking.
     if (!dryRun && priorities.length) await this.d.priorities.write(priorities, true);
-    await save({ lastHash: hash, lastModelAt: at, runsToday: runsToday + 1, notStarted, last: { ok: true, trigger, costUsd: r.costUsd, durationMs, skipped: null, error: null } });
-    return base({ ok: true, priorities: this.titled(priorities, inputs), notStarted, health, healthLine: healthLine(health), costUsd: r.costUsd, durationMs, dropped });
+    const titled = this.titled(priorities, inputs);
+    await save({ lastHash: hash, lastModelAt: at, runsToday: runsToday + 1, notStarted, prev, model: { provider: role.provider, costUsd: cost }, last: last({ ok: true, top: titled[0]?.title ?? null, ...usage }) });
+    return base({ ok: true, priorities: titled, notStarted, health, healthLine: healthLine(health), costUsd: cost, durationMs, dropped });
   }
 
   private titled(items: Priority[], inputs: RankInputs) {
@@ -306,8 +406,22 @@ export class Ranker {
   }
 
   /** For Home's sort header: the last run and what it could read. */
-  async status(): Promise<{ enabled: boolean; running: boolean; lastRunAt: string | null; healthLine: string; error: string | null; costUsd: number | null; notStarted: number }> {
+  async status(): Promise<{ enabled: boolean; running: boolean; lastRunAt: string | null; healthLine: string; error: string | null; costUsd: number | null; notStarted: number;
+    last: { ok: boolean; skipped: string | null; top: string | null; provider: string | null; inputTokens: number | null; outputTokens: number | null } | null }> {
     const s = await this.state();
-    return { enabled: await this.d.enabled(), running: !!this.running, lastRunAt: s.lastRunAt, healthLine: healthLine(s.health as Partial<Record<RankSource, SourceHealth>>), error: s.last?.error ?? null, costUsd: s.last?.costUsd ?? null, notStarted: s.notStarted.length };
+    const l = s.last;
+    // The cost shown is the standing ranking's (the last model run), so a skipped run doesn't blank it.
+    return { enabled: await this.d.enabled(), running: !!this.running, lastRunAt: s.lastRunAt, healthLine: healthLine(s.health as Partial<Record<RankSource, SourceHealth>>), error: l?.error ?? null, costUsd: s.model?.costUsd ?? null, notStarted: s.notStarted.length,
+      last: l ? { ok: l.ok, skipped: l.skipped, top: l.top, provider: s.model?.provider ?? null, inputTokens: l.inputTokens, outputTokens: l.outputTokens } : null };
+  }
+
+  /**
+   * Starts a run and returns at once: a slow model would outlast the plugin RPC's ~60 s timeout. The caller polls
+   * status() until running is false. A run already going is joined, not doubled.
+   */
+  start(opts: { trigger: RankTrigger; force?: boolean }): { started: boolean } {
+    if (this.running) return { started: false };
+    void this.run(opts).catch(() => undefined);
+    return { started: true };
   }
 }

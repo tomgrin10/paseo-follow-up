@@ -38,8 +38,8 @@ export type JobSpec<T> = {
   runner?: Runner;
 };
 export type JobResult<T> =
-  | { ok: true; value: T; costUsd: number | null; durationMs: number }
-  | { ok: false; error: string; reason: "timeout" | "too-large" | "invalid-json" | "invalid-shape" | "failed" | "stopped"; costUsd: number | null; durationMs: number };
+  | { ok: true; value: T; costUsd: number | null; durationMs: number; inputTokens?: number | null; outputTokens?: number | null }
+  | { ok: false; error: string; reason: "timeout" | "too-large" | "invalid-json" | "invalid-shape" | "failed" | "stopped"; costUsd: number | null; durationMs: number; inputTokens?: number | null; outputTokens?: number | null };
 export type JobLog = { at: string; name: string; provider: string; model: string; ok: boolean; reason: string | null; durationMs: number; costUsd: number | null; promptChars: number; inputTokens: number | null; outputTokens: number | null };
 
 export const DEFAULT_SYSTEM = "You turn the material you are given into the JSON object the user asks for. Reply with that JSON object only: no prose, no code fence. Use only facts in the material; never guess names, numbers or links.";
@@ -61,7 +61,7 @@ export class AiJobs {
     const model = spec.model ?? DEFAULT_MODEL[provider] ?? "";
     const started = now();
     let entry: JobLog | null = null;
-    const done = (r: JobResult<T>, out?: RunOutput | null) => { entry = ({ at: new Date(started).toISOString(), name: spec.name, provider, model, ok: r.ok, reason: r.ok ? null : r.reason, durationMs: r.durationMs, costUsd: r.costUsd, promptChars: spec.prompt.length, inputTokens: out?.inputTokens ?? null, outputTokens: out?.outputTokens ?? null }); return r; };
+    const done = (r: JobResult<T>, out?: RunOutput | null) => { entry = ({ at: new Date(started).toISOString(), name: spec.name, provider, model, ok: r.ok, reason: r.ok ? null : r.reason, durationMs: r.durationMs, costUsd: r.costUsd, promptChars: spec.prompt.length, inputTokens: out?.inputTokens ?? null, outputTokens: out?.outputTokens ?? null }); return { ...r, inputTokens: out?.inputTokens ?? null, outputTokens: out?.outputTokens ?? null }; };
     try { return await this.attempt({ ...spec, provider, model }, model, started, done); } finally { if (entry) await this.log(entry); }
   }
 

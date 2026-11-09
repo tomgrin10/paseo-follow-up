@@ -5,6 +5,7 @@ import { GROUP_TITLE, homeCounts, type HomeGroupId, type HomeModel } from "../sh
 import { FIELD_LABEL, excerpt, highlightRuns, homeSearchDocs, indexDocs, defaultActive, omniboxResults, overseerProvider, workspaceProvider, type OmniboxItem, type OmniboxProvider, type Range, type WorkspaceItem } from "../shared/search";
 import { SORT_HINT, SORT_LABEL, SORT_MODES, type SortMode } from "../shared/sort";
 import { priorityNote, PRIORITY_SOURCE_LABEL } from "../shared/priorities";
+import { rankCost } from "../shared/ranker";
 import { meters, meterText, type Meter } from "../shared/usage";
 import { resourceMeter, type Resources } from "../shared/resources";
 import type { HomeSources } from "./home-data";
@@ -112,7 +113,8 @@ export function SearchField({ theme, omnibox, dense, onEnter }: { theme: Theme; 
 
 // ---------- sort ----------
 
-export type RankState = { enabled: boolean; running: boolean; healthLine: string; error: string | null } | null;
+export type RankState = { enabled: boolean; running: boolean; healthLine: string; error: string | null; costUsd?: number | null; last?: { ok: boolean; skipped: string | null; provider: string | null } | null } | null;
+
 
 export function SortMenu({ theme, mode, onChange, rankedAt, touch, rank = null, onRerank }: { theme: Theme; mode: SortMode; onChange: (m: SortMode) => void; rankedAt: string | null; touch: boolean; rank?: RankState; onRerank?: () => Promise<{ ok: boolean; skipped: string | null; error: string | null; top?: { title: string }[] }> }) {
   const c = theme.colors;
@@ -126,16 +128,17 @@ export function SortMenu({ theme, mode, onChange, rankedAt, touch, rank = null, 
     try {
       const r = await onRerank();
       if (!r.ok) toast.error(r.error ?? "Couldn't re-rank.");
-      else if (r.skipped === "busy") toast.show("Already re-ranking");
+      else if (r.skipped === "busy") toast.show("Still ranking; Home updates when it's done");
       else toast.show(r.skipped === "same" ? "Nothing new in Linear, Slack, GitHub or the plan since the last ranking" : r.top?.[0] ? `Re-ranked · ${r.top[0].title} first` : "Re-ranked", { variant: "success" });
     } catch (e) { toast.error(e instanceof Error ? e.message : String(e)); }
   };
   // "Ranked 12m ago · Slack unavailable": the age, then any source the last run couldn't read.
-  const note = running ? "Re-ranking…" : [priorityNote(rankedAt, now), rank?.enabled ? rank.healthLine : ""].filter(Boolean).join(" · ");
+  // The footer keeps the standing ranking's age and cost while a new one runs; the menu item says "Ranking…".
+  const note = [priorityNote(rankedAt, now), rankedAt && rank?.enabled ? rankCost(rank) : "", rank?.enabled ? rank.healthLine : ""].filter(Boolean).join(" · ");
   return <View style={{ position: "relative", zIndex: 20 }}>
-    <Pressable accessibilityRole="button" accessibilityLabel={`Sort: ${SORT_LABEL[mode]}`} aria-expanded={open} accessibilityState={{ expanded: open }} onPress={() => setOpen(o => !o)}
+    <Pressable accessibilityRole="button" accessibilityLabel={`Sort: ${SORT_LABEL[mode]}${running ? ", ranking" : ""}`} aria-expanded={open} accessibilityState={{ expanded: open }} onPress={() => setOpen(o => !o)}
       style={state => ({ flexDirection: "row", alignItems: "center", gap: 4, height: touch ? 36 : 30, paddingHorizontal: 8, borderRadius: 6, backgroundColor: open || (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
-      {running ? <Spinner color={c.foregroundMuted} size={12} label="Re-ranking" /> : <Icon name="ArrowUpDown" size={13} color={c.foregroundMuted} />}
+      {running ? <Spinner color={c.foreground} size={12} label="Ranking" /> : <Icon name="ArrowUpDown" size={13} color={c.foregroundMuted} />}
       <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 12 }}>{SORT_LABEL[mode]}</Text>
       <Icon name="ChevronDown" size={12} color={c.foregroundMuted} />
     </Pressable>
@@ -152,8 +155,8 @@ export function SortMenu({ theme, mode, onChange, rankedAt, touch, rank = null, 
       <View style={{ marginTop: 4, borderTopWidth: 1, borderTopColor: c.border, paddingTop: 2 }}>
         {rank?.enabled && onRerank && <Pressable accessibilityRole="menuitem" accessibilityState={{ busy: running, disabled: running }} disabled={running} onPress={() => void rerank()}
           style={state => ({ flexDirection: "row", alignItems: "center", gap: 8, minHeight: touch ? 44 : 34, paddingHorizontal: 10, backgroundColor: (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
-          <View style={{ width: 14 }}>{running ? <Spinner color={c.foregroundMuted} size={12} label="Re-ranking" /> : <Icon name="RefreshCw" size={13} color={c.foreground} />}</View>
-          <Text style={{ color: running ? c.foregroundMuted : c.foreground, fontSize: 13 }}>{running ? "Re-ranking…" : "Re-rank now"}</Text>
+          <View style={{ width: 14 }}>{running ? <Spinner color={c.foregroundMuted} size={12} label="Ranking" /> : <Icon name="RefreshCw" size={13} color={c.foreground} />}</View>
+          <Text style={{ color: running ? c.foregroundMuted : c.foreground, fontSize: 13 }}>{running ? "Ranking…" : "Re-rank now"}</Text>
         </Pressable>}
         <Text style={{ color: c.foregroundMuted, fontSize: 11, paddingHorizontal: 10, paddingTop: 4, paddingBottom: 4 }}>Priority: {note}</Text>
       </View>
