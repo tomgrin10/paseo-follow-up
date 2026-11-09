@@ -59,6 +59,8 @@ import { readTranscript } from "./server/transcript";
 import { AgentSettingsStore, ProviderCatalog, type CatalogSource } from "./server/agent-settings";
 import { labelsFor, providerName, resolveRole, roleSummary, type AgentSettingsView } from "./shared/agent-settings";
 import type { LoadSignals } from "./shared/agent-load";
+import { OnboardingStore, ReadinessChecks, nativeAgentCount } from "./server/onboarding";
+import { execFile } from "node:child_process";
 import { BRIEF_KIND, BRIEF_VERSION, prState, validateNeedsYou, type Brief, type NeedsYouRecord } from "./shared/brief";
 
 export default function contribute(server: PluginServerContext) {
@@ -84,6 +86,7 @@ export default function contribute(server: PluginServerContext) {
   const handlers = new Map<string, { input: { parseAsync(value: unknown): Promise<unknown> }; run: (input: any, context: PluginHandlerContext) => unknown }>();
   const handle: PluginServerContext["handle"] = (contract, handler) => { handlers.set(contract.name, { input: contract.input, run: handler as never }); server.handle(contract, handler); };
   const store = new Store(directory, 1_000);
+  const onboarding = new OnboardingStore(directory);
   store.onChanged = scopeWriter(directory);
   const agentHooks = new AgentHooks(directory, clientEntry());
   const historyCache = HistoryCache.at(directory);
@@ -219,6 +222,8 @@ export default function contribute(server: PluginServerContext) {
     await copyFile(join(directory, "state.json"), join(directory, "state.before-active-scope.json.bak"), 1).catch(error => { if (!["ENOENT", "EEXIST"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error; });
   };
   const ready = (async () => {
+    // Getting started: fresh or existing is decided from what's on disk before anything below writes state.
+    await onboarding.init().catch(() => undefined);
     unlock = await store.lock();
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await writeFile(bridge, mcpSource, { mode: 0o600 });
@@ -778,6 +783,25 @@ export default function contribute(server: PluginServerContext) {
     if (approved) console.warn(`[follow-up] trust bypass approved ${approved} prompt(s) already pending at load`);
   }).catch(() => undefined);
   handle(rpc.trustBypassRpc, async () => trust.recent(20));
+  handle(rpc.onboardingRpc, async () => { await requireReady(); return onboarding.view(); });
+  handle(rpc.setOnboardingRpc, async ({ action, step }) => { await requireReady(); return onboarding.act(action, step ?? null); });
+  // Readiness checks for the setup flow: gh, the helper providers and whether tools attach. On demand only, cached.
+  const readiness = new ReadinessChecks({
+    gh: () => new Promise((resolve, reject) => execFile("gh", ["api", "user", "--jq", ".login"], { timeout: 10_000 }, (error, stdout, stderr) => error ? reject(Object.assign(error, { stderr })) : resolve(stdout))),
+    catalog: () => providerCatalog.read(),
+    use: async () => {
+      const on = await inboxSettings();
+      const roles = await agentSettings.all();
+      const use: Record<string, string[]> = {};
+      const add = (provider: string, name: string) => { (use[provider] ??= []).push(name); };
+      if (on.enable_overseer !== false) add(roles.overseer.provider, "the Overseer");
+      add(roles.about.provider, "What's this about?");
+      if (on.enable_ranker !== false) add(roles.ranker.provider, "AI priority");
+      return use;
+    },
+    tools: async () => ({ config: await paseoConfig(), nativeAgents: await nativeAgentCount(directory), hookError }),
+  });
+  handle(rpc.onboardingChecksRpc, async ({ fresh }, { paseo }) => { await requireReady(); seen(paseo); return readiness.run(!!fresh); });
 
   const removers = [
     server.on("agent.permission_requested", async (event, { paseo }) => { trustApi = paseo; await trust.handle(event.agent, event.request as never).catch(() => undefined); }),
