@@ -9,12 +9,27 @@ export function pressure(text: string | null, kind: "some" | "full" = "some"): n
   const m = text?.match(new RegExp(`^${kind} .*?avg60=([\\d.]+)`, "m"));
   return m ? Number(m[1]) : null;
 }
+/** One field of memory.stat, in bytes; null when absent. */
+export function statField(text: string | null, field: string): number | null {
+  const m = text?.match(new RegExp(`^${field} (\\d+)$`, "m"));
+  return m ? Number(m[1]) : null;
+}
+/**
+ * The working set: memory.current minus reclaimable cache (inactive_file and slab_reclaimable), the kubelet's
+ * measure. A disk scan can charge tens of GB of page cache to the cgroup without any real pressure, so
+ * memory.current alone reads as over the limit when nothing is wrong. Falls back to memory.current without memory.stat.
+ */
+export function workingSet(current: number | null, stat: string | null): number | null {
+  if (current === null) return null;
+  const reclaimable = (statField(stat, "inactive_file") ?? 0) + (statField(stat, "slab_reclaimable") ?? 0);
+  return Math.max(0, current - reclaimable);
+}
 const number = (text: string | null): number | null => { const v = text?.trim(); if (!v || v === "max") return null; const n = Number(v); return Number.isFinite(n) && n > 0 ? n : null; };
 
 /**
  * Watches the VM so Follow-up backs off before Paseo runs out of memory (2026-11-09: systemd-oomd killed
- * paseo.service at 28.5 GB against MemoryHigh=28G). Reads the cgroup Paseo runs in (memory.current, memory.high,
- * memory.pressure) and the host's CPU (/proc/stat for the meter, /proc/pressure/cpu for sustained pressure).
+ * paseo.service at 28.5 GB against MemoryHigh=28G). Reads the cgroup Paseo runs in (its working set from
+ * memory.current and memory.stat, memory.high, memory.pressure) and the host's CPU (/proc/stat for the meter, /proc/pressure/cpu for sustained pressure).
  * Every source is optional: unreadable means unknown, never "over budget".
  *
  * Levels: "constrained" at 75% of memory.high or under sustained pressure pauses background scans, auto-sends and
@@ -41,14 +56,15 @@ export class Governor {
   }
   async sample(): Promise<Resources> {
     const group = await this.group();
-    const [current, high, memPressure, stat, cpuPressure] = await Promise.all([
+    const [current, memStat, high, memPressure, stat, cpuPressure] = await Promise.all([
       group ? this.read(join(group, "memory.current")).catch(() => null) : null,
+      group ? this.read(join(group, "memory.stat")).catch(() => null) : null,
       group ? this.read(join(group, "memory.high")).catch(() => null) : null,
       group ? this.read(join(group, "memory.pressure")).catch(() => null) : null,
       this.read("/proc/stat").catch(() => null),
       this.read("/proc/pressure/cpu").catch(() => null),
     ]);
-    const memoryBytes = number(current), memoryHighBytes = number(high);
+    const memoryBytes = workingSet(number(current), memStat), memoryHighBytes = number(high);
     const memoryPct = memoryBytes && memoryHighBytes ? Math.round(memoryBytes / memoryHighBytes * 100) : null;
     let cpuPct: number | null = null;
     const fields = stat?.match(/^cpu\s+(.+)$/m)?.[1].trim().split(/\s+/).map(Number);
