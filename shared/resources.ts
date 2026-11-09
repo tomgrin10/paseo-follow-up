@@ -23,15 +23,46 @@ export function governorLevel(r: Pick<Resources, "memoryPct" | "memoryPressure" 
   return "ok";
 }
 
-/** The meter's tone for one value: amber from the constrained threshold, red from the critical one. */
-export function resourceTone(kind: "memory" | "cpu", pct: number | null, level: ResourceLevel): "ok" | "warning" | "danger" {
-  if (pct === null) return "ok";
-  if (kind === "memory") return pct >= MEMORY_CRITICAL ? "danger" : pct >= MEMORY_CONSTRAINED ? "warning" : "ok";
-  return pct >= 95 ? "danger" : pct >= 75 ? "warning" : "ok";
+/** Readings older than three Home usage polls (60 s each) are shown as old. */
+export const RESOURCES_STALE_MS = 3 * 60_000;
+const gb = (bytes: number) => (bytes / 1024 ** 3).toFixed(bytes < 10 * 1024 ** 3 ? 1 : 0);
+
+/** "Paseo memory 72% · CPU 40%", leaving out what's unreadable; null when nothing is. Memory is Paseo's cgroup against its memory.high; CPU is host-wide. */
+export function resourceText(r: Pick<Resources, "memoryPct" | "cpuPct">): string | null {
+  const parts = [r.memoryPct !== null ? `Paseo memory ${r.memoryPct}%` : null, r.cpuPct !== null ? `CPU ${r.cpuPct}%` : null].filter(Boolean);
+  return parts.length ? parts.join(" · ") : null;
 }
 
-/** "VM memory 72% · CPU 40%", leaving out what's unreadable; null when nothing is. */
-export function resourceText(r: Pick<Resources, "memoryPct" | "cpuPct">): string | null {
-  const parts = [r.memoryPct !== null ? `VM memory ${r.memoryPct}%` : null, r.cpuPct !== null ? `CPU ${r.cpuPct}%` : null].filter(Boolean);
-  return parts.length ? parts.join(" · ") : null;
+export type ResourceMeter = {
+  /** Visible line: "Paseo memory 72% · CPU 40%" plus "· as of 14:02" when old. */
+  text: string;
+  /** "· paused" when the governor is holding work back, else null. Shown in the tone colour. */
+  suffix: string | null;
+  /** Full sentence for screen readers, with bytes and a severity word. */
+  label: string;
+  /** Follows the governor level, so the colour and "paused" always agree. */
+  tone: "ok" | "warning" | "danger";
+  /** Bar fill: the value that is driving the level (CPU only when CPU pressure alone is). */
+  pct: number;
+  stale: boolean;
+};
+
+/** Everything the Home meter shows, or null when nothing is readable. */
+export function resourceMeter(r: Resources, now: number, clock: (ms: number) => string = ms => new Date(ms).toTimeString().slice(0, 5)): ResourceMeter | null {
+  const base = resourceText(r);
+  if (!base) return null;
+  const tone = r.level === "critical" ? "danger" : r.level === "constrained" ? "warning" : "ok";
+  const memoryDriven = (r.memoryPct ?? 0) >= MEMORY_CONSTRAINED || (r.memoryPressure ?? 0) >= MEMORY_PRESSURE_CONSTRAINED;
+  const cpuDriven = !memoryDriven && (r.cpuPressure ?? 0) >= CPU_PRESSURE_CONSTRAINED;
+  const pct = (cpuDriven ? r.cpuPct ?? r.memoryPct : r.memoryPct ?? r.cpuPct) ?? 0;
+  const at = r.at ? Date.parse(r.at) : NaN;
+  const stale = Number.isFinite(at) && now - at > RESOURCES_STALE_MS;
+  const text = stale ? `${base} · as of ${clock(at)}` : base;
+  const paused = r.level === "critical" ? "Follow-up paused background work and extras" : r.level === "constrained" ? "Follow-up paused background work" : null;
+  const memory = r.memoryPct === null ? null : r.memoryBytes && r.memoryHighBytes ? `Paseo memory ${gb(r.memoryBytes)} of ${gb(r.memoryHighBytes)} GB` : `Paseo memory ${r.memoryPct}%`;
+  const label = [
+    [memory, r.cpuPct !== null ? `CPU ${r.cpuPct}%` : null].filter(Boolean).join(", ") + (tone === "danger" ? ", critical" : tone === "warning" ? ", high" : ""),
+    paused, stale ? `Last read at ${clock(at)}` : null,
+  ].filter(Boolean).join(". ");
+  return { text, suffix: paused ? "· paused" : null, label, tone, pct, stale };
 }

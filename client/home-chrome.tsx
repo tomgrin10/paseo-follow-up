@@ -6,7 +6,7 @@ import { FIELD_LABEL, excerpt, highlightRuns, homeSearchDocs, indexDocs, omnibox
 import { SORT_HINT, SORT_LABEL, SORT_MODES, type SortMode } from "../shared/sort";
 import { priorityNote, PRIORITY_SOURCE_LABEL } from "../shared/priorities";
 import { meters, meterText, type Meter } from "../shared/usage";
-import { resourceText, resourceTone, type Resources } from "../shared/resources";
+import { resourceMeter, type Resources } from "../shared/resources";
 import type { HomeSources } from "./home-data";
 import type { Workstream } from "../shared/home";
 import { Age, PrChipView } from "./home-list";
@@ -172,12 +172,12 @@ export function UsageMeters({ theme, sources, dense }: { theme: Theme; sources: 
   const now = useMinute();
   const list = useMemo(() => meters(usage, Math.max(now, Date.now())), [usage, now]);
   const [open, setOpen] = useState<string | null>(null);
-  const vm = usage.resources && resourceText(usage.resources) ? usage.resources : null;
+  const vm = usage.resources && resourceMeter(usage.resources, now) ? usage.resources : null;
   if (!list.length && !vm) return null;
   const detail = list.find(m => m.family === open);
   return <View style={{ paddingHorizontal: dense ? 8 : 16, gap: 4 }}>
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 12, rowGap: 2 }}>
-      {vm && <VmMeter r={vm} c={c} />}
+      {vm && <VmMeter r={vm} c={c} now={Math.max(now, Date.now())} />}
       {list.map(m => <Pressable key={m.family} accessibilityRole="button" accessibilityLabel={`${meterText(m, now)}. ${m.accounts.length > 1 ? `${m.accounts.length} accounts; ` : ""}show detail`}
         aria-expanded={open === m.family} onPress={() => setOpen(o => o === m.family ? null : m.family)}
         style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 22 }}>
@@ -195,19 +195,17 @@ export function UsageMeters({ theme, sources, dense }: { theme: Theme; sources: 
   </View>;
 }
 /**
- * "VM memory 72% · CPU 40%", the resource governor's view. Amber from 75% of Paseo's memory limit, red from 85%;
- * the caption says when Follow-up has paused its own background work because of it.
+ * "Paseo memory 72% · CPU 40%", the resource governor's view. Text stays muted like the provider meters; the bar
+ * and the "· paused" suffix take amber or red when Follow-up has held back its own work. Old readings dim.
  */
-function VmMeter({ r, c }: { r: Resources; c: Colors }) {
-  const memory = resourceTone("memory", r.memoryPct, r.level), cpu = resourceTone("cpu", r.cpuPct, r.level);
-  const worst = memory === "danger" || cpu === "danger" ? "danger" : memory === "warning" || cpu === "warning" ? "warning" : "ok";
-  const color = toneColor({ tone: worst }, c);
-  const paused = r.level === "critical" ? "Follow-up paused background work and extras" : r.level === "constrained" ? "Follow-up paused background work" : null;
-  const text = resourceText(r)!;
-  return <View accessibilityRole="text" accessibilityLabel={`${text}${paused ? `. ${paused}` : ""}`} style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 22 }}>
-    <Bar pct={r.memoryPct ?? r.cpuPct ?? 0} color={color} c={c} />
-    <Text numberOfLines={1} style={{ color: worst === "ok" ? c.foregroundMuted : color, fontSize: 11, fontVariant: ["tabular-nums"] }}>
-      {text}{paused ? ` · ${paused.replace("Follow-up paused", "paused")}` : ""}
+function VmMeter({ r, c, now }: { r: Resources; c: Colors; now: number }) {
+  const m = resourceMeter(r, now);
+  if (!m) return null;
+  const color = toneColor(m, c);
+  return <View accessibilityRole="text" accessibilityLabel={m.label} style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 22, opacity: m.stale ? 0.6 : 1 }}>
+    <Bar pct={m.pct} color={color} c={c} />
+    <Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 11, fontVariant: ["tabular-nums"] }}>
+      {m.text}{m.suffix ? <Text style={{ color: m.tone === "ok" ? c.foregroundMuted : color, fontWeight: "500" }}>{` ${m.suffix}`}</Text> : null}
     </Text>
   </View>;
 }

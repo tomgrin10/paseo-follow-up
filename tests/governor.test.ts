@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Governor, pressure } from "../server/governor";
-import { governorLevel, resourceText, resourceTone } from "../shared/resources";
+import { governorLevel, resourceMeter, resourceText, type Resources } from "../shared/resources";
 import { Engine } from "../server/engine";
 import { Store } from "../server/store";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -42,8 +42,30 @@ test("sustained pressure counts as constrained; unreadable sources are unknown, 
   assert.deepEqual([r.memoryPct, r.cpuPct, r.level], [null, null, "ok"]);
   assert.equal(pressure("garbage"), null);
   assert.equal(resourceText(r), null, "the meter hides when nothing is readable");
-  assert.equal(resourceText({ memoryPct: 72, cpuPct: 40 }), "VM memory 72% · CPU 40%");
-  assert.deepEqual([resourceTone("memory", 74, "ok"), resourceTone("memory", 75, "ok"), resourceTone("memory", 85, "ok")], ["ok", "warning", "danger"]);
+  assert.equal(resourceText({ memoryPct: 72, cpuPct: 40 }), "Paseo memory 72% · CPU 40%");
+});
+
+test("the meter's colour, fill and paused caption follow the governor level", () => {
+  const GB = 1024 ** 3, now = Date.parse("2026-11-09T14:00:00Z");
+  const r = (over: Partial<Resources>): Resources => ({ memoryPct: 40, memoryBytes: 11.2 * GB, memoryHighBytes: 28 * GB, cpuPct: 30, memoryPressure: 0, cpuPressure: 0, level: "ok", at: new Date(now).toISOString(), ...over });
+  const ok = resourceMeter(r({}), now)!;
+  assert.deepEqual([ok.tone, ok.suffix, ok.pct, ok.stale], ["ok", null, 40, false]);
+  assert.equal(ok.label, "Paseo memory 11 of 28 GB, CPU 30%");
+  // CPU at 96% alone doesn't pause anything, so no false alarm.
+  assert.equal(resourceMeter(r({ cpuPct: 96 }), now)!.tone, "ok");
+  // CPU pressure pauses work: the bar shows CPU, not a 40%-full red bar.
+  const cpu = resourceMeter(r({ cpuPct: 97, cpuPressure: 70, level: "constrained" }), now)!;
+  assert.deepEqual([cpu.tone, cpu.suffix, cpu.pct], ["warning", "· paused", 97]);
+  assert.match(cpu.label, /, high\. Follow-up paused background work$/);
+  // Memory pressure under 75% still warns, and the bar stays on memory.
+  const mem = resourceMeter(r({ memoryPressure: 20, level: "constrained" }), now)!;
+  assert.deepEqual([mem.tone, mem.pct], ["warning", 40]);
+  const crit = resourceMeter(r({ memoryPct: 88, memoryBytes: 24.6 * GB, level: "critical" }), now)!;
+  assert.deepEqual([crit.tone, crit.suffix, crit.text], ["danger", "· paused", "Paseo memory 88% · CPU 30%"]);
+  assert.match(crit.label, /^Paseo memory 25 of 28 GB, CPU 30%, critical\. Follow-up paused background work and extras$/);
+  const old = resourceMeter(r({ at: new Date(now - 5 * 60_000).toISOString() }), now, () => "13:55")!;
+  assert.deepEqual([old.stale, old.text], [true, "Paseo memory 40% · CPU 30% · as of 13:55"]);
+  assert.match(old.label, /Last read at 13:55$/);
 });
 
 test("a paused engine skips background refresh entirely", async t => {
