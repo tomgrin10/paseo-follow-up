@@ -37,6 +37,8 @@ export const onboardingFileSchema = z.object({
   /** When the existing-install offer was first shown; it disappears a day later. */
   offeredAt: z.string().nullable().default(null),
   offerDismissed: z.boolean().default(false),
+  /** When a fresh install first finished or skipped setup. Auto-send is held until then; a later restart doesn't hold it again. */
+  settledAt: z.string().nullable().default(null),
 });
 export type OnboardingFile = z.infer<typeof onboardingFileSchema>;
 
@@ -47,6 +49,8 @@ export const onboardingViewSchema = z.object({
   step: z.enum(ONBOARDING_STEPS),
   show: z.boolean(),
   offer: z.boolean(),
+  /** Auto-send waits until setup is finished or skipped (fresh install only). */
+  holdsAutoSends: z.boolean().default(false),
 });
 export type OnboardingView = z.infer<typeof onboardingViewSchema>;
 
@@ -59,7 +63,15 @@ export function classifyInstall(present: readonly string[]): InstallKind {
 }
 
 export function initialOnboarding(install: InstallKind, now: Date): OnboardingFile {
-  return { version: 1, install, status: install === "fresh" ? "new" : "idle", step: null, createdAt: now.toISOString(), updatedAt: null, offeredAt: null, offerDismissed: false };
+  return { version: 1, install, status: install === "fresh" ? "new" : "idle", step: null, createdAt: now.toISOString(), updatedAt: null, offeredAt: null, offerDismissed: false, settledAt: null };
+}
+
+/**
+ * Auto-send waits on a fresh install until setup is finished or skipped, so nothing goes to an agent before the
+ * developer has seen the switch. Existing installs, and a fresh one that already settled, keep sending as before.
+ */
+export function holdsAutoSends(file: OnboardingFile | null): boolean {
+  return !!file && file.install === "fresh" && !file.settledAt && (file.status === "new" || file.status === "active");
 }
 
 export const OFFER_MS = 24 * 3600_000;
@@ -71,7 +83,7 @@ export function offerVisible(file: OnboardingFile, now: number): boolean {
 }
 
 export function onboardingView(file: OnboardingFile, now: number): OnboardingView {
-  return { install: file.install, status: file.status, step: file.step ?? "intro", show: file.status === "new" || file.status === "active", offer: offerVisible(file, now) };
+  return { install: file.install, status: file.status, step: file.step ?? "intro", show: file.status === "new" || file.status === "active", offer: offerVisible(file, now), holdsAutoSends: holdsAutoSends(file) };
 }
 
 export const ONBOARDING_ACTIONS = ["start", "step", "finish", "skip", "restart", "dismiss-offer"] as const;
@@ -84,8 +96,8 @@ export function applyOnboarding(file: OnboardingFile, action: OnboardingAction, 
   switch (action) {
     case "start": return { ...next, status: "active", step: file.status === "active" ? file.step ?? "intro" : "intro" };
     case "step": return { ...next, status: file.status === "new" || file.status === "idle" ? "active" : file.status, step: step ?? file.step };
-    case "finish": return { ...next, status: "done" };
-    case "skip": return { ...next, status: "skipped", offerDismissed: true };
+    case "finish": return { ...next, status: "done", settledAt: file.settledAt ?? at };
+    case "skip": return { ...next, status: "skipped", offerDismissed: true, settledAt: file.settledAt ?? at };
     // "Set up Follow-up again" from Settings or ⌘K: always from the start, any install kind.
     case "restart": return { ...next, status: "active", step: "intro", offerDismissed: true };
     case "dismiss-offer": return { ...next, offerDismissed: true };
