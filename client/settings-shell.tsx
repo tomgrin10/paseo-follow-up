@@ -12,7 +12,7 @@ import { text, type Theme } from "./kit";
 export function Disclosure({ id, title, summary, count, defaultOpen, theme, compact, children, framed = true }: {
   id: string; title: string; summary?: string | null; count?: string | number | null; defaultOpen: boolean; theme: Theme; compact: boolean; children: ReactNode; framed?: boolean;
 }) {
-  const c = theme.colors; const t = text(c);
+  const c = theme.colors; const t = text(c, compact);
   const [open, setOpen] = useState(() => readOpen(id, defaultOpen));
   const toggle = () => { const next = !open; writeOpen(id, next); setOpen(next); };
   const header = <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} aria-expanded={open}
@@ -51,7 +51,7 @@ export function CategoryTabs({ value, onChange, theme }: { value: SettingsCatego
 
 /** Phone: the category list. Each row's line comes from data already loaded, else a fixed description; it fetches nothing. */
 export function CategoryList({ onOpen, summaries, theme }: { onOpen: (id: SettingsCategory) => void; summaries: Partial<Record<SettingsCategory, string | null>>; theme: Theme }) {
-  const c = theme.colors; const t = text(c);
+  const c = theme.colors; const t = text(c, true);
   return <View style={{ borderRadius: 10, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1, overflow: "hidden" }}>
     {SETTINGS_CATEGORIES.map((cat, i) => <Pressable key={cat.id} accessibilityRole="button" accessibilityLabel={cat.title} accessibilityHint={summaries[cat.id] ?? cat.blurb} onPress={() => onOpen(cat.id)}
       style={state => ({ flexDirection: "row", alignItems: "center", gap: 12, minHeight: 56, paddingHorizontal: 16, paddingVertical: 8, borderTopWidth: i ? 1 : 0, borderTopColor: c.border, backgroundColor: state.pressed ? c.surface2 : "transparent" })}>
@@ -72,6 +72,6 @@ export function BackHeader({ title, onBack, theme }: { title: string; onBack: ()
   return <Pressable accessibilityRole="button" accessibilityLabel={`Back to settings from ${title}`} onPress={onBack}
     style={state => ({ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 48, marginHorizontal: -8, paddingHorizontal: 8, borderRadius: 8, backgroundColor: state.pressed ? c.surface2 : "transparent" })}>
     <Icon name="ChevronLeft" size={18} color={c.foregroundMuted} />
-    <Text accessibilityRole="header" style={{ color: c.foreground, fontSize: 17, lineHeight: 23, fontWeight: "600" }}>{title}</Text>
+    <Text accessibilityRole="header" style={text(c, true).title}>{title}</Text>
   </Pressable>;
 }
