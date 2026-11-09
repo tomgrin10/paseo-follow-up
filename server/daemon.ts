@@ -1,3 +1,4 @@
+import { isOverseerAgent } from "../shared/overseer";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -184,6 +185,8 @@ export class PaseoGateway implements Gateway {
       for (const workspace of workspaces.filter(w => !w.archivingAt && (workspaceId ? w.id === workspaceId : (defaults.has(w.projectId ?? "") && !optedOut(state, w.id)) || state.workspaces.some(saved => saved.id === w.id && saved.enable_tracking && !saved.archived)))) {
         const existing = state.workspaces.find(w => w.id === workspace.id);
         if (existing?.archived) continue;
+        // The Overseer's own workspace is Follow-up's, never tracked or repaired (1.4.0-beta.0).
+        if (agents.some(({ agent }) => agent.workspaceId === workspace.id && isOverseerAgent(agent.labels))) continue;
         const candidates = agents.map(row => row.agent).filter(a => a.workspaceId === workspace.id && !a.archivedAt && !a.labels["follow-through.recovery"]);
         const roots: Agent[] = [];
         for (const agent of candidates) if (await isWorkspaceRoot(agent, findParent)) roots.push(agent);

@@ -14,7 +14,9 @@ export const displayPreferences = defineSettings({
     // D6: a merged or closed PR flags its agent at the lowest priority.
     enable_inbox_pr_closed: z.boolean().default(true),
     // R2: Claude Code root agents that end a turn without needs_you are asked once to state what you need.
-    enable_brief_nudge: z.boolean().default(true) }),
+    enable_brief_nudge: z.boolean().default(true),
+    // 1.4.0-beta.0: the Overseer row on Home and its per-turn digest. Off never archives an existing Overseer.
+    enable_overseer: z.boolean().default(true) }),
 });
 
 export const displayRpc = settingsRpc(displayPreferences.id);

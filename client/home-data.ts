@@ -75,8 +75,9 @@ export function useHomeModel(sources: HomeSources): HomeModel {
   // Only the sort and priorities rebuild the model; agent titles and usage don't touch it.
   const sort = useSyncExternalStore(extras.subscribe, extras.sort, extras.sort);
   const priorities = useSyncExternalStore(extras.subscribe, extras.priorities, extras.priorities);
+  const overseer = useSyncExternalStore(extras.subscribe, () => extras.overseer()?.workspaceId ?? null, () => null);
   const now = useMinute();
-  return useMemo(() => buildHome({ rows: inbox.rows(), tracked: live.all(), paseo: paseo.all(), now: Date.now(), sort, priorities }), [a, b, c, now, sort, priorities, inbox, live, paseo]);
+  return useMemo(() => buildHome({ rows: inbox.rows(), tracked: live.all(), paseo: paseo.all(), now: Date.now(), sort, priorities, hidden: overseer ? [overseer] : [] }), [a, b, c, now, sort, priorities, inbox, live, paseo, overseer]);
 }
 
 /** Rebuilds a value at most every `ms` while mounted (used for the brief pane's source ages). */
