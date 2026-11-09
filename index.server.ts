@@ -35,6 +35,7 @@ import { onBeforeSend } from "./server/daemon";
 import { copyFile, readFile, rename } from "node:fs/promises";
 import { HistoryCache } from "./server/history-cache";
 import { Governor } from "./server/governor";
+import { ListCache } from "./server/list-cache";
 import { NO_USAGE } from "./shared/usage";
 import { conversationGone, DEFAULT_ACTIVE_WINDOW_DAYS } from "./server/agent-load";
 import { ACTIVE_SCOPE_MIGRATION, autoSendsByDefault, FOLLOW_EVERY_MIGRATION, followsByDefault, followsEvery, migrateFollowEvery, optedOut } from "./shared/settings";
@@ -56,6 +57,7 @@ export default function contribute(server: PluginServerContext) {
   const actions = new PrActions(store, github, graphite, browser);
   const engine = new Engine(store, github, gateway);
   const governor = new Governor();
+  const listCache = new ListCache();
   engine.paused = () => !governor.allowsBackground();
   const usage = new UsageReader(paseoHome);
   // Unknown is not off: an unreadable document keeps the inbox on with its defaults.
@@ -263,7 +265,7 @@ export default function contribute(server: PluginServerContext) {
     const view = browserWorkspaces(entries);
     return { tracked: true, ...view, workspaces: view.workspaces.map(w => ({ ...w, title: w.title.slice(0, 200), agentStatus: w.agentStatus.slice(0, 40), state: w.state.slice(0, 200) })) };
   });
-  server.handle(rpc.listRpc, async () => { await ready; return { workspaces: (await store.snapshot()).workspaces.filter(w => w.enable_tracking), error: loadError ?? hookError ?? engine.error }; });
+  server.handle(rpc.listRpc, async ({ since }) => { await ready; return { ...listCache.answer(await store.snapshot(), since), error: loadError ?? hookError ?? engine.error }; });
   server.handle(rpc.getRpc, async ({ workspaceId }) => { await ready; return { workspace: (await store.snapshot()).workspaces.find(w => w.id === workspaceId && w.enable_tracking) ?? null, error: loadError ?? hookError ?? engine.error }; });
   server.handle(rpc.syncWorkspaceRpc, async ({ agentId, summary }, { paseo }) => {
     await requireReady();

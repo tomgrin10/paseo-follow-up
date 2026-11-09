@@ -18,7 +18,11 @@ const agentCommunicationSchema = z.strictObject({
   purpose: communicationSchema.shape.purpose.unwrap().optional(), authorization: communicationSchema.shape.authorization.unwrap().optional(), replyUrl: communicationSchema.shape.replyUrl.unwrap().optional(),
 });
 
-export const listRpc = defineRpc({ name: "follow.list", input: z.object({}), output: z.object({ workspaces: z.array(workspaceSchema), error: z.string().nullable() }) });
+/**
+ * Tracked workspaces. 1.3.0-beta.4: pass the `revision` you hold as `since` to get only what changed (`full` false,
+ * plus `removed` ids). Without it, or when it's too old, the answer is the full list.
+ */
+export const listRpc = defineRpc({ name: "follow.list", input: z.object({ since: z.number().optional() }), output: z.object({ workspaces: z.array(workspaceSchema), error: z.string().nullable(), revision: z.number().optional(), full: z.boolean().optional(), removed: z.array(z.string()).optional() }) });
 export const getRpc = defineRpc({ name: "follow.get", input: z.object({ workspaceId: idSchema }), output: z.object({ workspace: workspaceSchema.nullable(), error: z.string().nullable() }) });
 export const agentStatusRpc = defineRpc({ name: "follow.agent-status", input: z.strictObject({ agentId: idSchema, detail: z.enum(["summary", "full"]).optional() }), output: workspaceSchema });
 export const syncWorkspaceRpc = defineRpc({ name: "follow.sync", input: z.strictObject({ agentId: idSchema, summary: z.string().trim().min(1).max(1000) }), output: z.object({ workspaceId: idSchema, synced: z.literal(true) }) });
