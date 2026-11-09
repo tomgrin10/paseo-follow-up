@@ -20,6 +20,7 @@ import { createServer } from "node:net";
 import { openSync } from "node:fs";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
+import { startCounter, ratePerMinute } from "./daemon-counter.mjs";
 
 const exec = promisify(execFile);
 // The check drives a real Paseo daemon, so it needs the paseo CLI (CI installs @getpaseo/cli). Without it, local
@@ -33,14 +34,16 @@ const arg = (name, fallback) => { const i = process.argv.indexOf(`--${name}`); r
 const N = Number(arg("workspaces", "120")); const AWAKE = Number(arg("awake", "5")); const POLLS = 3; const POLL_MS = 15_000;
 /** Seeds each workspace with this many never-sent cancelled batches, like the VM's 1.3.0-beta.2 state. */
 const CHURN = Number(arg("churn", "0")); const IDLE_MS = Number(arg("idle", "30")) * 1000;
-const budget = { rssMb: Number(arg("rss-budget", "0")), cpuPct: Number(arg("cpu-budget", "0")) };
+const budget = { rssMb: Number(arg("rss-budget", "0")), cpuPct: Number(arg("cpu-budget", "0")), requestsPerMin: Number(arg("request-budget", "0")) };
 const root = await mkdtemp(join(tmpdir(), "follow-scale-"));
 const home = join(root, "home"); const fixture = join(root, "fixture"); let plugin = arg("plugin", null);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const free = async () => { const s = createServer(); await new Promise(r => s.listen(0, "127.0.0.1", r)); const p = s.address().port; await new Promise(r => s.close(r)); return p; };
 const port = await free(); const url = `ws://127.0.0.1:${port}/ws`;
+// Every client but this script reaches the daemon through a counting proxy, so the worker's request rate is measured.
+const counter = await startCounter(port); const counted = `ws://127.0.0.1:${counter.port}/ws`;
 const heapDir = arg("heap-snapshot", null);
-const env = { ...process.env, ...(heapDir ? { NODE_OPTIONS: `--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=${heapDir}` } : {}), HOME: home, XDG_CONFIG_HOME: join(home, ".config"), PASEO_HOME: home, PASEO_DAEMON_URL: url, PASEO_RELAY_ENABLED: "false" };
+const env = { ...process.env, ...(heapDir ? { NODE_OPTIONS: `--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=${heapDir}` } : {}), HOME: home, XDG_CONFIG_HOME: join(home, ".config"), PASEO_HOME: home, PASEO_DAEMON_URL: counted, PASEO_RELAY_ENABLED: "false" };
 for (const key of ["PASEO_PASSWORD", "PASEO_PASSWORD_FILE", "PASEO_AGENT_ID", "PASEO_WORKSPACE_ID", "CLAUDE_CONFIG_DIR", "CODEX_HOME"]) delete env[key];
 const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env, timeout: 120_000, maxBuffer: 8 << 20 })).stdout);
 let daemon = null; let client = null;
@@ -105,9 +108,10 @@ try {
     const { stdout } = await exec("getconf", ["CLK_TCK"]); const hz = Number(stdout.trim()) || 100;
     const { statSync } = await import("node:fs"); const statePath = join(home, "plugin-data/follow-through/state.json");
     let writes = 0; let mtime = statSync(statePath).mtimeMs;
-    const t0 = await ticks(); const started = Date.now();
+    const t0 = await ticks(); const started = Date.now(); const requestsBefore = counter.snapshot();
     let peak = await rss();
     while (Date.now() - started < IDLE_MS) { await sleep(500); peak = Math.max(peak, await rss()); const m = statSync(statePath).mtimeMs; if (m !== mtime) { writes++; mtime = m; } }
+    const requests = ratePerMinute(requestsBefore, counter.snapshot(), "follow-through-worker", Date.now() - started);
     const cpuPct = Math.round(((await ticks()) - t0) / hz / ((Date.now() - started) / 1000) * 1000) / 10;
     // The worker's own breakdown (heap vs native), from the governor's sample in follow.usage.
     const memory = async () => { try { return (await client.invokePluginRpc("follow-through", "follow.usage", {}))?.resources?.worker ?? null; } catch { return null; } };
@@ -121,7 +125,7 @@ try {
     const tree = new Set([daemon.pid]);
     for (let grew = true; grew;) { grew = false; for (const r of rows) if (!tree.has(r.pid) && tree.has(r.ppid)) { tree.add(r.pid); grew = true; } }
     const hostRss = rows.filter(r => tree.has(r.pid) && r.pid !== pid && /plugin-process/.test(r.args)).map(r => r.rssMb);
-    worker = { pid, memory: memoryIdle, memoryAfterGc, hostPluginBaselineMb: hostRss.length ? Math.min(...hostRss) : null, rssMb: Math.round(await rss()), idlePeakRssMb: Math.round(peak), lifetimePeakRssMb: Math.round(await rss("VmHWM")), cpuPct, idleSeconds: IDLE_MS / 1000, stateWrites: writes, stateBytesBefore, stateBytesAfter: statSync(statePath).size };
+    worker = { pid, memory: memoryIdle, memoryAfterGc, hostPluginBaselineMb: hostRss.length ? Math.min(...hostRss) : null, rssMb: Math.round(await rss()), idlePeakRssMb: Math.round(peak), lifetimePeakRssMb: Math.round(await rss("VmHWM")), cpuPct, idleSeconds: IDLE_MS / 1000, stateWrites: writes, stateBytesBefore, stateBytesAfter: statSync(statePath).size, daemonRequestsPerMin: requests };
   }
   const receipts = (await readFile(join(home, "fixture-receipts.jsonl"), "utf8").catch(() => "")).trim().split("\n").filter(l => /Follow-through (batch|recovery)/.test(l)).length;
   const state = JSON.parse(await readFile(join(home, "plugin-data/follow-through/state.json"), "utf8"));
@@ -129,9 +133,10 @@ try {
   console.log(process.argv.includes("--json") ? JSON.stringify(result) : result);
   if (after > before) { console.error(`Follow-up loaded ${after - before} dormant agents`); process.exitCode = 1; }
   if (budget.rssMb && worker && worker.idlePeakRssMb > budget.rssMb) { console.error(`Worker RSS peaked at ${worker.idlePeakRssMb} MB, over ${budget.rssMb} MB`); process.exitCode = 1; }
+  if (budget.requestsPerMin && worker && worker.daemonRequestsPerMin.total > budget.requestsPerMin) { console.error(`Worker sent ${worker.daemonRequestsPerMin.total} daemon requests/min while idle, over ${budget.requestsPerMin}: ${JSON.stringify(worker.daemonRequestsPerMin.byType)}`); process.exitCode = 1; }
   if (budget.cpuPct && worker && worker.cpuPct > budget.cpuPct) { console.error(`Worker CPU ${worker.cpuPct}% exceeds ${budget.cpuPct}% while idle`); process.exitCode = 1; }
 } finally {
-  await stop().catch(() => {});
+  await stop().catch(() => {}); await counter.close().catch(() => {});
   if (!process.argv.includes("--keep")) await rm(root, { recursive: true, force: true }).catch(() => {});
   else console.error(`kept ${root}`);
 }

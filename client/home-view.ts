@@ -5,6 +5,7 @@ import type { Priority } from "../shared/priorities";
 import { DEFAULT_SORT, isSortMode, type SortMode } from "../shared/sort";
 import type { AgentLite } from "../shared/search";
 import { NO_USAGE, USAGE_POLL_MS, type Usage } from "../shared/usage";
+import { onVisible, whileVisible } from "./visibility";
 
 /**
  * What Home adds on top of the inbox, live and Paseo stores (1.3.0-beta.2): the sort choice (per device), external
@@ -39,16 +40,27 @@ export function createHomeExtras(client: PluginClientContext) {
   const emitSoon = () => { if (pending) return; pending = setTimeout(() => { pending = null; emit(); }, 250); };
 
   const timers: ReturnType<typeof setTimeout>[] = [];
+  // Nothing polls while the app is hidden; each poll runs once when it comes back (1.4.0).
+  const runs: (() => Promise<void>)[] = [];
   const poll = (ms: number, work: () => Promise<boolean>) => {
-    const run = async () => { try { if (await work()) emit(); } catch { /* keep the last answer */ } if (!stopped) timers.push(setTimeout(() => void run(), ms)); };
+    let waiting = false;
+    const run = async () => {
+      waiting = false;
+      try { if (await work()) emit(); } catch { /* keep the last answer */ }
+      if (stopped) return;
+      const next = whileVisible(ms, () => void run());
+      if (next) timers.push(next); else waiting = true;
+    };
+    runs.push(async () => { if (waiting) await run(); });
     void run();
   };
+  const offVisible = onVisible(() => { for (const r of runs) void r(); });
   poll(PRIORITY_POLL_MS, async () => {
     const next = (await client.rpc(prioritiesRpc, {})).items;
     if (JSON.stringify(next) === JSON.stringify(priorities)) return false;
     priorities = next; return true;
   });
-  poll(10_000, async () => {
+  poll(15_000, async () => {
     const next = await client.rpc(overseerStatusRpc, {});
     if (JSON.stringify(next) === JSON.stringify(overseer)) return false;
     overseer = next; return true;
@@ -67,21 +79,32 @@ export function createHomeExtras(client: PluginClientContext) {
     if (prior && prior.title === next.title && prior.workspaceId === next.workspaceId) return;
     agents.set(a.id, next); emitSoon();
   };
+  // Push for the inbox and live stores (1.4.0): an agent's status, attention or permissions changing is when Needs you
+  // and the pills can change, so those stores re-read then instead of polling every few seconds.
+  const activity = new Set<() => void>();
+  const signatures = new Map<string, string>();
+  const noteActivity = (a: unknown) => {
+    const x = a as { id?: string; status?: string; requiresAttention?: boolean; attentionReason?: string | null; pendingPermissions?: unknown[]; archivedAt?: string | null } | undefined;
+    if (!x?.id) return;
+    const signature = [x.status, x.requiresAttention, x.attentionReason, x.pendingPermissions?.length ?? 0, x.archivedAt].join("|");
+    const prior = signatures.get(x.id); signatures.set(x.id, signature);
+    if (prior !== undefined && prior !== signature) for (const l of activity) l();
+  };
   const unsubscribe = client.paseo.agents.subscribe(update => {
     const u = update as { kind: string; agent?: AgentEntry["agent"]; agentId?: string };
-    if (u.kind === "remove") { if (u.agentId && agents.delete(u.agentId)) emitSoon(); }
-    else putAgent(u.agent);
+    if (u.kind === "remove") { if (u.agentId && agents.delete(u.agentId)) emitSoon(); if (u.agentId) signatures.delete(u.agentId); for (const l of activity) l(); }
+    else { putAgent(u.agent); noteActivity(u.agent); }
   });
   let release: (() => Promise<void>) | null = null;
   void (async () => {
     const page = await client.paseo.agents.list({ subscribe: {}, page: { limit: 200 } });
     if (stopped) { await page.subscription.release(); return; }
     release = () => page.subscription.release();
-    (page.entries as AgentEntry[]).forEach(e => putAgent(e.agent));
+    (page.entries as AgentEntry[]).forEach(e => { putAgent(e.agent); noteActivity(e.agent); });
     let cursor = page.pageInfo.nextCursor;
     for (let i = 0; cursor && !stopped && i < 20; i++) {
       const next = await client.paseo.agents.list({ page: { limit: 200, cursor } });
-      (next.entries as AgentEntry[]).forEach(e => putAgent(e.agent));
+      (next.entries as AgentEntry[]).forEach(e => { putAgent(e.agent); noteActivity(e.agent); });
       if (next.pageInfo.nextCursor === cursor) break;
       cursor = next.pageInfo.nextCursor;
     }
@@ -105,7 +128,9 @@ export function createHomeExtras(client: PluginClientContext) {
     /** Bumped by ⌘K "Follow-up: Search"; the visible search field focuses when it changes. */
     focusToken: () => focusToken,
     focusSearch() { focusToken++; emit(); },
-    async stop() { stopped = true; for (const t of timers) clearTimeout(t); if (pending) clearTimeout(pending); listeners.clear(); unsubscribe(); await release?.(); },
+    /** Calls `listener` when an agent's status, attention or permissions change (see above). */
+    onActivity(listener: () => void) { activity.add(listener); return () => { activity.delete(listener); }; },
+    async stop() { stopped = true; offVisible(); activity.clear(); for (const t of timers) clearTimeout(t); if (pending) clearTimeout(pending); listeners.clear(); unsubscribe(); await release?.(); },
   };
 }
 export type HomeExtras = ReturnType<typeof createHomeExtras>;

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { browserKey, BROWSER_POLL_MS } from "./keys";
 import { Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { usePaseo, useRpc, type PluginScreenProps } from "@getpaseo/plugin/client";
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
@@ -213,7 +214,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
   const tail = useTail(agent.handle, `${row?.seq ?? 0}:${agent.status ?? ""}`);
   const browserRead = useRpc(browserStatusRpc);
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" } | null>(null);
-  const browser = useQuery({ queryKey: ["follow-through", "browser"], queryFn: () => browserRead({}), refetchInterval: 5000, enabled: !!sheet });
+  const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), refetchInterval: BROWSER_POLL_MS, enabled: !!sheet });
   const [question, setQuestion] = useState<string | null>(null);
   const [laterOpen, setLaterOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);

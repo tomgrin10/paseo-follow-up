@@ -1,5 +1,6 @@
 import { join } from "node:path";
-import { pages, withDaemon, type Agent } from "./daemon";
+import { withDaemon, type Agent } from "./daemon";
+import { DaemonDirectory } from "./directory";
 import type { AgentInfo, Directory } from "./inbox";
 import { isLoaded } from "./agent-load";
 
@@ -12,29 +13,23 @@ const info = (a: Snapshot): AgentInfo => ({
   pendingPermissionIds: Array.isArray(a.pendingPermissions) ? a.pendingPermissions.flatMap(p => typeof (p as { id?: unknown })?.id === "string" ? [(p as { id: string }).id] : []) : null,
 });
 
-/** The daemon as the inbox sees it. One connection reads agents and workspaces together, cached briefly. */
-export function daemonDirectory(connect: typeof withDaemon = withDaemon): Directory {
-  let cached: { at: number; value: Promise<{ agents: AgentInfo[]; workspaces: { id: string; name: string }[] }> } | null = null;
-  const all = () => {
-    if (cached && Date.now() - cached.at < 2_000) return cached.value;
-    const value = connect(async client => {
-      const [agents, workspaces] = await Promise.all([
-        pages(cursor => client.fetchAgents({ page: { limit: 100, ...(cursor ? { cursor } : {}) } })),
-        pages(cursor => client.fetchWorkspaces({ page: { limit: 100, ...(cursor ? { cursor } : {}) } })),
-      ]);
-      return { agents: agents.map(row => info(row.agent as Snapshot)), workspaces: workspaces.filter(w => !w.archivingAt).map(w => ({ id: w.id, name: w.name })) };
-    });
-    cached = { at: Date.now(), value };
-    value.catch(() => { if (cached?.value === value) cached = null; });
-    return value;
+/**
+ * The daemon as the inbox sees it: the shared directory (see DaemonDirectory), so Home, the panel and the inbox
+ * loop never list agents or workspaces on their own.
+ */
+export function daemonDirectory(shared: DaemonDirectory = new DaemonDirectory(), connect: typeof withDaemon = withDaemon): Directory {
+  const all = async () => {
+    const rows = await shared.read();
+    return { agents: rows.agents.map(row => info(row.agent as Snapshot)), workspaces: rows.workspaces.filter(w => !w.archivingAt).map(w => ({ id: w.id, name: w.name })) };
   };
   return {
     agents: async () => (await all()).agents,
     workspaces: async () => (await all()).workspaces,
     async agent(id) {
-      const known = cached ? (await cached.value.catch(() => null))?.agents.find(a => a.id === id) : undefined;
-      if (known) return known;
-      return connect(async client => { const row = await client.fetchAgent(id); return row ? info(row.agent as Snapshot) : null; });
+      await shared.read().catch(() => null);
+      const known = shared.cached(id);
+      if (known) return info(known as Snapshot);
+      return connect(async client => { const agent = await shared.live(client, id); return agent ? info(agent as Snapshot) : null; });
     },
     async tail(id, limit) {
       return connect(async client => {

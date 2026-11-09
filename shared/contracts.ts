@@ -109,7 +109,11 @@ export const workspaceSpecRpc = defineRpc({ name: "follow.workspace-spec", input
 ]), output: workspaceSchema });
 
 // Needs-you inbox. Names stay under follow. like the rest of the plugin.
-export const inboxListRpc = defineRpc({ name: "follow.inbox-list", input: z.object({}), output: z.object({ enabled: z.boolean(), rows: z.array(inboxRowSchema), unsorted: z.array(inboxRowSchema).nullable(), firstRun: z.boolean(), batchUndo: z.object({ at: z.string(), count: z.number().int() }).nullable(), signOffs: z.number().int(), error: z.string().nullable(),
+/**
+ * `etag` (1.4.0): the client sends the tag of the answer it holds; when nothing changed the reply is
+ * `{ unchanged: true }` with empty rows instead of the whole list again. Older clients omit it and get full answers.
+ */
+export const inboxListRpc = defineRpc({ name: "follow.inbox-list", input: z.object({ etag: z.string().max(64).optional() }), output: z.object({ etag: z.string().optional(), unchanged: z.boolean().optional(), enabled: z.boolean(), rows: z.array(inboxRowSchema), unsorted: z.array(inboxRowSchema).nullable(), firstRun: z.boolean(), batchUndo: z.object({ at: z.string(), count: z.number().int() }).nullable(), signOffs: z.number().int(), error: z.string().nullable(),
   /** Adoption share of needs_you over the last 7 days of flagged turns (R2). Optional for older daemons. */
   briefStats: z.object({ days: z.number().int(), total: z.number().int(), tool: z.number().int(), structured: z.number().int(), extraction: z.number().int(), fallback: z.number().int() }).optional(),
   /** The Overseer's own row (1.4.0-beta.0), kept out of rows and every Needs-you count. */

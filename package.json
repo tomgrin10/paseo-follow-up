@@ -29,7 +29,7 @@
     "test:install": "node scripts/check-install.mjs",
     "test:native": "node scripts/check-native-tools.mjs --agents 10",
     "prepare": "node scripts/build.mjs",
-    "test:scale": "node scripts/scale-check.mjs --workspaces 120 --awake 5 --churn 35 --idle 30 --rss-budget 240 --cpu-budget 3"
+    "test:scale": "node scripts/scale-check.mjs --workspaces 120 --awake 5 --churn 35 --idle 60 --rss-budget 240 --cpu-budget 3 --request-budget 2"
   },
   "devDependencies": {
     "@getpaseo/client": "0.14.0",
