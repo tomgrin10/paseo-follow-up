@@ -61,3 +61,6 @@ export function migrateActiveScope(state: { workspaces: { id: string; archived: 
   if (parked.size) state.autoSendsParked = [...parked];
   return parked.size;
 }
+
+/** 1.3.0-beta.4: never-sent cancelled batches moved out of state.json to the per-workspace archive. */
+export const PRUNE_MIGRATION = "prune-unsent-1";

@@ -36,9 +36,10 @@ import { copyFile, readFile, rename } from "node:fs/promises";
 import { HistoryCache } from "./server/history-cache";
 import { Governor } from "./server/governor";
 import { ListCache } from "./server/list-cache";
+import { batchArchive, pruneUnsent } from "./server/batch-archive";
 import { NO_USAGE } from "./shared/usage";
 import { conversationGone, DEFAULT_ACTIVE_WINDOW_DAYS } from "./server/agent-load";
-import { ACTIVE_SCOPE_MIGRATION, autoSendsByDefault, FOLLOW_EVERY_MIGRATION, followsByDefault, followsEvery, migrateFollowEvery, optedOut } from "./shared/settings";
+import { ACTIVE_SCOPE_MIGRATION, PRUNE_MIGRATION, autoSendsByDefault, FOLLOW_EVERY_MIGRATION, followsByDefault, followsEvery, migrateFollowEvery, optedOut } from "./shared/settings";
 import { BRIEF_KIND, BRIEF_VERSION, prState, validateNeedsYou, type Brief, type NeedsYouRecord } from "./shared/brief";
 
 export default function contribute(server: PluginServerContext) {
@@ -59,6 +60,8 @@ export default function contribute(server: PluginServerContext) {
   const governor = new Governor();
   const listCache = new ListCache();
   engine.paused = () => !governor.allowsBackground();
+  const archive = batchArchive(directory);
+  engine.archive = archive;
   const usage = new UsageReader(paseoHome);
   // Unknown is not off: an unreadable document keeps the inbox on with its defaults.
   const inboxSettings = async () => { try { const state = await displaySettings.read(); if (state.status === "ready") return state.values; } catch {} return displayPreferences.schema.parse({}); };
@@ -151,6 +154,17 @@ export default function contribute(server: PluginServerContext) {
     await copyFile(join(directory, "state.json"), join(directory, "state.before-follow-every.json.bak"), 1).catch(error => { if (!["ENOENT", "EEXIST"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error; });
     await store.mutate(state => { migrateFollowEvery(state); });
   };
+  /**
+   * 1.3.0-beta.4: once, back up state.json and move never-sent cancelled batches beyond the newest few per
+   * workspace to the archive (see pruneUnsent). Archived first, so nothing is lost if the write fails.
+   */
+  const pruneHistory = async () => {
+    if ((await store.snapshot()).migrations?.includes(PRUNE_MIGRATION)) return;
+    await copyFile(join(directory, "state.json"), join(directory, "state.before-prune.json.bak"), 1).catch(error => { if (!["ENOENT", "EEXIST"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error; });
+    const preview = await store.read();
+    for (const w of preview.workspaces) await archive(w.id, pruneUnsent(w));
+    await store.mutate(state => { for (const w of state.workspaces) pruneUnsent(w); state.migrations = [...state.migrations ?? [], PRUNE_MIGRATION]; });
+  };
   /** 1.3.0-beta.3: back up once before the active-scope migration (applied by the engine after its first discovery). */
   const backupActiveScope = async () => {
     if ((await store.snapshot()).migrations?.includes(ACTIVE_SCOPE_MIGRATION)) return;
@@ -164,6 +178,7 @@ export default function contribute(server: PluginServerContext) {
     await engine.recover();
     await migrateTracking();
     await backupActiveScope();
+    await pruneHistory();
     hooksStarted = true;
     await agentHooks.start().catch(() => { hookError = "Automatic sidebar instructions could not be registered for every provider. Check Claude/Codex hook settings; following still works."; });
     hookTimer = setInterval(() => void agentHooks.heartbeat().catch(() => {}), 30_000);

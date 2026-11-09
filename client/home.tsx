@@ -128,36 +128,45 @@ function useAgentLive(agentId: string | null) {
   return { handle, permissions: (handle?.pendingPermissions ?? []) as unknown as Permission[], status: handle?.status ?? null };
 }
 
-/** The last steps Home read per agent this session, shown while the agent is unloaded. */
-const seenSteps = new Map<string, TailStep[]>();
+/** The last steps Home read per agent this session, and when, shown while the agent isn't loaded. */
+const seenSteps = new Map<string, { steps: TailStep[]; at: number }>();
 /**
  * "Recent · last N steps", read only for the selected agent, refreshed when its status or flag changes.
- * Reading a timeline loads an unloaded agent for an hour (see server/agent-load.ts), so an unloaded agent
- * shows the steps Home saw last and waits for an explicit "Load recent steps".
+ * Reading a timeline loads an unloaded agent for an hour (see shared/agent-load.ts), so an agent that isn't loaded
+ * shows the steps Home saw last (marked with when) and waits for an explicit "Load recent steps".
  */
 function useTail(handle: ReturnType<typeof useAgentLive>["handle"], key: string) {
   const [steps, setSteps] = useState<TailStep[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [seenAt, setSeenAt] = useState<number | null>(null);
   const [wake, setWake] = useState(0);
   const [asleep, setAsleep] = useState(false);
-  useEffect(() => { setWake(0); }, [handle]);
+  const [loading, setLoading] = useState(false);
+  const [unknown, setUnknown] = useState(false);
+  useEffect(() => { setWake(0); setUnknown(false); }, [handle]);
+  // A snapshot that never arrives counts as not loaded instead of spinning forever.
+  useEffect(() => { if (!handle) return; const id = setTimeout(() => setUnknown(true), 5_000); return () => clearTimeout(id); }, [handle]);
   useEffect(() => {
     if (!handle) { setSteps([]); return; }
     const current = handle.current();
-    if (!current) return;
-    const loaded = isLoaded(current as unknown as LoadSignals);
-    setAsleep(!loaded);
-    if (!loaded && !wake) { setSteps(seenSteps.get(handle.id) ?? []); setError(null); return; }
-    let live = true;
+    if (!current && !unknown) return;
+    const loaded = !!current && isLoaded(current as unknown as LoadSignals);
+    if (!loaded && !wake) {
+      const seen = seenSteps.get(handle.id);
+      setAsleep(true); setSteps(seen?.steps ?? []); setSeenAt(seen?.at ?? null); setError(null); return;
+    }
+    setAsleep(false);
+    let live = true; setLoading(true);
     handle.timeline.refetch({ direction: "tail", limit: 40 }).then(page => {
       if (!live) return;
       const entries = [...(page as unknown as { entries: { seqStart: number; item: Parameters<typeof tailSteps>[0][number] }[] }).entries].sort((a, b) => a.seqStart - b.seqStart);
       const next = tailSteps(entries.map(e => e.item), 6);
-      seenSteps.set(handle.id, next); setSteps(next); setError(null);
-    }).catch(e => { if (live) { setError(errorText(e)); setSteps(s => s ?? []); } });
+      seenSteps.set(handle.id, { steps: next, at: Date.now() }); setSteps(next); setSeenAt(null); setError(null);
+    }).catch(e => { if (live) { setError(errorText(e)); setSteps(s => s ?? []); } })
+      .finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
-  }, [handle, key, wake]);
-  return { steps, error, asleep: asleep && !wake, load: () => setWake(n => n + 1) };
+  }, [handle, key, wake, unknown]);
+  return { steps, error, seenAt, asleep, loading, woken: wake > 0, load: () => setWake(n => n + 1) };
 }
 
 function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onBack }: {
@@ -230,15 +239,16 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
         actions={{ openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion, openAgent: () => openFull(s) }} />}
       {actionBar}
       {s.agentId && <View style={{ gap: 8 }}>
-        <Text style={[t.small, { fontWeight: "600", letterSpacing: 0.5, textTransform: "uppercase" }]}>Recent · last {tail.steps?.length || 6} steps</Text>
+        <Text style={[t.small, { fontWeight: "600", letterSpacing: 0.5, textTransform: "uppercase" }]}>{tail.asleep && tail.seenAt ? `Last seen · ${age(new Date(tail.seenAt).toISOString(), Date.now()) === "now" ? "just now" : `${age(new Date(tail.seenAt).toISOString(), Date.now())} ago`}` : tail.steps?.length ? `Recent · last ${tail.steps.length} steps` : "Recent steps"}</Text>
+        {!!tail.error && <Text style={t.meta}>{`Couldn't load the agent's steps: ${tail.error}`}</Text>}
         {tail.steps === null ? <Spinner color={c.foregroundMuted} size={12} label="Loading the agent's steps" />
-          : tail.steps.length === 0 ? <Text style={t.meta}>{tail.error ? `Couldn't load the agent's steps: ${tail.error}` : tail.asleep ? "This agent is asleep, so its steps aren't loaded." : "No steps yet."}</Text>
+          : tail.steps.length === 0 ? (tail.error ? null : <Text style={t.meta}>{tail.asleep ? "This agent isn't loaded, so its steps aren't shown." : "No steps yet."}</Text>)
           : tail.steps.map((step, i) => <Step key={i} step={step} c={c} last={i === tail.steps!.length - 1} />)}
-        {tail.asleep && <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-          <Button theme={theme} compact={compact} kind="secondary" icon="RefreshCw" title="Load recent steps" accessibilityHint="Wakes the agent to read its steps. It stays loaded for about an hour." onPress={tail.load} />
-          <Text style={[t.small, { flex: 1, minWidth: 160 }]}>Wakes the agent, which keeps it in memory for about an hour.</Text>
+        {(tail.asleep || (tail.woken && tail.loading)) && <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+          <Button theme={theme} compact={compact} kind="secondary" title={tail.loading ? "Loading…" : "Load recent steps"} loading={tail.loading} disabled={tail.loading} onPress={tail.load} />
+          <Text style={[t.small, { flex: 1, minWidth: 160 }]}>Loads the agent into memory for about an hour.</Text>
         </View>}
-        <Text style={t.small}>A preview, not the whole session. Open full for the chat.</Text>
+        {!!tail.steps?.length && <Text style={t.small}>A preview, not the whole session. Open full for the chat.</Text>}
       </View>}
     </ScrollView>
     {s.agentId && <ReplyBox theme={theme} compact={compact} agentName={s.title} onSend={async text => {
