@@ -255,6 +255,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   const browserRead = useRpc(browserStatusRpc);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [why, setWhy] = useState(false);
   const picks = usePicks(b.id);
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" } | null>(null);
   const workspace = b.workspaceId ? deps.workspace(b.workspaceId) : undefined;
@@ -325,8 +326,14 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
           {multi && <Text accessibilityLiveRegion="polite" style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontVariant: ["tabular-nums"] }}>· {pickedCount(b, picks)} of {askedDecisions(b).length} picked</Text>}
           <View style={{ flex: 1 }} />
           <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontVariant: ["tabular-nums"] }}>{ageText}</Text>
+          {/* Phones: where the card's facts come from sits behind ⓘ instead of a footer under every card. */}
+          {compact && <Pressable accessibilityRole="button" accessibilityLabel={why ? "Hide where this comes from" : "Where this comes from"} aria-expanded={why} accessibilityState={{ expanded: why }}
+            onPress={() => setWhy(v => !v)} hitSlop={{ top: 14, bottom: 14, left: 10, right: 12 }} style={{ marginLeft: 4, padding: 2 }}>
+            <Icon name="Info" size={14} color={why ? c.foreground : c.foregroundMuted} />
+          </Pressable>}
         </View>
-        <Text accessibilityRole="header" style={{ color: c.foreground, fontSize: compact ? 17 : 19, lineHeight: compact ? 23 : 26, fontWeight: "600", letterSpacing: -0.2 }}>{b.ask}</Text>
+        {/* The ask role: 16/22 on phones; desktop keeps 19/26. */}
+        <Text accessibilityRole="header" style={{ color: c.foreground, fontSize: compact ? 16 : 19, lineHeight: compact ? 22 : 26, fontWeight: "600", letterSpacing: compact ? 0 : -0.2 }}>{b.ask}</Text>
       </View>
 
       <BriefBody b={b} c={c} compact={compact} tight={tight} embedded={embedded} height={height} mode={multi ? "select" : "send"} picks={picks}
@@ -346,10 +353,10 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
         {!tight && !!b.also.context && <Text numberOfLines={3} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 19 }}>{b.also.context}</Text>}
       </View>}
     </View>
-    <View style={{ borderTopWidth: 1, borderTopColor: c.border, paddingHorizontal: pad, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 6 }}>
+    {(!compact || why) && <View style={{ borderTopWidth: 1, borderTopColor: c.border, paddingHorizontal: pad, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 6 }}>
       <Icon name="Info" size={12} color={c.foregroundMuted} />
       <Text style={{ flex: 1, color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{b.sourceLine}</Text>
-    </View>
+    </View>}
     {workspace && sheet && <PrSheet workspace={workspace} prKey={sheet.key} intent={sheet.intent} theme={theme} compact={compact} browserReady={browser.data?.ready ?? false} onClose={() => setSheet(null)} />}
   </View>;
 }
