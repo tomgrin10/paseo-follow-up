@@ -51,7 +51,7 @@ export default function contribute(server: PluginServerContext) {
   const directory = join(paseoHome, "plugin-data", "follow-through");
   const bridge = join(directory, "mcp.mjs");
   const store = new Store(directory, 1_000);
-  store.onSaved = scopeWriter(directory);
+  store.onChanged = scopeWriter(directory);
   const agentHooks = new AgentHooks(directory, clientEntry());
   const gateway = new PaseoGateway(undefined, undefined, undefined, HistoryCache.at(directory));
   const graphite = new Graphite();
@@ -181,7 +181,7 @@ export default function contribute(server: PluginServerContext) {
     await migrateTracking();
     await backupActiveScope();
     await pruneHistory();
-    await store.onSaved(await store.snapshot()).catch(() => undefined);
+    await store.onChanged(await store.snapshot()).catch(() => undefined);
     hooksStarted = true;
     await agentHooks.start().catch(() => { hookError = "Automatic sidebar instructions could not be registered for every provider. Check Claude/Codex hook settings; following still works."; });
     hookTimer = setInterval(() => void agentHooks.heartbeat().catch(() => {}), 30_000);
