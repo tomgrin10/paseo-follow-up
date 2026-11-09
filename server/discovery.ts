@@ -5,7 +5,33 @@ import type { State, Workspace } from "../shared/model";
 import { autoSendsByDefault, followsByDefault } from "../shared/settings";
 
 export type History = { candidates: string[]; goal: string | null; complete: boolean; error: string | null };
-export type DiscoveredWorkspace = { id: string; title: string; mainAgentId: string; /** Set when mainAgentId is a live successor to this closed or gone main agent. */ replacesMainAgentId?: string; messageAt: string | null; projectId?: string | null; enable_default_tracking?: boolean; history?: History; contributorAgentIds?: string[]; submissions?: Submission[]; artifacts?: Artifact[]; /** In the active scope (see workspaceActive). Undefined means unknown, treated as active. */ active?: boolean };
+export type DiscoveredWorkspace = { id: string; title: string; mainAgentId: string; /** Set when mainAgentId is a live successor to this closed or gone main agent. */ replacesMainAgentId?: string; /** The replacement is the original main agent taking the workspace back (Workspace.handover). */ handBack?: boolean; /** The recorded main agent reads "closed" right now. */ mainClosed?: boolean; messageAt: string | null; projectId?: string | null; enable_default_tracking?: boolean; history?: History; contributorAgentIds?: string[]; submissions?: Submission[]; artifacts?: Artifact[]; /** In the active scope (see workspaceActive). Undefined means unknown, treated as active. */ active?: boolean };
+
+export const interruptionHold = (kind: "canceled" | "failed") => kind === "canceled" ? "You stopped the main agent. Resume follow-up when ready." : "The main agent's turn failed. Check it before resuming follow-up.";
+
+/**
+ * Moves the workspace to another main agent: automatic handover, hand-back, or the developer's "Make main agent".
+ * A stop hold raised by another agent's turn doesn't carry over to the new main (a hold from before 1.4.0-beta.16
+ * names no agent, so only the developer's explicit choice clears it).
+ */
+export function setMainAgent(w: Workspace, to: string, kind: "handover" | "handBack" | "developer", now: number): void {
+  const from = w.mainAgentId;
+  if (from === to) return;
+  w.mainAgentId = to; w.runtimeReason = null; delete w.mainClosedSince;
+  w.contributorAgentIds = [...new Set([...(w.contributorAgentIds ?? []).filter(id => id !== to), from])];
+  for (const b of w.batches) if (b.state === "pending" && b.recipientAgentId === from) b.recipientAgentId = null;
+  if (kind === "handover") w.handover = { from, at: new Date(now).toISOString(), worked: false }; else delete w.handover;
+  const stop = w.interruption;
+  if (stop && w.hold === interruptionHold(stop.kind) && (stop.agentId ? stop.agentId !== to : kind === "developer")) { w.hold = null; delete w.interruption; w.completion = null; }
+  w.updatedAt = new Date(now).toISOString();
+}
+
+/** A successor's main-agent call: its handover is in use and no longer goes back. True when something changed. */
+export function markMainWork(state: State, agentId: string): boolean {
+  let changed = false;
+  for (const w of state.workspaces) if (w.mainAgentId === agentId && w.handover && !w.handover.worked) { w.handover.worked = true; changed = true; }
+  return changed;
+}
 
 export function extractHistory(items: readonly unknown[], complete = true, error: string | null = null): History {
   const candidates = new Set<string>();
@@ -57,11 +83,13 @@ export function applyDiscovery(state: State, discovered: DiscoveredWorkspace[], 
         if (!state.autoSendsParked.length) delete state.autoSendsParked;
       }
     }
-    // A closed or gone main agent hands the workspace to its live successor (discovery decides; see
-    // successorMainAgent). Any other mismatch keeps the recorded owner.
-    if (row.replacesMainAgentId && row.replacesMainAgentId === w.mainAgentId && !w.archived) {
-      w.mainAgentId = row.mainAgentId; w.runtimeReason = null;
-      for (const b of w.batches) if (b.state === "pending" && b.recipientAgentId === row.replacesMainAgentId) b.recipientAgentId = null;
+    // A long-closed, archived or gone main agent hands the workspace to its live successor, and an unused handover
+    // goes back to the original main once it's live (discovery decides; see successorMainAgent, handBackMainAgent).
+    // Any other mismatch keeps the recorded owner.
+    if (row.replacesMainAgentId && row.replacesMainAgentId === w.mainAgentId && !w.archived) setMainAgent(w, row.mainAgentId, row.handBack ? "handBack" : "handover", now);
+    // How long the recorded main has read closed without a break: a reopen resets it.
+    if (row.mainAgentId === w.mainAgentId && !row.replacesMainAgentId && row.mainClosed !== undefined) {
+      if (!row.mainClosed) delete w.mainClosedSince; else w.mainClosedSince ??= new Date(now).toISOString();
     }
     if (w.mainAgentId !== row.mainAgentId || w.archived) continue;
     // A new main agent, or a new message to the gone one, means its conversation can be tried again.

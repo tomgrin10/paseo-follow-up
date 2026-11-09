@@ -60,6 +60,10 @@ export const batchSchema = z.object({
 export const workspaceSchema = z.object({
   id: idSchema, title: textSchema, goal: textSchema, mainAgentId: idSchema,
   contributorAgentIds: z.array(idSchema).optional(),
+  /** When discovery first saw the recorded main agent closed, cleared once it reads live again (see successorMainAgent). */
+  mainClosedSince: z.string().optional(),
+  /** A main agent closed for MAIN_CLOSED_HANDOVER_MS handed the workspace to `mainAgentId`; until that agent does main-agent work, a live `from` takes it back. */
+  handover: z.object({ from: idSchema, at: z.string(), worked: z.boolean() }).optional(),
   enable_tracking: z.boolean().default(false), enable_auto_sends: z.boolean().default(false), hold: z.string().nullable(), archived: z.boolean(),
   prs: z.array(prSchema), obligations: z.array(obligationSchema), batches: z.array(batchSchema),
   excludedStacks: z.array(z.object({ name: textSchema, reason: textSchema, excludedAt: z.string(), prs: z.array(prSchema), obligations: z.array(obligationSchema) })).default([]),
@@ -67,7 +71,7 @@ export const workspaceSchema = z.object({
   completion: z.object({ summary: textSchema, declaredAt: z.string() }).nullable(),
   updatedAt: z.string(), managedDoneLabel: z.boolean(),
   runtimeReason: z.string().nullable(), runtimeBusy: z.boolean(), backgroundBusy: z.boolean().default(false),
-  interruption: z.object({ turnId: z.string().nullable(), at: z.string(), kind: z.enum(["canceled", "failed"]), guardPauseId: z.string().optional() }).optional(),
+  interruption: z.object({ turnId: z.string().nullable(), at: z.string(), kind: z.enum(["canceled", "failed"]), guardPauseId: z.string().optional(), /** The agent whose turn stopped (since 1.4.0-beta.16). */ agentId: idSchema.optional() }).optional(),
   // Added with questions; older saved states parse with none.
   questions: z.array(questionSchema).default([]),
   // Added with spec links; older saved states parse with none.

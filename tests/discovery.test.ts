@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { applyDiscovery, applyHistory, extractHistory } from "../server/discovery";
-import { chooseMainAgent, successorMainAgent, type Agent } from "../server/daemon";
+import { MAIN_CLOSED_HANDOVER_MS, chooseMainAgent, successorMainAgent, type Agent } from "../server/daemon";
 import { Engine, type Gateway } from "../server/engine";
 import { Store } from "../server/store";
 import { tasksFor, batchPrompt } from "../server/tasks";
@@ -102,16 +102,20 @@ test("Track returns after persistence while unrelated global observation is stil
   } finally { if (timer) clearTimeout(timer); release(); await activation; await engine.tick(); }
 });
 
-test("a closed or gone main agent hands over to the workspace's live root; a live main is never replaced", () => {
+test("a long-closed or gone main agent hands over to the workspace's live root; a live or briefly closed main is never replaced", () => {
   const agent = (id: string, status: string, createdAt: string, lastUserMessageAt: string | null = null) => ({ id, status, createdAt, lastUserMessageAt } as Agent);
   const closedMain = agent("old-main", "closed", "2026-09-22");
   const live = agent("live", "idle", "2026-10-01", "2026-11-08T15:00:00Z");
   const quiet = agent("quiet", "idle", "2026-10-05");
-  assert.equal(successorMainAgent([closedMain, live], "old-main")?.id, "live");
-  assert.equal(successorMainAgent([live], "old-main")?.id, "live", "a main missing from the index hands over too");
-  assert.equal(successorMainAgent([closedMain, quiet, live], "old-main")?.id, "live", "the one the developer wrote to last wins");
-  assert.equal(successorMainAgent([agent("old-main", "idle", "2026-09-22"), live], "old-main"), undefined, "a live main keeps the workspace");
-  assert.equal(successorMainAgent([closedMain], "old-main"), undefined, "no live root, no handover");
+  const now = Date.parse("2026-11-09T22:00:00Z");
+  const longAgo = new Date(now - MAIN_CLOSED_HANDOVER_MS).toISOString(); const lately = new Date(now - MAIN_CLOSED_HANDOVER_MS + 1).toISOString();
+  assert.equal(successorMainAgent([closedMain, live], "old-main", longAgo, now)?.id, "live");
+  assert.equal(successorMainAgent([closedMain, live], "old-main", lately, now), undefined, "closed for less than the handover time");
+  assert.equal(successorMainAgent([closedMain, live], "old-main", undefined, now), undefined, "a close discovery hasn't timed yet");
+  assert.equal(successorMainAgent([live], "old-main", undefined, now)?.id, "live", "a main missing from the index (archived or gone) hands over at once");
+  assert.equal(successorMainAgent([closedMain, quiet, live], "old-main", longAgo, now)?.id, "live", "the one the developer wrote to last wins");
+  assert.equal(successorMainAgent([agent("old-main", "idle", "2026-09-22"), live], "old-main", longAgo, now), undefined, "a live main keeps the workspace");
+  assert.equal(successorMainAgent([closedMain], "old-main", longAgo, now), undefined, "no live root, no handover");
   assert.equal(successorMainAgent([live], undefined), undefined);
 });
 
