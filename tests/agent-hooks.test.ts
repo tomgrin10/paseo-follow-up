@@ -66,10 +66,26 @@ test("a missing sidebar sync continues once; confirmation avoids it and later sh
     const stop = await f.run({ hook_event_name: "Stop", stop_hook_active: false }); assert.equal(stop.decision, "block"); assert.match(stop.reason, /metadata bookkeeping only/);
     await f.run({ hook_event_name: "UserPromptSubmit", prompt: stop.reason }); assert.equal(await f.run({ hook_event_name: "Stop" }), null);
     await f.run({ hook_event_name: "UserPromptSubmit" }); await f.hooks.confirm(f.w.id, f.w.mainAgentId, "Sidebar matches current work");
+    await f.run({ hook_event_name: "PostToolUse", tool_name: "mcp__paseo__follow_sync_workspace", tool_input: { summary: "x" } });
     assert.equal(await f.run({ hook_event_name: "Stop" }), null);
+    await tick();
     await f.run({ hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "gt submit --publish" } });
     assert.equal((await f.run({ hook_event_name: "Stop" })).decision, "block");
     assert.equal(await readFile(join(f.directory, "state.json"), "utf8"), original);
+  } finally { await f.close(); }
+});
+const tick = () => new Promise(r => setTimeout(r, 5));
+test("a sync through the bridge satisfies Stop however the call spells it: the record counts, not the tool name", async () => {
+  const f = await fixture();
+  try {
+    for (const command of ['node "$FOLLOW_THROUGH_CLI" call sync_workspace \'{"summary":"x"}\' --compact', "bash ./scripts/finish.sh"]) {
+      await f.run({ hook_event_name: "UserPromptSubmit" }); await tick();
+      await f.run({ hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: "/fixture/a.ts" } }); await tick();
+      // The RPC handler records the confirmation while the shell call runs; PostToolUse fires when it ends.
+      await f.hooks.confirm(f.w.id, f.w.mainAgentId, "Synced through the bridge"); await tick();
+      await f.run({ hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command } });
+      assert.equal(await f.run({ hook_event_name: "Stop" }), null, command);
+    }
   } finally { await f.close(); }
 });
 test("compaction restores instructions; tracker calls, continued stops and background work do not create loops", async () => {

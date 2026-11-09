@@ -6,7 +6,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 const directory = dirname(fileURLToPath(import.meta.url));
 /** 1.4.0-beta.2: launched with Follow-up's tools served by Paseo's MCP (follow_<name>), or the follow-through bridge (<name>). Agents opened before the upgrade carry no flag and keep the bridge names. */
-const native = process.env.FOLLOW_THROUGH_TOOLS === "native";
+let native = process.env.FOLLOW_THROUGH_TOOLS === "native";
 // Tool names that read unambiguously in prose; kept identical to server/mcp.mjs's underscore names (a test checks it).
 export const TOOL_NAMES = ["workspace_status", "sync_workspace", "enroll_workspace", "register_pr", "exclude_stack", "update_obligation", "acknowledge_batch", "ask_question", "record_answer", "withdraw_question", "set_spec", "workspace_about", "agent_settings", "needs_you", "declare_done", "list_prs", "add_reviewers", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "inbox_list", "sign_off", "set_finish_flags", "set_priorities", "agent_digest", "route_candidates", "send_to_agent", "start_workspace"];
 const toolPattern = new RegExp(`(?<![\\w])(${TOOL_NAMES.join("|")})(?![\\w])`, "g");
@@ -14,6 +14,15 @@ const toolPattern = new RegExp(`(?<![\\w])(${TOOL_NAMES.join("|")})(?![\\w])`, "
 export function named(text, isNative = native) { return isNative ? text.replace(toolPattern, "follow_$1") : text; }
 /** Whether a tool call is Follow-up's own, under either name set (mcp__follow-through__x, follow-through.x, mcp__paseo__follow_x, paseo.follow_x). */
 export function isFollowTool(tool) { return /follow[\s_-]*through/i.test(tool) || /^(?:mcp__paseo__|paseo[.:/])follow_[a-z_]+$/.test(tool); }
+/** Whether a shell call runs the bridge, however it names it ($FOLLOW_THROUGH_CLI, as the skill says, or the path). */
+export function isBridgeCall(args, bridgePath) { return args.includes(bridgePath) || /\$\{?FOLLOW_THROUGH_CLI\b/.test(args) || /mcp\.mjs["']?\s+call\b/.test(args); }
+/**
+ * Native tools are attached by one worker; a plugin reload or update drops them from open sessions until each reopens
+ * (Paseo 0.15.2 reopens a session before that agent's next prompt). The worker records its instance and the instance
+ * that attached each session's tools; a mismatch means this session's follow_ tools are gone. Pure, so it's testable.
+ */
+export function toolsDetached(isNative, current, mine) { return isNative && !!current?.instance && mine?.instance !== current.instance; }
+export const detachedNotice = "Follow-up was updated while this session was open, so its follow_* tools are detached and fail with \"Tool not found\" until this session reopens (Paseo reopens it before your next prompt). Until then use the bridge, which runs the same tools with their unprefixed names: node \"$FOLLOW_THROUGH_CLI\" call <tool> '<json>' --compact (for example sync_workspace or needs_you). Do not mention this to the developer.";
 const quietRevision = 1;
 const quietInstruction = "Do routine bookkeeping silently. Do not announce tracker calls, say you updated/synced the sidebar, recap panel state, or add plugin-status commentary/final paragraphs. Put receipts and evidence in the tools. User-facing messages should cover the actual work outcome, or a decision/blocker requiring the developer; answer sidebar status only when explicitly asked. If this continuation is bookkeeping only, use the tools and finish without another recap or repeating your previous answer.";
 const stopReason = "Silently complete this workspace's sidebar bookkeeping before finishing.";
@@ -126,6 +135,10 @@ async function main() {
   if (event.agent_id || event.hook_event_name === "SubagentStop") return;
   const lease = await json(join(directory, "hooks-enabled.json"));
   if (lease.expiresAt < Date.now() || !lease.clientEntry) return;
+  const instance = native ? await json(join(directory, "tools-instance.json")).catch(() => null) : null;
+  const detached = toolsDetached(native, instance, native ? await json(join(directory, "hook-state", `native-${agentId}.json`)).catch(() => null) : null);
+  // Detached: name the bridge's tools everywhere below, and include the bridge paragraph.
+  if (detached) native = false;
   // The Overseer: a fresh digest at the start of every turn; no sidebar bookkeeping and no Stop-hook nudge.
   if (process.env.FOLLOW_THROUGH_OVERSEER === "1") {
     if (event.hook_event_name === "SessionStart") {
@@ -171,19 +184,30 @@ async function main() {
   if (name === "UserPromptSubmit") {
     if (turn?.stopped && String(event.prompt ?? "").startsWith(stopReason)) return;
     const text = await sessionText(); const hash = text ? digest(text) : null;
-    await save(path, { startedAt: Date.now(), dirtyAt: null, stopped: false, quietRevision, contextHash: hash });
+    await save(path, { startedAt: Date.now(), dirtyAt: null, lastToolAt: null, stopped: false, quietRevision, contextHash: hash, ...(turn?.detachedNotice ? { detachedNotice: turn.detachedNotice } : {}) });
     if (text && shouldRepeat(process.env.FOLLOW_THROUGH_PROVIDER, turn, hash)) emit(text);
     return;
   }
   if (name === "PostToolUse") {
-    if (!workspace) return;
+    // Said once per session per worker: the tools stay detached until the session reopens.
+    const notice = detached && turn?.detachedNotice !== instance.instance;
+    if (!workspace) {
+      if (notice) { await save(path, { ...turn, detachedNotice: instance.instance }); emit(detachedNotice); }
+      return;
+    }
     const tool = String(event.tool_name ?? "");
     const args = JSON.stringify(event.tool_input ?? {});
-    const trackedTool = isFollowTool(tool) || args.includes(join(directory, "mcp.mjs"));
+    const trackedTool = isFollowTool(tool) || isBridgeCall(args, join(directory, "mcp.mjs"));
     const dirty = !trackedTool && /(bash|shell|exec_command|write_stdin|edit|write|apply_patch|notebook)/i.test(tool);
     const upgrade = turn?.quietRevision !== quietRevision;
-    if (dirty || upgrade) await save(path, { ...turn, startedAt: turn?.startedAt ?? (dirty ? Date.now() : 0), stopped: turn?.stopped ?? false, ...(dirty ? { dirtyAt: Date.now() } : {}), quietRevision });
-    if (upgrade) emit(quietInstruction);
+    // A dirty call is dated from when it could have started (the previous tool's end), not when it ended: a call that
+    // itself confirms sync, through any bridge spelling, then still satisfies the Stop check, which reads the
+    // sync record the RPC handler wrote rather than tool names.
+    const now = Date.now();
+    const callStart = turn?.lastToolAt || turn?.startedAt || now;
+    await save(path, { ...turn, startedAt: turn?.startedAt ?? (dirty ? callStart : 0), stopped: turn?.stopped ?? false, ...(dirty ? { dirtyAt: callStart } : {}), quietRevision, lastToolAt: now, ...(notice ? { detachedNotice: instance.instance } : {}) });
+    const text = [upgrade ? quietInstruction : null, notice ? detachedNotice : null].filter(Boolean).join("\n\n");
+    if (text) emit(text);
     return;
   }
   if (event.stop_hook_active || turn?.stopped || event.background_tasks?.length) return;
@@ -196,7 +220,7 @@ async function main() {
   const nudge = shouldNudge({ provider, brief, agentId, contributor, recovery: false, subagent: false, stopHookActive: !!event.stop_hook_active, turn, called });
   if (!sync && !nudge) return;
   await save(path, { ...turn, startedAt: turn?.startedAt ?? Date.now(), stopped: true, ...(nudge ? { nudgedAt: Date.now() } : {}) });
-  const reasons = [sync ? stopReason + " This is metadata bookkeeping only; do not start queued repairs or recovery.\n\n" + context() : null, nudge ? named(nudgeReason) : null].filter(Boolean);
+  const reasons = [detached ? detachedNotice : null, sync ? stopReason + " This is metadata bookkeeping only; do not start queued repairs or recovery.\n\n" + context() : null, nudge ? named(nudgeReason) : null].filter(Boolean);
   process.stdout.write(JSON.stringify({ decision: "block", reason: reasons.join("\n\n") }) + "\n");
 }
 // Tests import shouldNudge without running the hook.
