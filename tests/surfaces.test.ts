@@ -174,3 +174,14 @@ test("(3) the reviewers brief offers Add reviewers with saved reviewers, and wit
   assert.equal(none.ask, "#1499 has no reviewers yet");
   assert.equal(none.sourceLine, "No reviewers set for example/app; Add reviewers lets you pick.");
 });
+
+test("a finished flag with no stated ask headlines the workspace's open question, not 'No ask stated'", () => {
+  const q = { kind: "question" as const, key: "question:Q1", questionId: "Q1", title: "Q1 · Cyera answers", detail: "Get Cyera answers for the 10 pairs", state: "waiting" as const, big: null };
+  const none = { ...flagged(["finished"]), brief: { kind: "done" as BriefKind, source: "none" as const, state: "open" as const, ask: "" } } as InboxRow;
+  const h = flagHeadline(none, NOW, [q] as never)!;
+  assert.equal(h.key, "question");
+  assert.equal(h.line, "Get Cyera answers for the 10 pairs");
+  assert.equal(h.source, "flag");
+  assert.equal(flagHeadline(flagged(["finished"]), NOW, [])!.key, "finished", "no question: still Finished");
+  assert.equal(flagHeadline(flagged(["finished"], { kind: "decision", ask: "Pick one" }), NOW, [q] as never)!.key, "decision", "a real ask wins");
+});

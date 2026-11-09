@@ -94,3 +94,8 @@ test("phones: only Home's search row stays pinned; the status chips and the setu
   assert.match(home, /\{!compact && !omnibox\.results && <SetupOffer/);
   assert.match(home, /header=\{compact && !omnibox\.results \? <View[^>]*>\s*<StatusStrip[^]*?<SetupOffer theme=\{theme\} compact/);
 });
+
+test("phones: every state word's hue is lifted to text contrast, not only success (Finished is the accent)", async () => {
+  const list = await source("client/home-list.tsx");
+  assert.match(list, /return text \? readable\(base, c\) : base;/);
+});

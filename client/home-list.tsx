@@ -198,10 +198,13 @@ function OverseerRow({ theme, o, selected, touch, onSelect }: { theme: Theme; o:
   </Pressable>;
 }
 
-/** `text`: the colour carries the state word on its own (phones), so dark success is lifted to pass as text. */
+/**
+ * `text`: the colour carries the state word on its own (phones), so it's lifted to 4.5:1 on dark grounds. Finished
+ * uses the host accent and success green, both fill colours at about 3:1 as 12px text.
+ */
 export function glyphColor(s: Pick<Workstream, "tone">, c: Colors, text = false): string {
-  if (text && s.tone === "success") return readable(c.statusSuccess, c);
-  return s.tone === "running" ? runningColor(c) : s.tone === "success" ? c.statusSuccess : headlineColor(s.tone, c);
+  const base = s.tone === "running" ? runningColor(c) : s.tone === "success" ? c.statusSuccess : headlineColor(s.tone, c);
+  return text ? readable(base, c) : base;
 }
 const badgeColor = (b: Badge, c: Colors) => b.tone === "danger" ? c.statusDanger : b.tone === "warning" ? c.statusWarning : b.tone === "success" ? c.statusSuccess : b.tone === "merged" ? mergedColor(c) : c.foregroundMuted;
 
