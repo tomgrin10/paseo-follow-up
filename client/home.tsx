@@ -77,7 +77,9 @@ export function FollowHome(props: PluginScreenProps & { deps: HomeDeps }) {
   const list = <HomeList model={model} theme={theme} dense={compact} touch={compact} selectedKey={selected} onSelect={onSelect} briefLine={briefLine}
     results={omnibox.results} activeResult={omnibox.active} onResult={item => setSelected(item.key)} filter={filter}
     top={<ListTop theme={theme} dense={compact} title={<ListHeader theme={theme} compact={compact} onSettings={deps.openSettings} />}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: compact ? 12 : 16 }}>
+      {/* zIndex: on web every View is its own stacking context, so the sort menu only paints and hit-tests above the
+          strip and meters below if this row sits above them. */}
+      <View style={{ zIndex: 2, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: compact ? 12 : 16 }}>
         <SearchField theme={theme} omnibox={omnibox} dense={compact} onEnter={item => setSelected(item.key)} />
         <SortMenu theme={theme} mode={model.sort} onChange={deps.sources.extras.setSort} rankedAt={model.rankedAt} touch={compact} />
       </View>
