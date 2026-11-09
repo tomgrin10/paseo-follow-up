@@ -6,10 +6,14 @@ import { z } from "zod";
  */
 export const resourceLevels = ["ok", "constrained", "critical"] as const;
 export type ResourceLevel = typeof resourceLevels[number];
+/** The Follow-up worker's own memory (process.memoryUsage, MB), so its footprint is visible next to the VM's. */
+export const workerMemorySchema = z.object({ rssMb: z.number(), heapUsedMb: z.number(), heapTotalMb: z.number(), externalMb: z.number(), arrayBuffersMb: z.number() });
+export type WorkerMemory = z.infer<typeof workerMemorySchema>;
 export const resourcesSchema = z.object({
   memoryPct: z.number().nullable(), memoryBytes: z.number().nullable(), memoryHighBytes: z.number().nullable(),
   cpuPct: z.number().nullable(), memoryPressure: z.number().nullable(), cpuPressure: z.number().nullable(),
   level: z.enum(resourceLevels), at: z.string().nullable(),
+  worker: workerMemorySchema.nullable().optional(),
 });
 export type Resources = z.infer<typeof resourcesSchema>;
 
