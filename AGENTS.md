@@ -6,7 +6,9 @@ The public name is Follow-up and the npm package is paseo-follow-up. Retain inst
 
 Never commit credentials, daemon state, transcripts or local machine paths. Boolean configuration uses positive enable_ names. Subprocesses use argument arrays without a shell.
 
-The optional Send to Paseo integration uses only `follow.pr-owner` and the scoped browser exchange.
+The optional Send to Paseo integration uses only `follow.pr-owner`, the read-only `follow.pr-workspaces`
+(titles, ids, main-agent status and the Home one-line state, at most three, nothing for repositories
+outside the advertised browser scope) and the scoped browser exchange.
 Record the latest explicit registering agent on each PR; legacy registrations retain their workspace
 main. Browser exchange advertises at most 100 repository identities from active tracked PRs so the paired extension can connect without a second setup. Browser exchange defaults to no repository scopes until the extension echoes its selected exact scopes. Unknown toggle state never means off.
 

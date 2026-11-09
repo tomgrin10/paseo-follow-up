@@ -10,6 +10,7 @@ import { communicationSchema } from "./communication";
 import { taskTriggerSchema } from "./task-trigger";
 import { QUESTION_MODES, questionSchema } from "./questions";
 import { specSchema } from "./spec";
+import { HOME_GROUPS } from "./home";
 import { actionPlanSchema, actionResultSchema, browserCommandSchema, browserExchangeSchema, browserPrSchema, browserStatusSchema, prActionKind } from "./pr-actions";
 
 const agentCommunicationSchema = z.strictObject({
@@ -64,6 +65,9 @@ export const taskTriggerRpc = defineRpc({ name: "follow.set-task-trigger", input
 
 // Narrow integration: no inventory, messages, paths, or credentials cross this RPC.
 export const prOwnerRpc = defineRpc({ name: "follow.pr-owner", input: z.strictObject({ repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/), number: z.number().int().positive() }), output: z.object({ owner: z.object({ workspaceId: idSchema, agentId: idSchema }).nullable() }) });
+// Read-only browser view of who owns a PR: titles, ids, agent status and Follow-up's one line. Nothing else.
+// `tracked: false` means the repository is outside the scope Follow-up advertises to the browser, so nothing is returned.
+export const prWorkspacesRpc = defineRpc({ name: "follow.pr-workspaces", input: z.strictObject({ repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/), number: z.number().int().positive() }), output: z.object({ tracked: z.boolean(), more: z.number().int().nonnegative(), workspaces: z.array(z.object({ workspaceId: idSchema, agentId: idSchema, title: z.string().max(200), agentStatus: z.string().max(40), group: z.enum(HOME_GROUPS), state: z.string().max(200) })).max(3) }) });
 
 // Questions. Agents ask, record an answer given in chat, or withdraw; the developer answers from the UI.
 const optionInput = z.strictObject({ letter: z.string().regex(/^[A-Z]$/), label: z.string().trim().min(1).max(200), consequence: z.string().trim().max(600).optional() });
