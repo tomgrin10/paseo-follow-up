@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { useRpc } from "@getpaseo/plugin/client";
-import { Icon, useToast } from "@getpaseo/plugin/client/ui";
+import { Icon, SettingsAction, SettingsCard, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { reviewerSettingsRpc, reviewerSuggestionsRpc, saveReviewersRpc } from "../shared/contracts";
 import { MAX_REVIEWERS, TEAM_SLUG, USER_LOGIN, isTeam, resolveReviewers, reviewerConfig, reviewerLabel, sameLogin, setReviewerConfig, type ReviewerEntry } from "../shared/reviewers";
 import { Button, Switch, errorText, text, type Theme } from "./kit";
+import { Disclosure } from "./settings-shell";
+import { repoSummary, reposSummary, reviewersConfigured } from "../shared/settings-nav";
 
 export const reviewerSettingsKey = ["follow-through", "reviewer-settings"];
 
@@ -79,39 +81,79 @@ function AddReviewer({ repo, theme, compact, taken, onAdd }: { repo: string | nu
 }
 
 /** One list (a repository, or the default for all repos) with its chips and Add reviewer. Saves on every change. */
-function ReviewerList({ repo, list, theme, compact, fallback, first }: { repo: string | null; list: ReviewerEntry[]; theme: Theme; compact: boolean; fallback?: string | null; first?: boolean }) {
+function ReviewerList({ repo, list, theme, compact, fallback, first, titled = true, startAdding = false }: { repo: string | null; list: ReviewerEntry[]; theme: Theme; compact: boolean; fallback?: string | null; first?: boolean; titled?: boolean; startAdding?: boolean }) {
   const c = theme.colors; const t = text(c);
   const save = useRpc(saveReviewersRpc); const cache = useQueryClient(); const toast = useToast();
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState(startAdding);
   const change = useMutation({ mutationFn: (next: ReviewerEntry[]) => save({ repo, reviewers: next }), onSuccess: data => { cache.setQueryData(reviewerSettingsKey, data); setReviewerConfig(data.config); }, onError: error => toast.error(errorText(error)) });
-  return <View style={{ gap: 8, paddingHorizontal: 14, paddingVertical: 12, borderTopWidth: first ? 0 : 1, borderTopColor: c.border }}>
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-      <Icon name={repo ? "GitPullRequest" : "Globe"} size={13} color={c.foregroundMuted} />
-      <Text numberOfLines={1} style={[t.label, { flex: 1, minWidth: 0 }]}>{repo ?? "Default for all repos"}</Text>
-      {adding ? <Button theme={theme} compact={compact} kind="ghost" icon="Check" title="Done" accessibilityLabel={`Done adding to ${repo ?? "the default list"}`} onPress={() => setAdding(false)} />
-        : list.length < MAX_REVIEWERS && <Button theme={theme} compact={compact} kind="ghost" icon="UserPlus" title="Add reviewer" accessibilityLabel={`Add reviewer to ${repo ?? "the default list"}`} onPress={() => setAdding(true)} />}
-    </View>
-    {list.length > 0 ? <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-      {list.map((r, i) => <ReviewerChip key={r.login} r={r} theme={theme} compact={compact} onRemove={change.isPending ? undefined : () => change.mutate(list.filter((_, j) => j !== i))} />)}
-    </View> : <Text style={t.meta}>{fallback ?? "Nobody yet. Add reviewers opens a picker."}</Text>}
+  const action = adding ? <Button theme={theme} compact={compact} kind="ghost" icon="Check" title="Done" accessibilityLabel={`Done adding to ${repo ?? "the default list"}`} onPress={() => setAdding(false)} />
+    : list.length < MAX_REVIEWERS ? <Button theme={theme} compact={compact} kind="ghost" icon="UserPlus" title="Add reviewer" accessibilityLabel={`Add reviewer to ${repo ?? "the default list"}`} onPress={() => setAdding(true)} /> : null;
+  const chips = list.length > 0 ? list.map((r, i) => <ReviewerChip key={r.login} r={r} theme={theme} compact={compact} onRemove={change.isPending ? undefined : () => change.mutate(list.filter((_, j) => j !== i))} />)
+    : <Text style={[t.meta, titled ? null : { flex: 1, minWidth: 0 }]}>{fallback ?? "Nobody yet. Add reviewers opens a picker."}</Text>;
+  return <View style={{ gap: 8, paddingHorizontal: 14, paddingVertical: titled ? 12 : 8, paddingLeft: titled ? 14 : 58, borderTopWidth: first ? 0 : 1, borderTopColor: c.border }}>
+    {titled ? <>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <Icon name={repo ? "GitPullRequest" : "Globe"} size={13} color={c.foregroundMuted} />
+        <Text numberOfLines={1} style={[t.label, { flex: 1, minWidth: 0 }]}>{repo ?? "Default for all repos"}</Text>
+        {action}
+      </View>
+      {list.length > 0 ? <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>{chips}</View> : chips}
+    </> : /* Inside a fold the header already names the repo: chips and Add share one row, indented under it. */
+      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>{chips}<View style={{ flex: 1 }} />{action}</View>}
     {adding && <AddReviewer repo={repo} theme={theme} compact={compact} taken={list.map(r => r.login)} onAdd={r => change.mutate([...list, r])} />}
   </View>;
 }
 
-/** Settings → Reviewers: who "Add reviewers" asks, per repository, with a default for the rest. */
+/**
+ * Settings → Reviewers: who "Add reviewers" asks. The default list stays open; the repositories fold away behind one
+ * line ("3 with their own list · 5 use the default"), collapsed by default once anything is set. Inside, each
+ * repository with a list folds to its names, and the ones on the default fold together.
+ */
 export function ReviewerSettings({ theme, compact = false }: { theme: Theme; compact?: boolean }) {
   const c = theme.colors; const t = text(c);
   const query = useReviewerSettings();
   const data = query.data;
+  if (query.isPending) return <Text style={t.meta}>Loading reviewers…</Text>;
+  if (query.error || !data) return <SettingsCard><SettingsAction label="Couldn't load reviewers" hint={query.error ? errorText(query.error) : undefined} actionLabel="Retry" onPress={() => void query.refetch()} /></SettingsCard>;
+  const own = data.repos.filter(r => (data.config.repos[r] ?? []).length > 0).sort((a, b) => a.localeCompare(b));
+  const rest = data.repos.filter(r => !own.includes(r));
+  const fallback = data.config.defaults.length ? `Uses the default: ${data.config.defaults.map(reviewerLabel).join(", ")}` : null;
   return <View style={{ gap: 8 }}>
-    {query.isPending && <Text style={t.meta}>Loading reviewers…</Text>}
-    {query.error && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusDanger }]}>{errorText(query.error)}</Text>}
-    {data && <View style={{ borderRadius: 10, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1, overflow: "hidden" }}>
+    <View style={{ borderRadius: 10, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1, overflow: "hidden" }}>
       <ReviewerList first repo={null} list={data.config.defaults} theme={theme} compact={compact} fallback="Nobody. Repositories without their own list open the picker." />
-      {data.repos.map(repo => <ReviewerList key={repo} repo={repo} list={data.config.repos[repo] ?? []} theme={theme} compact={compact}
-        fallback={data.config.defaults.length ? `Uses the default: ${data.config.defaults.map(reviewerLabel).join(", ")}` : null} />)}
-    </View>}
-    {data && !data.repos.length && <Text style={t.meta}>Repositories show here once Follow-up has seen a PR in them.</Text>}
+    </View>
+    {data.repos.length > 0 ? <Disclosure id="reviewers.repos" title="Repositories" summary={reposSummary(data.repos, data.config)}
+      defaultOpen={!reviewersConfigured(data.config)} theme={theme} compact={compact}>
+      {own.map((repo, i) => <View key={repo} style={{ borderTopWidth: i ? 1 : 0, borderTopColor: c.border }}>
+        <Disclosure framed={false} id={`reviewers.repo.${repo}`} title={repo} summary={repoSummary(data.config.repos[repo] ?? [], data.config.defaults)} defaultOpen={false} theme={theme} compact={compact}>
+          <ReviewerList first titled={false} repo={repo} list={data.config.repos[repo] ?? []} theme={theme} compact={compact} fallback={fallback} />
+        </Disclosure>
+      </View>)}
+      {rest.length > 0 && <DefaultRepos repos={rest} defaults={data.config.defaults} theme={theme} compact={compact} first={!own.length} />}
+    </Disclosure> : <Text style={t.meta}>Repositories show here once Follow-up has seen a PR in them.</Text>}
+  </View>;
+}
+
+/**
+ * Repositories on the default, in one row: their names, each a button that gives it its own list (it then moves up
+ * with the others). No third level, and the default's names aren't repeated per repository.
+ */
+function DefaultRepos({ repos, defaults, theme, compact, first }: { repos: string[]; defaults: ReviewerEntry[]; theme: Theme; compact: boolean; first: boolean }) {
+  const c = theme.colors; const t = text(c);
+  const [editing, setEditing] = useState<string | null>(null);
+  return <View style={{ borderTopWidth: first ? 0 : 1, borderTopColor: c.border }}>
+    <View style={{ paddingLeft: 36, paddingRight: 14, paddingVertical: 10, gap: 6 }}>
+      <Text style={t.meta}>{`On the default${defaults.length ? ` (${defaults.map(reviewerLabel).join(", ")})` : ""}. Give one its own list:`}</Text>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+        {repos.map(repo => <Pressable key={repo} accessibilityRole="button" accessibilityLabel={`Give ${repo} its own list`} accessibilityState={{ selected: editing === repo }} onPress={() => setEditing(editing === repo ? null : repo)}
+          style={state => ({ flexDirection: "row", alignItems: "center", gap: 5, minHeight: compact ? 44 : 28, paddingHorizontal: 8, borderRadius: 6, borderWidth: 1, borderColor: editing === repo ? c.foregroundMuted : c.border, backgroundColor: state.pressed ? c.surface2 : "transparent" })}>
+          <Icon name="GitPullRequest" size={12} color={c.foregroundMuted} />
+          <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 12, lineHeight: 16 }}>{repo}</Text>
+          <Icon name={editing === repo ? "X" : "Plus"} size={12} color={c.foregroundMuted} />
+        </Pressable>)}
+      </View>
+    </View>
+    {editing && <ReviewerList key={editing} repo={editing} list={[]} theme={theme} compact={compact} startAdding fallback="Add the first reviewer for this repository." />}
   </View>;
 }
 
