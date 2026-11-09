@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import { appendFile, mkdir } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { z } from "zod";
 
 /**
@@ -13,7 +13,7 @@ import type { z } from "zod";
  * the CLI's own login, so the plugin holds no key. A Paseo child agent would cost a whole agent session per call.
  */
 
-export type RunInput = { prompt: string; system: string; model: string; timeoutMs: number; signal: AbortSignal };
+export type RunInput = { prompt: string; system: string; provider: string; model: string; thinking: string | null; timeoutMs: number; signal: AbortSignal };
 export type RunOutput = { text: string; costUsd: number | null; inputTokens: number | null; outputTokens: number | null };
 export type Runner = (input: RunInput) => Promise<RunOutput>;
 
@@ -23,8 +23,12 @@ export type JobSpec<T> = {
   prompt: string;
   schema: z.ZodType<T>;
   system?: string;
-  /** "haiku" (default) or "sonnet". */
+  /** "claude" (default) or "codex": the CLI that runs the job. Settings → Agents picks it per role. */
+  provider?: string;
+  /** The provider's model: "haiku" (Claude's default here), "sonnet", "gpt-6-luna"… */
   model?: string;
+  /** Effort / reasoning level where the provider has one; null: the CLI's default. */
+  thinking?: string | null;
   timeoutMs?: number;
   /** The prompt cap in characters (~4 per token). Longer prompts are refused, not truncated: the caller bounds inputs. */
   maxPromptChars?: number;
@@ -34,7 +38,7 @@ export type JobSpec<T> = {
 export type JobResult<T> =
   | { ok: true; value: T; costUsd: number | null; durationMs: number }
   | { ok: false; error: string; reason: "timeout" | "too-large" | "invalid-json" | "invalid-shape" | "failed" | "stopped"; costUsd: number | null; durationMs: number };
-export type JobLog = { at: string; name: string; model: string; ok: boolean; reason: string | null; durationMs: number; costUsd: number | null; promptChars: number; inputTokens: number | null; outputTokens: number | null };
+export type JobLog = { at: string; name: string; provider: string; model: string; ok: boolean; reason: string | null; durationMs: number; costUsd: number | null; promptChars: number; inputTokens: number | null; outputTokens: number | null };
 
 export const DEFAULT_SYSTEM = "You turn the material you are given into the JSON object the user asks for. Reply with that JSON object only: no prose, no code fence. Use only facts in the material; never guess names, numbers or links.";
 
@@ -43,24 +47,29 @@ export class AiJobs {
   private queue: (() => void)[] = [];
   private stopped = false;
   private controllers = new Set<AbortController>();
-  constructor(private opts: { runner?: Runner; concurrency?: number; logPath?: string | null; now?: () => number } = {}) {}
+  /** `runner` replaces every provider (tests); `runners` replaces one provider's CLI. */
+  constructor(private opts: { runner?: Runner; runners?: Partial<Record<string, Runner>>; concurrency?: number; logPath?: string | null; now?: () => number } = {}) {}
 
   get active(): number { return this.running; }
   get waiting(): number { return this.queue.length; }
 
   async run<T>(spec: JobSpec<T>): Promise<JobResult<T>> {
     const now = this.opts.now ?? Date.now;
-    const model = spec.model ?? "haiku";
+    const provider = spec.provider ?? "claude";
+    const model = spec.model ?? DEFAULT_MODEL[provider] ?? "";
     const started = now();
     let entry: JobLog | null = null;
-    const done = (r: JobResult<T>, out?: RunOutput | null) => { entry = ({ at: new Date(started).toISOString(), name: spec.name, model, ok: r.ok, reason: r.ok ? null : r.reason, durationMs: r.durationMs, costUsd: r.costUsd, promptChars: spec.prompt.length, inputTokens: out?.inputTokens ?? null, outputTokens: out?.outputTokens ?? null }); return r; };
-    try { return await this.attempt(spec, model, started, done); } finally { if (entry) await this.log(entry); }
+    const done = (r: JobResult<T>, out?: RunOutput | null) => { entry = ({ at: new Date(started).toISOString(), name: spec.name, provider, model, ok: r.ok, reason: r.ok ? null : r.reason, durationMs: r.durationMs, costUsd: r.costUsd, promptChars: spec.prompt.length, inputTokens: out?.inputTokens ?? null, outputTokens: out?.outputTokens ?? null }); return r; };
+    try { return await this.attempt({ ...spec, provider, model }, model, started, done); } finally { if (entry) await this.log(entry); }
   }
 
   private async attempt<T>(spec: JobSpec<T>, model: string, started: number, done: (r: JobResult<T>, out?: RunOutput | null) => JobResult<T>): Promise<JobResult<T>> {
     const now = this.opts.now ?? Date.now;
     if (spec.prompt.length > (spec.maxPromptChars ?? 60_000)) return done({ ok: false, reason: "too-large", error: `The prompt is ${spec.prompt.length} characters; the cap is ${spec.maxPromptChars ?? 60_000}.`, costUsd: null, durationMs: 0 });
     if (this.stopped) return done({ ok: false, reason: "stopped", error: "Follow-up is stopping.", costUsd: null, durationMs: 0 });
+    const provider = spec.provider ?? "claude";
+    const runner = this.opts.runner ?? this.opts.runners?.[provider] ?? defaultRunner(provider);
+    if (!runner) return done({ ok: false, reason: "failed", error: `${provider} can't run one-shot jobs; pick Claude or Codex in Settings → Agents.`, costUsd: null, durationMs: 0 });
     await this.slot();
     const controller = new AbortController(); this.controllers.add(controller);
     const timeoutMs = spec.timeoutMs ?? 90_000;
@@ -68,8 +77,7 @@ export class AiJobs {
     let out: RunOutput | null = null;
     try {
       const timeout = new Promise<"timeout">(resolve => { timer = setTimeout(() => { controller.abort(); resolve("timeout"); }, timeoutMs); });
-      const runner = this.opts.runner ?? claudeRunner();
-      const result = await Promise.race([runner({ prompt: spec.prompt, system: spec.system ?? DEFAULT_SYSTEM, model, timeoutMs, signal: controller.signal }), timeout]);
+      const result = await Promise.race([runner({ prompt: spec.prompt, system: spec.system ?? DEFAULT_SYSTEM, provider, model, thinking: spec.thinking ?? null, timeoutMs, signal: controller.signal }), timeout]);
       const durationMs = now() - started;
       if (result === "timeout") return done({ ok: false, reason: "timeout", error: `No answer within ${Math.round(timeoutMs / 1000)} s.`, costUsd: null, durationMs });
       out = result;
@@ -123,9 +131,42 @@ export function parseClaudeEnvelope(stdout: string): RunOutput {
     inputTokens: u ? (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) : null, outputTokens: u?.output_tokens ?? null };
 }
 
-export function claudeArgs(input: Pick<RunInput, "model" | "system">): string[] {
+export function claudeArgs(input: Pick<RunInput, "model" | "system"> & { thinking?: string | null }): string[] {
   return ["-p", "--model", input.model, "--output-format", "json", "--max-turns", "1", "--tools", "", "--no-session-persistence",
-    "--strict-mcp-config", "--setting-sources", "", "--disable-slash-commands", "--system-prompt", input.system];
+    "--strict-mcp-config", "--setting-sources", "", "--disable-slash-commands", ...(input.thinking ? ["--effort", input.thinking] : []), "--system-prompt", input.system];
+}
+
+/**
+ * `codex exec` with what can be turned off turned off: no saved session, no user config or rules, no shell tool,
+ * a read-only sandbox in an empty temp directory, JSON events on stdout. Codex has no system-prompt flag, so the
+ * system text leads the prompt on stdin.
+ */
+export function codexArgs(input: Pick<RunInput, "model"> & { thinking?: string | null; cwd: string }): string[] {
+  return ["exec", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "--sandbox", "read-only", "-C", input.cwd,
+    ...(input.model ? ["-m", input.model] : []), ...(input.thinking ? ["-c", `model_reasoning_effort=${input.thinking}`] : []),
+    "--disable", "shell_tool", "--json", "--color", "never", "-"];
+}
+export const codexPrompt = (input: Pick<RunInput, "system" | "prompt">) => `${input.system}\n\n${input.prompt}`;
+
+/** The last agent message and the token counts from `codex exec --json` events. Codex reports no cost. */
+export function parseCodexEvents(stdout: string): RunOutput {
+  let text: string | null = null, error: string | null = null, inputTokens: number | null = null, outputTokens: number | null = null;
+  for (const line of stdout.split("\n")) {
+    let e: { type?: string; item?: { type?: string; text?: unknown }; usage?: { input_tokens?: number; output_tokens?: number }; error?: { message?: string }; message?: string };
+    try { e = JSON.parse(line); } catch { continue; }
+    if (e?.type === "item.completed" && e.item?.type === "agent_message" && typeof e.item.text === "string") text = e.item.text;
+    else if (e?.type === "turn.completed" && e.usage) { inputTokens = e.usage.input_tokens ?? null; outputTokens = e.usage.output_tokens ?? null; }
+    else if (e?.type === "turn.failed" || e?.type === "error") error = e.error?.message ?? e.message ?? "failed";
+  }
+  if (text === null) throw new Error(`Codex returned no reply${error ? `: ${codexError(error)}` : "."}`);
+  return { text, costUsd: null, inputTokens, outputTokens };
+}
+const codexError = (raw: string) => { try { const j = JSON.parse(raw); return String(j?.error?.message ?? raw).slice(0, 200); } catch { return raw.slice(0, 200); } };
+
+/** Claude's own default for jobs; Codex uses its CLI default when no model is set. */
+export const DEFAULT_MODEL: Record<string, string> = { claude: "haiku" };
+export function defaultRunner(provider: string): Runner | null {
+  return provider === "claude" ? claudeRunner() : provider === "codex" ? codexRunner() : null;
 }
 
 /** The envelope of a one-turn reply is a few KB; anything near this is runaway output. */
@@ -133,9 +174,23 @@ export const MAX_STDOUT = 512 * 1024;
 
 /** Spawns `claude` with an argument array (no shell); the prompt goes on stdin. */
 export function claudeRunner(command = "claude"): Runner {
-  return input => new Promise((resolve, reject) => {
-    // Its own process group, so a timeout kills claude and anything it started.
-    const child = spawn(command, claudeArgs(input), { cwd: tmpdir(), detached: true, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" } });
+  return input => spawnJob(command, claudeArgs(input), input.prompt, parseClaudeEnvelope, input, { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" });
+}
+
+/** Spawns `codex exec` the same way, from an empty private temp directory that is removed afterwards. */
+export function codexRunner(command = "codex"): Runner {
+  return async input => {
+    const cwd = await mkdtemp(join(tmpdir(), "follow-up-job-"));
+    try { return await spawnJob(command, codexArgs({ ...input, cwd }), codexPrompt(input), parseCodexEvents, input, {}); }
+    finally { await rm(cwd, { recursive: true, force: true }).catch(() => undefined); }
+  };
+}
+
+function spawnJob(command: string, args: string[], stdin: string, parse: (stdout: string) => RunOutput, input: RunInput, env: Record<string, string>): Promise<RunOutput> {
+  return new Promise((resolve, reject) => {
+    const name = basename(command);
+    // Its own process group, so a timeout kills the CLI and anything it started.
+    const child = spawn(command, args, { cwd: tmpdir(), detached: true, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...env } });
     let stdout = "", stderr = "", capped = false;
     const kill = () => { try { if (child.pid) process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); } };
     input.signal.addEventListener("abort", kill, { once: true });
@@ -145,11 +200,11 @@ export function claudeRunner(command = "claude"): Runner {
     child.on("close", code => {
       input.signal.removeEventListener("abort", kill);
       if (input.signal.aborted) return reject(new Error("Stopped."));
-      if (capped) return reject(new Error("claude wrote more than the output cap."));
-      try { resolve(parseClaudeEnvelope(stdout)); }
-      catch { reject(new Error(`claude exited ${code ?? "early"}: ${(stderr || stdout).trim().split("\n").at(-1)?.slice(0, 200) ?? "no output"}`)); }
+      if (capped) return reject(new Error(`${name} wrote more than the output cap.`));
+      try { resolve(parse(stdout)); }
+      catch (error) { reject(new Error(error instanceof Error && /returned no reply/.test(error.message) ? error.message : `${name} exited ${code ?? "early"}: ${(stderr || stdout).trim().split("\n").at(-1)?.slice(0, 200) ?? "no output"}`)); }
     });
     child.stdin.on("error", () => undefined);
-    child.stdin.end(input.prompt);
+    child.stdin.end(stdin);
   });
 }

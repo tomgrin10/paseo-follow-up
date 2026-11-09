@@ -11,6 +11,7 @@ import { findWorkspace } from "./engine";
 import type { InboxAction } from "./inbox";
 import { priorityInputSchema, type Priority } from "../shared/priorities";
 import type { AboutView } from "../shared/about";
+import { ROLE_INFO, roleSummary, type RoleConfig } from "../shared/agent-settings";
 
 /**
  * Agent parity: every action the developer can click in Follow-up has a tool that runs the same server path.
@@ -20,10 +21,10 @@ import type { AboutView } from "../shared/about";
  * return a dry-run plan first; `confirm: true` with that plan's id runs it. Every agent write is recorded in
  * the inbox ledger as `by: "agent:<id>"`, which never counts as the developer writing to the agent.
  */
-export const AGENT_TOOLS = ["list_prs", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "track", "inbox_list", "sign_off", "snooze", "set_finish_flags", "set_priorities", "workspace_about"] as const;
+export const AGENT_TOOLS = ["list_prs", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "track", "inbox_list", "sign_off", "snooze", "set_finish_flags", "set_priorities", "workspace_about", "agent_settings"] as const;
 export type AgentTool = typeof AGENT_TOOLS[number];
 /** Tools that only read. */
-export const READ_ONLY_TOOLS: readonly AgentTool[] = ["list_prs", "inbox_list", "workspace_about"];
+export const READ_ONLY_TOOLS: readonly AgentTool[] = ["list_prs", "inbox_list", "workspace_about", "agent_settings"];
 /** Tools that can't be undone from Follow-up. */
 export const DESTRUCTIVE_TOOLS: readonly AgentTool[] = ["merge"];
 /** Tools that plan first and run only with `confirm: true` and the plan's id. */
@@ -66,6 +67,8 @@ export type AgentActionDeps = {
   priorities?: { write(batch: Priority[], replace: boolean): Promise<Priority[]> };
   /** "What's this about?": the overview and links for one workspace, written now if there is none yet. */
   about?: { view(workspaceId: string, opts: { open?: boolean; wait?: boolean }): Promise<AboutView> };
+  /** Settings → Agents, read-only: which agent each special role uses. No write tool. */
+  agentSettings?: { all(): Promise<Record<string, RoleConfig>> };
   now?: () => number;
 };
 
@@ -87,6 +90,7 @@ export const TOOL_INPUT: Record<AgentTool, z.ZodType> = {
   track: z.strictObject({ workspace: id }),
   inbox_list: z.strictObject({ flagged_only: z.boolean().optional() }),
   workspace_about: z.strictObject({ workspaceId: id }),
+  agent_settings: z.strictObject({}),
   sign_off: z.strictObject({ agentIds: agentIds.optional(), ...confirm }),
   snooze: z.strictObject({ agentIds: agentIds.optional(), until: z.string().trim().min(1).max(200).optional(), ...confirm }),
   set_finish_flags: z.strictObject({ agentIds: agentIds.optional(), value: z.boolean().optional(), ...confirm }),
@@ -127,6 +131,11 @@ export class AgentActions {
       case "list_prs": return this.listPrs(args);
       case "inbox_list": return this.inboxList(caller, args);
       case "workspace_about": return this.workspaceAbout(args as { workspaceId: string });
+      case "agent_settings": {
+        if (!this.d.agentSettings) throw new Error("agent_settings isn't available in this Follow-up.");
+        const roles = await this.d.agentSettings.all();
+        return { roles: Object.values(roles).map(r => ({ ...r, summary: roleSummary(r), does: ROLE_INFO[r.role].does })), change: "Tom changes these in Follow-up settings → Agents." };
+      }
       case "add_reviewers": return this.planReviewers(caller, args);
       case "merge": return this.planPr(caller, tool, "merge", args);
       case "enable_merge_when_ready": return this.planPr(caller, tool, "enable_mwr", args);
