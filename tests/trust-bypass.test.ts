@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TrustBypass, plainToolPermission, summarize, type PermissionRequestShape } from "../server/trust-bypass";
+import { TrustBypass, plainToolPermission, redact, summarize, type PermissionRequestShape } from "../server/trust-bypass";
 
 // Shapes as Paseo 0.15.2's providers send them (claude/agent.js handlePermissionRequest, codex-app-server-agent.js).
 const claudeBash: PermissionRequestShape = { id: "permission-1", kind: "tool", name: "Bash", input: { command: "cd ~/worktrees/app && git status", description: "Status" } };
@@ -89,8 +89,20 @@ test("plain tool permissions and summaries", () => {
 test("the Settings line says how many were approved today, and the last one", async () => {
   const { trustCountText } = await import("../shared/display");
   assert.equal(trustCountText(undefined), null);
-  assert.equal(trustCountText({ today: 0, recent: [] }), null);
+  assert.equal(trustCountText({ today: 0, recent: [] }), "None approved yet", "on but unused");
   assert.equal(trustCountText({ today: 3, recent: [{ summary: "Bash: cd repo && git status" }] }), "3 prompts approved today · latest Bash: cd repo && git status");
   assert.equal(trustCountText({ today: 1, recent: [{ summary: "Bash: ls" }] }), "1 prompt approved today · latest Bash: ls");
   assert.equal(trustCountText({ today: 0, recent: [{ summary: "Bash: ls" }] }), "None approved today · latest Bash: ls");
+});
+
+test("summaries mask secret-looking values before they reach the log or Settings", () => {
+  for (const [raw, masked] of [
+    ["curl -H 'Authorization: Bearer abc.def.ghi' https://api.example.invalid", "curl -H 'Authorization: Bearer ••• https://api.example.invalid"],
+    ["deploy --token s3cr3tvalue --region us", "deploy --token ••• --region us"],
+    ["API_KEY=abcd1234 npm run x", "API_KEY=••• npm run x"],
+    ["git clone https://user:hunter2@example.invalid/r.git", "git clone https://user:•••@example.invalid/r.git"],
+    ["echo ghp_" + "a".repeat(30), "echo •••"],
+    ["cd repo && git status", "cd repo && git status"],
+  ]) assert.equal(redact(raw), masked, raw);
+  assert.equal(summarize({ id: "s", kind: "tool", name: "Bash", input: { command: "gcloud auth print-access-token --password=p4ss" } }), "Bash: gcloud auth print-access-token --password=•••");
 });
