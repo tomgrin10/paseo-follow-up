@@ -210,7 +210,8 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
           </View>
         </View>
       </CardRow>
-      {active && browserReady === false && <CardRow theme={theme}>
+      {/* Graphite's merge-when-ready needs the browser companion; GitHub repositories use auto-merge and never see this. */}
+      {active && browserReady === false && w.prs.some(p => !settledForDisplay(p) && p.snapshot && p.snapshot.prWorkflow !== "github") && <CardRow theme={theme}>
         <View style={{ gap: 8 }}>
           <View style={{ gap: 2 }}>
             <Text style={t.label}>Merge when ready</Text>

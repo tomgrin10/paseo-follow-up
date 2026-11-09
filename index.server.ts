@@ -43,7 +43,10 @@ import { copyFile, readFile, rename, stat } from "node:fs/promises";
 import { HistoryCache } from "./server/history-cache";
 import { Governor } from "./server/governor";
 import { ListCache } from "./server/list-cache";
-import { scopeWriter } from "./server/scopes";
+import { scopeWriter, workflowSummary } from "./server/scopes";
+import { PrWorkflowStore } from "./server/pr-workflow";
+import { commandName } from "./shared/pr-workflow";
+import { projectRepo } from "./server/daemon";
 import { batchArchive, pruneUnsent } from "./server/batch-archive";
 import { NO_USAGE } from "./shared/usage";
 import { activeWindowMs, conversationGone, DEFAULT_ACTIVE_WINDOW_DAYS } from "./server/agent-load";
@@ -99,7 +102,12 @@ export default function contribute(server: PluginServerContext) {
   };
   const store = new Store(directory, 1_000);
   const onboarding = new OnboardingStore(directory);
-  store.onChanged = scopeWriter(directory);
+  // PR workflow (Graphite or plain GitHub) per repository; scopes.json carries each agent's so its instructions match.
+  const prWorkflow = new PrWorkflowStore(directory);
+  let workspaceRepos: Map<string, string> = new Map();
+  const workspaceRepo = (w: Workspace): string | null => (w.prs.find(p => p.snapshot?.state === "OPEN") ?? w.prs.at(-1))?.repo ?? workspaceRepos.get(w.id) ?? null;
+  const knownRepos = (state: { workspaces: Workspace[] }) => new Set([...state.workspaces.filter(w => w.enable_tracking && !w.archived).flatMap(w => w.prs.map(p => repoKey(p.repo))), ...[...workspaceRepos.values()].map(repoKey)]);
+  store.onChanged = scopeWriter(directory, { agent: w => prWorkflow.agentWorkflow(workspaceRepo(w)), summary: state => workflowSummary([...knownRepos(state)].map(r => prWorkflow.cachedWorkflow(r))) });
   const agentHooks = new AgentHooks(directory, clientEntry());
   const historyCache = HistoryCache.at(directory);
   const gateway = new PaseoGateway(undefined, undefined, undefined, historyCache);
@@ -108,11 +116,21 @@ export default function contribute(server: PluginServerContext) {
   gateway.recoveryRole = () => agentSettings.role("recovery");
   const graphite = new Graphite();
   const github = new Github(undefined, graphite, new Deployments());
+  github.workflow = repo => prWorkflow.workflow(repo);
+  workspaceRepos = gateway.workspaceRepos;
+  prWorkflow.paths = async () => {
+    const paths = new Map<string, string>();
+    for (const p of await gateway.projects(await store.snapshot())) { const repo = projectRepo(p.key); if (repo && p.path && !paths.has(repoKey(repo))) paths.set(repoKey(repo), p.path); }
+    return paths;
+  };
+  prWorkflow.onChanged = () => { void store.snapshot().then(state => store.onChanged(state)).catch(() => undefined); };
   const browser = new BrowserBridge();
   const reviewerStore = new ReviewerConfigStore(directory);
   const reviewerSuggestions = new ReviewerSuggestions();
   const actions = new PrActions(store, github, graphite, browser);
+  actions.savedMethod = repo => prWorkflow.current().repos[repoKey(repo)]?.mergeMethod ?? null;
   const engine = new Engine(store, github, gateway);
+  engine.wording = { reviewFix: repo => commandName(prWorkflow.reviewFix(repo)) };
   const governor = new Governor();
   const listCache = new ListCache();
   engine.paused = () => !governor.allowsBackground();
@@ -248,6 +266,9 @@ export default function contribute(server: PluginServerContext) {
     await backupActiveScope();
     // Reviewers: the one-time seed from earlier requests, before history is pruned. An unreadable reviewers.json only affects Add reviewers.
     await reviewerStore.migrate(await store.snapshot()).catch(() => undefined);
+    // PR workflow: the one-time /fix-pr seed, then resolve every known repository (filesystem checks only, never gt).
+    await prWorkflow.migrate().catch(() => undefined);
+    await prWorkflow.warm(knownRepos(await store.snapshot())).catch(() => undefined);
     await pruneHistory();
     await store.onChanged(await store.snapshot()).catch(() => undefined);
     hooksStarted = true;
@@ -275,7 +296,7 @@ export default function contribute(server: PluginServerContext) {
       const flags = { recovery, brief: !!brief && !recovery, root: root && !recovery, overseer: overseer && !recovery };
       const env = { ...request.env, FOLLOW_THROUGH_TOOLS: "native", FOLLOW_THROUGH_PROVIDER: request.provider, ...(flags.root ? { FOLLOW_THROUGH_ROOT: "1" } : {}), ...(flags.overseer ? { FOLLOW_THROUGH_OVERSEER: "1" } : {}) };
       if (/^[\w-]+$/.test(request.agentId)) await writeFile(join(directory, "hook-state", `native-${request.agentId}.json`), JSON.stringify({ instance: toolsInstance }), { mode: 0o600 }).catch(() => undefined);
-      return { ...request, env, tools: [...request.tools, ...nativeTools(flags, live, invoke)] };
+      return { ...request, env, tools: [...request.tools, ...nativeTools(flags, live, invoke, workflowSummary([...knownRepos(await store.snapshot())].map(r => prWorkflow.cachedWorkflow(r))))] };
     }
     return withSessionMcp({ ...request, env: { ...request.env, FOLLOW_THROUGH_TOOLS: "stdio", FOLLOW_THROUGH_PROVIDER: request.provider } }, directory, clientEntry(), paseoHome, recovery, process.env, brief, root, overseer, providers) as R;
   };
@@ -384,7 +405,7 @@ export default function contribute(server: PluginServerContext) {
     await agentHooks.confirm(w.id, agentId, summary);
     return { workspaceId: w.id, synced: true as const };
   });
-  handle(rpc.agentStatusRpc, async ({ agentId }, { paseo }) => { await requireReady(); const workspaceId = await callerWorkspaceId(agentId, paseo); return agentWorkspace(await store.snapshot(), agentId, "read", workspaceId, "pr"); });
+  handle(rpc.agentStatusRpc, async ({ agentId }, { paseo }) => { await requireReady(); const workspaceId = await callerWorkspaceId(agentId, paseo); const w = agentWorkspace(await store.snapshot(), agentId, "read", workspaceId, "pr"); return { ...w, prWorkflow: prWorkflow.agentWorkflow(workspaceRepo(w)) }; });
   handle(rpc.activateRpc, async ({ workspaceId }) => { await requireReady(); return engine.activate(workspaceId); });
   handle(rpc.sendRpc, async ({ workspaceId, batchId }) => { await requireReady(); return engine.sendPending(workspaceId, batchId); });
   handle(rpc.recoverRpc, async ({ workspaceId }) => { await requireReady(); return engine.startRecovery(workspaceId); });
@@ -565,6 +586,34 @@ export default function contribute(server: PluginServerContext) {
     for (const w of (await store.snapshot()).workspaces) for (const p of w.prs) seen.add(repoKey(p.repo));
     return { config, repos: [...seen].sort() };
   };
+  const prWorkflowRepos = async () => {
+    const repos = new Set((await reviewerSettings()).repos);
+    for (const p of await gateway.projects(await store.snapshot()).catch(() => [])) { const repo = projectRepo(p.key); if (repo) repos.add(repoKey(repo)); }
+    for (const repo of Object.keys(prWorkflow.current().repos)) repos.add(repo);
+    return repos;
+  };
+  const prWorkflowView = async (fresh = false) => prWorkflow.view(await prWorkflowRepos(), fresh);
+  handle(rpc.prWorkflowRpc, async ({ refresh }) => {
+    await requireReady();
+    const view = await prWorkflowView(!!refresh);
+    if (refresh) prWorkflow.onChanged();
+    return view;
+  });
+  handle(rpc.setPrWorkflowRpc, async ({ repo, setting, default: fallback, mergeMethod, reviewFix }) => {
+    await requireReady();
+    if ((setting !== undefined || mergeMethod !== undefined || (reviewFix !== undefined && repo)) && !repo) throw new Error("Name the repository (owner/name) to change.");
+    await prWorkflow.mutate(config => {
+      if (fallback !== undefined) config.default = fallback;
+      if (!repo) { if (reviewFix) config.reviewFix = reviewFix; return; }
+      const own = config.repos[repoKey(repo)] ??= {};
+      if (setting !== undefined) { if (setting === null) delete own.workflow; else own.workflow = setting; }
+      if (mergeMethod !== undefined) { if (mergeMethod === null) delete own.mergeMethod; else own.mergeMethod = mergeMethod; }
+      if (reviewFix !== undefined) { if (reviewFix === null) delete own.reviewFix; else own.reviewFix = reviewFix; }
+    });
+    // A changed workflow changes readiness and merge: check the PRs again now rather than on the next poll.
+    void engine.tick();
+    return prWorkflowView();
+  });
   handle(rpc.reviewerSettingsRpc, async () => { await requireReady(); return reviewerSettings(); });
   handle(rpc.saveReviewersRpc, async ({ repo, reviewers }) => { await requireReady(); await reviewerStore.save(repo, reviewers); return reviewerSettings(); });
   handle(rpc.reviewerSuggestionsRpc, async ({ repo }) => { await requireReady(); return reviewerSuggestions.suggest(repo); });
@@ -701,7 +750,7 @@ export default function contribute(server: PluginServerContext) {
     if (!stopped) aboutTimer = setTimeout(() => void aboutLoop(), 10 * 60_000);
   };
   aboutTimer = setTimeout(() => void aboutLoop(), 60_000);
-  const agentActions = new AgentActions({ store, prActions: actions, engine, inbox, priorities: priorityStore, about, agentSettings });
+  const agentActions = new AgentActions({ store, prActions: actions, engine, inbox, priorities: priorityStore, about, agentSettings, prWorkflows: () => prWorkflowView() });
   handle(rpc.prioritiesRpc, async () => ({ items: await priorityStore.read() }));
   // Provider limits are non-essential: at critical memory only the VM meter is served.
   handle(rpc.usageRpc, async () => ({ ...(governor.allowsExtras() ? await usage.read() : NO_USAGE), resources: governor.current() }));

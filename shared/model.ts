@@ -23,6 +23,13 @@ export const snapshotSchema = z.object({
   complete: z.boolean(), observedAt: z.string(),
   mergeCommit: z.string().nullable().optional(), deployment: deploymentSchema.nullable().optional(),
   mergedAt: z.string().nullable().optional(),
+  /** 1.4.0-beta.14: which workflow observed this PR. Absent (older snapshots) means Graphite, as before. */
+  prWorkflow: z.enum(["graphite", "github"]).optional(),
+  /** GitHub's own merge verdict (CLEAN, BLOCKED, BEHIND, DIRTY, UNSTABLE, HAS_HOOKS, DRAFT, UNKNOWN). */
+  mergeStateStatus: z.string().optional(),
+  inMergeQueue: z.boolean().optional(),
+  /** What the repository allows, read with the PR (no extra request): merge methods, auto-merge and a merge queue. */
+  repoMerge: z.object({ methods: z.array(z.enum(["squash", "merge", "rebase"])), preferred: z.enum(["squash", "merge", "rebase"]).nullable(), autoMerge: z.boolean(), mergeQueue: z.boolean() }).optional(),
 });
 export const prSchema = z.object({
   key: idSchema, repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/), number: z.number().int().positive(),
