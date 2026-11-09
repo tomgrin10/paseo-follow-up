@@ -23,6 +23,8 @@ import { ListTop, SearchField, SortMenu, StatusStrip, UsageMeters, useOmnibox, u
 import { useHomeModel, useTick, type HomeSources } from "./home-data";
 import { useInbox, UndoBar, useNextRelay } from "./inbox";
 import { Spinner } from "./motion";
+import { Setup, SetupOffer, useOnboarding } from "./onboarding";
+import type { OnboardingView } from "../shared/onboarding";
 import { withAlpha, isLight, mergedColor, type Colors } from "./theme";
 
 export const HOME_SCREEN = "follow-through";
@@ -30,7 +32,8 @@ const mono = Platform.OS === "ios" ? "Menlo" : "ui-monospace, SFMono-Regular, Me
 
 export type HomeDeps = {
   sources: HomeSources;
-  openSettings(): void;
+  /** Follow-up's settings, on a category when given (the setup flow's deep links). */
+  openSettings(category?: string): void;
   /** Docks the workspace's own panel in its explorer column. */
   openPanel(workspaceId: string): void;
   openLog(): void;
@@ -43,6 +46,16 @@ export type HomeDeps = {
  * With nothing selected the right side is the brief. `?view=log` shows what Follow-up did on its own.
  */
 export function FollowHome(props: PluginScreenProps & { deps: HomeDeps }) {
+  // Getting started takes Home's place on a fresh install (or after "Set up Follow-up again") until finished or skipped.
+  const onboarding = useOnboarding();
+  // Opened from "Set up again": read the flow's state afresh.
+  const { refetch } = onboarding;
+  useEffect(() => { if (props.params?.setup) void refetch(); }, [props.params?.setup, refetch]);
+  if (onboarding.data?.show) return <Setup theme={props.theme} compact={props.layout.compact} view={onboarding.data} deps={{ openSettings: props.deps.openSettings }} />;
+  return <HomeBody {...props} onboarding={onboarding.data} />;
+}
+
+function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: OnboardingView | undefined }) {
   const { theme, layout, navigation, params = {}, deps } = props;
   const { inbox } = deps.sources;
   const c = theme.colors;
@@ -117,6 +130,7 @@ export function FollowHome(props: PluginScreenProps & { deps: HomeDeps }) {
       </View>
       {!omnibox.results && <StatusStrip theme={theme} model={model} filter={filter} onFilter={setFilter} touch={compact} dense={compact} />}
       {!omnibox.results && <UsageMeters theme={theme} sources={deps.sources} dense={compact} />}
+      {!omnibox.results && <SetupOffer theme={theme} compact={compact} view={props.onboarding} />}
     </ListTop>} />;
 
   if (compact) return <View style={{ flex: 1, backgroundColor: c.surface0 }}>

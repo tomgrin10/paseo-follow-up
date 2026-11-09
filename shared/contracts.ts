@@ -5,6 +5,7 @@ import { usageSchema } from "./usage";
 import { aboutViewSchema } from "./about";
 import { AGENT_ROLES, agentSettingsViewSchema, savedRoleSchema } from "./agent-settings";
 import { defineRpc } from "@getpaseo/plugin";
+import { ONBOARDING_ACTIONS, ONBOARDING_STEPS, checksSchema, onboardingViewSchema } from "./onboarding";
 import { z } from "zod";
 import { inboxRowSchema } from "./inbox";
 import { briefSchema } from "./brief";
@@ -162,3 +163,10 @@ export const overseerRestartRpc = defineRpc({ name: "follow.overseer-restart", i
 /** Settings → Agents. `catalog` asks for Paseo's provider list (cached ten minutes; `fresh` re-reads it). */
 export const agentSettingsRpc = defineRpc({ name: "follow.agent-settings", input: z.object({ catalog: z.boolean().optional(), fresh: z.boolean().optional() }), output: agentSettingsViewSchema });
 export const setAgentSettingRpc = defineRpc({ name: "follow.set-agent-setting", input: z.strictObject({ role: z.enum(AGENT_ROLES), entry: savedRoleSchema.nullable() }), output: agentSettingsViewSchema });
+
+// Getting started (1.4.0-beta.10): the setup flow's progress and its readiness checks. Choices write through the
+// Settings screen's own RPCs and settings documents; these only hold where the flow is.
+export const onboardingRpc = defineRpc({ name: "follow.onboarding", input: z.object({}), output: onboardingViewSchema });
+export const setOnboardingRpc = defineRpc({ name: "follow.set-onboarding", input: z.strictObject({ action: z.enum(ONBOARDING_ACTIONS), step: z.enum(ONBOARDING_STEPS).optional() }), output: onboardingViewSchema });
+/** Run on demand while the flow is open, cached a minute; `fresh` is Check again. Never polled. */
+export const onboardingChecksRpc = defineRpc({ name: "follow.onboarding-checks", input: z.object({ fresh: z.boolean().optional() }), output: checksSchema });
