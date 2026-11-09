@@ -6,7 +6,7 @@ import { recoveryBatch } from "../shared/follow-up";
 import { flagHeadline } from "../shared/headline";
 import type { InboxRow } from "../shared/inbox";
 import type { Pr, State, Workspace } from "../shared/model";
-import { defaultReviewers, noReviewers } from "../shared/reviewers";
+import { configuredReviewers, reviewerLoginSchema, noReviewers, resolveReviewers, reviewerConfig, reviewerLabel, withoutAuthor, type ReviewerEntry } from "../shared/reviewers";
 import { findWorkspace } from "./engine";
 import type { InboxAction } from "./inbox";
 import { priorityInputSchema, type Priority } from "../shared/priorities";
@@ -61,12 +61,12 @@ export type AgentActionDeps = {
     act(input: InboxAction): Promise<{ results: { agentId: string; ok: boolean; cameBack: boolean }[] }>;
     noteAction(by: string, agentId: string, action: string): Promise<void>;
   };
-  reviewersFor?: (repo: string) => { name: string; login: string }[];
+  reviewersFor?: (repo: string) => ReviewerEntry[];
   priorities?: { write(batch: Priority[], replace: boolean): Promise<Priority[]> };
   now?: () => number;
 };
 
-const login = z.string().trim().regex(/^[\w.-]+(\/[\w.-]+)?$/, "Use GitHub logins (or org/team).");
+const login = reviewerLoginSchema;
 const prKey = z.string().trim().regex(/^[\w.-]+\/[\w.-]+#\d+$/, "Use owner/repo#number keys from list_prs.");
 const id = z.string().trim().min(1).max(200);
 const confirm = { planId: id.optional(), confirm: z.boolean().optional() };
@@ -99,6 +99,8 @@ export function prRow(w: Workspace, p: Pr) {
     checks: !s ? "unknown" : s.failedChecks.length ? "failed" : s.checksPending ? "pending" : "passed", failedChecks: s?.failedChecks ?? [],
     openThreads: s?.threads.length ?? 0, reviewDecision: s?.reviewDecision ?? null,
     reviewers: s?.reviewers ? { requested: s.reviewers.requested, teams: s.reviewers.teams, reviewed: s.reviewers.reviewed } : null,
+    // Read-only: who Add reviewers would ask here and where that list comes from (Settings → Reviewers).
+    configuredReviewers: (({ reviewers, source }) => ({ source, reviewers: reviewers.map(r => ({ login: r.login, name: reviewerLabel(r) })) }))(resolveReviewers(reviewerConfig(), p.repo)),
     needsReviewers: noReviewers(p) && !s!.draft, mergeable: blockers.length === 0, mergeBlockers: blockers,
   };
 }
@@ -107,9 +109,9 @@ type Plan = { id: string; tool: AgentTool; caller: string; expiresAt: number; ru
 
 export class AgentActions {
   private plans = new Map<string, Plan>();
-  private reviewersFor: (repo: string) => { name: string; login: string }[];
+  private reviewersFor: (repo: string) => ReviewerEntry[];
   private now: () => number;
-  constructor(private d: AgentActionDeps) { this.reviewersFor = d.reviewersFor ?? defaultReviewers; this.now = d.now ?? Date.now; }
+  constructor(private d: AgentActionDeps) { this.reviewersFor = d.reviewersFor ?? configuredReviewers; this.now = d.now ?? Date.now; }
 
   /** Runs one tool for a verified root agent. The caller's identity is checked by the RPC before this. */
   async run(caller: string, tool: AgentTool, raw: unknown): Promise<unknown> {
@@ -180,14 +182,13 @@ export class AgentActions {
       try {
         const { w, p } = this.findPr(state, key);
         const s = p.snapshot;
-        const author = s?.reviewers?.author?.toLowerCase();
         const chosen = args.reviewers ?? this.reviewersFor(p.repo).map(r => r.login);
-        const reviewers = chosen.filter(l => l.toLowerCase() !== author);
+        const reviewers = withoutAuthor(chosen.map(l => ({ login: l, name: null })), s?.reviewers?.author).map(r => r.login);
         const blockers: string[] = [];
         if (p.error || !s?.complete || !s.reviewers?.complete) blockers.push("Reviewer status is unavailable. Refresh first.");
         else if (s.state !== "OPEN" || s.draft) blockers.push("Not an open PR that is ready for review.");
         else if (!noReviewers(p)) blockers.push("Reviewers already assigned.");
-        if (!chosen.length) blockers.push("No default reviewers for this repository. Pass reviewers.");
+        if (!chosen.length) blockers.push(`No reviewers set for ${p.repo}. Pass reviewers, or ask the developer to set them in Settings → Reviewers.`);
         else if (!reviewers.length) blockers.push("Only the PR author was given.");
         return { pr: p.key, workspaceId: w.id, title: s?.title ?? null, reviewers, source: args.reviewers ? "given" : "defaults", blockers };
       } catch (error) { return { pr: key, workspaceId: null, title: null, reviewers: [] as string[], source: args.reviewers ? "given" : "defaults", blockers: [error instanceof Error ? error.message : String(error)] }; }

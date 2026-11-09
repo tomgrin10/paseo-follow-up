@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { emptyInbox, expired, inboxStateSchema, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason } from "../shared/inbox";
 import type { State as FollowState, Workspace as FollowWorkspace } from "../shared/model";
 import { prActionBlocks } from "../shared/pr-actions";
-import { defaultReviewers, noReviewers } from "../shared/reviewers";
+import { configuredReviewers, noReviewers, reviewerLabel, withoutAuthor } from "../shared/reviewers";
 import { classify, newestUserMessage, type Sources } from "./inbox-classifier";
 import { briefOrigin, briefStep, pickBrief, type Brief, type BriefEvent, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
 
@@ -462,7 +462,7 @@ export class Inbox {
     // The detail already reads as a sentence ("1 review thread to fix on #1499"); CI's is a list of checks.
     const pr = await this.o.briefs.pr(agentId, reason === "ci" ? `Checks failed on ${event.detail}` : reason === "review" ? event.detail : null).catch(() => null);
     if (!pr && reason !== "reviewers") return undefined;
-    const sources: BriefSources = event.type === "reviewers" ? { pr, reviewers: { prKey: event.prKey, number: Number(event.detail.slice(1)), url: event.url, names: event.names } } : { pr };
+    const sources: BriefSources = event.type === "reviewers" ? { pr, reviewers: { prKey: event.prKey, repo: event.prKey.split("#")[0], number: Number(event.detail.slice(1)), url: event.url, names: event.names } } : { pr };
     const create = await this.creator(agentId, null, `:${reason}:${event.dedupeKey.replace(/[^\w#:,.-]/g, "")}`, reason, sources);
     return (prev, next, at) => {
       if (!next.needs?.reasons.some(r => r.reason === reason && r.at === at)) return null;
@@ -756,7 +756,7 @@ export function followUpEvents(follow: FollowState, enablePrClosed: boolean): { 
         // or merge is already in flight for this PR (so a second request isn't asked for while GitHub catches up).
         if (!s.draft && noReviewers(pr) && !w.prActions.some(a => prActionBlocks(a, [pr.key])))
           events.push({ agentId, event: { type: "reviewers", dedupeKey: `${pr.key}:reviewers`, detail: `#${pr.number}`, prKey: pr.key, url: s.url ?? null,
-            names: defaultReviewers(pr.repo).filter(r => r.login.toLowerCase() !== s.reviewers?.author?.toLowerCase()).map(r => r.name) } });
+            names: withoutAuthor(configuredReviewers(pr.repo), s.reviewers?.author).map(reviewerLabel) } });
       } else if (enablePrClosed && (s.state === "MERGED" || s.state === "CLOSED")) {
         events.push({ agentId, event: { type: "pr_closed", dedupeKey: `${pr.key}:${s.state}`, detail: `#${pr.number} ${s.state === "MERGED" ? "merged" : "closed"}`, prKey: pr.key } });
       }

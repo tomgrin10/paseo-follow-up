@@ -56,6 +56,18 @@ Tap a PR, or its segment in the bar, for a sheet with its checks, reviewers and 
 
 ![The PR sheet for a PR whose required checks failed](docs/screenshots/follow-up-pr.png)
 
+### Reviewers
+
+**Add reviewers** asks the people you've set for that repository. Set them in **Settings → Follow-up → Reviewers**:
+
+- Each repository Follow-up has seen a PR in gets its own list. **Default for all repos** covers every repository without one.
+- **Add reviewer** suggests the repository's collaborators and teams from GitHub. You can also type a login (`octocat`) or a team as `org/team`.
+- Remove a reviewer with its ×. The arrow moves a reviewer earlier in the list.
+
+The PR sheet says who will be asked. **Edit…** opens a picker where you check or uncheck people for that PR only. **Remember for owner/repo** saves the choice as that repository's list. With nobody set, **Add reviewers** opens the picker straight away. The PR author is never asked.
+
+The lists are yours, not your team's. Each person who installs Follow-up sets their own. If you upgrade from a version that hardcoded reviewers, each repository keeps the reviewers you last requested there. A fresh install starts empty.
+
 The expand icon next to the gear (or **Follow-up: open the larger view** in ⌘K) opens the workspace as a full screen, in two columns when there is room: what needs you on the left, the stacks and activity on the right. Esc or the collapse icon takes you back.
 
 ![The larger view: Needs you, tasks and activity on the left, pull request stacks on the right](docs/screenshots/follow-up-large.png)
@@ -159,7 +171,7 @@ Tell an agent "the PRs look good, assign reviewers on all" and it can do it. Eve
 | Tool | Does what this button does |
 | --- | --- |
 | `list_prs` | Reads tracked PRs across all workspaces (draft, checks, threads, reviewers, merge blockers). Filters: `needs_reviewers`, `ready_to_merge`, `workspace`. |
-| `add_reviewers` | **Add reviewers**, on one PR or many. Repository defaults, or the logins you name. |
+| `add_reviewers` | **Add reviewers**, on one PR or many. Uses your saved reviewers for the repository, or the logins (or `org/team` slugs) you name. `list_prs` shows each PR's saved reviewers as `configuredReviewers`. |
 | `merge`, `enable_merge_when_ready`, `disable_merge_when_ready` | **Merge** and the PR sheet's merge-when-ready switch, with the same plan and blockers. |
 | `send_repairs`, `set_auto_send`, `clear_hold`, `retry_batch`, `track` | **Send**, the **Auto-send** switch, **Resume**, **Retry**, following a workspace again after an opt-out. |
 | `set_priorities` | Stores external priorities for Home's Priority sort: per workspace a score 0–100, a one-line reason and sources (Linear, Slack, planning, GitHub, Paseo). Plans first; `confirm: true` with the plan id stores them. Used for 6 hours. |
