@@ -85,7 +85,7 @@ try {
   // ── Auto resolves to GitHub (no sign-in), with a reason that doesn't mention Graphite.
   const view = await call('follow.pr-workflow', { refresh: true });
   const row = view.repos.find(r => r.repo === 'example/app');
-  assert.equal(row?.effective, 'github'); assert.equal(row.setting, 'auto'); assert.doesNotMatch(row.reason, /graphite/i);
+  assert.equal(row?.effective, 'github'); assert.equal(row.setting, 'auto'); assert.match(row.reason, /^Using GitHub./);
   assert.equal(view.gt.signedIn, false);
 
   let w = await refresh();

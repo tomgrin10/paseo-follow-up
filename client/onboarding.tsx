@@ -8,6 +8,7 @@ import { displayPreferences } from "../shared/display";
 import { ONBOARDING_STEPS, autoSendWrites, checksSummary, type Check, type OnboardingStep, type OnboardingView } from "../shared/onboarding";
 import { Button, IconButton, errorText, text, type Theme } from "./kit";
 import { ReviewerSettings } from "./reviewers";
+import { ShippingStep } from "./shipping";
 import { Spinner, useReducedMotion } from "./motion";
 import { raised, runningColor, tint, withAlpha, type Colors } from "./theme";
 
@@ -37,6 +38,7 @@ const TITLES: Record<OnboardingStep, string> = {
   intro: "Follow-up keeps your agents' PRs moving",
   checks: "Check your setup",
   defaults: "What Follow-up does without asking",
+  shipping: "How do you ship PRs?",
   reviewers: "Who should review your PRs?",
   helpers: "Helpers, and where things are",
 };
@@ -75,12 +77,14 @@ export function Setup({ theme, compact, view, deps }: { theme: Theme; compact: b
   const body = step === "intro" ? <IntroStep theme={theme} compact={compact} follow={follow.data ?? null} />
     : step === "checks" ? <ChecksStep theme={theme} compact={compact} checks={checks} deps={deps} />
     : step === "defaults" ? <DefaultsStep theme={theme} compact={compact} held={view.holdsAutoSends} />
+    : step === "shipping" ? <ShippingStep theme={theme} compact={compact} />
     : step === "reviewers" ? <ReviewerSettings theme={theme} compact={compact} />
     : <HelpersStep theme={theme} compact={compact} deps={deps} checks={checks.data?.checks ?? null} />;
   const lead: Record<OnboardingStep, string> = {
     intro: "It follows your agents' pull requests until the work is done, sends fixes back to them, and asks you only for decisions.",
     checks: "Follow-up reads PRs with the GitHub CLI, and its helper agents run on Claude or Codex. Checking is free.",
     defaults: "These are on now. Change anything here; it saves as you go, and Settings has the same switches.",
+    shipping: "Follow-up merges and tracks PRs the way each repository already works. It picked these; change one if it's wrong.",
     reviewers: "When you press Add reviewers on a PR, Follow-up asks these people. Set a default for all repositories, or a list for one. Until then, PRs without reviewers show in Needs you.",
     helpers: "Two optional agents. They read, summarise and rank. They never change code or message anyone.",
   };

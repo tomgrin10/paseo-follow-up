@@ -60,8 +60,11 @@ export class PrWorkflowStore {
   private cached: PrWorkflowConfig | null = null;
   private machine: { at: number; gtInstalled: boolean; signedIn: boolean } | null = null;
   private detected = new Map<string, Detected>();
-  /** Repository (owner/name, lowercase) → local checkout, from Paseo's projects. Set by the server. */
-  paths: () => Promise<Map<string, string>> = async () => new Map();
+  /**
+   * Repository (owner/name, lowercase) → local checkouts to look at, best first: the Paseo project's root, then the
+   * working directories of tracked workspaces with PRs there (a repository often has no project registered). Set by the server.
+   */
+  paths: () => Promise<Map<string, string[]>> = async () => new Map();
   /** Called after every save, so derived files (scopes.json) can be rewritten. */
   onChanged: () => void = () => undefined;
   constructor(readonly directory: string, private probe: Probe = fsProbe(), private now = Date.now, private ttl = 600_000) {}
@@ -124,9 +127,13 @@ export class PrWorkflowStore {
     const hit = this.detected.get(key);
     if (!fresh && hit && this.now() - hit.at < this.ttl) return hit;
     const machine = await this.machineState(freshMachine);
-    const path = (await this.paths()).get(key) ?? null;
+    const candidates = [...new Set((await this.paths()).get(key) ?? [])];
+    let path = candidates[0] ?? null;
     const detection: Detection = { gtInstalled: machine.gtInstalled, signedIn: machine.signedIn, path, initialised: false };
-    if (machine.gtInstalled && machine.signedIn && path) detection.initialised = await this.probe.initialised(path).catch(() => false);
+    // File reads only, stopping at the first checkout set up for Graphite.
+    if (machine.gtInstalled && machine.signedIn) for (const candidate of candidates) {
+      if (await this.probe.initialised(candidate).catch(() => false)) { detection.initialised = true; path = candidate; break; }
+    }
     const value = { at: this.now(), path, ...detect(detection) };
     this.detected.set(key, value);
     return value;
@@ -155,7 +162,7 @@ export class PrWorkflowStore {
   }
   reviewFix(repo: string | null): ReviewFix { return reviewFixFor(this.current(), repo); }
 
-  async view(repos: Iterable<string>, fresh = false): Promise<PrWorkflowView> {
+  async view(repos: Iterable<string>, fresh = false, github: (repo: string) => RepoWorkflowView["github"] = () => null): Promise<PrWorkflowView> {
     const config = await this.read();
     const machine = await this.machineState(fresh);
     const rows: RepoWorkflowView[] = [];
@@ -163,7 +170,7 @@ export class PrWorkflowStore {
       const d = await this.detect(repo, fresh, false);
       const { setting, inherits } = repoSetting(config, repo);
       const own = config.repos[repo];
-      rows.push({ repo, setting, inherits, detected: d.workflow, effective: resolveWorkflow(setting, d.workflow), reason: d.reason, path: d.path, mergeMethod: own?.mergeMethod ?? null, reviewFix: own?.reviewFix ?? null });
+      rows.push({ repo, setting, inherits, detected: d.workflow, effective: resolveWorkflow(setting, d.workflow), reason: d.reason, path: d.path, mergeMethod: own?.mergeMethod ?? null, reviewFix: own?.reviewFix ?? null, github: github(repo) });
     }
     return { gt: { installed: machine.gtInstalled, signedIn: machine.signedIn }, default: config.default, reviewFix: config.reviewFix, repos: rows };
   }
