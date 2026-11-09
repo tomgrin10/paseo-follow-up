@@ -99,13 +99,13 @@ export function FollowSettings({ theme, layout }: PluginSurfaceProps) {
   });
   return <ScrollView style={{ flex: 1, backgroundColor: c.surface0 }} contentContainerStyle={{ padding: layout.compact ? 16 : 24, gap: 18, maxWidth: 720, width: "100%", alignSelf: "center", paddingBottom: 40 }}>
     <FollowingSettings theme={theme} />
-    <SettingsSection title="Projects" info="Turn a project off to stop following its new workspaces. Workspaces already followed stay followed; stop one under Workspace exceptions.">
+    <SettingsSection title="Projects" info="With Follow every workspace on, every project is followed unless you turn it off here. Off stops following the project's new workspaces; ones already followed stay followed (stop one under Workspace exceptions). With Follow every workspace off, only the projects on here are followed.">
       {query.isPending && <ActivityIndicator accessibilityLabel="Loading projects" color={c.foregroundMuted} style={{ alignSelf: "flex-start", marginVertical: 8 }} />}
       {query.error && <SettingsCard><SettingsAction label="Couldn't load projects" hint={errorText(query.error)} actionLabel="Retry" onPress={() => void query.refetch()} /></SettingsCard>}
       {query.data?.projects.length === 0 && <Text style={t.meta}>Projects appear here once you add them to Paseo.</Text>}
       {!!query.data?.projects.length && <SettingsCard>
         {query.data.projects.map(project => <SettingsSwitch key={project.id} label={project.name}
-          hint={project.key.startsWith("remote:") ? project.key.slice(7) : project.path}
+          hint={project.key.startsWith("remote:") ? project.key.slice(7) : project.path.split("/").filter(Boolean).slice(-2).join("/")}
           value={project.enable_default_tracking} disabled={change.isPending}
           onValueChange={value => change.mutate({ projectId: project.id, enable_default_tracking: value })} />)}
       </SettingsCard>}

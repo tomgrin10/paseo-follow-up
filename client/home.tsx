@@ -82,7 +82,7 @@ export function FollowHome(props: PluginScreenProps & { deps: HomeDeps }) {
         <SortMenu theme={theme} mode={model.sort} onChange={deps.sources.extras.setSort} rankedAt={model.rankedAt} touch={compact} />
       </View>
       {!omnibox.results && <StatusStrip theme={theme} model={model} filter={filter} onFilter={setFilter} touch={compact} dense={compact} />}
-      <UsageMeters theme={theme} sources={deps.sources} dense={compact} />
+      {!omnibox.results && <UsageMeters theme={theme} sources={deps.sources} dense={compact} />}
     </ListTop>} />;
 
   if (compact) return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
