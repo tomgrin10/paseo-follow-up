@@ -1,0 +1,189 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { PaseoGateway, type Agent, type Daemon, type withDaemon } from "../server/daemon";
+import { DaemonDirectory, DIRTY_REFRESH_MS, BACKSTOP_REFRESH_MS } from "../server/directory";
+import { daemonDirectory } from "../server/inbox-directory";
+import { HistoryCache } from "../server/history-cache";
+import { SessionGuard } from "../server/session-guard";
+import type { State } from "../shared/model";
+import { clock, workspace } from "./fixtures";
+
+// 1.4.0-beta.1: every fetch_workspaces makes the daemon read each workspace's paseo.json through a two-wide pool.
+// Follow-up listed workspaces on every 15 s tick and on every Home/panel RPC, which slowed the app for everyone.
+// These tests count every request a fake daemon receives.
+
+const iso = (ms: number) => new Date(ms).toISOString();
+const agent = (id: string, workspaceId: string, patch: Partial<Agent> = {}): Agent => ({ id, workspaceId, provider: "claude", cwd: "/fixture", createdAt: iso(clock - DAY), status: "idle", activeTurn: null, labels: {}, lastUserMessageAt: iso(clock - 60_000), pendingPermissions: [], ...patch } as Agent);
+const DAY = 86_400_000;
+
+function daemon(agents: Agent[], workspaces: { id: string; name: string; projectId: string }[]) {
+  const requests: Record<string, number> = {}; const reads: string[] = [];
+  const hit = (type: string) => { requests[type] = (requests[type] ?? 0) + 1; };
+  const client = {
+    fetchAgents: async () => { hit("fetch_agents"); return { entries: agents.map(a => ({ agent: structuredClone(a) })), pageInfo: { hasMore: false, nextCursor: null } }; },
+    fetchWorkspaces: async () => { hit("fetch_workspaces"); return { entries: workspaces, pageInfo: { hasMore: false, nextCursor: null } }; },
+    listProjects: async () => { hit("project.list"); return { projects: [{ projectId: "project", projectKey: "remote:github.com/example/app", projectKind: "git", projectDisplayName: "app", projectRootPath: "/fixture" }] }; },
+    fetchAgent: async (id: string) => { hit("fetch_agent"); const a = agents.find(a => a.id === id); return a ? { agent: structuredClone(a) } : null; },
+    fetchAgentTimeline: async (id: string) => { hit("fetch_agent_timeline"); reads.push(id); return { entries: [{ seqStart: 0, item: { type: "user_message", text: "Ship it" } }], startCursor: null, endCursor: null, hasOlder: false, error: null, gap: false, staleCursor: false }; },
+    listProviderSubagents: async () => { hit("provider_subagents"); return { subagents: [] }; },
+    setWorkspaceLabel: async () => { hit("set_workspace_label"); },
+  } as unknown as Daemon;
+  let connections = 0;
+  const total = () => Object.values(requests).reduce((s, n) => s + n, 0);
+  return { client, requests, reads, total, connections: () => connections, connect: (async work => { connections++; return work(client); }) as typeof withDaemon };
+}
+
+async function fixture(t: any, size = 120, awake = 5) {
+  const dir = await mkdtemp(join(tmpdir(), "follow-load-")); t.after(() => rm(dir, { recursive: true, force: true }));
+  const workspaces = Array.from({ length: size }, (_, i) => ({ id: `w${i}`, name: `Workspace ${i}`, projectId: "project" }));
+  // A few loaded, recently used agents (the active scope); the rest dormant and unloaded.
+  const agents = workspaces.map((w, i) => i < awake ? agent(`a${i}`, w.id) : agent(`a${i}`, w.id, { activeTurn: undefined, lastUserMessageAt: iso(clock - 30 * DAY) }));
+  const d = daemon(agents, workspaces);
+  let now = clock;
+  const gateway = new PaseoGateway(d.connect, new SessionGuard(dir), async () => false, HistoryCache.at(dir), () => now);
+  const state: State = { version: 1, workspaces: workspaces.map((w, i) => workspace({ id: w.id, mainAgentId: `a${i}`, enable_tracking: true, dormant: i >= awake })) };
+  return { d, agents, gateway, state, advance: (ms: number) => { now += ms; }, now: () => now };
+}
+
+/** One engine tick as the worker runs it: discovery, then each active workspace's runtime. */
+async function tick(f: Awaited<ReturnType<typeof fixture>>) {
+  await f.gateway.discover(f.state);
+  for (const w of f.state.workspaces.filter(w => !w.dormant)) await f.gateway.observe(w);
+}
+
+test("discovery and runtime observation don't list workspaces on every tick", async t => {
+  const f = await fixture(t);
+  await tick(f);
+  const first = { ...f.d.requests };
+  assert.equal(first.fetch_workspaces, 1, "one listing at start");
+  for (let i = 0; i < 3; i++) { f.advance(15_000); await tick(f); }
+  assert.equal(f.d.requests.fetch_workspaces, 1, "no listing per tick while nothing changed");
+  assert.equal(f.d.requests.fetch_agents, 1);
+  assert.equal(f.d.requests["project.list"], 1);
+});
+
+test("an event marks the directory dirty: re-read at most once a minute, plus a ten-minute backstop", async t => {
+  const f = await fixture(t);
+  await tick(f);
+  f.gateway.directory.turnEnded({ id: "a1", workspaceId: "w1", provider: "claude", cwd: "/", title: null }, { kind: "completed" });
+  f.advance(15_000); await tick(f);
+  f.advance(15_000); await tick(f);
+  assert.equal(f.d.requests.fetch_workspaces, 1, "dirty, but the last read is under a minute old");
+  f.advance(DIRTY_REFRESH_MS); await tick(f);
+  assert.equal(f.d.requests.fetch_workspaces, 2, "dirty and a minute old: one re-read");
+  f.advance(DIRTY_REFRESH_MS); await tick(f);
+  assert.equal(f.d.requests.fetch_workspaces, 2, "clean again: no re-read");
+  f.advance(BACKSTOP_REFRESH_MS); await tick(f);
+  assert.equal(f.d.requests.fetch_workspaces, 3, "the backstop re-reads a clean directory every ten minutes");
+});
+
+test("events patch the directory in place: a turn makes the workspace busy without a re-read", async t => {
+  const f = await fixture(t);
+  await tick(f);
+  const w = f.state.workspaces[1];
+  f.gateway.directory.turnStarted({ id: "a1", workspaceId: "w1", provider: "claude", cwd: "/", title: null }, "turn");
+  assert.equal((await f.gateway.observe(w)).busy, true);
+  f.gateway.directory.turnEnded({ id: "a1", workspaceId: "w1", provider: "claude", cwd: "/", title: null }, { kind: "completed" });
+  assert.equal((await f.gateway.observe(w)).busy, false);
+  f.gateway.directory.permissionRequested("a1", { id: "p1" });
+  assert.match((await f.gateway.observe(w)).reason ?? "", /permission/);
+  f.gateway.directory.permissionResolved("a1", "p1");
+  assert.equal((await f.gateway.observe(w)).reason, null);
+  f.gateway.directory.workspaceArchived("w1");
+  assert.equal((await f.gateway.observe(w)).archived, true);
+  assert.equal(f.d.requests.fetch_workspaces, 1); assert.equal(f.d.requests.fetch_agents, 1);
+});
+
+test("idle request budget: under 2 daemon requests a minute with 120 workspaces", async t => {
+  const f = await fixture(t);
+  // Warm up: the first discovery reads each awake agent's history once.
+  await tick(f); f.advance(15_000); await tick(f);
+  const before = f.d.total(); const connectionsBefore = f.d.connections();
+  // Ten idle minutes at the worker's 15 s cadence, with the inbox and the Overseer reading the same directory.
+  const inbox = daemonDirectory(f.gateway.directory, f.d.connect);
+  for (let i = 0; i < 40; i++) { f.advance(15_000); await tick(f); await inbox.agents(); await inbox.workspaces(); }
+  const perMinute = (f.d.total() - before) / 10;
+  assert.ok(perMinute < 2, `${perMinute} requests/min: ${JSON.stringify(f.d.requests)}`);
+  assert.ok((f.d.connections() - connectionsBefore) / 10 < 2, "and under 2 connections a minute");
+});
+
+test("Home and the panel read the shared directory: inbox reads cost no daemon request", async t => {
+  const f = await fixture(t);
+  await tick(f);
+  const before = f.d.total();
+  const inbox = daemonDirectory(f.gateway.directory, f.d.connect);
+  for (let i = 0; i < 50; i++) { await inbox.agents(); await inbox.workspaces(); await inbox.agent("a3"); }
+  assert.equal(f.d.total(), before);
+});
+
+test("the Done label is sent when it changes, not on every tick", async t => {
+  const f = await fixture(t);
+  const w = f.state.workspaces[0];
+  for (let i = 0; i < 5; i++) await f.gateway.label(w, true);
+  assert.equal(f.d.requests.set_workspace_label, 1);
+  await f.gateway.label(w, false);
+  assert.equal(f.d.requests.set_workspace_label, 2);
+});
+
+test("a cached 'loaded' snapshot is confirmed before any read that would wake the agent", async t => {
+  const f = await fixture(t, 3, 1);
+  await tick(f);
+  assert.deepEqual(f.d.reads, ["a0"]);
+  // The daemon unloaded the idle agent after an hour (no event); a new user message makes discovery want its history.
+  const a0 = f.agents[0]; delete (a0 as { activeTurn?: unknown }).activeTurn;
+  const cached = f.gateway.directory.cached("a0")!; cached.lastUserMessageAt = iso(f.now());
+  f.advance(15_000); await tick(f);
+  assert.deepEqual(f.d.reads, ["a0"], "the confirmed snapshot says unloaded, so the timeline isn't read");
+  // Subagents are only asked about when a send depends on them, and only for a confirmed live agent.
+  assert.equal(f.d.requests.provider_subagents ?? 0, 0);
+});
+
+test("a fresh observation before a send re-reads agents, never the workspace list", async t => {
+  const f = await fixture(t);
+  await tick(f);
+  f.agents[2].status = "running";
+  assert.equal((await f.gateway.observe(f.state.workspaces[2], true)).busy, true);
+  assert.equal(f.d.requests.fetch_agents, 2); assert.equal(f.d.requests.fetch_workspaces, 1);
+});
+
+test("single-workspace discovery (Track, session start) uses the directory and re-reads only for an unknown workspace", async t => {
+  const f = await fixture(t);
+  await tick(f);
+  await f.gateway.discover(f.state, "w3");
+  assert.equal(f.d.requests.fetch_workspaces, 1);
+  await f.gateway.discover(f.state, "brand-new");
+  assert.equal(f.d.requests.fetch_workspaces, 2, "a workspace the directory hasn't seen forces one re-read");
+});
+
+test("concurrent readers share one in-flight read", async () => {
+  const d = daemon([agent("a", "w")], [{ id: "w", name: "w", projectId: "project" }]);
+  const directory = new DaemonDirectory(d.connect);
+  await Promise.all(Array.from({ length: 10 }, () => directory.read()));
+  assert.equal(d.requests.fetch_workspaces, 1);
+});
+
+test("the inbox list answers 'unchanged' in a few bytes when the client already holds it", async () => {
+  const { inboxAnswer } = await import("../server/etag");
+  const answer = { enabled: true, rows: Array.from({ length: 120 }, (_, i) => ({ agentId: `a${i}`, title: `Agent ${i}` })), unsorted: null, firstRun: false, batchUndo: null, signOffs: 0, error: null, overseer: null };
+  const first = inboxAnswer(answer, undefined);
+  assert.equal(first.rows.length, 120); assert.ok(first.etag);
+  const again = inboxAnswer(answer, first.etag);
+  assert.equal(again.unchanged, true); assert.equal(again.rows.length, 0);
+  assert.ok(JSON.stringify(again).length < 300, "a few bytes, not the list");
+  const changed = inboxAnswer({ ...answer, signOffs: 1 }, first.etag);
+  assert.equal(changed.unchanged, undefined); assert.equal(changed.rows.length, 120);
+});
+
+test("Track right after an agent is created re-reads agents once when the directory has none for the workspace", async t => {
+  const f = await fixture(t, 3, 1);
+  await tick(f);
+  f.agents.push(agent("fresh", "w-new"));
+  // The workspace is known (its event arrived), the agent's event hasn't been applied yet.
+  f.gateway.directory.workspaceCreated({ id: "w-new", projectId: "project", name: "New" });
+  const rows = await f.gateway.discover(f.state, "w-new");
+  assert.equal(rows[0]?.mainAgentId, "fresh");
+  assert.equal(f.d.requests.fetch_agents, 2); assert.equal(f.d.requests.fetch_workspaces, 1);
+});

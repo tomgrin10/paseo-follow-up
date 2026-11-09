@@ -46,6 +46,7 @@ export default function contribute(host: PluginClientContext) {
   const paseoWorkspaces = createPaseoWorkspaces(client, { onAdd: register, onRemove: id => { headers.get(id)?.remove(); headers.delete(id); } });
   const extras = createHomeExtras(client);
   const sources = { inbox, live: store, paseo: paseoWorkspaces, extras };
+  const offActivity = extras.onActivity(() => { inbox.nudge(); store.nudge(); });
   // "Sign off & next" from a pill or ⌘K: the screen relays it to the host's navigation.
   let nextToken = 0;
   const openNext = (from: string | null) => client.openScreen({ screenId: OVERVIEW, params: { next: String(++nextToken), ...(from ? { from } : {}) } });
@@ -58,8 +59,8 @@ export default function contribute(host: PluginClientContext) {
   };
   const homeDeps = { sources, openSettings, openPanel, openLog, openHome: openOverview, briefDeps };
   const Overview = (props: PluginScreenProps) => <FollowHome {...props} deps={homeDeps} />;
-  const Panel = (props: PluginWorkspacePanelProps) => <FollowPanel {...props} openSettings={openSettings} openOverview={openOverview} openLarge={openLarge} inbox={inbox} briefDeps={briefDeps} />;
-  const Large = (props: PluginScreenProps) => <FollowLarge {...props} openSettings={openSettings} openOverview={openOverview} />;
+  const Panel = (props: PluginWorkspacePanelProps) => <FollowPanel {...props} openSettings={openSettings} openOverview={openOverview} openLarge={openLarge} inbox={inbox} live={store} briefDeps={briefDeps} />;
+  const Large = (props: PluginScreenProps) => <FollowLarge {...props} openSettings={openSettings} openOverview={openOverview} live={store} />;
   const removers: (() => unknown)[] = [
     client.addScreen({ id: OVERVIEW, title: "Follow-up", Component: Overview }),
     client.addScreen({ id: LARGE_SCREEN, title: params => store.get(params.workspaceId ?? "")?.title ?? "Follow-up", Component: Large }),
@@ -99,7 +100,7 @@ export default function contribute(host: PluginClientContext) {
 
   return async () => {
     stopped = true;
-    visibility.dispose(); removeDisplay(); store.stop(); inbox.stop();
+    offActivity(); visibility.dispose(); removeDisplay(); store.stop(); inbox.stop();
     for (const r of removers) void r();
     for (const button of headers.values()) button.remove();
     await paseoWorkspaces.stop();

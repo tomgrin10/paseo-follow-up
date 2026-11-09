@@ -20,5 +20,12 @@ export function onVisible(wake: () => void): () => void {
   try { doc()?.addEventListener("visibilitychange", listener); } catch { /* no DOM */ }
   return () => { subscription?.remove(); try { doc()?.removeEventListener("visibilitychange", listener); } catch { /* no DOM */ } };
 }
+/**
+ * Schedules the next run of a background poll: after `ms` while the app is in the foreground, never while it is
+ * hidden (1.4.0: the stores pair this with `onVisible`, which polls once on return).
+ */
+export function whileVisible(ms: number, run: () => void): ReturnType<typeof setTimeout> | null {
+  return appVisible() ? setTimeout(run, ms) : null;
+}
 /** The poll interval for now: `visibleMs` in the foreground, `hiddenMs` otherwise. */
 export const pollDelay = (visibleMs: number, hiddenMs: number): number => appVisible() ? visibleMs : hiddenMs;

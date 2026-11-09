@@ -7,7 +7,7 @@ import type { InboxStore } from "./inbox-store";
 import { useInbox } from "./inbox";
 import { BriefCard, type BriefDeps } from "./brief";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getRpc, controlRpc, refreshRpc, browserStatusRpc, recoverRpc, sendRpc, inboxBriefRpc } from "../shared/contracts";
+import { controlRpc, refreshRpc, browserStatusRpc, recoverRpc, sendRpc, inboxBriefRpc } from "../shared/contracts";
 import { summary, type Workspace } from "../shared/model";
 import { followUpObligations, recoveryBatch } from "../shared/follow-up";
 import { settledForDisplay } from "../shared/presentation";
@@ -16,6 +16,9 @@ import { Button, Card, CardRow, FoldRow, IconButton, errorText, text, useNow, ty
 import { Reveal, Skeleton } from "./motion";
 import { WorkspaceHeader } from "./header";
 import { NeedsYouCard, overviewKey, workspaceKey } from "./needs-you";
+import { browserKey, BROWSER_POLL_MS } from "./keys";
+import { useWorkspace } from "./workspace-data";
+import type { LiveStore } from "./live";
 import { StacksCard } from "./stacks";
 import { TasksCard } from "./tasks";
 import { PrSheet } from "./pr-sheet";
@@ -27,7 +30,7 @@ import { AboutSection } from "./about";
 export { overviewKey, workspaceKey };
 
 export type PanelLinks = { openSettings: () => void; openOverview: () => void; openLarge?: (workspaceId: string) => void };
-type PanelProps = PluginWorkspacePanelProps & PanelLinks & { inbox?: InboxStore; briefDeps?: BriefDeps };
+type PanelProps = PluginWorkspacePanelProps & PanelLinks & { inbox?: InboxStore; live?: LiveStore; briefDeps?: BriefDeps };
 
 /**
  * The workspace panel (explorer column, or a tab on the phone): this workspace only. A Home button on top, then
@@ -35,21 +38,21 @@ type PanelProps = PluginWorkspacePanelProps & PanelLinks & { inbox?: InboxStore;
  * tasks, questions, spec, activity and Details. What needs you elsewhere lives on Home.
  */
 export function FollowPanel(props: PanelProps) {
-  const read = useRpc(getRpc);
-  const query = useQuery({ queryKey: workspaceKey(props.workspaceId), queryFn: () => read({ workspaceId: props.workspaceId }), refetchInterval: 5000 });
+  // Paints from the client's live store; one small read of this workspace on open, no poll (1.4.0).
+  const query = useWorkspace(props.live, props.workspaceId);
   const c = props.theme.colors;
   const base = { flex: 1, backgroundColor: c.surface0 };
-  if (query.isPending) return <PanelSkeleton theme={props.theme} compact={props.layout.compact} />;
-  if (query.error && !query.data?.workspace) return <View style={[base, { padding: props.layout.compact ? 16 : 12 }]}>
+  if (query.pending) return <PanelSkeleton theme={props.theme} compact={props.layout.compact} />;
+  if (query.error && !query.workspace) return <View style={[base, { padding: props.layout.compact ? 16 : 12 }]}>
     <Card theme={props.theme} compact={props.layout.compact} icon="CloudOff" title="Can't reach Follow-up" style={{ marginHorizontal: 0, marginTop: 0 }}>
       <CardRow theme={props.theme}>
         <Text accessibilityRole="alert" style={[text(c).meta, { marginBottom: 10 }]}>The plugin didn't answer: {errorText(query.error)}. It may still be starting; your work is saved on the host.</Text>
-        <Button title="Try again" icon="RefreshCw" theme={props.theme} compact={props.layout.compact} loading={query.isRefetching} onPress={() => void query.refetch()} />
+        <Button title="Try again" icon="RefreshCw" theme={props.theme} compact={props.layout.compact} loading={query.refetching} onPress={() => void query.refetch()} />
       </CardRow>
     </Card>
   </View>;
-  if (!query.data?.workspace) return <NothingYet {...props} loadError={query.data?.error} />;
-  return <PanelWorkspace {...props} workspace={query.data.workspace} loadError={query.error ? "Refresh failed. Showing the last saved state." : query.data.error} />;
+  if (!query.workspace) return <NothingYet {...props} loadError={query.loadError} />;
+  return <PanelWorkspace {...props} workspace={query.workspace} loadError={query.error ? "Refresh failed. Showing the last saved state." : query.loadError} />;
 }
 
 function PanelSkeleton({ theme, compact }: { theme: Theme; compact: boolean }) {
@@ -249,7 +252,7 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" | null } | null>(null);
   const [question, setQuestion] = useState<string | null>(null);
   const [specOpen, setSpecOpen] = useState(false);
-  const browser = useQuery({ queryKey: ["follow-through", "browser"], queryFn: () => browserRead({}), refetchInterval: 5000 });
+  const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), refetchInterval: BROWSER_POLL_MS });
   const invalidated = () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); };
   const auto = useMutation({ mutationFn: (next: boolean) => control({ workspaceId: w.id, enable_auto_sends: next }), onSuccess: (_, next) => { toast.show(next ? "Auto-send on for this workspace" : "Auto-send off · repairs wait for your click"); invalidated(); }, onError: e => toast.error(errorText(e)) });
   const update = useMutation({ mutationFn: () => refresh({ workspaceId: w.id }), onSuccess: () => setTimeout(invalidated, 1200), onError: e => toast.error(errorText(e)) });

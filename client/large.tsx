@@ -1,11 +1,11 @@
 import { useEffect } from "react";
 import { Platform, Text, View } from "react-native";
-import { useRpc, type PluginScreenProps } from "@getpaseo/plugin/client";
-import { useQuery } from "@tanstack/react-query";
-import { getRpc } from "../shared/contracts";
+import { type PluginScreenProps } from "@getpaseo/plugin/client";
+import { useWorkspace } from "./workspace-data";
+import type { LiveStore } from "./live";
 import { Button, Card, CardRow, errorText, text } from "./kit";
 import { Skeleton } from "./motion";
-import { PanelTop, WorkspaceView, useSessionFolds, workspaceKey, type PanelLinks } from "./panel";
+import { PanelTop, WorkspaceView, useSessionFolds, type PanelLinks } from "./panel";
 
 export const LARGE_SCREEN = "follow-through-workspace";
 
@@ -13,12 +13,11 @@ export const LARGE_SCREEN = "follow-through-workspace";
  * The panel opened as a Paseo screen: the host supplies the page, header and close button, and the
  * layout switches to two columns. Collapse (or Esc) returns to the workspace, where the panel still is.
  */
-export function FollowLarge(props: PluginScreenProps & PanelLinks) {
+export function FollowLarge(props: PluginScreenProps & PanelLinks & { live?: LiveStore }) {
   const { theme, layout, params, navigation } = props;
   const workspaceId = params.workspaceId ?? "";
   const c = theme.colors;
-  const read = useRpc(getRpc);
-  const query = useQuery({ queryKey: workspaceKey(workspaceId), queryFn: () => read({ workspaceId }), refetchInterval: 5000, enabled: !!workspaceId });
+  const query = useWorkspace(props.live, workspaceId);
   const folds = useSessionFolds(workspaceId);
   const back = () => navigation?.openWorkspace({ workspaceId });
 
@@ -39,10 +38,10 @@ export function FollowLarge(props: PluginScreenProps & PanelLinks) {
     return () => doc.removeEventListener("keydown", onKey);
   }, [navigation, workspaceId]);
 
-  if (query.isPending && workspaceId) return <View accessibilityLabel="Loading Follow-up" style={{ flex: 1, backgroundColor: c.surface0, padding: 24, gap: 12, maxWidth: 1240, width: "100%", alignSelf: "center" }}>
+  if (query.pending && workspaceId) return <View accessibilityLabel="Loading Follow-up" style={{ flex: 1, backgroundColor: c.surface0, padding: 24, gap: 12, maxWidth: 1240, width: "100%", alignSelf: "center" }}>
     <Skeleton width="30%" height={16} color={c.surface2} /><Skeleton width="60%" height={10} color={c.surface2} /><Skeleton width="100%" height={6} color={c.surface2} radius={3} />
   </View>;
-  const w = query.data?.workspace;
+  const w = query.workspace;
   if (!w) return <View style={{ flex: 1, backgroundColor: c.surface0, padding: layout.compact ? 16 : 24 }}>
     <Card theme={theme} compact={layout.compact} icon="GitPullRequest" title="Nothing to show here" style={{ marginHorizontal: 0, marginTop: 0, maxWidth: 520 }}>
       <CardRow theme={theme}>
@@ -52,7 +51,7 @@ export function FollowLarge(props: PluginScreenProps & PanelLinks) {
     </Card>
   </View>;
   return <WorkspaceView theme={theme} layout={layout} host={props.host} navigation={navigation} workspace={w} large
-    loadError={query.error ? "Refresh failed. Showing the last saved state." : query.data?.error ?? null}
+    loadError={query.error ? "Refresh failed. Showing the last saved state." : query.loadError}
     openSettings={props.openSettings} openOverview={props.openOverview} folds={folds}
     top={<PanelTop theme={theme} compact={layout.compact} openOverview={props.openOverview} />}
     resize={navigation ? { icon: "Minimize2", label: "Back to the workspace (Esc)", onPress: back } : null} />;
