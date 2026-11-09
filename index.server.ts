@@ -34,8 +34,13 @@ import { fileSources } from "./server/inbox-classifier";
 import { onBeforeSend } from "./server/daemon";
 import { copyFile, readFile, rename } from "node:fs/promises";
 import { HistoryCache } from "./server/history-cache";
+import { Governor } from "./server/governor";
+import { ListCache } from "./server/list-cache";
+import { scopeWriter } from "./server/scopes";
+import { batchArchive, pruneUnsent } from "./server/batch-archive";
+import { NO_USAGE } from "./shared/usage";
 import { conversationGone, DEFAULT_ACTIVE_WINDOW_DAYS } from "./server/agent-load";
-import { ACTIVE_SCOPE_MIGRATION, autoSendsByDefault, FOLLOW_EVERY_MIGRATION, followsByDefault, followsEvery, migrateFollowEvery, optedOut } from "./shared/settings";
+import { ACTIVE_SCOPE_MIGRATION, PRUNE_MIGRATION, autoSendsByDefault, FOLLOW_EVERY_MIGRATION, followsByDefault, followsEvery, migrateFollowEvery, optedOut } from "./shared/settings";
 import { BRIEF_KIND, BRIEF_VERSION, prState, validateNeedsYou, type Brief, type NeedsYouRecord } from "./shared/brief";
 
 export default function contribute(server: PluginServerContext) {
@@ -45,7 +50,8 @@ export default function contribute(server: PluginServerContext) {
   const questionMode = async (): Promise<QuestionMode> => { try { const state = await questionSettings.read(); return state.status === "ready" ? state.values.mode : DEFAULT_QUESTION_MODE; } catch { return DEFAULT_QUESTION_MODE; } };
   const directory = join(paseoHome, "plugin-data", "follow-through");
   const bridge = join(directory, "mcp.mjs");
-  const store = new Store(directory);
+  const store = new Store(directory, 1_000);
+  store.onChanged = scopeWriter(directory);
   const agentHooks = new AgentHooks(directory, clientEntry());
   const gateway = new PaseoGateway(undefined, undefined, undefined, HistoryCache.at(directory));
   const graphite = new Graphite();
@@ -53,6 +59,11 @@ export default function contribute(server: PluginServerContext) {
   const browser = new BrowserBridge();
   const actions = new PrActions(store, github, graphite, browser);
   const engine = new Engine(store, github, gateway);
+  const governor = new Governor();
+  const listCache = new ListCache();
+  engine.paused = () => !governor.allowsBackground();
+  const archive = batchArchive(directory);
+  engine.archive = archive;
   const usage = new UsageReader(paseoHome);
   // Unknown is not off: an unreadable document keeps the inbox on with its defaults.
   const inboxSettings = async () => { try { const state = await displaySettings.read(); if (state.status === "ready") return state.values; } catch {} return displayPreferences.schema.parse({}); };
@@ -121,6 +132,8 @@ export default function contribute(server: PluginServerContext) {
   const inboxLoop = async () => {
     await ready;
     if (stopped || loadError) return;
+    // Critical memory: the inbox's background reads wait too; hooks still record live events.
+    if (!governor.allowsExtras()) { if (!stopped) inboxTimer = setTimeout(() => void inboxLoop(), 15_000); return; }
     try { await writeBriefState().catch(() => undefined); await inbox.tick(); await inbox.observeGuard(); await inbox.observeFollowUp(await store.snapshot()); inboxError = null; }
     catch (error) { inboxError = error instanceof Error ? error.message : "The Needs-you inbox couldn't update."; }
     if (!stopped) inboxTimer = setTimeout(() => void inboxLoop(), 15_000);
@@ -143,6 +156,17 @@ export default function contribute(server: PluginServerContext) {
     await copyFile(join(directory, "state.json"), join(directory, "state.before-follow-every.json.bak"), 1).catch(error => { if (!["ENOENT", "EEXIST"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error; });
     await store.mutate(state => { migrateFollowEvery(state); });
   };
+  /**
+   * 1.3.0-beta.4: once, back up state.json and move never-sent cancelled batches beyond the newest few per
+   * workspace to the archive (see pruneUnsent). Archived first, so nothing is lost if the write fails.
+   */
+  const pruneHistory = async () => {
+    if ((await store.snapshot()).migrations?.includes(PRUNE_MIGRATION)) return;
+    await copyFile(join(directory, "state.json"), join(directory, "state.before-prune.json.bak"), 1).catch(error => { if (!["ENOENT", "EEXIST"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error; });
+    const preview = await store.read();
+    for (const w of preview.workspaces) await archive(w.id, pruneUnsent(w));
+    await store.mutate(state => { for (const w of state.workspaces) pruneUnsent(w); state.migrations = [...state.migrations ?? [], PRUNE_MIGRATION]; });
+  };
   /** 1.3.0-beta.3: back up once before the active-scope migration (applied by the engine after its first discovery). */
   const backupActiveScope = async () => {
     if ((await store.snapshot()).migrations?.includes(ACTIVE_SCOPE_MIGRATION)) return;
@@ -152,9 +176,12 @@ export default function contribute(server: PluginServerContext) {
     unlock = await store.lock();
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await writeFile(bridge, mcpSource, { mode: 0o600 });
+    governor.start();
     await engine.recover();
     await migrateTracking();
     await backupActiveScope();
+    await pruneHistory();
+    await store.onChanged(await store.snapshot()).catch(() => undefined);
     hooksStarted = true;
     await agentHooks.start().catch(() => { hookError = "Automatic sidebar instructions could not be registered for every provider. Check Claude/Codex hook settings; following still works."; });
     hookTimer = setInterval(() => void agentHooks.heartbeat().catch(() => {}), 30_000);
@@ -256,7 +283,7 @@ export default function contribute(server: PluginServerContext) {
     const view = browserWorkspaces(entries);
     return { tracked: true, ...view, workspaces: view.workspaces.map(w => ({ ...w, title: w.title.slice(0, 200), agentStatus: w.agentStatus.slice(0, 40), state: w.state.slice(0, 200) })) };
   });
-  server.handle(rpc.listRpc, async () => { await ready; return { workspaces: (await store.snapshot()).workspaces.filter(w => w.enable_tracking), error: loadError ?? hookError ?? engine.error }; });
+  server.handle(rpc.listRpc, async ({ since }) => { await ready; return { ...listCache.answer(await store.snapshot(), since), error: loadError ?? hookError ?? engine.error }; });
   server.handle(rpc.getRpc, async ({ workspaceId }) => { await ready; return { workspace: (await store.snapshot()).workspaces.find(w => w.id === workspaceId && w.enable_tracking) ?? null, error: loadError ?? hookError ?? engine.error }; });
   server.handle(rpc.syncWorkspaceRpc, async ({ agentId, summary }, { paseo }) => {
     await requireReady();
@@ -440,7 +467,8 @@ export default function contribute(server: PluginServerContext) {
   const priorityStore = new PriorityStore(directory);
   const agentActions = new AgentActions({ store, prActions: actions, engine, inbox, priorities: priorityStore });
   server.handle(rpc.prioritiesRpc, async () => ({ items: await priorityStore.read() }));
-  server.handle(rpc.usageRpc, async () => usage.read());
+  // Provider limits are non-essential: at critical memory only the VM meter is served.
+  server.handle(rpc.usageRpc, async () => ({ ...(governor.allowsExtras() ? await usage.read() : NO_USAGE), resources: governor.current() }));
   server.handle(rpc.agentActRpc, async ({ agentId, tool, args }, { paseo }) => {
     await requireReady(); seen(paseo);
     if (!(AGENT_TOOLS as readonly string[]).includes(tool)) throw new Error(`Unknown Follow-up tool ${tool}.`);
@@ -598,8 +626,8 @@ export default function contribute(server: PluginServerContext) {
     server.on("workspace.archived", async event => { await ready; if (!loadError && !stopped) await store.mutate(state => { const w = state.workspaces.find(w => w.id === event.workspace.id); if (w) w.archived = true; }); }),
   ];
   return async () => {
-    stopped = true; if (timer) clearTimeout(timer); if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
+    stopped = true; governor.stop(); if (timer) clearTimeout(timer); if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
     await ready; if (hooksStarted) await agentHooks.stop().catch(() => {});
-    await actions.close(); await closeConnections(); await engine.stop(); await ready; await unlock?.();
+    await actions.close(); await closeConnections(); await engine.stop(); await ready; await store.flush().catch(() => undefined); await unlock?.();
   };
 }

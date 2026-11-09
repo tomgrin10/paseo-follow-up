@@ -101,3 +101,18 @@ test("contributor sessions get PR registration and CLI fallback instructions wit
     assert.equal(await f.run({ hook_event_name: "Stop" }, { PASEO_AGENT_ID: "root-session" }), null);
   } finally { await f.close(); }
 });
+
+test("1.3.0-beta.4: the hook reads the small scopes.json instead of state.json when the worker wrote it", async () => {
+  const f = await fixture();
+  try {
+    const { scopes } = await import("../server/scopes");
+    // state.json says untracked; scopes.json (what the worker derives on each save) says main.
+    await writeFile(join(f.directory, "state.json"), JSON.stringify({ version: 1, workspaces: [] }));
+    assert.equal(await f.run({ hook_event_name: "SessionStart" }), null, "fallback: no scopes.json, so state.json decides");
+    await writeFile(join(f.directory, "scopes.json"), JSON.stringify({ version: 1, agents: scopes({ version: 1, workspaces: [f.w] } as any) }));
+    const out = await f.run({ hook_event_name: "SessionStart" });
+    assert.match(out.hookSpecificOutput.additionalContext, /workspace_status/);
+    await writeFile(join(f.directory, "scopes.json"), JSON.stringify({ version: 1, agents: {} }));
+    assert.equal(await f.run({ hook_event_name: "SessionStart" }), null);
+  } finally { await f.hooks.stop(); await f.close(); }
+});

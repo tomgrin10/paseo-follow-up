@@ -3,10 +3,13 @@ import { inboxActRpc, inboxListRpc } from "../shared/contracts";
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type { InboxRow } from "../shared/inbox";
 import { subscribeDisplay } from "./display";
+import { onVisible, pollDelay } from "./visibility";
 
 type List = RpcOutput<typeof inboxListRpc>;
 export type Recent = { agentIds: string[]; label: string; at: number; batch: boolean };
 const POLL_MS = 4_000;
+/** While the app is hidden (1.3.0-beta.4). */
+const HIDDEN_POLL_MS = 30_000;
 
 /**
  * One shared poll of the inbox for every surface on this client. Sign-offs apply optimistically;
@@ -47,13 +50,14 @@ export function createInboxStore(client: PluginClientContext) {
     } catch {
       failures++;
       if (failures >= 2 && offlineSince === null) { offlineSince = Date.now(); emit(); }
-    } finally { if (!stopped) timer = setTimeout(() => void poll(), POLL_MS); }
+    } finally { if (!stopped) timer = setTimeout(() => void poll(), pollDelay(POLL_MS, HIDDEN_POLL_MS)); }
   };
   const refresh = () => { if (timer) clearTimeout(timer); void poll(); };
   const unsubscribe = subscribeDisplay(values => {
     const on = values.enable_inbox !== false;
     if (on !== enabled) { enabled = on; emit(); if (on) refresh(); }
   });
+  const offVisible = onVisible(refresh);
   void poll();
 
   const patch = (agentIds: string[], change: (row: InboxRow) => InboxRow) => {
@@ -91,7 +95,7 @@ export function createInboxStore(client: PluginClientContext) {
     recent: () => recent,
     clearRecent() { recent = null; emit(); },
     refresh,
-    stop() { stopped = true; if (timer) clearTimeout(timer); listeners.clear(); unsubscribe(); },
+    stop() { stopped = true; offVisible(); if (timer) clearTimeout(timer); listeners.clear(); unsubscribe(); },
 
     /** Sign off now; queue for replay when the host can't be reached. */
     async signOff(requested: string[], options: { muteTurn?: boolean } = {}) {

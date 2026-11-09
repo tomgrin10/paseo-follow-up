@@ -61,7 +61,7 @@ function FollowingSettings({ theme }: Pick<PluginSurfaceProps, "theme">) {
           onValueChange={value => change.mutate({ enable_follow_every: value })} />
         <SettingsSwitch label="Send repairs automatically" hint="Review threads and red CI go to the workspace's agent on their own. Applies to workspaces Follow-up starts following from now on." value={data.enable_auto_sends_default} disabled={change.isPending}
           onValueChange={value => change.mutate({ enable_auto_sends_default: value })} />
-        <SettingsSelect label="Watch closely for" hint="A workspace with no message from you in this long, no loaded agent and no open PR rests. It stays listed but isn't checked, and nothing is sent to it, until a turn starts there."
+        <SettingsSelect label="Rest workspaces after" hint="A workspace rests when you haven't messaged it in this long, its agent isn't loaded and it has no open PR. It stays listed, but isn't checked and gets nothing sent until you start a turn there."
           value={String(windowDays)} disabled={change.isPending}
           options={[...new Set([1, 3, 7, 14, windowDays])].sort((a, b) => a - b).map(d => ({ value: String(d), label: d === 1 ? "1 day" : `${d} days` }))}
           onValueChange={value => change.mutate({ activeWindowDays: Number(value) })} />
@@ -69,14 +69,14 @@ function FollowingSettings({ theme }: Pick<PluginSurfaceProps, "theme">) {
     </SettingsSection>
     {!!data?.workspaces.length && <SettingsSection title="Workspace exceptions" info="Stop following one workspace, or change its auto-send. Following it again picks up its PRs on the next refresh.">
       <SettingsCard>
-        <SettingsSelect label="Workspace" value={picked} options={[{ value: "", label: "Choose a workspace" }, ...data.workspaces.map(w => ({ value: w.id, label: w.title }))]} onValueChange={setPicked} />
+        <SettingsSelect label="Workspace" value={picked} options={[{ value: "", label: "Choose a workspace" }, ...data.workspaces.map(w => ({ value: w.id, label: w.dormant ? `${w.title} · resting` : w.title }))]} onValueChange={setPicked} />
         {chosen && <SettingsSwitch label="Follow this workspace" value={!chosen.optedOut && chosen.enable_tracking} disabled={change.isPending}
           onValueChange={value => change.mutate({ workspace: { workspaceId: chosen.id, follow: value } }, { onSuccess: () => toast.show(value ? `Following ${chosen.title}` : `Stopped following ${chosen.title}`, { variant: "success" }) })} />}
-        {chosen && !chosen.optedOut && chosen.enable_tracking && <SettingsSwitch label="Send repairs automatically" hint={chosen.parked ? "Resting. Turns back on by itself when the workspace is active again." : chosen.dormant ? "Resting. Nothing is sent until a turn starts there." : undefined} value={chosen.enable_auto_sends} disabled={change.isPending}
+        {chosen && !chosen.optedOut && chosen.enable_tracking && <SettingsSwitch label="Send repairs automatically" hint={chosen.parked ? "Resting. Auto-send was paused and comes back when the workspace is active again. Changing it here makes your choice stick." : chosen.dormant ? "Resting. Nothing is sent until you start a turn there." : undefined} value={chosen.enable_auto_sends} disabled={change.isPending}
           onValueChange={value => change.mutate({ workspace: { workspaceId: chosen.id, enable_auto_sends: value } })} />}
       </SettingsCard>
       {exceptions.length > 0 && <SettingsCard>
-        {exceptions.map(w => <SettingsAction key={w.id} label={w.title} hint={w.optedOut || !w.enable_tracking ? "Not followed" : w.enable_auto_sends ? "Sends repairs automatically" : "Repairs wait for you"}
+        {exceptions.map(w => <SettingsAction key={w.id} label={w.title} hint={(w.optedOut || !w.enable_tracking ? "Not followed" : w.enable_auto_sends ? "Sends repairs automatically" : "Repairs wait for you") + (w.dormant && !w.optedOut && w.enable_tracking ? " · resting" : "")}
           actionLabel="Edit" onPress={() => setPicked(w.id)} />)}
       </SettingsCard>}
       {!exceptions.length && <Text style={t.meta}>No exceptions. Every workspace is followed the same way.</Text>}
