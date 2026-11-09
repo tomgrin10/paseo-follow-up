@@ -8,6 +8,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { followSettingsRpc, projectSettingsRpc, setFollowSettingsRpc, setProjectTrackingRpc } from "../shared/contracts";
 import { errorText, text } from "./kit";
 import { DisplaySections } from "./display";
+import { ReviewerSettings } from "./reviewers";
 
 const settingsKey = ["follow-through", "project-settings"];
 
@@ -114,6 +115,9 @@ export function FollowSettings({ theme, layout }: PluginSurfaceProps) {
           value={project.enable_default_tracking} disabled={change.isPending}
           onValueChange={value => change.mutate({ projectId: project.id, enable_default_tracking: value })} />)}
       </SettingsCard>}
+    </SettingsSection>
+    <SettingsSection title="Reviewers" info="Who Add reviewers asks on a PR. Set a list per repository, or a default for every repository without one. A login is a GitHub user (octocat) or a team (org/team). Teammates each keep their own lists.">
+      <ReviewerSettings theme={theme} compact={layout.compact} />
     </SettingsSection>
     <QuestionSettings theme={theme} />
     <DisplaySections theme={theme} />

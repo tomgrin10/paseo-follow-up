@@ -8,6 +8,7 @@ import type { Workspace } from "../shared/model";
 import { Button, Card, CardRow, errorText, text, type Theme } from "./kit";
 import type { Colors } from "./theme";
 import { meanwhile } from "./questions";
+import { useReviewerSettings } from "./reviewers";
 
 import { overviewKey, workspaceKey } from "./keys";
 export { overviewKey, workspaceKey };
@@ -36,6 +37,7 @@ export type NeedActions = {
 /** The developer's queue: one row per decision, each with its single action inline. */
 export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date.now(), flush = false, skip = [] }: { workspace: Workspace; theme: Theme; compact: boolean; actions: NeedActions; now?: number; flush?: boolean; skip?: NeedItem["kind"][] }) {
   const c = theme.colors; const t = text(c);
+  useReviewerSettings();
   const toast = useToast();
   const cache = useQueryClient();
   const control = useRpc(controlRpc); const send = useRpc(sendRpc); const check = useRpc(checkPrActionRpc);

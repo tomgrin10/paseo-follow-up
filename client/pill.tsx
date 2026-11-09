@@ -17,6 +17,7 @@ import type { LiveStore } from "./live";
 import { NeedsYouList, workspaceKey } from "./needs-you";
 import { PrSheet } from "./pr-sheet";
 import { QuestionSheet, QuestionStepper } from "./questions";
+import { useReviewerSettings } from "./reviewers";
 
 export const PILL_ID = "follow-up";
 
@@ -42,6 +43,7 @@ const stateFor = (t: Target | undefined, recent: { agentIds: string[]; at: numbe
   t ? pillState({ row: t.row, items: t.items, recent, now }) : null;
 
 function useTarget(deps: Deps, agentId: string, workspaceId: string) {
+  useReviewerSettings();
   useSyncExternalStore(deps.live.subscribe, deps.live.version, deps.live.version);
   useInbox(deps.inbox, () => deps.inbox.version());
   const now = Date.now();

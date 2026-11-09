@@ -2,7 +2,7 @@ import { summary, type Batch, type Pr, type Workspace, type Status } from "./mod
 import { followUpObligations, recoveryBatch } from "./follow-up";
 import { orderedStacks, settledForDisplay } from "./presentation";
 import { graphiteReady, prActionBlocks } from "./pr-actions";
-import { defaultReviewers, noReviewers } from "./reviewers";
+import { configuredReviewers, noReviewers } from "./reviewers";
 import { isOpen as questionOpen, questionState, type QuestionState } from "./questions";
 
 /** One colour language for the stack bar, rail nodes and overview bars. */
@@ -117,7 +117,7 @@ export function needsYou(w: Workspace, now = Date.now()): NeedItem[] {
   for (const pr of stackOrder(w.prs)) {
     // Only offer Merge here when Graphite agrees; otherwise the PR sheet explains what is missing.
     if (mergeReady(pr, w, now) && graphiteReady(pr.snapshot?.graphiteMergeStatus) && !blocking(pr)) items.push({ kind: "merge", key: `merge:${pr.key}`, prKey: pr.key, number: pr.number, title: `#${pr.number} is approved`, detail: pr.snapshot!.title });
-    else if (noReviewers(pr) && !pr.snapshot!.draft && defaultReviewers(pr.repo).length && !blocking(pr)) items.push({ kind: "reviewers", key: `reviewers:${pr.key}`, prKey: pr.key, number: pr.number, title: `#${pr.number} has no reviewers`, detail: pr.snapshot!.title });
+    else if (noReviewers(pr) && !pr.snapshot!.draft && configuredReviewers(pr.repo).length && !blocking(pr)) items.push({ kind: "reviewers", key: `reviewers:${pr.key}`, prKey: pr.key, number: pr.number, title: `#${pr.number} has no reviewers`, detail: pr.snapshot!.title });
   }
   return items;
 }
