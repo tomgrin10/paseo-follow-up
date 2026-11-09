@@ -562,6 +562,12 @@ export class Inbox {
     return { results };
   }
 
+  /** The stored brief for one agent, for Home's detail pane. */
+  async brief(agentId: string): Promise<Brief | null> {
+    if (!await this.on()) return null;
+    return (await this.store.snapshot()).entries[agentId]?.brief ?? null;
+  }
+
   /** Rows for every root agent that is flagged, snoozed, running or signed off today, plus Unsorted. */
   async list(): Promise<{ enabled: boolean; rows: InboxRow[]; unsorted: InboxRow[] | null; firstRun: boolean; batchUndo: { at: string; count: number } | null; signOffs: number; briefStats: BriefStats }> {
     const enabled = await this.on();

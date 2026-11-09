@@ -1,16 +1,15 @@
 import { useState } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
-import { useRpc, useTabState, openExternalUrl, type PluginHostProps, type PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
+import { useRpc, openExternalUrl, type PluginHostProps, type PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { z } from "zod";
-import { getRpc, controlRpc, refreshRpc, activateRpc, browserStatusRpc, recoverRpc, sendRpc } from "../shared/contracts";
+import { controlRpc, refreshRpc, browserStatusRpc, recoverRpc, sendRpc } from "../shared/contracts";
 import { summary, type Workspace } from "../shared/model";
 import { followUpObligations, recoveryBatch } from "../shared/follow-up";
 import { settledForDisplay } from "../shared/presentation";
 import { ago, sendBlocker, shortRefs } from "../shared/attention";
-import { Button, Card, CardRow, FoldRow, IconButton, errorText, text, useNow, type Theme } from "./kit";
-import { Reveal, Skeleton, Spinner } from "./motion";
+import { Button, Card, CardRow, FoldRow, errorText, text, useNow, type Theme } from "./kit";
+import { Reveal } from "./motion";
 import { WorkspaceHeader } from "./header";
 import { NeedsYouCard, overviewKey, workspaceKey } from "./needs-you";
 import { StacksCard } from "./stacks";
@@ -18,79 +17,11 @@ import { TasksCard } from "./tasks";
 import { PrSheet } from "./pr-sheet";
 import { ActivityCard, QuestionSheet } from "./questions";
 import { SpecRow, SpecSheet } from "./spec";
-import { mergedColor, tint } from "./theme";
+import { tint } from "./theme";
 
 export { overviewKey, workspaceKey };
 
 export type PanelLinks = { openSettings: () => void; openOverview: () => void; openLarge?: (workspaceId: string) => void };
-type PanelProps = PluginWorkspacePanelProps & PanelLinks;
-
-export function FollowPanel(props: PanelProps) {
-  const read = useRpc(getRpc);
-  const query = useQuery({ queryKey: workspaceKey(props.workspaceId), queryFn: () => read({ workspaceId: props.workspaceId }), refetchInterval: 5000 });
-  const c = props.theme.colors;
-  const base = { flex: 1, backgroundColor: c.surface0 };
-  if (query.isPending) return <PanelSkeleton theme={props.theme} compact={props.layout.compact} />;
-  if (query.error && !query.data?.workspace) return <View style={[base, { padding: props.layout.compact ? 16 : 12 }]}>
-    <Card theme={props.theme} compact={props.layout.compact} icon="CloudOff" title="Can't reach Follow-up" style={{ marginHorizontal: 0, marginTop: 0 }}>
-      <CardRow theme={props.theme}>
-        <Text accessibilityRole="alert" style={[text(c).meta, { marginBottom: 10 }]}>The plugin didn't answer: {errorText(query.error)}. It may still be starting; your tracked work is saved on the host.</Text>
-        <Button title="Try again" icon="RefreshCw" theme={props.theme} compact={props.layout.compact} loading={query.isRefetching} onPress={() => void query.refetch()} />
-      </CardRow>
-    </Card>
-  </View>;
-  if (!query.data?.workspace) return <StartTracking {...props} loadError={query.data?.error} />;
-  return <PanelWorkspace {...props} workspace={query.data.workspace} loadError={query.error ? "Refresh failed. Showing the last saved state." : query.data.error} />;
-}
-
-function PanelSkeleton({ theme, compact }: { theme: Theme; compact: boolean }) {
-  const c = theme.colors; const pad = compact ? 16 : 12;
-  return <View accessibilityLabel="Loading Follow-up" style={{ flex: 1, backgroundColor: c.surface0 }}>
-    <View style={{ padding: pad, gap: 10, borderBottomWidth: 1, borderBottomColor: c.border }}>
-      <Skeleton width="55%" height={14} color={c.surface2} />
-      <Skeleton width="85%" height={9} color={c.surface2} />
-      <Skeleton width="70%" height={9} color={c.surface2} />
-      <Skeleton width="100%" height={6} color={c.surface2} radius={3} />
-    </View>
-    {[0, 1].map(i => <View key={i} style={{ margin: pad, marginBottom: 0, padding: 12, gap: 10, borderRadius: 8, borderWidth: 1, borderColor: c.border }}>
-      <Skeleton width="35%" height={10} color={c.surface2} />
-      <Skeleton width="90%" height={9} color={c.surface2} />
-      <Skeleton width="75%" height={9} color={c.surface2} />
-    </View>)}
-  </View>;
-}
-
-function StartTracking({ theme, workspaceId, layout, loadError, openSettings }: PanelProps & { loadError?: string | null }) {
-  const c = theme.colors; const t = text(c);
-  const activate = useRpc(activateRpc); const cache = useQueryClient(); const toast = useToast();
-  const start = useMutation({ mutationFn: () => activate({ workspaceId }), onSuccess: () => { toast.show("Tracking this workspace", { variant: "success" }); void cache.invalidateQueries({ queryKey: workspaceKey(workspaceId) }); void cache.invalidateQueries({ queryKey: overviewKey }); } });
-  const compact = layout.compact;
-  // The empty state teaches with the panel's own rail: the three things Follow-up does, as three stack nodes.
-  const points: { icon: string; color: string; line: string }[] = [
-    { icon: "GitMerge", color: mergedColor(c), line: "Follows every PR this workspace opens, stack by stack, with review and CI state." },
-    { icon: "Wrench", color: c.statusDanger, line: "Gathers conflicts, failing checks and review threads into one repair batch for the main agent." },
-    { icon: "Check", color: c.statusSuccess, line: "Tells you when the agent declares the work done and it's safe to archive." },
-  ];
-  return <ScrollView style={{ flex: 1, backgroundColor: c.surface0 }} contentContainerStyle={{ padding: compact ? 16 : 12, paddingTop: compact ? 20 : 16, gap: 14 }}>
-    <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
-      <Text accessibilityRole="header" style={[t.title, { flex: 1 }]}>Track this workspace</Text>
-      <View style={{ marginVertical: compact ? -12 : -4, marginRight: compact ? -10 : -4 }}><IconButton icon="Settings" label="Follow-up settings" onPress={openSettings} theme={theme} compact={compact} /></View>
-    </View>
-    <View>
-      {points.map((p, i) => <View key={p.icon} style={{ flexDirection: "row", gap: 10 }}>
-        <View style={{ width: 18, alignItems: "center" }}>
-          <View style={{ width: 18, height: 18, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: tint(p.color, c) }}><Icon name={p.icon} size={11} color={p.color} /></View>
-          {i < points.length - 1 && <View style={{ width: 2, flex: 1, minHeight: 10, backgroundColor: c.border }} />}
-        </View>
-        <Text style={[t.meta, { flex: 1, color: c.foreground, paddingTop: 1, paddingBottom: i < points.length - 1 ? 14 : 0 }]}>{p.line}</Text>
-      </View>)}
-    </View>
-    <Text style={t.meta}>Nothing is merged or archived without your click. While Auto-send is on, repairs go to the agent on their own.</Text>
-    {(loadError || start.error) && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusDanger }]}>{start.error ? errorText(start.error) : loadError}</Text>}
-    <Button title="Track this workspace" kind="primary" icon="Plus" theme={theme} compact={compact} loading={start.isPending} onPress={() => start.mutate()} />
-    <Text style={t.small}>To track every workspace in a project, turn it on in Settings. Tracking data stays on this host.</Text>
-  </ScrollView>;
-}
 
 /** The main agent's current repairs: what was sent and when. Pending batches live in Needs you. */
 function AgentCard({ workspace: w, theme, compact, now, openAgent }: { workspace: Workspace; theme: Theme; compact: boolean; now: number; openAgent?: (id: string) => void }) {
@@ -194,7 +125,6 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
   </View>;
 }
 
-const folds = z.object({ open: z.array(z.string()) });
 function historyLabel(w: Workspace): string {
   const stacks = new Set(w.prs.map(p => p.stack)).size;
   const tasks = followUpObligations(w).filter(o => ["done", "waived"].includes(o.status)).length;
@@ -210,15 +140,6 @@ export function useSessionFolds(workspaceId: string): Folds {
 }
 
 /** The panel keeps its folds in the tab's persisted state and mirrors them for the larger view. */
-function PanelWorkspace(props: PanelProps & { workspace: Workspace; loadError?: string | null }) {
-  const [state, setState] = useTabState(props.tab, folds, { open: sessionFolds.get(props.workspaceId) ?? [] });
-  const isOpen = (key: string) => state.open.includes(key);
-  const toggle = (key: string) => { const next = isOpen(key) ? state.open.filter(k => k !== key) : [...state.open, key]; sessionFolds.set(props.workspaceId, next); setState({ open: next }); };
-  const { openLarge } = props;
-  return <WorkspaceView {...props} folds={{ isOpen, toggle }} resize={openLarge ? { icon: "Maximize2", label: "Open the larger view", onPress: () => openLarge(props.workspaceId) } : null} />;
-}
-
-/** Two columns from this content width: actions on the left, the stacks on the right. */
 export const WIDE_MIN = 820;
 
 export function WorkspaceView({ theme, layout, workspace: w, navigation, loadError, openSettings, openOverview, folds: { isOpen, toggle }, resize, large = false }: PluginHostProps & {

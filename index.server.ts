@@ -391,6 +391,7 @@ export default function contribute(server: PluginServerContext) {
     return result;
   });
   server.handle(rpc.inboxListRpc, async () => { await requireReady(); return { ...await inbox.list(), error: inboxError }; });
+  server.handle(rpc.inboxBriefRpc, async ({ agentId }) => { await requireReady(); return { brief: await inbox.brief(agentId) }; });
   server.handle(rpc.inboxActRpc, async input => { await requireReady(); return inbox.act(input); });
   server.handle(rpc.needsYouRpc, async ({ agentId, ...input }, { paseo }) => {
     await requireReady(); seen(paseo);
