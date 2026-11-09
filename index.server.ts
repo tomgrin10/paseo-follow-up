@@ -760,9 +760,23 @@ export default function contribute(server: PluginServerContext) {
   const trust = new TrustBypass(directory, {
     enabled: async () => (await inboxSettings()).enable_trust_bypass,
     // The mode the provider reports now; never the one the agent was created with.
-    mode: async agentId => { const agent = (await trustApi!.agents.ref(agentId).refresh())?.agent; return agent?.currentModeId ?? agent?.runtimeInfo?.modeId ?? null; },
-    approve: (agentId, requestId) => trustApi!.agents.ref(agentId).respondToPermission({ requestId, response: { behavior: "allow" } }),
+    // Before any handler context exists (the load sweep below), the same reads go through a daemon connection.
+    mode: async agentId => {
+      const agent = trustApi ? (await trustApi.agents.ref(agentId).refresh())?.agent : (await withDaemon(client => client.fetchAgent(agentId)))?.agent;
+      return agent?.currentModeId ?? agent?.runtimeInfo?.modeId ?? null;
+    },
+    approve: (agentId, requestId) => trustApi
+      ? trustApi.agents.ref(agentId).respondToPermission({ requestId, response: { behavior: "allow" } })
+      : withDaemon(client => client.respondToPermission(agentId, requestId, { behavior: "allow" })),
   });
+  // Prompts already pending when Follow-up loaded or updated raise no new event: sweep them once, from the startup
+  // agent list (metadata only; only loaded agents can have a pending prompt, so no agent is loaded or refreshed).
+  void ready.then(async () => {
+    if (loadError || stopped) return;
+    const decisions = await trust.sweep((await gateway.directory.read()).agents.map(row => row.agent));
+    const approved = decisions.filter(d => d.approved).length;
+    if (approved) console.warn(`[follow-up] trust bypass approved ${approved} prompt(s) already pending at load`);
+  }).catch(() => undefined);
   handle(rpc.trustBypassRpc, async () => trust.recent(20));
 
   const removers = [

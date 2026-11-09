@@ -106,3 +106,27 @@ test("summaries mask secret-looking values before they reach the log or Settings
   ]) assert.equal(redact(raw), masked, raw);
   assert.equal(summarize({ id: "s", kind: "tool", name: "Bash", input: { command: "gcloud auth print-access-token --password=p4ss" } }), "Bash: gcloud auth print-access-token --password=•••");
 });
+
+test("prompts already pending at load go through the same checks: full-trust plain tools approved, the rest left", async t => {
+  const f = await fixture(t, { bypass: "bypassPermissions", codex: "full-access", careful: "default", gone: "bypassPermissions", archived: "bypassPermissions" });
+  const decisions = await f.trust.sweep([
+    { id: "bypass", status: "idle", pendingPermissions: [claudeBash, question] },
+    { id: "codex", status: "running", pendingPermissions: [codexBash] },
+    { id: "careful", status: "idle", pendingPermissions: [claudeEdit] },
+    { id: "gone", status: "closed", pendingPermissions: [claudeBash] },
+    { id: "archived", status: "idle", archivedAt: "2026-11-09T00:00:00.000Z", pendingPermissions: [claudeBash] },
+    { id: "quiet", status: "idle", pendingPermissions: [] },
+    { id: "unloaded", status: "closed" },
+    { id: "odd", status: "idle", pendingPermissions: [null, "x", { kind: "tool" }] },
+  ]);
+  assert.deepEqual(f.approved, ["bypass:permission-1", "codex:codex-1"]);
+  assert.deepEqual(decisions.map(d => d.approved), [true, false, true, false]);
+  assert.deepEqual(f.fetched, ["bypass", "codex", "careful"], "the mode is read only for loaded agents with a plain tool prompt");
+  assert.equal((await f.trust.recent()).today, 2);
+});
+
+test("the load sweep respects the setting", async t => {
+  const f = await fixture(t, { x: "bypassPermissions" }, false);
+  assert.deepEqual(await f.trust.sweep([{ id: "x", status: "idle", pendingPermissions: [claudeBash] }]), [{ approved: false, reason: "off" }]);
+  assert.deepEqual(f.approved, []);
+});
