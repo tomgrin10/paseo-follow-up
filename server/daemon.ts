@@ -30,7 +30,7 @@ export interface Daemon {
   fetchAgent(id: string): Promise<{ agent: Agent } | null>;
   fetchAgents(options?: unknown): Promise<{ entries: { agent: Agent }[]; pageInfo: { hasMore: boolean; nextCursor: string | null } }>;
   fetchWorkspaces(options?: unknown): Promise<{ entries: WorkspaceRow[]; pageInfo: { hasMore: boolean; nextCursor: string | null } }>;
-  fetchAgentTimeline(id: string, options: unknown): Promise<{ entries: { item: unknown; seqStart: number; timestamp?: string }[]; startCursor: { epoch: string; seq: number } | null; hasOlder: boolean; error: string | null; gap: boolean; staleCursor: boolean }>;
+  fetchAgentTimeline(id: string, options: unknown): Promise<{ entries: { item: unknown; seqStart: number; timestamp?: string }[]; startCursor: { epoch: string; seq: number } | null; endCursor?: { epoch: string; seq: number } | null; epoch?: string; reset?: boolean; hasOlder: boolean; error: string | null; gap: boolean; staleCursor: boolean }>;
   listProviderSubagents(id: string): Promise<{ subagents: { status: string }[]; error?: string | null }>;
   sendMessage(id: string, text: string, options: { messageId: string; activeTurnBehavior: "steer" }): Promise<void>;
   setWorkspaceLabel(input: { workspaceId: string; label: { name: string; color: "emerald" }; assigned: boolean }): Promise<unknown>;
@@ -111,6 +111,44 @@ async function subagentsRunning(client: Daemon, agent: Agent, failure: string): 
   return children.subagents.some(child => child.status === "running");
 }
 
+type Entry = { item: unknown; seqStart: number; timestamp?: string };
+type Cursor = { epoch: string; seq: number };
+type Read = { entries: Entry[]; complete: boolean; end: Cursor | null; incremental: boolean };
+/** Entries re-read before the last cursor: canonical items (a tool call and its receipt) can update in place. */
+const OVERLAP = 25;
+/** The whole timeline, newest page first, up to 100 pages of 500. */
+async function readAll(client: Daemon, agentId: string): Promise<Read> {
+  const entries: Entry[] = []; let cursor: Cursor | null = null; let end: Cursor | null = null; let complete = false;
+  for (let pageIndex = 0; pageIndex < 100; pageIndex++) {
+    const page = await client.fetchAgentTimeline(agentId, { direction: cursor ? "before" : "tail", ...(cursor ? { cursor } : {}), limit: 500, projection: "canonical", timeout: 15_000 });
+    if (page.error || page.gap || page.staleCursor) throw new Error("Conversation history was unavailable or changed during recovery");
+    if (pageIndex === 0) end = page.endCursor ?? null;
+    entries.push(...page.entries);
+    if (!page.hasOlder) { complete = true; break; }
+    if (!page.startCursor || (cursor && page.startCursor.epoch === cursor.epoch && page.startCursor.seq >= cursor.seq)) throw new Error("Conversation history pagination was incomplete");
+    cursor = page.startCursor;
+  }
+  return { entries: entries.sort((a, b) => a.seqStart - b.seqStart), complete, end, incremental: false };
+}
+/**
+ * Only what's new since `since` (plus a small overlap), for a live agent whose history is already cached.
+ * Null means the cursor no longer applies (new epoch, reset, gap): read everything instead.
+ */
+async function readSince(client: Daemon, agentId: string, since: Cursor): Promise<Read | null> {
+  const entries: Entry[] = []; let cursor: Cursor | null = null; let end: Cursor | null = null;
+  for (let pageIndex = 0; pageIndex < 20; pageIndex++) {
+    const page = await client.fetchAgentTimeline(agentId, { direction: cursor ? "before" : "tail", ...(cursor ? { cursor } : {}), limit: 100, projection: "canonical", timeout: 15_000 });
+    if (page.error || page.gap || page.staleCursor || page.reset || (page.epoch && page.epoch !== since.epoch)) return null;
+    if (pageIndex === 0) { end = page.endCursor ?? null; if (end && end.epoch !== since.epoch) return null; }
+    entries.push(...page.entries);
+    const oldest = page.startCursor?.seq ?? page.entries[0]?.seqStart;
+    if (!page.hasOlder || (oldest !== undefined && oldest <= since.seq - OVERLAP)) return { entries: entries.filter(e => e.seqStart > since.seq - OVERLAP).sort((a, b) => a.seqStart - b.seqStart), complete: true, end, incremental: true };
+    if (!page.startCursor) return null;
+    cursor = page.startCursor;
+  }
+  return null;
+}
+
 export class PaseoGateway implements Gateway {
   constructor(private connect: typeof withDaemon = withDaemon, private guard = new SessionGuard(join(paseoHome, "plugin-data/session-guard")), private compacting = compactionPending, private histories = new HistoryCache(null), private now = Date.now) {}
   private directory: { agents: { agent: Agent }[]; workspaces: WorkspaceRow[] } | null = null;
@@ -120,6 +158,8 @@ export class PaseoGateway implements Gateway {
   // Persisted (successful reads only) so restarts don't rescan; see HistoryCache.
   /** Timeline reads discovery has made, for tests and the scale check. */
   timelineReads = 0;
+  /** Of those, reads that fetched only the newest entries. */
+  incrementalReads = 0;
   /** The active window from the last discovery's state. */
   private windowMs = DEFAULT_ACTIVE_WINDOW_DAYS * DAY_MS;
   async discover(state: State, workspaceId?: string): Promise<DiscoveredWorkspace[]> {
@@ -170,25 +210,20 @@ export class PaseoGateway implements Gateway {
       scans.sort((a, b) => (this.histories.get(a.agent.id)?.at ?? 0) - (this.histories.get(b.agent.id)?.at ?? 0) || (b.agent.lastUserMessageAt ?? "").localeCompare(a.agent.lastUserMessageAt ?? ""));
       // Session opening and Track need only ownership metadata. Read transcripts in the poll.
       for (const { agent, repo } of scans.slice(0, workspaceId ? 0 : 4)) {
-        let history: History; let submissions: Submission[] = []; let artifacts: Artifact[] = [];
+        let history: History; let submissions: Submission[] = []; let artifacts: Artifact[] = []; let end: { epoch: string; seq: number } | null = null;
         this.timelineReads++;
+        const cached = this.histories.get(agent.id);
         try {
-          const entries: { item: unknown; seqStart: number; timestamp?: string }[] = [];
-          let cursor: { epoch: string; seq: number } | null = null;
-          let complete = false;
-          for (let pageIndex = 0; pageIndex < 100; pageIndex++) {
-            const page = await client.fetchAgentTimeline(agent.id, { direction: cursor ? "before" : "tail", ...(cursor ? { cursor } : {}), limit: 500, projection: "canonical", timeout: 15_000 });
-            if (page.error || page.gap || page.staleCursor) throw new Error("Conversation history was unavailable or changed during recovery");
-            entries.push(...page.entries);
-            if (!page.hasOlder) { complete = true; break; }
-            if (!page.startCursor || (cursor && page.startCursor.epoch === cursor.epoch && page.startCursor.seq >= cursor.seq)) throw new Error("Conversation history pagination was incomplete");
-            cursor = page.startCursor;
-          }
-          entries.sort((a, b) => a.seqStart - b.seqStart);
-          const items = entries.map(e => e.item);
-          artifacts = publishedArtifacts(entries, agent.id);
-          history = extractHistory(items, complete, complete ? null : "History exceeds the recovery window; inspect older transcripts during inventory");
-          submissions = submittedPrs(items, agent.id, repo);
+          const read = (cached?.cursor && cached.history.complete && !cached.history.error ? await readSince(client, agent.id, cached.cursor) : null) ?? await readAll(client, agent.id);
+          end = read.end;
+          const items = read.entries.map(e => e.item);
+          const fresh = { artifacts: publishedArtifacts(read.entries, agent.id), history: extractHistory(items, read.complete, read.complete ? null : "History exceeds the recovery window; inspect older transcripts during inventory"), submissions: submittedPrs(items, agent.id, repo) };
+          if (read.incremental && cached) {
+            this.incrementalReads++;
+            history = { candidates: [...new Set([...cached.history.candidates, ...fresh.history.candidates])].sort(), goal: cached.history.goal ?? fresh.history.goal, complete: true, error: null };
+            submissions = [...new Map([...cached.submissions, ...fresh.submissions].map(x => [`${x.repo}#${x.number}`, x])).values()];
+            artifacts = [...new Map([...cached.artifacts, ...fresh.artifacts].map(x => [x.url, x])).values()];
+          } else ({ history, submissions, artifacts } = fresh);
         } catch { history = extractHistory([], false, "History could not be read; inspect the session or register submitted PRs explicitly"); }
         // An unreadable timeline is retried with backoff instead of every poll. New user messages and
         // live turns retry immediately.
@@ -196,7 +231,7 @@ export class PaseoGateway implements Gateway {
         const live = ["running", "initializing"].includes(agent.status);
         const failures = !history.error ? 0 : previous?.history.error && previous.messageAt === agent.lastUserMessageAt && !live ? previous.failures + 1 : 1;
         const at = this.now();
-        this.histories.set(agent.id, { messageAt: agent.lastUserMessageAt, at, failures, retryAt: at + historyRetryDelay(failures), history, submissions, artifacts });
+        this.histories.set(agent.id, { messageAt: agent.lastUserMessageAt, at, failures, retryAt: at + historyRetryDelay(failures), history, submissions, artifacts, cursor: history.error ? null : end });
         this.dirty.delete(agent.id);
       }
       for (const row of discovered) {

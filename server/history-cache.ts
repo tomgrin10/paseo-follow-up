@@ -6,7 +6,8 @@ import type { Submission } from "./submissions";
 import type { Artifact } from "../shared/spec";
 
 /** What discovery keeps per agent: the distilled history, never raw timeline items. */
-export type HistoryEntry = { messageAt: string | null; at: number; failures: number; retryAt: number; history: History; submissions: Submission[]; artifacts: Artifact[] };
+/** `cursor` is the newest timeline position read, so a live agent's next read fetches only what's new. */
+export type HistoryEntry = { messageAt: string | null; at: number; failures: number; retryAt: number; history: History; submissions: Submission[]; artifacts: Artifact[]; cursor?: { epoch: string; seq: number } | null };
 
 /**
  * Discovery's per-agent history, persisted so a worker or daemon restart doesn't rescan every timeline.
@@ -27,7 +28,7 @@ export class HistoryCache {
         if (file?.version !== 1 || !file.agents || typeof file.agents !== "object") return;
         for (const [id, value] of Object.entries(file.agents as Record<string, Partial<HistoryEntry>>)) {
           if (!value || typeof value !== "object" || !value.history || !Array.isArray(value.history.candidates)) continue;
-          this.entries.set(id, { messageAt: value.messageAt ?? null, at: Number(value.at) || 0, failures: 0, retryAt: 0, history: value.history as History, submissions: Array.isArray(value.submissions) ? value.submissions : [], artifacts: Array.isArray(value.artifacts) ? value.artifacts : [] });
+          this.entries.set(id, { messageAt: value.messageAt ?? null, at: Number(value.at) || 0, failures: 0, retryAt: 0, history: value.history as History, submissions: Array.isArray(value.submissions) ? value.submissions : [], artifacts: Array.isArray(value.artifacts) ? value.artifacts : [], cursor: value.cursor && typeof value.cursor.epoch === "string" && Number.isInteger(value.cursor.seq) ? value.cursor : null });
         }
       } catch { /* absent or unreadable: start empty */ }
     })();
@@ -41,7 +42,7 @@ export class HistoryCache {
     if (!this.path || !this.changed) return;
     this.changed = false;
     const agents: Record<string, Omit<HistoryEntry, "failures" | "retryAt">> = {};
-    for (const [id, e] of this.entries) if (!e.history.error) agents[id] = { messageAt: e.messageAt, at: e.at, history: e.history, submissions: e.submissions, artifacts: e.artifacts };
+    for (const [id, e] of this.entries) if (!e.history.error) agents[id] = { messageAt: e.messageAt, at: e.at, history: e.history, submissions: e.submissions, artifacts: e.artifacts, cursor: e.cursor ?? null };
     const temporary = `${this.path}.${randomUUID()}.tmp`;
     try {
       await mkdir(join(this.path, ".."), { recursive: true, mode: 0o700 });
