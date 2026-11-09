@@ -70,7 +70,7 @@ export function FollowHome(props: PluginScreenProps & { deps: HomeDeps }) {
   const detail = current
     ? <DetailPane key={current.key} s={current} model={model} theme={theme} compact={compact} deps={deps} openFull={openFull} signOffNext={signOffNext} onBack={compact ? () => setSelected(null) : undefined} />
     : <BriefPane theme={theme} compact={compact} pane={pane} onSelect={key => setSelected(key)} openLog={deps.openLog} sources={deps.sources} />;
-  const list = <HomeList model={model} theme={theme} touch={compact} selectedKey={selected} onSelect={onSelect} briefLine={briefLine}
+  const list = <HomeList model={model} theme={theme} dense={compact} touch={compact} selectedKey={selected} onSelect={onSelect} briefLine={briefLine}
     header={<ListHeader theme={theme} compact={compact} onSettings={deps.openSettings} needs={model.needs} />} />;
 
   if (compact) return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
@@ -170,7 +170,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
     </View>
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
       {!!s.word && <Text style={{ color, fontSize: 12, fontWeight: "600" }}>{s.word}</Text>}
-      <Text style={t.meta}>{[s.at ? `${age(s.at, Date.now())} ago` : "", s.project, w ? null : s.workspaceId ? "Not tracked" : ""].filter(Boolean).join(" · ")}</Text>
+      <Text style={t.meta}>{[s.at ? age(s.at, Date.now()) === "now" ? "just now" : `${age(s.at, Date.now())} ago` : "", s.project, w ? null : s.workspaceId ? "Not tracked" : ""].filter(Boolean).join(" · ")}</Text>
       {s.badges.map(x => <BadgeView key={x.text} b={x} c={c} />)}
       <PrChipView s={s} c={c} />
     </View>
@@ -193,8 +193,8 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
     {header}
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: compact ? 16 : 20, gap: 16, paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
       {agent.permissions.map(p => <PermissionBlock key={p.id} p={p} theme={theme} compact={compact} busy={busy === `perm:${p.id}`} primary={plan.primary === "allow"} onRespond={r => void respond(p, r)} />)}
-      {b && s.agentId ? <BriefCard {...({ embedded: true, item: { data: b }, theme, layout: { compact }, agentId: s.agentId, deps: deps.briefDeps } as unknown as Parameters<typeof BriefCard>[0])} />
-        : row?.needs && !agent.permissions.length ? <Text style={[t.body, { fontSize: 15, lineHeight: 21, fontWeight: "600" }]}>{s.line || s.word || "Needs you"}</Text>
+      {b && s.agentId && !(b.kind === "permission" && agent.permissions.length) ? <BriefCard {...({ embedded: true, item: { data: b }, theme, layout: { compact }, agentId: s.agentId, deps: deps.briefDeps } as unknown as Parameters<typeof BriefCard>[0])} />
+        : row?.needs && !agent.permissions.length && !b ? <Text style={[t.body, { fontSize: 15, lineHeight: 21, fontWeight: "600" }]}>{s.line || s.word || "Needs you"}</Text>
         : !row?.needs && s.line ? <Text style={t.body}>{s.line}</Text> : null}
       {w && <NeedsYouList workspace={w} theme={theme} compact={compact} flush skip={b?.decisions.length ? ["question"] : []}
         actions={{ openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion, openAgent: () => openFull(s) }} />}
