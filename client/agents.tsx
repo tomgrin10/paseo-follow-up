@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
@@ -7,7 +8,8 @@ import { agentSettingsRpc, setAgentSettingRpc } from "../shared/contracts";
 import { AGENT_ROLES, JOB_PROVIDERS, ROLE_DEFAULTS, ROLE_INFO, isJobRole, modelName, providerName, type AgentRole, type AgentSettingsView, type CatalogProvider, type SavedRole } from "../shared/agent-settings";
 import { Button, errorText, text, type Theme } from "./kit";
 
-const key = ["follow-through", "agent-settings"];
+export const agentSettingsKey = ["follow-through", "agent-settings"];
+const key = agentSettingsKey;
 const SAME = "__same";
 const DEFAULT = "__default";
 /** Each provider's "don't ask" mode, used when a Paseo agent role moves to it. */
@@ -19,7 +21,7 @@ type Role = AgentSettingsView["roles"][number];
  * Settings → Agents: one card per special role. What it does and what it uses now, then provider, model, effort,
  * mode and limits. The provider catalog is read once when this screen opens (cached on the server), never polled.
  */
-export function AgentSettings({ theme, compact }: Pick<PluginSurfaceProps, "theme"> & { compact: boolean }) {
+export function AgentSettings({ theme, compact, toggles = {} }: Pick<PluginSurfaceProps, "theme"> & { compact: boolean; toggles?: Partial<Record<AgentRole, ReactNode>> }) {
   const c = theme.colors; const t = text(c);
   const read = useRpc(agentSettingsRpc); const write = useRpc(setAgentSettingRpc); const cache = useQueryClient(); const toast = useToast();
   const query = useQuery({ queryKey: key, queryFn: () => read({ catalog: true }), staleTime: 5 * 60_000,
@@ -37,21 +39,22 @@ export function AgentSettings({ theme, compact }: Pick<PluginSurfaceProps, "them
   });
   const data = query.data;
   const info = "Which agent Follow-up uses for each of its own jobs. Defaults: Claude Haiku for overviews, Claude Opus for the Overseer, the main agent's own setup for recovery, Claude Sonnet for priority ranking. What's this about? and the ranker are one-shot jobs, so they run on Claude or Codex only; the Overseer and recovery can use any provider Paseo has. Changes apply from the next call; the Overseer switches when you restart it.";
-  return <SettingsSection title="Agents" info={info}>
+  return <SettingsSection title="Models" info={info}>
     {query.isPending && <ActivityIndicator accessibilityLabel="Loading agent settings" color={c.foregroundMuted} style={{ alignSelf: "flex-start", marginVertical: 8 }} />}
     {query.error && <SettingsCard><SettingsAction label="Couldn't load agent settings" hint={errorText(query.error)} actionLabel="Retry" onPress={() => void query.refetch()} /></SettingsCard>}
     {data?.catalog?.error && <SettingsCard><SettingsAction label="Couldn't read Paseo's providers" hint={`${data.catalog.error} The current choices still work; pickers show only what's saved.`} actionLabel="Retry" onPress={() => void read({ catalog: true, fresh: true }).then(v => cache.setQueryData(key, v), e => toast.error(errorText(e)))} /></SettingsCard>}
-    {/* Once for the section, not per card: what can't be picked and why. */}
-    {!!data?.catalog?.providers.some(p => !p.available) && <Text style={[t.meta, { paddingHorizontal: 4 }]}>{`Not available in Paseo: ${data.catalog.providers.filter(p => !p.available).map(p => `${p.label} (${(p.reason ?? "unavailable").replace(/\.$/, "")})`).join(", ")}.`}</Text>}
     {data && AGENT_ROLES.map(role => {
       const r = data.roles.find(x => x.role === role);
-      return r ? <RoleCard key={role} r={r} invalid={data.invalid.includes(role)} catalog={data.catalog?.providers ?? []} busy={change.isPending}
+      return r ? <RoleCard key={role} r={r} invalid={data.invalid.includes(role)} catalog={data.catalog?.providers ?? []} busy={change.isPending} toggle={toggles[role]}
         save={entry => change.mutate({ role, entry })} theme={theme} compact={compact} /> : null;
     })}
+    {/* Once, after the cards: what can't be picked and why (the pickers only list what can). */}
+    {!!data?.catalog?.providers.some(p => !p.available) && <Text style={[t.meta, { paddingHorizontal: 4 }]}>{`Not available in Paseo: ${data.catalog.providers.filter(p => !p.available).map(p => `${p.label} (${(p.reason ?? "unavailable").replace(/\.$/, "")})`).join(", ")}.`}</Text>}
+
   </SettingsSection>;
 }
 
-function RoleCard({ r, invalid, catalog, busy, save, theme, compact }: { r: Role; invalid: boolean; catalog: CatalogProvider[]; busy: boolean; save: (entry: SavedRole | null) => void; theme: Theme; compact: boolean }) {
+function RoleCard({ r, invalid, catalog, busy, save, theme, compact, toggle }: { r: Role; invalid: boolean; catalog: CatalogProvider[]; busy: boolean; save: (entry: SavedRole | null) => void; theme: Theme; compact: boolean; toggle?: ReactNode }) {
   const c = theme.colors; const t = text(c);
   const role = r.role;
   const jobs = isJobRole(role);
@@ -101,6 +104,8 @@ function RoleCard({ r, invalid, catalog, busy, save, theme, compact }: { r: Role
       {invalid && <Text style={t.meta}>Part of the saved setting wasn't valid, so its default is used.</Text>}
       {blocked && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusWarning }]}>{`${providerLabel} isn't available (${blockedReason}). ${role === "about" ? "Overviews will fail" : role === "ranker" ? "Ranking will fail" : role === "overseer" ? "Starting or restarting the Overseer will fail" : "Recovery agents won't start"} until you pick another provider or reset.`}</Text>}
     </View>
+    {/* The role's own on/off (Overseer, AI priority) leads its card; the model rows follow. */}
+    {toggle}
     <SettingsSelect label="Provider" value={r.same ? SAME : r.provider} options={providerOptions} disabled={busy || !catalog.length} onValueChange={pickProvider} />
     {!r.same && <SettingsSelect label="Model" value={r.model ?? DEFAULT} options={modelOptions} disabled={busy || !catalog.length}
       onValueChange={value => set({ model: value === DEFAULT ? null : value, thinking: null })} />}
