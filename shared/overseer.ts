@@ -1,3 +1,4 @@
+import { parseAnswersMessage } from "./questions";
 import { z } from "zod";
 import { HOME_GROUPS, buildHome, type HomeGroupId, type PaseoWorkspaceLite, type Workstream } from "./home";
 import type { InboxRow } from "./inbox";
@@ -269,8 +270,10 @@ export function branchFor(title: string): string {
 /** "Follow-up answer D1 (Which agent?): C — New workspace\nContinue…" as the developer sees it: "Answered: C · New workspace". */
 export function answerLine(text: string): string | null {
   const m = /^Follow-up answer [A-Z]*\d+(?: \([^)]*\))?: ([A-Z])\s*[—-]\s*([^\n]+)/.exec(text.trim());
-  return m ? `Answered: ${m[1]} · ${m[2].trim()}` : null;
-}
+  if (m) return `Answered: ${m[1]} · ${m[2].trim()}`;
+  // Several decisions answered together: each pick by its label, so the preview says what was decided.
+  const several = parseAnswersMessage(text);
+  return several ? `Answered: ${several.answers.map((a, i) => `${i + 1}. ${a.choice ? `${a.choice} · ${a.label}` : "skipped"}`).join("; ")}` : null;}
 
 export function approvesNewWorkspace(message: string | null | undefined): boolean {
   const m = (message ?? "").trim();
