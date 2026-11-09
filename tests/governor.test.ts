@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Governor, pressure } from "../server/governor";
+import { Governor, pressure, workingSet } from "../server/governor";
 import { governorLevel, resourceMeter, resourceText, type Resources } from "../shared/resources";
 import { Engine } from "../server/engine";
 import { Store } from "../server/store";
@@ -31,6 +31,20 @@ test("reads Paseo's cgroup and the host CPU, and levels follow the thresholds", 
   r = await governor.sample(); assert.equal(r.level, "critical"); assert.equal(governor.allowsExtras(), false);
   assert.equal(lines.length, 2, "transitions are logged once each");
   assert.match(lines[0], /ok → constrained/);
+});
+
+test("reclaimable cache doesn't count: memory.current above memory.high with a 45% working set is ok", async () => {
+  const g = "/sys/fs/cgroup/system.slice/paseo.service";
+  // The 2026-11-09 disk scan: ~10 GB inactive_file and 7.7 GB slab_reclaimable charged to paseo.service.
+  const stat = `anon ${Math.round(11.8 * GB)}\nfile ${Math.round(12 * GB)}\nactive_file ${1 * GB}\ninactive_file ${10 * GB}\nslab_reclaimable ${Math.round(7.7 * GB)}\nslab_unreclaimable ${200 * 1024 ** 2}\n`;
+  const current = Math.round(12.6 * GB) + 10 * GB + Math.round(7.7 * GB);
+  const f = files({ "/proc/self/cgroup": "0::/system.slice/paseo.service\n", [`${g}/memory.high`]: String(28 * GB), [`${g}/memory.current`]: String(current), [`${g}/memory.stat`]: stat, [`${g}/memory.pressure`]: psi(0), "/proc/pressure/cpu": psi(0) });
+  assert.ok(current > 28 * GB, "memory.current alone is over memory.high");
+  const r = await new Governor(f.read, () => {}).sample();
+  assert.equal(r.memoryPct, 45); assert.equal(r.level, "ok");
+  assert.equal(r.memoryBytes, Math.round(12.6 * GB));
+  assert.equal(workingSet(100, null), 100, "without memory.stat it falls back to memory.current");
+  assert.equal(workingSet(100, "inactive_file 300\n"), 0, "never negative");
 });
 
 test("sustained pressure counts as constrained; unreadable sources are unknown, never over budget", async () => {

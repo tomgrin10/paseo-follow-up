@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-/** 1.3.0-beta.4: the VM's memory and CPU, as the resource governor sees them. Null means unreadable. */
+/**
+ * 1.3.0-beta.4: the VM's memory and CPU, as the resource governor sees them. Null means unreadable. memoryBytes is
+ * Paseo's cgroup working set (memory.current minus inactive_file and slab_reclaimable), not raw memory.current.
+ */
 export const resourceLevels = ["ok", "constrained", "critical"] as const;
 export type ResourceLevel = typeof resourceLevels[number];
 export const resourcesSchema = z.object({
@@ -27,7 +30,7 @@ export function governorLevel(r: Pick<Resources, "memoryPct" | "memoryPressure" 
 export const RESOURCES_STALE_MS = 3 * 60_000;
 const gb = (bytes: number) => (bytes / 1024 ** 3).toFixed(bytes < 10 * 1024 ** 3 ? 1 : 0);
 
-/** "Paseo memory 72% · CPU 40%", leaving out what's unreadable; null when nothing is. Memory is Paseo's cgroup against its memory.high; CPU is host-wide. */
+/** "Paseo memory 72% · CPU 40%", leaving out what's unreadable; null when nothing is. Memory is Paseo's cgroup working set against its memory.high; CPU is host-wide. */
 export function resourceText(r: Pick<Resources, "memoryPct" | "cpuPct">): string | null {
   const parts = [r.memoryPct !== null ? `Paseo memory ${r.memoryPct}%` : null, r.cpuPct !== null ? `CPU ${r.cpuPct}%` : null].filter(Boolean);
   return parts.length ? parts.join(" · ") : null;
