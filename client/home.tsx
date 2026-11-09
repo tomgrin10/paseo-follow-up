@@ -541,6 +541,7 @@ function ReplyBox({ theme, compact, agentName, onSend, placeholder = "Answer in 
   return <View style={{ padding: compact ? 12 : 14, gap: 6, ...(docked ? {} : { borderTopWidth: 1, borderTopColor: c.border }) }}>
     <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: compact ? 12 : 10, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1, paddingLeft: 12, paddingRight: compact ? 1 : 6, paddingVertical: compact ? 0 : 6 }}>
       <TextInput ref={inputRef} accessibilityLabel={`Reply to ${agentName}`} accessibilityHint={compact && hint ? hint : undefined} onFocus={() => onFocusChange?.(true)} onBlur={() => onFocusChange?.(false)} value={value} onChangeText={setValue} placeholder={placeholder} placeholderTextColor={c.foregroundMuted} multiline
+        numberOfLines={compact ? 1 : undefined}
         onKeyPress={e => { const k = e.nativeEvent as unknown as { key: string; metaKey?: boolean; ctrlKey?: boolean }; if (k.key === "Enter" && (k.metaKey || k.ctrlKey)) void send(); }}
         style={{ flex: 1, minHeight: compact ? 46 : 36, maxHeight: 140, color: c.foreground, fontSize: 14, lineHeight: 20, paddingVertical: compact ? 13 : 6, ...(Platform.OS === "web" ? { outlineStyle: "none" } as object : {}) }} />
       <IconButton theme={theme} compact={compact} icon="ArrowUp" label="Send" disabled={!value.trim() || sending} spinning={sending} onPress={() => void send()} color={value.trim() ? c.foreground : undefined} />
