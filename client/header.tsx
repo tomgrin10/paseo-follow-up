@@ -2,7 +2,7 @@ import { Pressable, Text, View } from "react-native";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import type { Workspace } from "../shared/model";
 import { ago, headline, liveLine, stackBar, type LiveIcon } from "../shared/attention";
-import { IconButton, Switch, text, type Theme } from "./kit";
+import { Button, IconButton, Switch, text, type Theme } from "./kit";
 import { IconSwap, Spinner } from "./motion";
 import { segmentPaint, type Colors } from "./theme";
 import { SpecChip } from "./spec";
@@ -41,36 +41,28 @@ function LiveGlyph({ icon, colors }: { icon: LiveIcon; colors: Colors }) {
   }
 }
 
-export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings, onRefresh, refreshing, onAuto, autoPending, notice, onOpenPr, resize, hideTitle = false }: {
+export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings, onRefresh, refreshing, onAuto, autoPending, notice, onOpenPr, resize, hideTitle = false, onHome }: {
   workspace: Workspace; theme: Theme; compact: boolean; now: number; onSettings: () => void; onRefresh: () => void; refreshing: boolean; onAuto: (next: boolean) => void; autoPending: boolean; notice: string | null; onOpenPr?: (key: string) => void;
   /** Expand to the larger view, or collapse back to the panel. Absent where the panel is already as wide as it gets. */
   resize?: { icon: "Maximize2" | "Minimize2"; label: string; onPress: () => void } | null;
   /** The larger view's screen bar already names the workspace. */
   hideTitle?: boolean;
+  /** Phones: the panel's Home link joins the header's own bar, one 44px row instead of two. */
+  onHome?: () => void;
 }) {
-  const c = theme.colors; const t = text(c);
+  const c = theme.colors; const t = text(c, compact);
   const parts = headline(w, now);
   const live = liveLine(w, now);
   const checked = w.prs.map(p => p.snapshot?.observedAt).filter((v): v is string => !!v).sort().at(-1);
   const stale = !!checked && w.prs.some(p => p.snapshot?.state === "OPEN") && now - Date.parse(checked) > STALE_MS;
   const toneOf = (tone?: string) => tone === "warning" ? c.statusWarning : tone === "danger" ? c.statusDanger : tone === "success" ? c.statusSuccess : undefined;
   const pad = compact ? 16 : 12;
-  return <View style={{ paddingHorizontal: pad, paddingTop: compact ? 14 : 12, paddingBottom: 10, gap: 6, borderBottomWidth: 1, borderBottomColor: c.border }}>
-    <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
-      {/* On phones the host header right above already shows the workspace name. */}
-      {compact || hideTitle ? <Text numberOfLines={2} style={[t.meta, { flex: 1, paddingTop: 2 }, hideTitle && !compact ? { fontSize: 13, lineHeight: 19, color: c.foreground } : null]}>{w.goal}</Text>
-        : <Text accessibilityRole="header" style={[t.title, { flex: 1 }]}>{w.title}</Text>}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 2, marginVertical: compact ? -12 : -4, marginRight: compact ? -10 : -4 }}>
-        {!!w.spec?.url && <View style={{ marginRight: 4 }}><SpecChip workspace={w} theme={theme} compact={compact} /></View>}
-        {resize && <IconButton icon={resize.icon} label={resize.label} onPress={resize.onPress} theme={theme} compact={compact} />}
-        <IconButton icon="Settings" label="Follow-up settings" onPress={onSettings} theme={theme} compact={compact} />
-      </View>
-    </View>
-    {!compact && !hideTitle && w.goal && w.goal !== w.title && <Text numberOfLines={2} style={t.meta}>{w.goal}</Text>}
-    <Text accessibilityLiveRegion="polite" style={[t.meta, { color: c.foregroundMuted, marginTop: 2 }]}>
-      {parts.map((part, i) => <Text key={part.text} style={toneOf(part.tone) ? { color: toneOf(part.tone), fontWeight: "600" } : { color: c.foreground }}>{i ? <Text style={{ color: c.foregroundMuted, fontWeight: "400" }}>{" · "}</Text> : null}{part.text}</Text>)}
-    </Text>
-    <StackBar workspace={w} theme={theme} onOpen={onOpenPr} />
+  const controls = <View style={{ flexDirection: "row", alignItems: "center", gap: 2, marginVertical: compact ? -12 : -4, marginRight: compact ? -10 : -4 }}>
+    {!!w.spec?.url && <View style={{ marginRight: 4 }}><SpecChip workspace={w} theme={theme} compact={compact} /></View>}
+    {resize && <IconButton icon={resize.icon} label={resize.label} onPress={resize.onPress} theme={theme} compact={compact} />}
+    <IconButton icon="Settings" label="Follow-up settings" onPress={onSettings} theme={theme} compact={compact} />
+  </View>;
+  const tail = <>
     <View style={{ flexDirection: "row", gap: 6, marginTop: 2 }}>
       <View style={{ paddingTop: 3 }}><IconSwap swapKey={live.icon} size={12}><LiveGlyph icon={live.icon} colors={c} /></IconSwap></View>
       <Text accessibilityLiveRegion="polite" style={[t.meta, { flex: 1, color: live.icon === "spinner" ? c.foreground : c.foregroundMuted }]}>
@@ -88,5 +80,34 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
       <Switch theme={theme} compact={compact} label="Auto-send" accessibilityLabel="Auto-send repairs" hint="Send repair batches to the main agent on its own when the agent is idle. Off means each batch waits for your click."
         value={w.enable_auto_sends} disabled={autoPending} onChange={onAuto} />
     </View>
+  </>;
+  if (compact && onHome) return <View style={{ paddingHorizontal: pad, paddingTop: 4, paddingBottom: 12, gap: 8, borderBottomWidth: 1, borderBottomColor: c.border }}>
+    {/* One bar: Home on the left, the Spec chip and settings on the right. The host header above names the workspace,
+        so the goal shows only when it says something the title doesn't. */}
+    <View style={{ flexDirection: "row", alignItems: "center", minHeight: 44, marginLeft: -14 }}>
+      <Button theme={theme} compact kind="ghost" icon="House" title="Home" accessibilityHint="Opens Follow-up Home with every workspace" onPress={onHome} />
+      <View style={{ flex: 1 }} />
+      <View style={{ marginVertical: 12 }}>{controls}</View>
+    </View>
+    {!!w.goal && w.goal.trim() !== w.title.trim() && <Text numberOfLines={2} style={t.meta}>{w.goal}</Text>}
+    <Text accessibilityLiveRegion="polite" style={[t.ask, { color: c.foregroundMuted }]}>
+      {parts.map((part, i) => <Text key={part.text} style={toneOf(part.tone) ? { color: toneOf(part.tone) } : { color: c.foreground }}>{i ? <Text style={{ color: c.foregroundMuted, fontWeight: "400" }}>{" · "}</Text> : null}{part.text}</Text>)}
+    </Text>
+    <StackBar workspace={w} theme={theme} onOpen={onOpenPr} />
+    {tail}
+  </View>;
+  return <View style={{ paddingHorizontal: pad, paddingTop: compact ? 14 : 12, paddingBottom: 10, gap: 6, borderBottomWidth: 1, borderBottomColor: c.border }}>
+    <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+      {/* On phones the host header right above already shows the workspace name. */}
+      {compact || hideTitle ? <Text numberOfLines={2} style={[t.meta, { flex: 1, paddingTop: 2 }, hideTitle && !compact ? { fontSize: 13, lineHeight: 19, color: c.foreground } : null]}>{w.goal}</Text>
+        : <Text accessibilityRole="header" style={[t.title, { flex: 1 }]}>{w.title}</Text>}
+      {controls}
+    </View>
+    {!compact && !hideTitle && w.goal && w.goal !== w.title && <Text numberOfLines={2} style={t.meta}>{w.goal}</Text>}
+    <Text accessibilityLiveRegion="polite" style={[t.meta, { color: c.foregroundMuted, marginTop: 2 }]}>
+      {parts.map((part, i) => <Text key={part.text} style={toneOf(part.tone) ? { color: toneOf(part.tone), fontWeight: "600" } : { color: c.foreground }}>{i ? <Text style={{ color: c.foregroundMuted, fontWeight: "400" }}>{" · "}</Text> : null}{part.text}</Text>)}
+    </Text>
+    <StackBar workspace={w} theme={theme} onOpen={onOpenPr} />
+    {tail}
   </View>;
 }

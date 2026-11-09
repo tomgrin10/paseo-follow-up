@@ -4,9 +4,10 @@ import { useRpc } from "@getpaseo/plugin/client";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { checkPrActionRpc, controlRpc, sendRpc } from "../shared/contracts";
 import { needsYou, shortRefs, type NeedItem } from "../shared/attention";
+import { sameText } from "../shared/home";
 import type { Workspace } from "../shared/model";
 import { Button, Card, CardRow, errorText, text, type Theme } from "./kit";
-import type { Colors } from "./theme";
+import { withAlpha, type Colors } from "./theme";
 import { meanwhile } from "./questions";
 import { useReviewerSettings } from "./reviewers";
 
@@ -35,8 +36,8 @@ export type NeedActions = {
 };
 
 /** The developer's queue: one row per decision, each with its single action inline. */
-export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date.now(), flush = false, skip = [] }: { workspace: Workspace; theme: Theme; compact: boolean; actions: NeedActions; now?: number; flush?: boolean; skip?: NeedItem["kind"][] }) {
-  const c = theme.colors; const t = text(c);
+export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date.now(), flush = false, skip = [], feature = false }: { workspace: Workspace; theme: Theme; compact: boolean; actions: NeedActions; now?: number; flush?: boolean; skip?: NeedItem["kind"][]; /** Phones' detail pane: the first question is the screen's ask, an attention card with a full-width Answer. */ feature?: boolean }) {
+  const c = theme.colors; const t = text(c, compact);
   useReviewerSettings();
   const toast = useToast();
   const cache = useQueryClient();
@@ -77,16 +78,42 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
       case "reviewers": return actions.openPr && <Button theme={theme} compact={compact} icon="UserPlus" title="Add reviewers" onPress={() => actions.openPr!(item.prKey, "reviewers")} />;
     }
   };
-  return <View>
-    {items.map((item, index) => {
+  const featured = feature && items[0]?.kind === "question" ? items[0] as Extract<NeedItem, { kind: "question" }> : null;
+  return <View style={featured ? { gap: 12 } : undefined}>
+    {featured && <View accessibilityRole="summary" style={{ borderRadius: 10, borderWidth: 1, borderColor: withAlpha(c.statusWarning, 0.7), padding: 14, gap: 6 }}>
+      <View style={{ flexDirection: "row", gap: 10 }}>
+        <View style={{ paddingTop: 3 }}><Icon name={glyph(featured, c).name} size={16} color={c.statusWarning} /></View>
+        <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
+          <Text accessibilityRole="header" style={t.ask}>{featured.title}</Text>
+          {!!featured.detail && !sameText(featured.detail, featured.title.replace(/^Q\d+ · /, "")) && <Text numberOfLines={2} style={[t.body, { color: c.foregroundMuted }]}>{featured.detail}</Text>}
+          <QuestionState workspace={w} questionId={featured.questionId} theme={theme} />
+        </View>
+      </View>
+      {actions.openQuestion && <View style={{ marginTop: 6 }}><Button theme={theme} compact grow kind="primary" icon="MessageCircleReply" title={`Answer ${featured.questionId}`} accessibilityLabel={`Answer ${featured.title}`} onPress={() => actions.openQuestion!(featured.questionId)} /></View>}
+    </View>}
+    <View>
+    {items.filter(item => item !== featured).map((item, index) => {
       const g = glyph(item, c);
       const button = action(item);
-      return <CardRow key={item.key} theme={theme} first={index === 0 && flush} style={flush ? { paddingHorizontal: 0 } : undefined}>
+      // Phones: the action sits at the row's right edge so rows never grow a second line of controls. A send batch
+      // (the primary, with its task list) and Retry's pair keep their buttons full width under the row.
+      const inline = compact && button && item.kind !== "send" && !(item.kind === "retry" && !item.exhausted);
+      if (inline) return <CardRow key={item.key} theme={theme} compact first={index === 0 && flush} style={flush ? { paddingHorizontal: 0 } : undefined}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+          <Icon name={g.name} size={16} color={g.color} />
+          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+            <Text numberOfLines={2} style={t.label}>{item.title}</Text>
+            {"detail" in item && !!item.detail && !sameText(item.detail, item.title.replace(/^Q\d+ · /, "")) && <Text numberOfLines={1} style={t.meta}>{item.detail}</Text>}
+          </View>
+          {button}
+        </View>
+      </CardRow>;
+      return <CardRow key={item.key} theme={theme} compact={compact} first={index === 0 && flush} style={flush ? { paddingHorizontal: 0 } : undefined}>
         <View style={{ flexDirection: "row", gap: 9 }}>
           <View style={{ paddingTop: 2 }}><Icon name={g.name} size={14} color={g.color} /></View>
           <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
-            <Text style={t.body}>{item.title}</Text>
-            {"detail" in item && !!item.detail && <Text numberOfLines={item.kind === "question" ? 2 : 3} style={t.meta}>{item.detail}</Text>}
+            <Text style={compact ? t.label : t.body}>{item.title}</Text>
+            {"detail" in item && !!item.detail && !sameText(item.detail, item.title.replace(/^Q\d+ · /, "")) && <Text numberOfLines={item.kind === "question" ? 2 : 3} style={t.meta}>{item.detail}</Text>}
             {item.kind === "question" && <QuestionState workspace={w} questionId={item.questionId} theme={theme} />}
             {item.kind === "send" && <View style={{ gap: 2 }}>
               {item.tasks.slice(0, 4).map((task, i) => <Text key={i} numberOfLines={2} style={t.meta}><Text style={{ fontVariant: ["tabular-nums"] }}>{`${i + 1}. `}</Text>{shortRefs(task, w)}</Text>)}
@@ -100,6 +127,7 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
         </View>
       </CardRow>;
     })}
+    </View>
   </View>;
 }
 

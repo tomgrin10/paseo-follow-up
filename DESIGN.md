@@ -14,6 +14,22 @@ Colour carries meaning and nothing else. Purple is merged. Green is approved, do
 
 Type is the system sans: 15/21 semibold panel titles, 13/18 body, 12/17 supporting text, 11/15 small labels, tabular numerals for every count and time. Controls are 32px on desktop with a hit slop and 44px in compact layouts. Panel padding is 12px, 16px in compact layouts. Motion is 140–300ms ease-out, opacity and transform only, and every animation checks reduced motion: press scale, icon cross-fades when a state changes, and one rise-in for the Shipped card.
 
+## Phones
+
+`layout.compact` is the phone signal. Desktop keeps the values above; phones use the same tokens through size-aware helpers in `client/kit.tsx`, never forked components.
+
+- **Type** (`text(colors, compact)`): headline 20/26, title 17/23, ask 16/22 (the one line per pane you act on), body and label 14/20, meta 12/17, small 11/15 (the floor), section 13/18 semibold muted in sentence case. Desktop section heads stay small caps. Native caps font scaling at 1.4 (meta and small 1.25).
+- **Space** (`space(compact)`): 16 gutter and section gap, rows 12/16 padding and at least 48 tall, cards 14, controls 44.
+- **Targets**: everything tappable is 44 or more (chips get hit slop); adjacent targets sit 8 apart.
+- **Safe area** (`bottomInset`, `bottomGap`): anything on the bottom edge (the composer dock, the undo bar) clears `env(safe-area-inset-bottom)` on web, 24 on Android and 34 on iOS.
+- **One header.** The host header owns navigation. A Home row opens its own screen (`params.item`), so the host's ← returns to the list and Follow-up never draws a second back control. Each pane starts with a pane head: the title, full width, then one meta line (state word, age, project, PRs as text) that ellipsizes, with Open full as an icon at its end.
+- **Say it once.** A line already shown in a Needs-you row isn't repeated as a headline (`sameText`, on every size); the pill's title names the kind of ask, not the ask, because phones show it as the sheet title above the ask.
+- **One primary per screen.** In the detail pane, an actionable Needs-you item (Answer Q1, Merge, Add reviewers) is the primary and Sign off becomes secondary. A question is an attention card with a full-width Answer.
+- **Thumb reach.** The detail pane's moves (Sign off, Sign off & next, Later as an icon opening a list) and the composer sit in a dock pinned to the bottom; the moves hide while typing. The composer's explanation is its accessibility hint.
+- **Progressive disclosure.** Recent steps for an unloaded agent is one row with a quiet Load; the collapsed "What's this about?" shows its gist under the label; badges become the meta line; zero-count status chips are hidden and the strip scrolls sideways; meters move to the end of Home's list.
+- **Panel**: Home, the Spec chip and settings share one 44px bar; the goal appears only when it differs from the title; the status sentence uses the ask role. Needs-you rows put their single action at the right edge.
+- **Empty panel**: a title, one line and the three-node rail (PRs as a stack, what needs you, when it's done) with Project settings. Never a Track prompt.
+
 ## Workspace panel
 
 Top to bottom, every block optional except the header:
@@ -63,7 +79,7 @@ Project tracking uses Paseo's settings kit: one switch per project, with its rem
 
 ## Empty, loading and error
 
-An untracked workspace teaches with the panel's own rail: three nodes for what Follow-up does, the safety promise, one primary Track button and a pointer to project settings. Loading shows a skeleton of the header and two cards. A failed first load shows a card with the error and Try again.
+A workspace with nothing to follow says so; on phones it teaches with the panel's own rail (three nodes for what Follow-up does) and a Project settings button. Never a Track prompt. Loading shows a skeleton of the header and two cards. A failed first load shows a card with the error and Try again.
 
 ## CI labels
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { Platform, Pressable, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
 import { GROUP_TITLE, homeCounts, type HomeGroupId, type HomeModel } from "../shared/home";
 import { FIELD_LABEL, excerpt, highlightRuns, homeSearchDocs, indexDocs, defaultActive, omniboxResults, overseerProvider, workspaceProvider, type OmniboxItem, type OmniboxProvider, type Range, type WorkspaceItem } from "../shared/search";
@@ -89,10 +89,11 @@ export function SearchField({ theme, omnibox, dense, onEnter }: { theme: Theme; 
   const c = theme.colors;
   const [focused, setFocused] = useState(false);
   const { query, setQuery, results, active, move, inputRef, askOn } = omnibox;
-  const placeholder = askOn ? "Search, or ask the Overseer" : "Search workspaces, branches, PRs";
-  return <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 6, height: dense ? 30 : 32, paddingHorizontal: 8, borderRadius: 6,
+  const placeholder = askOn ? dense ? "Search or ask the Overseer" : "Search, or ask the Overseer" : "Search workspaces, branches, PRs";
+  // `dense` is the phone layout: a 44px field with a rounder shape and body-size text.
+  return <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: dense ? 8 : 6, height: dense ? 44 : 32, paddingHorizontal: dense ? 12 : 8, borderRadius: dense ? 12 : 6,
     borderWidth: 1, borderColor: focused ? withAlpha(c.foreground, 0.35) : c.border, backgroundColor: c.surface1 }}>
-    <Icon name="Search" size={13} color={c.foregroundMuted} />
+    <Icon name="Search" size={dense ? 16 : 13} color={c.foregroundMuted} />
     <TextInput ref={inputRef} value={query} onChangeText={setQuery} placeholder={placeholder} placeholderTextColor={c.foregroundMuted}
       accessibilityLabel={placeholder} autoCorrect={false} autoCapitalize="none" spellCheck={false} returnKeyType="go"
       onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
@@ -103,11 +104,11 @@ export function SearchField({ theme, omnibox, dense, onEnter }: { theme: Theme; 
         else if (key === "ArrowUp") { e.preventDefault?.(); move(-1); }
         else if (key === "Escape") { if (query) setQuery(""); else inputRef.current?.blur(); }
       }}
-      style={{ flex: 1, minWidth: 0, color: c.foreground, fontSize: 13, paddingVertical: 0, ...(Platform.OS === "web" ? { outlineStyle: "none" } as object : {}) }} />
-    {!!query && <Pressable accessibilityRole="button" accessibilityLabel="Clear search" hitSlop={8} onPress={() => { setQuery(""); inputRef.current?.focus(); }}>
-      <Icon name="X" size={13} color={c.foregroundMuted} />
+      style={{ flex: 1, minWidth: 0, color: c.foreground, fontSize: dense ? 15 : 13, paddingVertical: 0, ...(Platform.OS === "web" ? { outlineStyle: "none" } as object : {}) }} />
+    {!!query && <Pressable accessibilityRole="button" accessibilityLabel="Clear search" hitSlop={dense ? 14 : 8} onPress={() => { setQuery(""); inputRef.current?.focus(); }}>
+      <Icon name="X" size={dense ? 16 : 13} color={c.foregroundMuted} />
     </Pressable>}
-    {!query && !focused && Platform.OS === "web" && <Text style={{ color: c.foregroundMuted, fontSize: 11, paddingHorizontal: 4, borderRadius: 3, borderWidth: 1, borderColor: c.border }}>/</Text>}
+    {!query && !focused && !dense && Platform.OS === "web" && <Text style={{ color: c.foregroundMuted, fontSize: 11, paddingHorizontal: 4, borderRadius: 3, borderWidth: 1, borderColor: c.border }}>/</Text>}
   </View>;
 }
 
@@ -137,15 +138,16 @@ export function SortMenu({ theme, mode, onChange, rankedAt, touch, rank = null, 
   const note = [priorityNote(rankedAt, now), rankedAt && rank?.enabled ? rankCost(rank) : "", rank?.enabled ? rank.healthLine : ""].filter(Boolean).join(" · ");
   return <View style={{ position: "relative", zIndex: 20 }}>
     <Pressable accessibilityRole="button" accessibilityLabel={`Sort: ${SORT_LABEL[mode]}${running ? ", ranking" : ""}`} aria-expanded={open} accessibilityState={{ expanded: open }} onPress={() => setOpen(o => !o)}
-      style={state => ({ flexDirection: "row", alignItems: "center", gap: 4, height: touch ? 36 : 30, paddingHorizontal: 8, borderRadius: 6, backgroundColor: open || (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
-      {running ? <Spinner color={c.foreground} size={12} label="Ranking" /> : <Icon name="ArrowUpDown" size={13} color={c.foregroundMuted} />}
-      <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 12 }}>{SORT_LABEL[mode]}</Text>
-      <Icon name="ChevronDown" size={12} color={c.foregroundMuted} />
+      style={state => ({ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, height: touch ? 44 : 30, minWidth: touch ? 44 : undefined, paddingHorizontal: touch ? 0 : 8, borderRadius: touch ? 8 : 6, backgroundColor: open || (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
+      {/* Phones: an icon; the mode's name lives in the menu (and the accessible name). */}
+      {running ? <Spinner color={c.foreground} size={12} label="Ranking" /> : <Icon name="ArrowUpDown" size={touch ? 18 : 13} color={c.foregroundMuted} />}
+      {!touch && <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 12 }}>{SORT_LABEL[mode]}</Text>}
+      {!touch && <Icon name="ChevronDown" size={12} color={c.foregroundMuted} />}
     </Pressable>
-    {open && <View accessibilityRole="menu" style={{ position: "absolute", top: touch ? 40 : 34, right: 0, minWidth: 220, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1,
+    {open && <View accessibilityRole="menu" style={{ position: "absolute", top: touch ? 48 : 34, right: 0, minWidth: touch ? 240 : 220, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1,
       shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 8 }}>
       {SORT_MODES.map(m => <Pressable key={m} accessibilityRole="menuitem" accessibilityState={{ selected: m === mode }} onPress={() => { onChange(m); setOpen(false); }}
-        style={state => ({ flexDirection: "row", alignItems: "center", gap: 8, minHeight: touch ? 44 : 34, paddingHorizontal: 10, backgroundColor: (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
+        style={state => ({ flexDirection: "row", alignItems: "center", gap: 8, minHeight: touch ? 48 : 34, paddingHorizontal: touch ? 12 : 10, backgroundColor: (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
         <View style={{ width: 14, alignSelf: "flex-start", paddingTop: 2 }}>{m === mode && <Icon name="Check" size={13} color={c.foreground} />}</View>
         <View style={{ flex: 1 }}>
           <Text style={{ color: c.foreground, fontSize: 13, lineHeight: 17 }}>{SORT_LABEL[m]}</Text>
@@ -181,7 +183,8 @@ export function StatusStrip({ theme, model, filter, onFilter, touch, dense }: { 
     const muted = n === 0;
     const color = selected ? c.foreground : muted ? withAlpha(c.foregroundMuted, 0.6) : tone ?? c.foreground;
     return <Pressable key={key} accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={n === null ? label : `${label}, ${n}${selected ? ". Showing only these; press to show all" : ". Show only these"}`} onPress={onPress}
-      style={state => ({ flexDirection: "row", alignItems: "center", gap: 5, height: touch ? 36 : 30, paddingHorizontal: 8, borderRadius: 15,
+      hitSlop={touch ? { top: 6, bottom: 6 } : undefined}
+      style={state => ({ flexDirection: "row", alignItems: "center", gap: 5, height: touch ? 32 : 30, paddingHorizontal: touch ? 10 : 8, borderRadius: 16,
         borderWidth: 1, borderColor: selected ? withAlpha(c.foreground, 0.4) : "transparent",
         backgroundColor: selected ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
       {n !== null && <Text style={{ color, fontSize: 13, fontWeight: "600", fontVariant: ["tabular-nums"] }}>{n}</Text>}
@@ -189,10 +192,16 @@ export function StatusStrip({ theme, model, filter, onFilter, touch, dense }: { 
       {selected && <Icon name="X" size={11} color={c.foregroundMuted} />}
     </Pressable>;
   };
-  return <View accessibilityRole="toolbar" accessibilityLabel="Status" style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: dense ? 0 : 2, rowGap: 2, paddingHorizontal: dense ? 4 : 10 }}>
-    {STRIP.map(s => chip(s.id, s.label, counts[s.id], filter === s.id, () => onFilter(filter === s.id ? null : s.id), s.id === "needs" && counts.needs ? c.statusWarning : undefined))}
+  const chips = <>
+    {STRIP.filter(s => !touch || counts[s.id] > 0 || filter === s.id).map(s => chip(s.id, s.label, counts[s.id], filter === s.id, () => onFilter(filter === s.id ? null : s.id), s.id === "needs" && counts.needs ? c.statusWarning : undefined))}
     {counts.later > 0 && chip("later", "Later", counts.later, filter === "later", () => onFilter(filter === "later" ? null : "later"))}
     {counts.archivable > 0 && <Text style={{ color: c.statusSuccess, fontSize: 12, paddingHorizontal: 6 }}>{counts.archivable} to archive</Text>}
+  </>;
+  // Phones: only groups that have something, on one line that scrolls sideways instead of wrapping.
+  if (touch) return <ScrollView horizontal showsHorizontalScrollIndicator={false} accessibilityRole="toolbar" accessibilityLabel="Status"
+    contentContainerStyle={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 12, paddingVertical: 2 }}>{chips}</ScrollView>;
+  return <View accessibilityRole="toolbar" accessibilityLabel="Status" style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: dense ? 0 : 2, rowGap: 2, paddingHorizontal: dense ? 4 : 10 }}>
+    {chips}
   </View>;
 }
 

@@ -99,10 +99,11 @@ export function PrControls({ pr, workspace, theme, compact, browserReady: compan
         </View>
       </View>)}
       {plan.blockers.map(blocker => <Text key={blocker} style={[t.meta, { color: c.statusWarning }]}>{blocker}</Text>)}
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 2 }}>
-        <Button title={plan.kind === "merge" ? plan.mergeQueue ? `Add #${plan.prs[0].number} to merge queue` : plan.prs.length > 1 ? `Merge all ${plan.prs.length} PRs` : `Merge #${pr.number}` : `${plan.kind === "enable_mwr" ? "Enable" : "Disable"} for all ${plan.prs.length} PRs`} kind="primary" theme={theme} compact={compact} loading={submit.isPending} disabled={submit.isPending || scopeBlocked("downstack")} onPress={() => act("downstack")} />
-        {plan.kind !== "merge" && plan.prs.length > 1 && <Button title="Just this PR" theme={theme} compact={compact} disabled={submit.isPending || scopeBlocked("target")} onPress={() => act("target")} />}
-        <Button title="Cancel" kind="ghost" theme={theme} compact={compact} disabled={submit.isPending} onPress={() => { setPlan(null); checking.reset(); submit.reset(); }} />
+      {/* Phones: the confirm is full width with Cancel under it; desktop keeps one row. */}
+      <View style={compact ? { gap: 8, marginTop: 4 } : { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 2 }}>
+        <Button grow={compact} title={plan.kind === "merge" ? plan.mergeQueue ? `Add #${plan.prs[0].number} to merge queue` : plan.prs.length > 1 ? `Merge all ${plan.prs.length} PRs` : `Merge #${pr.number}` : `${plan.kind === "enable_mwr" ? "Enable" : "Disable"} for all ${plan.prs.length} PRs`} kind="primary" theme={theme} compact={compact} loading={submit.isPending} disabled={submit.isPending || scopeBlocked("downstack")} onPress={() => act("downstack")} />
+        {plan.kind !== "merge" && plan.prs.length > 1 && <Button grow={compact} title="Just this PR" theme={theme} compact={compact} disabled={submit.isPending || scopeBlocked("target")} onPress={() => act("target")} />}
+        <Button grow={compact} title="Cancel" kind="ghost" theme={theme} compact={compact} disabled={submit.isPending} onPress={() => { setPlan(null); checking.reset(); submit.reset(); }} />
       </View>
     </View>}
   </View>;

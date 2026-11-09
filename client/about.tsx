@@ -30,7 +30,7 @@ export const aboutKey = (workspaceId: string) => ["follow-through", "about", wor
  * is cached, the one-line gist. Open: the overview, what's linked, and when it was written with a Refresh.
  */
 export function AboutSection({ workspaceId, theme, compact, flush = false }: { workspaceId: string; theme: Theme; compact: boolean; flush?: boolean }) {
-  const c = theme.colors; const t = text(c);
+  const c = theme.colors; const t = text(c, compact);
   const [open, setOpenState] = useState(readOpen);
   const [refreshing, setRefreshing] = useState(false);
   const read = useRpc(workspaceAboutRpc);
@@ -53,6 +53,7 @@ export function AboutSection({ workspaceId, theme, compact, flush = false }: { w
     catch { /* the query's error shows */ } finally { setRefreshing(false); }
   };
   const busy = refreshing || view?.status === "pending";
+  const peek = compact && !open && !!d.gist;
 
   const failedKinds = new Set(view?.record?.failed ?? []);
 
@@ -60,18 +61,24 @@ export function AboutSection({ workspaceId, theme, compact, flush = false }: { w
   return <View style={{ borderRadius: 10, borderWidth: open ? 1 : 0, borderColor: c.border, marginHorizontal: flush ? 0 : compact ? 16 : 12, marginTop: flush ? 0 : 8 }}>
     <Pressable accessibilityRole="button" aria-expanded={open} accessibilityState={{ expanded: open }} accessibilityLabel={`${open ? "Hide" : "Show"} what this workspace is about`}
       accessibilityHint={d.gist && !open ? d.gist : undefined} onPress={toggle}
-      style={state => ({ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: open ? 12 : 8, marginHorizontal: open ? 0 : -8, minHeight: compact ? 44 : 32, paddingVertical: 6, borderRadius: 8,
+      style={state => ({ flexDirection: "row", alignItems: peek ? "flex-start" : "center", gap: 8, paddingHorizontal: open ? 12 : 8, marginHorizontal: open ? 0 : -8, minHeight: compact ? 48 : 32, paddingVertical: compact ? 8 : 6, borderRadius: 8,
         backgroundColor: state.pressed ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
-      <Icon name={open ? "ChevronDown" : "ChevronRight"} size={14} color={c.foregroundMuted} />
-      <Text style={[t.label, { flexShrink: 0 }]}>What's this about?</Text>
-      {!open && d.gist ? <Text numberOfLines={1} style={[t.meta, { flex: 1, minWidth: 0 }]}>{d.gist}</Text> : <View style={{ flex: 1 }} />}
+      <View style={peek ? { paddingTop: 3 } : undefined}><Icon name={open ? "ChevronDown" : "ChevronRight"} size={14} color={c.foregroundMuted} /></View>
+      {/* Phones: the gist wraps under the label (two lines) instead of being cut to a few words beside it. */}
+      {peek ? <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+        <Text style={t.label}>What's this about?</Text>
+        <Text numberOfLines={2} style={[t.meta, { fontSize: 13, lineHeight: 18 }]}>{d.gist}</Text>
+      </View> : <>
+        <Text style={[t.label, { flexShrink: 0 }]}>What's this about?</Text>
+        {!open && d.gist ? <Text numberOfLines={1} style={[t.meta, { flex: 1, minWidth: 0 }]}>{d.gist}</Text> : <View style={{ flex: 1 }} />}
+      </>}
       {!open && view?.status === "pending" && !d.gist && <Spinner color={c.foregroundMuted} size={11} label="Summarizing" />}
     </Pressable>
     {open && <View style={{ paddingHorizontal: 12, paddingBottom: 10, gap: 12 }}>
       <Overview d={d} view={view} c={c} compact={compact} loading={query.isPending} error={query.error ? errorText(query.error) : null} />
       {/* Nothing is claimed about links until an overview exists: "none found" only after a finished write. */}
       {d.body === "overview" && <View style={{ gap: 4 }}>
-        <Text accessibilityRole="header" style={[t.small, { fontWeight: "600", letterSpacing: 0.5, textTransform: "uppercase" }]}>Linked</Text>
+        <Text accessibilityRole="header" style={compact ? t.section : [t.small, { fontWeight: "600", letterSpacing: 0.5, textTransform: "uppercase" }]}>Linked</Text>
         {d.links.length ? d.links.map(l => <LinkRow key={l.key} l={l} c={c} compact={compact} failed={failedKinds.has(SOURCE_LABEL[l.kind])} />)
           : <Text style={t.meta}>{d.empty}</Text>}
       </View>}
@@ -95,7 +102,7 @@ function Overview({ d, view, c, compact, loading, error }: { d: ReturnType<typeo
   if (d.body === "overview") return <View style={{ gap: 4 }}>
     <Text selectable numberOfLines={compact && !more ? 4 : undefined}
       style={[t.body, { lineHeight: 19, color: c.foreground, opacity: 0.88 }]}>{d.overview}</Text>
-    {long && <Pressable accessibilityRole="button" onPress={() => setMore(m => !m)} hitSlop={12}><Text style={[t.small, { color: c.foreground }]}>{more ? "Less" : "More"}</Text></Pressable>}
+    {long && <Pressable accessibilityRole="button" onPress={() => setMore(m => !m)} hitSlop={compact ? { top: 14, bottom: 14, left: 12, right: 24 } : 12}><Text style={[t.small, { color: c.foreground, fontWeight: "600" }]}>{more ? "Less" : "More"}</Text></Pressable>}
     {d.refreshing && <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}><Spinner color={c.foregroundMuted} size={10} label="Summarizing" /><Text style={t.small}>Updating…</Text></View>}
   </View>;
   if (d.body === "summarizing" || loading) return <View style={{ gap: 6 }}>

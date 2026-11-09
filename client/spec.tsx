@@ -40,7 +40,7 @@ export function SpecRow({ workspace: w, theme, compact, onEdit }: { workspace: W
   const c = theme.colors; const t = text(c);
   const url = w.spec?.url;
   const others = w.artifacts.filter(a => a.url !== url).length;
-  return <CardRow theme={theme}>
+  return <CardRow theme={theme} compact={compact}>
     <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
       <View style={{ flex: 1, minWidth: 160, gap: 2 }}>
         <Text style={t.label}>Spec</Text>

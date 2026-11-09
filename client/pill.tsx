@@ -1,7 +1,7 @@
 import { useState, useSyncExternalStore } from "react";
 import { browserKey, BROWSER_POLL_MS } from "./keys";
 import { useWorkspace } from "./workspace-data";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { useRpc, type PluginButtonContentProps, type PluginButtonIconProps, type PluginButtonRegistration, type PluginClientContext } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/ui";
@@ -91,8 +91,9 @@ export function contributeFollowUpPill(client: PluginClientContext, deps: Deps) 
     for (const [agentId, { target, state }] of wanted) try {
       const undo = state.mode === "undo";
       const label = undo ? state.label : state.headline.label;
-      // The tooltip (and accessible name) says whose pill it is, then the ask.
-      const title = undo ? "Follow-up: signed off. Click to undo." : `Follow-up: ${state.headline.line}${state.todo && state.mode === "flag" ? ` · ${todoLabel(withoutBriefQuestions(target.items, target.row))} in this workspace` : ""}`;
+      // The tooltip (and accessible name) says whose pill it is and what kind of ask. On phones the host shows it as the
+      // sheet's title right above the popover, which carries the ask itself in full, so the title doesn't repeat it.
+      const title = undo ? "Follow-up: signed off. Click to undo." : `Follow-up · ${state.headline.label}${state.todo && state.mode === "flag" ? ` · ${todoLabel(withoutBriefQuestions(target.items, target.row))} in this workspace` : ""}`;
       const key = `${state.mode}|${label}|${title}`;
       const button = { title, label, behavior: undo ? { kind: "action" as const, onPress() { void inbox.undo([agentId]); } } : { kind: "popover" as const, Content } };
       const entry = pills.get(agentId);
@@ -112,7 +113,7 @@ export function contributeFollowUpPill(client: PluginClientContext, deps: Deps) 
 function Chip({ title, onPress, theme, compact }: { title: string; onPress: () => void; theme: Theme; compact: boolean }) {
   const c = theme.colors;
   return <Pressable accessibilityRole="button" accessibilityLabel={`Later: ${title}`} onPress={onPress} hitSlop={compact ? 0 : 3}
-    style={(s: { pressed: boolean; hovered?: boolean }) => ({ minHeight: compact ? 40 : 26, paddingHorizontal: compact ? 12 : 9, borderRadius: 999, borderWidth: 1, borderColor: c.border, alignItems: "center", justifyContent: "center", backgroundColor: s.pressed || s.hovered ? c.surface2 : "transparent" })}>
+    style={(s: { pressed: boolean; hovered?: boolean }) => ({ minHeight: compact ? 44 : 26, paddingHorizontal: compact ? 14 : 9, borderRadius: 999, borderWidth: 1, borderColor: c.border, alignItems: "center", justifyContent: "center", backgroundColor: s.pressed || s.hovered ? c.surface2 : "transparent" })}>
     <Text numberOfLines={1} style={{ color: c.foreground, fontSize: compact ? 13 : 12, lineHeight: compact ? 18 : 16 }}>{title}</Text>
   </Pressable>;
 }
@@ -136,8 +137,8 @@ const LATER = [["hour", "In 1 hour"], ["tonight", "Tonight 18:00"], ["tomorrow",
 export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
   const { deps } = props;
   const agentId = props.context === "agent" ? props.agentId : "";
-  const c = props.theme.colors; const t = text(c);
   const touch = props.layout.compact;
+  const c = props.theme.colors; const t = text(c, touch);
   const { target, state, now } = useTarget(deps, agentId, props.workspaceId);
   const browserRead = useRpc(browserStatusRpc);
   const main = !!target.workspace && target.workspace.mainAgentId === agentId;
@@ -167,7 +168,7 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
         <Text style={{ color: tone, fontSize: 12, lineHeight: 16, fontWeight: "600" }}>{headline.label}</Text>
         {flagged && state.todo > 0 && <Text style={t.small}>· {todoLabel(items.length ? items : withoutBriefQuestions(target.items, row))} in this workspace</Text>}
       </View>
-      <Text numberOfLines={2} style={{ color: c.foreground, fontSize: 14, lineHeight: 20, fontWeight: "600" }}>{headline.line}</Text>
+      <Text numberOfLines={touch ? 3 : 2} style={touch ? t.ask : { color: c.foreground, fontSize: 14, lineHeight: 20, fontWeight: "600" }}>{headline.line}</Text>
     </View> : <Text style={t.meta}>Nothing needs you here right now.</Text>}
 
     {/* 2. Sign off, with "& next" beside it, then Later. Only for a flagged agent. */}
@@ -178,15 +179,23 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
         <Button theme={props.theme} compact={touch} grow={touch} icon="ArrowRight" title="Sign off & next"
           onPress={() => done(() => { void deps.inbox.signOff([agentId]); deps.openNext(agentId); })} />
       </View>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
-        <Text style={[t.meta, { marginRight: 2 }]}>Later</Text>
-        {LATER.map(([id, title]) => <Chip key={id} title={title} theme={props.theme} compact={touch} onPress={() => done(() => void deps.inbox.snooze([agentId], snoozeUntil(id, new Date())))} />)}
-      </View>
+      {touch
+        // Phones: one row that scrolls sideways, never a second line of chips.
+        ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Text style={t.meta}>Later</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ gap: 6, paddingRight: 8 }}>
+            {LATER.map(([id, title]) => <Chip key={id} title={title.replace(/^In 1 hour$/, "1 hour")} theme={props.theme} compact onPress={() => done(() => void deps.inbox.snooze([agentId], snoozeUntil(id, new Date())))} />)}
+          </ScrollView>
+        </View>
+        : <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+          <Text style={[t.meta, { marginRight: 2 }]}>Later</Text>
+          {LATER.map(([id, title]) => <Chip key={id} title={title} theme={props.theme} compact={touch} onPress={() => done(() => void deps.inbox.snooze([agentId], snoozeUntil(id, new Date())))} />)}
+        </View>}
     </View>}
 
     {/* 3. The workspace's own items, only when there are some. */}
     {w && (asking || items.length > 0) && <View style={{ gap: 8, paddingTop: flagged ? 12 : 0, borderTopWidth: flagged ? 1 : 0, borderTopColor: c.border }}>
-      {flagged && <Text style={[t.small, { fontWeight: "600" }]}>In this workspace · {todoLabel(items)}</Text>}
+      {flagged && <Text style={touch ? t.section : [t.small, { fontWeight: "600" }]}>In this workspace · {todoLabel(items)}</Text>}
       {asking
         ? <QuestionStepper workspace={w} theme={props.theme} compact={touch} bodyMaxHeight={touch ? undefined : 200} onDetails={setQuestion} onAnswered={() => deps.live.refresh()} />
         : <NeedsYouList workspace={w} theme={props.theme} compact={touch} flush

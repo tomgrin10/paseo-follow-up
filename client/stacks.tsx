@@ -121,7 +121,7 @@ export function StacksCard({ workspace: w, theme, compact, open, toggle, onOpen,
     </View>}
     {active.map(s => <StackRows key={s.name} name={s.name} prs={s.prs} theme={theme} open={open} toggle={toggle} onOpen={onOpen} compact={compact} showRepo={showRepo} settled={false} wide={wide} />)}
     {settled.length > 0 && <>
-      <FoldRow theme={theme} open={settledOpen} onPress={() => toggle("settled")} icon="Archive" iconColor={c.foregroundMuted}
+      <FoldRow theme={theme} compact={compact} open={settledOpen} onPress={() => toggle("settled")} icon="Archive" iconColor={c.foregroundMuted}
         label={`${settled.length} settled stack${settled.length === 1 ? "" : "s"} · ${settledPrs} PR${settledPrs === 1 ? "" : "s"}`} />
       {settledOpen && settled.map(s => <StackRows key={s.name} name={s.name} prs={s.prs} theme={theme} open={open} toggle={toggle} onOpen={onOpen} compact={compact} showRepo={showRepo} settled wide={wide} />)}
     </>}
