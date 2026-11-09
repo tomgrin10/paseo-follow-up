@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Animated, Easing, Platform, Pressable, ScrollView, Text, View, type ViewStyle } from "react-native";
+import { Animated, Easing, Keyboard, Platform, Pressable, ScrollView, Text, View, type ViewStyle } from "react-native";
 import { useRpc, useSettings } from "@getpaseo/plugin/client";
 import { Icon, copyText, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -38,7 +38,7 @@ const TITLES: Record<OnboardingStep, string> = {
   checks: "Check your setup",
   defaults: "What Follow-up does without asking",
   reviewers: "Who should review your PRs?",
-  helpers: "Helpers",
+  helpers: "Helpers, and where things are",
 };
 
 /** Bottom clearance on phones. TODO(rebase): kit.tsx's bottomInset from the mobile rework replaces this. */
@@ -67,20 +67,21 @@ export function Setup({ theme, compact, view, deps }: { theme: Theme; compact: b
     const n = follow.data?.workspaces.filter(w => w.enable_tracking && !w.optedOut).length ?? 0;
     toast.show(n ? `Set up. Following ${n} workspace${n === 1 ? "" : "s"}.` : "Set up. Follow-up starts with your next workspace.", { variant: "success" });
   } });
-  const skip = () => move.mutate({ action: "skip" }, { onSuccess: () => toast.show("Setup skipped. It's in Follow-up settings when you want it.") });
+  const skip = () => move.mutate({ action: "skip" }, { onSuccess: () => toast.show("Setup skipped. Set it up any time from Follow-up settings, Set up Follow-up again.") });
   const last = index === ONBOARDING_STEPS.length - 1;
+  const keyboard = useKeyboardUp(compact);
   const failing = step === "checks" && checks.data ? checksSummary(checks.data.checks).state === "fail" : false;
 
-  const body = step === "intro" ? <IntroStep theme={theme} compact={compact} follow={follow.data ?? null} onSee={() => go("defaults")} />
+  const body = step === "intro" ? <IntroStep theme={theme} compact={compact} follow={follow.data ?? null} />
     : step === "checks" ? <ChecksStep theme={theme} compact={compact} checks={checks} deps={deps} />
     : step === "defaults" ? <DefaultsStep theme={theme} compact={compact} />
     : step === "reviewers" ? <ReviewerSettings theme={theme} compact={compact} />
     : <HelpersStep theme={theme} compact={compact} deps={deps} checks={checks.data?.checks ?? null} />;
   const lead: Record<OnboardingStep, string> = {
-    intro: "It follows each workspace's pull requests until the work is done, sends review comments and failed checks back to the agent that made them, and puts anything that needs your decision in one list.",
+    intro: "It follows your agents' pull requests until the work is done, sends fixes back to them, and asks you only for decisions.",
     checks: "Follow-up reads PRs with the GitHub CLI, and its helper agents run on Claude or Codex. Checking is free.",
     defaults: "These are on now. Change anything here; it saves as you go, and Settings has the same switches.",
-    reviewers: "Add reviewers on a PR asks these people. Set a default for every repository, or a list for one. You can do this later.",
+    reviewers: "When you press Add reviewers on a PR, Follow-up asks these people. Set a default for all repositories, or a list for one. Until then, PRs without reviewers show in Needs you.",
     helpers: "Two optional agents. They read, summarise and rank. They never change code or message anyone.",
   };
   const column: ViewStyle = { width: "100%", maxWidth: 560, alignSelf: "center", paddingHorizontal: compact ? 16 : 24 };
@@ -99,20 +100,41 @@ export function Setup({ theme, compact, view, deps }: { theme: Theme; compact: b
         {body}
       </StepFade>
     </ScrollView>
-    <View style={[{ borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.surface0, paddingTop: 12 }, bottomPad(compact)]}>
+    {/* While typing a reviewer on a phone the bar steps aside, so Continue never sits over the keyboard. */}
+    {!keyboard && <View style={[{ borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.surface0, paddingTop: 12 }, bottomPad(compact)]}>
       <View style={[column, { flexDirection: "row", alignItems: "center", gap: 8 }]}>
         {index > 0 && (compact
           ? <IconButton theme={theme} compact icon="ChevronLeft" label="Back" onPress={() => go(ONBOARDING_STEPS[index - 1])} />
           : <Button theme={theme} kind="ghost" icon="ChevronLeft" title="Back" onPress={() => go(ONBOARDING_STEPS[index - 1])} />)}
         {!compact && <View style={{ flex: 1 }} />}
-        {failing && !compact && <Text style={[t.meta, { flexShrink: 1 }]}>Follow-up works without these; each row says what's missing.</Text>}
         {step === "reviewers" && <Button theme={theme} compact={compact} kind="ghost" title="Skip, set later" onPress={() => go(ONBOARDING_STEPS[index + 1])} />}
         <Button theme={theme} compact={compact} grow={compact} kind="primary" icon={last ? "Check" : undefined}
           title={last ? "Finish" : failing ? "Continue anyway" : "Continue"} loading={last && move.isPending}
           onPress={() => last ? finish() : go(ONBOARDING_STEPS[index + 1])} />
       </View>
-    </View>
+    </View>}
   </View>;
+}
+
+/** Phones: whether the on-screen keyboard is up (native events; on the web, the visual viewport shrinking). */
+function useKeyboardUp(compact: boolean): boolean {
+  const [up, setUp] = useState(false);
+  useEffect(() => {
+    if (!compact) return;
+    if (Platform.OS === "web") {
+      type Viewport = { height: number; addEventListener(e: "resize", f: () => void): void; removeEventListener(e: "resize", f: () => void): void };
+      const vv = (globalThis as { visualViewport?: Viewport }).visualViewport;
+      const win = globalThis as unknown as { innerHeight: number };
+      if (!vv) return;
+      const check = () => setUp(win.innerHeight - vv.height > 150);
+      vv.addEventListener("resize", check);
+      return () => vv.removeEventListener("resize", check);
+    }
+    const show = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow", () => setUp(true));
+    const hide = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide", () => setUp(false));
+    return () => { show.remove(); hide.remove(); };
+  }, [compact]);
+  return up;
 }
 
 /** "2 of 5" and one short segment per step, drawn like the stack bar but in neutral ink: progress isn't a PR state. */
@@ -123,7 +145,7 @@ function Progress({ theme, index, onPick }: { theme: Theme; index: number; onPic
     <Text style={[t.small, { minWidth: 34 }]}>{`${index + 1} of ${ONBOARDING_STEPS.length}`}</Text>
     <View style={{ flex: 1, maxWidth: 220, flexDirection: "row", gap: 3 }}>
       {ONBOARDING_STEPS.map((s, i) => <Pressable key={s} disabled={i >= index} onPress={() => onPick(i)} accessibilityLabel={i < index ? `Back to step ${i + 1}` : undefined}
-        style={{ flex: 1, height: 14, justifyContent: "center" }}>
+        hitSlop={{ top: 12, bottom: 12 }} style={{ flex: 1, height: 14, justifyContent: "center" }}>
         <View style={{ height: 3, borderRadius: 2, backgroundColor: i === index ? c.foreground : i < index ? withAlpha(c.foreground, 0.4) : c.border }} />
       </Pressable>)}
     </View>
@@ -155,10 +177,10 @@ const Panel = ({ c, children }: { c: Colors; children: ReactNode }) =>
 const EXAMPLE = [
   { glyph: "CircleX", tone: "danger", line: "Checks failed on #418", caption: "Follow-up notices" },
   { glyph: "spinner", tone: "running", line: "Repair sent to the agent · 2m", caption: "and sends the fix to the agent that made the PR" },
-  { glyph: "CircleCheck", tone: "success", line: "#418 approved", caption: "then asks you only for the decision" },
+  { glyph: "CircleCheck", tone: "success", dot: "warning", line: "#418 approved", caption: "then asks you only for the decision" },
 ] as const;
 
-function IntroStep({ theme, compact, follow, onSee }: { theme: Theme; compact: boolean; follow: { workspaces: { enable_tracking: boolean; optedOut: boolean }[] } | null; onSee: () => void }) {
+function IntroStep({ theme, compact, follow }: { theme: Theme; compact: boolean; follow: { workspaces: { enable_tracking: boolean; optedOut: boolean }[] } | null }) {
   const c = theme.colors; const t = text(c);
   const reduced = useReducedMotion();
   const [phase, setPhase] = useState(reduced ? 2 : 0);
@@ -192,7 +214,7 @@ function IntroStep({ theme, compact, follow, onSee }: { theme: Theme; compact: b
       {/* What Follow-up did, step by step: the rail fills as the example plays. */}
       <View style={{ borderTopWidth: 1, borderTopColor: c.border, paddingHorizontal: compact ? 14 : 16, paddingVertical: 10, gap: 6 }}>
         {EXAMPLE.map((x, i) => <View key={x.line} style={{ flexDirection: "row", alignItems: "center", gap: 8, opacity: i <= phase ? 1 : 0.35 }}>
-          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: i <= phase ? tone(x.tone) : c.border }} />
+          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: i <= phase ? ("dot" in x ? c.statusWarning : tone(x.tone)) : c.border }} />
           <Text style={t.meta}>{x.caption}</Text>
         </View>)}
       </View>
@@ -207,11 +229,10 @@ function IntroStep({ theme, compact, follow, onSee }: { theme: Theme; compact: b
         <View style={{ flex: 1, gap: 1 }}><Text style={t.label}>{title}</Text><Text style={t.meta}>{line}</Text></View>
       </View>)}
     </View>
-    {n !== null && <Pressable accessibilityRole="button" onPress={onSee} style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 8, minHeight: compact ? 44 : 32, paddingHorizontal: 12, borderRadius: 8, backgroundColor: pressed ? c.surface2 : c.surface1 })}>
+    {n !== null && <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: compact ? 44 : 36, paddingHorizontal: 12, borderRadius: 8, backgroundColor: c.surface1 }}>
       <Icon name="Radar" size={14} color={c.foregroundMuted} />
-      <Text style={[t.body, { flex: 1 }]}>{n ? `Already following your ${n} workspace${n === 1 ? "" : "s"}.` : "No workspaces yet. Follow-up starts with the next one you create."}</Text>
-      {n > 0 && <Text style={[t.meta, { color: c.foreground }]}>See them</Text>}
-    </Pressable>}
+      <Text style={[t.body, { flex: 1 }]}>{n ? `Already following your ${n} workspace${n === 1 ? "" : "s"}. Step 3 lists them.` : "No workspaces yet. Follow-up starts with the next one you create."}</Text>
+    </View>}
   </View>;
 }
 
@@ -234,19 +255,24 @@ function ChecksStep({ theme, compact, checks, deps }: { theme: Theme; compact: b
       {rows ? rows.map((row, i) => <CheckRow key={row.id} theme={theme} compact={compact} row={row} first={i === 0} checking={again.isPending} deps={deps} />)
         : ["GitHub", "Claude", "Codex", "Agent tools"].map((label, i) => <CheckRow key={label} theme={theme} compact={compact} first={i === 0} checking deps={deps} row={{ id: label, label, state: "pending", detail: "Checking…", fix: null }} />)}
     </Panel>
+    {summary?.state === "fail" && <Text style={t.meta}>You can continue anyway. Following and Needs you work without what's missing; each row says what it affects.</Text>}
   </View>;
 }
 
 const GLYPH: Record<Check["state"], string> = { ok: "CircleCheck", warn: "CircleAlert", fail: "CircleX", pending: "CircleDashed", off: "CircleMinus" };
 function CheckRow({ theme, compact, row, first, checking, deps }: { theme: Theme; compact: boolean; row: Check; first: boolean; checking: boolean; deps: SetupDeps }) {
   const c = theme.colors; const t = text(c); const toast = useToast();
+  const [open, setOpen] = useState(false);
   const color = row.state === "ok" ? c.statusSuccess : row.state === "warn" ? c.statusWarning : row.state === "fail" ? c.statusDanger : c.foregroundMuted;
   return <View accessibilityLabel={`${row.label}: ${row.detail}`} style={{ flexDirection: "row", gap: 10, paddingHorizontal: compact ? 14 : 16, paddingVertical: 12, borderTopWidth: first ? 0 : 1, borderTopColor: c.border }}>
     <View style={{ paddingTop: 1 }}>{checking ? <Spinner color={c.foregroundMuted} size={16} /> : <Icon name={GLYPH[row.state]} size={16} color={color} />}</View>
     <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
       <Text style={t.label}>{row.label}</Text>
       <Text style={t.meta}>{row.detail}</Text>
-      {row.fix && <View style={{ gap: 6, marginTop: 4 }}>
+      {row.fix && row.state === "warn" && !open && <Pressable accessibilityRole="button" accessibilityState={{ expanded: false }} onPress={() => setOpen(true)} style={{ minHeight: compact ? 44 : 28, justifyContent: "center", alignSelf: "flex-start" }}>
+        <Text style={[t.meta, { color: c.foreground, textDecorationLine: "underline" }]}>How to fix</Text>
+      </Pressable>}
+      {row.fix && (row.state !== "warn" || open) && <View style={{ gap: 6, marginTop: 4 }}>
         <Text style={[t.meta, { color: c.foreground }]}>{row.fix.text}</Text>
         {row.fix.command && <View style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", maxWidth: "100%", paddingLeft: 10, borderRadius: 6, backgroundColor: c.surface2 }}>
           <Text selectable numberOfLines={1} style={{ flexShrink: 1, color: c.foreground, fontSize: 12, lineHeight: 17, fontFamily: Platform.OS === "ios" ? "Menlo" : "ui-monospace, SFMono-Regular, Menlo, monospace" }}>{row.fix.command}</Text>
@@ -306,11 +332,11 @@ function DefaultsStep({ theme, compact }: { theme: Theme; compact: boolean }) {
         {list.length > 0 && <View style={{ paddingLeft: compact ? 14 : 16, paddingBottom: 6 }}>
           {shown.map(w => {
             const on = w.enable_tracking && !w.optedOut;
-            return <Pressable key={w.id} accessibilityRole="switch" accessibilityState={{ checked: on }} aria-checked={on} accessibilityLabel={`Follow ${w.title}`} disabled={change.isPending}
+            return <Pressable key={w.id} accessibilityRole="checkbox" accessibilityState={{ checked: on }} aria-checked={on} accessibilityLabel={`Follow ${w.title}`} disabled={change.isPending}
               onPress={() => change.mutate([{ workspace: { workspaceId: w.id, follow: !on } }])}
               style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 10, minHeight: compact ? 44 : 32, paddingRight: compact ? 14 : 16, borderTopWidth: 1, borderTopColor: c.border, backgroundColor: pressed ? c.surface2 : "transparent" })}>
               <Text style={[t.body, { flex: 1, color: on ? c.foreground : c.foregroundMuted }]}>{w.title}</Text>
-              <Text style={t.small}>{on ? (w.dormant ? "Following · resting" : "Following") : "Not followed"}</Text>
+              {(!on || w.dormant) && <Text style={t.small}>{on ? "Resting" : "Not followed"}</Text>}
               <View style={{ width: 18, height: 18, borderRadius: 5, borderWidth: 1, borderColor: on ? c.accent : c.border, backgroundColor: on ? c.accent : "transparent", alignItems: "center", justifyContent: "center" }}>
                 {on && <Icon name="Check" size={12} color={c.accentForeground} />}
               </View>
@@ -322,7 +348,7 @@ function DefaultsStep({ theme, compact }: { theme: Theme; compact: boolean }) {
         </View>}
       </SwitchRow>
       <SwitchRow theme={theme} compact={compact} label="Send repairs automatically" value={data?.enable_auto_sends_default ?? null} disabled={change.isPending}
-        hint={`Review comments and failed checks go straight to the workspace's agent once it's idle. Off: each batch waits for your click.${followed ? ` Applies to the ${followed} already followed too.` : ""}`}
+        hint={`Review threads and failed checks go to the workspace's agent on their own, once it's idle. Off: each batch waits for your click.${followed ? ` Here it also applies to the ${followed} already followed.` : ""}`}
         onChange={v => change.mutate(autoSendWrites(v, list))} />
       <SwitchRow theme={theme} compact={compact} label="Approve tool prompts for bypass agents" value={trust}
         hint="An agent you started in bypass or full access sometimes still stops on a tool prompt. Follow-up approves those so it keeps going, and logs each one. Off brings the prompts back."
@@ -352,11 +378,15 @@ function HelpersStep({ theme, compact, deps, checks }: { theme: Theme; compact: 
         hint={`Sorts Home by what matters most, from your Linear issues, Slack mentions and review requests. About once an hour on workdays.${on(role("ranker"))}`} />
       <View style={{ flexDirection: compact ? "column" : "row", alignItems: compact ? "flex-start" : "center", gap: 8, paddingHorizontal: compact ? 14 : 16, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border }}>
         <Text style={[t.meta, { flex: compact ? undefined : 1 }]}>{`What's this about? summaries use ${role("about") ?? "a small model"}.${claudeDown ? " Claude isn't available here; switch the helpers to Codex in Settings." : ""}`}</Text>
-        <Button theme={theme} compact={compact} kind="ghost" icon="Bot" title="Change models" accessibilityLabel="Change models in Follow-up settings, Agents" onPress={() => deps.openSettings("agents")} />
+        {compact
+          ? <Pressable accessibilityRole="link" accessibilityLabel="Change models in Follow-up settings, Agents" onPress={() => deps.openSettings("agents")} style={{ minHeight: 44, justifyContent: "center" }}>
+              <Text style={[t.label, { textDecorationLine: "underline" }]}>Change models</Text>
+            </Pressable>
+          : <Button theme={theme} kind="ghost" icon="Bot" title="Change models" accessibilityLabel="Change models in Follow-up settings, Agents" onPress={() => deps.openSettings("agents")} />}
       </View>
     </Panel>
     <View style={{ gap: 2 }}>
-      <Text accessibilityRole="header" style={[t.label, { marginBottom: 4 }]}>Where to find things</Text>
+      <Text accessibilityRole="header" style={{ color: c.foregroundMuted, fontSize: 11, lineHeight: 15, fontWeight: "600", letterSpacing: 0.5, textTransform: "uppercase", marginTop: 10, marginBottom: 4 }}>Where to find things</Text>
       <TourRow theme={theme} thumb={<ThumbHome c={c} />} title="Home" line="Follow-up in the sidebar. Every workspace, with what needs you at the top." />
       <TourRow theme={theme} thumb={<ThumbPanel c={c} />} title="Workspace panel"
         line={compact ? "Tap Follow-up at the top of any workspace: its PRs, tasks and what the agent is doing." : "The Follow-up button in a workspace's header docks its PRs, tasks and what the agent is doing beside the chat."} />
@@ -391,7 +421,7 @@ export function SetupOffer({ theme, compact, view }: { theme: Theme; compact: bo
   return <View style={{ flexDirection: compact ? "column" : "row", alignItems: compact ? "stretch" : "center", gap: compact ? 6 : 10, marginHorizontal: compact ? 12 : 16, paddingLeft: 12, paddingRight: 4, paddingVertical: 4, borderRadius: 8, backgroundColor: c.surface1 }}>
     <View style={{ flex: compact ? undefined : 1, flexDirection: "row", alignItems: "center", gap: 8, paddingTop: compact ? 8 : 0 }}>
       <Icon name="ListChecks" size={14} color={c.foregroundMuted} />
-      <Text style={[t.meta, { flex: 1 }]}>New: a two-minute setup that checks GitHub and shows what Follow-up does on its own.</Text>
+      <Text style={[t.meta, { flex: 1 }]}>Follow-up has a two-minute setup that checks GitHub and shows what it does on its own.</Text>
     </View>
     <View style={{ flexDirection: "row", alignItems: "center", gap: 2, justifyContent: compact ? "flex-end" : undefined }}>
       <Button theme={theme} compact={compact} kind="ghost" title="Open setup" loading={run.isPending && run.variables === "restart"} onPress={() => run.mutate("restart")} />

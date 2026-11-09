@@ -22,6 +22,20 @@ paseo plugin install paseo-follow-up
 
 Needs Node 22+ and an authenticated GitHub CLI (`gh`) on the daemon host. Merge buttons use your saved Graphite CLI authentication. The installed plugin ID stays `follow-through`, so existing settings and tracked work carry over.
 
+## Getting started
+
+The first time you open Follow-up from the sidebar, a short setup takes Home's place. It takes about two minutes, and **Skip setup** leaves it at any point.
+
+<img alt="Follow-up's setup on a fresh install: an example PR going from failed checks to a repair to a merge only you can approve, the GitHub, Claude, Codex and agent tools checks, the three switches for what Follow-up does on its own, a default reviewer being added, the helpers and where things are, then Home" src="docs/media/follow-up-setup.gif" width="720">
+
+1. **What it is.** A worked example of one PR going from failed checks, to a repair sent to its agent, to a merge only you can approve, and how many of your workspaces Follow-up already follows.
+2. **Check your setup.** Whether the GitHub CLI is signed in (and as whom), whether Claude and Codex are available for the helper agents, and whether agents get Follow-up's tools. Anything missing shows the fix, with the command to copy. Checks run only while this step is open.
+3. **What Follow-up does without asking.** Follow every workspace (or turn single ones off), Send repairs automatically, and Approve tool prompts for bypass agents. They are on by default and save as you change them.
+4. **Reviewers.** Who **Add reviewers** asks: a default for every repository, and a list per repository Follow-up has seen. **Skip, set later** leaves it empty.
+5. **Helpers.** The Overseer and AI priority switches, which models they use (change them under Settings → Agents), and where Home, the workspace panel, Needs you and What's this about? live.
+
+Every switch in setup is the same one Settings shows, so nothing is applied twice and nothing is lost if you stop halfway. Setup remembers its step, so a reload or another device picks up where you left off. Run it again any time from **Set up Follow-up again** at the top of Follow-up's settings, or ⌘K → **Follow-up: Set up again**. If Follow-up was already installed before this version, it doesn't open on its own: Home shows one dismissible line offering it, for a day.
+
 ## Use
 
 Follow-up follows every workspace as soon as it has an agent; there is nothing to turn on. Open a workspace and click the Follow-up icon in its header (or press ⌘K / Ctrl+K and choose **Follow-up: open for this workspace**) to see that workspace's panel. Its **Home** button opens Home, the list of every workspace. To leave a workspace or a project out, open the settings (**Follow-up: settings** in ⌘K): **Following** has the global switches, **Workspace exceptions** the per-workspace ones.
