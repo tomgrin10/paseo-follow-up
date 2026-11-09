@@ -8,8 +8,11 @@ import { needsYou } from "../shared/attention";
 import { useSidebarViewActive } from "./inbox";
 import { homeCounts } from "../shared/home";
 import { useHomeModel, type HomeSources } from "./home-data";
+import { onVisible, pollDelay } from "./visibility";
 
 const POLL_MS = 8_000;
+/** While the app is hidden. */
+const HIDDEN_POLL_MS = 60_000;
 
 /** One shared poll of tracked workspaces for the pills, header-button dots and the sidebar count. */
 export function createLiveStore(client: PluginClientContext) {
@@ -20,17 +23,27 @@ export function createLiveStore(client: PluginClientContext) {
   const listeners = new Set<() => void>();
   let timer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
+  /** The worker's list revision this store holds; each poll asks only for what changed since (1.3.0-beta.4). */
+  let revision: number | undefined;
+  let all = new Map<string, Workspace>();
   const emit = () => { version++; for (const l of listeners) l(); };
   const poll = async () => {
     try {
-      const result = await client.rpc(listRpc, {});
+      const result = await client.rpc(listRpc, revision === undefined ? {} : { since: revision });
       if (stopped) return;
-      workspaces = new Map(result.workspaces.filter(w => !w.archived).map(w => [w.id, w]));
-      archived = result.workspaces.filter(w => w.archived);
+      const diff = result.full === false;
+      if (diff && !result.workspaces.length && !result.removed?.length) return;
+      const next = diff ? new Map(all) : new Map<string, Workspace>();
+      for (const id of result.removed ?? []) next.delete(id);
+      for (const w of result.workspaces) next.set(w.id, w);
+      all = next; revision = result.revision;
+      workspaces = new Map([...all.values()].filter(w => !w.archived).map(w => [w.id, w]));
+      archived = [...all.values()].filter(w => w.archived);
       emit();
     } catch { /* Keep the last answer through restarts and disconnects. */ }
-    finally { if (!stopped) timer = setTimeout(() => void poll(), POLL_MS); }
+    finally { if (!stopped) timer = setTimeout(() => void poll(), pollDelay(POLL_MS, HIDDEN_POLL_MS)); }
   };
+  const offVisible = onVisible(() => { if (timer) clearTimeout(timer); void poll(); });
   void poll();
   return {
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
@@ -39,7 +52,7 @@ export function createLiveStore(client: PluginClientContext) {
     all: () => [...workspaces.values()],
     archived: () => archived,
     refresh: () => { if (timer) clearTimeout(timer); void poll(); },
-    stop() { stopped = true; if (timer) clearTimeout(timer); listeners.clear(); },
+    stop() { stopped = true; offVisible(); if (timer) clearTimeout(timer); listeners.clear(); },
   };
 }
 export type LiveStore = ReturnType<typeof createLiveStore>;
