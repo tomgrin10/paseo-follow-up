@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { browserKey, BROWSER_POLL_MS } from "./keys";
 import { Platform, Pressable, Text, View, useWindowDimensions } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { openExternalUrl, useRpc, type PluginClientContext, type PluginTimelineItemProps } from "@getpaseo/plugin/client";
@@ -109,7 +110,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   const [details, setDetails] = useState(false);
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" } | null>(null);
   const workspace = b.workspaceId ? deps.workspace(b.workspaceId) : undefined;
-  const browser = useQuery({ queryKey: ["follow-through", "browser"], queryFn: () => browserRead({}), refetchInterval: 5000, enabled: !!sheet });
+  const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), refetchInterval: BROWSER_POLL_MS, enabled: !!sheet });
   if (b.state !== "open") return <Collapsed b={b} c={c} now={now} />;
 
   const attention = c.statusWarning;

@@ -49,6 +49,8 @@ test("workspace-first creation automatically tracks its later cross-workspace ch
   const f = await fixture(t);
   applyDiscovery(f.state, await f.gateway.discover(f.state), Date.now()); assert.equal(f.state.workspaces.length, 0, "an empty workspace does not invent an owner");
   f.populate();
+  // Paseo announces each new agent; the directory reads its snapshot instead of re-listing everything.
+  for (const id of ["created", "same-workspace-child"]) await f.gateway.directory.agentCreated({ id, workspaceId: "new-workspace", provider: "fixture", cwd: "/", title: null });
   applyDiscovery(f.state, await f.gateway.discover(f.state), Date.now());
   const w = f.state.workspaces[0]; assert.equal(w.id, "new-workspace"); assert.equal(w.mainAgentId, f.created.id); assert.equal(w.enable_tracking, true); assert.equal(w.enable_auto_sends, true);
   assert.deepEqual(w.contributorAgentIds, []); assert.equal(w.batches.length, 0);

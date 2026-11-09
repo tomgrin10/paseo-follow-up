@@ -3,13 +3,15 @@ import { inboxActRpc, inboxListRpc } from "../shared/contracts";
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type { InboxRow } from "../shared/inbox";
 import { subscribeDisplay } from "./display";
-import { onVisible, pollDelay } from "./visibility";
+import { onVisible, whileVisible } from "./visibility";
 
 type List = RpcOutput<typeof inboxListRpc>;
 export type Recent = { agentIds: string[]; label: string; at: number; batch: boolean };
-const POLL_MS = 4_000;
-/** While the app is hidden (1.3.0-beta.4). */
-const HIDDEN_POLL_MS = 30_000;
+/**
+ * The backstop poll. Changes arrive sooner by push: an agent's status or attention changing in Paseo's agent stream
+ * calls `nudge` (1.4.0). Nothing polls while the app is hidden; it refreshes once on return.
+ */
+const POLL_MS = 15_000;
 
 /**
  * One shared poll of the inbox for every surface on this client. Sign-offs apply optimistically;
@@ -32,7 +34,7 @@ export function createInboxStore(client: PluginClientContext) {
   let stopped = false;
   const listeners = new Set<() => void>();
   const emit = () => { version++; for (const l of listeners) l(); };
-  const rpcList = (): Promise<List> => client.rpc(inboxListRpc, {});
+  const rpcList = (): Promise<List> => client.rpc(inboxListRpc, data?.etag ? { etag: data.etag } : {});
   const act = (input: RpcInput<typeof inboxActRpc>) => client.rpc(inboxActRpc, input);
 
   const poll = async () => {
@@ -44,15 +46,20 @@ export function createInboxStore(client: PluginClientContext) {
       }
       const next = await rpcList();
       if (stopped) return;
+      // Nothing changed since the answer this store holds: keep it, and only re-render if we were offline.
+      if (next.unchanged && data) { if (offlineSince !== null || failures) { offlineSince = null; failures = 0; emit(); } return; }
       data = next; offlineSince = null; failures = 0;
       // Rows signed off while offline stay hidden until the replay lands.
       emit();
     } catch {
       failures++;
       if (failures >= 2 && offlineSince === null) { offlineSince = Date.now(); emit(); }
-    } finally { if (!stopped) timer = setTimeout(() => void poll(), pollDelay(POLL_MS, HIDDEN_POLL_MS)); }
+    } finally { if (!stopped) timer = whileVisible(POLL_MS, () => void poll()); }
   };
   const refresh = () => { if (timer) clearTimeout(timer); void poll(); };
+  let nudged: ReturnType<typeof setTimeout> | null = null;
+  /** Something changed in Paseo: refresh soon, coalescing a burst of agent updates into one read. */
+  const nudge = () => { if (nudged || stopped) return; nudged = setTimeout(() => { nudged = null; refresh(); }, 750); };
   const unsubscribe = subscribeDisplay(values => {
     const on = values.enable_inbox !== false;
     if (on !== enabled) { enabled = on; emit(); if (on) refresh(); }
@@ -97,7 +104,8 @@ export function createInboxStore(client: PluginClientContext) {
     recent: () => recent,
     clearRecent() { recent = null; emit(); },
     refresh,
-    stop() { stopped = true; offVisible(); if (timer) clearTimeout(timer); listeners.clear(); unsubscribe(); },
+    nudge,
+    stop() { stopped = true; offVisible(); if (timer) clearTimeout(timer); if (nudged) clearTimeout(nudged); listeners.clear(); unsubscribe(); },
 
     /** Sign off now; queue for replay when the host can't be reached. */
     async signOff(requested: string[], options: { muteTurn?: boolean } = {}) {

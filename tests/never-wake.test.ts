@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PaseoGateway, type Agent, type Daemon, type withDaemon } from "../server/daemon";
 import { daemonDirectory } from "../server/inbox-directory";
+import { DaemonDirectory } from "../server/directory";
 import { HistoryCache } from "../server/history-cache";
 import { SessionGuard } from "../server/session-guard";
 import { Engine, type Gateway, type Runtime } from "../server/engine";
@@ -103,7 +104,7 @@ test("the history cache survives a restart, so a new worker doesn't rescan", asy
 test("the inbox tail never reads an unloaded agent", async () => {
   const sleeping = agent("sleeping", "w"); const awake = agent("awake", "w", { status: "running" });
   const d = daemon([sleeping, awake], [{ id: "w", name: "w", projectId: "project" }]);
-  const directory = daemonDirectory(d.connect);
+  const directory = daemonDirectory(new DaemonDirectory(d.connect), d.connect);
   assert.deepEqual(await directory.tail("sleeping", 20), []);
   assert.equal((await directory.tail("awake", 20)).length, 1);
   assert.deepEqual(d.reads, ["awake"]);

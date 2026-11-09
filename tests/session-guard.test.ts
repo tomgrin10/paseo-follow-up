@@ -74,7 +74,8 @@ test("gateway waits for paused secondary agents, lets recovery stay independent 
 });
 test("a pause arriving during final preflight defers without invoking the daemon send", async t => {
   const f = await gatewayFixture(t); await f.save([]); let calls = 0;
-  f.beforeFetch(async () => { if (++calls === 2) await f.save([pause()]); });
+  // The send's own agent read is the final preflight (a fresh observation reads the shared agent list).
+  f.beforeFetch(async () => { if (++calls === 1) await f.save([pause()]); });
   await assert.rejects(f.gateway.send(f.w, f.batch, "Repair"), DeliveryDeferred); assert.equal(f.sends.length, 0);
 });
 test("unreadable guard state defers; errors after a real send attempt remain ambiguous", async t => {
