@@ -422,14 +422,17 @@ export function SetupOffer({ theme, compact, view }: { theme: Theme; compact: bo
   const act = useRpc(setOnboardingRpc); const cache = useQueryClient(); const toast = useToast();
   const run = useMutation({ mutationFn: (action: "restart" | "dismiss-offer") => act({ action }), onSuccess: next => cache.setQueryData(onboardingKey, next), onError: e => toast.error(errorText(e)) });
   if (!view?.offer) return null;
-  // Phones: one row in the list's gutter. The sentence itself opens setup (a 44+ target with "Open setup ›" in the
-  // foreground), the ✕ beside it dismisses; no second row of buttons under the text.
+  // Phones: one row in the list's gutter. A title and one meta line that never wrap; the row opens setup, the ✕ beside
+  // it dismisses. No second row of buttons under the text.
   if (compact) return <View style={{ flexDirection: "row", alignItems: "center", marginHorizontal: 16, borderRadius: 10, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1 }}>
     <Pressable accessibilityRole="button" accessibilityLabel="Open setup" accessibilityHint="A two-minute setup that checks GitHub and shows what Follow-up does on its own" disabled={run.isPending}
       onPress={() => run.mutate("restart")}
       style={state => ({ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 10, minHeight: 56, paddingLeft: 14, paddingRight: 4, paddingVertical: 10, borderTopLeftRadius: 10, borderBottomLeftRadius: 10, backgroundColor: state.pressed ? c.surface2 : "transparent" })}>
       {run.isPending && run.variables === "restart" ? <Spinner color={c.foregroundMuted} size={14} label="Opening setup" /> : <Icon name="ListChecks" size={16} color={c.foregroundMuted} />}
-      <Text style={[text(c, true).meta, { flex: 1 }]}>Two-minute setup: checks GitHub, shows what Follow-up does on its own. <Text style={{ color: c.foreground, fontWeight: "600" }}>Open setup ›</Text></Text>
+      <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
+        <Text numberOfLines={1} style={text(c, true).label}>Two-minute setup</Text>
+        <Text numberOfLines={1} style={text(c, true).meta}>Checks GitHub, shows what runs on its own</Text>
+      </View>
     </Pressable>
     <IconButton theme={theme} compact icon="X" label="Dismiss the setup offer" onPress={() => run.mutate("dismiss-offer")} />
   </View>;
