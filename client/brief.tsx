@@ -141,14 +141,22 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   </View>;
 
   if (b.slim) {
-    // One line. Permission: Paseo's own prompt below is the control (F9). Fallback: the paragraph is right above.
+    // Permission: Paseo's own prompt below is the control (F9). Fallback: the paragraph is right above.
+    // The label and age share the top line so the ask always gets the full width; at a narrow panel the move wraps under it.
     return <View accessibilityRole="summary" accessibilityLabel={`${acts ? "Needs you: " : ""}${b.ask}. ${b.sourceLine}`}
-      style={{ marginVertical: 10, flexDirection: "row", alignItems: "center", flexWrap: compact ? "wrap" : "nowrap", gap: 8, minHeight: 40, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: border }}>
-      <Icon name={ICON[b.kind]} size={14} color={acts ? attention : tone} />
-      {acts && <Text style={{ color: attention, fontSize: 12, lineHeight: 16, fontWeight: "600" }}>Needs you</Text>}
-      <Text style={{ flex: 1, minWidth: compact ? 160 : 0, color: acts ? c.foreground : c.foregroundMuted, fontSize: 14, lineHeight: 20, fontWeight: acts ? "600" : "400" }}>{b.ask}</Text>
-      {!embedded && moves.map(m => <Btn key={m.kind} label={m.label} onPress={() => press(m)} c={c} compact={compact} />)}
-      <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontVariant: ["tabular-nums"] }}>{ageText}</Text>
+      style={{ marginVertical: embedded ? 0 : 10, gap: 4, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: border }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+        <Icon name={ICON[b.kind]} size={14} color={tone} />
+        <Text numberOfLines={1} style={{ flexShrink: 1, color: acts ? attention : tone, fontSize: 12, lineHeight: 16, fontWeight: "600" }}>{acts ? "Needs you" : word(b.kind)}</Text>
+        <View style={{ flex: 1 }} />
+        <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontVariant: ["tabular-nums"] }}>{ageText}</Text>
+      </View>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 10, rowGap: 8 }}>
+        <Text numberOfLines={3} {...(Platform.OS === "web" ? { title: b.ask } as object : {})}
+          style={{ flexGrow: 1, flexShrink: 1, flexBasis: 200, minWidth: 0, color: acts ? c.foreground : c.foregroundMuted, fontSize: 14, lineHeight: 20, fontWeight: acts ? "600" : "400" }}>{b.ask}</Text>
+        {!embedded && moves.map(m => <Btn key={m.kind} label={busy === m.kind ? `${m.label}…` : m.label} icon={MOVE_ICON[m.kind]} disabled={!!busy} onPress={() => press(m)} c={c} compact={compact} />)}
+      </View>
+      {!!error && <Text accessibilityRole="alert" style={{ color: c.statusDanger, fontSize: 13, lineHeight: 18 }}>{error}</Text>}
     </View>;
   }
 
