@@ -186,11 +186,12 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <View style={{ flex: 1, minWidth: 160, gap: 2 }}>
             <Text style={t.label}>Main agent</Text>
+            <MainAgentName agentId={w.mainAgentId} theme={theme} />
             <Text style={t.meta}>Owns the PRs, tasks and the Done call. Repairs go here.</Text>
           </View>
           {openAgent && <Button theme={theme} compact={compact} icon="MessageSquare" title="Open" accessibilityLabel="Open main agent" onPress={() => openAgent(w.mainAgentId)} />}
         </View>
-        {(w.contributorAgentIds ?? []).map(id => <OtherRootAgent key={id} agentId={id} workspace={w} theme={theme} compact={compact} openAgent={openAgent} />)}
+        {(w.contributorAgentIds ?? []).map(id => <OtherRootAgent key={id} agentId={id} workspace={w} theme={theme} compact={compact} openAgent={openAgent} mainAgentId={w.mainAgentId} />)}
       </CardRow>
       <CardRow theme={theme}>
         <View style={{ gap: 8 }}>
@@ -222,26 +223,40 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
   </View>;
 }
 
+/** An agent's title from Paseo's client state (no fetch), or a short id while it loads or once it's gone. */
+function useAgentTitle(agentId: string): string {
+  return useAgent(agentId, a => a.title) || `Agent ${agentId.slice(0, 8)}`;
+}
+
+function MainAgentName({ agentId, theme }: { agentId: string; theme: Theme }) {
+  const t = text(theme.colors);
+  return <Text numberOfLines={1} style={[t.meta, { color: theme.colors.foreground }]}>{useAgentTitle(agentId)}</Text>;
+}
+
 /**
  * Another root agent in this workspace: it can contribute PRs but not ask Tom or call Done. "Make main agent" is
- * the developer's choice (a plugin RPC, never an agent tool). Its title comes from Paseo's client state, no fetch.
+ * the developer's choice (a plugin RPC, never an agent tool). It swaps roles, so the former main appears here with
+ * its own Make main agent: that is the undo, and the toast says so instead of a confirmation step.
  */
-function OtherRootAgent({ agentId, workspace: w, theme, compact, openAgent }: { agentId: string; workspace: Workspace; theme: Theme; compact: boolean; openAgent?: (id: string) => void }) {
+function OtherRootAgent({ agentId, mainAgentId, workspace: w, theme, compact, openAgent }: { agentId: string; mainAgentId: string; workspace: Workspace; theme: Theme; compact: boolean; openAgent?: (id: string) => void }) {
   const c = theme.colors; const t = text(c);
-  const title = useAgent(agentId, a => a.title) || `Agent ${agentId.slice(0, 8)}`;
+  const title = useAgentTitle(agentId); const formerTitle = useAgentTitle(mainAgentId);
   const control = useRpc(controlRpc); const cache = useQueryClient(); const toast = useToast();
   const promote = useMutation({
     mutationFn: () => control({ workspaceId: w.id, mainAgentId: agentId }),
-    onSuccess: () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); toast.show(`${title} is now the main agent`, { variant: "success" }); },
+    onSuccess: () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); toast.show(`${title} is now the main agent. To undo, make ${formerTitle} main again.`, { variant: "success" }); },
     onError: (e: Error) => toast.error(errorText(e)),
   });
-  return <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: c.border }}>
-    <View style={{ flex: 1, minWidth: 160, gap: 2 }}>
+  const canPromote = w.enable_tracking && !w.archived;
+  return <View style={{ gap: 8, marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: c.border }}>
+    <View style={{ gap: 2 }}>
       <Text numberOfLines={1} style={[t.meta, { color: c.foreground }]}>{title}</Text>
-      <Text style={t.meta}>Also works here. Adds PRs, can't ask you or call Done.</Text>
+      <Text style={t.meta}>Can add PRs here. Can't ask you questions or call Done.</Text>
     </View>
-    {openAgent && <Button theme={theme} compact={compact} kind="ghost" title="Open" accessibilityLabel={`Open ${title}`} onPress={() => openAgent(agentId)} />}
-    <Button theme={theme} compact={compact} title="Make main agent" accessibilityLabel={`Make ${title} the main agent`} loading={promote.isPending} disabled={promote.isPending} onPress={() => promote.mutate()} />
+    {(openAgent || canPromote) && <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+      {canPromote && <Button theme={theme} compact={compact} title="Make main agent" accessibilityLabel={`Make ${title} the main agent`} accessibilityHint={`Repairs, questions and Done move from ${formerTitle} to ${title}.`} loading={promote.isPending} disabled={promote.isPending} onPress={() => promote.mutate()} />}
+      {openAgent && <Button theme={theme} compact={compact} kind="ghost" icon="MessageSquare" title="Open" accessibilityLabel={`Open ${title}`} onPress={() => openAgent(agentId)} />}
+    </View>}
   </View>;
 }
 
