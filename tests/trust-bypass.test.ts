@@ -90,6 +90,7 @@ test("the Settings line says how many were approved today, and the last one", as
   const { trustCountText } = await import("../shared/display");
   assert.equal(trustCountText(undefined), null);
   assert.equal(trustCountText({ today: 0, recent: [] }), null);
-  assert.equal(trustCountText({ today: 3, recent: [{ summary: "Bash: cd repo && git status" }] }), "3 approved today · last: Bash: cd repo && git status");
-  assert.equal(trustCountText({ today: 0, recent: [{ summary: "Bash: ls" }] }), "0 approved today · last: Bash: ls");
+  assert.equal(trustCountText({ today: 3, recent: [{ summary: "Bash: cd repo && git status" }] }), "3 prompts approved today · latest Bash: cd repo && git status");
+  assert.equal(trustCountText({ today: 1, recent: [{ summary: "Bash: ls" }] }), "1 prompt approved today · latest Bash: ls");
+  assert.equal(trustCountText({ today: 0, recent: [{ summary: "Bash: ls" }] }), "None approved today · latest Bash: ls");
 });
