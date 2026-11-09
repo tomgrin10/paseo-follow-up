@@ -30,7 +30,7 @@ The first time you open Follow-up from the sidebar, a short setup takes Home's p
 
 1. **What it is.** A worked example of one PR going from failed checks, to a repair sent to its agent, to a merge only you can approve, and how many of your workspaces Follow-up already follows.
 2. **Check your setup.** Whether the GitHub CLI is signed in (and as whom), whether Claude and Codex are available for the helper agents, and whether agents get Follow-up's tools. Anything missing shows the fix, with the command to copy. Checks run only while this step is open.
-3. **What Follow-up does without asking.** Follow every workspace (or turn single ones off), Send repairs automatically, and Approve tool prompts for bypass agents. They are on by default and save as you change them.
+3. **What Follow-up does without asking.** Follow every workspace (or turn single ones off), Send repairs automatically, and Trust bypass agents. They are on by default and save as you change them.
 4. **Reviewers.** Who **Add reviewers** asks: a default for every repository, and a list per repository Follow-up has seen. **Skip, set later** leaves it empty.
 5. **Helpers.** The Overseer and AI priority switches, which models they use (change them under Settings → Agents), and where Home, the workspace panel, Needs you and What's this about? live.
 
