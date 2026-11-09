@@ -1,11 +1,11 @@
 import type { PluginClientContext, PluginSidebarItemContribution, PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useRpc, useSettings } from "@getpaseo/plugin/client";
 import { useQuery } from "@tanstack/react-query";
-import { inboxListRpc } from "../shared/contracts";
+import { inboxListRpc, trustBypassRpc } from "../shared/contracts";
 import { SettingsAction, SettingsCard, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { useEffect } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
-import { displayPreferences, displayRpc } from "../shared/display";
+import { displayPreferences, displayRpc, trustCountText } from "../shared/display";
 import { sidebarVisibility } from "./sidebar-visibility";
 import { appVisible, onVisible } from "./visibility";
 
@@ -20,6 +20,13 @@ export function briefShareText(stats: { days: number; total: number; tool: numbe
   const pct = Math.round((stats.tool / stats.total) * 100);
   const rest = [stats.structured ? `${stats.structured} from a permission, pause, error or PR` : "", stats.fallback ? `${stats.fallback} with nothing stated` : ""].filter(Boolean).join(", ");
   return `Last ${stats.days} days: agents stated what they need on ${stats.tool} of ${stats.total} flagged turns (${pct}%).${rest ? ` ${rest[0].toUpperCase()}${rest.slice(1)}.` : ""}`;
+}
+
+function TrustCount({ theme }: Pick<PluginSurfaceProps, "theme">) {
+  const read = useRpc(trustBypassRpc);
+  const stats = useQuery({ queryKey: ["follow-through", "trust-bypass"], queryFn: () => read({}), refetchInterval: 60_000 });
+  const text = trustCountText(stats.data);
+  return text ? <Text numberOfLines={1} style={{ color: theme.colors.foregroundMuted, fontSize: 12, lineHeight: 17, paddingHorizontal: 4 }}>{text}</Text> : null;
 }
 
 /** "Sidebar & pills" and "Needs-you inbox", rendered inside the one Follow-up settings screen. */
@@ -63,6 +70,12 @@ export function DisplaySections({ theme }: Pick<PluginSurfaceProps, "theme">) {
         <SettingsSwitch label="Ask agents to state what they need" hint="A Claude Code agent that ends a turn without saying what you need is asked once to state it, for the card at the end of its chat. Other providers only get the instruction." value={settings.values.enable_brief_nudge} disabled={settings.saving || !settings.values.enable_inbox} onValueChange={(enable_brief_nudge) => save({ enable_brief_nudge })} />
       </SettingsCard>
       {settings.values.enable_inbox && !!share.data?.briefStats && <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, lineHeight: 17, paddingHorizontal: 4 }}>{briefShareText(share.data.briefStats)}</Text>}
+    </SettingsSection>
+    <SettingsSection title="Permissions" info="Claude Code in Bypass and Codex in Full access still stop on some tool calls and wait for a yes.">
+      <SettingsCard>
+        <SettingsSwitch label="Trust bypass agents" hint="Approves those tool prompts for you, judged by the agent's mode at the time. Questions and plan approval still come to you, and agents in other modes still ask." value={settings.values.enable_trust_bypass} disabled={settings.saving} onValueChange={(enable_trust_bypass) => save({ enable_trust_bypass })} />
+      </SettingsCard>
+      {settings.values.enable_trust_bypass && <TrustCount theme={theme} />}
     </SettingsSection>
     <SettingsSection title="Overseer (beta)" info="One agent you can ask about all your work. It sends each task to the agent that owns it and asks you when it isn't sure.">
       <SettingsCard>
