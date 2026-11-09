@@ -126,14 +126,25 @@ export function createHomeExtras(client: PluginClientContext) {
     usage: () => usage,
     /** The ranker: on or off, its last run and which sources it could read. */
     rank: () => rank,
-    /** "Re-rank now": runs the ranker, then refreshes priorities and status. */
-    async rankNow() {
+    /**
+     * "Re-rank now": starts the ranker (the RPC returns at once), then polls its status every 3 s until it's done,
+     * refreshes priorities and answers with the run's outcome. Gives up waiting after 6 minutes; the run goes on.
+     */
+    async rankNow(): Promise<{ ok: boolean; skipped: string | null; error: string | null; top: { title: string }[] }> {
+      await client.rpc(rankNowRpc, { force: true });
       rank = rank ? { ...rank, running: true } : rank; emit();
-      try { return await client.rpc(rankNowRpc, { force: true }); }
-      finally {
-        const [p, st] = await Promise.all([client.rpc(prioritiesRpc, {}).catch(() => null), client.rpc(rankStatusRpc, {}).catch(() => null)]);
-        if (p) priorities = p.items; if (st) rank = st; emit();
+      let st = rank;
+      for (let i = 0; i < 120 && !stopped; i++) {
+        await new Promise(r => setTimeout(r, 3000));
+        st = await client.rpc(rankStatusRpc, {}).catch(() => st);
+        if (st && !st.running) break;
       }
+      const p = await client.rpc(prioritiesRpc, {}).catch(() => null);
+      if (p) priorities = p.items; if (st) rank = st; emit();
+      if (st?.running) return { ok: true, skipped: "busy", error: null, top: [] };
+      const last = st?.last;
+      // A run that was already going when the click came has finished too: report its outcome, not "busy".
+      return { ok: !!last?.ok, skipped: last?.skipped ?? null, error: last?.ok ? null : st?.error ?? null, top: last?.top ? [{ title: last.top }] : [] };
     },
     /** The Overseer: off, not started yet, or its agent and workspace. */
     overseer: () => overseer,

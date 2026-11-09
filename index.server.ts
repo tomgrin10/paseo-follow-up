@@ -567,7 +567,14 @@ export default function contribute(server: PluginServerContext) {
     windowMs: async () => activeWindowMs(await store.snapshot()), agent: () => agentSettings.role("overseer"),
     // Harness override only (isolated test daemons): "provider/model" wins over Settings → Agents.
     provider: process.env.FOLLOW_UP_OVERSEER_PROVIDER || undefined,
-    rerank: async () => { if (!ranker) throw new Error("The ranker isn't ready yet."); return rankSummary(await ranker.run({ trigger: "overseer" })); } });
+    // Starts the run and answers at once (a tool call shares the plugin RPC timeout); the current ranking comes along.
+    rerank: async () => {
+      if (!ranker) throw new Error("The ranker isn't ready yet.");
+      const { started } = ranker.start({ trigger: "overseer" });
+      const titles = new Map((await overseer!.workstreams()).map(w => [w.workspaceId, w.title]));
+      const current = (await priorityStore.read()).filter(p => p.by === "ranker").slice(0, 5).map(p => ({ title: titles.get(p.workspaceId) ?? p.workspaceId, score: p.score, reason: p.reason }));
+      return { started, current, next: `${started ? "Re-ranking started" : "A ranking is already running"}; it takes about a minute and Home updates by itself. Tell Tom that in one line, with the current top two or three if he asked what to work on.` };
+    } });
   const overseerStatus = async () => {
     const [s, info] = await Promise.all([overseer!.state(), overseer!.agentInfo()]);
     // Labels from the last catalog Settings read (never fetched here: this is polled), so both surfaces say the same.
@@ -617,10 +624,9 @@ export default function contribute(server: PluginServerContext) {
   ranker = new Ranker({ directory, jobs: aiJobs, priorities: priorityStore, role: rankerRole, enabled: rankerOn, tight: async () => !governor.allowsBackground(),
     workstreams: () => overseer!.workstreams(), planningUrl: () => planningUrl(process.env.FOLLOW_UP_PLAN_URL),
     sources: liveRankSources(aiJobs, { model: async () => { const r = await rankerRole(); return r.provider === "claude" ? r.model : null; } }) });
-  const rankSummary = (r: Awaited<ReturnType<Ranker["run"]>>) => ({ ok: r.ok, skipped: r.skipped, error: r.error, healthLine: r.healthLine, costUsd: r.costUsd, durationMs: r.durationMs,
-    top: r.priorities.slice(0, 10).map(p => ({ title: p.title, score: p.score, reason: p.reason })), notStarted: r.notStarted.length });
   handle(rpc.rankStatusRpc, async () => { await requireReady(); return ranker!.status(); });
-  handle(rpc.rankNowRpc, async ({ force }) => { await requireReady(); return rankSummary(await ranker!.run({ trigger: "manual", force: !!force })); });
+  // Returns at once: the run can take minutes on a slow model; Home polls rank-status and shows "Ranking…".
+  handle(rpc.rankNowRpc, async ({ force }) => { await requireReady(); return { ...ranker!.start({ trigger: "manual", force: !!force }), running: true }; });
   // Agent metadata only (agents.list never loads an agent), cached for a minute and shared by every overview.
   type AgentMeta = { id: string; title: string | null; parent: string | null; snapshot: LoadSignals };
   let agentMeta: { at: number; rows: Map<string, AgentMeta> } | null = null;
