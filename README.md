@@ -150,6 +150,19 @@ One agent you talk to about all your workspaces. It sits pinned at the top of Ho
 
 Turn it off under Settings → **Overseer (beta)**. While it's off, search has no ask row.
 
+#### AI priority (1.4 beta)
+
+Home's **Priority** sort can come from a ranker that reads what's happening outside Paseo: your assigned Linear issues (priority, due date, project and milestone), Slack DMs and mentions from the last 48 hours, open GitHub review requests, and the CPO's weekly planning artifact. Each row then shows a one-line reason that names its source, such as "HER-1312 · Urgent · due today" or "Slack: Dana asked twice". Needs you still comes first, whatever the score.
+
+- **When it runs:** about once an hour, Sunday to Thursday from 08:00 to 20:00 Israel time. **Re-rank now** in the sort menu runs it at any time, and so does asking the Overseer what to work on first. The menu says when it last ranked and names any source it couldn't read ("Ranked 12m ago · Slack unavailable").
+- **What it costs:** it calls the model only when its inputs changed since the last run, and at most 24 times a day (Re-rank now isn't capped). A run at about 100 workspaces is one Sonnet call of roughly 10k input tokens, about $0.06 and 20 s. The weekly plan is read at most once a day, for about $0.03. Each run's cost and duration go to `ai-jobs.jsonl`.
+- **What it touches:** everything is read-only: Follow-up's own state, read-only Linear and Slack tools through mcpproxy, `gh search prs`, and one read of the planning artifact with Claude's Artifact tool and no other tools. It never posts, comments or publishes. The artifact's link comes from `FOLLOW_UP_PLAN_URL`, or else from the morning-brief skill's source list (link only, without any share key).
+- Linear issues assigned to you that no workspace covers are kept for a later "Not started" group; they aren't shown yet.
+
+Turn it off under Settings → **Overseer (beta)** → **AI priority**.
+
+![Home sorted by Priority: each row shows the ranker's reason and source, such as "HER-1312 · Urgent · due today" from Linear and "Slack: Dana asked twice" from Slack](docs/media/overseer/priority-dark.png)
+
 ![Home's search with "scim" typed: the matching workspace, then the active row "Ask the Overseer: scim" with an Enter hint](docs/media/overseer/omnibox-ask-dark.png)
 
 ### Choosing models

@@ -34,6 +34,8 @@ export type JobSpec<T> = {
   maxPromptChars?: number;
   /** The reply cap in characters; a longer reply is refused. */
   maxOutputChars?: number;
+  /** This job's own runner (the ranker's plan reader needs the Artifact tool); it still takes a queue slot. */
+  runner?: Runner;
 };
 export type JobResult<T> =
   | { ok: true; value: T; costUsd: number | null; durationMs: number }
@@ -68,7 +70,8 @@ export class AiJobs {
     if (spec.prompt.length > (spec.maxPromptChars ?? 60_000)) return done({ ok: false, reason: "too-large", error: `The prompt is ${spec.prompt.length} characters; the cap is ${spec.maxPromptChars ?? 60_000}.`, costUsd: null, durationMs: 0 });
     if (this.stopped) return done({ ok: false, reason: "stopped", error: "Follow-up is stopping.", costUsd: null, durationMs: 0 });
     const provider = spec.provider ?? "claude";
-    const runner = this.opts.runner ?? this.opts.runners?.[provider] ?? defaultRunner(provider);
+    // An injected runner (tests) always wins, so a job can never reach the real CLI from a test; then the job's own.
+    const runner = this.opts.runner ?? spec.runner ?? this.opts.runners?.[provider] ?? defaultRunner(provider);
     if (!runner) return done({ ok: false, reason: "failed", error: `${provider} can't run one-shot jobs; pick Claude or Codex in Settings → Agents.`, costUsd: null, durationMs: 0 });
     await this.slot();
     const controller = new AbortController(); this.controllers.add(controller);
@@ -172,25 +175,32 @@ export function defaultRunner(provider: string): Runner | null {
 /** The envelope of a one-turn reply is a few KB; anything near this is runaway output. */
 export const MAX_STDOUT = 512 * 1024;
 
+/** A job's environment: `defaults` (Claude: no nonessential traffic), then `env`; an empty value in `env` removes that variable. */
+export function childEnv(env: Record<string, string> = {}, defaults: Record<string, string> = { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" }): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = { ...process.env, ...defaults, ...env };
+  for (const [k, v] of Object.entries(env)) if (v === "") delete out[k];
+  return out;
+}
+
 /** Spawns `claude` with an argument array (no shell); the prompt goes on stdin. */
-export function claudeRunner(command = "claude"): Runner {
-  return input => spawnJob(command, claudeArgs(input), input.prompt, parseClaudeEnvelope, input, { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" });
+export function claudeRunner(command = "claude", args: (input: RunInput) => string[] = claudeArgs, env: Record<string, string> = {}): Runner {
+  return input => spawnJob(command, args(input), input.prompt, parseClaudeEnvelope, input, childEnv(env));
 }
 
 /** Spawns `codex exec` the same way, from an empty private temp directory that is removed afterwards. */
 export function codexRunner(command = "codex"): Runner {
   return async input => {
     const cwd = await mkdtemp(join(tmpdir(), "follow-up-job-"));
-    try { return await spawnJob(command, codexArgs({ ...input, cwd }), codexPrompt(input), parseCodexEvents, input, {}); }
+    try { return await spawnJob(command, codexArgs({ ...input, cwd }), codexPrompt(input), parseCodexEvents, input, childEnv({}, {})); }
     finally { await rm(cwd, { recursive: true, force: true }).catch(() => undefined); }
   };
 }
 
-function spawnJob(command: string, args: string[], stdin: string, parse: (stdout: string) => RunOutput, input: RunInput, env: Record<string, string>): Promise<RunOutput> {
+function spawnJob(command: string, args: string[], stdin: string, parse: (stdout: string) => RunOutput, input: RunInput, env: NodeJS.ProcessEnv): Promise<RunOutput> {
   return new Promise((resolve, reject) => {
     const name = basename(command);
     // Its own process group, so a timeout kills the CLI and anything it started.
-    const child = spawn(command, args, { cwd: tmpdir(), detached: true, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...env } });
+    const child = spawn(command, args, { cwd: tmpdir(), detached: true, stdio: ["pipe", "pipe", "pipe"], env });
     let stdout = "", stderr = "", capped = false;
     const kill = () => { try { if (child.pid) process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); } };
     input.signal.addEventListener("abort", kill, { once: true });
