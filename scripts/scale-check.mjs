@@ -7,7 +7,8 @@
 //
 //   node scripts/scale-check.mjs [--workspaces 120] [--awake 5] [--plugin <unpacked plugin dir>] [--json]
 //
-// Exits non-zero when the loaded count grows. Run it inside a memory-capped scope, e.g.
+// Exits non-zero when the loaded count grows, or when --rss-budget / --cpu-budget are exceeded. Skips (exit 0) when
+// the paseo CLI is missing, except under CI. Run it inside a memory-capped scope, e.g.
 //   systemd-run --user --scope -p MemoryMax=4G node scripts/scale-check.mjs
 import assert from "node:assert/strict";
 import { spawn, execFile } from "node:child_process";
@@ -21,6 +22,13 @@ import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
 
 const exec = promisify(execFile);
+// The check drives a real Paseo daemon, so it needs the paseo CLI (CI installs @getpaseo/cli). Without it, local
+// runs skip with a message; in CI a missing CLI is a failure, so the resource budget is always enforced there.
+try { await exec("paseo", ["--version"], { timeout: 30_000 }); } catch {
+  const message = "scale check: the paseo CLI isn't on PATH (npm i -g @getpaseo/cli@0.15.2).";
+  if (process.env.CI) { console.error(`${message} Required in CI.`); process.exit(1); }
+  console.warn(`${message} Skipping.`); process.exit(0);
+}
 const arg = (name, fallback) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : fallback; };
 const N = Number(arg("workspaces", "120")); const AWAKE = Number(arg("awake", "5")); const POLLS = 3; const POLL_MS = 15_000;
 /** Seeds each workspace with this many never-sent cancelled batches, like the VM's 1.3.0-beta.2 state. */
@@ -102,7 +110,10 @@ try {
     while (Date.now() - started < IDLE_MS) { await sleep(500); peak = Math.max(peak, await rss()); const m = statSync(statePath).mtimeMs; if (m !== mtime) { writes++; mtime = m; } }
     const cpuPct = Math.round(((await ticks()) - t0) / hz / ((Date.now() - started) / 1000) * 1000) / 10;
     if (heapDir) { process.kill(pid, "SIGUSR2"); await sleep(8_000); }
-    worker = { pid, rssMb: Math.round(await rss()), idlePeakRssMb: Math.round(peak), lifetimePeakRssMb: Math.round(await rss("VmHWM")), cpuPct, idleSeconds: IDLE_MS / 1000, stateWrites: writes, stateBytesBefore, stateBytesAfter: statSync(statePath).size };
+    // The host's own cost: other plugin processes under this daemon (the fixture provider), for comparison.
+    const { stdout: ps } = await exec("ps", ["-eo", "pid=,ppid=,rss=,args="]);
+    const hostRss = ps.trim().split("\n").map(l => l.trim().split(/\s+/)).filter(f => Number(f[1]) === daemon.pid && f.slice(3).join(" ").includes("plugin-process") && Number(f[0]) !== pid).map(f => Math.round(Number(f[2]) / 1024));
+    worker = { pid, hostPluginBaselineMb: hostRss.length ? Math.min(...hostRss) : null, rssMb: Math.round(await rss()), idlePeakRssMb: Math.round(peak), lifetimePeakRssMb: Math.round(await rss("VmHWM")), cpuPct, idleSeconds: IDLE_MS / 1000, stateWrites: writes, stateBytesBefore, stateBytesAfter: statSync(statePath).size };
   }
   const receipts = (await readFile(join(home, "fixture-receipts.jsonl"), "utf8").catch(() => "")).trim().split("\n").filter(l => /Follow-through (batch|recovery)/.test(l)).length;
   const state = JSON.parse(await readFile(join(home, "plugin-data/follow-through/state.json"), "utf8"));

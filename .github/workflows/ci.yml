@@ -18,5 +18,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # npm run verify includes the scale check, which drives a real (isolated) Paseo daemon.
+      - run: npm install -g @getpaseo/cli@0.15.2
       - run: npm run verify
       - run: npm pack --dry-run
