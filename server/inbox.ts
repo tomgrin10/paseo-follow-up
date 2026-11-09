@@ -189,6 +189,11 @@ export class Inbox {
 
   /** The current turn per agent, from turn starts, so a needs_you call is matched to the turn it was made in. */
   private turns = new Map<string, { turnId: string | null; at: number }>();
+  private async previousBriefAt(agentId: string): Promise<number | null> {
+    const at = (await this.store.snapshot()).entries[agentId]?.brief?.at;
+    const ms = at ? Date.parse(at) : NaN;
+    return Number.isFinite(ms) ? ms + 1 : null;
+  }
   currentTurn(agentId: string): { turnId: string | null; at: number } | null { return this.turns.get(agentId) ?? null; }
 
   /** The sources every brief has: the agent's needs_you for this turn and its PR state. */
@@ -256,7 +261,8 @@ export class Inbox {
       }
       return;
     }
-    const since = this.turns.get(agent.id)?.at ?? null;
+    // After a plugin reload mid-turn the turn start is lost; anything stated since the previous brief belongs to this turn.
+    const since = this.turns.get(agent.id)?.at ?? await this.previousBriefAt(root.rootId);
     this.turns.delete(agent.id);
     const stated = await this.sources(agent.id, since, turnId);
     if (outcome.kind === "completed") {
