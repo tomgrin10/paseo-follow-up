@@ -216,6 +216,15 @@ async function call(method, input) {
   finally { await client.close().catch(() => undefined); }
 }
 
+
+// The worker imports this file for the same tool tables, validation and receipts (1.4.0-beta.2: Follow-up's tools
+// served natively through Paseo's own MCP). Only a direct run is the CLI / stdio bridge.
+export { tools, actionTools, overseerTools, toolList, schemas, validate, compact, callInput, needsYouInstruction, actionInstruction, overseerInstruction };
+function isMain() {
+  try { return !!process.argv[1] && !!import.meta.url && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href; } catch { return false; }
+}
+if (isMain()) runMain().catch(error => { console.error(error?.message ?? String(error)); process.exitCode = 1; });
+async function runMain() {
 const command = process.argv[2];
 if (command === "list" || command === "--help" || command === "help") {
   process.stdout.write(command === "list" ? JSON.stringify({ tools: schemas([...toolList(undefined, false, true, false, true), ...overseerTools]) }, null, 2) + "\n" : "Usage: node mcp.mjs list | call <tool> '<json>' [--compact]\nNative MCP returns compact receipts; workspace_status({detail:full}) requests complete history. CLI calls retain full replies unless --compact is supplied.\n");
@@ -268,4 +277,5 @@ if (command === "list" || command === "--help" || command === "help") {
       } catch (error) { process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, error: { code: -32603, message: error.message } }) + "\n"); }
     });
   });
+}
 }

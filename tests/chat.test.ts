@@ -8,6 +8,11 @@ test("Follow-up tools are recognised under Claude and Codex names only", () => {
   assert.equal(followToolName("mcp__other__register_pr"), null);
   assert.equal(followToolName("mcp__follow-through__unknown_tool"), null);
   assert.equal(followToolName("register_pr"), null, "a bare name could belong to any server");
+  // 1.4.0-beta.2: served through Paseo's own MCP.
+  assert.equal(followToolName("mcp__paseo__follow_register_pr"), "register_pr");
+  assert.equal(followToolName("paseo.follow_declare_done"), "declare_done");
+  assert.equal(followToolName("mcp__paseo__list_agents"), null);
+  assert.equal(followToolName("mcp__paseo__follow_unknown_tool"), null);
 });
 
 test("the CLI fallback is recognised with its JSON input, including escaped quotes", () => {

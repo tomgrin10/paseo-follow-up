@@ -2,8 +2,8 @@ import type { PluginSessionOpenRequest } from "@getpaseo/plugin/server";
 import { mcpDefinition } from "./agent-mcp";
 
 /** The bridge and caller identity belong to this launch, never global CLI config. */
-export function withSessionMcp(request: PluginSessionOpenRequest, directory: string, clientEntry: string, home: string, recovery: boolean, env: NodeJS.ProcessEnv = process.env, brief: string | null = null, root = false, overseer = false): PluginSessionOpenRequest {
-  if (request.purpose !== "interactive" || !["claude", "codex"].includes(request.provider) || request.labels["plugin-tools/enabled"] === "false") return request;
+export function withSessionMcp(request: PluginSessionOpenRequest, directory: string, clientEntry: string, home: string, recovery: boolean, env: NodeJS.ProcessEnv = process.env, brief: string | null = null, root = false, overseer = false, providers: string[] = ["claude", "codex"]): PluginSessionOpenRequest {
+  if (request.purpose !== "interactive" || !providers.includes(request.provider) || request.labels["plugin-tools/enabled"] === "false") return request;
   const definition = mcpDefinition(directory, clientEntry, home);
   return { ...request, mcpServers: { ...request.mcpServers, "follow-through": { ...definition, env: {
     ...definition.env, PASEO_AGENT_ID: request.agentId,
