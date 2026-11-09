@@ -138,10 +138,16 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
         <SortMenu theme={theme} mode={model.sort} onChange={deps.sources.extras.setSort} rankedAt={model.rankedAt} touch={compact} rank={rank} onRerank={deps.sources.extras.rankNow} />
         {compact && <IconButton theme={theme} compact icon="Settings" label="Follow-up settings" onPress={deps.openSettings} />}
       </View>
-      {!omnibox.results && <StatusStrip theme={theme} model={model} filter={filter} onFilter={setFilter} touch={compact} dense={compact} />}
-      {!omnibox.results && !compact && <UsageMeters theme={theme} sources={deps.sources} dense={compact} />}
-      {!omnibox.results && <SetupOffer theme={theme} compact={compact} view={props.onboarding} />}
-    </ListTop>} />;
+      {!compact && !omnibox.results && <StatusStrip theme={theme} model={model} filter={filter} onFilter={setFilter} touch={compact} dense={compact} />}
+      {!compact && !omnibox.results && <UsageMeters theme={theme} sources={deps.sources} dense={compact} />}
+      {!compact && !omnibox.results && <SetupOffer theme={theme} compact={compact} view={props.onboarding} />}
+    </ListTop>}
+    // Phones: only the search row stays pinned; the status chips and the setup offer scroll away with the list, so a
+    // scrolled list keeps the screen instead of sitting under a 250px block.
+    header={compact && !omnibox.results ? <View style={{ gap: 8, paddingTop: 6, paddingBottom: 6 }}>
+      <StatusStrip theme={theme} model={model} filter={filter} onFilter={setFilter} touch dense />
+      <SetupOffer theme={theme} compact view={props.onboarding} />
+    </View> : undefined} />;
 
   if (compact) return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
     {current || selected === OVERSEER_KEY && overseer || selected === BRIEF_KEY ? detail : list}
