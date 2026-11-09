@@ -260,7 +260,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
   };
   const respond = (p: Permission, response: { behavior: "allow" | "deny"; selectedActionId?: string; message?: string }) =>
     run(`perm:${p.id}`, () => agent.handle!.respondToPermission({ requestId: p.id, response: response as never }), response.behavior === "allow" ? "Allowed" : "Denied");
-  const color = glyphColor(s, c);
+  const color = glyphColor(s, c, compact);
 
   const ago = s.at ? age(s.at, Date.now()) : "";
   const metaRest = [ago === "now" ? "just now" : ago, s.project].filter(Boolean).join(" · ");
@@ -535,13 +535,14 @@ function ReplyBox({ theme, compact, agentName, onSend, placeholder = "Answer in 
     try { await onSend(text); setValue(""); toast.show("Sent", { variant: "success" }); }
     catch (e) { toast.error(errorText(e)); } finally { setSending(false); }
   };
+  // Phones: a 48-tall box (46 + hairline) with the placeholder on one centred line; it grows as you type.
   // In a dock (the detail pane), the dock draws the hairline; on its own it draws one. Phones keep the hint as the
   // input's accessibility hint instead of small print under it, where it collided with the gesture bar.
   return <View style={{ padding: compact ? 12 : 14, gap: 6, ...(docked ? {} : { borderTopWidth: 1, borderTopColor: c.border }) }}>
-    <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: compact ? 12 : 10, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1, paddingLeft: 12, paddingRight: compact ? 2 : 6, paddingVertical: compact ? 2 : 6 }}>
+    <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: compact ? 12 : 10, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1, paddingLeft: 12, paddingRight: compact ? 1 : 6, paddingVertical: compact ? 0 : 6 }}>
       <TextInput ref={inputRef} accessibilityLabel={`Reply to ${agentName}`} accessibilityHint={compact && hint ? hint : undefined} onFocus={() => onFocusChange?.(true)} onBlur={() => onFocusChange?.(false)} value={value} onChangeText={setValue} placeholder={placeholder} placeholderTextColor={c.foregroundMuted} multiline
         onKeyPress={e => { const k = e.nativeEvent as unknown as { key: string; metaKey?: boolean; ctrlKey?: boolean }; if (k.key === "Enter" && (k.metaKey || k.ctrlKey)) void send(); }}
-        style={{ flex: 1, minHeight: compact ? 44 : 36, maxHeight: 140, color: c.foreground, fontSize: 14, lineHeight: 20, paddingVertical: 6, ...(Platform.OS === "web" ? { outlineStyle: "none" } as object : {}) }} />
+        style={{ flex: 1, minHeight: compact ? 46 : 36, maxHeight: 140, color: c.foreground, fontSize: 14, lineHeight: 20, paddingVertical: compact ? 13 : 6, ...(Platform.OS === "web" ? { outlineStyle: "none" } as object : {}) }} />
       <IconButton theme={theme} compact={compact} icon="ArrowUp" label="Send" disabled={!value.trim() || sending} spinning={sending} onPress={() => void send()} color={value.trim() ? c.foreground : undefined} />
     </View>
     {!!hint && !compact && <Text style={{ color: c.foregroundMuted, fontSize: 11, lineHeight: 15 }}>{hint}</Text>}
@@ -571,7 +572,16 @@ function BriefPane({ theme, compact, pane, onSelect, openLog, sources }: { theme
     {!!pane.waiting && <Text style={t.body}><Text style={{ color: c.foregroundMuted }}>Waiting on others: </Text>{pane.waiting}</Text>}
     <Text style={t.body}><Text style={{ color: c.foregroundMuted }}>Cleared since {sinceLabel(now)}: </Text>{pane.cleared ?? "nothing yet"}.</Text>
 
-    {section("Done while you were away", <Pressable accessibilityRole="link" onPress={openLog} hitSlop={compact ? { top: 14, bottom: 14, left: 16, right: 8 } : 8}><Text style={[compact ? t.meta : t.small, { color: c.foreground }]}>{pane.away.count} · log</Text></Pressable>)}
+    {/* Phones: the section head is itself a 44 row into the log ("· N · View log ›"), not a tiny "0 · log" link. */}
+    {compact
+      ? <Pressable accessibilityRole="link" accessibilityLabel={`Done while you were away: ${pane.away.count}. View log`} onPress={openLog}
+        style={state => ({ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 44, marginTop: 6, marginHorizontal: -8, paddingHorizontal: 8, borderRadius: 8, backgroundColor: state.pressed ? c.surface2 : "transparent" })}>
+        <Text accessibilityRole="header" numberOfLines={1} style={[t.section, { flexShrink: 1 }]}>Done while you were away · {pane.away.count}</Text>
+        <View style={{ flex: 1 }} />
+        <Text style={[t.meta, { color: c.foreground }]}>View log</Text>
+        <Icon name="ChevronRight" size={14} color={c.foregroundMuted} />
+      </Pressable>
+      : section("Done while you were away", <Pressable accessibilityRole="link" onPress={openLog} hitSlop={8}><Text style={[t.small, { color: c.foreground }]}>{pane.away.count} · log</Text></Pressable>)}
     {pane.away.top.length ? pane.away.top.map(l => <LogRow key={l.key} l={l} c={c} />) : <Text style={t.meta}>Follow-up didn't act on its own since {sinceLabel(now)}.</Text>}
     <Text style={t.meta}>No merges, no messages to people. Those stay yours.</Text>
 

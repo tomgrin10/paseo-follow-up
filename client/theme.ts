@@ -20,6 +20,27 @@ export function isLight(colors: Colors): boolean {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.4;
 }
 
+function luminance(rgb: number[]): number {
+  const [r, g, b] = rgb.map(v => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/**
+ * A status hue lifted until it reads as text (4.5:1) on the page ground. Dark hosts' success green is a fill colour
+ * (about 3:1 as 12px text); on phones the state word carries the state alone, so it has to pass. Light grounds and
+ * hues that already pass come back unchanged.
+ */
+export function readable(color: string, colors: Colors): string {
+  const rgb = channels(color); const ground = channels(colors.surface0);
+  if (!rgb || !ground || isLight(colors)) return color;
+  const bg = luminance(ground);
+  for (let k = 1; k <= 2.5; k += 0.05) {
+    const next = rgb.map(v => Math.min(255, Math.round(v * k)));
+    if ((luminance(next) + 0.05) / (bg + 0.05) >= 4.5) return k === 1 ? color : `rgb(${next.join(", ")})`;
+  }
+  return color;
+}
+
 export function withAlpha(color: string, alpha: number): string {
   const rgb = channels(color);
   return rgb ? `rgba(${rgb.join(", ")}, ${alpha})` : color;

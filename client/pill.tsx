@@ -158,6 +158,8 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
   const items = w ? withoutBriefQuestions(needsYou(w, now), row) : [];
   const done = (work: () => void) => { props.close(); work(); };
   const headline = state && state.mode !== "undo" ? state.headline : null;
+  // Phones: one primary per sheet. While the workspace has something to act on, that's the primary and Sign off steps back.
+  const itemFirst = touch && !!w && (asking || items.length > 0);
   const tone = headline ? headlineColor(HEADLINE_TONE[headline.key], c) : c.foregroundMuted;
 
   return <View style={{ width: 380, maxWidth: "100%", gap: 12, marginTop: touch ? -12 : 0 }}>
@@ -165,8 +167,13 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
     {headline ? <View style={{ gap: 3 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
         <Icon name={HEADLINE_ICON[headline.key]} size={14} color={tone} />
-        <Text style={{ color: tone, fontSize: 12, lineHeight: 16, fontWeight: "600" }}>{headline.label}</Text>
-        {flagged && state.todo > 0 && <Text style={t.small}>· {todoLabel(items.length ? items : withoutBriefQuestions(target.items, row))} in this workspace</Text>}
+        {/* Phones: the host's sheet title already says "Follow-up · <label>", so the meta line doesn't repeat it. */}
+        {touch
+          ? <Text style={t.small}>{main ? "Main agent" : "This agent"}{flagged && state.todo > 0 ? ` · ${todoLabel(items.length ? items : withoutBriefQuestions(target.items, row))} in this workspace` : ""}</Text>
+          : <>
+            <Text style={{ color: tone, fontSize: 12, lineHeight: 16, fontWeight: "600" }}>{headline.label}</Text>
+            {flagged && state.todo > 0 && <Text style={t.small}>· {todoLabel(items.length ? items : withoutBriefQuestions(target.items, row))} in this workspace</Text>}
+          </>}
       </View>
       <Text numberOfLines={touch ? 3 : 2} style={touch ? t.ask : { color: c.foreground, fontSize: 14, lineHeight: 20, fontWeight: "600" }}>{headline.line}</Text>
     </View> : <Text style={t.meta}>Nothing needs you here right now.</Text>}
@@ -174,7 +181,7 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
     {/* 2. Sign off, with "& next" beside it, then Later. Only for a flagged agent. */}
     {flagged && <View style={{ gap: 10 }}>
       <View style={{ flexDirection: "row", gap: 8 }}>
-        <Button theme={props.theme} compact={touch} grow={touch} kind="primary" icon="Check" title="Sign off" accessibilityHint="Clears this agent from Needs you"
+        <Button theme={props.theme} compact={touch} grow={touch} kind={itemFirst ? "secondary" : "primary"} icon="Check" title="Sign off" accessibilityHint="Clears this agent from Needs you"
           onPress={() => done(() => void deps.inbox.signOff([agentId]))} />
         <Button theme={props.theme} compact={touch} grow={touch} icon="ArrowRight" title="Sign off & next"
           onPress={() => done(() => { void deps.inbox.signOff([agentId]); deps.openNext(agentId); })} />
@@ -198,7 +205,7 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
       {flagged && <Text style={touch ? t.section : [t.small, { fontWeight: "600" }]}>In this workspace · {todoLabel(items)}</Text>}
       {asking
         ? <QuestionStepper workspace={w} theme={props.theme} compact={touch} bodyMaxHeight={touch ? undefined : 200} onDetails={setQuestion} onAnswered={() => deps.live.refresh()} />
-        : <NeedsYouList workspace={w} theme={props.theme} compact={touch} flush
+        : <NeedsYouList workspace={w} theme={props.theme} compact={touch} flush feature={touch}
           actions={{ after: () => deps.live.refresh(), openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion }} />}
       {asking && items.some(i => i.kind !== "question") && <Text numberOfLines={2} style={t.small}>Also: {items.filter(i => i.kind !== "question").map(i => i.title).join(" · ")}</Text>}
       <PrSheet workspace={w} prKey={sheet?.key ?? null} intent={sheet?.intent ?? null} theme={props.theme} compact={touch} browserReady={browser.data?.ready ?? false} onClose={() => { setSheet(null); deps.live.refresh(); }} />
