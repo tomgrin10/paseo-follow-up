@@ -24,7 +24,7 @@ Needs Node 22+ and an authenticated GitHub CLI (`gh`) on the daemon host. Merge 
 
 ## Use
 
-Open a workspace, click the Follow-up icon in its header (or press ⌘K / Ctrl+K and choose **Follow-up: open for this workspace**), then **Track this workspace**. To track every workspace in a project, open the settings (the gear in the panel, or **Follow-up: project settings** in ⌘K) and turn the project on.
+Open a workspace, click the Follow-up icon in its header (or press ⌘K / Ctrl+K and choose **Follow-up: dock the navigator here**), then **Track this workspace**. To track every workspace in a project, open the settings (the gear in the panel, or **Follow-up: project settings** in ⌘K) and turn the project on.
 
 The panel reads top to bottom:
 
@@ -64,11 +64,7 @@ In the agent's chat, Follow-up's own tool calls collapse into one-line rows, you
 
 ![Follow-up rows and cards in an agent chat](docs/screenshots/follow-up-chat.png)
 
-**Follow-up: all tracked workspaces** (or the sidebar row) lists every tracked workspace, grouped by who's up next, with each stack's bar and its Spec link.
-
-![The tracked workspaces screen grouped into Needs you, Agent working, Waiting and Done](docs/screenshots/follow-up-overview.png)
-
-On a phone the panel opens as a tab, and the PR sheet and pill popover open as bottom sheets.
+On a phone the navigator opens as a tab, and the PR sheet and pill popover open as bottom sheets.
 
 ![Follow-up at phone width: the panel, a PR sheet and the pill popover](docs/screenshots/follow-up-mobile.png)
 
@@ -78,11 +74,11 @@ The 1.1 beta adds an inbox for your agents. An agent lands in **Needs you** when
 
 - **One pill per agent** above the composer, only while something needs you there. It leads with the one thing that matters (*Decision 4m*, *Permission 2m*, *Send 2 fixes*, *Merge #812*, *Add reviewers #1499*, *Finished 12m*), using the same order as the brief card and the Needs-you row. Click it for **Sign off**, **Sign off & next**, **Later…**, the workspace's questions and PR actions, *Mute this turn*, *Don't flag finishes* and *Open Follow-up*. After a sign-off it reads *Signed off · Undo* for 6 s.
 - **Sign off** in one step: the ✓ on a row, `/ok` in the composer (`/ok next` opens the next one), or ⌘K → **Follow-up: sign off & next**. Every sign-off can be undone for 24 hours.
-- **One sidebar item, Follow-up**, badged with how many agents need you (hidden at zero). It opens the inbox and your tracked workspaces.
+- **One sidebar item, Follow-up**, badged with how many agents need you (hidden at zero). It opens Home.
 - **Messages from automation don't count as yours**: agent-to-agent messages, Follow-up's own repairs, Defer, Smart Session and Session Guard continuations, and schedules leave the flag in place. Their turn end flags as usual. A script calling `paseo send` without an agent envelope counts as you until Paseo reports who sent a message.
 - **Don't flag finishes** (per agent, in the row's ⋯ or the composer's **More**): for agents that run on a schedule, such as a plugin auto-update. Permission prompts and errors still flag.
 - **First run** imports what Paseo marks unread and idle agents from the last 7 days you never replied to. Older idle agents wait in a one-time *Unsorted* list with a confirmed *Sign off all* that one Undo reverses.
-- On Paseo builds with sidebar views (Paseo `main` after 2026-11-07, expected in the next release), **Settings > Sidebar > Sidebar view > Follow-up: Needs you** puts the inbox in the sidebar, with your workspace list folded below it.
+- On Paseo builds with sidebar views (Paseo `main` after 2026-11-07, expected in the next release), **Settings > Sidebar > Sidebar view > Follow-up: Needs you** puts Home's list in the sidebar.
 - Everything is in one settings page, **Settings > Follow-up** (⌘K → **Follow-up: settings**): Projects, Questions, Sidebar & pills, and the Needs-you inbox. Turn the whole inbox off there. Off means nothing is flagged and no pill or sidebar item is shown.
 
 ### What you need to do, front and center (1.2 beta)
@@ -98,10 +94,22 @@ The content comes from a new `needs_you` tool that every root agent gets while t
 
 **Ask agents to state what they need** (on by default, in **Follow-up: display settings**): when a Claude Code root agent ends a turn without calling `needs_you`, Follow-up's Stop hook asks it once to call it, then lets it stop. It never asks twice in one turn, and skips subagents, contributors, recovery agents and agents waiting on a permission prompt. Codex and other providers get the instruction only. The settings screen shows how often agents stated what they need over the last 7 days.
 
+### Home (1.3 beta)
+
+The Follow-up sidebar row (and ⌘K → **Follow-up: Home**) opens **Home**: every workspace on the left, the one you pick on the right, answered without leaving it. It replaces the old overview and tracked-workspaces screens.
+
+- **The list**, grouped by what it needs from you: **Morning brief**, **Needs you** (blocking asks first: permissions, errors, questions; then decisions only you make, like merge and add reviewers; then finished turns to sign off, oldest first), **Follow-up is fixing** (repairs in flight), **Running**, **Waiting on others**, **Later** (snoozed) and **Quiet**, folded by project and paged, with merged and signed-off work marked ready to archive. Each row has the last ask or action, up to two badges, the PR with its checks, and the age.
+- **The detail pane** for the selected row: the brief (the ask, decisions as buttons), Allow / Deny for a pending permission, merge and add-reviewer actions, **Sign off**, **Sign off & next**, **Later…**, the agent's last few steps (read only for that agent), and a reply box. Sending a reply is you writing to the agent, so it clears Needs you. Only one button on screen is filled.
+- **The brief pane** when nothing is selected: a headline that names the first move, who you're waiting on, what cleared since the last workday, **Done while you were away** (what Follow-up did on its own, with a link to the full log) and how fresh Paseo and GitHub data is.
+- **Open full** opens the agent's chat and docks the **navigator** in that workspace's explorer column: the same list, compact, with this workspace's row expanded to its decisions, PR stack, tasks left, repair budget, activity and **Details** (the larger view). Its **Home** button goes back. The Follow-up header button re-docks it. On a phone, Home is the list and a row opens a full-height detail.
+![Home: the list grouped into Needs you, Follow-up is fixing, Running and Waiting on others, with a permission selected and Allow / Deny, Sign off and the agent's last steps on the right](docs/screenshots/follow-up-home.png)
+
+- ⌘K: **Follow-up: Home**, **Follow-up: Sign off & next**, **Follow-up: Later (tomorrow 09:00)**, **Follow-up: Next needs-you**, **Follow-up: Done while you were away**.
+
 Install the beta:
 
 ```sh
-paseo plugin update follow-through --version 1.2.0-beta.4
+paseo plugin update follow-through --version 1.3.0-beta.0
 # or, for a fresh install:
 paseo plugin install npm:paseo-follow-up@beta
 ```

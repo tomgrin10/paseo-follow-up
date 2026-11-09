@@ -96,7 +96,8 @@ function Collapsed({ b, c, now }: { b: Brief; c: Colors; now: number }) {
   </View>;
 }
 
-export function BriefCard({ item, theme, layout, agentId, deps }: PluginTimelineItemProps<Brief> & { deps: BriefDeps }) {
+/** `embedded`: inside Home's detail pane, which has its own reply box and action bar, so the card drops its moves. */
+export function BriefCard({ item, theme, layout, agentId, deps, embedded = false }: PluginTimelineItemProps<Brief> & { deps: BriefDeps; embedded?: boolean }) {
   const c = theme.colors; const b = item.data; const compact = layout.compact;
   const now = useNow(60_000);
   const { height } = useWindowDimensions();
@@ -146,7 +147,7 @@ export function BriefCard({ item, theme, layout, agentId, deps }: PluginTimeline
       <Icon name={ICON[b.kind]} size={14} color={acts ? attention : tone} />
       {acts && <Text style={{ color: attention, fontSize: 12, lineHeight: 16, fontWeight: "600" }}>Needs you</Text>}
       <Text style={{ flex: 1, minWidth: compact ? 160 : 0, color: acts ? c.foreground : c.foregroundMuted, fontSize: 14, lineHeight: 20, fontWeight: acts ? "600" : "400" }}>{b.ask}</Text>
-      {moves.map(m => <Btn key={m.kind} label={m.label} onPress={() => press(m)} c={c} compact={compact} />)}
+      {!embedded && moves.map(m => <Btn key={m.kind} label={m.label} onPress={() => press(m)} c={c} compact={compact} />)}
       <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontVariant: ["tabular-nums"] }}>{ageText}</Text>
     </View>;
   }
@@ -156,7 +157,7 @@ export function BriefCard({ item, theme, layout, agentId, deps }: PluginTimeline
   const showExtra = !tight || details || extrasFit(b, height);
   const pad = compact ? 14 : 16;
   return <View accessibilityRole="summary" accessibilityLabel={`${acts ? "Needs you" : word(b.kind)}: ${b.ask}`}
-    style={{ marginVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: border, backgroundColor: c.surface1, overflow: "hidden" }}>
+    style={{ marginVertical: embedded ? 0 : 10, borderRadius: 12, borderWidth: 1, borderColor: border, backgroundColor: c.surface1, overflow: "hidden" }}>
     <View style={{ paddingHorizontal: pad, paddingTop: compact ? 12 : 14, paddingBottom: 14, gap: tight ? 10 : 12 }}>
       <View style={{ gap: 4 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
@@ -176,8 +177,8 @@ export function BriefCard({ item, theme, layout, agentId, deps }: PluginTimeline
             open={!!open[`${d.id}:${o.letter}`]} onToggle={() => setOpen(v => ({ ...v, [`${d.id}:${o.letter}`]: !v[`${d.id}:${o.letter}`] }))}
             onPress={() => void run(`${d.id}:${o.letter}`, () => act({ agentId, briefId: b.id, decisionId: d.id, choice: o.letter }))} c={c} compact={compact} />)}
         </View>}
-        {!tight && <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{d.options.length ? `Or type ${letters(d)} in the composer, or reply in your own words.` : "Reply in the composer."}</Text>}
-        {tight && !d.options.length && <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>Reply in the composer.</Text>}
+        {!tight && <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{embedded ? d.options.length ? "Or answer in your own words below." : "Reply below." : d.options.length ? `Or type ${letters(d)} in the composer, or reply in your own words.` : "Reply in the composer."}</Text>}
+        {tight && !d.options.length && <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{embedded ? "Reply below." : "Reply in the composer."}</Text>}
       </View>)}
 
       {!!b.mono && !b.ask.endsWith(b.mono) && <View style={{ borderRadius: 8, backgroundColor: withAlpha(c.statusDanger, isLight(c) ? 0.07 : 0.1), paddingHorizontal: 10, paddingVertical: 8 }}>
@@ -204,7 +205,7 @@ export function BriefCard({ item, theme, layout, agentId, deps }: PluginTimeline
         </Pressable>)}
       </View>}
 
-      {moves.length > 0 && <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+      {!embedded && moves.length > 0 && <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
         {moves.map((m, i) => <Btn key={m.kind} label={busy === m.kind ? `${m.label}…` : m.label} icon={MOVE_ICON[m.kind]} primary={i === 0} disabled={!!busy} onPress={() => press(m)} c={c} compact={compact} />)}
       </View>}
 
