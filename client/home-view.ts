@@ -1,5 +1,6 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
-import { prioritiesRpc, usageRpc } from "../shared/contracts";
+import { overseerStartRpc, overseerStatusRpc, prioritiesRpc, usageRpc } from "../shared/contracts";
+import type { RpcOutput } from "@getpaseo/plugin";
 import type { Priority } from "../shared/priorities";
 import { DEFAULT_SORT, isSortMode, type SortMode } from "../shared/sort";
 import type { AgentLite } from "../shared/search";
@@ -26,6 +27,7 @@ export function createHomeExtras(client: PluginClientContext) {
   let sort: SortMode = isSortMode(saved) ? saved : DEFAULT_SORT;
   let priorities: Priority[] = [];
   let usage: Usage = NO_USAGE;
+  let overseer: RpcOutput<typeof overseerStatusRpc> | null = null;
   const agents = new Map<string, AgentLite>();
   let version = 0;
   let focusToken = 0;
@@ -45,6 +47,11 @@ export function createHomeExtras(client: PluginClientContext) {
     const next = (await client.rpc(prioritiesRpc, {})).items;
     if (JSON.stringify(next) === JSON.stringify(priorities)) return false;
     priorities = next; return true;
+  });
+  poll(10_000, async () => {
+    const next = await client.rpc(overseerStatusRpc, {});
+    if (JSON.stringify(next) === JSON.stringify(overseer)) return false;
+    overseer = next; return true;
   });
   poll(USAGE_POLL_MS, async () => {
     const next = await client.rpc(usageRpc, {});
@@ -87,6 +94,9 @@ export function createHomeExtras(client: PluginClientContext) {
     setSort(next: SortMode) { if (next === sort) return; sort = next; storage.set(SORT_KEY, next); emit(); },
     priorities: () => priorities,
     usage: () => usage,
+    /** The Overseer: off, not started yet, or its agent and workspace. */
+    overseer: () => overseer,
+    async startOverseer() { overseer = await client.rpc(overseerStartRpc, {}); emit(); return overseer; },
     agents: () => [...agents.values()],
     /** Bumped by ⌘K "Follow-up: Search"; the visible search field focuses when it changes. */
     focusToken: () => focusToken,

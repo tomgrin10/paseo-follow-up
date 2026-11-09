@@ -98,7 +98,9 @@ export const workspaceSpecRpc = defineRpc({ name: "follow.workspace-spec", input
 // Needs-you inbox. Names stay under follow. like the rest of the plugin.
 export const inboxListRpc = defineRpc({ name: "follow.inbox-list", input: z.object({}), output: z.object({ enabled: z.boolean(), rows: z.array(inboxRowSchema), unsorted: z.array(inboxRowSchema).nullable(), firstRun: z.boolean(), batchUndo: z.object({ at: z.string(), count: z.number().int() }).nullable(), signOffs: z.number().int(), error: z.string().nullable(),
   /** Adoption share of needs_you over the last 7 days of flagged turns (R2). Optional for older daemons. */
-  briefStats: z.object({ days: z.number().int(), total: z.number().int(), tool: z.number().int(), structured: z.number().int(), extraction: z.number().int(), fallback: z.number().int() }).optional() }) });
+  briefStats: z.object({ days: z.number().int(), total: z.number().int(), tool: z.number().int(), structured: z.number().int(), extraction: z.number().int(), fallback: z.number().int() }).optional(),
+  /** The Overseer's own row (1.4.0-beta.0), kept out of rows and every Needs-you count. */
+  overseer: inboxRowSchema.nullable().optional() }) });
 export const inboxActRpc = defineRpc({ name: "follow.inbox-act", input: z.strictObject({
   action: z.enum(["sign_off", "undo", "snooze", "mute_turn", "set_finish_flags", "unsorted_flag", "unsorted_sign_off", "batch_undo"]),
   agentIds: z.array(idSchema).max(500).optional(), seqs: z.record(z.string(), z.number().int()).optional(),
@@ -121,3 +123,9 @@ export const briefActionRpc = defineRpc({ name: "follow.brief-action", input: z.
 
 // Agent parity: one RPC carries every agent tool; the server runs the same path as the developer's button.
 export const agentActRpc = defineRpc({ name: "follow.agent-act", input: z.strictObject({ agentId: idSchema, tool: z.string().max(60), args: z.record(z.string(), z.unknown()).default({}) }), output: z.unknown() });
+
+// The Overseer (1.4.0-beta.0).
+export const overseerStatusSchema = z.object({ enabled: z.boolean(), agentId: z.string().nullable(), workspaceId: z.string().nullable(), startedAt: z.string().nullable(), generation: z.number().int(), error: z.string().nullable() });
+export const overseerStatusRpc = defineRpc({ name: "follow.overseer-status", input: z.object({}), output: overseerStatusSchema });
+export const overseerStartRpc = defineRpc({ name: "follow.overseer-start", input: z.object({}), output: overseerStatusSchema });
+export const overseerActRpc = defineRpc({ name: "follow.overseer-act", input: z.strictObject({ agentId: idSchema, tool: z.string().max(60), args: z.record(z.string(), z.unknown()).default({}) }), output: z.unknown() });

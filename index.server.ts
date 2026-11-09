@@ -39,8 +39,11 @@ import { ListCache } from "./server/list-cache";
 import { scopeWriter } from "./server/scopes";
 import { batchArchive, pruneUnsent } from "./server/batch-archive";
 import { NO_USAGE } from "./shared/usage";
-import { conversationGone, DEFAULT_ACTIVE_WINDOW_DAYS } from "./server/agent-load";
+import { activeWindowMs, conversationGone, DEFAULT_ACTIVE_WINDOW_DAYS } from "./server/agent-load";
 import { ACTIVE_SCOPE_MIGRATION, PRUNE_MIGRATION, autoSendsByDefault, FOLLOW_EVERY_MIGRATION, followsByDefault, followsEvery, migrateFollowEvery, optedOut } from "./shared/settings";
+import { Overseer, OVERSEER_TOOLS, type OverseerPaseo, type OverseerTool } from "./server/overseer";
+import { OVERSEER_LABEL } from "./shared/overseer";
+import { pages, withDaemon } from "./server/daemon";
 import { BRIEF_KIND, BRIEF_VERSION, prState, validateNeedsYou, type Brief, type NeedsYouRecord } from "./shared/brief";
 
 export default function contribute(server: PluginServerContext) {
@@ -81,8 +84,10 @@ export default function contribute(server: PluginServerContext) {
   };
   const needsYouPath = (agentId: string) => join(directory, "hook-state", `needs-you-${agentId}.json`);
   const trackedMain = async (agentId: string) => (await store.snapshot()).workspaces.find(w => w.enable_tracking && !w.archived && w.mainAgentId === agentId) ?? null;
+  let overseer: Overseer | null = null;
   const inbox: Inbox = new Inbox(directory, {
     enabled: inboxSettings,
+    overseer: async () => (await overseer?.state())?.agentId ?? null,
     briefs: {
       sink: append,
       async call(agentId) {
@@ -136,6 +141,8 @@ export default function contribute(server: PluginServerContext) {
     if (!governor.allowsExtras()) { if (!stopped) inboxTimer = setTimeout(() => void inboxLoop(), 15_000); return; }
     try { await writeBriefState().catch(() => undefined); await inbox.tick(); await inbox.reconcilePermissions(); await inbox.observeGuard(); await inbox.observeFollowUp(await store.snapshot()); inboxError = null; }
     catch (error) { inboxError = error instanceof Error ? error.message : "The Needs-you inbox couldn't update."; }
+    // The Overseer's digest for its next turn, and its recreation if it was archived. Never blocks the inbox.
+    if (overseer) { await overseer.writeDigest().catch(() => undefined); if (api) await overseer.ensure(api as unknown as OverseerPaseo, { periodic: true }).catch(() => undefined); }
     if (!stopped) inboxTimer = setTimeout(() => void inboxLoop(), 15_000);
   };
   // Hooks run in the background; an inbox failure never blocks the rest of Follow-up.
@@ -465,6 +472,26 @@ export default function contribute(server: PluginServerContext) {
   server.handle(rpc.requestReviewersRpc, async ({ workspaceId, prKey }) => { await requireReady(); const result = await actions.requestReviewers(workspaceId, prKey); void engine.tick(); return result; });
 
   const priorityStore = new PriorityStore(directory);
+  // Paseo's workspace descriptors for the Overseer (name, project, branch): metadata only, one paged read. The
+  // digest reuses it for a minute; the Overseer's own tool calls refresh it after 10 s.
+  type Descriptor = { id: string; name?: string | null; title?: string | null; projectId?: string | null; projectDisplayName?: string | null; projectCustomName?: string | null; activityAt?: string | null; archivingAt?: string | null; gitRuntime?: { currentBranch?: string | null } | null; githubRuntime?: { pullRequest?: { number?: number; title?: string } | null } | null };
+  let descriptors: { at: number; value: Promise<Descriptor[]> } | null = null;
+  const paseoWorkspaces = async (fresh = false) => {
+    if (!descriptors || Date.now() - descriptors.at > (fresh ? 10_000 : 60_000)) { const value = withDaemon(client => pages(cursor => client.fetchWorkspaces({ page: { limit: 100, ...(cursor ? { cursor } : {}) } })) as Promise<Descriptor[]>); descriptors = { at: Date.now(), value }; value.catch(() => { descriptors = null; }); }
+    return (await descriptors.value).filter(w => !w.archivingAt).map(w => ({ id: w.id, name: w.title || w.name || "Workspace", project: w.projectCustomName || w.projectDisplayName || null, projectId: w.projectId ?? null, activityAt: w.activityAt ?? null,
+      branch: w.gitRuntime?.currentBranch ?? null, pr: w.githubRuntime?.pullRequest?.title ? { number: w.githubRuntime.pullRequest.number ?? null, title: w.githubRuntime.pullRequest.title } : null }));
+  };
+  const overseerOn = async () => (await inboxSettings()).enable_overseer !== false;
+  overseer = new Overseer({ directory, store, inbox, priorities: priorityStore, workspaces: paseoWorkspaces, enabled: overseerOn, paseoHome, tight: async () => !governor.allowsBackground(),
+    windowMs: async () => activeWindowMs(await store.snapshot()), provider: process.env.FOLLOW_UP_OVERSEER_PROVIDER || undefined });
+  const overseerStatus = async () => { const s = await overseer!.state(); return { enabled: await overseerOn(), agentId: s.agentId, workspaceId: s.workspaceId, startedAt: s.startedAt, generation: s.generation, error: s.error }; };
+  server.handle(rpc.overseerStatusRpc, async () => { await requireReady(); return overseerStatus(); });
+  server.handle(rpc.overseerStartRpc, async (_input, { paseo }) => { await requireReady(); seen(paseo); await overseer!.start(paseo as unknown as OverseerPaseo); return overseerStatus(); });
+  server.handle(rpc.overseerActRpc, async ({ agentId, tool, args }, { paseo }) => {
+    await requireReady(); seen(paseo);
+    if (!(OVERSEER_TOOLS as readonly string[]).includes(tool)) throw new Error(`Unknown Overseer tool ${tool}.`);
+    return overseer!.act(paseo as unknown as OverseerPaseo, agentId, tool as OverseerTool, args);
+  });
   const agentActions = new AgentActions({ store, prActions: actions, engine, inbox, priorities: priorityStore });
   server.handle(rpc.prioritiesRpc, async () => ({ items: await priorityStore.read() }));
   // Provider limits are non-essential: at critical memory only the VM meter is served.
@@ -542,6 +569,9 @@ export default function contribute(server: PluginServerContext) {
     server.on("agent.permission_resolved", async (event, { paseo }) => { seen(paseo); inboxHook(async () => { await inbox.permissionResolved(event.agent, event.requestId); await writeBriefState(); }); }),
     server.on("agent.closed", async event => inboxHook(() => inbox.closed(event.agent))),
     server.on("agent.archived", async event => inboxHook(() => inbox.archived([event.agent.id]))),
+    // An archived Overseer comes back with a handoff summary (the next inbox tick also checks).
+    server.on("agent.archived", async (event, { paseo }) => { seen(paseo); inboxHook(async () => { if (event.agent.id === (await overseer!.state()).agentId) await overseer!.ensure(paseo as unknown as OverseerPaseo); }); }),
+    server.on("workspace.archived", async (event, { paseo }) => { seen(paseo); inboxHook(async () => { if (event.workspace.id === (await overseer!.state()).workspaceId) await overseer!.ensure(paseo as unknown as OverseerPaseo); }); }),
     server.on("workspace.archived", async event => inboxHook(() => inbox.workspaceArchived(event.workspace.id))),
     server.on("agent.turn_started", async event => {
       await ready;
@@ -561,6 +591,11 @@ export default function contribute(server: PluginServerContext) {
     server.before("agent.session_open", async ({ request }, { paseo }) => {
       await ready;
       if (loadError || stopped || request.purpose !== "interactive") return request;
+      // The Overseer: needs_you (no Stop-hook nudge), the action tools and its routing tools. Never tracked.
+      if (request.labels[OVERSEER_LABEL] === "1" && request.provider !== "codex") {
+        const env = { ...request.env, FOLLOW_THROUGH_OVERSEER: "1", FOLLOW_THROUGH_BRIEF: "claude" };
+        return withSessionMcp({ ...request, env }, directory, clientEntry(), paseoHome, false, process.env, "claude", true, true);
+      }
       const saved = await store.snapshot();
       let w = saved.workspaces.find(w => w.enable_tracking && !w.archived && (w.mainAgentId === request.agentId || w.batches.some(b => b.recipientAgentId === request.agentId && !b.settledAt && b.tasks.every(t => t.kind === "inventory") && ["sending", "sent", "uncertain", "blocked"].includes(b.state))));
       if (!w && request.workspaceId && !saved.workspaces.some(w => w.id === request.workspaceId && (w.archived || w.mainAgentId !== request.agentId))) {
