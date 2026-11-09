@@ -262,7 +262,8 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
   return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
     {header}
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: compact ? 16 : 20, gap: 16, paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
-      {!compact && s.workspaceId && w && <AboutSection key={s.workspaceId} workspaceId={s.workspaceId} theme={theme} compact={compact} flush />}
+      {/* What's this about? comes first on every size, directly under the header and above the ask. */}
+      {s.workspaceId && w && <AboutSection key={s.workspaceId} workspaceId={s.workspaceId} theme={theme} compact={compact} flush />}
       {agent.permissions.map(p => <PermissionBlock key={p.id} p={p} theme={theme} compact={compact} busy={busy === `perm:${p.id}`} primary={plan.primary === "allow"} onRespond={r => void respond(p, r)} />)}
       {b && s.agentId && !(b.kind === "permission" && agent.permissions.length) ? <BriefCard {...({ embedded: true, item: { data: b }, theme, layout: { compact }, agentId: s.agentId, deps: deps.briefDeps } as unknown as Parameters<typeof BriefCard>[0])} />
         : row?.needs && !agent.permissions.length && !b ? <Text style={[t.body, { fontSize: 15, lineHeight: 21, fontWeight: "600" }]}>{s.line || s.word || "Needs you"}</Text>
@@ -270,8 +271,6 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
       {w && <NeedsYouList workspace={w} theme={theme} compact={compact} flush skip={b?.decisions.length ? ["question"] : []}
         actions={{ openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion, openAgent: () => openFull(s) }} />}
       {actionBar}
-      {/* On a phone the ask and its moves come first; the reminder sits under them. */}
-      {compact && s.workspaceId && w && <AboutSection key={s.workspaceId} workspaceId={s.workspaceId} theme={theme} compact={compact} flush />}
       {s.agentId && <View style={{ gap: 8 }}>
         <Text style={[t.small, { fontWeight: "600", letterSpacing: 0.5, textTransform: "uppercase" }]}>{tail.asleep && tail.seenAt ? `Last seen · ${age(new Date(tail.seenAt).toISOString(), Date.now()) === "now" ? "just now" : `${age(new Date(tail.seenAt).toISOString(), Date.now())} ago`}` : tail.steps?.length ? `Recent · last ${tail.steps.length} steps` : "Recent steps"}</Text>
         {!!tail.error && <Text style={t.meta}>{`Couldn't load the agent's steps: ${tail.error}`}</Text>}
