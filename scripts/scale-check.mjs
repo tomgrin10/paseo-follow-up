@@ -109,11 +109,19 @@ try {
     let peak = await rss();
     while (Date.now() - started < IDLE_MS) { await sleep(500); peak = Math.max(peak, await rss()); const m = statSync(statePath).mtimeMs; if (m !== mtime) { writes++; mtime = m; } }
     const cpuPct = Math.round(((await ticks()) - t0) / hz / ((Date.now() - started) / 1000) * 1000) / 10;
-    if (heapDir) { process.kill(pid, "SIGUSR2"); await sleep(8_000); }
+    // The worker's own breakdown (heap vs native), from the governor's sample in follow.usage.
+    const memory = async () => { try { return (await client.invokePluginRpc("follow-through", "follow.usage", {}))?.resources?.worker ?? null; } catch { return null; } };
+    const memoryIdle = await memory();
+    let memoryAfterGc = null;
+    if (heapDir) { process.kill(pid, "SIGUSR2"); await sleep(8_000); memoryAfterGc = await memory(); }
     // The host's own cost: other plugin processes under this daemon (the fixture provider), for comparison.
     const { stdout: ps } = await exec("ps", ["-eo", "pid=,ppid=,rss=,args="]);
-    const hostRss = ps.trim().split("\n").map(l => l.trim().split(/\s+/)).filter(f => Number(f[1]) === daemon.pid && f.slice(3).join(" ").includes("plugin-process") && Number(f[0]) !== pid).map(f => Math.round(Number(f[2]) / 1024));
-    worker = { pid, hostPluginBaselineMb: hostRss.length ? Math.min(...hostRss) : null, rssMb: Math.round(await rss()), idlePeakRssMb: Math.round(peak), lifetimePeakRssMb: Math.round(await rss("VmHWM")), cpuPct, idleSeconds: IDLE_MS / 1000, stateWrites: writes, stateBytesBefore, stateBytesAfter: statSync(statePath).size };
+    // `paseo daemon run` is a wrapper, so plugin processes are grandchildren: walk the daemon's whole tree.
+    const rows = ps.trim().split("\n").map(l => l.trim().split(/\s+/)).map(f => ({ pid: Number(f[0]), ppid: Number(f[1]), rssMb: Math.round(Number(f[2]) / 1024), args: f.slice(3).join(" ") }));
+    const tree = new Set([daemon.pid]);
+    for (let grew = true; grew;) { grew = false; for (const r of rows) if (!tree.has(r.pid) && tree.has(r.ppid)) { tree.add(r.pid); grew = true; } }
+    const hostRss = rows.filter(r => tree.has(r.pid) && r.pid !== pid && /plugin-process/.test(r.args)).map(r => r.rssMb);
+    worker = { pid, memory: memoryIdle, memoryAfterGc, hostPluginBaselineMb: hostRss.length ? Math.min(...hostRss) : null, rssMb: Math.round(await rss()), idlePeakRssMb: Math.round(peak), lifetimePeakRssMb: Math.round(await rss("VmHWM")), cpuPct, idleSeconds: IDLE_MS / 1000, stateWrites: writes, stateBytesBefore, stateBytesAfter: statSync(statePath).size };
   }
   const receipts = (await readFile(join(home, "fixture-receipts.jsonl"), "utf8").catch(() => "")).trim().split("\n").filter(l => /Follow-through (batch|recovery)/.test(l)).length;
   const state = JSON.parse(await readFile(join(home, "plugin-data/follow-through/state.json"), "utf8"));
