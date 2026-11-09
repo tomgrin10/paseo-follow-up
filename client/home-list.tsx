@@ -31,7 +31,8 @@ type Entry =
   | { type: "more"; key: string; project: string; left: number }
   | { type: "result"; key: string; item: WorkspaceItem; index: number }
   | { type: "ask"; key: string; ask: string; index: number }
-  | { type: "label"; key: string; text: string };
+  | { type: "label"; key: string; text: string }
+  | { type: "empty"; key: string };
 
 export type HomeListProps = {
   model: HomeModel;
@@ -104,15 +105,21 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
         if (f.items.length > shown) out.push({ type: "more", key: `m:${f.project}`, project: f.project, left: f.items.length - shown });
       }
     }
+    // Phones: nothing followed yet says so and what fills the list, instead of a blank screen under the pinned rows.
+    if (touch && !filter && model.groups.every(g => !g.items.length)) out.push({ type: "empty", key: "l:nothing" });
     return out;
     if (filter && !out.length) out.push({ type: "label", key: "l:empty", text: `Nothing in ${GROUP_TITLE[filter as HomeGroupId]} right now.` });
     return out;
-  }, [model, closed, openProjects, pages, briefLine, results, filter, !!overseer]);
+  }, [model, closed, openProjects, pages, briefLine, results, filter, !!overseer, touch]);
 
   const render = useCallback(({ item }: { item: Entry }) => {
     switch (item.type) {
       case "label": return <Text accessibilityRole={item.key === "l:archived" ? "header" : undefined} style={{ color: c.foregroundMuted, fontSize: item.key === "l:archived" ? 11 : 13, fontWeight: item.key === "l:archived" ? "600" : "400",
         letterSpacing: item.key === "l:archived" ? 0.6 : 0, textTransform: item.key === "l:archived" ? "uppercase" : "none", paddingHorizontal: dense ? 8 : 16, paddingTop: 12, paddingBottom: 4 }}>{item.text}</Text>;
+      case "empty": return <View accessibilityRole="summary" style={{ marginHorizontal: 16, marginTop: 20, gap: 6 }}>
+        <Text accessibilityRole="header" style={{ color: c.foreground, fontSize: 17, lineHeight: 23, fontWeight: "600" }}>Nothing followed yet</Text>
+        <Text style={{ color: c.foregroundMuted, fontSize: 14, lineHeight: 20 }}>Follow a workspace from its Follow-up panel, or turn a project on in Settings so its workspaces join on their own. They show up here once their agents work.</Text>
+      </View>;
       case "result": return <ResultRow item={item.item} s={model.byKey.get(item.item.key)} theme={theme} active={item.index === activeResult} dense={dense} touch={touch} onPress={() => onResult?.(item.item)} />;
       case "ask": return <AskRow ask={item.ask} theme={theme} active={item.index === activeResult} dense={dense} touch={touch} sending={!!asking} onPress={() => onResult?.({ provider: "overseer", key: ASK_KEY, ask: item.ask })} />;
       case "brief": return <BriefRow theme={theme} line={briefLine ?? ""} selected={!touch && (selectedKey === null || selectedKey === BRIEF_KEY)} touch={touch} onSelect={onSelect} />;
