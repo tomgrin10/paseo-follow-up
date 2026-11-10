@@ -111,7 +111,7 @@ async function runCase(workspaceId, label, command, maxWait, action) {
   for (const name of ["wait_prepare_job", "wait_for_job", "wait_get_job"]) assert.ok(names.includes(name), `${name} attached natively`);
   const prompt = label === "adoption"
     ? `Run this finite command: ${JSON.stringify(command)}. It takes about 12 seconds. Report WAIT_ADOPTION with its actual exit code once it has finished.`
-    : `Prepare one job with description ${JSON.stringify(label)} and command ${JSON.stringify(command)}. Run its exact bashCommand with native Bash run_in_background=true. Then wait_for_job with max_wait_seconds=${maxWait}. Each still_pending requires wait_get_job and another wait while pending. When finished, reply WAIT_${label.toUpperCase()} and the actual exit code. Do not use timers or plain final replies as a substitute for wait_for_job.`;
+    : `Prepare one job with description ${JSON.stringify(label)} and command ${JSON.stringify(command)}. Run its exact bashCommand with native Bash run_in_background=true. Then wait_for_job with max_wait_seconds=${maxWait}. Each still_pending requires wait_get_job and another wait while pending, again with max_wait_seconds=${maxWait}: every wait_for_job call in this task uses max_wait_seconds=${maxWait}, never more. When finished, reply WAIT_${label.toUpperCase()} and the actual exit code. Do not use timers or plain final replies as a substitute for wait_for_job.`;
   await client.sendMessage(agent.id, prompt);
   const timeline = () => daemon.agentManager.getTimeline(agent.id);
   await until(() => timeline().some(i => i.type === "tool_call" && i.name.endsWith("wait_for_job") && i.status === "running"), `${label} wait starts`);
