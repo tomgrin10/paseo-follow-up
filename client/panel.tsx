@@ -270,7 +270,7 @@ function MainAgentName({ agentId, theme }: { agentId: string; theme: Theme }) {
  * its own Make main agent: that is the undo, and the toast says so instead of a confirmation step.
  */
 function OtherRootAgent({ agentId, mainAgentId, workspace: w, theme, compact, openAgent }: { agentId: string; mainAgentId: string; workspace: Workspace; theme: Theme; compact: boolean; openAgent?: (id: string) => void }) {
-  const c = theme.colors; const t = text(c);
+  const c = theme.colors; const t = text(c, compact);
   const title = useAgentTitle(agentId); const formerTitle = useAgentTitle(mainAgentId);
   const control = useRpc(controlRpc); const cache = useQueryClient(); const toast = useToast();
   const promote = useMutation({
@@ -281,12 +281,13 @@ function OtherRootAgent({ agentId, mainAgentId, workspace: w, theme, compact, op
   const canPromote = w.enable_tracking && !w.archived;
   return <View style={{ gap: 8, marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: c.border }}>
     <View style={{ gap: 2 }}>
-      <Text numberOfLines={1} style={[t.meta, { color: c.foreground }]}>{title}</Text>
+      <Text numberOfLines={1} style={compact ? t.label : [t.meta, { color: c.foreground }]}>{title}</Text>
       <Text style={t.meta}>Can add PRs here. Can't ask you questions or call Done.</Text>
     </View>
-    {(openAgent || canPromote) && <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-      {canPromote && <Button theme={theme} compact={compact} title="Make main agent" accessibilityLabel={`Make ${title} the main agent`} accessibilityHint={`Repairs, questions and Done move from ${formerTitle} to ${title}.`} loading={promote.isPending} disabled={promote.isPending} onPress={() => promote.mutate()} />}
-      {openAgent && <Button theme={theme} compact={compact} kind="ghost" icon="MessageSquare" title="Open" accessibilityLabel={`Open ${title}`} onPress={() => openAgent(agentId)} />}
+    {/* Phones: the two actions split one row (no wrap into a second row). */}
+    {(openAgent || canPromote) && <View style={{ flexDirection: "row", flexWrap: compact ? "nowrap" : "wrap", gap: 8 }}>
+      {canPromote && <Button theme={theme} compact={compact} grow={compact} title="Make main agent" accessibilityLabel={`Make ${title} the main agent`} accessibilityHint={`Repairs, questions and Done move from ${formerTitle} to ${title}.`} loading={promote.isPending} disabled={promote.isPending} onPress={() => promote.mutate()} />}
+      {openAgent && <Button theme={theme} compact={compact} kind={compact ? "secondary" : "ghost"} icon="MessageSquare" title="Open" accessibilityLabel={`Open ${title}`} onPress={() => openAgent(agentId)} />}
     </View>}
   </View>;
 }
