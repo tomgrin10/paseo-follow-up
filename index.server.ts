@@ -648,7 +648,7 @@ export default function contribute(server: PluginServerContext) {
   });
   handle(rpc.controlRpc, async input => {
     await requireReady();
-    return store.mutate(state => controlWorkspace(state, input));
+    return store.mutate(state => controlWorkspace(state, input, Date.now(), clientTimeZone));
   });
   handle(rpc.refreshRpc, async () => { await requireReady(); void engine.tick(); return { ok: true }; });
   handle(rpc.refineTasksRpc, async ({ workspaceId, tasks }) => {
