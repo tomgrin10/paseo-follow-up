@@ -10,11 +10,12 @@ import { meters, meterText, type Meter } from "../shared/usage";
 import { resourceMeter, type Resources } from "../shared/resources";
 import type { HomeSources } from "./home-data";
 import type { Workstream } from "../shared/home";
-import { Age, glyphColor, PrChipView, PrSummaryText } from "./home-list";
+import { Age, glyphColor, PrChipView, PrSummaryText, quickActionsHint } from "./home-list";
 import { useMinute } from "./home-data";
 import { Spinner } from "./motion";
 import { withAlpha, type Colors } from "./theme";
 import type { Theme } from "./kit";
+import { useRowMenuTrigger, type OpenRowMenu } from "./row-menu";
 
 /**
  * Home's chrome above the list (1.3.0-beta.2): the omnibox, the sort menu, the status strip and the provider
@@ -285,8 +286,9 @@ export function GroupChip({ group, c }: { group: HomeGroupId | "archived"; c: Co
   </View>;
 }
 
-export function ResultRow({ item, theme, active, dense, touch, onPress, s: row }: { item: WorkspaceItem; theme: Theme; active: boolean; dense: boolean; touch: boolean; onPress: () => void; s?: Workstream }) {
+export function ResultRow({ item, theme, active, dense, touch, onPress, s: row, onMenu }: { item: WorkspaceItem; theme: Theme; active: boolean; dense: boolean; touch: boolean; onPress: () => void; s?: Workstream; onMenu?: OpenRowMenu }) {
   const c = theme.colors;
+  const trigger = useRowMenuTrigger(row, onMenu, touch);
   const { hit } = item;
   const via = hit.via ? excerpt(hit.via.text, hit.via.ranges, dense ? 56 : 90) : null;
   const archived = hit.group === "archived";
@@ -294,7 +296,7 @@ export function ResultRow({ item, theme, active, dense, touch, onPress, s: row }
   // with the match highlighted. No group pill: the state word already says it.
   if (touch) {
     const tone = row ? glyphColor(row, c, true) : c.foregroundMuted;
-    return <Pressable accessibilityRole="button" accessibilityState={{ selected: active }} accessibilityLabel={`${hit.title}${row?.word ? `. ${row.word}` : ""}${hit.via ? `, ${FIELD_LABEL[hit.via.field]}: ${hit.via.text}` : ""}`} onPress={onPress}
+    return <Pressable ref={trigger.ref} onLongPress={trigger.onLongPress} delayLongPress={450} accessibilityHint={onMenu && row ? quickActionsHint(touch) : undefined} accessibilityRole="button" accessibilityState={{ selected: active }} accessibilityLabel={`${hit.title}${row?.word ? `. ${row.word}` : ""}${hit.via ? `, ${FIELD_LABEL[hit.via.field]}: ${hit.via.text}` : ""}`} onPress={onPress}
       style={state => ({ flexDirection: "row", alignItems: "flex-start", gap: 10, minHeight: 56, paddingLeft: 14, paddingRight: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: withAlpha(c.border, 0.6),
         backgroundColor: active || state.pressed ? c.surface2 : "transparent" })}>
       <View style={{ paddingTop: 2 }}><Icon name={archived ? "Archive" : row?.icon ?? "Circle"} size={17} color={archived ? c.foregroundMuted : tone} /></View>
@@ -312,7 +314,7 @@ export function ResultRow({ item, theme, active, dense, touch, onPress, s: row }
       </View>
     </Pressable>;
   }
-  return <Pressable accessibilityRole="button" accessibilityState={{ selected: active }} accessibilityLabel={`${hit.title}${hit.via ? `, ${FIELD_LABEL[hit.via.field]}: ${hit.via.text}` : ""}`} onPress={onPress}
+  return <Pressable ref={trigger.ref} onLongPress={trigger.onLongPress} delayLongPress={450} accessibilityHint={onMenu && row ? quickActionsHint(touch) : undefined} accessibilityRole="button" accessibilityState={{ selected: active }} accessibilityLabel={`${hit.title}${hit.via ? `, ${FIELD_LABEL[hit.via.field]}: ${hit.via.text}` : ""}`} onPress={onPress}
     style={state => ({ flexDirection: "row", alignItems: "center", gap: 10, minHeight: touch ? 56 : dense ? 40 : 44, paddingHorizontal: dense ? 8 : 16, paddingVertical: 4,
       borderLeftWidth: 2, borderLeftColor: active ? withAlpha(c.foreground, 0.5) : "transparent",
       backgroundColor: active ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
