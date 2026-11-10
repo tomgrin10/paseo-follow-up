@@ -50,7 +50,7 @@ test("CLI retains full replies for existing scripts and offers compact calls plu
   const run=async(args:string[])=>JSON.parse((await exec(process.execPath,[resolve("server/mcp.mjs"),...args],{env:f.env})).stdout);
   assert.equal((await run(["call","workspace_status","{}"])) .obligations.length,2);
   assert.equal((await run(["call","workspace_status","{}","--compact"])).obligations.length,1);
-  assert.equal((await run(["list"])).tools.length,71); // 30 + the Overseer's 5 routing tools + rerank + 34 parity tools (server/agent-parity.ts) + make_main_agent
+  assert.equal((await run(["list"])).tools.length,72); // 30 + the Overseer's 5 routing tools + rerank + 35 parity tools (server/agent-parity.ts, release_notes among them) + make_main_agent
   assert.ok((await exec(process.execPath,[resolve("server/mcp.mjs"),"--help"],{env:f.env})).stdout.includes("--compact"));
 });
 test("native discovery is silent outside tracked scope and recovery never gains main-only tools",async t=>{

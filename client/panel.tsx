@@ -27,6 +27,7 @@ import { ActivityCard, QuestionSheet } from "./questions";
 import { SpecRow, SpecSheet } from "./spec";
 import { mergedColor, tint } from "./theme";
 import { AboutSection } from "./about";
+import { WhatsNewGate } from "./release-notes";
 
 export { overviewKey, workspaceKey };
 
@@ -39,6 +40,10 @@ type PanelProps = PluginWorkspacePanelProps & PanelLinks & { inbox?: InboxStore;
  * tasks, questions, spec, activity and Details. What needs you elsewhere lives on Home.
  */
 export function FollowPanel(props: PanelProps) {
+  return <><PanelBody {...props} /><WhatsNewGate surface="panel" theme={props.theme} compact={props.layout.compact} /></>;
+}
+
+function PanelBody(props: PanelProps) {
   // Paints from the client's live store; one small read of this workspace on open, no poll (1.4.0).
   const query = useWorkspace(props.live, props.workspaceId);
   const c = props.theme.colors;

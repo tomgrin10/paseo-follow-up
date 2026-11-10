@@ -16,6 +16,7 @@ import { QUESTION_MODES, questionSchema } from "./questions";
 import { specSchema } from "./spec";
 import { HOME_GROUPS } from "./home";
 import { prWorkflowViewSchema, setPrWorkflowInputSchema } from "./pr-workflow";
+import { releaseNotesViewSchema } from "./changelog";
 import { actionPlanSchema, actionResultSchema, browserCommandSchema, browserExchangeSchema, browserPrSchema, browserStatusSchema, prActionKind } from "./pr-actions";
 
 const agentCommunicationSchema = z.strictObject({
@@ -179,3 +180,7 @@ export const onboardingChecksRpc = defineRpc({ name: "follow.onboarding-checks",
 export const prWorkflowRpc = defineRpc({ name: "follow.pr-workflow", input: z.object({ refresh: z.boolean().optional() }), output: prWorkflowViewSchema });
 /** `{ repo, setting }` sets one repository (`setting: null` inherits the default); `default` sets the default. */
 export const setPrWorkflowRpc = defineRpc({ name: "follow.set-pr-workflow", input: setPrWorkflowInputSchema, output: prWorkflowViewSchema });
+/** What's new and the release notes: this host's version record and every shipped note. Never polled. */
+export const releaseNotesRpc = defineRpc({ name: "follow.release-notes", input: z.object({}), output: releaseNotesViewSchema });
+/** What's new was closed for `version`: the host-wide record, for apps without local storage. Only moves forward. */
+export const whatsNewSeenRpc = defineRpc({ name: "follow.whats-new-seen", input: z.strictObject({ version: z.string().max(64) }), output: releaseNotesViewSchema });
