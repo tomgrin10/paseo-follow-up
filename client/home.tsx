@@ -26,6 +26,7 @@ import { Spinner } from "./motion";
 import { Setup, SetupOffer, useOnboarding } from "./onboarding";
 import type { OnboardingView } from "../shared/onboarding";
 import { withAlpha, isLight, mergedColor, type Colors } from "./theme";
+import { ReleaseNotesSheet, VersionLine, WhatsNewGate } from "./release-notes";
 
 export const HOME_SCREEN = "follow-through";
 
@@ -118,6 +119,13 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
     setSelected(next?.key ?? null);
   }, [inbox, model]);
 
+  // null: closed; false: What's new since the previous version; true: every version.
+  const [notesOpen, setNotesOpen] = useState<boolean | null>(null);
+  const versionLine = <VersionLine theme={theme} compact={compact} onOpen={setNotesOpen} />;
+  const updateSheets = <>
+    <WhatsNewGate surface="home" theme={theme} compact={compact} />
+    {notesOpen != null && <ReleaseNotesSheet theme={theme} compact={compact} all={notesOpen} onClose={() => setNotesOpen(null)} />}
+  </>;
   if (params.view === "log") return <LogView theme={theme} compact={compact} sources={deps.sources} onHome={deps.openHome} onOpen={key => { setSelected(key); deps.openHome(); }} />;
 
   const detail = selected === OVERSEER_KEY && overseer
@@ -131,7 +139,9 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
     results={omnibox.results} activeResult={omnibox.active} onResult={item => void pick(item)} filter={filter} overseer={overseer} asking={asking}
     // Phones: the host header already says Follow-up, so no "Home" title row; search, sort and settings share one row and
     // the meters move to the end of the list.
-    footer={compact ? <View style={{ paddingTop: 16, paddingBottom: 96 }}>{!omnibox.results && !nothing && <UsageMeters theme={theme} sources={deps.sources} dense />}</View> : undefined}
+    footer={omnibox.results ? undefined : compact
+      ? <View style={{ paddingTop: 16, paddingBottom: 96, gap: 12 }}>{!nothing && <UsageMeters theme={theme} sources={deps.sources} dense />}{versionLine}</View>
+      : versionLine}
     // Phones: the setup offer goes after the Needs-you group when there is one, so the first ask stays high.
     afterNeeds={compact && model.needs > 0 ? <SetupOffer theme={theme} compact view={props.onboarding} /> : undefined}
     emptyAction={compact ? <Button theme={theme} compact kind="secondary" icon="Settings" title="Project settings" onPress={deps.openSettings} /> : undefined}
@@ -156,11 +166,13 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
 
   if (compact) return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
     {current || selected === OVERSEER_KEY && overseer || selected === BRIEF_KEY ? detail : list}
+    {updateSheets}
     <View style={{ position: "absolute", left: 12, right: 12, bottom: bottomGap(true) + (current || selected === OVERSEER_KEY ? 132 : 0) }}><UndoBar store={inbox} theme={theme} touch /></View>
   </View>;
   return <View style={{ flex: 1, flexDirection: "row", backgroundColor: c.surface0 }}>
     <View style={{ flex: 1, minWidth: 0, borderRightWidth: 1, borderRightColor: c.border }}>
       {list}
+      {updateSheets}
       <View style={{ position: "absolute", left: 12, right: 12, bottom: 12 }}><UndoBar store={inbox} theme={theme} touch={false} /></View>
     </View>
     <View style={{ width: "42%", minWidth: 380, maxWidth: 680 }}>{detail}</View>

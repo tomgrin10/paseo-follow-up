@@ -4,7 +4,7 @@ import { askQuestion, recordAnswer, syncTaskQuestions, withdrawQuestion } from "
 import { agentSetSpec, developerSetSpec } from "./server/spec";
 import type { PluginServerContext, PluginHandlerContext } from "@getpaseo/plugin/server";
 import { mkdir, writeFile } from "node:fs/promises";
-import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import * as rpc from "./shared/contracts";
@@ -64,6 +64,8 @@ import { labelsFor, providerName, resolveRole, roleSummary, type AgentSettingsVi
 import type { LoadSignals } from "./shared/agent-load";
 import { OnboardingStore, ReadinessChecks, nativeAgentCount } from "./server/onboarding";
 import { execFile } from "node:child_process";
+import { VersionsStore, demoOverride, describeSelf, readPackage, type SelfInstall } from "./server/release-notes";
+import { releaseNotesViewSchema, type ReleaseNote, type ReleaseNotesView } from "./shared/changelog";
 import { BRIEF_KIND, BRIEF_VERSION, prState, validateNeedsYou, type Brief, type NeedsYouRecord } from "./shared/brief";
 
 /** Agent calls that only the main agent makes: one of these from a successor means the handover is in use. */
@@ -686,6 +688,26 @@ export default function contribute(server: PluginServerContext) {
     const cat = catalog ? await providerCatalog.read(fresh) : null;
     return { roles: Object.values(roles).map(r => ({ ...r, summary: roleSummary(r, labelsFor(r, cat)) })), invalid, catalog: cat };
   };
+  // What's new. Follow-up's own install comes from Paseo's plugin list, read once per worker.
+  const versions = new VersionsStore(directory);
+  let self: Promise<SelfInstall & { notes: ReleaseNote[] }> | null = null;
+  const selfInstall = () => self ??= withDaemon(async c => describeSelf(await c.listPlugins?.() ?? [])).then(async row => {
+    const pkg = row.path ? await readPackage(row.path) : { version: null, notes: [] };
+    const version = pkg.version ?? row.version;
+    if (!version) throw new Error("Paseo's plugin list doesn't show Follow-up's version yet.");
+    // Fresh or existing comes from setup's own record, decided once before anything else wrote state.
+    const existing = await onboarding.init().then(f => f.install === "existing", () => true);
+    await versions.started(version, existing).catch(() => undefined);
+    return { ...row, version, notes: pkg.notes };
+  }).catch(error => { self = null; throw error; });
+  // Record the version at start (in the background), so "Updated to X 2h ago" counts from the reload, not first view.
+  void ready.then(() => selfInstall()).catch(() => undefined);
+  const releaseNotesView = async (): Promise<ReleaseNotesView> => {
+    const me = await selfInstall(); const file = await versions.read();
+    return demoOverride(directory, "release-notes", releaseNotesViewSchema, { version: me.version, installKind: me.installKind, previous: file.previous ?? null, updatedAt: file.startedAt ?? null, hostSeen: file.hostSeen ?? null, notes: me.notes });
+  };
+  handle(rpc.releaseNotesRpc, async () => releaseNotesView());
+  handle(rpc.whatsNewSeenRpc, async ({ version }) => { await versions.seen(version); return releaseNotesView(); });
   handle(rpc.agentSettingsRpc, async ({ catalog, fresh }, { paseo }) => { await requireReady(); seen(paseo); return agentSettingsView(!!catalog, !!fresh); });
   handle(rpc.setAgentSettingRpc, async ({ role, entry }, { paseo }) => { await requireReady(); seen(paseo); await agentSettings.save(role, entry); return agentSettingsView(true); });
   handle(rpc.overseerActRpc, async ({ agentId, tool, args }, { paseo }) => {
