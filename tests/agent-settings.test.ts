@@ -169,7 +169,7 @@ test("Overseer: created with the configured model; a change offers a restart tha
   await h.overseer.restart(h.paseo);
   const second = h.created[1] as { config: Record<string, unknown>; prompt: string };
   assert.deepEqual([second.config.provider, second.config.modeId, second.config.thinkingOptionId], ["codex/gpt-6-luna", "full-access", "low"]);
-  assert.match(second.prompt, /Handoff from the previous Overseer, which Tom replaced to run on GPT-6-Luna/);
+  assert.match(second.prompt, /Handoff from the previous Overseer, which the developer replaced to run on GPT-6-Luna/);
   assert.deepEqual(h.timelineReads, [], "the unloaded old Overseer's timeline is never read");
   assert.equal((await h.overseer.agentInfo()).restart, false);
   assert.equal((await h.overseer.state()).generation, 2);

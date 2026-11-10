@@ -16,7 +16,7 @@ Paseo's plugin listing. [PRODUCT.md](PRODUCT.md) and [DESIGN.md](DESIGN.md) cove
 - The public name is Follow-up and the npm package is `paseo-follow-up`. Keep the installation id `follow-through`,
   the `follow.*` RPC names and `plugin-data/follow-through` so existing installs keep working. Never reset tracked
   work or settings during an upgrade.
-- Never commit credentials, daemon state, transcripts or local machine paths.
+- Never commit credentials, daemon state, transcripts or local machine paths. Follow-up is public: prompts, prefixes, tool text and UI copy say "the developer" (they/their), never a person's name (tests/no-personal-names.test.ts). Where old text is matched, such as the Overseer's forward prefix, keep recognising the legacy spelling.
 - Boolean settings use positive `enable_` names.
 - Subprocesses take argument arrays, never a shell.
 - Minimum Paseo is 0.14.0. Native agent tools need 0.15+, and the stdio bridge covers 0.14.
