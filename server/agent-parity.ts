@@ -51,6 +51,8 @@ export const RPC_TOOLS: readonly RpcTool[] = [
   // Settings → Agents
   { name: "set_agent_setting", rpc: "follow.set-agent-setting", kind: "planned", before: { rpc: "follow.agent-settings", input: () => ({}) },
     input: z.strictObject({ role: z.enum(AGENT_ROLES).optional(), entry: savedRoleSchema.nullable().optional(), ...confirm }) },
+  { name: "set_wait_for_jobs", rpc: "follow.set-wait", kind: "planned", before: { rpc: "follow.agent-settings", input: () => ({}) },
+    input: z.strictObject({ enable_wait: z.boolean().optional(), ...confirm }) },
   // Onboarding
   { name: "onboarding_status", rpc: "follow.onboarding", kind: "read", input: none },
   { name: "onboarding_checks", rpc: "follow.onboarding-checks", kind: "read", input: z.strictObject({ fresh: z.boolean().optional() }) },
@@ -126,6 +128,7 @@ export const PARITY: Record<string, { tools: readonly string[]; note?: string } 
   "follow.save-reviewers": { tools: ["save_reviewers"] },
   "follow.agent-settings": { tools: ["agent_settings"] },
   "follow.set-agent-setting": { tools: ["set_agent_setting"] },
+  "follow.set-wait": { tools: ["set_wait_for_jobs"] },
   "follow.onboarding": { tools: ["onboarding_status"] },
   "follow.onboarding-checks": { tools: ["onboarding_checks"] },
   "follow.set-onboarding": { tools: ["set_onboarding"] },

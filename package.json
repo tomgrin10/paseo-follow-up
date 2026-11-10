@@ -28,13 +28,14 @@
     "verify": "npm run typecheck && npm run check:notes && npm test && node --test button-visibility.test.mjs && npm run test:scale && npm run test:native && npm run test:trust",
     "test:trust": "node scripts/check-trust-bypass.mjs",
     "preview": "node scripts/check-install.mjs --keep",
-    "test:install": "node scripts/check-install.mjs",
+    "test:install": "node scripts/check-install.mjs && node scripts/check-wait.mjs",
     "test:github-mode": "node scripts/check-github-mode.mjs",
     "test:native": "node scripts/check-native-tools.mjs --agents 10",
     "prepare": "node scripts/build.mjs",
     "test:scale": "node scripts/scale-check.mjs --workspaces 120 --awake 5 --churn 35 --idle 60 --rss-budget 240 --cpu-budget 3 --request-budget 2",
     "check:notes": "node scripts/release-notes.mjs --check",
-    "release:notes": "node scripts/release-notes.mjs"
+    "release:notes": "node scripts/release-notes.mjs",
+    "test:wait": "node scripts/check-wait.mjs"
   },
   "devDependencies": {
     "@getpaseo/client": "0.14.0",
