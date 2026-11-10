@@ -913,6 +913,8 @@ export default function contribute(server: PluginServerContext) {
     },
     quietMs: fastUpdates ? 90_000 : undefined,
   });
+  // A worker that couldn't start never moves: under probation it is rolled back, and a later good start moves.
+  const evaluateMove = () => stopped || loadError ? Promise.resolve() : pluginMove.evaluate().catch(() => undefined);
   const updatesView = async (): Promise<UpdatesView> => demoOverride(directory, "updates", updatesViewSchema, { ...await updater.view(), move: await pluginMove.view().catch(() => null) });
   // The new worker reports in for the installer's probation once it is ready, with the reason if it couldn't start.
   void ready.then(async () => {
@@ -922,7 +924,7 @@ export default function contribute(server: PluginServerContext) {
     // A 1.x installer on probation reads the old directory's heartbeat; can go in the release after 2.0.0.
     try { writeLegacyHeartbeat(paseoHome, beat); } catch { /* no 1.x directory, or not writable: nothing watches it */ }
     if (!stopped) await updater.start();
-    if (!stopped) await pluginMove.evaluate().catch(() => undefined);
+    await evaluateMove();
   }).catch(() => undefined);
   handle(rpc.updatesRpc, async ({ check }) => {
     if (check) await updater.check(check).catch(() => undefined);
@@ -1203,7 +1205,7 @@ export default function contribute(server: PluginServerContext) {
     server.on("workspace.created", async event => gateway.directory.workspaceCreated(event.workspace)),
     server.on("workspace.archived", async event => gateway.directory.workspaceArchived(event.workspace.id)),
     server.on("agent.turn_started", async () => updater.activity()),
-    server.on("agent.turn_ended", async () => { updater.activity(); void pluginMove.evaluate().catch(() => undefined); }),
+    server.on("agent.turn_ended", async () => { updater.activity(); void evaluateMove(); }),
     server.on("agent.turn_started", async (event, { paseo }) => { seen(paseo); inboxHook(() => inbox.turnStarted(event.agent, event.turnId)); }),
     // A newer main-agent turn supersedes the failed turn's automatic hold (shared/status.ts holdSuperseded).
     server.on("agent.turn_started", async event => {
