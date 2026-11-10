@@ -73,7 +73,7 @@ Nothing polls while the app is hidden.
 | `client/shipping.tsx` | Settings → Following → Shipping PRs. |
 | `client/onboarding.tsx` | Getting started. |
 | `client/updates.tsx` | Settings → General's Updates sections, Home's update notice, setup's Updates step ([updates.md](updates.md)). |
-| `client/release-notes.tsx` | What's new, the notes list, Home's version line. |
+| `client/release-notes.tsx` | What's new and the notes list. Home's version marker is `VersionMark` in `client/updates.tsx`. |
 | `client/kit.tsx`, `client/motion.tsx`, `client/theme.ts`, `client/keys.ts` | The type scale, motion, theme helpers and query keys. |
 | `client/rich-text.tsx`, `shared/links.ts` | The one renderer for agent-written text, and the linkifier behind it. |
 

@@ -165,3 +165,15 @@ export const needsLook = (view: Pick<UpdatesView, "installKind" | "mode" | "phas
 
 export const copyCommand = (version: string) => `paseo plugin update follow-through --version ${version}`;
 export type { ReleaseNote } from "./changelog";
+
+/**
+ * Home's version marker ("v1.4.0-beta.34"): the version the update check runs as (UpdatesView.version, from the
+ * running plugin's own install), then a quiet word for the update state. The dot is the tab dot (needsLook): only
+ * when something needs the developer, never for an update that's already on its way. Never a popup.
+ */
+export function versionMark(view: Pick<UpdatesView, "version" | "installKind" | "mode" | "phase">): { version: string; suffix: string | null; dot: boolean; label: string } {
+  const k = view.phase.kind;
+  const suffix = k === "available" ? "update" : k === "waiting" || k === "installing" ? "updating" : k === "install-failed" || k === "rolled-back" || k === "untrusted" ? "check" : null;
+  const said = { update: "update available", updating: "update on its way", check: "the last update needs a look" } as const;
+  return { version: `v${view.version}`, suffix, dot: needsLook(view), label: `Follow-up version ${view.version}${suffix ? `, ${said[suffix as keyof typeof said]}` : ""}` };
+}
