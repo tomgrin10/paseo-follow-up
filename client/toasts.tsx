@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { Platform, Pressable, Text, View } from "react-native";
+import { AppRegistry, Platform, Pressable, Text, View } from "react-native";
+import { Component, type ReactNode } from "react";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import type { Theme } from "./kit";
 
@@ -38,17 +39,65 @@ function hostToastBottom(): number {
 export function ToastHost({ theme, compact }: { theme: Theme; compact: boolean }) {
   const [hostId] = useState(() => nextHost++);
   useEffect(() => { hosts.push(hostId); emit(); return () => { hosts.splice(hosts.indexOf(hostId), 1); emit(); }; }, [hostId]);
-  const list = useSyncExternalStore(subscribe, toastsNow, toastsNow);
   const leader = useSyncExternalStore(subscribe, () => hosts[0] === hostId, () => false);
+  // Web: every Follow-up root sits inside a clipped container (sidebar row, panel, Home), where position: fixed is
+  // trapped and the toast never shows. The leader hands its theme to a layer of its own on document.body.
+  const layered = Platform.OS === "web" && webLayer();
+  useEffect(() => { if (layered && leader) setLayerProps({ theme, compact }); }, [layered, leader, theme, compact]);
+  if (layered) return null;
+  return leader ? <ToastStack theme={theme} compact={compact} /> : null;
+}
+
+// ---------- web: a top-level layer outside every Follow-up container ----------
+
+let layerProps: { theme: Theme; compact: boolean } | null = null;
+const layerListeners = new Set<() => void>();
+function setLayerProps(next: { theme: Theme; compact: boolean }) { layerProps = next; for (const l of layerListeners) l(); }
+const LAYER_KEY = "follow-up-toasts";
+let layerMounted: boolean | null = null;
+
+/** Mounts the toast layer once: a pointer-transparent div on document.body with its own react-native-web root. */
+function webLayer(): boolean {
+  if (layerMounted !== null) return layerMounted;
+  try {
+    type El = { id: string; setAttribute(k: string, v: string): void; appendChild(c: El): void };
+    const doc = (globalThis as { document?: { body?: El; createElement(tag: string): El } }).document;
+    if (!doc?.body || typeof AppRegistry?.runApplication !== "function") return (layerMounted = false);
+    const root = doc.createElement("div");
+    root.id = LAYER_KEY;
+    root.setAttribute("style", "position:fixed;inset:0 0 auto 0;height:0;overflow:visible;z-index:2147483000;pointer-events:none;");
+    doc.body.appendChild(root);
+    AppRegistry.registerComponent(LAYER_KEY, () => ToastLayer);
+    AppRegistry.runApplication(LAYER_KEY, { rootTag: root, initialProps: {} });
+    return (layerMounted = true);
+  } catch { return (layerMounted = false); }
+}
+
+function ToastLayer() {
+  const props = useSyncExternalStore(l => { layerListeners.add(l); return () => { layerListeners.delete(l); }; }, () => layerProps, () => layerProps);
+  const hosted = useSyncExternalStore(subscribe, () => hosts.length > 0, () => false);
+  if (!props || !hosted) return null;
+  return <IconSafe><ToastStack theme={props.theme} compact={props.compact} /></IconSafe>;
+}
+
+/** The layer is a separate root; if a host component it uses ever needs Paseo's context there, fail to no toast, never a crash. */
+class IconSafe extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() { return this.state.failed ? null : this.props.children; }
+}
+
+function ToastStack({ theme, compact }: { theme: Theme; compact: boolean }) {
+  const list = useSyncExternalStore(subscribe, toastsNow, toastsNow);
   const [hostBottom, setHostBottom] = useState(0);
   // Only while Follow-up shows a toast: watch for Paseo's own above it (one cheap DOM read a quarter second).
   useEffect(() => {
-    if (!leader || !list.length || Platform.OS !== "web") { setHostBottom(0); return; }
+    if (!list.length || Platform.OS !== "web") { setHostBottom(0); return; }
     const tick = () => setHostBottom(b => { const next = hostToastBottom(); return next === b ? b : next; });
     tick(); const timer = setInterval(tick, 250);
     return () => clearInterval(timer);
-  }, [leader, list.length]);
-  if (!leader || !list.length) return null;
+  }, [list.length]);
+  if (!list.length) return null;
   const top = hostBottom ? hostBottom + GAP : TOP;
   const position = Platform.OS === "web"
     ? { position: "fixed", top: `max(${top}px, calc(env(safe-area-inset-top) + ${top}px))` } as unknown as object
