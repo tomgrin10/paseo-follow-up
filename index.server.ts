@@ -788,7 +788,7 @@ export default function contribute(server: PluginServerContext) {
       return true;
     },
     log: message => console.warn(message),
-    timing: fastUpdates ? { quietMs: 20_000, probationMs: 60_000 } : undefined,
+    timing: fastUpdates ? { quietMs: 90_000, probationMs: 60_000 } : undefined,
   });
   const updatesView = async (): Promise<UpdatesView> => demoOverride(directory, "updates", updatesViewSchema, await updater.view());
   // The new worker reports in for the installer's probation once it is ready, with the reason if it couldn't start.
