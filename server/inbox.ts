@@ -619,6 +619,7 @@ export class Inbox {
         }
         case "undo": each(() => ({ type: "undo" })); break;
         case "snooze": each(() => ({ type: "snooze", until: input.until ?? "next-event" })); break;
+        case "unsnooze": each(() => ({ type: "unsnooze" })); break;
         case "mute_turn": each(id => ({ type: "sign_off", ...(input.seqs?.[id] !== undefined ? { seq: input.seqs[id] } : {}), muteTurn: true })); cleared.push(...results.filter(r => r.ok).map(r => r.agentId)); break;
         case "set_finish_flags": each(() => ({ type: "set_finish_flags", value: input.value ?? true })); break;
         case "unsorted_flag": {
@@ -755,7 +756,7 @@ export function briefShare(state: Pick<InboxState, "briefOrigins">, now: number,
 }
 
 export type InboxAction = {
-  action: "sign_off" | "undo" | "snooze" | "mute_turn" | "set_finish_flags" | "unsorted_flag" | "unsorted_sign_off" | "batch_undo";
+  action: "sign_off" | "undo" | "snooze" | "unsnooze" | "mute_turn" | "set_finish_flags" | "unsorted_flag" | "unsorted_sign_off" | "batch_undo";
   agentIds?: string[]; seqs?: Record<string, number>; until?: string; value?: boolean; muteTurn?: boolean;
 };
 

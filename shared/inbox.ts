@@ -96,6 +96,8 @@ export type InboxEvent =
   | { type: "sign_off"; seq?: number; muteTurn?: boolean }
   | { type: "undo" }
   | { type: "snooze"; until: string }
+  /** Bring back now: ends a Later early. */
+  | { type: "unsnooze" }
   | { type: "tick" }
   | { type: "open" }
   | { type: "archive" }
@@ -240,6 +242,7 @@ export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
         e.snooze = set;
       }
       break;
+    case "unsnooze": if (e.snooze && e.needs) e.snooze = null; break; // #15c
     case "tick": // #16, plus housekeeping.
       if (e.snooze && /^\d{4}-/.test(e.snooze.until) && Date.parse(e.snooze.until) <= Date.parse(now)) e.snooze = null;
       if (e.undo && Date.parse(e.undo.expires) < Date.parse(now)) e.undo = null;

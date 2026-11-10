@@ -50,6 +50,7 @@ export function useRowMenu(host: RowMenuHost) {
       switch (item.action) {
         // Later and Sign off: the Undo bar already says it and offers Undo; no toast on top.
         case "later": return runAction({ label: "Later", run: () => inbox.snooze([s.agentId!], snoozeUntil(arg as LaterChoice, new Date())), success: null }, `later:${s.key}`);
+        case "bring_back": return runAction({ label: "Bring back now", run: () => inbox.unsnooze([s.agentId!]), success: "Back in Needs you" }, `bring_back:${s.key}`);
         case "sign_off": return runAction({ label: "Sign off", run: () => inbox.signOff([s.agentId!]), success: null }, `sign_off:${s.key}`);
         case "answer": return runAction({ label: "Answer", run: async () => openQuestion(s, arg), success: null });
         case "send_repairs": return runAction({ label: "Send repairs", run: async () => { const r = await send({ workspaceId, batchId: arg }); after(); return r; },

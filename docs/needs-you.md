@@ -45,7 +45,7 @@
 | `sign_off` | `{ agentIds }` |
 | `snooze` | `{ agentIds, until }`: `next-event`, `1h`, `tomorrow` or an ISO time |
 | `set_finish_flags` | `{ agentIds, value }`: whether finished turns flag them |
-| `inbox_act` | `{ action, agentIds, muteTurn? }`, where `action` is `undo` (the last sign-off or Later), `mute_turn`, `unsorted_flag`, `unsorted_sign_off` or `batch_undo` |
+| `inbox_act` | `{ action, agentIds, muteTurn? }`, where `action` is `undo` (the last sign-off or Later), `unsnooze` (Bring back now: ends a Later early), `mute_turn`, `unsorted_flag`, `unsorted_sign_off` or `batch_undo` |
 
 ## The brief and `needs_you`
 
