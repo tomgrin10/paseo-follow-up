@@ -128,6 +128,31 @@ function seen(e: Entry, key: string): boolean {
 }
 /** Permission, error and paused always break a snooze; a plain finish never does. */
 const BREAKS: Reason[] = ["permission", "error", "paused", "ci", "review", "pr_closed"];
+/**
+ * Reasons that describe the agent's last turn, not an outside fact: a newer turn start from anyone (the developer,
+ * another agent, the host resuming it) supersedes them, and a new failure flags again. Outside facts (permission by
+ * request, ci, review, reviewers, pr_closed) and the agent's own finish with its ask stay until handled.
+ */
+export const RUN_STATE_REASONS: readonly Reason[] = ["error", "paused"];
+/**
+ * What a row shows for an agent: a running agent has outlived its last turn's run-state flags and the card that only
+ * reported them (`running-is-not-stale`). A card with open questions stays: only the developer closes it.
+ */
+export function liveFlag<B extends { kind: string; state: string; questionIds?: string[]; at?: string }>(status: string, needs: Needs | null, brief: B | null, turnStartedAt: string | null = null): { needs: Needs | null; brief: B | null } {
+  // Only a flag older than the current turn's start is stale. Paseo can still read "running" for a moment after a
+  // turn fails (server/directory.ts keeps a failed agent busy until its re-read), so status alone isn't enough, and
+  // without a known turn start nothing is dropped here (the reducer and the load repair cover those turns).
+  if (!["running", "initializing"].includes(status) || !turnStartedAt) return { needs, brief };
+  const stale = brief?.state === "open" && (brief.kind === "error" || brief.kind === "paused") && !brief.questionIds?.length && !!brief.at && brief.at < turnStartedAt;
+  return { needs: withoutRunState(needs, turnStartedAt), brief: stale ? null : brief };
+}
+/** Drop the run-state flags a newer turn has outlived (all of them without `before`); null when nothing is left. */
+export function withoutRunState(needs: Needs | null, before?: string): Needs | null {
+  if (!needs) return null;
+  const reasons = needs.reasons.filter(r => !RUN_STATE_REASONS.includes(r.reason) || (before !== undefined && r.at >= before));
+  if (reasons.length === needs.reasons.length) return needs;
+  return reasons.length ? { reasons, since: reasons.map(r => r.at).sort()[0] } : null;
+}
 
 /**
  * Apply one event to one agent's entry (design §2.3). Returns the next entry; the input is not mutated.
@@ -159,8 +184,10 @@ export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
       // #3: the developer's own interrupt, or a Session Guard pause that will resume by itself.
       break;
     case "message":
-      // #11 clears everything; #12 automation changes nothing.
+      // #11 clears everything. #12 automation changes nothing, except that its turn supersedes the last turn's
+      // failure or pause (RUN_STATE_REASONS): the agent is running again.
       if (event.from === "tom") { e.needs = null; e.snooze = null; e.muteTurn = false; e.lastTomMessageAt = now; }
+      else { e.needs = withoutRunState(e.needs); if (!e.needs) e.snooze = null; }
       break;
     case "permission": flag("permission", event.detail, `permission:${event.requestId}`); break; // #4
     case "permission_resolved": // #5, D1: answering is attending.
@@ -298,7 +325,9 @@ export const inboxRowSchema = z.object({
   muteTurn: z.boolean(),
   enable_finish_flags: z.boolean(),
   /** The open or collapsed brief's one-liner, so every surface says the same thing (§4). */
-  brief: z.object({ kind: z.enum(BRIEF_KINDS), source: z.enum(BRIEF_SOURCES), state: z.enum(BRIEF_STATES), ask: z.string(), questionIds: z.array(z.string()).optional() }).nullable().optional(),
+  brief: z.object({ kind: z.enum(BRIEF_KINDS), source: z.enum(BRIEF_SOURCES), state: z.enum(BRIEF_STATES), ask: z.string(), questionIds: z.array(z.string()).optional(), at: z.string().optional() }).nullable().optional(),
+  /** When the agent's current turn started, if the worker saw it start (status invariant running-is-not-stale). */
+  turnStartedAt: z.string().nullable().optional(),
 });
 export type InboxRow = z.infer<typeof inboxRowSchema>;
 

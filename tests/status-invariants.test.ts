@@ -146,3 +146,36 @@ test("regression 2026-11-10 critique: a stuck Done check is never called a repai
   assert.equal(retry?.title, "The Done check didn't go through");
   assert.doesNotMatch(liveLine(w, clock).text, /repairs/);
 });
+
+test("running-is-not-stale: over every agent status, turn history and card, a running agent never headlines Error or Paused", async () => {
+  const { reduce, newEntry, liveFlag } = await import("../shared/inbox");
+  const { rowViolations } = await import("../shared/status-invariants");
+  const iso = (m: number) => new Date(clock + m * 60_000).toISOString();
+  const histories: Record<string, import("../shared/inbox").InboxEvent[]> = {
+    failed: [{ type: "turn_end", outcome: "failed", detail: "The turn failed: Subagent closed during a turn" }],
+    "failed-then-auto-turn": [{ type: "turn_end", outcome: "failed", detail: "x" }, { type: "message", from: "automation" }],
+    paused: [{ type: "turn_end", outcome: "canceled", guard: "attention", detail: "Paused" }],
+    crash: [{ type: "crash", detail: "Errored" }],
+    "failed-and-ci": [{ type: "turn_end", outcome: "failed", detail: "x" }, { type: "ci", dedupeKey: "ci:1", detail: "Checks failing" }],
+    "finished-then-failed": [{ type: "turn_end", outcome: "completed", detail: "Done" }, { type: "turn_end", outcome: "failed", detail: "x" }],
+  };
+  const failures: string[] = [];
+  // Turn start unknown, before the flags (Paseo still reads "running" after the failed turn), or after them (a newer turn).
+  for (const status of ["running", "initializing", "idle", "error"]) for (const [name, events] of Object.entries(histories)) for (const kind of [null, "error", "paused", "decision"] as const) for (const start of [null, iso(-1), iso(10)]) {
+    const e = events.reduce((acc, ev, i) => reduce(acc, ev, iso(i)), newEntry("a1"));
+    const card = kind ? { kind, source: "agent" as const, state: "open" as const, ask: "x", questionIds: [] as string[], at: iso(0) } : null;
+    const turnStartedAt = ["running", "initializing"].includes(status) ? start : null;
+    const row = { agentId: "a1", status, snooze: e.snooze, turnStartedAt, ...liveFlag(status, e.needs, card, turnStartedAt) };
+    for (const v of rowViolations(row, clock + 3_600_000)) failures.push(`${status} · ${name} · card=${kind} · start=${start} · ${v.detail}`);
+  }
+  assert.deepEqual(failures, []);
+  // The turn that just failed is news even while Paseo still reads "running" (found by the Home render): no newer
+  // turn start, so the Error stays.
+  const failed = reduce(newEntry("a1"), histories.failed[0], iso(0));
+  for (const start of [null, iso(-1)]) assert.equal(liveFlag("running", failed.needs, null, start).needs?.reasons[0]?.reason, "error", `start=${start}`);
+  assert.equal(liveFlag("running", failed.needs, null, iso(10)).needs, null);
+  // Fixture (2026-11-10, orchestrator 37bc4ab1): the raw entry, unfiltered, is exactly what Home showed.
+  const stale = reduce(newEntry("37bc4ab1"), histories.failed[0], iso(0));
+  assert.equal(rowViolations({ agentId: "37bc4ab1", status: "running", needs: stale.needs, snooze: null, brief: null, turnStartedAt: iso(15) }, clock)[0]?.id, "running-is-not-stale");
+  assert.deepEqual(rowViolations({ agentId: "37bc4ab1", status: "running", needs: stale.needs, snooze: null, brief: null, turnStartedAt: iso(-1) }, clock), []);
+});

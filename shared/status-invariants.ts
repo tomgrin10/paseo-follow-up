@@ -1,6 +1,8 @@
 import type { Workspace } from "./model";
 import { duplicateOpenQuestions } from "./questions";
 import { shouldReopen, type Brief } from "./brief";
+import { flagHeadline } from "./headline";
+import type { InboxRow } from "./inbox";
 import { completionCheck, summary } from "./model";
 import { liveLine, needsYou } from "./attention";
 import { trackedGroup, type HomeModel } from "./home";
@@ -102,6 +104,20 @@ export function violations(w: Workspace, now: number): { id: string; detail: str
  */
 export function briefViolations(current: Pick<Brief, "id" | "state" | "outcome" | "questionIds">, openQuestionIds: ReadonlySet<string>): { id: string; detail: string }[] {
   return shouldReopen(current, openQuestionIds) ? [{ id: "brief-follows-questions", detail: `${current.id} is ${current.state} while ${current.questionIds.filter(id => openQuestionIds.has(id)).join(", ")} ${current.questionIds.filter(id => openQuestionIds.has(id)).length === 1 ? "is" : "are"} open` }] : [];
+}
+
+/**
+ * Inbox rows (agents, not workspaces): a running agent never headlines a failure or pause from before its current
+ * turn started, since a newer turn supersedes them (RUN_STATE_REASONS in shared/inbox.ts). A flag from the turn that
+ * just failed is real news even while Paseo still reads "running". `running-is-not-stale`, 2026-11-10: Home said
+ * "Error · The turn failed" on an agent that had been running for 15 minutes.
+ */
+export function rowViolations(row: Pick<InboxRow, "agentId" | "status" | "needs" | "snooze" | "brief" | "turnStartedAt">, now: number): { id: string; detail: string }[] {
+  if (!["running", "initializing"].includes(row.status) || !row.turnStartedAt) return [];
+  const h = flagHeadline(row, now);
+  if (!h || (h.key !== "error" && h.key !== "paused")) return [];
+  const flaggedAt = [...(row.needs?.reasons.filter(r => r.reason === h.key).map(r => r.at) ?? []), ...(row.brief?.kind === h.key && row.brief.at ? [row.brief.at] : [])].sort().at(-1);
+  return !flaggedAt || flaggedAt < row.turnStartedAt ? [{ id: "running-is-not-stale", detail: `${row.agentId} is ${row.status} since ${row.turnStartedAt} but headlines ${h.label} from ${flaggedAt ?? "an older card"}` }] : [];
 }
 
 /**

@@ -48,7 +48,9 @@ export function browserWorkspaceState(w: Workspace, agent: BrowserAgent, now = D
   const group = row?.group ?? "quiet";
   if (group === "needs") return { group, state: `${GROUP_TITLE.needs} · ${row!.badges[0]?.text ?? row!.word ?? "Action"}` };
   if (agent.pendingPermissions?.length || agent.attentionReason === "permission") return { group: "needs", state: `${GROUP_TITLE.needs} · Permission` };
-  if (agent.status === "error" || agent.attentionReason === "error") return { group: "needs", state: `${GROUP_TITLE.needs} · Error` };
+  // Paseo's attention reason outlives the turn it describes: a running agent's "error" is the last turn's, not now's.
+  const running = ["running", "initializing"].includes(agent.status);
+  if (agent.status === "error" || agent.attentionReason === "error" && !running) return { group: "needs", state: `${GROUP_TITLE.needs} · Error` };
   if (group === "fixing") return { group, state: `${GROUP_TITLE.fixing} · ${fixDetail(w, row!.line)}` };
   if (group === "running" || ["running", "initializing"].includes(agent.status)) return { group: "running", state: GROUP_TITLE.running };
   if (agent.requiresAttention) return { group: "needs", state: `${GROUP_TITLE.needs} · Finished` };
