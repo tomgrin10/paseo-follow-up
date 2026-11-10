@@ -169,7 +169,13 @@ function Progress({ theme, index, onPick }: { theme: Theme; index: number; onPic
 function StepFade({ children, style }: { children: ReactNode; style: ViewStyle | ViewStyle[] }) {
   const reduced = useReducedMotion();
   const v = useRef(new Animated.Value(reduced ? 1 : 0)).current;
-  useEffect(() => { if (!reduced) Animated.timing(v, { toValue: 1, duration: 180, easing: Easing.out(Easing.cubic), useNativeDriver: Platform.OS !== "web" }).start(); }, []);
+  // Follows `reduced`: if the setting arrives (or changes) mid-fade, the content snaps into place.
+  useEffect(() => {
+    if (reduced) { v.setValue(1); return; }
+    const animation = Animated.timing(v, { toValue: 1, duration: 180, easing: Easing.out(Easing.cubic), useNativeDriver: Platform.OS !== "web" });
+    animation.start();
+    return () => animation.stop();
+  }, [reduced]);
   return <Animated.View style={[style as ViewStyle, { opacity: v, transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }) }] }]}>{children}</Animated.View>;
 }
 
@@ -196,8 +202,10 @@ const EXAMPLE = [
 function IntroStep({ theme, compact, follow }: { theme: Theme; compact: boolean; follow: { workspaces: { enable_tracking: boolean; optedOut: boolean }[] } | null }) {
   const c = theme.colors; const t = text(c);
   const reduced = useReducedMotion();
-  const [phase, setPhase] = useState(reduced ? 2 : 0);
-  useEffect(() => { if (reduced || phase >= 2) return; const id = setTimeout(() => setPhase(p => p + 1), 1600); return () => clearTimeout(id); }, [phase, reduced]);
+  // Reduced motion shows the last frame, derived in render so it holds even if the setting arrives after mount.
+  const [step, setStep] = useState(0);
+  useEffect(() => { if (reduced || step >= 2) return; const id = setTimeout(() => setStep(p => p + 1), 1600); return () => clearTimeout(id); }, [step, reduced]);
+  const phase = reduced ? 2 : step;
   const n = follow?.workspaces.filter(w => w.enable_tracking && !w.optedOut).length ?? null;
   const tone = (k: string) => k === "danger" ? c.statusDanger : k === "success" ? c.statusSuccess : runningColor(c);
   const e = EXAMPLE[phase];

@@ -1,16 +1,19 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { initialReducedMotion, rememberReducedMotion } from "../shared/motion";
 import { AccessibilityInfo, ActivityIndicator, Animated, Easing, Platform, Pressable, View, type PressableProps, type StyleProp, type ViewStyle } from "react-native";
 
 // The native driver is unavailable on web, where react-native-web animates in JS.
 const native = () => Platform.OS !== "web";
 const out = Easing.bezier(0.16, 1, 0.3, 1);
 
+/** The system's reduced-motion setting, right from the first render (`initialReducedMotion`), and kept current. */
 export function useReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(false);
+  const [reduced, setReduced] = useState(() => initialReducedMotion());
   useEffect(() => {
     let live = true;
-    void AccessibilityInfo.isReduceMotionEnabled().then(value => { if (live) setReduced(value); }).catch(() => undefined);
-    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduced);
+    const answer = (value: boolean) => { rememberReducedMotion(value); if (live) setReduced(value); };
+    void AccessibilityInfo.isReduceMotionEnabled().then(answer).catch(() => undefined);
+    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", answer);
     return () => { live = false; subscription.remove(); };
   }, []);
   return reduced;
