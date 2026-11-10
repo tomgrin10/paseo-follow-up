@@ -28,10 +28,24 @@ cd "$working_directory" || exit 126
 # A time limit (seconds) written at prepare: the command is stopped after it (TERM, then KILL 30 s later), so a
 # job that never finishes (an unbounded poll loop) can't keep the machine busy forever. Exit 124 means it hit the
 # limit; the receipt records that. Without timeout(1) (macOS) the command runs unbounded, as before.
+#
+# GNU timeout puts itself and the command in a new process group, so a TERM sent to this runner's group (Stop,
+# Claude Code killing the background task) wouldn't reach the job, and a foreground child would hold this shell's
+# TERM trap until it exited. So timeout runs in the background and every TERM, INT or HUP is forwarded to it; timeout
+# passes it on to the command's group (and KILLs it 30 s later if it's still there). The job's stdin is /dev/null
+# (an asynchronous command's default), which a Wait job never reads.
 job_limit=$(cat "$job_directory/timeout" 2>/dev/null || true)
 if [ -n "$job_limit" ] && command -v timeout >/dev/null 2>&1; then
-  timeout -k 30 "$job_limit" bash -c "$job_command"
+  # The trap is set first, so a signal that lands before timeout has started is passed on once it has.
+  job_pid= job_stop=
+  trap 'job_stop=1; [ -n "$job_pid" ] && kill -TERM "$job_pid" 2>/dev/null' TERM INT HUP
+  timeout -k 30 "$job_limit" bash -c "$job_command" &
+  job_pid=$!
+  if [ -n "$job_stop" ]; then kill -TERM "$job_pid" 2>/dev/null; fi
+  wait "$job_pid"
   job_status=$?
+  # A forwarded signal interrupts wait; keep waiting until timeout itself has exited, for its real status.
+  while kill -0 "$job_pid" 2>/dev/null; do wait "$job_pid"; job_status=$?; done
   if [ "$job_status" -eq 124 ]; then : > "$job_directory/timed-out"; fi
   exit "$job_status"
 fi

@@ -34,6 +34,9 @@ the background and end the turn "waiting for a notification". Wait lets them hol
   poll loop) can't keep the machine awake all night. Exit 124 writes `"timedOut": true` into the receipt, and
   `wait_for_job` says the command was stopped, not that it finished. A command that itself exits 124 reads as timed
   out too. Without `timeout(1)` (macOS) commands run unbounded, as before.
+- **No escaped jobs.** GNU `timeout` moves the job into its own process group, so the runner starts it in the
+  background and forwards TERM, INT and HUP to it. A TERM to the runner or to its whole group (Stop, Claude Code
+  killing the background task) stops the job and still writes a receipt. The job's stdin is `/dev/null`.
 - **Ownership.** Each job is scoped by the daemon's agent id and cwd. A tool input with an `agentId` is rejected.
 - **Stop and new messages.** Stop cancels the wait, and a new message ends it with `new_message`. Neither kills the
   job.

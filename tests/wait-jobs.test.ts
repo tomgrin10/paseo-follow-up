@@ -115,3 +115,43 @@ test('a prepared job stops at its time limit and its receipt says it timed out',
     assert.equal(status.exitCode, 3); assert.equal(status.timedOut, undefined, 'an ordinary failure is not a timeout');
   } finally { await f.close(); }
 });
+
+// Stop or Claude Code's background-task kill signals the runner, or its whole process group. GNU timeout moves the
+// job into a group of its own, so the runner must pass the signal on: no job process may outlive it.
+test('a TERM to the runner, or to its process group, stops the timed job and still writes a receipt', async () => {
+  const f = await fixture();
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const gone = async (marker: string) => {
+    for (let i = 0; i < 50; i++) {
+      const left = await new Promise<string>(ok => { const p = spawn('pgrep', ['-f', marker]); let out = ''; p.stdout.on('data', c => out += c); p.once('exit', () => ok(out.trim())); });
+      if (!left) return true;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    return false;
+  };
+  try {
+    for (const target of ['runner', 'group'] as const) {
+      const marker = `follow-wait-term-${target}-${process.pid}`;
+      const job = await f.jobs.prepare(f.owner, { description: target, command: `: ${marker}; while :; do sleep 0.2; done`, timeoutSeconds: 600 });
+      // detached: the runner leads its own process group, as under Claude Code's background Bash.
+      const child = spawn('bash', ['-c', job.bashCommand], { stdio: 'ignore', detached: true });
+      const exited = new Promise<number | null>(ok => child.once('exit', (code, signal) => ok(code ?? (signal ? 128 : null))));
+      while (!(await readFile(join(f.directory, 'jobs', f.owner.id, job.jobId, 'started'), 'utf8').then(() => true, e => e.code === 'EISDIR'))) await new Promise(r => setTimeout(r, 50));
+      await new Promise(r => setTimeout(r, 300));
+      process.kill(target === 'runner' ? child.pid! : -child.pid!, 'SIGTERM');
+      const ended = await Promise.race([exited.then(() => true), new Promise<false>(r => setTimeout(() => r(false), 10_000))]);
+      if (!ended) { spawn('pkill', ['-f', marker]); try { process.kill(-child.pid!, 'SIGKILL'); } catch {} }
+      assert.ok(ended, `${target}: the runner ends on TERM`);
+      assert.ok(await gone(marker), `${target}: no job process left behind`);
+      assert.equal(alive(child.pid!), false);
+      const status = await f.jobs.status(f.owner, job.jobId);
+      assert.equal(status.status, 'failed', `${target}: the receipt is written`);
+      assert.equal(status.timedOut, undefined, 'stopped, not timed out');
+    }
+    // The job's stdin is /dev/null: a command that reads it ends instead of hanging.
+    const reads = await f.jobs.prepare(f.owner, { description: 'reads stdin', command: 'cat; exit 5', timeoutSeconds: 60 });
+    const started = Date.now();
+    assert.equal(await run(reads.bashCommand).finished, 5);
+    assert.ok(Date.now() - started < 5000);
+  } finally { await f.close(); }
+});
