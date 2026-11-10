@@ -1,5 +1,6 @@
 import type { Project } from "../shared/settings";
 import { pages, withDaemon, type Agent, type Daemon } from "./daemon";
+import { isBackgroundAgent } from "./background-agents";
 import { isLoaded } from "./agent-load";
 
 /** A row of Paseo's workspace list. fetch_workspaces carries more (git and GitHub runtime) for the Overseer. */
@@ -104,6 +105,8 @@ export class DaemonDirectory {
   async live(client: Daemon, id: string): Promise<Agent | null> {
     this.count("fetch_agent_request");
     const agent = (await client.fetchAgent(id))?.agent ?? null;
+    // Paseo's own lists leave background agents out, so a row for one would only flicker until the next re-read.
+    if (agent && isBackgroundAgent(agent)) { if (this.rows) this.rows.agents = this.rows.agents.filter(row => row.agent.id !== id); return agent; }
     if (agent && this.rows) {
       const i = this.rows.agents.findIndex(row => row.agent.id === id);
       if (i >= 0) this.rows.agents[i] = { agent }; else this.rows.agents.push({ agent });

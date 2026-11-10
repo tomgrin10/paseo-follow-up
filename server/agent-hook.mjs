@@ -163,6 +163,10 @@ async function main() {
   if (event.agent_id || event.hook_event_name === "SubagentStop") return;
   const lease = await json(join(directory, "hooks-enabled.json"));
   if (lease.expiresAt < Date.now() || !lease.clientEntry) return;
+  // A Paseo 0.16 background agent (another plugin's helper) gets nothing from Follow-up: no context, no Stop-hook
+  // nudge. The worker lists them as it learns of them (server/background-agents.ts); Paseo doesn't say so at launch.
+  const background = await json(join(directory, "background-agents.json")).catch(() => null);
+  if (Array.isArray(background?.agents) && background.agents.includes(agentId)) return;
   const instance = native ? await json(join(directory, "tools-instance.json")).catch(() => null) : null;
   const detached = toolsDetached(native, instance, native ? await json(join(directory, "hook-state", `native-${agentId}.json`)).catch(() => null) : null);
   // Detached: name the bridge's tools everywhere below, and include the bridge paragraph.

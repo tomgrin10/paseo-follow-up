@@ -93,8 +93,9 @@ export class Wait {
   }
 
   /** Adds Wait's tools to an interactive Claude session, unless it's off, opted out, or the standalone plugin has it. */
-  async open<R extends PluginSessionOpenRequest>(request: R): Promise<R> {
-    if (request.purpose !== "interactive" || request.provider !== "claude") return request;
+  async open<R extends PluginSessionOpenRequest>(request: R, options: { background?: boolean } = {}): Promise<R> {
+    // A Paseo 0.16 background agent is another plugin's helper: no Wait (server/background-agents.ts).
+    if (options.background || request.purpose !== "interactive" || request.provider !== "claude") return request;
     if (request.labels["plugin-tools/enabled"] === "false" || request.labels["paseo-wait/enabled"] === "false" || request.labels[WAIT_LABEL] === "false") return request;
     if (!Array.isArray(request.tools) || request.tools.some(tool => (WAIT_TOOLS as readonly string[]).includes(tool.name))) return request;
     if (!(await this.deps.enabled())) return request;
