@@ -8,13 +8,14 @@ import { Icon, Modal, ScrollView, TextInput, copyText, useToast } from "@getpase
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { answerQuestionRpc } from "../shared/contracts";
 import type { Workspace } from "../shared/model";
-import { isOpen, questionState, replyText, type Question } from "../shared/questions";
+import { OTHER, OTHER_LABEL, answerLabel, isOpen, isOther, questionState, replyText, type Question } from "../shared/questions";
 import { ago } from "../shared/attention";
 import { activity, type ActivityTone } from "../shared/activity";
 import { Button, Card, CardRow, Chip, FoldRow, IconButton, errorText, text, type Theme } from "./kit";
 import { Spinner } from "./motion";
 import { mergedColor, tint, withAlpha, type Colors } from "./theme";
 import { overviewKey, workspaceKey } from "./keys";
+import { RichText } from "./rich-text";
 
 const who = (w: Workspace, agentId: string | null) => !agentId || agentId === w.mainAgentId ? "the main agent" : "a root session";
 
@@ -54,10 +55,10 @@ export function OptionCard({ theme, letter, label, consequence, recommended, sel
     <View style={{ width: 18, height: 18, marginTop: 1, borderRadius: 9, borderWidth: selected ? 5 : 1.5, borderColor: selected ? c.accent : c.foregroundMuted }} />
     <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 8, rowGap: 4 }}>
-        <Text style={t.label}>{letter ? <><Text style={{ fontVariant: ["tabular-nums"] }}>{letter}</Text>{"  "}</> : null}{label}</Text>
+        <Text style={t.label}>{letter ? <><Text style={{ fontVariant: ["tabular-nums"] }}>{letter}</Text>{"  "}</> : null}<RichText linkColor={c.foreground} style={t.label}>{label}</RichText></Text>
         {recommended && <Chip theme={theme} icon="ThumbsUp" label="Recommended" color={c.foregroundMuted} />}
       </View>
-      {!!consequence && <Text numberOfLines={dense ? 2 : undefined} style={t.meta}>{consequence}</Text>}
+      {!!consequence && <RichText linkColor={c.foreground} numberOfLines={dense ? 2 : undefined} style={t.meta}>{consequence}</RichText>}
     </View>
   </Pressable>;
 }
@@ -84,7 +85,9 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   useEffect(() => { setChoice(q.answer?.choice ?? null); setWords(q.answer?.words ?? ""); }, [q.id]);
   const refresh = () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); };
   const free = !q.options.length;
-  const answer = free ? words.trim() : choice;
+  // Something else: the field below stops being an optional note and becomes the answer, so Send waits for words.
+  const other = !free && isOther(choice);
+  const answer = free ? words.trim() : other && !words.trim() ? null : choice;
   const note = free ? undefined : words.trim() || undefined;
   const run = useMutation({
     mutationFn: async (action: "send" | "copy" | "resend") => {
@@ -105,10 +108,9 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   const delivery = deliveryLine(w, q, now);
   const pr = q.prKey ? w.prs.find(p => p.key === q.prKey) : null;
   const task = q.taskId ? w.obligations.find(o => o.id === q.taskId) : null;
-  const chosen = q.options.find(o => o.letter === q.answer?.choice);
   const deliveryColor = delivery?.tone === "success" ? c.statusSuccess : delivery?.tone === "warning" ? c.statusWarning : c.foregroundMuted;
   const context = (!!q.background || !!q.links.length || pr || task) && <View style={{ gap: 8 }}>
-    {!!q.background && <Text selectable numberOfLines={dense ? 3 : undefined} style={t.meta}>{q.background}</Text>}
+    {!!q.background && <RichText selectable linkColor={c.foreground} numberOfLines={dense ? 3 : undefined} style={t.meta}>{q.background}</RichText>}
     {!dense && q.links.map((link, i) => <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       <Icon name={link.url ? "Globe" : "FileText"} size={13} color={c.foregroundMuted} />
       {link.url ? <Pressable accessibilityRole="link" accessibilityLabel={`Open ${link.label || link.url}`} onPress={() => { void openExternalUrl(link.url!).catch(() => undefined); }} hitSlop={4}
@@ -122,20 +124,21 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
     </View>}
     {!dense && task && <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       <Icon name="ListChecks" size={13} color={c.foregroundMuted} />
-      <Text numberOfLines={2} style={[t.meta, { flexShrink: 1 }]}>Task: {task.title}</Text>
+      <RichText linkColor={c.foreground} numberOfLines={2} style={[t.meta, { flexShrink: 1 }]}>{`Task: ${task.title}`}</RichText>
     </View>}
   </View>;
   // In the pill popover the answer field and actions stay pinned below a scrolling body.
   const pinned = dense && !!bodyMaxHeight;
   const input = <View style={{ gap: 6 }}>
     {free && !dense && <Text style={t.meta}>No options were given. Write the decision for the agent.</Text>}
-    <TextInput accessibilityLabel={free ? `Your answer to ${q.id}` : `Note for the agent about ${q.id}, optional`} placeholder={free ? "Your answer" : "Add a note for the agent (optional)"} placeholderTextColor={c.foregroundMuted}
-      multiline value={words} editable={!run.isPending} onChangeText={setWords} maxLength={2000} autoFocus={pinned && !free && noteOpen} style={inputStyle(c, compact, free && !dense ? 3 : 2)} />
+    {other && !dense && <Text style={t.meta}>None of the options fit? Write your answer; it goes to the agent instead of a letter.</Text>}
+    <TextInput key={other ? "answer" : "note"} accessibilityLabel={free || other ? `Your answer to ${q.id}${other ? ", required" : ""}` : `Note for the agent about ${q.id}, optional`} placeholder={free ? "Your answer" : other ? "Your answer (required)" : "Add a note for the agent (optional)"} placeholderTextColor={c.foregroundMuted}
+      multiline value={words} editable={!run.isPending} onChangeText={setWords} maxLength={2000} autoFocus={other || pinned && !free && noteOpen} style={[inputStyle(c, compact, (free || other) && !dense ? 3 : 2), other ? { borderColor: words.trim() ? c.border : withAlpha(c.accent, 0.7) } : null]} />
   </View>;
   // Context comes before the options so the developer reads why before choosing.
   const body = <View style={{ gap: dense ? 10 : 14 }}>
     <View style={{ gap: 6 }}>
-      <Text selectable style={[t.body, { fontSize: dense ? 13 : 15, lineHeight: dense ? 19 : 22 }]}>{q.question}</Text>
+      <RichText selectable style={[t.body, { fontSize: dense ? 13 : 15, lineHeight: dense ? 19 : 22 }]}>{q.question}</RichText>
       {/* Phones: who asked and when is meta under the question, not a footnote after the buttons. */}
       {compact && !dense && <Text style={t.small}>Asked {ago(q.askedAt, now)} by {who(w, q.askedBy)}{q.taskId && !q.options.length ? " (blocked task)" : ""}</Text>}
       {open && <View style={{ flexDirection: "row", gap: 6 }}>
@@ -151,13 +154,16 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
     {!!q.options.length && <View accessibilityRole="radiogroup" accessibilityLabel={`Options for ${q.id}`} style={{ gap: 6 }}>
       {q.options.map(o => <OptionCard key={o.letter} theme={theme} compact={compact} dense={dense} letter={o.letter} label={o.label} consequence={o.consequence} recommended={q.recommend === o.letter}
         selected={(open ? choice : q.answer?.choice) === o.letter} disabled={!open || run.isPending} onPress={() => setChoice(o.letter)} />)}
+      {/* Built in on every question with options, after the agent's own: the developer's own answer. */}
+      {(open || isOther(q.answer?.choice)) && <OptionCard theme={theme} compact={compact} dense={dense} letter="" label={OTHER_LABEL} consequence={dense ? undefined : "Write your own answer"} recommended={false}
+        selected={(open ? choice : q.answer?.choice) === OTHER} disabled={!open || run.isPending} onPress={() => { setChoice(OTHER); if (pinned) setNoteOpen(true); }} />}
     </View>}
     {q.answer && <View style={{ gap: 6, padding: 10, borderRadius: 8, backgroundColor: tint(c.statusSuccess, c) }}>
       <View style={{ flexDirection: "row", gap: 6 }}>
         <View style={{ paddingTop: 2 }}><Icon name="CircleCheck" size={13} color={c.statusSuccess} /></View>
-        <Text selectable style={[t.label, { flex: 1 }]}>{q.answer.by === "agent" ? "Answered in chat: " : "You answered "}{q.answer.choice}{chosen ? ` · ${chosen.label}` : ""}</Text>
+        <RichText selectable style={[t.label, { flex: 1 }]}>{`${q.answer.by === "agent" ? "Answered in chat: " : "You answered "}${isOther(q.answer.choice) ? OTHER_LABEL : answerLabel(q, q.answer.choice)}`}</RichText>
       </View>
-      {!!q.answer.words && <Text selectable style={[t.meta, { color: c.foreground, paddingLeft: 19 }]}>{q.answer.words}</Text>}
+      {!!q.answer.words && <RichText selectable style={[t.meta, { color: c.foreground, paddingLeft: 19 }]}>{q.answer.words}</RichText>}
       {delivery && <View style={{ flexDirection: "row", gap: 6, paddingLeft: 19 }}>
         {delivery.tone === "spinner" ? <View style={{ paddingTop: 2 }}><Spinner color={c.foregroundMuted} size={11} /></View> : <View style={{ paddingTop: 2 }}><Icon name={delivery.icon} size={11} color={deliveryColor} /></View>}
         <Text style={[t.meta, { flex: 1, color: deliveryColor }]}>{delivery.text}</Text>
@@ -167,20 +173,20 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   </View>;
   const actions = (open || q.answer && ["queued", "unconfirmed", "copied"].includes(q.answer.delivery.state)) && <View style={{ gap: 6 }}>
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-      {open && <Button theme={theme} compact={compact} grow={compact} kind="primary" icon="Send" title="Send to agent" accessibilityLabel={`Send your ${q.id} answer to the agent`} accessibilityHint={compact ? `Puts your answer straight into the asking agent's chat, even mid-turn. Follow-up keeps it under ${q.id}.` : undefined} disabled={!answer || run.isPending} loading={run.isPending && run.variables === "send"} onPress={() => run.mutate("send")} />}
+      {open && <Button theme={theme} compact={compact} grow={compact} kind="primary" icon="Send" title="Send to agent" accessibilityLabel={`Send your ${q.id} answer to the agent`} accessibilityHint={other && !words.trim() ? "Write your answer first" : compact ? `Puts your answer straight into the asking agent's chat, even mid-turn. Follow-up keeps it under ${q.id}.` : undefined} disabled={!answer || run.isPending} loading={run.isPending && run.variables === "send"} onPress={() => run.mutate("send")} />}
       {open && <Button theme={theme} compact={compact} icon="Copy" title="Copy" accessibilityLabel={`Copy your ${q.id} answer instead of sending it`} disabled={!answer || run.isPending} loading={run.isPending && run.variables === "copy"} onPress={() => run.mutate("copy")} />}
       {q.answer?.delivery.state === "copied" && <Button theme={theme} compact={compact} kind="primary" icon="Send" title="Send to agent" accessibilityLabel={`Send your ${q.id} answer to the agent`} loading={run.isPending} onPress={() => run.mutate("send")} />}
       {q.answer && ["queued", "unconfirmed"].includes(q.answer.delivery.state) && <Button theme={theme} compact={compact} icon="RotateCcw" title={q.answer.delivery.state === "queued" ? "Try now" : "Resend"} accessibilityLabel={`Send the ${q.id} answer again`} loading={run.isPending} onPress={() => run.mutate("resend")} />}
       {q.answer && ["queued", "unconfirmed"].includes(q.answer.delivery.state) && <Button theme={theme} compact={compact} kind="ghost" icon="Copy" title="Copy" accessibilityLabel={`Copy the ${q.id} answer`} onPress={() => { void copyText(replyText(q, q.answer!.choice, q.answer!.words)).then(() => toast.show("Copied", { variant: "success" }), () => toast.error("Couldn't copy here")); }} />}
       {q.answer?.delivery.state === "unconfirmed" && openAgent && <Button theme={theme} compact={compact} kind="ghost" icon="MessageSquare" title="Open agent" onPress={() => openAgent(q.askedBy ?? w.mainAgentId)} />}
-      {pinned && open && !free && !noteOpen && <Button theme={theme} compact={compact} kind="ghost" icon="Pencil" title="Note" accessibilityLabel={`Add a note for the agent about ${q.id}`} onPress={() => setNoteOpen(true)} />}
+      {pinned && open && !free && !other && !noteOpen && <Button theme={theme} compact={compact} kind="ghost" icon="Pencil" title="Note" accessibilityLabel={`Add a note for the agent about ${q.id}`} onPress={() => setNoteOpen(true)} />}
       {dense && onDetails && <IconButton theme={theme} compact={compact} icon="Maximize2" label={`Open ${q.id} with its links and full context`} onPress={onDetails} />}
     </View>
     {open && !dense && !compact && <Text style={t.small}>Send puts your answer straight into the asking agent's chat, even mid-turn. Follow-up keeps it under {q.id}.</Text>}
   </View>;
   // In the pill popover the question scrolls and the answer field and actions stay put, so Send is never cut off.
   if (pinned) {
-    const showInput = open && (free || noteOpen);
+    const showInput = open && (free || other || noteOpen);
     return <View style={{ gap: 10 }}>
       <View>
         <ScrollView style={{ maxHeight: bodyMaxHeight! - (showInput ? 62 : 0), flexGrow: 0 }} contentContainerStyle={{ paddingRight: 2 }} scrollEventThrottle={32}
@@ -235,7 +241,7 @@ export function QuestionStepper({ workspace: w, theme, compact, openAgent, onAns
   return <View style={{ gap: 8 }}>
     <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: compact ? 40 : 26 }}>
       <Icon name={questionState(q) === "stopped" ? "CirclePause" : "MessageCircleQuestion"} size={14} color={c.statusWarning} />
-      <Text accessibilityRole="header" numberOfLines={2} style={[t.label, { flex: 1 }]}>{q.id} · {q.title}</Text>
+      <RichText accessibilityRole="header" numberOfLines={2} style={[t.label, { flex: 1 }]}>{`${q.id} · ${q.title}`}</RichText>
       {open.length > 1 && <>
         <Text accessibilityLabel={`Question ${at + 1} of ${open.length}`} style={[t.small, { marginLeft: 4 }]}>{at + 1} of {open.length}</Text>
         {arrow("ChevronLeft", "Previous question", -1)}{arrow("ChevronRight", "Next question", 1)}
@@ -283,13 +289,12 @@ export function ActivityCard({ workspace: w, theme, compact, now, open, toggle, 
               <Text numberOfLines={2} style={[t.body, { flex: 1 }]}>{r.text}</Text>
               <Text style={t.small}>{ago(r.at, now)}</Text>
             </View>
-            {(r.detail || r.took) && <Text numberOfLines={2} style={t.meta}>{[r.detail, r.took ? `took ${r.took}` : null].filter(Boolean).join(" · ")}</Text>}
+            {(r.detail || r.took) && <RichText linkColor={c.foreground} numberOfLines={2} style={t.meta}>{[r.detail, r.took ? `took ${r.took}` : null].filter(Boolean).join(" · ")}</RichText>}
           </View>
         </View>;
       })}
     </View> : (shown as typeof questions).map(q => {
-      const chosen = q.options.find(o => o.letter === q.answer?.choice);
-      const status = q.answer ? `${q.answer.choice}${chosen ? ` · ${chosen.label}` : ""}` : q.closed ? `Withdrawn: ${q.closed.reason}` : "Waiting for you";
+      const status = q.answer ? answerLabel(q, q.answer.choice, q.answer.words) : q.closed ? `Withdrawn: ${q.closed.reason}` : "Waiting for you";
       const icon = q.answer ? "MessageCircleReply" : q.closed ? "MessageCircleOff" : "MessageCircleQuestion";
       const color = q.answer ? c.statusSuccess : q.closed ? c.foregroundMuted : c.statusWarning;
       return <CardRow key={q.id} theme={theme} onPress={() => onOpenQuestion(q.id)} accessibilityLabel={`${q.id}, ${q.title}. ${status}. Open`}>
@@ -297,10 +302,10 @@ export function ActivityCard({ workspace: w, theme, compact, now, open, toggle, 
           <View style={{ paddingTop: 2 }}><Icon name={icon} size={13} color={color} /></View>
           <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
             <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
-              <Text numberOfLines={1} style={[t.body, { flex: 1 }]}>{q.id} · {q.title}</Text>
+              <RichText plain numberOfLines={1} style={[t.body, { flex: 1 }]}>{`${q.id} · ${q.title}`}</RichText>
               <Text style={t.small}>{ago(q.answer?.at ?? q.closed?.at ?? q.askedAt, now)}</Text>
             </View>
-            <Text numberOfLines={2} style={[t.meta, !q.answer && !q.closed ? { color: c.statusWarning } : null]}>{status}</Text>
+            <RichText plain numberOfLines={2} style={[t.meta, !q.answer && !q.closed ? { color: c.statusWarning } : null]}>{status}</RichText>
           </View>
         </View>
       </CardRow>;

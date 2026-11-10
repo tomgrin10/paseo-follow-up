@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { Workspace } from "../shared/model";
 import { followUpObligations } from "../shared/follow-up";
-import { QUESTION_MODE_RULES, findOpenMatch, isOpen, nextQuestionId, validChoice, type Question, type QuestionMode } from "../shared/questions";
+import { OTHER, OTHER_LABEL, QUESTION_MODE_RULES, choiceError, findOpenMatch, isOpen, isOther, nextQuestionId, validChoice, type Question, type QuestionMode } from "../shared/questions";
+
+/** "other" and its label both mean Something else, so an agent recording "Something else" lands on the same answer. */
+const normalChoice = (choice: string) => [OTHER, OTHER_LABEL.toLowerCase()].includes(choice.trim().toLowerCase()) ? OTHER : choice.trim();
 
 export type AskInput = {
   title: string; question: string; options?: { letter: string; label: string; consequence?: string }[]; recommend?: string;
@@ -88,8 +91,10 @@ function owned(w: Workspace, agentId: string, id: string): Question {
 export function recordAnswer(w: Workspace, agentId: string, id: string, choice: string, words: string | undefined, now: number): Question {
   const q = owned(w, agentId, id);
   if (!isOpen(q)) throw new Error(`${id} is already ${q.answer ? "answered" : "withdrawn"}.`);
+  choice = normalChoice(choice);
+  if (isOther(choice) && !validChoice(q, choice, words)) throw new Error(`${choiceError(q, choice)} Pass what the developer said as words.`);
   const at = new Date(now).toISOString();
-  q.answer = { choice: choice.trim(), ...(words?.trim() ? { words: words.trim() } : {}), at, by: "agent", delivery: { state: "recorded", to: agentId, messageId: null, at, reason: null } };
+  q.answer = { choice, ...(words?.trim() ? { words: words.trim() } : {}), at, by: "agent", delivery: { state: "recorded", to: agentId, messageId: null, at, reason: null } };
   return q;
 }
 
@@ -112,8 +117,9 @@ export function developerAnswer(w: Workspace, id: string, choice: string, words:
     return q;
   }
   if (q.answer && !(q.answer.by === "developer" && q.answer.delivery.state === "copied" && action === "send")) throw new Error(`${id} is already answered.`);
-  if (!validChoice(q, choice)) throw new Error(q.options.length ? `Pick one of ${q.options.map(o => o.letter).join(", ")}.` : "Write an answer first.");
-  q.answer = { choice: choice.trim(), ...(words?.trim() ? { words: words.trim() } : {}), at, by: "developer",
+  choice = normalChoice(choice);
+  if (!validChoice(q, choice, words)) throw new Error(choiceError(q, choice));
+  q.answer = { choice, ...(words?.trim() ? { words: words.trim() } : {}), at, by: "developer",
     delivery: action === "copy" ? { state: "copied", to: null, messageId: null, at, reason: null } : { state: "sending", to: null, messageId: randomUUID(), at, reason: null } };
   return q;
 }
