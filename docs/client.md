@@ -25,6 +25,12 @@ Nothing polls while the app is hidden.
   light and dark.
 - `npm run preview` starts an isolated daemon with the packed plugin ([testing.md](testing.md)).
 - User copy says "Summary" for the `about` feature.
+- **Agent-written text renders through `RichText`** (`client/rich-text.tsx`). Root cause of the unclickable artifact
+  link: every surface put agent-written text in a plain `<Text>`. `linkify` in `shared/links.ts` turns http(s) URLs
+  and `owner/repo#123` into links (no markdown). `tests/rich-text.test.ts` fails when a field an agent or the
+  developer wrote (question, option, answer words, brief ask/context, task title/evidence, summary, results,
+  Overseer replies, activity details) sits in a plain `<Text>`. A one-line title inside a pressable row uses
+  `<RichText plain>`. Add new agent-written fields to the scan.
 
 ## Files
 
@@ -64,6 +70,7 @@ Nothing polls while the app is hidden.
 | `client/updates.tsx` | Settings → General's Updates sections, Home's update notice, setup's Updates step ([updates.md](updates.md)). |
 | `client/release-notes.tsx` | What's new, the notes list, Home's version line. |
 | `client/kit.tsx`, `client/motion.tsx`, `client/theme.ts`, `client/keys.ts` | The type scale, motion, theme helpers and query keys. |
+| `client/rich-text.tsx`, `shared/links.ts` | The one renderer for agent-written text, and the linkifier behind it. |
 
 ## Row menu
 

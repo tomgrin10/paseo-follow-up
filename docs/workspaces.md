@@ -118,6 +118,11 @@ retargeting instead of Graphite restacks.
 - Answers from the UI go through `follow.answer-question`: Send, Copy or Resend. An answer the agent can't take yet
   queues, and the engine delivers it on a later tick.
 - Answers given in chat are recorded with `record_answer`.
+- **Something else on every question with options.** A built-in last choice, recorded as `choice: "other"` with
+  required words; agents never add it. The agent gets `Follow-up answer Qn (title): Something else — "words"`, and a
+  multi-decision brief keeps one line per decision. `answer_question`, `record_answer` and `brief_action` accept
+  "other" and refuse it without words. `answerLabel` in `shared/questions.ts` is the one way a surface names an
+  answer. Tests: `tests/something-else.test.ts`.
 - **One identity per open question.** Every path that creates a question first asks `findOpenMatch` in
   `shared/questions.ts`. That covers `ask_question`, `needs_you` decisions, and a retry after a reload.
   - The matcher is deterministic: normalized title and question tokens plus option-label overlap. It makes no model
