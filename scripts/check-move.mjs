@@ -179,20 +179,44 @@ async function shotHome(name) {
     say(`screenshot ${join(shots, `${name}.png`)}`);
   } finally { await page.close(); }
 }
-/** Follow-up's settings screen (Paseo titles it "<plugin id> · <name>") and its General line for the move. */
-async function shotPluginSettings(name) {
+/**
+ * Follow-up's settings screen under plugin id `id` and its General line for the move, plus Paseo's plugin list.
+ * Paseo 0.15 titles the screen "<plugin id> · <name>", 0.16 only "<name>"; both list the id under Settings → Plugins.
+ */
+async function shotPluginSettings(name, { id = NEW, variants = true } = {}) {
   if (!browser) return null;
   const page = await browser.newPage();
   try {
     const serverId = (await readFile(join(home, "server-id"), "utf8")).trim();
-    await page.goto(`http://127.0.0.1:${port}/settings/hosts/${serverId}/plugins/${NEW}/projects`);
-    const title = (await page.getByText(/ · Follow-up$/).first().textContent({ timeout: 60_000 }).catch(() => null))?.trim() ?? null;
+    await page.goto(`http://127.0.0.1:${port}/settings/hosts/${serverId}/plugins`);
+    await page.getByText("Plugin source", { exact: true }).waitFor({ timeout: 60_000 });
+    const listed = await page.evaluate(ids => ids.filter(i => [...document.querySelectorAll("div")].some(d => d.childElementCount === 0 && d.textContent === i)), [OLD, NEW]);
+    await page.screenshot({ path: join(shots, `${name}-plugins.png`) });
+    await page.goto(`http://127.0.0.1:${port}/settings/hosts/${serverId}/plugins/${id}/projects`);
+    await page.getByText("Back to plugins", { exact: true }).waitFor({ timeout: 60_000 });
+    const title = (await page.getByText(/^(?:\S+ · )?Follow-up$/).first().textContent({ timeout: 30_000 }).catch(() => null))?.trim() ?? null;
     // General is the screen's first category, open by default on desktop.
     const line = (await page.getByText(/Follow-up's new plugin id/).first().textContent({ timeout: 30_000 }).catch(() => null))?.trim() ?? null;
     await page.mouse.move(0, 0); await page.waitForTimeout(800);
     await page.screenshot({ path: join(shots, `${name}.png`), fullPage: true });
-    say(`screenshot ${join(shots, `${name}.png`)}: title ${JSON.stringify(title)}, line ${JSON.stringify(line)}`);
-    return { title, line };
+    say(`screenshot ${join(shots, `${name}.png`)}: title ${JSON.stringify(title)}, line ${JSON.stringify(line)}, listed ${JSON.stringify(listed)}`);
+    if (!variants) return { title, line, listed };
+    // The same line at phone width (the screen opens on its category list there) and in dark mode.
+    const moveLine = () => page.getByText(/Follow-up's new plugin id/).first();
+    await page.setViewportSize({ width: 390, height: 844 }); await page.reload();
+    // The phone opens on the category list; General's row is the first.
+    const general = page.getByText("General", { exact: true }).filter({ visible: true });
+    // isVisible() doesn't wait: wait for the list (or the open category) to render first.
+    await general.or(moveLine()).first().waitFor({ state: "visible", timeout: 30_000 }).catch(() => {});
+    if (!(await moveLine().isVisible())) await general.first().click({ timeout: 15_000 }).catch(() => {});
+    await moveLine().scrollIntoViewIfNeeded({ timeout: 30_000 }).catch(() => {});
+    const phone = { line: (await moveLine().textContent({ timeout: 30_000 }).catch(() => null))?.trim() ?? null, overflow: await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth) };
+    await page.waitForTimeout(800); await page.screenshot({ path: join(shots, `${name}-phone.png`) });
+    await page.emulateMedia({ colorScheme: "dark" }); await page.setViewportSize({ width: 1440, height: 1000 }); await page.reload();
+    await moveLine().waitFor({ timeout: 30_000 }).catch(() => {});
+    await page.mouse.move(0, 0); await page.waitForTimeout(800); await page.screenshot({ path: join(shots, `${name}-dark.png`), fullPage: true });
+    say(`screenshots ${name}-phone.png ${JSON.stringify(phone)}, ${name}-dark.png`);
+    return { title, line, listed, phone };
   } finally { await page.close(); }
 }
 
@@ -273,6 +297,8 @@ try {
   const rolled = (await self("follow.updates")).move;
   assert.equal(rolled?.phase, "rolled-back");
   step("forced probation failure rolled the move back", { reason: rolled.reason, plugins: await rows() });
+  const back = await shotPluginSettings("settings-rolled-back", { id: OLD, variants: false });
+  if (browser) assert.match(back.line ?? "", /^Couldn't move to Follow-up's new plugin id, so it went back to the old one\./, "Settings → General says the move rolled back");
 
   // 4. Retry with the good build.
   tarballs.set(RC1, good);
@@ -309,8 +335,11 @@ try {
   await shotHome("home-after");
   const settings = await shotPluginSettings("settings-plugin");
   if (browser) {
-    assert.equal(settings.title, `${NEW} · Follow-up`, "the plugin settings title shows the new id");
+    assert.ok([`${NEW} · Follow-up`, "Follow-up"].includes(settings.title), `the plugin settings title shows the new id, or only the name (0.16): ${settings.title}`);
+    assert.deepEqual(settings.listed, [NEW], "Settings → Plugins lists the new id only");
     assert.equal(settings.line, "Moved to Follow-up's new plugin id.", "Settings → General says the move is done");
+    assert.equal(settings.phone.line, settings.line, "the line shows at phone width too");
+    assert.equal(settings.phone.overflow, false, "no horizontal overflow at 390 px");
   }
   step("after the move", settings ?? {});
   result.ok = true;
