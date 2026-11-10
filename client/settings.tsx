@@ -242,7 +242,7 @@ export function FollowSettings({ theme, layout, openSetup }: PluginSurfaceProps 
   const line = summaries[category];
   return <ScrollView style={{ flex: 1, backgroundColor: c.surface0 }} stickyHeaderIndices={[0]} contentContainerStyle={{ ...page, paddingTop: 0 }}>
     <View style={{ paddingTop: 24, backgroundColor: c.surface0 }}><CategoryTabs value={category} onChange={pick} theme={theme} /></View>
-    {/* General shows the version and setup itself, so its line would only repeat them. */}
+    {/* General's status card says it already; its line is for the phone list. */}
     {line && category !== "general" ? <Text style={[t.meta, { marginTop: -6 }]}>{line}</Text> : null}
     {content}
   </ScrollView>;

@@ -279,3 +279,14 @@ test("pending notes: read from the new version's verified tarball, only versions
   assert.deepEqual(view.pendingNotes.map(n => n.version), ["1.4.0-beta.24"]);
   assert.deepEqual(view.pendingNotes[0]!.items, ["New thing."]);
 });
+
+test("status copy: a reason without a full stop never runs into the next sentence; settling says the next minute", async () => {
+  const { statusCopy } = await import("../shared/updates");
+  const view = { version: "1.4.0-beta.24", installKind: "npm" as const, mode: "auto" as const, channel: "beta" as const, channels: { stable: null, beta: null }, checkedAt: 0, nextCheckAt: null, registryError: null, pendingNotes: [], history: [], notice: null };
+  const rolled = statusCopy({ ...view, phase: { kind: "rolled-back", version: "1.4.0-beta.25", from: "1.4.0-beta.24", reason: "It reported an error: couldn't open its saved state", at: 0 } }, 0);
+  assert.match(rolled.detail, /saved state\. You're on 1\.4\.0-beta\.24 again\./);
+  const failed = statusCopy({ ...view, phase: { kind: "install-failed", version: "1.4.0-beta.25", reason: "Paseo couldn't install it.", at: 0 } }, 0);
+  assert.match(failed.detail, /install it\. Nothing changed\./);
+  const settling = statusCopy({ ...view, phase: { kind: "settling", version: "1.4.0-beta.25", from: "1.4.0-beta.24", at: 0, until: 60_000 } }, 0);
+  assert.match(settling.detail, /If it fails within the next minute,/);
+});

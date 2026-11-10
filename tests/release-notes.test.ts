@@ -99,3 +99,14 @@ test("ago: minutes under an hour, hours under two days, then days", async () => 
   assert.equal(agoText(2 * 3_600_000 + 59 * 60_000), "2h ago");
   assert.equal(agoText(3 * 86_400_000), "3 days ago");
 });
+
+test("versions: going back to an older version (a rollback) isn't an update", async () => {
+  const { mkdtemp } = await import("node:fs/promises"); const { tmpdir } = await import("node:os"); const { join } = await import("node:path");
+  const { VersionsStore: Store } = await import("../server/release-notes");
+  const store = new Store(await mkdtemp(join(tmpdir(), "versions-")), () => 1_000);
+  await store.started("1.4.0-beta.24", true);
+  await store.started("1.4.0-beta.25", true);
+  assert.equal((await store.read()).previous, "1.4.0-beta.24");
+  const back = await store.started("1.4.0-beta.24", true);
+  assert.equal(back.running, "1.4.0-beta.24"); assert.equal(back.previous, null); assert.equal(back.startedAt, null);
+});
