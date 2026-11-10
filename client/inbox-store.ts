@@ -10,7 +10,9 @@ type List = RpcOutput<typeof inboxListRpc>;
  * The last sign-off or Later on this client, for the Undo bar and the pill (6 s). A Later keeps each row's earlier
  * snooze so Undo can put it back at once, and `until` for the bar's wording.
  */
-export type Recent = { agentIds: string[]; label: string; at: number; batch: boolean } & ({ kind: "sign_off" } | { kind: "later"; until: string; prev: Record<string, InboxRow["snooze"]> });
+export type Recent = { agentIds: string[]; label: string; at: number; batch: boolean } & ({ kind: "sign_off" } | { kind: "later"; until: string; prev: Record<string, InboxRow["snooze"]> }
+  /** A workspace's own Later (no agent flag): `restore` puts back the workspace snooze it replaced. */
+  | { kind: "later_ws"; until: string; restore: () => Promise<void> });
 /**
  * The backstop poll. Changes arrive sooner by push: an agent's status or attention changing in Paseo's agent stream
  * calls `nudge` (1.4.0). Nothing polls while the app is hidden; it refreshes once on return.
@@ -146,7 +148,13 @@ export function createInboxStore(client: PluginClientContext) {
       } finally { for (const id of agentIds) inflight.delete(id); }
       refresh();
     },
+    /** A workspace Later, for the same Undo bar. */
+    noteLater(label: string, until: string, restore: () => Promise<void>) {
+      recent = { kind: "later_ws", agentIds: [], label, at: Date.now(), batch: false, until, restore };
+      emit();
+    },
     async undo(agentIds?: string[]) {
+      if (!agentIds && recent?.kind === "later_ws") { const { restore } = recent; recent = null; emit(); await restore(); return; }
       const target = agentIds ?? recent?.agentIds ?? [];
       const batch = !agentIds && recent?.batch;
       // A Later's undo shows at once: each row gets its earlier snooze back before the daemon confirms.

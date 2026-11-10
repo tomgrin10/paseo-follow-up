@@ -34,9 +34,16 @@
 | --- | --- |
 | `inbox_list` | `{ flagged_only? }` |
 | `sign_off` | `{ agentIds }` |
-| `snooze` | `{ agentIds, until }`: `next-event`, `1h`, `tomorrow` or an ISO time |
+| `snooze` | `{ agentIds, until }`: `next-event`, `1h`, `tonight`, `tomorrow`, `pr:<repo#n>` or an ISO time, stored as a time by `resolveUntil` |
 | `set_finish_flags` | `{ agentIds, value }`: whether finished turns flag them |
+| `snooze_workspace` | `{ workspace, until }` or `{ workspace, bring_back: true }`: Later on a workspace-only Needs-you row (below) |
 | `inbox_act` | `{ action, agentIds, muteTurn? }`, where `action` is `undo` (the last sign-off or Later), `unsnooze` (Bring back now: ends a Later early), `mute_turn`, `unsorted_flag`, `unsorted_sign_off` or `batch_undo` |
+
+- **Workspace Later.** A workspace-only Needs-you row (a hold, repairs to send, a question with no agent flag) has no
+  inbox flag to snooze. Its Later (row menu, `snooze_workspace`, `follow.control` `snooze`) sets `Workspace.snooze`
+  over the needs it covers (`needKey`). `workspaceSnoozed()` in `shared/attention.ts` keeps the row in Later until the time passes or a new need
+  appears; Bring back now clears it. Every count (the header dot, the pill, Home) goes through `activeNeeds()`, so none
+  counts a workspace in Later; the panel's card stays, reading "Later until …". The Undo bar undoes it like an agent's Later. Invariant `snooze-can-wake`.
 
 ## The brief and `needs_you`
 

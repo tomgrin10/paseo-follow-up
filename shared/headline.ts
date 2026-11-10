@@ -146,7 +146,7 @@ export function pillState(input: {
   /** needsYou() for the workspace, only when this agent is its main agent. */
   items: NeedItem[];
   /** The store's last sign-off or Later ("later"); no kind is a sign-off. */
-  recent: { agentIds: string[]; at: number; kind?: "sign_off" | "later" } | null;
+  recent: { agentIds: string[]; at: number; kind?: "sign_off" | "later" | "later_ws" } | null;
   now: number;
 }): PillState {
   const { row, recent, now } = input;
