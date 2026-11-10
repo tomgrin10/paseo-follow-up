@@ -57,7 +57,7 @@ export function SummaryLine({ workspace, theme, compact, lead = false }: { works
     Animated.timing(fade, { toValue: 1, duration: 200, easing: Easing.out(Easing.quad), useNativeDriver: Platform.OS !== "web" }).start();
   }, [shown, reduced, fade]);
   if (!line) return null;
-  if (line.kind === "writing") return <Text style={t.meta}>{line.text}</Text>;
+  if (line.kind === "writing") return <Text numberOfLines={1} style={t.meta}>{line.text}</Text>;
   // `lead`: the large view, where this line stands in for the title, keeps the goal's foreground lead style.
   const style = [t.body, { color: lead ? c.foreground : c.foregroundMuted }];
   return <Animated.View style={{ opacity: fade }}>
@@ -78,16 +78,17 @@ export function SummaryRow({ workspaceId, theme, compact }: { workspaceId: strin
   const d = summaryDisplay(view, Date.now());
   const busy = rewriting || d.pending;
   const line = query.error ? `Couldn't load the summary: ${errorText(query.error)}`
-    : d.footer ? (compact ? shortFooter(d.footer) : d.footer)
+    : d.footer ? shortFooter(d.footer)
     : d.failed ? "Couldn't write a summary"
     : d.pending ? "Writing a summary…" : "No summary yet";
   const action = busy ? "Rewriting…" : d.failed ? "Try again" : d.sentence ? "Rewrite" : "Write summary";
   return <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: compact ? 48 : 36 }}>
     <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
       <Text style={t.label}>Summary</Text>
-      <Text numberOfLines={1} accessibilityRole={d.failed || query.error ? "alert" : undefined} style={t.meta}>{line}</Text>
+      <Text numberOfLines={1} accessibilityRole={d.failed || query.error ? "alert" : undefined} style={t.meta}
+        {...(Platform.OS === "web" && d.footer ? { title: d.footer } as object : {})}>{line}</Text>
     </View>
-    <Button theme={theme} compact={compact} kind="ghost" icon="RefreshCw" title={action} accessibilityLabel="Write a new summary"
+    <Button theme={theme} compact={compact} kind="secondary" icon="RefreshCw" title={action}
       accessibilityHint={d.footer ?? undefined} disabled={busy} onPress={() => void rewrite()} />
   </View>;
 }

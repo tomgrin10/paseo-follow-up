@@ -29,7 +29,7 @@ test("the Summary keeps its internal ids: role about, its RPC and tool names", a
 });
 
 test("Set up Follow-up again says where setup stands and resumes one in progress", () => {
-  assert.deepEqual(setupEntry({ status: "done", step: "helpers" }), { label: "Set up Follow-up again", hint: "Finished. Run it again to recheck GitHub and the helper agents, or to change what Follow-up does on its own.", line: "Finished. Run it again any time", action: "Open setup", resume: false });
+  assert.deepEqual(setupEntry({ status: "done", step: "helpers" }), { label: "Set up Follow-up again", hint: "Done. Run it again to recheck GitHub and the helper agents, or to change what Follow-up does on its own.", line: "Finished. Run it again any time", action: "Open setup", resume: false });
   assert.equal(setupEntry({ status: "skipped", step: "intro" }).line, "Skipped. About two minutes");
   assert.equal(setupEntry({ status: "idle", step: "intro" }).resume, false);
   assert.equal(setupEntry(undefined).label, "Set up Follow-up again", "loading still shows the entry");
@@ -45,7 +45,7 @@ test("Set up Follow-up again leads General, the first Settings category and the 
   // First thing in General, not inside a fold; then the version and release notes.
   assert.ok(general.indexOf("setup.entry.label") > 0 && general.indexOf("setup.entry.label") < general.indexOf('title="Version"'));
   assert.doesNotMatch(general, /<Disclosure/);
-  assert.match(general, /actionLabel="What's new"/); assert.match(general, /label="All release notes"/);
+  assert.match(general, /actionLabel="What's new"/); assert.match(general, /label="Older versions"/);
   assert.match(settings, /category === "general" \? <GeneralCategory theme=\{theme\} compact=\{compact\} setup=\{setup\} \/>/);
   const client = await readFile(resolve("index.client.tsx"), "utf8");
   assert.match(client, /id: "follow-through-setup"/);
