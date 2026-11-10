@@ -51,6 +51,35 @@ export default function contribute(server: PluginServerContext) {
               emit({ type: "session.turn", sessionId: input.sessionId, turnId, state: "completed" });
               return;
             }
+            // scripts/screenshots.mjs: fixture-scripts.json maps a prompt to a list of steps, so the chat shows a natural
+            // prompt. { item } emits a timeline item, { rpc, input } calls a Follow-up RPC as this agent, { permission }
+            // asks for a permission and waits for the answer, { hold: true } leaves the turn running.
+            const scripts = JSON.parse(await readFile(join(process.env.PASEO_HOME!, "fixture-scripts.json"), "utf8").catch(() => "{}")) as Record<string, { item?: Record<string, unknown>; rpc?: string; input?: Record<string, unknown>; permission?: { kind?: string; name: string; title: string; input: Record<string, unknown> }; hold?: boolean }[]>;
+            const steps = scripts[text];
+            if (steps) {
+              const agentId = sessions.get(input.sessionId)!.PASEO_AGENT_ID;
+              const { DaemonClient } = require(["@getpaseo", "client", "internal", "daemon-client"].join("/"));
+              const rpcClient = steps.some(step => step.rpc) ? new DaemonClient({ url: process.env.PASEO_DAEMON_URL!, clientId: `fixture-script-${agentId}`, clientType: "cli", reconnect: { enabled: false } }) : null;
+              try {
+                await rpcClient?.connect();
+                for (const step of steps) {
+                  if (step.item) {
+                    const item = { id: randomUUID(), ...step.item };
+                    await appendFile(join(process.env.PASEO_HOME!, `fixture-history-${agentId}.jsonl`), JSON.stringify(item) + "\n");
+                    emit({ type: "timeline.item", sessionId: input.sessionId, item: item as never });
+                    await new Promise(resolve => setTimeout(resolve, 15));
+                  }
+                  if (step.rpc) await rpcClient.invokePluginRpc("follow-through", step.rpc, { agentId, ...step.input });
+                  if (step.permission) {
+                    const permissionId = randomUUID(); const ask = step.permission;
+                    await new Promise<void>(resolve => { permissions.set(permissionId, resolve); emit({ type: "session.permission", sessionId: input.sessionId, request: { id: permissionId, kind: (ask.kind ?? "tool") as "tool", name: ask.name, title: ask.title, input: ask.input as never } }); });
+                  }
+                  if (step.hold) return;
+                }
+              } finally { await rpcClient?.close(); }
+              emit({ type: "session.turn", sessionId: input.sessionId, turnId, state: "completed" });
+              return;
+            }
             const asked = /^Fixture: permission (\w+) (\w+)$/.exec(text);
             if (asked) {
               const permissionId = randomUUID();

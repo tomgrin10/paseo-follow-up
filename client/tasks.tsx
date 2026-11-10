@@ -2,15 +2,16 @@ import { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { Icon, Modal, TextInput, useToast } from "@getpaseo/plugin/client/ui";
 import { useRpc } from "@getpaseo/plugin/client";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import type { Obligation, Workspace } from "../shared/model";
 import { followUpObligations } from "../shared/follow-up";
 import { taskSchedule, type TaskTrigger } from "../shared/task-trigger";
 import { taskTriggerRpc } from "../shared/contracts";
-import { Button, Card, Chip, FoldRow, errorText, text, type Theme, SubmitScope } from "./kit";
+import { Button, Card, Chip, FoldRow, text, type Theme, SubmitScope } from "./kit";
 import { Spinner } from "./motion";
 import type { Colors } from "./theme";
 import { RichText } from "./rich-text";
+import { runAction } from "./toasts";
 
 const finished = (o: Obligation) => ["done", "waived"].includes(o.status);
 
@@ -22,7 +23,12 @@ function TriggerEditor({ obligation: o, workspace, theme, compact }: { obligatio
   const rpc = useRpc(taskTriggerRpc); const cache = useQueryClient(); const toast = useToast();
   const gated = event === "merge" || event === "deploy";
   const valid = !gated || prs.length > 0 && /^\d+$/.test(days) && Number(days) <= 3650;
-  const save = useMutation({ mutationFn: () => rpc({ workspaceId: workspace.id, obligationId: o.id, expectedRevision: o.revision, afterPrs: event === "now" ? [] : prs, trigger: event === "manual" ? null : { event, delayDays: gated ? Number(days) : 0 } }), onSuccess: async () => { toast.show("Schedule saved", { variant: "success" }); await cache.invalidateQueries(); } });
+  // Quick action: Save doesn't wait on the server; a toast confirms it, or says what failed with Retry.
+  const save = { isPending: false, mutate: () => void runAction({
+    label: "Schedule", toast, run: () => rpc({ workspaceId: workspace.id, obligationId: o.id, expectedRevision: o.revision, afterPrs: event === "now" ? [] : prs, trigger: event === "manual" ? null : { event, delayDays: gated ? Number(days) : 0 } }),
+    success: () => ({ message: "Schedule saved" }), onSuccess: () => { void cache.invalidateQueries(); }, onError: () => { void cache.invalidateQueries(); },
+    failure: `Schedule for ${o.title} not saved`,
+  }) };
   const busy = save.isPending;
   const options = [["manual", "Manual"], ["now", "Now"], ["merge", "After merge"], ["deploy", "After deploy"]] as const;
   return <SubmitScope enabled={!busy && valid} onSubmit={() => save.mutate()} style={{ gap: 10 }}>
@@ -31,7 +37,7 @@ function TriggerEditor({ obligation: o, workspace, theme, compact }: { obligatio
       <Text style={t.meta}>Manual tasks wait for you. Scheduled tasks join the next repair batch when they come due, and still follow your Auto-send choice.</Text>
     </View>
     <View accessibilityRole="radiogroup" accessibilityLabel={`Send trigger for ${o.title}`} style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-      {options.map(([value, label]) => <Pressable key={value} accessibilityRole="radio" accessibilityLabel={label} aria-checked={event === value} accessibilityState={{ checked: event === value, disabled: busy }} disabled={busy} onPress={() => { setEvent(value); save.reset(); }}
+      {options.map(([value, label]) => <Pressable key={value} accessibilityRole="radio" accessibilityLabel={label} aria-checked={event === value} accessibilityState={{ checked: event === value, disabled: busy }} disabled={busy} onPress={() => { setEvent(value); }}
         style={{ minHeight: compact ? 44 : 30, justifyContent: "center", paddingHorizontal: 11, borderRadius: 999, borderWidth: 1, borderColor: event === value ? c.accent : c.border, backgroundColor: event === value ? c.accent : "transparent" }}>
         <Text style={{ fontSize: 12, fontWeight: "600", color: event === value ? c.accentForeground : c.foreground }}>{label}</Text>
       </Pressable>)}
@@ -51,7 +57,6 @@ function TriggerEditor({ obligation: o, workspace, theme, compact }: { obligatio
         </Pressable>)}
       </View>
     </>}
-    {save.error && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusDanger }]}>{errorText(save.error)}</Text>}
     <Button shortcut title="Save schedule" kind="primary" accessibilityLabel={`Save trigger for ${o.title}`} disabled={busy || !valid} loading={busy} onPress={() => save.mutate()} theme={theme} compact={compact} />
   </SubmitScope>;
 }

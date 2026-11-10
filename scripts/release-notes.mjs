@@ -2,6 +2,9 @@
 // Release notes: `node scripts/release-notes.mjs <version> [--date yyyy-mm-dd] [--allow-empty]` moves changes/*.md
 // under a new `## <version> (<date>)` heading at the top of CHANGELOG.md and deletes those fragments. Betas (any
 // version with a prerelease part) get no section: the fragments stay in changes/ for the next stable release.
+// A release candidate of a major (2.0.0-rc.0) is not a beta: it writes or requires that major's section (`## 2.0.0`),
+// the one the rc and the final 2.0.0 both carry. When that section already exists (written by hand, or by an earlier
+// rc), new fragments are appended to it; `--curated` deletes them instead, for notes already folded into the section.
 // `node scripts/release-notes.mjs --check` validates CHANGELOG.md and pending fragments without writing.
 import { readFile, readdir, writeFile, unlink } from "node:fs/promises";
 import { join, dirname } from "node:path";
@@ -47,6 +50,14 @@ function versionsIn(changelog) {
   return changelog.split("\n").map(l => HEADING.exec(l)?.[1]).filter(Boolean);
 }
 
+/** The section a version carries: X.0.0-rc.N carries X.0.0's (see notesVersion in shared/changelog.ts). */
+export function notesVersion(version) {
+  const m = /^(\d+)\.0\.0-rc\.\d+$/.exec(version);
+  return m ? `${m[1]}.0.0` : version;
+}
+/** Betas (any prerelease that isn't a major's rc) get no notes. */
+export const isBeta = version => isPrerelease(version) && notesVersion(version) === version;
+
 async function check() {
   const problems = [];
   const changelog = await readFile(CHANGELOG, "utf8");
@@ -69,18 +80,37 @@ async function check() {
   if (!pkg.files.includes("CHANGELOG.md")) problems.push("package.json files must include CHANGELOG.md");
   // A stable bump without its notes would ship an empty "What's new". Run release:notes before bumping. Betas have
   // no notes of their own; their changes ship in the next stable release's section.
-  if (!isPrerelease(pkg.version) && !seen.has(pkg.version)) problems.push(`CHANGELOG.md has no section for package.json's ${pkg.version}. Run npm run release:notes ${pkg.version} before the bump.`);
+  const needs = notesVersion(pkg.version);
+  if (!isBeta(pkg.version) && !seen.has(needs)) problems.push(`CHANGELOG.md has no section for ${needs === pkg.version ? `package.json's ${needs}` : `${needs}, which package.json's ${pkg.version} carries`}. Run npm run release:notes ${pkg.version} before the bump.`);
   return problems;
 }
 
 export const isPrerelease = version => /^\d+\.\d+\.\d+-/.test(version);
 
-async function release(version, date, allowEmpty) {
+export async function release(version, date, allowEmpty, { curated = false } = {}) {
   if (!SEMVER.test(version)) throw new Error(`Not a version: ${version}`);
-  if (isPrerelease(version)) return { version, date, skipped: true, fragments: (await fragments()).map(f => f.name) };
+  if (isBeta(version)) return { version, date, skipped: true, fragments: (await fragments()).map(f => f.name) };
+  const target = notesVersion(version);
   const changelog = await readFile(CHANGELOG, "utf8");
-  if (versionsIn(changelog).includes(version)) throw new Error(`CHANGELOG.md already has ${version}`);
   const pending = await fragments();
+  if (versionsIn(changelog).includes(target)) {
+    if (!/^\d+\.0\.0$/.test(target)) throw new Error(`CHANGELOG.md already has ${version}`);
+    // The major's section exists (hand-written, or from an earlier rc): add new fragments to it, or with --curated
+    // drop them because the section already says it. A stable release of an rc'd major needs nothing else.
+    if (curated || !pending.length) { await Promise.all(pending.map(f => unlink(join(CHANGES, f.name)))); return { version, target, date, existing: true, bullets: 0, fragments: pending.map(f => f.name) }; }
+    const bullets = pending.flatMap(f => f.bullets);
+    for (const b of bullets) { const p = lintBullet(b); if (p.length) throw new Error(`${p.join(", ")}: ${b}`); }
+    const lines = changelog.split("\n");
+    const at = lines.findIndex(l => HEADING.exec(l)?.[1] === target);
+    let end = at + 1;
+    while (end < lines.length && !HEADING.test(lines[end]) && !/^\s*<details/i.test(lines[end]) && !/^#{1,2}\s/.test(lines[end])) end++;
+    let last = end; while (last > at + 1 && !lines[last - 1].trim()) last--;
+    lines.splice(last, 0, ...bullets.map(b => `- ${b}`));
+    await writeFile(CHANGELOG, lines.join("\n"));
+    await Promise.all(pending.map(f => unlink(join(CHANGES, f.name))));
+    return { version, target, date, existing: true, bullets: bullets.length, fragments: pending.map(f => f.name) };
+  }
+  version = target;
   const bullets = pending.flatMap(f => f.bullets);
   if (!bullets.length && !allowEmpty) throw new Error("No release note fragments in changes/. Add one, or pass --allow-empty for a release with no user-facing change.");
   const lines = bullets.length ? bullets : ["Small fixes and improvements."];
@@ -107,8 +137,9 @@ if (isMain) {
       const di = args.indexOf("--date");
       const date = di >= 0 ? args[di + 1] : new Date().toISOString().slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? "")) throw new Error("--date must be yyyy-mm-dd");
-      const result = await release(version, date, args.includes("--allow-empty"));
-      if (result.skipped) console.log(`${result.version} is a beta: no release notes. ${result.fragments.length} fragment(s) stay in changes/ for the next stable release.`);
+      const result = await release(version, date, args.includes("--allow-empty"), { curated: args.includes("--curated") });
+      if (result.existing) console.log(`CHANGELOG.md: ${result.target} already has its section; ${result.bullets ? `added ${result.bullets} note(s) from` : "consumed"} ${result.fragments.length} fragment(s).`);
+      else if (result.skipped) console.log(`${result.version} is a beta: no release notes. ${result.fragments.length} fragment(s) stay in changes/ for the next stable release.`);
       else console.log(`CHANGELOG.md: ${result.version} (${result.date}), ${result.bullets} note(s) from ${result.fragments.length} fragment(s)`);
     }
   } catch (e) { console.error(e.message); process.exit(1); }

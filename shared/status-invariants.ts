@@ -109,6 +109,18 @@ export function violations(w: Workspace, now: number): { id: string; detail: str
 }
 
 /**
+ * `brief-pr-facts-referenced`: a card shows PR state only for a PR it references: one it links, or, linking none, the
+ * PR its review or reviewers ask is about. Session Guard's limit fact on a paused card isn't PR state.
+ */
+export function briefFactsViolations(b: Pick<Brief, "id" | "kind" | "source" | "facts" | "factsPr" | "links">): { id: string; detail: string }[] {
+  if (!b.facts.length || b.source === "paused") return [];
+  if (!b.factsPr) return [{ id: "brief-pr-facts-referenced", detail: `${b.id} shows PR state without naming the PR` }];
+  const linked = b.links.flatMap(l => l.pr ? [l.pr] : []);
+  const ok = linked.length ? linked.includes(b.factsPr) : b.kind === "review" || b.kind === "reviewers";
+  return ok ? [] : [{ id: "brief-pr-facts-referenced", detail: `${b.id} shows ${b.factsPr}'s state but doesn't reference it` }];
+}
+
+/**
  * Needs-you cards (briefs live in the inbox store, not the workspace). An agent's current card follows its linked
  * questions: while one is open on the server, only the developer closes the card. `brief-follows-questions`.
  */

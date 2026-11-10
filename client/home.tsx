@@ -31,6 +31,7 @@ import { WhatsNewGate } from "./release-notes";
 import { useRowMenu } from "./row-actions";
 import { laterChoices } from "../shared/row-menu";
 import { RichText } from "./rich-text";
+import { ToastHost, useQuestionOpener } from "./toasts";
 
 export const HOME_SCREEN = "follow-through";
 
@@ -135,6 +136,7 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
   const updateNotice = <UpdateNotice theme={theme} compact={compact} openSettings={deps.openSettings} />;
   const updateSheets = <>
     <WhatsNewGate surface="home" theme={theme} compact={compact} />
+    <ToastHost theme={theme} compact={compact} />
   </>;
   if (params.view === "log") return <LogView theme={theme} compact={compact} sources={deps.sources} onHome={deps.openHome} onOpen={key => { setSelected(key); deps.openHome(); }} />;
 
@@ -287,6 +289,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
   const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), refetchInterval: BROWSER_POLL_MS, enabled: !!sheet });
   const [question, setQuestion] = useState<string | null>(() => ask?.id ?? null);
   useEffect(() => { if (ask) setQuestion(ask.id); }, [ask?.n]); // eslint-disable-line react-hooks/exhaustive-deps
+  useQuestionOpener(w?.id, setQuestion);
   const [laterOpen, setLaterOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const b = brief.data?.brief?.state === "open" ? brief.data.brief : null;

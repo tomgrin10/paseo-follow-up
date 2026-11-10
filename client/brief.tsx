@@ -3,7 +3,7 @@ import { browserKey, BROWSER_POLL_MS } from "./keys";
 import { Platform, Pressable, Text, View, useWindowDimensions } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { openExternalUrl, useRpc, type PluginClientContext, type PluginTimelineItemProps } from "@getpaseo/plugin/client";
-import { Icon, TextInput, copyText } from "@getpaseo/plugin/client/ui";
+import { Icon, TextInput, copyText, useToast } from "@getpaseo/plugin/client/ui";
 import { BRIEF_KIND, BRIEF_VERSION, askedDecisions, pickedCount, briefSchema, collapsedLine, extrasFit, hasOriginal, nothingNeededLine, isTight, pastRows, selectsFirst, sendBar, type Brief, type BriefDecision, type BriefMove } from "../shared/brief";
 import { age } from "../shared/inbox";
 import { briefKey, HEADLINE_WORD } from "../shared/headline";
@@ -17,6 +17,7 @@ import { SubmitScope, submitHint, text, useNow } from "./kit";
 import { RichText } from "./rich-text";
 import { PrSheet } from "./pr-sheet";
 import { isLight, withAlpha, type Colors } from "./theme";
+import { runAction, runUndoable } from "./toasts";
 
 /**
  * The brief card (design §2): the ask in one line, decisions as option rows, only the context needed, and the one
@@ -45,9 +46,9 @@ const keyboardFocus = () => { try { return !!(globalThis as { document?: { activ
 const ring = (focused: boolean | undefined, c: Colors) => focused && Platform.OS === "web" && keyboardFocus() ? ({ outlineWidth: 2, outlineStyle: "solid", outlineColor: withAlpha(c.accent, 0.6), outlineOffset: 2 } as object) : {};
 const letters = (d: BriefDecision) => { const l = d.options.map(o => o.letter); return l.length > 1 ? `${l.slice(0, -1).join(", ")} or ${l.at(-1)}` : l[0] ?? ""; };
 
-function Btn({ label, icon, primary, onPress, c, compact, disabled, shortcut = false }: { label: string; icon?: string; primary?: boolean; onPress: () => void; c: Colors; compact: boolean; disabled?: boolean; shortcut?: boolean }) {
+function Btn({ label, icon, primary, onPress, c, compact, disabled, shortcut = false, hint }: { label: string; icon?: string; primary?: boolean; onPress: () => void; c: Colors; compact: boolean; disabled?: boolean; shortcut?: boolean; hint?: string }) {
   const fg = primary ? c.accentForeground : c.foreground;
-  return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress}
+  return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityHint={hint} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress}
     style={({ hovered, pressed, focused }: { hovered?: boolean; pressed: boolean; focused?: boolean }) => ({ ...ring(focused, c), minHeight: compact ? 44 : 32, paddingHorizontal: compact ? 14 : 12, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 6, justifyContent: "center", opacity: disabled ? 0.5 : 1,
       backgroundColor: primary ? (pressed ? withAlpha(c.accent, 0.85) : hovered ? withAlpha(c.accent, 0.92) : c.accent) : pressed || hovered ? c.surface2 : "transparent",
       borderWidth: primary ? 0 : 1, borderColor: c.border, flexGrow: compact ? 1 : 0 })}>
@@ -235,14 +236,15 @@ function Past({ b, c, now, compact, height }: { b: Brief; c: Colors; now: number
   const picked = answered && asked.some(d => d.chosen);
   const icon = b.state === "superseded" ? "History" : "CircleCheck";
   const color = b.state === "superseded" ? c.foregroundMuted : c.statusSuccess;
-  const right = answered && b.outcomeAt ? `Answered ${clock(b.outcomeAt)}` : age(b.outcomeAt ?? b.at, now);
+  // A Done card already says "Done" as its outcome; its time stands alone rather than repeating it.
+  const right = answered && b.outcomeAt ? (b.outcome === "Done" ? clock(b.outcomeAt) : `Answered ${clock(b.outcomeAt)}`) : age(b.outcomeAt ?? b.at, now);
   const body = expanded && <View style={{ gap: 10, paddingTop: 4 }}>
     <BriefBody b={b} c={c} compact={compact} tight={false} embedded height={height} mode="readonly" picks={{}} onPick={() => undefined} busy={null} />
   </View>;
   if (!picked) return <View accessibilityLiveRegion="polite" style={{ marginVertical: 10, gap: 6, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: c.border }}>
     <View style={{ flexDirection: "row", gap: 10, alignItems: answered ? "flex-start" : "center", minHeight: 24 }}>
       <View style={{ paddingTop: answered ? 2 : 0 }}><Icon name={icon} size={15} color={color} /></View>
-      {answered
+      {answered && b.outcome !== "Done"
         ? <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
             <RichText linkColor={c.foreground} numberOfLines={expanded ? undefined : 1} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{b.ask}</RichText>
             <Text style={{ color: c.foreground, fontSize: 14, lineHeight: 20, fontWeight: "600" }}>{b.outcome}</Text>
@@ -250,7 +252,7 @@ function Past({ b, c, now, compact, height }: { b: Brief; c: Colors; now: number
         : <Text numberOfLines={expanded ? undefined : 1} style={{ flex: 1, minWidth: 0, color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>{collapsedLine(b)}</Text>}
       <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontVariant: ["tabular-nums"] }}>{right}</Text>
     </View>
-    {hasOriginal(b) && <View style={{ paddingLeft: 25 }}><Reveal label={answered ? "Show full question" : "Show original"} open={expanded} onPress={() => setExpanded(v => !v)} c={c} compact={compact} /></View>}
+    {hasOriginal(b) && <View style={{ paddingLeft: 25 }}><Reveal label={answered ? (b.kind === "action" ? "Show full ask" : "Show full question") : "Show original"} open={expanded} onPress={() => setExpanded(v => !v)} c={c} compact={compact} /></View>}
     {body}
   </View>;
   // Answered with picks: the ask, then each decision's question and the picked option, so the answer is never
@@ -281,28 +283,44 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   const browserRead = useRpc(browserStatusRpc);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
   const [why, setWhy] = useState(false);
+  // Done collapses the card the moment it's pressed; the server's answered brief replaces this when the send lands.
+  const [marked, setMarked] = useState<string | null>(null);
   const picks = usePicks(b.id);
   const words = useWords(b.id);
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" } | null>(null);
   const workspace = b.workspaceId ? deps.workspace(b.workspaceId) : undefined;
   const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), refetchInterval: BROWSER_POLL_MS, enabled: !!sheet });
   if (b.state !== "open") return <Past b={b} c={c} now={now} compact={compact} height={height} />;
+  if (marked) return <Past b={{ ...b, state: "answered", outcome: "Done", outcomeAt: marked }} c={c} now={now} compact={compact} height={height} />;
 
   const attention = c.statusWarning;
   const acts = b.flagged && ACTS.includes(b.kind);
   const tone = acts || b.kind === "done" || b.kind === "review" || b.kind === "error" ? kindTone(b.kind, c) : c.foregroundMuted;
   const ageText = age(b.at, now);
   const border = acts ? withAlpha(attention, isLight(c) ? 0.5 : 0.45) : c.border;
-  const run = async (key: string, work: () => Promise<unknown>) => {
+  // Every send from the card (a pick, Something else, Send answers, the keyboard's Send) goes through runAction: the
+  // card keeps the picks and words and says what failed, and the toast offers Retry. Success is the card itself.
+  const run = async (key: string, work: () => Promise<unknown>, failure = "Your answer wasn't sent") => {
     if (busy) return; setBusy(key); setError(null);
-    try { await work(); } catch (e) { setError(errorText(e)); } finally { setBusy(null); }
+    await runAction({ label: "Brief", toast, run: work, success: () => null, onError: e => setError(errorText(e)), failure });
+    setBusy(null);
+  };
+  // Done: "Done: <ask>" can't be unsent, so it goes out when the toast's Undo window ends (runUndoable). A failure
+  // reopens the card with the reason; the toast keeps Retry, and Open brings the agent's chat back.
+  const markDone = () => {
+    if (busy || marked) return;
+    setError(null); setMarked(new Date().toISOString());
+    runUndoable("Telling the agent it's done", { label: "Done", toast, run: () => act({ agentId, briefId: b.id, move: "done" }), success: "Marked done. The agent has it.",
+      failure: "Done not sent", open: () => deps.openAgent(agentId), onError: e => { setMarked(null); setError(errorText(e)); } }, () => setMarked(null), `done:${b.id}`);
   };
   const press = (m: BriefMove) => {
     if ((m.kind === "merge" || m.kind === "add_reviewers") && m.prKey) { if (workspace?.prs.some(p => p.key === m.prKey)) setSheet({ key: m.prKey, intent: m.kind === "merge" ? "merge" : "reviewers" }); else if (b.workspaceId) deps.openPanel(b.workspaceId); }
     else if (m.kind === "open_pr" && m.url) void openExternalUrl(m.url).catch(() => undefined);
     else if (m.kind === "sign_off_next") { deps.signOff(agentId); deps.openNext(agentId); }
-    else if (m.kind === "retry") void run("retry", () => act({ agentId, briefId: b.id, move: "retry" }));
+    else if (m.kind === "retry") void run("retry", () => act({ agentId, briefId: b.id, move: "retry" }), "Retry didn't start");
+    else if (m.kind === "done") markDone();
     else if (m.kind === "copy_error" && b.mono) void copyText(b.mono).catch(() => undefined);
     else if (m.kind === "open_subagent" && m.agentId) deps.openAgent(m.agentId);
   };
@@ -331,7 +349,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 10, rowGap: 8 }}>
         <RichText numberOfLines={3} tooltip={b.ask}
           style={{ flexGrow: 1, flexShrink: 1, flexBasis: 200, minWidth: 0, color: acts ? c.foreground : c.foregroundMuted, fontSize: 14, lineHeight: 20, fontWeight: acts ? "600" : "400" }}>{b.ask}</RichText>
-        {!embedded && moves.map(m => <Btn key={m.kind} label={busy === m.kind ? `${m.label}…` : m.label} icon={MOVE_ICON[m.kind]} disabled={!!busy} onPress={() => press(m)} c={c} compact={compact} />)}
+        {!embedded && moves.map(m => <Btn key={m.kind} label={busy === m.kind ? `${m.label}…` : m.label} icon={MOVE_ICON[m.kind]} disabled={!!busy} onPress={() => press(m)} c={c} compact={compact} hint={MOVE_HINT[m.kind]} />)}
       </View>
       {!!error && <Text accessibilityRole="alert" style={{ color: c.statusDanger, fontSize: 13, lineHeight: 18 }}>{error}</Text>}
     </View>;
@@ -375,7 +393,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
       {multi && <SendBar b={b} picks={sendable} busy={busy} error={error} onSend={sendAll} c={c} compact={compact} />}
 
       {!embedded && moves.length > 0 && <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-        {moves.map((m, i) => <Btn key={m.kind} label={busy === m.kind ? `${m.label}…` : m.label} icon={MOVE_ICON[m.kind]} primary={i === 0 && !multi} disabled={!!busy} onPress={() => press(m)} c={c} compact={compact} />)}
+        {moves.map((m, i) => <Btn key={m.kind} label={busy === m.kind ? `${m.label}…` : m.label} icon={MOVE_ICON[m.kind]} primary={i === 0 && !multi} disabled={!!busy} onPress={() => press(m)} c={c} compact={compact} hint={MOVE_HINT[m.kind]} />)}
       </View>}
 
       {!!error && !multi && <Text accessibilityRole="alert" style={{ color: c.statusDanger, fontSize: 13, lineHeight: 18 }}>{error}</Text>}
@@ -394,7 +412,8 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   </View>;
 }
 
-const MOVE_ICON: Record<BriefMove["kind"], string> = { merge: "GitMerge", open_pr: "ExternalLink", sign_off_next: "ArrowRight", retry: "RotateCcw", copy_error: "Copy", open_subagent: "SquareArrowOutUpRight", add_reviewers: "UserPlus" };
+const MOVE_HINT: Partial<Record<BriefMove["kind"], string>> = { done: "Tells the agent you did this. Undo for 6 seconds." };
+const MOVE_ICON: Record<BriefMove["kind"], string> = { merge: "GitMerge", open_pr: "ExternalLink", sign_off_next: "ArrowRight", retry: "RotateCcw", copy_error: "Copy", open_subagent: "SquareArrowOutUpRight", add_reviewers: "UserPlus", done: "Check" };
 
 export function contributeBrief(client: PluginClientContext, deps: BriefDeps) {
   const Component = (props: PluginTimelineItemProps<Brief>) => <BriefCard {...props} deps={deps} />;

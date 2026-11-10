@@ -86,6 +86,8 @@ export type BriefHost = {
   call(agentId: string): Promise<NeedsYouRecord | null>;
   /** The agent's newest open PR in a tracked workspace, with facts. */
   pr(agentId: string, event?: string | null): Promise<PrState | null>;
+  /** Every open PR in the agent's tracked workspace, each with its own facts: a brief that links one shows that PR. */
+  prs?(agentId: string): Promise<PrState[]>;
   /** The tracked workspace the agent is main in, for PR moves and questions. */
   workspaceId?(agentId: string): Promise<string | null>;
   /** A brief collapsed; its decisions stored as questions may need settling. */
@@ -231,12 +233,12 @@ export class Inbox {
   currentTurn(agentId: string): { turnId: string | null; at: number } | null { return this.turns.get(agentId) ?? null; }
 
   /** The sources every brief has: the agent's needs_you for this turn and its PR state. */
-  private async sources(agentId: string, since: number | null, turnId: string | null): Promise<Pick<BriefSources, "agent" | "pr">> {
+  private async sources(agentId: string, since: number | null, turnId: string | null): Promise<Pick<BriefSources, "agent" | "pr" | "prs">> {
     const b = this.o.briefs;
     if (!b) return {};
-    const [record, pr] = await Promise.all([b.call(agentId).catch(() => null), b.pr(agentId).catch(() => null)]);
+    const [record, pr, prs] = await Promise.all([b.call(agentId).catch(() => null), b.pr(agentId).catch(() => null), b.prs?.(agentId).catch(() => []) ?? []]);
     const current = record && (turnId && record.turnId === turnId || since !== null && record.at >= since) ? record.call : null;
-    return { agent: current, pr };
+    return { agent: current, pr, prs };
   }
 
   /** A decider that creates a brief, flagged when the event's reason is newly on the entry. */
@@ -436,7 +438,7 @@ export class Inbox {
    * The developer clicked an option or a move on the brief. Validated against the stored brief (a stale card is refused),
    * logged in the ledger as the developer's (so the classifier clears the flag, #11), then sent, then collapsed.
    */
-  async briefAction(agentId: string, input: { briefId: string; decisionId?: string; choice?: string; words?: string; choices?: { decisionId: string; choice: string; words?: string }[]; move?: "retry" }, send: (text: string, messageId: string) => Promise<void>, actor: Actor = DEVELOPER): Promise<Brief> {
+  async briefAction(agentId: string, input: { briefId: string; decisionId?: string; choice?: string; words?: string; choices?: { decisionId: string; choice: string; words?: string }[]; move?: "retry" | "done" }, send: (text: string, messageId: string) => Promise<void>, actor: Actor = DEVELOPER): Promise<Brief> {
     const state = await this.store.snapshot();
     const b = state.entries[agentId]?.brief;
     if (!b || b.id !== input.briefId) throw new Error("This brief was replaced by a newer one. Read the newest card.");
@@ -445,6 +447,9 @@ export class Inbox {
     if (input.move === "retry") {
       if (b.kind !== "error") throw new Error("Only a failed turn can be retried from its brief.");
       text = "Retry the turn that failed. Pick up from the last step that finished."; event = { type: "message", text: null };
+    } else if (input.move === "done") {
+      if (b.kind !== "action") throw new Error("Only an Action brief can be marked done. Answer a decision with its options.");
+      text = `Done: ${b.ask}`; event = { type: "done" };
     } else if (input.choices) {
       // A multi-decision card sends every pick in one message; at least one, each a real option of its decision.
       const picks: Record<string, string> = {}; const words: Record<string, string> = {};
@@ -532,7 +537,8 @@ export class Inbox {
       const open = next.brief?.state === "open" ? next.brief : null;
       // Reviewers replace only a card that asks nothing (a plain finish); an agent's own ask stays on top.
       if (event.type === "reviewers") return !open || open.kind === "unknown" || open.kind === "done" ? create(prev, next, at) : null;
-      return open ? (pr ? { type: "facts", facts: pr.facts } : null) : create(prev, next, at);
+      // Only a card about this PR takes its new state; one about something else keeps what it has (briefStep checks).
+      return open ? (pr ? { type: "facts", prKey: pr.key, facts: pr.facts } : null) : create(prev, next, at);
     };
   }
 
