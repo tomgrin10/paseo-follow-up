@@ -49,7 +49,7 @@ Follow-up can update itself. **Settings → Updates** has three modes:
 - **Tell me** shows the new version in Settings and as one line on Home. You choose when with **Install now**. It is the default on hosts that had Follow-up before updates existed.
 - **Off** never asks npm on its own, not even when Settings opens. **Check now** still works.
 
-Follow-up asks npm about once every six hours (one small request, nothing when unchanged), and opening Settings → Updates checks at most once a minute. **Channel** picks Stable (`latest`) or Beta; it starts on Beta when you run a beta, and never offers a stable older than what you run.
+Follow-up asks npm about once every six hours (one small request, nothing when unchanged), opening Settings → Updates checks at most once a minute, and **Check now** always asks. **Channel** picks Stable (`latest`) or Beta; it starts on Beta when you run a beta, and never offers a stable older than what you run.
 
 Before installing a version on its own, Follow-up reads the version's npm provenance and checks that it was built by this repository's GitHub workflow and is the exact file npm serves. That file's checksum is then pinned for the install. Follow-up does not verify the provenance signature itself, so this guards against a version published by hand or from another repository, not against a compromised registry. A version that fails the check is never installed from Settings; install it by hand with `paseo plugin update follow-through --version <version>` only if you trust it.
 

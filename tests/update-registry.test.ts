@@ -47,7 +47,11 @@ test("registry: at most one scheduled request per six hours; Settings and Check 
   clock.t += 30_000; await c.check("settings");
   assert.equal(c.requests, 2, "opening Settings right after a check reuses it");
   clock.t += 30_000; await c.check("manual");
-  assert.equal(c.requests, 3);
+  assert.equal(c.requests, 3, "Check now always asks");
+  clock.t += 1_000; await c.check("manual");
+  assert.equal(c.requests, 3, "a double press is one request");
+  clock.t += 5_000; await c.check("manual");
+  assert.equal(c.requests, 4);
   // A day of idle ticks every 15 s costs four requests.
   const start = c.requests;
   for (let i = 0; i < (24 * H) / 15_000; i++) { clock.t += 15_000; await c.check("scheduled"); }
