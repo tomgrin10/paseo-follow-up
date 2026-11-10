@@ -85,7 +85,7 @@ export function Setup({ theme, compact, view, deps }: { theme: Theme; compact: b
     : <HelpersStep theme={theme} compact={compact} deps={deps} checks={checks.data?.checks ?? null} />;
   const lead: Record<OnboardingStep, string> = {
     intro: "It follows your agents' pull requests until the work is done, sends fixes back to them, and asks you only for decisions.",
-    checks: "Follow-up reads PRs with the GitHub CLI, and its helper agents run on Claude or Codex. Checking is free.",
+    checks: "Follow-up reads PRs with the GitHub CLI, and its helper agents run on the providers you pick. Checking is free.",
     defaults: "These are on now. Change anything here; it saves as you go, and Settings has the same switches.",
     shipping: "Follow-up merges and tracks PRs the way each repository already works. It picked these; change one if it's wrong.",
     reviewers: "When you press Add reviewers on a PR, Follow-up asks these people. Set a default for all repositories, or a list for one. Until then, PRs without reviewers show in Needs you.",

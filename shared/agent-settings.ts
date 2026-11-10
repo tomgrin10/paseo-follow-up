@@ -15,9 +15,11 @@ import { waitStatusSchema } from "./wait";
 
 export const AGENT_ROLES = ["about", "overseer", "recovery", "ranker"] as const;
 export type AgentRole = typeof AGENT_ROLES[number];
-/** One-shot jobs run a headless CLI; only these providers have one. */
-export const JOB_PROVIDERS = ["claude", "codex"] as const;
-export type JobProvider = typeof JOB_PROVIDERS[number];
+/**
+ * One-shot jobs run on any Paseo provider. These two have a headless CLI fast path (server/ai-jobs.ts); every other
+ * provider runs the job as a short-lived hidden agent (server/job-agent.ts).
+ */
+export const CLI_JOB_PROVIDERS = ["claude", "codex"] as const;
 export const isJobRole = (role: AgentRole) => role === "about" || role === "ranker";
 
 const name = z.string().trim().min(1).max(120).regex(/^[\w.:@/[\]-]+$/);
@@ -141,7 +143,7 @@ export function roleSummary(c: RoleConfig, labels?: { provider?: string | null; 
 }
 
 /** What the Settings screen gets from the live provider catalog. */
-export type CatalogModel = { id: string; label: string; isDefault: boolean; thinking: { id: string; label: string; isDefault: boolean }[] };
+export type CatalogModel = { id: string; label: string; isDefault: boolean; description?: string; thinking: { id: string; label: string; isDefault: boolean }[] };
 export type CatalogProvider = { id: string; label: string; available: boolean; reason: string | null; models: CatalogModel[]; modes: { id: string; label: string }[]; defaultMode: string | null };
 export type Catalog = { providers: CatalogProvider[]; error: string | null; fetchedAt: string | null };
 
@@ -149,7 +151,7 @@ export const roleConfigSchema = z.object({
   role: z.enum(AGENT_ROLES), provider: z.string(), model: z.string().nullable(), thinking: z.string().nullable(), mode: z.string().nullable(), same: z.boolean(),
   dailyCap: z.number().nullable(), maxPromptChars: z.number().nullable(), cadenceMinutes: z.number().nullable(), isDefault: z.boolean(),
 });
-const catalogModelSchema = z.object({ id: z.string(), label: z.string(), isDefault: z.boolean(), thinking: z.array(z.object({ id: z.string(), label: z.string(), isDefault: z.boolean() })) });
+const catalogModelSchema = z.object({ id: z.string(), label: z.string(), isDefault: z.boolean(), description: z.string().optional(), thinking: z.array(z.object({ id: z.string(), label: z.string(), isDefault: z.boolean() })) });
 export const catalogSchema = z.object({
   providers: z.array(z.object({ id: z.string(), label: z.string(), available: z.boolean(), reason: z.string().nullable(), models: z.array(catalogModelSchema), modes: z.array(z.object({ id: z.string(), label: z.string() })), defaultMode: z.string().nullable() })),
   error: z.string().nullable(), fetchedAt: z.string().nullable(),
