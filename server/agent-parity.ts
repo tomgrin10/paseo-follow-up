@@ -89,6 +89,8 @@ export const RPC_TOOLS: readonly RpcTool[] = [
   // PR sheet: what the merge controls see (Send to Paseo, Graphite in Chrome)
   { name: "pr_controls", rpc: "follow.pr-control-status", kind: "read", input: z.strictObject({ workspaceId: id, prKey: z.string().trim().regex(/^[\w.-]+\/[\w.-]+#\d+$/) }) },
   { name: "browser_status", rpc: "follow.browser-status", kind: "read", input: none },
+  // What's new: the installed version, the one before it and when, and every shipped note (newest first)
+  { name: "release_notes", rpc: "follow.release-notes", kind: "read", input: none },
   // Settings → Permissions: trust bypass agents' approvals
   { name: "trust_bypass_status", rpc: "follow.trust-bypass", kind: "read", input: none },
 ];
@@ -145,4 +147,6 @@ export const PARITY: Record<string, { tools: readonly string[]; note?: string } 
   "follow.set-task-trigger": { tools: ["set_task_trigger", "update_obligation"] },
   "follow.trust-bypass": { tools: ["trust_bypass_status", "display_settings"] },
   "settings.display": { tools: ["display_settings", "set_display"] },
+  "follow.release-notes": { tools: ["release_notes"] },
+  "follow.whats-new-seen": { exempt: "Records that a person closed What's new on a device; an agent reading the notes isn't someone seeing the sheet." },
 };

@@ -1,0 +1,2 @@
+- After an update, "What's new" shows the notes for every version since you last looked, once on each device.
+- Home's last line shows your Follow-up version, with the full release notes one tap away.

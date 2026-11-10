@@ -9,6 +9,7 @@ import { useSidebarViewActive } from "./inbox";
 import { homeCounts } from "../shared/home";
 import { useHomeModel, type HomeSources } from "./home-data";
 import { onVisible, whileVisible } from "./visibility";
+import { WhatsNewGate } from "./release-notes";
 
 /** The backstop poll; agent changes `nudge` it sooner (1.4.0). Nothing while the app is hidden. */
 const POLL_MS = 15_000;
@@ -82,15 +83,16 @@ export function headerIcon(store: LiveStore) {
  * way into the full screen.
  */
 export function sidebarItem(sources: HomeSources, screenId: string) {
-  return function FollowSidebarItem({ currentScreen, openScreen, theme }: PluginSidebarItemProps) {
+  return function FollowSidebarItem({ currentScreen, openScreen, theme, layout }: PluginSidebarItemProps) {
     // The same counts as Home's status strip and the brief headline.
     const count = homeCounts(useHomeModel(sources)).needs;
     const inSidebarView = useSidebarViewActive();
     const c = theme.colors;
     const shown = count > 0 && !inSidebarView;
-    return <SidebarRow icon="GitPullRequest" active={currentScreen?.screenId === screenId} onPress={() => openScreen({ screenId, params: { section: "needs" } })}
+    // What's new mounts here too (the sidebar is always there), so it shows even if you live in agent chats.
+    return <><WhatsNewGate surface="sidebar" theme={theme} compact={layout.compact} /><SidebarRow icon="GitPullRequest" active={currentScreen?.screenId === screenId} onPress={() => openScreen({ screenId, params: { section: "needs" } })}
       trailing={shown ? <View accessibilityLabel={`${count} need${count === 1 ? "s" : ""} you`} style={{ minWidth: 18, height: 18, paddingHorizontal: 5, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: c.statusWarning }}>
         <Text style={{ color: c.surface0, fontSize: 11, lineHeight: 14, fontWeight: "700", fontVariant: ["tabular-nums"] }}>{count}</Text>
-      </View> : undefined} />;
+      </View> : undefined} /></>;
   };
 }

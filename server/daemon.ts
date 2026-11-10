@@ -38,6 +38,7 @@ export interface Daemon {
   sendMessage(id: string, text: string, options: { messageId: string; activeTurnBehavior: "steer" }): Promise<void>;
   setWorkspaceLabel(input: { workspaceId: string; label: { name: string; color: "emerald" }; assigned: boolean }): Promise<unknown>;
   invokePluginRpc(id: string, method: string, input: unknown): Promise<unknown>;
+  listPlugins?(): Promise<{ id: string; path: string; status?: string; error?: string; source?: string; installation?: { identity: { kind: string; registry?: unknown }; currentRevision?: string } }[]>;
   updateAgent(id: string, updates: { labels: Record<string, string> }): Promise<void>;
   clearAgentAttention?(agentId: string | string[]): Promise<void>;
   createAgent(options: RecoveryAgentOptions): Promise<Agent>;
