@@ -83,6 +83,8 @@ export type BriefHost = {
   call(agentId: string): Promise<NeedsYouRecord | null>;
   /** The agent's newest open PR in a tracked workspace, with facts. */
   pr(agentId: string, event?: string | null): Promise<PrState | null>;
+  /** Every open PR in the agent's tracked workspace, each with its own facts: a brief that links one shows that PR. */
+  prs?(agentId: string): Promise<PrState[]>;
   /** The tracked workspace the agent is main in, for PR moves and questions. */
   workspaceId?(agentId: string): Promise<string | null>;
   /** A brief collapsed; its decisions stored as questions may need settling. */
@@ -226,12 +228,12 @@ export class Inbox {
   currentTurn(agentId: string): { turnId: string | null; at: number } | null { return this.turns.get(agentId) ?? null; }
 
   /** The sources every brief has: the agent's needs_you for this turn and its PR state. */
-  private async sources(agentId: string, since: number | null, turnId: string | null): Promise<Pick<BriefSources, "agent" | "pr">> {
+  private async sources(agentId: string, since: number | null, turnId: string | null): Promise<Pick<BriefSources, "agent" | "pr" | "prs">> {
     const b = this.o.briefs;
     if (!b) return {};
-    const [record, pr] = await Promise.all([b.call(agentId).catch(() => null), b.pr(agentId).catch(() => null)]);
+    const [record, pr, prs] = await Promise.all([b.call(agentId).catch(() => null), b.pr(agentId).catch(() => null), b.prs?.(agentId).catch(() => []) ?? []]);
     const current = record && (turnId && record.turnId === turnId || since !== null && record.at >= since) ? record.call : null;
-    return { agent: current, pr };
+    return { agent: current, pr, prs };
   }
 
   /** A decider that creates a brief, flagged when the event's reason is newly on the entry. */
@@ -511,7 +513,8 @@ export class Inbox {
       const open = next.brief?.state === "open" ? next.brief : null;
       // Reviewers replace only a card that asks nothing (a plain finish); an agent's own ask stays on top.
       if (event.type === "reviewers") return !open || open.kind === "unknown" || open.kind === "done" ? create(prev, next, at) : null;
-      return open ? (pr ? { type: "facts", facts: pr.facts } : null) : create(prev, next, at);
+      // Only a card about this PR takes its new state; one about something else keeps what it has (briefStep checks).
+      return open ? (pr ? { type: "facts", prKey: pr.key, facts: pr.facts } : null) : create(prev, next, at);
     };
   }
 

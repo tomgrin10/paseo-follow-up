@@ -54,6 +54,8 @@ export const briefSchema = z.object({
   context: z.string().nullable().default(null),
   mono: z.string().nullable().default(null),
   facts: z.array(briefFactSchema).default([]),
+  /** The PR whose state `facts` shows: one the brief references (its review's PR or a PR it links). Null: no PR facts. */
+  factsPr: z.string().nullable().default(null),
   links: z.array(briefLinkSchema).default([]),
   moves: z.array(briefMoveSchema).default([]),
   /** What the agent stated with needs_you when a blocking state took the headline (§5.2 rule 1). */
@@ -145,13 +147,16 @@ export type BriefSources = {
   paused?: { note: string | null; resetsAt: string | null } | null;
   error?: { message: string } | null;
   agent?: NeedsYouCall | null;
+  /** The agent's newest open PR: a review brief that links no PR is about it, and S5 events are about it. */
   pr?: PrState | null;
+  /** Every readable open PR in the agent's workspace, so a brief that links one shows that PR's own state. */
+  prs?: PrState[] | null;
   /** A PR with nobody asked to review it. `names` are the developer's saved reviewers for `repo` (may be empty). */
   reviewers?: { prKey: string; repo?: string; number: number; url: string | null; names: string[] } | null;
   /** S6 extraction is out of scope (Phase 2); kept so the precedence reads like the design. */
   extracted?: null;
 };
-export type BriefContent = Pick<Brief, "source" | "kind" | "ask" | "slim" | "decisions" | "context" | "mono" | "facts" | "links" | "moves" | "also" | "sourceLine">;
+export type BriefContent = Pick<Brief, "source" | "kind" | "ask" | "slim" | "decisions" | "context" | "mono" | "facts" | "factsPr" | "links" | "moves" | "also" | "sourceLine">;
 
 const line = (text: string, max = 140) => { const t = text.replace(/\s+/g, " ").trim(); return t.length > max ? `${t.slice(0, max - 1)}…` : t; };
 const letter = (i: number) => String.fromCharCode(65 + i);
@@ -168,14 +173,28 @@ function fromAgent(call: NeedsYouCall): Pick<BriefContent, "kind" | "ask" | "dec
 }
 
 /**
+ * The PR a brief is about, or null. A brief that links PRs is about the first one Follow-up can read (never the lead PR
+ * instead); a review that links none is about the agent's own PR. Anything else is about no PR: an Action to rotate a
+ * key shows no CI state just because a PR is in flight (`brief-pr-facts-referenced`).
+ */
+function subjectPr(s: BriefSources, kind: BriefContent["kind"], links: { pr: string | null }[]): PrState | null {
+  const linked = links.flatMap(l => l.pr ? [l.pr] : []);
+  if (linked.length) {
+    const known = [...(s.prs ?? []), ...(s.pr ? [s.pr] : [])];
+    for (const key of linked) { const p = known.find(p => p.key === key); if (p) return p; }
+    return null;
+  }
+  return kind === "review" ? s.pr ?? null : null;
+}
+
+/**
  * §5.2: blocking states win the headline (permission > paused > error) and keep the agent's statement below a divider;
- * otherwise the agent's needs_you; PR facts merge into whichever wins, or headline on their own when nothing else exists;
- * otherwise the honest fallback. Never invents an ask.
+ * otherwise the agent's needs_you, with the facts of the PR it references (subjectPr); a PR event headlines on its own
+ * when nothing else exists; otherwise the honest fallback. Never invents an ask.
  */
 export function pickBrief(s: BriefSources): BriefContent {
-  const base = { decisions: [], context: null, mono: null, facts: [], links: [], moves: [], also: null } satisfies Partial<BriefContent>;
+  const base = { decisions: [], context: null, mono: null, facts: [], factsPr: null, links: [], moves: [], also: null } satisfies Partial<BriefContent>;
   const also = s.agent ? { ask: line(s.agent.ask), context: s.agent.context ?? null } : null;
-  const prFacts = (s.pr?.facts ?? []).slice(0, 3);
   if (s.permission) {
     const sub = s.permission.subagent;
     return { ...base, also, source: "permission", kind: "permission", slim: true,
@@ -190,32 +209,36 @@ export function pickBrief(s: BriefSources): BriefContent {
   }
   if (s.error) {
     const message = s.error.message.trim() || "Turn failed";
-    return { ...base, also, source: "error", kind: "error", slim: false, ask: line(`The turn failed: ${message}`), mono: line(message, 400), facts: prFacts,
+    // No PR facts: a failed turn is about the turn. CI state beside an API error reads as its cause, even when the
+    // agent has one PR in flight; the agent's own statement (`also`) still names what it was doing.
+    return { ...base, also, source: "error", kind: "error", slim: false, ask: line(`The turn failed: ${message}`), mono: line(message, 400),
       moves: [move("retry", "Retry the turn"), move("copy_error", "Copy error")], sourceLine: "From the failed turn." };
   }
   if (s.agent) {
     const a = fromAgent(s.agent);
-    const pr = s.pr;
-    // F7: "Nothing needed" doesn't flag, so it has nothing to sign off.
+    // F7: "Nothing needed" doesn't flag, so it has nothing to sign off, and shows no PR state.
+    const pr = a.kind === "done" ? null : subjectPr(s, a.kind, a.links);
+    const facts = (pr?.facts ?? []).slice(0, 3);
     const moves: BriefMove[] = a.kind === "done" ? []
       : a.kind === "review" && pr ? [...(pr.mergeable ? [move("merge", `Squash & merge #${pr.number}`, { prKey: pr.key })] : []), ...(pr.url ? [move("open_pr", "Open PR", { url: pr.url, prKey: pr.key })] : [])]
       : [];
-    return { ...base, ...a, source: "agent", slim: false, facts: a.kind === "done" ? [] : prFacts, moves,
-      sourceLine: pr && prFacts.length && a.kind !== "done" ? "Stated by the agent. PR, CI and review state from Follow-up." : AGENT_LINE };
+    return { ...base, ...a, source: "agent", slim: false, facts, factsPr: facts.length ? pr!.key : null, moves,
+      sourceLine: facts.length ? "Stated by the agent. PR, CI and review state from Follow-up." : AGENT_LINE };
   }
   if (s.reviewers) {
     const r = s.reviewers;
     const named = r.names.length ? r.names.join(" and ") : null;
     return { ...base, source: "followup", kind: "reviewers", slim: false,
       ask: line(named ? `Add reviewers to #${r.number}: ${named}` : `#${r.number} has no reviewers yet`),
-      facts: (s.pr?.key === r.prKey ? s.pr.facts : []).slice(0, 3),
+      ...(() => { const facts = (s.pr?.key === r.prKey ? s.pr.facts : []).slice(0, 3); return { facts, factsPr: facts.length ? r.prKey : null }; })(),
       // With nobody set, Add reviewers opens the picker; it never asks anyone without a click.
       moves: [move("add_reviewers", "Add reviewers", { prKey: r.prKey }), ...(r.url ? [move("open_pr", "Open PR", { url: r.url, prKey: r.prKey })] : [])],
       sourceLine: named ? "From Follow-up's PR state. Open review threads go to the agent; reviewers are yours." : `No reviewers set for ${r.repo ?? "this repository"}; Add reviewers lets you pick.` };
   }
   if (s.pr?.event) {
     const pr = s.pr;
-    return { ...base, source: "followup", kind: "review", slim: false, ask: line(pr.event!), facts: prFacts,
+    const facts = pr.facts.slice(0, 3);
+    return { ...base, source: "followup", kind: "review", slim: false, ask: line(pr.event!), facts, factsPr: facts.length ? pr.key : null,
       moves: pr.url ? [move("open_pr", "Open PR", { url: pr.url, prKey: pr.key })] : [], sourceLine: "From Follow-up's PR state." };
   }
   return { ...base, source: "none", kind: "unknown", slim: true, ask: FALLBACK_ASK, sourceLine: "No brief stated by the agent; nothing is guessed." };
@@ -273,7 +296,15 @@ export function prState(w: Pick<Workspace, "prs" | "mainAgentId"> | null | undef
   if (!w) return null;
   const owned = w.prs.filter(p => (p.registeredAgentId ?? w.mainAgentId) === agentId && p.snapshot?.complete && !p.error);
   const pr: Pr | undefined = owned.filter(p => p.snapshot!.state === "OPEN").at(-1);
-  if (!pr) return null;
+  return pr ? prFactsOf(pr, event) : null;
+}
+
+/** Every readable open PR in the workspace with its own facts, for briefs that link one (`BriefSources.prs`). */
+export function prStates(w: Pick<Workspace, "prs"> | null | undefined): PrState[] {
+  return (w?.prs ?? []).filter(p => p.snapshot?.complete && !p.error && p.snapshot.state === "OPEN").map(p => prFactsOf(p, null));
+}
+
+function prFactsOf(pr: Pr, event: string | null): PrState {
   const s = pr.snapshot!;
   const facts: BriefFact[] = [];
   if (s.failedChecks.length) facts.push({ icon: "CircleX", label: `Checks failed · ${s.failedChecks.slice(0, 2).join(", ")}`, tone: "bad" });
@@ -300,7 +331,8 @@ export type BriefEvent =
   | { type: "sign_off" }
   | { type: "undo" }
   | { type: "permission_resolved" }
-  | { type: "facts"; facts: BriefFact[] };
+  /** A PR's new state: lands only on the open brief whose facts are about that PR. */
+  | { type: "facts"; prKey: string; facts: BriefFact[] };
 
 /** A bare letter, or an option's label, as the developer's message counts as picking it (§2 Keyboard). */
 export function matchOption(b: Pick<Brief, "decisions">, text: string | null): { decision: BriefDecision; letter: string } | null {
@@ -369,7 +401,7 @@ export function briefStep(prev: Brief | null, event: BriefEvent, now: string): {
       if (prev?.state !== "open" || prev.source !== "permission") return keep;
       { const b = collapse(prev, "superseded", "Permission answered"); return { brief: b, appends: [b] }; }
     case "facts":
-      if (prev?.state !== "open" || JSON.stringify(prev.facts) === JSON.stringify(event.facts.slice(0, 3))) return keep;
+      if (prev?.state !== "open" || prev.factsPr !== event.prKey || JSON.stringify(prev.facts) === JSON.stringify(event.facts.slice(0, 3))) return keep;
       { const b = { ...prev, facts: event.facts.slice(0, 3) }; return { brief: b, appends: [b] }; }
   }
 }
