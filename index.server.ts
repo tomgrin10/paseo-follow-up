@@ -764,7 +764,22 @@ export default function contribute(server: PluginServerContext) {
     if (!stopped) aboutTimer = setTimeout(() => void aboutLoop(), 10 * 60_000);
   };
   aboutTimer = setTimeout(() => void aboutLoop(), 60_000);
-  const agentActions = new AgentActions({ store, prActions: actions, engine, inbox, priorities: priorityStore, about, agentSettings, prWorkflows: () => prWorkflowView() });
+  // Developer RPCs as agent tools (server/agent-parity.ts): the same handler the button's RPC runs.
+  const rpcBridge = {
+    async validate(method: string, input: unknown) { const h = handlers.get(method); if (!h) throw new Error(`Unknown Follow-up method ${method}.`); return h.input.parseAsync(input); },
+    async call(method: string, input: unknown) { const h = handlers.get(method); if (!h) throw new Error(`Unknown Follow-up method ${method}.`); return h.run(await h.input.parseAsync(input), { paseo: api } as PluginHandlerContext); },
+  };
+  // Settings → Display is host-scoped: read it here, write it through the host's settings RPC, as the screen does.
+  const displayBridge = {
+    async read() { const state = await displaySettings.read(); if (state.status !== "ready") throw new Error(`Display preferences can't be read: ${state.error}`); return { revision: state.revision, values: state.values as Record<string, unknown> }; },
+    async write(revision: string, values: Record<string, unknown>) {
+      const result = await withDaemon(client => client.invokePluginRpc("follow-through", `settings.${displayPreferences.id}.write`, { revision, values })) as { status?: string; error?: string } | null;
+      // "saved", or "conflict" (someone changed them since the read) / "invalid".
+      if (result?.status !== "saved") throw new Error(result?.status === "conflict" ? "Display preferences changed since the dry run. Run set_display again." : result?.error ?? "Display preferences weren't saved. Try again.");
+      return result;
+    },
+  };
+  const agentActions = new AgentActions({ store, prActions: actions, engine, inbox, priorities: priorityStore, about, agentSettings, prWorkflows: () => prWorkflowView(), rpc: rpcBridge, display: displayBridge });
   handle(rpc.prioritiesRpc, async () => ({ items: await priorityStore.read() }));
   // Provider limits are non-essential: at critical memory only the VM meter is served.
   handle(rpc.usageRpc, async () => ({ ...(governor.allowsExtras() ? await usage.read() : NO_USAGE), resources: governor.current() }));

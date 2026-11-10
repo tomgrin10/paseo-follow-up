@@ -13,6 +13,7 @@ import type { InboxAction } from "./inbox";
 import { priorityInputSchema, type Priority } from "../shared/priorities";
 import type { AboutView } from "../shared/about";
 import { ROLE_INFO, roleSummary, type RoleConfig } from "../shared/agent-settings";
+import { DISPLAY_TOOLS, RPC_TOOLS, type RpcTool } from "./agent-parity";
 
 /**
  * Agent parity: every action the developer can click in Follow-up has a tool that runs the same server path.
@@ -22,14 +23,16 @@ import { ROLE_INFO, roleSummary, type RoleConfig } from "../shared/agent-setting
  * return a dry-run plan first; `confirm: true` with that plan's id runs it. Every agent write is recorded in
  * the inbox ledger as `by: "agent:<id>"`, which never counts as the developer writing to the agent.
  */
-export const AGENT_TOOLS = ["list_prs", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "track", "inbox_list", "sign_off", "snooze", "set_finish_flags", "set_priorities", "workspace_about", "agent_settings"] as const;
+export const AGENT_TOOLS = ["list_prs", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "track", "inbox_list", "sign_off", "snooze", "set_finish_flags", "set_priorities", "workspace_about", "agent_settings", "follow_settings", "set_follow_settings", "project_settings", "set_project_tracking", "pr_workflow", "set_pr_workflow", "reviewer_settings", "reviewer_suggestions", "save_reviewers", "set_agent_setting", "onboarding_status", "onboarding_checks", "set_onboarding", "priorities", "rank_status", "rerank_priorities", "usage", "overseer_status", "overseer_start", "overseer_restart", "overseer_ask", "inbox_brief", "brief_action", "inbox_act", "answer_question", "run_recovery", "refresh", "set_workspace_spec", "set_task_trigger", "pr_controls", "browser_status", "trust_bypass_status", "display_settings", "set_display"] as const;
 export type AgentTool = typeof AGENT_TOOLS[number];
 /** Tools that only read. */
-export const READ_ONLY_TOOLS: readonly AgentTool[] = ["list_prs", "inbox_list", "workspace_about", "agent_settings"];
+export const READ_ONLY_TOOLS: readonly AgentTool[] = ["list_prs", "inbox_list", "workspace_about", "agent_settings", "display_settings", ...RPC_TOOLS.filter(t => t.kind === "read").map(t => t.name as AgentTool)];
 /** Tools that can't be undone from Follow-up. */
 export const DESTRUCTIVE_TOOLS: readonly AgentTool[] = ["merge"];
 /** Tools that plan first and run only with `confirm: true` and the plan's id. */
-export const PLANNED_TOOLS: readonly AgentTool[] = ["add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "sign_off", "snooze", "set_finish_flags", "set_priorities"];
+export const PLANNED_TOOLS: readonly AgentTool[] = ["add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "sign_off", "snooze", "set_finish_flags", "set_priorities", "set_display", ...RPC_TOOLS.filter(t => t.kind === "planned").map(t => t.name as AgentTool)];
+const RPC_TOOL = new Map<string, RpcTool>(RPC_TOOLS.map(t => [t.name, t]));
+void DISPLAY_TOOLS;
 
 /** The developer's control panel switches (Auto-send, Resume, Retry). The button and the agent tool share it. */
 export function controlWorkspace(state: State, input: { workspaceId: string; enable_auto_sends?: boolean; clearHold?: boolean; retryBatchId?: string; mainAgentId?: string }, now = Date.now()): Workspace {
@@ -76,6 +79,10 @@ export type AgentActionDeps = {
   agentSettings?: { all(): Promise<Record<string, RoleConfig>> };
   /** Each known repository's PR workflow (Settings → Following → Shipping PRs). */
   prWorkflows?: () => Promise<{ default: string; repos: { repo: string; effective: string; setting: string; reason: string; reviewFix: unknown }[]; reviewFix: unknown }>;
+  /** Runs a developer RPC's own handler (the button's path), and checks an input against its contract. */
+  rpc?: { call(method: string, input: unknown): Promise<unknown>; validate(method: string, input: unknown): Promise<unknown> };
+  /** Settings → Display (host-scoped preferences, trust bypass among them). */
+  display?: { read(): Promise<{ revision: string; values: Record<string, unknown> }>; write(revision: string, values: Record<string, unknown>): Promise<unknown> };
   now?: () => number;
 };
 
@@ -84,7 +91,7 @@ const prKey = z.string().trim().regex(/^[\w.-]+\/[\w.-]+#\d+$/, "Use owner/repo#
 const id = z.string().trim().min(1).max(200);
 const confirm = { planId: id.optional(), confirm: z.boolean().optional() };
 const agentIds = z.array(id).min(1).max(100);
-export const TOOL_INPUT: Record<AgentTool, z.ZodType> = {
+export const TOOL_INPUT = {
   list_prs: z.strictObject({ workspace: id.optional(), needs_reviewers: z.boolean().optional(), ready_to_merge: z.boolean().optional(), include_closed: z.boolean().optional() }),
   add_reviewers: z.strictObject({ prs: z.array(prKey).min(1).max(50).optional(), reviewers: z.array(login).min(1).max(15).optional(), ...confirm }),
   merge: z.strictObject({ pr: prKey.optional(), scope: z.enum(["target", "downstack"]).optional(), ...confirm }),
@@ -102,7 +109,10 @@ export const TOOL_INPUT: Record<AgentTool, z.ZodType> = {
   snooze: z.strictObject({ agentIds: agentIds.optional(), until: z.string().trim().min(1).max(200).optional(), ...confirm }),
   set_finish_flags: z.strictObject({ agentIds: agentIds.optional(), value: z.boolean().optional(), ...confirm }),
   set_priorities: z.strictObject({ priorities: z.array(priorityInputSchema).max(200).optional(), replace: z.boolean().optional(), ...confirm }),
-};
+  display_settings: z.strictObject({}),
+  set_display: z.strictObject({ values: z.record(z.string(), z.boolean()).optional(), ...confirm }),
+  ...Object.fromEntries(RPC_TOOLS.map(t => [t.name, t.input])),
+} as unknown as Record<AgentTool, z.ZodType>;
 
 /** One PR as an agent sees it: enough to decide "add reviewers on all" or "merge what's ready". */
 export function prRow(w: Workspace, p: Pr) {
@@ -136,6 +146,9 @@ export class AgentActions {
     if (!parsed.success) throw new Error(`${tool}: ${parsed.error.issues.map(i => `${i.path.join(".") || "arguments"} ${i.message}`).join("; ")}`);
     const args = parsed.data as Record<string, any>;
     if (PLANNED_TOOLS.includes(tool) && args.confirm) return this.confirm(caller, tool, args.planId);
+    const rpcTool = RPC_TOOL.get(tool);
+    if (rpcTool) return this.runRpc(caller, rpcTool, args);
+    if (tool === "display_settings" || tool === "set_display") return this.displayTool(caller, tool, args);
     switch (tool) {
       case "list_prs": return this.listPrs(args);
       case "inbox_list": return this.inboxList(caller, args);
@@ -186,6 +199,42 @@ export class AgentActions {
     if (plan.tool !== tool || plan.caller !== caller) throw new Error("This plan belongs to a different tool or agent. Run the dry run again.");
     this.plans.delete(planId);
     return plan.run();
+  }
+
+  /** A tool that is one developer RPC: reads run it; writes run it and are noted; planned writes dry-run first. */
+  private async runRpc(caller: string, t: RpcTool, args: Record<string, any>) {
+    if (!this.d.rpc) throw new Error(`${t.name} isn't available in this Follow-up.`);
+    const refusal = t.guard?.(args, caller);
+    if (refusal) throw new Error(refusal);
+    const { planId: _p, confirm: _c, ...given } = args;
+    const input = t.toRpc ? t.toRpc(given) : given;
+    if (t.kind === "read") return this.d.rpc.call(t.rpc, input);
+    if (t.kind === "write") { const out = await this.d.rpc.call(t.rpc, input); await this.note(caller, caller, t.name); return out; }
+    // Planned: the RPC's own contract checks the arguments now, so a bad call fails at the dry run.
+    const checked = await this.d.rpc.validate(t.rpc, input).catch((error: unknown) => { throw new Error(`${t.name}: ${error instanceof Error ? error.message : String(error)}`); });
+    const before = t.before ? await this.d.rpc.call(t.before.rpc, t.before.input ? t.before.input(given) : {}).catch(() => null) : undefined;
+    const planId = this.plan(caller, t.name as AgentTool, async () => { const out = await this.d.rpc!.call(t.rpc, checked); await this.note(caller, caller, t.name); return out; });
+    return { dryRun: true, planId, tool: t.name, change: checked, ...(before !== undefined ? { before } : {}),
+      next: `Only when the developer asked for this: call ${t.name} with confirm=true and planId=${planId} within 5 minutes.` };
+  }
+
+  /** Settings → Display: the host-scoped preferences the Display screen writes, trust bypass among them. */
+  private async displayTool(caller: string, tool: "display_settings" | "set_display", args: Record<string, any>) {
+    if (!this.d.display) throw new Error(`${tool} isn't available in this Follow-up.`);
+    const current = await this.d.display.read();
+    if (tool === "display_settings") return { values: current.values, change: "set_display changes these, only when the developer asked." };
+    const values = args.values as Record<string, boolean> | undefined;
+    if (!values || !Object.keys(values).length) throw new Error("set_display: give values, e.g. { enable_trust_bypass: false }. display_settings lists them.");
+    const unknown = Object.keys(values).filter(k => !(k in current.values));
+    if (unknown.length) throw new Error(`set_display: unknown setting ${unknown.join(", ")}. display_settings lists them.`);
+    const changes = Object.entries(values).filter(([k, v]) => current.values[k] !== v).map(([key, to]) => ({ key, from: current.values[key], to }));
+    const planId = changes.length ? this.plan(caller, "set_display", async () => {
+      const now = await this.d.display!.read();
+      await this.d.display!.write(now.revision, { ...now.values, ...values });
+      await this.note(caller, caller, "set_display");
+      return { changed: changes.map(c => c.key), values: { ...now.values, ...values } };
+    }) : null;
+    return { dryRun: true, planId, changes, next: planId ? `Only when the developer asked for this: call set_display with confirm=true and planId=${planId}.` : "Nothing changes." };
   }
 
   /** Read-only: the cached overview and links, or a fresh one when none is cached (waits for it). */
