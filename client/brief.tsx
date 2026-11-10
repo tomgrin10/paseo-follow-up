@@ -332,7 +332,8 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
         <Icon name={ICON[b.kind]} size={14} color={tone} />
         <Text numberOfLines={1} style={{ flexShrink: 1, color: acts ? attention : tone, fontSize: 12, lineHeight: 16, fontWeight: "600" }}>{acts ? "Needs you" : flaggedAct ? "Later" : word(b.kind)}</Text>
         <View style={{ flex: 1 }} />
-        <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontVariant: ["tabular-nums"] }}>{ageText}</Text>
+        {/* In Later the age would read as a second clock beside "Later until"; the pane header keeps it. */}
+        {!snoozed && <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontVariant: ["tabular-nums"] }}>{ageText}</Text>}
       </View>
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 10, rowGap: 8 }}>
         <RichText numberOfLines={3} tooltip={b.ask}
@@ -363,7 +364,8 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
           {flaggedAct && <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{word(b.kind)}</Text>}
           {multi && <Text accessibilityLiveRegion="polite" style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontVariant: ["tabular-nums"] }}>· {pickedCount(b, sendable)} of {askedDecisions(b).length} picked</Text>}
           <View style={{ flex: 1 }} />
-          <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontVariant: ["tabular-nums"] }}>{ageText}</Text>
+          {/* In Later the age would read as a second clock beside "Later until"; the pane header keeps it. */}
+        {!snoozed && <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontVariant: ["tabular-nums"] }}>{ageText}</Text>}
           {/* Phones: where the card's facts come from sits behind ⓘ instead of a footer under every card. */}
           {compact && <Pressable accessibilityRole="button" accessibilityLabel={why ? "Hide where this comes from" : "Where this comes from"} aria-expanded={why} accessibilityState={{ expanded: why }}
             onPress={() => setWhy(v => !v)} style={{ width: 44, height: 44, marginVertical: -15, marginRight: -14, alignItems: "center", justifyContent: "center" }}>

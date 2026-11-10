@@ -7,7 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { browserStatusRpc, controlRpc, inboxBriefRpc } from "../shared/contracts";
 import { needsYou, workspaceSnoozed } from "../shared/attention";
 import { briefPane, followUpLog, lastWorkdayEnd, nextNeeds, paneButtons, sameText, sinceLabel, tailSteps, type HomeGroupId, type HomeModel, type LogLine, type TailStep, type Workstream } from "../shared/home";
-import { age, snoozeUntil, type InboxRow } from "../shared/inbox";
+import { age, backLabel, snoozeUntil, type InboxRow } from "../shared/inbox";
 import { errorText } from "../shared/errors";
 import { isLoaded, type LoadSignals } from "../shared/agent-load";
 import { BriefCard, type BriefDeps } from "./brief";
@@ -372,17 +372,21 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
   </View>;
 
   // Bring back now removes itself, so focus moves to the pane's first move (Sign off) once the row is back.
-  const bringBack = (back: () => Promise<unknown>) => void run("bring_back", async () => { await back(); focusSoon(PANE_PRIMARY); });
-  const snoozedLine = !!later && <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-    <Icon name="AlarmClock" size={14} color={c.foregroundMuted} />
-    <Text style={t.meta}>{laterText}</Text>
-    <Button theme={theme} compact={compact} kind="secondary" icon="BellRing" title="Bring back now" loading={busy === "bring_back"} onPress={() => bringBack(later.back)} />
-  </View>;
-  const wsUnderLine = !!wsUnder && w && <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-    <Icon name="AlarmClock" size={14} color={c.foregroundMuted} />
-    <Text style={[t.meta, { flexShrink: 1 }]}>{`The workspace's own items: Later ${laterLabel(wsUnder.until, Date.now())}`}</Text>
-    <Button theme={theme} compact={compact} kind="ghost" icon="BellRing" title="Bring back now" loading={busy === "bring_back_ws"}
-      accessibilityLabel="Bring back the workspace's own items now" onPress={() => void run("bring_back_ws", async () => { await control({ workspaceId: w.id, snooze: null }); live.refresh(); })} />
+  // What's in Later here, one row each: this row's own Later, and (under an agent's flag) the workspace's own items.
+  // The header already says "Later until …", so each row says when it's back and offers Bring back now with a name
+  // that tells the two apart. Bring back removes its row, so focus moves to the pane's Sign off.
+  const laterRows = [
+    later && { key: "bring_back", who: wsUnder ? "This agent" : null, until: later.until, label: `Bring back ${s.title} now`, back: later.back },
+    wsUnder && w && { key: "bring_back_ws", who: "Workspace items", until: wsUnder.until, label: `Bring back ${s.title}'s workspace items now`,
+      back: async () => { await control({ workspaceId: w.id, snooze: null }); live.refresh(); } },
+  ].filter(Boolean) as { key: string; who: string | null; until: string; label: string; back: () => Promise<unknown> }[];
+  const laterBlock = laterRows.length > 0 && <View style={{ gap: compact ? 10 : 6 }}>
+    {laterRows.map(r => <View key={r.key} style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 8, rowGap: 6 }}>
+      <Icon name="AlarmClock" size={14} color={c.foregroundMuted} />
+      <Text style={[t.meta, { flexShrink: 1 }]}>{[r.who, backLabel(r.until, Date.now())].filter(Boolean).join(" · ")}</Text>
+      <Button theme={theme} compact={compact} kind="secondary" icon="BellRing" title="Bring back now" accessibilityLabel={r.label} loading={busy === r.key}
+        onPress={() => void run(r.key, async () => { await r.back(); focusSoon(PANE_PRIMARY); })} />
+    </View>)}
   </View>;
 
   const laterTimes = laterChoices(new Date());
@@ -439,8 +443,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
       {w && <NeedsYouList workspace={w} theme={theme} compact={compact} flush skip={b?.decisions.length ? ["question"] : []} feature={compact}
         actions={{ openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion, openAgent: () => openFull(s) }} />}
       {actionBar}
-      {snoozedLine}
-      {wsUnderLine}
+      {laterBlock}
       {steps}
     </ScrollView>
     {s.agentId && <View style={[{ borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.surface0 }, bottomInset(compact)]}>
