@@ -9,8 +9,10 @@
   agent's last turn, so a newer turn start from anyone (the developer, another agent, the host resuming it) drops
   them, along with an open card that only reported them (`briefStep` `turn_start`, unless it has open questions). A
   new failure flags again. Outside facts (permission by request, ci, review, reviewers, pr_closed) and a finish with
-  its ask stay until handled. Rows apply `liveFlag`, so a running agent never headlines a stale Error or Paused
-  (`rowViolations`, invariant `running-is-not-stale`), and `Inbox.start` drops such flags for agents already running
+  its ask stay until handled. Rows apply `liveFlag` with the turn start the worker saw (`turnStartedAt`), so a running
+  agent never headlines an Error or Paused from before its current turn (`rowViolations`, invariant
+  `running-is-not-stale`). Status alone isn't enough: Paseo can still read "running" right after a turn fails, and that
+  failure is real news. And `Inbox.start` drops such flags for agents already running
   after a restart (a 0.16 host resumes them; on 0.15 the agent stopped, and the flag stays).
 - **Pure logic** is in `shared/inbox.ts`: the reducer, `REASONS` in urgency order (permission, error, paused, ci,
   review, reviewers, finished, pr_closed), snoozes (`next-event`, an ISO time, or `pr:<repo#n>`), finish flags, and
