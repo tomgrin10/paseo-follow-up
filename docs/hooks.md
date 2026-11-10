@@ -1,0 +1,44 @@
+# Provider hooks
+
+## Installing the hooks
+
+`server/agent-hooks.ts` (`AgentHooks`):
+
+- **What it installs.** It writes `agent-hook.mjs` (from `server/hook-source.ts`, generated from
+  `server/agent-hook.mjs`) into `plugin-data/follow-through/`. It adds one command per event to Claude Code's
+  `~/.claude/settings.json` and Codex's `~/.codex/hooks.json` for SessionStart, UserPromptSubmit, PostToolUse and
+  Stop.
+- **When it's written.** `AgentHooks.start()` rewrites `agent-hook.mjs` and the settings entries on every worker
+  start (each plugin load or reload). `stop()` removes them at teardown.
+- **Reversible.** Entries end with `# paseo-follow-through-hook`, and `reconcileHooks` removes them.
+- **Lease.** The worker renews `hooks-enabled.json` every 30 s, and it expires 120 s after the last renewal. The
+  hook does nothing without a fresh lease, so a stopped Follow-up costs nothing.
+
+## What the hook does (`server/agent-hook.mjs`)
+
+It runs on every event, so it reads only small files: `scopes.json`, `brief.json`, its `hook-state/` markers, and
+`tools-instance.json`. It never reads `state.json` when `scopes.json` exists. It skips subagent events, recovery
+agents and anything without `PASEO_AGENT_ID`.
+
+| Event | Effect |
+| --- | --- |
+| SessionStart | Adds Follow-up's instructions for tracked agents (worded for the agent's PR workflow, contributor or main), the native tools' guidance (`nativeExtras`, since native tools carry no MCP instructions), and Wait's guidance (`waitExtras`, when `FOLLOW_THROUGH_WAIT=1`). Untracked Claude sessions with Wait get only Wait's guidance. |
+| UserPromptSubmit | Starts a turn marker. Repeats the context when it changed (Codex always repeats). Tells a demoted agent once that it lost the main role. For the Overseer, injects the digest. |
+| PostToolUse | Marks the turn dirty after shell or edit tools. Says once per session that native tools are detached after a reload. |
+| Stop | Blocks the stop once if a dirty turn didn't `sync_workspace` (read from `hook-state/sync-<agent>.json`, written by the RPC handler, so any tool spelling counts), or if a root Claude session didn't call `needs_you` (`shouldNudge`). Never blocks twice in one turn, or while background tasks run. |
+
+## Env flags
+
+The worker sets these at `agent.session_open`:
+
+- `FOLLOW_THROUGH_TOOLS`: `native` or `stdio`.
+- `FOLLOW_THROUGH_PROVIDER`.
+- `FOLLOW_THROUGH_ROOT`.
+- `FOLLOW_THROUGH_BRIEF`: the provider, when the nudge applies.
+- `FOLLOW_THROUGH_OVERSEER`.
+- `FOLLOW_THROUGH_RECOVERY`.
+- `FOLLOW_THROUGH_CLI`: the bridge path.
+- `FOLLOW_THROUGH_WAIT`.
+
+Tests: `tests/agent-hooks.test.ts` and `tests/hook-native.test.ts` (the hook is imported with
+`FOLLOW_THROUGH_HOOK_IMPORT=1`, so `main()` doesn't run), plus `tests/session-mcp.test.ts`.
