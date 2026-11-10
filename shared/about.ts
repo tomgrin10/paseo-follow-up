@@ -2,9 +2,11 @@ import { z } from "zod";
 import { modelName } from "./agent-settings";
 
 /**
- * "What's this about?" (1.3.0-beta.3): a short AI overview of one workspace plus the issues, PRs, threads and links
- * it touches. Links are only ever extracted from the workspace's own text, never written by the model, so nothing
- * linked can be invented. The model writes the gist and the overview from the inputs it was given.
+ * Summary: one short sentence under the workspace's title saying what the workspace is for, a reminder for a developer
+ * switching between many (Tom, 2026-11-10). Not a status report. Until 1.4.0 it was a longer
+ * overview with a Linked list; those records stay on disk but are never shown (`form` marks the new ones).
+ * Links are still extracted from the workspace's own text and kept in the record for the Linked items feature; no UI
+ * shows them for now.
  */
 
 export const LINK_KINDS = ["linear", "pr", "slack", "artifact", "doc", "link"] as const;
@@ -38,6 +40,8 @@ export const aboutRecordSchema = z.object({
   /** Sources that couldn't be read ("Linear", "Slack", "GitHub"); their rows show the bare link. */
   failed: z.array(z.string().max(40)).max(6),
   costUsd: z.number().nonnegative().nullable(),
+  /** "sentence": the one-line Summary (`gist`). Missing on the older long overviews, which are treated as none. */
+  form: z.literal("sentence").optional(),
   /** Which agent wrote it (Settings → Agents): "Summarized by Haiku". Older records have none. */
   by: z.object({ provider: z.string().max(60), model: z.string().max(120) }).nullable().optional(),
 });
@@ -56,12 +60,19 @@ export const aboutViewSchema = z.object({
 });
 export type AboutView = z.infer<typeof aboutViewSchema>;
 
-/** What the model returns. Anything else is rejected and the job counts as failed. */
-export const overviewOutputSchema = z.strictObject({
-  gist: z.string().trim().min(3).max(160),
-  overview: z.string().trim().min(10).max(900),
+/** The Summary's hard cap. About 20 words; anything longer is rejected, never cut. */
+export const SUMMARY_MAX_CHARS = 140;
+/**
+ * What the model returns: one sentence on one line. Anything else (too long, two lines, extra fields) is rejected and
+ * the job counts as failed, so the previous sentence stays. No retry at higher effort.
+ */
+export const summaryOutputSchema = z.strictObject({
+  sentence: z.string().trim().min(10).max(SUMMARY_MAX_CHARS).refine(v => !/[\r\n]/.test(v), "One line only"),
 });
-export type OverviewOutput = z.infer<typeof overviewOutputSchema>;
+export type SummaryOutput = z.infer<typeof summaryOutputSchema>;
+
+/** A record the Summary may show: written as one sentence. Older long overviews count as none. */
+export const currentSummary = <T extends Pick<AboutRecord, "form">>(r: T | null | undefined): T | null => r?.form === "sentence" ? r : null;
 
 // ---------- link extraction ----------
 
@@ -168,9 +179,7 @@ export function usageAllows(accounts: readonly { family: string; windows: readon
   return !accounts.some(a => a.family === "claude" && a.windows.some(w => w.pct > USAGE_CEILING_PCT));
 }
 
-// ---------- what the section says ----------
-
-export const NO_LINKS = "No linked issues or threads found";
+// ---------- what the Summary line says ----------
 
 function ageWords(iso: string, now: number): string {
   const ms = Math.max(0, now - Date.parse(iso));
@@ -191,28 +200,24 @@ export function footerText(r: Pick<AboutRecord, "generatedAt" | "basis" | "faile
 }
 /** Phones' one meta line: "Summarized by Haiku · 2m ago from the chat, 2 PRs" → "Haiku · 2m ago". */
 export const shortFooter = (footer: string | null): string => (footer ?? "").split(" from ")[0].replace(/^Summarized (by )?/, "");
-export function failedText(failed: readonly string[]): string | null {
-  return failed.length ? `${failed.join(" and ")} couldn't be read; ${failed.length === 1 ? "its" : "their"} links show bare.` : null;
+/**
+ * What the line under the title and the panel's Summary row show. Never invents: only a sentence-form record is shown
+ * (older long overviews count as none), and nothing stands in for a sentence that doesn't exist.
+ */
+export function summaryDisplay(view: AboutView | null | undefined, now: number): { sentence: string | null; pending: boolean; failed: boolean; error: string | null; footer: string | null } {
+  const r = currentSummary(view?.record);
+  return {
+    sentence: r?.gist ?? null, pending: view?.status === "pending", failed: !r && view?.status === "failed",
+    error: view?.error ?? null, footer: r ? footerText(r, now) : null,
+  };
 }
 
-/**
- * What the section shows. Never invents: no record and nothing running is the label only; while writing it's
- * "Summarizing…" with the first user message; links come only from extraction.
- */
-export function aboutDisplay(view: AboutView | null | undefined, now: number): {
-  gist: string | null; body: "summarizing" | "overview" | "failed" | "none"; overview: string | null; excerpt: string | null;
-  links: AboutLink[]; empty: string | null; footer: string | null; failed: string | null; refreshing: boolean;
-} {
-  const r = view?.record ?? null;
-  const links = r?.links ?? view?.links ?? [];
-  const pending = view?.status === "pending";
-  const body = r ? "overview" : pending ? "summarizing" : view?.status === "failed" ? "failed" : "none";
-  return {
-    gist: r?.gist ?? null, body, overview: r?.overview ?? null,
-    excerpt: !r && pending ? view?.firstMessage ?? null : null,
-    links, empty: links.length ? null : r || view ? NO_LINKS : null,
-    footer: r ? footerText(r, now) : null, failed: r ? failedText(r.failed) : null, refreshing: !!r && pending,
-  };
+/** Under the title: the sentence, else the goal when it says more than the title, else "Writing a summary…" while one is being written. */
+export function summaryLine(d: Pick<ReturnType<typeof summaryDisplay>, "sentence" | "pending">, w: { title: string; goal: string }): { text: string; kind: "summary" | "goal" | "writing" } | null {
+  if (d.sentence) return { text: d.sentence, kind: "summary" };
+  const goal = w.goal?.trim();
+  if (goal && goal.toLowerCase() !== w.title.trim().toLowerCase()) return { text: goal, kind: "goal" };
+  return d.pending ? { text: "Writing a summary…", kind: "writing" } : null;
 }
 
 /** One row's text: "HER-1312 · Vendor service accounts… · In Progress · High · due Nov 12". */

@@ -39,7 +39,7 @@ export function AgentSettings({ theme, compact, toggles = {} }: Pick<PluginSurfa
     onError: error => toast.error(errorText(error)),
   });
   const data = query.data;
-  const info = "Which agent Follow-up uses for each of its own jobs. Defaults: Claude Haiku for overviews, Claude Opus for the Overseer, the main agent's own setup for recovery, Claude Sonnet for priority ranking. What's this about? and the ranker are one-shot jobs, so they run on Claude or Codex only; the Overseer and recovery can use any provider Paseo has. Changes apply from the next call; the Overseer switches when you restart it.";
+  const info = "Which agent Follow-up uses for each of its own jobs. Defaults: Claude Haiku for summaries, Claude Opus for the Overseer, the main agent's own setup for recovery, Claude Sonnet for priority ranking. Summaries and the ranker are one-shot jobs, so they run on Claude or Codex only; the Overseer and recovery can use any provider Paseo has. Changes apply from the next call; the Overseer switches when you restart it.";
   return <SettingsSection title="Models" info={info}>
     {query.isPending && <ActivityIndicator accessibilityLabel="Loading agent settings" color={c.foregroundMuted} style={{ alignSelf: "flex-start", marginVertical: 8 }} />}
     {query.error && <SettingsCard><SettingsAction label="Couldn't load agent settings" hint={errorText(query.error)} actionLabel="Retry" onPress={() => void query.refetch()} /></SettingsCard>}
@@ -130,7 +130,7 @@ function RoleCard({ r, invalid, catalog, busy, save, theme, compact, toggle }: {
       </View>
       <Text style={t.meta}>{ROLE_INFO[role].does}{role === "overseer" ? " A running Overseer keeps its model until you restart it from Home." : ""}</Text>
       {invalid && <Text style={t.meta}>Part of the saved setting wasn't valid, so its default is used.</Text>}
-      {blocked && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusWarning }]}>{`${providerLabel} isn't available (${blockedReason}). ${role === "about" ? "Overviews will fail" : role === "ranker" ? "Ranking will fail" : role === "overseer" ? "Starting or restarting the Overseer will fail" : "Recovery agents won't start"} until you pick another provider or reset.`}</Text>}
+      {blocked && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusWarning }]}>{`${providerLabel} isn't available (${blockedReason}). ${role === "about" ? "Summaries will fail" : role === "ranker" ? "Ranking will fail" : role === "overseer" ? "Starting or restarting the Overseer will fail" : "Recovery agents won't start"} until you pick another provider or reset.`}</Text>}
     </View>
     {/* The role's own on/off (Overseer, AI priority) leads its card; the model rows follow. */}
     {toggle}
@@ -143,7 +143,7 @@ function RoleCard({ r, invalid, catalog, busy, save, theme, compact, toggle }: {
     {!jobs && !r.same && modes.length > 0 && <SettingsSelect label="Permissions" hint="It runs unattended, so pick a mode that doesn't prompt." value={r.mode ?? DEFAULT}
       options={[{ value: DEFAULT, label: modeDefault ? `Default (${modeLabel(modeDefault)})` : "Default" }, ...modes.map(m => ({ value: m.id, label: modeLabel(m) }))]} disabled={busy}
       onValueChange={value => set({ mode: value === DEFAULT ? null : value })} />}
-    {role === "about" && <SettingsSelect label="Written ahead per day" hint="Overviews written in the background for workspaces in Needs you. Opening a workspace always writes one when needed."
+    {role === "about" && <SettingsSelect label="Written ahead per day" hint="Summaries written in the background for workspaces in Needs you. Opening a workspace always writes one when needed."
       value={String(r.dailyCap ?? 60)} options={withCurrent([0, 20, 60, 120, 200], r.dailyCap ?? 60).map(n => ({ value: String(n), label: n === 0 ? "None" : String(n) }))} disabled={busy}
       onValueChange={value => set({ dailyCap: Number(value) })} />}
     {role === "ranker" && <SettingsSelect label="Ranks every" value={String(r.cadenceMinutes ?? 60)} disabled={busy}

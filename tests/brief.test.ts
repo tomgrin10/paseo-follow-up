@@ -237,7 +237,7 @@ test("§6 permission pending: a slim brief after the grace; answered → superse
   await s.done();
 });
 test("a permission answered while its brief is being built never leaves a stale row", async () => {
-  const s = await service([agent({ id: "main" }), agent({ id: "sub", parentAgentId: "main", title: "Follow-up: What's this about?" })], { callDelay: 40 });
+  const s = await service([agent({ id: "main" }), agent({ id: "sub", parentAgentId: "main", title: "Follow-up: Summary" })], { callDelay: 40 });
   const sub = { id: "sub", workspaceId: "w1", parentAgentId: "main" };
   const pending = s.inbox.permissionRequested(sub, { id: "p1", title: "Bash" });
   // The grace (5 ms) has passed and the brief is still reading its sources (40 ms) when the answer lands.

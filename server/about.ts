@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import {
-  ABOUT_TTL_MS, aboutRecordSchema, dailyBudget, extractLinks, keysFromBranch, needsOverview, overviewOutputSchema, stableJson, usageAllows,
-  type AboutLink, type AboutRecord, type AboutView, type OverviewOutput,
+  ABOUT_TTL_MS, aboutRecordSchema, currentSummary, dailyBudget, extractLinks, keysFromBranch, needsOverview, summaryOutputSchema, stableJson, usageAllows, SUMMARY_MAX_CHARS,
+  type AboutLink, type AboutRecord, type AboutView, type SummaryOutput,
 } from "../shared/about";
 import type { Workspace } from "../shared/model";
 import type { AiJobs } from "./ai-jobs";
@@ -161,9 +161,12 @@ export async function collectInputs(w: Workspace, ctx: AboutContext): Promise<Ab
   };
 }
 
-/** The cheap identity of the inputs, before any source is read. */
+/**
+ * The cheap identity of what the Summary is written from: purpose only (name, goal, first asks, PR titles). The chat's
+ * latest turns, PR states and subagents don't change what a workspace is for, so they don't buy a new sentence.
+ */
 export function inputsHash(inputs: AboutInputs): string {
-  return createHash("sha256").update(stableJson({ title: inputs.title, goal: inputs.goal, first: inputs.firstMessages, tail: inputs.tail, subagents: inputs.subagents, prs: inputs.prs })).digest("hex").slice(0, 32);
+  return createHash("sha256").update(stableJson({ v: 2, title: inputs.title, goal: inputs.goal, first: inputs.firstMessages, prs: inputs.prs.map(p => p.title) })).digest("hex").slice(0, 32);
 }
 
 /** Extraction plus the workspace's own PRs, which are linked by definition. */
@@ -214,21 +217,23 @@ export async function enrichLinks(links: AboutLink[], sources: AboutSources): Pr
   return { links: out.filter((l): l is AboutLink => !!l), failed: [...failed], issues, prBodies };
 }
 
-export function overviewPrompt(inputs: AboutInputs, extra: { issues: { key: string; title: string; description: string }[]; prBodies: { key: string; title: string; body: string }[] }, cap: number = LIMITS.promptChars): string {
+/**
+ * The Summary prompt: one sentence of purpose, from the workspace's name, goal, the developer's first asks and its PR
+ * titles. Nothing else is sent (no chat tail, PR bodies, issues or threads), which also keeps the call small.
+ */
+export function summaryPrompt(inputs: AboutInputs, cap: number = LIMITS.promptChars): string {
   const section = (title: string, lines: string[]) => lines.length ? `## ${title}\n${lines.join("\n")}\n` : "";
   const prompt = [
-    "You write the \"What's this about?\" note for one workspace in a developer's agent dashboard. The developer (Tom) opens it when the workspace name alone doesn't remind him what it is.",
-    "Return JSON: {\"gist\": string, \"overview\": string}.",
-    "- gist: one line, at most 80 characters, no trailing period. The goal in Tom's words first, then where it stands and who or what it waits on, last, e.g. \"Fix slow vendor-activity query; plan agreed, PR #1352 merged, waiting on Hadar\".",
-    "- overview: 2 to 4 short sentences in plain language: what the workspace is for, where it stands now, what's left and who or what it's waiting on. Name PRs as #number and issues by key. No markdown, no lists.",
-    "- Use only what's below. If something isn't stated (who it waits on, what's left), leave it out rather than guess.",
+    "You write a one-sentence reminder of what a workspace is for. It shows under the workspace's name in a developer's agent dashboard, for when they have switched between many workspaces and forgotten what this one is.",
+    "Return JSON: {\"sentence\": string}.",
+    `- One plain sentence on one line, about 20 words and at most ${SUMMARY_MAX_CHARS} characters, ending with a period.`,
+    "- Say what the work is for: the goal or the problem it solves, in the developer's terms. Not where it stands.",
+    "- No PR or issue numbers, no counts, no people's names, no status words (merged, waiting, blocked, done), no questions, no markdown.",
+    "- Use only what's below. If the purpose isn't clear, describe the change being made.",
     "",
     section("Workspace", [`Name: ${inputs.title}`, ...(inputs.branches.length ? [`Branches: ${inputs.branches.join(", ")}`] : [])]),
     section("What the developer asked first", inputs.firstMessages.map(m => `> ${m}`)),
-    section("Linked issues", extra.issues.map(i => `${i.key}: ${i.title}${i.description ? `\n${clip(i.description, LIMITS.issueChars)}` : ""}`)),
-    section("Pull requests", inputs.prs.map(p => { const body = extra.prBodies.find(b => b.key === p.key)?.body; return `#${p.key.split("#")[1]} ${p.title || "(untitled)"} [${p.state || "unknown"}]${body ? `\n${clip(body, LIMITS.prBodyChars)}` : ""}`; })),
-    section("Subagents it launched", inputs.subagents.map(s => `- ${s}`)),
-    section(`The latest conversation (last ${inputs.tail.length} items, oldest first)`, inputs.tail),
+    section("Pull request titles", inputs.prs.filter(p => p.title).map(p => `- ${p.title}`)),
   ].join("\n");
   return prompt.length > cap ? prompt.slice(0, cap) : prompt;
 }
@@ -300,7 +305,7 @@ export class AboutService {
   async view(workspaceId: string, opts: { open?: boolean; refresh?: boolean; wait?: boolean } = {}): Promise<AboutView> {
     const w = await this.deps.workspace(workspaceId);
     const file = await this.deps.store.read();
-    const cached = file.entries[workspaceId] ?? null;
+    const cached = currentSummary(file.entries[workspaceId]);
     if (!w) return { status: cached ? "ready" : "idle", record: cached, firstMessage: null, links: [], error: cached ? null : "Follow-up isn't following this workspace." };
     let firstMessage = await this.firstMessage(w);
     if ((opts.open || opts.refresh) && this.deps.roomOnDemand && !await this.deps.roomOnDemand().catch(() => true)) opts = { ...opts, open: false, refresh: false };
@@ -327,7 +332,7 @@ export class AboutService {
     const after = await this.deps.store.read();
     const failure = after.failures[workspaceId];
     const pending = this.inflight.has(workspaceId);
-    const record = after.entries[workspaceId] ?? null;
+    const record = currentSummary(after.entries[workspaceId]);
     return { status: pending ? "pending" : record ? "ready" : failure ? "failed" : "idle", record, firstMessage, links: record ? [] : links, error: !pending && failure && (!record || failure.at > Date.parse(record.generatedAt)) ? failure.error : null };
   }
 
@@ -353,11 +358,11 @@ export class AboutService {
       const w = await this.deps.workspace(id);
       if (!w) continue;
       const file = await this.deps.store.read();
-      const prior = file.entries[id];
+      const prior = currentSummary(file.entries[id]);
       if (prior && this.now() - Date.parse(prior.generatedAt) < ABOUT_TTL_MS) continue;
       const inputs = await collectInputs(w, ctx);
       const hash = inputsHash(inputs);
-      if (!needsOverview(file.entries[id] ?? null, hash, this.now(), { failedAt: file.failures[id]?.at ?? null })) continue;
+      if (!needsOverview(prior, hash, this.now(), { failedAt: file.failures[id]?.at ?? null })) continue;
       const budget = await this.deps.store.mutate(f => { const b = dailyBudget(f.daily, this.now(), cap); if (b.allowed) f.daily = b.next; return b.allowed; });
       if (!budget) return { started, skipped: "daily-cap" };
       // One at a time: the job runner's concurrency is shared with whatever the developer opens.
@@ -374,18 +379,19 @@ export class AboutService {
 
   private start(w: Workspace, inputs: AboutInputs, hash: string): Promise<void> {
     const work = (async () => {
-      const enriched = await enrichLinks(workspaceLinks(inputs), this.deps.sources);
       const role = await this.role();
-      const result = await this.deps.jobs.run<OverviewOutput>({ name: "about", provider: role.provider, ...(role.model ? { model: role.model } : {}), thinking: role.thinking,
-        prompt: overviewPrompt(inputs, enriched, role.maxPromptChars ?? LIMITS.promptChars), maxPromptChars: Math.max(role.maxPromptChars ?? LIMITS.promptChars, LIMITS.promptChars), schema: overviewOutputSchema, maxOutputChars: 2000, timeoutMs: 90_000 });
+      const result = await this.deps.jobs.run<SummaryOutput>({ name: "about", provider: role.provider, ...(role.model ? { model: role.model } : {}), thinking: role.thinking,
+        prompt: summaryPrompt(inputs, role.maxPromptChars ?? LIMITS.promptChars), maxPromptChars: Math.max(role.maxPromptChars ?? LIMITS.promptChars, LIMITS.promptChars), schema: summaryOutputSchema, maxOutputChars: 600, timeoutMs: 90_000 });
       const at = this.now();
+      // A reply that isn't one short sentence fails the job; the previous sentence (if any) stays.
       if (!result.ok) { await this.deps.store.mutate(f => { f.failures[w.id] = { at, error: result.error }; }); return; }
       const record: AboutRecord = {
-        workspaceId: w.id, inputsHash: hash, generatedAt: new Date(at).toISOString(),
-        gist: result.value.gist.replace(/\.$/, "").slice(0, 160), overview: result.value.overview.slice(0, 900),
-        links: enriched.links,
-        basis: { chat: inputs.tail.length > 0, source: inputs.source, prs: inputs.prs.length, issues: enriched.issues.map(i => i.key) },
-        failed: enriched.failed, costUsd: result.costUsd,
+        workspaceId: w.id, inputsHash: hash, generatedAt: new Date(at).toISOString(), form: "sentence",
+        gist: result.value.sentence, overview: "",
+        // Kept for the Linked items feature: extracted from the workspace's own text, not read from Linear or Slack.
+        links: workspaceLinks(inputs),
+        basis: { chat: inputs.firstMessages.length > 0, source: inputs.source, prs: inputs.prs.length, issues: [] },
+        failed: [], costUsd: result.costUsd,
         by: { provider: role.provider, model: role.model ?? role.provider },
       };
       await this.deps.store.mutate(f => { f.entries[w.id] = record; delete f.failures[w.id]; });

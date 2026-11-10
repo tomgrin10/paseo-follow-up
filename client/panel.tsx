@@ -26,7 +26,7 @@ import { PrSheet } from "./pr-sheet";
 import { ActivityCard, QuestionSheet } from "./questions";
 import { SpecRow, SpecSheet } from "./spec";
 import { mergedColor, tint } from "./theme";
-import { AboutSection } from "./about";
+import { SummaryRow } from "./about";
 import { WhatsNewGate } from "./release-notes";
 
 export { overviewKey, workspaceKey };
@@ -151,9 +151,8 @@ function PanelWorkspace(props: PanelProps & { workspace: Workspace; loadError?: 
   const { openLarge } = props;
   const compact = props.layout.compact;
   const top = <PanelTop theme={props.theme} compact={compact} openOverview={props.openOverview} />;
-  const about = <AboutSection key={props.workspaceId} workspaceId={props.workspaceId} theme={props.theme} compact={compact} />;
   const ask = props.inbox && props.briefDeps ? <MainAsk w={props.workspace} theme={props.theme} compact={compact} inbox={props.inbox} briefDeps={props.briefDeps} /> : null;
-  return <WorkspaceView {...props} top={top} about={about} ask={ask} folds={{ isOpen, toggle }} resize={openLarge ? { icon: "Maximize2", label: "Open the larger view", onPress: () => openLarge(props.workspaceId) } : null} />;
+  return <WorkspaceView {...props} top={top} ask={ask} folds={{ isOpen, toggle }} resize={openLarge ? { icon: "Maximize2", label: "Open the larger view", onPress: () => openLarge(props.workspaceId) } : null} />;
 }
 
 
@@ -219,6 +218,7 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
     <View style={{ marginTop: -1 }}><FoldRow theme={theme} compact={compact} open={shown} onPress={() => toggle("workspace")} icon="SlidersHorizontal" iconColor={c.foregroundMuted} label="Spec, agent and recovery" /></View>
     {shown && <>
       <SpecRow workspace={w} theme={theme} compact={compact} onEdit={editSpec} />
+      <CardRow theme={theme} compact={compact}><SummaryRow workspaceId={w.id} theme={theme} compact={compact} /></CardRow>
       <CardRow theme={theme} compact={compact}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <View style={{ flex: 1, minWidth: 160, gap: 2 }}>
@@ -345,8 +345,8 @@ const folds = z.object({ open: z.array(z.string()) });
 /** Two columns from this content width: actions on the left, the stacks on the right. */
 export const WIDE_MIN = 820;
 
-export function WorkspaceView({ theme, layout, workspace: w, navigation, loadError, openSettings, openOverview, folds: { isOpen, toggle }, resize, large = false, top, about, ask }: PluginHostProps & {
-  navigation?: PluginWorkspacePanelProps["navigation"]; workspace: Workspace; loadError?: string | null; openSettings: () => void; openOverview: () => void; top?: ReactNode; about?: ReactNode; ask?: ReactNode;
+export function WorkspaceView({ theme, layout, workspace: w, navigation, loadError, openSettings, openOverview, folds: { isOpen, toggle }, resize, large = false, top, ask }: PluginHostProps & {
+  navigation?: PluginWorkspacePanelProps["navigation"]; workspace: Workspace; loadError?: string | null; openSettings: () => void; openOverview: () => void; top?: ReactNode; ask?: ReactNode;
   folds: Folds; resize: { icon: "Maximize2" | "Minimize2"; label: string; onPress: () => void } | null; large?: boolean;
 }) {
   const control = useRpc(controlRpc); const refresh = useRpc(refreshRpc); const browserRead = useRpc(browserStatusRpc);
@@ -385,7 +385,6 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
     {!compact && top}
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20, ...(large ? { maxWidth: 1240, width: "100%", alignSelf: "center", paddingHorizontal: 12 } : null) }}>
       {header}
-      {about}
       {ask}
       {wide ? <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
         <View style={{ flex: 5, minWidth: 0 }}>{shipped}{needs}{agent}{history}{tasks}</View>

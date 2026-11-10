@@ -72,13 +72,13 @@ test("phones: the state word lifts dark success green to text contrast; light an
   assert.equal(readable("#e0e0e0", dark), "#e0e0e0");
 });
 
-test("phones: About's footer is one meta line, and its open state isn't shared across workspaces", async () => {
+test("phones: the Summary row's footer is one meta line, and the Summary has no open state to share", async () => {
   const { shortFooter } = await import("../shared/about");
   assert.equal(shortFooter("Summarized by Haiku · 2m ago from the chat, 2 PRs"), "Haiku · 2m ago");
   assert.equal(shortFooter("Summarized 3h ago from the goal"), "3h ago");
   const about = await source("client/about.tsx");
-  assert.match(about, /useState\(\(\) => compact \? false : readOpen\(\)\)/);
-  assert.match(about, /if \(!compact\) writeOpen\(next\)/);
+  assert.doesNotMatch(about, /readOpen|writeOpen/);
+  assert.match(about, /d\.footer \? shortFooter\(d\.footer\)/, "the short form on every size: a narrow panel clipped the time");
 });
 
 test("phones: the pill sheet has one primary; Sign off steps back while the workspace has something to act on", async () => {

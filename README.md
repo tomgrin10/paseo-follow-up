@@ -32,9 +32,9 @@ The first time you open Follow-up from the sidebar, a short setup takes Home's p
 2. **Check your setup.** Whether the GitHub CLI is signed in (and as whom), whether Claude and Codex are available for the helper agents, and whether agents get Follow-up's tools. Anything missing shows the fix, with the command to copy. Checks run only while this step is open.
 3. **What Follow-up does without asking.** Follow every workspace (or turn single ones off), Send repairs automatically, and Trust bypass agents. They are on by default and save as you change them.
 4. **Reviewers.** Who **Add reviewers** asks: a default for every repository, and a list per repository Follow-up has seen. **Skip, set later** leaves it empty.
-5. **Helpers.** The Overseer and AI priority switches, which models they use (change them under Settings → Agents), and where Home, the workspace panel, Needs you and What's this about? live.
+5. **Helpers.** The Overseer and AI priority switches, which models they use (change them under Settings → Agents), and where Home, the workspace panel, Needs you and the Summary live.
 
-Every switch in setup is the same one Settings shows, so nothing is applied twice and nothing is lost if you stop halfway. Setup remembers its step, so a reload or another device picks up where you left off. Run it again any time from **Set up Follow-up again** at the top of Follow-up's settings, or ⌘K → **Follow-up: Set up again**. If Follow-up was already installed before this version, it doesn't open on its own: Home shows one dismissible line offering it, for a day.
+Every switch in setup is the same one Settings shows, so nothing is applied twice and nothing is lost if you stop halfway. Setup remembers its step, so a reload or another device picks up where you left off. Run it again any time from **Set up Follow-up again** in Settings → **General**, the first category, or ⌘K → **Follow-up: Set up again**. If Follow-up was already installed before this version, it doesn't open on its own: Home shows one dismissible line offering it, for a day.
 
 ## What's new
 
@@ -147,9 +147,9 @@ The Follow-up sidebar row (and ⌘K → **Follow-up: Home**) opens **Home**: eve
 - **Provider limits** under it, from the [Smart Session](https://www.npmjs.com/package/paseo-smart-session) plugin: one line per provider, such as "Claude 5h 62% · 7d 41% · resets 14:10". Amber from 80%, red at the limit; tap a line to see each ZeroSub account. The age shows when the reading is older than 15 minutes. Without Smart Session the line isn't there.
 - **Search** ("Search workspaces, branches, PRs"; `/` or ⌘K → **Follow-up: Search** focuses it) matches workspace names, branches, PR numbers ("#1402" or "1402") and titles, agent and subagent titles, the project, Linear keys such as HER-1312, and the current ask. Words can come in any order, prefixes count and one typo is forgiven. Results are one ranked list (name above branch and PR above the ask, then recency) with the matched words marked and each row's group as a chip; archived workspaces come last. ↑/↓ move, Enter opens the result on the right, Esc clears.
 - **Sort** (the menu beside search, remembered on this device): **Priority** (default), **Recent**, **Oldest waiting**, **Name** and **By project**. It orders rows inside each group; groups stay in place and search ignores it. Priority means urgency: blocking asks, then decisions only you make, then finished turns; inside those, a big open question first, then the nearest task deadline, then the oldest ask. When an agent has ranked workspaces with `set_priorities` in the last 6 hours, Priority uses those scores inside Needs you (blocking asks still first), each row shows the ranker's one-line reason and source, and the menu says "Ranked 12m ago"; otherwise it says "By urgency". Follow-up never writes a reason itself.
-#### What's this about?
+#### Summary
 
-When a workspace's name doesn't remind you what it's for, open **What's this about?** at the top of Home's detail pane or the workspace panel (under Home). It's collapsed by default and remembers open or closed on this device. Collapsed, it shows a one-line gist once one is written ("Fix slow vendor-activity query; PR #1352 merged, waiting on Hadar"). Open, it shows:
+When a workspace's name doesn't remind you what it's for, open **Summary** at the top of Home's detail pane or the workspace panel (under Home). It's collapsed by default and remembers open or closed on this device. Collapsed, it shows a one-line gist once one is written ("Fix slow vendor-activity query; PR #1352 merged, waiting on Hadar"). Open, it shows:
 
 - **An overview**: two to four plain sentences on what the workspace is for, where it stands and what it's waiting on, written by a small model from the root agent's first messages and latest steps, its subagents' titles, its PRs and the linked issues. While it's being written you see "Summarizing…" with the first message.
 - **Linked**: Linear issues (key, title, state, priority, due), PRs (number, title, state), Slack threads (channel, who, a one-line excerpt) and claude.ai or doc links the agent shared, each with a source chip. Links are only ever found in the workspace's own text, never written by the model; with none it says "No linked issues or threads found".
@@ -197,7 +197,7 @@ Settings → **Agents** has one card for each agent Follow-up runs for you. Each
 
 | Agent | Default | Notes |
 |---|---|---|
-| What's this about? | Claude · Haiku | One small call per overview, no tools. Claude (`claude -p`) or Codex (`codex exec`). Also sets how many overviews are written ahead per day (60). |
+| Summaries | Claude · Haiku | One small call per summary, no tools. Claude (`claude -p`) or Codex (`codex exec`). Also sets how many overviews are written ahead per day (60). |
 | Overseer | Claude · newest Opus, Bypass | A change applies when you restart it. Its pane on Home offers **Restart with …**, and the new Overseer gets the old one's last steps. |
 | Recovery | Same as main agent | Or pick a provider and model. Switching provider keeps the main agent's tools and instructions. |
 | Priority ranker | Claude · Sonnet, hourly, up to 24 a day | One call per run, no tools. Claude or Codex. |

@@ -741,7 +741,7 @@ export default function contribute(server: PluginServerContext) {
     if (!(OVERSEER_TOOLS as readonly string[]).includes(tool)) throw new Error(`Unknown Overseer tool ${tool}.`);
     return overseer!.act(paseo as unknown as OverseerPaseo, agentId, tool as OverseerTool, args);
   });
-  // "What's this about?": small model jobs through the shared runner, cached per workspace in about.json.
+  // Summary: small model jobs through the shared runner, cached per workspace in about.json.
   const aiJobs = new AiJobs({ concurrency: 1, logPath: join(directory, "ai-jobs.jsonl") });
   // The ranker behind Home's Priority sort (1.4.0-beta.0). Its provider, model and limits come from the ranker role
   // in Settings → Agents. Inputs are read-only: Follow-up's state, mcpproxy, gh, the plan.
@@ -939,7 +939,7 @@ export default function contribute(server: PluginServerContext) {
       const use: Record<string, string[]> = {};
       const add = (provider: string, name: string) => { (use[provider] ??= []).push(name); };
       if (on.enable_overseer !== false) add(roles.overseer.provider, "the Overseer");
-      add(roles.about.provider, "What's this about?");
+      add(roles.about.provider, "Summaries");
       if (on.enable_ranker !== false) add(roles.ranker.provider, "AI priority");
       return use;
     },
