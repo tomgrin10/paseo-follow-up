@@ -1,0 +1,3 @@
+- Sending an answer closes the question at once; a small notice says when it reached the agent. If it didn't, the notice offers Retry and Open, and the question keeps your answer ("Not sent · Retry"), even after a reload.
+- Saving a spec link, a task's schedule or a reviewer pick also closes right away and confirms with a notice.
+- The composer pill keeps its shape after you sign off: Undo is inside it for a few seconds.

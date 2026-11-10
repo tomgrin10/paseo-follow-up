@@ -10,6 +10,7 @@ import { homeCounts } from "../shared/home";
 import { useHomeModel, type HomeSources } from "./home-data";
 import { onVisible, whileVisible } from "./visibility";
 import { WhatsNewGate } from "./release-notes";
+import { ToastHost } from "./toasts";
 
 /** The backstop poll; agent changes `nudge` it sooner (1.4.0). Nothing while the app is hidden. */
 const POLL_MS = 15_000;
@@ -90,7 +91,7 @@ export function sidebarItem(sources: HomeSources, screenId: string) {
     const c = theme.colors;
     const shown = count > 0 && !inSidebarView;
     // What's new mounts here too (the sidebar is always there), so it shows even if you live in agent chats.
-    return <><WhatsNewGate surface="sidebar" theme={theme} compact={layout.compact} /><SidebarRow icon="GitPullRequest" active={currentScreen?.screenId === screenId} onPress={() => openScreen({ screenId, params: { section: "needs" } })}
+    return <><WhatsNewGate surface="sidebar" theme={theme} compact={layout.compact} /><ToastHost theme={theme} compact={layout.compact} /><SidebarRow icon="GitPullRequest" active={currentScreen?.screenId === screenId} onPress={() => openScreen({ screenId, params: { section: "needs" } })}
       trailing={shown ? <View accessibilityLabel={`${count} need${count === 1 ? "s" : ""} you`} style={{ minWidth: 18, height: 18, paddingHorizontal: 5, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: c.statusWarning }}>
         <Text style={{ color: c.surface0, fontSize: 11, lineHeight: 14, fontWeight: "700", fontVariant: ["tabular-nums"] }}>{count}</Text>
       </View> : undefined} /></>;

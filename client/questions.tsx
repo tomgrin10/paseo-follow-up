@@ -10,17 +10,26 @@ import { answerQuestionRpc } from "../shared/contracts";
 import type { Workspace } from "../shared/model";
 import { OTHER, OTHER_LABEL, answerLabel, isOpen, isOther, questionState, replyText, type Question } from "../shared/questions";
 import { ago } from "../shared/attention";
+import { sentence } from "../shared/errors";
 import { activity, type ActivityTone } from "../shared/activity";
 import { Button, Card, CardRow, Chip, FoldRow, IconButton, SubmitScope, errorText, text, type Theme } from "./kit";
 import { Spinner } from "./motion";
 import { mergedColor, tint, withAlpha, type Colors } from "./theme";
 import { overviewKey, workspaceKey } from "./keys";
 import { RichText } from "./rich-text";
+import { openQuestion, runAction } from "./toasts";
+import { clearPendingAnswer, failPendingAnswer, pendingKey, setPendingAnswer, usePendingAnswer, usePendingAnswers, type PendingAnswer } from "./pending-answers";
 
 const who = (w: Workspace, agentId: string | null) => !agentId || agentId === w.mainAgentId ? "the main agent" : "a root session";
 
-/** What the agent is doing while the question is open, in the developer's terms. */
-export function meanwhile(w: Workspace, q: Question): { icon: string; color: (c: Colors) => string; text: string } {
+/**
+ * What the agent is doing while the question is open, in the developer's terms. `pending` is required, so every
+ * surface that describes a question also says when the developer's answer didn't reach Paseo, or is on its way;
+ * pass null only where the surface shows that itself (QuestionBody's Not sent · Retry line).
+ */
+export function meanwhile(w: Workspace, q: Question, pending: PendingAnswer | null | undefined): { icon: string; color: (c: Colors) => string; text: string } {
+  if (pending?.error) return { icon: "CircleAlert", color: c => c.statusDanger, text: `Your answer wasn't sent: ${sentence(pending.error)} Open it to retry; your words are kept.` };
+  if (pending) return { icon: "Send", color: c => c.foregroundMuted, text: "Sending your answer…" };
   if (q.taskId && !q.options.length) return { icon: "Clock", color: c => c.foregroundMuted, text: "A task is blocked on this. The agent works on the rest." };
   switch (questionState(q)) {
     case "stopped": return { icon: "CirclePause", color: c => c.statusWarning, text: q.big ? `The agent stopped and waits for your answer. Big question: ${q.big}.` : "The agent stopped and waits for your answer." };
@@ -71,8 +80,10 @@ const inputStyle = (c: Colors, compact: boolean, lines: number) => ({ minHeight:
  * One question with its answer form. Send records the answer and messages the asking agent straight
  * away; Copy records it and puts a reply on the clipboard instead. Used by the dialog and the pill.
  */
-export function QuestionBody({ workspace: w, question: q, theme, compact, now = Date.now(), dense = false, bodyMaxHeight, openAgent, onAnswered, onDetails }: {
+export function QuestionBody({ workspace: w, question: q, theme, compact, now = Date.now(), dense = false, bodyMaxHeight, openAgent, onAnswered, onDetails, onClose }: {
   workspace: Workspace; question: Question; theme: Theme; compact: boolean; now?: number; dense?: boolean; bodyMaxHeight?: number; openAgent?: (agentId: string) => void; onAnswered?: () => void; onDetails?: () => void;
+  /** The dialog's close: Send and Copy close it at once and report the outcome as a toast. */
+  onClose?: () => void;
 }) {
   const c = theme.colors; const t = text(c);
   const toast = useToast(); const cache = useQueryClient();
@@ -84,7 +95,12 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   // The pill's scrolling body: track whether more sits below the fold, so it can say so.
   const [scroll, setScroll] = useState({ content: 0, view: 0, offset: 0 });
   const more = scroll.content - scroll.view - scroll.offset > 4;
-  useEffect(() => { setChoice(q.answer?.choice ?? null); setWords(q.answer?.words ?? ""); }, [q.id]);
+  // An answer that didn't reach the server comes back filled in ("Not sent · Retry"), so nothing typed is lost.
+  const pending = usePendingAnswer(w.id, q.id);
+  const unsent = open && pending?.error ? pending : undefined;
+  // Answered or withdrawn elsewhere since: the unsent copy has nothing left to do.
+  useEffect(() => { if (pending && !open) clearPendingAnswer(w.id, q.id); }, [open, !!pending]);
+  useEffect(() => { setChoice(unsent?.choice ?? q.answer?.choice ?? null); setWords(unsent?.words ?? q.answer?.words ?? ""); }, [q.id, !!unsent]);
   const refresh = () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); };
   const free = !q.options.length;
   // Something else: the field below stops being an optional note and becomes the answer, so Send waits for words.
@@ -102,11 +118,37 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
       else if (d?.state === "sent") toast.show(`Sent your ${q.id} answer to the agent`, { variant: "success" });
       else if (d?.state === "queued") toast.show(`Answer saved. It goes to the agent when it can take it.`, { variant: "info" });
       else toast.show("Paseo didn't confirm the message. Check the agent's chat before resending.", { variant: "warning" });
-      refresh(); onAnswered?.();
+      refresh();
     },
     onError: error => { toast.error(errorText(error)); refresh(); },
   });
-  const state = meanwhile(w, q);
+  /**
+   * Send (or Copy) from an open question closes the dialog or moves the pill on at once; the server call runs in
+   * the background and its outcome is a toast. The answer is kept in pending-answers until the server has it.
+   */
+  const quick = (action: "send" | "copy") => {
+    if (!answer) return;
+    const input = { workspaceId: w.id, questionId: q.id, choice: answer, words: note, action };
+    if (action === "copy") void copyText(replyText(q, answer, note)).catch(() => undefined);
+    setPendingAnswer(w.id, q.id, { choice: answer, words: note ?? (free ? undefined : words.trim() || undefined) });
+    const agent = who(w, q.askedBy);
+    void runAction({
+      label: `Answer to ${q.id}`, toast, run: () => answerRpc(input),
+      success: result => {
+        const d = result.question.answer?.delivery;
+        if (action === "copy") return { message: `Copied the ${q.id} answer. Paste it into the agent's chat.` };
+        if (d?.state === "sent") return { message: `Sent to ${agent}` };
+        if (d?.state === "queued") return { tone: "info", message: `Answer saved; ${agent} gets it when it can` };
+        return { tone: "warning", message: "Paseo didn't confirm the message. Check the agent's chat before resending." };
+      },
+      onSuccess: () => { clearPendingAnswer(w.id, q.id); refresh(); },
+      onError: error => { failPendingAnswer(w.id, q.id, errorText(error)); refresh(); },
+      failure: `Answer to ${q.id} not sent`, open: () => openQuestion(w.id, q.id),
+    });
+    onClose?.(); onAnswered?.();
+  };
+  // The body says Not sent · Retry itself, with the button; the state line stays on what the agent is doing.
+  const state = meanwhile(w, q, null);
   const delivery = deliveryLine(w, q, now);
   const pr = q.prKey ? w.prs.find(p => p.key === q.prKey) : null;
   const task = q.taskId ? w.obligations.find(o => o.id === q.taskId) : null;
@@ -172,12 +214,19 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
         <Text style={[t.meta, { flex: 1, color: deliveryColor }]}>{delivery.text}</Text>
       </View>}
     </View>}
+    {unsent && <View accessibilityRole="alert" style={{ flexDirection: "row", gap: 6 }}>
+      <View style={{ paddingTop: 2 }}><Icon name="CircleAlert" size={12} color={c.statusDanger} /></View>
+      <Text style={[t.meta, { flex: 1, color: c.statusDanger }]}>Not sent · {unsent.error}</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel={`Retry sending your ${q.id} answer`} hitSlop={6} disabled={!answer} onPress={() => quick("send")}>
+        <Text style={[t.meta, { color: c.foreground, fontWeight: "600", textDecorationLine: "underline" }]}>Retry</Text>
+      </Pressable>
+    </View>}
     {open && !pinned && input}
   </View>;
   const actions = (open || q.answer && ["queued", "unconfirmed", "copied"].includes(q.answer.delivery.state)) && <View style={{ gap: 6 }}>
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-      {open && <Button shortcut theme={theme} compact={compact} grow={compact} kind="primary" icon="Send" title="Send to agent" accessibilityLabel={`Send your ${q.id} answer to the agent`} accessibilityHint={other && !words.trim() ? "Write your answer first" : compact ? `Puts your answer straight into the asking agent's chat, even mid-turn. Follow-up keeps it under ${q.id}.` : undefined} disabled={!answer || run.isPending} loading={run.isPending && run.variables === "send"} onPress={() => run.mutate("send")} />}
-      {open && <Button theme={theme} compact={compact} icon="Copy" title="Copy" accessibilityLabel={`Copy your ${q.id} answer instead of sending it`} disabled={!answer || run.isPending} loading={run.isPending && run.variables === "copy"} onPress={() => run.mutate("copy")} />}
+      {open && <Button shortcut theme={theme} compact={compact} grow={compact} kind="primary" icon="Send" title="Send to agent" accessibilityLabel={`Send your ${q.id} answer to the agent`} accessibilityHint={other && !words.trim() ? "Write your answer first" : compact ? `Puts your answer straight into the asking agent's chat, even mid-turn. Follow-up keeps it under ${q.id}.` : undefined} disabled={!answer || run.isPending} onPress={() => quick("send")} />}
+      {open && <Button theme={theme} compact={compact} icon="Copy" title="Copy" accessibilityLabel={`Copy your ${q.id} answer instead of sending it`} disabled={!answer || run.isPending} onPress={() => quick("copy")} />}
       {q.answer?.delivery.state === "copied" && <Button shortcut theme={theme} compact={compact} kind="primary" icon="Send" title="Send to agent" accessibilityLabel={`Send your ${q.id} answer to the agent`} loading={run.isPending} onPress={() => run.mutate("send")} />}
       {q.answer && ["queued", "unconfirmed"].includes(q.answer.delivery.state) && <Button theme={theme} compact={compact} icon="RotateCcw" title={q.answer.delivery.state === "queued" ? "Try now" : "Resend"} accessibilityLabel={`Send the ${q.id} answer again`} loading={run.isPending} onPress={() => run.mutate("resend")} />}
       {q.answer && ["queued", "unconfirmed"].includes(q.answer.delivery.state) && <Button theme={theme} compact={compact} kind="ghost" icon="Copy" title="Copy" accessibilityLabel={`Copy the ${q.id} answer`} onPress={() => { void copyText(replyText(q, q.answer!.choice, q.answer!.words)).then(() => toast.show("Copied", { variant: "success" }), () => toast.error("Couldn't copy here")); }} />}
@@ -192,7 +241,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   // In the pill popover the question scrolls and the answer field and actions stay put, so Send is never cut off.
   if (pinned) {
     const showInput = open && (free || other || noteOpen);
-    return <SubmitScope enabled={submittable} onSubmit={() => run.mutate("send")} style={{ gap: 10 }}>
+    return <SubmitScope enabled={submittable} onSubmit={() => open ? quick("send") : run.mutate("send")} style={{ gap: 10 }}>
       <View>
         <ScrollView style={{ maxHeight: bodyMaxHeight! - (showInput ? 62 : 0), flexGrow: 0 }} contentContainerStyle={{ paddingRight: 2 }} scrollEventThrottle={32}
           onLayout={e => { const view = e.nativeEvent.layout.height; setScroll(s => ({ ...s, view })); }}
@@ -207,7 +256,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
       {actions}
     </SubmitScope>;
   }
-  return <SubmitScope enabled={submittable} onSubmit={() => run.mutate("send")} style={{ gap: dense ? 10 : 14 }}>
+  return <SubmitScope enabled={submittable} onSubmit={() => open ? quick("send") : run.mutate("send")} style={{ gap: dense ? 10 : 14 }}>
     {body}
     {actions}
     {!dense && !compact && <Text style={t.small}>Asked {ago(q.askedAt, now)} by {who(w, q.askedBy)}{q.taskId && !q.options.length ? " (blocked task)" : ""}</Text>}
@@ -225,7 +274,7 @@ export function QuestionSheet({ workspace: w, questionId, theme, compact, onClos
   const color = !q ? c.foregroundMuted : q.answer ? c.statusSuccess : q.closed ? c.foregroundMuted : c.statusWarning;
   return <Modal title={q ? `${q.id} · ${q.title}` : "Question"} icon={<Icon name={q?.answer ? "MessageCircleReply" : "MessageCircleQuestion"} size={18} color={color} />} open={!!q} onOpenChange={next => { if (!next) onClose(); }}>
     <Modal.Content contentContainerStyle={{ padding: compact ? 16 : 20 }}>
-      {q && <QuestionBody key={q.id} workspace={w} question={q} theme={theme} compact={compact} openAgent={openAgent} />}
+      {q && <QuestionBody key={q.id} workspace={w} question={q} theme={theme} compact={compact} openAgent={openAgent} onClose={onClose} />}
     </Modal.Content>
   </Modal>;
 }
@@ -233,7 +282,9 @@ export function QuestionSheet({ workspace: w, questionId, theme, compact, onClos
 /** The pill steps through open questions ("1 of 3") and answers them without leaving the chat. */
 export function QuestionStepper({ workspace: w, theme, compact, openAgent, onAnswered, onDetails, bodyMaxHeight }: { workspace: Workspace; theme: Theme; compact: boolean; openAgent?: (agentId: string) => void; onAnswered?: () => void; onDetails?: (id: string) => void; bodyMaxHeight?: number }) {
   const c = theme.colors; const t = text(c);
-  const open = w.questions.filter(isOpen).sort((a, b) => Number(questionState(b) === "stopped") - Number(questionState(a) === "stopped"));
+  const pending = usePendingAnswers();
+  // An answer on its way (sent, no reply yet) steps the pill on at once; one that failed comes back as Not sent.
+  const open = w.questions.filter(q => isOpen(q) && !(pending[pendingKey(w.id, q.id)] && !pending[pendingKey(w.id, q.id)].error)).sort((a, b) => Number(questionState(b) === "stopped") - Number(questionState(a) === "stopped"));
   const [index, setIndex] = useState(0);
   if (!open.length) return null;
   const at = Math.min(index, open.length - 1);

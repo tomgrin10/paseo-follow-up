@@ -3,7 +3,7 @@ import { browserKey, BROWSER_POLL_MS } from "./keys";
 import { Platform, Pressable, Text, View, useWindowDimensions } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { openExternalUrl, useRpc, type PluginClientContext, type PluginTimelineItemProps } from "@getpaseo/plugin/client";
-import { Icon, TextInput, copyText } from "@getpaseo/plugin/client/ui";
+import { Icon, TextInput, copyText, useToast } from "@getpaseo/plugin/client/ui";
 import { BRIEF_KIND, BRIEF_VERSION, askedDecisions, pickedCount, briefSchema, collapsedLine, extrasFit, hasOriginal, nothingNeededLine, isTight, pastRows, selectsFirst, sendBar, type Brief, type BriefDecision, type BriefMove } from "../shared/brief";
 import { age } from "../shared/inbox";
 import { briefKey, HEADLINE_WORD } from "../shared/headline";
@@ -17,6 +17,7 @@ import { SubmitScope, submitHint, text, useNow } from "./kit";
 import { RichText } from "./rich-text";
 import { PrSheet } from "./pr-sheet";
 import { isLight, withAlpha, type Colors } from "./theme";
+import { runAction } from "./toasts";
 
 /**
  * The brief card (design §2): the ask in one line, decisions as option rows, only the context needed, and the one
@@ -279,6 +280,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   const browserRead = useRpc(browserStatusRpc);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
   const [why, setWhy] = useState(false);
   const picks = usePicks(b.id);
   const words = useWords(b.id);
@@ -292,9 +294,12 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   const tone = acts || b.kind === "done" || b.kind === "review" || b.kind === "error" ? kindTone(b.kind, c) : c.foregroundMuted;
   const ageText = age(b.at, now);
   const border = acts ? withAlpha(attention, isLight(c) ? 0.5 : 0.45) : c.border;
+  // Every send from the card (a pick, Something else, Send answers, the keyboard's Send) goes through runAction: the
+  // card keeps the picks and words and says what failed, and the toast offers Retry. Success is the card itself.
   const run = async (key: string, work: () => Promise<unknown>) => {
     if (busy) return; setBusy(key); setError(null);
-    try { await work(); } catch (e) { setError(errorText(e)); } finally { setBusy(null); }
+    await runAction({ label: "Brief", toast, run: work, success: () => null, onError: e => setError(errorText(e)), failure: "Your answer wasn't sent" });
+    setBusy(null);
   };
   const press = (m: BriefMove) => {
     if ((m.kind === "merge" || m.kind === "add_reviewers") && m.prKey) { if (workspace?.prs.some(p => p.key === m.prKey)) setSheet({ key: m.prKey, intent: m.kind === "merge" ? "merge" : "reviewers" }); else if (b.workspaceId) deps.openPanel(b.workspaceId); }

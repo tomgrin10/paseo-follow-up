@@ -2,13 +2,14 @@ import { useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { openExternalUrl, useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, TextInput, useToast } from "@getpaseo/plugin/client/ui";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { workspaceSpecRpc } from "../shared/contracts";
 import type { Workspace } from "../shared/model";
 import { specLabel, validSpecUrl } from "../shared/spec";
 import { ago } from "../shared/attention";
-import { Button, CardRow, errorText, text, type Theme, SubmitScope } from "./kit";
+import { Button, CardRow, text, type Theme, SubmitScope } from "./kit";
 import { overviewKey, workspaceKey } from "./keys";
+import { runAction } from "./toasts";
 
 const openUrl = (url: string) => { void openExternalUrl(url).catch(() => undefined); };
 
@@ -65,37 +66,38 @@ export function SpecSheet({ workspace: w, open, theme, compact, onClose }: { wor
   const [url, setUrl] = useState(w.spec?.url ?? "");
   const [title, setTitle] = useState(w.spec?.title ?? "");
   useEffect(() => { if (open) { setUrl(w.spec?.url ?? ""); setTitle(w.spec?.title ?? ""); } }, [open]);
-  const run = useMutation({
-    mutationFn: (input: { action: "set"; url: string; title?: string | null } | { action: "remove" } | { action: "reset" }) => save({ workspaceId: w.id, ...input }),
-    onSuccess: (_, input) => {
-      toast.show(input.action === "set" ? "Spec link saved" : input.action === "remove" ? "Spec link removed" : "Spec link handed back to the agent", { variant: "success" });
-      void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey });
-      onClose();
-    },
-    onError: error => toast.error(errorText(error)),
-  });
+  // Quick action: the sheet closes at once and a toast reports the outcome (Retry on failure).
+  const act = (input: { action: "set"; url: string; title?: string | null } | { action: "remove" } | { action: "reset" }) => {
+    onClose();
+    void runAction({
+      label: "Spec link", toast, run: () => save({ workspaceId: w.id, ...input }),
+      success: () => ({ message: input.action === "set" ? "Spec link saved" : input.action === "remove" ? "Spec link removed" : "Spec link handed back to the agent" }),
+      onSuccess: () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); },
+      failure: input.action === "set" ? "Spec link not saved" : "Spec link not changed",
+    });
+  };
   const valid = validSpecUrl(url);
   const others = w.artifacts.filter(a => a.url !== w.spec?.url);
   const field = { minHeight: compact ? 44 : 32, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: c.border, color: c.foreground, backgroundColor: c.surface1, fontSize: 13 };
   return <Modal title="Spec link" icon={<Icon name="FileText" size={18} color={c.foregroundMuted} />} open={open} onOpenChange={next => { if (!next) onClose(); }}>
     <Modal.Content contentContainerStyle={{ padding: compact ? 16 : 20 }}>
-      <SubmitScope enabled={!!valid && !run.isPending} onSubmit={() => run.mutate({ action: "set", url, title: title.trim() || null })} style={{ gap: 14 }}>
+      <SubmitScope enabled={!!valid} onSubmit={() => act({ action: "set", url, title: title.trim() || null })} style={{ gap: 14 }}>
       <Text style={t.meta}>The page that sums up this workspace, usually the Claude artifact the main agent keeps up to date. It shows as Spec in Follow-up's header.</Text>
       {w.spec?.url && <Text style={t.small}>{specSource(w)} {ago(w.spec.at)}</Text>}
       <View style={{ gap: 6 }}>
         <Text style={t.label}>Link</Text>
-        <TextInput accessibilityLabel="Spec link" placeholder="https://claude.ai/code/artifact/…" placeholderTextColor={c.foregroundMuted} value={url} onChangeText={setUrl} autoCapitalize="none" autoCorrect={false} inputMode="url" editable={!run.isPending}
+        <TextInput accessibilityLabel="Spec link" placeholder="https://claude.ai/code/artifact/…" placeholderTextColor={c.foregroundMuted} value={url} onChangeText={setUrl} autoCapitalize="none" autoCorrect={false} inputMode="url"
           style={[field, url && !valid ? { borderColor: c.statusDanger } : null]} />
         {!!url && !valid && <Text style={[t.small, { color: c.statusDanger }]}>Use a full https:// link.</Text>}
       </View>
       <View style={{ gap: 6 }}>
         <Text style={t.label}>Name <Text style={{ color: c.foregroundMuted, fontWeight: "400" }}>(optional)</Text></Text>
-        <TextInput accessibilityLabel="Spec name, optional" placeholder="Invoice retry spec" placeholderTextColor={c.foregroundMuted} value={title} onChangeText={setTitle} maxLength={120} editable={!run.isPending} style={field} />
+        <TextInput accessibilityLabel="Spec name, optional" placeholder="Invoice retry spec" placeholderTextColor={c.foregroundMuted} value={title} onChangeText={setTitle} maxLength={120} style={field} />
       </View>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-        <Button shortcut theme={theme} compact={compact} kind="primary" icon="Check" title="Save" disabled={!valid || run.isPending} loading={run.isPending && run.variables?.action === "set"} onPress={() => run.mutate({ action: "set", url, title: title.trim() || null })} />
-        {w.spec?.url && <Button theme={theme} compact={compact} kind="danger" title="Remove link" disabled={run.isPending} onPress={() => run.mutate({ action: "remove" })} />}
-        {w.spec?.source === "developer" && <Button theme={theme} compact={compact} kind="ghost" icon="Undo2" title="Let the agent set it" accessibilityLabel="Hand the spec link back to the main agent and detection" disabled={run.isPending} onPress={() => run.mutate({ action: "reset" })} />}
+        <Button shortcut theme={theme} compact={compact} kind="primary" icon="Check" title="Save" disabled={!valid} onPress={() => act({ action: "set", url, title: title.trim() || null })} />
+        {w.spec?.url && <Button theme={theme} compact={compact} kind="danger" title="Remove link" onPress={() => act({ action: "remove" })} />}
+        {w.spec?.source === "developer" && <Button theme={theme} compact={compact} kind="ghost" icon="Undo2" title="Let the agent set it" accessibilityLabel="Hand the spec link back to the main agent and detection" onPress={() => act({ action: "reset" })} />}
       </View>
       {others.length > 0 && <View style={{ gap: 6, paddingTop: 12, borderTopWidth: 1, borderTopColor: c.border }}>
         <Text style={t.label}>Other artifacts from this workspace</Text>
@@ -106,7 +108,7 @@ export function SpecSheet({ workspace: w, open, theme, compact, onClose }: { wor
             <Text numberOfLines={1} style={t.small}>{a.publishes > 1 ? `Published ${a.publishes} times` : "Published once"}{a.lastAt ? ` · ${ago(a.lastAt)}` : ""}</Text>
           </View>
           <Button theme={theme} compact={compact} kind="ghost" icon="ArrowUpRight" title="Open" accessibilityLabel={`Open ${a.title ?? "artifact"}`} onPress={() => openUrl(a.url)} />
-          <Button theme={theme} compact={compact} title="Use" accessibilityLabel={`Use ${a.title ?? "this artifact"} as the spec`} disabled={run.isPending} onPress={() => run.mutate({ action: "set", url: a.url, title: a.title })} />
+          <Button theme={theme} compact={compact} title="Use" accessibilityLabel={`Use ${a.title ?? "this artifact"} as the spec`} onPress={() => act({ action: "set", url: a.url, title: a.title })} />
         </View>)}
       </View>}
       </SubmitScope>

@@ -138,7 +138,7 @@ export type PillState =
 export const UNDO_MS = 6_000;
 
 /**
- * The single Follow-up pill for one agent. Flagged → its flag; just signed off → "Signed off · Undo" for 6 s;
+ * The single Follow-up pill for one agent. Flagged → its flag; just signed off → "Signed off" (Undo inside its popover) for 6 s;
  * otherwise the workspace's items when this is the workspace's main agent; else nothing.
  */
 export function pillState(input: {
@@ -153,7 +153,7 @@ export function pillState(input: {
   const items = withoutBriefQuestions(input.items, row);
   const flag = row ? flagHeadline(row, now, items) : null;
   if (flag) return { mode: "flag", headline: flag, todo: items.length };
-  if (row && recent && recent.agentIds.includes(row.agentId) && now - recent.at < UNDO_MS) return { mode: "undo", label: recent.kind === "later" ? "Later · Undo" : "Signed off · Undo" };
+  if (row && recent && recent.agentIds.includes(row.agentId) && now - recent.at < UNDO_MS) return { mode: "undo", label: recent.kind === "later" ? "Later" : "Signed off" };
   const work = workspaceHeadline(items);
   return work ? { mode: "workspace", headline: work, todo: items.length } : null;
 }
