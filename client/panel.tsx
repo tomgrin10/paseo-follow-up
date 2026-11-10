@@ -15,6 +15,7 @@ import { settledForDisplay } from "../shared/presentation";
 import { ago, shortRefs } from "../shared/attention";
 import { agentCard, unconfirmedNote } from "../shared/status";
 import { Button, Card, CardRow, FoldRow, IconButton, errorText, text, useNow, type Theme } from "./kit";
+import { VersionMark } from "./updates";
 import { Reveal, Skeleton } from "./motion";
 import { WorkspaceHeader } from "./header";
 import { NeedsYouCard, overviewKey, workspaceKey } from "./needs-you";
@@ -129,6 +130,7 @@ export function PanelTop({ theme, compact, openOverview, openSettings }: { theme
   return <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: compact ? 12 : 8, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: c.border }}>
     <Button theme={theme} compact={compact} kind="ghost" icon="House" title="Home" accessibilityHint="Opens Follow-up Home with every workspace" onPress={openOverview} />
     <View style={{ flex: 1 }} />
+    {openSettings && <VersionMark theme={theme} touch={compact} openSettings={openSettings} />}
     {openSettings && <IconButton icon="Settings" label="Follow-up settings" onPress={openSettings} theme={theme} compact={compact} />}
   </View>;
 }

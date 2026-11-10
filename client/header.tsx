@@ -3,6 +3,7 @@ import { Icon } from "@getpaseo/plugin/client/ui";
 import type { Workspace } from "../shared/model";
 import { ago, headline, liveLine, stackBar, type LiveIcon } from "../shared/attention";
 import { Button, IconButton, Switch, text, type Theme } from "./kit";
+import { VersionMark } from "./updates";
 import { IconSwap, Spinner } from "./motion";
 import { segmentPaint, type Colors } from "./theme";
 import { SpecChip } from "./spec";
@@ -60,6 +61,7 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
   const pad = compact ? 16 : 12;
   const controls = <View style={{ flexDirection: "row", alignItems: "center", gap: 2, marginVertical: compact ? -12 : -4, marginRight: compact ? -10 : -4 }}>
     {!!w.spec?.url && <View style={{ marginRight: 4 }}><SpecChip workspace={w} theme={theme} compact={compact} /></View>}
+    <VersionMark theme={theme} touch={compact} openSettings={onSettings} />
     {resize && <IconButton icon={resize.icon} label={resize.label} onPress={resize.onPress} theme={theme} compact={compact} />}
     <IconButton icon="Settings" label="Follow-up settings" onPress={onSettings} theme={theme} compact={compact} />
   </View>;

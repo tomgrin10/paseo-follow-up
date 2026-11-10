@@ -4,7 +4,7 @@ import { openExternalUrl, useRpc } from "@getpaseo/plugin/client";
 import { Icon, SettingsAction, SettingsCard, SettingsSection, SettingsSelect, copyText, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { dismissUpdateNoticeRpc, installUpdateRpc, setUpdatesRpc, updatesRpc } from "../shared/contracts";
-import { MODE_HINT, MODE_LABEL, UPDATE_MODES, channelHint, checkedText, copyCommand, statusCopy, type StatusAction, type UpdateMode, type UpdatesView } from "../shared/updates";
+import { MODE_HINT, MODE_LABEL, UPDATE_MODES, channelHint, checkedText, copyCommand, statusCopy, versionMark, type StatusAction, type UpdateMode, type UpdatesView } from "../shared/updates";
 import { writeCategory } from "../shared/settings-nav";
 import type { Channel } from "../shared/version";
 import { Button, errorText, space, text, useNow, type Theme } from "./kit";
@@ -185,4 +185,26 @@ export function UpdatesStep({ theme, compact }: { theme: Theme; compact: boolean
     </SettingsCard>
     <Text style={t.small}>Follow-up only installs versions npm confirms were built from github.com/tomgrin10/paseo-follow-up.</Text>
   </View>;
+}
+
+/**
+ * The tiny version marker in Home's and the panel's headers: "v1.4.0-beta.34", muted caption, a warning dot and
+ * "update" while a newer version is on offer. Tapping opens Settings → General. Loading holds its box; a failed read
+ * shows nothing. `touch`: phones get a 44pt box (react-native-web ignores hitSlop).
+ */
+export function VersionMark({ theme, touch, openSettings }: { theme: Theme; touch: boolean; openSettings: () => void }) {
+  const c = theme.colors; const t = text(c, touch);
+  const query = useUpdates();
+  const style = touch ? t.meta : t.small;
+  const box = touch ? { minHeight: 44, paddingHorizontal: 10, justifyContent: "center" as const } : { paddingHorizontal: 4, paddingVertical: 2 };
+  if (!query.data) return query.isError ? null : <View style={[box, { width: touch ? 96 : 84 }]} />;
+  const mark = versionMark(query.data);
+  return <Pressable accessibilityRole="button" accessibilityLabel={mark.label} accessibilityHint="Opens Follow-up settings, General" hitSlop={touch ? undefined : 6}
+    onPress={() => { writeCategory("general"); openSettings(); }} style={[box, { flexShrink: 1, minWidth: 0 }]}>
+    {state => { const hover = !!(state as { hovered?: boolean }).hovered || state.pressed;
+      return <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+        {mark.update && <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.statusWarning }} />}
+        <Text numberOfLines={1} style={[style, { flexShrink: 1 }, hover ? { color: c.foreground, textDecorationLine: "underline" } : null]}>{mark.text}</Text>
+      </View>; }}
+  </Pressable>;
 }
