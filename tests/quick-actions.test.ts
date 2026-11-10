@@ -89,6 +89,7 @@ test("on web, toasts render in a layer on document.body, not inside a Follow-up 
   assert.match(source, /AppRegistry\.runApplication\(LAYER_KEY, \{ rootTag: root/);
   assert.match(source, /pointer-events:none/, "the layer never blocks the page under it");
   assert.match(source, /if \(layered\) return null;/, "the root itself draws nothing inline on web");
+  assert.match(source, /<View pointerEvents="auto" accessibilityRole="alert"/, "pointer-events is inherited: each toast takes clicks back, or Undo and Retry can't be pressed");
 });
 
 // ---------- runAction and the toast store ----------

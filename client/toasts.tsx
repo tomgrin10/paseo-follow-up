@@ -111,7 +111,9 @@ function ToastView({ item, theme, compact }: { item: ToastItem; theme: Theme; co
   const c = theme.colors;
   const tone = item.tone === "error" ? c.statusDanger : item.tone === "warning" ? c.statusWarning : item.tone === "success" ? c.statusSuccess : c.foregroundMuted;
   const icon = item.tone === "error" ? "CircleAlert" : item.tone === "warning" ? "TriangleAlert" : item.tone === "success" ? "CircleCheck" : "Info";
-  return <View accessibilityRole="alert" accessibilityLiveRegion={item.tone === "error" ? "assertive" : "polite"}
+  // pointerEvents="auto": the web layer and the stack are pointer-transparent (pointer-events is inherited), so the
+  // toast itself must take clicks back, or Undo, Retry and Open can't be pressed.
+  return <View pointerEvents="auto" accessibilityRole="alert" accessibilityLiveRegion={item.tone === "error" ? "assertive" : "polite"}
     // Never steals focus: no autoFocus, and the alert role announces it.
     style={{ width: "92%", maxWidth: 480, alignItems: "center" }}>
     <View style={{ alignSelf: "center", maxWidth: "100%", flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8, paddingHorizontal: 12,
