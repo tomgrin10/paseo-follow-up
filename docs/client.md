@@ -36,6 +36,16 @@ Nothing polls while the app is hidden.
   the body in `SubmitScope` (`client/kit.tsx`) and mark the primary Button `shortcut`. Cmd+Enter (Ctrl+Enter off a
   Mac) submits from anywhere; plain Enter only outside multiline fields, buttons, links and radios. It fires once,
   never while the action is disabled, and stops the key so the host composer doesn't act on it.
+- **Quick actions close first.** A dialog's primary action closes it at once and runs the work through
+  `runAction` (`client/toast-store.ts`): a toast confirms it, or says what failed with Retry and Open (errors stay
+  until dismissed, at most three stacked). `ToastHost` mounts beside WhatsNewGate on Home, the panel and the sidebar
+  row; only the first mounted one draws, in the host toast's place and shape, below Paseo's own toast. With none
+  mounted, `runAction` uses the host toast. A sent answer stays in `client/pending-answers.ts` (localStorage on web
+  and desktop, memory on phones) until the server has it; a failed one shows "Not sent · Retry" with the words.
+  `tests/quick-actions.test.ts` fails when a dialog closes in a mutation's `onSuccess`. Left blocking, with the
+  reason in the test: Merge and merge-when-ready, which re-check the stack and can ask again.
+- **The composer pill is always a popover**, Undo included (Paseo 0.16 draws a chevron on popover pills;
+  `tests/pill-popover.test.ts`).
 
 ## Files
 
@@ -45,7 +55,6 @@ Nothing polls while the app is hidden.
 | `client/home-list.tsx` | The one virtualised list, used by Home and the sidebar view. |
 | `client/home-chrome.tsx` | Omnibox, sort menu, status strip, provider and memory meters. |
 | `client/row-menu.tsx`, `client/row-actions.ts`, `shared/row-menu.ts` | The row menu: right-click, long-press or the menu key (Shift+F10) on a Home row or search result. See [Row menu](#row-menu). |
-| `client/actions.ts` | `runAction`: a quick action closes its control at once and reports as a toast. A stand-in until the shared one lands. |
 | `client/home-view.ts` | Home's derived model: sort choice, priorities, titles for search, limits. |
 | `client/home-data.ts` | Paseo's own workspace list, for untracked rows (Quiet) and header buttons. |
 | `client/sidebar-view.tsx`, `client/sidebar-visibility.ts` | Home's list as Paseo's sidebar (on hosts that support it), and its registration. |
@@ -76,6 +85,7 @@ Nothing polls while the app is hidden.
 | `client/release-notes.tsx` | What's new and the notes list. Home's version marker is `VersionMark` in `client/updates.tsx`. |
 | `client/kit.tsx`, `client/motion.tsx`, `client/theme.ts`, `client/keys.ts` | The type scale, motion, theme helpers and query keys. |
 | `client/rich-text.tsx`, `shared/links.ts` | The one renderer for agent-written text, and the linkifier behind it. |
+| `client/toasts.tsx`, `client/toast-store.ts`, `client/pending-answers.ts` | The toast host, `runAction` for quick actions, and answers kept until the server has them. |
 
 ## Row menu
 
