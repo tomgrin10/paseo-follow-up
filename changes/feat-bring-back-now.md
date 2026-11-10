@@ -1,0 +1,1 @@
+- A snoozed workspace has Bring back now, in its right-click menu and its detail pane.

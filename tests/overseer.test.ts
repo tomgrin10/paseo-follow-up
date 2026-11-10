@@ -90,7 +90,7 @@ test("digest: 100 workspaces stay within about 3k tokens, and only changes repea
   assert.ok(file.rows.every(r => digestLine(hundred.find(h => h.workspaceId === r.id)!) === r.line));
   const first = overseerDigest(file, null, NOW + 5_000);
   assert.ok(first.text.length <= 12_000, `first digest ${first.text.length} chars`);
-  assert.match(first.text, /100 workspaces, 8 need Tom/); assert.match(first.text, /First turn\. Running now \(12\)/);
+  assert.match(first.text, /100 workspaces, 8 need the developer/); assert.match(first.text, /First turn\. Running now \(12\)/);
   // Next turn: nothing changed, so only the needs list and a "no changes" line.
   const quiet = overseerDigest(file, first.seen, NOW + 60_000);
   assert.match(quiet.text, /No other changes since your last turn/);
@@ -214,7 +214,7 @@ test("forwarded-message rule end to end: a reply to the open ask reads as Tom, a
   const f = await overseerFixture(t, [flaggedRow, row("a2", { workspaceId: "w2" })]);
   const reply = await f.overseer.act(f.paseo, f.ov, "send_to_agent", { agentId: "a1", text: "use option B", reply_to_ask: true }) as { clearsNeedsYou: boolean; workspace: string };
   assert.equal(reply.clearsNeedsYou, true); assert.equal(reply.workspace, "SCIM");
-  assert.equal(f.sent[0].text, "From Tom via Overseer: use option B");
+  assert.equal(f.sent[0].text, "From the developer via Overseer: use option B");
   assert.equal(await classify({ text: f.sent[0].text, messageId: f.sent[0].messageId }, "a1", NOW, sources(f.ledger)), "tom", "the inbox clears a1's flag");
   const task = await f.overseer.act(f.paseo, f.ov, "send_to_agent", { agentId: "a1", text: "also bump the timeout", reply_to_ask: false }) as { clearsNeedsYou: boolean };
   assert.equal(task.clearsNeedsYou, false);

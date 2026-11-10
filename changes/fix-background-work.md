@@ -1,0 +1,1 @@
+- On Paseo 0.16, an agent whose background job is still running shows as Running, not Finished. Follow-up waits for the job before sending fixes or accepting Done.

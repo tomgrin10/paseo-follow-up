@@ -86,7 +86,7 @@ First, pick where it lives:
   previous one, and the host-wide "seen" record.
 - **RPCs:** `follow.release-notes` (tool `release_notes`) and `follow.whats-new-seen` (exempt from parity: it records
   a person closing the sheet).
-- **UI:** `client/release-notes.tsx`, which shows What's new after an update, the full list, and Home's version line.
+- **UI:** `client/release-notes.tsx` shows What's new after an update and the full list. The version marker at the top of Home and the panel (`VersionMark` in `client/updates.tsx`, text from `versionMark` in `shared/updates.ts`) shows the running version and a dot while an update is on offer. Tapping it opens Settings → General, where Release notes and What's new live.
 - **Self-update** (check npm, install, watch, roll back) is in [updates.md](updates.md).
 - How notes get written is in [releasing.md](releasing.md).
 

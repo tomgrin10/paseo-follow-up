@@ -37,8 +37,10 @@ test("a flagged row leads with Later, today's four choices, then Sign off", () =
 test("a quiet or snoozed row has no triage moves", () => {
   assert.ok(!keys(base).some(([k]) => k === "triage"));
   const snoozed = rowMenu({ ...base, flagged: true, snoozedUntil: "Tue 09:00" })[0].items;
-  assert.deepEqual(snoozed.map(i => i.action), ["later", "sign_off"], "a snoozed row can change its time or be signed off");
-  assert.equal(snoozed[0].hint, "Snoozed until Tue 09:00");
+  assert.deepEqual(snoozed.map(i => i.action), ["later", "bring_back", "sign_off"], "a snoozed row can change its time, come back now, or be signed off");
+  assert.equal(snoozed[1].label, "Bring back now");
+  assert.ok(!flatItems(rowMenu({ ...base, flagged: true })).some(i => i.action === "bring_back"), "only a snoozed row comes back");
+  assert.equal(snoozed[0].hint, "Later until Tue 09:00", "the same words as the Undo bar and the pane");
   assert.ok(!keys({ ...base, flagged: true, s: { ...s, agentId: null } }).some(([k]) => k === "triage"), "no agent, nothing to snooze");
 });
 

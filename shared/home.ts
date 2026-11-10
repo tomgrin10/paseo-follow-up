@@ -1,12 +1,13 @@
-import { liveLine, needsYou, prTone, stackOrder, type NeedItem, type PrTone } from "./attention";
+import { batchView } from "./status";
+import { liveLine, needsYou, prTone, stackOrder, workspaceSnoozed, type NeedItem, type PrTone } from "./attention";
 import { activity, type Activity } from "./activity";
 import { followUpObligations, recoveryBatch } from "./follow-up";
 import { flagHeadline, HEADLINE_ICON, HEADLINE_TONE, HEADLINE_WORD, workspaceHeadline, withoutBriefQuestions, type Headline, type HeadlineKey, type HeadlineTone } from "./headline";
 import { rowTitle, sectionOf, type InboxRow } from "./inbox";
-import { settled, summary, type Pr, type Workspace } from "./model";
+import { completionCheck, settled, summary, type Pr, type Workspace } from "./model";
 import { isOpen as questionOpen } from "./questions";
 import { taskSchedule } from "./task-trigger";
-import { freshPriorities, type Priority, type PrioritySourceKind } from "./priorities";
+import { freshPriorities, priorityRow, type Priority, type PrioritySourceKind } from "./priorities";
 import { DEFAULT_SORT, sortItems, type SortMode } from "./sort";
 import { messageSender, notificationText, senderLabel, workItems } from "./message-sender";
 
@@ -26,7 +27,7 @@ export const GROUP_TITLE: Record<HomeGroupId, string> = {
 export type Tier = 0 | 1 | 2;
 const TIER: Record<HeadlineKey, Tier> = {
   permission: 0, error: 0, paused: 0, blocked: 0, decision: 0, question: 0,
-  action: 1, repairs: 1, merge: 1, reviewers: 1, review: 1, flagged: 1,
+  action: 1, repairs: 1, finish: 1, merge: 1, reviewers: 1, review: 1, flagged: 1,
   finished: 2, pr_closed: 2,
 };
 export const tierOf = (key: HeadlineKey): Tier => TIER[key];
@@ -93,8 +94,8 @@ export type HomeModel = {
 };
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-const fixingBatch = (w: Workspace) => w.batches.find(b => !recoveryBatch(b) && (["sending", "sent"].includes(b.state) || b.state === "pending" && w.enable_auto_sends));
-const recovering = (w: Workspace) => w.batches.find(b => recoveryBatch(b) && ["sending", "sent"].includes(b.state));
+/** "Follow-up is fixing": only work that is in flight or about to go out on its own (shared/status.ts). */
+const fixingBatch = (w: Workspace, now: number) => { const view = batchView(w, now); return view?.fixing && summary(w, now).status !== "done" ? view.batch : undefined; };
 
 /** The PR chip: the first PR that hasn't settled (else the last one), "+n" for the rest, and its checks. */
 export function prChip(w: Workspace | undefined): PrChip | null {
@@ -140,6 +141,18 @@ function sigOf(s: Omit<Workstream, "sig">): string {
 const make = (s: Omit<Workstream, "sig">): Workstream => ({ ...s, sig: sigOf(s) });
 const stripSig = ({ sig: _sig, ...s }: Workstream): Omit<Workstream, "sig"> => s;
 
+/** The Home group of a tracked workspace without an agent row: the order buildHome uses below. */
+export function trackedGroup(w: Workspace, now: number): HomeGroupId {
+  const items = needsYou(w, now);
+  if (items.length) return workspaceSnoozed(w, items, now) ? "later" : "needs";
+  if (fixingBatch(w, now)) return "fixing";
+  if (w.runtimeBusy) return "running";
+  const state = summary(w, now);
+  if (state.status === "done") return "quiet";
+  if (w.prs.some(p => p.snapshot?.state === "OPEN") || state.status === "waiting") return "waiting";
+  return "quiet";
+}
+
 /** Build every group from the inbox rows, Follow-up's tracked workspaces and Paseo's workspace list. */
 export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo: PaseoWorkspaceLite[]; now: number; sort?: SortMode; priorities?: readonly Priority[]; hidden?: readonly string[] }): HomeModel {
   // Workspaces Follow-up keeps off the list (the Overseer's own): no row, no count.
@@ -176,8 +189,8 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
         line: h && h.line !== HEADLINE_WORD[h.key] ? h.line : "", badges: [], pr: prChip(w), at: row.needs?.since ?? null }));
       if (row.workspaceId) covered.add(row.workspaceId);
     } else if (section === "running") {
-      const fixing = w && w.mainAgentId === row.agentId ? fixingBatch(w) ?? recovering(w) : undefined;
-      out.push(make({ ...base, group: fixing ? "fixing" : "running", tier: null, icon: fixing ? "Wrench" : row.resumesAt ? "CirclePause" : "LoaderCircle", tone: "running",
+      const fixing = w && w.mainAgentId === row.agentId ? fixingBatch(w, now) : undefined;
+      out.push(make({ ...base, group: fixing ? "fixing" : "running", tier: null, icon: fixing ? completionCheck(fixing) ? "ListChecks" : "Wrench" : row.resumesAt ? "CirclePause" : "LoaderCircle", tone: "running",
         word: null, line: fixing ? w ? liveLine(w, now).text : "Fixing" : row.resumesAt ? "Paused at the usage limit" : "Working", badges: [], pr: prChip(w), at: fixing?.sentAt ?? row.lastActivityAt }));
       if (row.workspaceId) covered.add(row.workspaceId);
     }
@@ -188,19 +201,25 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
     covered.add(w.id);
     const base = { key: `ws:${w.id}`, agentId: w.mainAgentId, workspaceId: w.id, title: paseo.get(w.id)?.name || w.title, agent: null, project: project(w.id) };
     const items = needsYou(w, now);
+    const group = trackedGroup(w, now);
     const h = workspaceHeadline(items);
-    if (h) {
+    // Later on the workspace's own needs: it waits in Later until its time or a new need.
+    if (group === "later" && h) {
+      out.push(make({ ...base, group: "later", tier: null, icon: "AlarmClock", tone: "muted", word: HEADLINE_WORD[h.key], line: h.line, badges: [], pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
+      continue;
+    }
+    if (group === "needs" && h) {
       out.push(make({ ...base, group: "needs", tier: tierOf(h.key), icon: HEADLINE_ICON[h.key], tone: HEADLINE_TONE[h.key], word: HEADLINE_WORD[h.key], line: h.line,
         badges: badges({ headline: h, workspace: w, items }), pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
       continue;
     }
-    const fixing = fixingBatch(w) ?? recovering(w);
+    const fixing = fixingBatch(w, now);
     const state = summary(w, now);
     const live = liveLine(w, now);
-    if (fixing) out.push(make({ ...base, group: "fixing", tier: null, icon: "Wrench", tone: "running", word: null, line: live.text, badges: [], pr: prChip(w), at: fixing.sentAt ?? fixing.createdAt, readyToArchive: false }));
-    else if (w.runtimeBusy) out.push(make({ ...base, group: "running", tier: null, icon: "LoaderCircle", tone: "running", word: null, line: live.text, badges: [], pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
+    if (group === "fixing" && fixing) out.push(make({ ...base, group: "fixing", tier: null, icon: completionCheck(fixing) ? "ListChecks" : "Wrench", tone: "running", word: null, line: live.text, badges: [], pr: prChip(w), at: fixing.sentAt ?? fixing.createdAt, readyToArchive: false }));
+    else if (group === "running") out.push(make({ ...base, group: "running", tier: null, icon: "LoaderCircle", tone: "running", word: null, line: live.text, badges: [], pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
     else if (state.status === "done") out.push(make({ ...base, group: "quiet", tier: null, icon: "CircleCheck", tone: "success", word: null, line: w.completion?.summary ?? "Done", badges: [], pr: prChip(w), at: w.completion?.declaredAt ?? w.updatedAt, readyToArchive: true }));
-    else if (w.prs.some(p => p.snapshot?.state === "OPEN") || state.status === "waiting") out.push(make({ ...base, group: "waiting", tier: null, icon: "Clock", tone: "muted", word: null, line: live.text, badges: badges({ headline: null, workspace: w, items }), pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
+    else if (group === "waiting") out.push(make({ ...base, group: "waiting", tier: null, icon: "Clock", tone: "muted", word: null, line: live.text, badges: badges({ headline: null, workspace: w, items }), pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
     else out.push(make({ ...base, group: "quiet", tier: null, icon: "Circle", tone: "muted", word: null, line: live.text, badges: [], pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
   }
 
@@ -216,9 +235,13 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
   for (const r of rows) { bump(r.workspaceId, r.lastActivityAt); bump(`agent:${r.agentId}`, r.lastActivityAt); }
   for (const p of paseo.values()) bump(p.id, p.activityAt);
   for (const w of tracked.values()) bump(w.id, w.updatedAt);
+  // A priority is per workspace, its reason about one row: only that row shows it (`row-lines-own-row`).
+  const rowsOf = new Map<string, Workstream[]>();
+  for (const s of out) if (s.workspaceId) rowsOf.set(s.workspaceId, [...rowsOf.get(s.workspaceId) ?? [], s]);
+  const owner = new Map([...fresh.byWorkspace].map(([id, p]) => [id, priorityRow(p, rowsOf.get(id) ?? [], tracked.get(id)?.mainAgentId ?? null)]));
   const finished: Workstream[] = out.map(s => {
     const w = s.workspaceId ? tracked.get(s.workspaceId) : undefined;
-    const p = s.workspaceId ? fresh.byWorkspace.get(s.workspaceId) : undefined;
+    const p = s.workspaceId && owner.get(s.workspaceId) === s.key ? fresh.byWorkspace.get(s.workspaceId) : undefined;
     const activityAt = [s.at, lastActivity.get(s.key) ?? null, s.workspaceId ? lastActivity.get(s.workspaceId) ?? null : null].filter((x): x is string => !!x).sort().at(-1) ?? null;
     const urgent = !!w?.questions.some(q => questionOpen(q) && !!q.big);
     const due = w ? followUpObligations(w).filter(o => !["done", "waived"].includes(o.status)).map(o => taskSchedule(o, w, now).dueAt).filter((x): x is string => !!x).sort()[0] ?? null : null;
@@ -301,7 +324,7 @@ export type BriefPaneModel = {
 const MOVE: Partial<Record<HeadlineKey, string>> = {
   permission: "It's waiting on a permission.", error: "It stopped on an error.", paused: "It's paused until you look.", blocked: "Follow-up is blocked on it.",
   decision: "The agent is blocked on your answer.", question: "The agent is waiting on your answer.", merge: "It's approved and ready to merge.",
-  reviewers: "Its PR has no reviewers yet.", repairs: "Fixes are ready to send.", review: "It has review feedback.", action: "It needs something only you can do.",
+  reviewers: "Its PR has no reviewers yet.", repairs: "Fixes are ready to send.", finish: "Its work is in: ask the main agent to check and declare Done.", review: "It has review feedback.", action: "It needs something only you can do.",
   finished: "It finished and is waiting for your sign-off.", pr_closed: "Its PR merged or closed.",
 };
 const keyOfWord = (word: string | null): HeadlineKey | null => (Object.entries(HEADLINE_WORD).find(([, w]) => w === word)?.[0] as HeadlineKey | undefined) ?? null;

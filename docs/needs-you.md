@@ -5,9 +5,24 @@
 - **One flag per root agent.** It clears only when the developer signs it off or writes to the agent, or when another
   agent signs it off on the developer's behalf (`sign_off`, which counts as a sign-off, not as writing). Opening a
   workspace, reading it, or Paseo's unread dot never clears it, and an agent can't clear its own flag.
+- **Run state is the last turn's, not an outside fact.** `error` and `paused` (`RUN_STATE_REASONS`) describe the
+  agent's last turn, so a newer turn start from anyone (the developer, another agent, the host resuming it) drops
+  them, along with an open card that only reported them (`briefStep` `turn_start`, unless it has open questions). A
+  new failure flags again. Outside facts (permission by request, ci, review, reviewers, pr_closed) and a finish with
+  its ask stay until handled. Rows apply `liveFlag` with the turn start the worker saw (`turnStartedAt`), so a running
+  agent never headlines an Error or Paused from before its current turn (`rowViolations`, invariant
+  `running-is-not-stale`). Status alone isn't enough: Paseo can still read "running" right after a turn fails, and that
+  failure is real news. And `Inbox.start` drops such flags for agents already running
+  after a restart (a 0.16 host resumes them; on 0.15 the agent stopped, and the flag stays).
+- **Background work is running (Paseo 0.16).** An agent that started a shell or task and ended its turn reports
+  `backgroundWork.count > 0`. The inbox's directory reads it as running (`liveStatus` in `shared/agent-load.ts`), so a
+  plain finish doesn't flag (F7's settle sees "running"), its row sits in Running with `backgroundWork`, and
+  `liveFlag` hides an older "finished" until the work ends (shown again after, not erased). Invariant
+  `background-work-is-running` in `rowViolations`. On 0.15 the field is absent and nothing changes.
 - **Pure logic** is in `shared/inbox.ts`: the reducer, `REASONS` in urgency order (permission, error, paused, ci,
   review, reviewers, finished, pr_closed), snoozes (`next-event`, an ISO time, or `pr:<repo#n>`), finish flags, and
-  undo.
+  undo. Undo covers the last sign-off or Later: a Later's undo puts back the snooze it replaced, unless a flag broke
+  that snooze since. The Undo bar and the pill say which one it was ("Signed off", "Later · until 09:00").
 - **Storage and loop.** `server/inbox.ts` stores `inbox.json` (`InboxStore`). `Inbox` turns lifecycle events into
   reducer events (`turnStarted`, `turnEnded`, `permissionRequested`…). `tick()` runs every 15 s from `inboxLoop`
   in `index.server.ts`.
@@ -62,9 +77,16 @@
 | --- | --- |
 | `inbox_list` | `{ flagged_only? }` |
 | `sign_off` | `{ agentIds }` |
-| `snooze` | `{ agentIds, until }`: `next-event`, `1h`, `tomorrow` or an ISO time |
+| `snooze` | `{ agentIds, until }`: `next-event`, `1h`, `tonight`, `tomorrow`, `pr:<repo#n>` or an ISO time, stored as a time by `resolveUntil` |
 | `set_finish_flags` | `{ agentIds, value }`: whether finished turns flag them |
-| `inbox_act` | `{ action, agentIds, muteTurn? }`, where `action` is `undo`, `mute_turn`, `unsorted_flag`, `unsorted_sign_off` or `batch_undo` |
+| `snooze_workspace` | `{ workspace, until }` or `{ workspace, bring_back: true }`: Later on a workspace-only Needs-you row (below) |
+| `inbox_act` | `{ action, agentIds, muteTurn? }`, where `action` is `undo` (the last sign-off or Later), `unsnooze` (Bring back now: ends a Later early), `mute_turn`, `unsorted_flag`, `unsorted_sign_off` or `batch_undo` |
+
+- **Workspace Later.** A workspace-only Needs-you row (a hold, repairs to send, a question with no agent flag) has no
+  inbox flag to snooze. Its Later (row menu, `snooze_workspace`, `follow.control` `snooze`) sets `Workspace.snooze`
+  over the needs it covers (`needKey`). `workspaceSnoozed()` in `shared/attention.ts` keeps the row in Later until the time passes or a new need
+  appears; Bring back now clears it. Every count (the header dot, the pill, Home) goes through `activeNeeds()`, so none
+  counts a workspace in Later; the panel's card stays, reading "Later until …". The Undo bar undoes it like an agent's Later. Invariant `snooze-can-wake`.
 
 ## The brief and `needs_you`
 
@@ -86,6 +108,9 @@
   brief supersedes it. While a linked question is open on the server, nothing but a developer reply, pick or sign-off
   closes its card. The invariant is `brief-follows-questions` (`shouldReopen` in `shared/brief.ts`,
   `shared/status-invariants.ts`).
+- **Every row shows its own lines.** Home and Paseo 0.16's sidebar view render the same model, so a
+  line on one agent's row never comes from another row of its workspace. The invariant is `row-lines-own-row`
+  (`homeViolations`); [ai-roles.md](ai-roles.md#priority-ranker-beta) covers priority reasons.
 - **Answering the brief.** The card's moves go through `follow.brief-action`: pick an option, several picks, or
   Retry. Each sends one message as the developer and is logged as such. Picks that answer stored questions become
   those questions' answers.
@@ -96,7 +121,8 @@
 ## Home
 
 - **Grouping** (`shared/home.ts`): every workstream in one list, grouped by what it needs (`HOME_GROUPS`: needs,
-  fixing, running, waiting, later, quiet).
+  fixing, running, waiting, later, quiet). A tracked workspace's group comes from `trackedGroup`, which reads the
+  status model ([workspaces.md](workspaces.md#status-model)).
 - **Search, sort and colour:**
   - `shared/search.ts`: the client-side omnibox index.
   - `shared/sort.ts`: Priority, Recent, Oldest waiting, Name, By project. Sorting applies within each group.

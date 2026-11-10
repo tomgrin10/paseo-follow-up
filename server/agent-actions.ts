@@ -4,7 +4,8 @@ import type { ActionPlan } from "../shared/pr-actions";
 import { mergeBlockers } from "../shared/pr-actions";
 import { recoveryBatch } from "../shared/follow-up";
 import { flagHeadline } from "../shared/headline";
-import type { InboxRow } from "../shared/inbox";
+import { resolveUntil, type InboxRow } from "../shared/inbox";
+import { needKey, needsYou } from "../shared/attention";
 import type { Pr, State, Workspace } from "../shared/model";
 import { configuredReviewers, reviewerLoginSchema, noReviewers, resolveReviewers, reviewerConfig, reviewerLabel, withoutAuthor, type ReviewerEntry } from "../shared/reviewers";
 import { findWorkspace } from "./engine";
@@ -24,19 +25,19 @@ import { waitNote, type WaitStatus } from "../shared/wait";
  * return a dry-run plan first; `confirm: true` with that plan's id runs it. Every agent write is recorded in
  * the inbox ledger as `by: "agent:<id>"`, which never counts as the developer writing to the agent.
  */
-export const AGENT_TOOLS = ["make_main_agent", "list_prs", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "track", "inbox_list", "sign_off", "snooze", "set_finish_flags", "set_priorities", "workspace_about", "agent_settings", "follow_settings", "set_follow_settings", "project_settings", "set_project_tracking", "pr_workflow", "set_pr_workflow", "reviewer_settings", "reviewer_suggestions", "save_reviewers", "set_agent_setting", "set_wait_for_jobs", "onboarding_status", "onboarding_checks", "set_onboarding", "priorities", "rank_status", "rerank_priorities", "usage", "overseer_status", "overseer_start", "overseer_restart", "overseer_ask", "inbox_brief", "brief_action", "inbox_act", "answer_question", "run_recovery", "refresh", "set_workspace_spec", "set_task_trigger", "pr_controls", "browser_status", "trust_bypass_status", "release_notes", "link_items", "set_linked_items", "updates_status", "check_updates", "set_updates", "install_update", "display_settings", "set_display"] as const;
+export const AGENT_TOOLS = ["make_main_agent", "list_prs", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "track", "inbox_list", "sign_off", "snooze", "snooze_workspace", "set_finish_flags", "set_priorities", "workspace_about", "agent_settings", "follow_settings", "set_follow_settings", "project_settings", "set_project_tracking", "pr_workflow", "set_pr_workflow", "reviewer_settings", "reviewer_suggestions", "save_reviewers", "set_agent_setting", "set_wait_for_jobs", "onboarding_status", "onboarding_checks", "set_onboarding", "priorities", "rank_status", "rerank_priorities", "usage", "overseer_status", "overseer_start", "overseer_restart", "overseer_ask", "inbox_brief", "brief_action", "inbox_act", "answer_question", "run_recovery", "refresh", "set_workspace_spec", "set_task_trigger", "pr_controls", "browser_status", "trust_bypass_status", "release_notes", "link_items", "set_linked_items", "updates_status", "check_updates", "set_updates", "install_update", "display_settings", "set_display"] as const;
 export type AgentTool = typeof AGENT_TOOLS[number];
 /** Tools that only read. */
 export const READ_ONLY_TOOLS: readonly AgentTool[] = ["list_prs", "inbox_list", "workspace_about", "agent_settings", "display_settings", ...RPC_TOOLS.filter(t => t.kind === "read").map(t => t.name as AgentTool)];
 /** Tools that can't be undone from Follow-up. */
 export const DESTRUCTIVE_TOOLS: readonly AgentTool[] = ["merge"];
 /** Tools that plan first and run only with `confirm: true` and the plan's id. */
-export const PLANNED_TOOLS: readonly AgentTool[] = ["make_main_agent", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "sign_off", "snooze", "set_finish_flags", "set_priorities", "set_display", ...RPC_TOOLS.filter(t => t.kind === "planned").map(t => t.name as AgentTool)];
+export const PLANNED_TOOLS: readonly AgentTool[] = ["make_main_agent", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "sign_off", "snooze", "snooze_workspace", "set_finish_flags", "set_priorities", "set_display", ...RPC_TOOLS.filter(t => t.kind === "planned").map(t => t.name as AgentTool)];
 const RPC_TOOL = new Map<string, RpcTool>(RPC_TOOLS.map(t => [t.name, t]));
 void DISPLAY_TOOLS;
 
 /** The developer's control panel switches (Auto-send, Resume, Retry). The button and the agent tool share it. */
-export function controlWorkspace(state: State, input: { workspaceId: string; enable_auto_sends?: boolean; clearHold?: boolean; retryBatchId?: string; mainAgentId?: string }, now = Date.now()): Workspace {
+export function controlWorkspace(state: State, input: { workspaceId: string; enable_auto_sends?: boolean; clearHold?: boolean; retryBatchId?: string; mainAgentId?: string; snooze?: { until: string } | null }, now = Date.now()): Workspace {
   const w = findWorkspace(state, input.workspaceId);
   if (!w.enable_tracking || w.archived) throw new Error("Activate this workspace before changing follow-up controls.");
   if (input.mainAgentId && input.mainAgentId !== w.mainAgentId) {
@@ -44,6 +45,15 @@ export function controlWorkspace(state: State, input: { workspaceId: string; ena
     setMainAgent(w, input.mainAgentId, "developer", now);
   }
   if (input.enable_auto_sends !== undefined) w.enable_auto_sends = input.enable_auto_sends;
+  // Later on a workspace-only Needs-you row, and Bring back now (null).
+  if (input.snooze === null) w.snooze = null;
+  else if (input.snooze) {
+    const until = resolveUntil(input.snooze.until, new Date(now));
+    if (!until || until.startsWith("pr:")) throw new Error("snooze: give until as next-event, 1h, tonight, tomorrow or an ISO time.");
+    const items = needsYou(w, now);
+    if (!items.length) throw new Error("Nothing needs you on this workspace, so there's nothing to put off.");
+    w.snooze = { until, at: new Date(now).toISOString(), keys: items.map(needKey) };
+  }
   if (input.clearHold) w.hold = null;
   if (input.retryBatchId) {
     const b = w.batches.find(b => b.id === input.retryBatchId);
@@ -112,6 +122,7 @@ export const TOOL_INPUT = {
   agent_settings: z.strictObject({}),
   sign_off: z.strictObject({ agentIds: agentIds.optional(), ...confirm }),
   snooze: z.strictObject({ agentIds: agentIds.optional(), until: z.string().trim().min(1).max(200).optional(), ...confirm }),
+  snooze_workspace: z.strictObject({ workspace: id.optional(), until: z.string().trim().min(1).max(200).optional(), bring_back: z.boolean().optional(), ...confirm }),
   set_finish_flags: z.strictObject({ agentIds: agentIds.optional(), value: z.boolean().optional(), ...confirm }),
   set_priorities: z.strictObject({ priorities: z.array(priorityInputSchema).max(200).optional(), replace: z.boolean().optional(), ...confirm }),
   display_settings: z.strictObject({}),
@@ -165,8 +176,8 @@ export class AgentActions {
         const roles = await this.d.agentSettings.all();
         const workflows = await this.d.prWorkflows?.().catch(() => null);
         const wait = await this.d.wait?.status().catch(() => null);
-        return { ...(wait ? { waitForBackgroundJobs: { ...wait, note: waitNote(wait), change: "set_wait_for_jobs, only when the developer asks." } } : {}), roles: Object.values(roles).map(r => ({ ...r, summary: roleSummary(r), does: ROLE_INFO[r.role].does })), change: "Tom changes these in Follow-up settings → Agents.",
-          ...(workflows ? { prWorkflow: { default: workflows.default, reviewFix: workflows.reviewFix, repos: workflows.repos.map(r => ({ repo: r.repo, workflow: r.effective, setting: r.setting, why: r.reason, reviewFix: r.reviewFix ?? workflows.reviewFix })), change: "Tom changes these in Follow-up settings → Following → Shipping PRs." } } : {}) };
+        return { ...(wait ? { waitForBackgroundJobs: { ...wait, note: waitNote(wait), change: "set_wait_for_jobs, only when the developer asks." } } : {}), roles: Object.values(roles).map(r => ({ ...r, summary: roleSummary(r), does: ROLE_INFO[r.role].does })), change: "The developer changes these in Follow-up settings → Agents.",
+          ...(workflows ? { prWorkflow: { default: workflows.default, reviewFix: workflows.reviewFix, repos: workflows.repos.map(r => ({ repo: r.repo, workflow: r.effective, setting: r.setting, why: r.reason, reviewFix: r.reviewFix ?? workflows.reviewFix })), change: "The developer changes these in Follow-up settings → Following → Shipping PRs." } } : {}) };
       }
       case "add_reviewers": return this.planReviewers(caller, args);
       case "merge": return this.planPr(caller, tool, "merge", args);
@@ -177,6 +188,7 @@ export class AgentActions {
       case "send_repairs": return this.sendRepairs(caller, args as { workspace: string; batchId?: string });
       case "set_auto_send": return this.control(caller, tool, { workspaceId: args.workspace, enable_auto_sends: args.value });
       case "clear_hold": return this.control(caller, tool, { workspaceId: args.workspace, clearHold: true });
+      case "snooze_workspace": return this.planWorkspaceSnooze(caller, args as { workspace?: string; until?: string; bring_back?: boolean });
       case "retry_batch": return this.control(caller, tool, { workspaceId: args.workspace, retryBatchId: args.batchId });
       case "track": {
         const w = await this.d.engine.activate(args.workspace);
@@ -233,7 +245,7 @@ export class AgentActions {
    * The rules are checked again at confirm. The old main hears on its next turn through the hook, never by a message.
    */
   private async planMakeMain(caller: string, args: Record<string, any>) {
-    if (!args.reason) throw new Error("make_main_agent: give reason, one line the developer sees (\"Tom asked me to take over the release\").");
+    if (!args.reason) throw new Error("make_main_agent: give reason, one line the developer sees (\"The developer asked me to take over the release\").");
     if (!args.requested) throw new Error("make_main_agent: give requested: developer (the developer asked for it) or self (your own claim).");
     if (!this.d.agentInfo) throw new Error("make_main_agent isn't available in this Follow-up.");
     const find = (state: State) => this.tracked(state).find(w => w.mainAgentId === caller || w.contributorAgentIds?.includes(caller));
@@ -364,7 +376,18 @@ export class AgentActions {
   private async control(caller: string, tool: AgentTool, input: Parameters<typeof controlWorkspace>[1]) {
     const w = await this.d.store.mutate(state => controlWorkspace(state, input, this.now()));
     await this.note(caller, w.mainAgentId, tool);
-    return { workspaceId: w.id, enable_auto_sends: w.enable_auto_sends, hold: w.hold, batches: w.batches.filter(b => !["completed", "cancelled"].includes(b.state)).map(b => ({ id: b.id, state: b.state })) };
+    return { workspaceId: w.id, enable_auto_sends: w.enable_auto_sends, hold: w.hold, snooze: w.snooze ?? null, batches: w.batches.filter(b => !["completed", "cancelled"].includes(b.state)).map(b => ({ id: b.id, state: b.state })) };
+  }
+
+  /** Later and Bring back now on a workspace-only Needs-you row, planned like snooze. Same mutator as the row menu. */
+  private async planWorkspaceSnooze(caller: string, args: { workspace?: string; until?: string; bring_back?: boolean }) {
+    if (!args.workspace) throw new Error("snooze_workspace: give workspace (an id from list_prs).");
+    if (!args.bring_back && !args.until) throw new Error("snooze_workspace: give until (next-event, 1h, tonight, tomorrow or an ISO time), or bring_back=true.");
+    const snooze = args.bring_back ? null : { until: args.until! };
+    // The dry run runs the mutator on a copy, so a bad until or a workspace with nothing to put off fails here.
+    const preview = controlWorkspace(structuredClone(await this.d.store.snapshot()), { workspaceId: args.workspace, snooze }, this.now());
+    const planId = this.plan(caller, "snooze_workspace", () => this.control(caller, "snooze_workspace", { workspaceId: args.workspace!, snooze }));
+    return { dryRun: true, planId, workspaceId: preview.id, snooze: preview.snooze ?? null, next: `Only on the developer's request: call snooze_workspace with confirm=true and planId=${planId}.` };
   }
 
   private async inboxList(caller: string, args: { flagged_only?: boolean }) {
@@ -382,6 +405,8 @@ export class AgentActions {
     if (!args.agentIds?.length) throw new Error(`${tool}: give agentIds (from inbox_list).`);
     if (args.agentIds.includes(caller)) throw new Error(tool === "sign_off" ? "An agent can't sign itself off. Only the developer clears your flag." : `${tool} is for other agents' rows, not your own.`);
     if (tool === "snooze" && !args.until) throw new Error("snooze: give until (\"next-event\", \"1h\", \"tomorrow\" or an ISO time).");
+    const until = tool === "snooze" ? resolveUntil(args.until!, new Date(this.now())) : null;
+    if (tool === "snooze" && !until) throw new Error(`snooze: until "${args.until}" isn't one of next-event, 1h, tonight, tomorrow, pr:<repo#n> or an ISO time.`);
     const { rows } = await this.d.inbox.list();
     const plan = args.agentIds.map(agentId => {
       const r = rows.find(r => r.agentId === agentId);
@@ -392,7 +417,7 @@ export class AgentActions {
     const planId = ready.length ? this.plan(caller, tool, async () => {
       const ids = ready.map(p => p.agentId);
       const input: InboxAction = tool === "sign_off" ? { action: "sign_off", agentIds: ids, seqs: Object.fromEntries(ready.filter(p => p.seq !== undefined).map(p => [p.agentId, p.seq!])) }
-        : tool === "snooze" ? { action: "snooze", agentIds: ids, until: args.until! } : { action: "set_finish_flags", agentIds: ids, value: args.value ?? true };
+        : tool === "snooze" ? { action: "snooze", agentIds: ids, until: until! } : { action: "set_finish_flags", agentIds: ids, value: args.value ?? true };
       const { results } = await this.d.inbox.act(input);
       for (const r of results) if (r.ok) await this.note(caller, r.agentId, tool);
       return { results };

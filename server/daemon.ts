@@ -20,13 +20,14 @@ import { DeliveryDeferred, ConversationGone } from "./delivery";
 import { timelineRefs } from "../shared/linked-extract";
 import type { LinkRef } from "../shared/linked";
 export { ConversationGone } from "./delivery";
-import { activeWindowMs, isLoaded, recentlyUsed, workspaceActive, conversationGone, DEFAULT_ACTIVE_WINDOW_DAYS, DAY_MS } from "./agent-load";
+import { turnIdOf } from "../shared/status";
+import { activeWindowMs, backgroundCount, isLive, isLoaded, recentlyUsed, workspaceActive, conversationGone, DEFAULT_ACTIVE_WINDOW_DAYS, DAY_MS } from "./agent-load";
 import { HistoryCache } from "./history-cache";
 import { DaemonDirectory, type DirectoryRows } from "./directory";
 type RecoveryAgentOptions = Partial<PluginBeforeRequests["agent.create"]["config"]> & { workspaceId: string; labels: Record<string, string>; idempotencyKey: string; env: Record<string, string> };
 
 export const paseoHome = process.env.PASEO_HOME ?? join(homedir(), ".paseo");
-export type Agent = { id: string; provider: string; cwd: string; model?: string | null; currentModeId?: string | null; runtimeInfo?: { modeId?: string | null } | null; thinkingOptionId?: string | null; features?: { id: string; value: unknown }[]; persistence?: { sessionId: string; nativeHandle?: string } | null; title?: string | null; createdAt: string; workspaceId?: string; status: string; archivedAt?: string | null; labels: Record<string, string>; lastUserMessageAt: string | null; pendingPermissions: unknown[]; activeTurn?: unknown; lastError?: string | null; /** Paseo 0.16 background agent; absent on 0.15. */ background?: boolean };
+export type Agent = { id: string; provider: string; cwd: string; model?: string | null; currentModeId?: string | null; runtimeInfo?: { modeId?: string | null } | null; thinkingOptionId?: string | null; features?: { id: string; value: unknown }[]; persistence?: { sessionId: string; nativeHandle?: string } | null; title?: string | null; createdAt: string; workspaceId?: string; status: string; archivedAt?: string | null; labels: Record<string, string>; lastUserMessageAt: string | null; pendingPermissions: unknown[]; activeTurn?: unknown; lastError?: string | null; /** Paseo 0.16 background agent; absent on 0.15. */ background?: boolean; /** Paseo 0.16: live background work (absent on 0.15). */ backgroundWork?: { count?: unknown } | null };
 type WorkspaceRow = { id: string; name: string; projectId?: string | null; labels?: string[]; archivingAt?: string | null };
 export interface Daemon {
   connect(): Promise<void>; close(): Promise<void>;
@@ -329,7 +330,7 @@ export class PaseoGateway implements Gateway {
     const scoped = agents.filter(row => row.agent.workspaceId === w.id && !row.agent.archivedAt && !recoveryIds.has(row.agent.id));
     const guarded = this.guard.waiting(pauses, { agentIds: [w.mainAgentId, ...scoped.map(row => row.agent.id)], workspaceId: w.id, excludedAgentIds: [...recoveryIds].filter((id): id is string => !!id) });
     const guardedInterruptionId = this.guard.ownsInterruption(pauses, w.mainAgentId, w.interruption)?.id;
-    const context = { guardedInterruptionId };
+    const context = { guardedInterruptionId, mainTurnId: turnIdOf(a.activeTurn) };
     if (guarded || !pauses && workspace.labels?.some(label => /^(Paused|Paused by Session Guard)$/i.test(label))) return { ...context, guarded: true, busy: false, reason: "Waiting for Session Guard to resume this workspace", archived: false };
     if (compacting) return { busy: true, reason: "Smart Session is compacting the main agent", archived: false };
     const mainLoaded = isLoaded(a), mainRecent = recentlyUsed(a, this.windowMs, this.now());
@@ -337,7 +338,11 @@ export class PaseoGateway implements Gateway {
     if (a.pendingPermissions.length || a.status === "error") return { busy: false, reason: a.status === "error" ? "Main agent needs recovery" : "Main agent is waiting for a permission or answer", archived: false };
     let busy = false; let backgroundBusy = false;
     const members = agents.filter(row => row.agent.workspaceId === w.id && !recoveryIds.has(row.agent.id) && !row.agent.labels["follow-through.recovery"]).map(row => row.agent);
-    for (const agent of members) if (["running", "initializing"].includes(agent.status)) { busy = true; if (agent.id !== w.mainAgentId) backgroundBusy = true; }
+    for (const agent of members) {
+      if (["running", "initializing"].includes(agent.status)) { busy = true; if (agent.id !== w.mainAgentId) backgroundBusy = true; }
+      // 0.16: work an agent started and ended its turn on (a shell, a task) is still work: no repairs, no Done yet.
+      else if (backgroundCount(agent) > 0) backgroundBusy = true;
+    }
     const subagentsMatter = fresh || !!w.completion || w.batches.some(b => !b.tasks.every(t => t.kind === "inventory") && ["pending", "sent"].includes(b.state));
     const idleLoaded = members.filter(agent => isLoaded(agent) && !["running", "initializing"].includes(agent.status));
     if (subagentsMatter && !backgroundBusy && idleLoaded.length) await this.connect(async client => {
@@ -353,7 +358,7 @@ export class PaseoGateway implements Gateway {
       if (!agent || agent.archivedAt || agent.workspaceId !== w.id) return { busy: false, reason: "Recovery agent is unavailable. Check its result before retrying." };
       if (this.guard.waiting(await this.guard.read(), { agentIds: [agent.id] })) return { busy: true, reason: "Waiting for Session Guard to resume recovery." };
       const children = await subagentsRunning(client, agent, "Recovery subagent status unavailable");
-      return { busy: ["running", "initializing"].includes(agent.status) || !!agent.pendingPermissions.length || children, reason: agent.pendingPermissions.length ? "Recovery is waiting for a permission or answer." : agent.status === "error" ? "Recovery failed. Check its agent before retrying." : null };
+      return { busy: isLive(agent) || !!agent.pendingPermissions.length || children, reason: agent.pendingPermissions.length ? "Recovery is waiting for a permission or answer." : agent.status === "error" ? "Recovery failed. Check its agent before retrying." : null };
     });
   }
   async send(w: Workspace, batch: Batch, text: string): Promise<void> {

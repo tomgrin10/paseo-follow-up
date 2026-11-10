@@ -12,8 +12,10 @@ import { summary, type Workspace } from "../shared/model";
 import { recentMainChange } from "../shared/home";
 import { followUpObligations, recoveryBatch } from "../shared/follow-up";
 import { settledForDisplay } from "../shared/presentation";
-import { ago, sendBlocker, shortRefs } from "../shared/attention";
+import { ago, shortRefs } from "../shared/attention";
+import { agentCard, unconfirmedNote } from "../shared/status";
 import { Button, Card, CardRow, FoldRow, IconButton, errorText, text, useNow, type Theme } from "./kit";
+import { VersionMark } from "./updates";
 import { Reveal, Skeleton } from "./motion";
 import { WorkspaceHeader } from "./header";
 import { NeedsYouCard, overviewKey, workspaceKey } from "./needs-you";
@@ -128,6 +130,7 @@ export function PanelTop({ theme, compact, openOverview, openSettings }: { theme
   return <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: compact ? 12 : 8, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: c.border }}>
     <Button theme={theme} compact={compact} kind="ghost" icon="House" title="Home" accessibilityHint="Opens Follow-up Home with every workspace" onPress={openOverview} />
     <View style={{ flex: 1 }} />
+    {openSettings && <VersionMark theme={theme} touch={compact} openSettings={openSettings} />}
     {openSettings && <IconButton icon="Settings" label="Follow-up settings" onPress={openSettings} theme={theme} compact={compact} />}
   </View>;
 }
@@ -151,26 +154,24 @@ function PanelWorkspace(props: PanelProps & { workspace: Workspace; loadError?: 
   const toggle = (key: string) => { const next = isOpen(key) ? state.open.filter(k => k !== key) : [...state.open, key]; sessionFolds.set(props.workspaceId, next); setState({ open: next }); };
   const { openLarge } = props;
   const compact = props.layout.compact;
-  const top = <PanelTop theme={props.theme} compact={compact} openOverview={props.openOverview} />;
+  const top = <PanelTop theme={props.theme} compact={compact} openOverview={props.openOverview} openSettings={props.openSettings} />;
   const ask = props.inbox && props.briefDeps ? <MainAsk w={props.workspace} theme={props.theme} compact={compact} inbox={props.inbox} briefDeps={props.briefDeps} /> : null;
   return <WorkspaceView {...props} top={top} ask={ask} folds={{ isOpen, toggle }} resize={openLarge ? { icon: "Maximize2", label: "Open the larger view", onPress: () => openLarge(props.workspaceId) } : null} />;
 }
 
 
 
-/** The main agent's current repairs: what was sent and when. Pending batches live in Needs you. */
+/** The agent that has Follow-up's work right now, in the same words as Home and the header (shared/status.ts). */
 function AgentCard({ workspace: w, theme, compact, now, openAgent }: { workspace: Workspace; theme: Theme; compact: boolean; now: number; openAgent?: (id: string) => void }) {
   const c = theme.colors; const t = text(c);
-  const sent = w.batches.find(b => !recoveryBatch(b) && ["sending", "sent"].includes(b.state));
-  const queued = w.enable_auto_sends ? w.batches.find(b => !recoveryBatch(b) && b.state === "pending") : undefined;
-  const batch = sent ?? queued;
-  if (!batch) return null;
+  const card = agentCard(w, now);
+  if (!card) return null;
+  const batch = card.view.batch;
   const recipient = batch.recipientAgentId && batch.recipientAgentId !== w.mainAgentId ? batch.recipientAgentId : w.mainAgentId;
-  const blocker = queued && !sent ? sendBlocker(w, queued) : null;
-  return <Card theme={theme} compact={compact} icon="Bot" title={recipient === w.mainAgentId ? "Main agent is on it" : "Recovery agent is on it"}
+  return <Card theme={theme} compact={compact} icon="Bot" title={card.title}
     right={openAgent && <Button theme={theme} compact={compact} kind="ghost" icon="ArrowUpRight" title="Open" accessibilityLabel="Open the agent's chat" onPress={() => openAgent(recipient)} />}>
     <CardRow theme={theme} compact={compact}>
-      <Text style={[t.meta, { marginBottom: 6 }]}>{sent ? `Sent ${batch.tasks.length} repair${batch.tasks.length === 1 ? "" : "s"} ${ago(batch.sentAt, now)}. Follow-up waits for the agent to report back.` : `${batch.tasks.length} repair${batch.tasks.length === 1 ? "" : "s"} queued · ${blocker ?? "sends when the agent is idle"}`}</Text>
+      <Text style={[t.meta, { marginBottom: 6 }]}>{card.view.phase === "sent" ? `Sent ${batch.tasks.length} repair${batch.tasks.length === 1 ? "" : "s"} ${ago(batch.sentAt, now)}. Follow-up waits for the agent to report back.` : card.line}</Text>
       {batch.tasks.map((task, i) => <View key={task.key} style={{ flexDirection: "row", gap: 6 }}>
         <Text style={[t.meta, { width: 16, fontVariant: ["tabular-nums"] }]}>{i + 1}.</Text>
         <RichText linkColor={c.foreground} style={[t.meta, { flex: 1 }]}>{shortRefs(task.title, w)}</RichText>
@@ -188,14 +189,17 @@ function ShippedCard({ workspace: w, theme, compact, now }: { workspace: Workspa
   return <Reveal>
     <View style={{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 10, padding: 14, gap: 10, backgroundColor: tint(c.statusSuccess, c), borderWidth: 1, borderColor: tint(c.statusSuccess, c) }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-        <View style={{ width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: c.statusSuccess }}><Icon name="Check" size={17} color={c.surface0} /></View>
+        <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: c.statusSuccess }}><Icon name="Check" size={17} color={c.surface0} /></View>
         <View style={{ flex: 1 }}>
           <Text accessibilityRole="header" style={[t.label, { fontSize: 14, color: c.foreground }]}>Shipped</Text>
           <Text style={t.meta}>{merged ? `${merged} PR${merged === 1 ? "" : "s"} merged · ` : ""}declared {ago(w.completion.declaredAt, now)}</Text>
         </View>
       </View>
       <RichText selectable style={[t.body, { color: c.foreground }]}>{w.completion.summary}</RichText>
-      {!!w.completion.unconfirmed?.length && <Text style={t.meta}>{`Deploy not confirmed by Follow-up for ${w.completion.unconfirmed.map(k => shortRefs(k, w)).join(", ")}. The summary above is the agent's evidence.`}</Text>}
+      {!!w.completion.unconfirmed?.length && <View style={{ flexDirection: "row", gap: 6, alignItems: "flex-start" }}>
+        <View style={{ paddingTop: 2 }}><Icon name="CircleAlert" size={13} color={c.statusWarning} /></View>
+        <Text style={[t.meta, { flex: 1, color: c.foreground }]}>{unconfirmedNote(w.completion.unconfirmed)}</Text>
+      </View>}
       <Text style={t.meta}>Archive the workspace from its menu when you're finished with it.</Text>
     </View>
   </Reveal>;

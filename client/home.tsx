@@ -4,8 +4,8 @@ import { Platform, Pressable, ScrollView, Text, TextInput, useWindowDimensions, 
 import { usePaseo, useRpc, type PluginScreenProps } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
 import { useQuery } from "@tanstack/react-query";
-import { browserStatusRpc, inboxBriefRpc } from "../shared/contracts";
-import { needsYou } from "../shared/attention";
+import { browserStatusRpc, controlRpc, inboxBriefRpc } from "../shared/contracts";
+import { needsYou, workspaceSnoozed } from "../shared/attention";
 import { briefPane, followUpLog, lastWorkdayEnd, nextNeeds, paneButtons, sameText, sinceLabel, tailSteps, type HomeGroupId, type HomeModel, type LogLine, type TailStep, type Workstream } from "../shared/home";
 import { age, snoozeUntil, type InboxRow } from "../shared/inbox";
 import { errorText } from "../shared/errors";
@@ -21,13 +21,13 @@ import { answerLine, overseerRowState } from "../shared/overseer";
 import type { OmniboxItem } from "../shared/search";
 import { ListTop, SearchField, SortMenu, StatusStrip, UsageMeters, useOmnibox, useSlashToFocus } from "./home-chrome";
 import { useHomeModel, useTick, type HomeSources } from "./home-data";
-import { useInbox, UndoBar, useNextRelay } from "./inbox";
+import { laterLabel, useInbox, UndoBar, useNextRelay } from "./inbox";
 import { Spinner } from "./motion";
 import { Setup, SetupOffer, useOnboarding } from "./onboarding";
 import type { OnboardingView } from "../shared/onboarding";
 import { withAlpha, isLight, mergedColor, type Colors } from "./theme";
-import { UpdateNotice } from "./updates";
-import { ReleaseNotesSheet, VersionLine, WhatsNewGate } from "./release-notes";
+import { UpdateNotice, VersionMark } from "./updates";
+import { WhatsNewGate } from "./release-notes";
 import { useRowMenu } from "./row-actions";
 import { laterChoices } from "../shared/row-menu";
 import { RichText } from "./rich-text";
@@ -132,13 +132,9 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
     setSelected(next?.key ?? null);
   }, [inbox, model]);
 
-  // null: closed; false: What's new since the previous version; true: every version.
-  const [notesOpen, setNotesOpen] = useState<boolean | null>(null);
   const updateNotice = <UpdateNotice theme={theme} compact={compact} openSettings={deps.openSettings} />;
-  const updatesFooter = <VersionLine theme={theme} compact={compact} onOpen={setNotesOpen} />;
   const updateSheets = <>
     <WhatsNewGate surface="home" theme={theme} compact={compact} />
-    {notesOpen != null && <ReleaseNotesSheet theme={theme} compact={compact} all={notesOpen} onClose={() => setNotesOpen(null)} />}
   </>;
   if (params.view === "log") return <LogView theme={theme} compact={compact} sources={deps.sources} onHome={deps.openHome} onOpen={key => { setSelected(key); deps.openHome(); }} />;
 
@@ -154,8 +150,8 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
     // Phones: the host header already says Follow-up, so no "Home" title row; search, sort and settings share one row and
     // the meters move to the end of the list.
     footer={omnibox.results ? undefined : compact
-      ? <View style={{ paddingTop: 16, paddingBottom: 96, gap: 12 }}>{!nothing && <UsageMeters theme={theme} sources={deps.sources} dense />}{updatesFooter}</View>
-      : updatesFooter}
+      ? <View style={{ paddingTop: 16, paddingBottom: 96, gap: 12 }}>{!nothing && <UsageMeters theme={theme} sources={deps.sources} dense />}</View>
+      : undefined}
     // Phones: the setup offer goes after the Needs-you group when there is one, so the first ask stays high.
     afterNeeds={compact && model.needs > 0 ? <SetupOffer theme={theme} compact view={props.onboarding} /> : undefined}
     emptyAction={compact ? <Button theme={theme} compact kind="secondary" icon="Settings" title="Project settings" onPress={deps.openSettings} /> : undefined}
@@ -174,7 +170,11 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
     // Phones: only the search row stays pinned; the status chips and the setup offer scroll away with the list, so a
     // scrolled list keeps the screen instead of sitting under a 250px block.
     header={omnibox.results ? undefined : compact ? <View style={{ gap: 8, paddingTop: 6, paddingBottom: 6 }}>
-      <StatusStrip theme={theme} model={model} filter={filter} onFilter={setFilter} touch dense />
+      {/* No title row on phones: the version sits at the right of the status chips and scrolls away with them. */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingRight: 6 }}>
+        <View style={{ flex: 1, minWidth: 0 }}><StatusStrip theme={theme} model={model} filter={filter} onFilter={setFilter} touch dense /></View>
+        <VersionMark theme={theme} touch openSettings={deps.openSettings} />
+      </View>
       {updateNotice}
       {model.needs === 0 && <SetupOffer theme={theme} compact view={props.onboarding} />}
     </View> : updateNotice} />;
@@ -197,7 +197,11 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
 function ListHeader({ theme, compact, onSettings }: { theme: Theme; compact: boolean; onSettings: () => void }) {
   const c = theme.colors;
   return <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16 }}>
-    <Text accessibilityRole="header" style={{ flex: 1, color: c.foreground, fontSize: compact ? 17 : 15, fontWeight: "600" }}>Home</Text>
+    {/* Home first, the version second: a muted caption on the title's line, never a control beside the cog. */}
+    <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 4 }}>
+      <Text accessibilityRole="header" style={{ color: c.foreground, fontSize: compact ? 17 : 15, fontWeight: "600" }}>Home</Text>
+      <VersionMark theme={theme} touch={compact} openSettings={onSettings} />
+    </View>
     <IconButton theme={theme} compact={compact} icon="Settings" label="Follow-up settings" onPress={onSettings} />
   </View>;
 }
@@ -275,6 +279,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
   const w = useSyncExternalStore(live.subscribe, () => s.workspaceId ? live.get(s.workspaceId) : undefined, () => undefined);
   const agent = useAgentLive(s.agentId);
   const readBrief = useRpc(inboxBriefRpc);
+  const control = useRpc(controlRpc);
   const brief = useQuery({ queryKey: ["follow-through", "home-brief", s.agentId, row?.seq ?? 0], queryFn: () => readBrief({ agentId: s.agentId! }), enabled: !!s.agentId && !!row?.brief });
   const tail = useTail(agent.handle, `${row?.seq ?? 0}:${agent.status ?? ""}`);
   const browserRead = useRpc(browserStatusRpc);
@@ -293,7 +298,8 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
   const itemFirst = compact && asks.length > 0;
   const [laterSheet, setLaterSheet] = useState(false);
   const [typing, setTyping] = useState(false);
-  const flagged = !!row?.needs && !row.snooze;
+  // A snoozed row keeps its moves: Sign off is a normal end for something put off, and Later changes the time.
+  const flagged = !!row?.needs;
   const plan = paneButtons({ permissions: agent.permissions.length, decisions: !!b?.decisions.some(d => d.options.length), items, flagged, hasAgent: !!s.agentId });
   const run = async (key: string, work: () => Promise<unknown>, done?: string) => {
     if (busy) return; setBusy(key);
@@ -350,6 +356,18 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
     </View>}
   </View>;
 
+  // A snoozed row says when it comes back and offers Bring back now, on every width.
+  // The workspace's own Later (a workspace-only Needs-you row) reads the same and comes back the same way.
+  const wsSnooze = !row?.needs && w && s.key === `ws:${w.id}` && w.snooze && workspaceSnoozed(w, asks, Date.now()) ? w.snooze : null;
+  const later = row?.needs && row.snooze ? { until: row.snooze.until, back: () => inbox.unsnooze([s.agentId!]) }
+    : wsSnooze && w ? { until: wsSnooze.until, back: async () => { await control({ workspaceId: w.id, snooze: null }); live.refresh(); } } : null;
+  const snoozedLine = !!later && <View accessibilityLabel={`Later, ${laterLabel(later.until, Date.now())}`} style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+    <Icon name="AlarmClock" size={14} color={c.foregroundMuted} />
+    <Text style={t.meta}>Later {laterLabel(later.until, Date.now())}</Text>
+    <Button theme={theme} compact={compact} kind="secondary" icon="BellRing" title="Bring back now" loading={busy === "bring_back"}
+      onPress={() => void run("bring_back", later.back)} />
+  </View>;
+
   const laterTimes = laterChoices(new Date());
   // Phones: the moves sit in the dock above the composer, in thumb reach, on one row: Sign off, Sign off & next, Later.
   const narrow = useWindowDimensions().width < 380;
@@ -404,6 +422,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
       {w && <NeedsYouList workspace={w} theme={theme} compact={compact} flush skip={b?.decisions.length ? ["question"] : []} feature={compact}
         actions={{ openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion, openAgent: () => openFull(s) }} />}
       {actionBar}
+      {snoozedLine}
       {steps}
     </ScrollView>
     {s.agentId && <View style={[{ borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.surface0 }, bottomInset(compact)]}>

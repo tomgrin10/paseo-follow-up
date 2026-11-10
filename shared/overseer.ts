@@ -15,7 +15,13 @@ import type { Priority } from "./priorities";
 export const OVERSEER_LABEL = "follow-up.overseer";
 export const OVERSEER_TITLE = "Overseer";
 /** Prefix on every task the Overseer forwards, so the receiving agent knows whose words they are. */
-export const FORWARD_PREFIX = "From Tom via Overseer:";
+export const FORWARD_PREFIX = "From the developer via Overseer:";
+/**
+ * Every prefix a forwarded message has carried. An earlier one named the developer; old transcripts keep that spelling,
+ * so anything that recognises a forward checks all of them (isForwarded).
+ */
+export const FORWARD_PREFIXES = [FORWARD_PREFIX, "From Tom via Overseer:"] as const;
+export const isForwarded = (text: string) => FORWARD_PREFIXES.some(p => text.trimStart().startsWith(p));
 
 export const overseerStateSchema = z.object({
   version: z.literal(1),
@@ -42,6 +48,8 @@ export const isOverseerAgent = (labels: Readonly<Record<string, string>> | null 
 export type WorkstreamPr = { key: string; number: number; state: string; checks: "passed" | "failed" | "pending" | "unknown"; threads: number; url: string | null };
 export type WorkstreamRow = {
   workspaceId: string;
+  /** The Home row this is (`agent:<id>` or `ws:<id>`): a ranked reason is shown on this row only. */
+  key?: string;
   title: string;
   project: string | null;
   branch: string | null;
@@ -117,7 +125,7 @@ function rowOf(s: Workstream, w: Workspace | undefined, p: PaseoWorkspaceLite | 
   const prs = (w?.prs ?? []).map(pr => ({ key: pr.key, number: pr.number, state: pr.snapshot?.state ?? "unknown", checks: prChecks(pr), threads: pr.snapshot?.threads.length ?? 0, url: pr.snapshot?.url ?? null }));
   const needs = s.group === "needs";
   return {
-    workspaceId: s.workspaceId!, title: s.title, project: s.project, branch: p?.branch ?? null, group: s.group,
+    workspaceId: s.workspaceId!, key: s.key, title: s.title, project: s.project, branch: p?.branch ?? null, group: s.group,
     agentId: s.agentId, agentStatus: status ?? (s.group === "running" || s.group === "fixing" ? "running" : null), prs,
     ask: needs ? [s.word, s.line].filter(Boolean).join(": ") || null : null, askKind: needs ? s.word : null,
     activity: needs ? null : s.line || null, activityAt: s.activityAt ?? s.at,

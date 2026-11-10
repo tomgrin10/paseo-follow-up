@@ -76,6 +76,11 @@ export const workspaceSchema = z.object({
   /** When the main agent last made a main-agent call (sync, tasks, questions, needs_you, Done), hourly at most. */
   mainWorkAt: z.string().optional(),
   enable_tracking: z.boolean().default(false), enable_auto_sends: z.boolean().default(false), hold: z.string().nullable(), archived: z.boolean(),
+  /**
+   * Later on a workspace-only Needs-you row (no inbox flag to snooze): `until` an ISO time or "next-event", over the
+   * needs it was set on (`keys`, needKey). A new need or the time ends it (workspaceSnoozed). Null: not snoozed.
+   */
+  snooze: z.object({ until: z.string(), at: z.string(), keys: z.array(z.string()) }).nullable().optional(),
   prs: z.array(prSchema), obligations: z.array(obligationSchema), batches: z.array(batchSchema),
   excludedStacks: z.array(z.object({ name: textSchema, reason: textSchema, excludedAt: z.string(), prs: z.array(prSchema), obligations: z.array(obligationSchema) })).default([]),
   prActions: z.array(z.object({ id: idSchema, kind: z.enum(["merge", "enable_mwr", "disable_mwr", "request_reviewers"]), reviewers: z.array(z.string()).optional(), prs: z.array(idSchema), heads: z.record(z.string(), z.string()), createdAt: z.string(), state: z.enum(["sending", "submitted", "failed", "uncertain"]), result: z.string() })).default([]),
@@ -84,6 +89,8 @@ export const workspaceSchema = z.object({
     unconfirmed: z.array(z.string()).optional() }).nullable(),
   /** The main agent declared Done while only Follow-up's own waits remained (a rollout, a refresh); recorded as Done once they clear. */
   declaration: z.object({ summary: textSchema, at: z.string() }).nullable().optional(),
+  /** Why the worker holds queued repairs although nothing in this record blocks them (unloaded/long-idle agent, setup). */
+  sendWait: z.enum(["unloaded", "setup"]).nullable().optional(),
   updatedAt: z.string(), managedDoneLabel: z.boolean(),
   runtimeReason: z.string().nullable(), runtimeBusy: z.boolean(), backgroundBusy: z.boolean().default(false),
   interruption: z.object({ turnId: z.string().nullable(), at: z.string(), kind: z.enum(["canceled", "failed"]), guardPauseId: z.string().optional(), /** The agent whose turn stopped (since 1.4.0-beta.16). */ agentId: idSchema.optional() }).optional(),
@@ -171,7 +178,7 @@ export function completionGate(w: Workspace, now = Date.now()): CompletionGate {
   for (const q of (w.questions ?? []).filter(questionOpen)) add("developer", `Answer or withdraw ${q.id} (${q.title})`);
   if (w.hold) add("developer", w.hold);
   if (w.runtimeBusy) add("wait", "Wait for active agent work to finish");
-  if (w.backgroundBusy) add("wait", "Wait for active background agents to finish");
+  if (w.backgroundBusy) add("wait", "Wait for background agents and jobs to finish");
   if (w.runtimeReason) add("wait", w.runtimeReason);
   return { blockers, unconfirmed };
 }
@@ -186,7 +193,7 @@ export type Status = "active" | "handling" | "waiting" | "needs-you" | "done";
 export function summary(w: Workspace, now = Date.now()): { status: Status; label: string; reason: string } {
   const obligations = followUpObligations(w);
   if (w.hold) return { status: "needs-you", label: "Needs you", reason: w.hold };
-  const blocked = w.batches.find(b => !recoveryBatch(b) && ["blocked", "uncertain"].includes(b.state));
+  const blocked = w.batches.find(b => !recoveryBatch(b) && ["blocked", "uncertain"].includes(b.state) && !(w.completion && completionCheck(b)));
   if (blocked) return { status: "needs-you", label: "Needs you", reason: blocked.result || "Follow-up needs a decision" };
   const question = (w.questions ?? []).find(questionOpen);
   if (question) return { status: "needs-you", label: "Needs you", reason: `${question.id}: ${question.title}` };
@@ -194,7 +201,7 @@ export function summary(w: Workspace, now = Date.now()): { status: Status; label
   if (obligation) return { status: "needs-you", label: "Needs you", reason: obligation.title };
   if (w.completion && completionBlockers(w, now).length === 0) return { status: "done", label: "Done", reason: w.completion.summary };
   if (w.runtimeReason) return { status: "waiting", label: "Waiting", reason: w.runtimeReason };
-  const batch = w.batches.find(b => !recoveryBatch(b) && ["pending", "sending", "sent"].includes(b.state));
+  const batch = w.batches.find(b => !recoveryBatch(b) && ["pending", "sending", "sent"].includes(b.state) && !(b.state === "pending" && completionCheck(b)));
   if (batch) return { status: batch.state === "pending" ? "active" : "handling", label: batch.state === "pending" ? w.enable_auto_sends ? "Auto queued" : "Ready to send" : "Agent handling", reason: `${batch.tasks.length} follow-up task${batch.tasks.length === 1 ? "" : "s"} ${batch.state === "pending" ? "queued" : batch.recipientAgentId && batch.recipientAgentId !== w.mainAgentId ? "sent to the recovery agent" : "sent to the main agent"}` };
   if (w.runtimeBusy || obligations.some(o => o.status === "working")) return { status: "handling", label: "Agent handling", reason: obligations.find(o => o.status === "working")?.title ?? "The main agent is working" };
   if (w.prs.some(pr => pr.error || !pr.snapshot?.complete)) return { status: "waiting", label: "Waiting", reason: "PR status unavailable; refresh will retry" };

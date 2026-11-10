@@ -31,6 +31,11 @@ Nothing polls while the app is hidden.
   developer wrote (question, option, answer words, brief ask/context, task title/evidence, summary, results,
   Overseer replies, activity details) sits in a plain `<Text>`. A one-line title inside a pressable row uses
   `<RichText plain>`. Add new agent-written fields to the scan.
+- **Every dialog or card with a primary action is keyboard-sendable** (`tests/keyboard-send.test.ts`). Root cause of
+  "I can't press command+enter to send": no card or sheet had a key handler, and the answer field is multiline. Wrap
+  the body in `SubmitScope` (`client/kit.tsx`) and mark the primary Button `shortcut`. Cmd+Enter (Ctrl+Enter off a
+  Mac) submits from anywhere; plain Enter only outside multiline fields, buttons, links and radios. It fires once,
+  never while the action is disabled, and stops the key so the host composer doesn't act on it.
 
 ## Files
 
@@ -68,7 +73,7 @@ Nothing polls while the app is hidden.
 | `client/shipping.tsx` | Settings → Following → Shipping PRs. |
 | `client/onboarding.tsx` | Getting started. |
 | `client/updates.tsx` | Settings → General's Updates sections, Home's update notice, setup's Updates step ([updates.md](updates.md)). |
-| `client/release-notes.tsx` | What's new, the notes list, Home's version line. |
+| `client/release-notes.tsx` | What's new and the notes list. Home's version marker is `VersionMark` in `client/updates.tsx`. |
 | `client/kit.tsx`, `client/motion.tsx`, `client/theme.ts`, `client/keys.ts` | The type scale, motion, theme helpers and query keys. |
 | `client/rich-text.tsx`, `shared/links.ts` | The one renderer for agent-written text, and the linkifier behind it. |
 
@@ -77,7 +82,9 @@ Nothing polls while the app is hidden.
 Right-click a Home row or search result (or long-press it on a phone, or press the menu key or Shift+F10 on a focused
 row) for quick moves without opening it. `rowMenu()` in `shared/row-menu.ts` lists only what applies to that row:
 
-1. Triage: Later (the same four choices as the detail pane and the pill, `LATER_CHOICES`), then Sign off.
+1. Triage: Later (the same four choices as the detail pane and the pill, `LATER_CHOICES`), Bring back now on a
+   snoozed row (`inbox_act` `unsnooze`; the detail pane offers it too), then Sign off. Later and Sign off show the
+   Undo bar. A workspace-only Needs-you row gets the workspace's own Later and Bring back now instead (no Sign off).
 2. Answer Q<n> for up to two open questions.
 3. Resume follow-up, Send N repairs and Retry repairs, each shown only when it applies.
 4. Open chat, and Ask the Overseer about this (it pre-fills the omnibox and doesn't send).
