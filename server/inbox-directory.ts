@@ -2,14 +2,15 @@ import { join } from "node:path";
 import { withDaemon, type Agent } from "./daemon";
 import { DaemonDirectory } from "./directory";
 import type { AgentInfo, Directory } from "./inbox";
-import { isLoaded } from "./agent-load";
+import { backgroundCount, isLoaded, liveStatus } from "./agent-load";
 
 type Snapshot = Agent & { updatedAt?: string; parentAgentId?: string | null; requiresAttention?: boolean; attentionReason?: string | null; attentionTimestamp?: string | null };
 const info = (a: Snapshot): AgentInfo => ({
   id: a.id, workspaceId: a.workspaceId ?? null, parentAgentId: a.parentAgentId ?? a.labels?.["paseo.parent-agent-id"] ?? null,
-  title: a.title ?? null, status: a.status, archivedAt: a.archivedAt ?? null, updatedAt: a.updatedAt ?? null,
+  title: a.title ?? null, status: liveStatus(a), archivedAt: a.archivedAt ?? null, updatedAt: a.updatedAt ?? null,
   lastUserMessageAt: a.lastUserMessageAt ?? null, requiresAttention: !!a.requiresAttention, attentionReason: a.attentionReason ?? null,
   attentionTimestamp: a.attentionTimestamp ?? null, createdAt: a.createdAt ?? null, ...(a.background === true ? { background: true } : {}),
+  ...(backgroundCount(a) ? { backgroundWork: backgroundCount(a) } : {}),
   pendingPermissionIds: Array.isArray(a.pendingPermissions) ? a.pendingPermissions.flatMap(p => typeof (p as { id?: unknown })?.id === "string" ? [(p as { id: string }).id] : []) : null,
 });
 

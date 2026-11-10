@@ -1,6 +1,6 @@
 import { settled, type Workspace } from "../shared/model";
 
-export { isLoaded, LIVE_STATUSES, type LoadSignals } from "../shared/agent-load";
+export { backgroundCount, isLive, isLoaded, liveStatus, LIVE_STATUSES, type LoadSignals } from "../shared/agent-load";
 import { isLoaded, type LoadSignals } from "../shared/agent-load";
 
 export const DAY_MS = 86_400_000;
