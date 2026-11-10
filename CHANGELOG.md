@@ -2,6 +2,10 @@
 
 What changed in each version of Follow-up, newest first. Follow-up shows these in "What's new" after an update, and in full from Home's last line.
 
+## 1.4.0-beta.29 (2026-11-10)
+
+- Small fixes and improvements.
+
 ## 1.4.0-beta.28 (2026-11-10)
 
 - "What's this about?" is now the Summary: one short sentence under the workspace's name saying what it's for. Rewrite it from the panel's Spec, agent and recovery section.
