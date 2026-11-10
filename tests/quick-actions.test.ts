@@ -89,7 +89,7 @@ test("on web, toasts render in a layer on document.body, not inside a Follow-up 
   assert.match(source, /AppRegistry\.runApplication\(LAYER_KEY, \{ rootTag: root/);
   assert.match(source, /pointer-events:none/, "the layer never blocks the page under it");
   assert.match(source, /if \(layered\) return null;/, "the root itself draws nothing inline on web");
-  assert.match(source, /<View pointerEvents="auto" accessibilityRole="alert"/, "pointer-events is inherited: each toast takes clicks back, or Undo and Retry can't be pressed");
+  assert.match(source, /<Pressable pointerEvents="auto" accessibilityRole="alert"[^>]*focusable=\{false\}/, "pointer-events is inherited: each toast takes clicks back, or Undo and Retry can't be pressed");
 });
 
 // ---------- runAction and the toast store ----------
@@ -149,6 +149,23 @@ test("runAction without a ToastHost: the host toast says it wasn't sent and wher
   await runAction({ label: "x", run: async () => { throw new Error("offline"); }, success: () => null, failure: "Answer to Q24 not sent", open: () => undefined,
     toast: { show: () => undefined, error: m => { host.push(m); } } });
   assert.deepEqual(host, ["Answer to Q24 not sent. Retry from Needs you."]);
+});
+
+test("a kept toast outlives the drop; hover holds its time; onExpire runs only on timeout", async t => {
+  const { pushToast, holdToast, toastsNow, dismissToast } = await store();
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  try {
+    let expired = 0;
+    const kept = pushToast("info", "Telling the agent it's done", [], { durationMs: 6_000, keep: true, onExpire: () => { expired++; } });
+    pushToast("success", "a"); pushToast("success", "b"); pushToast("success", "c");
+    assert.ok(toastsNow().some(x => x.id === kept), "an Undo window is never pushed out by newer toasts");
+    t.mock.timers.tick(3_000); holdToast(kept, true); t.mock.timers.tick(10_000);
+    assert.equal(expired, 0, "held: the window doesn't run out under the pointer");
+    holdToast(kept, false); t.mock.timers.tick(3_100);
+    assert.equal(expired, 1); assert.equal(toastsNow().some(x => x.id === kept), false);
+    const gone = pushToast("info", "x", [], { onExpire: () => { expired++; } }); dismissToast(gone); t.mock.timers.tick(10_000);
+    assert.equal(expired, 1, "dismissed or acted on: never expires");
+  } finally { for (const x of toastsNow()) dismissToast(x.id); t.mock.timers.reset(); }
 });
 
 test("the stack holds at most three; the oldest non-error goes first", async () => {

@@ -94,7 +94,7 @@ export function contributeFollowUpPill(client: PluginClientContext, deps: Deps) 
       const label = undo ? state.label : state.headline.label;
       // The tooltip (and accessible name) says whose pill it is and what kind of ask. On phones the host shows it as the
       // sheet's title right above the popover, which carries the ask itself in full, so the title doesn't repeat it.
-      const title = undo ? "Follow-up: signed off. Open to undo." : `Follow-up · ${state.headline.label}${state.todo && state.mode === "flag" ? ` · ${todoLabel(withoutBriefQuestions(target.items, target.row))} in this workspace` : ""}`;
+      const title = undo ? "Follow-up · Signed off" : `Follow-up · ${state.headline.label}${state.todo && state.mode === "flag" ? ` · ${todoLabel(withoutBriefQuestions(target.items, target.row))} in this workspace` : ""}`;
       const key = `${state.mode}|${label}|${title}`;
       // Always a popover, Undo included: Paseo 0.16 draws a chevron on popover pills, so switching kinds for the undo
       // window made the chevron and the pill's width jump (tests/pill-popover.test.ts).
@@ -171,7 +171,7 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
       <Text style={t.meta}>Signed off. It leaves Needs you in a few seconds.</Text>
     </View>
     <View style={{ flexDirection: "row" }}>
-      <Button theme={props.theme} compact={touch} grow={touch} kind="primary" icon="Undo2" title="Undo" accessibilityHint="Puts this agent back in Needs you"
+      <Button theme={props.theme} compact={touch} grow={touch} kind="secondary" icon="Undo2" title="Undo" accessibilityHint="Puts this agent back in Needs you"
         onPress={() => done(() => void deps.inbox.undo([agentId]))} />
     </View>
   </View>;

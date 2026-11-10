@@ -14,7 +14,7 @@ import type { Theme } from "./kit";
  */
 
 export { pushToast, dismissToast, runAction, openQuestion, useQuestionOpener, hasToastHost } from "./toast-store";
-import { dismissToast, emit, hosts, subscribe, toastsNow, type ToastItem } from "./toast-store";
+import { dismissToast, emit, holdToast, hosts, subscribe, toastsNow, type ToastItem } from "./toast-store";
 let nextHost = 1;
 
 // The host toast's tokens (Paseo 0.15 app-toast): radius 2xl, padding 8/12, gap 8, top 12 below the safe area.
@@ -22,14 +22,17 @@ const TOP = 12;
 const GAP = 8;
 
 /** Web: where Paseo's own toast ends, so Follow-up's stack sits below it rather than on top of it. */
+/** Where Paseo's own toast last sat (its top), so Follow-up's lands in the same place when it shows alone. */
+let hostTop = 0;
 function hostToastBottom(): number {
-  type Box = { bottom: number; height: number };
+  type Box = { top: number; bottom: number; height: number };
   type El = { closest(sel: string): El | null; parentElement: El | null; getBoundingClientRect(): Box };
   const doc = (globalThis as { document?: { querySelector(sel: string): El | null } }).document;
   if (Platform.OS !== "web" || !doc) return 0;
   const node = doc.querySelector('[data-testid="app-toast-message"]');
   const box = (node?.closest('[role="alert"], [aria-live]') ?? node?.parentElement)?.getBoundingClientRect();
-  return box && box.height > 0 ? box.bottom : 0;
+  if (box && box.height > 0) { hostTop = box.top; return box.bottom; }
+  return 0;
 }
 
 /**
@@ -98,7 +101,8 @@ function ToastStack({ theme, compact }: { theme: Theme; compact: boolean }) {
     return () => clearInterval(timer);
   }, [list.length]);
   if (!list.length) return null;
-  const top = hostBottom ? hostBottom + GAP : TOP;
+  // Alone, it takes Paseo's toast place: below the app header (measured once a host toast has shown), not over it.
+  const top = hostBottom ? hostBottom + GAP : hostTop || (Platform.OS === "web" ? (compact ? 72 : 44) : TOP);
   const position = Platform.OS === "web"
     ? { position: "fixed", top: `max(${top}px, calc(env(safe-area-inset-top) + ${top}px))` } as unknown as object
     : { position: "absolute" as const, top: top + (compact ? 44 : 0) };
@@ -113,8 +117,10 @@ function ToastView({ item, theme, compact }: { item: ToastItem; theme: Theme; co
   const icon = item.tone === "error" ? "CircleAlert" : item.tone === "warning" ? "TriangleAlert" : item.tone === "success" ? "CircleCheck" : "Info";
   // pointerEvents="auto": the web layer and the stack are pointer-transparent (pointer-events is inherited), so the
   // toast itself must take clicks back, or Undo, Retry and Open can't be pressed.
-  return <View pointerEvents="auto" accessibilityRole="alert" accessibilityLiveRegion={item.tone === "error" ? "assertive" : "polite"}
-    // Never steals focus: no autoFocus, and the alert role announces it.
+  return <Pressable pointerEvents="auto" accessibilityRole="alert" accessibilityLiveRegion={item.tone === "error" ? "assertive" : "polite"} focusable={false}
+    // Never steals focus: no autoFocus, and the alert role announces it. Hover or focus inside holds its timer.
+    onHoverIn={() => holdToast(item.id, true)} onHoverOut={() => holdToast(item.id, false)}
+    onFocus={() => holdToast(item.id, true)} onBlur={() => holdToast(item.id, false)}
     style={{ width: "92%", maxWidth: 480, alignItems: "center" }}>
     <View style={{ alignSelf: "center", maxWidth: "100%", flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8, paddingHorizontal: 12,
       borderRadius: 16, borderWidth: 1, borderColor: item.tone === "error" ? tone : c.border, backgroundColor: c.surface0,
@@ -127,10 +133,10 @@ function ToastView({ item, theme, compact }: { item: ToastItem; theme: Theme; co
         <Text style={{ color: c.foreground, fontSize: 13, lineHeight: 18, fontWeight: "600" }}>{a.label}</Text>
       </Pressable>)}
       {item.sticky && <Pressable accessibilityRole="button" accessibilityLabel="Dismiss" hitSlop={compact ? 10 : 6} onPress={() => dismissToast(item.id)}
-        style={(s: { pressed: boolean; hovered?: boolean }) => ({ padding: 4, borderRadius: 8, backgroundColor: s.pressed || s.hovered ? c.surface2 : "transparent" })}>
+        style={(s: { pressed: boolean; hovered?: boolean }) => ({ padding: 6, minWidth: 28, minHeight: 28, alignItems: "center", justifyContent: "center", borderRadius: 8, backgroundColor: s.pressed || s.hovered ? c.surface2 : "transparent" })}>
         <Icon name="X" size={14} color={c.foregroundMuted} />
       </Pressable>}
     </View>
-  </View>;
+  </Pressable>;
 }
 
