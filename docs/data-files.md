@@ -16,6 +16,7 @@ Everything lives in `$PASEO_HOME/plugin-data/follow-through/`.
 | `archive/` | `server/batch-archive.ts` | Never-sent cancelled batches pruned from `state.json`. |
 | `history-cache.json` | `server/history-cache.ts` | Discovery's distilled per-agent history (goal, PR candidates, cursor). Never raw timeline items. |
 | `scopes.json` | `server/scopes.ts` | Each agent's role (main, contributor, recovery) and PR workflow, for the hook and the bridge. Written on change. |
+| `background-agents.json` | `server/background-agents.ts` | Paseo 0.16 background agents (other plugins' helpers) Follow-up has seen, newest 2,000, so the hook skips them. Written when one is found. |
 | `mcp.mjs` | `index.server.ts` | The stdio bridge and CLI, written from `server/mcp-source.ts` at start. |
 | `agent-hook.mjs`, `hooks-enabled.json` | `server/agent-hooks.ts` | The provider hook script, and its lease (expires 120 s after the last heartbeat). |
 | `hook-state/` | hook, worker | Per-session turn markers. `sync-<agent>.json` (the last sync), `needs-you-<agent>.json` (the last `needs_you` call), `native-<agent>.json` (which worker attached native tools), `overseer-seen-<agent>.json`. |
