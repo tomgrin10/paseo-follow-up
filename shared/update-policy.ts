@@ -61,3 +61,5 @@ export function busyText(busy: readonly Busy[]): string {
 }
 
 // Probation (did the new version stick) lives in server/update-watchdog.mjs: the detached installer runs it.
+/** How long after an update the watchdog watches the new version (the same constant as the watchdog's). */
+export const PROBATION_MS = 10 * 60_000;

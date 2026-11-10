@@ -2,11 +2,10 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { offerFor, compareVersions, type Channel } from "../shared/version";
 import type { HistoryEntry, UpdateMode, UpdatePhase, UpdatesView } from "../shared/updates";
-import { busyText, quietWindow, QUIET_MS, CAP_MS, type Busy } from "../shared/update-policy";
+import { busyText, quietWindow, QUIET_MS, CAP_MS, PROBATION_MS, type Busy } from "../shared/update-policy";
 import { CHECK_INTERVAL_MS, type CheckReason, type RegistrySnapshot } from "./update-registry";
 import type { Provenance } from "./update-provenance";
 import type { SelfInstall } from "./release-notes";
-import { PROBATION_MS } from "./update-watchdog.mjs";
 import { settingsOf, type UpdatesFile } from "./updates";
 
 /**
