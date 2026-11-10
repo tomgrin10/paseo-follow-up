@@ -352,7 +352,9 @@ export function userStep(text: string): TailStep | null {
   const s = messageSender(text);
   if (s.kind === "developer") return s.text ? { kind: "you", text: s.text } : null;
   const from = senderLabel(s);
-  return from && s.text ? { kind: "message", from, text: s.text } : null;
+  // A batch or recovery opens with its own header ("Follow-through batch b-7"), which the label already says.
+  const body = s.kind === "follow-up" && (s.what === "batch" || s.what === "recovery") ? s.text.split("\n").slice(1).join("\n").trim() || s.text : s.text;
+  return from && body ? { kind: "message", from, text: body } : null;
 }
 /** Paseo 0.15+ projects an agent's message into an `agent_message` tool call: the same "From …" row as its envelope. */
 function projectedAgentStep(it: TimelineItem): TailStep | null {

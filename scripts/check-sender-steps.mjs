@@ -46,23 +46,26 @@ try {
   await client.sendMessage(agent.id, "Fixture: chat — fix the CSV export", { messageId: "fixture-chat" });
   for (let i = 0; i < 80; i++) {
     const history = await client.fetchAgentTimeline(agent.id, { projection: "canonical", limit: 100 });
-    if (history.entries.some(e => /Ship it after CI is green/.test(e.item.text ?? ""))) { await new Promise(r => setTimeout(r, 2000)); break; }
+    if (history.entries.some(e => /sidebar sync is done/.test(e.item.text ?? ""))) break;
     if (i === 79) throw new Error(`the fixture turn was not recorded: ${JSON.stringify(history.entries.map(e => e.item)).slice(0, 1500)}`);
     await new Promise(r => setTimeout(r, 250));
   }
-  // Track it so Home lists it (the same call the demo seeder makes).
-  await client.invokePluginRpc("follow-through", "follow.enroll", { agentId: agent.id, goal: "Fix the CSV export" });
+  // Track it so Home lists it (discovery first, then the same activate call the demo seeder makes).
+  for (let i = 0; ; i++) {
+    try { await client.invokePluginRpc("follow-through", "follow.refresh", {}); await client.invokePluginRpc("follow-through", "follow.activate", { workspaceId: w.id }); break; }
+    catch (error) { if (i > 40) throw error; await new Promise(r => setTimeout(r, 500)); }
+  }
   const timeline = (await client.fetchAgentTimeline(agent.id, { projection: "canonical", limit: 100 })).entries.map(e => e.item);
   await fs.writeFile(join(out, "timeline.json"), JSON.stringify(timeline, null, 2));
   const { chromium } = createRequire(join(process.env.PLAYWRIGHT_CORE, "package.json"))("playwright-core");
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM, headless: true });
   const report = [];
   for (const [form, viewport] of [["desktop", { width: 1280, height: 900 }], ["phone", { width: 390, height: 844 }]]) for (const scheme of ["dark", "light"]) {
-    context = await browser.newContext({ viewport, colorScheme: scheme, deviceScaleFactor: 2 });
+    // Phone: open Home at desktop width (the sidebar is a drawer on phones), pick the row, then narrow the viewport.
+    context = await browser.newContext({ viewport: { width: 1280, height: 900 }, colorScheme: scheme, deviceScaleFactor: 2 });
     const errors = []; context.on("weberror", e => errors.push(String(e.error())));
     const page = await context.newPage();
     await page.goto(`http://127.0.0.1:${port}/`);
-    if (form === "phone") await page.getByRole("button", { name: /menu|sidebar/i }).first().click({ timeout: 5000 }).catch(() => {});
     await page.getByText(/^Follow-up$/).first().click({ timeout: 30000 }).catch(async error => { await page.screenshot({ path: join(out, `${form}-${scheme}-failed.png`) }); throw error; });
     // Home lists the workspace; its row (not the sidebar's) opens the detail pane with Recent steps.
     await page.getByText("Skip setup", { exact: true }).first().click({ timeout: 8000 }).catch(() => {});
@@ -70,10 +73,15 @@ try {
     await page.screenshot({ path: join(out, `${form}-${scheme}-home.png`) });
     await page.getByText("Sender steps", { exact: false }).last().click({ timeout: 30000 }).catch(async error => { await page.screenshot({ path: join(out, `${form}-${scheme}-failed.png`) }); throw error; });
     await page.getByText("From Release captain", { exact: true }).first().waitFor({ timeout: 30000 }).catch(async error => { await page.screenshot({ path: join(out, `${form}-${scheme}-failed.png`) }); throw error; });
-    await page.waitForTimeout(800);
+    await page.setViewportSize(viewport);
+    await page.waitForTimeout(1200);
     await page.getByText("From Release captain", { exact: true }).first().scrollIntoViewIfNeeded();
     await page.mouse.move(0, 0);
     await page.screenshot({ path: join(out, `${form}-${scheme}.png`) });
+    // The rest of Recent steps, down to the developer's own message.
+    await page.getByText("Looks good. Ship it after CI is green.", { exact: true }).first().scrollIntoViewIfNeeded().catch(() => {});
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: join(out, `${form}-${scheme}-steps.png`) });
     const facts = await page.evaluate(() => {
       const leaves = [...document.querySelectorAll("body *")].filter(n => n.children.length === 0).map(n => n.textContent ?? "");
       return { raw: document.body.innerText.includes("<paseo-system"), bookkeeping: /sidebar sync is done|sidebar bookkeeping/.test(document.body.innerText), you: leaves.filter(t => t === "You").length, labels: leaves.filter(t => /^(From |You, via|Follow-up (batch|answer)|.+ finished$)/.test(t)), overflow: document.documentElement.scrollWidth > innerWidth };
@@ -108,7 +116,7 @@ function senderTurn() {
     user("Looks good. Ship it after CI is green."),
     // Follow-up's Stop-hook nudge (Codex form) and the agent's bookkeeping reply: neither is a step.
     user('<hook_prompt hook_run_id="stop:9:/fixture/.codex/hooks.json">Silently complete this workspace\'s sidebar bookkeeping before finishing. This is metadata bookkeeping only; do not start queued repairs or recovery.</hook_prompt>'),
-    { type: "tool_call", callId: id(), name: "mcp__paseo__follow_sync_workspace", status: "completed", error: null, detail: { type: "unknown", input: {} } },
+    { type: "tool_call", callId: id(), name: "mcp__paseo__follow_sync_workspace", status: "completed", error: null, detail: { type: "unknown", input: { summary: "Synced" }, output: { content: [{ type: "text", text: "{\"ok\":true}" }] } } },
     say("The sidebar sync is done. The background check finished earlier and reported FINISHED."),
   ].map(item => ({ id: id(), ...item }));
 }
