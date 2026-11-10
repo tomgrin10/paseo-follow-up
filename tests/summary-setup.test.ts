@@ -56,7 +56,7 @@ test("General's line in the phone list names the version and where setup stands"
   const { generalSummary } = await import("../shared/onboarding");
   assert.equal(generalSummary("1.4.0", "done"), "Follow-up 1.4.0 · setup finished");
   assert.equal(generalSummary("1.4.0", "skipped"), "Follow-up 1.4.0 · setup skipped");
-  assert.equal(generalSummary(null, "active"), "setup in progress");
+  assert.equal(generalSummary(null, "active"), "Setup in progress");
   assert.equal(generalSummary(undefined, undefined), null);
 });
 

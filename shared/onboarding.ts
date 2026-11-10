@@ -105,7 +105,8 @@ export function setupEntry(view: Pick<OnboardingView, "status" | "step"> | null 
 export function generalSummary(version: string | null | undefined, status: OnboardingView["status"] | null | undefined): string | null {
   const setup = status === "done" ? "setup finished" : status === "skipped" ? "setup skipped" : status === "new" || status === "active" ? "setup in progress" : status === "idle" ? "setup not run" : null;
   const parts = [version ? `Follow-up ${version}` : null, setup].filter(Boolean);
-  return parts.length ? parts.join(" · ") : null;
+  const line = parts.join(" · ");
+  return line ? line.charAt(0).toUpperCase() + line.slice(1) : null;
 }
 
 export function onboardingView(file: OnboardingFile, now: number): OnboardingView {
