@@ -1,0 +1,94 @@
+# Settings, onboarding, release notes and trust bypass
+
+## Where settings live
+
+| Setting | Stored in | Code |
+| --- | --- | --- |
+| Display (header button, sidebar item, composer pill, inbox, closed-PR flags, brief nudge, Overseer, ranker, trust bypass) | Paseo host settings document `display` (`displayPreferences`). It's host-scoped and keeps older saved sidebar values. | `shared/display.ts`, `client/display.tsx` |
+| Question mode | host settings `questionPreferences` | `shared/questions.ts` |
+| Following, projects, per-workspace exceptions, active window | `state.json` | `shared/settings.ts`; RPCs `follow.follow-settings`, `follow.set-follow-settings`, `follow.project-settings`, `follow.set-project-tracking` |
+| Agents and Wait | `agents.json` | [ai-roles.md](ai-roles.md), [wait.md](wait.md) |
+| Shipping PRs | `pr-workflow.json` | [prs.md](prs.md) |
+| Reviewers | `reviewers.json` | [prs.md](prs.md) |
+
+- **Booleans** use positive `enable_` names. Fields only ever gain defaults, so documents saved by older versions
+  keep parsing.
+- **Display fields** are read and written by agents through `display_settings` and `set_display`
+  (`DISPLAY_TOOLS` in `server/agent-parity.ts`, PARITY key `settings.display`).
+- **The settings screen.** `client/settings.tsx` (categories), `client/settings-shell.tsx` (collapsible blocks) and
+  `shared/settings-nav.ts` (categories, summaries, saved view state). Settings open through Paseo's settings screen
+  `projects`; legacy screen ids still map there.
+
+## Adding a setting
+
+First, pick where it lives:
+
+- **A host-wide switch for what Follow-up shows or does** (most switches) goes in `displayPreferences`. Add a field
+  with a default to the schema in `shared/display.ts` and a row in `client/display.tsx`.
+  - No new RPC is needed: the client uses the host's `settings.display` document.
+  - Agents get it for free through `display_settings` and `set_display`, so there's no new tool.
+  - The server reads it with `displaySettings.read()`, and an unreadable document means defaults.
+- **Something that configures one of Follow-up's agents** goes in `agents.json`, as `enable_wait` does.
+  1. Add the field to `AgentSettingsFile` and `parseAgentSettings` in `shared/agent-settings.ts`, and to the view
+     schema.
+  2. Add a getter and setter to `AgentSettingsStore` in `server/agent-settings.ts`. Write the field only when it
+     differs from the default.
+  3. Add a dedicated RPC in `shared/contracts.ts` (like `follow.set-wait`) and its handler in `index.server.ts`.
+     Return the full agent settings view.
+  4. Add a planned `RPC_TOOLS` entry and a `PARITY` entry in `server/agent-parity.ts`, the tool tuple in
+     `server/mcp.mjs`, the name in `AGENT_TOOLS` (`server/agent-actions.ts`), and the tool count in
+     `tests/mcp-usage.test.ts`. Then run `npm run prepare`.
+  5. Add the UI in `client/agents.tsx` and the copy in `shared/`.
+  6. Add tests in `tests/agent-settings.test.ts`, lines in [rpcs-and-tools.md](rpcs-and-tools.md) and here, and
+     `changes/<branch>.md`.
+- **Following, projects or per-workspace settings** go in `state.json`, through `follow.set-follow-settings` and
+  `shared/settings.ts`.
+
+## Getting started (onboarding)
+
+- **Files.** `shared/onboarding.ts` defines the steps (`ONBOARDING_STEPS`: intro, checks, defaults, shipping,
+  reviewers, helpers), install detection and the checks schema. `server/onboarding.ts` holds `OnboardingStore`
+  (`onboarding.json`) and `ReadinessChecks`.
+- **Fresh or existing install** is decided once, before anything writes state. A host with any Follow-up data is
+  existing and only gets an offer.
+- **An unreadable file counts as finished**, so setup is never forced. While setup is open on a fresh install,
+  auto-sends are held (`holdsAutoSends`).
+- **Readiness checks** run on demand, cached a minute (`fresh` re-runs them):
+  - `gh api user`;
+  - the provider snapshot;
+  - Paseo's `config.json`;
+  - the count of `hook-state/native-*.json`.
+- **Choices** write through the same RPCs the Settings screen uses.
+- **RPCs:** `follow.onboarding`, `follow.set-onboarding`, `follow.onboarding-checks`. **Tools:**
+  `onboarding_status`, `onboarding_checks`, `set_onboarding`. **UI:** `client/onboarding.tsx`.
+
+## Release notes, What's new and updates
+
+- **Release notes.** `shared/changelog.ts` parses `CHANGELOG.md` and picks the What's new notes.
+  `shared/version.ts` orders versions (semver with prerelease identifiers) and selects channels.
+- **Only a major version gets a popup.** `announcesUpdate(from, to)` in `shared/changelog.ts` is the one rule for
+  every prompt about Follow-up's own updates: true only when a new major is released (1.x to 2.0.0; a 2.0.0 beta still
+  counts as 1.x). What's new and any update notice or prompt must go through it; everything else is recorded quietly
+  or shown as a Settings row, never a sheet or toast. Home's "Updated to X · What's new" needs notes of X's own. The
+  invariant is `update-announcements-major-only`, and `tests/update-announcements.test.ts` has a grid test: add any
+  new update surface to it.
+- **The installed version.** `server/release-notes.ts` reads Follow-up's own install row from the daemon's plugin
+  list (`describeSelf`) and the package's `CHANGELOG.md`. It records `versions.json`: the current version, the
+  previous one, and the host-wide "seen" record.
+- **RPCs:** `follow.release-notes` (tool `release_notes`) and `follow.whats-new-seen` (exempt from parity: it records
+  a person closing the sheet).
+- **UI:** `client/release-notes.tsx`, which shows What's new after an update, the full list, and Home's version line.
+- **Self-update** (check npm, install, watch, roll back) is in [updates.md](updates.md).
+- How notes get written is in [releasing.md](releasing.md).
+
+## Trust bypass
+
+`server/trust-bypass.ts` (`TrustBypass`), on `agent.permission_requested`:
+
+- **What it approves.** When the agent's current mode is `bypassPermissions` (Claude) or `full-access` (Codex), it
+  approves plain tool permissions that Claude Code still prompts for (compound `cd … && git`, writes under `.git/`,
+  and so on). Each approval is logged, redacted, to `trust-bypass.jsonl`.
+- **What it never answers:** questions, plan approval, MCP elicitation or auth, or any other mode.
+- **The switch.** Display `enable_trust_bypass`, on by default.
+- **RPC:** `follow.trust-bypass`, today's count and the recent approvals (tool `trust_bypass_status`).
+- **Tests:** `tests/trust-bypass.test.ts` and `npm run test:trust` (a real daemon, in CI).

@@ -293,7 +293,7 @@ npm run test:install
 paseo plugin reload follow-through   # after changes
 ```
 
-Integration checks use a separate Paseo home with synthetic agents.
+Integration checks use a separate Paseo home with synthetic agents. Working on Follow-up with an agent? Start at [AGENTS.md](AGENTS.md): the architecture map, a file index per subsystem, the invariants, and the docs in [docs/](docs/).
 
 Release notes: a PR that changes something users see adds `changes/<branch>.md` with one to three plain-language bullets ([rules](changes/README.md)). Before a stable version bump, `npm run release:notes <version>` moves them into CHANGELOG.md (`-- --allow-empty` for a release with nothing user-facing). For a beta it writes nothing and the fragments wait for the next stable release. `npm run verify` fails if a stable package version has no notes.
 
