@@ -53,6 +53,6 @@ export function FollowLarge(props: PluginScreenProps & PanelLinks & { live?: Liv
   return <WorkspaceView theme={theme} layout={layout} host={props.host} navigation={navigation} workspace={w} large
     loadError={query.error ? "Refresh failed. Showing the last saved state." : query.loadError}
     openSettings={props.openSettings} openOverview={props.openOverview} folds={folds}
-    top={<PanelTop theme={theme} compact={layout.compact} openOverview={props.openOverview} />}
+    top={<PanelTop theme={theme} compact={layout.compact} openOverview={props.openOverview} openSettings={props.openSettings} />}
     resize={navigation ? { icon: "Minimize2", label: "Back to the workspace (Esc)", onPress: back } : null} />;
 }

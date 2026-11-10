@@ -1,0 +1,1 @@
+- Follow-up's version now shows at the top of Home and the workspace panel instead of at the bottom of the list. Tap it for Settings, where Release notes live and a newer version is marked when one is available.

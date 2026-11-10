@@ -60,6 +60,9 @@ test("the one-line state follows Follow-up's groups and the main agent's live at
   assert.equal(state({}, { pendingPermissions: [{}] }), "Needs you · Permission");
   assert.equal(state({}, { status: "error" }), "Needs you · Error");
   assert.equal(state({}, { requiresAttention: true, attentionReason: "finished" }), "Needs you · Finished");
+  // 2026-11-10: Paseo's attention reason outlives the failed turn; a running agent reads Running, a stopped one Error.
+  assert.equal(state({}, { status: "running", requiresAttention: true, attentionReason: "error" }), "Running");
+  assert.equal(state({}, { requiresAttention: true, attentionReason: "error" }), "Needs you · Error");
   const threads = pr({ snapshot: snapshot({ threads: [{ id: "t1", updatedAt: "x" }, { id: "t2", updatedAt: "x" }, { id: "t3", updatedAt: "x" }] }) });
   const batch = { id: "b1", state: "sent", tasks: [{ id: "t", title: "Fix threads" }], attempts: 1, createdAt: new Date(clock).toISOString(), sentAt: new Date(clock).toISOString() };
   assert.equal(state({ prs: [threads], batches: [batch as never] }), "Follow-up is fixing · 3 threads");

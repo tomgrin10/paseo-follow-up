@@ -65,6 +65,7 @@ return a dry run and run only with `confirm: true` and the plan id. `PARITY` map
 | `merge`, `enable_merge_when_ready`, `disable_merge_when_ready` | `follow.prepare-pr-action`, `follow.confirm-pr-action` | planned |
 | `send_repairs` | `follow.send` | write |
 | `set_auto_send`, `clear_hold`, `retry_batch` | `follow.control` | write |
+| `snooze_workspace` | `follow.control` (`snooze`) | planned; Later and Bring back now on a workspace-only Needs-you row |
 | `make_main_agent` | `follow.control` (`mainAgentId`) | planned; claim rules in `checkMainClaim` |
 | `track` | `follow.activate` (`engine.activate`): follow a workspace again after an opt-out | write |
 | `refresh` | `follow.refresh` | write (cheap) |

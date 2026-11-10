@@ -1,5 +1,5 @@
 import { batchView } from "./status";
-import { liveLine, needsYou, prTone, stackOrder, type NeedItem, type PrTone } from "./attention";
+import { liveLine, needsYou, prTone, stackOrder, workspaceSnoozed, type NeedItem, type PrTone } from "./attention";
 import { activity, type Activity } from "./activity";
 import { followUpObligations, recoveryBatch } from "./follow-up";
 import { flagHeadline, HEADLINE_ICON, HEADLINE_TONE, HEADLINE_WORD, workspaceHeadline, withoutBriefQuestions, type Headline, type HeadlineKey, type HeadlineTone } from "./headline";
@@ -9,6 +9,7 @@ import { isOpen as questionOpen } from "./questions";
 import { taskSchedule } from "./task-trigger";
 import { freshPriorities, priorityRow, type Priority, type PrioritySourceKind } from "./priorities";
 import { DEFAULT_SORT, sortItems, type SortMode } from "./sort";
+import { messageSender, notificationText, senderLabel, workItems } from "./message-sender";
 
 /**
  * Home (design §3): every workstream in one list, grouped by what it needs from the developer. Pure, so the
@@ -142,7 +143,8 @@ const stripSig = ({ sig: _sig, ...s }: Workstream): Omit<Workstream, "sig"> => s
 
 /** The Home group of a tracked workspace without an agent row: the order buildHome uses below. */
 export function trackedGroup(w: Workspace, now: number): HomeGroupId {
-  if (needsYou(w, now).length) return "needs";
+  const items = needsYou(w, now);
+  if (items.length) return workspaceSnoozed(w, items, now) ? "later" : "needs";
   if (fixingBatch(w, now)) return "fixing";
   if (w.runtimeBusy) return "running";
   const state = summary(w, now);
@@ -201,6 +203,11 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
     const items = needsYou(w, now);
     const group = trackedGroup(w, now);
     const h = workspaceHeadline(items);
+    // Later on the workspace's own needs: it waits in Later until its time or a new need.
+    if (group === "later" && h) {
+      out.push(make({ ...base, group: "later", tier: null, icon: "AlarmClock", tone: "muted", word: HEADLINE_WORD[h.key], line: h.line, badges: [], pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
+      continue;
+    }
     if (group === "needs" && h) {
       out.push(make({ ...base, group: "needs", tier: tierOf(h.key), icon: HEADLINE_ICON[h.key], tone: HEADLINE_TONE[h.key], word: HEADLINE_WORD[h.key], line: h.line,
         badges: badges({ headline: h, workspace: w, items }), pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
@@ -355,16 +362,43 @@ export function sinceLabel(now: number): string {
 
 // ---------- the detail pane ----------
 
-export type TailStep = { kind: "you" | "agent" | "tool" | "error"; text: string; failed?: boolean };
-type TimelineItem = { type: string; text?: string; message?: string; name?: string; status?: string; detail?: Record<string, unknown> | null; error?: unknown };
+/**
+ * One step of "Recent steps". `you` is only ever the developer's own message; every other user-role message (another
+ * agent, a child's finish notification, Follow-up's batch or answer, an Overseer forward) is a `message` with `from`,
+ * its envelope stripped. See shared/message-sender.ts.
+ */
+export type TailStep = { kind: "you" | "agent" | "tool" | "error"; text: string; failed?: boolean } | { kind: "message"; from: string; text: string };
+type TimelineItem = { type: string; text?: string; message?: string; name?: string; status?: string; detail?: Record<string, unknown> | null; error?: unknown; agentMessage?: { event?: string; sender?: { title?: string }; text?: unknown } };
+
+/** A user-role message as a step: You for the developer, "From …" for anyone else, nothing for system text. */
+export function userStep(text: string): TailStep | null {
+  const s = messageSender(text);
+  if (s.kind === "developer") return s.text ? { kind: "you", text: s.text } : null;
+  const from = senderLabel(s);
+  // A batch or recovery opens with its own header ("Follow-through batch b-7"), which the label already says.
+  const body = s.kind === "follow-up" && (s.what === "batch" || s.what === "recovery") ? s.text.split("\n").slice(1).join("\n").trim() || s.text : s.text;
+  return from && body ? { kind: "message", from, text: body } : null;
+}
+/** Paseo 0.15+ projects an agent's message into an `agent_message` tool call: the same "From …" row as its envelope. */
+function projectedAgentStep(it: TimelineItem): TailStep | null {
+  const m = it.agentMessage ?? { text: it.detail?.text };
+  if (!m || typeof m.text !== "string" || !m.text.trim()) return null;
+  const event = (["finished", "errored", "permission-required", "closed"] as const).find(e => e === m.event) ?? "message";
+  const from = senderLabel({ kind: "agent", event, agentId: "", title: m.sender?.title?.trim() || null, text: m.text })!;
+  // A projected finish notification still carries its "<agent-response>" wrapper: show only the child's reply.
+  const text = event === "message" ? m.text.trim() : notificationText(m.text);
+  return text ? { kind: "message", from, text } : null;
+}
 /**
  * The agent's last `n` steps for "Recent · last N steps": messages, one-line tool calls and errors. Reasoning,
  * todos and plugin rows (the brief card itself) are left out; the pane shows the brief above.
  */
 export function tailSteps(items: TimelineItem[], n = 6): TailStep[] {
   const out: TailStep[] = [];
-  for (const it of items) {
-    if (it.type === "user_message" && it.text) out.push({ kind: "you", text: it.text });
+  // Follow-up's hook feedback and the bookkeeping the agent did in answer to it are not the agent's work.
+  for (const it of workItems(items)) {
+    if (it.type === "user_message" && it.text) { const step = userStep(it.text); if (step) out.push(step); }
+    else if (it.type === "tool_call" && (it.agentMessage || it.name === "agent_message")) { const step = projectedAgentStep(it); if (step) out.push(step); }
     else if (it.type === "assistant_message" && it.text) {
       // Streaming arrives as several chunks of one message: join consecutive agent text.
       const last = out.at(-1);

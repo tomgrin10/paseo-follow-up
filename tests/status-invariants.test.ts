@@ -146,3 +146,62 @@ test("regression 2026-11-10 critique: a stuck Done check is never called a repai
   assert.equal(retry?.title, "The Done check didn't go through");
   assert.doesNotMatch(liveLine(w, clock).text, /repairs/);
 });
+
+test("running-is-not-stale: over every agent status, turn history and card, a running agent never headlines Error or Paused", async () => {
+  const { reduce, newEntry, liveFlag } = await import("../shared/inbox");
+  const { rowViolations } = await import("../shared/status-invariants");
+  const iso = (m: number) => new Date(clock + m * 60_000).toISOString();
+  const histories: Record<string, import("../shared/inbox").InboxEvent[]> = {
+    failed: [{ type: "turn_end", outcome: "failed", detail: "The turn failed: Subagent closed during a turn" }],
+    "failed-then-auto-turn": [{ type: "turn_end", outcome: "failed", detail: "x" }, { type: "message", from: "automation" }],
+    paused: [{ type: "turn_end", outcome: "canceled", guard: "attention", detail: "Paused" }],
+    crash: [{ type: "crash", detail: "Errored" }],
+    "failed-and-ci": [{ type: "turn_end", outcome: "failed", detail: "x" }, { type: "ci", dedupeKey: "ci:1", detail: "Checks failing" }],
+    "finished-then-failed": [{ type: "turn_end", outcome: "completed", detail: "Done" }, { type: "turn_end", outcome: "failed", detail: "x" }],
+  };
+  const failures: string[] = [];
+  // Turn start unknown, before the flags (Paseo still reads "running" after the failed turn), or after them (a newer turn).
+  for (const status of ["running", "initializing", "idle", "error"]) for (const [name, events] of Object.entries(histories)) for (const kind of [null, "error", "paused", "decision"] as const) for (const start of [null, iso(-1), iso(10)]) {
+    const e = events.reduce((acc, ev, i) => reduce(acc, ev, iso(i)), newEntry("a1"));
+    const card = kind ? { kind, source: "agent" as const, state: "open" as const, ask: "x", questionIds: [] as string[], at: iso(0) } : null;
+    const turnStartedAt = ["running", "initializing"].includes(status) ? start : null;
+    const row = { agentId: "a1", status, snooze: e.snooze, turnStartedAt, ...liveFlag(status, e.needs, card, turnStartedAt) };
+    for (const v of rowViolations(row, clock + 3_600_000)) failures.push(`${status} · ${name} · card=${kind} · start=${start} · ${v.detail}`);
+  }
+  assert.deepEqual(failures, []);
+  // The turn that just failed is news even while Paseo still reads "running" (found by the Home render): no newer
+  // turn start, so the Error stays.
+  const failed = reduce(newEntry("a1"), histories.failed[0], iso(0));
+  for (const start of [null, iso(-1)]) assert.equal(liveFlag("running", failed.needs, null, start).needs?.reasons[0]?.reason, "error", `start=${start}`);
+  assert.equal(liveFlag("running", failed.needs, null, iso(10)).needs, null);
+  // Fixture (2026-11-10, orchestrator 37bc4ab1): the raw entry, unfiltered, is exactly what Home showed.
+  const stale = reduce(newEntry("37bc4ab1"), histories.failed[0], iso(0));
+  assert.equal(rowViolations({ agentId: "37bc4ab1", status: "running", needs: stale.needs, snooze: null, brief: null, turnStartedAt: iso(15) }, clock)[0]?.id, "running-is-not-stale");
+  assert.deepEqual(rowViolations({ agentId: "37bc4ab1", status: "running", needs: stale.needs, snooze: null, brief: null, turnStartedAt: iso(-1) }, clock), []);
+});
+
+test("automatic-hold-is-not-stale: over every hold, turn and agent, a newer main-agent turn leaves no failed turn's hold", async () => {
+  const { holdViolations } = await import("../shared/status-invariants");
+  const { holdSuperseded, liftHold, interruptionHold } = await import("../shared/status");
+  const at = new Date(clock).toISOString();
+  const holds = {
+    failed: { hold: interruptionHold("failed"), interruption: { turnId: "t1", at, kind: "failed" as const } },
+    "failed-other-agent": { hold: interruptionHold("failed"), interruption: { turnId: "t1", at, kind: "failed" as const, agentId: "helper" } },
+    stopped: { hold: interruptionHold("canceled"), interruption: { turnId: "t1", at, kind: "canceled" as const } },
+    developer: { hold: "You explicitly stopped follow-up", interruption: { turnId: "t1", at, kind: "failed" as const } },
+    "guard-lifted": { hold: null, interruption: { turnId: "t1", at, kind: "failed" as const, guardPauseId: "p" } },
+    none: { hold: null, interruption: undefined },
+  };
+  const failures: string[] = [];
+  for (const [name, h] of Object.entries(holds)) for (const mainTurnId of [null, "t1", "t2"]) {
+    const w = { ...workspace({ id: "w1", mainAgentId: "main" }), ...h } as import("../shared/model").Workspace;
+    // What the worker does on a turn start or a refresh (index.server.ts, server/engine.ts).
+    if (holdSuperseded(w, { agentId: w.mainAgentId, turnId: mainTurnId })) liftHold(w);
+    for (const v of holdViolations(w, mainTurnId)) failures.push(`${name} · turn=${mainTurnId} · ${v.detail}`);
+    if (name !== "failed" && h.hold) assert.equal(w.hold, h.hold, `${name} · turn=${mainTurnId}: not Follow-up's to lift`);
+  }
+  assert.deepEqual(failures, []);
+  // Fixture (2026-11-10 render): the failed turn's hold, unrepaired, under a newer turn is the bug.
+  const raw = { ...workspace({ id: "w1", mainAgentId: "main" }), ...holds.failed } as import("../shared/model").Workspace;
+  assert.equal(holdViolations(raw, "t2")[0]?.id, "automatic-hold-is-not-stale");
+});

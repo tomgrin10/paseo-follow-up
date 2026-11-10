@@ -16,6 +16,7 @@ import { Store } from "./server/store";
 import { PriorityStore } from "./server/priorities";
 import { UsageReader } from "./server/usage";
 import { Engine, agentWorkspace, findWorkspace, interruptionHold } from "./server/engine";
+import { holdSuperseded, liftHold } from "./shared/status";
 import { Github } from "./server/github";
 import { ReviewerConfigStore, ReviewerSuggestions } from "./server/reviewer-config";
 import { repoKey } from "./shared/reviewers";
@@ -57,6 +58,8 @@ import { ACTIVE_SCOPE_MIGRATION, PRUNE_MIGRATION, autoSendsByDefault, FOLLOW_EVE
 import { Overseer, OVERSEER_TOOLS, type OverseerPaseo, type OverseerTool } from "./server/overseer";
 import { OVERSEER_LABEL } from "./shared/overseer";
 import { withDaemon } from "./server/daemon";
+import { hostFeature, type ServerInfo } from "./server/host-features";
+type ServerInfoClient = { getLastServerInfoMessage?: () => ServerInfo };
 import { inboxAnswer } from "./server/etag";
 import { jobAgentRunner, type JobPaseo } from "./server/job-agent";
 import { AiJobs } from "./server/ai-jobs";
@@ -181,6 +184,8 @@ export default function contribute(server: PluginServerContext) {
   const trackedMain = async (agentId: string) => (await store.snapshot()).workspaces.find(w => w.enable_tracking && !w.archived && w.mainAgentId === agentId) ?? null;
   let overseer: Overseer | null = null;
   let ranker: Ranker | null = null;
+  // Who sent a message (server/inbox-classifier.ts): the inbox and the Overseer's new-workspace gate read one ledger.
+  const senderSources = fileSources(paseoHome, async () => (await inbox.store.snapshot()).ledger);
   const inbox: Inbox = new Inbox(directory, {
     enabled: inboxSettings,
     overseer: async () => (await overseer?.state())?.agentId ?? null,
@@ -221,7 +226,7 @@ export default function contribute(server: PluginServerContext) {
       },
     },
     directory: daemonDirectory(gateway.directory),
-    sources: fileSources(paseoHome, async (): Promise<{ agentId: string; messageId: string | null; at: string }[]> => (await inbox.store.snapshot()).ledger),
+    sources: senderSources,
     guard: async () => {
       try { const state = JSON.parse(await readFile(guardPath(paseoHome), "utf8")); return state?.version === 1 && Array.isArray(state.pauses) ? state.pauses as GuardPause[] : null; }
       catch { return null; }
@@ -347,8 +352,10 @@ export default function contribute(server: PluginServerContext) {
     try { const path = join(paseoHome, "config.json"); const { mtimeMs } = await stat(path); if (configCache?.mtimeMs !== mtimeMs) configCache = { mtimeMs, value: JSON.parse(await readFile(path, "utf8")) }; return configCache.value as Parameters<typeof nativeToolsAvailable>[1]; } catch { return null; }
   };
   // Wait for background jobs (folded in from paseo-wait): native tools for interactive Claude sessions.
-  const wait = new Wait(join(directory, "wait"), { enabled: () => agentSettings.waitEnabled(), config: async () => await paseoConfig() as WaitPaseoConfig | null });
-  const currentWait = async () => waitStatus(await agentSettings.waitEnabled(), await paseoConfig() as WaitPaseoConfig | null);
+  // Paseo 0.16 runs background jobs itself (features.agentBackgroundWork): Wait retires there (docs/wait.md).
+  const hostBackgroundWork = hostFeature("agentBackgroundWork", () => withDaemon(async client => (client as ServerInfoClient).getLastServerInfoMessage?.()));
+  const wait = new Wait(join(directory, "wait"), { enabled: () => agentSettings.waitEnabled(), config: async () => await paseoConfig() as WaitPaseoConfig | null, hostBackgroundWork });
+  const currentWait = async () => waitStatus(await agentSettings.waitEnabled(), await paseoConfig() as WaitPaseoConfig | null, await hostBackgroundWork());
   const live = async (agentId: string): Promise<Live> => ({ role: scopes(await store.snapshot())[agentId]?.role ?? null, inbox: (await inboxSettings()).enable_inbox });
   const invoke: Invoke = async (method, input, context) => {
     const handler = handlers.get(method); if (!handler) throw new Error(`Unknown Follow-up method ${method}.`);
@@ -745,7 +752,7 @@ export default function contribute(server: PluginServerContext) {
       branch: w.gitRuntime?.currentBranch ?? null, pr: w.githubRuntime?.pullRequest?.title ? { number: w.githubRuntime.pullRequest.number ?? null, title: w.githubRuntime.pullRequest.title } : null }));
   };
   const overseerOn = async () => (await inboxSettings()).enable_overseer !== false;
-  overseer = new Overseer({ directory, store, inbox, priorities: priorityStore, workspaces: paseoWorkspaces, enabled: overseerOn, paseoHome, tight: async () => !governor.allowsBackground(),
+  overseer = new Overseer({ directory, store, inbox, sources: senderSources, priorities: priorityStore, workspaces: paseoWorkspaces, enabled: overseerOn, paseoHome, tight: async () => !governor.allowsBackground(),
     windowMs: async () => activeWindowMs(await store.snapshot()), agent: () => agentSettings.role("overseer"),
     // Harness override only (isolated test daemons): "provider/model" wins over Settings → Agents.
     provider: process.env.FOLLOW_UP_OVERSEER_PROVIDER || undefined,
@@ -1130,6 +1137,15 @@ export default function contribute(server: PluginServerContext) {
     server.on("agent.turn_started", async () => updater.activity()),
     server.on("agent.turn_ended", async () => updater.activity()),
     server.on("agent.turn_started", async (event, { paseo }) => { seen(paseo); inboxHook(() => inbox.turnStarted(event.agent, event.turnId)); }),
+    // A newer main-agent turn supersedes the failed turn's automatic hold (shared/status.ts holdSuperseded).
+    server.on("agent.turn_started", async event => {
+      await ready;
+      if (stopped || loadError) return;
+      const turn = { agentId: event.agent.id, turnId: event.turnId ?? null };
+      if (!(await store.snapshot()).workspaces.some(w => w.enable_tracking && holdSuperseded(w, turn))) return;
+      await store.mutate(state => { for (const w of state.workspaces) if (w.enable_tracking && holdSuperseded(w, turn)) liftHold(w); });
+      void engine.tick();
+    }),
     server.on("agent.turn_ended", async (event, { paseo }) => { seen(paseo); inboxHook(() => inbox.turnEnded(event.agent, event.outcome, event.turnId)); }),
     server.on("agent.permission_requested", async (event, { paseo }) => { seen(paseo); inboxHook(async () => { await inbox.permissionRequested(event.agent, event.request); await writeBriefState(); }); }),
     server.on("agent.permission_resolved", async (event, { paseo }) => { seen(paseo); inboxHook(async () => { await inbox.permissionResolved(event.agent, event.requestId); await writeBriefState(); }); }),
