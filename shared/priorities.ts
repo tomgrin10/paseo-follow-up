@@ -27,6 +27,12 @@ export const prioritySchema = z.object({
   at: z.string(),
   /** Who set it: "agent:<id>". */
   by: z.string().optional(),
+  /**
+   * The Home row the ranker read (`agent:<id>` or `ws:<id>`). A workspace can have several rows (one per flagged root
+   * agent), and the reason is about the one it was ranked from, so only that row shows it. Absent: set for the
+   * workspace as a whole (set_priorities, or stored before 1.4.0-beta.34).
+   */
+  row: z.string().optional(),
 });
 export type Priority = z.infer<typeof prioritySchema>;
 export const prioritiesFileSchema = z.object({ version: z.literal(1), items: z.array(prioritySchema) });
@@ -47,6 +53,18 @@ export function freshPriorities(items: readonly Priority[], now: number): { byWo
     if (!rankedAt || p.at > rankedAt) rankedAt = p.at;
   }
   return { byWorkspace, rankedAt };
+}
+
+/**
+ * The one row that shows a priority's reason, out of its workspace's rows: the row it was ranked from; else (a
+ * priority for the whole workspace) its only row, the workspace's own row, or its main agent's row. A ranked row
+ * that's gone shows it nowhere: that reason described a row the developer no longer sees, and the next ranking runs
+ * because the rows changed. The score still orders every row of the workspace; only the line has one owner.
+ */
+export function priorityRow(p: Pick<Priority, "workspaceId" | "row">, rows: readonly { key: string; agentId: string | null }[], mainAgentId: string | null = null): string | null {
+  if (p.row) return rows.some(r => r.key === p.row) ? p.row : null;
+  if (rows.length === 1) return rows[0].key;
+  return rows.find(r => r.key === `ws:${p.workspaceId}`)?.key ?? (mainAgentId ? rows.find(r => r.agentId === mainAgentId)?.key ?? null : null);
 }
 
 /** Merge a ranker's batch into the stored list: newest per workspace wins; `replace` drops the ones it didn't list. */
