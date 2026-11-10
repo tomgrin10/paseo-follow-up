@@ -1,6 +1,6 @@
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { messageSender, type MessageSender } from "../shared/message-sender";
+import { messageSender, workItems, type MessageSender } from "../shared/message-sender";
 
 /**
  * Who sent the message that started a turn (design §2.4). Paseo's hooks carry no origin yet, so
@@ -62,6 +62,19 @@ export async function ledgerSender(message: Message | null, agentId: string, at:
 
 const near = (iso: unknown, at: number) => typeof iso === "string" && Number.isFinite(Date.parse(iso)) && Math.abs(Date.parse(iso) - at) <= WINDOW_MS;
 async function json(path: string): Promise<any> { return JSON.parse(await readFile(path, "utf8")); }
+
+/**
+ * The agent's reply that a finished turn reports (the Finished reason's detail). Follow-up's Stop hook can continue a
+ * turn for bookkeeping; the reply after that ("The sidebar sync is done") answers Follow-up, not the developer, so it
+ * never counts. Codex shows the hook prompt in the timeline (workItems drops it and what follows); Claude Code's is
+ * hidden from Paseo's timeline, so the hook saves the reply it interrupted (`hook-state/bookkeeping-<agent>.json`),
+ * which wins when it was written during this turn.
+ */
+export function finishedReply(items: readonly unknown[], saved: { at?: unknown; reply?: unknown } | null, turnStartedAt: number | null): string | null {
+  if (saved && typeof saved.reply === "string" && saved.reply.trim() && typeof saved.at === "number" && (turnStartedAt === null || saved.at >= turnStartedAt)) return saved.reply;
+  const reply = [...workItems(items)].reverse().find(i => (i as { type?: string })?.type === "assistant_message") as { text?: unknown } | undefined;
+  return typeof reply?.text === "string" ? reply.text : null;
+}
 
 /** Readers over the other plugins' plugin-data. Unknown versions or shapes read as "not theirs". */
 export function fileSources(paseoHome: string, ledger: () => Promise<Ledger>): Sources {

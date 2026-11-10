@@ -18,7 +18,13 @@
     the source agent's id and title, the event (`message`, `finished`, `errored`, `permission-required`, `closed`)
     and the body unescaped and stripped (a notification's `<agent-response>` reply when it has one).
   - `follow-up`: Follow-up's batch (`Follow-through batch`, legacy `Workspace follow-through batch`), recovery
-    (`Follow-through recovery`) or answer (`Follow-up answer`). An answer is usually the developer's click, which only
+    (`Follow-through recovery`), answer (`Follow-up answer`), or its provider hook's feedback (`what: "hook"`,
+    `HOOK_TEXT_PREFIXES`): Claude Code records the Stop-hook bookkeeping nudge as an isMeta
+    `Stop hook feedback:` line (Paseo's timeline drops it, the transcript keeps it), Codex as a
+    `<hook_prompt hook_run_id="stop:…">` user message. `workItems` drops that feedback and everything the agent did in
+    answer to it, up to the next prompt from anyone else; Recent steps, Summary and the Finished reason read only
+    `workItems`. Because Paseo hides Claude's hook line, the Stop hook saves the reply it interrupted
+    (`hook-state/bookkeeping-<agent>.json`) and the Finished reason uses it (`finishedReply`). An answer is usually the developer's click, which only
     the delivery ledger can tell (`ledgerSender`).
   - `overseer-forward`: `From the developer via Overseer:` or the legacy `From Tom via Overseer:` (`FORWARD_PREFIXES`),
     prefix stripped. It counts as the developer only through the ledger (the forwarded-message rule).
@@ -30,7 +36,8 @@
   `readTranscript`), discovery's goal (`extractHistory`), linked items (`timelineRefs`), Needs-you clearing (`classify`)
   and the Overseer's new-workspace gate (`lastDeveloperMessage`). Only `developer` shows as "You"; others show as
   "From <agent>", "<agent> finished", "Follow-up batch" or "You, via Overseer", never with the raw envelope
-  (`senderViolations` in `shared/status-invariants.ts`, `tests/message-sender.test.ts`).
+  (`senderViolations` in `shared/status-invariants.ts`, `tests/message-sender.test.ts`). Follow-up's own words never
+  read as work: `followUpTextViolations` (`no-follow-up-text-as-work`, `tests/follow-up-text.test.ts`).
 - **Who started a turn** (`server/inbox-classifier.ts`):
   - The text's sender comes first: an agent envelope is `agent` and a Paseo system prompt is `system`, whatever the
     ledger says.

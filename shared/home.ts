@@ -8,7 +8,7 @@ import { isOpen as questionOpen } from "./questions";
 import { taskSchedule } from "./task-trigger";
 import { freshPriorities, type Priority, type PrioritySourceKind } from "./priorities";
 import { DEFAULT_SORT, sortItems, type SortMode } from "./sort";
-import { messageSender, senderLabel } from "./message-sender";
+import { messageSender, senderLabel, workItems } from "./message-sender";
 
 /**
  * Home (design §3): every workstream in one list, grouped by what it needs from the developer. Pure, so the
@@ -368,7 +368,8 @@ function projectedAgentStep(it: TimelineItem): TailStep | null {
  */
 export function tailSteps(items: TimelineItem[], n = 6): TailStep[] {
   const out: TailStep[] = [];
-  for (const it of items) {
+  // Follow-up's hook feedback and the bookkeeping the agent did in answer to it are not the agent's work.
+  for (const it of workItems(items)) {
     if (it.type === "user_message" && it.text) { const step = userStep(it.text); if (step) out.push(step); }
     else if (it.type === "tool_call" && (it.agentMessage || it.name === "agent_message")) { const step = projectedAgentStep(it); if (step) out.push(step); }
     else if (it.type === "assistant_message" && it.text) {

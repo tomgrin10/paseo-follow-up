@@ -3,7 +3,7 @@ import { open, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { userStep, type TailStep } from "../shared/home";
-import { developerWords, messageSender } from "../shared/message-sender";
+import { developerWords, messageSender, workItems } from "../shared/message-sender";
 
 /**
  * An unloaded agent's recent steps, read from its provider's transcript on disk. Read-only and never
@@ -103,36 +103,43 @@ async function tailLines(path: string, bytes = TAIL_BYTES): Promise<string[]> {
 
 const tool = (name: unknown) => typeof name === "string" ? name.replace(/^mcp__[^_]+(?:_[^_]+)*?__/, "") : "tool";
 
-/** A user line through the sender classifier (You only for the developer, harness and Paseo system text dropped). */
-const push = (out: TailStep[], user: boolean, text: string) => {
-  if (user) { const step = userStep(text); if (step) out.push(step); return; }
-  const t = text.trim(); if (t) out.push({ kind: "agent", text: t });
-};
+/**
+ * Claude Code records Stop-hook feedback as an isMeta user line. Meta lines are otherwise skipped, but this one is
+ * kept as a user message so the classifier can see Follow-up's own nudge and drop the bookkeeping that answered it.
+ */
+const hookFeedback = (j: any) => j.isMeta && j.type === "user" && /^\w+ hook feedback:/.test(typeof j.message?.content === "string" ? j.message.content : textOf(j.message?.content));
 
+type Raw = { type: "user_message" | "assistant_message" | "tool"; text: string };
 /** Steps from transcript lines (Claude Code or Codex rollout), oldest first. Unknown shapes are skipped. */
 export function transcriptSteps(lines: string[]): TailStep[] {
-  const out: TailStep[] = [];
+  const raw: Raw[] = [];
+  const text = (user: boolean, t: string) => raw.push({ type: user ? "user_message" : "assistant_message", text: t });
   for (const line of lines) {
     let j: any; try { j = JSON.parse(line); } catch { continue; }
     if (!j || typeof j !== "object") continue;
     // Claude Code
-    if ((j.type === "user" || j.type === "assistant") && j.message && !j.isMeta && !j.isSidechain) {
+    if ((j.type === "user" || j.type === "assistant") && j.message && (!j.isMeta || hookFeedback(j)) && !j.isSidechain) {
       const content = j.message.content;
-      if (typeof content === "string") { push(out, j.type === "user", content); continue; }
+      if (typeof content === "string") { text(j.type === "user", content); continue; }
       if (!Array.isArray(content)) continue;
       for (const c of content) {
-        if (c?.type === "text" && typeof c.text === "string") push(out, j.type === "user", c.text);
-        else if (c?.type === "tool_use") out.push({ kind: "tool", text: tool(c.name) });
+        if (c?.type === "text" && typeof c.text === "string") text(j.type === "user", c.text);
+        else if (c?.type === "tool_use") raw.push({ type: "tool", text: tool(c.name) });
       }
       continue;
     }
     // Codex rollout
     const p = j.type === "response_item" ? j.payload : null;
     if (p?.type === "message" && (p.role === "user" || p.role === "assistant") && Array.isArray(p.content)) {
-      for (const c of p.content) {
-        if (typeof c?.text === "string") push(out, p.role === "user", c.text);
-      }
-    } else if (p?.type === "function_call" || p?.type === "custom_tool_call" || p?.type === "local_shell_call") out.push({ kind: "tool", text: tool(p.name ?? "shell") });
+      for (const c of p.content) if (typeof c?.text === "string") text(p.role === "user", c.text);
+    } else if (p?.type === "function_call" || p?.type === "custom_tool_call" || p?.type === "local_shell_call") raw.push({ type: "tool", text: tool(p.name ?? "shell") });
+  }
+  // The sender classifier: You only for the developer; Follow-up's hook feedback and the bookkeeping after it dropped.
+  const out: TailStep[] = [];
+  for (const r of workItems(raw)) {
+    if (r.type === "user_message") { const step = userStep(r.text); if (step) out.push(step); }
+    else if (r.type === "tool") out.push({ kind: "tool", text: r.text });
+    else { const t = r.text.trim(); if (t) out.push({ kind: "agent", text: t }); }
   }
   return out;
 }
@@ -176,7 +183,7 @@ export function parseLine(line: string): TranscriptItem[] {
   try { j = JSON.parse(line); } catch { return []; }
   if (!j || typeof j !== "object") return [];
   if ((j.type === "user" || j.type === "assistant") && j.message && typeof j.message === "object") {
-    if (j.isSidechain || j.isMeta) return [];
+    if (j.isSidechain || j.isMeta && !hookFeedback(j)) return [];
     const content = j.message.content;
     const out: TranscriptItem[] = [];
     if (typeof content === "string") out.push({ type: j.type === "user" ? "user_message" : "assistant_message", text: content });
@@ -207,7 +214,8 @@ export async function readTranscript(paseoHome: string, agentId: string, limit: 
     const { head, tail } = await headAndTail(path);
     // Only the developer's words are "first messages"; Summary's tailLines classifies the tail's user lines itself.
     const first = head.flatMap(parseLine).flatMap(i => { const words = i.type === "user_message" && i.text ? developerWords(i.text) : null; return words ? [{ ...i, text: words }] : []; }).slice(0, 2);
-    const items = tail.flatMap(parseLine).filter(i => i.type !== "user_message" || (i.text && messageSender(i.text).kind !== "system"));
+    // Follow-up's hook feedback and the agent's bookkeeping after it are not the work (workItems).
+    const items = workItems(tail.flatMap(parseLine)).filter(i => i.type !== "user_message" || (i.text && messageSender(i.text).kind !== "system"));
     return { first, tail: items.slice(-limit) };
   } catch { return null; }
 }

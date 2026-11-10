@@ -6,7 +6,7 @@ import { emptyInbox, expired, inboxStateSchema, newEntry, reduce, StaleSignOff, 
 import type { State as FollowState, Workspace as FollowWorkspace } from "../shared/model";
 import { prActionBlocks } from "../shared/pr-actions";
 import { configuredReviewers, noReviewers, reviewerLabel, withoutAuthor } from "../shared/reviewers";
-import { classify, turnPrompt, type Sources } from "./inbox-classifier";
+import { classify, finishedReply, turnPrompt, type Sources } from "./inbox-classifier";
 import { briefOrigin, briefStep, pickBrief, shouldReopen, validPick, type Brief, type BriefEvent, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
 import { OTHER_LABEL, isOther } from "../shared/questions";
 
@@ -157,7 +157,8 @@ export class Inbox {
   private resolved = new Set<string>();
   private waiting = new Map<string, string>();
   private cache: { at: number; agents: AgentInfo[]; workspaces: { id: string; name: string }[] } | null = null;
-  constructor(directory: string, private o: InboxOptions) { this.store = new InboxStore(directory); }
+  private hookState: string;
+  constructor(directory: string, private o: InboxOptions) { this.store = new InboxStore(directory); this.hookState = join(directory, "hook-state"); }
   private now() { return this.o.now?.() ?? Date.now(); }
   /**
    * Paseo still reports "running" for a moment after a turn completes, so a status read at turn end would make
@@ -298,12 +299,15 @@ export class Inbox {
       return;
     }
     // After a plugin reload mid-turn the turn start is lost; anything stated since the previous brief belongs to this turn.
-    const since = this.turns.get(agent.id)?.at ?? await this.previousBriefAt(root.rootId);
+    const turnAt = this.turns.get(agent.id)?.at ?? null;
+    const since = turnAt ?? await this.previousBriefAt(root.rootId);
     this.turns.delete(agent.id);
     const stated = await this.sources(agent.id, since, turnId);
     if (outcome.kind === "completed") {
       const items = await this.o.directory.tail(agent.id, 20).catch(() => []);
-      const reply = [...items].reverse().find(i => (i as { type?: string })?.type === "assistant_message") as { text?: string } | undefined;
+      // Never Follow-up's own bookkeeping continuation's reply (finishedReply).
+      const saved = /^[\w-]+$/.test(agent.id) ? await readFile(join(this.hookState, `bookkeeping-${agent.id}.json`), "utf8").then(t => JSON.parse(t), () => null) : null;
+      const reply = { text: finishedReply(items, saved, turnAt) };
       // F7: needs_you kind=done means nothing for the developer, and while Paseo still shows the agent running
       // (background work) its own running state is enough. Neither flags; a decision, action or review still does.
       const status = await this.settledStatus(agent.id);
