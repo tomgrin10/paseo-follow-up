@@ -2,6 +2,10 @@
 
 What changed in each version of Follow-up, newest first. Follow-up shows these in "What's new" after an update, and in full from Home's last line.
 
+## 1.4.0-beta.25 (2026-11-10)
+
+- A question an agent asks again no longer shows up twice in Needs you. Agents get the open question back, and existing duplicates close on update.
+
 ## 1.4.0-beta.24 (2026-11-10)
 
 - Claude agents now keep working while a long command runs, checking on it at least once a minute instead of ending their turn to wait. Turn it off in Settings → Agents → Wait for background jobs.
