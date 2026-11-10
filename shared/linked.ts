@@ -40,8 +40,13 @@ export const linkedItemSchema = z.object({
   checkedAt: z.string().nullable().default(null),
 });
 export type LinkedItem = z.infer<typeof linkedItemSchema>;
-const exclusionSchema = z.object({ key: short(300), at: z.string(), by: short(120), reason: short(200).nullable().default(null) });
-const candidateSchema = z.object({ key: short(40), seen: z.number().int().min(1), firstSeen: z.string(), retryAt: z.string().nullable().default(null), failures: z.number().int().min(0).default(0) });
+/** `item`: what was removed, so Undo brings it back as it was. */
+const exclusionSchema = z.object({ key: short(300), at: z.string(), by: short(120), reason: short(200).nullable().default(null), item: linkedItemSchema.nullable().default(null) });
+/**
+ * `strong`: seen in a tool receipt, the developer's words, the goal or a PR. A key only an agent's prose mentions is
+ * weak and waits for a second sighting (`seen` ≥ 2) before Linear is asked.
+ */
+const candidateSchema = z.object({ key: short(40), seen: z.number().int().min(1), firstSeen: z.string(), retryAt: z.string().nullable().default(null), failures: z.number().int().min(0).default(0), strong: z.boolean().default(true) });
 export const workspaceLinksSchema = z.object({
   items: z.array(linkedItemSchema).default([]),
   excluded: z.array(exclusionSchema).default([]),
@@ -145,12 +150,12 @@ export function excludeItem(ws: WorkspaceLinks, key: string, by: string, reason:
   const i = ws.items.findIndex(x => x.key === key);
   const removed = i >= 0 ? ws.items.splice(i, 1)[0] : null;
   ws.candidates = ws.candidates.filter(c => c.key !== key);
-  if (!ws.excluded.some(e => e.key === key)) ws.excluded.push({ key, at, by, reason: reason?.slice(0, 200) ?? null });
+  if (!ws.excluded.some(e => e.key === key)) ws.excluded.push({ key, at, by, reason: reason?.slice(0, 200) ?? null, item: removed });
   if (ws.excluded.length > LIMITS.excluded) ws.excluded.splice(0, ws.excluded.length - LIMITS.excluded);
   return removed;
 }
 /** Undo: the exclusion goes, and the removed item (when given) comes back as it was. */
-export function unexcludeItem(ws: WorkspaceLinks, key: string, restore: LinkedItem | null): void {
+export function unexcludeItem(ws: WorkspaceLinks, key: string, restore: LinkedItem | null = ws.excluded.find(e => e.key === key)?.item ?? null): void {
   ws.excluded = ws.excluded.filter(e => e.key !== key);
   if (restore && !ws.items.some(i => i.key === key)) ws.items.push(restore);
 }
@@ -161,7 +166,7 @@ export function unexcludeItem(ws: WorkspaceLinks, key: string, restore: LinkedIt
  * An extracted Linear-shaped key. Known items refresh their lastSeen; excluded and rejected keys, and keys whose team
  * prefix isn't a known Linear team, are dropped on the spot. Returns whether it is (now) a candidate.
  */
-export function noteCandidate(file: LinkedFile, workspaceId: string, raw: string, now: number): boolean {
+export function noteCandidate(file: LinkedFile, workspaceId: string, raw: string, now: number, strong = true): boolean {
   const key = linearKey(raw);
   if (!key || file.rejected[key]) return false;
   const ws = file.workspaces[workspaceId] ??= emptyWorkspaceLinks();
@@ -170,8 +175,8 @@ export function noteCandidate(file: LinkedFile, workspaceId: string, raw: string
   if (item) { item.lastSeen = new Date(now).toISOString(); return false; }
   if (file.teams && !file.teams.keys.includes(teamOf(key))) return false;
   const c = ws.candidates.find(c => c.key === key);
-  if (c) { c.seen++; return true; }
-  ws.candidates.push({ key, seen: 1, firstSeen: new Date(now).toISOString(), retryAt: null, failures: 0 });
+  if (c) { c.seen++; c.strong ||= strong; return true; }
+  ws.candidates.push({ key, seen: 1, firstSeen: new Date(now).toISOString(), retryAt: null, failures: 0, strong });
   if (ws.candidates.length > LIMITS.candidates) ws.candidates.splice(0, ws.candidates.length - LIMITS.candidates);
   return true;
 }
@@ -182,13 +187,14 @@ export function setTeams(file: LinkedFile, keys: string[], now: number): void {
   for (const ws of Object.values(file.workspaces)) ws.candidates = ws.candidates.filter(c => keys.includes(teamOf(c.key)));
 }
 
-/** Up to `max` candidates due for a Linear check, oldest first. Nothing while the team list is unknown. */
+/** Up to `max` candidates due for a Linear check, oldest first. Nothing while the team list is unknown; weak ones wait for a second sighting. */
 export function dueChecks(file: LinkedFile, now: number, max: number = LIMITS.checksPerDrain): { workspaceId: string; key: string }[] {
   if (!file.teams) return [];
   const due: { workspaceId: string; key: string; firstSeen: string }[] = [];
   const seen = new Set<string>();
   for (const [workspaceId, ws] of Object.entries(file.workspaces)) for (const c of ws.candidates) {
     if (c.retryAt && Date.parse(c.retryAt) > now) continue;
+    if (!c.strong && c.seen < 2) continue;
     if (!file.teams.keys.includes(teamOf(c.key))) continue;
     due.push({ workspaceId, key: c.key, firstSeen: c.firstSeen });
   }
@@ -279,4 +285,55 @@ export function migrateAboutLinks(file: LinkedFile, about: Record<string, { link
   }
   file.migrations.push(ABOUT_MIGRATION);
   return { items, candidates };
+}
+
+// ---------- extraction: what passive sources saw ----------
+
+/** One reference seen in text Follow-up already reads. `strong`: a tool receipt, the developer's words, the goal or a PR. */
+export type LinkRef = { raw: string; strong: boolean; title?: string | null };
+
+/**
+ * Passive sightings into the file. Linear keys become candidates (weak ones need a second sighting); Slack threads,
+ * artifacts, docs and GitHub issues are URL-shaped and kept as extracted items. PRs and generic URLs never get in
+ * this way, and exclusions hold. Returns how many items and candidates were added.
+ */
+export function noteRefs(file: LinkedFile, workspaceId: string, refs: readonly LinkRef[], now: number): { items: number; candidates: number } {
+  let items = 0, candidates = 0;
+  for (const ref of refs) {
+    const c = classifyLink(ref.raw, false);
+    if (!c || c.kind === "pr" || c.kind === "link") continue;
+    if (c.kind === "linear") { if (noteCandidate(file, workspaceId, c.key, now, ref.strong)) candidates++; continue; }
+    const ws = file.workspaces[workspaceId] ??= emptyWorkspaceLinks();
+    const r = upsertItem(ws, { key: c.key, kind: c.kind, url: c.url, title: ref.title ?? null, origin: "extracted" }, now);
+    if (r.ok && r.created) items++;
+  }
+  return { items, candidates };
+}
+
+// ---------- the view: stored items plus the spec and published artifacts ----------
+
+export type LinkedViewItem = LinkedItem & { spec: boolean };
+export type LinkedView = { workspaceId: string; items: LinkedViewItem[]; excluded: { key: string; at: string; by: string; reason: string | null }[]; counts: Partial<Record<LinkedKind, number>>; pending: number };
+
+/**
+ * What the panel and link_items show. The spec (origin spec) and published artifacts (origin published) are derived
+ * from what Follow-up already stores, never copied into linked.json; an excluded one stays out.
+ */
+export function linkedView(workspaceId: string, ws: WorkspaceLinks | undefined, derived: { spec: { url: string; title: string | null } | null; artifacts: readonly { url: string; title: string | null; firstAt: string | null; lastAt: string | null; by: string | null }[] }): LinkedView {
+  const stored = ws ?? emptyWorkspaceLinks();
+  const excluded = new Set(stored.excluded.map(e => e.key));
+  const items: LinkedViewItem[] = stored.items.map(i => ({ ...i, spec: false }));
+  const add = (url: string, title: string | null, origin: "spec" | "published", at: string | null, by: string | null) => {
+    const c = classifyLink(url, true);
+    if (!c || c.kind === "pr" || excluded.has(c.key)) return;
+    const prior = items.find(i => i.key === c.key);
+    if (prior) { prior.title ??= title; if (origin === "spec") prior.spec = true; return; }
+    const when = at ?? new Date(0).toISOString();
+    items.push({ ...linkedItemSchema.parse({ key: c.key, kind: c.kind, url: c.url ?? url, title, origin, by, firstSeen: when, lastSeen: when }), spec: origin === "spec" });
+  };
+  if (derived.spec?.url) add(derived.spec.url, derived.spec.title, "spec", null, null);
+  for (const a of derived.artifacts) add(a.url, a.title, "published", a.lastAt ?? a.firstAt, a.by);
+  const counts: Partial<Record<LinkedKind, number>> = {};
+  for (const i of items) if (!i.spec) counts[i.kind] = (counts[i.kind] ?? 0) + 1;
+  return { workspaceId, items, excluded: stored.excluded.map(({ key, at, by, reason }) => ({ key, at, by, reason })), counts, pending: stored.candidates.length };
 }
