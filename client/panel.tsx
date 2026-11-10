@@ -13,7 +13,7 @@ import { recentMainChange } from "../shared/home";
 import { followUpObligations, recoveryBatch } from "../shared/follow-up";
 import { settledForDisplay } from "../shared/presentation";
 import { ago, shortRefs } from "../shared/attention";
-import { agentCard } from "../shared/status";
+import { agentCard, unconfirmedNote } from "../shared/status";
 import { Button, Card, CardRow, FoldRow, IconButton, errorText, text, useNow, type Theme } from "./kit";
 import { Reveal, Skeleton } from "./motion";
 import { WorkspaceHeader } from "./header";
@@ -186,14 +186,17 @@ function ShippedCard({ workspace: w, theme, compact, now }: { workspace: Workspa
   return <Reveal>
     <View style={{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 10, padding: 14, gap: 10, backgroundColor: tint(c.statusSuccess, c), borderWidth: 1, borderColor: tint(c.statusSuccess, c) }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-        <View style={{ width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: c.statusSuccess }}><Icon name="Check" size={17} color={c.surface0} /></View>
+        <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: c.statusSuccess }}><Icon name="Check" size={17} color={c.surface0} /></View>
         <View style={{ flex: 1 }}>
           <Text accessibilityRole="header" style={[t.label, { fontSize: 14, color: c.foreground }]}>Shipped</Text>
           <Text style={t.meta}>{merged ? `${merged} PR${merged === 1 ? "" : "s"} merged · ` : ""}declared {ago(w.completion.declaredAt, now)}</Text>
         </View>
       </View>
       <Text selectable style={[t.body, { color: c.foreground }]}>{w.completion.summary}</Text>
-      {!!w.completion.unconfirmed?.length && <Text style={t.meta}>{`Deploy not confirmed by Follow-up for ${w.completion.unconfirmed.map(k => shortRefs(k, w)).join(", ")}. The summary above is the agent's evidence.`}</Text>}
+      {!!w.completion.unconfirmed?.length && <View style={{ flexDirection: "row", gap: 6, alignItems: "flex-start" }}>
+        <View style={{ paddingTop: 2 }}><Icon name="CircleAlert" size={13} color={c.statusWarning} /></View>
+        <Text style={[t.meta, { flex: 1, color: c.foreground }]}>{unconfirmedNote(w.completion.unconfirmed)}</Text>
+      </View>}
       <Text style={t.meta}>Archive the workspace from its menu when you're finished with it.</Text>
     </View>
   </Reveal>;

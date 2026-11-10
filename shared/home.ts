@@ -4,7 +4,7 @@ import { activity, type Activity } from "./activity";
 import { followUpObligations, recoveryBatch } from "./follow-up";
 import { flagHeadline, HEADLINE_ICON, HEADLINE_TONE, HEADLINE_WORD, workspaceHeadline, withoutBriefQuestions, type Headline, type HeadlineKey, type HeadlineTone } from "./headline";
 import { rowTitle, sectionOf, type InboxRow } from "./inbox";
-import { settled, summary, type Pr, type Workspace } from "./model";
+import { completionCheck, settled, summary, type Pr, type Workspace } from "./model";
 import { isOpen as questionOpen } from "./questions";
 import { taskSchedule } from "./task-trigger";
 import { freshPriorities, type Priority, type PrioritySourceKind } from "./priorities";
@@ -188,7 +188,7 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
       if (row.workspaceId) covered.add(row.workspaceId);
     } else if (section === "running") {
       const fixing = w && w.mainAgentId === row.agentId ? fixingBatch(w, now) : undefined;
-      out.push(make({ ...base, group: fixing ? "fixing" : "running", tier: null, icon: fixing ? "Wrench" : row.resumesAt ? "CirclePause" : "LoaderCircle", tone: "running",
+      out.push(make({ ...base, group: fixing ? "fixing" : "running", tier: null, icon: fixing ? completionCheck(fixing) ? "ListChecks" : "Wrench" : row.resumesAt ? "CirclePause" : "LoaderCircle", tone: "running",
         word: null, line: fixing ? w ? liveLine(w, now).text : "Fixing" : row.resumesAt ? "Paused at the usage limit" : "Working", badges: [], pr: prChip(w), at: fixing?.sentAt ?? row.lastActivityAt }));
       if (row.workspaceId) covered.add(row.workspaceId);
     }
@@ -209,7 +209,7 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
     const fixing = fixingBatch(w, now);
     const state = summary(w, now);
     const live = liveLine(w, now);
-    if (group === "fixing" && fixing) out.push(make({ ...base, group: "fixing", tier: null, icon: "Wrench", tone: "running", word: null, line: live.text, badges: [], pr: prChip(w), at: fixing.sentAt ?? fixing.createdAt, readyToArchive: false }));
+    if (group === "fixing" && fixing) out.push(make({ ...base, group: "fixing", tier: null, icon: completionCheck(fixing) ? "ListChecks" : "Wrench", tone: "running", word: null, line: live.text, badges: [], pr: prChip(w), at: fixing.sentAt ?? fixing.createdAt, readyToArchive: false }));
     else if (group === "running") out.push(make({ ...base, group: "running", tier: null, icon: "LoaderCircle", tone: "running", word: null, line: live.text, badges: [], pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
     else if (state.status === "done") out.push(make({ ...base, group: "quiet", tier: null, icon: "CircleCheck", tone: "success", word: null, line: w.completion?.summary ?? "Done", badges: [], pr: prChip(w), at: w.completion?.declaredAt ?? w.updatedAt, readyToArchive: true }));
     else if (group === "waiting") out.push(make({ ...base, group: "waiting", tier: null, icon: "Clock", tone: "muted", word: null, line: live.text, badges: badges({ headline: null, workspace: w, items }), pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
@@ -313,7 +313,7 @@ export type BriefPaneModel = {
 const MOVE: Partial<Record<HeadlineKey, string>> = {
   permission: "It's waiting on a permission.", error: "It stopped on an error.", paused: "It's paused until you look.", blocked: "Follow-up is blocked on it.",
   decision: "The agent is blocked on your answer.", question: "The agent is waiting on your answer.", merge: "It's approved and ready to merge.",
-  reviewers: "Its PR has no reviewers yet.", repairs: "Fixes are ready to send.", finish: "Its work is in; ask the agent to declare Done.", review: "It has review feedback.", action: "It needs something only you can do.",
+  reviewers: "Its PR has no reviewers yet.", repairs: "Fixes are ready to send.", finish: "Its work is in: ask the main agent to check and declare Done.", review: "It has review feedback.", action: "It needs something only you can do.",
   finished: "It finished and is waiting for your sign-off.", pr_closed: "Its PR merged or closed.",
 };
 const keyOfWord = (word: string | null): HeadlineKey | null => (Object.entries(HEADLINE_WORD).find(([, w]) => w === word)?.[0] as HeadlineKey | undefined) ?? null;

@@ -97,7 +97,12 @@ card (`agentCard`) and Needs you all read it. Rules it encodes:
 - The Done check never auto-sends, so it waits on you: Needs you shows "Ready to finish · ask the main agent to
   declare Done" with **Ask to finish**, whether Auto is on or off. Done settles any open Done check
   (`settleDoneChecks`).
-- A queued batch never claims it "sends when the agent is idle".
+- A queued batch never claims it "sends when the agent is idle". Repairs Auto won't send because the agent is idle
+  and unloaded wait on you: Needs you offers Send (`waits-on-you-means-needs-you`).
+- The Done check uses one wording everywhere (`FINISH_WORD`, `FINISH_ASK`, `FINISH_LINE`) and its own icon, never
+  a wrench or a green check. A stuck Done check reads "The Done check didn't go through", never "repairs"
+  (`stuckLine`).
+- A Done with an unconfirmed deploy says so in the header and live line, and both cards use `unconfirmedNote`.
 
 The invariants in `shared/status-invariants.ts` check these over a grid of states
 (`tests/status-invariants.test.ts`). After each refresh the worker runs `violations()` and appends changes to

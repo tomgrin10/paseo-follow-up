@@ -1,4 +1,4 @@
-import { batchView } from "./status";
+import { batchView, FINISH_LINE, stuckLine, unconfirmedRefs } from "./status";
 import { completionCheck, summary, type Batch, type Pr, type Workspace, type Status } from "./model";
 import { followUpObligations, recoveryBatch } from "./follow-up";
 import { orderedStacks, settledForDisplay } from "./presentation";
@@ -101,7 +101,7 @@ export function needsYou(w: Workspace, now = Date.now()): NeedItem[] {
   if (w.hold) items.push({ kind: "hold", key: "hold", title: "Follow-up is paused", detail: w.hold });
   for (const b of w.batches.filter(b => !recoveryBatch(b) && ["blocked", "uncertain"].includes(b.state) && !(w.completion && completionCheck(b)))) {
     items.push({ kind: "retry", key: `retry:${b.id}`, batchId: b.id, exhausted: b.attempts >= 3,
-      title: b.state === "uncertain" ? "Check whether the repairs arrived" : "The repairs didn't finish",
+      title: stuckLine(b),
       detail: b.result || (b.state === "uncertain" ? "Delivery wasn't confirmed." : "The main agent reported a blocker.") });
   }
   for (const a of w.prActions.filter(a => a.state === "uncertain")) {
@@ -115,11 +115,14 @@ export function needsYou(w: Workspace, now = Date.now()): NeedItem[] {
   // A blocked task is a question once the server mirrors it; until then it still shows as a decision.
   for (const o of followUpObligations(w).filter(o => o.status === "blocked" && !questions.some(q => q.taskId === o.id && q.taskRevision !== null)))
     items.push({ kind: "decision", key: `decision:${o.id}`, obligationId: o.id, title: o.title, detail: o.evidence });
-  for (const b of pendingSends(w).filter(b => completionCheck(b) ? !w.completion : !w.enable_auto_sends)) {
+  // Repairs Auto won't send (an idle agent Follow-up doesn't wake) wait on you just like hand-sent ones (shared/status.ts).
+  const view = batchView(w, now);
+  const idleWait = (b: Batch) => view?.batch.id === b.id && view.phase === "queued" && view.waitingOn === "you" && !w.hold && !w.goneAgent && !w.dormant;
+  for (const b of pendingSends(w).filter(b => completionCheck(b) ? !w.completion : !w.enable_auto_sends || idleWait(b))) {
     items.push(completionCheck(b)
-      ? { kind: "send", key: `send:${b.id}`, batchId: b.id, tasks: b.tasks.map(t => t.title), blocker: sendBlocker(w, b), title: "Ready to finish · ask the main agent to declare Done", finish: true }
+      ? { kind: "send", key: `send:${b.id}`, batchId: b.id, tasks: b.tasks.map(t => t.title), blocker: sendBlocker(w, b), title: FINISH_LINE, finish: true }
       : { kind: "send", key: `send:${b.id}`, batchId: b.id, tasks: b.tasks.map(t => t.title), blocker: sendBlocker(w, b),
-      title: `${plural(b.tasks.length, "repair")} ready for the main agent` });
+      title: `${plural(b.tasks.length, "repair")} ready for the main agent${w.enable_auto_sends ? " · it's idle, and Follow-up doesn't wake it" : ""}` });
   }
   const blocking = (pr: Pr) => w.prActions.some(a => prActionBlocks(a, [pr.key]));
   for (const pr of stackOrder(w.prs)) {
@@ -136,7 +139,11 @@ export function headline(w: Workspace, now = Date.now()): HeadlinePart[] {
   const bar = stackBar(w);
   const parts: HeadlinePart[] = [];
   const state = summary(w, now);
-  if (state.status === "done") return [{ text: `Done · ${plural(w.prs.length, "PR")} shipped`, tone: "success" }];
+  if (state.status === "done") {
+    const unconfirmed = w.completion?.unconfirmed ?? [];
+    return unconfirmed.length ? [{ text: `Done · ${plural(w.prs.length, "PR")} merged`, tone: "success" }, { text: `deploy unconfirmed for ${unconfirmedRefs(unconfirmed)}`, tone: "warning" }]
+      : [{ text: `Done · ${plural(w.prs.length, "PR")} shipped`, tone: "success" }];
+  }
   if (!bar.total) parts.push({ text: "No PRs registered yet" });
   else if (bar.merged === bar.total) parts.push({ text: bar.total === 1 ? "PR merged" : `All ${bar.total} PRs merged` });
   else parts.push({ text: `${bar.merged} of ${plural(bar.total, "PR")} merged` });
@@ -151,7 +158,10 @@ export type LiveIcon = "spinner" | "done" | "paused" | "waiting" | "alert" | "id
 /** What is happening right now, in one line, with the time it started when known. */
 export function liveLine(w: Workspace, now = Date.now()): { icon: LiveIcon; text: string; since: string | null } {
   const state = summary(w, now);
-  if (state.status === "done") return { icon: "done", text: "Ready to archive", since: w.completion?.declaredAt ?? null };
+  if (state.status === "done") {
+    const unconfirmed = w.completion?.unconfirmed ?? [];
+    return { icon: "done", text: unconfirmed.length ? `Ready to archive once you've checked ${unconfirmed.length === 1 ? `${unconfirmedRefs(unconfirmed)}'s deploy` : `the deploys of ${unconfirmedRefs(unconfirmed)}`}` : "Ready to archive", since: w.completion?.declaredAt ?? null };
+  }
   if (w.hold) return { icon: "paused", text: "Paused until you resume", since: w.interruption?.at ?? null };
   const stopped = (w.questions ?? []).filter(questionOpen).find(q => questionState(q) === "stopped");
   if (stopped) return { icon: "paused", text: `Main agent stopped until you answer ${stopped.id}`, since: stopped.askedAt };

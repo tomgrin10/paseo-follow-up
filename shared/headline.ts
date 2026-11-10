@@ -1,4 +1,5 @@
 import type { NeedItem } from "./attention";
+import { FINISH_ASK, FINISH_WORD } from "./status";
 import type { BriefKind } from "./brief";
 import { age, displayReason, reasonRank, type InboxRow, type Reason, type ReasonEntry } from "./inbox";
 
@@ -18,15 +19,15 @@ export type HeadlineTone = "danger" | "warning" | "accent" | "merged" | "muted";
 /** The decisive word each key leads with. The pill, the card header and the row all read it from here. */
 export const HEADLINE_WORD: Record<HeadlineKey, string> = {
   permission: "Permission", error: "Error", paused: "Paused", blocked: "Blocked", decision: "Decision", question: "Question", action: "Action",
-  repairs: "Fixes", finish: "Ready to finish", merge: "Merge", reviewers: "Add reviewers", review: "Review", finished: "Finished", flagged: "Flagged", pr_closed: "PR closed",
+  repairs: "Fixes", finish: FINISH_WORD, merge: "Merge", reviewers: "Add reviewers", review: "Review", finished: "Finished", flagged: "Flagged", pr_closed: "PR closed",
 };
 export const HEADLINE_ICON: Record<HeadlineKey, string> = {
   permission: "ShieldQuestion", error: "CircleX", paused: "CirclePause", blocked: "OctagonAlert", decision: "MessageCircleQuestion", question: "MessageCircleQuestion",
-  action: "Hand", repairs: "Wrench", finish: "CircleCheck", merge: "GitMerge", reviewers: "UserPlus", review: "GitPullRequest", finished: "Flag", flagged: "Flag", pr_closed: "GitMerge",
+  action: "Hand", repairs: "Wrench", finish: "ListChecks", merge: "GitMerge", reviewers: "UserPlus", review: "GitPullRequest", finished: "Flag", flagged: "Flag", pr_closed: "GitMerge",
 };
 export const HEADLINE_TONE: Record<HeadlineKey, HeadlineTone> = {
   permission: "warning", error: "danger", paused: "warning", blocked: "danger", decision: "warning", question: "warning", action: "warning",
-  repairs: "warning", finish: "accent", merge: "merged", reviewers: "warning", review: "warning", finished: "accent", flagged: "warning", pr_closed: "merged",
+  repairs: "warning", finish: "warning", merge: "merged", reviewers: "warning", review: "warning", finished: "accent", flagged: "warning", pr_closed: "merged",
 };
 export const headlineRank = (key: HeadlineKey) => HEADLINE_KEYS.indexOf(key);
 
@@ -109,7 +110,7 @@ export function workspaceHeadline(items: NeedItem[]): Headline | null {
     case "check": return { key: "blocked", label: "Check PR", line: top.title, source: "workspace" };
     case "answer": return { key: "blocked", label: "Check answer", line: top.title, source: "workspace" };
     case "decision": return { key: "decision", label: "Decision", line: top.title, source: "workspace" };
-    case "send": return top.finish ? { key: "finish", label: "Ready to finish", line: "Ask the main agent to check the work and declare Done", source: "workspace" } : { key: "repairs", label: `Send ${plural(top.tasks.length, "fix", "fixes")}`, line: top.title, source: "workspace" };
+    case "send": return top.finish ? { key: "finish", label: FINISH_WORD, line: FINISH_ASK[0].toUpperCase() + FINISH_ASK.slice(1), source: "workspace" } : { key: "repairs", label: `Send ${plural(top.tasks.length, "fix", "fixes")}`, line: top.title, source: "workspace" };
     case "merge": return { key: "merge", label: `Merge #${top.number}`, line: top.title, source: "workspace" };
     case "reviewers": return { key: "reviewers", label: `Add reviewers #${top.number}`, line: top.title, source: "workspace" };
   }

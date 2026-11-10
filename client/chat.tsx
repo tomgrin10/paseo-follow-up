@@ -4,6 +4,7 @@ import type { PluginClientContext, PluginTimelineItemProps } from "@getpaseo/plu
 import { Icon, ScrollView } from "@getpaseo/plugin/client/ui";
 import { answerCardSchema, batchCardSchema, createMomentLedger, followTimelineItem, parseBatchPrompt, toolRowSchema, type AnswerCard, type BatchCard, type ToolRow } from "../shared/chat";
 import { parseAnswerMessage, parseAnswersMessage } from "../shared/questions";
+import { unconfirmedNote, unconfirmedRefs } from "../shared/status";
 import { Reveal } from "./motion";
 import { tint, withAlpha } from "./theme";
 
@@ -51,14 +52,16 @@ function ToolRowView({ item, theme }: PluginTimelineItemProps<ToolRow>) {
 function DoneCard({ summary, unconfirmed, theme }: { summary: string; unconfirmed: string[]; theme: PluginTimelineItemProps["theme"] }) {
   const c = theme.colors;
   return <Reveal>
-    <View accessibilityRole="summary" style={{ flexDirection: "row", gap: 12, padding: 12, borderRadius: 10, backgroundColor: tint(c.statusSuccess, c), borderWidth: 1, borderColor: withAlpha(c.statusSuccess, 0.35), marginVertical: 4 }}>
-      <View style={{ width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: c.statusSuccess }}><Icon name="Check" size={16} color={c.surface0} /></View>
+    <View accessibilityRole="summary" accessibilityLabel={`Workspace done${unconfirmed.length ? `, deploy not confirmed for ${unconfirmedRefs(unconfirmed)}` : ""}`} style={{ flexDirection: "row", gap: 12, padding: 12, borderRadius: 10, backgroundColor: tint(c.statusSuccess, c), borderWidth: 1, borderColor: withAlpha(c.statusSuccess, 0.35), marginVertical: 4 }}>
+      <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: c.statusSuccess }}><Icon name="Check" size={16} color={c.surface0} /></View>
       <View style={{ flex: 1, gap: 3 }}>
         <Text style={{ color: c.foreground, fontSize: 14, lineHeight: 19, fontWeight: "600" }}>Workspace done</Text>
         {!!summary && <Text selectable style={{ color: c.foreground, fontSize: 13, lineHeight: 19 }}>{summary}</Text>}
-        <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 17 }}>{unconfirmed.length
-          ? `Deploy not confirmed by Follow-up for ${unconfirmed.map(k => k.includes("#") ? `#${k.split("#")[1]}` : k).join(", ")}; the summary above is the agent's evidence. Archive the workspace when you're ready.`
-          : "Follow-up checked every PR and task. Archive the workspace when you're ready."}</Text>
+        {unconfirmed.length > 0 && <View style={{ flexDirection: "row", gap: 6, alignItems: "flex-start" }}>
+          <View style={{ paddingTop: 2 }}><Icon name="CircleAlert" size={13} color={c.statusWarning} /></View>
+          <Text style={{ flex: 1, color: c.foreground, fontSize: 12, lineHeight: 17 }}>{unconfirmedNote(unconfirmed)}</Text>
+        </View>}
+        <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 17 }}>{unconfirmed.length ? "Archive the workspace when you're ready." : "Follow-up checked every PR and task. Archive the workspace when you're ready."}</Text>
       </View>
     </View>
   </Reveal>;
