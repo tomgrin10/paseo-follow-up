@@ -10,6 +10,7 @@ import { taskTriggerRpc } from "../shared/contracts";
 import { Button, Card, Chip, FoldRow, errorText, text, type Theme } from "./kit";
 import { Spinner } from "./motion";
 import type { Colors } from "./theme";
+import { RichText } from "./rich-text";
 
 const finished = (o: Obligation) => ["done", "waived"].includes(o.status);
 
@@ -84,7 +85,7 @@ function TaskRow({ o, w, theme, onOpen, compact }: { o: Obligation; w: Workspace
     style={state => ({ flexDirection: "row", gap: 10, paddingHorizontal: 12, paddingVertical: 9, minHeight: compact ? 52 : 44, borderTopWidth: 1, borderTopColor: c.border, backgroundColor: state.pressed ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
     <View style={{ width: 16, paddingTop: 2, alignItems: "center" }}><TaskGlyph o={o} w={w} colors={c} /></View>
     <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
-      <Text numberOfLines={3} style={[t.body, finished(o) ? { color: c.foregroundMuted } : null]}>{o.title}</Text>
+      <RichText plain numberOfLines={3} style={[t.body, finished(o) ? { color: c.foregroundMuted } : null]}>{o.title}</RichText>
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
         {scheduled && !finished(o) ? <Chip theme={theme} label={`${status}${prs ? ` · ${prs}` : ""}`} color={c.foregroundMuted} />
           : <Text style={[t.meta, o.status === "blocked" && !linkedQuestion(o, w) ? { color: c.statusWarning } : null, { fontVariant: ["tabular-nums"] }]}>{status}{prs && !finished(o) && !linkedQuestion(o, w) ? ` · waits for ${prs}` : ""}</Text>}
@@ -101,12 +102,12 @@ function TaskSheet({ o, w, theme, compact, onClose }: { o: Obligation | null; w:
     <Modal.Content contentContainerStyle={{ padding: compact ? 16 : 20, gap: 14 }}>
       {o && <>
         <View style={{ gap: 6 }}>
-          <Text selectable style={[t.title, { fontSize: 16, lineHeight: 22 }]}>{o.title}</Text>
+          <RichText selectable style={[t.title, { fontSize: 16, lineHeight: 22 }]}>{o.title}</RichText>
           <Text style={t.meta}>{statusOf(o, w)}{o.afterPrs.length ? ` · after ${o.afterPrs.map(p => `#${p.split("#")[1]}`).join(", ")}` : ""}{schedule?.dueAt ? ` · due ${new Date(schedule.dueAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : ""}</Text>
         </View>
         <View style={{ gap: 4 }}>
           <Text style={t.label}>Evidence</Text>
-          <Text selectable style={t.meta}>{o.evidence || "Nothing recorded yet. The agent adds evidence when it checks or finishes the task."}</Text>
+          <RichText selectable linkColor={c.foreground} style={t.meta}>{o.evidence || "Nothing recorded yet. The agent adds evidence when it checks or finishes the task."}</RichText>
         </View>
         {!finished(o) && o.status !== "working" && <View style={{ paddingTop: 12, borderTopWidth: 1, borderTopColor: c.border }}>
           <TriggerEditor key={`${o.id}:${o.revision}`} obligation={o} workspace={w} theme={theme} compact={compact} />

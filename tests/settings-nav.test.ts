@@ -10,12 +10,12 @@ const store = (): KeyValue & { data: Map<string, string> } => { const data = new
 
 test("categories: five, General first, in order; every setting the old page had is still rendered (moved, not dropped)", async () => {
   assert.deepEqual(SETTINGS_CATEGORIES.map(c => c.id), ["general", "following", "reviewers", "agents", "display"]);
-  const source = (await Promise.all(["client/settings.tsx", "client/display.tsx", "client/reviewers.tsx", "client/agents.tsx"].map(f => readFile(f, "utf8")))).join("\n");
+  const source = (await Promise.all(["client/settings.tsx", "client/display.tsx", "client/reviewers.tsx", "client/agents.tsx", "client/job-rows.tsx"].map(f => readFile(f, "utf8")))).join("\n");
   for (const label of ["Follow every workspace", "Send repairs automatically", "Rest workspaces after", "Follow this workspace", "While a question is open", "Sidebar item", "Workspace header button", "Composer pill",
     "Needs-you inbox", "Flag merged and closed PRs", "Ask agents to state what they need", "Default for all repos", "Add reviewer", "Trust bypass agents"]) assert.ok(source.includes(label), label);
   assert.ok(/<PermissionsSection theme=\{theme\} \/>[\s\S]*<ProjectsFold/.test(source), "Permissions sits in Following, after Defaults");
   assert.ok(!/title="Permissions"[\s\S]{0,400}title="Needs-you inbox"|DisplaySections[\s\S]*<PermissionsSection/.test(source.slice(source.indexOf("export function DisplaySections"))), "and not under Inbox & display");
-  for (const field of ["enable_overseer", "enable_ranker"]) assert.ok(source.includes(`field="${field}"`), `${field} switch moved onto its agent card`);
+  for (const field of ["enable_overseer", "enable_ranker"]) assert.ok(source.includes(`"${field}"`), `${field} switch sits in its job row`);
   // Same RPCs as before: UI only.
   for (const rpc of ["followSettingsRpc", "setFollowSettingsRpc", "projectSettingsRpc", "setProjectTrackingRpc", "reviewerSettingsRpc", "saveReviewersRpc", "agentSettingsRpc", "setAgentSettingRpc"]) assert.ok(source.includes(rpc), rpc);
   assert.ok(!/SettingsSelect label="Workspace"/.test(source), "the 100-option workspace select is gone");
@@ -71,4 +71,11 @@ test("Workspaces: search by title words, exceptions first, capped with the rest 
   assert.equal(workspacesOpenByDefault(0), false); assert.equal(workspacesOpenByDefault(2), true);
   assert.equal(followingSummary({ enable_follow_every: true, enable_auto_sends_default: true, workspaces: all }), "Following every workspace · 2 exceptions · auto-send on");
   assert.equal(followingSummary({ enable_follow_every: false, enable_auto_sends_default: false, workspaces: [] }), "Following chosen projects · no exceptions · auto-send off");
+});
+
+test("desktop Agents tab: no status line above the card; the Helper agents header says it once (phone list keeps it)", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const s = await readFile("client/settings.tsx", "utf8");
+  assert.match(s, /line && category !== "general" && category !== "agents"/);
+  assert.match(s, /<CategoryList summaries=\{summaries\}/);
 });

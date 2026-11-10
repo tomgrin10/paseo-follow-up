@@ -5,6 +5,7 @@ import { setPrWorkflowInputSchema } from "../shared/pr-workflow";
 import { reviewerListSchema } from "../shared/reviewers";
 import { taskTriggerSchema } from "../shared/task-trigger";
 import { UPDATE_MODES } from "../shared/updates";
+import { briefChoiceSchema } from "../shared/contracts";
 
 /**
  * Agent parity, part 2 (1.4.0-beta.21): tools that are a developer RPC one-to-one. A read runs the RPC's handler; a
@@ -71,8 +72,8 @@ export const RPC_TOOLS: readonly RpcTool[] = [
   // Needs-you: the brief card and the inbox's other actions
   { name: "inbox_brief", rpc: "follow.inbox-brief", kind: "read", input: z.strictObject({ agentId: id }) },
   { name: "brief_action", rpc: "follow.brief-action", kind: "planned", before: { rpc: "follow.inbox-brief", input: a => ({ agentId: a.agentId }) },
-    input: z.strictObject({ agentId: id.optional(), briefId: z.string().max(300).optional(), decisionId: z.string().max(20).optional(), choice: z.string().regex(/^[A-Z]$/).optional(), move: z.enum(["retry"]).optional(),
-      choices: z.array(z.object({ decisionId: z.string().max(20), choice: z.string().regex(/^[A-Z]$/) })).min(1).max(10).optional(), ...confirm }),
+    input: z.strictObject({ agentId: id.optional(), briefId: z.string().max(300).optional(), decisionId: z.string().max(20).optional(), choice: briefChoiceSchema.optional(), words: z.string().trim().max(2000).optional(), move: z.enum(["retry"]).optional(),
+      choices: z.array(z.object({ decisionId: z.string().max(20), choice: briefChoiceSchema, words: z.string().trim().max(2000).optional() })).min(1).max(10).optional(), ...confirm }),
     guard: (a, caller) => a.agentId === caller ? "brief_action answers another agent's brief for the developer; your own brief is the developer's to answer." : null },
   { name: "inbox_act", rpc: "follow.inbox-act", kind: "planned",
     input: z.strictObject({ action: z.enum(["undo", "mute_turn", "unsorted_flag", "unsorted_sign_off", "batch_undo"]).optional(), agentIds: z.array(id).max(500).optional(), muteTurn: z.boolean().optional(), ...confirm }),
@@ -89,6 +90,10 @@ export const RPC_TOOLS: readonly RpcTool[] = [
   { name: "set_task_trigger", rpc: "follow.set-task-trigger", kind: "planned",
     input: z.strictObject({ workspaceId: id.optional(), obligationId: id.optional(), expectedRevision: z.number().int().nonnegative().optional(), trigger: taskTriggerSchema.nullable().optional(), afterPrs: z.array(id).optional(), ...confirm }),
     toRpc: a => ({ workspaceId: a.workspaceId, obligationId: a.obligationId, expectedRevision: a.expectedRevision, trigger: a.trigger ?? null, afterPrs: a.afterPrs ?? [] }) },
+  // Linked items: the list sheet (read, Add link, remove, Undo) for any workspace
+  { name: "link_items", rpc: "follow.linked-items", kind: "read", input: z.strictObject({ workspaceId: id }) },
+  { name: "set_linked_items", rpc: "follow.set-linked-items", kind: "planned", before: { rpc: "follow.linked-items", input: a => ({ workspaceId: a.workspaceId }) },
+    input: z.strictObject({ workspaceId: id.optional(), action: z.enum(["add", "remove", "undo"]).optional(), ref: z.string().trim().min(1).max(2000).optional(), title: z.string().trim().max(200).optional(), ...confirm }) },
   // PR sheet: what the merge controls see (Send to Paseo, Graphite in Chrome)
   { name: "pr_controls", rpc: "follow.pr-control-status", kind: "read", input: z.strictObject({ workspaceId: id, prKey: z.string().trim().regex(/^[\w.-]+\/[\w.-]+#\d+$/) }) },
   { name: "browser_status", rpc: "follow.browser-status", kind: "read", input: none },

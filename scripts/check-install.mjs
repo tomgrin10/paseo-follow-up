@@ -7,6 +7,8 @@ import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
+import { harness, spawnDaemon } from "./harness.mjs";
+await harness();
 const exec = promisify(execFile);
 const root = await mkdtemp(join(tmpdir(), "follow-install-"));
 const home = join(root, "home"); const plugin = join(root, "plugin"); const fixture = join(root, "fixture"); const bin = join(root, "bin");
@@ -33,7 +35,7 @@ try {
   for (const key of ["PASEO_PASSWORD", "PASEO_PASSWORD_FILE", "PASEO_AGENT_ID", "PASEO_AGENT_CWD", "PASEO_WORKSPACE_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_SESSION_ID", "CLAUDE_CONFIG_DIR", "CODEX_HOME"]) delete env[key];
   const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env, timeout: 120000, maxBuffer: 1024 * 1024 })).stdout);
   const log = await import("node:fs").then(fs => fs.openSync(join(root, "daemon.log"), "a"));
-  daemon = spawn("paseo", ["daemon", "run", "--home", home], { env, stdio: ["ignore", log, log] });
+  daemon = spawnDaemon(["daemon", "run", "--home", home], { env, stdio: ["ignore", log, log] });
   for (let attempt = 0; attempt < 80; attempt++) {
     try { await cli("workspace", "ls"); break; }
     catch { assert.equal(daemon.exitCode, null, "isolated daemon exited"); if (attempt === 79) throw new Error("isolated daemon did not start"); await new Promise(r => setTimeout(r, 250)); }
@@ -104,8 +106,8 @@ try {
     child.stdin.end(requests.map((r, i) => JSON.stringify({ jsonrpc: "2.0", id: i + 1, ...r })).join("\n") + "\n"); await finished; assert.equal(error, ""); return output.trim().split("\n").map(l => JSON.parse(l));
   };
   const native = await nativeMcp([{ method: "initialize", params: {} }, { method: "tools/list" }, { method: "tools/call", params: { name: "workspace_status", arguments: {} } }]);
-  assert.equal(native[1].result.tools.length, 12); assert.equal(JSON.parse(native[2].result.content[0].text).detail, "summary");
-  assert.deepEqual((await nativeMcp([{ method: "tools/list" }], secondary.id))[0].result.tools.map(t => t.name).sort(), ["register_pr", "sync_workspace", "workspace_status"]);
+  assert.equal(native[1].result.tools.length, 14); assert.equal(JSON.parse(native[2].result.content[0].text).detail, "summary");
+  assert.deepEqual((await nativeMcp([{ method: "tools/list" }], secondary.id))[0].result.tools.map(t => t.name).sort(), ["link_item", "register_pr", "sync_workspace", "unlink_item", "workspace_status"]);
   const fallbackEnv = { ...env, PASEO_AGENT_ID: agent.id }; delete fallbackEnv.FOLLOW_THROUGH_CLIENT_ENTRY;
   const fallback = JSON.parse((await exec(process.execPath, [bridgePath, "call", "workspace_status", "{}"], { env: fallbackEnv })).stdout);
   assert.equal(fallback.id, w.id, "a dependency-free bridge resolves the installed CLI client without a session env override");

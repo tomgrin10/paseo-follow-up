@@ -19,6 +19,8 @@ import { createServer } from "node:net";
 import { openSync } from "node:fs";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
+import { harness, spawnDaemon } from "./harness.mjs";
+await harness();
 
 const exec = promisify(execFile);
 try { await exec("paseo", ["--version"], { timeout: 30_000 }); } catch {
@@ -57,7 +59,7 @@ try {
   await writeFile(join(fixture, "index.server.ts"), await readFile("scripts/fixture-provider.ts", "utf8"));
   const packed = JSON.parse((await exec("npm", ["pack", "--json", "--pack-destination", root], { timeout: 60_000 })).stdout)[0];
   await exec("tar", ["-xzf", join(root, packed.filename), "--strip-components=1", "-C", plugin]);
-  daemon = spawn("paseo", ["daemon", "run", "--home", home], { env, stdio: ["ignore", openSync(join(root, "daemon.log"), "a"), openSync(join(root, "daemon.log"), "a")] });
+  daemon = spawnDaemon(["daemon", "run", "--home", home], { env, stdio: ["ignore", openSync(join(root, "daemon.log"), "a"), openSync(join(root, "daemon.log"), "a")] });
   for (let i = 0; i < 120; i++) { try { await cli("workspace", "ls"); break; } catch { assert.equal(daemon.exitCode, null, "isolated daemon exited"); if (i === 119) throw new Error("isolated daemon did not start"); await sleep(250); } }
   client = new DaemonClient({ url, clientId: "follow-native-check", clientType: "cli", reconnect: { enabled: false }, suppressSendErrors: true }); await client.connect();
   await cli("plugin", "install", fixture);

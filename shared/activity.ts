@@ -2,6 +2,7 @@ import type { Workspace } from "./model";
 import { recoveryBatch } from "./follow-up";
 import { shortRefs } from "./attention";
 import { isGithubFlow } from "./pr-actions";
+import { answerLabel } from "./questions";
 
 export type ActivityTone = "merged" | "success" | "warning" | "danger" | "muted";
 export type Activity = { key: string; at: string; icon: string; tone: ActivityTone; text: string; detail: string | null; took: string | null };
@@ -48,8 +49,7 @@ export function activity(w: Workspace): Activity[] {
     const ref = `${q.id} · ${q.title}`;
     rows.push({ key: `asked:${q.id}`, at: q.askedAt, icon: "MessageCircleQuestion", tone: "warning", text: ref, detail: "Asked", took: null });
     if (q.answer) {
-      const option = q.options.find(o => o.letter === q.answer!.choice);
-      rows.push({ key: `answered:${q.id}`, at: q.answer.at, icon: "MessageCircleReply", tone: "success", text: ref, detail: `${q.answer.by === "agent" ? "Answered in chat" : "Answered"}: ${q.answer.choice}${option ? ` · ${option.label}` : ""}`, took: duration(q.askedAt, q.answer.at) });
+      rows.push({ key: `answered:${q.id}`, at: q.answer.at, icon: "MessageCircleReply", tone: "success", text: ref, detail: `${q.answer.by === "agent" ? "Answered in chat" : "Answered"}: ${answerLabel(q, q.answer.choice, q.answer.words)}`, took: duration(q.askedAt, q.answer.at) });
     }
     if (q.closed) rows.push({ key: `withdrawn:${q.id}`, at: q.closed.at, icon: "MessageCircleOff", tone: "muted", text: ref, detail: `Withdrawn: ${q.closed.reason}`, took: null });
   }

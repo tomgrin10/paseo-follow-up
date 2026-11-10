@@ -7,7 +7,7 @@ import { QUESTION_MODES, QUESTION_MODE_RULES, questionPreferences, type Question
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { followSettingsRpc, projectSettingsRpc, setFollowSettingsRpc, setProjectTrackingRpc } from "../shared/contracts";
 import { Switch, bottomInset, errorText, space, text, type Theme } from "./kit";
-import { DisplaySections, PermissionsSection, PreferenceSwitch } from "./display";
+import { DisplaySections, PermissionsSection } from "./display";
 import { ReviewerSettings, reviewerSettingsKey } from "./reviewers";
 import { AgentSettings, WaitSettings, agentSettingsKey } from "./agents";
 import { ShippingSettings } from "./shipping";
@@ -21,6 +21,7 @@ import {
   writeCategory, type SettingsCategory, type WorkspaceSetting,
 } from "../shared/settings-nav";
 import type { AgentSettingsView } from "../shared/agent-settings";
+import { jobRow, jobsHeader } from "../shared/job-rows";
 import type { ReviewerConfig } from "../shared/reviewers";
 
 const settingsKey = ["follow-through", "project-settings"];
@@ -169,7 +170,7 @@ function AgentsCategory({ theme, compact }: { theme: Theme; compact: boolean }) 
   return <>
     <QuestionSettings theme={theme} />
     <WaitSettings theme={theme} />
-    <AgentSettings theme={theme} compact={compact} toggles={{ overseer: <PreferenceSwitch field="enable_overseer" theme={theme} />, ranker: <PreferenceSwitch field="enable_ranker" theme={theme} /> }} />
+    <AgentSettings theme={theme} compact={compact} />
   </>;
 }
 
@@ -186,6 +187,17 @@ function GeneralCategory({ theme, compact, setup }: { theme: Theme; compact: boo
   </>;
 }
 
+/** Agents' line says what the rows' header says (recommended or not); without the catalog, how many differ from defaults. */
+function agentsSummary(agents: AgentSettingsView, changed: number): string {
+  if (agents.catalog?.providers.length && !agents.catalog.error) {
+    const header = jobsHeader(agents.roles.map(r => jobRow(r, agents.catalog)), agents.catalog, false);
+    if (header.action === "check") return "No provider is ready";
+    // The same words as the rows' header, so the tab line and the card never disagree.
+    return header.differ ? header.text.replace(/\.$/, "") : "All on the recommended models";
+  }
+  return changed ? `${changed} of ${agents.roles.length} changed from the defaults` : "Every agent on its default";
+}
+
 /** Each category's one line, from data already loaded (never fetched for it). */
 function useSummaries(): Partial<Record<SettingsCategory, string | null>> {
   // skipToken: subscribe to what's cached (re-rendering when it arrives) without ever fetching for the summary.
@@ -199,7 +211,7 @@ function useSummaries(): Partial<Record<SettingsCategory, string | null>> {
     general: updates ? generalSummary(updates) : null,
     following: follow ? followingSummary(follow) : null,
     reviewers: reviewers ? reviewersSummary(reviewers.config) : null,
-    agents: agents ? (changed ? `${changed} of ${agents.roles.length} changed from the defaults` : "Every agent on its default") : null,
+    agents: agents ? agentsSummary(agents, changed) : null,
   };
 }
 
@@ -240,8 +252,8 @@ export function FollowSettings({ theme, layout, openSetup }: PluginSurfaceProps 
   const line = summaries[category];
   return <ScrollView style={{ flex: 1, backgroundColor: c.surface0 }} stickyHeaderIndices={[0]} contentContainerStyle={{ ...page, paddingTop: 0 }}>
     <View style={{ paddingTop: 24, backgroundColor: c.surface0 }}><CategoryTabs value={category} onChange={pick} theme={theme} /></View>
-    {/* General's status card says it already; its line is for the phone list. */}
-    {line && category !== "general" ? <Text style={[t.meta, { marginTop: -6 }]}>{line}</Text> : null}
+    {/* General's status card and the Agents card header say it already; their lines are for the phone list. */}
+    {line && category !== "general" && category !== "agents" ? <Text style={[t.meta, { marginTop: -6 }]}>{line}</Text> : null}
     {content}
   </ScrollView>;
 }
