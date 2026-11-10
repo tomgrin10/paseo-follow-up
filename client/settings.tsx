@@ -193,7 +193,7 @@ function agentsSummary(agents: AgentSettingsView, changed: number): string {
     const header = jobsHeader(agents.roles.map(r => jobRow(r, agents.catalog)), agents.catalog, false);
     if (header.action === "check") return "No provider is ready";
     // The same words as the rows' header, so the tab line and the card never disagree.
-    return header.action === "use" ? header.text.replace(/\.$/, "") : "All on the recommended models";
+    return header.differ ? header.text.replace(/\.$/, "") : "All on the recommended models";
   }
   return changed ? `${changed} of ${agents.roles.length} changed from the defaults` : "Every agent on its default";
 }
@@ -252,8 +252,8 @@ export function FollowSettings({ theme, layout, openSetup }: PluginSurfaceProps 
   const line = summaries[category];
   return <ScrollView style={{ flex: 1, backgroundColor: c.surface0 }} stickyHeaderIndices={[0]} contentContainerStyle={{ ...page, paddingTop: 0 }}>
     <View style={{ paddingTop: 24, backgroundColor: c.surface0 }}><CategoryTabs value={category} onChange={pick} theme={theme} /></View>
-    {/* General's status card says it already; its line is for the phone list. */}
-    {line && category !== "general" ? <Text style={[t.meta, { marginTop: -6 }]}>{line}</Text> : null}
+    {/* General's status card and the Agents card header say it already; their lines are for the phone list. */}
+    {line && category !== "general" && category !== "agents" ? <Text style={[t.meta, { marginTop: -6 }]}>{line}</Text> : null}
     {content}
   </ScrollView>;
 }

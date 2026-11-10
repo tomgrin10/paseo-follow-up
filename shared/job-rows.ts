@@ -107,17 +107,18 @@ export function isReset(r: RoleView, catalog: Catalog | null | undefined): boole
   return jobRow(r, catalog).recommended && r.dailyCap === d.dailyCap && r.maxPromptChars === d.maxPromptChars && r.cadenceMinutes === d.cadenceMinutes;
 }
 
-export type JobsHeader = { text: string; tone: "muted" | "warning"; action: "use" | "retry" | "check" | null };
+export type JobsHeader = { text: string; tone: "muted" | "warning"; action: "use" | "retry" | "check" | null; differ: number };
 /** The line above the rows, and its one action. */
 export function jobsHeader(rows: readonly JobRowModel[], catalog: Catalog | null | undefined, loading: boolean): JobsHeader {
-  if (loading && !catalog) return { text: "Reading your providers…", tone: "muted", action: null };
-  if (catalog?.error && !catalog.providers.length) return { text: "Couldn't read Paseo's providers. The current picks still work.", tone: "warning", action: "retry" };
+  if (loading && !catalog) return { text: "Reading your providers…", tone: "muted", action: null, differ: 0 };
+  if (catalog?.error && !catalog.providers.length) return { text: "Couldn't read Paseo's providers. The current picks still work.", tone: "warning", action: "retry", differ: 0 };
   // Recovery copies the main agent, so it never decides whether any provider is ready.
   const picks = rows.filter(r => r.role !== "recovery");
-  if (picks.length && picks.every(r => !r.rec)) return { text: "No provider in Paseo is ready, so these helpers can't run yet. Following PRs and Needs you still work.", tone: "warning", action: "check" };
+  if (picks.length && picks.every(r => !r.rec)) return { text: "No provider in Paseo is ready, so these helpers can't run yet. Following PRs and Needs you still work.", tone: "warning", action: "check", differ: 0 };
   const differ = rows.filter(r => r.rec && !r.recommended).length;
-  if (!differ) return { text: "Picked for the models Paseo has here.", tone: "muted", action: null };
-  return { text: `${differ} job${differ === 1 ? "" : "s"} ${differ === 1 ? "differs" : "differ"} from the recommendation.`, tone: "muted", action: "use" };
+  if (!differ) return { text: "Picked for the models Paseo has here.", tone: "muted", action: null, differ: 0 };
+  // One job: its own row's Use recommended does the same, so the header only says it. Two or more: one click for all.
+  return { text: `${differ} job${differ === 1 ? "" : "s"} ${differ === 1 ? "differs" : "differ"} from the recommendation.`, tone: "muted", action: differ >= 2 ? "use" : null, differ };
 }
 
 /**
