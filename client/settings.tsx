@@ -218,8 +218,6 @@ export function FollowSettings({ theme, layout, openSetup }: PluginSurfaceProps 
   const pick = (id: SettingsCategory) => { writeCategory(id); setCategory(id); };
   // "Set up Follow-up again" leads General, the first category: what it says depends on where setup stands.
   const onboarding = useOnboarding();
-  // Loaded up front (cached for good) so General's line in the phone list can name the version.
-  useReleaseNotes();
   const entry = setupEntry(onboarding.data);
   const setup = openSetup ? { entry, open: () => openSetup(entry.resume) } : undefined;
   const content = category === "general" ? <GeneralCategory theme={theme} compact={compact} setup={setup} />
