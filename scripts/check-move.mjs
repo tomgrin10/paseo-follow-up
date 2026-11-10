@@ -187,8 +187,7 @@ async function shotPluginSettings(name) {
     const serverId = (await readFile(join(home, "server-id"), "utf8")).trim();
     await page.goto(`http://127.0.0.1:${port}/settings/hosts/${serverId}/plugins/${NEW}/projects`);
     const title = (await page.getByText(/ · Follow-up$/).first().textContent({ timeout: 60_000 }).catch(() => null))?.trim() ?? null;
-    const general = page.getByText("General", { exact: true });
-    if (await general.count()) await general.first().click().catch(() => {});
+    // General is the screen's first category, open by default on desktop.
     const line = (await page.getByText(/Follow-up's new plugin id/).first().textContent({ timeout: 30_000 }).catch(() => null))?.trim() ?? null;
     await page.mouse.move(0, 0); await page.waitForTimeout(800);
     await page.screenshot({ path: join(shots, `${name}.png`), fullPage: true });
@@ -284,8 +283,9 @@ try {
   assert.deepEqual(await tracked(NEW), afterRollback, "same workspaces under the new id");
   assert.ok(existsSync(join(home, "plugin-settings", NEW, "harness-marker.json")), "plugin settings moved");
   assert.ok(existsSync(join(oldDir, "state.json")), "1.x's directory is kept as a backup");
-  const moved = (await call(NEW, "follow.updates")).move;
+  const view = await call(NEW, "follow.updates"), moved = view.move;
   assert.equal(moved?.phase, "moved");
+  assert.deepEqual([view.history[0]?.result, view.history[0]?.to], ["updated", RC1], "history ends with the update to 2.0, which 1.x's installer logged after the copy");
   step("moved", { plugins: await rows(), move: moved });
 
   // 5. Agents: the same follow_* names (2.0 adds follow_retry_move), answered under the new id.

@@ -77,6 +77,9 @@ old one. 1.x ran under an older id and data directory (`shared/legacy.ts` names 
   agents run that path), and `heartbeat.json` is written next to the new one while the old directory exists, because
   a 1.x installer on probation reads it (drop that in the release after 2.0.0). Wait jobs prepared before the move
   keep their receipts in the old `wait/jobs`; `server/wait-jobs.ts` looks there for a job it can't find.
+  The 1.x installer that installed 2.0 logs the end of its probation (`applied`, `updated`) in the old `updates.jsonl`,
+  after 2.0's first start made the copy; `readEvents` (`server/updater.ts`) adds the old file's events newer than
+  `migrated-from.json`, so the update history ends with that update (drop that with the heartbeat).
 - **Plugin id** (`server/plugin-move.ts`, run by `runMove` in `server/update-watchdog.mjs`): an npm install still
   under the old id waits for the same quiet rule as an update (no agent mid-turn, nothing busy, a quiet stretch) and
   for no installer to be alive, Follow-up's or a 1.x one still on probation (its lock is in the old directory). Then

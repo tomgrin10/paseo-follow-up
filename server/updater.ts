@@ -7,6 +7,7 @@ import { CHECK_INTERVAL_MS, type CheckReason, type RegistrySnapshot } from "./up
 import type { Provenance } from "./update-provenance";
 import type { SelfInstall } from "./release-notes";
 import { settingsOf, type UpdatesFile } from "./updates";
+import { MOVED_MARKER } from "./data-move";
 import { announcesUpdate, notesVersion, parseChangelog } from "../shared/changelog";
 
 /**
@@ -54,12 +55,27 @@ const HISTORY = 20;
 const UPDATED_SHOWN_MS = 7 * 24 * 3_600_000;
 const TERMINAL = new Set(["updated", "failed", "rolled-back", "rollback-failed"]);
 
-export async function readEvents(directory: string): Promise<UpdateEvent[]> {
+async function eventsIn(directory: string): Promise<UpdateEvent[]> {
   const text = await readFile(join(directory, "updates.jsonl"), "utf8").catch(() => "");
   const lines = text.split("\n").filter(Boolean).slice(-400);
   const out: UpdateEvent[] = [];
   for (const line of lines) { try { const e = JSON.parse(line) as UpdateEvent; if (e && typeof e.at === "number" && typeof e.to === "string") out.push(e); } catch { /* a torn line */ } }
   return out;
+}
+
+/**
+ * updates.jsonl, plus what a 1.x installer logged in 1.x's directory after 2.0 copied it (server/data-move.ts): the
+ * update to 2.0 finishes its probation there ("applied", "updated"), after 2.0's first start made the copy. Without
+ * them 2.0's history ends at the update's "installing". Can go in the release after 2.0.0, with the legacy heartbeat.
+ */
+export async function readEvents(directory: string): Promise<UpdateEvent[]> {
+  const own = await eventsIn(directory);
+  const marker = await readFile(join(directory, MOVED_MARKER), "utf8").then(t => JSON.parse(t) as { from?: unknown; at?: unknown }, () => null);
+  const since = typeof marker?.at === "string" ? Date.parse(marker.at) : NaN;
+  if (typeof marker?.from !== "string" || !Number.isFinite(since)) return own;
+  const seen = new Set(own.map(e => JSON.stringify(e)));
+  const later = (await eventsIn(marker.from)).filter(e => e.at >= since && !seen.has(JSON.stringify(e)));
+  return later.length ? [...own, ...later].sort((a, b) => a.at - b.at).slice(-400) : own;
 }
 
 export function historyOf(events: readonly UpdateEvent[]): HistoryEntry[] {
