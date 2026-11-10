@@ -5,6 +5,8 @@ import {tmpdir} from 'node:os';
 import {createRequire} from 'node:module';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
+import { harness } from "./harness.mjs";
+await harness();
 const preview=JSON.parse(await readFile('.preview-isolated.json','utf8'));
 assert.ok(preview.root.startsWith('/tmp/follow-install-')&&preview.home===preview.root+'/home');
 const path=join(preview.home,'plugin-data/follow-through/state.json');

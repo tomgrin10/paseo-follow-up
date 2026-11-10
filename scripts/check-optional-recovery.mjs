@@ -7,6 +7,8 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {DaemonClient} from '@getpaseo/client/internal/daemon-client';
 import {createPaseoApi} from '@getpaseo/client';
+import { harness } from "./harness.mjs";
+await harness();
 const p=JSON.parse(await readFile('.preview-isolated.json','utf8'));
 assert.ok(p.root.startsWith('/tmp/follow-install-')&&p.home===p.root+'/home');
 const env={...process.env,HOME:p.home,XDG_CONFIG_HOME:p.home+'/.config',PASEO_HOME:p.home,PASEO_DAEMON_URL:`ws://127.0.0.1:${p.port}/ws`};delete env.PASEO_PASSWORD;delete env.PASEO_PASSWORD_FILE;

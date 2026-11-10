@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
+import { harness } from "./harness.mjs";
+await harness();
 
 const preview = JSON.parse(await readFile(".preview-isolated.json", "utf8"));
 assert.ok(preview.root.startsWith("/tmp/follow-install-") && preview.home === join(preview.root, "home"), "Only the synthetic preview daemon is allowed");
