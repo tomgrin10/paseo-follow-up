@@ -36,6 +36,10 @@ The first time you open Follow-up from the sidebar, a short setup takes Home's p
 
 Every switch in setup is the same one Settings shows, so nothing is applied twice and nothing is lost if you stop halfway. Setup remembers its step, so a reload or another device picks up where you left off. Run it again any time from **Set up Follow-up again** at the top of Follow-up's settings, or ⌘K → **Follow-up: Set up again**. If Follow-up was already installed before this version, it doesn't open on its own: Home shows one dismissible line offering it, for a day.
 
+## What's new
+
+After Follow-up updates, the next time you open Paseo it shows **What's new**: the notes for every version since that device last looked, newest open, older ones folded. It shows once per device per version (once per host in the phone app), never on a fresh install and never over setup. Home's last line says which version you run, with **Release notes** for the full list; for three days after an update it reads **Updated to X · What's new** instead. The notes ship inside the package as [CHANGELOG.md](CHANGELOG.md), so they work offline and match the installed version.
+
 ## Use
 
 Follow-up follows every workspace as soon as it has an agent; there is nothing to turn on. Open a workspace and click the Follow-up icon in its header (or press ⌘K / Ctrl+K and choose **Follow-up: open for this workspace**) to see that workspace's panel. Its **Home** button opens Home, the list of every workspace. To leave a workspace or a project out, open the settings (**Follow-up: settings** in ⌘K): **Following** has the global switches, **Workspace exceptions** the per-workspace ones.
@@ -259,7 +263,11 @@ npm run test:install
 paseo plugin reload follow-through   # after changes
 ```
 
-Integration checks use a separate Paseo home with synthetic agents. Version tags (`vX.Y.Z`) publish to npm through Trusted Publishing.
+Integration checks use a separate Paseo home with synthetic agents.
+
+Release notes: a PR that changes something users see adds `changes/<branch>.md` with one to three plain-language bullets ([rules](changes/README.md)). Before the version bump, `npm run release:notes <version>` moves them into CHANGELOG.md (`-- --allow-empty` for a release with nothing user-facing). `npm run verify` fails if the package version has no notes.
+
+Version tags (`vX.Y.Z`) publish to npm through Trusted Publishing.
 
 ## License
 
