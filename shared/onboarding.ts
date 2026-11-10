@@ -83,7 +83,7 @@ export function offerVisible(file: OnboardingFile, now: number): boolean {
 }
 
 /**
- * "Set up Follow-up again" in Settings (the Following card, the phone's category list, the desktop tab strip): what it
+ * "Set up Follow-up again" in Settings → General: what it
  * says and does for where setup stands. `resume` opens the flow where it was left instead of from the top.
  */
 export type SetupEntry = { label: string; hint: string; line: string; action: string; resume: boolean };
@@ -95,7 +95,7 @@ export function setupEntry(view: Pick<OnboardingView, "status" | "step"> | null 
       const at = `Step ${ONBOARDING_STEPS.indexOf(view.step) + 1} of ${ONBOARDING_STEPS.length}`;
       return { label: "Continue setup", hint: `In progress, ${at.toLowerCase()}. ${SETUP_WHAT}`, line: `In progress, ${at.toLowerCase()}`, action: "Continue", resume: true };
     }
-    case "done": return { label, hint: `Finished. Run it again to recheck GitHub and the helper agents, or to change what Follow-up does on its own.`, line: "Finished. Run it again any time", action: "Open setup", resume: false };
+    case "done": return { label, hint: `Done. Run it again to recheck GitHub and the helper agents, or to change what Follow-up does on its own.`, line: "Finished. Run it again any time", action: "Open setup", resume: false };
     case "skipped": return { label, hint: `Skipped. ${SETUP_WHAT}`, line: "Skipped. About two minutes", action: "Open setup", resume: false };
     default: return { label, hint: SETUP_WHAT, line: "About two minutes", action: "Open setup", resume: false };
   }

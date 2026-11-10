@@ -78,7 +78,7 @@ test("phones: the Summary row's footer is one meta line, and the Summary has no 
   assert.equal(shortFooter("Summarized 3h ago from the goal"), "3h ago");
   const about = await source("client/about.tsx");
   assert.doesNotMatch(about, /readOpen|writeOpen/);
-  assert.match(about, /compact \? shortFooter\(d\.footer\) : d\.footer/);
+  assert.match(about, /d\.footer \? shortFooter\(d\.footer\)/, "the short form on every size: a narrow panel clipped the time");
 });
 
 test("phones: the pill sheet has one primary; Sign off steps back while the workspace has something to act on", async () => {

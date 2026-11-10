@@ -174,7 +174,6 @@ function AgentsCategory({ theme, compact }: { theme: Theme; compact: boolean }) 
   </>;
 }
 
-/** Each category's one line, from data already loaded (never fetched for it). */
 /**
  * General: setup and the installed version with its release notes. Auto-update adds its Updates section here.
  * "Set up Follow-up again" is the first row, so it's on the first screen Settings opens on.
@@ -189,15 +188,16 @@ function GeneralCategory({ theme, compact, setup }: { theme: Theme; compact: boo
     </SettingsSection>}
     <SettingsSection title="Version">
       <SettingsCard>
-        <SettingsAction label={version ? `Follow-up ${version}` : "Follow-up"} hint={notes.isError ? "Couldn't read the release notes." : "What changed in this version and the ones before it."}
+        <SettingsAction label={version ? `Follow-up ${version}` : "Follow-up"} hint={notes.isError ? "Couldn't read the release notes." : "Installed version."}
           actionLabel="What's new" onPress={() => setSheet(false)} />
-        <SettingsAction label="All release notes" hint="Every version, newest first." actionLabel="Open" onPress={() => setSheet(true)} />
+        <SettingsAction label="Older versions" hint="Every release, newest first." actionLabel="Open" onPress={() => setSheet(true)} />
       </SettingsCard>
     </SettingsSection>
     {sheet != null && <ReleaseNotesSheet theme={theme} compact={compact} all={sheet} onClose={() => setSheet(null)} />}
   </>;
 }
 
+/** Each category's one line, from data already loaded (never fetched for it). */
 function useSummaries(): Partial<Record<SettingsCategory, string | null>> {
   // skipToken: subscribe to what's cached (re-rendering when it arrives) without ever fetching for the summary.
   const follow = useQuery({ queryKey: followKey, queryFn: skipToken }).data as Parameters<typeof followingSummary>[0] | undefined;
@@ -229,6 +229,8 @@ export function FollowSettings({ theme, layout, openSetup }: PluginSurfaceProps 
   const pick = (id: SettingsCategory) => { writeCategory(id); setCategory(id); };
   // "Set up Follow-up again" leads General, the first category: what it says depends on where setup stands.
   const onboarding = useOnboarding();
+  // Loaded up front (cached for good) so General's line in the phone list can name the version.
+  useReleaseNotes();
   const entry = setupEntry(onboarding.data);
   const setup = openSetup ? { entry, open: () => openSetup(entry.resume) } : undefined;
   const content = category === "general" ? <GeneralCategory theme={theme} compact={compact} setup={setup} />
@@ -251,7 +253,8 @@ export function FollowSettings({ theme, layout, openSetup }: PluginSurfaceProps 
   const line = summaries[category];
   return <ScrollView style={{ flex: 1, backgroundColor: c.surface0 }} stickyHeaderIndices={[0]} contentContainerStyle={{ ...page, paddingTop: 0 }}>
     <View style={{ paddingTop: 24, backgroundColor: c.surface0 }}><CategoryTabs value={category} onChange={pick} theme={theme} /></View>
-    {line ? <Text style={[t.meta, { marginTop: -6 }]}>{line}</Text> : null}
+    {/* General shows the version and setup itself, so its line would only repeat them. */}
+    {line && category !== "general" ? <Text style={[t.meta, { marginTop: -6 }]}>{line}</Text> : null}
     {content}
   </ScrollView>;
 }

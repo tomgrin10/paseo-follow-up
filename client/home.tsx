@@ -292,7 +292,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
   const header = compact ? <View style={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 6, gap: 2, borderBottomWidth: 1, borderBottomColor: c.border }}>
     <Text accessibilityRole="header" numberOfLines={3} style={t.title}>{s.title}</Text>
     {/* The Summary: what this workspace is for, right under its name. */}
-    {s.workspaceId && w && <View style={{ marginTop: 2 }}><SummaryLine key={s.workspaceId} workspace={w} theme={theme} compact /></View>}
+    {s.workspaceId && w && <View style={{ marginTop: 4 }}><SummaryLine key={s.workspaceId} workspace={w} theme={theme} compact /></View>}
     <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 44 }}>
       <Icon name={s.icon} size={14} color={color} />
       <Text numberOfLines={1} style={[t.meta, { flex: 1, minWidth: 0 }]}>
