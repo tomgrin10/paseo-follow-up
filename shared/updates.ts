@@ -67,6 +67,9 @@ const ago = (ms: number) => {
   const h = Math.round(m / 60);
   return h < 48 ? `${h}h ago` : `${Math.round(h / 24)} days ago`;
 };
+/** A reason from the server, as a sentence: the next sentence never runs into it. */
+export const sentence = (s: string) => { const t = s.trim(); return /[.!?]$/.test(t) ? t : `${t}.`; };
+const within = (ms: number) => { const m = Math.max(1, Math.round(ms / 60_000)); return m === 1 ? "the next minute" : m < 60 ? `the next ${m} minutes` : Math.round(m / 60) === 1 ? "the next hour" : `the next ${Math.round(m / 60)} hours`; };
 const inAbout = (ms: number) => {
   const m = Math.max(1, Math.round(ms / 60_000));
   if (m < 60) return `${m} minute${m === 1 ? "" : "s"}`;
@@ -111,18 +114,18 @@ export function statusCopy(view: UpdatesView, now: number): StatusCopy {
     case "installing":
       return { icon: "Download", tone: "muted", title: `Installing ${p.version}…`, detail: "Follow-up reloads when it finishes, usually in under a minute. This page comes back by itself.", primary: null, secondary: [], spinning: true };
     case "settling":
-      return { icon: "CircleCheck", tone: "success", title: `Updated to ${p.version}`, detail: `${ago(now - p.at)[0]!.toUpperCase()}${ago(now - p.at).slice(1)}, from ${p.from}. If it fails in the next ${inAbout(p.until - now)}, Follow-up goes back to ${p.from} by itself.`, primary: null, secondary: ["whats-new"] };
+      return { icon: "CircleCheck", tone: "success", title: `Updated to ${p.version}`, detail: `${ago(now - p.at)[0]!.toUpperCase()}${ago(now - p.at).slice(1)}, from ${p.from}. If it fails within ${within(p.until - now)}, Follow-up goes back to ${p.from} by itself.`, primary: null, secondary: ["whats-new"] };
     case "updated":
       return { icon: "CircleCheck", tone: "success", title: `Up to date: ${p.version}`, detail: `Updated ${ago(now - p.at)} from ${p.from}.`, primary: null, secondary: ["check", "whats-new"] };
     case "rolled-back":
-      return { icon: "Undo2", tone: "warning", title: `Update to ${p.version} failed, rolled back`, detail: `${p.reason} You're on ${p.from} again. Follow-up won't try ${p.version} again on its own; it waits for the next version.`, primary: null, secondary: ["copy-details", "retry"] };
+      return { icon: "Undo2", tone: "warning", title: `Update to ${p.version} failed, rolled back`, detail: `${sentence(p.reason)} You're on ${p.from} again. Follow-up won't try ${p.version} again on its own; it waits for the next version.`, primary: null, secondary: ["copy-details", "retry"] };
     case "install-failed":
-      return { icon: "TriangleAlert", tone: "warning", title: `Couldn't install ${p.version}`, detail: `${p.reason} Nothing changed. Follow-up tries again at the next check.`, primary: null, secondary: ["retry", "copy-details"] };
+      return { icon: "TriangleAlert", tone: "warning", title: `Couldn't install ${p.version}`, detail: `${sentence(p.reason)} Nothing changed. Follow-up tries again at the next check.`, primary: null, secondary: ["retry", "copy-details"] };
     case "untrusted":
-      return { icon: "ShieldAlert", tone: "warning", title: `Not installed: can't confirm where ${p.version} came from`, detail: `${p.reason} Follow-up won't install it automatically. Install it by hand only if you trust it.`, primary: null, secondary: ["copy-command", "view-npm"] };
+      return { icon: "ShieldAlert", tone: "warning", title: `Not installed: can't confirm where ${p.version} came from`, detail: `${sentence(p.reason)} Follow-up won't install it automatically. Install it by hand only if you trust it.`, primary: null, secondary: ["copy-command", "view-npm"] };
     case "current":
     default: {
-      if (view.registryError && view.checkedAt == null) return { icon: "CloudOff", tone: "muted", title: "Couldn't reach npm", detail: `${view.registryError} Follow-up tries again later.`, primary: null, secondary: ["check"] };
+      if (view.registryError && view.checkedAt == null) return { icon: "CloudOff", tone: "muted", title: "Couldn't reach npm", detail: `${sentence(view.registryError)} Follow-up tries again later.`, primary: null, secondary: ["check"] };
       if (view.registryError) return { icon: "CloudOff", tone: "muted", title: "Couldn't reach npm", detail: `Last good check ${ago(now - view.checkedAt!)}.${view.nextCheckAt ? ` Follow-up tries again in about ${inAbout(view.nextCheckAt - now)}.` : ""}`, primary: null, secondary: ["check"] };
       if (view.mode === "off") return { icon: "CirclePause", tone: "muted", title: "Automatic updates are off", detail: `You're on ${view.version}. Follow-up doesn't check for updates on its own.`, primary: null, secondary: ["check"] };
       const next = view.nextCheckAt ? ` Next check in about ${inAbout(view.nextCheckAt - now)}.` : "";
@@ -146,7 +149,9 @@ export function generalSummary(view: Pick<UpdatesView, "version" | "installKind"
   if (view.installKind !== "npm") return `Follow-up ${view.version} · managed by your checkout`;
   const p = view.phase;
   switch (p.kind) {
-    case "available": case "waiting": case "untrusted": return `Update available · ${p.version}`;
+    case "available": return `Update available · ${p.version}`;
+    case "waiting": return `Waiting to install · ${p.version}`;
+    case "untrusted": return `Not verified · ${p.version}`;
     case "installing": return `Installing ${p.version}`;
     case "rolled-back": return `Update to ${p.version} rolled back`;
     case "install-failed": return `Update to ${p.version} failed`;

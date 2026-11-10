@@ -7,7 +7,7 @@ import { dismissUpdateNoticeRpc, installUpdateRpc, setUpdatesRpc, updatesRpc } f
 import { MODE_HINT, MODE_LABEL, UPDATE_MODES, channelHint, checkedText, copyCommand, statusCopy, type StatusAction, type UpdateMode, type UpdatesView } from "../shared/updates";
 import { writeCategory } from "../shared/settings-nav";
 import type { Channel } from "../shared/version";
-import { Button, errorText, text, useNow, type Theme } from "./kit";
+import { Button, errorText, space, text, useNow, type Theme } from "./kit";
 import { Spinner } from "./motion";
 import { Disclosure } from "./settings-shell";
 import { withAlpha } from "./theme";
@@ -36,8 +36,8 @@ export function UpdateNotice({ theme, compact, openSettings }: { theme: Theme; c
   if (!n) return null;
   const rolled = n.kind === "rolled-back";
   const title = rolled ? `Update to ${n.version} failed, rolled back` : `Follow-up ${n.version} is available`;
-  const detail = rolled ? `You're on ${n.from} again. Nothing to do; details are in Settings → General.` : "Installing reloads Follow-up for a few seconds.";
-  return <View accessibilityRole="summary" style={{ marginHorizontal: compact ? 12 : 16, marginTop: 8, marginBottom: 4, borderRadius: 8, borderWidth: 1,
+  const detail = rolled ? `You're on ${n.from} again. Nothing to do.` : "Installing reloads Follow-up for a few seconds.";
+  return <View accessibilityRole="summary" style={{ marginHorizontal: compact ? space(true).gutter : 24, marginTop: 8, marginBottom: 4, borderRadius: 8, borderWidth: 1,
     borderColor: rolled ? withAlpha(c.statusWarning, 0.6) : c.border, backgroundColor: c.surface1, paddingHorizontal: 12, paddingVertical: 10, gap: 8 }}>
     <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
       <View style={{ paddingTop: 2 }}><Icon name={rolled ? "Undo2" : "CircleArrowUp"} size={15} color={rolled ? c.statusWarning : c.foregroundMuted} /></View>
@@ -46,7 +46,7 @@ export function UpdateNotice({ theme, compact, openSettings }: { theme: Theme; c
         <Text style={t.meta}>{confirm ? "Some agents are mid-turn. Open agent chats lose Follow-up's tools until you reopen them; their work and history are kept." : detail}</Text>
       </View>
       <Pressable accessibilityRole="button" accessibilityLabel={rolled ? "Dismiss" : "Not now"} hitSlop={8} onPress={() => run.mutate(() => dismiss({ id: n.id }))}
-        style={state => ({ width: compact ? 44 : 24, height: compact ? 44 : 24, marginTop: compact ? -12 : -2, marginRight: compact ? -12 : -4, alignItems: "center", justifyContent: "center", borderRadius: 6, backgroundColor: state.pressed ? c.surface2 : "transparent" })}>
+        style={state => ({ width: compact ? 44 : 32, height: compact ? 44 : 32, marginTop: compact ? -12 : -6, marginRight: compact ? -12 : -8, alignItems: "center", justifyContent: "center", borderRadius: 6, backgroundColor: state.pressed ? c.surface2 : "transparent" })}>
         <Icon name="X" size={14} color={c.foregroundMuted} />
       </Pressable>
     </View>
@@ -88,12 +88,13 @@ function StatusCard({ view, theme, compact, onWhatsNew }: { view: UpdatesView; t
     <View accessibilityLiveRegion="polite" style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
       <View style={{ width: 16, paddingTop: 1, alignItems: "center" }}>{s.spinning ? <Spinner color={color} size={14} /> : <Icon name={s.icon} size={16} color={color} />}</View>
       <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
-        <Text style={[t.label, { color: s.tone === "warning" ? c.statusWarning : c.foreground }]}>{s.title}</Text>
+        <Text style={t.label}>{s.title}</Text>
         <Text style={t.meta}>{confirm ? "Open agent chats lose Follow-up's tools until you reopen them. Their work and history are kept." : s.detail}</Text>
       </View>
     </View>
     {(confirm || s.primary || s.secondary.length > 0 || view.installKind === "npm") && <View style={{ flexDirection: compact ? "column" : "row", alignItems: compact ? "stretch" : "center", gap: 8, marginTop: 10, paddingLeft: 26 }}>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, flex: compact ? undefined : 1 }}>
+      {/* Phones: one full-width button per row, so a ghost button below a bordered one doesn't float. */}
+      <View style={compact ? { flexDirection: "column", alignItems: "stretch", gap: 8 } : { flexDirection: "row", flexWrap: "wrap", gap: 8, flex: 1 }}>
         {confirm ? <>
           <Button title="Install now" kind="primary" theme={theme} compact={compact} loading={run.isPending} onPress={() => run.mutate(() => install({ version, anyway: true }).finally(() => setConfirm(false)))} />
           <Button title="Cancel" kind="ghost" theme={theme} compact={compact} onPress={() => setConfirm(false)} />
@@ -136,7 +137,7 @@ export function UpdatesSections({ theme, compact }: { theme: Theme; compact: boo
     <SettingsSection title={view.installKind === "npm" ? "How Follow-up updates" : "Release notes"}>
       <SettingsCard>
         {view.installKind === "npm" && <>
-        <SettingsSelect<UpdateMode> label="Updates" hint={MODE_HINT[view.mode]} value={view.mode} disabled={save.isPending}
+        <SettingsSelect<UpdateMode> label="When a new version is out" hint={MODE_HINT[view.mode]} value={view.mode} disabled={save.isPending}
           options={UPDATE_MODES.map(m => ({ value: m, label: MODE_LABEL[m] }))} onValueChange={mode => save.mutate({ mode })} />
         <SettingsSelect<Channel> label="Channel" hint={channelHint(view)} value={view.channel} disabled={save.isPending}
           options={[{ value: "stable", label: "Stable" }, { value: "beta", label: "Beta" }]}
@@ -182,6 +183,6 @@ export function UpdatesStep({ theme, compact }: { theme: Theme; compact: boolean
       <SettingsSelect<Channel> label="Channel" hint={channelHint(view)} value={view.channel} disabled={save.isPending}
         options={[{ value: "stable", label: "Stable" }, { value: "beta", label: "Beta" }]} onValueChange={channel => save.mutate({ channel })} />
     </SettingsCard>
-    <Text style={t.small}>Only versions built from github.com/tomgrin10/paseo-follow-up are installed.</Text>
+    <Text style={t.small}>Follow-up only installs versions npm confirms were built from github.com/tomgrin10/paseo-follow-up.</Text>
   </View>;
 }
