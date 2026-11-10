@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { dueChecks, emptyLinkedFile, linkedView, noteRefs, setTeams } from "../shared/linked";
 import { timelineRefs, workspaceRefs } from "../shared/linked-extract";
-import { forwardText } from "../shared/overseer";
+import { FORWARD_PREFIXES, forwardText } from "../shared/overseer";
 import { LinkedService, LinkedStore, type LinkedSources } from "../server/linked";
 import { PaseoGateway, type Agent, type Daemon, type withDaemon } from "../server/daemon";
 import { HistoryCache } from "../server/history-cache";
@@ -54,6 +54,7 @@ test("timeline: receipts and the developer's words are strong, agent prose weak,
   assert.ok(!refs.some(r => r.raw.includes("/pull/")), "PRs have their own card");
   assert.deepEqual(timelineRefs([user(1, "HER-1"), user(2, "HER-2")], 1).map(r => r.raw), ["HER-2"], "the overlap before the cursor is skipped");
   assert.deepEqual(timelineRefs([user(1, forwardText("look at HER-77"))]), [], "an Overseer forward is Follow-up's own text");
+  assert.deepEqual(timelineRefs([user(1, `${FORWARD_PREFIXES.at(-1)} look at HER-78`)]), [], "so is a forward under the legacy prefix");
 });
 
 test("a weak key waits for a second sighting; a strong one goes to Linear now; URL-shaped refs are kept without a check", () => {

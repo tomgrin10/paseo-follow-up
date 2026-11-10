@@ -1,6 +1,6 @@
 import { extractLinks, keysFromBranch } from "./about";
 import type { LinkRef } from "./linked";
-import { FORWARD_PREFIX } from "./overseer";
+import { isForwarded } from "./overseer";
 
 /**
  * Linked items' passive ingress (1.4.0-beta.30): references in text Follow-up already reads. Pure.
@@ -14,8 +14,9 @@ import { FORWARD_PREFIX } from "./overseer";
  */
 
 /** Follow-up's own messages to an agent: never evidence of what the work is about. */
-const FOLLOW_UP_PREFIXES = ["Workspace follow-through batch", "Follow-through batch", "Follow-through recovery", "Follow-up answer", FORWARD_PREFIX];
-const isFollowUpText = (text: string) => FOLLOW_UP_PREFIXES.some(p => text.startsWith(p));
+const FOLLOW_UP_PREFIXES = ["Workspace follow-through batch", "Follow-through batch", "Follow-through recovery", "Follow-up answer"];
+/** Follow-up's own text, including Overseer forwards under every prefix they have carried (old transcripts keep the old one). */
+const isFollowUpText = (text: string) => isForwarded(text) || FOLLOW_UP_PREFIXES.some(p => text.startsWith(p));
 const SLACK_TS = /^\d{10}\.\d{6}$/;
 
 type Item = { type?: string; text?: unknown; name?: unknown; status?: unknown; error?: unknown; detail?: { input?: unknown } };

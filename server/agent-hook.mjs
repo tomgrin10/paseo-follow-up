@@ -51,13 +51,13 @@ export function overseerDigest(file, seen, now = Date.now(), { needsMax = 20, ch
   const resting = all.filter(r => r.resting);
   const prior = seen && typeof seen.rows === "object" && seen.rows ? seen.rows : null;
   const age = Math.max(0, Math.round((now - Date.parse(file?.at ?? "")) / 1000));
-  const lines = [`Follow-up digest (last change ${Number.isFinite(age) ? `${age}s` : "?"} ago): ${file?.total ?? all.length} workspaces, ${file?.needs ?? 0} need Tom. Paging: workstreams(page, group, query).`];
+  const lines = [`Follow-up digest (last change ${Number.isFinite(age) ? `${age}s` : "?"} ago): ${file?.total ?? all.length} workspaces, ${file?.needs ?? 0} need the developer. Paging: workstreams(page, group, query).`];
   const needs = rows.filter(r => r.group === "needs");
   if (needs.length) {
-    lines.push(`Needs Tom (${needs.length}):`);
+    lines.push(`Needs the developer (${needs.length}):`);
     for (const r of needs.slice(0, needsMax)) lines.push(`- ${r.line}`);
     if (needs.length > needsMax) lines.push(`- …${needs.length - needsMax} more: workstreams(group="needs")`);
-  } else lines.push("Nothing needs Tom right now.");
+  } else lines.push("Nothing needs the developer right now.");
   if (!prior) {
     const active = rows.filter(r => r.group === "running" || r.group === "fixing");
     lines.push(`First turn. Running now (${active.length}):`);

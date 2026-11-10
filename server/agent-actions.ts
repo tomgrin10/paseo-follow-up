@@ -165,8 +165,8 @@ export class AgentActions {
         const roles = await this.d.agentSettings.all();
         const workflows = await this.d.prWorkflows?.().catch(() => null);
         const wait = await this.d.wait?.status().catch(() => null);
-        return { ...(wait ? { waitForBackgroundJobs: { ...wait, note: waitNote(wait), change: "set_wait_for_jobs, only when the developer asks." } } : {}), roles: Object.values(roles).map(r => ({ ...r, summary: roleSummary(r), does: ROLE_INFO[r.role].does })), change: "Tom changes these in Follow-up settings → Agents.",
-          ...(workflows ? { prWorkflow: { default: workflows.default, reviewFix: workflows.reviewFix, repos: workflows.repos.map(r => ({ repo: r.repo, workflow: r.effective, setting: r.setting, why: r.reason, reviewFix: r.reviewFix ?? workflows.reviewFix })), change: "Tom changes these in Follow-up settings → Following → Shipping PRs." } } : {}) };
+        return { ...(wait ? { waitForBackgroundJobs: { ...wait, note: waitNote(wait), change: "set_wait_for_jobs, only when the developer asks." } } : {}), roles: Object.values(roles).map(r => ({ ...r, summary: roleSummary(r), does: ROLE_INFO[r.role].does })), change: "The developer changes these in Follow-up settings → Agents.",
+          ...(workflows ? { prWorkflow: { default: workflows.default, reviewFix: workflows.reviewFix, repos: workflows.repos.map(r => ({ repo: r.repo, workflow: r.effective, setting: r.setting, why: r.reason, reviewFix: r.reviewFix ?? workflows.reviewFix })), change: "The developer changes these in Follow-up settings → Following → Shipping PRs." } } : {}) };
       }
       case "add_reviewers": return this.planReviewers(caller, args);
       case "merge": return this.planPr(caller, tool, "merge", args);
@@ -233,7 +233,7 @@ export class AgentActions {
    * The rules are checked again at confirm. The old main hears on its next turn through the hook, never by a message.
    */
   private async planMakeMain(caller: string, args: Record<string, any>) {
-    if (!args.reason) throw new Error("make_main_agent: give reason, one line the developer sees (\"Tom asked me to take over the release\").");
+    if (!args.reason) throw new Error("make_main_agent: give reason, one line the developer sees (\"The developer asked me to take over the release\").");
     if (!args.requested) throw new Error("make_main_agent: give requested: developer (the developer asked for it) or self (your own claim).");
     if (!this.d.agentInfo) throw new Error("make_main_agent isn't available in this Follow-up.");
     const find = (state: State) => this.tracked(state).find(w => w.mainAgentId === caller || w.contributorAgentIds?.includes(caller));
