@@ -7,7 +7,7 @@ import { join } from "node:path";
  * fails open: an unknown or unreadable format means "the developer wrote it", which clears a flag
  * rather than leaving noise.
  */
-export type Sender = "agent" | "follow-up" | "defer" | "session" | "schedule" | "tom";
+export type Sender = "agent" | "follow-up" | "defer" | "session" | "schedule" | "tom" | "unknown";
 export type Message = { text: string; messageId?: string | null; clientMessageId?: string | null };
 export type Ledger = { agentId: string; messageId: string | null; at: string; by?: string; action?: string }[];
 export type Sources = {
@@ -21,6 +21,11 @@ export const WINDOW_MS = 10_000;
 
 const ENVELOPE = /^\s*<paseo-system\b[^>]*\bkind="(agent-message|agent-notification)"/;
 
+/**
+ * Only "tom" may answer a brief. A turn whose prompt wasn't seen is "unknown", never the developer: before 1.4.0-beta.25
+ * an unseen prompt fell back to the developer, so another agent's message (which Paseo 0.15 stores as an agent_message
+ * tool call, not a user message) answered the open brief with the developer's previous message.
+ */
 export async function classify(message: Message | null, agentId: string, at: number, sources: Sources): Promise<Sender> {
   if (message && ENVELOPE.test(message.text)) return "agent";
   const safe = async (check: () => Promise<boolean>) => { try { return await check(); } catch { return false; } };
@@ -40,7 +45,7 @@ export async function classify(message: Message | null, agentId: string, at: num
   if (await safe(() => sources.defer(agentId, at))) return "defer";
   if (await safe(() => sources.session(agentId, at))) return "session";
   if (await safe(() => sources.schedule(agentId, at))) return "schedule";
-  return "tom";
+  return message ? "tom" : "unknown";
 }
 
 const near = (iso: unknown, at: number) => typeof iso === "string" && Number.isFinite(Date.parse(iso)) && Math.abs(Date.parse(iso) - at) <= WINDOW_MS;
@@ -86,4 +91,22 @@ export function newestUserMessage(items: unknown[]): Message | null {
     if (item?.type === "user_message" && typeof item.text === "string") return { text: item.text, messageId: item.messageId ?? null, clientMessageId: item.clientMessageId ?? null };
   }
   return null;
+}
+
+/**
+ * What started the current turn, from the timeline tail (newest last). Paseo 0.15 projects an agent's message into a
+ * completed `agent_message` tool call carrying its sender, and a schedule or heartbeat prompt into a `heartbeat` tool
+ * call; only a developer's own words stay a user message. If the previous turn's output comes before any prompt, the
+ * new prompt isn't in the tail yet: unknown, so nothing is answered on a guess.
+ */
+export function turnPrompt(items: unknown[]): { message: Message | null; from: "agent" | "schedule" | null } {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i] as { type?: string; name?: string; callId?: string; text?: unknown; agentMessage?: { text?: unknown }; messageId?: string; clientMessageId?: string } | null;
+    if (!item || typeof item !== "object") continue;
+    if (item.type === "user_message" && typeof item.text === "string") return { message: { text: item.text, messageId: item.messageId ?? null, clientMessageId: item.clientMessageId ?? null }, from: null };
+    if (item.type === "tool_call" && (item.name === "agent_message" || item.agentMessage || item.callId?.startsWith("paseo-agent-message:"))) return { message: null, from: "agent" };
+    if (item.type === "tool_call" && item.name === "heartbeat" && item.callId?.startsWith("paseo-system:")) return { message: null, from: "schedule" };
+    if (item.type === "assistant_message" || item.type === "tool_call") return { message: null, from: null };
+  }
+  return { message: null, from: null };
 }
