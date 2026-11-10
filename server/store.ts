@@ -1,7 +1,7 @@
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { stateSchema, type State } from "../shared/model";
+import { stateSchema, type State, type Workspace } from "../shared/model";
 
 /**
  * Follow-up's saved state. 1.3.0-beta.4: the state lives in memory once loaded, and writes to state.json are
@@ -42,14 +42,38 @@ export class Store {
   /** A private, mutable copy of the saved state (the old per-call read). */
   async read(): Promise<State> { return structuredClone(await this.load()); }
   async mutate<T>(work: (state: State) => T | Promise<T>): Promise<T> {
-    const next = this.tail.then(async () => {
-      const draft = structuredClone(await this.load());
+    return this.apply(async current => {
+      const draft = structuredClone(current);
       const value = await work(draft);
-      // Write-through keeps the old contract: a failed write leaves the saved state as it was. The draft may hold
-      // objects owned by callers (observations), so only the validated copy the write returns is frozen.
-      if (this.writeMs <= 0) this.state = await this.write(draft);
-      else { this.state = draft; this.schedule(); }
-      await this.onChanged(this.state).catch(() => undefined);
+      return { value, next: sameJson(draft, current) ? null : draft };
+    });
+  }
+  /**
+   * A mutation of one workspace: only that workspace is copied, and nothing is written, re-validated or derived when
+   * it comes back unchanged. The engine observes every active workspace on each tick, and copying the whole state for
+   * each (then re-parsing it at the next write) was most of the idle worker's garbage (1.4.0-beta.23 scale check).
+   */
+  async mutateWorkspace<T>(id: string, work: (workspace: Workspace) => T | Promise<T>): Promise<T> {
+    return this.apply(async current => {
+      const index = current.workspaces.findIndex(w => w.id === id);
+      if (index < 0) throw new Error("Workspace tracking is initializing; try again shortly.");
+      const before = current.workspaces[index];
+      const draft = structuredClone(before);
+      const value = await work(draft);
+      return { value, next: sameJson(draft, before) ? null : { ...current, workspaces: current.workspaces.with(index, draft) } };
+    });
+  }
+  /** Runs a mutation in order. A null `next` means nothing changed: the state, the pending write and derived files stay as they are. */
+  private apply<T>(work: (current: State) => Promise<{ value: T; next: State | null }>): Promise<T> {
+    const next = this.tail.then(async () => {
+      const { value, next } = await work(await this.load());
+      if (next) {
+        // Write-through keeps the old contract: a failed write leaves the saved state as it was. The draft may hold
+        // objects owned by callers (observations), so only the validated copy the write returns is frozen.
+        if (this.writeMs <= 0) this.state = await this.write(next);
+        else { this.state = next; this.schedule(); }
+        await this.onChanged(this.state).catch(() => undefined);
+      }
       return structuredClone(value);
     });
     this.tail = next.catch(() => undefined);
@@ -112,6 +136,26 @@ export class Store {
     }
     return async () => { if (await readFile(path, "utf8").catch(() => "") === token) await unlink(path); };
   }
+}
+
+/**
+ * Whether two values would save the same: JSON-equal, ignoring key order and undefined properties (the schema
+ * normalizes both). Anything else (a Date, a Map) counts as different, so a real change is never skipped.
+ */
+export function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (!sameJson(a[i], b[i])) return false;
+    return true;
+  }
+  if (Array.isArray(b) || Object.getPrototypeOf(a) !== Object.prototype || Object.getPrototypeOf(b) !== Object.prototype) return false;
+  const x = a as Record<string, unknown>, y = b as Record<string, unknown>;
+  let keys = 0;
+  for (const key in x) { if (x[key] === undefined) continue; keys++; if (!Object.hasOwn(y, key) || !sameJson(x[key], y[key])) return false; }
+  for (const key in y) if (y[key] !== undefined) keys--;
+  return keys === 0;
 }
 
 function deepFreeze<T>(value: T): T {
