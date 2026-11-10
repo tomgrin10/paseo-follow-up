@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Platform, Pressable, Text, View } from "react-native";
 import type { PluginClientContext, PluginTimelineItemProps } from "@getpaseo/plugin/client";
 import { Icon, ScrollView } from "@getpaseo/plugin/client/ui";
-import { answerCardSchema, batchCardSchema, followShellCall, followToolName, parseBatchPrompt, readText, toolRow, toolRowSchema, type AnswerCard, type BatchCard, type ToolRow } from "../shared/chat";
+import { answerCardSchema, batchCardSchema, createMomentLedger, followTimelineItem, parseBatchPrompt, toolRowSchema, type AnswerCard, type BatchCard, type ToolRow } from "../shared/chat";
 import { parseAnswerMessage, parseAnswersMessage } from "../shared/questions";
 import { Reveal } from "./motion";
 import { tint, withAlpha } from "./theme";
@@ -11,9 +11,7 @@ const mono = () => (Platform.OS === "ios" ? "Menlo" : "monospace");
 const TOOL_KIND = "tool-row";
 const BATCH_KIND = "batch-card";
 const ANSWER_KIND = "answer-card";
-const TOOL_ICON: Partial<Record<ToolRow["tool"], string>> = { ask_question: "MessageCircleQuestion", record_answer: "MessageCircleReply", withdraw_question: "MessageCircleOff", set_spec: "FileText" };
-
-function record(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+const TOOL_ICON: Partial<Record<ToolRow["tool"], string>> = { ask_question: "MessageCircleQuestion" };
 
 /** Expandable full text below a row, scrolling on its own so long output never moves the chat. */
 function Expanded({ text, color, border }: { text: string; color: string; border: string }) {
@@ -132,26 +130,15 @@ function AnswerCardView({ item, theme }: PluginTimelineItemProps<AnswerCard>) {
 }
 
 export function contributeChat(client: PluginClientContext) {
+  const moments = createMomentLedger();
   const removers = [
+    // Routine bookkeeping stays Paseo's own tool call so it groups with the turn's other calls (a plugin item always
+    // seals Paseo's group); only the Done card and a question asked leave the group. See TOOL_PRESENTATION.
     client.addTimelineTransformer({
       id: "follow-tool-calls", query: { itemType: "tool_call" },
       transform({ item }) {
-        const detail: unknown = item.detail;
-        let tool = followToolName(item.name);
-        let input: Record<string, unknown> = {};
-        let output: string | undefined;
-        if (tool) {
-          if (record(detail) && record(detail.input)) input = detail.input;
-          output = record(detail) && "output" in detail ? readText(detail.output) : undefined;
-        } else if (record(detail) && detail.type === "shell" && typeof detail.command === "string") {
-          const call = followShellCall(detail.command);
-          if (!call) return undefined;
-          tool = call.tool; input = call.input; output = typeof detail.output === "string" ? detail.output : undefined;
-        } else return undefined;
-        const error = item.status === "failed" ? readText(item.error) ?? "" : undefined;
-        if (item.status === "completed" && record(detail) && record(detail.output) && detail.output.isError === true)
-          return { items: [{ type: "plugin" as const, kind: TOOL_KIND, version: 1, data: toolRow(tool, "failed", input, undefined, output) }] };
-        return { items: [{ type: "plugin" as const, kind: TOOL_KIND, version: 1, data: toolRow(tool, item.status, input, output, error) }] };
+        const row = followTimelineItem(item, moments);
+        return row ? { items: [{ type: "plugin" as const, kind: TOOL_KIND, version: 1, data: row }] } : undefined;
       },
     }),
     client.addTimelineTransformer({

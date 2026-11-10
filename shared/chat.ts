@@ -137,6 +137,71 @@ export function toolRow(tool: FollowTool, status: "running" | "completed" | "fai
   }
 }
 
+/**
+ * How each of Follow-up's agent tools (and Wait's) shows in a chat. Paseo 0.15.2 groups a run only from tool_call and
+ * thought items, and a timeline transform can only return plugin items, so a transformed call always leaves Paseo's
+ * group and sits loose. Routine bookkeeping therefore stays an ordinary tool call; only a moment the developer should
+ * see on its own becomes a row or card. A new tool must be added here (tests/chat-grouping.test.ts fails otherwise).
+ */
+export const TOOL_PRESENTATION: Record<string, "routine" | "moment"> = {
+  workspace_status: "routine", sync_workspace: "routine", enroll_workspace: "routine", register_pr: "routine", exclude_stack: "routine",
+  update_obligation: "routine", acknowledge_batch: "routine", record_answer: "routine", withdraw_question: "routine", set_spec: "routine",
+  workspace_about: "routine", agent_settings: "routine", needs_you: "routine", list_prs: "routine", add_reviewers: "routine",
+  enable_merge_when_ready: "routine", disable_merge_when_ready: "routine", send_repairs: "routine", set_auto_send: "routine", clear_hold: "routine",
+  retry_batch: "routine", inbox_list: "routine", sign_off: "routine", set_finish_flags: "routine", set_priorities: "routine", agent_digest: "routine",
+  route_candidates: "routine", send_to_agent: "routine", start_workspace: "routine", display_settings: "routine", set_display: "routine",
+  follow_settings: "routine", set_follow_settings: "routine", project_settings: "routine", set_project_tracking: "routine", pr_workflow: "routine",
+  set_pr_workflow: "routine", reviewer_settings: "routine", reviewer_suggestions: "routine", save_reviewers: "routine", set_agent_setting: "routine",
+  set_wait_for_jobs: "routine", onboarding_status: "routine", onboarding_checks: "routine", set_onboarding: "routine", rank_status: "routine",
+  rerank_priorities: "routine", overseer_status: "routine", overseer_start: "routine", overseer_restart: "routine", overseer_ask: "routine",
+  inbox_brief: "routine", brief_action: "routine", inbox_act: "routine", answer_question: "routine", run_recovery: "routine",
+  set_workspace_spec: "routine", set_task_trigger: "routine", pr_controls: "routine", browser_status: "routine", trust_bypass_status: "routine",
+  release_notes: "routine", make_main_agent: "routine", wait_prepare_job: "routine", wait_for_job: "routine", wait_get_job: "routine",
+  // The developer's moments: the workspace is done, or the agent asked them something. needs_you runs every turn, so a
+  // card there would be noise; the inbox already carries it.
+  declare_done: "moment", ask_question: "moment",
+};
+export const MOMENT_TOOLS = Object.keys(TOOL_PRESENTATION).filter(t => TOOL_PRESENTATION[t] === "moment") as FollowTool[];
+
+/** The fields of Paseo's tool_call timeline item that the transform reads. */
+export type TimelineToolCall = { type: "tool_call"; callId: string; name: string; status: "running" | "completed" | "failed" | "canceled"; error: unknown; detail: unknown };
+
+/** Done cards already shown, by workspace and summary, so a repeated declare_done doesn't draw a second card. */
+export type MomentLedger = Map<string, string>;
+export const createMomentLedger = (): MomentLedger => new Map();
+const LEDGER_LIMIT = 500;
+
+/**
+ * The plugin row for a Follow-up tool call, or undefined to leave it as Paseo's own grouped tool call. Pure apart from
+ * the ledger, which keeps the first call that drew each Done card.
+ */
+export function followTimelineItem(item: TimelineToolCall, ledger: MomentLedger): ToolRow | undefined {
+  const detail = item.detail;
+  let tool = followToolName(item.name);
+  let input: Record<string, unknown> = {};
+  let output: string | undefined;
+  if (tool) {
+    if (record(detail) && record(detail.input)) input = detail.input;
+    output = record(detail) && "output" in detail ? readText(detail.output) : undefined;
+  } else if (record(detail) && detail.type === "shell" && typeof detail.command === "string") {
+    const call = followShellCall(detail.command);
+    if (!call) return undefined;
+    tool = call.tool; input = call.input; output = typeof detail.output === "string" ? detail.output : undefined;
+  } else return undefined;
+  if (TOOL_PRESENTATION[tool] !== "moment" || item.status !== "completed") return undefined;
+  if (record(detail) && record(detail.output) && detail.output.isError === true) return undefined;
+  const row = toolRow(tool, "completed", input, output);
+  if (tool !== "declare_done") return row;
+  if (!row.done) return undefined;
+  const result = json(output);
+  const workspace = record(result?.workspace) && typeof result!.workspace.id === "string" ? result!.workspace.id : str(result?.workspaceId);
+  const key = `${workspace}\0${row.done.summary}`;
+  const first = ledger.get(key);
+  if (first !== undefined && first !== item.callId) return undefined;
+  if (first === undefined) { if (ledger.size >= LEDGER_LIMIT) ledger.delete(ledger.keys().next().value!); ledger.set(key, item.callId); }
+  return row;
+}
+
 export const answerCardSchema = z.object({ id: z.string(), title: z.string(), choice: z.string(), label: z.string().nullable(), words: z.string().nullable(), text: z.string(),
   /** 1.4.0: a multi-decision answer, one entry per decision with its question; `choice: null` was skipped. */
   answers: z.array(z.object({ id: z.string(), question: z.string(), choice: z.string().nullable(), label: z.string().nullable() })).optional() });

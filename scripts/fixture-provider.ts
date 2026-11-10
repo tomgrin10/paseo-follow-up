@@ -44,6 +44,13 @@ export default function contribute(server: PluginServerContext) {
             const text = input.prompt.input.type === "message" ? input.prompt.input.content.filter(c => c.type === "text").map(c => c.text).join("\n") : input.prompt.input.arguments;
             await appendFile(join(process.env.PASEO_HOME!, `fixture-history-${sessions.get(input.sessionId)!.PASEO_AGENT_ID}.jsonl`), JSON.stringify({ id: input.prompt.clientMessageId, type: "user_message", text, messageId: input.prompt.clientMessageId }) + "\n");
             if (text === "Fixture: keep running") return;
+            // scripts/check-chat-grouping.mjs: replay a synthetic turn's timeline items from fixture-chat.json.
+            if (text.includes("Fixture: chat")) {
+              const items = JSON.parse(await readFile(join(process.env.PASEO_HOME!, "fixture-chat.json"), "utf8"));
+              for (const item of items) { emit({ type: "timeline.item", sessionId: input.sessionId, item }); await new Promise(resolve => setTimeout(resolve, 15)); }
+              emit({ type: "session.turn", sessionId: input.sessionId, turnId, state: "completed" });
+              return;
+            }
             const asked = /^Fixture: permission (\w+) (\w+)$/.exec(text);
             if (asked) {
               const permissionId = randomUUID();
