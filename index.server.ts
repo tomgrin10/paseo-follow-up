@@ -56,6 +56,7 @@ import { Overseer, OVERSEER_TOOLS, type OverseerPaseo, type OverseerTool } from 
 import { OVERSEER_LABEL } from "./shared/overseer";
 import { withDaemon } from "./server/daemon";
 import { inboxAnswer } from "./server/etag";
+import { jobAgentRunner, type JobPaseo } from "./server/job-agent";
 import { AiJobs } from "./server/ai-jobs";
 import { liveRankSources, planningUrl, Ranker, RANKER_ROLE_DEFAULT } from "./server/ranker";
 import { AboutService, AboutStore, liveSources, rootHistory, type AboutContext } from "./server/about";
@@ -829,7 +830,7 @@ export default function contribute(server: PluginServerContext) {
     return overseer!.act(paseo as unknown as OverseerPaseo, agentId, tool as OverseerTool, args);
   });
   // Summary: small model jobs through the shared runner, cached per workspace in about.json.
-  const aiJobs = new AiJobs({ concurrency: 1, logPath: join(directory, "ai-jobs.jsonl") });
+  const aiJobs = new AiJobs({ concurrency: 1, logPath: join(directory, "ai-jobs.jsonl"), generic: jobAgentRunner({ paseo: () => api as unknown as JobPaseo | null, directory }) });
   // The ranker behind Home's Priority sort (1.4.0-beta.0). Its provider, model and limits come from the ranker role
   // in Settings → Agents. Inputs are read-only: Follow-up's state, mcpproxy, gh, the plan.
   const rankerOn = async () => (await inboxSettings()).enable_ranker !== false;

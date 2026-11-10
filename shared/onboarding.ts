@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { providerName } from "./agent-settings";
 
 /**
  * Getting started (1.4.0-beta.10). A first-run setup that takes a fresh install from "what is this?" to a configured
@@ -160,35 +161,44 @@ export function ghCheck(r: GhResult): Check {
 export type ProviderInfo = { id: string; label: string; available: boolean; reason: string | null };
 /** Which providers the helper roles use right now, e.g. { claude: ["Overseer", "Summaries"] }. */
 export type ProviderUse = Record<string, string[]>;
-const PROVIDER_FIX: Record<string, { text: string; command: string }> = {
+const PROVIDER_FIX: Record<string, { text: string; command: string | null }> = {
   claude: { text: "Install Claude Code on the computer running Paseo and sign in.", command: "claude" },
   codex: { text: "Install Codex on the computer running Paseo and sign in.", command: "codex login" },
 };
 const joinNames = (names: string[]) => names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0] ?? "";
 
-/** One row per helper provider (Claude, Codex). A provider no helper uses is optional. */
+/** Claude and Codex keep a row even when no helper uses them: they're the two most setups have. */
+const KNOWN_PROVIDERS = ["claude", "codex"];
+const nameOf = (catalog: { providers: ProviderInfo[] }, id: string) => providerName(id, catalog.providers.find(p => p.id === id)?.label);
+
+/**
+ * One row per provider a helper uses (any provider id), plus a quiet row for each other provider that's ready and for
+ * Claude and Codex. A provider no helper uses is optional: never a failure. A missing provider's fix offers to switch
+ * its helpers to one that's ready, preferring Claude, then Codex, then the catalog's order.
+ */
 export function providerChecks(catalog: { providers: ProviderInfo[]; error: string | null } | null, use: ProviderUse): Check[] {
   if (!catalog || (catalog.error && !catalog.providers.length)) return [{ id: "providers", label: "Helper agents", state: "warn", detail: catalog?.error ?? "Couldn't read Paseo's providers.", fix: fix("Check again in a moment.") }];
+  const ready = catalog.providers.filter(p => p.available).map(p => p.id).sort((x, y) => rank(x) - rank(y));
+  const ids = [...new Set([...KNOWN_PROVIDERS.filter(id => use[id]?.length || catalog.providers.some(p => p.id === id)), ...Object.keys(use).filter(id => use[id]?.length), ...ready])];
   const rows: Check[] = [];
-  const anyAvailable = ["claude", "codex"].some(id => catalog.providers.find(p => p.id === id)?.available);
-  for (const id of ["claude", "codex"]) {
+  for (const id of ids) {
     const p = catalog.providers.find(x => x.id === id);
-    const label = p?.label || (id === "claude" ? "Claude" : "Codex");
+    const label = nameOf(catalog, id);
     const users = use[id] ?? [];
     const usedBy = users.length ? `Used by ${joinNames(users)}.` : "Not used by any helper right now.";
     if (p?.available) { rows.push({ id: `provider-${id}`, label, state: "ok", detail: `Available. ${usedBy}`, fix: null }); continue; }
     if (p?.reason === "Still loading") { rows.push({ id: `provider-${id}`, label, state: "pending", detail: "Paseo is still checking this provider.", fix: fix("Check again in a few seconds.") }); continue; }
-    const why = p?.reason ? ` (${p.reason})` : "";
+    const why = p?.reason ? ` (${p.reason})` : p ? "" : " (Paseo doesn't have it)";
     if (!users.length) { rows.push({ id: `provider-${id}`, label, state: "off", detail: `Not available${why}. Optional: no helper uses it.`, fix: null }); continue; }
-    const other = id === "claude" ? "codex" : "claude";
-    const otherOk = !!catalog.providers.find(x => x.id === other)?.available;
+    const setup = PROVIDER_FIX[id] ?? { text: `Set up ${label} on the computer running Paseo, then check again.`, command: null };
+    const other = ready.find(x => x !== id);
     rows.push({ id: `provider-${id}`, label, state: "fail", detail: `Not available${why}. ${joinNames(users)} won't run until it is.`,
-      fix: otherOk ? fix(`${PROVIDER_FIX[id].text} Or switch those helpers to ${other === "codex" ? "Codex" : "Claude"} in Settings, Agents.`, PROVIDER_FIX[id].command, "agents")
-        : fix(PROVIDER_FIX[id].text, PROVIDER_FIX[id].command) });
+      fix: other ? fix(`${setup.text} Or switch those helpers to ${nameOf(catalog, other)} in Settings, Agents.`, setup.command, "agents") : fix(setup.text, setup.command) });
   }
-  if (!anyAvailable) rows.unshift({ id: "providers", label: "Helper agents", state: "fail", detail: "Neither Claude Code nor Codex is available, so the Overseer, Summaries and AI priority can't run. Following PRs and Needs you still work.", fix: null });
+  if (!ready.length) rows.unshift({ id: "providers", label: "Helper agents", state: "fail", detail: "No provider in Paseo is ready, so the Overseer, Summaries and AI priority can't run. Following PRs and Needs you still work.", fix: null });
   return rows;
 }
+const rank = (id: string) => { const i = KNOWN_PROVIDERS.indexOf(id); return i < 0 ? KNOWN_PROVIDERS.length : i; };
 
 export type ToolsInput = {
   /** Paseo's config.json (or null when unreadable). */
@@ -201,18 +211,18 @@ export type ToolsInput = {
 export function toolsCheck({ config, nativeAgents, hookError }: ToolsInput): Check[] {
   const label = "Agent tools";
   const mcpOff = config?.daemon?.mcp?.enabled === false || config?.daemon?.mcp?.injectIntoAgents === false;
-  const blocked = ["claude", "codex"].filter(id => { const p = config?.agents?.providers?.[id]?.paseoTools; return p?.enabled === false || !!p?.disabledTools?.some(n => n.startsWith("follow_")); });
+  const blocked = Object.keys(config?.agents?.providers ?? {}).filter(id => { const p = config?.agents?.providers?.[id]?.paseoTools; return p?.enabled === false || !!p?.disabledTools?.some(n => n.startsWith("follow_")); });
   const seen = nativeAgents ? ` Seen on ${nativeAgents} agent${nativeAgents === 1 ? "" : "s"} so far.` : "";
   let row: Check;
   if (mcpOff || blocked.length) {
-    const why = mcpOff ? "Paseo's MCP is off" : `Paseo's tools are off for ${joinNames(blocked.map(b => b === "claude" ? "Claude" : "Codex"))}`;
+    const why = mcpOff ? "Paseo's MCP is off" : `Paseo's tools are off for ${joinNames(blocked.map(b => providerName(b)))}`;
     row = { id: "tools", label, state: "warn", detail: `${why}, so each agent gets Follow-up's tools through a small extra process. It works, and uses a little more memory.`,
       fix: mcpOff ? fix("Optional. To serve them through Paseo instead, set this in Paseo's config.json (in Paseo's home folder) and restart Paseo.", `"daemon": { "mcp": { "enabled": true } }`) : fix("Optional. Turn Paseo tools back on for that provider in Paseo's config.json, under agents.providers.") };
   } else if (!nativeAgents) {
     row = { id: "tools", label, state: "pending", detail: "Checked when your first agent starts. Nothing to do.", fix: null };
   } else row = { id: "tools", label, state: "ok", detail: `Agents get Follow-up's tools through Paseo.${seen}`, fix: null };
   const rows = [row];
-  if (hookError) rows.push({ id: "hooks", label: "Agent instructions", state: "warn", detail: "Follow-up couldn't add its instructions for every provider. Following still works; agents just aren't reminded to report PRs.", fix: fix("Check the Claude Code and Codex hook settings, then restart Follow-up from Paseo's plugin settings.") });
+  if (hookError) rows.push({ id: "hooks", label: "Agent instructions", state: "warn", detail: "Follow-up couldn't add its instructions for every provider. Following still works; agents just aren't reminded to report PRs.", fix: fix("Check your providers' hook settings (Claude Code and Codex have them), then restart Follow-up from Paseo's plugin settings.") });
   return rows;
 }
 

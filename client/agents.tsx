@@ -6,7 +6,7 @@ import { SettingsAction, SettingsCard, SettingsSection, SettingsSelect, Settings
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { agentSettingsRpc, setAgentSettingRpc, setWaitRpc } from "../shared/contracts";
 import { WAIT_HINT, WAIT_NOT_ATTACHED, WAIT_TITLE, waitNote } from "../shared/wait";
-import { AGENT_ROLES, JOB_PROVIDERS, ROLE_DEFAULTS, ROLE_INFO, isJobRole, modelName, providerName, type AgentRole, type AgentSettingsView, type CatalogProvider, type SavedRole } from "../shared/agent-settings";
+import { AGENT_ROLES, ROLE_DEFAULTS, ROLE_INFO, isJobRole, modelName, providerName, type AgentRole, type AgentSettingsView, type CatalogProvider, type SavedRole } from "../shared/agent-settings";
 import { Button, errorText, text, type Theme } from "./kit";
 
 export const agentSettingsKey = ["follow-through", "agent-settings"];
@@ -39,7 +39,7 @@ export function AgentSettings({ theme, compact, toggles = {} }: Pick<PluginSurfa
     onError: error => toast.error(errorText(error)),
   });
   const data = query.data;
-  const info = "Which agent Follow-up uses for each of its own jobs. Defaults: Claude Haiku for summaries, Claude Opus for the Overseer, the main agent's own setup for recovery, Claude Sonnet for priority ranking. Summaries and the ranker are one-shot jobs, so they run on Claude or Codex only; the Overseer and recovery can use any provider Paseo has. Changes apply from the next call; the Overseer switches when you restart it.";
+  const info = "Which agent Follow-up uses for each of its own jobs. Defaults: Claude Haiku for summaries, Claude Opus for the Overseer, the main agent's own setup for recovery, Claude Sonnet for priority ranking. Every role can use any provider Paseo has. Summaries and the ranker are one-shot jobs: on a provider other than Claude or Codex, each runs as a short hidden agent that's archived when it answers. Changes apply from the next call; the Overseer switches when you restart it.";
   return <SettingsSection title="Models" info={info}>
     {query.isPending && <ActivityIndicator accessibilityLabel="Loading agent settings" color={c.foregroundMuted} style={{ alignSelf: "flex-start", marginVertical: 8 }} />}
     {query.error && <SettingsCard><SettingsAction label="Couldn't load agent settings" hint={errorText(query.error)} actionLabel="Retry" onPress={() => void query.refetch()} /></SettingsCard>}
@@ -86,7 +86,7 @@ function RoleCard({ r, invalid, catalog, busy, save, theme, compact, toggle }: {
   const c = theme.colors; const t = text(c);
   const role = r.role;
   const jobs = isJobRole(role);
-  const usable = catalog.filter(p => p.available && (!jobs || (JOB_PROVIDERS as readonly string[]).includes(p.id)));
+  const usable = catalog.filter(p => p.available);
   const current = catalog.find(p => p.id === r.provider);
   const base: SavedRole = { provider: r.provider, model: r.model, thinking: r.thinking, ...(jobs ? {} : { mode: r.mode }), ...(role === "recovery" ? { same: r.same } : {}),
     ...(jobs ? { dailyCap: r.dailyCap ?? undefined, maxPromptChars: r.maxPromptChars ?? undefined } : {}), ...(role === "ranker" ? { cadenceMinutes: r.cadenceMinutes ?? undefined } : {}) };
