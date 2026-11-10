@@ -59,3 +59,11 @@ fixture per reported bug).
   changed options supersede it, so two versions are never open at once. needs_you points at open questions with
   `questions: ["Qn"]` rather than restating them. A later call in the same turn replaces only the questions the
   earlier call created, and a superseded brief never closes an ask_question's question.
+
+- Timeline transforms must not break Paseo's grouping (tests/chat-grouping.test.ts). Paseo groups only tool_call and
+  thought items, and a transform can only return plugin items, so a transformed call always leaves the group and
+  renders loose. Every agent tool (Follow-up's and Wait's) is classified in TOOL_PRESENTATION (shared/chat.ts): routine
+  bookkeeping returns undefined and stays Paseo's own call; only a moment the developer must see (declare_done's card,
+  ask_question) becomes a row. Classify a new tool there, routine unless it is such a moment. A repeated declare_done for
+  the same workspace and summary draws one card. scripts/check-chat-grouping.mjs renders a synthetic mixed turn in an
+  isolated daemon for screenshots.
