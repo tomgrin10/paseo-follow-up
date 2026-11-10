@@ -27,7 +27,7 @@ import { Setup, SetupOffer, useOnboarding } from "./onboarding";
 import type { OnboardingView } from "../shared/onboarding";
 import { withAlpha, isLight, mergedColor, type Colors } from "./theme";
 import { UpdateNotice, VersionMark } from "./updates";
-import { ReleaseNotesSheet, VersionLine, WhatsNewGate } from "./release-notes";
+import { WhatsNewGate } from "./release-notes";
 import { useRowMenu } from "./row-actions";
 import { laterChoices } from "../shared/row-menu";
 import { RichText } from "./rich-text";
@@ -132,13 +132,9 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
     setSelected(next?.key ?? null);
   }, [inbox, model]);
 
-  // null: closed; false: What's new since the previous version; true: every version.
-  const [notesOpen, setNotesOpen] = useState<boolean | null>(null);
   const updateNotice = <UpdateNotice theme={theme} compact={compact} openSettings={deps.openSettings} />;
-  const updatesFooter = <VersionLine theme={theme} compact={compact} onOpen={setNotesOpen} />;
   const updateSheets = <>
     <WhatsNewGate surface="home" theme={theme} compact={compact} />
-    {notesOpen != null && <ReleaseNotesSheet theme={theme} compact={compact} all={notesOpen} onClose={() => setNotesOpen(null)} />}
   </>;
   if (params.view === "log") return <LogView theme={theme} compact={compact} sources={deps.sources} onHome={deps.openHome} onOpen={key => { setSelected(key); deps.openHome(); }} />;
 
@@ -154,8 +150,8 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
     // Phones: the host header already says Follow-up, so no "Home" title row; search, sort and settings share one row and
     // the meters move to the end of the list.
     footer={omnibox.results ? undefined : compact
-      ? <View style={{ paddingTop: 16, paddingBottom: 96, gap: 12 }}>{!nothing && <UsageMeters theme={theme} sources={deps.sources} dense />}{updatesFooter}</View>
-      : updatesFooter}
+      ? <View style={{ paddingTop: 16, paddingBottom: 96, gap: 12 }}>{!nothing && <UsageMeters theme={theme} sources={deps.sources} dense />}</View>
+      : undefined}
     // Phones: the setup offer goes after the Needs-you group when there is one, so the first ask stays high.
     afterNeeds={compact && model.needs > 0 ? <SetupOffer theme={theme} compact view={props.onboarding} /> : undefined}
     emptyAction={compact ? <Button theme={theme} compact kind="secondary" icon="Settings" title="Project settings" onPress={deps.openSettings} /> : undefined}
