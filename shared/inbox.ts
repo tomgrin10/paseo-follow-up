@@ -294,11 +294,40 @@ export function age(iso: string | null | undefined, now: number): string {
   return `${Math.floor(h / 24)}d`;
 }
 
-/** Snooze presets offered by "Later…". Times are local to the device that picks them. */
-export function snoozeUntil(choice: "hour" | "tonight" | "tomorrow" | "next-event", now: Date): string {
+/**
+ * A wall-clock time (day offset from today, hour) in an IANA timezone, as an instant. Two passes settle the zone's
+ * offset, including across a daylight-saving change between now and then.
+ */
+function zonedAt(now: Date, timeZone: string, dayOffset: number, hour: number): Date {
+  const parts = (t: Date) => Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    .formatToParts(t).map(p => [p.type, Number(p.value)])) as Record<string, number>;
+  const offset = (t: Date) => { const p = parts(t); return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - Math.floor(t.getTime() / 1000) * 1000; };
+  const today = parts(now);
+  const wall = Date.UTC(today.year, today.month - 1, today.day + dayOffset, hour, 0, 0);
+  let at = wall - offset(new Date(wall));
+  at = wall - offset(new Date(at));
+  return new Date(at);
+}
+
+/** Whether a string names a timezone this runtime knows ("Asia/Jerusalem", "UTC"). */
+export function isTimeZone(timeZone: string | null | undefined): timeZone is string {
+  if (!timeZone) return false;
+  try { new Intl.DateTimeFormat("en-US", { timeZone }); return true; } catch { return false; }
+}
+
+/**
+ * Snooze presets offered by "Later…". Times are local to the device that picks them, or, given `timeZone`, to that
+ * zone: the daemon resolves an agent tool's "tonight"/"tomorrow" in the developer's timezone (the one their Follow-up
+ * client last reported), not the host's, which is often UTC.
+ */
+export function snoozeUntil(choice: "hour" | "tonight" | "tomorrow" | "next-event", now: Date, timeZone?: string | null): string {
   if (choice === "next-event") return "next-event";
-  const d = new Date(now);
   if (choice === "hour") return new Date(now.getTime() + 3_600_000).toISOString();
+  if (isTimeZone(timeZone)) {
+    if (choice === "tonight") { const d = zonedAt(now, timeZone, 0, 18); return (d > now ? d : zonedAt(now, timeZone, 1, 18)).toISOString(); }
+    return zonedAt(now, timeZone, 1, 9).toISOString();
+  }
+  const d = new Date(now);
   if (choice === "tonight") { d.setHours(18, 0, 0, 0); if (d <= now) d.setDate(d.getDate() + 1); return d.toISOString(); }
   d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d.toISOString();
 }
@@ -306,13 +335,31 @@ export function snoozeUntil(choice: "hour" | "tonight" | "tomorrow" | "next-even
 /**
  * The words the snooze tools accept ("1h", "hour", "tonight", "tomorrow", "next-event", "pr:<repo#n>", an ISO time) as
  * what a snooze stores: an ISO time or a wake word. Null for anything else. A raw "1h" stored as-is never woke.
+ * `timeZone`: where "tonight" and "tomorrow" are (snoozeUntil).
  */
-export function resolveUntil(until: string, now: Date): string | null {
+export function resolveUntil(until: string, now: Date, timeZone?: string | null): string | null {
   const u = until.trim().toLowerCase();
   if (u === "1h" || u === "hour") return snoozeUntil("hour", now);
-  if (u === "tonight" || u === "tomorrow" || u === "next-event") return snoozeUntil(u, now);
+  if (u === "tonight" || u === "tomorrow" || u === "next-event") return snoozeUntil(u, now, timeZone);
   if (/^pr:[\w.-]+\/[\w.-]+#\d+$/i.test(until.trim())) return until.trim();
   return /^\d{4}-\d{2}-\d{2}T/.test(until.trim()) && Number.isFinite(Date.parse(until)) ? new Date(until).toISOString() : null;
+}
+
+/**
+ * The Later group's time column: when the row comes back, short. "in 25m", "in 2h" within three hours, then "18:00",
+ * "tomorrow 09:00", "Tue 09:00"; "next event"; "#12 merges". "now" once the time has passed and the row hasn't moved yet.
+ */
+export function wakeShort(until: string | null | undefined, now: number): string {
+  if (!until) return "";
+  if (until === "next-event") return "next event";
+  if (until.startsWith("pr:")) return `#${until.split("#")[1]} merges`;
+  const at = Date.parse(until);
+  if (!Number.isFinite(at)) return "";
+  const m = Math.ceil((at - now) / 60_000);
+  if (m <= 0) return "now";
+  if (m < 60) return `in ${m}m`;
+  if (m < 180) return `in ${Math.floor(m / 60)}h`;
+  return wakeLabel({ until, at: new Date(now).toISOString() }, now);
 }
 
 export function wakeLabel(snooze: Snooze, now: number): string {

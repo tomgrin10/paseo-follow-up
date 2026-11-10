@@ -272,7 +272,8 @@ function Past({ b, c, now, compact, height }: { b: Brief; c: Colors; now: number
 }
 
 /** `embedded`: inside Home's detail pane, which has its own reply box and action bar, so the card drops its moves. */
-export function BriefCard({ item, theme, layout, agentId, deps, embedded = false }: PluginTimelineItemProps<Brief> & { deps: BriefDeps; embedded?: boolean }) {
+/** `snoozed`: the row is in Later, so the card wears the row's muted tone and says "Later" instead of "Needs you". */
+export function BriefCard({ item, theme, layout, agentId, deps, embedded = false, snoozed = false }: PluginTimelineItemProps<Brief> & { deps: BriefDeps; embedded?: boolean; snoozed?: boolean }) {
   const c = theme.colors; const b = item.data; const compact = layout.compact;
   const now = useNow(60_000);
   const { height } = useWindowDimensions();
@@ -290,8 +291,10 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   if (b.state !== "open") return <Past b={b} c={c} now={now} compact={compact} height={height} />;
 
   const attention = c.statusWarning;
-  const acts = b.flagged && ACTS.includes(b.kind);
-  const tone = acts || b.kind === "done" || b.kind === "review" || b.kind === "error" ? kindTone(b.kind, c) : c.foregroundMuted;
+  const flaggedAct = b.flagged && ACTS.includes(b.kind);
+  // In Later the card goes quiet like its Home row: no attention colour, and its label says Later.
+  const acts = flaggedAct && !snoozed;
+  const tone = !snoozed && (acts || b.kind === "done" || b.kind === "review" || b.kind === "error") ? kindTone(b.kind, c) : c.foregroundMuted;
   const ageText = age(b.at, now);
   const border = acts ? withAlpha(attention, isLight(c) ? 0.5 : 0.45) : c.border;
   // Every send from the card (a pick, Something else, Send answers, the keyboard's Send) goes through runAction: the
@@ -327,7 +330,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
       style={{ marginVertical: embedded ? 0 : 10, gap: 4, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: border }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
         <Icon name={ICON[b.kind]} size={14} color={tone} />
-        <Text numberOfLines={1} style={{ flexShrink: 1, color: acts ? attention : tone, fontSize: 12, lineHeight: 16, fontWeight: "600" }}>{acts ? "Needs you" : word(b.kind)}</Text>
+        <Text numberOfLines={1} style={{ flexShrink: 1, color: acts ? attention : tone, fontSize: 12, lineHeight: 16, fontWeight: "600" }}>{acts ? "Needs you" : flaggedAct ? "Later" : word(b.kind)}</Text>
         <View style={{ flex: 1 }} />
         <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontVariant: ["tabular-nums"] }}>{ageText}</Text>
       </View>
@@ -350,14 +353,14 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   const otherId = !multi ? askedDecisions(b).find(d => isOther(picks[d.id]))?.id : undefined;
   const keySend = multi ? (sendBar(b, sendable).ready ? () => sendAll() : null) : otherId && words[otherId]?.trim() ? () => sendOther(otherId) : null;
   const sendOther = (decisionId: string) => { const text = words[decisionId]?.trim(); if (text) void run(`${decisionId}:${OTHER}`, async () => { await act({ agentId, briefId: b.id, decisionId, choice: OTHER, words: text }); pickStore.clear(b.id); wordStore.clear(b.id); }); };
-  return <View accessibilityRole="summary" accessibilityLabel={`${acts ? "Needs you" : word(b.kind)}: ${b.ask}`}
+  return <View accessibilityRole="summary" accessibilityLabel={`${acts ? "Needs you" : flaggedAct ? "Later" : word(b.kind)}: ${b.ask}`}
     style={{ marginVertical: embedded ? 0 : 10, borderRadius: 12, borderWidth: 1, borderColor: border, backgroundColor: c.surface1, overflow: "hidden" }}>
     <SubmitScope enabled={!!keySend && !busy} onSubmit={() => keySend?.()} style={{ paddingHorizontal: pad, paddingTop: compact ? 12 : 14, paddingBottom: 14, gap: tight ? 10 : 12 }}>
       <View style={{ gap: 4 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
           <Icon name={ICON[b.kind]} size={14} color={tone} />
-          <Text style={{ color: acts ? attention : tone, fontSize: 12, lineHeight: 16, fontWeight: "600" }}>{acts ? "Needs you" : word(b.kind)}</Text>
-          {acts && <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{word(b.kind)}</Text>}
+          <Text style={{ color: acts ? attention : tone, fontSize: 12, lineHeight: 16, fontWeight: "600" }}>{acts ? "Needs you" : flaggedAct ? "Later" : word(b.kind)}</Text>
+          {flaggedAct && <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{word(b.kind)}</Text>}
           {multi && <Text accessibilityLiveRegion="polite" style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontVariant: ["tabular-nums"] }}>· {pickedCount(b, sendable)} of {askedDecisions(b).length} picked</Text>}
           <View style={{ flex: 1 }} />
           <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontVariant: ["tabular-nums"] }}>{ageText}</Text>

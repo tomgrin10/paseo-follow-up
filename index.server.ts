@@ -4,6 +4,7 @@ import { askQuestion, needsYouQuestions, recordAnswer, syncTaskQuestions, withdr
 import { agentSetSpec, developerSetSpec } from "./server/spec";
 import type { PluginServerContext, PluginHandlerContext, PluginHookContext, PluginSessionOpenRequest } from "@getpaseo/plugin/server";
 import { mkdir, writeFile } from "node:fs/promises";
+import { isTimeZone } from "./shared/inbox";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -95,6 +96,8 @@ export default function contribute(server: PluginServerContext) {
   // An unreadable setting means the default, which never lets an agent build ahead of the developer.
   const questionMode = async (): Promise<QuestionMode> => { try { const state = await questionSettings.read(); return state.status === "ready" ? state.values.mode : DEFAULT_QUESTION_MODE; } catch { return DEFAULT_QUESTION_MODE; } };
   const directory = join(paseoHome, "plugin-data", "follow-through");
+  const timeZonePath = join(directory, "client-time-zone.json");
+  let clientTimeZone: string | null = (() => { try { const z = JSON.parse(readFileSync(timeZonePath, "utf8")).timeZone; return isTimeZone(z) ? z : null; } catch { return null; } })();
   const bridge = join(directory, "mcp.mjs");
   /**
    * Native tools live in this process: a reload or update drops them from every open session (Paseo 0.15.2 re-attaches
@@ -872,6 +875,13 @@ export default function contribute(server: PluginServerContext) {
   handle(rpc.dismissUpdateNoticeRpc, async ({ id }) => { await updater.dismiss(id); return updatesView(); });
   handle(rpc.agentSettingsRpc, async ({ catalog, fresh }, { paseo }) => { await requireReady(); seen(paseo); return agentSettingsView(!!catalog, !!fresh); });
   handle(rpc.setAgentSettingRpc, async ({ role, entry }, { paseo }) => { await requireReady(); seen(paseo); await agentSettings.save(role, entry); return agentSettingsView(true); });
+  // The developer's timezone, reported by their Follow-up client: an agent's "tonight"/"tomorrow" snooze resolves in it,
+  // not on this host's clock (often UTC). Kept across restarts; the last client to report wins.
+  handle(rpc.clientTimeZoneRpc, async ({ timeZone }) => {
+    if (!isTimeZone(timeZone)) return { ok: false };
+    if (timeZone !== clientTimeZone) { clientTimeZone = timeZone; await writeFile(timeZonePath, JSON.stringify({ timeZone }), { mode: 0o600 }).catch(() => undefined); }
+    return { ok: true };
+  });
   handle(rpc.setWaitRpc, async ({ enable_wait }, { paseo }) => { await requireReady(); seen(paseo); await agentSettings.setWait(enable_wait); return agentSettingsView(true); });
   handle(rpc.overseerActRpc, async ({ agentId, tool, args }, { paseo }) => {
     await requireReady(); seen(paseo);
@@ -979,7 +989,7 @@ export default function contribute(server: PluginServerContext) {
       return result;
     },
   };
-  const agentActions = new AgentActions({ store, prActions: actions, engine, inbox, priorities: priorityStore, about, agentSettings, wait: { status: currentWait }, prWorkflows: () => prWorkflowView(), rpc: rpcBridge, display: displayBridge,
+  const agentActions = new AgentActions({ timeZone: () => clientTimeZone, store, prActions: actions, engine, inbox, priorities: priorityStore, about, agentSettings, wait: { status: currentWait }, prWorkflows: () => prWorkflowView(), rpc: rpcBridge, display: displayBridge,
     // The directory's agent list (metadata only): a claim never loads or refreshes the main agent.
     agentInfo: async agentId => { const row = gateway.directory.cached(agentId) ?? (await gateway.directory.read()).agents.find(r => r.agent.id === agentId)?.agent; return row ? { status: row.status, activeTurn: row.activeTurn, pendingPermissions: row.pendingPermissions, archivedAt: row.archivedAt } : null; } });
   handle(rpc.prioritiesRpc, async () => ({ items: await priorityStore.read() }));

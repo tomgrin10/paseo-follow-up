@@ -167,6 +167,7 @@ export const PARITY: Record<string, { tools: readonly string[]; note?: string } 
   "follow.updates": { tools: ["updates_status", "check_updates"] },
   "follow.set-updates": { tools: ["set_updates"] },
   "follow.install-update": { tools: ["install_update"] },
+  "follow.client-time-zone": { exempt: "The device reports its timezone so an agent's tonight/tomorrow match the developer's clock; nothing for an agent to do." },
   "follow.dismiss-update-notice": { exempt: "Hides Home's update line for the person looking at it; updates_status already tells an agent what that line said." },
   "follow.whats-new-seen": { exempt: "Records that a person closed What's new on a device; an agent reading the notes isn't someone seeing the sheet." },
 };
