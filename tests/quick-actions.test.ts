@@ -68,6 +68,19 @@ test("Send and Copy on a question close the dialog before the server answers", a
   assert.match(source, /onSubmit=\{\(\) => open \? quick\("send"\)/, "the keyboard's Send takes the same quick path");
 });
 
+test("one runAction and one toast path: every quick action, the row menu's included, uses client/toast-store.ts", async () => {
+  const dir = join(import.meta.dirname, "..", "client");
+  const defines: string[] = []; const imports: string[] = [];
+  for (const f of (await readdir(dir)).filter(f => /\.tsx?$/.test(f))) {
+    const source = await readFile(join(dir, f), "utf8");
+    if (/function runAction\b|const runAction\s*=/.test(source)) defines.push(f);
+    for (const m of source.matchAll(/import \{[^}]*\brunAction\b[^}]*\} from "([^"]+)"/g)) if (m[1] !== "./toast-store" && m[1] !== "./toasts") imports.push(`${f} ← ${m[1]}`);
+  }
+  assert.deepEqual(defines, ["toast-store.ts"], "a second runAction splits the toast path");
+  assert.deepEqual(imports, []);
+  assert.match(await readFile(join(dir, "row-actions.ts"), "utf8"), /from "\.\/toast-store"/, "the row menu's Later, Sign off and the rest report through the shared toasts");
+});
+
 // ---------- runAction and the toast store ----------
 
 const store = () => import("../client/toast-store");
@@ -101,6 +114,22 @@ test("runAction: a failure keeps Retry and Open, stays until dismissed, and Retr
     error.actions[0].onPress(); await new Promise(r => setTimeout(r, 0));
     assert.equal(calls, 2, "Retry runs the same action again");
   } finally { hosts.splice(hosts.indexOf(98), 1); for (const t of toastsNow()) dismissToast(t.id); }
+});
+
+test("runAction: a plain-string success, a default failure, reopen, and a key that drops a duplicate in flight", async () => {
+  const { runAction, bindToast } = await store();
+  const host: string[] = [];
+  bindToast({ show: m => { host.push(`show:${m}`); }, error: m => { host.push(`error:${m}`); } });
+  try {
+    let release!: () => void; const gate = new Promise<void>(r => { release = r; });
+    const first = runAction({ label: "Later", run: () => gate, success: "Later · Tomorrow 9:00" }, "later:w1");
+    assert.equal(await runAction({ label: "Later", run: async () => undefined, success: "dup" }, "later:w1"), false, "a second tap while the first runs does nothing");
+    release(); assert.equal(await first, true);
+    let reopened = 0;
+    assert.equal(await runAction({ label: "Stop following", run: async () => { throw new Error("offline"); }, success: null, reopen: () => { reopened++; } }), false);
+    assert.deepEqual(host, ["show:Later · Tomorrow 9:00", "error:Stop following didn't work. offline"]);
+    assert.equal(reopened, 1);
+  } finally { bindToast(null); }
 });
 
 test("runAction without a ToastHost: the host toast says it wasn't sent and where to retry", async () => {

@@ -8,7 +8,7 @@ import { snoozeUntil, wakeLabel } from "../shared/inbox";
 import { LATER_CHOICES, rowMenu, type LaterChoice, type RowMenuItem } from "../shared/row-menu";
 import type { Workstream } from "../shared/home";
 import { aboutKey } from "./about";
-import { bindToast, runAction } from "./actions";
+import { bindToast, runAction } from "./toast-store";
 import type { HomeSources } from "./home-data";
 
 /** What the surface showing the menu does for the moves that leave the list (open, answer, ask). */
