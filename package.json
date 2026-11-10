@@ -24,7 +24,7 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "tsx --test --import ./tests/hermetic-env.mjs tests/*.test.ts",
     "verify": "npm run typecheck && npm run check:notes && npm test && node --test button-visibility.test.mjs && npm run test:scale && npm run test:native && npm run test:trust",
     "test:trust": "node scripts/check-trust-bypass.mjs",
     "preview": "node scripts/check-install.mjs --keep",
