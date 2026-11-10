@@ -42,10 +42,11 @@ test("Set up Follow-up again leads General, the first Settings category and the 
   assert.equal(SETTINGS_CATEGORIES[0].id, "general"); assert.equal(DEFAULT_CATEGORY, "general");
   const settings = await readFile(resolve("client/settings.tsx"), "utf8");
   const general = settings.slice(settings.indexOf("function GeneralCategory"), settings.indexOf("function useSummaries"));
-  // First thing in General, not inside a fold; then the version and release notes.
-  assert.ok(general.indexOf("setup.entry.label") > 0 && general.indexOf("setup.entry.label") < general.indexOf('title="Version"'));
+  // First thing in General, not inside a fold; then updates: the version, its status and all release notes.
+  assert.ok(general.indexOf("setup.entry.label") > 0 && general.indexOf("setup.entry.label") < general.indexOf("<UpdatesSections"));
   assert.doesNotMatch(general, /<Disclosure/);
-  assert.match(general, /actionLabel="What's new"/); assert.match(general, /label="Older versions"/);
+  const updates = await readFile(resolve("client/updates.tsx"), "utf8");
+  assert.match(updates, /"whats-new": \{ title: "What's new"/); assert.match(updates, /label="Release notes"[^>]*actionLabel="See all"/);
   assert.match(settings, /category === "general" \? <GeneralCategory theme=\{theme\} compact=\{compact\} setup=\{setup\} \/>/);
   const client = await readFile(resolve("index.client.tsx"), "utf8");
   assert.match(client, /id: "follow-through-setup"/);

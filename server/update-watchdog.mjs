@@ -4,7 +4,7 @@
 // It asks Paseo for the reviewed version (the integrity Follow-up checked must match), applies it, then watches the
 // new version for ten minutes: Paseo's plugin list (status and error) and the new worker's heartbeat.json. If the new
 // version fails to load, reports an error, or never reports in, it installs the old version again the same way.
-// Every step goes to updates.jsonl, which Settings → Updates reads. Plain JavaScript with no dependencies besides
+// Every step goes to updates.jsonl, which Settings → General reads. Plain JavaScript with no dependencies besides
 // Paseo's own daemon client (its path comes from the worker), so it runs whichever Follow-up version is installed.
 import { appendFile, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";

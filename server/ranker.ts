@@ -286,7 +286,7 @@ const RESTAMP_MS = 4 * 3_600_000;
  */
 export class Ranker {
   private running: Promise<RankResult> | null = null;
-  /** Whether a ranking is running now (Settings → Updates waits for it). */
+  /** Whether a ranking is running now (Settings → General waits for it). */
   isRunning(): boolean { return this.running != null; }
   constructor(private d: RankerDeps) {}
   private now() { return this.d.now?.() ?? Date.now(); }

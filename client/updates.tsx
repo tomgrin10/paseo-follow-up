@@ -36,7 +36,7 @@ export function UpdateNotice({ theme, compact, openSettings }: { theme: Theme; c
   if (!n) return null;
   const rolled = n.kind === "rolled-back";
   const title = rolled ? `Update to ${n.version} failed, rolled back` : `Follow-up ${n.version} is available`;
-  const detail = rolled ? `You're on ${n.from} again. Nothing to do; details are in Settings → Updates.` : "Installing reloads Follow-up for a few seconds.";
+  const detail = rolled ? `You're on ${n.from} again. Nothing to do; details are in Settings → General.` : "Installing reloads Follow-up for a few seconds.";
   return <View accessibilityRole="summary" style={{ marginHorizontal: compact ? 12 : 16, marginTop: 8, marginBottom: 4, borderRadius: 8, borderWidth: 1,
     borderColor: rolled ? withAlpha(c.statusWarning, 0.6) : c.border, backgroundColor: c.surface1, paddingHorizontal: 12, paddingVertical: 10, gap: 8 }}>
     <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
@@ -60,7 +60,7 @@ export function UpdateNotice({ theme, compact, openSettings }: { theme: Theme; c
   </View>;
 }
 
-/** The status card at the top of Settings → Updates. */
+/** The status card at the top of Settings → General. */
 function StatusCard({ view, theme, compact, onWhatsNew }: { view: UpdatesView; theme: Theme; compact: boolean; onWhatsNew: () => void }) {
   const c = theme.colors; const t = text(c);
   const now = useNow(30_000);
@@ -158,10 +158,10 @@ export function UpdatesSections({ theme, compact }: { theme: Theme; compact: boo
 const SETUP_CARDS: { mode: UpdateMode; hint: string }[] = [
   { mode: "auto", hint: "Waits until your agents are idle. Rolls back if the new version fails." },
   { mode: "notify", hint: "Shows new versions on Home. You choose when to install." },
-  { mode: "off", hint: "No checks. You can check from Settings → Updates." },
+  { mode: "off", hint: "No checks. You can check from Settings → General." },
 ];
 /**
- * Setup's Updates step: the same RPCs and controls as Settings → Updates, as radio cards. Reads without asking npm.
+ * Setup's Updates step: the same RPCs and controls as Settings → General, as radio cards. Reads without asking npm.
  * Saves on change; passing the step or skipping setup on a fresh install saves the pre-selected mode (server side).
  */
 export function UpdatesStep({ theme, compact }: { theme: Theme; compact: boolean }) {

@@ -9,7 +9,7 @@ import type { SelfInstall } from "./release-notes";
 import { settingsOf, type UpdatesFile } from "./updates";
 
 /**
- * Settings → Updates, end to end: when to ask npm, whether a new version may be installed, when, and what to show.
+ * Settings → General, end to end: when to ask npm, whether a new version may be installed, when, and what to show.
  *
  * Network: on its own, one registry request every six hours, and none at all when updates are Off. A new version
  * costs two more requests once (its provenance, cached in updates.json). Installing hands off to the detached

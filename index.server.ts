@@ -725,7 +725,7 @@ export default function contribute(server: PluginServerContext) {
     const cat = catalog ? await providerCatalog.read(fresh) : null;
     return { roles: Object.values(roles).map(r => ({ ...r, summary: roleSummary(r, labelsFor(r, cat)) })), invalid, catalog: cat, wait: await currentWait() };
   };
-  // What's new and Settings → Updates. Follow-up's own install comes from Paseo's plugin list, read once per worker.
+  // What's new and Settings → General. Follow-up's own install comes from Paseo's plugin list, read once per worker.
   const versions = new VersionsStore(directory);
   const updatesStore = new UpdatesStore(directory);
   let self: Promise<SelfInstall & { notes: ReleaseNote[] }> | null = null;
@@ -746,7 +746,7 @@ export default function contribute(server: PluginServerContext) {
   };
   handle(rpc.releaseNotesRpc, async () => releaseNotesView());
   handle(rpc.whatsNewSeenRpc, async ({ version }) => { await versions.seen(version); return releaseNotesView(); });
-  // Settings → Updates: see server/updater.ts. The registry snapshot lives in registry.json; installs run detached.
+  // Settings → General: see server/updater.ts. The registry snapshot lives in registry.json; installs run detached.
   const registry = new RegistryChecker({ packageName: "paseo-follow-up", fetch: (url, init) => fetch(url, init),
     load: () => readFile(join(directory, "registry.json"), "utf8").then(t => JSON.parse(t) as RegistrySnapshot, () => null),
     save: async snap => { const tmp = join(directory, `registry.json.${process.pid}.tmp`); await writeFile(tmp, JSON.stringify(snap), { mode: 0o600 }); await rename(tmp, join(directory, "registry.json")); } });

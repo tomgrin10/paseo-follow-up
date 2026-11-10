@@ -190,7 +190,7 @@ export const releaseNotesRpc = defineRpc({ name: "follow.release-notes", input: 
 /** What's new was closed for `version`: the host-wide record, for apps without local storage. Only moves forward. */
 export const whatsNewSeenRpc = defineRpc({ name: "follow.whats-new-seen", input: z.strictObject({ version: z.string().max(64) }), output: releaseNotesViewSchema });
 /**
- * Settings → Updates (and onboarding's Updates step). `check` asks the registry now: "settings" when the screen opens
+ * Settings → General (and onboarding's Updates step). `check` asks the registry now: "settings" when the screen opens
  * (skipped when a check ran in the last minute, or Mode is Off), "manual" for Check now. Without it, no request.
  */
 export const updatesRpc = defineRpc({ name: "follow.updates", input: z.strictObject({ check: z.enum(["settings", "manual"]).optional() }), output: updatesViewSchema });

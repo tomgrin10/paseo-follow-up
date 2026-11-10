@@ -4,7 +4,7 @@ import { INSTALL_KINDS, releaseNoteSchema as noteSchema } from "./changelog";
 export type { InstallKind } from "./changelog";
 
 /**
- * Settings → Updates: the view the server sends, and the words each state shows. Pure, so every state's copy is
+ * Settings → General: the view the server sends, and the words each state shows. Pure, so every state's copy is
  * testable without rendering. Also the contract for onboarding's Updates step: it reads `follow.updates` and writes
  * `follow.set-updates` with `{ mode, channel }`, exactly like Settings.
  */

@@ -246,3 +246,12 @@ test("watchdog: a different artifact than the one checked is never applied", asy
   assert.equal(await run(job, { connect: async () => client, sleep: async () => undefined }), "failed");
   assert.deepEqual(calls, ["preview 1.4.0-beta.24"]);
 });
+
+test("General's phone line: up to date with the version, or what's going on", async () => {
+  const { generalSummary } = await import("../shared/updates");
+  const v = { version: "1.4.0-beta.24", installKind: "npm" as const };
+  assert.equal(generalSummary({ ...v, phase: { kind: "current" } }), "Up to date · 1.4.0-beta.24");
+  assert.equal(generalSummary({ ...v, phase: { kind: "available", version: "1.4.0-beta.25", publishedAt: null } }), "Update available · 1.4.0-beta.25");
+  assert.equal(generalSummary({ ...v, phase: { kind: "rolled-back", version: "1.4.0-beta.25", from: "1.4.0-beta.24", reason: "x", at: 0 } }), "Update to 1.4.0-beta.25 rolled back");
+  assert.equal(generalSummary({ ...v, installKind: "git", phase: { kind: "current" } }), "Follow-up 1.4.0-beta.24 · managed by your checkout");
+});
