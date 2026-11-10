@@ -472,3 +472,43 @@ test("the developer's message clears the flag end to end; automation doesn't", a
   assert.equal(stateOf((await auto.inbox.store.snapshot()).entries.a1), "NEEDS");
   await done(); await auto.done();
 });
+
+// Stale run state (2026-11-10, Tom): a failed turn's Error flag outlived every later turn of an agent that kept running.
+test("a newer turn from anyone supersedes the last turn's failure or pause; outside facts stay", () => {
+  const failed = run([{ type: "turn_end", outcome: "failed", detail: "The turn failed: Subagent closed during a turn" }, { type: "ci", dedupeKey: "ci:1", detail: "Checks failing" }]);
+  const next = reduce(failed, { type: "message", from: "automation" }, at(5));
+  assert.deepEqual(next.needs?.reasons.map(r => r.reason), ["ci"], "the error is history; CI still needs you");
+  const paused = run([{ type: "turn_end", outcome: "canceled", guard: "attention", detail: "Paused" }]);
+  assert.equal(stateOf(reduce(paused, { type: "message", from: "automation" }, at(5))), "QUIET");
+  const again = reduce(next, { type: "turn_end", outcome: "failed", detail: "Failed again" }, at(6));
+  assert.equal(displayReason(again.needs)?.reason, "error", "a new failure flags again");
+  const perm = run([{ type: "permission", requestId: "r1", detail: "Allow?" }]);
+  assert.equal(stateOf(reduce(perm, { type: "message", from: "automation" }, at(5))), "NEEDS", "a permission is by request, not by turn");
+});
+
+test("a running agent's row never headlines a stale error; on 0.15 a stopped agent keeps it", async () => {
+  const running = await service([agent({ id: "a1", status: "running" })]);
+  await mark(running.inbox);
+  await running.inbox.turnEnded({ id: "a1", workspaceId: "w1" }, { kind: "failed", error: { message: "Subagent closed during a turn" } }, "t1");
+  // Paseo (and the directory) can still read "running" right after the failure: that turn's Error is real news.
+  assert.equal(displayReason((await running.inbox.list()).rows.find(r => r.agentId === "a1")?.needs ?? null)?.reason, "error", "just failed: Error shows");
+  await running.inbox.turnStarted({ id: "a1", workspaceId: "w1" }, "t2");
+  assert.equal((await running.inbox.list()).rows.find(r => r.agentId === "a1")?.needs, null, "a newer turn: no Error headline");
+  const stopped = await service([agent({ id: "a1", status: "idle" })]);
+  await mark(stopped.inbox);
+  await stopped.inbox.turnEnded({ id: "a1", workspaceId: "w1" }, { kind: "failed", error: { message: "Subagent closed during a turn" } }, "t1");
+  assert.equal(displayReason((await stopped.inbox.list()).rows.find(r => r.agentId === "a1")?.needs ?? null)?.reason, "error", "stopped: the failure still needs you");
+  await running.done(); await stopped.done();
+});
+
+test("load repair: an error from before a restart clears for an agent that is running now (0.16 resumes it)", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "inbox-"));
+  const before = await service([agent({ id: "a1", status: "idle" })], { dir });
+  await mark(before.inbox);
+  await before.inbox.turnEnded({ id: "a1", workspaceId: "w1" }, { kind: "failed", error: { message: "Daemon restarted" } }, "t1");
+  assert.equal(stateOf((await before.inbox.store.snapshot()).entries.a1), "NEEDS");
+  const after = await service([agent({ id: "a1", status: "running" })], { dir });
+  await after.inbox.start();
+  assert.equal(stateOf((await after.inbox.store.snapshot()).entries.a1), "QUIET", "persisted, not only hidden");
+  await after.done();
+});

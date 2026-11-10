@@ -334,6 +334,12 @@ export function briefStep(prev: Brief | null, event: BriefEvent, now: string): {
     // A turn the developer didn't start (another agent, Follow-up, a continuation, a schedule) leaves the card open:
     // only the developer answers it, and only a newer brief from the same agent supersedes it.
     case "turn_start":
+      // A card that only reported the last turn's failure or pause is history once a new turn starts: the agent is
+      // running again (RUN_STATE_REASONS in shared/inbox.ts). A card with open questions stays, as above.
+      if (prev?.state === "open" && (prev.kind === "error" || prev.kind === "paused") && !prev.questionIds.length) {
+        const b = collapse(prev, "superseded", "The agent started a new turn");
+        return { brief: b, appends: [b] };
+      }
       return keep;
     case "message": {
       if (prev?.state !== "open") return keep;
