@@ -11,6 +11,7 @@ import * as rpc from "./shared/contracts";
 import { browserRepositories, browserWorkspaces, prClaims, prOwner } from "./server/pr-owner";
 import { type Workspace } from "./shared/model";
 import { isWorkspaceRoot } from "./server/workspace-agent";
+import { BackgroundAgents } from "./server/background-agents";
 import { Store } from "./server/store";
 import { PriorityStore } from "./server/priorities";
 import { UsageReader } from "./server/usage";
@@ -1056,7 +1057,11 @@ export default function contribute(server: PluginServerContext) {
   handle(rpc.onboardingChecksRpc, async ({ fresh }, { paseo }) => { await requireReady(); seen(paseo); return readiness.run(!!fresh); });
 
   type SessionOpen = (input: { request: PluginSessionOpenRequest }, context: PluginHookContext) => Promise<PluginSessionOpenRequest | void>;
-  const withWait = (handler: SessionOpen): SessionOpen => async (input, context) => wait.open((await handler(input, context)) ?? input.request);
+  // Paseo 0.16 background agents (another plugin's helpers) get no root treatment: no tools, no Wait, no needs_you or
+  // Stop-hook nudge. The flag is only in the agent snapshot, so session open reads it once per agent.
+  const background = new BackgroundAgents();
+  const isBackground = (agentId: string, paseo: PluginHandlerContext["paseo"]) => background.check(agentId, async id => (await paseo.agents.ref(id).refresh())?.agent as { background?: unknown } | undefined);
+  const withWait = (handler: SessionOpen): SessionOpen => async (input, context) => wait.open((await handler(input, context)) ?? input.request, { background: await isBackground(input.request.agentId, context.paseo) });
   const removers = [
     server.on("agent.permission_requested", async (event, { paseo }) => { trustApi = paseo; await trust.handle(event.agent, event.request as never).catch(() => undefined); }),
     displaySettings.subscribe(() => void writeBriefState().catch(() => undefined)),
@@ -1102,6 +1107,7 @@ export default function contribute(server: PluginServerContext) {
     server.before("agent.session_open", withWait(async ({ request }, { paseo }) => {
       await ready;
       if (loadError || stopped || request.purpose !== "interactive") return request;
+      if (await isBackground(request.agentId, paseo)) return request;
       // The Overseer: needs_you (no Stop-hook nudge), the action tools and its routing tools. Never tracked.
       if (request.labels[OVERSEER_LABEL] === "1" && ["claude", "codex"].includes(request.provider)) {
         const env = { ...request.env, FOLLOW_THROUGH_OVERSEER: "1", FOLLOW_THROUGH_BRIEF: request.provider };
