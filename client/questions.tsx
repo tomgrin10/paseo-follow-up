@@ -10,6 +10,7 @@ import { answerQuestionRpc } from "../shared/contracts";
 import type { Workspace } from "../shared/model";
 import { OTHER, OTHER_LABEL, answerLabel, isOpen, isOther, questionState, replyText, type Question } from "../shared/questions";
 import { ago } from "../shared/attention";
+import { sentence } from "../shared/errors";
 import { activity, type ActivityTone } from "../shared/activity";
 import { Button, Card, CardRow, Chip, FoldRow, IconButton, SubmitScope, errorText, text, type Theme } from "./kit";
 import { Spinner } from "./motion";
@@ -27,7 +28,7 @@ const who = (w: Workspace, agentId: string | null) => !agentId || agentId === w.
  * pass null only where the surface shows that itself (QuestionBody's Not sent · Retry line).
  */
 export function meanwhile(w: Workspace, q: Question, pending: PendingAnswer | null | undefined): { icon: string; color: (c: Colors) => string; text: string } {
-  if (pending?.error) return { icon: "CircleAlert", color: c => c.statusDanger, text: `Your answer wasn't sent: ${pending.error}. Open it to retry; your words are kept.` };
+  if (pending?.error) return { icon: "CircleAlert", color: c => c.statusDanger, text: `Your answer wasn't sent: ${sentence(pending.error)} Open it to retry; your words are kept.` };
   if (pending) return { icon: "Send", color: c => c.foregroundMuted, text: "Sending your answer…" };
   if (q.taskId && !q.options.length) return { icon: "Clock", color: c => c.foregroundMuted, text: "A task is blocked on this. The agent works on the rest." };
   switch (questionState(q)) {
