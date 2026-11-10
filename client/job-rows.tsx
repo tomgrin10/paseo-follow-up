@@ -40,7 +40,8 @@ export function useAgentSettings() {
   return { query, change, refresh, toast };
 }
 
-export type JobExtra = (r: RoleView, save: (entry: SavedRole | null) => void, busy: boolean) => ReactNode;
+/** Settings' per-row More: what its toggle says (it names what's inside) and what it shows. */
+export type JobExtra = { label: (r: RoleView) => string; render: (r: RoleView, save: (entry: SavedRole | null) => void, busy: boolean) => ReactNode };
 
 export function JobRows({ theme, compact, order, extra, preselect = false }: {
   theme: Theme; compact: boolean; order: readonly AgentRole[];
@@ -125,7 +126,7 @@ export function JobRow({ row, r, catalog, loading, theme, compact, busy, open, o
       <Text accessibilityRole="header" style={[t.label, { flex: 1 }]}>{row.title}</Text>
       {enabled !== undefined && <Switch theme={theme} compact={compact} label={enabled ? "On" : "Off"} accessibilityLabel={row.title} value={enabled} disabled={!onEnable} onChange={v => onEnable?.(v)} />}
     </View>
-    <Text style={t.meta}>{row.does}</Text>
+    <Text style={[t.meta, off && { opacity: 0.6 }]}>{row.does}</Text>
     <View style={{ opacity: off ? 0.6 : 1, gap: 6, marginTop: 8 }}>
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
         {loading
@@ -139,22 +140,25 @@ export function JobRow({ row, r, catalog, loading, theme, compact, busy, open, o
         {row.recommended && <Chip theme={theme} label="Recommended" color={c.foregroundMuted} />}
       </View>
       <Text style={[t.meta, { fontSize: 12, lineHeight: 16 }]}>{row.hint ? `${row.need} ${row.hint}` : row.need}</Text>
-      {row.notice && <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 8 }}>
+      {row.notice && <View style={{ gap: 6, alignItems: "flex-start" }}>
         <Text accessibilityRole={row.notice.tone === "warning" ? "alert" : undefined} style={[t.meta, { fontSize: 12, lineHeight: 16, color: row.notice.tone === "warning" ? c.statusWarning : c.foregroundMuted }]}>{row.notice.text}</Text>
-        {use && <Pressable accessibilityRole="button" accessibilityLabel={`Use ${row.recPick} for ${row.title}`} disabled={busy} onPress={use} hitSlop={8} style={{ minHeight: compact ? 44 : 24, justifyContent: "center" }}>
-          <Text style={[t.label, { fontSize: 12, textDecorationLine: "underline" }]}>Use</Text>
-        </Pressable>}
+        {/* Can't run: a real button, the row's one way back. Only differs: the developer chose it, so a quiet link. */}
+        {use && (row.notice.tone === "warning"
+          ? <Button theme={theme} compact={compact} kind="secondary" title="Use recommended" accessibilityLabel={`Use ${row.recPick} for ${row.title}`} disabled={busy} onPress={use} />
+          : <Pressable accessibilityRole="button" accessibilityLabel={`Use ${row.recPick} for ${row.title}`} disabled={busy} onPress={use} hitSlop={8} style={{ minHeight: compact ? 44 : 24, justifyContent: "center" }}>
+              <Text style={[t.label, { fontSize: 12, textDecorationLine: "underline" }]}>Use recommended</Text>
+            </Pressable>)}
       </View>}
       {open && !loading && <View style={{ marginTop: 4, borderWidth: 1, borderColor: c.border, borderRadius: 10, overflow: "hidden" }}>
         <RolePickers r={r} catalog={catalog} busy={busy} save={save} />
       </View>}
       {extra && <>
-        <Pressable accessibilityRole="button" accessibilityState={{ expanded: more }} aria-expanded={more} accessibilityLabel={`More ${row.title} settings`} onPress={() => setMore(!more)} hitSlop={6}
+        <Pressable accessibilityRole="button" accessibilityState={{ expanded: more }} aria-expanded={more} accessibilityLabel={`${row.title}: ${extra.label(r)}`} onPress={() => setMore(!more)} hitSlop={6}
           style={{ flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start", minHeight: compact ? 44 : 24 }}>
-          <Text style={[t.meta, { color: c.foreground }]}>More</Text>
+          <Text style={[t.meta, { color: c.foreground }]}>{extra.label(r)}</Text>
           <Icon name={more ? "ChevronUp" : "ChevronDown"} size={12} color={c.foregroundMuted} />
         </Pressable>
-        {more && <View style={{ borderWidth: 1, borderColor: c.border, borderRadius: 10, overflow: "hidden" }}>{extra(r, save, busy)}</View>}
+        {more && <View style={{ borderWidth: 1, borderColor: c.border, borderRadius: 10, overflow: "hidden" }}>{extra.render(r, save, busy)}</View>}
       </>}
     </View>
   </View>;

@@ -1,4 +1,4 @@
-import { ROLE_DEFAULTS, ROLE_INFO, isJobRole, labelsFor, roleSummary, type AgentRole, type AgentSettingsView, type Catalog, type RoleConfig, type SavedRole } from "./agent-settings";
+import { EMPTY_AGENT_SETTINGS, ROLE_DEFAULTS, ROLE_INFO, isJobRole, labelsFor, resolveRole, roleSummary, type AgentRole, type AgentSettingsView, type Catalog, type RoleConfig, type SavedRole } from "./agent-settings";
 import { ROLE_NEED, isRecommended, recommend, type Recommendation } from "./recommend";
 
 /**
@@ -40,7 +40,7 @@ export function recLabel(rec: Recommendation, catalog: Catalog | null | undefine
   const config: RoleConfig = { role: rec.role, provider: rec.provider, model: rec.model, thinking: rec.thinking, mode: null, same: false, dailyCap: null, maxPromptChars: null, cadenceMinutes: null, isDefault: false };
   const label = roleSummary(config, labelsFor(config, catalog));
   // A fallback pick is the provider's own default model: say which, when the catalog knows.
-  if (!rec.model && rec.role !== "overseer") {
+  if (!rec.model && !(rec.role === "overseer" && rec.provider === "claude")) {
     const d = catalog?.providers.find(p => p.id === rec.provider)?.models.find(m => m.isDefault);
     if (d) return label.replace(/Default$/, `Default (${d.label})`);
   }
@@ -83,6 +83,28 @@ export function recommendedEntry(r: RoleView, rec: Recommendation): SavedRole {
   const provider = rec.provider ?? r.provider;
   const mode = provider === r.provider ? r.mode : provider === ROLE_DEFAULTS[r.role].provider ? ROLE_DEFAULTS[r.role].mode : NO_PROMPT_MODE[provider] ?? null;
   return { ...keep, provider, model: rec.model, thinking: rec.thinking, ...(mode && !isJobRole(r.role) ? { mode } : {}), ...(r.role === "recovery" ? { same: false } : {}) };
+}
+
+/**
+ * What Reset to defaults saves. Normally nothing (the declared defaults, limits and schedule too). When the declared
+ * default can't run here but something can, the recommendation instead, with the default limits and schedule, so a
+ * reset never leaves a job that won't run. `label` names that pick for the row's copy.
+ */
+export function resetEntry(role: AgentRole, catalog: Catalog | null | undefined): { entry: SavedRole | null; label: string | null } {
+  const d = resolveRole(EMPTY_AGENT_SETTINGS, role);
+  const row = jobRow({ ...d, summary: roleSummary(d) }, catalog);
+  if (!(row.notice?.tone === "warning" && row.rec)) return { entry: null, label: null };
+  // Only the pick is saved; limits and schedule stay unsaved, which is their default.
+  const { dailyCap: _c, maxPromptChars: _m, cadenceMinutes: _k, ...pick } = recommendedEntry({ ...d, summary: row.pick }, row.rec);
+  return { entry: pick, label: row.recPick };
+}
+
+/** Whether Reset to defaults has nothing left to do for this job. */
+export function isReset(r: RoleView, catalog: Catalog | null | undefined): boolean {
+  const { entry } = resetEntry(r.role, catalog);
+  if (!entry) return r.isDefault;
+  const d = resolveRole(EMPTY_AGENT_SETTINGS, r.role);
+  return jobRow(r, catalog).recommended && r.dailyCap === d.dailyCap && r.maxPromptChars === d.maxPromptChars && r.cadenceMinutes === d.cadenceMinutes;
 }
 
 export type JobsHeader = { text: string; tone: "muted" | "warning"; action: "use" | "retry" | "check" | null };

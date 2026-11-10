@@ -291,7 +291,7 @@ function CheckRow({ theme, compact, row, first, checking, deps }: { theme: Theme
           <Text selectable numberOfLines={1} style={{ flexShrink: 1, color: c.foreground, fontSize: 12, lineHeight: 17, fontFamily: Platform.OS === "ios" ? "Menlo" : "ui-monospace, SFMono-Regular, Menlo, monospace" }}>{row.fix.command}</Text>
           <IconButton theme={theme} compact={compact} icon="Copy" label={`Copy ${row.fix.command}`} onPress={() => { void copyText(row.fix!.command!).then(() => toast.show("Copied", { variant: "success" }), () => toast.error("Couldn't copy here")); }} />
         </View>}
-        {row.fix.settings && <Button theme={theme} compact={compact} kind="ghost" icon="Settings" title="Open Settings, Agents" onPress={() => deps.openSettings(row.fix!.settings!)} />}
+        {row.fix.settings && <Button theme={theme} compact={compact} kind="ghost" icon="Settings" title="Open Settings → Agents" onPress={() => deps.openSettings(row.fix!.settings!)} />}
       </View>}
     </View>
   </View>;
@@ -381,7 +381,7 @@ function HelpersStep({ theme, compact, deps }: { theme: Theme; compact: boolean;
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center" }}>
       <Text style={t.meta}>Permissions and limits are in </Text>
       <Pressable accessibilityRole="link" accessibilityLabel="Open Follow-up settings, Agents" onPress={() => deps.openSettings("agents")} hitSlop={8} style={{ minHeight: compact ? 44 : 20, justifyContent: "center" }}>
-        <Text style={[t.meta, { color: c.foreground, textDecorationLine: "underline" }]}>Settings, Agents</Text>
+        <Text style={[t.meta, { color: c.foreground, textDecorationLine: "underline" }]}>Settings → Agents</Text>
       </Pressable>
       <Text style={t.meta}>.</Text>
     </View>

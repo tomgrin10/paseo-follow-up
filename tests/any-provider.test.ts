@@ -136,8 +136,8 @@ test("recommendations: OpenCode and Copilot go by the catalog's own wording firs
 
 test("recommendations: nothing fits gives the provider's default and a hint; nothing available gives nothing", () => {
   const rec = recommend("about", [provider("pi", [model("pi-1", { isDefault: true })])]);
-  assert.deepEqual([rec.provider, rec.model, rec.source], ["pi", null, "fallback"]); assert.match(rec.hint!, /small, fast model/);
-  assert.equal(recommend("overseer", [provider("pi", [])]).hint, "Pick your strongest model if you have one.");
+  assert.deepEqual([rec.provider, rec.model, rec.source], ["pi", null, "fallback"]); assert.match(rec.hint!, /says which is small/);
+  assert.equal(recommend("overseer", [provider("pi", [])]).hint, "None of its models says which is strongest, so this is its default.");
   assert.equal(recommend("about", [provider("claude", [], false)]).source, "none");
   assert.ok(isRecommended({ provider: "codex", model: "gpt-6-luna-mini", same: false }, recommend("about", [CODEX])));
   assert.ok(!isRecommended({ provider: "codex", model: null, same: false }, recommend("about", [CODEX])));
