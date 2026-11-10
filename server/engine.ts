@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { completionBlockers, type Workspace, type State, type Batch } from "../shared/model";
+import { completionBlockers, completionCheck, completionGate, revokesDone, type CompletionGate, type Workspace, type State, type Batch } from "../shared/model";
 import { Store } from "./store";
 import { Github } from "./github";
 import { batchPrompt, tasksFor, isRecovery, needsPrObservations, type TaskWording } from "./tasks";
@@ -144,7 +144,12 @@ export class Engine {
           unacknowledged.state = "blocked";
           unacknowledged.result = unacknowledged.acknowledgmentError ? `Acknowledgment was refused for agent ${unacknowledged.acknowledgmentError.agentId}: ${unacknowledged.acknowledgmentError.error}` : "No accepted acknowledgment is recorded. Check the assigned agent’s result and any tracker errors before retrying.";
         }
-        if (w.completion && completionBlockers(w, this.now()).some(b => !b.startsWith("Wait for active agent"))) w.completion = null;
+        if (w.completion && revokesDone(w, this.now())) w.completion = null;
+        if (w.declaration && !w.completion) {
+          const gate = completionGate(w, this.now());
+          if (gate.blockers.some(b => b.owner !== "wait")) w.declaration = null;
+          else if (!gate.blockers.length) acceptDeclaration(w, gate, this.now());
+        }
       });
       if (pruned.length) await this.archive(original.id, pruned).catch(() => undefined);
       for (const b of (await this.store.snapshot()).workspaces.find(w => w.id === original.id)!.batches.filter(b => isRecovery(b) && b.state === "sent")) {
@@ -328,6 +333,9 @@ export class Engine {
   }
   private reconcile(w: Workspace): void {
     const tasks = tasksFor(w, this.now(), this.wording);
+    // Hysteresis: a queued Done check survives the agent's own turns; only a real change (new work, Done) ends it.
+    const queuedCheck = w.batches.find(b => b.state === "pending" && completionCheck(b));
+    if (queuedCheck && w.runtimeBusy && !tasks.some(t => t.kind === "completion")) tasks.push(...tasksFor({ ...w, runtimeBusy: false }, this.now(), this.wording).filter(t => t.kind === "completion"));
     const delivered = new Set(w.batches.filter(b => ["sending", "sent", "completed", "blocked", "uncertain"].includes(b.state)).flatMap(b => b.tasks.map(t => `${t.key}:${t.fingerprint}`)));
     const fresh = tasks.filter(t => !delivered.has(`${t.key}:${t.fingerprint}`));
     let pending = w.batches.find(b => b.state === "pending" && !isRecovery(b));
@@ -346,9 +354,15 @@ export class Engine {
     if (fresh.some(t => ["conflict", "review", "checks", "restack"].includes(t.kind) && w.batches.filter(b => b.id !== pending!.id && ["completed", "blocked"].includes(b.state)).filter(b => b.tasks.some(old => old.key === t.key)).length >= 3)) {
       pending.state = "blocked"; pending.result = "This PR still needs repairs after three follow-up batches. Review it before retrying.";
     }
-    w.completion = null;
+    // New repairs or tasks reopen the work; the Done check itself does not.
+    if (fresh.some(t => t.kind !== "completion")) { w.completion = null; w.declaration = null; }
   }
-  async declareDone(agentId: string, message: string, workspaceId?: string): Promise<{ workspace: Workspace; blockers: string[] }> {
+  /**
+   * Accepts Done when nothing the agent or developer must do remains. A deploy Follow-up can't confirm is not a
+   * blocker: Done is recorded with a "Deploy not confirmed by Follow-up" note and the agent's summary as evidence.
+   * Repeating it is a no-op (alreadyDone), and `next` tells the agent whether anything is its to fix.
+   */
+  async declareDone(agentId: string, message: string, workspaceId?: string): Promise<DoneResult> {
     const current = ownedWorkspace(await this.store.snapshot(), agentId, workspaceId);
     // Delivery may wait for this very turn to finish, so declarations observe independently.
     const [runtime, observations] = await Promise.all([
@@ -366,15 +380,20 @@ export class Engine {
         if (observation?.snapshot) recordSnapshot(pr, observation.snapshot, this.now());
       }
       // The declaration is made inside the owner's turn; that foreground turn is allowed.
-      const unsentCompletion = (b: Batch) => b.state === "pending" && b.tasks.every(t => t.kind === "completion");
-      const copy = { ...w, runtimeBusy: false, batches: w.batches.filter(b => !unsentCompletion(b)) };
-      const blockers = completionBlockers(copy, this.now());
-      if (w.archived) blockers.push("Workspace is archived");
-      if (!blockers.length) {
-        for (const b of w.batches.filter(unsentCompletion)) { b.state = "cancelled"; b.result = "The main agent verified completion directly before this check was sent."; }
-        w.completion = { summary: message, declaredAt: new Date(this.now()).toISOString() };
+      const gate = completionGate({ ...w, runtimeBusy: false }, this.now());
+      if (w.archived) gate.blockers.push({ owner: "developer", text: "Workspace is archived" });
+      const blockers = gate.blockers.map(b => b.text);
+      if (gate.blockers.length) {
+        // Nothing left for the agent or developer: keep the declaration and let Follow-up finish it, so nobody retries.
+        const stored = gate.blockers.every(b => b.owner === "wait");
+        w.declaration = stored ? { summary: message, at: new Date(this.now()).toISOString() } : null;
+        return { workspace: w, blockers, unconfirmed: gate.unconfirmed, alreadyDone: false, next: doneGuidance(gate, false, stored) };
       }
-      return { workspace: w, blockers };
+      w.declaration = null;
+      const alreadyDone = !!w.completion;
+      for (const b of w.batches.filter(b => b.state === "pending" && completionCheck(b))) { b.state = "cancelled"; b.result = "The main agent declared Done."; }
+      if (!alreadyDone) w.completion = { summary: message, declaredAt: new Date(this.now()).toISOString(), ...(gate.unconfirmed.length ? { unconfirmed: gate.unconfirmed } : {}) };
+      return { workspace: w, blockers, unconfirmed: gate.unconfirmed, alreadyDone, next: doneGuidance(gate, alreadyDone) };
     });
   }
   async acknowledge(agentId: string, batchId: string, outcome: "completed" | "blocked", result: string, workspaceId?: string): Promise<Workspace> {
@@ -393,6 +412,25 @@ export class Engine {
     return w;
   }
   async stop(): Promise<void> { this.stopped = true; await this.running; await Promise.allSettled(this.recoveryOperations); }
+}
+
+export type DoneResult = { workspace: Workspace; blockers: string[]; unconfirmed: string[]; alreadyDone: boolean; next: string };
+/** The declare_done reply in words: what's missing, who can move it, and whether calling again could help. */
+/** Records a stored declaration as Done; the Done check it answers is no longer needed. */
+function acceptDeclaration(w: Workspace, gate: CompletionGate, now: number): void {
+  w.completion = { summary: w.declaration!.summary, declaredAt: new Date(now).toISOString(), ...(gate.unconfirmed.length ? { unconfirmed: gate.unconfirmed } : {}) };
+  w.declaration = null;
+  for (const b of w.batches.filter(b => b.state === "pending" && completionCheck(b))) { b.state = "cancelled"; b.result = "The main agent declared Done."; }
+}
+export function doneGuidance(gate: CompletionGate, alreadyDone = false, stored = false): string {
+  const note = gate.unconfirmed.length ? ` Follow-up couldn't confirm what production serves for ${gate.unconfirmed.join(", ")}, so Done carries "Deploy not confirmed by Follow-up" with your summary as the evidence.` : "";
+  if (!gate.blockers.length) return alreadyDone ? `Already Done; nothing changed. Don't call declare_done again.${note}` : `Done accepted.${note} Nothing else to do; the developer archives the workspace.`;
+  const yours = gate.blockers.filter(b => b.owner === "agent").map(b => b.text);
+  const theirs = gate.blockers.filter(b => b.owner !== "agent").map(b => `${b.text} (${b.owner === "developer" ? "needs the developer" : "Follow-up rechecks on its own"})`);
+  const parts = [yours.length ? `Yours to fix, then call declare_done again: ${yours.join("; ")}.` : "", theirs.length ? `Not yours to fix: ${theirs.join("; ")}.` : ""];
+  if (stored) parts.push("Follow-up kept your declaration and records Done on its own once these clear. Don't call declare_done again; end the turn.");
+  else if (!yours.length) parts.push("Don't call declare_done again until one of these changes; end the turn. If the developer needs to act, say so once.");
+  return `Not Done yet. ${parts.filter(Boolean).join(" ")}`;
 }
 
 export function findWorkspace(state: State, id: string): Workspace {
