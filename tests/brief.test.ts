@@ -48,13 +48,47 @@ test("§5.2 row 3: PR facts merge into the winning brief; a merge-ready review g
   assert.deepEqual(review.moves.map(m => m.label), ["Squash & merge #813", "Open PR"]);
   assert.deepEqual(pickBrief({ agent: { ask: "Review #813", kind: "review" }, pr: { ...prFacts, mergeable: false } }).moves.map(m => m.kind), ["open_pr"], "no merge move when it can't merge");
   const error = pickBrief({ error: { message: "x" }, pr: prFacts });
-  assert.equal(error.facts.length, 2, "facts merge into a blocking brief too");
+  assert.deepEqual(error.facts, [], "a failed turn is about the turn: no CI state beside an API error");
+  assert.equal(error.sourceLine, "From the failed turn.");
   const followup = pickBrief({ pr: { ...prFacts, event: "Checks failed on #812 lint, unit-api" } });
   assert.equal(followup.source, "followup"); assert.equal(followup.ask, "Checks failed on #812 lint, unit-api");
   assert.equal(pickBrief({ pr: prFacts }).source, "none", "PR facts without an event never invent an ask");
   // Q: a merge-ready PR is still a "Needs you" brief, kind review.
   assert.equal(review.kind, "review");
 });
+// Tom (2026-11-10): an Action brief about something else showed the workspace's PR checks and review state.
+// Root cause: pickBrief merged the agent's lead PR facts into every brief. Facts now come only from the PR a brief
+// references: a review brief's PR, or a PR it links (with that PR's own facts). `brief-pr-facts-referenced`.
+const other: PrState = { key: "acme/app#900", number: 900, url: "https://example.invalid/pr/900", title: "Retry budget", facts: [{ icon: "CircleX", label: "Checks failed · lint", tone: "bad" }], mergeable: false, event: null };
+test("a brief shows PR facts only for a PR it references, never the lead PR by default", () => {
+  const action = pickBrief({ agent: { ask: "Rotate the staging API key", kind: "action" }, pr: prFacts, prs: [prFacts, other] });
+  assert.deepEqual(action.facts, [], "an Action brief about a key rotation shows no PR state");
+  assert.equal(action.factsPr, null);
+  assert.equal(action.sourceLine, "Stated by the agent.", "the source line doesn't claim PR state it doesn't show");
+  const decided = pickBrief({ agent: { ...decision, links: [{ label: "Retry budget", pr: other.key }] }, pr: prFacts, prs: [prFacts, other] });
+  assert.deepEqual(decided.facts.map(f => f.label), ["Checks failed · lint"], "a linked PR shows its own facts, not the lead's");
+  assert.equal(decided.factsPr, other.key);
+  assert.match(decided.sourceLine, /PR, CI and review state from Follow-up/);
+  const review = pickBrief({ agent: { ask: "Review #900", kind: "review", links: [{ label: "#900", pr: other.key }] }, pr: prFacts, prs: [prFacts, other] });
+  assert.equal(review.factsPr, other.key); assert.deepEqual(review.moves.map(m => m.prKey), [other.key], "the review's moves act on the PR it's about");
+  const gone = pickBrief({ agent: { ask: "Review #901", kind: "review", links: [{ label: "#901", pr: "acme/app#901" }] }, pr: prFacts, prs: [prFacts] });
+  assert.deepEqual(gone.facts, [], "a linked PR Follow-up can't read shows nothing, not the lead PR's state");
+  const lead = pickBrief({ agent: { ask: "Review and merge #813", kind: "review" }, pr: prFacts, prs: [prFacts, other] });
+  assert.equal(lead.factsPr, prFacts.key, "a review that links nothing is about the agent's own PR");
+});
+test("invariant brief-pr-facts-referenced: no brief shows PR facts for a PR it doesn't reference", async () => {
+  const { briefFactsViolations } = await import("../shared/status-invariants");
+  const linkSets = [[], [{ label: "#900", pr: other.key }], [{ label: "#901", pr: "acme/app#901" }], [{ label: "docs", url: "https://example.invalid" }]];
+  let checked = 0;
+  for (const kind of ["action", "decision", "review", "done", "unknown"] as const) for (const links of linkSets) for (const blocking of [{}, { error: { message: "boom" } }, { paused: { note: null, resetsAt: "14:00" } }]) {
+    const b = pickBrief({ ...blocking, agent: { ask: "Do the thing", kind: kind === "unknown" ? "action" : kind, links, ...(kind === "decision" ? { decisions: decision.decisions } : {}) }, pr: { ...prFacts, event: kind === "unknown" ? "Checks failed on #813" : null }, prs: [prFacts, other] });
+    assert.deepEqual(briefFactsViolations({ ...b, id: "brief:t" }), [], `${kind} ${JSON.stringify(links)} ${Object.keys(blocking)}`); checked++;
+  }
+  assert.ok(checked >= 60);
+  assert.deepEqual(briefFactsViolations({ id: "brief:x", kind: "action", source: "agent", facts: prFacts.facts, factsPr: prFacts.key, links: [] }), [{ id: "brief-pr-facts-referenced", detail: "brief:x shows acme/app#813's state but doesn't reference it" }]);
+  assert.deepEqual(briefFactsViolations({ id: "brief:y", kind: "action", source: "agent", facts: prFacts.facts, factsPr: null, links: [] }), [{ id: "brief-pr-facts-referenced", detail: "brief:y shows PR state without naming the PR" }]);
+});
+
 test("§5.2 rows 4–5: with no extraction (out of scope) and nothing stated, the honest fallback, slim and quote-free", () => {
   const b = pickBrief({ extracted: null });
   assert.equal(b.source, "none"); assert.equal(b.kind, "unknown"); assert.equal(b.slim, true);
@@ -116,9 +150,14 @@ test("§6 permission answered retires the slim permission brief, and no other", 
   assert.equal(briefStep(open(), { type: "permission_resolved" }, at(1)).appends.length, 0);
 });
 test("§6 CI red or review threads on an idle agent refresh the open brief's facts in place", () => {
-  const b = open();
-  const r = briefStep(b, { type: "facts", facts: [{ icon: "CircleX", label: "Checks failed · lint", tone: "bad" }] }, at(4));
+  const b = open("brief:t1", { factsPr: prFacts.key, facts: prFacts.facts });
+  const r = briefStep(b, { type: "facts", prKey: prFacts.key, facts: [{ icon: "CircleX", label: "Checks failed · lint", tone: "bad" }] }, at(4));
   assert.equal(r.brief!.id, b.id); assert.equal(r.brief!.at, b.at, "the age doesn't reset"); assert.equal(r.brief!.facts[0].label, "Checks failed · lint");
+});
+test("§6 a PR's new state never lands on a brief about something else", () => {
+  const red = [{ icon: "CircleX", label: "Checks failed · lint", tone: "bad" as const }];
+  assert.equal(briefStep(open(), { type: "facts", prKey: prFacts.key, facts: red }, at(4)).appends.length, 0, "a brief with no PR stays without one");
+  assert.equal(briefStep(open("brief:t1", { factsPr: other.key, facts: other.facts }), { type: "facts", prKey: prFacts.key, facts: red }, at(4)).appends.length, 0, "another PR's state doesn't replace this one's");
 });
 
 // ---------- needs_you validation (§7.1) ----------
@@ -146,7 +185,7 @@ test("needs_you validation mirrors ask_question: lengths, 2–5 options, a recom
 // ---------- the Inbox service: briefs at the real hook points ----------
 
 const agent = (patch: Partial<AgentInfo> & { id: string }): AgentInfo => ({ workspaceId: "w1", parentAgentId: null, title: "Main", status: "idle", archivedAt: null, updatedAt: T0, lastUserMessageAt: null, requiresAttention: false, attentionReason: null, ...patch });
-async function service(agents: AgentInfo[], o: { tails?: Record<string, unknown[]>; calls?: Record<string, NeedsYouRecord>; pr?: PrState | null; pauses?: GuardPause[]; now?: () => number; ledger?: Sources["ledger"]; callDelay?: number; settleMs?: number } = {}) {
+async function service(agents: AgentInfo[], o: { tails?: Record<string, unknown[]>; calls?: Record<string, NeedsYouRecord>; pr?: PrState | null; prs?: PrState[]; pauses?: GuardPause[]; now?: () => number; ledger?: Sources["ledger"]; callDelay?: number; settleMs?: number } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "brief-"));
   const appended: { agentId: string; brief: Brief }[] = [];
   const directory: Directory = {
@@ -158,7 +197,7 @@ async function service(agents: AgentInfo[], o: { tails?: Record<string, unknown[
     enabled: async () => ({ enable_inbox: true, enable_inbox_pr_closed: true }), directory,
     sources: { ledger: o.ledger ?? (async () => (await inbox.store.snapshot()).ledger), defer: async () => false, session: async () => false, schedule: async () => false },
     guard: async () => o.pauses ?? null, graceMs: 5, permissionSettleMs: o.settleMs ?? 30_000, settleMs: 40, settleStepMs: 5, now: () => now(),
-    briefs: { async sink(agentId, brief) { appended.push({ agentId, brief }); }, async call(id) { if (o.callDelay) await new Promise(r => setTimeout(r, o.callDelay)); return o.calls?.[id] ?? null; }, async pr(_id, event) { return o.pr ? { ...o.pr, event: event ?? null } : null; } },
+    briefs: { async sink(agentId, brief) { appended.push({ agentId, brief }); }, async call(id) { if (o.callDelay) await new Promise(r => setTimeout(r, o.callDelay)); return o.calls?.[id] ?? null; }, async pr(_id, event) { return o.pr ? { ...o.pr, event: event ?? null } : null; }, async prs() { return o.prs ?? (o.pr ? [o.pr] : []); } },
   });
   await inbox.store.mutate(s => { s.importedAt = T0; s.lastSeen = at(0); s.primedAt = T0; });
   return { inbox, appended, setNow: (f: () => number) => { now = f; }, entry: async (id = "main") => (await inbox.store.snapshot()).entries[id], done: () => rm(dir, { recursive: true, force: true }) };
@@ -319,6 +358,13 @@ test("§6 sign off and undo (single and batch) update the brief and re-append it
   await s.inbox.act({ action: "undo", agentIds: ["main"] });
   assert.equal((await s.entry()).brief?.state, "open");
   assert.deepEqual(s.appended.map(a => a.brief.state), ["open", "signed", "open"]);
+  await s.done();
+});
+test("an Action brief made while the agent's PR is in flight shows none of that PR's state", async () => {
+  const s = await service([agent({ id: "main" })], { pr: prFacts, calls: { main: { at: Date.parse(at(1)), turnId: "t1", call: { ask: "Rotate the staging API key", kind: "action" } } } });
+  await s.inbox.turnEnded(main, { kind: "completed" }, "t1");
+  const b = (await s.entry()).brief!;
+  assert.equal(b.kind, "action"); assert.deepEqual(b.facts, []); assert.equal(b.sourceLine, "Stated by the agent.");
   await s.done();
 });
 test("§6 CI red on an idle agent: facts refresh an open brief, or an S5 brief is made", async () => {
