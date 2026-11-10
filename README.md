@@ -38,7 +38,7 @@ Every switch in setup is the same one Settings shows, so nothing is applied twic
 
 ## What's new
 
-After Follow-up updates, the next time you open Paseo it shows **What's new**: the notes for every version since that device last looked, newest open, older ones folded. It shows once per device per version (once per host in the phone app), never on a fresh install and never over setup. Home's last line says which version you run, with **Release notes** for the full list; for three days after an update it reads **Updated to X · What's new** instead. The notes ship inside the package as [CHANGELOG.md](CHANGELOG.md), so they work offline and match the installed version.
+After a major update (1.x to 2.0), the next time you open Paseo it shows **What's new**: the notes for every version since that device last looked, newest open, older ones folded. It shows once per device per version (once per host in the phone app), never on a fresh install and never over setup. Betas, minor and patch updates never pop it up. Betas have no notes of their own; their changes are collected in the next stable release. Home's last line says which version you run, with **Release notes** for the full list; for three days after an update to a version with its own notes it reads **Updated to X · What's new** instead. The notes ship inside the package as [CHANGELOG.md](CHANGELOG.md), so they work offline and match the installed version.
 
 ## Use
 
@@ -278,7 +278,7 @@ paseo plugin reload follow-through   # after changes
 
 Integration checks use a separate Paseo home with synthetic agents.
 
-Release notes: a PR that changes something users see adds `changes/<branch>.md` with one to three plain-language bullets ([rules](changes/README.md)). Before the version bump, `npm run release:notes <version>` moves them into CHANGELOG.md (`-- --allow-empty` for a release with nothing user-facing). `npm run verify` fails if the package version has no notes.
+Release notes: a PR that changes something users see adds `changes/<branch>.md` with one to three plain-language bullets ([rules](changes/README.md)). Before a stable version bump, `npm run release:notes <version>` moves them into CHANGELOG.md (`-- --allow-empty` for a release with nothing user-facing). For a beta it writes nothing and the fragments wait for the next stable release. `npm run verify` fails if a stable package version has no notes.
 
 Version tags (`vX.Y.Z`) publish to npm through Trusted Publishing.
 
