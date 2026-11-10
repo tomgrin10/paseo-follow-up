@@ -78,6 +78,11 @@ export function flagHeadline(row: Pick<InboxRow, "needs" | "snooze" | "brief">, 
   let key = REASON_KEY[top.reason];
   if (brief && (top.reason === "finished" || briefKey(brief.kind) === key)) key = briefKey(brief.kind);
   const since = age(row.needs.since, now);
+  // "Finished · No ask stated" while the workspace has an open question tells Tom to skip it; the question is the ask.
+  if (key === "finished" && (!brief || brief.source === "none")) {
+    const asked = workspaceHeadline(items.filter(i => i.kind === "question"));
+    if (asked) return { ...asked, source: "flag" };
+  }
   // A failed check or review thread headlines as the developer's action: repairs ready to send.
   const send = items.find((i): i is Extract<NeedItem, { kind: "send" }> => i.kind === "send");
   if ((key === "flagged" || key === "review") && send) return { key: "repairs", label: `Send ${plural(send.tasks.length, "fix", "fixes")}`, line: send.title, source: "flag" };

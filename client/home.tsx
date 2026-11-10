@@ -1,22 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { browserKey, BROWSER_POLL_MS } from "./keys";
-import { Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { usePaseo, useRpc, type PluginScreenProps } from "@getpaseo/plugin/client";
-import { Icon, useToast } from "@getpaseo/plugin/client/ui";
+import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
 import { useQuery } from "@tanstack/react-query";
 import { browserStatusRpc, inboxBriefRpc } from "../shared/contracts";
 import { needsYou } from "../shared/attention";
-import { briefPane, followUpLog, lastWorkdayEnd, nextNeeds, paneButtons, sinceLabel, tailSteps, type HomeGroupId, type HomeModel, type LogLine, type TailStep, type Workstream } from "../shared/home";
+import { briefPane, followUpLog, lastWorkdayEnd, nextNeeds, paneButtons, sameText, sinceLabel, tailSteps, type HomeGroupId, type HomeModel, type LogLine, type TailStep, type Workstream } from "../shared/home";
 import { age, snoozeUntil, type InboxRow } from "../shared/inbox";
 import { errorText } from "../shared/errors";
 import { isLoaded, type LoadSignals } from "../shared/agent-load";
 import { BriefCard, type BriefDeps } from "./brief";
 import { AboutSection } from "./about";
-import { Button, IconButton, text, type Theme } from "./kit";
+import { bottomGap, bottomInset, Button, IconButton, space, text, type Theme } from "./kit";
 import { NeedsYouList } from "./needs-you";
 import { PrSheet } from "./pr-sheet";
 import { QuestionSheet } from "./questions";
-import { Age, BadgeView, BRIEF_KEY, glyphColor, HomeList, OVERSEER_KEY, PrChipView, type OverseerRowState } from "./home-list";
+import { Age, BadgeView, BRIEF_KEY, glyphColor, HomeList, OVERSEER_KEY, PrChipView, PrSummaryText, type OverseerRowState } from "./home-list";
 import { answerLine, overseerRowState } from "../shared/overseer";
 import type { OmniboxItem } from "../shared/search";
 import { ListTop, SearchField, SortMenu, StatusStrip, UsageMeters, useOmnibox, useSlashToFocus } from "./home-chrome";
@@ -28,6 +28,7 @@ import type { OnboardingView } from "../shared/onboarding";
 import { withAlpha, isLight, mergedColor, type Colors } from "./theme";
 
 export const HOME_SCREEN = "follow-through";
+
 const mono = Platform.OS === "ios" ? "Menlo" : "ui-monospace, SFMono-Regular, Menlo, monospace";
 
 export type HomeDeps = {
@@ -38,6 +39,8 @@ export type HomeDeps = {
   openPanel(workspaceId: string): void;
   openLog(): void;
   openHome(): void;
+  /** Phones: open one Home item as its own screen, so the host's ← (and Android back) returns to the list. */
+  openItem?(key: string): void;
   briefDeps: BriefDeps;
 };
 
@@ -64,11 +67,14 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
   const omnibox = useOmnibox(model, deps.sources);
   useSlashToFocus(omnibox, params.view !== "log");
   const [filter, setFilter] = useState<HomeGroupId | null>(null);
-  const [selected, setSelected] = useState<string | null>(() => params.select ? `agent:${params.select}` : null);
+  const [selected, setSelected] = useState<string | null>(() => params.item ?? (params.select ? `agent:${params.select}` : null));
   const openAgentRow = useMemo(() => navigation ? (row: InboxRow) => navigation.openAgent({ agentId: row.agentId }) : undefined, [navigation]);
   useNextRelay(inbox, params, openAgentRow);
   useEffect(() => { if (params.select) setSelected(`agent:${params.select}`); }, [params.select]);
-  const onSelect = useCallback((key: string) => setSelected(key === BRIEF_KEY ? null : key), []);
+  // Phones show one thing at a time. A row opens its own screen (pushed by the host) instead of swapping in place, so the
+  // host's ← is the only back control and it lands on the list. Desktop selects in place beside the list.
+  const route = compact && deps.openItem ? deps.openItem : null;
+  const onSelect = useCallback((key: string) => { if (route) route(key); else setSelected(key === BRIEF_KEY ? null : key); }, [route]);
   const current = selected ? model.byKey.get(selected) ?? (selected.startsWith("agent:") ? [...model.byKey.values()].find(x => x.agentId === selected.slice(6)) ?? null : null) : null;
   const tracked = useSyncExternalStore(deps.sources.live.subscribe, deps.sources.live.version, deps.sources.live.version);
   const rows = useInbox(inbox, () => inbox.rows());
@@ -82,13 +88,13 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
   const [asking, setAsking] = useState(false);
   const [pendingAsk, setPendingAsk] = useState<string | null>(null);
   const pick = useCallback(async (item: OmniboxItem) => {
-    if (item.ask === undefined) { setSelected(item.key); return; }
+    if (item.ask === undefined) { if (route) route(item.key); else setSelected(item.key); return; }
     if (asking) return;
     setAsking(true);
     // No toast: the conversation opens on the sent words, which says it more plainly.
-    try { await deps.sources.extras.askOverseer(item.ask); omnibox.setQuery(""); omnibox.inputRef.current?.blur(); setPendingAsk(item.ask); setSelected(OVERSEER_KEY); inbox.refresh(); }
+    try { await deps.sources.extras.askOverseer(item.ask); omnibox.setQuery(""); omnibox.inputRef.current?.blur(); setPendingAsk(item.ask); if (route) route(OVERSEER_KEY); else setSelected(OVERSEER_KEY); inbox.refresh(); }
     catch (e) { toast.error(errorText(e)); } finally { setAsking(false); }
-  }, [asking, deps.sources.extras, omnibox, inbox, toast]);
+  }, [asking, deps.sources.extras, omnibox, inbox, toast, route]);
   // ⌘K "Follow-up: Ask the Overseer" opens Home with `?ask=<nonce>`: select it and focus its reply box. A param, not
   // shared state, so it works whether Home was already open or mounts fresh.
   const [replyFocus, setReplyFocus] = useState(0);
@@ -115,27 +121,42 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
   if (params.view === "log") return <LogView theme={theme} compact={compact} sources={deps.sources} onHome={deps.openHome} onOpen={key => { setSelected(key); deps.openHome(); }} />;
 
   const detail = selected === OVERSEER_KEY && overseer
-    ? <OverseerPane theme={theme} compact={compact} o={overseer} focus={replyFocus} pending={pendingAsk} agentId={overseerStatus?.agentId ?? null} model={overseerStatus?.model ?? null} restartWith={overseerStatus?.restartWith ?? null} configured={overseerStatus?.configured ?? null} deps={deps} navigation={navigation} onBack={compact ? () => setSelected(null) : undefined} />
+    ? <OverseerPane theme={theme} compact={compact} o={overseer} focus={replyFocus} pending={pendingAsk} agentId={overseerStatus?.agentId ?? null} model={overseerStatus?.model ?? null} restartWith={overseerStatus?.restartWith ?? null} configured={overseerStatus?.configured ?? null} deps={deps} navigation={navigation} onBack={compact && !route ? () => setSelected(null) : undefined} />
     : current
-    ? <DetailPane key={current.key} s={current} model={model} theme={theme} compact={compact} deps={deps} openFull={openFull} signOffNext={signOffNext} onBack={compact ? () => setSelected(null) : undefined} />
-    : <BriefPane theme={theme} compact={compact} pane={pane} onSelect={key => setSelected(key)} openLog={deps.openLog} sources={deps.sources} />;
+    ? <DetailPane key={current.key} s={current} model={model} theme={theme} compact={compact} deps={deps} openFull={openFull} signOffNext={signOffNext} onBack={compact && !route ? () => setSelected(null) : undefined} />
+    : <BriefPane theme={theme} compact={compact} pane={pane} onSelect={key => route ? route(key) : setSelected(key)} openLog={deps.openLog} sources={deps.sources} />;
+  // Nothing followed at all: no sort, no meters, just the empty state and its action.
+  const nothing = model.groups.every(g => !g.items.length);
   const list = <HomeList model={model} theme={theme} dense={compact} touch={compact} selectedKey={selected} onSelect={onSelect} briefLine={briefLine}
     results={omnibox.results} activeResult={omnibox.active} onResult={item => void pick(item)} filter={filter} overseer={overseer} asking={asking}
-    top={<ListTop theme={theme} dense={compact} title={<ListHeader theme={theme} compact={compact} onSettings={deps.openSettings} />}>
+    // Phones: the host header already says Follow-up, so no "Home" title row; search, sort and settings share one row and
+    // the meters move to the end of the list.
+    footer={compact ? <View style={{ paddingTop: 16, paddingBottom: 96 }}>{!omnibox.results && !nothing && <UsageMeters theme={theme} sources={deps.sources} dense />}</View> : undefined}
+    // Phones: the setup offer goes after the Needs-you group when there is one, so the first ask stays high.
+    afterNeeds={compact && model.needs > 0 ? <SetupOffer theme={theme} compact view={props.onboarding} /> : undefined}
+    emptyAction={compact ? <Button theme={theme} compact kind="secondary" icon="Settings" title="Project settings" onPress={deps.openSettings} /> : undefined}
+    top={<ListTop theme={theme} dense={compact} title={compact ? undefined : <ListHeader theme={theme} compact={compact} onSettings={deps.openSettings} />}>
       {/* zIndex: on web every View is its own stacking context, so the sort menu only paints and hit-tests above the
           strip and meters below if this row sits above them. */}
-      <View style={{ zIndex: 2, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: compact ? 12 : 16 }}>
+      <View style={{ zIndex: 2, flexDirection: "row", alignItems: "center", gap: compact ? 2 : 6, paddingLeft: compact ? 16 : 16, paddingRight: compact ? 6 : 16 }}>
         <SearchField theme={theme} omnibox={omnibox} dense={compact} onEnter={item => void pick(item)} />
-        <SortMenu theme={theme} mode={model.sort} onChange={deps.sources.extras.setSort} rankedAt={model.rankedAt} touch={compact} rank={rank} onRerank={deps.sources.extras.rankNow} />
+        {!(compact && nothing) && <SortMenu theme={theme} mode={model.sort} onChange={deps.sources.extras.setSort} rankedAt={model.rankedAt} touch={compact} rank={rank} onRerank={deps.sources.extras.rankNow} />}
+        {compact && <IconButton theme={theme} compact icon="Settings" label="Follow-up settings" onPress={deps.openSettings} />}
       </View>
-      {!omnibox.results && <StatusStrip theme={theme} model={model} filter={filter} onFilter={setFilter} touch={compact} dense={compact} />}
-      {!omnibox.results && <UsageMeters theme={theme} sources={deps.sources} dense={compact} />}
-      {!omnibox.results && <SetupOffer theme={theme} compact={compact} view={props.onboarding} />}
-    </ListTop>} />;
+      {!compact && !omnibox.results && <StatusStrip theme={theme} model={model} filter={filter} onFilter={setFilter} touch={compact} dense={compact} />}
+      {!compact && !omnibox.results && <UsageMeters theme={theme} sources={deps.sources} dense={compact} />}
+      {!compact && !omnibox.results && <SetupOffer theme={theme} compact={compact} view={props.onboarding} />}
+    </ListTop>}
+    // Phones: only the search row stays pinned; the status chips and the setup offer scroll away with the list, so a
+    // scrolled list keeps the screen instead of sitting under a 250px block.
+    header={compact && !omnibox.results ? <View style={{ gap: 8, paddingTop: 6, paddingBottom: 6 }}>
+      <StatusStrip theme={theme} model={model} filter={filter} onFilter={setFilter} touch dense />
+      {model.needs === 0 && <SetupOffer theme={theme} compact view={props.onboarding} />}
+    </View> : undefined} />;
 
   if (compact) return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
-    {current || selected === OVERSEER_KEY && overseer ? detail : list}
-    <View style={{ position: "absolute", left: 12, right: 12, bottom: 12 }}><UndoBar store={inbox} theme={theme} touch /></View>
+    {current || selected === OVERSEER_KEY && overseer || selected === BRIEF_KEY ? detail : list}
+    <View style={{ position: "absolute", left: 12, right: 12, bottom: bottomGap(true) + (current || selected === OVERSEER_KEY ? 132 : 0) }}><UndoBar store={inbox} theme={theme} touch /></View>
   </View>;
   return <View style={{ flex: 1, flexDirection: "row", backgroundColor: c.surface0 }}>
     <View style={{ flex: 1, minWidth: 0, borderRightWidth: 1, borderRightColor: c.border }}>
@@ -218,7 +239,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
   s: Workstream; model: HomeModel; theme: Theme; compact: boolean; deps: HomeDeps;
   openFull: (s: Workstream) => void; signOffNext: (s: Workstream) => void; onBack?: () => void;
 }) {
-  const c = theme.colors; const t = text(c);
+  const c = theme.colors; const t = text(c, compact);
   const toast = useToast();
   const { inbox, live } = deps.sources;
   const row = useInbox(inbox, () => s.agentId ? inbox.rows().find(r => r.agentId === s.agentId) ?? null : null);
@@ -234,7 +255,14 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
   const [laterOpen, setLaterOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const b = brief.data?.brief?.state === "open" ? brief.data.brief : null;
-  const items = w ? needsYou(w).map(i => i.kind) : [];
+  const asks = w ? needsYou(w) : [];
+  const items = asks.map(i => i.kind);
+  // Say it once: when a Needs-you row already carries the row's line (a question's title or detail), skip the headline.
+  const echoed = !!s.line && asks.some(i => sameText(i.title, s.line) || ("detail" in i && sameText(i.detail, s.line)));
+  // Phones: one primary per screen. An actionable Needs-you item (Answer, Merge…) outranks Sign off.
+  const itemFirst = compact && asks.length > 0;
+  const [laterSheet, setLaterSheet] = useState(false);
+  const [typing, setTyping] = useState(false);
   const flagged = !!row?.needs && !row.snooze;
   const plan = paneButtons({ permissions: agent.permissions.length, decisions: !!b?.decisions.some(d => d.options.length), items, flagged, hasAgent: !!s.agentId });
   const run = async (key: string, work: () => Promise<unknown>, done?: string) => {
@@ -243,9 +271,24 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
   };
   const respond = (p: Permission, response: { behavior: "allow" | "deny"; selectedActionId?: string; message?: string }) =>
     run(`perm:${p.id}`, () => agent.handle!.respondToPermission({ requestId: p.id, response: response as never }), response.behavior === "allow" ? "Allowed" : "Denied");
-  const color = glyphColor(s, c);
+  const color = glyphColor(s, c, compact);
 
-  const header = <View style={{ paddingHorizontal: compact ? 16 : 20, paddingTop: 12, paddingBottom: 12, gap: 6, borderBottomWidth: 1, borderBottomColor: c.border }}>
+  const ago = s.at ? age(s.at, Date.now()) : "";
+  const metaRest = [ago === "now" ? "just now" : ago, s.project].filter(Boolean).join(" · ");
+  // Phones: the host header already says Follow-up and carries ←. The pane head is the full-width title, then one meta
+  // line (state, age, project, PRs as text) that ellipsizes instead of wrapping, with Open full as an icon at its end.
+  const header = compact ? <View style={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 6, gap: 2, borderBottomWidth: 1, borderBottomColor: c.border }}>
+    <Text accessibilityRole="header" numberOfLines={3} style={t.title}>{s.title}</Text>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 44 }}>
+      <Icon name={s.icon} size={14} color={color} />
+      <Text numberOfLines={1} style={[t.meta, { flex: 1, minWidth: 0 }]}>
+        {!!s.word && <Text style={{ color, fontWeight: "600" }}>{s.word}</Text>}
+        {metaRest ? (s.word ? ` · ${metaRest}` : metaRest) : ""}
+        <PrSummaryText s={s} c={c} lead=" · " />
+      </Text>
+      <IconButton theme={theme} compact icon="PanelRightOpen" label="Open full" onPress={() => openFull(s)} />
+    </View>
+  </View> : <View style={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, gap: 6, borderBottomWidth: 1, borderBottomColor: c.border }}>
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       {onBack && <IconButton theme={theme} compact icon="ChevronLeft" label="Back to Home" onPress={onBack} />}
       <Icon name={s.icon} size={16} color={color} />
@@ -260,7 +303,8 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
     </View>
   </View>;
 
-  const actionBar = (plan.buttons.includes("sign_off") || plan.buttons.includes("later")) && <View style={{ gap: 8 }}>
+  const canMove = plan.buttons.includes("sign_off") || plan.buttons.includes("later");
+  const actionBar = !compact && (plan.buttons.includes("sign_off") || plan.buttons.includes("later")) && <View style={{ gap: 8 }}>
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
       <Button theme={theme} compact={compact} kind={plan.primary === "sign_off" ? "primary" : "secondary"} icon="Check" title="Sign off" loading={busy === "sign_off"}
         onPress={() => void run("sign_off", () => inbox.signOff([s.agentId!]))} />
@@ -273,35 +317,72 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
     </View>}
   </View>;
 
+  const laterTimes = [["hour", "In 1 hour"], ["tonight", "Tonight 18:00"], ["tomorrow", "Tomorrow 09:00"], ["next-event", "Next event"]] as const;
+  // Phones: the moves sit in the dock above the composer, in thumb reach, on one row: Sign off, Sign off & next, Later.
+  const narrow = useWindowDimensions().width < 380;
+  const moves = compact && canMove && !typing && <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingTop: 10 }}>
+    <View style={{ flex: 1 }}><Button theme={theme} compact grow kind={plan.primary === "sign_off" && !itemFirst ? "primary" : "secondary"} icon={narrow ? undefined : "Check"} title="Sign off" loading={busy === "sign_off"}
+      onPress={() => void run("sign_off", () => inbox.signOff([s.agentId!]))} /></View>
+    <View style={{ flex: 1.3 }}><Button theme={theme} compact grow icon={narrow ? undefined : "ArrowRight"} title="Sign off & next" onPress={() => signOffNext(s)} /></View>
+    <IconButton theme={theme} compact icon="AlarmClock" label="Later…" onPress={() => setLaterSheet(true)} />
+  </View>;
+  const laterModal = compact && <Modal title="Remind me later" open={laterSheet} onOpenChange={setLaterSheet}>
+    <Modal.Content contentContainerStyle={{ paddingVertical: 8 }}>
+      {laterTimes.map(([k, label]) => <Pressable key={k} accessibilityRole="button" onPress={() => { setLaterSheet(false); void inbox.snooze([s.agentId!], snoozeUntil(k, new Date())); }}
+        style={({ pressed }) => ({ minHeight: 48, justifyContent: "center", paddingHorizontal: 16, backgroundColor: pressed ? c.surface2 : "transparent" })}>
+        <Text style={t.body}>{label}</Text>
+      </Pressable>)}
+    </Modal.Content>
+  </Modal>;
+
+  const steps = s.agentId && <View style={{ gap: 8 }}>
+    {/* Phones: an unloaded agent is one row, label and why on the left, a quiet Load on the right. */}
+    {compact && tail.asleep && !tail.steps?.length && !tail.error ? <View style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 48 }}>
+      <Icon name="History" size={16} color={c.foregroundMuted} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={t.label}>Recent steps</Text>
+        <Text style={t.meta}>{tail.seenAt ? `Last seen ${age(new Date(tail.seenAt).toISOString(), Date.now())} ago. ` : ""}Not loaded. Loading keeps it in memory for about an hour.</Text>
+      </View>
+      <Button theme={theme} compact kind="ghost" title={tail.loading ? "Loading…" : "Load"} accessibilityLabel="Load recent steps" accessibilityHint="Loads the agent into memory for about an hour" loading={tail.loading} disabled={tail.loading} onPress={tail.load} />
+    </View> : <>
+      <Text style={compact ? t.section : [t.small, { fontWeight: "600", letterSpacing: 0.5, textTransform: "uppercase" }]}>{tail.asleep && tail.seenAt ? `Last seen · ${age(new Date(tail.seenAt).toISOString(), Date.now()) === "now" ? "just now" : `${age(new Date(tail.seenAt).toISOString(), Date.now())} ago`}` : tail.steps?.length ? `Recent · last ${tail.steps.length} steps` : "Recent steps"}</Text>
+      {!!tail.error && <Text style={t.meta}>{`Couldn't load the agent's steps: ${tail.error}`}</Text>}
+      {tail.steps === null ? <Spinner color={c.foregroundMuted} size={12} label="Loading the agent's steps" />
+        : tail.steps.length === 0 ? (tail.error ? null : <Text style={t.meta}>{tail.asleep ? "This agent isn't loaded, so its steps aren't shown." : "No steps yet."}</Text>)
+        : tail.steps.map((step, i) => <Step key={i} step={step} c={c} last={i === tail.steps!.length - 1} />)}
+      {(tail.asleep || (tail.woken && tail.loading)) && <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+        <Button theme={theme} compact={compact} kind="secondary" title={tail.loading ? "Loading…" : "Load recent steps"} loading={tail.loading} disabled={tail.loading} onPress={tail.load} />
+        <Text style={[t.small, { flex: 1, minWidth: 160 }]}>Loads the agent into memory for about an hour.</Text>
+      </View>}
+      {!compact && !!tail.steps?.length && <Text style={t.small}>A preview, not the whole session. Open full for the chat.</Text>}
+    </>}
+  </View>;
+  // "No ask stated" only repeats the chat; the panel already hides it, and on a phone it's dead weight above the ask.
+  const showBrief = b && s.agentId && !(b.kind === "permission" && agent.permissions.length) && !(compact && b.source === "none");
+
   return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
     {header}
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: compact ? 16 : 20, gap: 16, paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
       {/* What's this about? comes first on every size, directly under the header and above the ask. */}
       {s.workspaceId && w && <AboutSection key={s.workspaceId} workspaceId={s.workspaceId} theme={theme} compact={compact} flush />}
       {agent.permissions.map(p => <PermissionBlock key={p.id} p={p} theme={theme} compact={compact} busy={busy === `perm:${p.id}`} primary={plan.primary === "allow"} onRespond={r => void respond(p, r)} />)}
-      {b && s.agentId && !(b.kind === "permission" && agent.permissions.length) ? <BriefCard {...({ embedded: true, item: { data: b }, theme, layout: { compact }, agentId: s.agentId, deps: deps.briefDeps } as unknown as Parameters<typeof BriefCard>[0])} />
-        : row?.needs && !agent.permissions.length && !b ? <Text style={[t.body, { fontSize: 15, lineHeight: 21, fontWeight: "600" }]}>{s.line || s.word || "Needs you"}</Text>
+      {showBrief ? <BriefCard {...({ embedded: true, item: { data: b }, theme, layout: { compact }, agentId: s.agentId, deps: deps.briefDeps } as unknown as Parameters<typeof BriefCard>[0])} />
+        : echoed || (b && compact && b.source === "none" && asks.length) ? null
+        : row?.needs && !agent.permissions.length && !b ? <Text style={compact ? t.ask : [t.body, { fontSize: 15, lineHeight: 21, fontWeight: "600" }]}>{s.line || s.word || "Needs you"}</Text>
         : !row?.needs && s.line ? <Text style={t.body}>{s.line}</Text> : null}
-      {w && <NeedsYouList workspace={w} theme={theme} compact={compact} flush skip={b?.decisions.length ? ["question"] : []}
+      {w && <NeedsYouList workspace={w} theme={theme} compact={compact} flush skip={b?.decisions.length ? ["question"] : []} feature={compact}
         actions={{ openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion, openAgent: () => openFull(s) }} />}
       {actionBar}
-      {s.agentId && <View style={{ gap: 8 }}>
-        <Text style={[t.small, { fontWeight: "600", letterSpacing: 0.5, textTransform: "uppercase" }]}>{tail.asleep && tail.seenAt ? `Last seen · ${age(new Date(tail.seenAt).toISOString(), Date.now()) === "now" ? "just now" : `${age(new Date(tail.seenAt).toISOString(), Date.now())} ago`}` : tail.steps?.length ? `Recent · last ${tail.steps.length} steps` : "Recent steps"}</Text>
-        {!!tail.error && <Text style={t.meta}>{`Couldn't load the agent's steps: ${tail.error}`}</Text>}
-        {tail.steps === null ? <Spinner color={c.foregroundMuted} size={12} label="Loading the agent's steps" />
-          : tail.steps.length === 0 ? (tail.error ? null : <Text style={t.meta}>{tail.asleep ? "This agent isn't loaded, so its steps aren't shown." : "No steps yet."}</Text>)
-          : tail.steps.map((step, i) => <Step key={i} step={step} c={c} last={i === tail.steps!.length - 1} />)}
-        {(tail.asleep || (tail.woken && tail.loading)) && <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-          <Button theme={theme} compact={compact} kind="secondary" title={tail.loading ? "Loading…" : "Load recent steps"} loading={tail.loading} disabled={tail.loading} onPress={tail.load} />
-          <Text style={[t.small, { flex: 1, minWidth: 160 }]}>Loads the agent into memory for about an hour.</Text>
-        </View>}
-        {!!tail.steps?.length && <Text style={t.small}>A preview, not the whole session. Open full for the chat.</Text>}
-      </View>}
+      {steps}
     </ScrollView>
-    {s.agentId && <ReplyBox theme={theme} compact={compact} agentName={s.title} onSend={async text => {
-      await agent.handle!.send(text);
-      inbox.refresh();
-    }} />}
+    {s.agentId && <View style={[{ borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.surface0 }, bottomInset(compact)]}>
+      {moves}
+      <ReplyBox theme={theme} compact={compact} agentName={s.title} placeholder={compact ? "Reply to the agent" : undefined} onFocusChange={setTyping} onSend={async text => {
+        await agent.handle!.send(text);
+        inbox.refresh();
+      }} />
+    </View>}
+    {laterModal}
     {w && sheet && <PrSheet workspace={w} prKey={sheet.key} intent={sheet.intent} theme={theme} compact={compact} browserReady={browser.data?.ready ?? false} onClose={() => setSheet(null)} />}
     {w && <QuestionSheet workspace={w} questionId={question} theme={theme} compact={compact} onClose={() => setQuestion(null)} />}
   </View>;
@@ -312,7 +393,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
  * decision card when it asks which agent should get a task. Before the first start, one Start button.
  */
 function OverseerPane({ theme, compact, o, focus = 0, pending = null, agentId, model, restartWith, configured, deps, navigation, onBack }: { theme: Theme; compact: boolean; o: OverseerRowState; focus?: number; pending?: string | null; agentId: string | null; model: string | null; restartWith: string | null; configured: string | null; deps: HomeDeps; navigation: PluginScreenProps["navigation"]; onBack?: () => void }) {
-  const c = theme.colors; const t = text(c);
+  const c = theme.colors; const t = text(c, compact);
   const toast = useToast();
   const { inbox, extras } = deps.sources;
   const row = useInbox(inbox, () => inbox.overseer());
@@ -331,7 +412,25 @@ function OverseerPane({ theme, compact, o, focus = 0, pending = null, agentId, m
     if (starting) return; setStarting(true);
     try { await extras.startOverseer(); toast.show("The Overseer is ready", { variant: "success" }); } catch (e) { toast.error(errorText(e)); } finally { setStarting(false); }
   };
-  const header = <View style={{ paddingHorizontal: compact ? 16 : 20, paddingTop: 12, paddingBottom: 12, gap: 4, borderBottomWidth: 1, borderBottomColor: c.border }}>
+  const restartRow = agentId && restartWith && (compact
+    // Phones: one row, the why on the left and a short Restart on the right; the full target is the a11y label.
+    ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+      <Text numberOfLines={2} style={[t.meta, { flex: 1, minWidth: 0 }]}>{`Settings say ${short(restartWith)}`}</Text>
+      <Button theme={theme} compact icon="RefreshCw" title="Restart" accessibilityLabel={`Restart with ${short(restartWith)}`} accessibilityHint={`Starts a new Overseer on ${restartWith} and hands it the recent conversation`} loading={restarting} onPress={() => void restart()} />
+    </View>
+    : <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap", paddingTop: 6 }}>
+      <Text style={[t.meta, { flex: 1, minWidth: 180 }]}>{`Running ${model ?? "its first model"} · Settings say ${restartWith}`}</Text>
+      <Button theme={theme} compact={compact} icon="RefreshCw" title={`Restart with ${short(restartWith)}`} accessibilityHint={`Starts a new Overseer on ${restartWith} and hands it the recent conversation`} loading={restarting} onPress={() => void restart()} />
+    </View>);
+  const header = compact ? <View style={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 6, gap: 2, borderBottomWidth: 1, borderBottomColor: c.border }}>
+    <Text accessibilityRole="header" style={t.title}>Overseer</Text>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 44 }}>
+      <Icon name="MessagesSquare" size={14} color={c.foregroundMuted} />
+      <Text numberOfLines={1} style={[t.meta, { flex: 1, minWidth: 0 }]}>{model ?? configured ?? "Not started"}</Text>
+      {agentId && navigation && <IconButton theme={theme} compact icon="PanelRightOpen" label="Open full" onPress={() => navigation.openAgent({ agentId })} />}
+    </View>
+    {restartRow}
+  </View> : <View style={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, gap: 4, borderBottomWidth: 1, borderBottomColor: c.border }}>
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       {onBack && <IconButton theme={theme} compact icon="ChevronLeft" label="Back to Home" onPress={onBack} />}
       <Icon name="MessagesSquare" size={16} color={c.foreground} />
@@ -342,17 +441,14 @@ function OverseerPane({ theme, compact, o, focus = 0, pending = null, agentId, m
         : <Button theme={theme} icon="PanelRightOpen" title="Open full" accessibilityHint="Opens the Overseer's whole chat" onPress={() => navigation.openAgent({ agentId })} />)}
     </View>
     {/* Settings → Agents changed: offered, never done mid-conversation on its own. */}
-    {agentId && restartWith && <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap", paddingTop: 6 }}>
-      <Text style={[t.meta, { flex: 1, minWidth: 180 }]}>{`Running ${model ?? "its first model"} · Settings say ${restartWith}`}</Text>
-      <Button theme={theme} compact={compact} icon="RefreshCw" title={`Restart with ${short(restartWith)}`} accessibilityHint={`Starts a new Overseer on ${restartWith} and hands it the recent conversation`} loading={restarting} onPress={() => void restart()} />
-    </View>}
+    {restartRow}
   </View>;
   if (o.state === "start") return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
     {header}
     <ScrollView contentContainerStyle={{ padding: compact ? 16 : 20, gap: 12 }}>
-      <Text style={[t.body, { fontSize: 15, lineHeight: 22 }]}>One agent that knows every workspace's state. Tell it "the PRs look good, assign reviewers on all" or "tell the SCIM agent to use option B", and it finds the right agent and passes it on.</Text>
-      <Text style={t.meta}>It never merges, posts to people or archives. It starts a new workspace only when you say so. It runs on {configured ?? "Claude · Newest Opus"} in its own workspace, which stays off your lists. Change the model in Follow-up settings → Agents.</Text>
-      <View style={{ flexDirection: "row" }}><Button theme={theme} compact={compact} kind="primary" icon="Play" title="Start the Overseer" loading={starting} onPress={() => void start()} /></View>
+      <Text style={compact ? t.body : [t.body, { fontSize: 15, lineHeight: 22 }]}>One agent that knows every workspace's state. Tell it "the PRs look good, assign reviewers on all" or "tell the SCIM agent to use option B", and it finds the right agent and passes it on.</Text>
+      <Text style={t.meta}>It never merges, posts to people or archives. It starts a new workspace only when you say so.{compact ? " It works in its own workspace, which stays off your lists." : ` It runs on ${configured ?? "Claude · Newest Opus"} in its own workspace, which stays off your lists.`} Change the model in Follow-up settings → Agents.</Text>
+      <View style={{ flexDirection: "row" }}><Button theme={theme} compact={compact} grow={compact} kind="primary" icon="Play" title="Start the Overseer" loading={starting} onPress={() => void start()} /></View>
     </ScrollView>
   </View>;
   return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
@@ -368,8 +464,10 @@ function OverseerPane({ theme, compact, o, focus = 0, pending = null, agentId, m
       {/* Its open ask, after the conversation that led to it. Only something Tom can act on; never "No ask stated". */}
       {b && agentId && (b.kind === "decision" && b.decisions.some(d => d.options.length) || b.kind === "action") ? <BriefCard {...({ embedded: true, item: { data: b }, theme, layout: { compact }, agentId, deps: deps.briefDeps } as unknown as Parameters<typeof BriefCard>[0])} /> : null}
     </ScrollView>
-    {agentId && <ReplyBox theme={theme} compact={compact} agentName="the Overseer" placeholder="Ask or give a task: “assign reviewers on all ready PRs”" hint={null} focus={focus}
-      onSend={async message => { await agent.handle!.send(message); inbox.refresh(); }} />}
+    {agentId && <View style={[{ borderTopWidth: 1, borderTopColor: c.border }, bottomInset(compact)]}>
+      <ReplyBox theme={theme} compact={compact} agentName="the Overseer" placeholder={compact ? "Ask or give a task" : "Ask or give a task: “assign reviewers on all ready PRs”"} hint={null} focus={focus}
+        onSend={async message => { await agent.handle!.send(message); inbox.refresh(); }} />
+    </View>}
   </View>;
 }
 
@@ -396,7 +494,7 @@ function permissionText(p: Permission): string {
 }
 
 function PermissionBlock({ p, theme, compact, busy, primary, onRespond }: { p: Permission; theme: Theme; compact: boolean; busy: boolean; primary: boolean; onRespond: (r: { behavior: "allow" | "deny"; selectedActionId?: string; message?: string }) => void }) {
-  const c = theme.colors; const t = text(c);
+  const c = theme.colors; const t = text(c, compact);
   const command = permissionText(p);
   // Provider-defined choices ("Always for this session") show as extra secondaries; Allow and Deny always exist.
   const extra = (p.actions ?? []).filter(a => !/^(allow|deny|reject)$/i.test(a.label.trim()));
@@ -406,17 +504,25 @@ function PermissionBlock({ p, theme, compact, busy, primary, onRespond }: { p: P
       <Text style={[t.label, { color: c.statusWarning, flex: 1 }]}>{p.title || `Wants to use ${p.name}`}</Text>
     </View>
     {!!command && <View style={{ padding: 10, borderRadius: 7, backgroundColor: c.surface0 }}><Text selectable style={[t.body, { fontFamily: mono }]}>{command}</Text></View>}
-    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+    {compact ? <>
+      <Text style={t.meta}>Allow runs it once. Deny stops it; reply below with what to do instead.</Text>
+      {extra.map(a => <Button key={a.id} theme={theme} compact grow title={a.label} disabled={busy} onPress={() => onRespond({ behavior: a.behavior, selectedActionId: a.id })} />)}
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        <View style={{ flex: 1 }}><Button theme={theme} compact grow title="Deny" disabled={busy} onPress={() => onRespond({ behavior: "deny" })} /></View>
+        <View style={{ flex: 1 }}><Button theme={theme} compact grow kind={primary ? "primary" : "secondary"} icon="Check" title="Allow" loading={busy} onPress={() => onRespond({ behavior: "allow" })} /></View>
+      </View>
+    </> : <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
       <Text style={[t.meta, { flex: 1, minWidth: 180 }]}>Allow runs it once. Deny stops it; write below what to do instead.</Text>
       <Button theme={theme} compact={compact} title="Deny" disabled={busy} onPress={() => onRespond({ behavior: "deny" })} />
       {extra.map(a => <Button key={a.id} theme={theme} compact={compact} title={a.label} disabled={busy} onPress={() => onRespond({ behavior: a.behavior, selectedActionId: a.id })} />)}
       <Button theme={theme} compact={compact} kind={primary ? "primary" : "secondary"} icon="Check" title="Allow" loading={busy} onPress={() => onRespond({ behavior: "allow" })} />
-    </View>
+    </View>}
   </View>;
 }
 
 /** The reply box. Sending is the developer writing to the agent, which clears Needs you (binding rule). */
-function ReplyBox({ theme, compact, agentName, onSend, placeholder = "Answer in your own words", hint = "Sending clears Needs you. Sign off & next moves on without a reply.", focus = 0 }: { theme: Theme; compact: boolean; agentName: string; onSend: (text: string) => Promise<void>; placeholder?: string; hint?: string | null; focus?: number }) {
+const REPLY_HINT = "Sending clears Needs you. Sign off & next moves on without a reply.";
+function ReplyBox({ theme, compact, agentName, onSend, placeholder = "Answer in your own words", hint = REPLY_HINT, focus = 0, onFocusChange, docked = true }: { theme: Theme; compact: boolean; agentName: string; onSend: (text: string) => Promise<void>; placeholder?: string; hint?: string | null; focus?: number; onFocusChange?: (focused: boolean) => void; docked?: boolean }) {
   const c = theme.colors;
   const inputRef = useRef<TextInput | null>(null);
   // Focus when asked to (⌘K), never on a plain mount. The closing command palette hands focus back to where it was,
@@ -440,21 +546,25 @@ function ReplyBox({ theme, compact, agentName, onSend, placeholder = "Answer in 
     try { await onSend(text); setValue(""); toast.show("Sent", { variant: "success" }); }
     catch (e) { toast.error(errorText(e)); } finally { setSending(false); }
   };
-  return <View style={{ padding: compact ? 12 : 14, borderTopWidth: 1, borderTopColor: c.border, gap: 6 }}>
-    <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 10, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1, paddingLeft: 12, paddingRight: 6, paddingVertical: 6 }}>
-      <TextInput ref={inputRef} accessibilityLabel={`Reply to ${agentName}`} value={value} onChangeText={setValue} placeholder={placeholder} placeholderTextColor={c.foregroundMuted} multiline
+  // Phones: a 48-tall box (46 + hairline) with the placeholder on one centred line; it grows as you type.
+  // In a dock (the detail pane), the dock draws the hairline; on its own it draws one. Phones keep the hint as the
+  // input's accessibility hint instead of small print under it, where it collided with the gesture bar.
+  return <View style={{ padding: compact ? 12 : 14, gap: 6, ...(docked ? {} : { borderTopWidth: 1, borderTopColor: c.border }) }}>
+    <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: compact ? 12 : 10, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1, paddingLeft: 12, paddingRight: compact ? 1 : 6, paddingVertical: compact ? 0 : 6 }}>
+      <TextInput ref={inputRef} accessibilityLabel={`Reply to ${agentName}`} accessibilityHint={compact && hint ? hint : undefined} onFocus={() => onFocusChange?.(true)} onBlur={() => onFocusChange?.(false)} value={value} onChangeText={setValue} placeholder={placeholder} placeholderTextColor={c.foregroundMuted} multiline
+        numberOfLines={compact ? 1 : undefined}
         onKeyPress={e => { const k = e.nativeEvent as unknown as { key: string; metaKey?: boolean; ctrlKey?: boolean }; if (k.key === "Enter" && (k.metaKey || k.ctrlKey)) void send(); }}
-        style={{ flex: 1, minHeight: compact ? 44 : 36, maxHeight: 140, color: c.foreground, fontSize: 14, lineHeight: 20, paddingVertical: 6, ...(Platform.OS === "web" ? { outlineStyle: "none" } as object : {}) }} />
+        style={{ flex: 1, minHeight: compact ? 46 : 36, maxHeight: 140, color: c.foreground, fontSize: 14, lineHeight: 20, paddingVertical: compact ? 13 : 6, ...(Platform.OS === "web" ? { outlineStyle: "none" } as object : {}) }} />
       <IconButton theme={theme} compact={compact} icon="ArrowUp" label="Send" disabled={!value.trim() || sending} spinning={sending} onPress={() => void send()} color={value.trim() ? c.foreground : undefined} />
     </View>
-    {!!hint && <Text style={{ color: c.foregroundMuted, fontSize: 11, lineHeight: 15 }}>{hint}</Text>}
+    {!!hint && !compact && <Text style={{ color: c.foregroundMuted, fontSize: 11, lineHeight: 15 }}>{hint}</Text>}
   </View>;
 }
 
 // ---------- brief pane ----------
 
 function BriefPane({ theme, compact, pane, onSelect, openLog, sources }: { theme: Theme; compact: boolean; pane: ReturnType<typeof briefPane>; onSelect: (key: string) => void; openLog: () => void; sources: HomeSources }) {
-  const c = theme.colors; const t = text(c);
+  const c = theme.colors; const t = text(c, compact);
   useTick(30_000);
   const now = Date.now();
   const offline = sources.inbox.offlineSince();
@@ -462,19 +572,35 @@ function BriefPane({ theme, compact, pane, onSelect, openLog, sources }: { theme
   const date = new Date(now).toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" });
   const time = new Date(now).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
   const section = (title: string, right?: React.ReactNode) => <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
-    <Text accessibilityRole="header" style={[t.small, { flex: 1, fontWeight: "600", letterSpacing: 0.5, textTransform: "uppercase" }]}>{title}</Text>{right}
+    <Text accessibilityRole="header" style={[t.section, { flex: 1 }]}>{title}</Text>{right}
   </View>;
   const dot = (ok: boolean) => <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: ok ? c.statusSuccess : c.statusWarning }} />;
   return <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: compact ? 16 : 22, gap: 10 }}>
-    <Text style={t.meta}>{date} · {time}</Text>
-    <Text accessibilityRole="header" style={{ color: c.foreground, fontSize: compact ? 19 : 21, lineHeight: compact ? 26 : 29, fontWeight: "600", letterSpacing: -0.2 }}>{pane.headline}</Text>
-    {pane.first && <Button theme={theme} compact={compact} kind="primary" icon="ArrowRight" title={`Open ${pane.first.title.length > 40 ? `${pane.first.title.slice(0, 40)}…` : pane.first.title}`} onPress={() => onSelect(pane.first!.key)} />}
+    {/* Phones: the headline leads and the date sits under it; desktop keeps the date as an eyebrow. */}
+    {!compact && <Text style={t.meta}>{date} · {time}</Text>}
+    <Text accessibilityRole="header" style={t.headline}>{pane.headline}</Text>
+    {compact && <Text style={t.meta}>Morning brief · {date} · {time}</Text>}
+    {pane.first && <Button theme={theme} compact={compact} grow={compact} kind="primary" icon="ArrowRight" title={`Open ${pane.first.title.length > 40 ? `${pane.first.title.slice(0, 40)}…` : pane.first.title}`} onPress={() => onSelect(pane.first!.key)} />}
     {!!pane.waiting && <Text style={t.body}><Text style={{ color: c.foregroundMuted }}>Waiting on others: </Text>{pane.waiting}</Text>}
     <Text style={t.body}><Text style={{ color: c.foregroundMuted }}>Cleared since {sinceLabel(now)}: </Text>{pane.cleared ?? "nothing yet"}.</Text>
 
-    {section("Done while you were away", <Pressable accessibilityRole="link" onPress={openLog} hitSlop={8}><Text style={[t.small, { color: c.foreground }]}>{pane.away.count} · log</Text></Pressable>)}
-    {pane.away.top.length ? pane.away.top.map(l => <LogRow key={l.key} l={l} c={c} />) : <Text style={t.meta}>Follow-up didn't act on its own since {sinceLabel(now)}.</Text>}
-    <Text style={t.meta}>No merges, no messages to people. Those stay yours.</Text>
+    {/* Phones: the section head is itself a 44 row into the log ("· N · View log ›"), not a tiny "0 · log" link. With
+        nothing done, one muted line says so instead of a header, an empty log and the same "since" twice. */}
+    {compact && !pane.away.count
+      ? <Text style={[t.meta, { marginTop: 6 }]}>Nothing done on its own since {sinceLabel(now)} · no merges, no messages to people.</Text>
+      : compact
+      ? <Pressable accessibilityRole="link" accessibilityLabel={`Done while you were away: ${pane.away.count}. View log`} onPress={openLog}
+        style={state => ({ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 44, marginTop: 6, marginHorizontal: -8, paddingHorizontal: 8, borderRadius: 8, backgroundColor: state.pressed ? c.surface2 : "transparent" })}>
+        <Text accessibilityRole="header" numberOfLines={1} style={[t.section, { flexShrink: 1 }]}>Done while you were away · {pane.away.count}</Text>
+        <View style={{ flex: 1 }} />
+        <Text style={[t.meta, { color: c.foreground }]}>View log</Text>
+        <Icon name="ChevronRight" size={14} color={c.foregroundMuted} />
+      </Pressable>
+      : section("Done while you were away", <Pressable accessibilityRole="link" onPress={openLog} hitSlop={8}><Text style={[t.small, { color: c.foreground }]}>{pane.away.count} · log</Text></Pressable>)}
+    {!(compact && !pane.away.count) && <>
+      {pane.away.top.length ? pane.away.top.map(l => <LogRow key={l.key} l={l} c={c} />) : <Text style={t.meta}>Follow-up didn't act on its own since {sinceLabel(now)}.</Text>}
+      <Text style={t.meta}>No merges, no messages to people. Those stay yours.</Text>
+    </>}
 
     {section("Sources")}
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 14 }}>

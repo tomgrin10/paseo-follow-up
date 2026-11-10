@@ -29,7 +29,7 @@ const ago = (at: number, now = Date.now()) => { const m = Math.round((now - at) 
 
 /** Settings → Following → Shipping PRs: the default, review comments, then one fold per repository. */
 export function ShippingSettings({ theme, compact }: { theme: Theme; compact: boolean }) {
-  const c = theme.colors; const t = text(c);
+  const c = theme.colors; const t = text(c, compact);
   const read = useRpc(prWorkflowRpc); const write = useRpc(setPrWorkflowRpc); const cache = useQueryClient(); const toast = useToast();
   const query = useQuery({ queryKey: shippingKey, queryFn: () => read({}), staleTime: 60_000 });
   const recheck = useMutation({ mutationFn: () => read({ refresh: true }), onSuccess: v => { cache.setQueryData(shippingKey, v); toast.show("Checked again", { variant: "success" }); }, onError: e => toast.error(errorText(e)) });
@@ -79,7 +79,7 @@ function signInWarning(view: PrWorkflowView): string | null {
 }
 
 function RepoShipping({ row, view, theme, compact, busy, set }: { row: RepoWorkflowView; view: PrWorkflowView; theme: Theme; compact: boolean; busy: boolean; set: (input: Omit<Write, "repo">, label: string) => void }) {
-  const c = theme.colors; const t = text(c);
+  const c = theme.colors; const t = text(c, compact);
   const fallback = view.default === "auto" ? `Default · Auto → ${workflowName(row.detected)}` : `Default · ${PR_WORKFLOW_LABELS[view.default].label}`;
   const methods = row.github?.methods ?? [];
   const preferred = row.github?.preferred ?? methods[0] ?? null;
@@ -116,7 +116,7 @@ function listMethods(methods: MergeMethod[]): string {
  * inherited row (`inherited` set) adds "Same as default".
  */
 function ReviewFixSelect({ label, value, inherited, theme, compact, busy, onSave }: { label: string; value: ReviewFix | null; inherited?: ReviewFix; theme: Theme; compact: boolean; busy: boolean; onSave: (fix: ReviewFix | null) => void }) {
-  const c = theme.colors; const t = text(c);
+  const c = theme.colors; const t = text(c, compact);
   const current = value ? value.kind : inherited ? "inherit" : "builtin";
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value && commandName(value) || "");
@@ -127,14 +127,17 @@ function ReviewFixSelect({ label, value, inherited, theme, compact, busy, onSave
     <SettingsSelect<"inherit" | "builtin" | "command"> label={label} hint={hint} value={shown} disabled={busy}
       options={[...(inherited ? [{ value: "inherit" as const, label: `Default · ${reviewFixLabel(inherited)}` }] : []), { value: "builtin" as const, label: "Built-in steps" }, { value: "command" as const, label: value?.kind === "command" ? commandName(value)! : "A skill or command…" }]}
       onValueChange={next => { if (next === "command") { setEditing(true); return; } setEditing(false); onSave(next === "inherit" ? null : { kind: "builtin" }); }} />
-    {editing && <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingBottom: 12 }}>
+    {/* Phones: the field gets the full width and Save / Cancel split the row under it. */}
+    {editing && <View style={compact ? { gap: 8, paddingHorizontal: 16, paddingBottom: 12 } : { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingBottom: 12 }}>
       <TextInput accessibilityLabel="Skill or command for review comments" value={draft} onChangeText={setDraft} placeholder="/fix-pr" placeholderTextColor={c.foregroundMuted} autoCapitalize="none" autoCorrect={false} autoFocus
         onSubmitEditing={() => { if (valid) { onSave({ kind: "command", command: draft.trim() }); setEditing(false); } }}
-        style={{ flex: 1, minWidth: 0, minHeight: compact ? 44 : 32, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: draft && !valid ? c.statusDanger : c.border, color: c.foreground, fontSize: 13, backgroundColor: c.surface0, fontFamily: "monospace" }} />
-      <Button theme={theme} compact={compact} kind="primary" title="Save" disabled={!valid || busy} onPress={() => { onSave({ kind: "command", command: draft.trim() }); setEditing(false); }} />
-      <Button theme={theme} compact={compact} kind="ghost" title="Cancel" onPress={() => setEditing(false)} />
+        style={{ flex: 1, minWidth: 0, minHeight: compact ? 44 : 32, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: draft && !valid ? c.statusDanger : c.border, color: c.foreground, fontSize: compact ? 15 : 13, backgroundColor: c.surface0, fontFamily: "monospace", ...(compact ? { flex: undefined } : {}) }} />
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        <Button theme={theme} compact={compact} grow={compact} kind="primary" title="Save" disabled={!valid || busy} onPress={() => { onSave({ kind: "command", command: draft.trim() }); setEditing(false); }} />
+        <Button theme={theme} compact={compact} grow={compact} kind={compact ? "secondary" : "ghost"} title="Cancel" onPress={() => setEditing(false)} />
+      </View>
     </View>}
-    {editing && draft !== "" && !valid && <Text style={[t.meta, { color: c.statusDanger, paddingHorizontal: 14, paddingBottom: 10 }]}>Use a name like /fix-pr: letters, digits, dashes, dots or colons.</Text>}
+    {editing && draft !== "" && !valid && <Text style={[t.meta, { color: c.statusDanger, paddingHorizontal: compact ? 16 : 14, paddingBottom: 10 }]}>Use a name like /fix-pr: letters, digits, dashes, dots or colons.</Text>}
   </View>;
 }
 
@@ -143,7 +146,7 @@ function ReviewFixSelect({ label, value, inherited, theme, compact, busy, onSave
  * the same setting as Settings. Graphite is named only as an option, or on a repository that already ships with it.
  */
 export function ShippingStep({ theme, compact }: { theme: Theme; compact: boolean }) {
-  const c = theme.colors; const t = text(c);
+  const c = theme.colors; const t = text(c, compact);
   const read = useRpc(prWorkflowRpc); const write = useRpc(setPrWorkflowRpc); const cache = useQueryClient(); const toast = useToast();
   const query = useQuery({ queryKey: shippingKey, queryFn: () => read({}), staleTime: 60_000 });
   const change = useMutation({

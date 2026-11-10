@@ -63,7 +63,8 @@ export default function contribute(host: PluginClientContext) {
     openAgent: agentId => client.openScreen({ screenId: OVERVIEW, params: { next: String(++nextToken), open: agentId } }),
     workspace: id => store.get(id), openPanel,
   };
-  const homeDeps = { sources, openSettings, openPanel, openLog, openHome: openOverview, briefDeps };
+  const openItem = (key: string) => client.openScreen({ screenId: OVERVIEW, params: { item: key } });
+  const homeDeps = { sources, openSettings, openPanel, openLog, openHome: openOverview, openItem, briefDeps };
   const Overview = (props: PluginScreenProps) => <FollowHome {...props} deps={homeDeps} />;
   const Panel = (props: PluginWorkspacePanelProps) => <FollowPanel {...props} openSettings={openSettings} openOverview={openOverview} openLarge={openLarge} inbox={inbox} live={store} briefDeps={briefDeps} />;
   const Large = (props: PluginScreenProps) => <FollowLarge {...props} openSettings={openSettings} openOverview={openOverview} live={store} />;

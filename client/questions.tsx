@@ -135,6 +135,8 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   const body = <View style={{ gap: dense ? 10 : 14 }}>
     <View style={{ gap: 6 }}>
       <Text selectable style={[t.body, { fontSize: dense ? 13 : 15, lineHeight: dense ? 19 : 22 }]}>{q.question}</Text>
+      {/* Phones: who asked and when is meta under the question, not a footnote after the buttons. */}
+      {compact && !dense && <Text style={t.small}>Asked {ago(q.askedAt, now)} by {who(w, q.askedBy)}{q.taskId && !q.options.length ? " (blocked task)" : ""}</Text>}
       {open && <View style={{ flexDirection: "row", gap: 6 }}>
         <View style={{ paddingTop: 2 }}><Icon name={state.icon} size={12} color={state.color(c)} /></View>
         <Text style={[t.meta, { flex: 1, color: state.color(c) }]}>{state.text}</Text>
@@ -164,7 +166,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   </View>;
   const actions = (open || q.answer && ["queued", "unconfirmed", "copied"].includes(q.answer.delivery.state)) && <View style={{ gap: 6 }}>
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-      {open && <Button theme={theme} compact={compact} kind="primary" icon="Send" title="Send to agent" accessibilityLabel={`Send your ${q.id} answer to the agent`} disabled={!answer || run.isPending} loading={run.isPending && run.variables === "send"} onPress={() => run.mutate("send")} />}
+      {open && <Button theme={theme} compact={compact} grow={compact} kind="primary" icon="Send" title="Send to agent" accessibilityLabel={`Send your ${q.id} answer to the agent`} accessibilityHint={compact ? `Puts your answer straight into the asking agent's chat, even mid-turn. Follow-up keeps it under ${q.id}.` : undefined} disabled={!answer || run.isPending} loading={run.isPending && run.variables === "send"} onPress={() => run.mutate("send")} />}
       {open && <Button theme={theme} compact={compact} icon="Copy" title="Copy" accessibilityLabel={`Copy your ${q.id} answer instead of sending it`} disabled={!answer || run.isPending} loading={run.isPending && run.variables === "copy"} onPress={() => run.mutate("copy")} />}
       {q.answer?.delivery.state === "copied" && <Button theme={theme} compact={compact} kind="primary" icon="Send" title="Send to agent" accessibilityLabel={`Send your ${q.id} answer to the agent`} loading={run.isPending} onPress={() => run.mutate("send")} />}
       {q.answer && ["queued", "unconfirmed"].includes(q.answer.delivery.state) && <Button theme={theme} compact={compact} icon="RotateCcw" title={q.answer.delivery.state === "queued" ? "Try now" : "Resend"} accessibilityLabel={`Send the ${q.id} answer again`} loading={run.isPending} onPress={() => run.mutate("resend")} />}
@@ -173,7 +175,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
       {pinned && open && !free && !noteOpen && <Button theme={theme} compact={compact} kind="ghost" icon="Pencil" title="Note" accessibilityLabel={`Add a note for the agent about ${q.id}`} onPress={() => setNoteOpen(true)} />}
       {dense && onDetails && <IconButton theme={theme} compact={compact} icon="Maximize2" label={`Open ${q.id} with its links and full context`} onPress={onDetails} />}
     </View>
-    {open && !dense && <Text style={t.small}>Send puts your answer straight into the asking agent's chat, even mid-turn. Follow-up keeps it under {q.id}.</Text>}
+    {open && !dense && !compact && <Text style={t.small}>Send puts your answer straight into the asking agent's chat, even mid-turn. Follow-up keeps it under {q.id}.</Text>}
   </View>;
   // In the pill popover the question scrolls and the answer field and actions stay put, so Send is never cut off.
   if (pinned) {
@@ -196,7 +198,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   return <View style={{ gap: dense ? 10 : 14 }}>
     {body}
     {actions}
-    {!dense && <Text style={t.small}>Asked {ago(q.askedAt, now)} by {who(w, q.askedBy)}{q.taskId && !q.options.length ? " (blocked task)" : ""}</Text>}
+    {!dense && !compact && <Text style={t.small}>Asked {ago(q.askedAt, now)} by {who(w, q.askedBy)}{q.taskId && !q.options.length ? " (blocked task)" : ""}</Text>}
   </View>;
 }
 
@@ -302,6 +304,6 @@ export function ActivityCard({ workspace: w, theme, compact, now, open, toggle, 
         </View>
       </CardRow>;
     })}
-    {list.length > LIMIT && <FoldRow theme={theme} open={all} onPress={() => toggle("activity")} icon="History" iconColor={c.foregroundMuted} label={all ? "Show less" : `Show all ${list.length}`} />}
+    {list.length > LIMIT && <FoldRow theme={theme} compact={compact} open={all} onPress={() => toggle("activity")} icon="History" iconColor={c.foregroundMuted} label={all ? "Show less" : `Show all ${list.length}`} />}
   </Card>;
 }

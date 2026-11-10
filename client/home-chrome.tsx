@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { Platform, Pressable, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
 import { GROUP_TITLE, homeCounts, type HomeGroupId, type HomeModel } from "../shared/home";
 import { FIELD_LABEL, excerpt, highlightRuns, homeSearchDocs, indexDocs, defaultActive, omniboxResults, overseerProvider, workspaceProvider, type OmniboxItem, type OmniboxProvider, type Range, type WorkspaceItem } from "../shared/search";
-import { SORT_HINT, SORT_LABEL, SORT_MODES, type SortMode } from "../shared/sort";
+import { DEFAULT_SORT, SORT_HINT, SORT_LABEL, SORT_MODES, type SortMode } from "../shared/sort";
 import { priorityNote, PRIORITY_SOURCE_LABEL } from "../shared/priorities";
 import { rankCost } from "../shared/ranker";
 import { meters, meterText, type Meter } from "../shared/usage";
 import { resourceMeter, type Resources } from "../shared/resources";
 import type { HomeSources } from "./home-data";
 import type { Workstream } from "../shared/home";
-import { Age, PrChipView } from "./home-list";
+import { Age, glyphColor, PrChipView, PrSummaryText } from "./home-list";
 import { useMinute } from "./home-data";
 import { Spinner } from "./motion";
 import { withAlpha, type Colors } from "./theme";
@@ -89,10 +89,11 @@ export function SearchField({ theme, omnibox, dense, onEnter }: { theme: Theme; 
   const c = theme.colors;
   const [focused, setFocused] = useState(false);
   const { query, setQuery, results, active, move, inputRef, askOn } = omnibox;
-  const placeholder = askOn ? "Search, or ask the Overseer" : "Search workspaces, branches, PRs";
-  return <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 6, height: dense ? 30 : 32, paddingHorizontal: 8, borderRadius: 6,
+  const placeholder = askOn ? dense ? "Search or ask the Overseer" : "Search, or ask the Overseer" : "Search workspaces, branches, PRs";
+  // `dense` is the phone layout: a 44px field with a rounder shape and body-size text.
+  return <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: dense ? 8 : 6, height: dense ? 44 : 32, paddingHorizontal: dense ? 12 : 8, borderRadius: dense ? 12 : 6,
     borderWidth: 1, borderColor: focused ? withAlpha(c.foreground, 0.35) : c.border, backgroundColor: c.surface1 }}>
-    <Icon name="Search" size={13} color={c.foregroundMuted} />
+    <Icon name="Search" size={dense ? 16 : 13} color={c.foregroundMuted} />
     <TextInput ref={inputRef} value={query} onChangeText={setQuery} placeholder={placeholder} placeholderTextColor={c.foregroundMuted}
       accessibilityLabel={placeholder} autoCorrect={false} autoCapitalize="none" spellCheck={false} returnKeyType="go"
       onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
@@ -103,11 +104,11 @@ export function SearchField({ theme, omnibox, dense, onEnter }: { theme: Theme; 
         else if (key === "ArrowUp") { e.preventDefault?.(); move(-1); }
         else if (key === "Escape") { if (query) setQuery(""); else inputRef.current?.blur(); }
       }}
-      style={{ flex: 1, minWidth: 0, color: c.foreground, fontSize: 13, paddingVertical: 0, ...(Platform.OS === "web" ? { outlineStyle: "none" } as object : {}) }} />
-    {!!query && <Pressable accessibilityRole="button" accessibilityLabel="Clear search" hitSlop={8} onPress={() => { setQuery(""); inputRef.current?.focus(); }}>
-      <Icon name="X" size={13} color={c.foregroundMuted} />
+      style={{ flex: 1, minWidth: 0, color: c.foreground, fontSize: dense ? 15 : 13, paddingVertical: 0, ...(Platform.OS === "web" ? { outlineStyle: "none" } as object : {}) }} />
+    {!!query && <Pressable accessibilityRole="button" accessibilityLabel="Clear search" hitSlop={dense ? 14 : 8} onPress={() => { setQuery(""); inputRef.current?.focus(); }}>
+      <Icon name="X" size={dense ? 16 : 13} color={c.foregroundMuted} />
     </Pressable>}
-    {!query && !focused && Platform.OS === "web" && <Text style={{ color: c.foregroundMuted, fontSize: 11, paddingHorizontal: 4, borderRadius: 3, borderWidth: 1, borderColor: c.border }}>/</Text>}
+    {!query && !focused && !dense && Platform.OS === "web" && <Text style={{ color: c.foregroundMuted, fontSize: 11, paddingHorizontal: 4, borderRadius: 3, borderWidth: 1, borderColor: c.border }}>/</Text>}
   </View>;
 }
 
@@ -137,15 +138,18 @@ export function SortMenu({ theme, mode, onChange, rankedAt, touch, rank = null, 
   const note = [priorityNote(rankedAt, now), rankedAt && rank?.enabled ? rankCost(rank) : "", rank?.enabled ? rank.healthLine : ""].filter(Boolean).join(" · ");
   return <View style={{ position: "relative", zIndex: 20 }}>
     <Pressable accessibilityRole="button" accessibilityLabel={`Sort: ${SORT_LABEL[mode]}${running ? ", ranking" : ""}`} aria-expanded={open} accessibilityState={{ expanded: open }} onPress={() => setOpen(o => !o)}
-      style={state => ({ flexDirection: "row", alignItems: "center", gap: 4, height: touch ? 36 : 30, paddingHorizontal: 8, borderRadius: 6, backgroundColor: open || (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
-      {running ? <Spinner color={c.foreground} size={12} label="Ranking" /> : <Icon name="ArrowUpDown" size={13} color={c.foregroundMuted} />}
-      <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 12 }}>{SORT_LABEL[mode]}</Text>
-      <Icon name="ChevronDown" size={12} color={c.foregroundMuted} />
+      style={state => ({ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, height: touch ? 44 : 30, minWidth: touch ? 44 : undefined, paddingHorizontal: touch ? 0 : 8, borderRadius: touch ? 8 : 6, backgroundColor: open || (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
+      {/* Phones: an icon; the mode's name lives in the menu (and the accessible name). */}
+      {running ? <Spinner color={c.foreground} size={12} label="Ranking" /> : <Icon name="ArrowUpDown" size={touch ? 18 : 13} color={touch && mode !== DEFAULT_SORT ? c.foreground : c.foregroundMuted} />}
+      {/* Phones: the icon carries no label, so a non-default sort shows as a dot on it. */}
+      {touch && mode !== DEFAULT_SORT && <View style={{ position: "absolute", top: 9, right: 9, width: 7, height: 7, borderRadius: 4, backgroundColor: c.accent }} />}
+      {!touch && <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 12 }}>{SORT_LABEL[mode]}</Text>}
+      {!touch && <Icon name="ChevronDown" size={12} color={c.foregroundMuted} />}
     </Pressable>
-    {open && <View accessibilityRole="menu" style={{ position: "absolute", top: touch ? 40 : 34, right: 0, minWidth: 220, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1,
+    {open && <View accessibilityRole="menu" style={{ position: "absolute", top: touch ? 48 : 34, right: 0, minWidth: touch ? 240 : 220, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1,
       shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 8 }}>
       {SORT_MODES.map(m => <Pressable key={m} accessibilityRole="menuitem" accessibilityState={{ selected: m === mode }} onPress={() => { onChange(m); setOpen(false); }}
-        style={state => ({ flexDirection: "row", alignItems: "center", gap: 8, minHeight: touch ? 44 : 34, paddingHorizontal: 10, backgroundColor: (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
+        style={state => ({ flexDirection: "row", alignItems: "center", gap: 8, minHeight: touch ? 48 : 34, paddingHorizontal: touch ? 12 : 10, backgroundColor: (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
         <View style={{ width: 14, alignSelf: "flex-start", paddingTop: 2 }}>{m === mode && <Icon name="Check" size={13} color={c.foreground} />}</View>
         <View style={{ flex: 1 }}>
           <Text style={{ color: c.foreground, fontSize: 13, lineHeight: 17 }}>{SORT_LABEL[m]}</Text>
@@ -158,7 +162,8 @@ export function SortMenu({ theme, mode, onChange, rankedAt, touch, rank = null, 
           <View style={{ width: 14 }}>{running ? <Spinner color={c.foregroundMuted} size={12} label="Ranking" /> : <Icon name="RefreshCw" size={13} color={c.foreground} />}</View>
           <Text style={{ color: running ? c.foregroundMuted : c.foreground, fontSize: 13 }}>{running ? "Ranking…" : "Re-rank now"}</Text>
         </Pressable>}
-        <Text style={{ color: c.foregroundMuted, fontSize: 11, paddingHorizontal: 10, paddingTop: 4, paddingBottom: 4 }}>Priority: {note}</Text>
+        {/* Phones: before anything is ranked, "Priority: By urgency" only repeats the checked row's hint. */}
+        {!(touch && !rankedAt) && <Text style={{ color: c.foregroundMuted, fontSize: 11, paddingHorizontal: 10, paddingTop: 4, paddingBottom: 4 }}>Priority: {note}</Text>}
       </View>
     </View>}
   </View>;
@@ -180,19 +185,32 @@ export function StatusStrip({ theme, model, filter, onFilter, touch, dense }: { 
   const chip = (key: string, label: string, n: number | null, selected: boolean, onPress: () => void, tone?: string) => {
     const muted = n === 0;
     const color = selected ? c.foreground : muted ? withAlpha(c.foregroundMuted, 0.6) : tone ?? c.foreground;
+    const pill = (hovered?: boolean) => ({ flexDirection: "row" as const, alignItems: "center" as const, gap: 5, height: touch ? 32 : 30, paddingHorizontal: touch ? 10 : 8, borderRadius: 16,
+      borderWidth: 1, borderColor: selected ? withAlpha(c.foreground, 0.4) : "transparent",
+      backgroundColor: selected ? c.surface2 : hovered ? c.surface1 : "transparent" });
     return <Pressable key={key} accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={n === null ? label : `${label}, ${n}${selected ? ". Showing only these; press to show all" : ". Show only these"}`} onPress={onPress}
-      style={state => ({ flexDirection: "row", alignItems: "center", gap: 5, height: touch ? 36 : 30, paddingHorizontal: 8, borderRadius: 15,
-        borderWidth: 1, borderColor: selected ? withAlpha(c.foreground, 0.4) : "transparent",
-        backgroundColor: selected ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
-      {n !== null && <Text style={{ color, fontSize: 13, fontWeight: "600", fontVariant: ["tabular-nums"] }}>{n}</Text>}
-      <Text style={{ color: selected ? c.foreground : muted ? withAlpha(c.foregroundMuted, 0.6) : c.foregroundMuted, fontSize: 12 }}>{label}</Text>
-      {selected && <Icon name="X" size={11} color={c.foregroundMuted} />}
+      // Phones: a 32-tall chip inside a real 44 touch box (react-native-web ignores hitSlop).
+      style={touch ? { paddingVertical: 6 } : state => pill((state as { hovered?: boolean }).hovered)}>
+      {state => {
+        const inner = <>
+          {n !== null && <Text style={{ color, fontSize: 13, fontWeight: "600", fontVariant: ["tabular-nums"] }}>{n}</Text>}
+          <Text style={{ color: selected ? c.foreground : muted ? withAlpha(c.foregroundMuted, 0.6) : c.foregroundMuted, fontSize: 12 }}>{label}</Text>
+          {selected && <Icon name="X" size={11} color={c.foregroundMuted} />}
+        </>;
+        return touch ? <View style={pill((state as { hovered?: boolean }).hovered)}>{inner}</View> : inner;
+      }}
     </Pressable>;
   };
-  return <View accessibilityRole="toolbar" accessibilityLabel="Status" style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: dense ? 0 : 2, rowGap: 2, paddingHorizontal: dense ? 4 : 10 }}>
-    {STRIP.map(s => chip(s.id, s.label, counts[s.id], filter === s.id, () => onFilter(filter === s.id ? null : s.id), s.id === "needs" && counts.needs ? c.statusWarning : undefined))}
+  const chips = <>
+    {STRIP.filter(s => !touch || counts[s.id] > 0 || filter === s.id).map(s => chip(s.id, s.label, counts[s.id], filter === s.id, () => onFilter(filter === s.id ? null : s.id), s.id === "needs" && counts.needs ? c.statusWarning : undefined))}
     {counts.later > 0 && chip("later", "Later", counts.later, filter === "later", () => onFilter(filter === "later" ? null : "later"))}
     {counts.archivable > 0 && <Text style={{ color: c.statusSuccess, fontSize: 12, paddingHorizontal: 6 }}>{counts.archivable} to archive</Text>}
+  </>;
+  // Phones: only groups that have something, on one line that scrolls sideways instead of wrapping.
+  if (touch) return <ScrollView horizontal showsHorizontalScrollIndicator={false} accessibilityRole="toolbar" accessibilityLabel="Status"
+    contentContainerStyle={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 12, paddingVertical: 2 }}>{chips}</ScrollView>;
+  return <View accessibilityRole="toolbar" accessibilityLabel="Status" style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: dense ? 0 : 2, rowGap: 2, paddingHorizontal: dense ? 4 : 10 }}>
+    {chips}
   </View>;
 }
 
@@ -272,6 +290,28 @@ export function ResultRow({ item, theme, active, dense, touch, onPress, s: row }
   const { hit } = item;
   const via = hit.via ? excerpt(hit.via.text, hit.via.ranges, dense ? 56 : 90) : null;
   const archived = hit.group === "archived";
+  // Phones: the list's own row (glyph, two-line 15/20 title with the age, state word in tone, PRs as text, a divider),
+  // with the match highlighted. No group pill: the state word already says it.
+  if (touch) {
+    const tone = row ? glyphColor(row, c, true) : c.foregroundMuted;
+    return <Pressable accessibilityRole="button" accessibilityState={{ selected: active }} accessibilityLabel={`${hit.title}${row?.word ? `. ${row.word}` : ""}${hit.via ? `, ${FIELD_LABEL[hit.via.field]}: ${hit.via.text}` : ""}`} onPress={onPress}
+      style={state => ({ flexDirection: "row", alignItems: "flex-start", gap: 10, minHeight: 56, paddingLeft: 14, paddingRight: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: withAlpha(c.border, 0.6),
+        backgroundColor: active || state.pressed ? c.surface2 : "transparent" })}>
+      <View style={{ paddingTop: 2 }}><Icon name={archived ? "Archive" : row?.icon ?? "Circle"} size={17} color={archived ? c.foregroundMuted : tone} /></View>
+      <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+          <View style={{ flex: 1, minWidth: 0 }}><Highlighted text={hit.title} ranges={hit.titleRanges} color={archived ? c.foregroundMuted : c.foreground} hit={c.foreground} mark={c.statusWarning} size={15} weight="500" lines={2} /></View>
+          {row && <Age iso={row.at} c={c} size={12} />}
+        </View>
+        {via ? <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>{FIELD_LABEL[hit.via!.field]} · <Highlighted text={via.text} ranges={via.ranges} color={c.foregroundMuted} hit={c.foreground} mark={c.statusWarning} size={13} /></Text>
+          : archived ? <Text style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>Archived</Text>
+          : row && (row.word || row.line) ? <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>
+            {row.word ? <Text style={{ color: tone, fontWeight: "600" }}>{row.word}</Text> : null}{row.word && row.line ? " · " : ""}{row.line}
+          </Text> : null}
+        {row?.pr && <Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 17 }}><PrSummaryText s={row} c={c} /></Text>}
+      </View>
+    </Pressable>;
+  }
   return <Pressable accessibilityRole="button" accessibilityState={{ selected: active }} accessibilityLabel={`${hit.title}${hit.via ? `, ${FIELD_LABEL[hit.via.field]}: ${hit.via.text}` : ""}`} onPress={onPress}
     style={state => ({ flexDirection: "row", alignItems: "center", gap: 10, minHeight: touch ? 56 : dense ? 40 : 44, paddingHorizontal: dense ? 8 : 16, paddingVertical: 4,
       borderLeftWidth: 2, borderLeftColor: active ? withAlpha(c.foreground, 0.5) : "transparent",

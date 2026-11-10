@@ -6,7 +6,7 @@ import { Icon, SettingsAction, SettingsCard, SettingsSection, SettingsSelect, Se
 import { QUESTION_MODES, QUESTION_MODE_RULES, questionPreferences, type QuestionMode } from "../shared/questions";
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { followSettingsRpc, projectSettingsRpc, setFollowSettingsRpc, setProjectTrackingRpc } from "../shared/contracts";
-import { Switch, errorText, text, type Theme } from "./kit";
+import { Switch, bottomInset, errorText, space, text, type Theme } from "./kit";
 import { DisplaySections, PermissionsSection, PreferenceSwitch } from "./display";
 import { ReviewerSettings, reviewerSettingsKey } from "./reviewers";
 import { AgentSettings, agentSettingsKey } from "./agents";
@@ -50,7 +50,7 @@ const followKey = ["follow-through", "follow-settings"];
  * one row open at a time, 25 rows and "Show more".
  */
 function FollowingCategory({ theme, compact, openSetup }: { theme: Theme; compact: boolean; openSetup?: () => void }) {
-  const c = theme.colors; const t = text(c);
+  const c = theme.colors; const t = text(c, compact);
   const read = useRpc(followSettingsRpc); const write = useRpc(setFollowSettingsRpc); const cache = useQueryClient(); const toast = useToast();
   const query = useQuery({ queryKey: followKey, queryFn: () => read({}), refetchInterval: 30000 });
   const change = useMutation({
@@ -87,7 +87,7 @@ function FollowingCategory({ theme, compact, openSetup }: { theme: Theme; compac
 }
 
 function ProjectsFold({ theme, compact }: { theme: Theme; compact: boolean }) {
-  const c = theme.colors; const t = text(c);
+  const c = theme.colors; const t = text(c, compact);
   const read = useRpc(projectSettingsRpc); const write = useRpc(setProjectTrackingRpc); const cache = useQueryClient(); const toast = useToast();
   const query = useQuery({ queryKey: settingsKey, queryFn: () => read({}), refetchInterval: 15000 });
   const change = useMutation({
@@ -117,7 +117,7 @@ function ProjectsFold({ theme, compact }: { theme: Theme; compact: boolean }) {
 
 function WorkspacesFold({ theme, compact, all, autoDefault, busy, set }: { theme: Theme; compact: boolean; all: WorkspaceSetting[]; autoDefault: boolean; busy: boolean;
   set: (w: { workspaceId: string; follow?: boolean; enable_auto_sends?: boolean }, toast?: string) => void }) {
-  const c = theme.colors; const t = text(c);
+  const c = theme.colors; const t = text(c, compact);
   const [q, setQ] = useState("");
   const [cap, setCap] = useState(25);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -189,8 +189,8 @@ function useSummaries(): Partial<Record<SettingsCategory, string | null>> {
  * data loads.
  */
 export function FollowSettings({ theme, layout, openSetup }: PluginSurfaceProps & { openSetup?: () => void }) {
-  const c = theme.colors; const t = text(c);
   const compact = layout.compact;
+  const c = theme.colors; const t = text(c, compact);
   const [category, setCategory] = useState<SettingsCategory>(() => readCategory());
   // The phone reopens in the last category, like desktop; before any pick it starts on the list.
   const [drilled, setDrilled] = useState(() => hasSavedCategory());
@@ -203,9 +203,10 @@ export function FollowSettings({ theme, layout, openSetup }: PluginSurfaceProps 
     </View>
     : category === "agents" ? <AgentsCategory theme={theme} compact={compact} />
     : <DisplaySections theme={theme} />;
-  const page = { padding: compact ? 16 : 24, gap: 18, maxWidth: 720, width: "100%" as const, alignSelf: "center" as const, paddingBottom: 40 };
+  // Phones: the shared gutter and the bottom inset (the gesture bar), like every other Follow-up surface.
+  const page = { padding: compact ? space(true).gutter : 24, gap: 18, maxWidth: 720, width: "100%" as const, alignSelf: "center" as const, paddingBottom: 40 };
   // The host's header sits right above: no extra top space on a phone.
-  if (compact) return <ScrollView style={{ flex: 1, backgroundColor: c.surface0 }} contentContainerStyle={{ ...page, paddingTop: 4 }}>
+  if (compact) return <ScrollView style={{ flex: 1, backgroundColor: c.surface0 }} contentContainerStyle={{ ...page, paddingTop: 4, ...bottomInset(true, 28) }}>
     {drilled ? <>
       <BackHeader title={categoryTitle(category)} onBack={() => setDrilled(false)} theme={theme} />
       {content}

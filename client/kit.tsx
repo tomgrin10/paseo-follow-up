@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Pressable, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { Platform, Pressable, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { PressScale, Spinner } from "./motion";
 import { raised, tint, withAlpha, type Colors, type Theme } from "./theme";
@@ -15,13 +15,44 @@ export function useNow(intervalMs = 30_000): number {
 
 export { errorText } from "../shared/errors";
 
-export const text = (colors: Colors) => ({
-  title: { color: colors.foreground, fontSize: 15, lineHeight: 21, fontWeight: "600" as const },
-  body: { color: colors.foreground, fontSize: 13, lineHeight: 18 },
-  meta: { color: colors.foregroundMuted, fontSize: 12, lineHeight: 17, fontVariant: ["tabular-nums" as const] },
-  small: { color: colors.foregroundMuted, fontSize: 11, lineHeight: 15, fontVariant: ["tabular-nums" as const] },
-  label: { color: colors.foreground, fontSize: 13, lineHeight: 18, fontWeight: "600" as const },
-});
+/**
+ * The type scale. Desktop values are the long-standing ones; `compact` (phones) steps body and titles up for reading at
+ * arm's length and keeps hierarchy in weight and colour: one 600 line per block, supporting text muted. `ask` is the one
+ * line per pane you act on; `section` heads groups (sentence case on phones, small caps on desktop).
+ */
+export const text = (colors: Colors, compact = false) => {
+  const cap = (n: number) => Platform.OS === "web" ? {} : { maxFontSizeMultiplier: n };
+  return {
+    headline: { color: colors.foreground, fontSize: compact ? 20 : 21, lineHeight: compact ? 26 : 29, fontWeight: "600" as const, letterSpacing: -0.2, ...cap(1.4) },
+    title: { color: colors.foreground, fontSize: compact ? 17 : 15, lineHeight: compact ? 23 : 21, fontWeight: "600" as const, ...cap(1.4) },
+    ask: { color: colors.foreground, fontSize: compact ? 16 : 15, lineHeight: compact ? 22 : 21, fontWeight: "600" as const, ...cap(1.4) },
+    body: { color: colors.foreground, fontSize: compact ? 14 : 13, lineHeight: compact ? 20 : 18, ...cap(1.4) },
+    meta: { color: colors.foregroundMuted, fontSize: 12, lineHeight: 17, fontVariant: ["tabular-nums" as const], ...cap(1.25) },
+    small: { color: colors.foregroundMuted, fontSize: 11, lineHeight: 15, fontVariant: ["tabular-nums" as const], ...cap(1.25) },
+    label: { color: colors.foreground, fontSize: compact ? 14 : 13, lineHeight: compact ? 20 : 18, fontWeight: "600" as const, ...cap(1.4) },
+    section: compact
+      ? { color: colors.foregroundMuted, fontSize: 13, lineHeight: 18, fontWeight: "600" as const, ...cap(1.25) }
+      : { color: colors.foregroundMuted, fontSize: 11, lineHeight: 15, fontWeight: "600" as const, letterSpacing: 0.5, textTransform: "uppercase" as const },
+  };
+};
+
+/** Spacing tokens. Phones get a 16 gutter, roomier rows and 44px controls; desktop keeps today's density. */
+export const space = (compact = false) => compact
+  ? { gutter: 16, section: 16, stack: 6, rowV: 12, rowH: 16, card: 14, control: 44, row: 48 }
+  : { gutter: 12, section: 12, stack: 4, rowV: 9, rowH: 12, card: 12, control: 32, row: 32 };
+
+/**
+ * Bottom clearance for anything that touches the screen's bottom edge on a phone (the composer dock, the undo bar,
+ * sheet footers). The plugin has no safe-area provider: web uses env() (0 unless the host sets viewport-fit=cover, so
+ * the max() still leaves 12), native uses the gesture-bar / home-indicator heights. Desktop gets nothing.
+ */
+export function bottomInset(compact: boolean, extra = 0): ViewStyle {
+  if (!compact) return {};
+  if (Platform.OS === "web") return { paddingBottom: `max(${12 + extra}px, calc(env(safe-area-inset-bottom) + ${extra}px))` as unknown as number };
+  return { paddingBottom: (Platform.OS === "ios" ? 34 : 24) + extra };
+}
+/** The same clearance as a number, for absolutely positioned bars (web can't do env() in `bottom`, so it uses 12). */
+export const bottomGap = (compact: boolean) => !compact || Platform.OS === "web" ? 12 : Platform.OS === "ios" ? 34 : 24;
 
 type ButtonKind = "primary" | "secondary" | "ghost" | "danger";
 /** One button vocabulary for the whole plugin: 32px on desktop with a hit slop, 44px on touch layouts. */
@@ -64,9 +95,9 @@ export function Card({ theme, icon, title, tone = "plain", count, right, childre
   const accent = tone === "attention" ? c.statusWarning : tone === "success" ? c.statusSuccess : null;
   return <View style={[{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 8, overflow: "hidden", backgroundColor: c.surface0 },
     accent ? { borderWidth: 1, borderColor: withAlpha(accent, 0.7) } : raised(c), style]}>
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 8 }}>
-      <Icon name={icon} size={14} color={accent ?? c.foregroundMuted} />
-      <Text accessibilityRole="header" style={{ color: accent ?? c.foreground, fontSize: 13, lineHeight: 18, fontWeight: "600" }}>{title}</Text>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: compact ? 8 : 7, paddingHorizontal: compact ? 14 : 12, paddingTop: 10, paddingBottom: 8, minHeight: compact ? 44 : undefined }}>
+      <Icon name={icon} size={compact ? 16 : 14} color={accent ?? c.foregroundMuted} />
+      <Text accessibilityRole="header" style={{ color: accent ?? c.foreground, fontSize: compact ? 14 : 13, lineHeight: compact ? 20 : 18, fontWeight: "600" }}>{title}</Text>
       {count !== undefined && count !== "" && <Chip theme={theme} color={accent ?? c.foregroundMuted} label={String(count)} />}
       <View style={{ flex: 1 }} />
       {right}
@@ -99,19 +130,19 @@ export function Switch({ theme, label, value, onChange, disabled = false, access
 }
 
 /** A row inside a card: hairline on top, hover tint when pressable. */
-export function CardRow({ theme, onPress, accessibilityLabel, children, style, first = false }: { theme: Theme; onPress?: () => void; accessibilityLabel?: string; children: ReactNode; style?: StyleProp<ViewStyle>; first?: boolean }) {
+export function CardRow({ theme, onPress, accessibilityLabel, children, style, first = false, compact = false }: { theme: Theme; onPress?: () => void; accessibilityLabel?: string; children: ReactNode; style?: StyleProp<ViewStyle>; first?: boolean; compact?: boolean }) {
   const c = theme.colors;
-  const base: ViewStyle = { paddingHorizontal: 12, paddingVertical: 9, borderTopWidth: first ? 0 : 1, borderTopColor: c.border };
+  const base: ViewStyle = { paddingHorizontal: compact ? 14 : 12, paddingVertical: compact ? 12 : 9, borderTopWidth: first ? 0 : 1, borderTopColor: c.border };
   if (!onPress) return <View style={[base, style]}>{children}</View>;
   return <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel} onPress={onPress}
     style={state => [base, { backgroundColor: state.pressed ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" }, style]}>{children}</Pressable>;
 }
 
 /** The fold row that hides finished items: "3 merged · Show". */
-export function FoldRow({ theme, label, open, onPress, icon, iconColor }: { theme: Theme; label: string; open: boolean; onPress: () => void; icon: string; iconColor: string }) {
+export function FoldRow({ theme, label, open, onPress, icon, iconColor, compact = false }: { theme: Theme; label: string; open: boolean; onPress: () => void; icon: string; iconColor: string; compact?: boolean }) {
   const c = theme.colors;
   return <Pressable accessibilityRole="button" aria-expanded={open} accessibilityState={{ expanded: open }} accessibilityLabel={`${open ? "Hide" : "Show"} ${label}`} onPress={onPress}
-    style={state => ({ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1, borderTopColor: c.border, backgroundColor: state.pressed ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
+    style={state => ({ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: compact ? 14 : 12, paddingVertical: 8, minHeight: compact ? 48 : undefined, borderTopWidth: 1, borderTopColor: c.border, backgroundColor: state.pressed ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
     <View style={{ width: 16, alignItems: "center" }}><Icon name={icon} size={13} color={iconColor} /></View>
     <Text style={{ flex: 1, color: c.foregroundMuted, fontSize: 12, lineHeight: 17, fontWeight: "600", fontVariant: ["tabular-nums"] }}>{label}</Text>
     <Icon name={open ? "ChevronUp" : "ChevronDown"} size={14} color={c.foregroundMuted} />

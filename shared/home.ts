@@ -379,3 +379,9 @@ export function paneButtons(p: PaneInput): { buttons: PaneButton[]; primary: Pan
     : p.flagged ? "sign_off" : null;
   return { buttons, primary };
 }
+
+/** Two lines say the same thing (trimmed, case-insensitive, ignoring trailing punctuation): show only one of them. */
+export function sameText(a: string | null | undefined, b: string | null | undefined): boolean {
+  const n = (x: string | null | undefined) => (x ?? "").trim().replace(/[.!?…:;,\s]+$/u, "").replace(/\s+/g, " ").toLowerCase();
+  return !!n(a) && n(a) === n(b);
+}
