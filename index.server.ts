@@ -65,6 +65,7 @@ import { labelsFor, providerName, resolveRole, roleSummary, type AgentSettingsVi
 import type { LoadSignals } from "./shared/agent-load";
 import { OnboardingStore, ReadinessChecks, nativeAgentCount } from "./server/onboarding";
 import { execFile } from "node:child_process";
+import { compactHeap } from "./server/memory";
 import { VersionsStore, demoOverride, describeSelf, readPackage, type SelfInstall } from "./server/release-notes";
 import { releaseNotesViewSchema, type ReleaseNote, type ReleaseNotesView } from "./shared/changelog";
 import { BRIEF_KIND, BRIEF_VERSION, prState, validateNeedsYou, type Brief, type NeedsYouRecord } from "./shared/brief";
@@ -330,10 +331,13 @@ export default function contribute(server: PluginServerContext) {
     }
     return withSessionMcp({ ...request, env: { ...request.env, FOLLOW_THROUGH_TOOLS: "stdio", FOLLOW_THROUGH_PROVIDER: request.provider } }, directory, clientEntry(), paseoHome, recovery, process.env, brief, root, overseer, providers) as R;
   };
+  let compacted = false;
   const loop = async () => {
     await ready;
     if (stopped || loadError) return;
     await engine.tick();
+    // Startup is done once the first tick is: release what it grew (see server/memory.ts).
+    if (!compacted) { compacted = true; compactHeap(); }
     if (!stopped) timer = setTimeout(() => void loop(), 15_000);
   };
   void loop();
