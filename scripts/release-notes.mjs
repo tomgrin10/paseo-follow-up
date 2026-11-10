@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Release notes: `node scripts/release-notes.mjs <version> [--date yyyy-mm-dd] [--allow-empty]` moves changes/*.md
-// under a new `## <version> (<date>)` heading at the top of CHANGELOG.md and deletes those fragments.
+// under a new `## <version> (<date>)` heading at the top of CHANGELOG.md and deletes those fragments. Betas (any
+// version with a prerelease part) get no section: the fragments stay in changes/ for the next stable release.
 // `node scripts/release-notes.mjs --check` validates CHANGELOG.md and pending fragments without writing.
 import { readFile, readdir, writeFile, unlink } from "node:fs/promises";
 import { join, dirname } from "node:path";
@@ -66,13 +67,17 @@ async function check() {
   for (const f of pending) for (const b of f.bullets) for (const p of lintBullet(b)) problems.push(`changes/${f.name}: ${p}: ${b}`);
   const pkg = JSON.parse(await readFile(join(ROOT, "package.json"), "utf8"));
   if (!pkg.files.includes("CHANGELOG.md")) problems.push("package.json files must include CHANGELOG.md");
-  // A version bump without its notes would ship an empty "What's new". Run release:notes before bumping.
-  if (!seen.has(pkg.version)) problems.push(`CHANGELOG.md has no section for package.json's ${pkg.version}. Run npm run release:notes ${pkg.version} before the bump.`);
+  // A stable bump without its notes would ship an empty "What's new". Run release:notes before bumping. Betas have
+  // no notes of their own; their changes ship in the next stable release's section.
+  if (!isPrerelease(pkg.version) && !seen.has(pkg.version)) problems.push(`CHANGELOG.md has no section for package.json's ${pkg.version}. Run npm run release:notes ${pkg.version} before the bump.`);
   return problems;
 }
 
+export const isPrerelease = version => /^\d+\.\d+\.\d+-/.test(version);
+
 async function release(version, date, allowEmpty) {
   if (!SEMVER.test(version)) throw new Error(`Not a version: ${version}`);
+  if (isPrerelease(version)) return { version, date, skipped: true, fragments: (await fragments()).map(f => f.name) };
   const changelog = await readFile(CHANGELOG, "utf8");
   if (versionsIn(changelog).includes(version)) throw new Error(`CHANGELOG.md already has ${version}`);
   const pending = await fragments();
@@ -103,7 +108,8 @@ if (isMain) {
       const date = di >= 0 ? args[di + 1] : new Date().toISOString().slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? "")) throw new Error("--date must be yyyy-mm-dd");
       const result = await release(version, date, args.includes("--allow-empty"));
-      console.log(`CHANGELOG.md: ${result.version} (${result.date}), ${result.bullets} note(s) from ${result.fragments.length} fragment(s)`);
+      if (result.skipped) console.log(`${result.version} is a beta: no release notes. ${result.fragments.length} fragment(s) stay in changes/ for the next stable release.`);
+      else console.log(`CHANGELOG.md: ${result.version} (${result.date}), ${result.bullets} note(s) from ${result.fragments.length} fragment(s)`);
     }
   } catch (e) { console.error(e.message); process.exit(1); }
 }
