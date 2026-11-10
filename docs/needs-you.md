@@ -5,6 +5,13 @@
 - **One flag per root agent.** It clears only when the developer signs it off or writes to the agent, or when another
   agent signs it off on the developer's behalf (`sign_off`, which counts as a sign-off, not as writing). Opening a
   workspace, reading it, or Paseo's unread dot never clears it, and an agent can't clear its own flag.
+- **Run state is the last turn's, not an outside fact.** `error` and `paused` (`RUN_STATE_REASONS`) describe the
+  agent's last turn, so a newer turn start from anyone (the developer, another agent, the host resuming it) drops
+  them, along with an open card that only reported them (`briefStep` `turn_start`, unless it has open questions). A
+  new failure flags again. Outside facts (permission by request, ci, review, reviewers, pr_closed) and a finish with
+  its ask stay until handled. Rows apply `liveFlag`, so a running agent never headlines a stale Error or Paused
+  (`rowViolations`, invariant `running-is-not-stale`), and `Inbox.start` drops such flags for agents already running
+  after a restart (a 0.16 host resumes them; on 0.15 the agent stopped, and the flag stays).
 - **Pure logic** is in `shared/inbox.ts`: the reducer, `REASONS` in urgency order (permission, error, paused, ci,
   review, reviewers, finished, pr_closed), snoozes (`next-event`, an ISO time, or `pr:<repo#n>`), finish flags, and
   undo.
