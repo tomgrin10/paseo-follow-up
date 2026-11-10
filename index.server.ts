@@ -64,6 +64,7 @@ import { AgentSettingsStore, ProviderCatalog, type CatalogSource } from "./serve
 import { labelsFor, providerName, resolveRole, roleSummary, type AgentSettingsView } from "./shared/agent-settings";
 import type { LoadSignals } from "./shared/agent-load";
 import { OnboardingStore, ReadinessChecks, nativeAgentCount } from "./server/onboarding";
+import { updatesConsent } from "./shared/onboarding";
 import { execFile, spawn } from "node:child_process";
 import { compactHeap } from "./server/memory";
 import { UpdatesStore } from "./server/updates";
@@ -756,7 +757,7 @@ export default function contribute(server: PluginServerContext) {
     try { process.kill(lock.pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === "EPERM"; }
   };
   const updater = new Updater({
-    directory, read: () => updatesStore.read(), write: next => updatesStore.write(next), self: () => selfInstall(), registry,
+    directory, read: () => updatesStore.read(), defaultMode: () => onboarding.init().then(f => f.install === "fresh" ? "auto" as const : "notify" as const, () => "notify" as const), write: next => updatesStore.write(next), self: () => selfInstall(), registry,
     provenance: version => checkProvenance({ fetch: (url, init) => fetch(url, init), registry: registryUrl(), name: "paseo-follow-up", version }),
     busy: async fresh => {
       const busy: Busy[] = [];
@@ -994,7 +995,15 @@ export default function contribute(server: PluginServerContext) {
   }).catch(() => undefined);
   handle(rpc.trustBypassRpc, async () => trust.recent(20));
   handle(rpc.onboardingRpc, async () => { await requireReady(); return onboarding.view(); });
-  handle(rpc.setOnboardingRpc, async ({ action, step }) => { await requireReady(); return onboarding.act(action, step ?? null); });
+  handle(rpc.setOnboardingRpc, async ({ action, step }) => {
+    await requireReady();
+    const before = await onboarding.init();
+    const view = await onboarding.act(action, step ?? null);
+    // A fresh install passing the Updates step, or skipping setup, takes Install automatically (see updatesConsent).
+    if (updatesConsent({ install: before.install, settled: !!before.settledAt, action, from: before.step, to: step ?? null }) && !(await updatesStore.read()).mode)
+      await updater.setSettings({ mode: "auto" }).catch(() => undefined);
+    return view;
+  });
   // Readiness checks for the setup flow: gh, the helper providers and whether tools attach. On demand only, cached.
   const readiness = new ReadinessChecks({
     gh: () => new Promise((resolve, reject) => execFile("gh", ["api", "user", "--jq", ".login"], { timeout: 10_000 }, (error, stdout, stderr) => error ? reject(Object.assign(error, { stderr })) : resolve(stdout))),

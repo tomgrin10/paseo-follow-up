@@ -33,8 +33,11 @@ export class UpdatesStore {
   }
 }
 
-/** Defaults: the channel follows the installed version; an existing install starts at Tell me, a fresh one asks (onboarding). */
-export function settingsOf(file: UpdatesFile, version: string): { mode: UpdateMode; channel: Channel } {
-  return { mode: file.mode ?? "notify", channel: isChannel(file.channel) ? file.channel : defaultChannel(version) };
+/**
+ * Defaults: the channel follows the installed version. An existing install starts at Tell me; a fresh one at Install
+ * automatically, which setup shows pre-selected and saves when passed or skipped.
+ */
+export function settingsOf(file: UpdatesFile, version: string, fallback: UpdateMode = "notify"): { mode: UpdateMode; channel: Channel } {
+  return { mode: file.mode ?? fallback, channel: isChannel(file.channel) ? file.channel : defaultChannel(version) };
 }
 

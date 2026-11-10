@@ -43,9 +43,10 @@ function deliveryLine(w: Workspace, q: Question, now: number): { icon: string; t
   }
 }
 
-function OptionCard({ theme, letter, label, consequence, recommended, selected, disabled, onPress, compact, dense = false }: { theme: Theme; letter: string; label: string; consequence?: string; recommended: boolean; selected: boolean; disabled: boolean; onPress: () => void; compact: boolean; dense?: boolean }) {
+/** A radio card: the question options, and setup's Updates choice (no letter there). */
+export function OptionCard({ theme, letter, label, consequence, recommended, selected, disabled, onPress, compact, dense = false }: { theme: Theme; letter?: string; label: string; consequence?: string; recommended: boolean; selected: boolean; disabled: boolean; onPress: () => void; compact: boolean; dense?: boolean }) {
   const c = theme.colors; const t = text(c);
-  return <Pressable accessibilityRole="radio" aria-checked={selected} accessibilityState={{ checked: selected, disabled }} accessibilityLabel={`${letter}. ${label}${recommended ? ". Recommended" : ""}${consequence ? `. ${consequence}` : ""}`}
+  return <Pressable accessibilityRole="radio" aria-checked={selected} accessibilityState={{ checked: selected, disabled }} accessibilityLabel={`${letter ? `${letter}. ` : ""}${label}${recommended ? ". Recommended" : ""}${consequence ? `. ${consequence}` : ""}`}
     disabled={disabled} onPress={onPress}
     style={state => ({ flexDirection: "row", gap: 10, paddingHorizontal: dense ? 10 : 12, paddingVertical: compact ? 12 : dense ? 8 : 10, borderRadius: 8, borderWidth: selected ? 1.5 : 1,
       borderColor: selected ? c.accent : c.border, margin: selected ? 0 : 0.5,
@@ -53,7 +54,7 @@ function OptionCard({ theme, letter, label, consequence, recommended, selected, 
     <View style={{ width: 18, height: 18, marginTop: 1, borderRadius: 9, borderWidth: selected ? 5 : 1.5, borderColor: selected ? c.accent : c.foregroundMuted }} />
     <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 8, rowGap: 4 }}>
-        <Text style={t.label}><Text style={{ fontVariant: ["tabular-nums"] }}>{letter}</Text>{"  "}{label}</Text>
+        <Text style={t.label}>{letter ? <><Text style={{ fontVariant: ["tabular-nums"] }}>{letter}</Text>{"  "}</> : null}{label}</Text>
         {recommended && <Chip theme={theme} icon="ThumbsUp" label="Recommended" color={c.foregroundMuted} />}
       </View>
       {!!consequence && <Text numberOfLines={dense ? 2 : undefined} style={t.meta}>{consequence}</Text>}

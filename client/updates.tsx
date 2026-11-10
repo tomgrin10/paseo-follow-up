@@ -11,6 +11,7 @@ import { Button, errorText, text, useNow, type Theme } from "./kit";
 import { Spinner } from "./motion";
 import { Disclosure } from "./settings-shell";
 import { withAlpha } from "./theme";
+import { OptionCard } from "./questions";
 import { ReleaseNotesSheet, VersionNotes } from "./release-notes";
 
 export const updatesKey = ["follow-through", "updates"];
@@ -151,5 +152,36 @@ export function UpdatesSections({ theme, compact }: { theme: Theme; compact: boo
       </View>)}
     </Disclosure>}
     {sheet != null && <ReleaseNotesSheet theme={theme} compact={compact} all={sheet} onClose={() => setSheet(null)} />}
+  </View>;
+}
+
+const SETUP_CARDS: { mode: UpdateMode; hint: string }[] = [
+  { mode: "auto", hint: "Waits until your agents are idle. Rolls back if the new version fails." },
+  { mode: "notify", hint: "Shows new versions on Home. You choose when to install." },
+  { mode: "off", hint: "No checks. You can check from Settings → Updates." },
+];
+/**
+ * Setup's Updates step: the same RPCs and controls as Settings → Updates, as radio cards. Reads without asking npm.
+ * Saves on change; passing the step or skipping setup on a fresh install saves the pre-selected mode (server side).
+ */
+export function UpdatesStep({ theme, compact }: { theme: Theme; compact: boolean }) {
+  const c = theme.colors; const t = text(c);
+  const query = useUpdates();
+  const write = useRpc(setUpdatesRpc); const cache = useQueryClient(); const toast = useToast();
+  const save = useMutation({ mutationFn: (input: { mode?: UpdateMode; channel?: Channel }) => write(input), onSuccess: v => cache.setQueryData(updatesKey, v), onError: e => toast.error(errorText(e)) });
+  const view = query.data;
+  if (query.isLoading) return <Spinner color={c.foregroundMuted} size={16} label="Loading updates" />;
+  if (!view) return <Text accessibilityRole="alert" style={[t.meta, { color: c.statusDanger }]}>{query.error ? errorText(query.error) : "Couldn't load updates."}</Text>;
+  if (view.installKind !== "npm") return <Text style={t.body}>Updates are managed by your checkout. Pull and rebuild to update.</Text>;
+  return <View style={{ gap: 12 }}>
+    <View accessibilityRole="radiogroup" accessibilityLabel="Updates" style={{ gap: 6 }}>
+      {SETUP_CARDS.map(card => <OptionCard key={card.mode} theme={theme} compact={compact} label={MODE_LABEL[card.mode]} consequence={card.hint} recommended={card.mode === "auto"}
+        selected={view.mode === card.mode} disabled={save.isPending} onPress={() => view.mode !== card.mode && save.mutate({ mode: card.mode })} />)}
+    </View>
+    <SettingsCard>
+      <SettingsSelect<Channel> label="Channel" hint={channelHint(view)} value={view.channel} disabled={save.isPending}
+        options={[{ value: "stable", label: "Stable" }, { value: "beta", label: "Beta" }]} onValueChange={channel => save.mutate({ channel })} />
+    </SettingsCard>
+    <Text style={t.small}>Only versions built from github.com/tomgrin10/paseo-follow-up are installed.</Text>
   </View>;
 }
