@@ -17,7 +17,7 @@ import { SubmitScope, submitHint, text, useNow } from "./kit";
 import { RichText } from "./rich-text";
 import { PrSheet } from "./pr-sheet";
 import { isLight, withAlpha, type Colors } from "./theme";
-import { runAction } from "./toasts";
+import { runAction, runUndoable } from "./toasts";
 
 /**
  * The brief card (design §2): the ask in one line, decisions as option rows, only the context needed, and the one
@@ -234,7 +234,7 @@ function Past({ b, c, now, compact, height }: { b: Brief; c: Colors; now: number
   const picked = answered && asked.some(d => d.chosen);
   const icon = b.state === "superseded" ? "History" : "CircleCheck";
   const color = b.state === "superseded" ? c.foregroundMuted : c.statusSuccess;
-  const right = answered && b.outcomeAt ? `Answered ${clock(b.outcomeAt)}` : age(b.outcomeAt ?? b.at, now);
+  const right = answered && b.outcomeAt ? `${b.outcome === "Done" ? "Done" : "Answered"} ${clock(b.outcomeAt)}` : age(b.outcomeAt ?? b.at, now);
   const body = expanded && <View style={{ gap: 10, paddingTop: 4 }}>
     <BriefBody b={b} c={c} compact={compact} tight={false} embedded height={height} mode="readonly" picks={{}} onPick={() => undefined} busy={null} />
   </View>;
@@ -282,12 +282,15 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   const [error, setError] = useState<string | null>(null);
   const toast = useToast();
   const [why, setWhy] = useState(false);
+  // Done collapses the card the moment it's pressed; the server's answered brief replaces this when the send lands.
+  const [marked, setMarked] = useState<string | null>(null);
   const picks = usePicks(b.id);
   const words = useWords(b.id);
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" } | null>(null);
   const workspace = b.workspaceId ? deps.workspace(b.workspaceId) : undefined;
   const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), refetchInterval: BROWSER_POLL_MS, enabled: !!sheet });
   if (b.state !== "open") return <Past b={b} c={c} now={now} compact={compact} height={height} />;
+  if (marked) return <Past b={{ ...b, state: "answered", outcome: "Done", outcomeAt: marked }} c={c} now={now} compact={compact} height={height} />;
 
   const attention = c.statusWarning;
   const acts = b.flagged && ACTS.includes(b.kind);
@@ -301,11 +304,20 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
     await runAction({ label: "Brief", toast, run: work, success: () => null, onError: e => setError(errorText(e)), failure: "Your answer wasn't sent" });
     setBusy(null);
   };
+  // Done: "Done: <ask>" can't be unsent, so it goes out when the toast's Undo window ends (runUndoable). A failure
+  // reopens the card with the reason; the toast keeps Retry, and Open brings the agent's chat back.
+  const markDone = () => {
+    if (busy || marked) return;
+    setError(null); setMarked(new Date().toISOString());
+    runUndoable("Marked done", { label: "Done", toast, run: () => act({ agentId, briefId: b.id, move: "done" }), success: "Marked done. The agent has it.",
+      failure: "Done not sent", open: () => deps.openAgent(agentId), onError: e => { setMarked(null); setError(errorText(e)); } }, () => setMarked(null), `done:${b.id}`);
+  };
   const press = (m: BriefMove) => {
     if ((m.kind === "merge" || m.kind === "add_reviewers") && m.prKey) { if (workspace?.prs.some(p => p.key === m.prKey)) setSheet({ key: m.prKey, intent: m.kind === "merge" ? "merge" : "reviewers" }); else if (b.workspaceId) deps.openPanel(b.workspaceId); }
     else if (m.kind === "open_pr" && m.url) void openExternalUrl(m.url).catch(() => undefined);
     else if (m.kind === "sign_off_next") { deps.signOff(agentId); deps.openNext(agentId); }
     else if (m.kind === "retry") void run("retry", () => act({ agentId, briefId: b.id, move: "retry" }));
+    else if (m.kind === "done") markDone();
     else if (m.kind === "copy_error" && b.mono) void copyText(b.mono).catch(() => undefined);
     else if (m.kind === "open_subagent" && m.agentId) deps.openAgent(m.agentId);
   };
@@ -397,7 +409,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   </View>;
 }
 
-const MOVE_ICON: Record<BriefMove["kind"], string> = { merge: "GitMerge", open_pr: "ExternalLink", sign_off_next: "ArrowRight", retry: "RotateCcw", copy_error: "Copy", open_subagent: "SquareArrowOutUpRight", add_reviewers: "UserPlus" };
+const MOVE_ICON: Record<BriefMove["kind"], string> = { merge: "GitMerge", open_pr: "ExternalLink", sign_off_next: "ArrowRight", retry: "RotateCcw", copy_error: "Copy", open_subagent: "SquareArrowOutUpRight", add_reviewers: "UserPlus", done: "Check" };
 
 export function contributeBrief(client: PluginClientContext, deps: BriefDeps) {
   const Component = (props: PluginTimelineItemProps<Brief>) => <BriefCard {...props} deps={deps} />;

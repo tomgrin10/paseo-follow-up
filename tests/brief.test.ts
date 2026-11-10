@@ -76,6 +76,22 @@ test("a brief shows PR facts only for a PR it references, never the lead PR by d
   const lead = pickBrief({ agent: { ask: "Review and merge #813", kind: "review" }, pr: prFacts, prs: [prFacts, other] });
   assert.equal(lead.factsPr, prFacts.key, "a review that links nothing is about the agent's own PR");
 });
+// Tom (2026-11-10): an Action brief ("Rotate the staging API key") had no button; telling the agent it was done
+// meant typing it. Done is the Action card's one move: it sends "Done: <ask>" as the developer and collapses the card.
+test("Done: an Action brief's one move; reviews, decisions, errors and finishes don't get it", () => {
+  assert.deepEqual(pickBrief({ agent: { ask: "Rotate the staging API key", kind: "action" } }).moves.map(m => [m.kind, m.label]), [["done", "Done"]]);
+  assert.equal(pickBrief({ agent: { ask: "Review #813", kind: "review" }, pr: prFacts }).moves.some(m => m.kind === "done"), false);
+  assert.equal(pickBrief({ agent: decision }).moves.some(m => m.kind === "done"), false);
+  assert.equal(pickBrief({ agent: { ask: "Nothing needed.", kind: "done" } }).moves.length, 0);
+  assert.equal(pickBrief({ error: { message: "x" }, agent: { ask: "Rotate the key", kind: "action" } }).moves.some(m => m.kind === "done"), false, "a failed turn isn't done");
+});
+test("§6 done: the open card collapses to Done · <ask>, once", () => {
+  const b = open("brief:t1", pickBrief({ agent: { ask: "Rotate the staging API key", kind: "action" } }));
+  const r = briefStep(b, { type: "done" }, at(2));
+  assert.equal(r.brief!.state, "answered"); assert.equal(collapsedLine(r.brief!), "Done · Rotate the staging API key");
+  assert.equal(briefStep(r.brief, { type: "done" }, at(3)).appends.length, 0);
+});
+
 test("invariant brief-pr-facts-referenced: no brief shows PR facts for a PR it doesn't reference", async () => {
   const { briefFactsViolations } = await import("../shared/status-invariants");
   const linkSets = [[], [{ label: "#900", pr: other.key }], [{ label: "#901", pr: "acme/app#901" }], [{ label: "docs", url: "https://example.invalid" }]];
@@ -366,6 +382,22 @@ test("an Action brief made while the agent's PR is in flight shows none of that 
   const b = (await s.entry()).brief!;
   assert.equal(b.kind, "action"); assert.deepEqual(b.facts, []); assert.equal(b.sourceLine, "Stated by the agent.");
   await s.done();
+});
+test("Done sends \"Done: <ask>\" as the developer, clears the flag's source, and is refused on any other card", async () => {
+  const s = await service([agent({ id: "main" })], { calls: { main: { at: Date.parse(at(1)), turnId: "t1", call: { ask: "Rotate the staging API key", kind: "action" } } } });
+  await s.inbox.turnEnded(main, { kind: "completed" }, "t1");
+  const id = (await s.entry()).brief!.id;
+  const sent: { text: string; messageId: string }[] = [];
+  const after = await s.inbox.briefAction("main", { briefId: id, move: "done" }, async (text, messageId) => { sent.push({ text, messageId }); });
+  assert.equal(after.state, "answered"); assert.equal(after.outcome, "Done");
+  assert.deepEqual(sent.map(m => m.text), ["Done: Rotate the staging API key"]);
+  assert.deepEqual((await s.inbox.store.snapshot()).ledger.map(l => [l.messageId, l.by]), [[sent[0].messageId, "developer"]]);
+  await assert.rejects(s.inbox.briefAction("main", { briefId: id, move: "done" }, async () => undefined), /already answered/);
+  await s.done();
+  const d = await service([agent({ id: "main" })], { calls: { main: { at: Date.parse(at(1)), turnId: "t1", call: decision } } });
+  await d.inbox.turnEnded(main, { kind: "completed" }, "t1");
+  await assert.rejects(d.inbox.briefAction("main", { briefId: (await d.entry()).brief!.id, move: "done" }, async () => undefined), /Only an Action brief/);
+  await d.done();
 });
 test("§6 CI red on an idle agent: facts refresh an open brief, or an S5 brief is made", async () => {
   const w = workspace({ prs: [pr({ snapshot: snapshot({ failedChecks: ["lint"] }) })] });
