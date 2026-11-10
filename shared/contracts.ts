@@ -16,6 +16,7 @@ import { QUESTION_MODES, questionSchema } from "./questions";
 import { specSchema } from "./spec";
 import { HOME_GROUPS } from "./home";
 import { prWorkflowViewSchema, setPrWorkflowInputSchema } from "./pr-workflow";
+import { setUpdatesInputSchema, updatesViewSchema } from "./updates";
 import { releaseNotesViewSchema } from "./changelog";
 import { actionPlanSchema, actionResultSchema, browserCommandSchema, browserExchangeSchema, browserPrSchema, browserStatusSchema, prActionKind } from "./pr-actions";
 
@@ -188,3 +189,13 @@ export const setPrWorkflowRpc = defineRpc({ name: "follow.set-pr-workflow", inpu
 export const releaseNotesRpc = defineRpc({ name: "follow.release-notes", input: z.object({}), output: releaseNotesViewSchema });
 /** What's new was closed for `version`: the host-wide record, for apps without local storage. Only moves forward. */
 export const whatsNewSeenRpc = defineRpc({ name: "follow.whats-new-seen", input: z.strictObject({ version: z.string().max(64) }), output: releaseNotesViewSchema });
+/**
+ * Settings → General (and onboarding's Updates step). `check` asks the registry now: "settings" when the screen opens
+ * (skipped when a check ran in the last minute, or Mode is Off), "manual" for Check now. Without it, no request.
+ */
+export const updatesRpc = defineRpc({ name: "follow.updates", input: z.strictObject({ check: z.enum(["settings", "manual"]).optional() }), output: updatesViewSchema });
+export const setUpdatesRpc = defineRpc({ name: "follow.set-updates", input: setUpdatesInputSchema, output: updatesViewSchema });
+/** Install now. Without `anyway` it still waits for a quiet moment; `anyway` installs even with agents mid-turn. */
+export const installUpdateRpc = defineRpc({ name: "follow.install-update", input: z.strictObject({ version: z.string().max(64), anyway: z.boolean().optional() }), output: updatesViewSchema });
+/** Hides a Home update notice on every device (until the next version, for "available"). */
+export const dismissUpdateNoticeRpc = defineRpc({ name: "follow.dismiss-update-notice", input: z.strictObject({ id: z.string().max(120) }), output: updatesViewSchema });

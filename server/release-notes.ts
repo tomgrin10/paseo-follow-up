@@ -61,13 +61,15 @@ export class VersionsStore {
     return next;
   }
   /**
-   * Records the version this worker runs as. A change moves the old one to `previous`. With no record at all, an
+   * Records the version this worker runs as. A change moves the old one to `previous`; a downgrade clears it. With no record at all, an
    * existing install (Follow-up ran here before) starts from LEGACY_BASELINE, so its first update with release notes
    * shows them; a fresh install has no previous version, so What's new stays quiet and setup speaks instead.
    */
   started(version: string, existingInstall: boolean): Promise<VersionsFile> {
     return this.mutate(file => {
       if (file.running === version) return null;
+      // Going back to an older version (a rollback) isn't an update: no "Updated to" line and no What's new.
+      if (file.running && compareVersions(version, file.running) < 0) return { ...file, running: version, previous: null, startedAt: null };
       const previous = file.running ?? (existingInstall && compareVersions(version, LEGACY_BASELINE) > 0 ? LEGACY_BASELINE : null);
       return { ...file, running: version, previous, startedAt: previous ? this.now() : null };
     });

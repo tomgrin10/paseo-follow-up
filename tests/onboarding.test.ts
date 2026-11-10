@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OnboardingStore, ReadinessChecks, nativeAgentCount, type CheckDeps } from "../server/onboarding";
 import { CHOICE_WRITES, autoSendWrites, checksSummary, classifyInstall, followWrites, offerVisible, initialOnboarding, OFFER_MS, type Check } from "../shared/onboarding";
-import { reviewerSettingsRpc, saveReviewersRpc, setFollowSettingsRpc, followSettingsRpc, prWorkflowRpc, setPrWorkflowRpc } from "../shared/contracts";
+import { reviewerSettingsRpc, saveReviewersRpc, setFollowSettingsRpc, followSettingsRpc, prWorkflowRpc, setPrWorkflowRpc, setUpdatesRpc } from "../shared/contracts";
 import { displayPreferences } from "../shared/display";
 
 const tmp = async (t: TestContext) => { const d = await mkdtemp(join(tmpdir(), "follow-onboarding-")); t.after(() => rm(d, { recursive: true, force: true })); return d; };
@@ -233,7 +233,7 @@ test("nativeAgentCount counts native-<agent>.json only", async t => {
 // ---------- choices write what Settings writes ----------
 
 test("choices: every write is a Settings RPC or display-settings field, never a parallel config", () => {
-  const settingsRpcs = new Set([setFollowSettingsRpc.name, saveReviewersRpc.name, setPrWorkflowRpc.name]);
+  const settingsRpcs = new Set([setFollowSettingsRpc.name, saveReviewersRpc.name, setPrWorkflowRpc.name, setUpdatesRpc.name]);
   const displayFields = new Set(Object.keys(displayPreferences.schema.shape));
   for (const [choice, target] of Object.entries(CHOICE_WRITES)) {
     if ("rpc" in target) assert.ok(settingsRpcs.has(target.rpc), `${choice} → ${target.rpc}`);
@@ -252,7 +252,24 @@ test("choices: every write is a Settings RPC or display-settings field, never a 
 
 test("shipping sits between defaults and reviewers", async () => {
   const { ONBOARDING_STEPS } = await import("../shared/onboarding");
-  assert.deepEqual([...ONBOARDING_STEPS], ["intro", "checks", "defaults", "shipping", "reviewers", "helpers"]);
+  assert.deepEqual([...ONBOARDING_STEPS], ["intro", "checks", "defaults", "shipping", "reviewers", "updates", "helpers"]);
+});
+
+test("updates step: writes what Settings → General writes; a fresh install's setup consents to automatic updates", async () => {
+  const { updatesConsent } = await import("../shared/onboarding");
+  assert.ok(setUpdatesRpc.input.safeParse({ mode: "auto" }).success);
+  assert.ok(setUpdatesRpc.input.safeParse({ channel: "beta" }).success);
+  const fresh = { install: "fresh" as const, settled: false };
+  assert.equal(updatesConsent({ ...fresh, action: "step", from: "updates", to: "helpers" }), true, "Continue past the step");
+  assert.equal(updatesConsent({ ...fresh, action: "step", from: "updates", to: "reviewers" }), false, "Back");
+  assert.equal(updatesConsent({ ...fresh, action: "step", from: "reviewers", to: "updates" }), false, "arriving");
+  assert.equal(updatesConsent({ ...fresh, action: "skip", from: "intro", to: null }), true, "Skip setup");
+  assert.equal(updatesConsent({ ...fresh, action: "finish", from: "helpers", to: null }), true);
+  assert.equal(updatesConsent({ install: "existing", settled: false, action: "skip", from: "updates", to: null }), false, "existing installs never");
+  assert.equal(updatesConsent({ install: "existing", settled: false, action: "step", from: "updates", to: "helpers" }), false);
+  assert.equal(updatesConsent({ install: "fresh", settled: true, action: "skip", from: "intro", to: null }), false, "a restarted setup never");
+  const flow = await readFile(new URL("../client/updates.tsx", import.meta.url), "utf8");
+  assert.match(flow, /export function UpdatesStep[\s\S]*setUpdatesRpc/);
 });
 
 test("choices: the setup client calls the same contracts and settings document as the Settings screen", async () => {
