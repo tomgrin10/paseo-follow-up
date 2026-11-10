@@ -6,7 +6,11 @@ import { subscribeDisplay } from "./display";
 import { onVisible, whileVisible } from "./visibility";
 
 type List = RpcOutput<typeof inboxListRpc>;
-export type Recent = { agentIds: string[]; label: string; at: number; batch: boolean };
+/**
+ * The last sign-off or Later on this client, for the Undo bar and the pill (6 s). A Later keeps each row's earlier
+ * snooze so Undo can put it back at once, and `until` for the bar's wording.
+ */
+export type Recent = { agentIds: string[]; label: string; at: number; batch: boolean } & ({ kind: "sign_off" } | { kind: "later"; until: string; prev: Record<string, InboxRow["snooze"]> });
 /**
  * The backstop poll. Changes arrive sooner by push: an agent's status or attention changing in Paseo's agent stream
  * calls `nudge` (1.4.0). Nothing polls while the app is hidden; it refreshes once on return.
@@ -74,11 +78,13 @@ export function createInboxStore(client: PluginClientContext) {
   };
   const titleOf = (id: string) => { const r = data?.rows.find(x => x.agentId === id) ?? data?.unsorted?.find(x => x.agentId === id); return r ? r.workspaceTitle && r.multiRoot ? `${r.workspaceTitle} › ${r.title}` : r.workspaceTitle ?? r.title : "agent"; };
 
+  const labelOf = (agentIds: string[]) => agentIds.length === 1 ? titleOf(agentIds[0]) : `${agentIds.length} agents`;
+
   const signOffNow = async (agentIds: string[], options: { muteTurn?: boolean }) => {
     const seqs = Object.fromEntries((data?.rows ?? []).filter(r => agentIds.includes(r.agentId)).map(r => [r.agentId, r.seq]));
     const at = new Date().toISOString();
     patch(agentIds, r => ({ ...r, needs: null, snooze: null, signedOffAt: at, undoable: true, muteTurn: !!options.muteTurn || r.muteTurn }));
-    recent = { agentIds, label: agentIds.length === 1 ? titleOf(agentIds[0]) : `${agentIds.length} agents`, at: Date.now(), batch: agentIds.length > 1 };
+    recent = { kind: "sign_off", agentIds, label: labelOf(agentIds), at: Date.now(), batch: agentIds.length > 1 };
     emit();
     try {
       const result = await act({ action: options.muteTurn ? "mute_turn" : "sign_off", agentIds, seqs });
@@ -119,7 +125,12 @@ export function createInboxStore(client: PluginClientContext) {
       if (!agentIds.length) return;
       for (const id of agentIds) inflight.add(id);
       try {
+        // Only flagged rows take a Later (the daemon ignores the rest), so only they get an Undo.
+        const flagged = (data?.rows ?? []).filter(r => agentIds.includes(r.agentId) && r.needs);
+        const prev = Object.fromEntries(flagged.map(r => [r.agentId, r.snooze]));
         patch(agentIds, r => ({ ...r, snooze: { until, at: new Date().toISOString() } }));
+        if (flagged.length) recent = { kind: "later", agentIds: flagged.map(r => r.agentId), label: labelOf(flagged.map(r => r.agentId)), at: Date.now(), batch: false, until, prev };
+        emit();
         await act({ action: "snooze", agentIds, until });
       } finally { for (const id of agentIds) inflight.delete(id); }
       refresh();
@@ -127,6 +138,8 @@ export function createInboxStore(client: PluginClientContext) {
     async undo(agentIds?: string[]) {
       const target = agentIds ?? recent?.agentIds ?? [];
       const batch = !agentIds && recent?.batch;
+      // A Later's undo shows at once: each row gets its earlier snooze back before the daemon confirms.
+      if (recent?.kind === "later") { const prev = recent.prev; patch(target.filter(id => id in prev), r => ({ ...r, snooze: prev[r.agentId] ?? null })); }
       recent = null;
       pending = pending.filter(p => !target.includes(p.agentId));
       emit();

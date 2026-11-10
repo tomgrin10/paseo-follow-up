@@ -28,7 +28,11 @@ export const entrySchema = z.object({
   signedOffAt: isoSchema.nullable().default(null),
   lastTomMessageAt: isoSchema.nullable().default(null),
   seq: z.number().int().default(0),
-  undo: z.object({ seq: z.number().int(), prev: needsSchema.nullable(), prevSnooze: snoozeSchema.nullable().default(null), expires: isoSchema }).nullable().default(null),
+  /**
+   * The last sign-off or Later, for Undo. A Later's undo (`kind: "snooze"`) puts back the snooze it replaced, and only
+   * while the snooze it set (`set`) still stands: a flag that broke it since stays broken.
+   */
+  undo: z.object({ kind: z.enum(["sign_off", "snooze"]).default("sign_off"), seq: z.number().int(), prev: needsSchema.nullable(), prevSnooze: snoozeSchema.nullable().default(null), set: snoozeSchema.nullable().default(null), expires: isoSchema }).nullable().default(null),
   /** D2: "Sign off · mute this turn". The next turn end is absorbed once. */
   muteTurn: z.boolean().default(false),
   /** Per-agent "Don't flag finishes": permission prompts and errors still flag, plain turn ends don't. */
@@ -207,7 +211,7 @@ export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
       break;
     case "sign_off": { // #13
       if (event.seq !== undefined && event.seq !== e.seq) throw new StaleSignOff();
-      if (e.needs || e.snooze) e.undo = { seq: e.seq + 1, prev: e.needs, prevSnooze: e.snooze, expires: new Date(Date.parse(now) + UNDO_MS).toISOString() };
+      if (e.needs || e.snooze) e.undo = { kind: "sign_off", seq: e.seq + 1, prev: e.needs, prevSnooze: e.snooze, set: null, expires: new Date(Date.parse(now) + UNDO_MS).toISOString() };
       e.needs = null; e.snooze = null; e.signedOffAt = now;
       if (event.muteTurn) e.muteTurn = true;
       break;
@@ -215,6 +219,11 @@ export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
     case "undo": { // #14
       const u = e.undo;
       if (!u || Date.parse(u.expires) < Date.parse(now)) break;
+      if (u.kind === "snooze") {
+        if (e.snooze && u.set && e.snooze.until === u.set.until && e.snooze.at === u.set.at) e.snooze = u.prevSnooze;
+        e.undo = null;
+        break;
+      }
       if (!e.needs) { e.needs = u.prev; e.snooze = u.prevSnooze; }
       else if (u.prev) {
         // Something new flagged since: keep it and bring the signed-off reasons back too.
@@ -224,7 +233,13 @@ export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
       e.undo = null; e.signedOffAt = null; e.muteTurn = false;
       break;
     }
-    case "snooze": if (e.needs && !e.goneAt) e.snooze = { until: event.until, at: now }; break; // #15
+    case "snooze": // #15, and #15b: Later is undoable like a sign-off.
+      if (e.needs && !e.goneAt) {
+        const set = { until: event.until, at: now };
+        e.undo = { kind: "snooze", seq: e.seq + 1, prev: e.needs, prevSnooze: e.snooze, set, expires: new Date(Date.parse(now) + UNDO_MS).toISOString() };
+        e.snooze = set;
+      }
+      break;
     case "tick": // #16, plus housekeeping.
       if (e.snooze && /^\d{4}-/.test(e.snooze.until) && Date.parse(e.snooze.until) <= Date.parse(now)) e.snooze = null;
       if (e.undo && Date.parse(e.undo.expires) < Date.parse(now)) e.undo = null;
@@ -283,8 +298,10 @@ export function wakeLabel(snooze: Snooze, now: number): string {
   const at = new Date(snooze.until);
   if (!Number.isFinite(at.getTime())) return "";
   const sameDay = new Date(now).toDateString() === at.toDateString();
+  const next = new Date(now); next.setDate(next.getDate() + 1);
   const time = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-  return sameDay ? time : `${at.toLocaleDateString([], { weekday: "short" })} ${time}`;
+  // "Tomorrow 09:00" reads back as "tomorrow 09:00", not the weekday the developer has to work out.
+  return sameDay ? time : next.toDateString() === at.toDateString() ? `tomorrow ${time}` : `${at.toLocaleDateString([], { weekday: "short" })} ${time}`;
 }
 
 /** An optimistic action queued while the host was unreachable. */

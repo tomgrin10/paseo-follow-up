@@ -145,14 +145,15 @@ export function pillState(input: {
   row: Pick<InboxRow, "agentId" | "needs" | "snooze" | "brief"> | null;
   /** needsYou() for the workspace, only when this agent is its main agent. */
   items: NeedItem[];
-  recent: { agentIds: string[]; at: number } | null;
+  /** The store's last sign-off or Later ("later"); no kind is a sign-off. */
+  recent: { agentIds: string[]; at: number; kind?: "sign_off" | "later" } | null;
   now: number;
 }): PillState {
   const { row, recent, now } = input;
   const items = withoutBriefQuestions(input.items, row);
   const flag = row ? flagHeadline(row, now, items) : null;
   if (flag) return { mode: "flag", headline: flag, todo: items.length };
-  if (row && recent && recent.agentIds.includes(row.agentId) && now - recent.at < UNDO_MS) return { mode: "undo", label: "Signed off · Undo" };
+  if (row && recent && recent.agentIds.includes(row.agentId) && now - recent.at < UNDO_MS) return { mode: "undo", label: recent.kind === "later" ? "Later · Undo" : "Signed off · Undo" };
   const work = workspaceHeadline(items);
   return work ? { mode: "workspace", headline: work, todo: items.length } : null;
 }
