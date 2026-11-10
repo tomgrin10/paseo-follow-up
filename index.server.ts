@@ -205,7 +205,7 @@ export default function contribute(server: PluginServerContext) {
             const q = w.questions.find(q => q.id === d.id && brief.questionIds.includes(q.id));
             if (!q || q.answer || q.closed) continue;
             if (brief.state === "superseded" && (current.has(q.id) || q.via === "ask")) continue;
-            if (brief.state === "answered" && d.chosen) q.answer = { choice: d.chosen, at, by: "developer", delivery: { state: "sent", to: agentId, messageId: null, at, reason: null } };
+            if (brief.state === "answered" && d.chosen) q.answer = { choice: d.chosen, ...(d.words ? { words: d.words } : {}), at, by: "developer", delivery: { state: "sent", to: agentId, messageId: null, at, reason: null } };
             else if (brief.state === "superseded") q.closed = { at, reason: "The agent kept going past this brief.", by: null };
           }
         });
@@ -996,9 +996,9 @@ export default function contribute(server: PluginServerContext) {
     await rename(temporary, needsYouPath(agentId));
     return { ok: true as const, briefId: `brief:${turn?.turnId ?? record.at}` };
   });
-  handle(rpc.briefActionRpc, async ({ agentId, briefId, decisionId, choice, choices, move }, { paseo }) => {
+  handle(rpc.briefActionRpc, async ({ agentId, briefId, decisionId, choice, words, choices, move }, { paseo }) => {
     await requireReady(); seen(paseo);
-    const brief = await inbox.briefAction(agentId, { briefId, decisionId, choice, choices, move }, async (text, messageId) => {
+    const brief = await inbox.briefAction(agentId, { briefId, decisionId, choice, words, choices, move }, async (text, messageId) => {
       await paseo.agents.ref(agentId).send(text, { messageId, activeTurnBehavior: "steer" });
     });
     return { brief };

@@ -95,19 +95,47 @@ export function nextQuestionId(questions: Pick<Question, "id">[]): string {
   return `Q${highest + 1}`;
 }
 
+/**
+ * "Something else" (1.4.0-beta.32): the built-in last choice on every question with options, after the agent's own.
+ * Recorded as `choice: "other"` with the developer's words as the answer; agents never add it themselves.
+ */
+export const OTHER = "other";
+export const OTHER_LABEL = "Something else";
+export const isOther = (choice: string | null | undefined) => choice === OTHER;
+const quoted = (words: string | undefined | null) => `"${(words ?? "").trim()}"`;
+
+/**
+ * The one way every surface names an answer: "B · Retry for a day", `Something else · "use a cron"`, or the free
+ * answer itself. The dialog, Activity, Needs-you and the brief's past card all read it from here.
+ */
+export function answerLabel(q: { options: readonly { letter: string; label: string }[] }, choice: string, words?: string | null): string {
+  // One line: a row clamps it, and a newline inside the words would cut the label off at the first line break.
+  if (isOther(choice)) return `${OTHER_LABEL} · ${quoted((words ?? "").replace(/\s+/g, " "))}`;
+  const option = q.options.find(o => o.letter === choice);
+  return option ? `${choice} · ${option.label}` : choice;
+}
+
+/** The head of an answer line: "B — Retry for a day", `Something else — "use a cron"`, or the free answer. */
+function answerHead(q: { options: readonly { letter: string; label: string }[] }, choice: string, words?: string): string {
+  if (isOther(choice)) return `${OTHER_LABEL} — ${quoted(words)}`;
+  const option = q.options.find(o => o.letter === choice);
+  return `${choice}${option ? ` — ${option.label}` : ""}`;
+}
+
 /** What Copy puts on the clipboard, ready to paste into the agent's chat. */
 export function replyText(q: Pick<Question, "id" | "title" | "options">, choice: string, words?: string): string {
-  const option = q.options.find(o => o.letter === choice);
-  return `${q.id} (${q.title}): ${choice}${option ? ` — ${option.label}` : ""}${words?.trim() ? `\n${words.trim()}` : ""}`;
+  return `${q.id} (${q.title}): ${answerHead(q, choice, words)}${!isOther(choice) && words?.trim() ? `\n${words.trim()}` : ""}`;
 }
 
 export const ANSWER_PREFIX = "Follow-up answer";
 /** The message sent to the asking agent. It starts with ANSWER_PREFIX so chat rows and history scans recognise it. */
 export function answerMessage(q: Question, choice: string, words?: string): string {
-  const option = q.options.find(o => o.letter === choice);
-  const lines = [`${ANSWER_PREFIX} ${q.id} (${q.title}): ${choice}${option ? ` — ${option.label}` : ""}`];
-  if (words?.trim()) lines.push(`The developer added: ${words.trim()}`);
-  if (q.mode === "keep-building" && !q.big && q.recommend && choice !== q.recommend) lines.push(`You were building ${q.recommend}. Undo the work built on it and build ${choice} first.`);
+  const lines = [`${ANSWER_PREFIX} ${q.id} (${q.title}): ${answerHead(q, choice, words)}`];
+  if (isOther(choice)) lines.push("None of your options: the developer's own answer is in the quotes.");
+  else if (words?.trim()) lines.push(`The developer added: ${words.trim()}`);
+  if (q.mode === "keep-building" && !q.big && q.recommend && choice !== q.recommend) lines.push(isOther(choice)
+    ? `You were building ${q.recommend}. Undo the work built on it and do what the developer described first.`
+    : `You were building ${q.recommend}. Undo the work built on it and build ${choice} first.`);
   else if (q.taskId) lines.push("Continue the blocked task with this decision and update the task when it moves.");
   else lines.push("Continue with this choice. The answer is already recorded, so you don't need to record it.");
   return lines.join("\n");
@@ -115,6 +143,9 @@ export function answerMessage(q: Question, choice: string, words?: string): stri
 
 /** Parses an answer message back into its parts, for the chat card. */
 export function parseAnswerMessage(text: string): { id: string; title: string; choice: string; label: string | null; words: string | null } | null {
+  // Something else: the developer's words are quoted and may run over several lines.
+  const other = /^Follow-up answer ([QD]\d+) \((.+?)\): Something else — "([\s\S]*)"\n(?:None of your options|Continue|You were building)/.exec(text.trim() + "\n");
+  if (other) return { id: other[1], title: other[2], choice: OTHER_LABEL, label: null, words: other[3].trim() || null };
   const match = /^Follow-up answer ([QD]\d+) \((.+?)\): ([^\n—]+?)(?: — ([^\n]+))?\n(?:The developer added: ([^\n]+))?/.exec(text.trim() + "\n");
   return match ? { id: match[1], title: match[2], choice: match[3].trim(), label: match[4]?.trim() ?? null, words: match[5]?.trim() ?? null } : null;
 }
@@ -130,15 +161,24 @@ export function parseAnswersMessage(text: string): { title: string; answers: { i
   const ids = head[1].split(", ");
   const answers = ids.map(id => {
     const line = lines.find(l => l.startsWith(`${id} (`));
-    const m = line ? /^[QD]\d+ \((.*?)\): (?:([A-Z]) — (.+)|skipped\b.*)$/.exec(line) : null;
+    const m = line ? /^[QD]\d+ \((.*?)\): (?:([A-Z]|Something else) — (.+)|skipped\b.*)$/.exec(line) : null;
     return { id, question: m?.[1] ?? "", choice: m?.[2] ?? null, label: m?.[3]?.trim() ?? null };
   });
   return { title: head[2], answers };
 }
 
-/** The answer is a known option letter, or free words when the question has no options. */
-export function validChoice(q: Pick<Question, "options">, choice: string): boolean {
+/**
+ * The answer is a known option letter, "other" with the developer's words (only when there are options to be other
+ * than), or free words when the question has no options.
+ */
+export function validChoice(q: Pick<Question, "options">, choice: string, words?: string): boolean {
+  if (isOther(choice)) return q.options.length > 0 && !!words?.trim();
   return q.options.length ? q.options.some(o => o.letter === choice) : choice.trim().length > 0;
+}
+/** Why an answer was refused, in the developer's (or agent's) terms. */
+export function choiceError(q: Pick<Question, "options">, choice: string): string {
+  if (isOther(choice)) return q.options.length ? `${OTHER_LABEL} needs your answer in words.` : "This question has no options; write the answer as the choice.";
+  return q.options.length ? `Pick one of ${q.options.map(o => o.letter).join(", ")}, or ${OTHER_LABEL} (choice "other") with words.` : "Write an answer first.";
 }
 
 // ---------- one identity per open question (1.4.0-beta.25) ----------

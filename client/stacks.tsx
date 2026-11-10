@@ -8,6 +8,7 @@ import { isGithubFlow } from "../shared/pr-actions";
 import { Card, FoldRow, text, type Theme } from "./kit";
 import { Spinner } from "./motion";
 import { mergedColor, tint, toneColor, type Colors } from "./theme";
+import { RichText } from "./rich-text";
 
 const NODE = 16;
 
@@ -113,7 +114,7 @@ export function StacksCard({ workspace: w, theme, compact, open, toggle, onOpen,
   return <Card theme={theme} compact={compact} icon="GitPullRequest" title="Pull requests" count={openCount ? `${openCount} open` : undefined}>
     {inFlight.map(a => <View key={a.id} style={{ flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1, borderTopColor: c.border }}>
       <View style={{ paddingTop: 3 }}><Spinner color={c.accent} size={12} /></View>
-      <Text style={[t.meta, { flex: 1, color: c.foreground }]}>{a.result || (isGithubFlow(w.prs.find(p => p.key === a.prs[0])?.snapshot) ? "Sending to GitHub…" : "Submitting to Graphite…")}</Text>
+      <RichText style={[t.meta, { flex: 1, color: c.foreground }]}>{a.result || (isGithubFlow(w.prs.find(p => p.key === a.prs[0])?.snapshot) ? "Sending to GitHub…" : "Submitting to Graphite…")}</RichText>
     </View>)}
     {!w.prs.length && <View style={{ paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border, gap: 4 }}>
       <Text style={t.body}>No PRs yet</Text>
