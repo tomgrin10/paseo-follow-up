@@ -56,7 +56,7 @@ test("merge delays use the last selected mergedAt, never title parsing, and wait
   w.prs[1].snapshot!.state = "CLOSED"; w.prs[1].disposition = "Superseded";
   w.obligations[0].trigger!.delayDays = 0; assert.equal(taskSchedule(w.obligations[0], w, clock).ready, false);
 });
-test("deployment delays persist their first verified clock across polls and storage; fresh deployment remains required", async t => {
+test("deployment delays persist their first verified clock across polls and storage; a seen deployment stays latched without fresh evidence", async t => {
   const w = workspace({ prs: [pr()], obligations: [obligation({ afterPrs: ["example/app#1"], trigger: { event: "deploy", delayDays: 14 } })] });
   recordSnapshot(w.prs[0], deployed(clock), clock);
   assert.equal(taskSchedule(w.obligations[0], w, clock).ready, false);
@@ -69,15 +69,15 @@ test("deployment delays persist their first verified clock across polls and stor
   assert.equal(taskSchedule(restored.obligations[0], restored, clock + 14 * day - 1).ready, false);
   recordSnapshot(restored.prs[0], deployed(clock + 14 * day), clock + 14 * day);
   assert.equal(tasksFor(restored, clock + 14 * day)[0].kind, "obligation");
-  assert.equal(tasksFor(restored, clock + 14 * day + 121_000).length, 0);
+  assert.equal(tasksFor(restored, clock + 14 * day + 121_000)[0].kind, "obligation", "an old observation never un-deploys a PR");
   assert.deepEqual(workspaceSchema.parse(restored).prs[0].deploymentAnchor, w.prs[0].deploymentAnchor);
 });
-test("unknown observations retain deployment timing but block delivery; rollback and changed merge reset it", () => {
+test("unknown observations keep the deployment latched; rollback and changed merge reset it", () => {
   const p = pr(); recordSnapshot(p, deployed(clock), clock);
   const unknown = deployed(clock + day); unknown.deployment!.state = "unknown";
   recordSnapshot(p, unknown, clock + day); assert.equal(p.deploymentAnchor!.at, new Date(clock).toISOString());
   const w = workspace({ prs: [p], obligations: [obligation({ afterPrs: [p.key], trigger: { event: "deploy", delayDays: 0 } })] });
-  assert.equal(taskSchedule(w.obligations[0], w, clock + day).ready, false);
+  assert.equal(taskSchedule(w.obligations[0], w, clock + day).ready, true, "a probe error is not evidence of a rollback");
   for (const state of ["pending", "partial"] as const) {
     const rollback = deployed(clock + day); rollback.deployment!.state = state;
     recordSnapshot(p, rollback, clock + day); assert.equal(p.deploymentAnchor, undefined);

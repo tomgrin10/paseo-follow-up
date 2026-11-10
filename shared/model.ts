@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { followUpObligations, deployed, recoveryBatch } from "./follow-up";
+import { followUpObligations, deployState, recoveryBatch } from "./follow-up";
 import { communicationSchema, replyRecorded } from "./communication";
 import { taskTriggerSchema } from "./task-trigger";
 import { isOpen as questionOpen, questionSchema } from "./questions";
@@ -79,7 +79,9 @@ export const workspaceSchema = z.object({
   prs: z.array(prSchema), obligations: z.array(obligationSchema), batches: z.array(batchSchema),
   excludedStacks: z.array(z.object({ name: textSchema, reason: textSchema, excludedAt: z.string(), prs: z.array(prSchema), obligations: z.array(obligationSchema) })).default([]),
   prActions: z.array(z.object({ id: idSchema, kind: z.enum(["merge", "enable_mwr", "disable_mwr", "request_reviewers"]), reviewers: z.array(z.string()).optional(), prs: z.array(idSchema), heads: z.record(z.string(), z.string()), createdAt: z.string(), state: z.enum(["sending", "submitted", "failed", "uncertain"]), result: z.string() })).default([]),
-  completion: z.object({ summary: textSchema, declaredAt: z.string() }).nullable(),
+  completion: z.object({ summary: textSchema, declaredAt: z.string(),
+    /** PRs whose deploy Follow-up could not confirm when Done was accepted ("Deploy not confirmed by Follow-up"). */
+    unconfirmed: z.array(z.string()).optional() }).nullable(),
   updatedAt: z.string(), managedDoneLabel: z.boolean(),
   runtimeReason: z.string().nullable(), runtimeBusy: z.boolean(), backgroundBusy: z.boolean().default(false),
   interruption: z.object({ turnId: z.string().nullable(), at: z.string(), kind: z.enum(["canceled", "failed"]), guardPauseId: z.string().optional(), /** The agent whose turn stopped (since 1.4.0-beta.16). */ agentId: idSchema.optional() }).optional(),
@@ -127,23 +129,56 @@ export type State = z.infer<typeof stateSchema>;
 export function settled(pr: Pr): boolean {
   return pr.snapshot?.state === "MERGED" || (pr.snapshot?.state === "CLOSED" && !!pr.disposition);
 }
+/**
+ * What stands between a workspace and Done, and who can move it:
+ * - agent: the main agent can resolve it with its tools (record a task, acknowledge a batch, withdraw a question);
+ * - developer: needs Tom (merge, answer, resume, check a PR action);
+ * - wait: time or Follow-up's own observation (agent busy, deploy rollout, status refresh). Never revokes a Done.
+ * `unconfirmed` is not a blocker: PRs whose deploy Follow-up could not confirm. Done is accepted with a note.
+ */
+export type BlockerOwner = "agent" | "developer" | "wait";
+/** `contrary`: positive evidence that shipped work regressed (a rollback). It takes back a Done even though nobody acts. */
+export type Blocker = { text: string; owner: BlockerOwner; contrary?: true };
+export type CompletionGate = { blockers: Blocker[]; unconfirmed: string[] };
+/** A completion check is the nudge to declare Done; it never blocks Done itself. */
+export const completionCheck = (b: Pick<Batch, "tasks">): boolean => b.tasks.length > 0 && b.tasks.every(t => t.kind === "completion");
+export function completionGate(w: Workspace, now = Date.now()): CompletionGate {
+  const blockers: Blocker[] = [];
+  const unconfirmed: string[] = [];
+  const add = (owner: BlockerOwner, text: string, contrary?: true) => blockers.push(contrary ? { owner, text, contrary } : { owner, text });
+  for (const pr of w.prs) {
+    const ref = `${pr.repo}#${pr.number}`;
+    // Merged (or closed with a disposition) is permanent: a later observation failure can't undo it.
+    if (pr.snapshot?.complete && settled(pr)) {
+      const deploy = deployState(pr, now);
+      if (deploy === "not-deployed") add("wait", `Wait for ${ref} to reach ${pr.snapshot.deployment?.environment || "production"}`, true);
+      else if (deploy === "unconfirmed") unconfirmed.push(ref);
+      continue;
+    }
+    if (pr.error || !pr.snapshot?.complete || now - Date.parse(pr.snapshot.observedAt) > 120_000) { add("wait", `Refresh status for ${ref}`); continue; }
+    if (pr.snapshot.state === "CLOSED") add("agent", `Settle ${ref} with a disposition`);
+    else add("developer", `Settle ${ref}`);
+  }
+  for (const o of followUpObligations(w).filter(o => !["done", "waived"].includes(o.status))) add(o.status === "blocked" ? "developer" : "agent", o.title);
+  for (const o of followUpObligations(w).filter(o => o.status === "done" && o.communication && !replyRecorded(o.communication))) add("agent", `Record the sent reply for ${o.title}`);
+  const open = w.batches.filter(b => !recoveryBatch(b) && !completionCheck(b));
+  if (open.some(b => ["sending", "sent"].includes(b.state))) add("agent", "Acknowledge the open follow-up batch");
+  if (open.some(b => ["blocked", "uncertain"].includes(b.state))) add("developer", "Retry or dismiss the stuck follow-up batch");
+  if (open.some(b => b.state === "pending")) add("developer", "Send or dismiss the queued repairs");
+  if (w.prActions.some(a => ["sending", "uncertain"].includes(a.state))) add("developer", "Check the outstanding PR action");
+  for (const q of (w.questions ?? []).filter(questionOpen)) add("developer", `Answer or withdraw ${q.id} (${q.title})`);
+  if (w.hold) add("developer", w.hold);
+  if (w.runtimeBusy) add("wait", "Wait for active agent work to finish");
+  if (w.backgroundBusy) add("wait", "Wait for active background agents to finish");
+  if (w.runtimeReason) add("wait", w.runtimeReason);
+  return { blockers, unconfirmed };
+}
 export function completionBlockers(w: Workspace, now = Date.now()): string[] {
-  const blockers = w.prs.flatMap(pr => {
-    if (pr.error || !pr.snapshot?.complete || now - Date.parse(pr.snapshot.observedAt) > 120_000)
-      return [`Refresh status for ${pr.repo}#${pr.number}`];
-    if (pr.snapshot.state === "MERGED" && pr.snapshot.deployment?.environment && !deployed(pr, now)) return [`Verify production deployment of ${pr.repo}#${pr.number}`];
-    return settled(pr) ? [] : [`Settle ${pr.repo}#${pr.number}${pr.snapshot.state === "CLOSED" ? " with a disposition" : ""}`];
-  });
-  blockers.push(...followUpObligations(w).filter(o => !["done", "waived"].includes(o.status)).map(o => o.title));
-  blockers.push(...followUpObligations(w).filter(o => o.status === "done" && o.communication && !replyRecorded(o.communication)).map(o => `Record the sent reply for ${o.title}`));
-  if (w.batches.some(b => !recoveryBatch(b) && ["pending", "sending", "sent", "blocked", "uncertain"].includes(b.state))) blockers.push("Finish outstanding follow-up batches");
-  if (w.prActions.some(a => ["sending", "uncertain"].includes(a.state))) blockers.push("Check the outstanding PR action");
-  blockers.push(...(w.questions ?? []).filter(questionOpen).map(q => `Answer or withdraw ${q.id} (${q.title})`));
-  if (w.hold) blockers.push(w.hold);
-  if (w.runtimeBusy) blockers.push("Wait for active agent work to finish");
-  if (w.backgroundBusy) blockers.push("Wait for active background agents to finish");
-  if (w.runtimeReason) blockers.push(w.runtimeReason);
-  return blockers;
+  return completionGate(w, now).blockers.map(b => b.text);
+}
+/** Only new work or contrary evidence takes a Done back; waiting and observation gaps never do. */
+export function revokesDone(w: Workspace, now = Date.now()): boolean {
+  return completionGate(w, now).blockers.some(b => b.owner !== "wait" || b.contrary);
 }
 export type Status = "active" | "handling" | "waiting" | "needs-you" | "done";
 export function summary(w: Workspace, now = Date.now()): { status: Status; label: string; reason: string } {

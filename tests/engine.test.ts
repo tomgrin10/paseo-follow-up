@@ -329,17 +329,18 @@ test("a fourteen-day merge trigger queues at its due time and dispatches only on
   const restarted = new Engine(f.store, f.github, f.gateway, () => clock + delay + 61_000);
   await restarted.recover(); await restarted.tick(); assert.equal(f.sends.length, 1);
 });
-test("a fourteen-day deploy task keeps its clock through engine recovery and waits for current serving evidence", async t => {
+test("a fourteen-day deploy task keeps its clock through engine recovery and releases on the latched deployment", async t => {
   const delay = 14 * 86_400_000;
   const deployed = (at: number) => snapshot({ state: "MERGED", mergeCommit: "squash-commit", deployment: { state: "deployed", environment: "production", commits: ["serving-commit"], evidence: "Current serving images contain the merge", observedAt: new Date(at).toISOString() } });
   const f = await fixture(t, workspace({ enable_auto_sends: true, obligations: [{ id: "later", title: "Recheck production behavior", status: "waiting", afterPrs: ["example/app#1"], evidence: "", enable_follow_up: true, revision: 0, trigger: { event: "deploy", delayDays: 14 } }] }));
   f.observe("example/app#1", deployed(clock)); await f.engine.tick();
   const anchor = (await f.get()).prs[0].deploymentAnchor;
-  f.advance(delay); await f.engine.recover(); await f.engine.tick();
-  assert.equal((await f.get()).batches.length, 0, "stale deployment cannot release a due task");
+  f.advance(delay - 1); await f.engine.recover(); await f.engine.tick();
+  assert.equal((await f.get()).batches.length, 0, "not due yet");
+  f.advance(1); await f.engine.tick();
+  assert.equal((await f.get()).batches[0].state, "pending", "an old observation keeps the deployment latched");
   f.observe("example/app#1", deployed(clock + delay)); await f.engine.tick();
   assert.deepEqual((await f.get()).prs[0].deploymentAnchor, anchor);
-  assert.equal((await f.get()).batches[0].state, "pending");
   f.advance(61_000); await f.engine.tick(); assert.equal(f.sends.length, 1);
   await f.engine.recover(); await f.engine.tick(); assert.equal(f.sends.length, 1);
 });

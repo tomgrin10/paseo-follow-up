@@ -21,7 +21,7 @@ test("never-sent cancelled batches beyond the newest three move to the archive; 
   assert.equal((await readFile(join(dir, "archive", "workspace.jsonl"), "utf8")).trim().split("\n").length, 3);
 });
 
-test("a completion check flipping with every turn no longer piles up batches", async t => {
+test("a completion check survives the agent's turns instead of being cancelled and recreated", async t => {
   const root = await mkdtemp(join(tmpdir(), "follow-churn-")); t.after(() => rm(root, { recursive: true, force: true }));
   const store = new Store(root); await store.mutate(s => { s.workspaces.push(workspace({ prs: [pr({ snapshot: snapshot({ state: "MERGED" }) })] })); });
   let now = clock; let runtime: Runtime = { busy: false, reason: null, archived: false };
@@ -30,6 +30,7 @@ test("a completion check flipping with every turn no longer piles up batches", a
   engine.archive = async (_id, batches) => { archived.push(...batches.map(b => b.id)); };
   for (let i = 0; i < 40; i++) { runtime = { busy: i % 2 === 1, reason: null, archived: false }; now += 15_000; await engine.tick(); }
   const w = (await store.snapshot()).workspaces[0];
-  assert.ok(w.batches.length <= 4, `kept ${w.batches.length} batches`);
-  assert.ok(archived.length >= 15, "the rest went to the archive");
+  // Hysteresis: the agent's own turns don't cancel and recreate the Done check.
+  assert.deepEqual(w.batches.map(b => b.state), ["pending"], "one Done check, never cancelled and recreated");
+  assert.equal(archived.length, 0);
 });
