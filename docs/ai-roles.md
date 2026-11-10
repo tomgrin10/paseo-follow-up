@@ -1,4 +1,4 @@
-# AI roles: Summary, the Overseer, the priority ranker, recovery
+# AI roles: Summary, the Overseer, AI priority (the ranker), recovery
 
 ## Settings → Agents (`agents.json`)
 
@@ -9,10 +9,24 @@
   `ProviderCatalog`.
   - The catalog is Paseo's provider snapshot. It's read only when the settings screen opens and cached for 10
     minutes.
-  - `providersFor` limits job roles (Summary, ranker) to Claude and Codex, the providers with a headless CLI.
+  - `providersFor` offers every provider in the catalog to every role. `CLI_JOB_PROVIDERS` (Claude, Codex) only
+    names the providers with a headless CLI fast path; any other provider runs jobs through `server/job-agent.ts`.
+  - `catalogFrom` keeps each model's description (cut to 200 characters), which the recommendations read.
 - **RPCs and tools.** `follow.agent-settings`, `follow.set-agent-setting` and `follow.set-wait`; tools
   `agent_settings`, `set_agent_setting` and `set_wait_for_jobs`.
-- **UI:** `client/agents.tsx`.
+- **UI:** `client/agents.tsx` (Settings → Agents) and setup's Helper agents step both render the shared job rows
+  in `client/job-rows.tsx`; see [settings.md](settings.md).
+- **Names.** `ROLE_INFO` holds each role's title and what it does, the one copy both surfaces use. The ranker is
+  **AI priority** in all user-facing copy; code and files keep `ranker`.
+- **Recommendations** (`shared/recommend.ts`). `ROLE_TIER` says what size of model each job needs (Summary small,
+  AI priority mid, the Overseer strong, recovery the same as the main agent) and `ROLE_NEED` says it in one line.
+  `recommend(role, catalog)` picks:
+  - with Claude available, the declared `ROLE_DEFAULTS`;
+  - otherwise the first ready provider (Claude, then Codex, then the rest), and in it the model whose description
+    (`modelTier`, then whole-word name patterns like `mini` or `opus`) fits the tier; a small job gets the lowest
+    effort the model offers;
+  - when nothing fits, the provider's default model with a hint (`source: "fallback"`).
+  `isRecommended` compares a saved pick with it. `shared/job-rows.ts` turns this into what a row says.
 - **Defaults.** Jobs default to fast models: Summary on Haiku, the ranker on Sonnet. Validate required fields rather
   than raising effort.
 
@@ -24,6 +38,14 @@
 - **Codex:** `codex exec --ephemeral` with no user config, no shell and a read-only sandbox in an empty temp folder.
 - **Limits:** one turn, a 90 s timeout (the whole process group is killed), and one job at a time.
 - **Log:** each call's duration and cost goes to `ai-jobs.jsonl`.
+- **Any other provider** (`server/job-agent.ts`, `jobAgentRunner`): when neither a CLI runner applies, `AiJobs`
+  falls back to `opts.generic`, a short-lived Paseo agent. Paseo refuses hidden internal agents from plugins, so jobs
+  run in one background workspace ("Follow-up jobs", home `jobs-home/`, id cached in `jobs-workspace.json` and
+  recreated once if it's gone). Background workspaces and their agents stay out of Paseo's lists. Each job creates
+  an agent (label `follow-through-job`, `autoArchive`) with the job's system prompt, waits for it to finish, takes
+  its last message as the answer and archives it. A permission prompt, timeout or empty reply fails the job
+  visibly; with no Paseo connection yet it fails with "Follow-up isn't connected to Paseo yet". Tests:
+  `tests/any-provider.test.ts`.
 
 ## Summary (internal id `about`)
 

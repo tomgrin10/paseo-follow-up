@@ -5,7 +5,7 @@ import { waitStatusSchema } from "./wait";
  * Which agent each of Follow-up's special roles uses (Settings → Agents), kept in `agents.json` next to state.json.
  *
  * - `about`: Summaries, a one-shot job (server/ai-jobs.ts).
- * - `ranker`: the Overseer's priority ranker, a one-shot job.
+ * - `ranker`: AI priority, the ranker behind Home's Priority sort, a one-shot job.
  * - `overseer`: the long-lived Overseer agent in Paseo.
  * - `recovery`: the agent Follow-up starts to rebuild a workspace's tracking; "Same as main agent" by default.
  *
@@ -15,9 +15,11 @@ import { waitStatusSchema } from "./wait";
 
 export const AGENT_ROLES = ["about", "overseer", "recovery", "ranker"] as const;
 export type AgentRole = typeof AGENT_ROLES[number];
-/** One-shot jobs run a headless CLI; only these providers have one. */
-export const JOB_PROVIDERS = ["claude", "codex"] as const;
-export type JobProvider = typeof JOB_PROVIDERS[number];
+/**
+ * One-shot jobs run on any Paseo provider. These two have a headless CLI fast path (server/ai-jobs.ts); every other
+ * provider runs the job as a short-lived hidden agent (server/job-agent.ts).
+ */
+export const CLI_JOB_PROVIDERS = ["claude", "codex"] as const;
 export const isJobRole = (role: AgentRole) => role === "about" || role === "ranker";
 
 const name = z.string().trim().min(1).max(120).regex(/^[\w.:@/[\]-]+$/);
@@ -62,11 +64,12 @@ export const ROLE_DEFAULTS: Record<AgentRole, Omit<RoleConfig, "role" | "isDefau
   ranker: { provider: "claude", model: "sonnet", thinking: null, mode: null, same: false, dailyCap: 24, maxPromptChars: 60_000, cadenceMinutes: 60 },
 };
 
+/** Each job's name and what it does: the one copy setup's Helper agents step, Settings → Agents and agent tools share. */
 export const ROLE_INFO: Record<AgentRole, { title: string; does: string }> = {
-  about: { title: "Summaries", does: "Writes the summary and one-line gist at the top of a workspace." },
-  overseer: { title: "Overseer", does: "Routes your asks to the agents that own them." },
-  recovery: { title: "Recovery", does: "Rebuilds a workspace's tracking when Follow-up lost track of it." },
-  ranker: { title: "Priority ranker", does: "Ranks workspaces for Home's Priority sort." },
+  about: { title: "Summaries", does: "One sentence under each workspace's title saying what it's for." },
+  overseer: { title: "Overseer", does: "One agent you ask about all your workspaces, from Home's search. Starts only when you click Start on Home." },
+  recovery: { title: "Recovery", does: "Rebuilds a workspace's tracking when Follow-up lost track of it. Runs only when you ask." },
+  ranker: { title: "AI priority", does: "Sorts Home by what matters most, from Linear, Slack and review requests. About hourly on workdays." },
 };
 
 /** Reads the file leniently: anything unreadable becomes empty, each role and field is checked on its own. */
@@ -135,13 +138,13 @@ export function modelName(model: string | null, label?: string | null): string {
 /** "Claude · Haiku", "Same as main agent", "Codex · GPT-6-Luna · low". */
 export function roleSummary(c: RoleConfig, labels?: { provider?: string | null; model?: string | null; thinking?: string | null }): string {
   if (c.role === "recovery" && c.same) return "Same as main agent";
-  const parts = [providerName(c.provider, labels?.provider), c.model || c.role !== "overseer" ? modelName(c.model, labels?.model) : "Newest Opus"];
+  const parts = [providerName(c.provider, labels?.provider), c.model || c.role !== "overseer" || c.provider !== "claude" ? modelName(c.model, labels?.model) : "Newest Opus"];
   if (c.thinking) parts.push(labels?.thinking ?? c.thinking);
   return parts.join(" · ");
 }
 
 /** What the Settings screen gets from the live provider catalog. */
-export type CatalogModel = { id: string; label: string; isDefault: boolean; thinking: { id: string; label: string; isDefault: boolean }[] };
+export type CatalogModel = { id: string; label: string; isDefault: boolean; description?: string; thinking: { id: string; label: string; isDefault: boolean }[] };
 export type CatalogProvider = { id: string; label: string; available: boolean; reason: string | null; models: CatalogModel[]; modes: { id: string; label: string }[]; defaultMode: string | null };
 export type Catalog = { providers: CatalogProvider[]; error: string | null; fetchedAt: string | null };
 
@@ -149,7 +152,7 @@ export const roleConfigSchema = z.object({
   role: z.enum(AGENT_ROLES), provider: z.string(), model: z.string().nullable(), thinking: z.string().nullable(), mode: z.string().nullable(), same: z.boolean(),
   dailyCap: z.number().nullable(), maxPromptChars: z.number().nullable(), cadenceMinutes: z.number().nullable(), isDefault: z.boolean(),
 });
-const catalogModelSchema = z.object({ id: z.string(), label: z.string(), isDefault: z.boolean(), thinking: z.array(z.object({ id: z.string(), label: z.string(), isDefault: z.boolean() })) });
+const catalogModelSchema = z.object({ id: z.string(), label: z.string(), isDefault: z.boolean(), description: z.string().optional(), thinking: z.array(z.object({ id: z.string(), label: z.string(), isDefault: z.boolean() })) });
 export const catalogSchema = z.object({
   providers: z.array(z.object({ id: z.string(), label: z.string(), available: z.boolean(), reason: z.string().nullable(), models: z.array(catalogModelSchema), modes: z.array(z.object({ id: z.string(), label: z.string() })), defaultMode: z.string().nullable() })),
   error: z.string().nullable(), fetchedAt: z.string().nullable(),

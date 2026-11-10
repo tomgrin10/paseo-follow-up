@@ -38,7 +38,7 @@ First, pick where it lives:
   4. Add a planned `RPC_TOOLS` entry and a `PARITY` entry in `server/agent-parity.ts`, the tool tuple in
      `server/mcp.mjs`, the name in `AGENT_TOOLS` (`server/agent-actions.ts`), and the tool count in
      `tests/mcp-usage.test.ts`. Then run `npm run prepare`.
-  5. Add the UI in `client/agents.tsx` and the copy in `shared/`.
+  5. Add the UI in `client/agents.tsx` (a per-job control goes in the row's More, `RoleMore`) and the copy in `shared/`.
   6. Add tests in `tests/agent-settings.test.ts`, lines in [rpcs-and-tools.md](rpcs-and-tools.md) and here, and
      `changes/<branch>.md`.
 - **Following, projects or per-workspace settings** go in `state.json`, through `follow.set-follow-settings` and
@@ -47,7 +47,7 @@ First, pick where it lives:
 ## Getting started (onboarding)
 
 - **Files.** `shared/onboarding.ts` defines the steps (`ONBOARDING_STEPS`: intro, checks, defaults, shipping,
-  reviewers, helpers), install detection and the checks schema. `server/onboarding.ts` holds `OnboardingStore`
+  reviewers, updates, helpers, tour), install detection and the checks schema. `server/onboarding.ts` holds `OnboardingStore`
   (`onboarding.json`) and `ReadinessChecks`.
 - **Fresh or existing install** is decided once, before anything writes state. A host with any Follow-up data is
   existing and only gets an offer.
@@ -59,6 +59,15 @@ First, pick where it lives:
   - Paseo's `config.json`;
   - the count of `hook-state/native-*.json`.
 - **Choices** write through the same RPCs the Settings screen uses.
+- **Helper agents step and Settings → Agents share one component.** `client/job-rows.tsx` (`JobRows`) renders both;
+  `shared/job-rows.ts` decides what each row says (`jobRow`: what the job does, the current pick, the Recommended
+  chip, the need line, an amber line when the saved provider can't run here), the header (`jobsHeader`, with Use
+  recommended) and what Use recommended saves (`recommendedEntry`: provider, model and effort only; limits and
+  schedule stay). The surfaces differ only in order (`SETUP_ORDER`, `SETTINGS_ORDER`), Settings' per-row More
+  (Permissions, limits, AI priority's schedule, Reset to defaults) and setup's `preselect`, which fills in a
+  recommendation only for a job with nothing saved whose default can't run here. `tests/job-rows.test.ts` fails if
+  either surface grows row content of its own.
+- **The tour** ("Where to find things") is its own last step.
 - **RPCs:** `follow.onboarding`, `follow.set-onboarding`, `follow.onboarding-checks`. **Tools:**
   `onboarding_status`, `onboarding_checks`, `set_onboarding`. **UI:** `client/onboarding.tsx`.
 
