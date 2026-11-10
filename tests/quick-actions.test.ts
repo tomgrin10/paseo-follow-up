@@ -81,6 +81,16 @@ test("one runAction and one toast path: every quick action, the row menu's inclu
   assert.match(await readFile(join(dir, "row-actions.ts"), "utf8"), /from "\.\/toast-store"/, "the row menu's Later, Sign off and the rest report through the shared toasts");
 });
 
+// Harness (2026-11-10): Follow-up's toasts were in the DOM but never on screen. Every root (sidebar row, panel, Home)
+// sits in a clipped container, so position: fixed was trapped inside it. On web the stack renders in its own layer.
+test("on web, toasts render in a layer on document.body, not inside a Follow-up root", async () => {
+  const source = await readFile(join(import.meta.dirname, "..", "client", "toasts.tsx"), "utf8");
+  assert.match(source, /doc\.body\.appendChild\(root\)/);
+  assert.match(source, /AppRegistry\.runApplication\(LAYER_KEY, \{ rootTag: root/);
+  assert.match(source, /pointer-events:none/, "the layer never blocks the page under it");
+  assert.match(source, /if \(layered\) return null;/, "the root itself draws nothing inline on web");
+});
+
 // ---------- runAction and the toast store ----------
 
 const store = () => import("../client/toast-store");
