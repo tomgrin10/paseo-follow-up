@@ -86,6 +86,14 @@ export const INVARIANTS: Invariant[] = [
       return inFlight(w) || w.runtimeBusy || followUpObligations(w).some(o => o.status === "working") ? null : live.text;
     },
   },
+  {
+    id: "snooze-can-wake",
+    why: "A workspace Later always wakes: it stores an ISO time or next-event, never a raw word like \"1h\" (shared/inbox.ts resolveUntil).",
+    check(w) {
+      const u = w.snooze?.until;
+      return u && u !== "next-event" && !Number.isFinite(Date.parse(u)) ? `snooze until "${u}" never wakes` : null;
+    },
+  },
 ];
 
 export function violations(w: Workspace, now: number): { id: string; detail: string }[] {

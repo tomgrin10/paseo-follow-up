@@ -4,8 +4,8 @@ import { Platform, Pressable, ScrollView, Text, TextInput, useWindowDimensions, 
 import { usePaseo, useRpc, type PluginScreenProps } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
 import { useQuery } from "@tanstack/react-query";
-import { browserStatusRpc, inboxBriefRpc } from "../shared/contracts";
-import { needsYou } from "../shared/attention";
+import { browserStatusRpc, controlRpc, inboxBriefRpc } from "../shared/contracts";
+import { needsYou, workspaceSnoozed } from "../shared/attention";
 import { briefPane, followUpLog, lastWorkdayEnd, nextNeeds, paneButtons, sameText, sinceLabel, tailSteps, type HomeGroupId, type HomeModel, type LogLine, type TailStep, type Workstream } from "../shared/home";
 import { age, snoozeUntil, type InboxRow } from "../shared/inbox";
 import { errorText } from "../shared/errors";
@@ -275,6 +275,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
   const w = useSyncExternalStore(live.subscribe, () => s.workspaceId ? live.get(s.workspaceId) : undefined, () => undefined);
   const agent = useAgentLive(s.agentId);
   const readBrief = useRpc(inboxBriefRpc);
+  const control = useRpc(controlRpc);
   const brief = useQuery({ queryKey: ["follow-through", "home-brief", s.agentId, row?.seq ?? 0], queryFn: () => readBrief({ agentId: s.agentId! }), enabled: !!s.agentId && !!row?.brief });
   const tail = useTail(agent.handle, `${row?.seq ?? 0}:${agent.status ?? ""}`);
   const browserRead = useRpc(browserStatusRpc);
@@ -352,11 +353,15 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
   </View>;
 
   // A snoozed row says when it comes back and offers Bring back now, on every width.
-  const snoozedLine = !!row?.needs && !!row.snooze && <View accessibilityLabel={`Later, ${laterLabel(row.snooze.until, Date.now())}`} style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+  // The workspace's own Later (a workspace-only Needs-you row) reads the same and comes back the same way.
+  const wsSnooze = !row?.needs && w && s.key === `ws:${w.id}` && w.snooze && workspaceSnoozed(w, asks, Date.now()) ? w.snooze : null;
+  const later = row?.needs && row.snooze ? { until: row.snooze.until, back: () => inbox.unsnooze([s.agentId!]) }
+    : wsSnooze && w ? { until: wsSnooze.until, back: async () => { await control({ workspaceId: w.id, snooze: null }); live.refresh(); } } : null;
+  const snoozedLine = !!later && <View accessibilityLabel={`Later, ${laterLabel(later.until, Date.now())}`} style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
     <Icon name="AlarmClock" size={14} color={c.foregroundMuted} />
-    <Text style={t.meta}>Later {laterLabel(row.snooze.until, Date.now())}</Text>
+    <Text style={t.meta}>Later {laterLabel(later.until, Date.now())}</Text>
     <Button theme={theme} compact={compact} kind="secondary" icon="BellRing" title="Bring back now" loading={busy === "bring_back"}
-      onPress={() => void run("bring_back", () => inbox.unsnooze([s.agentId!]))} />
+      onPress={() => void run("bring_back", later.back)} />
   </View>;
 
   const laterTimes = laterChoices(new Date());

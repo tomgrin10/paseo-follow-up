@@ -120,7 +120,7 @@ export const DISPLAY_TOOLS = ["display_settings", "set_display"] as const;
 export const PARITY: Record<string, { tools: readonly string[]; note?: string } | { exempt: string } | { pending: string }> = {
   "follow.list": { tools: ["list_prs", "workspace_status"] },
   "follow.get": { tools: ["list_prs", "workspace_status"] },
-  "follow.control": { tools: ["set_auto_send", "clear_hold", "retry_batch", "make_main_agent"] },
+  "follow.control": { tools: ["set_auto_send", "clear_hold", "retry_batch", "make_main_agent", "snooze_workspace"] },
   "follow.send": { tools: ["send_repairs"] },
   "follow.recover": { tools: ["run_recovery"] },
   "follow.refresh": { tools: ["refresh"] },

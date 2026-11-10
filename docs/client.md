@@ -84,7 +84,7 @@ row) for quick moves without opening it. `rowMenu()` in `shared/row-menu.ts` lis
 
 1. Triage: Later (the same four choices as the detail pane and the pill, `LATER_CHOICES`), Bring back now on a
    snoozed row (`inbox_act` `unsnooze`; the detail pane offers it too), then Sign off. Later and Sign off show the
-   Undo bar.
+   Undo bar. A workspace-only Needs-you row gets the workspace's own Later and Bring back now instead (no Sign off).
 2. Answer Q<n> for up to two open questions.
 3. Resume follow-up, Send N repairs and Retry repairs, each shown only when it applies.
 4. Open chat, and Ask the Overseer about this (it pre-fills the omnibox and doesn't send).

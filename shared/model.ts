@@ -76,6 +76,11 @@ export const workspaceSchema = z.object({
   /** When the main agent last made a main-agent call (sync, tasks, questions, needs_you, Done), hourly at most. */
   mainWorkAt: z.string().optional(),
   enable_tracking: z.boolean().default(false), enable_auto_sends: z.boolean().default(false), hold: z.string().nullable(), archived: z.boolean(),
+  /**
+   * Later on a workspace-only Needs-you row (no inbox flag to snooze): `until` an ISO time or "next-event", over the
+   * needs it was set on (`keys`, needKey). A new need or the time ends it (workspaceSnoozed). Null: not snoozed.
+   */
+  snooze: z.object({ until: z.string(), at: z.string(), keys: z.array(z.string()) }).nullable().optional(),
   prs: z.array(prSchema), obligations: z.array(obligationSchema), batches: z.array(batchSchema),
   excludedStacks: z.array(z.object({ name: textSchema, reason: textSchema, excludedAt: z.string(), prs: z.array(prSchema), obligations: z.array(obligationSchema) })).default([]),
   prActions: z.array(z.object({ id: idSchema, kind: z.enum(["merge", "enable_mwr", "disable_mwr", "request_reviewers"]), reviewers: z.array(z.string()).optional(), prs: z.array(idSchema), heads: z.record(z.string(), z.string()), createdAt: z.string(), state: z.enum(["sending", "submitted", "failed", "uncertain"]), result: z.string() })).default([]),
