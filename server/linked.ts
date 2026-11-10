@@ -4,7 +4,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { liveSources, mcpproxyText } from "./about";
-import { TEAMS_TTL_MS, applyCheck, setTeams, dueChecks, emptyLinkedFile, linkedFileSchema, migrateAboutLinks, takeBudget, type LinearIssueFacts, type LinkedFile } from "../shared/linked";
+import { LIMITS, TEAMS_TTL_MS, applyCheck, classifyLink, emptyWorkspaceLinks, excludeItem, linkedView, noteCandidate, noteRefs, setTeams, dueChecks, emptyLinkedFile, linkedFileSchema, migrateAboutLinks, takeBudget, teamOf, toneOf, unexcludeItem, upsertItem, type LinearIssueFacts, type LinkedFile, type LinkedItem, type LinkRef, type LinkedView } from "../shared/linked";
 
 /**
  * linked.json beside state.json (see shared/linked.ts). Read from disk on each use and never held whole in the worker:
@@ -96,6 +96,77 @@ export class LinkedService {
     return { checked, skipped: null };
   }
 
+  /**
+   * An explicit link: an agent's link_item (origin registered, by its id) or the developer's Add link (manual). A Linear
+   * key is confirmed with Linear first: unknown keys and non-team prefixes are refused, not stored. When Linear can't be
+   * read the key waits as a candidate and the drain adds it later. A PR is refused: it has register_pr.
+   */
+  async link(workspaceId: string, raw: string, opts: { origin: "registered" | "manual"; by: string; why?: string | null; title?: string | null }): Promise<LinkResult> {
+    const c = classifyLink(raw, true);
+    if (!c) return { ok: false, reason: "Not a link or a Linear key. Give an http(s) URL or a key like HER-1312." };
+    if (c.kind === "pr") return { ok: false, reason: `${c.key} is a pull request, not a linked item. Register it with register_pr.` };
+    const now = this.now();
+    let facts: LinearIssueFacts | null = null;
+    if (c.kind === "linear") {
+      const file = await this.deps.store.read();
+      if (file.rejected[c.key]) return { ok: false, reason: `Linear has no issue ${c.key}.` };
+      if (file.teams && !file.teams.keys.includes(teamOf(c.key))) return { ok: false, reason: `${teamOf(c.key)} isn't a Linear team here (teams: ${file.teams.keys.join(", ") || "none"}).` };
+      const known = file.workspaces[workspaceId]?.items.some(i => i.key === c.key);
+      if (!known) {
+        const result = await this.deps.sources.issue(c.key).then(found => ({ found }), (error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }));
+        if ("found" in result && !result.found) { await this.deps.store.mutate(f => applyCheck(f, c.key, result, now)); return { ok: false, reason: `Linear has no issue ${c.key}.` }; }
+        if ("error" in result) {
+          const excluded = await this.deps.store.mutate(f => {
+            if (opts.origin === "manual") { const ws = f.workspaces[workspaceId] ??= emptyWorkspaceLinks(); ws.excluded = ws.excluded.filter(e => e.key !== c.key); }
+            return !noteCandidate(f, workspaceId, c.key, now, true) && !!f.workspaces[workspaceId]?.excluded.some(e => e.key === c.key);
+          });
+          if (excluded) return { ok: false, reason: excludedReason(c.key) };
+          return { ok: true, pending: true, key: c.key, message: `Linear couldn't be read just now. ${c.key} is queued and shows once Linear confirms it.` };
+        }
+        facts = result.found;
+      }
+    }
+    return this.deps.store.mutate(f => {
+      const ws = f.workspaces[workspaceId] ??= emptyWorkspaceLinks();
+      const r = upsertItem(ws, {
+        key: c.key, kind: c.kind, url: facts?.url ?? c.url, title: facts?.title ?? opts.title ?? null, origin: opts.origin, by: opts.by, why: opts.why ?? null,
+        ...(facts ? { status: facts.state, statusTone: toneOf(facts.state), checkedAt: new Date(now).toISOString() } : {}),
+      }, now);
+      if (!r.ok) return { ok: false as const, reason: r.reason === "excluded" ? excludedReason(c.key) : `This workspace already has ${LIMITS.items} linked items. Unlink one first.` };
+      return { ok: true as const, pending: false, key: c.key, item: r.item, created: r.created };
+    });
+  }
+
+  /** Removes an item and remembers it, so nothing adds it back (only the developer re-adding it, or Undo). */
+  unlink(workspaceId: string, raw: string, by: string, reason: string | null): Promise<{ removed: LinkedItem | null; key: string }> {
+    const key = classifyLink(raw, true)?.key ?? raw.trim();
+    return this.deps.store.mutate(f => ({ removed: excludeItem(f.workspaces[workspaceId] ??= emptyWorkspaceLinks(), key, by, reason, this.now()), key }));
+  }
+
+  /** Undo a removal: the exclusion goes and the item comes back as it was. */
+  undo(workspaceId: string, key: string): Promise<boolean> {
+    return this.deps.store.mutate(f => {
+      const ws = f.workspaces[workspaceId];
+      if (!ws?.excluded.some(e => e.key === key)) return false;
+      unexcludeItem(ws, key);
+      return true;
+    });
+  }
+
+  async view(workspaceId: string, derived: Parameters<typeof linkedView>[2]): Promise<LinkedView> {
+    return linkedView(workspaceId, (await this.deps.store.read()).workspaces[workspaceId], derived);
+  }
+
+  /** Passive sightings (shared/linked-extract.ts), one write for the whole batch. Nothing to note costs nothing. */
+  note(batch: ReadonlyMap<string, readonly LinkRef[]>): Promise<{ items: number; candidates: number }> {
+    if (![...batch.values()].some(r => r.length)) return Promise.resolve({ items: 0, candidates: 0 });
+    return this.deps.store.mutate(f => {
+      let items = 0, candidates = 0;
+      for (const [workspaceId, refs] of batch) { const n = noteRefs(f, workspaceId, refs, this.now()); items += n.items; candidates += n.candidates; }
+      return { items, candidates };
+    });
+  }
+
   /** One-time carry-over of verified Summary links (shared/linked.ts migrateAboutLinks). */
   migrate(about: () => Promise<Record<string, { links: { kind: string; key: string; url: string | null; title: string | null; state?: string | null }[] }>>): Promise<{ items: number; candidates: number }> {
     return this.deps.store.read().then(async file => {
@@ -105,6 +176,9 @@ export class LinkedService {
     });
   }
 }
+
+export type LinkResult = { ok: false; reason: string } | { ok: true; pending: true; key: string; message: string } | { ok: true; pending: false; key: string; item: LinkedItem; created: boolean };
+const excludedReason = (key: string) => `${key} was removed from this workspace's linked items, so it stays out. The developer can add it back in the Linked items list.`;
 
 const exec = promisify(execFile);
 /** The live reads, through mcpproxy like the Summary: Linear's get_issue and list_teams. */

@@ -23,8 +23,8 @@ is missing from AGENTS.md or docs/, so add a line here when you add one.
 | Session | Tools |
 | --- | --- |
 | Tracked main agent | Core tools (below), the action tools, and `needs_you` while the inbox is on. |
-| Contributor (another root agent of a tracked workspace) | `workspace_status`, `register_pr`, `sync_workspace`, and `make_main_agent` (its claim rules apply). |
-| Recovery agent | Core tools except `declare_done`, `sync_workspace`, the question tools and `set_spec`. No action tools. |
+| Contributor (another root agent of a tracked workspace) | `workspace_status`, `register_pr`, `sync_workspace`, `link_item`, `unlink_item`, and `make_main_agent` (its claim rules apply). |
+| Recovery agent | Core tools except `declare_done`, `sync_workspace`, the question tools, `set_spec`, `link_item` and `unlink_item`. No action tools. |
 | Untracked root agent | The action tools, and `needs_you` while the inbox is on. |
 | Overseer | `needs_you`, the action tools and the Overseer tools. |
 | Subagents | None (Wait still applies: [wait.md](wait.md)). |
@@ -48,6 +48,7 @@ is missing from AGENTS.md or docs/, so add a line here when you add one.
 | `acknowledge_batch` | `follow.acknowledge` | Records a repair batch's result: completed or blocked. |
 | `ask_question`, `record_answer`, `withdraw_question` | `follow.ask-question`, `follow.record-answer`, `follow.withdraw-question` | Questions for the developer (`server/questions.ts`). |
 | `set_spec` | `follow.set-spec` | The agent's spec link. The developer's own link wins over it. |
+| `link_item`, `unlink_item` | `follow.link-item`, `follow.unlink-item` | Links what the work is about (a Linear key is confirmed with Linear first; a PR is refused), or removes one for good ([linked-items.md](linked-items.md)). Main and contributors. |
 | `needs_you` | `follow.needs-you` | The end-of-turn brief: what the developer must do next. |
 | `declare_done` | `follow.done` | Declares the goal fulfilled and returns any blockers. |
 
@@ -86,6 +87,7 @@ return a dry run and run only with `confirm: true` and the plan id. `PARITY` map
 | `answer_question` | `follow.answer-question` | planned; never your own question |
 | `set_workspace_spec` | `follow.workspace-spec` | planned |
 | `set_task_trigger` | `follow.set-task-trigger` | planned |
+| `link_items`, `set_linked_items` | `follow.linked-items`, `follow.set-linked-items` (add, remove, undo) | read / planned. Their `PARITY` rows land with the UI that calls them. |
 | `pr_controls`, `browser_status` | `follow.pr-control-status`, `follow.browser-status` | read |
 | `release_notes` | `follow.release-notes` | read |
 | `updates_status`, `check_updates` | `follow.updates` | read / write (no plan) |

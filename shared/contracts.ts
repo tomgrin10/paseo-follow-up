@@ -3,6 +3,7 @@ import { MAX_REVIEWERS, REPO, reviewerConfigSchema, reviewerEntrySchema, reviewe
 import { prioritySchema } from "./priorities";
 import { usageSchema } from "./usage";
 import { aboutViewSchema } from "./about";
+import { linkedItemSchema } from "./linked";
 import { AGENT_ROLES, agentSettingsViewSchema, savedRoleSchema } from "./agent-settings";
 import { defineRpc } from "@getpaseo/plugin";
 import { ONBOARDING_ACTIONS, ONBOARDING_STEPS, checksSchema, onboardingViewSchema } from "./onboarding";
@@ -115,6 +116,24 @@ export const workspaceSpecRpc = defineRpc({ name: "follow.workspace-spec", input
   z.object({ workspaceId: idSchema, action: z.literal("remove") }),
   z.object({ workspaceId: idSchema, action: z.literal("reset") }),
 ]), output: workspaceSchema });
+
+// Linked items (shared/linked.ts). The agent's own: link_item / unlink_item, for its workspace (main or contributor).
+const linkRef = z.string().trim().min(1).max(2000);
+const linkReceipt = z.object({ workspaceId: idSchema, ok: z.boolean(), key: z.string().nullable(), pending: z.boolean(), message: z.string() });
+export const linkItemRpc = defineRpc({ name: "follow.link-item", input: z.strictObject({ agentId: idSchema, ref: linkRef, why: z.string().trim().max(140).optional(), title: z.string().trim().max(200).optional() }), output: linkReceipt });
+export const unlinkItemRpc = defineRpc({ name: "follow.unlink-item", input: z.strictObject({ agentId: idSchema, ref: linkRef, reason: z.string().trim().min(1).max(200) }), output: linkReceipt });
+const linkedViewSchema = z.object({
+  workspaceId: idSchema, items: z.array(linkedItemSchema.extend({ spec: z.boolean() })),
+  excluded: z.array(z.object({ key: z.string(), at: z.string(), by: z.string(), reason: z.string().nullable() })),
+  counts: z.record(z.string(), z.number()), pending: z.number(),
+});
+// The developer's list: read any workspace's items, add one by hand, remove one, or undo a removal.
+export const linkedItemsRpc = defineRpc({ name: "follow.linked-items", input: z.strictObject({ workspaceId: idSchema }), output: linkedViewSchema });
+export const setLinkedItemsRpc = defineRpc({ name: "follow.set-linked-items", input: z.discriminatedUnion("action", [
+  z.strictObject({ workspaceId: idSchema, action: z.literal("add"), ref: linkRef, title: z.string().trim().max(200).optional() }),
+  z.strictObject({ workspaceId: idSchema, action: z.literal("remove"), ref: linkRef }),
+  z.strictObject({ workspaceId: idSchema, action: z.literal("undo"), ref: linkRef }),
+]), output: linkedViewSchema.extend({ message: z.string().nullable() }) });
 
 // Needs-you inbox. Names stay under follow. like the rest of the plugin.
 /**
