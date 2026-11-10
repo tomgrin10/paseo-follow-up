@@ -5,6 +5,7 @@ export const tools: ToolTuple[];
 export const actionTools: ToolTuple[];
 export const overseerTools: ToolTuple[];
 export const waitInstruction: string;
+export const backgroundWorkInstruction: string;
 export function toolList(recovery?: boolean, contributor?: boolean, brief?: boolean, briefOnly?: boolean, actions?: boolean): ToolTuple[];
 export function schemas(list: ToolTuple[], workflows?: "graphite" | "github" | "mixed" | null): ToolSchema[];
 export function validate(value: unknown, schema: unknown, path?: string): void;
