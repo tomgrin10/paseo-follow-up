@@ -75,3 +75,39 @@ export async function checkProvenance(input: { fetch: Fetch; registry: string; n
   const workflow = statement.predicate?.buildDefinition?.externalParameters?.workflow;
   return { ok: true, version, integrity, tarball, workflow: `${workflow?.path ?? "?"}@${workflow?.ref ?? "?"}`, publishedAt: null };
 }
+
+/**
+ * The release notes inside a version's tarball (package/CHANGELOG.md), for Settings to show before installing. One
+ * download per new version (the same file Paseo installs, a few hundred KB), checked against the integrity that
+ * provenance confirmed. Returns null when it can't be read; nothing else in the tarball is looked at.
+ */
+export async function tarballChangelog(input: { fetch: (url: string, init: { headers: Record<string, string>; signal?: AbortSignal }) => Promise<{ status: number; arrayBuffer(): Promise<ArrayBuffer> }>; tarball: string; integrity: string; timeoutMs?: number; maxBytes?: number }): Promise<string | null> {
+  const { createHash } = await import("node:crypto");
+  const { gunzipSync } = await import("node:zlib");
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), input.timeoutMs ?? 30_000);
+  try {
+    const res = await input.fetch(input.tarball, { headers: { accept: "application/octet-stream" }, signal: abort.signal });
+    if (res.status !== 200) return null;
+    const bytes = Buffer.from(await res.arrayBuffer());
+    if (bytes.length > (input.maxBytes ?? 20 << 20)) return null;
+    if (`sha512-${createHash("sha512").update(bytes).digest("base64")}` !== input.integrity) return null;
+    return tarFile(gunzipSync(bytes, { maxOutputLength: 80 << 20 }), "package/CHANGELOG.md");
+  } catch { return null; } finally { clearTimeout(timer); }
+}
+
+/** One file from an uncompressed ustar archive, by path. */
+export function tarFile(tar: Buffer, path: string): string | null {
+  const field = (b: Buffer) => { const i = b.indexOf(0); return b.subarray(0, i < 0 ? b.length : i).toString("utf8"); };
+  for (let at = 0; at + 512 <= tar.length;) {
+    const header = tar.subarray(at, at + 512);
+    if (header.every(x => x === 0)) return null;
+    const name = field(header.subarray(0, 100)), prefix = field(header.subarray(345, 500));
+    const size = parseInt(field(header.subarray(124, 136)).trim() || "0", 8);
+    const full = prefix ? `${prefix}/${name}` : name;
+    if (!Number.isFinite(size) || size < 0) return null;
+    if (full === path) return tar.subarray(at + 512, at + 512 + size).toString("utf8");
+    at += 512 + Math.ceil(size / 512) * 512;
+  }
+  return null;
+}

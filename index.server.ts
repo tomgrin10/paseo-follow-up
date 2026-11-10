@@ -70,7 +70,7 @@ import { compactHeap } from "./server/memory";
 import { UpdatesStore } from "./server/updates";
 import { Updater } from "./server/updater";
 import { RegistryChecker, registryUrl, type RegistrySnapshot } from "./server/update-registry";
-import { checkProvenance } from "./server/update-provenance";
+import { checkProvenance, tarballChangelog } from "./server/update-provenance";
 import { watchdogSource } from "./server/update-watchdog-source";
 import { busyAgents, type Busy } from "./shared/update-policy";
 import { VersionsStore, demoOverride, describeSelf, readPackage, type SelfInstall } from "./server/release-notes";
@@ -760,6 +760,7 @@ export default function contribute(server: PluginServerContext) {
   };
   const updater = new Updater({
     directory, read: () => updatesStore.read(), defaultMode: () => onboarding.init().then(f => f.install === "fresh" ? "auto" as const : "notify" as const, () => "notify" as const), write: next => updatesStore.write(next), self: () => selfInstall(), registry,
+    changelog: (tarball, integrity) => tarballChangelog({ fetch: (url, init) => fetch(url, init), tarball, integrity }),
     provenance: version => checkProvenance({ fetch: (url, init) => fetch(url, init), registry: registryUrl(), name: "paseo-follow-up", version }),
     busy: async fresh => {
       const busy: Busy[] = [];
