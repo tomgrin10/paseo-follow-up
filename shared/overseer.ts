@@ -17,8 +17,8 @@ export const OVERSEER_TITLE = "Overseer";
 /** Prefix on every task the Overseer forwards, so the receiving agent knows whose words they are. */
 export const FORWARD_PREFIX = "From the developer via Overseer:";
 /**
- * Every prefix a forwarded message has carried. Until 1.4.0-beta.36 it named the developer; old transcripts keep that
- * spelling, so anything that recognises a forward checks all of them (isForwarded).
+ * Every prefix a forwarded message has carried. An earlier one named the developer; old transcripts keep that spelling,
+ * so anything that recognises a forward checks all of them (isForwarded).
  */
 export const FORWARD_PREFIXES = [FORWARD_PREFIX, "From Tom via Overseer:"] as const;
 export const isForwarded = (text: string) => FORWARD_PREFIXES.some(p => text.trimStart().startsWith(p));
