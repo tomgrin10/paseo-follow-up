@@ -34,9 +34,12 @@
   - no inbox rows for its turns;
   - no directory row.
   Paseo sends the flag only in the agent snapshot (`fetch_agent` / `agents.ref(id).refresh()`), not in lifecycle
-  events or `session_open`, so session open reads it once per agent (`BackgroundAgents`, cached: the flag is fixed
-  at creation). A failed read counts as not background. On 0.15 the field is absent and nothing changes. Guarded by
-  `tests/background-agents.test.ts`.
+  events or `session_open`. On 0.16 a brand-new agent's snapshot doesn't exist yet at `session_open` (checked in the
+  0.16 harness), so its first session still gets the tools. The worker learns the flag at `agent.created` and
+  writes `background-agents.json`. The hook then skips the agent (no context, no Stop-hook nudge), tool calls are
+  refused (`isWorkspaceRoot`), and later session opens skip tools and Wait. `BackgroundAgents` remembers only
+  "yes": the flag is fixed at creation, and an early "no" must not stick. A failed read counts as not background.
+  On 0.15 the field is absent and nothing changes. Guarded by `tests/background-agents.test.ts`.
 - **Roles:**
   - **Main agent:** owns goal, tasks, questions, the spec and Done.
   - **Contributors** (other root agents): get PR status, registration and sync only.

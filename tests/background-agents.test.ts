@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isWorkspaceRoot } from "../server/workspace-agent";
-import { BackgroundAgents, isBackgroundAgent } from "../server/background-agents";
+import { BackgroundAgents, backgroundAgentsFile, isBackgroundAgent } from "../server/background-agents";
 import { DaemonDirectory } from "../server/directory";
 import { Inbox, type AgentInfo, type Directory } from "../server/inbox";
 import type { Sources } from "../server/inbox-classifier";
@@ -31,14 +33,19 @@ test("a background agent is never a workspace root", async () => {
   assert.equal(await isWorkspaceRoot({ ...helper, background: undefined }, async () => null), true, "0.15: no field, still a root");
 });
 
-test("the session-open check reads the snapshot once per agent and treats a failed read as not background", async () => {
-  const agents = new BackgroundAgents();
-  let reads = 0;
-  const refresh = async (id: string) => { reads++; return id === "helper" ? { background: true } : {}; };
+test("only 'yes' is remembered: an early read before the snapshot exists doesn't stick", async () => {
+  const found: string[] = [];
+  const agents = new BackgroundAgents(id => { found.push(id); });
+  let reads = 0; let created = false;
+  // 0.16 order (probe): session_open first, where the new agent's snapshot has no flag yet; agent.created after.
+  const refresh = async (id: string) => { reads++; return id === "helper" && created ? { background: true } : id === "helper" ? undefined : {}; };
+  assert.equal(await agents.check("helper", refresh), false, "session_open: not known yet");
+  created = true;
+  assert.equal(await agents.check("helper", refresh), true, "agent.created: the flag shows up");
   assert.equal(await agents.check("helper", refresh), true);
-  assert.equal(await agents.check("helper", refresh), true);
+  assert.equal(reads, 2, "background is fixed at creation, so it's read once it's known");
+  assert.deepEqual(found, ["helper"], "and announced once");
   assert.equal(await agents.check("main", refresh), false);
-  assert.equal(reads, 2, "background is fixed at creation, so one read per agent is enough");
   assert.equal(await agents.check("flaky", async () => { throw new Error("offline"); }), false, "unknown keeps today's behaviour");
   assert.equal(await agents.check("flaky", async () => ({ background: true })), true, "a failed read isn't cached");
 });
@@ -100,4 +107,25 @@ test("session open asks about background before giving any root treatment", asyn
   assert.ok(guard > 0, "the session_open handler checks for a background agent");
   for (const later of ["FOLLOW_THROUGH_OVERSEER", "isWorkspaceRoot(", "withTools("]) assert.ok(guard < open.indexOf(later), `before ${later}`);
   assert.match(source, /wait\.open\(.*\{ background: await isBackground\(/, "and Wait is told too");
+});
+
+test("the hook stays silent for a listed background agent: no context, no Stop-hook nudge", async t => {
+  const root = await mkdtemp(join(tmpdir(), "follow-bg-hook-")); t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = join(root, "plugin-data/follow-through"); await mkdir(join(directory, "hook-state"), { recursive: true });
+  await writeFile(join(directory, "agent-hook.mjs"), await readFile(resolve("server/agent-hook.mjs"), "utf8"));
+  await writeFile(join(directory, "hooks-enabled.json"), JSON.stringify({ expiresAt: Date.now() + 60_000, clientEntry: "/fixture/client.js" }));
+  await writeFile(join(directory, "state.json"), JSON.stringify({ workspaces: [] }));
+  await writeFile(join(directory, "brief.json"), JSON.stringify({ enable_inbox: true, enable_brief_nudge: true, pending: [] }));
+  const fire = (agent: string, event: object) => new Promise<string>((ok, bad) => {
+    const child = spawn(process.execPath, [join(directory, "agent-hook.mjs")], { env: { ...process.env, FOLLOW_THROUGH_HOOK_IMPORT: "", PASEO_AGENT_ID: agent, FOLLOW_THROUGH_BRIEF: "claude", FOLLOW_THROUGH_RECOVERY: "" }, stdio: ["pipe", "pipe", "pipe"] });
+    let out = ""; child.stdout.on("data", c => out += c); child.once("error", bad); child.once("exit", () => ok(out.trim()));
+    child.stdin.end(JSON.stringify({ session_id: "s1", ...event }));
+  });
+  const agents = new BackgroundAgents();
+  const save = backgroundAgentsFile(directory, () => agents.ids);
+  await agents.check("helper", async () => ({ background: true })); await save();
+  await fire("helper", { hook_event_name: "UserPromptSubmit", prompt: "classify this" });
+  assert.equal(await fire("helper", { hook_event_name: "Stop" }), "", "no needs_you nudge, so no extra model turn");
+  await fire("root", { hook_event_name: "UserPromptSubmit", prompt: "do it" });
+  assert.equal(JSON.parse(await fire("root", { hook_event_name: "Stop" })).decision, "block", "a root agent still gets it");
 });
