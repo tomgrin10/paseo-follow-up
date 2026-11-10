@@ -135,6 +135,20 @@ test("data move: copies 1.x's directory once, skips live files, keeps the old on
   assert.equal(JSON.parse(await readFile(join(old, "heartbeat.json"), "utf8")).version, "2.0.0", "the 1.x installer's probation sees 2.0 report in");
 });
 
+test("data move: after a rollback to 1.x, a later 2.0 copies 1.x's newer data again and keeps the stale copy", async t => {
+  const home = await oldHome(t);
+  const { directory, legacy: old } = dataDirs(home);
+  assert.equal(moveData(home, { waitMs: 0 }).status, "moved");
+  // 1.x runs again and keeps working after the rollback.
+  await writeFile(join(old, "state.json"), JSON.stringify({ version: 1, workspaces: [{ id: "w1" }, { id: "w2" }] }));
+  const later = new Date(Date.now() + 5_000); const { utimes } = await import("node:fs/promises"); await utimes(join(old, "state.json"), later, later);
+  const again = moveData(home, { waitMs: 0 });
+  assert.equal(again.status, "moved");
+  assert.ok(again.replaced && existsSync(join(again.replaced, "state.json")), "the stale copy is kept");
+  assert.deepEqual(JSON.parse(await readFile(join(directory, "state.json"), "utf8")).workspaces.map((w: { id: string }) => w.id), ["w1", "w2"]);
+  assert.equal(moveData(home, { waitMs: 0 }).status, "present", "then it settles");
+});
+
 test("data move: a fresh install has nothing to move", async t => {
   const home = await mkdtemp(join(tmpdir(), "follow-legacy-fresh-")); t.after(() => rm(home, { recursive: true, force: true }));
   assert.equal(moveData(home, { waitMs: 0 }).status, "fresh");

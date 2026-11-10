@@ -70,7 +70,9 @@ old one. 1.x ran under an older id and data directory (`shared/legacy.ts` names 
   directory to a temporary sibling and renames it into place. It runs synchronously at the top of `contribute()`,
   skips files that belong to a live process (`worker.lock`, `heartbeat.json`, `update-watchdog.lock`,
   `hooks-enabled.json`), waits up to 10 s for a 1.x worker that still holds the old lock, and writes
-  `migrated-from.json`. A second start finds the directory and does nothing. The old directory is never deleted.
+  `migrated-from.json` (with the old `state.json`'s time). A second start finds the directory and does nothing, unless
+  1.x wrote its `state.json` after the copy (a failed 2.0 start was rolled back to 1.x): then the stale copy is kept
+  as `.follow-up.before-<time>` and the data is copied again. The old directory is never deleted.
   Two compatibility files are written there: `mcp.mjs` becomes a shim that runs the current bridge (1.x recovery
   agents run that path), and `heartbeat.json` is written next to the new one while the old directory exists, because
   a 1.x installer on probation reads it (drop that in the release after 2.0.0). Wait jobs prepared before the move
