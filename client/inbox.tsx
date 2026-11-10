@@ -1,10 +1,10 @@
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Text, View } from "react-native";
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { flagHeadline, type Headline } from "../shared/headline";
 import { nextAfter, snoozeUntil, wakeLabel, type InboxRow } from "../shared/inbox";
-import { Button, type Theme } from "./kit";
+import { Button, focusSoon, rowDomId, type Theme } from "./kit";
 import { raised } from "./theme";
 import type { InboxStore } from "./inbox-store";
 
@@ -20,17 +20,37 @@ export const rowHeadline = (row: InboxRow, now: number): Headline | null => flag
 /** "until 09:00", "until Tue 09:00", "until next event": a Later's wake time for the Undo bar. */
 export const laterLabel = (until: string, now: number) => { const w = wakeLabel({ until, at: new Date(now).toISOString() }, now); return w ? `until ${w}` : "snoozed"; };
 
-/** The undo bar: in-surface, so it can carry an Undo action that host toasts can't. Lasts 6 s. Says Signed off or Later. */
+/**
+ * The undo bar: in-surface, so it can carry an Undo action that host toasts can't. Lasts 6 s. Says Signed off or Later.
+ * It waits while its Undo has focus or the pointer (resuming with at least 2 s), and Escape closes it. After Undo,
+ * focus goes to the restored row, since the bar that had it is gone.
+ */
 export function UndoBar({ store, theme, touch }: { store: InboxStore; theme: Theme; touch: boolean }) {
   const c = theme.colors;
   const recent = useInbox(store, () => store.recent());
+  const [focused, setFocused] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const held = focused || hovered;
+  const left = useRef<number | null>(null);
+  useEffect(() => { left.current = null; setFocused(false); setHovered(false); }, [recent]);
   useEffect(() => {
-    if (!recent) return;
-    const id = setTimeout(() => store.clearRecent(), Math.max(0, 6_000 - (Date.now() - recent.at)));
-    return () => clearTimeout(id);
-  }, [recent, store]);
+    if (!recent || held) return;
+    const ms = left.current ?? Math.max(0, 6_000 - (Date.now() - recent.at));
+    const start = Date.now();
+    const id = setTimeout(() => store.clearRecent(), ms);
+    return () => { clearTimeout(id); left.current = Math.max(2_000, ms - (Date.now() - start)); };
+  }, [recent, held, store]);
+  useEffect(() => {
+    const doc = (globalThis as { document?: { addEventListener(t: string, f: (e: { key: string }) => void): void; removeEventListener(t: string, f: (e: { key: string }) => void): void } }).document;
+    if (!recent || !focused || !doc) return;
+    const onKey = (e: { key: string }) => { if (e.key === "Escape") store.clearRecent(); };
+    doc.addEventListener("keydown", onKey);
+    return () => doc.removeEventListener("keydown", onKey);
+  }, [recent, focused, store]);
   if (!recent) return null;
   const what = recent.kind === "sign_off" ? "Signed off" : `Later ${laterLabel(recent.until, Date.now())}`;
+  const restored = recent.kind === "later_ws" ? recent.key : recent.agentIds[0] ? `agent:${recent.agentIds[0]}` : undefined;
+  const undo = () => { void store.undo().then(() => { if (restored) focusSoon(rowDomId(restored)); }); };
   return <View role="status" accessibilityLiveRegion="polite" style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: touch ? 52 : 40, paddingLeft: 12, paddingRight: 4, borderRadius: 8, backgroundColor: c.surface1, borderWidth: 1, borderColor: c.border, ...raised(c) }}>
     {recent.kind !== "sign_off"
       ? <Icon name="AlarmClock" size={15} color={c.foregroundMuted} />
@@ -41,7 +61,8 @@ export function UndoBar({ store, theme, touch }: { store: InboxStore; theme: The
       <Text numberOfLines={1} style={{ flexShrink: 1, color: c.foreground, fontSize: touch ? 14 : 12 }}>{recent.label}</Text>
       <Text numberOfLines={1} style={{ flexShrink: 0, color: c.foregroundMuted, fontSize: touch ? 13 : 12 }}>{touch ? what : ` · ${what}`}</Text>
     </View>
-    <Button theme={theme} compact={touch} kind="ghost" icon="Undo2" title="Undo" accessibilityLabel={`Undo: ${what}, ${recent.label}`} onPress={() => void store.undo()} />
+    <Button theme={theme} compact={touch} kind="ghost" icon="Undo2" title="Undo" accessibilityLabel={`Undo: ${what}, ${recent.label}`} onPress={undo}
+      onInteract={e => { if (e === "focus" || e === "blur") setFocused(e === "focus"); else setHovered(e === "hoverIn"); }} />
   </View>;
 }
 

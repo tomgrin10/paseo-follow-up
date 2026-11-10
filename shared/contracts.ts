@@ -220,4 +220,6 @@ export const setUpdatesRpc = defineRpc({ name: "follow.set-updates", input: setU
 /** Install now. Without `anyway` it still waits for a quiet moment; `anyway` installs even with agents mid-turn. */
 export const installUpdateRpc = defineRpc({ name: "follow.install-update", input: z.strictObject({ version: z.string().max(64), anyway: z.boolean().optional() }), output: updatesViewSchema });
 /** Hides a Home update notice on every device (until the next version, for "available"). */
+/** The developer's IANA timezone, from their Follow-up client: an agent tool's "tonight"/"tomorrow" resolve in it. */
+export const clientTimeZoneRpc = defineRpc({ name: "follow.client-time-zone", input: z.strictObject({ timeZone: z.string().min(1).max(64) }), output: z.object({ ok: z.boolean() }) });
 export const dismissUpdateNoticeRpc = defineRpc({ name: "follow.dismiss-update-notice", input: z.strictObject({ id: z.string().max(120) }), output: updatesViewSchema });
