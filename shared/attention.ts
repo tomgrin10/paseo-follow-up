@@ -1,4 +1,5 @@
-import { summary, type Batch, type Pr, type Workspace, type Status } from "./model";
+import { batchView } from "./status";
+import { completionCheck, summary, type Batch, type Pr, type Workspace, type Status } from "./model";
 import { followUpObligations, recoveryBatch } from "./follow-up";
 import { orderedStacks, settledForDisplay } from "./presentation";
 import { githubApproved, graphiteReady, isGithubFlow, mergeBlockers, prActionBlocks } from "./pr-actions";
@@ -78,7 +79,8 @@ export function sendBlocker(w: Workspace, batch: Batch): string | null {
 export type NeedItem =
   | { kind: "hold"; key: string; title: string; detail: string }
   | { kind: "retry"; key: string; batchId: string; title: string; detail: string; exhausted: boolean }
-  | { kind: "send"; key: string; batchId: string; title: string; tasks: string[]; blocker: string | null }
+  /** `finish`: the Done check. It never auto-sends, so it always waits on you. */
+  | { kind: "send"; key: string; batchId: string; title: string; tasks: string[]; blocker: string | null; finish?: true }
   | { kind: "decision"; key: string; obligationId: string; title: string; detail: string }
   | { kind: "question"; key: string; questionId: string; title: string; detail: string; state: QuestionState; big: string | null }
   | { kind: "answer"; key: string; questionId: string; title: string; detail: string }
@@ -97,7 +99,7 @@ export function needsYou(w: Workspace, now = Date.now()): NeedItem[] {
   const open = questions.filter(questionOpen);
   for (const q of open.filter(q => questionState(q) === "stopped")) items.push({ kind: "question", key: `question:${q.id}`, questionId: q.id, title: `${q.id} · ${q.title}`, detail: q.question, state: "stopped", big: q.big });
   if (w.hold) items.push({ kind: "hold", key: "hold", title: "Follow-up is paused", detail: w.hold });
-  for (const b of w.batches.filter(b => !recoveryBatch(b) && ["blocked", "uncertain"].includes(b.state))) {
+  for (const b of w.batches.filter(b => !recoveryBatch(b) && ["blocked", "uncertain"].includes(b.state) && !(w.completion && completionCheck(b)))) {
     items.push({ kind: "retry", key: `retry:${b.id}`, batchId: b.id, exhausted: b.attempts >= 3,
       title: b.state === "uncertain" ? "Check whether the repairs arrived" : "The repairs didn't finish",
       detail: b.result || (b.state === "uncertain" ? "Delivery wasn't confirmed." : "The main agent reported a blocker.") });
@@ -113,8 +115,10 @@ export function needsYou(w: Workspace, now = Date.now()): NeedItem[] {
   // A blocked task is a question once the server mirrors it; until then it still shows as a decision.
   for (const o of followUpObligations(w).filter(o => o.status === "blocked" && !questions.some(q => q.taskId === o.id && q.taskRevision !== null)))
     items.push({ kind: "decision", key: `decision:${o.id}`, obligationId: o.id, title: o.title, detail: o.evidence });
-  if (!w.enable_auto_sends) for (const b of pendingSends(w)) {
-    items.push({ kind: "send", key: `send:${b.id}`, batchId: b.id, tasks: b.tasks.map(t => t.title), blocker: sendBlocker(w, b),
+  for (const b of pendingSends(w).filter(b => completionCheck(b) ? !w.completion : !w.enable_auto_sends)) {
+    items.push(completionCheck(b)
+      ? { kind: "send", key: `send:${b.id}`, batchId: b.id, tasks: b.tasks.map(t => t.title), blocker: sendBlocker(w, b), title: "Ready to finish · ask the main agent to declare Done", finish: true }
+      : { kind: "send", key: `send:${b.id}`, batchId: b.id, tasks: b.tasks.map(t => t.title), blocker: sendBlocker(w, b),
       title: `${plural(b.tasks.length, "repair")} ready for the main agent` });
   }
   const blocking = (pr: Pr) => w.prActions.some(a => prActionBlocks(a, [pr.key]));
@@ -151,14 +155,11 @@ export function liveLine(w: Workspace, now = Date.now()): { icon: LiveIcon; text
   if (w.hold) return { icon: "paused", text: "Paused until you resume", since: w.interruption?.at ?? null };
   const stopped = (w.questions ?? []).filter(questionOpen).find(q => questionState(q) === "stopped");
   if (stopped) return { icon: "paused", text: `Main agent stopped until you answer ${stopped.id}`, since: stopped.askedAt };
-  const sent = openBatches(w).find(b => ["sending", "sent"].includes(b.state));
-  if (sent) {
-    const who = sent.recipientAgentId && sent.recipientAgentId !== w.mainAgentId ? "Recovery agent" : "Main agent";
-    return { icon: "spinner", text: `${who} is working on ${plural(sent.tasks.length, "repair")}`, since: sent.activityAt ?? sent.sentAt };
-  }
+  const view = batchView(w, now);
+  if (view?.phase === "sent" && view.kind !== "recovery") return { icon: "spinner", text: view.line, since: view.batch.activityAt ?? view.batch.sentAt };
   if (w.runtimeReason) return { icon: "waiting", text: w.runtimeReason, since: null };
-  const pending = pendingSends(w)[0];
-  if (pending && w.enable_auto_sends) return { icon: "waiting", text: `${plural(pending.tasks.length, "repair")} queued · sends when the agent is idle`, since: pending.createdAt };
+  // Queued work, in the same words as the agent card and Home (shared/status.ts). Repairs you send by hand live in Needs you.
+  if (view?.phase === "queued" && (view.kind === "finish" || w.enable_auto_sends)) return { icon: view.fixing ? "spinner" : "waiting", text: view.line, since: view.batch.createdAt };
   if (w.runtimeBusy) return { icon: "spinner", text: "Main agent is working", since: null };
   const working = followUpObligations(w).find(o => o.status === "working");
   if (working) return { icon: "spinner", text: working.title, since: null };

@@ -66,6 +66,8 @@ export class Engine {
   autoSendsHeld: () => boolean = () => false;
   /** Where pruned never-sent batches go (see pruneUnsent); the worker appends them to an archive file. */
   archive: (workspaceId: string, batches: Batch[]) => Promise<void> = async () => {};
+  /** Set by the worker: logs a workspace whose status surfaces contradict each other (server/status-check.ts). */
+  statusCheck: (w: Workspace, now: number) => Promise<void> = async () => {};
   /** Background refreshes skipped while paused, for tests and the resource check. */
   skipped = 0;
   constructor(readonly store: Store, private github: Pick<Github, "observe">, private gateway: Gateway, private now = Date.now, private settleMs = 60_000) {}
@@ -144,6 +146,7 @@ export class Engine {
           unacknowledged.result = unacknowledged.acknowledgmentError ? `Acknowledgment was refused for agent ${unacknowledged.acknowledgmentError.agentId}: ${unacknowledged.acknowledgmentError.error}` : "No accepted acknowledgment is recorded. Check the assigned agent’s result and any tracker errors before retrying.";
         }
         if (w.completion && revokesDone(w, this.now())) w.completion = null;
+        if (w.completion) settleDoneChecks(w, this.now());
         if (w.declaration && !w.completion) {
           const gate = completionGate(w, this.now());
           if (gate.blockers.some(b => b.owner !== "wait")) w.declaration = null;
@@ -165,6 +168,9 @@ export class Engine {
       }
       for (const q of findWorkspace(await this.store.snapshot(), original.id).questions.filter(q => q.answer?.delivery.state === "queued")) await this.deliverAnswer(original.id, q.id).catch(() => undefined);
       let current = findWorkspace(await this.store.snapshot(), original.id);
+      // Persist the holds that live only in this refresh, so every surface can say why repairs wait (shared/status.ts).
+      const sendWait = this.autoSendsHeld() ? "setup" : runtime.mainLoaded === false || runtime.mainRecent === false ? "unloaded" : null;
+      if ((current.sendWait ?? null) !== sendWait) current = await this.store.mutate(state => { const w = findWorkspace(state, original.id); w.sendWait = sendWait; return w; });
       const pending = current.batches.find(b => b.state === "pending" && !isRecovery(b));
       // Auto-send only reaches an agent that is loaded and recently used: sending to a dormant one would wake it.
       // Completion checks never go out on their own; they wait for Tom or the agent's next live turn.
@@ -182,6 +188,7 @@ export class Engine {
         await this.gateway.label(current, done);
         if (!done) await this.store.mutate(state => { findWorkspace(state, current.id).managedDoneLabel = false; });
       }
+      await this.statusCheck(findWorkspace(await this.store.snapshot(), original.id), this.now()).catch(() => undefined);
     }
     this.error = null;
   }
@@ -390,7 +397,7 @@ export class Engine {
       }
       w.declaration = null;
       const alreadyDone = !!w.completion;
-      for (const b of w.batches.filter(b => b.state === "pending" && completionCheck(b))) { b.state = "cancelled"; b.result = "The main agent declared Done."; }
+      settleDoneChecks(w, this.now());
       if (!alreadyDone) w.completion = { summary: message, declaredAt: new Date(this.now()).toISOString(), ...(gate.unconfirmed.length ? { unconfirmed: gate.unconfirmed } : {}) };
       return { workspace: w, blockers, unconfirmed: gate.unconfirmed, alreadyDone, next: doneGuidance(gate, alreadyDone) };
     });
@@ -415,11 +422,18 @@ export class Engine {
 
 export type DoneResult = { workspace: Workspace; blockers: string[]; unconfirmed: string[]; alreadyDone: boolean; next: string };
 /** The declare_done reply in words: what's missing, who can move it, and whether calling again could help. */
+/** Done answers every open Done check: a queued one is cancelled, a sent one counts as acknowledged. */
+function settleDoneChecks(w: Workspace, now: number): void {
+  for (const b of w.batches.filter(b => completionCheck(b) && ["pending", "sending", "sent", "blocked", "uncertain"].includes(b.state))) {
+    const sent = b.state !== "pending";
+    b.state = sent ? "completed" : "cancelled"; b.result = "The main agent declared Done."; if (sent) b.settledAt = new Date(now).toISOString();
+  }
+}
 /** Records a stored declaration as Done; the Done check it answers is no longer needed. */
 function acceptDeclaration(w: Workspace, gate: CompletionGate, now: number): void {
   w.completion = { summary: w.declaration!.summary, declaredAt: new Date(now).toISOString(), ...(gate.unconfirmed.length ? { unconfirmed: gate.unconfirmed } : {}) };
   w.declaration = null;
-  for (const b of w.batches.filter(b => b.state === "pending" && completionCheck(b))) { b.state = "cancelled"; b.result = "The main agent declared Done."; }
+  settleDoneChecks(w, now);
 }
 export function doneGuidance(gate: CompletionGate, alreadyDone = false, stored = false): string {
   const note = gate.unconfirmed.length ? ` Follow-up couldn't confirm what production serves for ${gate.unconfirmed.join(", ")}, so Done carries "Deploy not confirmed by Follow-up" with your summary as the evidence.` : "";
