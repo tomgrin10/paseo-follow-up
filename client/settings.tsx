@@ -10,6 +10,7 @@ import { Switch, errorText, text, type Theme } from "./kit";
 import { DisplaySections, PermissionsSection, PreferenceSwitch } from "./display";
 import { ReviewerSettings, reviewerSettingsKey } from "./reviewers";
 import { AgentSettings, agentSettingsKey } from "./agents";
+import { ShippingSettings } from "./shipping";
 import { BackHeader, CategoryList, CategoryTabs, Disclosure } from "./settings-shell";
 import {
   categoryTitle, followingSummary, hasSavedCategory, projectsOpenByDefault, projectsSummary, readCategory, reviewersSummary, workspaceRows, workspaceState, workspacesOpenByDefault, workspacesSummary,
@@ -75,6 +76,7 @@ function FollowingCategory({ theme, compact, openSetup }: { theme: Theme; compac
           onValueChange={value => change.mutate({ activeWindowDays: Number(value) })} />
       </SettingsCard>}
     </SettingsSection>
+    <ShippingSettings theme={theme} compact={compact} />
     <PermissionsSection theme={theme} />
     <ProjectsFold theme={theme} compact={compact} />
     {data && (data.workspaces.length

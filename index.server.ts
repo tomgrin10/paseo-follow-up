@@ -119,8 +119,12 @@ export default function contribute(server: PluginServerContext) {
   github.workflow = repo => prWorkflow.workflow(repo);
   workspaceRepos = gateway.workspaceRepos;
   prWorkflow.paths = async () => {
-    const paths = new Map<string, string>();
-    for (const p of await gateway.projects(await store.snapshot())) { const repo = projectRepo(p.key); if (repo && p.path && !paths.has(repoKey(repo))) paths.set(repoKey(repo), p.path); }
+    const paths = new Map<string, string[]>();
+    const add = (repo: string, path: string) => { const key = repoKey(repo); paths.set(key, [...(paths.get(key) ?? []), path]); };
+    const state = await store.snapshot();
+    for (const p of await gateway.projects(state)) { const repo = projectRepo(p.key); if (repo && p.path) add(repo, p.path); }
+    // Fallback: where tracked workspaces' agents work on that repository's PRs.
+    for (const w of state.workspaces) for (const repo of new Set([...w.prs.map(p => p.repo), ...(workspaceRepos.get(w.id) ? [workspaceRepos.get(w.id)!] : [])])) for (const cwd of gateway.workspaceCwds.get(w.id) ?? []) add(repo, cwd);
     return paths;
   };
   prWorkflow.onChanged = () => { void store.snapshot().then(state => store.onChanged(state)).catch(() => undefined); };
@@ -592,7 +596,17 @@ export default function contribute(server: PluginServerContext) {
     for (const repo of Object.keys(prWorkflow.current().repos)) repos.add(repo);
     return repos;
   };
-  const prWorkflowView = async (fresh = false) => prWorkflow.view(await prWorkflowRepos(), fresh);
+  // Each repository's merge settings as GitHub reported them with its newest observed PR (no extra request).
+  const repoMerges = async () => {
+    const newest = new Map<string, { at: string; value: NonNullable<NonNullable<Workspace["prs"][number]["snapshot"]>["repoMerge"]> }>();
+    for (const w of (await store.snapshot()).workspaces) for (const p of w.prs) {
+      const s = p.snapshot; if (!s?.repoMerge) continue;
+      const key = repoKey(p.repo); const seen = newest.get(key);
+      if (!seen || s.observedAt > seen.at) newest.set(key, { at: s.observedAt, value: s.repoMerge });
+    }
+    return newest;
+  };
+  const prWorkflowView = async (fresh = false) => { const merges = await repoMerges(); return prWorkflow.view(await prWorkflowRepos(), fresh, repo => merges.get(repo)?.value ?? null); };
   handle(rpc.prWorkflowRpc, async ({ refresh }) => {
     await requireReady();
     const view = await prWorkflowView(!!refresh);
