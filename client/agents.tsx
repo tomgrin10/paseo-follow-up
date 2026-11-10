@@ -65,7 +65,7 @@ export function WaitSettings({ theme }: Pick<PluginSurfaceProps, "theme">) {
     {wait && <SettingsCard>
       {/* Paseo 0.16 (reason "host"): what the host does comes first and stays whether the switch is on or off; it's
           information, not a problem, so no alert. */}
-      {wait.host && <Text style={[t.body, { color: c.foreground, paddingHorizontal: 16, paddingTop: 14 }]}>{WAIT_HOST_NOTE}</Text>}
+      {wait.host && <Text style={[t.body, { color: c.foreground, paddingHorizontal: 16, paddingVertical: 14 }]}>{WAIT_HOST_NOTE}</Text>}
       <SettingsSwitch label={copy.title} hint={copy.hint} value={wait.enable_wait} disabled={change.isPending} onValueChange={value => change.mutate(value)} />
       {note && wait.enable_wait && wait.reason !== "host" && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusWarning, paddingHorizontal: 16, paddingBottom: 12 }]}>{`${WAIT_NOT_ATTACHED} ${note}`}</Text>}
     </SettingsCard>}
