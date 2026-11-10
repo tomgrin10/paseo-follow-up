@@ -5,7 +5,7 @@ import { waitStatusSchema } from "./wait";
  * Which agent each of Follow-up's special roles uses (Settings → Agents), kept in `agents.json` next to state.json.
  *
  * - `about`: Summaries, a one-shot job (server/ai-jobs.ts).
- * - `ranker`: the Overseer's priority ranker, a one-shot job.
+ * - `ranker`: AI priority, the ranker behind Home's Priority sort, a one-shot job.
  * - `overseer`: the long-lived Overseer agent in Paseo.
  * - `recovery`: the agent Follow-up starts to rebuild a workspace's tracking; "Same as main agent" by default.
  *
@@ -64,11 +64,12 @@ export const ROLE_DEFAULTS: Record<AgentRole, Omit<RoleConfig, "role" | "isDefau
   ranker: { provider: "claude", model: "sonnet", thinking: null, mode: null, same: false, dailyCap: 24, maxPromptChars: 60_000, cadenceMinutes: 60 },
 };
 
+/** Each job's name and what it does: the one copy setup's Helper agents step, Settings → Agents and agent tools share. */
 export const ROLE_INFO: Record<AgentRole, { title: string; does: string }> = {
-  about: { title: "Summaries", does: "Writes the summary and one-line gist at the top of a workspace." },
-  overseer: { title: "Overseer", does: "Routes your asks to the agents that own them." },
-  recovery: { title: "Recovery", does: "Rebuilds a workspace's tracking when Follow-up lost track of it." },
-  ranker: { title: "Priority ranker", does: "Ranks workspaces for Home's Priority sort." },
+  about: { title: "Summaries", does: "One sentence under each workspace's title saying what it's for." },
+  overseer: { title: "Overseer", does: "One agent you ask about all your workspaces, from Home's search. Starts only when you click Start on Home." },
+  recovery: { title: "Recovery", does: "Rebuilds a workspace's tracking when Follow-up lost track of it. Runs only when you ask." },
+  ranker: { title: "AI priority", does: "Sorts Home by what matters most, from Linear, Slack and review requests. About hourly on workdays." },
 };
 
 /** Reads the file leniently: anything unreadable becomes empty, each role and field is checked on its own. */
