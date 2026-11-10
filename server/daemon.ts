@@ -159,6 +159,8 @@ export const projectRepo = (key: string) => /^remote:github\.com\/([\w.-]+\/[\w.
 export class PaseoGateway implements Gateway {
   /** Each discovered workspace's project repository, for its PR workflow before it has PRs. */
   readonly workspaceRepos = new Map<string, string>();
+  /** Workspace → its root agents' working directories, from the agent list already in hand (no extra reads). */
+  readonly workspaceCwds = new Map<string, string[]>();
   /** Settings → Agents' "recovery" role; unset or "Same as main agent" copies the main agent. */
   recoveryRole: (() => Promise<RecoveryRole>) | null = null;
   constructor(private connect: typeof withDaemon = withDaemon, private guard = new SessionGuard(join(paseoHome, "plugin-data/session-guard")), private compacting = compactionPending, private histories = new HistoryCache(null), private now = Date.now, readonly directory = new DaemonDirectory(connect, now)) {}
@@ -222,6 +224,7 @@ export class PaseoGateway implements Gateway {
       const project = projects.find(p => p.projectId === workspace.projectId);
       const repo = project?.projectKind === "git" ? /^remote:github\.com\/([\w.-]+\/[\w.-]+?)(?:\.git)?$/.exec(project.projectKey)?.[1] ?? null : null;
       if (repo) this.workspaceRepos.set(workspace.id, repo); else this.workspaceRepos.delete(workspace.id);
+      this.workspaceCwds.set(workspace.id, [...new Set(roots.map(a => a.cwd).filter(Boolean))]);
       // Active scope: a dormant workspace stays listed but is never scanned. Within an active one only
       // loaded agents are read, because a timeline read loads the agent (see isLoaded).
       row.active = workspaceActive(roots, existing, windowMs, now);

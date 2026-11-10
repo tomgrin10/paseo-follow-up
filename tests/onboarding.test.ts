@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OnboardingStore, ReadinessChecks, nativeAgentCount, type CheckDeps } from "../server/onboarding";
 import { CHOICE_WRITES, autoSendWrites, checksSummary, classifyInstall, followWrites, offerVisible, initialOnboarding, OFFER_MS, type Check } from "../shared/onboarding";
-import { reviewerSettingsRpc, saveReviewersRpc, setFollowSettingsRpc, followSettingsRpc } from "../shared/contracts";
+import { reviewerSettingsRpc, saveReviewersRpc, setFollowSettingsRpc, followSettingsRpc, prWorkflowRpc, setPrWorkflowRpc } from "../shared/contracts";
 import { displayPreferences } from "../shared/display";
 
 const tmp = async (t: TestContext) => { const d = await mkdtemp(join(tmpdir(), "follow-onboarding-")); t.after(() => rm(d, { recursive: true, force: true })); return d; };
@@ -233,7 +233,7 @@ test("nativeAgentCount counts native-<agent>.json only", async t => {
 // ---------- choices write what Settings writes ----------
 
 test("choices: every write is a Settings RPC or display-settings field, never a parallel config", () => {
-  const settingsRpcs = new Set([setFollowSettingsRpc.name, saveReviewersRpc.name]);
+  const settingsRpcs = new Set([setFollowSettingsRpc.name, saveReviewersRpc.name, setPrWorkflowRpc.name]);
   const displayFields = new Set(Object.keys(displayPreferences.schema.shape));
   for (const [choice, target] of Object.entries(CHOICE_WRITES)) {
     if ("rpc" in target) assert.ok(settingsRpcs.has(target.rpc), `${choice} → ${target.rpc}`);
@@ -245,7 +245,14 @@ test("choices: every write is a Settings RPC or display-settings field, never a 
   assert.ok(setFollowSettingsRpc.input.safeParse({ workspace: { workspaceId: "w1", follow: false } }).success);
   assert.ok(setFollowSettingsRpc.input.safeParse({ workspace: { workspaceId: "w1", enable_auto_sends: false } }).success);
   assert.ok(saveReviewersRpc.input.safeParse({ repo: null, reviewers: [{ login: "ana-reviews", name: null }] }).success);
-  assert.ok(followSettingsRpc && reviewerSettingsRpc);
+  // shipping writes follow.set-pr-workflow, the RPC Settings' Shipping PRs uses.
+  assert.ok(setPrWorkflowRpc.input.safeParse({ repo: "acme/api", setting: "github" }).success);
+  assert.ok(followSettingsRpc && reviewerSettingsRpc && prWorkflowRpc);
+});
+
+test("shipping sits between defaults and reviewers", async () => {
+  const { ONBOARDING_STEPS } = await import("../shared/onboarding");
+  assert.deepEqual([...ONBOARDING_STEPS], ["intro", "checks", "defaults", "shipping", "reviewers", "helpers"]);
 });
 
 test("choices: the setup client calls the same contracts and settings document as the Settings screen", async () => {

@@ -15,14 +15,15 @@ export const prWorkflowSchema = z.enum(["graphite", "github"]);
 /** The same plain words Settings and onboarding show. The github hint never mentions Graphite. */
 export const PR_WORKFLOW_LABELS: Record<PrWorkflowSetting, { label: string; hint: string }> = {
   auto: { label: "Auto", hint: "Works it out per repository from what's installed and how the repository is set up." },
-  graphite: { label: "Graphite stacks", hint: "Merge, merge when ready and stack readiness through Graphite. Needs the gt CLI signed in on this machine." },
+  graphite: { label: "Graphite", hint: "Merge, merge when ready and stack readiness through Graphite. Needs the gt CLI signed in on this machine." },
   github: { label: "GitHub", hint: "Readiness, merge and auto-merge straight from GitHub. Stacks follow each PR's base branch." },
 };
-export const workflowName = (w: PrWorkflow) => w === "graphite" ? "Graphite stacks" : "GitHub";
+export const workflowName = (w: PrWorkflow) => w === "graphite" ? "Graphite" : "GitHub";
 
 export const MERGE_METHODS = ["squash", "merge", "rebase"] as const;
 export type MergeMethod = typeof MERGE_METHODS[number];
 export const mergeMethodSchema = z.enum(MERGE_METHODS);
+export const MERGE_METHOD_SHORT: Record<MergeMethod, string> = { squash: "Squash", merge: "Merge commit", rebase: "Rebase" };
 export const MERGE_METHOD_LABELS: Record<MergeMethod, string> = { squash: "Squash and merge", merge: "Merge commit", rebase: "Rebase and merge" };
 
 /**
@@ -58,11 +59,11 @@ export const emptyPrWorkflowConfig = (): PrWorkflowConfig => prWorkflowConfigSch
 /** What the machine and the repository say, gathered without running gt. */
 export type Detection = { gtInstalled: boolean; signedIn: boolean; path: string | null; initialised: boolean };
 export function detect(d: Detection): { workflow: PrWorkflow; reason: string } {
-  if (!d.gtInstalled) return { workflow: "github", reason: "No stacking tool found on this machine" };
-  if (!d.signedIn) return { workflow: "github", reason: "No signed-in stacking tool on this machine" };
+  if (!d.gtInstalled) return { workflow: "github", reason: "Using GitHub. Graphite isn’t set up on this machine." };
+  if (!d.signedIn) return { workflow: "github", reason: "Using GitHub. Graphite isn’t set up on this machine." };
   if (!d.path) return { workflow: "github", reason: "No local checkout to check; using GitHub" };
-  if (!d.initialised) return { workflow: "github", reason: "This repository uses plain GitHub branches" };
-  return { workflow: "graphite", reason: "Graphite CLI and sign-in found, and this repository uses it" };
+  if (!d.initialised) return { workflow: "github", reason: "Using GitHub. This repository isn’t set up for Graphite." };
+  return { workflow: "graphite", reason: "Using Graphite. The gt CLI is signed in and this repository is initialised." };
 }
 
 export function repoSetting(config: PrWorkflowConfig, repo: string): { setting: PrWorkflowSetting; inherits: boolean } {
@@ -78,6 +79,8 @@ export const repoWorkflowViewSchema = z.object({
   repo: z.string(), setting: prWorkflowSettingSchema, detected: prWorkflowSchema, effective: prWorkflowSchema, reason: z.string(),
   path: z.string().nullable(), inherits: z.boolean(),
   mergeMethod: mergeMethodSchema.nullable(), reviewFix: reviewFixSchema.nullable(),
+  /** What GitHub allows here, from the newest PR Follow-up read in this repository; null until it has read one. */
+  github: z.object({ methods: z.array(mergeMethodSchema), preferred: mergeMethodSchema.nullable(), autoMerge: z.boolean(), mergeQueue: z.boolean() }).nullable().default(null),
 });
 export type RepoWorkflowView = z.infer<typeof repoWorkflowViewSchema>;
 export const prWorkflowViewSchema = z.object({
@@ -95,5 +98,36 @@ export const setPrWorkflowInputSchema = z.strictObject({
   reviewFix: reviewFixSchema.nullable().optional(),
 });
 
+/** Settings' line for the default: "Auto · GitHub in 5 repositories, Graphite in 3". */
+export function shippingSummary(view: Pick<PrWorkflowView, "default" | "repos">): string {
+  const counts = (["github", "graphite"] as const).map(w => [w, view.repos.filter(r => r.effective === w).length] as const).filter(([, n]) => n > 0);
+  const lead = PR_WORKFLOW_LABELS[view.default].label;
+  if (!counts.length) return lead;
+  if (counts.length === 1) return `${lead} · ${workflowName(counts[0][0])} everywhere`;
+  return `${lead} · ${counts.map(([w, n]) => `${workflowName(w)} in ${n}`).join(", ")}`;
+}
+/** One repository's folded line: "GitHub · Auto", "Graphite · set here", plus a merge method chosen here. */
+export function repoShippingSummary(row: RepoWorkflowView): string {
+  // What was set here comes before "Auto", so a phone's truncation cuts the least useful part.
+  const method = row.mergeMethod && row.effective === "github" ? MERGE_METHOD_SHORT[row.mergeMethod] : "";
+  return [workflowName(row.effective), method, row.inherits ? (row.setting === "auto" ? "Auto" : "default") : "set here"].filter(Boolean).join(" · ");
+}
+/** "3 GitHub · 2 Graphite · 1 set here". */
+export function reposShippingSummary(rows: readonly RepoWorkflowView[]): string {
+  const gh = rows.filter(r => r.effective === "github").length, gt = rows.length - gh, own = rows.filter(r => !r.inherits || r.mergeMethod || r.reviewFix).length;
+  return [gh ? `${gh} GitHub` : "", gt ? `${gt} Graphite` : "", own ? `${own} set here` : ""].filter(Boolean).join(" · ") || "None yet";
+}
+export const reviewFixLabel = (fix: ReviewFix) => fix.kind === "builtin" ? "Built-in steps" : commandName(fix)!;
+
 /** What an agent's instructions depend on: the workspace's workflow and its review-fix command (null: built-in). */
 export type AgentWorkflow = { mode: PrWorkflow; reviewFix: string | null };
+
+/**
+ * What setup's per-repository select writes. "Auto" while the default is Auto means inherit (null), as Settings'
+ * "Default" does, so going Graphite → Auto doesn't leave the repository pinned.
+ */
+export function setupWrite(view: Pick<PrWorkflowView, "default">, repo: string, choice: PrWorkflowSetting): { repo: string; setting: PrWorkflowSetting | null } {
+  return { repo, setting: choice === "auto" && view.default === "auto" ? null : choice };
+}
+/** Setup's select value: an inheriting repository under an Auto default shows Auto. */
+export const setupValue = (view: Pick<PrWorkflowView, "default">, row: Pick<RepoWorkflowView, "inherits" | "setting">): PrWorkflowSetting => row.inherits ? view.default : row.setting;
