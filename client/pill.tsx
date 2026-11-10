@@ -94,9 +94,11 @@ export function contributeFollowUpPill(client: PluginClientContext, deps: Deps) 
       const label = undo ? state.label : state.headline.label;
       // The tooltip (and accessible name) says whose pill it is and what kind of ask. On phones the host shows it as the
       // sheet's title right above the popover, which carries the ask itself in full, so the title doesn't repeat it.
-      const title = undo ? "Follow-up: signed off. Click to undo." : `Follow-up · ${state.headline.label}${state.todo && state.mode === "flag" ? ` · ${todoLabel(withoutBriefQuestions(target.items, target.row))} in this workspace` : ""}`;
+      const title = undo ? "Follow-up: signed off. Open to undo." : `Follow-up · ${state.headline.label}${state.todo && state.mode === "flag" ? ` · ${todoLabel(withoutBriefQuestions(target.items, target.row))} in this workspace` : ""}`;
       const key = `${state.mode}|${label}|${title}`;
-      const button = { title, label, behavior: undo ? { kind: "action" as const, onPress() { void inbox.undo([agentId]); } } : { kind: "popover" as const, Content } };
+      // Always a popover, Undo included: Paseo 0.16 draws a chevron on popover pills, so switching kinds for the undo
+      // window made the chevron and the pill's width jump (tests/pill-popover.test.ts).
+      const button = { title, label, behavior: { kind: "popover" as const, Content } };
       const entry = pills.get(agentId);
       if (!entry) pills.set(agentId, { workspaceId: target.workspaceId, key, pill: client.addComposerPill({ id: PILL_ID, workspaceId: target.workspaceId, agentId, button: { ...button, icon: PillIcon } }) });
       else if (entry.key !== key) { entry.pill.update(button); entry.key = key; }
@@ -161,6 +163,18 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
   // Phones: one primary per sheet. While the workspace has something to act on, that's the primary and Sign off steps back.
   const itemFirst = touch && !!w && (asking || items.length > 0);
   const tone = headline ? headlineColor(HEADLINE_TONE[headline.key], c) : c.foregroundMuted;
+
+  // The 6 s after a sign-off: the pill stays a popover, and Undo is its one action.
+  if (state?.mode === "undo") return <View style={{ width: 380, maxWidth: "100%", gap: 10, marginTop: touch ? -12 : 0 }}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+      <Icon name="Check" size={14} color={c.foregroundMuted} />
+      <Text style={t.meta}>Signed off. It leaves Needs you in a few seconds.</Text>
+    </View>
+    <View style={{ flexDirection: "row" }}>
+      <Button theme={props.theme} compact={touch} grow={touch} kind="primary" icon="Undo2" title="Undo" accessibilityHint="Puts this agent back in Needs you"
+        onPress={() => done(() => void deps.inbox.undo([agentId]))} />
+    </View>
+  </View>;
 
   return <View style={{ width: 380, maxWidth: "100%", gap: 12, marginTop: touch ? -12 : 0 }}>
     {/* 1. The ask, in one line. */}

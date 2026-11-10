@@ -79,7 +79,7 @@ test("pill state machine: flagged → popover; sign off → undo window → gone
   // Sign off: the row clears and the store records the recent sign-off.
   const signed = row({ signedOffAt: new Date(NOW).toISOString(), undoable: true });
   const recent = { agentIds: ["a1"], at: NOW };
-  assert.deepEqual(pillState({ row: signed, items: [], recent, now: NOW + 1_000 }), { mode: "undo", label: "Signed off · Undo" });
+  assert.deepEqual(pillState({ row: signed, items: [], recent, now: NOW + 1_000 }), { mode: "undo", label: "Signed off" });
   assert.equal(pillState({ row: signed, items: [], recent, now: NOW + UNDO_MS + 1 }), null, "gone after 6 s");
   // Another agent's sign-off doesn't put an undo pill here.
   assert.equal(pillState({ row: signed, items: [], recent: { agentIds: ["other"], at: NOW }, now: NOW + 1_000 }), null);
