@@ -1,0 +1,1 @@
+- Home and the workspace panel show Follow-up's version at the top. Tap it to open Settings, where a newer version is marked when one is available.

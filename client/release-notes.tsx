@@ -185,13 +185,13 @@ export function VersionLine({ theme, compact, onOpen }: { theme: Theme; compact:
   // Loading: hold the line's height. Failed: nothing, rather than dead space at the end of Home.
   if (!view) return query.isError ? null : <View style={{ height: 32 }} />;
   const recent = recentUpdate(view, now);
-  const label = recent ? `Updated to ${view.version} ${agoText(now - view.updatedAt!)}` : `Follow-up ${view.version}`;
+  // The headers' version marker names the version; the footer only says what changed, so the two never disagree.
+  const label = recent ? `Updated to ${view.version} ${agoText(now - view.updatedAt!)}` : null;
   const link = recent ? "What's new" : "Release notes";
   // Phones: meta size (12) rather than 11, and a 44pt target.
   const style = compact ? t.meta : t.small;
   return <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 16, paddingTop: 12, paddingBottom: compact ? 0 : 48 }}>
-    <Text style={style}>{label}</Text>
-    <Dot style={style} />
+    {label && <><Text style={style}>{label}</Text><Dot style={style} /></>}
     <Pressable accessibilityRole="button" accessibilityLabel={recent ? `What's new in ${view.version}` : "Release notes"} hitSlop={compact ? { top: 15, bottom: 15, left: 8, right: 8 } : 6} onPress={() => onOpen(!recent)}>
       {state => <Text style={[style, { color: c.foreground, textDecorationLine: (state as { hovered?: boolean }).hovered ? "underline" : "none" }]}>{link}</Text>}
     </Pressable>

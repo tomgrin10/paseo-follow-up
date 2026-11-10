@@ -165,3 +165,13 @@ export const needsLook = (view: Pick<UpdatesView, "installKind" | "mode" | "phas
 
 export const copyCommand = (version: string) => `paseo plugin update follow-through --version ${version}`;
 export type { ReleaseNote } from "./changelog";
+
+/**
+ * Home's version marker ("v1.4.0-beta.34"): the version the update check runs as (UpdatesView.version, from the
+ * running plugin's own install), and whether a newer one is on offer. It never asks npm, and it's quiet: a dot and
+ * "update" at most, never a popup.
+ */
+export function versionMark(view: Pick<UpdatesView, "version" | "phase">): { text: string; update: boolean; label: string } {
+  const update = view.phase.kind === "available" || view.phase.kind === "waiting";
+  return { text: `v${view.version}${update ? " · update" : ""}`, update, label: `Follow-up version ${view.version}${update ? ", update available" : ""}` };
+}

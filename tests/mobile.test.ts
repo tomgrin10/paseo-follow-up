@@ -92,7 +92,7 @@ test("phones: only Home's search row stays pinned; the status chips and the setu
   const home = await source("client/home.tsx");
   assert.match(home, /\{!compact && !omnibox\.results && <StatusStrip/);
   assert.match(home, /\{!compact && !omnibox\.results && <SetupOffer/);
-  assert.match(home, /header=\{omnibox\.results \? undefined : compact \? <View[^>]*>\s*<StatusStrip[^]*?<SetupOffer theme=\{theme\} compact/);
+  assert.match(home, /header=\{omnibox\.results \? undefined : compact \? <View[^>]*>[^]*?<StatusStrip[^]*?<SetupOffer theme=\{theme\} compact/, "the chips (and the version marker beside them) scroll in the list header");
 });
 
 test("phones: every state word's hue is lifted to text contrast, not only success (Finished is the accent)", async () => {
