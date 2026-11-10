@@ -46,7 +46,13 @@ if [ -n "$job_limit" ] && command -v timeout >/dev/null 2>&1; then
   job_status=$?
   # A forwarded signal interrupts wait; keep waiting until timeout itself has exited, for its real status.
   while kill -0 "$job_pid" 2>/dev/null; do wait "$job_pid"; job_status=$?; done
-  if [ "$job_status" -eq 124 ]; then : > "$job_directory/timed-out"; fi
+  # Some coreutils versions also exit 124 when timeout itself is signalled, so 124 means the limit only when nobody
+  # stopped the job; a stopped job reports 143 (TERM), like the unbounded path.
+  if [ -n "$job_stop" ]; then
+    if [ "$job_status" -eq 124 ]; then job_status=143; fi
+  elif [ "$job_status" -eq 124 ]; then
+    : > "$job_directory/timed-out"
+  fi
   exit "$job_status"
 fi
 bash -c "$job_command"
