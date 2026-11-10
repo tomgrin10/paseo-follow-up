@@ -116,8 +116,7 @@ export class Engine {
       if (this.stopped) return;
       const runtime = await this.gateway.observe(original).catch((): Runtime => ({ busy: false, reason: "Agent state unavailable; refresh will retry", archived: false }));
       const pruned: Batch[] = [];
-      await this.store.mutate(state => {
-        const w = findWorkspace(state, original.id);
+      await this.store.mutateWorkspace(original.id, w => {
         w.runtimeBusy = runtime.busy; w.runtimeReason = runtime.reason;
         w.backgroundBusy = runtime.backgroundBusy ?? false;
         if (runtime.gone && w.goneAgent?.agentId !== w.mainAgentId) w.goneAgent = { agentId: w.mainAgentId, at: new Date(this.now()).toISOString(), reason: runtime.gone };
