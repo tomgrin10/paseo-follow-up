@@ -40,6 +40,7 @@ not a patch for one instance.
 | `scripts/check-trust-bypass.mjs` | `test:trust` | Trust bypass on a real daemon. |
 | `scripts/check-install.mjs` | `test:install`, `preview` | The packed install. `--keep` (`npm run preview`) leaves the daemon running for screenshots, prints "Isolated browser app: http://127.0.0.1:<port>", and writes `.preview-isolated.json`. |
 | `scripts/check-wait.mjs` | `test:wait`, `test:wait-live` | Wait with real Haiku agents. Skips without credentials or Paseo 0.15; `test:wait-live` fails instead. |
+| `scripts/check-move.mjs` | `test:move` | 2.0's move from 1.x on a real daemon: the published 1.x beta auto-updates from a fake npm registry to a broken 2.0 (rolled back), then a good one; the move to the new plugin id fails probation once (rolled back, data intact), then succeeds on Try again. Same `follow_*` tool names, Home before and after and the plugin settings title as screenshots (`--shots <dir>`). About 15 minutes. |
 | `scripts/check-github-mode.mjs` | `test:github-mode` | Plain-GitHub mode on the running preview, with a fake `gh`. |
 
 Every script in the table above starts its own isolated daemon, except `test:github-mode`. The scripts below don't:
