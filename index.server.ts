@@ -1,3 +1,4 @@
+import { actorBy, actorOf, type Actor } from "./shared/actor";
 import { displayPreferences } from "./shared/display";
 import { DEFAULT_QUESTION_MODE, QUESTION_DEDUPE_MIGRATION, collapseDuplicateQuestions, questionPreferences, type QuestionMode } from "./shared/questions";
 import { askQuestion, needsYouQuestions, recordAnswer, syncTaskQuestions, withdrawQuestion } from "./server/questions";
@@ -219,7 +220,9 @@ export default function contribute(server: PluginServerContext) {
             const q = w.questions.find(q => q.id === d.id && brief.questionIds.includes(q.id));
             if (!q || q.answer || q.closed) continue;
             if (brief.state === "superseded" && (current.has(q.id) || q.via === "ask")) continue;
-            if (brief.state === "answered" && d.chosen) q.answer = { choice: d.chosen, ...(d.words ? { words: d.words } : {}), at, by: "developer", delivery: { state: "sent", to: agentId, messageId: null, at, reason: null } };
+            // The card's answer is the developer's only when they clicked it; an agent's brief_action stays the agent's.
+            const agentBy = brief.answeredBy?.startsWith("agent:") ? brief.answeredBy.slice("agent:".length) : null;
+            if (brief.state === "answered" && d.chosen) q.answer = { choice: d.chosen, ...(d.words ? { words: d.words } : {}), at, ...(agentBy ? { by: "agent" as const, agentId: agentBy } : { by: "developer" as const }), delivery: { state: "sent", to: agentId, messageId: null, at, reason: null } };
             else if (brief.state === "superseded") q.closed = { at, reason: "The agent kept going past this brief.", by: null };
           }
         });
@@ -608,30 +611,31 @@ export default function contribute(server: PluginServerContext) {
     const w = findWorkspace(await store.snapshot(), workspaceId);
     return linked.view(w.id, linkedDerived(w));
   });
-  handle(rpc.setLinkedItemsRpc, async input => {
+  handle(rpc.setLinkedItemsRpc, async (input, context) => {
     await requireReady();
+    const by = actorBy(actorOf(context));
     const w = findWorkspace(await store.snapshot(), input.workspaceId);
     let message: string | null = null;
     if (input.action === "add") {
-      const r = await linked.link(w.id, input.ref, { origin: "manual", by: "developer", title: input.title });
+      const r = await linked.link(w.id, input.ref, { origin: "manual", by, title: input.title });
       if (!r.ok) throw new Error(r.reason);
       if (r.pending) message = r.message;
     } else if (input.action === "remove") {
       // The spec and published artifacts are derived: removing one records the exclusion, and the view leaves it out.
-      await linked.unlink(w.id, input.ref, "developer", null);
+      await linked.unlink(w.id, input.ref, by, null);
     } else if (!await linked.undo(w.id, input.ref)) message = "Nothing to undo.";
     return { ...await linked.view(w.id, linkedDerived(w)), message };
   });
-  handle(rpc.workspaceSpecRpc, async input => {
+  handle(rpc.workspaceSpecRpc, async (input, context) => {
     await requireReady();
     return store.mutate(state => {
       const w = findWorkspace(state, input.workspaceId);
       if (!w.enable_tracking || w.archived) throw new Error("Follow-up isn't following this workspace. Turn it back on in Follow-up settings, under Workspace exceptions.");
-      developerSetSpec(w, input, Date.now());
+      developerSetSpec(w, input, Date.now(), actorOf(context));
       return w;
     });
   });
-  handle(rpc.answerQuestionRpc, async ({ workspaceId, questionId, choice, words, action }) => { await requireReady(); return engine.answer(workspaceId, questionId, choice, words, action); });
+  handle(rpc.answerQuestionRpc, async ({ workspaceId, questionId, choice, words, action }, context) => { await requireReady(); return engine.answer(workspaceId, questionId, choice, words, action, actorOf(context)); });
   handle(rpc.declareDoneRpc, async ({ agentId, summary }, { paseo }) => { await requireReady(); return engine.declareDone(agentId, summary, await callerWorkspaceId(agentId, paseo, false)); });
   handle(rpc.acknowledgeRpc, async ({ agentId, batchId, outcome, result }, { paseo }) => {
     await requireReady();
@@ -970,7 +974,8 @@ export default function contribute(server: PluginServerContext) {
   // Developer RPCs as agent tools (server/agent-parity.ts): the same handler the button's RPC runs.
   const rpcBridge = {
     async validate(method: string, input: unknown) { const h = handlers.get(method); if (!h) throw new Error(`Unknown Follow-up method ${method}.`); return h.input.parseAsync(input); },
-    async call(method: string, input: unknown) { const h = handlers.get(method); if (!h) throw new Error(`Unknown Follow-up method ${method}.`); return h.run(await h.input.parseAsync(input), { paseo: api } as PluginHandlerContext); },
+    // Agent tools reach handlers only here, so the acting agent rides along (shared/actor.ts): without it a call is the app's.
+    async call(method: string, input: unknown, actor?: Actor) { const h = handlers.get(method); if (!h) throw new Error(`Unknown Follow-up method ${method}.`); return h.run(await h.input.parseAsync(input), { paseo: api, ...(actor ? { actor } : {}) } as PluginHandlerContext); },
   };
   // Settings → Display is host-scoped: read it here, write it through the host's settings RPC, as the screen does.
   const displayBridge = {
@@ -982,7 +987,7 @@ export default function contribute(server: PluginServerContext) {
       return result;
     },
   };
-  const agentActions = new AgentActions({ store, prActions: actions, engine, inbox, priorities: priorityStore, about, agentSettings, wait: { status: currentWait }, prWorkflows: () => prWorkflowView(), rpc: rpcBridge, display: displayBridge,
+  const agentActions = new AgentActions({ store, prActions: actions, engine, inbox, priorities: priorityStore, about, agentSettings, wait: { status: currentWait }, prWorkflows: () => prWorkflowView(), rpc: rpcBridge, display: displayBridge, agentTitle: async id => (await api?.agents.ref(id).refresh().catch(() => null))?.agent?.title ?? null,
     // The directory's agent list (metadata only): a claim never loads or refreshes the main agent.
     agentInfo: async agentId => { const row = gateway.directory.cached(agentId) ?? (await gateway.directory.read()).agents.find(r => r.agent.id === agentId)?.agent; return row ? { status: row.status, activeTurn: row.activeTurn, pendingPermissions: row.pendingPermissions, archivedAt: row.archivedAt } : null; } });
   handle(rpc.prioritiesRpc, async () => ({ items: await priorityStore.read() }));
@@ -1006,7 +1011,7 @@ export default function contribute(server: PluginServerContext) {
   // Home, the sidebar badge and the pills poll this; an unchanged list answers in a few bytes (see inboxAnswer).
   handle(rpc.inboxListRpc, async ({ etag }) => { await requireReady(); return inboxAnswer({ ...await inbox.list(), error: inboxError }, etag); });
   handle(rpc.inboxBriefRpc, async ({ agentId }) => { await requireReady(); return { brief: await inbox.brief(agentId) }; });
-  handle(rpc.inboxActRpc, async input => { await requireReady(); return inbox.act(input); });
+  handle(rpc.inboxActRpc, async (input, context) => { await requireReady(); return inbox.act(input, actorOf(context)); });
   handle(rpc.needsYouRpc, async ({ agentId, ...input }, { paseo }) => {
     await requireReady(); seen(paseo);
     if (!(await inboxSettings()).enable_inbox) throw new Error("The Needs-you inbox is off, so there's no brief to fill. Finish with your normal reply.");
@@ -1049,11 +1054,12 @@ export default function contribute(server: PluginServerContext) {
     await rename(temporary, needsYouPath(agentId));
     return { ok: true as const, briefId: `brief:${turn?.turnId ?? record.at}` };
   });
-  handle(rpc.briefActionRpc, async ({ agentId, briefId, decisionId, choice, words, choices, move }, { paseo }) => {
+  handle(rpc.briefActionRpc, async ({ agentId, briefId, decisionId, choice, words, choices, move }, context) => {
+    const { paseo } = context;
     await requireReady(); seen(paseo);
     const brief = await inbox.briefAction(agentId, { briefId, decisionId, choice, words, choices, move }, async (text, messageId) => {
       await paseo.agents.ref(agentId).send(text, { messageId, activeTurnBehavior: "steer" });
-    });
+    }, actorOf(context));
     return { brief };
   });
 

@@ -1,3 +1,4 @@
+import { onBehalfOf } from "./actor";
 import { z } from "zod";
 
 /** Follow-up's own messages and tool calls, recognised in agent chats so they render as compact rows. */
@@ -206,3 +207,12 @@ export const answerCardSchema = z.object({ id: z.string(), title: z.string(), ch
   /** 1.4.0: a multi-decision answer, one entry per decision with its question; `choice: null` was skipped. */
   answers: z.array(z.object({ id: z.string(), question: z.string(), choice: z.string().nullable(), label: z.string().nullable() })).optional() });
 export type AnswerCard = z.infer<typeof answerCardSchema>;
+/**
+ * Whose answer a chat answer card shows: "Your answer", or "<agent>'s answer" when another agent answered for the
+ * developer (brief_action, answer_question name themselves in the message, shared/actor.ts). Plural for several.
+ */
+export function answerCardWhose(card: Pick<AnswerCard, "text" | "answers">): string {
+  const agent = onBehalfOf(card.text);
+  const one = agent ? `${agent.title}'s answer` : "Your answer";
+  return card.answers ? `${one}s` : one;
+}

@@ -1,3 +1,4 @@
+import { DEVELOPER, type Actor } from "../shared/actor";
 import { randomUUID } from "node:crypto";
 import { completionBlockers, completionCheck, completionGate, revokesDone, type CompletionGate, type Workspace, type State, type Batch } from "../shared/model";
 import { Store } from "./store";
@@ -214,11 +215,11 @@ export class Engine {
     return activated;
   }
   /** Records the developer's answer, then sends it unless they chose to copy it. */
-  async answer(workspaceId: string, questionId: string, choice: string, words: string | undefined, action: "send" | "copy" | "resend"): Promise<{ workspace: Workspace; question: Question }> {
+  async answer(workspaceId: string, questionId: string, choice: string, words: string | undefined, action: "send" | "copy" | "resend", actor: Actor = DEVELOPER): Promise<{ workspace: Workspace; question: Question }> {
     await this.store.mutate(state => {
       const w = findWorkspace(state, workspaceId);
       if (!w.enable_tracking || w.archived) throw new Error("Follow-up isn't following this workspace. Turn it back on in Follow-up settings, under Workspace exceptions.");
-      developerAnswer(w, questionId, choice, words, action, this.now());
+      developerAnswer(w, questionId, choice, words, action, this.now(), actor);
       if (!w.questions.some(isOpenQuestion)) w.updatedAt = new Date(this.now()).toISOString();
     });
     if (action !== "copy") await this.deliverAnswer(workspaceId, questionId);

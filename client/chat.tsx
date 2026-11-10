@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Platform, Pressable, Text, View } from "react-native";
 import type { PluginClientContext, PluginTimelineItemProps } from "@getpaseo/plugin/client";
 import { Icon, ScrollView } from "@getpaseo/plugin/client/ui";
-import { answerCardSchema, batchCardSchema, createMomentLedger, followTimelineItem, parseBatchPrompt, toolRowSchema, type AnswerCard, type BatchCard, type ToolRow } from "../shared/chat";
+import { answerCardSchema, answerCardWhose, batchCardSchema, createMomentLedger, followTimelineItem, parseBatchPrompt, toolRowSchema, type AnswerCard, type BatchCard, type ToolRow } from "../shared/chat";
 import { parseAnswerMessage, parseAnswersMessage } from "../shared/questions";
 import { unconfirmedNote, unconfirmedRefs } from "../shared/status";
 import { Reveal } from "./motion";
@@ -103,12 +103,13 @@ function BatchCardView({ item, theme }: PluginTimelineItemProps<BatchCard>) {
 function AnswerCardView({ item, theme }: PluginTimelineItemProps<AnswerCard>) {
   const c = theme.colors;
   const card = item.data;
+  const whose = answerCardWhose(card);
   const [expanded, setExpanded] = useState(false);
   return <View style={{ alignSelf: "flex-end", width: "100%", maxWidth: 560, marginVertical: 4 }}>
     <View style={{ borderRadius: 10, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1, overflow: "hidden" }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 6 }}>
         <Icon name="MessageCircleReply" size={14} color={c.statusSuccess} />
-        <Text numberOfLines={card.answers ? 2 : 1} style={{ flex: 1, color: c.foreground, fontSize: 13, lineHeight: 18, fontWeight: "600" }}>{card.answers ? `Your answers · ${card.title}` : <>Your answer{/^D\d+$/.test(card.id) ? "" : ` to ${card.id}`} · {card.title}</>}</Text>
+        <Text numberOfLines={card.answers ? 2 : 1} style={{ flex: 1, color: c.foreground, fontSize: 13, lineHeight: 18, fontWeight: "600" }}>{card.answers ? `${whose} · ${card.title}` : <>{whose}{/^D\d+$/.test(card.id) ? "" : ` to ${card.id}`} · {card.title}</>}</Text>
         <Pressable accessibilityRole="button" aria-expanded={expanded} accessibilityLabel={expanded ? "Hide the full message" : "Show the full message"} onPress={() => setExpanded(v => !v)} hitSlop={6}
           style={state => ({ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: state.pressed ? c.surface2 : "transparent" })}>
           <Text style={{ color: c.foregroundMuted, fontSize: 12 }}>{expanded ? "Hide" : "Full message"}</Text>
