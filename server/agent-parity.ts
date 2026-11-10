@@ -94,7 +94,7 @@ export const RPC_TOOLS: readonly RpcTool[] = [
   { name: "browser_status", rpc: "follow.browser-status", kind: "read", input: none },
   // What's new: the installed version, the one before it and when, and every shipped note (newest first)
   { name: "release_notes", rpc: "follow.release-notes", kind: "read", input: none },
-  // Settings → Updates: status (mode, channel, newest versions, phase, pending notes, history), Check now, mode/channel, Install now
+  // Settings → General: status (mode, channel, newest versions, phase, pending notes, history), Check now, mode/channel, Install now
   { name: "updates_status", rpc: "follow.updates", kind: "read", input: none },
   { name: "check_updates", rpc: "follow.updates", kind: "write", input: none, toRpc: () => ({ check: "manual" }) },
   { name: "set_updates", rpc: "follow.set-updates", kind: "planned", before: { rpc: "follow.updates", input: () => ({}) },

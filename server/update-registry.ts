@@ -2,7 +2,7 @@ import type { DistTags } from "../shared/version";
 
 /**
  * Follow-up's own update check against the npm registry. One request at most every six hours on its own; opening
- * Settings → Updates or Check now may ask sooner, but never more than once a minute. Uses npm's abbreviated
+ * Settings → General may ask sooner, at most once a minute; Check now always asks. Uses npm's abbreviated
  * metadata and the previous ETag, so an unchanged package costs a 304 with no body.
  */
 

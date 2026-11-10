@@ -255,7 +255,7 @@ test("shipping sits between defaults and reviewers", async () => {
   assert.deepEqual([...ONBOARDING_STEPS], ["intro", "checks", "defaults", "shipping", "reviewers", "updates", "helpers"]);
 });
 
-test("updates step: writes what Settings → Updates writes; a fresh install's setup consents to automatic updates", async () => {
+test("updates step: writes what Settings → General writes; a fresh install's setup consents to automatic updates", async () => {
   const { updatesConsent } = await import("../shared/onboarding");
   assert.ok(setUpdatesRpc.input.safeParse({ mode: "auto" }).success);
   assert.ok(setUpdatesRpc.input.safeParse({ channel: "beta" }).success);
