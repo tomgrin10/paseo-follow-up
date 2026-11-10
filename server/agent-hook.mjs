@@ -8,7 +8,7 @@ const directory = dirname(fileURLToPath(import.meta.url));
 /** 1.4.0-beta.2: launched with Follow-up's tools served by Paseo's MCP (follow_<name>), or the follow-through bridge (<name>). Agents opened before the upgrade carry no flag and keep the bridge names. */
 let native = process.env.FOLLOW_THROUGH_TOOLS === "native";
 // Tool names that read unambiguously in prose; kept identical to server/mcp.mjs's underscore names (a test checks it).
-export const TOOL_NAMES = ["workspace_status", "sync_workspace", "enroll_workspace", "register_pr", "exclude_stack", "update_obligation", "acknowledge_batch", "ask_question", "record_answer", "withdraw_question", "set_spec", "workspace_about", "agent_settings", "needs_you", "declare_done", "list_prs", "add_reviewers", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "inbox_list", "sign_off", "set_finish_flags", "set_priorities", "agent_digest", "route_candidates", "send_to_agent", "start_workspace", "display_settings", "set_display", "follow_settings", "set_follow_settings", "project_settings", "set_project_tracking", "pr_workflow", "set_pr_workflow", "reviewer_settings", "reviewer_suggestions", "save_reviewers", "set_agent_setting", "onboarding_status", "onboarding_checks", "set_onboarding", "rank_status", "rerank_priorities", "overseer_status", "overseer_start", "overseer_restart", "overseer_ask", "inbox_brief", "brief_action", "inbox_act", "answer_question", "run_recovery", "set_workspace_spec", "set_task_trigger", "pr_controls", "browser_status", "trust_bypass_status"];
+export const TOOL_NAMES = ["workspace_status", "sync_workspace", "enroll_workspace", "register_pr", "exclude_stack", "update_obligation", "acknowledge_batch", "ask_question", "record_answer", "withdraw_question", "set_spec", "workspace_about", "agent_settings", "needs_you", "declare_done", "list_prs", "add_reviewers", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "inbox_list", "sign_off", "set_finish_flags", "set_priorities", "agent_digest", "route_candidates", "send_to_agent", "start_workspace", "display_settings", "set_display", "follow_settings", "set_follow_settings", "project_settings", "set_project_tracking", "pr_workflow", "set_pr_workflow", "reviewer_settings", "reviewer_suggestions", "save_reviewers", "set_agent_setting", "onboarding_status", "onboarding_checks", "set_onboarding", "rank_status", "rerank_priorities", "overseer_status", "overseer_start", "overseer_restart", "overseer_ask", "inbox_brief", "brief_action", "inbox_act", "answer_question", "run_recovery", "set_workspace_spec", "set_task_trigger", "pr_controls", "browser_status", "trust_bypass_status", "make_main_agent"];
 const toolPattern = new RegExp(`(?<![\\w])(${TOOL_NAMES.join("|")})(?![\\w])`, "g");
 /** Names Follow-up's tools the way this agent has them. */
 export function named(text, isNative = native) { return isNative ? text.replace(toolPattern, "follow_$1") : text; }
@@ -122,6 +122,14 @@ function paragraphs(lease, contributor, workflow) {
     `Prefer the native follow-through MCP tools. For a full historical record, use workspace_status with detail=full. CLI compatibility fallback: FOLLOW_THROUGH_CLIENT_ENTRY=${quote(lease.clientEntry)} node ${quote(join(directory, "mcp.mjs"))} call <tool> '<json>' --compact. Omit --compact only when an existing script needs the full response. Never ask the developer to maintain the sidebar or run this bridge.`,
   ];
 }
+/** The old main's notice, within a day of losing the role: who took over, why, and what to do. Null otherwise. */
+export function demotedNotice(demoted, now = Date.now()) {
+  if (!demoted?.at || now - Date.parse(demoted.at) > 24 * 60 * 60_000) return null;
+  const time = new Date(demoted.at).toISOString().slice(11, 16);
+  const who = demoted.by === "developer" ? "the developer moved it" : demoted.by === "auto" ? "Follow-up moved it" : "it was claimed";
+  return { at: demoted.at, text: `You're no longer this workspace's main agent: ${demoted.to} took over at ${time} UTC (${who}${demoted.reason ? `: ${demoted.reason}` : ""}). Report to it instead of asking the developer or calling Done. If that's wrong, ask the developer to make you main again; you can't take it back on your own for 2 hours.` };
+}
+
 /** With native tools there's no MCP initialize reply, so the role text it carried comes from the hook instead. */
 async function nativeExtras(brief) {
   if (!native) return [];
@@ -171,8 +179,8 @@ async function main() {
   }
   // scopes.json is a few KB; this hook runs on every tool call. Older workers don't write it: read state.json.
   const scopes = await json(join(directory, "scopes.json")).catch(() => null);
-  let workspace = null; let contributor = false; let workflow;
-  if (scopes?.agents) { const entry = scopes.agents[agentId]; if (entry && entry.role !== "recovery") { workspace = { id: entry.workspaceId }; contributor = entry.role === "contributor"; workflow = entry.workflow; } }
+  let workspace = null; let contributor = false; let workflow; let demoted = null;
+  if (scopes?.agents) { const entry = scopes.agents[agentId]; if (entry && entry.role !== "recovery") { workspace = { id: entry.workspaceId }; contributor = entry.role === "contributor"; workflow = entry.workflow; demoted = contributor ? demotedNotice(entry.demoted) : null; } }
   else {
     const state = await json(join(directory, "state.json")).catch(() => ({ workspaces: [] }));
     workspace = state.workspaces.find(w => (w.mainAgentId === agentId || w.contributorAgentIds?.includes(agentId)) && w.enable_tracking && !w.archived) ?? null;
@@ -198,8 +206,11 @@ async function main() {
   if (name === "UserPromptSubmit") {
     if (turn?.stopped && String(event.prompt ?? "").startsWith(stopReason)) return;
     const text = await sessionText(); const hash = text ? digest(text) : null;
-    await save(path, { startedAt: Date.now(), dirtyAt: null, lastToolAt: null, stopped: false, quietRevision, contextHash: hash, ...(turn?.detachedNotice ? { detachedNotice: turn.detachedNotice } : {}) });
-    if (text && shouldRepeat(process.env.FOLLOW_THROUGH_PROVIDER, turn, hash)) emit(text);
+    // Lost the main role (make_main_agent, Make main agent, or a handover): said once, on the next turn.
+    const tellDemoted = demoted && turn?.demotedNotice !== demoted.at;
+    await save(path, { startedAt: Date.now(), dirtyAt: null, lastToolAt: null, stopped: false, quietRevision, contextHash: hash, ...(turn?.detachedNotice ? { detachedNotice: turn.detachedNotice } : {}), ...(tellDemoted || turn?.demotedNotice ? { demotedNotice: tellDemoted ? demoted.at : turn.demotedNotice } : {}) });
+    const out = [text && shouldRepeat(process.env.FOLLOW_THROUGH_PROVIDER, turn, hash) ? text : null, tellDemoted ? demoted.text : null].filter(Boolean);
+    if (out.length) emit(out.join("\n\n"));
     return;
   }
   if (name === "PostToolUse") {

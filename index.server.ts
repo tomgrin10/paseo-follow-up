@@ -25,7 +25,7 @@ import { AgentActions, AGENT_TOOLS, controlWorkspace, type AgentTool } from "./s
 import { PaseoGateway, paseoHome, clientEntry, closeConnections, sessionGuardOwnsInterruption } from "./server/daemon";
 import { mcpSource } from "./server/mcp-source";
 import { excludeStack } from "./server/exclusions";
-import { applyHistory, applyDiscovery, extractHistory, markMainWork } from "./server/discovery";
+import { applyHistory, applyDiscovery, extractHistory, mainWorkDue, markMainWork } from "./server/discovery";
 import { lifecycleOnly, recoveryBatch } from "./shared/follow-up";
 import { Deployments } from "./server/deployments";
 import { AgentHooks } from "./server/agent-hooks";
@@ -97,7 +97,7 @@ export default function contribute(server: PluginServerContext) {
   };
   const noteMainWork = async (agentId: string) => {
     // A cheap check on the snapshot first: almost every call has no open handover, so nothing is written.
-    if (!(await store.snapshot()).workspaces.some(w => w.mainAgentId === agentId && w.handover && !w.handover.worked)) return;
+    if (!(await store.snapshot()).workspaces.some(w => mainWorkDue(w, agentId, Date.now()))) return;
     await store.mutate(state => { markMainWork(state, agentId); });
   };
   const store = new Store(directory, 1_000);
@@ -779,7 +779,9 @@ export default function contribute(server: PluginServerContext) {
       return result;
     },
   };
-  const agentActions = new AgentActions({ store, prActions: actions, engine, inbox, priorities: priorityStore, about, agentSettings, prWorkflows: () => prWorkflowView(), rpc: rpcBridge, display: displayBridge });
+  const agentActions = new AgentActions({ store, prActions: actions, engine, inbox, priorities: priorityStore, about, agentSettings, prWorkflows: () => prWorkflowView(), rpc: rpcBridge, display: displayBridge,
+    // The directory's agent list (metadata only): a claim never loads or refreshes the main agent.
+    agentInfo: async agentId => { const row = gateway.directory.cached(agentId) ?? (await gateway.directory.read()).agents.find(r => r.agent.id === agentId)?.agent; return row ? { status: row.status, activeTurn: row.activeTurn, pendingPermissions: row.pendingPermissions, archivedAt: row.archivedAt } : null; } });
   handle(rpc.prioritiesRpc, async () => ({ items: await priorityStore.read() }));
   // Provider limits are non-essential: at critical memory only the VM meter is served.
   handle(rpc.usageRpc, async () => ({ ...(governor.allowsExtras() ? await usage.read() : NO_USAGE), resources: governor.current() }));
@@ -791,7 +793,8 @@ export default function contribute(server: PluginServerContext) {
     const agent = (await paseo.agents.ref(agentId).refresh())?.agent;
     if (!agent?.workspaceId || agent.archivedAt) throw new Error("Cannot locate the caller's workspace.");
     if (agent.labels["follow-through.recovery"]) throw new Error("Recovery sessions can't act for the developer. Acknowledge your batch instead.");
-    if ((await store.snapshot()).workspaces.some(w => w.enable_tracking && !w.archived && w.contributorAgentIds?.includes(agentId))) throw new Error("Contributor sessions can't act for the developer. Report to the main agent.");
+    // Contributors (the workspace's other root agents) get one tool: make_main_agent, with its claim rules.
+    if (tool !== "make_main_agent" && (await store.snapshot()).workspaces.some(w => w.enable_tracking && !w.archived && w.contributorAgentIds?.includes(agentId))) throw new Error("Contributor sessions can't act for the developer. Report to the main agent.");
     if (!await isWorkspaceRoot(agent, async id => (await paseo.agents.ref(id).refresh())?.agent)) throw new Error("Follow-up's action tools are for root agents. Ask your parent agent.");
     const result = await agentActions.run(agentId, tool as AgentTool, args);
     void engine.tick();

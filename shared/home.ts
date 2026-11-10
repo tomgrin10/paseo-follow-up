@@ -32,6 +32,14 @@ export const tierOf = (key: HeadlineKey): Tier => TIER[key];
 
 export type BadgeTone = "warning" | "danger" | "success" | "merged" | "muted";
 export type Badge = { text: string; tone: BadgeTone };
+/**
+ * The newest change of main agent within a day, when an agent or Follow-up made it (the developer knows their own).
+ * Home badges it; the panel shows "Main agent changed: A → B" with Undo.
+ */
+export function recentMainChange(w: Pick<Workspace, "mainHistory" | "mainAgentId">, now: number): NonNullable<Workspace["mainHistory"]>[number] | null {
+  const last = w.mainHistory?.at(-1);
+  return last && last.by !== "developer" && last.to === w.mainAgentId && now - Date.parse(last.at) < 24 * 60 * 60_000 ? last : null;
+}
 export type PrChip = { label: string; tone: PrTone; checks: { text: string; tone: BadgeTone } | null; url: string | null };
 /** A Paseo workspace as Home needs it. Untracked workspaces still get a row, in Quiet. */
 export type PaseoWorkspaceLite = {
@@ -214,7 +222,10 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
     const urgent = !!w?.questions.some(q => questionOpen(q) && !!q.big);
     const due = w ? followUpObligations(w).filter(o => !["done", "waived"].includes(o.status)).map(o => taskSchedule(o, w, now).dueAt).filter((x): x is string => !!x).sort()[0] ?? null : null;
     const priority = p ? { score: p.score, reason: p.reason, source: p.sources[0] ? { kind: p.sources[0].kind, label: p.sources[0].label } : null } : null;
-    return make({ ...stripSig(s), activityAt, urgent, due, priority });
+    // Rule 5 of main-agent claims: a quiet badge for a day after an agent or Follow-up changed the main agent.
+    // Last in line, so it never pushes out a badge that asks for something.
+    const badges = w && recentMainChange(w, now) ? [...s.badges, { text: "Main agent changed", tone: "muted" as const }].slice(0, 2) : s.badges;
+    return make({ ...stripSig(s), badges, activityAt, urgent, due, priority });
   });
   const byGroup = new Map<HomeGroupId, Workstream[]>(HOME_GROUPS.map(g => [g, []]));
   for (const s of finished) byGroup.get(s.group)!.push(s);
