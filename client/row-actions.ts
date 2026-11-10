@@ -3,7 +3,7 @@ import { useRpc } from "@getpaseo/plugin/client";
 import { copyText, useToast } from "@getpaseo/plugin/client/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { controlRpc, sendRpc, setFollowSettingsRpc, workspaceAboutRpc } from "../shared/contracts";
-import { needsYou } from "../shared/attention";
+import { needsYou, workspaceSnoozed } from "../shared/attention";
 import { snoozeUntil, wakeLabel } from "../shared/inbox";
 import { rowMenu, type LaterChoice, type RowMenuItem } from "../shared/row-menu";
 import type { Workstream } from "../shared/home";
@@ -40,17 +40,33 @@ export function useRowMenu(host: RowMenuHost) {
       const { sources: { inbox, live, paseo }, prefillAsk, overseerOn } = deps().host;
       const row = s.agentId ? inbox.rows().find(r => r.agentId === s.agentId) ?? null : null;
       const w = s.workspaceId ? live.get(s.workspaceId) ?? null : null;
-      return rowMenu({ s, flagged: !!row?.needs, snoozedUntil: row?.needs && row.snooze ? wakeLabel(row.snooze, Date.now()) || null : null, w, needs: w ? needsYou(w) : [], branch: s.workspaceId ? paseo.get(s.workspaceId)?.branch ?? null : null, canAsk: !!prefillAsk && overseerOn });
+      const needs = w ? needsYou(w) : [];
+      // A workspace-only Needs-you row: Home's own row for the workspace, with needs and no agent flag behind it.
+      const wsOnly = !!w && s.key === `ws:${w.id}` && needs.length > 0 && !row?.needs;
+      const wsSnooze = wsOnly && w!.snooze && workspaceSnoozed(w!, needs, Date.now()) ? w!.snooze : null;
+      const workspaceLater = wsOnly ? { snoozedUntil: wsSnooze ? wakeLabel({ until: wsSnooze.until, at: wsSnooze.at }, Date.now()) || null : null } : null;
+      return rowMenu({ s, workspaceLater, flagged: !!row?.needs, snoozedUntil: row?.needs && row.snooze ? wakeLabel(row.snooze, Date.now()) || null : null, w, needs, branch: s.workspaceId ? paseo.get(s.workspaceId)?.branch ?? null : null, canAsk: !!prefillAsk && overseerOn });
     };
     const pick = (s: Workstream, item: RowMenuItem): Promise<boolean> => {
       const { host: { sources: { inbox, live }, openFull, openQuestion, prefillAsk }, send, control, about, setFollow, cache } = deps();
       const after = () => { live.refresh(); inbox.refresh(); };
+      const w0 = (id: string) => id ? live.get(id) ?? null : null;
       const workspaceId = s.workspaceId ?? "";
       const arg = item.arg ?? "";
       switch (item.action) {
         // Later and Sign off: the Undo bar already says it and offers Undo; no toast on top.
         case "later": return runAction({ label: "Later", run: () => inbox.snooze([s.agentId!], snoozeUntil(arg as LaterChoice, new Date())), success: null }, `later:${s.key}`);
         case "bring_back": return runAction({ label: "Bring back now", run: () => inbox.unsnooze([s.agentId!]), success: "Back in Needs you" }, `bring_back:${s.key}`);
+        // Workspace Later: the same Undo bar as an agent's Later; Undo puts back whatever workspace snooze this replaced.
+        case "later_ws": {
+          const prev = w0(workspaceId)?.snooze ?? null;
+          const until = snoozeUntil(arg as LaterChoice, new Date());
+          return runAction({ label: "Later", run: async () => {
+            await control({ workspaceId, snooze: { until } }); after();
+            inbox.noteLater(s.title, until, async () => { await control({ workspaceId, snooze: prev && Date.parse(prev.until) > Date.now() || prev?.until === "next-event" ? { until: prev.until } : null }); after(); });
+          }, success: null }, `later_ws:${workspaceId}`);
+        }
+        case "bring_back_ws": return runAction({ label: "Bring back now", run: async () => { await control({ workspaceId, snooze: null }); after(); }, success: "Back in Needs you" }, `bring_back_ws:${workspaceId}`);
         case "sign_off": return runAction({ label: "Sign off", run: () => inbox.signOff([s.agentId!]), success: null }, `sign_off:${s.key}`);
         case "answer": return runAction({ label: "Answer", run: async () => openQuestion(s, arg), success: null });
         case "send_repairs": return runAction({ label: "Send repairs", run: async () => { const r = await send({ workspaceId, batchId: arg }); after(); return r; },

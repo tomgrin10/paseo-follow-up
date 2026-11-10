@@ -1,5 +1,5 @@
 import { batchView } from "./status";
-import { liveLine, needsYou, prTone, stackOrder, type NeedItem, type PrTone } from "./attention";
+import { liveLine, needsYou, prTone, stackOrder, workspaceSnoozed, type NeedItem, type PrTone } from "./attention";
 import { activity, type Activity } from "./activity";
 import { followUpObligations, recoveryBatch } from "./follow-up";
 import { flagHeadline, HEADLINE_ICON, HEADLINE_TONE, HEADLINE_WORD, workspaceHeadline, withoutBriefQuestions, type Headline, type HeadlineKey, type HeadlineTone } from "./headline";
@@ -142,7 +142,8 @@ const stripSig = ({ sig: _sig, ...s }: Workstream): Omit<Workstream, "sig"> => s
 
 /** The Home group of a tracked workspace without an agent row: the order buildHome uses below. */
 export function trackedGroup(w: Workspace, now: number): HomeGroupId {
-  if (needsYou(w, now).length) return "needs";
+  const items = needsYou(w, now);
+  if (items.length) return workspaceSnoozed(w, items, now) ? "later" : "needs";
   if (fixingBatch(w, now)) return "fixing";
   if (w.runtimeBusy) return "running";
   const state = summary(w, now);
@@ -201,6 +202,11 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
     const items = needsYou(w, now);
     const group = trackedGroup(w, now);
     const h = workspaceHeadline(items);
+    // Later on the workspace's own needs: it waits in Later until its time or a new need.
+    if (group === "later" && h) {
+      out.push(make({ ...base, group: "later", tier: null, icon: "AlarmClock", tone: "muted", word: HEADLINE_WORD[h.key], line: h.line, badges: [], pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
+      continue;
+    }
     if (group === "needs" && h) {
       out.push(make({ ...base, group: "needs", tier: tierOf(h.key), icon: HEADLINE_ICON[h.key], tone: HEADLINE_TONE[h.key], word: HEADLINE_WORD[h.key], line: h.line,
         badges: badges({ headline: h, workspace: w, items }), pr: prChip(w), at: w.updatedAt, readyToArchive: false }));

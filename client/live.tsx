@@ -4,7 +4,7 @@ import type { PluginButtonIconProps, PluginClientContext, PluginSidebarItemProps
 import { Icon, SidebarRow } from "@getpaseo/plugin/client/ui";
 import { listRpc } from "../shared/contracts";
 import type { Workspace } from "../shared/model";
-import { needsYou } from "../shared/attention";
+import { activeNeeds, needsYou } from "../shared/attention";
 import { useSidebarViewActive } from "./inbox";
 import { homeCounts } from "../shared/home";
 import { useHomeModel, type HomeSources } from "./home-data";
@@ -68,7 +68,7 @@ export function useLive<T>(store: LiveStore, select: () => T): T {
 /** The header button's icon: a pull-request glyph with a warning dot while the workspace needs you. */
 export function headerIcon(store: LiveStore) {
   return function HeaderIcon(props: PluginButtonIconProps) {
-    const need = useLive(store, () => { const w = store.get(props.workspaceId); return w ? needsYou(w).length : 0; });
+    const need = useLive(store, () => { const w = store.get(props.workspaceId); return w ? activeNeeds(w).length : 0; });
     return <View style={{ width: props.size, height: props.size }}>
       <Icon name="GitPullRequest" size={props.size} color={props.color} />
       {need > 0 && <View accessibilityLabel={`${need} need you`} style={{ position: "absolute", top: -2, right: -3, width: 7, height: 7, borderRadius: 4, backgroundColor: props.theme.colors.statusWarning, borderWidth: 1.5, borderColor: props.theme.colors.surface0 }} />}

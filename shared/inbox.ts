@@ -268,6 +268,18 @@ export function snoozeUntil(choice: "hour" | "tonight" | "tomorrow" | "next-even
   d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d.toISOString();
 }
 
+/**
+ * The words the snooze tools accept ("1h", "hour", "tonight", "tomorrow", "next-event", "pr:<repo#n>", an ISO time) as
+ * what a snooze stores: an ISO time or a wake word. Null for anything else. A raw "1h" stored as-is never woke.
+ */
+export function resolveUntil(until: string, now: Date): string | null {
+  const u = until.trim().toLowerCase();
+  if (u === "1h" || u === "hour") return snoozeUntil("hour", now);
+  if (u === "tonight" || u === "tomorrow" || u === "next-event") return snoozeUntil(u, now);
+  if (/^pr:[\w.-]+\/[\w.-]+#\d+$/i.test(until.trim())) return until.trim();
+  return /^\d{4}-\d{2}-\d{2}T/.test(until.trim()) && Number.isFinite(Date.parse(until)) ? new Date(until).toISOString() : null;
+}
+
 export function wakeLabel(snooze: Snooze, now: number): string {
   if (snooze.until === "next-event") return "next event";
   if (snooze.until.startsWith("pr:")) return `when #${snooze.until.split("#")[1]} merges`;
