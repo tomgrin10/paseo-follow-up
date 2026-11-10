@@ -1,3 +1,4 @@
+import { BATCH_PREFIX, RECOVERY_TITLE } from "../shared/legacy";
 import { createHash } from "node:crypto";
 import type { Task, Workspace, Batch } from "../shared/model";
 import { settled } from "../shared/model";
@@ -67,14 +68,14 @@ export function needsPrObservations(w: Workspace, batch: Pick<Batch, "tasks">): 
 export function batchPrompt(w: Workspace, batch: Batch): string {
   if (!isRecovery(batch)) {
     const tasks = orderTasks(w, batch.tasks).map((t, i) => `${i + 1}. ${t.title}`).join("\n");
-    return `Follow-through batch ${batch.id}\n\n${tasks}`;
+    return `${BATCH_PREFIX} ${batch.id}\n\n${tasks}`;
   }
   const quote = (text: string) => `'${text.replace(/'/g, `'"'"'`)}'`;
   const bridge = `FOLLOW_THROUGH_CLIENT_ENTRY=${quote(clientEntry())} node ${quote(join(paseoHome, "plugin-data/follow-through/mcp.mjs"))} call <tool> '<json>'`;
   const finish = `Finish with acknowledge_batch(batchId="${batch.id}", outcome="completed", result="..."), or outcome="blocked" with the reason. CLI fallback: ${bridge}`;
   const quiet = "Perform tracker bookkeeping silently: no announcements of sidebar updates, plugin-status commentary, final sidebar recap, or repeated prior answer. Put tracking evidence/results in the tools. Report actual work outcomes or developer decisions/blockers; discuss sidebar status only when explicitly asked.";
   return [
-    `Follow-through recovery ${batch.id}`,
+    `${RECOVERY_TITLE} ${batch.id}`,
     `Workspace: ${w.title}\nMain agent: ${w.mainAgentId}\nEvidence file: ${batch.contextPath}`,
     "Recover workspace PR stacks and remaining work. You are a separate inventory agent; the main agent remains the owner.",
     quiet,

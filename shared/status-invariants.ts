@@ -1,5 +1,6 @@
 import type { Actor } from "./actor";
-import { HOOK_TEXT_PREFIXES } from "./message-sender";
+import { ANY_HOOK_TEXT_PREFIXES } from "./message-sender";
+import { BATCH_PREFIXES, RECOVERY_TITLES } from "./legacy";
 import type { Workspace } from "./model";
 import { answerMessage, duplicateOpenQuestions, isOther, parseAnswerMessage } from "./questions";
 import { shouldReopen, type Brief } from "./brief";
@@ -163,7 +164,8 @@ export function senderViolations(texts: readonly string[]): { id: string; detail
  * batch headers or recovery prompts. A Recent-steps row labelled as Follow-up's own is exempt (pass only unlabelled text).
  */
 export function followUpTextViolations(texts: readonly (string | null | undefined)[]): { id: string; detail: string }[] {
-  const own = (t: string) => HOOK_TEXT_PREFIXES.some(p => t.includes(p)) || /(?:^|\n|: )(?:Workspace follow-through batch|Follow-through batch|Follow-through recovery) /.test(t);
+  const headers = [...BATCH_PREFIXES, ...RECOVERY_TITLES].map(h => h.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  const own = (t: string) => ANY_HOOK_TEXT_PREFIXES.some(p => t.includes(p)) || new RegExp(`(?:^|\\n|: )(?:${headers}) `).test(t);
   return texts.filter((t): t is string => typeof t === "string" && own(t)).map(t => ({ id: "no-follow-up-text-as-work", detail: t.slice(0, 80) }));
 }
 

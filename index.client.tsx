@@ -1,3 +1,4 @@
+import { LEGACY_SETTINGS_SCREEN } from "./shared/legacy";
 import { contributeDisplay } from "./client/display";
 import { withButtonVisibility } from "./client/button-visibility";
 import { openExternalUrl, type PluginClientContext, type PluginButtonRegistration, type PluginScreenProps, type PluginSurfaceProps, type PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
@@ -24,7 +25,7 @@ const OVERVIEW = HOME_SCREEN;
 /** The workspace panel: this workspace only, with a Home button. One id for the side pane and the phone tab (1.2.0-beta.1 retired "follow-through-tab"). */
 const PANEL = "follow-through";
 /** Old settings screen ids, kept only so saved links and restored routes still open the one settings page. */
-const LEGACY_SETTINGS_SCREENS = ["follow-through-settings", "project-settings", "display-settings"];
+const LEGACY_SETTINGS_SCREENS = [LEGACY_SETTINGS_SCREEN, "project-settings", "display-settings"];
 
 export default function contribute(host: PluginClientContext) {
   const visibility = withButtonVisibility(host);
