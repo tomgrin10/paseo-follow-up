@@ -80,13 +80,13 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | PR workflow (Graphite or GitHub), PR actions, reviewers, deployments, Send to Paseo | `server/pr-workflow.ts`, `server/github.ts`, `server/graphite.ts`, `server/pr-actions.ts`, `server/browser-bridge.ts`, `server/reviewer-config.ts`, `server/deployments.ts`, `server/deployment-anchor.ts`, `shared/pr-workflow.ts`, `shared/pr-actions.ts`, `shared/reviewers.ts` | [prs](docs/prs.md) |
 | Agent tools and agent parity | `server/mcp.mjs`, `server/native-tools.ts`, `server/session-mcp.ts`, `server/agent-mcp.ts`, `server/mcp-registrations.ts`, `server/scopes.ts`, `server/agent-actions.ts`, `server/agent-parity.ts`, `shared/actor.ts`, `shared/chat.ts` | [rpcs-and-tools](docs/rpcs-and-tools.md) |
 | Provider hooks | `server/agent-hooks.ts`, `server/agent-hook.mjs` | [hooks](docs/hooks.md) |
-| Wait for background jobs | `server/wait.ts`, `server/wait-jobs.ts`, `server/wait-runner.sh`, `shared/wait.ts` | [wait](docs/wait.md) |
+| Wait for background jobs | `server/wait.ts`, `server/host-features.ts`, `server/wait-jobs.ts`, `server/wait-runner.sh`, `shared/wait.ts` | [wait](docs/wait.md) |
 | Onboarding, release notes and What's new, display settings, trust bypass | `server/onboarding.ts`, `server/release-notes.ts`, `server/trust-bypass.ts`, `shared/onboarding.ts`, `shared/changelog.ts`, `shared/version.ts`, `shared/display.ts`, `shared/settings-nav.ts` | [settings](docs/settings.md) |
 | Self-update (check, install, watchdog, rollback) | `server/updater.ts`, `server/update-registry.ts`, `server/update-provenance.ts`, `server/update-watchdog.mjs`, `server/updates.ts`, `shared/updates.ts`, `shared/update-policy.ts`, `client/updates.tsx` | [updates](docs/updates.md) |
 | Resource governor, never waking agents, worker memory, usage meters | `server/governor.ts`, `server/memory.ts`, `server/agent-load.ts`, `server/usage.ts`, `shared/agent-load.ts`, `shared/resources.ts`, `shared/usage.ts` | [resources](docs/resources.md) |
 | UI | `index.client.tsx`, `client/` | [client](docs/client.md) |
 | Shared copy and errors | `shared/presentation.ts`, `shared/errors.ts` | [client](docs/client.md) |
-| Tests and checks | `tests/`, `scripts/`, `button-visibility.test.mjs` | [testing](docs/testing.md) |
+| Tests, checks and README screenshots | `tests/`, `scripts/`, `scripts/screenshots.mjs`, `button-visibility.test.mjs` | [testing](docs/testing.md) |
 | Releases | `changes/`, `CHANGELOG.md`, `scripts/release-notes.mjs`, `.github/workflows/` | [releasing](docs/releasing.md) |
 
 ## Invariants
@@ -172,6 +172,7 @@ See [docs/releasing.md](docs/releasing.md). In short:
 - The orchestrator (Tom, or the coordinating agent he runs releases from), not the feature PR, runs
   `npm run release:notes <version>`, then bumps the version in the same release commit, tags `vX.Y.Z`, and lets the
   npm workflow publish. Versions with a prerelease part (`1.4.0-beta.24`) publish under the `beta` dist-tag.
+  Betas get no notes. A major's rc (`2.0.0-rc.0`) carries the major's section, `## 2.0.0`.
 - Don't bump the version in a feature PR.
 
 ## Common pitfalls

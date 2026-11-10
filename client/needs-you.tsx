@@ -11,6 +11,7 @@ import type { Workspace } from "../shared/model";
 import { Button, Card, CardRow, errorText, text, type Theme } from "./kit";
 import { withAlpha, type Colors } from "./theme";
 import { meanwhile } from "./questions";
+import { usePendingAnswer } from "./pending-answers";
 import { useReviewerSettings } from "./reviewers";
 
 import { overviewKey, workspaceKey } from "./keys";
@@ -136,9 +137,10 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
 
 function QuestionState({ workspace: w, questionId, theme }: { workspace: Workspace; questionId: string; theme: Theme }) {
   const c = theme.colors;
+  const pending = usePendingAnswer(w.id, questionId);
   const q = w.questions.find(x => x.id === questionId);
   if (!q) return null;
-  const state = meanwhile(w, q);
+  const state = meanwhile(w, q, pending);
   return <View style={{ flexDirection: "row", gap: 5 }}>
     <View style={{ paddingTop: 2 }}><Icon name={state.icon} size={11} color={state.color(c)} /></View>
     <Text numberOfLines={4} style={[text(c).small, { flex: 1, color: state.color(c) }]}>{state.text}</Text>

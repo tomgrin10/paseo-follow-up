@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { LEGACY_BASELINE, notesSince, parseChangelog, whatsNew } from "../shared/changelog";
+import { LEGACY_BASELINE, announcesUpdate, notesSince, notesVersion, parseChangelog, recentNotes, recentUpdate, whatsNew } from "../shared/changelog";
 // @ts-expect-error plain ESM script without types
 import { fragmentBullets, lintBullet } from "../scripts/release-notes.mjs";
 
@@ -106,4 +106,56 @@ test("release notes script: lints style; a stable release moves fragments under 
   await run("1.1.1", "--allow-empty", "--date", "2026-11-10");
   assert.match(await readFile(join(dir, "CHANGELOG.md"), "utf8"), /## 1\.1\.1 \(2026-11-10\)\n\n- Small fixes and improvements\./);
   assert.equal(await readFile(join(dir, "changes/README.md"), "utf8"), "kept");
+});
+
+test("release notes script: an rc of a major writes the major's section, consumes fragments, and the final release reuses it", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "notes-rc-"));
+  await mkdir(join(dir, "scripts")); await mkdir(join(dir, "changes"));
+  await cp("scripts/release-notes.mjs", join(dir, "scripts/release-notes.mjs"));
+  const pkg = (version: string) => writeFile(join(dir, "package.json"), JSON.stringify({ version, files: ["CHANGELOG.md"] }));
+  const run = (...a: string[]) => exec("node", [join(dir, "scripts/release-notes.mjs"), ...a]);
+  const changelog = () => readFile(join(dir, "CHANGELOG.md"), "utf8");
+  await writeFile(join(dir, "CHANGELOG.md"), "# Release notes\n\n## 1.0.1 (2026-01-02)\n\n- Old.\n");
+  await writeFile(join(dir, "changes/a.md"), "- Beta work.\n");
+  // Betas stay note-less, even betas of the next major.
+  await run("2.0.0-beta.3", "--date", "2026-11-10");
+  assert.doesNotMatch(await changelog(), /2\.0\.0/);
+  await pkg("2.0.0-beta.3"); await run("--check");
+  // The rc needs the major's section.
+  await pkg("2.0.0-rc.0");
+  await assert.rejects(run("--check"), /no section for 2\.0\.0, which package\.json's 2\.0\.0-rc\.0 carries/);
+  assert.match((await run("2.0.0-rc.0", "--date", "2026-11-11")).stdout, /CHANGELOG\.md: 2\.0\.0 \(2026-11-11\), 1 note/);
+  assert.equal(await changelog(), "# Release notes\n\n## 2.0.0 (2026-11-11)\n\n- Beta work.\n\n## 1.0.1 (2026-01-02)\n\n- Old.\n", "## 2.0.0, not ## 2.0.0-rc.0");
+  assert.deepEqual(await readdir(join(dir, "changes")), [], "fragments consumed");
+  await run("--check");
+  // A later rc adds new fragments to the same section; --curated drops them because the section already covers them.
+  await writeFile(join(dir, "changes/b.md"), "- Rc fix.\n");
+  await run("2.0.0-rc.1"); assert.match(await changelog(), /- Beta work\.\n- Rc fix\.\n\n## 1\.0\.1/);
+  await writeFile(join(dir, "changes/c.md"), "- Folded in by hand.\n");
+  await run("2.0.0-rc.2", "--curated");
+  assert.doesNotMatch(await changelog(), /Folded in/); assert.deepEqual(await readdir(join(dir, "changes")), []);
+  // The stable release carries the same section: nothing new to write, and --check passes.
+  await run("2.0.0"); await pkg("2.0.0"); await run("--check");
+  assert.equal((await changelog()).match(/^## 2\.0\.0/gm)?.length, 1);
+});
+
+test("changelog: a <details> archive below the notes never reaches What's new; image lines are skipped", () => {
+  const text = "# R\n\n## 2.0.0 (2026-11-11)\n\n![Home](https://example.com/home.png)\n\n- Home.\n\n<details><summary>1.1-1.4 betas</summary>\n\n## 1.4.0-beta.2 (2026-11-09)\n\n- Old beta.\n\n</details>\n";
+  assert.deepEqual(parseChangelog(text), [{ version: "2.0.0", date: "2026-11-11", items: ["Home."] }]);
+});
+
+test("what's new: 1.x to 2.0.0-rc.0 shows 2.0's notes once; later rcs and 2.0.0 itself don't pop again", () => {
+  const majors = parseChangelog("## 2.0.0 (2026-11-11)\n\n- Two.\n\n## 1.0.1 (2026-01-02)\n\n- Old.\n");
+  const at = (installed: string, seen: string) => whatsNew({ installed, deviceSeen: seen, previous: null, onboarding: false, notes: majors });
+  const first = at("2.0.0-rc.0", "1.4.0-beta.32");
+  assert.ok(first.show && first.notes.map(n => n.version).join() === "2.0.0", "the rc carries 2.0.0's section, and only it");
+  assert.ok(at("2.0.0-rc.0", "1.0.1").show, "from the last stable too");
+  assert.deepEqual(at("2.0.0-rc.1", "2.0.0-rc.0"), { show: false, reason: "not-major", record: "2.0.0-rc.1" });
+  assert.deepEqual(at("2.0.0", "2.0.0-rc.1"), { show: false, reason: "not-major", record: "2.0.0" }, "the final 2.0.0 doesn't pop again");
+  assert.ok(at("2.0.0", "1.4.0-beta.32").show, "but someone skipping the rc still sees 2.0 once");
+  assert.deepEqual(at("2.0.0-beta.1", "1.4.0-beta.32"), { show: false, reason: "not-major", record: "2.0.0-beta.1" }, "a beta of 2.0 is still 1.x");
+  assert.equal(notesVersion("2.0.0-rc.3"), "2.0.0"); assert.equal(notesVersion("2.0.0-beta.1"), "2.0.0-beta.1"); assert.equal(notesVersion("2.1.0-rc.0"), "2.1.0-rc.0");
+  assert.equal(announcesUpdate("2.0.0-rc.0", "2.0.0"), false); assert.equal(announcesUpdate("1.4.0-beta.32", "2.0.0-rc.0"), true);
+  assert.deepEqual(recentNotes({ version: "2.0.0-rc.0", previous: "2.0.0-rc.0", notes: majors }).map(n => n.version), ["2.0.0"], "opened by hand, the rc shows 2.0's notes");
+  assert.equal(recentUpdate({ version: "2.0.0-rc.0", previous: "1.4.0-beta.32", updatedAt: 1, notes: majors }, 2), true, "Home's Updated to 2.0.0-rc.0 · What's new line");
 });

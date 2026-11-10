@@ -22,7 +22,7 @@ agents and anything without `PASEO_AGENT_ID`.
 
 | Event | Effect |
 | --- | --- |
-| SessionStart | Adds Follow-up's instructions for tracked agents (worded for the agent's PR workflow, contributor or main), the native tools' guidance (`nativeExtras`, since native tools carry no MCP instructions), and Wait's guidance (`waitExtras`, when `FOLLOW_THROUGH_WAIT=1`). Untracked Claude sessions with Wait get only Wait's guidance. |
+| SessionStart | Adds Follow-up's instructions for tracked agents (worded for the agent's PR workflow, contributor or main), the native tools' guidance (`nativeExtras`, since native tools carry no MCP instructions), and Wait's guidance (`waitExtras`: `waitInstruction` when `FOLLOW_THROUGH_WAIT=1`, or on Paseo 0.16 `backgroundWorkInstruction` when `FOLLOW_THROUGH_BACKGROUND_WORK=1`). Untracked Claude sessions with Wait get only Wait's guidance. |
 | UserPromptSubmit | Starts a turn marker. Repeats the context when it changed (Codex always repeats). Tells a demoted agent once that it lost the main role. For the Overseer, injects the digest. |
 | PostToolUse | Marks the turn dirty after shell or edit tools. Says once per session that native tools are detached after a reload. |
 | Stop | Blocks the stop once if a dirty turn didn't `sync_workspace` (read from `hook-state/sync-<agent>.json`, written by the RPC handler, so any tool spelling counts), or if a root Claude session didn't call `needs_you` (`shouldNudge`). Never blocks twice in one turn, or while background tasks run. |
@@ -39,6 +39,7 @@ The worker sets these at `agent.session_open`:
 - `FOLLOW_THROUGH_RECOVERY`.
 - `FOLLOW_THROUGH_CLI`: the bridge path.
 - `FOLLOW_THROUGH_WAIT`.
+- `FOLLOW_THROUGH_BACKGROUND_WORK` (Paseo 0.16, instead of `FOLLOW_THROUGH_WAIT`).
 
 Tests: `tests/agent-hooks.test.ts` and `tests/hook-native.test.ts` (the hook is imported with
 `FOLLOW_THROUGH_HOOK_IMPORT=1`, so `main()` doesn't run), plus `tests/session-mcp.test.ts`.
