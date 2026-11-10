@@ -65,8 +65,10 @@ export function LinkedChip({ model, theme, compact, onPress }: { model: LinkedCh
   const c = theme.colors;
   const mark = compact ? 14 : 12;
   const count = { color: c.foreground, fontSize: 12, lineHeight: 16, fontWeight: "600" as const, fontVariant: ["tabular-nums" as const] };
-  return <Pressable accessibilityRole="button" accessibilityLabel={model.label} onPress={onPress} hitSlop={compact ? 4 : 6}
-    {...(Platform.OS === "web" ? { title: model.tooltip } as object : {})}
+  // The desktop tooltip: React Native Web drops `title` on a Pressable, so it goes on the DOM node itself.
+  const ref = useRef<View | null>(null);
+  useEffect(() => { if (Platform.OS === "web") (ref.current as unknown as { setAttribute?: (k: string, v: string) => void } | null)?.setAttribute?.("title", model.tooltip); }, [model.tooltip]);
+  return <Pressable ref={ref} accessibilityRole="button" accessibilityLabel={model.label} onPress={onPress} hitSlop={compact ? 4 : 6}
     style={state => ({ flexDirection: "row", alignItems: "center", gap: 8, minHeight: compact ? 36 : 24, paddingHorizontal: compact ? 10 : 8, borderRadius: 999, borderWidth: 1, borderColor: c.border,
       backgroundColor: state.pressed ? c.surface2 : hovered(state) ? c.surface1 : "transparent" })}>
     {model.parts.map(p => <View key={p.kind} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
@@ -123,7 +125,7 @@ export function LinkedItemsRow({ workspace: w, theme, compact }: { workspace: Wo
         <Text style={t.label}>Linked items</Text>
         <Text numberOfLines={2} style={t.meta}>{line}</Text>
       </View>
-      <Button theme={theme} compact={compact} kind={model ? "secondary" : "ghost"} icon={model ? "List" : "Plus"} title={model ? "Open" : "Add"}
+      <Button theme={theme} compact={compact} icon={model ? "List" : "Plus"} title={model ? "Open" : "Add"}
         accessibilityLabel={model ? "Open linked items" : "Add a linked item"} onPress={sheets.open} />
     </View>
     {sheets.element}
@@ -146,6 +148,7 @@ export function LinkedSheet({ workspace: w, theme, compact, open, onClose, onEdi
   const [menu, setMenu] = useState<string | null>(null);
   const [removed, setRemoved] = useState<Removed | null>(null);
   const field = useRef<NativeTextInput | null>(null);
+  const [focused, setFocused] = useState(false);
   useEffect(() => { if (open) { setFilter(""); setError(null); setNote(null); setMenu(null); setRemoved(null); } }, [open]);
   useEffect(() => { if (!removed) return; const id = setTimeout(() => setRemoved(null), 6000); return () => clearTimeout(id); }, [removed]);
   // Desktop focuses the field; phones don't, so the keyboard doesn't cover the list.
@@ -177,10 +180,10 @@ export function LinkedSheet({ workspace: w, theme, compact, open, onClose, onEdi
     <Modal.Content contentContainerStyle={{ paddingHorizontal: 0, paddingTop: compact ? 4 : 8, paddingBottom: compact ? 16 : 20, gap: 0 }}>
       <View style={{ paddingHorizontal: gutter, paddingBottom: 10, gap: 6 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: compact ? 44 : 34, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1,
-          borderColor: error ? c.statusDanger : c.border, backgroundColor: c.surface1 }}>
+          borderColor: error ? c.statusDanger : focused ? c.foregroundMuted : c.border, backgroundColor: c.surface1 }}>
           <Icon name="Search" size={compact ? 16 : 14} color={c.foregroundMuted} />
           <TextInput ref={field} accessibilityLabel="Filter, or paste a link or key" placeholder="Filter, or paste a link or key" placeholderTextColor={c.foregroundMuted}
-            value={filter} onChangeText={v => { setFilter(v); setError(null); }} onSubmitEditing={add} autoCapitalize="none" autoCorrect={false} returnKeyType={paste?.action === "add" ? "done" : "search"}
+            value={filter} onChangeText={v => { setFilter(v); setError(null); }} onSubmitEditing={add} blurOnSubmit={false} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} autoCapitalize="none" autoCorrect={false} returnKeyType={paste?.action === "add" ? "done" : "search"}
             style={[t.body, { flex: 1, minWidth: 0, paddingVertical: 6, ...(Platform.OS === "web" ? { outlineStyle: "none" } as object : null) }]} />
           {!!filter && <IconButton theme={theme} compact={false} icon="X" label="Clear" onPress={() => { setFilter(""); setError(null); field.current?.focus(); }} />}
         </View>
@@ -188,6 +191,14 @@ export function LinkedSheet({ workspace: w, theme, compact, open, onClose, onEdi
         {note && <Text accessibilityLiveRegion="polite" style={t.meta}>{note}</Text>}
       </View>
 
+      {/* Host toasts can't carry an action, so Undo lives in the sheet for 6 s, like Home's undo bar,
+          right under the field so it's on screen however far the list scrolled. */}
+      {removed && <View accessibilityLiveRegion="polite" style={{ flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: gutter, marginBottom: 10, paddingLeft: 12, paddingRight: 4, paddingVertical: 4,
+        borderRadius: 8, backgroundColor: c.surface2 }}>
+        <Text numberOfLines={1} style={[t.meta, { flex: 1, color: c.foreground }]}>Removed {removed.label}</Text>
+        <Button theme={theme} compact={compact} kind="ghost" icon="Undo2" title="Undo" accessibilityLabel={`Undo: link ${removed.label} again`} disabled={run.isPending}
+          onPress={() => run.mutate({ action: "undo", ref: removed.key, label: removed.label })} />
+      </View>}
       {paste?.action === "add" && <Pressable accessibilityRole="button" accessibilityLabel={`Add ${paste.label}`} accessibilityHint="Adds it to this workspace's linked items" disabled={run.isPending} onPress={add}
         style={state => ({ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: gutter, paddingVertical: sp.rowV, minHeight: sp.row, borderTopWidth: 1, borderBottomWidth: 1, borderColor: c.border,
           backgroundColor: state.pressed ? c.surface2 : hovered(state) ? c.surface2 : c.surface1 })}>
@@ -222,13 +233,6 @@ export function LinkedSheet({ workspace: w, theme, compact, open, onClose, onEdi
         </>}
       </View>)}
 
-      {/* Host toasts can't carry an action, so Undo lives in the sheet for 6 s, like Home's undo bar. */}
-      {removed && <View accessibilityLiveRegion="polite" style={{ flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: gutter, marginTop: 14, paddingLeft: 12, paddingRight: 4, paddingVertical: 4,
-        borderRadius: 8, backgroundColor: c.surface2 }}>
-        <Text numberOfLines={1} style={[t.meta, { flex: 1, color: c.foreground }]}>Removed {removed.label}</Text>
-        <Button theme={theme} compact={compact} kind="ghost" icon="Undo2" title="Undo" accessibilityLabel={`Undo: link ${removed.label} again`} disabled={run.isPending}
-          onPress={() => run.mutate({ action: "undo", ref: removed.key, label: removed.label })} />
-      </View>}
     </Modal.Content>
   </Modal>;
 }
