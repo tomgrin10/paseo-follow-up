@@ -14,6 +14,7 @@ import { WaitJobs } from "../server/wait-jobs";
 import { moveView, moveLine } from "../shared/plugin-move";
 import { PluginMove } from "../server/plugin-move";
 import { runMove } from "../server/update-watchdog.mjs";
+import { readEvents, historyOf } from "../server/updater";
 
 /**
  * What 1.x left behind keeps working in 2.0. Every 1.x spelling here comes from shared/legacy.ts, the one module that
@@ -147,6 +148,26 @@ test("data move: after a rollback to 1.x, a later 2.0 copies 1.x's newer data ag
   assert.ok(again.replaced && existsSync(join(again.replaced, "state.json")), "the stale copy is kept");
   assert.deepEqual(JSON.parse(await readFile(join(directory, "state.json"), "utf8")).workspaces.map((w: { id: string }) => w.id), ["w1", "w2"]);
   assert.equal(moveData(home, { waitMs: 0 }).status, "present", "then it settles");
+});
+
+test("update history: what 1.x's installer logged after the copy (the update to 2.0 passing) is 2.0's history too", async t => {
+  const home = await oldHome(t);
+  const { directory, legacy: old } = dataDirs(home);
+  const line = (e: object) => `${JSON.stringify(e)}\n`;
+  const before = { at: Date.now() - 60_000, from: "1.4.0", to: "2.0.0-rc.0", event: "rolled-back", reason: "broken" };
+  const installing = { at: Date.now() - 1_000, from: "1.4.0", to: "2.0.0", event: "installing" };
+  await writeFile(join(old, "updates.jsonl"), line(before) + line(installing));
+  moveData(home, { waitMs: 0 });
+  // 2.0's first start copied the directory; 1.x's installer then finishes its probation in the old one.
+  const updated = { at: Date.now() + 1_000, from: "1.4.0", to: "2.0.0", event: "updated" };
+  const { appendFile } = await import("node:fs/promises");
+  await appendFile(join(old, "updates.jsonl"), line(updated));
+  const events = await readEvents(directory);
+  assert.deepEqual(events.map(e => e.event), ["rolled-back", "installing", "updated"], "each event once, in order");
+  assert.equal(historyOf(events)[0].result, "updated", "the latest result is the update, not the earlier rollback");
+  const fresh = await mkdtemp(join(tmpdir(), "follow-legacy-events-")); t.after(() => rm(fresh, { recursive: true, force: true }));
+  await writeFile(join(fresh, "updates.jsonl"), line(updated));
+  assert.deepEqual((await readEvents(fresh)).map(e => e.event), ["updated"], "no marker: only its own file");
 });
 
 test("data move: a fresh install has nothing to move", async t => {
