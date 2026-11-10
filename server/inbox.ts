@@ -430,7 +430,7 @@ export class Inbox {
    * The developer clicked an option or a move on the brief. Validated against the stored brief (a stale card is refused),
    * logged in the ledger as the developer's (so the classifier clears the flag, #11), then sent, then collapsed.
    */
-  async briefAction(agentId: string, input: { briefId: string; decisionId?: string; choice?: string; words?: string; choices?: { decisionId: string; choice: string; words?: string }[]; move?: "retry" }, send: (text: string, messageId: string) => Promise<void>): Promise<Brief> {
+  async briefAction(agentId: string, input: { briefId: string; decisionId?: string; choice?: string; words?: string; choices?: { decisionId: string; choice: string; words?: string }[]; move?: "retry" | "done" }, send: (text: string, messageId: string) => Promise<void>): Promise<Brief> {
     const state = await this.store.snapshot();
     const b = state.entries[agentId]?.brief;
     if (!b || b.id !== input.briefId) throw new Error("This brief was replaced by a newer one. Read the newest card.");
@@ -439,6 +439,9 @@ export class Inbox {
     if (input.move === "retry") {
       if (b.kind !== "error") throw new Error("Only a failed turn can be retried from its brief.");
       text = "Retry the turn that failed. Pick up from the last step that finished."; event = { type: "message", text: null };
+    } else if (input.move === "done") {
+      if (b.kind !== "action") throw new Error("Only an Action brief can be marked done. Answer a decision with its options.");
+      text = `Done: ${b.ask}`; event = { type: "done" };
     } else if (input.choices) {
       // A multi-decision card sends every pick in one message; at least one, each a real option of its decision.
       const picks: Record<string, string> = {}; const words: Record<string, string> = {};

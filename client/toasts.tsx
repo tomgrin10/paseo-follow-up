@@ -13,7 +13,7 @@ import type { Theme } from "./kit";
  * Toasts appear without motion (nothing to reduce) and never take focus.
  */
 
-export { pushToast, dismissToast, runAction, openQuestion, useQuestionOpener, hasToastHost } from "./toast-store";
+export { pushToast, dismissToast, runAction, runUndoable, openQuestion, useQuestionOpener, hasToastHost } from "./toast-store";
 import { dismissToast, emit, holdToast, hosts, subscribe, toastsNow, type ToastItem } from "./toast-store";
 let nextHost = 1;
 

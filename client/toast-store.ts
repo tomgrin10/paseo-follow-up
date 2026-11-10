@@ -128,6 +128,20 @@ export async function runAction<T>(opts: ActionSpec<T>, key?: string): Promise<b
   } finally { if (key !== undefined) inflight.delete(key); }
 }
 
+/**
+ * A quick action whose message can't be taken back once sent (Done on an Action brief): the toast says `message` with
+ * Undo, and the work starts only when the toast's window ends. Undo inside the window cancels it and nothing is sent;
+ * a reload inside it also sends nothing, which is the safe side. With no ToastHost there is no Undo to show, so the
+ * work runs at once and the host toast confirms with `success`.
+ */
+export function runUndoable<T>(message: string, opts: ActionSpec<T>, onUndo: () => void, key?: string): void {
+  if (!hasToastHost()) { void runAction(opts, key); return; }
+  let undone = false;
+  pushToast("success", message, [{ label: "Undo", onPress: () => { undone = true; onUndo(); } }]);
+  // After the send, the collapsed card is the confirmation: no second toast. A failure still reports with Retry.
+  setTimeout(() => { if (!undone) void runAction({ ...opts, success: null }, key); }, DURATION_MS);
+}
+
 // ---------- Open: a toast's way back to the question it is about ----------
 
 const openers = new Map<string, ((questionId: string) => void)[]>();

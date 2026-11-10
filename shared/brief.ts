@@ -28,7 +28,7 @@ export const briefDecisionSchema = z.object({
 });
 export const briefFactSchema = z.object({ icon: z.string(), label: z.string(), tone: z.enum(["ok", "warn", "bad", "muted"]).default("muted") });
 export const briefLinkSchema = z.object({ label: z.string(), url: z.string().nullable().default(null), path: z.string().nullable().default(null), pr: z.string().nullable().default(null) });
-export const MOVES = ["merge", "open_pr", "sign_off_next", "retry", "copy_error", "open_subagent", "add_reviewers"] as const;
+export const MOVES = ["merge", "open_pr", "sign_off_next", "retry", "copy_error", "open_subagent", "add_reviewers", "done"] as const;
 export const briefMoveSchema = z.object({ kind: z.enum(MOVES), label: z.string(), prKey: z.string().nullable().default(null), url: z.string().nullable().default(null), agentId: z.string().nullable().default(null) });
 
 /** Stored on the inbox entry (additive; the store's `version` stays 1) and appended as the timeline row's data. */
@@ -221,6 +221,8 @@ export function pickBrief(s: BriefSources): BriefContent {
     const facts = (pr?.facts ?? []).slice(0, 3);
     const moves: BriefMove[] = a.kind === "done" ? []
       : a.kind === "review" && pr ? [...(pr.mergeable ? [move("merge", `Squash & merge #${pr.number}`, { prKey: pr.key })] : []), ...(pr.url ? [move("open_pr", "Open PR", { url: pr.url, prKey: pr.key })] : [])]
+      // An Action is something the developer does elsewhere; Done tells the agent in one tap ("Done: <ask>").
+      : a.kind === "action" ? [move("done", "Done")]
       : [];
     return { ...base, ...a, source: "agent", slim: false, facts, factsPr: facts.length ? pr!.key : null, moves,
       sourceLine: facts.length ? "Stated by the agent. PR, CI and review state from Follow-up." : AGENT_LINE };
@@ -329,6 +331,8 @@ export type BriefEvent =
   /** Several decisions answered together (1.4.0): every pick at once; the rest were skipped on purpose. */
   | { type: "options"; picks: { decisionId: string; choice: string; words?: string }[] }
   | { type: "sign_off" }
+  /** The developer did an Action brief's ask and said so with Done; the server already sent "Done: <ask>". */
+  | { type: "done" }
   | { type: "undo" }
   | { type: "permission_resolved" }
   /** A PR's new state: lands only on the open brief whose facts are about that PR. */
@@ -391,6 +395,9 @@ export function briefStep(prev: Brief | null, event: BriefEvent, now: string): {
       const b = { ...collapse(prev, "answered", answeredOutcome(decisions)), decisions };
       return { brief: b, appends: [b] };
     }
+    case "done":
+      if (prev?.state !== "open" || prev.kind !== "action") return keep;
+      { const b = collapse(prev, "answered", "Done"); return { brief: b, appends: [b] }; }
     case "sign_off":
       if (prev?.state !== "open") return keep;
       { const b = collapse(prev, "signed", "Signed off"); return { brief: b, appends: [b] }; }
