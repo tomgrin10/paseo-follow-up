@@ -9,7 +9,8 @@ Paseo 0.16 advertises `features.agentBackgroundWork`: it tracks an agent's backg
 Stop, and wakes the agent when one finishes, at no model cost while it waits. On such a host Wait attaches no tools
 and doesn't set `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0`. It sets `FOLLOW_THROUGH_BACKGROUND_WORK=1` instead, and the
 SessionStart hook gives `backgroundWorkInstruction` (`server/mcp.mjs`): run it with `run_in_background=true`, end
-the turn, confirm the exit code when woken. Settings shows why (reason `host`). The same switch, labels and
+the turn, confirm the exit code when woken. Settings → Agents → Background jobs says so first (reason `host`, shown with the switch on or off), and the switch
+reads "Use Paseo background jobs": it only adds that guidance to new sessions. The same switch, labels and
 standalone check still apply. Everything below is Paseo 0.15. Delete Wait when Follow-up requires 0.16.
 
 - `server/host-features.ts`: `hostFeature` reads the daemon's `server_info.features` once and keeps the first real

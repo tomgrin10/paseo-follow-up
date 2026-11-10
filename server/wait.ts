@@ -46,7 +46,7 @@ function hostServesTools(config: WaitPaseoConfig | null): boolean {
 /** What Settings → Agents shows: the switch, and why Wait is off when it is on. */
 export function waitStatus(enabled: boolean, config: WaitPaseoConfig | null, hostBackgroundWork = false): WaitStatus {
   const reason = !enabled ? "off" : standaloneWaitInstalled(config) ? "standalone" : hostBackgroundWork ? "host" : !hostServesTools(config) ? "no-agent-tools" : null;
-  return { enable_wait: enabled, active: reason === null, reason };
+  return { enable_wait: enabled, active: reason === null, reason, ...(hostBackgroundWork ? { host: true } : {}) };
 }
 
 const json = (value: unknown) => ({ text: JSON.stringify(value), structuredContent: value });
