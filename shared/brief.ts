@@ -76,16 +76,20 @@ export const NEEDS_YOU_KINDS = ["decision", "action", "review", "done"] as const
 export type NeedsYouCall = {
   ask: string; kind: typeof NEEDS_YOU_KINDS[number];
   decisions?: { question: string; options?: { label: string; consequence?: string }[]; recommend?: number }[];
+  /** Open questions (Q18) this ask is about, instead of restating them as decisions. */
+  questions?: string[];
   context?: string;
   links?: { label: string; url?: string; path?: string; pr?: string }[];
 };
 /** What the bridge records after a valid call; the turn end reads the newest one for the turn. */
-export type NeedsYouRecord = { at: number; turnId: string | null; call: NeedsYouCall; questionIds?: string[] };
+export type NeedsYouRecord = { at: number; turnId: string | null; call: NeedsYouCall; questionIds?: string[];
+  /** The questions this call created (the rest it pointed at or matched). Only these are replaced by a later call in the same turn. */
+  createdIds?: string[] };
 
 /** The exact instruction appended to Follow-up's MCP instructions for root agents (design §7.2). */
-export const NEEDS_YOU_INSTRUCTION = "When you end a turn, call `needs_you` once, just before your final reply, with what the developer has to do next: a decision (give 2–3 options, what each means for them, and the one you recommend), an action only they can take (merge, approve, log in, run or send something), or kind=done (\"Nothing needed\" plus what you finished, in one line), which means there is nothing for the developer and won't flag you in their inbox. Keep `ask` to one line and `context` to what they need to decide. Don't repeat your report there; still write your normal reply. Don't call it while a permission prompt is waiting or while you're still working.";
+export const NEEDS_YOU_INSTRUCTION = "When you end a turn, call `needs_you` once, just before your final reply, with what the developer has to do next: a decision (give 2–3 options, what each means for them, and the one you recommend), an action only they can take (merge, approve, log in, run or send something), or kind=done (\"Nothing needed\" plus what you finished, in one line), which means there is nothing for the developer and won't flag you in their inbox. A decision that is already an open question (you asked it with ask_question, or it is still open from an earlier turn) is never restated: point at it with questions=[\"Q18\"], or say \"Still open: Q18 …\" in ask. Keep `ask` to one line and `context` to what they need to decide. Don't repeat your report there; still write your normal reply. Don't call it while a permission prompt is waiting or while you're still working.";
 /** The Stop-hook nudge's reason (R2). Short, because it lands in the agent's context. */
-export const NEEDS_YOU_NUDGE = "Before you stop, call needs_you once with what the developer has to do next: a decision with options, an action only they can take, or kind=done (\"Nothing needed\" plus what you finished), which means nothing for the developer and won't flag you. Then stop; don't repeat your reply.";
+export const NEEDS_YOU_NUDGE = "Before you stop, call needs_you once with what the developer has to do next: a decision with options (or questions=[\"Q18\"] for one that is already an open question), an action only they can take, or kind=done (\"Nothing needed\" plus what you finished), which means nothing for the developer and won't flag you. Then stop; don't repeat your reply.";
 
 /**
  * Validates a needs_you call the way ask_question is validated (§7.1). Throws with a message the agent can act on.
@@ -98,7 +102,10 @@ export function validateNeedsYou(input: NeedsYouCall, resolvePr: (ref: string) =
   if (!NEEDS_YOU_KINDS.includes(input.kind)) throw new Error(`kind must be one of ${NEEDS_YOU_KINDS.join(", ")}.`);
   const decisions = input.decisions ?? [];
   if (decisions.length && input.kind !== "decision") throw new Error("decisions are only for kind \"decision\".");
-  if (decisions.length > 3) throw new Error("Give at most 3 decisions; anything bigger belongs in the chat.");
+  const questions = input.questions ?? [];
+  if (questions.length && input.kind !== "decision") throw new Error("questions are only for kind \"decision\".");
+  for (const id of questions) if (!/^Q\d+$/.test(id)) throw new Error(`questions lists open question ids like "Q18", not ${JSON.stringify(id)}.`);
+  if (decisions.length + new Set(questions).size > 3) throw new Error("Give at most 3 decisions and questions together; anything bigger belongs in the chat.");
   for (const [i, d] of decisions.entries()) {
     if (!d.question?.trim() || d.question.length > 200) throw new Error(`decisions[${i}].question needs 1–200 characters.`);
     const options = d.options ?? [];
@@ -121,7 +128,7 @@ export function validateNeedsYou(input: NeedsYouCall, resolvePr: (ref: string) =
     if (l.url !== undefined && !/^https?:\/\//i.test(l.url)) throw new Error(`links[${i}].url must be an http(s) link.`);
     return l.pr !== undefined ? { ...l, pr: resolvePr(l.pr) } : l;
   });
-  return { ask, kind: input.kind, ...(decisions.length ? { decisions } : {}), ...(input.context?.trim() ? { context: input.context.trim() } : {}), ...(checked.length ? { links: checked } : {}) };
+  return { ask, kind: input.kind, ...(decisions.length ? { decisions } : {}), ...(questions.length ? { questions: [...new Set(questions)] } : {}), ...(input.context?.trim() ? { context: input.context.trim() } : {}), ...(checked.length ? { links: checked } : {}) };
 }
 
 // ---------- sources and precedence (§5) ----------
