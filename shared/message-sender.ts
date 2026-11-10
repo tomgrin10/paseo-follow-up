@@ -82,7 +82,7 @@ function envelopeAt(text: string): { attrs: Map<string, string>; body: string; e
 }
 
 /** A finish notification's useful part: the child's reply inside `<agent-response>`, else the status line. */
-function notificationText(body: string): string {
+export function notificationText(body: string): string {
   const reply = /<agent-response>\n?([\s\S]*?)\n?<\/agent-response>/.exec(body)?.[1]?.trim();
   if (reply) return reply;
   return body.replace(/<permission-request>[\s\S]*?<\/permission-request>/g, "").trim();

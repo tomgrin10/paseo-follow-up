@@ -46,7 +46,7 @@ try {
   await client.sendMessage(agent.id, "Fixture: chat — fix the CSV export", { messageId: "fixture-chat" });
   for (let i = 0; i < 80; i++) {
     const history = await client.fetchAgentTimeline(agent.id, { projection: "canonical", limit: 100 });
-    if (history.entries.some(e => /sidebar sync is done/.test(e.item.text ?? ""))) break;
+    if (history.entries.some(e => /Ship it after CI is green/.test(e.item.text ?? ""))) { await new Promise(r => setTimeout(r, 2000)); break; }
     if (i === 79) throw new Error(`the fixture turn was not recorded: ${JSON.stringify(history.entries.map(e => e.item)).slice(0, 1500)}`);
     await new Promise(r => setTimeout(r, 250));
   }

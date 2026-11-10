@@ -75,6 +75,8 @@ test("Recent steps (live timeline and transcripts): no raw envelope, only the de
   assert.deepEqual(tailSteps([user(SCHEDULE)]), [], "schedule fires aren't steps");
   // Paseo 0.15+ projects an agent's message to an agent_message tool call: same row, not a tool line.
   assert.deepEqual(tailSteps([{ type: "tool_call", name: "agent_message", agentMessage: { event: "message", sender: { id: "x", title: "Release captain" }, text: "hi" } } as never]), [{ kind: "message", from: "From Release captain", text: "hi" }]);
+  // Its projected finish notification (as Paseo 0.15.4 records it) keeps the <agent-response> wrapper: shown stripped.
+  assert.deepEqual(tailSteps([{ type: "tool_call", name: "agent_message", agentMessage: { event: "finished", sender: { id: "c", title: "Test runner" }, text: "Agent c (Test runner) finished.\n\n<agent-response>\nAll 42 pass.\n</agent-response>" } } as never]), [{ kind: "message", from: "Test runner finished", text: "All 42 pass." }]);
 });
 
 test("Summary inputs and discovery's goal: only the developer's words, never an envelope", () => {
