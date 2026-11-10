@@ -45,7 +45,7 @@ function deliveryLine(w: Workspace, q: Question, now: number): { icon: string; t
 }
 
 /** A radio card: the question options, and setup's Updates choice (no letter there). */
-export function OptionCard({ theme, letter, label, consequence, recommended, selected, disabled, onPress, compact, dense = false }: { theme: Theme; letter?: string; label: string; consequence?: string; recommended: boolean; selected: boolean; disabled: boolean; onPress: () => void; compact: boolean; dense?: boolean }) {
+export function OptionCard({ theme, letter, label, consequence, recommended, selected, disabled, onPress, compact, dense = false, own = false }: { theme: Theme; letter?: string; own?: boolean; label: string; consequence?: string; recommended: boolean; selected: boolean; disabled: boolean; onPress: () => void; compact: boolean; dense?: boolean }) {
   const c = theme.colors; const t = text(c);
   return <Pressable accessibilityRole="radio" aria-checked={selected} accessibilityState={{ checked: selected, disabled }} accessibilityLabel={`${letter ? `${letter}. ` : ""}${label}${recommended ? ". Recommended" : ""}${consequence ? `. ${consequence}` : ""}`}
     disabled={disabled} onPress={onPress}
@@ -55,7 +55,9 @@ export function OptionCard({ theme, letter, label, consequence, recommended, sel
     <View style={{ width: 18, height: 18, marginTop: 1, borderRadius: 9, borderWidth: selected ? 5 : 1.5, borderColor: selected ? c.accent : c.foregroundMuted }} />
     <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 8, rowGap: 4 }}>
-        <Text style={t.label}>{letter ? <><Text style={{ fontVariant: ["tabular-nums"] }}>{letter}</Text>{"  "}</> : null}<RichText linkColor={c.foreground} style={t.label}>{label}</RichText></Text>
+        {/* The built-in Something else: a pencil in the letter's slot, so its label lines up with the agent's options. */}
+        {own ? <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}><Icon name="PenLine" size={12} color={c.foregroundMuted} /><Text style={t.label}>{label}</Text></View>
+          : <Text style={t.label}>{letter ? <><Text style={{ fontVariant: ["tabular-nums"] }}>{letter}</Text>{"  "}</> : null}<RichText linkColor={c.foreground} style={t.label}>{label}</RichText></Text>}
         {recommended && <Chip theme={theme} icon="ThumbsUp" label="Recommended" color={c.foregroundMuted} />}
       </View>
       {!!consequence && <RichText linkColor={c.foreground} numberOfLines={dense ? 2 : undefined} style={t.meta}>{consequence}</RichText>}
@@ -131,9 +133,8 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   const pinned = dense && !!bodyMaxHeight;
   const input = <View style={{ gap: 6 }}>
     {free && !dense && <Text style={t.meta}>No options were given. Write the decision for the agent.</Text>}
-    {other && !dense && <Text style={t.meta}>None of the options fit? Write your answer; it goes to the agent instead of a letter.</Text>}
     <TextInput key={other ? "answer" : "note"} accessibilityLabel={free || other ? `Your answer to ${q.id}${other ? ", required" : ""}` : `Note for the agent about ${q.id}, optional`} placeholder={free ? "Your answer" : other ? "Your answer (required)" : "Add a note for the agent (optional)"} placeholderTextColor={c.foregroundMuted}
-      multiline value={words} editable={!run.isPending} onChangeText={setWords} maxLength={2000} autoFocus={other || pinned && !free && noteOpen} style={[inputStyle(c, compact, (free || other) && !dense ? 3 : 2), other ? { borderColor: words.trim() ? c.border : withAlpha(c.accent, 0.7) } : null]} />
+      multiline value={words} editable={!run.isPending} onChangeText={setWords} maxLength={2000} autoFocus={other || pinned && !free && noteOpen} style={[inputStyle(c, compact, (free || other) && !dense ? 3 : 2)]} />
   </View>;
   // Context comes before the options so the developer reads why before choosing.
   const body = <View style={{ gap: dense ? 10 : 14 }}>
@@ -155,7 +156,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
       {q.options.map(o => <OptionCard key={o.letter} theme={theme} compact={compact} dense={dense} letter={o.letter} label={o.label} consequence={o.consequence} recommended={q.recommend === o.letter}
         selected={(open ? choice : q.answer?.choice) === o.letter} disabled={!open || run.isPending} onPress={() => setChoice(o.letter)} />)}
       {/* Built in on every question with options, after the agent's own: the developer's own answer. */}
-      {(open || isOther(q.answer?.choice)) && <OptionCard theme={theme} compact={compact} dense={dense} letter="" label={OTHER_LABEL} consequence={dense ? undefined : "Write your own answer"} recommended={false}
+      {(open || isOther(q.answer?.choice)) && <OptionCard theme={theme} compact={compact} dense={dense} own label={OTHER_LABEL} consequence={open && !dense ? "Write your own answer" : undefined} recommended={false}
         selected={(open ? choice : q.answer?.choice) === OTHER} disabled={!open || run.isPending} onPress={() => { setChoice(OTHER); if (pinned) setNoteOpen(true); }} />}
     </View>}
     {q.answer && <View style={{ gap: 6, padding: 10, borderRadius: 8, backgroundColor: tint(c.statusSuccess, c) }}>
@@ -182,7 +183,9 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
       {pinned && open && !free && !other && !noteOpen && <Button theme={theme} compact={compact} kind="ghost" icon="Pencil" title="Note" accessibilityLabel={`Add a note for the agent about ${q.id}`} onPress={() => setNoteOpen(true)} />}
       {dense && onDetails && <IconButton theme={theme} compact={compact} icon="Maximize2" label={`Open ${q.id} with its links and full context`} onPress={onDetails} />}
     </View>
-    {open && !dense && !compact && <Text style={t.small}>Send puts your answer straight into the asking agent's chat, even mid-turn. Follow-up keeps it under {q.id}.</Text>}
+    {/* Same words as the brief card's, so a disabled Send always says why. */}
+    {open && other && !words.trim() ? <Text style={t.small}>Write your answer, then send it.</Text>
+      : open && !dense && !compact && <Text style={t.small}>Send puts your answer straight into the asking agent's chat, even mid-turn. Follow-up keeps it under {q.id}.</Text>}
   </View>;
   // In the pill popover the question scrolls and the answer field and actions stay put, so Send is never cut off.
   if (pinned) {

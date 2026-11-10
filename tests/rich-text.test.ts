@@ -45,7 +45,7 @@ const AGENT_FIELDS = [
   /\.question\b/, /\.background\b/, /\.consequence\b/, /\.words\b/, // questions, options, answers
   /\b(?:o|option|chosen)\.label\b/, // option labels
   /\.ask\b/, /\.context\b/, /\b(?:b|brief)\.mono\b/, // briefs
-  /\.evidence\b/, /\.summary\b/, /\.result\b/, // tasks, Done, batches
+  /\.evidence\b/, /\.summary\b/, /\.result\b(?!\])/, // tasks, Done, batches (not a lookup key like LABEL[h.result])
   /\bfeatured\.detail\b/, /\bitem\.detail\b/, // Needs-you rows (a question's body)
   /\bstep\.text\b/, // the Overseer's replies
   /\b(?:r|l)\.detail\b/, // activity rows: answers, results
@@ -82,6 +82,7 @@ test("the scan catches a plain <Text> around an agent-written field and allows R
   assert.equal(plainTextViolations(`<Text>{\`\${q.id} · \${q.title}\`}</Text>`).length, 1);
   assert.equal(plainTextViolations(`<RichText selectable style={t.body}>{q.question}</RichText>`).length, 0);
   assert.equal(plainTextViolations(`<Text style={t.meta}>{state.text}</Text>`).length, 0);
+  assert.equal(plainTextViolations("<Text style={t.small}>{`${h.from} · ${HISTORY_RESULT[h.result]}`}</Text>").length, 0, "a lookup key is Follow-up's own copy");
 });
 
 test("every agent-written field in the client renders through RichText", async () => {
