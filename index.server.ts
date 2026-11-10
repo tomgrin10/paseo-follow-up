@@ -4,13 +4,14 @@ import { askQuestion, needsYouQuestions, recordAnswer, syncTaskQuestions, withdr
 import { agentSetSpec, developerSetSpec } from "./server/spec";
 import type { PluginServerContext, PluginHandlerContext, PluginHookContext, PluginSessionOpenRequest } from "@getpaseo/plugin/server";
 import { mkdir, writeFile } from "node:fs/promises";
-import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import * as rpc from "./shared/contracts";
 import { browserRepositories, browserWorkspaces, prClaims, prOwner } from "./server/pr-owner";
 import { type Workspace } from "./shared/model";
 import { isWorkspaceRoot } from "./server/workspace-agent";
+import { BackgroundAgents, backgroundAgentsFile } from "./server/background-agents";
 import { Store } from "./server/store";
 import { PriorityStore } from "./server/priorities";
 import { UsageReader } from "./server/usage";
@@ -1098,7 +1099,14 @@ export default function contribute(server: PluginServerContext) {
   handle(rpc.onboardingChecksRpc, async ({ fresh }, { paseo }) => { await requireReady(); seen(paseo); return readiness.run(!!fresh); });
 
   type SessionOpen = (input: { request: PluginSessionOpenRequest }, context: PluginHookContext) => Promise<PluginSessionOpenRequest | void>;
-  const withWait = (handler: SessionOpen): SessionOpen => async (input, context) => wait.open((await handler(input, context)) ?? input.request);
+  // Paseo 0.16 background agents (another plugin's helpers) get no root treatment: no tools, no Wait, no needs_you or
+  // Stop-hook nudge. The flag is only in the agent snapshot, so session open reads it once per agent.
+  let saveBackground: () => Promise<void> = async () => {};
+  const background = new BackgroundAgents(() => saveBackground());
+  saveBackground = backgroundAgentsFile(directory, () => background.ids);
+  try { background.seed(JSON.parse(readFileSync(join(directory, "background-agents.json"), "utf8"))?.agents); } catch { /* none yet */ }
+  const isBackground = (agentId: string, paseo: PluginHandlerContext["paseo"]) => background.check(agentId, async id => (await paseo.agents.ref(id).refresh())?.agent as { background?: unknown } | undefined);
+  const withWait = (handler: SessionOpen): SessionOpen => async (input, context) => wait.open((await handler(input, context)) ?? input.request, { background: await isBackground(input.request.agentId, context.paseo) });
   const removers = [
     server.on("agent.permission_requested", async (event, { paseo }) => { trustApi = paseo; await trust.handle(event.agent, event.request as never).catch(() => undefined); }),
     displaySettings.subscribe(() => void writeBriefState().catch(() => undefined)),
@@ -1110,7 +1118,8 @@ export default function contribute(server: PluginServerContext) {
     server.on("agent.permission_resolved", async event => gateway.directory.permissionResolved(event.agent.id, event.requestId)),
     server.on("agent.archived", async event => gateway.directory.agentArchived(event.agent.id, event.archivedAt)),
     server.on("agent.closed", async event => gateway.directory.agentClosed(event.agent.id)),
-    server.on("agent.created", async event => { await ready; await gateway.directory.agentCreated(event.agent); }),
+    // 0.16: the background flag first shows up here (it isn't in session_open yet), so the hook learns it now.
+    server.on("agent.created", async (event, { paseo }) => { await ready; await isBackground(event.agent.id, paseo); await gateway.directory.agentCreated(event.agent); }),
     server.on("workspace.created", async event => gateway.directory.workspaceCreated(event.workspace)),
     server.on("workspace.archived", async event => gateway.directory.workspaceArchived(event.workspace.id)),
     server.on("agent.turn_started", async () => updater.activity()),
@@ -1144,6 +1153,7 @@ export default function contribute(server: PluginServerContext) {
     server.before("agent.session_open", withWait(async ({ request }, { paseo }) => {
       await ready;
       if (loadError || stopped || request.purpose !== "interactive") return request;
+      if (await isBackground(request.agentId, paseo)) return request;
       // The Overseer: needs_you (no Stop-hook nudge), the action tools and its routing tools. Never tracked.
       if (request.labels[OVERSEER_LABEL] === "1" && ["claude", "codex"].includes(request.provider)) {
         const env = { ...request.env, FOLLOW_THROUGH_OVERSEER: "1", FOLLOW_THROUGH_BRIEF: request.provider };
