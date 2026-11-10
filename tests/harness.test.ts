@@ -14,7 +14,7 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   const dir = await mkdtemp(join(tmpdir(), "follow-slots-"));
   const children: ChildProcess[] = [];
   t.after(async () => { for (const c of children) if (c.exitCode === null) c.kill("SIGKILL"); await rm(dir, { recursive: true, force: true }); });
-  const env = { ...process.env, HARNESS_SLOT_DIR: join(dir, "slots"), HARNESS_SLOTS: "1", HARNESS_SLOT: "" };
+  const env = { ...process.env, HARNESS_SLOT_DIR: join(dir, "slots"), HARNESS_SLOTS: "1", HARNESS_SLOT_HELD: "", HARNESS_PASEO_CGROUP: join(dir, "no-cgroup") };
   /** A script that takes a slot, says so, then holds it until stdin closes. */
   const script = join(dir, "script.mjs");
   await writeFile(script, `import { harness, spawnTracked } from ${JSON.stringify(helper)};
@@ -78,4 +78,31 @@ test("every script that starts a Paseo daemon or a browser takes a slot, and sta
     assert.doesNotMatch(source, /spawn\("paseo", \["daemon"/, `${name} starts its daemon with spawnDaemon, so it dies with the script`);
   }
   assert.ok(heavy.length >= 10, `found only ${heavy.length} harness scripts; the scan is broken`);
+});
+
+test("HARNESS_SLOT_HELD runs at once, like the wrapper's re-entry; a held slot exports it to children", async t => {
+  const f = await fixture(t);
+  const a = f.run(); await until(() => a.out.stdout.includes("slot 1"), "first takes the only slot");
+  const { spawnSync } = await import("node:child_process");
+  const probe = join(f.dir, "probe.mjs");
+  await writeFile(probe, `import { harness } from ${JSON.stringify(helper)};\nawait harness({ pollMs: 100 }); console.log("held " + process.env.HARNESS_SLOT_HELD);\n`);
+  const reentered = spawnSync(process.execPath, [probe], { env: { ...f.env, HARNESS_SLOT_HELD: "1" }, encoding: "utf8", timeout: 5000 });
+  assert.equal(reentered.stdout.trim(), "held 1", "another agent shooting against a held daemon doesn't queue");
+  a.child.stdin!.end();
+  await until(() => a.child.exitCode !== null, "first ends");
+  const fresh = spawnSync(process.execPath, [probe], { env: f.env, encoding: "utf8", timeout: 5000 });
+  assert.equal(fresh.stdout.trim(), "held 1", "a script that takes a slot exports HARNESS_SLOT_HELD to what it starts");
+});
+
+test("no slot while Paseo's working set is over 75% of its cap; reclaimable cache doesn't count", async t => {
+  const f = await fixture(t);
+  const { mkdir } = await import("node:fs/promises");
+  const cgroup = join(f.dir, "no-cgroup"); await mkdir(cgroup, { recursive: true });
+  await writeFile(join(cgroup, "memory.high"), "1000\n");
+  await writeFile(join(cgroup, "memory.current"), "900\n");
+  await writeFile(join(cgroup, "memory.stat"), "anon 700\ninactive_file 100\nslab_reclaimable 20\n");
+  const a = f.run(); await until(() => a.out.stderr.includes("waiting for a harness slot"), "waits at 78%");
+  await new Promise(r => setTimeout(r, 300)); assert.equal(a.out.stdout, "");
+  await writeFile(join(cgroup, "memory.stat"), "anon 600\ninactive_file 200\nslab_reclaimable 20\n");
+  await until(() => a.out.stdout.includes("slot 1"), "runs at 68%, the cache being reclaimable");
 });
