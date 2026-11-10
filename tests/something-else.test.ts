@@ -32,6 +32,8 @@ test("Something else is delivered as the developer's own answer, in quotes", () 
   assert.equal(replyText(q, "other", "Use a cron"), `Q1 (Retry window): Something else — "Use a cron"`);
   assert.equal(answerLabel(q, "other", "Use a cron"), `Something else · "Use a cron"`);
   assert.equal(answerLabel(q, "B"), "B · Retry for a day");
+  // A row clamps the label: multi-line words must not cut it off at the first line break (critique, 2026-11-10).
+  assert.equal(answerLabel(q, "other", "Link it from the spec:\n  https://x.dev/a"), `Something else · "Link it from the spec: https://x.dev/a"`);
 });
 
 test("Something else keeps several lines and still parses back for the chat card", () => {

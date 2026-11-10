@@ -109,7 +109,8 @@ const quoted = (words: string | undefined | null) => `"${(words ?? "").trim()}"`
  * answer itself. The dialog, Activity, Needs-you and the brief's past card all read it from here.
  */
 export function answerLabel(q: { options: readonly { letter: string; label: string }[] }, choice: string, words?: string | null): string {
-  if (isOther(choice)) return `${OTHER_LABEL} · ${quoted(words)}`;
+  // One line: a row clamps it, and a newline inside the words would cut the label off at the first line break.
+  if (isOther(choice)) return `${OTHER_LABEL} · ${quoted((words ?? "").replace(/\s+/g, " "))}`;
   const option = q.options.find(o => o.letter === choice);
   return option ? `${choice} · ${option.label}` : choice;
 }
