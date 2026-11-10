@@ -42,7 +42,7 @@ export function targets(rows: InboxRow[], workspaces: Workspace[], now: number):
   return out;
 }
 
-const stateFor = (t: Target | undefined, recent: { agentIds: string[]; at: number } | null, now: number): PillState =>
+const stateFor = (t: Target | undefined, recent: { agentIds: string[]; at: number; kind?: "sign_off" | "later" } | null, now: number): PillState =>
   t ? pillState({ row: t.row, items: t.items, recent, now }) : null;
 
 function useTarget(deps: Deps, agentId: string, workspaceId: string) {
@@ -94,7 +94,7 @@ export function contributeFollowUpPill(client: PluginClientContext, deps: Deps) 
       const label = undo ? state.label : state.headline.label;
       // The tooltip (and accessible name) says whose pill it is and what kind of ask. On phones the host shows it as the
       // sheet's title right above the popover, which carries the ask itself in full, so the title doesn't repeat it.
-      const title = undo ? "Follow-up: signed off. Click to undo." : `Follow-up · ${state.headline.label}${state.todo && state.mode === "flag" ? ` · ${todoLabel(withoutBriefQuestions(target.items, target.row))} in this workspace` : ""}`;
+      const title = undo ? (recent?.kind === "later" ? "Follow-up: moved to Later. Click to undo." : "Follow-up: signed off. Click to undo.") : `Follow-up · ${state.headline.label}${state.todo && state.mode === "flag" ? ` · ${todoLabel(withoutBriefQuestions(target.items, target.row))} in this workspace` : ""}`;
       const key = `${state.mode}|${label}|${title}`;
       const button = { title, label, behavior: undo ? { kind: "action" as const, onPress() { void inbox.undo([agentId]); } } : { kind: "popover" as const, Content } };
       const entry = pills.get(agentId);

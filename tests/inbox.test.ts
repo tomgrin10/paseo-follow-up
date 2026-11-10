@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { compareNeeds, displayReason, newEntry, nextAfter, reduce, replay, rowTitle, sectionRows, StaleSignOff, stateOf, type Entry, type InboxEvent, type InboxRow } from "../shared/inbox";
+import { wakeLabel, compareNeeds, displayReason, newEntry, nextAfter, reduce, replay, rowTitle, sectionRows, StaleSignOff, stateOf, type Entry, type InboxEvent, type InboxRow } from "../shared/inbox";
 import { classify, fileSources, newestUserMessage, type Sources } from "../server/inbox-classifier";
 import { followUpEvents, Inbox, REVISION, type AgentInfo, type Directory, type GuardPause } from "../server/inbox";
 import { pr, snapshot, workspace } from "./fixtures";
@@ -110,6 +110,27 @@ test("#14 undo restores the exact record and its age; it expires after 24 h", ()
 test("#15 snooze moves Needs you to Later; a quiet agent can't be snoozed", () => {
   assert.equal(stateOf(snoozed(newEntry("a1"))), "LATER");
   assert.equal(stateOf(reduce(newEntry("a1"), { type: "snooze", until: at(60) }, at(0))), "QUIET");
+});
+test("#15b Later records an undo that puts back the snooze it replaced (bug: Later had no Undo)", () => {
+  const flagged = run([finished]);
+  const later = reduce(flagged, { type: "snooze", until: at(600) }, at(5));
+  assert.equal(later.undo?.kind, "snooze");
+  const back = reduce(later, { type: "undo" }, at(6));
+  assert.equal(stateOf(back), "NEEDS", "undo of a first Later brings the row back to Needs you");
+  assert.deepEqual(back.needs, flagged.needs); assert.equal(back.signedOffAt, null); assert.equal(back.undo, null);
+  const moved = reduce(reduce(later, { type: "snooze", until: at(900) }, at(7)), { type: "undo" }, at(8));
+  assert.equal(moved.snooze?.until, at(600), "undo of a changed time restores the earlier time");
+  const woke = reduce(reduce(later, { type: "crash", detail: "x" }, at(7)), { type: "undo" }, at(8));
+  assert.equal(woke.snooze, null, "a flag that broke the snooze since stays broken: undo changes nothing");
+  const off = reduce(reduce(later, { type: "sign_off" }, at(7)), { type: "undo" }, at(8));
+  assert.equal(stateOf(off), "LATER", "sign-off after Later: undo restores the Later row");
+  assert.equal(reduce(newEntry("a1"), { type: "snooze", until: at(60) }, at(0)).undo, null, "a quiet agent records nothing");
+});
+test("a Later reads back the way it was picked: tomorrow says tomorrow, not the weekday", () => {
+  const now = new Date(2026, 10, 10, 15, 0).getTime();
+  assert.equal(wakeLabel({ until: new Date(2026, 10, 11, 9, 0).toISOString(), at: T0 }, now), "tomorrow 09:00");
+  assert.equal(wakeLabel({ until: new Date(2026, 10, 10, 18, 0).toISOString(), at: T0 }, now), "18:00");
+  assert.match(wakeLabel({ until: new Date(2026, 10, 13, 9, 0).toISOString(), at: T0 }, now), /^\w{3} 09:00$/);
 });
 test("#16 an expired snooze comes back with its original age; 'next event' wakes on any flag", () => {
   const e = snoozed(newEntry("a1"));

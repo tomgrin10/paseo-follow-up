@@ -3,7 +3,7 @@ import { Text, View } from "react-native";
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { flagHeadline, type Headline } from "../shared/headline";
-import { nextAfter, snoozeUntil, type InboxRow } from "../shared/inbox";
+import { nextAfter, snoozeUntil, wakeLabel, type InboxRow } from "../shared/inbox";
 import { Button, type Theme } from "./kit";
 import { raised } from "./theme";
 import type { InboxStore } from "./inbox-store";
@@ -17,7 +17,10 @@ export function useInbox<T>(store: InboxStore, select: () => T): T {
 /** The row's headline, the same one the pill and the brief card use. A snoozed row keeps its reason, in muted tones. */
 export const rowHeadline = (row: InboxRow, now: number): Headline | null => flagHeadline({ ...row, snooze: null }, now);
 
-/** The undo bar: in-surface, so it can carry an Undo action that host toasts can't. Lasts 6 s. */
+/** "until 09:00", "until Tue 09:00", "until next event": a Later's wake time for the Undo bar. */
+export const laterLabel = (until: string, now: number) => { const w = wakeLabel({ until, at: new Date(now).toISOString() }, now); return w ? `until ${w}` : "snoozed"; };
+
+/** The undo bar: in-surface, so it can carry an Undo action that host toasts can't. Lasts 6 s. Says Signed off or Later. */
 export function UndoBar({ store, theme, touch }: { store: InboxStore; theme: Theme; touch: boolean }) {
   const c = theme.colors;
   const recent = useInbox(store, () => store.recent());
@@ -27,10 +30,18 @@ export function UndoBar({ store, theme, touch }: { store: InboxStore; theme: The
     return () => clearTimeout(id);
   }, [recent, store]);
   if (!recent) return null;
-  return <View accessibilityRole="alert" accessibilityLiveRegion="polite" style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: touch ? 52 : 40, paddingLeft: 12, paddingRight: 4, borderRadius: 8, backgroundColor: c.surface1, borderWidth: 1, borderColor: c.border, ...raised(c) }}>
-    <Icon name="CircleCheck" size={15} color={c.statusSuccess} />
-    <Text numberOfLines={1} style={{ flex: 1, color: c.foreground, fontSize: 12 }}>Signed off <Text style={{ color: c.foregroundMuted }}>{recent.label}</Text></Text>
-    <Button theme={theme} compact={touch} kind="ghost" icon="Undo2" title="Undo" onPress={() => void store.undo()} />
+  const what = recent.kind === "later" ? `Later ${laterLabel(recent.until, Date.now())}` : "Signed off";
+  return <View role="status" accessibilityLiveRegion="polite" style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: touch ? 52 : 40, paddingLeft: 12, paddingRight: 4, borderRadius: 8, backgroundColor: c.surface1, borderWidth: 1, borderColor: c.border, ...raised(c) }}>
+    {recent.kind === "later"
+      ? <Icon name="AlarmClock" size={15} color={c.foregroundMuted} />
+      : <Icon name="CircleCheck" size={15} color={c.statusSuccess} />}
+    {/* Title first and cut on its own, so the time always shows: "TKT-3101 Retry write-up · Later until tomorrow 09:00". */}
+    {/* Phones stack the two, so neither is cut to a stub; wide screens keep one line. */}
+    <View style={touch ? { flex: 1, minWidth: 0, paddingVertical: 6 } : { flex: 1, flexDirection: "row", alignItems: "center", minWidth: 0 }}>
+      <Text numberOfLines={1} style={{ flexShrink: 1, color: c.foreground, fontSize: touch ? 14 : 12 }}>{recent.label}</Text>
+      <Text numberOfLines={1} style={{ flexShrink: 0, color: c.foregroundMuted, fontSize: touch ? 13 : 12 }}>{touch ? what : ` · ${what}`}</Text>
+    </View>
+    <Button theme={theme} compact={touch} kind="ghost" icon="Undo2" title="Undo" accessibilityLabel={`Undo: ${what}, ${recent.label}`} onPress={() => void store.undo()} />
   </View>;
 }
 
@@ -56,7 +67,7 @@ export function contributeInboxCommands(client: PluginClientContext, store: Inbo
       onSelect({ agent }) { void store.signOff([agent.id]); } }),
     client.addCommandCenterItem({ id: "inbox-later", title: "Follow-up: Later (tomorrow 09:00)", icon: "AlarmClock", keywords: ["ok", "snooze", "later", "needs you"], context: "agent",
       onSelect({ agent }) { void store.snooze([agent.id], snoozeUntil("tomorrow", new Date())); } }),
-    client.addCommandCenterItem({ id: "inbox-undo", title: "Follow-up: undo last sign-off", icon: "Undo2", keywords: ["ok", "undo", "needs you", "sign off"], context: "global",
+    client.addCommandCenterItem({ id: "inbox-undo", title: "Follow-up: undo last sign-off or Later", icon: "Undo2", keywords: ["ok", "undo", "needs you", "sign off", "later", "snooze"], context: "global",
       onSelect() { void store.undo(); } }),
     client.addCommandCenterItem({ id: "inbox-next", title: "Follow-up: Next needs-you", icon: "Inbox", keywords: ["ok", "next", "needs you", "inbox"], context: "global",
       onSelect() { openNext(null); } }),
