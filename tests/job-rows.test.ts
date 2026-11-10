@@ -62,6 +62,9 @@ test("Codex only: unsaved jobs are filled in quietly; a saved Claude choice is f
   assert.equal(row.notice?.tone, "warning");
   assert.equal(row.notice?.text, "Claude isn't available here, so this won't run. Recommended: Codex · GPT-6-Luna-Mini · Minimal.");
   assert.equal(jobsHeader([row], cat, false).text, "1 job differs from the recommendation.");
+  assert.equal(jobsHeader([row], cat, false).action, null, "one job: the row's own Use recommended, no second button in the header");
+  const other = jobRow(view("ranker", { provider: "claude" }), cat);
+  assert.deepEqual([jobsHeader([row, other], cat, false).text, jobsHeader([row, other], cat, false).action], ["2 jobs differ from the recommendation.", "use"]);
 });
 
 test("Use recommended changes provider, model and effort only; limits stay; the Overseer's mode follows a new provider", () => {
