@@ -21,6 +21,7 @@ export function laterChoices(now: Date): typeof LATER_CHOICES[number][] {
 
 export const ROW_ACTIONS = {
   later: { tool: "snooze" },
+  bring_back: { tool: "inbox_act", note: "action: \"unsnooze\"." },
   sign_off: { tool: "sign_off" },
   answer: { exempt: "Opens the question card; sending the answer is answer_question." },
   send_repairs: { tool: "send_repairs" },
@@ -90,6 +91,7 @@ export function rowMenu(input: RowMenuInput): RowMenuSection[] {
   add("triage", s.agentId && flagged ? [
     { key: "later", action: "later", label: "Later", icon: "AlarmClock", ...(snoozedUntil ? { hint: `Later until ${snoozedUntil}` } : {}),
       children: laterChoices(now).map(([id, label]) => ({ key: `later:${id}`, action: "later" as const, label, icon: "Clock", arg: id })) },
+    !!snoozedUntil && { key: "bring_back", action: "bring_back", label: "Bring back now", icon: "BellRing" },
     { key: "sign_off", action: "sign_off", label: "Sign off", icon: "Check" },
   ] : []);
 

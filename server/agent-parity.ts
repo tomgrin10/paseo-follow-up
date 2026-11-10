@@ -76,7 +76,7 @@ export const RPC_TOOLS: readonly RpcTool[] = [
       choices: z.array(z.object({ decisionId: z.string().max(20), choice: briefChoiceSchema, words: z.string().trim().max(2000).optional() })).min(1).max(10).optional(), ...confirm }),
     guard: (a, caller) => a.agentId === caller ? "brief_action answers another agent's brief for the developer; your own brief is the developer's to answer." : null },
   { name: "inbox_act", rpc: "follow.inbox-act", kind: "planned",
-    input: z.strictObject({ action: z.enum(["undo", "mute_turn", "unsorted_flag", "unsorted_sign_off", "batch_undo"]).optional(), agentIds: z.array(id).max(500).optional(), muteTurn: z.boolean().optional(), ...confirm }),
+    input: z.strictObject({ action: z.enum(["undo", "unsnooze", "mute_turn", "unsorted_flag", "unsorted_sign_off", "batch_undo"]).optional(), agentIds: z.array(id).max(500).optional(), muteTurn: z.boolean().optional(), ...confirm }),
     guard: (a, caller) => a.agentIds?.includes(caller) ? "inbox_act is for other agents' rows, not your own." : null },
   // Questions: the developer's answer to another agent's question
   { name: "answer_question", rpc: "follow.answer-question", kind: "planned",

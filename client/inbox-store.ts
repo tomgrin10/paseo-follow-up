@@ -135,6 +135,17 @@ export function createInboxStore(client: PluginClientContext) {
       } finally { for (const id of agentIds) inflight.delete(id); }
       refresh();
     },
+    /** Bring back now: the rows leave Later for Needs you at once; the daemon confirms on the next read. */
+    async unsnooze(requested: string[]) {
+      const agentIds = requested.filter(id => !inflight.has(id));
+      if (!agentIds.length) return;
+      for (const id of agentIds) inflight.add(id);
+      try {
+        patch(agentIds, r => r.needs ? { ...r, snooze: null } : r);
+        await act({ action: "unsnooze", agentIds });
+      } finally { for (const id of agentIds) inflight.delete(id); }
+      refresh();
+    },
     async undo(agentIds?: string[]) {
       const target = agentIds ?? recent?.agentIds ?? [];
       const batch = !agentIds && recent?.batch;
