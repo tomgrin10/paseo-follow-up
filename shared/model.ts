@@ -71,6 +71,10 @@ export const workspaceSchema = z.object({
   mainClosedSince: z.string().optional(),
   /** A main agent closed for MAIN_CLOSED_HANDOVER_MS handed the workspace to `mainAgentId`; until that agent does main-agent work, a live `from` takes it back. */
   handover: z.object({ from: idSchema, at: z.string(), worked: z.boolean() }).optional(),
+  /** Every change of main agent, newest last, at most 20 (1.4.0-beta.22). by: developer, auto, or agent:<id>. */
+  mainHistory: z.array(z.object({ from: idSchema, to: idSchema, by: z.string(), reason: z.string().nullable(), at: z.string() })).optional(),
+  /** When the main agent last made a main-agent call (sync, tasks, questions, needs_you, Done), hourly at most. */
+  mainWorkAt: z.string().optional(),
   enable_tracking: z.boolean().default(false), enable_auto_sends: z.boolean().default(false), hold: z.string().nullable(), archived: z.boolean(),
   prs: z.array(prSchema), obligations: z.array(obligationSchema), batches: z.array(batchSchema),
   excludedStacks: z.array(z.object({ name: textSchema, reason: textSchema, excludedAt: z.string(), prs: z.array(prSchema), obligations: z.array(obligationSchema) })).default([]),

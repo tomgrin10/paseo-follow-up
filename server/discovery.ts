@@ -14,9 +14,30 @@ export const interruptionHold = (kind: "canceled" | "failed") => kind === "cance
  * A stop hold raised by another agent's turn doesn't carry over to the new main (a hold from before 1.4.0-beta.16
  * names no agent, so only the developer's explicit choice clears it).
  */
-export function setMainAgent(w: Workspace, to: string, kind: "handover" | "handBack" | "developer", now: number): void {
+/** Main-agent claim rules (~/paseo-harness/main-agent-claim.md, approved 2026-11-10). */
+export const MAIN_CHANGE_COOLDOWN_MS = 30 * 60_000;
+export const MAIN_RECLAIM_MS = 2 * 60 * 60_000;
+export const MAIN_IDLE_MS = 24 * 60 * 60_000;
+export const MAIN_NOTICE_MS = 24 * 60 * 60_000;
+export type MainChange = NonNullable<Workspace["mainHistory"]>[number];
+
+/** The newest change of main agent, if any. */
+export const lastMainChange = (w: Pick<Workspace, "mainHistory">): MainChange | undefined => w.mainHistory?.at(-1);
+/** Within the cooldown after any change: no self-claim and no automatic handover (the developer is exempt). */
+export const inMainCooldown = (w: Pick<Workspace, "mainHistory">, now: number) => { const last = lastMainChange(w); return !!last && now - Date.parse(last.at) < MAIN_CHANGE_COOLDOWN_MS; };
+
+/**
+ * Moves the workspace to another main agent: automatic handover or hand-back, the developer's "Make main agent",
+ * or an agent's claim (make_main_agent). Recorded in mainHistory. A stop hold raised by another agent's turn
+ * doesn't carry over (a hold from before 1.4.0-beta.16 names no agent, so only the developer's choice clears it).
+ */
+export function setMainAgent(w: Workspace, to: string, kind: "handover" | "handBack" | "developer" | "claim", now: number, meta: { by?: string; reason?: string | null } = {}): void {
   const from = w.mainAgentId;
   if (from === to) return;
+  const by = meta.by ?? (kind === "developer" ? "developer" : "auto");
+  const reason = meta.reason ?? (kind === "handover" ? "The main agent was closed for 30 minutes" : kind === "handBack" ? "The original main agent is back" : null);
+  w.mainHistory = [...(w.mainHistory ?? []), { from, to, by, reason, at: new Date(now).toISOString() }].slice(-20);
+  delete w.mainWorkAt;
   w.mainAgentId = to; w.runtimeReason = null; delete w.mainClosedSince;
   w.contributorAgentIds = [...new Set([...(w.contributorAgentIds ?? []).filter(id => id !== to), from])];
   for (const b of w.batches) if (b.state === "pending" && b.recipientAgentId === from) b.recipientAgentId = null;
@@ -26,11 +47,49 @@ export function setMainAgent(w: Workspace, to: string, kind: "handover" | "handB
   w.updatedAt = new Date(now).toISOString();
 }
 
-/** A successor's main-agent call: its handover is in use and no longer goes back. True when something changed. */
-export function markMainWork(state: State, agentId: string): boolean {
+const MAIN_WORK_MARK_MS = 60 * 60_000;
+/** Whether a main-agent call by `agentId` has something to record: an open handover, or an hour-old mainWorkAt. */
+export function mainWorkDue(w: Workspace, agentId: string, now: number): boolean {
+  return w.mainAgentId === agentId && (!!w.handover && !w.handover.worked || !w.mainWorkAt || now - Date.parse(w.mainWorkAt) >= MAIN_WORK_MARK_MS);
+}
+/**
+ * A main agent's main-agent call: a successor's handover is in use and no longer goes back, and mainWorkAt (hourly
+ * at most, so a sync per turn doesn't write state every time) feeds the 24-hour idle rule of a claim.
+ */
+export function markMainWork(state: State, agentId: string, now = Date.now()): boolean {
   let changed = false;
-  for (const w of state.workspaces) if (w.mainAgentId === agentId && w.handover && !w.handover.worked) { w.handover.worked = true; changed = true; }
+  for (const w of state.workspaces) {
+    if (!mainWorkDue(w, agentId, now)) continue;
+    if (w.handover && !w.handover.worked) w.handover.worked = true;
+    w.mainWorkAt = new Date(now).toISOString(); changed = true;
+  }
   return changed;
+}
+
+/** What a claim needs to know about the current main, from the agent list (metadata; never loads an agent). Null: gone. */
+export type MainAgentInfo = { status: string; activeTurn?: unknown; pendingPermissions?: unknown[] | null; archivedAt?: string | null } | null;
+
+/**
+ * Rules 1-4 of a main-agent claim. Who may claim (the workspace's root agents) is checked by the caller. A claim the
+ * developer asked for is refused only while the main is mid-turn; a self-claim also needs the main archived, gone or
+ * closed 30 minutes, or every open PR registered by the claimant while the main has been idle 24 hours, and respects
+ * the cooldown and the 2-hour reclaim limit.
+ */
+export function checkMainClaim(w: Workspace, target: string, requested: "developer" | "self", main: MainAgentInfo, now: number): { blockers: string[]; rule: string | null } {
+  const blockers: string[] = [];
+  if (target === w.mainAgentId) return { blockers: ["Already the main agent."], rule: null };
+  if (!(w.contributorAgentIds ?? []).includes(target)) return { blockers: ["Not one of this workspace's root agents."], rule: null };
+  if (main && !main.archivedAt && (["running", "initializing"].includes(main.status) || !!main.activeTurn || !!main.pendingPermissions?.length)) blockers.push("The main agent is mid-turn. Try again after its turn ends.");
+  if (requested === "developer") return { blockers, rule: blockers.length ? null : "asked by the developer" };
+  if (inMainCooldown(w, now)) blockers.push("The main agent changed less than 30 minutes ago. Ask the developer if it should change again.");
+  if (w.mainHistory?.some(c => c.from === target && now - Date.parse(c.at) < MAIN_RECLAIM_MS)) blockers.push("This agent lost the main role less than 2 hours ago and can't take it back on its own. Ask the developer.");
+  const open = w.prs.filter(p => !p.disposition && !["MERGED", "CLOSED"].includes(p.snapshot?.state ?? "OPEN"));
+  const rule = !main || main.archivedAt ? "the main agent is archived or gone"
+    : main.status === "closed" && w.mainClosedSince && now - Date.parse(w.mainClosedSince) >= MAIN_CHANGE_COOLDOWN_MS ? "the main agent has been closed for 30 minutes"
+    : open.length && open.every(p => p.registeredAgentId === target) && !!w.mainWorkAt && now - Date.parse(w.mainWorkAt) >= MAIN_IDLE_MS ? "it registered every open PR and the main agent has been idle for 24 hours"
+    : null;
+  if (!rule) blockers.push("An agent can claim the main role on its own only when the main agent is archived, gone or closed for 30 minutes, or when it registered every open PR and the main has been idle for 24 hours. Otherwise ask the developer.");
+  return { blockers, rule: blockers.length ? null : rule };
 }
 
 export function extractHistory(items: readonly unknown[], complete = true, error: string | null = null): History {

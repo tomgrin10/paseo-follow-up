@@ -9,6 +9,7 @@ import { BriefCard, type BriefDeps } from "./brief";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { controlRpc, refreshRpc, browserStatusRpc, recoverRpc, sendRpc, inboxBriefRpc } from "../shared/contracts";
 import { summary, type Workspace } from "../shared/model";
+import { recentMainChange } from "../shared/home";
 import { followUpObligations, recoveryBatch } from "../shared/follow-up";
 import { settledForDisplay } from "../shared/presentation";
 import { ago, sendBlocker, shortRefs } from "../shared/attention";
@@ -221,6 +222,7 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
           </View>
           {openAgent && <Button theme={theme} compact={compact} icon="MessageSquare" title="Open" accessibilityLabel="Open main agent" onPress={() => openAgent(w.mainAgentId)} />}
         </View>
+        <MainChangeNotice workspace={w} theme={theme} compact={compact} />
         {(w.contributorAgentIds ?? []).map(id => <OtherRootAgent key={id} agentId={id} workspace={w} theme={theme} compact={compact} openAgent={openAgent} mainAgentId={w.mainAgentId} />)}
       </CardRow>
       <CardRow theme={theme} compact={compact}>
@@ -257,6 +259,33 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
 /** An agent's title from Paseo's client state (no fetch), or a short id while it loads or once it's gone. */
 function useAgentTitle(agentId: string): string {
   return useAgent(agentId, a => a.title) || `Agent ${agentId.slice(0, 8)}`;
+}
+
+/**
+ * "Took over from A · 5m ago · reason · Undo" under B's name, for a day after an agent or Follow-up moved the role
+ * (main-agent claim rule 5). Quiet: a meta line in this card, never a Needs-you item. Undo makes A main again
+ * through the same developer action as Make main agent, which no cooldown blocks.
+ */
+function MainChangeNotice({ workspace: w, theme, compact }: { workspace: Workspace; theme: Theme; compact: boolean }) {
+  const c = theme.colors; const t = text(c);
+  const now = useNow(60_000);
+  const change = recentMainChange(w, now);
+  const from = useAgentTitle(change?.from ?? ""); const to = useAgentTitle(change?.to ?? "");
+  const control = useRpc(controlRpc); const cache = useQueryClient(); const toast = useToast();
+  const undo = useMutation({
+    mutationFn: () => control({ workspaceId: w.id, mainAgentId: change!.from }),
+    onSuccess: () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); toast.show(`${from} is the main agent again`, { variant: "success" }); },
+    onError: (e: Error) => toast.error(errorText(e)),
+  });
+  if (!change) return null;
+  const canUndo = w.enable_tracking && !w.archived && (w.contributorAgentIds ?? []).includes(change.from);
+  return <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+    {/* The new main's name is the card's title right above, so the line names only who it took over from. */}
+    <Text numberOfLines={3} accessibilityLabel={`${to} took over from ${from} ${ago(change.at, now)}${change.reason ? `. ${change.reason}` : ""}`} style={[t.meta, { flex: 1, minWidth: 200 }]}>
+      <Text style={{ color: c.foreground }}>Took over from {from}</Text> · {ago(change.at, now)}{change.reason ? ` · ${change.reason}` : ""}
+    </Text>
+    {canUndo && <Button theme={theme} compact={compact} kind="ghost" title="Undo" accessibilityLabel={`Undo: make ${from} the main agent again`} accessibilityHint={`Repairs, questions and Done move back to ${from}.`} loading={undo.isPending} disabled={undo.isPending} onPress={() => undo.mutate()} />}
+  </View>;
 }
 
 function MainAgentName({ agentId, theme }: { agentId: string; theme: Theme }) {
