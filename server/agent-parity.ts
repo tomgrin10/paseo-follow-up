@@ -137,6 +137,7 @@ export const PARITY: Record<string, { tools: readonly string[]; note?: string } 
   "follow.agent-settings": { tools: ["agent_settings"] },
   "follow.set-agent-setting": { tools: ["set_agent_setting"] },
   "follow.set-wait": { tools: ["set_wait_for_jobs"] },
+  "follow.wait-output": { exempt: "The chat's Wait row shows the tail of a job the agent ran itself; the agent already has that output from its native Bash." },
   "follow.onboarding": { tools: ["onboarding_status"] },
   "follow.onboarding-checks": { tools: ["onboarding_checks"] },
   "follow.set-onboarding": { tools: ["set_onboarding"] },

@@ -170,6 +170,8 @@ export const overseerRestartRpc = defineRpc({ name: "follow.overseer-restart", i
 export const agentSettingsRpc = defineRpc({ name: "follow.agent-settings", input: z.object({ catalog: z.boolean().optional(), fresh: z.boolean().optional() }), output: agentSettingsViewSchema });
 export const setAgentSettingRpc = defineRpc({ name: "follow.set-agent-setting", input: z.strictObject({ role: z.enum(AGENT_ROLES), entry: savedRoleSchema.nullable() }), output: agentSettingsViewSchema });
 /** Settings → Agents → Wait for background jobs (1.4.0-beta.24). Applies to sessions opened afterwards. */
+/** The chat's Wait row: the last 8 KB of a job's captured output, read when the row is opened. */
+export const waitOutputRpc = defineRpc({ name: "follow.wait-output", input: z.strictObject({ agentId: z.string().regex(/^[a-z0-9_-]{1,128}$/i), jobId: z.string().uuid() }), output: z.object({ text: z.string(), bytes: z.number().int().min(0), truncated: z.boolean() }) });
 export const setWaitRpc = defineRpc({ name: "follow.set-wait", input: z.strictObject({ enable_wait: z.boolean() }), output: agentSettingsViewSchema });
 
 // Getting started (1.4.0-beta.10): the setup flow's progress and its readiness checks. Choices write through the

@@ -156,12 +156,15 @@ export const TOOL_PRESENTATION: Record<string, "routine" | "moment"> = {
   rerank_priorities: "routine", overseer_status: "routine", overseer_start: "routine", overseer_restart: "routine", overseer_ask: "routine",
   inbox_brief: "routine", brief_action: "routine", inbox_act: "routine", answer_question: "routine", run_recovery: "routine",
   set_workspace_spec: "routine", set_task_trigger: "routine", pr_controls: "routine", browser_status: "routine", trust_bypass_status: "routine",
-  release_notes: "routine", updates_status: "routine", check_updates: "routine", set_updates: "routine", install_update: "routine", make_main_agent: "routine", wait_prepare_job: "routine", wait_for_job: "routine", wait_get_job: "routine",
+  release_notes: "routine", updates_status: "routine", check_updates: "routine", set_updates: "routine", install_update: "routine", make_main_agent: "routine", wait_prepare_job: "routine", wait_get_job: "routine",
   // The developer's moments: the workspace is done, or the agent asked them something. needs_you runs every turn, so a
   // card there would be noise; the inbox already carries it.
   declare_done: "moment", ask_question: "moment",
+  // Wait's live timer: the first wait_for_job on a job is its row (shared/wait-chat.ts); later waits on that job stay
+  // grouped and only feed the row.
+  wait_for_job: "moment",
 };
-export const MOMENT_TOOLS = Object.keys(TOOL_PRESENTATION).filter(t => TOOL_PRESENTATION[t] === "moment") as FollowTool[];
+export const MOMENT_TOOLS = Object.keys(TOOL_PRESENTATION).filter(t => TOOL_PRESENTATION[t] === "moment");
 
 /** The fields of Paseo's tool_call timeline item that the transform reads. */
 export type TimelineToolCall = { type: "tool_call"; callId: string; name: string; status: "running" | "completed" | "failed" | "canceled"; error: unknown; detail: unknown };

@@ -5,7 +5,7 @@ import { mkdtemp, rm, writeFile, symlink, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
-import { WaitJobs, waitInput, DEFAULT_WAIT_SECONDS, HARD_MAX_WAIT_SECONDS } from '../server/wait-jobs';
+import { WaitJobs, waitInput, DEFAULT_WAIT_SECONDS, HARD_MAX_WAIT_SECONDS, JOB_RETENTION_MS } from '../server/wait-jobs';
 
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), 'follow-wait-unit-'));
@@ -108,5 +108,52 @@ test('ownership, invalid receipts, and symlinked receipts cannot report success'
     await writeFile(receipt, '{"exitCode":"0"}'); await assert.rejects(f.jobs.status(f.owner, job.jobId));
     await rm(receipt); const outside = join(f.directory, 'outside.json'); await writeFile(outside, '{"exitCode":0}'); await symlink(outside, receipt);
     await assert.rejects(f.jobs.status(f.owner, job.jobId), /Invalid wait job/);
+  } finally { await f.close(); }
+});
+
+test('the runner passes output through unchanged and live, keeps exit codes, and bounds its copy to ~1 MiB', async () => {
+  const f = await fixture();
+  try {
+    for (const code of [0, 1, 7, 255]) {
+      const job = await f.jobs.prepare(f.owner, { description: `exit ${code}`, command: `printf 'out\\n'; printf 'err\\n' >&2; exit ${code}` });
+      const execution = run(job.bashCommand);
+      let seen = ''; execution.child.stdout.on('data', chunk => { seen += chunk; }); execution.child.stderr.on('data', chunk => { seen += chunk; });
+      assert.equal(await execution.finished, code, 'the runner exits with the command\'s own code');
+      assert.equal(seen, 'out\nerr\n', 'the agent\'s Bash gets the same bytes');
+      assert.equal((await f.jobs.status(f.owner, job.jobId)).exitCode, code);
+      assert.equal((await f.jobs.outputTail(f.owner.id, job.jobId)).text, 'out\nerr\n');
+    }
+    // Live: the first line reaches the agent's Bash (and the copy) before the command exits.
+    const slow = await f.jobs.prepare(f.owner, { description: 'live', command: 'echo first; sleep 2; echo second' });
+    const live = run(slow.bashCommand);
+    const first = await new Promise<number>(resolve => live.child.stdout.once('data', () => resolve(Date.now())));
+    const ended = await live.finished.then(() => Date.now());
+    assert.ok(ended - first > 1500, 'output streams as it is written, not at exit');
+    // Bounded: 3 MiB of output leaves at most two 512 KiB halves, ending with the last line.
+    const chatty = await f.jobs.prepare(f.owner, { description: 'chatty', command: "head -c 3145728 /dev/zero | tr '\\0' 'x' | fold -w 1023; echo LAST" });
+    const big = run(chatty.bashCommand);
+    let total = 0; big.child.stdout.on('data', chunk => { total += chunk.length; });
+    assert.equal(await big.finished, 0);
+    assert.ok(total > 3145728, 'the agent still gets everything');
+    const tail = await f.jobs.outputTail(f.owner.id, chatty.jobId);
+    assert.ok(tail.bytes <= 1048576, `the copy holds ${tail.bytes} bytes`); assert.ok(tail.truncated);
+    assert.ok(tail.text.endsWith('LAST\n')); assert.ok(Buffer.byteLength(tail.text) <= 8192);
+    assert.ok(!tail.text.startsWith('x'.repeat(1023) + 'x'), 'the tail starts on a line boundary');
+    await assert.rejects(f.jobs.outputTail('other-agent', chatty.jobId), /Unknown job/);
+  } finally { await f.close(); }
+});
+
+test('prepare prunes job directories untouched for 7 days, at most once an hour', async () => {
+  const f = await fixture();
+  try {
+    const old = await f.jobs.prepare(f.owner, { description: 'old', command: 'true' });
+    const fresh = await f.jobs.prepare(f.owner, { description: 'fresh', command: 'true' });
+    const { utimes } = await import('node:fs/promises');
+    const stale = new Date(Date.now() - JOB_RETENTION_MS - 60_000);
+    await utimes(join(f.directory, 'jobs', f.owner.id, old.jobId, 'job.json'), stale, stale);
+    assert.equal(await f.jobs.prune(Date.now() + 7200_000), 1);
+    await assert.rejects(f.jobs.status(f.owner, old.jobId), /Unknown job/);
+    assert.equal((await f.jobs.status(f.owner, fresh.jobId)).status, 'prepared');
+    assert.equal(await f.jobs.prune(Date.now() + 7300_000), 0, 'the next sweep waits an hour');
   } finally { await f.close(); }
 });

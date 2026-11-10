@@ -822,6 +822,7 @@ export default function contribute(server: PluginServerContext) {
   handle(rpc.agentSettingsRpc, async ({ catalog, fresh }, { paseo }) => { await requireReady(); seen(paseo); return agentSettingsView(!!catalog, !!fresh); });
   handle(rpc.setAgentSettingRpc, async ({ role, entry }, { paseo }) => { await requireReady(); seen(paseo); await agentSettings.save(role, entry); return agentSettingsView(true); });
   handle(rpc.setWaitRpc, async ({ enable_wait }, { paseo }) => { await requireReady(); seen(paseo); await agentSettings.setWait(enable_wait); return agentSettingsView(true); });
+  handle(rpc.waitOutputRpc, async ({ agentId, jobId }) => wait.jobs.outputTail(agentId, jobId));
   handle(rpc.overseerActRpc, async ({ agentId, tool, args }, { paseo }) => {
     await requireReady(); seen(paseo);
     if (!(OVERSEER_TOOLS as readonly string[]).includes(tool)) throw new Error(`Unknown Overseer tool ${tool}.`);
