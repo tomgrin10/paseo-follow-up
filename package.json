@@ -1,7 +1,7 @@
 {
   "name": "paseo-follow-up",
   "private": false,
-  "version": "1.4.0-beta.33",
+  "version": "1.4.0-beta.42",
   "description": "Follow every workspace PR stack in Paseo, answer agent questions, batch repairs for the main agent, and see what needs you.",
   "type": "module",
   "files": [

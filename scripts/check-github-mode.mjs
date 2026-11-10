@@ -11,6 +11,8 @@ import { createRequire } from 'node:module';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { DaemonClient } from '@getpaseo/client/internal/daemon-client';
+import { harness } from "./harness.mjs";
+await harness();
 const exec = promisify(execFile);
 const preview = JSON.parse(await readFile('.preview-isolated.json', 'utf8'));
 assert.ok(preview.root.startsWith('/tmp/follow-install-') && preview.home === preview.root + '/home', 'Requires the isolated preview.');

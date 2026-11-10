@@ -9,6 +9,8 @@ import { headlineColor, mergedColor, readable, runningColor, tint, toneColor, wi
 import { useMinute } from "./home-data";
 import { Spinner } from "./motion";
 import type { Theme } from "./kit";
+import { RowMenu, useRowMenuTrigger, type OpenRowMenu, type RowMenuOpen } from "./row-menu";
+import type { RowMenuItem, RowMenuSection } from "../shared/row-menu";
 
 /**
  * The one list: Home's left side and (on hosts that have it) the sidebar
@@ -65,10 +67,19 @@ export type HomeListProps = {
   overseer?: OverseerRowState | null;
   /** An omnibox ask is on its way to the Overseer. */
   asking?: boolean;
+  /** The row menu (right-click, long-press, the menu key): what a row offers, and what a pick does. Absent: no menu. */
+  menu?: { build: (s: Workstream) => RowMenuSection[]; pick: (s: Workstream, item: RowMenuItem) => void };
 };
 
-export function HomeList({ model, theme, dense = false, touch, selectedKey, onSelect, briefLine, renderExpanded, header, footer, top, afterNeeds, emptyAction, results, activeResult = 0, onResult, filter = null, overseer = null, asking = false }: HomeListProps) {
+export function HomeList({ model, theme, dense = false, touch, selectedKey, onSelect, briefLine, renderExpanded, header, footer, top, afterNeeds, emptyAction, results, activeResult = 0, onResult, filter = null, overseer = null, asking = false, menu }: HomeListProps) {
   const c = theme.colors;
+  const [openMenu, setOpenMenu] = useState<RowMenuOpen | null>(null);
+  const build = menu?.build;
+  const onMenu = useMemo<OpenRowMenu | undefined>(() => build ? (s, anchor, node, keyboard) => {
+    const sections = build(s);
+    if (sections.length) setOpenMenu({ s, anchor, sections, returnTo: node, keyboard });
+  } : undefined, [build]);
+  const menuKey = openMenu?.s.key ?? null;
   const [closed, setClosed] = useState<Set<string>>(new Set(["quiet"]));
   const [openProjects, setOpenProjects] = useState<Set<string>>(new Set());
   const [pages, setPages] = useState<Record<string, number>>({});
@@ -128,7 +139,7 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
         {emptyAction ? <View style={{ flexDirection: "row", marginTop: 6 }}>{emptyAction}</View> : null}
       </View>;
       case "slot": return <View style={{ paddingVertical: 10 }}>{afterNeeds}</View>;
-      case "result": return <ResultRow item={item.item} s={model.byKey.get(item.item.key)} theme={theme} active={item.index === activeResult} dense={dense} touch={touch} onPress={() => onResult?.(item.item)} />;
+      case "result": return <ResultRow item={item.item} s={model.byKey.get(item.item.key)} theme={theme} active={item.index === activeResult || menuKey === item.item.key} dense={dense} touch={touch} onPress={() => onResult?.(item.item)} onMenu={onMenu} />;
       case "ask": return <AskRow ask={item.ask} theme={theme} active={item.index === activeResult} dense={dense} touch={touch} sending={!!asking} onPress={() => onResult?.({ provider: "overseer", key: ASK_KEY, ask: item.ask })} />;
       case "brief": return <BriefRow theme={theme} line={briefLine ?? ""} selected={!touch && (selectedKey === null || selectedKey === BRIEF_KEY)} touch={touch} onSelect={onSelect} />;
       case "overseer": return overseer ? <OverseerRow theme={theme} o={overseer} selected={selectedKey === OVERSEER_KEY} touch={touch} onSelect={onSelect} /> : null;
@@ -147,12 +158,12 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
       case "row": {
         const selected = selectedKey === item.key;
         return <View>
-          <Row s={item.s} theme={theme} dense={dense} touch={touch} selected={selected} onSelect={onSelect} sig={item.s.sig} />
+          <Row s={item.s} theme={theme} dense={dense} touch={touch} selected={selected} onSelect={onSelect} sig={item.s.sig} onMenu={onMenu} menuOpen={menuKey === item.key} />
           {selected && renderExpanded ? renderExpanded(item.s) : null}
         </View>;
       }
     }
-  }, [theme, c, dense, touch, selectedKey, onSelect, briefLine, renderExpanded, toggle, toggleProject, activeResult, onResult, model, overseer?.state, overseer?.line, asking, afterNeeds, emptyAction]);
+  }, [theme, c, dense, touch, selectedKey, onSelect, briefLine, renderExpanded, toggle, toggleProject, activeResult, onResult, model, overseer?.state, overseer?.line, asking, afterNeeds, emptyAction, onMenu, menuKey]);
 
   const listRef = useRef<FlatList<Entry>>(null);
   // Keep the keyboard-active result in view.
@@ -161,11 +172,13 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
     const at = data.findIndex(e => (e.type === "result" || e.type === "ask") && e.index === activeResult);
     if (at >= 0) listRef.current?.scrollToIndex({ index: at, viewPosition: 0.5, animated: false });
   }, [activeResult, results, data]);
-  const list = <FlatList ref={listRef} data={data} keyExtractor={e => e.key} renderItem={render} extraData={`${selectedKey}:${activeResult}:${asking}`} onScrollToIndexFailed={() => undefined}
+  const list = <FlatList ref={listRef} data={data} keyExtractor={e => e.key} renderItem={render} extraData={`${selectedKey}:${activeResult}:${asking}:${menuKey}`} onScrollToIndexFailed={() => undefined}
     initialNumToRender={30} maxToRenderPerBatch={30} windowSize={9} removeClippedSubviews={false}
     ListHeaderComponent={header ? <>{header}</> : null} ListFooterComponent={footer ? <>{footer}</> : <View style={{ height: 32 }} />}
     style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 8 }} keyboardShouldPersistTaps="handled" />;
-  return top ? <View style={{ flex: 1, minHeight: 0 }}>{top}{list}</View> : list;
+  const overlay = openMenu && menu ? <RowMenu key={`${openMenu.s.key}:${openMenu.anchor?.x ?? "sheet"}:${openMenu.anchor?.y ?? ""}`} menu={openMenu} theme={theme} onClose={() => setOpenMenu(null)} onPick={item => menu.pick(openMenu.s, item)} /> : null;
+  // With a menu the wrapper is always there, so opening one never remounts the list (and its scroll).
+  return top || menu ? <View style={{ flex: 1, minHeight: 0 }}>{top}{list}{overlay}</View> : list;
 }
 
 function GroupHeader({ theme, title, count, open, tone, dense, touch, onPress }: { theme: Theme; title: string; count: number; open: boolean; tone?: string; dense: boolean; touch: boolean; onPress: () => void }) {
@@ -210,6 +223,9 @@ function OverseerRow({ theme, o, selected, touch, onSelect }: { theme: Theme; o:
  * `text`: the colour carries the state word on its own (phones), so it's lifted to 4.5:1 on dark grounds. Finished
  * uses the host accent and success green, both fill colours at about 3:1 as 12px text.
  */
+/** The row's hint, the same on Home rows and search results. */
+export const quickActionsHint = (touch: boolean) => touch ? "Long-press for quick actions" : "Quick actions: Shift+F10";
+
 export function glyphColor(s: Pick<Workstream, "tone">, c: Colors, text = false): string {
   const base = s.tone === "running" ? runningColor(c) : s.tone === "success" ? c.statusSuccess : headlineColor(s.tone, c);
   return text ? readable(base, c) : base;
@@ -248,9 +264,10 @@ export function Age({ iso, c, size = 12 }: { iso: string | null; c: Colors; size
   return text ? <Text style={{ color: c.foregroundMuted, fontSize: size, fontVariant: ["tabular-nums"], minWidth: 26, textAlign: "right" }}>{text}</Text> : null;
 }
 
-type RowProps = { s: Workstream; sig: string; theme: Theme; dense: boolean; touch: boolean; selected: boolean; onSelect: (key: string) => void };
-const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect }: RowProps) {
+type RowProps = { s: Workstream; sig: string; theme: Theme; dense: boolean; touch: boolean; selected: boolean; onSelect: (key: string) => void; onMenu?: OpenRowMenu; menuOpen?: boolean };
+const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onMenu, menuOpen = false }: RowProps) {
   const c = theme.colors;
+  const trigger = useRowMenuTrigger(s, onMenu, touch);
   const color = glyphColor(s, c, touch);
   const blocking = s.group === "needs" && s.tier === 0;
   const muted = s.group === "quiet" || s.group === "later";
@@ -258,11 +275,12 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect }: Ro
   // Phones: "Working" under every row of a "Running 9" group says nothing the header didn't; one line per row instead.
   const generic = touch && !s.word && (s.line === "Working" || s.line === "Fixing");
   const label = [s.title + (s.agent ? ` › ${s.agent}` : ""), s.word, s.line].filter(Boolean).join(". ");
-  return <Pressable accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={label} onPress={() => onSelect(s.key)}
+  return <Pressable ref={trigger.ref} accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={label} accessibilityHint={onMenu ? quickActionsHint(touch) : undefined}
+    onPress={() => onSelect(s.key)} onLongPress={trigger.onLongPress} delayLongPress={450}
     style={state => ({ flexDirection: "row", alignItems: dense ? "flex-start" : "center", gap: touch ? 10 : dense ? 8 : 10, minHeight: touch ? 56 : dense ? 36 : 38, paddingLeft: touch ? 14 : dense ? 8 : 16, paddingRight: touch ? 16 : dense ? 8 : 16, paddingVertical: touch ? 12 : dense ? 6 : 0,
       ...(touch ? { borderBottomWidth: 1, borderBottomColor: withAlpha(c.border, 0.6) } : {}),
       borderLeftWidth: 2, borderLeftColor: blocking ? withAlpha(color, 0.9) : "transparent",
-      backgroundColor: selected ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
+      backgroundColor: selected || menuOpen || state.pressed && touch ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
     <View style={{ width: touch ? 18 : 16, alignItems: "center", paddingTop: touch ? 2 : dense ? 1 : 0 }}>
       {s.tone === "running" && s.icon === "LoaderCircle" ? <Spinner color={color} size={13} label="Running" /> : <Icon name={s.icon} size={touch ? 17 : 15} color={color} />}
     </View>
@@ -296,4 +314,4 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect }: Ro
     </View>{!!s.priority?.reason && <View style={{ paddingRight: 40 }}><PriorityLine reason={s.priority.reason} source={s.priority.source} c={c} /></View>}</View>}
     {!touch && <Age iso={s.at} c={c} size={dense ? 11 : 12} />}
   </Pressable>;
-}, (a, b) => a.sig === b.sig && a.selected === b.selected && a.theme === b.theme && a.dense === b.dense && a.touch === b.touch && a.onSelect === b.onSelect);
+}, (a, b) => a.sig === b.sig && a.selected === b.selected && a.theme === b.theme && a.dense === b.dense && a.touch === b.touch && a.onSelect === b.onSelect && a.onMenu === b.onMenu && a.menuOpen === b.menuOpen);

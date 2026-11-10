@@ -13,6 +13,7 @@ import { meanwhile } from "./questions";
 import { useReviewerSettings } from "./reviewers";
 
 import { overviewKey, workspaceKey } from "./keys";
+import { RichText } from "./rich-text";
 export { overviewKey, workspaceKey };
 
 function glyph(item: NeedItem, colors: Colors): { name: string; color: string } {
@@ -85,8 +86,8 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
       <View style={{ flexDirection: "row", gap: 10 }}>
         <View style={{ paddingTop: 3 }}><Icon name={glyph(featured, c).name} size={16} color={c.statusWarning} /></View>
         <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
-          <Text accessibilityRole="header" style={t.ask}>{featured.title}</Text>
-          {!!featured.detail && !sameText(featured.detail, featured.title.replace(/^Q\d+ · /, "")) && <Text numberOfLines={2} style={[t.body, { color: c.foregroundMuted }]}>{featured.detail}</Text>}
+          <RichText accessibilityRole="header" style={t.ask}>{featured.title}</RichText>
+          {!!featured.detail && !sameText(featured.detail, featured.title.replace(/^Q\d+ · /, "")) && <RichText linkColor={c.foreground} numberOfLines={2} style={[t.body, { color: c.foregroundMuted }]}>{featured.detail}</RichText>}
           <QuestionState workspace={w} questionId={featured.questionId} theme={theme} />
         </View>
       </View>
@@ -103,8 +104,8 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
           <Icon name={g.name} size={16} color={g.color} />
           <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-            <Text numberOfLines={2} style={t.label}>{item.title}</Text>
-            {"detail" in item && !!item.detail && !sameText(item.detail, item.title.replace(/^Q\d+ · /, "")) && <Text numberOfLines={1} style={t.meta}>{item.detail}</Text>}
+            <RichText numberOfLines={2} style={t.label}>{item.title}</RichText>
+            {"detail" in item && !!item.detail && !sameText(item.detail, item.title.replace(/^Q\d+ · /, "")) && <RichText linkColor={c.foreground} numberOfLines={1} style={t.meta}>{item.detail}</RichText>}
           </View>
           {button}
         </View>
@@ -113,8 +114,8 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
         <View style={{ flexDirection: "row", gap: 9 }}>
           <View style={{ paddingTop: 2 }}><Icon name={g.name} size={14} color={g.color} /></View>
           <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
-            <Text style={compact ? t.label : t.body}>{item.title}</Text>
-            {"detail" in item && !!item.detail && !sameText(item.detail, item.title.replace(/^Q\d+ · /, "")) && <Text numberOfLines={item.kind === "question" ? 2 : 3} style={t.meta}>{item.detail}</Text>}
+            <RichText style={compact ? t.label : t.body}>{item.title}</RichText>
+            {"detail" in item && !!item.detail && !sameText(item.detail, item.title.replace(/^Q\d+ · /, "")) && <RichText linkColor={c.foreground} numberOfLines={item.kind === "question" ? 2 : 3} style={t.meta}>{item.detail}</RichText>}
             {item.kind === "question" && <QuestionState workspace={w} questionId={item.questionId} theme={theme} />}
             {item.kind === "send" && !item.finish && <View style={{ gap: 2 }}>
               {item.tasks.slice(0, 4).map((task, i) => <Text key={i} numberOfLines={2} style={t.meta}><Text style={{ fontVariant: ["tabular-nums"] }}>{`${i + 1}. `}</Text>{shortRefs(task, w)}</Text>)}

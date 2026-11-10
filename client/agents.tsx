@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
@@ -6,52 +5,38 @@ import { SettingsAction, SettingsCard, SettingsSection, SettingsSelect, Settings
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { agentSettingsRpc, setAgentSettingRpc, setWaitRpc } from "../shared/contracts";
 import { WAIT_HINT, WAIT_NOT_ATTACHED, WAIT_TITLE, waitNote } from "../shared/wait";
-import { AGENT_ROLES, JOB_PROVIDERS, ROLE_DEFAULTS, ROLE_INFO, isJobRole, modelName, providerName, type AgentRole, type AgentSettingsView, type CatalogProvider, type SavedRole } from "../shared/agent-settings";
+import { isJobRole, type AgentRole, type AgentSettingsView, type SavedRole } from "../shared/agent-settings";
+import { NO_PROMPT_MODE, SETTINGS_ORDER, isReset, resetEntry } from "../shared/job-rows";
+import { JobRows, agentSettingsKey, useAgentSettings, type JobExtra } from "./job-rows";
 import { Button, errorText, text, type Theme } from "./kit";
 
-export const agentSettingsKey = ["follow-through", "agent-settings"];
+export { agentSettingsKey } from "./job-rows";
 const key = agentSettingsKey;
-const SAME = "__same";
 const DEFAULT = "__default";
-/** Each provider's "don't ask" mode, used when a Paseo agent role moves to it. */
-const BYPASS: Record<string, string> = { claude: "bypassPermissions", codex: "full-access" };
 
 type Role = AgentSettingsView["roles"][number];
 
 /**
- * Settings → Agents: one card per special role. What it does and what it uses now, then provider, model, effort,
- * mode and limits. The provider catalog is read once when this screen opens (cached on the server), never polled.
+ * Settings → Agents: the same job rows as setup's Helper agents step (client/job-rows.tsx), plus each row's More with
+ * what only Settings has: permissions, limits, schedule and Reset to defaults. The provider catalog is read once when
+ * this screen opens (cached on the server), never polled.
  */
-export function AgentSettings({ theme, compact, toggles = {} }: Pick<PluginSurfaceProps, "theme"> & { compact: boolean; toggles?: Partial<Record<AgentRole, ReactNode>> }) {
+export function AgentSettings({ theme, compact }: Pick<PluginSurfaceProps, "theme"> & { compact: boolean }) {
   const c = theme.colors; const t = text(c);
-  const read = useRpc(agentSettingsRpc); const write = useRpc(setAgentSettingRpc); const cache = useQueryClient(); const toast = useToast();
-  const query = useQuery({ queryKey: key, queryFn: () => read({ catalog: true }), staleTime: 5 * 60_000,
-    // Only while Paseo is still discovering providers (right after it starts): ask again until they settle.
-    refetchInterval: q => (q.state.data as AgentSettingsView | undefined)?.catalog?.providers.some(p => p.reason === "Still loading") && q.state.dataUpdateCount < 10 ? 5000 : false });
-  const change = useMutation({
-    mutationFn: (input: { role: AgentRole; entry: SavedRole | null }) => write(input),
-    onSuccess: (value, input) => {
-      cache.setQueryData(key, value);
-      void cache.invalidateQueries({ queryKey: ["follow-through", "about"] });
-      const r = value.roles.find(x => x.role === input.role);
-      if (r) toast.show(input.role === "overseer" ? `Overseer: ${r.summary}. Restart it from Home to switch.` : `${ROLE_INFO[input.role].title}: ${r.summary}`, { variant: "success" });
-    },
-    onError: error => toast.error(errorText(error)),
-  });
+  const { query } = useAgentSettings();
   const data = query.data;
-  const info = "Which agent Follow-up uses for each of its own jobs. Defaults: Claude Haiku for summaries, Claude Opus for the Overseer, the main agent's own setup for recovery, Claude Sonnet for priority ranking. Summaries and the ranker are one-shot jobs, so they run on Claude or Codex only; the Overseer and recovery can use any provider Paseo has. Changes apply from the next call; the Overseer switches when you restart it.";
-  return <SettingsSection title="Models" info={info}>
-    {query.isPending && <ActivityIndicator accessibilityLabel="Loading agent settings" color={c.foregroundMuted} style={{ alignSelf: "flex-start", marginVertical: 8 }} />}
-    {query.error && <SettingsCard><SettingsAction label="Couldn't load agent settings" hint={errorText(query.error)} actionLabel="Retry" onPress={() => void query.refetch()} /></SettingsCard>}
-    {data?.catalog?.error && <SettingsCard><SettingsAction label="Couldn't read Paseo's providers" hint={`${data.catalog.error} The current choices still work; pickers show only what's saved.`} actionLabel="Retry" onPress={() => void read({ catalog: true, fresh: true }).then(v => cache.setQueryData(key, v), e => toast.error(errorText(e)))} /></SettingsCard>}
-    {data && AGENT_ROLES.map(role => {
-      const r = data.roles.find(x => x.role === role);
-      return r ? <RoleCard key={role} r={r} invalid={data.invalid.includes(role)} catalog={data.catalog?.providers ?? []} busy={change.isPending} toggle={toggles[role]}
-        save={entry => change.mutate({ role, entry })} theme={theme} compact={compact} /> : null;
-    })}
-    {/* Once, after the cards: what can't be picked and why (the pickers only list what can). */}
-    {!!data?.catalog?.providers.some(p => !p.available) && <Text style={[t.meta, { paddingHorizontal: 4 }]}>{`Not available in Paseo: ${data.catalog.providers.filter(p => !p.available).map(p => `${p.label} (${(p.reason ?? "unavailable").replace(/\.$/, "")})`).join(", ")}.`}</Text>}
-
+  const more: JobExtra = {
+    // The toggle names what's inside, so nobody opens it to find out.
+    label: r => r.role === "ranker" ? "Schedule, limits and reset" : isJobRole(r.role) ? "Limits and reset" : r.same ? null : "Permissions and reset",
+    render: (r, save, busy) => <RoleMore r={r} save={save} busy={busy} theme={theme} compact={compact} invalid={!!data?.invalid.includes(r.role)} />,
+  };
+  const info = "Which agent Follow-up uses for each of its own jobs. Recommended picks come from what Paseo has: with Claude, Haiku for summaries, Sonnet for AI priority, the newest Opus for the Overseer and the main agent's setup for recovery; otherwise a model of the size each job needs. Summaries and AI priority are one-shot jobs: on a provider other than Claude or Codex, each runs as a short hidden agent that's archived when it answers. Changes apply from the next call; the Overseer switches when you restart it.";
+  return <SettingsSection title="Helper agents" info={info}>
+    <SettingsCard>
+      <JobRows theme={theme} compact={compact} order={SETTINGS_ORDER} extra={more} />
+    </SettingsCard>
+    {/* Once, after the rows: what can't be picked and why (the pickers only list what can). */}
+    {!!data?.catalog && unavailableLine(data.catalog.providers) && <Text style={[t.meta, { paddingHorizontal: 4 }]}>{unavailableLine(data.catalog.providers)}</Text>}
   </SettingsSection>;
 }
 
@@ -82,64 +67,27 @@ export function WaitSettings({ theme }: Pick<PluginSurfaceProps, "theme">) {
   </SettingsSection>;
 }
 
-function RoleCard({ r, invalid, catalog, busy, save, theme, compact, toggle }: { r: Role; invalid: boolean; catalog: CatalogProvider[]; busy: boolean; save: (entry: SavedRole | null) => void; theme: Theme; compact: boolean; toggle?: ReactNode }) {
+/** A row's More in Settings: permissions (Paseo agents), limits and schedule (jobs), and Reset to defaults. */
+function RoleMore({ r, save, busy, theme, compact, invalid }: { r: Role; save: (entry: SavedRole | null) => void; busy: boolean; theme: Theme; compact: boolean; invalid: boolean }) {
   const c = theme.colors; const t = text(c);
+  const { query } = useAgentSettings();
+  const catalog = query.data?.catalog?.providers ?? [];
   const role = r.role;
   const jobs = isJobRole(role);
-  const usable = catalog.filter(p => p.available && (!jobs || (JOB_PROVIDERS as readonly string[]).includes(p.id)));
   const current = catalog.find(p => p.id === r.provider);
   const base: SavedRole = { provider: r.provider, model: r.model, thinking: r.thinking, ...(jobs ? {} : { mode: r.mode }), ...(role === "recovery" ? { same: r.same } : {}),
     ...(jobs ? { dailyCap: r.dailyCap ?? undefined, maxPromptChars: r.maxPromptChars ?? undefined } : {}), ...(role === "ranker" ? { cadenceMinutes: r.cadenceMinutes ?? undefined } : {}) };
   const set = (patch: SavedRole) => save({ ...base, ...patch });
-  const providerLabel = providerName(r.provider, current?.label);
-  // Saved on a provider Paseo can't use right now: say so plainly, with what happens and the way out.
-  const blocked = !r.same && catalog.length > 0 && !usable.some(p => p.id === r.provider);
-  const blockedReason = !current ? "not in Paseo's provider list" : !current.available ? (current.reason ?? "unavailable").replace(/\.$/, "") : "can't run one-shot jobs";
-
-  const providerOptions = [
-    ...(role === "recovery" ? [{ value: SAME, label: "Same as main agent" }] : []),
-    ...usable.map(p => ({ value: p.id, label: p.label })),
-    ...(!r.same && !usable.some(p => p.id === r.provider) ? [{ value: r.provider, label: `${providerLabel} · unavailable` }] : []),
-  ];
-  const pickProvider = (value: string) => {
-    if (value === SAME) return set({ same: true });
-    const p = catalog.find(x => x.id === value);
-    const defaults = ROLE_DEFAULTS[role];
-    const same = value === defaults.provider;
-    set({ same: false, provider: value, model: same ? defaults.model : null, thinking: null, ...(jobs ? {} : { mode: same ? defaults.mode : BYPASS[value] ?? p?.defaultMode ?? null }) });
-  };
-
-  const models = current?.models ?? [];
-  const model = r.model ? models.find(m => m.id === r.model) : null;
-  const providerDefault = models.find(m => m.isDefault);
-  const defaultModel = role === "overseer" && r.provider === "claude" ? "Default (newest Opus)" : providerDefault ? `Default (${providerDefault.label})` : "Default";
-  const modelOptions = [{ value: DEFAULT, label: defaultModel }, ...models.map(m => ({ value: m.id, label: m.label })),
-    ...(r.model && !model ? [{ value: r.model, label: modelName(r.model) }] : [])];
-  const thinking = (model ?? providerDefault)?.thinking ?? [];
-  const thinkingDefault = thinking.find(o => o.isDefault);
   const modes = current?.modes ?? [];
   const modeDefault = modes.find(m => m.id === current?.defaultMode);
-  const modeLabel = (m: { id: string; label: string }) => BYPASS[r.provider] === m.id ? `${m.label} · no prompts` : m.label;
-
-  const reset = <Button theme={theme} compact={compact} kind="ghost" icon="RotateCcw" title="Reset to default" accessibilityHint={`Back to ${roleDefaultText(role)}`} disabled={busy || (r.isDefault && !invalid)} onPress={() => save(null)} />;
-  return <SettingsCard>
-    <View style={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10, gap: 2 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <Text accessibilityRole="header" style={[t.title, { flex: 1 }]}>{ROLE_INFO[role].title}</Text>
-        {!compact && reset}
-      </View>
-      <Text style={t.meta}>{ROLE_INFO[role].does}{role === "overseer" ? " A running Overseer keeps its model until you restart it from Home." : ""}</Text>
-      {invalid && <Text style={t.meta}>Part of the saved setting wasn't valid, so its default is used.</Text>}
-      {blocked && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusWarning }]}>{`${providerLabel} isn't available (${blockedReason}). ${role === "about" ? "Summaries will fail" : role === "ranker" ? "Ranking will fail" : role === "overseer" ? "Starting or restarting the Overseer will fail" : "Recovery agents won't start"} until you pick another provider or reset.`}</Text>}
-    </View>
-    {/* The role's own on/off (Overseer, AI priority) leads its card; the model rows follow. */}
-    {toggle}
-    <SettingsSelect label="Provider" value={r.same ? SAME : r.provider} options={providerOptions} disabled={busy || !catalog.length} onValueChange={pickProvider} />
-    {!r.same && <SettingsSelect label="Model" value={r.model ?? DEFAULT} options={modelOptions} disabled={busy || !catalog.length}
-      onValueChange={value => set({ model: value === DEFAULT ? null : value, thinking: null })} />}
-    {!r.same && (thinking.length > 0 || !!r.thinking) && <SettingsSelect label="Effort" hint={!thinking.length && !blocked && model ? "This model lists no effort levels in Paseo; the saved one is still passed on." : undefined} value={r.thinking ?? DEFAULT}
-      options={[{ value: DEFAULT, label: thinkingDefault ? `Default (${thinkingDefault.label})` : "Default" }, ...thinking.map(o => ({ value: o.id, label: o.label })), ...(r.thinking && !thinking.some(o => o.id === r.thinking) ? [{ value: r.thinking, label: r.thinking }] : [])]} disabled={busy}
-      onValueChange={value => set({ thinking: value === DEFAULT ? null : value })} />}
+  const modeLabel = (m: { id: string; label: string }) => NO_PROMPT_MODE[r.provider] === m.id ? `${m.label} · no prompts` : m.label;
+  // Reset puts back the declared defaults, unless they can't run here: then the recommendation, with default limits.
+  const reset = resetEntry(role, query.data?.catalog);
+  const resetDone = isReset(r, query.data?.catalog);
+  const schedule = role === "ranker" ? "limits and schedule" : jobs ? "limits" : "permissions";
+  const resetText = reset.entry ? `Back to the recommended ${reset.label}, with the default ${schedule}.` : `Everything back to ${roleDefaultText(role)}, ${schedule} too.`;
+  return <>
+    {invalid && <Text style={[t.meta, { paddingHorizontal: 16, paddingTop: 10 }]}>Part of the saved setting wasn't valid, so its default is used.</Text>}
     {!jobs && !r.same && modes.length > 0 && <SettingsSelect label="Permissions" hint="It runs unattended, so pick a mode that doesn't prompt." value={r.mode ?? DEFAULT}
       options={[{ value: DEFAULT, label: modeDefault ? `Default (${modeLabel(modeDefault)})` : "Default" }, ...modes.map(m => ({ value: m.id, label: modeLabel(m) }))]} disabled={busy}
       onValueChange={value => set({ mode: value === DEFAULT ? null : value })} />}
@@ -152,9 +100,26 @@ function RoleCard({ r, invalid, catalog, busy, save, theme, compact, toggle }: {
     {role === "ranker" && <SettingsSelect label="At most per day" value={String(r.dailyCap ?? 24)} disabled={busy}
       options={withCurrent([6, 12, 24, 48, 96], r.dailyCap ?? 24).map(n => ({ value: String(n), label: String(n) }))}
       onValueChange={value => set({ dailyCap: Number(value) })} />}
-    {compact && <View style={{ flexDirection: "row", paddingHorizontal: 8, paddingVertical: 6 }}>{reset}</View>}
-  </SettingsCard>;
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: compact ? 14 : 16, paddingVertical: 8, borderTopWidth: 1, borderTopColor: c.border }}>
+      <Text style={[t.meta, { flex: 1 }]}>{resetText}</Text>
+      <Button theme={theme} compact={compact} kind="ghost" title="Reset to defaults" disabled={busy || (resetDone && !invalid)} onPress={() => save(reset.entry)} />
+    </View>
+  </>;
 }
 
 const roleDefaultText = (role: AgentRole) => role === "recovery" ? "the main agent's setup" : role === "overseer" ? "Claude, newest Opus" : role === "about" ? "Claude Haiku" : "Claude Sonnet, hourly";
+/** "Not available in Paseo: Claude and Pi (turned off in Paseo); Antigravity (not installed)." Grouped by reason; a
+ * provider whose name is also on a ready one isn't listed, so the line never contradicts the rows. */
+function unavailableLine(providers: readonly { label: string; available: boolean; reason: string | null }[]): string | null {
+  const ready = new Set(providers.filter(p => p.available).map(p => p.label));
+  const groups = new Map<string, string[]>();
+  for (const p of providers) if (!p.available && !ready.has(p.label)) {
+    // Paseo's reasons can name binaries and PATH; developers here only need "not installed".
+    const why = /not found|PATH|not installed/i.test(p.reason ?? "") ? "not installed" : (p.reason ?? "unavailable").replace(/\.$/, "");
+    groups.set(why, [...(groups.get(why) ?? []), p.label]);
+  }
+  if (!groups.size) return null;
+  const list = (names: string[]) => names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return `Not available in Paseo: ${[...groups].map(([why, names]) => `${list(names)} (${why[0].toLowerCase()}${why.slice(1)})`).join("; ")}.`;
+}
 const withCurrent = (list: number[], value: number) => [...new Set([...list, value])].sort((a, b) => a - b);

@@ -17,6 +17,8 @@ import type { PluginBeforeRequests } from "@getpaseo/plugin/server";
 import { isWorkspaceRoot, type WorkspaceAgent } from "./workspace-agent";
 import { SessionGuard } from "./session-guard";
 import { DeliveryDeferred, ConversationGone } from "./delivery";
+import { timelineRefs } from "../shared/linked-extract";
+import type { LinkRef } from "../shared/linked";
 export { ConversationGone } from "./delivery";
 import { activeWindowMs, isLoaded, recentlyUsed, workspaceActive, conversationGone, DEFAULT_ACTIVE_WINDOW_DAYS, DAY_MS } from "./agent-load";
 import { HistoryCache } from "./history-cache";
@@ -24,7 +26,7 @@ import { DaemonDirectory, type DirectoryRows } from "./directory";
 type RecoveryAgentOptions = Partial<PluginBeforeRequests["agent.create"]["config"]> & { workspaceId: string; labels: Record<string, string>; idempotencyKey: string; env: Record<string, string> };
 
 export const paseoHome = process.env.PASEO_HOME ?? join(homedir(), ".paseo");
-export type Agent = { id: string; provider: string; cwd: string; model?: string | null; currentModeId?: string | null; runtimeInfo?: { modeId?: string | null } | null; thinkingOptionId?: string | null; features?: { id: string; value: unknown }[]; persistence?: { sessionId: string; nativeHandle?: string } | null; title?: string | null; createdAt: string; workspaceId?: string; status: string; archivedAt?: string | null; labels: Record<string, string>; lastUserMessageAt: string | null; pendingPermissions: unknown[]; activeTurn?: unknown; lastError?: string | null };
+export type Agent = { id: string; provider: string; cwd: string; model?: string | null; currentModeId?: string | null; runtimeInfo?: { modeId?: string | null } | null; thinkingOptionId?: string | null; features?: { id: string; value: unknown }[]; persistence?: { sessionId: string; nativeHandle?: string } | null; title?: string | null; createdAt: string; workspaceId?: string; status: string; archivedAt?: string | null; labels: Record<string, string>; lastUserMessageAt: string | null; pendingPermissions: unknown[]; activeTurn?: unknown; lastError?: string | null; /** Paseo 0.16 background agent; absent on 0.15. */ background?: boolean };
 type WorkspaceRow = { id: string; name: string; projectId?: string | null; labels?: string[]; archivingAt?: string | null };
 export interface Daemon {
   connect(): Promise<void>; close(): Promise<void>;
@@ -164,6 +166,11 @@ export class PaseoGateway implements Gateway {
   readonly workspaceCwds = new Map<string, string[]>();
   /** Settings → Agents' "recovery" role; unset or "Same as main agent" copies the main agent. */
   recoveryRole: (() => Promise<RecoveryRole>) | null = null;
+  /**
+   * Linked items' passive ingress: references in the entries this poll read for loaded agents (shared/linked-extract.ts),
+   * per workspace. Only entries past the cached cursor count, so a re-read overlap is never a second sighting.
+   */
+  linkRefs: ((batch: Map<string, LinkRef[]>) => void) | null = null;
   constructor(private connect: typeof withDaemon = withDaemon, private guard = new SessionGuard(join(paseoHome, "plugin-data/session-guard")), private compacting = compactionPending, private histories = new HistoryCache(null), private now = Date.now, readonly directory = new DaemonDirectory(connect, now)) {}
   private dirty = new Set<string>();
   /** Parent ids the directory doesn't list and Paseo didn't know either, until the directory next re-reads. */
@@ -241,8 +248,9 @@ export class PaseoGateway implements Gateway {
     scans.sort((a, b) => (this.histories.get(a.agent.id)?.at ?? 0) - (this.histories.get(b.agent.id)?.at ?? 0) || (b.agent.lastUserMessageAt ?? "").localeCompare(a.agent.lastUserMessageAt ?? ""));
     // Session opening and Track need only ownership metadata. Read transcripts in the poll.
     const due = scans.slice(0, workspaceId ? 0 : 4);
+    const refs = new Map<string, LinkRef[]>();
     if (due.length) await this.connect(async client => {
-      for (const { agent: listed, repo } of due) {
+      for (const { row: dueRow, agent: listed, repo } of due) {
         // The directory may predate the daemon unloading this agent: confirm it is still loaded before reading,
         // since a timeline read would wake it.
         const agent = await this.directory.confirmLoaded(client, listed).catch(() => null);
@@ -254,6 +262,12 @@ export class PaseoGateway implements Gateway {
           const read = (cached?.cursor && cached.history.complete && !cached.history.error ? await readSince(client, agent.id, cached.cursor) : null) ?? await readAll(client, agent.id);
           end = read.end;
           const items = read.entries.map(e => e.item);
+          // Linked items ride this read. Best-effort: a throw here must never mark the history unreadable.
+          if (this.linkRefs) try {
+            const after = cached?.cursor && read.end && cached.cursor.epoch === read.end.epoch ? cached.cursor.seq : -1;
+            const found = timelineRefs(read.entries, after);
+            if (found.length) refs.set(dueRow.id, [...refs.get(dueRow.id) ?? [], ...found]);
+          } catch { /* skipped for this batch */ }
           const fresh = { artifacts: publishedArtifacts(read.entries, agent.id), history: extractHistory(items, read.complete, read.complete ? null : "History exceeds the recovery window; inspect older transcripts during inventory"), submissions: submittedPrs(items, agent.id, repo) };
           if (read.incremental && cached) {
             this.incrementalReads++;
@@ -272,6 +286,7 @@ export class PaseoGateway implements Gateway {
         this.dirty.delete(agent.id);
       }
     });
+    if (refs.size) try { this.linkRefs?.(refs); } catch { /* linked items are best-effort */ }
     for (const row of discovered) {
       const ids = [row.mainAgentId, ...(row.contributorAgentIds ?? [])];
       const cached = ids.flatMap(id => { const h = this.histories.get(id); return h ? [h] : []; });

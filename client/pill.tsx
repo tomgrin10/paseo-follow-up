@@ -9,6 +9,7 @@ import { browserStatusRpc } from "../shared/contracts";
 import { needsYou, type NeedItem } from "../shared/attention";
 import { briefQuestionIds, HEADLINE_ICON, HEADLINE_TONE, pillState, todoLabel, withoutBriefQuestions, type PillState } from "../shared/headline";
 import { snoozeUntil, type InboxRow } from "../shared/inbox";
+import { laterChoices } from "../shared/row-menu";
 import { isOpen as questionOpen } from "../shared/questions";
 import type { Workspace } from "../shared/model";
 import { Button, errorText, text, type Theme } from "./kit";
@@ -127,7 +128,6 @@ function FooterLink({ title, icon, onPress, theme, compact, hint }: { title: str
   </Pressable>;
 }
 
-const LATER = [["hour", "In 1 hour"], ["tonight", "Tonight 18:00"], ["tomorrow", "Tomorrow 09:00"], ["next-event", "Next event"]] as const;
 
 /**
  * The popover. Paseo mounts popover content twice on web (#9103) and may leave a stray copy (#7235), so it
@@ -191,12 +191,12 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
         ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <Text style={t.meta}>Later</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ gap: 6, paddingRight: 8 }}>
-            {LATER.map(([id, title]) => <Chip key={id} title={title.replace(/^In 1 hour$/, "1 hour")} theme={props.theme} compact onPress={() => done(() => void deps.inbox.snooze([agentId], snoozeUntil(id, new Date())))} />)}
+            {laterChoices(new Date()).map(([id, title]) => <Chip key={id} title={title.replace(/^In 1 hour$/, "1 hour")} theme={props.theme} compact onPress={() => done(() => void deps.inbox.snooze([agentId], snoozeUntil(id, new Date())))} />)}
           </ScrollView>
         </View>
         : <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
           <Text style={[t.meta, { marginRight: 2 }]}>Later</Text>
-          {LATER.map(([id, title]) => <Chip key={id} title={title} theme={props.theme} compact={touch} onPress={() => done(() => void deps.inbox.snooze([agentId], snoozeUntil(id, new Date())))} />)}
+          {laterChoices(new Date()).map(([id, title]) => <Chip key={id} title={title} theme={props.theme} compact={touch} onPress={() => done(() => void deps.inbox.snooze([agentId], snoozeUntil(id, new Date())))} />)}
         </View>}
     </View>}
 

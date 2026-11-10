@@ -2,7 +2,7 @@ import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
-  AGENT_ROLES, EMPTY_AGENT_SETTINGS, JOB_PROVIDERS, isJobRole, parseAgentSettings, resolveAll, resolveRole,
+  AGENT_ROLES, EMPTY_AGENT_SETTINGS, isJobRole, parseAgentSettings, resolveAll, resolveRole,
   type AgentRole, type AgentSettingsFile, type Catalog, type CatalogProvider, type RoleConfig, type SavedRole,
 } from "../shared/agent-settings";
 
@@ -82,7 +82,7 @@ function clean(role: AgentRole, entry: SavedRole): SavedRole {
 }
 
 type SnapshotEntry = { provider: string; status?: string; enabled?: boolean; error?: string; label?: string;
-  models?: { id: string; label?: string; isDefault?: boolean; isSelectable?: boolean; thinkingOptions?: { id: string; label?: string; isDefault?: boolean }[] }[];
+  models?: { id: string; label?: string; description?: string; isDefault?: boolean; isSelectable?: boolean; thinkingOptions?: { id: string; label?: string; isDefault?: boolean }[] }[];
   modes?: { id: string; label?: string }[]; defaultModeId?: string | null };
 export type CatalogSource = () => Promise<{ entries?: SnapshotEntry[] } | null>;
 
@@ -93,17 +93,16 @@ export function catalogFrom(entries: SnapshotEntry[]): CatalogProvider[] {
     const reason = e.enabled === false ? "Turned off in Paseo" : ready ? null : e.status === "loading" ? "Still loading" : e.error ? e.error.slice(0, 120) : "Not installed";
     return {
       id: e.provider, label: e.label || e.provider, available: !reason, reason,
-      models: (e.models ?? []).filter(m => m.isSelectable !== false && !/\[1m\]/.test(m.id)).map(m => ({ id: m.id, label: m.label || m.id, isDefault: !!m.isDefault,
+      models: (e.models ?? []).filter(m => m.isSelectable !== false && !/\[1m\]/.test(m.id)).map(m => ({ id: m.id, label: m.label || m.id, isDefault: !!m.isDefault, ...(m.description ? { description: m.description.slice(0, 200) } : {}),
         thinking: (m.thinkingOptions ?? []).map(t => ({ id: t.id, label: t.label || t.id, isDefault: !!t.isDefault })) })),
       modes: (e.modes ?? []).map(m => ({ id: m.id, label: m.label || m.id })), defaultMode: e.defaultModeId ?? null,
     };
   });
 }
 
-/** For a role: which providers it can use. Jobs need a headless CLI, so only Claude and Codex. */
-export function providersFor(role: AgentRole, catalog: CatalogProvider[]): CatalogProvider[] {
-  if (!isJobRole(role)) return catalog;
-  return catalog.map(p => (JOB_PROVIDERS as readonly string[]).includes(p.id) ? p : { ...p, available: false, reason: p.reason ?? "Can't run one-shot jobs; only Claude and Codex can" });
+/** For a role: which providers it can use. Every role can use every provider Paseo has (jobs too, since 1.4.0). */
+export function providersFor(_role: AgentRole, catalog: CatalogProvider[]): CatalogProvider[] {
+  return catalog;
 }
 
 /**

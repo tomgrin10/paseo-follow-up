@@ -4,13 +4,14 @@ import { askQuestion, needsYouQuestions, recordAnswer, syncTaskQuestions, withdr
 import { agentSetSpec, developerSetSpec } from "./server/spec";
 import type { PluginServerContext, PluginHandlerContext, PluginHookContext, PluginSessionOpenRequest } from "@getpaseo/plugin/server";
 import { mkdir, writeFile } from "node:fs/promises";
-import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import * as rpc from "./shared/contracts";
 import { browserRepositories, browserWorkspaces, prClaims, prOwner } from "./server/pr-owner";
 import { type Workspace } from "./shared/model";
 import { isWorkspaceRoot } from "./server/workspace-agent";
+import { BackgroundAgents, backgroundAgentsFile } from "./server/background-agents";
 import { Store } from "./server/store";
 import { PriorityStore } from "./server/priorities";
 import { UsageReader } from "./server/usage";
@@ -57,10 +58,12 @@ import { Overseer, OVERSEER_TOOLS, type OverseerPaseo, type OverseerTool } from 
 import { OVERSEER_LABEL } from "./shared/overseer";
 import { withDaemon } from "./server/daemon";
 import { inboxAnswer } from "./server/etag";
+import { jobAgentRunner, type JobPaseo } from "./server/job-agent";
 import { AiJobs } from "./server/ai-jobs";
 import { liveRankSources, planningUrl, Ranker, RANKER_ROLE_DEFAULT } from "./server/ranker";
 import { AboutService, AboutStore, liveSources, rootHistory, type AboutContext } from "./server/about";
-import { LinkedService, LinkedStore, liveLinkedSources } from "./server/linked";
+import { LinkedService, LinkedStore, liveLinkedSources, type LinkResult } from "./server/linked";
+import { workspaceRefs } from "./shared/linked-extract";
 import { readTranscript } from "./server/transcript";
 import { AgentSettingsStore, ProviderCatalog, type CatalogSource } from "./server/agent-settings";
 import { labelsFor, providerName, resolveRole, roleSummary, type AgentSettingsView } from "./shared/agent-settings";
@@ -150,6 +153,9 @@ export default function contribute(server: PluginServerContext) {
   const engine = new Engine(store, github, gateway);
   engine.wording = { reviewFix: repo => commandName(prWorkflow.reviewFix(repo)) };
   const governor = new Governor();
+  const linked = new LinkedService({ store: new LinkedStore(directory), sources: liveLinkedSources(), roomForBackground: async () => governor.allowsBackground() });
+  // Extraction rides discovery's own timeline batch (loaded agents only): no extra reads (shared/linked-extract.ts).
+  gateway.linkRefs = batch => void linked.note(batch).catch(() => undefined);
   const listCache = new ListCache();
   engine.paused = () => !governor.allowsBackground();
   engine.autoSendsHeld = () => onboarding.holdsAutoSends();
@@ -205,7 +211,7 @@ export default function contribute(server: PluginServerContext) {
             const q = w.questions.find(q => q.id === d.id && brief.questionIds.includes(q.id));
             if (!q || q.answer || q.closed) continue;
             if (brief.state === "superseded" && (current.has(q.id) || q.via === "ask")) continue;
-            if (brief.state === "answered" && d.chosen) q.answer = { choice: d.chosen, at, by: "developer", delivery: { state: "sent", to: agentId, messageId: null, at, reason: null } };
+            if (brief.state === "answered" && d.chosen) q.answer = { choice: d.chosen, ...(d.words ? { words: d.words } : {}), at, by: "developer", delivery: { state: "sent", to: agentId, messageId: null, at, reason: null } };
             else if (brief.state === "superseded") q.closed = { at, reason: "The agent kept going past this brief.", by: null };
           }
         });
@@ -571,6 +577,41 @@ export default function contribute(server: PluginServerContext) {
       return { workspaceId: w.id, spec: w.spec, applied, message };
     });
   });
+  // Linked items: the agent's own workspace (main or a contributor), and the developer's list for any workspace.
+  const linkReceipt = (workspaceId: string, r: LinkResult) => r.ok
+    ? { workspaceId, ok: true, key: r.key, pending: r.pending, message: r.pending ? r.message : `${r.created ? "Linked" : "Already linked"}: ${r.item.title ? `${r.key} · ${r.item.title}` : r.key}.` }
+    : { workspaceId, ok: false, key: null, pending: false, message: r.reason };
+  const linkedDerived = (w: Workspace) => ({ spec: w.spec?.url ? { url: w.spec.url, title: w.spec.title ?? null } : null, artifacts: w.artifacts ?? [] });
+  handle(rpc.linkItemRpc, async ({ agentId, ref, why, title }, { paseo }) => {
+    await requireReady();
+    const w = agentWorkspace(await store.snapshot(), agentId, "write", await callerWorkspaceId(agentId, paseo), "pr");
+    return linkReceipt(w.id, await linked.link(w.id, ref, { origin: "registered", by: agentId, why, title }));
+  });
+  handle(rpc.unlinkItemRpc, async ({ agentId, ref, reason }, { paseo }) => {
+    await requireReady();
+    const w = agentWorkspace(await store.snapshot(), agentId, "write", await callerWorkspaceId(agentId, paseo), "pr");
+    const { removed, key } = await linked.unlink(w.id, ref, agentId, reason);
+    return { workspaceId: w.id, ok: true, key, pending: false, message: removed ? `Unlinked ${key}. It stays out unless the developer adds it back.` : `${key} wasn't linked; it is now kept out.` };
+  });
+  handle(rpc.linkedItemsRpc, async ({ workspaceId }) => {
+    await requireReady();
+    const w = findWorkspace(await store.snapshot(), workspaceId);
+    return linked.view(w.id, linkedDerived(w));
+  });
+  handle(rpc.setLinkedItemsRpc, async input => {
+    await requireReady();
+    const w = findWorkspace(await store.snapshot(), input.workspaceId);
+    let message: string | null = null;
+    if (input.action === "add") {
+      const r = await linked.link(w.id, input.ref, { origin: "manual", by: "developer", title: input.title });
+      if (!r.ok) throw new Error(r.reason);
+      if (r.pending) message = r.message;
+    } else if (input.action === "remove") {
+      // The spec and published artifacts are derived: removing one records the exclusion, and the view leaves it out.
+      await linked.unlink(w.id, input.ref, "developer", null);
+    } else if (!await linked.undo(w.id, input.ref)) message = "Nothing to undo.";
+    return { ...await linked.view(w.id, linkedDerived(w)), message };
+  });
   handle(rpc.workspaceSpecRpc, async input => {
     await requireReady();
     return store.mutate(state => {
@@ -831,7 +872,7 @@ export default function contribute(server: PluginServerContext) {
     return overseer!.act(paseo as unknown as OverseerPaseo, agentId, tool as OverseerTool, args);
   });
   // Summary: small model jobs through the shared runner, cached per workspace in about.json.
-  const aiJobs = new AiJobs({ concurrency: 1, logPath: join(directory, "ai-jobs.jsonl") });
+  const aiJobs = new AiJobs({ concurrency: 1, logPath: join(directory, "ai-jobs.jsonl"), generic: jobAgentRunner({ paseo: () => api as unknown as JobPaseo | null, directory }) });
   // The ranker behind Home's Priority sort (1.4.0-beta.0). Its provider, model and limits come from the ranker role
   // in Settings → Agents. Inputs are read-only: Follow-up's state, mcpproxy, gh, the plan.
   const rankerOn = async () => (await inboxSettings()).enable_ranker !== false;
@@ -902,14 +943,16 @@ export default function contribute(server: PluginServerContext) {
     if (!stopped) aboutTimer = setTimeout(() => void aboutLoop(), 10 * 60_000);
   };
   aboutTimer = setTimeout(() => void aboutLoop(), 60_000);
-  // Linked items (shared/linked.ts): carry over verified About links once, then drain the Linear check queue on the
-  // same 10-minute cadence. An empty queue (the steady state) costs one small file read and no MCP call.
-  const linked = new LinkedService({ store: new LinkedStore(directory), sources: liveLinkedSources(), roomForBackground: async () => governor.allowsBackground() });
+  // Linked items (shared/linked.ts): carry over verified About links once, then note the workspace record's own
+  // references and drain the Linear check queue on the same 10-minute cadence. An empty queue (the steady state)
+  // costs one small file read and no MCP call.
   let linkedTimer: ReturnType<typeof setTimeout> | null = null;
   const linkedLoop = async () => {
     await ready;
     if (stopped || loadError) return;
     await linked.migrate(async () => (await aboutStore.read()).entries).catch(() => undefined);
+    const state = await store.snapshot().catch(() => null);
+    if (state) await linked.note(new Map(state.workspaces.filter(w => w.enable_tracking && !w.archived && !w.dormant).map(w => [w.id, workspaceRefs(w)]))).catch(() => undefined);
     await linked.drain().catch(() => undefined);
     if (!stopped) linkedTimer = setTimeout(() => void linkedLoop(), 10 * 60_000);
   };
@@ -996,9 +1039,9 @@ export default function contribute(server: PluginServerContext) {
     await rename(temporary, needsYouPath(agentId));
     return { ok: true as const, briefId: `brief:${turn?.turnId ?? record.at}` };
   });
-  handle(rpc.briefActionRpc, async ({ agentId, briefId, decisionId, choice, choices, move }, { paseo }) => {
+  handle(rpc.briefActionRpc, async ({ agentId, briefId, decisionId, choice, words, choices, move }, { paseo }) => {
     await requireReady(); seen(paseo);
-    const brief = await inbox.briefAction(agentId, { briefId, decisionId, choice, choices, move }, async (text, messageId) => {
+    const brief = await inbox.briefAction(agentId, { briefId, decisionId, choice, words, choices, move }, async (text, messageId) => {
       await paseo.agents.ref(agentId).send(text, { messageId, activeTurnBehavior: "steer" });
     });
     return { brief };
@@ -1058,7 +1101,14 @@ export default function contribute(server: PluginServerContext) {
   handle(rpc.onboardingChecksRpc, async ({ fresh }, { paseo }) => { await requireReady(); seen(paseo); return readiness.run(!!fresh); });
 
   type SessionOpen = (input: { request: PluginSessionOpenRequest }, context: PluginHookContext) => Promise<PluginSessionOpenRequest | void>;
-  const withWait = (handler: SessionOpen): SessionOpen => async (input, context) => wait.open((await handler(input, context)) ?? input.request);
+  // Paseo 0.16 background agents (another plugin's helpers) get no root treatment: no tools, no Wait, no needs_you or
+  // Stop-hook nudge. The flag is only in the agent snapshot, so session open reads it once per agent.
+  let saveBackground: () => Promise<void> = async () => {};
+  const background = new BackgroundAgents(() => saveBackground());
+  saveBackground = backgroundAgentsFile(directory, () => background.ids);
+  try { background.seed(JSON.parse(readFileSync(join(directory, "background-agents.json"), "utf8"))?.agents); } catch { /* none yet */ }
+  const isBackground = (agentId: string, paseo: PluginHandlerContext["paseo"]) => background.check(agentId, async id => (await paseo.agents.ref(id).refresh())?.agent as { background?: unknown } | undefined);
+  const withWait = (handler: SessionOpen): SessionOpen => async (input, context) => wait.open((await handler(input, context)) ?? input.request, { background: await isBackground(input.request.agentId, context.paseo) });
   const removers = [
     server.on("agent.permission_requested", async (event, { paseo }) => { trustApi = paseo; await trust.handle(event.agent, event.request as never).catch(() => undefined); }),
     displaySettings.subscribe(() => void writeBriefState().catch(() => undefined)),
@@ -1070,7 +1120,8 @@ export default function contribute(server: PluginServerContext) {
     server.on("agent.permission_resolved", async event => gateway.directory.permissionResolved(event.agent.id, event.requestId)),
     server.on("agent.archived", async event => gateway.directory.agentArchived(event.agent.id, event.archivedAt)),
     server.on("agent.closed", async event => gateway.directory.agentClosed(event.agent.id)),
-    server.on("agent.created", async event => { await ready; await gateway.directory.agentCreated(event.agent); }),
+    // 0.16: the background flag first shows up here (it isn't in session_open yet), so the hook learns it now.
+    server.on("agent.created", async (event, { paseo }) => { await ready; await isBackground(event.agent.id, paseo); await gateway.directory.agentCreated(event.agent); }),
     server.on("workspace.created", async event => gateway.directory.workspaceCreated(event.workspace)),
     server.on("workspace.archived", async event => gateway.directory.workspaceArchived(event.workspace.id)),
     server.on("agent.turn_started", async () => updater.activity()),
@@ -1104,6 +1155,7 @@ export default function contribute(server: PluginServerContext) {
     server.before("agent.session_open", withWait(async ({ request }, { paseo }) => {
       await ready;
       if (loadError || stopped || request.purpose !== "interactive") return request;
+      if (await isBackground(request.agentId, paseo)) return request;
       // The Overseer: needs_you (no Stop-hook nudge), the action tools and its routing tools. Never tracked.
       if (request.labels[OVERSEER_LABEL] === "1" && ["claude", "codex"].includes(request.provider)) {
         const env = { ...request.env, FOLLOW_THROUGH_OVERSEER: "1", FOLLOW_THROUGH_BRIEF: request.provider };

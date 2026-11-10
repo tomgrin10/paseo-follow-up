@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { AgentToolDefinition, AgentToolContext, PluginSessionOpenRequest } from "@getpaseo/plugin/server";
-import { WaitJobs, waitInput } from "./wait-jobs";
+import { WaitJobs, waitInput, prepareInput } from "./wait-jobs";
 import type { WaitStatus } from "../shared/wait";
 
 /**
@@ -61,9 +61,9 @@ export class Wait {
     this.tools = [
       {
         name: "wait_prepare_job",
-        description: "For a finite shell command that may take a while and whose result you need before finishing (tests, builds, installs, deploy checks): prepare it here instead of running it directly. Returns jobId and bashCommand and runs nothing. Run that exact bashCommand with native Bash run_in_background=true, then call wait_for_job instead of ending your turn.",
-        input: z.object({ description: z.string().min(1).max(240), command: z.string().min(1).max(32000) }).strict(),
-        execute: async (input, context) => { guard(context); return json(await this.jobs.prepare(owner(context), input as { description: string; command: string })); },
+        description: "For a finite shell command that may take a while and whose result you need before finishing (tests, builds, installs, deploy checks): prepare it here instead of running it directly. Returns jobId and bashCommand and runs nothing. Run that exact bashCommand with native Bash run_in_background=true, then call wait_for_job instead of ending your turn. The command is stopped after timeoutSeconds (default 3 hours, at most 12); a stopped job reports timedOut.",
+        input: prepareInput,
+        execute: async (input, context) => { guard(context); return json(await this.jobs.prepare(owner(context), input as z.input<typeof prepareInput>)); },
       },
       {
         name: "wait_get_job",
@@ -93,8 +93,9 @@ export class Wait {
   }
 
   /** Adds Wait's tools to an interactive Claude session, unless it's off, opted out, or the standalone plugin has it. */
-  async open<R extends PluginSessionOpenRequest>(request: R): Promise<R> {
-    if (request.purpose !== "interactive" || request.provider !== "claude") return request;
+  async open<R extends PluginSessionOpenRequest>(request: R, options: { background?: boolean } = {}): Promise<R> {
+    // A Paseo 0.16 background agent is another plugin's helper: no Wait (server/background-agents.ts).
+    if (options.background || request.purpose !== "interactive" || request.provider !== "claude") return request;
     if (request.labels["plugin-tools/enabled"] === "false" || request.labels["paseo-wait/enabled"] === "false" || request.labels[WAIT_LABEL] === "false") return request;
     if (!Array.isArray(request.tools) || request.tools.some(tool => (WAIT_TOOLS as readonly string[]).includes(tool.name))) return request;
     if (!(await this.deps.enabled())) return request;
