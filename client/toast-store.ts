@@ -11,7 +11,11 @@ import { errorText } from "../shared/errors";
 
 export type ToastTone = "success" | "info" | "warning" | "error";
 export type ToastAction = { label: string; onPress: () => void };
-export type ToastItem = { id: number; tone: ToastTone; message: string; actions: ToastAction[]; sticky: boolean };
+export type ToastItem = { id: number; tone: ToastTone; message: string; actions: ToastAction[]; sticky: boolean;
+  /** Not dropped to make room while it lasts (an Undo window whose work waits on it). */
+  keep?: boolean };
+/** How long a toast lasts, whether it is kept, and what runs when it times out (not when it's dismissed or acted on). */
+export type ToastOptions = { durationMs?: number; keep?: boolean; onExpire?: () => void };
 
 const MAX = 3;
 const DURATION_MS = 4_000;
@@ -22,23 +26,42 @@ export const hosts: number[] = [];
 export const emit = () => { for (const l of listeners) l(); };
 export const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l); }; };
 
-/** Shows a toast. Errors stay until dismissed; the rest go after ~4 s. At most three: the oldest non-error goes first. */
-export function pushToast(tone: ToastTone, message: string, actions: ToastAction[] = []): number {
+type Timer = { handle: ReturnType<typeof setTimeout> | null; left: number; since: number; onExpire?: () => void };
+const timers = new Map<number, Timer>();
+function arm(id: number, t: Timer) {
+  t.since = Date.now();
+  t.handle = setTimeout(() => { timers.delete(id); const live = items.some(x => x.id === id); dismissToast(id); if (live) t.onExpire?.(); }, t.left);
+}
+
+/**
+ * Shows a toast. Errors stay until dismissed; the rest go after ~4 s (or `durationMs`). At most three: the oldest
+ * toast that is neither an error nor kept goes first. A dropped toast never runs its `onExpire`.
+ */
+export function pushToast(tone: ToastTone, message: string, actions: ToastAction[] = [], options: ToastOptions = {}): number {
   const id = nextId++;
   const sticky = tone === "error";
-  items = [...items, { id, tone, message, actions, sticky }];
+  items = [...items, { id, tone, message, actions, sticky, ...(options.keep ? { keep: true } : {}) }];
   while (items.length > MAX) {
-    const drop = items.findIndex(t => !t.sticky);
-    items = items.filter((_, i) => i !== (drop >= 0 ? drop : 0));
+    const drop = items.findIndex(t => !t.sticky && !t.keep);
+    if (drop < 0) break;
+    dismissToast(items[drop].id);
   }
   emit();
-  if (!sticky) setTimeout(() => dismissToast(id), DURATION_MS);
+  if (!sticky) { const t: Timer = { handle: null, left: options.durationMs ?? DURATION_MS, since: 0, onExpire: options.onExpire }; timers.set(id, t); arm(id, t); }
   return id;
 }
 
+/** While the pointer rests on a toast or focus is in it, its time stops: an Undo you're reaching for never runs out. */
+export function holdToast(id: number, held: boolean) {
+  const t = timers.get(id); if (!t) return;
+  if (held && t.handle) { clearTimeout(t.handle); t.handle = null; t.left = Math.max(800, t.left - (Date.now() - t.since)); }
+  else if (!held && !t.handle) arm(id, t);
+}
+
 export function dismissToast(id: number) {
-  if (!items.some(t => t.id === id)) return;
-  items = items.filter(t => t.id !== id); emit();
+  const t = timers.get(id); if (t?.handle) clearTimeout(t.handle); timers.delete(id);
+  if (!items.some(x => x.id === id)) return;
+  items = items.filter(x => x.id !== id); emit();
 }
 
 /** True while a ToastHost is mounted somewhere in Follow-up. */
