@@ -5,8 +5,8 @@ import { emptyInbox, expired, inboxStateSchema, newEntry, reduce, StaleSignOff, 
 import type { State as FollowState, Workspace as FollowWorkspace } from "../shared/model";
 import { prActionBlocks } from "../shared/pr-actions";
 import { configuredReviewers, noReviewers, reviewerLabel, withoutAuthor } from "../shared/reviewers";
-import { classify, newestUserMessage, type Sources } from "./inbox-classifier";
-import { briefOrigin, briefStep, pickBrief, type Brief, type BriefEvent, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
+import { classify, turnPrompt, type Sources } from "./inbox-classifier";
+import { briefOrigin, briefStep, pickBrief, shouldReopen, type Brief, type BriefEvent, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
 
 /** The flag store: plugin-data/follow-through/inbox.json. A new file, so existing state never changes shape. */
 export class InboxStore {
@@ -264,10 +264,11 @@ export class Inbox {
     const at = this.now();
     this.turns.set(agent.id, { turnId: turnId ?? null, at });
     const items = await this.o.directory.tail(agent.id, 20).catch(() => []);
-    const message = newestUserMessage(items);
-    const sender = await classify(message, agent.id, at, this.o.sources);
-    // The developer's message answers the open brief; anything else means the agent kept going.
-    const brief: BriefEvent = sender === "tom" ? { type: "message", text: message?.text ?? null } : { type: "turn_start" };
+    const prompt = turnPrompt(items);
+    const sender = prompt.from ?? await classify(prompt.message, agent.id, at, this.o.sources);
+    // Only the developer's own message answers the open brief. Another agent's message, Follow-up's prompts, a
+    // continuation after compaction or a schedule start a turn but leave the card open: its questions still are.
+    const brief: BriefEvent = sender === "tom" ? { type: "message", text: prompt.message?.text ?? null } : { type: "turn_start" };
     await this.apply([{ agentId: root.rootId, event: { type: "message", from: sender === "tom" ? "tom" : "automation" }, brief: () => brief }]);
   }
 
@@ -631,6 +632,32 @@ export class Inbox {
     // D8, one way: signing off also clears Paseo's own unread dot.
     if (cleared.length) await this.o.directory.clearAttention(cleared).catch(() => undefined);
     return { results };
+  }
+
+  /**
+   * One-time repair (1.4.0-beta.25): an agent's current card that a non-developer turn collapsed while its questions are
+   * still open comes back open, in the inbox and in the chat (the timeline item is re-appended with the same id).
+   * Only cards collapsed in the last week; `openQuestions` says which of an agent's linked questions are open.
+   */
+  async reopenCollapsed(openQuestions: (agentId: string, ids: string[]) => Promise<ReadonlySet<string>>): Promise<string[]> {
+    const state = await this.store.snapshot();
+    const due: string[] = [];
+    for (const [agentId, e] of Object.entries(state.entries)) {
+      const b = e?.brief;
+      if (!b || b.state === "open" || !b.questionIds.length || !b.outcomeAt || this.now() - Date.parse(b.outcomeAt) > 7 * 86_400_000) continue;
+      if (shouldReopen(b, await openQuestions(agentId, b.questionIds).catch(() => new Set<string>()), false)) due.push(agentId);
+    }
+    const appends: { agentId: string; brief: Brief }[] = [];
+    if (due.length) await this.store.mutate(s => {
+      for (const agentId of due) {
+        const b = s.entries[agentId]?.brief;
+        if (!b || b.state === "open") continue;
+        const reopened: Brief = { ...b, state: "open", outcome: null, outcomeAt: null };
+        s.entries[agentId]!.brief = reopened; appends.push({ agentId, brief: reopened });
+      }
+    });
+    await this.flush(appends);
+    return appends.map(a => a.agentId);
   }
 
   /** The stored brief for one agent, for Home's detail pane. */
