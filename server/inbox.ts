@@ -106,9 +106,10 @@ export type InboxOptions = {
 /** Decides the brief step for one event from the entry before and after it. */
 export type BriefDecider = (prev: Entry, next: Entry, at: string) => BriefEvent | null;
 /** Brief steps every inbox event implies: sign-off collapses, undo reopens, an answered prompt retires its slim brief. */
-export function autoBrief(event: InboxEvent): BriefEvent | null {
+export function autoBrief(event: InboxEvent, prev?: Entry): BriefEvent | null {
   if (event.type === "sign_off") return { type: "sign_off" };
-  if (event.type === "undo") return { type: "undo" };
+  // Undoing a Later only moves the snooze back: the brief was never collapsed, so nothing reopens.
+  if (event.type === "undo") return prev?.undo?.kind === "snooze" ? null : { type: "undo" };
   if (event.type === "permission_resolved") return { type: "permission_resolved" };
   return null;
 }
@@ -190,7 +191,7 @@ export class Inbox {
         const prev = state.entries[agentId] ?? newEntry(agentId);
         const next = reduce(prev, event, at);
         state.entries[agentId] = next;
-        const steps = [autoBrief(event), brief?.(prev, next, at) ?? null].filter((s): s is BriefEvent => !!s);
+        const steps = [autoBrief(event, prev), brief?.(prev, next, at) ?? null].filter((s): s is BriefEvent => !!s);
         for (const step of steps) this.step(state, agentId, step, at, appends);
       }
     });
@@ -595,7 +596,7 @@ export class Inbox {
           const ev = event(agentId);
           try { state.entries[agentId] = reduce(prev, ev, at); results.push({ agentId, ok: true, cameBack: false }); }
           catch (error) { if (!(error instanceof StaleSignOff)) throw error; results.push({ agentId, ok: false, cameBack: true }); continue; }
-          const step = autoBrief(ev);
+          const step = autoBrief(ev, prev);
           if (step) this.step(state, agentId, step, at, appends);
         }
       };

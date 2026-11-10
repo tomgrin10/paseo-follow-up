@@ -7,7 +7,8 @@
   workspace, reading it, or Paseo's unread dot never clears it, and an agent can't clear its own flag.
 - **Pure logic** is in `shared/inbox.ts`: the reducer, `REASONS` in urgency order (permission, error, paused, ci,
   review, reviewers, finished, pr_closed), snoozes (`next-event`, an ISO time, or `pr:<repo#n>`), finish flags, and
-  undo.
+  undo. Undo covers the last sign-off or Later: a Later's undo puts back the snooze it replaced, unless a flag broke
+  that snooze since. The Undo bar and the pill say which one it was ("Signed off", "Later · until 09:00").
 - **Storage and loop.** `server/inbox.ts` stores `inbox.json` (`InboxStore`). `Inbox` turns lifecycle events into
   reducer events (`turnStarted`, `turnEnded`, `permissionRequested`…). `tick()` runs every 15 s from `inboxLoop`
   in `index.server.ts`.
@@ -35,7 +36,7 @@
 | `sign_off` | `{ agentIds }` |
 | `snooze` | `{ agentIds, until }`: `next-event`, `1h`, `tomorrow` or an ISO time |
 | `set_finish_flags` | `{ agentIds, value }`: whether finished turns flag them |
-| `inbox_act` | `{ action, agentIds, muteTurn? }`, where `action` is `undo`, `mute_turn`, `unsorted_flag`, `unsorted_sign_off` or `batch_undo` |
+| `inbox_act` | `{ action, agentIds, muteTurn? }`, where `action` is `undo` (the last sign-off or Later), `mute_turn`, `unsorted_flag`, `unsorted_sign_off` or `batch_undo` |
 
 ## The brief and `needs_you`
 

@@ -5,7 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { controlRpc, sendRpc, setFollowSettingsRpc, workspaceAboutRpc } from "../shared/contracts";
 import { needsYou } from "../shared/attention";
 import { snoozeUntil, wakeLabel } from "../shared/inbox";
-import { LATER_CHOICES, rowMenu, type LaterChoice, type RowMenuItem } from "../shared/row-menu";
+import { rowMenu, type LaterChoice, type RowMenuItem } from "../shared/row-menu";
 import type { Workstream } from "../shared/home";
 import { aboutKey } from "./about";
 import { bindToast, runAction } from "./actions";
@@ -48,11 +48,8 @@ export function useRowMenu(host: RowMenuHost) {
       const workspaceId = s.workspaceId ?? "";
       const arg = item.arg ?? "";
       switch (item.action) {
-        case "later": {
-          const label = LATER_CHOICES.find(([id]) => id === arg)?.[1] ?? "Later";
-          return runAction({ label: "Later", run: () => inbox.snooze([s.agentId!], snoozeUntil(arg as LaterChoice, new Date())), success: `Later · ${label}` }, `later:${s.key}`);
-        }
-        // The Undo bar already says it and offers Undo; no toast on top.
+        // Later and Sign off: the Undo bar already says it and offers Undo; no toast on top.
+        case "later": return runAction({ label: "Later", run: () => inbox.snooze([s.agentId!], snoozeUntil(arg as LaterChoice, new Date())), success: null }, `later:${s.key}`);
         case "sign_off": return runAction({ label: "Sign off", run: () => inbox.signOff([s.agentId!]), success: null }, `sign_off:${s.key}`);
         case "answer": return runAction({ label: "Answer", run: async () => openQuestion(s, arg), success: null });
         case "send_repairs": return runAction({ label: "Send repairs", run: async () => { const r = await send({ workspaceId, batchId: arg }); after(); return r; },
