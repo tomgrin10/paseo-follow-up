@@ -28,6 +28,8 @@ import type { OnboardingView } from "../shared/onboarding";
 import { withAlpha, isLight, mergedColor, type Colors } from "./theme";
 import { UpdateNotice } from "./updates";
 import { ReleaseNotesSheet, VersionLine, WhatsNewGate } from "./release-notes";
+import { useRowMenu } from "./row-actions";
+import { laterChoices } from "../shared/row-menu";
 
 export const HOME_SCREEN = "follow-through";
 
@@ -42,7 +44,7 @@ export type HomeDeps = {
   openLog(): void;
   openHome(): void;
   /** Phones: open one Home item as its own screen, so the host's ← (and Android back) returns to the list. */
-  openItem?(key: string): void;
+  openItem?(key: string, extra?: { question?: string }): void;
   briefDeps: BriefDeps;
 };
 
@@ -114,6 +116,15 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
     // The explorer needs the workspace route first; then dock that workspace's panel beside the chat.
     if (!compact && s.workspaceId) { const id = s.workspaceId; setTimeout(() => deps.openPanel(id), 900); }
   }, [navigation, compact, deps]);
+  // The row menu's Answer: select the row (phones: open its screen) with that question's card open.
+  const [ask, setAsk] = useState<{ key: string; id: string; n: number } | null>(() => params.question && params.item ? { key: params.item, id: params.question, n: 1 } : null);
+  const openQuestion = useCallback((s: Workstream, id: string) => {
+    if (route) { deps.openItem?.(s.key, { question: id }); return; }
+    setSelected(s.key); setAsk(a => ({ key: s.key, id, n: (a?.n ?? 0) + 1 }));
+  }, [route, deps]);
+  const omniRef = useRef(omnibox); omniRef.current = omnibox;
+  const prefillAsk = useCallback((text: string) => { omniRef.current.setQuery(text); setTimeout(() => omniRef.current.inputRef.current?.focus(), 0); }, []);
+  const rowMenu = useRowMenu({ sources: deps.sources, openFull, openQuestion, prefillAsk, overseerOn: !!overseerStatus?.enabled });
   const signOffNext = useCallback((s: Workstream) => {
     if (s.agentId) void inbox.signOff([s.agentId]);
     const next = nextNeeds(model, s.key);
@@ -133,12 +144,12 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
   const detail = selected === OVERSEER_KEY && overseer
     ? <OverseerPane theme={theme} compact={compact} o={overseer} focus={replyFocus} pending={pendingAsk} agentId={overseerStatus?.agentId ?? null} model={overseerStatus?.model ?? null} restartWith={overseerStatus?.restartWith ?? null} configured={overseerStatus?.configured ?? null} deps={deps} navigation={navigation} onBack={compact && !route ? () => setSelected(null) : undefined} />
     : current
-    ? <DetailPane key={current.key} s={current} model={model} theme={theme} compact={compact} deps={deps} openFull={openFull} signOffNext={signOffNext} onBack={compact && !route ? () => setSelected(null) : undefined} />
+    ? <DetailPane key={current.key} s={current} model={model} theme={theme} compact={compact} deps={deps} openFull={openFull} signOffNext={signOffNext} ask={ask?.key === current.key ? ask : null} onBack={compact && !route ? () => setSelected(null) : undefined} />
     : <BriefPane theme={theme} compact={compact} pane={pane} onSelect={key => route ? route(key) : setSelected(key)} openLog={deps.openLog} sources={deps.sources} />;
   // Nothing followed at all: no sort, no meters, just the empty state and its action.
   const nothing = model.groups.every(g => !g.items.length);
   const list = <HomeList model={model} theme={theme} dense={compact} touch={compact} selectedKey={selected} onSelect={onSelect} briefLine={briefLine}
-    results={omnibox.results} activeResult={omnibox.active} onResult={item => void pick(item)} filter={filter} overseer={overseer} asking={asking}
+    results={omnibox.results} activeResult={omnibox.active} onResult={item => void pick(item)} filter={filter} overseer={overseer} asking={asking} menu={rowMenu}
     // Phones: the host header already says Follow-up, so no "Home" title row; search, sort and settings share one row and
     // the meters move to the end of the list.
     footer={omnibox.results ? undefined : compact
@@ -250,9 +261,11 @@ function useTail(handle: ReturnType<typeof useAgentLive>["handle"], key: string,
   return { steps, error, seenAt, asleep, loading, woken: wake > 0, load: () => setWake(n => n + 1) };
 }
 
-function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onBack }: {
+function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask, onBack }: {
   s: Workstream; model: HomeModel; theme: Theme; compact: boolean; deps: HomeDeps;
   openFull: (s: Workstream) => void; signOffNext: (s: Workstream) => void; onBack?: () => void;
+  /** The row menu's Answer: open this question's card (n changes on every pick, so the same question reopens). */
+  ask?: { id: string; n: number } | null;
 }) {
   const c = theme.colors; const t = text(c, compact);
   const toast = useToast();
@@ -266,7 +279,8 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
   const browserRead = useRpc(browserStatusRpc);
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" } | null>(null);
   const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), refetchInterval: BROWSER_POLL_MS, enabled: !!sheet });
-  const [question, setQuestion] = useState<string | null>(null);
+  const [question, setQuestion] = useState<string | null>(() => ask?.id ?? null);
+  useEffect(() => { if (ask) setQuestion(ask.id); }, [ask?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   const [laterOpen, setLaterOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const b = brief.data?.brief?.state === "open" ? brief.data.brief : null;
@@ -330,12 +344,12 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
       <Button theme={theme} compact={compact} icon="AlarmClock" title="Later…" onPress={() => setLaterOpen(v => !v)} />
     </View>
     {laterOpen && <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-      {([["hour", "In 1 hour"], ["tonight", "Tonight 18:00"], ["tomorrow", "Tomorrow 09:00"], ["next-event", "Next event"]] as const).map(([k, label]) =>
+      {laterChoices(new Date()).map(([k, label]) =>
         <Button key={k} theme={theme} compact={compact} kind="ghost" title={label} onPress={() => { setLaterOpen(false); void inbox.snooze([s.agentId!], snoozeUntil(k, new Date())); }} />)}
     </View>}
   </View>;
 
-  const laterTimes = [["hour", "In 1 hour"], ["tonight", "Tonight 18:00"], ["tomorrow", "Tomorrow 09:00"], ["next-event", "Next event"]] as const;
+  const laterTimes = laterChoices(new Date());
   // Phones: the moves sit in the dock above the composer, in thumb reach, on one row: Sign off, Sign off & next, Later.
   const narrow = useWindowDimensions().width < 380;
   const moves = compact && canMove && !typing && <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingTop: 10 }}>
