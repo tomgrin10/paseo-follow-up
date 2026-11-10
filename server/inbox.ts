@@ -699,7 +699,9 @@ export class Inbox {
     const rootsPer = new Map<string, number>();
     for (const { agent } of roots.values()) if (agent.workspaceId) rootsPer.set(agent.workspaceId, (rootsPer.get(agent.workspaceId) ?? 0) + 1);
     const row = (agent: AgentInfo, delegatedFrom: string | null, e: Entry | undefined): InboxRow => {
-      const live = liveFlag(agent.status, e?.needs ?? null, e?.brief ? { kind: e.brief.kind, source: e.brief.source, state: e.brief.state, ask: e.brief.ask, questionIds: e.brief.questionIds } : null);
+      const turn = this.turns.get(agent.id);
+      const turnStartedAt = turn && ["running", "initializing"].includes(agent.status) ? new Date(turn.at).toISOString() : null;
+      const live = liveFlag(agent.status, e?.needs ?? null, e?.brief ? { kind: e.brief.kind, source: e.brief.source, state: e.brief.state, ask: e.brief.ask, questionIds: e.brief.questionIds, at: e.brief.at } : null, turnStartedAt);
       return {
       agentId: agent.id, workspaceId: agent.workspaceId, title: agent.title || "Agent",
       workspaceTitle: agent.workspaceId ? names.get(agent.workspaceId) ?? null : null,
@@ -709,6 +711,7 @@ export class Inbox {
       needs: live.needs, snooze: e?.snooze ?? null, signedOffAt: e?.signedOffAt ?? null,
       undoable: !!e?.undo && Date.parse(e.undo.expires) > now, seq: e?.seq ?? 0, muteTurn: e?.muteTurn ?? false, enable_finish_flags: e?.enable_finish_flags ?? true,
       brief: live.brief,
+      turnStartedAt,
       };
     };
     const rows: InboxRow[] = [];
