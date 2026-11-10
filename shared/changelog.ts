@@ -58,12 +58,31 @@ export type WhatsNewInput = {
 export type WhatsNew =
   | { show: true; notes: ReleaseNote[] }
   /** `record` is the version to store as seen without showing anything (first install, downgrade, nothing new). */
-  | { show: false; reason: "first-run" | "onboarding" | "seen" | "older" | "no-notes"; record: string | null };
+  | { show: false; reason: "first-run" | "onboarding" | "seen" | "older" | "not-major" | "no-notes"; record: string | null };
+
+/** The major a version belongs to once released: a prerelease of X.0.0 (2.0.0-beta.1) is still before X. */
+function releasedMajor(v: string): number | null {
+  const p = parseVersion(v);
+  if (!p) return null;
+  return p.pre.length && p.minor === 0 && p.patch === 0 ? p.major - 1 : p.major;
+}
+
+/**
+ * The one rule for every prompt Follow-up makes about its own updates (the What's new sheet, and any update notice):
+ * only a newly released major version earns one (1.x to 2.0). Betas, minors and patches are recorded quietly; their
+ * changes wait in changes/ and ship in the next stable release's notes. A first install (no `from`) is never announced.
+ */
+export function announcesUpdate(from: string | null, to: string): boolean {
+  if (!from) return false;
+  const a = releasedMajor(from), b = releasedMajor(to);
+  return a != null && b != null && b > a;
+}
 
 /**
  * Whether this device shows "What's new" now. With no baseline at all (no device record and no previous daemon
  * version) this is a first install: onboarding covers it, so the installed version is recorded silently. Onboarding
- * wins over the sheet and leaves the stored version alone, so the sheet can come after onboarding ends.
+ * wins over the sheet and leaves the stored version alone, so the sheet can come after onboarding ends. Only a new
+ * major opens it (announcesUpdate); any other update records the installed version silently.
  */
 export function whatsNew({ installed, deviceSeen, previous, onboarding, notes }: WhatsNewInput): WhatsNew {
   if (onboarding) return { show: false, reason: "onboarding", record: null };
@@ -72,6 +91,7 @@ export function whatsNew({ installed, deviceSeen, previous, onboarding, notes }:
   const c = compareVersions(installed, lastSeen);
   if (c === 0) return { show: false, reason: "seen", record: deviceSeen ? null : installed };
   if (c < 0) return { show: false, reason: "older", record: installed };
+  if (!announcesUpdate(lastSeen, installed)) return { show: false, reason: "not-major", record: installed };
   const since = notesSince(notes, lastSeen, installed);
   return since.length ? { show: true, notes: since } : { show: false, reason: "no-notes", record: installed };
 }
@@ -100,10 +120,14 @@ export const releaseNotesViewSchema = z.object({
 });
 export type ReleaseNotesView = z.infer<typeof releaseNotesViewSchema>;
 
-/** Home's "Updated to X 2h ago · What's new" line shows for three days after an update. */
+/**
+ * Home's "Updated to X 2h ago · What's new" line shows for three days after an update to a version with notes of its
+ * own. Betas ship none, so after one the line stays "Follow-up X · Release notes" rather than opening an empty sheet.
+ */
 export const RECENT_UPDATE_MS = 3 * 86_400_000;
-export function recentUpdate(view: Pick<ReleaseNotesView, "previous" | "updatedAt">, now: number): boolean {
-  return !!view.previous && view.updatedAt != null && now - view.updatedAt >= 0 && now - view.updatedAt < RECENT_UPDATE_MS;
+export function recentUpdate(view: Pick<ReleaseNotesView, "version" | "previous" | "updatedAt" | "notes">, now: number): boolean {
+  if (!view.previous || view.updatedAt == null || now - view.updatedAt < 0 || now - view.updatedAt >= RECENT_UPDATE_MS) return false;
+  return view.notes.some(n => n.version === view.version && n.items.length > 0);
 }
 /** The notes What's new shows when opened by hand: everything since the previous version, else this version's own. */
 export function recentNotes(view: Pick<ReleaseNotesView, "version" | "previous" | "notes">): ReleaseNote[] {

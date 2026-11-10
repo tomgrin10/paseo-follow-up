@@ -66,10 +66,10 @@ test("self: the package's version and notes are read from its own folder", async
 
 const notes: ReleaseNote[] = [22, 21, 20].map(n => ({ version: `1.4.0-beta.${n}`, date: null, items: [`Note ${n}.`] }));
 test("recent: Home's Updated line lasts three days after a real update", () => {
-  assert.equal(recentUpdate({ previous: "1.4.0-beta.21", updatedAt: 0 }, RECENT_UPDATE_MS - 1), true);
-  assert.equal(recentUpdate({ previous: "1.4.0-beta.21", updatedAt: 0 }, RECENT_UPDATE_MS), false);
-  assert.equal(recentUpdate({ previous: null, updatedAt: 0 }, 1), false, "fresh install");
-  assert.equal(recentUpdate({ previous: "1.4.0-beta.21", updatedAt: null }, 1), false);
+  assert.equal(recentUpdate({ version: "1.4.0-beta.22", notes, previous: "1.4.0-beta.21", updatedAt: 0 }, RECENT_UPDATE_MS - 1), true);
+  assert.equal(recentUpdate({ version: "1.4.0-beta.22", notes, previous: "1.4.0-beta.21", updatedAt: 0 }, RECENT_UPDATE_MS), false);
+  assert.equal(recentUpdate({ version: "1.4.0-beta.22", notes, previous: null, updatedAt: 0 }, 1), false, "fresh install");
+  assert.equal(recentUpdate({ version: "1.4.0-beta.22", notes, previous: "1.4.0-beta.21", updatedAt: null }, 1), false);
   assert.deepEqual(recentNotes({ version: "1.4.0-beta.22", previous: "1.4.0-beta.20", notes }).map(n => n.version), ["1.4.0-beta.22", "1.4.0-beta.21"]);
   assert.deepEqual(recentNotes({ version: "1.4.0-beta.22", previous: null, notes }).map(n => n.version), ["1.4.0-beta.22"], "no baseline: this version's own notes");
 });
