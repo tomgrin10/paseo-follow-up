@@ -59,8 +59,9 @@ they need a running `npm run preview` and read `.preview-isolated.json`. Some dr
 Home by URL and waits for the Status strip and search field, `homeRow` finds a row in Home's column (never the
 sidebar entry with the same title), and both throw with a screenshot instead of shooting the wrong page.
 
-`scripts/fixture-provider.ts` is the synthetic agent provider these daemons use, and `scripts/harness.mjs` gives them
-their slot and cleanup (below). `scripts/daemon-counter.mjs` and
+`scripts/fixture-provider.ts` is the synthetic agent provider these daemons use. Its `fixture-scripts.json` mode
+plays a scripted turn (timeline items, Follow-up RPCs, a permission) for a given prompt, for `scripts/screenshots.mjs`.
+`scripts/harness.mjs` gives them their slot and cleanup (below). `scripts/daemon-counter.mjs` and
 `scripts/heap-summary.mjs` are measurement helpers ([resources.md](resources.md)).
 
 ## Rules for harness daemons
@@ -98,6 +99,34 @@ their slot and cleanup (below). `scripts/daemon-counter.mjs` and
   `systemd-run --user --scope -p MemoryMax=4G npm run test:scale`.
 - **Live model calls** (`check-wait`) cost a few cents. Re-run single cases with
   `npm run test:wait-live -- --cases message,failure`.
+
+## Screenshots
+
+`npm run shots` (`scripts/screenshots.mjs`) re-shoots every README image from the current UI. Run it through the
+harness slot:
+
+```sh
+PLAYWRIGHT_CORE=<playwright-core dir> CHROMIUM=<chromium binary> ~/paseo-harness/tools/harness-slot npm run shots -- --out <dir>
+```
+
+- **What it does.** Starts one isolated daemon (the packed plugin, the fixture provider, the web UI, a fake `gh`),
+  seeds synthetic workspaces through Follow-up's own RPCs and scripted fixture turns, shoots with headless Playwright,
+  and stops the daemon on success and on failure. It needs the Paseo CLI 0.15.x.
+- **Deterministic.** Fixed seed data and fixed clocks: the daemon and worker run with a shifted `Date` (a preload),
+  and the browser's clock is frozen with `page.clock`. The server id is fixed and project ids come from a counter, so
+  the sidebar's project avatar keeps its colour. Two runs give the same images. It waits on UI states, not
+  sleeps.
+- **Synthetic only.** `example/app`, made-up people (Dana, Ravi), Linear-style keys (`APP-142`, `WEB-17`). Never real
+  repos, names, channels or anything from a real Paseo home. This is a public repo.
+- **Shots** (PNG, into `--out`, default `docs/screenshots/`): `setup`, `home`, `panel`,
+  `questions`, `pill`, `pr-sheet`, `phone`, `whats-new`. `context-menu` and `linked-items` are stubs for now and are
+  skipped with a log line. `--only a,b` shoots a subset.
+- **Theme.** Dark for desktop shots, light for the phone shot; `--scheme dark|light` overrides both.
+- **What's new** is shot after a reinstall as `2.0.0-rc.0` over `1.4.0-beta.32`, with a `## 2.0.0` section;
+  `--whats-new-changelog <file>` uses that CHANGELOG.md instead of the built-in one.
+- **Size** (aim under ~300 KB each). With `pngquant` (lossy palette) or `oxipng` on PATH, shots are taken at
+  deviceScaleFactor 2 and optimised. Without either, desktop shots use deviceScaleFactor 1.25 and Playwright's own PNG
+  (the phone shot stays at 2). `--scale <n>` sets the desktop factor.
 
 ## UI
 
