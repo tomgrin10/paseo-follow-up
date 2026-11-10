@@ -36,7 +36,8 @@
     "check:notes": "node scripts/release-notes.mjs --check",
     "release:notes": "node scripts/release-notes.mjs",
     "test:wait": "node scripts/check-wait.mjs",
-    "test:wait-live": "node scripts/check-wait.mjs --live"
+    "test:wait-live": "node scripts/check-wait.mjs --live",
+    "shots": "node scripts/screenshots.mjs"
   },
   "devDependencies": {
     "@getpaseo/client": "0.14.0",
