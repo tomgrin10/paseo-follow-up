@@ -3,6 +3,7 @@ import { Icon } from "@getpaseo/plugin/client/ui";
 import type { Workspace } from "../shared/model";
 import { ago, headline, liveLine, stackBar, type LiveIcon } from "../shared/attention";
 import { Button, IconButton, Switch, text, type Theme } from "./kit";
+import { VersionMark } from "./updates";
 import { IconSwap, Spinner } from "./motion";
 import { segmentPaint, type Colors } from "./theme";
 import { SpecChip } from "./spec";
@@ -87,6 +88,8 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
         so the Summary (or the goal, until there is one) is the first line under it. */}
     <View style={{ flexDirection: "row", alignItems: "center", minHeight: 44, marginLeft: -14 }}>
       <Button theme={theme} compact kind="ghost" icon="House" title="Home" accessibilityHint="Opens Follow-up Home with every workspace" onPress={onHome} />
+      {/* The version sits with Home, as on Home's own title line, not beside the cog. */}
+      <View style={{ marginLeft: 8 }}><VersionMark theme={theme} touch openSettings={onSettings} /></View>
       <View style={{ flex: 1 }} />
       <View style={{ marginVertical: 12 }}>{controls}</View>
     </View>

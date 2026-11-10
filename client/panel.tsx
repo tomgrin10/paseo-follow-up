@@ -15,6 +15,7 @@ import { settledForDisplay } from "../shared/presentation";
 import { ago, shortRefs } from "../shared/attention";
 import { agentCard, unconfirmedNote } from "../shared/status";
 import { Button, Card, CardRow, FoldRow, IconButton, errorText, text, useNow, type Theme } from "./kit";
+import { VersionMark } from "./updates";
 import { Reveal, Skeleton } from "./motion";
 import { WorkspaceHeader } from "./header";
 import { NeedsYouCard, overviewKey, workspaceKey } from "./needs-you";
@@ -129,6 +130,7 @@ export function PanelTop({ theme, compact, openOverview, openSettings }: { theme
   return <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: compact ? 12 : 8, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: c.border }}>
     <Button theme={theme} compact={compact} kind="ghost" icon="House" title="Home" accessibilityHint="Opens Follow-up Home with every workspace" onPress={openOverview} />
     <View style={{ flex: 1 }} />
+    {openSettings && <VersionMark theme={theme} touch={compact} openSettings={openSettings} />}
     {openSettings && <IconButton icon="Settings" label="Follow-up settings" onPress={openSettings} theme={theme} compact={compact} />}
   </View>;
 }
@@ -152,7 +154,7 @@ function PanelWorkspace(props: PanelProps & { workspace: Workspace; loadError?: 
   const toggle = (key: string) => { const next = isOpen(key) ? state.open.filter(k => k !== key) : [...state.open, key]; sessionFolds.set(props.workspaceId, next); setState({ open: next }); };
   const { openLarge } = props;
   const compact = props.layout.compact;
-  const top = <PanelTop theme={props.theme} compact={compact} openOverview={props.openOverview} />;
+  const top = <PanelTop theme={props.theme} compact={compact} openOverview={props.openOverview} openSettings={props.openSettings} />;
   const ask = props.inbox && props.briefDeps ? <MainAsk w={props.workspace} theme={props.theme} compact={compact} inbox={props.inbox} briefDeps={props.briefDeps} /> : null;
   return <WorkspaceView {...props} top={top} ask={ask} folds={{ isOpen, toggle }} resize={openLarge ? { icon: "Maximize2", label: "Open the larger view", onPress: () => openLarge(props.workspaceId) } : null} />;
 }

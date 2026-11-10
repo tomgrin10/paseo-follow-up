@@ -26,8 +26,8 @@ import { Spinner } from "./motion";
 import { Setup, SetupOffer, useOnboarding } from "./onboarding";
 import type { OnboardingView } from "../shared/onboarding";
 import { withAlpha, isLight, mergedColor, type Colors } from "./theme";
-import { UpdateNotice } from "./updates";
-import { ReleaseNotesSheet, VersionLine, WhatsNewGate } from "./release-notes";
+import { UpdateNotice, VersionMark } from "./updates";
+import { WhatsNewGate } from "./release-notes";
 import { useRowMenu } from "./row-actions";
 import { laterChoices } from "../shared/row-menu";
 import { RichText } from "./rich-text";
@@ -132,13 +132,9 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
     setSelected(next?.key ?? null);
   }, [inbox, model]);
 
-  // null: closed; false: What's new since the previous version; true: every version.
-  const [notesOpen, setNotesOpen] = useState<boolean | null>(null);
   const updateNotice = <UpdateNotice theme={theme} compact={compact} openSettings={deps.openSettings} />;
-  const updatesFooter = <VersionLine theme={theme} compact={compact} onOpen={setNotesOpen} />;
   const updateSheets = <>
     <WhatsNewGate surface="home" theme={theme} compact={compact} />
-    {notesOpen != null && <ReleaseNotesSheet theme={theme} compact={compact} all={notesOpen} onClose={() => setNotesOpen(null)} />}
   </>;
   if (params.view === "log") return <LogView theme={theme} compact={compact} sources={deps.sources} onHome={deps.openHome} onOpen={key => { setSelected(key); deps.openHome(); }} />;
 
@@ -154,8 +150,8 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
     // Phones: the host header already says Follow-up, so no "Home" title row; search, sort and settings share one row and
     // the meters move to the end of the list.
     footer={omnibox.results ? undefined : compact
-      ? <View style={{ paddingTop: 16, paddingBottom: 96, gap: 12 }}>{!nothing && <UsageMeters theme={theme} sources={deps.sources} dense />}{updatesFooter}</View>
-      : updatesFooter}
+      ? <View style={{ paddingTop: 16, paddingBottom: 96, gap: 12 }}>{!nothing && <UsageMeters theme={theme} sources={deps.sources} dense />}</View>
+      : undefined}
     // Phones: the setup offer goes after the Needs-you group when there is one, so the first ask stays high.
     afterNeeds={compact && model.needs > 0 ? <SetupOffer theme={theme} compact view={props.onboarding} /> : undefined}
     emptyAction={compact ? <Button theme={theme} compact kind="secondary" icon="Settings" title="Project settings" onPress={deps.openSettings} /> : undefined}
@@ -174,7 +170,11 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
     // Phones: only the search row stays pinned; the status chips and the setup offer scroll away with the list, so a
     // scrolled list keeps the screen instead of sitting under a 250px block.
     header={omnibox.results ? undefined : compact ? <View style={{ gap: 8, paddingTop: 6, paddingBottom: 6 }}>
-      <StatusStrip theme={theme} model={model} filter={filter} onFilter={setFilter} touch dense />
+      {/* No title row on phones: the version sits at the right of the status chips and scrolls away with them. */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingRight: 6 }}>
+        <View style={{ flex: 1, minWidth: 0 }}><StatusStrip theme={theme} model={model} filter={filter} onFilter={setFilter} touch dense /></View>
+        <VersionMark theme={theme} touch openSettings={deps.openSettings} />
+      </View>
       {updateNotice}
       {model.needs === 0 && <SetupOffer theme={theme} compact view={props.onboarding} />}
     </View> : updateNotice} />;
@@ -197,7 +197,11 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
 function ListHeader({ theme, compact, onSettings }: { theme: Theme; compact: boolean; onSettings: () => void }) {
   const c = theme.colors;
   return <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16 }}>
-    <Text accessibilityRole="header" style={{ flex: 1, color: c.foreground, fontSize: compact ? 17 : 15, fontWeight: "600" }}>Home</Text>
+    {/* Home first, the version second: a muted caption on the title's line, never a control beside the cog. */}
+    <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 4 }}>
+      <Text accessibilityRole="header" style={{ color: c.foreground, fontSize: compact ? 17 : 15, fontWeight: "600" }}>Home</Text>
+      <VersionMark theme={theme} touch={compact} openSettings={onSettings} />
+    </View>
     <IconButton theme={theme} compact={compact} icon="Settings" label="Follow-up settings" onPress={onSettings} />
   </View>;
 }
