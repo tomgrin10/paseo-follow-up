@@ -166,6 +166,8 @@ export const overseerRestartRpc = defineRpc({ name: "follow.overseer-restart", i
 /** Settings → Agents. `catalog` asks for Paseo's provider list (cached ten minutes; `fresh` re-reads it). */
 export const agentSettingsRpc = defineRpc({ name: "follow.agent-settings", input: z.object({ catalog: z.boolean().optional(), fresh: z.boolean().optional() }), output: agentSettingsViewSchema });
 export const setAgentSettingRpc = defineRpc({ name: "follow.set-agent-setting", input: z.strictObject({ role: z.enum(AGENT_ROLES), entry: savedRoleSchema.nullable() }), output: agentSettingsViewSchema });
+/** Settings → Agents → Wait for background jobs (1.4.0-beta.24). Applies to sessions opened afterwards. */
+export const setWaitRpc = defineRpc({ name: "follow.set-wait", input: z.strictObject({ enable_wait: z.boolean() }), output: agentSettingsViewSchema });
 
 // Getting started (1.4.0-beta.10): the setup flow's progress and its readiness checks. Choices write through the
 // Settings screen's own RPCs and settings documents; these only hold where the flow is.

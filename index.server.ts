@@ -2,7 +2,7 @@ import { displayPreferences } from "./shared/display";
 import { DEFAULT_QUESTION_MODE, questionPreferences, type QuestionMode } from "./shared/questions";
 import { askQuestion, recordAnswer, syncTaskQuestions, withdrawQuestion } from "./server/questions";
 import { agentSetSpec, developerSetSpec } from "./server/spec";
-import type { PluginServerContext, PluginHandlerContext } from "@getpaseo/plugin/server";
+import type { PluginServerContext, PluginHandlerContext, PluginHookContext, PluginSessionOpenRequest } from "@getpaseo/plugin/server";
 import { mkdir, writeFile } from "node:fs/promises";
 import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -31,6 +31,7 @@ import { Deployments } from "./server/deployments";
 import { AgentHooks } from "./server/agent-hooks";
 import { withSessionMcp } from "./server/session-mcp";
 import { nativeTools, nativeToolsAvailable, type Invoke, type Live } from "./server/native-tools";
+import { Wait, waitStatus, type WaitPaseoConfig } from "./server/wait";
 import { removeGlobalRegistrations } from "./server/mcp-registrations";
 import { TrustBypass } from "./server/trust-bypass";
 import { scopes } from "./server/scopes";
@@ -289,6 +290,9 @@ export default function contribute(server: PluginServerContext) {
   const paseoConfig = async () => {
     try { const path = join(paseoHome, "config.json"); const { mtimeMs } = await stat(path); if (configCache?.mtimeMs !== mtimeMs) configCache = { mtimeMs, value: JSON.parse(await readFile(path, "utf8")) }; return configCache.value as Parameters<typeof nativeToolsAvailable>[1]; } catch { return null; }
   };
+  // Wait for background jobs (folded in from paseo-wait): native tools for interactive Claude sessions.
+  const wait = new Wait(join(directory, "wait"), { enabled: () => agentSettings.waitEnabled(), config: async () => await paseoConfig() as WaitPaseoConfig | null });
+  const currentWait = async () => waitStatus(await agentSettings.waitEnabled(), await paseoConfig() as WaitPaseoConfig | null);
   const live = async (agentId: string): Promise<Live> => ({ role: scopes(await store.snapshot())[agentId]?.role ?? null, inbox: (await inboxSettings()).enable_inbox });
   const invoke: Invoke = async (method, input, context) => {
     const handler = handlers.get(method); if (!handler) throw new Error(`Unknown Follow-up method ${method}.`);
@@ -686,7 +690,7 @@ export default function contribute(server: PluginServerContext) {
   const agentSettingsView = async (catalog: boolean, fresh = false): Promise<AgentSettingsView> => {
     const [{ invalid }, roles] = await Promise.all([agentSettings.load(), agentSettings.all()]);
     const cat = catalog ? await providerCatalog.read(fresh) : null;
-    return { roles: Object.values(roles).map(r => ({ ...r, summary: roleSummary(r, labelsFor(r, cat)) })), invalid, catalog: cat };
+    return { roles: Object.values(roles).map(r => ({ ...r, summary: roleSummary(r, labelsFor(r, cat)) })), invalid, catalog: cat, wait: await currentWait() };
   };
   // What's new. Follow-up's own install comes from Paseo's plugin list, read once per worker.
   const versions = new VersionsStore(directory);
@@ -710,6 +714,7 @@ export default function contribute(server: PluginServerContext) {
   handle(rpc.whatsNewSeenRpc, async ({ version }) => { await versions.seen(version); return releaseNotesView(); });
   handle(rpc.agentSettingsRpc, async ({ catalog, fresh }, { paseo }) => { await requireReady(); seen(paseo); return agentSettingsView(!!catalog, !!fresh); });
   handle(rpc.setAgentSettingRpc, async ({ role, entry }, { paseo }) => { await requireReady(); seen(paseo); await agentSettings.save(role, entry); return agentSettingsView(true); });
+  handle(rpc.setWaitRpc, async ({ enable_wait }, { paseo }) => { await requireReady(); seen(paseo); await agentSettings.setWait(enable_wait); return agentSettingsView(true); });
   handle(rpc.overseerActRpc, async ({ agentId, tool, args }, { paseo }) => {
     await requireReady(); seen(paseo);
     if (!(OVERSEER_TOOLS as readonly string[]).includes(tool)) throw new Error(`Unknown Overseer tool ${tool}.`);
@@ -801,7 +806,7 @@ export default function contribute(server: PluginServerContext) {
       return result;
     },
   };
-  const agentActions = new AgentActions({ store, prActions: actions, engine, inbox, priorities: priorityStore, about, agentSettings, prWorkflows: () => prWorkflowView(), rpc: rpcBridge, display: displayBridge,
+  const agentActions = new AgentActions({ store, prActions: actions, engine, inbox, priorities: priorityStore, about, agentSettings, wait: { status: currentWait }, prWorkflows: () => prWorkflowView(), rpc: rpcBridge, display: displayBridge,
     // The directory's agent list (metadata only): a claim never loads or refreshes the main agent.
     agentInfo: async agentId => { const row = gateway.directory.cached(agentId) ?? (await gateway.directory.read()).agents.find(r => r.agent.id === agentId)?.agent; return row ? { status: row.status, activeTurn: row.activeTurn, pendingPermissions: row.pendingPermissions, archivedAt: row.archivedAt } : null; } });
   handle(rpc.prioritiesRpc, async () => ({ items: await priorityStore.read() }));
@@ -919,6 +924,8 @@ export default function contribute(server: PluginServerContext) {
   });
   handle(rpc.onboardingChecksRpc, async ({ fresh }, { paseo }) => { await requireReady(); seen(paseo); return readiness.run(!!fresh); });
 
+  type SessionOpen = (input: { request: PluginSessionOpenRequest }, context: PluginHookContext) => Promise<PluginSessionOpenRequest | void>;
+  const withWait = (handler: SessionOpen): SessionOpen => async (input, context) => wait.open((await handler(input, context)) ?? input.request);
   const removers = [
     server.on("agent.permission_requested", async (event, { paseo }) => { trustApi = paseo; await trust.handle(event.agent, event.request as never).catch(() => undefined); }),
     displaySettings.subscribe(() => void writeBriefState().catch(() => undefined)),
@@ -958,7 +965,8 @@ export default function contribute(server: PluginServerContext) {
       });
       if (waking) void engine.tick();
     }),
-    server.before("agent.session_open", async ({ request }, { paseo }) => {
+    // Follow-up's own tools first, then Wait's on top (every interactive Claude session, tracked or not).
+    server.before("agent.session_open", withWait(async ({ request }, { paseo }) => {
       await ready;
       if (loadError || stopped || request.purpose !== "interactive") return request;
       // The Overseer: needs_you (no Stop-hook nudge), the action tools and its routing tools. Never tracked.
@@ -997,7 +1005,7 @@ export default function contribute(server: PluginServerContext) {
       const recovery = w.mainAgentId !== request.agentId && !w.contributorAgentIds?.includes(request.agentId);
       const main = !recovery && w.mainAgentId === request.agentId ? brief : null;
       return withTools({ ...request, env: { ...request.env, FOLLOW_THROUGH_CLI: bridge, FOLLOW_THROUGH_CLIENT_ENTRY: clientEntry(), ...(recovery ? { FOLLOW_THROUGH_RECOVERY: "1" } : {}), ...(main ? { FOLLOW_THROUGH_BRIEF: main } : {}) } }, recovery, main, root && !recovery);
-    }),
+    })),
     server.on("agent.turn_ended", async (event, { paseo, signal }) => {
       await ready;
       if (stopped || loadError) return;
@@ -1031,7 +1039,7 @@ export default function contribute(server: PluginServerContext) {
     server.on("workspace.archived", async event => { await ready; if (!loadError && !stopped) await store.mutate(state => { const w = state.workspaces.find(w => w.id === event.workspace.id); if (w) w.archived = true; }); }),
   ];
   return async () => {
-    stopped = true; governor.stop(); if (timer) clearTimeout(timer); if (aboutTimer) clearTimeout(aboutTimer); aiJobs.stop(); ranker = null; if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
+    stopped = true; wait.close(); governor.stop(); if (timer) clearTimeout(timer); if (aboutTimer) clearTimeout(aboutTimer); aiJobs.stop(); ranker = null; if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
     await ready; if (hooksStarted) await agentHooks.stop().catch(() => {});
     await actions.close(); await closeConnections(); await engine.stop(); await ready; await store.flush().catch(() => undefined); await unlock?.();
   };

@@ -14,6 +14,7 @@ import { priorityInputSchema, type Priority } from "../shared/priorities";
 import type { AboutView } from "../shared/about";
 import { ROLE_INFO, roleSummary, type RoleConfig } from "../shared/agent-settings";
 import { DISPLAY_TOOLS, RPC_TOOLS, type RpcTool } from "./agent-parity";
+import { waitNote, type WaitStatus } from "../shared/wait";
 
 /**
  * Agent parity: every action the developer can click in Follow-up has a tool that runs the same server path.
@@ -23,7 +24,7 @@ import { DISPLAY_TOOLS, RPC_TOOLS, type RpcTool } from "./agent-parity";
  * return a dry-run plan first; `confirm: true` with that plan's id runs it. Every agent write is recorded in
  * the inbox ledger as `by: "agent:<id>"`, which never counts as the developer writing to the agent.
  */
-export const AGENT_TOOLS = ["make_main_agent", "list_prs", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "track", "inbox_list", "sign_off", "snooze", "set_finish_flags", "set_priorities", "workspace_about", "agent_settings", "follow_settings", "set_follow_settings", "project_settings", "set_project_tracking", "pr_workflow", "set_pr_workflow", "reviewer_settings", "reviewer_suggestions", "save_reviewers", "set_agent_setting", "onboarding_status", "onboarding_checks", "set_onboarding", "priorities", "rank_status", "rerank_priorities", "usage", "overseer_status", "overseer_start", "overseer_restart", "overseer_ask", "inbox_brief", "brief_action", "inbox_act", "answer_question", "run_recovery", "refresh", "set_workspace_spec", "set_task_trigger", "pr_controls", "browser_status", "trust_bypass_status", "release_notes", "display_settings", "set_display"] as const;
+export const AGENT_TOOLS = ["make_main_agent", "list_prs", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "track", "inbox_list", "sign_off", "snooze", "set_finish_flags", "set_priorities", "workspace_about", "agent_settings", "follow_settings", "set_follow_settings", "project_settings", "set_project_tracking", "pr_workflow", "set_pr_workflow", "reviewer_settings", "reviewer_suggestions", "save_reviewers", "set_agent_setting", "set_wait_for_jobs", "onboarding_status", "onboarding_checks", "set_onboarding", "priorities", "rank_status", "rerank_priorities", "usage", "overseer_status", "overseer_start", "overseer_restart", "overseer_ask", "inbox_brief", "brief_action", "inbox_act", "answer_question", "run_recovery", "refresh", "set_workspace_spec", "set_task_trigger", "pr_controls", "browser_status", "trust_bypass_status", "release_notes", "display_settings", "set_display"] as const;
 export type AgentTool = typeof AGENT_TOOLS[number];
 /** Tools that only read. */
 export const READ_ONLY_TOOLS: readonly AgentTool[] = ["list_prs", "inbox_list", "workspace_about", "agent_settings", "display_settings", ...RPC_TOOLS.filter(t => t.kind === "read").map(t => t.name as AgentTool)];
@@ -77,6 +78,8 @@ export type AgentActionDeps = {
   about?: { view(workspaceId: string, opts: { open?: boolean; wait?: boolean }): Promise<AboutView> };
   /** Settings → Agents, read-only: which agent each special role uses. No write tool. */
   agentSettings?: { all(): Promise<Record<string, RoleConfig>> };
+  /** Settings → Agents → Wait for background jobs, for agent_settings (set_wait_for_jobs is an RPC tool). */
+  wait?: { status(): Promise<WaitStatus> };
   /** Each known repository's PR workflow (Settings → Following → Shipping PRs). */
   prWorkflows?: () => Promise<{ default: string; repos: { repo: string; effective: string; setting: string; reason: string; reviewFix: unknown }[]; reviewFix: unknown }>;
   /** Runs a developer RPC's own handler (the button's path), and checks an input against its contract. */
@@ -161,7 +164,8 @@ export class AgentActions {
         if (!this.d.agentSettings) throw new Error("agent_settings isn't available in this Follow-up.");
         const roles = await this.d.agentSettings.all();
         const workflows = await this.d.prWorkflows?.().catch(() => null);
-        return { roles: Object.values(roles).map(r => ({ ...r, summary: roleSummary(r), does: ROLE_INFO[r.role].does })), change: "Tom changes these in Follow-up settings → Agents.",
+        const wait = await this.d.wait?.status().catch(() => null);
+        return { ...(wait ? { waitForBackgroundJobs: { ...wait, note: waitNote(wait), change: "set_wait_for_jobs, only when the developer asks." } } : {}), roles: Object.values(roles).map(r => ({ ...r, summary: roleSummary(r), does: ROLE_INFO[r.role].does })), change: "Tom changes these in Follow-up settings → Agents.",
           ...(workflows ? { prWorkflow: { default: workflows.default, reviewFix: workflows.reviewFix, repos: workflows.repos.map(r => ({ repo: r.repo, workflow: r.effective, setting: r.setting, why: r.reason, reviewFix: r.reviewFix ?? workflows.reviewFix })), change: "Tom changes these in Follow-up settings → Following → Shipping PRs." } } : {}) };
       }
       case "add_reviewers": return this.planReviewers(caller, args);
