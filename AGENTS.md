@@ -27,6 +27,9 @@ Paseo's plugin listing. [PRODUCT.md](PRODUCT.md) and [DESIGN.md](DESIGN.md) cove
   `server/update-watchdog.mjs`. Commit the generated output with its source.
 - Never restart the developer's daemon or send test messages into real conversations. Tests use isolated Paseo and
   provider homes with synthetic agents ([docs/testing.md](docs/testing.md)).
+- Every script that starts a Paseo daemon or a browser calls `await harness()` (`scripts/harness.mjs`) first, a
+  machine-wide slot shared with the `harness-slot` wrapper, and starts daemons with `spawnDaemon` so none outlives it
+  ([docs/testing.md](docs/testing.md#rules-for-harness-daemons)).
 
 ## Architecture map
 
