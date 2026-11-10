@@ -173,7 +173,7 @@ export function completionGate(w: Workspace, now = Date.now()): CompletionGate {
   for (const q of (w.questions ?? []).filter(questionOpen)) add("developer", `Answer or withdraw ${q.id} (${q.title})`);
   if (w.hold) add("developer", w.hold);
   if (w.runtimeBusy) add("wait", "Wait for active agent work to finish");
-  if (w.backgroundBusy) add("wait", "Wait for active background agents to finish");
+  if (w.backgroundBusy) add("wait", "Wait for background agents and jobs to finish");
   if (w.runtimeReason) add("wait", w.runtimeReason);
   return { blockers, unconfirmed };
 }

@@ -14,6 +14,11 @@
   `running-is-not-stale`). Status alone isn't enough: Paseo can still read "running" right after a turn fails, and that
   failure is real news. And `Inbox.start` drops such flags for agents already running
   after a restart (a 0.16 host resumes them; on 0.15 the agent stopped, and the flag stays).
+- **Background work is running (Paseo 0.16).** An agent that started a shell or task and ended its turn reports
+  `backgroundWork.count > 0`. The inbox's directory reads it as running (`liveStatus` in `shared/agent-load.ts`), so a
+  plain finish doesn't flag (F7's settle sees "running"), its row sits in Running with `backgroundWork`, and
+  `liveFlag` hides an older "finished" until the work ends (shown again after, not erased). Invariant
+  `background-work-is-running` in `rowViolations`. On 0.15 the field is absent and nothing changes.
 - **Pure logic** is in `shared/inbox.ts`: the reducer, `REASONS` in urgency order (permission, error, paused, ci,
   review, reviewers, finished, pr_closed), snoozes (`next-event`, an ISO time, or `pr:<repo#n>`), finish flags, and
   undo.

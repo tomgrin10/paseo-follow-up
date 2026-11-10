@@ -65,6 +65,8 @@ export type AgentInfo = {
   background?: boolean;
   /** Ids of the permission prompts Paseo shows for this agent right now. Absent or null: unknown, so nothing is cleared. */
   pendingPermissionIds?: string[] | null;
+  /** Paseo 0.16: live background work; `status` already reads "running" while it's above 0 (liveStatus). */
+  backgroundWork?: number;
 };
 export interface Directory {
   agents(): Promise<AgentInfo[]>;
@@ -715,7 +717,7 @@ export class Inbox {
     const row = (agent: AgentInfo, delegatedFrom: string | null, e: Entry | undefined): InboxRow => {
       const turn = this.turns.get(agent.id);
       const turnStartedAt = turn && ["running", "initializing"].includes(agent.status) ? new Date(turn.at).toISOString() : null;
-      const live = liveFlag(agent.status, e?.needs ?? null, e?.brief ? { kind: e.brief.kind, source: e.brief.source, state: e.brief.state, ask: e.brief.ask, questionIds: e.brief.questionIds, at: e.brief.at } : null, turnStartedAt);
+      const live = liveFlag(agent.status, e?.needs ?? null, e?.brief ? { kind: e.brief.kind, source: e.brief.source, state: e.brief.state, ask: e.brief.ask, questionIds: e.brief.questionIds, at: e.brief.at } : null, turnStartedAt, !!agent.backgroundWork);
       return {
       agentId: agent.id, workspaceId: agent.workspaceId, title: agent.title || "Agent",
       workspaceTitle: agent.workspaceId ? names.get(agent.workspaceId) ?? null : null,
@@ -726,6 +728,7 @@ export class Inbox {
       undoable: !!e?.undo && Date.parse(e.undo.expires) > now, seq: e?.seq ?? 0, muteTurn: e?.muteTurn ?? false, enable_finish_flags: e?.enable_finish_flags ?? true,
       brief: live.brief,
       turnStartedAt,
+      ...(agent.backgroundWork ? { backgroundWork: agent.backgroundWork } : {}),
       };
     };
     const rows: InboxRow[] = [];
