@@ -16,6 +16,7 @@ import { Store } from "./server/store";
 import { PriorityStore } from "./server/priorities";
 import { UsageReader } from "./server/usage";
 import { Engine, agentWorkspace, findWorkspace, interruptionHold } from "./server/engine";
+import { holdSuperseded, liftHold } from "./shared/status";
 import { Github } from "./server/github";
 import { ReviewerConfigStore, ReviewerSuggestions } from "./server/reviewer-config";
 import { repoKey } from "./shared/reviewers";
@@ -1127,6 +1128,15 @@ export default function contribute(server: PluginServerContext) {
     server.on("agent.turn_started", async () => updater.activity()),
     server.on("agent.turn_ended", async () => updater.activity()),
     server.on("agent.turn_started", async (event, { paseo }) => { seen(paseo); inboxHook(() => inbox.turnStarted(event.agent, event.turnId)); }),
+    // A newer main-agent turn supersedes the failed turn's automatic hold (shared/status.ts holdSuperseded).
+    server.on("agent.turn_started", async event => {
+      await ready;
+      if (stopped || loadError) return;
+      const turn = { agentId: event.agent.id, turnId: event.turnId ?? null };
+      if (!(await store.snapshot()).workspaces.some(w => w.enable_tracking && holdSuperseded(w, turn))) return;
+      await store.mutate(state => { for (const w of state.workspaces) if (w.enable_tracking && holdSuperseded(w, turn)) liftHold(w); });
+      void engine.tick();
+    }),
     server.on("agent.turn_ended", async (event, { paseo }) => { seen(paseo); inboxHook(() => inbox.turnEnded(event.agent, event.outcome, event.turnId)); }),
     server.on("agent.permission_requested", async (event, { paseo }) => { seen(paseo); inboxHook(async () => { await inbox.permissionRequested(event.agent, event.request); await writeBriefState(); }); }),
     server.on("agent.permission_resolved", async (event, { paseo }) => { seen(paseo); inboxHook(async () => { await inbox.permissionResolved(event.agent, event.requestId); await writeBriefState(); }); }),

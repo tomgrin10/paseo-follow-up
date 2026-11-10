@@ -7,7 +7,7 @@ import { completionCheck, summary } from "./model";
 import { liveLine, needsYou } from "./attention";
 import { trackedGroup, type HomeModel } from "./home";
 import { freshPriorities, type Priority } from "./priorities";
-import { agentCard, batchView } from "./status";
+import { agentCard, automaticHold, batchView } from "./status";
 import { followUpObligations } from "./follow-up";
 
 /**
@@ -139,4 +139,16 @@ export function homeViolations(model: Pick<HomeModel, "byKey">, priorities: read
     else if (model.byKey.get(keys[0])!.priority!.reason !== p.reason) out.push({ id: "row-lines-own-row", detail: `${keys[0]} shows another reason than ${workspaceId}'s` });
   }
   return out;
+}
+
+/**
+ * Workspaces against their main agent's current turn: Follow-up's automatic hold after a failed turn is that turn's
+ * run state, so it never outlives a newer turn (holdSuperseded in shared/status.ts). A hold the developer set, and
+ * "You stopped the main agent", are theirs and may. `automatic-hold-is-not-stale`, 2026-11-10: a running agent's
+ * pane said "Follow-up is paused · The main agent's turn failed" under a Working row.
+ */
+export function holdViolations(w: Pick<Workspace, "id" | "hold" | "interruption" | "mainAgentId">, mainTurnId: string | null): { id: string; detail: string }[] {
+  const stop = w.interruption;
+  if (!stop || stop.kind !== "failed" || !automaticHold(w) || !mainTurnId || mainTurnId === stop.turnId || (stop.agentId && stop.agentId !== w.mainAgentId)) return [];
+  return [{ id: "automatic-hold-is-not-stale", detail: `${w.id} holds for failed turn ${stop.turnId ?? "?"} while the main agent is on turn ${mainTurnId}` }];
 }
