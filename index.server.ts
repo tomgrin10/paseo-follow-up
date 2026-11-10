@@ -752,7 +752,7 @@ export default function contribute(server: PluginServerContext) {
       const { started } = ranker.start({ trigger: "overseer" });
       const titles = new Map((await overseer!.workstreams()).map(w => [w.workspaceId, w.title]));
       const current = (await priorityStore.read()).filter(p => p.by === "ranker").slice(0, 5).map(p => ({ title: titles.get(p.workspaceId) ?? p.workspaceId, score: p.score, reason: p.reason }));
-      return { started, current, next: `${started ? "Re-ranking started" : "A ranking is already running"}; it takes about a minute and Home updates by itself. Tell Tom that in one line, with the current top two or three if he asked what to work on.` };
+      return { started, current, next: `${started ? "Re-ranking started" : "A ranking is already running"}; it takes about a minute and Home updates by itself. Tell the developer that in one line, with the current top two or three if they asked what to work on.` };
     } });
   const overseerStatus = async () => {
     const [s, info] = await Promise.all([overseer!.state(), overseer!.agentInfo()]);
