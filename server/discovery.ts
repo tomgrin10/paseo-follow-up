@@ -3,11 +3,12 @@ import type { Artifact } from "../shared/spec";
 import { mergeArtifacts } from "./spec";
 import type { State, Workspace } from "../shared/model";
 import { autoSendsByDefault, followsByDefault } from "../shared/settings";
+import { interruptionHold } from "../shared/status";
 
 export type History = { candidates: string[]; goal: string | null; complete: boolean; error: string | null };
 export type DiscoveredWorkspace = { id: string; title: string; mainAgentId: string; /** Set when mainAgentId is a live successor to this closed or gone main agent. */ replacesMainAgentId?: string; /** The replacement is the original main agent taking the workspace back (Workspace.handover). */ handBack?: boolean; /** The recorded main agent reads "closed" right now. */ mainClosed?: boolean; messageAt: string | null; projectId?: string | null; enable_default_tracking?: boolean; history?: History; contributorAgentIds?: string[]; submissions?: Submission[]; artifacts?: Artifact[]; /** In the active scope (see workspaceActive). Undefined means unknown, treated as active. */ active?: boolean };
 
-export const interruptionHold = (kind: "canceled" | "failed") => kind === "canceled" ? "You stopped the main agent. Resume follow-up when ready." : "The main agent's turn failed. Check it before resuming follow-up.";
+export { interruptionHold };
 
 /**
  * Moves the workspace to another main agent: automatic handover, hand-back, or the developer's "Make main agent".
