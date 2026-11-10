@@ -27,7 +27,7 @@ export function AgentSettings({ theme, compact }: Pick<PluginSurfaceProps, "them
   const data = query.data;
   const more: JobExtra = {
     // The toggle names what's inside, so nobody opens it to find out.
-    label: r => r.role === "ranker" ? "Schedule, limits and reset" : isJobRole(r.role) ? "Limits and reset" : r.same ? "Reset" : "Permissions and reset",
+    label: r => r.role === "ranker" ? "Schedule, limits and reset" : isJobRole(r.role) ? "Limits and reset" : r.same ? null : "Permissions and reset",
     render: (r, save, busy) => <RoleMore r={r} save={save} busy={busy} theme={theme} compact={compact} invalid={!!data?.invalid.includes(r.role)} />,
   };
   const info = "Which agent Follow-up uses for each of its own jobs. Recommended picks come from what Paseo has: with Claude, Haiku for summaries, Sonnet for AI priority, the newest Opus for the Overseer and the main agent's setup for recovery; otherwise a model of the size each job needs. Summaries and AI priority are one-shot jobs: on a provider other than Claude or Codex, each runs as a short hidden agent that's archived when it answers. Changes apply from the next call; the Overseer switches when you restart it.";
@@ -114,7 +114,8 @@ function unavailableLine(providers: readonly { label: string; available: boolean
   const ready = new Set(providers.filter(p => p.available).map(p => p.label));
   const groups = new Map<string, string[]>();
   for (const p of providers) if (!p.available && !ready.has(p.label)) {
-    const why = (p.reason ?? "unavailable").replace(/\.$/, "");
+    // Paseo's reasons can name binaries and PATH; developers here only need "not installed".
+    const why = /not found|PATH|not installed/i.test(p.reason ?? "") ? "not installed" : (p.reason ?? "unavailable").replace(/\.$/, "");
     groups.set(why, [...(groups.get(why) ?? []), p.label]);
   }
   if (!groups.size) return null;

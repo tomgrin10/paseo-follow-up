@@ -192,8 +192,8 @@ function agentsSummary(agents: AgentSettingsView, changed: number): string {
   if (agents.catalog?.providers.length && !agents.catalog.error) {
     const header = jobsHeader(agents.roles.map(r => jobRow(r, agents.catalog)), agents.catalog, false);
     if (header.action === "check") return "No provider is ready";
-    const differ = agents.roles.filter(r => { const row = jobRow(r, agents.catalog); return row.rec && !row.recommended; }).length;
-    return differ ? `${differ} of ${agents.roles.length} differ from the recommendation` : "All on the recommended models";
+    // The same words as the rows' header, so the tab line and the card never disagree.
+    return header.action === "use" ? header.text.replace(/\.$/, "") : "All on the recommended models";
   }
   return changed ? `${changed} of ${agents.roles.length} changed from the defaults` : "Every agent on its default";
 }
