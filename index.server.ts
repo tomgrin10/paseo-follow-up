@@ -59,6 +59,7 @@ import { inboxAnswer } from "./server/etag";
 import { AiJobs } from "./server/ai-jobs";
 import { liveRankSources, planningUrl, Ranker, RANKER_ROLE_DEFAULT } from "./server/ranker";
 import { AboutService, AboutStore, liveSources, rootHistory, type AboutContext } from "./server/about";
+import { LinkedService, LinkedStore, liveLinkedSources } from "./server/linked";
 import { readTranscript } from "./server/transcript";
 import { AgentSettingsStore, ProviderCatalog, type CatalogSource } from "./server/agent-settings";
 import { labelsFor, providerName, resolveRole, roleSummary, type AgentSettingsView } from "./shared/agent-settings";
@@ -875,9 +876,10 @@ export default function contribute(server: PluginServerContext) {
       },
     };
   };
+  const aboutStore = new AboutStore(directory);
   const about = new AboutService({
     role: () => agentSettings.role("about"),
-    store: new AboutStore(directory), jobs: aiJobs, sources: liveSources(),
+    store: aboutStore, jobs: aiJobs, sources: liveSources(),
     workspace: async id => (await store.snapshot()).workspaces.find(w => w.id === id && w.enable_tracking && !w.archived) ?? null,
     context: aboutContext, usage: () => usage.read(),
     firstMessage: async agentId => { await historyCache.load(); return historyCache.get(agentId)?.history.goal ?? null; }, roomForBackground: async () => governor.allowsBackground(), roomOnDemand: async () => governor.allowsExtras(),
@@ -898,6 +900,18 @@ export default function contribute(server: PluginServerContext) {
     if (!stopped) aboutTimer = setTimeout(() => void aboutLoop(), 10 * 60_000);
   };
   aboutTimer = setTimeout(() => void aboutLoop(), 60_000);
+  // Linked items (shared/linked.ts): carry over verified About links once, then drain the Linear check queue on the
+  // same 10-minute cadence. An empty queue (the steady state) costs one small file read and no MCP call.
+  const linked = new LinkedService({ store: new LinkedStore(directory), sources: liveLinkedSources(), roomForBackground: async () => governor.allowsBackground() });
+  let linkedTimer: ReturnType<typeof setTimeout> | null = null;
+  const linkedLoop = async () => {
+    await ready;
+    if (stopped || loadError) return;
+    await linked.migrate(async () => (await aboutStore.read()).entries).catch(() => undefined);
+    await linked.drain().catch(() => undefined);
+    if (!stopped) linkedTimer = setTimeout(() => void linkedLoop(), 10 * 60_000);
+  };
+  linkedTimer = setTimeout(() => void linkedLoop(), 90_000);
   // Developer RPCs as agent tools (server/agent-parity.ts): the same handler the button's RPC runs.
   const rpcBridge = {
     async validate(method: string, input: unknown) { const h = handlers.get(method); if (!h) throw new Error(`Unknown Follow-up method ${method}.`); return h.input.parseAsync(input); },
@@ -1158,7 +1172,7 @@ export default function contribute(server: PluginServerContext) {
     server.on("workspace.archived", async event => { await ready; if (!loadError && !stopped) await store.mutate(state => { const w = state.workspaces.find(w => w.id === event.workspace.id); if (w) w.archived = true; }); }),
   ];
   return async () => {
-    stopped = true; wait.close(); updater.stop(); governor.stop(); if (timer) clearTimeout(timer); if (aboutTimer) clearTimeout(aboutTimer); aiJobs.stop(); ranker = null; if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
+    stopped = true; wait.close(); updater.stop(); governor.stop(); if (timer) clearTimeout(timer); if (aboutTimer) clearTimeout(aboutTimer); if (linkedTimer) clearTimeout(linkedTimer); aiJobs.stop(); ranker = null; if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
     await ready; if (hooksStarted) await agentHooks.stop().catch(() => {});
     await actions.close(); await closeConnections(); await engine.stop(); await ready; await store.flush().catch(() => undefined); await unlock?.();
   };
