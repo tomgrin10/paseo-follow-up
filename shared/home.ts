@@ -223,7 +223,8 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
     const due = w ? followUpObligations(w).filter(o => !["done", "waived"].includes(o.status)).map(o => taskSchedule(o, w, now).dueAt).filter((x): x is string => !!x).sort()[0] ?? null : null;
     const priority = p ? { score: p.score, reason: p.reason, source: p.sources[0] ? { kind: p.sources[0].kind, label: p.sources[0].label } : null } : null;
     // Rule 5 of main-agent claims: a quiet badge for a day after an agent or Follow-up changed the main agent.
-    const badges = w && recentMainChange(w, now) ? [{ text: "New main agent", tone: "muted" as const }, ...s.badges].slice(0, 2) : s.badges;
+    // Last in line, so it never pushes out a badge that asks for something.
+    const badges = w && recentMainChange(w, now) ? [...s.badges, { text: "Main agent changed", tone: "muted" as const }].slice(0, 2) : s.badges;
     return make({ ...stripSig(s), badges, activityAt, urgent, due, priority });
   });
   const byGroup = new Map<HomeGroupId, Workstream[]>(HOME_GROUPS.map(g => [g, []]));

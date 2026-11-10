@@ -262,7 +262,7 @@ function useAgentTitle(agentId: string): string {
 }
 
 /**
- * "Main agent changed: A → B · reason · 5m ago · Undo", for a day after an agent or Follow-up moved the role
+ * "Took over from A · 5m ago · reason · Undo" under B's name, for a day after an agent or Follow-up moved the role
  * (main-agent claim rule 5). Quiet: a meta line in this card, never a Needs-you item. Undo makes A main again
  * through the same developer action as Make main agent, which no cooldown blocks.
  */
@@ -280,10 +280,11 @@ function MainChangeNotice({ workspace: w, theme, compact }: { workspace: Workspa
   if (!change) return null;
   const canUndo = w.enable_tracking && !w.archived && (w.contributorAgentIds ?? []).includes(change.from);
   return <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-    <Text style={[t.meta, { flex: 1, minWidth: 200 }]}>
-      <Text style={{ color: c.foreground }}>Main agent changed: {from} → {to}</Text>{change.reason ? ` · ${change.reason}` : ""} · {ago(change.at, now)}
+    {/* The new main's name is the card's title right above, so the line names only who it took over from. */}
+    <Text numberOfLines={3} accessibilityLabel={`${to} took over from ${from} ${ago(change.at, now)}${change.reason ? `. ${change.reason}` : ""}`} style={[t.meta, { flex: 1, minWidth: 200 }]}>
+      <Text style={{ color: c.foreground }}>Took over from {from}</Text> · {ago(change.at, now)}{change.reason ? ` · ${change.reason}` : ""}
     </Text>
-    {canUndo && <Button theme={theme} compact={compact} kind="ghost" title="Undo" accessibilityLabel={`Undo: make ${from} the main agent again`} loading={undo.isPending} disabled={undo.isPending} onPress={() => undo.mutate()} />}
+    {canUndo && <Button theme={theme} compact={compact} kind="ghost" title="Undo" accessibilityLabel={`Undo: make ${from} the main agent again`} accessibilityHint={`Repairs, questions and Done move back to ${from}.`} loading={undo.isPending} disabled={undo.isPending} onPress={() => undo.mutate()} />}
   </View>;
 }
 
