@@ -614,6 +614,11 @@ export default function contribute(server: PluginServerContext) {
     const w = findWorkspace(await store.snapshot(), workspaceId);
     return linked.view(w.id, linkedDerived(w));
   });
+  handle(rpc.linkedIndexRpc, async () => {
+    await requireReady();
+    // Archived workspaces stay searchable on Home, so their links do too.
+    return { workspaces: await linked.searchIndex() };
+  });
   handle(rpc.setLinkedItemsRpc, async (input, context) => {
     await requireReady();
     const by = actorBy(actorOf(context));

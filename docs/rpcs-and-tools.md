@@ -98,7 +98,8 @@ the developer's; it never clears a Needs-you flag and never passes the Overseer'
 | `answer_question` | `follow.answer-question` | planned; never your own question |
 | `set_workspace_spec` | `follow.workspace-spec` | planned |
 | `set_task_trigger` | `follow.set-task-trigger` | planned |
-| `link_items`, `set_linked_items` | `follow.linked-items`, `follow.set-linked-items` (add, remove, undo) | read / planned. Their `PARITY` rows land with the UI that calls them. |
+| `link_items`, `set_linked_items` | `follow.linked-items`, `follow.set-linked-items` (add, remove, undo) | read / planned. The Linked sheet calls both; `link_item` and `unlink_item` also count for `follow.set-linked-items`. |
+| `link_items` (per workspace) | `follow.linked-index` | read. Home's search over every workspace's linked keys and titles, fetched only while the search field has text. |
 | `pr_controls`, `browser_status` | `follow.pr-control-status`, `follow.browser-status` | read |
 | `release_notes` | `follow.release-notes` | read |
 | `updates_status`, `check_updates` | `follow.updates` | read / write (no plan) |
