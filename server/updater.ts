@@ -42,6 +42,8 @@ export type UpdaterDeps = {
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
   log?: (message: string) => void;
+  /** The isolated update harness's short timings (FOLLOW_UP_UPDATES_FAST=1); production uses the policy's. */
+  timing?: { quietMs: number; probationMs: number };
 };
 
 type Ready = NonNullable<UpdatesFile["ready"]>;
@@ -196,20 +198,20 @@ export class Updater {
     if (!manual && await this.blocked(target, snap)) return;
     const ready: Ready = file.ready ?? { version: target, since: this.now(), manual: false, lastBusyAt: null };
     const busy = await this.d.busy(false);
-    const decision = quietWindow({ now: this.now(), readySince: ready.since, lastBusyAt: ready.lastBusyAt ?? null, busy });
+    const decision = quietWindow({ now: this.now(), readySince: ready.since, lastBusyAt: ready.lastBusyAt ?? null, busy, quietMs: this.d.timing?.quietMs });
     if (decision.install) {
       // Right before installing, look at Paseo's live agent list rather than the cached directory.
       const live = await this.d.busy(true);
       if (!live.length) { await this.launch(me.version, target); return; }
       await this.d.write({ ...(await this.d.read()), ready: { ...ready, lastBusyAt: this.now() } });
-      this.wake(QUIET_MS);
+      this.wake(this.d.timing?.quietMs ?? QUIET_MS);
       return;
     }
     const next: Ready = decision.why === "busy" ? { ...ready, lastBusyAt: this.now() } : ready;
     if (JSON.stringify(next) !== JSON.stringify(file.ready)) await this.d.write({ ...(await this.d.read()), ready: next });
     // Busy agents re-trigger on their next turn end; background jobs don't, so look again after a quiet stretch.
     if (decision.why === "settling") this.wake(decision.at - this.now());
-    else if (busy.some(b => b.kind !== "agent")) this.wake(QUIET_MS);
+    else if (busy.some(b => b.kind !== "agent")) this.wake(this.d.timing?.quietMs ?? QUIET_MS);
     else this.wake(ready.since + CAP_MS - this.now());
   }
 
@@ -252,7 +254,7 @@ export class Updater {
     if (last && !TERMINAL.has(last.event)) {
       if (await this.d.installerAlive()) {
         const applied = [...events].reverse().find(e => e.event === "applied" && e.to === last.to);
-        if (last.event === "applied" || last.event === "rolling-back") return applied ? { kind: "settling", version: last.to, from: last.from, at: applied.at, until: applied.at + PROBATION_MS } : { kind: "installing", version: last.to, since: last.at };
+        if (last.event === "applied" || last.event === "rolling-back") return applied ? { kind: "settling", version: last.to, from: last.from, at: applied.at, until: applied.at + (this.d.timing?.probationMs ?? PROBATION_MS) } : { kind: "installing", version: last.to, since: last.at };
         return { kind: "installing", version: last.to, since: last.at };
       }
       // The installer stopped without saying how it went: report what is running now.
@@ -269,7 +271,7 @@ export class Updater {
       const ready = file.ready?.version === v ? file.ready : null;
       if (ready && (mode === "auto" || ready.manual)) {
         const busy = await this.d.busy(false);
-        const decision = quietWindow({ now, readySince: ready.since, lastBusyAt: ready.lastBusyAt ?? null, busy });
+        const decision = quietWindow({ now, readySince: ready.since, lastBusyAt: ready.lastBusyAt ?? null, busy, quietMs: this.d.timing?.quietMs });
         return { kind: "waiting", version: v, busy: busy.length ? busyText(busy) : null, idleAt: decision.install ? null : decision.why === "settling" ? decision.at : null,
           capAt: ready.since + CAP_MS, capped: now - ready.since >= CAP_MS };
       }
