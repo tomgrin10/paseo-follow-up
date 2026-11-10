@@ -121,6 +121,30 @@ try {
   assert.equal(swept.at(-1).agentId, early.id);
   await until(async () => await needs(early.id) === null, "no Needs-you row for it");
   result.sweptAtLoad = `${swept.at(-1).mode}: ${swept.at(-1).summary}`;
+
+  // Agent parity: an agent turns trust bypass off with set_display (planned: dry run, then confirm), the same host
+  // settings write as Settings → Permissions. The next bypass prompt then stays for the developer.
+  const act = (agentId, tool, args) => client.invokePluginRpc("follow-through", "follow.agent-act", { agentId, tool, args });
+  const plan = await act(early.id, "set_display", { values: { enable_trust_bypass: false } });
+  assert.deepEqual(plan.changes, [{ key: "enable_trust_bypass", from: true, to: false }], "the dry run shows the change");
+  assert.equal((await client.invokePluginRpc("follow-through", "settings.display.read", {})).values.enable_trust_bypass, true, "the dry run wrote nothing");
+  await act(early.id, "set_display", { confirm: true, planId: plan.planId });
+  assert.equal((await client.invokePluginRpc("follow-through", "settings.display.read", {})).values.enable_trust_bypass, false, "confirm wrote the host setting");
+  const after = await make("bypassPermissions", 7);
+  await after.send("Fixture: permission tool Bash");
+  assert.match(await until(() => needs(after.id), "trust bypass off: the prompt flags Needs you"), /permission/i);
+  assert.equal((await pending(after.id)).length, 1, "trust bypass off: the prompt stays pending");
+  assert.equal((await audit()).length, 4, "nothing approved after the agent turned it off");
+  result.agentTurnedTrustOff = true;
+  // A developer RPC as an agent tool on a real daemon: Settings → Following's Auto-send default, planned.
+  const before = await client.invokePluginRpc("follow-through", "follow.follow-settings", {});
+  const flip = !before.enable_auto_sends_default;
+  const followPlan = await act(early.id, "set_follow_settings", { enable_auto_sends_default: flip });
+  assert.equal((await client.invokePluginRpc("follow-through", "follow.follow-settings", {})).enable_auto_sends_default, before.enable_auto_sends_default, "the dry run wrote nothing");
+  await act(early.id, "set_follow_settings", { confirm: true, planId: followPlan.planId });
+  assert.equal((await client.invokePluginRpc("follow-through", "follow.follow-settings", {})).enable_auto_sends_default, flip, "confirm ran the Settings RPC");
+  result.agentChangedFollowSettings = true;
+  { const [p] = await pending(after.id); await client.respondToPermission(after.id, p.id, { behavior: "deny", message: "check done" }).catch(() => undefined); }
   console.log(process.argv.includes("--json") ? JSON.stringify(result) : result);
 } catch (error) { process.exitCode = 1; throw error; } finally {
   await client?.close().catch(() => {});
