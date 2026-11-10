@@ -35,7 +35,8 @@
     "test:scale": "node scripts/scale-check.mjs --workspaces 120 --awake 5 --churn 35 --idle 60 --rss-budget 240 --cpu-budget 3 --request-budget 2",
     "check:notes": "node scripts/release-notes.mjs --check",
     "release:notes": "node scripts/release-notes.mjs",
-    "test:wait": "node scripts/check-wait.mjs"
+    "test:wait": "node scripts/check-wait.mjs",
+    "test:wait-live": "node scripts/check-wait.mjs --live"
   },
   "devDependencies": {
     "@getpaseo/client": "0.14.0",

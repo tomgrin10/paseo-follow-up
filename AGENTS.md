@@ -42,4 +42,5 @@ paseo-wait plugin. It is native plugin tools only: no loopback MCP, no process p
 active wait. Only the runner's exit receipt proves completion; ownership comes from the daemon's agent id and cwd,
 never from tool input; Stop and new messages end observation without killing the job. Keep it off while the
 standalone plugin is installed and enabled (tests/wait.test.ts). scripts/check-wait.mjs drives real Haiku agents in an
-isolated daemon; keep its adoption case prompt free of Wait's tool names.
+isolated daemon; keep its adoption case prompt free of Wait's tool names. Without Claude credentials or on Paseo below
+0.15 (CI) it prints SKIP and exits 0, so test:install still runs there; npm run test:wait-live fails instead of skipping.
