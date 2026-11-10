@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Pr, Workspace } from "./model";
+import { OTHER_LABEL, answerLabel, isOther } from "./questions";
 
 /**
  * The brief: "what you need to do", appended as one card at the end of an agent's timeline when it needs
@@ -21,7 +22,9 @@ export const briefDecisionSchema = z.object({
   question: z.string(),
   options: z.array(briefOptionSchema).default([]),
   recommend: z.string().nullable().default(null),
+  /** A letter, or "other" (Something else) with the developer's own answer in `words`. */
   chosen: z.string().nullable().default(null),
+  words: z.string().nullable().default(null),
 });
 export const briefFactSchema = z.object({ icon: z.string(), label: z.string(), tone: z.enum(["ok", "warn", "bad", "muted"]).default("muted") });
 export const briefLinkSchema = z.object({ label: z.string(), url: z.string().nullable().default(null), path: z.string().nullable().default(null), pr: z.string().nullable().default(null) });
@@ -159,7 +162,7 @@ const AGENT_LINE = "Stated by the agent.";
 function fromAgent(call: NeedsYouCall): Pick<BriefContent, "kind" | "ask" | "decisions" | "context" | "links"> {
   return {
     kind: call.kind, ask: line(call.ask), context: call.context ?? null,
-    decisions: (call.decisions ?? []).map((d, i) => ({ id: `D${i + 1}`, question: d.question, options: (d.options ?? []).map((o, j) => ({ letter: letter(j), label: o.label, consequence: o.consequence ?? null })), recommend: d.recommend !== undefined && d.options?.length ? letter(d.recommend) : null, chosen: null })),
+    decisions: (call.decisions ?? []).map((d, i) => ({ id: `D${i + 1}`, question: d.question, options: (d.options ?? []).map((o, j) => ({ letter: letter(j), label: o.label, consequence: o.consequence ?? null })), recommend: d.recommend !== undefined && d.options?.length ? letter(d.recommend) : null, chosen: null, words: null })),
     links: (call.links ?? []).map(l => ({ label: l.label, url: l.url ?? null, path: l.path ?? null, pr: l.pr ?? null })),
   };
 }
@@ -291,9 +294,9 @@ export type BriefEvent =
   | { type: "create"; id: string; turnId: string | null; content: BriefContent; flagged: boolean; seq: number; questionIds?: string[]; workspaceId?: string | null }
   | { type: "turn_start" }
   | { type: "message"; text: string | null }
-  | { type: "option"; decisionId: string; choice: string }
+  | { type: "option"; decisionId: string; choice: string; words?: string }
   /** Several decisions answered together (1.4.0): every pick at once; the rest were skipped on purpose. */
-  | { type: "options"; picks: { decisionId: string; choice: string }[] }
+  | { type: "options"; picks: { decisionId: string; choice: string; words?: string }[] }
   | { type: "sign_off" }
   | { type: "undo" }
   | { type: "permission_resolved" }
@@ -343,15 +346,15 @@ export function briefStep(prev: Brief | null, event: BriefEvent, now: string): {
     case "option": {
       if (prev?.state !== "open") return keep;
       const d = prev.decisions.find(d => d.id === event.decisionId);
-      const o = d?.options.find(o => o.letter === event.choice);
-      if (!d || !o) return keep;
-      const b = { ...collapse(prev, "answered", `You picked ${o.letter} · ${o.label}`), decisions: prev.decisions.map(x => x.id === d.id ? { ...x, chosen: o.letter } : x) };
+      if (!d || !validPick(d, event.choice, event.words)) return keep;
+      const decisions = prev.decisions.map(x => x.id === d.id ? { ...x, chosen: event.choice, words: isOther(event.choice) ? event.words!.trim() : null } : x);
+      const b = { ...collapse(prev, "answered", answeredOutcome(decisions)), decisions };
       return { brief: b, appends: [b] };
     }
     case "options": {
       if (prev?.state !== "open") return keep;
-      const chosen = new Map(event.picks.map(p => [p.decisionId, p.choice]));
-      const decisions = prev.decisions.map(d => { const c = chosen.get(d.id); return c && d.options.some(o => o.letter === c) ? { ...d, chosen: c } : d; });
+      const chosen = new Map(event.picks.map(p => [p.decisionId, p]));
+      const decisions = prev.decisions.map(d => { const p = chosen.get(d.id); return p && validPick(d, p.choice, p.words) ? { ...d, chosen: p.choice, words: isOther(p.choice) ? p.words!.trim() : null } : d; });
       if (!decisions.some(d => d.chosen)) return keep;
       const b = { ...collapse(prev, "answered", answeredOutcome(decisions)), decisions };
       return { brief: b, appends: [b] };
@@ -370,6 +373,11 @@ export function briefStep(prev: Brief | null, event: BriefEvent, now: string): {
       { const b = { ...prev, facts: event.facts.slice(0, 3) }; return { brief: b, appends: [b] }; }
   }
 }
+
+/** A pick on a decision: one of its letters, or Something else with words. The server and the lifecycle share it. */
+export const validPick = (d: Pick<BriefDecision, "options">, choice: string, words?: string | null) => isOther(choice) ? d.options.length > 0 && !!words?.trim() : d.options.some(o => o.letter === choice);
+/** What a decision's pick reads as: "B · label", or `Something else · "words"`. */
+export const pickLabel = (d: Pick<BriefDecision, "options" | "chosen" | "words">) => d.chosen ? answerLabel(d, d.chosen, d.words) : null;
 
 /** Decisions that have options to pick: the ones a multi-decision card sends together. */
 export const askedDecisions = (b: Pick<Brief, "decisions">): BriefDecision[] => b.decisions.filter(d => d.options.length > 0);
@@ -393,7 +401,7 @@ export const pickedCount = (b: Pick<Brief, "decisions">, picks: Record<string, s
 /** The answered card's summary (1.4.0): each asked decision's question (numbered when there are several) and the pick. */
 export function pastRows(b: Pick<Brief, "decisions" | "ask">): { id: string; question: string | null; answer: string | null }[] {
   const asked = askedDecisions(b); const numbered = asked.length > 1;
-  return asked.map((d, i) => { const o = d.options.find(o => o.letter === d.chosen); return { id: d.id, question: numbered || d.question.trim() !== b.ask.trim() ? `${numbered ? `${i + 1}. ` : ""}${d.question}` : null, answer: o ? `${o.letter} · ${o.label}` : null }; });
+  return asked.map((d, i) => ({ id: d.id, question: numbered || d.question.trim() !== b.ask.trim() ? `${numbered ? `${i + 1}. ` : ""}${d.question}` : null, answer: pickLabel(d) }));
 }
 /** Whether a past card has more than its one line to show behind "Show full question" / "Show original". */
 export const hasOriginal = (b: Pick<Brief, "decisions" | "context" | "mono" | "facts" | "links">) => b.decisions.length > 0 || !!b.context || !!b.mono || b.facts.length > 0 || b.links.length > 0;
@@ -401,8 +409,8 @@ export const hasOriginal = (b: Pick<Brief, "decisions" | "context" | "mono" | "f
 /** "You picked 1. A · 2. B · 3. skipped" for a multi-decision answer; one decision reads as before. */
 export function answeredOutcome(decisions: BriefDecision[]): string {
   const asked = decisions.filter(d => d.options.length);
-  if (asked.length <= 1) { const d = asked.find(d => d.chosen); const o = d?.options.find(o => o.letter === d.chosen); return o ? `You picked ${o.letter} · ${o.label}` : "You replied"; }
-  return `You picked ${asked.map((d, i) => `${i + 1}. ${d.chosen ?? "skipped"}`).join(" · ")}`;
+  if (asked.length <= 1) { const d = asked.find(d => d.chosen); if (!d) return "You replied"; return isOther(d.chosen) ? `You answered ${pickLabel(d)}` : `You picked ${pickLabel(d)}`; }
+  return `You picked ${asked.map((d, i) => `${i + 1}. ${isOther(d.chosen) ? OTHER_LABEL : d.chosen ?? "skipped"}`).join(" · ")}`;
 }
 
 /** F7: the one muted timeline line for a "Nothing needed" turn: "Nothing needed · <what was finished>". */

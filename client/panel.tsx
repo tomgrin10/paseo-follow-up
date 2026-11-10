@@ -28,6 +28,7 @@ import { SpecRow, SpecSheet } from "./spec";
 import { mergedColor, tint } from "./theme";
 import { SummaryRow } from "./about";
 import { WhatsNewGate } from "./release-notes";
+import { RichText } from "./rich-text";
 
 export { overviewKey, workspaceKey };
 
@@ -172,9 +173,9 @@ function AgentCard({ workspace: w, theme, compact, now, openAgent }: { workspace
       <Text style={[t.meta, { marginBottom: 6 }]}>{sent ? `Sent ${batch.tasks.length} repair${batch.tasks.length === 1 ? "" : "s"} ${ago(batch.sentAt, now)}. Follow-up waits for the agent to report back.` : `${batch.tasks.length} repair${batch.tasks.length === 1 ? "" : "s"} queued · ${blocker ?? "sends when the agent is idle"}`}</Text>
       {batch.tasks.map((task, i) => <View key={task.key} style={{ flexDirection: "row", gap: 6 }}>
         <Text style={[t.meta, { width: 16, fontVariant: ["tabular-nums"] }]}>{i + 1}.</Text>
-        <Text style={[t.meta, { flex: 1 }]}>{shortRefs(task.title, w)}</Text>
+        <RichText linkColor={c.foreground} style={[t.meta, { flex: 1 }]}>{shortRefs(task.title, w)}</RichText>
       </View>)}
-      {!!batch.result && <Text style={[t.meta, { marginTop: 6, color: c.statusWarning }]}>{batch.result}</Text>}
+      {!!batch.result && <RichText style={[t.meta, { marginTop: 6, color: c.statusWarning }]}>{batch.result}</RichText>}
     </CardRow>
   </Card>;
 }
@@ -193,7 +194,7 @@ function ShippedCard({ workspace: w, theme, compact, now }: { workspace: Workspa
           <Text style={t.meta}>{merged ? `${merged} PR${merged === 1 ? "" : "s"} merged · ` : ""}declared {ago(w.completion.declaredAt, now)}</Text>
         </View>
       </View>
-      <Text selectable style={[t.body, { color: c.foreground }]}>{w.completion.summary}</Text>
+      <RichText selectable style={[t.body, { color: c.foreground }]}>{w.completion.summary}</RichText>
       {!!w.completion.unconfirmed?.length && <Text style={t.meta}>{`Deploy not confirmed by Follow-up for ${w.completion.unconfirmed.map(k => shortRefs(k, w)).join(", ")}. The summary above is the agent's evidence.`}</Text>}
       <Text style={t.meta}>Archive the workspace from its menu when you're finished with it.</Text>
     </View>
@@ -238,7 +239,7 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
             <Text style={t.meta}>A separate agent reads this workspace's history to find PRs and tasks Follow-up missed. It never edits code or messages the main agent.</Text>
           </View>
           {recoveryState && <Text style={[t.meta, { color: c.foreground }]}>{recoveryState}{last?.settledAt ? ` · ${ago(last.settledAt)}` : ""}</Text>}
-          {!!last?.result && <Text numberOfLines={4} selectable style={t.meta}>{last.result}</Text>}
+          {!!last?.result && <RichText linkColor={c.foreground} numberOfLines={4} selectable style={t.meta}>{last.result}</RichText>}
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
             {last?.state === "pending" ? <Button title="Run queued recovery" theme={theme} compact={compact} loading={runQueued.isPending} onPress={() => runQueued.mutate(last.id)} />
               : <Button title={recovery.isPending || last?.state === "sending" ? "Starting recovery…" : "Run recovery"} icon="History" theme={theme} compact={compact} loading={recovery.isPending}
