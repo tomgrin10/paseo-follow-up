@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CAP_MS, QUIET_MS, busyAgents, busyText, quietWindow } from "../shared/update-policy";
+import { CAP_MS, QUIET_MS, PROBATION_MS as POLICY_PROBATION_MS, busyAgents, busyText, quietWindow } from "../shared/update-policy";
 import { LOAD_TIMEOUT_MS, PROBATION_MS, probation } from "../server/update-watchdog.mjs";
 
 const M = 60_000, H = 60 * M;
@@ -54,3 +54,5 @@ test("rollback: an error reported during probation rolls back; a clean run is ke
     { verdict: "rollback", reason: "It didn't start within two minutes." }, "the old version's heartbeat doesn't count");
   assert.deepEqual(probation({ ...base, now: M, plugin: { status: "disabled", version: null, error: null }, heartbeat: null }), { verdict: "ok" }, "disabled by the developer");
 });
+
+test("the watchdog and Settings agree on how long probation lasts", () => assert.equal(PROBATION_MS, POLICY_PROBATION_MS));

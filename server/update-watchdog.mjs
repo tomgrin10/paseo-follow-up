@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 
-/** How long after an update a new version must run cleanly before it counts as good. */
+/** How long after an update a new version must run cleanly before it counts as good (shared/update-policy.ts too). */
 export const PROBATION_MS = 10 * 60_000;
 /** How long the new version has to report in at all. */
 export const LOAD_TIMEOUT_MS = 2 * 60_000;
@@ -119,7 +119,7 @@ export async function run(job, io = {}) {
 }
 
 // Run as a script: the job comes in the environment (it carries the daemon password, so never on the command line).
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) void (async () => {
   const job = JSON.parse(process.env.FOLLOW_UP_UPDATE_JOB ?? "null");
   delete process.env.FOLLOW_UP_UPDATE_JOB;
   if (!job) process.exit(2);
@@ -128,4 +128,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     await appendFile(join(job.directory, "updates.jsonl"), `${JSON.stringify({ at: Date.now(), from: job.from, to: job.to, event: "failed", reason: clip(e?.message ?? e) || "The installer stopped." })}\n`).catch(() => undefined);
   });
   process.exit(0);
-}
+})();
