@@ -72,3 +72,10 @@ test("Workspaces: search by title words, exceptions first, capped with the rest 
   assert.equal(followingSummary({ enable_follow_every: true, enable_auto_sends_default: true, workspaces: all }), "Following every workspace · 2 exceptions · auto-send on");
   assert.equal(followingSummary({ enable_follow_every: false, enable_auto_sends_default: false, workspaces: [] }), "Following chosen projects · no exceptions · auto-send off");
 });
+
+test("desktop Agents tab: no status line above the card; the Helper agents header says it once (phone list keeps it)", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const s = await readFile("client/settings.tsx", "utf8");
+  assert.match(s, /line && category !== "general" && category !== "agents"/);
+  assert.match(s, /<CategoryList summaries=\{summaries\}/);
+});
