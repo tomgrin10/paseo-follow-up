@@ -32,13 +32,30 @@ The first time you open Follow-up from the sidebar, a short setup takes Home's p
 2. **Check your setup.** Whether the GitHub CLI is signed in (and as whom), whether Claude and Codex are available for the helper agents, and whether agents get Follow-up's tools. Anything missing shows the fix, with the command to copy. Checks run only while this step is open.
 3. **What Follow-up does without asking.** Follow every workspace (or turn single ones off), Send repairs automatically, and Trust bypass agents. They are on by default and save as you change them.
 4. **Reviewers.** Who **Add reviewers** asks: a default for every repository, and a list per repository Follow-up has seen. **Skip, set later** leaves it empty.
-5. **Helpers.** The Overseer and AI priority switches, which models they use (change them under Settings → Agents), and where Home, the workspace panel, Needs you and the Summary live.
+5. **Updates.** Install automatically (recommended), Tell me, or Off, and the Stable or Beta channel. Passing the step or skipping setup keeps Install automatically.
+6. **Helpers.** The Overseer and AI priority switches, which models they use (change them under Settings → Agents), and where Home, the workspace panel, Needs you and the Summary live.
 
 Every switch in setup is the same one Settings shows, so nothing is applied twice and nothing is lost if you stop halfway. Setup remembers its step, so a reload or another device picks up where you left off. Run it again any time from **Set up Follow-up again** in Settings → **General**, the first category, or ⌘K → **Follow-up: Set up again**. If Follow-up was already installed before this version, it doesn't open on its own: Home shows one dismissible line offering it, for a day.
 
 ## What's new
 
 After a major update (1.x to 2.0), the next time you open Paseo it shows **What's new**: the notes for every version since that device last looked, newest open, older ones folded. It shows once per device per version (once per host in the phone app), never on a fresh install and never over setup. Betas, minor and patch updates never pop it up. Betas have no notes of their own; their changes are collected in the next stable release. Home's last line says which version you run, with **Release notes** for the full list; for three days after an update to a version with its own notes it reads **Updated to X · What's new** instead. The notes ship inside the package as [CHANGELOG.md](CHANGELOG.md), so they work offline and match the installed version.
+
+## Updates
+
+Follow-up can update itself. **Settings → General** has three modes:
+
+- **Install automatically** installs a new version at a quiet moment: no agent mid-turn and none of Follow-up's own work running, for five minutes in a row (after a day of waiting, any idle moment). Installing reloads Follow-up, which detaches its tools from open agent sessions until they reopen, so it never installs mid-turn.
+- **Tell me** shows the new version in Settings → General, and as one line on Home only for a new major version (2.0). You choose when with **Install now**. It is the default on hosts that had Follow-up before updates existed.
+- **Off** never asks npm on its own, not even when Settings opens. **Check now** still works.
+
+Follow-up asks npm about once every six hours (one small request, nothing when unchanged), opening Settings → General checks at most once a minute, and **Check now** always asks. **Channel** picks Stable (`latest`) or Beta; it starts on Beta when you run a beta, and never offers a stable older than what you run.
+
+Before installing a version on its own, Follow-up reads the version's npm provenance and checks that it was built by this repository's GitHub workflow and is the exact file npm serves. That file's checksum is then pinned for the install. Follow-up does not verify the provenance signature itself, so this guards against a version published by hand or from another repository, not against a compromised registry. A version that fails the check is never installed from Settings; install it by hand with `paseo plugin update follow-through --version <version>` only if you trust it.
+
+An installer runs alongside Follow-up for the install and the ten minutes after it. If the new version fails to load, reports an error, or doesn't start within two minutes, it installs the previous version again, and Settings and Home say what happened. Follow-up doesn't retry a rolled-back version on its own. Every update is listed under **Update history**. Installs from a Git checkout or a local folder are left alone: pull and rebuild to update.
+
+Agents can do the same with `updates_status`, `check_updates`, `set_updates` and `install_update` (the last two as confirmed plans).
 
 ## Use
 

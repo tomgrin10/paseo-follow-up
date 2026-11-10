@@ -9,11 +9,12 @@ import { ONBOARDING_STEPS, autoSendWrites, checksSummary, type Check, type Onboa
 import { Button, IconButton, errorText, text, type Theme } from "./kit";
 import { ReviewerSettings } from "./reviewers";
 import { ShippingStep } from "./shipping";
+import { UpdatesStep } from "./updates";
 import { Spinner, useReducedMotion } from "./motion";
 import { raised, runningColor, tint, withAlpha, type Colors } from "./theme";
 
 /**
- * Getting started: five steps that take a fresh install to a configured Follow-up. Shown in Home's place while the
+ * Getting started: the steps that take a fresh install to a configured Follow-up. Shown in Home's place while the
  * server says so (fresh install, or "Set up Follow-up again"), never forced on an existing install.
  * Every switch writes through the Settings screen's own RPC or settings document as it changes; the flow itself only
  * saves which step it's on, so a reload resumes there.
@@ -40,6 +41,7 @@ const TITLES: Record<OnboardingStep, string> = {
   defaults: "What Follow-up does without asking",
   shipping: "How do you ship PRs?",
   reviewers: "Who should review your PRs?",
+  updates: "Keep Follow-up up to date",
   helpers: "Helpers, and where things are",
 };
 
@@ -79,6 +81,7 @@ export function Setup({ theme, compact, view, deps }: { theme: Theme; compact: b
     : step === "defaults" ? <DefaultsStep theme={theme} compact={compact} held={view.holdsAutoSends} />
     : step === "shipping" ? <ShippingStep theme={theme} compact={compact} />
     : step === "reviewers" ? <ReviewerSettings theme={theme} compact={compact} />
+    : step === "updates" ? <UpdatesStep theme={theme} compact={compact} />
     : <HelpersStep theme={theme} compact={compact} deps={deps} checks={checks.data?.checks ?? null} />;
   const lead: Record<OnboardingStep, string> = {
     intro: "It follows your agents' pull requests until the work is done, sends fixes back to them, and asks you only for decisions.",
@@ -86,6 +89,7 @@ export function Setup({ theme, compact, view, deps }: { theme: Theme; compact: b
     defaults: "These are on now. Change anything here; it saves as you go, and Settings has the same switches.",
     shipping: "Follow-up merges and tracks PRs the way each repository already works. It picked these; change one if it's wrong.",
     reviewers: "When you press Add reviewers on a PR, Follow-up asks these people. Set a default for all repositories, or a list for one. Until then, PRs without reviewers show in Needs you.",
+    updates: "New versions fix problems and add features. Follow-up can install them for you, at a moment when no agent is using it, and goes back to the old version if something breaks.",
     helpers: "Two optional agents. They read, summarise and rank. They never change code or message anyone.",
   };
   const column: ViewStyle = { width: "100%", maxWidth: 560, alignSelf: "center", paddingHorizontal: compact ? 16 : 24 };

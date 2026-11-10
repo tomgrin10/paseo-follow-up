@@ -8,7 +8,7 @@ import { z } from "zod";
  * (see `CHOICE_WRITES`); the flow keeps only its own progress in `plugin-data/follow-through/onboarding.json`.
  */
 
-export const ONBOARDING_STEPS = ["intro", "checks", "defaults", "shipping", "reviewers", "helpers"] as const;
+export const ONBOARDING_STEPS = ["intro", "checks", "defaults", "shipping", "reviewers", "updates", "helpers"] as const;
 export type OnboardingStep = typeof ONBOARDING_STEPS[number];
 export const isStep = (v: unknown): v is OnboardingStep => typeof v === "string" && (ONBOARDING_STEPS as readonly string[]).includes(v);
 
@@ -99,14 +99,6 @@ export function setupEntry(view: Pick<OnboardingView, "status" | "step"> | null 
     case "skipped": return { label, hint: `Skipped. ${SETUP_WHAT}`, line: "Skipped. About two minutes", action: "Open setup", resume: false };
     default: return { label, hint: SETUP_WHAT, line: "About two minutes", action: "Open setup", resume: false };
   }
-}
-
-/** General's line in the phone's Settings list: "Follow-up 1.4.0 · setup finished". */
-export function generalSummary(version: string | null | undefined, status: OnboardingView["status"] | null | undefined): string | null {
-  const setup = status === "done" ? "setup finished" : status === "skipped" ? "setup skipped" : status === "new" || status === "active" ? "setup in progress" : status === "idle" ? "setup not run" : null;
-  const parts = [version ? `Follow-up ${version}` : null, setup].filter(Boolean);
-  const line = parts.join(" · ");
-  return line ? line.charAt(0).toUpperCase() + line.slice(1) : null;
 }
 
 export function onboardingView(file: OnboardingFile, now: number): OnboardingView {
@@ -250,7 +242,22 @@ export const CHOICE_WRITES = {
   overseer: { settings: "display", field: "enable_overseer" },
   ranker: { settings: "display", field: "enable_ranker" },
   trustBypass: { settings: "display", field: "enable_trust_bypass" },
+  updatesMode: { rpc: "follow.set-updates", field: "mode" },
+  updatesChannel: { rpc: "follow.set-updates", field: "channel" },
 } as const;
+
+/**
+ * A fresh install's setup is its consent to automatic updates: passing the Updates step without picking, or skipping
+ * setup, saves Install automatically (when nothing was chosen yet). An existing install never gets this: its setup
+ * shows the mode it already has, and its default stays Tell me.
+ */
+export function updatesConsent(input: { install: InstallKind; settled: boolean; action: OnboardingAction; from: OnboardingStep | null; to: OnboardingStep | null }): boolean {
+  if (input.install !== "fresh" || input.settled) return false;
+  if (input.action === "skip" || input.action === "finish") return true;
+  if (input.action !== "step" || !input.to) return false;
+  const at = ONBOARDING_STEPS.indexOf("updates");
+  return input.from === "updates" && ONBOARDING_STEPS.indexOf(input.to) > at;
+}
 
 type FollowRow = { id: string; enable_tracking: boolean; enable_auto_sends: boolean; optedOut: boolean };
 /**

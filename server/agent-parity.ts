@@ -4,6 +4,7 @@ import { ONBOARDING_ACTIONS, ONBOARDING_STEPS } from "../shared/onboarding";
 import { setPrWorkflowInputSchema } from "../shared/pr-workflow";
 import { reviewerListSchema } from "../shared/reviewers";
 import { taskTriggerSchema } from "../shared/task-trigger";
+import { UPDATE_MODES } from "../shared/updates";
 
 /**
  * Agent parity, part 2 (1.4.0-beta.21): tools that are a developer RPC one-to-one. A read runs the RPC's handler; a
@@ -93,6 +94,13 @@ export const RPC_TOOLS: readonly RpcTool[] = [
   { name: "browser_status", rpc: "follow.browser-status", kind: "read", input: none },
   // What's new: the installed version, the one before it and when, and every shipped note (newest first)
   { name: "release_notes", rpc: "follow.release-notes", kind: "read", input: none },
+  // Settings → General: status (mode, channel, newest versions, phase, pending notes, history), Check now, mode/channel, Install now
+  { name: "updates_status", rpc: "follow.updates", kind: "read", input: none },
+  { name: "check_updates", rpc: "follow.updates", kind: "write", input: none, toRpc: () => ({ check: "manual" }) },
+  { name: "set_updates", rpc: "follow.set-updates", kind: "planned", before: { rpc: "follow.updates", input: () => ({}) },
+    input: z.strictObject({ mode: z.enum(UPDATE_MODES).optional(), channel: z.enum(["stable", "beta"]).optional(), ...confirm }) },
+  { name: "install_update", rpc: "follow.install-update", kind: "planned", before: { rpc: "follow.updates", input: () => ({}) },
+    input: z.strictObject({ version: z.string().trim().min(1).max(64), anyway: z.boolean().optional(), ...confirm }) },
   // Settings → Permissions: trust bypass agents' approvals
   { name: "trust_bypass_status", rpc: "follow.trust-bypass", kind: "read", input: none },
 ];
@@ -151,5 +159,9 @@ export const PARITY: Record<string, { tools: readonly string[]; note?: string } 
   "follow.trust-bypass": { tools: ["trust_bypass_status", "display_settings"] },
   "settings.display": { tools: ["display_settings", "set_display"] },
   "follow.release-notes": { tools: ["release_notes"] },
+  "follow.updates": { tools: ["updates_status", "check_updates"] },
+  "follow.set-updates": { tools: ["set_updates"] },
+  "follow.install-update": { tools: ["install_update"] },
+  "follow.dismiss-update-notice": { exempt: "Hides Home's update line for the person looking at it; updates_status already tells an agent what that line said." },
   "follow.whats-new-seen": { exempt: "Records that a person closed What's new on a device; an agent reading the notes isn't someone seeing the sheet." },
 };

@@ -74,8 +74,10 @@ fixture per reported bug).
   notes, and every beta shipped notes. announcesUpdate(from, to) in shared/changelog.ts is the one rule: true only when
   a major is released (1.x to 2.0.0; a 2.0.0 beta still counts as 1.x, so the beta channel still gets the 2.0 sheet).
   What's new and any update notice or prompt go through it; anything else is recorded quietly or shown as a row in
-  Settings, never a sheet or toast. Home's "Updated to X · What's new" needs notes of X's own. The grid test fails if a
-  non-major update would open a sheet; add new update surfaces to it.
+  Settings, never a sheet or toast. Home's "Updated to X · What's new" needs notes of X's own, and the updater's Home
+  notice for an available version needs a new major (a rollback notice reports a failure and always shows). The grid
+  tests (here and in tests/updater.test.ts) fail if a non-major update would open a sheet; add new update surfaces to
+  them.
 - Only the developer answers a Needs-you card (brief-follows-questions). A turn's prompt is read from the timeline
   tail, including Paseo 0.15's agent_message and heartbeat tool-call projections, and an unseen prompt is "unknown",
   never the developer. A turn the developer didn't start leaves the card open; only a newer brief supersedes it. While
