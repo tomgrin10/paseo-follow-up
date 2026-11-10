@@ -8,7 +8,7 @@ import { FORWARD_PREFIX, FORWARD_PREFIXES, forwardText, isForwarded } from "../s
 // (they record who asked for what); prompts, prefixes, tool descriptions, receipts and UI copy may not.
 const ROOT = join(import.meta.dirname, "..");
 const DENY = /\b(Tom|Tom's|Gringauz)\b/; // the repository owner's handle in its URL is an identity, not prose
-// The only allowed occurrence: the pre-1.4.0-beta.36 forward prefix, kept so old transcripts are still recognised.
+// The only allowed occurrence: the earlier forward prefix, kept so old transcripts are still recognised.
 const LEGACY = ['"From Tom via Overseer:"'];
 
 const shipped = (dir: string): string[] => readdirSync(join(ROOT, dir)).flatMap(name => {
@@ -32,6 +32,12 @@ test("no personal name in anything Follow-up says (prompts, prefixes, tool text,
     });
   }
   assert.deepEqual(hits, [], "say \"the developer\" (they/their) instead");
+});
+
+test("the README describes the developer without naming them; only the copyright line names the author", () => {
+  const hits = readFileSync(join(ROOT, "README.md"), "utf8").split("\n").map((line, i) => ({ line, n: i + 1 }))
+    .filter(({ line }) => DENY.test(line) && !/^\[MIT\]\(LICENSE\) ©/.test(line));
+  assert.deepEqual(hits.map(h => `README.md:${h.n}: ${h.line.slice(0, 120)}`), []);
 });
 
 test("the Overseer prompt refers to the developer without gendered pronouns", () => {
