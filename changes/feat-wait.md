@@ -1,2 +1,0 @@
-- Claude agents now keep working while a long command runs, checking on it at least once a minute instead of ending their turn to wait. Turn it off in Settings → Agents → Wait for background jobs.
-- This replaces the separate Wait plugin. While that plugin is installed, Follow-up's own Wait stays off and Settings says so.
