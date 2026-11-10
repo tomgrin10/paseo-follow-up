@@ -536,6 +536,11 @@ function Step({ step, c, last }: { step: TailStep; c: Colors; last: boolean }) {
   if (step.kind === "you") return <View style={{ padding: 10, borderRadius: 8, backgroundColor: c.surface1, gap: 3 }}>
     <Text style={t.small}>You</Text><RichText numberOfLines={3} style={t.body}>{answerLine(step.text) ?? step.text}</RichText>
   </View>;
+  // Anyone but the developer (another agent, a child's finish, Follow-up's own send, an Overseer forward): outlined,
+  // labelled by sender, never "You" and never the raw envelope (shared/message-sender.ts).
+  if (step.kind === "message") return <View style={{ padding: 10, borderRadius: 8, borderWidth: 1, borderColor: c.border, gap: 3 }}>
+    <Text numberOfLines={1} style={t.small}>{step.from}</Text><RichText numberOfLines={3} style={t.body}>{answerLine(step.text) ?? step.text}</RichText>
+  </View>;
   if (step.kind === "error") return <RichText numberOfLines={4} style={[t.body, { color: c.statusDanger }]}>{step.text}</RichText>;
   return <RichText selectable numberOfLines={last ? 40 : 4} style={[t.body, { lineHeight: 19 }]}>{step.text.replace(/\*\*/g, "")}</RichText>;
 }
