@@ -102,6 +102,11 @@ retargeting instead of Graphite restacks.
 
 ## Status model
 
+Background work is work (Paseo 0.16): the main agent's `backgroundWork.count > 0` sets `backgroundBusy`
+(`server/daemon.ts` `observe`), so no repair is sent into it ("sends after the agent's background work"), and Done
+waits ("Wait for background agents and jobs to finish"; a declaration is kept and accepted when it clears). Make main
+agent waits too (`checkMainClaim`).
+
 `shared/status.ts` is the one place a user-facing status is computed. `batchView(w, now)` picks the batch that
 describes Follow-up's work right now: its phase (`queued`, `sent`, `stuck`), who it waits on (the agent's
 turn, the open batch, an idle agent Follow-up won't wake, setup, or you) and its one line. It mirrors the auto-send

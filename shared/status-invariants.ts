@@ -120,12 +120,17 @@ export function briefViolations(current: Pick<Brief, "id" | "state" | "outcome" 
  * just failed is real news even while Paseo still reads "running". `running-is-not-stale`, 2026-11-10: Home said
  * "Error · The turn failed" on an agent that had been running for 15 minutes.
  */
-export function rowViolations(row: Pick<InboxRow, "agentId" | "status" | "needs" | "snooze" | "brief" | "turnStartedAt">, now: number): { id: string; detail: string }[] {
-  if (!["running", "initializing"].includes(row.status) || !row.turnStartedAt) return [];
+export function rowViolations(row: Pick<InboxRow, "agentId" | "status" | "needs" | "snooze" | "brief" | "turnStartedAt" | "backgroundWork">, now: number): { id: string; detail: string }[] {
+  const out: { id: string; detail: string }[] = [];
+  // background-work-is-running (Paseo 0.16): a job the agent started and ended its turn on is still its work, so the
+  // row is Running and never "finished" until the work ends.
+  if (row.backgroundWork && (!["running", "initializing"].includes(row.status) || flagHeadline(row, now)?.key === "finished")) out.push({ id: "background-work-is-running", detail: `${row.agentId} has ${row.backgroundWork} background job(s) but reads ${row.status}${flagHeadline(row, now)?.key === "finished" ? " · finished" : ""}` });
+  if (!["running", "initializing"].includes(row.status) || !row.turnStartedAt) return out;
   const h = flagHeadline(row, now);
-  if (!h || (h.key !== "error" && h.key !== "paused")) return [];
+  if (!h || (h.key !== "error" && h.key !== "paused")) return out;
   const flaggedAt = [...(row.needs?.reasons.filter(r => r.reason === h.key).map(r => r.at) ?? []), ...(row.brief?.kind === h.key && row.brief.at ? [row.brief.at] : [])].sort().at(-1);
-  return !flaggedAt || flaggedAt < row.turnStartedAt ? [{ id: "running-is-not-stale", detail: `${row.agentId} is ${row.status} since ${row.turnStartedAt} but headlines ${h.label} from ${flaggedAt ?? "an older card"}` }] : [];
+  if (!flaggedAt || flaggedAt < row.turnStartedAt) out.push({ id: "running-is-not-stale", detail: `${row.agentId} is ${row.status} since ${row.turnStartedAt} but headlines ${h.label} from ${flaggedAt ?? "an older card"}` });
+  return out;
 }
 
 /**

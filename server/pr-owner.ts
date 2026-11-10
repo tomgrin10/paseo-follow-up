@@ -1,5 +1,6 @@
 import type { State, Workspace } from "../shared/model";
 import { buildHome, GROUP_TITLE, HOME_GROUPS, type HomeGroupId } from "../shared/home";
+import { isLive } from "../shared/agent-load";
 
 /** Duplicate claims are ambiguous. Never route by recency or by PR title. */
 export function prOwner(state: State, repo: string, number: number) {
@@ -18,7 +19,7 @@ export function browserRepositories(state: State): string[] {
 }
 
 /** The live Paseo facts about a workspace's main agent that the browser view needs. */
-export type BrowserAgent = { status: string; pendingPermissions?: unknown[]; requiresAttention?: boolean; attentionReason?: string | null };
+export type BrowserAgent = { status: string; pendingPermissions?: unknown[]; requiresAttention?: boolean; attentionReason?: string | null; backgroundWork?: { count?: unknown } | null };
 export type BrowserWorkspace = { workspaceId: string; agentId: string; title: string; agentStatus: string; group: HomeGroupId; state: string };
 export const BROWSER_WORKSPACE_LIMIT = 3;
 
@@ -49,10 +50,11 @@ export function browserWorkspaceState(w: Workspace, agent: BrowserAgent, now = D
   if (group === "needs") return { group, state: `${GROUP_TITLE.needs} · ${row!.badges[0]?.text ?? row!.word ?? "Action"}` };
   if (agent.pendingPermissions?.length || agent.attentionReason === "permission") return { group: "needs", state: `${GROUP_TITLE.needs} · Permission` };
   // Paseo's attention reason outlives the turn it describes: a running agent's "error" is the last turn's, not now's.
-  const running = ["running", "initializing"].includes(agent.status);
+  // 0.16: live background work counts as running too (no "Finished" while a job it started still runs).
+  const running = isLive(agent);
   if (agent.status === "error" || agent.attentionReason === "error" && !running) return { group: "needs", state: `${GROUP_TITLE.needs} · Error` };
   if (group === "fixing") return { group, state: `${GROUP_TITLE.fixing} · ${fixDetail(w, row!.line)}` };
-  if (group === "running" || ["running", "initializing"].includes(agent.status)) return { group: "running", state: GROUP_TITLE.running };
+  if (group === "running" || running) return { group: "running", state: GROUP_TITLE.running };
   if (agent.requiresAttention) return { group: "needs", state: `${GROUP_TITLE.needs} · Finished` };
   if (group === "waiting") return { group, state: row!.line ? `${GROUP_TITLE.waiting} · ${row!.line}` : GROUP_TITLE.waiting };
   return { group, state: row?.readyToArchive ? "Done · ready to archive" : GROUP_TITLE.quiet };

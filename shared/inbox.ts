@@ -144,13 +144,21 @@ export const RUN_STATE_REASONS: readonly Reason[] = ["error", "paused"];
  * What a row shows for an agent: a running agent has outlived its last turn's run-state flags and the card that only
  * reported them (`running-is-not-stale`). A card with open questions stays: only the developer closes it.
  */
-export function liveFlag<B extends { kind: string; state: string; questionIds?: string[]; at?: string }>(status: string, needs: Needs | null, brief: B | null, turnStartedAt: string | null = null): { needs: Needs | null; brief: B | null } {
+export function liveFlag<B extends { kind: string; state: string; questionIds?: string[]; at?: string }>(status: string, needs: Needs | null, brief: B | null, turnStartedAt: string | null = null, background = false): { needs: Needs | null; brief: B | null } {
+  // Paseo 0.16 background work still live: the agent isn't finished yet, so a finish waits (shown, not erased).
+  if (background) needs = withoutReasons(needs, ["finished"]);
   // Only a flag older than the current turn's start is stale. Paseo can still read "running" for a moment after a
   // turn fails (server/directory.ts keeps a failed agent busy until its re-read), so status alone isn't enough, and
   // without a known turn start nothing is dropped here (the reducer and the load repair cover those turns).
   if (!["running", "initializing"].includes(status) || !turnStartedAt) return { needs, brief };
   const stale = brief?.state === "open" && (brief.kind === "error" || brief.kind === "paused") && !brief.questionIds?.length && !!brief.at && brief.at < turnStartedAt;
   return { needs: withoutRunState(needs, turnStartedAt), brief: stale ? null : brief };
+}
+function withoutReasons(needs: Needs | null, drop: readonly Reason[]): Needs | null {
+  if (!needs) return null;
+  const reasons = needs.reasons.filter(r => !drop.includes(r.reason));
+  if (reasons.length === needs.reasons.length) return needs;
+  return reasons.length ? { reasons, since: reasons.map(r => r.at).sort()[0] } : null;
 }
 /** Drop the run-state flags a newer turn has outlived (all of them without `before`); null when nothing is left. */
 export function withoutRunState(needs: Needs | null, before?: string): Needs | null {
@@ -360,6 +368,8 @@ export const inboxRowSchema = z.object({
   brief: z.object({ kind: z.enum(BRIEF_KINDS), source: z.enum(BRIEF_SOURCES), state: z.enum(BRIEF_STATES), ask: z.string(), questionIds: z.array(z.string()).optional(), at: z.string().optional() }).nullable().optional(),
   /** When the agent's current turn started, if the worker saw it start (status invariant running-is-not-stale). */
   turnStartedAt: z.string().nullable().optional(),
+  /** Paseo 0.16: the agent's live background work (shells, tasks); absent means none or a 0.15 host. */
+  backgroundWork: z.number().int().positive().optional(),
 });
 export type InboxRow = z.infer<typeof inboxRowSchema>;
 
