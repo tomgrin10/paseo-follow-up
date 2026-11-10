@@ -27,6 +27,19 @@
   identify a workspace subagent. Resolve the parent's workspace: a launch into a different workspace is an eligible
   root, while a same-workspace child stays excluded. Unknown parent membership grants no new scope. Use this module
   everywhere: discovery, tool access and recovery handoff. Packed tests cover workspace-first agent creation.
+- **Background agents** (`server/background-agents.ts`). On Paseo 0.16 another plugin can run a helper with
+  `background: true` (no tab, no notifications, left out of Paseo's agent lists). Such an agent is never a root:
+  - no action tools, no `needs_you` and no Stop-hook nudge at session open;
+  - no Wait;
+  - no inbox rows for its turns;
+  - no directory row.
+  Paseo sends the flag only in the agent snapshot (`fetch_agent` / `agents.ref(id).refresh()`), not in lifecycle
+  events or `session_open`. On 0.16 a brand-new agent's snapshot doesn't exist yet at `session_open` (checked in the
+  0.16 harness), so its first session still gets the tools. The worker learns the flag at `agent.created` and
+  writes `background-agents.json`. The hook then skips the agent (no context, no Stop-hook nudge), tool calls are
+  refused (`isWorkspaceRoot`), and later session opens skip tools and Wait. `BackgroundAgents` remembers only
+  "yes": the flag is fixed at creation, and an early "no" must not stick. A failed read counts as not background.
+  On 0.15 the field is absent and nothing changes. Guarded by `tests/background-agents.test.ts`.
 - **Roles:**
   - **Main agent:** owns goal, tasks, questions, the spec and Done.
   - **Contributors** (other root agents): get PR status, registration and sync only.
