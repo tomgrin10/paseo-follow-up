@@ -78,3 +78,7 @@ fixture per reported bug).
   notice for an available version needs a new major (a rollback notice reports a failure and always shows). The grid
   tests (here and in tests/updater.test.ts) fail if a non-major update would open a sheet; add new update surfaces to
   them.
+- Only the developer answers a Needs-you card (brief-follows-questions). A turn's prompt is read from the timeline
+  tail, including Paseo 0.15's agent_message and heartbeat tool-call projections, and an unseen prompt is "unknown",
+  never the developer. A turn the developer didn't start leaves the card open; only a newer brief supersedes it. While
+  a linked question is open on the server, nothing but a developer reply, pick or sign-off closes its card.

@@ -328,9 +328,10 @@ export function briefStep(prev: Brief | null, event: BriefEvent, now: string): {
       appends.push(brief);
       return { brief, appends };
     }
+    // A turn the developer didn't start (another agent, Follow-up, a continuation, a schedule) leaves the card open:
+    // only the developer answers it, and only a newer brief from the same agent supersedes it.
     case "turn_start":
-      if (prev?.state !== "open") return keep;
-      { const b = collapse(prev, "superseded", "The agent kept going"); return { brief: b, appends: [b] }; }
+      return keep;
     case "message": {
       if (prev?.state !== "open") return keep;
       const picked = matchOption(prev, event.text);
@@ -408,4 +409,20 @@ export function answeredOutcome(decisions: BriefDecision[]): string {
 export function nothingNeededLine(ask: string): string {
   const rest = ask.replace(/^\s*nothing(?: is)? needed(?: from you)?\s*[.:·—–-]?\s*/i, "").trim();
   return rest ? `Nothing needed · ${rest}` : "Nothing needed";
+}
+
+// ---------- one source of truth: the card follows its questions (1.4.0-beta.25) ----------
+
+/** Outcomes only the developer produces: a reply, an option pick, sign-off. Anything else never closes a card. */
+export const developerClosed = (b: Pick<Brief, "state" | "outcome">) => b.state === "signed" || b.state === "answered" && /^You (replied|picked)\b/.test(b.outcome ?? "");
+/**
+ * Whether an agent's current brief (the newest) must be shown open: it links questions that are still open on the
+ * server, and nothing the developer did closed it. Before 1.4.0-beta.25 a turn started by another agent (or Follow-up,
+ * a continuation, a schedule) superseded it, or answered it with the developer's previous message.
+ * `trustReplies: false` (the one-time repair) also reopens "You replied" cards, since those can't be told apart.
+ */
+export function shouldReopen(b: Pick<Brief, "state" | "outcome" | "questionIds">, openQuestionIds: ReadonlySet<string>, trustReplies = true): boolean {
+  if (b.state === "open" || !b.questionIds.some(id => openQuestionIds.has(id))) return false;
+  if (b.state === "superseded") return true;
+  return !trustReplies && b.state === "answered" && b.outcome === "You replied";
 }

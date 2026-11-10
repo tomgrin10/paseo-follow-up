@@ -272,6 +272,7 @@ export default function contribute(server: PluginServerContext) {
    * 1.4.0-beta.25: once, collapse open questions that were asked twice or more (see collapseDuplicateQuestions). The
    * oldest stays open; answered ones are never touched. Backed up first, like the other migrations.
    */
+  const BRIEF_REOPEN_MIGRATION = "reopen-collapsed-briefs-1";
   const dedupeQuestions = async () => {
     if ((await store.snapshot()).migrations?.includes(QUESTION_DEDUPE_MIGRATION)) return;
     await copyFile(join(directory, "state.json"), join(directory, "state.before-question-dedupe.json.bak"), 1).catch(error => { if (!["ENOENT", "EEXIST"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error; });
@@ -281,6 +282,19 @@ export default function contribute(server: PluginServerContext) {
       for (const w of state.workspaces) if (collapseDuplicateQuestions(w.questions, now).length) w.updatedAt = new Date(now).toISOString();
       state.migrations = [...state.migrations ?? [], QUESTION_DEDUPE_MIGRATION];
     });
+  };
+  /**
+   * 1.4.0-beta.25: once, reopen Needs-you cards that another agent's message (or Follow-up, a continuation, a schedule)
+   * collapsed while their questions are still open (Inbox.reopenCollapsed). Questions are the source of truth.
+   */
+  const reopenBriefs = async () => {
+    if ((await store.snapshot()).migrations?.includes(BRIEF_REOPEN_MIGRATION)) return;
+    const snapshot = await store.snapshot();
+    await inbox.reopenCollapsed(async (agentId, ids) => {
+      const w = snapshot.workspaces.find(w => w.mainAgentId === agentId);
+      return new Set((w?.questions ?? []).filter(q => ids.includes(q.id) && !q.answer && !q.closed).map(q => q.id));
+    }).catch(error => console.warn("[follow-up] reopening collapsed cards failed:", error));
+    await store.mutate(state => { state.migrations = [...state.migrations ?? [], BRIEF_REOPEN_MIGRATION]; });
   };
   /** 1.3.0-beta.3: back up once before the active-scope migration (applied by the engine after its first discovery). */
   const backupActiveScope = async () => {
@@ -299,6 +313,7 @@ export default function contribute(server: PluginServerContext) {
     await engine.recover();
     await migrateTracking();
     await dedupeQuestions();
+    await reopenBriefs();
     await backupActiveScope();
     // Reviewers: the one-time seed from earlier requests, before history is pruned. An unreadable reviewers.json only affects Add reviewers.
     await reviewerStore.migrate(await store.snapshot()).catch(() => undefined);

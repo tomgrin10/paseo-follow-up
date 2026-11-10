@@ -1,0 +1,1 @@
+- A Needs-you card in the chat only closes when you answer it. A message from another agent, a Follow-up prompt or a schedule no longer marks it as answered, and cards wrongly closed that way reopen on update.

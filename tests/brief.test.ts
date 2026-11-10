@@ -103,10 +103,12 @@ test("§6 sign off collapses to 'Signed off'; undo reopens it", () => {
   assert.equal(back.state, "open"); assert.equal(back.outcome, null);
   assert.equal(briefStep(open(), { type: "undo" }, at(2)).appends.length, 0, "undo only reopens a signed-off brief");
 });
-test("§6 a new turn starting supersedes the open brief", () => {
-  const r = briefStep(open(), { type: "turn_start" }, at(1));
-  assert.equal(r.brief!.state, "superseded"); assert.equal(r.brief!.outcome, "The agent kept going");
-  assert.equal(briefStep(r.brief, { type: "turn_start" }, at(2)).appends.length, 0);
+test("§6 a turn the developer didn't start leaves the open brief open; only a newer brief supersedes it", () => {
+  const b = open();
+  const r = briefStep(b, { type: "turn_start" }, at(1));
+  assert.equal(r.brief!.state, "open"); assert.equal(r.appends.length, 0);
+  const next = briefStep(b, { type: "create", id: "brief:t2", turnId: "t2", content: pickBrief({ agent: { ask: "Newer ask", kind: "action" } }), flagged: true, seq: 2 }, at(2));
+  assert.equal(next.appends[0].state, "superseded"); assert.equal(next.appends[0].outcome, "The agent kept going");
 });
 test("§6 permission answered retires the slim permission brief, and no other", () => {
   const perm = open("brief:t1:permission:p1", pickBrief({ permission: { title: "x", subagent: null } }));
@@ -268,17 +270,46 @@ test("a permission row whose prompt Paseo no longer shows clears; one still show
   assert.deepEqual(s.inbox.pendingPermissions().sort(), ["legacy", "other"]);
   await s.done();
 });
-test("§6 new turn: the agent kept going supersedes; the developer's message answers", async () => {
+test("§6 new turn: only the developer's own message answers; anything else leaves the card open", async () => {
   const s = await service([agent({ id: "main" })], { calls: { main: { at: Date.parse(at(1)), turnId: "t1", call: decision } }, tails: { main: [{ type: "user_message", text: "B" }] } });
   await s.inbox.turnEnded(main, { kind: "completed" }, "t1");
   await s.inbox.turnStarted(main, "t2");
-  assert.equal((await s.entry()).brief?.outcome, "You picked B · One global bucket");
+  assert.equal((await s.entry()).brief?.outcome, "You picked B · One global bucket", "a developer option pick");
   await s.done();
-  const auto = await service([agent({ id: "main" })], { calls: { main: { at: Date.parse(at(1)), turnId: "t1", call: decision } }, tails: { main: [{ type: "user_message", text: "<paseo-system kind=\"agent-message\">go on</paseo-system>" }] } });
-  await auto.inbox.turnEnded(main, { kind: "completed" }, "t1");
-  await auto.inbox.turnStarted(main, "t2");
-  assert.equal((await auto.entry()).brief?.state, "superseded");
-  await auto.done();
+  const reply = await service([agent({ id: "main" })], { calls: { main: { at: Date.parse(at(1)), turnId: "t1", call: decision } }, tails: { main: [{ type: "assistant_message", text: "Which one?" }, { type: "user_message", text: "Let me think, ask me after lunch" }] } });
+  await reply.inbox.turnEnded(main, { kind: "completed" }, "t1");
+  await reply.inbox.turnStarted(main, "t2");
+  assert.equal((await reply.entry()).brief?.outcome, "You replied", "a developer reply");
+  await reply.done();
+  // Tom, 2026-11-10: another agent's message collapsed the card as "You replied". Paseo 0.15 stores it as an
+  // agent_message tool call after the developer's previous message, which was mistaken for the reply.
+  const cases: [string, unknown[]][] = [
+    ["an agent message (Paseo 0.15 projection)", [{ type: "user_message", text: "B" }, { type: "assistant_message", text: "Done." }, { type: "tool_call", callId: "paseo-agent-message:m1", name: "agent_message", status: "completed", agentMessage: { event: "message", sender: { id: "other" }, text: "PR is up" } }]],
+    ["an agent message (envelope text)", [{ type: "user_message", text: "<paseo-system version=\"1\" kind=\"agent-message\" source-agent-id=\"other\" message-id=\"m\">\nPR is up\n</paseo-system>" }]],
+    ["a schedule or heartbeat", [{ type: "user_message", text: "B" }, { type: "tool_call", callId: "paseo-system:abc", name: "heartbeat", status: "completed" }]],
+    ["a compaction continuation (no prompt in the tail yet)", [{ type: "user_message", text: "B" }, { type: "assistant_message", text: "Summary of the work so far" }]],
+  ];
+  cases.push(["a Follow-up batch prompt", [{ type: "user_message", text: "Workspace follow-through batch fix-1: 2 repairs", messageId: "batch-1" }]]);
+  for (const [label, tail] of cases) {
+    const other = await service([agent({ id: "main" })], { calls: { main: { at: Date.parse(at(1)), turnId: "t1", call: decision } }, tails: { main: tail },
+      ledger: async () => [{ agentId: "main", messageId: "batch-1", at: at(1) }] });
+    await other.inbox.turnEnded(main, { kind: "completed" }, "t1");
+    await other.inbox.turnStarted(main, "t2");
+    assert.equal((await other.entry()).brief?.state, "open", label);
+    await other.done();
+  }
+});
+test("repair: a card wrongly collapsed while its questions are open comes back open, in the inbox and the chat", async () => {
+  const s = await service([agent({ id: "main" })], { calls: { main: { at: Date.parse(at(1)), turnId: "t1", call: decision, questionIds: ["Q20"] } }, tails: { main: [{ type: "user_message", text: "Looks good" }] } });
+  await s.inbox.turnEnded(main, { kind: "completed" }, "t1");
+  await s.inbox.turnStarted(main, "t2");
+  assert.equal((await s.entry()).brief?.outcome, "You replied");
+  assert.deepEqual(await s.inbox.reopenCollapsed(async () => new Set<string>()), [], "its questions are closed: stays answered");
+  assert.deepEqual(await s.inbox.reopenCollapsed(async () => new Set(["Q20"])), ["main"]);
+  assert.equal((await s.entry()).brief?.state, "open");
+  assert.equal(s.appended.at(-1)?.brief.state, "open", "the chat card is re-appended open");
+  assert.deepEqual(await s.inbox.reopenCollapsed(async () => new Set(["Q20"])), [], "idempotent");
+  await s.done();
 });
 test("§6 sign off and undo (single and batch) update the brief and re-append it", async () => {
   const s = await service([agent({ id: "main" })], { calls: { main: { at: Date.parse(at(1)), turnId: "t1", call: decision } } });
