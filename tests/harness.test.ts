@@ -130,3 +130,14 @@ test("a paseo CLI on PATH below the plugin's floor stops the run before it takes
   assert.equal(good.out.stderr.match(/^paseo /gm)?.length, 1);
   assert.ok(good.out.stderr.includes(`paseo 0.16.0-beta.1 at ${join(beta, "paseo")}\n`), good.out.stderr);
 });
+
+test("waitUntil: the deadline scales with load, so a wait sized for an idle VM survives load 30 on 8 cores", async () => {
+  const { loadFactor, waitUntil } = await import(helper);
+  assert.equal(loadFactor(2, 8), 1, "an idle VM keeps the base budget");
+  assert.equal(loadFactor(30, 8), 3.75);
+  assert.equal(loadFactor(500, 8), 6, "capped, so a broken run still ends");
+  // Ready after ~120 ms: a 50 ms budget fails at factor 1 and passes at factor 4.
+  const readyAt = (ms: number) => { const at = Date.now() + ms; return async () => Date.now() >= at && "ready"; };
+  await assert.rejects(waitUntil("not yet", readyAt(120), { baseMs: 50, everyMs: 10, factor: () => 1 }), /not yet \(waited 0 s; budget 0 s at load factor 1\.0\)/);
+  assert.equal(await waitUntil("not yet", readyAt(120), { baseMs: 50, everyMs: 10, factor: () => 4 }), "ready");
+});

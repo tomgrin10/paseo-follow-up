@@ -60,6 +60,10 @@ their slot and cleanup (below). `scripts/daemon-counter.mjs` and
 
 ## Rules for harness daemons
 
+- **Wait by deadline, scaled by load.** A harness wait polls with `waitUntil(what, check, { baseMs })` from
+  `scripts/harness.mjs`, never a fixed attempt count. Its budget is `baseMs` (sized for an idle VM) times
+  `loadFactor()`: the 1-minute load per core, between 1 and 6, re-read on every poll. A shared VM at load 30 on
+  8 cores runs every wait about 4× slower, and a fixed count failed `test:install` three times in four runs there.
 - **Take a slot.** Every script that starts a Paseo daemon or a browser calls `await harness()` from
   `scripts/harness.mjs` before its heavy work, and starts daemons with `spawnDaemon`. `tests/harness.test.ts` fails
   when a script skips either. `harness()`:

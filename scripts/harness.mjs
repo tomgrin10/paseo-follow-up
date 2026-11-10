@@ -14,10 +14,29 @@
 import { execFileSync, spawn } from "node:child_process";
 import { accessSync, constants, mkdirSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { delimiter, join } from "node:path";
+import { availableParallelism, loadavg } from "node:os";
 
 export const slotDirectory = (env = process.env) => env.HARNESS_SLOT_DIR || "/tmp/paseo-harness-slots";
 export const slotCount = (env = process.env) => { const n = Number(env.HARNESS_SLOTS); return Number.isInteger(n) && n > 0 ? n : 2; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/** How much slower than idle the shared VM runs now: 1-minute load per core, between 1 and 6. */
+export const loadFactor = (load = loadavg()[0], cores = availableParallelism()) => Math.min(6, Math.max(1, load / Math.max(1, cores)));
+/**
+ * Polls `check` until it returns something truthy, then returns it. Throws `what` once `baseMs` scaled by the current
+ * loadFactor has passed (re-read every poll), so a wait sized for an idle VM doesn't fail a run at load 30 on 8 cores,
+ * yet a broken run still ends within 6× its budget. Use it instead of a fixed attempt count in every harness wait.
+ */
+export async function waitUntil(what, check, { baseMs, everyMs = 250, factor = () => loadFactor() } = {}) {
+  const start = Date.now();
+  for (;;) {
+    const value = await check();
+    if (value) return value;
+    const budget = baseMs * factor();
+    if (Date.now() - start >= budget) throw new Error(`${what} (waited ${Math.round((Date.now() - start) / 1000)} s; budget ${Math.round(budget / 1000)} s at load factor ${factor().toFixed(1)})`);
+    await sleep(everyMs);
+  }
+}
 
 /** This process or an ancestor has a slot file open: the shell wrapper keeps the locked fd open while it runs us. */
 export function insideSlot(directory = slotDirectory()) {
