@@ -1,6 +1,7 @@
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { BackgroundAgents } from "./background-agents";
 import { emptyInbox, expired, inboxStateSchema, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason } from "../shared/inbox";
 import type { State as FollowState, Workspace as FollowWorkspace } from "../shared/model";
 import { prActionBlocks } from "../shared/pr-actions";
@@ -59,6 +60,8 @@ export type AgentInfo = {
   requiresAttention: boolean; attentionReason: string | null;
   /** When Paseo marked the agent as needing attention (a turn finished unread). Optional for older hosts and stubs. */
   attentionTimestamp?: string | null; createdAt?: string | null;
+  /** Paseo 0.16 background agent (a plugin's helper): its turns never raise rows. Absent on 0.15. */
+  background?: boolean;
   /** Ids of the permission prompts Paseo shows for this agent right now. Absent or null: unknown, so nothing is cleared. */
   pendingPermissionIds?: string[] | null;
 };
@@ -256,9 +259,14 @@ export class Inbox {
     return { rootId: current.id, subagent, delegated: false };
   }
 
+  /** Paseo 0.16 background agents are another plugin's helpers: their turns never raise rows (background-agents.ts). */
+  private backgroundAgents = new BackgroundAgents();
+  private background(id: string) { return this.backgroundAgents.check(id, agentId => this.o.directory.agent(agentId)); }
+
   async turnStarted(agent: { id: string; workspaceId: string | null; parentAgentId?: string | null }, turnId?: string | null): Promise<void> {
+    if (!await this.on()) { this.live.add(agent.id); return; }
+    if (await this.background(agent.id)) return;
     this.live.add(agent.id);
-    if (!await this.on()) return;
     const root = await this.root(agent);
     if (root.subagent) return;
     const at = this.now();
@@ -275,6 +283,7 @@ export class Inbox {
   async turnEnded(agent: { id: string; workspaceId: string | null; parentAgentId?: string | null }, outcome: { kind: "completed" } | { kind: "failed"; error: { message: string } } | { kind: "canceled"; reason: string }, turnId: string | null): Promise<void> {
     this.live.delete(agent.id);
     if (!await this.on()) return;
+    if (await this.background(agent.id)) return;
     const root = await this.root(agent);
     if (root.subagent) {
       // Subagent finishes are covered by the parent's own turn end; failures surface on the parent's brief.

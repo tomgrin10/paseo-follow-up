@@ -1,0 +1,1 @@
+- Background jobs that agents wait on now stop after 3 hours unless the agent asks for longer (up to 12), so a job that never finishes can't keep the machine busy all night.
