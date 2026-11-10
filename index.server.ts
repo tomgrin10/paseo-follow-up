@@ -84,7 +84,7 @@ import { busyAgents, type Busy } from "./shared/update-policy";
 import { VersionsStore, demoOverride, describeSelf, readPackage, type SelfInstall } from "./server/release-notes";
 import { updatesViewSchema, type UpdatesView } from "./shared/updates";
 import { releaseNotesViewSchema, type ReleaseNote, type ReleaseNotesView } from "./shared/changelog";
-import { BRIEF_KIND, BRIEF_VERSION, prState, validateNeedsYou, type Brief, type NeedsYouRecord } from "./shared/brief";
+import { BRIEF_KIND, BRIEF_VERSION, prState, prStates, validateNeedsYou, type Brief, type NeedsYouRecord } from "./shared/brief";
 
 /** Agent calls that only the main agent makes: one of these from a successor means the handover is in use. */
 const MAIN_WORK = new Set(["follow.sync", "follow.register-pr", "follow.obligation", "follow.done", "follow.acknowledge", "follow.exclude-stack", "follow.ask-question", "follow.record-answer", "follow.withdraw-question", "follow.set-spec", "follow.needs-you"]);
@@ -198,6 +198,9 @@ export default function contribute(server: PluginServerContext) {
       async pr(agentId, event) {
         const w = (await store.snapshot()).workspaces.find(w => w.enable_tracking && !w.archived && (w.mainAgentId === agentId || w.prs.some(p => p.registeredAgentId === agentId)));
         return prState(w, agentId, event ?? null);
+      },
+      async prs(agentId) {
+        return prStates((await store.snapshot()).workspaces.find(w => w.enable_tracking && !w.archived && (w.mainAgentId === agentId || w.prs.some(p => p.registeredAgentId === agentId))));
       },
       async workspaceId(agentId) { return (await trackedMain(agentId))?.id ?? null; },
       // Decisions stored as questions follow the brief: a picked option is the developer's answer; a brief the agent
