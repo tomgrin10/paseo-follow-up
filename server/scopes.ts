@@ -10,7 +10,8 @@ export type Role = "main" | "contributor" | "recovery";
  * agent runs both; they used to parse the whole state.json (5.3 MB on the VM) every 2 seconds and on every tool
  * call. This file is a few KB and rewritten only when a role changes.
  */
-type Entry = { role: Role; workspaceId: string; workflow?: AgentWorkflow };
+/** `demoted` (1.4.0-beta.22): the newest time this contributor lost the main role, so its hook can say so on its next turn. */
+type Entry = { role: Role; workspaceId: string; workflow?: AgentWorkflow; demoted?: { to: string; at: string; reason: string | null; by: string } };
 /**
  * `workflow` (1.4.0-beta.14) is the workspace's PR workflow and review-fix command, so the hook and bridge give
  * GitHub-only workspaces GitHub instructions. Absent: Graphite with /fix-pr, as every earlier version said.
@@ -20,7 +21,10 @@ export function scopes(state: State, workflow?: (w: Workspace) => AgentWorkflow)
   for (const w of state.workspaces) {
     if (!w.enable_tracking || w.archived) continue;
     const flow = workflow ? { workflow: workflow(w) } : {};
-    for (const id of w.contributorAgentIds ?? []) agents[id] ??= { role: "contributor", workspaceId: w.id, ...flow };
+    for (const id of w.contributorAgentIds ?? []) {
+      const lost = w.mainHistory?.findLast(c => c.from === id);
+      agents[id] ??= { role: "contributor", workspaceId: w.id, ...flow, ...(lost ? { demoted: { to: lost.to, at: lost.at, reason: lost.reason, by: lost.by } } : {}) };
+    }
     for (const b of w.batches) if (b.recipientAgentId && !b.settledAt && ["sending", "sent", "blocked", "uncertain"].includes(b.state) && b.tasks.every(t => t.kind === "inventory")) agents[b.recipientAgentId] = { role: "recovery", workspaceId: w.id, ...flow };
     agents[w.mainAgentId] = { role: "main", workspaceId: w.id, ...flow };
   }

@@ -8,7 +8,7 @@ import type { InboxRow } from "../shared/inbox";
 import type { Pr, State, Workspace } from "../shared/model";
 import { configuredReviewers, reviewerLoginSchema, noReviewers, resolveReviewers, reviewerConfig, reviewerLabel, withoutAuthor, type ReviewerEntry } from "../shared/reviewers";
 import { findWorkspace } from "./engine";
-import { setMainAgent } from "./discovery";
+import { checkMainClaim, lastMainChange, setMainAgent, type MainAgentInfo } from "./discovery";
 import type { InboxAction } from "./inbox";
 import { priorityInputSchema, type Priority } from "../shared/priorities";
 import type { AboutView } from "../shared/about";
@@ -23,14 +23,14 @@ import { DISPLAY_TOOLS, RPC_TOOLS, type RpcTool } from "./agent-parity";
  * return a dry-run plan first; `confirm: true` with that plan's id runs it. Every agent write is recorded in
  * the inbox ledger as `by: "agent:<id>"`, which never counts as the developer writing to the agent.
  */
-export const AGENT_TOOLS = ["list_prs", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "track", "inbox_list", "sign_off", "snooze", "set_finish_flags", "set_priorities", "workspace_about", "agent_settings", "follow_settings", "set_follow_settings", "project_settings", "set_project_tracking", "pr_workflow", "set_pr_workflow", "reviewer_settings", "reviewer_suggestions", "save_reviewers", "set_agent_setting", "onboarding_status", "onboarding_checks", "set_onboarding", "priorities", "rank_status", "rerank_priorities", "usage", "overseer_status", "overseer_start", "overseer_restart", "overseer_ask", "inbox_brief", "brief_action", "inbox_act", "answer_question", "run_recovery", "refresh", "set_workspace_spec", "set_task_trigger", "pr_controls", "browser_status", "trust_bypass_status", "display_settings", "set_display"] as const;
+export const AGENT_TOOLS = ["make_main_agent", "list_prs", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "track", "inbox_list", "sign_off", "snooze", "set_finish_flags", "set_priorities", "workspace_about", "agent_settings", "follow_settings", "set_follow_settings", "project_settings", "set_project_tracking", "pr_workflow", "set_pr_workflow", "reviewer_settings", "reviewer_suggestions", "save_reviewers", "set_agent_setting", "onboarding_status", "onboarding_checks", "set_onboarding", "priorities", "rank_status", "rerank_priorities", "usage", "overseer_status", "overseer_start", "overseer_restart", "overseer_ask", "inbox_brief", "brief_action", "inbox_act", "answer_question", "run_recovery", "refresh", "set_workspace_spec", "set_task_trigger", "pr_controls", "browser_status", "trust_bypass_status", "display_settings", "set_display"] as const;
 export type AgentTool = typeof AGENT_TOOLS[number];
 /** Tools that only read. */
 export const READ_ONLY_TOOLS: readonly AgentTool[] = ["list_prs", "inbox_list", "workspace_about", "agent_settings", "display_settings", ...RPC_TOOLS.filter(t => t.kind === "read").map(t => t.name as AgentTool)];
 /** Tools that can't be undone from Follow-up. */
 export const DESTRUCTIVE_TOOLS: readonly AgentTool[] = ["merge"];
 /** Tools that plan first and run only with `confirm: true` and the plan's id. */
-export const PLANNED_TOOLS: readonly AgentTool[] = ["add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "sign_off", "snooze", "set_finish_flags", "set_priorities", "set_display", ...RPC_TOOLS.filter(t => t.kind === "planned").map(t => t.name as AgentTool)];
+export const PLANNED_TOOLS: readonly AgentTool[] = ["make_main_agent", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "sign_off", "snooze", "set_finish_flags", "set_priorities", "set_display", ...RPC_TOOLS.filter(t => t.kind === "planned").map(t => t.name as AgentTool)];
 const RPC_TOOL = new Map<string, RpcTool>(RPC_TOOLS.map(t => [t.name, t]));
 void DISPLAY_TOOLS;
 
@@ -81,6 +81,8 @@ export type AgentActionDeps = {
   prWorkflows?: () => Promise<{ default: string; repos: { repo: string; effective: string; setting: string; reason: string; reviewFix: unknown }[]; reviewFix: unknown }>;
   /** Runs a developer RPC's own handler (the button's path), and checks an input against its contract. */
   rpc?: { call(method: string, input: unknown): Promise<unknown>; validate(method: string, input: unknown): Promise<unknown> };
+  /** One agent's list entry for a main-agent claim (metadata; never loads it). Null when it's gone. */
+  agentInfo?: (agentId: string) => Promise<MainAgentInfo>;
   /** Settings → Display (host-scoped preferences, trust bypass among them). */
   display?: { read(): Promise<{ revision: string; values: Record<string, unknown> }>; write(revision: string, values: Record<string, unknown>): Promise<unknown> };
   now?: () => number;
@@ -110,6 +112,7 @@ export const TOOL_INPUT = {
   set_finish_flags: z.strictObject({ agentIds: agentIds.optional(), value: z.boolean().optional(), ...confirm }),
   set_priorities: z.strictObject({ priorities: z.array(priorityInputSchema).max(200).optional(), replace: z.boolean().optional(), ...confirm }),
   display_settings: z.strictObject({}),
+  make_main_agent: z.strictObject({ agentId: id.optional(), reason: z.string().trim().min(1).max(200).optional(), requested: z.enum(["developer", "self"]).optional(), ...confirm }),
   set_display: z.strictObject({ values: z.record(z.string(), z.boolean()).optional(), ...confirm }),
   ...Object.fromEntries(RPC_TOOLS.map(t => [t.name, t.input])),
 } as unknown as Record<AgentTool, z.ZodType>;
@@ -149,6 +152,7 @@ export class AgentActions {
     const rpcTool = RPC_TOOL.get(tool);
     if (rpcTool) return this.runRpc(caller, rpcTool, args);
     if (tool === "display_settings" || tool === "set_display") return this.displayTool(caller, tool, args);
+    if (tool === "make_main_agent") return this.planMakeMain(caller, args);
     switch (tool) {
       case "list_prs": return this.listPrs(args);
       case "inbox_list": return this.inboxList(caller, args);
@@ -216,6 +220,37 @@ export class AgentActions {
     const planId = this.plan(caller, t.name as AgentTool, async () => { const out = await this.d.rpc!.call(t.rpc, checked); await this.note(caller, caller, t.name); return out; });
     return { dryRun: true, planId, tool: t.name, change: checked, ...(before !== undefined ? { before } : {}),
       next: `Only when the developer asked for this: call ${t.name} with confirm=true and planId=${planId} within 5 minutes.` };
+  }
+
+  /**
+   * make_main_agent: a root agent makes itself or another root agent of its workspace the main agent
+   * (~/paseo-harness/main-agent-claim.md). The current main can hand its role on; anyone else follows checkMainClaim:
+   * the developer's ask is refused only mid-turn, a self-claim needs the main archived, gone, long closed or idle.
+   * The rules are checked again at confirm. The old main hears on its next turn through the hook, never by a message.
+   */
+  private async planMakeMain(caller: string, args: Record<string, any>) {
+    if (!args.reason) throw new Error("make_main_agent: give reason, one line the developer sees (\"Tom asked me to take over the release\").");
+    if (!args.requested) throw new Error("make_main_agent: give requested: developer (the developer asked for it) or self (your own claim).");
+    if (!this.d.agentInfo) throw new Error("make_main_agent isn't available in this Follow-up.");
+    const find = (state: State) => this.tracked(state).find(w => w.mainAgentId === caller || w.contributorAgentIds?.includes(caller));
+    const w = find(await this.d.store.snapshot());
+    if (!w) throw new Error("Only a root agent of a tracked workspace can change its main agent.");
+    const target = args.agentId ?? caller; const from = w.mainAgentId;
+    const requested = caller === from ? "developer" : args.requested as "developer" | "self";
+    const check = async (current: Workspace) => checkMainClaim(current, target, requested, caller === from ? null : await this.d.agentInfo!(current.mainAgentId), this.now());
+    const { blockers, rule } = await check(w);
+    const reason = `${args.reason}${args.requested === "developer" && caller !== from ? " (the developer asked)" : ""}`;
+    const planId = blockers.length ? null : this.plan(caller, "make_main_agent", async () => {
+      const fresh = find(await this.d.store.snapshot());
+      if (!fresh || fresh.id !== w.id || fresh.mainAgentId !== from) throw new Error("The main agent changed since the dry run. Run make_main_agent again.");
+      const again = await check(fresh);
+      if (again.blockers.length) throw new Error(again.blockers.join(" "));
+      await this.d.store.mutate(state => { const current = findWorkspace(state, w.id); if (current.mainAgentId !== from) throw new Error("The main agent changed since the dry run."); setMainAgent(current, target, "claim", this.now(), { by: `agent:${caller}`, reason }); });
+      await this.note(caller, from, "make_main_agent");
+      return { workspaceId: w.id, mainAgentId: target, previous: from, reason, undo: "The developer can undo it from the workspace panel; the previous main can't take it back on its own for 2 hours." };
+    }, 2 * 60_000);
+    return { dryRun: true, planId, workspaceId: w.id, workspace: w.title, from, to: target, requested, rule, blockers, lastChange: lastMainChange(w) ?? null,
+      next: planId ? `Call make_main_agent with confirm=true and planId=${planId} within 2 minutes. The developer sees "Main agent changed" with Undo.` : "Blocked. Ask the developer, who can use Make main agent in the workspace panel." };
   }
 
   /** Settings → Display: the host-scoped preferences the Display screen writes, trust bypass among them. */

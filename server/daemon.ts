@@ -12,7 +12,7 @@ import { applyRecoveryRole, recoveryConfig, type RecoveryRole } from "./recovery
 import { submittedPrs, type Submission } from "./submissions";
 import { publishedArtifacts } from "./spec";
 import type { Artifact } from "../shared/spec";
-import { extractHistory, type History, type DiscoveredWorkspace } from "./discovery";
+import { extractHistory, inMainCooldown, type History, type DiscoveredWorkspace } from "./discovery";
 import type { PluginBeforeRequests } from "@getpaseo/plugin/server";
 import { isWorkspaceRoot, type WorkspaceAgent } from "./workspace-agent";
 import { SessionGuard } from "./session-guard";
@@ -214,7 +214,8 @@ export class PaseoGateway implements Gateway {
       for (const agent of candidates) if (await isWorkspaceRoot(agent, findParent)) roots.push(agent);
       const recorded = existing ? roots.find(a => a.id === existing.mainAgentId) : undefined;
       const handBack = existing ? handBackMainAgent(roots, existing) : undefined;
-      const successor = handBack ?? successorMainAgent(roots, existing?.mainAgentId, existing?.mainClosedSince, now);
+      // Rule 4: no automatic handover within 30 minutes of a change, unless the main is gone (hand-back is exempt).
+      const successor = handBack ?? (existing && recorded && inMainCooldown(existing, now) ? undefined : successorMainAgent(roots, existing?.mainAgentId, existing?.mainClosedSince, now));
       const main = successor ?? chooseMainAgent(roots, existing?.mainAgentId);
       if (!main && !existing) continue;
       const owner = successor?.id ?? existing?.mainAgentId ?? main!.id;
