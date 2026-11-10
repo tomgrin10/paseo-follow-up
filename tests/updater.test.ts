@@ -10,6 +10,7 @@ import { run } from "../server/update-watchdog.mjs";
 import type { UpdatesFile } from "../server/updates";
 import type { Busy } from "../shared/update-policy";
 import type { Provenance } from "../server/update-provenance";
+import { announcesUpdate } from "../shared/changelog";
 
 const INTEGRITY = "sha512-kM/c8bZm2HxcQQMwaiSMYCyjq+HTquHiLEbam/EyTedfZ9H+os1VcSNtQecqKxvKA/LyO+rOzm8ShRSOSy/QVQ==";
 const HEX = "90cfdcf1b666d87c5c4103306a248c602ca3abe1d3aae1e22c46da9bf1324de75f67d1fea2cd5571236d41e72a2b1bca03f2f23beacece6f1285148e4b2fd055";
@@ -64,16 +65,35 @@ test("Off: no scheduled or Settings checks; Check now still asks npm", async () 
   r.updater.stop();
 });
 
-test("Tell me: a newer beta is available with a Home notice until dismissed; nothing installs", async () => {
+test("Tell me: a newer beta is available in Settings only, with no Home notice; nothing installs", async () => {
   const r = await rig({ file: { mode: "notify" } });
   await r.updater.check("manual");
   const view = await r.updater.view();
   assert.deepEqual(view.phase, { kind: "available", version: "1.4.0-beta.24", publishedAt: null });
-  assert.deepEqual(view.notice, { id: "available:1.4.0-beta.24", kind: "available", version: "1.4.0-beta.24", from: null });
+  assert.equal(view.notice, null, "a beta is not a major: Settings → General shows it, Home doesn't");
   assert.deepEqual(view.channels, { stable: "1.0.1", beta: "1.4.0-beta.24" });
-  await r.updater.dismiss("available:1.4.0-beta.24");
+  assert.deepEqual(r.spawned, []);
+});
+
+test("Tell me: a new major gets a Home notice until dismissed", async () => {
+  const r = await rig({ file: { mode: "notify" }, tags: { latest: "2.0.0", beta: "2.0.0" }, versions: ["1.4.0-beta.23", "2.0.0"] });
+  await r.updater.check("manual");
+  assert.deepEqual((await r.updater.view()).notice, { id: "available:2.0.0", kind: "available", version: "2.0.0", from: null });
+  await r.updater.dismiss("available:2.0.0");
   assert.equal((await r.updater.view()).notice, null);
   assert.deepEqual(r.spawned, []);
+});
+
+test("grid (update-announcements-major-only): an available update has a Home notice only when announcesUpdate says so", async () => {
+  const cases: [string, string][] = [["1.4.0-beta.23", "1.4.0-beta.24"], ["1.4.0-beta.23", "1.4.0"], ["1.4.0", "1.4.1"], ["1.4.0", "1.5.0"],
+    ["1.4.0", "2.0.0-beta.0"], ["2.0.0-beta.0", "2.0.0"], ["1.4.0-beta.23", "2.0.0"], ["2.0.0", "2.1.0-beta.0"], ["2.0.0", "3.0.0"]];
+  for (const [installed, offered] of cases) {
+    const r = await rig({ file: { mode: "notify", channel: "beta" }, installed, tags: { latest: offered, beta: offered }, versions: [installed, offered] });
+    await r.updater.check("manual");
+    const view = await r.updater.view();
+    assert.equal(view.phase.kind, "available", `${installed} -> ${offered}`);
+    assert.equal(view.notice != null, announcesUpdate(installed, offered), `${installed} -> ${offered}`);
+  }
 });
 
 test("Stable on a beta: the older stable is never offered", async () => {
