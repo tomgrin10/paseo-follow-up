@@ -184,7 +184,7 @@ export class PrActions {
       if (plan.kind === "merge" && current.prActions.some(a => a.kind === "merge" && a.state === "submitted" && prs.some(p => a.heads[p.key] === p.snapshot?.head) && this.now() - Date.parse(a.createdAt) < 30_000)) throw new Error(`A merge was just submitted for this revision. Wait for ${via(prs)}'s result.`);
       if (identity(downstack(current.prs, plan.target)) !== saved.identity) throw new Error("The stack changed before submission.");
       current.prActions.push({ id, kind: plan.kind, prs: prs.map(p => p.key), heads: Object.fromEntries(prs.map(p => [p.key, p.snapshot!.head])), createdAt: new Date(this.now()).toISOString(), state: "sending", result: isGithubFlow(prs[0].snapshot) ? "Waiting for GitHub to confirm." : plan.kind === "merge" ? "Waiting for Graphite to confirm." : "Confirm this PR setting change in the Send to Paseo extension in Chrome." });
-      current.completion = null;
+      current.completion = null; current.declaration = null;
     });
     let state: "submitted" | "failed" | "uncertain" = "submitted";
     let result: string;

@@ -33,7 +33,7 @@ export function tasksFor(w: Workspace, now = Date.now(), wording: TaskWording = 
     if (!o.enable_follow_up || !["pending", "waiting"].includes(o.status) || !communicationReady(o.communication)) continue;
     if (taskSchedule(o, w, now).ready) add("obligation", o.id, o.title, [o.id, o.revision]);
   }
-  if ((w.prs.length || followUpObligations(w).length || w.inventory && w.inventory.syncedRevision >= w.inventory.revision) && !w.completion && !w.runtimeBusy &&
+  if ((w.prs.length || followUpObligations(w).length || w.inventory && w.inventory.syncedRevision >= w.inventory.revision) && !w.completion && !w.declaration && !w.runtimeBusy &&
       // Merged is permanent and a deploy is latched, so a status or probe hiccup never flips this (no create/cancel churn).
       w.prs.every(pr => pr.snapshot?.complete && settled(pr) && deployState(pr, now) !== "not-deployed") &&
       followUpObligations(w).every(o => ["done", "waived"].includes(o.status)))

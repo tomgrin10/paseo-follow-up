@@ -1,3 +1,3 @@
 - A finished workspace no longer stalls short of Done when Follow-up can't check what production serves. Done goes through with a "Deploy not confirmed by Follow-up" note.
-- Once Follow-up has seen a deploy, it stays counted until a rollback, so a failed check no longer undoes Done.
+- A deploy Follow-up has seen stays counted until a rollback. If the agent declares Done while a rollout is still going, Follow-up records Done when it lands.
 - The chat shows "Workspace done" only when Follow-up accepted it, and declaring Done twice adds no second card.

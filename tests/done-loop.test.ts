@@ -109,3 +109,23 @@ test("the chat only draws a Done card from a reply Follow-up wrote", () => {
   const wrapped = toolRow("declare_done", "completed", input, `Result: ${JSON.stringify({ workspaceId: "w", completion: { summary: "s", declaredAt: "t" }, blockers: [] })}`);
   assert.ok(wrapped.done);
 });
+
+test("a declaration waiting only on Follow-up's own checks is kept and recorded as Done when they clear", async t => {
+  const f = await fixture(t, shipped()); f.probe("pending");
+  await f.engine.tick();
+  const refused = await f.engine.declareDone("main-agent", "Verified on prod");
+  assert.equal(refused.blockers.length, 3); assert.match(refused.next, /records Done on its own/);
+  assert.equal((await f.get()).completion, null);
+  f.probe("deployed"); f.advance(15_000); await f.engine.tick();
+  const w = await f.get();
+  assert.equal(w.completion?.summary, "Verified on prod"); assert.equal(w.declaration, null);
+  assert.ok(w.batches.every(b => b.state !== "pending"), "no Done check left behind");
+});
+
+test("a declaration refused for the agent's own work is not kept", async t => {
+  const w = shipped(); w.obligations[0].status = "pending";
+  const f = await fixture(t, w);
+  const refused = await f.engine.declareDone("main-agent", "Done?");
+  assert.match(refused.next, /Yours to fix/);
+  assert.equal((await f.get()).declaration, null);
+});

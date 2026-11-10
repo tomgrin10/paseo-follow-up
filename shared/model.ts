@@ -82,6 +82,8 @@ export const workspaceSchema = z.object({
   completion: z.object({ summary: textSchema, declaredAt: z.string(),
     /** PRs whose deploy Follow-up could not confirm when Done was accepted ("Deploy not confirmed by Follow-up"). */
     unconfirmed: z.array(z.string()).optional() }).nullable(),
+  /** The main agent declared Done while only Follow-up's own waits remained (a rollout, a refresh); recorded as Done once they clear. */
+  declaration: z.object({ summary: textSchema, at: z.string() }).nullable().optional(),
   updatedAt: z.string(), managedDoneLabel: z.boolean(),
   runtimeReason: z.string().nullable(), runtimeBusy: z.boolean(), backgroundBusy: z.boolean().default(false),
   interruption: z.object({ turnId: z.string().nullable(), at: z.string(), kind: z.enum(["canceled", "failed"]), guardPauseId: z.string().optional(), /** The agent whose turn stopped (since 1.4.0-beta.16). */ agentId: idSchema.optional() }).optional(),
