@@ -84,7 +84,7 @@ export function flagHeadline(row: Pick<InboxRow, "needs" | "snooze" | "brief">, 
     if (asked) return { ...asked, source: "flag" };
   }
   // A failed check or review thread headlines as the developer's action: repairs ready to send.
-  const send = items.find((i): i is Extract<NeedItem, { kind: "send" }> => i.kind === "send");
+  const send = items.find((i): i is Extract<NeedItem, { kind: "send" }> => i.kind === "send" && !i.finish);
   if ((key === "flagged" || key === "review") && send) return { key: "repairs", label: `Send ${plural(send.tasks.length, "fix", "fixes")}`, line: send.title, source: "flag" };
   // "Add reviewers #1499": the PR number is the detail, so the pill names which PR.
   if (key === "reviewers") return { key, label: `${HEADLINE_WORD.reviewers} ${top.detail}`.trim(), line: brief?.ask ?? `Add reviewers to ${top.detail}`, source: "flag" };
@@ -109,7 +109,7 @@ export function workspaceHeadline(items: NeedItem[]): Headline | null {
     case "check": return { key: "blocked", label: "Check PR", line: top.title, source: "workspace" };
     case "answer": return { key: "blocked", label: "Check answer", line: top.title, source: "workspace" };
     case "decision": return { key: "decision", label: "Decision", line: top.title, source: "workspace" };
-    case "send": return { key: "repairs", label: `Send ${plural(top.tasks.length, "fix", "fixes")}`, line: top.title, source: "workspace" };
+    case "send": return top.finish ? { key: "repairs", label: "Ready to finish", line: top.title, source: "workspace" } : { key: "repairs", label: `Send ${plural(top.tasks.length, "fix", "fixes")}`, line: top.title, source: "workspace" };
     case "merge": return { key: "merge", label: `Merge #${top.number}`, line: top.title, source: "workspace" };
     case "reviewers": return { key: "reviewers", label: `Add reviewers #${top.number}`, line: top.title, source: "workspace" };
   }

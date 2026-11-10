@@ -49,6 +49,7 @@ import { PrWorkflowStore } from "./server/pr-workflow";
 import { commandName } from "./shared/pr-workflow";
 import { projectRepo } from "./server/daemon";
 import { batchArchive, pruneUnsent } from "./server/batch-archive";
+import { statusCheck } from "./server/status-check";
 import { NO_USAGE } from "./shared/usage";
 import { activeWindowMs, conversationGone, DEFAULT_ACTIVE_WINDOW_DAYS } from "./server/agent-load";
 import { ACTIVE_SCOPE_MIGRATION, PRUNE_MIGRATION, autoSendsByDefault, FOLLOW_EVERY_MIGRATION, followsByDefault, followsEvery, migrateFollowEvery, optedOut } from "./shared/settings";
@@ -154,6 +155,7 @@ export default function contribute(server: PluginServerContext) {
   engine.autoSendsHeld = () => onboarding.holdsAutoSends();
   const archive = batchArchive(directory);
   engine.archive = archive;
+  engine.statusCheck = statusCheck(join(directory, "status-diagnostics.jsonl"));
   const usage = new UsageReader(paseoHome);
   // Unknown is not off: an unreadable document keeps the inbox on with its defaults.
   const inboxSettings = async () => { try { const state = await displaySettings.read(); if (state.status === "ready") return state.values; } catch {} return displayPreferences.schema.parse({}); };

@@ -12,7 +12,8 @@ import { summary, type Workspace } from "../shared/model";
 import { recentMainChange } from "../shared/home";
 import { followUpObligations, recoveryBatch } from "../shared/follow-up";
 import { settledForDisplay } from "../shared/presentation";
-import { ago, sendBlocker, shortRefs } from "../shared/attention";
+import { ago, shortRefs } from "../shared/attention";
+import { agentCard } from "../shared/status";
 import { Button, Card, CardRow, FoldRow, IconButton, errorText, text, useNow, type Theme } from "./kit";
 import { Reveal, Skeleton } from "./motion";
 import { WorkspaceHeader } from "./header";
@@ -157,19 +158,17 @@ function PanelWorkspace(props: PanelProps & { workspace: Workspace; loadError?: 
 
 
 
-/** The main agent's current repairs: what was sent and when. Pending batches live in Needs you. */
+/** The agent that has Follow-up's work right now, in the same words as Home and the header (shared/status.ts). */
 function AgentCard({ workspace: w, theme, compact, now, openAgent }: { workspace: Workspace; theme: Theme; compact: boolean; now: number; openAgent?: (id: string) => void }) {
   const c = theme.colors; const t = text(c);
-  const sent = w.batches.find(b => !recoveryBatch(b) && ["sending", "sent"].includes(b.state));
-  const queued = w.enable_auto_sends ? w.batches.find(b => !recoveryBatch(b) && b.state === "pending") : undefined;
-  const batch = sent ?? queued;
-  if (!batch) return null;
+  const card = agentCard(w, now);
+  if (!card) return null;
+  const batch = card.view.batch;
   const recipient = batch.recipientAgentId && batch.recipientAgentId !== w.mainAgentId ? batch.recipientAgentId : w.mainAgentId;
-  const blocker = queued && !sent ? sendBlocker(w, queued) : null;
-  return <Card theme={theme} compact={compact} icon="Bot" title={recipient === w.mainAgentId ? "Main agent is on it" : "Recovery agent is on it"}
+  return <Card theme={theme} compact={compact} icon="Bot" title={card.title}
     right={openAgent && <Button theme={theme} compact={compact} kind="ghost" icon="ArrowUpRight" title="Open" accessibilityLabel="Open the agent's chat" onPress={() => openAgent(recipient)} />}>
     <CardRow theme={theme} compact={compact}>
-      <Text style={[t.meta, { marginBottom: 6 }]}>{sent ? `Sent ${batch.tasks.length} repair${batch.tasks.length === 1 ? "" : "s"} ${ago(batch.sentAt, now)}. Follow-up waits for the agent to report back.` : `${batch.tasks.length} repair${batch.tasks.length === 1 ? "" : "s"} queued · ${blocker ?? "sends when the agent is idle"}`}</Text>
+      <Text style={[t.meta, { marginBottom: 6 }]}>{card.view.phase === "sent" ? `Sent ${batch.tasks.length} repair${batch.tasks.length === 1 ? "" : "s"} ${ago(batch.sentAt, now)}. Follow-up waits for the agent to report back.` : card.line}</Text>
       {batch.tasks.map((task, i) => <View key={task.key} style={{ flexDirection: "row", gap: 6 }}>
         <Text style={[t.meta, { width: 16, fontVariant: ["tabular-nums"] }]}>{i + 1}.</Text>
         <Text style={[t.meta, { flex: 1 }]}>{shortRefs(task.title, w)}</Text>

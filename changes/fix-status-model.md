@@ -1,0 +1,3 @@
+- Home, the workspace panel and the header now agree on what Follow-up is doing. "Main agent is on it" and "Follow-up is fixing" appear only while repairs are really with the agent.
+- Queued repairs say why they're waiting, such as the agent's current turn or an idle agent Follow-up won't wake.
+- When everything is in but the agent hasn't declared Done, Needs you shows "Ready to finish" with an Ask to finish button.

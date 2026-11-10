@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { INVARIANTS, violations } from "../shared/status-invariants";
 import { askQuestion, needsYouQuestions } from "../server/questions";
 import { questionSchema } from "../shared/questions";
-import { clock, workspace } from "./fixtures";
+import type { Batch, Obligation, Workspace } from "../shared/model";
+import { liveLine, needsYou } from "../shared/attention";
+import { buildHome, trackedGroup } from "../shared/home";
+import { agentCard } from "../shared/status";
+import { clock, pr, snapshot, workspace } from "./fixtures";
 
 // Every status invariant over a grid of workspaces, plus one named fixture per reported bug. Extend the grid's axes
 // and add invariants to shared/status-invariants.ts; a fixture stays once its bug is fixed.
@@ -53,4 +57,74 @@ test("brief-follows-questions: while a linked question is open, only the develop
   // from a real reply, so it reopens "You replied" cards whose questions are all still open.
   assert.equal(shouldReopen(card("answered", "You replied"), open, false), true);
   assert.equal(shouldReopen(card("answered", "You picked B · x"), open, false), false);
+});
+
+// Follow-up status surfaces (2026-11-10, wks_4b27f268): every surface reads shared/status.ts.
+const at = (ms: number) => new Date(clock - ms).toISOString();
+const batch = (kind: "repairs" | "finish" | "recovery", state: Batch["state"], patch: Partial<Batch> = {}): Batch => ({
+  id: `${kind}-${state}`, messageId: "m", attempts: 1, result: "", recipientAgentId: kind === "recovery" ? "recovery-agent" : null, contextPath: null, activityAt: null, acknowledgmentError: null, recoveryHandoffs: [],
+  tasks: [kind === "repairs" ? { key: "conflict:example/app#1", kind: "conflict", target: "example/app#1", title: "Resolve merge conflicts on example/app#1", fingerprint: "f" }
+    : kind === "finish" ? { key: "completion:workspace", kind: "completion", target: "workspace", title: "Verify the workspace is finished and declare Done", fingerprint: "f" }
+    : { key: "inventory:workspace", kind: "inventory", target: "workspace", title: "Recover workspace PR stacks and remaining work", fingerprint: "1" }],
+  state, createdAt: at(10 * 60_000), sentAt: ["sending", "sent", "blocked", "uncertain"].includes(state) ? at(5 * 60_000) : null, settledAt: null, ...patch,
+});
+const obligation = (status: Obligation["status"]): Obligation => ({ id: "task", title: "Verify tenant data", status, afterPrs: [], evidence: "", enable_follow_up: true, revision: 0 });
+const merged = (deployment: "latched" | "unconfirmed" | "none") => pr({
+  snapshot: snapshot({ state: "MERGED", mergeCommit: "merge", deployment: deployment === "none" ? null : { state: deployment === "latched" ? "deployed" : "unknown", environment: "production", commits: [], evidence: "", observedAt: at(10 * 60_000) } }),
+  ...(deployment === "latched" ? { deploymentAnchor: { mergeCommit: "merge", at: at(86_400_000) } } : {}),
+});
+
+const AGENTS: Record<string, Partial<Workspace>> = {
+  idle: {}, running: { runtimeBusy: true }, background: { backgroundBusy: true }, unavailable: { runtimeReason: "Agent state unavailable; refresh will retry" },
+  gone: { goneAgent: { agentId: "main-agent", at: at(0), reason: "No conversation found" } as Workspace["goneAgent"] }, unloaded: { sendWait: "unloaded" }, setup: { sendWait: "setup" }, dormant: { dormant: true } as Partial<Workspace>,
+};
+const BATCHES: Record<string, Batch[]> = {
+  none: [], "repairs-queued": [batch("repairs", "pending")], "repairs-settling": [batch("repairs", "pending", { createdAt: at(5_000) })], "repairs-sent": [batch("repairs", "sent")],
+  "repairs-stuck": [batch("repairs", "blocked")], "repairs-uncertain": [batch("repairs", "uncertain")], "finish-queued": [batch("finish", "pending")], "finish-sent": [batch("finish", "sent")],
+  "recovery-sent": [batch("recovery", "sent")], "finish-and-repairs": [batch("repairs", "pending"), batch("finish", "pending")],
+};
+const PRS: Record<string, Workspace["prs"]> = { open: [pr()], latched: [merged("latched")], unconfirmed: [merged("unconfirmed")], none: [] };
+const TASKS: Record<string, Obligation[]> = { none: [], open: [obligation("pending")], done: [obligation("done")], blocked: [obligation("blocked")], working: [obligation("working")] };
+
+function* grid(): Generator<[string, Workspace]> {
+  for (const [agent, a] of Object.entries(AGENTS)) for (const [b, batches] of Object.entries(BATCHES)) for (const auto of [true, false])
+    for (const [p, prs] of Object.entries(PRS)) for (const [t, obligations] of Object.entries(TASKS)) for (const done of [false, true]) for (const hold of [null, "Paused: the agent stopped"]) {
+      const w = workspace({ ...a, batches: batches.map(x => ({ ...x })), enable_auto_sends: auto, prs, obligations, hold,
+        completion: done ? { summary: "Shipped", declaredAt: at(60_000) } : null });
+      yield [`agent=${agent} batch=${b} auto=${auto} prs=${p} tasks=${t} done=${done} hold=${!!hold}`, w];
+    }
+}
+
+test("no generated workspace state produces contradictory status labels", () => {
+  const failures: string[] = [];
+  let count = 0;
+  for (const [name, w] of grid()) {
+    count++;
+    for (const v of violations(w, clock)) if (failures.length < 20) failures.push(`${v.id} · ${name} · ${v.detail}`);
+  }
+  assert.ok(count > 10_000, `the grid covers ${count} states`);
+  assert.deepEqual(failures, []);
+});
+
+/** wks_4b27f268b5dc2fc6, 2026-11-10: merged and deployed, both tasks done, agent idle, a Done check queued. */
+const screenshot = () => workspace({ enable_auto_sends: true, prs: [merged("latched"), { ...merged("latched"), key: "example/app#2", number: 2 }, { ...merged("latched"), key: "example/app#3", number: 3 }],
+  obligations: [obligation("done"), { ...obligation("done"), id: "task-2" }], batches: [batch("finish", "pending", { createdAt: at(7 * 60_000) })] });
+
+test("regression wks_4b27f268: an idle agent with a queued Done check is not 'on it', not 'fixing', and never 'sends when idle'", () => {
+  const w = screenshot();
+  assert.deepEqual(violations(w, clock), []);
+  assert.doesNotMatch(liveLine(w, clock).text, /sends when the agent is idle/);
+  assert.equal(agentCard(w, clock), null, "no 'Main agent is on it' card");
+  assert.notEqual(trackedGroup(w, clock), "fixing");
+  const home = buildHome({ rows: [], tracked: [w], paseo: [], now: clock });
+  assert.ok(!home.groups.some(g => g.id === "fixing" && g.items.length), "Home doesn't put it under Follow-up is fixing");
+  assert.ok(home.groups.some(g => g.id === "needs" && g.items.length), "it waits on you: Ready to finish");
+  const finish = needsYou(w, clock).find(i => i.kind === "send");
+  assert.equal(finish?.title, "Ready to finish · ask the main agent to declare Done");
+});
+
+test("regression wks_4b27f268: the same workspace once Done reads Done everywhere", () => {
+  const w = { ...screenshot(), batches: [], completion: { summary: "Shipped", declaredAt: at(0), unconfirmed: [] } };
+  assert.deepEqual(violations(w, clock), []);
+  assert.equal(trackedGroup(w, clock), "quiet"); assert.equal(liveLine(w, clock).text, "Ready to archive");
 });

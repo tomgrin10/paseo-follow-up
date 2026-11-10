@@ -1,3 +1,4 @@
+import { batchView } from "./status";
 import { liveLine, needsYou, prTone, stackOrder, type NeedItem, type PrTone } from "./attention";
 import { activity, type Activity } from "./activity";
 import { followUpObligations, recoveryBatch } from "./follow-up";
@@ -92,8 +93,8 @@ export type HomeModel = {
 };
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-const fixingBatch = (w: Workspace) => w.batches.find(b => !recoveryBatch(b) && (["sending", "sent"].includes(b.state) || b.state === "pending" && w.enable_auto_sends));
-const recovering = (w: Workspace) => w.batches.find(b => recoveryBatch(b) && ["sending", "sent"].includes(b.state));
+/** "Follow-up is fixing": only work that is in flight or about to go out on its own (shared/status.ts). */
+const fixingBatch = (w: Workspace, now: number) => { const view = batchView(w, now); return view?.fixing && summary(w, now).status !== "done" ? view.batch : undefined; };
 
 /** The PR chip: the first PR that hasn't settled (else the last one), "+n" for the rest, and its checks. */
 export function prChip(w: Workspace | undefined): PrChip | null {
@@ -139,6 +140,17 @@ function sigOf(s: Omit<Workstream, "sig">): string {
 const make = (s: Omit<Workstream, "sig">): Workstream => ({ ...s, sig: sigOf(s) });
 const stripSig = ({ sig: _sig, ...s }: Workstream): Omit<Workstream, "sig"> => s;
 
+/** The Home group of a tracked workspace without an agent row: the order buildHome uses below. */
+export function trackedGroup(w: Workspace, now: number): HomeGroupId {
+  if (needsYou(w, now).length) return "needs";
+  if (fixingBatch(w, now)) return "fixing";
+  if (w.runtimeBusy) return "running";
+  const state = summary(w, now);
+  if (state.status === "done") return "quiet";
+  if (w.prs.some(p => p.snapshot?.state === "OPEN") || state.status === "waiting") return "waiting";
+  return "quiet";
+}
+
 /** Build every group from the inbox rows, Follow-up's tracked workspaces and Paseo's workspace list. */
 export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo: PaseoWorkspaceLite[]; now: number; sort?: SortMode; priorities?: readonly Priority[]; hidden?: readonly string[] }): HomeModel {
   // Workspaces Follow-up keeps off the list (the Overseer's own): no row, no count.
@@ -175,7 +187,7 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
         line: h && h.line !== HEADLINE_WORD[h.key] ? h.line : "", badges: [], pr: prChip(w), at: row.needs?.since ?? null }));
       if (row.workspaceId) covered.add(row.workspaceId);
     } else if (section === "running") {
-      const fixing = w && w.mainAgentId === row.agentId ? fixingBatch(w) ?? recovering(w) : undefined;
+      const fixing = w && w.mainAgentId === row.agentId ? fixingBatch(w, now) : undefined;
       out.push(make({ ...base, group: fixing ? "fixing" : "running", tier: null, icon: fixing ? "Wrench" : row.resumesAt ? "CirclePause" : "LoaderCircle", tone: "running",
         word: null, line: fixing ? w ? liveLine(w, now).text : "Fixing" : row.resumesAt ? "Paused at the usage limit" : "Working", badges: [], pr: prChip(w), at: fixing?.sentAt ?? row.lastActivityAt }));
       if (row.workspaceId) covered.add(row.workspaceId);
@@ -187,19 +199,20 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
     covered.add(w.id);
     const base = { key: `ws:${w.id}`, agentId: w.mainAgentId, workspaceId: w.id, title: paseo.get(w.id)?.name || w.title, agent: null, project: project(w.id) };
     const items = needsYou(w, now);
+    const group = trackedGroup(w, now);
     const h = workspaceHeadline(items);
-    if (h) {
+    if (group === "needs" && h) {
       out.push(make({ ...base, group: "needs", tier: tierOf(h.key), icon: HEADLINE_ICON[h.key], tone: HEADLINE_TONE[h.key], word: HEADLINE_WORD[h.key], line: h.line,
         badges: badges({ headline: h, workspace: w, items }), pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
       continue;
     }
-    const fixing = fixingBatch(w) ?? recovering(w);
+    const fixing = fixingBatch(w, now);
     const state = summary(w, now);
     const live = liveLine(w, now);
-    if (fixing) out.push(make({ ...base, group: "fixing", tier: null, icon: "Wrench", tone: "running", word: null, line: live.text, badges: [], pr: prChip(w), at: fixing.sentAt ?? fixing.createdAt, readyToArchive: false }));
-    else if (w.runtimeBusy) out.push(make({ ...base, group: "running", tier: null, icon: "LoaderCircle", tone: "running", word: null, line: live.text, badges: [], pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
+    if (group === "fixing" && fixing) out.push(make({ ...base, group: "fixing", tier: null, icon: "Wrench", tone: "running", word: null, line: live.text, badges: [], pr: prChip(w), at: fixing.sentAt ?? fixing.createdAt, readyToArchive: false }));
+    else if (group === "running") out.push(make({ ...base, group: "running", tier: null, icon: "LoaderCircle", tone: "running", word: null, line: live.text, badges: [], pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
     else if (state.status === "done") out.push(make({ ...base, group: "quiet", tier: null, icon: "CircleCheck", tone: "success", word: null, line: w.completion?.summary ?? "Done", badges: [], pr: prChip(w), at: w.completion?.declaredAt ?? w.updatedAt, readyToArchive: true }));
-    else if (w.prs.some(p => p.snapshot?.state === "OPEN") || state.status === "waiting") out.push(make({ ...base, group: "waiting", tier: null, icon: "Clock", tone: "muted", word: null, line: live.text, badges: badges({ headline: null, workspace: w, items }), pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
+    else if (group === "waiting") out.push(make({ ...base, group: "waiting", tier: null, icon: "Clock", tone: "muted", word: null, line: live.text, badges: badges({ headline: null, workspace: w, items }), pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
     else out.push(make({ ...base, group: "quiet", tier: null, icon: "Circle", tone: "muted", word: null, line: live.text, badges: [], pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
   }
 
