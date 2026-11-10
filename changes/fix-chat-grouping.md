@@ -1,2 +1,0 @@
-- Follow-up's routine bookkeeping now sits inside Paseo's grouped tool calls instead of breaking them into loose rows.
-- Only the moments that matter stand out in the chat: a question asked and the Workspace done card, which now shows once even when the agent declares done twice.
