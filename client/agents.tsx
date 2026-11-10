@@ -7,7 +7,7 @@ import { agentSettingsRpc, setAgentSettingRpc, setWaitRpc } from "../shared/cont
 import { WAIT_HINT, WAIT_NOT_ATTACHED, WAIT_TITLE, waitNote } from "../shared/wait";
 import { isJobRole, type AgentRole, type AgentSettingsView, type SavedRole } from "../shared/agent-settings";
 import { NO_PROMPT_MODE, SETTINGS_ORDER } from "../shared/job-rows";
-import { JobRows, agentSettingsKey, useAgentSettings } from "./job-rows";
+import { JobRows, agentSettingsKey, useAgentSettings, type JobExtra } from "./job-rows";
 import { Button, errorText, text, type Theme } from "./kit";
 
 export { agentSettingsKey } from "./job-rows";
@@ -25,10 +25,11 @@ export function AgentSettings({ theme, compact }: Pick<PluginSurfaceProps, "them
   const c = theme.colors; const t = text(c);
   const { query } = useAgentSettings();
   const data = query.data;
+  const more: JobExtra = (r, save, busy) => <RoleMore r={r} save={save} busy={busy} theme={theme} compact={compact} invalid={!!data?.invalid.includes(r.role)} />;
   const info = "Which agent Follow-up uses for each of its own jobs. Recommended picks come from what Paseo has: with Claude, Haiku for summaries, Sonnet for AI priority, the newest Opus for the Overseer and the main agent's setup for recovery; otherwise a model of the size each job needs. Summaries and AI priority are one-shot jobs: on a provider other than Claude or Codex, each runs as a short hidden agent that's archived when it answers. Changes apply from the next call; the Overseer switches when you restart it.";
   return <SettingsSection title="Helper agents" info={info}>
     <SettingsCard>
-      <JobRows theme={theme} compact={compact} order={SETTINGS_ORDER} extra={(r, save, busy) => <RoleMore r={r} save={save} busy={busy} theme={theme} compact={compact} invalid={!!data?.invalid.includes(r.role)} />} />
+      <JobRows theme={theme} compact={compact} order={SETTINGS_ORDER} extra={more} />
     </SettingsCard>
     {/* Once, after the rows: what can't be picked and why (the pickers only list what can). */}
     {!!data?.catalog?.providers.some(p => !p.available) && <Text style={[t.meta, { paddingHorizontal: 4 }]}>{`Not available in Paseo: ${data.catalog.providers.filter(p => !p.available).map(p => `${p.label} (${(p.reason ?? "unavailable").replace(/\.$/, "")})`).join(", ")}.`}</Text>}

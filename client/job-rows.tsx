@@ -8,7 +8,7 @@ import { displayPreferences } from "../shared/display";
 import { ROLE_DEFAULTS, ROLE_INFO, isJobRole, modelName, providerName, type AgentRole, type AgentSettingsView, type CatalogProvider, type SavedRole } from "../shared/agent-settings";
 import { NO_PROMPT_MODE, jobRow, jobsHeader, preselect as toPreselect, recommendedEntry, type JobRowModel } from "../shared/job-rows";
 import { Button, Chip, Switch, errorText, text, type Theme } from "./kit";
-import { Spinner, useReducedMotion } from "./motion";
+import { Spinner } from "./motion";
 
 /**
  * The helper jobs as rows: setup's Helper agents step and Settings → Agents both render <JobRows>, so they show the same
@@ -116,7 +116,6 @@ export function JobRow({ row, r, catalog, loading, theme, compact, busy, open, o
   save: (entry: SavedRole | null) => void; extra?: JobExtra; first: boolean;
 }) {
   const c = theme.colors; const t = text(c, compact);
-  const reduced = useReducedMotion();
   const [more, setMore] = useState(false);
   const off = enabled === false;
   const pad = compact ? 14 : 16;
@@ -155,7 +154,7 @@ export function JobRow({ row, r, catalog, loading, theme, compact, busy, open, o
           <Text style={[t.meta, { color: c.foreground }]}>More</Text>
           <Icon name={more ? "ChevronUp" : "ChevronDown"} size={12} color={c.foregroundMuted} />
         </Pressable>
-        {more && <View style={{ borderWidth: 1, borderColor: c.border, borderRadius: 10, overflow: "hidden", opacity: reduced ? 1 : 1 }}>{extra(r, save, busy)}</View>}
+        {more && <View style={{ borderWidth: 1, borderColor: c.border, borderRadius: 10, overflow: "hidden" }}>{extra(r, save, busy)}</View>}
       </>}
     </View>
   </View>;

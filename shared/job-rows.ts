@@ -1,4 +1,4 @@
-import { ROLE_DEFAULTS, ROLE_INFO, labelsFor, roleSummary, type AgentRole, type AgentSettingsView, type Catalog, type RoleConfig, type SavedRole } from "./agent-settings";
+import { ROLE_DEFAULTS, ROLE_INFO, isJobRole, labelsFor, roleSummary, type AgentRole, type AgentSettingsView, type Catalog, type RoleConfig, type SavedRole } from "./agent-settings";
 import { ROLE_NEED, isRecommended, recommend, type Recommendation } from "./recommend";
 
 /**
@@ -82,7 +82,7 @@ export function recommendedEntry(r: RoleView, rec: Recommendation): SavedRole {
   if (rec.same) return { ...keep, provider: r.provider, model: r.model, thinking: r.thinking, ...(r.mode ? { mode: r.mode } : {}), same: true };
   const provider = rec.provider ?? r.provider;
   const mode = provider === r.provider ? r.mode : provider === ROLE_DEFAULTS[r.role].provider ? ROLE_DEFAULTS[r.role].mode : NO_PROMPT_MODE[provider] ?? null;
-  return { ...keep, provider, model: rec.model, thinking: rec.thinking, ...(mode ? { mode } : {}), ...(r.role === "recovery" ? { same: false } : {}) };
+  return { ...keep, provider, model: rec.model, thinking: rec.thinking, ...(mode && !isJobRole(r.role) ? { mode } : {}), ...(r.role === "recovery" ? { same: false } : {}) };
 }
 
 export type JobsHeader = { text: string; tone: "muted" | "warning"; action: "use" | "retry" | "check" | null };
@@ -90,7 +90,9 @@ export type JobsHeader = { text: string; tone: "muted" | "warning"; action: "use
 export function jobsHeader(rows: readonly JobRowModel[], catalog: Catalog | null | undefined, loading: boolean): JobsHeader {
   if (loading && !catalog) return { text: "Reading your providers…", tone: "muted", action: null };
   if (catalog?.error && !catalog.providers.length) return { text: "Couldn't read Paseo's providers. The current picks still work.", tone: "warning", action: "retry" };
-  if (rows.length && rows.every(r => !r.rec)) return { text: "No provider in Paseo is ready, so these helpers can't run yet. Following PRs and Needs you still work.", tone: "warning", action: "check" };
+  // Recovery copies the main agent, so it never decides whether any provider is ready.
+  const picks = rows.filter(r => r.role !== "recovery");
+  if (picks.length && picks.every(r => !r.rec)) return { text: "No provider in Paseo is ready, so these helpers can't run yet. Following PRs and Needs you still work.", tone: "warning", action: "check" };
   const differ = rows.filter(r => r.rec && !r.recommended).length;
   if (!differ) return { text: "Picked for the models Paseo has here.", tone: "muted", action: null };
   return { text: `${differ} job${differ === 1 ? "" : "s"} ${differ === 1 ? "differs" : "differ"} from the recommendation.`, tone: "muted", action: "use" };
