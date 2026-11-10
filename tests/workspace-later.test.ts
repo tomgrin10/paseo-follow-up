@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { activeNeeds, needsYou, workspaceSnoozed } from "../shared/attention";
 import { readFile } from "node:fs/promises";
 import { buildHome } from "../shared/home";
-import { isTimeZone, resolveUntil, snoozeUntil, wakeLabel, wakeShort } from "../shared/inbox";
+import { backLabel, isTimeZone, resolveUntil, snoozeUntil, wakeLabel, wakeShort } from "../shared/inbox";
 import { flatItems, rowMenu, type RowMenuInput } from "../shared/row-menu";
 import { AgentActions, controlWorkspace, type AgentActionDeps } from "../server/agent-actions";
 import { Store } from "../server/store";
@@ -159,6 +159,11 @@ test("the Later column shows when a row comes back, not its age", () => {
   assert.equal(wakeShort("pr:example/app#12", now), "#12 merges");
   assert.equal(wakeShort(null, now), "");
   assert.equal(wakeShort(iso(24 * 60), now), wakeLabel({ until: iso(24 * 60), at: iso(0) }, now), "farther out: the clock time");
+  // The pane's Later rows say it as a sentence (the header already says "Later until …").
+  assert.match(backLabel(iso(60), now), /^Back at \d\d:\d\d$/);
+  assert.match(backLabel(iso(24 * 60), now), /^Back tomorrow \d\d:\d\d$/);
+  assert.equal(backLabel("next-event", now), "Back at the next event");
+  assert.equal(backLabel("pr:example/app#12", now), "Back when #12 merges");
   // Home carries the wake time on both kinds of Later row.
   const w = controlWorkspace(state(), { workspaceId: "workspace", snooze: { until: iso(60) } }, NOW);
   const home = buildHome({ rows: [], tracked: [w], paseo: [], now: NOW + 1 });

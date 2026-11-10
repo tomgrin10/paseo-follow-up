@@ -59,7 +59,7 @@ export function UndoBar({ store, theme, touch }: { store: InboxStore; theme: The
     {/* Phones stack the two, so neither is cut to a stub; wide screens keep one line. */}
     <View style={touch ? { flex: 1, minWidth: 0, paddingVertical: 6 } : { flex: 1, flexDirection: "row", alignItems: "center", minWidth: 0 }}>
       <Text numberOfLines={1} style={{ flexShrink: 1, color: c.foreground, fontSize: touch ? 14 : 12 }}>{recent.label}</Text>
-      <Text numberOfLines={1} style={{ flexShrink: 0, color: c.foregroundMuted, fontSize: touch ? 13 : 12 }}>{touch ? what : ` · ${what}`}</Text>
+      <Text numberOfLines={1} style={{ flexShrink: 0, color: c.foregroundMuted, fontSize: touch ? 13 : 12 }}>{touch ? what : `\u00a0· ${what}`}</Text>
     </View>
     <Button theme={theme} compact={touch} kind="ghost" icon="Undo2" title="Undo" accessibilityLabel={`Undo: ${what}, ${recent.label}`} onPress={undo}
       onInteract={e => { if (e === "focus" || e === "blur") setFocused(e === "focus"); else setHovered(e === "hoverIn"); }} />

@@ -362,6 +362,13 @@ export function wakeShort(until: string | null | undefined, now: number): string
   return wakeLabel({ until, at: new Date(now).toISOString() }, now);
 }
 
+/** "Back at 22:19", "Back tomorrow 09:00", "Back at the next event", "Back when #12 merges": a Later row's return, as a sentence. */
+export function backLabel(until: string, now: number): string {
+  const w = wakeLabel({ until, at: new Date(now).toISOString() }, now);
+  if (!w) return "In Later";
+  return w === "next event" ? "Back at the next event" : /^\d/.test(w) ? `Back at ${w}` : `Back ${w}`;
+}
+
 export function wakeLabel(snooze: Snooze, now: number): string {
   if (snooze.until === "next-event") return "next event";
   if (snooze.until.startsWith("pr:")) return `when #${snooze.until.split("#")[1]} merges`;
