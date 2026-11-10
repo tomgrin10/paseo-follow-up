@@ -490,7 +490,10 @@ test("a running agent's row never headlines a stale error; on 0.15 a stopped age
   const running = await service([agent({ id: "a1", status: "running" })]);
   await mark(running.inbox);
   await running.inbox.turnEnded({ id: "a1", workspaceId: "w1" }, { kind: "failed", error: { message: "Subagent closed during a turn" } }, "t1");
-  assert.equal((await running.inbox.list()).rows.find(r => r.agentId === "a1")?.needs, null, "running: no Error headline");
+  // Paseo (and the directory) can still read "running" right after the failure: that turn's Error is real news.
+  assert.equal(displayReason((await running.inbox.list()).rows.find(r => r.agentId === "a1")?.needs ?? null)?.reason, "error", "just failed: Error shows");
+  await running.inbox.turnStarted({ id: "a1", workspaceId: "w1" }, "t2");
+  assert.equal((await running.inbox.list()).rows.find(r => r.agentId === "a1")?.needs, null, "a newer turn: no Error headline");
   const stopped = await service([agent({ id: "a1", status: "idle" })]);
   await mark(stopped.inbox);
   await stopped.inbox.turnEnded({ id: "a1", workspaceId: "w1" }, { kind: "failed", error: { message: "Subagent closed during a turn" } }, "t1");

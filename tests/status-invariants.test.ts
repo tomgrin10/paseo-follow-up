@@ -160,14 +160,22 @@ test("running-is-not-stale: over every agent status, turn history and card, a ru
     "finished-then-failed": [{ type: "turn_end", outcome: "completed", detail: "Done" }, { type: "turn_end", outcome: "failed", detail: "x" }],
   };
   const failures: string[] = [];
-  for (const status of ["running", "initializing", "idle", "error"]) for (const [name, events] of Object.entries(histories)) for (const kind of [null, "error", "paused", "decision"] as const) {
+  // Turn start unknown, before the flags (Paseo still reads "running" after the failed turn), or after them (a newer turn).
+  for (const status of ["running", "initializing", "idle", "error"]) for (const [name, events] of Object.entries(histories)) for (const kind of [null, "error", "paused", "decision"] as const) for (const start of [null, iso(-1), iso(10)]) {
     const e = events.reduce((acc, ev, i) => reduce(acc, ev, iso(i)), newEntry("a1"));
-    const card = kind ? { kind, source: "agent" as const, state: "open" as const, ask: "x", questionIds: [] as string[] } : null;
-    const row = { agentId: "a1", status, snooze: e.snooze, ...liveFlag(status, e.needs, card) };
-    for (const v of rowViolations(row, clock + 3_600_000)) failures.push(`${status} · ${name} · card=${kind} · ${v.detail}`);
+    const card = kind ? { kind, source: "agent" as const, state: "open" as const, ask: "x", questionIds: [] as string[], at: iso(0) } : null;
+    const turnStartedAt = ["running", "initializing"].includes(status) ? start : null;
+    const row = { agentId: "a1", status, snooze: e.snooze, turnStartedAt, ...liveFlag(status, e.needs, card, turnStartedAt) };
+    for (const v of rowViolations(row, clock + 3_600_000)) failures.push(`${status} · ${name} · card=${kind} · start=${start} · ${v.detail}`);
   }
   assert.deepEqual(failures, []);
+  // The turn that just failed is news even while Paseo still reads "running" (found by the Home render): no newer
+  // turn start, so the Error stays.
+  const failed = reduce(newEntry("a1"), histories.failed[0], iso(0));
+  for (const start of [null, iso(-1)]) assert.equal(liveFlag("running", failed.needs, null, start).needs?.reasons[0]?.reason, "error", `start=${start}`);
+  assert.equal(liveFlag("running", failed.needs, null, iso(10)).needs, null);
   // Fixture (2026-11-10, orchestrator 37bc4ab1): the raw entry, unfiltered, is exactly what Home showed.
   const stale = reduce(newEntry("37bc4ab1"), histories.failed[0], iso(0));
-  assert.equal(rowViolations({ agentId: "37bc4ab1", status: "running", needs: stale.needs, snooze: null, brief: null }, clock)[0]?.id, "running-is-not-stale");
+  assert.equal(rowViolations({ agentId: "37bc4ab1", status: "running", needs: stale.needs, snooze: null, brief: null, turnStartedAt: iso(15) }, clock)[0]?.id, "running-is-not-stale");
+  assert.deepEqual(rowViolations({ agentId: "37bc4ab1", status: "running", needs: stale.needs, snooze: null, brief: null, turnStartedAt: iso(-1) }, clock), []);
 });

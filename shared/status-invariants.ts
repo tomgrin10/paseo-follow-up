@@ -106,12 +106,15 @@ export function briefViolations(current: Pick<Brief, "id" | "state" | "outcome" 
 }
 
 /**
- * Inbox rows (agents, not workspaces): a running agent never headlines its last turn's failure or pause, since a
- * newer turn supersedes them (RUN_STATE_REASONS in shared/inbox.ts). `running-is-not-stale`, 2026-11-10: Home said
+ * Inbox rows (agents, not workspaces): a running agent never headlines a failure or pause from before its current
+ * turn started, since a newer turn supersedes them (RUN_STATE_REASONS in shared/inbox.ts). A flag from the turn that
+ * just failed is real news even while Paseo still reads "running". `running-is-not-stale`, 2026-11-10: Home said
  * "Error · The turn failed" on an agent that had been running for 15 minutes.
  */
-export function rowViolations(row: Pick<InboxRow, "agentId" | "status" | "needs" | "snooze" | "brief">, now: number): { id: string; detail: string }[] {
-  if (!["running", "initializing"].includes(row.status)) return [];
+export function rowViolations(row: Pick<InboxRow, "agentId" | "status" | "needs" | "snooze" | "brief" | "turnStartedAt">, now: number): { id: string; detail: string }[] {
+  if (!["running", "initializing"].includes(row.status) || !row.turnStartedAt) return [];
   const h = flagHeadline(row, now);
-  return h && (h.key === "error" || h.key === "paused") ? [{ id: "running-is-not-stale", detail: `${row.agentId} is ${row.status} but headlines ${h.label}` }] : [];
+  if (!h || (h.key !== "error" && h.key !== "paused")) return [];
+  const flaggedAt = [...(row.needs?.reasons.filter(r => r.reason === h.key).map(r => r.at) ?? []), ...(row.brief?.kind === h.key && row.brief.at ? [row.brief.at] : [])].sort().at(-1);
+  return !flaggedAt || flaggedAt < row.turnStartedAt ? [{ id: "running-is-not-stale", detail: `${row.agentId} is ${row.status} since ${row.turnStartedAt} but headlines ${h.label} from ${flaggedAt ?? "an older card"}` }] : [];
 }
