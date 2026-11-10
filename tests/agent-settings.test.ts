@@ -99,7 +99,7 @@ test("catalog: Paseo's snapshot becomes pickers; failures come back as an error,
   assert.deepEqual(providers.map(p => [p.id, p.available, p.reason]), [["claude", true, null], ["codex", true, null], ["opencode", false, "Not installed"], ["copilot", false, "Turned off in Paseo"], ["muse", false, "muse not found on PATH"]]);
   assert.deepEqual(providers[0].models.map(m => m.id), ["claude-opus-5-5"], "1M-context variants are hidden");
   const forJobs = providersFor("about", [...providers, { id: "pi", label: "Pi", available: true, reason: null, models: [], modes: [], defaultMode: null }]);
-  assert.equal(forJobs.find(p => p.id === "pi")!.available, false); assert.match(forJobs.find(p => p.id === "pi")!.reason!, /only Claude and Codex/);
+  assert.equal(forJobs.find(p => p.id === "pi")!.available, true, "jobs run on any provider Paseo has");
   assert.equal(providersFor("overseer", providers).find(p => p.id === "codex")!.available, true);
   assert.deepEqual(labelsFor({ ...resolveRole(null, "overseer"), model: "claude-opus-5-5", thinking: "high" }, { providers, error: null, fetchedAt: null }), { provider: "Claude", model: "Opus 5.5", thinking: "High" });
 
@@ -169,7 +169,7 @@ test("Overseer: created with the configured model; a change offers a restart tha
   await h.overseer.restart(h.paseo);
   const second = h.created[1] as { config: Record<string, unknown>; prompt: string };
   assert.deepEqual([second.config.provider, second.config.modeId, second.config.thinkingOptionId], ["codex/gpt-6-luna", "full-access", "low"]);
-  assert.match(second.prompt, /Handoff from the previous Overseer, which Tom replaced to run on GPT-6-Luna/);
+  assert.match(second.prompt, /Handoff from the previous Overseer, which the developer replaced to run on GPT-6-Luna/);
   assert.deepEqual(h.timelineReads, [], "the unloaded old Overseer's timeline is never read");
   assert.equal((await h.overseer.agentInfo()).restart, false);
   assert.equal((await h.overseer.state()).generation, 2);

@@ -66,6 +66,9 @@
   brief supersedes it. While a linked question is open on the server, nothing but a developer reply, pick or sign-off
   closes its card. The invariant is `brief-follows-questions` (`shouldReopen` in `shared/brief.ts`,
   `shared/status-invariants.ts`).
+- **Every row shows its own lines.** Home and Paseo 0.16's sidebar view render the same model, so a
+  line on one agent's row never comes from another row of its workspace. The invariant is `row-lines-own-row`
+  (`homeViolations`); [ai-roles.md](ai-roles.md#priority-ranker-beta) covers priority reasons.
 - **Answering the brief.** The card's moves go through `follow.brief-action`: pick an option, several picks, or
   Retry. Each sends one message as the developer and is logged as such. Picks that answer stored questions become
   those questions' answers.

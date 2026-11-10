@@ -24,7 +24,7 @@ import { waitNote, type WaitStatus } from "../shared/wait";
  * return a dry-run plan first; `confirm: true` with that plan's id runs it. Every agent write is recorded in
  * the inbox ledger as `by: "agent:<id>"`, which never counts as the developer writing to the agent.
  */
-export const AGENT_TOOLS = ["make_main_agent", "list_prs", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "track", "inbox_list", "sign_off", "snooze", "set_finish_flags", "set_priorities", "workspace_about", "agent_settings", "follow_settings", "set_follow_settings", "project_settings", "set_project_tracking", "pr_workflow", "set_pr_workflow", "reviewer_settings", "reviewer_suggestions", "save_reviewers", "set_agent_setting", "set_wait_for_jobs", "onboarding_status", "onboarding_checks", "set_onboarding", "priorities", "rank_status", "rerank_priorities", "usage", "overseer_status", "overseer_start", "overseer_restart", "overseer_ask", "inbox_brief", "brief_action", "inbox_act", "answer_question", "run_recovery", "refresh", "set_workspace_spec", "set_task_trigger", "pr_controls", "browser_status", "trust_bypass_status", "release_notes", "updates_status", "check_updates", "set_updates", "install_update", "display_settings", "set_display"] as const;
+export const AGENT_TOOLS = ["make_main_agent", "list_prs", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "track", "inbox_list", "sign_off", "snooze", "set_finish_flags", "set_priorities", "workspace_about", "agent_settings", "follow_settings", "set_follow_settings", "project_settings", "set_project_tracking", "pr_workflow", "set_pr_workflow", "reviewer_settings", "reviewer_suggestions", "save_reviewers", "set_agent_setting", "set_wait_for_jobs", "onboarding_status", "onboarding_checks", "set_onboarding", "priorities", "rank_status", "rerank_priorities", "usage", "overseer_status", "overseer_start", "overseer_restart", "overseer_ask", "inbox_brief", "brief_action", "inbox_act", "answer_question", "run_recovery", "refresh", "set_workspace_spec", "set_task_trigger", "pr_controls", "browser_status", "trust_bypass_status", "release_notes", "link_items", "set_linked_items", "updates_status", "check_updates", "set_updates", "install_update", "display_settings", "set_display"] as const;
 export type AgentTool = typeof AGENT_TOOLS[number];
 /** Tools that only read. */
 export const READ_ONLY_TOOLS: readonly AgentTool[] = ["list_prs", "inbox_list", "workspace_about", "agent_settings", "display_settings", ...RPC_TOOLS.filter(t => t.kind === "read").map(t => t.name as AgentTool)];
@@ -165,8 +165,8 @@ export class AgentActions {
         const roles = await this.d.agentSettings.all();
         const workflows = await this.d.prWorkflows?.().catch(() => null);
         const wait = await this.d.wait?.status().catch(() => null);
-        return { ...(wait ? { waitForBackgroundJobs: { ...wait, note: waitNote(wait), change: "set_wait_for_jobs, only when the developer asks." } } : {}), roles: Object.values(roles).map(r => ({ ...r, summary: roleSummary(r), does: ROLE_INFO[r.role].does })), change: "Tom changes these in Follow-up settings → Agents.",
-          ...(workflows ? { prWorkflow: { default: workflows.default, reviewFix: workflows.reviewFix, repos: workflows.repos.map(r => ({ repo: r.repo, workflow: r.effective, setting: r.setting, why: r.reason, reviewFix: r.reviewFix ?? workflows.reviewFix })), change: "Tom changes these in Follow-up settings → Following → Shipping PRs." } } : {}) };
+        return { ...(wait ? { waitForBackgroundJobs: { ...wait, note: waitNote(wait), change: "set_wait_for_jobs, only when the developer asks." } } : {}), roles: Object.values(roles).map(r => ({ ...r, summary: roleSummary(r), does: ROLE_INFO[r.role].does })), change: "The developer changes these in Follow-up settings → Agents.",
+          ...(workflows ? { prWorkflow: { default: workflows.default, reviewFix: workflows.reviewFix, repos: workflows.repos.map(r => ({ repo: r.repo, workflow: r.effective, setting: r.setting, why: r.reason, reviewFix: r.reviewFix ?? workflows.reviewFix })), change: "The developer changes these in Follow-up settings → Following → Shipping PRs." } } : {}) };
       }
       case "add_reviewers": return this.planReviewers(caller, args);
       case "merge": return this.planPr(caller, tool, "merge", args);
@@ -233,7 +233,7 @@ export class AgentActions {
    * The rules are checked again at confirm. The old main hears on its next turn through the hook, never by a message.
    */
   private async planMakeMain(caller: string, args: Record<string, any>) {
-    if (!args.reason) throw new Error("make_main_agent: give reason, one line the developer sees (\"Tom asked me to take over the release\").");
+    if (!args.reason) throw new Error("make_main_agent: give reason, one line the developer sees (\"The developer asked me to take over the release\").");
     if (!args.requested) throw new Error("make_main_agent: give requested: developer (the developer asked for it) or self (your own claim).");
     if (!this.d.agentInfo) throw new Error("make_main_agent isn't available in this Follow-up.");
     const find = (state: State) => this.tracked(state).find(w => w.mainAgentId === caller || w.contributorAgentIds?.includes(caller));

@@ -25,6 +25,12 @@ Nothing polls while the app is hidden.
   light and dark.
 - `npm run preview` starts an isolated daemon with the packed plugin ([testing.md](testing.md)).
 - User copy says "Summary" for the `about` feature.
+- **Agent-written text renders through `RichText`** (`client/rich-text.tsx`). Root cause of the unclickable artifact
+  link: every surface put agent-written text in a plain `<Text>`. `linkify` in `shared/links.ts` turns http(s) URLs
+  and `owner/repo#123` into links (no markdown). `tests/rich-text.test.ts` fails when a field an agent or the
+  developer wrote (question, option, answer words, brief ask/context, task title/evidence, summary, results,
+  Overseer replies, activity details) sits in a plain `<Text>`. A one-line title inside a pressable row uses
+  `<RichText plain>`. Add new agent-written fields to the scan.
 
 ## Files
 
@@ -33,6 +39,8 @@ Nothing polls while the app is hidden.
 | `client/home.tsx` | Home: the list and the detail pane, the Overseer card, the setup flow's place. |
 | `client/home-list.tsx` | The one virtualised list, used by Home and the sidebar view. |
 | `client/home-chrome.tsx` | Omnibox, sort menu, status strip, provider and memory meters. |
+| `client/row-menu.tsx`, `client/row-actions.ts`, `shared/row-menu.ts` | The row menu: right-click, long-press or the menu key (Shift+F10) on a Home row or search result. See [Row menu](#row-menu). |
+| `client/actions.ts` | `runAction`: a quick action closes its control at once and reports as a toast. A stand-in until the shared one lands. |
 | `client/home-view.ts` | Home's derived model: sort choice, priorities, titles for search, limits. |
 | `client/home-data.ts` | Paseo's own workspace list, for untracked rows (Quiet) and header buttons. |
 | `client/sidebar-view.tsx`, `client/sidebar-visibility.ts` | Home's list as Paseo's sidebar (on hosts that support it), and its registration. |
@@ -55,12 +63,39 @@ Nothing polls while the app is hidden.
 | `client/visibility.ts` | Foreground detection; hidden means no polling. |
 | `client/display.tsx`, `client/button-visibility.ts` | Settings → Display, and button visibility (unknown is not off). `button-visibility.test.mjs` covers the lifecycle. |
 | `client/settings.tsx`, `client/settings-shell.tsx` | The settings screen and its collapsible sections. |
-| `client/agents.tsx` | Settings → Agents, including Background jobs (Wait). |
+| `client/agents.tsx` | Settings → Agents: the shared job rows with each row's More, and Background jobs (Wait). |
+| `client/job-rows.tsx` | The job rows Settings → Agents and setup's Helper agents step share (`JobRows`, `RolePickers`). |
 | `client/shipping.tsx` | Settings → Following → Shipping PRs. |
 | `client/onboarding.tsx` | Getting started. |
 | `client/updates.tsx` | Settings → General's Updates sections, Home's update notice, setup's Updates step ([updates.md](updates.md)). |
 | `client/release-notes.tsx` | What's new, the notes list, Home's version line. |
 | `client/kit.tsx`, `client/motion.tsx`, `client/theme.ts`, `client/keys.ts` | The type scale, motion, theme helpers and query keys. |
+| `client/rich-text.tsx`, `shared/links.ts` | The one renderer for agent-written text, and the linkifier behind it. |
+
+## Row menu
+
+Right-click a Home row or search result (or long-press it on a phone, or press the menu key or Shift+F10 on a focused
+row) for quick moves without opening it. `rowMenu()` in `shared/row-menu.ts` lists only what applies to that row:
+
+1. Triage: Later (the same four choices as the detail pane and the pill, `LATER_CHOICES`), then Sign off.
+2. Answer Q<n> for up to two open questions.
+3. Resume follow-up, Send N repairs and Retry repairs, each shown only when it applies.
+4. Open chat, and Ask the Overseer about this (it pre-fills the omnibox and doesn't send).
+5. Copy branch name, Copy PR link(s), Rewrite Summary, Make <agent> the main agent, and Stop following… (which asks
+   first).
+
+Rules:
+
+- **Rows only.** The DOM `contextmenu` listener sits on each row's own node, so the browser's menu stays everywhere
+  else. `tests/row-menu.test.ts` fails on a `contextmenu` listener anywhere else.
+- **Parity.** Each action is a `ROW_ACTIONS` entry that names its agent tool, or why it needs none (open, copy,
+  pre-fill). Every pick goes through `runAction` and the RPC its usual button calls. Both are tested.
+- **Layout.** On desktop it's a popover at the pointer, clamped inside the viewport (`placeMenu`). On a phone it's a
+  sheet. It has `role=menu`, arrow keys and Home/End to move, Right and Left to open and close Later, Enter to pick,
+  and Escape to close. Focus returns to the row.
+- **Not here yet.** There's no archive or merge (those stay deliberate), and no manual priority, because
+  `set_priorities` only takes ranker scores. The workspace panel's navigator and the sidebar view don't have the menu
+  yet.
 
 ## Chat rows and Paseo's grouping
 

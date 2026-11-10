@@ -14,7 +14,8 @@ export type RankSource = typeof RANK_SOURCES[number];
 export const RANK_SOURCE_LABEL: Record<RankSource, string> = { linear: "Linear", slack: "Slack", github: "GitHub", planning: "Plan" };
 export type SourceHealth = "ok" | "failed" | "off";
 
-export type RankWorkstream = { id: string; title: string; branch: string | null; group: string; ask: string | null; prs: string[]; keys: string[]; dormant: boolean };
+/** `row`: the Home row it was read from. Not in the prompt or the stable inputs; the reply's priority keeps it. */
+export type RankWorkstream = { id: string; row?: string; title: string; branch: string | null; group: string; ask: string | null; prs: string[]; keys: string[]; dormant: boolean };
 export type RankIssue = { key: string; title: string; priority: string | null; status: string | null; due: string | null; project: string | null; milestone: string | null; url: string | null };
 export type RankMessage = { where: string; who: string | null; text: string; at: string | null };
 export type RankReview = { repo: string; number: number; title: string; url: string | null; author: string | null };
@@ -28,7 +29,7 @@ const clip = (s: string | null | undefined, n: number) => { const t = (s ?? "").
 /** The ranker's view of a workstream. Follow-up's own priority is left out, so a ranking never feeds itself. */
 export function rankWorkstream(w: WorkstreamRow): RankWorkstream {
   return {
-    id: w.workspaceId, title: clip(w.title, RANK_LIMITS.titleChars), branch: w.branch, group: w.group, ask: w.ask ? clip(w.ask, RANK_LIMITS.textChars) : null,
+    id: w.workspaceId, ...(w.key ? { row: w.key } : {}), title: clip(w.title, RANK_LIMITS.titleChars), branch: w.branch, group: w.group, ask: w.ask ? clip(w.ask, RANK_LIMITS.textChars) : null,
     prs: w.prs.map(p => `#${p.number} ${p.state.toLowerCase()}${p.checks ? ` checks ${p.checks}` : ""}`), keys: w.keys, dormant: w.dormant,
   };
 }
@@ -57,7 +58,7 @@ Rules:
 - Rank only workspace ids from WORKSTREAMS. Give every non-resting workstream a score; leave resting ones out unless an input names them.
 - The reason is the concrete fact, at most 60 characters, fact first: "HER-1312 · Urgent · due today", "This week's Okta milestone", "Dana asked twice, demo tomorrow", "Review requested by Avi". Never start it with the source's name ("Slack:", "Plan:", "Linear:"): the list shows the source beside it. Never "important" or "high priority" alone.
 - Every ranked workstream has a non-empty reason. When no outside input (Linear, Slack, GitHub, plan) names it, the reason is its strongest Paseo fact (its open ask, PR state or checks, "agent stopped") with sources [{"kind":"paseo","label":"Paseo"}]. Never filler like "no outside signal".
-- Direct asks to the developer weigh at least as much as this week's plan milestones: a Slack DM or mention waiting on him, a GitHub review requested from him, a workstream waiting on his decision (group needs with an open ask). Never rank a plan item above a direct ask of similar urgency; a direct ask from a person with a deadline ranks above any plan item.
+- Direct asks to the developer weigh at least as much as this week's plan milestones: a Slack DM or mention waiting on them, a GitHub review requested from them, a workstream waiting on their decision (group needs with an open ask). Never rank a plan item above a direct ask of similar urgency; a direct ask from a person with a deadline ranks above any plan item.
 - Stability: PREVIOUS RANKING lists each workstream's last score. Keep a workstream within 10 points of it unless something about that workstream changed (a new Slack line, issue state, review request, PR or ask). Don't reshuffle what didn't change.
 - Spread the scores: a clear outside signal (urgent or due Linear issue, a person asking in Slack, a review request, this week's plan) scores above one without. A workstream waiting on the developer (group needs) with a real ask scores higher than the same work without one.
 - Use only facts in the material. Never invent a key, a person, a date or a url.
@@ -165,7 +166,7 @@ export function toPriorities(reply: RankReply, inputs: RankInputs, at: string): 
     const given = clip(p.reason.split(/\r?\n/)[0].replace(SOURCE_PREFIX, ""), 140);
     // Every ranked row has a reason: the model's, or (after the retry still failed) the workspace's own fact.
     const reason = meaningful(given) ? given : paseoReason(w);
-    priorities.push({ workspaceId: w.id, score: Math.round(Math.min(100, p.score)), reason, sources: reason === given ? sources : [{ kind: "paseo", label: "Paseo" }], at, by: "ranker" });
+    priorities.push({ workspaceId: w.id, score: Math.round(Math.min(100, p.score)), reason, sources: reason === given ? sources : [{ kind: "paseo", label: "Paseo" }], at, by: "ranker", ...(w.row ? { row: w.row } : {}) });
   }
   priorities.sort((a, b) => b.score - a.score || a.workspaceId.localeCompare(b.workspaceId));
   const covered = new Set(inputs.workstreams.flatMap(w => w.keys.map(k => k.toUpperCase())));

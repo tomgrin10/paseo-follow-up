@@ -1,12 +1,14 @@
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { BackgroundAgents } from "./background-agents";
 import { emptyInbox, expired, inboxStateSchema, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason, liveFlag, withoutRunState } from "../shared/inbox";
 import type { State as FollowState, Workspace as FollowWorkspace } from "../shared/model";
 import { prActionBlocks } from "../shared/pr-actions";
 import { configuredReviewers, noReviewers, reviewerLabel, withoutAuthor } from "../shared/reviewers";
 import { classify, turnPrompt, type Sources } from "./inbox-classifier";
-import { briefOrigin, briefStep, pickBrief, shouldReopen, type Brief, type BriefEvent, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
+import { briefOrigin, briefStep, pickBrief, shouldReopen, validPick, type Brief, type BriefEvent, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
+import { OTHER_LABEL, isOther } from "../shared/questions";
 
 /** The flag store: plugin-data/follow-through/inbox.json. A new file, so existing state never changes shape. */
 export class InboxStore {
@@ -59,6 +61,8 @@ export type AgentInfo = {
   requiresAttention: boolean; attentionReason: string | null;
   /** When Paseo marked the agent as needing attention (a turn finished unread). Optional for older hosts and stubs. */
   attentionTimestamp?: string | null; createdAt?: string | null;
+  /** Paseo 0.16 background agent (a plugin's helper): its turns never raise rows. Absent on 0.15. */
+  background?: boolean;
   /** Ids of the permission prompts Paseo shows for this agent right now. Absent or null: unknown, so nothing is cleared. */
   pendingPermissionIds?: string[] | null;
 };
@@ -115,21 +119,24 @@ export function pauseSource(p: GuardPause): { note: string | null; resetsAt: str
   return { note, resetsAt: at ? `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}` : null };
 }
 /** The developer's option click, in the existing answer format so Follow-up's answer card renders it. */
-export function briefAnswer(id: string, question: string, letter: string, label: string): string {
+export function briefAnswer(id: string, question: string, letter: string, label: string, words?: string): string {
   const title = question.replace(/[()\n]/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+  if (isOther(letter)) return `Follow-up answer ${id} (${title}): ${OTHER_LABEL} — "${(words ?? "").trim()}"\nNone of your options: the developer's own answer is in the quotes.`;
   return `Follow-up answer ${id} (${title}): ${letter} — ${label}\nContinue with this choice.`;
 }
 /**
  * Several decisions answered together (1.4.0): one message, a summary line the developer reads at a glance, then one
  * line per decision the agent can act on. Skipped decisions are named, so the agent knows they're still open.
  */
-export function briefAnswers(ask: string, decisions: { id: string; question: string; options: { letter: string; label: string }[] }[], picks: Record<string, string>): string {
+export function briefAnswers(ask: string, decisions: { id: string; question: string; options: { letter: string; label: string }[] }[], picks: Record<string, string>, words: Record<string, string> = {}): string {
   const clean = (t: string) => t.replace(/[()\n]/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
   const asked = decisions.filter(d => d.options.length);
-  const picked = (d: typeof asked[number]) => d.options.find(o => o.letter === picks[d.id]);
-  const summary = asked.map((d, i) => { const o = picked(d); return `${i + 1}. ${o ? `${o.letter} — ${o.label}` : "skipped"}`; }).join(" · ");
+  // Something else stays on its decision's one line: the developer's words with line breaks folded to spaces.
+  const other = (d: typeof asked[number]) => isOther(picks[d.id]) && words[d.id]?.trim() ? `${OTHER_LABEL} — "${words[d.id].replace(/\s+/g, " ").trim()}"` : null;
+  const picked = (d: typeof asked[number]) => { const o = d.options.find(o => o.letter === picks[d.id]); return other(d) ?? (o ? `${o.letter} — ${o.label}` : null); };
+  const summary = asked.map((d, i) => { const p = picked(d); return `${i + 1}. ${other(d) ? OTHER_LABEL : p ?? "skipped"}`; }).join(" · ");
   const lines = [`${ANSWERS_PREFIX} ${asked.map(d => d.id).join(", ")} (${clean(ask)}): ${summary}`];
-  for (const d of asked) { const o = picked(d); lines.push(o ? `${d.id} (${clean(d.question)}): ${o.letter} — ${o.label}` : `${d.id} (${clean(d.question)}): skipped — not answered yet; ask again if it still matters.`); }
+  for (const d of asked) { const p = picked(d); lines.push(p ? `${d.id} (${clean(d.question)}): ${p}` : `${d.id} (${clean(d.question)}): skipped — not answered yet; ask again if it still matters.`); }
   const skipped = asked.filter(d => !picked(d));
   lines.push(skipped.length ? `Continue with the answered ones; ${skipped.map(d => d.id).join(" and ")} ${skipped.length === 1 ? "is" : "are"} still open. The answers are already recorded.` : "Continue with these choices. The answers are already recorded.");
   return lines.join("\n");
@@ -256,9 +263,14 @@ export class Inbox {
     return { rootId: current.id, subagent, delegated: false };
   }
 
+  /** Paseo 0.16 background agents are another plugin's helpers: their turns never raise rows (background-agents.ts). */
+  private backgroundAgents = new BackgroundAgents();
+  private background(id: string) { return this.backgroundAgents.check(id, agentId => this.o.directory.agent(agentId)); }
+
   async turnStarted(agent: { id: string; workspaceId: string | null; parentAgentId?: string | null }, turnId?: string | null): Promise<void> {
+    if (!await this.on()) { this.live.add(agent.id); return; }
+    if (await this.background(agent.id)) return;
     this.live.add(agent.id);
-    if (!await this.on()) return;
     const root = await this.root(agent);
     if (root.subagent) return;
     const at = this.now();
@@ -275,6 +287,7 @@ export class Inbox {
   async turnEnded(agent: { id: string; workspaceId: string | null; parentAgentId?: string | null }, outcome: { kind: "completed" } | { kind: "failed"; error: { message: string } } | { kind: "canceled"; reason: string }, turnId: string | null): Promise<void> {
     this.live.delete(agent.id);
     if (!await this.on()) return;
+    if (await this.background(agent.id)) return;
     const root = await this.root(agent);
     if (root.subagent) {
       // Subagent finishes are covered by the parent's own turn end; failures surface on the parent's brief.
@@ -415,7 +428,7 @@ export class Inbox {
    * The developer clicked an option or a move on the brief. Validated against the stored brief (a stale card is refused),
    * logged in the ledger as the developer's (so the classifier clears the flag, #11), then sent, then collapsed.
    */
-  async briefAction(agentId: string, input: { briefId: string; decisionId?: string; choice?: string; choices?: { decisionId: string; choice: string }[]; move?: "retry" }, send: (text: string, messageId: string) => Promise<void>): Promise<Brief> {
+  async briefAction(agentId: string, input: { briefId: string; decisionId?: string; choice?: string; words?: string; choices?: { decisionId: string; choice: string; words?: string }[]; move?: "retry" }, send: (text: string, messageId: string) => Promise<void>): Promise<Brief> {
     const state = await this.store.snapshot();
     const b = state.entries[agentId]?.brief;
     if (!b || b.id !== input.briefId) throw new Error("This brief was replaced by a newer one. Read the newest card.");
@@ -426,21 +439,22 @@ export class Inbox {
       text = "Retry the turn that failed. Pick up from the last step that finished."; event = { type: "message", text: null };
     } else if (input.choices) {
       // A multi-decision card sends every pick in one message; at least one, each a real option of its decision.
-      const picks: Record<string, string> = {};
+      const picks: Record<string, string> = {}; const words: Record<string, string> = {};
       for (const p of input.choices) {
         const d = b.decisions.find(d => d.id === p.decisionId);
-        if (!d?.options.some(o => o.letter === p.choice)) throw new Error("Pick one of the options on the card.");
+        if (!d || !validPick(d, p.choice, p.words)) throw new Error(isOther(p.choice) ? `${OTHER_LABEL} needs your answer in words.` : "Pick one of the options on the card.");
         picks[d.id] = p.choice;
+        if (isOther(p.choice)) words[d.id] = p.words!.trim();
       }
       if (!Object.keys(picks).length) throw new Error("Pick at least one option before sending.");
-      text = briefAnswers(b.ask, b.decisions, picks);
-      event = { type: "options", picks: Object.entries(picks).map(([decisionId, choice]) => ({ decisionId, choice })) };
+      text = briefAnswers(b.ask, b.decisions, picks, words);
+      event = { type: "options", picks: Object.entries(picks).map(([decisionId, choice]) => ({ decisionId, choice, ...(words[decisionId] ? { words: words[decisionId] } : {}) })) };
     } else {
       const d = b.decisions.find(d => d.id === input.decisionId);
-      const o = d?.options.find(o => o.letter === input.choice);
-      if (!d || !o) throw new Error("Pick one of the options on the card.");
-      text = briefAnswer(d.id, d.question, o.letter, o.label);
-      event = { type: "option", decisionId: d.id, choice: o.letter };
+      if (!d || !input.choice || !validPick(d, input.choice, input.words)) throw new Error(input.choice && isOther(input.choice) ? `${OTHER_LABEL} needs your answer in words.` : "Pick one of the options on the card.");
+      const o = d.options.find(o => o.letter === input.choice);
+      text = briefAnswer(d.id, d.question, input.choice, o?.label ?? "", input.words);
+      event = { type: "option", decisionId: d.id, choice: input.choice, ...(isOther(input.choice) ? { words: input.words!.trim() } : {}) };
     }
     const messageId = randomUUID();
     await this.noteDelivery(agentId, messageId, "developer");

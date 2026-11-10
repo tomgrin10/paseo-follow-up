@@ -4,6 +4,8 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createRequire} from 'node:module';
 import {DaemonClient} from '@getpaseo/client/internal/daemon-client';
+import { harness } from "./harness.mjs";
+await harness();
 const p=JSON.parse(await readFile('.preview-isolated.json','utf8'));
 assert.ok(p.root.startsWith('/tmp/follow-install-'));
 const {chromium}=createRequire(process.env.SEND_TO_PASEO_SOURCE+'/extension/package.json')('playwright-core');

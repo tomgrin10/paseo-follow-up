@@ -1,0 +1,2 @@
+- Links in questions, briefs, tasks, Done summaries and agent replies are clickable, including GitHub PR references like owner/repo#123.
+- Every question with options now ends with "Something else", where you write your own answer when none of the options fit.

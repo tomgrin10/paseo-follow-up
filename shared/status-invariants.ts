@@ -5,7 +5,8 @@ import { flagHeadline } from "./headline";
 import type { InboxRow } from "./inbox";
 import { completionCheck, summary } from "./model";
 import { liveLine, needsYou } from "./attention";
-import { trackedGroup } from "./home";
+import { trackedGroup, type HomeModel } from "./home";
+import { freshPriorities, type Priority } from "./priorities";
 import { agentCard, batchView } from "./status";
 import { followUpObligations } from "./follow-up";
 
@@ -117,4 +118,25 @@ export function rowViolations(row: Pick<InboxRow, "agentId" | "status" | "needs"
   if (!h || (h.key !== "error" && h.key !== "paused")) return [];
   const flaggedAt = [...(row.needs?.reasons.filter(r => r.reason === h.key).map(r => r.at) ?? []), ...(row.brief?.kind === h.key && row.brief.at ? [row.brief.at] : [])].sort().at(-1);
   return !flaggedAt || flaggedAt < row.turnStartedAt ? [{ id: "running-is-not-stale", detail: `${row.agentId} is ${row.status} since ${row.turnStartedAt} but headlines ${h.label} from ${flaggedAt ?? "an older card"}` }] : [];
+}
+
+/**
+ * Home rows (Home's list and the sidebar view render the same model): every row's lines come from its own row. A
+ * priority is stored per workspace but its reason was written about one row, so at most one row of a workspace shows
+ * it, and when the ranker named the row it read, that row. `row-lines-own-row` (1.4.0-beta.34: a Finished agent
+ * row showed its errored sibling's "Agent errored before follow-up started" in the sidebar view).
+ */
+export function homeViolations(model: Pick<HomeModel, "byKey">, priorities: readonly Priority[], now: number): { id: string; detail: string }[] {
+  const fresh = freshPriorities(priorities, now).byWorkspace;
+  const carriers = new Map<string, string[]>();
+  for (const s of model.byKey.values()) if (s.priority && s.workspaceId) carriers.set(s.workspaceId, [...carriers.get(s.workspaceId) ?? [], s.key]);
+  const out: { id: string; detail: string }[] = [];
+  for (const [workspaceId, keys] of carriers) {
+    const p = fresh.get(workspaceId);
+    if (keys.length > 1) out.push({ id: "row-lines-own-row", detail: `${keys.join(", ")} all show ${workspaceId}'s priority` });
+    else if (!p) out.push({ id: "row-lines-own-row", detail: `${keys[0]} shows a priority ${workspaceId} doesn't have` });
+    else if (p.row && p.row !== keys[0]) out.push({ id: "row-lines-own-row", detail: `${keys[0]} shows the reason ranked for ${p.row}` });
+    else if (model.byKey.get(keys[0])!.priority!.reason !== p.reason) out.push({ id: "row-lines-own-row", detail: `${keys[0]} shows another reason than ${workspaceId}'s` });
+  }
+  return out;
 }

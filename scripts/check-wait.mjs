@@ -21,6 +21,7 @@ import { join, dirname, delimiter } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { createServer } from "node:net";
+import { harness, onShutdown } from "./harness.mjs";
 
 const exec = promisify(execFile);
 const source = fileURLToPath(new URL("../", import.meta.url));
@@ -45,6 +46,7 @@ if (skip) {
   console.log(`SKIP check-wait: ${skip}. Run npm run test:wait-live where Claude credentials and Paseo 0.15+ are available.`);
   process.exit(0);
 }
+await harness();
 let cli;
 for (const directory of (process.env.PATH ?? "").split(delimiter)) { try { cli = await realpath(join(directory, "paseo")); break; } catch {} }
 if (!cli) throw new Error("The installed Paseo CLI is required");
@@ -75,6 +77,7 @@ async function until(predicate, description, timeout = 180000) { const deadline 
 const isWait = name => /(^|__|\.)wait_(prepare_job|for_job|get_job)$/.test(name);
 const ends = suffix => name => name.endsWith(suffix);
 let daemon, client;
+onShutdown(async () => { await client?.close().catch(() => {}); await daemon?.stop().catch(() => {}); });
 const launches = new Map();
 
 function receipt(item) {
