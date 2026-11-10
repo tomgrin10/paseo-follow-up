@@ -11,6 +11,7 @@ import type { Pr, Workspace } from "../shared/model";
 import { Button, Switch, errorText, text, type Theme } from "./kit";
 import { noReviewers, resolveReviewers, withoutAuthor, type ReviewerEntry } from "../shared/reviewers";
 import { ReviewerPicker, reviewerSettingsKey, useReviewerSettings, willAsk } from "./reviewers";
+import { runAction } from "./toasts";
 
 const METHOD_SENTENCE: Record<MergeMethod, string> = { squash: "squash and merge it", merge: "merge it with a merge commit", rebase: "rebase and merge it" };
 /** Blockers read as nouns after "clears:"; proper names (GitHub, Graphite) keep their capital. */
@@ -36,7 +37,7 @@ export function PrControls({ pr, workspace, theme, compact, browserReady: compan
   const reviewerSettings = useReviewerSettings();
   // `picked`: this PR only, from the picker; `remember` also saves them for the repository.
   const reviewRequest = useMutation({ mutationFn: (input?: { picked: ReviewerEntry[]; remember: boolean }) => requestReviewers({ workspaceId: workspace.id, prKey: pr.key, ...(input ? { reviewers: input.picked, remember: input.remember } : {}) }),
-    onSuccess: (reply, input) => { setPicking(false); setNotice(reply.result); if (reply.state === "submitted") toast.show(reply.result, { variant: "success" }); if (input?.remember) void cache.invalidateQueries({ queryKey: reviewerSettingsKey }); invalidate(); }, onError: invalidate });
+    onSuccess: (reply, input) => { setNotice(reply.result); if (reply.state === "submitted") toast.show(reply.result, { variant: "success" }); if (input?.remember) void cache.invalidateQueries({ queryKey: reviewerSettingsKey }); invalidate(); }, onError: invalidate });
   const submit = useMutation({ mutationFn: (input: { planId: string; scope: "target" | "downstack" }) => confirm(input), onSuccess: reply => { setPlan(null); setNotice(reply.result); if (reply.state === "submitted") toast.show(reply.result, { variant: "success" }); invalidate(); }, onError: invalidate });
   const checking = useMutation({ mutationFn: (kind: PrActionKind) => prepare({ workspaceId: workspace.id, prKey: pr.key, kind }), onSuccess: result => {
     if (result.kind !== "merge" && result.prs.length === 1 && !result.blockers.length && !result.prs[0].blockers.length) submit.mutate({ planId: result.id, scope: "target" });
@@ -90,7 +91,16 @@ export function PrControls({ pr, workspace, theme, compact, browserReady: compan
       </>}
     </View>}
     {missingReviewers && !pr.snapshot?.draft && picking && <ReviewerPicker repo={pr.repo} author={pr.snapshot?.reviewers?.author ?? null} theme={theme} compact={compact} busy={reviewRequest.isPending}
-      onCancel={() => setPicking(false)} onRequest={(picked, remember) => reviewRequest.mutate({ picked, remember })} />}
+      onCancel={() => setPicking(false)} onRequest={(picked, remember) => {
+        // Quick action: the picker closes at once; a toast says what GitHub did (Retry and Open on failure).
+        setPicking(false);
+        void runAction({
+          label: "Reviewers", toast, run: () => requestReviewers({ workspaceId: workspace.id, prKey: pr.key, reviewers: picked, remember }),
+          success: reply => ({ tone: reply.state === "submitted" ? "success" : "info", message: reply.result }),
+          onSuccess: reply => { setNotice(reply.result); if (remember) void cache.invalidateQueries({ queryKey: reviewerSettingsKey }); invalidate(); },
+          onError: invalidate, failure: `Reviewers not requested on #${pr.number}`, open: () => setPicking(true),
+        });
+      }} />}
     {!plan && <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
       {(canMerge || queued || recentlySubmitted || busy) ? <Button title={busy ? checking.isPending ? "Checking…" : "Submitting…" : queued ? "Queued to merge" : recentlySubmitted ? "Submitted" : `Merge #${pr.number}`} icon={queued ? "Clock" : "GitMerge"} theme={theme} compact={compact} kind={canMerge ? "primary" : "secondary"} loading={busy} disabled={disabled || !canMerge} onPress={() => begin("merge")} />
         : <Text style={[t.meta, { flex: 1 }]}>{waitingFor.length ? `Merge opens when it clears: ${waitingFor.join(", ")}.` : github ? "Waiting for GitHub to confirm it can merge." : "Waiting for Graphite to report it ready to merge."}</Text>}

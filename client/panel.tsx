@@ -30,6 +30,7 @@ import { mergedColor, tint } from "./theme";
 import { SummaryRow } from "./about";
 import { WhatsNewGate } from "./release-notes";
 import { RichText } from "./rich-text";
+import { ToastHost, useQuestionOpener } from "./toasts";
 
 export { overviewKey, workspaceKey };
 
@@ -42,7 +43,7 @@ type PanelProps = PluginWorkspacePanelProps & PanelLinks & { inbox?: InboxStore;
  * tasks, questions, spec, activity and Details. What needs you elsewhere lives on Home.
  */
 export function FollowPanel(props: PanelProps) {
-  return <><PanelBody {...props} /><WhatsNewGate surface="panel" theme={props.theme} compact={props.layout.compact} /></>;
+  return <><PanelBody {...props} /><WhatsNewGate surface="panel" theme={props.theme} compact={props.layout.compact} /><ToastHost theme={props.theme} compact={props.layout.compact} /></>;
 }
 
 function PanelBody(props: PanelProps) {
@@ -360,6 +361,7 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const wide = !compact && width >= WIDE_MIN;
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" | null } | null>(null);
   const [question, setQuestion] = useState<string | null>(null);
+  useQuestionOpener(w.id, setQuestion);
   const [specOpen, setSpecOpen] = useState(false);
   const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), refetchInterval: BROWSER_POLL_MS });
   const invalidated = () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); };
