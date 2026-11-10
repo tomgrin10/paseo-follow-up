@@ -82,7 +82,9 @@ Tests: `tests/main-claim.test.ts`, `tests/main-handover.test.ts`.
    - PR observations are complete.
    - Setup isn't holding auto-sends.
 
-   Otherwise the batch waits for the developer's Send (`follow.send`).
+   Otherwise the batch waits for the developer's Send (`follow.send`). The worker persists why it held an
+   auto-send for an idle-but-unloaded agent or for setup in `sendWait` (written only when it changes), so the status
+   model can say the real reason.
 5. Batch states: `pending` → `sending` → `sent` → acknowledged (`acknowledge_batch`), or `blocked` or `uncertain`.
    - A sent batch with no acknowledgment after 2 idle minutes becomes `blocked`.
    - A reload mid-send makes it `uncertain` (`engine.recover()`).
@@ -94,6 +96,30 @@ Tests: `tests/main-claim.test.ts`, `tests/main-handover.test.ts`.
 
 The repair wording follows the PR workflow ([prs.md](prs.md)): the review-fix command (e.g. `/fix-pr`), and GitHub
 retargeting instead of Graphite restacks.
+
+## Status model
+
+`shared/status.ts` is the one place a user-facing status is computed. `batchView(w, now)` picks the batch that
+describes Follow-up's work right now: its phase (`queued`, `sent`, `stuck`), who it waits on (the agent's
+turn, the open batch, an idle agent Follow-up won't wake, setup, or you) and its one line. It mirrors the auto-send
+rules above. Home's bucket (`trackedGroup` in `shared/home.ts`), the header live line (`liveLine`), the panel's agent
+card (`agentCard`) and Needs you all read it. Rules it encodes:
+
+- "Main agent is on it" only while a batch is really sent; a queued one reads "Queued for the main agent".
+- "Follow-up is fixing" only for work in flight or about to auto-send.
+- The Done check never auto-sends, so it waits on you: Needs you shows "Ready to finish · ask the main agent to
+  declare Done" with **Ask to finish**, whether Auto is on or off. Done settles any open Done check
+  (`settleDoneChecks`).
+- A queued batch never claims it "sends when the agent is idle". Repairs Auto won't send because the agent is idle
+  and unloaded wait on you: Needs you offers Send (`waits-on-you-means-needs-you`).
+- The Done check uses one wording everywhere (`FINISH_WORD`, `FINISH_ASK`, `FINISH_LINE`) and its own icon, never
+  a wrench or a green check. A stuck Done check reads "The Done check didn't go through", never "repairs"
+  (`stuckLine`).
+- A Done with an unconfirmed deploy says so in the header and live line, and both cards use `unconfirmedNote`.
+
+The invariants in `shared/status-invariants.ts` check these over a grid of states
+(`tests/status-invariants.test.ts`). After each refresh the worker runs `violations()` and appends changes to
+`plugin-data/follow-through/status-diagnostics.jsonl` (`server/status-check.ts`, rotated at 256 KB).
 
 ## Tasks (obligations)
 
