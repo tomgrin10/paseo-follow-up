@@ -89,6 +89,10 @@ export const RPC_TOOLS: readonly RpcTool[] = [
   { name: "set_task_trigger", rpc: "follow.set-task-trigger", kind: "planned",
     input: z.strictObject({ workspaceId: id.optional(), obligationId: id.optional(), expectedRevision: z.number().int().nonnegative().optional(), trigger: taskTriggerSchema.nullable().optional(), afterPrs: z.array(id).optional(), ...confirm }),
     toRpc: a => ({ workspaceId: a.workspaceId, obligationId: a.obligationId, expectedRevision: a.expectedRevision, trigger: a.trigger ?? null, afterPrs: a.afterPrs ?? [] }) },
+  // Linked items: the list sheet (read, Add link, remove, Undo) for any workspace
+  { name: "link_items", rpc: "follow.linked-items", kind: "read", input: z.strictObject({ workspaceId: id }) },
+  { name: "set_linked_items", rpc: "follow.set-linked-items", kind: "planned", before: { rpc: "follow.linked-items", input: a => ({ workspaceId: a.workspaceId }) },
+    input: z.strictObject({ workspaceId: id.optional(), action: z.enum(["add", "remove", "undo"]).optional(), ref: z.string().trim().min(1).max(2000).optional(), title: z.string().trim().max(200).optional(), ...confirm }) },
   // PR sheet: what the merge controls see (Send to Paseo, Graphite in Chrome)
   { name: "pr_controls", rpc: "follow.pr-control-status", kind: "read", input: z.strictObject({ workspaceId: id, prKey: z.string().trim().regex(/^[\w.-]+\/[\w.-]+#\d+$/) }) },
   { name: "browser_status", rpc: "follow.browser-status", kind: "read", input: none },
