@@ -47,46 +47,62 @@ export const hasToastHost = () => hosts.length > 0;
 /** Test seam: the store's current toasts. */
 export const toastsNow = () => items;
 
-/**
- * A quick action: the caller closes its dialog or card first, then this runs the work in the background and reports
- * the outcome as a toast. Failure keeps a Retry (the same action again) and, when given, an Open that brings the
- * card back with what the developer entered. Without a mounted ToastHost the host toast says it instead.
- */
-export function runAction<T>({ label, run, success, failure, open, toast }: {
+type Done = { tone?: ToastTone; message: string } | string | null;
+export type ActionSpec<T> = {
+  /** What runs ("Later", "Send repairs"): the failure toast's default subject. */
   label: string;
   run: () => Promise<T>;
-  success: (result: T) => { tone?: ToastTone; message: string } | null;
-  /** The error toast's text, e.g. "Answer to Q24 not sent". The reason follows it. */
-  failure: string;
-  /** Reopens the card with the developer's input. */
+  /** The success toast, or null for none (a card or Undo bar that already says it). Throwing here counts as a failure. */
+  success: Done | ((result: T) => Done);
+  /** The failure toast's text, e.g. "Answer to Q24 not sent"; the reason follows it. Defaults to "<label> didn't work". */
+  failure?: string | ((error: unknown) => string);
+  /** The error toast's Open: brings the card back with what the developer entered. */
   open?: () => void;
-  /** The host toast, from `useToast()` in the component that started the action. */
+  /** Called after a failure so the developer can try again where they were (reopen the menu or card). */
+  reopen?: () => void;
+  /** The host toast, from `useToast()` where the action started; otherwise the one a surface bound (bindToast). */
   toast?: ToastApi;
   /** Runs after a failure, before the toast: keep the input, mark the card. */
   onError?: (error: unknown) => void;
   onSuccess?: (result: T) => void;
-}): Promise<void>;
-export async function runAction<T>(opts: {
-  label: string; run: () => Promise<T>; success: (result: T) => { tone?: ToastTone; message: string } | null; failure: string;
-  open?: () => void; toast?: ToastApi; onError?: (error: unknown) => void; onSuccess?: (result: T) => void;
-}): Promise<void> {
-  const { run, success, failure, open, toast, onError, onSuccess } = opts;
+};
+
+let boundToast: ToastApi | null = null;
+/** The host toast for callers that can't pass one (the row menu), bound once by a mounted surface. */
+export function bindToast(api: ToastApi | null): void { boundToast = api; }
+const inflight = new Set<string>();
+
+/**
+ * A quick action: the caller closes its dialog, menu or card first, then this runs the work in the background and
+ * reports the outcome as a toast. Failure keeps a Retry (the same action again) and, when given, an Open that brings
+ * the card back with what the developer entered. Without a mounted ToastHost the host toast says it instead.
+ * With a `key`, a second identical action while one runs is dropped. Resolves true on success.
+ */
+export async function runAction<T>(opts: ActionSpec<T>, key?: string): Promise<boolean> {
+  if (key !== undefined) { if (inflight.has(key)) return false; inflight.add(key); }
+  const toast = opts.toast ?? boundToast ?? undefined;
   try {
-    const result = await run();
-    onSuccess?.(result);
-    const done = success(result);
-    if (!done) return;
-    if (hasToastHost()) pushToast(done.tone ?? "success", done.message);
-    else toast?.show(done.message, { variant: done.tone ?? "success" });
+    const result = await opts.run();
+    const raw = typeof opts.success === "function" ? opts.success(result) : opts.success;
+    opts.onSuccess?.(result);
+    const done = typeof raw === "string" ? { message: raw } : raw;
+    if (done) {
+      if (hasToastHost()) pushToast(done.tone ?? "success", done.message);
+      else toast?.show(done.message, { variant: done.tone ?? "success" });
+    }
+    return true;
   } catch (error) {
-    onError?.(error);
+    opts.onError?.(error);
+    const failure = typeof opts.failure === "function" ? opts.failure(error) : opts.failure ?? `${opts.label} didn't work`;
     const reason = errorText(error);
     if (hasToastHost()) {
-      const actions: ToastAction[] = [{ label: "Retry", onPress: () => void runAction(opts) }];
-      if (open) actions.push({ label: "Open", onPress: open });
+      const actions: ToastAction[] = [{ label: "Retry", onPress: () => void runAction(opts, key) }];
+      if (opts.open) actions.push({ label: "Open", onPress: opts.open });
       pushToast("error", `${failure}. ${reason}`, actions);
-    } else toast?.error(`${failure}. ${open ? "Retry from Needs you." : reason}`);
-  }
+    } else toast?.error(`${failure}. ${opts.open ? "Retry from Needs you." : reason}`);
+    opts.reopen?.();
+    return false;
+  } finally { if (key !== undefined) inflight.delete(key); }
 }
 
 // ---------- Open: a toast's way back to the question it is about ----------
