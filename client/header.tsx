@@ -61,7 +61,6 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
   const pad = compact ? 16 : 12;
   const controls = <View style={{ flexDirection: "row", alignItems: "center", gap: 2, marginVertical: compact ? -12 : -4, marginRight: compact ? -10 : -4 }}>
     {!!w.spec?.url && <View style={{ marginRight: 4 }}><SpecChip workspace={w} theme={theme} compact={compact} /></View>}
-    <VersionMark theme={theme} touch={compact} openSettings={onSettings} />
     {resize && <IconButton icon={resize.icon} label={resize.label} onPress={resize.onPress} theme={theme} compact={compact} />}
     <IconButton icon="Settings" label="Follow-up settings" onPress={onSettings} theme={theme} compact={compact} />
   </View>;
@@ -89,6 +88,8 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
         so the Summary (or the goal, until there is one) is the first line under it. */}
     <View style={{ flexDirection: "row", alignItems: "center", minHeight: 44, marginLeft: -14 }}>
       <Button theme={theme} compact kind="ghost" icon="House" title="Home" accessibilityHint="Opens Follow-up Home with every workspace" onPress={onHome} />
+      {/* The version sits with Home, as on Home's own title line, not beside the cog. */}
+      <VersionMark theme={theme} touch openSettings={onSettings} />
       <View style={{ flex: 1 }} />
       <View style={{ marginVertical: 12 }}>{controls}</View>
     </View>
