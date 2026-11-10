@@ -645,3 +645,32 @@ test("2026-11-10 stale error: a new turn supersedes a card that only reported th
   assert.equal(briefStep(asked, { type: "turn_start" }, at(5)).brief?.state, "open");
   assert.equal(briefStep(open("brief:t11", { kind: "decision" }), { type: "turn_start" }, at(5)).brief?.state, "open", "a decision waits for the developer");
 });
+
+// only-developer-acts-as-developer: an agent answering another agent's card (brief_action, agent parity) acts for the
+// developer but is not the developer. The ledger records the agent, the message names it, the flag stays, and the
+// classifier never reads the answer as the developer's.
+test("an agent's brief answer is recorded as that agent, never the developer, and doesn't clear the flag", async () => {
+  const s = await service([agent({ id: "main" })], { calls: { main: { at: Date.parse(at(1)), turnId: "t1", call: decision } } });
+  await s.inbox.turnEnded(main, { kind: "completed" }, "t1");
+  const id = (await s.entry()).brief!.id;
+  const sent: { text: string; messageId: string }[] = [];
+  const actor = { kind: "agent" as const, agentId: "helper-1", title: "Release captain" };
+  await (s.inbox.briefAction as (...a: unknown[]) => Promise<unknown>)("main", { briefId: id, decisionId: "D1", choice: "A" }, async (text: string, messageId: string) => { sent.push({ text, messageId }); }, actor);
+  const ledger = (await s.inbox.store.snapshot()).ledger;
+  assert.deepEqual(ledger.filter(l => l.messageId === sent[0].messageId).map(l => l.by), ["agent:helper-1"], "the ledger names the agent");
+  assert.match(sent[0].text, /Answered by Release captain \(agent helper-1\) for the developer\./, "the message says who answered");
+  const sources: Sources = { ledger: async () => ledger, defer: async () => false, session: async () => false, schedule: async () => false };
+  assert.notEqual(await classify({ text: sent[0].text, messageId: sent[0].messageId }, "main", Date.parse(at(1)), sources), "tom");
+  s.inbox["o"].directory.tail = async () => [{ type: "user_message", text: sent[0].text, messageId: sent[0].messageId }];
+  await s.inbox.turnStarted(main, "t2");
+  assert.ok((await s.entry()).needs, "the flag stays: only the developer's own answer clears it");
+  await s.done();
+});
+test("an agent's inbox_act is recorded against each row it touched as that agent", async () => {
+  const s = await service([agent({ id: "main" })], { calls: { main: { at: Date.parse(at(1)), turnId: "t1", call: decision } } });
+  await s.inbox.turnEnded(main, { kind: "completed" }, "t1");
+  await (s.inbox.act as (...a: unknown[]) => Promise<unknown>)({ action: "mute_turn", agentIds: ["main"] }, { kind: "agent", agentId: "helper-1", title: "Release captain" });
+  const ledger = (await s.inbox.store.snapshot()).ledger;
+  assert.deepEqual(ledger.filter(l => l.agentId === "main" && l.action).map(l => [l.by, l.action]), [["agent:helper-1", "mute_turn"]]);
+  await s.done();
+});

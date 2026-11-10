@@ -1,3 +1,4 @@
+import { agentActor, onBehalfLine } from "./actor";
 // Questions agents ask the developer. The question modes, their rules and the
 // "big question" test are adapted from Progress (@stevecastaneda/paseo-progress,
 // MIT, © 2026 Steve Castaneda); see THIRD_PARTY_NOTICES.md.
@@ -54,6 +55,9 @@ export const answerSchema = z.object({
   words: z.string().trim().max(2000).optional(),
   at: z.string(),
   by: z.enum(["developer", "agent"]),
+  /** An agent answered another agent's question on the developer's behalf (answer_question): which one (shared/actor.ts). */
+  agentId: z.string().optional(),
+  agentTitle: z.string().nullable().optional(),
   delivery: z.object({
     state: z.enum(["sending", "sent", "queued", "unconfirmed", "copied", "recorded"]),
     to: z.string().nullable(),
@@ -138,6 +142,9 @@ export function answerMessage(q: Question, choice: string, words?: string): stri
     : `You were building ${q.recommend}. Undo the work built on it and build ${choice} first.`);
   else if (q.taskId) lines.push("Continue the blocked task with this decision and update the task when it moves.");
   else lines.push("Continue with this choice. The answer is already recorded, so you don't need to record it.");
+  // answer_question by another agent: the receiving agent and every reader know it wasn't the developer's click.
+  const byline = q.answer?.by === "agent" && q.answer.agentId ? onBehalfLine(agentActor(q.answer.agentId, q.answer.agentTitle)) : null;
+  if (byline) lines.push(byline);
   return lines.join("\n");
 }
 

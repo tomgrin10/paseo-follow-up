@@ -1,3 +1,4 @@
+import { DEVELOPER, type Actor } from "../shared/actor";
 import type { Workspace } from "../shared/model";
 import { MAX_ARTIFACTS, isClaudeArtifact, validSpecUrl, type Artifact } from "../shared/spec";
 
@@ -87,14 +88,17 @@ export function agentSetSpec(w: Workspace, agentId: string, url: string, title: 
 }
 
 /** The developer sets, removes, or hands the link back to agents and detection. */
-export function developerSetSpec(w: Workspace, input: { action: "set"; url: string; title?: string | null } | { action: "remove" } | { action: "reset" }, now: number): void {
+export function developerSetSpec(w: Workspace, input: { action: "set"; url: string; title?: string | null } | { action: "remove" } | { action: "reset" }, now: number, actor: Actor = DEVELOPER): void {
+  // set_workspace_spec by another agent is that agent's choice, not "Set by you".
+  const source = actor.kind === "agent" ? "agent" as const : "developer" as const;
+  const by = actor.kind === "agent" ? actor.agentId : null;
   const at = new Date(now).toISOString();
   if (input.action === "set") {
     const url = validSpecUrl(input.url);
     if (!url) throw new Error("Enter a full https:// link.");
-    w.spec = { url, title: input.title?.trim().slice(0, 120) || w.artifacts.find(a => a.url === url)?.title || null, source: "developer", by: null, at };
+    w.spec = { url, title: input.title?.trim().slice(0, 120) || w.artifacts.find(a => a.url === url)?.title || null, source, by, at };
   } else if (input.action === "remove") {
-    w.spec = { url: null, title: null, source: "developer", by: null, at };
+    w.spec = { url: null, title: null, source, by, at };
   } else {
     w.spec = null;
     chooseDetectedSpec(w, now);

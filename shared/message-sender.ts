@@ -1,3 +1,4 @@
+import { onBehalfOf } from "./actor";
 /**
  * Who wrote a user-role message, from its text alone. Pure and shared by every surface that reads a conversation.
  *
@@ -143,7 +144,7 @@ export function senderLabel(s: MessageSender): string | null {
       const who = s.title ?? "another agent";
       return s.event === "message" ? `From ${who}` : `${s.title ?? "A child agent"} ${{ finished: "finished", errored: "errored", "permission-required": "needs permission", closed: "closed" }[s.event]}`;
     }
-    case "follow-up": return s.what === "batch" ? "Follow-up batch" : s.what === "recovery" ? "Follow-up recovery" : s.what === "answer" ? "Follow-up answer" : null;
+    case "follow-up": return s.what === "batch" ? "Follow-up batch" : s.what === "recovery" ? "Follow-up recovery" : s.what === "answer" ? (onBehalfOf(s.text) ? `Answer from ${onBehalfOf(s.text)!.title}` : "Follow-up answer") : null;
     case "overseer-forward": return "You, via Overseer";
     case "system": return null;
   }

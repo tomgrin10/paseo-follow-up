@@ -89,9 +89,9 @@ const usePicks = (briefId: string) => useSyncExternalStore(pickStore.subscribe, 
  * One option. `send` answers on tap (a single-decision card); `select` marks it as this decision's pick (a card with
  * several decisions, sent together); `readonly` shows a past card, the chosen option marked and the rest dimmed.
  */
-function OptionRow({ option, recommended, sending, disabled, tight, open, onToggle, onPress, c, compact, mode = "send", selected = false, answered = false, other = false }: {
+function OptionRow({ option, recommended, sending, disabled, tight, open, onToggle, onPress, c, compact, mode = "send", selected = false, answered = false, other = false, answerLabel = "Your answer" }: {
   option: BriefDecision["options"][number]; recommended: boolean; sending: boolean; disabled: boolean; tight: boolean; open: boolean; onToggle: () => void; onPress: () => void; c: Colors; compact: boolean;
-  mode?: "send" | "select" | "readonly"; selected?: boolean; answered?: boolean; other?: boolean;
+  mode?: "send" | "select" | "readonly"; selected?: boolean; answered?: boolean; other?: boolean; answerLabel?: string;
 }) {
   const strong = withAlpha(c.foreground, isLight(c) ? 0.38 : 0.42);
   const showDetail = !!option.consequence && (!tight || open);
@@ -119,7 +119,7 @@ function OptionRow({ option, recommended, sending, disabled, tight, open, onTogg
         <View style={{ flexDirection: "row", alignItems: "center", columnGap: 8, flexWrap: "wrap" }}>
           <RichText linkColor={c.foreground} style={{ color: muted ? c.foregroundMuted : c.foreground, fontSize: 14, lineHeight: 20, fontWeight: muted ? "400" : "600" }}>{`${marked && !other ? `${option.letter} · ` : ""}${option.label}`}</RichText>
           {recommended && !readonly && <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontWeight: "600" }}>Recommended</Text>}
-          {readonly && selected && <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontWeight: "600" }}>Your answer</Text>}
+          {readonly && selected && <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontWeight: "600" }}>{answerLabel}</Text>}
           {sending && <Text accessibilityLiveRegion="polite" style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>Sending…</Text>}
         </View>
         {showDetail && <RichText linkColor={c.foreground} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>{option.consequence}</RichText>}
@@ -144,6 +144,8 @@ function BriefBody({ b, c, compact, tight, embedded, height, mode, picks, onPick
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [details, setDetails] = useState(false);
   const readonly = mode === "readonly";
+  // An agent's brief_action answered this card for the developer: say whose answer it is, never "Your answer".
+  const answerLabel = b.answeredBy?.startsWith("agent:") ? `${b.answeredByTitle ?? "An agent"}'s answer` : "Your answer";
   const extra = !!b.context || b.facts.length > 0 || b.links.length > 0;
   const showExtra = readonly || !tight || details || extrasFit(b, height);
   const numbered = b.decisions.length > 1;
@@ -151,12 +153,12 @@ function BriefBody({ b, c, compact, tight, embedded, height, mode, picks, onPick
     {b.decisions.map((d, i) => <View key={d.id} accessibilityRole={mode === "select" ? "radiogroup" : undefined} accessibilityLabel={mode === "select" ? d.question : undefined} style={{ gap: 8 }}>
       {(numbered || d.question.trim() !== b.ask.trim()) && <RichText style={{ color: c.foreground, fontSize: 14, lineHeight: 20, fontWeight: numbered ? "600" : "400" }}>{`${numbered ? `${i + 1}. ` : ""}${d.question}`}</RichText>}
       {d.options.length > 0 && <View style={{ gap: 6 }}>
-        {d.options.map(o => <OptionRow key={o.letter} option={o} recommended={d.recommend === o.letter} mode={mode} selected={readonly ? d.chosen === o.letter : picks[d.id] === o.letter} answered={readonly && !!d.chosen}
+        {d.options.map(o => <OptionRow key={o.letter} option={o} recommended={d.recommend === o.letter} mode={mode} answerLabel={answerLabel} selected={readonly ? d.chosen === o.letter : picks[d.id] === o.letter} answered={readonly && !!d.chosen}
           sending={busy === `${d.id}:${o.letter}`} disabled={!!busy} tight={tight && !readonly}
           open={!!open[`${d.id}:${o.letter}`]} onToggle={() => setOpen(v => ({ ...v, [`${d.id}:${o.letter}`]: !v[`${d.id}:${o.letter}`] }))}
           onPress={() => mode === "send" ? onSend?.(`${d.id}:${o.letter}`) : onPick(d.id, o.letter)} c={c} compact={compact} />)}
         {/* Built in after the agent's options on every decision: the developer's own answer. */}
-        {(!readonly || isOther(d.chosen)) && <OptionRow other option={{ letter: "", label: OTHER_LABEL, consequence: readonly ? `"${d.words ?? ""}"` : null }} recommended={false} mode={mode}
+        {(!readonly || isOther(d.chosen)) && <OptionRow other option={{ letter: "", label: OTHER_LABEL, consequence: readonly ? `"${d.words ?? ""}"` : null }} recommended={false} mode={mode} answerLabel={answerLabel}
           selected={readonly ? isOther(d.chosen) : isOther(picks[d.id])} answered={readonly && !!d.chosen} sending={busy === `${d.id}:${OTHER}`} disabled={!!busy} tight={false} open={false} onToggle={() => undefined}
           onPress={() => onPick(d.id, OTHER)} c={c} compact={compact} />}
         {!readonly && isOther(picks[d.id]) && <View style={{ gap: 8 }}>

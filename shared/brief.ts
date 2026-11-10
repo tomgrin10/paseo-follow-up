@@ -65,6 +65,10 @@ export const briefSchema = z.object({
   /** Collapsed states: "You picked A · Per-tenant buckets", "You replied", "Signed off", "The agent kept going". */
   outcome: z.string().nullable().default(null),
   outcomeAt: z.string().nullable().default(null),
+  /** Who answered the card (shared/actor.ts ledgerBy): "developer", or "agent:<id>" for an agent's brief_action. */
+  answeredBy: z.string().optional(),
+  /** The answering agent's title, for "Release captain's answer" on the collapsed card. */
+  answeredByTitle: z.string().nullable().optional(),
   /** For the card's PR moves: the tracked workspace, when there is one. */
   workspaceId: z.string().nullable().default(null),
 });
