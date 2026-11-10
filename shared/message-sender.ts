@@ -19,8 +19,12 @@ export type MessageSender =
   | { kind: "developer"; text: string }
   /** Another agent: its message, or a child's finish notification. `text` is the body with the envelope stripped. */
   | { kind: "agent"; event: AgentEvent; agentId: string; title: string | null; text: string }
-  /** Follow-up's own message: a repair batch, a recovery hand-off, or a decision answer (often the developer's click). */
-  | { kind: "follow-up"; what: "batch" | "recovery" | "answer"; text: string }
+  /**
+   * Follow-up's own message: a repair batch, a recovery hand-off, a decision answer (often the developer's click), or
+   * its provider hook's feedback (the Stop-hook bookkeeping continuation and the other hook texts). A hook message's
+   * `text` is the hook's words, unwrapped.
+   */
+  | { kind: "follow-up"; what: "batch" | "recovery" | "answer" | "hook"; text: string }
   /** The developer's words routed by the Overseer. `text` has the "From … via Overseer:" prefix stripped. */
   | { kind: "overseer-forward"; text: string }
   /** Paseo's own injected prompts (schedule fires, unknown kinds) and the provider harness's wrappers. */
@@ -37,6 +41,28 @@ const FOLLOW_UP: { prefix: RegExp; what: "batch" | "recovery" | "answer" }[] = [
   { prefix: /^Follow-through recovery\b/, what: "recovery" },
   { prefix: /^Follow-up answer\b/, what: "answer" },
 ];
+/**
+ * How every text Follow-up's provider hook (server/agent-hook.mjs) can feed back to an agent begins. A provider shows
+ * Stop-hook feedback to the agent as a user-role message: Claude Code as "Stop hook feedback:\n<reason>" (an isMeta
+ * line, which Paseo's timeline drops but the transcript keeps), Codex as `<hook_prompt hook_run_id="stop:…">…</hook_prompt>`.
+ * tests/message-sender.test.ts checks each prefix is still in the hook source.
+ */
+export const HOOK_TEXT_PREFIXES = [
+  "Silently complete this workspace's sidebar bookkeeping",
+  "Before you stop, call ",
+  "Follow-up was updated while this session was open",
+  "Do routine bookkeeping silently.",
+  "Maintain this tracked workspace's Follow-through sidebar",
+] as const;
+/** A provider's wrapper around hook feedback: Codex's `<hook_prompt …>` element or Claude Code's "Stop hook feedback:" line. */
+function hookBody(text: string): string | null {
+  const codex = /^<hook_prompt\b[^>]*>([\s\S]*?)<\/hook_prompt>\s*$/.exec(text);
+  if (codex) return codex[1].trim();
+  const claude = /^(?:Stop|PostToolUse|UserPromptSubmit|SessionStart) hook feedback:\s*\n?([\s\S]*)$/.exec(text);
+  return claude ? claude[1].trim() : null;
+}
+const isHookText = (text: string) => HOOK_TEXT_PREFIXES.some(p => text.startsWith(p));
+
 /** Harness text that is never typed: a message that opens with a tag and ends with one, or a known instruction header. */
 const HARNESS = /^(?:<([A-Za-z][\w-]*)\b[^>]*>[\s\S]*<\/[A-Za-z][\w-]*>\s*$|# AGENTS\.md instructions|<INSTRUCTIONS>|Caveat: The messages below)/;
 
@@ -85,6 +111,10 @@ export function messageSender(raw: string): MessageSender {
     if (kind === "user-message") return { kind: "developer", text: first.body };
     return { kind: "system", source: "paseo", text: first.body };
   }
+  // Hook feedback: Follow-up's own when its words are, otherwise another plugin's or the harness's.
+  const hook = hookBody(text);
+  if (hook !== null) return isHookText(hook) ? { kind: "follow-up", what: "hook", text: hook } : { kind: "system", source: "harness", text: hook };
+  if (isHookText(text)) return { kind: "follow-up", what: "hook", text };
   const forward = FORWARD_PREFIXES.find(p => text.startsWith(p));
   if (forward) return { kind: "overseer-forward", text: text.slice(forward.length).trim() };
   const own = FOLLOW_UP.find(f => f.prefix.test(text));
@@ -113,8 +143,29 @@ export function senderLabel(s: MessageSender): string | null {
       const who = s.title ?? "another agent";
       return s.event === "message" ? `From ${who}` : `${s.title ?? "A child agent"} ${{ finished: "finished", errored: "errored", "permission-required": "needs permission", closed: "closed" }[s.event]}`;
     }
-    case "follow-up": return s.what === "batch" ? "Follow-up batch" : s.what === "recovery" ? "Follow-up recovery" : "Follow-up answer";
+    case "follow-up": return s.what === "batch" ? "Follow-up batch" : s.what === "recovery" ? "Follow-up recovery" : s.what === "answer" ? "Follow-up answer" : null;
     case "overseer-forward": return "You, via Overseer";
     case "system": return null;
   }
+}
+
+/**
+ * The agent's work in a timeline, oldest first: Follow-up's hook feedback and everything the agent did in answer to it
+ * (the bookkeeping continuation: its sync calls and its "sidebar is synced" reply) are left out, up to the next prompt
+ * from anyone else. Summary inputs, the Finished reason and Recent steps read this, so Follow-up's own nudge is never
+ * mistaken for the agent's work. Pure; unknown items pass through.
+ */
+export function workItems<T>(items: readonly T[]): T[] {
+  const out: T[] = [];
+  let bookkeeping = false;
+  for (const item of items) {
+    const v = item as { type?: unknown; text?: unknown } | null;
+    if (v && v.type === "user_message" && typeof v.text === "string") {
+      const s = messageSender(v.text);
+      if (s.kind === "follow-up" && s.what === "hook") { bookkeeping = true; continue; }
+      if (s.kind !== "system") bookkeeping = false;
+    }
+    if (!bookkeeping) out.push(item);
+  }
+  return out;
 }

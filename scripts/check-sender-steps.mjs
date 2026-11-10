@@ -46,10 +46,12 @@ try {
   await client.sendMessage(agent.id, "Fixture: chat — fix the CSV export", { messageId: "fixture-chat" });
   for (let i = 0; i < 80; i++) {
     const history = await client.fetchAgentTimeline(agent.id, { projection: "canonical", limit: 100 });
-    if (history.entries.some(e => /Ship it after CI is green/.test(e.item.text ?? ""))) break;
+    if (history.entries.some(e => /sidebar sync is done/.test(e.item.text ?? ""))) break;
     if (i === 79) throw new Error(`the fixture turn was not recorded: ${JSON.stringify(history.entries.map(e => e.item)).slice(0, 1500)}`);
     await new Promise(r => setTimeout(r, 250));
   }
+  // Track it so Home lists it (the same call the demo seeder makes).
+  await client.invokePluginRpc("follow-through", "follow.enroll", { agentId: agent.id, goal: "Fix the CSV export" });
   const timeline = (await client.fetchAgentTimeline(agent.id, { projection: "canonical", limit: 100 })).entries.map(e => e.item);
   await fs.writeFile(join(out, "timeline.json"), JSON.stringify(timeline, null, 2));
   const { chromium } = createRequire(join(process.env.PLAYWRIGHT_CORE, "package.json"))("playwright-core");
@@ -62,7 +64,11 @@ try {
     await page.goto(`http://127.0.0.1:${port}/`);
     if (form === "phone") await page.getByRole("button", { name: /menu|sidebar/i }).first().click({ timeout: 5000 }).catch(() => {});
     await page.getByText(/^Follow-up$/).first().click({ timeout: 30000 }).catch(async error => { await page.screenshot({ path: join(out, `${form}-${scheme}-failed.png`) }); throw error; });
-    await page.getByText("Sender steps", { exact: false }).first().click({ timeout: 30000 }).catch(async error => { await page.screenshot({ path: join(out, `${form}-${scheme}-failed.png`) }); throw error; });
+    // Home lists the workspace; its row (not the sidebar's) opens the detail pane with Recent steps.
+    await page.getByText("Skip setup", { exact: true }).first().click({ timeout: 8000 }).catch(() => {});
+    await page.waitForTimeout(2500);
+    await page.screenshot({ path: join(out, `${form}-${scheme}-home.png`) });
+    await page.getByText("Sender steps", { exact: false }).last().click({ timeout: 30000 }).catch(async error => { await page.screenshot({ path: join(out, `${form}-${scheme}-failed.png`) }); throw error; });
     await page.getByText("From Release captain", { exact: true }).first().waitFor({ timeout: 30000 }).catch(async error => { await page.screenshot({ path: join(out, `${form}-${scheme}-failed.png`) }); throw error; });
     await page.waitForTimeout(800);
     await page.getByText("From Release captain", { exact: true }).first().scrollIntoViewIfNeeded();
@@ -70,14 +76,14 @@ try {
     await page.screenshot({ path: join(out, `${form}-${scheme}.png`) });
     const facts = await page.evaluate(() => {
       const leaves = [...document.querySelectorAll("body *")].filter(n => n.children.length === 0).map(n => n.textContent ?? "");
-      return { raw: document.body.innerText.includes("<paseo-system"), you: leaves.filter(t => t === "You").length, labels: leaves.filter(t => /^(From |You, via|Follow-up (batch|answer)|.+ finished$)/.test(t)), overflow: document.documentElement.scrollWidth > innerWidth };
+      return { raw: document.body.innerText.includes("<paseo-system"), bookkeeping: /sidebar sync is done|sidebar bookkeeping/.test(document.body.innerText), you: leaves.filter(t => t === "You").length, labels: leaves.filter(t => /^(From |You, via|Follow-up (batch|answer)|.+ finished$)/.test(t)), overflow: document.documentElement.scrollWidth > innerWidth };
     });
     report.push({ form, scheme, ...facts, errors });
     await context.close(); context = null;
   }
   await browser.close();
   console.log(JSON.stringify({ out, report }, null, 2));
-  for (const r of report) { assert.equal(r.raw, false, `${r.form} ${r.scheme}: a raw envelope is on screen`); assert.equal(r.overflow, false, `${r.form} ${r.scheme}: horizontal overflow`); }
+  for (const r of report) { assert.equal(r.raw, false, `${r.form} ${r.scheme}: a raw envelope is on screen`); assert.equal(r.bookkeeping, false, `${r.form} ${r.scheme}: Follow-up's hook text or the bookkeeping reply is on screen`); assert.equal(r.overflow, false, `${r.form} ${r.scheme}: horizontal overflow`); }
 } finally {
   await context?.close().catch(() => {}); await client?.close().catch(() => {});
   if (daemon && daemon.exitCode === null) { daemon.kill("SIGTERM"); await new Promise(r => setTimeout(r, 1500)); if (daemon.exitCode === null) daemon.kill("SIGKILL"); }
@@ -100,5 +106,9 @@ function senderTurn() {
     user("From the developer via Overseer: also keep the header row on every page"),
     user("Follow-up answer D1 (Which encoding?): B — UTF-8 with BOM\nContinue with this choice."),
     user("Looks good. Ship it after CI is green."),
+    // Follow-up's Stop-hook nudge (Codex form) and the agent's bookkeeping reply: neither is a step.
+    user('<hook_prompt hook_run_id="stop:9:/fixture/.codex/hooks.json">Silently complete this workspace\'s sidebar bookkeeping before finishing. This is metadata bookkeeping only; do not start queued repairs or recovery.</hook_prompt>'),
+    { type: "tool_call", callId: id(), name: "mcp__paseo__follow_sync_workspace", status: "completed", error: null, detail: { type: "unknown", input: {} } },
+    say("The sidebar sync is done. The background check finished earlier and reported FINISHED."),
   ].map(item => ({ id: id(), ...item }));
 }

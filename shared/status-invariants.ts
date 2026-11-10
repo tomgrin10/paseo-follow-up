@@ -1,3 +1,4 @@
+import { HOOK_TEXT_PREFIXES } from "./message-sender";
 import type { Workspace } from "./model";
 import { duplicateOpenQuestions } from "./questions";
 import { shouldReopen, type Brief } from "./brief";
@@ -47,4 +48,14 @@ export function briefViolations(current: Pick<Brief, "id" | "state" | "outcome" 
  */
 export function senderViolations(texts: readonly string[]): { id: string; detail: string }[] {
   return texts.filter(t => typeof t === "string" && t.includes("<paseo-system")).map(t => ({ id: "no-raw-paseo-envelope", detail: t.slice(0, 80) }));
+}
+
+/**
+ * `no-follow-up-text-as-work`: Summary inputs, the Finished reason and Recent steps never carry Follow-up's own words as
+ * the agent's or the developer's work: its hook feedback (the Stop-hook bookkeeping nudge and the other hook texts),
+ * batch headers or recovery prompts. A Recent-steps row labelled as Follow-up's own is exempt (pass only unlabelled text).
+ */
+export function followUpTextViolations(texts: readonly (string | null | undefined)[]): { id: string; detail: string }[] {
+  const own = (t: string) => HOOK_TEXT_PREFIXES.some(p => t.includes(p)) || /(?:^|\n|: )(?:Workspace follow-through batch|Follow-through batch|Follow-through recovery) /.test(t);
+  return texts.filter((t): t is string => typeof t === "string" && own(t)).map(t => ({ id: "no-follow-up-text-as-work", detail: t.slice(0, 80) }));
 }

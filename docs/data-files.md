@@ -19,7 +19,7 @@ Everything lives in `$PASEO_HOME/plugin-data/follow-through/`.
 | `background-agents.json` | `server/background-agents.ts` | Paseo 0.16 background agents (other plugins' helpers) Follow-up has seen, newest 2,000, so the hook skips them. Written when one is found. |
 | `mcp.mjs` | `index.server.ts` | The stdio bridge and CLI, written from `server/mcp-source.ts` at start. |
 | `agent-hook.mjs`, `hooks-enabled.json` | `server/agent-hooks.ts` | The provider hook script, and its lease (expires 120 s after the last heartbeat). |
-| `hook-state/` | hook, worker | Per-session turn markers. `sync-<agent>.json` (the last sync), `needs-you-<agent>.json` (the last `needs_you` call), `native-<agent>.json` (which worker attached native tools), `overseer-seen-<agent>.json`. |
+| `hook-state/` | hook, worker | Per-session turn markers. `sync-<agent>.json` (the last sync), `needs-you-<agent>.json` (the last `needs_you` call), `native-<agent>.json` (which worker attached native tools), `overseer-seen-<agent>.json`, `bookkeeping-<agent>.json` (the reply a Stop-hook bookkeeping continuation interrupted, which the Finished reason reports instead of the bookkeeping reply). |
 | `tools-instance.json` | `index.server.ts` | This worker's instance id, to detect detached native tools. |
 | `brief.json` | `index.server.ts` | Whether the inbox and the nudge are on, plus agents with a permission prompt showing. Read by the hook and the bridge. |
 | `inbox.json` | `server/inbox.ts` | One Needs-you flag per root agent, snoozes, finish flags, briefs, and the delivery ledger (`by: "agent:<id>"` for agent actions). |

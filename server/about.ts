@@ -9,7 +9,7 @@ import {
   type AboutLink, type AboutRecord, type AboutView, type SummaryOutput,
 } from "../shared/about";
 import type { Workspace } from "../shared/model";
-import { messageSender, senderLabel } from "../shared/message-sender";
+import { messageSender, senderLabel, workItems } from "../shared/message-sender";
 import type { AiJobs } from "./ai-jobs";
 import { isLoaded, type LoadSignals } from "../shared/agent-load";
 
@@ -120,7 +120,8 @@ const clip = (s: string, n: number) => { const t = s.replace(/\s+/g, " ").trim()
 
 export function tailLines(items: readonly unknown[]): { lines: string[]; users: string[]; raw: string[] } {
   const lines: string[] = [], users: string[] = [], raw: string[] = [];
-  for (const item of items) {
+  // Follow-up's hook feedback and the agent's bookkeeping reply to it never reach the Summary model.
+  for (const item of workItems(items)) {
     if (!item || typeof item !== "object") continue;
     const v = item as TimelineItem;
     if (v.type === "reasoning" || v.type === "plugin") continue;

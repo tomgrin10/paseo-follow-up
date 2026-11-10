@@ -1,2 +1,3 @@
 - Recent steps no longer shows another agent's message as yours: it reads "From <agent>" (or "<agent> finished"), and Follow-up's batches, answers and Overseer forwards are labelled, never in Paseo's raw wrapper.
 - Another agent's message, a finish notification or a schedule never clears a Needs-you flag and never approves a new workspace for the Overseer.
+- Finished reasons, Summaries and Recent steps no longer report Follow-up's own end-of-turn bookkeeping ("The sidebar sync is done") as the agent's work.
