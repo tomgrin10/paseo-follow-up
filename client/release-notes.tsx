@@ -169,7 +169,7 @@ export function VersionLine({ theme, compact, onOpen }: { theme: Theme; compact:
   const recent = recentUpdate(view, now);
   const ago = recent ? Math.round((now - view.updatedAt!) / 3_600_000) : 0;
   const label = recent ? `Updated to ${view.version} ${ago < 1 ? "just now" : ago < 48 ? `${ago}h ago` : `${Math.round(ago / 24)} days ago`}` : `Follow-up ${view.version}`;
-  return <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: compact ? 16 : 20, paddingTop: 12, paddingBottom: compact ? 0 : 48 }}>
+  return <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 16, paddingTop: 12, paddingBottom: compact ? 0 : 48 }}>
     <Text style={t.small}>{label}</Text>
     <Text style={t.small}>·</Text>
     <Pressable accessibilityRole="link" hitSlop={compact ? 14 : 6} onPress={() => onOpen(!recent)}>
