@@ -52,14 +52,6 @@ test("Set up Follow-up again leads General, the first Settings category and the 
   assert.match(client, /resume \? Promise\.resolve\(\) : client\.rpc\(setOnboardingRpc, \{ action: "restart" \}\)/);
 });
 
-test("General's line in the phone list names the version and where setup stands", async () => {
-  const { generalSummary } = await import("../shared/onboarding");
-  assert.equal(generalSummary("1.4.0", "done"), "Follow-up 1.4.0 · setup finished");
-  assert.equal(generalSummary("1.4.0", "skipped"), "Follow-up 1.4.0 · setup skipped");
-  assert.equal(generalSummary(null, "active"), "Setup in progress");
-  assert.equal(generalSummary(undefined, undefined), null);
-});
-
 test("the agent tool for setup names Set up Follow-up again, so agents can do what the button does", async () => {
   const mcp = await readFile(resolve("server/mcp.mjs"), "utf8");
   const line = mcp.split("\n").find(l => l.includes('["set_onboarding"'))!;

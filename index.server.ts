@@ -66,7 +66,9 @@ import type { LoadSignals } from "./shared/agent-load";
 import { OnboardingStore, ReadinessChecks, nativeAgentCount } from "./server/onboarding";
 import { execFile } from "node:child_process";
 import { compactHeap } from "./server/memory";
+import { UpdatesStore, settingsOf } from "./server/updates";
 import { VersionsStore, demoOverride, describeSelf, readPackage, type SelfInstall } from "./server/release-notes";
+import { updatesViewSchema, type UpdatesView } from "./shared/updates";
 import { releaseNotesViewSchema, type ReleaseNote, type ReleaseNotesView } from "./shared/changelog";
 import { BRIEF_KIND, BRIEF_VERSION, prState, validateNeedsYou, type Brief, type NeedsYouRecord } from "./shared/brief";
 
@@ -717,8 +719,9 @@ export default function contribute(server: PluginServerContext) {
     const cat = catalog ? await providerCatalog.read(fresh) : null;
     return { roles: Object.values(roles).map(r => ({ ...r, summary: roleSummary(r, labelsFor(r, cat)) })), invalid, catalog: cat, wait: await currentWait() };
   };
-  // What's new. Follow-up's own install comes from Paseo's plugin list, read once per worker.
+  // What's new and Settings → Updates. Follow-up's own install comes from Paseo's plugin list, read once per worker.
   const versions = new VersionsStore(directory);
+  const updatesStore = new UpdatesStore(directory);
   let self: Promise<SelfInstall & { notes: ReleaseNote[] }> | null = null;
   const selfInstall = () => self ??= withDaemon(async c => describeSelf(await c.listPlugins?.() ?? [])).then(async row => {
     const pkg = row.path ? await readPackage(row.path) : { version: null, notes: [] };
@@ -737,6 +740,24 @@ export default function contribute(server: PluginServerContext) {
   };
   handle(rpc.releaseNotesRpc, async () => releaseNotesView());
   handle(rpc.whatsNewSeenRpc, async ({ version }) => { await versions.seen(version); return releaseNotesView(); });
+  const updatesView = async (): Promise<UpdatesView> => {
+    const me = await selfInstall(); const file = await updatesStore.read(); const { mode, channel } = settingsOf(file, me.version);
+    const view: UpdatesView = { version: me.version, installKind: me.installKind, mode, channel, channels: { stable: null, beta: null }, checkedAt: null, nextCheckAt: null, registryError: null,
+      phase: { kind: "current" }, pendingNotes: [], history: [], notice: null };
+    return demoOverride(directory, "updates", updatesViewSchema, view);
+  };
+  handle(rpc.updatesRpc, async () => updatesView());
+  handle(rpc.setUpdatesRpc, async ({ mode, channel }) => {
+    const file = await updatesStore.read();
+    await updatesStore.write({ ...file, ...(mode ? { mode } : {}), ...(channel ? { channel } : {}) });
+    return updatesView();
+  });
+  handle(rpc.installUpdateRpc, async () => updatesView());
+  handle(rpc.dismissUpdateNoticeRpc, async ({ id }) => {
+    const file = await updatesStore.read();
+    await updatesStore.write({ ...file, dismissed: [...new Set([...(file.dismissed ?? []), id])].slice(-50) });
+    return updatesView();
+  });
   handle(rpc.agentSettingsRpc, async ({ catalog, fresh }, { paseo }) => { await requireReady(); seen(paseo); return agentSettingsView(!!catalog, !!fresh); });
   handle(rpc.setAgentSettingRpc, async ({ role, entry }, { paseo }) => { await requireReady(); seen(paseo); await agentSettings.save(role, entry); return agentSettingsView(true); });
   handle(rpc.setWaitRpc, async ({ enable_wait }, { paseo }) => { await requireReady(); seen(paseo); await agentSettings.setWait(enable_wait); return agentSettingsView(true); });

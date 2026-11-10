@@ -101,14 +101,6 @@ export function setupEntry(view: Pick<OnboardingView, "status" | "step"> | null 
   }
 }
 
-/** General's line in the phone's Settings list: "Follow-up 1.4.0 · setup finished". */
-export function generalSummary(version: string | null | undefined, status: OnboardingView["status"] | null | undefined): string | null {
-  const setup = status === "done" ? "setup finished" : status === "skipped" ? "setup skipped" : status === "new" || status === "active" ? "setup in progress" : status === "idle" ? "setup not run" : null;
-  const parts = [version ? `Follow-up ${version}` : null, setup].filter(Boolean);
-  const line = parts.join(" · ");
-  return line ? line.charAt(0).toUpperCase() + line.slice(1) : null;
-}
-
 export function onboardingView(file: OnboardingFile, now: number): OnboardingView {
   return { install: file.install, status: file.status, step: file.step ?? "intro", show: file.status === "new" || file.status === "active", offer: offerVisible(file, now), holdsAutoSends: holdsAutoSends(file) };
 }
