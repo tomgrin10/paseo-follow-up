@@ -222,3 +222,16 @@ test("the question card shows Not sent · Retry and the pill skips an answer on 
   assert.match(source, /accessibilityLabel=\{`Retry sending your \$\{q\.id\} answer`\}/);
   assert.match(source, /isOpen\(q\) && !\(pending\[pendingKey\(w\.id, q\.id\)\] && !pending\[pendingKey\(w\.id, q\.id\)\]\.error\)/);
 });
+
+// Harness (2026-11-10): the Needs-you row read "No question Q999 in this workspace.. Open it to retry". Reasons arrive as
+// full sentences (or not), so a reason followed by more text goes through sentence(), never a bare `${reason}.`.
+test("a failure reason followed by more text ends in exactly one stop", async () => {
+  const { sentence } = await import("../shared/errors");
+  assert.equal(sentence("No question Q999 in this workspace."), "No question Q999 in this workspace.");
+  assert.equal(sentence("Daemon offline"), "Daemon offline.");
+  assert.equal(sentence("Is it running?  "), "Is it running?");
+  for (const dir of ["client", "shared"]) for (const f of (await readdir(join(import.meta.dirname, "..", dir))).filter(f => /\.tsx?$/.test(f))) {
+    const text = await readFile(join(import.meta.dirname, "..", dir, f), "utf8");
+    for (const m of text.matchAll(/\$\{([^}]*)\}\.\s/g)) assert.doesNotMatch(m[1], /error|reason/i, `${dir}/${f}: \${${m[1]}}. can double the stop; use sentence()`);
+  }
+});
