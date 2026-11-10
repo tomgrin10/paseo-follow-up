@@ -27,7 +27,7 @@ test("Home's detail pane drops its headline when a Needs-you row already says it
 test("phones: a Home row opens its own screen, so the host's back is the only back control", async () => {
   const home = await source("client/home.tsx");
   const index = await source("index.client.tsx");
-  assert.match(index, /openItem = \(key: string\) => client\.openScreen\(\{ screenId: OVERVIEW, params: \{ item: key \} \}\)/);
+  assert.match(index, /openItem = \(key: string(, extra: \{ question\?: string \} = \{\})?\) => client\.openScreen\(\{ screenId: OVERVIEW, params: \{ item: key[ ,}]/);
   assert.match(home, /const route = compact && deps\.openItem \? deps\.openItem : null;/);
   // Our chevron only exists where Home swaps panes in place (no route), never beside the host's ←.
   for (const m of home.matchAll(/onBack=\{([^}]*)\}/g)) assert.match(m[1], /compact && !route \?/, m[0]);

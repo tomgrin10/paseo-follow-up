@@ -7,7 +7,7 @@ import { rowTitle, sectionOf, type InboxRow } from "./inbox";
 import { completionCheck, settled, summary, type Pr, type Workspace } from "./model";
 import { isOpen as questionOpen } from "./questions";
 import { taskSchedule } from "./task-trigger";
-import { freshPriorities, type Priority, type PrioritySourceKind } from "./priorities";
+import { freshPriorities, priorityRow, type Priority, type PrioritySourceKind } from "./priorities";
 import { DEFAULT_SORT, sortItems, type SortMode } from "./sort";
 
 /**
@@ -228,9 +228,13 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
   for (const r of rows) { bump(r.workspaceId, r.lastActivityAt); bump(`agent:${r.agentId}`, r.lastActivityAt); }
   for (const p of paseo.values()) bump(p.id, p.activityAt);
   for (const w of tracked.values()) bump(w.id, w.updatedAt);
+  // A priority is per workspace, its reason about one row: only that row shows it (`row-lines-own-row`).
+  const rowsOf = new Map<string, Workstream[]>();
+  for (const s of out) if (s.workspaceId) rowsOf.set(s.workspaceId, [...rowsOf.get(s.workspaceId) ?? [], s]);
+  const owner = new Map([...fresh.byWorkspace].map(([id, p]) => [id, priorityRow(p, rowsOf.get(id) ?? [], tracked.get(id)?.mainAgentId ?? null)]));
   const finished: Workstream[] = out.map(s => {
     const w = s.workspaceId ? tracked.get(s.workspaceId) : undefined;
-    const p = s.workspaceId ? fresh.byWorkspace.get(s.workspaceId) : undefined;
+    const p = s.workspaceId && owner.get(s.workspaceId) === s.key ? fresh.byWorkspace.get(s.workspaceId) : undefined;
     const activityAt = [s.at, lastActivity.get(s.key) ?? null, s.workspaceId ? lastActivity.get(s.workspaceId) ?? null : null].filter((x): x is string => !!x).sort().at(-1) ?? null;
     const urgent = !!w?.questions.some(q => questionOpen(q) && !!q.big);
     const due = w ? followUpObligations(w).filter(o => !["done", "waived"].includes(o.status)).map(o => taskSchedule(o, w, now).dueAt).filter((x): x is string => !!x).sort()[0] ?? null : null;
