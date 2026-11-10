@@ -1,3 +1,4 @@
+import type { Actor } from "./actor";
 import { HOOK_TEXT_PREFIXES } from "./message-sender";
 import type { Workspace } from "./model";
 import { duplicateOpenQuestions } from "./questions";
@@ -186,4 +187,13 @@ export function holdViolations(w: Pick<Workspace, "id" | "hold" | "interruption"
   const stop = w.interruption;
   if (!stop || stop.kind !== "failed" || !automaticHold(w) || !mainTurnId || mainTurnId === stop.turnId || (stop.agentId && stop.agentId !== w.mainAgentId)) return [];
   return [{ id: "automatic-hold-is-not-stale", detail: `${w.id} holds for failed turn ${stop.turnId ?? "?"} while the main agent is on turn ${mainTurnId}` }];
+}
+
+/**
+ * `only-developer-acts-as-developer`, the action half of `only-developer-is-developer` (shared/actor.ts): an action an
+ * agent took on the developer's behalf (brief_action, inbox_act, answer_question, the spec link, linked items) is never
+ * recorded as the developer's. Pass each path's actor and the `by` it recorded.
+ */
+export function actorViolations(rows: readonly { path: string; actor: Actor; recorded: string | null | undefined }[]): { id: string; detail: string }[] {
+  return rows.filter(r => r.actor.kind === "agent" && (!r.recorded || r.recorded === "developer")).map(r => ({ id: "only-developer-acts-as-developer", detail: `${r.path} by agent ${r.actor.kind === "agent" ? r.actor.agentId : ""} recorded as ${r.recorded ?? "nobody"}` }));
 }

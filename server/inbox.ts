@@ -1,3 +1,4 @@
+import { DEVELOPER, ledgerBy, onBehalfLine, type Actor } from "../shared/actor";
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -420,7 +421,7 @@ export class Inbox {
   }
 
   /** Written before Follow-up sends, so the classifier recognises its own messages. */
-  async noteDelivery(agentId: string, messageId: string | null, by?: "developer"): Promise<void> {
+  async noteDelivery(agentId: string, messageId: string | null, by?: "developer" | `agent:${string}`): Promise<void> {
     const at = this.iso();
     await this.store.mutate(state => { state.ledger = [...state.ledger.filter(l => this.now() - Date.parse(l.at) < 3_600_000), { agentId, messageId, at, ...(by ? { by } : {}) }].slice(-200); });
   }
@@ -435,7 +436,7 @@ export class Inbox {
    * The developer clicked an option or a move on the brief. Validated against the stored brief (a stale card is refused),
    * logged in the ledger as the developer's (so the classifier clears the flag, #11), then sent, then collapsed.
    */
-  async briefAction(agentId: string, input: { briefId: string; decisionId?: string; choice?: string; words?: string; choices?: { decisionId: string; choice: string; words?: string }[]; move?: "retry" }, send: (text: string, messageId: string) => Promise<void>): Promise<Brief> {
+  async briefAction(agentId: string, input: { briefId: string; decisionId?: string; choice?: string; words?: string; choices?: { decisionId: string; choice: string; words?: string }[]; move?: "retry" }, send: (text: string, messageId: string) => Promise<void>, actor: Actor = DEVELOPER): Promise<Brief> {
     const state = await this.store.snapshot();
     const b = state.entries[agentId]?.brief;
     if (!b || b.id !== input.briefId) throw new Error("This brief was replaced by a newer one. Read the newest card.");
@@ -464,11 +465,24 @@ export class Inbox {
       event = { type: "option", decisionId: d.id, choice: input.choice, ...(isOther(input.choice) ? { words: input.words!.trim() } : {}) };
     }
     const messageId = randomUUID();
-    await this.noteDelivery(agentId, messageId, "developer");
+    // The developer's click counts as their message (F6); another agent's brief_action is that agent's, never theirs.
+    const byline = onBehalfLine(actor);
+    if (byline) text = `${text}\n${byline}`;
+    await this.noteDelivery(agentId, messageId, ledgerBy(actor));
     await send(text, messageId);
     const appends: { agentId: string; brief: Brief }[] = [];
     const at = this.iso();
-    const result = await this.store.mutate(s => { if (s.entries[agentId]?.brief?.id === b.id) this.step(s, agentId, event, at, appends); return s.entries[agentId]?.brief ?? b; });
+    const result = await this.store.mutate(s => {
+      if (s.entries[agentId]?.brief?.id === b.id) this.step(s, agentId, event, at, appends);
+      const brief = s.entries[agentId]?.brief;
+      if (brief?.id === b.id && brief.state !== "open") {
+        brief.answeredBy = ledgerBy(actor);
+        if (actor.kind === "agent") brief.answeredByTitle = actor.title;
+        if (actor.kind === "agent" && brief.outcome) brief.outcome = brief.outcome.replace(/^You /, `${actor.title ?? "Another agent"} `);
+        for (const a of appends) if (a.brief.id === b.id) { a.brief.answeredBy = brief.answeredBy; a.brief.answeredByTitle = brief.answeredByTitle; a.brief.outcome = brief.outcome; }
+      }
+      return s.entries[agentId]?.brief ?? b;
+    });
     await this.flush(appends);
     return result;
   }
@@ -598,7 +612,9 @@ export class Inbox {
     }
   }
 
-  async act(input: InboxAction): Promise<{ results: { agentId: string; ok: boolean; cameBack: boolean }[] }> {
+  async act(input: InboxAction, actor: Actor = DEVELOPER): Promise<{ results: { agentId: string; ok: boolean; cameBack: boolean }[] }> {
+    // An agent's inbox_act is recorded against every row it touched as that agent (agent parity), never the developer.
+    if (actor.kind === "agent") for (const id of input.agentIds ?? []) await this.noteAction(ledgerBy(actor), id, input.action).catch(() => undefined);
     const at = this.iso(); const now = this.now();
     const results: { agentId: string; ok: boolean; cameBack: boolean }[] = [];
     const cleared: string[] = [];
