@@ -91,3 +91,11 @@ test("release_notes is a read-only agent tool for follow.release-notes; closing 
   assert.deepEqual(PARITY["follow.release-notes"], { tools: ["release_notes"] });
   assert.ok("exempt" in PARITY["follow.whats-new-seen"]!);
 });
+
+test("ago: minutes under an hour, hours under two days, then days", async () => {
+  const { agoText } = await import("../shared/changelog");
+  assert.equal(agoText(20_000), "just now");
+  assert.equal(agoText(29 * 60_000), "29m ago");
+  assert.equal(agoText(2 * 3_600_000 + 59 * 60_000), "2h ago");
+  assert.equal(agoText(3 * 86_400_000), "3 days ago");
+});

@@ -1,6 +1,6 @@
 # Release notes
 
-What changed in each version of Follow-up, newest first. Follow-up shows these in "What's new" after an update and under Settings → Updates.
+What changed in each version of Follow-up, newest first. Follow-up shows these in "What's new" after an update, and in full from Home's last line.
 
 ## 1.4.0-beta.22 (2026-11-10)
 
