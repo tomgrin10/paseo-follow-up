@@ -36,3 +36,10 @@ parent membership must not grant new scope. Cover workspace-first agent creation
 Track and interactive session startup must not scan transcripts or wait for a daemon-wide refresh.
 Persist activation before returning; leave history and external status observation to background work.
 Keep a regression with a blocked global refresh so successful activation cannot time out again.
+
+Wait for background jobs (server/wait.ts, server/wait-jobs.ts, server/wait-runner.sh) came from the standalone
+paseo-wait plugin. It is native plugin tools only: no loopback MCP, no process per agent or job, timers only during an
+active wait. Only the runner's exit receipt proves completion; ownership comes from the daemon's agent id and cwd,
+never from tool input; Stop and new messages end observation without killing the job. Keep it off while the
+standalone plugin is installed and enabled (tests/wait.test.ts). scripts/check-wait.mjs drives real Haiku agents in an
+isolated daemon; keep its adoption case prompt free of Wait's tool names.

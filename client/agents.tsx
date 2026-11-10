@@ -2,9 +2,10 @@ import type { ReactNode } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
-import { SettingsAction, SettingsCard, SettingsSection, SettingsSelect, useToast } from "@getpaseo/plugin/client/ui";
+import { SettingsAction, SettingsCard, SettingsSection, SettingsSelect, SettingsSwitch, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { agentSettingsRpc, setAgentSettingRpc } from "../shared/contracts";
+import { agentSettingsRpc, setAgentSettingRpc, setWaitRpc } from "../shared/contracts";
+import { WAIT_HINT, WAIT_NOT_ATTACHED, WAIT_TITLE, waitNote } from "../shared/wait";
 import { AGENT_ROLES, JOB_PROVIDERS, ROLE_DEFAULTS, ROLE_INFO, isJobRole, modelName, providerName, type AgentRole, type AgentSettingsView, type CatalogProvider, type SavedRole } from "../shared/agent-settings";
 import { Button, errorText, text, type Theme } from "./kit";
 
@@ -51,6 +52,33 @@ export function AgentSettings({ theme, compact, toggles = {} }: Pick<PluginSurfa
     {/* Once, after the cards: what can't be picked and why (the pickers only list what can). */}
     {!!data?.catalog?.providers.some(p => !p.available) && <Text style={[t.meta, { paddingHorizontal: 4 }]}>{`Not available in Paseo: ${data.catalog.providers.filter(p => !p.available).map(p => `${p.label} (${(p.reason ?? "unavailable").replace(/\.$/, "")})`).join(", ")}.`}</Text>}
 
+  </SettingsSection>;
+}
+
+/**
+ * Settings → Agents → Wait for background jobs: one switch, on by default. Shares the Agents screen's query, so it
+ * costs no extra read. When the switch is on but Wait isn't attached (the standalone plugin is installed, or the host
+ * doesn't serve plugin tools), an amber alert under it says so and what to do; the hint stays.
+ */
+export function WaitSettings({ theme }: Pick<PluginSurfaceProps, "theme">) {
+  const c = theme.colors; const t = text(c);
+  const read = useRpc(agentSettingsRpc); const write = useRpc(setWaitRpc); const cache = useQueryClient(); const toast = useToast();
+  const query = useQuery({ queryKey: key, queryFn: () => read({ catalog: true }), staleTime: 5 * 60_000 });
+  const change = useMutation({
+    mutationFn: (enable_wait: boolean) => write({ enable_wait }),
+    onSuccess: value => { cache.setQueryData(key, value); toast.show(`${WAIT_TITLE}: ${value.wait?.enable_wait ? "on" : "off"}`, { variant: "success" }); },
+    onError: error => toast.error(errorText(error)),
+  });
+  const wait = query.data?.wait;
+  const note = wait ? waitNote(wait) : null;
+  return <SettingsSection title="Background jobs">
+    {/* The card's place is kept while loading, so the Models section below doesn't jump. */}
+    {query.isPending && <SettingsCard><View style={{ minHeight: 72, justifyContent: "center", paddingHorizontal: 16 }}><ActivityIndicator accessibilityLabel="Loading the Wait setting" color={c.foregroundMuted} style={{ alignSelf: "flex-start" }} /></View></SettingsCard>}
+    {query.error && <SettingsCard><SettingsAction label="Couldn't load the Wait setting" hint={errorText(query.error)} actionLabel="Retry" onPress={() => void query.refetch()} /></SettingsCard>}
+    {wait && <SettingsCard>
+      <SettingsSwitch label={WAIT_TITLE} hint={WAIT_HINT} value={wait.enable_wait} disabled={change.isPending} onValueChange={value => change.mutate(value)} />
+      {note && wait.enable_wait && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusWarning, paddingHorizontal: 16, paddingBottom: 12 }]}>{`${WAIT_NOT_ATTACHED} ${note}`}</Text>}
+    </SettingsCard>}
   </SettingsSection>;
 }
 

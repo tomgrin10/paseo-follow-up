@@ -8,7 +8,7 @@ const directory = dirname(fileURLToPath(import.meta.url));
 /** 1.4.0-beta.2: launched with Follow-up's tools served by Paseo's MCP (follow_<name>), or the follow-through bridge (<name>). Agents opened before the upgrade carry no flag and keep the bridge names. */
 let native = process.env.FOLLOW_THROUGH_TOOLS === "native";
 // Tool names that read unambiguously in prose; kept identical to server/mcp.mjs's underscore names (a test checks it).
-export const TOOL_NAMES = ["workspace_status", "sync_workspace", "enroll_workspace", "register_pr", "exclude_stack", "update_obligation", "acknowledge_batch", "ask_question", "record_answer", "withdraw_question", "set_spec", "workspace_about", "agent_settings", "needs_you", "declare_done", "list_prs", "add_reviewers", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "inbox_list", "sign_off", "set_finish_flags", "set_priorities", "agent_digest", "route_candidates", "send_to_agent", "start_workspace", "display_settings", "set_display", "follow_settings", "set_follow_settings", "project_settings", "set_project_tracking", "pr_workflow", "set_pr_workflow", "reviewer_settings", "reviewer_suggestions", "save_reviewers", "set_agent_setting", "onboarding_status", "onboarding_checks", "set_onboarding", "rank_status", "rerank_priorities", "overseer_status", "overseer_start", "overseer_restart", "overseer_ask", "inbox_brief", "brief_action", "inbox_act", "answer_question", "run_recovery", "set_workspace_spec", "set_task_trigger", "pr_controls", "browser_status", "trust_bypass_status", "release_notes", "make_main_agent"];
+export const TOOL_NAMES = ["workspace_status", "sync_workspace", "enroll_workspace", "register_pr", "exclude_stack", "update_obligation", "acknowledge_batch", "ask_question", "record_answer", "withdraw_question", "set_spec", "workspace_about", "agent_settings", "needs_you", "declare_done", "list_prs", "add_reviewers", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "inbox_list", "sign_off", "set_finish_flags", "set_priorities", "agent_digest", "route_candidates", "send_to_agent", "start_workspace", "display_settings", "set_display", "follow_settings", "set_follow_settings", "project_settings", "set_project_tracking", "pr_workflow", "set_pr_workflow", "reviewer_settings", "reviewer_suggestions", "save_reviewers", "set_agent_setting", "set_wait_for_jobs", "onboarding_status", "onboarding_checks", "set_onboarding", "rank_status", "rerank_priorities", "overseer_status", "overseer_start", "overseer_restart", "overseer_ask", "inbox_brief", "brief_action", "inbox_act", "answer_question", "run_recovery", "set_workspace_spec", "set_task_trigger", "pr_controls", "browser_status", "trust_bypass_status", "release_notes", "make_main_agent"];
 const toolPattern = new RegExp(`(?<![\\w])(${TOOL_NAMES.join("|")})(?![\\w])`, "g");
 /** Names Follow-up's tools the way this agent has them. */
 export function named(text, isNative = native) { return isNative ? text.replace(toolPattern, "follow_$1") : text; }
@@ -141,6 +141,12 @@ async function nativeExtras(brief) {
     process.env.FOLLOW_THROUGH_OVERSEER === "1" ? bridge.overseerInstruction : null,
   ].filter(Boolean).map(text => named(text));
 }
+/** Wait's guidance (server/wait.ts attaches its tools natively, so there is no MCP initialize text to carry it). */
+async function waitExtras() {
+  if (process.env.FOLLOW_THROUGH_WAIT !== "1") return [];
+  const bridge = await import(pathToFileURL(join(directory, "mcp.mjs")).href).catch(() => null);
+  return bridge?.waitInstruction ? [bridge.waitInstruction] : [];
+}
 /**
  * Claude Code keeps hook context for the whole session and re-runs SessionStart after compaction, so the same text
  * on every prompt only costs tokens (~1.3k per turn for a tracked main agent): send it once per session and again
@@ -164,7 +170,7 @@ async function main() {
   // The Overseer: a fresh digest at the start of every turn; no sidebar bookkeeping and no Stop-hook nudge.
   if (process.env.FOLLOW_THROUGH_OVERSEER === "1") {
     if (event.hook_event_name === "SessionStart") {
-      const extras = await nativeExtras(await json(join(directory, "brief.json")).catch(() => null));
+      const extras = [...await nativeExtras(await json(join(directory, "brief.json")).catch(() => null)), ...await waitExtras()];
       if (extras.length) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: extras.join("\n\n") } }) + "\n");
       return;
     }
@@ -189,9 +195,13 @@ async function main() {
   // The brief nudge applies to root agents launched with FOLLOW_THROUGH_BRIEF, tracked or not.
   const provider = process.env.FOLLOW_THROUGH_BRIEF || null;
   const brief = provider ? await json(join(directory, "brief.json")).catch(() => null) : null;
-  if (!workspace && !(brief?.enable_inbox && brief?.enable_brief_nudge) && !(native && process.env.FOLLOW_THROUGH_ROOT === "1")) return;
+  if (!workspace && !(brief?.enable_inbox && brief?.enable_brief_nudge) && !(native && process.env.FOLLOW_THROUGH_ROOT === "1")) {
+    // Every other Claude session with Wait (subagents, untracked agents) still gets Wait's guidance, once per session.
+    if (event.hook_event_name === "SessionStart") { const extras = await waitExtras(); if (extras.length) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: extras.join("\n\n") } }) + "\n"); }
+    return;
+  }
   const context = () => instructions(lease, contributor, workflow);
-  const sessionText = async () => [workspace ? context() : null, ...await nativeExtras(brief)].filter(Boolean).join("\n\n");
+  const sessionText = async () => [workspace ? context() : null, ...await nativeExtras(brief), ...await waitExtras()].filter(Boolean).join("\n\n");
   const name = event.hook_event_name;
   if (!["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"].includes(name)) return;
   const session = createHash("sha256").update(String(event.session_id ?? agentId)).digest("hex").slice(0, 24);

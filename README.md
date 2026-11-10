@@ -204,6 +204,18 @@ Settings → **Agents** has one card for each agent Follow-up runs for you. Each
 
 The choices live in `agents.json` in Follow-up's data folder. Anything missing or invalid there falls back to the default. Agents can read the choices with the read-only `agent_settings` tool. The About footer names the model that wrote each overview ("Summarized by Haiku · 2h ago").
 
+### Wait for background jobs (1.4.0-beta.24)
+
+Claude agents often start a long command in the background (tests, a build, a deploy check) and then end their turn "waiting for a notification", which leaves the workspace looking idle while it isn't done. With **Wait for background jobs** (Settings → Agents, on by default), every Claude agent Paseo starts gets three small tools:
+
+1. `wait_prepare_job({description, command})` records the job and returns a `bashCommand`. It runs nothing.
+2. The agent runs that exact command with Bash in the background, as it would anyway.
+3. `wait_for_job({jobId})` keeps the agent Running for up to 60 seconds (30 by default) and returns **completed** or **failed** with the exit code, **still_pending** (the agent checks the output with `wait_get_job` and waits again) or **new_message** (you wrote to it).
+
+Only the command's exit receipt counts as done. Stop ends the wait without killing the command, and a new message ends it too. Each agent sees only its own jobs, and the records survive Follow-up updates. Nothing runs while no agent is waiting: no extra process, no port, no polling.
+
+This replaces the separate **Wait** plugin (`paseo-wait`). While that plugin is installed and enabled, Follow-up's Wait stays off and Settings says so. Disable or remove it to switch: `paseo plugin disable paseo-wait`. Agents opened afterwards get Follow-up's Wait; already-open sessions switch on their next prompt. Wait needs Paseo 0.15+ with its agent tools on (the default). To leave one agent without it, give the agent the label `follow-up-wait/enabled=false` (the older `paseo-wait/enabled=false` and `plugin-tools/enabled=false` also work).
+
 ![Home with the Overseer selected: the pinned row asks which agent should take a broken export, and the pane shows the conversation, the routed task and the decision with two candidates plus New workspace](docs/media/overseer/overseer-dark.png)
 
 Install the beta:
@@ -243,6 +255,7 @@ Tell an agent "the PRs look good, assign reviewers on all" and it can do it. Eve
 | `send_repairs`, `set_auto_send`, `clear_hold`, `retry_batch`, `track` | **Send**, the **Auto-send** switch, **Resume**, **Retry**, following a workspace again after an opt-out. |
 | `set_priorities` | Stores external priorities for Home's Priority sort: per workspace a score 0–100, a one-line reason and sources (Linear, Slack, planning, GitHub, Paseo). Plans first; `confirm: true` with the plan id stores them. Used for 6 hours. |
 | `inbox_list`, `sign_off`, `snooze`, `set_finish_flags` | The Needs-you list, **Sign off**, **Later** and **Don't flag finishes**, for other agents only. |
+| `agent_settings`, `set_wait_for_jobs` | Reads Settings → Agents; turns **Wait for background jobs** on or off (plans first). |
 
 Tools that act on a list, and merge, return a dry run first and act only when called again with `confirm: true` and that plan's id. Their descriptions tell the agent to use them only when you asked. An agent can't sign itself off. Recovery agents, contributors and subagents don't get these tools, and the daemon checks the caller again on every call.
 

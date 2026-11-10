@@ -9,7 +9,7 @@ import { followSettingsRpc, projectSettingsRpc, setFollowSettingsRpc, setProject
 import { Switch, bottomInset, errorText, space, text, type Theme } from "./kit";
 import { DisplaySections, PermissionsSection, PreferenceSwitch } from "./display";
 import { ReviewerSettings, reviewerSettingsKey } from "./reviewers";
-import { AgentSettings, agentSettingsKey } from "./agents";
+import { AgentSettings, WaitSettings, agentSettingsKey } from "./agents";
 import { ShippingSettings } from "./shipping";
 import { BackHeader, CategoryList, CategoryTabs, Disclosure } from "./settings-shell";
 import {
@@ -161,10 +161,11 @@ function WorkspacesFold({ theme, compact, all, autoDefault, busy, set }: { theme
   </Disclosure>;
 }
 
-/** Agents: Questions, then the four agent cards. The Overseer and AI priority switches lead their own cards. */
+/** Agents: Questions, Wait for background jobs, then the four agent cards. The Overseer and AI priority switches lead their own cards. */
 function AgentsCategory({ theme, compact }: { theme: Theme; compact: boolean }) {
   return <>
     <QuestionSettings theme={theme} />
+    <WaitSettings theme={theme} />
     <AgentSettings theme={theme} compact={compact} toggles={{ overseer: <PreferenceSwitch field="enable_overseer" theme={theme} />, ranker: <PreferenceSwitch field="enable_ranker" theme={theme} /> }} />
   </>;
 }
