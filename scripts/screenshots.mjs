@@ -17,7 +17,7 @@
 //
 // Needs PLAYWRIGHT_CORE (a playwright-core directory) and CHROMIUM (a Chromium or headless-shell binary), and the
 // Paseo CLI 0.15.x on PATH (harness-slot puts it first).
-import { spawn, execFile } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { openSync, existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
@@ -27,6 +27,7 @@ import { createServer } from "node:net";
 import { createRequire } from "node:module";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
+import { harness, spawnDaemon } from "./harness.mjs";
 
 const exec = promisify(execFile);
 const argv = process.argv.slice(2);
@@ -51,6 +52,7 @@ const paseoVersion = await exec("paseo", ["--version"], { timeout: 30000 }).then
 if (!paseoVersion || !/(^|\D)0\.15\.\d+/.test(paseoVersion)) fail(`needs the Paseo CLI 0.15.x on PATH (found ${paseoVersion ?? "none"}); run through harness-slot or put ~/paseo-harness/cli/0.15.4/bin first`);
 if (changelogArg && !existsSync(changelogArg)) fail(`--whats-new-changelog: no file at ${changelogArg}`);
 const optimiser = await findOptimiser();
+await harness();
 const desktopScale = Number(arg("--scale", optimiser ? 2 : 1.25));
 if (!(desktopScale >= 1 && desktopScale <= 3)) fail("--scale is between 1 and 3");
 
@@ -500,7 +502,7 @@ try {
   for (const key of ["PASEO_PASSWORD", "PASEO_PASSWORD_FILE", "PASEO_AGENT_ID", "PASEO_AGENT_CWD", "PASEO_WORKSPACE_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_SESSION_ID", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "FOLLOW_UP_UPDATES_DEMO"]) delete env[key];
   const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env, timeout: 120000, maxBuffer: 1 << 22 })).stdout);
   const daemonLog = openSync(join(root, "daemon.log"), "a");
-  daemon = spawn("paseo", ["daemon", "run", "--home", home], { env, stdio: ["ignore", daemonLog, daemonLog] });
+  daemon = spawnDaemon(["daemon", "run", "--home", home], { env, stdio: ["ignore", daemonLog, daemonLog] });
   for (let i = 0; ; i++) {
     try { await cli("workspace", "ls"); break; }
     catch { if (daemon.exitCode !== null) throw new Error(`isolated daemon exited; see ${join(root, "daemon.log")}`); if (i > 120) throw new Error("isolated daemon did not start"); await new Promise(r => setTimeout(r, 250)); }
