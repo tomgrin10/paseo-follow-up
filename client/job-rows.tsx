@@ -89,7 +89,7 @@ export function JobRows({ theme, compact, order, extra, preselect = false }: {
     <Text accessibilityRole="alert" style={[t.meta, { color: c.statusWarning }]}>{`Couldn't load the helper agents: ${errorText(query.error)}`}</Text>
     <Button theme={theme} compact={compact} title="Retry" onPress={() => void query.refetch()} />
   </View>;
-  const action = header.action === "use" ? <Button theme={theme} compact={compact} title="Use recommended" loading={bulk} disabled={busy} onPress={() => void useAll()} />
+  const action = header.action === "use" ? <Button theme={theme} compact={compact} title="Use recommended for all" loading={bulk} disabled={busy} onPress={() => void useAll()} />
     : header.action === "retry" ? <Button theme={theme} compact={compact} title="Retry" disabled={busy} onPress={() => void refresh()} />
     : header.action === "check" ? <Button theme={theme} compact={compact} title="Check again" disabled={busy} onPress={() => void refresh()} /> : null;
   return <View>
