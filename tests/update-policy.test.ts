@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CAP_MS, LOAD_TIMEOUT_MS, PROBATION_MS, QUIET_MS, busyAgents, busyText, probation, quietWindow } from "../shared/update-policy";
+import { CAP_MS, QUIET_MS, busyAgents, busyText, quietWindow } from "../shared/update-policy";
+import { LOAD_TIMEOUT_MS, PROBATION_MS, probation } from "../server/update-watchdog.mjs";
 
 const M = 60_000, H = 60 * M;
 

@@ -22,7 +22,7 @@ import { Graphite } from "./server/graphite";
 import { BrowserBridge } from "./server/browser-bridge";
 import { PrActions } from "./server/pr-actions";
 import { AgentActions, AGENT_TOOLS, controlWorkspace, type AgentTool } from "./server/agent-actions";
-import { PaseoGateway, paseoHome, clientEntry, closeConnections, sessionGuardOwnsInterruption } from "./server/daemon";
+import { PaseoGateway, paseoHome, clientEntry, daemonOptions, closeConnections, sessionGuardOwnsInterruption } from "./server/daemon";
 import { mcpSource } from "./server/mcp-source";
 import { excludeStack } from "./server/exclusions";
 import { applyHistory, applyDiscovery, extractHistory, mainWorkDue, markMainWork } from "./server/discovery";
@@ -64,9 +64,14 @@ import { AgentSettingsStore, ProviderCatalog, type CatalogSource } from "./serve
 import { labelsFor, providerName, resolveRole, roleSummary, type AgentSettingsView } from "./shared/agent-settings";
 import type { LoadSignals } from "./shared/agent-load";
 import { OnboardingStore, ReadinessChecks, nativeAgentCount } from "./server/onboarding";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { compactHeap } from "./server/memory";
-import { UpdatesStore, settingsOf } from "./server/updates";
+import { UpdatesStore } from "./server/updates";
+import { Updater } from "./server/updater";
+import { RegistryChecker, registryUrl, type RegistrySnapshot } from "./server/update-registry";
+import { checkProvenance } from "./server/update-provenance";
+import { watchdogSource } from "./server/update-watchdog-source";
+import { busyAgents, type Busy } from "./shared/update-policy";
 import { VersionsStore, demoOverride, describeSelf, readPackage, type SelfInstall } from "./server/release-notes";
 import { updatesViewSchema, type UpdatesView } from "./shared/updates";
 import { releaseNotesViewSchema, type ReleaseNote, type ReleaseNotesView } from "./shared/changelog";
@@ -740,24 +745,60 @@ export default function contribute(server: PluginServerContext) {
   };
   handle(rpc.releaseNotesRpc, async () => releaseNotesView());
   handle(rpc.whatsNewSeenRpc, async ({ version }) => { await versions.seen(version); return releaseNotesView(); });
-  const updatesView = async (): Promise<UpdatesView> => {
-    const me = await selfInstall(); const file = await updatesStore.read(); const { mode, channel } = settingsOf(file, me.version);
-    const view: UpdatesView = { version: me.version, installKind: me.installKind, mode, channel, channels: { stable: null, beta: null }, checkedAt: null, nextCheckAt: null, registryError: null,
-      phase: { kind: "current" }, pendingNotes: [], history: [], notice: null };
-    return demoOverride(directory, "updates", updatesViewSchema, view);
+  // Settings → Updates: see server/updater.ts. The registry snapshot lives in registry.json; installs run detached.
+  const registry = new RegistryChecker({ packageName: "paseo-follow-up", fetch: (url, init) => fetch(url, init),
+    load: () => readFile(join(directory, "registry.json"), "utf8").then(t => JSON.parse(t) as RegistrySnapshot, () => null),
+    save: async snap => { const tmp = join(directory, `registry.json.${process.pid}.tmp`); await writeFile(tmp, JSON.stringify(snap), { mode: 0o600 }); await rename(tmp, join(directory, "registry.json")); } });
+  const watchdogLock = join(directory, "update-watchdog.lock");
+  const installerAlive = async () => {
+    const lock = await readFile(watchdogLock, "utf8").then(t => JSON.parse(t) as { pid?: number }, () => null);
+    if (!lock?.pid) return false;
+    try { process.kill(lock.pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === "EPERM"; }
   };
-  handle(rpc.updatesRpc, async () => updatesView());
-  handle(rpc.setUpdatesRpc, async ({ mode, channel }) => {
-    const file = await updatesStore.read();
-    await updatesStore.write({ ...file, ...(mode ? { mode } : {}), ...(channel ? { channel } : {}) });
+  const updater = new Updater({
+    directory, read: () => updatesStore.read(), write: next => updatesStore.write(next), self: () => selfInstall(), registry,
+    provenance: version => checkProvenance({ fetch: (url, init) => fetch(url, init), registry: registryUrl(), name: "paseo-follow-up", version }),
+    busy: async fresh => {
+      const busy: Busy[] = [];
+      const rows = await gateway.directory.read(fresh ? { fresh: "agents" } : {});
+      const agents = busyAgents(rows.agents.map(({ agent }) => ({ status: agent.status, archivedAt: agent.archivedAt, hasFollowTools: true })));
+      if (agents) busy.push({ kind: "agent", count: agents });
+      if (ranker?.isRunning()) busy.push({ kind: "ranker" });
+      else if (aiJobs.active > 0) busy.push({ kind: "about" });
+      const state = await store.snapshot();
+      const prActions = state.workspaces.reduce((n, w) => n + w.prActions.filter(a => a.state === "sending").length, 0);
+      const repairs = state.workspaces.reduce((n, w) => n + w.batches.filter(b => b.state === "sending").length, 0);
+      if (prActions) busy.push({ kind: "pr-action", count: prActions });
+      if (repairs) busy.push({ kind: "repair", count: repairs });
+      return busy;
+    },
+    installerAlive,
+    spawn: async job => {
+      if (await installerAlive()) return false;
+      const script = join(directory, "update-watchdog.mjs");
+      await writeFile(script, watchdogSource, { mode: 0o600 });
+      const env = { ...process.env, FOLLOW_UP_UPDATE_JOB: JSON.stringify({ ...job, directory, pluginId: "follow-through", clientEntry: clientEntry(), daemon: await daemonOptions() }) };
+      const child = spawn(process.execPath, [script], { detached: true, stdio: "ignore", env });
+      child.unref();
+      await writeFile(watchdogLock, JSON.stringify({ pid: child.pid, to: job.to }), { mode: 0o600 });
+      return true;
+    },
+    log: message => console.warn(message),
+  });
+  const updatesView = async (): Promise<UpdatesView> => demoOverride(directory, "updates", updatesViewSchema, await updater.view());
+  // The new worker reports in for the installer's probation once it is ready, with the reason if it couldn't start.
+  void ready.then(async () => {
+    const me = await selfInstall();
+    await writeFile(join(directory, "heartbeat.json"), JSON.stringify({ version: me.version, at: Date.now(), error: loadError ? String(loadError).slice(0, 300) : null }), { mode: 0o600 });
+    if (!stopped) await updater.start();
+  }).catch(() => undefined);
+  handle(rpc.updatesRpc, async ({ check }) => {
+    if (check) await updater.check(check).catch(() => undefined);
     return updatesView();
   });
-  handle(rpc.installUpdateRpc, async () => updatesView());
-  handle(rpc.dismissUpdateNoticeRpc, async ({ id }) => {
-    const file = await updatesStore.read();
-    await updatesStore.write({ ...file, dismissed: [...new Set([...(file.dismissed ?? []), id])].slice(-50) });
-    return updatesView();
-  });
+  handle(rpc.setUpdatesRpc, async ({ mode, channel }) => { await updater.setSettings({ mode, channel }); return updatesView(); });
+  handle(rpc.installUpdateRpc, async ({ version, anyway }) => { await updater.install(version, !!anyway); return updatesView(); });
+  handle(rpc.dismissUpdateNoticeRpc, async ({ id }) => { await updater.dismiss(id); return updatesView(); });
   handle(rpc.agentSettingsRpc, async ({ catalog, fresh }, { paseo }) => { await requireReady(); seen(paseo); return agentSettingsView(!!catalog, !!fresh); });
   handle(rpc.setAgentSettingRpc, async ({ role, entry }, { paseo }) => { await requireReady(); seen(paseo); await agentSettings.save(role, entry); return agentSettingsView(true); });
   handle(rpc.setWaitRpc, async ({ enable_wait }, { paseo }) => { await requireReady(); seen(paseo); await agentSettings.setWait(enable_wait); return agentSettingsView(true); });
@@ -988,6 +1029,8 @@ export default function contribute(server: PluginServerContext) {
     server.on("agent.created", async event => { await ready; await gateway.directory.agentCreated(event.agent); }),
     server.on("workspace.created", async event => gateway.directory.workspaceCreated(event.workspace)),
     server.on("workspace.archived", async event => gateway.directory.workspaceArchived(event.workspace.id)),
+    server.on("agent.turn_started", async () => updater.activity()),
+    server.on("agent.turn_ended", async () => updater.activity()),
     server.on("agent.turn_started", async (event, { paseo }) => { seen(paseo); inboxHook(() => inbox.turnStarted(event.agent, event.turnId)); }),
     server.on("agent.turn_ended", async (event, { paseo }) => { seen(paseo); inboxHook(() => inbox.turnEnded(event.agent, event.outcome, event.turnId)); }),
     server.on("agent.permission_requested", async (event, { paseo }) => { seen(paseo); inboxHook(async () => { await inbox.permissionRequested(event.agent, event.request); await writeBriefState(); }); }),
@@ -1087,7 +1130,7 @@ export default function contribute(server: PluginServerContext) {
     server.on("workspace.archived", async event => { await ready; if (!loadError && !stopped) await store.mutate(state => { const w = state.workspaces.find(w => w.id === event.workspace.id); if (w) w.archived = true; }); }),
   ];
   return async () => {
-    stopped = true; wait.close(); governor.stop(); if (timer) clearTimeout(timer); if (aboutTimer) clearTimeout(aboutTimer); aiJobs.stop(); ranker = null; if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
+    stopped = true; wait.close(); updater.stop(); governor.stop(); if (timer) clearTimeout(timer); if (aboutTimer) clearTimeout(aboutTimer); aiJobs.stop(); ranker = null; if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
     await ready; if (hooksStarted) await agentHooks.stop().catch(() => {});
     await actions.close(); await closeConnections(); await engine.stop(); await ready; await store.flush().catch(() => undefined); await unlock?.();
   };
