@@ -80,6 +80,8 @@ export const questionSchema = z.object({
   mode: z.enum(QUESTION_MODES),
   answer: answerSchema.nullable().default(null),
   closed: z.object({ at: z.string(), reason: z.string(), by: z.string().nullable() }).nullable().default(null),
+  /** Which path created it (1.4.0-beta.25): ask_question, a needs_you decision, or a blocked task. Older records: null. */
+  via: z.enum(["ask", "needs_you", "task"]).nullable().optional(),
 });
 export type Question = z.infer<typeof questionSchema>;
 export type QuestionOption = z.infer<typeof questionOptionSchema>;
@@ -137,4 +139,97 @@ export function parseAnswersMessage(text: string): { title: string; answers: { i
 /** The answer is a known option letter, or free words when the question has no options. */
 export function validChoice(q: Pick<Question, "options">, choice: string): boolean {
   return q.options.length ? q.options.some(o => o.letter === choice) : choice.trim().length > 0;
+}
+
+// ---------- one identity per open question (1.4.0-beta.25) ----------
+//
+// Questions came in two or more times: an agent asked with ask_question and then restated the decision in its
+// end-of-turn needs_you, or restated an open decision at every turn's end. Every path that creates a question asks
+// this matcher first. It is deterministic and cheap (token sets, no model call), and it only compares questions in
+// one workspace.
+
+const STOP = new Set(["a", "an", "the", "and", "or", "of", "to", "for", "in", "on", "at", "by", "with", "it", "its", "is", "are", "be", "do", "does", "should", "we", "i", "you", "this", "that", "what", "which", "how", "now", "as"]);
+const stem = (t: string) => t.length > 4 ? t.replace(/(ations|ation|ings|ing|ed|es|s)$/, "").replace(/e$/, "") : t;
+/** Lower-cased word stems. `keepStop` keeps short words, for option labels like "as is". */
+export function questionTokens(text: string, keepStop = false): Set<string> {
+  const words = text.toLowerCase().replace(/^[a-z][:.)]\s+/, "").replace(/['’]s\b/g, "").split(/[^a-z0-9]+/).filter(Boolean);
+  return new Set(words.filter(w => keepStop || !STOP.has(w)).map(stem));
+}
+const jaccard = (a: Set<string>, b: Set<string>) => { if (!a.size && !b.size) return 1; let n = 0; for (const t of a) if (b.has(t)) n++; return n / (a.size + b.size - n); };
+const contained = (a: Set<string>, b: Set<string>) => { const [small, big] = a.size <= b.size ? [a, b] : [b, a]; if (!small.size) return 0; let n = 0; for (const t of small) if (big.has(t)) n++; return n / small.size; };
+
+export type QuestionShape = { title: string; question: string; options: { label: string }[] };
+/** How alike two questions read: 0–1 over the title, the question and both together. */
+export function textSimilarity(a: QuestionShape, b: QuestionShape): number {
+  const at = questionTokens(a.title), bt = questionTokens(b.title), aq = questionTokens(a.question), bq = questionTokens(b.question);
+  return Math.max(jaccard(at, bt), jaccard(aq, bq), jaccard(new Set([...at, ...aq]), new Set([...bt, ...bq])));
+}
+/** Share of options that have a counterpart ("Memoize the gate" ~ "A: memoize"). Both free-answer: 1; one only: 0. */
+export function optionOverlap(a: QuestionShape, b: QuestionShape): number {
+  if (!a.options.length && !b.options.length) return 1;
+  if (!a.options.length || !b.options.length) return 0;
+  const bs = b.options.map(o => questionTokens(o.label, true));
+  let hits = 0;
+  for (const o of a.options) { const t = questionTokens(o.label, true); if (bs.some(x => contained(t, x) >= 0.5)) hits++; }
+  return hits / Math.max(a.options.length, b.options.length);
+}
+/**
+ * `same`: the same question again (return the open one). `changed`: the same decision with materially different options
+ * (the new one supersedes it). null: a different question.
+ */
+export function compareQuestions(a: QuestionShape, b: QuestionShape): "same" | "changed" | null {
+  const text = textSimilarity(a, b), options = optionOverlap(a, b);
+  if (text >= 0.6) return options >= 0.67 ? "same" : "changed";
+  // A reworded question with the same options ("How should the gate's added cost be handled?" / "How should PR 6's gate
+  // handle the cost increase?", both memoize / as is / prefilter).
+  // Generic options (Yes / No, Keep / Defer) say nothing about which question it is, so they never carry a match.
+  const specific = new Set(a.options.flatMap(o => [...questionTokens(o.label)])).size >= 3;
+  if (text >= 0.3 && specific && a.options.length >= 2 && options >= 0.99 && a.options.length === b.options.length) return "same";
+  return null;
+}
+/** Near-identical: the only match allowed across two different askers in one workspace. */
+const nearIdentical = (a: QuestionShape, b: QuestionShape) => textSimilarity(a, b) >= 0.85 && optionOverlap(a, b) >= 0.99;
+
+/**
+ * The open question in this workspace that `input` repeats, if any. Candidates are the asker's own open questions and
+ * open needs_you decisions; another agent's question only when near-identical. Blocked-task questions keep their own
+ * identity (the task and its revision) and never match.
+ */
+export function findOpenMatch(questions: readonly Question[], input: QuestionShape, askedBy: string | null): { question: Question; verdict: "same" | "changed" } | null {
+  let best: { question: Question; verdict: "same" | "changed"; score: number } | null = null;
+  for (const q of questions) {
+    if (!isOpen(q) || q.taskRevision !== null) continue;
+    const own = q.askedBy === askedBy || q.via === "needs_you";
+    const verdict = own ? compareQuestions(input, q) : nearIdentical(input, q) ? "same" : null;
+    if (!verdict) continue;
+    const score = textSimilarity(input, q) + optionOverlap(input, q);
+    if (!best || score > best.score) best = { question: q, verdict, score };
+  }
+  return best && { question: best.question, verdict: best.verdict };
+}
+
+/** Open questions that repeat an older open one in the same workspace: [duplicate, original] pairs. The invariant. */
+export function duplicateOpenQuestions(questions: readonly Question[]): { duplicate: Question; of: Question }[] {
+  const out: { duplicate: Question; of: Question }[] = [];
+  const kept: Question[] = [];
+  for (const q of questions) {
+    if (!isOpen(q)) continue;
+    const match = q.taskRevision === null ? findOpenMatch(kept, q, q.askedBy) : null;
+    if (match?.verdict === "same") out.push({ duplicate: q, of: match.question }); else kept.push(q);
+  }
+  return out;
+}
+
+export const QUESTION_DEDUPE_MIGRATION = "dedupe-open-questions-1";
+/**
+ * One-time cleanup (1.4.0-beta.25): open questions that repeat an older open one close as "Duplicate of Qn.". The
+ * oldest stays; answered and closed questions are never touched. Idempotent: a second run finds nothing to close.
+ * Returns what it closed, so a dry run can report it.
+ */
+export function collapseDuplicateQuestions(questions: Question[], now: number): { closed: string; of: string }[] {
+  const at = new Date(now).toISOString();
+  return duplicateOpenQuestions(questions).map(({ duplicate, of }) => {
+    duplicate.closed = { at, reason: `Duplicate of ${of.id}.`, by: null };
+    return { closed: duplicate.id, of: of.id };
+  });
 }

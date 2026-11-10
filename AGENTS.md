@@ -44,3 +44,18 @@ never from tool input; Stop and new messages end observation without killing the
 standalone plugin is installed and enabled (tests/wait.test.ts). scripts/check-wait.mjs drives real Haiku agents in an
 isolated daemon; keep its adoption case prompt free of Wait's tool names. Without Claude credentials or on Paseo below
 0.15 (CI) it prints SKIP and exits 0, so test:install still runs there; npm run test:wait-live fails instead of skipping.
+
+## Bugs
+
+Every bug is fixed for its whole class: root cause, a test that fails on main, the fix at the source, and an invariant
+in shared/status-invariants.ts (tests/status-invariants.test.ts runs every invariant over a grid of workspaces plus one
+fixture per reported bug).
+
+- Questions are deduped at the source (no-duplicate-open-question). Every path that creates a question (ask_question,
+  needs_you decisions, a retry after a reload) asks findOpenMatch in shared/questions.ts first. The matcher is
+  deterministic: it compares normalized title and question tokens plus option-label overlap, and makes no model call.
+  Its candidates are the same workspace's open questions from the same asker, plus needs_you ones; another agent's
+  question matches only when near-identical. The same question returns the open one ("Already open as Qn"), and
+  changed options supersede it, so two versions are never open at once. needs_you points at open questions with
+  `questions: ["Qn"]` rather than restating them. A later call in the same turn replaces only the questions the
+  earlier call created, and a superseded brief never closes an ask_question's question.
