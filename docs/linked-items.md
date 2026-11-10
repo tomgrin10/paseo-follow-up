@@ -11,7 +11,27 @@ and, when someone links one on purpose, any other URL. PRs are not linked items,
 - `server/linked.ts` has `LinkedStore` (`linked.json`, written atomically, read on use and never cached in the worker),
   `LinkedService` (drain and migrate) and `liveLinkedSources`, which runs Linear's `get_issue` and `list_teams`
   through mcpproxy, like the Summary.
-- `index.server.ts` runs a loop every 10 minutes, the first 90 s after start: migrate once, then drain.
+- `shared/linked-extract.ts` is pure too. It extracts references from text Follow-up already reads (`timelineRefs`,
+  `workspaceRefs`).
+- `index.server.ts` runs a loop every 10 minutes, the first 90 s after start: migrate once, note the workspace
+  record's references, then drain.
+
+## How items get in
+
+- **`link_item` / `unlink_item`** (an agent, origin `registered`) and **`set_linked_items`** / `follow.set-linked-items`
+  (the developer or an agent for them, origin `manual`).
+  - A Linear key is confirmed with Linear on the spot. An unknown key or a non-team prefix is refused, not stored.
+  - When Linear can't be read, the key waits as a candidate.
+  - A PR is refused and pointed to `register_pr`.
+- **Extraction** (origin `extracted`) rides discovery's own timeline batch (`PaseoGateway.linkRefs`). Only loaded
+  agents are read, so a dormant agent is never woken for this.
+  - Strong: Linear tool receipts, Slack threads the agent read, URLs in completed tool calls, the developer's own
+    messages, and the goal, title, PR titles and branches.
+  - Weak: agent prose and other agents' messages. A weak key waits for a second sighting before Linear is asked.
+  - Only entries past the cached cursor count, so a re-read overlap is never a second sighting.
+  - Follow-up's own messages, bare keys in shell commands, PRs and generic URLs never count.
+- **Spec and published artifacts** (origins `spec`, `published`) are derived in the view (`linkedView`) from
+  `w.spec` and `w.artifacts`, never copied. The spec is tagged and left out of the counts.
 
 ## Rules
 

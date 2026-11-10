@@ -29,7 +29,7 @@ test("MCP stdout contains only protocol and outside-Paseo sessions have no mutat
 test("Paseo MCP sessions expose scoped schemas without an agentId override", async () => {
   const instruction = (await handshake(true))[0].result.instructions; assert.match(instruction, /Perform bookkeeping silently/);
   for (const rule of ["header with the batchId", "acknowledge_batch", "before declare_done", "skip resolved tasks", "--publish", "serving revisions", "Leave merging and archiving to the developer"]) assert.ok(instruction.includes(rule), `MCP retains ${rule} when hooks are unavailable`);
-  const result = await handshake(true); const tools = result[1].result.tools; assert.equal(tools.length, 12); assert.ok(["ask_question", "record_answer", "withdraw_question", "set_spec"].every(name => tools.some((t: any) => t.name === name))); assert.ok(tools.some((t: any) => t.name === "declare_done")); assert.ok(tools.some((t: any) => t.name === "sync_workspace")); assert.equal(tools.find((t: any) => t.name === "acknowledge_batch").inputSchema.properties.result.maxLength, 2000); assert.ok(tools.every((t: any) => !("agentId" in t.inputSchema.properties) && t.inputSchema.additionalProperties === false));
+  const result = await handshake(true); const tools = result[1].result.tools; assert.equal(tools.length, 14); assert.ok(["ask_question", "record_answer", "withdraw_question", "set_spec"].every(name => tools.some((t: any) => t.name === name))); assert.ok(tools.some((t: any) => t.name === "declare_done")); assert.ok(tools.some((t: any) => t.name === "sync_workspace")); assert.equal(tools.find((t: any) => t.name === "acknowledge_batch").inputSchema.properties.result.maxLength, 2000); assert.ok(tools.every((t: any) => !("agentId" in t.inputSchema.properties) && t.inputSchema.additionalProperties === false));
   const task = tools.find((t: any) => t.name === "update_obligation"); assert.deepEqual(task.inputSchema.properties.communication.required, ["threadUrl", "recipient"]); assert.match(task.description, /Auto does not authorize external posts/); assert.match(task.description, /Tasks are manual unless explicitly scheduled/); assert.deepEqual(task.inputSchema.properties.trigger.properties.event.enum, ["now", "merge", "deploy"]); assert.equal(task.inputSchema.properties.trigger.properties.delayDays.maximum, 3650); assert.match(instruction, /draft or uncertain send stays blocked/);
 });
 
@@ -44,7 +44,7 @@ test("recovery agents get metadata tools without completion authority", async ()
 
 test("other root sessions get actual PR registration tools while completion authority stays with the owner", async () => {
   const result = await handshake(true, false, true);
-  assert.deepEqual(result[1].result.tools.map((t: any) => t.name).sort(), ["register_pr", "sync_workspace", "workspace_status"]);
+  assert.deepEqual(result[1].result.tools.map((t: any) => t.name).sort(), ["link_item", "register_pr", "sync_workspace", "unlink_item", "workspace_status"]);
   assert.match(result[0].result.instructions, /secondary git worktrees/);
   assert.match(result[0].result.instructions, /designated main agent/);
 });

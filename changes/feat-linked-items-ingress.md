@@ -1,0 +1,1 @@
+- Agents now link the Linear issue, Slack thread or doc they start from, and Follow-up also picks them up from your messages and the agent's own lookups. A key an agent only mentions in passing has to come up twice before it counts.
