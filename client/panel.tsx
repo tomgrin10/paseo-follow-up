@@ -24,7 +24,7 @@ import { TasksCard } from "./tasks";
 import { PrSheet } from "./pr-sheet";
 import { ActivityCard, QuestionSheet } from "./questions";
 import { SpecRow, SpecSheet } from "./spec";
-import { tint } from "./theme";
+import { mergedColor, tint } from "./theme";
 import { AboutSection } from "./about";
 
 export { overviewKey, workspaceKey };
@@ -45,7 +45,7 @@ export function FollowPanel(props: PanelProps) {
   if (query.pending) return <PanelSkeleton theme={props.theme} compact={props.layout.compact} />;
   if (query.error && !query.workspace) return <View style={[base, { padding: props.layout.compact ? 16 : 12 }]}>
     <Card theme={props.theme} compact={props.layout.compact} icon="CloudOff" title="Can't reach Follow-up" style={{ marginHorizontal: 0, marginTop: 0 }}>
-      <CardRow theme={props.theme}>
+      <CardRow theme={props.theme} compact={props.layout.compact}>
         <Text accessibilityRole="alert" style={[text(c).meta, { marginBottom: 10 }]}>The plugin didn't answer: {errorText(query.error)}. It may still be starting; your work is saved on the host.</Text>
         <Button title="Try again" icon="RefreshCw" theme={props.theme} compact={props.layout.compact} loading={query.refetching} onPress={() => void query.refetch()} />
       </CardRow>
@@ -76,12 +76,42 @@ function PanelSkeleton({ theme, compact }: { theme: Theme; compact: boolean }) {
 function NothingYet({ theme, layout, loadError, openOverview, openSettings }: PanelProps & { loadError?: string | null }) {
   const c = theme.colors; const t = text(c);
   const compact = layout.compact;
-  return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
+  if (!compact) return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
     <PanelTop theme={theme} compact={compact} openOverview={openOverview} openSettings={openSettings} />
-    <View style={{ padding: compact ? 16 : 12, gap: 8 }}>
+    <View style={{ padding: 12, gap: 8 }}>
       <Text style={t.meta}>Nothing to follow here yet. Once an agent opens a PR or records a task in this workspace, its stack and tasks show up here.</Text>
       {loadError && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusDanger }]}>{loadError}</Text>}
     </View>
+  </View>;
+  // Phones: teach with the panel's own rail instead of one line of small print at the top of an empty screen.
+  const tp = text(c, true);
+  const steps: [string, string, string, string][] = [
+    ["GitPullRequest", mergedColor(c), "Pull requests, as a stack", "Each PR the agent opens, in merge order, with checks and reviews."],
+    ["CircleAlert", c.statusWarning, "What needs you", "Questions, reviews and merges, one action each."],
+    ["CircleCheck", c.statusSuccess, "When it's done", "The agent declares Done once every PR and task settles."],
+  ];
+  return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
+    <PanelTop theme={theme} compact={compact} openOverview={openOverview} openSettings={openSettings} />
+    <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 24, gap: 16 }}>
+      <View style={{ gap: 6 }}>
+        <Text accessibilityRole="header" style={tp.title}>Nothing to follow here yet</Text>
+        <Text style={[tp.body, { color: c.foregroundMuted }]}>Once an agent opens a PR or records a task in this workspace, Follow-up tracks it here.</Text>
+      </View>
+      <View>
+        {steps.map(([icon, color, title, line], i) => <View key={title} style={{ flexDirection: "row", gap: 12 }}>
+          <View style={{ alignItems: "center", width: 24 }}>
+            <View style={{ width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: tint(color, c) }}><Icon name={icon} size={13} color={color} /></View>
+            {i < steps.length - 1 && <View style={{ flex: 1, width: 2, backgroundColor: c.border, marginVertical: 2 }} />}
+          </View>
+          <View style={{ flex: 1, paddingBottom: i < steps.length - 1 ? 18 : 0, gap: 2, paddingTop: 2 }}>
+            <Text style={tp.label}>{title}</Text>
+            <Text style={tp.meta}>{line}</Text>
+          </View>
+        </View>)}
+      </View>
+      {loadError && <Text accessibilityRole="alert" style={[tp.meta, { color: c.statusDanger }]}>{loadError}</Text>}
+      <View style={{ flexDirection: "row" }}><Button theme={theme} compact kind="secondary" icon="Settings" title="Project settings" accessibilityHint="Choose which projects Follow-up tracks" onPress={openSettings} /></View>
+    </ScrollView>
   </View>;
 }
 
@@ -133,7 +163,7 @@ function AgentCard({ workspace: w, theme, compact, now, openAgent }: { workspace
   const blocker = queued && !sent ? sendBlocker(w, queued) : null;
   return <Card theme={theme} compact={compact} icon="Bot" title={recipient === w.mainAgentId ? "Main agent is on it" : "Recovery agent is on it"}
     right={openAgent && <Button theme={theme} compact={compact} kind="ghost" icon="ArrowUpRight" title="Open" accessibilityLabel="Open the agent's chat" onPress={() => openAgent(recipient)} />}>
-    <CardRow theme={theme}>
+    <CardRow theme={theme} compact={compact}>
       <Text style={[t.meta, { marginBottom: 6 }]}>{sent ? `Sent ${batch.tasks.length} repair${batch.tasks.length === 1 ? "" : "s"} ${ago(batch.sentAt, now)}. Follow-up waits for the agent to report back.` : `${batch.tasks.length} repair${batch.tasks.length === 1 ? "" : "s"} queued · ${blocker ?? "sends when the agent is idle"}`}</Text>
       {batch.tasks.map((task, i) => <View key={task.key} style={{ flexDirection: "row", gap: 6 }}>
         <Text style={[t.meta, { width: 16, fontVariant: ["tabular-nums"] }]}>{i + 1}.</Text>
@@ -179,10 +209,10 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
   const shown = open("workspace");
   const openUrl = (url: string) => { void openExternalUrl(url).catch(() => undefined); };
   return <View style={{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 8, borderWidth: 1, borderColor: c.border, overflow: "hidden" }}>
-    <View style={{ marginTop: -1 }}><FoldRow theme={theme} open={shown} onPress={() => toggle("workspace")} icon="SlidersHorizontal" iconColor={c.foregroundMuted} label="Spec, agent and recovery" /></View>
+    <View style={{ marginTop: -1 }}><FoldRow theme={theme} compact={compact} open={shown} onPress={() => toggle("workspace")} icon="SlidersHorizontal" iconColor={c.foregroundMuted} label="Spec, agent and recovery" /></View>
     {shown && <>
       <SpecRow workspace={w} theme={theme} compact={compact} onEdit={editSpec} />
-      <CardRow theme={theme}>
+      <CardRow theme={theme} compact={compact}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <View style={{ flex: 1, minWidth: 160, gap: 2 }}>
             <Text style={t.label}>Main agent</Text>
@@ -193,7 +223,7 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
         </View>
         {(w.contributorAgentIds ?? []).map(id => <OtherRootAgent key={id} agentId={id} workspace={w} theme={theme} compact={compact} openAgent={openAgent} mainAgentId={w.mainAgentId} />)}
       </CardRow>
-      <CardRow theme={theme}>
+      <CardRow theme={theme} compact={compact}>
         <View style={{ gap: 8 }}>
           <View style={{ gap: 2 }}>
             <Text style={t.label}>Recovery</Text>
@@ -211,7 +241,7 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
         </View>
       </CardRow>
       {/* Graphite's merge-when-ready needs the browser companion; GitHub repositories use auto-merge and never see this. */}
-      {active && browserReady === false && w.prs.some(p => !settledForDisplay(p) && p.snapshot && p.snapshot.prWorkflow !== "github") && <CardRow theme={theme}>
+      {active && browserReady === false && w.prs.some(p => !settledForDisplay(p) && p.snapshot && p.snapshot.prWorkflow !== "github") && <CardRow theme={theme} compact={compact}>
         <View style={{ gap: 8 }}>
           <View style={{ gap: 2 }}>
             <Text style={t.label}>Merge when ready</Text>
@@ -240,7 +270,7 @@ function MainAgentName({ agentId, theme }: { agentId: string; theme: Theme }) {
  * its own Make main agent: that is the undo, and the toast says so instead of a confirmation step.
  */
 function OtherRootAgent({ agentId, mainAgentId, workspace: w, theme, compact, openAgent }: { agentId: string; mainAgentId: string; workspace: Workspace; theme: Theme; compact: boolean; openAgent?: (id: string) => void }) {
-  const c = theme.colors; const t = text(c);
+  const c = theme.colors; const t = text(c, compact);
   const title = useAgentTitle(agentId); const formerTitle = useAgentTitle(mainAgentId);
   const control = useRpc(controlRpc); const cache = useQueryClient(); const toast = useToast();
   const promote = useMutation({
@@ -251,12 +281,13 @@ function OtherRootAgent({ agentId, mainAgentId, workspace: w, theme, compact, op
   const canPromote = w.enable_tracking && !w.archived;
   return <View style={{ gap: 8, marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: c.border }}>
     <View style={{ gap: 2 }}>
-      <Text numberOfLines={1} style={[t.meta, { color: c.foreground }]}>{title}</Text>
+      <Text numberOfLines={1} style={compact ? t.label : [t.meta, { color: c.foreground }]}>{title}</Text>
       <Text style={t.meta}>Can add PRs here. Can't ask you questions or call Done.</Text>
     </View>
-    {(openAgent || canPromote) && <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-      {canPromote && <Button theme={theme} compact={compact} title="Make main agent" accessibilityLabel={`Make ${title} the main agent`} accessibilityHint={`Repairs, questions and Done move from ${formerTitle} to ${title}.`} loading={promote.isPending} disabled={promote.isPending} onPress={() => promote.mutate()} />}
-      {openAgent && <Button theme={theme} compact={compact} kind="ghost" icon="MessageSquare" title="Open" accessibilityLabel={`Open ${title}`} onPress={() => openAgent(agentId)} />}
+    {/* Phones: the two actions split one row (no wrap into a second row). */}
+    {(openAgent || canPromote) && <View style={{ flexDirection: "row", flexWrap: compact ? "nowrap" : "wrap", gap: 8 }}>
+      {canPromote && <Button theme={theme} compact={compact} grow={compact} title="Make main agent" accessibilityLabel={`Make ${title} the main agent`} accessibilityHint={`Repairs, questions and Done move from ${formerTitle} to ${title}.`} loading={promote.isPending} disabled={promote.isPending} onPress={() => promote.mutate()} />}
+      {openAgent && <Button theme={theme} compact={compact} kind={compact ? "secondary" : "ghost"} icon="MessageSquare" title="Open" accessibilityLabel={`Open ${title}`} onPress={() => openAgent(agentId)} />}
     </View>}
   </View>;
 }
@@ -301,13 +332,13 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const openPr = (key: string) => setSheet({ key, intent: null });
   // The expand button only appears while the panel is narrow; a wide panel or the larger view keeps its collapse button.
   const resizeShown = compact ? null : resize?.icon === "Maximize2" && wide ? null : resize;
-  const header = <WorkspaceHeader workspace={w} theme={theme} compact={compact} now={now} onSettings={openSettings} onRefresh={() => update.mutate()} refreshing={update.isPending} onAuto={next => auto.mutate(next)} autoPending={auto.isPending} notice={loadError ?? null} onOpenPr={openPr} resize={resizeShown} hideTitle={large} />;
+  const header = <WorkspaceHeader workspace={w} theme={theme} compact={compact} now={now} onSettings={openSettings} onRefresh={() => update.mutate()} refreshing={update.isPending} onAuto={next => auto.mutate(next)} autoPending={auto.isPending} notice={loadError ?? null} onOpenPr={openPr} resize={resizeShown} hideTitle={large} onHome={compact ? openOverview : undefined} />;
   const shipped = <ShippedCard workspace={w} theme={theme} compact={compact} now={now} />;
   const needs = <NeedsYouCard workspace={w} theme={theme} compact={compact} now={now} actions={{ openAgent, openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion }} />;
   const agent = <AgentCard workspace={w} theme={theme} compact={compact} now={now} openAgent={openAgent} />;
   // Once shipped, the stack and tasks are history: one quiet fold instead of two near-empty cards.
   const history = done && <View style={{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.colors.border, overflow: "hidden" }}>
-    <View style={{ marginTop: -1 }}><FoldRow theme={theme} open={isOpen("history")} onPress={() => toggle("history")} icon="History" iconColor={theme.colors.foregroundMuted} label={historyLabel(w)} /></View>
+    <View style={{ marginTop: -1 }}><FoldRow theme={theme} compact={compact} open={isOpen("history")} onPress={() => toggle("history")} icon="History" iconColor={theme.colors.foregroundMuted} label={historyLabel(w)} /></View>
   </View>;
   const showWork = !done || isOpen("history");
   const stacks = showWork && <StacksCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} onOpen={openPr} wide={wide} />;
@@ -315,7 +346,8 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const log = <ActivityCard workspace={w} theme={theme} compact={compact} now={now} open={isOpen} toggle={toggle} onOpenQuestion={setQuestion} />;
   const extras = <WorkspaceCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} openAgent={openAgent} browserReady={browser.data ? browser.data.ready : null} openOverview={openOverview} editSpec={() => setSpecOpen(true)} />;
   return <View onLayout={event => setWidth(event.nativeEvent.layout.width)} style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>
-    {top}
+    {/* Phones fold the top bar into the header's own row. */}
+    {!compact && top}
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20, ...(large ? { maxWidth: 1240, width: "100%", alignSelf: "center", paddingHorizontal: 12 } : null) }}>
       {header}
       {about}

@@ -128,7 +128,7 @@ export function TasksCard({ workspace: w, theme, compact, open, toggle, onOpenQu
       <Text style={t.meta}>No follow-up tasks. The agent records work that outlives a merge here, like a migration to run or a production check.</Text>
     </View>}
     {outstanding.map(o => { const q = linkedQuestion(o, w); return <TaskRow key={o.id} o={o} w={w} theme={theme} compact={compact} onOpen={() => q && onOpenQuestion ? onOpenQuestion(q.id) : setSelected(o.id)} />; })}
-    {completed.length > 0 && <FoldRow theme={theme} open={showDone} onPress={() => toggle("tasks-done")} icon="Check" iconColor={c.statusSuccess} label={`${completed.length} done`} />}
+    {completed.length > 0 && <FoldRow theme={theme} compact={compact} open={showDone} onPress={() => toggle("tasks-done")} icon="Check" iconColor={c.statusSuccess} label={`${completed.length} done`} />}
     {showDone && completed.map(o => <TaskRow key={o.id} o={o} w={w} theme={theme} compact={compact} onOpen={() => setSelected(o.id)} />)}
     <TaskSheet o={all.find(o => o.id === selected) ?? null} w={w} theme={theme} compact={compact} onClose={() => setSelected(null)} />
   </Card>;

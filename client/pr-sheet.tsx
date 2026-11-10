@@ -18,7 +18,7 @@ function Fact({ icon, color, children, theme }: { icon: string; color?: string; 
 
 /** Everything about one PR, with its merge and reviewer controls. A sheet on phones, a dialog on desktop. */
 export function PrSheet({ workspace: w, prKey, intent, theme, compact, browserReady, onClose }: { workspace: Workspace; prKey: string | null; intent: "merge" | "reviewers" | null; theme: Theme; compact: boolean; browserReady: boolean; onClose: () => void }) {
-  const c = theme.colors; const t = text(c);
+  const c = theme.colors; const t = text(c, compact);
   const pr = w.prs.find(p => p.key === prKey) ?? null;
   const s = pr?.snapshot;
   const open = (url: string) => { void openExternalUrl(url).catch(() => undefined); };
@@ -28,10 +28,10 @@ export function PrSheet({ workspace: w, prKey, intent, theme, compact, browserRe
   const parent = pr?.parent ? w.prs.find(p => p.key === pr.parent) : null;
   const reviewers = s?.reviewers?.complete ? [...new Set([...s.reviewers.requested, ...s.reviewers.teams.map(team => `team/${team}`), ...s.reviewers.reviewed])] : [];
   return <Modal title={pr ? `Pull request #${pr.number}` : "Pull request"} icon={<Icon name={tone === "merged" ? "GitMerge" : "GitPullRequest"} size={18} color={toneColor(c, tone)} />} open={!!pr} onOpenChange={next => { if (!next) onClose(); }}>
-    <Modal.Content contentContainerStyle={{ padding: compact ? 16 : 20, gap: 14 }}>
+    <Modal.Content contentContainerStyle={{ padding: compact ? 16 : 20, gap: compact ? 16 : 14, ...(compact ? { paddingBottom: 24 } : null) }}>
       {pr && <>
         <View style={{ gap: 6 }}>
-          <Text selectable style={[t.title, { fontSize: 16, lineHeight: 22 }]}>{s?.title ?? `${pr.repo} pull request`}</Text>
+          <Text selectable style={compact ? t.title : [t.title, { fontSize: 16, lineHeight: 22 }]}>{s?.title ?? `${pr.repo} pull request`}</Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
             {status && <Chip theme={theme} label={status.label} color={toneColor(c, tone === "pending" || tone === "draft" ? "unknown" : tone)} />}
             <Text style={t.meta}>{pr.repo} · {pr.stack}{stack.length > 1 ? ` · ${stack.indexOf(pr) + 1} of ${stack.length}` : ""}</Text>
@@ -53,10 +53,11 @@ export function PrSheet({ workspace: w, prKey, intent, theme, compact, browserRe
         {s?.state === "OPEN" && <View style={{ paddingTop: 12, borderTopWidth: 1, borderTopColor: c.border }}>
           <PrControls key={`${pr.key}:${intent ?? ""}`} pr={pr} workspace={w} theme={theme} compact={compact} browserReady={browserReady} intent={intent} />
         </View>}
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, paddingTop: 12, borderTopWidth: 1, borderTopColor: c.border }}>
-          {s?.prWorkflow !== "github" && <Button theme={theme} compact={compact} icon="ExternalLink" title="Open in Graphite" accessibilityLabel={`Open ${pr.repo} pull request ${pr.number} in Graphite`} onPress={() => open(graphitePrUrl(pr))} />}
-          {s?.url && s.prWorkflow === "github" && <Button theme={theme} compact={compact} icon="ExternalLink" title="Open on GitHub" accessibilityLabel={`Open ${pr.repo} pull request ${pr.number} on GitHub`} onPress={() => open(s.url)} />}
-          {s?.url && s.prWorkflow !== "github" && <Button theme={theme} compact={compact} kind="ghost" icon="Github" title="GitHub" accessibilityLabel={`Open ${pr.repo} pull request ${pr.number} on GitHub`} onPress={() => open(s.url)} />}
+        {/* Phones: the links split the row evenly. GitHub-mode repositories have no Graphite link; GitHub is the link. */}
+        <View style={{ flexDirection: "row", flexWrap: compact ? "nowrap" : "wrap", gap: 8, paddingTop: 12, borderTopWidth: 1, borderTopColor: c.border }}>
+          {s?.prWorkflow !== "github" && <View style={compact ? { flex: 1 } : undefined}><Button theme={theme} compact={compact} grow={compact} icon="ExternalLink" title="Open in Graphite" accessibilityLabel={`Open ${pr.repo} pull request ${pr.number} in Graphite`} onPress={() => open(graphitePrUrl(pr))} /></View>}
+          {s?.url && s.prWorkflow === "github" && <View style={compact ? { flex: 1 } : undefined}><Button theme={theme} compact={compact} grow={compact} icon="ExternalLink" title="Open on GitHub" accessibilityLabel={`Open ${pr.repo} pull request ${pr.number} on GitHub`} onPress={() => open(s.url)} /></View>}
+          {s?.url && s.prWorkflow !== "github" && <View style={compact ? { flex: 1 } : undefined}><Button theme={theme} compact={compact} grow={compact} kind={compact ? "secondary" : "ghost"} icon="Github" title="GitHub" accessibilityLabel={`Open ${pr.repo} pull request ${pr.number} on GitHub`} onPress={() => open(s.url)} /></View>}
         </View>
       </>}
     </Modal.Content>

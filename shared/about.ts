@@ -189,6 +189,8 @@ export function footerText(r: Pick<AboutRecord, "generatedAt" | "basis" | "faile
   const from = parts.length ? ` from ${parts.join(", ")}` : "";
   return r.by?.model ? `Summarized by ${modelName(r.by.model)} · ${ageWords(r.generatedAt, now)}${from}` : `Summarized ${ageWords(r.generatedAt, now)}${from}`;
 }
+/** Phones' one meta line: "Summarized by Haiku · 2m ago from the chat, 2 PRs" → "Haiku · 2m ago". */
+export const shortFooter = (footer: string | null): string => (footer ?? "").split(" from ")[0].replace(/^Summarized (by )?/, "");
 export function failedText(failed: readonly string[]): string | null {
   return failed.length ? `${failed.join(" and ")} couldn't be read; ${failed.length === 1 ? "its" : "their"} links show bare.` : null;
 }
