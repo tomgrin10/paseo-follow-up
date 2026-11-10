@@ -82,6 +82,12 @@ One long-lived agent the developer talks to about all workspaces. It routes asks
 - **When it runs.** It hashes its inputs and calls the model only when they changed. It runs hourly on workdays,
   within the daily cap, while the governor allows background work.
 - **Output:** `priorities.json` (`server/priorities.ts`, `shared/priorities.ts`) and `ranker.json`.
+- **One row shows the reason.** A priority is stored per workspace, and its score orders every row of that
+  workspace. A workspace can have several Home rows, one per flagged root agent, and the reason was written about
+  the row the ranker read. That row is `row` on the stored priority, and only that row shows the reason. A priority
+  for the whole workspace (`set_priorities`, or one stored without `row`) shows on the workspace's only row, its own
+  `ws:` row, or its main agent's row (`priorityRow`). The invariant is `row-lines-own-row` (`homeViolations` in
+  `shared/status-invariants.ts`).
 - **RPCs:** `follow.rank-status`, and `follow.rank-now`, which returns at once; poll the status.
 - **Agent tools:** `set_priorities` (an agent can supply priorities itself), `priorities`, `rank_status`,
   `rerank_priorities`.
