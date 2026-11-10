@@ -30,7 +30,7 @@ function ToolRowView({ item, theme }: PluginTimelineItemProps<ToolRow>) {
   const row = item.data;
   const [expanded, setExpanded] = useState(false);
   const [hovered, setHovered] = useState(false);
-  if (row.done) return <DoneCard summary={row.done.summary} theme={theme} />;
+  if (row.done) return <DoneCard summary={row.done.summary} unconfirmed={row.done.unconfirmed ?? []} theme={theme} />;
   const color = row.tone === "danger" ? c.statusDanger : row.tone === "warning" ? c.statusWarning : row.tone === "success" ? c.statusSuccess : c.foregroundMuted;
   const openable = row.more !== null;
   const active = openable && (hovered || expanded);
@@ -50,7 +50,7 @@ function ToolRowView({ item, theme }: PluginTimelineItemProps<ToolRow>) {
 }
 
 /** The agent declared the workspace done: the one row in the chat that is allowed to be a little proud. */
-function DoneCard({ summary, theme }: { summary: string; theme: PluginTimelineItemProps["theme"] }) {
+function DoneCard({ summary, unconfirmed, theme }: { summary: string; unconfirmed: string[]; theme: PluginTimelineItemProps["theme"] }) {
   const c = theme.colors;
   return <Reveal>
     <View accessibilityRole="summary" style={{ flexDirection: "row", gap: 12, padding: 12, borderRadius: 10, backgroundColor: tint(c.statusSuccess, c), borderWidth: 1, borderColor: withAlpha(c.statusSuccess, 0.35), marginVertical: 4 }}>
@@ -58,7 +58,9 @@ function DoneCard({ summary, theme }: { summary: string; theme: PluginTimelineIt
       <View style={{ flex: 1, gap: 3 }}>
         <Text style={{ color: c.foreground, fontSize: 14, lineHeight: 19, fontWeight: "600" }}>Workspace done</Text>
         {!!summary && <Text selectable style={{ color: c.foreground, fontSize: 13, lineHeight: 19 }}>{summary}</Text>}
-        <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 17 }}>Follow-up checked every PR and task. Archive the workspace when you're ready.</Text>
+        <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 17 }}>{unconfirmed.length
+          ? `Deploy not confirmed by Follow-up for ${unconfirmed.map(k => k.includes("#") ? `#${k.split("#")[1]}` : k).join(", ")}; the summary above is the agent's evidence. Archive the workspace when you're ready.`
+          : "Follow-up checked every PR and task. Archive the workspace when you're ready."}</Text>
       </View>
     </View>
   </Reveal>;
