@@ -234,7 +234,8 @@ function Past({ b, c, now, compact, height }: { b: Brief; c: Colors; now: number
   const picked = answered && asked.some(d => d.chosen);
   const icon = b.state === "superseded" ? "History" : "CircleCheck";
   const color = b.state === "superseded" ? c.foregroundMuted : c.statusSuccess;
-  const right = answered && b.outcomeAt ? `${b.outcome === "Done" ? "Done" : "Answered"} ${clock(b.outcomeAt)}` : age(b.outcomeAt ?? b.at, now);
+  // A Done card already says "Done" as its outcome; its time stands alone rather than repeating it.
+  const right = answered && b.outcomeAt ? (b.outcome === "Done" ? clock(b.outcomeAt) : `Answered ${clock(b.outcomeAt)}`) : age(b.outcomeAt ?? b.at, now);
   const body = expanded && <View style={{ gap: 10, paddingTop: 4 }}>
     <BriefBody b={b} c={c} compact={compact} tight={false} embedded height={height} mode="readonly" picks={{}} onPick={() => undefined} busy={null} />
   </View>;
@@ -249,7 +250,7 @@ function Past({ b, c, now, compact, height }: { b: Brief; c: Colors; now: number
         : <Text numberOfLines={expanded ? undefined : 1} style={{ flex: 1, minWidth: 0, color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>{collapsedLine(b)}</Text>}
       <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontVariant: ["tabular-nums"] }}>{right}</Text>
     </View>
-    {hasOriginal(b) && <View style={{ paddingLeft: 25 }}><Reveal label={answered ? "Show full question" : "Show original"} open={expanded} onPress={() => setExpanded(v => !v)} c={c} compact={compact} /></View>}
+    {hasOriginal(b) && <View style={{ paddingLeft: 25 }}><Reveal label={answered ? (b.kind === "action" ? "Show full ask" : "Show full question") : "Show original"} open={expanded} onPress={() => setExpanded(v => !v)} c={c} compact={compact} /></View>}
     {body}
   </View>;
   // Answered with picks: the ask, then each decision's question and the picked option, so the answer is never
