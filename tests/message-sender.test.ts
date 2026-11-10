@@ -73,6 +73,7 @@ test("Recent steps (live timeline and transcripts): no raw envelope, only the de
   assert.deepEqual(tailSteps([user(AGENT_NOTIFICATION)])[0], { kind: "message", from: "Test runner finished", text: "yes, all 42 tests pass" });
   assert.deepEqual(tailSteps([user(FORWARD)])[0], { kind: "message", from: "You, via Overseer", text: "use option B" });
   assert.deepEqual(tailSteps([user(SCHEDULE)]), [], "schedule fires aren't steps");
+  assert.deepEqual(tailSteps([user(BATCH)])[0], { kind: "message", from: "Follow-up batch", text: "- Fix CI on acme/app#12" }, "the batch header isn't repeated under its label");
   // Paseo 0.15+ projects an agent's message to an agent_message tool call: same row, not a tool line.
   assert.deepEqual(tailSteps([{ type: "tool_call", name: "agent_message", agentMessage: { event: "message", sender: { id: "x", title: "Release captain" }, text: "hi" } } as never]), [{ kind: "message", from: "From Release captain", text: "hi" }]);
   // Its projected finish notification (as Paseo 0.15.4 records it) keeps the <agent-response> wrapper: shown stripped.
