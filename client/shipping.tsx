@@ -9,7 +9,7 @@ import {
   MERGE_METHOD_LABELS, MERGE_METHOD_SHORT, PR_WORKFLOWS, setupValue, setupWrite, type setPrWorkflowInputSchema, PR_WORKFLOW_LABELS, commandName, repoShippingSummary, reposShippingSummary, reviewFixLabel, shippingSummary, workflowName,
   type MergeMethod, type PrWorkflowSetting, type PrWorkflowView, type RepoWorkflowView, type ReviewFix,
 } from "../shared/pr-workflow";
-import { Button, errorText, text, type Theme } from "./kit";
+import { Button, errorText, text, type Theme, SubmitScope } from "./kit";
 import { Disclosure } from "./settings-shell";
 
 export const shippingKey = ["follow-through", "pr-workflow"];
@@ -128,15 +128,14 @@ function ReviewFixSelect({ label, value, inherited, theme, compact, busy, onSave
       options={[...(inherited ? [{ value: "inherit" as const, label: `Default · ${reviewFixLabel(inherited)}` }] : []), { value: "builtin" as const, label: "Built-in steps" }, { value: "command" as const, label: value?.kind === "command" ? commandName(value)! : "A skill or command…" }]}
       onValueChange={next => { if (next === "command") { setEditing(true); return; } setEditing(false); onSave(next === "inherit" ? null : { kind: "builtin" }); }} />
     {/* Phones: the field gets the full width and Save / Cancel split the row under it. */}
-    {editing && <View style={compact ? { gap: 8, paddingHorizontal: 16, paddingBottom: 12 } : { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingBottom: 12 }}>
+    {editing && <SubmitScope enabled={valid && !busy} onSubmit={() => { onSave({ kind: "command", command: draft.trim() }); setEditing(false); }} style={compact ? { gap: 8, paddingHorizontal: 16, paddingBottom: 12 } : { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingBottom: 12 }}>
       <TextInput accessibilityLabel="Skill or command for review comments" value={draft} onChangeText={setDraft} placeholder="/fix-pr" placeholderTextColor={c.foregroundMuted} autoCapitalize="none" autoCorrect={false} autoFocus
-        onSubmitEditing={() => { if (valid) { onSave({ kind: "command", command: draft.trim() }); setEditing(false); } }}
         style={{ flex: 1, minWidth: 0, minHeight: compact ? 44 : 32, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: draft && !valid ? c.statusDanger : c.border, color: c.foreground, fontSize: compact ? 15 : 13, backgroundColor: c.surface0, fontFamily: "monospace", ...(compact ? { flex: undefined } : {}) }} />
       <View style={{ flexDirection: "row", gap: 8 }}>
-        <Button theme={theme} compact={compact} grow={compact} kind="primary" title="Save" disabled={!valid || busy} onPress={() => { onSave({ kind: "command", command: draft.trim() }); setEditing(false); }} />
+        <Button shortcut theme={theme} compact={compact} grow={compact} kind="primary" title="Save" disabled={!valid || busy} onPress={() => { onSave({ kind: "command", command: draft.trim() }); setEditing(false); }} />
         <Button theme={theme} compact={compact} grow={compact} kind={compact ? "secondary" : "ghost"} title="Cancel" onPress={() => setEditing(false)} />
       </View>
-    </View>}
+    </SubmitScope>}
     {editing && draft !== "" && !valid && <Text style={[t.meta, { color: c.statusDanger, paddingHorizontal: compact ? 16 : 14, paddingBottom: 10 }]}>Use a name like /fix-pr: letters, digits, dashes, dots or colons.</Text>}
   </View>;
 }

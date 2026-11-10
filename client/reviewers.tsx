@@ -5,7 +5,7 @@ import { Icon, SettingsAction, SettingsCard, useToast } from "@getpaseo/plugin/c
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { reviewerSettingsRpc, reviewerSuggestionsRpc, saveReviewersRpc } from "../shared/contracts";
 import { MAX_REVIEWERS, TEAM_SLUG, USER_LOGIN, isTeam, resolveReviewers, reviewerConfig, reviewerLabel, sameLogin, setReviewerConfig, type ReviewerEntry } from "../shared/reviewers";
-import { Button, Switch, errorText, text, type Theme } from "./kit";
+import { Button, Switch, errorText, text, type Theme, SubmitScope } from "./kit";
 import { Disclosure } from "./settings-shell";
 import { repoSummary, reposSummary, reviewersConfigured } from "../shared/settings-nav";
 
@@ -178,7 +178,7 @@ export function ReviewerPicker({ repo, author, theme, compact, busy, onCancel, o
   const picked = options.filter(r => checked.includes(r.login.toLowerCase()) && !isAuthor(r));
   const toggle = (r: ReviewerEntry) => setChecked(v => v.includes(r.login.toLowerCase()) ? v.filter(x => x !== r.login.toLowerCase()) : [...v, r.login.toLowerCase()]);
   const sameAsSaved = picked.length === saved.length && picked.every((r, i) => sameLogin(r.login, saved[i].login));
-  return <View accessibilityRole="summary" accessibilityLabel="Pick reviewers for this PR" style={{ gap: 8 }}>
+  return <SubmitScope enabled={picked.length > 0 && !busy} onSubmit={() => onRequest(picked, remember && !sameAsSaved)} accessibilityRole="summary" accessibilityLabel="Pick reviewers for this PR" style={{ gap: 8 }}>
     {!options.length && <Text style={t.meta}>{`No reviewers set for ${repo}. Add who to ask on this PR.`}</Text>}
     {options.map(r => {
       const on = checked.includes(r.login.toLowerCase()) && !isAuthor(r);
@@ -199,12 +199,12 @@ export function ReviewerPicker({ repo, author, theme, compact, busy, onCancel, o
     {picked.length > 0 && !sameAsSaved && <Switch theme={theme} compact={compact} label={saved.length ? `Remember for ${repo}` : `Remember for ${repo} (no list yet)`} value={remember} onChange={setRemember}
       hint="Saves the checked reviewers as this repository's list." />}
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-      <Button theme={theme} compact={compact} kind="primary" icon="UserPlus" loading={busy} disabled={!picked.length || busy}
+      <Button shortcut theme={theme} compact={compact} kind="primary" icon="UserPlus" loading={busy} disabled={!picked.length || busy}
         title={picked.length ? `Request ${picked.length === 1 ? reviewerLabel(picked[0]) : `${picked.length} reviewers`}` : "Request reviewers"}
         accessibilityLabel={`Request ${picked.map(reviewerLabel).join(", ") || "nobody"}`} onPress={() => onRequest(picked, remember && !sameAsSaved)} />
       <Button theme={theme} compact={compact} kind="ghost" title="Cancel" disabled={busy} onPress={onCancel} />
     </View>
-  </View>;
+  </SubmitScope>;
 }
 
 /** "Will ask Uri and Yuval": the configured reviewers for a PR, minus its author. */
