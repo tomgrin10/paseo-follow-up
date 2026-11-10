@@ -46,6 +46,21 @@ export class AgentSettingsStore {
     return next;
   }
 
+  /** Wait for background jobs: on unless the developer turned it off. */
+  async waitEnabled(): Promise<boolean> { return (await this.load()).file.enable_wait !== false; }
+  setWait(enabled: boolean): Promise<AgentSettingsFile> {
+    const next = this.tail.then(async () => {
+      const { file, invalid } = await this.load();
+      const copy: AgentSettingsFile = { ...structuredClone(file), enable_wait: enabled };
+      if (enabled) delete copy.enable_wait;
+      await this.write(copy);
+      this.cached = { file: copy, invalid };
+      return copy;
+    });
+    this.tail = next.catch(() => undefined);
+    return next;
+  }
+
   private async write(file: AgentSettingsFile): Promise<void> {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     const temporary = join(this.directory, `agents.${randomUUID()}.tmp`);

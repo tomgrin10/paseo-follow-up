@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { waitStatusSchema } from "./wait";
 
 /**
  * Which agent each of Follow-up's special roles uses (Settings → Agents), kept in `agents.json` next to state.json.
@@ -32,7 +33,8 @@ export const savedRoleSchema = z.object({
   cadenceMinutes: z.number().int().min(5).max(24 * 60).optional(),
 });
 export type SavedRole = z.infer<typeof savedRoleSchema>;
-export type AgentSettingsFile = { version: 1; roles: Partial<Record<AgentRole, SavedRole>> };
+/** `enable_wait`: Wait for background jobs (shared/wait.ts); absent means on. */
+export type AgentSettingsFile = { version: 1; roles: Partial<Record<AgentRole, SavedRole>>; enable_wait?: boolean };
 export const EMPTY_AGENT_SETTINGS: AgentSettingsFile = { version: 1, roles: {} };
 
 /** A role as used: every field filled in. `model: null` is the provider's default (for the Overseer: the newest Opus). */
@@ -87,7 +89,8 @@ export function parseAgentSettings(raw: unknown): { file: AgentSettingsFile; inv
     if (bad) invalid.push(role);
     if (Object.keys(kept).length) roles[role] = kept;
   }
-  return { file: { version: 1, roles }, invalid };
+  const wait = raw && typeof raw === "object" ? (raw as { enable_wait?: unknown }).enable_wait : undefined;
+  return { file: { version: 1, roles, ...(typeof wait === "boolean" ? { enable_wait: wait } : {}) }, invalid };
 }
 
 /** The role as used. A provider that changed without a model drops the old model, thinking and mode. */
@@ -156,6 +159,8 @@ export const agentSettingsViewSchema = z.object({
   roles: z.array(roleConfigSchema.extend({ summary: z.string() })),
   invalid: z.array(z.enum(AGENT_ROLES)),
   catalog: catalogSchema.nullable(),
+  /** Wait for background jobs; optional so an older worker's reply still parses. */
+  wait: waitStatusSchema.optional(),
 });
 export type AgentSettingsView = z.infer<typeof agentSettingsViewSchema>;
 
