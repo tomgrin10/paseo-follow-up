@@ -154,11 +154,11 @@ test("runUndoable: Undo inside the window sends nothing; otherwise the work runs
     const toast = toastsNow().at(-1)!;
     assert.equal(toast.message, "Marked done"); assert.deepEqual(toast.actions.map(a => a.label), ["Undo"]);
     toast.actions[0].onPress(); dismissToast(toast.id);
-    t.mock.timers.tick(5_000); await new Promise(r => setImmediate(r));
+    t.mock.timers.tick(6_100); await new Promise(r => setImmediate(r));
     assert.deepEqual(sent, [], "undone: the agent never hears it"); assert.equal(undone, 1);
     runUndoable("Marked done", spec, () => { undone++; });
     assert.deepEqual(sent, [], "nothing goes out while Undo is on screen");
-    t.mock.timers.tick(5_000); await new Promise(r => setImmediate(r));
+    t.mock.timers.tick(6_100); await new Promise(r => setImmediate(r));
     assert.deepEqual(sent, ["Done: Rotate the key"]);
     assert.equal(toastsNow().some(x => x.message === "Marked done" && x.actions.length === 0), false, "no second toast after the send");
   } finally { hosts.splice(hosts.indexOf(97), 1); for (const x of toastsNow()) dismissToast(x.id); t.mock.timers.reset(); }

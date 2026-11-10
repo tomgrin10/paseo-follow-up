@@ -136,11 +136,14 @@ export async function runAction<T>(opts: ActionSpec<T>, key?: string): Promise<b
  */
 export function runUndoable<T>(message: string, opts: ActionSpec<T>, onUndo: () => void, key?: string): void {
   if (!hasToastHost()) { void runAction(opts, key); return; }
-  let undone = false;
-  pushToast("success", message, [{ label: "Undo", onPress: () => { undone = true; onUndo(); } }]);
-  // After the send, the collapsed card is the confirmation: no second toast. A failure still reports with Retry.
-  setTimeout(() => { if (!undone) void runAction({ ...opts, success: null }, key); }, DURATION_MS);
+  // Nothing has happened yet, so the tone is neutral, not success. The window matches sign-off's Undo (6 s), is
+  // never pushed out by newer toasts, and holds while the pointer or focus is on it. The send runs only when it
+  // times out: Undo (or dismissing it) cancels. After the send, the collapsed card is the confirmation; a failure
+  // still reports with Retry.
+  pushToast("info", message, [{ label: "Undo", onPress: onUndo }], { durationMs: UNDO_WINDOW_MS, keep: true, onExpire: () => void runAction({ ...opts, success: null }, key) });
 }
+/** The same 6 s as a sign-off's Undo. */
+export const UNDO_WINDOW_MS = 6_000;
 
 // ---------- Open: a toast's way back to the question it is about ----------
 
