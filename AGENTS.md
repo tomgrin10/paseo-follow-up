@@ -76,3 +76,7 @@ fixture per reported bug).
   What's new and any update notice or prompt go through it; anything else is recorded quietly or shown as a row in
   Settings, never a sheet or toast. Home's "Updated to X · What's new" needs notes of X's own. The grid test fails if a
   non-major update would open a sheet; add new update surfaces to it.
+- Only the developer answers a Needs-you card (brief-follows-questions). A turn's prompt is read from the timeline
+  tail, including Paseo 0.15's agent_message and heartbeat tool-call projections, and an unseen prompt is "unknown",
+  never the developer. A turn the developer didn't start leaves the card open; only a newer brief supersedes it. While
+  a linked question is open on the server, nothing but a developer reply, pick or sign-off closes its card.
