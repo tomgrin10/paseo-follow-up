@@ -4,7 +4,7 @@ import { useRpc } from "@getpaseo/plugin/client";
 import { SettingsAction, SettingsCard, SettingsSection, SettingsSelect, SettingsSwitch, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { agentSettingsRpc, setAgentSettingRpc, setWaitRpc } from "../shared/contracts";
-import { WAIT_HINT, WAIT_NOT_ATTACHED, WAIT_TITLE, waitNote } from "../shared/wait";
+import { WAIT_HOST_NOTE, WAIT_NOT_ATTACHED, waitNote, waitSwitchCopy } from "../shared/wait";
 import { isJobRole, type AgentRole, type AgentSettingsView, type SavedRole } from "../shared/agent-settings";
 import { NO_PROMPT_MODE, SETTINGS_ORDER, isReset, resetEntry } from "../shared/job-rows";
 import { JobRows, agentSettingsKey, useAgentSettings, type JobExtra } from "./job-rows";
@@ -43,7 +43,8 @@ export function AgentSettings({ theme, compact }: Pick<PluginSurfaceProps, "them
 /**
  * Settings → Agents → Wait for background jobs: one switch, on by default. Shares the Agents screen's query, so it
  * costs no extra read. When the switch is on but Wait isn't attached (the standalone plugin is installed, or the host
- * doesn't serve plugin tools), an amber alert under it says so and what to do; the hint stays.
+ * doesn't serve plugin tools), an amber alert under it says so and what to do; the hint stays. On Paseo 0.16 (reason
+ * `host`) the card leads with "Paseo runs background jobs itself" and the switch only adds that guidance to sessions.
  */
 export function WaitSettings({ theme }: Pick<PluginSurfaceProps, "theme">) {
   const c = theme.colors; const t = text(c);
@@ -51,21 +52,22 @@ export function WaitSettings({ theme }: Pick<PluginSurfaceProps, "theme">) {
   const query = useQuery({ queryKey: key, queryFn: () => read({ catalog: true }), staleTime: 5 * 60_000 });
   const change = useMutation({
     mutationFn: (enable_wait: boolean) => write({ enable_wait }),
-    onSuccess: value => { cache.setQueryData(key, value); toast.show(`${WAIT_TITLE}: ${value.wait?.enable_wait ? "on" : "off"}`, { variant: "success" }); },
+    onSuccess: value => { cache.setQueryData(key, value); toast.show(`${waitSwitchCopy(value.wait).title}: ${value.wait?.enable_wait ? "on" : "off"}`, { variant: "success" }); },
     onError: error => toast.error(errorText(error)),
   });
   const wait = query.data?.wait;
   const note = wait ? waitNote(wait) : null;
+  const copy = waitSwitchCopy(wait);
   return <SettingsSection title="Background jobs">
     {/* The card's place is kept while loading, so the Models section below doesn't jump. */}
-    {query.isPending && <SettingsCard><View style={{ minHeight: 72, justifyContent: "center", paddingHorizontal: 16 }}><ActivityIndicator accessibilityLabel="Loading the Wait setting" color={c.foregroundMuted} style={{ alignSelf: "flex-start" }} /></View></SettingsCard>}
-    {query.error && <SettingsCard><SettingsAction label="Couldn't load the Wait setting" hint={errorText(query.error)} actionLabel="Retry" onPress={() => void query.refetch()} /></SettingsCard>}
+    {query.isPending && <SettingsCard><View style={{ minHeight: 72, justifyContent: "center", paddingHorizontal: 16 }}><ActivityIndicator accessibilityLabel="Loading the background jobs setting" color={c.foregroundMuted} style={{ alignSelf: "flex-start" }} /></View></SettingsCard>}
+    {query.error && <SettingsCard><SettingsAction label="Couldn't load the background jobs setting" hint={errorText(query.error)} actionLabel="Retry" onPress={() => void query.refetch()} /></SettingsCard>}
     {wait && <SettingsCard>
-      <SettingsSwitch label={WAIT_TITLE} hint={WAIT_HINT} value={wait.enable_wait} disabled={change.isPending} onValueChange={value => change.mutate(value)} />
-      {/* Paseo 0.16 (reason "host") isn't a problem to fix, so it reads as plain information, not a warning. */}
-      {note && wait.enable_wait && (wait.reason === "host"
-        ? <Text style={[t.meta, { color: c.foregroundMuted, paddingHorizontal: 16, paddingBottom: 12 }]}>{note}</Text>
-        : <Text accessibilityRole="alert" style={[t.meta, { color: c.statusWarning, paddingHorizontal: 16, paddingBottom: 12 }]}>{`${WAIT_NOT_ATTACHED} ${note}`}</Text>)}
+      {/* Paseo 0.16 (reason "host"): what the host does comes first and stays whether the switch is on or off; it's
+          information, not a problem, so no alert. */}
+      {wait.host && <Text style={[t.body, { color: c.foreground, paddingHorizontal: 16, paddingTop: 14 }]}>{WAIT_HOST_NOTE}</Text>}
+      <SettingsSwitch label={copy.title} hint={copy.hint} value={wait.enable_wait} disabled={change.isPending} onValueChange={value => change.mutate(value)} />
+      {note && wait.enable_wait && wait.reason !== "host" && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusWarning, paddingHorizontal: 16, paddingBottom: 12 }]}>{`${WAIT_NOT_ATTACHED} ${note}`}</Text>}
     </SettingsCard>}
   </SettingsSection>;
 }

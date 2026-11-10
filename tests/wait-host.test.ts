@@ -12,7 +12,7 @@ import type { PluginSessionOpenRequest } from "@getpaseo/plugin/server";
 import { Wait, WAIT_TOOLS, waitStatus } from "../server/wait";
 import { hostFeature } from "../server/host-features";
 import { backgroundWorkInstruction, waitInstruction } from "../server/mcp.mjs";
-import { WAIT_HOST_NOTE, waitNote } from "../shared/wait";
+import { WAIT_HINT, WAIT_HOST_HINT, WAIT_HOST_NOTE, WAIT_HOST_TITLE, WAIT_TITLE, waitNote, waitSwitchCopy } from "../shared/wait";
 
 async function dir(t: { after: (f: () => Promise<void>) => void }, prefix = "follow-wait-host-") {
   const root = await mkdtemp(join(tmpdir(), prefix)); t.after(() => rm(root, { recursive: true, force: true })); return root;
@@ -60,10 +60,18 @@ test("on a 0.16 host Wait attaches no tools and leaves Claude's MCP auto-backgro
 
 test("Settings says why Wait isn't attached on a 0.16 host", () => {
   const status = waitStatus(true, null, true);
-  assert.deepEqual(status, { enable_wait: true, active: false, reason: "host" });
+  assert.deepEqual(status, { enable_wait: true, active: false, reason: "host", host: true });
   assert.equal(waitNote(status), WAIT_HOST_NOTE);
   assert.deepEqual(waitStatus(false, null, true).reason, "off", "the switch still wins");
   assert.equal(waitStatus(true, null).active, true, "0.15 unchanged");
+  // The switch is named for what it controls on each host; the 0.16 statement never names Wait.
+  assert.deepEqual(waitSwitchCopy(status), { title: WAIT_HOST_TITLE, hint: WAIT_HOST_HINT });
+  assert.deepEqual(waitSwitchCopy(waitStatus(true, null)), { title: WAIT_TITLE, hint: WAIT_HINT });
+  assert.deepEqual(waitSwitchCopy(undefined), { title: WAIT_TITLE, hint: WAIT_HINT }, "loading: 0.15 copy");
+  const off = waitStatus(false, null, true);
+  assert.equal(off.host, true, "switched off on 0.16: the card still says Paseo runs the jobs");
+  assert.deepEqual(waitSwitchCopy(off), { title: WAIT_HOST_TITLE, hint: WAIT_HOST_HINT }, "and keeps the 0.16 switch copy");
+  for (const copy of [WAIT_HOST_NOTE, WAIT_HOST_TITLE, WAIT_HOST_HINT]) assert.doesNotMatch(copy, /\bWait\b|wait_/, copy);
 });
 
 test("the hook's 0.16 guidance: background, end the turn, no Wait tools", async t => {
