@@ -16,7 +16,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createRequire } from "node:module";
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, realpath } from "node:fs/promises";
+import { access, mkdtemp, mkdir, writeFile, readFile, readdir, rm, realpath } from "node:fs/promises";
 import { join, dirname, delimiter } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import { pathToFileURL, fileURLToPath } from "node:url";
@@ -27,6 +27,24 @@ const source = fileURLToPath(new URL("../", import.meta.url));
 // --quick: three cases; --cases a,b: just those (e.g. to re-run one that a provider hiccup broke).
 const casesAt = process.argv.indexOf("--cases");
 const only = casesAt >= 0 ? new Set(process.argv[casesAt + 1].split(",")) : process.argv.includes("--quick") ? new Set(["adoption", "stop", "standalone"]) : null;
+// Real model calls need Claude credentials, and Wait's native tools need Paseo 0.15+. Without either (CI has no
+// credentials and installs Paseo 0.14), this prints SKIP with the reason and exits 0. --live (npm run test:wait-live)
+// makes a missing prerequisite a failure instead.
+const liveClaude = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
+const skip = await (async () => {
+  const credentials = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"].some(key => process.env[key])
+    || await access(join(liveClaude, ".credentials.json")).then(() => true, () => false);
+  if (!credentials) return `no Claude credentials (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, CLAUDE_CODE_OAUTH_TOKEN or ${join(liveClaude, ".credentials.json")})`;
+  const version = await exec("paseo", ["--version"], { timeout: 30000 }).then(({ stdout }) => stdout.trim(), () => "");
+  const [major, minor] = (version.match(/(\d+)\.(\d+)\./) ?? []).slice(1).map(Number);
+  if (!(major > 0 || minor >= 15)) return `Paseo ${version || "CLI not found"} serves no plugin tools to agents; Wait needs 0.15+`;
+  return null;
+})();
+if (skip) {
+  if (process.argv.includes("--live")) { console.error(`FAIL check-wait: ${skip}`); process.exit(1); }
+  console.log(`SKIP check-wait: ${skip}. Run npm run test:wait-live where Claude credentials and Paseo 0.15+ are available.`);
+  process.exit(0);
+}
 let cli;
 for (const directory of (process.env.PATH ?? "").split(delimiter)) { try { cli = await realpath(join(directory, "paseo")); break; } catch {} }
 if (!cli) throw new Error("The installed Paseo CLI is required");
@@ -42,7 +60,7 @@ const { default: pino } = await load("pino");
 const root = await mkdtemp(join(tmpdir(), "follow-wait-install-"));
 const home = join(root, "paseo"); const userHome = join(root, "user"); const packedDirectory = join(root, "plugin"); const cwd = join(root, "work");
 await Promise.all([home, userHome, packedDirectory, cwd].map(path => mkdir(path, { recursive: true })));
-const actualClaude = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
+const actualClaude = liveClaude;
 const keys = ["HOME", "PASEO_HOME", "PASEO_DAEMON_URL", "PASEO_PASSWORD", "PASEO_PASSWORD_FILE", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "PASEO_AGENT_ID", "PASEO_WORKSPACE_ID", "PASEO_AGENT_CWD"];
 const original = Object.fromEntries(keys.map(key => [key, process.env[key]]));
 const reservation = createServer(); await new Promise(resolve => reservation.listen(0, "127.0.0.1", resolve)); const port = reservation.address().port; await new Promise(resolve => reservation.close(resolve));
