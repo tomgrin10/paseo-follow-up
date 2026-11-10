@@ -1,5 +1,6 @@
 import type { Workspace } from "./model";
 import { duplicateOpenQuestions } from "./questions";
+import { shouldReopen, type Brief } from "./brief";
 
 /**
  * Status invariants: what must hold for any workspace, whatever path changed it. Pure, no IO, and never throwing:
@@ -27,4 +28,12 @@ export function violations(w: Workspace, now: number): { id: string; detail: str
     if (detail) out.push({ id: inv.id, detail });
   }
   return out;
+}
+
+/**
+ * Needs-you cards (briefs live in the inbox store, not the workspace). An agent's current card follows its linked
+ * questions: while one is open on the server, only the developer closes the card. `brief-follows-questions`.
+ */
+export function briefViolations(current: Pick<Brief, "id" | "state" | "outcome" | "questionIds">, openQuestionIds: ReadonlySet<string>): { id: string; detail: string }[] {
+  return shouldReopen(current, openQuestionIds) ? [{ id: "brief-follows-questions", detail: `${current.id} is ${current.state} while ${current.questionIds.filter(id => openQuestionIds.has(id)).join(", ")} ${current.questionIds.filter(id => openQuestionIds.has(id)).length === 1 ? "is" : "are"} open` }] : [];
 }

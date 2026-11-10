@@ -37,3 +37,20 @@ test("fixture (2026-11-10, Q18/Q19): the check catches two open versions of one 
   const w = workspace({ questions: [q("Q18", "Linked items: build it with the six recommendations?", ["Build it as recommended", "Build it, with changes", "Rethink the design"]), q("Q19", "Build Linked items with the six recommended choices?", ["Build as recommended", "Build with changes", "Rethink the design"])] });
   assert.deepEqual(violations(w, clock), [{ id: "no-duplicate-open-question", detail: "Q19 repeats Q18" }]);
 });
+
+test("brief-follows-questions: while a linked question is open, only the developer closes the card", async () => {
+  const { briefViolations } = await import("../shared/status-invariants");
+  const { shouldReopen } = await import("../shared/brief");
+  const open = new Set(["Q20", "Q21"]);
+  const card = (state: "open" | "answered" | "signed" | "superseded", outcome: string | null, questionIds = ["Q20", "Q21", "Q22"]) => ({ id: "brief:t9", state, outcome, questionIds });
+  assert.deepEqual(briefViolations(card("open", null), open), []);
+  assert.deepEqual(briefViolations(card("superseded", "The agent kept going"), open), [{ id: "brief-follows-questions", detail: "brief:t9 is superseded while Q20, Q21 are open" }]);
+  assert.deepEqual(briefViolations(card("answered", "You replied"), open), [], "a developer reply closes it");
+  assert.deepEqual(briefViolations(card("answered", "You picked B · Fix the network"), open), []);
+  assert.deepEqual(briefViolations(card("signed", "Signed off"), open), []);
+  assert.deepEqual(briefViolations(card("superseded", "The agent kept going"), new Set()), [], "its questions are closed");
+  // Fixture (2026-11-10, Q20–Q22): collapsed to "You replied" by another agent's message. The repair can't tell it
+  // from a real reply, so it reopens "You replied" cards whose questions are all still open.
+  assert.equal(shouldReopen(card("answered", "You replied"), open, false), true);
+  assert.equal(shouldReopen(card("answered", "You picked B · x"), open, false), false);
+});
