@@ -145,7 +145,9 @@ export async function runMove(job, io = {}) {
   let client = null;
   const daemon = async () => client ??= await connect();
   const drop = async () => { const c = client; client = null; await c?.close?.().catch?.(() => undefined); };
-  const retry = async action => { try { return await action(await daemon()); } catch { await drop(); return action(await daemon()); } };
+  // Disabling Follow-up reloads plugins, which can drop this connection: reconnect once. Any other error is the answer.
+  const dropped = e => /clos|connect|socket|ECONN|EPIPE|timed? ?out|not open/i.test(String(e?.message ?? e));
+  const retry = async action => { try { return await action(await daemon()); } catch (e) { if (!dropped(e)) throw e; await drop(); return action(await daemon()); } };
   const copySettings = io.copySettings ?? (async () => {
     const from = join(job.settingsRoot, job.oldId), to = join(job.settingsRoot, job.newId);
     if (!await stat(from).then(() => true, () => false) || await stat(to).then(() => true, () => false)) return;

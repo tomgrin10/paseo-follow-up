@@ -78,7 +78,7 @@ try {
   const configs = await Promise.all(created.map(async ({ agentId }) => JSON.parse(await readFile(join(home, `fixture-agent-config-${agentId}.json`), "utf8"))));
   const stdioServers = configs.filter(c => c.mcpServers?.["follow-up"]?.type === "stdio").length;
   const paseoMcp = configs.filter(c => Object.values(c.mcpServers ?? {}).some(s => s?.type === "http")).length;
-  const result = { mode: STDIO ? "stdio" : "native", agents: N, followThroughStdioServers: stdioServers, agentsWithPaseoMcp: paseoMcp, followTools: 0, call: null };
+  const result = { mode: STDIO ? "stdio" : "native", agents: N, followUpStdioServers: stdioServers, agentsWithPaseoMcp: paseoMcp, followTools: 0, call: null };
   // Call Follow-up's tools over the daemon's MCP as the first agent, after tracking its workspace.
   const server = Object.values(configs[0].mcpServers ?? {}).find(s => s?.type === "http");
   if (server) {
