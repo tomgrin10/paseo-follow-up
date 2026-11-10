@@ -4,14 +4,14 @@ import { askQuestion, needsYouQuestions, recordAnswer, syncTaskQuestions, withdr
 import { agentSetSpec, developerSetSpec } from "./server/spec";
 import type { PluginServerContext, PluginHandlerContext, PluginHookContext, PluginSessionOpenRequest } from "@getpaseo/plugin/server";
 import { mkdir, writeFile } from "node:fs/promises";
-import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import * as rpc from "./shared/contracts";
 import { browserRepositories, browserWorkspaces, prClaims, prOwner } from "./server/pr-owner";
 import { type Workspace } from "./shared/model";
 import { isWorkspaceRoot } from "./server/workspace-agent";
-import { BackgroundAgents } from "./server/background-agents";
+import { BackgroundAgents, backgroundAgentsFile } from "./server/background-agents";
 import { Store } from "./server/store";
 import { PriorityStore } from "./server/priorities";
 import { UsageReader } from "./server/usage";
@@ -1059,7 +1059,10 @@ export default function contribute(server: PluginServerContext) {
   type SessionOpen = (input: { request: PluginSessionOpenRequest }, context: PluginHookContext) => Promise<PluginSessionOpenRequest | void>;
   // Paseo 0.16 background agents (another plugin's helpers) get no root treatment: no tools, no Wait, no needs_you or
   // Stop-hook nudge. The flag is only in the agent snapshot, so session open reads it once per agent.
-  const background = new BackgroundAgents();
+  let saveBackground: () => Promise<void> = async () => {};
+  const background = new BackgroundAgents(() => saveBackground());
+  saveBackground = backgroundAgentsFile(directory, () => background.ids);
+  try { background.seed(JSON.parse(readFileSync(join(directory, "background-agents.json"), "utf8"))?.agents); } catch { /* none yet */ }
   const isBackground = (agentId: string, paseo: PluginHandlerContext["paseo"]) => background.check(agentId, async id => (await paseo.agents.ref(id).refresh())?.agent as { background?: unknown } | undefined);
   const withWait = (handler: SessionOpen): SessionOpen => async (input, context) => wait.open((await handler(input, context)) ?? input.request, { background: await isBackground(input.request.agentId, context.paseo) });
   const removers = [
@@ -1073,7 +1076,8 @@ export default function contribute(server: PluginServerContext) {
     server.on("agent.permission_resolved", async event => gateway.directory.permissionResolved(event.agent.id, event.requestId)),
     server.on("agent.archived", async event => gateway.directory.agentArchived(event.agent.id, event.archivedAt)),
     server.on("agent.closed", async event => gateway.directory.agentClosed(event.agent.id)),
-    server.on("agent.created", async event => { await ready; await gateway.directory.agentCreated(event.agent); }),
+    // 0.16: the background flag first shows up here (it isn't in session_open yet), so the hook learns it now.
+    server.on("agent.created", async (event, { paseo }) => { await ready; await isBackground(event.agent.id, paseo); await gateway.directory.agentCreated(event.agent); }),
     server.on("workspace.created", async event => gateway.directory.workspaceCreated(event.workspace)),
     server.on("workspace.archived", async event => gateway.directory.workspaceArchived(event.workspace.id)),
     server.on("agent.turn_started", async () => updater.activity()),
