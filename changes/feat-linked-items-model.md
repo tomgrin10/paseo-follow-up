@@ -1,0 +1,1 @@
+- Follow-up now keeps a checked list of the Linear issues, Slack threads and docs each workspace is about. A Linear key only counts once Linear confirms it, so lookalikes like STATUS-1025 never show up.
