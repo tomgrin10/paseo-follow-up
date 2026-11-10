@@ -31,6 +31,11 @@ Nothing polls while the app is hidden.
   developer wrote (question, option, answer words, brief ask/context, task title/evidence, summary, results,
   Overseer replies, activity details) sits in a plain `<Text>`. A one-line title inside a pressable row uses
   `<RichText plain>`. Add new agent-written fields to the scan.
+- **Every dialog or card with a primary action is keyboard-sendable** (`tests/keyboard-send.test.ts`). Root cause of
+  "I can't press command+enter to send": no card or sheet had a key handler, and the answer field is multiline. Wrap
+  the body in `SubmitScope` (`client/kit.tsx`) and mark the primary Button `shortcut`. Cmd+Enter (Ctrl+Enter off a
+  Mac) submits from anywhere; plain Enter only outside multiline fields, buttons, links and radios. It fires once,
+  never while the action is disabled, and stops the key so the host composer doesn't act on it.
 
 ## Files
 

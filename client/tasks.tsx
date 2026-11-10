@@ -7,7 +7,7 @@ import type { Obligation, Workspace } from "../shared/model";
 import { followUpObligations } from "../shared/follow-up";
 import { taskSchedule, type TaskTrigger } from "../shared/task-trigger";
 import { taskTriggerRpc } from "../shared/contracts";
-import { Button, Card, Chip, FoldRow, errorText, text, type Theme } from "./kit";
+import { Button, Card, Chip, FoldRow, errorText, text, type Theme, SubmitScope } from "./kit";
 import { Spinner } from "./motion";
 import type { Colors } from "./theme";
 import { RichText } from "./rich-text";
@@ -25,7 +25,7 @@ function TriggerEditor({ obligation: o, workspace, theme, compact }: { obligatio
   const save = useMutation({ mutationFn: () => rpc({ workspaceId: workspace.id, obligationId: o.id, expectedRevision: o.revision, afterPrs: event === "now" ? [] : prs, trigger: event === "manual" ? null : { event, delayDays: gated ? Number(days) : 0 } }), onSuccess: async () => { toast.show("Schedule saved", { variant: "success" }); await cache.invalidateQueries(); } });
   const busy = save.isPending;
   const options = [["manual", "Manual"], ["now", "Now"], ["merge", "After merge"], ["deploy", "After deploy"]] as const;
-  return <View style={{ gap: 10 }}>
+  return <SubmitScope enabled={!busy && valid} onSubmit={() => save.mutate()} style={{ gap: 10 }}>
     <View style={{ gap: 4 }}>
       <Text style={t.label}>Send to the agent</Text>
       <Text style={t.meta}>Manual tasks wait for you. Scheduled tasks join the next repair batch when they come due, and still follow your Auto-send choice.</Text>
@@ -52,8 +52,8 @@ function TriggerEditor({ obligation: o, workspace, theme, compact }: { obligatio
       </View>
     </>}
     {save.error && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusDanger }]}>{errorText(save.error)}</Text>}
-    <Button title="Save schedule" kind="primary" accessibilityLabel={`Save trigger for ${o.title}`} disabled={busy || !valid} loading={busy} onPress={() => save.mutate()} theme={theme} compact={compact} />
-  </View>;
+    <Button shortcut title="Save schedule" kind="primary" accessibilityLabel={`Save trigger for ${o.title}`} disabled={busy || !valid} loading={busy} onPress={() => save.mutate()} theme={theme} compact={compact} />
+  </SubmitScope>;
 }
 
 /** The question a blocked task became, if the server has mirrored it. */

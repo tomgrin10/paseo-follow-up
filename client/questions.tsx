@@ -11,7 +11,7 @@ import type { Workspace } from "../shared/model";
 import { OTHER, OTHER_LABEL, answerLabel, isOpen, isOther, questionState, replyText, type Question } from "../shared/questions";
 import { ago } from "../shared/attention";
 import { activity, type ActivityTone } from "../shared/activity";
-import { Button, Card, CardRow, Chip, FoldRow, IconButton, errorText, text, type Theme } from "./kit";
+import { Button, Card, CardRow, Chip, FoldRow, IconButton, SubmitScope, errorText, text, type Theme } from "./kit";
 import { Spinner } from "./motion";
 import { mergedColor, tint, withAlpha, type Colors } from "./theme";
 import { overviewKey, workspaceKey } from "./keys";
@@ -129,6 +129,8 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
       <RichText linkColor={c.foreground} numberOfLines={2} style={[t.meta, { flexShrink: 1 }]}>{`Task: ${task.title}`}</RichText>
     </View>}
   </View>;
+  // Cmd+Enter (and Enter outside the answer field) does what Send does, only when Send is enabled.
+  const submittable = !run.isPending && (open ? !!answer : q.answer?.delivery.state === "copied");
   // In the pill popover the answer field and actions stay pinned below a scrolling body.
   const pinned = dense && !!bodyMaxHeight;
   const input = <View style={{ gap: 6 }}>
@@ -174,9 +176,9 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   </View>;
   const actions = (open || q.answer && ["queued", "unconfirmed", "copied"].includes(q.answer.delivery.state)) && <View style={{ gap: 6 }}>
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-      {open && <Button theme={theme} compact={compact} grow={compact} kind="primary" icon="Send" title="Send to agent" accessibilityLabel={`Send your ${q.id} answer to the agent`} accessibilityHint={other && !words.trim() ? "Write your answer first" : compact ? `Puts your answer straight into the asking agent's chat, even mid-turn. Follow-up keeps it under ${q.id}.` : undefined} disabled={!answer || run.isPending} loading={run.isPending && run.variables === "send"} onPress={() => run.mutate("send")} />}
+      {open && <Button shortcut theme={theme} compact={compact} grow={compact} kind="primary" icon="Send" title="Send to agent" accessibilityLabel={`Send your ${q.id} answer to the agent`} accessibilityHint={other && !words.trim() ? "Write your answer first" : compact ? `Puts your answer straight into the asking agent's chat, even mid-turn. Follow-up keeps it under ${q.id}.` : undefined} disabled={!answer || run.isPending} loading={run.isPending && run.variables === "send"} onPress={() => run.mutate("send")} />}
       {open && <Button theme={theme} compact={compact} icon="Copy" title="Copy" accessibilityLabel={`Copy your ${q.id} answer instead of sending it`} disabled={!answer || run.isPending} loading={run.isPending && run.variables === "copy"} onPress={() => run.mutate("copy")} />}
-      {q.answer?.delivery.state === "copied" && <Button theme={theme} compact={compact} kind="primary" icon="Send" title="Send to agent" accessibilityLabel={`Send your ${q.id} answer to the agent`} loading={run.isPending} onPress={() => run.mutate("send")} />}
+      {q.answer?.delivery.state === "copied" && <Button shortcut theme={theme} compact={compact} kind="primary" icon="Send" title="Send to agent" accessibilityLabel={`Send your ${q.id} answer to the agent`} loading={run.isPending} onPress={() => run.mutate("send")} />}
       {q.answer && ["queued", "unconfirmed"].includes(q.answer.delivery.state) && <Button theme={theme} compact={compact} icon="RotateCcw" title={q.answer.delivery.state === "queued" ? "Try now" : "Resend"} accessibilityLabel={`Send the ${q.id} answer again`} loading={run.isPending} onPress={() => run.mutate("resend")} />}
       {q.answer && ["queued", "unconfirmed"].includes(q.answer.delivery.state) && <Button theme={theme} compact={compact} kind="ghost" icon="Copy" title="Copy" accessibilityLabel={`Copy the ${q.id} answer`} onPress={() => { void copyText(replyText(q, q.answer!.choice, q.answer!.words)).then(() => toast.show("Copied", { variant: "success" }), () => toast.error("Couldn't copy here")); }} />}
       {q.answer?.delivery.state === "unconfirmed" && openAgent && <Button theme={theme} compact={compact} kind="ghost" icon="MessageSquare" title="Open agent" onPress={() => openAgent(q.askedBy ?? w.mainAgentId)} />}
@@ -190,7 +192,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   // In the pill popover the question scrolls and the answer field and actions stay put, so Send is never cut off.
   if (pinned) {
     const showInput = open && (free || other || noteOpen);
-    return <View style={{ gap: 10 }}>
+    return <SubmitScope enabled={submittable} onSubmit={() => run.mutate("send")} style={{ gap: 10 }}>
       <View>
         <ScrollView style={{ maxHeight: bodyMaxHeight! - (showInput ? 62 : 0), flexGrow: 0 }} contentContainerStyle={{ paddingRight: 2 }} scrollEventThrottle={32}
           onLayout={e => { const view = e.nativeEvent.layout.height; setScroll(s => ({ ...s, view })); }}
@@ -203,13 +205,13 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
       </View>
       {showInput && input}
       {actions}
-    </View>;
+    </SubmitScope>;
   }
-  return <View style={{ gap: dense ? 10 : 14 }}>
+  return <SubmitScope enabled={submittable} onSubmit={() => run.mutate("send")} style={{ gap: dense ? 10 : 14 }}>
     {body}
     {actions}
     {!dense && !compact && <Text style={t.small}>Asked {ago(q.askedAt, now)} by {who(w, q.askedBy)}{q.taskId && !q.options.length ? " (blocked task)" : ""}</Text>}
-  </View>;
+  </SubmitScope>;
 }
 
 function hostOf(url: string): string {
