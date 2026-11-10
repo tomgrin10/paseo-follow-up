@@ -41,7 +41,7 @@ export function useAgentSettings() {
 }
 
 /** Settings' per-row More: what its toggle says (it names what's inside) and what it shows. */
-export type JobExtra = { label: (r: RoleView) => string; render: (r: RoleView, save: (entry: SavedRole | null) => void, busy: boolean) => ReactNode };
+export type JobExtra = { label: (r: RoleView) => string | null; render: (r: RoleView, save: (entry: SavedRole | null) => void, busy: boolean) => ReactNode };
 
 export function JobRows({ theme, compact, order, extra, preselect = false }: {
   theme: Theme; compact: boolean; order: readonly AgentRole[];
@@ -152,7 +152,8 @@ export function JobRow({ row, r, catalog, loading, theme, compact, busy, open, o
       {open && !loading && <View style={{ marginTop: 4, borderWidth: 1, borderColor: c.border, borderRadius: 10, overflow: "hidden" }}>
         <RolePickers r={r} catalog={catalog} busy={busy} save={save} />
       </View>}
-      {extra && <>
+      {/* No label: nothing Settings-only for this row (Recovery on the main agent's setup is already its default). */}
+      {extra && extra.label(r) && <>
         <Pressable accessibilityRole="button" accessibilityState={{ expanded: more }} aria-expanded={more} accessibilityLabel={`${row.title}: ${extra.label(r)}`} onPress={() => setMore(!more)} hitSlop={6}
           style={{ flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start", minHeight: compact ? 44 : 24 }}>
           <Text style={[t.meta, { color: c.foreground }]}>{extra.label(r)}</Text>
