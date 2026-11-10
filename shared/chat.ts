@@ -42,7 +42,7 @@ export const toolRowSchema = z.object({
   line: z.string(),
   tone: z.enum(["muted", "warning", "danger", "success"]),
   more: z.string().nullable(),
-  done: z.object({ summary: z.string() }).nullable(),
+  done: z.object({ summary: z.string(), /** PRs whose deploy Follow-up could not confirm. */ unconfirmed: z.array(z.string()).optional() }).nullable(),
 });
 export type ToolRow = z.infer<typeof toolRowSchema>;
 
@@ -63,7 +63,9 @@ export function readText(value: unknown): string | undefined {
 }
 function json(text: string | undefined): Record<string, unknown> | null {
   if (!text) return null;
-  try { const value = JSON.parse(text); return record(value) ? value : null; } catch { return null; }
+  const parse = (body: string) => { try { const value = JSON.parse(body); return record(value) ? value : null; } catch { return null; } };
+  // Some providers wrap the reply in extra text; the receipt is the outermost JSON object.
+  return parse(text) ?? (text.indexOf("{") >= 0 ? parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)) : null);
 }
 const str = (value: unknown) => typeof value === "string" ? value : typeof value === "number" ? String(value) : "";
 const firstLine = (text: string) => text.split("\n").map(l => l.trim()).find(Boolean) ?? "";
@@ -121,10 +123,16 @@ export function toolRow(tool: FollowTool, status: "running" | "completed" | "fai
       return { ...base, state: "done", line: kept ? "Spec link kept · the developer chose it" : `Spec link: ${firstLine(str(input.title)) || specHost(str(input.url))}`, more: str(result?.message) || more };
     }
     case "declare_done": {
+      // Only a reply Follow-up wrote can show Done: never the agent's own summary when the result is missing or unreadable.
       const blockers = Array.isArray(result?.blockers) ? result!.blockers.map(str).filter(Boolean) : [];
-      const completion = record(result?.completion) ? str(result!.completion.summary) : record(record(result?.workspace) ? (result!.workspace as Record<string, unknown>).completion : null) ? str(((result!.workspace as Record<string, unknown>).completion as Record<string, unknown>).summary) : "";
-      if (blockers.length) return { ...base, state: "done", tone: "warning", line: `Not done yet · ${blockers.length} blocker${blockers.length === 1 ? "" : "s"}`, more: blockers.map(b => `• ${b}`).join("\n") };
-      return { ...base, state: "done", tone: "success", line: "Declared done", more, done: { summary: completion || str(input.summary) } };
+      const workspace = record(result?.workspace) ? result!.workspace as Record<string, unknown> : null;
+      const completionRecord = record(result?.completion) ? result!.completion : record(workspace?.completion) ? workspace!.completion as Record<string, unknown> : null;
+      const next = str(result?.next);
+      if (blockers.length) return { ...base, state: "done", tone: "warning", line: `Not done yet · ${blockers.length} blocker${blockers.length === 1 ? "" : "s"}`, more: [blockers.map(b => `• ${b}`).join("\n"), next].filter(Boolean).join("\n\n") };
+      if (!completionRecord) return { ...base, state: "done", line: "Done check", more };
+      if (result?.alreadyDone === true) return { ...base, state: "done", line: "Already done · nothing changed", more: next || more };
+      const unconfirmed = Array.isArray(completionRecord.unconfirmed) ? completionRecord.unconfirmed.map(str).filter(Boolean) : [];
+      return { ...base, state: "done", tone: "success", line: "Declared done", more, done: { summary: str(completionRecord.summary) || str(input.summary), ...(unconfirmed.length ? { unconfirmed } : {}) } };
     }
   }
 }

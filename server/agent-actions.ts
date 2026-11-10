@@ -53,7 +53,7 @@ export function controlWorkspace(state: State, input: { workspaceId: string; ena
     w.batches.push({ ...b, ...(recoveryBatch(b) ? { enable_manual_recovery: true } : {}), id: randomUUID(), messageId: randomUUID(), state: "pending", attempts: b.attempts + 1, createdAt: new Date(now).toISOString(), sentAt: null, settledAt: null, result: "", activityAt: null, acknowledgmentError: null });
   }
   const at = new Date(now).toISOString();
-  if (input.clearHold || input.retryBatchId && !recoveryBatch(w.batches.find(b => b.id === input.retryBatchId)!)) { w.completion = null; w.updatedAt = at; }
+  if (input.clearHold || input.retryBatchId && !recoveryBatch(w.batches.find(b => b.id === input.retryBatchId)!)) { w.completion = null; w.declaration = null; w.updatedAt = at; }
   else w.updatedAt = at;
   return w;
 }

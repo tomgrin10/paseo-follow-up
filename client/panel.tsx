@@ -195,6 +195,7 @@ function ShippedCard({ workspace: w, theme, compact, now }: { workspace: Workspa
         </View>
       </View>
       <Text selectable style={[t.body, { color: c.foreground }]}>{w.completion.summary}</Text>
+      {!!w.completion.unconfirmed?.length && <Text style={t.meta}>{`Deploy not confirmed by Follow-up for ${w.completion.unconfirmed.map(k => shortRefs(k, w)).join(", ")}. The summary above is the agent's evidence.`}</Text>}
       <Text style={t.meta}>Archive the workspace from its menu when you're finished with it.</Text>
     </View>
   </Reveal>;

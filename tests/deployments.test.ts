@@ -20,7 +20,7 @@ function fixture() {
     return JSON.stringify({ spec: { containers: [{ name: "app", image: `us-central1-docker.pkg.dev/acme-prod/acme-docker/prod-app-backend@sha256:${(args[3] === "old" ? "2" : "1").repeat(64)}` }] }, status: { conditions: [{ type: "Ready", status: "True" }] } });
   }, (async (url: any) => ({ ok: true, text: async () => JSON.stringify(String(url).includes("/manifests/") ? { config: { digest: `sha256:${String(url).includes("2".repeat(64)) ? "4".repeat(64) : "3".repeat(64)}` } } : { config: { Labels: { "org.opencontainers.image.revision": String(url).includes("4".repeat(64)) ? old : current } } }) })) as any, () => now);
   const target = pr({ repo: "acme/acme-poc", key: "acme/acme-poc#1", snapshot: snapshot({ state: "MERGED", head: "unmerged-head-not-in-history", mergeCommit: merged }) });
-  return { adapter, target, calls, failure: () => { failure = true; }, missing: () => { missing = true; }, unready: () => { ready = false; }, rollback: () => { rollback = true; }, split: () => { split = true; }, advance: () => { now += 61_000; } };
+  return { adapter, target, calls, failure: () => { failure = true; }, heal: () => { failure = false; }, wait: (ms: number) => { now += ms; }, missing: () => { missing = true; }, unready: () => { ready = false; }, rollback: () => { rollback = true; }, split: () => { split = true; }, advance: () => { now += 61_000; } };
 }
 test("deployment follows the squash merge commit into actual serving images, and caches fleet reads", async () => {
   const f = fixture(); const result = (await f.adapter.observe([f.target])).get(f.target.key)!;
@@ -38,6 +38,15 @@ test("missing services, unready revisions, and read failures remain unknown with
     const f = fixture(); f[state](); const value = (await f.adapter.observe([f.target])).get(f.target.key)!;
     assert.equal(value.state, "unknown"); assert.ok(!JSON.stringify(value).includes("private transport"));
   }
+});
+test("a failed probe says why, without transport detail, and retries on the next refresh instead of a minute later", async () => {
+  const f = fixture(); f.failure();
+  const value = (await f.adapter.observe([f.target])).get(f.target.key)!;
+  assert.equal(value.state, "unknown"); assert.match(value.evidence, /Could not verify serving production revisions \(lookup failed\)/);
+  assert.equal(f.adapter.lastError, "lookup failed");
+  f.heal(); f.wait(16_000);
+  assert.equal((await f.adapter.observe([f.target])).get(f.target.key)!.state, "deployed");
+  assert.equal(f.adapter.lastError, null);
 });
 test("unknown merge commits and repositories cannot claim deployment", async () => {
   const f = fixture(); f.target.snapshot!.mergeCommit = null; assert.equal((await f.adapter.observe([f.target])).get(f.target.key)?.state, "unknown");
@@ -64,7 +73,7 @@ test("legacy titles and dependencyStage do not schedule tasks; explicit merge tr
 test("known pending deployment stays visible; compact labels keep merged and approved distinct", () => {
   const p = pr({ snapshot: snapshot({ state: "MERGED", deployment: { state: "pending", environment: "production", commits: [current], evidence: "Not yet included", observedAt: new Date().toISOString() } }) });
   assert.equal(settledForDisplay(p), false); assert.equal(compactPrStatus(p).label, "Merged");
-  assert.match(completionBlockers(workspace({ prs: [p] }), clock)[0], /production deployment/);
+  assert.match(completionBlockers(workspace({ prs: [p] }), Date.now())[0], /to reach production/);
   for (const state of ["partial", "unknown"] as const) { p.snapshot!.deployment!.state = state; assert.equal(compactPrStatus(p).label, "Merged"); }
   p.snapshot!.deployment!.state = "deployed"; assert.equal(settledForDisplay(p), true); assert.equal(compactPrStatus(p).label, "Deployed"); assert.equal(compactPrStatus(p).tone, "merged");
   p.snapshot!.deployment!.observedAt = new Date(Date.now() - 121_000).toISOString(); assert.equal(compactPrStatus(p).label, "Merged");

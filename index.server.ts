@@ -338,7 +338,7 @@ export default function contribute(server: PluginServerContext) {
   };
   void loop();
   void (async () => { await ready; if (stopped || loadError) return; await inbox.start().catch(error => { inboxError = error instanceof Error ? error.message : String(error); }); void inboxLoop(); })();
-  const changed = (w: Workspace) => { w.completion = null; w.updatedAt = new Date().toISOString(); };
+  const changed = (w: Workspace) => { w.completion = null; w.declaration = null; w.updatedAt = new Date().toISOString(); };
 
   const callerWorkspaceId = async (agentId: string, paseo: PluginHandlerContext["paseo"], allowHandoff = true) => {
     const agent = (await paseo.agents.ref(agentId).refresh())?.agent;
@@ -983,7 +983,7 @@ export default function contribute(server: PluginServerContext) {
       if (!owned && !waking) return;
       if (owned) gateway.markDirty(event.agent.id);
       await store.mutate(state => {
-        const w = owned && state.workspaces.find(w => w.id === owned.id); if (w) w.completion = null;
+        const w = owned && state.workspaces.find(w => w.id === owned.id); if (w) { w.completion = null; w.declaration = null; }
         const d = waking && state.workspaces.find(w => w.id === waking.id); if (d) delete d.dormant;
       });
       if (waking) void engine.tick();
@@ -1054,8 +1054,8 @@ export default function contribute(server: PluginServerContext) {
         const w = state.workspaces.find(w => w.enable_tracking && (w.mainAgentId === event.agent.id || w.contributorAgentIds?.includes(event.agent.id)));
         if (!w || w.mainAgentId !== event.agent.id || !interruption) return;
         // The provider lost the conversation: every later send fails the same way, so stop sending instead of holding.
-        if (event.outcome.kind === "failed" && conversationGone(event.outcome.error.message)) { w.goneAgent = { agentId: event.agent.id, at: interruption.at, reason: event.outcome.error.message }; w.completion = null; return; }
-        w.hold = interruptionHold(interruption.kind); w.interruption = { ...interruption, agentId: event.agent.id }; w.completion = null;
+        if (event.outcome.kind === "failed" && conversationGone(event.outcome.error.message)) { w.goneAgent = { agentId: event.agent.id, at: interruption.at, reason: event.outcome.error.message }; w.completion = null; w.declaration = null; return; }
+        w.hold = interruptionHold(interruption.kind); w.interruption = { ...interruption, agentId: event.agent.id }; w.completion = null; w.declaration = null;
       });
       void engine.tick();
     }),

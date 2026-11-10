@@ -12,8 +12,22 @@ const repository = "acme/acme-poc";
 const project = "acme-prod";
 const roles = ["backend", "etl", "interpretation", "public-api", "web"];
 
+/** Messages this probe throws itself. Anything else (gcloud, gh, fetch) is summarized so no transport detail leaks. */
+const OWN_REASONS = new Set(["Deployment image unavailable", "Deployment image metadata exceeds the read limit", "Serving image must have an immutable production digest", "Serving image config unavailable", "Serving source revision is unknown", "Production service catalog incomplete", "Production traffic is not ready", "Serving revision unavailable", "Serving revision is not ready"]);
+export function probeReason(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  if (OWN_REASONS.has(message)) return message;
+  const command = (error as { cmd?: unknown; path?: unknown } | null)?.cmd ?? (error as { path?: unknown } | null)?.path;
+  if (typeof command === "string" && /^(gcloud|gh)\b/.test(command)) return `${command.split(" ")[0]} call failed`;
+  if (error instanceof SyntaxError) return "unreadable response";
+  if (error instanceof Error && error.name === "AbortError") return "registry timed out";
+  return "lookup failed";
+}
+
 export class Deployments {
-  private fleet: { until: number; value: Promise<Fleet | null> } | null = null;
+  private fleet: { until: number; value: Promise<Fleet | { error: string }> } | null = null;
+  /** Why the last fleet read failed, for diagnostics and the PR evidence line; null after a success. */
+  lastError: string | null = null;
   private images = new Map<string, Promise<string>>();
   private ancestry = new Map<string, Promise<boolean>>();
   private token: { value: string; until: number } | null = null;
@@ -85,11 +99,20 @@ export class Deployments {
     const merged = [...new Map(prs.filter(p => p.snapshot?.state === "MERGED").map(p => [p.key, p])).values()];
     if (!merged.length) return result;
     if (merged.some(p => p.repo === repository)) {
-      if (!this.fleet || this.fleet.until <= this.now()) this.fleet = { until: this.now() + 60_000, value: this.readFleet().catch(() => null) };
+      if (!this.fleet || this.fleet.until <= this.now()) {
+        const entry = { until: this.now() + 60_000, value: this.readFleet().then(fleet => { this.lastError = null; return fleet; }, (error: unknown) => {
+          // A failure is retried on the next refresh (15 s), not served from cache for a minute.
+          entry.until = this.now() + 15_000; this.lastError = probeReason(error);
+          return { error: this.lastError };
+        }) };
+        this.fleet = entry;
+      }
     }
-    const fleet = this.fleet ? await this.fleet.value : null;
+    const read = this.fleet ? await this.fleet.value : null;
+    const fleet = read && "commits" in read ? read : null;
+    const reason = read && "error" in read ? ` (${read.error})` : "";
     for (let start = 0; start < merged.length; start += 4) await Promise.all(merged.slice(start, start + 4).map(async p => {
-      const unknown: Deployment = { state: "unknown", environment: p.repo === repository ? "production" : "", commits: [], evidence: p.repo === repository ? "Could not verify serving production revisions. Check gcloud/gh access and refresh." : "No deployment source configured for this repository.", observedAt: new Date(this.now()).toISOString() };
+      const unknown: Deployment = { state: "unknown", environment: p.repo === repository ? "production" : "", commits: [], evidence: p.repo === repository ? `Could not verify serving production revisions${reason}. Check gcloud/gh access and refresh.` : "No deployment source configured for this repository.", observedAt: new Date(this.now()).toISOString() };
       if (p.repo !== repository || !fleet || !sha.test(p.snapshot?.mergeCommit ?? "")) { result.set(p.key, unknown); return; }
       try {
         const included = await Promise.all(fleet.commits.map(commit => this.contains(p.snapshot!.mergeCommit!, commit)));
