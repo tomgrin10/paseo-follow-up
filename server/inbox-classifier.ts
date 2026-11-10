@@ -1,5 +1,6 @@
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { messageSender, type MessageSender } from "../shared/message-sender";
 
 /**
  * Who sent the message that started a turn (design §2.4). Paseo's hooks carry no origin yet, so
@@ -7,7 +8,7 @@ import { join } from "node:path";
  * fails open: an unknown or unreadable format means "the developer wrote it", which clears a flag
  * rather than leaving noise.
  */
-export type Sender = "agent" | "follow-up" | "defer" | "session" | "schedule" | "tom" | "unknown";
+export type Sender = "agent" | "follow-up" | "defer" | "session" | "schedule" | "system" | "tom" | "unknown";
 export type Message = { text: string; messageId?: string | null; clientMessageId?: string | null };
 export type Ledger = { agentId: string; messageId: string | null; at: string; by?: string; action?: string }[];
 export type Sources = {
@@ -19,7 +20,6 @@ export type Sources = {
 };
 export const WINDOW_MS = 10_000;
 
-const ENVELOPE = /^\s*<paseo-system\b[^>]*\bkind="(agent-message|agent-notification)"/;
 
 /**
  * Only "tom" may answer a brief. A turn whose prompt wasn't seen is "unknown", never the developer: before 1.4.0-beta.25
@@ -27,25 +27,37 @@ const ENVELOPE = /^\s*<paseo-system\b[^>]*\bkind="(agent-message|agent-notificat
  * tool call, not a user message) answered the open brief with the developer's previous message.
  */
 export async function classify(message: Message | null, agentId: string, at: number, sources: Sources): Promise<Sender> {
-  if (message && ENVELOPE.test(message.text)) return "agent";
+  // The text names its sender first (shared/message-sender.ts): another agent's envelope or a Paseo system prompt is
+  // never the developer, whatever the ledger says.
+  const text = message ? messageSender(message.text) : null;
+  if (text?.kind === "agent") return "agent";
+  if (text?.kind === "system" && text.source === "paseo") return "system";
   const safe = async (check: () => Promise<boolean>) => { try { return await check(); } catch { return false; } };
-  // Follow-up's own sends are automation, except a brief option or move the developer clicked: that is their message.
-  const own = await (async () => {
-    try {
-      const ledger = (await sources.ledger()).filter(l => l.agentId === agentId && !l.action);
-      const ids = [message?.messageId, message?.clientMessageId].filter((id): id is string => !!id);
-      const exact = ledger.find(l => l.messageId && ids.includes(l.messageId));
-      if (exact) return exact.by === "developer" ? "tom" as const : "follow-up" as const;
-      const near = ledger.filter(l => Math.abs(Date.parse(l.at) - at) <= WINDOW_MS);
-      if (!near.length) return null;
-      return near.every(l => l.by === "developer") ? "tom" as const : "follow-up" as const;
-    } catch { return null; }
-  })();
+  const own = await ledgerSender(message, agentId, at, sources);
   if (own) return own;
+  // Follow-up's batch, recovery or an Overseer forward with no ledger entry is still automation. An answer isn't
+  // decided here: answers go out only on the developer's Send, so an unrecorded one fails open below.
+  if (text?.kind === "overseer-forward" || text?.kind === "follow-up" && text.what !== "answer") return "follow-up";
   if (await safe(() => sources.defer(agentId, at))) return "defer";
   if (await safe(() => sources.session(agentId, at))) return "session";
   if (await safe(() => sources.schedule(agentId, at))) return "schedule";
   return message ? "tom" : "unknown";
+}
+
+/**
+ * What Follow-up's delivery ledger says about a message: "tom" for a brief option or move the developer clicked,
+ * "follow-up" for Follow-up's own sends, null when the ledger has no entry for it (or can't be read).
+ */
+export async function ledgerSender(message: Message | null, agentId: string, at: number, sources: Pick<Sources, "ledger">): Promise<"tom" | "follow-up" | null> {
+  try {
+    const ledger = (await sources.ledger()).filter(l => l.agentId === agentId && !l.action);
+    const ids = [message?.messageId, message?.clientMessageId].filter((id): id is string => !!id);
+    const exact = ledger.find(l => l.messageId && ids.includes(l.messageId));
+    if (exact) return exact.by === "developer" ? "tom" : "follow-up";
+    const near = ledger.filter(l => Math.abs(Date.parse(l.at) - at) <= WINDOW_MS);
+    if (!near.length) return null;
+    return near.every(l => l.by === "developer") ? "tom" : "follow-up";
+  } catch { return null; }
 }
 
 const near = (iso: unknown, at: number) => typeof iso === "string" && Number.isFinite(Date.parse(iso)) && Math.abs(Date.parse(iso) - at) <= WINDOW_MS;
@@ -84,11 +96,22 @@ export function fileSources(paseoHome: string, ledger: () => Promise<Ledger>): S
   };
 }
 
-/** The newest user message in a timeline tail, or null when the turn started without one. */
-export function newestUserMessage(items: unknown[]): Message | null {
+/**
+ * The newest prompt in a timeline tail that isn't the harness's own text, with its sender read from the text. A
+ * projected agent message (Paseo 0.15+ `agent_message` tool call) or schedule fire (`heartbeat`) counts as a prompt
+ * from someone else, so nothing older behind it is taken for the developer's latest word.
+ */
+export function latestPrompt(items: unknown[]): { message: Message; sender: MessageSender } | { message: null; sender: "agent" | "schedule" } | null {
   for (let i = items.length - 1; i >= 0; i--) {
-    const item = items[i] as { type?: string; text?: unknown; messageId?: string; clientMessageId?: string } | null;
-    if (item?.type === "user_message" && typeof item.text === "string") return { text: item.text, messageId: item.messageId ?? null, clientMessageId: item.clientMessageId ?? null };
+    const item = items[i] as { type?: string; name?: string; callId?: string; text?: unknown; agentMessage?: unknown; messageId?: string; clientMessageId?: string } | null;
+    if (!item || typeof item !== "object") continue;
+    if (item.type === "user_message" && typeof item.text === "string") {
+      const sender = messageSender(item.text);
+      if (sender.kind === "system" && sender.source === "harness") continue;
+      return { message: { text: item.text, messageId: item.messageId ?? null, clientMessageId: item.clientMessageId ?? null }, sender };
+    }
+    if (item.type === "tool_call" && (item.name === "agent_message" || item.agentMessage || item.callId?.startsWith("paseo-agent-message:"))) return { message: null, sender: "agent" };
+    if (item.type === "tool_call" && item.name === "heartbeat" && item.callId?.startsWith("paseo-system:")) return { message: null, sender: "schedule" };
   }
   return null;
 }

@@ -2,7 +2,8 @@ import type { Dirent } from "node:fs";
 import { open, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import type { TailStep } from "../shared/home";
+import { userStep, type TailStep } from "../shared/home";
+import { developerWords, messageSender } from "../shared/message-sender";
 
 /**
  * An unloaded agent's recent steps, read from its provider's transcript on disk. Read-only and never
@@ -101,8 +102,12 @@ async function tailLines(path: string, bytes = TAIL_BYTES): Promise<string[]> {
 }
 
 const tool = (name: unknown) => typeof name === "string" ? name.replace(/^mcp__[^_]+(?:_[^_]+)*?__/, "") : "tool";
-/** Text the developer typed, not harness wrappers (command caveats, system reminders, environment context). */
-const typed = (text: string) => { const t = text.trim(); return t && !t.startsWith("<") ? t : null; };
+
+/** A user line through the sender classifier (You only for the developer, harness and Paseo system text dropped). */
+const push = (out: TailStep[], user: boolean, text: string) => {
+  if (user) { const step = userStep(text); if (step) out.push(step); return; }
+  const t = text.trim(); if (t) out.push({ kind: "agent", text: t });
+};
 
 /** Steps from transcript lines (Claude Code or Codex rollout), oldest first. Unknown shapes are skipped. */
 export function transcriptSteps(lines: string[]): TailStep[] {
@@ -113,10 +118,10 @@ export function transcriptSteps(lines: string[]): TailStep[] {
     // Claude Code
     if ((j.type === "user" || j.type === "assistant") && j.message && !j.isMeta && !j.isSidechain) {
       const content = j.message.content;
-      if (typeof content === "string") { const t = j.type === "user" ? typed(content) : content.trim(); if (t) out.push({ kind: j.type === "user" ? "you" : "agent", text: t }); continue; }
+      if (typeof content === "string") { push(out, j.type === "user", content); continue; }
       if (!Array.isArray(content)) continue;
       for (const c of content) {
-        if (c?.type === "text" && typeof c.text === "string") { const t = j.type === "user" ? typed(c.text) : c.text.trim(); if (t) out.push({ kind: j.type === "user" ? "you" : "agent", text: t }); }
+        if (c?.type === "text" && typeof c.text === "string") push(out, j.type === "user", c.text);
         else if (c?.type === "tool_use") out.push({ kind: "tool", text: tool(c.name) });
       }
       continue;
@@ -125,9 +130,7 @@ export function transcriptSteps(lines: string[]): TailStep[] {
     const p = j.type === "response_item" ? j.payload : null;
     if (p?.type === "message" && (p.role === "user" || p.role === "assistant") && Array.isArray(p.content)) {
       for (const c of p.content) {
-        if (typeof c?.text !== "string") continue;
-        const t = p.role === "user" ? typed(c.text) : c.text.trim();
-        if (t) out.push({ kind: p.role === "user" ? "you" : "agent", text: t });
+        if (typeof c?.text === "string") push(out, p.role === "user", c.text);
       }
     } else if (p?.type === "function_call" || p?.type === "custom_tool_call" || p?.type === "local_shell_call") out.push({ kind: "tool", text: tool(p.name ?? "shell") });
   }
@@ -194,8 +197,6 @@ export function parseLine(line: string): TranscriptItem[] {
   return [];
 }
 
-/** Codex and Claude both inject instructions as user messages; they aren't the developer's words. */
-const injected = (text: string) => /^\s*(<|# AGENTS\.md instructions|<INSTRUCTIONS>|Caveat: The messages below)/.test(text);
 
 /** The first developer messages and the last `limit` items of an agent's transcript, or null when there is none. */
 export async function readTranscript(paseoHome: string, agentId: string, limit: number, roots?: TranscriptRoots): Promise<{ first: TranscriptItem[]; tail: TranscriptItem[] } | null> {
@@ -204,8 +205,9 @@ export async function readTranscript(paseoHome: string, agentId: string, limit: 
     const path = record && await transcriptFile(record, roots);
     if (!path) return null;
     const { head, tail } = await headAndTail(path);
-    const first = head.flatMap(parseLine).filter(i => i.type === "user_message" && i.text && !injected(i.text)).slice(0, 2);
-    const items = tail.flatMap(parseLine).filter(i => i.type !== "user_message" || (i.text && !injected(i.text)));
+    // Only the developer's words are "first messages"; Summary's tailLines classifies the tail's user lines itself.
+    const first = head.flatMap(parseLine).flatMap(i => { const words = i.type === "user_message" && i.text ? developerWords(i.text) : null; return words ? [{ ...i, text: words }] : []; }).slice(0, 2);
+    const items = tail.flatMap(parseLine).filter(i => i.type !== "user_message" || (i.text && messageSender(i.text).kind !== "system"));
     return { first, tail: items.slice(-limit) };
   } catch { return null; }
 }

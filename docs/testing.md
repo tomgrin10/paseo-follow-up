@@ -47,6 +47,7 @@ they need a running `npm run preview` and read `.preview-isolated.json`. Some dr
   `scripts/browser-control-preload.cjs`: merge-when-ready through the extension.
 - `scripts/check-compact-panel.mjs`: the panel at phone width.
 - `scripts/check-chat-grouping.mjs`: a synthetic mixed turn for chat-grouping screenshots (starts its own isolated daemon).
+- `scripts/check-sender-steps.mjs`: Home's Recent steps with one message from every sender kind; fails on a raw `<paseo-system` envelope or overflow (starts its own isolated daemon).
 - `scripts/check-optional-recovery.mjs`: recovery only on request.
 - `scripts/check-project-settings.mjs`: per-project defaults.
 - `scripts/check-reviewers.mjs` and `scripts/check-reviewer-concurrency.mjs`: reviewer requests.
