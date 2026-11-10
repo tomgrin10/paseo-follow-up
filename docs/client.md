@@ -19,7 +19,9 @@ Nothing polls while the app is hidden.
 
 - Use native React Native controls and host theme tokens (`client/theme.ts`).
 - Use the type scale in `client/kit.tsx`.
-- Use the motion helpers in `client/motion.tsx`.
+- Use the motion helpers in `client/motion.tsx`. `useReducedMotion()` is right on the first render
+  (`shared/motion.ts`), but it can still change later: an effect or value that reads it must follow it (list it in
+  the deps, derive in render), never decide once at mount (`tests/reduced-motion.test.ts`).
 - Follow [DESIGN.md](../DESIGN.md) and [PRODUCT.md](../PRODUCT.md) (voice).
 - Every UI change goes through `/impeccable critique`, and you render each state yourself: desktop and 390×844,
   light and dark.
@@ -83,7 +85,7 @@ Nothing polls while the app is hidden.
 | `client/onboarding.tsx` | Getting started. |
 | `client/updates.tsx` | Settings → General's Updates sections, Home's update notice, setup's Updates step ([updates.md](updates.md)). |
 | `client/release-notes.tsx` | What's new and the notes list. Home's version marker is `VersionMark` in `client/updates.tsx`. |
-| `client/kit.tsx`, `client/motion.tsx`, `client/theme.ts`, `client/keys.ts` | The type scale, motion, theme helpers and query keys. |
+| `client/kit.tsx`, `client/motion.tsx`, `shared/motion.ts`, `client/theme.ts`, `client/keys.ts` | The type scale, motion (and the first-render reduced-motion read), theme helpers and query keys. |
 | `client/rich-text.tsx`, `shared/links.ts` | The one renderer for agent-written text, and the linkifier behind it. |
 | `client/toasts.tsx`, `client/toast-store.ts`, `client/pending-answers.ts` | The toast host, `runAction` for quick actions, and answers kept until the server has them. |
 
