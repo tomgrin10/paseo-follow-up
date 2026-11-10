@@ -62,7 +62,10 @@ export function WaitSettings({ theme }: Pick<PluginSurfaceProps, "theme">) {
     {query.error && <SettingsCard><SettingsAction label="Couldn't load the Wait setting" hint={errorText(query.error)} actionLabel="Retry" onPress={() => void query.refetch()} /></SettingsCard>}
     {wait && <SettingsCard>
       <SettingsSwitch label={WAIT_TITLE} hint={WAIT_HINT} value={wait.enable_wait} disabled={change.isPending} onValueChange={value => change.mutate(value)} />
-      {note && wait.enable_wait && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusWarning, paddingHorizontal: 16, paddingBottom: 12 }]}>{`${WAIT_NOT_ATTACHED} ${note}`}</Text>}
+      {/* Paseo 0.16 (reason "host") isn't a problem to fix, so it reads as plain information, not a warning. */}
+      {note && wait.enable_wait && (wait.reason === "host"
+        ? <Text style={[t.meta, { color: c.foregroundMuted, paddingHorizontal: 16, paddingBottom: 12 }]}>{note}</Text>
+        : <Text accessibilityRole="alert" style={[t.meta, { color: c.statusWarning, paddingHorizontal: 16, paddingBottom: 12 }]}>{`${WAIT_NOT_ATTACHED} ${note}`}</Text>)}
     </SettingsCard>}
   </SettingsSection>;
 }

@@ -44,8 +44,8 @@ function hostServesTools(config: WaitPaseoConfig | null): boolean {
 }
 
 /** What Settings → Agents shows: the switch, and why Wait is off when it is on. */
-export function waitStatus(enabled: boolean, config: WaitPaseoConfig | null): WaitStatus {
-  const reason = !enabled ? "off" : standaloneWaitInstalled(config) ? "standalone" : !hostServesTools(config) ? "no-agent-tools" : null;
+export function waitStatus(enabled: boolean, config: WaitPaseoConfig | null, hostBackgroundWork = false): WaitStatus {
+  const reason = !enabled ? "off" : standaloneWaitInstalled(config) ? "standalone" : hostBackgroundWork ? "host" : !hostServesTools(config) ? "no-agent-tools" : null;
   return { enable_wait: enabled, active: reason === null, reason };
 }
 
@@ -54,7 +54,8 @@ const json = (value: unknown) => ({ text: JSON.stringify(value), structuredConte
 export class Wait {
   readonly jobs: WaitJobs;
   readonly tools: AgentToolDefinition[];
-  constructor(directory: string, private deps: { enabled: () => Promise<boolean>; config: () => Promise<WaitPaseoConfig | null> }) {
+  /** `hostBackgroundWork`: the host advertises features.agentBackgroundWork (Paseo 0.16, server/host-features.ts). */
+  constructor(directory: string, private deps: { enabled: () => Promise<boolean>; config: () => Promise<WaitPaseoConfig | null>; hostBackgroundWork?: () => Promise<boolean> }) {
     this.jobs = new WaitJobs(directory);
     const owner = (context: AgentToolContext) => ({ id: context.agent.id, cwd: context.agent.cwd });
     const guard = (context: AgentToolContext) => { if (context.signal.aborted) throw new Error("Wait tool canceled"); };
@@ -92,15 +93,22 @@ export class Wait {
     ];
   }
 
-  /** Adds Wait's tools to an interactive Claude session, unless it's off, opted out, or the standalone plugin has it. */
+  /**
+   * Adds Wait's tools to an interactive Claude session, unless it's off, opted out, or the standalone plugin has it.
+   * On a Paseo 0.16 host (agentBackgroundWork) it attaches nothing and leaves Claude Code's MCP auto-background alone;
+   * FOLLOW_THROUGH_BACKGROUND_WORK=1 makes the hook say "run it in the background and end your turn" instead.
+   */
   async open<R extends PluginSessionOpenRequest>(request: R, options: { background?: boolean } = {}): Promise<R> {
     // A Paseo 0.16 background agent is another plugin's helper: no Wait (server/background-agents.ts).
     if (options.background || request.purpose !== "interactive" || request.provider !== "claude") return request;
     if (request.labels["plugin-tools/enabled"] === "false" || request.labels["paseo-wait/enabled"] === "false" || request.labels[WAIT_LABEL] === "false") return request;
-    if (!Array.isArray(request.tools) || request.tools.some(tool => (WAIT_TOOLS as readonly string[]).includes(tool.name))) return request;
     if (!(await this.deps.enabled())) return request;
     const config = await this.deps.config();
-    if (!waitStatus(true, config).active) return request;
+    const status = waitStatus(true, config, await this.deps.hostBackgroundWork?.().catch(() => false));
+    // Paseo 0.16: no plugin tools needed for the host's own background work, so this comes before the tool checks.
+    if (status.reason === "host") return { ...request, env: { ...request.env, FOLLOW_THROUGH_BACKGROUND_WORK: "1" } };
+    if (!Array.isArray(request.tools) || request.tools.some(tool => (WAIT_TOOLS as readonly string[]).includes(tool.name))) return request;
+    if (!status.active) return request;
     return { ...request, env: { ...request.env, CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS: "0", FOLLOW_THROUGH_WAIT: "1" }, tools: [...request.tools, ...this.tools] };
   }
 

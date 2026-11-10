@@ -3,6 +3,18 @@
 This was the standalone paseo-wait plugin, folded in at 1.4.0-beta.24. Claude agents often start a long command in
 the background and end the turn "waiting for a notification". Wait lets them hold for the result instead.
 
+## Paseo 0.16: retired
+
+Paseo 0.16 advertises `features.agentBackgroundWork`: it tracks an agent's background shell jobs, shows them with
+Stop, and wakes the agent when one finishes, at no model cost while it waits. On such a host Wait attaches no tools
+and doesn't set `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0`. It sets `FOLLOW_THROUGH_BACKGROUND_WORK=1` instead, and the
+SessionStart hook gives `backgroundWorkInstruction` (`server/mcp.mjs`): run it with `run_in_background=true`, end
+the turn, confirm the exit code when woken. Settings shows why (reason `host`). The same switch, labels and
+standalone check still apply. Everything below is Paseo 0.15. Delete Wait when Follow-up requires 0.16.
+
+- `server/host-features.ts`: `hostFeature` reads the daemon's `server_info.features` once and keeps the first real
+  answer. A failed read answers false, so Wait stays as on 0.15.
+
 ## How it works
 
 1. `wait_prepare_job({description, command, timeoutSeconds?})` records a job and returns the exact `bashCommand`.
@@ -50,6 +62,7 @@ the background and end the turn "waiting for a notification". Wait lets them hol
   `follow.set-wait`, tool `set_wait_for_jobs`).
 - **No double install.** While Paseo's `config.json` lists `paseo-wait` as installed and not disabled, Settings
   shows "The separate Wait plugin is installed. Disable it to use Follow-up's built-in Wait".
+- **Paseo 0.16.** Settings says the host runs background jobs itself (above).
 - **No plugin tools.** On hosts that don't serve plugin tools (Paseo 0.14, or the agent MCP off), Settings explains
   it.
 - **Labels.** It's also off for agents labelled `follow-up-wait/enabled=false`, `paseo-wait/enabled=false` or
@@ -57,7 +70,7 @@ the background and end the turn "waiting for a notification". Wait lets them hol
 
 ## Tests
 
-- **Unit:** `tests/wait.test.ts` and `tests/wait-jobs.test.ts`.
+- **Unit:** `tests/wait.test.ts`, `tests/wait-jobs.test.ts` and `tests/wait-host.test.ts` (0.16).
 - **Live:** `scripts/check-wait.mjs` (`npm run test:wait`, part of `test:install`) drives real Claude Haiku agents
   in an isolated in-process daemon. Cases: adoption, repeat, failure, stop, message, reload, standalone.
   - It skips with exit 0 when there are no Claude credentials or Paseo is below 0.15 (CI).
