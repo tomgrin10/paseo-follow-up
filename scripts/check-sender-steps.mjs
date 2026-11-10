@@ -84,14 +84,23 @@ try {
     await page.screenshot({ path: join(out, `${form}-${scheme}-steps.png`) });
     const facts = await page.evaluate(() => {
       const leaves = [...document.querySelectorAll("body *")].filter(n => n.children.length === 0).map(n => n.textContent ?? "");
-      return { raw: document.body.innerText.includes("<paseo-system"), bookkeeping: /sidebar sync is done|sidebar bookkeeping/.test(document.body.innerText), you: leaves.filter(t => t === "You").length, labels: leaves.filter(t => /^(From |You, via|Follow-up (batch|answer)|.+ finished$)/.test(t)), overflow: document.documentElement.scrollWidth > innerWidth };
+      return { raw: document.body.innerText.includes("<paseo-system"), bookkeeping: /sidebar sync is done|sidebar bookkeeping/.test(document.body.innerText), you: leaves.filter(t => t === "You").length, labels: leaves.filter(t => /^(From |You, via|Follow-up (batch|answer)|Answer from |.+ finished$)/.test(t)), overflow: document.documentElement.scrollWidth > innerWidth };
     });
+    // Desktop: the chat itself, where the agent's answer card must name the agent.
+    if (form === "desktop") {
+      await page.getByText("Sender steps", { exact: false }).first().click({ timeout: 30000 });
+      const card = page.getByText(/Release captain's answer/).first();
+      facts.agentCard = await card.waitFor({ timeout: 20000 }).then(() => true, () => false);
+      if (facts.agentCard) await card.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(500);
+      await page.screenshot({ path: join(out, `${form}-${scheme}-chat.png`) });
+    }
     report.push({ form, scheme, ...facts, errors });
     await context.close(); context = null;
   }
   await browser.close();
   console.log(JSON.stringify({ out, report }, null, 2));
-  for (const r of report) { assert.equal(r.raw, false, `${r.form} ${r.scheme}: a raw envelope is on screen`); assert.equal(r.bookkeeping, false, `${r.form} ${r.scheme}: Follow-up's hook text or the bookkeeping reply is on screen`); assert.equal(r.overflow, false, `${r.form} ${r.scheme}: horizontal overflow`); }
+  for (const r of report) { assert.equal(r.raw, false, `${r.form} ${r.scheme}: a raw envelope is on screen`); assert.equal(r.bookkeeping, false, `${r.form} ${r.scheme}: Follow-up's hook text or the bookkeeping reply is on screen`); assert.equal(r.overflow, false, `${r.form} ${r.scheme}: horizontal overflow`); assert.ok(r.labels.includes("Answer from Release captain"), `${r.form} ${r.scheme}: the agent's answer isn't labelled with the agent`); if (r.form === "desktop") assert.equal(r.agentCard, true, `${r.form} ${r.scheme}: the chat card doesn't name the agent`); }
 } finally {
   await context?.close().catch(() => {}); await client?.close().catch(() => {});
   if (daemon && daemon.exitCode === null) { daemon.kill("SIGTERM"); await new Promise(r => setTimeout(r, 1500)); if (daemon.exitCode === null) daemon.kill("SIGKILL"); }
@@ -112,7 +121,8 @@ function senderTurn() {
     user('<paseo-system version="1" kind="agent-notification" source-agent-id="agent-tests" message-id="m2" source-agent-title="Test runner" event="finished">\nAgent agent-tests (Test runner) finished.\n\n&lt;agent-response&gt;\nAll 42 export tests pass, including the 50k-row case.\n&lt;/agent-response&gt;\n</paseo-system>'),
     user("Follow-through batch b-7\n\n- Fix CI on example/app#412: lint"),
     user("From the developer via Overseer: also keep the header row on every page"),
-    user("Follow-up answer D1 (Which encoding?): B — UTF-8 with BOM\nContinue with this choice."),
+    // An answer another agent sent on the developer's behalf (brief_action): "Answer from Release captain", never "You".
+    user("Follow-up answer D1 (Which encoding?): B — UTF-8 with BOM\nContinue with this choice.\nAnswered by Release captain (agent agent-captain) for the developer."),
     user("Looks good. Ship it after CI is green."),
     // Follow-up's Stop-hook nudge (Codex form) and the agent's bookkeeping reply: neither is a step.
     user('<hook_prompt hook_run_id="stop:9:/fixture/.codex/hooks.json">Silently complete this workspace\'s sidebar bookkeeping before finishing. This is metadata bookkeeping only; do not start queued repairs or recovery.</hook_prompt>'),
