@@ -9,7 +9,8 @@ Reading an unloaded agent's timeline (`fetch_agent_timeline`) or its provider su
 loaded for an hour.
 
 - **Check first.** `isLoaded()` in `shared/agent-load.ts` is the check. A snapshot without `activeTurn` is a stored
-  projection, so treat it as unloaded. When in doubt, don't wake it.
+  projection, so treat it as unloaded. When in doubt, don't wake it. `isLive()` is "running for Follow-up": mid-turn,
+  starting, or with Paseo 0.16 background work (`backgroundCount`; absent, zero or malformed counts read as none).
 - **Read from disk instead.** `server/transcript.ts` reads an unloaded agent's recent steps from the provider
   transcript on disk, read-only: the last 512 KB, never credentials.
 - **The active window.** `server/agent-load.ts` defines it (`workspaceActive`, `activeWindowMs`; default

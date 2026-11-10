@@ -112,7 +112,7 @@ export class Overseer {
       const agent = await workspace.agents.create({
         config: { provider: chosen.provider, ...(chosen.mode ? { modeId: chosen.mode } : {}), ...(chosen.thinking ? { thinkingOptionId: chosen.thinking } : {}), systemPrompt: overseerPrompt },
         title: OVERSEER_TITLE, labels: { [OVERSEER_LABEL]: "1" },
-        ...(handoff ? { prompt: `Handoff from the previous Overseer, ${why}. Its last steps:\n${handoff}\n\nNothing to do until Tom writes. Reply "Ready." only.` } : {}),
+        ...(handoff ? { prompt: `Handoff from the previous Overseer, ${why}. Its last steps:\n${handoff}\n\nNothing to do until the developer writes. Reply "Ready." only.` } : {}),
       });
       const next: OverseerState = { version: 1, agentId: agent.id, workspaceId: workspace.id, startedAt: new Date(this.now()).toISOString(), generation: current.generation + 1, error: null,
         agent: { key: chosen.key, provider: chosen.provider.split("/")[0], model: chosen.provider.split("/").slice(1).join("/"), thinking: chosen.thinking, mode: chosen.mode } };
@@ -174,7 +174,7 @@ export class Overseer {
     if (!s.agentId) return this.start(paseo);
     const read = await this.steps(paseo, s.agentId, 12).catch(() => null);
     const configured = await this.setting();
-    return this.start(paseo, handoffSummary(read?.steps ?? []), `which Tom replaced to run on ${configured.model ? modelName(configured.model) : configured.provider}`);
+    return this.start(paseo, handoffSummary(read?.steps ?? []), `which the developer replaced to run on ${configured.model ? modelName(configured.model) : configured.provider}`);
   }
 
   private async alive(paseo: OverseerPaseo, s: OverseerState): Promise<boolean> {
@@ -251,7 +251,7 @@ export class Overseer {
       case "agent_digest": return this.agentDigest(paseo, args.agentId, args.steps ?? 10);
       case "route_candidates": {
         const { confident, top } = routeDecision(scoreCandidates(args.ask, await this.workstreams(true), this.now()));
-        return { confident, candidates: top, next: confident ? `Send it with send_to_agent to ${top[0].agentId} (${top[0].title}), then tell Tom in one line.` : "Not sure: ask Tom with needs_you kind=decision, these candidates plus \"New workspace\"." };
+        return { confident, candidates: top, next: confident ? `Send it with send_to_agent to ${top[0].agentId} (${top[0].title}), then tell the developer in one line.` : "Not sure: ask the developer with needs_you kind=decision, these candidates plus \"New workspace\"." };
       }
       case "send_to_agent": return this.send(paseo, s, args as { agentId: string; text: string; reply_to_ask?: boolean });
       case "start_workspace": return args.confirm ? this.confirm(args.planId) : this.planWorkspace(paseo, s, args);
@@ -296,11 +296,11 @@ export class Overseer {
     // Sending to an unloaded agent wakes it. That's Tom's explicit ask here, so it's allowed, and the reply says so.
     const woke = !isLoaded(agent);
     try { await paseo.agents.ref(args.agentId).send(forwardText(args.text), { messageId }); }
-    catch (error) { if (conversationGone(error)) throw new Error(`${agent.title ?? args.agentId}'s conversation is gone; it can't take messages. Offer Tom a new workspace instead.`); throw error; }
+    catch (error) { if (conversationGone(error)) throw new Error(`${agent.title ?? args.agentId}'s conversation is gone; it can't take messages. Offer the developer a new workspace instead.`); throw error; }
     const lites = await this.d.workspaces().catch(() => []);
     const where = lites.find(l => l.id === agent.workspaceId)?.name ?? agent.title ?? args.agentId;
     const who = agent.title ?? where;
-    return { sent: true, agentId: args.agentId, workspace: where, woke, clearsNeedsYou: sender === "developer", next: `Tell Tom in one line: "Sent to ${where}${woke ? ` (woke ${who})` : ""}."` };
+    return { sent: true, agentId: args.agentId, workspace: where, woke, clearsNeedsYou: sender === "developer", next: `Tell the developer in one line: "Sent to ${where}${woke ? ` (woke ${who})` : ""}."` };
   }
 
   /**
@@ -328,7 +328,7 @@ export class Overseer {
 
   /** Dry run: the workspace Follow-up would start. Runs only after the developer asked for or approved it. */
   private async planWorkspace(paseo: OverseerPaseo, s: OverseerState, args: { task?: string; title?: string; project?: string; linear_key?: string; base?: string }) {
-    if (!args.task) throw new Error("start_workspace: give task (Tom's words for the work).");
+    if (!args.task) throw new Error("start_workspace: give task (the developer's words for the work).");
     const [lites, projects] = await Promise.all([this.d.workspaces(true), listProjects(paseo)]);
     const wanted = args.project?.toLowerCase();
     // Without a project, the one most of the developer's workspaces live in.
@@ -342,7 +342,7 @@ export class Overseer {
     const base = args.base ?? "main";
     const blockers: string[] = [];
     if (!project) blockers.push(projects.length ? `Pick a project: ${projects.slice(0, 8).map(p => p.name).join(", ")}.` : "No Paseo project is available.");
-    if (!approvesNewWorkspace(await this.lastDeveloperMessage(paseo, s.agentId!))) blockers.push("Tom hasn't asked for or approved a new workspace. Ask him first (needs_you kind=decision with \"New workspace\" as an option).");
+    if (!approvesNewWorkspace(await this.lastDeveloperMessage(paseo, s.agentId!))) blockers.push("The developer hasn't asked for or approved a new workspace. Ask them first (needs_you kind=decision with \"New workspace\" as an option).");
     const plan = { title, branch, base, project: project?.name ?? null, firstMessage: forwardText(args.task) };
     const planId = blockers.length ? null : randomUUID();
     if (planId) this.plans.set(planId, { expiresAt: this.now() + 10 * 60_000, run: async () => {
@@ -352,7 +352,7 @@ export class Overseer {
       const agent = await w.agents.create({ config: { provider: await providerModel(paseo, providerId), ...(providerId === "claude" ? { modeId: "bypassPermissions" } : {}) }, title, prompt: plan.firstMessage });
       return { started: true, workspaceId: w.id, agentId: agent.id, title, branch };
     } });
-    return { dryRun: true, planId, plan, blockers, next: planId ? `Call start_workspace with confirm=true and planId=${planId}. Then tell Tom in one line.` : "Blocked; resolve the blockers first." };
+    return { dryRun: true, planId, plan, blockers, next: planId ? `Call start_workspace with confirm=true and planId=${planId}. Then tell the developer in one line.` : "Blocked; resolve the blockers first." };
   }
   private async confirm(planId: string | undefined) {
     if (!planId) throw new Error("start_workspace: confirm needs the planId from the dry run.");

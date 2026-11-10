@@ -8,7 +8,7 @@ const directory = dirname(fileURLToPath(import.meta.url));
 /** 1.4.0-beta.2: launched with Follow-up's tools served by Paseo's MCP (follow_<name>), or the follow-through bridge (<name>). Agents opened before the upgrade carry no flag and keep the bridge names. */
 let native = process.env.FOLLOW_THROUGH_TOOLS === "native";
 // Tool names that read unambiguously in prose; kept identical to server/mcp.mjs's underscore names (a test checks it).
-export const TOOL_NAMES = ["workspace_status", "sync_workspace", "enroll_workspace", "register_pr", "exclude_stack", "update_obligation", "acknowledge_batch", "ask_question", "record_answer", "withdraw_question", "set_spec", "link_item", "unlink_item", "link_items", "set_linked_items", "workspace_about", "agent_settings", "needs_you", "declare_done", "list_prs", "add_reviewers", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "inbox_list", "sign_off", "set_finish_flags", "set_priorities", "agent_digest", "route_candidates", "send_to_agent", "start_workspace", "display_settings", "set_display", "follow_settings", "set_follow_settings", "project_settings", "set_project_tracking", "pr_workflow", "set_pr_workflow", "reviewer_settings", "reviewer_suggestions", "save_reviewers", "set_agent_setting", "set_wait_for_jobs", "onboarding_status", "onboarding_checks", "set_onboarding", "rank_status", "rerank_priorities", "overseer_status", "overseer_start", "overseer_restart", "overseer_ask", "inbox_brief", "brief_action", "inbox_act", "answer_question", "run_recovery", "set_workspace_spec", "set_task_trigger", "pr_controls", "browser_status", "trust_bypass_status", "release_notes", "updates_status", "check_updates", "set_updates", "install_update", "make_main_agent"];
+export const TOOL_NAMES = ["workspace_status", "sync_workspace", "enroll_workspace", "register_pr", "exclude_stack", "update_obligation", "acknowledge_batch", "ask_question", "record_answer", "withdraw_question", "set_spec", "link_item", "unlink_item", "link_items", "set_linked_items", "workspace_about", "agent_settings", "needs_you", "declare_done", "list_prs", "add_reviewers", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "inbox_list", "sign_off", "snooze_workspace", "set_finish_flags", "set_priorities", "agent_digest", "route_candidates", "send_to_agent", "start_workspace", "display_settings", "set_display", "follow_settings", "set_follow_settings", "project_settings", "set_project_tracking", "pr_workflow", "set_pr_workflow", "reviewer_settings", "reviewer_suggestions", "save_reviewers", "set_agent_setting", "set_wait_for_jobs", "onboarding_status", "onboarding_checks", "set_onboarding", "rank_status", "rerank_priorities", "overseer_status", "overseer_start", "overseer_restart", "overseer_ask", "inbox_brief", "brief_action", "inbox_act", "answer_question", "run_recovery", "set_workspace_spec", "set_task_trigger", "pr_controls", "browser_status", "trust_bypass_status", "release_notes", "updates_status", "check_updates", "set_updates", "install_update", "make_main_agent"];
 const toolPattern = new RegExp(`(?<![\\w])(${TOOL_NAMES.join("|")})(?![\\w])`, "g");
 /** Names Follow-up's tools the way this agent has them. */
 export function named(text, isNative = native) { return isNative ? text.replace(toolPattern, "follow_$1") : text; }
@@ -51,13 +51,13 @@ export function overseerDigest(file, seen, now = Date.now(), { needsMax = 20, ch
   const resting = all.filter(r => r.resting);
   const prior = seen && typeof seen.rows === "object" && seen.rows ? seen.rows : null;
   const age = Math.max(0, Math.round((now - Date.parse(file?.at ?? "")) / 1000));
-  const lines = [`Follow-up digest (last change ${Number.isFinite(age) ? `${age}s` : "?"} ago): ${file?.total ?? all.length} workspaces, ${file?.needs ?? 0} need Tom. Paging: workstreams(page, group, query).`];
+  const lines = [`Follow-up digest (last change ${Number.isFinite(age) ? `${age}s` : "?"} ago): ${file?.total ?? all.length} workspaces, ${file?.needs ?? 0} need the developer. Paging: workstreams(page, group, query).`];
   const needs = rows.filter(r => r.group === "needs");
   if (needs.length) {
-    lines.push(`Needs Tom (${needs.length}):`);
+    lines.push(`Needs the developer (${needs.length}):`);
     for (const r of needs.slice(0, needsMax)) lines.push(`- ${r.line}`);
     if (needs.length > needsMax) lines.push(`- …${needs.length - needsMax} more: workstreams(group="needs")`);
-  } else lines.push("Nothing needs Tom right now.");
+  } else lines.push("Nothing needs the developer right now.");
   if (!prior) {
     const active = rows.filter(r => r.group === "running" || r.group === "fixing");
     lines.push(`First turn. Running now (${active.length}):`);

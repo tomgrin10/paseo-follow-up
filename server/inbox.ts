@@ -2,7 +2,7 @@ import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { BackgroundAgents } from "./background-agents";
-import { emptyInbox, expired, inboxStateSchema, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason } from "../shared/inbox";
+import { emptyInbox, expired, inboxStateSchema, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason, liveFlag, withoutRunState } from "../shared/inbox";
 import type { State as FollowState, Workspace as FollowWorkspace } from "../shared/model";
 import { prActionBlocks } from "../shared/pr-actions";
 import { configuredReviewers, noReviewers, reviewerLabel, withoutAuthor } from "../shared/reviewers";
@@ -65,6 +65,8 @@ export type AgentInfo = {
   background?: boolean;
   /** Ids of the permission prompts Paseo shows for this agent right now. Absent or null: unknown, so nothing is cleared. */
   pendingPermissionIds?: string[] | null;
+  /** Paseo 0.16: live background work; `status` already reads "running" while it's above 0 (liveStatus). */
+  backgroundWork?: number;
 };
 export interface Directory {
   agents(): Promise<AgentInfo[]>;
@@ -106,9 +108,10 @@ export type InboxOptions = {
 /** Decides the brief step for one event from the entry before and after it. */
 export type BriefDecider = (prev: Entry, next: Entry, at: string) => BriefEvent | null;
 /** Brief steps every inbox event implies: sign-off collapses, undo reopens, an answered prompt retires its slim brief. */
-export function autoBrief(event: InboxEvent): BriefEvent | null {
+export function autoBrief(event: InboxEvent, prev?: Entry): BriefEvent | null {
   if (event.type === "sign_off") return { type: "sign_off" };
-  if (event.type === "undo") return { type: "undo" };
+  // Undoing a Later only moves the snooze back: the brief was never collapsed, so nothing reopens.
+  if (event.type === "undo") return prev?.undo?.kind === "snooze" ? null : { type: "undo" };
   if (event.type === "permission_resolved") return { type: "permission_resolved" };
   return null;
 }
@@ -191,7 +194,7 @@ export class Inbox {
         const prev = state.entries[agentId] ?? newEntry(agentId);
         const next = reduce(prev, event, at);
         state.entries[agentId] = next;
-        const steps = [autoBrief(event), brief?.(prev, next, at) ?? null].filter((s): s is BriefEvent => !!s);
+        const steps = [autoBrief(event, prev), brief?.(prev, next, at) ?? null].filter((s): s is BriefEvent => !!s);
         for (const step of steps) this.step(state, agentId, step, at, appends);
       }
     });
@@ -566,6 +569,14 @@ export class Inbox {
         state.revision = REVISION;
       } else {
         if (state.revision < REVISION) migrateFirstRun(state, new Map(agents.map(a => [a.id, a])), now);
+        // A failure or pause from before a restart is history for an agent that is running now (RUN_STATE_REASONS);
+        // a 0.16 host resumes the turns a restart cut off, 0.15 leaves them stopped, so those flags stay.
+        for (const { agent } of roots) {
+          const e = state.entries[agent.id];
+          if (!e?.needs || !["running", "initializing"].includes(agent.status)) continue;
+          const needs = withoutRunState(e.needs);
+          if (needs !== e.needs) state.entries[agent.id] = { ...e, needs, snooze: needs ? e.snooze : null, seq: e.seq + 1 };
+        }
         if (state.lastSeen) for (const { agent, root } of roots) {
           const e = state.entries[agent.id];
           // A finish missed while the worker was down is one Paseo itself marked unread after lastSeen.
@@ -599,7 +610,7 @@ export class Inbox {
           const ev = event(agentId);
           try { state.entries[agentId] = reduce(prev, ev, at); results.push({ agentId, ok: true, cameBack: false }); }
           catch (error) { if (!(error instanceof StaleSignOff)) throw error; results.push({ agentId, ok: false, cameBack: true }); continue; }
-          const step = autoBrief(ev);
+          const step = autoBrief(ev, prev);
           if (step) this.step(state, agentId, step, at, appends);
         }
       };
@@ -614,6 +625,7 @@ export class Inbox {
         }
         case "undo": each(() => ({ type: "undo" })); break;
         case "snooze": each(() => ({ type: "snooze", until: input.until ?? "next-event" })); break;
+        case "unsnooze": each(() => ({ type: "unsnooze" })); break;
         case "mute_turn": each(id => ({ type: "sign_off", ...(input.seqs?.[id] !== undefined ? { seq: input.seqs[id] } : {}), muteTurn: true })); cleared.push(...results.filter(r => r.ok).map(r => r.agentId)); break;
         case "set_finish_flags": each(() => ({ type: "set_finish_flags", value: input.value ?? true })); break;
         case "unsorted_flag": {
@@ -708,15 +720,23 @@ export class Inbox {
     }
     const rootsPer = new Map<string, number>();
     for (const { agent } of roots.values()) if (agent.workspaceId) rootsPer.set(agent.workspaceId, (rootsPer.get(agent.workspaceId) ?? 0) + 1);
-    const row = (agent: AgentInfo, delegatedFrom: string | null, e: Entry | undefined): InboxRow => ({
+    const row = (agent: AgentInfo, delegatedFrom: string | null, e: Entry | undefined): InboxRow => {
+      const turn = this.turns.get(agent.id);
+      const turnStartedAt = turn && ["running", "initializing"].includes(agent.status) ? new Date(turn.at).toISOString() : null;
+      const live = liveFlag(agent.status, e?.needs ?? null, e?.brief ? { kind: e.brief.kind, source: e.brief.source, state: e.brief.state, ask: e.brief.ask, questionIds: e.brief.questionIds, at: e.brief.at } : null, turnStartedAt, !!agent.backgroundWork);
+      return {
       agentId: agent.id, workspaceId: agent.workspaceId, title: agent.title || "Agent",
       workspaceTitle: agent.workspaceId ? names.get(agent.workspaceId) ?? null : null,
       multiRoot: (rootsPer.get(agent.workspaceId ?? "") ?? 0) > 1, status: agent.status, delegatedFrom,
       resumesAt: this.waiting.get(agent.id) ?? null, lastActivityAt: agent.updatedAt,
-      needs: e?.needs ?? null, snooze: e?.snooze ?? null, signedOffAt: e?.signedOffAt ?? null,
+      // A running agent never headlines its last turn's failure or pause (status invariant running-is-not-stale).
+      needs: live.needs, snooze: e?.snooze ?? null, signedOffAt: e?.signedOffAt ?? null,
       undoable: !!e?.undo && Date.parse(e.undo.expires) > now, seq: e?.seq ?? 0, muteTurn: e?.muteTurn ?? false, enable_finish_flags: e?.enable_finish_flags ?? true,
-      brief: e?.brief ? { kind: e.brief.kind, source: e.brief.source, state: e.brief.state, ask: e.brief.ask, questionIds: e.brief.questionIds } : null,
-    });
+      brief: live.brief,
+      turnStartedAt,
+      ...(agent.backgroundWork ? { backgroundWork: agent.backgroundWork } : {}),
+      };
+    };
     const rows: InboxRow[] = [];
     let overseer: InboxRow | null = null;
     for (const { agent, delegatedFrom } of roots.values()) {
@@ -743,7 +763,7 @@ export function briefShare(state: Pick<InboxState, "briefOrigins">, now: number,
 }
 
 export type InboxAction = {
-  action: "sign_off" | "undo" | "snooze" | "mute_turn" | "set_finish_flags" | "unsorted_flag" | "unsorted_sign_off" | "batch_undo";
+  action: "sign_off" | "undo" | "snooze" | "unsnooze" | "mute_turn" | "set_finish_flags" | "unsorted_flag" | "unsorted_sign_off" | "batch_undo";
   agentIds?: string[]; seqs?: Record<string, number>; until?: string; value?: boolean; muteTurn?: boolean;
 };
 

@@ -16,6 +16,7 @@ import { Store } from "./server/store";
 import { PriorityStore } from "./server/priorities";
 import { UsageReader } from "./server/usage";
 import { Engine, agentWorkspace, findWorkspace, interruptionHold } from "./server/engine";
+import { holdSuperseded, liftHold } from "./shared/status";
 import { Github } from "./server/github";
 import { ReviewerConfigStore, ReviewerSuggestions } from "./server/reviewer-config";
 import { repoKey } from "./shared/reviewers";
@@ -50,6 +51,7 @@ import { PrWorkflowStore } from "./server/pr-workflow";
 import { commandName } from "./shared/pr-workflow";
 import { projectRepo } from "./server/daemon";
 import { batchArchive, pruneUnsent } from "./server/batch-archive";
+import { statusCheck } from "./server/status-check";
 import { NO_USAGE } from "./shared/usage";
 import { activeWindowMs, conversationGone, DEFAULT_ACTIVE_WINDOW_DAYS } from "./server/agent-load";
 import { ACTIVE_SCOPE_MIGRATION, PRUNE_MIGRATION, autoSendsByDefault, FOLLOW_EVERY_MIGRATION, followsByDefault, followsEvery, migrateFollowEvery, optedOut } from "./shared/settings";
@@ -160,6 +162,7 @@ export default function contribute(server: PluginServerContext) {
   engine.autoSendsHeld = () => onboarding.holdsAutoSends();
   const archive = batchArchive(directory);
   engine.archive = archive;
+  engine.statusCheck = statusCheck(join(directory, "status-diagnostics.jsonl"));
   const usage = new UsageReader(paseoHome);
   // Unknown is not off: an unreadable document keeps the inbox on with its defaults.
   const inboxSettings = async () => { try { const state = await displaySettings.read(); if (state.status === "ready") return state.values; } catch {} return displayPreferences.schema.parse({}); };
@@ -752,7 +755,7 @@ export default function contribute(server: PluginServerContext) {
       const { started } = ranker.start({ trigger: "overseer" });
       const titles = new Map((await overseer!.workstreams()).map(w => [w.workspaceId, w.title]));
       const current = (await priorityStore.read()).filter(p => p.by === "ranker").slice(0, 5).map(p => ({ title: titles.get(p.workspaceId) ?? p.workspaceId, score: p.score, reason: p.reason }));
-      return { started, current, next: `${started ? "Re-ranking started" : "A ranking is already running"}; it takes about a minute and Home updates by itself. Tell Tom that in one line, with the current top two or three if he asked what to work on.` };
+      return { started, current, next: `${started ? "Re-ranking started" : "A ranking is already running"}; it takes about a minute and Home updates by itself. Tell the developer that in one line, with the current top two or three if they asked what to work on.` };
     } });
   const overseerStatus = async () => {
     const [s, info] = await Promise.all([overseer!.state(), overseer!.agentInfo()]);
@@ -1127,6 +1130,15 @@ export default function contribute(server: PluginServerContext) {
     server.on("agent.turn_started", async () => updater.activity()),
     server.on("agent.turn_ended", async () => updater.activity()),
     server.on("agent.turn_started", async (event, { paseo }) => { seen(paseo); inboxHook(() => inbox.turnStarted(event.agent, event.turnId)); }),
+    // A newer main-agent turn supersedes the failed turn's automatic hold (shared/status.ts holdSuperseded).
+    server.on("agent.turn_started", async event => {
+      await ready;
+      if (stopped || loadError) return;
+      const turn = { agentId: event.agent.id, turnId: event.turnId ?? null };
+      if (!(await store.snapshot()).workspaces.some(w => w.enable_tracking && holdSuperseded(w, turn))) return;
+      await store.mutate(state => { for (const w of state.workspaces) if (w.enable_tracking && holdSuperseded(w, turn)) liftHold(w); });
+      void engine.tick();
+    }),
     server.on("agent.turn_ended", async (event, { paseo }) => { seen(paseo); inboxHook(() => inbox.turnEnded(event.agent, event.outcome, event.turnId)); }),
     server.on("agent.permission_requested", async (event, { paseo }) => { seen(paseo); inboxHook(async () => { await inbox.permissionRequested(event.agent, event.request); await writeBriefState(); }); }),
     server.on("agent.permission_resolved", async (event, { paseo }) => { seen(paseo); inboxHook(async () => { await inbox.permissionResolved(event.agent, event.requestId); await writeBriefState(); }); }),

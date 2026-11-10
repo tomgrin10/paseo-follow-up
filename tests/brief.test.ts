@@ -321,6 +321,16 @@ test("§6 sign off and undo (single and batch) update the brief and re-append it
   assert.deepEqual(s.appended.map(a => a.brief.state), ["open", "signed", "open"]);
   await s.done();
 });
+test("§6 undo of a Later leaves the brief open and appends nothing", async () => {
+  const s = await service([agent({ id: "main" })], { calls: { main: { at: Date.parse(at(1)), turnId: "t1", call: decision } } });
+  await s.inbox.turnEnded(main, { kind: "completed" }, "t1");
+  await s.inbox.act({ action: "snooze", agentIds: ["main"], until: "next-event" });
+  await s.inbox.act({ action: "undo", agentIds: ["main"] });
+  const e = await s.entry();
+  assert.equal(e.snooze, null); assert.ok(e.needs); assert.equal(e.brief?.state, "open");
+  assert.deepEqual(s.appended.map(a => a.brief.state), ["open"]);
+  await s.done();
+});
 test("§6 CI red on an idle agent: facts refresh an open brief, or an S5 brief is made", async () => {
   const w = workspace({ prs: [pr({ snapshot: snapshot({ failedChecks: ["lint"] }) })] });
   const red: PrState = { ...prFacts, facts: [{ icon: "CircleX", label: "Checks failed · lint", tone: "bad" }], event: null };
@@ -546,4 +556,14 @@ test("F7: finishIsQuiet covers done, running and the unknown case", () => {
 });
 test("F7 (4): the nudge and the tool say kind=done won't flag", () => {
   assert.match(NEEDS_YOU_NUDGE, /won't flag/); assert.match(NEEDS_YOU_INSTRUCTION, /won't flag/);
+});
+
+test("2026-11-10 stale error: a new turn supersedes a card that only reported the last turn's failure; one with open questions stays", () => {
+  const failed = open("brief:t9", { kind: "error" });
+  const next = briefStep(failed, { type: "turn_start" }, at(5));
+  assert.equal(next.brief?.state, "superseded");
+  assert.equal(next.brief?.outcome, "The agent started a new turn");
+  const asked = { ...open("brief:t10", { kind: "error" }), questionIds: ["Q3"] };
+  assert.equal(briefStep(asked, { type: "turn_start" }, at(5)).brief?.state, "open");
+  assert.equal(briefStep(open("brief:t11", { kind: "decision" }), { type: "turn_start" }, at(5)).brief?.state, "open", "a decision waits for the developer");
 });

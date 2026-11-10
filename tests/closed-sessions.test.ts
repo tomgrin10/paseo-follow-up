@@ -69,3 +69,13 @@ test("closed and unloaded agents are not asked for provider subagents, which wou
   f.recovery.status = "idle"; f.recovery.activeTurn = null; assert.equal((await f.gateway.recoveryRuntime(w, batch)).busy, true);
   assert.deepEqual(f.subagentLists, ["main-agent", "recovery"]);
 });
+
+test("0.16: the main agent's live background work holds repairs and Done without asking for subagents", async t => {
+  const f = await fixture(t); const w = workspace();
+  (f.main as { backgroundWork?: { count: number } }).backgroundWork = { count: 1 };
+  const runtime = await f.gateway.observe(w);
+  assert.equal(runtime.backgroundBusy, true); assert.equal(runtime.busy, false, "busy stays the agent's turn");
+  assert.deepEqual(f.subagentLists, [], "already busy: no subagent request");
+  (f.main as { backgroundWork?: { count: number } }).backgroundWork = { count: 0 };
+  assert.equal((await f.gateway.observe(w)).backgroundBusy, false);
+});

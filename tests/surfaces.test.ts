@@ -81,6 +81,9 @@ test("pill state machine: flagged → popover; sign off → undo window → gone
   const recent = { agentIds: ["a1"], at: NOW };
   assert.deepEqual(pillState({ row: signed, items: [], recent, now: NOW + 1_000 }), { mode: "undo", label: "Signed off · Undo" });
   assert.equal(pillState({ row: signed, items: [], recent, now: NOW + UNDO_MS + 1 }), null, "gone after 6 s");
+  // Later from the pill: the pill says Later, not Signed off (bug: every recent move read "Signed off").
+  const later = row({ needs: { reasons: [], since: new Date(NOW).toISOString() }, snooze: { until: "next-event", at: new Date(NOW).toISOString() } });
+  assert.deepEqual(pillState({ row: later, items: [], recent: { ...recent, kind: "later" }, now: NOW + 1_000 }), { mode: "undo", label: "Later · Undo" });
   // Another agent's sign-off doesn't put an undo pill here.
   assert.equal(pillState({ row: signed, items: [], recent: { agentIds: ["other"], at: NOW }, now: NOW + 1_000 }), null);
   // PR-only attention on the main agent: no flag, the workspace headlines.
