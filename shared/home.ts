@@ -8,7 +8,7 @@ import { isOpen as questionOpen } from "./questions";
 import { taskSchedule } from "./task-trigger";
 import { freshPriorities, type Priority, type PrioritySourceKind } from "./priorities";
 import { DEFAULT_SORT, sortItems, type SortMode } from "./sort";
-import { messageSender, senderLabel, workItems } from "./message-sender";
+import { messageSender, notificationText, senderLabel, workItems } from "./message-sender";
 
 /**
  * Home (design §3): every workstream in one list, grouped by what it needs from the developer. Pure, so the
@@ -360,7 +360,9 @@ function projectedAgentStep(it: TimelineItem): TailStep | null {
   if (!m || typeof m.text !== "string" || !m.text.trim()) return null;
   const event = (["finished", "errored", "permission-required", "closed"] as const).find(e => e === m.event) ?? "message";
   const from = senderLabel({ kind: "agent", event, agentId: "", title: m.sender?.title?.trim() || null, text: m.text })!;
-  return { kind: "message", from, text: m.text.trim() };
+  // A projected finish notification still carries its "<agent-response>" wrapper: show only the child's reply.
+  const text = event === "message" ? m.text.trim() : notificationText(m.text);
+  return text ? { kind: "message", from, text } : null;
 }
 /**
  * The agent's last `n` steps for "Recent · last N steps": messages, one-line tool calls and errors. Reasoning,
