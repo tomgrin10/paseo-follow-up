@@ -17,5 +17,5 @@ export function excludeStack(w: Workspace, stack: string, reason: string, obliga
     b.tasks = b.tasks.filter(t => !keys.has(t.target) && !ids.has(t.target));
     if (!b.tasks.length) { b.state = "cancelled"; b.result = `Stack excluded from workspace scope: ${reason}`; }
   }
-  w.completion = null; w.updatedAt = at;
+  w.completion = null; w.declaration = null; w.updatedAt = at;
 }

@@ -43,7 +43,7 @@ export function setMainAgent(w: Workspace, to: string, kind: "handover" | "handB
   for (const b of w.batches) if (b.state === "pending" && b.recipientAgentId === from) b.recipientAgentId = null;
   if (kind === "handover") w.handover = { from, at: new Date(now).toISOString(), worked: false }; else delete w.handover;
   const stop = w.interruption;
-  if (stop && w.hold === interruptionHold(stop.kind) && (stop.agentId ? stop.agentId !== to : kind === "developer")) { w.hold = null; delete w.interruption; w.completion = null; }
+  if (stop && w.hold === interruptionHold(stop.kind) && (stop.agentId ? stop.agentId !== to : kind === "developer")) { w.hold = null; delete w.interruption; w.completion = null; w.declaration = null; }
   w.updatedAt = new Date(now).toISOString();
 }
 
@@ -157,7 +157,7 @@ export function applyDiscovery(state: State, discovered: DiscoveredWorkspace[], 
     if (!w.enable_tracking && followsByDefault(state, row)) { w.enable_auto_sends = startsWithAutoSend(state, w); w.enable_tracking = true; }
     if (!w.inventory) {
       w.inventory = { revision: 1, syncedRevision: 0, candidates: [], historyComplete: false, historyError: null, scannedMessageAt: null };
-      w.completion = null;
+      w.completion = null; w.declaration = null;
     }
     if (row.history) {
       if (w.goal === row.title && row.history.goal) w.goal = row.history.goal;
@@ -171,7 +171,7 @@ export function applyDiscovery(state: State, discovered: DiscoveredWorkspace[], 
         state.workspaces.some(other => other.id !== w.id && other.enable_tracking && !other.archived && other.prs.some(p => p.key === key))) continue;
       w.prs.push({ key, repo: receipt.repo, number: receipt.number, registeredAgentId: receipt.agentId,
         discoveredFromSubmission: true, stack: receipt.branch ?? `PR #${receipt.number}`, parent: null, disposition: null, snapshot: null, error: null });
-      w.completion = null; w.updatedAt = new Date(now).toISOString();
+      w.completion = null; w.declaration = null; w.updatedAt = new Date(now).toISOString();
     }
   }
 }
@@ -183,7 +183,7 @@ export function applyHistory(w: Workspace, history: History, messageAt: string |
   const excludedKeys = new Set(w.excludedStacks.flatMap(stack => stack.prs.map(p => p.key)));
   if (added.some(key => !excludedKeys.has(key) && !w.prs.some(pr => pr.key === key))) {
     inventory.revision++;
-    w.completion = null;
+    w.completion = null; w.declaration = null;
   }
   inventory.candidates = [...new Set([...inventory.candidates, ...added])].sort();
   inventory.historyComplete = history.complete;
