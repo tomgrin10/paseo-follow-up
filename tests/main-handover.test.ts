@@ -122,3 +122,17 @@ test("Make main agent: the developer picks one of the workspace's root agents; a
   assert.equal(legacy.workspaces[0].mainAgentId, "orchestrator");
   assert.equal(legacy.workspaces[0].hold, interruptionHold("canceled"));
 });
+
+test("rule 4: no automatic handover within 30 minutes of a change of main agent", async t => {
+  const f = await fixture(t);
+  await f.poll();
+  f.close(f.orchestrator);
+  for (let i = 0; i < 29; i++) await f.poll();
+  // A change was just made (say, a claim or the developer's choice): the cooldown holds the automatic handover.
+  f.w().mainHistory = [{ from: "helper", to: "orchestrator", by: "developer", reason: null, at: new Date(Date.now()).toISOString() }];
+  await f.poll(2 * 60_000);
+  assert.equal(f.w().mainAgentId, "orchestrator", "closed 31 minutes, but the main changed 2 minutes ago");
+  await f.poll(MAIN_CLOSED_HANDOVER_MS);
+  assert.equal(f.w().mainAgentId, "helper", "after the cooldown the handover goes ahead");
+  assert.equal(f.w().mainHistory?.at(-1)?.by, "auto");
+});
