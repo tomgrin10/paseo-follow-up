@@ -9,7 +9,7 @@ const info = (a: Snapshot): AgentInfo => ({
   id: a.id, workspaceId: a.workspaceId ?? null, parentAgentId: a.parentAgentId ?? a.labels?.["paseo.parent-agent-id"] ?? null,
   title: a.title ?? null, status: a.status, archivedAt: a.archivedAt ?? null, updatedAt: a.updatedAt ?? null,
   lastUserMessageAt: a.lastUserMessageAt ?? null, requiresAttention: !!a.requiresAttention, attentionReason: a.attentionReason ?? null,
-  attentionTimestamp: a.attentionTimestamp ?? null, createdAt: a.createdAt ?? null,
+  attentionTimestamp: a.attentionTimestamp ?? null, createdAt: a.createdAt ?? null, ...(a.background === true ? { background: true } : {}),
   pendingPermissionIds: Array.isArray(a.pendingPermissions) ? a.pendingPermissions.flatMap(p => typeof (p as { id?: unknown })?.id === "string" ? [(p as { id: string }).id] : []) : null,
 });
 
