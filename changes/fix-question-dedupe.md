@@ -1,0 +1,1 @@
+- A question an agent asks again no longer shows up twice in Needs you. Agents get the open question back, and existing duplicates close on update.
