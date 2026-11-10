@@ -132,6 +132,24 @@ test("a Later reads back the way it was picked: tomorrow says tomorrow, not the 
   assert.equal(wakeLabel({ until: new Date(2026, 10, 10, 18, 0).toISOString(), at: T0 }, now), "18:00");
   assert.match(wakeLabel({ until: new Date(2026, 10, 13, 9, 0).toISOString(), at: T0 }, now), /^\w{3} 09:00$/);
 });
+test("#15c Bring back now ends a Later early, with the flag's original age; a quiet or flagged row is unchanged", () => {
+  const later = snoozed(newEntry("a1"));
+  const back = reduce(later, { type: "unsnooze" }, at(5));
+  assert.equal(stateOf(back), "NEEDS"); assert.equal(back.needs!.since, at(0)); assert.ok(back.seq > later.seq);
+  const flagged = run([finished]);
+  assert.deepEqual(reduce(flagged, { type: "unsnooze" }, at(5)), flagged, "not snoozed: nothing to do");
+  assert.equal(stateOf(reduce(newEntry("a1"), { type: "unsnooze" }, at(5))), "QUIET");
+});
+test("Bring back now through the daemon: inbox_act unsnooze", async () => {
+  const { inbox, done } = await service([agent({ id: "main" })]);
+  await mark(inbox);
+  await inbox.turnEnded({ id: "main", workspaceId: "w1", parentAgentId: null }, { kind: "completed" }, "t1");
+  await inbox.act({ action: "snooze", agentIds: ["main"], until: "next-event" });
+  assert.equal(stateOf((await inbox.store.snapshot()).entries.main), "LATER");
+  await inbox.act({ action: "unsnooze", agentIds: ["main"] });
+  assert.equal(stateOf((await inbox.store.snapshot()).entries.main), "NEEDS");
+  await done();
+});
 test("#16 an expired snooze comes back with its original age; 'next event' wakes on any flag", () => {
   const e = snoozed(newEntry("a1"));
   assert.equal(stateOf(reduce(e, { type: "tick" }, at(599))), "LATER");

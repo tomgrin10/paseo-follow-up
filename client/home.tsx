@@ -21,7 +21,7 @@ import { answerLine, overseerRowState } from "../shared/overseer";
 import type { OmniboxItem } from "../shared/search";
 import { ListTop, SearchField, SortMenu, StatusStrip, UsageMeters, useOmnibox, useSlashToFocus } from "./home-chrome";
 import { useHomeModel, useTick, type HomeSources } from "./home-data";
-import { useInbox, UndoBar, useNextRelay } from "./inbox";
+import { laterLabel, useInbox, UndoBar, useNextRelay } from "./inbox";
 import { Spinner } from "./motion";
 import { Setup, SetupOffer, useOnboarding } from "./onboarding";
 import type { OnboardingView } from "../shared/onboarding";
@@ -293,7 +293,8 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
   const itemFirst = compact && asks.length > 0;
   const [laterSheet, setLaterSheet] = useState(false);
   const [typing, setTyping] = useState(false);
-  const flagged = !!row?.needs && !row.snooze;
+  // A snoozed row keeps its moves: Sign off is a normal end for something put off, and Later changes the time.
+  const flagged = !!row?.needs;
   const plan = paneButtons({ permissions: agent.permissions.length, decisions: !!b?.decisions.some(d => d.options.length), items, flagged, hasAgent: !!s.agentId });
   const run = async (key: string, work: () => Promise<unknown>, done?: string) => {
     if (busy) return; setBusy(key);
@@ -350,6 +351,14 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
     </View>}
   </View>;
 
+  // A snoozed row says when it comes back and offers Bring back now, on every width.
+  const snoozedLine = !!row?.needs && !!row.snooze && <View accessibilityLabel={`Later, ${laterLabel(row.snooze.until, Date.now())}`} style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+    <Icon name="AlarmClock" size={14} color={c.foregroundMuted} />
+    <Text style={t.meta}>Later {laterLabel(row.snooze.until, Date.now())}</Text>
+    <Button theme={theme} compact={compact} kind="secondary" icon="BellRing" title="Bring back now" loading={busy === "bring_back"}
+      onPress={() => void run("bring_back", () => inbox.unsnooze([s.agentId!]))} />
+  </View>;
+
   const laterTimes = laterChoices(new Date());
   // Phones: the moves sit in the dock above the composer, in thumb reach, on one row: Sign off, Sign off & next, Later.
   const narrow = useWindowDimensions().width < 380;
@@ -404,6 +413,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
       {w && <NeedsYouList workspace={w} theme={theme} compact={compact} flush skip={b?.decisions.length ? ["question"] : []} feature={compact}
         actions={{ openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion, openAgent: () => openFull(s) }} />}
       {actionBar}
+      {snoozedLine}
       {steps}
     </ScrollView>
     {s.agentId && <View style={[{ borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.surface0 }, bottomInset(compact)]}>

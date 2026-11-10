@@ -82,7 +82,9 @@ Nothing polls while the app is hidden.
 Right-click a Home row or search result (or long-press it on a phone, or press the menu key or Shift+F10 on a focused
 row) for quick moves without opening it. `rowMenu()` in `shared/row-menu.ts` lists only what applies to that row:
 
-1. Triage: Later (the same four choices as the detail pane and the pill, `LATER_CHOICES`), then Sign off.
+1. Triage: Later (the same four choices as the detail pane and the pill, `LATER_CHOICES`), Bring back now on a
+   snoozed row (`inbox_act` `unsnooze`; the detail pane offers it too), then Sign off. Later and Sign off show the
+   Undo bar.
 2. Answer Q<n> for up to two open questions.
 3. Resume follow-up, Send N repairs and Retry repairs, each shown only when it applies.
 4. Open chat, and Ask the Overseer about this (it pre-fills the omnibox and doesn't send).
