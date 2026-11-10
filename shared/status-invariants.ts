@@ -1,6 +1,8 @@
 import type { Workspace } from "./model";
 import { duplicateOpenQuestions } from "./questions";
 import { shouldReopen, type Brief } from "./brief";
+import { flagHeadline } from "./headline";
+import type { InboxRow } from "./inbox";
 import { completionCheck, summary } from "./model";
 import { liveLine, needsYou } from "./attention";
 import { trackedGroup } from "./home";
@@ -101,4 +103,15 @@ export function violations(w: Workspace, now: number): { id: string; detail: str
  */
 export function briefViolations(current: Pick<Brief, "id" | "state" | "outcome" | "questionIds">, openQuestionIds: ReadonlySet<string>): { id: string; detail: string }[] {
   return shouldReopen(current, openQuestionIds) ? [{ id: "brief-follows-questions", detail: `${current.id} is ${current.state} while ${current.questionIds.filter(id => openQuestionIds.has(id)).join(", ")} ${current.questionIds.filter(id => openQuestionIds.has(id)).length === 1 ? "is" : "are"} open` }] : [];
+}
+
+/**
+ * Inbox rows (agents, not workspaces): a running agent never headlines its last turn's failure or pause, since a
+ * newer turn supersedes them (RUN_STATE_REASONS in shared/inbox.ts). `running-is-not-stale`, 2026-11-10: Home said
+ * "Error · The turn failed" on an agent that had been running for 15 minutes.
+ */
+export function rowViolations(row: Pick<InboxRow, "agentId" | "status" | "needs" | "snooze" | "brief">, now: number): { id: string; detail: string }[] {
+  if (!["running", "initializing"].includes(row.status)) return [];
+  const h = flagHeadline(row, now);
+  return h && (h.key === "error" || h.key === "paused") ? [{ id: "running-is-not-stale", detail: `${row.agentId} is ${row.status} but headlines ${h.label}` }] : [];
 }

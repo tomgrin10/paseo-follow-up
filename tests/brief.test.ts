@@ -547,3 +547,13 @@ test("F7: finishIsQuiet covers done, running and the unknown case", () => {
 test("F7 (4): the nudge and the tool say kind=done won't flag", () => {
   assert.match(NEEDS_YOU_NUDGE, /won't flag/); assert.match(NEEDS_YOU_INSTRUCTION, /won't flag/);
 });
+
+test("2026-11-10 stale error: a new turn supersedes a card that only reported the last turn's failure; one with open questions stays", () => {
+  const failed = open("brief:t9", { kind: "error" });
+  const next = briefStep(failed, { type: "turn_start" }, at(5));
+  assert.equal(next.brief?.state, "superseded");
+  assert.equal(next.brief?.outcome, "The agent started a new turn");
+  const asked = { ...open("brief:t10", { kind: "error" }), questionIds: ["Q3"] };
+  assert.equal(briefStep(asked, { type: "turn_start" }, at(5)).brief?.state, "open");
+  assert.equal(briefStep(open("brief:t11", { kind: "decision" }), { type: "turn_start" }, at(5)).brief?.state, "open", "a decision waits for the developer");
+});

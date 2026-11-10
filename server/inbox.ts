@@ -1,7 +1,7 @@
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { emptyInbox, expired, inboxStateSchema, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason } from "../shared/inbox";
+import { emptyInbox, expired, inboxStateSchema, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason, liveFlag, withoutRunState } from "../shared/inbox";
 import type { State as FollowState, Workspace as FollowWorkspace } from "../shared/model";
 import { prActionBlocks } from "../shared/pr-actions";
 import { configuredReviewers, noReviewers, reviewerLabel, withoutAuthor } from "../shared/reviewers";
@@ -548,6 +548,14 @@ export class Inbox {
         state.revision = REVISION;
       } else {
         if (state.revision < REVISION) migrateFirstRun(state, new Map(agents.map(a => [a.id, a])), now);
+        // A failure or pause from before a restart is history for an agent that is running now (RUN_STATE_REASONS);
+        // a 0.16 host resumes the turns a restart cut off, 0.15 leaves them stopped, so those flags stay.
+        for (const { agent } of roots) {
+          const e = state.entries[agent.id];
+          if (!e?.needs || !["running", "initializing"].includes(agent.status)) continue;
+          const needs = withoutRunState(e.needs);
+          if (needs !== e.needs) state.entries[agent.id] = { ...e, needs, snooze: needs ? e.snooze : null, seq: e.seq + 1 };
+        }
         if (state.lastSeen) for (const { agent, root } of roots) {
           const e = state.entries[agent.id];
           // A finish missed while the worker was down is one Paseo itself marked unread after lastSeen.
@@ -690,15 +698,19 @@ export class Inbox {
     }
     const rootsPer = new Map<string, number>();
     for (const { agent } of roots.values()) if (agent.workspaceId) rootsPer.set(agent.workspaceId, (rootsPer.get(agent.workspaceId) ?? 0) + 1);
-    const row = (agent: AgentInfo, delegatedFrom: string | null, e: Entry | undefined): InboxRow => ({
+    const row = (agent: AgentInfo, delegatedFrom: string | null, e: Entry | undefined): InboxRow => {
+      const live = liveFlag(agent.status, e?.needs ?? null, e?.brief ? { kind: e.brief.kind, source: e.brief.source, state: e.brief.state, ask: e.brief.ask, questionIds: e.brief.questionIds } : null);
+      return {
       agentId: agent.id, workspaceId: agent.workspaceId, title: agent.title || "Agent",
       workspaceTitle: agent.workspaceId ? names.get(agent.workspaceId) ?? null : null,
       multiRoot: (rootsPer.get(agent.workspaceId ?? "") ?? 0) > 1, status: agent.status, delegatedFrom,
       resumesAt: this.waiting.get(agent.id) ?? null, lastActivityAt: agent.updatedAt,
-      needs: e?.needs ?? null, snooze: e?.snooze ?? null, signedOffAt: e?.signedOffAt ?? null,
+      // A running agent never headlines its last turn's failure or pause (status invariant running-is-not-stale).
+      needs: live.needs, snooze: e?.snooze ?? null, signedOffAt: e?.signedOffAt ?? null,
       undoable: !!e?.undo && Date.parse(e.undo.expires) > now, seq: e?.seq ?? 0, muteTurn: e?.muteTurn ?? false, enable_finish_flags: e?.enable_finish_flags ?? true,
-      brief: e?.brief ? { kind: e.brief.kind, source: e.brief.source, state: e.brief.state, ask: e.brief.ask, questionIds: e.brief.questionIds } : null,
-    });
+      brief: live.brief,
+      };
+    };
     const rows: InboxRow[] = [];
     let overseer: InboxRow | null = null;
     for (const { agent, delegatedFrom } of roots.values()) {
