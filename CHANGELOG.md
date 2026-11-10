@@ -2,6 +2,11 @@
 
 What changed in each version of Follow-up, newest first. Follow-up shows these in "What's new" after an update, and in full from Home's last line.
 
+## 1.4.0-beta.27 (2026-11-10)
+
+- Follow-up's routine bookkeeping now sits inside Paseo's grouped tool calls instead of breaking them into loose rows.
+- Only the moments that matter stand out in the chat: a question asked and the Workspace done card, which now shows once even when the agent declares done twice.
+
 ## 1.4.0-beta.26 (2026-11-10)
 
 - A finished workspace no longer stalls short of Done when Follow-up can't check what production serves. Done goes through with a "Deploy not confirmed by Follow-up" note.
