@@ -58,6 +58,8 @@ import { ACTIVE_SCOPE_MIGRATION, PRUNE_MIGRATION, autoSendsByDefault, FOLLOW_EVE
 import { Overseer, OVERSEER_TOOLS, type OverseerPaseo, type OverseerTool } from "./server/overseer";
 import { OVERSEER_LABEL } from "./shared/overseer";
 import { withDaemon } from "./server/daemon";
+import { hostFeature, type ServerInfo } from "./server/host-features";
+type ServerInfoClient = { getLastServerInfoMessage?: () => ServerInfo };
 import { inboxAnswer } from "./server/etag";
 import { jobAgentRunner, type JobPaseo } from "./server/job-agent";
 import { AiJobs } from "./server/ai-jobs";
@@ -345,8 +347,10 @@ export default function contribute(server: PluginServerContext) {
     try { const path = join(paseoHome, "config.json"); const { mtimeMs } = await stat(path); if (configCache?.mtimeMs !== mtimeMs) configCache = { mtimeMs, value: JSON.parse(await readFile(path, "utf8")) }; return configCache.value as Parameters<typeof nativeToolsAvailable>[1]; } catch { return null; }
   };
   // Wait for background jobs (folded in from paseo-wait): native tools for interactive Claude sessions.
-  const wait = new Wait(join(directory, "wait"), { enabled: () => agentSettings.waitEnabled(), config: async () => await paseoConfig() as WaitPaseoConfig | null });
-  const currentWait = async () => waitStatus(await agentSettings.waitEnabled(), await paseoConfig() as WaitPaseoConfig | null);
+  // Paseo 0.16 runs background jobs itself (features.agentBackgroundWork): Wait retires there (docs/wait.md).
+  const hostBackgroundWork = hostFeature("agentBackgroundWork", () => withDaemon(async client => (client as ServerInfoClient).getLastServerInfoMessage?.()));
+  const wait = new Wait(join(directory, "wait"), { enabled: () => agentSettings.waitEnabled(), config: async () => await paseoConfig() as WaitPaseoConfig | null, hostBackgroundWork });
+  const currentWait = async () => waitStatus(await agentSettings.waitEnabled(), await paseoConfig() as WaitPaseoConfig | null, await hostBackgroundWork());
   const live = async (agentId: string): Promise<Live> => ({ role: scopes(await store.snapshot())[agentId]?.role ?? null, inbox: (await inboxSettings()).enable_inbox });
   const invoke: Invoke = async (method, input, context) => {
     const handler = handlers.get(method); if (!handler) throw new Error(`Unknown Follow-up method ${method}.`);
