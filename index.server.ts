@@ -751,6 +751,8 @@ export default function contribute(server: PluginServerContext) {
     load: () => readFile(join(directory, "registry.json"), "utf8").then(t => JSON.parse(t) as RegistrySnapshot, () => null),
     save: async snap => { const tmp = join(directory, `registry.json.${process.pid}.tmp`); await writeFile(tmp, JSON.stringify(snap), { mode: 0o600 }); await rename(tmp, join(directory, "registry.json")); } });
   const watchdogLock = join(directory, "update-watchdog.lock");
+  // Only the isolated update harness sets this: short quiet window and probation, so a rollback shows in minutes.
+  const fastUpdates = process.env.FOLLOW_UP_UPDATES_FAST === "1";
   const installerAlive = async () => {
     const lock = await readFile(watchdogLock, "utf8").then(t => JSON.parse(t) as { pid?: number }, () => null);
     if (!lock?.pid) return false;
@@ -778,13 +780,14 @@ export default function contribute(server: PluginServerContext) {
       if (await installerAlive()) return false;
       const script = join(directory, "update-watchdog.mjs");
       await writeFile(script, watchdogSource, { mode: 0o600 });
-      const env = { ...process.env, FOLLOW_UP_UPDATE_JOB: JSON.stringify({ ...job, directory, pluginId: "follow-through", clientEntry: clientEntry(), daemon: await daemonOptions() }) };
+      const env = { ...process.env, FOLLOW_UP_UPDATE_JOB: JSON.stringify({ ...job, directory, pluginId: "follow-through", clientEntry: clientEntry(), daemon: await daemonOptions(), ...(fastUpdates ? { timing: { probationMs: 60_000, loadTimeoutMs: 45_000, watchEveryMs: 5_000 } } : {}) }) };
       const child = spawn(process.execPath, [script], { detached: true, stdio: "ignore", env });
       child.unref();
       await writeFile(watchdogLock, JSON.stringify({ pid: child.pid, to: job.to }), { mode: 0o600 });
       return true;
     },
     log: message => console.warn(message),
+    timing: fastUpdates ? { quietMs: 20_000, probationMs: 60_000 } : undefined,
   });
   const updatesView = async (): Promise<UpdatesView> => demoOverride(directory, "updates", updatesViewSchema, await updater.view());
   // The new worker reports in for the installer's probation once it is ready, with the reason if it couldn't start.

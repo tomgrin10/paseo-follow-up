@@ -24,7 +24,7 @@ export const WATCH_EVERY_MS = 15_000;
  * @param {{ now: number; appliedAt: number; to: string; plugin: { status: "running" | "disabled" | "failed" | "missing"; version: string | null; error: string | null }; heartbeat: { version: string; at: number; error: string | null } | null }} input
  * @returns {{ verdict: "wait" } | { verdict: "ok" } | { verdict: "rollback"; reason: string }}
  */
-export function probation({ now, appliedAt, to, plugin, heartbeat }) {
+export function probation({ now, appliedAt, to, plugin, heartbeat, probationMs = PROBATION_MS, loadTimeoutMs = LOAD_TIMEOUT_MS }) {
   const elapsed = now - appliedAt;
   if (plugin.status === "disabled") return { verdict: "ok" };
   if (plugin.status === "failed") return { verdict: "rollback", reason: plugin.error ? `It failed to load: ${plugin.error}` : "It failed to load." };
@@ -32,8 +32,8 @@ export function probation({ now, appliedAt, to, plugin, heartbeat }) {
   if (plugin.version && plugin.version !== to) return { verdict: "rollback", reason: `Paseo still runs ${plugin.version}.` };
   const mine = heartbeat && heartbeat.version === to && heartbeat.at >= appliedAt ? heartbeat : null;
   if (mine?.error) return { verdict: "rollback", reason: `It reported an error: ${mine.error}` };
-  if (!mine) return elapsed >= LOAD_TIMEOUT_MS ? { verdict: "rollback", reason: "It didn't start within two minutes." } : { verdict: "wait" };
-  return elapsed >= PROBATION_MS ? { verdict: "ok" } : { verdict: "wait" };
+  if (!mine) return elapsed >= loadTimeoutMs ? { verdict: "rollback", reason: "It didn't start within two minutes." } : { verdict: "wait" };
+  return elapsed >= probationMs ? { verdict: "ok" } : { verdict: "wait" };
 }
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -41,10 +41,12 @@ const clip = (text, n = 300) => String(text ?? "").replace(/\s+/g, " ").trim().s
 
 /**
  * One install. `job`: { directory, pluginId, from, to, integrity, tarball, clientEntry, daemon, rollbackOnly? }.
+ * `job.timing` ({ probationMs, loadTimeoutMs, watchEveryMs }) shortens the watch for the isolated update harness only.
  * `io` is injectable for tests: { connect(), now(), sleep(ms) }.
  */
 export async function run(job, io = {}) {
   const now = io.now ?? Date.now;
+  const timing = job.timing ?? {};
   const wait = io.sleep ?? sleep;
   const log = event => appendFile(join(job.directory, "updates.jsonl"), `${JSON.stringify({ at: now(), from: job.from, to: job.to, ...event })}\n`, { mode: 0o600 });
   const connect = io.connect ?? (async () => {
@@ -105,10 +107,10 @@ export async function run(job, io = {}) {
     if (failed) { await log({ event: "failed", reason: failed }); return "failed"; }
     await log({ event: "applied", pid: process.pid });
     for (;;) {
-      await wait(WATCH_EVERY_MS);
+      await wait(timing.watchEveryMs ?? WATCH_EVERY_MS);
       const seen = await observe();
-      if (!seen) { if (now() - appliedAt >= LOAD_TIMEOUT_MS * 2) { await rollback("Paseo stopped answering after the update."); return "rolled-back"; } continue; }
-      const verdict = probation({ now: now(), appliedAt, to: job.to, ...seen });
+      if (!seen) { if (now() - appliedAt >= (timing.loadTimeoutMs ?? LOAD_TIMEOUT_MS) * 2) { await rollback("Paseo stopped answering after the update."); return "rolled-back"; } continue; }
+      const verdict = probation({ now: now(), appliedAt, to: job.to, ...seen, ...timing });
       if (verdict.verdict === "ok") { await log({ event: "updated" }); return "updated"; }
       if (verdict.verdict === "rollback") { await rollback(verdict.reason); return "rolled-back"; }
     }
