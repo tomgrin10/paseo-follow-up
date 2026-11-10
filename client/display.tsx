@@ -36,19 +36,6 @@ function TrustCount({ theme, inCard = false }: Pick<PluginSurfaceProps, "theme">
  * The Overseer and AI priority switches, at the top of their cards in Settings → Agents. Same Display preferences as
  * before (enable_overseer, enable_ranker); only where they show moved.
  */
-export function PreferenceSwitch({ field, theme }: { field: "enable_overseer" | "enable_ranker"; theme: PluginSurfaceProps["theme"] }) {
-  const settings = useSettings(displayPreferences);
-  if (settings.status !== "ready") return null;
-  const copy = field === "enable_overseer"
-    ? { label: "Run the Overseer", hint: "Off hides its row on Home and stops its digest. An Overseer you already started stays in its workspace; Follow-up never archives it." }
-    : { label: "Rank with AI", hint: "Ranks Home's Priority sort from Linear, Slack, GitHub and the weekly plan. Read-only; runs hourly on workdays when something changed." };
-  return <>
-    <SettingsSwitch label={copy.label} hint={copy.hint} value={settings.values[field]} disabled={settings.saving}
-      onValueChange={value => void settings.save({ ...settings.values, [field]: value }, settings.revision)} />
-    {settings.saveError && <Text accessibilityRole="alert" style={{ color: theme.colors.statusDanger, paddingHorizontal: 16, paddingBottom: 8 }}>{settings.saveError}</Text>}
-  </>;
-}
-
 /**
  * Permissions, in Settings → Following after Defaults: Trust bypass agents and how many prompts it approved.
  * Same Display preference as before (enable_trust_bypass); only where it shows moved.

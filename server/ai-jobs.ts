@@ -23,7 +23,7 @@ export type JobSpec<T> = {
   prompt: string;
   schema: z.ZodType<T>;
   system?: string;
-  /** "claude" (default) or "codex": the CLI that runs the job. Settings → Agents picks it per role. */
+  /** Any Paseo provider id; "claude" (default) and "codex" run through their headless CLI, the rest as a hidden agent. */
   provider?: string;
   /** The provider's model: "haiku" (Claude's default here), "sonnet", "gpt-6-luna"… */
   model?: string;
@@ -49,8 +49,11 @@ export class AiJobs {
   private queue: (() => void)[] = [];
   private stopped = false;
   private controllers = new Set<AbortController>();
-  /** `runner` replaces every provider (tests); `runners` replaces one provider's CLI. */
-  constructor(private opts: { runner?: Runner; runners?: Partial<Record<string, Runner>>; concurrency?: number; logPath?: string | null; now?: () => number } = {}) {}
+  /**
+   * `runner` replaces every provider (tests); `runners` replaces one provider's CLI. `generic` runs every provider
+   * without a CLI fast path (server/job-agent.ts: a short-lived agent in a background workspace).
+   */
+  constructor(private opts: { runner?: Runner; runners?: Partial<Record<string, Runner>>; generic?: Runner; concurrency?: number; logPath?: string | null; now?: () => number } = {}) {}
 
   get active(): number { return this.running; }
   get waiting(): number { return this.queue.length; }
@@ -71,8 +74,8 @@ export class AiJobs {
     if (this.stopped) return done({ ok: false, reason: "stopped", error: "Follow-up is stopping.", costUsd: null, durationMs: 0 });
     const provider = spec.provider ?? "claude";
     // An injected runner (tests) always wins, so a job can never reach the real CLI from a test; then the job's own.
-    const runner = this.opts.runner ?? spec.runner ?? this.opts.runners?.[provider] ?? defaultRunner(provider);
-    if (!runner) return done({ ok: false, reason: "failed", error: `${provider} can't run one-shot jobs; pick Claude or Codex in Settings → Agents.`, costUsd: null, durationMs: 0 });
+    const runner = this.opts.runner ?? spec.runner ?? this.opts.runners?.[provider] ?? defaultRunner(provider) ?? this.opts.generic;
+    if (!runner) return done({ ok: false, reason: "failed", error: `${provider} can't run one-shot jobs here; pick another provider in Settings → Agents.`, costUsd: null, durationMs: 0 });
     await this.slot();
     const controller = new AbortController(); this.controllers.add(controller);
     const timeoutMs = spec.timeoutMs ?? 90_000;

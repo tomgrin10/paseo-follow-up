@@ -99,7 +99,7 @@ test("catalog: Paseo's snapshot becomes pickers; failures come back as an error,
   assert.deepEqual(providers.map(p => [p.id, p.available, p.reason]), [["claude", true, null], ["codex", true, null], ["opencode", false, "Not installed"], ["copilot", false, "Turned off in Paseo"], ["muse", false, "muse not found on PATH"]]);
   assert.deepEqual(providers[0].models.map(m => m.id), ["claude-opus-5-5"], "1M-context variants are hidden");
   const forJobs = providersFor("about", [...providers, { id: "pi", label: "Pi", available: true, reason: null, models: [], modes: [], defaultMode: null }]);
-  assert.equal(forJobs.find(p => p.id === "pi")!.available, false); assert.match(forJobs.find(p => p.id === "pi")!.reason!, /only Claude and Codex/);
+  assert.equal(forJobs.find(p => p.id === "pi")!.available, true, "jobs run on any provider Paseo has");
   assert.equal(providersFor("overseer", providers).find(p => p.id === "codex")!.available, true);
   assert.deepEqual(labelsFor({ ...resolveRole(null, "overseer"), model: "claude-opus-5-5", thinking: "high" }, { providers, error: null, fetchedAt: null }), { provider: "Claude", model: "Opus 5.5", thinking: "High" });
 
