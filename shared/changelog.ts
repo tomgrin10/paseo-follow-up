@@ -110,3 +110,12 @@ export function recentNotes(view: Pick<ReleaseNotesView, "version" | "previous" 
   const since = notesSince(view.notes, view.previous, view.version);
   return since.length ? since : view.notes.filter(n => n.version === view.version);
 }
+
+/** "just now", "12m ago", "2h ago", "3 days ago". */
+export function agoText(ms: number): string {
+  const m = Math.floor(ms / 60_000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  return h < 48 ? `${h}h ago` : `${Math.floor(h / 24)} days ago`;
+}
