@@ -7,9 +7,9 @@ import type { State } from "../shared/model";
 import type { Priority } from "../shared/priorities";
 import type { Brief } from "../shared/brief";
 import { flagHeadline } from "../shared/headline";
-import { tailSteps, HOME_GROUPS, type PaseoWorkspaceLite } from "../shared/home";
+import { tailSteps, HOME_GROUPS, type PaseoWorkspaceLite, type TailStep } from "../shared/home";
 import { isOpen as questionOpen } from "../shared/questions";
-import { newestUserMessage } from "./inbox-classifier";
+import { classify, latestPrompt, ledgerSender, type Sources } from "./inbox-classifier";
 import {
   EMPTY_OVERSEER, OVERSEER_LABEL, OVERSEER_TITLE, approvesNewWorkspace, branchFor, digestFile, forwardText, forwardedSender, linearKeys,
   overseerStateSchema, pageRows, routeDecision, scoreCandidates, workspaceTitleFor, workstreams, type OverseerState, type WorkstreamRow,
@@ -43,6 +43,8 @@ export type OverseerDeps = {
   store: { snapshot(): Promise<State> };
   inbox: { list(): Promise<{ rows: InboxRow[] }>; brief(agentId: string): Promise<Brief | null>; noteDelivery(agentId: string, messageId: string | null, by?: "developer"): Promise<void> };
   priorities: { read(): Promise<Priority[]> };
+  /** Who sent a message (the inbox's ledger and other plugins' files): the new-workspace gate reads the same sources as Needs-you. */
+  sources?: Sources;
   /** Paseo's workspace descriptors (name, project, branch): metadata only, cached. `fresh` for tool calls. */
   workspaces(fresh?: boolean): Promise<(PaseoWorkspaceLite & { projectId?: string | null })[]>;
   /** Where agent records live, for reading an unloaded agent's transcript from disk. */
@@ -301,15 +303,27 @@ export class Overseer {
     return { sent: true, agentId: args.agentId, workspace: where, woke, clearsNeedsYou: sender === "developer", next: `Tell Tom in one line: "Sent to ${where}${woke ? ` (woke ${who})` : ""}."` };
   }
 
-  /** The Overseer is mid-turn when it calls a tool, so it is loaded; the transcript covers the rare other case. */
-  private async lastTomMessage(paseo: OverseerPaseo, agentId: string): Promise<string | null> {
+  /**
+   * The developer's latest message to the Overseer, or null when the newest prompt is anyone else's (another agent,
+   * a child's notification, a schedule, Follow-up's own send). A "Follow-up answer" counts only when the delivery
+   * ledger shows the developer clicked it; another agent answering the Overseer's card never approves.
+   * The Overseer is mid-turn when it calls a tool, so it is loaded; the transcript covers the rare other case.
+   */
+  private async lastDeveloperMessage(paseo: OverseerPaseo, agentId: string): Promise<string | null> {
     const agent = (await paseo.agents.ref(agentId).refresh().catch(() => null))?.agent ?? null;
     if (agent && isLoaded(agent)) {
       const page = await paseo.agents.ref(agentId).timeline.refetch({ direction: "tail", limit: 40, projection: "canonical" }).catch(() => null);
-      return page ? newestUserMessage([...page.entries].sort((a, b) => a.seqStart - b.seqStart).map(e => e.item))?.text ?? null : null;
+      const prompt = page ? latestPrompt([...page.entries].sort((a, b) => a.seqStart - b.seqStart).map(e => e.item)) : null;
+      if (!prompt?.message || typeof prompt.sender === "string") return null;
+      const sources = this.d.sources ?? NO_SOURCES;
+      if (prompt.sender.kind === "follow-up" && prompt.sender.what === "answer") return await ledgerSender(prompt.message, agentId, this.now(), sources) === "tom" ? prompt.message.text : null;
+      if (prompt.sender.kind !== "developer") return null;
+      return await classify(prompt.message, agentId, this.now(), sources) === "tom" ? prompt.sender.text : null;
     }
+    // Transcript steps say "you" only for the developer's own message (shared/message-sender.ts).
     const read = await this.steps(paseo, agentId, 20, agent).catch(() => null);
-    return [...(read?.steps ?? [])].reverse().find(x => x.kind === "you")?.text ?? null;
+    const last = [...(read?.steps ?? [])].reverse().find(x => x.kind === "you" || x.kind === "message");
+    return last?.kind === "you" ? last.text : null;
   }
 
   /** Dry run: the workspace Follow-up would start. Runs only after the developer asked for or approved it. */
@@ -328,7 +342,7 @@ export class Overseer {
     const base = args.base ?? "main";
     const blockers: string[] = [];
     if (!project) blockers.push(projects.length ? `Pick a project: ${projects.slice(0, 8).map(p => p.name).join(", ")}.` : "No Paseo project is available.");
-    if (!approvesNewWorkspace(await this.lastTomMessage(paseo, s.agentId!))) blockers.push("Tom hasn't asked for or approved a new workspace. Ask him first (needs_you kind=decision with \"New workspace\" as an option).");
+    if (!approvesNewWorkspace(await this.lastDeveloperMessage(paseo, s.agentId!))) blockers.push("Tom hasn't asked for or approved a new workspace. Ask him first (needs_you kind=decision with \"New workspace\" as an option).");
     const plan = { title, branch, base, project: project?.name ?? null, firstMessage: forwardText(args.task) };
     const planId = blockers.length ? null : randomUUID();
     if (planId) this.plans.set(planId, { expiresAt: this.now() + 10 * 60_000, run: async () => {
@@ -355,8 +369,10 @@ export const DEFAULT_OVERSEER_AGENT: OverseerAgentSetting = { provider: "claude"
 /** Identifies a setting: the default is plain "claude", so older Overseers (no recorded agent) match it. */
 export const settingKey = (s: OverseerAgentSetting) => s.provider === "claude" && !s.model && !s.thinking && s.mode === "bypassPermissions" ? "claude" : [s.provider, s.model ?? "", s.thinking ?? "", s.mode ?? ""].join("|");
 
-export function handoffSummary(steps: { kind: string; text: string }[]): string {
-  return steps.length ? steps.map(x => `- ${x.kind === "you" ? "Tom" : x.kind}: ${clip(x.text.replace(/\s+/g, " ").trim(), 240)}`).join("\n") : "(no history could be read)";
+const NO_SOURCES: Sources = { ledger: async () => [], defer: async () => false, session: async () => false, schedule: async () => false };
+
+export function handoffSummary(steps: TailStep[]): string {
+  return steps.length ? steps.map(x => `- ${x.kind === "you" ? "developer" : x.kind === "message" ? x.from : x.kind}: ${clip(x.text.replace(/\s+/g, " ").trim(), 240)}`).join("\n") : "(no history could be read)";
 }
 
 /** Write JSON to a temp file, then rename: readers never see half a file. */

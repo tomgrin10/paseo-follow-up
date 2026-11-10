@@ -11,8 +11,30 @@
 - **Storage and loop.** `server/inbox.ts` stores `inbox.json` (`InboxStore`). `Inbox` turns lifecycle events into
   reducer events (`turnStarted`, `turnEnded`, `permissionRequested`…). `tick()` runs every 15 s from `inboxLoop`
   in `index.server.ts`.
+- **Who wrote a message** (`shared/message-sender.ts`): the one classifier for user-role text. Paseo delivers more
+  than the developer's words as user messages, so nothing may treat "user role" as "the developer" without it.
+  `messageSender(text)` returns:
+  - `agent`: a `<paseo-system kind="agent-message">` or `kind="agent-notification"` envelope (one or several), with
+    the source agent's id and title, the event (`message`, `finished`, `errored`, `permission-required`, `closed`)
+    and the body unescaped and stripped (a notification's `<agent-response>` reply when it has one).
+  - `follow-up`: Follow-up's batch (`Follow-through batch`, legacy `Workspace follow-through batch`), recovery
+    (`Follow-through recovery`) or answer (`Follow-up answer`). An answer is usually the developer's click, which only
+    the delivery ledger can tell (`ledgerSender`).
+  - `overseer-forward`: `From the developer via Overseer:` or the legacy `From Tom via Overseer:` (`FORWARD_PREFIXES`),
+    prefix stripped. It counts as the developer only through the ledger (the forwarded-message rule).
+  - `system`: Paseo's bare `<paseo-system>` (schedule fires) and unknown kinds, and the harness's wrappers (a text that
+    opens and closes with a tag, AGENTS.md instructions, command caveats).
+  - `developer`: everything else, including Paseo's `kind="user-message"` quoting envelope.
+
+  Call sites: Recent steps and the Overseer's digest (`tailSteps`, `transcriptSteps`), Summary inputs (`tailLines`,
+  `readTranscript`), discovery's goal (`extractHistory`), linked items (`timelineRefs`), Needs-you clearing (`classify`)
+  and the Overseer's new-workspace gate (`lastDeveloperMessage`). Only `developer` shows as "You"; others show as
+  "From <agent>", "<agent> finished", "Follow-up batch" or "You, via Overseer", never with the raw envelope
+  (`senderViolations` in `shared/status-invariants.ts`, `tests/message-sender.test.ts`).
 - **Who started a turn** (`server/inbox-classifier.ts`):
-  - Checks known senders in order: Follow-up's own sends (the delivery ledger, through `onBeforeSend`), Defer's
+  - The text's sender comes first: an agent envelope is `agent` and a Paseo system prompt is `system`, whatever the
+    ledger says.
+  - Then checks known senders in order: Follow-up's own sends (the delivery ledger, through `onBeforeSend`), Defer's
     queue, Smart Session compactions, Session Guard and Paseo schedules.
   - `turnPrompt` reads the prompt from the timeline tail. Paseo 0.15 projects another agent's message as an
     `agent_message` tool call and a schedule or heartbeat as a `heartbeat` tool call; only the developer's own words
