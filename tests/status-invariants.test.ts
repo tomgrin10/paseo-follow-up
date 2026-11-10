@@ -118,7 +118,10 @@ test("regression wks_4b27f268: an idle agent with a queued Done check is not 'on
   assert.notEqual(trackedGroup(w, clock), "fixing");
   const home = buildHome({ rows: [], tracked: [w], paseo: [], now: clock });
   assert.ok(!home.groups.some(g => g.id === "fixing" && g.items.length), "Home doesn't put it under Follow-up is fixing");
-  assert.ok(home.groups.some(g => g.id === "needs" && g.items.length), "it waits on you: Ready to finish");
+  const row = home.groups.find(g => g.id === "needs")?.items[0];
+  assert.ok(row, "it waits on you: Ready to finish");
+  assert.equal(row.word, "Ready to finish", "the Done check isn't labelled as a fix");
+  assert.notEqual(row.icon, "Wrench");
   const finish = needsYou(w, clock).find(i => i.kind === "send");
   assert.equal(finish?.title, "Ready to finish · ask the main agent to declare Done");
 });

@@ -26,7 +26,7 @@ export const GROUP_TITLE: Record<HomeGroupId, string> = {
 export type Tier = 0 | 1 | 2;
 const TIER: Record<HeadlineKey, Tier> = {
   permission: 0, error: 0, paused: 0, blocked: 0, decision: 0, question: 0,
-  action: 1, repairs: 1, merge: 1, reviewers: 1, review: 1, flagged: 1,
+  action: 1, repairs: 1, finish: 1, merge: 1, reviewers: 1, review: 1, flagged: 1,
   finished: 2, pr_closed: 2,
 };
 export const tierOf = (key: HeadlineKey): Tier => TIER[key];
@@ -313,7 +313,7 @@ export type BriefPaneModel = {
 const MOVE: Partial<Record<HeadlineKey, string>> = {
   permission: "It's waiting on a permission.", error: "It stopped on an error.", paused: "It's paused until you look.", blocked: "Follow-up is blocked on it.",
   decision: "The agent is blocked on your answer.", question: "The agent is waiting on your answer.", merge: "It's approved and ready to merge.",
-  reviewers: "Its PR has no reviewers yet.", repairs: "Fixes are ready to send.", review: "It has review feedback.", action: "It needs something only you can do.",
+  reviewers: "Its PR has no reviewers yet.", repairs: "Fixes are ready to send.", finish: "Its work is in; ask the agent to declare Done.", review: "It has review feedback.", action: "It needs something only you can do.",
   finished: "It finished and is waiting for your sign-off.", pr_closed: "Its PR merged or closed.",
 };
 const keyOfWord = (word: string | null): HeadlineKey | null => (Object.entries(HEADLINE_WORD).find(([, w]) => w === word)?.[0] as HeadlineKey | undefined) ?? null;

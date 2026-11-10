@@ -67,7 +67,8 @@
 ## Home
 
 - **Grouping** (`shared/home.ts`): every workstream in one list, grouped by what it needs (`HOME_GROUPS`: needs,
-  fixing, running, waiting, later, quiet).
+  fixing, running, waiting, later, quiet). A tracked workspace's group comes from `trackedGroup`, which reads the
+  status model ([workspaces.md](workspaces.md#status-model)).
 - **Search, sort and colour:**
   - `shared/search.ts`: the client-side omnibox index.
   - `shared/sort.ts`: Priority, Recent, Oldest waiting, Name, By project. Sorting applies within each group.
