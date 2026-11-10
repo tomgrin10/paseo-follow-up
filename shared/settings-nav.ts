@@ -6,13 +6,15 @@ import { reviewerLabel, type ReviewerConfig, type ReviewerEntry } from "./review
  */
 
 export const SETTINGS_CATEGORIES = [
+  // First and the default on a device that never picked one: setup, the installed version and (soon) updates.
+  { id: "general", title: "General", icon: "Settings2", blurb: "Updates, setup, version" },
   { id: "following", title: "Following", icon: "Radar", blurb: "Projects, workspaces, auto-send" },
   { id: "reviewers", title: "Reviewers", icon: "UserCheck", blurb: "Default and per-repo lists" },
   { id: "agents", title: "Agents", icon: "Bot", blurb: "Questions, Overseer, models" },
   { id: "display", title: "Inbox & display", icon: "Inbox", blurb: "Sidebar, pills, Needs-you inbox" },
 ] as const;
 export type SettingsCategory = typeof SETTINGS_CATEGORIES[number]["id"];
-export const DEFAULT_CATEGORY: SettingsCategory = "following";
+export const DEFAULT_CATEGORY: SettingsCategory = "general";
 export const isCategory = (v: unknown): v is SettingsCategory => typeof v === "string" && SETTINGS_CATEGORIES.some(c => c.id === v);
 export const categoryTitle = (id: SettingsCategory) => SETTINGS_CATEGORIES.find(c => c.id === id)!.title;
 

@@ -139,7 +139,7 @@ const catalog = (claude: boolean | string, codex: boolean | string) => ({ error:
 const deps = (patch: Partial<CheckDeps> = {}): CheckDeps => ({
   gh: async () => "demo-dev\n",
   catalog: async () => catalog(true, true),
-  use: async () => ({ claude: ["the Overseer", "What's this about?", "AI priority"] }),
+  use: async () => ({ claude: ["the Overseer", "Summaries", "AI priority"] }),
   tools: async () => ({ config: { daemon: { mcp: { enabled: true } } }, nativeAgents: 3, hookError: null }),
   ...patch,
 });
@@ -178,7 +178,7 @@ test("checks: gh missing, signed out and unreachable each say how to fix it", as
 test("checks: a provider a helper uses is a failure; an unused one is optional; both missing says what still works", async () => {
   let checks = (await new ReadinessChecks(deps({ catalog: async () => catalog(false, true) })).run()).checks;
   const claude = byId(checks, "provider-claude");
-  assert.equal(claude.state, "fail"); assert.match(claude.detail, /the Overseer, What's this about\? and AI priority won't run/);
+  assert.equal(claude.state, "fail"); assert.match(claude.detail, /the Overseer, Summaries and AI priority won't run/);
   assert.equal(claude.fix?.settings, "agents", "Codex works, so offer to switch the helpers"); assert.equal(claude.fix?.command, "claude");
 
   checks = (await new ReadinessChecks(deps({ catalog: async () => catalog(true, false) })).run()).checks;

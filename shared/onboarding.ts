@@ -82,6 +82,32 @@ export function offerVisible(file: OnboardingFile, now: number): boolean {
   return !file.offeredAt || now - Date.parse(file.offeredAt) < OFFER_MS;
 }
 
+/**
+ * "Set up Follow-up again" in Settings (the Following card, the phone's category list, the desktop tab strip): what it
+ * says and does for where setup stands. `resume` opens the flow where it was left instead of from the top.
+ */
+export type SetupEntry = { label: string; hint: string; line: string; action: string; resume: boolean };
+const SETUP_WHAT = "Checks GitHub and the helper agents, and shows what Follow-up does on its own. About two minutes.";
+export function setupEntry(view: Pick<OnboardingView, "status" | "step"> | null | undefined): SetupEntry {
+  const label = "Set up Follow-up again";
+  switch (view?.status) {
+    case "new": case "active": {
+      const at = `Step ${ONBOARDING_STEPS.indexOf(view.step) + 1} of ${ONBOARDING_STEPS.length}`;
+      return { label: "Continue setup", hint: `In progress, ${at.toLowerCase()}. ${SETUP_WHAT}`, line: `In progress, ${at.toLowerCase()}`, action: "Continue", resume: true };
+    }
+    case "done": return { label, hint: `Finished. Run it again to recheck GitHub and the helper agents, or to change what Follow-up does on its own.`, line: "Finished. Run it again any time", action: "Open setup", resume: false };
+    case "skipped": return { label, hint: `Skipped. ${SETUP_WHAT}`, line: "Skipped. About two minutes", action: "Open setup", resume: false };
+    default: return { label, hint: SETUP_WHAT, line: "About two minutes", action: "Open setup", resume: false };
+  }
+}
+
+/** General's line in the phone's Settings list: "Follow-up 1.4.0 · setup finished". */
+export function generalSummary(version: string | null | undefined, status: OnboardingView["status"] | null | undefined): string | null {
+  const setup = status === "done" ? "setup finished" : status === "skipped" ? "setup skipped" : status === "new" || status === "active" ? "setup in progress" : status === "idle" ? "setup not run" : null;
+  const parts = [version ? `Follow-up ${version}` : null, setup].filter(Boolean);
+  return parts.length ? parts.join(" · ") : null;
+}
+
 export function onboardingView(file: OnboardingFile, now: number): OnboardingView {
   return { install: file.install, status: file.status, step: file.step ?? "intro", show: file.status === "new" || file.status === "active", offer: offerVisible(file, now), holdsAutoSends: holdsAutoSends(file) };
 }
@@ -139,7 +165,7 @@ export function ghCheck(r: GhResult): Check {
 }
 
 export type ProviderInfo = { id: string; label: string; available: boolean; reason: string | null };
-/** Which providers the helper roles use right now, e.g. { claude: ["Overseer", "What's this about?"] }. */
+/** Which providers the helper roles use right now, e.g. { claude: ["Overseer", "Summaries"] }. */
 export type ProviderUse = Record<string, string[]>;
 const PROVIDER_FIX: Record<string, { text: string; command: string }> = {
   claude: { text: "Install Claude Code on the computer running Paseo and sign in.", command: "claude" },
@@ -167,7 +193,7 @@ export function providerChecks(catalog: { providers: ProviderInfo[]; error: stri
       fix: otherOk ? fix(`${PROVIDER_FIX[id].text} Or switch those helpers to ${other === "codex" ? "Codex" : "Claude"} in Settings, Agents.`, PROVIDER_FIX[id].command, "agents")
         : fix(PROVIDER_FIX[id].text, PROVIDER_FIX[id].command) });
   }
-  if (!anyAvailable) rows.unshift({ id: "providers", label: "Helper agents", state: "fail", detail: "Neither Claude Code nor Codex is available, so the Overseer, What's this about? and AI priority can't run. Following PRs and Needs you still work.", fix: null });
+  if (!anyAvailable) rows.unshift({ id: "providers", label: "Helper agents", state: "fail", detail: "Neither Claude Code nor Codex is available, so the Overseer, Summaries and AI priority can't run. Following PRs and Needs you still work.", fix: null });
   return rows;
 }
 

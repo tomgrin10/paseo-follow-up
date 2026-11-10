@@ -5,7 +5,7 @@ import { basename, dirname, join } from "node:path";
 import type { z } from "zod";
 
 /**
- * Small bounded model jobs: a prompt in, validated JSON out. Shared by "What's this about?" and the Overseer ranker.
+ * Small bounded model jobs: a prompt in, validated JSON out. Shared by Summaries and the Overseer ranker.
  *
  * The default runner is a headless `claude -p` with everything optional stripped: no tools, no MCP servers, no
  * settings, hooks, skills or CLAUDE.md, no saved session, one turn, a fixed system prompt, run from the temp dir.

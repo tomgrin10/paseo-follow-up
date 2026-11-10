@@ -4,7 +4,7 @@ import { waitStatusSchema } from "./wait";
 /**
  * Which agent each of Follow-up's special roles uses (Settings → Agents), kept in `agents.json` next to state.json.
  *
- * - `about`: "What's this about?" overviews, a one-shot job (server/ai-jobs.ts).
+ * - `about`: Summaries, a one-shot job (server/ai-jobs.ts).
  * - `ranker`: the Overseer's priority ranker, a one-shot job.
  * - `overseer`: the long-lived Overseer agent in Paseo.
  * - `recovery`: the agent Follow-up starts to rebuild a workspace's tracking; "Same as main agent" by default.
@@ -63,7 +63,7 @@ export const ROLE_DEFAULTS: Record<AgentRole, Omit<RoleConfig, "role" | "isDefau
 };
 
 export const ROLE_INFO: Record<AgentRole, { title: string; does: string }> = {
-  about: { title: "What's this about?", does: "Writes the overview and gist at the top of a workspace." },
+  about: { title: "Summaries", does: "Writes the summary and one-line gist at the top of a workspace." },
   overseer: { title: "Overseer", does: "Routes your asks to the agents that own them." },
   recovery: { title: "Recovery", does: "Rebuilds a workspace's tracking when Follow-up lost track of it." },
   ranker: { title: "Priority ranker", does: "Ranks workspaces for Home's Priority sort." },

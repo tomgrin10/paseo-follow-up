@@ -26,7 +26,7 @@ Type is the system sans: 15/21 semibold panel titles, 13/18 body, 12/17 supporti
 - **Say it once.** A line already shown in a Needs-you row isn't repeated as a headline (`sameText`, on every size); the pill's title names the kind of ask, not the ask, because phones show it as the sheet title above the ask.
 - **One primary per screen.** In the detail pane, an actionable Needs-you item (Answer Q1, Merge, Add reviewers) is the primary and Sign off becomes secondary. A question is an attention card with a full-width Answer.
 - **Thumb reach.** The detail pane's moves (Sign off, Sign off & next, Later as an icon opening a list) and the composer sit in a dock pinned to the bottom; the moves hide while typing. The composer's explanation is its accessibility hint.
-- **Progressive disclosure.** Recent steps for an unloaded agent is one row with a quiet Load; the collapsed "What's this about?" shows its gist under the label; badges become the meta line; zero-count status chips are hidden and the strip scrolls sideways; meters move to the end of Home's list.
+- **Progressive disclosure.** Recent steps for an unloaded agent is one row with a quiet Load; the collapsed Summary shows its gist under the label; badges become the meta line; zero-count status chips are hidden and the strip scrolls sideways; meters move to the end of Home's list.
 - **Panel**: Home, the Spec chip and settings share one 44px bar; the goal appears only when it differs from the title; the status sentence uses the ask role. Needs-you rows put their single action at the right edge.
 - **Empty panel**: a title, one line and the three-node rail (PRs as a stack, what needs you, when it's done) with Project settings. Never a Track prompt.
 

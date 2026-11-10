@@ -12,6 +12,11 @@ import { ReviewerSettings, reviewerSettingsKey } from "./reviewers";
 import { AgentSettings, WaitSettings, agentSettingsKey } from "./agents";
 import { ShippingSettings } from "./shipping";
 import { BackHeader, CategoryList, CategoryTabs, Disclosure } from "./settings-shell";
+import { useOnboarding } from "./onboarding";
+import { generalSummary, setupEntry, type SetupEntry } from "../shared/onboarding";
+import { ReleaseNotesSheet, releaseNotesKey, useReleaseNotes } from "./release-notes";
+import type { ReleaseNotesView } from "../shared/changelog";
+import type { OnboardingView } from "../shared/onboarding";
 import {
   categoryTitle, followingSummary, hasSavedCategory, projectsOpenByDefault, projectsSummary, readCategory, reviewersSummary, workspaceRows, workspaceState, workspacesOpenByDefault, workspacesSummary,
   writeCategory, type SettingsCategory, type WorkspaceSetting,
@@ -49,7 +54,7 @@ const followKey = ["follow-through", "follow-settings"];
  * workspace", so they stay next to it. Workspaces replaces the old 100-option select: search, exceptions first,
  * one row open at a time, 25 rows and "Show more".
  */
-function FollowingCategory({ theme, compact, openSetup }: { theme: Theme; compact: boolean; openSetup?: () => void }) {
+function FollowingCategory({ theme, compact }: { theme: Theme; compact: boolean }) {
   const c = theme.colors; const t = text(c, compact);
   const read = useRpc(followSettingsRpc); const write = useRpc(setFollowSettingsRpc); const cache = useQueryClient(); const toast = useToast();
   const query = useQuery({ queryKey: followKey, queryFn: () => read({}), refetchInterval: 30000 });
@@ -61,7 +66,6 @@ function FollowingCategory({ theme, compact, openSetup }: { theme: Theme; compac
   const data = query.data;
   const windowDays = data?.activeWindowDays ?? 3;
   return <>
-    {openSetup && <SettingsCard><SettingsAction label="Set up Follow-up again" hint="Check GitHub and the helper agents, and review what Follow-up does on its own. About two minutes." actionLabel="Open setup" onPress={openSetup} /></SettingsCard>}
     <SettingsSection title="Defaults" info="Follow-up follows every workspace's PR stack, tasks and repairs as soon as the workspace has an agent. Turn Follow every workspace off to follow only the projects switched on below. Follow-up never merges, requests reviewers or archives on its own.">
       {query.isPending && <ActivityIndicator accessibilityLabel="Loading following settings" color={c.foregroundMuted} style={{ alignSelf: "flex-start", marginVertical: 8 }} />}
       {query.error && <SettingsCard><SettingsAction label="Couldn't load following settings" hint={errorText(query.error)} actionLabel="Retry" onPress={() => void query.refetch()} /></SettingsCard>}
@@ -171,13 +175,39 @@ function AgentsCategory({ theme, compact }: { theme: Theme; compact: boolean }) 
 }
 
 /** Each category's one line, from data already loaded (never fetched for it). */
+/**
+ * General: setup and the installed version with its release notes. Auto-update adds its Updates section here.
+ * "Set up Follow-up again" is the first row, so it's on the first screen Settings opens on.
+ */
+function GeneralCategory({ theme, compact, setup }: { theme: Theme; compact: boolean; setup?: { entry: SetupEntry; open: () => void } }) {
+  const notes = useReleaseNotes();
+  const [sheet, setSheet] = useState<boolean | null>(null);
+  const version = notes.data?.version;
+  return <>
+    {setup && <SettingsSection title="Setup">
+      <SettingsCard><SettingsAction label={setup.entry.label} hint={setup.entry.hint} actionLabel={setup.entry.action} onPress={setup.open} /></SettingsCard>
+    </SettingsSection>}
+    <SettingsSection title="Version">
+      <SettingsCard>
+        <SettingsAction label={version ? `Follow-up ${version}` : "Follow-up"} hint={notes.isError ? "Couldn't read the release notes." : "What changed in this version and the ones before it."}
+          actionLabel="What's new" onPress={() => setSheet(false)} />
+        <SettingsAction label="All release notes" hint="Every version, newest first." actionLabel="Open" onPress={() => setSheet(true)} />
+      </SettingsCard>
+    </SettingsSection>
+    {sheet != null && <ReleaseNotesSheet theme={theme} compact={compact} all={sheet} onClose={() => setSheet(null)} />}
+  </>;
+}
+
 function useSummaries(): Partial<Record<SettingsCategory, string | null>> {
   // skipToken: subscribe to what's cached (re-rendering when it arrives) without ever fetching for the summary.
   const follow = useQuery({ queryKey: followKey, queryFn: skipToken }).data as Parameters<typeof followingSummary>[0] | undefined;
   const reviewers = useQuery({ queryKey: reviewerSettingsKey, queryFn: skipToken }).data as { config: ReviewerConfig } | undefined;
   const agents = useQuery({ queryKey: agentSettingsKey, queryFn: skipToken }).data as AgentSettingsView | undefined;
   const changed = agents?.roles.filter(r => !r.isDefault).length ?? 0;
+  const notes = useQuery({ queryKey: releaseNotesKey, queryFn: skipToken }).data as ReleaseNotesView | undefined;
+  const onboarding = useQuery({ queryKey: ["follow-through", "onboarding"], queryFn: skipToken }).data as OnboardingView | undefined;
   return {
+    general: generalSummary(notes?.version, onboarding?.status),
     following: follow ? followingSummary(follow) : null,
     reviewers: reviewers ? reviewersSummary(reviewers.config) : null,
     agents: agents ? (changed ? `${changed} of ${agents.roles.length} changed from the defaults` : "Every agent on its default") : null,
@@ -185,11 +215,11 @@ function useSummaries(): Partial<Record<SettingsCategory, string | null>> {
 }
 
 /**
- * Follow-up's settings, in four categories. Desktop: tabs under the host's own settings nav, the last one remembered
+ * Follow-up's settings, in five categories. Desktop: tabs under the host's own settings nav, the last one remembered
  * on this device. Phone: the category list, drilling in with a back row. Only the open category mounts, so only its
  * data loads.
  */
-export function FollowSettings({ theme, layout, openSetup }: PluginSurfaceProps & { openSetup?: () => void }) {
+export function FollowSettings({ theme, layout, openSetup }: PluginSurfaceProps & { openSetup?: (resume?: boolean) => void }) {
   const compact = layout.compact;
   const c = theme.colors; const t = text(c, compact);
   const [category, setCategory] = useState<SettingsCategory>(() => readCategory());
@@ -197,7 +227,12 @@ export function FollowSettings({ theme, layout, openSetup }: PluginSurfaceProps 
   const [drilled, setDrilled] = useState(() => hasSavedCategory());
   const summaries = useSummaries();
   const pick = (id: SettingsCategory) => { writeCategory(id); setCategory(id); };
-  const content = category === "following" ? <FollowingCategory theme={theme} compact={compact} openSetup={openSetup} />
+  // "Set up Follow-up again" leads General, the first category: what it says depends on where setup stands.
+  const onboarding = useOnboarding();
+  const entry = setupEntry(onboarding.data);
+  const setup = openSetup ? { entry, open: () => openSetup(entry.resume) } : undefined;
+  const content = category === "general" ? <GeneralCategory theme={theme} compact={compact} setup={setup} />
+    : category === "following" ? <FollowingCategory theme={theme} compact={compact} />
     : category === "reviewers" ? <View style={{ gap: 8 }}>
       <Text style={t.meta}>Who Add reviewers asks on a PR: a list per repository, or the default for every repository without one. A login is a GitHub user (octocat) or a team (org/team). Teammates each keep their own lists.</Text>
       <ReviewerSettings theme={theme} compact={compact} />
