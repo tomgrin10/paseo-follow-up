@@ -88,7 +88,7 @@ export function rowMenu(input: RowMenuInput): RowMenuSection[] {
 
   // 1. Triage, the moves made many times a day. Later first: it's the one Tom named.
   add("triage", s.agentId && flagged ? [
-    { key: "later", action: "later", label: "Later", icon: "AlarmClock", ...(snoozedUntil ? { hint: `Snoozed until ${snoozedUntil}` } : {}),
+    { key: "later", action: "later", label: "Later", icon: "AlarmClock", ...(snoozedUntil ? { hint: `Later until ${snoozedUntil}` } : {}),
       children: laterChoices(now).map(([id, label]) => ({ key: `later:${id}`, action: "later" as const, label, icon: "Clock", arg: id })) },
     { key: "sign_off", action: "sign_off", label: "Sign off", icon: "Check" },
   ] : []);

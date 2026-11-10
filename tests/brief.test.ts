@@ -321,6 +321,16 @@ test("§6 sign off and undo (single and batch) update the brief and re-append it
   assert.deepEqual(s.appended.map(a => a.brief.state), ["open", "signed", "open"]);
   await s.done();
 });
+test("§6 undo of a Later leaves the brief open and appends nothing", async () => {
+  const s = await service([agent({ id: "main" })], { calls: { main: { at: Date.parse(at(1)), turnId: "t1", call: decision } } });
+  await s.inbox.turnEnded(main, { kind: "completed" }, "t1");
+  await s.inbox.act({ action: "snooze", agentIds: ["main"], until: "next-event" });
+  await s.inbox.act({ action: "undo", agentIds: ["main"] });
+  const e = await s.entry();
+  assert.equal(e.snooze, null); assert.ok(e.needs); assert.equal(e.brief?.state, "open");
+  assert.deepEqual(s.appended.map(a => a.brief.state), ["open"]);
+  await s.done();
+});
 test("§6 CI red on an idle agent: facts refresh an open brief, or an S5 brief is made", async () => {
   const w = workspace({ prs: [pr({ snapshot: snapshot({ failedChecks: ["lint"] }) })] });
   const red: PrState = { ...prFacts, facts: [{ icon: "CircleX", label: "Checks failed · lint", tone: "bad" }], event: null };
