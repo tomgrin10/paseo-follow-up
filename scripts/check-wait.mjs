@@ -7,6 +7,8 @@
 //   failure   a failing command: the receipt's exit code comes back as failed.
 //   stop      Stop cancels the wait; the job keeps running and completes.
 //   message   a new message ends the wait (new_message) before the job finishes.
+//   long      --long only (about 3.5 min): one wait_for_job holds the full 180 s ceiling through Claude Code and
+//             Paseo's MCP, returns still_pending (not a transport error), then the job completes on a second wait.
 //   reload    plugin reload: records survive; the session gets Wait back on its next prompt.
 //   standalone  with paseo-wait installed and enabled in config.json, a new session gets no Wait tools.
 // It samples the plugin worker's memory (one worker, no process per agent) idle and after the cases.
@@ -26,7 +28,9 @@ const exec = promisify(execFile);
 const source = fileURLToPath(new URL("../", import.meta.url));
 // --quick: three cases; --cases a,b: just those (e.g. to re-run one that a provider hiccup broke).
 const casesAt = process.argv.indexOf("--cases");
+// --long adds the 180 s case, which the default run leaves out.
 const only = casesAt >= 0 ? new Set(process.argv[casesAt + 1].split(",")) : process.argv.includes("--quick") ? new Set(["adoption", "stop", "standalone"]) : null;
+const long = process.argv.includes("--long") || !!only?.has("long");
 // Real model calls need Claude credentials, and Wait's native tools need Paseo 0.15+. Without either (CI has no
 // credentials and installs Paseo 0.14), this prints SKIP with the reason and exits 0. --live (npm run test:wait-live)
 // makes a missing prerequisite a failure instead.
@@ -124,7 +128,7 @@ async function runCase(workspaceId, label, command, maxWait, action) {
     if (action === "stop") await client.cancelAgent(agent.id);
     else await client.sendMessage(agent.id, "A new user message: stop waiting and reply WAIT_MESSAGE_ACK. Do not claim the job is complete.", { activeTurnBehavior: "steer" });
   }
-  await until(() => daemon.agentManager.getAgent(agent.id)?.lifecycle !== "running", `${label} turn ends`);
+  await until(() => daemon.agentManager.getAgent(agent.id)?.lifecycle !== "running", `${label} turn ends`, label === "long" ? 480000 : 180000);
   const endedMs = Date.now();
   const calls = timeline().filter(i => i.type === "tool_call");
   result.lastTimeline = calls.map(i => ({ name: i.name, status: i.status, detail: i.detail, error: i.error }));
@@ -134,6 +138,11 @@ async function runCase(workspaceId, label, command, maxWait, action) {
   if (!action) {
     const terminal = calls.filter(i => i.name.endsWith("wait_for_job") || i.name.endsWith("wait_get_job")).map(receipt).findLast(r => r?.status === "completed" || r?.status === "failed");
     assert.equal(terminal?.status, label === "failure" ? "failed" : "completed", "completion must be observed through a receipt");
+    if (label === "long") {
+      const full = waits.find(w => w.receipt?.outcome === "still_pending");
+      assert.ok(full && full.receipt.waitedSeconds >= 179, `one wait held the whole 180 s ceiling: ${JSON.stringify(waits)}`);
+      assert.ok(waits.every(w => w.status === "completed"), "no wait call died in a transport timeout");
+    }
     if (label === "repeat") { assert.ok(waits.filter(w => w.receipt?.outcome === "still_pending").length >= 2, "the agent wakes repeatedly"); assert.ok(calls.some(i => i.name.endsWith("wait_get_job")), "and inspects between waits"); }
   } else if (action === "stop") assert.equal(waits.at(-1).status, "canceled");
   else { assert.equal(waits.at(-1).receipt?.outcome, "new_message"); assert.ok(endedMs - actionMs < 7000, "a message releases the wait before the job finishes"); }
@@ -142,7 +151,7 @@ async function runCase(workspaceId, label, command, maxWait, action) {
     assert.equal(own.value.status, "running", "ending observation leaves the job running");
     await until(async () => (await call(agent.id, "wait_get_job", { jobId: prepared.jobId })).value.status === "completed", "the background job exits", 20000);
   }
-  const record = { label, waits: waits.map(w => w.receipt?.outcome ?? w.status), exitCode: own.value.exitCode, toolNames: [...new Set(calls.map(i => i.name))], messageLatencyMs: actionMs ? endedMs - actionMs : undefined };
+  const record = { label, waits: waits.map(w => w.receipt?.outcome ?? w.status), waitedSeconds: waits.map(w => w.receipt?.waitedSeconds), exitCode: own.value.exitCode, toolNames: [...new Set(calls.map(i => i.name))], messageLatencyMs: actionMs ? endedMs - actionMs : undefined };
   result.cases.push(record); log("case_passed", record);
   return { agentId: agent.id, jobId: prepared.jobId };
 }
@@ -188,7 +197,8 @@ try {
     if (repeat) { const rejected = await call(other.agentId, "wait_get_job", { jobId: repeat.jobId }); assert.equal(rejected.isError, true); assert.match(rejected.text, /Unknown job/); }
   }
   if (want("stop")) await runCase(workspaceId, "stop", "sleep 10; printf WAIT_STOP_JOB_COMPLETE", 30, "stop");
-  if (want("message")) await runCase(workspaceId, "message", "sleep 10; printf WAIT_MESSAGE_JOB_COMPLETE", 30, "message");
+  if (want("message")) await runCase(workspaceId, "message", "sleep 10; printf WAIT_MESSAGE_JOB_COMPLETE", 180, "message");
+  if (long) await runCase(workspaceId, "long", "sleep 190; printf WAIT_LONG_JOB_COMPLETE", 180);
   await memory("after_cases");
   const previous = repeat ?? adoption;
   if (previous && want("reload")) {

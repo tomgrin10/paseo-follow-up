@@ -227,7 +227,7 @@ Claude agents often start a long command in the background (tests, a build, a de
 
 1. `wait_prepare_job({description, command})` records the job and returns a `bashCommand`. It runs nothing.
 2. The agent runs that exact command with Bash in the background, as it would anyway.
-3. `wait_for_job({jobId})` keeps the agent Running for up to 60 seconds (30 by default) and returns **completed** or **failed** with the exit code, **still_pending** (the agent checks the output with `wait_get_job` and waits again) or **new_message** (you wrote to it).
+3. `wait_for_job({jobId})` keeps the agent Running for up to 3 minutes (1 by default) and returns **completed** or **failed** with the exit code, **still_pending** (the agent checks the output with `wait_get_job` and waits again) or **new_message** (you wrote to it).
 
 Only the command's exit receipt counts as done. Stop ends the wait without killing the command, and a new message ends it too. Each agent sees only its own jobs, and the records survive Follow-up updates. Nothing runs while no agent is waiting: no extra process, no port, no polling.
 

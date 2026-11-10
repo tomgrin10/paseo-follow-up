@@ -1,0 +1,1 @@
+- Wait can hold an agent for up to 3 minutes per check (1 minute by default), so long builds and test runs need fewer wake-ups. A new message or Stop still ends the wait at once.

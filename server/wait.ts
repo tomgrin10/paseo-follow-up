@@ -6,12 +6,12 @@ import type { WaitStatus } from "../shared/wait";
 /**
  * Wait: bounded foreground waits for finite background jobs, folded in from the standalone paseo-wait plugin
  * (1.4.0-beta.24). The agent prepares a job, runs the returned command with native Bash run_in_background=true,
- * then calls wait_for_job, which holds for at most 60 s (default 30) and returns completed, failed, still_pending
+ * then calls wait_for_job, which holds for at most 180 s (default 60) and returns completed, failed, still_pending
  * or new_message. The agent stays Running instead of ending its turn on "waiting for a notification".
  *
  * Served as native plugin tools on the agent's Paseo MCP (request.tools at session_open), like the follow_ tools.
  * Paseo holds a plugin tool call for up to 10 minutes and forwards a cancelled request as tool.cancel (our
- * context.signal), so a 60 s wait fits and Stop ends it. No listener, no port, no process per agent. Hosts that
+ * context.signal), so a 180 s wait fits and Stop ends it. No listener, no port, no process per agent. Hosts that
  * can't serve plugin tools (Paseo 0.14, daemon.mcp.injectIntoAgents=false, the provider's Paseo tools off) get no
  * Wait; the standalone plugin's loopback MCP was not carried over.
  *
@@ -73,7 +73,7 @@ export class Wait {
       },
       {
         name: "wait_for_job",
-        description: "Wait in the foreground for a job you prepared: default 30 s, at most 60 s per call. Returns completed or failed with the exit code, still_pending (inspect the job and its output, then wait again if it is still needed) or new_message (handle it first). Stop and new messages end the wait without killing the job. Don't end your turn just because a wait ran out.",
+        description: "Wait in the foreground for a job you prepared: default 60 s, at most 180 s per call. Returns completed or failed with the exit code, still_pending (inspect the job and its output, then wait again if it is still needed) or new_message (handle it first). Stop and new messages end the wait without killing the job. Don't end your turn just because a wait ran out.",
         input: waitInput,
         execute: async (input, context) => {
           const started = Date.now();

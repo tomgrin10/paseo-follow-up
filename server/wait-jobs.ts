@@ -16,8 +16,8 @@ import { runnerSource } from "./wait-runner-source";
  * records and reads them. Idle jobs cost nothing: no watcher, no timer. A wait holds two bounded timers (a 250 ms
  * receipt check and the ceiling) and releases them when it returns. Records live on disk, so they survive reloads.
  */
-export const DEFAULT_WAIT_SECONDS = 30;
-export const HARD_MAX_WAIT_SECONDS = 60;
+export const DEFAULT_WAIT_SECONDS = 60;
+export const HARD_MAX_WAIT_SECONDS = 180;
 export const waitInput = z.object({
   jobId: z.string().uuid(),
   max_wait_seconds: z.number().int().min(1).max(HARD_MAX_WAIT_SECONDS).default(DEFAULT_WAIT_SECONDS),

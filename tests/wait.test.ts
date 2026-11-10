@@ -81,7 +81,7 @@ test("tools scope jobs by the daemon's agent identity and cwd, and complete only
   await assert.rejects(call(wait, "wait_get_job", { jobId: prepared.jobId }, context("agent-b", root)), /Unknown job/, "another agent can't read it");
   await assert.rejects(call(wait, "wait_get_job", { jobId: prepared.jobId }, context("agent-a", "/elsewhere")), /ownership/, "nor the same id in another cwd");
   await assert.rejects(tool(wait, "wait_prepare_job").input.parseAsync({ description: "x", command: "true", agentId: "agent-b" }), "identity never comes from model input");
-  await assert.rejects(tool(wait, "wait_for_job").input.parseAsync({ jobId: prepared.jobId, max_wait_seconds: 61 }), "60 s hard ceiling");
+  await assert.rejects(tool(wait, "wait_for_job").input.parseAsync({ jobId: prepared.jobId, max_wait_seconds: 181 }), "180 s hard ceiling");
   const execution = run(prepared.bashCommand);
   const first = await call(wait, "wait_for_job", { jobId: prepared.jobId, max_wait_seconds: 1 }, me);
   assert.equal(first.outcome, "still_pending"); assert.equal(first.status, "running");

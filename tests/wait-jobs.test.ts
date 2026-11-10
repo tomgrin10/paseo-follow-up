@@ -40,15 +40,30 @@ test('a finite job periodically wakes the caller, completes, and survives store 
 });
 
 test('ceilings are fixed, strict, and cannot be extended by a hung message transport', async () => {
-  assert.equal(DEFAULT_WAIT_SECONDS, 30); assert.equal(HARD_MAX_WAIT_SECONDS, 60);
+  assert.equal(DEFAULT_WAIT_SECONDS, 60); assert.equal(HARD_MAX_WAIT_SECONDS, 180);
   const f = await fixture();
   try {
     const job = await f.jobs.prepare(f.owner, { description: 'not started', command: 'true' });
-    assert.equal(waitInput.parse({ jobId: job.jobId }).max_wait_seconds, 30);
-    for (const max_wait_seconds of [0, -1, 61, 3600, 1.5]) assert.throws(() => waitInput.parse({ jobId: job.jobId, max_wait_seconds }));
+    assert.equal(waitInput.parse({ jobId: job.jobId }).max_wait_seconds, 60);
+    assert.equal(waitInput.parse({ jobId: job.jobId, max_wait_seconds: 180 }).max_wait_seconds, 180);
+    for (const max_wait_seconds of [0, -1, 181, 3600, 1.5]) assert.throws(() => waitInput.parse({ jobId: job.jobId, max_wait_seconds }));
     const start = Date.now();
     const receipt = await f.jobs.wait(f.owner, { jobId: job.jobId, max_wait_seconds: 1 }, { hasNewMessage: () => new Promise(() => {}) });
     assert.equal(receipt.outcome, 'still_pending'); assert.equal(receipt.status, 'prepared'); assert.ok(Date.now() - start < 1500); assert.equal(f.jobs.activeWaits, 0);
+  } finally { await f.close(); }
+});
+
+test('a full 180 s wait still releases within about a second of a new message', async () => {
+  const f = await fixture();
+  try {
+    const job = await f.jobs.prepare(f.owner, { description: 'long wait', command: 'sleep 600' });
+    const start = Date.now();
+    let arrived = 0;
+    setTimeout(() => { arrived = Date.now(); }, 300);
+    const receipt = await f.jobs.wait(f.owner, { jobId: job.jobId, max_wait_seconds: HARD_MAX_WAIT_SECONDS }, { hasNewMessage: async () => arrived > 0 });
+    assert.equal(receipt.outcome, 'new_message');
+    assert.ok(Date.now() - arrived < 1000, `released ${Date.now() - arrived} ms after the message`);
+    assert.ok(Date.now() - start < 2000); assert.equal(f.jobs.activeWaits, 0);
   } finally { await f.close(); }
 });
 

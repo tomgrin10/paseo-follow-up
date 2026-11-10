@@ -8,7 +8,7 @@ the background and end the turn "waiting for a notification". Wait lets them hol
 1. `wait_prepare_job({description, command})` records a job and returns the exact `bashCommand`. It runs nothing.
 2. The agent runs that command with native Bash and `run_in_background=true`. The command is the runner
    (`wait/run-job.sh`, from `server/wait-runner.sh`) wrapping the agent's command.
-3. `wait_for_job({jobId, max_wait_seconds})` holds for up to 60 s (default 30). It returns `completed` or `failed`
+3. `wait_for_job({jobId, max_wait_seconds})` holds for up to 180 s (default 60). It returns `completed` or `failed`
    with the exit code, `still_pending`, or `new_message`.
 4. `wait_get_job({jobId})` reads a job's status.
 
@@ -32,7 +32,10 @@ the background and end the turn "waiting for a notification". Wait lets them hol
 - **Ownership.** Each job is scoped by the daemon's agent id and cwd. A tool input with an `agentId` is rejected.
 - **Stop and new messages.** Stop cancels the wait, and a new message ends it with `new_message`. Neither kills the
   job.
-- **Claude only.** Wait sets `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0` and `FOLLOW_THROUGH_WAIT=1` for the session.
+- **Ceiling.** `HARD_MAX_WAIT_SECONDS` is 180. Before raising it, prove a full-length call end to end with
+  `npm run test:wait-long`. Paseo gives a plugin tool call 10 minutes, but Claude Code's HTTP MCP transport has its
+  own request timeout (`MCP_TOOL_TIMEOUT`, 60 s by default).
+- **Claude only.** Codex's `tool_timeout_sec` defaults to 60 s, so Wait isn't offered there. Wait sets `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0` and `FOLLOW_THROUGH_WAIT=1` for the session.
 - **Guidance.** `waitInstruction` in `server/mcp.mjs` reaches the agent through the SessionStart hook
   ([hooks.md](hooks.md)).
 
@@ -52,6 +55,8 @@ the background and end the turn "waiting for a notification". Wait lets them hol
 - **Unit:** `tests/wait.test.ts` and `tests/wait-jobs.test.ts`.
 - **Live:** `scripts/check-wait.mjs` (`npm run test:wait`, part of `test:install`) drives real Claude Haiku agents
   in an isolated in-process daemon. Cases: adoption, repeat, failure, stop, message, reload, standalone.
+  - `--long` (`npm run test:wait-long`, about 4 minutes, not in `test:install`) adds `long`: one wait holds the full
+    180 s ceiling to `still_pending` through Claude Code and Paseo's MCP, then the job completes.
   - It skips with exit 0 when there are no Claude credentials or Paseo is below 0.15 (CI).
   - `npm run test:wait-live` fails instead of skipping.
   - `--cases a,b` re-runs single cases.
