@@ -30,9 +30,9 @@ export function UndoBar({ store, theme, touch }: { store: InboxStore; theme: The
     return () => clearTimeout(id);
   }, [recent, store]);
   if (!recent) return null;
-  const what = recent.kind === "later" ? `Later ${laterLabel(recent.until, Date.now())}` : "Signed off";
+  const what = recent.kind === "sign_off" ? "Signed off" : `Later ${laterLabel(recent.until, Date.now())}`;
   return <View role="status" accessibilityLiveRegion="polite" style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: touch ? 52 : 40, paddingLeft: 12, paddingRight: 4, borderRadius: 8, backgroundColor: c.surface1, borderWidth: 1, borderColor: c.border, ...raised(c) }}>
-    {recent.kind === "later"
+    {recent.kind !== "sign_off"
       ? <Icon name="AlarmClock" size={15} color={c.foregroundMuted} />
       : <Icon name="CircleCheck" size={15} color={c.statusSuccess} />}
     {/* Title first and cut on its own, so the time always shows: "TKT-3101 Retry write-up · Later until tomorrow 09:00". */}

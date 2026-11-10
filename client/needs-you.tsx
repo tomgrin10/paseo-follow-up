@@ -4,7 +4,8 @@ import { Icon, useToast } from "@getpaseo/plugin/client/ui";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { checkPrActionRpc, controlRpc, sendRpc } from "../shared/contracts";
-import { needsYou, shortRefs, type NeedItem } from "../shared/attention";
+import { needsYou, shortRefs, workspaceSnoozed, type NeedItem } from "../shared/attention";
+import { laterLabel } from "./inbox";
 import { sameText } from "../shared/home";
 import type { Workspace } from "../shared/model";
 import { Button, Card, CardRow, errorText, text, type Theme } from "./kit";
@@ -145,9 +146,12 @@ function QuestionState({ workspace: w, questionId, theme }: { workspace: Workspa
 }
 
 export function NeedsYouCard({ workspace, theme, compact, actions, now }: { workspace: Workspace; theme: Theme; compact: boolean; actions: NeedActions; now: number }) {
-  const count = needsYou(workspace, now).length;
+  const all = needsYou(workspace, now);
+  const count = all.length;
   if (!count) return null;
-  return <Card theme={theme} compact={compact} icon="CircleAlert" title="Needs you" tone="attention" count={count}>
+  // In Later the card stays (its moves still work) but reads Later, without the attention border.
+  const later = workspaceSnoozed(workspace, all, now) && workspace.snooze ? laterLabel(workspace.snooze.until, now) : null;
+  return <Card theme={theme} compact={compact} icon={later ? "AlarmClock" : "CircleAlert"} title={later ? `Later ${later}` : "Needs you"} tone={later ? "plain" : "attention"} count={count}>
     <NeedsYouList workspace={workspace} theme={theme} compact={compact} actions={actions} now={now} />
   </Card>;
 }

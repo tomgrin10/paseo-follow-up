@@ -91,6 +91,24 @@ export type NeedItem =
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** Everything waiting on the developer, most urgent first. Each item has exactly one action. */
+/** One need as a workspace snooze remembers it: its key plus what it says, so a different hold or blocker is news. */
+export const needKey = (i: NeedItem) => `${i.key}|${"detail" in i ? i.detail : i.title}`;
+
+/** A workspace's Later still stands: its time hasn't come and every need it covers was already there when it was set. */
+export function workspaceSnoozed(w: Pick<Workspace, "snooze">, items: readonly NeedItem[], now: number): boolean {
+  const z = w.snooze;
+  if (!z || !items.length) return false;
+  if (z.until !== "next-event" && !(Date.parse(z.until) > now)) return false;
+  const known = new Set(z.keys);
+  return items.every(i => known.has(needKey(i)));
+}
+
+/** The needs that count right now: none while the workspace is in Later. Every count (dot, pill, Home) uses this. */
+export function activeNeeds(w: Workspace, now = Date.now()): NeedItem[] {
+  const items = needsYou(w, now);
+  return workspaceSnoozed(w, items, now) ? [] : items;
+}
+
 export function needsYou(w: Workspace, now = Date.now()): NeedItem[] {
   if (!w.enable_tracking || w.archived) return [];
   const items: NeedItem[] = [];
