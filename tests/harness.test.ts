@@ -1,20 +1,26 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 
 // scripts/harness.mjs: machine-wide slots shared with the harness-slot shell wrapper, and no orphaned daemons.
 const helper = resolve("scripts/harness.mjs");
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+/** A fake `paseo` CLI in its own directory that prints `version`. */
+async function fakePaseo(dir: string, name: string, version: string) {
+  const bin = join(dir, name); await mkdir(bin, { recursive: true });
+  await writeFile(join(bin, "paseo"), `#!/bin/sh\necho "${version}"\n`); await chmod(join(bin, "paseo"), 0o755);
+  return bin;
+}
 const until = async (check: () => boolean, label: string, ms = 10_000) => { for (const end = Date.now() + ms; !check();) { if (Date.now() > end) throw new Error(`timed out: ${label}`); await new Promise(r => setTimeout(r, 50)); } };
 
 async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   const dir = await mkdtemp(join(tmpdir(), "follow-slots-"));
   const children: ChildProcess[] = [];
   t.after(async () => { for (const c of children) if (c.exitCode === null) c.kill("SIGKILL"); await rm(dir, { recursive: true, force: true }); });
-  const env = { ...process.env, HARNESS_SLOT_DIR: join(dir, "slots"), HARNESS_SLOTS: "1", HARNESS_SLOT_HELD: "", HARNESS_PASEO_CGROUP: join(dir, "no-cgroup") };
+  const env = { ...process.env, PATH: [await fakePaseo(dir, "cli", "0.15.4"), process.env.PATH].join(delimiter), HARNESS_SLOT_DIR: join(dir, "slots"), HARNESS_SLOTS: "1", HARNESS_SLOT_HELD: "", HARNESS_PASEO_CGROUP: join(dir, "no-cgroup") };
   /** A script that takes a slot, says so, then holds it until stdin closes. */
   const script = join(dir, "script.mjs");
   await writeFile(script, `import { harness, spawnTracked } from ${JSON.stringify(helper)};
@@ -22,8 +28,8 @@ const { slot } = await harness({ pollMs: 100 });
 console.log("slot " + slot + " speech " + process.env.PASEO_DICTATION_ENABLED + "/" + process.env.PASEO_VOICE_MODE_ENABLED);
 if (process.argv[2] === "daemon") { const d = spawnTracked("sleep", ["300"]); console.log("daemon " + d.pid); }
 process.stdin.resume(); process.stdin.on("end", () => process.exit(0));\n`);
-  const run = (args: string[] = [], command = process.execPath, prefix: string[] = []) => {
-    const child = spawn(command, [...prefix, script, ...args], { env, stdio: ["pipe", "pipe", "pipe"] });
+  const run = (args: string[] = [], command = process.execPath, prefix: string[] = [], extra: NodeJS.ProcessEnv = {}) => {
+    const child = spawn(command, [...prefix, script, ...args], { env: { ...env, ...extra }, stdio: ["pipe", "pipe", "pipe"] });
     children.push(child);
     const out = { stdout: "", stderr: "" };
     child.stdout!.on("data", d => { out.stdout += d; }); child.stderr!.on("data", d => { out.stderr += d; });
@@ -105,4 +111,22 @@ test("no slot while Paseo's working set is over 75% of its cap; reclaimable cach
   await new Promise(r => setTimeout(r, 300)); assert.equal(a.out.stdout, "");
   await writeFile(join(cgroup, "memory.stat"), "anon 600\ninactive_file 200\nslab_reclaimable 20\n");
   await until(() => a.out.stdout.includes("slot 1"), "runs at 68%, the cache being reclaimable");
+});
+
+test("a paseo CLI on PATH below the plugin's floor stops the run before it takes a slot; a good one is printed once", async t => {
+  const f = await fixture(t);
+  const { slotCount, paseoFloor } = await import(helper) as { slotCount: (env: object) => number; paseoFloor: () => string };
+  assert.equal(slotCount({}), 2, "two slots by default, like the wrapper");
+  assert.equal(paseoFloor(), "0.14.0", "the floor is paseo-plugin.json's requirements.paseo");
+  const stale = await fakePaseo(f.dir, "stale", "0.7.2");
+  const old = f.run([], process.execPath, [], { PATH: [stale, f.env.PATH].join(delimiter) });
+  await until(() => old.child.exitCode !== null, "a stale CLI exits");
+  assert.equal(old.child.exitCode, 97);
+  assert.ok(old.out.stderr.includes(`wrong paseo (0.7.2 at ${join(stale, "paseo")}); need >= 0.14.0`), old.out.stderr);
+  assert.equal(old.out.stdout, "", "no slot, no run");
+  const beta = await fakePaseo(f.dir, "beta", "0.16.0-beta.1");
+  const good = f.run([], process.execPath, [], { PATH: [beta, f.env.PATH].join(delimiter) });
+  await until(() => good.out.stdout.includes("slot 1"), "a newer CLI runs");
+  assert.equal(good.out.stderr.match(/^paseo /gm)?.length, 1);
+  assert.ok(good.out.stderr.includes(`paseo 0.16.0-beta.1 at ${join(beta, "paseo")}\n`), good.out.stderr);
 });

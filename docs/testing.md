@@ -64,12 +64,15 @@ their slot and cleanup (below). `scripts/daemon-counter.mjs` and
   `scripts/harness.mjs` before its heavy work, and starts daemons with `spawnDaemon`. `tests/harness.test.ts` fails
   when a script skips either. `harness()`:
   - Holds a machine-wide flock on `/tmp/paseo-harness-slots/slotN`. These are the same files as the VM's
-    `harness-slot` shell wrapper, so the wrapper and the scripts share slots. `HARNESS_SLOTS` sets N (default 3).
+    `harness-slot` shell wrapper, so the wrapper and the scripts share slots. `HARNESS_SLOTS` sets N (default 2).
   - Waits, with a single `waiting for a harness slot` line, while every slot is taken or while Paseo's working set
     is over 75% of its cap. The working set is `memory.current` minus `inactive_file` and `slab_reclaimable` for the
     `paseo.service` cgroup.
   - Exports `HARNESS_SLOT_HELD`. A run that already has it (under the wrapper, started by a script holding a slot,
     or shooting against another agent's held daemon with `HARNESS_SLOT_HELD=1`) starts at once.
+  - Checks the `paseo` CLI first on PATH: prints `paseo X at /path` once, and exits 97 with
+    `wrong paseo (X at /path); need >= <floor>` when X is below `requirements.paseo` in `paseo-plugin.json`. A stale
+    CLI earlier on PATH otherwise fails deep in the run, as an unknown option. Runs already inside a slot skip this.
   - Turns local speech off, so harness daemons don't download a speech model.
   
   Daemons from `spawnDaemon` run in their own process group, which is killed when the script exits, including on
