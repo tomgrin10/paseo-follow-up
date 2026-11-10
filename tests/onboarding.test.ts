@@ -250,9 +250,9 @@ test("choices: every write is a Settings RPC or display-settings field, never a 
   assert.ok(followSettingsRpc && reviewerSettingsRpc && prWorkflowRpc);
 });
 
-test("shipping sits between defaults and reviewers", async () => {
+test("shipping sits between defaults and reviewers; the tour is its own last step", async () => {
   const { ONBOARDING_STEPS } = await import("../shared/onboarding");
-  assert.deepEqual([...ONBOARDING_STEPS], ["intro", "checks", "defaults", "shipping", "reviewers", "updates", "helpers"]);
+  assert.deepEqual([...ONBOARDING_STEPS], ["intro", "checks", "defaults", "shipping", "reviewers", "updates", "helpers", "tour"]);
 });
 
 test("updates step: writes what Settings → General writes; a fresh install's setup consents to automatic updates", async () => {
@@ -264,7 +264,7 @@ test("updates step: writes what Settings → General writes; a fresh install's s
   assert.equal(updatesConsent({ ...fresh, action: "step", from: "updates", to: "reviewers" }), false, "Back");
   assert.equal(updatesConsent({ ...fresh, action: "step", from: "reviewers", to: "updates" }), false, "arriving");
   assert.equal(updatesConsent({ ...fresh, action: "skip", from: "intro", to: null }), true, "Skip setup");
-  assert.equal(updatesConsent({ ...fresh, action: "finish", from: "helpers", to: null }), true);
+  assert.equal(updatesConsent({ ...fresh, action: "finish", from: "tour", to: null }), true);
   assert.equal(updatesConsent({ install: "existing", settled: false, action: "skip", from: "updates", to: null }), false, "existing installs never");
   assert.equal(updatesConsent({ install: "existing", settled: false, action: "step", from: "updates", to: "helpers" }), false);
   assert.equal(updatesConsent({ install: "fresh", settled: true, action: "skip", from: "intro", to: null }), false, "a restarted setup never");

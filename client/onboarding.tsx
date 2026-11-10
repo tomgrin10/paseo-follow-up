@@ -3,11 +3,13 @@ import { Animated, Easing, Keyboard, Platform, Pressable, ScrollView, Text, View
 import { useRpc, useSettings } from "@getpaseo/plugin/client";
 import { Icon, copyText, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { agentSettingsRpc, followSettingsRpc, onboardingChecksRpc, onboardingRpc, setFollowSettingsRpc, setOnboardingRpc } from "../shared/contracts";
+import { followSettingsRpc, onboardingChecksRpc, onboardingRpc, setFollowSettingsRpc, setOnboardingRpc } from "../shared/contracts";
 import { displayPreferences } from "../shared/display";
 import { ONBOARDING_STEPS, autoSendWrites, checksSummary, type Check, type OnboardingStep, type OnboardingView } from "../shared/onboarding";
 import { Button, IconButton, errorText, text, type Theme } from "./kit";
 import { ReviewerSettings } from "./reviewers";
+import { JobRows } from "./job-rows";
+import { SETUP_ORDER } from "../shared/job-rows";
 import { ShippingStep } from "./shipping";
 import { UpdatesStep } from "./updates";
 import { Spinner, useReducedMotion } from "./motion";
@@ -42,7 +44,8 @@ const TITLES: Record<OnboardingStep, string> = {
   shipping: "How do you ship PRs?",
   reviewers: "Who should review your PRs?",
   updates: "Keep Follow-up up to date",
-  helpers: "Helpers, and where things are",
+  helpers: "Helper agents",
+  tour: "Where to find things",
 };
 
 /** Bottom clearance on phones. TODO(rebase): kit.tsx's bottomInset from the mobile rework replaces this. */
@@ -82,7 +85,8 @@ export function Setup({ theme, compact, view, deps }: { theme: Theme; compact: b
     : step === "shipping" ? <ShippingStep theme={theme} compact={compact} />
     : step === "reviewers" ? <ReviewerSettings theme={theme} compact={compact} />
     : step === "updates" ? <UpdatesStep theme={theme} compact={compact} />
-    : <HelpersStep theme={theme} compact={compact} deps={deps} checks={checks.data?.checks ?? null} />;
+    : step === "helpers" ? <HelpersStep theme={theme} compact={compact} deps={deps} />
+    : <TourStep theme={theme} compact={compact} />;
   const lead: Record<OnboardingStep, string> = {
     intro: "It follows your agents' pull requests until the work is done, sends fixes back to them, and asks you only for decisions.",
     checks: "Follow-up reads PRs with the GitHub CLI, and its helper agents run on the providers you pick. Checking is free.",
@@ -90,7 +94,8 @@ export function Setup({ theme, compact, view, deps }: { theme: Theme; compact: b
     shipping: "Follow-up merges and tracks PRs the way each repository already works. It picked these; change one if it's wrong.",
     reviewers: "When you press Add reviewers on a PR, Follow-up asks these people. Set a default for all repositories, or a list for one. Until then, PRs without reviewers show in Needs you.",
     updates: "New versions fix problems and add features. Follow-up can install them for you, at a moment when no agent is using it, and goes back to the old version if something breaks.",
-    helpers: "Two optional agents. They read, summarise and rank. They never change code or message anyone.",
+    helpers: "Follow-up's own agents. They read, summarise and rank. They never change code or message anyone.",
+    tour: "Four places worth knowing. Everything else is in Settings.",
   };
   const column: ViewStyle = { width: "100%", maxWidth: 560, alignSelf: "center", paddingHorizontal: compact ? 16 : 24 };
 
@@ -366,41 +371,30 @@ function DefaultsStep({ theme, compact, held }: { theme: Theme; compact: boolean
   </View>;
 }
 
-// ---------- 5. helpers and where to find things ----------
+// ---------- 6. helper agents, 7. where to find things ----------
 
-function HelpersStep({ theme, compact, deps, checks }: { theme: Theme; compact: boolean; deps: SetupDeps; checks: Check[] | null }) {
+/** The same job rows as Settings → Agents (client/job-rows.tsx), cheapest first; fills in picks that can't run here. */
+function HelpersStep({ theme, compact, deps }: { theme: Theme; compact: boolean; deps: SetupDeps }) {
   const c = theme.colors; const t = text(c);
-  const display = useSettings(displayPreferences); const toast = useToast();
-  const readAgents = useRpc(agentSettingsRpc);
-  const agents = useQuery({ queryKey: ["follow-through", "agent-settings", "summary"], queryFn: () => readAgents({}), staleTime: 60_000 });
-  const role = (r: string) => agents.data?.roles.find(x => x.role === r)?.summary ?? null;
-  const values = display.status === "ready" ? display.values : null;
-  const save = (patch: Partial<typeof displayPreferences.schema._output>) => { if (display.status === "ready") void display.save({ ...display.values, ...patch }, display.revision).catch(e => toast.error(errorText(e))); };
-  const claudeDown = checks?.find(x => x.id === "provider-claude")?.state === "fail";
-  const on = (summary: string | null) => summary ? ` Runs on ${summary}.` : "";
-  return <View style={{ gap: 14 }}>
-    <Panel c={c}>
-      <SwitchRow first theme={theme} compact={compact} label="Overseer" value={values?.enable_overseer ?? null} onChange={v => save({ enable_overseer: v })}
-        hint={`One agent you ask about all your workspaces, from Home's search box. It starts only when you click Start on Home.${on(role("overseer"))}`} />
-      <SwitchRow theme={theme} compact={compact} label="AI priority" value={values?.enable_ranker ?? null} onChange={v => save({ enable_ranker: v })}
-        hint={`Sorts Home by what matters most, from your Linear issues, Slack mentions and review requests. About once an hour on workdays.${on(role("ranker"))}`} />
-      <View style={{ flexDirection: compact ? "column" : "row", alignItems: compact ? "flex-start" : "center", gap: 8, paddingHorizontal: compact ? 14 : 16, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border }}>
-        <Text style={[t.meta, { flex: compact ? undefined : 1 }]}>{`Summaries use ${role("about") ?? "a small model"}.${claudeDown ? " Claude isn't available here; switch the helpers to Codex in Settings." : ""}`}</Text>
-        {compact
-          ? <Pressable accessibilityRole="link" accessibilityLabel="Change models in Follow-up settings, Agents" onPress={() => deps.openSettings("agents")} style={{ minHeight: 44, justifyContent: "center" }}>
-              <Text style={[t.label, { textDecorationLine: "underline" }]}>Change models</Text>
-            </Pressable>
-          : <Button theme={theme} kind="ghost" icon="Bot" title="Change models" accessibilityLabel="Change models in Follow-up settings, Agents" onPress={() => deps.openSettings("agents")} />}
-      </View>
-    </Panel>
-    <View style={{ gap: 2 }}>
-      <Text accessibilityRole="header" style={{ color: c.foregroundMuted, fontSize: 11, lineHeight: 15, fontWeight: "600", letterSpacing: 0.5, textTransform: "uppercase", marginTop: 10, marginBottom: 4 }}>Where to find things</Text>
-      <TourRow theme={theme} thumb={<ThumbHome c={c} />} title="Home" line="Follow-up in the sidebar. Every workspace, with what needs you at the top." />
-      <TourRow theme={theme} thumb={<ThumbPanel c={c} />} title="Workspace panel"
-        line={compact ? "Tap Follow-up at the top of any workspace: its PRs, tasks and what the agent is doing." : "The Follow-up button in a workspace's header docks its PRs, tasks and what the agent is doing beside the chat."} />
-      <TourRow theme={theme} thumb={<ThumbNeeds c={c} />} title="Needs you" line="The decisions only you can make, one button each. A pill above the chat shows the same." />
-      <TourRow theme={theme} thumb={<ThumbAbout c={c} />} title="Summary" line="One sentence under a workspace's title saying what it's for." />
+  return <View style={{ gap: 12 }}>
+    <Panel c={c}><JobRows theme={theme} compact={compact} order={SETUP_ORDER} preselect /></Panel>
+    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center" }}>
+      <Text style={t.meta}>Permissions and limits are in </Text>
+      <Pressable accessibilityRole="link" accessibilityLabel="Open Follow-up settings, Agents" onPress={() => deps.openSettings("agents")} hitSlop={8} style={{ minHeight: compact ? 44 : 20, justifyContent: "center" }}>
+        <Text style={[t.meta, { color: c.foreground, textDecorationLine: "underline" }]}>Settings, Agents</Text>
+      </Pressable>
+      <Text style={t.meta}>.</Text>
     </View>
+  </View>;
+}
+
+function TourStep({ theme, compact }: { theme: Theme; compact: boolean }) {
+  return <View style={{ gap: 2 }}>
+    <TourRow theme={theme} thumb={<ThumbHome c={theme.colors} />} title="Home" line="Follow-up in the sidebar. Every workspace, with what needs you at the top." />
+    <TourRow theme={theme} thumb={<ThumbPanel c={theme.colors} />} title="Workspace panel"
+      line={compact ? "Tap Follow-up at the top of any workspace: its PRs, tasks and what the agent is doing." : "The Follow-up button in a workspace's header docks its PRs, tasks and what the agent is doing beside the chat."} />
+    <TourRow theme={theme} thumb={<ThumbNeeds c={theme.colors} />} title="Needs you" line="The decisions only you can make, one button each. A pill above the chat shows the same." />
+    <TourRow theme={theme} thumb={<ThumbAbout c={theme.colors} />} title="Summary" line="One sentence under a workspace's title saying what it's for." />
   </View>;
 }
 

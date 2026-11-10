@@ -9,7 +9,7 @@ import { providerName } from "./agent-settings";
  * (see `CHOICE_WRITES`); the flow keeps only its own progress in `plugin-data/follow-through/onboarding.json`.
  */
 
-export const ONBOARDING_STEPS = ["intro", "checks", "defaults", "shipping", "reviewers", "updates", "helpers"] as const;
+export const ONBOARDING_STEPS = ["intro", "checks", "defaults", "shipping", "reviewers", "updates", "helpers", "tour"] as const;
 export type OnboardingStep = typeof ONBOARDING_STEPS[number];
 export const isStep = (v: unknown): v is OnboardingStep => typeof v === "string" && (ONBOARDING_STEPS as readonly string[]).includes(v);
 
