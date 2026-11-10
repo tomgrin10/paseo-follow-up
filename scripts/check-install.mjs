@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
-import { harness, spawnDaemon } from "./harness.mjs";
+import { harness, spawnDaemon, waitUntil } from "./harness.mjs";
 await harness();
 const exec = promisify(execFile);
 const root = await mkdtemp(join(tmpdir(), "follow-install-"));
@@ -36,10 +36,7 @@ try {
   const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env, timeout: 120000, maxBuffer: 1024 * 1024 })).stdout);
   const log = await import("node:fs").then(fs => fs.openSync(join(root, "daemon.log"), "a"));
   daemon = spawnDaemon(["daemon", "run", "--home", home], { env, stdio: ["ignore", log, log] });
-  for (let attempt = 0; attempt < 80; attempt++) {
-    try { await cli("workspace", "ls"); break; }
-    catch { assert.equal(daemon.exitCode, null, "isolated daemon exited"); if (attempt === 79) throw new Error("isolated daemon did not start"); await new Promise(r => setTimeout(r, 250)); }
-  }
+  await waitUntil("isolated daemon did not start", async () => { try { await cli("workspace", "ls"); return true; } catch { assert.equal(daemon.exitCode, null, "isolated daemon exited"); return false; } }, { baseMs: 20_000 });
   await cli("plugin", "install", fixture);
   client = new DaemonClient({ url, clientId: "follow-install-test", clientType: "cli", reconnect: { enabled: false }, suppressSendErrors: true }); await client.connect(); api = createPaseoApi(client);
   const call = (method, input) => client.invokePluginRpc("follow-through", method, input);
@@ -86,12 +83,11 @@ try {
   assert.equal((await call("follow.agent-status", { agentId: secondary.id })).id, w.id);
   await assert.rejects(call("follow.enroll", { agentId: secondary.id, goal: "Cannot replace owner" }), /expected main agent/);
   assert.equal(record.mainAgentId, agent.id, "the original root remains owner");
-  for (let attempt = 0; attempt < 300; attempt++) {
-    record = (await call("follow.get", { workspaceId: w.id })).workspace;
-    if (record.inventory.candidates.includes("example/app#1")) break;
-    if (attempt === 299) throw new Error("Background discovery did not recover the fixture history within two poll intervals");
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
+  // Two poll intervals on an idle VM; longer under load (three failures in four runs at load ~30 on 8 cores, 2026-11-10).
+  record = await waitUntil("Background discovery did not recover the fixture history within two poll intervals", async () => {
+    const current = (await call("follow.get", { workspaceId: w.id })).workspace;
+    return current.inventory.candidates.includes("example/app#1") && current;
+  }, { baseMs: 30_000, everyMs: 100 });
   assert.ok(record.inventory.candidates.includes("example/app#1"));
   assert.ok(record.inventory.candidates.includes("example/unrelated#7"));
   assert.equal(record.prs.length, 0, "references must be reconciled by the agent before repairs");
@@ -144,8 +140,8 @@ try {
   await call("follow.recover", { workspaceId: w.id });
   const waitFor = async (predicate, label) => {
     console.log(`Waiting for ${label}…`);
-    for (let i = 0; i < 100; i++) { await call("follow.refresh", {}); record = (await call("follow.get", { workspaceId: w.id })).workspace; if (await predicate(record)) return; await new Promise(r => setTimeout(r, 1000)); }
-    throw new Error(`Timed out waiting for ${label}: ${JSON.stringify(record)}`);
+    try { await waitUntil(`Timed out waiting for ${label}`, async () => { await call("follow.refresh", {}); record = (await call("follow.get", { workspaceId: w.id })).workspace; return await predicate(record); }, { baseMs: 100_000, everyMs: 1000 }); }
+    catch (error) { throw new Error(`${error.message}: ${JSON.stringify(record)}`); }
   };
   await waitFor(w => w.inventory.syncedRevision === w.inventory.revision && !w.runtimeBusy, "clicked history recovery");
   const recovery = record.batches.find(b => b.tasks.every(t => t.kind === "inventory"));
@@ -210,7 +206,7 @@ try {
   const repair = record.batches.find(b => b.tasks.some(t => t.kind === "conflict"));
   const receiptsForBatches = async () => (await readFile(join(home, "fixture-receipts.jsonl"), "utf8")).trim().split("\n").filter(line => /Follow-through (batch|recovery)/.test(line));
   let receipts = await receiptsForBatches();
-  for (let attempt = 0; receipts.length < 2 && attempt < 40; attempt++) { await new Promise(r => setTimeout(r, 250)); receipts = await receiptsForBatches(); }
+  await waitUntil("two batch receipts", async () => (receipts = await receiptsForBatches()).length >= 2, { baseMs: 10_000 }).catch(() => undefined);
   assert.equal(receipts.length, 2); assert.equal(JSON.parse(receipts[0]).agentId, helper.id); assert.equal(JSON.parse(receipts[1]).agentId, agent.id); assert.match(receipts[1], /Resolve merge conflicts/);
   const repairInput = JSON.parse(receipts[1]).input;
   assert.equal(repairInput.type, "message");
@@ -229,12 +225,12 @@ try {
   await call("follow.refresh", {});
   const doneRecord = (await call("follow.get", { workspaceId: w.id })).workspace;
   let labeledWorkspace = await w.refresh();
-  for (let attempt = 0; !(labeledWorkspace.labels ?? []).includes("Done") && attempt < 40; attempt++) { await new Promise(r => setTimeout(r, 250)); labeledWorkspace = await w.refresh(); }
+  if (!(labeledWorkspace.labels ?? []).includes("Done")) await waitUntil("Done label", async () => ((labeledWorkspace = await w.refresh()).labels ?? []).includes("Done"), { baseMs: 10_000 }).catch(() => undefined);
   assert.ok((labeledWorkspace.labels ?? []).includes("Done"), JSON.stringify({ completion: doneRecord.completion, busy: doneRecord.runtimeBusy, background: doneRecord.backgroundBusy, reason: doneRecord.runtimeReason, managed: doneRecord.managedDoneLabel, batches: doneRecord.batches.map(b => b.state), labels: labeledWorkspace.labels }));
   for (const value of [true, false]) assert.ok((await call("follow.control", { workspaceId: w.id, enable_auto_sends: value })).completion, "changing Auto must preserve Done");
   const bridgeEnv = { ...env, PASEO_AGENT_ID: agent.id, FOLLOW_THROUGH_CLIENT_ENTRY: resolve("node_modules/@getpaseo/client/dist/daemon-client.js") };
   const viaBridge = JSON.parse((await exec(process.execPath, [join(home, "plugin-data/follow-through/mcp.mjs"), "call", "workspace_status"], { env: bridgeEnv })).stdout); assert.equal(viaBridge.id, w.id);
-  await call("follow.obligation", { agentId: agent.id, title: "New follow-on work", status: "pending", evidence: "", afterPrs: [], enable_follow_up: false }); await waitFor(w => !w.managedDoneLabel, "Done label removed after new work"); for (let attempt = 0; ((await w.refresh()).labels ?? []).includes("Done") && attempt < 40; attempt++) await new Promise(r => setTimeout(r, 250)); assert.ok(!((await w.refresh()).labels ?? []).includes("Done"));
+  await call("follow.obligation", { agentId: agent.id, title: "New follow-on work", status: "pending", evidence: "", afterPrs: [], enable_follow_up: false }); await waitFor(w => !w.managedDoneLabel, "Done label removed after new work"); await waitUntil("Done label removed", async () => !((await w.refresh()).labels ?? []).includes("Done"), { baseMs: 10_000 }).catch(() => undefined); assert.ok(!((await w.refresh()).labels ?? []).includes("Done"));
   await call("follow.activate", { workspaceId: other.id });
   const manual = (await call("follow.get", { workspaceId: other.id })).workspace;
   assert.equal(manual.enable_auto_sends, true, "first tracking turns Auto-send on");
@@ -361,10 +357,7 @@ try {
   const defaultAgent = await defaultWorkspace.agents.create({ config: { provider: "followthrough-fixture/fixture" }, title: "Default main" });
   await call("follow.refresh", {});
   let defaultRecord;
-  for (let attempt = 0; attempt < 40; attempt++) {
-    await call("follow.refresh", {}); defaultRecord = (await call("follow.get", { workspaceId: defaultWorkspace.id })).workspace;
-    if (defaultRecord) break; await new Promise(r => setTimeout(r, 250));
-  }
+  await waitUntil("default-tracked workspace", async () => { await call("follow.refresh", {}); return defaultRecord = (await call("follow.get", { workspaceId: defaultWorkspace.id })).workspace; }, { baseMs: 10_000 }).catch(() => undefined);
   assert.ok(defaultRecord); assert.equal(defaultRecord.enable_auto_sends, true); assert.equal(defaultRecord.mainAgentId, defaultAgent.id);
   const defaultEnv = JSON.parse(await readFile(join(home, `fixture-settings-${defaultAgent.id}.json`), "utf8"));
   assert.ok(defaultEnv.FOLLOW_THROUGH_CLI, "the default main gets its bridge on its first session");
@@ -374,11 +367,7 @@ try {
     assert.equal((await call("follow.get", { workspaceId: launched.id })).workspace, null);
     const localMain = await launched.agents.create({ config: { provider: "followthrough-fixture/fixture" }, labels: { "paseo.parent-agent-id": agent.id }, title: `Created main ${index}` });
     let record;
-    for (let attempt = 0; attempt < 40; attempt++) {
-      record = (await call("follow.get", { workspaceId: launched.id })).workspace;
-      if (record?.enable_tracking) break;
-      await call("follow.refresh", {}); await new Promise(resolve => setTimeout(resolve, 250));
-    }
+    await waitUntil("created task tracked", async () => { record = (await call("follow.get", { workspaceId: launched.id })).workspace; if (record?.enable_tracking) return true; await call("follow.refresh", {}); return false; }, { baseMs: 10_000 }).catch(() => undefined);
     assert.equal(record.mainAgentId, localMain.id); assert.equal(record.enable_auto_sends, true);
     const firstSession = JSON.parse(await readFile(join(home, `fixture-settings-${localMain.id}.json`), "utf8"));
     assert.ok(firstSession.FOLLOW_THROUGH_CLI, "a cross-workspace launch gets its bridge on the first session");
@@ -402,12 +391,7 @@ try {
   await cli("plugin", "reload", "follow-through");
   assert.equal((await call("follow.project-settings", {})).projects.find(p => p.id === heroProject.id).enable_default_tracking, false);
   await call("follow.set-project-tracking", { projectId: heroProject.id, enable_default_tracking: true });
-  for (let attempt = 0; attempt < 40; attempt++) {
-    await call("follow.refresh", {});
-    if ((await call("follow.get", { workspaceId: disabledWorkspace.id })).workspace) break;
-    if (attempt === 39) throw new Error("Enabled project did not enroll its existing workspace");
-    await new Promise(r => setTimeout(r, 250));
-  }
+  await waitUntil("Enabled project did not enroll its existing workspace", async () => { await call("follow.refresh", {}); return (await call("follow.get", { workspaceId: disabledWorkspace.id })).workspace; }, { baseMs: 10_000 });
   assert.equal((await readFile(join(home, "fixture-receipts.jsonl"), "utf8")).trim().split("\n").length, priorReceipts, "default enrollment must not send or launch recovery");
   console.log("PASS: project defaults enroll existing/new workspaces, expose the bridge on the first main session, persist off across reload and preserve records without any messages.");
   if (!process.argv.includes("--projects-only")) console.log("PASS: installation is inert; per-workspace activation, isolated recovery with inherited config, verified recipient handoff, durable scope exclusions, refused-ack diagnostics and a clean main conversation, manual repairs/completion, scoped opt-in Auto delivery, GH_REPO authentication context, unselected agents untouched, reload deduplication, Done label, reopening, and CLI bridge.");
