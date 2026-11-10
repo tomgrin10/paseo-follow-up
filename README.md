@@ -221,7 +221,7 @@ This replaces the separate **Wait** plugin (`paseo-wait`). While that plugin is 
 Install the beta:
 
 ```sh
-paseo plugin update follow-through --version 1.4.0-beta.27
+paseo plugin update follow-through --version 1.4.0-beta.28
 # or, for a fresh install:
 paseo plugin install npm:paseo-follow-up@beta
 ```

@@ -2,6 +2,12 @@
 
 What changed in each version of Follow-up, newest first. Follow-up shows these in "What's new" after an update, and in full from Home's last line.
 
+## 1.4.0-beta.28 (2026-11-10)
+
+- "What's this about?" is now the Summary: one short sentence under the workspace's name saying what it's for. Rewrite it from the panel's Spec, agent and recovery section.
+- The list of linked issues and threads under it is gone for now.
+- Settings has a new General section first, with Set up Follow-up again and the installed version's release notes.
+
 ## 1.4.0-beta.27 (2026-11-10)
 
 - Follow-up's routine bookkeeping now sits inside Paseo's grouped tool calls instead of breaking them into loose rows.
