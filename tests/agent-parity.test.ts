@@ -103,6 +103,13 @@ test("reads run the RPC directly; the RPC's own contract rejects bad writes at t
   assert.ok(!f.calls.some(c => ["follow.answer-question", "follow.rank-now", "follow.set-onboarding"].includes(c.method)), "planned: nothing runs before confirm");
 });
 
+test("inbox_act unsnooze: Bring back now is an agent move too, planned", async () => {
+  const f = rpcFixture();
+  const plan = await f.agent.run("orchestrator", "inbox_act", { action: "unsnooze", agentIds: ["a2"] }) as { planId: string };
+  assert.deepEqual(f.calls, [], "planned: nothing runs before confirm");
+  await f.agent.run("orchestrator", "inbox_act", { confirm: true, planId: plan.planId });
+  assert.deepEqual(f.calls.at(-1), { method: "follow.inbox-act", input: { action: "unsnooze", agentIds: ["a2"] } });
+});
 test("never on yourself: an agent can't answer its own brief or act on its own inbox row", async () => {
   const f = rpcFixture();
   await assert.rejects(f.agent.run("me", "brief_action", { agentId: "me", briefId: "b", decisionId: "d1", choice: "A" }), /your own brief/);

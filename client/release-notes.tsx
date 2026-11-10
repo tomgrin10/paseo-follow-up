@@ -4,9 +4,9 @@ import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, ScrollView } from "@getpaseo/plugin/client/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { releaseNotesRpc, whatsNewSeenRpc } from "../shared/contracts";
-import { LAST_SEEN_KEY, agoText, recentNotes, recentUpdate, whatsNew, type ReleaseNote, type ReleaseNotesView } from "../shared/changelog";
+import { LAST_SEEN_KEY, recentNotes, whatsNew, type ReleaseNote, type ReleaseNotesView } from "../shared/changelog";
 import { deviceStorage } from "../shared/settings-nav";
-import { Button, text, useNow, type Theme } from "./kit";
+import { Button, text, type Theme } from "./kit";
 import { useOnboarding } from "./onboarding";
 
 /**
@@ -174,26 +174,4 @@ export function ReleaseNotesSheet({ theme, compact, all = false, onClose }: { th
   const view = useReleaseNotes().data;
   if (!view) return null;
   return <WhatsNewSheet open notes={recentNotes(view)} all={view.notes} startAll={all} theme={theme} compact={compact} onClose={onClose} />;
-}
-
-/** Home's quiet footer: "Follow-up 1.4.0-beta.21 · Release notes", or "Updated to … 2h ago · What's new" for 3 days. */
-export function VersionLine({ theme, compact, onOpen }: { theme: Theme; compact: boolean; onOpen: (all: boolean) => void }) {
-  const c = theme.colors; const t = text(c, compact);
-  const now = useNow(60_000);
-  const query = useReleaseNotes();
-  const view = query.data;
-  // Loading: hold the line's height. Failed: nothing, rather than dead space at the end of Home.
-  if (!view) return query.isError ? null : <View style={{ height: 32 }} />;
-  const recent = recentUpdate(view, now);
-  const label = recent ? `Updated to ${view.version} ${agoText(now - view.updatedAt!)}` : `Follow-up ${view.version}`;
-  const link = recent ? "What's new" : "Release notes";
-  // Phones: meta size (12) rather than 11, and a 44pt target.
-  const style = compact ? t.meta : t.small;
-  return <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 16, paddingTop: 12, paddingBottom: compact ? 0 : 48 }}>
-    <Text style={style}>{label}</Text>
-    <Dot style={style} />
-    <Pressable accessibilityRole="button" accessibilityLabel={recent ? `What's new in ${view.version}` : "Release notes"} hitSlop={compact ? { top: 15, bottom: 15, left: 8, right: 8 } : 6} onPress={() => onOpen(!recent)}>
-      {state => <Text style={[style, { color: c.foreground, textDecorationLine: (state as { hovered?: boolean }).hovered ? "underline" : "none" }]}>{link}</Text>}
-    </Pressable>
-  </View>;
 }

@@ -231,14 +231,14 @@ Claude agents often start a long command in the background (tests, a build, a de
 
 Only the command's exit receipt counts as done. Stop ends the wait without killing the command, and a new message ends it too. Each agent sees only its own jobs, and the records survive Follow-up updates. Nothing runs while no agent is waiting: no extra process, no port, no polling.
 
-This replaces the separate **Wait** plugin (`paseo-wait`). While that plugin is installed and enabled, Follow-up's Wait stays off and Settings says so. Disable or remove it to switch: `paseo plugin disable paseo-wait`. Agents opened afterwards get Follow-up's Wait; already-open sessions switch on their next prompt. Wait needs Paseo 0.15+ with its agent tools on (the default). To leave one agent without it, give the agent the label `follow-up-wait/enabled=false` (the older `paseo-wait/enabled=false` and `plugin-tools/enabled=false` also work).
+This replaces the separate **Wait** plugin (`paseo-wait`). While that plugin is installed and enabled, Follow-up's Wait stays off and Settings says so. Disable or remove it to switch: `paseo plugin disable paseo-wait`. Agents opened afterwards get Follow-up's Wait; already-open sessions switch on their next prompt. Wait needs Paseo 0.15+ with its agent tools on (the default). On Paseo 0.16 it isn't attached: Paseo itself keeps a background command running, shows it with Stop and wakes the agent when it finishes, so agents are told to end the turn instead, and Settings says so. To leave one agent without it, give the agent the label `follow-up-wait/enabled=false` (the older `paseo-wait/enabled=false` and `plugin-tools/enabled=false` also work).
 
 ![Home with the Overseer selected: the pinned row asks which agent should take a broken export, and the pane shows the conversation, the routed task and the decision with two candidates plus New workspace](docs/media/overseer/overseer-dark.png)
 
 Install the beta:
 
 ```sh
-paseo plugin update follow-through --version 1.4.0-beta.46
+paseo plugin update follow-through --version 1.4.0-beta.54
 # or, for a fresh install:
 paseo plugin install npm:paseo-follow-up@beta
 ```

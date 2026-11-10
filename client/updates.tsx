@@ -4,7 +4,7 @@ import { openExternalUrl, useRpc } from "@getpaseo/plugin/client";
 import { Icon, SettingsAction, SettingsCard, SettingsSection, SettingsSelect, copyText, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { dismissUpdateNoticeRpc, installUpdateRpc, setUpdatesRpc, updatesRpc } from "../shared/contracts";
-import { MODE_HINT, MODE_LABEL, UPDATE_MODES, channelHint, checkedText, copyCommand, statusCopy, type StatusAction, type UpdateMode, type UpdatesView } from "../shared/updates";
+import { MODE_HINT, MODE_LABEL, UPDATE_MODES, channelHint, checkedText, copyCommand, statusCopy, versionMark, type StatusAction, type UpdateMode, type UpdatesView } from "../shared/updates";
 import { writeCategory } from "../shared/settings-nav";
 import type { Channel } from "../shared/version";
 import { Button, errorText, space, text, useNow, type Theme } from "./kit";
@@ -185,4 +185,30 @@ export function UpdatesStep({ theme, compact }: { theme: Theme; compact: boolean
     </SettingsCard>
     <Text style={t.small}>Follow-up only installs versions npm confirms were built from github.com/tomgrin10/paseo-follow-up.</Text>
   </View>;
+}
+
+/**
+ * The tiny version marker at the top of Home and the panel: "v1.4.0-beta.34", muted caption, then the update state
+ * ("update", "updating", "check") and a warning dot only when something needs a look. Phones keep the version and
+ * the dot, so the status chips beside it keep their room. Tapping opens Settings → General (Release notes live there).
+ * Loading takes no width; a failed read shows nothing. `touch`: a 44pt box (react-native-web ignores hitSlop).
+ */
+export function VersionMark({ theme, touch, openSettings }: { theme: Theme; touch: boolean; openSettings: () => void }) {
+  const c = theme.colors; const t = text(c, touch);
+  const query = useUpdates();
+  if (!query.data) return null;
+  const mark = versionMark(query.data);
+  const style = touch ? t.meta : t.small;
+  const box = touch ? { minHeight: 44, paddingHorizontal: 10, justifyContent: "center" as const } : { paddingHorizontal: 4, paddingVertical: 4 };
+  return <Pressable accessibilityRole="button" accessibilityLabel={mark.label} accessibilityHint="Opens Follow-up settings, General" hitSlop={touch ? undefined : 8}
+    onPress={() => { writeCategory("general"); openSettings(); }} style={[box, { flexShrink: 1, minWidth: 0 }]}>
+    {state => { const hover = !!(state as { hovered?: boolean }).hovered || state.pressed; const line = hover ? { color: c.foreground, textDecorationLine: "underline" as const } : null;
+      return <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <Text numberOfLines={1} style={[style, { flexShrink: 1 }, line]}>{mark.version}</Text>
+        {(mark.dot || (!touch && mark.suffix)) && <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+          {mark.dot && <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.statusWarning }} />}
+          {!touch && mark.suffix && <Text numberOfLines={1} style={[style, line]}>{mark.suffix}</Text>}
+        </View>}
+      </View>; }}
+  </Pressable>;
 }

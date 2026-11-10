@@ -1,0 +1,1 @@
+- An agent that failed a turn and then kept running no longer shows Error on Home and in the browser. A new turn from anyone clears the old failure or pause, and a new failure flags again.

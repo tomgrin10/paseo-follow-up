@@ -28,7 +28,11 @@ export const entrySchema = z.object({
   signedOffAt: isoSchema.nullable().default(null),
   lastTomMessageAt: isoSchema.nullable().default(null),
   seq: z.number().int().default(0),
-  undo: z.object({ seq: z.number().int(), prev: needsSchema.nullable(), prevSnooze: snoozeSchema.nullable().default(null), expires: isoSchema }).nullable().default(null),
+  /**
+   * The last sign-off or Later, for Undo. A Later's undo (`kind: "snooze"`) puts back the snooze it replaced, and only
+   * while the snooze it set (`set`) still stands: a flag that broke it since stays broken.
+   */
+  undo: z.object({ kind: z.enum(["sign_off", "snooze"]).default("sign_off"), seq: z.number().int(), prev: needsSchema.nullable(), prevSnooze: snoozeSchema.nullable().default(null), set: snoozeSchema.nullable().default(null), expires: isoSchema }).nullable().default(null),
   /** D2: "Sign off · mute this turn". The next turn end is absorbed once. */
   muteTurn: z.boolean().default(false),
   /** Per-agent "Don't flag finishes": permission prompts and errors still flag, plain turn ends don't. */
@@ -92,6 +96,8 @@ export type InboxEvent =
   | { type: "sign_off"; seq?: number; muteTurn?: boolean }
   | { type: "undo" }
   | { type: "snooze"; until: string }
+  /** Bring back now: ends a Later early. */
+  | { type: "unsnooze" }
   | { type: "tick" }
   | { type: "open" }
   | { type: "archive" }
@@ -128,6 +134,39 @@ function seen(e: Entry, key: string): boolean {
 }
 /** Permission, error and paused always break a snooze; a plain finish never does. */
 const BREAKS: Reason[] = ["permission", "error", "paused", "ci", "review", "pr_closed"];
+/**
+ * Reasons that describe the agent's last turn, not an outside fact: a newer turn start from anyone (the developer,
+ * another agent, the host resuming it) supersedes them, and a new failure flags again. Outside facts (permission by
+ * request, ci, review, reviewers, pr_closed) and the agent's own finish with its ask stay until handled.
+ */
+export const RUN_STATE_REASONS: readonly Reason[] = ["error", "paused"];
+/**
+ * What a row shows for an agent: a running agent has outlived its last turn's run-state flags and the card that only
+ * reported them (`running-is-not-stale`). A card with open questions stays: only the developer closes it.
+ */
+export function liveFlag<B extends { kind: string; state: string; questionIds?: string[]; at?: string }>(status: string, needs: Needs | null, brief: B | null, turnStartedAt: string | null = null, background = false): { needs: Needs | null; brief: B | null } {
+  // Paseo 0.16 background work still live: the agent isn't finished yet, so a finish waits (shown, not erased).
+  if (background) needs = withoutReasons(needs, ["finished"]);
+  // Only a flag older than the current turn's start is stale. Paseo can still read "running" for a moment after a
+  // turn fails (server/directory.ts keeps a failed agent busy until its re-read), so status alone isn't enough, and
+  // without a known turn start nothing is dropped here (the reducer and the load repair cover those turns).
+  if (!["running", "initializing"].includes(status) || !turnStartedAt) return { needs, brief };
+  const stale = brief?.state === "open" && (brief.kind === "error" || brief.kind === "paused") && !brief.questionIds?.length && !!brief.at && brief.at < turnStartedAt;
+  return { needs: withoutRunState(needs, turnStartedAt), brief: stale ? null : brief };
+}
+function withoutReasons(needs: Needs | null, drop: readonly Reason[]): Needs | null {
+  if (!needs) return null;
+  const reasons = needs.reasons.filter(r => !drop.includes(r.reason));
+  if (reasons.length === needs.reasons.length) return needs;
+  return reasons.length ? { reasons, since: reasons.map(r => r.at).sort()[0] } : null;
+}
+/** Drop the run-state flags a newer turn has outlived (all of them without `before`); null when nothing is left. */
+export function withoutRunState(needs: Needs | null, before?: string): Needs | null {
+  if (!needs) return null;
+  const reasons = needs.reasons.filter(r => !RUN_STATE_REASONS.includes(r.reason) || (before !== undefined && r.at >= before));
+  if (reasons.length === needs.reasons.length) return needs;
+  return reasons.length ? { reasons, since: reasons.map(r => r.at).sort()[0] } : null;
+}
 
 /**
  * Apply one event to one agent's entry (design §2.3). Returns the next entry; the input is not mutated.
@@ -159,8 +198,10 @@ export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
       // #3: the developer's own interrupt, or a Session Guard pause that will resume by itself.
       break;
     case "message":
-      // #11 clears everything; #12 automation changes nothing.
+      // #11 clears everything. #12 automation changes nothing, except that its turn supersedes the last turn's
+      // failure or pause (RUN_STATE_REASONS): the agent is running again.
       if (event.from === "tom") { e.needs = null; e.snooze = null; e.muteTurn = false; e.lastTomMessageAt = now; }
+      else { e.needs = withoutRunState(e.needs); if (!e.needs) e.snooze = null; }
       break;
     case "permission": flag("permission", event.detail, `permission:${event.requestId}`); break; // #4
     case "permission_resolved": // #5, D1: answering is attending.
@@ -180,7 +221,7 @@ export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
       break;
     case "sign_off": { // #13
       if (event.seq !== undefined && event.seq !== e.seq) throw new StaleSignOff();
-      if (e.needs || e.snooze) e.undo = { seq: e.seq + 1, prev: e.needs, prevSnooze: e.snooze, expires: new Date(Date.parse(now) + UNDO_MS).toISOString() };
+      if (e.needs || e.snooze) e.undo = { kind: "sign_off", seq: e.seq + 1, prev: e.needs, prevSnooze: e.snooze, set: null, expires: new Date(Date.parse(now) + UNDO_MS).toISOString() };
       e.needs = null; e.snooze = null; e.signedOffAt = now;
       if (event.muteTurn) e.muteTurn = true;
       break;
@@ -188,6 +229,11 @@ export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
     case "undo": { // #14
       const u = e.undo;
       if (!u || Date.parse(u.expires) < Date.parse(now)) break;
+      if (u.kind === "snooze") {
+        if (e.snooze && u.set && e.snooze.until === u.set.until && e.snooze.at === u.set.at) e.snooze = u.prevSnooze;
+        e.undo = null;
+        break;
+      }
       if (!e.needs) { e.needs = u.prev; e.snooze = u.prevSnooze; }
       else if (u.prev) {
         // Something new flagged since: keep it and bring the signed-off reasons back too.
@@ -197,7 +243,14 @@ export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
       e.undo = null; e.signedOffAt = null; e.muteTurn = false;
       break;
     }
-    case "snooze": if (e.needs && !e.goneAt) e.snooze = { until: event.until, at: now }; break; // #15
+    case "snooze": // #15, and #15b: Later is undoable like a sign-off.
+      if (e.needs && !e.goneAt) {
+        const set = { until: event.until, at: now };
+        e.undo = { kind: "snooze", seq: e.seq + 1, prev: e.needs, prevSnooze: e.snooze, set, expires: new Date(Date.parse(now) + UNDO_MS).toISOString() };
+        e.snooze = set;
+      }
+      break;
+    case "unsnooze": if (e.snooze && e.needs) e.snooze = null; break; // #15c
     case "tick": // #16, plus housekeeping.
       if (e.snooze && /^\d{4}-/.test(e.snooze.until) && Date.parse(e.snooze.until) <= Date.parse(now)) e.snooze = null;
       if (e.undo && Date.parse(e.undo.expires) < Date.parse(now)) e.undo = null;
@@ -250,14 +303,28 @@ export function snoozeUntil(choice: "hour" | "tonight" | "tomorrow" | "next-even
   d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d.toISOString();
 }
 
+/**
+ * The words the snooze tools accept ("1h", "hour", "tonight", "tomorrow", "next-event", "pr:<repo#n>", an ISO time) as
+ * what a snooze stores: an ISO time or a wake word. Null for anything else. A raw "1h" stored as-is never woke.
+ */
+export function resolveUntil(until: string, now: Date): string | null {
+  const u = until.trim().toLowerCase();
+  if (u === "1h" || u === "hour") return snoozeUntil("hour", now);
+  if (u === "tonight" || u === "tomorrow" || u === "next-event") return snoozeUntil(u, now);
+  if (/^pr:[\w.-]+\/[\w.-]+#\d+$/i.test(until.trim())) return until.trim();
+  return /^\d{4}-\d{2}-\d{2}T/.test(until.trim()) && Number.isFinite(Date.parse(until)) ? new Date(until).toISOString() : null;
+}
+
 export function wakeLabel(snooze: Snooze, now: number): string {
   if (snooze.until === "next-event") return "next event";
   if (snooze.until.startsWith("pr:")) return `when #${snooze.until.split("#")[1]} merges`;
   const at = new Date(snooze.until);
   if (!Number.isFinite(at.getTime())) return "";
   const sameDay = new Date(now).toDateString() === at.toDateString();
+  const next = new Date(now); next.setDate(next.getDate() + 1);
   const time = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-  return sameDay ? time : `${at.toLocaleDateString([], { weekday: "short" })} ${time}`;
+  // "Tomorrow 09:00" reads back as "tomorrow 09:00", not the weekday the developer has to work out.
+  return sameDay ? time : next.toDateString() === at.toDateString() ? `tomorrow ${time}` : `${at.toLocaleDateString([], { weekday: "short" })} ${time}`;
 }
 
 /** An optimistic action queued while the host was unreachable. */
@@ -298,7 +365,11 @@ export const inboxRowSchema = z.object({
   muteTurn: z.boolean(),
   enable_finish_flags: z.boolean(),
   /** The open or collapsed brief's one-liner, so every surface says the same thing (§4). */
-  brief: z.object({ kind: z.enum(BRIEF_KINDS), source: z.enum(BRIEF_SOURCES), state: z.enum(BRIEF_STATES), ask: z.string(), questionIds: z.array(z.string()).optional() }).nullable().optional(),
+  brief: z.object({ kind: z.enum(BRIEF_KINDS), source: z.enum(BRIEF_SOURCES), state: z.enum(BRIEF_STATES), ask: z.string(), questionIds: z.array(z.string()).optional(), at: z.string().optional() }).nullable().optional(),
+  /** When the agent's current turn started, if the worker saw it start (status invariant running-is-not-stale). */
+  turnStartedAt: z.string().nullable().optional(),
+  /** Paseo 0.16: the agent's live background work (shells, tasks); absent means none or a 0.15 host. */
+  backgroundWork: z.number().int().positive().optional(),
 });
 export type InboxRow = z.infer<typeof inboxRowSchema>;
 
