@@ -29,6 +29,8 @@ export type UpdaterDeps = {
   read(): Promise<UpdatesFile>;
   write(next: UpdatesFile): Promise<void>;
   self(): Promise<SelfInstall>;
+  /** The mode before one is chosen: Install automatically on a fresh install, Tell me on an existing one. */
+  defaultMode?(): Promise<UpdateMode>;
   registry: { check(reason: CheckReason): Promise<RegistrySnapshot>; snapshot(): Promise<RegistrySnapshot> };
   provenance(version: string): Promise<Provenance>;
   /** What is busy right now. `fresh` re-reads agent status from Paseo's list (right before installing). */
@@ -77,7 +79,10 @@ export class Updater {
   async start(): Promise<void> { await this.schedule(); void this.evaluate().catch(e => this.d.log?.(`[follow-up] updates: ${e?.message ?? e}`)); }
   stop(): void { this.stopped = true; this.clearTimer(this.timer); this.clearTimer(this.quietTimer); this.timer = this.quietTimer = null; }
 
-  private async settings() { const [file, me] = await Promise.all([this.d.read(), this.d.self()]); return { file, me, ...settingsOf(file, me.version) }; }
+  private async settings() {
+    const [file, me, fallback] = await Promise.all([this.d.read(), this.d.self(), this.d.defaultMode?.() ?? "notify" as const]);
+    return { file, me, ...settingsOf(file, me.version, fallback) };
+  }
 
   private async schedule(): Promise<void> {
     this.clearTimer(this.timer); this.timer = null;

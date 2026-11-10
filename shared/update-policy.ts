@@ -51,7 +51,7 @@ export function busyText(busy: readonly Busy[]): string {
     switch (b.kind) {
       case "agent": return b.count === 1 ? "1 agent is mid-turn" : `${b.count} agents are mid-turn`;
       case "ranker": return "the priority ranker is running";
-      case "about": return "an overview is being written";
+      case "about": return "a summary is being written";
       case "pr-action": return b.count === 1 ? "a PR action is finishing" : `${b.count} PR actions are finishing`;
       case "repair": return b.count === 1 ? "a repair batch is being sent" : `${b.count} repair batches are being sent`;
     }
