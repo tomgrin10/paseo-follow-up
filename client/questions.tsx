@@ -17,12 +17,18 @@ import { mergedColor, tint, withAlpha, type Colors } from "./theme";
 import { overviewKey, workspaceKey } from "./keys";
 import { RichText } from "./rich-text";
 import { openQuestion, runAction } from "./toasts";
-import { clearPendingAnswer, failPendingAnswer, pendingKey, setPendingAnswer, usePendingAnswer, usePendingAnswers } from "./pending-answers";
+import { clearPendingAnswer, failPendingAnswer, pendingKey, setPendingAnswer, usePendingAnswer, usePendingAnswers, type PendingAnswer } from "./pending-answers";
 
 const who = (w: Workspace, agentId: string | null) => !agentId || agentId === w.mainAgentId ? "the main agent" : "a root session";
 
-/** What the agent is doing while the question is open, in the developer's terms. */
-export function meanwhile(w: Workspace, q: Question): { icon: string; color: (c: Colors) => string; text: string } {
+/**
+ * What the agent is doing while the question is open, in the developer's terms. `pending` is required, so every
+ * surface that describes a question also says when the developer's answer didn't reach Paseo, or is on its way;
+ * pass null only where the surface shows that itself (QuestionBody's Not sent · Retry line).
+ */
+export function meanwhile(w: Workspace, q: Question, pending: PendingAnswer | null | undefined): { icon: string; color: (c: Colors) => string; text: string } {
+  if (pending?.error) return { icon: "CircleAlert", color: c => c.statusDanger, text: `Your answer wasn't sent: ${pending.error}. Open it to retry; your words are kept.` };
+  if (pending) return { icon: "Send", color: c => c.foregroundMuted, text: "Sending your answer…" };
   if (q.taskId && !q.options.length) return { icon: "Clock", color: c => c.foregroundMuted, text: "A task is blocked on this. The agent works on the rest." };
   switch (questionState(q)) {
     case "stopped": return { icon: "CirclePause", color: c => c.statusWarning, text: q.big ? `The agent stopped and waits for your answer. Big question: ${q.big}.` : "The agent stopped and waits for your answer." };
@@ -140,7 +146,8 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
     });
     onClose?.(); onAnswered?.();
   };
-  const state = meanwhile(w, q);
+  // The body says Not sent · Retry itself, with the button; the state line stays on what the agent is doing.
+  const state = meanwhile(w, q, null);
   const delivery = deliveryLine(w, q, now);
   const pr = q.prKey ? w.prs.find(p => p.key === q.prKey) : null;
   const task = q.taskId ? w.obligations.find(o => o.id === q.taskId) : null;

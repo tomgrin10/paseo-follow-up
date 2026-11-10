@@ -187,6 +187,18 @@ test("pending answers survive a reload where localStorage exists, and an unconfi
   } finally { g.localStorage = before; }
 });
 
+// Harness (2026-11-10): after a failed send the question dialog said Not sent, but the panel's Needs-you row didn't.
+test("every surface that describes a question says when its answer wasn't sent", async () => {
+  const source = await readFile(join(import.meta.dirname, "..", "client", "questions.tsx"), "utf8");
+  assert.match(source, /export function meanwhile\(w: Workspace, q: Question, pending: PendingAnswer \| null \| undefined\)/, "the pending answer is a required argument");
+  const row = await readFile(join(import.meta.dirname, "..", "client", "needs-you.tsx"), "utf8");
+  assert.match(row, /const pending = usePendingAnswer\(w\.id, questionId\);[\s\S]*meanwhile\(w, q, pending\)/);
+  for (const f of (await readdir(join(import.meta.dirname, "..", "client"))).filter(f => f.endsWith(".tsx"))) {
+    const text = await readFile(join(import.meta.dirname, "..", "client", f), "utf8");
+    for (const m of text.matchAll(/meanwhile\(([^)]*)\)/g)) if (!m[1].startsWith("w: Workspace")) assert.equal(m[1].split(",").length, 3, `${f}: meanwhile(${m[1]}) must pass the pending answer`);
+  }
+});
+
 test("the question card shows Not sent · Retry and the pill skips an answer on its way", async () => {
   const source = await readFile(join(import.meta.dirname, "..", "client", "questions.tsx"), "utf8");
   assert.match(source, /Not sent · \{unsent\.error\}/);
