@@ -12,6 +12,8 @@ export type UpdatesFile = {
   /** A newer version allowed to install, waiting for a quiet moment. `manual`: Install now asked for it. */
   ready?: { version: string; since: number; manual: boolean; lastBusyAt: number | null };
   /** Provenance verdicts by version (the last ten), so a version is checked once. */
+  /** Release notes read from a newer version's tarball (the last three versions), so Settings can show them before installing. */
+  notes?: Record<string, { version: string; date: string | null; items: string[] }[]>;
   provenance?: Record<string, { ok: true; integrity: string; tarball: string; workflow: string } | { ok: false; reason: string }>;
 };
 

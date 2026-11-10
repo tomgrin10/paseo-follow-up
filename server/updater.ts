@@ -7,6 +7,7 @@ import { CHECK_INTERVAL_MS, type CheckReason, type RegistrySnapshot } from "./up
 import type { Provenance } from "./update-provenance";
 import type { SelfInstall } from "./release-notes";
 import { settingsOf, type UpdatesFile } from "./updates";
+import { parseChangelog } from "../shared/changelog";
 
 /**
  * Settings → General, end to end: when to ask npm, whether a new version may be installed, when, and what to show.
@@ -32,6 +33,8 @@ export type UpdaterDeps = {
   defaultMode?(): Promise<UpdateMode>;
   registry: { check(reason: CheckReason): Promise<RegistrySnapshot>; snapshot(): Promise<RegistrySnapshot> };
   provenance(version: string): Promise<Provenance>;
+  /** A trusted version's CHANGELOG.md from its tarball, or null. */
+  changelog?(tarball: string, integrity: string): Promise<string | null>;
   /** What is busy right now. `fresh` re-reads agent status from Paseo's list (right before installing). */
   busy(fresh: boolean): Promise<Busy[]>;
   /** Starts the detached installer. Returns false when one is already running. */
@@ -161,6 +164,16 @@ export class Updater {
     return p;
   }
 
+  /** Notes for a trusted newer version, read once from its tarball and kept for the last three versions. */
+  private async notes(version: string, trust: Extract<Provenance, { ok: true }>): Promise<void> {
+    if (!this.d.changelog || (await this.d.read()).notes?.[version]) return;
+    const text = await this.d.changelog(trust.tarball, trust.integrity).catch(() => null);
+    if (text == null) return;
+    const latest = await this.d.read();
+    const entries = Object.entries({ ...latest.notes, [version]: parseChangelog(text).slice(0, 30) }).slice(-3);
+    await this.d.write({ ...latest, notes: Object.fromEntries(entries) });
+  }
+
   private async launch(from: string, to: string): Promise<void> {
     const file = await this.d.read();
     const known = file.provenance?.[to];
@@ -193,6 +206,7 @@ export class Updater {
     if (file.ready && file.ready.version !== target) { const { ready: _, ...rest } = file; file = rest; await this.d.write(file); }
     const trust = await this.trust(target);
     if (!trust.ok) return;
+    await this.notes(target, trust);
     const manual = file.ready?.manual === true;
     if (mode !== "auto" && !manual) return;
     if (!manual && await this.blocked(target, snap)) return;
@@ -236,7 +250,7 @@ export class Updater {
     const events = await readEvents(this.d.directory);
     const channels = { stable: offerVersion("stable", snap), beta: offerVersion("beta", snap) };
     const base = { version: me.version, installKind: me.installKind, mode, channel, channels, checkedAt: snap.okAt, registryError: snap.error,
-      nextCheckAt: mode === "off" || me.installKind !== "npm" ? null : (snap.checkedAt ?? now) + CHECK_INTERVAL_MS, pendingNotes: [], history: historyOf(events) };
+      nextCheckAt: mode === "off" || me.installKind !== "npm" ? null : (snap.checkedAt ?? now) + CHECK_INTERVAL_MS, pendingNotes: [] as UpdatesView["pendingNotes"], history: historyOf(events) };
     const phase = await this.phase(file, me.version, mode, channel, snap, events, now);
     const dismissed = new Set(file.dismissed ?? []);
     let notice: UpdatesView["notice"] = null;
@@ -245,7 +259,10 @@ export class Updater {
       else if (phase.kind === "available" && mode === "notify") notice = { id: `available:${phase.version}`, kind: "available", version: phase.version, from: null };
       if (notice && dismissed.has(notice.id)) notice = null;
     }
-    return { ...base, phase, notice };
+    // Notes for what's on offer: every version after the installed one, from the newest version's own changelog.
+    const offered = "version" in phase && compareVersions(phase.version, me.version) > 0 ? phase.version : null;
+    const pendingNotes = offered ? (file.notes?.[offered] ?? []).filter(n => compareVersions(n.version, me.version) > 0 && compareVersions(n.version, offered) <= 0) : [];
+    return { ...base, pendingNotes, phase, notice };
   }
 
   private async phase(file: UpdatesFile, running: string, mode: UpdateMode, channel: Channel, snap: RegistrySnapshot, events: UpdateEvent[], now: number): Promise<UpdatePhase> {

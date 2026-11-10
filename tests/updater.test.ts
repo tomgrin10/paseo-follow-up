@@ -255,3 +255,27 @@ test("General's phone line: up to date with the version, or what's going on", as
   assert.equal(generalSummary({ ...v, phase: { kind: "rolled-back", version: "1.4.0-beta.25", from: "1.4.0-beta.24", reason: "x", at: 0 } }), "Update to 1.4.0-beta.25 rolled back");
   assert.equal(generalSummary({ ...v, installKind: "git", phase: { kind: "current" } }), "Follow-up 1.4.0-beta.24 · managed by your checkout");
 });
+
+test("pending notes: read from the new version's verified tarball, only versions after the installed one", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { createHash } = await import("node:crypto");
+  const { mkdir } = await import("node:fs/promises");
+  const { tarballChangelog } = await import("../server/update-provenance");
+  const dir = await mkdtemp(join(tmpdir(), "tarball-"));
+  await mkdir(join(dir, "package"));
+  await writeFile(join(dir, "package/package.json"), "{}");
+  await writeFile(join(dir, "package/CHANGELOG.md"), "# Changelog\n\n## 1.4.0-beta.24 (2026-11-11)\n\n- New thing.\n\n## 1.4.0-beta.23 (2026-11-10)\n\n- Old thing.\n");
+  execFileSync("tar", ["-czf", join(dir, "t.tgz"), "-C", dir, "package"]);
+  const bytes = await readFile(join(dir, "t.tgz"));
+  const integrity = `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
+  const fetch = async () => ({ status: 200, arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length) as ArrayBuffer });
+  const text = await tarballChangelog({ fetch, tarball: "https://r/t.tgz", integrity });
+  assert.match(text!, /New thing/);
+  assert.equal(await tarballChangelog({ fetch, tarball: "https://r/t.tgz", integrity: "sha512-AAAA" }), null, "a different file is never read");
+  const r = await rig({ file: { mode: "notify" } });
+  (r.updater as unknown as { d: { changelog: () => Promise<string> } }).d.changelog = async () => text!;
+  await r.updater.check("manual");
+  const view = await r.updater.view();
+  assert.deepEqual(view.pendingNotes.map(n => n.version), ["1.4.0-beta.24"]);
+  assert.deepEqual(view.pendingNotes[0]!.items, ["New thing."]);
+});
