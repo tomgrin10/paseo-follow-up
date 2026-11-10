@@ -2,6 +2,11 @@
 
 What changed in each version of Follow-up, newest first. Follow-up shows these in "What's new" after an update, and in full from Home's last line.
 
+## 1.4.0-beta.23 (2026-11-10)
+
+- After an update, "What's new" shows the notes for every version since you last looked, once on each device.
+- Home's last line shows your Follow-up version, with the full release notes one tap away.
+
 ## 1.4.0-beta.22 (2026-11-10)
 
 - An agent can take over as a workspace's main agent when the main one is gone or idle, or when you ask it to. It can hand the role on too, within clear limits.
