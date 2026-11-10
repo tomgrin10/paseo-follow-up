@@ -2,7 +2,7 @@
 
 Follow-up checks npm for a newer version of itself, and can install it, watch it, and roll it back. The UI is the
 Updates part of Settings → General (`UpdatesSections` in `client/updates.tsx`), Home's one-line notice
-(`UpdateNotice`), and setup's Updates step (`UpdatesStep`). Users read about it in README's "Updates" section.
+(`UpdateNotice`: a rollback, or in Tell me a new major only, per `announcesUpdate` in `shared/changelog.ts`), and setup's Updates step (`UpdatesStep`). Users read about it in README's "Updates" section.
 
 ## Files
 

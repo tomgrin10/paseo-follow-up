@@ -7,7 +7,7 @@ import { CHECK_INTERVAL_MS, type CheckReason, type RegistrySnapshot } from "./up
 import type { Provenance } from "./update-provenance";
 import type { SelfInstall } from "./release-notes";
 import { settingsOf, type UpdatesFile } from "./updates";
-import { parseChangelog } from "../shared/changelog";
+import { announcesUpdate, parseChangelog } from "../shared/changelog";
 
 /**
  * Settings → General, end to end: when to ask npm, whether a new version may be installed, when, and what to show.
@@ -256,7 +256,9 @@ export class Updater {
     let notice: UpdatesView["notice"] = null;
     if (me.installKind === "npm") {
       if (phase.kind === "rolled-back") notice = { id: `rolled-back:${phase.version}`, kind: "rolled-back", version: phase.version, from: phase.from };
-      else if (phase.kind === "available" && mode === "notify") notice = { id: `available:${phase.version}`, kind: "available", version: phase.version, from: null };
+      // Only a new major earns a Home notice (announcesUpdate, the one rule for update prompts); any other available
+      // version stays a quiet row in Settings → General. The rollback notice reports a failure, not an update.
+      else if (phase.kind === "available" && mode === "notify" && announcesUpdate(me.version, phase.version)) notice = { id: `available:${phase.version}`, kind: "available", version: phase.version, from: null };
       if (notice && dismissed.has(notice.id)) notice = null;
     }
     // Notes for what's on offer: every version after the installed one, from the newest version's own changelog.

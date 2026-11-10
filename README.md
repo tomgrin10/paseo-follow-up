@@ -46,7 +46,7 @@ After a major update (1.x to 2.0), the next time you open Paseo it shows **What'
 Follow-up can update itself. **Settings → General** has three modes:
 
 - **Install automatically** installs a new version at a quiet moment: no agent mid-turn and none of Follow-up's own work running, for five minutes in a row (after a day of waiting, any idle moment). Installing reloads Follow-up, which detaches its tools from open agent sessions until they reopen, so it never installs mid-turn.
-- **Tell me** shows the new version in Settings and as one line on Home. You choose when with **Install now**. It is the default on hosts that had Follow-up before updates existed.
+- **Tell me** shows the new version in Settings → General, and as one line on Home only for a new major version (2.0). You choose when with **Install now**. It is the default on hosts that had Follow-up before updates existed.
 - **Off** never asks npm on its own, not even when Settings opens. **Check now** still works.
 
 Follow-up asks npm about once every six hours (one small request, nothing when unchanged), opening Settings → General checks at most once a minute, and **Check now** always asks. **Channel** picks Stable (`latest`) or Beta; it starts on Beta when you run a beta, and never offers a stable older than what you run.
