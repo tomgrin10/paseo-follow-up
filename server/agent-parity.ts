@@ -106,6 +106,8 @@ export const RPC_TOOLS: readonly RpcTool[] = [
     input: z.strictObject({ mode: z.enum(UPDATE_MODES).optional(), channel: z.enum(["stable", "beta"]).optional(), ...confirm }) },
   { name: "install_update", rpc: "follow.install-update", kind: "planned", before: { rpc: "follow.updates", input: () => ({}) },
     input: z.strictObject({ version: z.string().trim().min(1).max(64), anyway: z.boolean().optional(), ...confirm }) },
+  // Settings → General: 2.0's move to the new plugin id (status is in updates_status), Try again
+  { name: "retry_move", rpc: "follow.retry-move", kind: "planned", before: { rpc: "follow.updates", input: () => ({}) }, input: z.strictObject({ ...confirm }) },
   // Settings → Permissions: trust bypass agents' approvals
   { name: "trust_bypass_status", rpc: "follow.trust-bypass", kind: "read", input: none },
 ];
@@ -171,6 +173,7 @@ export const PARITY: Record<string, { tools: readonly string[]; note?: string } 
   "follow.set-updates": { tools: ["set_updates"] },
   "follow.install-update": { tools: ["install_update"] },
   "follow.client-time-zone": { exempt: "The device reports its timezone so an agent's tonight/tomorrow match the developer's clock; nothing for an agent to do." },
+  "follow.retry-move": { tools: ["retry_move"] },
   "follow.dismiss-update-notice": { exempt: "Hides Home's update line for the person looking at it; updates_status already tells an agent what that line said." },
   "follow.whats-new-seen": { exempt: "Records that a person closed What's new on a device; an agent reading the notes isn't someone seeing the sheet." },
 };

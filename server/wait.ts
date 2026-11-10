@@ -55,8 +55,8 @@ export class Wait {
   readonly jobs: WaitJobs;
   readonly tools: AgentToolDefinition[];
   /** `hostBackgroundWork`: the host advertises features.agentBackgroundWork (Paseo 0.16, server/host-features.ts). */
-  constructor(directory: string, private deps: { enabled: () => Promise<boolean>; config: () => Promise<WaitPaseoConfig | null>; hostBackgroundWork?: () => Promise<boolean> }) {
-    this.jobs = new WaitJobs(directory);
+  constructor(directory: string, private deps: { enabled: () => Promise<boolean>; config: () => Promise<WaitPaseoConfig | null>; hostBackgroundWork?: () => Promise<boolean>; legacyDirectory?: string | null }) {
+    this.jobs = new WaitJobs(directory, deps.legacyDirectory ?? null);
     const owner = (context: AgentToolContext) => ({ id: context.agent.id, cwd: context.agent.cwd });
     const guard = (context: AgentToolContext) => { if (context.signal.aborted) throw new Error("Wait tool canceled"); };
     this.tools = [

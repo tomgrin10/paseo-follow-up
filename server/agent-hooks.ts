@@ -1,3 +1,4 @@
+import { HOOK_MARKER, HOOK_MARKERS, withRuntimePrelude } from "../shared/legacy";
 import { mkdir, readFile, writeFile, rename, rm, realpath } from "node:fs/promises";
 import { join, dirname, relative, isAbsolute } from "node:path";
 import { homedir, tmpdir } from "node:os";
@@ -5,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { hookSource } from "./hook-source";
 import { backupOnce, writeTarget, writeThrough } from "./write-through";
 
-const marker = "# paseo-follow-through-hook";
+
 const events = ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"];
 type Handler = { command?: string; [key: string]: unknown };
 type Group = { hooks?: Handler[]; [key: string]: unknown };
@@ -15,10 +16,10 @@ export function reconcileHooks(settings: Settings, script: string | null): Setti
   const next = structuredClone(settings);
   next.hooks ??= {};
   for (const [event, groups] of Object.entries(next.hooks)) {
-    next.hooks[event] = groups.map(group => ({ ...group, hooks: group.hooks?.filter(hook => !hook.command?.endsWith(marker)) })).filter(group => !group.hooks || group.hooks.length > 0);
+    next.hooks[event] = groups.map(group => ({ ...group, hooks: group.hooks?.filter(hook => !HOOK_MARKERS.some(marker => hook.command?.endsWith(marker))) })).filter(group => !group.hooks || group.hooks.length > 0);
     if (!next.hooks[event].length) delete next.hooks[event];
   }
-  if (script) for (const event of events) (next.hooks[event] ??= []).push({ hooks: [{ type: "command", command: `if [ -f ${quote(script)} ]; then node ${quote(script)}; fi ${marker}`, timeout: 10 }] });
+  if (script) for (const event of events) (next.hooks[event] ??= []).push({ hooks: [{ type: "command", command: `if [ -f ${quote(script)} ]; then node ${quote(script)}; fi ${HOOK_MARKER}`, timeout: 10 }] });
   return next;
 }
 /** Follow-up's own files (plugin data dir), never the user's: a plain temp file + rename is right here. */
@@ -57,7 +58,7 @@ async function install(path: string, script: string | null, directory: string): 
 export class AgentHooks {
   constructor(private directory: string, private clientEntry: string, private paths = [join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), "settings.json"), join(process.env.CODEX_HOME ?? join(homedir(), ".codex"), "hooks.json")]) {}
   async start(): Promise<void> {
-    await writeFile(join(this.directory, "agent-hook.mjs"), hookSource, { mode: 0o600 });
+    await writeFile(join(this.directory, "agent-hook.mjs"), withRuntimePrelude(hookSource), { mode: 0o600 });
     await this.heartbeat();
     const results = await Promise.allSettled(this.paths.map(path => install(path, join(this.directory, "agent-hook.mjs"), this.directory)));
     const failed = results.flatMap(result => result.status === "rejected" ? [String((result.reason as Error)?.message ?? result.reason)] : []);
