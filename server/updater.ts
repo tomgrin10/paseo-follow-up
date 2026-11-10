@@ -7,7 +7,7 @@ import { CHECK_INTERVAL_MS, type CheckReason, type RegistrySnapshot } from "./up
 import type { Provenance } from "./update-provenance";
 import type { SelfInstall } from "./release-notes";
 import { settingsOf, type UpdatesFile } from "./updates";
-import { announcesUpdate, parseChangelog } from "../shared/changelog";
+import { announcesUpdate, notesVersion, parseChangelog } from "../shared/changelog";
 
 /**
  * Settings → General, end to end: when to ask npm, whether a new version may be installed, when, and what to show.
@@ -263,7 +263,7 @@ export class Updater {
     }
     // Notes for what's on offer: every version after the installed one, from the newest version's own changelog.
     const offered = "version" in phase && compareVersions(phase.version, me.version) > 0 ? phase.version : null;
-    const pendingNotes = offered ? (file.notes?.[offered] ?? []).filter(n => compareVersions(n.version, me.version) > 0 && compareVersions(n.version, offered) <= 0) : [];
+    const pendingNotes = offered ? (file.notes?.[offered] ?? []).filter(n => compareVersions(n.version, notesVersion(me.version)) > 0 && compareVersions(n.version, notesVersion(offered)) <= 0) : [];
     return { ...base, pendingNotes, phase, notice };
   }
 
