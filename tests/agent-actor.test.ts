@@ -75,3 +75,11 @@ test("an agent's answer is labelled with the agent everywhere it is read", async
   const q = { id: "Q1", title: "Encoding", question: "Which?", options: [{ letter: "A", label: "UTF-8" }], answer: { choice: "A", at: "x", by: "agent", agentId: "helper-1", agentTitle: "Release captain", delivery: { state: "sending", to: null, messageId: "m", at: "x", reason: null } } };
   assert.match(answerMessage(q as never, "A"), /\nAnswered by Release captain \(agent helper-1\) for the developer\.$/, "answer_question's message names the agent");
 });
+
+test("the chat answer card says whose answer it is", async () => {
+  const { answerCardWhose } = await import("../shared/chat");
+  const mine = "Follow-up answer D1 (Which encoding?): B — UTF-8 with BOM\nContinue with this choice.";
+  assert.equal(answerCardWhose({ text: mine }), "Your answer");
+  assert.equal(answerCardWhose({ text: `${mine}\nAnswered by Release captain (agent helper-1) for the developer.` }), "Release captain's answer");
+  assert.equal(answerCardWhose({ text: `${mine}\nAnswered by Release captain (agent helper-1) for the developer.`, answers: [] }), "Release captain's answers");
+});
