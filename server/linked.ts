@@ -4,7 +4,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { liveSources, mcpproxyText } from "./about";
-import { LIMITS, TEAMS_TTL_MS, applyCheck, classifyLink, emptyWorkspaceLinks, excludeItem, linkedView, noteCandidate, noteRefs, setTeams, dueChecks, emptyLinkedFile, linkedFileSchema, migrateAboutLinks, takeBudget, teamOf, toneOf, unexcludeItem, upsertItem, type LinearIssueFacts, type LinkedFile, type LinkedItem, type LinkRef, type LinkedView } from "../shared/linked";
+import { LIMITS, TEAMS_TTL_MS, applyCheck, classifyLink, emptyWorkspaceLinks, excludeItem, linkedView, noteCandidate, noteRefs, setTeams, dueChecks, emptyLinkedFile, linkedFileSchema, linkedSearchIndex, migrateAboutLinks, takeBudget, teamOf, toneOf, unexcludeItem, upsertItem, type LinearIssueFacts, type LinkedFile, type LinkedItem, type LinkRef, type LinkedView } from "../shared/linked";
 
 /**
  * linked.json beside state.json (see shared/linked.ts). Read from disk on each use and never held whole in the worker:
@@ -155,6 +155,11 @@ export class LinkedService {
 
   async view(workspaceId: string, derived: Parameters<typeof linkedView>[2]): Promise<LinkedView> {
     return linkedView(workspaceId, (await this.deps.store.read()).workspaces[workspaceId], derived);
+  }
+
+  /** Home's search index: one read of linked.json, made only while the developer searches. */
+  async searchIndex(): Promise<ReturnType<typeof linkedSearchIndex>> {
+    return linkedSearchIndex(await this.deps.store.read());
   }
 
   /** Passive sightings (shared/linked-extract.ts), one write for the whole batch. Nothing to note costs nothing. */

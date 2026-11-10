@@ -6,7 +6,7 @@ import { Button, IconButton, Switch, text, type Theme } from "./kit";
 import { VersionMark } from "./updates";
 import { IconSwap, Spinner } from "./motion";
 import { segmentPaint, type Colors } from "./theme";
-import { SpecChip } from "./spec";
+import { ReferencesLine } from "./linked";
 import { SummaryLine } from "./about";
 
 /** PR status older than this means the poll has stopped working; say so instead of looking current. */
@@ -60,7 +60,8 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
   const toneOf = (tone?: string) => tone === "warning" ? c.statusWarning : tone === "danger" ? c.statusDanger : tone === "success" ? c.statusSuccess : undefined;
   const pad = compact ? 16 : 12;
   const controls = <View style={{ flexDirection: "row", alignItems: "center", gap: 2, marginVertical: compact ? -12 : -4, marginRight: compact ? -10 : -4 }}>
-    {!!w.spec?.url && <View style={{ marginRight: 4 }}><SpecChip workspace={w} theme={theme} compact={compact} /></View>}
+    {/* Phones: Spec and Linked ride in the 44px bar. Elsewhere they sit in the references line under the Summary. */}
+    {compact && onHome && <View style={{ marginRight: 4 }}><ReferencesLine workspace={w} theme={theme} compact bar /></View>}
     {resize && <IconButton icon={resize.icon} label={resize.label} onPress={resize.onPress} theme={theme} compact={compact} />}
     <IconButton icon="Settings" label="Follow-up settings" onPress={onSettings} theme={theme} compact={compact} />
   </View>;
@@ -109,6 +110,8 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
     </View>
     {/* The Summary takes the goal's place; the goal shows until there is one. */}
     {!compact && !hideTitle && <SummaryLine workspace={w} theme={theme} compact={false} />}
+    {/* The references line: Spec and Linked, one line, only when there's a spec or anything linked. */}
+    <ReferencesLine workspace={w} theme={theme} compact={compact} />
     <Text accessibilityLiveRegion="polite" style={[t.meta, { color: c.foregroundMuted, marginTop: 2 }]}>
       {parts.map((part, i) => <Text key={part.text} style={toneOf(part.tone) ? { color: toneOf(part.tone), fontWeight: "600" } : { color: c.foreground }}>{i ? <Text style={{ color: c.foregroundMuted, fontWeight: "400" }}>{" · "}</Text> : null}{part.text}</Text>)}
     </Text>

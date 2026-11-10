@@ -12,6 +12,7 @@ import { errorText } from "../shared/errors";
 import { isLoaded, type LoadSignals } from "../shared/agent-load";
 import { BriefCard, type BriefDeps } from "./brief";
 import { SummaryLine } from "./about";
+import { ReferencesLine } from "./linked";
 import { bottomGap, bottomInset, Button, focusSoon, IconButton, space, text, type Theme } from "./kit";
 import { NeedsYouList } from "./needs-you";
 import { PrSheet } from "./pr-sheet";
@@ -332,6 +333,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
     <Text accessibilityRole="header" numberOfLines={3} style={t.title}>{s.title}</Text>
     {/* The Summary: what this workspace is for, right under its name. */}
     {s.workspaceId && w && <View style={{ marginTop: 4 }}><SummaryLine key={s.workspaceId} workspace={w} theme={theme} compact /></View>}
+    {s.workspaceId && w && <View style={{ marginTop: 6 }}><ReferencesLine key={`refs:${s.workspaceId}`} workspace={w} theme={theme} compact /></View>}
     <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 44 }}>
       <Icon name={s.icon} size={14} color={color} />
       <Text numberOfLines={1} style={[t.meta, { flex: 1, minWidth: 0 }]}>
@@ -349,6 +351,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
       <Button theme={theme} compact={compact} icon="PanelRightOpen" title="Open full" accessibilityHint="Opens the agent's chat and docks this list beside it" onPress={() => openFull(s)} />
     </View>
     {s.workspaceId && w && <SummaryLine key={s.workspaceId} workspace={w} theme={theme} compact={false} />}
+    {s.workspaceId && w && <ReferencesLine key={`refs:${s.workspaceId}`} workspace={w} theme={theme} compact={false} />}
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
       {!!s.word && <Text style={{ color, fontSize: 12, fontWeight: "600" }}>{s.word}</Text>}
       <Text style={t.meta}>{[laterText, s.at ? age(s.at, Date.now()) === "now" ? "just now" : `${age(s.at, Date.now())} ago` : "", s.project].filter(Boolean).join(" · ")}</Text>

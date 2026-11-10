@@ -31,3 +31,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Simple Icons
+
+The Linear, Slack, GitHub, Notion, Google Docs and Claude marks in `client/brand-icons.ts` are from
+[Simple Icons](https://simpleicons.org) 13.21.0, released under CC0-1.0 (public domain). The marks themselves are
+trademarks of their owners and are used only to say which service a linked item comes from.

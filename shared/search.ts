@@ -1,5 +1,6 @@
 import type { HomeGroupId, HomeModel, PaseoWorkspaceLite } from "./home";
 import type { Workspace } from "./model";
+import { linkedSearchText, type LinkedSearchItem } from "./linked-display";
 
 /**
  * Home's omnibox search (1.3.0-beta.2). Pure and client-side: the index is built once per model change and every
@@ -11,9 +12,10 @@ import type { Workspace } from "./model";
  * agent, project and ask), adds a bonus when the query appears as one phrase, and a little for recency.
  */
 
-export type SearchField = "name" | "branch" | "pr" | "agent" | "project" | "ask";
-export const FIELD_WEIGHT: Record<SearchField, number> = { name: 100, branch: 70, pr: 70, agent: 55, project: 40, ask: 30 };
-export const FIELD_LABEL: Record<SearchField, string> = { name: "Name", branch: "Branch", pr: "PR", agent: "Agent", project: "Project", ask: "Ask" };
+export type SearchField = "name" | "branch" | "pr" | "linked" | "agent" | "project" | "ask";
+/** `linked`: a linked item's key and title (Linear, Slack, docs), so "HER-1312" finds the workspace that links it. */
+export const FIELD_WEIGHT: Record<SearchField, number> = { name: 100, branch: 70, pr: 70, linked: 60, agent: 55, project: 40, ask: 30 };
+export const FIELD_LABEL: Record<SearchField, string> = { name: "Name", branch: "Branch", pr: "PR", linked: "Linked", agent: "Agent", project: "Project", ask: "Ask" };
 
 export type SearchDoc = {
   /** The Home row key the result selects. */
@@ -211,7 +213,7 @@ export type AgentLite = { id: string; title: string | null; workspaceId: string 
  * One document per Home row, plus Follow-up's archived workspaces. A workspace row carries every agent title in
  * that workspace; an agent row (one of several roots) carries its own title too.
  */
-export function homeSearchDocs(input: { model: HomeModel; paseo: PaseoWorkspaceLite[]; tracked: Workspace[]; archived?: Workspace[]; agents?: AgentLite[] }): SearchDoc[] {
+export function homeSearchDocs(input: { model: HomeModel; paseo: PaseoWorkspaceLite[]; tracked: Workspace[]; archived?: Workspace[]; agents?: AgentLite[]; linked?: Record<string, readonly LinkedSearchItem[]> }): SearchDoc[] {
   const paseo = new Map(input.paseo.map(p => [p.id, p]));
   const tracked = new Map(input.tracked.map(w => [w.id, w]));
   const agentsBy = new Map<string, string[]>();
@@ -228,6 +230,7 @@ export function homeSearchDocs(input: { model: HomeModel; paseo: PaseoWorkspaceL
     // Stack names are usually the branch.
     for (const stack of new Set((w?.prs ?? []).map(pr => pr.stack))) if (stack && stack !== p?.branch && !stack.startsWith("PR #")) out.push({ field: "branch", text: stack });
     for (const title of new Set(agentsBy.get(id) ?? [])) out.push({ field: "agent", text: title });
+    for (const text of new Set((input.linked?.[id] ?? []).map(linkedSearchText))) if (text) out.push({ field: "linked", text });
     return out;
   };
   const docs: SearchDoc[] = [];

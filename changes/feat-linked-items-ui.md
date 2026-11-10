@@ -1,0 +1,3 @@
+- Each workspace now shows what it's linked to next to its Spec: Linear issues, Slack threads, docs and artifacts, with a count for each.
+- Open the Linked list to see who linked each item and why, paste a link or key to add one, or remove one with Undo.
+- Searching Home now also matches linked issue keys and titles, and says when a result matched through a link.

@@ -72,7 +72,11 @@ export function SpecSheet({ workspace: w, open, theme, compact, onClose }: { wor
     void runAction({
       label: "Spec link", toast, run: () => save({ workspaceId: w.id, ...input }),
       success: () => ({ message: input.action === "set" ? "Spec link saved" : input.action === "remove" ? "Spec link removed" : "Spec link handed back to the agent" }),
-      onSuccess: () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); },
+      onSuccess: () => {
+        void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey });
+        // The spec is a linked item too (derived in the view), so the Linked sheet re-reads.
+        void cache.invalidateQueries({ queryKey: ["follow-through", "linked", w.id] });
+      },
       failure: input.action === "set" ? "Spec link not saved" : "Spec link not changed",
     });
   };

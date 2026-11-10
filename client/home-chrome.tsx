@@ -16,6 +16,7 @@ import { Spinner } from "./motion";
 import { withAlpha, type Colors } from "./theme";
 import type { Theme } from "./kit";
 import { useRowMenuTrigger, type OpenRowMenu } from "./row-menu";
+import { useLinkedIndex } from "./linked";
 
 /**
  * Home's chrome above the list (1.3.0-beta.2): the omnibox, the sort menu, the status strip and the provider
@@ -51,10 +52,12 @@ export function useOmnibox(model: HomeModel, sources: HomeSources, extraProvider
   const searching = query.trim().length > 0;
   const overseer = useSyncExternalStore(sources.extras.subscribe, sources.extras.overseer, sources.extras.overseer);
   const askOn = !!overseer?.enabled;
+  // Linked keys and titles: fetched only while there's a query (client/linked.tsx explains why).
+  const linked = useLinkedIndex(searching);
   // Built lazily: nothing is indexed until the developer types.
-  const index = useMemo(() => searching ? indexDocs(homeSearchDocs({ model, paseo: sources.paseo.all(), tracked: sources.live.all(), archived: sources.live.archived(), agents: sources.extras.agents() })) : null,
+  const index = useMemo(() => searching ? indexDocs(homeSearchDocs({ model, paseo: sources.paseo.all(), tracked: sources.live.all(), archived: sources.live.archived(), agents: sources.extras.agents(), linked })) : null,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [searching, model, live, paseo, extras]);
+    [searching, model, live, paseo, extras, linked]);
   const providers = useMemo(() => index ? [workspaceProvider(index), ...extraProviders, overseerProvider(askOn)] : [], [index, extraProviders, askOn]);
   const results = useMemo(() => searching ? omniboxResults(providers, query) : null, [providers, query, searching]);
   const setQuery = useCallback((q: string) => { setQueryState(q); setActive(null); }, []);

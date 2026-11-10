@@ -337,3 +337,17 @@ export function linkedView(workspaceId: string, ws: WorkspaceLinks | undefined, 
   for (const i of items) if (!i.spec) counts[i.kind] = (counts[i.kind] ?? 0) + 1;
   return { workspaceId, items, excluded: stored.excluded.map(({ key, at, by, reason }) => ({ key, at, by, reason })), counts, pending: stored.candidates.length };
 }
+
+// ---------- Home search ----------
+
+/**
+ * Home's search index for linked items (`follow.linked-index`): every workspace's stored items as key, kind and title.
+ * Built from one read of linked.json, only while the developer is typing a search, never on the list's poll.
+ */
+export function linkedSearchIndex(file: LinkedFile): Record<string, { key: string; kind: LinkedKind; title: string | null }[]> {
+  const out: Record<string, { key: string; kind: LinkedKind; title: string | null }[]> = {};
+  for (const [workspaceId, ws] of Object.entries(file.workspaces)) {
+    if (ws.items.length) out[workspaceId] = ws.items.map(i => ({ key: i.key, kind: i.kind, title: i.title }));
+  }
+  return out;
+}
