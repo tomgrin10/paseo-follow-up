@@ -1,10 +1,12 @@
 // Machine-wide harness slots and daemon cleanup for every script that starts a Paseo daemon or a browser.
 //
-// The VM is shared by many agents, so at most HARNESS_SLOTS (default 2) heavy runs go at once. A slot is a flock on
-// /tmp/paseo-harness-slots/slotN, the same files the shared harness-slot shell wrapper uses, so the shell wrapper and
-// these scripts share slots. A script already inside a slot (under the wrapper, or started by a script holding one)
-// doesn't take a second, so nested runs never deadlock. The lock is held by a `flock … cat` child reading a pipe
-// from this process: it's released when the script ends, however it ends.
+// The VM is shared by many agents, so at most HARNESS_SLOTS (default 3) heavy runs go at once, and none starts while
+// Paseo's working set is above 75% of its memory cap. A slot is a flock on /tmp/paseo-harness-slots/slotN, the same
+// files the harness-slot shell wrapper uses, so the wrapper and these scripts share slots. Like the wrapper, a held
+// slot exports HARNESS_SLOT_HELD; a script that already has it (under the wrapper, started by a script holding one, or
+// shooting against another agent's held daemon with HARNESS_SLOT_HELD=1) runs at once, so nested runs never queue
+// behind themselves. The lock is held by a `flock … cat` child reading a pipe from this process: it's released when
+// the script ends, however it ends.
 //
 // Daemons started through spawnDaemon run in their own process group, which is killed when the script exits,
 // including on SIGINT, SIGTERM and SIGHUP (a CI or `timeout` kill), so no daemon or plugin process outlives the run.
@@ -13,12 +15,12 @@ import { mkdirSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 
 export const slotDirectory = (env = process.env) => env.HARNESS_SLOT_DIR || "/tmp/paseo-harness-slots";
-export const slotCount = (env = process.env) => { const n = Number(env.HARNESS_SLOTS); return Number.isInteger(n) && n > 0 ? n : 2; };
+export const slotCount = (env = process.env) => { const n = Number(env.HARNESS_SLOTS); return Number.isInteger(n) && n > 0 ? n : 3; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 /** This process or an ancestor has a slot file open: the shell wrapper keeps the locked fd open while it runs us. */
 export function insideSlot(directory = slotDirectory()) {
-  if (process.env.HARNESS_SLOT) return true;
+  if (process.env.HARNESS_SLOT_HELD) return true;
   for (let pid = process.pid, hops = 0; pid > 1 && hops < 64; hops++) {
     try { for (const fd of readdirSync(`/proc/${pid}/fd`)) { try { if (readlinkSync(`/proc/${pid}/fd/${fd}`).startsWith(`${directory}/slot`)) return true; } catch { /* closed meanwhile */ } } } catch { /* not ours to read */ }
     try { pid = Number(readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1].split(" ")[1]); } catch { break; }
@@ -42,6 +44,20 @@ function tryLock(path) {
   });
 }
 
+/**
+ * Paseo's working set (memory.current minus inactive_file and slab_reclaimable) over 75% of its cap (memory.high, else
+ * memory.max): a new harness daemon would push it toward the OOM line, so waiting is right. Unreadable means no gate.
+ */
+export function memoryBusy(cgroup = process.env.HARNESS_PASEO_CGROUP || "/sys/fs/cgroup/system.slice/paseo.service") {
+  const read = name => { try { return readFileSync(join(cgroup, name), "utf8"); } catch { return null; } };
+  const bytes = text => { const n = Number(text?.trim()); return Number.isFinite(n) && n > 0 ? n : null; };
+  const current = bytes(read("memory.current")); const cap = bytes(read("memory.high")) ?? bytes(read("memory.max"));
+  if (!current || !cap) return false;
+  const stat = read("memory.stat") ?? "";
+  const field = name => Number(new RegExp(`^${name} (\\d+)$`, "m").exec(stat)?.[1] ?? 0);
+  return current - field("inactive_file") - field("slab_reclaimable") > cap * 0.75;
+}
+
 let held = null;
 /**
  * Waits for a harness slot (one "waiting for a harness slot" line while all are busy) and sets the harness env: local
@@ -54,9 +70,9 @@ export async function harness({ log = line => console.error(line), pollMs = 5_00
   if (held || insideSlot(directory)) return { slot: held?.slot ?? null };
   mkdirSync(directory, { recursive: true });
   for (let waited = false; ;) {
-    for (let slot = 1; slot <= slotCount(); slot++) {
+    if (!memoryBusy()) for (let slot = 1; slot <= slotCount(); slot++) {
       const holder = await tryLock(join(directory, `slot${slot}`));
-      if (holder) { held = { slot, holder }; process.env.HARNESS_SLOT = String(slot); return { slot }; }
+      if (holder) { held = { slot, holder }; process.env.HARNESS_SLOT_HELD = String(slot); return { slot }; }
     }
     if (!waited) { log("waiting for a harness slot"); waited = true; }
     await sleep(pollMs);
