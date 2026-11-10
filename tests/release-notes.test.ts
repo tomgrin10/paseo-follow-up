@@ -50,7 +50,7 @@ test("versions: concurrent writes are serialised, none lost", async () => {
 
 test("self: install kind and path come from Paseo's plugin list", () => {
   const rows = [{ id: "other", path: "/x" }, { id: "follow-up", path: "/p", status: "running", installation: { identity: { kind: "npm" }, currentRevision: "1.4.0-beta.21" } }];
-  assert.deepEqual(describeSelf(rows), { path: "/p", version: "1.4.0-beta.21", installKind: "npm", status: "running", error: null });
+  assert.deepEqual(describeSelf(rows), { id: "follow-up", path: "/p", version: "1.4.0-beta.21", installKind: "npm", status: "running", error: null });
   assert.equal(describeSelf([{ id: "follow-up", path: "/p", source: "directory" }]).installKind, "directory");
   assert.equal(describeSelf([{ id: "follow-up", path: "/p", installation: { identity: { kind: "npm", registry: {} } } }]).installKind, "registry");
   assert.equal(describeSelf([]).installKind, "unknown");

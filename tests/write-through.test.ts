@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { writeThrough, backupOnce } from "../server/write-through";
 import { unregisterClaude } from "../server/mcp-registrations";
+import { LEGACY_GLOBAL_MCP } from "../shared/legacy";
 
 // Invariant: a server module that writes a user-owned config file (it names one of them) writes it through
 // server/write-through.ts, never with its own rename(): rename() onto a symlink replaces the link.
@@ -35,7 +36,7 @@ test("writeThrough and backupOnce keep a symlinked directory and file intact and
 test("unregistering the old MCP entry from a symlinked .claude.json keeps the link", async () => {
   const root = await mkdtemp(join(tmpdir(), "follow-write-through-"));
   try {
-    await writeFile(join(root, "real.json"), JSON.stringify({ mcpServers: { "follow-up": { env: { FOLLOW_UP_MANAGED: "1" } }, keep: {} } }));
+    await writeFile(join(root, "real.json"), JSON.stringify({ mcpServers: { [LEGACY_GLOBAL_MCP.name]: { env: { [LEGACY_GLOBAL_MCP.managedEnv]: "1" } }, keep: {} } }));
     await symlink(join(root, "real.json"), join(root, ".claude.json"));
     assert.equal((await unregisterClaude(join(root, ".claude.json"))).status, "removed");
     assert.ok((await lstat(join(root, ".claude.json"))).isSymbolicLink());

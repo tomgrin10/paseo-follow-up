@@ -29,6 +29,8 @@ export const RULES = [
   [new RegExp(`${F[0].toUpperCase()}${F.slice(1)} ${T}`, "g"), "Follow up"],
   [new RegExp(`${F}${T}-fixture`, "g"), "followup-fixture"],
   [new RegExp(`${F}${T}`, "g"), "followup"],
+  [new RegExp(`${F}${T[0].toUpperCase()}${T.slice(1)}`, "g"), "followUp"],
+  [new RegExp(`${F[0].toUpperCase()}${F.slice(1)}${T[0].toUpperCase()}${T.slice(1)}`, "g"), "FollowUp"],
   [new RegExp(`${F}_${T}`, "g"), "follow_up"],
   [new RegExp(`${F}-${T}`, "g"), "follow-up"],
   [new RegExp(`${F} ${T}`, "g"), "follow up"],
