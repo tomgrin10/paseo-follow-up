@@ -26,6 +26,7 @@ import { Spinner } from "./motion";
 import { Setup, SetupOffer, useOnboarding } from "./onboarding";
 import type { OnboardingView } from "../shared/onboarding";
 import { withAlpha, isLight, mergedColor, type Colors } from "./theme";
+import { UpdateNotice } from "./updates";
 import { ReleaseNotesSheet, VersionLine, WhatsNewGate } from "./release-notes";
 
 export const HOME_SCREEN = "follow-through";
@@ -121,7 +122,8 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
 
   // null: closed; false: What's new since the previous version; true: every version.
   const [notesOpen, setNotesOpen] = useState<boolean | null>(null);
-  const versionLine = <VersionLine theme={theme} compact={compact} onOpen={setNotesOpen} />;
+  const updateNotice = <UpdateNotice theme={theme} compact={compact} openSettings={deps.openSettings} />;
+  const updatesFooter = <VersionLine theme={theme} compact={compact} onOpen={setNotesOpen} />;
   const updateSheets = <>
     <WhatsNewGate surface="home" theme={theme} compact={compact} />
     {notesOpen != null && <ReleaseNotesSheet theme={theme} compact={compact} all={notesOpen} onClose={() => setNotesOpen(null)} />}
@@ -140,8 +142,8 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
     // Phones: the host header already says Follow-up, so no "Home" title row; search, sort and settings share one row and
     // the meters move to the end of the list.
     footer={omnibox.results ? undefined : compact
-      ? <View style={{ paddingTop: 16, paddingBottom: 96, gap: 12 }}>{!nothing && <UsageMeters theme={theme} sources={deps.sources} dense />}{versionLine}</View>
-      : versionLine}
+      ? <View style={{ paddingTop: 16, paddingBottom: 96, gap: 12 }}>{!nothing && <UsageMeters theme={theme} sources={deps.sources} dense />}{updatesFooter}</View>
+      : updatesFooter}
     // Phones: the setup offer goes after the Needs-you group when there is one, so the first ask stays high.
     afterNeeds={compact && model.needs > 0 ? <SetupOffer theme={theme} compact view={props.onboarding} /> : undefined}
     emptyAction={compact ? <Button theme={theme} compact kind="secondary" icon="Settings" title="Project settings" onPress={deps.openSettings} /> : undefined}
@@ -159,10 +161,11 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
     </ListTop>}
     // Phones: only the search row stays pinned; the status chips and the setup offer scroll away with the list, so a
     // scrolled list keeps the screen instead of sitting under a 250px block.
-    header={compact && !omnibox.results ? <View style={{ gap: 8, paddingTop: 6, paddingBottom: 6 }}>
+    header={omnibox.results ? undefined : compact ? <View style={{ gap: 8, paddingTop: 6, paddingBottom: 6 }}>
       <StatusStrip theme={theme} model={model} filter={filter} onFilter={setFilter} touch dense />
+      {updateNotice}
       {model.needs === 0 && <SetupOffer theme={theme} compact view={props.onboarding} />}
-    </View> : undefined} />;
+    </View> : updateNotice} />;
 
   if (compact) return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
     {current || selected === OVERSEER_KEY && overseer || selected === BRIEF_KEY ? detail : list}

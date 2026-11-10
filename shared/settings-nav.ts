@@ -6,7 +6,7 @@ import { reviewerLabel, type ReviewerConfig, type ReviewerEntry } from "./review
  */
 
 export const SETTINGS_CATEGORIES = [
-  // First and the default on a device that never picked one: setup, the installed version and (soon) updates.
+  // First and the default on a device that never picked one: setup, the installed version and its updates.
   { id: "general", title: "General", icon: "Settings2", blurb: "Updates, setup, version" },
   { id: "following", title: "Following", icon: "Radar", blurb: "Projects, workspaces, auto-send" },
   { id: "reviewers", title: "Reviewers", icon: "UserCheck", blurb: "Default and per-repo lists" },

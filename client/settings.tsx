@@ -11,12 +11,11 @@ import { DisplaySections, PermissionsSection, PreferenceSwitch } from "./display
 import { ReviewerSettings, reviewerSettingsKey } from "./reviewers";
 import { AgentSettings, WaitSettings, agentSettingsKey } from "./agents";
 import { ShippingSettings } from "./shipping";
+import { UpdatesSections, useUpdates } from "./updates";
+import { generalSummary } from "../shared/updates";
 import { BackHeader, CategoryList, CategoryTabs, Disclosure } from "./settings-shell";
 import { useOnboarding } from "./onboarding";
-import { generalSummary, setupEntry, type SetupEntry } from "../shared/onboarding";
-import { ReleaseNotesSheet, releaseNotesKey, useReleaseNotes } from "./release-notes";
-import type { ReleaseNotesView } from "../shared/changelog";
-import type { OnboardingView } from "../shared/onboarding";
+import { setupEntry, type SetupEntry } from "../shared/onboarding";
 import {
   categoryTitle, followingSummary, hasSavedCategory, projectsOpenByDefault, projectsSummary, readCategory, reviewersSummary, workspaceRows, workspaceState, workspacesOpenByDefault, workspacesSummary,
   writeCategory, type SettingsCategory, type WorkspaceSetting,
@@ -179,21 +178,11 @@ function AgentsCategory({ theme, compact }: { theme: Theme; compact: boolean }) 
  * "Set up Follow-up again" is the first row, so it's on the first screen Settings opens on.
  */
 function GeneralCategory({ theme, compact, setup }: { theme: Theme; compact: boolean; setup?: { entry: SetupEntry; open: () => void } }) {
-  const notes = useReleaseNotes();
-  const [sheet, setSheet] = useState<boolean | null>(null);
-  const version = notes.data?.version;
   return <>
     {setup && <SettingsSection title="Setup">
       <SettingsCard><SettingsAction label={setup.entry.label} hint={setup.entry.hint} actionLabel={setup.entry.action} onPress={setup.open} /></SettingsCard>
     </SettingsSection>}
-    <SettingsSection title="Version">
-      <SettingsCard>
-        <SettingsAction label={version ? `Follow-up ${version}` : "Follow-up"} hint={notes.isError ? "Couldn't read the release notes." : "Installed version."}
-          actionLabel="What's new" onPress={() => setSheet(false)} />
-        <SettingsAction label="Older versions" hint="Every release, newest first." actionLabel="Open" onPress={() => setSheet(true)} />
-      </SettingsCard>
-    </SettingsSection>
-    {sheet != null && <ReleaseNotesSheet theme={theme} compact={compact} all={sheet} onClose={() => setSheet(null)} />}
+    <UpdatesSections theme={theme} compact={compact} />
   </>;
 }
 
@@ -204,10 +193,10 @@ function useSummaries(): Partial<Record<SettingsCategory, string | null>> {
   const reviewers = useQuery({ queryKey: reviewerSettingsKey, queryFn: skipToken }).data as { config: ReviewerConfig } | undefined;
   const agents = useQuery({ queryKey: agentSettingsKey, queryFn: skipToken }).data as AgentSettingsView | undefined;
   const changed = agents?.roles.filter(r => !r.isDefault).length ?? 0;
-  const notes = useQuery({ queryKey: releaseNotesKey, queryFn: skipToken }).data as ReleaseNotesView | undefined;
-  const onboarding = useQuery({ queryKey: ["follow-through", "onboarding"], queryFn: skipToken }).data as OnboardingView | undefined;
+  // General's line reads the updates view (local files, no npm request), so the phone list shows it before a drill-in.
+  const updates = useUpdates().data;
   return {
-    general: generalSummary(notes?.version, onboarding?.status),
+    general: updates ? generalSummary(updates) : null,
     following: follow ? followingSummary(follow) : null,
     reviewers: reviewers ? reviewersSummary(reviewers.config) : null,
     agents: agents ? (changed ? `${changed} of ${agents.roles.length} changed from the defaults` : "Every agent on its default") : null,
