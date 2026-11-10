@@ -54,15 +54,31 @@ they need a running `npm run preview` and read `.preview-isolated.json`. Some dr
 - `scripts/demo.mjs`: seeds the preview with demo data for screenshots (`node scripts/demo.mjs`, optionally
   `--freeze-pr-display`).
 
-`scripts/fixture-provider.ts` is the synthetic agent provider these daemons use. `scripts/daemon-counter.mjs` and
+`scripts/fixture-provider.ts` is the synthetic agent provider these daemons use, and `scripts/harness.mjs` gives them
+their slot and cleanup (below). `scripts/daemon-counter.mjs` and
 `scripts/heap-summary.mjs` are measurement helpers ([resources.md](resources.md)).
 
 ## Rules for harness daemons
 
-- **Memory first.** Before starting one, check that Paseo's working set (`memory.current` minus `inactive_file`
-  for the `paseo.service` cgroup) is under 75 % of its limit.
-- **One at a time.** Run one harness daemon at a time, and stop it when you're done. `npm run preview` keeps
-  running until SIGINT or SIGTERM: run it in the background, and to stop it, send SIGTERM to that npm/node process.
+- **Take a slot.** Every script that starts a Paseo daemon or a browser calls `await harness()` from
+  `scripts/harness.mjs` before its heavy work, and starts daemons with `spawnDaemon`. `tests/harness.test.ts` fails
+  when a script skips either. `harness()`:
+  - Holds a machine-wide flock on `/tmp/paseo-harness-slots/slotN`. These are the same files as the VM's
+    `harness-slot` shell wrapper, so the wrapper and the scripts share slots. `HARNESS_SLOTS` sets N (default 2).
+  - Waits, with a single `waiting for a harness slot` line, while every slot is taken or while Paseo's working set
+    is over 75% of its cap. The working set is `memory.current` minus `inactive_file` and `slab_reclaimable` for the
+    `paseo.service` cgroup.
+  - Exports `HARNESS_SLOT_HELD`. A run that already has it (under the wrapper, started by a script holding a slot,
+    or shooting against another agent's held daemon with `HARNESS_SLOT_HELD=1`) starts at once.
+  - Checks the `paseo` CLI first on PATH: prints `paseo X at /path` once, and exits 97 with
+    `wrong paseo (X at /path); need >= <floor>` when X is below `requirements.paseo` in `paseo-plugin.json`. A stale
+    CLI earlier on PATH otherwise fails deep in the run, as an unknown option. Runs already inside a slot skip this.
+  - Turns local speech off, so harness daemons don't download a speech model.
+  
+  Daemons from `spawnDaemon` run in their own process group, which is killed when the script exits, including on
+  SIGINT, SIGTERM and SIGHUP. Wrap other heavy commands (`npm run verify`, Playwright) in the shell wrapper.
+- **Stop what you start.** Stop a harness daemon as soon as you're done with it. `npm run preview` keeps
+  running, and holds its slot, until SIGINT or SIGTERM: run it in the background, and to stop it, send SIGTERM to that npm/node process.
   It then stops its daemon (`daemonPid` in `.preview-isolated.json`) and removes nothing else. Delete
   `.preview-isolated.json` and the temp root afterwards.
 - **Isolated homes only.** The scripts create a temp root with their own `HOME`, `PASEO_HOME`, `CLAUDE_CONFIG_DIR`

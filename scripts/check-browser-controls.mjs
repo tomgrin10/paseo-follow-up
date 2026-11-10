@@ -7,6 +7,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createServer } from 'node:net';
 import { DaemonClient } from '@getpaseo/client/internal/daemon-client';
+import { harness } from "./harness.mjs";
+await harness();
 const exec = promisify(execFile);
 const preview = JSON.parse(await readFile('.preview-isolated.json','utf8'));
 if(!preview.root.startsWith('/tmp/follow-install-'))throw new Error('Requires the isolated preview.');
