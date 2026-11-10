@@ -6,6 +6,7 @@ import { Button, IconButton, Switch, text, type Theme } from "./kit";
 import { IconSwap, Spinner } from "./motion";
 import { segmentPaint, type Colors } from "./theme";
 import { SpecChip } from "./spec";
+import { SummaryLine } from "./about";
 
 /** PR status older than this means the poll has stopped working; say so instead of looking current. */
 export const STALE_MS = 10 * 60_000;
@@ -83,13 +84,13 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
   </>;
   if (compact && onHome) return <View style={{ paddingHorizontal: pad, paddingTop: 4, paddingBottom: 12, gap: 8, borderBottomWidth: 1, borderBottomColor: c.border }}>
     {/* One bar: Home on the left, the Spec chip and settings on the right. The host header above names the workspace,
-        so the goal shows only when it says something the title doesn't. */}
+        so the Summary (or the goal, until there is one) is the first line under it. */}
     <View style={{ flexDirection: "row", alignItems: "center", minHeight: 44, marginLeft: -14 }}>
       <Button theme={theme} compact kind="ghost" icon="House" title="Home" accessibilityHint="Opens Follow-up Home with every workspace" onPress={onHome} />
       <View style={{ flex: 1 }} />
       <View style={{ marginVertical: 12 }}>{controls}</View>
     </View>
-    {!!w.goal && w.goal.trim() !== w.title.trim() && <Text numberOfLines={2} style={t.meta}>{w.goal}</Text>}
+    <SummaryLine workspace={w} theme={theme} compact />
     <Text accessibilityLiveRegion="polite" style={[t.ask, { color: c.foregroundMuted }]}>
       {parts.map((part, i) => <Text key={part.text} style={toneOf(part.tone) ? { color: toneOf(part.tone) } : { color: c.foreground }}>{i ? <Text style={{ color: c.foregroundMuted, fontWeight: "400" }}>{" · "}</Text> : null}{part.text}</Text>)}
     </Text>
@@ -99,11 +100,12 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
   return <View style={{ paddingHorizontal: pad, paddingTop: compact ? 14 : 12, paddingBottom: 10, gap: 6, borderBottomWidth: 1, borderBottomColor: c.border }}>
     <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
       {/* On phones the host header right above already shows the workspace name. */}
-      {compact || hideTitle ? <Text numberOfLines={2} style={[t.meta, { flex: 1, paddingTop: 2 }, hideTitle && !compact ? { fontSize: 13, lineHeight: 19, color: c.foreground } : null]}>{w.goal}</Text>
+      {compact || hideTitle ? <View style={{ flex: 1, minWidth: 0, paddingTop: 2 }}><SummaryLine workspace={w} theme={theme} compact={compact} lead={hideTitle && !compact} /></View>
         : <Text accessibilityRole="header" style={[t.title, { flex: 1 }]}>{w.title}</Text>}
       {controls}
     </View>
-    {!compact && !hideTitle && w.goal && w.goal !== w.title && <Text numberOfLines={2} style={t.meta}>{w.goal}</Text>}
+    {/* The Summary takes the goal's place; the goal shows until there is one. */}
+    {!compact && !hideTitle && <SummaryLine workspace={w} theme={theme} compact={false} />}
     <Text accessibilityLiveRegion="polite" style={[t.meta, { color: c.foregroundMuted, marginTop: 2 }]}>
       {parts.map((part, i) => <Text key={part.text} style={toneOf(part.tone) ? { color: toneOf(part.tone), fontWeight: "600" } : { color: c.foreground }}>{i ? <Text style={{ color: c.foregroundMuted, fontWeight: "400" }}>{" · "}</Text> : null}{part.text}</Text>)}
     </Text>

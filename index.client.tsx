@@ -37,7 +37,8 @@ export default function contribute(host: PluginClientContext) {
   const openLog = () => client.openScreen({ screenId: OVERVIEW, params: { view: "log" } });
   const openLarge = (workspaceId: string) => client.openScreen({ screenId: LARGE_SCREEN, params: { workspaceId } });
   // "Set up Follow-up again" (Settings and ⌘K): restart the flow on the server, then open Home, which shows it.
-  const openSetup = () => { void client.rpc(setOnboardingRpc, { action: "restart" }).catch(() => undefined).then(() => client.openScreen({ screenId: OVERVIEW, params: { setup: String(Date.now()) } })); };
+  // `resume`: setup is already in progress, so open it where it was left instead of from the top.
+  const openSetup = (resume = false) => { void (resume ? Promise.resolve() : client.rpc(setOnboardingRpc, { action: "restart" }).catch(() => undefined)).then(() => client.openScreen({ screenId: OVERVIEW, params: { setup: String(Date.now()) } })); };
   const Settings = (props: PluginSurfaceProps) => <FollowSettings {...props} openSetup={openSetup} />;
   const store = createLiveStore(client);
   const inbox = createInboxStore(host);
@@ -87,7 +88,7 @@ export default function contribute(host: PluginClientContext) {
     client.addCommandCenterItem({ id: "follow-through-log", title: "Follow-up: Done while you were away", icon: "History", keywords: ["log", "overnight", "away", "repairs", "activity"], context: "global", onSelect({ openScreen }) { openScreen({ screenId: OVERVIEW, params: { view: "log" } }); } }),
     client.addCommandCenterItem({ id: "follow-through-settings", title: "Follow-up: settings", icon: "Settings", keywords: ["default", "following", "project", "display", "sidebar", "pill", "header", "inbox", "questions"], context: "global", onSelect() { openSettings(); } }),
     // "Set up Follow-up again": the setup flow from the top, on Home.
-    client.addCommandCenterItem({ id: "follow-through-setup", title: "Follow-up: Set up again", icon: "ListChecks", keywords: ["setup", "onboarding", "getting started", "checks", "gh", "tour", "welcome"], context: "global", onSelect() { openSetup(); } }),
+    client.addCommandCenterItem({ id: "follow-through-setup", title: "Follow-up: Set up again", icon: "ListChecks", keywords: ["setup", "set up again", "restart setup", "onboarding", "getting started", "checks", "gh", "tour", "welcome"], context: "global", onSelect() { openSetup(); } }),
     client.addSlashCommand({ name: "follow-up", description: "Open this workspace's PRs and remaining work", argumentHint: "", context: "agent", onSubmit({ openPanel }) { openPanel(PANEL, { location: location() }); } }),
     contributeChat(client),
     contributeFollowUpPill(client, { inbox, live: store, openPanel, openNext }),

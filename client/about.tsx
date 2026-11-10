@@ -1,142 +1,93 @@
-import { useState } from "react";
-import { Pressable, Text, View } from "react-native";
-import { openExternalUrl, useRpc } from "@getpaseo/plugin/client";
-import { Icon } from "@getpaseo/plugin/client/ui";
+import { useEffect, useRef, useState } from "react";
+import { Animated, Easing, Platform, Text, View } from "react-native";
+import { useRpc } from "@getpaseo/plugin/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { workspaceAboutRpc } from "../shared/contracts";
-import { aboutDisplay, linkLine, shortFooter, SOURCE_LABEL, type AboutLink, type AboutView } from "../shared/about";
+import { shortFooter, summaryDisplay, summaryLine, type AboutView } from "../shared/about";
 import { errorText } from "../shared/errors";
 import { Button, text, type Theme } from "./kit";
-import { Spinner } from "./motion";
+import { useReducedMotion } from "./motion";
 import { useTick } from "./home-data";
-import type { Colors } from "./theme";
-
-const OPEN_KEY = "follow-up.about.open";
-/** Open/closed is per device (web and desktop storage). Native or blocked storage: this session only. */
-let memoryOpen: boolean | null = null;
-const readOpen = (): boolean => {
-  try { const v = (globalThis as { localStorage?: Storage }).localStorage?.getItem(OPEN_KEY); if (v === "1" || v === "0") return v === "1"; } catch { /* memory only */ }
-  return memoryOpen ?? false;
-};
-const writeOpen = (open: boolean) => {
-  memoryOpen = open;
-  try { (globalThis as { localStorage?: Storage }).localStorage?.setItem(OPEN_KEY, open ? "1" : "0"); } catch { /* memory only */ }
-};
 
 export const aboutKey = (workspaceId: string) => ["follow-through", "about", workspaceId] as const;
 
 /**
- * "What's this about?" at the top of Home's detail pane and the workspace panel. Collapsed: the label and, when one
- * is cached, the one-line gist. Open: the overview, what's linked, and when it was written with a Refresh.
+ * The Summary: one sentence under the workspace's title saying what it's for (Tom, 2026-11-10). One read shape for
+ * every place that shows it (the panel header, Home's detail header, the panel's Summary row), so they share one cache
+ * entry. Reading asks the server to write one when none is current; its TTL, back-off, budgets and the memory check
+ * decide whether it actually does. Polls only while one is being written.
  */
-export function AboutSection({ workspaceId, theme, compact, flush = false }: { workspaceId: string; theme: Theme; compact: boolean; flush?: boolean }) {
-  const c = theme.colors; const t = text(c, compact);
-  // Phones start every pane collapsed and keep the choice for this mount only: one tap mustn't push the ask below the
-  // fold in every workspace. Desktop keeps the per-device choice.
-  const [open, setOpenState] = useState(() => compact ? false : readOpen());
-  const [refreshing, setRefreshing] = useState(false);
+export function useSummary(workspaceId: string) {
   const read = useRpc(workspaceAboutRpc);
   const client = useQueryClient();
   const query = useQuery({
-    queryKey: [...aboutKey(workspaceId), open],
-    queryFn: () => read({ workspaceId, open }),
-    // Polls only while an overview is being written; otherwise one read per open (and per Refresh).
+    queryKey: aboutKey(workspaceId),
+    queryFn: () => read({ workspaceId, open: true }),
     refetchInterval: q => (q.state.data as AboutView | undefined)?.status === "pending" ? 3000 : false,
     staleTime: 60_000,
   });
-  useTick(60_000);
-  const view = query.data ?? null;
-  const d = aboutDisplay(view, Date.now());
-  const toggle = () => { const next = !open; if (!compact) writeOpen(next); setOpenState(next); };
-  const refresh = async () => {
-    if (refreshing) return;
-    setRefreshing(true);
-    try { const next = await read({ workspaceId, open: true, refresh: true }); client.setQueryData([...aboutKey(workspaceId), true], next); }
-    catch { /* the query's error shows */ } finally { setRefreshing(false); }
+  const [rewriting, setRewriting] = useState(false);
+  const rewrite = async () => {
+    if (rewriting) return;
+    setRewriting(true);
+    try { client.setQueryData(aboutKey(workspaceId), await read({ workspaceId, open: true, refresh: true })); }
+    catch { /* the query's error shows */ } finally { setRewriting(false); }
   };
-  const busy = refreshing || view?.status === "pending";
-  const peek = compact && !open && !!d.gist;
-
-  const failedKinds = new Set(view?.record?.failed ?? []);
-
-  // Collapsed it's a plain disclosure row; open, a hairline frame with no fill so the ask stays the raised block.
-  return <View style={{ borderRadius: 10, borderWidth: open ? 1 : 0, borderColor: c.border, marginHorizontal: flush ? 0 : compact ? 16 : 12, marginTop: flush ? 0 : 8 }}>
-    <Pressable accessibilityRole="button" aria-expanded={open} accessibilityState={{ expanded: open }} accessibilityLabel={`${open ? "Hide" : "Show"} what this workspace is about`}
-      accessibilityHint={d.gist && !open ? d.gist : undefined} onPress={toggle}
-      style={state => ({ flexDirection: "row", alignItems: peek ? "flex-start" : "center", gap: 8, paddingHorizontal: open ? 12 : 8, marginHorizontal: open ? 0 : -8, minHeight: compact ? 48 : 32, paddingVertical: compact ? 8 : 6, borderRadius: 8,
-        backgroundColor: state.pressed ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
-      <View style={peek ? { paddingTop: 3 } : undefined}><Icon name={open ? "ChevronDown" : "ChevronRight"} size={14} color={c.foregroundMuted} /></View>
-      {/* Phones: the gist wraps under the label (two lines) instead of being cut to a few words beside it. */}
-      {peek ? <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-        <Text style={t.label}>What's this about?</Text>
-        <Text numberOfLines={2} style={[t.meta, { fontSize: 13, lineHeight: 18 }]}>{d.gist}</Text>
-      </View> : <>
-        <Text style={[t.label, { flexShrink: 0 }]}>What's this about?</Text>
-        {!open && d.gist ? <Text numberOfLines={1} style={[t.meta, { flex: 1, minWidth: 0 }]}>{d.gist}</Text> : <View style={{ flex: 1 }} />}
-      </>}
-      {!open && view?.status === "pending" && !d.gist && <Spinner color={c.foregroundMuted} size={11} label="Summarizing" />}
-    </Pressable>
-    {open && <View style={{ paddingHorizontal: 12, paddingBottom: 10, gap: 12 }}>
-      <Overview d={d} view={view} c={c} compact={compact} loading={query.isPending} error={query.error ? errorText(query.error) : null} />
-      {/* Nothing is claimed about links until an overview exists: "none found" only after a finished write. */}
-      {d.body === "overview" && <View style={{ gap: 4 }}>
-        <Text accessibilityRole="header" style={compact ? t.section : [t.small, { fontWeight: "600", letterSpacing: 0.5, textTransform: "uppercase" }]}>Linked</Text>
-        {d.links.length ? d.links.map(l => <LinkRow key={l.key} l={l} c={c} compact={compact} failed={failedKinds.has(SOURCE_LABEL[l.kind])} />)
-          : <Text style={t.meta}>{d.empty}</Text>}
-      </View>}
-      {view?.record && <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        {/* Phones: one meta line ("Haiku · 2m ago"); what it was built from goes to Refresh's hint. */}
-        <Text numberOfLines={compact ? 1 : undefined} style={[t.small, { flex: 1, minWidth: 0 }]}>{compact ? shortFooter(d.footer) : d.footer}</Text>
-        <Button theme={theme} compact={compact} kind="ghost" icon="RefreshCw" title={busy ? "Summarizing…" : "Refresh"} accessibilityLabel="Summarize again" accessibilityHint={compact ? d.footer ?? undefined : undefined} disabled={busy} onPress={() => void refresh()} />
-      </View>}
-      {!view?.record && view?.status === "failed" && <View style={{ flexDirection: "row" }}>
-        <Button theme={theme} compact={compact} kind="ghost" icon="RefreshCw" title={busy ? "Summarizing…" : "Try again"} disabled={busy} onPress={() => void refresh()} />
-      </View>}
-    </View>}
-  </View>;
+  return { query, view: query.data ?? null, rewrite, rewriting };
 }
 
-function Overview({ d, view, c, compact, loading, error }: { d: ReturnType<typeof aboutDisplay>; view: AboutView | null; c: Colors; compact: boolean; loading: boolean; error: string | null }) {
-  const t = text(c);
-  const [more, setMore] = useState(false);
-  // onTextLayout doesn't fire on web; about 200 characters fill four lines at phone width.
-  const long = compact && (d.overview?.length ?? 0) > 200;
-  // Context, not the ask: body size, a step quieter than the ask's text. On a phone, four lines with More.
-  if (d.body === "overview") return <View style={{ gap: 4 }}>
-    <Text selectable numberOfLines={compact && !more ? 4 : undefined}
-      style={[t.body, { lineHeight: 19, color: c.foreground, opacity: 0.88 }]}>{d.overview}</Text>
-    {long && <Pressable accessibilityRole="button" onPress={() => setMore(m => !m)} hitSlop={compact ? { top: 14, bottom: 14, left: 12, right: 24 } : 12}><Text style={[t.small, { color: c.foreground, fontWeight: "600" }]}>{more ? "Less" : "More"}</Text></Pressable>}
-    {d.refreshing && <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}><Spinner color={c.foregroundMuted} size={10} label="Summarizing" /><Text style={t.small}>Updating…</Text></View>}
-  </View>;
-  if (d.body === "summarizing" || loading) return <View style={{ gap: 6 }}>
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-      <Spinner color={c.foregroundMuted} size={12} label="Summarizing" />
-      <Text style={t.meta}>Summarizing…</Text>
-    </View>
-    {d.excerpt && <Text numberOfLines={3} style={[t.meta, { fontStyle: "italic" }]}>“{d.excerpt}”</Text>}
-  </View>;
-  if (error) return <Text accessibilityRole="alert" style={[t.meta, { color: c.statusDanger }]}>Couldn't load the overview: {error}</Text>;
-  if (d.body === "failed") return <Text accessibilityRole="alert" style={t.meta}>Couldn't write an overview{view?.error ? `: ${view.error}` : "."}</Text>;
-  return <Text style={t.meta}>No overview yet.</Text>;
+/**
+ * Under the title: the sentence, or the goal when there's no sentence yet, or "Writing a summary…" when there's
+ * neither. Plain, selectable, muted, at most three lines. No label, no control, no spinner.
+ */
+export function SummaryLine({ workspace, theme, compact, lead = false }: { workspace: { id: string; title: string; goal: string }; theme: Theme; compact: boolean; lead?: boolean }) {
+  const c = theme.colors; const t = text(c, compact);
+  const { view } = useSummary(workspace.id);
+  const line = summaryLine(summaryDisplay(view, Date.now()), workspace);
+  const reduced = useReducedMotion();
+  const fade = useRef(new Animated.Value(1)).current;
+  const shown = line?.kind === "summary" ? line.text : null;
+  const seen = useRef(shown);
+  // A sentence arriving fades in once; no height animation, and nothing with reduced motion.
+  useEffect(() => {
+    if (!shown || shown === seen.current) return;
+    seen.current = shown;
+    if (reduced) return;
+    fade.setValue(0);
+    Animated.timing(fade, { toValue: 1, duration: 200, easing: Easing.out(Easing.quad), useNativeDriver: Platform.OS !== "web" }).start();
+  }, [shown, reduced, fade]);
+  if (!line) return null;
+  if (line.kind === "writing") return <Text style={t.meta}>{line.text}</Text>;
+  // `lead`: the large view, where this line stands in for the title, keeps the goal's foreground lead style.
+  const style = [t.body, { color: lead ? c.foreground : c.foregroundMuted }];
+  return <Animated.View style={{ opacity: fade }}>
+    <Text selectable numberOfLines={3} style={style}
+      accessibilityLabel={line.kind === "summary" ? `Summary: ${line.text}` : undefined}
+      {...(Platform.OS === "web" ? { title: line.text } as object : {})}>{line.text}</Text>
+  </Animated.View>;
 }
 
-function LinkRow({ l, c, compact, failed }: { l: AboutLink; c: Colors; compact: boolean; failed: boolean }) {
-  const t = text(c);
-  const line = linkLine(l);
-  const bare = !l.title && !l.excerpt;
-  // A source that couldn't be read says so on its own row, muted: it doesn't need the developer.
-  const meta = bare && failed ? [...line.meta, `${SOURCE_LABEL[l.kind]} couldn't be read`] : line.meta;
-  return <Pressable accessibilityRole="link" accessibilityLabel={[SOURCE_LABEL[l.kind], line.lead, line.title, ...meta].filter(Boolean).join(", ")} disabled={!l.url}
-    onPress={() => { if (l.url) void openExternalUrl(l.url).catch(() => undefined); }}
-    style={state => ({ flexDirection: "row", alignItems: "flex-start", gap: 10, minHeight: compact ? 44 : undefined, paddingVertical: compact ? 8 : 4, paddingHorizontal: 6, marginHorizontal: -6, borderRadius: 6, backgroundColor: (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
-    <Text numberOfLines={1} style={[t.small, { width: 46, paddingTop: 2 }]}>{SOURCE_LABEL[l.kind]}</Text>
+/**
+ * The panel's Summary row (inside "Spec, agent and recovery"): who wrote it and when, and Rewrite. The agent tool
+ * `workspace_about` with refresh=true does the same.
+ */
+export function SummaryRow({ workspaceId, theme, compact }: { workspaceId: string; theme: Theme; compact: boolean }) {
+  const c = theme.colors; const t = text(c, compact);
+  const { query, view, rewrite, rewriting } = useSummary(workspaceId);
+  useTick(60_000);
+  const d = summaryDisplay(view, Date.now());
+  const busy = rewriting || d.pending;
+  const line = query.error ? `Couldn't load the summary: ${errorText(query.error)}`
+    : d.footer ? (compact ? shortFooter(d.footer) : d.footer)
+    : d.failed ? "Couldn't write a summary"
+    : d.pending ? "Writing a summary…" : "No summary yet";
+  const action = busy ? "Rewriting…" : d.failed ? "Try again" : d.sentence ? "Rewrite" : "Write summary";
+  return <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: compact ? 48 : 36 }}>
     <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
-      <Text numberOfLines={2} style={t.body}>
-        <Text style={{ fontWeight: "500", fontVariant: ["tabular-nums"], color: bare ? c.foregroundMuted : c.foreground }}>{line.lead}</Text>
-        {line.title ? <Text>{`  ${line.title}`}</Text> : bare && l.url && l.kind !== "slack" ? <Text style={{ color: c.foregroundMuted }}>{"  link"}</Text> : null}
-      </Text>
-      {!!meta.length && <Text numberOfLines={1} style={t.small}>{meta.join(" · ")}</Text>}
+      <Text style={t.label}>Summary</Text>
+      <Text numberOfLines={1} accessibilityRole={d.failed || query.error ? "alert" : undefined} style={t.meta}>{line}</Text>
     </View>
-    {!!l.url && <View style={{ paddingTop: 3 }}><Icon name="ArrowUpRight" size={12} color={c.foregroundMuted} /></View>}
-  </Pressable>;
+    <Button theme={theme} compact={compact} kind="ghost" icon="RefreshCw" title={action} accessibilityLabel="Write a new summary"
+      accessibilityHint={d.footer ?? undefined} disabled={busy} onPress={() => void rewrite()} />
+  </View>;
 }

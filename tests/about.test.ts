@@ -5,12 +5,12 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { z } from "zod";
 import {
-  aboutDisplay, classifyUrl, dailyBudget, extractLinks, footerText, keysFromBranch, linkLine, needsOverview, NO_LINKS, stableJson, usageAllows,
-  ABOUT_TTL_MS, ABOUT_RETRY_MS, type AboutRecord, type AboutView,
+  summaryDisplay, summaryLine, classifyUrl, dailyBudget, extractLinks, footerText, keysFromBranch, linkLine, needsOverview, stableJson, usageAllows,
+  ABOUT_TTL_MS, ABOUT_RETRY_MS, summaryOutputSchema, type AboutRecord, type AboutView,
 } from "../shared/about";
 import { AiJobs, claudeArgs, parseClaudeEnvelope, parseJsonReply, type Runner } from "../server/ai-jobs";
 import {
-  AboutService, AboutStore, collectInputs, enrichLinks, inputsHash, mcpproxyText, overviewPrompt, parseLinearIssue, parseSlackThread, tailLines, workspaceLinks,
+  AboutService, AboutStore, collectInputs, enrichLinks, inputsHash, mcpproxyText, summaryPrompt, parseLinearIssue, parseSlackThread, tailLines, workspaceLinks,
   DAILY_BACKGROUND_CAP, LIMITS, type AboutContext, type AboutSources,
 } from "../server/about";
 import { AgentActions, READ_ONLY_TOOLS } from "../server/agent-actions";
@@ -73,8 +73,10 @@ test("cache keys ignore key order and whitespace but change with the inputs", ()
   assert.equal(stableJson({ b: 1, a: "x  y" }), stableJson({ a: "x y", b: 1 }));
   const base = { workspaceId: "w", source: "live" as const, title: "T", goal: "G", branches: [], firstMessages: ["G"], tail: ["Agent: done"], subagents: [], prs: [], linkTexts: ["unused"] };
   assert.equal(inputsHash(base), inputsHash({ ...base, linkTexts: ["different raw tool output"] }), "raw link text doesn't change the hash");
-  assert.notEqual(inputsHash(base), inputsHash({ ...base, tail: ["Agent: done", "Developer: and the tests?"] }));
-  assert.notEqual(inputsHash(base), inputsHash({ ...base, prs: [{ key: "a/b#1", title: "x", state: "MERGED" }] }));
+  assert.equal(inputsHash(base), inputsHash({ ...base, tail: ["Agent: done", "Developer: and the tests?"] }), "the latest chat doesn't change what it's for");
+  assert.equal(inputsHash({ ...base, prs: [{ key: "a/b#1", title: "x", state: "OPEN" }] }), inputsHash({ ...base, prs: [{ key: "a/b#1", title: "x", state: "MERGED" }] }), "PR state isn't purpose");
+  assert.notEqual(inputsHash(base), inputsHash({ ...base, prs: [{ key: "a/b#1", title: "x", state: "MERGED" }] }), "a new PR title is");
+  assert.notEqual(inputsHash(base), inputsHash({ ...base, goal: "Another goal" }));
 });
 
 test("staleness: none → write; same inputs → keep; changed inputs only after an hour; refresh always; failures back off", () => {
@@ -202,19 +204,21 @@ test("never invent: unknown Linear keys drop, a failed source keeps the bare lin
   assert.ok(down.links.some(l => l.key === "HER-404"), "unread keys stay bare rather than dropped");
 });
 
-test("never invent: the section's fallbacks", () => {
+test("never invent: the line under the title is the sentence, else the goal, else Writing a summary… while one is written", () => {
   const empty: AboutView = { status: "idle", record: null, firstMessage: null, links: [], error: null };
-  assert.equal(aboutDisplay(null, NOW).gist, null);
-  assert.equal(aboutDisplay(empty, NOW).body, "none");
-  assert.equal(aboutDisplay(empty, NOW).empty, NO_LINKS);
-  const pending = aboutDisplay({ ...empty, status: "pending", firstMessage: "Look into the slow query" }, NOW);
-  assert.equal(pending.body, "summarizing"); assert.equal(pending.excerpt, "Look into the slow query");
-  const record: AboutRecord = { workspaceId: "w", inputsHash: "h", generatedAt: iso(120), gist: "Fix slow query", overview: "o", links: [], basis: { chat: true, source: "live", prs: 2, issues: ["HER-1312"] }, failed: ["Linear"], costUsd: 0.001 };
-  const ready = aboutDisplay({ ...empty, status: "ready", record }, NOW);
-  assert.equal(ready.gist, "Fix slow query"); assert.equal(ready.empty, NO_LINKS);
-  assert.equal(ready.footer, "Summarized 2h ago from the chat, 2 PRs, HER-1312");
-  assert.match(ready.failed ?? "", /^Linear couldn't be read/);
-  assert.equal(aboutDisplay({ ...empty, status: "pending", record }, NOW).refreshing, true);
+  const w = { title: "Okta SCIM sync", goal: "Okta SCIM sync" };
+  assert.equal(summaryLine(summaryDisplay(null, NOW), w), null, "nothing at all: nothing shown");
+  assert.equal(summaryLine(summaryDisplay(empty, NOW), w), null, "a goal that repeats the title isn't shown");
+  assert.deepEqual(summaryLine(summaryDisplay({ ...empty, status: "pending" }, NOW), w), { text: "Writing a summary…", kind: "writing" });
+  assert.deepEqual(summaryLine(summaryDisplay({ ...empty, status: "pending" }, NOW), { ...w, goal: "Fix nested groups in the SCIM sync" }), { text: "Fix nested groups in the SCIM sync", kind: "goal" });
+  const record: AboutRecord = { workspaceId: "w", inputsHash: "h", generatedAt: iso(120), form: "sentence", gist: "Keep Okta group members in sync with nested groups.", overview: "", links: [], basis: { chat: true, source: "live", prs: 2, issues: [] }, failed: [], costUsd: 0.001 };
+  const ready = summaryDisplay({ ...empty, status: "ready", record }, NOW);
+  assert.equal(ready.sentence, record.gist); assert.equal(ready.footer, "Summarized 2h ago from the chat, 2 PRs");
+  assert.deepEqual(summaryLine(ready, { ...w, goal: "a goal" }), { text: record.gist, kind: "summary" }, "the sentence replaces the goal");
+  const rewriting = summaryDisplay({ ...empty, status: "pending", record }, NOW);
+  assert.equal(rewriting.sentence, record.gist, "the old sentence stays while a new one is written");
+  const failed = summaryDisplay({ ...empty, status: "failed", error: "The reply was longer than allowed." }, NOW);
+  assert.deepEqual([failed.failed, failed.sentence], [true, null]);
   assert.equal(footerText({ ...record, basis: { chat: false, source: "live", prs: 0, issues: [] } }, NOW), "Summarized 2h ago");
   assert.deepEqual(linkLine({ kind: "linear", key: "HER-1", url: null, title: "T", state: "Todo", priority: "High", due: "2026-11-12", who: null, excerpt: null }), { lead: "HER-1", title: "T", meta: ["Todo", "High", "due 2026-11-12"] });
 });
@@ -238,14 +242,50 @@ test("timeline lines keep the developer and agent words, drop reasoning and Foll
 
 const ctx = (over: Partial<AboutContext> = {}): AboutContext => ({ async history() { return { first: [], items, source: "live" as const }; }, async subagents() { return ["Benchmark the index"]; }, ...over });
 
-test("the prompt is bounded and carries the inputs", async () => {
-  const w = workspace({ title: "Investigate and plan database query fix", goal: "Investigate why the vendor activity query is slow (HER-1312)" });
+test("the Summary prompt asks for one sentence of purpose and sends only name, goal, first asks and PR titles", async () => {
+  const w = workspace({ title: "Investigate and plan database query fix", goal: "Investigate why the vendor activity query is slow (HER-1312)", prs: [pr({ snapshot: snapshot({ title: "Add an index for vendor activity" }) })] });
   const inputs = await collectInputs(w, ctx({ async history() { return { first: [], items: Array.from({ length: 200 }, (_, i) => ({ type: "assistant_message", text: `step ${i} ${"x".repeat(900)}` })), source: "live" as const }; } }));
-  assert.ok(inputs.tail.join("\n").length <= LIMITS.tailChars);
-  assert.ok(inputs.tail.every(l => l.length <= LIMITS.itemChars + 8));
-  const prompt = overviewPrompt(inputs, { issues: [{ key: "HER-1312", title: "Slow query", description: "y".repeat(5000) }], prBodies: [] });
-  assert.ok(prompt.length <= LIMITS.promptChars);
-  assert.match(prompt, /Investigate and plan database query fix/); assert.match(prompt, /HER-1312: Slow query/); assert.match(prompt, /Benchmark the index/);
+  const prompt = summaryPrompt(inputs);
+  assert.ok(prompt.length < 3000, `small: ${prompt.length} chars`);
+  assert.match(prompt, /Investigate and plan database query fix/); assert.match(prompt, /vendor activity query is slow/); assert.match(prompt, /- Add an index for vendor activity/);
+  assert.match(prompt, /at most 140 characters/); assert.match(prompt, /Not where it stands/);
+  assert.doesNotMatch(prompt, /step 199|Benchmark the index|xxxx/, "no chat tail or subagents");
+});
+
+test("the Summary reply must be one sentence on one line of at most 140 characters", () => {
+  const ok = summaryOutputSchema.safeParse({ sentence: "Speed up the vendor activity query so the vendor page loads fast." });
+  assert.equal(ok.success, true);
+  assert.equal(summaryOutputSchema.safeParse({ sentence: "x".repeat(141) }).success, false);
+  assert.equal(summaryOutputSchema.safeParse({ sentence: "Line one.\nLine two." }).success, false);
+  assert.equal(summaryOutputSchema.safeParse({ sentence: "Fine sentence here.", overview: "extra" }).success, false);
+});
+
+test("an over-long reply fails the job and keeps the previous sentence", async () => {
+  let text = JSON.stringify({ sentence: "Speed up the vendor activity query so the vendor page loads fast." });
+  const { s, dir, advance } = await service({ runner: async () => ({ text, costUsd: null, inputTokens: 1, outputTokens: 1 }) });
+  try {
+    const first = await s.view("w1", { open: true, wait: true });
+    assert.equal(first.record?.gist, "Speed up the vendor activity query so the vendor page loads fast.");
+    text = JSON.stringify({ sentence: "This workspace ".repeat(20) });
+    advance(1000);
+    const again = await s.view("w1", { open: true, refresh: true, wait: true });
+    assert.equal(again.record?.gist, first.record?.gist, "the previous sentence stays");
+    assert.ok(again.error, "the failure is reported");
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("older long overviews are never shown; the first view writes the sentence", async () => {
+  const { s, dir, calls } = await service();
+  try {
+    const old: AboutRecord = { workspaceId: "w1", inputsHash: "old", generatedAt: iso(5), gist: "Fix slow vendor-activity query; PR #1352 merged, waiting on Hadar", overview: "A long overview.", links: [], basis: { chat: true, source: "live", prs: 1, issues: [] }, failed: [], costUsd: null };
+    await new AboutStore(dir).mutate(f => { f.entries.w1 = old; });
+    const collapsed = await s.view("w1");
+    assert.equal(collapsed.record, null, "nothing until the new sentence exists");
+    assert.equal(summaryDisplay({ status: "ready", record: old, firstMessage: null, links: [], error: null }, NOW).sentence, null);
+    const done = await s.view("w1", { open: true, wait: true });
+    assert.equal(calls(), 1, "an old record doesn't count as fresh");
+    assert.equal(done.record?.form, "sentence");
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
 async function service(over: { runner?: Runner; sources?: AboutSources; usage?: number; room?: boolean; ws?: ReturnType<typeof workspace>[]; role?: () => Promise<{ provider: string; model: string | null; thinking: string | null; dailyCap: number | null; maxPromptChars: number | null }> } = {}) {
@@ -253,7 +293,7 @@ async function service(over: { runner?: Runner; sources?: AboutSources; usage?: 
   let now = NOW;
   const all = over.ws ?? [workspace({ id: "w1", title: "Investigate and plan database query fix", goal: "Investigate why the vendor activity query is slow (HER-1312)", mainAgentId: "a1", prs: [] })];
   let calls = 0;
-  const runner: Runner = over.runner ?? (async () => { calls++; return { text: JSON.stringify({ gist: "Fix slow vendor-activity query; PR #1352 open, waiting on Hadar.", overview: "Speeds up the vendor activity query. PR #1352 adds an index. It waits on Hadar's review." }), costUsd: 0.0012, inputTokens: 1500, outputTokens: 80 }; });
+  const runner: Runner = over.runner ?? (async () => { calls++; return { text: JSON.stringify({ sentence: "Speed up the vendor activity query so the vendor page loads fast." }), costUsd: 0.0012, inputTokens: 1500, outputTokens: 80 }; });
   const s = new AboutService({
     store: new AboutStore(dir), jobs: new AiJobs({ runner }), sources: over.sources ?? fakeSources(),
     workspace: async id => all.find(w => w.id === id) ?? null, context: () => ctx(),
@@ -272,10 +312,10 @@ test("the service: collapsed reads only the cache; open writes once; unchanged i
     assert.equal(first.status, "pending"); assert.equal(first.firstMessage, "Investigate why the vendor activity query is slow (HER-1312)");
     assert.ok(first.links.some(l => l.key === "HER-1312"));
     const done = await s.view("w1", { open: true, wait: true });
-    assert.equal(done.status, "ready"); assert.equal(done.record?.gist, "Fix slow vendor-activity query; PR #1352 open, waiting on Hadar");
+    assert.equal(done.status, "ready"); assert.equal(done.record?.gist, "Speed up the vendor activity query so the vendor page loads fast.");
     assert.equal(done.record?.costUsd, 0.0012);
     assert.deepEqual(done.record?.links.map(l => l.key), ["HER-1312", "acme/api#1352"]);
-    assert.deepEqual(done.record?.basis.issues, ["HER-1312"]);
+    assert.deepEqual(done.record?.basis.issues, [], "no source is read for the sentence");
     assert.equal(calls(), 1);
     await s.view("w1", { open: true, wait: true });
     assert.equal(calls(), 1, "same inputs, no new job");
@@ -314,16 +354,20 @@ test("background: under the daily cap, skipped above 85% usage", async () => {
   } finally { await rm(full.dir, { recursive: true, force: true }); }
 });
 
-test("workspace_about is a read-only agent tool returning the overview and links", async () => {
-  const { s, dir } = await service();
+test("workspace_about returns the Summary sentence and links, and refresh rewrites it like the panel's button", async () => {
+  const { s, dir, calls } = await service();
   try {
     const w = workspace({ id: "w1", title: "Investigate and plan database query fix", goal: "Investigate why the vendor activity query is slow (HER-1312)", mainAgentId: "a1" });
     const actions = new AgentActions({ store: { snapshot: async () => ({ workspaces: [w] }) as never, mutate: async () => { throw new Error("read-only"); } }, prActions: {} as never, engine: {} as never, inbox: {} as never, about: s });
     assert.ok(READ_ONLY_TOOLS.includes("workspace_about"));
-    const out = await actions.run("caller", "workspace_about", { workspaceId: "Investigate and plan database query fix" }) as { status: string; gist: string; links: { key: string }[] };
-    assert.equal(out.status, "ready"); assert.match(out.gist, /vendor-activity/);
+    const out = await actions.run("caller", "workspace_about", { workspaceId: "Investigate and plan database query fix" }) as { status: string; summary: string; gist: string; links: { key: string }[] };
+    assert.equal(out.status, "ready"); assert.match(out.summary, /vendor activity query/); assert.equal(out.gist, out.summary);
     assert.ok(out.links.some(l => l.key === "HER-1312"));
     await assert.rejects(actions.run("caller", "workspace_about", { workspaceId: "nope" }), /No tracked workspace/);
+    // Agent parity with the panel's Rewrite: refresh writes a new sentence even when one is cached.
+    const before = calls();
+    await actions.run("caller", "workspace_about", { workspaceId: "w1", refresh: true });
+    assert.equal(calls(), before + 1);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
@@ -423,7 +467,7 @@ test("an overview younger than an hour is served without reading the agent's his
     let reads = 0;
     let now = NOW;
     const w = workspace({ id: "w1", title: "T", goal: "G", mainAgentId: "a1", prs: [] });
-    const s = new AboutService({ store: new AboutStore(dir), jobs: new AiJobs({ runner: reply(JSON.stringify({ gist: "g line", overview: "An overview." })) }), sources: fakeSources(),
+    const s = new AboutService({ store: new AboutStore(dir), jobs: new AiJobs({ runner: reply(JSON.stringify({ sentence: "A sentence about the workspace." })) }), sources: fakeSources(),
       workspace: async () => w, context: () => ctx({ async history() { reads++; return { first: [], items, source: "live" as const }; } }), usage: async () => ({ accounts: [] }), now: () => now });
     await s.view("w1", { open: true, wait: true });
     assert.equal(reads, 1);
@@ -448,7 +492,7 @@ test("the excerpt is the developer's first message, never the workspace title re
 
 test("Settings → Agents: the about role picks the job's provider, model and effort; the footer names the model", async () => {
   const seen: { provider: string; model: string; thinking: string | null }[] = [];
-  const runner: Runner = async input => { seen.push({ provider: input.provider, model: input.model, thinking: input.thinking }); return { text: JSON.stringify({ gist: "Speed up the vendor query", overview: "Speeds up the vendor activity query with an index." }), costUsd: null, inputTokens: 1, outputTokens: 1 }; };
+  const runner: Runner = async input => { seen.push({ provider: input.provider, model: input.model, thinking: input.thinking }); return { text: JSON.stringify({ sentence: "Speed up the vendor activity query with an index." }), costUsd: null, inputTokens: 1, outputTokens: 1 }; };
   let role = { provider: "claude", model: "haiku" as string | null, thinking: null as string | null, dailyCap: 60, maxPromptChars: 40_000 };
   const { s, dir, advance } = await service({ runner, role: async () => role });
   try {
