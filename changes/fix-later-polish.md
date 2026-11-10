@@ -1,1 +1,1 @@
-- Later rows show when they come back ("in 25m", "tomorrow 09:00") instead of their age, and a snoozed row's detail reads Later instead of Needs you. An agent's "tonight" or "tomorrow" now means your timezone, not the server's. Keyboard focus lands on the restored row after Undo, and the Undo bar waits while you're on it.
+- Later rows show when they come back, and a snoozed row's detail reads Later. An agent's "tonight" or "tomorrow" now means your timezone. Focus lands on the restored row after Undo.
