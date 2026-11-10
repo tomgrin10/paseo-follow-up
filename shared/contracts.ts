@@ -162,10 +162,12 @@ export const needsYouRpc = defineRpc({ name: "follow.needs-you", input: z.strict
 }), output: z.object({ ok: z.literal(true), briefId: z.string() }) });
 /** Home's detail pane: the full stored brief for one agent (the list carries only its one-liner). */
 export const inboxBriefRpc = defineRpc({ name: "follow.inbox-brief", input: z.strictObject({ agentId: idSchema }), output: z.object({ brief: briefSchema.nullable() }) });
+/** An option letter, or "other" (Something else, which needs words). */
+export const briefChoiceSchema = z.string().regex(/^(?:[A-Z]|other)$/);
 export const briefActionRpc = defineRpc({ name: "follow.brief-action", input: z.strictObject({
-  agentId: idSchema, briefId: z.string().max(300), decisionId: z.string().max(20).optional(), choice: z.string().regex(/^[A-Z]$/).optional(), move: z.enum(["retry"]).optional(),
-  /** 1.4.0: every pick of a multi-decision card, sent together. */
-  choices: z.array(z.object({ decisionId: z.string().max(20), choice: z.string().regex(/^[A-Z]$/) })).min(1).max(10).optional(),
+  agentId: idSchema, briefId: z.string().max(300), decisionId: z.string().max(20).optional(), choice: briefChoiceSchema.optional(), words: z.string().trim().max(2000).optional(), move: z.enum(["retry"]).optional(),
+  /** 1.4.0: every pick of a multi-decision card, sent together. "other" is Something else, with the words. */
+  choices: z.array(z.object({ decisionId: z.string().max(20), choice: briefChoiceSchema, words: z.string().trim().max(2000).optional() })).min(1).max(10).optional(),
 }), output: z.object({ brief: briefSchema }) });
 
 // Agent parity: one RPC carries every agent tool; the server runs the same path as the developer's button.

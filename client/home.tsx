@@ -30,6 +30,7 @@ import { UpdateNotice } from "./updates";
 import { ReleaseNotesSheet, VersionLine, WhatsNewGate } from "./release-notes";
 import { useRowMenu } from "./row-actions";
 import { laterChoices } from "../shared/row-menu";
+import { RichText } from "./rich-text";
 
 export const HOME_SCREEN = "follow-through";
 
@@ -508,13 +509,13 @@ function Step({ step, c, last }: { step: TailStep; c: Colors; last: boolean }) {
   const t = text(c);
   if (step.kind === "tool") return <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
     <Icon name="Terminal" size={13} color={step.failed ? c.statusDanger : c.foregroundMuted} />
-    <Text numberOfLines={1} style={[t.meta, { flex: 1, fontFamily: mono }]}>{step.text}</Text>
+    <RichText plain numberOfLines={1} style={[t.meta, { flex: 1, fontFamily: mono }]}>{step.text}</RichText>
   </View>;
   if (step.kind === "you") return <View style={{ padding: 10, borderRadius: 8, backgroundColor: c.surface1, gap: 3 }}>
-    <Text style={t.small}>You</Text><Text numberOfLines={3} style={t.body}>{answerLine(step.text) ?? step.text}</Text>
+    <Text style={t.small}>You</Text><RichText numberOfLines={3} style={t.body}>{answerLine(step.text) ?? step.text}</RichText>
   </View>;
-  if (step.kind === "error") return <Text numberOfLines={4} style={[t.body, { color: c.statusDanger }]}>{step.text}</Text>;
-  return <Text selectable numberOfLines={last ? 40 : 4} style={[t.body, { lineHeight: 19 }]}>{step.text.replace(/\*\*/g, "")}</Text>;
+  if (step.kind === "error") return <RichText numberOfLines={4} style={[t.body, { color: c.statusDanger }]}>{step.text}</RichText>;
+  return <RichText selectable numberOfLines={last ? 40 : 4} style={[t.body, { lineHeight: 19 }]}>{step.text.replace(/\*\*/g, "")}</RichText>;
 }
 
 function permissionText(p: Permission): string {
@@ -647,7 +648,7 @@ function LogRow({ l, c, onOpen }: { l: LogLine; c: Colors; onOpen?: () => void }
     <View style={{ paddingTop: 2 }}><Icon name={l.icon} size={13} color={tone} /></View>
     <View style={{ flex: 1, minWidth: 0 }}>
       <Text numberOfLines={1} style={t.body}>{l.text} <Text style={{ color: c.foregroundMuted }}>· {l.workspaceTitle}</Text></Text>
-      {!!l.detail && <Text numberOfLines={2} style={t.meta}>{l.detail}{l.took ? ` · took ${l.took}` : ""}</Text>}
+      {!!l.detail && <RichText plain numberOfLines={2} style={t.meta}>{`${l.detail}${l.took ? ` · took ${l.took}` : ""}`}</RichText>}
     </View>
     <Age iso={l.at} c={c} />
   </Pressable>;
