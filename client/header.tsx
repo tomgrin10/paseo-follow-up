@@ -89,7 +89,7 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
     <View style={{ flexDirection: "row", alignItems: "center", minHeight: 44, marginLeft: -14 }}>
       <Button theme={theme} compact kind="ghost" icon="House" title="Home" accessibilityHint="Opens Follow-up Home with every workspace" onPress={onHome} />
       {/* The version sits with Home, as on Home's own title line, not beside the cog. */}
-      <VersionMark theme={theme} touch openSettings={onSettings} />
+      <View style={{ marginLeft: 8 }}><VersionMark theme={theme} touch openSettings={onSettings} /></View>
       <View style={{ flex: 1 }} />
       <View style={{ marginVertical: 12 }}>{controls}</View>
     </View>
