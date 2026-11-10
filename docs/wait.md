@@ -5,7 +5,8 @@ the background and end the turn "waiting for a notification". Wait lets them hol
 
 ## How it works
 
-1. `wait_prepare_job({description, command})` records a job and returns the exact `bashCommand`. It runs nothing.
+1. `wait_prepare_job({description, command, timeoutSeconds?})` records a job and returns the exact `bashCommand`.
+   It runs nothing. The time limit defaults to 3 h (at most 12 h) and is written to the job's `timeout` file.
 2. The agent runs that command with native Bash and `run_in_background=true`. The command is the runner
    (`wait/run-job.sh`, from `server/wait-runner.sh`) wrapping the agent's command.
 3. `wait_for_job({jobId, max_wait_seconds})` holds for up to 60 s (default 30). It returns `completed` or `failed`
@@ -29,6 +30,10 @@ the background and end the turn "waiting for a notification". Wait lets them hol
   agent refresh a second to notice a new message, and only while it waits.
 - **Proof of completion.** Only the runner's atomic exit receipt (`result.json`) proves completion. An elapsed wait
   or missing output is `still_pending`, never success. Symlinked or malformed receipts are rejected.
+- **Time limit.** The runner runs the command under `timeout -k 30 <limit>`, so a job that never ends (an unbounded
+  poll loop) can't keep the machine awake all night. Exit 124 writes `"timedOut": true` into the receipt, and
+  `wait_for_job` says the command was stopped, not that it finished. A command that itself exits 124 reads as timed
+  out too. Without `timeout(1)` (macOS) commands run unbounded, as before.
 - **Ownership.** Each job is scoped by the daemon's agent id and cwd. A tool input with an `agentId` is rejected.
 - **Stop and new messages.** Stop cancels the wait, and a new message ends it with `new_message`. Neither kills the
   job.

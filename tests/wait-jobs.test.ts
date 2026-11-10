@@ -5,7 +5,7 @@ import { mkdtemp, rm, writeFile, symlink, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
-import { WaitJobs, waitInput, DEFAULT_WAIT_SECONDS, HARD_MAX_WAIT_SECONDS } from '../server/wait-jobs';
+import { WaitJobs, waitInput, DEFAULT_WAIT_SECONDS, HARD_MAX_WAIT_SECONDS, DEFAULT_JOB_TIMEOUT_SECONDS, MAX_JOB_TIMEOUT_SECONDS } from '../server/wait-jobs';
 
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), 'follow-wait-unit-'));
@@ -93,5 +93,25 @@ test('ownership, invalid receipts, and symlinked receipts cannot report success'
     await writeFile(receipt, '{"exitCode":"0"}'); await assert.rejects(f.jobs.status(f.owner, job.jobId));
     await rm(receipt); const outside = join(f.directory, 'outside.json'); await writeFile(outside, '{"exitCode":0}'); await symlink(outside, receipt);
     await assert.rejects(f.jobs.status(f.owner, job.jobId), /Invalid wait job/);
+  } finally { await f.close(); }
+});
+
+test('a prepared job stops at its time limit and its receipt says it timed out', async () => {
+  const f = await fixture();
+  try {
+    assert.equal(DEFAULT_JOB_TIMEOUT_SECONDS, 3 * 3600); assert.equal(MAX_JOB_TIMEOUT_SECONDS, 12 * 3600);
+    await assert.rejects(f.jobs.prepare(f.owner, { description: 'too long', command: 'true', timeoutSeconds: MAX_JOB_TIMEOUT_SECONDS + 1 }));
+    // The VM sleep report's case: a poll loop whose marker never comes.
+    const loop = await f.jobs.prepare(f.owner, { description: 'endless poll', command: 'while ! grep -q EXIT /nonexistent 2>/dev/null; do sleep 0.2; done', timeoutSeconds: 1 });
+    const started = Date.now();
+    assert.equal(await run(loop.bashCommand).finished, 124);
+    assert.ok(Date.now() - started < 5000, 'stopped at the limit, not left running');
+    const receipt = await f.jobs.wait(f.owner, { jobId: loop.jobId, max_wait_seconds: 1 });
+    assert.equal(receipt.outcome, 'failed'); assert.equal(receipt.exitCode, 124); assert.equal(receipt.timedOut, true);
+    assert.match(receipt.instruction, /time limit/);
+    const quick = await f.jobs.prepare(f.owner, { description: 'quick', command: 'exit 3' });
+    assert.equal(await run(quick.bashCommand).finished, 3);
+    const status = await f.jobs.status(f.owner, quick.jobId);
+    assert.equal(status.exitCode, 3); assert.equal(status.timedOut, undefined, 'an ordinary failure is not a timeout');
   } finally { await f.close(); }
 });

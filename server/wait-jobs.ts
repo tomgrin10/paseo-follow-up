@@ -18,15 +18,24 @@ import { runnerSource } from "./wait-runner-source";
  */
 export const DEFAULT_WAIT_SECONDS = 30;
 export const HARD_MAX_WAIT_SECONDS = 60;
+/** A prepared job's time limit: 3 h unless the agent asks for another, at most 12 h. The runner stops it after that. */
+export const DEFAULT_JOB_TIMEOUT_SECONDS = 3 * 3600;
+export const MAX_JOB_TIMEOUT_SECONDS = 12 * 3600;
+export const prepareInput = z.object({
+  description: z.string().min(1).max(240),
+  command: z.string().min(1).max(32000),
+  timeoutSeconds: z.number().int().min(1).max(MAX_JOB_TIMEOUT_SECONDS).optional(),
+}).strict();
 export const waitInput = z.object({
   jobId: z.string().uuid(),
   max_wait_seconds: z.number().int().min(1).max(HARD_MAX_WAIT_SECONDS).default(DEFAULT_WAIT_SECONDS),
 }).strict();
 const metadataSchema = z.object({ version: z.literal(1), id: z.string().uuid(), agentId: z.string(), cwd: z.string(), description: z.string(), createdAt: z.string() }).strict();
-const resultSchema = z.object({ exitCode: z.number().int().min(0).max(255) }).strict();
+const resultSchema = z.object({ exitCode: z.number().int().min(0).max(255), timedOut: z.literal(true).optional() }).strict();
 
 export interface Owner { id: string; cwd: string }
-export interface JobStatus { jobId: string; status: "prepared" | "running" | "completed" | "failed"; description: string; createdAt: string; exitCode?: number }
+/** `timedOut`: the runner stopped the command at its time limit (exit 124). */
+export interface JobStatus { jobId: string; status: "prepared" | "running" | "completed" | "failed"; description: string; createdAt: string; exitCode?: number; timedOut?: true }
 export type WaitResult = JobStatus & { outcome: "completed" | "failed" | "still_pending" | "new_message"; waitedSeconds: number; instruction: string };
 
 const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
@@ -50,7 +59,8 @@ export class WaitJobs {
   }
 
   /** Writes the job record and returns the exact command to run. Runs nothing. */
-  async prepare(owner: Owner, input: { description: string; command: string }) {
+  async prepare(owner: Owner, raw: z.input<typeof prepareInput>) {
+    const input = prepareInput.parse(raw);
     if (this.closed) throw new Error("Wait tools are stopping");
     const id = randomUUID();
     const path = this.path(owner, id);
@@ -61,6 +71,8 @@ export class WaitJobs {
     await rename(temporary, runner);
     const record = { version: 1, id, agentId: owner.id, cwd: owner.cwd, description: input.description, createdAt: new Date().toISOString() };
     await writeFile(join(path, "job.json"), JSON.stringify(record), { mode: 0o600, flag: "wx" });
+    const limit = input.timeoutSeconds ?? DEFAULT_JOB_TIMEOUT_SECONDS;
+    await writeFile(join(path, "timeout"), String(limit), { mode: 0o600, flag: "wx" });
     return {
       jobId: id,
       bashCommand: ["sh", runner, path, owner.cwd, input.command].map(quote).join(" "),
@@ -76,8 +88,8 @@ export class WaitJobs {
     if (record.agentId !== owner.id || record.id !== jobId || record.cwd !== owner.cwd) throw new Error("Job ownership does not match this agent and working directory");
     const base = { jobId, description: record.description, createdAt: record.createdAt };
     try {
-      const { exitCode } = resultSchema.parse(await jsonFile(join(path, "result.json")));
-      return { ...base, status: exitCode === 0 ? "completed" : "failed", exitCode };
+      const { exitCode, timedOut } = resultSchema.parse(await jsonFile(join(path, "result.json")));
+      return { ...base, status: exitCode === 0 ? "completed" : "failed", exitCode, ...(timedOut ? { timedOut } : {}) };
     } catch (error) { if (!missing(error)) throw error; }
     try {
       const started = await lstat(join(path, "started"));
@@ -119,6 +131,7 @@ export class WaitJobs {
             ...current, outcome, waitedSeconds: (Date.now() - started) / 1000,
             instruction: outcome === "still_pending" ? "The wait ceiling was reached. Inspect the job and its output now. If it is healthy and still needed, call wait_for_job again. Do not treat this as completion."
               : outcome === "new_message" ? "A new message arrived. Handle it before deciding whether to wait again. The underlying job was not stopped."
+              : current.timedOut ? "The command hit its time limit and was stopped (exit 124); it did not finish. Inspect its output, then decide whether to run it again with a longer timeoutSeconds or change it."
               : "The command exited. Inspect its output and exit code before continuing.",
           });
         };
