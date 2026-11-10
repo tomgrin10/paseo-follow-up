@@ -6,7 +6,7 @@ import { questionSchema } from "../shared/questions";
 import type { Batch, Obligation, Workspace } from "../shared/model";
 import { liveLine, needsYou } from "../shared/attention";
 import { buildHome, trackedGroup } from "../shared/home";
-import { agentCard } from "../shared/status";
+import { agentCard, FINISH_LINE } from "../shared/status";
 import { clock, pr, snapshot, workspace } from "./fixtures";
 
 // Every status invariant over a grid of workspaces, plus one named fixture per reported bug. Extend the grid's axes
@@ -123,11 +123,26 @@ test("regression wks_4b27f268: an idle agent with a queued Done check is not 'on
   assert.equal(row.word, "Ready to finish", "the Done check isn't labelled as a fix");
   assert.notEqual(row.icon, "Wrench");
   const finish = needsYou(w, clock).find(i => i.kind === "send");
-  assert.equal(finish?.title, "Ready to finish · ask the main agent to declare Done");
+  assert.equal(finish?.title, FINISH_LINE);
 });
 
 test("regression wks_4b27f268: the same workspace once Done reads Done everywhere", () => {
   const w = { ...screenshot(), batches: [], completion: { summary: "Shipped", declaredAt: at(0), unconfirmed: [] } };
   assert.deepEqual(violations(w, clock), []);
   assert.equal(trackedGroup(w, clock), "quiet"); assert.equal(liveLine(w, clock).text, "Ready to archive");
+});
+
+test("regression 2026-11-10 critique: repairs queued for an idle agent Follow-up won't wake are yours to send", () => {
+  const w = workspace({ enable_auto_sends: true, sendWait: "unloaded", prs: [pr()], batches: [batch("repairs", "pending")] });
+  assert.deepEqual(violations(w, clock), []);
+  assert.equal(trackedGroup(w, clock), "needs");
+  assert.ok(needsYou(w, clock).some(i => i.kind === "send" && !i.finish), "a Send for the queued repair");
+  assert.equal(agentCard(w, clock), null, "no 'Queued for the main agent' card that can't act");
+});
+
+test("regression 2026-11-10 critique: a stuck Done check is never called a repair", () => {
+  const w = workspace({ prs: [merged("latched")], batches: [batch("finish", "blocked")] });
+  const retry = needsYou(w, clock).find(i => i.kind === "retry");
+  assert.equal(retry?.title, "The Done check didn't go through");
+  assert.doesNotMatch(liveLine(w, clock).text, /repairs/);
 });

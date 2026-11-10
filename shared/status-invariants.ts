@@ -57,6 +57,15 @@ export const INVARIANTS: Invariant[] = [
     },
   },
   {
+    id: "waits-on-you-means-needs-you", why: "2026-11-10 critique: repairs queued for an idle agent said they waited on you while Home filed them under Waiting on others with no Send",
+    check: (w, now) => {
+      const v = batchView(w, now);
+      if (!v || v.phase !== "queued" || v.waitingOn !== "you" || w.hold || w.goneAgent || w.dormant || summary(w, now).status === "done") return null;
+      if (!needsYou(w, now).some(i => i.kind === "send" && i.batchId === v.batch.id)) return `"${v.line}" has no Send in Needs you`;
+      return trackedGroup(w, now) === "needs" ? null : `"${v.line}" shown in ${trackedGroup(w, now)}`;
+    },
+  },
+  {
     id: "done-is-done-everywhere", why: "a Done workspace reads as Done on every surface and asks nothing more",
     check: (w, now) => {
       if (summary(w, now).status !== "done") return null;
