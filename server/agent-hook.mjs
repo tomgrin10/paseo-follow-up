@@ -267,6 +267,9 @@ async function main() {
   const nudge = shouldNudge({ provider, brief, agentId, contributor, recovery: false, subagent: false, stopHookActive: !!event.stop_hook_active, turn, called });
   if (!sync && !nudge) return;
   await save(path, { ...turn, startedAt: turn?.startedAt ?? Date.now(), stopped: true, ...(nudge ? { nudgedAt: Date.now() } : {}) });
+  // The reply this Stop interrupts is the agent's real answer; what it says after the bookkeeping continuation answers
+  // Follow-up. The inbox reports this one as the Finished reason (server/inbox-classifier.ts finishedReply).
+  if (typeof event.last_assistant_message === "string" && event.last_assistant_message.trim()) await save(join(directory, "hook-state", `bookkeeping-${agentId}.json`), { at: Date.now(), reply: event.last_assistant_message.slice(0, 4000) }).catch(() => undefined);
   const reasons = [detached ? detachedNotice : null, sync ? stopReason + " This is metadata bookkeeping only; do not start queued repairs or recovery.\n\n" + context() : null, nudge ? named(nudgeReason) : null].filter(Boolean);
   process.stdout.write(JSON.stringify({ decision: "block", reason: reasons.join("\n\n") }) + "\n");
 }

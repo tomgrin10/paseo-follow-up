@@ -3,6 +3,7 @@ import type { Artifact } from "../shared/spec";
 import { mergeArtifacts } from "./spec";
 import type { State, Workspace } from "../shared/model";
 import { autoSendsByDefault, followsByDefault } from "../shared/settings";
+import { developerWords, messageSender } from "../shared/message-sender";
 import { interruptionHold } from "../shared/status";
 import { backgroundCount, isLive } from "../shared/agent-load";
 
@@ -102,9 +103,10 @@ export function extractHistory(items: readonly unknown[], complete = true, error
     const value = item as { type?: string; text?: string };
     if (value.type === "reasoning" || value.type === "plugin") continue;
     const text = typeof value.text === "string" ? value.text : JSON.stringify(item);
-    if (/^(Workspace follow-through batch|Follow-through batch|Follow-through recovery|Follow-up answer) /.test(text)) continue;
-    if (!goal && value.type === "user_message" && value.text && !value.text.trimStart().startsWith("<"))
-      goal = value.text.trim().replace(/\s+/g, " ").slice(0, 350) || null;
+    // Follow-up's own messages carry the PR links it already knows: no evidence. The goal is the developer's words only.
+    if (messageSender(text).kind === "follow-up") continue;
+    const words: string | null = !goal && value.type === "user_message" && value.text ? developerWords(value.text) : null;
+    if (words) goal = words.replace(/\s+/g, " ").slice(0, 350) || null;
     for (const match of text.matchAll(/https:\/\/(?:github\.com|app\.graphite\.(?:com|dev)\/github\/pr)\/([\w.-]+)\/([\w.-]+)\/(?:pull\/)?(\d+)(?=[/?#\s)\]"'.,;:<>}]|$)/g))
       candidates.add(`${match[1]}/${match[2]}#${Number(match[3])}`);
   }

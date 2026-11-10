@@ -184,6 +184,8 @@ export default function contribute(server: PluginServerContext) {
   const trackedMain = async (agentId: string) => (await store.snapshot()).workspaces.find(w => w.enable_tracking && !w.archived && w.mainAgentId === agentId) ?? null;
   let overseer: Overseer | null = null;
   let ranker: Ranker | null = null;
+  // Who sent a message (server/inbox-classifier.ts): the inbox and the Overseer's new-workspace gate read one ledger.
+  const senderSources = fileSources(paseoHome, async () => (await inbox.store.snapshot()).ledger);
   const inbox: Inbox = new Inbox(directory, {
     enabled: inboxSettings,
     overseer: async () => (await overseer?.state())?.agentId ?? null,
@@ -221,7 +223,7 @@ export default function contribute(server: PluginServerContext) {
       },
     },
     directory: daemonDirectory(gateway.directory),
-    sources: fileSources(paseoHome, async (): Promise<{ agentId: string; messageId: string | null; at: string }[]> => (await inbox.store.snapshot()).ledger),
+    sources: senderSources,
     guard: async () => {
       try { const state = JSON.parse(await readFile(guardPath(paseoHome), "utf8")); return state?.version === 1 && Array.isArray(state.pauses) ? state.pauses as GuardPause[] : null; }
       catch { return null; }
@@ -747,7 +749,7 @@ export default function contribute(server: PluginServerContext) {
       branch: w.gitRuntime?.currentBranch ?? null, pr: w.githubRuntime?.pullRequest?.title ? { number: w.githubRuntime.pullRequest.number ?? null, title: w.githubRuntime.pullRequest.title } : null }));
   };
   const overseerOn = async () => (await inboxSettings()).enable_overseer !== false;
-  overseer = new Overseer({ directory, store, inbox, priorities: priorityStore, workspaces: paseoWorkspaces, enabled: overseerOn, paseoHome, tight: async () => !governor.allowsBackground(),
+  overseer = new Overseer({ directory, store, inbox, sources: senderSources, priorities: priorityStore, workspaces: paseoWorkspaces, enabled: overseerOn, paseoHome, tight: async () => !governor.allowsBackground(),
     windowMs: async () => activeWindowMs(await store.snapshot()), agent: () => agentSettings.role("overseer"),
     // Harness override only (isolated test daemons): "provider/model" wins over Settings → Agents.
     provider: process.env.FOLLOW_UP_OVERSEER_PROVIDER || undefined,

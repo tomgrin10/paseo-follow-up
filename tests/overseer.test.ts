@@ -199,7 +199,7 @@ async function overseerFixture(t: any, rows: InboxRow[], tails: Record<string, u
     async noteDelivery(agentId: string, messageId: string | null, by?: "developer") { ledger.push({ agentId, messageId, at: new Date(NOW).toISOString(), ...(by ? { by } : {}) }); },
   };
   const state: State = { version: 1, workspaces: [workspace({ id: "w1", title: "SCIM", mainAgentId: "a1", prs: [pr({ key: "acme/app#1402", repo: "acme/app", number: 1402, snapshot: snapshot({ title: "HER-1282 SCIM sync" }) })] })] };
-  const overseer = new Overseer({ directory: dir, store: { snapshot: async () => state }, inbox, priorities: { read: async () => [] }, enabled: extra.enabled ?? (async () => true), provider: "demo/claude-opus-5-5", now: () => NOW,
+  const overseer = new Overseer({ directory: dir, store: { snapshot: async () => state }, inbox, sources: sources(ledger), priorities: { read: async () => [] }, enabled: extra.enabled ?? (async () => true), provider: "demo/claude-opus-5-5", now: () => NOW,
     tight: extra.tight ?? (async () => false), paseoHome: extra.paseoHome,
     workspaces: async () => [{ id: "w1", name: "SCIM", project: "acme-app", projectId: "p", activityAt: at(5), branch: "tom/her-1282-scim" }, { id: "w2", name: "Export", project: "acme-app", projectId: "p", activityAt: at(9), branch: "tom/export" }] });
   const fake = fakePaseo({ a1: { workspaceId: "w1" }, a2: { workspaceId: "w2" } }, tails);
@@ -251,7 +251,7 @@ test("route_candidates, workstreams and agent_digest answer from Follow-up's sta
   assert.deepEqual(d.steps.map(s => s.kind), ["you", "tool", "agent"]); assert.equal(d.workspace, "SCIM"); assert.equal(d.openAsks.length, 1);
 });
 
-test("a new workspace waits for Tom's approval", async t => {
+test("a new workspace waits for the developer's approval", async t => {
   const f = await overseerFixture(t, [], {});
   // The fake's ref() builds a new handle per call, so swap the Overseer's tail through a map.
   const tails: Record<string, unknown[]> = {};
@@ -261,7 +261,9 @@ test("a new workspace waits for Tom's approval", async t => {
   const blocked = await f.overseer.act(f.paseo, f.ov, "start_workspace", { task: "HER-1400 fix the CSV export" }) as { planId: string | null; blockers: string[]; plan: { title: string; branch: string; project: string } };
   assert.equal(blocked.planId, null); assert.match(blocked.blockers.join(), /hasn't asked for or approved/);
   assert.equal(f.created.filter(c => c.kind === "workspace").length, 1, "nothing but the Overseer's own workspace");
-  tails[f.ov] = [{ type: "user_message", text: "Follow-up answer D1 (Which agent?): C — New workspace\nContinue with this choice." }];
+  // The answer is the developer's click on the Overseer's card: the brief action records it in the ledger first.
+  f.ledger.push({ agentId: f.ov, messageId: "answer-1", at: new Date(NOW).toISOString(), by: "developer" });
+  tails[f.ov] = [{ type: "user_message", text: "Follow-up answer D1 (Which agent?): C — New workspace\nContinue with this choice.", messageId: "answer-1" }];
   const plan = await f.overseer.act(f.paseo, f.ov, "start_workspace", { task: "HER-1400 fix the CSV export" }) as { planId: string; plan: { title: string; branch: string; project: string } };
   assert.ok(plan.planId); assert.deepEqual(plan.plan, { ...plan.plan, title: "HER-1400 Fix the CSV export", branch: "her-1400-fix-the-csv-export", project: "acme-app" });
   const done = await f.overseer.act(f.paseo, f.ov, "start_workspace", { confirm: true, planId: plan.planId }) as { started: boolean };

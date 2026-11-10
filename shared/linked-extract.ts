@@ -1,6 +1,6 @@
 import { extractLinks, keysFromBranch } from "./about";
 import type { LinkRef } from "./linked";
-import { isForwarded } from "./overseer";
+import { messageSender } from "./message-sender";
 
 /**
  * Linked items' passive ingress (1.4.0-beta.30): references in text Follow-up already reads. Pure.
@@ -13,10 +13,6 @@ import { isForwarded } from "./overseer";
  * strong; an agent's prose is weak. URL-shaped references (Slack threads, artifacts, docs, GitHub issues) don't wait.
  */
 
-/** Follow-up's own messages to an agent: never evidence of what the work is about. */
-const FOLLOW_UP_PREFIXES = ["Workspace follow-through batch", "Follow-through batch", "Follow-through recovery", "Follow-up answer"];
-/** Follow-up's own text, including Overseer forwards under every prefix they have carried (old transcripts keep the old one). */
-const isFollowUpText = (text: string) => isForwarded(text) || FOLLOW_UP_PREFIXES.some(p => text.startsWith(p));
 const SLACK_TS = /^\d{10}\.\d{6}$/;
 
 type Item = { type?: string; text?: unknown; name?: unknown; status?: unknown; error?: unknown; detail?: { input?: unknown } };
@@ -51,8 +47,10 @@ function receiptRefs(name: string, input: unknown): LinkRef[] {
 function entryRefs(item: Item): LinkRef[] {
   if (!item || typeof item !== "object") return [];
   if (item.type === "user_message" && typeof item.text === "string") {
-    const text = item.text.trimStart();
-    return text.startsWith("<") || isFollowUpText(text) ? [] : refsIn(text, true);
+    // Only the developer's words vouch for a reference. Another agent's message is prose (as its 0.15 tool-call form
+    // below); Follow-up's own messages, Overseer forwards and system text are never evidence.
+    const s = messageSender(item.text);
+    return s.kind === "developer" ? refsIn(s.text, true) : s.kind === "agent" ? refsIn(s.text, false) : [];
   }
   if (item.type === "assistant_message" && typeof item.text === "string") return refsIn(item.text, false);
   if (item.type === "tool_call" && typeof item.name === "string") {

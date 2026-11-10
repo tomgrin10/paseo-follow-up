@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { wakeLabel, compareNeeds, displayReason, newEntry, nextAfter, reduce, replay, rowTitle, sectionRows, StaleSignOff, stateOf, type Entry, type InboxEvent, type InboxRow } from "../shared/inbox";
-import { classify, fileSources, newestUserMessage, type Sources } from "../server/inbox-classifier";
+import { classify, fileSources, latestPrompt, type Sources } from "../server/inbox-classifier";
 import { followUpEvents, Inbox, REVISION, type AgentInfo, type Directory, type GuardPause } from "../server/inbox";
 import { pr, snapshot, workspace } from "./fixtures";
 
@@ -492,9 +492,10 @@ test("classifier: reads Defer, Smart Session, Session Guard and schedule files",
   assert.equal(await who("defer"), "tom", "a corrupt file fails open");
   await rm(home, { recursive: true, force: true });
 });
-test("classifier: the newest user message is read from the tail", () => {
-  assert.deepEqual(newestUserMessage([{ type: "user_message", text: "old" }, { type: "assistant_message", text: "a" }, { type: "user_message", text: "new", messageId: "m2" }, { type: "assistant_message", text: "b" }]), { text: "new", messageId: "m2", clientMessageId: null });
-  assert.equal(newestUserMessage([{ type: "assistant_message", text: "a" }]), null);
+test("classifier: the latest prompt is read from the tail, past harness text, stopping at another sender", () => {
+  assert.deepEqual(latestPrompt([{ type: "user_message", text: "old" }, { type: "assistant_message", text: "a" }, { type: "user_message", text: "new", messageId: "m2" }, { type: "user_message", text: "<system-reminder>x</system-reminder>" }, { type: "assistant_message", text: "b" }]), { message: { text: "new", messageId: "m2", clientMessageId: null }, sender: { kind: "developer", text: "new" } });
+  assert.deepEqual(latestPrompt([{ type: "user_message", text: "yes" }, { type: "tool_call", name: "agent_message", agentMessage: { text: "go" } }]), { message: null, sender: "agent" });
+  assert.equal(latestPrompt([{ type: "assistant_message", text: "a" }]), null);
 });
 test("the developer's message clears the flag end to end; automation doesn't", async () => {
   const { inbox, done } = await service([agent({ id: "a1" })], { tails: { a1: [{ type: "user_message", text: "Thanks, ship it" }] } });
