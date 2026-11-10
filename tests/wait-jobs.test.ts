@@ -146,7 +146,8 @@ test('a TERM to the runner, or to its process group, stops the timed job and sti
       assert.equal(alive(child.pid!), false);
       const status = await f.jobs.status(f.owner, job.jobId);
       assert.equal(status.status, 'failed', `${target}: the receipt is written`);
-      assert.equal(status.timedOut, undefined, 'stopped, not timed out');
+      assert.equal(status.timedOut, undefined, 'stopped, not timed out (even where timeout exits 124 on TERM)');
+      assert.equal(status.exitCode, 143);
     }
     // The job's stdin is /dev/null: a command that reads it ends instead of hanging.
     const reads = await f.jobs.prepare(f.owner, { description: 'reads stdin', command: 'cat; exit 5', timeoutSeconds: 60 });
