@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Platform, Pressable, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { PressScale, Spinner } from "./motion";
@@ -54,10 +54,63 @@ export function bottomInset(compact: boolean, extra = 0): ViewStyle {
 /** The same clearance as a number, for absolutely positioned bars (web can't do env() in `bottom`, so it uses 12). */
 export const bottomGap = (compact: boolean) => !compact || Platform.OS === "web" ? 12 : Platform.OS === "ios" ? 34 : 24;
 
+// ---------- keyboard send ----------
+//
+// Root cause of "I can't press command+enter to send (or enter)": no card or sheet had a key handler at all, and the
+// answer field is multiline, so Enter only added a newline. Every dialog or card with a primary action wraps its body in
+// SubmitScope and marks that Button with `shortcut` (tests/keyboard-send.test.ts fails otherwise).
+
+type DomKey = { key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; repeat: boolean; isComposing?: boolean; target: unknown; preventDefault(): void; stopPropagation(): void };
+type DomNode = { addEventListener(t: "keydown", f: (e: DomKey) => void): void; removeEventListener(t: "keydown", f: (e: DomKey) => void): void };
+const isMac = () => typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test((navigator as { platform?: string }).platform ?? navigator.userAgent ?? "");
+/** "⌘↵" on a Mac, "Ctrl ↵" elsewhere: the hint a primary Button shows on desktop web. */
+export const submitHint = () => isMac() ? "⌘↵" : "Ctrl ↵";
+
+/**
+ * What a keydown inside a SubmitScope does. Cmd+Enter (Ctrl+Enter off a Mac) submits from anywhere, including the
+ * note field. Plain Enter submits only when focus is on nothing that uses Enter itself: not a multiline field, a
+ * button, a link, a radio or a switch. Repeats, IME composition and Shift/Alt never submit.
+ */
+export function submitKey(e: Pick<DomKey, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey" | "repeat" | "isComposing">, target: { tag?: string; role?: string | null; multiline?: boolean }, mac: boolean): boolean {
+  if (e.key !== "Enter" || e.repeat || e.isComposing || e.altKey || e.shiftKey) return false;
+  if (mac ? e.metaKey : e.ctrlKey) return true;
+  if (e.metaKey || e.ctrlKey) return false;
+  const tag = (target.tag ?? "").toUpperCase();
+  if (tag === "TEXTAREA" || target.multiline || tag === "BUTTON" || tag === "A" || tag === "SELECT") return false;
+  return !["button", "link", "radio", "checkbox", "switch", "tab", "menuitem", "option"].includes(target.role ?? "");
+}
+
+/**
+ * Wraps a card or sheet whose primary action the keyboard can trigger. Fires `onSubmit` once per press and never while
+ * `enabled` is false (Send disabled, e.g. Something else with no words), and stops the key so the host's own
+ * Cmd+Enter (the composer) doesn't also act on it. Web only; native keyboards submit through the button.
+ */
+export function SubmitScope({ enabled, onSubmit, children, style, accessibilityRole, accessibilityLabel }: { enabled: boolean; onSubmit: () => void; children: ReactNode; style?: StyleProp<ViewStyle>; accessibilityRole?: "summary"; accessibilityLabel?: string }) {
+  const ref = useRef<View>(null);
+  const latest = useRef({ enabled, onSubmit }); latest.current = { enabled, onSubmit };
+  const busy = useRef(false);
+  useEffect(() => {
+    const node = ref.current as unknown as DomNode | null;
+    if (Platform.OS !== "web" || !node?.addEventListener) return;
+    const onKey = (e: DomKey) => {
+      const t = e.target as { tagName?: string; getAttribute?: (n: string) => string | null } | null;
+      if (!submitKey(e, { tag: t?.tagName, role: t?.getAttribute?.("role") ?? null }, isMac())) return;
+      e.preventDefault(); e.stopPropagation();
+      if (!latest.current.enabled || busy.current) return;
+      busy.current = true; setTimeout(() => { busy.current = false; }, 600);
+      latest.current.onSubmit();
+    };
+    node.addEventListener("keydown", onKey);
+    return () => node.removeEventListener("keydown", onKey);
+  }, []);
+  return <View ref={ref} style={style} accessibilityRole={accessibilityRole} accessibilityLabel={accessibilityLabel}>{children}</View>;
+}
+
 type ButtonKind = "primary" | "secondary" | "ghost" | "danger";
 /** One button vocabulary for the whole plugin: 32px on desktop with a hit slop, 44px on touch layouts. */
-export function Button({ title, onPress, theme, kind = "secondary", disabled = false, loading = false, icon, compact = false, accessibilityLabel, accessibilityHint, grow = false }: {
+export function Button({ title, onPress, theme, kind = "secondary", disabled = false, loading = false, icon, compact = false, accessibilityLabel, accessibilityHint, grow = false, shortcut = false }: {
   title: string; onPress: () => void; theme: Theme; kind?: ButtonKind; disabled?: boolean; loading?: boolean; icon?: string; compact?: boolean; accessibilityLabel?: string; accessibilityHint?: string; grow?: boolean;
+  /** The SubmitScope's action: shows a quiet ⌘↵ on desktop web. */ shortcut?: boolean;
 }) {
   const c = theme.colors;
   const fg = kind === "primary" ? c.accentForeground : kind === "danger" ? c.statusDanger : c.foreground;
@@ -73,6 +126,7 @@ export function Button({ title, onPress, theme, kind = "secondary", disabled = f
     })}>
     {loading ? <Spinner color={fg} size={12} /> : icon ? <Icon name={icon} size={compact ? 16 : 14} color={fg} /> : null}
     <Text numberOfLines={1} style={{ color: fg, fontSize: compact ? 14 : 12, lineHeight: compact ? 19 : 16, fontWeight: "600" }}>{title}</Text>
+    {shortcut && !compact && Platform.OS === "web" && <Text accessibilityElementsHidden importantForAccessibility="no" style={{ color: fg, opacity: 0.6, fontSize: 11, lineHeight: 16, fontWeight: "500", marginLeft: 2 }}>{submitHint()}</Text>}
   </PressScale>;
 }
 

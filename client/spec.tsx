@@ -7,7 +7,7 @@ import { workspaceSpecRpc } from "../shared/contracts";
 import type { Workspace } from "../shared/model";
 import { specLabel, validSpecUrl } from "../shared/spec";
 import { ago } from "../shared/attention";
-import { Button, CardRow, errorText, text, type Theme } from "./kit";
+import { Button, CardRow, errorText, text, type Theme, SubmitScope } from "./kit";
 import { overviewKey, workspaceKey } from "./keys";
 
 const openUrl = (url: string) => { void openExternalUrl(url).catch(() => undefined); };
@@ -78,7 +78,8 @@ export function SpecSheet({ workspace: w, open, theme, compact, onClose }: { wor
   const others = w.artifacts.filter(a => a.url !== w.spec?.url);
   const field = { minHeight: compact ? 44 : 32, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: c.border, color: c.foreground, backgroundColor: c.surface1, fontSize: 13 };
   return <Modal title="Spec link" icon={<Icon name="FileText" size={18} color={c.foregroundMuted} />} open={open} onOpenChange={next => { if (!next) onClose(); }}>
-    <Modal.Content contentContainerStyle={{ padding: compact ? 16 : 20, gap: 14 }}>
+    <Modal.Content contentContainerStyle={{ padding: compact ? 16 : 20 }}>
+      <SubmitScope enabled={!!valid && !run.isPending} onSubmit={() => run.mutate({ action: "set", url, title: title.trim() || null })} style={{ gap: 14 }}>
       <Text style={t.meta}>The page that sums up this workspace, usually the Claude artifact the main agent keeps up to date. It shows as Spec in Follow-up's header.</Text>
       {w.spec?.url && <Text style={t.small}>{specSource(w)} {ago(w.spec.at)}</Text>}
       <View style={{ gap: 6 }}>
@@ -92,7 +93,7 @@ export function SpecSheet({ workspace: w, open, theme, compact, onClose }: { wor
         <TextInput accessibilityLabel="Spec name, optional" placeholder="Invoice retry spec" placeholderTextColor={c.foregroundMuted} value={title} onChangeText={setTitle} maxLength={120} editable={!run.isPending} style={field} />
       </View>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-        <Button theme={theme} compact={compact} kind="primary" icon="Check" title="Save" disabled={!valid || run.isPending} loading={run.isPending && run.variables?.action === "set"} onPress={() => run.mutate({ action: "set", url, title: title.trim() || null })} />
+        <Button shortcut theme={theme} compact={compact} kind="primary" icon="Check" title="Save" disabled={!valid || run.isPending} loading={run.isPending && run.variables?.action === "set"} onPress={() => run.mutate({ action: "set", url, title: title.trim() || null })} />
         {w.spec?.url && <Button theme={theme} compact={compact} kind="danger" title="Remove link" disabled={run.isPending} onPress={() => run.mutate({ action: "remove" })} />}
         {w.spec?.source === "developer" && <Button theme={theme} compact={compact} kind="ghost" icon="Undo2" title="Let the agent set it" accessibilityLabel="Hand the spec link back to the main agent and detection" disabled={run.isPending} onPress={() => run.mutate({ action: "reset" })} />}
       </View>
@@ -108,6 +109,7 @@ export function SpecSheet({ workspace: w, open, theme, compact, onClose }: { wor
           <Button theme={theme} compact={compact} title="Use" accessibilityLabel={`Use ${a.title ?? "this artifact"} as the spec`} disabled={run.isPending} onPress={() => run.mutate({ action: "set", url: a.url, title: a.title })} />
         </View>)}
       </View>}
+      </SubmitScope>
     </Modal.Content>
   </Modal>;
 }

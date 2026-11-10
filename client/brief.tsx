@@ -13,7 +13,7 @@ import { briefActionRpc, browserStatusRpc } from "../shared/contracts";
 import { errorText } from "../shared/errors";
 import { OTHER, OTHER_LABEL, isOther } from "../shared/questions";
 import type { Workspace } from "../shared/model";
-import { text, useNow } from "./kit";
+import { SubmitScope, submitHint, text, useNow } from "./kit";
 import { RichText } from "./rich-text";
 import { PrSheet } from "./pr-sheet";
 import { isLight, withAlpha, type Colors } from "./theme";
@@ -45,7 +45,7 @@ const keyboardFocus = () => { try { return !!(globalThis as { document?: { activ
 const ring = (focused: boolean | undefined, c: Colors) => focused && Platform.OS === "web" && keyboardFocus() ? ({ outlineWidth: 2, outlineStyle: "solid", outlineColor: withAlpha(c.accent, 0.6), outlineOffset: 2 } as object) : {};
 const letters = (d: BriefDecision) => { const l = d.options.map(o => o.letter); return l.length > 1 ? `${l.slice(0, -1).join(", ")} or ${l.at(-1)}` : l[0] ?? ""; };
 
-function Btn({ label, icon, primary, onPress, c, compact, disabled }: { label: string; icon?: string; primary?: boolean; onPress: () => void; c: Colors; compact: boolean; disabled?: boolean }) {
+function Btn({ label, icon, primary, onPress, c, compact, disabled, shortcut = false }: { label: string; icon?: string; primary?: boolean; onPress: () => void; c: Colors; compact: boolean; disabled?: boolean; shortcut?: boolean }) {
   const fg = primary ? c.accentForeground : c.foreground;
   return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress}
     style={({ hovered, pressed, focused }: { hovered?: boolean; pressed: boolean; focused?: boolean }) => ({ ...ring(focused, c), minHeight: compact ? 44 : 32, paddingHorizontal: compact ? 14 : 12, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 6, justifyContent: "center", opacity: disabled ? 0.5 : 1,
@@ -53,6 +53,7 @@ function Btn({ label, icon, primary, onPress, c, compact, disabled }: { label: s
       borderWidth: primary ? 0 : 1, borderColor: c.border, flexGrow: compact ? 1 : 0 })}>
     {icon ? <Icon name={icon} size={compact ? 16 : 14} color={fg} /> : null}
     <Text numberOfLines={1} style={{ color: fg, fontSize: compact ? 14 : 13, lineHeight: compact ? 19 : 17, fontWeight: "600" }}>{label}</Text>
+    {shortcut && !compact && Platform.OS === "web" && <Text accessibilityElementsHidden importantForAccessibility="no" style={{ color: fg, opacity: 0.6, fontSize: 11, lineHeight: 16, fontWeight: "500" }}>{submitHint()}</Text>}
   </Pressable>;
 }
 
@@ -162,7 +163,7 @@ function BriefBody({ b, c, compact, tight, embedded, height, mode, picks, onPick
             value={words[d.id] ?? ""} editable={!busy} onChangeText={t => onWords?.(d.id, t)}
             style={{ minHeight: compact ? 66 : 58, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: words[d.id]?.trim() ? c.border : withAlpha(c.accent, 0.7), color: c.foreground, backgroundColor: c.surface0, fontSize: 14, lineHeight: 20, textAlignVertical: "top" }} />
           {mode === "send" && <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
-            <Btn label={busy === `${d.id}:${OTHER}` ? "Sending…" : "Send answer"} icon="Send" primary disabled={!words[d.id]?.trim() || !!busy} onPress={() => onSendOther?.(d.id)} c={c} compact={compact} />
+            <Btn shortcut label={busy === `${d.id}:${OTHER}` ? "Sending…" : "Send answer"} icon="Send" primary disabled={!words[d.id]?.trim() || !!busy} onPress={() => onSendOther?.(d.id)} c={c} compact={compact} />
             {!words[d.id]?.trim() && <Text style={{ flexShrink: 1, color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>Write your answer, then send it.</Text>}
           </View>}
         </View>}
@@ -203,7 +204,7 @@ function SendBar({ b, picks, busy, error, onSend, c, compact }: { b: Brief; pick
   const bar = sendBar(b, picks);
   return <View style={{ gap: 6 }}>
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
-      <Btn label={busy === "answers" ? "Sending…" : bar.label} icon="Send" primary={bar.ready && !bar.partial} disabled={!bar.ready || !!busy} onPress={onSend} c={c} compact={compact} />
+      <Btn shortcut label={busy === "answers" ? "Sending…" : bar.label} icon="Send" primary={bar.ready && !bar.partial} disabled={!bar.ready || !!busy} onPress={onSend} c={c} compact={compact} />
       {!bar.ready && <Text style={{ flexShrink: 1, color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>Pick your answers, then send them in one message.</Text>}
     </View>
     {bar.skipped && <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{bar.skipped}</Text>}
@@ -340,10 +341,13 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   const sendOne = (key: string) => { const [decisionId, choice] = key.split(":"); void run(key, () => act({ agentId, briefId: b.id, decisionId, choice })); };
   const sendable = ready(picks, words);
   const sendAll = () => void run("answers", async () => { await act({ agentId, briefId: b.id, choices: Object.entries(sendable).map(([decisionId, choice]) => ({ decisionId, choice, ...(isOther(choice) ? { words: words[decisionId].trim() } : {}) })) }); pickStore.clear(b.id); wordStore.clear(b.id); });
+  // The keyboard's Send: every pick on a multi-decision card, or a single card's Something else once it has words.
+  const otherId = !multi ? askedDecisions(b).find(d => isOther(picks[d.id]))?.id : undefined;
+  const keySend = multi ? (sendBar(b, sendable).ready ? () => sendAll() : null) : otherId && words[otherId]?.trim() ? () => sendOther(otherId) : null;
   const sendOther = (decisionId: string) => { const text = words[decisionId]?.trim(); if (text) void run(`${decisionId}:${OTHER}`, async () => { await act({ agentId, briefId: b.id, decisionId, choice: OTHER, words: text }); pickStore.clear(b.id); wordStore.clear(b.id); }); };
   return <View accessibilityRole="summary" accessibilityLabel={`${acts ? "Needs you" : word(b.kind)}: ${b.ask}`}
     style={{ marginVertical: embedded ? 0 : 10, borderRadius: 12, borderWidth: 1, borderColor: border, backgroundColor: c.surface1, overflow: "hidden" }}>
-    <View style={{ paddingHorizontal: pad, paddingTop: compact ? 12 : 14, paddingBottom: 14, gap: tight ? 10 : 12 }}>
+    <SubmitScope enabled={!!keySend && !busy} onSubmit={() => keySend?.()} style={{ paddingHorizontal: pad, paddingTop: compact ? 12 : 14, paddingBottom: 14, gap: tight ? 10 : 12 }}>
       <View style={{ gap: 4 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
           <Icon name={ICON[b.kind]} size={14} color={tone} />
@@ -379,7 +383,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
         <RichText style={{ color: c.foreground, fontSize: 14, lineHeight: 20 }}>{b.also.ask}</RichText>
         {!tight && !!b.also.context && <RichText linkColor={c.foreground} numberOfLines={3} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 19 }}>{b.also.context}</RichText>}
       </View>}
-    </View>
+    </SubmitScope>
     {(!compact || why) && <View style={{ borderTopWidth: 1, borderTopColor: c.border, paddingHorizontal: pad, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 6 }}>
       <Icon name="Info" size={12} color={c.foregroundMuted} />
       <Text style={{ flex: 1, color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{b.sourceLine}</Text>
