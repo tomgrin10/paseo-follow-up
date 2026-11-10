@@ -9,6 +9,7 @@ import {
   type AboutLink, type AboutRecord, type AboutView, type SummaryOutput,
 } from "../shared/about";
 import type { Workspace } from "../shared/model";
+import { messageSender, senderLabel, workItems } from "../shared/message-sender";
 import type { AiJobs } from "./ai-jobs";
 import { isLoaded, type LoadSignals } from "../shared/agent-load";
 
@@ -116,19 +117,21 @@ export type AboutInputs = {
 };
 
 const clip = (s: string, n: number) => { const t = s.replace(/\s+/g, " ").trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
-/** Follow-up's own messages to the agent aren't the developer's words. */
-const PLUGIN_TEXT = /^(Workspace follow-through batch|Follow-through batch|Follow-through recovery|Follow-up answer) /;
 
 export function tailLines(items: readonly unknown[]): { lines: string[]; users: string[]; raw: string[] } {
   const lines: string[] = [], users: string[] = [], raw: string[] = [];
-  for (const item of items) {
+  // Follow-up's hook feedback and the agent's bookkeeping reply to it never reach the Summary model.
+  for (const item of workItems(items)) {
     if (!item || typeof item !== "object") continue;
     const v = item as TimelineItem;
     if (v.type === "reasoning" || v.type === "plugin") continue;
     const text = typeof v.text === "string" ? v.text : "";
     if (v.type === "user_message") {
-      if (!text.trim() || text.trimStart().startsWith("<") || PLUGIN_TEXT.test(text)) continue;
-      users.push(text); raw.push(text); lines.push(`Developer: ${clip(text, LIMITS.itemChars)}`);
+      // Only the developer is "Developer"; Follow-up's own messages and system text aren't the work's story.
+      const s = messageSender(text);
+      if (s.kind === "developer" && s.text) { users.push(s.text); raw.push(s.text); lines.push(`Developer: ${clip(s.text, LIMITS.itemChars)}`); }
+      else if (s.kind === "overseer-forward" && s.text) { users.push(s.text); raw.push(s.text); lines.push(`Developer (via Overseer): ${clip(s.text, LIMITS.itemChars)}`); }
+      else if (s.kind === "agent" && s.text) lines.push(`${senderLabel(s)}: ${clip(s.text, LIMITS.itemChars)}`);
     } else if (v.type === "assistant_message") {
       if (!text.trim()) continue;
       raw.push(text); lines.push(`Agent: ${clip(text, LIMITS.itemChars)}`);

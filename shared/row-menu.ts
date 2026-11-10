@@ -21,7 +21,10 @@ export function laterChoices(now: Date): typeof LATER_CHOICES[number][] {
 
 export const ROW_ACTIONS = {
   later: { tool: "snooze" },
+  bring_back: { tool: "inbox_act", note: "action: \"unsnooze\"." },
   sign_off: { tool: "sign_off" },
+  later_ws: { tool: "snooze_workspace" },
+  bring_back_ws: { tool: "snooze_workspace", note: "bring_back=true." },
   answer: { exempt: "Opens the question card; sending the answer is answer_question." },
   send_repairs: { tool: "send_repairs" },
   retry_batch: { tool: "retry_batch" },
@@ -71,6 +74,11 @@ export type RowMenuInput = {
   needs?: readonly NeedItem[];
   /** Paseo's current branch for the workspace. */
   branch?: string | null;
+  /**
+   * A workspace-only Needs-you row (a hold, repairs to send; no agent flag): it gets the workspace's own Later, and
+   * Bring back now while that's set (`snoozedUntil`, the wake label).
+   */
+  workspaceLater?: { snoozedUntil: string | null } | null;
   /** The surface can pre-fill an Overseer ask (Home's omnibox, while the Overseer is on). */
   canAsk?: boolean;
 };
@@ -79,7 +87,7 @@ const MAX_ANSWERS = 2;
 
 /** The row's menu, in sections: triage, answer, fix, go, copy and tidy. Only what applies to this row is listed. */
 export function rowMenu(input: RowMenuInput): RowMenuSection[] {
-  const { s, flagged, snoozedUntil, w, needs = [], branch, canAsk, now = new Date() } = input;
+  const { s, flagged, snoozedUntil, w, needs = [], branch, canAsk, workspaceLater, now = new Date() } = input;
   const sections: RowMenuSection[] = [];
   const add = (key: string, items: (RowMenuItem | null | false | undefined)[]) => {
     const kept = items.filter((x): x is RowMenuItem => !!x);
@@ -88,9 +96,15 @@ export function rowMenu(input: RowMenuInput): RowMenuSection[] {
 
   // 1. Triage, the moves made many times a day. Later first: it's the one Tom named.
   add("triage", s.agentId && flagged ? [
-    { key: "later", action: "later", label: "Later", icon: "AlarmClock", ...(snoozedUntil ? { hint: `Snoozed until ${snoozedUntil}` } : {}),
+    { key: "later", action: "later", label: "Later", icon: "AlarmClock", ...(snoozedUntil ? { hint: `Later until ${snoozedUntil}` } : {}),
       children: laterChoices(now).map(([id, label]) => ({ key: `later:${id}`, action: "later" as const, label, icon: "Clock", arg: id })) },
+    !!snoozedUntil && { key: "bring_back", action: "bring_back", label: "Bring back now", icon: "BellRing" },
     { key: "sign_off", action: "sign_off", label: "Sign off", icon: "Check" },
+  ] : !flagged && workspaceLater && w ? [
+    // No agent flag, so nothing to sign off: the workspace's needs themselves are put off.
+    { key: "later_ws", action: "later_ws", label: "Later", icon: "AlarmClock", ...(workspaceLater.snoozedUntil ? { hint: `Later until ${workspaceLater.snoozedUntil}` } : {}),
+      children: laterChoices(now).map(([id, label]) => ({ key: `later_ws:${id}`, action: "later_ws" as const, label, icon: "Clock", arg: id })) },
+    !!workspaceLater.snoozedUntil && { key: "bring_back_ws", action: "bring_back_ws", label: "Bring back now", icon: "BellRing" },
   ] : []);
 
   // 2. Answer the open questions, stopped ones first (needsYou's order).

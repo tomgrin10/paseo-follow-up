@@ -5,14 +5,58 @@
 - **One flag per root agent.** It clears only when the developer signs it off or writes to the agent, or when another
   agent signs it off on the developer's behalf (`sign_off`, which counts as a sign-off, not as writing). Opening a
   workspace, reading it, or Paseo's unread dot never clears it, and an agent can't clear its own flag.
+- **Run state is the last turn's, not an outside fact.** `error` and `paused` (`RUN_STATE_REASONS`) describe the
+  agent's last turn, so a newer turn start from anyone (the developer, another agent, the host resuming it) drops
+  them, along with an open card that only reported them (`briefStep` `turn_start`, unless it has open questions). A
+  new failure flags again. Outside facts (permission by request, ci, review, reviewers, pr_closed) and a finish with
+  its ask stay until handled. Rows apply `liveFlag` with the turn start the worker saw (`turnStartedAt`), so a running
+  agent never headlines an Error or Paused from before its current turn (`rowViolations`, invariant
+  `running-is-not-stale`). Status alone isn't enough: Paseo can still read "running" right after a turn fails, and that
+  failure is real news. And `Inbox.start` drops such flags for agents already running
+  after a restart (a 0.16 host resumes them; on 0.15 the agent stopped, and the flag stays).
+- **Background work is running (Paseo 0.16).** An agent that started a shell or task and ended its turn reports
+  `backgroundWork.count > 0`. The inbox's directory reads it as running (`liveStatus` in `shared/agent-load.ts`), so a
+  plain finish doesn't flag (F7's settle sees "running"), its row sits in Running with `backgroundWork`, and
+  `liveFlag` hides an older "finished" until the work ends (shown again after, not erased). Invariant
+  `background-work-is-running` in `rowViolations`. On 0.15 the field is absent and nothing changes.
 - **Pure logic** is in `shared/inbox.ts`: the reducer, `REASONS` in urgency order (permission, error, paused, ci,
   review, reviewers, finished, pr_closed), snoozes (`next-event`, an ISO time, or `pr:<repo#n>`), finish flags, and
-  undo.
+  undo. Undo covers the last sign-off or Later: a Later's undo puts back the snooze it replaced, unless a flag broke
+  that snooze since. The Undo bar and the pill say which one it was ("Signed off", "Later · until 09:00").
 - **Storage and loop.** `server/inbox.ts` stores `inbox.json` (`InboxStore`). `Inbox` turns lifecycle events into
   reducer events (`turnStarted`, `turnEnded`, `permissionRequested`…). `tick()` runs every 15 s from `inboxLoop`
   in `index.server.ts`.
+- **Who wrote a message** (`shared/message-sender.ts`): the one classifier for user-role text. Paseo delivers more
+  than the developer's words as user messages, so nothing may treat "user role" as "the developer" without it.
+  `messageSender(text)` returns:
+  - `agent`: a `<paseo-system kind="agent-message">` or `kind="agent-notification"` envelope (one or several), with
+    the source agent's id and title, the event (`message`, `finished`, `errored`, `permission-required`, `closed`)
+    and the body unescaped and stripped (a notification's `<agent-response>` reply when it has one).
+  - `follow-up`: Follow-up's batch (`Follow-through batch`, legacy `Workspace follow-through batch`), recovery
+    (`Follow-through recovery`), answer (`Follow-up answer`), or its provider hook's feedback (`what: "hook"`,
+    `HOOK_TEXT_PREFIXES`): Claude Code records the Stop-hook bookkeeping nudge as an isMeta
+    `Stop hook feedback:` line (Paseo's timeline drops it, the transcript keeps it), Codex as a
+    `<hook_prompt hook_run_id="stop:…">` user message. `workItems` drops that feedback and everything the agent did in
+    answer to it, up to the next prompt from anyone else; Recent steps, Summary and the Finished reason read only
+    `workItems`. Because Paseo hides Claude's hook line, the Stop hook saves the reply it interrupted
+    (`hook-state/bookkeeping-<agent>.json`) and the Finished reason uses it (`finishedReply`). An answer is usually the developer's click, which only
+    the delivery ledger can tell (`ledgerSender`).
+  - `overseer-forward`: `From the developer via Overseer:` or the legacy `From Tom via Overseer:` (`FORWARD_PREFIXES`),
+    prefix stripped. It counts as the developer only through the ledger (the forwarded-message rule).
+  - `system`: Paseo's bare `<paseo-system>` (schedule fires) and unknown kinds, and the harness's wrappers (a text that
+    opens and closes with a tag, AGENTS.md instructions, command caveats).
+  - `developer`: everything else, including Paseo's `kind="user-message"` quoting envelope.
+
+  Call sites: Recent steps and the Overseer's digest (`tailSteps`, `transcriptSteps`), Summary inputs (`tailLines`,
+  `readTranscript`), discovery's goal (`extractHistory`), linked items (`timelineRefs`), Needs-you clearing (`classify`)
+  and the Overseer's new-workspace gate (`lastDeveloperMessage`). Only `developer` shows as "You"; others show as
+  "From <agent>", "<agent> finished", "Follow-up batch" or "You, via Overseer", never with the raw envelope
+  (`senderViolations` in `shared/status-invariants.ts`, `tests/message-sender.test.ts`). Follow-up's own words never
+  read as work: `followUpTextViolations` (`no-follow-up-text-as-work`, `tests/follow-up-text.test.ts`).
 - **Who started a turn** (`server/inbox-classifier.ts`):
-  - Checks known senders in order: Follow-up's own sends (the delivery ledger, through `onBeforeSend`), Defer's
+  - The text's sender comes first: an agent envelope is `agent` and a Paseo system prompt is `system`, whatever the
+    ledger says.
+  - Then checks known senders in order: Follow-up's own sends (the delivery ledger, through `onBeforeSend`), Defer's
     queue, Smart Session compactions, Session Guard and Paseo schedules.
   - `turnPrompt` reads the prompt from the timeline tail. Paseo 0.15 projects another agent's message as an
     `agent_message` tool call and a schedule or heartbeat as a `heartbeat` tool call; only the developer's own words
@@ -33,9 +77,16 @@
 | --- | --- |
 | `inbox_list` | `{ flagged_only? }` |
 | `sign_off` | `{ agentIds }` |
-| `snooze` | `{ agentIds, until }`: `next-event`, `1h`, `tomorrow` or an ISO time |
+| `snooze` | `{ agentIds, until }`: `next-event`, `1h`, `tonight`, `tomorrow`, `pr:<repo#n>` or an ISO time, stored as a time by `resolveUntil` |
 | `set_finish_flags` | `{ agentIds, value }`: whether finished turns flag them |
-| `inbox_act` | `{ action, agentIds, muteTurn? }`, where `action` is `undo`, `mute_turn`, `unsorted_flag`, `unsorted_sign_off` or `batch_undo` |
+| `snooze_workspace` | `{ workspace, until }` or `{ workspace, bring_back: true }`: Later on a workspace-only Needs-you row (below) |
+| `inbox_act` | `{ action, agentIds, muteTurn? }`, where `action` is `undo` (the last sign-off or Later), `unsnooze` (Bring back now: ends a Later early), `mute_turn`, `unsorted_flag`, `unsorted_sign_off` or `batch_undo` |
+
+- **Workspace Later.** A workspace-only Needs-you row (a hold, repairs to send, a question with no agent flag) has no
+  inbox flag to snooze. Its Later (row menu, `snooze_workspace`, `follow.control` `snooze`) sets `Workspace.snooze`
+  over the needs it covers (`needKey`). `workspaceSnoozed()` in `shared/attention.ts` keeps the row in Later until the time passes or a new need
+  appears; Bring back now clears it. Every count (the header dot, the pill, Home) goes through `activeNeeds()`, so none
+  counts a workspace in Later; the panel's card stays, reading "Later until …". The Undo bar undoes it like an agent's Later. Invariant `snooze-can-wake`.
 
 ## The brief and `needs_you`
 

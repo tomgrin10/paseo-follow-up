@@ -3,11 +3,14 @@ import type { Artifact } from "../shared/spec";
 import { mergeArtifacts } from "./spec";
 import type { State, Workspace } from "../shared/model";
 import { autoSendsByDefault, followsByDefault } from "../shared/settings";
+import { developerWords, messageSender } from "../shared/message-sender";
+import { interruptionHold } from "../shared/status";
+import { backgroundCount, isLive } from "../shared/agent-load";
 
 export type History = { candidates: string[]; goal: string | null; complete: boolean; error: string | null };
 export type DiscoveredWorkspace = { id: string; title: string; mainAgentId: string; /** Set when mainAgentId is a live successor to this closed or gone main agent. */ replacesMainAgentId?: string; /** The replacement is the original main agent taking the workspace back (Workspace.handover). */ handBack?: boolean; /** The recorded main agent reads "closed" right now. */ mainClosed?: boolean; messageAt: string | null; projectId?: string | null; enable_default_tracking?: boolean; history?: History; contributorAgentIds?: string[]; submissions?: Submission[]; artifacts?: Artifact[]; /** In the active scope (see workspaceActive). Undefined means unknown, treated as active. */ active?: boolean };
 
-export const interruptionHold = (kind: "canceled" | "failed") => kind === "canceled" ? "You stopped the main agent. Resume follow-up when ready." : "The main agent's turn failed. Check it before resuming follow-up.";
+export { interruptionHold };
 
 /**
  * Moves the workspace to another main agent: automatic handover, hand-back, or the developer's "Make main agent".
@@ -67,7 +70,7 @@ export function markMainWork(state: State, agentId: string, now = Date.now()): b
 }
 
 /** What a claim needs to know about the current main, from the agent list (metadata; never loads an agent). Null: gone. */
-export type MainAgentInfo = { status: string; activeTurn?: unknown; pendingPermissions?: unknown[] | null; archivedAt?: string | null } | null;
+export type MainAgentInfo = { status: string; activeTurn?: unknown; pendingPermissions?: unknown[] | null; archivedAt?: string | null; backgroundWork?: { count?: unknown } | null } | null;
 
 /**
  * Rules 1-4 of a main-agent claim. Who may claim (the workspace's root agents) is checked by the caller. A claim the
@@ -79,7 +82,7 @@ export function checkMainClaim(w: Workspace, target: string, requested: "develop
   const blockers: string[] = [];
   if (target === w.mainAgentId) return { blockers: ["Already the main agent."], rule: null };
   if (!(w.contributorAgentIds ?? []).includes(target)) return { blockers: ["Not one of this workspace's root agents."], rule: null };
-  if (main && !main.archivedAt && (["running", "initializing"].includes(main.status) || !!main.activeTurn || !!main.pendingPermissions?.length)) blockers.push("The main agent is mid-turn. Try again after its turn ends.");
+  if (main && !main.archivedAt && (isLive(main) || !!main.activeTurn || !!main.pendingPermissions?.length)) blockers.push(backgroundCount(main) > 0 && !main.activeTurn ? "The main agent has background work running. Try again after it finishes." : "The main agent is mid-turn. Try again after its turn ends.");
   if (requested === "developer") return { blockers, rule: blockers.length ? null : "asked by the developer" };
   if (inMainCooldown(w, now)) blockers.push("The main agent changed less than 30 minutes ago. Ask the developer if it should change again.");
   if (w.mainHistory?.some(c => c.from === target && now - Date.parse(c.at) < MAIN_RECLAIM_MS)) blockers.push("This agent lost the main role less than 2 hours ago and can't take it back on its own. Ask the developer.");
@@ -100,9 +103,10 @@ export function extractHistory(items: readonly unknown[], complete = true, error
     const value = item as { type?: string; text?: string };
     if (value.type === "reasoning" || value.type === "plugin") continue;
     const text = typeof value.text === "string" ? value.text : JSON.stringify(item);
-    if (/^(Workspace follow-through batch|Follow-through batch|Follow-through recovery|Follow-up answer) /.test(text)) continue;
-    if (!goal && value.type === "user_message" && value.text && !value.text.trimStart().startsWith("<"))
-      goal = value.text.trim().replace(/\s+/g, " ").slice(0, 350) || null;
+    // Follow-up's own messages carry the PR links it already knows: no evidence. The goal is the developer's words only.
+    if (messageSender(text).kind === "follow-up") continue;
+    const words: string | null = !goal && value.type === "user_message" && value.text ? developerWords(value.text) : null;
+    if (words) goal = words.replace(/\s+/g, " ").slice(0, 350) || null;
     for (const match of text.matchAll(/https:\/\/(?:github\.com|app\.graphite\.(?:com|dev)\/github\/pr)\/([\w.-]+)\/([\w.-]+)\/(?:pull\/)?(\d+)(?=[/?#\s)\]"'.,;:<>}]|$)/g))
       candidates.add(`${match[1]}/${match[2]}#${Number(match[3])}`);
   }

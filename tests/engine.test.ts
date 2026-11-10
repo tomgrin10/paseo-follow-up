@@ -87,6 +87,18 @@ test("only an evidenced Guard interruption clears its generated hold; unproven a
   await f.store.mutate(s => { s.workspaces[0].hold = "You explicitly stopped follow-up"; }); await f.engine.tick(); assert.equal((await f.get()).hold, "You explicitly stopped follow-up");
   await f.store.mutate(s => { s.workspaces[0].hold = interruptionHold("failed"); delete s.workspaces[0].interruption; }); await f.engine.tick(); assert.equal((await f.get()).hold, interruptionHold("failed"));
 });
+test("a newer main-agent turn lifts the failed turn's automatic hold; the same turn, a stop and a developer hold stay", async t => {
+  const failed = () => ({ hold: interruptionHold("failed"), interruption: { turnId: "t1", at: new Date(clock).toISOString(), kind: "failed" as const } });
+  const f = await fixture(t, workspace({ ...failed(), prs: [pr({ snapshot: snapshot({ conflict: true }) })] }));
+  // Right after the failure Paseo can still read "running" with no active turn, or the failed turn's id: the hold stays.
+  for (const mainTurnId of [null, "t1"]) { f.runtime({ busy: true, reason: null, archived: false, mainTurnId }); await f.engine.tick(); assert.equal((await f.get()).hold, interruptionHold("failed"), `turn ${mainTurnId}`); }
+  f.runtime({ busy: true, reason: null, archived: false, mainTurnId: "t2" }); await f.engine.tick();
+  assert.equal((await f.get()).hold, null); assert.equal((await f.get()).interruption, undefined);
+  await f.store.mutate(s => { Object.assign(s.workspaces[0], { hold: interruptionHold("canceled"), interruption: { turnId: "t1", at: new Date(clock).toISOString(), kind: "canceled" } }); });
+  await f.engine.tick(); assert.equal((await f.get()).hold, interruptionHold("canceled"), "the developer's Stop stays until they resume");
+  await f.store.mutate(s => { s.workspaces[0].hold = "You explicitly stopped follow-up"; s.workspaces[0].interruption = failed().interruption; });
+  await f.engine.tick(); assert.equal((await f.get()).hold, "You explicitly stopped follow-up", "a hold the developer set never lifts on its own");
+});
 test("rescinds conditions resolved before delivery", async t => {
   const f = await fixture(t, workspace({ prs: [pr({ snapshot: snapshot({ conflict: true }) })] }));
   await f.engine.tick(); f.advance(61_000); f.observe("example/app#1", snapshot()); await f.engine.tick();

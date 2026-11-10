@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { compareNeeds, displayReason, newEntry, nextAfter, reduce, replay, rowTitle, sectionRows, StaleSignOff, stateOf, type Entry, type InboxEvent, type InboxRow } from "../shared/inbox";
-import { classify, fileSources, newestUserMessage, type Sources } from "../server/inbox-classifier";
+import { wakeLabel, compareNeeds, displayReason, newEntry, nextAfter, reduce, replay, rowTitle, sectionRows, StaleSignOff, stateOf, type Entry, type InboxEvent, type InboxRow } from "../shared/inbox";
+import { classify, fileSources, latestPrompt, type Sources } from "../server/inbox-classifier";
 import { followUpEvents, Inbox, REVISION, type AgentInfo, type Directory, type GuardPause } from "../server/inbox";
 import { pr, snapshot, workspace } from "./fixtures";
 
@@ -110,6 +110,45 @@ test("#14 undo restores the exact record and its age; it expires after 24 h", ()
 test("#15 snooze moves Needs you to Later; a quiet agent can't be snoozed", () => {
   assert.equal(stateOf(snoozed(newEntry("a1"))), "LATER");
   assert.equal(stateOf(reduce(newEntry("a1"), { type: "snooze", until: at(60) }, at(0))), "QUIET");
+});
+test("#15b Later records an undo that puts back the snooze it replaced (bug: Later had no Undo)", () => {
+  const flagged = run([finished]);
+  const later = reduce(flagged, { type: "snooze", until: at(600) }, at(5));
+  assert.equal(later.undo?.kind, "snooze");
+  const back = reduce(later, { type: "undo" }, at(6));
+  assert.equal(stateOf(back), "NEEDS", "undo of a first Later brings the row back to Needs you");
+  assert.deepEqual(back.needs, flagged.needs); assert.equal(back.signedOffAt, null); assert.equal(back.undo, null);
+  const moved = reduce(reduce(later, { type: "snooze", until: at(900) }, at(7)), { type: "undo" }, at(8));
+  assert.equal(moved.snooze?.until, at(600), "undo of a changed time restores the earlier time");
+  const woke = reduce(reduce(later, { type: "crash", detail: "x" }, at(7)), { type: "undo" }, at(8));
+  assert.equal(woke.snooze, null, "a flag that broke the snooze since stays broken: undo changes nothing");
+  const off = reduce(reduce(later, { type: "sign_off" }, at(7)), { type: "undo" }, at(8));
+  assert.equal(stateOf(off), "LATER", "sign-off after Later: undo restores the Later row");
+  assert.equal(reduce(newEntry("a1"), { type: "snooze", until: at(60) }, at(0)).undo, null, "a quiet agent records nothing");
+});
+test("a Later reads back the way it was picked: tomorrow says tomorrow, not the weekday", () => {
+  const now = new Date(2026, 10, 10, 15, 0).getTime();
+  assert.equal(wakeLabel({ until: new Date(2026, 10, 11, 9, 0).toISOString(), at: T0 }, now), "tomorrow 09:00");
+  assert.equal(wakeLabel({ until: new Date(2026, 10, 10, 18, 0).toISOString(), at: T0 }, now), "18:00");
+  assert.match(wakeLabel({ until: new Date(2026, 10, 13, 9, 0).toISOString(), at: T0 }, now), /^\w{3} 09:00$/);
+});
+test("#15c Bring back now ends a Later early, with the flag's original age; a quiet or flagged row is unchanged", () => {
+  const later = snoozed(newEntry("a1"));
+  const back = reduce(later, { type: "unsnooze" }, at(5));
+  assert.equal(stateOf(back), "NEEDS"); assert.equal(back.needs!.since, at(0)); assert.ok(back.seq > later.seq);
+  const flagged = run([finished]);
+  assert.deepEqual(reduce(flagged, { type: "unsnooze" }, at(5)), flagged, "not snoozed: nothing to do");
+  assert.equal(stateOf(reduce(newEntry("a1"), { type: "unsnooze" }, at(5))), "QUIET");
+});
+test("Bring back now through the daemon: inbox_act unsnooze", async () => {
+  const { inbox, done } = await service([agent({ id: "main" })]);
+  await mark(inbox);
+  await inbox.turnEnded({ id: "main", workspaceId: "w1", parentAgentId: null }, { kind: "completed" }, "t1");
+  await inbox.act({ action: "snooze", agentIds: ["main"], until: "next-event" });
+  assert.equal(stateOf((await inbox.store.snapshot()).entries.main), "LATER");
+  await inbox.act({ action: "unsnooze", agentIds: ["main"] });
+  assert.equal(stateOf((await inbox.store.snapshot()).entries.main), "NEEDS");
+  await done();
 });
 test("#16 an expired snooze comes back with its original age; 'next event' wakes on any flag", () => {
   const e = snoozed(newEntry("a1"));
@@ -453,9 +492,10 @@ test("classifier: reads Defer, Smart Session, Session Guard and schedule files",
   assert.equal(await who("defer"), "tom", "a corrupt file fails open");
   await rm(home, { recursive: true, force: true });
 });
-test("classifier: the newest user message is read from the tail", () => {
-  assert.deepEqual(newestUserMessage([{ type: "user_message", text: "old" }, { type: "assistant_message", text: "a" }, { type: "user_message", text: "new", messageId: "m2" }, { type: "assistant_message", text: "b" }]), { text: "new", messageId: "m2", clientMessageId: null });
-  assert.equal(newestUserMessage([{ type: "assistant_message", text: "a" }]), null);
+test("classifier: the latest prompt is read from the tail, past harness text, stopping at another sender", () => {
+  assert.deepEqual(latestPrompt([{ type: "user_message", text: "old" }, { type: "assistant_message", text: "a" }, { type: "user_message", text: "new", messageId: "m2" }, { type: "user_message", text: "<system-reminder>x</system-reminder>" }, { type: "assistant_message", text: "b" }]), { message: { text: "new", messageId: "m2", clientMessageId: null }, sender: { kind: "developer", text: "new" } });
+  assert.deepEqual(latestPrompt([{ type: "user_message", text: "yes" }, { type: "tool_call", name: "agent_message", agentMessage: { text: "go" } }]), { message: null, sender: "agent" });
+  assert.equal(latestPrompt([{ type: "assistant_message", text: "a" }]), null);
 });
 test("the developer's message clears the flag end to end; automation doesn't", async () => {
   const { inbox, done } = await service([agent({ id: "a1" })], { tails: { a1: [{ type: "user_message", text: "Thanks, ship it" }] } });
@@ -471,4 +511,44 @@ test("the developer's message clears the flag end to end; automation doesn't", a
   await auto.inbox.turnStarted(a);
   assert.equal(stateOf((await auto.inbox.store.snapshot()).entries.a1), "NEEDS");
   await done(); await auto.done();
+});
+
+// Stale run state (2026-11-10, Tom): a failed turn's Error flag outlived every later turn of an agent that kept running.
+test("a newer turn from anyone supersedes the last turn's failure or pause; outside facts stay", () => {
+  const failed = run([{ type: "turn_end", outcome: "failed", detail: "The turn failed: Subagent closed during a turn" }, { type: "ci", dedupeKey: "ci:1", detail: "Checks failing" }]);
+  const next = reduce(failed, { type: "message", from: "automation" }, at(5));
+  assert.deepEqual(next.needs?.reasons.map(r => r.reason), ["ci"], "the error is history; CI still needs you");
+  const paused = run([{ type: "turn_end", outcome: "canceled", guard: "attention", detail: "Paused" }]);
+  assert.equal(stateOf(reduce(paused, { type: "message", from: "automation" }, at(5))), "QUIET");
+  const again = reduce(next, { type: "turn_end", outcome: "failed", detail: "Failed again" }, at(6));
+  assert.equal(displayReason(again.needs)?.reason, "error", "a new failure flags again");
+  const perm = run([{ type: "permission", requestId: "r1", detail: "Allow?" }]);
+  assert.equal(stateOf(reduce(perm, { type: "message", from: "automation" }, at(5))), "NEEDS", "a permission is by request, not by turn");
+});
+
+test("a running agent's row never headlines a stale error; on 0.15 a stopped agent keeps it", async () => {
+  const running = await service([agent({ id: "a1", status: "running" })]);
+  await mark(running.inbox);
+  await running.inbox.turnEnded({ id: "a1", workspaceId: "w1" }, { kind: "failed", error: { message: "Subagent closed during a turn" } }, "t1");
+  // Paseo (and the directory) can still read "running" right after the failure: that turn's Error is real news.
+  assert.equal(displayReason((await running.inbox.list()).rows.find(r => r.agentId === "a1")?.needs ?? null)?.reason, "error", "just failed: Error shows");
+  await running.inbox.turnStarted({ id: "a1", workspaceId: "w1" }, "t2");
+  assert.equal((await running.inbox.list()).rows.find(r => r.agentId === "a1")?.needs, null, "a newer turn: no Error headline");
+  const stopped = await service([agent({ id: "a1", status: "idle" })]);
+  await mark(stopped.inbox);
+  await stopped.inbox.turnEnded({ id: "a1", workspaceId: "w1" }, { kind: "failed", error: { message: "Subagent closed during a turn" } }, "t1");
+  assert.equal(displayReason((await stopped.inbox.list()).rows.find(r => r.agentId === "a1")?.needs ?? null)?.reason, "error", "stopped: the failure still needs you");
+  await running.done(); await stopped.done();
+});
+
+test("load repair: an error from before a restart clears for an agent that is running now (0.16 resumes it)", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "inbox-"));
+  const before = await service([agent({ id: "a1", status: "idle" })], { dir });
+  await mark(before.inbox);
+  await before.inbox.turnEnded({ id: "a1", workspaceId: "w1" }, { kind: "failed", error: { message: "Daemon restarted" } }, "t1");
+  assert.equal(stateOf((await before.inbox.store.snapshot()).entries.a1), "NEEDS");
+  const after = await service([agent({ id: "a1", status: "running" })], { dir });
+  await after.inbox.start();
+  assert.equal(stateOf((await after.inbox.store.snapshot()).entries.a1), "QUIET", "persisted, not only hidden");
+  await after.done();
 });

@@ -1,11 +1,14 @@
+import { HOOK_TEXT_PREFIXES } from "./message-sender";
 import type { Workspace } from "./model";
 import { duplicateOpenQuestions } from "./questions";
 import { shouldReopen, type Brief } from "./brief";
+import { flagHeadline } from "./headline";
+import type { InboxRow } from "./inbox";
 import { completionCheck, summary } from "./model";
 import { liveLine, needsYou } from "./attention";
 import { trackedGroup, type HomeModel } from "./home";
 import { freshPriorities, type Priority } from "./priorities";
-import { agentCard, batchView } from "./status";
+import { agentCard, automaticHold, batchView } from "./status";
 import { followUpObligations } from "./follow-up";
 
 /**
@@ -84,6 +87,14 @@ export const INVARIANTS: Invariant[] = [
       return inFlight(w) || w.runtimeBusy || followUpObligations(w).some(o => o.status === "working") ? null : live.text;
     },
   },
+  {
+    id: "snooze-can-wake",
+    why: "A workspace Later always wakes: it stores an ISO time or next-event, never a raw word like \"1h\" (shared/inbox.ts resolveUntil).",
+    check(w) {
+      const u = w.snooze?.until;
+      return u && u !== "next-event" && !Number.isFinite(Date.parse(u)) ? `snooze until "${u}" never wakes` : null;
+    },
+  },
 ];
 
 export function violations(w: Workspace, now: number): { id: string; detail: string }[] {
@@ -117,6 +128,46 @@ export function briefViolations(current: Pick<Brief, "id" | "state" | "outcome" 
 }
 
 /**
+ * Conversation surfaces (Recent steps, the Overseer's digest and handoff, Summary inputs): what Follow-up shows or
+ * feeds a model from a conversation never carries Paseo's raw envelope. Its sender is classified first
+ * (shared/message-sender.ts), so another agent's words read "From <agent>" and never as the developer's.
+ * `no-raw-paseo-envelope`; the attribution half, `only-developer-is-developer`, is driven per call site in
+ * tests/message-sender.test.ts.
+ */
+export function senderViolations(texts: readonly string[]): { id: string; detail: string }[] {
+  return texts.filter(t => typeof t === "string" && t.includes("<paseo-system")).map(t => ({ id: "no-raw-paseo-envelope", detail: t.slice(0, 80) }));
+}
+
+/**
+ * `no-follow-up-text-as-work`: Summary inputs, the Finished reason and Recent steps never carry Follow-up's own words as
+ * the agent's or the developer's work: its hook feedback (the Stop-hook bookkeeping nudge and the other hook texts),
+ * batch headers or recovery prompts. A Recent-steps row labelled as Follow-up's own is exempt (pass only unlabelled text).
+ */
+export function followUpTextViolations(texts: readonly (string | null | undefined)[]): { id: string; detail: string }[] {
+  const own = (t: string) => HOOK_TEXT_PREFIXES.some(p => t.includes(p)) || /(?:^|\n|: )(?:Workspace follow-through batch|Follow-through batch|Follow-through recovery) /.test(t);
+  return texts.filter((t): t is string => typeof t === "string" && own(t)).map(t => ({ id: "no-follow-up-text-as-work", detail: t.slice(0, 80) }));
+}
+
+/**
+ * Inbox rows (agents, not workspaces): a running agent never headlines a failure or pause from before its current
+ * turn started, since a newer turn supersedes them (RUN_STATE_REASONS in shared/inbox.ts). A flag from the turn that
+ * just failed is real news even while Paseo still reads "running". `running-is-not-stale`, 2026-11-10: Home said
+ * "Error · The turn failed" on an agent that had been running for 15 minutes.
+ */
+export function rowViolations(row: Pick<InboxRow, "agentId" | "status" | "needs" | "snooze" | "brief" | "turnStartedAt" | "backgroundWork">, now: number): { id: string; detail: string }[] {
+  const out: { id: string; detail: string }[] = [];
+  // background-work-is-running (Paseo 0.16): a job the agent started and ended its turn on is still its work, so the
+  // row is Running and never "finished" until the work ends.
+  if (row.backgroundWork && (!["running", "initializing"].includes(row.status) || flagHeadline(row, now)?.key === "finished")) out.push({ id: "background-work-is-running", detail: `${row.agentId} has ${row.backgroundWork} background job(s) but reads ${row.status}${flagHeadline(row, now)?.key === "finished" ? " · finished" : ""}` });
+  if (!["running", "initializing"].includes(row.status) || !row.turnStartedAt) return out;
+  const h = flagHeadline(row, now);
+  if (!h || (h.key !== "error" && h.key !== "paused")) return out;
+  const flaggedAt = [...(row.needs?.reasons.filter(r => r.reason === h.key).map(r => r.at) ?? []), ...(row.brief?.kind === h.key && row.brief.at ? [row.brief.at] : [])].sort().at(-1);
+  if (!flaggedAt || flaggedAt < row.turnStartedAt) out.push({ id: "running-is-not-stale", detail: `${row.agentId} is ${row.status} since ${row.turnStartedAt} but headlines ${h.label} from ${flaggedAt ?? "an older card"}` });
+  return out;
+}
+
+/**
  * Home rows (Home's list and the sidebar view render the same model): every row's lines come from its own row. A
  * priority is stored per workspace but its reason was written about one row, so at most one row of a workspace shows
  * it, and when the ranker named the row it read, that row. `row-lines-own-row` (1.4.0-beta.34: a Finished agent
@@ -135,4 +186,16 @@ export function homeViolations(model: Pick<HomeModel, "byKey">, priorities: read
     else if (model.byKey.get(keys[0])!.priority!.reason !== p.reason) out.push({ id: "row-lines-own-row", detail: `${keys[0]} shows another reason than ${workspaceId}'s` });
   }
   return out;
+}
+
+/**
+ * Workspaces against their main agent's current turn: Follow-up's automatic hold after a failed turn is that turn's
+ * run state, so it never outlives a newer turn (holdSuperseded in shared/status.ts). A hold the developer set, and
+ * "You stopped the main agent", are theirs and may. `automatic-hold-is-not-stale`, 2026-11-10: a running agent's
+ * pane said "Follow-up is paused · The main agent's turn failed" under a Working row.
+ */
+export function holdViolations(w: Pick<Workspace, "id" | "hold" | "interruption" | "mainAgentId">, mainTurnId: string | null): { id: string; detail: string }[] {
+  const stop = w.interruption;
+  if (!stop || stop.kind !== "failed" || !automaticHold(w) || !mainTurnId || mainTurnId === stop.turnId || (stop.agentId && stop.agentId !== w.mainAgentId)) return [];
+  return [{ id: "automatic-hold-is-not-stale", detail: `${w.id} holds for failed turn ${stop.turnId ?? "?"} while the main agent is on turn ${mainTurnId}` }];
 }

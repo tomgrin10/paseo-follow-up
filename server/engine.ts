@@ -12,6 +12,7 @@ import { replyRecorded } from "../shared/communication";
 import { DeliveryDeferred, ConversationGone } from "./delivery";
 import { recordSnapshot } from "./deployment-anchor";
 import { pruneUnsent } from "./batch-archive";
+import { holdSuperseded, liftHold } from "../shared/status";
 
 export interface Runtime {
   busy: boolean; reason: string | null; archived: boolean; backgroundBusy?: boolean;
@@ -20,6 +21,8 @@ export interface Runtime {
   mainLoaded?: boolean;
   /** The main agent had a user message within the active window. Undefined means unknown. */
   mainRecent?: boolean;
+  /** The main agent's current turn id (shared/status.ts turnIdOf), when it has one. Undefined means unknown. */
+  mainTurnId?: string | null;
   /** The main agent's provider conversation no longer exists. */
   gone?: string | null;
 }
@@ -127,6 +130,8 @@ export class Engine {
           w.hold = null; w.interruption.guardPauseId = runtime.guardedInterruptionId;
         }
         if (runtime.archived) w.archived = true;
+        // Repair path for a missed turn start (a reload, a restart): the main agent is on a newer turn than the failed one.
+        if (runtime.mainTurnId !== undefined && holdSuperseded(w, { agentId: w.mainAgentId, turnId: runtime.mainTurnId })) liftHold(w);
         for (const p of w.prs) {
           const observed = observations.get(p.key);
           if (!observed) continue;

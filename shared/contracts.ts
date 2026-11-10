@@ -40,7 +40,8 @@ export const registerPrRpc = defineRpc({ name: "follow.register-pr", input: z.st
 export const obligationRpc = defineRpc({ name: "follow.obligation", input: z.strictObject({ agentId: idSchema, id: idSchema.optional(), title: textSchema, status: z.enum(["pending", "waiting", "working", "blocked", "done", "waived"]), afterPrs: z.array(idSchema).optional(), dependencyStage: z.enum(["merged", "deployed"]).optional(), evidence: z.string().max(4000).optional(), enable_follow_up: z.boolean().optional(), communication: agentCommunicationSchema.optional(), trigger: taskTriggerSchema.strict().nullable().optional() }), output: workspaceSchema.extend({ updatedObligationId: idSchema }) });
 export const declareDoneRpc = defineRpc({ name: "follow.done", input: z.strictObject({ agentId: idSchema, summary: textSchema }), output: z.object({ workspace: workspaceSchema, blockers: z.array(z.string()), unconfirmed: z.array(z.string()).default([]), alreadyDone: z.boolean().default(false), next: z.string().default("") }) });
 export const acknowledgeRpc = defineRpc({ name: "follow.acknowledge", input: z.strictObject({ agentId: idSchema, batchId: idSchema, outcome: z.enum(["completed", "blocked"]), result: textSchema }), output: workspaceSchema });
-export const controlRpc = defineRpc({ name: "follow.control", input: z.object({ workspaceId: idSchema, enable_auto_sends: z.boolean().optional(), clearHold: z.boolean().optional(), retryBatchId: idSchema.optional(), /** The developer's "Make main agent": one of the workspace's other root agents. */ mainAgentId: idSchema.optional() }), output: workspaceSchema });
+export const controlRpc = defineRpc({ name: "follow.control", input: z.object({ workspaceId: idSchema, enable_auto_sends: z.boolean().optional(), clearHold: z.boolean().optional(), retryBatchId: idSchema.optional(), /** The developer's "Make main agent": one of the workspace's other root agents. */ mainAgentId: idSchema.optional(),
+  /** Later on a workspace-only Needs-you row; null is Bring back now. */ snooze: z.object({ until: z.string().trim().min(1).max(200) }).nullable().optional() }), output: workspaceSchema });
 export const refreshRpc = defineRpc({ name: "follow.refresh", input: z.object({ workspaceId: idSchema.optional() }), output: z.object({ ok: z.boolean() }) });
 
 export const activateRpc = defineRpc({ name: "follow.activate", input: z.object({ workspaceId: idSchema }), output: workspaceSchema });
@@ -146,7 +147,7 @@ export const inboxListRpc = defineRpc({ name: "follow.inbox-list", input: z.obje
   /** The Overseer's own row (1.4.0-beta.0), kept out of rows and every Needs-you count. */
   overseer: inboxRowSchema.nullable().optional() }) });
 export const inboxActRpc = defineRpc({ name: "follow.inbox-act", input: z.strictObject({
-  action: z.enum(["sign_off", "undo", "snooze", "mute_turn", "set_finish_flags", "unsorted_flag", "unsorted_sign_off", "batch_undo"]),
+  action: z.enum(["sign_off", "undo", "snooze", "unsnooze", "mute_turn", "set_finish_flags", "unsorted_flag", "unsorted_sign_off", "batch_undo"]),
   agentIds: z.array(idSchema).max(500).optional(), seqs: z.record(z.string(), z.number().int()).optional(),
   until: z.string().max(200).optional(), value: z.boolean().optional(), muteTurn: z.boolean().optional(),
 }), output: z.object({ results: z.array(z.object({ agentId: z.string(), ok: z.boolean(), cameBack: z.boolean() })) }) });
