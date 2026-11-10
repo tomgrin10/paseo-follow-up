@@ -90,7 +90,10 @@ Tests: `tests/main-claim.test.ts`, `tests/main-handover.test.ts`.
    - A reload mid-send makes it `uncertain` (`engine.recover()`).
    - Never-sent cancelled batches are pruned to `archive/` (`server/batch-archive.ts`).
 6. **Holds.** A canceled or failed main-agent turn sets `hold`, unless Session Guard owns the interruption
-   (`server/session-guard.ts`, `sessionGuardOwnsInterruption`). A lost provider conversation sets `goneAgent`
+   (`server/session-guard.ts`, `sessionGuardOwnsInterruption`). A failed turn's hold is run state: a newer main-agent
+   turn (a different turn id, from anyone) lifts it, on the turn start and, as a repair, on the next refresh
+   (`holdSuperseded` in `shared/status.ts`, invariant `automatic-hold-is-not-stale`). A stop ("You stopped the main
+   agent") and a hold the developer set stay until they resume. A lost provider conversation sets `goneAgent`
    (`server/delivery.ts`, `conversationGone`), and Follow-up stops sending to that agent.
 7. **Done label.** Paseo's Done label is set only when the label changes.
 
@@ -98,6 +101,11 @@ The repair wording follows the PR workflow ([prs.md](prs.md)): the review-fix co
 retargeting instead of Graphite restacks.
 
 ## Status model
+
+Background work is work (Paseo 0.16): the main agent's `backgroundWork.count > 0` sets `backgroundBusy`
+(`server/daemon.ts` `observe`), so no repair is sent into it ("sends after the agent's background work"), and Done
+waits ("Wait for background agents and jobs to finish"; a declaration is kept and accepted when it clears). Make main
+agent waits too (`checkMainClaim`).
 
 `shared/status.ts` is the one place a user-facing status is computed. `batchView(w, now)` picks the batch that
 describes Follow-up's work right now: its phase (`queued`, `sent`, `stuck`), who it waits on (the agent's

@@ -54,6 +54,10 @@ they need a running `npm run preview` and read `.preview-isolated.json`. Some dr
 - `scripts/demo.mjs`: seeds the preview with demo data for screenshots (`node scripts/demo.mjs`, optionally
   `--freeze-pr-display`).
 
+`scripts/ui-home.mjs` is the Playwright helper screenshot scripts use to reach Follow-up Home: `openHome` goes to
+Home by URL and waits for the Status strip and search field, `homeRow` finds a row in Home's column (never the
+sidebar entry with the same title), and both throw with a screenshot instead of shooting the wrong page.
+
 `scripts/fixture-provider.ts` is the synthetic agent provider these daemons use, and `scripts/harness.mjs` gives them
 their slot and cleanup (below). `scripts/daemon-counter.mjs` and
 `scripts/heap-summary.mjs` are measurement helpers ([resources.md](resources.md)).
