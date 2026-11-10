@@ -27,6 +27,7 @@ Everything lives in `$PASEO_HOME/plugin-data/follow-through/`.
 | `pr-workflow.json` | `server/pr-workflow.ts` | Graphite or GitHub, the default and per repository, merge methods, the review-fix command. |
 | `priorities.json`, `ranker.json` | `server/priorities.ts`, `server/ranker.ts` | Home's Priority sort, the ranker's input hash, run count, source health and plan summary. |
 | `about.json`, `ai-jobs.jsonl` | `server/about.ts`, `server/ai-jobs.ts` | Summary overviews and linked items, and each model call's duration and cost. |
+| `linked.json` | `server/linked.ts` | Linked items per workspace (items, exclusions, Linear candidates), keys Linear rejected, the known Linear teams, the daily check count and migrations ([linked-items.md](linked-items.md)). Read on use, never cached in the worker. |
 | `overseer.json`, `overseer-digest.json`, `overseer-home/` | `server/overseer.ts` | The Overseer's agent id, the digest its hook injects, and its workspace folder. |
 | `onboarding.json` | `server/onboarding.ts` | Setup progress: fresh or existing install, the current step, offer state. |
 | `versions.json` | `server/release-notes.ts` | The installed version, the previous one, and the host-wide What's new record. |
