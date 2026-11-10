@@ -8,8 +8,8 @@ import {
 
 const store = (): KeyValue & { data: Map<string, string> } => { const data = new Map<string, string>(); return { data, get: k => data.get(k) ?? null, set: (k, v) => { data.set(k, v); } }; };
 
-test("categories: four, in order; every setting the old page had is still rendered (moved, not dropped)", async () => {
-  assert.deepEqual(SETTINGS_CATEGORIES.map(c => c.id), ["following", "reviewers", "agents", "display"]);
+test("categories: five, General first, in order; every setting the old page had is still rendered (moved, not dropped)", async () => {
+  assert.deepEqual(SETTINGS_CATEGORIES.map(c => c.id), ["general", "following", "reviewers", "agents", "display"]);
   const source = (await Promise.all(["client/settings.tsx", "client/display.tsx", "client/reviewers.tsx", "client/agents.tsx"].map(f => readFile(f, "utf8")))).join("\n");
   for (const label of ["Follow every workspace", "Send repairs automatically", "Rest workspaces after", "Follow this workspace", "While a question is open", "Sidebar item", "Workspace header button", "Composer pill",
     "Needs-you inbox", "Flag merged and closed PRs", "Ask agents to state what they need", "Default for all repos", "Add reviewer", "Trust bypass agents"]) assert.ok(source.includes(label), label);
@@ -23,9 +23,10 @@ test("categories: four, in order; every setting the old page had is still render
 
 test("category and open state persist per device; unknown or missing values fall back", () => {
   const s = store();
-  assert.equal(readCategory(s), "following"); assert.equal(hasSavedCategory(s), false);
+  assert.equal(readCategory(s), "general", "a device that never picked opens on General"); assert.equal(hasSavedCategory(s), false);
   writeCategory("reviewers", s); assert.equal(readCategory(s), "reviewers"); assert.equal(hasSavedCategory(s), true);
-  s.set("follow-up.settings.category", "nonsense"); assert.equal(readCategory(s), "following");
+  s.set("follow-up.settings.category", "nonsense"); assert.equal(readCategory(s), "general");
+  s.set("follow-up.settings.category", "following"); assert.equal(readCategory(s), "following", "an existing device keeps its stored category");
   assert.equal(readOpen("reviewers", false, s), false); assert.equal(readOpen("reviewers", true, s), true, "no saved choice: the section's default");
   writeOpen("reviewers", true, s); assert.equal(readOpen("reviewers", false, s), true, "the developer's choice wins over the default");
   writeOpen("reviewers", false, s); assert.equal(readOpen("reviewers", true, s), false);

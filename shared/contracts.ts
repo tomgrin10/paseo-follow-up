@@ -81,7 +81,7 @@ export const setFollowSettingsRpc = defineRpc({ name: "follow.set-follow-setting
 /** External priorities for Home's Priority sort (written by the set_priorities agent tool). */
 export const prioritiesRpc = defineRpc({ name: "follow.priorities", input: z.object({}), output: z.object({ items: z.array(prioritySchema) }) });
 /** Provider session limits from the Smart Session plugin, for Home's meters. Hidden when it isn't installed. */
-/** "What's this about?": collapsed reads the cache; open may start an overview; refresh always does. */
+/** Summary: collapsed reads the cache; open may start an overview; refresh always does. */
 export const workspaceAboutRpc = defineRpc({ name: "follow.workspace-about", input: z.object({ workspaceId: idSchema, open: z.boolean().optional(), refresh: z.boolean().optional() }), output: aboutViewSchema });
 export const usageRpc = defineRpc({ name: "follow.usage", input: z.object({}), output: usageSchema });
 // Trust bypass agents: how many permission prompts were approved today, and the newest few (tool and a short summary).

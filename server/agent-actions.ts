@@ -74,8 +74,8 @@ export type AgentActionDeps = {
   };
   reviewersFor?: (repo: string) => ReviewerEntry[];
   priorities?: { write(batch: Priority[], replace: boolean): Promise<Priority[]> };
-  /** "What's this about?": the overview and links for one workspace, written now if there is none yet. */
-  about?: { view(workspaceId: string, opts: { open?: boolean; wait?: boolean }): Promise<AboutView> };
+  /** Summary: one sentence on what a workspace is for, written now if there is none yet (or refresh). */
+  about?: { view(workspaceId: string, opts: { open?: boolean; wait?: boolean; refresh?: boolean }): Promise<AboutView> };
   /** Settings → Agents, read-only: which agent each special role uses. No write tool. */
   agentSettings?: { all(): Promise<Record<string, RoleConfig>> };
   /** Settings → Agents → Wait for background jobs, for agent_settings (set_wait_for_jobs is an RPC tool). */
@@ -108,7 +108,7 @@ export const TOOL_INPUT = {
   retry_batch: z.strictObject({ workspace: id, batchId: id }),
   track: z.strictObject({ workspace: id }),
   inbox_list: z.strictObject({ flagged_only: z.boolean().optional() }),
-  workspace_about: z.strictObject({ workspaceId: id }),
+  workspace_about: z.strictObject({ workspaceId: id, refresh: z.boolean().optional() }),
   agent_settings: z.strictObject({}),
   sign_off: z.strictObject({ agentIds: agentIds.optional(), ...confirm }),
   snooze: z.strictObject({ agentIds: agentIds.optional(), until: z.string().trim().min(1).max(200).optional(), ...confirm }),
@@ -159,7 +159,7 @@ export class AgentActions {
     switch (tool) {
       case "list_prs": return this.listPrs(args);
       case "inbox_list": return this.inboxList(caller, args);
-      case "workspace_about": return this.workspaceAbout(args as { workspaceId: string });
+      case "workspace_about": return this.workspaceAbout(args as { workspaceId: string; refresh?: boolean });
       case "agent_settings": {
         if (!this.d.agentSettings) throw new Error("agent_settings isn't available in this Follow-up.");
         const roles = await this.d.agentSettings.all();
@@ -276,15 +276,16 @@ export class AgentActions {
     return { dryRun: true, planId, changes, next: planId ? `Only when the developer asked for this: call set_display with confirm=true and planId=${planId}.` : "Nothing changes." };
   }
 
-  /** Read-only: the cached overview and links, or a fresh one when none is cached (waits for it). */
-  private async workspaceAbout(args: { workspaceId: string }) {
+  /** The cached Summary sentence and extracted links, or a fresh sentence when none is cached or refresh is set (waits for it). */
+  private async workspaceAbout(args: { workspaceId: string; refresh?: boolean }) {
     if (!this.d.about) throw new Error("workspace_about isn't available in this Follow-up.");
     const state = await this.d.store.snapshot();
     const w = this.tracked(state).find(w => w.id === args.workspaceId || w.title === args.workspaceId);
     if (!w) throw new Error(`No tracked workspace matches ${args.workspaceId}.`);
-    const view = await this.d.about.view(w.id, { open: true, wait: true });
+    // refresh: the panel's Rewrite. Writes a new sentence (one small model call) even when one is cached.
+    const view = await this.d.about.view(w.id, { open: true, wait: true, refresh: !!args.refresh });
     const r = view.record;
-    return { workspaceId: w.id, title: w.title, status: view.status, gist: r?.gist ?? null, overview: r?.overview ?? null, generatedAt: r?.generatedAt ?? null,
+    return { workspaceId: w.id, title: w.title, status: view.status, summary: r?.gist ?? null, gist: r?.gist ?? null, generatedAt: r?.generatedAt ?? null,
       links: (r?.links ?? view.links).map(l => ({ kind: l.kind, key: l.key, url: l.url, title: l.title, state: l.state, priority: l.priority, due: l.due, who: l.who })),
       failedSources: r?.failed ?? [], error: view.error };
   }

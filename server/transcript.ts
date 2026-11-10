@@ -144,7 +144,7 @@ export async function transcriptTail(paseoHome: string, agentId: string, n: numb
   } catch { return null; }
 }
 
-// "What's this about?": the first developer messages and the latest items, as timeline-like items. Uses the same
+// Summary: the first developer messages and the latest items, as timeline-like items. Uses the same
 // record and path rules as transcriptTail; reads only the file's first HEAD_BYTES and last TAIL_BYTES.
 const HEAD_BYTES = 256 * 1024;
 export type TranscriptItem = { type: "user_message" | "assistant_message" | "tool_call"; text?: string; name?: string; detail?: { output: string } };

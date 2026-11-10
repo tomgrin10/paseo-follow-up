@@ -69,7 +69,7 @@ export function Setup({ theme, compact, view, deps }: { theme: Theme; compact: b
     const n = follow.data?.workspaces.filter(w => w.enable_tracking && !w.optedOut).length ?? 0;
     toast.show(n ? `Set up. Following ${n} workspace${n === 1 ? "" : "s"}.` : "Set up. Follow-up starts with your next workspace.", { variant: "success" });
   } });
-  const skip = () => move.mutate({ action: "skip" }, { onSuccess: () => toast.show("Setup skipped. Set it up any time from Follow-up settings, Set up Follow-up again.") });
+  const skip = () => move.mutate({ action: "skip" }, { onSuccess: () => toast.show("Setup skipped. Set it up any time from Follow-up settings, General.") });
   const last = index === ONBOARDING_STEPS.length - 1;
   const keyboard = useKeyboardUp(compact);
   const failing = step === "checks" && checks.data ? checksSummary(checks.data.checks).state === "fail" : false;
@@ -381,7 +381,7 @@ function HelpersStep({ theme, compact, deps, checks }: { theme: Theme; compact: 
       <SwitchRow theme={theme} compact={compact} label="AI priority" value={values?.enable_ranker ?? null} onChange={v => save({ enable_ranker: v })}
         hint={`Sorts Home by what matters most, from your Linear issues, Slack mentions and review requests. About once an hour on workdays.${on(role("ranker"))}`} />
       <View style={{ flexDirection: compact ? "column" : "row", alignItems: compact ? "flex-start" : "center", gap: 8, paddingHorizontal: compact ? 14 : 16, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border }}>
-        <Text style={[t.meta, { flex: compact ? undefined : 1 }]}>{`What's this about? summaries use ${role("about") ?? "a small model"}.${claudeDown ? " Claude isn't available here; switch the helpers to Codex in Settings." : ""}`}</Text>
+        <Text style={[t.meta, { flex: compact ? undefined : 1 }]}>{`Summaries use ${role("about") ?? "a small model"}.${claudeDown ? " Claude isn't available here; switch the helpers to Codex in Settings." : ""}`}</Text>
         {compact
           ? <Pressable accessibilityRole="link" accessibilityLabel="Change models in Follow-up settings, Agents" onPress={() => deps.openSettings("agents")} style={{ minHeight: 44, justifyContent: "center" }}>
               <Text style={[t.label, { textDecorationLine: "underline" }]}>Change models</Text>
@@ -395,7 +395,7 @@ function HelpersStep({ theme, compact, deps, checks }: { theme: Theme; compact: 
       <TourRow theme={theme} thumb={<ThumbPanel c={c} />} title="Workspace panel"
         line={compact ? "Tap Follow-up at the top of any workspace: its PRs, tasks and what the agent is doing." : "The Follow-up button in a workspace's header docks its PRs, tasks and what the agent is doing beside the chat."} />
       <TourRow theme={theme} thumb={<ThumbNeeds c={c} />} title="Needs you" line="The decisions only you can make, one button each. A pill above the chat shows the same." />
-      <TourRow theme={theme} thumb={<ThumbAbout c={c} />} title="What's this about?" line="At the top of a workspace: a short summary of what it's for and where it stands, with its links." />
+      <TourRow theme={theme} thumb={<ThumbAbout c={c} />} title="Summary" line="One sentence under a workspace's title saying what it's for." />
     </View>
   </View>;
 }
@@ -412,7 +412,8 @@ const bar = (c: Colors, w: `${number}%`, color = c.border, h = 3) => <View style
 const ThumbHome = ({ c }: { c: Colors }) => <>{bar(c, "60%", c.statusWarning)}{bar(c, "90%")}{bar(c, "75%")}{bar(c, "85%")}</>;
 const ThumbPanel = ({ c }: { c: Colors }) => <>{bar(c, "55%", c.foregroundMuted)}<View style={{ flexDirection: "row", gap: 2 }}>{bar(c, "30%", c.foregroundMuted, 4)}{bar(c, "30%", c.border, 4)}{bar(c, "30%", c.border, 4)}</View>{bar(c, "80%")}</>;
 const ThumbNeeds = ({ c }: { c: Colors }) => <View style={{ flex: 1, borderRadius: 4, borderWidth: 1, borderColor: c.statusWarning, padding: 4, gap: 3 }}>{bar(c, "70%")}<View style={{ width: 16, height: 5, borderRadius: 2, backgroundColor: c.accent }} /></View>;
-const ThumbAbout = ({ c }: { c: Colors }) => <><View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}><Icon name="ChevronDown" size={8} color={c.foregroundMuted} />{bar(c, "60%", c.foregroundMuted)}</View>{bar(c, "90%")}{bar(c, "80%")}</>;
+// The Summary: the title, then one quiet line under it.
+const ThumbAbout = ({ c }: { c: Colors }) => <>{bar(c, "60%", c.foregroundMuted, 4)}{bar(c, "90%")}{bar(c, "70%")}</>;
 
 // ---------- existing installs ----------
 

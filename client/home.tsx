@@ -11,7 +11,7 @@ import { age, snoozeUntil, type InboxRow } from "../shared/inbox";
 import { errorText } from "../shared/errors";
 import { isLoaded, type LoadSignals } from "../shared/agent-load";
 import { BriefCard, type BriefDeps } from "./brief";
-import { AboutSection } from "./about";
+import { SummaryLine } from "./about";
 import { bottomGap, bottomInset, Button, IconButton, space, text, type Theme } from "./kit";
 import { NeedsYouList } from "./needs-you";
 import { PrSheet } from "./pr-sheet";
@@ -291,6 +291,8 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
   // line (state, age, project, PRs as text) that ellipsizes instead of wrapping, with Open full as an icon at its end.
   const header = compact ? <View style={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 6, gap: 2, borderBottomWidth: 1, borderBottomColor: c.border }}>
     <Text accessibilityRole="header" numberOfLines={3} style={t.title}>{s.title}</Text>
+    {/* The Summary: what this workspace is for, right under its name. */}
+    {s.workspaceId && w && <View style={{ marginTop: 4 }}><SummaryLine key={s.workspaceId} workspace={w} theme={theme} compact /></View>}
     <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 44 }}>
       <Icon name={s.icon} size={14} color={color} />
       <Text numberOfLines={1} style={[t.meta, { flex: 1, minWidth: 0 }]}>
@@ -307,6 +309,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
       <Text accessibilityRole="header" numberOfLines={2} style={[t.title, { flex: 1, fontSize: 16 }]}>{s.title}{s.agent ? <Text style={{ color: c.foregroundMuted, fontWeight: "400" }}>{` › ${s.agent}`}</Text> : null}</Text>
       <Button theme={theme} compact={compact} icon="PanelRightOpen" title="Open full" accessibilityHint="Opens the agent's chat and docks this list beside it" onPress={() => openFull(s)} />
     </View>
+    {s.workspaceId && w && <SummaryLine key={s.workspaceId} workspace={w} theme={theme} compact={false} />}
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
       {!!s.word && <Text style={{ color, fontSize: 12, fontWeight: "600" }}>{s.word}</Text>}
       <Text style={t.meta}>{[s.at ? age(s.at, Date.now()) === "now" ? "just now" : `${age(s.at, Date.now())} ago` : "", s.project].filter(Boolean).join(" · ")}</Text>
@@ -375,8 +378,6 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, onB
   return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
     {header}
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: compact ? 16 : 20, gap: 16, paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
-      {/* What's this about? comes first on every size, directly under the header and above the ask. */}
-      {s.workspaceId && w && <AboutSection key={s.workspaceId} workspaceId={s.workspaceId} theme={theme} compact={compact} flush />}
       {agent.permissions.map(p => <PermissionBlock key={p.id} p={p} theme={theme} compact={compact} busy={busy === `perm:${p.id}`} primary={plan.primary === "allow"} onRespond={r => void respond(p, r)} />)}
       {showBrief ? <BriefCard {...({ embedded: true, item: { data: b }, theme, layout: { compact }, agentId: s.agentId, deps: deps.briefDeps } as unknown as Parameters<typeof BriefCard>[0])} />
         : echoed || (b && compact && b.source === "none" && asks.length) ? null
