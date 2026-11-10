@@ -7,7 +7,7 @@ import { QUESTION_MODES, QUESTION_MODE_RULES, questionPreferences, type Question
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { followSettingsRpc, projectSettingsRpc, setFollowSettingsRpc, setProjectTrackingRpc } from "../shared/contracts";
 import { Switch, bottomInset, errorText, space, text, type Theme } from "./kit";
-import { DisplaySections, PermissionsSection, PreferenceSwitch } from "./display";
+import { DisplaySections, PermissionsSection } from "./display";
 import { ReviewerSettings, reviewerSettingsKey } from "./reviewers";
 import { AgentSettings, WaitSettings, agentSettingsKey } from "./agents";
 import { ShippingSettings } from "./shipping";
@@ -169,7 +169,7 @@ function AgentsCategory({ theme, compact }: { theme: Theme; compact: boolean }) 
   return <>
     <QuestionSettings theme={theme} />
     <WaitSettings theme={theme} />
-    <AgentSettings theme={theme} compact={compact} toggles={{ overseer: <PreferenceSwitch field="enable_overseer" theme={theme} />, ranker: <PreferenceSwitch field="enable_ranker" theme={theme} /> }} />
+    <AgentSettings theme={theme} compact={compact} />
   </>;
 }
 
