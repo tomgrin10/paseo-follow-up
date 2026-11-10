@@ -21,6 +21,7 @@ import {
   writeCategory, type SettingsCategory, type WorkspaceSetting,
 } from "../shared/settings-nav";
 import type { AgentSettingsView } from "../shared/agent-settings";
+import { jobRow, jobsHeader } from "../shared/job-rows";
 import type { ReviewerConfig } from "../shared/reviewers";
 
 const settingsKey = ["follow-through", "project-settings"];
@@ -186,6 +187,17 @@ function GeneralCategory({ theme, compact, setup }: { theme: Theme; compact: boo
   </>;
 }
 
+/** Agents' line says what the rows' header says (recommended or not); without the catalog, how many differ from defaults. */
+function agentsSummary(agents: AgentSettingsView, changed: number): string {
+  if (agents.catalog?.providers.length && !agents.catalog.error) {
+    const header = jobsHeader(agents.roles.map(r => jobRow(r, agents.catalog)), agents.catalog, false);
+    if (header.action === "check") return "No provider is ready";
+    const differ = agents.roles.filter(r => { const row = jobRow(r, agents.catalog); return row.rec && !row.recommended; }).length;
+    return differ ? `${differ} of ${agents.roles.length} differ from the recommendation` : "All on the recommended models";
+  }
+  return changed ? `${changed} of ${agents.roles.length} changed from the defaults` : "Every agent on its default";
+}
+
 /** Each category's one line, from data already loaded (never fetched for it). */
 function useSummaries(): Partial<Record<SettingsCategory, string | null>> {
   // skipToken: subscribe to what's cached (re-rendering when it arrives) without ever fetching for the summary.
@@ -199,7 +211,7 @@ function useSummaries(): Partial<Record<SettingsCategory, string | null>> {
     general: updates ? generalSummary(updates) : null,
     following: follow ? followingSummary(follow) : null,
     reviewers: reviewers ? reviewersSummary(reviewers.config) : null,
-    agents: agents ? (changed ? `${changed} of ${agents.roles.length} changed from the defaults` : "Every agent on its default") : null,
+    agents: agents ? agentsSummary(agents, changed) : null,
   };
 }
 

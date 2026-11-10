@@ -19,9 +19,9 @@ export const ROLE_NEED: Record<AgentRole, string> = {
   recovery: "Rebuilds a workspace, so the same setup as its main agent.",
 };
 const HINT: Record<Tier, string> = {
-  small: "Pick a small, fast model if you have one.",
-  mid: "Pick a mid-size model if you have one.",
-  strong: "Pick your strongest model if you have one.",
+  small: "None of its models says which is small, so this is its default.",
+  mid: "None of its models says which is mid-size, so this is its default.",
+  strong: "None of its models says which is strongest, so this is its default.",
 };
 
 // Name fallbacks, as whole words so "gemini" isn't "mini". Order matters only when a name has both.

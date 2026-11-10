@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { resolveRole, roleSummary, type AgentRole, type CatalogProvider, type RoleConfig, type SavedRole } from "../shared/agent-settings";
-import { SETTINGS_ORDER, SETUP_ORDER, jobRow, jobsHeader, preselect, recommendedEntry } from "../shared/job-rows";
+import { SETTINGS_ORDER, SETUP_ORDER, isReset, jobRow, jobsHeader, preselect, recommendedEntry, resetEntry } from "../shared/job-rows";
 
 // Setup's Helper agents step and Settings → Agents show the same job rows (Tom, 2026-11-10: "can't the settings page
 // look more like the onboarding?"). One component renders both; these tests fail if either surface grows its own.
@@ -82,5 +82,30 @@ test("header: loading, a catalog error and no provider each say so; a fallback p
   const pi = catalog(p("pi", [{ id: "pi-1", isDefault: true }]));
   const overseer = view("overseer", { provider: "pi" });
   const row = jobRow(overseer, pi);
-  assert.equal(row.recommended, true); assert.equal(row.hint, "Pick your strongest model if you have one.");
+  assert.equal(row.recommended, true); assert.equal(row.hint, "None of its models says which is strongest, so this is its default.");
+});
+
+test("no label says Opus for a provider other than Claude; a default model is named when the catalog knows it", () => {
+  const pi = catalog(p("pi", [{ id: "pi-1", label: "Pi One", isDefault: true }]));
+  for (const role of SETUP_ORDER) {
+    const row = jobRow(view(role, { provider: "pi", model: null }), pi);
+    assert.doesNotMatch(row.pick, /Opus/, `${role} pick`);
+    assert.doesNotMatch(row.recPick ?? "", /Opus/, `${role} recommendation`);
+  }
+  const fresh = jobRow(view("overseer"), catalog(p("claude", [], false), pi.providers[0]));
+  assert.equal(fresh.recPick, "pi · Default (Pi One)");
+  assert.equal(jobRow(view("overseer"), catalog(CLAUDE)).pick, "Claude · Newest Opus");
+});
+
+test("Reset to defaults never leaves a job that won't run: without Claude it resets to the recommendation, limits back to default", () => {
+  assert.deepEqual(resetEntry("about", catalog(CLAUDE, CODEX)), { entry: null, label: null }, "Claude here: the declared defaults");
+  const noClaude = catalog(p("claude", [], false), CODEX);
+  const about = resetEntry("about", noClaude);
+  assert.deepEqual(about.entry, { provider: "codex", model: "gpt-6-luna-mini", thinking: "minimal" });
+  assert.equal(about.label, "Codex · GPT-6-Luna-Mini · Minimal");
+  assert.equal(resetEntry("overseer", noClaude).entry?.mode, "full-access", "the Overseer gets Codex's no-prompt mode");
+  assert.deepEqual(resetEntry("recovery", noClaude), { entry: null, label: null }, "recovery copies the main agent, so its default always runs");
+  assert.equal(isReset(view("about", about.entry!), noClaude), true, "after the reset there's nothing left to reset");
+  assert.equal(isReset(view("about", { ...about.entry!, dailyCap: 20 }), noClaude), false, "a changed limit still resets");
+  assert.equal(isReset(view("about"), catalog(CLAUDE)), true);
 });

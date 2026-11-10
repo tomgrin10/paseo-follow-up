@@ -193,7 +193,7 @@ export function providerChecks(catalog: { providers: ProviderInfo[]; error: stri
     const setup = PROVIDER_FIX[id] ?? { text: `Set up ${label} on the computer running Paseo, then check again.`, command: null };
     const other = ready.find(x => x !== id);
     rows.push({ id: `provider-${id}`, label, state: "fail", detail: `Not available${why}. ${joinNames(users)} won't run until it is.`,
-      fix: other ? fix(`${setup.text} Or switch those helpers to ${nameOf(catalog, other)} in Settings, Agents.`, setup.command, "agents") : fix(setup.text, setup.command) });
+      fix: other ? fix(`${setup.text} Or switch those helpers to ${nameOf(catalog, other)} in Settings → Agents.`, setup.command, "agents") : fix(setup.text, setup.command) });
   }
   if (!ready.length) rows.unshift({ id: "providers", label: "Helper agents", state: "fail", detail: "No provider in Paseo is ready, so the Overseer, Summaries and AI priority can't run. Following PRs and Needs you still work.", fix: null });
   return rows;

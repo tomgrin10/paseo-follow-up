@@ -138,7 +138,7 @@ export function modelName(model: string | null, label?: string | null): string {
 /** "Claude · Haiku", "Same as main agent", "Codex · GPT-6-Luna · low". */
 export function roleSummary(c: RoleConfig, labels?: { provider?: string | null; model?: string | null; thinking?: string | null }): string {
   if (c.role === "recovery" && c.same) return "Same as main agent";
-  const parts = [providerName(c.provider, labels?.provider), c.model || c.role !== "overseer" ? modelName(c.model, labels?.model) : "Newest Opus"];
+  const parts = [providerName(c.provider, labels?.provider), c.model || c.role !== "overseer" || c.provider !== "claude" ? modelName(c.model, labels?.model) : "Newest Opus"];
   if (c.thinking) parts.push(labels?.thinking ?? c.thinking);
   return parts.join(" · ");
 }
