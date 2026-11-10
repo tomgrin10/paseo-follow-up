@@ -129,3 +129,16 @@ test("a declaration refused for the agent's own work is not kept", async t => {
   assert.match(refused.next, /Yours to fix/);
   assert.equal((await f.get()).declaration, null);
 });
+
+test("declaring Done answers a sent Done check, so it never turns into 'the repairs didn't finish'", async t => {
+  const w = shipped();
+  w.batches = [{ id: "check", messageId: "m", attempts: 1, result: "", recipientAgentId: null, contextPath: null, activityAt: null, acknowledgmentError: null, recoveryHandoffs: [],
+    tasks: [{ key: "completion:workspace", kind: "completion", target: "workspace", title: "Verify the workspace is finished and declare Done", fingerprint: "f" }],
+    state: "sent", createdAt: new Date(clock).toISOString(), sentAt: new Date(clock).toISOString(), settledAt: null }];
+  const f = await fixture(t, w);
+  await f.engine.declareDone("main-agent", "Shipped");
+  f.advance(5 * 60_000); await f.engine.tick();
+  const after = await f.get();
+  assert.equal(after.batches[0].state, "completed"); assert.ok(after.completion);
+  assert.equal(summary(after, f.now()).status, "done");
+});

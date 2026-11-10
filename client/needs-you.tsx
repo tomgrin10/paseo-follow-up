@@ -1,3 +1,4 @@
+import { FINISH_ASK } from "../shared/status";
 import { Text, View } from "react-native";
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
 import { useRpc } from "@getpaseo/plugin/client";
@@ -23,7 +24,7 @@ function glyph(item: NeedItem, colors: Colors): { name: string; color: string } 
     case "decision": return { name: "MessageCircleQuestion", color: colors.statusWarning };
     case "question": return { name: item.state === "stopped" ? "CirclePause" : "MessageCircleQuestion", color: colors.statusWarning };
     case "answer": return { name: "TriangleAlert", color: colors.statusWarning };
-    case "send": return { name: "Send", color: colors.statusWarning };
+    case "send": return { name: item.finish ? "ListChecks" : "Send", color: colors.statusWarning };
     case "merge": return { name: "GitMerge", color: colors.statusSuccess };
     case "reviewers": return { name: "UserPlus", color: colors.foregroundMuted };
   }
@@ -74,7 +75,7 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
       case "decision": return openMain && <Button theme={theme} compact={compact} icon="MessageSquare" title="Answer in chat" onPress={openMain} />;
       case "question": return actions.openQuestion && <Button theme={theme} compact={compact} icon="MessageCircleReply" title="Answer" accessibilityLabel={`Answer ${item.title}`} onPress={() => actions.openQuestion!(item.questionId)} />;
       case "answer": return actions.openQuestion && <Button theme={theme} compact={compact} icon="Eye" title="Check" accessibilityLabel={`Check the ${item.questionId} answer`} onPress={() => actions.openQuestion!(item.questionId)} />;
-      case "send": return <Button theme={theme} compact={compact} kind="primary" icon="Send" title="Send to main agent" accessibilityLabel={`Send ${item.tasks.length} repairs to the main agent`} loading={deliver.isPending} disabled={busy || !!item.blocker} onPress={() => deliver.mutate(item.batchId)} />;
+      case "send": return <Button theme={theme} compact={compact} kind="primary" icon="Send" title={item.finish ? "Ask to finish" : "Send to main agent"} accessibilityLabel={item.finish ? `Ask to finish: ${FINISH_ASK}` : `Send ${item.tasks.length} repairs to the main agent`} accessibilityHint={item.blocker ?? undefined} loading={deliver.isPending} disabled={busy || !!item.blocker} onPress={() => deliver.mutate(item.batchId)} />;
       case "merge": return actions.openPr && <Button theme={theme} compact={compact} icon="GitMerge" title={`Merge #${item.number}`} accessibilityLabel={`Review and merge pull request ${item.number}`} onPress={() => actions.openPr!(item.prKey, "merge")} />;
       case "reviewers": return actions.openPr && <Button theme={theme} compact={compact} icon="UserPlus" title="Add reviewers" onPress={() => actions.openPr!(item.prKey, "reviewers")} />;
     }
@@ -116,7 +117,7 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
             <RichText style={compact ? t.label : t.body}>{item.title}</RichText>
             {"detail" in item && !!item.detail && !sameText(item.detail, item.title.replace(/^Q\d+ · /, "")) && <RichText linkColor={c.foreground} numberOfLines={item.kind === "question" ? 2 : 3} style={t.meta}>{item.detail}</RichText>}
             {item.kind === "question" && <QuestionState workspace={w} questionId={item.questionId} theme={theme} />}
-            {item.kind === "send" && <View style={{ gap: 2 }}>
+            {item.kind === "send" && !item.finish && <View style={{ gap: 2 }}>
               {item.tasks.slice(0, 4).map((task, i) => <Text key={i} numberOfLines={2} style={t.meta}><Text style={{ fontVariant: ["tabular-nums"] }}>{`${i + 1}. `}</Text>{shortRefs(task, w)}</Text>)}
               {item.tasks.length > 4 && <Text style={t.meta}>{`and ${item.tasks.length - 4} more`}</Text>}
             </View>}

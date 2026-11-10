@@ -79,7 +79,10 @@ test("headline, live line and pill read the same state", () => {
   const sent = { ...w, batches: [batch({ state: "sent", sentAt: new Date(clock - 120_000).toISOString() })] };
   assert.equal(liveLine(sent, clock).icon, "spinner");
   assert.match(liveLine(sent, clock).text, /Main agent is working on 1 repair/);
-  assert.equal(liveLine({ ...w, enable_auto_sends: true }, clock).text, "1 repair queued · sends when the agent is idle");
+  // The line says why repairs wait, never "sends when the agent is idle" while it is idle.
+  assert.equal(liveLine({ ...w, enable_auto_sends: true }, clock).text, "1 repair queued · sending now");
+  assert.equal(liveLine({ ...w, enable_auto_sends: true, runtimeBusy: true }, clock).text, "1 repair queued · sends after the agent's current turn");
+  assert.equal(liveLine({ ...w, enable_auto_sends: true, sendWait: "unloaded" }, clock).text, "1 repair queued · the agent is idle and Follow-up doesn't wake it · send it now");
 });
 
 test("done workspaces read as shipped and sort into Done", () => {
