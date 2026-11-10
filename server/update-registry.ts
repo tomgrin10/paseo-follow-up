@@ -7,7 +7,10 @@ import type { DistTags } from "../shared/version";
  */
 
 export const CHECK_INTERVAL_MS = 6 * 60 * 60_000;
-export const MANUAL_FLOOR_MS = 60_000;
+/** Opening Settings asks at most once a minute. */
+export const SETTINGS_FLOOR_MS = 60_000;
+/** Check now (and the agent's check_updates) always asks; this only folds a double press into one request. */
+export const MANUAL_FLOOR_MS = 5_000;
 export const ABBREVIATED = "application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8";
 
 export type RegistrySnapshot = {
@@ -37,7 +40,7 @@ export function due(snapshot: Pick<RegistrySnapshot, "checkedAt">, now: number, 
   if (snapshot.checkedAt == null) return true;
   const elapsed = now - snapshot.checkedAt;
   if (elapsed < 0) return true; // clock went backwards: don't stall for six hours
-  return elapsed >= (reason === "scheduled" ? CHECK_INTERVAL_MS : MANUAL_FLOOR_MS);
+  return elapsed >= (reason === "scheduled" ? CHECK_INTERVAL_MS : reason === "settings" ? SETTINGS_FLOOR_MS : MANUAL_FLOOR_MS);
 }
 
 export class RegistryChecker {
