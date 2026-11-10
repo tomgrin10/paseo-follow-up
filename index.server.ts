@@ -1,6 +1,6 @@
 import { displayPreferences } from "./shared/display";
-import { DEFAULT_QUESTION_MODE, questionPreferences, type QuestionMode } from "./shared/questions";
-import { askQuestion, recordAnswer, syncTaskQuestions, withdrawQuestion } from "./server/questions";
+import { DEFAULT_QUESTION_MODE, QUESTION_DEDUPE_MIGRATION, collapseDuplicateQuestions, questionPreferences, type QuestionMode } from "./shared/questions";
+import { askQuestion, needsYouQuestions, recordAnswer, syncTaskQuestions, withdrawQuestion } from "./server/questions";
 import { agentSetSpec, developerSetSpec } from "./server/spec";
 import type { PluginServerContext, PluginHandlerContext, PluginHookContext, PluginSessionOpenRequest } from "@getpaseo/plugin/server";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -181,13 +181,18 @@ export default function contribute(server: PluginServerContext) {
       // moved past closes its still-open questions so the panel doesn't keep stale ones.
       async settled(agentId, brief) {
         if (brief.state !== "answered" && brief.state !== "superseded") return;
+        const latest = await readFile(needsYouPath(agentId), "utf8").then(t => JSON.parse(t) as NeedsYouRecord).catch(() => null);
         await store.mutate(state => {
           const w = state.workspaces.find(w => w.enable_tracking && w.mainAgentId === agentId);
           if (!w) return;
           const at = brief.outcomeAt ?? new Date().toISOString();
+          // A question this agent still points at (its newest needs_you), or one it asked with ask_question, outlives
+          // an old brief: only the brief's own decisions close with it.
+          const current = new Set(latest?.questionIds ?? []);
           for (const d of brief.decisions) {
             const q = w.questions.find(q => q.id === d.id && brief.questionIds.includes(q.id));
             if (!q || q.answer || q.closed) continue;
+            if (brief.state === "superseded" && (current.has(q.id) || q.via === "ask")) continue;
             if (brief.state === "answered" && d.chosen) q.answer = { choice: d.chosen, at, by: "developer", delivery: { state: "sent", to: agentId, messageId: null, at, reason: null } };
             else if (brief.state === "superseded") q.closed = { at, reason: "The agent kept going past this brief.", by: null };
           }
@@ -254,6 +259,20 @@ export default function contribute(server: PluginServerContext) {
     for (const w of preview.workspaces) await archive(w.id, pruneUnsent(w));
     await store.mutate(state => { for (const w of state.workspaces) pruneUnsent(w); state.migrations = [...state.migrations ?? [], PRUNE_MIGRATION]; });
   };
+  /**
+   * 1.4.0-beta.25: once, collapse open questions that were asked twice or more (see collapseDuplicateQuestions). The
+   * oldest stays open; answered ones are never touched. Backed up first, like the other migrations.
+   */
+  const dedupeQuestions = async () => {
+    if ((await store.snapshot()).migrations?.includes(QUESTION_DEDUPE_MIGRATION)) return;
+    await copyFile(join(directory, "state.json"), join(directory, "state.before-question-dedupe.json.bak"), 1).catch(error => { if (!["ENOENT", "EEXIST"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error; });
+    await store.mutate(state => {
+      const now = Date.now();
+      // Not changed(w): closing a duplicate must not reopen a declared completion.
+      for (const w of state.workspaces) if (collapseDuplicateQuestions(w.questions, now).length) w.updatedAt = new Date(now).toISOString();
+      state.migrations = [...state.migrations ?? [], QUESTION_DEDUPE_MIGRATION];
+    });
+  };
   /** 1.3.0-beta.3: back up once before the active-scope migration (applied by the engine after its first discovery). */
   const backupActiveScope = async () => {
     if ((await store.snapshot()).migrations?.includes(ACTIVE_SCOPE_MIGRATION)) return;
@@ -270,6 +289,7 @@ export default function contribute(server: PluginServerContext) {
     governor.start();
     await engine.recover();
     await migrateTracking();
+    await dedupeQuestions();
     await backupActiveScope();
     // Reviewers: the one-time seed from earlier requests, before history is pruned. An unreadable reviewers.json only affects Add reviewers.
     await reviewerStore.migrate(await store.snapshot()).catch(() => undefined);
@@ -490,9 +510,10 @@ export default function contribute(server: PluginServerContext) {
     const mode = await questionMode();
     return store.mutate(state => {
       const w = agentWorkspace(state, agentId, "write", workspaceId);
-      const { question, instruction } = askQuestion(w, agentId, input, mode, Date.now());
-      changed(w);
-      return { workspaceId: w.id, question, mode, instruction };
+      const { supersedes, ...ask } = input;
+      const { question, instruction, outcome, of } = askQuestion(w, agentId, ask, mode, Date.now(), { via: "ask", ...(supersedes ? { supersedes } : {}) });
+      if (outcome !== "duplicate") changed(w);
+      return { workspaceId: w.id, question, mode, instruction, outcome, of };
     });
   });
   handle(rpc.recordAnswerRpc, async ({ agentId, id, choice, words }, { paseo }) => {
@@ -842,7 +863,7 @@ export default function contribute(server: PluginServerContext) {
     // F2: root agents only. Contributors and recovery sessions report to the main agent; subagents to their parent.
     if (agent.labels["follow-through.recovery"] || tracked && tracked.mainAgentId !== agentId) throw new Error("needs_you is for the workspace's main agent. Report to the main agent instead.");
     if (!await isWorkspaceRoot(agent, async id => (await paseo.agents.ref(id).refresh())?.agent)) throw new Error("needs_you is for root agents. Report to your parent agent instead.");
-    const call = validateNeedsYou(input, ref => {
+    let call = validateNeedsYou(input, ref => {
       const key = ref.trim().replace(/^#/, "");
       const match = tracked?.prs.find(p => p.key.toLowerCase() === key.toLowerCase()) ?? (tracked?.prs.filter(p => String(p.number) === key).length === 1 ? tracked.prs.find(p => String(p.number) === key) : undefined);
       if (!match) throw new Error(`No registered PR matches ${ref}. Register it with register_pr first, or give the link as url.`);
@@ -851,20 +872,22 @@ export default function contribute(server: PluginServerContext) {
     const turn = inbox.currentTurn(agentId);
     const previous = await readFile(needsYouPath(agentId), "utf8").then(t => JSON.parse(t) as NeedsYouRecord).catch(() => null);
     const sameTurn = !!previous && (turn?.turnId ? previous.turnId === turn.turnId : !!turn && previous.at >= turn.at);
-    let questionIds: string[] = [];
+    let questionIds: string[] = []; let createdIds: string[] = [];
     if (tracked) {
       const mode = await questionMode();
-      questionIds = await store.mutate(state => {
+      const linked = await store.mutate(state => {
         const w = findWorkspace(state, tracked.id);
-        const now = Date.now();
-        // Called twice in one turn: the last call wins, so the first call's questions close.
-        if (sameTurn) for (const q of w.questions) if (previous!.questionIds?.includes(q.id) && !q.answer && !q.closed) q.closed = { at: new Date(now).toISOString(), reason: "Replaced by a newer needs_you call.", by: agentId };
-        const ids = (call.decisions ?? []).map(d => askQuestion(w, agentId, { title: d.question.slice(0, 120), question: d.question, options: (d.options ?? []).map((o, i) => ({ letter: String.fromCharCode(65 + i), label: o.label, ...(o.consequence ? { consequence: o.consequence } : {}) })), ...(d.options?.length ? { recommend: String.fromCharCode(65 + d.recommend!) } : {}) }, mode, now).question.id);
-        if (ids.length) changed(w);
-        return ids;
+        const result = needsYouQuestions(w, agentId, call, mode, Date.now(), sameTurn ? previous : null);
+        if (result.questionIds.length || sameTurn) changed(w);
+        return result;
       });
-    }
-    const record: NeedsYouRecord = { at: Date.now(), turnId: turn?.turnId ?? null, call, questionIds };
+      questionIds = linked.questionIds; createdIds = linked.createdIds;
+      // The brief maps decisions to questions by position, so the record keeps them aligned (a linked question shows as itself).
+      const { questions: _refs, ...rest } = call;
+      call = { ...rest, ...(linked.decisions.length ? { decisions: linked.decisions } : {}) };
+      if (!linked.decisions.length) delete call.decisions;
+    } else if (call.questions?.length) throw new Error("questions point at a tracked workspace's open questions, and this workspace isn't tracked.");
+    const record: NeedsYouRecord = { at: Date.now(), turnId: turn?.turnId ?? null, call, questionIds, createdIds };
     await mkdir(join(directory, "hook-state"), { recursive: true, mode: 0o700 });
     const temporary = `${needsYouPath(agentId)}.${randomUUID()}`;
     await writeFile(temporary, JSON.stringify(record), { mode: 0o600 });

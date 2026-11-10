@@ -42,9 +42,12 @@ test("only the main agent asks; options are lettered in order with one recommend
 
 test("refs stay unique for the life of the workspace, even after questions close", () => {
   const w = workspace();
-  ask(w); const second = ask(w).question;
+  // Distinct questions: asking the same open one again returns it (question dedupe).
+  const other = (title: string, question: string) => ({ title, question, options: [{ letter: "A", label: `${title} now` }, { letter: "B", label: `${title} later` }] });
+  ask(w); const second = ask(w, other("Cohort size", "Which cohort gets the rollout first?")).question;
+  assert.equal(second.id, "Q2");
   withdrawQuestion(w, "main-agent", second.id, "Settled in review", clock);
-  assert.equal(ask(w).question.id, "Q3");
+  assert.equal(ask(w, other("Alert channel", "Where do failed-retry alerts go?")).question.id, "Q3");
   assert.equal(nextQuestionId([{ id: "Q9" }, { id: "Q10" }]), "Q11");
 });
 
