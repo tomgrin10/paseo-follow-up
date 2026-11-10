@@ -395,7 +395,7 @@ function HelpersStep({ theme, compact, deps, checks }: { theme: Theme; compact: 
       <TourRow theme={theme} thumb={<ThumbPanel c={c} />} title="Workspace panel"
         line={compact ? "Tap Follow-up at the top of any workspace: its PRs, tasks and what the agent is doing." : "The Follow-up button in a workspace's header docks its PRs, tasks and what the agent is doing beside the chat."} />
       <TourRow theme={theme} thumb={<ThumbNeeds c={c} />} title="Needs you" line="The decisions only you can make, one button each. A pill above the chat shows the same." />
-      <TourRow theme={theme} thumb={<ThumbAbout c={c} />} title="Summary" line="At the top of a workspace: a short summary of what it's for and where it stands, with its links." />
+      <TourRow theme={theme} thumb={<ThumbAbout c={c} />} title="Summary" line="One sentence under a workspace's title saying what it's for." />
     </View>
   </View>;
 }
@@ -412,7 +412,8 @@ const bar = (c: Colors, w: `${number}%`, color = c.border, h = 3) => <View style
 const ThumbHome = ({ c }: { c: Colors }) => <>{bar(c, "60%", c.statusWarning)}{bar(c, "90%")}{bar(c, "75%")}{bar(c, "85%")}</>;
 const ThumbPanel = ({ c }: { c: Colors }) => <>{bar(c, "55%", c.foregroundMuted)}<View style={{ flexDirection: "row", gap: 2 }}>{bar(c, "30%", c.foregroundMuted, 4)}{bar(c, "30%", c.border, 4)}{bar(c, "30%", c.border, 4)}</View>{bar(c, "80%")}</>;
 const ThumbNeeds = ({ c }: { c: Colors }) => <View style={{ flex: 1, borderRadius: 4, borderWidth: 1, borderColor: c.statusWarning, padding: 4, gap: 3 }}>{bar(c, "70%")}<View style={{ width: 16, height: 5, borderRadius: 2, backgroundColor: c.accent }} /></View>;
-const ThumbAbout = ({ c }: { c: Colors }) => <><View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}><Icon name="ChevronDown" size={8} color={c.foregroundMuted} />{bar(c, "60%", c.foregroundMuted)}</View>{bar(c, "90%")}{bar(c, "80%")}</>;
+// The Summary: the title, then one quiet line under it.
+const ThumbAbout = ({ c }: { c: Colors }) => <>{bar(c, "60%", c.foregroundMuted, 4)}{bar(c, "90%")}{bar(c, "70%")}</>;
 
 // ---------- existing installs ----------
 
