@@ -36,7 +36,7 @@ const exec = promisify(execFile);
 const argv = process.argv.slice(2);
 const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : fallback; };
 // What's new reinstalls the plugin as 2.0.0-rc.0, so it goes last: every other shot shows the version under test.
-const SHOTS = ["setup", "home", "panel", "questions", "pill", "pr-sheet", "phone", "context-menu", "linked-items", "whats-new"];
+const SHOTS = ["setup", "home", "panel", "questions", "pill", "pr-sheet", "phone", "context-menu", "linked-items", "notes-home", "notes-panel", "whats-new"];
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
 for (const name of only) if (!SHOTS.includes(name)) fail(`unknown shot "${name}" (known: ${SHOTS.join(", ")})`);
 const scheme = arg("--scheme");
@@ -422,6 +422,26 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       // Desktop focuses the filter field once the sheet opens; wait for it, so capture's blur clears the focus ring.
       await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Filter, or paste a link or key");
     });
+    // The 2.0.0 notes' two images (What's new and the GitHub page): the same scenes as home and panel, cropped to what
+    // a ~500px sheet can show legibly. Home without Paseo's own sidebar; the panel at its real width (320), its head (tab,
+    // status line, stack bar, Auto-send) and the question card under it. Shoot notes-panel with --scale 3: the sheet and
+    // the GitHub page draw it at most 320 wide (#WxH), so it stays sharp and never larger than the UI.
+    // The rectangles are CSS pixels of the 1440x900 DESKTOP viewport. CHANGELOG.md pins them to a commit, never main.
+    if (name === "notes-home") await shoot("notes-home", DESKTOP, "dark", async page => {
+      await openHome(page);
+      await (await homeRow(page, "Billing retries")).click();
+      await page.getByText("Only network failures").first().waitFor();
+      return { x: 320, y: 0, width: 1120, height: 680 };
+    });
+    if (name === "notes-panel") await shoot("notes-panel", DESKTOP, "dark", async page => {
+      await openChat(page, "Billing retries", billing.prompt);
+      await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+      await page.getByRole("button", { name: /^Pull request 142: / }).first().waitFor();
+      // A taller window shows more of the panel; it stays 320 CSS px wide (its real width at 1440), shot at 3x.
+      await page.setViewportSize({ width: DESKTOP.width, height: 1400 });
+      await page.getByRole("button", { name: /^Pull request 142: / }).first().waitFor();
+      return { x: 1120, y: 0, width: 320, height: Number(process.env.NOTES_PANEL_HEIGHT ?? 910) };
+    });
     if (name === "whats-new") {
       // The packed copy Paseo runs: the path its plugin list reports (the unpacked folder for a directory install).
       const installed = (await cli("plugin", "ls")).find(row => row.id === "follow-up")?.path ?? plugin;
@@ -437,6 +457,24 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
         await openHome(page, { keepDialogs: true });
         if (phone) await page.setViewportSize(PHONE);
         await page.getByRole("dialog").getByText("What's new in 2.0.0").first().waitFor().catch(() => page.getByText("What's new in 2.0.0").first().waitFor());
+        // The notes' screenshots load by URL: wait until each has loaded or failed (a failed one is left out).
+        await page.waitForFunction(() => [...document.images].every(i => i.complete), null, { timeout: 30000 });
+      };
+      /** The same sheet scrolled so `heading` is at the top: the panel's section and its image. */
+      const sheetAt = (phone, heading) => async page => {
+        await sheet(phone)(page);
+        await page.getByText(heading, { exact: true }).last().evaluate(el => el.scrollIntoView({ block: "start" }));
+        await page.waitForFunction(() => [...document.images].every(i => i.complete), null, { timeout: 30000 });
+      };
+      /** The same sheet scrolled to its end: the last section and the credits. */
+      const sheetEnd = phone => async page => {
+        await sheet(phone)(page);
+        // The phone's bottom sheet has no dialog role: wheel over the middle of the screen, where the sheet's body is.
+        const box = await page.getByRole("dialog").last().boundingBox({ timeout: 3000 }).catch(() => null);
+        const vp = page.viewportSize();
+        await page.mouse.move(box ? box.x + box.width / 2 : vp.width / 2, box ? box.y + box.height / 2 : vp.height * 0.6);
+        for (let i = 0; i < 8; i++) await page.mouse.wheel(0, 1200);
+        await page.waitForFunction(() => [...document.images].every(i => i.complete), null, { timeout: 30000 });
       };
       await shoot("whats-new", DESKTOP, "dark", sheet(false), { seen: WHATS_NEW_FROM });
       // Review evidence for the sheet itself (not README images): light, and the phone's bottom sheet.
@@ -444,6 +482,10 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
         await shoot("whats-new-light", DESKTOP, "light", sheet(false), { seen: WHATS_NEW_FROM });
         await shoot("whats-new-phone", PHONE, "light", sheet(true), { seen: WHATS_NEW_FROM });
         await shoot("whats-new-phone-dark", PHONE, "dark", sheet(true), { seen: WHATS_NEW_FROM });
+        await shoot("whats-new-mid", DESKTOP, "dark", sheetAt(false, "A panel on every workspace"), { seen: WHATS_NEW_FROM });
+        await shoot("whats-new-phone-mid", PHONE, "dark", sheetAt(true, "A panel on every workspace"), { seen: WHATS_NEW_FROM });
+        await shoot("whats-new-end", DESKTOP, "dark", sheetEnd(false), { seen: WHATS_NEW_FROM });
+        await shoot("whats-new-phone-end", PHONE, "light", sheetEnd(true), { seen: WHATS_NEW_FROM });
       }
     }
   }
