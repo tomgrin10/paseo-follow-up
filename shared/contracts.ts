@@ -176,6 +176,8 @@ export const briefActionRpc = defineRpc({ name: "follow.brief-action", input: z.
   agentId: idSchema, briefId: z.string().max(300), decisionId: z.string().max(20).optional(), choice: briefChoiceSchema.optional(), words: z.string().trim().max(2000).optional(), move: z.enum(["retry", "done"]).optional(),
   /** 1.4.0: every pick of a multi-decision card, sent together. "other" is Something else, with the words. */
   choices: z.array(z.object({ decisionId: z.string().max(20), choice: briefChoiceSchema, words: z.string().trim().max(2000).optional() })).min(1).max(10).optional(),
+  /** One per Send, reused on Retry: the same answer is recorded and sent once (server/inbox.ts briefAction). */
+  answerId: z.string().regex(/^[\w-]{8,80}$/).optional(),
 }), output: z.object({ brief: briefSchema }) });
 
 // Agent parity: one RPC carries every agent tool; the server runs the same path as the developer's button.

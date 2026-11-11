@@ -154,7 +154,10 @@ async function fixture(t: any, deliver: Gateway["deliver"]) {
 test("Send delivers the answer to the asking agent with steer semantics and records who got it", async t => {
   const sent: { recipients: string[]; text: string; messageId: string }[] = [];
   const f = await fixture(t, async (_w, recipients, text, messageId) => { sent.push({ recipients, text, messageId }); return recipients[0]; });
-  const { question } = await f.engine.answer("workspace", "Q1", "B", "A day", "send");
+  const { question: recorded } = await f.engine.answer("workspace", "Q1", "B", "A day", "send");
+  assert.equal(recorded.answer!.delivery.state, "sending", "the RPC replies once the answer is recorded; the send runs after");
+  await f.engine.idle();
+  const question = await f.question();
   assert.equal(question.answer!.delivery.state, "sent"); assert.equal(question.answer!.delivery.to, "main-agent");
   assert.equal(sent.length, 1); assert.deepEqual(sent[0].recipients, ["main-agent"]); assert.equal(sent[0].messageId, question.answer!.delivery.messageId);
   assert.match(sent[0].text, /^Follow-up answer Q1 \(Retry window\): B — Retry for a day\nThe developer added: A day/);
@@ -164,7 +167,7 @@ test("Send delivers the answer to the asking agent with steer semantics and reco
 test("an answer the agent can't take yet is queued and goes out on a later check", async t => {
   let ready = false; let sends = 0;
   const f = await fixture(t, async (_w, recipients) => { if (!ready) throw new DeliveryDeferred("Waiting for Session Guard to resume the agent."); sends++; return recipients[0]; });
-  await f.engine.answer("workspace", "Q1", "A", undefined, "send");
+  await f.engine.answer("workspace", "Q1", "A", undefined, "send"); await f.engine.idle();
   assert.deepEqual({ state: (await f.question()).answer!.delivery.state, reason: (await f.question()).answer!.delivery.reason }, { state: "queued", reason: "Waiting for Session Guard to resume the agent." });
   await f.engine.tick(); assert.equal(sends, 0);
   ready = true; await f.engine.tick();
@@ -174,10 +177,10 @@ test("an answer the agent can't take yet is queued and goes out on a later check
 test("an unconfirmed send is never retried automatically; Copy never sends; reloads mark interrupted sends unconfirmed", async t => {
   let sends = 0;
   const f = await fixture(t, async () => { sends++; throw new Error("socket closed"); });
-  await f.engine.answer("workspace", "Q1", "A", undefined, "send");
+  await f.engine.answer("workspace", "Q1", "A", undefined, "send"); await f.engine.idle();
   assert.equal((await f.question()).answer!.delivery.state, "unconfirmed");
   await f.engine.tick(); assert.equal(sends, 1, "ambiguous sends wait for an explicit Resend");
-  await f.engine.answer("workspace", "Q1", "A", undefined, "resend"); assert.equal(sends, 2);
+  await f.engine.answer("workspace", "Q1", "A", undefined, "resend"); await f.engine.idle(); assert.equal(sends, 2);
 
   const copy = await fixture(t, async () => { throw new Error("must not send"); });
   const copied = await copy.engine.answer("workspace", "Q1", "B", undefined, "copy");

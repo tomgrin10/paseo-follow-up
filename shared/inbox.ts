@@ -48,6 +48,11 @@ export const entrySchema = z.object({
 });
 export type Entry = z.infer<typeof entrySchema>;
 
+export const outboxSchema = z.object({
+  answerId: z.string(), agentId: z.string(), briefId: z.string(), messageId: z.string(), text: z.string(), at: isoSchema,
+  attempts: z.number().int().default(0), state: z.enum(["sending", "failed"]).default("sending"), error: z.string().nullable().default(null),
+});
+export type OutboxEntry = z.infer<typeof outboxSchema>;
 export const inboxStateSchema = z.object({
   version: z.literal(1),
   entries: z.record(z.string(), entrySchema).default({}),
@@ -64,6 +69,11 @@ export const inboxStateSchema = z.object({
     by: z.union([z.enum(["follow-up", "developer"]), z.string().regex(/^agent:[\w-]+$/)]).optional(),
     /** Set on an agent action's record (no message was sent), so the classifier never matches it to a message. */
     action: z.string().max(60).optional() })).default([]),
+  /**
+   * Brief answers recorded but not yet confirmed by Paseo (AnswerOutbox in server/inbox.ts). The card's RPC replies once
+   * the answer is here; delivery runs after, retried with the same messageId (Paseo's receipts make a resend a no-op).
+   */
+  outbox: z.array(outboxSchema).default([]),
   /** Last time the worker was alive; anything that finished after it was missed. */
   lastSeen: isoSchema.nullable().default(null),
   /** Set once Follow-up's existing PR states were recorded as already seen. */
