@@ -31,7 +31,7 @@ reviewers) still run `gh`. `FOLLOW_UP_GITHUB_API` points the client at a fake fo
 
 **Backoff** (`shared/poll.ts`). A read costs about one GraphQL point per PR (15 PRs = 16 points), from the
 developer's 5000-point hourly budget that every agent shares, so only PRs that are due go into a tick's queries.
-The engine ticks every 15 s. On a timer tick a PR is due when it's moving, its workspace is busy, the developer
+The engine ticks every 15 s. On a timer tick a PR is due when it's moving (every 30 s when only checks are running), its workspace is busy, the developer
 refreshed or opened its workspace, or its interval passed: 60 s for settled open or closed PRs, 30 minutes for merged
 ones (merged is final; deploy state is probed separately every tick). Otherwise its last observation stands in.
 Moving means: not read yet, an error, an incomplete read, a check actually running (finishing checks don't bump a

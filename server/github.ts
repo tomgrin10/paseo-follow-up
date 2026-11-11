@@ -186,7 +186,7 @@ export class Github {
    */
   hot(p: Pr): boolean {
     const last = this.last.get(p.key);
-    return cadence(last?.snapshot, p.error || last?.error, this.changedAt.get(p.key) ?? null, this.now()) === "tick";
+    return cadence(last?.snapshot, p.error || last?.error, this.changedAt.get(p.key) ?? null, this.now()) !== "idle";
   }
   /** Requests GitHub reads made, for tests and the poll-cost harness. */
   readonly stats = { graphql: 0, rest: 0, skipped: 0, points: 0 };

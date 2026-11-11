@@ -19,25 +19,37 @@ export const RECENT_CHANGE_MS = 5 * 60_000;
 export const OBSERVATION_FRESH_MS = 120_000;
 const GRAPHITE_IN_FLIGHT = /QUEUED_TO_MERGE|WAITING_TO_MERGE|REBASING|HANDED_OFF_TO_EXTERNAL_MERGE_QUEUE/;
 
-export type Cadence = "tick" | "idle";
+export type Cadence = "tick" | "checks" | "idle";
+/** A PR whose only movement is running checks is read this often. */
+export const RUNNING_POLL_MS = 30_000;
 /** Why a PR must be read every tick, or null when it may back off. */
 export function movingReason(s: Snapshot | null | undefined, error: string | null | undefined): string | null {
-  if (!s) return "not observed yet";
-  if (error) return "last read failed";
-  if (!s.complete) return "incomplete read";
-  if (s.state !== "OPEN") return null;
+  return movingReasons(s, error)[0] ?? null;
+}
+const CHECKS = "checks running";
+function movingReasons(s: Snapshot | null | undefined, error: string | null | undefined): string[] {
+  if (!s) return ["not observed yet"];
+  if (error) return ["last read failed"];
+  if (!s.complete) return ["incomplete read"];
+  if (s.state !== "OPEN") return [];
+  const out: string[] = [];
+  if (s.inMergeQueue) out.push("in the merge queue");
+  if (s.mergeWhenReady === "on") out.push("merge when ready is on");
+  if (s.graphiteMergeStatus && GRAPHITE_IN_FLIGHT.test(s.graphiteMergeStatus)) out.push("Graphite is merging it");
+  if (s.mergeStateStatus === "UNKNOWN") out.push("mergeability unknown");
   // checksRunning: a context actually in progress. A required check that never reported isn't running, so it
   // alone doesn't keep a PR hot forever (a push that would start it changes the head, which is a recent change).
-  if (s.checksRunning ?? s.checksPending) return "checks running";
-  if (s.inMergeQueue) return "in the merge queue";
-  if (s.mergeWhenReady === "on") return "merge when ready is on";
-  if (s.graphiteMergeStatus && GRAPHITE_IN_FLIGHT.test(s.graphiteMergeStatus)) return "Graphite is merging it";
-  if (s.mergeStateStatus === "UNKNOWN") return "mergeability unknown";
-  return null;
+  if (s.checksRunning ?? s.checksPending) out.push(CHECKS);
+  return out;
 }
+/**
+ * `tick`: read every tick. `checks`: only checks are running, read every RUNNING_POLL_MS (a result showing 15 s later
+ * costs nothing that matters; the budget is shared by every agent). `idle`: settled.
+ */
 export function cadence(s: Snapshot | null | undefined, error: string | null | undefined, changedAt: number | null, now: number): Cadence {
-  if (movingReason(s, error)) return "tick";
-  return changedAt !== null && now - changedAt < RECENT_CHANGE_MS ? "tick" : "idle";
+  const reasons = movingReasons(s, error);
+  if (reasons.some(r => r !== CHECKS) || (changedAt !== null && now - changedAt < RECENT_CHANGE_MS)) return "tick";
+  return reasons.length ? "checks" : "idle";
 }
 
 /** A merged PR is final: nothing on it feeds repairs, and its deploy state is probed separately every tick. */
@@ -57,13 +69,17 @@ export function budgetTier(b: Budget | null | undefined, now: number): Tier {
   return b.remaining < CRITICAL_BUDGET ? "critical" : b.remaining < LOW_BUDGET ? "low" : "normal";
 }
 /**
- * Whether a background tick reads this already-observed PR. Moving PRs: every tick (unless the budget is critical).
+ * Whether a background tick reads this already-observed PR. Moving PRs: every tick, or every RUNNING_POLL_MS when
+ * only checks are running (unless the budget is critical).
  * Settled open or closed PRs: every POLL_IDLE_MS. Merged: every MERGED_POLL_MS.
  */
 export function dueForRead(i: { snapshot: Snapshot | null | undefined; error: string | null | undefined; changedAt: number | null; readAt: number; now: number; tier: Tier; repoUrgent: boolean }): boolean {
   if (i.tier === "critical") return false;
-  if (cadence(i.snapshot, i.error, i.changedAt, i.now) === "tick") return true;
+  const c = cadence(i.snapshot, i.error, i.changedAt, i.now);
+  if (c === "tick") return true;
   const age = i.now - i.readAt;
+  // Half a tick of slack: ticks drift a little, and 29.9 s must not wait for the next tick.
+  if (c === "checks") return age >= RUNNING_POLL_MS - TICK_MS / 2;
   if (i.tier === "low") return i.snapshot?.state !== "MERGED" && i.repoUrgent && age >= LOW_IDLE_MS;
   return age >= (i.snapshot?.state === "MERGED" ? MERGED_POLL_MS : POLL_IDLE_MS);
 }

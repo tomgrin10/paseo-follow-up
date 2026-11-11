@@ -91,7 +91,7 @@ test("settled repositories back off to one read per POLL_IDLE_MS; a minute of ti
   assert.ok(now - Date.parse(sample.observedAt) <= POLL_IDLE_MS + TICK_MS);
 });
 
-test("a PR with pending checks is never backed off (finishing checks don't bump updatedAt)", async () => {
+test("a PR with running checks is never backed off past RUNNING_POLL_MS (finishing checks don't bump updatedAt)", async () => {
   let now = clock;
   const { rows, prs } = fleet(30, 3, i => (i === 4 ? { checksPending: true } : {}));
   const f = fakeGithub(rows);
@@ -100,11 +100,11 @@ test("a PR with pending checks is never backed off (finishing checks don't bump 
   const pendingRepo = prs[4].repo;
   f.calls.perRepo.clear();
   for (let i = 0; i < 8; i++) { now += TICK_MS; await github.observe(prs, { background: true }); }
-  assert.equal(f.calls.perRepo.get(pendingRepo), 8, "the repository with pending checks is read every tick");
+  assert.equal(f.calls.perRepo.get(pendingRepo), 4, "the repository with running checks: every 30 s");
   for (const [repo, count] of f.calls.perRepo) if (repo !== pendingRepo) assert.ok(count <= 2, `${repo} backed off`);
-  // The checks finish: seen on the very next tick.
+  // The checks finish: seen within RUNNING_POLL_MS.
   rows.get(prs[4].key)!.checksPending = false;
-  now += TICK_MS;
+  now += TICK_MS; await github.observe(prs, { background: true }); now += TICK_MS;
   assert.equal((await github.observe(prs, { background: true })).get(prs[4].key)!.snapshot!.checksPending, false);
 });
 
@@ -229,11 +229,11 @@ test("a first read is not a change: a settled repository backs off right after t
   await github.observe(prs, { background: true });
   f.calls.perRepo.clear();
   for (let i = 0; i < 4; i++) { now += TICK_MS; await github.observe(prs, { background: true }); }
-  assert.equal(f.calls.perRepo.get(prs[0].repo), 4, "the repository with pending checks: every tick");
+  assert.equal(f.calls.perRepo.get(prs[0].repo), 2, "the repository with running checks: every 30 s");
   assert.equal(f.calls.perRepo.get(prs[1].repo), 1, "the settled one: once per POLL_IDLE_MS from the start");
 });
 
-test("a running non-required check also keeps every-tick reads: it can still fail and show", async () => {
+test("a running non-required check also keeps 30 s reads: it can still fail and show", async () => {
   let now = clock;
   const { rows, prs } = fleet(4, 2, i => (i === 0 ? { optionalRunning: true } : {}));
   const f = fakeGithub(rows);
@@ -243,11 +243,11 @@ test("a running non-required check also keeps every-tick reads: it can still fai
   assert.equal(first.get(prs[0].key)!.snapshot!.checksRunning, true);
   f.calls.perRepo.clear();
   for (let i = 0; i < 4; i++) { now += TICK_MS; await github.observe(prs, { background: true }); }
-  assert.equal(f.calls.perRepo.get(prs[0].repo), 4);
+  assert.equal(f.calls.perRepo.get(prs[0].repo), 2);
   assert.equal(f.calls.perRepo.get(prs[1].repo), 1);
 });
 
-test("per-PR backoff: a hot PR doesn't drag its repository's merged PRs into every tick; merged PRs read every 30 min", async () => {
+test("per-PR backoff: a PR with running checks doesn't drag its repository's merged PRs into every tick; merged PRs read every 30 min", async () => {
   let now = clock;
   const { rows, prs } = fleet(20, 1, i => (i === 0 ? { checksPending: true } : { state: "MERGED" }));
   const f = fakeGithub(rows);
@@ -255,8 +255,8 @@ test("per-PR backoff: a hot PR doesn't drag its repository's merged PRs into eve
   await github.observe(prs, { background: true });
   const start = f.calls.points;
   for (let i = 0; i < 4 * 60; i++) { now += TICK_MS; await github.observe(prs, { background: true }); }
-  // One hour: the running PR every tick (240 points) + 19 merged PRs twice (38) instead of 20 × 240 = 4800.
-  assert.equal(f.calls.points - start, 240 + 19 * 2);
+  // One hour: the running PR every 30 s (120 points) + 19 merged PRs twice (38) instead of 20 × 240 = 4800.
+  assert.equal(f.calls.points - start, 120 + 19 * 2);
 });
 
 test("a required check that never reported isn't running: the PR backs off like any settled PR", async () => {
@@ -287,12 +287,12 @@ test("GraphQL budget: low stretches settled reads and pauses merged and quiet re
   const read = new Map<string, number>(); const api = f.api.graphql;
   f.api.graphql = async (repo, query, vars) => { for (const [, n] of query.matchAll(/pullRequest\(number:(\d+)\)/g)) read.set(`${repo}#${n}`, (read.get(`${repo}#${n}`) ?? 0) + 1); return api(repo, query, vars); };
   for (let i = 0; i < 20; i++) { now += TICK_MS; await github.observe(prs, { background: true }); }
-  assert.equal(read.get(prs[0].key), 20, "the PR with running checks: every tick");
+  assert.equal(read.get(prs[0].key), 10, "the PR with running checks: every 30 s");
   assert.equal(read.get(prs[6].key), 1, "a settled PR in the same repository: every 5 minutes");
   assert.equal(read.get(prs[3].key), undefined, "a merged PR waits for the reset");
   assert.equal(read.get(prs[1].key), undefined, "a quiet repository waits for the reset");
   // Critical, then the API refusing: nothing is read, nothing fails, the last observations stand in.
-  budget.remaining = 50; now += TICK_MS; await github.observe(prs, { background: true });
+  budget.remaining = 50; for (let i = 0; i < 2; i++) { now += TICK_MS; await github.observe(prs, { background: true }); } // a 30 s read learns it
   const before = f.calls.graphql; now += TICK_MS;
   const held = await github.observe(prs, { background: true });
   assert.equal(f.calls.graphql, before); assert.ok([...held.values()].every(o => o.error === null && o.snapshot));

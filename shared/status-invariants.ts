@@ -12,7 +12,7 @@ import { trackedGroup, type HomeModel } from "./home";
 import { freshPriorities, type Priority } from "./priorities";
 import { agentCard, automaticHold, batchView } from "./status";
 import { followUpObligations } from "./follow-up";
-import { cadence, movingReason, OBSERVATION_FRESH_MS, POLL_IDLE_MS, TICK_MS } from "./poll";
+import { cadence, movingReason, OBSERVATION_FRESH_MS, POLL_IDLE_MS, RUNNING_POLL_MS, TICK_MS } from "./poll";
 
 /**
  * Status invariants: what must hold for any workspace, whatever path changed it. Pure, no IO, and never throwing:
@@ -28,10 +28,11 @@ const lines = (w: Workspace, now: number) => [liveLine(w, now).text, agentCard(w
 export const INVARIANTS: Invariant[] = [
   {
     id: "poll-backoff-never-hides-a-moving-pr",
-    why: "2026-11-11 cpu-load §5: PR polling backs off for settled repositories. A PR that can still change without bumping what the last read saw (checks pending, merge queue, merge when ready, unknown mergeability, an error) is read every tick, and a backed-off PR is never older than the completion gate allows (shared/poll.ts).",
+    why: "2026-11-11 cpu-load §5: PR polling backs off for settled repositories. A PR that can still change without bumping what the last read saw (merge queue, merge when ready, unknown mergeability, an error) is read every tick, one with running checks every 30 s, and a backed-off PR is never older than the completion gate allows (shared/poll.ts).",
     check(w, now) {
       if (POLL_IDLE_MS + TICK_MS >= OBSERVATION_FRESH_MS) return `idle poll ${POLL_IDLE_MS} ms + tick ${TICK_MS} ms reaches the ${OBSERVATION_FRESH_MS} ms freshness gate`;
-      const backedOff = w.prs.find(p => movingReason(p.snapshot, p.error) && cadence(p.snapshot, p.error, null, now) !== "tick");
+      if (RUNNING_POLL_MS > POLL_IDLE_MS) return `running checks read every ${RUNNING_POLL_MS} ms, slower than settled PRs`;
+      const backedOff = w.prs.find(p => movingReason(p.snapshot, p.error) && cadence(p.snapshot, p.error, null, now) === "idle");
       return backedOff ? `${backedOff.key} (${movingReason(backedOff.snapshot, backedOff.error)}) would back off` : null;
     },
   },
