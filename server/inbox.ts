@@ -9,6 +9,7 @@ import type { State as FollowState, Workspace as FollowWorkspace } from "../shar
 import { prActionBlocks } from "../shared/pr-actions";
 import { configuredReviewers, noReviewers, reviewerLabel, withoutAuthor } from "../shared/reviewers";
 import { classify, finishedReply, turnPrompt, type Sources } from "./inbox-classifier";
+import { STALE_BRIEF } from "../shared/errors";
 import { briefOrigin, briefStep, pickBrief, shouldReopen, validPick, type Brief, type BriefEvent, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
 import { OTHER_LABEL, answerTitle, isOther } from "../shared/questions";
 
@@ -458,8 +459,8 @@ export class Inbox {
       if (queued?.state === "failed") return this.resend(queued, send);
       return b;
     }
-    if (!b || b.id !== input.briefId) throw new Error("This brief was replaced by a newer one. Read the newest card.");
-    if (b.state !== "open") throw new Error("This brief was already answered or signed off.");
+    if (!b || b.id !== input.briefId) throw new Error(STALE_BRIEF.replaced);
+    if (b.state !== "open") throw new Error(STALE_BRIEF.answered);
     let text: string; let event: BriefEvent;
     if (input.move === "retry") {
       if (b.kind !== "error") throw new Error("Only a failed turn can be retried from its brief.");

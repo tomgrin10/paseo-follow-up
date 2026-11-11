@@ -155,7 +155,9 @@ type NeedsYouDecision = { question: string; options?: { label: string; consequen
 /** A stored question as a needs_you decision, so the brief shows it with its own id, options and recommendation. */
 export function decisionOf(q: Question): NeedsYouDecision {
   const recommend = q.recommend ? q.options.findIndex(o => o.letter === q.recommend) : -1;
-  return { question: q.question.slice(0, 200), ...(q.options.length ? { options: q.options.map(o => ({ label: o.label.slice(0, 60), ...(o.consequence ? { consequence: o.consequence.slice(0, 160) } : {}) })) } : {}), ...(recommend >= 0 ? { recommend } : {}) };
+  // Whole text: needs_you's 200/60/160 limits are for decisions an agent writes, not for a stored question it points at.
+  // The card clamps long text itself, at a word, with an ellipsis and a way to read it all.
+  return { question: q.question, ...(q.options.length ? { options: q.options.map(o => ({ label: o.label, ...(o.consequence ? { consequence: o.consequence } : {}) })) } : {}), ...(recommend >= 0 ? { recommend } : {}) };
 }
 
 /**

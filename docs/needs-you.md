@@ -156,6 +156,15 @@ every `sending` entry.
   derived from it (`stableMessageId`), so every attempt is the same message to Paseo, whose receipts make a repeat a no-op.
 - **Questions too.** `follow.answer-question` records the answer as `sending` and delivers after the reply
   (`Engine.answer`); the question shows sending, sent, queued or unconfirmed as before.
+- **A card trusts the live brief, not its row.** A chat card is a timeline row, a snapshot the server re-appends when the
+  brief changes (best-effort). `shownBrief` (`shared/brief.ts`) decides what a card shows from `follow.inbox-brief`
+  (one query per agent, `liveBriefKey`, only while a row still looks open). A card is actionable only when the live
+  brief is that exact brief and open. A row whose brief moved on shows its recorded answer (from the questions it
+  points at) or "Replaced by a newer update". A card shows a stored question's live, full text; `decisionOf` never
+  cuts it.
+- **A moot refusal reconciles.** "Already answered", "replaced" and "withdrawn" refusals (`isMoot` in
+  `shared/errors.ts`) aren't failures: `runAction`'s `reconcile` refreshes the card instead of offering Retry
+  (`tests/stale-brief.test.ts`).
 - **Shared state file.** `brief.json` tells the bridge and the hook whether the inbox and the nudge are on.
 - **The headline.** `shared/headline.ts` is the one precedence for "what does this agent need", shared by the pill,
   the brief card header and the Needs-you rows, so they never disagree.

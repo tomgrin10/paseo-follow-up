@@ -1,0 +1,3 @@
+- A Needs-you card in chat no longer stays open after you answered its question somewhere else or the agent moved on. It shows your answer, or that a newer update replaced it.
+- Tapping an option on a card that was already answered now shows the recorded answer instead of an error.
+- Question and option text on a card is shown whole. Long context is clamped with an ellipsis and opens in full with Show more.
