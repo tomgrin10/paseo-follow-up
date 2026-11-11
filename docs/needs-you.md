@@ -137,7 +137,25 @@
   (`homeViolations`); [ai-roles.md](ai-roles.md#priority-ranker-beta) covers priority reasons.
 - **Answering the brief.** The card's moves go through `follow.brief-action`: pick an option, several picks, or
   Retry. Each sends one message as the developer and is logged as such. Picks that answer stored questions become
-  those questions' answers.
+  those questions' answers. See [Answering a brief](#answering-a-brief).
+
+### Answering a brief
+
+`Inbox.briefAction` records the answer and replies; the message goes out after. Recording is one inbox write: the
+ledger entry, the collapsed brief (`answerId`, `delivery: { state: "sending" }`) and an `outbox` entry. Then the RPC
+returns and `deliverAnswer` sends it, capped at 2 minutes per attempt, retried after 15 s, 1 min and 5 min. On success
+the outbox entry and `delivery` are cleared; after the last failure `delivery` is `failed` with the reason, the card
+says "Not delivered to the agent" with **Send again**, and the answer stays in the outbox. A worker start resends
+every `sending` entry.
+
+- **Why after.** Sending to a dormant agent makes Paseo resume it and wait for its run to start (up to 60 s; 86 s on
+  2026-11-11), longer than the 30 s a plugin RPC gets. Awaiting it made the card say "Your answer wasn't sent" for
+  answers that arrived, and Retry sent them twice.
+- **Never twice.** The client makes one `answerId` per Send and the toast's Retry reuses it, so does Send again.
+  The same `answerId` returns the recorded brief (or resends a failed one) instead of a second answer. The messageId is
+  derived from it (`stableMessageId`), so every attempt is the same message to Paseo, whose receipts make a repeat a no-op.
+- **Questions too.** `follow.answer-question` records the answer as `sending` and delivers after the reply
+  (`Engine.answer`); the question shows sending, sent, queued or unconfirmed as before.
 - **Shared state file.** `brief.json` tells the bridge and the hook whether the inbox and the nudge are on.
 - **The headline.** `shared/headline.ts` is the one precedence for "what does this agent need", shared by the pill,
   the brief card header and the Needs-you rows, so they never disagree.

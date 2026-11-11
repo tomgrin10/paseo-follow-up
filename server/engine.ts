@@ -10,7 +10,7 @@ import { reconcileSubmittedStacks } from "./submissions";
 import { applyDiscovery, interruptionHold, startsWithAutoSend, type DiscoveredWorkspace } from "./discovery";
 import { followsByDefault, migrateActiveScope } from "../shared/settings";
 import { replyRecorded } from "../shared/communication";
-import { DeliveryDeferred, ConversationGone } from "./delivery";
+import { DeliveryDeferred, ConversationGone, withDeadline } from "./delivery";
 import { recordSnapshot } from "./deployment-anchor";
 import { pruneUnsent } from "./batch-archive";
 import { holdSuperseded, liftHold } from "../shared/status";
@@ -222,10 +222,21 @@ export class Engine {
       developerAnswer(w, questionId, choice, words, action, this.now(), actor);
       if (!w.questions.some(isOpenQuestion)) w.updatedAt = new Date(this.now()).toISOString();
     });
-    if (action !== "copy") await this.deliverAnswer(workspaceId, questionId);
+    // Recorded as "sending": the reply goes back now and the message after it. Reaching a dormant agent can take Paseo
+    // longer than the 30 s a plugin RPC gets; the question shows sending → sent (or queued, unconfirmed) as it lands.
+    if (action !== "copy") this.later(() => this.deliverAnswer(workspaceId, questionId));
     const workspace = findWorkspace(await this.store.snapshot(), workspaceId);
     return { workspace, question: workspace.questions.find(q => q.id === questionId)! };
   }
+  /** Work that runs after an RPC replied. Its outcome lands on the record; tests await `idle()`. */
+  private deliveries = new Set<Promise<unknown>>();
+  private later(work: () => Promise<unknown>): void {
+    const p = work().catch(error => console.warn(`[follow-up] background delivery failed: ${error instanceof Error ? error.message : String(error)}`)).finally(() => this.deliveries.delete(p));
+    this.deliveries.add(p);
+  }
+  async idle(): Promise<void> { while (this.deliveries.size) await Promise.allSettled([...this.deliveries]); }
+  /** One delivery attempt's cap: past it the answer reads "unconfirmed" instead of "sending" forever. */
+  deliveryAttemptMs = 120_000;
   private async deliverAnswer(workspaceId: string, questionId: string): Promise<void> {
     const w = findWorkspace(await this.store.snapshot(), workspaceId);
     const q = w.questions.find(q => q.id === questionId);
@@ -233,7 +244,7 @@ export class Engine {
     let outcome: { state: "sent" | "queued" | "unconfirmed"; to: string | null; reason: string | null };
     try {
       if (!this.gateway.deliver) throw new DeliveryDeferred("Messaging is unavailable in this Paseo version; copy the answer instead.");
-      const to = await this.gateway.deliver(w, answerRecipients(w, q), answerMessage(q, q.answer.choice, q.answer.words), q.answer.delivery.messageId);
+      const to = await withDeadline(this.gateway.deliver(w, answerRecipients(w, q), answerMessage(q, q.answer.choice, q.answer.words), q.answer.delivery.messageId), this.deliveryAttemptMs, "Paseo didn't confirm the answer in time");
       outcome = { state: "sent", to, reason: null };
     } catch (error) {
       outcome = error instanceof DeliveryDeferred
