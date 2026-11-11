@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Animated, Easing, Keyboard, Platform, Pressable, ScrollView, Text, View, type ViewStyle } from "react-native";
+import { Animated, Easing, Keyboard, Platform, ScrollView, View, type ViewStyle } from "react-native";
+import { Pressable, Text } from "./text";
 import { useRpc, useSettings } from "@getpaseo/plugin/client";
 import { Icon, copyText, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";

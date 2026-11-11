@@ -1,4 +1,5 @@
-import { Pressable, Text, View } from "react-native";
+import { View } from "react-native";
+import { Pressable, Text } from "./text";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import type { Pr, Workspace } from "../shared/model";
 import { compactPrStatus, orderedStacks, settledForDisplay } from "../shared/presentation";

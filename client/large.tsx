@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import { Platform, Text, View } from "react-native";
+import { Platform, View } from "react-native";
+import { Text } from "./text";
 import { type PluginScreenProps } from "@getpaseo/plugin/client";
 import { useWorkspace } from "./workspace-data";
 import type { LiveStore } from "./live";

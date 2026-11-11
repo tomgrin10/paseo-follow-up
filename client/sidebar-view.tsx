@@ -1,7 +1,8 @@
 import * as sdk from "@getpaseo/plugin/client";
 import type { PluginClientContext, PluginHostProps } from "@getpaseo/plugin/client";
 import { useCallback, useMemo, type ComponentType } from "react";
-import { Text, View } from "react-native";
+import { View } from "react-native";
+import { Text } from "./text";
 import { UndoBar, useSidebarViewMounted } from "./inbox";
 import { HomeList } from "./home-list";
 import { useHomeModel, type HomeSources } from "./home-data";
