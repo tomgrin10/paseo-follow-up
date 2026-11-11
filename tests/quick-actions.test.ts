@@ -117,7 +117,7 @@ test("runAction: a failure keeps Retry and Open, stays until dismissed, and Retr
     let calls = 0; let opened = 0; let failed = 0;
     await runAction({ label: "x", run: async () => { calls++; if (calls === 1) throw new Error("network down"); return 1; }, success: () => ({ message: "Sent" }), failure: "Answer to Q24 not sent", open: () => { opened++; }, onError: () => { failed++; } });
     const error = toastsNow().find(t => t.tone === "error")!;
-    assert.match(error.message, /^Answer to Q24 not sent\. /);
+    assert.equal(error.message, "Answer to Q24 not sent", "with Open, the toast is one line; the reason waits on the card Open returns to");
     assert.equal(error.sticky, true, "errors stay until dismissed");
     assert.deepEqual(error.actions.map(a => a.label), ["Retry", "Open"]);
     assert.equal(failed, 1, "the caller keeps the input before the toast shows");
@@ -138,7 +138,7 @@ test("runAction: a plain-string success, a default failure, reopen, and a key th
     release(); assert.equal(await first, true);
     let reopened = 0;
     assert.equal(await runAction({ label: "Stop following", run: async () => { throw new Error("offline"); }, success: null, reopen: () => { reopened++; } }), false);
-    assert.deepEqual(host, ["show:Later · Tomorrow 9:00", "error:Stop following didn't work. offline"]);
+    assert.deepEqual(host, ["show:Later · Tomorrow 9:00", "error:Stop following didn't work. offline."]);
     assert.equal(reopened, 1);
   } finally { bindToast(null); }
 });
@@ -263,4 +263,51 @@ test("a failure reason followed by more text ends in exactly one stop", async ()
     const text = await readFile(join(import.meta.dirname, "..", dir, f), "utf8");
     for (const m of text.matchAll(/\$\{([^}]*)\}\.\s/g)) assert.doesNotMatch(m[1], /error|reason/i, `${dir}/${f}: \${${m[1]}}. can double the stop; use sentence()`);
   }
+});
+
+// ---------- 1.4.0-beta.59 polish ----------
+
+// The error toast was twice the width of Paseo's own ("Answer to Q1 not sent. No question Q999 in this workspace." plus
+// Retry, Open and ✕ filled the 480 px boundary and wrapped). With Open, the reason lives on the surface Open returns to,
+// so the toast says only what failed; without Open the reason stays, in at most two lines.
+test("an error toast stays as narrow as the host's: one line with Open, the reason on the surface", async () => {
+  const { runAction, toastsNow, hosts, dismissToast } = await store();
+  hosts.push(97);
+  try {
+    await runAction({ label: "Later", run: async () => { throw new Error("Request failed: daemon offline requestType=x"); }, success: null });
+    assert.equal(toastsNow().at(-1)?.message, "Later didn't work. daemon offline.", "no surface to return to: the reason stays");
+  } finally { hosts.splice(hosts.indexOf(97), 1); for (const t of toastsNow()) dismissToast(t.id); }
+  const view = await readFile(join(import.meta.dirname, "..", "client", "toasts.tsx"), "utf8");
+  assert.match(view, /numberOfLines=\{2\}[^>]*>\{item\.message\}/, "a toast's message never grows past two lines");
+  // Every caller with Open keeps the reason where Open lands.
+  for (const f of (await readdir(join(import.meta.dirname, "..", "client"))).filter(f => f.endsWith(".tsx"))) {
+    const text = await readFile(join(import.meta.dirname, "..", "client", f), "utf8");
+    for (const m of text.matchAll(/run(?:Action|Undoable)\(([\s\S]*?)\n\s*\}\)?[,;)]/g)) if (/\bopen: /.test(m[1]))
+      assert.match(m[1], /onError: [^\n]*(errorText|failPendingAnswer)\(/, `${f}: an action with Open records the reason on its surface in onError`);
+  }
+});
+
+// Ctrl/Cmd+Z undoes while an Undo toast is showing, and only then: never inside a text field, never with Shift (redo).
+test("Ctrl/Cmd+Z runs the visible toast's Undo, and nothing else", async () => {
+  const { pushToast, undoShortcut, toastsNow, dismissToast } = await store();
+  const key = (o: Partial<{ key: string; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; target: unknown }>) => ({ key: "z", metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, target: null, ...o });
+  assert.equal(undoShortcut(key({ ctrlKey: true }), false), false, "no Undo toast: the key is left alone");
+  let undone = 0;
+  const id = pushToast("info", "Telling the agent it's done", [{ label: "Undo", onPress: () => { undone++; } }], { durationMs: 60_000, keep: true });
+  try {
+    assert.equal(undoShortcut(key({ metaKey: true }), false), false, "Cmd is the Mac key, not Windows'");
+    assert.equal(undoShortcut(key({ ctrlKey: true, shiftKey: true }), false), false, "Shift+Z is redo");
+    assert.equal(undoShortcut(key({ ctrlKey: true, target: { tagName: "TEXTAREA" } }), false), false, "typing keeps its own undo");
+    assert.equal(undoShortcut(key({ ctrlKey: true, target: { tagName: "DIV", isContentEditable: true } }), false), false);
+    assert.equal(undone, 0);
+    assert.equal(undoShortcut(key({ ctrlKey: true }), false), true);
+    assert.equal(undone, 1); assert.equal(toastsNow().some(t => t.id === id), false, "the toast goes, like pressing Undo");
+    assert.equal(undoShortcut(key({ ctrlKey: true }), false), false, "only once");
+    pushToast("info", "x", [{ label: "Undo", onPress: () => { undone++; } }], { durationMs: 60_000 });
+    assert.equal(undoShortcut(key({ ctrlKey: true }), true), false, "Ctrl+Z on a Mac isn't undo");
+    assert.equal(undoShortcut(key({ key: "Z", metaKey: true }), true), true); assert.equal(undone, 2);
+  } finally { for (const t of toastsNow()) dismissToast(t.id); }
+  const view = await readFile(join(import.meta.dirname, "..", "client", "toasts.tsx"), "utf8");
+  assert.match(view, /addEventListener\("keydown"/, "the toast layer listens for the key");
+  assert.match(view, /if \(undoShortcut\(e, mac\)\) e\.preventDefault\(\)/);
 });
