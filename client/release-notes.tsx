@@ -26,17 +26,31 @@ const fmtDate = (iso: string | null) => iso ? new Date(`${iso}T12:00:00`).toLoca
 /** Hidden from screen readers: a visual separator only. */
 const Dot = ({ style }: { style: object }) => <Text style={style} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden>·</Text>;
 
-/** One version's bullets. Shared by What's new, the release notes and Settings. */
+/** One bullet: a small dot and its text. */
+function Bullet({ text: line, theme, compact }: { text: string; theme: Theme; compact: boolean }) {
+  const c = theme.colors; const t = text(c, compact);
+  return <View style={{ flexDirection: "row", gap: 8 }}>
+    <View style={{ width: 4, height: 4, borderRadius: 2, marginTop: compact ? 8 : 7, backgroundColor: c.foregroundMuted }} />
+    <Text style={[t.body, { flex: 1 }]}>{line}</Text>
+  </View>;
+}
+
+/**
+ * One version's notes. Shared by What's new, the release notes and Settings. A curated section (headings and
+ * paragraphs, like 2.0.0) reads in full as written; a list of bullets folds past `max` behind "Show all N".
+ */
 export function VersionNotes({ note, theme, compact = false, max = 8 }: { note: ReleaseNote; theme: Theme; compact?: boolean; max?: number }) {
   const c = theme.colors; const t = text(c, compact);
   const [all, setAll] = useState(false);
+  if (note.blocks?.length) return <View style={{ gap: 8 }}>
+    {note.blocks.map((b, i) => b.kind === "heading"
+      ? <Text key={i} accessibilityRole="header" style={[t.label, { marginTop: i ? 10 : 0 }]}>{b.text}</Text>
+      : b.kind === "text" ? <Text key={i} style={t.body}>{b.text}</Text>
+      : <Bullet key={i} text={b.text} theme={theme} compact={compact} />)}
+  </View>;
   const items = all ? note.items : note.items.slice(0, max);
-  const dotTop = compact ? 8 : 7;
   return <View style={{ gap: 6 }}>
-    {items.map((item, i) => <View key={i} style={{ flexDirection: "row", gap: 8 }}>
-      <View style={{ width: 4, height: 4, borderRadius: 2, marginTop: dotTop, backgroundColor: c.foregroundMuted }} />
-      <Text style={[t.body, { flex: 1 }]}>{item}</Text>
-    </View>)}
+    {items.map((item, i) => <Bullet key={i} text={item} theme={theme} compact={compact} />)}
     {!all && note.items.length > max && <Pressable accessibilityRole="button" onPress={() => setAll(true)} hitSlop={compact ? { top: 14, bottom: 14, left: 8, right: 8 } : 6}
       style={{ minHeight: compact ? 44 : undefined, justifyContent: "center", alignSelf: "flex-start" }}>
       <Text style={[t.label, { color: c.foreground, fontWeight: "600" }]}>{`Show all ${note.items.length}`}</Text>
@@ -66,7 +80,7 @@ function FoldedVersion({ note, theme, compact }: { note: ReleaseNote; theme: The
       <Icon name={open ? "ChevronDown" : "ChevronRight"} size={14} color={c.foregroundMuted} />
       <Text accessibilityRole="header" style={[t.label, { fontVariant: ["tabular-nums"], flexShrink: 0 }]}>{note.version}</Text>
       {note.date && <Text style={[t.meta, { flexShrink: 0 }]}>{fmtDate(note.date)}</Text>}
-      {!open && <Text numberOfLines={1} style={[t.meta, { flex: 1, minWidth: 0 }]}>{note.items[0] ?? ""}</Text>}
+      {!open && <Text numberOfLines={1} style={[t.meta, { flex: 1, minWidth: 0 }]}>{note.items[0] ?? note.blocks?.find(b => b.kind !== "heading")?.text ?? ""}</Text>}
     </Pressable>
     {open && <View style={{ paddingLeft: 22, paddingBottom: 12 }}><VersionNotes note={note} theme={theme} compact={compact} /></View>}
   </View>;

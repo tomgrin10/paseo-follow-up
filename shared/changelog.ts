@@ -22,28 +22,55 @@ export function notesVersion(version: string): string {
 /** A release candidate of a major: X.0.0-rc.N. */
 export const isMajorRc = (version: string): boolean => notesVersion(version) !== version;
 
-export type ReleaseNote = { version: string; date: string | null; items: string[] };
+/**
+ * A note's content in order. `items` keeps the bullets alone (what betas and older notes are); `blocks` adds a curated
+ * section's `###` headings and paragraphs, so an announcement (2.0.0) reads as written. Inline markdown is reduced to
+ * its text (links to their label, no backticks or bold); image lines are left out: the sheet is text only.
+ */
+export type NoteBlock = { kind: "heading" | "text" | "bullet"; text: string };
+export type ReleaseNote = { version: string; date: string | null; items: string[]; blocks?: NoteBlock[] };
+/** Inline markdown to plain text: `[label](url)` to label, no backticks, bold or italics markers. */
+export const plainInline = (s: string): string =>
+  s.replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/`([^`]*)`/g, "$1").replace(/\*\*([^*]+)\*\*/g, "$1").replace(/(^|\W)_([^_]+)_(?=\W|$)/g, "$1$2").trim();
 const HEADING = /^##\s+v?(\S+)(?:\s+\((\d{4}-\d{2}-\d{2})\))?\s*$/;
 
 export function parseChangelog(text: string): ReleaseNote[] {
   const notes: ReleaseNote[] = [];
   let current: ReleaseNote | null = null;
+  /** The block a continuation line joins: the last bullet, or a paragraph still open (no blank line since). */
+  let open: NoteBlock | null = null;
   for (const line of text.replace(/\r\n?/g, "\n").split("\n")) {
     if (/^\s*<details/i.test(line)) break;
     const heading = HEADING.exec(line);
     if (heading) {
-      current = parseVersion(heading[1]!) ? { version: heading[1]!, date: heading[2] ?? null, items: [] } : null;
+      current = parseVersion(heading[1]!) ? { version: heading[1]!, date: heading[2] ?? null, items: [], blocks: [] } : null;
       if (current) notes.push(current);
+      open = null;
       continue;
     }
-    if (/^#{1,2}\s/.test(line)) { current = null; continue; }
+    if (/^#{1,2}\s/.test(line)) { current = null; open = null; continue; }
     if (!current) continue;
+    const blocks = current.blocks!;
+    if (!line.trim()) { if (open?.kind === "text") open = null; continue; }
+    const sub = /^#{3,6}\s+(.*)$/.exec(line);
+    if (sub) { blocks.push({ kind: "heading", text: plainInline(sub[1]!) }); open = null; continue; }
+    if (/^\s*!\[[^\]]*\]\([^)]*\)\s*$/.test(line) || /^\s*<!--.*-->\s*$/.test(line) || /^\s*<\/?\w/.test(line)) { open = null; continue; }
     const bullet = /^[-*]\s+(.*)$/.exec(line);
-    if (bullet) current.items.push(bullet[1]!.trim());
-    else if (/^\s+\S/.test(line) && current.items.length) current.items[current.items.length - 1] += ` ${line.trim()}`;
+    if (bullet) {
+      current.items.push(bullet[1]!.trim());
+      blocks.push(open = { kind: "bullet", text: plainInline(bullet[1]!) });
+    } else if (/^\s+\S/.test(line) && open?.kind === "bullet") {
+      current.items[current.items.length - 1] += ` ${line.trim()}`;
+      open.text = `${open.text} ${plainInline(line)}`;
+    } else if (open?.kind === "text") open.text = `${open.text} ${plainInline(line)}`;
+    else blocks.push(open = { kind: "text", text: plainInline(line) });
   }
+  for (const n of notes) if (!n.blocks!.some(b => b.kind !== "bullet")) delete n.blocks; // bullets only: items says it all
   return notes.sort((a, b) => compareVersions(b.version, a.version));
 }
+
+/** Whether a note has anything to show: bullets, or a curated section's headings and paragraphs. */
+export const hasContent = (n: ReleaseNote): boolean => n.items.length > 0 || !!n.blocks?.length;
 
 /**
  * Every version after `lastSeen` up to and including `installed`, newest first. Versions newer than the installed
@@ -122,7 +149,8 @@ export const LAST_SEEN_KEY = "follow-up.whats-new.seen";
 export const INSTALL_KINDS = ["npm", "git", "directory", "registry", "unknown"] as const;
 export type InstallKind = typeof INSTALL_KINDS[number];
 
-export const releaseNoteSchema = z.object({ version: z.string(), date: z.string().nullable(), items: z.array(z.string()) });
+export const releaseNoteSchema = z.object({ version: z.string(), date: z.string().nullable(), items: z.array(z.string()),
+  blocks: z.array(z.object({ kind: z.enum(["heading", "text", "bullet"]), text: z.string() })).optional() });
 /** `follow.release-notes`: this host's version record and every shipped note. Read once per app session; never polled. */
 export const releaseNotesViewSchema = z.object({
   version: z.string(),
@@ -145,7 +173,7 @@ export type ReleaseNotesView = z.infer<typeof releaseNotesViewSchema>;
 export const RECENT_UPDATE_MS = 3 * 86_400_000;
 export function recentUpdate(view: Pick<ReleaseNotesView, "version" | "previous" | "updatedAt" | "notes">, now: number): boolean {
   if (!view.previous || view.updatedAt == null || now - view.updatedAt < 0 || now - view.updatedAt >= RECENT_UPDATE_MS) return false;
-  return view.notes.some(n => n.version === notesVersion(view.version) && n.items.length > 0);
+  return view.notes.some(n => n.version === notesVersion(view.version) && hasContent(n));
 }
 /** The notes What's new shows when opened by hand: everything since the previous version, else this version's own. */
 export function recentNotes(view: Pick<ReleaseNotesView, "version" | "previous" | "notes">): ReleaseNote[] {
