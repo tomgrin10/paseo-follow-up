@@ -42,7 +42,7 @@ test("a beta's body is its own fragments in the shared format, never boilerplate
     "**Install:** `paseo plugin install npm:paseo-follow-up@1.1.0-beta.1`",
     "", "## What's new", "", "- A row no longer flickers.", "- Undo works twice.",
     "", "## Install", "",
-    `Already installed: \`paseo plugin update follow-up --version 1.1.0-beta.1\`. Prereleases are on npm's \`beta\` dist-tag; the current stable release is [here](${LATEST}). Needs Paseo 0.15.0 or newer.`,
+    `Already installed: \`paseo plugin update follow-up --version 1.1.0-beta.1\`. Prereleases are on npm's \`beta\` dist-tag; the current stable release is on the [Releases page](${LATEST}). Needs Paseo 0.15.0 or newer.`,
     "", VERIFIED, "",
   ].join("\n"), "only the fragments added since the previous tag, the install command once, no hard-coded stable version");
   assert.doesNotMatch(b1, /Home has a search box/, "an earlier beta's fragment stays with that beta");
