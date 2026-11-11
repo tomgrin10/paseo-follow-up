@@ -211,3 +211,17 @@ test("Done windows are per agent: a second Done or a sign-off can't take one ove
   w.end("a2"); assert.equal(w.has("a2"), false); assert.deepEqual(cancelled, ["a1"], "the toast ending is not an undo");
   assert.equal(changes, 4);
 });
+
+// 1.4.0-beta.62: the collapsed Done card showed the success-green check during the Undo window, before anything was
+// sent. A card is green only once its outcome has landed on the daemon; a Done still waiting on its toast is muted.
+test("a past card's check is green only once its outcome landed; a pending Done stays muted", async () => {
+  const { pastTone } = await import("../shared/brief");
+  assert.equal(pastTone("answered", false), "success");
+  assert.equal(pastTone("answered", true), "muted", "Done inside its Undo window (or still sending)");
+  assert.equal(pastTone("superseded", false), "muted");
+  assert.equal(pastTone("signed", false), "success", "a signed-off card stays green (critique: an early draft greyed it for good)");
+  const { readFile } = await import("node:fs/promises"); const { join } = await import("node:path");
+  const view = await readFile(join(import.meta.dirname, "..", "client", "brief.tsx"), "utf8");
+  assert.match(view, /if \(marked\) return <Past [^\n]*pending=\{!sent\}/, "the locally marked Done renders as pending");
+  assert.doesNotMatch(view.slice(view.indexOf("function Past"), view.indexOf("function Past") + 4000), /color=\{c\.statusSuccess\}/, "Past takes its colour from pastTone only");
+});
