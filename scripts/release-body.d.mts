@@ -21,3 +21,4 @@ export function releaseBody(tag: string, src: Source, options?: { notes?: string
 export function ownNotes(body: string | null | undefined): { text: string; replaced: string[] };
 export function framed(body: string | null | undefined): boolean;
 export function hasNotes(body: string | null | undefined): boolean;
+export declare function sizedImages(text: string): string;

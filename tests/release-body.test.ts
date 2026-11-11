@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { LATEST, MAINTENANCE, NO_NOTES, UNWRITTEN, VERIFIED, VERIFIED_BEFORE_NPM, compare, framed, gitSource, hasNotes, ownNotes, releaseBody, releaseNotes } from "../scripts/release-body.mjs";
+import { LATEST, MAINTENANCE, NO_NOTES, UNWRITTEN, VERIFIED, VERIFIED_BEFORE_NPM, compare, framed, gitSource, hasNotes, ownNotes, releaseBody, releaseNotes, sizedImages } from "../scripts/release-body.mjs";
 import { plan } from "../scripts/backfill-release-notes.mjs";
 
 // Tom: "the beta releases on github don't display release notes, make sure every github release displays proper clean
@@ -114,4 +114,10 @@ test("backfill: every page gets the frame; hand-written text is kept, only its i
   assert.equal(hasNotes(boilerplate), false);
   assert.deepEqual(ownNotes("Plain text only.").replaced, []);
   assert.ok(compare("1.4.0-beta.10", "1.4.0-beta.9") > 0 && compare("2.0.0", "2.0.0-rc.0") > 0);
+});
+
+test("a screenshot on the GitHub page is never drawn larger than its CSS size: #WxH becomes <img width=W>", () => {
+  assert.equal(sizedImages("Intro.\n\n![Home \"list\"](https://x.test/a/h.png#1120x680)\n\n![raw](https://x.test/r.png)\n"),
+    'Intro.\n\n<img src="https://x.test/a/h.png" width="1120" alt="Home &quot;list&quot;">\n\n![raw](https://x.test/r.png)\n', "an unsized image stays markdown");
+  assert.equal(sizedImages("text ![a](https://x.test/i.png#2x1) inline"), "text ![a](https://x.test/i.png#2x1) inline", "only an image alone on its line");
 });

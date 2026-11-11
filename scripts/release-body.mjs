@@ -124,11 +124,21 @@ export function verifiedAtTag(tag, src) {
 }
 
 /**
+ * A notes image line with a `#WxH` size (CSS pixels, CHANGELOG.md's convention) as `<img width=W>`: GitHub draws a
+ * markdown image at its full pixel width, so a 2x or 3x screenshot would show 2-3 times the size of the UI it shows.
+ * Lines without a size stay as they are.
+ */
+export function sizedImages(text) {
+  const attr = s => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  return text.replace(/^[ \t]*!\[([^\]]*)\]\(\s*(https?:\/\/\S+?)#(\d+)x(\d+)\s*\)[ \t]*$/gm, (_, alt, url, w) => `<img src="${attr(url)}" width="${w}" alt="${attr(alt)}">`);
+}
+
+/**
  * The body for a tag. `notes` overrides the notes (the backfill passes a page's own hand-written text);
  * `backfill` marks a page written after the release (pinned install, and the verification claim says "before npm").
  */
 export function releaseBody(tag, src, { notes = null, backfill = false } = {}) {
-  const text = notes ?? releaseNotes(tag, src).notes;
+  const text = sizedImages(notes ?? releaseNotes(tag, src).notes);
   const i = install(tag, src, { pinned: backfill });
   const verified = verifiedAtTag(tag, src) ? `\n\n${backfill ? VERIFIED_BEFORE_NPM : VERIFIED}` : "";
   return `**Install:** \`${i.cmd}\`\n\n## What's new\n\n${text}\n\n## Install\n\n${i.line}${verified}\n`;
