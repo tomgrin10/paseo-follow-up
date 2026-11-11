@@ -31,3 +31,12 @@ test("harnessEnv puts HOME, CLAUDE_CONFIG_DIR, CODEX_HOME and PASEO_HOME inside 
   assert.throws(() => harnessEnv("/tmp/follow-x", { base, set: { CLAUDE_CONFIG_DIR: "/home/real/.claude" } }), /outside the harness root/);
   assert.throws(() => harnessEnv("/tmp/follow-x", { base, home: "/home/real" }), /outside the harness root/);
 });
+test("harnessEnv turns dictation and voice mode off for harness daemons unless the caller sets them", () => {
+  // 2026-11-11: each fresh harness PASEO_HOME downloaded and unpacked the speech model; harness-slot's "false" was stripped.
+  const base = { PATH: "/bin", PASEO_DICTATION_ENABLED: "true", PASEO_VOICE_MODE_ENABLED: "true" };
+  const env = harnessEnv("/tmp/follow-x", { base });
+  assert.equal(env.PASEO_DICTATION_ENABLED, "false"); assert.equal(env.PASEO_VOICE_MODE_ENABLED, "false");
+  const on = harnessEnv("/tmp/follow-x", { base, set: { PASEO_DICTATION_ENABLED: "true", PASEO_VOICE_MODE_ENABLED: "true" } });
+  assert.equal(on.PASEO_DICTATION_ENABLED, "true"); assert.equal(on.PASEO_VOICE_MODE_ENABLED, "true");
+  assert.equal(harnessEnv("/tmp/follow-x", { base, strip: ["PASEO_VOICE_MODE_ENABLED"] }).PASEO_VOICE_MODE_ENABLED, undefined);
+});
