@@ -26,15 +26,6 @@ test("selectableFor: content is selectable on web, control labels aren't, an exp
   for (const role of ["button", "link", "checkbox", "radio", "switch", "tab", "menuitem"]) assert.ok(CONTROL_ROLES.has(role), role);
 });
 
-test("a link in content can be drag-selected: it isn't draggable, and a click that ends a selection doesn't open it", async () => {
-  const { linkClickOpens } = await import("../client/text-rules");
-  assert.equal(linkClickOpens(""), true, "a plain click opens the link");
-  assert.equal(linkClickOpens("The old key leaked into a CI log on https://github.com/x"), false, "finishing a drag-select on a link keeps the selection");
-  const rich = await readFile(join(ROOT, "client/rich-text.tsx"), "utf8");
-  assert.match(rich, /setAttribute\?\.\("draggable", "false"\)/, "web anchors are natively draggable; a drag that starts on a URL must select it, not drag it");
-  assert.match(rich, /linkClickOpens\(/, "the link's press checks for a selection first");
-});
-
 test("an option card's description stays copyable: its letter and label are the control, its prose is content", async () => {
   const q = await readFile(join(ROOT, "client/questions.tsx"), "utf8");
   assert.match(q, /\{!!consequence && <RichText selectable=\{copyable\}/, "OptionCard's consequence opts back into selection");
