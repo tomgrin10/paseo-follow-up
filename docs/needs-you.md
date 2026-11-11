@@ -22,7 +22,7 @@
   `outside-fact-is-live` (`factFlagViolations`) and `agent-merges-asks-nothing`.
 - **In-flight work reads as waiting.** A PR registered with `agentMerges` is the agent's own merge, so it asks the
   developer for neither reviewers nor a merge. A working or waiting task puts the workspace in Waiting (never Quiet),
-  and a waiting task is the agent's declared wait: the live line reads `Waiting · <task title>`. Invariant
+  and a waiting task is the agent's declared wait: its live line is the task's title, with the waiting icon. Invariant
   `in-flight-reads-waiting`; `tests/in-flight-status.test.ts` enumerates every in-flight signal.
 - **Background work is running (Paseo 0.16).** An agent that started a shell or task and ended its turn reports
   `backgroundWork.count > 0`. The inbox's directory reads it as running (`liveStatus` in `shared/agent-load.ts`), so a

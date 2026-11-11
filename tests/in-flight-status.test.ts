@@ -126,7 +126,7 @@ test("invariant: no in-flight signal can make a workspace read Needs you, Finish
 
 test("a declared wait reads as Waiting with what it waits on", () => {
   const w = IN_FLIGHT[0].w;
-  assert.deepEqual(liveLine(w, clock), { icon: "waiting", text: "Waiting · beta.68 install · reload window 11:21", since: null });
+  assert.deepEqual(liveLine(w, clock), { icon: "waiting", text: "beta.68 install · reload window 11:21", since: null });
 });
 
 test("invariants: the bug's own fixture breaks each new invariant before the fix's state, and holds after", async () => {

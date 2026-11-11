@@ -203,9 +203,10 @@ export function liveLine(w: Workspace, now = Date.now()): { icon: LiveIcon; text
   if (w.runtimeBusy) return { icon: "spinner", text: "Main agent is working", since: null };
   const working = followUpObligations(w).find(o => o.status === "working");
   if (working) return { icon: "spinner", text: working.title, since: null };
-  // A wait the agent declared (a waiting task: a release, a reload window, a detached job) says what it waits on.
+  // A wait the agent declared (a waiting task: a release, a reload window, a detached job) says what it waits on. The
+  // waiting icon, Home's Waiting group and the brief's "Waiting on others" already say it waits, so the line doesn't.
   const waiting = followUpObligations(w).find(o => o.status === "waiting");
-  if (waiting) return { icon: "waiting", text: `Waiting · ${waiting.title}`, since: null };
+  if (waiting) return { icon: "waiting", text: waiting.title, since: null };
   if (w.prs.some(p => p.error || !p.snapshot?.complete)) return { icon: "alert", text: "Some PR status is unavailable · retrying", since: null };
   if (w.prs.some(p => p.snapshot?.state === "OPEN" && p.snapshot.checksPending)) return { icon: "waiting", text: "Checks are running", since: null };
   if (w.prs.some(p => p.snapshot?.state === "OPEN")) return { icon: "waiting", text: "Waiting on review and merges", since: null };
