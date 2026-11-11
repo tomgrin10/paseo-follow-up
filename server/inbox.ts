@@ -520,7 +520,7 @@ export class Inbox {
     const result = await this.store.mutate(s => {
       const current = s.entries[agentId]?.brief;
       // Another answer won the race between the check above and this write: refuse rather than send both.
-      if (current?.id !== b.id || current.state !== "open") throw new Error("This brief was already answered or signed off.");
+      if (current?.id !== b.id || current.state !== "open") throw new Error(STALE_BRIEF.answered);
       this.step(s, agentId, event, at, appends);
       const brief = s.entries[agentId]?.brief;
       if (brief?.id === b.id) {

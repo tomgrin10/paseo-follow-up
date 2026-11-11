@@ -139,3 +139,16 @@ test("invariant: every answer path resolves a brief whose questions are all sett
   const server = await readFile(join(import.meta.dirname, "..", "index.server.ts"), "utf8");
   assert.match(server, /store\.onChanged = [\s\S]{0,400}inbox\.questionsChanged\(/, "store.onChanged resolves briefs from question state");
 });
+
+test("resolved states compose with delivery: an answered brief whose delivery failed stays answered and keeps Send again", () => {
+  const row = brief("brief:t1-1");
+  const failed = { ...row, state: "answered" as const, outcome: "You picked B · Follow-up", outcomeAt: T0, answerId: "a1", delivery: { state: "failed" as const, error: "Paseo didn't confirm it" } };
+  const shown = shownBrief(row, { brief: failed }, [q35("B")]);
+  assert.equal(shown.brief.state, "answered");
+  assert.equal(shown.brief.answerId, "a1", "Send again reuses the same answerId");
+  assert.equal(shown.brief.delivery?.state, "failed", "the card still says Not delivered, with Send again");
+  assert.equal(shown.actionable, false);
+  // The row itself already collapsed with a failed delivery, and a newer brief is live: still Send again.
+  const later = shownBrief(failed, { brief: brief("brief:t2") }, [q35("B")]);
+  assert.equal(later.brief.delivery?.state, "failed");
+});
