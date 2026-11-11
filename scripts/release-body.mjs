@@ -1,15 +1,15 @@
 // The GitHub release body for a tag: `node scripts/release-body.mjs v2.0.1-beta.3` prints it.
 // Every release (beta, rc, stable) has the same shape:
 //
-//   **Install:** `<command>` (needs Paseo X or newer).
+//   **Install:** `paseo plugin install npm:paseo-follow-up[@X]`
 //
 //   ## What's new
 //   <notes>
 //
 //   ## Install
-//   <install line> Needs Paseo X or newer.
+//   Already installed: `paseo plugin update <id of that release> [--version X]`. <dist-tag note> Needs Paseo F or newer.
 //
-//   <verification sentence>
+//   <verification sentence, only when that tag's publish workflow ran those checks>
 //
 // Only the notes differ. A stable version or a major's rc gets its CURATED CHANGELOG.md section (an rc carries the
 // major's, see notesVersion), including the collapsed "Full changelog" under it. A beta renders the changes/
@@ -24,6 +24,10 @@ import { fragmentBullets, isBeta, notesVersion } from "./release-notes.mjs";
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
 const HEADING = /^##\s+v?(\S+)(?:\s+\((\d{4}-\d{2}-\d{2})\))?\s*$/;
 export const VERIFIED = "This release passed plugin verification, isolated packed installation checks, and npm registry integrity verification before these notes were published.";
+/** The same claim for a page written after the fact (the backfill): the checks ran before npm, not before these notes. */
+export const VERIFIED_BEFORE_NPM = "This release passed plugin verification, isolated packed installation checks, and npm registry integrity verification before it was published to npm.";
+export const NO_NOTES = "No notes were written for this release.";
+export const LATEST = "https://github.com/tomgrin10/paseo-follow-up/releases/latest";
 export const MAINTENANCE = "Maintenance release; no user-visible changes.";
 export const UNWRITTEN = "No notes were written for this beta. What it added is in the next stable release's notes.";
 /** The last tag whose CHANGELOG.md still had the per-beta sections (1.4.0-beta.0 to beta.29). */
@@ -95,32 +99,85 @@ export function releaseNotes(tag, src) {
   return { notes: hadFragments ? MAINTENANCE : UNWRITTEN, source: hadFragments ? `no fragments since ${prev}` : "no notes source" };
 }
 
-/** The install lines: the plugin id and the Paseo floor come from paseo-plugin.json at the tag. */
-export function install(tag, src) {
+/**
+ * The install parts. The plugin id (it was different in 1.x) and the Paseo floor come from paseo-plugin.json at the tag.
+ * `pinned`: the fresh-install command names the version (always for a prerelease, and for any page written later).
+ */
+export function install(tag, src, { pinned = false } = {}) {
   const version = tag.replace(/^v/, "");
   const manifest = JSON.parse(src.file(tag, "paseo-plugin.json") ?? "{}");
   const id = manifest.id ?? "follow-up";
   const floor = String(manifest.requirements?.paseo ?? "").replace(/^\D+/, "") || null;
-  const needs = floor ? `Needs Paseo ${floor} or newer.` : "";
-  if (!isPre(version)) {
-    const cmd = "paseo plugin install npm:paseo-follow-up";
-    return { cmd, line: `\`${cmd}\`, or \`paseo plugin update ${id}\` if it's installed. ${needs}`.trim(), needs };
+  const pre = isPre(version);
+  const cmd = pre || pinned ? `paseo plugin install npm:paseo-follow-up@${version}` : "paseo plugin install npm:paseo-follow-up";
+  const update = pre || pinned ? `paseo plugin update ${id} --version ${version}` : `paseo plugin update ${id}`;
+  const parts = [`Already installed: \`${update}\`.`];
+  if (pre) parts.push(`Prereleases are on npm's \`beta\` dist-tag; the current stable release is [here](${LATEST}).`);
+  if (floor) parts.push(`Needs Paseo ${floor} or newer.`);
+  return { cmd, line: parts.join(" ") };
+}
+
+/** Whether the publish workflow at the tag ran what the verification sentence claims. */
+export function verifiedAtTag(tag, src) {
+  const wf = src.file(tag, ".github/workflows/publish-npm.yml") ?? "";
+  return /npm run verify/.test(wf) && /test:install/.test(wf) && /integrity/i.test(wf);
+}
+
+/**
+ * The body for a tag. `notes` overrides the notes (the backfill passes a page's own hand-written text);
+ * `backfill` marks a page written after the release (pinned install, and the verification claim says "before npm").
+ */
+export function releaseBody(tag, src, { notes = null, backfill = false } = {}) {
+  const text = notes ?? releaseNotes(tag, src).notes;
+  const i = install(tag, src, { pinned: backfill });
+  const verified = verifiedAtTag(tag, src) ? `\n\n${backfill ? VERIFIED_BEFORE_NPM : VERIFIED}` : "";
+  return `**Install:** \`${i.cmd}\`\n\n## What's new\n\n${text}\n\n## Install\n\n${i.line}${verified}\n`;
+}
+
+/** The sentences the frame replaces: the Paseo floor, the install id, install or update commands, generic check claims. */
+const BOILERPLATE = [
+  /^Requires Paseo\b/i, /installation ID\b/i, /^Install with\b/i, /^Already installed\b/i, /^(Validated|Verified) with\b/i,
+  /registry integrity\b/i, /^This release passed\b/i, /^Return to stable\b/i, /^Install:/i, /^Install or update\b/i, /^npm publication\b/i,
+  // The lead line of the body the publish workflow wrote before every page had notes.
+  /^Track workspace pull requests, queue follow-up work, and verify completion in Paseo\.$/,
+];
+/**
+ * A hand-written page's own notes, for the frame. Every paragraph is kept verbatim, except that the old install and
+ * verification paragraphs lose their boilerplate sentences (the frame says those); whatever else they say stays.
+ * The page's own install section and `## What's new` heading go, and its other `## ` headings move one level down
+ * under the frame's. Returns the kept text and every sentence or block it replaced.
+ */
+export function ownNotes(body) {
+  const blocks = (body ?? "").replace(/\r\n?/g, "\n").trim().split(/\n{2,}/);
+  const kept = [], replaced = [];
+  let inInstall = false;
+  for (const block of blocks) {
+    const b = block.trim();
+    const heading = /^##\s+(.*)$/.exec(b);
+    if (heading) {
+      inInstall = /^install$/i.test(heading[1].trim());
+      if (inInstall || /^what's new$/i.test(heading[1].trim())) { replaced.push(block); continue; }
+    }
+    if (/^```/.test(b) && /paseo plugin (install|update)/.test(b)) { replaced.push(block); continue; }
+    if (!heading && !/^[-*#]/.test(b)) {
+      const sentences = b.split(/(?<=[.!?])\s+(?=\S)/);
+      const keep = sentences.filter(x => !BOILERPLATE.some(re => re.test(x.trim())));
+      if (keep.length < sentences.length) {
+        replaced.push(...sentences.filter(x => !keep.includes(x)));
+        if (keep.length) kept.push(keep.join(" "));
+        continue;
+      }
+    }
+    if (inInstall) { replaced.push(block); continue; }
+    kept.push(block.replace(/^##(\s)/gm, "###$1"));
   }
-  const stables = versions(src).filter(v => !isPre(v) && compare(v, version) < 0).sort(compare);
-  const stable = stables.length ? ` The stable release is ${stables[stables.length - 1]}.` : "";
-  const cmd = `paseo plugin install npm:paseo-follow-up@${version}`;
-  return { cmd, line: `\`${cmd}\`, or \`paseo plugin update ${id} --version ${version}\` if it's installed. Prereleases are on npm's \`beta\` dist-tag.${stable} ${needs}`.trim(), needs };
+  return { text: kept.join("\n\n").trim(), replaced };
 }
 
-export function releaseBody(tag, src) {
-  const { notes } = releaseNotes(tag, src);
-  const i = install(tag, src);
-  const top = `**Install:** \`${i.cmd}\`${i.needs ? ` (${i.needs.replace(/^Needs/, "needs").replace(/\.$/, "")})` : ""}.`;
-  return `${top}\n\n## What's new\n\n${notes}\n\n## Install\n\n${i.line}\n\n${VERIFIED}\n`;
-}
-
-/** Whether an existing GitHub release body already has notes: a bullet, a section heading, or this format. */
+/** Whether a page body has hand-written notes: a bullet or a section heading. */
 export const hasNotes = body => /^\s*[-*]\s+\S/m.test(body ?? "") || /^#{2,3}\s+\S/m.test(body ?? "");
+/** Whether a page body is already in this format. */
+export const framed = body => /^\*\*Install:\*\* `/.test(body ?? "") && /^## What's new$/m.test(body ?? "") && /^## Install$/m.test(body ?? "");
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isMain) {
