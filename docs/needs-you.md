@@ -105,6 +105,16 @@
 - **What the brief is.** The brief (`shared/brief.ts`) is one card appended to an agent's timeline when it needs
   the developer. `pickBrief` chooses its content by precedence: permission, paused, error, the agent's `needs_you`,
   Follow-up's PR state, extraction. It never invents an ask. States: open, answered, signed, superseded.
+- **PR facts only for a PR the brief references** (`brief-pr-facts-referenced`, `briefFactsViolations` in
+  `shared/status-invariants.ts`). A brief that links PRs shows the first linked PR's own state (`BriefSources.prs`,
+  from `prStates`); a review that links none shows the agent's newest open PR; nothing else shows any. `factsPr` names
+  the PR, and a PR's new state (`facts` step) lands only on a card whose `factsPr` matches. Error briefs show none: a
+  failed turn is about the turn, and CI state beside an API error reads as its cause.
+- **Done on Action briefs.** An Action brief's one move is Done (`follow.brief-action` `move: "done"`, agent tool
+  `brief_action` with `move: done`). The server sends `Done: <ask>` as the developer (ledger `developer`, so the flag
+  clears) and collapses the card to `Done · <ask>`. The card collapses at once; `runUndoable` (`client/toast-store.ts`)
+  holds the send for the toast's Undo window, since a sent message can't be taken back. With no ToastHost mounted it
+  sends at once. Only Action briefs take it; reviews, decisions and failed turns are refused.
 - **`needs_you`** (`follow.needs-you`) is the agent's end-of-turn statement.
   - **Point, don't restate.** To refer to questions already open, pass `questions: ["Qn"]` instead of restating
     them as decisions.

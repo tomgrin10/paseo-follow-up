@@ -72,7 +72,7 @@ export const RPC_TOOLS: readonly RpcTool[] = [
   // Needs-you: the brief card and the inbox's other actions
   { name: "inbox_brief", rpc: "follow.inbox-brief", kind: "read", input: z.strictObject({ agentId: id }) },
   { name: "brief_action", rpc: "follow.brief-action", kind: "planned", before: { rpc: "follow.inbox-brief", input: a => ({ agentId: a.agentId }) },
-    input: z.strictObject({ agentId: id.optional(), briefId: z.string().max(300).optional(), decisionId: z.string().max(20).optional(), choice: briefChoiceSchema.optional(), words: z.string().trim().max(2000).optional(), move: z.enum(["retry"]).optional(),
+    input: z.strictObject({ agentId: id.optional(), briefId: z.string().max(300).optional(), decisionId: z.string().max(20).optional(), choice: briefChoiceSchema.optional(), words: z.string().trim().max(2000).optional(), move: z.enum(["retry", "done"]).optional(),
       choices: z.array(z.object({ decisionId: z.string().max(20), choice: briefChoiceSchema, words: z.string().trim().max(2000).optional() })).min(1).max(10).optional(), ...confirm }),
     guard: (a, caller) => a.agentId === caller ? "brief_action answers another agent's brief for the developer; your own brief is the developer's to answer." : null },
   { name: "inbox_act", rpc: "follow.inbox-act", kind: "planned",

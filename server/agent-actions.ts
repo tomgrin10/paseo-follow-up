@@ -1,3 +1,4 @@
+import { agentActor, type Actor } from "../shared/actor";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { ActionPlan } from "../shared/pr-actions";
@@ -96,7 +97,9 @@ export type AgentActionDeps = {
   /** Each known repository's PR workflow (Settings → Following → Shipping PRs). */
   prWorkflows?: () => Promise<{ default: string; repos: { repo: string; effective: string; setting: string; reason: string; reviewFix: unknown }[]; reviewFix: unknown }>;
   /** Runs a developer RPC's own handler (the button's path), and checks an input against its contract. */
-  rpc?: { call(method: string, input: unknown): Promise<unknown>; validate(method: string, input: unknown): Promise<unknown> };
+  rpc?: { call(method: string, input: unknown, actor?: Actor): Promise<unknown>; validate(method: string, input: unknown): Promise<unknown> };
+  /** The acting agent's title, for the "on the developer's behalf" record (shared/actor.ts). The caller is live, so reading it wakes nothing. */
+  agentTitle?: (agentId: string) => Promise<string | null>;
   /** One agent's list entry for a main-agent claim (metadata; never loads it). Null when it's gone. */
   agentInfo?: (agentId: string) => Promise<MainAgentInfo>;
   /** Settings → Display (host-scoped preferences, trust bypass among them). */
@@ -231,12 +234,14 @@ export class AgentActions {
     if (refusal) throw new Error(refusal);
     const { planId: _p, confirm: _c, ...given } = args;
     const input = t.toRpc ? t.toRpc(given) : given;
-    if (t.kind === "read") return this.d.rpc.call(t.rpc, input);
-    if (t.kind === "write") { const out = await this.d.rpc.call(t.rpc, input); await this.note(caller, caller, t.name); return out; }
+    // Every RPC an agent tool runs carries the acting agent, so its handler never records the developer.
+    const actor = agentActor(caller, await this.d.agentTitle?.(caller).catch(() => null));
+    if (t.kind === "read") return this.d.rpc.call(t.rpc, input, actor);
+    if (t.kind === "write") { const out = await this.d.rpc.call(t.rpc, input, actor); await this.note(caller, caller, t.name); return out; }
     // Planned: the RPC's own contract checks the arguments now, so a bad call fails at the dry run.
     const checked = await this.d.rpc.validate(t.rpc, input).catch((error: unknown) => { throw new Error(`${t.name}: ${error instanceof Error ? error.message : String(error)}`); });
     const before = t.before ? await this.d.rpc.call(t.before.rpc, t.before.input ? t.before.input(given) : {}).catch(() => null) : undefined;
-    const planId = this.plan(caller, t.name as AgentTool, async () => { const out = await this.d.rpc!.call(t.rpc, checked); await this.note(caller, caller, t.name); return out; });
+    const planId = this.plan(caller, t.name as AgentTool, async () => { const out = await this.d.rpc!.call(t.rpc, checked, actor); await this.note(caller, caller, t.name); return out; });
     return { dryRun: true, planId, tool: t.name, change: checked, ...(before !== undefined ? { before } : {}),
       next: `Only when the developer asked for this: call ${t.name} with confirm=true and planId=${planId} within 5 minutes.` };
   }

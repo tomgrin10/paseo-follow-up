@@ -143,6 +143,35 @@ test("runAction: a plain-string success, a default failure, reopen, and a key th
   } finally { bindToast(null); }
 });
 
+test("runUndoable: Undo inside the window sends nothing; otherwise the work runs once the toast goes", async t => {
+  const { runUndoable, toastsNow, hosts, dismissToast } = await store();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  hosts.push(97);
+  try {
+    const sent: string[] = []; let undone = 0;
+    const spec = { label: "Done", run: async () => { sent.push("Done: Rotate the key"); }, success: "Marked done", failure: "Done not sent" };
+    runUndoable("Marked done", spec, () => { undone++; });
+    const toast = toastsNow().at(-1)!;
+    assert.equal(toast.message, "Marked done"); assert.deepEqual(toast.actions.map(a => a.label), ["Undo"]);
+    toast.actions[0].onPress(); dismissToast(toast.id);
+    t.mock.timers.tick(6_100); await new Promise(r => setImmediate(r));
+    assert.deepEqual(sent, [], "undone: the agent never hears it"); assert.equal(undone, 1);
+    runUndoable("Marked done", spec, () => { undone++; });
+    assert.deepEqual(sent, [], "nothing goes out while Undo is on screen");
+    t.mock.timers.tick(6_100); await new Promise(r => setImmediate(r));
+    assert.deepEqual(sent, ["Done: Rotate the key"]);
+    assert.equal(toastsNow().some(x => x.message === "Marked done" && x.actions.length === 0), false, "no second toast after the send");
+  } finally { hosts.splice(hosts.indexOf(97), 1); for (const x of toastsNow()) dismissToast(x.id); t.mock.timers.reset(); }
+});
+
+test("runUndoable with no ToastHost: no Undo to offer, so it sends at once and the host toast confirms", async () => {
+  const { runUndoable } = await store();
+  const host: string[] = []; const sent: string[] = [];
+  runUndoable("Marked done", { label: "Done", run: async () => { sent.push("x"); }, success: "Marked done", failure: "Done not sent", toast: { show: m => { host.push(m); }, error: () => undefined } }, () => undefined);
+  await new Promise(r => setImmediate(r));
+  assert.deepEqual(sent, ["x"]); assert.deepEqual(host, ["Marked done"]);
+});
+
 test("runAction without a ToastHost: the host toast says it wasn't sent and where to retry", async () => {
   const { runAction } = await store();
   const host: string[] = [];

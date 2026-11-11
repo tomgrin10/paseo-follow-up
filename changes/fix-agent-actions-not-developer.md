@@ -1,0 +1,1 @@
+- When an agent answers a card or question, or acts on a Needs-you row, for you, Follow-up records that agent, not you. The card and chat say "<agent>'s answer", and the answer never clears a flag or approves a new workspace.
