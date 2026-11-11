@@ -134,7 +134,10 @@ export default function contribute(server: PluginServerContext) {
   let workspaceRepos: Map<string, string> = new Map();
   const workspaceRepo = (w: Workspace): string | null => (w.prs.find(p => p.snapshot?.state === "OPEN") ?? w.prs.at(-1))?.repo ?? workspaceRepos.get(w.id) ?? null;
   const knownRepos = (state: { workspaces: Workspace[] }) => new Set([...state.workspaces.filter(w => w.enable_tracking && !w.archived).flatMap(w => w.prs.map(p => repoKey(p.repo))), ...[...workspaceRepos.values()].map(repoKey)]);
-  store.onChanged = scopeWriter(directory, { agent: w => prWorkflow.agentWorkflow(workspaceRepo(w)), summary: state => workflowSummary([...knownRepos(state)].map(r => prWorkflow.cachedWorkflow(r))) });
+  const writeScopes = scopeWriter(directory, { agent: w => prWorkflow.agentWorkflow(workspaceRepo(w)), summary: state => workflowSummary([...knownRepos(state)].map(r => prWorkflow.cachedWorkflow(r))) });
+  // Every write: scopes for the hooks, then any open brief whose questions are now all settled resolves (every answer
+  // path writes here, so one check covers them all; tests/stale-brief.test.ts).
+  store.onChanged = async state => { await writeScopes(state); await inbox.questionsChanged(state.workspaces).catch(() => undefined); };
   const agentHooks = new AgentHooks(directory, clientEntry());
   const historyCache = HistoryCache.at(directory);
   const gateway = new PaseoGateway(undefined, undefined, undefined, historyCache);

@@ -10,7 +10,8 @@ import { prActionBlocks } from "../shared/pr-actions";
 import { configuredReviewers, noReviewers, reviewerLabel, withoutAuthor } from "../shared/reviewers";
 import { classify, finishedReply, turnPrompt, type Sources } from "./inbox-classifier";
 import { STALE_BRIEF } from "../shared/errors";
-import { briefOrigin, briefStep, pickBrief, shouldReopen, validPick, type Brief, type BriefEvent, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
+import type { Question } from "../shared/questions";
+import { briefOrigin, briefQuestionsEvent, briefStep, pickBrief, shouldReopen, validPick, type Brief, type BriefEvent, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
 import { OTHER_LABEL, answerTitle, isOther } from "../shared/questions";
 
 /** The flag store: plugin-data/follow-through/inbox.json. A new file, so existing state never changes shape. */
@@ -419,6 +420,26 @@ export class Inbox {
     const state = await this.store.snapshot();
     agentIds = agentIds.filter(id => state.entries[id]);
     await this.apply(agentIds.map(agentId => ({ agentId, event: { type: "archive" } as const })));
+  }
+
+  /**
+   * Follow-up's state changed (store.onChanged): an open brief whose questions are now all answered or withdrawn, by
+   * any path, resolves here, keeps the answers, and its chat row is re-appended. Cheap: only open briefs with questions.
+   */
+  async questionsChanged(workspaces: readonly { id: string; questions: Question[] }[]): Promise<void> {
+    const snap = await this.store.snapshot();
+    const due = Object.entries(snap.entries).filter(([, e]) => e?.brief?.state === "open" && e.brief.questionIds.length && e.brief.workspaceId);
+    if (!due.length) return;
+    const appends: { agentId: string; brief: Brief }[] = [];
+    await this.store.mutate(state => {
+      for (const [agentId] of due) {
+        const b = state.entries[agentId]?.brief;
+        const w = b?.workspaceId ? workspaces.find(w => w.id === b.workspaceId) : undefined;
+        const event = b && w ? briefQuestionsEvent(b, w.questions) : null;
+        if (event) this.step(state, agentId, event, this.iso(), appends);
+      }
+    });
+    await this.flush(appends);
   }
 
   async workspaceArchived(workspaceId: string): Promise<void> {
