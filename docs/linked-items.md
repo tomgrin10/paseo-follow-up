@@ -59,7 +59,8 @@ The design is §5 of the Linked items design; the rules below are what the code 
 
 - **The references line** (`ReferencesLine`) sits under the Summary and above the status sentence in the panel, the
   larger view and Home's detail pane. It holds the Spec chip (moved out of the title row, so it never jumps) and the
-  Linked chip. On phones both chips ride in the panel's 44px bar instead. With no spec and nothing linked there is no
+  Linked chip. Phones show the same line under the Summary, never in the 44px bar: beside Home and settings it
+  would push settings off-screen at 390pt. With no spec and nothing linked there is no
   line at all, so the panel looks as it did before (`referencesShown`).
 - **The Linked chip** (`linkedChip`): a mark and a count per kind, in the order linear, slack, artifact, doc, issue,
   link; at most 4 kinds on desktop and 3 on phones, then `+N` (the hidden kinds' item total). Counts are the view's
@@ -68,13 +69,15 @@ The design is §5 of the Linked items design; the rules below are what the code 
 - **The sheet** (`LinkedSheet`, a host `Modal` titled "Linked"):
   - One field, "Filter, or paste a link or key". Typing filters. A key or URL not in the list becomes a "+ Add …" row
     (`pasteToAdd`), and Enter adds it through `follow.set-linked-items`. The server's refusal shows inline under the
-    field. A PR is refused on the spot. Desktop focuses the field; phones don't.
-  - Groups by kind (`linkedGroups`), headed "Linear · 6" without the spec. Open items first (the spec on top, then
-    newest), done and cancelled behind "N done". More than 10 open rows show 8 plus "Show N more".
+    field. A PR is refused on the spot, and so is anything new at the 50-item cap (`LINKED_FULL`, the server's copy
+    too), so there is never an Add row that can only fail. Desktop focuses the field; phones don't.
+  - The spec, when there is one, is its own row above the groups (`linkedSpec`): the chip doesn't count it, so it sits
+    under no head. Groups by kind (`linkedGroups`), headed "Linear · 6", each head equal to its rows. Open items
+    first, newest first; done and cancelled behind "N done". More than 10 open rows show 8 plus "Show N more".
   - Rows (`linkedRow`): a lead, the title, and who linked it and why. A row opens the item in the browser. `⋯`
     (desktop: on hover or focus; phones: always) shows Copy link and Remove inline, or Edit spec link… on the spec,
-    which swaps to the spec sheet. Remove is immediate, with an in-sheet "Removed … · Undo" for 6 s (host toasts can't
-    carry an action).
+    which swaps to the spec sheet. Remove is immediate, with an in-sheet "Removed … · Undo" for 6 s, 8 on phones, held while
+    hovered or focused (host toasts can't carry an action).
   - First load shows 3 skeleton rows. A change writes the returned view into the `linkedKey` query and invalidates
     Home's index; saving the spec invalidates `linkedKey` too.
 - **The disclosure row** (`LinkedItemsRow`): "Linked items" under the spec row in "Spec, agent and recovery", with
@@ -82,6 +85,7 @@ The design is §5 of the Linked items design; the rules below are what the code 
 - **Home search** matches linked keys and titles (search field `linked`), and a match through a link says so on the
   row's second line: "Linked · HER-1312 Vendor sync drops SCIM groups". The index comes from `follow.linked-index`,
   fetched only while the search field has text and kept a minute (`useLinkedIndex`), so Home's list poll never reads
-  `linked.json`.
+  `linked.json`. Numbers match exactly or by prefix, never by a typo (`tokenMatch`), so "HER-1312" can't find the
+  workspace linking HER-1352; words keep their typo tolerance.
 - **Reads:** a surface showing the line reads `follow.linked-items` once when it mounts and keeps it a minute. Nothing
   polls.

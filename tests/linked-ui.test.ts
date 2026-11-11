@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { findSvgIconProblem, PLUGIN_SVG_ICON_MAX_BYTES } from "@getpaseo/plugin";
 import { emptyLinkedFile, emptyWorkspaceLinks, linkedSearchIndex, linkedView, upsertItem, type LinkedViewItem } from "../shared/linked";
-import { CHIP_MAX, FOLD_SHOW, LINKED_EMPTY, linkedChip, linkedGroups, linkedRow, linkedSearchText, pasteToAdd, referencesShown } from "../shared/linked-display";
+import { CHIP_MAX, FOLD_SHOW, LINKED_EMPTY, linkedChip, linkedGroups, linkedRow, linkedSearchText, linkedSpec, pasteToAdd, referencesShown } from "../shared/linked-display";
+import { LIMITS } from "../shared/linked";
 import { homeSearchDocs, indexDocs, search } from "../shared/search";
 import { PARITY } from "../server/agent-parity";
 import { BRAND_ICONS } from "../client/brand-icons";
@@ -60,7 +61,7 @@ test("references line: hidden with no spec and nothing linked, shown for either"
   assert.equal(referencesShown(null, { slack: 1 }), true);
 });
 
-test("groups: chip order, open first and newest first, the spec on top, done folded, heads without the spec", () => {
+test("groups: chip order, open first and newest first, done folded; the spec stands alone, so every head equals its rows", () => {
   const items = [
     item({ key: "slack:C1/1730000000.000100", kind: "slack", title: "#eng-identity" }),
     item({ key: "HER-1", kind: "linear", statusTone: "done", status: "Done" }),
@@ -75,8 +76,13 @@ test("groups: chip order, open first and newest first, the spec on top, done fol
   assert.deepEqual(g[0].rows.map(i => i.key), ["HER-4", "HER-2"]);
   assert.deepEqual(g[0].done.map(i => i.key), ["HER-3", "HER-1"]);
   assert.equal(g[0].count, 4);
-  assert.equal(g[2].rows[0].spec, true, "the spec leads its group");
-  assert.equal(g[2].count, 1, "the head leaves the spec out, like the chip");
+  // The spec isn't counted (the chip leaves it out), so it isn't a row under a head either: a head says 1 above 1 row.
+  assert.deepEqual(g[2].rows.map(i => i.key), ["https://claude.ai/code/artifact/other"]);
+  for (const x of g) assert.equal(x.count, x.rows.length + x.moreOpen + x.done.length, `${x.head}: the head counts exactly its rows`);
+  assert.equal(linkedSpec(items)?.key, "https://claude.ai/code/artifact/spec");
+  assert.equal(linkedSpec(items, "spec")?.spec, true, "the filter finds it by 'spec'");
+  assert.equal(linkedSpec(items, "slack"), null);
+  assert.equal(linkedSpec(items.filter(i => !i.spec)), null);
 });
 
 test("groups: more than 10 open rows show 8 plus Show N more; 10 or fewer never fold", () => {
@@ -118,6 +124,16 @@ test("paste to add: a new key or URL is an Add row, a known one filters, a PR is
   assert.equal(generic.action === "add" && generic.label, "example.com › scim");
 });
 
+test("paste to add: at the cap there's no Add row, only the reason, and the spec doesn't count toward it", () => {
+  const full = Array.from({ length: LIMITS.items }, (_, i) => item({ key: `HER-${2000 + i}`, kind: "linear" }));
+  const refused = pasteToAdd("https://example.com/runbooks/retention", full)!;
+  assert.equal(refused.action, "refuse");
+  assert.match(refused.action === "refuse" ? refused.message : "", /50 linked\. Remove one/);
+  assert.equal(pasteToAdd("HER-2000", full), null, "a known key still just filters at the cap");
+  const withSpec = [...full.slice(1), item({ key: "https://claude.ai/code/artifact/spec", kind: "artifact", spec: true, origin: "spec" })];
+  assert.equal(pasteToAdd("HER-9", withSpec)?.action, "add", "49 items plus the spec: room for one more");
+});
+
 test("rows: who linked it and why, Linear state glyphs, brand marks, no personal names", () => {
   const main = "agent-main";
   const lin = linkedRow(item({ key: "HER-1312", kind: "linear", title: "Okta SCIM sync drops nested groups", status: "In Progress", statusTone: "active", by: main, why: "started from this" }), main);
@@ -149,6 +165,16 @@ test("Home search: a linked key or title finds the workspace and says why on the
   assert.equal(linkedSearchText({ key: "https://example.com/a/b", kind: "link", title: null }), "example.com › b");
 });
 
+test("Home search: a key matches exactly; numbers never match by a one-digit typo", () => {
+  const row = (id: string, title: string) => ({ key: `ws:${id}`, workspaceId: id, title, agent: null, at: null, activityAt: null, project: null, line: null });
+  const model = { groups: [{ id: "working", items: [row("w1", "Vendor sync"), row("w2", "CSV export for vendor risk scores")] }], byKey: new Map() } as unknown as HomeModel;
+  const linked = { w1: [{ key: "HER-1312", kind: "linear" as const, title: "Okta SCIM sync drops nested groups" }], w2: [{ key: "HER-1352", kind: "linear" as const, title: "CSV columns" }] };
+  const index = indexDocs(homeSearchDocs({ model, paseo: [], tracked: [], linked }));
+  assert.deepEqual(search(index, "HER-1312").map(h => h.key), ["ws:w1"], "HER-1352 is a different issue");
+  assert.deepEqual(search(index, "her-13").map(h => h.key).sort(), ["ws:w1", "ws:w2"], "a prefix still finds both while typing");
+  assert.deepEqual(search(index, "vendr").map(h => h.key).sort(), ["ws:w1", "ws:w2"], "words keep their typo tolerance");
+});
+
 test("Home search index: stored items only, per workspace, from one read", () => {
   const file = emptyLinkedFile();
   file.workspaces.w1 = emptyWorkspaceLinks();
@@ -172,10 +198,11 @@ test("parity: the client's linked RPCs map to the agent tools", () => {
   assert.ok("tools" in PARITY["follow.linked-index"]);
 });
 
-test("placement: the Spec chip left the title row for the references line; phones keep it in the bar", async () => {
+test("placement: the Spec chip left the title row for the references line, on phones too (never the 44px bar)", async () => {
   const header = await readFile("client/header.tsx", "utf8");
   assert.doesNotMatch(header, /<SpecChip/, "the header no longer draws SpecChip itself");
-  assert.match(header, /<ReferencesLine workspace=\{w\} theme=\{theme\} compact bar \/>/);
+  assert.doesNotMatch(header.slice(header.indexOf("const controls"), header.indexOf("const tail")), /ReferencesLine/, "nothing but icons in the bar's controls");
+  assert.equal(header.match(/<ReferencesLine /g)?.length, 2, "the phone panel and the desktop header each draw the line once");
   const home = await readFile("client/home.tsx", "utf8");
   assert.match(home, /<ReferencesLine/, "Home's detail pane shows the same line");
   const panel = await readFile("client/panel.tsx", "utf8");

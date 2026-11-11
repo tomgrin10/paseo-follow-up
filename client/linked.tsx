@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { linkedIndexRpc, linkedItemsRpc, setLinkedItemsRpc } from "../shared/contracts";
 import type { LinkedKind, LinkedView, LinkedViewItem } from "../shared/linked";
 import type { Workspace } from "../shared/model";
-import { CHIP_MAX, LINKED_EMPTY, linkedChip, linkedGroups, linkedRow, pasteToAdd, referencesShown, type LinkedChipModel, type RowGlyph } from "../shared/linked-display";
+import { CHIP_MAX, LINKED_EMPTY, linkedChip, linkedGroups, linkedRow, linkedSpec, pasteToAdd, referencesShown, type LinkedChipModel, type RowGlyph } from "../shared/linked-display";
 import { BRAND_ICONS } from "./brand-icons";
 import { Button, CardRow, IconButton, errorText, space, text, type Theme } from "./kit";
 import { Skeleton } from "./motion";
@@ -63,7 +63,8 @@ export function LinkedGlyph({ glyph, colors: c, size }: { glyph: RowGlyph | { ty
  */
 export function LinkedChip({ model, theme, compact, onPress }: { model: LinkedChipModel; theme: Theme; compact: boolean; onPress: () => void }) {
   const c = theme.colors;
-  const mark = compact ? 14 : 12;
+  // 14 on both: at 12 the Linear mark's stripes blur into a blob.
+  const mark = 14;
   const count = { color: c.foreground, fontSize: 12, lineHeight: 16, fontWeight: "600" as const, fontVariant: ["tabular-nums" as const] };
   // The desktop tooltip: React Native Web drops `title` on a Pressable, so it goes on the DOM node itself.
   const ref = useRef<View | null>(null);
@@ -85,7 +86,11 @@ export function LinkedChip({ model, theme, compact, onPress }: { model: LinkedCh
  */
 export function useLinkedSheets(workspace: Workspace, theme: Theme, compact: boolean): { open: () => void; editSpec: () => void; element: ReactNode } {
   const [which, setWhich] = useState<"linked" | "spec" | null>(null);
-  const element = <>
+  // Mounted on first open and kept (so closing still animates): a panel hosts this twice (references line and the
+  // disclosure row), and a surface that's never opened mounts no sheet at all.
+  const [used, setUsed] = useState(false);
+  useEffect(() => { if (which) setUsed(true); }, [which]);
+  const element = (used || which) && <>
     <LinkedSheet workspace={workspace} theme={theme} compact={compact} open={which === "linked"} onClose={() => setWhich(null)} onEditSpec={() => setWhich("spec")} />
     <SpecSheet workspace={workspace} open={which === "spec"} theme={theme} compact={compact} onClose={() => setWhich(null)} />
   </>;
@@ -94,17 +99,17 @@ export function useLinkedSheets(workspace: Workspace, theme: Theme, compact: boo
 
 /**
  * The references line: the Spec chip (moved out of the title row, so it never jumps) and the Linked chip. Nothing at
- * all when there's no spec and nothing linked, so such a panel looks exactly as before. `bar`: the chips alone, for
- * the phone panel's 44px bar.
+ * all when there's no spec and nothing linked, so such a panel looks exactly as before. Phones too:
+ * it wraps under the Summary, never in the 44px bar (which can't hold it beside Home and settings at 390pt).
  */
-export function ReferencesLine({ workspace: w, theme, compact, bar = false }: { workspace: Workspace; theme: Theme; compact: boolean; bar?: boolean }) {
+export function ReferencesLine({ workspace: w, theme, compact }: { workspace: Workspace; theme: Theme; compact: boolean }) {
   const query = useLinked(w.id);
   const sheets = useLinkedSheets(w, theme, compact);
   const counts = query.data?.counts as LinkedView["counts"] | undefined;
   if (!referencesShown(w.spec?.url, counts)) return sheets.element;
   const model = linkedChip(counts, compact ? CHIP_MAX.phone : CHIP_MAX.desktop);
   return <>
-    <View style={{ flexDirection: "row", alignItems: "center", gap: compact ? 6 : 8, flexWrap: bar ? "nowrap" : "wrap", ...(bar ? null : { marginTop: 2 }) }}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: compact ? 6 : 8, flexWrap: "wrap", marginTop: 2 }}>
       {!!w.spec?.url && <SpecChip workspace={w} theme={theme} compact={compact} />}
       {model && <LinkedChip model={model} theme={theme} compact={compact} onPress={sheets.open} />}
     </View>
@@ -150,7 +155,9 @@ export function LinkedSheet({ workspace: w, theme, compact, open, onClose, onEdi
   const field = useRef<NativeTextInput | null>(null);
   const [focused, setFocused] = useState(false);
   useEffect(() => { if (open) { setFilter(""); setError(null); setNote(null); setMenu(null); setRemoved(null); } }, [open]);
-  useEffect(() => { if (!removed) return; const id = setTimeout(() => setRemoved(null), 6000); return () => clearTimeout(id); }, [removed]);
+  // Undo waits while the pointer or focus is on it, and a little longer on phones.
+  const [holdUndo, setHoldUndo] = useState(false);
+  useEffect(() => { if (!removed || holdUndo) return; const id = setTimeout(() => setRemoved(null), compact ? 8000 : 6000); return () => clearTimeout(id); }, [removed, holdUndo, compact]);
   // Desktop focuses the field; phones don't, so the keyboard doesn't cover the list.
   useEffect(() => { if (open && !compact) { const id = setTimeout(() => field.current?.focus(), 50); return () => clearTimeout(id); } }, [open, compact]);
   const settle = (view: LinkedView) => {
@@ -171,6 +178,8 @@ export function LinkedSheet({ workspace: w, theme, compact, open, onClose, onEdi
   const items = (query.data?.items ?? []) as LinkedViewItem[];
   const paste = pasteToAdd(filter, items);
   const groups = useMemo(() => linkedGroups(items, { query: paste ? "" : filter, expanded }), [items, filter, expanded, paste]);
+  // The spec stands alone above the groups: the chip doesn't count it, so it sits under no head.
+  const spec = linkedSpec(items, paste ? "" : filter);
   const add = () => { if (paste?.action === "add" && !run.isPending) run.mutate({ action: "add", ref: paste.ref, label: paste.label }); };
   const toggle = (set: ReadonlySet<LinkedKind>, kind: LinkedKind) => { const next = new Set(set); if (next.has(kind)) next.delete(kind); else next.add(kind); return next; };
   const gutter = sp.gutter + (compact ? 0 : 8);
@@ -183,17 +192,17 @@ export function LinkedSheet({ workspace: w, theme, compact, open, onClose, onEdi
           borderColor: error ? c.statusDanger : focused ? c.foregroundMuted : c.border, backgroundColor: c.surface1 }}>
           <Icon name="Search" size={compact ? 16 : 14} color={c.foregroundMuted} />
           <TextInput ref={field} accessibilityLabel="Filter, or paste a link or key" placeholder="Filter, or paste a link or key" placeholderTextColor={c.foregroundMuted}
-            value={filter} onChangeText={v => { setFilter(v); setError(null); }} onSubmitEditing={add} blurOnSubmit={false} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} autoCapitalize="none" autoCorrect={false} returnKeyType={paste?.action === "add" ? "done" : "search"}
+            value={filter} onChangeText={v => { setFilter(v); setError(null); setNote(null); }} onSubmitEditing={add} blurOnSubmit={false} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} autoCapitalize="none" autoCorrect={false} returnKeyType={paste?.action === "add" ? "done" : "search"}
             style={[t.body, { flex: 1, minWidth: 0, paddingVertical: 6, ...(Platform.OS === "web" ? { outlineStyle: "none" } as object : null) }]} />
-          {!!filter && <IconButton theme={theme} compact={false} icon="X" label="Clear" onPress={() => { setFilter(""); setError(null); field.current?.focus(); }} />}
+          {!!filter && <IconButton theme={theme} compact={compact} icon="X" label="Clear" onPress={() => { setFilter(""); setError(null); field.current?.focus(); }} />}
         </View>
         {error && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusDanger }]}>{error}</Text>}
         {note && <Text accessibilityLiveRegion="polite" style={t.meta}>{note}</Text>}
       </View>
 
-      {/* Host toasts can't carry an action, so Undo lives in the sheet for 6 s, like Home's undo bar,
+      {/* Host toasts can't carry an action, so Undo lives in the sheet for 6 s (8 on phones; held while hovered or focused), like Home's undo bar,
           right under the field so it's on screen however far the list scrolled. */}
-      {removed && <View accessibilityLiveRegion="polite" style={{ flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: gutter, marginBottom: 10, paddingLeft: 12, paddingRight: 4, paddingVertical: 4,
+      {removed && <View accessibilityLiveRegion="polite" {...({ onMouseEnter: () => setHoldUndo(true), onMouseLeave: () => setHoldUndo(false), onFocus: () => setHoldUndo(true), onBlur: () => setHoldUndo(false) } as object)} style={{ flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: gutter, marginBottom: 10, paddingLeft: 12, paddingRight: 4, paddingVertical: 4,
         borderRadius: 8, backgroundColor: c.surface2 }}>
         <Text numberOfLines={1} style={[t.meta, { flex: 1, color: c.foreground }]}>Removed {removed.label}</Text>
         <Button theme={theme} compact={compact} kind="ghost" icon="Undo2" title="Undo" accessibilityLabel={`Undo: link ${removed.label} again`} disabled={run.isPending}
@@ -218,8 +227,12 @@ export function LinkedSheet({ workspace: w, theme, compact, open, onClose, onEdi
       </View>
       : query.error ? <Text accessibilityRole="alert" style={[t.meta, { paddingHorizontal: gutter, paddingTop: 8, color: c.statusDanger }]}>Couldn't load the list: {errorText(query.error)}</Text>
       : !items.length ? <Text style={[t.meta, { paddingHorizontal: gutter, paddingTop: 8, fontSize: compact ? 14 : 13, lineHeight: compact ? 20 : 18 }]}>{LINKED_EMPTY}</Text>
-      : !groups.length && !paste ? <Text style={[t.meta, { paddingHorizontal: gutter, paddingTop: 8 }]}>Nothing linked matches “{filter.trim()}”.</Text>
-      : groups.map(g => <View key={g.kind} style={{ paddingTop: compact ? 14 : 12 }}>
+      : !groups.length && !spec && !paste ? <Text style={[t.meta, { paddingHorizontal: gutter, paddingTop: 8 }]}>Nothing linked matches “{filter.trim()}”.</Text>
+      : <>{spec && <View style={{ paddingTop: compact ? 10 : 8 }}>
+        <LinkedRow item={spec} mainAgentId={w.mainAgentId} theme={theme} compact={compact} gutter={gutter} menuOpen={menu === spec.key}
+          onMenu={() => setMenu(m => m === spec.key ? null : spec.key)} onEditSpec={() => { setMenu(null); onEditSpec(); }} onRemove={() => undefined} />
+      </View>}
+      {groups.map(g => <View key={g.kind} style={{ paddingTop: compact ? 14 : 12 }}>
         <Text accessibilityRole="header" style={[t.section, { paddingHorizontal: gutter, paddingBottom: 4 }]}>{g.head} · {g.count}</Text>
         {g.rows.map(i => <LinkedRow key={i.key} item={i} mainAgentId={w.mainAgentId} theme={theme} compact={compact} gutter={gutter} menuOpen={menu === i.key}
           onMenu={() => setMenu(m => m === i.key ? null : i.key)} onEditSpec={() => { setMenu(null); onEditSpec(); }}
@@ -231,7 +244,7 @@ export function LinkedSheet({ workspace: w, theme, compact, open, onClose, onEdi
             onMenu={() => setMenu(m => m === i.key ? null : i.key)} onEditSpec={() => { setMenu(null); onEditSpec(); }}
             onRemove={label => { setMenu(null); run.mutate({ action: "remove", ref: i.key, label }); }} />)}
         </>}
-      </View>)}
+      </View>)}</>}
 
     </Modal.Content>
   </Modal>;
@@ -262,11 +275,12 @@ function LinkedRow({ item: i, mainAgentId, theme, compact, gutter, menuOpen, onM
   const url = i.url;
   const showMenu = compact || hover || focus || menuOpen;
   const finished = i.statusTone === "done" || i.statusTone === "cancelled";
-  return <View {...({ onMouseEnter: () => setHover(true), onMouseLeave: () => setHover(false) } as object)}
+  // Focus anywhere in the row (the row link or ⋯ itself) shows ⋯: a focused control is never left at opacity 0.
+  return <View {...({ onMouseEnter: () => setHover(true), onMouseLeave: () => setHover(false), onFocus: () => setFocus(true), onBlur: () => setFocus(false) } as object)}
     style={{ backgroundColor: menuOpen ? c.surface1 : "transparent" }}>
     <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
       <Pressable accessibilityRole="link" accessibilityLabel={`${r.lead ? `${r.lead} ` : ""}${r.title}${r.spec ? ", spec" : ""}. ${r.meta}`} accessibilityHint={url ? "Opens in the browser" : undefined}
-        disabled={!url} onPress={() => url && openUrl(url)} onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
+        disabled={!url} onPress={() => url && openUrl(url)}
         style={state => ({ flex: 1, minWidth: 0, flexDirection: "row", gap: 12, paddingLeft: gutter, paddingRight: 4, paddingVertical: compact ? 10 : 8,
           backgroundColor: state.pressed ? c.surface2 : hovered(state) && !menuOpen ? c.surface1 : "transparent" })}>
         <View style={{ width: 16, alignItems: "center", paddingTop: compact ? 3 : 2 }}><LinkedGlyph glyph={r.glyph} colors={c} size={compact ? 15 : 14} /></View>
@@ -276,7 +290,6 @@ function LinkedRow({ item: i, mainAgentId, theme, compact, gutter, menuOpen, onM
           <Text numberOfLines={compact ? 2 : 1} style={[t.body, { color: finished ? c.foregroundMuted : c.foreground }]}>
             {!compact && r.lead ? <Text style={{ fontWeight: "600", fontVariant: ["tabular-nums"] }}>{r.lead}  </Text> : null}
             {r.title}
-            {r.spec ? <Text style={{ color: c.foregroundMuted, fontSize: 11 }}>{"  "}SPEC</Text> : null}
           </Text>
           <Text numberOfLines={1} style={t.meta}>{r.meta}</Text>
         </View>
