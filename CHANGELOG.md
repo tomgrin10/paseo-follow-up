@@ -75,6 +75,7 @@ Follow-up borrows ideas from [Progress](https://github.com/stevecastaneda/paseo-
 - A deploy Follow-up has seen stays counted until a rollback, and Done goes through with a note when Follow-up can't check what production serves.
 - Saving a spec link, a task's schedule or a reviewer pick closes at once and confirms with a short message.
 - An agent can mark a PR it merges itself, so Follow-up stops asking you to review or merge it. Work the agent is waiting on reads as Waiting, with what it waits on.
+- Follow-up checks GitHub with far fewer requests and no helper processes, and checks a workspace's PRs as soon as you open it.
 
 ### Agents and the main agent
 
@@ -113,6 +114,7 @@ Follow-up borrows ideas from [Progress](https://github.com/stevecastaneda/paseo-
 - Installed from Paseo's plugin list? Follow-up moves to its new plugin id by itself there too, keeping your workspaces and settings.
 - What's new shows screenshots of what it describes.
 - Release notes and What's new open wider on large screens, so their screenshots are easier to read.
+- The release notes always show their scrollbar when there is more to read, and their titles name Follow-up.
 
 ### Phone and performance
 

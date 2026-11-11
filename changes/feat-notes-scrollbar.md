@@ -1,1 +1,0 @@
-- The release notes always show their scrollbar when there is more to read, and their titles name Follow-up.
