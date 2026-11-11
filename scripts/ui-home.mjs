@@ -22,8 +22,12 @@ async function fail(page, failShot, why) {
   throw new Error(`Not on Follow-up Home: ${why}. url=${page.url()} headings=${JSON.stringify(headings.slice(0, 6))}${failShot ? ` screenshot=${failShot}` : ""}`);
 }
 
-/** Opens Follow-up Home and waits until Home itself is on screen. Throws (after a `failShot` screenshot) otherwise. */
-export async function openHome(page, { origin, serverId, timeout = 30_000, failShot } = {}) {
+/**
+ * Opens Follow-up Home and waits until Home itself is on screen. Throws (after a `failShot` screenshot) otherwise.
+ * `keepDialogs: true` only loads Home's URL and leaves any sheet over it open (Getting started, What's new): the caller
+ * waits for what that sheet shows.
+ */
+export async function openHome(page, { origin, serverId, timeout = 30_000, failShot, keepDialogs = false } = {}) {
   if (!origin || !serverId) throw new Error("openHome needs { origin, serverId }");
   // A fresh browser that opens a deep link before the app has connected to the host lands on /open-project, so load
   // the app first and retry the URL; the sidebar's "Follow-up" entry (exact text, unlike workspace rows) is the fallback.
@@ -33,6 +37,7 @@ export async function openHome(page, { origin, serverId, timeout = 30_000, failS
   const onHome = ms => Promise.all([status.first().waitFor({ state: "visible", timeout: ms }), search.first().waitFor({ state: "visible", timeout: ms })]).then(() => true, () => false);
   for (let attempt = 0; attempt < 3; attempt++) {
     await page.goto(homeUrl(origin, serverId));
+    if (keepDialogs) return;
     // Paseo's first-run sheet can cover the app; close it if it's there.
     await page.getByRole("button", { name: "Close", exact: true }).last().click({ timeout: 1500 }).catch(() => {});
     if (await onHome(8000)) return;

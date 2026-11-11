@@ -3,8 +3,9 @@
 //                                     [--whats-new-changelog <CHANGELOG.md>] [--keep]
 //
 // One isolated daemon (temp HOME and PASEO_HOME, the packed plugin, the fixture provider from
-// scripts/fixture-provider.ts, the web UI, a fake `gh` on PATH), seeded through Follow-up's own RPCs and fixture agents
+// scripts/fixture-provider.ts, the web UI, a fake `gh` and a fake `mcpproxy` for Linear on PATH), seeded through Follow-up's own RPCs and fixture agents
 // with synthetic data only: example/app, made-up people (Dana, Ravi) and Linear-style keys (APP-142, WEB-17).
+// Each shot is written as follow-up-<shot>.png.
 //
 // Deterministic: fixed seed data, and fixed clocks. The daemon and the plugin worker run with a Date preload that reads
 // a shifted clock from a file, so everything is created at fixed times after BASE; the browser's clock is frozen with
@@ -29,13 +30,13 @@ import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
 import { harness, spawnDaemon } from "./harness.mjs";
 import { harnessEnv } from "./harness-env.mjs";
+import { openHome as openHomeAt, homeRow } from "./ui-home.mjs";
 
 const exec = promisify(execFile);
 const argv = process.argv.slice(2);
 const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : fallback; };
-const SHOTS = ["setup", "home", "panel", "questions", "pill", "pr-sheet", "phone", "whats-new", "context-menu", "linked-items"];
-/** Shots that land later: kept here so the list is complete, skipped with a log line. */
-const STUBS = { "context-menu": "Home row context menu", "linked-items": "linked items" };
+// What's new reinstalls the plugin as 2.0.0-rc.0, so it goes last: every other shot shows the version under test.
+const SHOTS = ["setup", "home", "panel", "questions", "pill", "pr-sheet", "phone", "context-menu", "linked-items", "whats-new"];
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
 for (const name of only) if (!SHOTS.includes(name)) fail(`unknown shot "${name}" (known: ${SHOTS.join(", ")})`);
 const scheme = arg("--scheme");
@@ -128,6 +129,34 @@ console.log(JSON.stringify({ data: { repository } }));
 `;
 }
 
+/**
+ * What the fake `mcpproxy` knows of Linear. Linked items only show a Linear key once Linear confirms it, and the worker
+ * asks through `mcpproxy call tool-read --tool-name=linear:get_issue`; these answer it. Any other key is "not found",
+ * so keys extracted from the other workspaces' goals are rejected and never render (whenever the linked loop runs).
+ */
+function linearIssues() {
+  return {
+    "APP-142": { title: "Retry failed charges with exponential backoff", status: "In Progress" },
+    "APP-139": { title: "Customers charged twice after a gateway timeout", status: "Done" },
+    "APP-151": { title: "Dunning email copy for failed renewals", status: "Todo" },
+  };
+}
+/** A fake `mcpproxy`: Linear's get_issue and list_teams from the fixture file, a tool error for everything else. */
+function fakeMcpproxy(file) {
+  return `#!/usr/bin/env node
+const issues = JSON.parse(require("fs").readFileSync(${JSON.stringify(file)}, "utf8"));
+const flag = name => (process.argv.find(a => a.startsWith("--" + name + "=")) || "").slice(name.length + 3);
+const tool = flag("tool-name"); let args = {}; try { args = JSON.parse(flag("json_args") || "{}"); } catch {}
+const reply = (text, isError = false) => { console.log(JSON.stringify({ content: [{ type: "text", text }], isError })); process.exit(0); };
+if (tool === "linear:list_teams") reply(JSON.stringify({ teams: [{ key: "APP", name: "App" }, { key: "WEB", name: "Web" }] }));
+if (tool === "linear:get_issue") {
+  const i = issues[args.id];
+  reply(i ? JSON.stringify({ identifier: args.id, title: i.title, status: i.status, url: "https://linear.app/example/issue/" + args.id }) : "Issue not found");
+}
+reply("not available in the screenshot fixture", true);
+`;
+}
+
 const msg = text => ({ item: { type: "assistant_message", text } });
 const think = text => ({ item: { type: "reasoning", text } });
 const bash = (command, output) => ({ item: { type: "tool_call", callId: `call-${command.length}-${output.length}`, name: "Bash", status: "completed", error: null, detail: { type: "shell", command, output } } });
@@ -163,6 +192,12 @@ const WORKSPACES = [
       rpc("follow.register-pr", { repo: "example/app", number: 142, stack: "Billing retries" }),
       rpc("follow.register-pr", { repo: "example/app", number: 143, stack: "Billing retries", parentNumber: 142 }),
       rpc("follow.obligation", { title: "Check retries in staging after the deploy", status: "waiting", afterPrs: ["example/app#143"] }),
+      // Linked items: a spec and what the agent linked, each with why (Linear keys are confirmed by the fake mcpproxy).
+      rpc("follow.set-spec", { url: "https://example.com/docs/billing/retry-spec", title: "Charge retry spec" }),
+      rpc("follow.link-item", { ref: "APP-142", why: "The issue this workspace delivers" }),
+      rpc("follow.link-item", { ref: "APP-139", why: "Retries must not double-charge; this was the last time they did" }),
+      rpc("follow.link-item", { ref: "https://example.slack.com/archives/C0BILLING1/p1772614800000100", title: "#billing: which declines are soft?", why: "Where support asked for declined-card retries" }),
+      rpc("follow.link-item", { ref: "https://example.com/docs/billing/retries", title: "Retry notes", why: "The backoff schedule and its limits" }),
       bash("pnpm test billing", "pass 87"),
       rpc("follow.ask-question", { title: "Retry declined cards?", question: "Should charges that fail with card_declined retry, or only network failures?",
         options: [{ letter: "A", label: "Only network failures", consequence: "Today's behavior. Declined cards go straight to the dunning email." },
@@ -222,6 +257,9 @@ async function seed({ call, home }) {
     const done = await call("follow.done", { agentId: w.agentId, summary: spec.done });
     if (done.blockers.length) throw new Error(`${spec.key} could not be Done: ${done.blockers.join("; ")}`);
   }
+  // One item the developer added by hand ("Added by you" in the Linked list).
+  const billing = workspaces.find(w => w.key === "billing");
+  await call("follow.set-linked-items", { workspaceId: billing.workspaceId, action: "add", ref: "APP-151" });
   await call("follow.refresh", {});
   // The inbox loop folds PR, CI and review state into each brief; let it run on the snapshots before the clock moves.
   await inboxTicks(home, 2);
@@ -247,43 +285,10 @@ const INIT = ({ seen }) => {
   } catch {}
 };
 
-// ---------- reaching Home (from scripts/ui-home.mjs in PR #84; use that module once it lands) ----------
-// Paseo's sidebar lists every workspace under the title Home shows for its row, so clicking "Follow-up" by text and a
-// row by title can land on the workspace page. Go to Home by URL, wait for what only Home renders (the Status strip
-// and the search field), and look rows up only inside Home's column. Fail loudly instead of shooting the wrong page.
-let HOME_URL = null;
-const SEARCH = /^(Search, or ask the Overseer|Search or ask the Overseer|Search workspaces, branches, PRs)$/;
-const homeAnchors = page => ({ status: page.getByRole("toolbar", { name: "Status", exact: true }), search: page.getByRole("textbox", { name: SEARCH }) });
-async function assertHome(page, timeout = 15000) {
-  const { status, search } = homeAnchors(page);
-  try { await status.first().waitFor({ state: "visible", timeout }); await search.first().waitFor({ state: "visible", timeout }); }
-  catch { throw new Error(`not on Follow-up Home (no Status strip and search field) at ${page.url()}`); }
-}
-/** Opens Follow-up Home by URL (retrying: a deep link before the app connects lands on /open-project). `sheets: false` leaves dialogs open. */
-async function openHome(page, { sheets = true } = {}) {
-  const onHome = ms => assertHome(page, ms).then(() => true, () => false);
-  for (let attempt = 0; attempt < 3; attempt++) {
-    await page.goto(HOME_URL);
-    if (!sheets) return;
-    if (await onHome(8000)) return;
-  }
-  await assertHome(page);
-}
-/** The Home row for a workspace: a button labelled "Title. Word. Line" inside the search field's column. */
-async function homeRow(page, title, timeout = 15000) {
-  await assertHome(page, timeout);
-  const rows = page.getByRole("button", { name: new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\. `) });
-  const end = Date.now() + timeout;
-  for (;;) {
-    const column = await homeAnchors(page).search.first().boundingBox();
-    for (const row of await rows.all()) {
-      const box = await row.boundingBox().catch(() => null);
-      if (box && column && box.x + box.width > column.x && box.x < column.x + column.width) return row;
-    }
-    if (Date.now() > end) throw new Error(`no Home row for "${title}" in Home's column`);
-    await page.waitForTimeout(250);
-  }
-}
+// ---------- reaching Home (scripts/ui-home.mjs) ----------
+let ORIGIN = null; let SERVER_ID = null;
+/** Follow-up Home by URL, asserted (scripts/ui-home.mjs); `keepDialogs` leaves Getting started or What's new open. */
+const openHome = (page, { keepDialogs = false } = {}) => openHomeAt(page, { origin: ORIGIN, serverId: SERVER_ID, keepDialogs });
 
 const failures = [];
 function makeShooter({ browser, port, out, scheme: forced, optimiser, results }) {
@@ -313,7 +318,7 @@ function makeShooter({ browser, port, out, scheme: forced, optimiser, results })
     } finally { await context.close(); }
   }
   async function save(name, png, colorScheme) {
-    const path = join(out, `${name}.png`);
+    const path = join(out, `follow-up-${name}.png`);
     await fs.writeFile(path, png);
     const bytes = await optimise(path, optimiser);
     results.push({ name, path, bytes, scheme: colorScheme });
@@ -344,7 +349,8 @@ function makeShooter({ browser, port, out, scheme: forced, optimiser, results })
 /** No spinners or skeletons on screen, fonts loaded, and two quiet frames. */
 async function settle(page) {
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForFunction(() => ![...document.querySelectorAll('[role="progressbar"], [aria-busy="true"]')].some(n => n.getBoundingClientRect().width > 0), null, { timeout: 15000 }).catch(() => {});
+  // Getting started's step indicator is a progressbar too ("Step 1 of N"), but not a loading state.
+  await page.waitForFunction(() => ![...document.querySelectorAll('[role="progressbar"], [aria-busy="true"]')].some(n => n.getBoundingClientRect().width > 0 && !/^Step \d+ of \d+$/.test(n.getAttribute("aria-label") ?? "")), null, { timeout: 15000 }).catch(() => {});
   await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
 }
 
@@ -360,7 +366,6 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   const billing = WORKSPACES.find(w => w.key === "billing");
   for (const name of SHOTS) {
     if (!only.includes(name) || name === "setup") continue;
-    if (STUBS[name]) { log(`${name}: skipped (${STUBS[name]} lands later)`); continue; }
     if (name === "home") await shoot("home", DESKTOP, "dark", async page => {
       await openHome(page);
       await (await homeRow(page, "Billing retries")).click();
@@ -396,6 +401,27 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       { viewport: PHONE, drive: async page => { await openHome(page); await page.setViewportSize(PHONE); await homeRow(page, "Billing retries"); } },
       { viewport: PHONE, drive: async page => { await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, "Billing retries")).click(); await page.getByText("Only network failures").first().waitFor(); } },
     ]);
+    if (name === "context-menu") await shoot("context-menu", DESKTOP, "dark", async page => {
+      await openHome(page);
+      await (await homeRow(page, "Billing retries")).click();
+      await page.getByText("Only network failures").first().waitFor();
+      await (await homeRow(page, "Billing retries")).click({ button: "right", position: { x: 160, y: 18 } });
+      const menu = page.getByRole("menu", { name: "Actions for Billing retries" });
+      await menu.waitFor();
+      await menu.getByRole("menuitem", { name: /^Answer Q1/ }).first().waitFor();
+      await menu.getByRole("menuitem", { name: /^Copy \d* ?PR links?/ }).first().waitFor();
+    });
+    if (name === "linked-items") await shoot("linked-items", DESKTOP, "dark", async page => {
+      await openHome(page);
+      await (await homeRow(page, "Billing retries")).click();
+      await page.getByRole("button", { name: /^Linked: / }).first().click();
+      const sheet = page.getByRole("dialog").last();
+      await sheet.getByText("Retry failed charges with exponential backoff").first().waitFor();
+      await sheet.getByText("#billing: which declines are soft?").first().waitFor();
+      await sheet.getByText("Added by you").first().waitFor();
+      // Desktop focuses the filter field once the sheet opens; wait for it, so capture's blur clears the focus ring.
+      await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Filter, or paste a link or key");
+    });
     if (name === "whats-new") {
       // The packed copy Paseo runs: the path its plugin list reports (the unpacked folder for a directory install).
       const installed = (await cli("plugin", "ls")).find(row => row.id === "follow-through")?.path ?? plugin;
@@ -408,7 +434,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       let seenVersion = null;
       await until(() => `the ${WHATS_NEW_TO} worker (it reports ${seenVersion})`, async () => (seenVersion = (await call("follow.release-notes", {}).catch(e => ({ version: `error: ${e.message.split("\n")[0]}` }))).version) === WHATS_NEW_TO, { tries: 120, every: 500 });
       await shoot("whats-new", DESKTOP, "dark", async page => {
-        await openHome(page, { sheets: false });
+        await openHome(page, { keepDialogs: true });
         await page.getByRole("dialog").getByText("What's new in 2.0.0").first().waitFor().catch(() => page.getByText("What's new in 2.0.0").first().waitFor());
       }, { seen: WHATS_NEW_FROM });
     }
@@ -495,6 +521,8 @@ try {
   await fs.writeFile(join(root, "clock.cjs"), CLOCK_PRELOAD);
   await fs.writeFile(join(home, "gh-fixture.json"), JSON.stringify(pulls()));
   await fs.writeFile(join(bin, "gh"), fakeGh(join(home, "gh-fixture.json"))); await fs.chmod(join(bin, "gh"), 0o700);
+  await fs.writeFile(join(home, "linear-fixture.json"), JSON.stringify(linearIssues()));
+  await fs.writeFile(join(bin, "mcpproxy"), fakeMcpproxy(join(home, "linear-fixture.json"))); await fs.chmod(join(bin, "mcpproxy"), 0o700);
   // Real speed while the daemon starts and the plugin installs; seeding and shooting crawl (setDaemonClock).
   // It starts ten minutes before BASE, so the clock only ever moves forward.
   await fs.writeFile(clockFile, JSON.stringify({ fake: at(-10), real: Date.now(), rate: 1 }));
@@ -518,7 +546,7 @@ try {
       return client.invokePluginRpc("follow-through", method, input);
     }
   };
-  HOME_URL = `http://127.0.0.1:${port}/h/${(await fs.readFile(join(home, "server-id"), "utf8")).trim()}/plugin/follow-through/surface/follow-through`;
+  ORIGIN = `http://127.0.0.1:${port}`; SERVER_ID = (await fs.readFile(join(home, "server-id"), "utf8")).trim();
   log(`isolated daemon on 127.0.0.1:${port} (${paseoVersion}), root ${root}`);
 
   const { chromium } = createRequire(join(process.env.PLAYWRIGHT_CORE, "package.json"))("playwright-core");
@@ -527,18 +555,11 @@ try {
 
   // setup: the first step of Getting started, on this fresh install, before anything is seeded.
   if (only.includes("setup")) await shoot("setup", { width: 1440, height: 900 }, "dark", async page => {
-    await openHome(page, { sheets: false });
+    await openHome(page, { keepDialogs: true });
+    // The first step, by its progressbar ("Step 1 of N", N = ONBOARDING_STEPS.length): no hard-coded step count.
+    // Under reduced motion (the context's) StepFade shows the step at once, so there is no fade to wait out.
+    await page.getByRole("progressbar", { name: /^Step 1 of \d+$/ }).first().waitFor();
     await page.getByText("Follow-up keeps your agents' PRs moving").waitFor();
-    await page.getByText("1 of 7").waitFor();
-    // The step fades in with Animated.timing, which runs on Date.now(); under page.clock's frozen time it would stay
-    // at opacity 0. Move the frozen clock past the fade, then wait until the step is fully opaque.
-    await page.clock.setFixedTime(BASE + VIEW + 1000);
-    await page.waitForFunction(() => {
-      const node = [...document.querySelectorAll("div")].find(el => el.textContent?.startsWith("Follow-up keeps your agents' PRs moving") && !el.children.length)
-        ?? [...document.querySelectorAll("*")].find(el => el.childElementCount === 0 && el.textContent?.includes("Follow-up keeps your agents' PRs moving"));
-      for (let el = node; el; el = el.parentElement) if (Number(getComputedStyle(el).opacity) < 1) return false;
-      return Boolean(node);
-    });
   });
   await call("follow.set-onboarding", { action: "finish" });
   const seeded = await seed({ call, home });
