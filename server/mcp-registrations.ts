@@ -1,7 +1,7 @@
-import { copyFile, mkdir, readFile, readdir, realpath, rename, rmdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, realpath, rmdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { randomBytes } from "node:crypto";
+import { backupOnce, writeThrough } from "./write-through";
 
 /**
  * 1.4.0-beta.2: Follow-up's tools are served per agent (natively through Paseo's MCP, or a per-agent stdio bridge
@@ -51,10 +51,8 @@ async function withLock(file: string, action: () => Promise<void>): Promise<bool
   try { await action(); return true; } finally { await rmdir(lock).catch(() => undefined); }
 }
 async function replace(path: string, text: string): Promise<void> {
-  await copyFile(path, path + BACKUP, 1).catch(error => { if (error.code !== "EEXIST") throw error; });
-  const mode = (await stat(path)).mode & 0o777;
-  const temporary = `${path}.follow-through.${randomBytes(4).toString("hex")}.tmp`;
-  await writeFile(temporary, text, { mode }); await rename(temporary, path);
+  await backupOnce(path, BACKUP);
+  await writeThrough(path, text, (await stat(path)).mode & 0o777);
 }
 const managed = (server: unknown) => (server as { env?: Record<string, string> } | null)?.env?.FOLLOW_THROUGH_MANAGED === "1";
 

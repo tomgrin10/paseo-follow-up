@@ -22,6 +22,7 @@ import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
 import { startCounter, ratePerMinute } from "./daemon-counter.mjs";
 import { harness, spawnDaemon } from "./harness.mjs";
+import { harnessEnv } from "./harness-env.mjs";
 
 const exec = promisify(execFile);
 // The check drives a real Paseo daemon, so it needs the paseo CLI (CI installs @getpaseo/cli). Without it, local
@@ -45,8 +46,7 @@ const port = await free(); const url = `ws://127.0.0.1:${port}/ws`;
 // Every client but this script reaches the daemon through a counting proxy, so the worker's request rate is measured.
 const counter = await startCounter(port); const counted = `ws://127.0.0.1:${counter.port}/ws`;
 const heapDir = arg("heap-snapshot", null);
-const env = { ...process.env, ...(heapDir ? { NODE_OPTIONS: `--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=${heapDir}` } : {}), HOME: home, XDG_CONFIG_HOME: join(home, ".config"), PASEO_HOME: home, PASEO_DAEMON_URL: counted, PASEO_RELAY_ENABLED: "false" };
-for (const key of ["PASEO_PASSWORD", "PASEO_PASSWORD_FILE", "PASEO_AGENT_ID", "PASEO_WORKSPACE_ID", "CLAUDE_CONFIG_DIR", "CODEX_HOME"]) delete env[key];
+const env = harnessEnv(root, { home, set: { ...(heapDir ? { NODE_OPTIONS: `--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=${heapDir}` } : {}), PASEO_DAEMON_URL: counted, PASEO_RELAY_ENABLED: "false" } });
 const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env, timeout: 120_000, maxBuffer: 8 << 20 })).stdout);
 let daemon = null; let client = null;
 const start = async () => {

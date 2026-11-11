@@ -6,6 +6,7 @@ import {createRequire} from 'node:module';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import { harness } from "./harness.mjs";
+import { harnessEnv } from "./harness-env.mjs";
 await harness();
 const preview=JSON.parse(await readFile('.preview-isolated.json','utf8'));
 assert.ok(preview.root.startsWith('/tmp/follow-install-')&&preview.home===preview.root+'/home');
@@ -24,7 +25,7 @@ w.obligations=[
 {id:'names',title:'Verify vendor resolution after both fixes deploy',status:'waiting',afterPrs:['example/app#8','example/app#9'],dependencyStage:'deployed',evidence:'Synthetic before/after counts are retained for verification.',enable_follow_up:true,revision:0},
 {id:'decision',title:'Choose the mail-key migration or read fallback',status:'blocked',afterPrs:[],evidence:'Synthetic pending developer decision.',enable_follow_up:false,revision:0}];
 await writeFile(path+'.compact.tmp',JSON.stringify(state),{mode:0o600});await rename(path+'.compact.tmp',path);
-const env={...process.env,HOME:preview.home,XDG_CONFIG_HOME:preview.home+'/.config',PASEO_HOME:preview.home,PASEO_DAEMON_URL:`ws://127.0.0.1:${preview.port}/ws`};delete env.PASEO_PASSWORD;delete env.PASEO_PASSWORD_FILE;
+const env=harnessEnv(preview.root,{home:preview.home,set:{PASEO_DAEMON_URL:`ws://127.0.0.1:${preview.port}/ws`}});
 await promisify(execFile)('paseo',['--home',preview.home,'plugin','reload','follow-through','--json'],{env,timeout:120000});
 const {chromium}=createRequire(process.env.SEND_TO_PASEO_SOURCE+'/extension/package.json')('playwright-core');
 const profile=await mkdtemp(join(tmpdir(),'follow-compact-browser-'));

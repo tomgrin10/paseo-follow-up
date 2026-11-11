@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { createServer } from 'node:net';
 import { DaemonClient } from '@getpaseo/client/internal/daemon-client';
 import { harness } from "./harness.mjs";
+import { harnessEnv } from "./harness-env.mjs";
 await harness();
 const exec = promisify(execFile);
 const preview = JSON.parse(await readFile('.preview-isolated.json','utf8'));
@@ -18,8 +19,7 @@ if(!source)throw new Error('SEND_TO_PASEO_SOURCE must point to the companion sou
 const fixtureUrl=process.env.FOLLOW_TEST_GRAPHITE_URL;
 if(!fixtureUrl?.startsWith('http://127.0.0.1:'))throw new Error('An isolated Graphite fixture is required.');
 const net=createServer();await new Promise(r=>net.listen(0,'127.0.0.1',r));const bridgePort=net.address().port;await new Promise(r=>net.close(r));
-const env={...process.env, HOME:preview.home,PASEO_HOME:preview.home,PASEO_DAEMON_URL:`ws://127.0.0.1:${preview.port}/ws`};
-for(const key of ['PASEO_PASSWORD','PASEO_PASSWORD_FILE','PASEO_AGENT_ID','NODE_OPTIONS'])delete env[key];
+const env=harnessEnv(preview.root,{home:preview.home,set:{PASEO_DAEMON_URL:`ws://127.0.0.1:${preview.port}/ws`},strip:['NODE_OPTIONS']});
 const cli=async(...args)=>JSON.parse((await exec('paseo',['--home',preview.home,'--json',...args],{env,timeout:120_000})).stdout);
 if (!standalone) {
 const dir=join(preview.home,'plugin-data/send-to-paseo');await mkdir(dir,{recursive:true});

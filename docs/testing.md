@@ -70,6 +70,12 @@ plays a scripted turn (timeline items, Follow-up RPCs, a permission) for a given
   `scripts/harness.mjs`, never a fixed attempt count. Its budget is `baseMs` (sized for an idle VM) times
   `loadFactor()`: the 1-minute load per core, between 1 and 6, re-read on every poll. A shared VM at load 30 on
   8 cores runs every wait about 4× slower, and a fixed count failed `test:install` three times in four runs there.
+- **Isolate the env with `harnessEnv`.** Every script that spawns a daemon, the Paseo CLI or a plugin builds the
+  child env with `harnessEnv(root, { home, set })` from `scripts/harness-env.mjs` (`applyEnv` for an in-process
+  daemon). It puts `HOME`, `XDG_CONFIG_HOME`, `PASEO_HOME`, `CLAUDE_CONFIG_DIR` and `CODEX_HOME` inside the temp
+  root, refuses any of them outside it, and strips the session's `PASEO_*`, `CODEX_*`, Follow-up and Claude session
+  variables. A hand-built `{ ...process.env, … }` once missed `CLAUDE_CONFIG_DIR`, and its daemon installed hooks into
+  a real account. `tests/harness-env.test.ts` fails on a check script that builds its env by hand.
 - **Take a slot.** Every script that starts a Paseo daemon or a browser calls `await harness()` from
   `scripts/harness.mjs` before its heavy work, and starts daemons with `spawnDaemon`. `tests/harness.test.ts` fails
   when a script skips either. `harness()`:

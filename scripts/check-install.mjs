@@ -8,6 +8,7 @@ import { createServer } from "node:net";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
 import { harness, spawnDaemon, waitUntil } from "./harness.mjs";
+import { harnessEnv } from "./harness-env.mjs";
 await harness();
 const exec = promisify(execFile);
 const root = await mkdtemp(join(tmpdir(), "follow-install-"));
@@ -31,8 +32,7 @@ try {
   await writeFile(join(home, "github-fixture.json"), JSON.stringify({ state: "OPEN", conflict: true }));
   const gh = `#!/usr/bin/env node\nif(process.env.GH_REPO!=='example/app')throw new Error('Missing repository authentication context');const fs=require('fs'); const d=JSON.parse(fs.readFileSync(${JSON.stringify(join(home, "github-fixture.json"))},'utf8')); if(process.argv[3]!=='graphql'){console.log('[]');process.exit(0)} const pr={number:1,title:'Migration rollout',url:'https://github.com/example/app/pull/1',state:d.state,headRefName:'fixture-bottom',headRefOid:d.head??'fixture-head',baseRefName:'main',isDraft:false,mergeable:d.conflict?'CONFLICTING':'MERGEABLE',mergeStateStatus:d.conflict?'DIRTY':'CLEAN',reviewDecision:'APPROVED',baseRef:null,reviewThreads:{nodes:[],pageInfo:{hasNextPage:false}},commits:{nodes:[]}};console.log(JSON.stringify({data:{repository:{defaultBranchRef:{name:'main'},p0:pr}}}));\n`;
   await writeFile(join(bin, "gh"), gh); await chmod(join(bin, "gh"), 0o700);
-  const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: join(home, ".config"), PASEO_HOME: home, PASEO_DAEMON_URL: url, PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true", PATH: `${bin}:${process.env.PATH}` };
-  for (const key of ["PASEO_PASSWORD", "PASEO_PASSWORD_FILE", "PASEO_AGENT_ID", "PASEO_AGENT_CWD", "PASEO_WORKSPACE_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_SESSION_ID", "CLAUDE_CONFIG_DIR", "CODEX_HOME"]) delete env[key];
+  const env = harnessEnv(root, { home, set: { PASEO_DAEMON_URL: url, PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true", PATH: `${bin}:${process.env.PATH}` } });
   const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env, timeout: 120000, maxBuffer: 1024 * 1024 })).stdout);
   const log = await import("node:fs").then(fs => fs.openSync(join(root, "daemon.log"), "a"));
   daemon = spawnDaemon(["daemon", "run", "--home", home], { env, stdio: ["ignore", log, log] });
@@ -107,8 +107,11 @@ try {
   const fallbackEnv = { ...env, PASEO_AGENT_ID: agent.id }; delete fallbackEnv.FOLLOW_THROUGH_CLIENT_ENTRY;
   const fallback = JSON.parse((await exec(process.execPath, [bridgePath, "call", "workspace_status", "{}"], { env: fallbackEnv })).stdout);
   assert.equal(fallback.id, w.id, "a dependency-free bridge resolves the installed CLI client without a session env override");
-  const claudeGlobal = JSON.parse(await readFile(join(home, ".claude.json"), "utf8").catch(() => "{}"));
-  assert.equal(claudeGlobal.mcpServers?.["follow-through"], undefined, "session attachment must not register a global Claude MCP");
+  // harnessEnv sets CLAUDE_CONFIG_DIR, so Claude's global config is <home>/.claude/.claude.json; check both spellings.
+  for (const global of [join(home, ".claude.json"), join(home, ".claude/.claude.json")]) {
+    const claudeGlobal = JSON.parse(await readFile(global, "utf8").catch(() => "{}"));
+    assert.equal(claudeGlobal.mcpServers?.["follow-through"], undefined, "session attachment must not register a global Claude MCP");
+  }
   assert.equal(await readFile(join(home, ".codex/config.toml"), "utf8"), codexFixture, "session attachment must leave global Codex MCP settings unchanged");
   const hookScript = join(home, "plugin-data/follow-through/agent-hook.mjs");
   const runAgentHook = async (event, agentId = agent.id) => {
