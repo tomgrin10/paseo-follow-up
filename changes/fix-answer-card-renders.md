@@ -1,0 +1,1 @@
+- An answer card in chat now shows your whole answer and note, even when they run over several lines, and a question title with parentheses no longer garbles the card.
