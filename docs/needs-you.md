@@ -160,7 +160,8 @@ every `sending` entry.
   brief changes (best-effort). `shownBrief` (`shared/brief.ts`) decides what a card shows from `follow.inbox-brief`
   (one query per agent, `liveBriefKey`, only while a row still looks open). A card is actionable only when the live
   brief is that exact brief and open. A row whose brief moved on shows its recorded answer (from the questions it
-  points at) or "Replaced by a newer update". A card shows a stored question's live, full text; `decisionOf` never
+  points at), "Replaced by a newer card" or "No longer needed · the agent moved on". A resolved card drops a status
+  prefix the agent wrote into its ask (`pastAsk`: "Still open: Q35, …"). A card shows a stored question's live, full text; `decisionOf` never
   cuts it.
 - **A moot refusal reconciles.** "Already answered", "replaced" and "withdrawn" refusals (`isMoot` in
   `shared/errors.ts`) aren't failures: `runAction`'s `reconcile` refreshes the card instead of offering Retry
