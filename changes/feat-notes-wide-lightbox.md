@@ -1,2 +1,0 @@
-- Release notes and What's new open wider on large screens, so their screenshots are easier to read.
-- Tapping a screenshot in the notes shows it larger inside Paseo instead of opening a browser tab.

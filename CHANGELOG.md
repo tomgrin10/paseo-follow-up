@@ -112,6 +112,7 @@ Follow-up borrows ideas from [Progress](https://github.com/stevecastaneda/paseo-
 - With reduced motion on, setup's steps show at once.
 - Installed from Paseo's plugin list? Follow-up moves to its new plugin id by itself there too, keeping your workspaces and settings.
 - What's new shows screenshots of what it describes.
+- Release notes and What's new open wider on large screens, so their screenshots are easier to read.
 
 ### Phone and performance
 
@@ -136,5 +137,9 @@ Follow-up borrows ideas from [Progress](https://github.com/stevecastaneda/paseo-
 - If your Claude or Codex settings file is a link, Follow-up updates the file it points to and keeps the link.
 - Error messages are as short as Paseo's own, with the full reason where Open takes you.
 - A workspace no longer shows Needs you for "Add reviewers" in a repository nobody is set up to review, and the flag goes away on its own once the PR merges or gets reviewers.
+
+### More
+
+- Tapping a screenshot in the notes shows it larger inside Paseo instead of opening a browser tab.
 
 </details>
