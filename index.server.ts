@@ -532,7 +532,7 @@ export default function contribute(server: PluginServerContext) {
       return w;
     });
   });
-  handle(rpc.registerPrRpc, async ({ agentId, repo, number, stack, parentNumber, disposition }, { paseo }) => {
+  handle(rpc.registerPrRpc, async ({ agentId, repo, number, stack, parentNumber, disposition, agentMerges }, { paseo }) => {
     await requireReady();
     const workspaceId = await callerWorkspaceId(agentId, paseo);
     const result = await store.mutate(state => {
@@ -550,9 +550,9 @@ export default function contribute(server: PluginServerContext) {
         if (seen.has(ancestor)) throw new Error("PR parent relationships cannot form a cycle.");
         seen.add(ancestor); ancestor = w.prs.find(p => p.key === ancestor)?.parent ?? null;
       }
-      const altered = !existing || existing.stack !== stack || existing.parent !== parent || disposition !== undefined && existing.disposition !== disposition;
-      if (existing) { existing.registeredAgentId = agentId; existing.discoveredFromSubmission = false; existing.stack = stack; existing.parent = parent; if (disposition !== undefined) existing.disposition = disposition; }
-      else w.prs.push({ registeredAgentId: agentId, key, repo, number, stack, parent, disposition: disposition ?? null, snapshot: null, error: null });
+      const altered = !existing || existing.stack !== stack || existing.parent !== parent || disposition !== undefined && existing.disposition !== disposition || agentMerges !== undefined && !!existing.agentMerges !== agentMerges;
+      if (existing) { existing.registeredAgentId = agentId; existing.discoveredFromSubmission = false; existing.stack = stack; existing.parent = parent; if (disposition !== undefined) existing.disposition = disposition; if (agentMerges !== undefined) existing.agentMerges = agentMerges; }
+      else w.prs.push({ registeredAgentId: agentId, key, repo, number, stack, parent, disposition: disposition ?? null, snapshot: null, error: null, ...(agentMerges ? { agentMerges } : {}) });
       if (altered) changed(w); return w;
     });
     void engine.tick(); return result;

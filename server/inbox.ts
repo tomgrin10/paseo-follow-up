@@ -4,14 +4,14 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { stableMessageId, withDeadline } from "./delivery";
 import { BackgroundAgents } from "./background-agents";
-import { emptyInbox, expired, inboxStateSchema, type OutboxEntry, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason, liveFlag, withoutRunState } from "../shared/inbox";
+import { emptyInbox, expired, inboxStateSchema, type OutboxEntry, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason, liveFlag, withoutRunState, FACT_REASONS } from "../shared/inbox";
 import type { State as FollowState, Workspace as FollowWorkspace } from "../shared/model";
-import { prActionBlocks } from "../shared/pr-actions";
-import { configuredReviewers, noReviewers, reviewerLabel, withoutAuthor } from "../shared/reviewers";
+import { asksForReviewers } from "../shared/attention";
+import { configuredReviewers, reviewerLabel, withoutAuthor } from "../shared/reviewers";
 import { classify, finishedReply, turnPrompt, type Sources } from "./inbox-classifier";
 import { STALE_BRIEF } from "../shared/errors";
 import type { Question } from "../shared/questions";
-import { briefOrigin, briefQuestionsEvent, briefStep, pickBrief, shouldReopen, validPick, type Brief, type BriefEvent, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
+import { briefOrigin, briefQuestionsEvent, briefStep, pickBrief, shouldReopen, validPick, type Brief, type BriefEvent, type BriefKind, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
 import { OTHER_LABEL, answerTitle, isOther } from "../shared/questions";
 
 /** The flag store: plugin-data/follow-up/inbox.json. A new file, so existing state never changes shape. */
@@ -121,6 +121,13 @@ export function autoBrief(event: InboxEvent, prev?: Entry): BriefEvent | null {
   // Undoing a Later only moves the snooze back: the brief was never collapsed, so nothing reopens.
   if (event.type === "undo") return prev?.undo?.kind === "snooze" ? null : { type: "undo" };
   if (event.type === "permission_resolved") return { type: "permission_resolved" };
+  // A Follow-up PR card closes with its fact: reviewers on its own, a review card once neither CI nor threads hold.
+  if (event.type === "facts_live") {
+    const kinds: BriefKind[] = [];
+    if (!event.live.includes("reviewers")) kinds.push("reviewers");
+    if (!event.live.includes("ci") && !event.live.includes("review")) kinds.push("review");
+    return kinds.length ? { type: "fact_ended", kinds } : null;
+  }
   return null;
 }
 /** Session Guard's note and reset time, read defensively: anything unexpected shows as no detail. */
@@ -631,6 +638,17 @@ export class Inbox {
       return;
     }
     await this.apply(await Promise.all(events.map(async ({ agentId, event }) => ({ agentId, event, brief: await this.prBrief(agentId, event) }))));
+    // Then withdraw the flags (and Follow-up's PR cards) whose fact ended since: merged, fixed, reviewed, or the agent is on it.
+    const live = liveFacts(follow, events);
+    const entries = (await this.store.snapshot()).entries;
+    const stale = [...live].filter((pair): pair is [string, Reason[]] => {
+      const [agentId, facts] = pair; const e = entries[agentId];
+      if (!facts || !e) return false;
+      const dead = (r: Reason) => FACT_REASONS.includes(r) && !facts.includes(r);
+      const card = e.brief?.state === "open" && e.brief.source === "followup";
+      return !!e.needs?.reasons.some(r => dead(r.reason)) || card && (e.brief!.kind === "reviewers" ? dead("reviewers") : dead("ci") && dead("review"));
+    });
+    await this.apply(stale.map(([agentId, facts]) => ({ agentId, event: { type: "facts_live", live: facts } })));
   }
 
   /** CI red or review threads on an idle agent (#8–9): refresh the open brief's facts, or make an S5 brief. */
@@ -961,6 +979,24 @@ export function repairsGoToAgent(w: Pick<FollowWorkspace, "enable_auto_sends" | 
   return w.enable_auto_sends && !w.hold && !w.batches.some(b => ["blocked", "uncertain"].includes(b.state));
 }
 
+/**
+ * The outside facts (FACT_REASONS) that still hold per agent, from the same events that flag them. An agent with a PR
+ * Follow-up couldn't read maps to null: unknown is not off, so nothing of theirs is withdrawn.
+ */
+export function liveFacts(follow: FollowState, events: { agentId: string; event: InboxEvent }[]): Map<string, Reason[] | null> {
+  const out = new Map<string, Reason[] | null>();
+  for (const w of follow.workspaces.filter(w => w.enable_tracking && !w.archived)) for (const pr of w.prs) {
+    const agentId = pr.registeredAgentId ?? w.mainAgentId;
+    if (!pr.snapshot?.complete || pr.error) out.set(agentId, null);
+    else if (!out.has(agentId)) out.set(agentId, []);
+  }
+  for (const { agentId, event } of events) {
+    const live = out.get(agentId);
+    if (live && FACT_REASONS.includes(event.type as Reason) && !("suppressed" in event && event.suppressed) && !live.includes(event.type as Reason)) live.push(event.type as Reason);
+  }
+  return out;
+}
+
 /** CI, review, reviewer and PR-state events from Follow-up's tracked workspaces, keyed so the same state never re-flags. */
 export function followUpEvents(follow: FollowState, enablePrClosed: boolean): { agentId: string; event: InboxEvent }[] {
   const events: { agentId: string; event: InboxEvent }[] = [];
@@ -978,7 +1014,7 @@ export function followUpEvents(follow: FollowState, enablePrClosed: boolean): { 
         if (s.conflict) events.push({ agentId, event: { type: "review", dedupeKey: `${pr.key}:conflict:${s.head}`, detail: `Merge conflict to fix on #${pr.number}`, suppressed: repairing || automatic } });
         // Reviewers are the developer's job, and don't wait for threads or CI. Skipped only while a reviewer request
         // or merge is already in flight for this PR (so a second request isn't asked for while GitHub catches up).
-        if (!s.draft && noReviewers(pr) && !w.prActions.some(a => prActionBlocks(a, [pr.key])))
+        if (asksForReviewers(pr, w))
           events.push({ agentId, event: { type: "reviewers", dedupeKey: `${pr.key}:reviewers`, detail: `#${pr.number}`, prKey: pr.key, url: s.url ?? null,
             names: withoutAuthor(configuredReviewers(pr.repo), s.reviewers?.author).map(reviewerLabel) } });
       } else if (enablePrClosed && (s.state === "MERGED" || s.state === "CLOSED")) {
