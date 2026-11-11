@@ -6,7 +6,7 @@ import { providerName } from "./agent-settings";
  * Follow-up in about two minutes. Pure, so install detection, the offer, the checks' copy and resume are testable.
  *
  * Every choice the flow offers writes through the RPC or settings document the Settings screen already uses
- * (see `CHOICE_WRITES`); the flow keeps only its own progress in `plugin-data/follow-through/onboarding.json`.
+ * (see `CHOICE_WRITES`); the flow keeps only its own progress in `plugin-data/follow-up/onboarding.json`.
  */
 
 export const ONBOARDING_STEPS = ["intro", "checks", "defaults", "shipping", "reviewers", "updates", "helpers", "tour"] as const;

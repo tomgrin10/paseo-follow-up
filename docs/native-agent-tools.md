@@ -56,7 +56,7 @@ token code of your own.
    `~/.paseo/zerosub/homes/<id>/`. Zerosub copies the main `.claude.json`'s servers into its homes, so remove the
    entry from the main file too (`server/mcp-registrations.ts`).
 6. **Tell the hooks and UI which names the agent has.** Sessions opened before the upgrade keep the old names
-   until they reopen. Follow-up sets `FOLLOW_THROUGH_TOOLS=native|stdio` in the agent env and matches both
+   until they reopen. Follow-up sets `FOLLOW_UP_TOOLS=native|stdio` in the agent env and matches both
    name forms wherever it reads tool calls.
 7. **Survive your own updates.** A plugin reload (every `paseo plugin update`) drops the tools of every open session,
    and Paseo 0.15.2 has no way for a plugin to re-attach them: it reopens a stale session only before that agent's next
@@ -69,7 +69,7 @@ token code of your own.
    works again after the next prompt.
 8. **Gate on records, not tool names.** Anything that must know whether the agent did something (Follow-up's Stop hook:
    did it sync?) should read a record the RPC handler wrote, because the same call can arrive natively, through the
-   stdio server, or through a shell bridge spelled however the agent likes (`node "$FOLLOW_THROUGH_CLI" call …`).
+   stdio server, or through a shell bridge spelled however the agent likes (`node "$FOLLOW_UP_CLI" call …`).
    Follow-up dates a shell call from the end of the previous tool call, so a call that confirmed sync while it ran
    satisfies the check.
 9. **Reuse your handlers.** Follow-up records every `server.handle` handler in a map and calls it in-process from

@@ -31,9 +31,9 @@ export function PrControls({ pr, workspace, theme, compact, browserReady: compan
   const github = isGithubFlow(pr.snapshot);
   const browserReady = github ? !!pr.snapshot?.repoMerge?.autoMerge : companionReady;
   const [plan, setPlan] = useState<ActionPlan | null>(null); const [notice, setNotice] = useState<string | null>(null);
-  const statusKey = ["follow-through", "pr-controls", workspace.id, pr.key, pr.snapshot?.head];
+  const statusKey = ["follow-up", "pr-controls", workspace.id, pr.key, pr.snapshot?.head];
   const status = useQuery({ queryKey: statusKey, queryFn: () => read({ workspaceId: workspace.id, prKey: pr.key }), refetchInterval: 10_000, enabled: browserReady });
-  const invalidate = () => { void cache.invalidateQueries({ queryKey: ["follow-through", "workspace", workspace.id] }); void cache.invalidateQueries({ queryKey: ["follow-through", "pr-controls", workspace.id] }); void cache.invalidateQueries({ queryKey: ["follow-through", "overview"] }); };
+  const invalidate = () => { void cache.invalidateQueries({ queryKey: ["follow-up", "workspace", workspace.id] }); void cache.invalidateQueries({ queryKey: ["follow-up", "pr-controls", workspace.id] }); void cache.invalidateQueries({ queryKey: ["follow-up", "overview"] }); };
   const [picking, setPicking] = useState(false);
   const reviewerSettings = useReviewerSettings();
   // `picked`: this PR only, from the picker; `remember` also saves them for the repository.

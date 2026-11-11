@@ -18,7 +18,7 @@ export function pruneUnsent(w: Pick<Workspace, "batches">, keep = KEEP_UNSENT_CA
   return [...drop];
 }
 
-/** Appends pruned batches to plugin-data/follow-through/archive/<workspace>.jsonl (kept, never read back). */
+/** Appends pruned batches to plugin-data/follow-up/archive/<workspace>.jsonl (kept, never read back). */
 export function batchArchive(directory: string) {
   return async (workspaceId: string, batches: Batch[]): Promise<void> => {
     if (!batches.length) return;

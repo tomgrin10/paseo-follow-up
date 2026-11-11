@@ -14,7 +14,7 @@ async function fixture(t: any) {
   const directory = await mkdtemp(join(tmpdir(), "follow-closed-")); t.after(() => rm(directory, { recursive: true, force: true }));
   let now = clock; t.mock.method(Date, "now", () => now);
   const main = { id: "main-agent", workspaceId: "workspace", provider: "codex", cwd: "/fixture", createdAt: "2026-01-01T00:00:00Z", status: "idle", activeTurn: null, labels: {}, lastUserMessageAt: "2026-01-01T00:00:00Z", pendingPermissions: [] } as Agent;
-  const recovery = { ...main, id: "recovery", status: "closed", labels: { "follow-through.recovery": "true" } };
+  const recovery = { ...main, id: "recovery", status: "closed", labels: { "follow-up.recovery": "true" } };
   const agents = [main, recovery];
   let timelineReads = 0; let readable = false; const subagentLists: string[] = [];
   const client = {

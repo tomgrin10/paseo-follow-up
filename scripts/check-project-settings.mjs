@@ -12,13 +12,13 @@ const {chromium}=createRequire(process.env.SEND_TO_PASEO_SOURCE+'/extension/pack
 const profile=await mkdtemp(join(tmpdir(),'follow-settings-browser-'));
 const context=await chromium.launchPersistentContext(profile,{executablePath:process.env.STP_CHROMIUM,headless:true,viewport:{width:1440,height:1050},args:['--disable-extensions','--no-first-run']});
 const client=new DaemonClient({url:`ws://127.0.0.1:${p.port}/ws`,clientId:'project-settings-ui',clientType:'cli',reconnect:{enabled:false}});await client.connect();
-const call=(method,input={})=>client.invokePluginRpc('follow-through',method,input);
+const call=(method,input={})=>client.invokePluginRpc('follow-up',method,input);
 try{
 const page=await context.newPage();await fetch(`http://127.0.0.1:${p.port}/llms.txt`);await page.goto(`http://127.0.0.1:${p.port}/`);
 await page.getByRole('button',{name:'Settings',exact:true}).click();
 await page.getByRole('button',{name:'Plugins',exact:true}).click();
-await page.getByRole('button',{name:'Actions for follow-through',exact:true}).click();
-await page.getByRole('menuitem',{name:'Follow-through',exact:true}).click();
+await page.getByRole('button',{name:'Actions for follow-up',exact:true}).click();
+await page.getByRole('menuitem',{name:'Follow-up',exact:true}).click();
 await page.getByText('Default tracking by project',{exact:true}).waitFor();
 const hero=page.getByRole('switch',{name:/Default tracking for .*example\/acme-poc/});
 assert.equal(await hero.getAttribute('aria-checked'),'true');

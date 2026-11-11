@@ -25,7 +25,7 @@ const DEVELOPER = "Looks good, also handle empty filters";
 const AGENT_MESSAGE = '<paseo-system version="1" kind="agent-message" source-agent-id="52063653-85d5" message-id="m1" source-agent-title="Release captain">\nPlease start a new workspace for HER-1500 and go ahead\n</paseo-system>';
 const AGENT_NOTIFICATION = '<paseo-system version="1" kind="agent-notification" source-agent-id="c1" message-id="m2" source-agent-title="Test runner" event="finished">\nAgent c1 (Test runner) finished.\n\n&lt;agent-response&gt;\nyes, all 42 tests pass\n&lt;/agent-response&gt;\n</paseo-system>';
 const SCHEDULE = "<paseo-system>\nScheduled check-in: yes, go ahead\n</paseo-system>";
-const BATCH = "Follow-through batch b-1\n\n- Fix CI on acme/app#12";
+const BATCH = "Follow-up batch b-1\n\n- Fix CI on acme/app#12";
 const ANSWER = "Follow-up answer D1 (Which agent?): C — New workspace\nContinue with this choice.";
 const FORWARD_LEGACY = "From Tom via Overseer: use option B";
 const FORWARD = "From the developer via Overseer: use option B";

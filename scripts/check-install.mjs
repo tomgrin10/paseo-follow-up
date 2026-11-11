@@ -27,7 +27,7 @@ try {
   await writeFile(join(home, "config.json"), JSON.stringify({ pluginsEnabled: true, daemon: { listen: `127.0.0.1:${port}`, relay: { enabled: false }, mcp: { enabled: false }, browserTools: { enabled: false } }, features: { webUi: { enabled: true } } }));
   const packed = JSON.parse((await exec("npm", ["pack", "--json", "--pack-destination", root], { timeout: 30000 })).stdout)[0];
   await exec("tar", ["-xzf", join(root, packed.filename), "--strip-components=1", "-C", plugin]);
-  await writeFile(join(fixture, "paseo-plugin.json"), JSON.stringify({ id: "followthrough-fixture", requirements: { paseo: ">=0.11.0" } }));
+  await writeFile(join(fixture, "paseo-plugin.json"), JSON.stringify({ id: "followup-fixture", requirements: { paseo: ">=0.11.0" } }));
   await writeFile(join(fixture, "index.server.ts"), await readFile("scripts/fixture-provider.ts", "utf8"));
   await writeFile(join(home, "github-fixture.json"), JSON.stringify({ state: "OPEN", conflict: true }));
   const gh = `#!/usr/bin/env node\nif(process.env.GH_REPO!=='example/app')throw new Error('Missing repository authentication context');const fs=require('fs'); const d=JSON.parse(fs.readFileSync(${JSON.stringify(join(home, "github-fixture.json"))},'utf8')); if(process.argv[3]!=='graphql'){console.log('[]');process.exit(0)} const pr={number:1,title:'Migration rollout',url:'https://github.com/example/app/pull/1',state:d.state,headRefName:'fixture-bottom',headRefOid:d.head??'fixture-head',baseRefName:'main',isDraft:false,mergeable:d.conflict?'CONFLICTING':'MERGEABLE',mergeStateStatus:d.conflict?'DIRTY':'CLEAN',reviewDecision:'APPROVED',baseRef:null,reviewThreads:{nodes:[],pageInfo:{hasNextPage:false}},commits:{nodes:[]}};console.log(JSON.stringify({data:{repository:{defaultBranchRef:{name:'main'},p0:pr}}}));\n`;
@@ -39,9 +39,9 @@ try {
   await waitUntil("isolated daemon did not start", async () => { try { await cli("workspace", "ls"); return true; } catch { assert.equal(daemon.exitCode, null, "isolated daemon exited"); return false; } }, { baseMs: 20_000 });
   await cli("plugin", "install", fixture);
   client = new DaemonClient({ url, clientId: "follow-install-test", clientType: "cli", reconnect: { enabled: false }, suppressSendErrors: true }); await client.connect(); api = createPaseoApi(client);
-  const call = (method, input) => client.invokePluginRpc("follow-through", method, input);
-  const w = await api.workspaces.create({ title: "Follow-through POC test", source: { kind: "directory", path: root } });
-  const agent = await w.agents.create({ config: { provider: "followthrough-fixture/fixture", model: "fixture", modeId: "default", thinkingOptionId: "high", providerOptions: { fixture_marker: "inherit-main-config" }, systemPrompt: "Keep the fixture workspace instructions" }, title: "Isolated main agent" });
+  const call = (method, input) => client.invokePluginRpc("follow-up", method, input);
+  const w = await api.workspaces.create({ title: "Follow-up POC test", source: { kind: "directory", path: root } });
+  const agent = await w.agents.create({ config: { provider: "followup-fixture/fixture", model: "fixture", modeId: "default", thinkingOptionId: "high", providerOptions: { fixture_marker: "inherit-main-config" }, systemPrompt: "Keep the fixture workspace instructions" }, title: "Isolated main agent" });
   await client.sendMessage(agent.id, "Fixture: ship migration and verify the rollout", { messageId: "fixture-initial-request" });
   for (let i = 0; i < 40; i++) {
     const history = await client.fetchAgentTimeline(agent.id, { projection: "canonical", limit: 50 });
@@ -49,10 +49,10 @@ try {
     if (i === 39) throw new Error(`Fixture history was not emitted: ${JSON.stringify(history.entries)}`);
     await new Promise(r => setTimeout(r, 250));
   }
-  await mkdir(join(home, "plugin-data/follow-through"), { recursive: true });
+  await mkdir(join(home, "plugin-data/follow-up"), { recursive: true });
   // This suite drives explicit activation, so Follow every workspace is off (and its one-time migration already
   // done); tests/home-beta2.test.ts covers the default-on rule and the migration.
-  await writeFile(join(home, "plugin-data/follow-through/state.json"), JSON.stringify({ version: 1, enable_follow_every: false, migrations: ["follow-every-1"], workspaces: [{ id: w.id, title: "Follow-through POC test", goal: "Follow-through POC test", mainAgentId: agent.id, enable_auto_follow_up: true, hold: null, archived: false, prs: [], obligations: [], batches: [], completion: null, updatedAt: new Date().toISOString(), managedDoneLabel: false, runtimeReason: null, runtimeBusy: false, backgroundBusy: false, inventory: null }] }));
+  await writeFile(join(home, "plugin-data/follow-up/state.json"), JSON.stringify({ version: 1, enable_follow_every: false, migrations: ["follow-every-1"], workspaces: [{ id: w.id, title: "Follow-up POC test", goal: "Follow-up POC test", mainAgentId: agent.id, enable_auto_follow_up: true, hold: null, archived: false, prs: [], obligations: [], batches: [], completion: null, updatedAt: new Date().toISOString(), managedDoneLabel: false, runtimeReason: null, runtimeBusy: false, backgroundBusy: false, inventory: null }] }));
   await cli("plugin", "install", plugin);
   assert.ok(!(await cli("plugin", "ls")).some(p => p.id === "send-to-paseo"), "the complete lifecycle suite runs without the companion");
   assert.equal((await call("follow.browser-status", {})).ready, false);
@@ -60,11 +60,11 @@ try {
   const inactiveStatus = await call("follow.agent-status", { agentId: agent.id });
   assert.equal(inactiveStatus.mainAgentId, agent.id); assert.equal(inactiveStatus.enable_tracking, false);
   await assert.rejects(call("follow.enroll", { agentId: agent.id, goal: "Must not activate" }), /Tracking is inactive/);
-  assert.equal((await cli("plugin", "ls", "follow-through"))[0].status, "running");
-  await w.agents.create({ config: { provider: "followthrough-fixture/fixture" }, title: "Secondary agent" });
+  assert.equal((await cli("plugin", "ls", "follow-up"))[0].status, "running");
+  await w.agents.create({ config: { provider: "followup-fixture/fixture" }, title: "Secondary agent" });
   const otherPath = join(root, "other-workspace"); await mkdir(otherPath);
   const other = await api.workspaces.create({ title: "Untouched workspace", source: { kind: "directory", path: otherPath } });
-  await other.agents.create({ config: { provider: "followthrough-fixture/fixture" }, title: "Untouched main agent" });
+  await other.agents.create({ config: { provider: "followup-fixture/fixture" }, title: "Untouched main agent" });
   await call("follow.refresh", {});
   assert.equal((await call("follow.list", {})).workspaces.length, 0, "install and agent creation must not activate anything");
   if (!process.argv.includes("--projects-only")) {
@@ -94,7 +94,7 @@ try {
   assert.equal(record.batches.length, 0);
   assert.equal((await call("follow.pr-owner", { repo: "example/app", number: 1 })).owner, null, "history references do not establish PR ownership");
   assert.deepEqual(await call("follow.pr-workspaces", { repo: "example/app", number: 1 }), { tracked: false, workspaces: [], more: 0 }, "untracked repositories return nothing to the browser");
-  const bridgePath = join(home, "plugin-data/follow-through/mcp.mjs");
+  const bridgePath = join(home, "plugin-data/follow-up/mcp.mjs");
   const nativeMcp = async (requests, caller = agent.id) => {
     const child = spawn(process.execPath, [bridgePath], { env: { ...env, PASEO_AGENT_ID: caller }, stdio: ["pipe", "pipe", "pipe"] });
     let output = "", error = ""; child.stdout.on("data", v => output += v); child.stderr.on("data", v => error += v);
@@ -104,16 +104,16 @@ try {
   const native = await nativeMcp([{ method: "initialize", params: {} }, { method: "tools/list" }, { method: "tools/call", params: { name: "workspace_status", arguments: {} } }]);
   assert.equal(native[1].result.tools.length, 14); assert.equal(JSON.parse(native[2].result.content[0].text).detail, "summary");
   assert.deepEqual((await nativeMcp([{ method: "tools/list" }], secondary.id))[0].result.tools.map(t => t.name).sort(), ["link_item", "register_pr", "sync_workspace", "unlink_item", "workspace_status"]);
-  const fallbackEnv = { ...env, PASEO_AGENT_ID: agent.id }; delete fallbackEnv.FOLLOW_THROUGH_CLIENT_ENTRY;
+  const fallbackEnv = { ...env, PASEO_AGENT_ID: agent.id }; delete fallbackEnv.FOLLOW_UP_CLIENT_ENTRY;
   const fallback = JSON.parse((await exec(process.execPath, [bridgePath, "call", "workspace_status", "{}"], { env: fallbackEnv })).stdout);
   assert.equal(fallback.id, w.id, "a dependency-free bridge resolves the installed CLI client without a session env override");
   // harnessEnv sets CLAUDE_CONFIG_DIR, so Claude's global config is <home>/.claude/.claude.json; check both spellings.
   for (const global of [join(home, ".claude.json"), join(home, ".claude/.claude.json")]) {
     const claudeGlobal = JSON.parse(await readFile(global, "utf8").catch(() => "{}"));
-    assert.equal(claudeGlobal.mcpServers?.["follow-through"], undefined, "session attachment must not register a global Claude MCP");
+    assert.equal(claudeGlobal.mcpServers?.["follow-up"], undefined, "session attachment must not register a global Claude MCP");
   }
   assert.equal(await readFile(join(home, ".codex/config.toml"), "utf8"), codexFixture, "session attachment must leave global Codex MCP settings unchanged");
-  const hookScript = join(home, "plugin-data/follow-through/agent-hook.mjs");
+  const hookScript = join(home, "plugin-data/follow-up/agent-hook.mjs");
   const runAgentHook = async (event, agentId = agent.id) => {
     const child = spawn(process.execPath, [hookScript], { env: { ...env, PASEO_AGENT_ID: agentId }, stdio: ["pipe", "pipe", "pipe"] });
     let output = ""; let error = "";
@@ -122,8 +122,8 @@ try {
     child.stdin.end(JSON.stringify({ session_id: "packed-normal-turn", ...event })); await finished;
     assert.equal(error, ""); return output ? JSON.parse(output) : null;
   };
-  assert.ok(JSON.parse(await readFile(join(home, ".claude/settings.json"), "utf8")).hooks.UserPromptSubmit.some(group => group.hooks.some(hook => hook.command.includes("paseo-follow-through-hook"))));
-  assert.ok(JSON.parse(await readFile(join(home, ".codex/hooks.json"), "utf8")).hooks.UserPromptSubmit.some(group => group.hooks.some(hook => hook.command.includes("paseo-follow-through-hook"))));
+  assert.ok(JSON.parse(await readFile(join(home, ".claude/settings.json"), "utf8")).hooks.UserPromptSubmit.some(group => group.hooks.some(hook => hook.command.includes("paseo-follow-up-hook"))));
+  assert.ok(JSON.parse(await readFile(join(home, ".codex/hooks.json"), "utf8")).hooks.UserPromptSubmit.some(group => group.hooks.some(hook => hook.command.includes("paseo-follow-up-hook"))));
   assert.match((await runAgentHook({ hook_event_name: "UserPromptSubmit" }, secondary.id)).hookSpecificOutput.additionalContext, /secondary git worktrees/);
   assert.match((await runAgentHook({ hook_event_name: "UserPromptSubmit" })).hookSpecificOutput.additionalContext, /sync_workspace/);
   assert.equal((await runAgentHook({ hook_event_name: "Stop" })).decision, "block");
@@ -137,7 +137,7 @@ try {
   assert.equal((await call("follow.agent-status", { agentId: agent.id })).prs.length, 0, "hooks never claim referenced PRs");
   console.log("PASS: packed agent hooks provide scoped normal-turn instructions and one missed-sync continuation; scoped root-session sync changes neither ownership, PR inventory, Auto nor Done.");
   console.log("Packed plugin installs without development dependencies; MCP and lifecycle hooks registered.");
-  const config = JSON.parse(await readFile(join(home, "fixture-config.json"), "utf8")); assert.ok(!config.mcp.includes("follow-through")); assert.equal(config.bridge, undefined); assert.ok(!config.instructions?.includes("follow-through"), "unselected agents are not modified");
+  const config = JSON.parse(await readFile(join(home, "fixture-config.json"), "utf8")); assert.ok(!config.mcp.includes("follow-up")); assert.equal(config.bridge, undefined); assert.ok(!config.instructions?.includes("follow-up"), "unselected agents are not modified");
   for (let i = 0; i < 3; i++) await call("follow.refresh", {});
   assert.equal((await readFile(join(home, "fixture-receipts.jsonl"), "utf8")).trim().split("\n").length, 1, "activation and polling must not send");
   await call("follow.recover", { workspaceId: w.id });
@@ -156,11 +156,11 @@ try {
   const helperConfig = JSON.parse(await readFile(join(home, `fixture-agent-config-${helper.id}.json`), "utf8"));
   assert.equal(helperConfig.model, "fixture"); assert.equal(helperConfig.mode, "default"); assert.equal(helperConfig.thinkingOption, "high");
   assert.ok(helperConfig.systemPrompt.startsWith("Keep the fixture workspace instructions"));
-  assert.equal(helperConfig.env.FOLLOW_THROUGH_RECOVERY, "1");
-  assert.ok(!helperConfig.toolPolicy.preapproved.some(t => t.server === "follow-through" && t.tool === "declare_done")); assert.equal(helper.labels["follow-through.recovery"], "true");
+  assert.equal(helperConfig.env.FOLLOW_UP_RECOVERY, "1");
+  assert.ok(!helperConfig.toolPolicy.preapproved.some(t => t.server === "follow-up" && t.tool === "declare_done")); assert.equal(helper.labels["follow-up.recovery"], "true");
   assert.equal(record.mainAgentId, agent.id);
   const mainHistory = await client.fetchAgentTimeline(agent.id, { projection: "canonical", limit: 100 });
-  assert.ok(!mainHistory.entries.some(e => JSON.stringify(e.item).includes("Follow-through recovery")), "recovery must not pollute the main conversation");
+  assert.ok(!mainHistory.entries.some(e => JSON.stringify(e.item).includes("Follow-up recovery")), "recovery must not pollute the main conversation");
   const evidence = JSON.parse(await readFile(recovery.contextPath, "utf8"));
   assert.ok(JSON.stringify(evidence.timeline).includes("example/unrelated/pull/7"));
   await assert.rejects(call("follow.done", { agentId: helper.id, summary: "Done" }), /main agent/);
@@ -207,14 +207,14 @@ try {
   await call("follow.send", { workspaceId: w.id, batchId: queuedRepair.id });
   await waitFor(w => w.batches.some(b => b.tasks.some(t => t.kind === "conflict") && b.state === "sent"), "clicked conflict follow-up");
   const repair = record.batches.find(b => b.tasks.some(t => t.kind === "conflict"));
-  const receiptsForBatches = async () => (await readFile(join(home, "fixture-receipts.jsonl"), "utf8")).trim().split("\n").filter(line => /Follow-through (batch|recovery)/.test(line));
+  const receiptsForBatches = async () => (await readFile(join(home, "fixture-receipts.jsonl"), "utf8")).trim().split("\n").filter(line => /Follow-up (batch|recovery)/.test(line));
   let receipts = await receiptsForBatches();
   await waitUntil("two batch receipts", async () => (receipts = await receiptsForBatches()).length >= 2, { baseMs: 10_000 }).catch(() => undefined);
   assert.equal(receipts.length, 2); assert.equal(JSON.parse(receipts[0]).agentId, helper.id); assert.equal(JSON.parse(receipts[1]).agentId, agent.id); assert.match(receipts[1], /Resolve merge conflicts/);
   const repairInput = JSON.parse(receipts[1]).input;
   assert.equal(repairInput.type, "message");
-  assert.equal(repairInput.content.filter(c => c.type === "text").map(c => c.text).join("\n"), `Follow-through batch ${repair.id}\n\n1. Resolve merge conflicts on example/app#1`);
-  await cli("plugin", "reload", "follow-through"); await call("follow.refresh", {});
+  assert.equal(repairInput.content.filter(c => c.type === "text").map(c => c.text).join("\n"), `Follow-up batch ${repair.id}\n\n1. Resolve merge conflicts on example/app#1`);
+  await cli("plugin", "reload", "follow-up"); await call("follow.refresh", {});
   receipts = await receiptsForBatches(); assert.equal(receipts.length, 2, "reload must not resend either inventory or repairs");
   await writeFile(join(home, "github-fixture.json"), JSON.stringify({ state: "MERGED", conflict: false }));
   await call("follow.acknowledge", { agentId: agent.id, batchId: repair.id, outcome: "completed", result: "Conflict fixed, verified, and pushed" });
@@ -231,8 +231,8 @@ try {
   if (!(labeledWorkspace.labels ?? []).includes("Done")) await waitUntil("Done label", async () => ((labeledWorkspace = await w.refresh()).labels ?? []).includes("Done"), { baseMs: 10_000 }).catch(() => undefined);
   assert.ok((labeledWorkspace.labels ?? []).includes("Done"), JSON.stringify({ completion: doneRecord.completion, busy: doneRecord.runtimeBusy, background: doneRecord.backgroundBusy, reason: doneRecord.runtimeReason, managed: doneRecord.managedDoneLabel, batches: doneRecord.batches.map(b => b.state), labels: labeledWorkspace.labels }));
   for (const value of [true, false]) assert.ok((await call("follow.control", { workspaceId: w.id, enable_auto_sends: value })).completion, "changing Auto must preserve Done");
-  const bridgeEnv = { ...env, PASEO_AGENT_ID: agent.id, FOLLOW_THROUGH_CLIENT_ENTRY: resolve("node_modules/@getpaseo/client/dist/daemon-client.js") };
-  const viaBridge = JSON.parse((await exec(process.execPath, [join(home, "plugin-data/follow-through/mcp.mjs"), "call", "workspace_status"], { env: bridgeEnv })).stdout); assert.equal(viaBridge.id, w.id);
+  const bridgeEnv = { ...env, PASEO_AGENT_ID: agent.id, FOLLOW_UP_CLIENT_ENTRY: resolve("node_modules/@getpaseo/client/dist/daemon-client.js") };
+  const viaBridge = JSON.parse((await exec(process.execPath, [join(home, "plugin-data/follow-up/mcp.mjs"), "call", "workspace_status"], { env: bridgeEnv })).stdout); assert.equal(viaBridge.id, w.id);
   await call("follow.obligation", { agentId: agent.id, title: "New follow-on work", status: "pending", evidence: "", afterPrs: [], enable_follow_up: false }); await waitFor(w => !w.managedDoneLabel, "Done label removed after new work"); await waitUntil("Done label removed", async () => !((await w.refresh()).labels ?? []).includes("Done"), { baseMs: 10_000 }).catch(() => undefined); assert.ok(!((await w.refresh()).labels ?? []).includes("Done"));
   await call("follow.activate", { workspaceId: other.id });
   const manual = (await call("follow.get", { workspaceId: other.id })).workspace;
@@ -250,7 +250,7 @@ try {
   console.log("Waiting through the batch quiet period while Session Guard remains paused…");
   while (Date.now() - Date.parse(guardedBatch.createdAt) < 61_000) { await call("follow.refresh", {}); await new Promise(r => setTimeout(r, 1000)); }
   assert.equal((await receiptsForBatches()).length, 3, "no Auto message while Session Guard owns the pause");
-  await cli("plugin", "reload", "follow-through");
+  await cli("plugin", "reload", "follow-up");
   record = (await call("follow.get", { workspaceId: w.id })).workspace;
   assert.equal(record.batches.find(b => b.id === guardedBatch.id).state, "pending");
   await assert.rejects(call("follow.send", { workspaceId: w.id, batchId: guardedBatch.id }), /Session Guard/);
@@ -283,14 +283,14 @@ try {
   assert.equal(partialReceipt.obligation.evidence, replyInput.evidence);
   const syntheticReplyUrl = "https://example.slack.com/archives/C123/p1767261660000000?thread_ts=1767261600.000000";
   await call("follow.obligation", { ...replyInput, id: replyTask.id, title: "Update requester", status: "done", evidence: "Synthetic receipt; no Slack write performed", communication: { ...communication, replyUrl: syntheticReplyUrl } });
-  await cli("plugin", "reload", "follow-through");
+  await cli("plugin", "reload", "follow-up");
   const savedReply = (await call("follow.agent-status", { agentId: agent.id })).obligations.find(o => o.id === replyTask.id);
   assert.equal(savedReply.communication.replyUrl, syntheticReplyUrl); assert.equal(savedReply.status, "done");
   assert.equal((await receiptsForBatches()).length, 4, "recording communication evidence never posts to Slack or messages an agent");
   console.log("PASS: communication RPC/CLI schemas preserve exact destinations, deduplicate drafts, reject unsent completion and retain reply receipts after reload; no external Slack write.");
   const handoffPath = join(root, "handoff-workspace"); await mkdir(handoffPath);
   const handoffWorkspace = await api.workspaces.create({ title: "Recovery handoff regression", source: { kind: "directory", path: handoffPath } });
-  const handoffMain = await handoffWorkspace.agents.create({ config: { provider: "followthrough-fixture/fixture", providerOptions: { fixture_mode: "deferred" } }, title: "Handoff main" });
+  const handoffMain = await handoffWorkspace.agents.create({ config: { provider: "followup-fixture/fixture", providerOptions: { fixture_mode: "deferred" } }, title: "Handoff main" });
   await call("follow.activate", { workspaceId: handoffWorkspace.id });
   let handoffRecord = (await call("follow.get", { workspaceId: handoffWorkspace.id })).workspace;
   await call("follow.recover", { workspaceId: handoffWorkspace.id });
@@ -312,7 +312,7 @@ try {
   await call("follow.register-pr", { agentId: handoffMain.id, repo: "example/app", number: 1, stack: "Migration rollout" });
   const preserved = await call("follow.obligation", { agentId: handoffMain.id, title: "Verify deployed revision", status: "waiting", afterPrs: ["example/app#1"], evidence: "Existing evidence remains", enable_follow_up: false });
   const preservedId = preserved.obligations[0].id;
-  const unassigned = await handoffWorkspace.agents.create({ config: { provider: "followthrough-fixture/fixture" }, title: "Unassigned agent" });
+  const unassigned = await handoffWorkspace.agents.create({ config: { provider: "followup-fixture/fixture" }, title: "Unassigned agent" });
   await assert.rejects(call("follow.acknowledge", { agentId: unassigned.id, batchId: handoffBatch.id, outcome: "completed", result: "Must be refused" }), /received agent/);
   await client.sendMessage(originalRecipient, "Fixture: fail recovery", { messageId: "fixture-recovery-failure" });
   await waitHandoff(w => w.batches[0].state === "blocked");
@@ -320,7 +320,7 @@ try {
   assert.equal(handoffRecord.hold, null, "optional recovery failure must not hold main-agent work");
   assert.equal(handoffRecord.batches[0].acknowledgmentError.agentId, unassigned.id);
   await client.archiveAgent(originalRecipient);
-  const replacement = await handoffWorkspace.agents.create({ config: { provider: "followthrough-fixture/fixture" }, title: "Replacement recovery" });
+  const replacement = await handoffWorkspace.agents.create({ config: { provider: "followup-fixture/fixture" }, title: "Replacement recovery" });
   await client.sendMessage(replacement.id, recoveryTask, { messageId: "handoff-initial-task" });
   await waitHandoff(w => w.batches[0].state === "completed");
   const transferred = handoffRecord.batches[0];
@@ -337,8 +337,8 @@ try {
   await assert.rejects(call("follow.register-pr", { agentId: handoffMain.id, repo: "example/app", number: 1, stack: "Renamed external stack" }), /excluded from workspace scope/);
   }
   if (!process.argv.includes("--projects-only")) {
-    const contributor = (await client.fetchAgents({ page: { limit: 100 } })).entries.map(e => e.agent).find(a => a.workspaceId === w.id && a.id !== agent.id && !a.labels["follow-through.recovery"]);
-    const child = spawn(process.execPath, [join(home, "plugin-data/follow-through/mcp.mjs")], { env: { ...env, PASEO_AGENT_ID: contributor.id }, stdio: ["pipe", "pipe", "pipe"] });
+    const contributor = (await client.fetchAgents({ page: { limit: 100 } })).entries.map(e => e.agent).find(a => a.workspaceId === w.id && a.id !== agent.id && !a.labels["follow-up.recovery"]);
+    const child = spawn(process.execPath, [join(home, "plugin-data/follow-up/mcp.mjs")], { env: { ...env, PASEO_AGENT_ID: contributor.id }, stdio: ["pipe", "pipe", "pipe"] });
     let output = ""; child.stdout.on("data", c => output += c);
     const finished = new Promise((ok, bad) => { child.once("error", bad); child.once("exit", code => code === 0 ? ok() : bad(new Error("Contributor MCP exited"))); });
     child.stdin.end(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "register_pr", arguments: { repo: "example/app", number: 99, stack: "Contributor work" } } }) + "\n");
@@ -357,28 +357,28 @@ try {
   await exec("git", ["init", "--initial-branch=main", heroPath], { env });
   await exec("git", ["-C", heroPath, "remote", "add", "origin", "https://github.com/example/acme-poc.git"], { env });
   const defaultWorkspace = await api.workspaces.create({ title: "Default-tracked workspace", source: { kind: "directory", path: heroPath } });
-  const defaultAgent = await defaultWorkspace.agents.create({ config: { provider: "followthrough-fixture/fixture" }, title: "Default main" });
+  const defaultAgent = await defaultWorkspace.agents.create({ config: { provider: "followup-fixture/fixture" }, title: "Default main" });
   await call("follow.refresh", {});
   let defaultRecord;
   await waitUntil("default-tracked workspace", async () => { await call("follow.refresh", {}); return defaultRecord = (await call("follow.get", { workspaceId: defaultWorkspace.id })).workspace; }, { baseMs: 10_000 }).catch(() => undefined);
   assert.ok(defaultRecord); assert.equal(defaultRecord.enable_auto_sends, true); assert.equal(defaultRecord.mainAgentId, defaultAgent.id);
   const defaultEnv = JSON.parse(await readFile(join(home, `fixture-settings-${defaultAgent.id}.json`), "utf8"));
-  assert.ok(defaultEnv.FOLLOW_THROUGH_CLI, "the default main gets its bridge on its first session");
+  assert.ok(defaultEnv.FOLLOW_UP_CLI, "the default main gets its bridge on its first session");
   // Match agent-scoped CLI launches: the parent label survives even with a new workspace.
   for (let index = 0; index < 3; index++) {
     const launched = await api.workspaces.create({ title: `Created task ${index}`, source: { kind: "directory", path: heroPath } });
     assert.equal((await call("follow.get", { workspaceId: launched.id })).workspace, null);
-    const localMain = await launched.agents.create({ config: { provider: "followthrough-fixture/fixture" }, labels: { "paseo.parent-agent-id": agent.id }, title: `Created main ${index}` });
+    const localMain = await launched.agents.create({ config: { provider: "followup-fixture/fixture" }, labels: { "paseo.parent-agent-id": agent.id }, title: `Created main ${index}` });
     let record;
     await waitUntil("created task tracked", async () => { record = (await call("follow.get", { workspaceId: launched.id })).workspace; if (record?.enable_tracking) return true; await call("follow.refresh", {}); return false; }, { baseMs: 10_000 }).catch(() => undefined);
     assert.equal(record.mainAgentId, localMain.id); assert.equal(record.enable_auto_sends, true);
     const firstSession = JSON.parse(await readFile(join(home, `fixture-settings-${localMain.id}.json`), "utf8"));
-    assert.ok(firstSession.FOLLOW_THROUGH_CLI, "a cross-workspace launch gets its bridge on the first session");
+    assert.ok(firstSession.FOLLOW_UP_CLI, "a cross-workspace launch gets its bridge on the first session");
     assert.equal((await call("follow.activate", { workspaceId: launched.id })).mainAgentId, localMain.id, "Track must also succeed");
     assert.equal((await call("follow.enroll", { agentId: localMain.id, goal: `Independent task ${index}` })).mainAgentId, localMain.id);
-    const nested = await launched.agents.create({ config: { provider: "followthrough-fixture/fixture" }, labels: { "paseo.parent-agent-id": localMain.id }, title: "Same-workspace child" });
+    const nested = await launched.agents.create({ config: { provider: "followup-fixture/fixture" }, labels: { "paseo.parent-agent-id": localMain.id }, title: "Same-workspace child" });
     const nestedEnv = JSON.parse(await readFile(join(home, `fixture-settings-${nested.id}.json`), "utf8"));
-    assert.equal(nestedEnv.FOLLOW_THROUGH_CLI, undefined);
+    assert.equal(nestedEnv.FOLLOW_UP_CLI, undefined);
     await assert.rejects(call("follow.agent-status", { agentId: nested.id }), /received agent/);
     await assert.rejects(call("follow.enroll", { agentId: agent.id, workspaceId: launched.id, goal: "Cannot claim the child workspace" }), /another workspace/);
   }
@@ -387,11 +387,11 @@ try {
   assert.equal(heroProject.enable_default_tracking, true);
   await call("follow.set-project-tracking", { projectId: heroProject.id, enable_default_tracking: false });
   const disabledWorkspace = await api.workspaces.create({ title: "Default disabled", source: { kind: "directory", path: heroPath } });
-  await disabledWorkspace.agents.create({ config: { provider: "followthrough-fixture/fixture" }, title: "Untracked main" });
+  await disabledWorkspace.agents.create({ config: { provider: "followup-fixture/fixture" }, title: "Untracked main" });
   await call("follow.refresh", {});
   assert.equal((await call("follow.get", { workspaceId: disabledWorkspace.id })).workspace, null);
   assert.ok((await call("follow.get", { workspaceId: defaultWorkspace.id })).workspace, "turning off defaults preserves existing tracking");
-  await cli("plugin", "reload", "follow-through");
+  await cli("plugin", "reload", "follow-up");
   assert.equal((await call("follow.project-settings", {})).projects.find(p => p.id === heroProject.id).enable_default_tracking, false);
   await call("follow.set-project-tracking", { projectId: heroProject.id, enable_default_tracking: true });
   await waitUntil("Enabled project did not enroll its existing workspace", async () => { await call("follow.refresh", {}); return (await call("follow.get", { workspaceId: disabledWorkspace.id })).workspace; }, { baseMs: 10_000 });

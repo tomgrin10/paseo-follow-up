@@ -154,18 +154,18 @@ test("decision 3: the brief's own decision isn't repeated as Q1 in the popover's
 
 test("the bridge offers action tools to Paseo-launched root agents only, honestly annotated, through follow.agent-act", async t => {
   const root = await mkdtemp(join(tmpdir(), "follow-agent-mcp-")); t.after(() => rm(root, { recursive: true, force: true }));
-  const directory = join(root, "plugin-data/follow-through"); await mkdir(directory, { recursive: true });
+  const directory = join(root, "plugin-data/follow-up"); await mkdir(directory, { recursive: true });
   await writeFile(join(directory, "state.json"), JSON.stringify({ workspaces: [] }));
   await writeFile(join(directory, "hooks-enabled.json"), JSON.stringify({ expiresAt: Date.now() + 60_000 }));
   await writeFile(join(root, "config.json"), JSON.stringify({ daemon: { listen: "127.0.0.1:1" } }));
   const calls = join(root, "calls.jsonl"), client = join(root, "client.mjs");
   await writeFile(client, `import{appendFileSync}from'node:fs';export class DaemonClient{async connect(){}async close(){}async invokePluginRpc(plugin,method,input){appendFileSync(${JSON.stringify(calls)},JSON.stringify({method,input})+'\\n');return{prs:[],workspaces:[]};}}`);
   const ask = (env: Record<string, string>) => new Promise<any[]>((ok, bad) => {
-    const child = spawn(process.execPath, [resolve("server/mcp.mjs")], { env: { ...process.env, PASEO_HOME: root, PASEO_AGENT_ID: "orchestrator", FOLLOW_THROUGH_CLIENT_ENTRY: client, FOLLOW_THROUGH_RECOVERY: "", FOLLOW_THROUGH_BRIEF: "", FOLLOW_THROUGH_ROOT: "", ...env }, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [resolve("server/mcp.mjs")], { env: { ...process.env, PASEO_HOME: root, PASEO_AGENT_ID: "orchestrator", FOLLOW_UP_CLIENT_ENTRY: client, FOLLOW_UP_RECOVERY: "", FOLLOW_UP_BRIEF: "", FOLLOW_UP_ROOT: "", ...env }, stdio: ["pipe", "pipe", "pipe"] });
     let out = ""; child.stdout.on("data", c => out += c); child.once("error", bad); child.once("exit", () => ok(out.trim().split("\n").map(l => JSON.parse(l))));
     child.stdin.end([{ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }, { jsonrpc: "2.0", id: 2, method: "tools/list" }, { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "list_prs", arguments: { needs_reviewers: true } } }].map(r => JSON.stringify(r)).join("\n") + "\n");
   });
-  const on = await ask({ FOLLOW_THROUGH_ROOT: "1" });
+  const on = await ask({ FOLLOW_UP_ROOT: "1" });
   const tools = on[1].result.tools;
   assert.ok(["list_prs", "add_reviewers", "merge", "sign_off", "inbox_list", "send_repairs", "track"].every(n => tools.some((x: any) => x.name === n)));
   const hint = (n: string) => tools.find((x: any) => x.name === n).annotations;
@@ -175,5 +175,5 @@ test("the bridge offers action tools to Paseo-launched root agents only, honestl
   assert.match(tools.find((x: any) => x.name === "add_reviewers").description, /Only when the developer asked/);
   assert.match(on[0].result.instructions, /assign reviewers on all/);
   assert.deepEqual(JSON.parse((await readFile(calls, "utf8")).trim()), { method: "follow.agent-act", input: { tool: "list_prs", args: { needs_reviewers: true }, agentId: "orchestrator" } });
-  for (const env of [{}, { FOLLOW_THROUGH_ROOT: "1", FOLLOW_THROUGH_RECOVERY: "1" }] as Record<string, string>[]) assert.deepEqual((await ask(env))[1].result.tools, [], "no tools for a subagent, an outside session or recovery");
+  for (const env of [{}, { FOLLOW_UP_ROOT: "1", FOLLOW_UP_RECOVERY: "1" }] as Record<string, string>[]) assert.deepEqual((await ask(env))[1].result.tools, [], "no tools for a subagent, an outside session or recovery");
 });

@@ -13,7 +13,7 @@ import {
 import { Button, errorText, text, type Theme, SubmitScope } from "./kit";
 import { Disclosure } from "./settings-shell";
 
-export const shippingKey = ["follow-through", "pr-workflow"];
+export const shippingKey = ["follow-up", "pr-workflow"];
 type Write = z.input<typeof setPrWorkflowInputSchema>;
 
 /** The section's info tip. Graphite is explained only on a machine where it's in play. */
@@ -36,7 +36,7 @@ export function ShippingSettings({ theme, compact }: { theme: Theme; compact: bo
   const recheck = useMutation({ mutationFn: () => read({ refresh: true }), onSuccess: v => { cache.setQueryData(shippingKey, v); toast.show("Checked again", { variant: "success" }); }, onError: e => toast.error(errorText(e)) });
   const change = useMutation({
     mutationFn: (input: Write & { toast?: string }) => { const { toast: _, ...rest } = input; return write(rest); },
-    onSuccess: (v, input) => { cache.setQueryData(shippingKey, v); if (input.toast) toast.show(input.toast, { variant: "success" }); void cache.invalidateQueries({ queryKey: ["follow-through", "workspace"] }); },
+    onSuccess: (v, input) => { cache.setQueryData(shippingKey, v); if (input.toast) toast.show(input.toast, { variant: "success" }); void cache.invalidateQueries({ queryKey: ["follow-up", "workspace"] }); },
     onError: e => toast.error(errorText(e)),
   });
   const data = query.data;

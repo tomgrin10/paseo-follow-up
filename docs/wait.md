@@ -7,7 +7,7 @@ the background and end the turn "waiting for a notification". Wait lets them hol
 
 Paseo 0.16 advertises `features.agentBackgroundWork`: it tracks an agent's background shell jobs, shows them with
 Stop, and wakes the agent when one finishes, at no model cost while it waits. On such a host Wait attaches no tools
-and doesn't set `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0`. It sets `FOLLOW_THROUGH_BACKGROUND_WORK=1` instead, and the
+and doesn't set `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0`. It sets `FOLLOW_UP_BACKGROUND_WORK=1` instead, and the
 SessionStart hook gives `backgroundWorkInstruction` (`server/mcp.mjs`): run it with `run_in_background=true`, end
 the turn, confirm the exit code when woken. Settings → Agents → Background jobs says so first (reason `host`, shown with the switch on or off), and the switch
 reads "Use Paseo background jobs": it only adds that guidance to new sessions. The same switch, labels and
@@ -53,7 +53,7 @@ standalone check still apply. Everything below is Paseo 0.15. Delete Wait when F
 - **Ownership.** Each job is scoped by the daemon's agent id and cwd. A tool input with an `agentId` is rejected.
 - **Stop and new messages.** Stop cancels the wait, and a new message ends it with `new_message`. Neither kills the
   job.
-- **Claude only.** Wait sets `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0` and `FOLLOW_THROUGH_WAIT=1` for the session.
+- **Claude only.** Wait sets `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0` and `FOLLOW_UP_WAIT=1` for the session.
 - **Guidance.** `waitInstruction` in `server/mcp.mjs` reaches the agent through the SessionStart hook
   ([hooks.md](hooks.md)).
 

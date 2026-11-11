@@ -12,10 +12,10 @@ is missing from AGENTS.md or docs/, so add a line here when you add one.
   - `live()` re-checks the caller's role on every call.
   - Details: [native-agent-tools.md](native-agent-tools.md).
 - **Stdio bridge (Paseo 0.14, or when the host serves no plugin tools).** `server/session-mcp.ts` adds a per-launch
-  MCP server that runs `plugin-data/follow-through/mcp.mjs`. It connects to the daemon as `PASEO_AGENT_ID` and calls
-  the same RPCs. The same file is a CLI: `node "$FOLLOW_THROUGH_CLI" list` or `call <tool> '<json>' [--compact]`.
+  MCP server that runs `plugin-data/follow-up/mcp.mjs`. It connects to the daemon as `PASEO_AGENT_ID` and calls
+  the same RPCs. The same file is a CLI: `node "$FOLLOW_UP_CLI" list` or `call <tool> '<json>' [--compact]`.
   - There is never a global MCP registration. `server/mcp-registrations.ts` removes the old user-scope one, with a
-    `.follow-through-unregister.bak`.
+    `.follow-up-unregister.bak`.
   - `server/agent-mcp.ts` builds the stdio definition.
 - **Which tools a session gets** is decided by `toolList()` in `server/mcp.mjs` and `availableTools()` in
   `server/native-tools.ts`:

@@ -6,7 +6,7 @@ const MAX_BYTES = 256 * 1024;
 
 /**
  * The worker's cheap runtime self-check: after each refresh, a workspace whose surfaces contradict each other
- * (shared/status-invariants.ts) is logged once to plugin-data/follow-through/status-diagnostics.jsonl with its id.
+ * (shared/status-invariants.ts) is logged once to plugin-data/follow-up/status-diagnostics.jsonl with its id.
  * Logged again only when the set of violations changes. No UI, no polling, one small map of workspace ids.
  */
 export function statusCheck(file: string, check: typeof violations = violations) {

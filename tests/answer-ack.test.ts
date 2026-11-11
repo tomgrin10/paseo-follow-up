@@ -12,7 +12,7 @@ import { clock, pr, workspace } from "./fixtures";
 import { settleTime } from "./support/hanging-host";
 
 /**
- * Bug (2026-11-11): "Your answer wasn't sent. Plugin RPC timed out: follow-through.invoke" on a question card.
+ * Bug (2026-11-11): "Your answer wasn't sent. Plugin RPC timed out: follow-up.invoke" on a question card.
  *
  * follow.brief-action awaited the message to the agent before replying. For a dormant agent Paseo first resumes it and
  * then waits for its run to start (up to 60 s): 86 s that morning, while a plugin RPC gets 30 s. The answer did arrive,

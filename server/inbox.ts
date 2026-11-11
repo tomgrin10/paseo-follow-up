@@ -14,7 +14,7 @@ import type { Question } from "../shared/questions";
 import { briefOrigin, briefQuestionsEvent, briefStep, pickBrief, shouldReopen, validPick, type Brief, type BriefEvent, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
 import { OTHER_LABEL, answerTitle, isOther } from "../shared/questions";
 
-/** The flag store: plugin-data/follow-through/inbox.json. A new file, so existing state never changes shape. */
+/** The flag store: plugin-data/follow-up/inbox.json. A new file, so existing state never changes shape. */
 export class InboxStore {
   private tail: Promise<unknown> = Promise.resolve();
   constructor(readonly directory: string) {}
@@ -464,7 +464,7 @@ export class Inbox {
    * then recorded: the ledger notes the message as the developer's (so the classifier clears the flag, #11), the brief
    * collapses, and the answer goes into the outbox, all before this returns. Getting it to the agent runs after
    * (deliverAnswer): Paseo may first have to resume a dormant agent and wait for its run to start, which took 86 s on
-   * 2026-11-11, far past the 30 s a plugin RPC gets ("Plugin RPC timed out: follow-through.invoke" for an answer that
+   * 2026-11-11, far past the 30 s a plugin RPC gets ("Plugin RPC timed out: follow-up.invoke" for an answer that
    * did arrive). See docs/needs-you.md#answering-a-brief.
    *
    * `answerId` makes it idempotent: the client sends the same one on Retry, so a retry or a double click returns the

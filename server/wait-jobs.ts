@@ -6,7 +6,7 @@ import { runnerSource } from "./wait-runner-source";
 
 /**
  * Wait's job store (folded in from the standalone paseo-wait plugin). A job is a directory under
- * `plugin-data/follow-through/wait/jobs/<agentId>/<jobId>/`:
+ * `plugin-data/follow-up/wait/jobs/<agentId>/<jobId>/`:
  *
  * - `job.json`: who prepared it (agent id and cwd, from the daemon, never from model input) and what it is.
  * - `started/`: created once by the runner, so a prepared command runs at most once.

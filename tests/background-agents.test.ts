@@ -105,19 +105,19 @@ test("session open asks about background before giving any root treatment", asyn
   const open = source.slice(source.indexOf('server.before("agent.session_open"'));
   const guard = open.indexOf("isBackground(");
   assert.ok(guard > 0, "the session_open handler checks for a background agent");
-  for (const later of ["FOLLOW_THROUGH_OVERSEER", "isWorkspaceRoot(", "withTools("]) assert.ok(guard < open.indexOf(later), `before ${later}`);
+  for (const later of ["FOLLOW_UP_OVERSEER", "isWorkspaceRoot(", "withTools("]) assert.ok(guard < open.indexOf(later), `before ${later}`);
   assert.match(source, /wait\.open\(.*\{ background: await isBackground\(/, "and Wait is told too");
 });
 
 test("the hook stays silent for a listed background agent: no context, no Stop-hook nudge", async t => {
   const root = await mkdtemp(join(tmpdir(), "follow-bg-hook-")); t.after(() => rm(root, { recursive: true, force: true }));
-  const directory = join(root, "plugin-data/follow-through"); await mkdir(join(directory, "hook-state"), { recursive: true });
+  const directory = join(root, "plugin-data/follow-up"); await mkdir(join(directory, "hook-state"), { recursive: true });
   await writeFile(join(directory, "agent-hook.mjs"), await readFile(resolve("server/agent-hook.mjs"), "utf8"));
   await writeFile(join(directory, "hooks-enabled.json"), JSON.stringify({ expiresAt: Date.now() + 60_000, clientEntry: "/fixture/client.js" }));
   await writeFile(join(directory, "state.json"), JSON.stringify({ workspaces: [] }));
   await writeFile(join(directory, "brief.json"), JSON.stringify({ enable_inbox: true, enable_brief_nudge: true, pending: [] }));
   const fire = (agent: string, event: object) => new Promise<string>((ok, bad) => {
-    const child = spawn(process.execPath, [join(directory, "agent-hook.mjs")], { env: { ...process.env, FOLLOW_THROUGH_HOOK_IMPORT: "", PASEO_AGENT_ID: agent, FOLLOW_THROUGH_BRIEF: "claude", FOLLOW_THROUGH_RECOVERY: "" }, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [join(directory, "agent-hook.mjs")], { env: { ...process.env, FOLLOW_UP_HOOK_IMPORT: "", PASEO_AGENT_ID: agent, FOLLOW_UP_BRIEF: "claude", FOLLOW_UP_RECOVERY: "" }, stdio: ["pipe", "pipe", "pipe"] });
     let out = ""; child.stdout.on("data", c => out += c); child.once("error", bad); child.once("exit", () => ok(out.trim()));
     child.stdin.end(JSON.stringify({ session_id: "s1", ...event }));
   });

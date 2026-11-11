@@ -19,7 +19,7 @@ async function fixture() {
   const save = () => writeFile(join(directory, "state.json"), JSON.stringify(state));
   await save();
   const run = async (event: Record<string, unknown>, env: Record<string, string> = {}) => {
-    const child = spawn(process.execPath, [join(directory, "agent-hook.mjs")], { env: { ...process.env, PASEO_AGENT_ID: w.mainAgentId, FOLLOW_THROUGH_RECOVERY: "", ...env }, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [join(directory, "agent-hook.mjs")], { env: { ...process.env, PASEO_AGENT_ID: w.mainAgentId, FOLLOW_UP_RECOVERY: "", ...env }, stdio: ["pipe", "pipe", "pipe"] });
     let output = ""; let error = "";
     child.stdout.on("data", c => { output += c; }); child.stderr.on("data", c => { error += c; });
     const done = new Promise<void>((resolve, reject) => { child.once("error", reject); child.once("exit", code => code === 0 ? resolve() : reject(new Error(error))); });
@@ -33,7 +33,7 @@ test("hook installation preserves other handlers, backs up once, remains idempot
   try {
     const first = await readFile(f.settings[0], "utf8"); await f.hooks.start(); assert.equal(await readFile(f.settings[0], "utf8"), first);
     assert.equal(JSON.parse(first).model, "keep"); assert.equal(JSON.parse(first).hooks.Stop[0].hooks[0].command, "existing hook");
-    assert.equal(JSON.parse(await readFile(f.settings[0] + ".follow-through.bak", "utf8")).hooks.Stop.length, 1);
+    assert.equal(JSON.parse(await readFile(f.settings[0] + ".follow-up.bak", "utf8")).hooks.Stop.length, 1);
     await f.hooks.stop(); const after = JSON.parse(await readFile(f.settings[0], "utf8")); assert.equal(after.hooks.Stop.length, 1); assert.equal(after.hooks.Stop[0].hooks[0].command, "existing hook");
     assert.equal(await f.run({ hook_event_name: "UserPromptSubmit" }), null);
     const command: string = (reconcileHooks({}, "/tmp/a'b/agent-hook.mjs").hooks!.Stop[0].hooks![0]).command!;
@@ -47,11 +47,11 @@ test("only an enabled, unarchived main agent receives normal-turn instructions, 
     const result = await f.run({ ...event, agent_type: "custom-main" }); assert.match(result.hookSpecificOutput.additionalContext, /sync_workspace/); assert.match(result.hookSpecificOutput.additionalContext, /Auto still governs/);
     assert.match(result.hookSpecificOutput.additionalContext, /Do routine bookkeeping silently/); assert.match(result.hookSpecificOutput.additionalContext, /without another recap/);
     const context = result.hookSpecificOutput.additionalContext;
-    for (const rule of ["skip resolved tasks", "one PR fully before the next", "/fix-pr", "--publish", "safe reparent", "preserve uncommitted work", "currently serving revision", "acknowledge_batch", "acknowledge a completion batch first", "Merging and archiving remain the developer's actions", "FOLLOW_THROUGH_CLIENT_ENTRY", "/fixture/client.js"]) assert.ok(context.includes(rule), `standing context retains ${rule}`);
+    for (const rule of ["skip resolved tasks", "one PR fully before the next", "/fix-pr", "--publish", "safe reparent", "preserve uncommitted work", "currently serving revision", "acknowledge_batch", "acknowledge a completion batch first", "Merging and archiving remain the developer's actions", "FOLLOW_UP_CLIENT_ENTRY", "/fixture/client.js"]) assert.ok(context.includes(rule), `standing context retains ${rule}`);
     for (const rule of ["original Slack threadUrl", "explicit developer authorization", "purpose=verified", "actual sent replyUrl", "never claim a draft was sent", "do not authorize repairs"]) assert.ok(context.includes(rule), `standing context retains communication rule: ${rule}`);
     assert.equal(await f.run(event, { PASEO_AGENT_ID: "secondary" }), null);
     assert.equal(await f.run(event, { PASEO_AGENT_ID: "" }), null);
-    assert.equal(await f.run(event, { FOLLOW_THROUGH_RECOVERY: "1" }), null);
+    assert.equal(await f.run(event, { FOLLOW_UP_RECOVERY: "1" }), null);
     assert.equal(await f.run({ ...event, agent_id: "provider-child" }), null);
     f.w.enable_tracking = false; await f.save(); assert.equal(await f.run(event), null);
     f.w.enable_tracking = true; f.w.archived = true; await f.save(); assert.equal(await f.run(event), null);
@@ -78,7 +78,7 @@ const tick = () => new Promise(r => setTimeout(r, 5));
 test("a sync through the bridge satisfies Stop however the call spells it: the record counts, not the tool name", async () => {
   const f = await fixture();
   try {
-    for (const command of ['node "$FOLLOW_THROUGH_CLI" call sync_workspace \'{"summary":"x"}\' --compact', "bash ./scripts/finish.sh"]) {
+    for (const command of ['node "$FOLLOW_UP_CLI" call sync_workspace \'{"summary":"x"}\' --compact', "bash ./scripts/finish.sh"]) {
       await f.run({ hook_event_name: "UserPromptSubmit" }); await tick();
       await f.run({ hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: "/fixture/a.ts" } }); await tick();
       // The RPC handler records the confirmation while the shell call runs; PostToolUse fires when it ends.
@@ -149,7 +149,7 @@ test("hook install and uninstall write through a symlinked settings.json and hoo
     const installed = JSON.parse(await readFile(join(real, "settings.json"), "utf8"));
     assert.equal(installed.model, "keep"); assert.ok(installed.hooks.Stop[0].hooks[0].command.includes(join(directory, "agent-hook.mjs")), "the target got the hooks");
     assert.ok(JSON.parse(await readFile(join(real, "hooks.json"), "utf8")).hooks.UserPromptSubmit, "the relative link's target got the hooks");
-    assert.ok((await lstat(join(real, "settings.json.follow-through.bak"))).isFile(), "the backup sits beside the target");
+    assert.ok((await lstat(join(real, "settings.json.follow-up.bak"))).isFile(), "the backup sits beside the target");
     assert.deepEqual((await readdir(join(directory, "claude"))).sort(), ["settings.json"], "nothing is written beside the link");
     await hooks.stop();
     for (const link of links) assert.ok((await lstat(link)).isSymbolicLink(), `${link} is still a symlink after uninstall`);

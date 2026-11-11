@@ -225,10 +225,10 @@ function fakeDaemon(o: { failNew?: boolean; serve?: string }) {
   const client = {
     previewPluginUpdates: async ({ target }: { target: { version: string } }) => {
       calls.push(`preview ${target.version}`);
-      return [{ id: "follow-through", outcome: "update", links: [], proposal: { id: "follow-through", expected: {}, target: { kind: "npm", version: target.version, integrity: o.serve ?? INTEGRITY, resolved: `https://r/${target.version}.tgz` } } }];
+      return [{ id: "follow-up", outcome: "update", links: [], proposal: { id: "follow-up", expected: {}, target: { kind: "npm", version: target.version, integrity: o.serve ?? INTEGRITY, resolved: `https://r/${target.version}.tgz` } } }];
     },
-    applyPluginUpdates: async ([p]: { target: { version: string } }[]) => { calls.push(`apply ${p!.target.version}`); installed = p!.target.version; return [{ id: "follow-through", outcome: "updated" }]; },
-    listPlugins: async () => [{ id: "follow-through", status: o.failNew && installed !== "1.4.0-beta.23" ? "failed" : "running", error: o.failNew && installed !== "1.4.0-beta.23" ? "SyntaxError" : undefined, installation: { currentRevision: installed } }],
+    applyPluginUpdates: async ([p]: { target: { version: string } }[]) => { calls.push(`apply ${p!.target.version}`); installed = p!.target.version; return [{ id: "follow-up", outcome: "updated" }]; },
+    listPlugins: async () => [{ id: "follow-up", status: o.failNew && installed !== "1.4.0-beta.23" ? "failed" : "running", error: o.failNew && installed !== "1.4.0-beta.23" ? "SyntaxError" : undefined, installation: { currentRevision: installed } }],
     close: async () => undefined,
   };
   return { client, calls };
@@ -238,7 +238,7 @@ test("watchdog: applies the checked artifact, keeps it once probation passes", a
   const directory = await mkdtemp(join(tmpdir(), "watchdog-"));
   const { client, calls } = fakeDaemon({});
   let now = 1_000;
-  const job = { directory, pluginId: "follow-through", from: "1.4.0-beta.23", to: "1.4.0-beta.24", integrity: INTEGRITY, tarball: "https://r/1.4.0-beta.24.tgz", clientEntry: "", daemon: {} };
+  const job = { directory, pluginId: "follow-up", from: "1.4.0-beta.23", to: "1.4.0-beta.24", integrity: INTEGRITY, tarball: "https://r/1.4.0-beta.24.tgz", clientEntry: "", daemon: {} };
   const result = await run(job, { connect: async () => client, now: () => now, sleep: async ms => { now += ms; if (now < 30_000) await writeFile(join(directory, "heartbeat.json"), JSON.stringify({ version: "1.4.0-beta.24", at: now, error: null })); } });
   assert.equal(result, "updated");
   assert.deepEqual(calls, ["preview 1.4.0-beta.24", "apply 1.4.0-beta.24"]);
@@ -250,7 +250,7 @@ test("watchdog: a version that fails to load is rolled back to the old one", asy
   const directory = await mkdtemp(join(tmpdir(), "watchdog-"));
   const { client, calls } = fakeDaemon({ failNew: true });
   let now = 1_000;
-  const job = { directory, pluginId: "follow-through", from: "1.4.0-beta.23", to: "1.4.0-beta.24", integrity: INTEGRITY, tarball: "https://r/1.4.0-beta.24.tgz", clientEntry: "", daemon: {} };
+  const job = { directory, pluginId: "follow-up", from: "1.4.0-beta.23", to: "1.4.0-beta.24", integrity: INTEGRITY, tarball: "https://r/1.4.0-beta.24.tgz", clientEntry: "", daemon: {} };
   const result = await run(job, { connect: async () => client, now: () => now, sleep: async ms => { now += ms; } });
   assert.equal(result, "rolled-back");
   assert.deepEqual(calls, ["preview 1.4.0-beta.24", "apply 1.4.0-beta.24", "preview 1.4.0-beta.23", "apply 1.4.0-beta.23"]);
@@ -262,7 +262,7 @@ test("watchdog: a version that fails to load is rolled back to the old one", asy
 test("watchdog: a different artifact than the one checked is never applied", async () => {
   const directory = await mkdtemp(join(tmpdir(), "watchdog-"));
   const { client, calls } = fakeDaemon({ serve: "sha512-AAAA" });
-  const job = { directory, pluginId: "follow-through", from: "1.4.0-beta.23", to: "1.4.0-beta.24", integrity: INTEGRITY, tarball: "https://r/1.4.0-beta.24.tgz", clientEntry: "", daemon: {} };
+  const job = { directory, pluginId: "follow-up", from: "1.4.0-beta.23", to: "1.4.0-beta.24", integrity: INTEGRITY, tarball: "https://r/1.4.0-beta.24.tgz", clientEntry: "", daemon: {} };
   assert.equal(await run(job, { connect: async () => client, sleep: async () => undefined }), "failed");
   assert.deepEqual(calls, ["preview 1.4.0-beta.24"]);
 });

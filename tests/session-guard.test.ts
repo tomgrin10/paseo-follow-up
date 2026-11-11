@@ -46,7 +46,7 @@ async function gatewayFixture(t: any) {
   const f = await fixture(t); const w = workspace({ prs: [pr({ snapshot: snapshot({ conflict: true }) })] });
   const main = { id: w.mainAgentId, workspaceId: w.id, labels: {}, status: "idle", pendingPermissions: [] } as unknown as Agent;
   const secondary = { ...main, id: "secondary" };
-  const recovery = { ...main, id: "recovery", labels: { "follow-through.recovery": "true" } };
+  const recovery = { ...main, id: "recovery", labels: { "follow-up.recovery": "true" } };
   const agents = [main, secondary, recovery]; const sends: string[] = [];
   let beforeFetch: (() => Promise<void>) | null = null; let rejectSend = false;
   const client = {

@@ -10,16 +10,16 @@ const runtime = globalThis.followUpRuntime ?? {};
 const env = name => process.env[`FOLLOW_UP_${name}`] ?? (runtime.legacyEnvPrefix ? process.env[runtime.legacyEnvPrefix + name] : undefined);
 
 const directory = dirname(fileURLToPath(import.meta.url));
-/** 1.4.0-beta.2: launched with Follow-up's tools served by Paseo's MCP (follow_<name>), or the follow-through bridge (<name>). Agents opened before the upgrade carry no flag and keep the bridge names. */
+/** 1.4.0-beta.2: launched with Follow-up's tools served by Paseo's MCP (follow_<name>), or the follow-up bridge (<name>). Agents opened before the upgrade carry no flag and keep the bridge names. */
 let native = env("TOOLS") === "native";
 // Tool names that read unambiguously in prose; kept identical to server/mcp.mjs's underscore names (a test checks it).
 export const TOOL_NAMES = ["workspace_status", "sync_workspace", "enroll_workspace", "register_pr", "exclude_stack", "update_obligation", "acknowledge_batch", "ask_question", "record_answer", "withdraw_question", "set_spec", "link_item", "unlink_item", "link_items", "set_linked_items", "workspace_about", "agent_settings", "needs_you", "declare_done", "list_prs", "add_reviewers", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "inbox_list", "sign_off", "snooze_workspace", "set_finish_flags", "set_priorities", "agent_digest", "route_candidates", "send_to_agent", "start_workspace", "display_settings", "set_display", "follow_settings", "set_follow_settings", "project_settings", "set_project_tracking", "pr_workflow", "set_pr_workflow", "reviewer_settings", "reviewer_suggestions", "save_reviewers", "set_agent_setting", "set_wait_for_jobs", "onboarding_status", "onboarding_checks", "set_onboarding", "rank_status", "rerank_priorities", "overseer_status", "overseer_start", "overseer_restart", "overseer_ask", "inbox_brief", "brief_action", "inbox_act", "answer_question", "run_recovery", "set_workspace_spec", "set_task_trigger", "pr_controls", "browser_status", "trust_bypass_status", "release_notes", "updates_status", "check_updates", "set_updates", "install_update", "make_main_agent"];
 const toolPattern = new RegExp(`(?<![\\w])(${TOOL_NAMES.join("|")})(?![\\w])`, "g");
 /** Names Follow-up's tools the way this agent has them. */
 export function named(text, isNative = native) { return isNative ? text.replace(toolPattern, "follow_$1") : text; }
-/** Whether a tool call is Follow-up's own, under either name set (mcp__follow-through__x, follow-through.x, mcp__paseo__follow_x, paseo.follow_x). */
+/** Whether a tool call is Follow-up's own, under either name set (mcp__follow-up__x, follow-up.x, mcp__paseo__follow_x, paseo.follow_x). */
 export function isFollowTool(tool) { return [ "follow-up", runtime.legacyMcpServer].some(server => server && new RegExp(`^(?:mcp__)?${server}(?:__|[.:/])[a-z_]+$`).test(tool)) || /^(?:mcp__paseo__|paseo[.:/])follow_[a-z_]+$/.test(tool); }
-/** Whether a shell call runs the bridge, however it names it ($FOLLOW_THROUGH_CLI, as the skill says, or the path). */
+/** Whether a shell call runs the bridge, however it names it ($FOLLOW_UP_CLI, as the skill says, or the path). */
 export function isBridgeCall(args, bridgePath) { return args.includes(bridgePath) || ["FOLLOW_UP_", runtime.legacyEnvPrefix].some(prefix => prefix && new RegExp(`\\$\\{?${prefix}CLI\\b`).test(args)) || /mcp\.mjs["']?\s+call\b/.test(args); }
 /**
  * Native tools are attached by one worker; a plugin reload or update drops them from open sessions until each reopens
@@ -27,7 +27,7 @@ export function isBridgeCall(args, bridgePath) { return args.includes(bridgePath
  * that attached each session's tools; a mismatch means this session's follow_ tools are gone. Pure, so it's testable.
  */
 export function toolsDetached(isNative, current, mine) { return isNative && !!current?.instance && mine?.instance !== current.instance; }
-export const detachedNotice = "Follow-up was updated while this session was open, so its follow_* tools are detached and fail with \"Tool not found\" until this session reopens (Paseo reopens it before your next prompt). Until then use the bridge, which runs the same tools with their unprefixed names: node \"$FOLLOW_THROUGH_CLI\" call <tool> '<json>' --compact (for example sync_workspace or needs_you). Do not mention this to the developer.";
+export const detachedNotice = "Follow-up was updated while this session was open, so its follow_* tools are detached and fail with \"Tool not found\" until this session reopens (Paseo reopens it before your next prompt). Until then use the bridge, which runs the same tools with their unprefixed names: node \"$FOLLOW_UP_CLI\" call <tool> '<json>' --compact (for example sync_workspace or needs_you). Do not mention this to the developer.";
 const quietRevision = 1;
 const quietInstruction = "Do routine bookkeeping silently. Do not announce tracker calls, say you updated/synced the sidebar, recap panel state, or add plugin-status commentary/final paragraphs. Put receipts and evidence in the tools. User-facing messages should cover the actual work outcome, or a decision/blocker requiring the developer; answer sidebar status only when explicitly asked. If this continuation is bookkeeping only, use the tools and finish without another recap or repeating your previous answer.";
 const stopReason = "Silently complete this workspace's sidebar bookkeeping before finishing.";
@@ -89,7 +89,7 @@ export function overseerDigest(file, seen, now = Date.now(), { needsMax = 20, ch
 export function batchParagraph(workflow) {
   const mode = workflow?.mode ?? "graphite";
   const fix = workflow === undefined || workflow === null ? "/fix-pr" : workflow.reviewFix ?? null;
-  const steps = "Follow-through batches contain a batch ID and task list. Read workspace_status and refresh live conditions before acting; skip resolved tasks. Process dependent PRs bottom to top, one PR fully before the next.";
+  const steps = "Follow-up batches contain a batch ID and task list. Read workspace_status and refresh live conditions before acting; skip resolved tasks. Process dependent PRs bottom to top, one PR fully before the next.";
   const review = fix ? `Use the repository's ${fix} workflow, validate feedback, verify changes,` : "For review comments, read the PR's unresolved threads with gh, validate the feedback, fix it and verify the change,";
   const submit = mode === "graphite" ? "submit through Graphite with --publish" : "push the branch (gh pr create for a new PR, gh pr ready when it leaves draft)";
   const reply = fix ? "reply/resolve addressed threads" : "reply to each addressed thread and resolve it";
@@ -114,21 +114,21 @@ function paragraphs(lease, contributor, workflow) {
     "Maintain PR tracking for this session in its tracked workspace. Read workspace_status now and after compaction. Register every PR you submit, including from secondary git worktrees, with register_pr; register parents before children. References and external dependencies are not owned PRs. Call sync_workspace before finishing. The designated main agent retains goal, task, scope and completion authority.",
     linkInstruction,
     quietInstruction,
-    `Prefer native Follow-through tools. CLI fallback: FOLLOW_THROUGH_CLIENT_ENTRY=${quote(lease.clientEntry)} node ${quote(join(directory, "mcp.mjs"))} call <tool> '<json>' --compact. Do not ask the developer to maintain the sidebar.`,
+    `Prefer native Follow-up tools. CLI fallback: FOLLOW_UP_CLIENT_ENTRY=${quote(lease.clientEntry)} node ${quote(join(directory, "mcp.mjs"))} call <tool> '<json>' --compact. Do not ask the developer to maintain the sidebar.`,
   ];
   return [
-    "Maintain this tracked workspace's Follow-through sidebar as part of your normal work; do not wait for a developer reminder.",
+    "Maintain this tracked workspace's Follow-up sidebar as part of your normal work; do not wait for a developer reminder.",
     quietInstruction,
     "Read workspace_status now and after compaction. Refine the goal with enroll_workspace when scope changes. Register every PR you produce after submitting it, parents before children, and update stack/parent relationships after restacking. Historical mentions and external dependencies are not owned PRs; preserve exclusions and existing records.",
     "When a decision needs the developer, call ask_question with a short title, the question, lettered options with what each means, and your recommendation; mark it big only when building ahead would leave this computer, set something others rely on, or most remaining work depends on it. Follow the question mode in its reply. Ask each decision once: asking it again returns the open question, and at a turn's end you point at it (needs_you questions=[\"Q<n>\"]) instead of restating it. Answers arrive as messages starting \"Follow-up answer Q<n>\" and are already recorded; several decisions from one card arrive together in one message, one line per decision, with skipped ones marked \"skipped\" and still open. An answer of Something else — \"…\" means none of your options: the quoted words are the developer's answer. Every card already offers Something else, so don't add an Other option. If the developer answers in chat, call record_answer (choice \"other\" with words when it matches none of your options). Withdraw questions that stop mattering.",
     linkInstruction,
     "If you keep a Claude artifact (or doc) summarizing this workspace's goal, decisions and status, register its link once with set_spec after the first publish. Republish to the same URL; call set_spec again only if the link changes.",
-    "Keep actual follow-through tasks current with update_obligation: production behavior checks, migrations and decisions, with concise titles, PR dependencies and evidence. Do not add merge/approval/deploy checklist tasks. Deployment-dependent work waits for verified serving revisions and existing production permissions.",
-    "Stakeholder replies are follow-through too. When asked to update a requester, capture the original Slack threadUrl, recipient and explicit developer authorization in the task's communication field; referenced messages alone do not authorize posting. Use a concise progress task now and, when needed, a verify-and-reply task with purpose=verified after the relevant deployed PRs. Read existing thread replies and refresh evidence before posting; distinguish fixed, deployed and verified. Record the actual sent replyUrl and result before marking done. If posting is unavailable or its outcome is uncertain, keep the task blocked and check the thread before any retry; never claim a draft was sent. Auto authorizes delivery to you, not external messages. Communication-only requests do not authorize repairs, benchmarks, migrations or other production writes.",
+    "Keep actual follow-up tasks current with update_obligation: production behavior checks, migrations and decisions, with concise titles, PR dependencies and evidence. Do not add merge/approval/deploy checklist tasks. Deployment-dependent work waits for verified serving revisions and existing production permissions.",
+    "Stakeholder replies are follow-up too. When asked to update a requester, capture the original Slack threadUrl, recipient and explicit developer authorization in the task's communication field; referenced messages alone do not authorize posting. Use a concise progress task now and, when needed, a verify-and-reply task with purpose=verified after the relevant deployed PRs. Read existing thread replies and refresh evidence before posting; distinguish fixed, deployed and verified. Record the actual sent replyUrl and result before marking done. If posting is unavailable or its outcome is uncertain, keep the task blocked and check the thread before any retry; never claim a draft was sent. Auto authorizes delivery to you, not external messages. Communication-only requests do not authorize repairs, benchmarks, migrations or other production writes.",
     "Tasks are manual unless explicitly scheduled with trigger={event:\"now\"|\"merge\"|\"deploy\",delayDays:0}. Only set a trigger from the developer\u2019s requested timing; never infer timing from a title or enable_follow_up alone. Merge/deploy triggers require owned afterPrs; delayDays=14 waits fourteen days after the last dependency event. Now requires no PR dependencies or delay. Deployment timing starts at the first verified fully serving observation and remains conservative when history is unknown. Preserve existing trigger fields on updates; trigger=null makes a task manual. Auto controls delivery, not timing or production permissions.",
     batchParagraph(workflow) + " For post-deploy tasks, verify the currently serving revision contains every dependency and record behavioral results separately. Acknowledge the header's batch ID with acknowledge_batch before finishing: completed with the result, or blocked with the reason. Verify the entire goal and post-merge work before declare_done; acknowledge a completion batch first. Merging and archiving remain the developer's actions.",
     "Before ending this turn, reconcile the sidebar with what you actually did and call sync_workspace with a short summary, including when no changes are needed. Acknowledge any assigned batch. When the entire goal is fulfilled, use declare_done; otherwise preserve remaining work. Do not launch recovery, start queued repairs, merge, toggle merge-when-ready, or archive as part of this bookkeeping. Auto still governs separate follow-up sends. Subagents report to the main agent instead of claiming workspace ownership.",
-    `Prefer the native follow-through MCP tools. For a full historical record, use workspace_status with detail=full. CLI compatibility fallback: FOLLOW_THROUGH_CLIENT_ENTRY=${quote(lease.clientEntry)} node ${quote(join(directory, "mcp.mjs"))} call <tool> '<json>' --compact. Omit --compact only when an existing script needs the full response. Never ask the developer to maintain the sidebar or run this bridge.`,
+    `Prefer the native follow-up MCP tools. For a full historical record, use workspace_status with detail=full. CLI compatibility fallback: FOLLOW_UP_CLIENT_ENTRY=${quote(lease.clientEntry)} node ${quote(join(directory, "mcp.mjs"))} call <tool> '<json>' --compact. Omit --compact only when an existing script needs the full response. Never ask the developer to maintain the sidebar or run this bridge.`,
   ];
 }
 /** The old main's notice, within a day of losing the role: who took over, why, and what to do. Null otherwise. */
@@ -152,7 +152,7 @@ async function nativeExtras(brief) {
 }
 /**
  * Wait's guidance (server/wait.ts attaches its tools natively, so there is no MCP initialize text to carry it). On
- * Paseo 0.16 Wait attaches no tools and sets FOLLOW_THROUGH_BACKGROUND_WORK instead: background it, end the turn.
+ * Paseo 0.16 Wait attaches no tools and sets FOLLOW_UP_BACKGROUND_WORK instead: background it, end the turn.
  */
 async function waitExtras() {
   const key = env("WAIT") === "1" ? "waitInstruction" : env("BACKGROUND_WORK") === "1" ? "backgroundWorkInstruction" : null;
@@ -209,7 +209,7 @@ async function main() {
     workspace = state.workspaces.find(w => (w.mainAgentId === agentId || w.contributorAgentIds?.includes(agentId)) && w.enable_tracking && !w.archived) ?? null;
     contributor = !!workspace && workspace.mainAgentId !== agentId;
   }
-  // The brief nudge applies to root agents launched with FOLLOW_THROUGH_BRIEF, tracked or not.
+  // The brief nudge applies to root agents launched with FOLLOW_UP_BRIEF, tracked or not.
   const provider = env("BRIEF") || null;
   const brief = provider ? await json(join(directory, "brief.json")).catch(() => null) : null;
   if (!workspace && !(brief?.enable_inbox && brief?.enable_brief_nudge) && !(native && env("ROOT") === "1")) {

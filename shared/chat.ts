@@ -7,7 +7,7 @@ export const FOLLOW_TOOLS = ["workspace_status", "sync_workspace", "enroll_works
 export type FollowTool = (typeof FOLLOW_TOOLS)[number];
 
 /**
- * Claude records mcp__follow-through__register_pr; Codex records follow-through.register_pr. Since 1.4.0-beta.2 the
+ * Claude records mcp__follow-up__register_pr; Codex records follow-up.register_pr. Since 1.4.0-beta.2 the
  * tools are served through Paseo's own MCP as follow_register_pr: mcp__paseo__follow_register_pr / paseo.follow_register_pr.
  */
 export function followToolName(name: string): FollowTool | null {
@@ -15,7 +15,7 @@ export function followToolName(name: string): FollowTool | null {
   return match && (FOLLOW_TOOLS as readonly string[]).includes(match[1]) ? match[1] as FollowTool : null;
 }
 
-/** The CLI fallback agents run when MCP is unavailable: node …/follow-through/mcp.mjs call <tool> '<json>'. */
+/** The CLI fallback agents run when MCP is unavailable: node …/follow-up/mcp.mjs call <tool> '<json>'. */
 export function followShellCall(command: string): { tool: FollowTool; input: Record<string, unknown> } | null {
   const match = BRIDGE_SHELL_CALL.exec(command);
   if (!match || !(FOLLOW_TOOLS as readonly string[]).includes(match[1])) return null;

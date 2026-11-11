@@ -16,7 +16,7 @@ import { withAlpha } from "./theme";
 import { OptionCard } from "./questions";
 import { ReleaseNotesSheet, VersionNotes } from "./release-notes";
 
-export const updatesKey = ["follow-through", "updates"];
+export const updatesKey = ["follow-up", "updates"];
 
 /** The server's updates view. Reading it never asks the registry; `check` does (rate-limited on the server). */
 export function useUpdates(check?: "settings") {

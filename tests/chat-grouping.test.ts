@@ -10,7 +10,7 @@ import { WAIT_TOOLS } from "../server/wait";
  * nothing (undefined) for routine bookkeeping, and only moments on an explicit allowlist become rows or cards.
  */
 // The hook reads stdin unless told it is being imported.
-process.env.FOLLOW_THROUGH_HOOK_IMPORT = "1";
+process.env.FOLLOW_UP_HOOK_IMPORT = "1";
 // @ts-expect-error plain JS hook, generated into hook-source.ts
 const hook = await import("../server/agent-hook.mjs") as { TOOL_NAMES: string[] };
 const ALL_TOOLS = [...new Set([...hook.TOOL_NAMES, ...WAIT_TOOLS])];
@@ -21,9 +21,9 @@ function spellings(tool: string): TimelineToolCall[] {
   const mcp = { type: "unknown", input: { summary: "x", title: "t" }, output: { content: [{ type: "text", text: JSON.stringify({ workspace: { id: "w1", completion: { summary: "Shipped" } }, blockers: [], question: { id: "Q1", title: "t" } }) }] } };
   return [
     done(`mcp__paseo__follow_${tool}`, mcp), done(`paseo.follow_${tool}`, mcp),
-    done(`mcp__follow-through__${tool}`, mcp), done(`follow-through.${tool}`, mcp),
+    done(`mcp__follow-up__${tool}`, mcp), done(`follow-up.${tool}`, mcp),
     done(`mcp__paseo__${tool}`, mcp),
-    done("Bash", { type: "shell", command: `node ~/.paseo/plugin-data/follow-through/mcp.mjs call ${tool} '{"summary":"x"}'`, output: "{}" }),
+    done("Bash", { type: "shell", command: `node ~/.paseo/plugin-data/follow-up/mcp.mjs call ${tool} '{"summary":"x"}'`, output: "{}" }),
   ];
 }
 

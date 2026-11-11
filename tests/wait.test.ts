@@ -42,7 +42,7 @@ test("Wait attaches its three native tools to interactive Claude sessions and ke
   const next = await wait.open(base);
   assert.deepEqual(next.tools.map(t => t.name).sort(), [...WAIT_TOOLS].sort());
   assert.deepEqual(next.mcpServers, base.mcpServers, "no MCP server of its own: no listener, no port");
-  assert.equal(next.env.KEEP, "yes"); assert.equal(next.env.CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS, "0"); assert.equal(next.env.FOLLOW_THROUGH_WAIT, "1");
+  assert.equal(next.env.KEEP, "yes"); assert.equal(next.env.CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS, "0"); assert.equal(next.env.FOLLOW_UP_WAIT, "1");
   assert.deepEqual((await wait.open(next)).tools.length, 3, "never attached twice");
   // Who doesn't get it.
   const skipped: Partial<PluginSessionOpenRequest>[] = [{ purpose: "history" }, { provider: "codex" }, { labels: { "plugin-tools/enabled": "false" } }, { labels: { "paseo-wait/enabled": "false" } }, { labels: { "follow-up-wait/enabled": "false" } }];
@@ -178,24 +178,24 @@ test("agent parity: set_wait_for_jobs is the switch's RPC, planned first; agent_
   await assert.rejects(agent.run("orch", "set_wait_for_jobs", { confirm: true, planId: plan.planId }), /expired or was already used/);
 });
 
-test("the agent hook gives Wait's guidance once at SessionStart to any Claude session with FOLLOW_THROUGH_WAIT", async t => {
+test("the agent hook gives Wait's guidance once at SessionStart to any Claude session with FOLLOW_UP_WAIT", async t => {
   const root = await dir(t, "follow-wait-hook-");
-  const directory = join(root, "plugin-data/follow-through"); await mkdir(join(directory, "hook-state"), { recursive: true });
+  const directory = join(root, "plugin-data/follow-up"); await mkdir(join(directory, "hook-state"), { recursive: true });
   for (const file of ["agent-hook.mjs", "mcp.mjs"]) await writeFile(join(directory, file), await readFile(resolve("server", file), "utf8"));
   await writeFile(join(directory, "hooks-enabled.json"), JSON.stringify({ expiresAt: Date.now() + 60_000, clientEntry: "/fixture/client.js" }));
   await writeFile(join(directory, "scopes.json"), JSON.stringify({ agents: { main: { role: "main", workspaceId: "w1" } } }));
   const fire = (agentId: string, event: object, env: Record<string, string>) => new Promise<string>((ok, bad) => {
-    const child = spawn(process.execPath, [join(directory, "agent-hook.mjs")], { env: { ...process.env, FOLLOW_THROUGH_HOOK_IMPORT: "", PASEO_AGENT_ID: agentId, FOLLOW_THROUGH_BRIEF: "", FOLLOW_THROUGH_RECOVERY: "", FOLLOW_THROUGH_TOOLS: "", FOLLOW_THROUGH_ROOT: "", FOLLOW_THROUGH_OVERSEER: "", FOLLOW_THROUGH_WAIT: "", ...env } });
+    const child = spawn(process.execPath, [join(directory, "agent-hook.mjs")], { env: { ...process.env, FOLLOW_UP_HOOK_IMPORT: "", PASEO_AGENT_ID: agentId, FOLLOW_UP_BRIEF: "", FOLLOW_UP_RECOVERY: "", FOLLOW_UP_TOOLS: "", FOLLOW_UP_ROOT: "", FOLLOW_UP_OVERSEER: "", FOLLOW_UP_WAIT: "", ...env } });
     let out = ""; child.stdout.on("data", c => out += c); child.once("error", bad); child.once("exit", () => ok(out.trim()));
     child.stdin.end(JSON.stringify({ session_id: "s1", ...event }));
   });
   const text = (out: string) => out ? JSON.parse(out).hookSpecificOutput.additionalContext as string : "";
   // An untracked subagent: only Wait's text, only at SessionStart.
-  assert.equal(text(await fire("sub", { hook_event_name: "SessionStart" }, { FOLLOW_THROUGH_WAIT: "1" })), waitInstruction);
-  assert.equal(await fire("sub", { hook_event_name: "UserPromptSubmit", prompt: "hi" }, { FOLLOW_THROUGH_WAIT: "1" }), "");
+  assert.equal(text(await fire("sub", { hook_event_name: "SessionStart" }, { FOLLOW_UP_WAIT: "1" })), waitInstruction);
+  assert.equal(await fire("sub", { hook_event_name: "UserPromptSubmit", prompt: "hi" }, { FOLLOW_UP_WAIT: "1" }), "");
   assert.equal(await fire("sub", { hook_event_name: "SessionStart" }, {}), "", "no Wait, no text");
   // A tracked main agent: Wait's text joins its session context, unprefixed (Wait's names aren't follow_ tools).
-  const main = text(await fire("main", { hook_event_name: "SessionStart" }, { FOLLOW_THROUGH_WAIT: "1", FOLLOW_THROUGH_TOOLS: "native", FOLLOW_THROUGH_PROVIDER: "claude", FOLLOW_THROUGH_ROOT: "1" }));
+  const main = text(await fire("main", { hook_event_name: "SessionStart" }, { FOLLOW_UP_WAIT: "1", FOLLOW_UP_TOOLS: "native", FOLLOW_UP_PROVIDER: "claude", FOLLOW_UP_ROOT: "1" }));
   assert.ok(main.includes(waitInstruction)); assert.match(main, /follow_workspace_status/); assert.doesNotMatch(main, /follow_wait_/);
   assert.match(waitInstruction, /wait_prepare_job/); assert.match(waitInstruction, /instead of ending your turn/);
 });

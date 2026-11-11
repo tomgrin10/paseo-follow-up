@@ -6,9 +6,9 @@ import { backupOnce, writeThrough } from "./write-through";
 
 /**
  * 1.4.0-beta.2: Follow-up's tools are served per agent (natively through Paseo's MCP, or a per-agent stdio bridge
- * as the fallback), so the old user-scope "follow-through" registration only made every Claude/Codex session on
+ * as the fallback), so the old user-scope "follow-up" registration only made every Claude/Codex session on
  * the machine, Paseo's or not, spawn its own node mcp.mjs. This removes the entries Follow-up wrote
- * (FOLLOW_THROUGH_MANAGED=1) from every Claude and Codex home Paseo launches agents with, backing each file up first.
+ * (FOLLOW_UP_MANAGED=1) from every Claude and Codex home Paseo launches agents with, backing each file up first.
  * Entries the user added themselves are left alone.
  */
 export type Unregistered = { path: string; status: "removed" | "absent" | "foreign" | "busy" | "error"; error?: string };
@@ -73,7 +73,7 @@ export async function unregisterClaude(path: string): Promise<Unregistered> {
   } catch (error) { return { path, status: "error", error: (error as Error).message }; }
 }
 
-/** Removes [mcp_servers.follow-through] and its .env table when they're Follow-up's, keeping everything else verbatim. */
+/** Removes [mcp_servers.follow-up] and its .env table when they're Follow-up's, keeping everything else verbatim. */
 export function withoutCodexEntry(text: string): string | null {
   const lines = text.split("\n");
   const header = (line: string) => /^\s*\[\[?\s*([^\]]+?)\s*\]\]?\s*(?:#.*)?$/.exec(line)?.[1].replace(/["']/g, "") ?? null;

@@ -184,7 +184,7 @@ async function seed({ call, home }) {
   for (const spec of WORKSPACES) {
     await setDaemonClock(at(spec.minute));
     const w = await api.workspaces.create({ title: spec.title, source: { kind: "directory", path: repo } });
-    const agent = await w.agents.create({ config: { provider: "followthrough-fixture/fixture", model: "fixture", modeId: "default" }, title: spec.title });
+    const agent = await w.agents.create({ config: { provider: "followup-fixture/fixture", model: "fixture", modeId: "default" }, title: spec.title });
     await call("follow.activate", { workspaceId: w.id });
     await call("follow.control", { workspaceId: w.id, enable_auto_sends: false });
     await client.sendMessage(agent.id, spec.prompt, { messageId: `shots-${spec.key}` });
@@ -230,7 +230,7 @@ async function seed({ call, home }) {
 
 /** Waits for `n` more runs of the worker's inbox loop (its tick stamps inbox.json's lastSeen). */
 async function inboxTicks(home, n) {
-  const lastSeen = () => fs.readFile(join(home, "plugin-data/follow-through/inbox.json"), "utf8").then(t => JSON.parse(t).lastSeen ?? null, () => null);
+  const lastSeen = () => fs.readFile(join(home, "plugin-data/follow-up/inbox.json"), "utf8").then(t => JSON.parse(t).lastSeen ?? null, () => null);
   for (let i = 0; i < n; i++) { const before = await lastSeen(); await until("an inbox tick", async () => (await lastSeen()) !== before, { tries: 160, every: 250 }); }
 }
 
@@ -398,13 +398,13 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
     ]);
     if (name === "whats-new") {
       // The packed copy Paseo runs: the path its plugin list reports (the unpacked folder for a directory install).
-      const installed = (await cli("plugin", "ls")).find(row => row.id === "follow-through")?.path ?? plugin;
+      const installed = (await cli("plugin", "ls")).find(row => row.id === "follow-up")?.path ?? plugin;
       const pkgPath = join(installed, "package.json");
       const pkg = JSON.parse(await fs.readFile(pkgPath, "utf8"));
       await fs.writeFile(pkgPath, JSON.stringify({ ...pkg, version: WHATS_NEW_TO }, null, 2));
       await fs.writeFile(join(installed, "CHANGELOG.md"), await whatsNewChangelog());
-      await fs.writeFile(join(home, "plugin-data/follow-through/versions.json"), JSON.stringify({ running: WHATS_NEW_FROM, previous: null, startedAt: null, hostSeen: WHATS_NEW_FROM }));
-      await cli("plugin", "reload", "follow-through");
+      await fs.writeFile(join(home, "plugin-data/follow-up/versions.json"), JSON.stringify({ running: WHATS_NEW_FROM, previous: null, startedAt: null, hostSeen: WHATS_NEW_FROM }));
+      await cli("plugin", "reload", "follow-up");
       let seenVersion = null;
       await until(() => `the ${WHATS_NEW_TO} worker (it reports ${seenVersion})`, async () => (seenVersion = (await call("follow.release-notes", {}).catch(e => ({ version: `error: ${e.message.split("\n")[0]}` }))).version) === WHATS_NEW_TO, { tries: 120, every: 500 });
       await shoot("whats-new", DESKTOP, "dark", async page => {
@@ -490,7 +490,7 @@ try {
   await fs.writeFile(join(home, "config.json"), JSON.stringify({ pluginsEnabled: true, daemon: { listen: `127.0.0.1:${port}`, relay: { enabled: false }, mcp: { enabled: false }, browserTools: { enabled: false } }, features: { webUi: { enabled: true } } }));
   const packed = JSON.parse((await exec("npm", ["pack", "--json", "--pack-destination", root], { timeout: 120000 })).stdout)[0];
   await exec("tar", ["-xzf", join(root, packed.filename), "--strip-components=1", "-C", plugin]);
-  await fs.writeFile(join(fixture, "paseo-plugin.json"), JSON.stringify({ id: "followthrough-fixture", requirements: { paseo: ">=0.11.0" } }));
+  await fs.writeFile(join(fixture, "paseo-plugin.json"), JSON.stringify({ id: "followup-fixture", requirements: { paseo: ">=0.11.0" } }));
   await fs.writeFile(join(fixture, "index.server.ts"), await fs.readFile("scripts/fixture-provider.ts", "utf8"));
   await fs.writeFile(join(root, "clock.cjs"), CLOCK_PRELOAD);
   await fs.writeFile(join(home, "gh-fixture.json"), JSON.stringify(pulls()));
@@ -511,14 +511,14 @@ try {
   daemonUrl = url; await connect();
   // A plugin reload (What's new) can drop the connection too: Follow-up RPCs reconnect once.
   const call = async (method, input) => {
-    try { return await client.invokePluginRpc("follow-through", method, input); }
+    try { return await client.invokePluginRpc("follow-up", method, input); }
     catch (error) {
       if (!/clos|connect|socket|lease|transport/i.test(String(error?.message))) throw error;
       await connect();
-      return client.invokePluginRpc("follow-through", method, input);
+      return client.invokePluginRpc("follow-up", method, input);
     }
   };
-  HOME_URL = `http://127.0.0.1:${port}/h/${(await fs.readFile(join(home, "server-id"), "utf8")).trim()}/plugin/follow-through/surface/follow-through`;
+  HOME_URL = `http://127.0.0.1:${port}/h/${(await fs.readFile(join(home, "server-id"), "utf8")).trim()}/plugin/follow-up/surface/follow-up`;
   log(`isolated daemon on 127.0.0.1:${port} (${paseoVersion}), root ${root}`);
 
   const { chromium } = createRequire(join(process.env.PLAYWRIGHT_CORE, "package.json"))("playwright-core");

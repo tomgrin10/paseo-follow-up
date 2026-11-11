@@ -1,8 +1,8 @@
 // Native tools check (1.4.0-beta.2): Follow-up's tools reach agents through Paseo's own MCP, with no per-agent
-// follow-through process.
+// follow-up process.
 //
 // Starts an isolated Paseo daemon (never the user's) with its agent MCP on, installs the fixture provider and the
-// packed plugin, creates N root agents and reads each agent's launch config: how many carry a follow-through stdio
+// packed plugin, creates N root agents and reads each agent's launch config: how many carry a follow-up stdio
 // server (one node mcp.mjs per agent once a real Claude/Codex runs it) and how many get the daemon's MCP. Then it
 // calls Follow-up's tools over that MCP as the first agent, the way Claude or Codex would.
 //
@@ -37,7 +37,7 @@ const home = join(root, "home"); const fixture = join(root, "fixture"); const pl
 const free = async () => { const s = createServer(); await new Promise(r => s.listen(0, "127.0.0.1", r)); const p = s.address().port; await new Promise(r => s.close(r)); return p; };
 const port = await free(); const url = `ws://127.0.0.1:${port}/ws`;
 const env = harnessEnv(root, { home, set: { PASEO_DAEMON_URL: url, PASEO_RELAY_ENABLED: "false",
-  FOLLOW_THROUGH_TOOL_PROVIDERS: "claude,codex,followthrough-fixture", ...(STDIO ? { FOLLOW_THROUGH_FORCE_STDIO: "1" } : {}) } });
+  FOLLOW_UP_TOOL_PROVIDERS: "claude,codex,followup-fixture", ...(STDIO ? { FOLLOW_UP_FORCE_STDIO: "1" } : {}) } });
 const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env, timeout: 120_000, maxBuffer: 8 << 20 })).stdout);
 let daemon = null; let client = null;
 
@@ -55,7 +55,7 @@ async function mcp(server, session, body) {
 try {
   await mkdir(home, { recursive: true }); await mkdir(fixture, { recursive: true }); await mkdir(plugin);
   await writeFile(join(home, "config.json"), JSON.stringify({ pluginsEnabled: true, daemon: { listen: `127.0.0.1:${port}`, relay: { enabled: false }, mcp: { enabled: true, injectIntoAgents: true }, browserTools: { enabled: false } } }));
-  await writeFile(join(fixture, "paseo-plugin.json"), JSON.stringify({ id: "followthrough-fixture", requirements: { paseo: ">=0.11.0" } }));
+  await writeFile(join(fixture, "paseo-plugin.json"), JSON.stringify({ id: "followup-fixture", requirements: { paseo: ">=0.11.0" } }));
   await writeFile(join(fixture, "index.server.ts"), await readFile("scripts/fixture-provider.ts", "utf8"));
   const packed = JSON.parse((await exec("npm", ["pack", "--json", "--pack-destination", root], { timeout: 60_000 })).stdout)[0];
   await exec("tar", ["-xzf", join(root, packed.filename), "--strip-components=1", "-C", plugin]);
@@ -65,24 +65,24 @@ try {
   await cli("plugin", "install", fixture);
   await cli("plugin", "install", plugin);
   // Untracked roots, so each first session takes the root-agent path (default tracking only sets the CLI env).
-  await client.invokePluginRpc("follow-through", "follow.set-follow-settings", { enable_follow_every: false });
+  await client.invokePluginRpc("follow-up", "follow.set-follow-settings", { enable_follow_every: false });
   const api = createPaseoApi(client);
   const created = [];
   for (let i = 0; i < N; i++) {
     const dir = join(root, "projects", `w${i}`); await mkdir(dir, { recursive: true });
     const w = await api.workspaces.create({ title: `Synthetic workspace ${i}`, source: { kind: "directory", path: dir } });
-    const a = await w.agents.create({ config: { provider: "followthrough-fixture/fixture", model: "fixture", modeId: "default" }, title: `Synthetic agent ${i}` });
+    const a = await w.agents.create({ config: { provider: "followup-fixture/fixture", model: "fixture", modeId: "default" }, title: `Synthetic agent ${i}` });
     created.push({ workspaceId: w.id, agentId: a.id });
   }
   await sleep(1_500);
   const configs = await Promise.all(created.map(async ({ agentId }) => JSON.parse(await readFile(join(home, `fixture-agent-config-${agentId}.json`), "utf8"))));
-  const stdioServers = configs.filter(c => c.mcpServers?.["follow-through"]?.type === "stdio").length;
+  const stdioServers = configs.filter(c => c.mcpServers?.["follow-up"]?.type === "stdio").length;
   const paseoMcp = configs.filter(c => Object.values(c.mcpServers ?? {}).some(s => s?.type === "http")).length;
   const result = { mode: STDIO ? "stdio" : "native", agents: N, followThroughStdioServers: stdioServers, agentsWithPaseoMcp: paseoMcp, followTools: 0, call: null };
   // Call Follow-up's tools over the daemon's MCP as the first agent, after tracking its workspace.
   const server = Object.values(configs[0].mcpServers ?? {}).find(s => s?.type === "http");
   if (server) {
-    await client.invokePluginRpc("follow-through", "follow.activate", { workspaceId: created[0].workspaceId });
+    await client.invokePluginRpc("follow-up", "follow.activate", { workspaceId: created[0].workspaceId });
     const session = {};
     await mcp(server, session, { id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "follow-native-check", version: "1" } } });
     await mcp(server, session, { method: "notifications/initialized" });
@@ -97,9 +97,9 @@ try {
 
       // A plugin reload (every update) drops request.tools from open sessions; Paseo 0.15.2 re-attaches them only when a
       // session reopens, which it does before that agent's next prompt.
-      const data = join(home, "plugin-data/follow-through");
+      const data = join(home, "plugin-data/follow-up");
       const instanceBefore = JSON.parse(await readFile(join(data, "tools-instance.json"), "utf8")).instance;
-      await cli("plugin", "reload", "follow-through");
+      await cli("plugin", "reload", "follow-up");
       let instanceAfter = instanceBefore;
       for (let i = 0; i < 80 && instanceAfter === instanceBefore; i++) { await sleep(250); instanceAfter = JSON.parse(await readFile(join(data, "tools-instance.json"), "utf8").catch(() => "{}")).instance ?? instanceBefore; }
       assert.notEqual(instanceAfter, instanceBefore, "the reloaded worker records a new instance");
@@ -124,7 +124,7 @@ try {
       result.reload = { midTurnNative: "fails (detached)", midTurnBridge: "ok", afterNextPrompt: "ok" };
     }
   }
-  const pid = Number((await readFile(join(home, "plugin-data/follow-through/worker.lock"), "utf8").catch(() => "")).split(":")[0]);
+  const pid = Number((await readFile(join(home, "plugin-data/follow-up/worker.lock"), "utf8").catch(() => "")).split(":")[0]);
   if (pid > 0) result.workerRssMb = Math.round(Number(/VmRSS:\s+(\d+)/.exec(await readFile(`/proc/${pid}/status`, "utf8"))[1]) / 1024);
   if (STDIO) assert.equal(stdioServers, N, "stdio mode: one bridge per root agent"); else { assert.equal(stdioServers, 0, "native mode: no per-agent bridge"); assert.equal(result.followTools > 0, true); }
   console.log(process.argv.includes("--json") ? JSON.stringify(result) : result);

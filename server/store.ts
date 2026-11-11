@@ -33,10 +33,10 @@ export class Store {
     if (this.state) return this.state;
     let text: string | null = null;
     try { text = await readFile(join(this.directory, "state.json"), "utf8"); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error("Saved follow-through state could not be read. Restore state.json before continuing."); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error("Saved follow-up state could not be read. Restore state.json before continuing."); }
     let state: State;
     try { state = text === null ? { version: 1, workspaces: [] } : stateSchema.parse(JSON.parse(text)); }
-    catch { throw new Error("Saved follow-through state could not be read. Restore state.json before continuing."); }
+    catch { throw new Error("Saved follow-up state could not be read. Restore state.json before continuing."); }
     this.state ??= deepFreeze(state);
     return this.state;
   }
@@ -127,7 +127,7 @@ export class Store {
       const prior = await readFile(path, "utf8");
       const pid = Number(prior.split(":")[0]);
       if (!Number.isInteger(pid) || pid < 1) throw new Error("Worker lock has an invalid owner.");
-      try { process.kill(pid, 0); throw new Error("Another follow-through worker is running."); }
+      try { process.kill(pid, 0); throw new Error("Another follow-up worker is running."); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
       const recovery = await open(`${path}.recovery`, "wx", 0o600);
       try {

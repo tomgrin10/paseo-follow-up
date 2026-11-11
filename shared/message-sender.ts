@@ -55,7 +55,7 @@ export const HOOK_TEXT_PREFIXES = [
   "Before you stop, call ",
   "Follow-up was updated while this session was open",
   "Do routine bookkeeping silently.",
-  "Maintain this tracked workspace's Follow-through sidebar",
+  "Maintain this tracked workspace's Follow-up sidebar",
 ] as const;
 /** A provider's wrapper around hook feedback: Codex's `<hook_prompt …>` element or Claude Code's "Stop hook feedback:" line. */
 function hookBody(text: string): string | null {

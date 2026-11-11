@@ -15,7 +15,7 @@ import { Spinner } from "./motion";
  * The helper jobs as rows: setup's Helper agents step and Settings → Agents both render <JobRows>, so they show the same
  * thing for the same job (tests/job-rows.test.ts). What a row says comes from shared/job-rows.ts.
  */
-export const agentSettingsKey = ["follow-through", "agent-settings"];
+export const agentSettingsKey = ["follow-up", "agent-settings"];
 type RoleView = AgentSettingsView["roles"][number];
 const SAME = "__same";
 const DEFAULT = "__default";
@@ -31,7 +31,7 @@ export function useAgentSettings() {
     mutationFn: (input: { role: AgentRole; entry: SavedRole | null; quiet?: boolean }) => write({ role: input.role, entry: input.entry }),
     onSuccess: (value, input) => {
       cache.setQueryData(agentSettingsKey, value);
-      void cache.invalidateQueries({ queryKey: ["follow-through", "about"] });
+      void cache.invalidateQueries({ queryKey: ["follow-up", "about"] });
       const r = value.roles.find(x => x.role === input.role);
       if (r && !input.quiet) toast.show(input.role === "overseer" ? `Overseer: ${r.summary}. Restart it from Home to switch.` : `${ROLE_INFO[input.role].title}: ${r.summary}`, { variant: "success" });
     },

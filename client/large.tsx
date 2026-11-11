@@ -8,7 +8,7 @@ import { Button, Card, CardRow, errorText, text } from "./kit";
 import { Skeleton } from "./motion";
 import { PanelTop, WorkspaceView, useSessionFolds, type PanelLinks } from "./panel";
 
-export const LARGE_SCREEN = "follow-through-workspace";
+export const LARGE_SCREEN = "follow-up-workspace";
 
 /**
  * The panel opened as a Paseo screen: the host supplies the page, header and close button, and the

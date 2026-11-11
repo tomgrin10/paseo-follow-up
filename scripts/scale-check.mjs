@@ -62,7 +62,7 @@ const loaded = list => list.filter(a => ["running", "initializing"].includes(a.s
 try {
   await mkdir(home, { recursive: true }); await mkdir(fixture, { recursive: true });
   await writeFile(join(home, "config.json"), JSON.stringify({ pluginsEnabled: true, daemon: { listen: `127.0.0.1:${port}`, relay: { enabled: false }, mcp: { enabled: false }, browserTools: { enabled: false } } }));
-  await writeFile(join(fixture, "paseo-plugin.json"), JSON.stringify({ id: "followthrough-fixture", requirements: { paseo: ">=0.11.0" } }));
+  await writeFile(join(fixture, "paseo-plugin.json"), JSON.stringify({ id: "followup-fixture", requirements: { paseo: ">=0.11.0" } }));
   await writeFile(join(fixture, "index.server.ts"), await readFile("scripts/fixture-provider.ts", "utf8"));
   if (!plugin) {
     plugin = join(root, "plugin"); await mkdir(plugin);
@@ -76,7 +76,7 @@ try {
   for (let i = 0; i < N; i++) {
     const dir = join(root, "projects", `w${i}`); await mkdir(dir, { recursive: true });
     const w = await api.workspaces.create({ title: `Synthetic workspace ${i}`, source: { kind: "directory", path: dir } });
-    const a = await w.agents.create({ config: { provider: "followthrough-fixture/fixture", model: "fixture", modeId: "default" }, title: `Synthetic agent ${i}` });
+    const a = await w.agents.create({ config: { provider: "followup-fixture/fixture", model: "fixture", modeId: "default" }, title: `Synthetic agent ${i}` });
     await client.sendMessage(a.id, `Synthetic task ${i}: ship https://github.com/example/app/pull/${i + 1}`, { messageId: `scale-${i}` });
     created.push({ workspaceId: w.id, agentId: a.id });
   }
@@ -90,11 +90,11 @@ try {
   for (const { agentId } of created.slice(0, AWAKE)) await client.sendMessage(agentId, "Synthetic: still working", { messageId: `awake-${agentId}` });
   await sleep(2_000);
   // The beta.2 state: every workspace followed with auto-send on, nothing cached.
-  await mkdir(join(home, "plugin-data/follow-through"), { recursive: true });
+  await mkdir(join(home, "plugin-data/follow-up"), { recursive: true });
   const now = new Date().toISOString();
   const churn = i => Array.from({ length: CHURN }, (_, k) => ({ id: `churn-${i}-${k}`, messageId: `churn-m-${i}-${k}`, tasks: [{ key: `completion:w${i}`, kind: "completion", target: `w${i}`, title: "Verify the workspace is finished and declare Done", fingerprint: `f${k}` }], state: "cancelled", createdAt: now, sentAt: null, settledAt: null, attempts: 1, result: "Conditions resolved before delivery", recipientAgentId: null, contextPath: null, activityAt: null, acknowledgmentError: null, recoveryHandoffs: [] }));
-  await writeFile(join(home, "plugin-data/follow-through/state.json"), JSON.stringify({ version: 1, migrations: ["follow-every-1"], workspaces: created.map(({ workspaceId, agentId }, i) => ({ id: workspaceId, title: `Synthetic workspace ${i}`, goal: "Synthetic", mainAgentId: agentId, enable_tracking: true, enable_auto_sends: true, hold: null, archived: false, prs: [], obligations: [], batches: churn(i), completion: null, updatedAt: now, managedDoneLabel: false, runtimeReason: null, runtimeBusy: false, backgroundBusy: false, inventory: null })) }));
-  const stateBytesBefore = (await readFile(join(home, "plugin-data/follow-through/state.json"))).length;
+  await writeFile(join(home, "plugin-data/follow-up/state.json"), JSON.stringify({ version: 1, migrations: ["follow-every-1"], workspaces: created.map(({ workspaceId, agentId }, i) => ({ id: workspaceId, title: `Synthetic workspace ${i}`, goal: "Synthetic", mainAgentId: agentId, enable_tracking: true, enable_auto_sends: true, hold: null, archived: false, prs: [], obligations: [], batches: churn(i), completion: null, updatedAt: now, managedDoneLabel: false, runtimeReason: null, runtimeBusy: false, backgroundBusy: false, inventory: null })) }));
+  const stateBytesBefore = (await readFile(join(home, "plugin-data/follow-up/state.json"))).length;
   const before = loaded(await agents());
   await cli("plugin", "install", plugin);
   const samples = [];
@@ -102,21 +102,21 @@ try {
   await sleep(5_000);
   const after = loaded(await agents());
   // The worker: its pid is in the lock it holds. RSS now, CPU and state.json writes over an idle window.
-  const pid = Number((await readFile(join(home, "plugin-data/follow-through/worker.lock"), "utf8").catch(() => "")).split(":")[0]);
+  const pid = Number((await readFile(join(home, "plugin-data/follow-up/worker.lock"), "utf8").catch(() => "")).split(":")[0]);
   const ticks = async () => { const f = (await readFile(`/proc/${pid}/stat`, "utf8")).split(") ")[1].split(" "); return Number(f[11]) + Number(f[12]); };
   const rss = async (field = "VmRSS") => Number(new RegExp(`${field}:\\s+(\\d+)`).exec(await readFile(`/proc/${pid}/status`, "utf8"))[1]) / 1024;
   let worker = null;
   if (pid > 0) {
     const { stdout } = await exec("getconf", ["CLK_TCK"]); const hz = Number(stdout.trim()) || 100;
-    const { statSync } = await import("node:fs"); const statePath = join(home, "plugin-data/follow-through/state.json");
+    const { statSync } = await import("node:fs"); const statePath = join(home, "plugin-data/follow-up/state.json");
     let writes = 0; let mtime = statSync(statePath).mtimeMs;
     const t0 = await ticks(); const started = Date.now(); const requestsBefore = counter.snapshot();
     let peak = await rss();
     while (Date.now() - started < IDLE_MS) { await sleep(500); peak = Math.max(peak, await rss()); const m = statSync(statePath).mtimeMs; if (m !== mtime) { writes++; mtime = m; } }
-    const requests = ratePerMinute(requestsBefore, counter.snapshot(), "follow-through-worker", Date.now() - started);
+    const requests = ratePerMinute(requestsBefore, counter.snapshot(), "follow-up-worker", Date.now() - started);
     const cpuPct = Math.round(((await ticks()) - t0) / hz / ((Date.now() - started) / 1000) * 1000) / 10;
     // The worker's own breakdown (heap vs native), from the governor's sample in follow.usage.
-    const memory = async () => { try { return (await client.invokePluginRpc("follow-through", "follow.usage", {}))?.resources?.worker ?? null; } catch { return null; } };
+    const memory = async () => { try { return (await client.invokePluginRpc("follow-up", "follow.usage", {}))?.resources?.worker ?? null; } catch { return null; } };
     const memoryIdle = await memory();
     let memoryAfterGc = null;
     if (heapDir) { process.kill(pid, "SIGUSR2"); await sleep(8_000); memoryAfterGc = await memory(); }
@@ -129,8 +129,8 @@ try {
     const hostRss = rows.filter(r => tree.has(r.pid) && r.pid !== pid && /plugin-process/.test(r.args)).map(r => r.rssMb);
     worker = { pid, memory: memoryIdle, memoryAfterGc, hostPluginBaselineMb: hostRss.length ? Math.min(...hostRss) : null, rssMb: Math.round(await rss()), idlePeakRssMb: Math.round(peak), lifetimePeakRssMb: Math.round(await rss("VmHWM")), cpuPct, idleSeconds: IDLE_MS / 1000, stateWrites: writes, stateBytesBefore, stateBytesAfter: statSync(statePath).size, daemonRequestsPerMin: requests };
   }
-  const receipts = (await readFile(join(home, "fixture-receipts.jsonl"), "utf8").catch(() => "")).trim().split("\n").filter(l => /Follow-through (batch|recovery)/.test(l)).length;
-  const state = JSON.parse(await readFile(join(home, "plugin-data/follow-through/state.json"), "utf8"));
+  const receipts = (await readFile(join(home, "fixture-receipts.jsonl"), "utf8").catch(() => "")).trim().split("\n").filter(l => /Follow-up (batch|recovery)/.test(l)).length;
+  const state = JSON.parse(await readFile(join(home, "plugin-data/follow-up/state.json"), "utf8"));
   const result = { workspaces: N, awakeOnPurpose: AWAKE, loadedBefore: before, loadedPerPoll: samples, loadedAfter: after, followUpSends: receipts, dormant: state.workspaces.filter(w => w.dormant).length, autoSendOn: state.workspaces.filter(w => w.enable_auto_sends).length, parked: state.autoSendsParked?.length ?? 0, worker };
   console.log(process.argv.includes("--json") ? JSON.stringify(result) : result);
   if (after > before) { console.error(`Follow-up loaded ${after - before} dormant agents`); process.exitCode = 1; }

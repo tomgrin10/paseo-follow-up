@@ -19,7 +19,7 @@
    call that map in-process, so the stdio bridge and native tools run identical code. Calls in `MAIN_WORK` (sync,
    register-pr, obligation, done…) by a successor main agent also make a pending handover stick.
 5. Starts `ready`. It decides fresh vs existing install for onboarding, takes the worker lock, writes the bridge
-   (`plugin-data/follow-through/mcp.mjs`), and removes old global MCP registrations. Then it starts the governor,
+   (`plugin-data/follow-up/mcp.mjs`), and removes old global MCP registrations. Then it starts the governor,
    recovers interrupted sends (`engine.recover()`), runs the one-time migrations (each backs `state.json` up to a
    `*.bak` first), seeds reviewers and the PR workflow, and installs provider hooks with a 30 s lease heartbeat.
 6. Starts two loops:
@@ -95,10 +95,10 @@ At `agent.session_open` (`purpose: "interactive"` only), the worker decides the 
 - **Overseer**: labelled `follow-up.overseer=1`.
 - **Tracked main**: the workspace's `mainAgentId`.
 - **Contributor**: another root agent of a tracked workspace.
-- **Recovery**: the agent Follow-up launched to run a recovery batch (labelled `follow-through.recovery`, and the
-  batch's `recipientAgentId`). It isn't a root agent. It gets `FOLLOW_THROUGH_RECOVERY=1` and the reduced core set.
+- **Recovery**: the agent Follow-up launched to run a recovery batch (labelled `follow-up.recovery`, and the
+  batch's `recipientAgentId`). It isn't a root agent. It gets `FOLLOW_UP_RECOVERY=1` and the reduced core set.
 - **Untracked root**: a root agent in a workspace Follow-up doesn't track.
 - **Subagent**: anything else. It gets no Follow-up tools.
 
 `withTools` then attaches the matching tool set natively, or through the per-launch stdio bridge, and sets the
-`FOLLOW_THROUGH_*` env flags that the hook reads. The full list is in [hooks.md](hooks.md#env-flags). `withWait` adds Wait's tools to every interactive Claude session on top ([wait.md](wait.md)).
+`FOLLOW_UP_*` env flags that the hook reads. The full list is in [hooks.md](hooks.md#env-flags). `withWait` adds Wait's tools to every interactive Claude session on top ([wait.md](wait.md)).

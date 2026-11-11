@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { mergePriorities, prioritiesFileSchema, type Priority } from "../shared/priorities";
 
 /**
- * External priorities (plugin-data/follow-through/priorities.json), kept apart from state.json so a ranker
+ * External priorities (plugin-data/follow-up/priorities.json), kept apart from state.json so a ranker
  * writing every few minutes never contends with the engine's state writes. Unreadable means none.
  */
 export class PriorityStore {
