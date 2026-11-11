@@ -109,6 +109,16 @@ export function activeNeeds(w: Workspace, now = Date.now()): NeedItem[] {
   return workspaceSnoozed(w, items, now) ? [] : items;
 }
 
+/**
+ * Whether a PR asks the developer to add reviewers. The one predicate for Needs you's reviewers item and the inbox's
+ * "Add reviewers" flag (server/inbox.ts followUpEvents), so the two never disagree: an open, non-draft PR with no
+ * reviewers, in a repository someone is set up to review, that the agent doesn't merge itself, with no reviewer
+ * request or merge already in flight. Status invariant reviewers-ask-agrees.
+ */
+export function asksForReviewers(pr: Pr, w: Pick<Workspace, "prActions">): boolean {
+  return !pr.agentMerges && noReviewers(pr) && !pr.snapshot!.draft && configuredReviewers(pr.repo).length > 0 && !w.prActions.some(a => prActionBlocks(a, [pr.key]));
+}
+
 export function needsYou(w: Workspace, now = Date.now()): NeedItem[] {
   if (!w.enable_tracking || w.archived) return [];
   const items: NeedItem[] = [];
@@ -145,8 +155,10 @@ export function needsYou(w: Workspace, now = Date.now()): NeedItem[] {
   const blocking = (pr: Pr) => w.prActions.some(a => prActionBlocks(a, [pr.key]));
   for (const pr of stackOrder(w.prs)) {
     // Only offer Merge here when the PR's workflow (Graphite, or GitHub itself) agrees; otherwise the PR sheet explains what is missing.
+    // A PR the agent merges itself is the agent's work in flight, never the developer's merge or review.
+    if (pr.agentMerges) continue;
     if (mergeReady(pr, w, now) && workflowReady(pr) && !blocking(pr)) items.push({ kind: "merge", key: `merge:${pr.key}`, prKey: pr.key, number: pr.number, title: isGithubFlow(pr.snapshot) && pr.snapshot!.reviewDecision !== "APPROVED" ? `#${pr.number} is ready to merge` : `#${pr.number} is approved`, detail: pr.snapshot!.title });
-    else if (noReviewers(pr) && !pr.snapshot!.draft && configuredReviewers(pr.repo).length && !blocking(pr)) items.push({ kind: "reviewers", key: `reviewers:${pr.key}`, prKey: pr.key, number: pr.number, title: `#${pr.number} has no reviewers`, detail: pr.snapshot!.title });
+    else if (asksForReviewers(pr, w)) items.push({ kind: "reviewers", key: `reviewers:${pr.key}`, prKey: pr.key, number: pr.number, title: `#${pr.number} has no reviewers`, detail: pr.snapshot!.title });
   }
   return items;
 }
@@ -191,6 +203,10 @@ export function liveLine(w: Workspace, now = Date.now()): { icon: LiveIcon; text
   if (w.runtimeBusy) return { icon: "spinner", text: "Main agent is working", since: null };
   const working = followUpObligations(w).find(o => o.status === "working");
   if (working) return { icon: "spinner", text: working.title, since: null };
+  // A wait the agent declared (a waiting task: a release, a reload window, a detached job) says what it waits on. The
+  // waiting icon, Home's Waiting group and the brief's "Waiting on others" already say it waits, so the line doesn't.
+  const waiting = followUpObligations(w).find(o => o.status === "waiting");
+  if (waiting) return { icon: "waiting", text: waiting.title, since: null };
   if (w.prs.some(p => p.error || !p.snapshot?.complete)) return { icon: "alert", text: "Some PR status is unavailable · retrying", since: null };
   if (w.prs.some(p => p.snapshot?.state === "OPEN" && p.snapshot.checksPending)) return { icon: "waiting", text: "Checks are running", since: null };
   if (w.prs.some(p => p.snapshot?.state === "OPEN")) return { icon: "waiting", text: "Waiting on review and merges", since: null };
