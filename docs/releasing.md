@@ -45,10 +45,25 @@ stop.
    Then it publishes:
    - A version with a prerelease part (`1.4.0-beta.24`) goes to the `beta` dist-tag and must never be `latest`.
    - A stable version goes to `latest`.
-   - A GitHub release follows: a prerelease for betas.
+   - A GitHub release follows (a prerelease for any version with a prerelease part). **Every release page has
+     notes, in one format** from `scripts/release-body.mjs`: an install line on top, `## What's new`, then
+     `## Install` and the verification sentence. The notes are the version's curated CHANGELOG.md section for a
+     stable or a major's rc (the collapsed full changelog included), and for a beta the `changes/` fragments added
+     since the previous tag, as written. A beta only renders its fragments; they stay in `changes/` for the next
+     curated section. A beta with no fragments says "Maintenance release; no user-visible changes." Preview a body
+     with `node scripts/release-body.mjs <tag>`. This is the GitHub page only: What's new in the app stays
+     major-only. `tests/release-body.test.ts` covers the format and that the workflow uses the renderer.
 5. Wait for registry integrity verification before saying the version is on npm. To retry a failed publish, run the
    workflow with `workflow_dispatch` and the existing tag. If a fix is needed, ship it as the next version rather
    than moving the tag.
+
+## Backfilling old release pages
+
+`node scripts/backfill-release-notes.mjs` renders the same body for every GitHub release whose page has no notes
+(no bullet and no heading) and writes them to a folder; it edits nothing. Read them, then run it again with
+`--apply` (`--only v1.4.0-beta.10,…` limits it) to `gh release edit` each one. Pages that already have notes are left
+alone, and a release it can't render (an old stable with no CHANGELOG section) is skipped. Betas up to 1.4.0-beta.29
+use the per-beta sections CHANGELOG.md had at `v1.4.0-beta.68`; the 1.1 to 1.3 betas had no notes at all and say so.
 
 ## Installing on a host
 
