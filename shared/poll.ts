@@ -5,7 +5,8 @@ import type { Snapshot } from "./model";
  * POLL_IDLE_MS (server/github.ts); everything else is read every tick.
  *
  * The backoff covers every field a snapshot feeds: a PR is settled only when nothing on it can move without also
- * changing what the last read saw. Finishing CI checks do NOT bump a PR's updatedAt, so pending checks, a merge
+ * changing what the last read saw. Finishing CI checks do NOT bump a PR's updatedAt, so any running check (required or not: a non-required one can
+ * still fail and show), a merge
  * queue, merge-when-ready (GitHub auto-merge or Graphite) and unknown mergeability all keep the every-tick cadence.
  * A settled PR's next change is seen at most POLL_IDLE_MS + TICK_MS late, inside the completion gate's freshness
  * (OBSERVATION_FRESH_MS, shared/model.ts), so backoff never turns a settled PR into "Refresh status".
@@ -25,7 +26,7 @@ export function movingReason(s: Snapshot | null | undefined, error: string | nul
   if (error) return "last read failed";
   if (!s.complete) return "incomplete read";
   if (s.state !== "OPEN") return null;
-  if (s.checksPending) return "checks pending";
+  if (s.checksPending || s.checksRunning) return "checks running";
   if (s.inMergeQueue) return "in the merge queue";
   if (s.mergeWhenReady === "on") return "merge when ready is on";
   if (s.graphiteMergeStatus && GRAPHITE_IN_FLIGHT.test(s.graphiteMergeStatus)) return "Graphite is merging it";

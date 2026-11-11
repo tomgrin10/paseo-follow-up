@@ -21,6 +21,8 @@ export const snapshotSchema = z.object({
   mergeWhenReady: z.enum(["on", "off", "unknown"]).default("unknown"),
   threads: z.array(z.object({ id: z.string(), updatedAt: z.string() })),
   failedChecks: z.array(z.string()), otherFailedChecks: z.array(z.string()).optional(), checksPending: z.boolean(),
+  /** Any check still running, required or not (a non-required one can still fail). Drives polling cadence (shared/poll.ts). */
+  checksRunning: z.boolean().optional(),
   complete: z.boolean(), observedAt: z.string(),
   mergeCommit: z.string().nullable().optional(), deployment: deploymentSchema.nullable().optional(),
   mergedAt: z.string().nullable().optional(),
