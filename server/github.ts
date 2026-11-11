@@ -277,7 +277,9 @@ export class Github {
   private remember(key: string, value: Observation): void {
     const { observedAt: _, deployment: __, ...content } = value.snapshot ?? ({} as Partial<Snapshot>);
     const print = JSON.stringify([value.error, value.snapshot ? content : null]);
-    if (this.prints.get(key) !== print) { this.prints.set(key, print); this.changedAt.set(key, this.now()); }
+    // A first read is not a change: otherwise every PR stays hot for RECENT_CHANGE_MS after each worker start.
+    const previous = this.prints.get(key);
+    if (previous !== print) { if (previous !== undefined) this.changedAt.set(key, this.now()); this.prints.set(key, print); }
     this.last.set(key, value);
   }
 }
