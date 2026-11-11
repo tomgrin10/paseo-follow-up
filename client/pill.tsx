@@ -24,7 +24,7 @@ import { useReviewerSettings } from "./reviewers";
 
 export const PILL_ID = "follow-up";
 /** The pill's title in a move's Undo window; the label itself comes from pillState ("Signed off", "Later", "Done"). */
-const UNDO_TITLE: Record<string, string> = { sign_off: "Signed off", later: "Moved to Later", done: "Done" };
+const UNDO_TITLE: Record<string, string> = { sign_off: "Signed off", later: "Moved to Later" };
 
 
 type Deps = { inbox: InboxStore; live: LiveStore; openPanel: (workspaceId: string) => void; openNext: (from: string) => void };
@@ -45,8 +45,8 @@ export function targets(rows: InboxRow[], workspaces: Workspace[], now: number):
   return out;
 }
 
-const stateFor = (t: Target | undefined, recent: { agentIds: string[]; at: number; kind?: "sign_off" | "later" | "later_ws" | "done" } | null, now: number): PillState =>
-  t ? pillState({ row: t.row, items: t.items, recent, now }) : null;
+const stateFor = (t: Target | undefined, recent: { agentIds: string[]; at: number; kind?: "sign_off" | "later" | "later_ws" } | null, now: number, done = false): PillState =>
+  t ? pillState({ row: t.row, items: t.items, recent, done, now }) : null;
 
 function useTarget(deps: Deps, agentId: string, workspaceId: string) {
   useReviewerSettings();
@@ -57,7 +57,7 @@ function useTarget(deps: Deps, agentId: string, workspaceId: string) {
   const w = deps.live.get(workspaceId) ?? null;
   const items = w && w.mainAgentId === agentId ? needsYou(w, now) : [];
   const target: Target = { agentId, workspaceId, row, workspace: w, items };
-  return { target, state: stateFor(target, deps.inbox.recent(), now), now };
+  return { target, state: stateFor(target, deps.inbox.recent(), now, deps.inbox.doneWindow(agentId)), now };
 }
 
 /**
@@ -85,7 +85,7 @@ export function contributeFollowUpPill(client: PluginClientContext, deps: Deps) 
     const recent = inbox.recent();
     const wanted = new Map<string, { target: Target; state: Exclude<PillState, null> }>();
     for (const [agentId, target] of targets(inbox.rows(), live.all(), now)) {
-      const state = stateFor(target, recent, now);
+      const state = stateFor(target, recent, now, inbox.doneWindow(agentId));
       if (state) wanted.set(agentId, { target, state });
     }
     for (const [agentId, entry] of pills) {
@@ -97,7 +97,7 @@ export function contributeFollowUpPill(client: PluginClientContext, deps: Deps) 
       const label = undo ? state.label : state.headline.label;
       // The tooltip (and accessible name) says whose pill it is and what kind of ask. On phones the host shows it as the
       // sheet's title right above the popover, which carries the ask itself in full, so the title doesn't repeat it.
-      const title = undo ? `Follow-up · ${UNDO_TITLE[recent?.kind ?? "sign_off"] ?? "Signed off"}` : `Follow-up · ${state.headline.label}${state.todo && state.mode === "flag" ? ` · ${todoLabel(withoutBriefQuestions(target.items, target.row))} in this workspace` : ""}`;
+      const title = undo ? `Follow-up · ${state.label === "Done" ? "Done" : UNDO_TITLE[recent?.kind ?? "sign_off"] ?? "Signed off"}` : `Follow-up · ${state.headline.label}${state.todo && state.mode === "flag" ? ` · ${todoLabel(withoutBriefQuestions(target.items, target.row))} in this workspace` : ""}`;
       const key = `${state.mode}|${label}|${title}`;
       // Always a popover, Undo included: Paseo 0.16 draws a chevron on popover pills, so switching kinds for the undo
       // window made the chevron and the pill's width jump (tests/pill-popover.test.ts).

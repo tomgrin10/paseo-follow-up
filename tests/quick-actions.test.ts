@@ -278,7 +278,8 @@ test("an error toast stays as narrow as the host's: one line with Open, the reas
     assert.equal(toastsNow().at(-1)?.message, "Later didn't work. daemon offline.", "no surface to return to: the reason stays");
   } finally { hosts.splice(hosts.indexOf(97), 1); for (const t of toastsNow()) dismissToast(t.id); }
   const view = await readFile(join(import.meta.dirname, "..", "client", "toasts.tsx"), "utf8");
-  assert.match(view, /numberOfLines=\{2\}[^>]*>\{item\.message\}/, "a toast's message never grows past two lines");
+  assert.match(view, /numberOfLines=\{opens \? 2 : undefined\}>\{item\.message\}/, "a short Open toast clamps; the only copy of a reason never does");
+  assert.match(view, /<View style=\{\{ flexShrink: 0 \}\}><Icon name=\{icon\}/, "the icon never shrinks beside a wrapping message");
   // Every caller with Open keeps the reason where Open lands.
   for (const f of (await readdir(join(import.meta.dirname, "..", "client"))).filter(f => f.endsWith(".tsx"))) {
     const text = await readFile(join(import.meta.dirname, "..", "client", f), "utf8");
@@ -309,5 +310,5 @@ test("Ctrl/Cmd+Z runs the visible toast's Undo, and nothing else", async () => {
   } finally { for (const t of toastsNow()) dismissToast(t.id); }
   const view = await readFile(join(import.meta.dirname, "..", "client", "toasts.tsx"), "utf8");
   assert.match(view, /addEventListener\("keydown"/, "the toast layer listens for the key");
-  assert.match(view, /if \(undoShortcut\(e, mac\)\) e\.preventDefault\(\)/);
+  assert.match(view, /if \(undoShortcut\(e, mac\)\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); \}/, "the host's own undo never sees the same press");
 });

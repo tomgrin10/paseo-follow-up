@@ -71,7 +71,7 @@ Nothing polls while the app is hidden.
 | `client/tasks.tsx` | Tasks and their triggers. |
 | `client/spec.tsx` | The spec link chip and row. |
 | `client/about.tsx` | Summary at the top of Home's detail pane and the panel. |
-| `client/inbox.tsx`, `client/inbox-store.ts` | Needs-you rows, the undo bar and inbox commands, plus the shared inbox poll. |
+| `client/inbox.tsx`, `client/inbox-store.ts`, `client/done-windows.ts` | Needs-you rows, the undo bar and inbox commands, plus the shared inbox poll and Done's per-agent Undo windows (the pill says Done while one is open). |
 | `client/brief.tsx` | The brief card in agent timelines. |
 | `client/pill.tsx` | The composer pill. |
 | `client/chat.tsx` | Compact rows for Follow-up's tool calls, batch cards and Done cards in chats (recognised by `shared/chat.ts`). |
