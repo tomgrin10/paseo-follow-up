@@ -1,0 +1,2 @@
+- The version at the top of Home and the panel now shows just the version. Tap it for update status and release notes in Settings.
+- Settings no longer says an update failed after a newer version was installed.

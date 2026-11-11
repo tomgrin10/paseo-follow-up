@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { offerFor, compareVersions, type Channel } from "../shared/version";
-import type { HistoryEntry, UpdateMode, UpdatePhase, UpdatesView } from "../shared/updates";
+import { staleUpdatePhase, type HistoryEntry, type UpdateMode, type UpdatePhase, type UpdatesView } from "../shared/updates";
 import { busyText, quietWindow, QUIET_MS, CAP_MS, PROBATION_MS, type Busy } from "../shared/update-policy";
 import { CHECK_INTERVAL_MS, type CheckReason, type RegistrySnapshot } from "./update-registry";
 import type { Provenance } from "./update-provenance";
@@ -54,6 +54,8 @@ type Ready = NonNullable<UpdatesFile["ready"]>;
 const HISTORY = 20;
 const UPDATED_SHOWN_MS = 7 * 24 * 3_600_000;
 const TERMINAL = new Set(["updated", "failed", "rolled-back", "rollback-failed"]);
+/** The installer's update steps. updates.jsonl also holds the 2.0 move's steps (`moving` … `moved`), which aren't installs. */
+const INSTALL_EVENTS = new Set<string>(["installing", "applied", "updated", "failed", "rolling-back", "rolled-back", "rollback-failed"] satisfies UpdateEvent["event"][]);
 
 async function eventsIn(directory: string): Promise<UpdateEvent[]> {
   const text = await readFile(join(directory, "updates.jsonl"), "utf8").catch(() => "");
@@ -283,7 +285,26 @@ export class Updater {
     return { ...base, pendingNotes, phase, notice };
   }
 
-  private async phase(file: UpdatesFile, running: string, mode: UpdateMode, channel: Channel, snap: RegistrySnapshot, events: UpdateEvent[], now: number): Promise<UpdatePhase> {
+  /**
+   * The phase, settled against what runs: a phase tied to a version at or below the running one (an installer that died
+   * before a newer version went in from outside, a failure or rollback since superseded) reads as current or updated
+   * (`staleUpdatePhase`, invariant `update-phase-never-outlives-its-version`). Recomputed from updates.jsonl on every
+   * view, so a load or a check always settles it; nothing is persisted that could outlive it.
+   */
+  private async phase(file: UpdatesFile, running: string, mode: UpdateMode, channel: Channel, snap: RegistrySnapshot, all: UpdateEvent[], now: number): Promise<UpdatePhase> {
+    const events = all.filter(e => INSTALL_EVENTS.has(e.event));
+    const phase = await this.rawPhase(file, running, mode, channel, snap, events, now);
+    if (!staleUpdatePhase(phase, running, await this.d.installerAlive())) return phase;
+    const terminal = [...events].reverse().find(e => TERMINAL.has(e.event));
+    return this.settled(terminal, running, now);
+  }
+
+  private settled(terminal: UpdateEvent | undefined, running: string, now: number): UpdatePhase {
+    if (terminal?.event === "updated" && terminal.to === running && now - terminal.at < UPDATED_SHOWN_MS) return { kind: "updated", version: running, from: terminal.from, at: terminal.at };
+    return { kind: "current" };
+  }
+
+  private async rawPhase(file: UpdatesFile, running: string, mode: UpdateMode, channel: Channel, snap: RegistrySnapshot, events: UpdateEvent[], now: number): Promise<UpdatePhase> {
     if (this.checking) return { kind: "checking" };
     const last = events[events.length - 1];
     if (last && !TERMINAL.has(last.event)) {
@@ -314,8 +335,7 @@ export class Updater {
     }
     if (terminal && TERMINAL.has(terminal.event) && terminal.event !== "updated" && terminal.to !== running && compareVersions(terminal.to, running) > 0 && (terminal.event === "rolled-back" || terminal.event === "rollback-failed"))
       return { kind: "rolled-back", version: terminal.to, from: terminal.from, reason: terminal.reason ?? "It didn't start cleanly.", at: terminal.at };
-    if (terminal?.event === "updated" && terminal.to === running && now - terminal.at < UPDATED_SHOWN_MS) return { kind: "updated", version: running, from: terminal.from, at: terminal.at };
-    return { kind: "current" };
+    return this.settled(terminal, running, now);
   }
 }
 

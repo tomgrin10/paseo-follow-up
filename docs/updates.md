@@ -59,6 +59,12 @@ Updates part of Settings → General (`UpdatesSections` in `client/updates.tsx`)
 5. A rolled-back version is never retried automatically. A failed install is retried after the next successful
    check. Paseo itself refuses a build that can't load while applying it, which shows as "Couldn't install".
 6. `VersionsStore.started` treats a downgrade as no update, so a rollback never shows "Updated to" or What's new.
+7. The phase is read back from `updates.jsonl` on every view, from the installer's steps only (the move's steps share
+   the file) and settled against the running version: a phase tied to a version at or below the one running (an
+   installer that died before a newer version went in through `paseo plugin`, a failure or rollback since superseded)
+   reads as current, or updated (`staleUpdatePhase` in `shared/updates.ts`). A live installer's own installing and
+   settling are the exception. The invariant is `update-phase-never-outlives-its-version` (`updatePhaseViolations` in
+   `shared/status-invariants.ts`, grid in `tests/updater.test.ts`).
 
 ## Moving from 1.x
 
