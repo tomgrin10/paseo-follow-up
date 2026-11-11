@@ -453,6 +453,18 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
         await openHome(page, { keepDialogs: true });
         if (phone) await page.setViewportSize(PHONE);
         await page.getByRole("dialog").getByText("What's new in 2.0.0").first().waitFor().catch(() => page.getByText("What's new in 2.0.0").first().waitFor());
+        // The notes' screenshots load by URL: wait until each has loaded or failed (a failed one is left out).
+        await page.waitForFunction(() => [...document.images].every(i => i.complete), null, { timeout: 30000 });
+      };
+      /** The same sheet scrolled to its end: the panel's image and the credits. */
+      const sheetEnd = phone => async page => {
+        await sheet(phone)(page);
+        // The phone's bottom sheet has no dialog role: wheel over the middle of the screen, where the sheet's body is.
+        const box = await page.getByRole("dialog").last().boundingBox({ timeout: 3000 }).catch(() => null);
+        const vp = page.viewportSize();
+        await page.mouse.move(box ? box.x + box.width / 2 : vp.width / 2, box ? box.y + box.height / 2 : vp.height * 0.6);
+        for (let i = 0; i < 8; i++) await page.mouse.wheel(0, 1200);
+        await page.waitForFunction(() => [...document.images].every(i => i.complete), null, { timeout: 30000 });
       };
       await shoot("whats-new", DESKTOP, "dark", sheet(false), { seen: WHATS_NEW_FROM });
       // Review evidence for the sheet itself (not README images): light, and the phone's bottom sheet.
@@ -460,6 +472,8 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
         await shoot("whats-new-light", DESKTOP, "light", sheet(false), { seen: WHATS_NEW_FROM });
         await shoot("whats-new-phone", PHONE, "light", sheet(true), { seen: WHATS_NEW_FROM });
         await shoot("whats-new-phone-dark", PHONE, "dark", sheet(true), { seen: WHATS_NEW_FROM });
+        await shoot("whats-new-end", DESKTOP, "dark", sheetEnd(false), { seen: WHATS_NEW_FROM });
+        await shoot("whats-new-phone-end", PHONE, "light", sheetEnd(true), { seen: WHATS_NEW_FROM });
       }
     }
   }
