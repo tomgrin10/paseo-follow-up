@@ -175,8 +175,12 @@ export const releaseNoteSchema = z.object({ version: z.string(), date: z.string(
     z.object({ kind: z.literal("image"), text: z.string(), url: z.string(), aspect: z.number().nullable(), width: z.number().nullable() }),
   ])).optional() });
 /** `follow.release-notes`: this host's version record and every shipped note. Read once per app session; never polled. */
+/** The display name when the manifest can't be read; the manifest's `name` (paseo-plugin.json) is the source. */
+export const PLUGIN_NAME = "Follow-up";
 export const releaseNotesViewSchema = z.object({
   version: z.string(),
+  /** The plugin's display name from its manifest, for the notes' titles ("Follow-up release notes"). */
+  name: z.string().default(PLUGIN_NAME),
   installKind: z.enum(INSTALL_KINDS),
   /** The version Follow-up ran before this one on this host, null on a fresh install (What's new baseline). */
   previous: z.string().nullable(),

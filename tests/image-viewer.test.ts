@@ -36,3 +36,26 @@ test("the viewer fits the window and never draws an image past its CSS width", (
   // Unknown CSS width: fit the window.
   assert.equal(fitImage({ width: null, aspect: 2 }, { width: 1000, height: 2000 }).width, 1000 - 112);
 });
+
+// Tom on rc.2: the notes' scrollbar must show whenever they overflow, not only while scrolling (macOS hides overlay
+// scrollbars unless the container styles them). Scoped to the notes' scroll container, never global.
+test("the notes' scroll container keeps a styled, scoped scrollbar in every dialog", async () => {
+  const { notesScrollbarCss, NOTES_SCROLL_ATTR } = await import("../shared/notes-scrollbar");
+  const notes = await source("release-notes.tsx");
+  assert.equal((notes.match(/<NotesScroll theme=\{theme\}/g) ?? []).length, 3, "the wide dialog, the host dialog and the phone sheet");
+  assert.doesNotMatch(notes, /<ScrollView style/, "no notes body scrolls without NotesScroll");
+  assert.match(notes, /persistentScrollbar/, "Android keeps its bar");
+  const css = notesScrollbarCss({ foregroundMuted: "#888888" });
+  for (const line of css.split("\n")) assert.ok(line.includes(`[${NOTES_SCROLL_ATTR}]`), `scoped: ${line}`);
+  assert.match(css, /::-webkit-scrollbar \{[^}]*width: 10px/); assert.match(css, /::-webkit-scrollbar-thumb \{[^}]*#888888/);
+  assert.match(css, /scrollbar-color: [^;]*#888888/);
+});
+
+test("the notes' titles name the plugin from its manifest", async () => {
+  const notes = await source("release-notes.tsx");
+  assert.match(notes, /export const notesTitle = \(name: string, version: string \| null\) => version \? `What's new in \$\{name\} \$\{version\}` : `\$\{name\} release notes`;/);
+  assert.match(notes, /const title = notesTitle\(name, full \? null : newest\.version\);/);
+  assert.equal((notes.match(/<WhatsNewSheet open name=\{view\.name\}/g) ?? []).length, 2, "What's new and Settings' Release notes");
+  const server = await readFile(join(import.meta.dirname, "..", "server", "release-notes.ts"), "utf8");
+  assert.match(server, /paseo-plugin\.json/);
+});
