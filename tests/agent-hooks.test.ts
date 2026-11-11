@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, writeFile, rm, mkdir } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, rm, mkdir, symlink, lstat, readdir, readlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { AgentHooks, reconcileHooks } from "../server/agent-hooks";
@@ -131,4 +131,54 @@ test("1.3.0-beta.4: the hook reads the small scopes.json instead of state.json w
     await writeFile(join(f.directory, "scopes.json"), JSON.stringify({ version: 1, agents: {} }));
     assert.equal(await f.run({ hook_event_name: "SessionStart" }), null);
   } finally { await f.hooks.stop(); await f.close(); }
+});
+// 2026-11-10: a harness run replaced the seat account's symlinked settings.json with a regular file (rename() onto a
+// symlink replaces the link). Settings and hooks writers must write through symlinks: the link survives, the target changes.
+test("hook install and uninstall write through a symlinked settings.json and hooks.json, keeping the links", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "follow-hook-link-"));
+  try {
+    const real = join(directory, "dotfiles"); await mkdir(real);
+    await mkdir(join(directory, "claude")); await mkdir(join(directory, "codex"));
+    await writeFile(join(real, "settings.json"), JSON.stringify({ model: "keep" }));
+    await writeFile(join(real, "hooks.json"), JSON.stringify({}));
+    const links = [join(directory, "claude/settings.json"), join(directory, "codex/hooks.json")];
+    await symlink(join(real, "settings.json"), links[0]); await symlink("../dotfiles/hooks.json", links[1]);
+    const hooks = new AgentHooks(directory, "/fixture/client.js", links);
+    await hooks.start();
+    for (const link of links) assert.ok((await lstat(link)).isSymbolicLink(), `${link} is still a symlink after install`);
+    const installed = JSON.parse(await readFile(join(real, "settings.json"), "utf8"));
+    assert.equal(installed.model, "keep"); assert.ok(installed.hooks.Stop[0].hooks[0].command.includes(join(directory, "agent-hook.mjs")), "the target got the hooks");
+    assert.ok(JSON.parse(await readFile(join(real, "hooks.json"), "utf8")).hooks.UserPromptSubmit, "the relative link's target got the hooks");
+    assert.ok((await lstat(join(real, "settings.json.follow-through.bak"))).isFile(), "the backup sits beside the target");
+    assert.deepEqual((await readdir(join(directory, "claude"))).sort(), ["settings.json"], "nothing is written beside the link");
+    await hooks.stop();
+    for (const link of links) assert.ok((await lstat(link)).isSymbolicLink(), `${link} is still a symlink after uninstall`);
+    assert.deepEqual(JSON.parse(await readFile(join(real, "settings.json"), "utf8")), { model: "keep", hooks: {} });
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+// A dangling link means the user's dotfiles aren't there (unmounted, moved): refuse, never create a file at the target
+// or replace the link, and say which path.
+test("a dangling settings symlink is refused with a clear error and left untouched", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "follow-hook-dangling-"));
+  try {
+    await mkdir(join(directory, "claude"));
+    const link = join(directory, "claude/settings.json"); await symlink(join(directory, "missing/settings.json"), link);
+    const hooks = new AgentHooks(directory, "/fixture/client.js", [link]);
+    await assert.rejects(hooks.start(), /dangling symlink/);
+    assert.ok((await lstat(link)).isSymbolicLink()); assert.equal(await readlink(link), join(directory, "missing/settings.json"));
+    await assert.rejects(lstat(join(directory, "missing")), { code: "ENOENT" });
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+// Defense in depth: a Follow-up whose data dir is a temp dir is a harness or test; it never writes a settings file
+// outside the temp dir, whatever env it inherited.
+test("a Follow-up running from a temp data dir never writes settings outside the temp dir", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "follow-hook-escape-"));
+  try {
+    const outside = "/nonexistent-follow-real-home/.claude/settings.json";
+    const hooks = new AgentHooks(directory, "/fixture/client.js", [outside, join(directory, "claude/settings.json")]);
+    await hooks.start();
+    await assert.rejects(lstat("/nonexistent-follow-real-home"), { code: "ENOENT" });
+    assert.ok(JSON.parse(await readFile(join(directory, "claude/settings.json"), "utf8")).hooks.Stop, "in-temp settings still install");
+    await hooks.stop();
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });

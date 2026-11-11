@@ -12,14 +12,14 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { DaemonClient } from '@getpaseo/client/internal/daemon-client';
 import { harness } from "./harness.mjs";
+import { harnessEnv } from "./harness-env.mjs";
 await harness();
 const exec = promisify(execFile);
 const preview = JSON.parse(await readFile('.preview-isolated.json', 'utf8'));
 assert.ok(preview.root.startsWith('/tmp/follow-install-') && preview.home === preview.root + '/home', 'Requires the isolated preview.');
 const shots = process.env.FOLLOW_SHOTS ?? 'docs/screenshots/github-mode';
 await mkdir(shots, { recursive: true });
-const env = { ...process.env, HOME: preview.home, XDG_CONFIG_HOME: preview.home + '/.config', PASEO_HOME: preview.home, PASEO_DAEMON_URL: `ws://127.0.0.1:${preview.port}/ws` };
-for (const key of ['PASEO_PASSWORD', 'PASEO_PASSWORD_FILE', 'PASEO_AGENT_ID', 'NODE_OPTIONS']) delete env[key];
+const env = harnessEnv(preview.root, { home: preview.home, set: { PASEO_DAEMON_URL: `ws://127.0.0.1:${preview.port}/ws` }, strip: ['NODE_OPTIONS'] });
 // A fresh machine: no Graphite sign-in in the isolated home.
 await assert.rejects(access(join(preview.home, '.config/graphite/auth')));
 

@@ -1,0 +1,1 @@
+- If your Claude or Codex settings file is a link to another file, Follow-up now updates the file it points to and keeps the link.

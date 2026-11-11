@@ -21,6 +21,7 @@ import { promisify } from "node:util";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
 import { harness, spawnDaemon } from "./harness.mjs";
+import { harnessEnv } from "./harness-env.mjs";
 await harness();
 
 const exec = promisify(execFile);
@@ -34,8 +35,7 @@ const root = await mkdtemp(join(tmpdir(), "follow-trust-"));
 const home = join(root, "home"); const fixture = join(root, "fixture"); const plugin = join(root, "plugin");
 const free = async () => { const s = createServer(); await new Promise(r => s.listen(0, "127.0.0.1", r)); const p = s.address().port; await new Promise(r => s.close(r)); return p; };
 const port = await free(); const url = `ws://127.0.0.1:${port}/ws`;
-const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: join(home, ".config"), PASEO_HOME: home, PASEO_DAEMON_URL: url, PASEO_RELAY_ENABLED: "false" };
-for (const key of ["PASEO_PASSWORD", "PASEO_PASSWORD_FILE", "PASEO_AGENT_ID", "PASEO_WORKSPACE_ID", "CLAUDE_CONFIG_DIR", "CODEX_HOME"]) delete env[key];
+const env = harnessEnv(root, { home, set: { PASEO_DAEMON_URL: url, PASEO_RELAY_ENABLED: "false" } });
 const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env, timeout: 120_000, maxBuffer: 8 << 20 })).stdout);
 let daemon = null; let client = null;
 
