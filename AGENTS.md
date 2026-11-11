@@ -74,7 +74,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 
 | Subsystem | Files | Doc |
 | --- | --- | --- |
-| Worker entry, RPC wiring, session attach | `index.server.ts`, `shared/contracts.ts`, `server/rpc-timing.ts`, `server/daemon.ts`, `server/directory.ts`, `server/store.ts`, `server/list-cache.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
+| Worker entry, RPC wiring, session attach, teardown | `index.server.ts`, `shared/contracts.ts`, `server/rpc-timing.ts`, `server/teardown.ts`, `server/daemon.ts`, `server/directory.ts`, `server/store.ts`, `server/list-cache.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
 | Discovery, ownership, main agent | `server/discovery.ts`, `server/workspace-agent.ts`, `server/background-agents.ts`, `server/submissions.ts`, `server/pr-owner.ts`, `server/exclusions.ts`, `server/history-cache.ts`, `server/recovery-handoff.ts`, `server/recovery-config.ts`, `shared/settings.ts` | [workspaces](docs/workspaces.md) |
 | Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
 | Needs-you inbox, brief, Home | `server/inbox.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts` | [needs-you](docs/needs-you.md) |
@@ -139,6 +139,11 @@ These are product rules. Each has tests, and breaking one is a bug even when the
 9. **No root treatment for background agents.** A Paseo 0.16 `background: true` agent is another plugin's helper.
    Follow-up gives it no tools, no Wait, no `needs_you` or Stop-hook nudge, no inbox rows and no directory row
    (`server/background-agents.ts`, `tests/background-agents.test.ts`). On 0.15 the field is absent.
+10. **Stopping never waits on stuck work** (`worker-stop-never-waits-on-a-stuck-pass`). The worker's stop clears its
+   timers, so a wait with no bound on work stuck on the daemon, Paseo or a CLI that never answers leaves stop pending
+   for good (a reload waits on the old worker). Every wait in teardown goes through `settleWithin`
+   (`server/teardown.ts`): `Engine.stop`, `PrActions.close`, `closeConnections` and start-up. `Store.close` then refuses
+   every mutation, so work that outlives its bound writes nothing. Guarded by `tests/worker-stop.test.ts`.
 
 ## Bugs
 

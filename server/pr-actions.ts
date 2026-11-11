@@ -1,3 +1,4 @@
+import { STOP_WAIT_MS, settleWithin } from "./teardown";
 import { randomUUID } from "node:crypto";
 import { downstack, isGithubFlow, mergeBlockers, prActionBlocks, type ActionPlan, type BrowserPr, type PrActionKind } from "../shared/pr-actions";
 import type { MergeMethod } from "../shared/pr-workflow";
@@ -246,7 +247,9 @@ export class PrActions {
       return { state: error instanceof GithubWriteError && !error.uncertain ? "failed" : "uncertain", result: partial(error) };
     }
   }
-  async close() { this.plans.clear(); this.browser.close(); await Promise.allSettled([...this.running]); }
+  /** How long close waits on actions in flight (a gh or gt call can hang for good); tests shorten it. */
+  stopWaitMs = STOP_WAIT_MS;
+  async close() { this.plans.clear(); this.browser.close(); await settleWithin(Promise.allSettled([...this.running]), this.stopWaitMs); }
   async check(workspaceId: string, actionId: string) {
     const w = await this.fresh(workspaceId);
     const action = w.prActions.find(a => a.id === actionId);

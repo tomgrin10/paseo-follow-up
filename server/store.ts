@@ -1,3 +1,4 @@
+import { STOP_WAIT_MS, settleWithin } from "./teardown";
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -12,6 +13,9 @@ import { stateSchema, type State, type Workspace } from "../shared/model";
  * Snapshots are shared (frozen once validated): read them, never mutate them. Mutations work on a copy and replace it,
  * so a failed mutation leaves the state untouched.
  */
+/** Refused once the worker stopped: nothing is saved, and the next start recovers from what was. */
+const stopping = () => new Error("Follow-up is stopping; nothing was saved.");
+
 export class Store {
   private tail: Promise<unknown> = Promise.resolve();
   private state: State | null = null;
@@ -19,6 +23,8 @@ export class Store {
   private saved: State | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private flushing: Promise<void> | null = null;
+  /** Set by close(): no mutation commits after it (worker-stop-never-waits-on-a-stuck-pass). */
+  private closed = false;
   /**
    * Called inside each mutation with the new state, before it returns, so files derived from it (scopes.json)
    * are current as soon as the mutation is, independent of the batched state.json write. It runs inside the write
@@ -67,7 +73,10 @@ export class Store {
   /** Runs a mutation in order. A null `next` means nothing changed: the state, the pending write and derived files stay as they are. */
   private apply<T>(work: (current: State) => Promise<{ value: T; next: State | null }>): Promise<T> {
     const next = this.tail.then(async () => {
+      if (this.closed) throw stopping();
       const { value, next } = await work(await this.load());
+      // A mutation that was in flight when the worker stopped (its work awaited a daemon that answered late) is dropped.
+      if (this.closed) throw stopping();
       if (next) {
         // Write-through keeps the old contract: a failed write leaves the saved state as it was. The draft may hold
         // objects owned by callers (observations), so only the validated copy the write returns is frozen.
@@ -91,6 +100,19 @@ export class Store {
     if (!current) return;
     this.flushing = this.write(current).then(saved => { if (this.state === current) this.state = saved; }).finally(() => { this.flushing = null; });
     await this.flushing;
+  }
+  /**
+   * The worker's last word on its state: refuses every mutation from now on, waits a bounded time for the one in
+   * flight (which then can't commit), and writes changes still pending from batched mutations. Never throws.
+   */
+  async close(ms = STOP_WAIT_MS): Promise<void> {
+    this.closed = true;
+    await settleWithin(this.tail, ms);
+    const pending = this.timer !== null;
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    if (this.flushing) await settleWithin(this.flushing, ms);
+    const current = this.state;
+    if (pending && current) await settleWithin(this.write(current).then(saved => { if (this.state === current) this.state = saved; }), ms);
   }
   private schedule(): void {
     this.timer ??= setTimeout(() => { this.timer = null; void this.flush().catch(() => undefined); }, this.writeMs);
