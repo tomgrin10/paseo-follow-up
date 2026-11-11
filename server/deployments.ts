@@ -29,6 +29,7 @@ export class Deployments {
   /** Why the last fleet read failed, for diagnostics and the PR evidence line; null after a success. */
   lastError: string | null = null;
   private images = new Map<string, Promise<string>>();
+  private revisions = new Map<string, Promise<string>>();
   private ancestry = new Map<string, Promise<boolean>>();
   private token: { value: string; until: number } | null = null;
   constructor(
@@ -65,6 +66,22 @@ export class Deployments {
     if (this.images.size > 500) this.images.clear();
     this.images.set(image, work); void work.catch(() => this.images.delete(image)); return work;
   }
+  /**
+   * A Cloud Run revision is immutable: its image (so its commit) never changes. Once a revision has been read ready,
+   * its commit is reused, so a fleet read costs one `gcloud run services list` instead of one call per serving
+   * revision as well (cpu-load REPORT.md §5: 6 gcloud calls a minute). Failures and unready revisions aren't cached.
+   */
+  private revisionCommit(name: string, region: string): Promise<string> {
+    const key = `${region}/${name}`; const cached = this.revisions.get(key); if (cached) return cached;
+    const work = (async () => {
+      const revision = JSON.parse(await this.run("gcloud", ["run", "revisions", "describe", name, "--project", project, "--region", region, "--format=json(spec.containers,status.conditions)"]));
+      if (!revision.status?.conditions?.some((c: Node) => c.type === "Ready" && c.status === "True")) throw new Error("Serving revision is not ready");
+      const image = revision.spec?.containers?.find((c: Node) => c.name === "app")?.image;
+      return this.imageCommit(image ?? "");
+    })();
+    if (this.revisions.size > 500) this.revisions.clear();
+    this.revisions.set(key, work); void work.catch(() => this.revisions.delete(key)); return work;
+  }
   private async readFleet(): Promise<Fleet> {
     const services: Node[] = JSON.parse(await this.run("gcloud", ["run", "services", "list", "--project", project, "--filter", "metadata.labels.rollout-group=app", "--format=json(metadata.name,metadata.labels,status.traffic,status.conditions)"]));
     if (!Array.isArray(services) || roles.some(role => !services.some(s => s.metadata?.name?.startsWith(`acme-service-app-${role}-`)))) throw new Error("Production service catalog incomplete");
@@ -75,10 +92,7 @@ export class Deployments {
       if (!region || !service.status?.conditions?.some((c: Node) => c.type === "Ready" && c.status === "True") || traffic.reduce((n, t) => n + t.percent, 0) !== 100) throw new Error("Production traffic is not ready");
       return Promise.all(traffic.map(async t => {
         if (!/^[a-z0-9-]+$/.test(t.revisionName ?? "")) throw new Error("Serving revision unavailable");
-        const revision = JSON.parse(await this.run("gcloud", ["run", "revisions", "describe", t.revisionName, "--project", project, "--region", region, "--format=json(spec.containers,status.conditions)"]));
-        if (!revision.status?.conditions?.some((c: Node) => c.type === "Ready" && c.status === "True")) throw new Error("Serving revision is not ready");
-        const image = revision.spec?.containers?.find((c: Node) => c.name === "app")?.image;
-        return { revision: t.revisionName, commit: await this.imageCommit(image ?? "") };
+        return { revision: t.revisionName, commit: await this.revisionCommit(t.revisionName, region) };
       }));
     }));
     return { commits: [...new Set(rows.flat().map(r => r.commit))], evidence: `Production serving revisions: ${rows.flat().map(r => `${r.revision}=${r.commit}`).join(", ")}`, observedAt: new Date(this.now()).toISOString() };

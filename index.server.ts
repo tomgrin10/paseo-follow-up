@@ -1,4 +1,5 @@
 import { actorBy, actorOf, type Actor } from "./shared/actor";
+import { TICK_MS } from "./shared/poll";
 import { PluginMove } from "./server/plugin-move";
 import { moveData, dataDirs, writeLegacyHeartbeat, type DataMove } from "./server/data-move";
 import { isRecovery, withRuntimePrelude, invokeSelf, PLUGIN_ID } from "./shared/legacy";
@@ -405,10 +406,10 @@ export default function contribute(server: PluginServerContext) {
   const loop = async () => {
     await ready;
     if (stopped || loadError) return;
-    await engine.tick();
+    await engine.tick({ background: true });
     // Startup is done once the first tick is: release what it grew (see server/memory.ts).
     if (!compacted) { compacted = true; compactHeap(); }
-    if (!stopped) timer = setTimeout(() => void loop(), 15_000);
+    if (!stopped) timer = setTimeout(() => void loop(), TICK_MS);
   };
   void loop();
   void (async () => { await ready; if (stopped || loadError) return; await inbox.start().catch(error => { inboxError = error instanceof Error ? error.message : String(error); }); void inboxLoop(); })();
@@ -684,7 +685,7 @@ export default function contribute(server: PluginServerContext) {
     await requireReady();
     return store.mutate(state => controlWorkspace(state, input, Date.now(), clientTimeZone));
   });
-  handle(rpc.refreshRpc, async () => { await requireReady(); void engine.tick(); return { ok: true }; });
+  handle(rpc.refreshRpc, async ({ workspaceId }) => { await requireReady(); void engine.tick({ workspaceId }); return { ok: true }; });
   handle(rpc.refineTasksRpc, async ({ workspaceId, tasks }) => {
     await requireReady();
     const result = await store.mutate(state => {
