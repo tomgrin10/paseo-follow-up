@@ -63,6 +63,7 @@ export default function contribute(host: PluginClientContext) {
     signOff: agentId => void inbox.signOff([agentId]), openNext,
     openAgent: agentId => client.openScreen({ screenId: OVERVIEW, params: { next: String(++nextToken), open: agentId } }),
     workspace: id => store.get(id), openPanel,
+    noteDone: (agentId, label, cancel) => inbox.noteDone(agentId, label, cancel), endDone: agentId => inbox.endDone(agentId),
   };
   const openItem = (key: string, extra: { question?: string } = {}) => client.openScreen({ screenId: OVERVIEW, params: { item: key, ...(extra.question ? { question: extra.question } : {}) } });
   const homeDeps = { sources, openSettings, openPanel, openLog, openHome: openOverview, openItem, briefDeps };

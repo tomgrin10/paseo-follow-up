@@ -25,11 +25,12 @@ export function UndoBar({ store, theme, touch }: { store: InboxStore; theme: The
   const c = theme.colors;
   const recent = useInbox(store, () => store.recent());
   useEffect(() => {
-    if (!recent) return;
+    // Done's window belongs to its toast, which ends it; this bar neither shows it nor times it out.
+    if (!recent || recent.kind === "done") return;
     const id = setTimeout(() => store.clearRecent(), Math.max(0, 6_000 - (Date.now() - recent.at)));
     return () => clearTimeout(id);
   }, [recent, store]);
-  if (!recent) return null;
+  if (!recent || recent.kind === "done") return null;
   const what = recent.kind === "sign_off" ? "Signed off" : `Later ${laterLabel(recent.until, Date.now())}`;
   return <View role="status" accessibilityLiveRegion="polite" style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: touch ? 52 : 40, paddingLeft: 12, paddingRight: 4, borderRadius: 8, backgroundColor: c.surface1, borderWidth: 1, borderColor: c.border, ...raised(c) }}>
     {recent.kind !== "sign_off"

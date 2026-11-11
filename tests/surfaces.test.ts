@@ -188,3 +188,15 @@ test("a finished flag with no stated ask headlines the workspace's open question
   assert.equal(flagHeadline(flagged(["finished"]), NOW, [])!.key, "finished", "no question: still Finished");
   assert.equal(flagHeadline(flagged(["finished"], { kind: "decision", ask: "Pick one" }), NOW, [q] as never)!.key, "decision", "a real ask wins");
 });
+
+// 1.4.0-beta.59: during Done's Undo window the pill still read "Action": Done waits on the toast, so the brief is still
+// open on the daemon. The developer's own move owns the pill for its window, the same way Signed off and Later do.
+test("Done owns the pill for its Undo window: 'Done', then back to the ask if undone", () => {
+  const r = flagged(["finished"], { kind: "action", ask: "Rotate the staging API key" });
+  assert.equal(pillState({ row: r, items: [], recent: null, now: NOW })?.mode, "flag");
+  const done = { agentIds: ["a1"], at: NOW, kind: "done" as const };
+  assert.deepEqual(pillState({ row: r, items: [], recent: done, now: NOW + 1_000 }), { mode: "undo", label: "Done" });
+  // A held toast outlasts 6 s; the store clears Done when the toast ends, so time alone doesn't bring "Action" back.
+  assert.deepEqual(pillState({ row: r, items: [], recent: done, now: NOW + UNDO_MS + 5_000 }), { mode: "undo", label: "Done" });
+  assert.equal(pillState({ row: r, items: [], recent: { ...done, agentIds: ["other"] }, now: NOW + 1_000 })?.mode, "flag");
+});

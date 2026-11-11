@@ -12,7 +12,9 @@ type List = RpcOutput<typeof inboxListRpc>;
  */
 export type Recent = { agentIds: string[]; label: string; at: number; batch: boolean } & ({ kind: "sign_off" } | { kind: "later"; until: string; prev: Record<string, InboxRow["snooze"]> }
   /** A workspace's own Later (no agent flag): `restore` puts back the workspace snooze it replaced. */
-  | { kind: "later_ws"; until: string; restore: () => Promise<void> });
+  | { kind: "later_ws"; until: string; restore: () => Promise<void> }
+  /** Done on an Action brief, inside its toast's Undo window: `cancel` is that toast's Undo. Ends with the toast. */
+  | { kind: "done"; cancel: () => void });
 /**
  * The backstop poll. Changes arrive sooner by push: an agent's status or attention changing in Paseo's agent stream
  * calls `nudge` (1.4.0). Nothing polls while the app is hidden; it refreshes once on return.
@@ -153,7 +155,16 @@ export function createInboxStore(client: PluginClientContext) {
       recent = { kind: "later_ws", agentIds: [], label, at: Date.now(), batch: false, until, restore };
       emit();
     },
+    /** Done's Undo window opened (client/brief.tsx): the pill says Done until `endDone`. */
+    noteDone(agentId: string, label: string, cancel: () => void) {
+      recent = { kind: "done", agentIds: [agentId], label, at: Date.now(), batch: false, cancel };
+      emit();
+    },
+    endDone(agentId: string) {
+      if (recent?.kind === "done" && recent.agentIds.includes(agentId)) { recent = null; emit(); }
+    },
     async undo(agentIds?: string[]) {
+      if (recent?.kind === "done" && (!agentIds || agentIds.some(id => recent!.agentIds.includes(id)))) { const { cancel } = recent; recent = null; emit(); cancel(); return; }
       if (!agentIds && recent?.kind === "later_ws") { const { restore } = recent; recent = null; emit(); await restore(); return; }
       const target = agentIds ?? recent?.agentIds ?? [];
       const batch = !agentIds && recent?.batch;
