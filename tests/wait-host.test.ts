@@ -45,8 +45,8 @@ test("on a 0.16 host Wait attaches no tools and leaves Claude's MCP auto-backgro
   const next = await wait.open(request(root));
   assert.deepEqual(next.tools, [], "no wait_* tools");
   assert.equal(next.env.CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS, undefined);
-  assert.equal(next.env.FOLLOW_THROUGH_WAIT, undefined);
-  assert.equal(next.env.FOLLOW_THROUGH_BACKGROUND_WORK, "1", "the hook gives the background-work guidance instead");
+  assert.equal(next.env.FOLLOW_UP_WAIT, undefined);
+  assert.equal(next.env.FOLLOW_UP_BACKGROUND_WORK, "1", "the hook gives the background-work guidance instead");
   assert.equal(next.env.KEEP, "yes");
   // The same opt-outs still mean nothing at all.
   for (const patch of [{ purpose: "history" }, { provider: "codex" }, { labels: { "follow-up-wait/enabled": "false" } }] as Partial<PluginSessionOpenRequest>[]) {
@@ -55,7 +55,7 @@ test("on a 0.16 host Wait attaches no tools and leaves Claude's MCP auto-backgro
   host = false;
   const old = await wait.open(request(root));
   assert.deepEqual(old.tools.map(t => t.name).sort(), [...WAIT_TOOLS].sort(), "0.15: Wait as before");
-  assert.equal(old.env.CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS, "0"); assert.equal(old.env.FOLLOW_THROUGH_BACKGROUND_WORK, undefined);
+  assert.equal(old.env.CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS, "0"); assert.equal(old.env.FOLLOW_UP_BACKGROUND_WORK, undefined);
 });
 
 test("Settings says why Wait isn't attached on a 0.16 host", () => {
@@ -76,17 +76,17 @@ test("Settings says why Wait isn't attached on a 0.16 host", () => {
 
 test("the hook's 0.16 guidance: background, end the turn, no Wait tools", async t => {
   const root = await dir(t, "follow-wait-host-hook-");
-  const directory = join(root, "plugin-data/follow-through"); await mkdir(join(directory, "hook-state"), { recursive: true });
+  const directory = join(root, "plugin-data/follow-up"); await mkdir(join(directory, "hook-state"), { recursive: true });
   for (const file of ["agent-hook.mjs", "mcp.mjs"]) await writeFile(join(directory, file), await readFile(resolve("server", file), "utf8"));
   await writeFile(join(directory, "hooks-enabled.json"), JSON.stringify({ expiresAt: Date.now() + 60_000, clientEntry: "/fixture/client.js" }));
   const fire = (env: Record<string, string>) => new Promise<string>((ok, bad) => {
-    const child = spawn(process.execPath, [join(directory, "agent-hook.mjs")], { env: { ...process.env, FOLLOW_THROUGH_HOOK_IMPORT: "", PASEO_AGENT_ID: "sub", FOLLOW_THROUGH_BRIEF: "", FOLLOW_THROUGH_RECOVERY: "", FOLLOW_THROUGH_TOOLS: "", FOLLOW_THROUGH_ROOT: "", FOLLOW_THROUGH_OVERSEER: "", FOLLOW_THROUGH_WAIT: "", FOLLOW_THROUGH_BACKGROUND_WORK: "", ...env } });
+    const child = spawn(process.execPath, [join(directory, "agent-hook.mjs")], { env: { ...process.env, FOLLOW_UP_HOOK_IMPORT: "", PASEO_AGENT_ID: "sub", FOLLOW_UP_BRIEF: "", FOLLOW_UP_RECOVERY: "", FOLLOW_UP_TOOLS: "", FOLLOW_UP_ROOT: "", FOLLOW_UP_OVERSEER: "", FOLLOW_UP_WAIT: "", FOLLOW_UP_BACKGROUND_WORK: "", ...env } });
     let out = ""; child.stdout.on("data", c => out += c); child.once("error", bad); child.once("exit", () => ok(out.trim()));
     child.stdin.end(JSON.stringify({ session_id: "s1", hook_event_name: "SessionStart" }));
   });
   const text = (out: string) => out ? JSON.parse(out).hookSpecificOutput.additionalContext as string : "";
-  assert.equal(text(await fire({ FOLLOW_THROUGH_BACKGROUND_WORK: "1" })), backgroundWorkInstruction);
-  assert.equal(text(await fire({ FOLLOW_THROUGH_WAIT: "1" })), waitInstruction, "0.15 unchanged");
+  assert.equal(text(await fire({ FOLLOW_UP_BACKGROUND_WORK: "1" })), backgroundWorkInstruction);
+  assert.equal(text(await fire({ FOLLOW_UP_WAIT: "1" })), waitInstruction, "0.15 unchanged");
   assert.match(backgroundWorkInstruction, /run_in_background/);
   assert.match(backgroundWorkInstruction, /end your turn/);
   assert.doesNotMatch(backgroundWorkInstruction, /wait_(prepare|for|get)_job/);

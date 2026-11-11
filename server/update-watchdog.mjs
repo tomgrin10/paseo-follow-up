@@ -1,4 +1,4 @@
-// Follow-up's installer and watchdog (1.4.0-beta.24). Written to plugin-data/follow-through/update-watchdog.mjs and run
+// Follow-up's installer and watchdog (1.4.0-beta.24). Written to plugin-data/follow-up/update-watchdog.mjs and run
 // detached, because installing reloads Follow-up: the worker that asked for the update stops while this keeps going.
 //
 // It asks Paseo for the reviewed version (the integrity Follow-up checked must match), applies it, then watches the
@@ -51,7 +51,7 @@ export async function run(job, io = {}) {
   const log = event => appendFile(join(job.directory, "updates.jsonl"), `${JSON.stringify({ at: now(), from: job.from, to: job.to, ...event })}\n`, { mode: 0o600 });
   const connect = io.connect ?? (async () => {
     const { DaemonClient } = createRequire(import.meta.url)(job.clientEntry);
-    const client = new DaemonClient({ ...job.daemon, clientId: "follow-through-updater" });
+    const client = new DaemonClient({ ...job.daemon, clientId: "follow-up-updater" });
     await client.connect();
     return client;
   });

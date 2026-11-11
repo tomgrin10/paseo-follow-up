@@ -351,7 +351,7 @@ export default function contribute(server: PluginServerContext) {
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await writeFile(bridge, withRuntimePrelude(mcpSource), { mode: 0o600 });
     // 1.4.0-beta.2: tools are per agent now; drop the old user-scope registrations that spawned mcp.mjs in every session.
-    void removeGlobalRegistrations().then(results => { const removed = results.filter(r => r.status === "removed").map(r => r.path); if (removed.length) console.warn(`[follow-up] removed the global follow-through MCP registration from ${removed.length} file(s); backups end in .follow-through-unregister.bak`); });
+    void removeGlobalRegistrations().then(results => { const removed = results.filter(r => r.status === "removed").map(r => r.path); if (removed.length) console.warn(`[follow-up] removed the global follow-up MCP registration from ${removed.length} file(s); backups end in .follow-up-unregister.bak`); });
     governor.start();
     await engine.recover();
     await migrateTracking();
@@ -371,10 +371,10 @@ export default function contribute(server: PluginServerContext) {
     await writeBriefState().catch(() => undefined);
     // Brief answers recorded before a reload that Paseo never confirmed go out again, under the same messageId.
     await inbox.resumeAnswers(sendTo).catch(() => undefined);
-  })().catch(() => { loadError = "Follow-through could not start. Check its saved state and worker lock."; });
-  const requireReady = async () => { await ready; if (loadError || stopped) throw new Error(loadError ?? "Follow-through is stopping"); };
+  })().catch(() => { loadError = "Follow-up could not start. Check its saved state and worker lock."; });
+  const requireReady = async () => { await ready; if (loadError || stopped) throw new Error(loadError ?? "Follow-up is stopping"); };
   // 1.4.0-beta.2: Follow-up's tools per agent: natively through Paseo's MCP when the host serves plugin tools,
-  // otherwise the stdio bridge for this launch only. FOLLOW_THROUGH_TOOLS tells the hooks which names the agent has.
+  // otherwise the stdio bridge for this launch only. FOLLOW_UP_TOOLS tells the hooks which names the agent has.
   let configCache: { mtimeMs: number; value: unknown } | null = null;
   const paseoConfig = async () => {
     try { const path = join(paseoHome, "config.json"); const { mtimeMs } = await stat(path); if (configCache?.mtimeMs !== mtimeMs) configCache = { mtimeMs, value: JSON.parse(await readFile(path, "utf8")) }; return configCache.value as Parameters<typeof nativeToolsAvailable>[1]; } catch { return null; }
@@ -390,16 +390,16 @@ export default function contribute(server: PluginServerContext) {
     return handler.run(await handler.input.parseAsync(input), { paseo: context.paseo });
   };
   const withTools = async <R extends Parameters<typeof withSessionMcp>[0]>(request: R, recovery: boolean, brief: string | null, root: boolean, overseer = false): Promise<R> => {
-    // FOLLOW_THROUGH_TOOL_PROVIDERS / FOLLOW_THROUGH_FORCE_STDIO exist for the isolated harness (scripts/check-native-tools.mjs).
-    const providers = (process.env.FOLLOW_THROUGH_TOOL_PROVIDERS ?? "claude,codex").split(",");
+    // FOLLOW_UP_TOOL_PROVIDERS / FOLLOW_UP_FORCE_STDIO exist for the isolated harness (scripts/check-native-tools.mjs).
+    const providers = (process.env.FOLLOW_UP_TOOL_PROVIDERS ?? "claude,codex").split(",");
     if (request.purpose !== "interactive" || !providers.includes(request.provider) || request.labels["plugin-tools/enabled"] === "false") return request;
-    if (process.env.FOLLOW_THROUGH_FORCE_STDIO !== "1" && nativeToolsAvailable(request, await paseoConfig())) {
+    if (process.env.FOLLOW_UP_FORCE_STDIO !== "1" && nativeToolsAvailable(request, await paseoConfig())) {
       const flags = { recovery, brief: !!brief && !recovery, root: root && !recovery, overseer: overseer && !recovery };
-      const env = { ...request.env, FOLLOW_THROUGH_TOOLS: "native", FOLLOW_THROUGH_PROVIDER: request.provider, ...(flags.root ? { FOLLOW_THROUGH_ROOT: "1" } : {}), ...(flags.overseer ? { FOLLOW_THROUGH_OVERSEER: "1" } : {}) };
+      const env = { ...request.env, FOLLOW_UP_TOOLS: "native", FOLLOW_UP_PROVIDER: request.provider, ...(flags.root ? { FOLLOW_UP_ROOT: "1" } : {}), ...(flags.overseer ? { FOLLOW_UP_OVERSEER: "1" } : {}) };
       if (/^[\w-]+$/.test(request.agentId)) await writeFile(join(directory, "hook-state", `native-${request.agentId}.json`), JSON.stringify({ instance: toolsInstance }), { mode: 0o600 }).catch(() => undefined);
       return { ...request, env, tools: [...request.tools, ...nativeTools(flags, live, invoke, workflowSummary([...knownRepos(await store.snapshot())].map(r => prWorkflow.cachedWorkflow(r))))] };
     }
-    return withSessionMcp({ ...request, env: { ...request.env, FOLLOW_THROUGH_TOOLS: "stdio", FOLLOW_THROUGH_PROVIDER: request.provider } }, directory, clientEntry(), paseoHome, recovery, process.env, brief, root, overseer, providers) as R;
+    return withSessionMcp({ ...request, env: { ...request.env, FOLLOW_UP_TOOLS: "stdio", FOLLOW_UP_PROVIDER: request.provider } }, directory, clientEntry(), paseoHome, recovery, process.env, brief, root, overseer, providers) as R;
   };
   let compacted = false;
   const loop = async () => {
@@ -693,7 +693,7 @@ export default function contribute(server: PluginServerContext) {
       for (const edit of tasks) {
         const o = w.obligations.find(o => o.id === edit.id);
         if (!o || ["done", "waived", "working"].includes(o.status)) throw new Error("Task changed or is no longer editable. Refresh before refining it.");
-        if (lifecycleOnly(edit) || edit.afterPrs.some(key => !w.prs.some(p => p.key === key))) throw new Error("Record concrete follow-through and owned PR dependencies.");
+        if (lifecycleOnly(edit) || edit.afterPrs.some(key => !w.prs.some(p => p.key === key))) throw new Error("Record concrete follow-up and owned PR dependencies.");
         if (o.title !== edit.title) o.previousTitles = [...(o.previousTitles ?? []), o.title];
         updateObligation(w, { ...edit, status: o.status, evidence: o.evidence });
       }
@@ -1245,7 +1245,7 @@ export default function contribute(server: PluginServerContext) {
       if (await isBackground(request.agentId, paseo)) return request;
       // The Overseer: needs_you (no Stop-hook nudge), the action tools and its routing tools. Never tracked.
       if (request.labels[OVERSEER_LABEL] === "1" && ["claude", "codex"].includes(request.provider)) {
-        const env = { ...request.env, FOLLOW_THROUGH_OVERSEER: "1", FOLLOW_THROUGH_BRIEF: request.provider };
+        const env = { ...request.env, FOLLOW_UP_OVERSEER: "1", FOLLOW_UP_BRIEF: request.provider };
         return withTools({ ...request, env }, false, request.provider, true, true);
       }
       const saved = await store.snapshot();
@@ -1258,7 +1258,7 @@ export default function contribute(server: PluginServerContext) {
           const current = await store.snapshot();
           w = current.workspaces.find(w => w.enable_tracking && w.mainAgentId === request.agentId);
           if (!current.workspaces.some(w => w.id === request.workspaceId) && current.projectDefaults?.[project.id] !== false)
-            return { ...request, env: { ...request.env, FOLLOW_THROUGH_CLI: bridge, FOLLOW_THROUGH_CLIENT_ENTRY: clientEntry() } };
+            return { ...request, env: { ...request.env, FOLLOW_UP_CLI: bridge, FOLLOW_UP_CLIENT_ENTRY: clientEntry() } };
         }
       }
       const root = !!request.workspaceId && !isRecovery(request.labels) && await isWorkspaceRoot({ id: request.agentId, workspaceId: request.workspaceId, labels: request.labels }, async id => (await paseo.agents.ref(id).refresh())?.agent);
@@ -1274,11 +1274,11 @@ export default function contribute(server: PluginServerContext) {
       if (!w) {
         // Root agents get the action tools (agent parity) and, while the inbox is on, needs_you.
         if (!root) return request;
-        return withTools({ ...request, env: { ...request.env, ...(brief ? { FOLLOW_THROUGH_BRIEF: brief } : {}) } }, false, brief, true);
+        return withTools({ ...request, env: { ...request.env, ...(brief ? { FOLLOW_UP_BRIEF: brief } : {}) } }, false, brief, true);
       }
       const recovery = w.mainAgentId !== request.agentId && !w.contributorAgentIds?.includes(request.agentId);
       const main = !recovery && w.mainAgentId === request.agentId ? brief : null;
-      return withTools({ ...request, env: { ...request.env, FOLLOW_THROUGH_CLI: bridge, FOLLOW_THROUGH_CLIENT_ENTRY: clientEntry(), ...(recovery ? { FOLLOW_THROUGH_RECOVERY: "1" } : {}), ...(main ? { FOLLOW_THROUGH_BRIEF: main } : {}) } }, recovery, main, root && !recovery);
+      return withTools({ ...request, env: { ...request.env, FOLLOW_UP_CLI: bridge, FOLLOW_UP_CLIENT_ENTRY: clientEntry(), ...(recovery ? { FOLLOW_UP_RECOVERY: "1" } : {}), ...(main ? { FOLLOW_UP_BRIEF: main } : {}) } }, recovery, main, root && !recovery);
     })),
     server.on("agent.turn_ended", async (event, { paseo, signal }) => {
       await ready;

@@ -166,7 +166,7 @@ export function generalSummary(view: Pick<UpdatesView, "version" | "installKind"
 export const needsLook = (view: Pick<UpdatesView, "installKind" | "mode" | "phase">) =>
   view.installKind === "npm" && (view.phase.kind === "rolled-back" || view.phase.kind === "untrusted" || view.phase.kind === "install-failed" || (view.phase.kind === "available" && view.mode !== "auto"));
 
-export const copyCommand = (version: string) => `paseo plugin update follow-through --version ${version}`;
+export const copyCommand = (version: string) => `paseo plugin update follow-up --version ${version}`;
 export type { ReleaseNote } from "./changelog";
 
 /**

@@ -26,14 +26,14 @@ test("batches several stacks and sends only after an explicit click", async t =>
   const f = await fixture(t, workspace({ prs: [pr({ snapshot: snapshot({ conflict: true }) }), pr({ key: "example/app#2", number: 2, stack: "CLI access", snapshot: snapshot({ threads: [{ id: "thread", updatedAt: "fixed-time" }] }) })] }));
   await f.engine.tick(); assert.equal(f.sends.length, 0); assert.equal((await f.get()).batches[0].tasks.length, 2);
   f.advance(61_000); await Promise.all([f.engine.tick(), f.engine.tick()]); assert.equal(f.sends.length, 0); await f.send(); assert.equal(f.sends.length, 1);
-  assert.equal(f.sends[0], `Follow-through batch ${(await f.get()).batches[0].id}\n\n1. Resolve merge conflicts on example/app#1\n2. Use /fix-pr for example/app#2 (1 open thread)`);
+  assert.equal(f.sends[0], `Follow-up batch ${(await f.get()).batches[0].id}\n\n1. Resolve merge conflicts on example/app#1\n2. Use /fix-pr for example/app#2 (1 open thread)`);
   await f.engine.tick(); assert.equal(f.sends.length, 1);
 });
 test("single-PR repairs omit historical context and retain an acknowledgeable batch identity", async t => {
   const f = await fixture(t, workspace({ goal: "Historical goal with several previous stacks. ".repeat(40), prs: [pr({ snapshot: snapshot({ threads: [{ id: "review", updatedAt: "time" }] }) })] }));
   await f.engine.tick(); await f.send(); const delivered = (await f.get()).batches[0];
-  assert.equal(f.sends[0], `Follow-through batch ${delivered.id}\n\n1. Use /fix-pr for example/app#1 (1 open thread)`);
-  const batchId = /^Follow-through batch ([^\n]+)/.exec(f.sends[0])![1];
+  assert.equal(f.sends[0], `Follow-up batch ${delivered.id}\n\n1. Use /fix-pr for example/app#1 (1 open thread)`);
+  const batchId = /^Follow-up batch ([^\n]+)/.exec(f.sends[0])![1];
   await f.engine.acknowledge("main-agent", batchId, "completed", "Validated feedback and resolved the thread");
   assert.equal((await f.get()).batches[0].state, "completed");
   await f.engine.tick(); assert.equal(f.sends.length, 1, "format changes must not bypass delivery deduplication");
@@ -128,7 +128,7 @@ test("dependency settlement queues a deploy check but requires a click to send",
   const f = await fixture(t, workspace({ obligations: [{ id: "deploy", title: "Verify deployed revision", status: "waiting", afterPrs: ["example/app#1"], evidence: "", trigger: { event: "merge", delayDays: 0 }, enable_follow_up: true, dependencyStage: "merged", revision: 0 }] }));
   await f.engine.tick(); assert.equal((await f.get()).batches.length, 0);
   f.observe("example/app#1", snapshot({ state: "MERGED" })); await f.engine.tick(); f.advance(61_000); await f.engine.tick(); assert.equal(f.sends.length, 0); await f.send(); assert.equal(f.sends.length, 1); assert.match(f.sends[0], /Verify deployed revision/);
-  assert.equal(f.sends[0], `Follow-through batch ${(await f.get()).batches[0].id}\n\n1. Verify deployed revision`);
+  assert.equal(f.sends[0], `Follow-up batch ${(await f.get()).batches[0].id}\n\n1. Verify deployed revision`);
 });
 test("Done requires agent declaration and settles only after foreground work ends", async t => {
   const f = await fixture(t, workspace({ prs: [pr({ snapshot: snapshot({ state: "MERGED" }) })] }));
@@ -216,7 +216,7 @@ test("dependency prompts process the parent before the child", async t => {
 test("an agent can acknowledge and declare Done while delivery waits for its turn", async t => {
   const f = await fixture(t, workspace({ prs: [pr({ snapshot: snapshot({ state: "MERGED" }) })], inventory: { revision: 1, syncedRevision: 1, candidates: [], historyComplete: true, historyError: null, scannedMessageAt: null } }));
   f.gateway.send = async (_w, batch, text) => {
-    assert.equal(text, `Follow-through batch ${batch.id}\n\n1. Verify the workspace is finished and declare Done`);
+    assert.equal(text, `Follow-up batch ${batch.id}\n\n1. Verify the workspace is finished and declare Done`);
     f.runtime({ busy: true, reason: null, archived: false });
     await f.engine.acknowledge("main-agent", batch.id, "completed", "Recovered and verified all historical work");
     const result = await f.engine.declareDone("main-agent", "Shipped and verified");
@@ -281,7 +281,7 @@ test("recovery is isolated, scoped to metadata, and never transfers the main age
   assert.throws(() => agentWorkspace({ version: 1, workspaces: [recoveryWorkspace()] }, "recovery-agent"));
   function recoveryWorkspace(): Workspace { return workspace({ batches: [{ ...recovery, state: "completed" }] }); }
   await f.engine.tick(); await f.send(); const repair = (await f.get()).batches.find(b => b.tasks.some(t => t.kind === "conflict"))!;
-  assert.equal(repair.recipientAgentId, "main-agent"); assert.equal(f.sends.at(-1)!, `Follow-through batch ${repair.id}\n\n1. Resolve merge conflicts on example/app#1`);
+  assert.equal(repair.recipientAgentId, "main-agent"); assert.equal(f.sends.at(-1)!, `Follow-up batch ${repair.id}\n\n1. Resolve merge conflicts on example/app#1`);
   await assert.rejects(f.engine.acknowledge("recovery-agent", repair.id, "completed", "Fixed"), /assigned agent/);
 });
 

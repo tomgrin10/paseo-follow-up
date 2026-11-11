@@ -35,7 +35,7 @@ test("writeThrough and backupOnce keep a symlinked directory and file intact and
 test("unregistering the old MCP entry from a symlinked .claude.json keeps the link", async () => {
   const root = await mkdtemp(join(tmpdir(), "follow-write-through-"));
   try {
-    await writeFile(join(root, "real.json"), JSON.stringify({ mcpServers: { "follow-through": { env: { FOLLOW_THROUGH_MANAGED: "1" } }, keep: {} } }));
+    await writeFile(join(root, "real.json"), JSON.stringify({ mcpServers: { "follow-up": { env: { FOLLOW_UP_MANAGED: "1" } }, keep: {} } }));
     await symlink(join(root, "real.json"), join(root, ".claude.json"));
     assert.equal((await unregisterClaude(join(root, ".claude.json"))).status, "removed");
     assert.ok((await lstat(join(root, ".claude.json"))).isSymbolicLink());

@@ -9,13 +9,13 @@ import { workspace } from "./fixtures";
 
 async function fixture(t: any) {
   const root = await mkdtemp(join(tmpdir(), "follow-mcp-usage-")); t.after(()=>rm(root,{recursive:true,force:true}));
-  const directory = join(root,"plugin-data/follow-through"); await mkdir(directory,{recursive:true});
+  const directory = join(root,"plugin-data/follow-up"); await mkdir(directory,{recursive:true});
   const w = workspace({obligations:[{id:"old",title:"Historical result",status:"done",afterPrs:[],evidence:"old evidence",enable_follow_up:false,revision:0},{id:"current",title:"Verify current behavior",status:"waiting",afterPrs:["example/app#1"],evidence:"Current evidence",enable_follow_up:true,trigger:{event:"deploy",delayDays:14},revision:0}]});
   const statePath=join(directory,"state.json"); const save=()=>writeFile(statePath,JSON.stringify({workspaces:[w]})); await save();
   await writeFile(join(directory,"hooks-enabled.json"),JSON.stringify({expiresAt:Date.now()+60_000})); await writeFile(join(root,"config.json"),JSON.stringify({daemon:{listen:"127.0.0.1:1"}}));
   const client=join(root,"client.mjs"),calls=join(root,"calls.jsonl");
   await writeFile(client,`import{appendFileSync}from'node:fs';const w=${JSON.stringify(w)};export class DaemonClient{async connect(){}async close(){}async invokePluginRpc(plugin,method,input){appendFileSync(${JSON.stringify(calls)},JSON.stringify({method,input})+'\\n');if(method==='follow.obligation')return{...w,updatedObligationId:'current'};if(method==='follow.done')return{workspace:w,blockers:['Still open']};return w;}}`);
-  const env={...process.env,PASEO_HOME:root,PASEO_AGENT_ID:w.mainAgentId,FOLLOW_THROUGH_CLIENT_ENTRY:client,FOLLOW_THROUGH_RECOVERY:""};
+  const env={...process.env,PASEO_HOME:root,PASEO_AGENT_ID:w.mainAgentId,FOLLOW_UP_CLIENT_ENTRY:client,FOLLOW_UP_RECOVERY:""};
   const rpc=async(requests:any[],override:Record<string,string>={})=>{
     const child=spawn(process.execPath,[resolve("server/mcp.mjs")],{env:{...env,...override},stdio:["pipe","pipe","pipe"]});let output="",error="";
     child.stdout.on("data",c=>output+=c);child.stderr.on("data",c=>error+=c);
@@ -77,8 +77,8 @@ test("an already-open MCP connection announces activation changes without messag
 test("replacement recovery discovery can ask the authoritative status handler to validate a handoff",async t=>{
   const f=await fixture(t);
   f.w.batches=[{id:"recovery",state:"sent",settledAt:null,recipientAgentId:"old-helper",tasks:[{kind:"inventory"}]}] as any;await f.save();
-  await writeFile(join(f.root,"client.mjs"),`import{readFileSync,writeFileSync}from'node:fs';export class DaemonClient{async connect(){}async close(){}async invokePluginRpc(plugin,method,input){if(method!=='follow.agent-status')throw new Error('Only authoritative status lookup expected');const path=${JSON.stringify(join(f.root,"plugin-data/follow-through/state.json"))};const state=JSON.parse(readFileSync(path,'utf8'));state.workspaces[0].batches[0].recipientAgentId=input.agentId;writeFileSync(path,JSON.stringify(state));return state.workspaces[0];}}`);
-  const result=await f.rpc([{method:"tools/list"}],{PASEO_AGENT_ID:"replacement-helper",FOLLOW_THROUGH_RECOVERY:"1"});
+  await writeFile(join(f.root,"client.mjs"),`import{readFileSync,writeFileSync}from'node:fs';export class DaemonClient{async connect(){}async close(){}async invokePluginRpc(plugin,method,input){if(method!=='follow.agent-status')throw new Error('Only authoritative status lookup expected');const path=${JSON.stringify(join(f.root,"plugin-data/follow-up/state.json"))};const state=JSON.parse(readFileSync(path,'utf8'));state.workspaces[0].batches[0].recipientAgentId=input.agentId;writeFileSync(path,JSON.stringify(state));return state.workspaces[0];}}`);
+  const result=await f.rpc([{method:"tools/list"}],{PASEO_AGENT_ID:"replacement-helper",FOLLOW_UP_RECOVERY:"1"});
   assert.equal(result[0].result.tools.length,6);assert.ok(result[0].result.tools.every((t:any)=>!["declare_done","sync_workspace"].includes(t.name)));
-  const saved=JSON.parse(await readFile(join(f.root,"plugin-data/follow-through/state.json"),"utf8"));assert.equal(saved.workspaces[0].mainAgentId,"main-agent");
+  const saved=JSON.parse(await readFile(join(f.root,"plugin-data/follow-up/state.json"),"utf8"));assert.equal(saved.workspaces[0].mainAgentId,"main-agent");
 });

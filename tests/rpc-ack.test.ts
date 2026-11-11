@@ -6,7 +6,7 @@ import { FIXTURE, sample } from "./support/sample-input";
 import { seed } from "./support/seed";
 
 /**
- * Invariant (2026-11-11, "Your answer wasn't sent. Plugin RPC timed out: follow-through.invoke"): every RPC the client
+ * Invariant (2026-11-11, "Your answer wasn't sent. Plugin RPC timed out: follow-up.invoke"): every RPC the client
  * calls replies within ACK_MS even when everything slow hangs: the Paseo API never answers, the daemon socket accepts
  * and stays silent, and gh, gt, mcpproxy, claude and codex never exit. Paseo gives a plugin RPC 30 s and then shows the
  * developer an error, whatever the handler later does; an answer that arrived 88 s later still read "wasn't sent".

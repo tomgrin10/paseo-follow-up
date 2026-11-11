@@ -20,11 +20,11 @@ console.log(JSON.stringify({data:{repository}}));
 await writeFile(join(preview.root,'bin/gh'),gh);await chmod(join(preview.root,'bin/gh'),0o700);
 const client=new DaemonClient({url:`ws://127.0.0.1:${preview.port}/ws`,clientId:'task-trigger-ui-test',clientType:'cli',reconnect:{enabled:false}});
 await client.connect();const api=createPaseoApi(client);
-const call=(method,input={})=>client.invokePluginRpc('follow-through',method,input);
+const call=(method,input={})=>client.invokePluginRpc('follow-up',method,input);
 const directory=join(preview.root,'trigger-workspace');await mkdir(directory,{recursive:true});
 const title='Task trigger test '+Date.now().toString(36);
 const workspace=await api.workspaces.create({title,source:{kind:'directory',path:directory}});
-const agent=await workspace.agents.create({config:{provider:'followthrough-fixture/fixture',model:'fixture'},title:'Synthetic trigger main'});
+const agent=await workspace.agents.create({config:{provider:'followup-fixture/fixture',model:'fixture'},title:'Synthetic trigger main'});
 await call('follow.activate',{workspaceId:workspace.id});
 for(const number of [1,2])await call('follow.register-pr',{agentId:agent.id,repo:'example/app',number,stack:'PR descriptions',parentNumber:number===2?1:null});
 const taskTitle='Recheck transcript titles';
@@ -37,7 +37,7 @@ const context=await chromium.launchPersistentContext(profile,{executablePath:pro
 const errors=[];context.on('weberror',error=>errors.push(String(error.error())));
 try{
  const page=await context.newPage();await fetch(`http://127.0.0.1:${preview.port}/llms.txt`);await page.goto(`http://127.0.0.1:${preview.port}/`);
- await page.getByRole('button',{name:new RegExp('^'+title)}).click();await page.getByRole('button',{name:'Open workspace follow-through',exact:true}).click();
+ await page.getByRole('button',{name:new RegExp('^'+title)}).click();await page.getByRole('button',{name:'Open workspace follow-up',exact:true}).click();
  const details=page.getByRole('button',{name:'Show task details: '+taskTitle,exact:true});await details.waitFor();
  assert.equal(await page.getByText('Manual',{exact:true}).count(),1);
  assert.equal(await page.getByRole('radiogroup').count(),0);
@@ -57,7 +57,7 @@ try{
  let saved=current.obligations.find(o=>o.id===task.id);assert.deepEqual(saved.trigger,{event:'deploy',delayDays:14});assert.deepEqual(saved.afterPrs,['example/app#1']);
  assert.equal(saved.evidence,task.evidence);assert.equal(current.enable_auto_sends,false);assert.equal(current.mainAgentId,agent.id);
  assert.ok(current.batches.filter(b=>b.state==='pending').every(b=>b.tasks.every(t=>t.kind!=='obligation')));
- await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'Open workspace follow-through',exact:true}).click();
+ await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'Open workspace follow-up',exact:true}).click();
  await page.getByRole('button',{name:'Show task details: '+taskTitle,exact:true}).click();
  await page.getByRole('button',{name:'Collapse Tasks',exact:true}).scrollIntoViewIfNeeded();
  assert.equal(await delay.inputValue(),'14');
@@ -71,6 +71,6 @@ try{
  current=(await call('follow.get',{workspaceId:workspace.id})).workspace;
  for(let i=0;current.obligations.find(o=>o.id===task.id).trigger!==null&&i<40;i++){await page.waitForTimeout(100);current=(await call('follow.get',{workspaceId:workspace.id})).workspace;}
  saved=current.obligations.find(o=>o.id===task.id);assert.equal(saved.trigger,null);assert.equal(saved.enable_follow_up,false);assert.deepEqual(saved.afterPrs,['example/app#1']);
- await page.reload();await page.getByRole('button',{name:'Open workspace follow-through',exact:true}).click();await page.getByText('Manual · #1',{exact:true}).waitFor();
+ await page.reload();await page.getByRole('button',{name:'Open workspace follow-up',exact:true}).click();await page.getByText('Manual · #1',{exact:true}).waitFor();
  assert.deepEqual(errors,[]);console.log('PASS: actual native desktop/mobile task disclosure, manual default, disabled/invalid trigger validation, fourteen-day deploy/merge controls, persistence, manual reset preserving dependencies/evidence/Auto/owner, future-task exclusion, 44px targets and no overflow/browser errors. Synthetic workspace only; no real messages.');
 }finally{await context.close();await client.close();await rm(profile,{recursive:true,force:true});}

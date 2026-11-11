@@ -19,7 +19,7 @@ Tracked root sessions maintain PR metadata during normal work. Contributor roots
 ## Capabilities and Constraints
 Paseo native Explorer panel and workspace tab; global overview; persistent host-side records and polling with the app closed; agent MCP tools; individual or project-default tracking with original main-agent ownership. Done is an agent declaration gated by settled PRs and completed obligations. Archiving remains manual. The plugin supports GitHub, historical PR reference recovery, automatic discovery from successful session submission receipts across git worktrees, and explicit stack membership.
 
-Canonical remote Git projects whose repository basename is `hero-poc` track by default, including organization and fork projects. Other projects start off. Native Settings → Plugins → Actions for follow-through → Follow-up and **Follow-up: project settings** provide per-project switches, persisted by stable project ID. On enrolls existing and future unarchived workspaces with a valid original main agent; Off stops further enrollment while preserving tracked records and settings. New enrollments have Auto off and do not send messages or create a recovery agent automatically. Existing tracked Auto choices remain unchanged.
+Canonical remote Git projects whose repository basename is `hero-poc` track by default, including organization and fork projects. Other projects start off. Native Settings → Plugins → Actions for follow-up → Follow-up and **Follow-up: project settings** provide per-project switches, persisted by stable project ID. On enrolls existing and future unarchived workspaces with a valid original main agent; Off stops further enrollment while preserving tracked records and settings. New enrollments have Auto off and do not send messages or create a recovery agent automatically. Existing tracked Auto choices remain unchanged.
 
 Existing-workspace inventory is an optional user action under the panel's Agent, recovery and Graphite disclosure, repeatable after completion. It runs in a separate recovery agent. Its result and conversation remain accessible there; the original main agent retains ownership of repairs and Done. Recovery and repair prompts stay specific to their respective tasks. Manually registered PR repairs, dependency checks and Done never require inventory acknowledgment. Auto does not schedule recovery. Optional recovery activity, failures and permissions do not hold main-agent work.
 
@@ -33,7 +33,7 @@ Tracking, recovery, follow-up, Done, and CLI-backed Merge work without Send to P
 
 ## Product Principles
 
-Stakeholder replies are substantive follow-through tasks. Agents retain the original Slack thread and recipient, distinguish progress from verified outcomes, and record sent-message receipts. Final verify-and-reply tasks can wait for actual deployment. Auto governs agent delivery; external replies require actual developer authorization and an available write-capable connection. Drafts or uncertain posts stay blocked. The plugin does not scan Slack in the background or create its own posting identity.
+Stakeholder replies are substantive follow-up tasks. Agents retain the original Slack thread and recipient, distinguish progress from verified outcomes, and record sent-message receipts. Final verify-and-reply tasks can wait for actual deployment. Auto governs agent delivery; external replies require actual developer authorization and an available write-capable connection. Drafts or uncertain posts stay blocked. The plugin does not scan Slack in the background or create its own posting identity.
 
 - Tracking follows a workspace click or an enabled project default; repository identity, not display names, determines the built-in hero-poc default. Installation and lifecycle discovery respect these defaults without enabling Auto. Polling sends only for tracked workspaces with explicit Auto consent.
 - Auto is a visible per-workspace toggle, off by default. Manual clicks are immediate; Auto waits for idle boundaries.
@@ -45,7 +45,7 @@ Stakeholder replies are substantive follow-through tasks. Agents retain the orig
 ## Evidence on Hand
 Existing Graphite, Defer, Smart Session, and Session Guard plugin code; the developer's long-lived workspace transcript. Screenshots use clearly identified synthetic demo data.
 
-## Compact status and deployment follow-through
+## Compact status and deployment follow-up
 
 The workspace view leads with status: PRs merged, what needs the developer, what needs fixing, a stack bar and what the agent is doing now. Developer decisions sit in one Needs you card with an action each. PR rows are drawn as stack rails with a two-line title and `#n · status`; full detail opens in a PR sheet. Tasks are secondary concrete checks, migrations and decisions. Approval/merge/deploy checklist duplicates remain in legacy history and are omitted from Tasks. Goals, evidence and recovery details use disclosures.
 

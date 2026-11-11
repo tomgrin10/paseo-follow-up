@@ -16,7 +16,7 @@ not a patch for one instance.
 - **Shared code.** Most logic is pure and lives in `shared/`, so tests target it directly.
 - **Fixtures.** `tests/fixtures.ts` builds workspaces, PRs, snapshots and a clock.
 - **A clean environment.** `npm test` preloads `tests/hermetic-env.mjs`, which clears the Follow-up and Paseo session
-  variables (`FOLLOW_THROUGH_*`, `PASEO_AGENT_ID`, `PASEO_HOME`…). A run from inside a live agent session then
+  variables (`FOLLOW_UP_*`, `PASEO_AGENT_ID`, `PASEO_HOME`…). A run from inside a live agent session then
   matches CI.
 - **Tests that guard a whole class of bug:**
   - `tests/never-wake.test.ts` and `tests/daemon-load.test.ts`: no wake-ups, bounded reads.

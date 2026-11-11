@@ -67,7 +67,7 @@ const actualClaude = liveClaude;
 const original = { ...process.env };
 const reservation = createServer(); await new Promise(resolve => reservation.listen(0, "127.0.0.1", resolve)); const port = reservation.address().port; await new Promise(resolve => reservation.close(resolve));
 const url = `ws://127.0.0.1:${port}/ws`;
-const pluginId = "follow-through";
+const pluginId = "follow-up";
 const configFile = join(home, "config.json");
 const writeConfig = (extra = {}) => writeFile(configFile, JSON.stringify({ pluginsEnabled: true, daemon: { listen: `127.0.0.1:${port}`, mcp: { enabled: true, injectIntoAgents: true }, relay: { enabled: false } }, plugins: { [pluginId]: { source: "directory", path: packedDirectory, enabled: true }, ...extra } }));
 const result = { cases: [], memory: [] };

@@ -40,7 +40,7 @@ async function install(path: string, script: string | null, directory: string): 
   const target = await writeTarget(path);
   const temp = await realpath(tmpdir()).catch(() => tmpdir());
   if (inside(temp, await realpath(directory).catch(() => directory)) && !inside(temp, target)) {
-    console.warn(`[follow-through] not writing ${path}: this Follow-up runs from a temp data dir (${directory}), so it's a harness or test, and the settings file is outside the temp dir.`);
+    console.warn(`[follow-up] not writing ${path}: this Follow-up runs from a temp data dir (${directory}), so it's a harness or test, and the settings file is outside the temp dir.`);
     return;
   }
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -49,11 +49,11 @@ async function install(path: string, script: string | null, directory: string): 
     const settings = original ? JSON.parse(original) : {};
     const next = reconcileHooks(settings, script);
     if (JSON.stringify(settings) === JSON.stringify(next)) return;
-    if (original !== null) await backupOnce(target, ".follow-through.bak");
+    if (original !== null) await backupOnce(target, ".follow-up.bak");
     if (await readFile(target, "utf8").catch(() => null) !== original) continue;
     await writeThrough(target, JSON.stringify(next, null, 2) + "\n"); return;
   }
-  throw new Error("Agent hook settings kept changing; Follow-through will retry after reload.");
+  throw new Error("Agent hook settings kept changing; Follow-up will retry after reload.");
 }
 export class AgentHooks {
   constructor(private directory: string, private clientEntry: string, private paths = [join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), "settings.json"), join(process.env.CODEX_HOME ?? join(homedir(), ".codex"), "hooks.json")]) {}

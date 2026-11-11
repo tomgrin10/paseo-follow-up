@@ -344,7 +344,7 @@ test("§6 new turn: only the developer's own message answers; anything else leav
     ["a schedule or heartbeat", [{ type: "user_message", text: "B" }, { type: "tool_call", callId: "paseo-system:abc", name: "heartbeat", status: "completed" }]],
     ["a compaction continuation (no prompt in the tail yet)", [{ type: "user_message", text: "B" }, { type: "assistant_message", text: "Summary of the work so far" }]],
   ];
-  cases.push(["a Follow-up batch prompt", [{ type: "user_message", text: "Workspace follow-through batch fix-1: 2 repairs", messageId: "batch-1" }]]);
+  cases.push(["a Follow-up batch prompt", [{ type: "user_message", text: "Workspace Follow-up batch fix-1: 2 repairs", messageId: "batch-1" }]]);
   for (const [label, tail] of cases) {
     const other = await service([agent({ id: "main" })], { calls: { main: { at: Date.parse(at(1)), turnId: "t1", call: decision } }, tails: { main: tail },
       ledger: async () => [{ agentId: "main", messageId: "batch-1", at: at(1) }] });
@@ -479,7 +479,7 @@ test("a superseded fallback reads as 'no ask was stated', not as an earlier ask"
 // ---------- R2: the Stop-hook nudge ----------
 
 test("R2: the nudge decision covers called, not called, already nudged, permission pending, subagent, setting off and inbox off", async () => {
-  process.env.FOLLOW_THROUGH_HOOK_IMPORT = "1";
+  process.env.FOLLOW_UP_HOOK_IMPORT = "1";
   // @ts-expect-error plain JS hook, generated into hook-source.ts
   const { shouldNudge } = await import("../server/agent-hook.mjs");
   const base = { provider: "claude", brief: { enable_inbox: true, enable_brief_nudge: true, pending: [] }, agentId: "a1", contributor: false, recovery: false, subagent: false, stopHookActive: false, turn: { startedAt: 1000, stopped: false }, called: null };
@@ -501,13 +501,13 @@ test("R2: the nudge decision covers called, not called, already nudged, permissi
 
 async function hookHome(t: { after: (f: () => Promise<void>) => void }, brief: object) {
   const root = await mkdtemp(join(tmpdir(), "brief-hook-")); t.after(() => rm(root, { recursive: true, force: true }));
-  const directory = join(root, "plugin-data/follow-through"); await mkdir(join(directory, "hook-state"), { recursive: true });
+  const directory = join(root, "plugin-data/follow-up"); await mkdir(join(directory, "hook-state"), { recursive: true });
   await writeFile(join(directory, "agent-hook.mjs"), await readFile(resolve("server/agent-hook.mjs"), "utf8"));
   await writeFile(join(directory, "hooks-enabled.json"), JSON.stringify({ expiresAt: Date.now() + 60_000, clientEntry: "/fixture/client.js" }));
   await writeFile(join(directory, "state.json"), JSON.stringify({ workspaces: [] }));
   await writeFile(join(directory, "brief.json"), JSON.stringify(brief));
   const fire = (event: object, env: Record<string, string> = {}) => new Promise<string>((ok, bad) => {
-    const child = spawn(process.execPath, [join(directory, "agent-hook.mjs")], { env: { ...process.env, FOLLOW_THROUGH_HOOK_IMPORT: "", PASEO_AGENT_ID: "a1", FOLLOW_THROUGH_BRIEF: "claude", FOLLOW_THROUGH_RECOVERY: "", ...env }, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [join(directory, "agent-hook.mjs")], { env: { ...process.env, FOLLOW_UP_HOOK_IMPORT: "", PASEO_AGENT_ID: "a1", FOLLOW_UP_BRIEF: "claude", FOLLOW_UP_RECOVERY: "", ...env }, stdio: ["pipe", "pipe", "pipe"] });
     let out = ""; child.stdout.on("data", c => out += c); child.once("error", bad); child.once("exit", () => ok(out.trim()));
     child.stdin.end(JSON.stringify({ session_id: "s1", ...event }));
   });
@@ -524,8 +524,8 @@ test("R2: the installed hook nudges an untracked Claude Code root agent once per
   await new Promise(r => setTimeout(r, 5));
   await writeFile(join(h.directory, "hook-state", "needs-you-a1.json"), JSON.stringify({ at: Date.now() + 1, turnId: null, call: {} }));
   assert.equal(await h.fire({ hook_event_name: "Stop" }), "", "called this turn: no nudge");
-  assert.equal(await h.fire({ hook_event_name: "UserPromptSubmit", prompt: "x" }, { FOLLOW_THROUGH_BRIEF: "" }), "");
-  assert.equal(await h.fire({ hook_event_name: "Stop" }, { FOLLOW_THROUGH_BRIEF: "" }), "", "not launched as a brief root (subagent or contributor): nothing");
+  assert.equal(await h.fire({ hook_event_name: "UserPromptSubmit", prompt: "x" }, { FOLLOW_UP_BRIEF: "" }), "");
+  assert.equal(await h.fire({ hook_event_name: "Stop" }, { FOLLOW_UP_BRIEF: "" }), "", "not launched as a brief root (subagent or contributor): nothing");
   assert.equal(await h.fire({ hook_event_name: "Stop", agent_id: "task-1" }), "", "Claude Code subagents never");
 });
 test("R2: setting off or inbox off means the hook stays silent for untracked agents", async t => {
@@ -546,22 +546,22 @@ test("the bridge's instruction and the hook's nudge match the shared wording exa
 });
 test("needs_you reaches an untracked root agent while the inbox is on, never otherwise, with the instruction", async t => {
   const root = await mkdtemp(join(tmpdir(), "brief-mcp-")); t.after(() => rm(root, { recursive: true, force: true }));
-  const directory = join(root, "plugin-data/follow-through"); await mkdir(directory, { recursive: true });
+  const directory = join(root, "plugin-data/follow-up"); await mkdir(directory, { recursive: true });
   await writeFile(join(directory, "hooks-enabled.json"), JSON.stringify({ expiresAt: Date.now() + 60_000 }));
   await writeFile(join(directory, "state.json"), JSON.stringify({ workspaces: [] }));
   const ask = (env: Record<string, string>) => new Promise<any[]>((ok, bad) => {
-    const child = spawn(process.execPath, [resolve("server/mcp.mjs")], { env: { ...process.env, PASEO_HOME: root, PASEO_AGENT_ID: "a1", FOLLOW_THROUGH_RECOVERY: "", FOLLOW_THROUGH_BRIEF: "", ...env }, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [resolve("server/mcp.mjs")], { env: { ...process.env, PASEO_HOME: root, PASEO_AGENT_ID: "a1", FOLLOW_UP_RECOVERY: "", FOLLOW_UP_BRIEF: "", ...env }, stdio: ["pipe", "pipe", "pipe"] });
     let out = ""; child.stdout.on("data", c => out += c); child.once("error", bad); child.once("exit", () => ok(out.trim().split("\n").map(l => JSON.parse(l))));
     child.stdin.end([{ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }, { jsonrpc: "2.0", id: 2, method: "tools/list" }].map(r => JSON.stringify(r)).join("\n") + "\n");
   });
   await writeFile(join(directory, "brief.json"), JSON.stringify({ enable_inbox: true, enable_brief_nudge: true }));
-  const on = await ask({ FOLLOW_THROUGH_BRIEF: "claude" });
+  const on = await ask({ FOLLOW_UP_BRIEF: "claude" });
   assert.deepEqual(on[1].result.tools.map((x: { name: string }) => x.name), ["needs_you"]);
   assert.equal(on[0].result.instructions, NEEDS_YOU_INSTRUCTION);
   assert.deepEqual((await ask({}))[1].result.tools, [], "not launched as a root agent");
-  assert.deepEqual((await ask({ FOLLOW_THROUGH_BRIEF: "claude", FOLLOW_THROUGH_RECOVERY: "1" }))[1].result.tools, [], "recovery");
+  assert.deepEqual((await ask({ FOLLOW_UP_BRIEF: "claude", FOLLOW_UP_RECOVERY: "1" }))[1].result.tools, [], "recovery");
   await writeFile(join(directory, "brief.json"), JSON.stringify({ enable_inbox: false, enable_brief_nudge: true }));
-  assert.deepEqual((await ask({ FOLLOW_THROUGH_BRIEF: "claude" }))[1].result.tools, [], "inbox off");
+  assert.deepEqual((await ask({ FOLLOW_UP_BRIEF: "claude" }))[1].result.tools, [], "inbox off");
 });
 test("prState reads the agent's newest open PR and only says merge-ready when it is", () => {
   const ready = workspace({ prs: [pr({ snapshot: snapshot({ reviewDecision: "APPROVED" }) })] });

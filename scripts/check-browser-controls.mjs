@@ -26,11 +26,11 @@ const dir=join(preview.home,'plugin-data/send-to-paseo');await mkdir(dir,{recurs
 await writeFile(join(dir,'settings.json'),JSON.stringify({version:1,token:'isolated-browser-fixture-token',port:bridgePort,defaultProvider:null,paired:false,recentSends:[],allowedExtensionIds:[],agentDispatch:'main'}),{mode:0o600});
 const packed = JSON.parse((await exec('npm', ['pack', '--json', '--pack-destination', preview.root])).stdout)[0];
 await exec('tar', ['-xzf', join(preview.root, packed.filename), '--strip-components=1', '-C', join(preview.root, 'plugin')]);
-await cli('plugin', 'reload', 'follow-through');
+await cli('plugin', 'reload', 'follow-up');
 const plugins=await cli('plugin','ls'); if(plugins.some(p=>p.id==='send-to-paseo')) await cli('plugin','reload','send-to-paseo'); else await cli('plugin','install',join(source,'plugin'));
 } else { assert.ok(!(await cli('plugin','ls')).some(p=>p.id==='send-to-paseo')); }
 const client=new DaemonClient({url:env.PASEO_DAEMON_URL,clientId:'browser-control-test',clientType:'cli',reconnect:{enabled:false}});await client.connect();
-const call=(name,input={})=>client.invokePluginRpc('follow-through',name,input);
+const call=(name,input={})=>client.invokePluginRpc('follow-up',name,input);
 await call('follow.activate',{workspaceId:preview.workspaceId});
 await call('follow.control',{workspaceId:preview.workspaceId,enable_auto_sends:false});
 const gh=`#!/usr/bin/env node
@@ -70,9 +70,9 @@ await wait(async () => (await call('follow.get', { workspaceId: preview.workspac
 const status=await call('follow.pr-control-status',{workspaceId:preview.workspaceId,prKey:'example/app#2'});
 assert.ok(status.pr, JSON.stringify(status));
 assert.equal(status.pr.mergeWhenReady, (await (await fetch(fixtureUrl+"/__test/state")).json()).enabled.includes(2));assert.equal(status.pr.head,'fixture-head-2');
-console.log('PASS: actual MV3 worker -> paired HTTP bridge -> installed Follow-through RPC -> first-party Graphite read.');
+console.log('PASS: actual MV3 worker -> paired HTTP bridge -> installed Follow-up RPC -> first-party Graphite read.');
 } else { const status=await call('follow.pr-control-status',{workspaceId:preview.workspaceId,prKey:'example/app#2'}); assert.equal(status.browser.ready,false);assert.equal(status.pr,null);assert.equal(status.error,null); }
-const page=await context.newPage();await fetch(`http://127.0.0.1:${preview.port}/llms.txt`);const serverId=(await readFile(join(preview.home,'server-id'),'utf8')).trim(); await page.goto(`http://127.0.0.1:${preview.port}/`); await page.getByRole("button",{name:/^Follow-through POC test/}).click();
+const page=await context.newPage();await fetch(`http://127.0.0.1:${preview.port}/llms.txt`);const serverId=(await readFile(join(preview.home,'server-id'),'utf8')).trim(); await page.goto(`http://127.0.0.1:${preview.port}/`); await page.getByRole("button",{name:/^Follow-up POC test/}).click();
 await mkdir('docs/screenshots',{recursive:true});
 console.log('BROWSER_TEST_READY '+JSON.stringify({port:preview.port,workspaceId:preview.workspaceId,agentId:preview.agentId,bridgePort,fixtureUrl}));
 await page.getByRole('button',{name:'Open workspace follow-up',exact:true}).click();

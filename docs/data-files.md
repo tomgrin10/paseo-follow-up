@@ -1,6 +1,6 @@
 # Data files
 
-Everything lives in `$PASEO_HOME/plugin-data/follow-through/`.
+Everything lives in `$PASEO_HOME/plugin-data/follow-up/`.
 
 - Files are owner-only (0600, folders 0700).
 - Writes are atomic: a temp file, then rename.
@@ -45,4 +45,4 @@ Outside this folder, Follow-up reads (never writes):
 - Provider transcripts (`~/.claude/projects`, `~/.codex/sessions`).
 
 It writes its hook entries into `~/.claude/settings.json` and `~/.codex/hooks.json`, which is reversible: entries
-carry the `# paseo-follow-through-hook` marker. [OVERVIEW.md](../OVERVIEW.md) is the user-facing statement of this.
+carry the `# paseo-follow-up-hook` marker. [OVERVIEW.md](../OVERVIEW.md) is the user-facing statement of this.

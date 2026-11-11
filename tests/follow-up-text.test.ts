@@ -20,7 +20,7 @@ const hookSource = readFileSync(new URL("../server/agent-hook.mjs", import.meta.
 const constant = (name: string) => JSON.parse(new RegExp(`const ${name} = ("(?:[^"\\\\]|\\\\.)*");`).exec(hookSource)![1]) as string;
 const STOP_REASON = constant("stopReason");
 const QUIET = constant("quietInstruction");
-const HOOK_TEXT = `${STOP_REASON} This is metadata bookkeeping only; do not start queued repairs or recovery.\n\nMaintain this tracked workspace's Follow-through sidebar as part of your normal work; do not wait for a developer reminder.\n\n${QUIET}`;
+const HOOK_TEXT = `${STOP_REASON} This is metadata bookkeeping only; do not start queued repairs or recovery.\n\nMaintain this tracked workspace's Follow-up sidebar as part of your normal work; do not wait for a developer reminder.\n\n${QUIET}`;
 const WORK = "Fixed the export: rows over 10k now stream in pages and the last page is kept.";
 const BOOKKEEPING = "The sidebar sync is done. The background check finished earlier and reported FINISHED.";
 

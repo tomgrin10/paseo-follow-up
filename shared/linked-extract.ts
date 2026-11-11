@@ -29,7 +29,7 @@ const stringsOf = (value: unknown, out: string[] = [], depth = 0): string[] => {
 
 /** A completed tool call's receipt: Linear keys only from Linear's own tools, a Slack thread it read, URLs it opened. */
 function receiptRefs(name: string, input: unknown): LinkRef[] {
-  if (/follow[_-]|follow-through/i.test(name)) return [];
+  if (/follow[_-]|follow-up/i.test(name)) return [];
   const args = input && typeof input === "object" ? input as Record<string, unknown> : {};
   const refs: LinkRef[] = [];
   if (/slack_read_thread/.test(name) && typeof args.channel_id === "string" && typeof args.message_ts === "string" && SLACK_TS.test(args.message_ts))

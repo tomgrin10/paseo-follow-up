@@ -55,7 +55,7 @@ export class BrowserBridge {
     });
   }
   close() {
-    for (const job of this.pending.values()) { clearTimeout(job.timer); job.resolve({ id: job.command.id, nonce: job.command.nonce, outcome: job.clientId && job.command.op !== "read" ? "uncertain" : "failed", prs: [], applied: [], error: "Follow-through reloaded before the request was confirmed. Check state." }); }
+    for (const job of this.pending.values()) { clearTimeout(job.timer); job.resolve({ id: job.command.id, nonce: job.command.nonce, outcome: job.clientId && job.command.op !== "read" ? "uncertain" : "failed", prs: [], applied: [], error: "Follow-up reloaded before the request was confirmed. Check state." }); }
     this.pending.clear(); this.clients.clear(); this.observations.clear();
   }
 }

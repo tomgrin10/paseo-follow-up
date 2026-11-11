@@ -32,8 +32,8 @@
   - `agent`: a `<paseo-system kind="agent-message">` or `kind="agent-notification"` envelope (one or several), with
     the source agent's id and title, the event (`message`, `finished`, `errored`, `permission-required`, `closed`)
     and the body unescaped and stripped (a notification's `<agent-response>` reply when it has one).
-  - `follow-up`: Follow-up's batch (`Follow-through batch`, legacy `Workspace follow-through batch`), recovery
-    (`Follow-through recovery`), answer (`Follow-up answer`), or its provider hook's feedback (`what: "hook"`,
+  - `follow-up`: Follow-up's batch (`Follow-up batch`, legacy `Workspace Follow-up batch`), recovery
+    (`Follow-up recovery`), answer (`Follow-up answer`), or its provider hook's feedback (`what: "hook"`,
     `HOOK_TEXT_PREFIXES`): Claude Code records the Stop-hook bookkeeping nudge as an isMeta
     `Stop hook feedback:` line (Paseo's timeline drops it, the transcript keeps it), Codex as a
     `<hook_prompt hook_run_id="stop:…">` user message. `workItems` drops that feedback and everything the agent did in

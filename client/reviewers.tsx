@@ -10,7 +10,7 @@ import { Button, Switch, errorText, text, type Theme, SubmitScope } from "./kit"
 import { Disclosure } from "./settings-shell";
 import { repoSummary, reposSummary, reviewersConfigured } from "../shared/settings-nav";
 
-export const reviewerSettingsKey = ["follow-through", "reviewer-settings"];
+export const reviewerSettingsKey = ["follow-up", "reviewer-settings"];
 
 /** The saved reviewer lists. Loading them also updates what Needs you and the briefs read. */
 export function useReviewerSettings() {
@@ -22,7 +22,7 @@ export function useReviewerSettings() {
     if (!query.data || JSON.stringify(query.data.config) === JSON.stringify(reviewerConfig())) return;
     setReviewerConfig(query.data.config);
     // Needs-you rows and counts were computed with the previous lists.
-    void cache.invalidateQueries({ queryKey: ["follow-through", "workspace"] }); void cache.invalidateQueries({ queryKey: ["follow-through", "overview"] });
+    void cache.invalidateQueries({ queryKey: ["follow-up", "workspace"] }); void cache.invalidateQueries({ queryKey: ["follow-up", "overview"] });
   }, [query.data]);
   return query;
 }
@@ -54,7 +54,7 @@ function AddReviewer({ repo, theme, compact, taken, onAdd }: { repo: string | nu
   const [focused, setFocused] = useState(false);
   // The list shows while the field has focus; blur closes it a beat later so a tap on a suggestion still lands.
   const [open, setOpen] = useState(false);
-  const suggestions = useQuery({ queryKey: ["follow-through", "reviewer-suggestions", repo], queryFn: () => suggestRead({ repo: repo! }), enabled: !!repo && focused, staleTime: 600_000, retry: false });
+  const suggestions = useQuery({ queryKey: ["follow-up", "reviewer-suggestions", repo], queryFn: () => suggestRead({ repo: repo! }), enabled: !!repo && focused, staleTime: 600_000, retry: false });
   const q = value.trim().replace(/^@/, "");
   const matches = (suggestions.data?.suggestions ?? []).filter(s => !taken.some(l => sameLogin(l, s.login)) && (!q || s.login.toLowerCase().includes(q.toLowerCase()) || (s.name ?? "").toLowerCase().includes(q.toLowerCase()))).slice(0, 6);
   const add = (r: ReviewerEntry) => { onAdd(r); setValue(""); setOpen(false); };

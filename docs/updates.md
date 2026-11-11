@@ -60,7 +60,7 @@ Updates part of Settings → General (`UpdatesSections` in `client/updates.tsx`)
    check. Paseo itself refuses a build that can't load while applying it, which shows as "Couldn't install".
 6. `VersionsStore.started` treats a downgrade as no update, so a rollback never shows "Updated to" or What's new.
 
-## Data files (plugin-data/follow-through)
+## Data files (plugin-data/follow-up)
 
 `updates.json` (mode, channel, dismissed notices, the waiting update, provenance and notes caches),
 `registry.json` (the last npm answer), `updates.jsonl` (every install step), `heartbeat.json`,

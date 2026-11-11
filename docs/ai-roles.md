@@ -42,7 +42,7 @@
   falls back to `opts.generic`, a short-lived Paseo agent. Paseo refuses hidden internal agents from plugins, so jobs
   run in one background workspace ("Follow-up jobs", home `jobs-home/`, id cached in `jobs-workspace.json` and
   recreated once if it's gone). Background workspaces and their agents stay out of Paseo's lists. Each job creates
-  an agent (label `follow-through-job`, `autoArchive`) with the job's system prompt, waits for it to finish, takes
+  an agent (label `follow-up-job`, `autoArchive`) with the job's system prompt, waits for it to finish, takes
   its last message as the answer and archives it. A permission prompt, timeout or empty reply fails the job
   visibly; with no Paseo connection yet it fails with "Follow-up isn't connected to Paseo yet". Tests:
   `tests/any-provider.test.ts`.

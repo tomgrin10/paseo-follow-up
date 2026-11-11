@@ -13,8 +13,8 @@ Paseo's plugin listing. [PRODUCT.md](PRODUCT.md) and [DESIGN.md](DESIGN.md) cove
 
 ## Hard rules
 
-- The public name is Follow-up and the npm package is `paseo-follow-up`. Keep the installation id `follow-through`,
-  the `follow.*` RPC names and `plugin-data/follow-through` so existing installs keep working. Never reset tracked
+- The public name is Follow-up and the npm package is `paseo-follow-up`. Keep the installation id `follow-up`,
+  the `follow.*` RPC names and `plugin-data/follow-up` so existing installs keep working. Never reset tracked
   work or settings during an upgrade.
 - Never commit credentials, daemon state, transcripts or local machine paths. Follow-up is public: prompts, prefixes, tool text and UI copy say "the developer" (they/their), never a person's name (tests/no-personal-names.test.ts). Where old text is matched, such as the Overseer's forward prefix, keep recognising the legacy spelling.
 - Boolean settings use positive `enable_` names.
@@ -38,9 +38,9 @@ Paseo's plugin listing. [PRODUCT.md](PRODUCT.md) and [DESIGN.md](DESIGN.md) cove
 ```
 Paseo app (web, desktop, phone)          Paseo daemon (host)                          Agent sessions (Claude Code, Codex)
   index.client.tsx                         index.server.ts: the plugin worker            native tools: mcp__paseo__follow_<name>,
-  client/*.tsx: Home, panel, pill,   RPC     one process, owns plugin-data/follow-through   wait_* (served by Paseo's MCP, run in the worker)
+  client/*.tsx: Home, panel, pill,   RPC     one process, owns plugin-data/follow-up   wait_* (served by Paseo's MCP, run in the worker)
   settings, brief card, chat rows   ────▶   handlers keyed by shared/contracts.ts   ◀──  stdio bridge: server/mcp.mjs (Paseo 0.14 or fallback,
-  shared/*.ts: pure logic, schemas         server/*.ts: engine, inbox, stores...          also a CLI: node "$FOLLOW_THROUGH_CLI" call …)
+  shared/*.ts: pure logic, schemas         server/*.ts: engine, inbox, stores...          also a CLI: node "$FOLLOW_UP_CLI" call …)
                                            lifecycle hooks: server.on / server.before   provider hooks: server/agent-hook.mjs
                                                                                          wait runner: plugin-data/.../wait/run-job.sh
 ```
@@ -63,7 +63,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
   `hooks.json` for SessionStart, UserPromptSubmit, PostToolUse and Stop. It's gated by the `hooks-enabled.json` lease,
   which the worker renews. The hook adds context, nudges sync and `needs_you`, and adds Wait's guidance:
   [docs/hooks.md](docs/hooks.md).
-- **Data**: everything lives in `$PASEO_HOME/plugin-data/follow-through/`. Each file is listed in
+- **Data**: everything lives in `$PASEO_HOME/plugin-data/follow-up/`. Each file is listed in
   [docs/data-files.md](docs/data-files.md).
 
 ## File index
@@ -150,7 +150,7 @@ Every bug is fixed for its whole class:
 Status bugs (two surfaces disagreeing, a label that isn't true) come from computing a status inline. Every
 user-facing status (Home bucket, header live line, agent card, batch line, Needs you, pills) derives from
 `shared/status.ts`. The worker logs contradictions it meets at runtime to
-`plugin-data/follow-through/status-diagnostics.jsonl` (`server/status-check.ts`); read it when a status looks wrong.
+`plugin-data/follow-up/status-diagnostics.jsonl` (`server/status-check.ts`); read it when a status looks wrong.
 
 ## How to test
 

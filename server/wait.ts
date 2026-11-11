@@ -96,7 +96,7 @@ export class Wait {
   /**
    * Adds Wait's tools to an interactive Claude session, unless it's off, opted out, or the standalone plugin has it.
    * On a Paseo 0.16 host (agentBackgroundWork) it attaches nothing and leaves Claude Code's MCP auto-background alone;
-   * FOLLOW_THROUGH_BACKGROUND_WORK=1 makes the hook say "run it in the background and end your turn" instead.
+   * FOLLOW_UP_BACKGROUND_WORK=1 makes the hook say "run it in the background and end your turn" instead.
    */
   async open<R extends PluginSessionOpenRequest>(request: R, options: { background?: boolean } = {}): Promise<R> {
     // A Paseo 0.16 background agent is another plugin's helper: no Wait (server/background-agents.ts).
@@ -106,10 +106,10 @@ export class Wait {
     const config = await this.deps.config();
     const status = waitStatus(true, config, await this.deps.hostBackgroundWork?.().catch(() => false));
     // Paseo 0.16: no plugin tools needed for the host's own background work, so this comes before the tool checks.
-    if (status.reason === "host") return { ...request, env: { ...request.env, FOLLOW_THROUGH_BACKGROUND_WORK: "1" } };
+    if (status.reason === "host") return { ...request, env: { ...request.env, FOLLOW_UP_BACKGROUND_WORK: "1" } };
     if (!Array.isArray(request.tools) || request.tools.some(tool => (WAIT_TOOLS as readonly string[]).includes(tool.name))) return request;
     if (!status.active) return request;
-    return { ...request, env: { ...request.env, CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS: "0", FOLLOW_THROUGH_WAIT: "1" }, tools: [...request.tools, ...this.tools] };
+    return { ...request, env: { ...request.env, CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS: "0", FOLLOW_UP_WAIT: "1" }, tools: [...request.tools, ...this.tools] };
   }
 
   close() { this.jobs.close(); }

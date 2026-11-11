@@ -51,10 +51,10 @@ export async function hangingHost(): Promise<{ root: string; directory: string; 
   // every daemon call would fail at once instead of hanging on the socket.
   (globalThis as { require?: NodeJS.Require }).require ??= createRequire(import.meta.url);
   const paseo = env.PASEO_HOME;
-  await mkdir(join(paseo, "plugin-data", "follow-through"), { recursive: true, mode: 0o700 });
+  await mkdir(join(paseo, "plugin-data", "follow-up"), { recursive: true, mode: 0o700 });
   await writeFile(join(paseo, "config.json"), JSON.stringify({ daemon: { listen: `127.0.0.1:${port}` } }));
   return {
-    root, directory: join(paseo, "plugin-data", "follow-through"),
+    root, directory: join(paseo, "plugin-data", "follow-up"),
     async close() { for (const s of sockets) s.destroy(); await new Promise(resolve => blackhole.close(resolve)); },
   };
 }

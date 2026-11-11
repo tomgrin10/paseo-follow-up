@@ -377,7 +377,7 @@ export function userStep(text: string): TailStep | null {
   const s = messageSender(text);
   if (s.kind === "developer") return s.text ? { kind: "you", text: s.text } : null;
   const from = senderLabel(s);
-  // A batch or recovery opens with its own header ("Follow-through batch b-7"), which the label already says.
+  // A batch or recovery opens with its own header ("Follow-up batch b-7"), which the label already says.
   const body = s.kind === "follow-up" && (s.what === "batch" || s.what === "recovery") ? s.text.split("\n").slice(1).join("\n").trim() || s.text : s.text;
   return from && body ? { kind: "message", from, text: body } : null;
 }
@@ -408,7 +408,7 @@ export function tailSteps(items: TimelineItem[], n = 6): TailStep[] {
     } else if (it.type === "tool_call") {
       const d = it.detail ?? {};
       const what = [d.command, d.filePath, d.path, d.url, d.query, d.pattern].find(v => typeof v === "string" && v.trim()) as string | undefined;
-      // MCP tools read by their own name: "mcp__follow-through__send_to_agent" and "mcp__paseo__follow_send_to_agent" are "send_to_agent".
+      // MCP tools read by their own name: "mcp__follow-up__send_to_agent" and "mcp__paseo__follow_send_to_agent" are "send_to_agent".
       out.push({ kind: "tool", text: `${(it.name ?? "Tool").replace(/^mcp__.+?__/, "").replace(/^follow_/, "")}${what ? ` · ${what.split("\n")[0]}` : ""}`, failed: it.status === "failed" || !!it.error });
     } else if (it.type === "error" && it.message) out.push({ kind: "error", text: it.message });
   }

@@ -79,7 +79,7 @@ const hundred = Array.from({ length: 100 }, (_, i) => ws(`w${i}`, {
   prs: [{ key: `hero/app#${1300 + i}`, number: 1300 + i, state: "OPEN", checks: i % 3 ? "passed" : "failed", threads: i % 4, url: null }],
   priority: i < 30 ? { score: 90 - i, reason: `HER-${1200 + i} · Urgent · due today` } : null,
 }));
-const hook = async () => { process.env.FOLLOW_THROUGH_HOOK_IMPORT = "1";
+const hook = async () => { process.env.FOLLOW_UP_HOOK_IMPORT = "1";
   // @ts-expect-error plain JS hook, generated into hook-source.ts
   return import("../server/agent-hook.mjs") as Promise<{ overseerDigest: (file: unknown, seen: unknown, now?: number) => { text: string; seen: { rows: Record<string, string> } } }>; };
 
@@ -292,7 +292,7 @@ test("the Overseer's session skips the Stop-hook nudge and gets the digest inste
   await writeFile(join(dir, "overseer-digest.json"), JSON.stringify(digestFile("ov", fleet.map(r => r.workspaceId === "scim" ? { ...r, group: "needs" as const, ask: "Decision: A or B" } : r), Date.now())));
   await mkdir(join(dir, "hook-state"), { recursive: true });
   const run = (event: object) => new Promise<string>(resolve => {
-    const p = spawn(process.execPath, [join(dir, "agent-hook.mjs")], { env: { ...process.env, FOLLOW_THROUGH_HOOK_IMPORT: "", PASEO_AGENT_ID: "ov", FOLLOW_THROUGH_OVERSEER: "1", FOLLOW_THROUGH_BRIEF: "claude" } });
+    const p = spawn(process.execPath, [join(dir, "agent-hook.mjs")], { env: { ...process.env, FOLLOW_UP_HOOK_IMPORT: "", PASEO_AGENT_ID: "ov", FOLLOW_UP_OVERSEER: "1", FOLLOW_UP_BRIEF: "claude" } });
     let out = ""; p.stdout.on("data", d => { out += d; }); p.on("close", () => resolve(out)); p.stdin.end(JSON.stringify(event));
   });
   const submitted = JSON.parse(await run({ hook_event_name: "UserPromptSubmit", session_id: "s", prompt: "what needs me?" }));
@@ -321,7 +321,7 @@ async function transcriptHome(t: any) {
     JSON.stringify({ type: "user", message: { role: "user", content: "the CSV export drops the last row" } }),
     "{ not json",
     JSON.stringify({ type: "user", isMeta: true, message: { content: "<local-command-caveat>x</local-command-caveat>" } }),
-    JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "Looking at the writer." }, { type: "tool_use", name: "mcp__follow-through__workspace_status", input: {} }] } }),
+    JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "Looking at the writer." }, { type: "tool_use", name: "mcp__follow-up__workspace_status", input: {} }] } }),
     JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", content: "ok" }] } }),
     JSON.stringify({ type: "some-future-type", payload: 1 }),
     JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "Fixed the off-by-one; PR #1431 is up." }] } }),
