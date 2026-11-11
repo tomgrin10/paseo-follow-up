@@ -11,6 +11,14 @@
 - **When it's written.** `AgentHooks.start()` rewrites `agent-hook.mjs` and the settings entries on every worker
   start (each plugin load or reload). `stop()` removes them at teardown.
 - **Reversible.** Entries end with `# paseo-follow-through-hook`, and `reconcileHooks` removes them.
+- **Written through symlinks.** Settings files are often symlinks (dotfiles, a shared account dir). Every write to a
+  user-owned config file goes through `server/write-through.ts`: it resolves the path, then backs up and replaces the
+  target, so a link stays a link. A dangling link is refused with an error naming the path; Follow-up never creates
+  the missing target. `tests/write-through.test.ts` fails when a module that names a user config file writes it
+  another way.
+- **Never from a harness into a real home.** When `plugin-data/follow-through` is under the OS temp dir (a test or
+  harness daemon), Follow-up skips, with a warning, any settings file outside the temp dir, whatever
+  `CLAUDE_CONFIG_DIR`/`CODEX_HOME` it inherited.
 - **Lease.** The worker renews `hooks-enabled.json` every 30 s, and it expires 120 s after the last renewal. The
   hook does nothing without a fresh lease, so a stopped Follow-up costs nothing.
 

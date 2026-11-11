@@ -8,10 +8,11 @@ import {promisify} from 'node:util';
 import {DaemonClient} from '@getpaseo/client/internal/daemon-client';
 import {createPaseoApi} from '@getpaseo/client';
 import { harness } from "./harness.mjs";
+import { harnessEnv } from "./harness-env.mjs";
 await harness();
 const p=JSON.parse(await readFile('.preview-isolated.json','utf8'));
 assert.ok(p.root.startsWith('/tmp/follow-install-')&&p.home===p.root+'/home');
-const env={...process.env,HOME:p.home,XDG_CONFIG_HOME:p.home+'/.config',PASEO_HOME:p.home,PASEO_DAEMON_URL:`ws://127.0.0.1:${p.port}/ws`};delete env.PASEO_PASSWORD;delete env.PASEO_PASSWORD_FILE;
+const env=harnessEnv(p.root,{home:p.home,set:{PASEO_DAEMON_URL:`ws://127.0.0.1:${p.port}/ws`}});
 await writeFile(p.root+'/fixture/index.server.ts',await readFile('scripts/fixture-provider.ts','utf8'));
 await promisify(execFile)('paseo',['--home',p.home,'plugin','reload','followthrough-fixture','--json'],{env,timeout:120000});
 const gh=`#!/usr/bin/env node
