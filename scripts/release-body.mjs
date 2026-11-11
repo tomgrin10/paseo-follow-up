@@ -112,7 +112,7 @@ export function install(tag, src, { pinned = false } = {}) {
   const cmd = pre || pinned ? `paseo plugin install npm:paseo-follow-up@${version}` : "paseo plugin install npm:paseo-follow-up";
   const update = pre || pinned ? `paseo plugin update ${id} --version ${version}` : `paseo plugin update ${id}`;
   const parts = [`Already installed: \`${update}\`.`];
-  if (pre) parts.push(`Prereleases are on npm's \`beta\` dist-tag; the current stable release is [here](${LATEST}).`);
+  if (pre) parts.push(`Prereleases are on npm's \`beta\` dist-tag; the current stable release is on the [Releases page](${LATEST}).`);
   if (floor) parts.push(`Needs Paseo ${floor} or newer.`);
   return { cmd, line: parts.join(" ") };
 }
