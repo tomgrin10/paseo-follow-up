@@ -4,7 +4,7 @@ import { Platform, Pressable, Text, View, useWindowDimensions } from "react-nati
 import { useQuery } from "@tanstack/react-query";
 import { openExternalUrl, useRpc, type PluginClientContext, type PluginTimelineItemProps } from "@getpaseo/plugin/client";
 import { Icon, TextInput, copyText, useToast } from "@getpaseo/plugin/client/ui";
-import { BRIEF_KIND, BRIEF_VERSION, askedDecisions, pickedCount, briefSchema, collapsedLine, extrasFit, hasOriginal, nothingNeededLine, isTight, pastRows, selectsFirst, sendBar, type Brief, type BriefDecision, type BriefMove } from "../shared/brief";
+import { BRIEF_KIND, BRIEF_VERSION, askedDecisions, pickedCount, briefSchema, collapsedLine, extrasFit, hasOriginal, nothingNeededLine, isTight, pastRows, pastTone, selectsFirst, sendBar, type Brief, type BriefDecision, type BriefMove } from "../shared/brief";
 import { age } from "../shared/inbox";
 import { briefKey, HEADLINE_WORD } from "../shared/headline";
 /** The card's kind word comes from the same table as the pill and the Needs-you row. */
@@ -232,13 +232,13 @@ function Reveal({ label, open, onPress, c, compact }: { label: string; open: boo
  * A card that's no longer open keeps its question (1.4.0). Answered: the ask, each decision with what was picked, and
  * "Show full question" opens the original read-only. Superseded or signed off: the one muted line, plus "Show original".
  */
-function Past({ b, c, now, compact, height }: { b: Brief; c: Colors; now: number; compact: boolean; height: number }) {
+function Past({ b, c, now, compact, height, pending = false }: { b: Brief; c: Colors; now: number; compact: boolean; height: number; pending?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const answered = b.state === "answered";
   const asked = askedDecisions(b);
   const picked = answered && asked.some(d => d.chosen);
   const icon = b.state === "superseded" ? "History" : "CircleCheck";
-  const color = b.state === "superseded" ? c.foregroundMuted : c.statusSuccess;
+  const color = pastTone(b.state, pending) === "success" ? c.statusSuccess : c.foregroundMuted;
   // A Done card already says "Done" as its outcome; its time stands alone rather than repeating it.
   const right = answered && b.outcomeAt ? (b.outcome === "Done" ? clock(b.outcomeAt) : `Answered ${clock(b.outcomeAt)}`) : age(b.outcomeAt ?? b.at, now);
   const body = expanded && <View style={{ gap: 10, paddingTop: 4 }}>
@@ -262,7 +262,7 @@ function Past({ b, c, now, compact, height }: { b: Brief; c: Colors; now: number
   // separated from what it answered.
   return <View accessibilityRole="summary" accessibilityLabel={`Answered: ${b.ask}`} style={{ marginVertical: 10, gap: 8, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: c.border }}>
     <View style={{ flexDirection: "row", gap: 8, alignItems: "flex-start" }}>
-      <View style={{ paddingTop: 2 }}><Icon name="CircleCheck" size={15} color={c.statusSuccess} /></View>
+      <View style={{ paddingTop: 2 }}><Icon name="CircleCheck" size={15} color={color} /></View>
       <RichText style={{ flex: 1, minWidth: 0, color: c.foreground, fontSize: 14, lineHeight: 20, fontWeight: "600" }}>{b.ask}</RichText>
       <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 20, fontVariant: ["tabular-nums"] }}>{right}</Text>
     </View>
@@ -297,7 +297,8 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   const workspace = b.workspaceId ? deps.workspace(b.workspaceId) : undefined;
   const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), refetchInterval: BROWSER_POLL_MS, enabled: !!sheet });
   if (b.state !== "open") return <Past b={b} c={c} now={now} compact={compact} height={height} />;
-  if (marked) return <Past b={{ ...b, state: "answered", outcome: "Done", outcomeAt: marked }} c={c} now={now} compact={compact} height={height} />;
+  // Muted until the send lands: the server's answered brief then replaces this, green.
+  if (marked) return <Past b={{ ...b, state: "answered", outcome: "Done", outcomeAt: marked }} pending c={c} now={now} compact={compact} height={height} />;
 
   const attention = c.statusWarning;
   const flaggedAct = b.flagged && ACTS.includes(b.kind);

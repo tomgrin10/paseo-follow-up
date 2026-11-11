@@ -312,3 +312,22 @@ test("Ctrl/Cmd+Z runs the visible toast's Undo, and nothing else", async () => {
   assert.match(view, /addEventListener\("keydown"/, "the toast layer listens for the key");
   assert.match(view, /if \(undoShortcut\(e, mac\)\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); \}/, "the host's own undo never sees the same press");
 });
+
+// 1.4.0-beta.62: on a Hebrew (or any non-Latin) layout, Ctrl+Z reports e.key "ז", so the Undo shortcut never fired.
+// The physical key (e.code "KeyZ") stands in when e.key isn't a Latin letter; a Latin layout's own letter still wins,
+// so AZERTY/Dvorak users press the key labelled Z, not whatever sits where QWERTY's Z is.
+test("the Undo shortcut works on non-Latin layouts through e.code, and only there", async () => {
+  const { pushToast, undoShortcut, toastsNow, dismissToast } = await store();
+  const key = (o: Record<string, unknown>) => ({ key: "z", code: "KeyZ", metaKey: false, ctrlKey: true, shiftKey: false, altKey: false, target: null, ...o }) as Parameters<typeof undoShortcut>[0];
+  let undone = 0;
+  const push = () => pushToast("info", "Telling the agent it's done", [{ label: "Undo", onPress: () => { undone++; } }], { durationMs: 60_000, keep: true });
+  try {
+    push(); assert.equal(undoShortcut(key({ key: "ז" }), false), true, "Hebrew layout: ז on KeyZ"); assert.equal(undone, 1);
+    push(); assert.equal(undoShortcut(key({ key: "я", code: "KeyZ" }), false), true, "Cyrillic layout"); assert.equal(undone, 2);
+    push(); assert.equal(undoShortcut(key({ key: "ז", metaKey: true, ctrlKey: false }), true), true, "Mac, Hebrew"); assert.equal(undone, 3);
+    push();
+    assert.equal(undoShortcut(key({ key: "w", code: "KeyZ" }), false), false, "a Latin layout's own letter wins (AZERTY's W sits on KeyZ)");
+    assert.equal(undoShortcut(key({ key: "ז", code: "KeyX" }), false), false, "another physical key isn't Z");
+    assert.equal(undoShortcut(key({ key: "z", code: "KeyY" }), false), true, "QWERTZ: the letter z is z wherever it sits"); assert.equal(undone, 4);
+  } finally { for (const t of toastsNow()) dismissToast(t.id); }
+});
