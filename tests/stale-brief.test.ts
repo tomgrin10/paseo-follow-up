@@ -23,7 +23,7 @@ const LONG_Q = "You asked for a fast chat item that links to an agent or workspa
 const LONG_C = "Ships as a beta soon. Switcher already moves between agents and workspaces, and its 0.16 work reads the same live lists. It shows Paseo's status for the child, not Follow-up's.";
 const q35 = (answer: string | null = null): Question => ({
   id: "Q35", title: "Link card owner", question: LONG_Q, options: [{ letter: "A", label: "Switcher, built now by the 0.16 workspace", consequence: LONG_C }, { letter: "B", label: "Follow-up, right after 2.0", consequence: null }],
-  recommend: "A", big: null, background: null, links: [], prKey: null, taskId: null, taskRevision: null, askedBy: "a1", askedAt: T0, mode: "hold",
+  recommend: "A", big: null, background: null, links: [], prKey: null, taskId: null, taskRevision: null, askedBy: "a1", askedAt: T0, mode: "stop",
   answer: answer ? { choice: answer, words: null, at: T0, by: "developer", delivery: { state: "sent", to: "a1", messageId: "m1", at: T0, reason: null } } as unknown as Question["answer"] : null,
   closed: null, via: "ask",
 } as unknown as Question);
@@ -105,4 +105,37 @@ test("invariant: every brief surface goes through shownBrief, and the server thr
   }
   const questions = await readFile(join(root, "server/questions.ts"), "utf8");
   assert.doesNotMatch(questions.slice(questions.indexOf("export function decisionOf")), /^[^\n]*\.slice\(0, \d+\)/, "no hard cut of question text into a brief");
+});
+
+// The orchestrator's rule (2026-11-11): when every question a brief points at is answered or withdrawn, by any path,
+// the brief resolves on the server and keeps the recorded answers. Harness finding: answering Q1 through the question
+// card left the decision brief open on the server, so its pill and Needs-you count stayed up.
+test("invariant: every answer path resolves a brief whose questions are all settled, on the server", async () => {
+  const { briefQuestionsEvent } = await import("../shared/brief");
+  const { developerAnswer, recordAnswer, withdrawQuestion } = await import("../server/questions");
+  const { workspace } = await import("./fixtures");
+  const paths: [string, (w: ReturnType<typeof workspace>) => void, "answered" | "superseded"][] = [
+    ["the question card (and follow_answer_question for another agent): send", w => { developerAnswer(w, "Q35", "B", undefined, "send", Date.parse(T0)); }, "answered"],
+    ["the question card: copy", w => { developerAnswer(w, "Q35", "B", undefined, "copy", Date.parse(T0)); }, "answered"],
+    ["follow_record_answer (answered in chat)", w => { recordAnswer(w, "main-agent", "Q35", "B", undefined, Date.parse(T0)); }, "answered"],
+    ["follow_withdraw_question", w => { withdrawQuestion(w, "main-agent", "Q35", "No longer needed", Date.parse(T0)); }, "superseded"],
+  ];
+  for (const [path, answer, state] of paths) {
+    const w = workspace({ questions: [{ ...q35(), askedBy: "main-agent" } as Question] });
+    const open = brief("brief:t1-1");
+    assert.equal(briefQuestionsEvent(open, w.questions), null, `${path}: nothing settled yet, nothing to do`);
+    answer(w);
+    const event = briefQuestionsEvent(open, w.questions);
+    assert.ok(event, `${path}: settling every question resolves the brief`);
+    const next = briefStep(open, event!, T0);
+    assert.equal(next.brief?.state, state, path);
+    assert.deepEqual(next.appends.map(b => b.state), [state], `${path}: the chat row is re-appended resolved`);
+    if (state === "answered") { assert.equal(next.brief?.decisions[0].chosen, "B", `${path}: keeps the recorded answer`); assert.match(next.brief?.outcome ?? "", /B/); }
+  }
+  // One of two questions answered: still open.
+  const w = workspace({ questions: [{ ...q35("B"), askedBy: "main-agent" } as Question, { ...q35(), id: "Q36", askedBy: "main-agent" } as Question] });
+  assert.equal(briefQuestionsEvent({ ...brief("brief:t1-1"), questionIds: ["Q35", "Q36"] }, w.questions), null);
+  // Wired once for every path: each write to Follow-up's state runs the check (store.onChanged).
+  const server = await readFile(join(import.meta.dirname, "..", "index.server.ts"), "utf8");
+  assert.match(server, /store\.onChanged = [\s\S]{0,400}inbox\.questionsChanged\(/, "store.onChanged resolves briefs from question state");
 });

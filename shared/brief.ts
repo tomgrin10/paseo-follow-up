@@ -350,7 +350,9 @@ export type BriefEvent =
   | { type: "undo" }
   | { type: "permission_resolved" }
   /** A PR's new state: lands only on the open brief whose facts are about that PR. */
-  | { type: "facts"; prKey: string; facts: BriefFact[] };
+  | { type: "facts"; prKey: string; facts: BriefFact[] }
+  /** Every question the brief points at is settled, by any path (briefQuestionsEvent): an answer, or null if withdrawn. */
+  | { type: "questions"; answers: Record<string, { choice: string; words: string | null } | null> };
 
 /** A bare letter, or an option's label, as the developer's message counts as picking it (§2 Keyboard). */
 export function matchOption(b: Pick<Brief, "decisions">, text: string | null): { decision: BriefDecision; letter: string } | null {
@@ -427,6 +429,13 @@ export function briefStep(prev: Brief | null, event: BriefEvent, now: string): {
     case "permission_resolved":
       if (prev?.state !== "open" || prev.source !== "permission") return keep;
       { const b = collapse(prev, "superseded", "Permission answered"); return { brief: b, appends: [b] }; }
+    case "questions": {
+      if (prev?.state !== "open" || !prev.questionIds.length || !prev.questionIds.every(id => id in event.answers)) return keep;
+      const decisions = prev.decisions.map(d => { const a = event.answers[d.id]; return a && !d.chosen ? { ...d, chosen: a.choice, words: isOther(a.choice) ? a.words : null } : d; });
+      const answered = prev.questionIds.some(id => event.answers[id]);
+      const b = answered ? { ...collapse(prev, "answered", answeredOutcome(decisions)), decisions } : collapse(prev, "superseded", "The agent withdrew the question");
+      return { brief: b, appends: [b] };
+    }
     case "facts":
       if (prev?.state !== "open" || prev.factsPr !== event.prKey || JSON.stringify(prev.facts) === JSON.stringify(event.facts.slice(0, 3))) return keep;
       { const b = { ...prev, facts: event.facts.slice(0, 3) }; return { brief: b, appends: [b] }; }
@@ -536,4 +545,22 @@ export function shownBrief(row: Brief, live: { brief: Brief | null } | undefined
     else if (elsewhere) brief = { ...brief, state: "superseded", outcome: "Replaced by a newer update", outcomeAt: brief.outcomeAt ?? null };
   }
   return { brief, actionable: !!live && live.brief?.id === row.id && brief.state === "open" };
+}
+
+/**
+ * The server-side rule: when every question an open brief points at is answered or withdrawn, by any path (the question
+ * card, the brief card, follow_record_answer, follow_answer_question, follow_withdraw_question), the brief resolves and
+ * keeps the recorded answers. Null while any is still open or unknown. Run on every state write (store.onChanged).
+ */
+export function briefQuestionsEvent(b: Brief, questions: readonly Question[]): Extract<BriefEvent, { type: "questions" }> | null {
+  if (b.state !== "open" || !b.questionIds.length) return null;
+  const answers: Record<string, { choice: string; words: string | null } | null> = {};
+  for (const id of b.questionIds) {
+    const q = questions.find(q => q.id === id);
+    if (!q) return null;
+    if (q.answer) answers[id] = { choice: q.answer.choice, words: q.answer.words ?? null };
+    else if (q.closed) answers[id] = null;
+    else return null;
+  }
+  return { type: "questions", answers };
 }
