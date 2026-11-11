@@ -17,8 +17,13 @@ stop.
 2. `npm run release:notes <version>` (`scripts/release-notes.mjs`) moves every fragment under
    `## <version> (<date>)` at the top of `CHANGELOG.md` and deletes the fragments. Pass `-- --allow-empty` for a
    release with nothing user-facing. **Betas get no section:** for a version with a prerelease part, release:notes
-   leaves the fragments in `changes/` for the next stable release. `check:notes` fails only when a stable
-   `package.json` version has no `CHANGELOG.md` section. Never edit a released section, except to fix wording.
+   leaves the fragments in `changes/` for the next stable release. **A major's release candidate**
+   (`2.0.0-rc.N`) isn't a beta. It carries the major's own section (`## 2.0.0`): release:notes writes that section,
+   or appends to it when it already exists, and `--curated` instead deletes fragments the hand-written section
+   already covers. The final `2.0.0` reuses the same section. In the app, `notesVersion` (`shared/changelog.ts`) maps
+   an rc to that section, so 1.x → rc.0 shows What's new once, and rc.N → 2.0.0 doesn't show it again. Older
+   history can sit below a `<details>` line in CHANGELOG.md: the parser stops there, so it never reaches What's new.
+   `check:notes` fails when a stable version, or a major's rc, has no section of its own. Never edit a released section, except to fix wording.
 3. In the same commit, bump the version in `package.json` and `package-lock.json` together, commit
    `chore: release paseo-follow-up vX.Y.Z`, and push an immutable `vX.Y.Z` tag. Never move a published tag.
 4. `.github/workflows/publish-npm.yml` runs on the tag. It checks:

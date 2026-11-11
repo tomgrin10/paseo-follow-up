@@ -58,6 +58,16 @@ All of these go through `follow.agent-act`. The handlers are in `AgentActions` (
 `AGENT_TOOLS`), or in `RPC_TOOLS` (`server/agent-parity.ts`) for tools that mirror one developer RPC. Planned tools
 return a dry run and run only with `confirm: true` and the plan id. `PARITY` maps every client RPC to its tools.
 
+**Who acted** (`shared/actor.ts`): an agent tool runs the same handler as the developer's click, but it is never the
+developer's action. `AgentActions.runRpc` hands every RPC the acting agent (id and title) through the worker's RPC
+bridge (`context.actor`); a call without one came from the app. Handlers read `actorOf(context)` and record it: the
+inbox ledger (`by: "agent:<id>"`, never `"developer"`), a brief's `answeredBy`/`answeredByTitle`, a question's answer
+(`by: "agent"`, `agentId`), the spec link (`source: "agent"`), linked items (`by`), and `inbox_act` notes each row it
+touched. A card answer an agent sends carries "Answered by <agent> (agent <id>) for the developer." so the receiving
+agent, its chat card ("<agent>'s answer"), Recent steps ("Answer from <agent>") and the classifier never read it as
+the developer's; it never clears a Needs-you flag and never passes the Overseer's new-workspace gate. Invariant
+`only-developer-acts-as-developer` (`actorViolations`, `tests/agent-actor.test.ts`).
+
 | Tool | Mirrors | Kind |
 | --- | --- | --- |
 | `list_prs` | `follow.list`, `follow.get` | read |

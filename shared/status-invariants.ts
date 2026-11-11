@@ -1,3 +1,4 @@
+import type { Actor } from "./actor";
 import { HOOK_TEXT_PREFIXES } from "./message-sender";
 import type { Workspace } from "./model";
 import { duplicateOpenQuestions } from "./questions";
@@ -108,6 +109,18 @@ export function violations(w: Workspace, now: number): { id: string; detail: str
 }
 
 /**
+ * `brief-pr-facts-referenced`: a card shows PR state only for a PR it references: one it links, or, linking none, the
+ * PR its review or reviewers ask is about. Session Guard's limit fact on a paused card isn't PR state.
+ */
+export function briefFactsViolations(b: Pick<Brief, "id" | "kind" | "source" | "facts" | "factsPr" | "links">): { id: string; detail: string }[] {
+  if (!b.facts.length || b.source === "paused") return [];
+  if (!b.factsPr) return [{ id: "brief-pr-facts-referenced", detail: `${b.id} shows PR state without naming the PR` }];
+  const linked = b.links.flatMap(l => l.pr ? [l.pr] : []);
+  const ok = linked.length ? linked.includes(b.factsPr) : b.kind === "review" || b.kind === "reviewers";
+  return ok ? [] : [{ id: "brief-pr-facts-referenced", detail: `${b.id} shows ${b.factsPr}'s state but doesn't reference it` }];
+}
+
+/**
  * Needs-you cards (briefs live in the inbox store, not the workspace). An agent's current card follows its linked
  * questions: while one is open on the server, only the developer closes the card. `brief-follows-questions`.
  */
@@ -186,4 +199,13 @@ export function holdViolations(w: Pick<Workspace, "id" | "hold" | "interruption"
   const stop = w.interruption;
   if (!stop || stop.kind !== "failed" || !automaticHold(w) || !mainTurnId || mainTurnId === stop.turnId || (stop.agentId && stop.agentId !== w.mainAgentId)) return [];
   return [{ id: "automatic-hold-is-not-stale", detail: `${w.id} holds for failed turn ${stop.turnId ?? "?"} while the main agent is on turn ${mainTurnId}` }];
+}
+
+/**
+ * `only-developer-acts-as-developer`, the action half of `only-developer-is-developer` (shared/actor.ts): an action an
+ * agent took on the developer's behalf (brief_action, inbox_act, answer_question, the spec link, linked items) is never
+ * recorded as the developer's. Pass each path's actor and the `by` it recorded.
+ */
+export function actorViolations(rows: readonly { path: string; actor: Actor; recorded: string | null | undefined }[]): { id: string; detail: string }[] {
+  return rows.filter(r => r.actor.kind === "agent" && (!r.recorded || r.recorded === "developer")).map(r => ({ id: "only-developer-acts-as-developer", detail: `${r.path} by agent ${r.actor.kind === "agent" ? r.actor.agentId : ""} recorded as ${r.recorded ?? "nobody"}` }));
 }
