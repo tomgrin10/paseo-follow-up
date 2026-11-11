@@ -64,6 +64,11 @@ test("changelog: the shipped CHANGELOG.md shows only the curated 2.0.0 in the ap
 const pngSize = (b: Buffer) => [b.readUInt32BE(16), b.readUInt32BE(20)] as const;
 const git = (args: string[], encoding: BufferEncoding | "buffer" = "utf8") => exec("git", args, { encoding: encoding as "utf8", maxBuffer: 1 << 26 });
 
+test("changelog: a screenshot is never drawn larger than its CSS size: the sheet caps it at the URL's width", async () => {
+  const sheet = await readFile("client/release-notes.tsx", "utf8");
+  assert.match(sheet, /maxWidth: block\.width/, "NoteImage never stretches past #W");
+});
+
 test("changelog: every image in the notes loads from a commit on this branch that holds it, at the shape the URL says", async t => {
   // Notes that ship must never change after release: an image URL names a commit (never main or a branch), that
   // commit is in this branch's history (so a rebase or squash that drops it fails here, not on users' phones), and
@@ -81,6 +86,9 @@ test("changelog: every image in the notes loads from a commit on this branch tha
     const [pw, ph] = pngSize(png);
     assert.ok(w && h, `${url}: a #WxH shape`);
     assert.ok(Math.abs(pw / ph - +w! / +h!) < 0.01, `${path}: the URL's ${w}x${h} matches the PNG's ${pw}x${ph}`);
+    // #WxH is the CSS size: the PNG is a 2x or 3x shot of it, so the sheet (which never draws wider than W) and the
+    // GitHub page (<img width=W>) show the screenshot at most at the size of the UI it shows, and sharp.
+    assert.ok(pw / +w! >= 2 && Number.isInteger(pw / +w!), `${path}: ${pw}px is a 2x or 3x shot of ${w} CSS px`);
   }
 });
 
@@ -214,7 +222,7 @@ test("release notes script: a curated section is never regrouped or relabeled; 0
 test("changelog: a <details> archive below the notes never reaches What's new; image lines become image blocks", () => {
   const text = "# R\n\n## 2.0.0 (2026-11-11)\n\n![Home](https://example.com/home.png)\n\n- Home.\n\n<details><summary>1.1-1.4 betas</summary>\n\n## 1.4.0-beta.2 (2026-11-09)\n\n- Old beta.\n\n</details>\n";
   assert.deepEqual(parseChangelog(text), [{ version: "2.0.0", date: "2026-11-11", items: ["Home."], blocks: [
-    { kind: "image", text: "Home", url: "https://example.com/home.png", aspect: null }, { kind: "bullet", text: "Home." }] }]);
+    { kind: "image", text: "Home", url: "https://example.com/home.png", aspect: null, width: null }, { kind: "bullet", text: "Home." }] }]);
 });
 
 test("changelog: a curated section's ### headings and paragraphs reach What's new as blocks, inline markdown as text, images and rules as their own blocks", () => {
@@ -223,14 +231,14 @@ test("changelog: a curated section's ### headings and paragraphs reach What's ne
   assert.deepEqual(note!.items, ["A bullet that wraps."]);
   assert.deepEqual(note!.blocks, [
     { kind: "text", text: "Follow-up is a Paseo plugin that keeps track of workspaces." },
-    { kind: "image", text: "Home list", url: "https://example.com/h.png", aspect: 1.6 },
+    { kind: "image", text: "Home list", url: "https://example.com/h.png", aspect: 1.6, width: 1600 },
     { kind: "heading", text: "One list" },
     { kind: "text", text: "Home lists every workspace." },
     { kind: "bullet", text: "A bullet that wraps." },
     { kind: "rule", text: "" },
     { kind: "text", text: "Thanks." },
   ], "a relative image path means nothing to the app and is dropped");
-  assert.deepEqual(imageBlock("![a](https://x.test/i.png#16x9)"), { kind: "image", text: "a", url: "https://x.test/i.png", aspect: 16 / 9 });
+  assert.deepEqual(imageBlock("![a](https://x.test/i.png#16x9)"), { kind: "image", text: "a", url: "https://x.test/i.png", aspect: 16 / 9, width: 16 });
   assert.equal(imageBlock("text ![a](https://x.test/i.png)"), null, "only an image alone on its line");
   assert.equal(parseChangelog("## 1.0.1\n\n- Only bullets.\n")[0]!.blocks, undefined, "a bullets-only note stays items");
 });

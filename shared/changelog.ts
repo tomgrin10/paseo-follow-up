@@ -30,11 +30,13 @@ export const isMajorRc = (version: string): boolean => notesVersion(version) !==
  *
  * An image's `text` is its alt text and `url` where it loads from: the app may run on a phone away from the daemon's
  * host, so images load by URL, pinned to a commit (tests/changelog.test.ts). A `#<width>x<height>` fragment on the URL
- * is the image's shape, so the sheet reserves it before the image loads and nothing jumps.
+ * is the image's size in CSS pixels (the PNG is shot at 2x or 3x of it): the sheet reserves that shape before the
+ * image loads, so nothing jumps, and never draws it wider than that width, so a screenshot is never larger than the UI
+ * it shows.
  */
 export type NoteBlock =
   | { kind: "heading" | "text" | "bullet" | "rule"; text: string }
-  | { kind: "image"; text: string; url: string; aspect: number | null };
+  | { kind: "image"; text: string; url: string; aspect: number | null; width: number | null };
 const IMAGE = /^\s*!\[([^\]]*)\]\(\s*(\S+?)\s*\)\s*$/;
 /** An image line's block, or null. Only http(s) URLs: a relative path means nothing to the app. */
 export function imageBlock(line: string): NoteBlock | null {
@@ -42,7 +44,7 @@ export function imageBlock(line: string): NoteBlock | null {
   if (!m || !/^https?:\/\//.test(m[2]!)) return null;
   const size = /#(\d+)x(\d+)$/.exec(m[2]!);
   const aspect = size && +size[2]! > 0 ? +size[1]! / +size[2]! : null;
-  return { kind: "image", text: plainInline(m[1]!), url: m[2]!.replace(/#.*$/, ""), aspect };
+  return { kind: "image", text: plainInline(m[1]!), url: m[2]!.replace(/#.*$/, ""), aspect, width: size && aspect ? +size[1]! : null };
 }
 export type ReleaseNote = { version: string; date: string | null; items: string[]; blocks?: NoteBlock[] };
 /** Inline markdown to plain text: `[label](url)` to label, no backticks, bold or italics markers. */
@@ -170,7 +172,7 @@ export type InstallKind = typeof INSTALL_KINDS[number];
 export const releaseNoteSchema = z.object({ version: z.string(), date: z.string().nullable(), items: z.array(z.string()),
   blocks: z.array(z.union([
     z.object({ kind: z.enum(["heading", "text", "bullet", "rule"]), text: z.string() }),
-    z.object({ kind: z.literal("image"), text: z.string(), url: z.string(), aspect: z.number().nullable() }),
+    z.object({ kind: z.literal("image"), text: z.string(), url: z.string(), aspect: z.number().nullable(), width: z.number().nullable() }),
   ])).optional() });
 /** `follow.release-notes`: this host's version record and every shipped note. Read once per app session; never polled. */
 export const releaseNotesViewSchema = z.object({
