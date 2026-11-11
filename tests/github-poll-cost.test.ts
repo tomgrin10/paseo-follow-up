@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { Github, RULES_TTL_MS } from "../server/github";
 import { accountFor, ghTokens, httpApi, DEAD_BUS, type GithubApi } from "../server/github-api";
 import { Deployments } from "../server/deployments";
-import { POLL_IDLE_MS, TICK_MS, RECENT_CHANGE_MS } from "../shared/poll";
+import { POLL_IDLE_MS, TICK_MS, RECENT_CHANGE_MS, movingReason } from "../shared/poll";
 import { clock, pr } from "./fixtures";
 
 // 2026-11-11 cpu-load REPORT.md §5: the live worker made ~40 gh calls/min (+6 gcloud) for ~30 PRs. Root causes:
@@ -11,15 +11,18 @@ import { clock, pr } from "./fixtures";
 // read spawned the gh wrapper (~3 processes), settled PRs were re-read every 15 s tick, and the deploy probe described
 // every serving revision each minute. These tests pin the cost per tick so it can't creep back.
 
-type Row = { optionalRunning?: boolean; checksPending?: boolean; queued?: boolean; autoMerge?: boolean; state?: string; base?: string; rules?: "ok" | "error" | "truncated"; missing?: boolean; updated?: number };
-function fakeGithub(rows: Map<string, Row>) {
-  const calls = { graphql: 0, rest: 0, restPaths: [] as string[], perRepo: new Map<string, number>() };
+type Row = { missingRequired?: boolean; optionalRunning?: boolean; checksPending?: boolean; queued?: boolean; autoMerge?: boolean; state?: string; base?: string; rules?: "ok" | "error" | "truncated"; missing?: boolean; updated?: number };
+function fakeGithub(rows: Map<string, Row>, budget = { remaining: 5000, resetAt: "2026-01-01T11:00:00Z", limited: false }) {
+  const calls = { points: 0, graphql: 0, rest: 0, restPaths: [] as string[], perRepo: new Map<string, number>() };
   const ruleNodes = { pageInfo: { hasNextPage: false }, nodes: [{ type: "REQUIRED_STATUS_CHECKS", repositoryRuleset: { enforcement: "ACTIVE" }, parameters: { requiredStatusChecks: [{ context: "ci" }] } }, { type: "REQUIRED_STATUS_CHECKS", repositoryRuleset: { enforcement: "EVALUATE" }, parameters: { requiredStatusChecks: [{ context: "trial" }] } }] };
   const api: GithubApi = {
     async graphql(repo, query) {
       calls.graphql++; calls.perRepo.set(repo, (calls.perRepo.get(repo) ?? 0) + 1);
       const repository: Record<string, unknown> = { defaultBranchRef: { name: "main", branchProtectionRule: null, rules: ruleNodes } };
       const errors: unknown[] = [];
+      if (budget.limited) return { data: null, errors: [{ type: "RATE_LIMITED", message: "API rate limit exceeded" }] };
+      const cost = [...query.matchAll(/pullRequest\(/g)].length || 1; budget.remaining -= cost; calls.points += cost;
+      repository.__rate = { cost, remaining: budget.remaining, resetAt: budget.resetAt };
       for (const [, alias, number] of query.matchAll(/(p\d+):pullRequest\(number:(\d+)\)/g)) {
         const row = rows.get(`${repo}#${number}`) ?? {};
         if (row.missing) { repository[alias] = null; errors.push({ type: "NOT_FOUND", path: ["repository", alias] }); continue; }
@@ -34,7 +37,8 @@ function fakeGithub(rows: Map<string, Row>) {
           commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false }, nodes: [{ name: "ci", status: row.checksPending ? "IN_PROGRESS" : "COMPLETED", conclusion: row.checksPending ? null : "SUCCESS" }, { name: "optional-e2e", status: row.optionalRunning ? "IN_PROGRESS" : "COMPLETED", conclusion: row.optionalRunning ? null : "SUCCESS" }] } } } }] },
         };
       }
-      return { data: { repository }, ...(errors.length ? { errors } : {}) };
+      const rateLimit = repository.__rate; delete repository.__rate;
+      return { data: { rateLimit, repository }, ...(errors.length ? { errors } : {}) };
     },
     async rest(_repo, path) { calls.rest++; calls.restPaths.push(path); return [{ type: "required_status_checks", parameters: { required_status_checks: [{ context: "ci" }] } }]; },
   };
@@ -241,4 +245,63 @@ test("a running non-required check also keeps every-tick reads: it can still fai
   for (let i = 0; i < 4; i++) { now += TICK_MS; await github.observe(prs, { background: true }); }
   assert.equal(f.calls.perRepo.get(prs[0].repo), 4);
   assert.equal(f.calls.perRepo.get(prs[1].repo), 1);
+});
+
+test("per-PR backoff: a hot PR doesn't drag its repository's merged PRs into every tick; merged PRs read every 30 min", async () => {
+  let now = clock;
+  const { rows, prs } = fleet(20, 1, i => (i === 0 ? { checksPending: true } : { state: "MERGED" }));
+  const f = fakeGithub(rows);
+  const github = new Github(undefined, undefined, undefined, f.api, () => now);
+  await github.observe(prs, { background: true });
+  const start = f.calls.points;
+  for (let i = 0; i < 4 * 60; i++) { now += TICK_MS; await github.observe(prs, { background: true }); }
+  // One hour: the running PR every tick (240 points) + 19 merged PRs twice (38) instead of 20 × 240 = 4800.
+  assert.equal(f.calls.points - start, 240 + 19 * 2);
+});
+
+test("a required check that never reported isn't running: the PR backs off like any settled PR", async () => {
+  let now = clock;
+  const { rows, prs } = fleet(1, 1);
+  const f = fakeGithub(rows);
+  const github = new Github(undefined, undefined, undefined, f.api, () => now);
+  const s = (await github.observe(prs, { background: true })).get(prs[0].key)!.snapshot!;
+  assert.equal(s.checksRunning, false);
+  s.checksPending = true; // what a missing required context reads as
+  assert.equal(movingReason(s, null), null);
+  assert.equal(movingReason({ ...s, checksRunning: true }, null), "checks running");
+  assert.equal(movingReason({ ...s, checksRunning: undefined }, null), "checks running", "older snapshots: pending counts");
+});
+
+test("GraphQL budget: low stretches settled reads and pauses merged and quiet repos; critical and RATE_LIMITED keep last observations until the reset", async () => {
+  let now = clock;
+  const budget = { remaining: 5000, resetAt: new Date(clock + 3_600_000).toISOString(), limited: false };
+  const { rows, prs } = fleet(9, 3, i => (i === 0 ? { checksPending: true } : i === 3 ? { state: "MERGED" } : {}));
+  const f = fakeGithub(rows, budget);
+  const github = new Github(undefined, undefined, undefined, f.api, () => now);
+  await github.observe(prs, { background: true });
+  assert.equal(github.budget("org0")!.remaining, 5000 - 3);
+  assert.equal(github.stats.points, 9);
+  // Low: only the repository with something moving is read; its settled PRs every 5 minutes, merged never.
+  budget.remaining = 400;
+  now += POLL_IDLE_MS; await github.observe(prs, { background: true }); // learns the low budget
+  const read = new Map<string, number>(); const api = f.api.graphql;
+  f.api.graphql = async (repo, query, vars) => { for (const [, n] of query.matchAll(/pullRequest\(number:(\d+)\)/g)) read.set(`${repo}#${n}`, (read.get(`${repo}#${n}`) ?? 0) + 1); return api(repo, query, vars); };
+  for (let i = 0; i < 20; i++) { now += TICK_MS; await github.observe(prs, { background: true }); }
+  assert.equal(read.get(prs[0].key), 20, "the PR with running checks: every tick");
+  assert.equal(read.get(prs[6].key), 1, "a settled PR in the same repository: every 5 minutes");
+  assert.equal(read.get(prs[3].key), undefined, "a merged PR waits for the reset");
+  assert.equal(read.get(prs[1].key), undefined, "a quiet repository waits for the reset");
+  // Critical, then the API refusing: nothing is read, nothing fails, the last observations stand in.
+  budget.remaining = 50; now += TICK_MS; await github.observe(prs, { background: true });
+  const before = f.calls.graphql; now += TICK_MS;
+  const held = await github.observe(prs, { background: true });
+  assert.equal(f.calls.graphql, before); assert.ok([...held.values()].every(o => o.error === null && o.snapshot));
+  // The reset passes; the API is out of budget anyway (another agent used it): no errors, wait 10 more minutes.
+  now = clock + 3_600_000 + 1; budget.limited = true;
+  const refused = await github.observe(prs, { background: true });
+  assert.ok([...refused.values()].every(o => o.error === null && o.snapshot));
+  const unseen = pr({ key: "org0/repo0#99", repo: "org0/repo0", number: 99 });
+  now += TICK_MS; assert.match((await github.observe([unseen])).get(unseen.key)!.error!, /API limit .* used up; Follow-up reads again after/);
+  budget.limited = false; now += 10 * 60_000 + 1;
+  await github.observe(prs, { background: true }); assert.ok(github.budget("org0")!.remaining > 0);
 });
