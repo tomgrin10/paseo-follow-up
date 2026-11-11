@@ -30,6 +30,7 @@ import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
 import { harness, spawnDaemon } from "./harness.mjs";
 import { harnessEnv } from "./harness-env.mjs";
+import { fakeGithub } from "./fake-github.mjs";
 import { openHome as openHomeAt, homeRow } from "./ui-home.mjs";
 
 const exec = promisify(execFile);
@@ -103,7 +104,7 @@ function pulls() {
     181: { title: "Dark mode color tokens", state: "MERGED", author: "dana", checks: [ok("test"), ok("lint")] },
   };
 }
-/** A fake `gh`: GraphQL PR reads from the fixture file, `[]` for everything else (branch rules, auth). */
+/** A fake `gh`: GraphQL PR reads from the fixture file, `[]` for everything else (branch rules, auth). fakeGithub serves it over HTTP. */
 function fakeGh(file) {
   return `#!/usr/bin/env node
 const d = JSON.parse(require("fs").readFileSync(${JSON.stringify(file)}, "utf8"));
@@ -652,13 +653,15 @@ try {
   await fs.writeFile(join(root, "clock.cjs"), CLOCK_PRELOAD);
   await fs.writeFile(join(home, "gh-fixture.json"), JSON.stringify(pulls()));
   await fs.writeFile(join(bin, "gh"), fakeGh(join(home, "gh-fixture.json"))); await fs.chmod(join(bin, "gh"), 0o700);
+  // PR reads go over HTTPS (server/github-api.ts) to this fake, which answers with the same fixture gh.
+  const github = await fakeGithub({ dir: root, gh: join(bin, "gh") });
   await fs.writeFile(join(home, "linear-fixture.json"), JSON.stringify(linearIssues()));
   await fs.writeFile(join(bin, "mcpproxy"), fakeMcpproxy(join(home, "linear-fixture.json"))); await fs.chmod(join(bin, "mcpproxy"), 0o700);
   // Real speed while the daemon starts and the plugin installs; seeding and shooting crawl (setDaemonClock).
   // It starts ten minutes before BASE, so the clock only ever moves forward.
   await fs.writeFile(clockFile, JSON.stringify({ fake: at(-10), real: Date.now(), rate: 1 }));
 
-  const env = harnessEnv(root, { home, set: { PASEO_DAEMON_URL: url, PASEO_SERVER_ID: "srv_followupshots", PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true", PATH: `${bin}:${process.env.PATH}`, FOLLOW_SHOTS_CLOCK: clockFile, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${join(root, "clock.cjs")}`.trim(), TZ: "UTC" } });
+  const env = harnessEnv(root, { home, strip: github.strip, set: { ...github.env, PASEO_DAEMON_URL: url, PASEO_SERVER_ID: "srv_followupshots", PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true", PATH: `${bin}:${process.env.PATH}`, FOLLOW_SHOTS_CLOCK: clockFile, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${join(root, "clock.cjs")}`.trim(), TZ: "UTC" } });
   const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env, timeout: 120000, maxBuffer: 1 << 22 })).stdout);
   const daemonLog = openSync(join(root, "daemon.log"), "a");
   daemon = spawnDaemon(["daemon", "run", "--home", home], { env, stdio: ["ignore", daemonLog, daemonLog] });
