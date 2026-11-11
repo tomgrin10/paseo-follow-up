@@ -5,9 +5,9 @@
 // `gh` shim first on PATH that counts every spawn. It installs the plugin, waits one warm-up minute, then measures
 // gh spawns, HTTP requests and the worker's CPU over a window. Run it on two builds at the same N for before/after:
 //
-//   node scripts/poll-cost.mjs [--prs 30] [--workspaces 10] [--repos 3] [--minutes 3] [--plugin <dir>] [--cpu-prof <dir>] [--json]
+//   node scripts/poll-cost.mjs [--prs 30] [--workspaces 10] [--repos 3] [--pending 3] [--minutes 3] [--plugin <dir>] [--cpu-prof <dir>] [--json]
 //
-// --cpu-prof writes the worker's V8 CPU profile (node --cpu-prof) for the window. Run under the harness-slot wrapper.
+// --pending K keeps K PRs (one per repository first) with checks in progress. --cpu-prof writes the worker's V8 CPU profile (node --cpu-prof) for the window. Run under the harness-slot wrapper.
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, mkdir, readFile, writeFile, rm, chmod, readdir } from "node:fs/promises";
@@ -25,7 +25,7 @@ const exec = promisify(execFile);
 await harness();
 const arg = (name, fallback) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : fallback; };
 const N = Number(arg("prs", "30")); const W = Number(arg("workspaces", "10")); const R = Number(arg("repos", "3")); const MINUTES = Number(arg("minutes", "3"));
-const PENDING = Math.max(1, Math.round(N / 10)); const profileDir = arg("cpu-prof", null);
+const PENDING = Number(arg("pending", String(Math.max(1, Math.round(N / 10))))); const profileDir = arg("cpu-prof", null);
 const root = await mkdtemp(join(tmpdir(), "follow-poll-cost-"));
 const home = join(root, "home"); const fixture = join(root, "fixture"); const bin = join(root, "bin"); let plugin = arg("plugin", null);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
