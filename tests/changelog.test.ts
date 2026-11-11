@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { LEGACY_BASELINE, announcesUpdate, notesSince, notesVersion, parseChangelog, recentNotes, recentUpdate, whatsNew } from "../shared/changelog";
 // @ts-expect-error plain ESM script without types
-import { fragmentBullets, lintBullet } from "../scripts/release-notes.mjs";
+import { DRAFT_MARKER, fragmentBullets, lintBullet } from "../scripts/release-notes.mjs";
 
 const exec = promisify(execFile);
 const SAMPLE = `# Release notes
@@ -42,10 +42,15 @@ test("changelog: headings, dates, bullets, continuation lines; newest first by v
   assert.deepEqual(notes[2]!.items, ["Second, no date."]);
 });
 
-test("changelog: the shipped CHANGELOG.md parses, covers 1.4.0-beta.0 to beta.22, and every entry has notes", async () => {
-  const notes = parseChangelog(await readFile("CHANGELOG.md", "utf8"));
-  for (let i = 0; i <= 22; i++) assert.ok(notes.some(n => n.version === `1.4.0-beta.${i}`), `beta.${i}`);
-  for (const n of notes) { assert.ok(n.items.length, n.version); for (const i of n.items) assert.deepEqual(lintBullet(i), [], `${n.version}: ${i}`); }
+test("changelog: the shipped CHANGELOG.md shows only the curated 2.0.0 in the app; the full list stays below <details>, all lint-clean", async () => {
+  const text = await readFile("CHANGELOG.md", "utf8");
+  const notes = parseChangelog(text);
+  assert.deepEqual(notes.map(n => n.version), ["2.0.0"], "What's new and the release notes see 2.0.0 only");
+  const blocks = notes[0]!.blocks ?? [];
+  assert.ok(blocks.filter(b => b.kind === "heading").length >= 3 && blocks.filter(b => b.kind === "heading").length <= 8, "a handful of pillars");
+  assert.ok(blocks.every(b => !/1\.x|upgrad|roll ?back|0\.15/i.test(b.text)), "no upgrade or Paseo version talk in the curated notes");
+  assert.ok(text.split("\n").map(l => /^[-*]\s+(.*)$/.exec(l)?.[1]).filter(Boolean).every(b => !lintBullet(b!).length), "every bullet, full list included, is lint-clean");
+  assert.match(text, /<details><summary>Full changelog since 1\.0\.1<\/summary>/);
 });
 
 const notes = parseChangelog(["# R", ...[14, 13, 12, 11, 10].map(n => `## 1.4.0-beta.${n} (2026-11-1${n % 10})\n\n- Note ${n}.`)].join("\n\n"));
@@ -96,9 +101,16 @@ test("release notes script: lints style; a stable release moves fragments under 
   assert.deepEqual((await readdir(join(dir, "changes"))).sort(), ["README.md", "a-first.md", "b-second.md"], "and its fragments wait");
   await writeFile(join(dir, "package.json"), JSON.stringify({ version: "1.1.0-beta.0", files: ["CHANGELOG.md"] }));
   await run("--check");
-  await run("1.1.0", "--date", "2026-11-09");
+  assert.match((await run("1.1.0", "--date", "2026-11-09")).stdout, /DRAFT: curate it/);
   const out = await readFile(join(dir, "CHANGELOG.md"), "utf8");
-  assert.equal(out, "# Release notes\n\nIntro.\n\n## 1.1.0 (2026-11-09)\n\n- First.\n- Second.\n\n## 1.0.0 (2026-01-01)\n\n- Old.\n", "the next stable collects every beta's fragments");
+  assert.equal(out, `# Release notes\n\nIntro.\n\n## 1.1.0 (2026-11-09)\n\n${DRAFT_MARKER}\n\n- First.\n- Second.\n\n<details><summary>Full changelog since 1.0.0</summary>\n\n### More\n\n- First.\n- Second.\n\n</details>\n\n## 1.0.0 (2026-01-01)\n\n- Old.\n`,
+    "the next stable drafts its curated notes from every beta's fragments, with the full list under them");
+  // Curation is the default path: the draft can't ship until someone rewrites it and drops the marker.
+  await writeFile(join(dir, "package.json"), JSON.stringify({ version: "1.1.0", files: ["CHANGELOG.md"] }));
+  await assert.rejects(run("--check"), /1\.1\.0 is still the draft release:notes wrote/);
+  await writeFile(join(dir, "CHANGELOG.md"), out.replace(`${DRAFT_MARKER}\n\n- First.\n- Second.`, "- First and second, in one line."));
+  await run("--check");
+  assert.deepEqual(parseChangelog(await readFile(join(dir, "CHANGELOG.md"), "utf8"))[0]!.items, ["First and second, in one line."], "What's new shows the curated part only");
   await writeFile(join(dir, "package.json"), JSON.stringify({ version: "1.2.0", files: ["CHANGELOG.md"] }));
   await assert.rejects(run("--check"), /no section for package\.json's 1\.2\.0/, "a stable without notes still fails");
   await assert.rejects(run("1.1.0"), /already has/);
@@ -124,24 +136,66 @@ test("release notes script: an rc of a major writes the major's section, consume
   // The rc needs the major's section.
   await pkg("2.0.0-rc.0");
   await assert.rejects(run("--check"), /no section for 2\.0\.0, which package\.json's 2\.0\.0-rc\.0 carries/);
-  assert.match((await run("2.0.0-rc.0", "--date", "2026-11-11")).stdout, /CHANGELOG\.md: 2\.0\.0 \(2026-11-11\), 1 note/);
-  assert.equal(await changelog(), "# Release notes\n\n## 2.0.0 (2026-11-11)\n\n- Beta work.\n\n## 1.0.1 (2026-01-02)\n\n- Old.\n", "## 2.0.0, not ## 2.0.0-rc.0");
+  assert.match((await run("2.0.0-rc.0", "--date", "2026-11-11")).stdout, /CHANGELOG\.md: 2\.0\.0 \(2026-11-11\), 1 note.*DRAFT/);
+  assert.match(await changelog(), /^## 2\.0\.0 \(2026-11-11\)\n\n<!-- DRAFT/m, "## 2.0.0, not ## 2.0.0-rc.0");
   assert.deepEqual(await readdir(join(dir, "changes")), [], "fragments consumed");
+  await assert.rejects(run("--check"), /2\.0\.0 is still the draft/, "an rc can't ship a draft either");
+  await writeFile(join(dir, "CHANGELOG.md"), "# Release notes\n\n## 2.0.0 (2026-11-11)\n\nFollow-up is a plugin.\n\n### Home\n\nOne list.\n\n<details><summary>Full changelog since 1.0.1</summary>\n\n### More\n\n- Beta work.\n\n</details>\n\n## 1.0.1 (2026-01-02)\n\n- Old.\n");
   await run("--check");
-  // A later rc adds new fragments to the same section; --curated drops them because the section already covers them.
-  await writeFile(join(dir, "changes/b.md"), "- Rc fix.\n");
-  await run("2.0.0-rc.1"); assert.match(await changelog(), /- Beta work\.\n- Rc fix\.\n\n## 1\.0\.1/);
-  await writeFile(join(dir, "changes/c.md"), "- Folded in by hand.\n");
-  await run("2.0.0-rc.2", "--curated");
-  assert.doesNotMatch(await changelog(), /Folded in/); assert.deepEqual(await readdir(join(dir, "changes")), []);
+  // A later rc keeps the curated text as written; its fragment joins the full list in a group of its own.
+  await writeFile(join(dir, "changes/b.md"), "- Rc fix that no longer drops a row.\n");
+  await run("2.0.0-rc.1");
+  const after = await changelog();
+  assert.match(after, /Follow-up is a plugin\.\n\n### Home\n\nOne list\.\n\n<details><summary>Full changelog since 1\.0\.1<\/summary>\n\n### More\n\n- Beta work\.\n\n### Fixes\n\n- Rc fix that no longer drops a row\.\n\n<\/details>\n\n## 1\.0\.1/);
+  assert.deepEqual(await readdir(join(dir, "changes")), []);
+  assert.deepEqual(parseChangelog(after).find(n => n.version === "2.0.0")!.blocks, [{ kind: "text", text: "Follow-up is a plugin." }, { kind: "heading", text: "Home" }, { kind: "text", text: "One list." }]);
   // The stable release carries the same section: nothing new to write, and --check passes.
   await run("2.0.0"); await pkg("2.0.0"); await run("--check");
   assert.equal((await changelog()).match(/^## 2\.0\.0/gm)?.length, 1);
 });
 
+test("release notes script: a curated section is never regrouped or relabeled; 0 fragments is a no-op, 1 adds one line", async () => {
+  // The bug: release:notes on a curated 2.0.0 with no fragments rebuilt its full list with the area classifier,
+  // moving hand-placed lines between groups and changing the summary. release-fu runs it for every release.
+  const dir = await mkdtemp(join(tmpdir(), "notes-curated-"));
+  await mkdir(join(dir, "scripts")); await mkdir(join(dir, "changes"));
+  await cp("scripts/release-notes.mjs", join(dir, "scripts/release-notes.mjs"));
+  await cp("CHANGELOG.md", join(dir, "CHANGELOG.md")); // the shipped, hand-curated one
+  const run = (...a: string[]) => exec("node", [join(dir, "scripts/release-notes.mjs"), ...a]);
+  const before = await readFile(join(dir, "CHANGELOG.md"), "utf8");
+  for (const v of ["2.0.0-rc.0", "2.0.0-rc.1", "2.0.0"]) {
+    await run(v, "--date", "2026-12-01");
+    assert.equal(await readFile(join(dir, "CHANGELOG.md"), "utf8"), before, `${v} with no fragments leaves CHANGELOG.md byte-identical`);
+  }
+  await writeFile(join(dir, "changes/x.md"), "- A workspace no longer flickers between groups.\n");
+  await run("2.0.0-rc.1");
+  const after = (await readFile(join(dir, "CHANGELOG.md"), "utf8")).split("\n");
+  const added = after.filter(l => !before.split("\n").includes(l));
+  assert.deepEqual(added, ["- A workspace no longer flickers between groups."], "one new line, nothing else changes");
+  assert.deepEqual(after.filter(l => l !== added[0]), before.split("\n"), "every existing line keeps its place, headings and summary included");
+  const fixes = after.indexOf("### Fixes"), line = after.indexOf(added[0]!);
+  assert.ok(fixes >= 0 && line > fixes && line < after.indexOf("</details>"), "it joins its own area's group");
+  await writeFile(join(dir, "changes/y.md"), "- A workspace no longer flickers between groups.\n");
+  await run("2.0.0");
+  assert.equal(after.join("\n"), await readFile(join(dir, "CHANGELOG.md"), "utf8"), "a note already in the list isn't added twice");
+});
+
 test("changelog: a <details> archive below the notes never reaches What's new; image lines are skipped", () => {
   const text = "# R\n\n## 2.0.0 (2026-11-11)\n\n![Home](https://example.com/home.png)\n\n- Home.\n\n<details><summary>1.1-1.4 betas</summary>\n\n## 1.4.0-beta.2 (2026-11-09)\n\n- Old beta.\n\n</details>\n";
   assert.deepEqual(parseChangelog(text), [{ version: "2.0.0", date: "2026-11-11", items: ["Home."] }]);
+});
+
+test("changelog: a curated section's ### headings and paragraphs reach What's new as blocks, inline markdown as text, images left out", () => {
+  const text = "## 2.0.0 (2026-11-11)\n\nFollow-up is a [Paseo](https://paseo.sh) plugin\nthat keeps track of `workspaces`.\n\n![Home](https://example.com/h.png)\n\n### One list\n\nHome lists **every** workspace.\n\n- A bullet\n  that wraps.\n\n<details><summary>Full changelog</summary>\n\n### Fixes\n\n- Hidden.\n\n</details>\n";
+  const [note] = parseChangelog(text);
+  assert.deepEqual(note!.items, ["A bullet that wraps."]);
+  assert.deepEqual(note!.blocks, [
+    { kind: "text", text: "Follow-up is a Paseo plugin that keeps track of workspaces." },
+    { kind: "heading", text: "One list" },
+    { kind: "text", text: "Home lists every workspace." },
+    { kind: "bullet", text: "A bullet that wraps." },
+  ]);
+  assert.equal(parseChangelog("## 1.0.1\n\n- Only bullets.\n")[0]!.blocks, undefined, "a bullets-only note stays items");
 });
 
 test("what's new: 1.x to 2.0.0-rc.0 shows 2.0's notes once; later rcs and 2.0.0 itself don't pop again", () => {

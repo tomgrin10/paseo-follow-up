@@ -117,12 +117,12 @@ test("a paseo CLI on PATH below the plugin's floor stops the run before it takes
   const f = await fixture(t);
   const { slotCount, paseoFloor } = await import(helper) as { slotCount: (env: object) => number; paseoFloor: () => string };
   assert.equal(slotCount({}), 2, "two slots by default, like the wrapper");
-  assert.equal(paseoFloor(), "0.14.0", "the floor is paseo-plugin.json's requirements.paseo");
+  assert.equal(paseoFloor(), "0.15.0", "the floor is paseo-plugin.json's requirements.paseo");
   const stale = await fakePaseo(f.dir, "stale", "0.7.2");
   const old = f.run([], process.execPath, [], { PATH: [stale, f.env.PATH].join(delimiter) });
   await until(() => old.child.exitCode !== null, "a stale CLI exits");
   assert.equal(old.child.exitCode, 97);
-  assert.ok(old.out.stderr.includes(`wrong paseo (0.7.2 at ${join(stale, "paseo")}); need >= 0.14.0`), old.out.stderr);
+  assert.ok(old.out.stderr.includes(`wrong paseo (0.7.2 at ${join(stale, "paseo")}); need >= 0.15.0`), old.out.stderr);
   assert.equal(old.out.stdout, "", "no slot, no run");
   const beta = await fakePaseo(f.dir, "beta", "0.16.0-beta.1");
   const good = f.run([], process.execPath, [], { PATH: [beta, f.env.PATH].join(delimiter) });
