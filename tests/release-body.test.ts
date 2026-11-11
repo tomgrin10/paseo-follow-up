@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { MAINTENANCE, UNWRITTEN, VERIFIED, compare, gitSource, hasNotes, releaseBody, releaseNotes } from "../scripts/release-body.mjs";
+import { LATEST, MAINTENANCE, NO_NOTES, UNWRITTEN, VERIFIED, VERIFIED_BEFORE_NPM, compare, framed, gitSource, hasNotes, ownNotes, releaseBody, releaseNotes } from "../scripts/release-body.mjs";
 import { plan } from "../scripts/backfill-release-notes.mjs";
 
 // Tom: "the beta releases on github don't display release notes, make sure every github release displays proper clean
@@ -26,23 +26,25 @@ function repo(t: TestContext, tags: [string, Record<string, string | null>][]) {
   }
   return gitSource(git);
 }
-const manifest = (paseo: string) => JSON.stringify({ id: "follow-up", requirements: { paseo } });
+const manifest = (paseo: string, id = "follow-up") => JSON.stringify({ id, requirements: { paseo } });
+/** A publish workflow that ran the checks the verification sentence claims. */
+const CHECKED = "steps:\n  - run: npm run verify\n  - run: npm run test:install\n  - run: echo registry integrity verified\n";
 
 test("a beta's body is its own fragments in the shared format, never boilerplate only", t => {
   const src = repo(t, [
-    ["v1.0.1", { "paseo-plugin.json": manifest(">=0.15.0"), "CHANGELOG.md": "# R\n\n## 1.0.1\n\n- Old.\n", "changes/README.md": "rules" }],
+    ["v1.0.1", { "paseo-plugin.json": manifest(">=0.15.0"), "CHANGELOG.md": "# R\n\n## 1.0.1\n\n- Old.\n", "changes/README.md": "rules", ".github/workflows/publish-npm.yml": CHECKED }],
     ["v1.1.0-beta.0", { "changes/feat-a.md": "- Home has a search box.\n" }],
     ["v1.1.0-beta.1", { "changes/fix-b.md": "- A row no longer flickers.\n- Undo works twice.\n" }],
     ["v1.1.0-beta.2", {}],
   ]);
   const b1 = releaseBody("v1.1.0-beta.1", src);
   assert.equal(b1, [
-    "**Install:** `paseo plugin install npm:paseo-follow-up@1.1.0-beta.1` (needs Paseo 0.15.0 or newer).",
+    "**Install:** `paseo plugin install npm:paseo-follow-up@1.1.0-beta.1`",
     "", "## What's new", "", "- A row no longer flickers.", "- Undo works twice.",
     "", "## Install", "",
-    "`paseo plugin install npm:paseo-follow-up@1.1.0-beta.1`, or `paseo plugin update follow-up --version 1.1.0-beta.1` if it's installed. Prereleases are on npm's `beta` dist-tag. The stable release is 1.0.1. Needs Paseo 0.15.0 or newer.",
+    `Already installed: \`paseo plugin update follow-up --version 1.1.0-beta.1\`. Prereleases are on npm's \`beta\` dist-tag; the current stable release is [here](${LATEST}). Needs Paseo 0.15.0 or newer.`,
     "", VERIFIED, "",
-  ].join("\n"), "only the fragments added since the previous tag, rendered as written");
+  ].join("\n"), "only the fragments added since the previous tag, the install command once, no hard-coded stable version");
   assert.doesNotMatch(b1, /Home has a search box/, "an earlier beta's fragment stays with that beta");
   assert.match(releaseBody("v1.1.0-beta.2", src), new RegExp(`## What's new\\n\\n${MAINTENANCE}\\n`), "no fragments says so in one line");
   for (const tag of ["v1.1.0-beta.0", "v1.1.0-beta.1", "v1.1.0-beta.2"]) assert.ok(hasNotes(releaseBody(tag, src)), `${tag} has notes`);
@@ -59,10 +61,12 @@ test("a stable version and a major's rc carry the curated section, full changelo
   const rc = releaseBody("v2.0.0-rc.0", src);
   assert.ok(rc.includes(`## What's new\n\n${curated}\n\n## Install`), "the curated section as written, never the fragment list");
   assert.doesNotMatch(rc, /Raw fragment|a comment/);
-  assert.match(rc, /^\*\*Install:\*\* `paseo plugin install npm:paseo-follow-up@2\.0\.0-rc\.0`/);
+  assert.match(rc, /^\*\*Install:\*\* `paseo plugin install npm:paseo-follow-up@2\.0\.0-rc\.0`\n/);
+  assert.doesNotMatch(rc, /This release passed/, "no verification claim where the tag's workflow didn't run those checks");
   const stable = releaseBody("v2.0.0", src);
-  assert.match(stable, /^\*\*Install:\*\* `paseo plugin install npm:paseo-follow-up` \(needs Paseo 0\.15\.0 or newer\)\./, "stable installs from npm's latest, with the npm: prefix");
-  assert.match(stable, /`paseo plugin update follow-up` if it's installed/);
+  assert.match(stable, /^\*\*Install:\*\* `paseo plugin install npm:paseo-follow-up`\n/, "stable installs from npm's latest, with the npm: prefix");
+  assert.match(stable, /## Install\n\nAlready installed: `paseo plugin update follow-up`\. Needs Paseo 0\.15\.0 or newer\.\n$/);
+  assert.equal((stable.match(/paseo plugin install/g) ?? []).length, 1, "the install command appears once");
   assert.equal(releaseNotes("v1.1.0-beta.0", src).notes, UNWRITTEN, "a beta from before changes/ existed, with no section, says no notes were written");
   assert.throws(() => releaseNotes("v1.0.1", repo(t, [["v1.0.1", { "CHANGELOG.md": "# R\n" }]])), /no 1\.0\.1 section/, "a stable without its section never renders boilerplate");
 });
@@ -76,22 +80,38 @@ test("the publish workflow writes every GitHub release body with scripts/release
   assert.doesNotMatch(release, /Track workspace pull requests|INSTALL_LINE|<<'NOTES'/, "no hand-written boilerplate body");
 });
 
-test("backfill: only releases without notes are rewritten, in version order; ones it can't render are skipped", t => {
+test("backfill: every page gets the frame; hand-written text is kept, only its install and check boilerplate goes", t => {
   const src = repo(t, [
-    ["v1.0.1", { "paseo-plugin.json": manifest(">=0.14.0"), "changes/README.md": "rules" }],
+    ["v0.3.0", { "paseo-plugin.json": manifest(">=0.14.0", "old-id"), ".github/workflows/publish-npm.yml": CHECKED }],
+    ["v1.0.1", { "changes/README.md": "rules" }],
     ["v1.1.0-beta.0", { "changes/a.md": "- A.\n" }],
     ["v1.1.0-beta.1", {}],
   ]);
-  const boilerplate = "Track workspace pull requests.\n\nInstall with: `paseo plugin update x --version 1` (beta).\n\nThis release passed plugin verification.";
+  const boilerplate = "Track workspace pull requests, queue follow-up work, and verify completion in Paseo.\n\nInstall with: `paseo plugin update x --version 1` (beta). Return to stable with `paseo plugin update x --version 1.0.1` on Paseo 0.14.0 or newer.\n\nThe installation ID remains `x` to preserve saved work and settings.\nThis release passed plugin verification, isolated packed installation checks,\nand npm registry integrity verification before these notes were published.";
+  const handWritten = "Follow-up 1.0.1 fixes things.\n\n## Fixed\n\n- **Closed agents stay closed.**\n\n## Install\n\n```\npaseo plugin install paseo-follow-up\n```\n\nAlready installed: `paseo plugin update old-id`. Requires Paseo 0.14.0 or newer. No data changes.";
+  const old = "Adds a thing.\n\nRequires Paseo 0.14.0 or newer. Optional integration requires Companion 2.1.0.\n\nValidated with 138 checks. A replay recovered all 12 PRs. npm registry integrity matches main.";
   const steps = plan([
     { tagName: "v1.1.0-beta.1", body: boilerplate },
-    { tagName: "v1.0.1", body: "Follow-up 1.0.1 fixes things.\n\n## Fixed\n\n- **Closed agents stay closed.**" },
+    { tagName: "v1.0.1", body: handWritten },
     { tagName: "v1.1.0-beta.0", body: boilerplate },
-  ], src);
-  assert.deepEqual(steps.map(s => [s.tag, s.action]), [["v1.0.1", "keep"], ["v1.1.0-beta.0", "write"], ["v1.1.0-beta.1", "write"]]);
-  assert.match(steps[1]!.body!, /## What's new\n\n- A\.\n/);
-  assert.match(steps[2]!.body!, new RegExp(MAINTENANCE));
-  assert.equal(hasNotes(boilerplate), false, "the old boilerplate counts as no notes");
-  assert.equal(plan([{ tagName: "v1.0.1", body: boilerplate }], src)[0]!.action, "skip", "a stable with no section is skipped, not given boilerplate");
+    { tagName: "v0.3.0", body: old },
+    { tagName: "v2.0.0-rc.0", body: "set by hand" },
+  ], src, { except: ["v2.0.0-rc.0"] });
+  assert.deepEqual(steps.map(s => [s.tag, s.action]), [["v0.3.0", "write"], ["v1.0.1", "write"], ["v1.1.0-beta.0", "write"], ["v1.1.0-beta.1", "write"]], "--except is left alone");
+  const [b030, b101, b0, b1] = steps.map(s => s.body!);
+  assert.equal(b030, [
+    "**Install:** `paseo plugin install npm:paseo-follow-up@0.3.0`", "", "## What's new", "",
+    "Adds a thing.", "", "Optional integration requires Companion 2.1.0.", "", "A replay recovered all 12 PRs.",
+    "", "## Install", "", "Already installed: `paseo plugin update old-id --version 0.3.0`. Needs Paseo 0.14.0 or newer.", "", VERIFIED_BEFORE_NPM, "",
+  ].join("\n"), "every hand-written fact stays; the era's id, a pinned install, and the claim as it was true then");
+  assert.match(b101, /## What's new\n\nFollow-up 1\.0\.1 fixes things\.\n\n### Fixed\n\n- \*\*Closed agents stay closed\.\*\*\n\nNo data changes\.\n\n## Install/, "its own headings move under the frame's");
+  assert.doesNotMatch(b101, /```/);
+  assert.match(b0, /## What's new\n\n- A\.\n/);
+  assert.match(b1, new RegExp(MAINTENANCE));
+  assert.ok(steps.every(s => framed(s.body)), "every page ends in the one format");
+  assert.equal(plan([{ tagName: "v1.0.1", body: b101 }], src)[0]!.action, "keep", "running it again changes nothing");
+  assert.match(plan([{ tagName: "v1.0.1", body: boilerplate }], src)[0]!.body!, new RegExp(NO_NOTES), "a stable with no notes anywhere says so");
+  assert.equal(hasNotes(boilerplate), false);
+  assert.deepEqual(ownNotes("Plain text only.").replaced, []);
   assert.ok(compare("1.4.0-beta.10", "1.4.0-beta.9") > 0 && compare("2.0.0", "2.0.0-rc.0") > 0);
 });

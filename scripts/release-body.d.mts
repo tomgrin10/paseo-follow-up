@@ -12,6 +12,12 @@ export function section(changelog: string | null, version: string, options?: { f
 export function gitSource(git: (args: string[]) => string): Source;
 export function previousTag(src: Source, version: string): string | null;
 export function releaseNotes(tag: string, src: Source): { notes: string; source: string };
-export function install(tag: string, src: Source): { cmd: string; line: string; needs: string };
-export function releaseBody(tag: string, src: Source): string;
+export const VERIFIED_BEFORE_NPM: string;
+export const NO_NOTES: string;
+export const LATEST: string;
+export function install(tag: string, src: Source, options?: { pinned?: boolean }): { cmd: string; line: string };
+export function verifiedAtTag(tag: string, src: Source): boolean;
+export function releaseBody(tag: string, src: Source, options?: { notes?: string | null; backfill?: boolean }): string;
+export function ownNotes(body: string | null | undefined): { text: string; replaced: string[] };
+export function framed(body: string | null | undefined): boolean;
 export function hasNotes(body: string | null | undefined): boolean;
