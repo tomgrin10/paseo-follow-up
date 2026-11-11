@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { AppRegistry, Platform, Pressable, Text, View } from "react-native";
+import { AppRegistry, Platform, View } from "react-native";
+import { Pressable, Text } from "./text";
 import { Component, type ReactNode } from "react";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import type { Theme } from "./kit";

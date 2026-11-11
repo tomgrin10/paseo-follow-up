@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Platform, Pressable, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { Platform, View, type StyleProp, type ViewStyle } from "react-native";
+import { Pressable, Text } from "./text";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { PressScale, Spinner } from "./motion";
 import { raised, tint, withAlpha, type Colors, type Theme } from "./theme";

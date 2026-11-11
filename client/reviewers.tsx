@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { TextInput, View } from "react-native";
+import { Pressable, Text } from "./text";
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, SettingsAction, SettingsCard, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";

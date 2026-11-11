@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Animated, Easing, Platform, Text, View } from "react-native";
+import { Animated, Easing, Platform, View } from "react-native";
+import { Text } from "./text";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { workspaceAboutRpc } from "../shared/contracts";
