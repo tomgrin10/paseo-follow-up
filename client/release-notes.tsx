@@ -42,9 +42,10 @@ function Bullet({ text: line, theme, compact }: { text: string; theme: Theme; co
 export function VersionNotes({ note, theme, compact = false, max = 8 }: { note: ReleaseNote; theme: Theme; compact?: boolean; max?: number }) {
   const c = theme.colors; const t = text(c, compact);
   const [all, setAll] = useState(false);
-  if (note.blocks?.length) return <View style={{ gap: 8 }}>
+  // Headings sit a step above body text and closer to the paragraph they open than to the one before.
+  if (note.blocks?.length) return <View style={{ gap: 6 }}>
     {note.blocks.map((b, i) => b.kind === "heading"
-      ? <Text key={i} accessibilityRole="header" style={[t.label, { marginTop: i ? 10 : 0 }]}>{b.text}</Text>
+      ? <Text key={i} accessibilityRole="header" style={[t.label, { fontSize: compact ? 16 : 14, lineHeight: compact ? 22 : 20, marginTop: i ? 14 : 0 }]}>{b.text}</Text>
       : b.kind === "text" ? <Text key={i} style={t.body}>{b.text}</Text>
       : <Bullet key={i} text={b.text} theme={theme} compact={compact} />)}
   </View>;
