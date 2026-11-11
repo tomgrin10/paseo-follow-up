@@ -36,8 +36,9 @@ function Bullet({ text: line, theme, compact }: { text: string; theme: Theme; co
 }
 
 /**
- * A screenshot in the notes: full width at its own shape (reserved before it loads, so nothing below it jumps), in a
- * hairline frame with the host's radius. It loads by URL; if it can't (offline, blocked), it is left out entirely, with
+ * A screenshot in the notes: at most its CSS width (never larger than the UI it shows) and at most the column, left
+ * aligned like the text, at its own shape (reserved before it loads, so nothing below it jumps), in a hairline frame
+ * with the host's radius. It loads by URL; if it can't (offline, blocked), it is left out entirely, with
  * no empty frame. A tap opens it full size in the browser.
  */
 function NoteImage({ block, theme }: { block: Extract<NoteBlock, { kind: "image" }>; theme: Theme }) {
@@ -47,7 +48,7 @@ function NoteImage({ block, theme }: { block: Extract<NoteBlock, { kind: "image"
   if (failed) return null;
   return <Pressable accessibilityRole="imagebutton" accessibilityLabel={block.text} accessibilityHint="Opens the full-size image"
     onPress={() => { void openExternalUrl(block.url).catch(() => undefined); }}
-    style={state => ({ marginVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: c.border, overflow: "hidden", backgroundColor: c.surface1, opacity: state.pressed ? 0.85 : 1 })}>
+    style={state => ({ alignSelf: "stretch", maxWidth: block.width ?? undefined, marginVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: c.border, overflow: "hidden", backgroundColor: c.surface1, opacity: state.pressed ? 0.85 : 1 })}>
     <Image source={{ uri: block.url }} accessibilityIgnoresInvertColors resizeMode="cover" style={{ width: "100%", aspectRatio: aspect }}
       onError={() => setFailed(true)}
       onLoad={e => { const src = (e.nativeEvent as { source?: { width?: number; height?: number } } | undefined)?.source; if (!block.aspect && src?.width && src?.height) setAspect(src.width / src.height); }} />
@@ -71,7 +72,8 @@ export function VersionNotes({ note, theme, compact = false, max = 8 }: { note: 
         const quiet = quietFrom >= 0 && i > quietFrom;
         if (b.kind === "image") return <NoteImage key={i} block={b} theme={theme} />;
         if (b.kind === "rule") return <View key={i} style={{ height: 1, backgroundColor: c.border, marginTop: 16, marginBottom: 4 }} />;
-        if (b.kind === "heading") return <Text key={i} accessibilityRole="header" style={quiet ? [t.meta, { fontWeight: "600" }] : [t.label, { fontSize: compact ? 16 : 14, lineHeight: compact ? 22 : 20, marginTop: i ? 14 : 0 }]}>{b.text}</Text>;
+        // Section headings: semibold, one step above body (body 13/14, heading 15/17, the title role), clearly headings.
+        if (b.kind === "heading") return <Text key={i} accessibilityRole="header" style={quiet ? [t.meta, { fontWeight: "600" }] : [t.title, { fontWeight: "600", marginTop: i ? 16 : 0 }]}>{b.text}</Text>;
         if (b.kind === "text") return <Text key={i} style={quiet ? t.meta : i === 0 ? [t.body, lead] : t.body}>{b.text}</Text>;
         return <Bullet key={i} text={b.text} theme={theme} compact={compact} />;
       })}
