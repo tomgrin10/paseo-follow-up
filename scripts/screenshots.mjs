@@ -1,6 +1,6 @@
 // Re-shoots every README image from the current UI: `npm run shots` (through ~/paseo-harness/tools/harness-slot).
 // Usage: node scripts/screenshots.mjs [--out <dir>] [--only home,panel,...] [--scheme dark|light] [--scale <n>]
-//                                     [--whats-new-changelog <CHANGELOG.md>] [--whats-new-all] [--keep]
+//                                     [--whats-new-changelog <CHANGELOG.md>] [--whats-new-all] [--notes-review] [--keep]
 //
 // One isolated daemon (temp HOME and PASEO_HOME, the packed plugin, the fixture provider from
 // scripts/fixture-provider.ts, the web UI, a fake `gh` and a fake `mcpproxy` for Linear on PATH), seeded through Follow-up's own RPCs and fixture agents
@@ -486,6 +486,73 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
         await shoot("whats-new-phone-mid", PHONE, "dark", sheetAt(true, "A panel on every workspace"), { seen: WHATS_NEW_FROM });
         await shoot("whats-new-end", DESKTOP, "dark", sheetEnd(false), { seen: WHATS_NEW_FROM });
         await shoot("whats-new-phone-end", PHONE, "light", sheetEnd(true), { seen: WHATS_NEW_FROM });
+      }
+      // Review evidence for the wide notes dialog (from 1280px windows) and the image viewer, both entry points.
+      if (argv.includes("--notes-review")) {
+        const BIG = { width: 2560, height: 1440 }; const NARROW = { width: 1180, height: 800 };
+        const HOME_ALT = /^Follow-up Home: every workspace/; const PANEL_ALT = /^The Follow-up panel on a workspace/;
+        const images = page => page.waitForFunction(() => [...document.images].every(i => i.complete), null, { timeout: 30000 });
+        const whatsNewAt = vp => async page => {
+          await openHome(page, { keepDialogs: true });
+          await page.setViewportSize(vp);
+          await page.getByText("What's new in 2.0.0").first().waitFor();
+          await images(page);
+        };
+        /** Settings → Plugins → Follow-up → General → Release notes, See all. */
+        const releaseNotesAt = vp => async page => {
+          await page.setViewportSize(vp);
+          await page.goto(`${ORIGIN}/settings/hosts/${SERVER_ID}/plugins/follow-up/projects`);
+          await page.getByRole("button", { name: "See all" }).first().click();
+          await page.getByText("Release notes", { exact: true }).last().waitFor();
+          await images(page);
+        };
+        const viewer = (base, alt) => async page => {
+          await base(page);
+          await page.getByRole("button", { name: alt }).first().click();
+          await page.getByRole("button", { name: "Close image" }).waitFor();
+          await images(page);
+          // The viewer covers the window, not the dialog: its X sits in the window's top-right corner.
+          const x = await page.getByRole("button", { name: "Close image" }).boundingBox(); const vp = page.viewportSize();
+          if (!x || x.x + x.width < vp.width - 24 || x.y > 24) throw new Error(`the viewer is boxed in: its X is at ${JSON.stringify(x)} in ${vp.width}x${vp.height}`);
+        };
+        /** Esc closes the viewer, then the notes; a click on the viewer closes it. Throws (a failed shot) if not. */
+        const escOrder = base => async page => {
+          await viewer(base, HOME_ALT)(page);
+          await page.keyboard.press("Escape");
+          await page.getByRole("button", { name: "Close image" }).waitFor({ state: "detached", timeout: 3000 });
+          if (!(await page.getByRole("button", { name: HOME_ALT }).first().isVisible())) throw new Error("Esc closed the notes along with the viewer");
+          const focused = await page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? "");
+          if (!/^Follow-up Home/.test(focused)) throw new Error(`focus did not return to the screenshot (it is on "${focused}")`);
+          await page.getByRole("button", { name: HOME_ALT }).first().click();
+          await page.getByRole("button", { name: "Close image" }).waitFor();
+          await page.mouse.click(20, 20);
+          await page.getByRole("button", { name: "Close image" }).waitFor({ state: "detached", timeout: 3000 });
+          await page.keyboard.press("Escape");
+          await page.getByRole("button", { name: HOME_ALT }).first().waitFor({ state: "detached", timeout: 3000 });
+        };
+        const viewerOnly = argv.includes("--viewer-only");
+        for (const scheme of viewerOnly ? [] : ["dark", "light"]) {
+          const sfx = scheme === "light" ? "-light" : "";
+          await shoot(`notes-2560${sfx}`, BIG, scheme, whatsNewAt(BIG), { seen: WHATS_NEW_FROM });
+          await shoot(`notes-1440${sfx}`, DESKTOP, scheme, whatsNewAt(DESKTOP), { seen: WHATS_NEW_FROM });
+          await shoot(`release-notes-2560${sfx}`, BIG, scheme, releaseNotesAt(BIG), { seen: WHATS_NEW_TO });
+          await shoot(`release-notes-1440${sfx}`, DESKTOP, scheme, releaseNotesAt(DESKTOP), { seen: WHATS_NEW_TO });
+          await shoot(`notes-phone${sfx}`, PHONE, scheme, sheet(true), { seen: WHATS_NEW_FROM });
+          await shoot(`viewer-2560${sfx}`, BIG, scheme, viewer(whatsNewAt(BIG), HOME_ALT), { seen: WHATS_NEW_FROM });
+          await shoot(`viewer-phone${sfx}`, PHONE, scheme, viewer(sheet(true), PANEL_ALT), { seen: WHATS_NEW_FROM });
+        }
+        if (viewerOnly) for (const scheme of ["dark", "light"]) {
+          const sfx = scheme === "light" ? "-light" : "";
+          await shoot(`viewer-2560${sfx}`, BIG, scheme, viewer(whatsNewAt(BIG), HOME_ALT), { seen: WHATS_NEW_FROM });
+          await shoot(`viewer-phone${sfx}`, PHONE, scheme, viewer(sheet(true), PANEL_ALT), { seen: WHATS_NEW_FROM });
+        }
+        await shoot("viewer-1440-panel", DESKTOP, "dark", viewer(whatsNewAt(DESKTOP), PANEL_ALT), { seen: WHATS_NEW_FROM });
+        await shoot("viewer-release-notes-1440", DESKTOP, "dark", viewer(releaseNotesAt(DESKTOP), HOME_ALT), { seen: WHATS_NEW_TO });
+        // Below 1280 the host's own 520px dialog, with the viewer inside its focus scope.
+        if (!viewerOnly) await shoot("notes-1180", NARROW, "dark", whatsNewAt(NARROW), { seen: WHATS_NEW_FROM });
+        await shoot("viewer-1180", NARROW, "dark", viewer(whatsNewAt(NARROW), HOME_ALT), { seen: WHATS_NEW_FROM });
+        await shoot("esc-order-1440", DESKTOP, "dark", escOrder(whatsNewAt(DESKTOP)), { seen: WHATS_NEW_FROM });
+        await shoot("esc-order-1180", NARROW, "dark", escOrder(whatsNewAt(NARROW)), { seen: WHATS_NEW_FROM });
       }
     }
   }
