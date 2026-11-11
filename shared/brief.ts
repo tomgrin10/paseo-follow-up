@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Pr, Workspace } from "./model";
-import { OTHER_LABEL, answerLabel, isOther } from "./questions";
+import { OTHER_LABEL, answerLabel, isOther, type Question } from "./questions";
 
 /**
  * The brief: "what you need to do", appended as one card at the end of an agent's timeline when it needs
@@ -300,9 +300,28 @@ export function extrasFit(b: Pick<Brief, "decisions" | "context" | "facts" | "mo
 }
 
 /** One muted line for a collapsed brief: what was asked and what happened to it. */
+/** Why a card stopped being open without the developer answering it: Follow-up's words, shown as the card's line. */
+export const RESOLVED = {
+  replaced: "Replaced by a newer card",
+  movedOn: "No longer needed · the agent moved on",
+  withdrawn: "The agent withdrew this question",
+} as const;
+const OWN_OUTCOMES: readonly string[] = Object.values(RESOLVED);
+
+/**
+ * The agent's ask as a resolved card's line. An agent sometimes writes the card's status into its ask ("Still open:
+ * Q35, which plugin…"); once the card is resolved that contradicts it, so the status framing goes.
+ */
+export function pastAsk(ask: string): string {
+  // Only a status word followed by punctuation or a question id: "Open the PR when CI is green" is an ask, not a status.
+  const t = ask.replace(/^\s*(still open|open|pending|waiting on|needs you|blocked)(\s*[:,·-]\s*|\s+(?=Q\d+\b))(Q\d+\s*[:,·-]?\s*)?/i, "").trim();
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : ask;
+}
+
 export function collapsedLine(b: Pick<Brief, "state" | "source" | "outcome" | "ask">): string {
-  if (b.state === "superseded") return b.source === "none" ? "No ask was stated · the agent kept going" : `Earlier ask, the agent kept going: ${b.ask}`;
-  return `${b.outcome} · ${b.ask}`;
+  if (b.state === "superseded" && b.outcome && OWN_OUTCOMES.includes(b.outcome)) return b.outcome;
+  if (b.state === "superseded") return b.source === "none" ? "No ask was stated · the agent kept going" : `Earlier ask, the agent kept going: ${pastAsk(b.ask)}`;
+  return `${b.outcome} · ${pastAsk(b.ask)}`;
 }
 
 // ---------- PR facts (S5) ----------
@@ -350,7 +369,9 @@ export type BriefEvent =
   | { type: "undo" }
   | { type: "permission_resolved" }
   /** A PR's new state: lands only on the open brief whose facts are about that PR. */
-  | { type: "facts"; prKey: string; facts: BriefFact[] };
+  | { type: "facts"; prKey: string; facts: BriefFact[] }
+  /** Every question the brief points at is settled, by any path (briefQuestionsEvent): an answer, or null if withdrawn. */
+  | { type: "questions"; answers: Record<string, { choice: string; words: string | null } | null> };
 
 /** A bare letter, or an option's label, as the developer's message counts as picking it (§2 Keyboard). */
 export function matchOption(b: Pick<Brief, "decisions">, text: string | null): { decision: BriefDecision; letter: string } | null {
@@ -427,6 +448,13 @@ export function briefStep(prev: Brief | null, event: BriefEvent, now: string): {
     case "permission_resolved":
       if (prev?.state !== "open" || prev.source !== "permission") return keep;
       { const b = collapse(prev, "superseded", "Permission answered"); return { brief: b, appends: [b] }; }
+    case "questions": {
+      if (prev?.state !== "open" || !prev.questionIds.length || !prev.questionIds.every(id => id in event.answers)) return keep;
+      const decisions = prev.decisions.map(d => { const a = event.answers[d.id]; return a && !d.chosen ? { ...d, chosen: a.choice, words: isOther(a.choice) ? a.words : null } : d; });
+      const answered = prev.questionIds.some(id => event.answers[id]);
+      const b = answered ? { ...collapse(prev, "answered", answeredOutcome(decisions)), decisions } : collapse(prev, "superseded", RESOLVED.withdrawn);
+      return { brief: b, appends: [b] };
+    }
     case "facts":
       if (prev?.state !== "open" || prev.factsPr !== event.prKey || JSON.stringify(prev.facts) === JSON.stringify(event.facts.slice(0, 3))) return keep;
       { const b = { ...prev, facts: event.facts.slice(0, 3) }; return { brief: b, appends: [b] }; }
@@ -506,3 +534,52 @@ export function shouldReopen(b: Pick<Brief, "state" | "outcome" | "questionIds">
 export const newAnswerId = (): string => `a${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12).padEnd(10, "0")}`;
 /** The delivery failure as one sentence, or a plain fallback. */
 export const undeliveredReason = (error: string | null | undefined): string => { const e = (error ?? "").trim() || "Paseo didn't confirm it"; return /[.!?]$/.test(e) ? e : `${e}.`; };
+
+/**
+ * What a brief card shows, from the server's live brief rather than the timeline row it was rendered from. The row is a
+ * snapshot that the server re-appends when the brief changes, but that write is best-effort, so the row's own `state`
+ * is never trusted on its own. A card is actionable only when the live brief is this exact brief and open.
+ *  - `live` undefined: not loaded yet. The card shows its row but isn't actionable.
+ *  - the live brief is another one (or none): this card is history. If its questions were answered, it says so
+ *    ("You picked B · …"); otherwise "Replaced by a newer update".
+ *  - every question it points at is answered: answered, even if the stored brief hasn't caught up.
+ * Decisions backed by a stored question show that question's live, full text and its recorded answer.
+ */
+export function shownBrief(row: Brief, live: { brief: Brief | null } | undefined, questions: readonly Question[] = []): { brief: Brief; actionable: boolean } {
+  const mine = live?.brief?.id === row.id ? live.brief! : row;
+  const byId = new Map(questions.map(q => [q.id, q]));
+  const decisions = mine.decisions.map(d => {
+    const q = byId.get(d.id);
+    if (!q) return d;
+    const options = q.options.length ? q.options.map(o => ({ letter: o.letter, label: o.label, consequence: o.consequence ?? null })) : d.options;
+    const chosen = d.chosen ?? q.answer?.choice ?? null;
+    return { ...d, question: q.question, options, chosen, words: d.words ?? (chosen && isOther(chosen) ? q.answer?.words ?? null : null) };
+  });
+  let brief: Brief = { ...mine, decisions };
+  if (brief.state === "open") {
+    const linked = brief.questionIds.filter(id => byId.has(id));
+    const allAnswered = linked.length > 0 && linked.length === brief.questionIds.length && linked.every(id => byId.get(id)!.answer);
+    const elsewhere = !!live && live.brief?.id !== row.id;
+    if (allAnswered) brief = { ...brief, state: "answered", outcome: answeredOutcome(decisions), outcomeAt: brief.outcomeAt ?? null };
+    else if (elsewhere) brief = { ...brief, state: "superseded", outcome: live!.brief ? RESOLVED.replaced : RESOLVED.movedOn, outcomeAt: brief.outcomeAt ?? null };
+  }
+  return { brief, actionable: !!live && live.brief?.id === row.id && brief.state === "open" };
+}
+
+/**
+ * The server-side rule: when every question an open brief points at is answered or withdrawn, by any path (the question
+ * card, the brief card, follow_record_answer, follow_answer_question, follow_withdraw_question), the brief resolves and
+ * keeps the recorded answers. Null while any is still open or unknown. Run on every state write (store.onChanged).
+ */
+export function briefQuestionsEvent(b: Brief, questions: readonly Question[]): Extract<BriefEvent, { type: "questions" }> | null {
+  if (b.state !== "open" || !b.questionIds.length) return null;
+  const answers: Record<string, { choice: string; words: string | null } | null> = {};
+  for (const id of b.questionIds) {
+    const q = questions.find(q => q.id === id);
+    if (!q) return null;
+    if (q.answer) answers[id] = { choice: q.answer.choice, words: q.answer.words ?? null };
+    else if (q.closed) answers[id] = null;
+    else return null;
+  }
+  return { type: "questions", answers };
+}

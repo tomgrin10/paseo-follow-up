@@ -14,7 +14,7 @@ import type { Theme } from "./kit";
  * Toasts appear without motion (nothing to reduce) and never take focus.
  */
 
-export { pushToast, dismissToast, runAction, runUndoable, openQuestion, useQuestionOpener, hasToastHost } from "./toast-store";
+export { pushToast, dismissToast, notice, runAction, runUndoable, openQuestion, useQuestionOpener, hasToastHost } from "./toast-store";
 import { dismissToast, emit, holdToast, hosts, subscribe, toastsNow, undoShortcut, type KeyLike, type ToastItem } from "./toast-store";
 type UndoKey = KeyLike & { preventDefault(): void; stopPropagation(): void };
 const isMac = () => /Mac|iPhone|iPad/.test((globalThis as { navigator?: { platform?: string } }).navigator?.platform ?? "");

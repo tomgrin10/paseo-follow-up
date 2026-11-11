@@ -9,7 +9,9 @@ import type { State as FollowState, Workspace as FollowWorkspace } from "../shar
 import { prActionBlocks } from "../shared/pr-actions";
 import { configuredReviewers, noReviewers, reviewerLabel, withoutAuthor } from "../shared/reviewers";
 import { classify, finishedReply, turnPrompt, type Sources } from "./inbox-classifier";
-import { briefOrigin, briefStep, pickBrief, shouldReopen, validPick, type Brief, type BriefEvent, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
+import { STALE_BRIEF } from "../shared/errors";
+import type { Question } from "../shared/questions";
+import { briefOrigin, briefQuestionsEvent, briefStep, pickBrief, shouldReopen, validPick, type Brief, type BriefEvent, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
 import { OTHER_LABEL, answerTitle, isOther } from "../shared/questions";
 
 /** The flag store: plugin-data/follow-through/inbox.json. A new file, so existing state never changes shape. */
@@ -420,6 +422,26 @@ export class Inbox {
     await this.apply(agentIds.map(agentId => ({ agentId, event: { type: "archive" } as const })));
   }
 
+  /**
+   * Follow-up's state changed (store.onChanged): an open brief whose questions are now all answered or withdrawn, by
+   * any path, resolves here, keeps the answers, and its chat row is re-appended. Cheap: only open briefs with questions.
+   */
+  async questionsChanged(workspaces: readonly { id: string; questions: Question[] }[]): Promise<void> {
+    const snap = await this.store.snapshot();
+    const due = Object.entries(snap.entries).filter(([, e]) => e?.brief?.state === "open" && e.brief.questionIds.length && e.brief.workspaceId);
+    if (!due.length) return;
+    const appends: { agentId: string; brief: Brief }[] = [];
+    await this.store.mutate(state => {
+      for (const [agentId] of due) {
+        const b = state.entries[agentId]?.brief;
+        const w = b?.workspaceId ? workspaces.find(w => w.id === b.workspaceId) : undefined;
+        const event = b && w ? briefQuestionsEvent(b, w.questions) : null;
+        if (event) this.step(state, agentId, event, this.iso(), appends);
+      }
+    });
+    await this.flush(appends);
+  }
+
   async workspaceArchived(workspaceId: string): Promise<void> {
     const agents = await this.o.directory.agents().catch(() => []);
     await this.archived(agents.filter(a => a.workspaceId === workspaceId).map(a => a.id));
@@ -458,8 +480,8 @@ export class Inbox {
       if (queued?.state === "failed") return this.resend(queued, send);
       return b;
     }
-    if (!b || b.id !== input.briefId) throw new Error("This brief was replaced by a newer one. Read the newest card.");
-    if (b.state !== "open") throw new Error("This brief was already answered or signed off.");
+    if (!b || b.id !== input.briefId) throw new Error(STALE_BRIEF.replaced);
+    if (b.state !== "open") throw new Error(STALE_BRIEF.answered);
     let text: string; let event: BriefEvent;
     if (input.move === "retry") {
       if (b.kind !== "error") throw new Error("Only a failed turn can be retried from its brief.");
@@ -498,7 +520,7 @@ export class Inbox {
     const result = await this.store.mutate(s => {
       const current = s.entries[agentId]?.brief;
       // Another answer won the race between the check above and this write: refuse rather than send both.
-      if (current?.id !== b.id || current.state !== "open") throw new Error("This brief was already answered or signed off.");
+      if (current?.id !== b.id || current.state !== "open") throw new Error(STALE_BRIEF.answered);
       this.step(s, agentId, event, at, appends);
       const brief = s.entries[agentId]?.brief;
       if (brief?.id === b.id) {
