@@ -40,3 +40,35 @@ test("harnessEnv turns dictation and voice mode off for harness daemons unless t
   assert.equal(on.PASEO_DICTATION_ENABLED, "true"); assert.equal(on.PASEO_VOICE_MODE_ENABLED, "true");
   assert.equal(harnessEnv("/tmp/follow-x", { base, strip: ["PASEO_VOICE_MODE_ENABLED"] }).PASEO_VOICE_MODE_ENABLED, undefined);
 });
+test("a harness daemon never reads the real GitHub: every script that fakes gh for a daemon also serves the HTTPS reads", async () => {
+  // 2026-11-11: GitHub reads moved from gh to in-process HTTPS (#116). check-install's fake gh was bypassed, the packed
+  // plugin asked api.github.com for example/app and the v2.0.0-rc.3 publish failed in test:install.
+  assert.equal(harnessEnv("/tmp/follow-x", { base: { PATH: "/bin", FOLLOW_UP_GITHUB_API: "https://api.github.com" } }).FOLLOW_UP_GITHUB_API, "http://127.0.0.1:9");
+  assert.equal(harnessEnv("/tmp/follow-x", { base: {}, set: { FOLLOW_UP_GITHUB_API: "http://127.0.0.1:5" } }).FOLLOW_UP_GITHUB_API, "http://127.0.0.1:5");
+  const offenders: string[] = [];
+  for (const name of (await readdir("scripts")).filter(n => n.endsWith(".mjs"))) {
+    const text = await readFile(join("scripts", name), "utf8");
+    const fakesGh = /graphql/.test(text) && /\bbin\b[^\n]*["'](bin\/)?gh["']/.test(text);
+    if (fakesGh && /spawnDaemon\(/.test(text) && !/fakeGithub\(|FOLLOW_UP_GITHUB_API/.test(text)) offenders.push(name);
+  }
+  assert.deepEqual(offenders, []);
+});
+test("fakeGithub answers reads through the fixture gh, only with the owner's own token", async () => {
+  const { fakeGithub } = await import(resolve("scripts/fake-github.mjs"));
+  const { mkdtemp, writeFile, chmod, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { execFile } = await import("node:child_process");
+  const dir = await mkdtemp(join(tmpdir(), "fake-github-"));
+  const gh = join(dir, "gh");
+  await writeFile(gh, `#!/usr/bin/env node\nif (process.env.GH_REPO !== "example/app") { console.error("wrong repo"); process.exit(1); }\nconsole.log(process.argv[3] === "graphql" ? JSON.stringify({ data: { repository: { p0: { number: 1 } } } }) : "[]");\n`); await chmod(gh, 0o700);
+  const github = await fakeGithub({ dir, gh });
+  try {
+    const token = await new Promise<string>((ok, fail) => execFile(github.env.FOLLOW_UP_GH_BIN, ["auth", "token", "--user", "fixture-example"], (e, out) => e ? fail(e) : ok(out.trim())));
+    const post = (auth: string, owner = "example") => fetch(`${github.url}/graphql`, { method: "POST", headers: { authorization: `bearer ${auth}` }, body: JSON.stringify({ query: "{}", variables: { owner, name: "app" } }) });
+    assert.deepEqual(await (await post(token)).json(), { data: { repository: { p0: { number: 1 } } } });
+    assert.equal((await post("fixture-token-other")).status, 401);
+    assert.equal((await post("fixture-token-other", "other")).status, 502, "the fixture's own GH_REPO check still runs");
+    assert.deepEqual(await (await fetch(`${github.url}/repos/example/app/rules/branches/main`, { headers: { authorization: `bearer ${token}` } })).json(), []);
+    assert.match(await (await import("node:fs/promises")).readFile(github.env.GH_ACCOUNT_MAP, "utf8"), /^example fixture-example$/m);
+  } finally { await github.close(); await rm(dir, { recursive: true, force: true }); }
+});

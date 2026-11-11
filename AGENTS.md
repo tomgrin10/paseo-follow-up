@@ -224,9 +224,9 @@ See [docs/releasing.md](docs/releasing.md). In short:
   last message.
 - **Timeline reads on agent events.** `agent.turn_ended` can read a bounded tail (the agent is live). Anything
   outside a live event must check `isLoaded()` first.
-- **CI doesn't run everything.**
-  - PR CI (`.github/workflows/ci.yml`) runs `verify` and `npm pack --dry-run` with Paseo 0.15.2. It doesn't run
-    `test:install`.
-  - The publish workflow (`.github/workflows/publish-npm.yml`) runs `verify` and `test:install` with Paseo 0.15.2 and
-    no model credentials, so `check-wait` skips there.
-  - Run `npm run test:install` and, when you touch Wait, `npm run test:wait-live` locally.
+- **CI doesn't run everything.** It runs no live-model check.
+  - PR CI (`.github/workflows/ci.yml`) runs the publish workflow's gate: `verify`, `test:install` and
+    `npm pack --dry-run`, with Paseo 0.15.2 and the same Claude and Codex CLIs. `tests/publish-gate.test.ts`
+    (invariant `publish-gate-checks-run-on-every-pr`) fails when the publish workflow runs a check PR CI doesn't.
+  - Neither has model credentials, so `check-wait` skips there.
+  - When you touch Wait, run `npm run test:wait-live` locally.
