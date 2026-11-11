@@ -4,3 +4,7 @@ export const overviewKey = ["follow-through", "overview"];
 /** The browser extension's connection status: one shared query for every surface (1.4.0: 15 s, was 5 s). */
 export const browserKey = ["follow-through", "browser"];
 export const BROWSER_POLL_MS = 15_000;
+/** An agent's live brief (follow.inbox-brief): one query per agent, shared by every brief card in its chat. */
+export const liveBriefKey = (agentId: string) => ["follow-through", "live-brief", agentId];
+/** How often a card that still looks open re-checks it (only while Paseo is visible; React Query pauses when hidden). */
+export const LIVE_BRIEF_POLL_MS = 30_000;

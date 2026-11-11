@@ -21,7 +21,8 @@ export class Store {
   private flushing: Promise<void> | null = null;
   /**
    * Called inside each mutation with the new state, before it returns, so files derived from it (scopes.json)
-   * are current as soon as the mutation is, independent of the batched state.json write.
+   * are current as soon as the mutation is, independent of the batched state.json write. It runs inside the write
+   * queue, so it must never await a write to this store: that write would wait on the queue it holds.
    */
   onChanged: (state: State) => Promise<void> = async () => {};
   /** Writes to state.json, for tests and the resource check. */
