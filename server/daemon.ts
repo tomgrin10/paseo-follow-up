@@ -1,3 +1,4 @@
+import { settleWithin } from "./teardown";
 import { isRecovery, RECOVERY_LABEL, RECOVERY_BATCH_LABEL, RECOVERY_TITLE, MCP_SERVER, MCP_SERVERS } from "../shared/legacy";
 import { isOverseerAgent } from "../shared/overseer";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -74,7 +75,7 @@ export async function withDaemon<T>(work: (client: Daemon) => Promise<T>): Promi
   try { await client.connect(); return await work(client); }
   finally { clients.delete(client); await client.close().catch(() => undefined); }
 }
-export async function closeConnections(): Promise<void> { stopped = true; await Promise.allSettled([...clients].map(c => c.close())); }
+export async function closeConnections(): Promise<void> { stopped = true; await settleWithin(Promise.allSettled([...clients].map(c => c.close()))); }
 
 export async function pages<T>(fetch: (cursor?: string) => Promise<{ entries: T[]; pageInfo: { hasMore: boolean; nextCursor: string | null } }>): Promise<T[]> {
   const rows: T[] = []; let cursor: string | undefined;
