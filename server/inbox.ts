@@ -2,7 +2,7 @@ import { DEVELOPER, ledgerBy, onBehalfLine, type Actor } from "../shared/actor";
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { stableMessageId, withDeadline } from "./delivery";
+import { realTimers, stableMessageId, withDeadline, type Timers } from "./delivery";
 import { BackgroundAgents } from "./background-agents";
 import { emptyInbox, expired, inboxStateSchema, type OutboxEntry, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason, liveFlag, withoutRunState } from "../shared/inbox";
 import type { State as FollowState, Workspace as FollowWorkspace } from "../shared/model";
@@ -406,7 +406,10 @@ export class Inbox {
   pendingPermissions(): string[] { return [...this.pending]; }
 
   /** Stop pending grace timers when the worker stops. */
-  stop(): void { for (const { timer, done } of this.grace.values()) { clearTimeout(timer); done(); } this.grace.clear(); for (const t of this.retryTimers.values()) clearTimeout(t); this.retryTimers.clear(); }
+  /** Stop pending grace timers and answer retries when the worker stops. An attempt still in flight writes nothing after
+   * this: the next worker owns the outbox (resumeAnswers), and a stopped one must not overwrite what it records. */
+  stop(): void { this.stopped = true; for (const { timer, done } of this.grace.values()) { clearTimeout(timer); done(); } this.grace.clear(); for (const t of this.retryTimers.values()) this.timers.clear(t); this.retryTimers.clear(); }
+  private stopped = false;
 
   async closed(agent: { id: string; workspaceId: string | null; parentAgentId?: string | null }): Promise<void> {
     const wasLive = this.live.delete(agent.id);
@@ -544,6 +547,7 @@ export class Inbox {
   /** Background work after an RPC replied; failures are kept on the record, never thrown at nobody. Tests await `idle()`. */
   private running = new Set<Promise<unknown>>();
   private after(work: () => Promise<unknown>): void {
+    if (this.stopped) return;
     const p = work().catch(error => console.warn(`[follow-up] background inbox work failed: ${error instanceof Error ? error.message : String(error)}`)).finally(() => this.running.delete(p));
     this.running.add(p);
   }
@@ -552,12 +556,15 @@ export class Inbox {
   /** Retry delays for an answer Paseo didn't confirm. Each attempt is capped; the same messageId makes a retry safe. */
   deliveryRetryMs = [15_000, 60_000, 300_000];
   deliveryAttemptMs = 120_000;
-  private retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Retry delays and attempt deadlines run on this; tests inject fake timers (see Timers). */
+  timers: Timers = realTimers;
+  private retryTimers = new Map<string, unknown>();
 
   /** One attempt to get a recorded answer to its agent; on failure, a later retry, then `failed` on the brief with the reason. */
   private async deliverAnswer(entry: OutboxEntry, send: Send): Promise<void> {
-    const outcome = await withDeadline(send(entry.text, entry.messageId), this.deliveryAttemptMs, "Paseo didn't confirm the answer in time")
+    const outcome = await withDeadline(send(entry.text, entry.messageId), this.deliveryAttemptMs, "Paseo didn't confirm the answer in time", this.timers)
       .then(() => null, (error: unknown) => error instanceof Error ? error.message : String(error));
+    if (this.stopped) return;
     const attempts = entry.attempts + 1;
     const retryIn = outcome === null ? null : this.deliveryRetryMs[attempts - 1] ?? null;
     await this.store.mutate(s => {
@@ -576,10 +583,9 @@ export class Inbox {
     if (outcome !== null) console.warn(`[follow-up] answer ${entry.answerId} to ${entry.agentId} not confirmed (attempt ${attempts}): ${outcome}`);
     const brief = (await this.store.snapshot()).entries[entry.agentId]?.brief;
     if (brief?.id === entry.briefId) await this.o.briefs?.sink(entry.agentId, brief).catch(() => undefined);
-    if (retryIn !== null) {
-      clearTimeout(this.retryTimers.get(entry.answerId));
-      const timer = setTimeout(() => { this.retryTimers.delete(entry.answerId); this.after(() => this.deliverAnswer({ ...entry, attempts }, send)); }, retryIn);
-      (timer as { unref?: () => void }).unref?.();
+    if (retryIn !== null && !this.stopped) {
+      if (this.retryTimers.has(entry.answerId)) this.timers.clear(this.retryTimers.get(entry.answerId));
+      const timer = this.timers.set(() => { this.retryTimers.delete(entry.answerId); this.after(() => this.deliverAnswer({ ...entry, attempts }, send)); }, retryIn);
       this.retryTimers.set(entry.answerId, timer);
     }
   }

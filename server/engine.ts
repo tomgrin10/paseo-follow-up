@@ -10,7 +10,7 @@ import { reconcileSubmittedStacks } from "./submissions";
 import { applyDiscovery, interruptionHold, startsWithAutoSend, type DiscoveredWorkspace } from "./discovery";
 import { followsByDefault, migrateActiveScope } from "../shared/settings";
 import { replyRecorded } from "../shared/communication";
-import { DeliveryDeferred, ConversationGone, withDeadline } from "./delivery";
+import { DeliveryDeferred, ConversationGone, realTimers, withDeadline, type Timers } from "./delivery";
 import { recordSnapshot } from "./deployment-anchor";
 import { pruneUnsent } from "./batch-archive";
 import { holdSuperseded, liftHold } from "../shared/status";
@@ -237,6 +237,8 @@ export class Engine {
   async idle(): Promise<void> { while (this.deliveries.size) await Promise.allSettled([...this.deliveries]); }
   /** One delivery attempt's cap: past it the answer reads "unconfirmed" instead of "sending" forever. */
   deliveryAttemptMs = 120_000;
+  /** The attempt deadline runs on this; tests inject fake timers (see Timers). */
+  timers: Timers = realTimers;
   private async deliverAnswer(workspaceId: string, questionId: string): Promise<void> {
     const w = findWorkspace(await this.store.snapshot(), workspaceId);
     const q = w.questions.find(q => q.id === questionId);
@@ -244,7 +246,7 @@ export class Engine {
     let outcome: { state: "sent" | "queued" | "unconfirmed"; to: string | null; reason: string | null };
     try {
       if (!this.gateway.deliver) throw new DeliveryDeferred("Messaging is unavailable in this Paseo version; copy the answer instead.");
-      const to = await withDeadline(this.gateway.deliver(w, answerRecipients(w, q), answerMessage(q, q.answer.choice, q.answer.words), q.answer.delivery.messageId), this.deliveryAttemptMs, "Paseo didn't confirm the answer in time");
+      const to = await withDeadline(this.gateway.deliver(w, answerRecipients(w, q), answerMessage(q, q.answer.choice, q.answer.words), q.answer.delivery.messageId), this.deliveryAttemptMs, "Paseo didn't confirm the answer in time", this.timers);
       outcome = { state: "sent", to, reason: null };
     } catch (error) {
       outcome = error instanceof DeliveryDeferred
