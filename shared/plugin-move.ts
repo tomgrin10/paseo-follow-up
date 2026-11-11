@@ -9,7 +9,9 @@ import { LEGACY_PLUGIN_ID, PLUGIN_ID } from "./legacy";
  *  - moving: the move is running.
  *  - moved: done, within the last week.
  *  - rolled-back / failed: the new id didn't come up, so the old id runs again. Not retried by itself; Retry asks again.
- *  - manual: not installed from npm, so Follow-up can't reinstall itself.
+ *  - manual: not installed from npm or a Paseo plugin registry (git, a local directory), so Follow-up can't reinstall
+ *    itself. A registry install (Paseo's plugin list) moves by reinstalling from its registry, which takes the
+ *    reviewed pin and the manifest's new id.
  */
 export const MOVE_PHASES = ["none", "waiting", "moving", "moved", "rolled-back", "failed", "manual"] as const;
 export const moveViewSchema = z.object({
@@ -36,7 +38,7 @@ export function moveView(input: { id: string | null | undefined; installKind: st
   if (input.id !== LEGACY_PLUGIN_ID) {
     return last?.event === "moved" && input.now - last.at < MOVE_SHOWN_MS ? { ...base, phase: "moved", at: last.at, reason: null } : { ...base, phase: "none", at: null, reason: null };
   }
-  if (input.installKind !== "npm") return { ...base, phase: "manual", at: null, reason: null };
+  if (input.installKind !== "npm" && input.installKind !== "registry") return { ...base, phase: "manual", at: null, reason: null };
   if (input.moving) return { ...base, phase: "moving", at: null, reason: null };
   if (last && last.event !== "moved" && !input.retryAsked) return { ...base, phase: last.event === "move-failed" ? "failed" : "rolled-back", at: last.at, reason: last.reason ?? null };
   return { ...base, phase: "waiting", at: null, reason: null };
