@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { ToastApi } from "@getpaseo/plugin/client/ui";
-import { errorText, sentence } from "../shared/errors";
+import { errorText, isMoot, sentence } from "../shared/errors";
 
 /**
  * Follow-up's one toast system, the part without React Native: the store, `runAction` and the question openers.
@@ -88,6 +88,11 @@ export type ActionSpec<T> = {
   /** Runs after a failure, before the toast: keep the input, mark the card. */
   onError?: (error: unknown) => void;
   onSuccess?: (result: T) => void;
+  /**
+   * The server refused because the thing was already answered, replaced or withdrawn elsewhere (isMoot): not a failure,
+   * so no error toast and no Retry. The surface refreshes and shows the resolved state with the recorded answer.
+   */
+  reconcile?: (error: unknown) => void;
 };
 
 let boundToast: ToastApi | null = null;
@@ -101,6 +106,12 @@ const inflight = new Set<string>();
  * the card back with what the developer entered. Without a mounted ToastHost the host toast says it instead.
  * With a `key`, a second identical action while one runs is dropped. Resolves true on success.
  */
+/** A neutral one-line note (no actions): through the ToastHost when one is mounted, else the host toast. */
+export function notice(message: string, toast?: ToastApi): void {
+  if (hasToastHost()) pushToast("info", message);
+  else (toast ?? boundToast)?.show(message);
+}
+
 export async function runAction<T>(opts: ActionSpec<T>, key?: string): Promise<boolean> {
   if (key !== undefined) { if (inflight.has(key)) return false; inflight.add(key); }
   const toast = opts.toast ?? boundToast ?? undefined;
@@ -115,6 +126,7 @@ export async function runAction<T>(opts: ActionSpec<T>, key?: string): Promise<b
     }
     return true;
   } catch (error) {
+    if (opts.reconcile && isMoot(error)) { opts.reconcile(error); return false; }
     opts.onError?.(error);
     const failure = typeof opts.failure === "function" ? opts.failure(error) : opts.failure ?? `${opts.label} didn't work`;
     const reason = errorText(error);

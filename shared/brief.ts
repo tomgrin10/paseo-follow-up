@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Pr, Workspace } from "./model";
-import { OTHER_LABEL, answerLabel, isOther } from "./questions";
+import { OTHER_LABEL, answerLabel, isOther, type Question } from "./questions";
 
 /**
  * The brief: "what you need to do", appended as one card at the end of an agent's timeline when it needs
@@ -506,3 +506,34 @@ export function shouldReopen(b: Pick<Brief, "state" | "outcome" | "questionIds">
 export const newAnswerId = (): string => `a${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12).padEnd(10, "0")}`;
 /** The delivery failure as one sentence, or a plain fallback. */
 export const undeliveredReason = (error: string | null | undefined): string => { const e = (error ?? "").trim() || "Paseo didn't confirm it"; return /[.!?]$/.test(e) ? e : `${e}.`; };
+
+/**
+ * What a brief card shows, from the server's live brief rather than the timeline row it was rendered from. The row is a
+ * snapshot that the server re-appends when the brief changes, but that write is best-effort, so the row's own `state`
+ * is never trusted on its own. A card is actionable only when the live brief is this exact brief and open.
+ *  - `live` undefined: not loaded yet. The card shows its row but isn't actionable.
+ *  - the live brief is another one (or none): this card is history. If its questions were answered, it says so
+ *    ("You picked B · …"); otherwise "Replaced by a newer update".
+ *  - every question it points at is answered: answered, even if the stored brief hasn't caught up.
+ * Decisions backed by a stored question show that question's live, full text and its recorded answer.
+ */
+export function shownBrief(row: Brief, live: { brief: Brief | null } | undefined, questions: readonly Question[] = []): { brief: Brief; actionable: boolean } {
+  const mine = live?.brief?.id === row.id ? live.brief! : row;
+  const byId = new Map(questions.map(q => [q.id, q]));
+  const decisions = mine.decisions.map(d => {
+    const q = byId.get(d.id);
+    if (!q) return d;
+    const options = q.options.length ? q.options.map(o => ({ letter: o.letter, label: o.label, consequence: o.consequence ?? null })) : d.options;
+    const chosen = d.chosen ?? q.answer?.choice ?? null;
+    return { ...d, question: q.question, options, chosen, words: d.words ?? (chosen && isOther(chosen) ? q.answer?.words ?? null : null) };
+  });
+  let brief: Brief = { ...mine, decisions };
+  if (brief.state === "open") {
+    const linked = brief.questionIds.filter(id => byId.has(id));
+    const allAnswered = linked.length > 0 && linked.length === brief.questionIds.length && linked.every(id => byId.get(id)!.answer);
+    const elsewhere = !!live && live.brief?.id !== row.id;
+    if (allAnswered) brief = { ...brief, state: "answered", outcome: answeredOutcome(decisions), outcomeAt: brief.outcomeAt ?? null };
+    else if (elsewhere) brief = { ...brief, state: "superseded", outcome: "Replaced by a newer update", outcomeAt: brief.outcomeAt ?? null };
+  }
+  return { brief, actionable: !!live && live.brief?.id === row.id && brief.state === "open" };
+}

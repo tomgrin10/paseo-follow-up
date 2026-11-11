@@ -1,16 +1,16 @@
 import { useState, useSyncExternalStore } from "react";
-import { browserKey, BROWSER_POLL_MS } from "./keys";
+import { browserKey, BROWSER_POLL_MS, liveBriefKey, LIVE_BRIEF_POLL_MS, workspaceKey } from "./keys";
 import { Platform, View, useWindowDimensions } from "react-native";
 import { Pressable, Text } from "./text";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { openExternalUrl, useRpc, type PluginClientContext, type PluginTimelineItemProps } from "@getpaseo/plugin/client";
 import { Icon, TextInput, copyText, useToast } from "@getpaseo/plugin/client/ui";
-import { BRIEF_KIND, BRIEF_VERSION, askedDecisions, pickedCount, briefSchema, collapsedLine, extrasFit, hasOriginal, nothingNeededLine, isTight, pastRows, pastTone, selectsFirst, sendBar, newAnswerId, undeliveredReason, type Brief, type BriefDecision, type BriefMove } from "../shared/brief";
+import { BRIEF_KIND, BRIEF_VERSION, askedDecisions, pickedCount, briefSchema, collapsedLine, extrasFit, hasOriginal, nothingNeededLine, isTight, pastRows, pastTone, selectsFirst, sendBar, shownBrief, newAnswerId, undeliveredReason, type Brief, type BriefDecision, type BriefMove } from "../shared/brief";
 import { age } from "../shared/inbox";
 import { briefKey, HEADLINE_WORD } from "../shared/headline";
 /** The card's kind word comes from the same table as the pill and the Needs-you row. */
 const word = (kind: Brief["kind"]) => HEADLINE_WORD[briefKey(kind)];
-import { briefActionRpc, browserStatusRpc } from "../shared/contracts";
+import { briefActionRpc, browserStatusRpc, inboxBriefRpc } from "../shared/contracts";
 import { errorText } from "../shared/errors";
 import { OTHER, OTHER_LABEL, isOther } from "../shared/questions";
 import type { Workspace } from "../shared/model";
@@ -147,6 +147,7 @@ function BriefBody({ b, c, compact, tight, embedded, height, mode, picks, onPick
 }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [details, setDetails] = useState(false);
+  const [fullContext, setFullContext] = useState(false);
   const readonly = mode === "readonly";
   // An agent's brief_action answered this card for the developer: say whose answer it is, never "Your answer".
   const answerLabel = b.answeredBy?.startsWith("agent:") ? `${b.answeredByTitle ?? "An agent"}'s answer` : "Your answer";
@@ -190,7 +191,9 @@ function BriefBody({ b, c, compact, tight, embedded, height, mode, picks, onPick
       <Text style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 18, fontWeight: "500" }}>Details</Text>
     </Pressable>}
 
-    {showExtra && !!b.context && <RichText selectable linkColor={c.foreground} numberOfLines={readonly ? undefined : 4} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 19 }}>{b.context}</RichText>}
+    {showExtra && !!b.context && <RichText selectable linkColor={c.foreground} numberOfLines={readonly || fullContext ? undefined : CONTEXT_LINES} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 19 }}>{b.context}</RichText>}
+    {/* Clamped by lines (a word boundary, with an ellipsis), never cut in the data; long context opens in full. */}
+    {showExtra && !readonly && clamps(b.context, CONTEXT_LINES) && <Reveal label="Show more" openLabel="Show less" open={fullContext} onPress={() => setFullContext(v => !v)} c={c} compact={compact} />}
 
     {showExtra && (b.facts.length > 0 || b.links.length > 0) && <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
       {b.facts.slice(0, 3).map((f, i) => { const col = factTone(f.tone, c); return <View key={`f${i}`} style={{ flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 8, minHeight: 24, borderRadius: 6, backgroundColor: f.tone === "muted" ? c.surface2 : withAlpha(col, isLight(c) ? 0.1 : 0.14) }}>
@@ -220,8 +223,12 @@ function SendBar({ b, picks, busy, error, onSend, c, compact }: { b: Brief; pick
 }
 
 /** "Show full question" / "Show original": a past card opens back up, read-only. */
-function Reveal({ label, open, onPress, c, compact }: { label: string; open: boolean; onPress: () => void; c: Colors; compact: boolean }) {
-  const text = open ? label.replace(/^Show/, "Hide") : label;
+const CONTEXT_LINES = 4;
+/** Roughly whether text runs past `lines` lines of the card's width (about 70 characters a line), so it gets Show more. */
+const clamps = (t: string | null | undefined, lines: number) => !!t && t.length > lines * 70;
+
+function Reveal({ label, openLabel, open, onPress, c, compact }: { label: string; openLabel?: string; open: boolean; onPress: () => void; c: Colors; compact: boolean }) {
+  const text = open ? openLabel ?? label.replace(/^Show/, "Hide") : label;
   return <Pressable accessibilityRole="button" aria-expanded={open} accessibilityLabel={text} onPress={onPress} hitSlop={6}
     style={({ focused }: { pressed: boolean; focused?: boolean }) => ({ ...ring(focused, c), flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start", minHeight: compact ? 44 : 24 })}>
     <View style={{ transform: [{ rotate: open ? "90deg" : "0deg" }] }}><Icon name="ChevronRight" size={14} color={c.foregroundMuted} /></View>
@@ -293,12 +300,24 @@ function Past({ b, c, now, compact, height, pending = false, onResend, resending
 /** `embedded`: inside Home's detail pane, which has its own reply box and action bar, so the card drops its moves. */
 /** `snoozed`: the row is in Later, so the card wears the row's muted tone and says "Later" instead of "Needs you". */
 export function BriefCard({ item, theme, layout, agentId, deps, embedded = false, snoozed = false }: PluginTimelineItemProps<Brief> & { deps: BriefDeps; embedded?: boolean; snoozed?: boolean }) {
-  const c = theme.colors; const b = item.data; const compact = layout.compact;
+  const c = theme.colors; const row = item.data; const compact = layout.compact;
+  // The row is a snapshot; the live brief decides (shownBrief). Only a row that still looks open asks, one query per
+  // agent for every card in its chat. A card is actionable only when the server says this exact brief is open.
+  const readBrief = useRpc(inboxBriefRpc);
+  const cache = useQueryClient();
+  const live = useQuery({ queryKey: liveBriefKey(agentId), queryFn: () => readBrief({ agentId }), enabled: row.state === "open" && !!agentId, refetchInterval: LIVE_BRIEF_POLL_MS, staleTime: 5_000 });
+  const workspace = row.workspaceId ? deps.workspace(row.workspaceId) : undefined;
+  const shown = row.state === "open" ? shownBrief(row, live.data, workspace?.questions ?? []) : { brief: row, actionable: false };
+  const b = shown.brief;
+  // A refusal that means "already answered or replaced" isn't a failure: re-read, and the card shows what happened.
+  const reconcile = () => { setError(null); void cache.invalidateQueries({ queryKey: liveBriefKey(agentId) }); if (row.workspaceId) void cache.invalidateQueries({ queryKey: workspaceKey(row.workspaceId) }); };
   const now = useNow(60_000);
   const { height } = useWindowDimensions();
   const act = useRpc(briefActionRpc);
   const browserRead = useRpc(browserStatusRpc);
-  const [busy, setBusy] = useState<string | null>(null);
+  const [sending, setBusy] = useState<string | null>(null);
+  // Until the server confirms this brief is the open one, every control waits ("checking" matches no button's key).
+  const busy = sending ?? (shown.actionable ? null : "checking");
   const [error, setError] = useState<string | null>(null);
   const toast = useToast();
   const [why, setWhy] = useState(false);
@@ -309,14 +328,14 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   const picks = usePicks(b.id);
   const words = useWords(b.id);
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" } | null>(null);
-  const workspace = b.workspaceId ? deps.workspace(b.workspaceId) : undefined;
   const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), refetchInterval: BROWSER_POLL_MS, enabled: !!sheet });
   // Send again on an undelivered answer: the same answerId, so the server resends that answer and never a second one.
   const resend = () => {
-    if (busy || !b.answerId) return; setBusy("resend");
+    // Only a send in flight blocks it: a resolved card is never "actionable", but its undelivered answer can go again.
+    if (sending || !b.answerId) return; setBusy("resend");
     void runAction({ label: "Answer", toast, run: () => act({ agentId, briefId: b.id, answerId: b.answerId! }), success: () => null, failure: "Your answer wasn't sent again" }).finally(() => setBusy(null));
   };
-  if (b.state !== "open") return <Past b={b} c={c} now={now} compact={compact} height={height} onResend={b.answerId ? resend : undefined} resending={busy === "resend"} />;
+  if (shown.brief.state !== "open") return <Past b={shown.brief} c={c} now={now} compact={compact} height={height} onResend={b.answerId ? resend : undefined} resending={sending === "resend"} />;
   // Muted until the send lands: the server's answered brief then replaces this, green.
   if (marked) return <Past b={{ ...b, state: "answered", outcome: "Done", outcomeAt: marked }} pending={!sent} c={c} now={now} compact={compact} height={height} />;
 
@@ -333,7 +352,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   const run = async (key: string, work: (answerId: string) => Promise<unknown>, failure = "Your answer wasn't sent") => {
     if (busy) return; setBusy(key); setError(null);
     const answerId = newAnswerId();
-    await runAction({ label: "Brief", toast, run: () => work(answerId), success: () => null, onError: e => setError(errorText(e)), failure });
+    await runAction({ label: "Brief", toast, run: () => work(answerId), success: () => null, onError: e => setError(errorText(e)), reconcile, failure });
     setBusy(null);
   };
   // Done: "Done: <ask>" can't be unsent, so it goes out when the toast's Undo window ends (runUndoable). A failure
@@ -343,7 +362,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
     setError(null); setSent(false); setMarked(new Date().toISOString());
     const doneId = newAnswerId();
     const id = runUndoable("Telling the agent it's done", { label: "Done", toast, run: () => act({ agentId, briefId: b.id, move: "done", answerId: doneId }), success: "Marked done. The agent has it.",
-      failure: "Done not sent", open: () => deps.openAgent(agentId), onSuccess: () => setSent(true), onError: e => { setMarked(null); setError(errorText(e)); } }, () => setMarked(null), `done:${b.id}`, () => deps.endDone?.(agentId));
+      failure: "Done not sent", open: () => deps.openAgent(agentId), onSuccess: () => setSent(true), onError: e => { setMarked(null); setError(errorText(e)); }, reconcile: () => { setMarked(null); reconcile(); } }, () => setMarked(null), `done:${b.id}`, () => deps.endDone?.(agentId));
     // The pill's Undo is this toast's Undo: it closes the toast (so nothing is sent) and reopens the card.
     if (id !== null) deps.noteDone?.(agentId, () => { dismissToast(id); setMarked(null); });
   };
