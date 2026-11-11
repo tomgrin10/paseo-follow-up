@@ -1,1 +1,0 @@
-- Press Cmd+Enter (Ctrl+Enter on Windows and Linux) to send an answer or save a dialog, even while typing a note. Enter works too when you're not in a text box.

@@ -2,19 +2,19 @@
   "id": "follow-up",
   "name": "Follow-up",
   "icon": "assets/icon.png",
-  "description": "See every workspace PR stack at a glance, answer your agents' questions, send repairs in one batch, and know when something needs you.",
+  "description": "Follow every workspace until the work is done: one Home for what needs you, questions you answer anywhere, and repairs that send themselves.",
   "media": [
-    "docs/screenshots/follow-up-hero.png",
-    "docs/screenshots/follow-up-questions.png",
-    "docs/screenshots/follow-up-states.png",
-    "docs/screenshots/follow-up-pill.png",
-    "docs/screenshots/follow-up-large.png",
-    "docs/screenshots/follow-up-pr.png",
-    "docs/screenshots/follow-up-chat.png",
     "docs/screenshots/follow-up-home.png",
-    "docs/screenshots/follow-up-mobile.png"
+    "docs/screenshots/follow-up-panel.png",
+    "docs/screenshots/follow-up-questions.png",
+    "docs/screenshots/follow-up-pill.png",
+    "docs/screenshots/follow-up-pr-sheet.png",
+    "docs/screenshots/follow-up-context-menu.png",
+    "docs/screenshots/follow-up-linked-items.png",
+    "docs/screenshots/follow-up-phone.png",
+    "docs/screenshots/follow-up-setup.png"
   ],
   "requirements": {
-    "paseo": ">=0.14.0"
+    "paseo": ">=0.15.0"
   }
 }

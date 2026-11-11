@@ -1,1 +1,0 @@
-- Settings → Agents says how many jobs differ from the recommendation once, in the Helper agents card. Use recommended for all appears only when two or more jobs differ; a single job has its own button.

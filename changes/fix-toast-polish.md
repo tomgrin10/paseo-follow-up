@@ -1,3 +1,0 @@
-- While you can still undo Done, the composer pill says Done, and its Undo takes the Done back.
-- Error messages are as narrow as Paseo's own. The full reason shows where Open takes you.
-- Ctrl+Z (Cmd+Z on a Mac) undoes the last action while its Undo message is showing.

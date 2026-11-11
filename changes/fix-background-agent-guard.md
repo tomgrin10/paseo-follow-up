@@ -1,1 +1,0 @@
-- On Paseo 0.16, helper agents that other plugins run in the background no longer get Follow-up's tools or its end-of-turn reminder, and no longer show up in Needs you.

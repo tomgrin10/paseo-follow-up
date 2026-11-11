@@ -1,1 +1,0 @@
-- With reduced motion turned on, Getting started's steps show at once instead of fading in.

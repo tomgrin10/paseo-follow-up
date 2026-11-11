@@ -18,22 +18,28 @@ The orchestrator is Tom, or the coordinating agent he runs releases from. Featur
 stop.
 
 1. Start from a clean `main` that has every PR to ship.
-2. `npm run release:notes <version>` (`scripts/release-notes.mjs`) moves every fragment under
-   `## <version> (<date>)` at the top of `CHANGELOG.md` and deletes the fragments. Pass `-- --allow-empty` for a
-   release with nothing user-facing. **Betas get no section:** for a version with a prerelease part, release:notes
-   leaves the fragments in `changes/` for the next stable release. **A major's release candidate**
-   (`2.0.0-rc.N`) isn't a beta. It carries the major's own section (`## 2.0.0`): release:notes writes that section,
-   or appends to it when it already exists, and `--curated` instead deletes fragments the hand-written section
-   already covers. The final `2.0.0` reuses the same section. In the app, `notesVersion` (`shared/changelog.ts`) maps
-   an rc to that section, so 1.x → rc.0 shows What's new once, and rc.N → 2.0.0 doesn't show it again. Older
-   history can sit below a `<details>` line in CHANGELOG.md: the parser stops there, so it never reaches What's new.
-   `check:notes` fails when a stable version, or a major's rc, has no section of its own. Never edit a released section, except to fix wording.
+2. **Notes come in two tiers.**
+   - **A beta** gets no CHANGELOG section. Its fragments stay in `changes/` for the next stable or rc, and its GitHub
+     release shows them as they are.
+   - **A stable version or a major's rc is curated.** `npm run release:notes <version>` (`scripts/release-notes.mjs`)
+     writes a DRAFT section: the fragments as starting material under a `<!-- DRAFT … -->` line, then a generated
+     "Full changelog since <last stable>" in a collapsed `<details>` block (every fragment, deduplicated and grouped by
+     area), and deletes the fragments. Rewrite the draft into a short section grouped by what a user gets, lead with
+     what matters, cut internal fixes, and delete the DRAFT line. `check:notes` (in `verify`, so in the publish
+     workflow too) fails while the line is there. A curated section can use `###` headings and paragraphs; What's
+     new shows them as written, without images. Pass `-- --allow-empty` for a release with nothing user-facing.
+   - **A major's rc** (`2.0.0-rc.N`) carries the major's own section (`## 2.0.0`). A later rc or the final `2.0.0`
+     keeps the curated text as written and adds its new fragments to the full list. In the app, `notesVersion`
+     (`shared/changelog.ts`) maps an rc to that section, so 1.x → rc.0 shows What's new once, and rc.N → 2.0.0
+     doesn't show it again. The parser stops at `<details>`, so the full list never reaches What's new.
+   - `check:notes` also fails when a stable version or a major's rc has no section of its own. Never edit a released
+     section, except to fix wording.
 3. In the same commit, bump the version in `package.json` and `package-lock.json` together, commit
    `chore: release paseo-follow-up vX.Y.Z`, and push an immutable `vX.Y.Z` tag. Never move a published tag.
 4. `.github/workflows/publish-npm.yml` runs on the tag. It checks:
    - the tag is on `main` and matches `package.json`;
    - trusted publishing (OIDC) authorization;
-   - then runs `npm run verify` and `npm run test:install` with pinned Paseo 0.14 and the Claude and Codex CLIs,
+   - then runs `npm run verify` and `npm run test:install` with pinned Paseo 0.15.2 and the Claude and Codex CLIs,
      and `npm pack --dry-run`.
 
    Then it publishes:

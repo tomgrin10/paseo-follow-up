@@ -4,8 +4,14 @@
 // version with a prerelease part) get no section: the fragments stay in changes/ for the next stable release.
 // A release candidate of a major (2.0.0-rc.0) is not a beta: it writes or requires that major's section (`## 2.0.0`),
 // the one the rc and the final 2.0.0 both carry. When that section already exists (written by hand, or by an earlier
-// rc), new fragments are appended to it; `--curated` deletes them instead, for notes already folded into the section.
+// rc), its text stays as written and new fragments join its "Full changelog" list.
 // `node scripts/release-notes.mjs --check` validates CHANGELOG.md and pending fragments without writing.
+//
+// Two tiers. A beta's notes are its fragments, rendered as they are on its GitHub release (scripts/release-body.mjs in
+// the publish workflow). A stable version or a major's rc is CURATED: a short, hand-written section grouped by what a
+// user gets, which What's new shows. release:notes writes a DRAFT of it (the fragments, under DRAFT_MARKER) plus the
+// generated "Full changelog" (every fragment, grouped by area, inside <details>), and check:notes fails while the
+// version's section still carries the marker. Curating means rewriting the draft and deleting the marker line.
 import { readFile, readdir, writeFile, unlink } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +21,41 @@ const CHANGELOG = join(ROOT, "CHANGELOG.md");
 const CHANGES = join(ROOT, "changes");
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const HEADING = /^##\s+v?(\S+)(?:\s+\((\d{4}-\d{2}-\d{2})\))?\s*$/;
+
+/** The line release:notes puts in a stable or rc section it drafted from fragments. check:notes refuses it. */
+export const DRAFT_MARKER = "<!-- DRAFT: curate this section (group by what a user gets, lead with what matters), then delete this line -->";
+
+/**
+ * The full list's areas, in order, each with the words that put a note in it. A note goes to the first area that
+ * matches; "Fixes" catches what reads as a fix ("no longer", "now shows"), and "More" the rest.
+ */
+export const AREAS = [
+  ["Fixes", /\bno longer\b|\bnever (?:shows|says|clears|sends)|\bnow (?:shows|says|updates|agree)|\bwrongly\b|\bfixed\b|\bgarbles?\b/i],
+  ["Home and Needs you", /\bhome\b|needs you|needs-you|\binbox\b|sign(?:s|ed)? off|\blater\b|snooz|search|\bsort\b|sidebar|\bpill\b|status strip|right-click|long-press|row menu|undo/i],
+  ["Questions and answers", /question|answer|\bcard\b|option|something else|cmd\+enter|ctrl\+enter|\bbrief/i],
+  ["Repairs and PRs", /repair|\bbatch|auto-send|\bchecks?\b|\bmerge|review|graphite|github|conflict|deploy|\bdone\b|\bPRs?\b/i],
+  ["The Overseer and AI priority", /overseer|priority|rank/i],
+  ["Summary and Linked items", /summary|summaries|linked|linear|slack|what's this about/i],
+  ["Providers and helper agents", /provider|\bmodel|helper|settings → agents|recovery/i],
+  ["Agents and tools", /\btools?\b|\bwait\b|background|main agent|trust bypass|permission|hook/i],
+  ["Setup, Settings and updates", /setup|getting started|settings|update|what's new|version|release notes/i],
+  ["Performance", /\bload\b|lighter|memory|polling|process|less\b/i],
+  ["Phone", /phone/i],
+];
+/** Every note grouped by area (### headings), deduplicated; the markdown inside a "Full changelog" <details>. */
+export function groupByArea(bullets) {
+  const seen = new Set(); const groups = new Map([...AREAS.map(([name]) => [name, []]), ["More", []]]);
+  for (const b of bullets) {
+    const key = b.toLowerCase().replace(/\W+/g, " ").trim();
+    if (!key || seen.has(key)) continue; seen.add(key);
+    groups.get(AREAS.find(([, re]) => re.test(b))?.[0] ?? "More").push(b);
+  }
+  // Fixes match first (a fix to Home is a fix) but read last.
+  const order = [...groups].filter(([name]) => name !== "Fixes").concat([["Fixes", groups.get("Fixes")]]);
+  return order.filter(([, list]) => list.length).map(([name, list]) => `### ${name}\n\n${list.map(b => `- ${b}`).join("\n")}`).join("\n\n");
+}
+/** The collapsible full list that follows a curated section. */
+export const fullBlock = (since, bullets) => `<details><summary>Full changelog since ${since}</summary>\n\n${groupByArea(bullets)}\n\n</details>`;
 
 /** Style rules for user-facing notes; returns the problems with one bullet. */
 export function lintBullet(text) {
@@ -81,46 +122,58 @@ async function check() {
   // A stable bump without its notes would ship an empty "What's new". Run release:notes before bumping. Betas have
   // no notes of their own; their changes ship in the next stable release's section.
   const needs = notesVersion(pkg.version);
+  if (!isBeta(pkg.version) && seen.has(needs) && draftIn(changelog, needs)) problems.push(`CHANGELOG.md ${needs} is still the draft release:notes wrote. Curate it (group by what a user gets, lead with what matters, cut internal fixes), then delete the DRAFT line.`);
   if (!isBeta(pkg.version) && !seen.has(needs)) problems.push(`CHANGELOG.md has no section for ${needs === pkg.version ? `package.json's ${needs}` : `${needs}, which package.json's ${pkg.version} carries`}. Run npm run release:notes ${pkg.version} before the bump.`);
   return problems;
 }
 
+/** Whether a version's section (up to the next heading) still has the draft marker. */
+export function draftIn(changelog, version) {
+  const lines = changelog.split("\n");
+  const at = lines.findIndex(l => HEADING.exec(l)?.[1] === version);
+  if (at < 0) return false;
+  for (let i = at + 1; i < lines.length && !HEADING.test(lines[i]); i++) if (lines[i].includes("<!-- DRAFT:")) return true;
+  return false;
+}
+
 export const isPrerelease = version => /^\d+\.\d+\.\d+-/.test(version);
 
-export async function release(version, date, allowEmpty, { curated = false } = {}) {
+export async function release(version, date, allowEmpty, { since = null } = {}) {
   if (!SEMVER.test(version)) throw new Error(`Not a version: ${version}`);
   if (isBeta(version)) return { version, date, skipped: true, fragments: (await fragments()).map(f => f.name) };
   const target = notesVersion(version);
-  const changelog = await readFile(CHANGELOG, "utf8");
+  let changelog = await readFile(CHANGELOG, "utf8");
   const pending = await fragments();
-  if (versionsIn(changelog).includes(target)) {
+  const bullets = pending.flatMap(f => f.bullets);
+  for (const b of bullets) { const p = lintBullet(b); if (p.length) throw new Error(`${p.join(", ")}: ${b}`); }
+  const lines = changelog.split("\n");
+  const at = lines.findIndex(l => HEADING.exec(l)?.[1] === target);
+  const from = since ?? lines.map(l => HEADING.exec(l)?.[1]).find(v => v && v !== target && !isPrerelease(v)) ?? "the last release";
+  if (at >= 0) {
     if (!/^\d+\.0\.0$/.test(target)) throw new Error(`CHANGELOG.md already has ${version}`);
-    // The major's section exists (hand-written, or from an earlier rc): add new fragments to it, or with --curated
-    // drop them because the section already says it. A stable release of an rc'd major needs nothing else.
-    if (curated || !pending.length) { await Promise.all(pending.map(f => unlink(join(CHANGES, f.name)))); return { version, target, date, existing: true, bullets: 0, fragments: pending.map(f => f.name) }; }
-    const bullets = pending.flatMap(f => f.bullets);
-    for (const b of bullets) { const p = lintBullet(b); if (p.length) throw new Error(`${p.join(", ")}: ${b}`); }
-    const lines = changelog.split("\n");
-    const at = lines.findIndex(l => HEADING.exec(l)?.[1] === target);
+    // The major's section exists (curated by hand, or by an earlier rc). Its text stays as written; the new fragments
+    // join the full list under it.
     let end = at + 1;
-    while (end < lines.length && !HEADING.test(lines[end]) && !/^\s*<details/i.test(lines[end]) && !/^#{1,2}\s/.test(lines[end])) end++;
-    let last = end; while (last > at + 1 && !lines[last - 1].trim()) last--;
-    lines.splice(last, 0, ...bullets.map(b => `- ${b}`));
+    while (end < lines.length && !HEADING.test(lines[end]) && !/^#{1,2}\s/.test(lines[end])) end++;
+    const block = lines.slice(at + 1, end).join("\n");
+    const open = block.search(/^<details><summary>Full changelog/m);
+    let curated = open >= 0 ? block.slice(0, open) : block, old = [];
+    if (open >= 0) old = block.slice(open).split("\n").map(l => /^[-*]\s+(.*)$/.exec(l)?.[1]).filter(Boolean);
+    if (bullets.length || open >= 0) curated = `${curated.trimEnd()}\n\n${fullBlock(from, [...old, ...bullets])}\n`;
+    lines.splice(at + 1, end - at - 1, ...`${curated.trimEnd()}\n`.split("\n"));
     await writeFile(CHANGELOG, lines.join("\n"));
     await Promise.all(pending.map(f => unlink(join(CHANGES, f.name))));
     return { version, target, date, existing: true, bullets: bullets.length, fragments: pending.map(f => f.name) };
   }
-  version = target;
-  const bullets = pending.flatMap(f => f.bullets);
   if (!bullets.length && !allowEmpty) throw new Error("No release note fragments in changes/. Add one, or pass --allow-empty for a release with no user-facing change.");
-  const lines = bullets.length ? bullets : ["Small fixes and improvements."];
-  for (const b of lines) { const p = lintBullet(b); if (p.length) throw new Error(`${p.join(", ")}: ${b}`); }
-  const section = `## ${version} (${date})\n\n${lines.map(b => `- ${b}`).join("\n")}\n\n`;
-  const at = changelog.search(/^##\s/m);
-  const next = at < 0 ? `${changelog.trimEnd()}\n\n${section}` : changelog.slice(0, at) + section + changelog.slice(at);
-  await writeFile(CHANGELOG, next);
+  // A draft to curate: the fragments as starting material, the marker check:notes refuses, and the full list.
+  const body = bullets.length ? `${DRAFT_MARKER}\n\n${bullets.map(b => `- ${b}`).join("\n")}\n\n${fullBlock(from, bullets)}` : "- Small fixes and improvements.";
+  const section = `## ${target} (${date})\n\n${body}\n\n`;
+  const first = changelog.search(/^##\s/m);
+  changelog = first < 0 ? `${changelog.trimEnd()}\n\n${section}` : changelog.slice(0, first) + section + changelog.slice(first);
+  await writeFile(CHANGELOG, changelog);
   await Promise.all(pending.map(f => unlink(join(CHANGES, f.name))));
-  return { version, date, bullets: lines.length, fragments: pending.map(f => f.name) };
+  return { version: target, date, bullets: bullets.length, draft: bullets.length > 0, fragments: pending.map(f => f.name) };
 }
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
@@ -137,10 +190,11 @@ if (isMain) {
       const di = args.indexOf("--date");
       const date = di >= 0 ? args[di + 1] : new Date().toISOString().slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? "")) throw new Error("--date must be yyyy-mm-dd");
-      const result = await release(version, date, args.includes("--allow-empty"), { curated: args.includes("--curated") });
-      if (result.existing) console.log(`CHANGELOG.md: ${result.target} already has its section; ${result.bullets ? `added ${result.bullets} note(s) from` : "consumed"} ${result.fragments.length} fragment(s).`);
+      const si = args.indexOf("--since");
+      const result = await release(version, date, args.includes("--allow-empty"), { since: si >= 0 ? args[si + 1] : null });
+      if (result.existing) console.log(`CHANGELOG.md: ${result.target} already has its section; ${result.bullets ? `added ${result.bullets} note(s) to its full changelog from` : "consumed"} ${result.fragments.length} fragment(s).`);
       else if (result.skipped) console.log(`${result.version} is a beta: no release notes. ${result.fragments.length} fragment(s) stay in changes/ for the next stable release.`);
-      else console.log(`CHANGELOG.md: ${result.version} (${result.date}), ${result.bullets} note(s) from ${result.fragments.length} fragment(s)`);
+      else console.log(`CHANGELOG.md: ${result.version} (${result.date}), ${result.bullets} note(s) from ${result.fragments.length} fragment(s)${result.draft ? ". It's a DRAFT: curate it and delete the DRAFT line; check:notes refuses it until then." : ""}`);
     }
   } catch (e) { console.error(e.message); process.exit(1); }
 }

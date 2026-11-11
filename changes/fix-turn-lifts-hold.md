@@ -1,1 +1,0 @@
-- When an agent's turn fails and it then carries on, Follow-up resumes on its own instead of staying paused. A stop you made still waits for you.
