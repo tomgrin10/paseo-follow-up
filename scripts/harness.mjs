@@ -80,7 +80,7 @@ export function memoryBusy(cgroup = process.env.HARNESS_PASEO_CGROUP || "/sys/fs
 
 const triple = text => /(\d+)\.(\d+)\.(\d+)/.exec(text ?? "")?.slice(1).map(Number) ?? null;
 const below = (a, b) => { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i]; return false; };
-/** The lowest Paseo the plugin supports: requirements.paseo in paseo-plugin.json (">=0.14.0"). */
+/** The lowest Paseo the plugin supports: requirements.paseo in paseo-plugin.json (">=0.15.0"). */
 export const paseoFloor = () => JSON.parse(readFileSync(new URL("../paseo-plugin.json", import.meta.url), "utf8")).requirements.paseo.replace(/^\D+/, "");
 /** The first executable `paseo` on PATH, or null. */
 export function whichPaseo(path = process.env.PATH ?? "") {

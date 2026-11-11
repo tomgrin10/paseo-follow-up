@@ -1,2 +1,0 @@
-- Follow-up can update itself. Choose Install automatically, Tell me or Off in Settings → General; it installs only when no agent is busy and goes back to the old version if the new one fails.
-- Setup has an Updates step, with Stable or Beta updates.

@@ -5,7 +5,7 @@
 | Command | What it runs |
 | --- | --- |
 | `npm run verify` | `typecheck`, `check:notes` (release-note fragments), `npm test` (every `tests/*.test.ts` through tsx), `button-visibility.test.mjs`, `test:scale`, `test:native`, `test:trust`. PR CI (`.github/workflows/ci.yml`) runs it with Paseo 0.15.2. |
-| `npm run test:install` | `scripts/check-install.mjs` (packs the plugin and installs it into an isolated daemon with fixture providers: activation, recovery, ownership, hooks, tasks, Session Guard coordination, project defaults), then `scripts/check-wait.mjs` ([wait.md](wait.md)). PR CI doesn't run it. The publish workflow runs it with Paseo 0.14 and no model credentials. |
+| `npm run test:install` | `scripts/check-install.mjs` (packs the plugin and installs it into an isolated daemon with fixture providers: activation, recovery, ownership, hooks, tasks, Session Guard coordination, project defaults), then `scripts/check-wait.mjs` ([wait.md](wait.md)). PR CI doesn't run it. The publish workflow runs it with Paseo 0.15.2 and no model credentials. |
 | `npm pack --dry-run` | Checks the package contents: runtime entries, generated sources, `server/wait-runner.sh`, screenshots, and no state, logs or credentials. |
 
 Write the failing test first. Bugs get a root cause, a failing test, a fix for the whole class, and an invariant,
@@ -123,7 +123,8 @@ harness slot:
 PLAYWRIGHT_CORE=<playwright-core dir> CHROMIUM=<chromium binary> ~/paseo-harness/tools/harness-slot npm run shots -- --out <dir>
 ```
 
-- **What it does.** Starts one isolated daemon (the packed plugin, the fixture provider, the web UI, a fake `gh`),
+- **What it does.** Starts one isolated daemon (the packed plugin, the fixture provider, the web UI, a fake `gh`, and a
+  fake `mcpproxy` that confirms a few Linear keys so Linked items render),
   seeds synthetic workspaces through Follow-up's own RPCs and scripted fixture turns, shoots with headless Playwright,
   and stops the daemon on success and on failure. It needs the Paseo CLI 0.15.x.
 - **Deterministic.** Fixed seed data and fixed clocks: the daemon and worker run with a shifted `Date` (a preload),
@@ -132,12 +133,13 @@ PLAYWRIGHT_CORE=<playwright-core dir> CHROMIUM=<chromium binary> ~/paseo-harness
   sleeps.
 - **Synthetic only.** `example/app`, made-up people (Dana, Ravi), Linear-style keys (`APP-142`, `WEB-17`). Never real
   repos, names, channels or anything from a real Paseo home. This is a public repo.
-- **Shots** (PNG, into `--out`, default `docs/screenshots/`): `setup`, `home`, `panel`,
-  `questions`, `pill`, `pr-sheet`, `phone`, `whats-new`. `context-menu` and `linked-items` are stubs for now and are
-  skipped with a log line. `--only a,b` shoots a subset.
+- **Shots** (`follow-up-<shot>.png`, into `--out`, default `docs/screenshots/`): `setup`, `home`, `panel`,
+  `questions`, `pill`, `pr-sheet`, `phone`, `whats-new`, `context-menu` (Home's row menu, right-clicked) and
+  `linked-items` (the Linked list open over Home's detail). `--only a,b` shoots a subset. Home is reached with
+  `scripts/ui-home.mjs`, which fails the shot instead of shooting the wrong page.
 - **Theme.** Dark for desktop shots, light for the phone shot; `--scheme dark|light` overrides both.
-- **What's new** is shot after a reinstall as `2.0.0-rc.0` over `1.4.0-beta.32`, with a `## 2.0.0` section;
-  `--whats-new-changelog <file>` uses that CHANGELOG.md instead of the built-in one.
+- **What's new** is shot after a reinstall as `2.0.0-rc.0` over `1.4.0-beta.32`. It shows the repo's CHANGELOG.md
+  `## 2.0.0` section when there is one, else a built-in stand-in; `--whats-new-changelog <file>` uses that file instead.
 - **Size** (aim under ~300 KB each). With `pngquant` (lossy palette) or `oxipng` on PATH, shots are taken at
   deviceScaleFactor 2 and optimised. Without either, desktop shots use deviceScaleFactor 1.25 and Playwright's own PNG
   (the phone shot stays at 2). `--scale <n>` sets the desktop factor.
