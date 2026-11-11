@@ -108,14 +108,16 @@ export function SubmitScope({ enabled, onSubmit, children, style, accessibilityR
 
 type ButtonKind = "primary" | "secondary" | "ghost" | "danger";
 /** One button vocabulary for the whole plugin: 32px on desktop with a hit slop, 44px on touch layouts. */
-export function Button({ title, onPress, theme, kind = "secondary", disabled = false, loading = false, icon, compact = false, accessibilityLabel, accessibilityHint, grow = false, shortcut = false }: {
+export function Button({ title, onPress, theme, kind = "secondary", disabled = false, loading = false, icon, compact = false, accessibilityLabel, accessibilityHint, grow = false, shortcut = false, nativeID, onInteract }: {
+  /** Focus and hover, for a surface that pauses while the button is in use (the Undo bar). */ onInteract?: (event: "focus" | "blur" | "hoverIn" | "hoverOut") => void;
+  /** A DOM id on web, so focusSoon can move focus here after the control that had it goes away. */ nativeID?: string;
   title: string; onPress: () => void; theme: Theme; kind?: ButtonKind; disabled?: boolean; loading?: boolean; icon?: string; compact?: boolean; accessibilityLabel?: string; accessibilityHint?: string; grow?: boolean;
   /** The SubmitScope's action: shows a quiet ⌘↵ on desktop web. */ shortcut?: boolean;
 }) {
   const c = theme.colors;
   const fg = kind === "primary" ? c.accentForeground : kind === "danger" ? c.statusDanger : c.foreground;
   const inactive = disabled || loading;
-  return <PressScale accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? title} accessibilityHint={accessibilityHint} accessibilityState={{ disabled: inactive, busy: loading }}
+  return <PressScale nativeID={nativeID} onFocus={() => onInteract?.("focus")} onBlur={() => onInteract?.("blur")} onHoverIn={() => onInteract?.("hoverIn")} onHoverOut={() => onInteract?.("hoverOut")} accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? title} accessibilityHint={accessibilityHint} accessibilityState={{ disabled: inactive, busy: loading }}
     disabled={inactive} onPress={onPress} hitSlop={compact ? 0 : 4} outerStyle={grow ? { flexGrow: 1 } : { alignSelf: "flex-start" }}
     style={({ pressed, hovered }) => ({
       minHeight: compact ? 44 : 32, paddingHorizontal: compact ? 14 : 11, borderRadius: compact ? 8 : 6, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
@@ -202,3 +204,17 @@ export function FoldRow({ theme, label, open, onPress, icon, iconColor, compact 
     <Icon name={open ? "ChevronUp" : "ChevronDown"} size={14} color={c.foregroundMuted} />
   </Pressable>;
 }
+
+/**
+ * Moves keyboard focus to the element with this DOM id once it renders (web only; native keeps its own focus). For
+ * a control that removes itself, like Undo or Bring back now, so focus lands on what it restored instead of the page.
+ */
+export function focusSoon(id: string, tries = 20): void {
+  const doc = (globalThis as { document?: { getElementById(id: string): { focus(): void } | null } }).document;
+  if (Platform.OS !== "web" || !doc) return;
+  const el = doc.getElementById(id);
+  if (el) { el.focus(); return; }
+  if (tries > 0) setTimeout(() => focusSoon(id, tries - 1), 50);
+}
+/** The DOM id of a Home row, for focusSoon. */
+export const rowDomId = (key: string) => `follow-up-row-${key.replace(/[^\w-]/g, "_")}`;

@@ -7,12 +7,12 @@ import { useQuery } from "@tanstack/react-query";
 import { browserStatusRpc, controlRpc, inboxBriefRpc } from "../shared/contracts";
 import { needsYou, workspaceSnoozed } from "../shared/attention";
 import { briefPane, followUpLog, lastWorkdayEnd, nextNeeds, paneButtons, sameText, sinceLabel, tailSteps, type HomeGroupId, type HomeModel, type LogLine, type TailStep, type Workstream } from "../shared/home";
-import { age, snoozeUntil, type InboxRow } from "../shared/inbox";
+import { age, backLabel, snoozeUntil, type InboxRow } from "../shared/inbox";
 import { errorText } from "../shared/errors";
 import { isLoaded, type LoadSignals } from "../shared/agent-load";
 import { BriefCard, type BriefDeps } from "./brief";
 import { SummaryLine } from "./about";
-import { bottomGap, bottomInset, Button, IconButton, space, text, type Theme } from "./kit";
+import { bottomGap, bottomInset, Button, focusSoon, IconButton, space, text, type Theme } from "./kit";
 import { NeedsYouList } from "./needs-you";
 import { PrSheet } from "./pr-sheet";
 import { QuestionSheet } from "./questions";
@@ -54,6 +54,9 @@ export type HomeDeps = {
  * Home (design §2–§6): every workstream on the left, the selected one on the right, answered in place.
  * With nothing selected the right side is the brief. `?view=log` shows what Follow-up did on its own.
  */
+/** The pane's Sign off, where focus goes after Bring back now. */
+const PANE_PRIMARY = "follow-up-pane-primary";
+
 export function FollowHome(props: PluginScreenProps & { deps: HomeDeps }) {
   // Getting started takes Home's place on a fresh install (or after "Set up Follow-up again") until finished or skipped.
   const onboarding = useOnboarding();
@@ -312,8 +315,17 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
     run(`perm:${p.id}`, () => agent.handle!.respondToPermission({ requestId: p.id, response: response as never }), response.behavior === "allow" ? "Allowed" : "Denied");
   const color = glyphColor(s, c, compact);
 
+  // A snoozed row says when it comes back and offers Bring back now, on every width.
+  // The workspace's own Later (a workspace-only Needs-you row) reads the same and comes back the same way.
+  const wsSnooze = !row?.needs && w && s.key === `ws:${w.id}` && w.snooze && workspaceSnoozed(w, asks, Date.now()) ? w.snooze : null;
+  const later = row?.needs && row.snooze ? { until: row.snooze.until, back: () => inbox.unsnooze([s.agentId!]) }
+    : wsSnooze && w ? { until: wsSnooze.until, back: async () => { await control({ workspaceId: w.id, snooze: null }); live.refresh(); } } : null;
+  // Workspace Later under an agent flag: the agent's row shows, and the workspace's own items stay put off until their
+  // time (the developer chose that; a new item still breaks it). Said in the pane so it isn't hidden (docs/needs-you.md).
+  const wsUnder = row?.needs && w && w.snooze && s.key !== `ws:${w.id}` && workspaceSnoozed(w, asks, Date.now()) ? w.snooze : null;
+  const laterText = later ? `Later ${laterLabel(later.until, Date.now())}` : "";
   const ago = s.at ? age(s.at, Date.now()) : "";
-  const metaRest = [ago === "now" ? "just now" : ago, s.project].filter(Boolean).join(" · ");
+  const metaRest = [laterText, ago === "now" ? "just now" : ago, s.project].filter(Boolean).join(" · ");
   // Phones: the host header already says Follow-up and carries ←. The pane head is the full-width title, then one meta
   // line (state, age, project, PRs as text) that ellipsizes instead of wrapping, with Open full as an icon at its end.
   const header = compact ? <View style={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 6, gap: 2, borderBottomWidth: 1, borderBottomColor: c.border }}>
@@ -339,7 +351,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
     {s.workspaceId && w && <SummaryLine key={s.workspaceId} workspace={w} theme={theme} compact={false} />}
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
       {!!s.word && <Text style={{ color, fontSize: 12, fontWeight: "600" }}>{s.word}</Text>}
-      <Text style={t.meta}>{[s.at ? age(s.at, Date.now()) === "now" ? "just now" : `${age(s.at, Date.now())} ago` : "", s.project].filter(Boolean).join(" · ")}</Text>
+      <Text style={t.meta}>{[laterText, s.at ? age(s.at, Date.now()) === "now" ? "just now" : `${age(s.at, Date.now())} ago` : "", s.project].filter(Boolean).join(" · ")}</Text>
       {s.badges.map(x => <BadgeView key={x.text} b={x} c={c} />)}
       <PrChipView s={s} c={c} />
     </View>
@@ -348,7 +360,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
   const canMove = plan.buttons.includes("sign_off") || plan.buttons.includes("later");
   const actionBar = !compact && (plan.buttons.includes("sign_off") || plan.buttons.includes("later")) && <View style={{ gap: 8 }}>
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-      <Button theme={theme} compact={compact} kind={plan.primary === "sign_off" ? "primary" : "secondary"} icon="Check" title="Sign off" loading={busy === "sign_off"}
+      <Button nativeID={PANE_PRIMARY} theme={theme} compact={compact} kind={plan.primary === "sign_off" ? "primary" : "secondary"} icon="Check" title="Sign off" loading={busy === "sign_off"}
         onPress={() => void run("sign_off", () => inbox.signOff([s.agentId!]))} />
       <Button theme={theme} compact={compact} icon="ArrowRight" title="Sign off & next" onPress={() => signOffNext(s)} />
       <Button theme={theme} compact={compact} icon="AlarmClock" title="Later…" onPress={() => setLaterOpen(v => !v)} />
@@ -359,23 +371,29 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
     </View>}
   </View>;
 
-  // A snoozed row says when it comes back and offers Bring back now, on every width.
-  // The workspace's own Later (a workspace-only Needs-you row) reads the same and comes back the same way.
-  const wsSnooze = !row?.needs && w && s.key === `ws:${w.id}` && w.snooze && workspaceSnoozed(w, asks, Date.now()) ? w.snooze : null;
-  const later = row?.needs && row.snooze ? { until: row.snooze.until, back: () => inbox.unsnooze([s.agentId!]) }
-    : wsSnooze && w ? { until: wsSnooze.until, back: async () => { await control({ workspaceId: w.id, snooze: null }); live.refresh(); } } : null;
-  const snoozedLine = !!later && <View accessibilityLabel={`Later, ${laterLabel(later.until, Date.now())}`} style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-    <Icon name="AlarmClock" size={14} color={c.foregroundMuted} />
-    <Text style={t.meta}>Later {laterLabel(later.until, Date.now())}</Text>
-    <Button theme={theme} compact={compact} kind="secondary" icon="BellRing" title="Bring back now" loading={busy === "bring_back"}
-      onPress={() => void run("bring_back", later.back)} />
+  // Bring back now removes itself, so focus moves to the pane's first move (Sign off) once the row is back.
+  // What's in Later here, one row each: this row's own Later, and (under an agent's flag) the workspace's own items.
+  // The header already says "Later until …", so each row says when it's back and offers Bring back now with a name
+  // that tells the two apart. Bring back removes its row, so focus moves to the pane's Sign off.
+  const laterRows = [
+    later && { key: "bring_back", who: wsUnder ? "This agent" : null, until: later.until, label: `Bring back ${s.title} now`, back: later.back },
+    wsUnder && w && { key: "bring_back_ws", who: "Workspace items", until: wsUnder.until, label: `Bring back ${s.title}'s workspace items now`,
+      back: async () => { await control({ workspaceId: w.id, snooze: null }); live.refresh(); } },
+  ].filter(Boolean) as { key: string; who: string | null; until: string; label: string; back: () => Promise<unknown> }[];
+  const laterBlock = laterRows.length > 0 && <View style={{ gap: compact ? 10 : 6 }}>
+    {laterRows.map(r => <View key={r.key} style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 8, rowGap: 6 }}>
+      <Icon name="AlarmClock" size={14} color={c.foregroundMuted} />
+      <Text style={[t.meta, { flexShrink: 1 }]}>{[r.who, backLabel(r.until, Date.now())].filter(Boolean).join(" · ")}</Text>
+      <Button theme={theme} compact={compact} kind="secondary" icon="BellRing" title="Bring back now" accessibilityLabel={r.label} loading={busy === r.key}
+        onPress={() => void run(r.key, async () => { await r.back(); focusSoon(PANE_PRIMARY); })} />
+    </View>)}
   </View>;
 
   const laterTimes = laterChoices(new Date());
   // Phones: the moves sit in the dock above the composer, in thumb reach, on one row: Sign off, Sign off & next, Later.
   const narrow = useWindowDimensions().width < 380;
   const moves = compact && canMove && !typing && <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingTop: 10 }}>
-    <View style={{ flex: 1 }}><Button theme={theme} compact grow kind={plan.primary === "sign_off" && !itemFirst ? "primary" : "secondary"} icon={narrow ? undefined : "Check"} title="Sign off" loading={busy === "sign_off"}
+    <View style={{ flex: 1 }}><Button nativeID={PANE_PRIMARY} theme={theme} compact grow kind={plan.primary === "sign_off" && !itemFirst ? "primary" : "secondary"} icon={narrow ? undefined : "Check"} title="Sign off" loading={busy === "sign_off"}
       onPress={() => void run("sign_off", () => inbox.signOff([s.agentId!]))} /></View>
     <View style={{ flex: 1.3 }}><Button theme={theme} compact grow icon={narrow ? undefined : "ArrowRight"} title="Sign off & next" onPress={() => signOffNext(s)} /></View>
     <IconButton theme={theme} compact icon="AlarmClock" label="Later…" onPress={() => setLaterSheet(true)} />
@@ -418,14 +436,14 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
     {header}
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: compact ? 16 : 20, gap: 16, paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
       {agent.permissions.map(p => <PermissionBlock key={p.id} p={p} theme={theme} compact={compact} busy={busy === `perm:${p.id}`} primary={plan.primary === "allow"} onRespond={r => void respond(p, r)} />)}
-      {showBrief ? <BriefCard {...({ embedded: true, item: { data: b }, theme, layout: { compact }, agentId: s.agentId, deps: deps.briefDeps } as unknown as Parameters<typeof BriefCard>[0])} />
+      {showBrief ? <BriefCard {...({ embedded: true, snoozed: !!later, item: { data: b }, theme, layout: { compact }, agentId: s.agentId, deps: deps.briefDeps } as unknown as Parameters<typeof BriefCard>[0])} />
         : echoed || (b && compact && b.source === "none" && asks.length) ? null
         : row?.needs && !agent.permissions.length && !b ? <Text style={compact ? t.ask : [t.body, { fontSize: 15, lineHeight: 21, fontWeight: "600" }]}>{s.line || s.word || "Needs you"}</Text>
         : !row?.needs && s.line ? <Text style={t.body}>{s.line}</Text> : null}
       {w && <NeedsYouList workspace={w} theme={theme} compact={compact} flush skip={b?.decisions.length ? ["question"] : []} feature={compact}
         actions={{ openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion, openAgent: () => openFull(s) }} />}
       {actionBar}
-      {snoozedLine}
+      {laterBlock}
       {steps}
     </ScrollView>
     {s.agentId && <View style={[{ borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.surface0 }, bottomInset(compact)]}>

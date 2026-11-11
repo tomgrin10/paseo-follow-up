@@ -73,6 +73,8 @@ export type Workstream = {
   pr: PrChip | null;
   /** The age shown on the right. */
   at: string | null;
+  /** Later rows: when it comes back (an ISO time, "next-event" or "pr:<repo#n>"); the time column shows this instead of the age. */
+  wakeAt?: string | null;
   readyToArchive: boolean;
   /** Latest activity anywhere on the workstream, for the Recent sort. */
   activityAt?: string | null;
@@ -135,7 +137,7 @@ export function badges(input: { headline: Headline | null; row?: InboxRow; works
 }
 
 function sigOf(s: Omit<Workstream, "sig">): string {
-  return [s.group, s.tier, s.icon, s.tone, s.title, s.agent, s.line, s.word, s.at, s.readyToArchive, s.badges.map(b => b.text).join("|"), s.pr ? `${s.pr.label}:${s.pr.checks?.text}` : "",
+  return [s.group, s.tier, s.icon, s.tone, s.title, s.agent, s.line, s.word, s.at, s.wakeAt ?? "", s.readyToArchive, s.badges.map(b => b.text).join("|"), s.pr ? `${s.pr.label}:${s.pr.checks?.text}` : "",
     s.priority ? `${s.priority.reason}:${s.priority.source?.label}` : ""].join("\u0001");
 }
 const make = (s: Omit<Workstream, "sig">): Workstream => ({ ...s, sig: sigOf(s) });
@@ -186,7 +188,7 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
     } else if (section === "later") {
       const h = flagHeadline({ ...row, snooze: null }, now);
       out.push(make({ ...base, group: "later", tier: null, icon: "AlarmClock", tone: "muted", word: h ? HEADLINE_WORD[h.key] : null,
-        line: h && h.line !== HEADLINE_WORD[h.key] ? h.line : "", badges: [], pr: prChip(w), at: row.needs?.since ?? null }));
+        line: h && h.line !== HEADLINE_WORD[h.key] ? h.line : "", badges: [], pr: prChip(w), at: row.needs?.since ?? null, wakeAt: row.snooze?.until ?? null }));
       if (row.workspaceId) covered.add(row.workspaceId);
     } else if (section === "running") {
       const fixing = w && w.mainAgentId === row.agentId ? fixingBatch(w, now) : undefined;
@@ -205,7 +207,7 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
     const h = workspaceHeadline(items);
     // Later on the workspace's own needs: it waits in Later until its time or a new need.
     if (group === "later" && h) {
-      out.push(make({ ...base, group: "later", tier: null, icon: "AlarmClock", tone: "muted", word: HEADLINE_WORD[h.key], line: h.line, badges: [], pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
+      out.push(make({ ...base, group: "later", tier: null, icon: "AlarmClock", tone: "muted", word: HEADLINE_WORD[h.key], line: h.line, badges: [], pr: prChip(w), at: w.updatedAt, wakeAt: w.snooze?.until ?? null, readyToArchive: false }));
       continue;
     }
     if (group === "needs" && h) {

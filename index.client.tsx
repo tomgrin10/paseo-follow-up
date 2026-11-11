@@ -16,7 +16,7 @@ import { contributeInboxCommands } from "./client/inbox";
 import type { BriefDeps } from "./client/brief";
 import { inboxSidebarView, sidebarViewHost } from "./client/sidebar-view";
 import { contributeBrief } from "./client/brief";
-import { setOnboardingRpc } from "./shared/contracts";
+import { clientTimeZoneRpc, setOnboardingRpc } from "./shared/contracts";
 import { isCategory, writeCategory } from "./shared/settings-nav";
 
 /** Home. The same screen id the Overview had, so the sidebar row, ⌘K and saved links land on Home. */
@@ -32,6 +32,15 @@ export default function contribute(host: PluginClientContext) {
   const location = () => Dimensions.get("window").width < 768 ? "workspace" as const : "explorer" as const;
   const openPanel = (workspaceId: string) => client.openPanel(PANEL, { workspaceId, location: location() });
   // A category (agents, reviewers, following) is saved first, so settings opens on it (drilled in on a phone).
+  // An agent's "tonight"/"tomorrow" snooze resolves on the daemon: tell it this device's timezone (docs/needs-you.md).
+  // Retried a few times, since the host may not be reachable yet while the app starts.
+  const reportTimeZone = (attempt = 0) => {
+    let timeZone: string | undefined; try { timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return; }
+    if (!timeZone) return;
+    client.rpc(clientTimeZoneRpc, { timeZone }).then(r => { if (!r.ok) throw new Error("rejected"); })
+      .catch(() => { if (attempt < 4) setTimeout(() => reportTimeZone(attempt + 1), [5_000, 30_000, 120_000, 600_000][attempt]); });
+  };
+  reportTimeZone();
   const openSettings = (category?: string) => { if (isCategory(category)) writeCategory(category); client.openSettings("projects"); };
   const openOverview = () => client.openScreen({ screenId: OVERVIEW });
   const openLog = () => client.openScreen({ screenId: OVERVIEW, params: { view: "log" } });
