@@ -1,6 +1,9 @@
 // Re-shoots every README image from the current UI: `npm run shots` (through ~/paseo-harness/tools/harness-slot).
 // Usage: node scripts/screenshots.mjs [--out <dir>] [--only home,panel,...] [--scheme dark|light] [--scale <n>]
 //                                     [--whats-new-changelog <CHANGELOG.md>] [--whats-new-all] [--notes-review] [--keep]
+//                                     [--as-version <X.Y.Z>]
+// `--as-version` installs the packed plugin under that version, so Home and the panel read "vX.Y.Z" (stable notes
+// and README images never show an rc). The notes shots set their own scale: notes-home 2x, notes-panel 3x.
 //
 // One isolated daemon (temp HOME and PASEO_HOME, the packed plugin, the fixture provider from
 // scripts/fixture-provider.ts, the web UI, a fake `gh` and a fake `mcpproxy` for Linear on PATH), seeded through Follow-up's own RPCs and fixture agents
@@ -44,6 +47,8 @@ if (scheme && !["dark", "light"].includes(scheme)) fail("--scheme is dark or lig
 const out = resolve(arg("--out", "docs/screenshots"));
 const changelogArg = arg("--whats-new-changelog");
 const keep = argv.includes("--keep");
+const asVersion = arg("--as-version");
+if (asVersion && !/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(asVersion)) fail("--as-version is a version like 2.0.0");
 const log = (...a) => console.log("[shots]", ...a);
 function fail(message) { console.error(`screenshots: ${message}`); process.exit(1); }
 
@@ -293,10 +298,10 @@ const openHome = (page, { keepDialogs = false } = {}) => openHomeAt(page, { orig
 const failures = [];
 function makeShooter({ browser, port, out, scheme: forced, optimiser, results }) {
   /** Opens the web app in a fresh context, runs `drive`, and returns the PNG (optionally clipped to what drive returns). */
-  async function capture(name, viewport, theme, drive, { seen = null } = {}) {
+  async function capture(name, viewport, theme, drive, { seen = null, scale = null } = {}) {
     const colorScheme = forced ?? theme;
     // Always open at desktop width: on a phone Paseo's sidebar is a drawer, so phone frames open Home first, then narrow.
-    const context = await browser.newContext({ viewport: DESKTOP, colorScheme, deviceScaleFactor: viewport.width < 768 ? 2 : desktopScale, reducedMotion: "reduce", timezoneId: "UTC", locale: "en-US" });
+    const context = await browser.newContext({ viewport: DESKTOP, colorScheme, deviceScaleFactor: scale ?? (viewport.width < 768 ? 2 : desktopScale), reducedMotion: "reduce", timezoneId: "UTC", locale: "en-US" });
     try {
       await context.addInitScript(INIT, { seen });
       const page = await context.newPage();
@@ -432,7 +437,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       await (await homeRow(page, "Billing retries")).click();
       await page.getByText("Only network failures").first().waitFor();
       return { x: 320, y: 0, width: 1120, height: 680 };
-    });
+    }, { scale: 2 });
     if (name === "notes-panel") await shoot("notes-panel", DESKTOP, "dark", async page => {
       await openChat(page, "Billing retries", billing.prompt);
       await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
@@ -441,7 +446,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       await page.setViewportSize({ width: DESKTOP.width, height: 1400 });
       await page.getByRole("button", { name: /^Pull request 142: / }).first().waitFor();
       return { x: 1120, y: 0, width: 320, height: Number(process.env.NOTES_PANEL_HEIGHT ?? 910) };
-    });
+    }, { scale: 3 });
     if (name === "whats-new") {
       // The packed copy Paseo runs: the path its plugin list reports (the unpacked folder for a directory install).
       const installed = (await cli("plugin", "ls")).find(row => row.id === "follow-up")?.path ?? plugin;
@@ -647,6 +652,10 @@ try {
   await fs.writeFile(join(home, "config.json"), JSON.stringify({ pluginsEnabled: true, daemon: { listen: `127.0.0.1:${port}`, relay: { enabled: false }, mcp: { enabled: false }, browserTools: { enabled: false } }, features: { webUi: { enabled: true } } }));
   const packed = JSON.parse((await exec("npm", ["pack", "--json", "--pack-destination", root], { timeout: 120000 })).stdout)[0];
   await exec("tar", ["-xzf", join(root, packed.filename), "--strip-components=1", "-C", plugin]);
+  if (asVersion) {
+    const pkgPath = join(plugin, "package.json");
+    await fs.writeFile(pkgPath, JSON.stringify({ ...JSON.parse(await fs.readFile(pkgPath, "utf8")), version: asVersion }, null, 2));
+  }
   await fs.writeFile(join(fixture, "paseo-plugin.json"), JSON.stringify({ id: "followup-fixture", requirements: { paseo: ">=0.11.0" } }));
   await fs.writeFile(join(fixture, "index.server.ts"), await fs.readFile("scripts/fixture-provider.ts", "utf8"));
   await fs.writeFile(join(root, "clock.cjs"), CLOCK_PRELOAD);
