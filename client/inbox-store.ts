@@ -4,6 +4,7 @@ import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type { InboxRow } from "../shared/inbox";
 import { subscribeDisplay } from "./display";
 import { onVisible, whileVisible } from "./visibility";
+import { createDoneWindows } from "./done-windows";
 
 type List = RpcOutput<typeof inboxListRpc>;
 /**
@@ -40,6 +41,7 @@ export function createInboxStore(client: PluginClientContext) {
   let stopped = false;
   const listeners = new Set<() => void>();
   const emit = () => { version++; for (const l of listeners) l(); };
+  const dones = createDoneWindows(emit);
   const rpcList = (): Promise<List> => client.rpc(inboxListRpc, data?.etag ? { etag: data.etag } : {});
   const act = (input: RpcInput<typeof inboxActRpc>) => client.rpc(inboxActRpc, input);
 
@@ -153,7 +155,12 @@ export function createInboxStore(client: PluginClientContext) {
       recent = { kind: "later_ws", agentIds: [], label, at: Date.now(), batch: false, until, restore, key };
       emit();
     },
+    /** Done's Undo windows (client/done-windows.ts): the pill says Done until that agent's toast ends. */
+    noteDone: (agentId: string, cancel: () => void) => dones.note(agentId, cancel),
+    endDone: (agentId: string) => dones.end(agentId),
+    doneWindow: (agentId: string) => dones.has(agentId),
     async undo(agentIds?: string[]) {
+      if (agentIds && dones.undo(agentIds)) return;
       if (!agentIds && recent?.kind === "later_ws") { const { restore } = recent; recent = null; emit(); await restore(); return; }
       const target = agentIds ?? recent?.agentIds ?? [];
       const batch = !agentIds && recent?.batch;

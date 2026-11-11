@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { ToastApi } from "@getpaseo/plugin/client/ui";
-import { errorText } from "../shared/errors";
+import { errorText, sentence } from "../shared/errors";
 
 /**
  * Follow-up's one toast system, the part without React Native: the store, `runAction` and the question openers.
@@ -121,8 +121,9 @@ export async function runAction<T>(opts: ActionSpec<T>, key?: string): Promise<b
     if (hasToastHost()) {
       const actions: ToastAction[] = [{ label: "Retry", onPress: () => void runAction(opts, key) }];
       if (opts.open) actions.push({ label: "Open", onPress: opts.open });
-      pushToast("error", `${failure}. ${reason}`, actions);
-    } else toast?.error(`${failure}. ${opts.open ? "Retry from Needs you." : reason}`);
+      // With Open, the toast is one line, as narrow as Paseo's own: the reason lives on the surface Open returns to.
+      pushToast("error", opts.open ? failure : `${sentence(failure)} ${sentence(reason)}`, actions);
+    } else toast?.error(`${sentence(failure)} ${opts.open ? "Retry from Needs you." : sentence(reason)}`);
     opts.reopen?.();
     return false;
   } finally { if (key !== undefined) inflight.delete(key); }
@@ -134,13 +135,30 @@ export async function runAction<T>(opts: ActionSpec<T>, key?: string): Promise<b
  * a reload inside it also sends nothing, which is the safe side. With no ToastHost there is no Undo to show, so the
  * work runs at once and the host toast confirms with `success`.
  */
-export function runUndoable<T>(message: string, opts: ActionSpec<T>, onUndo: () => void, key?: string): void {
-  if (!hasToastHost()) { void runAction(opts, key); return; }
+export function runUndoable<T>(message: string, opts: ActionSpec<T>, onUndo: () => void, key?: string, onEnd?: () => void): number | null {
+  if (!hasToastHost()) { void runAction(opts, key); return null; }
   // Nothing has happened yet, so the tone is neutral, not success. The window matches sign-off's Undo (6 s), is
   // never pushed out by newer toasts, and holds while the pointer or focus is on it. The send runs only when it
   // times out: Undo (or dismissing it) cancels. After the send, the collapsed card is the confirmation; a failure
   // still reports with Retry.
-  pushToast("info", message, [{ label: "Undo", onPress: onUndo }], { durationMs: UNDO_WINDOW_MS, keep: true, onExpire: () => void runAction({ ...opts, success: null }, key) });
+  return pushToast("info", message, [{ label: "Undo", onPress: () => { onEnd?.(); onUndo(); } }], { durationMs: UNDO_WINDOW_MS, keep: true,
+    onExpire: () => { void runAction({ ...opts, success: null }, key).finally(() => onEnd?.()); } });
+}
+
+export type KeyLike = { key: string; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; target: unknown };
+/**
+ * Ctrl+Z (Cmd+Z on a Mac) while an Undo toast shows: the newest one's Undo, as if pressed. Only then, and never while
+ * typing (a text field keeps its own undo) or with Shift (redo). True when it acted, so the caller stops the key.
+ */
+export function undoShortcut(e: KeyLike, mac: boolean): boolean {
+  if (e.key.toLowerCase() !== "z" || e.shiftKey || e.altKey || (mac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey)) return false;
+  const t = e.target as { tagName?: string; isContentEditable?: boolean } | null;
+  if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/i.test(t.tagName ?? ""))) return false;
+  const toast = [...items].reverse().find(x => x.actions.some(a => a.label === "Undo"));
+  if (!toast) return false;
+  const undo = toast.actions.find(a => a.label === "Undo")!;
+  dismissToast(toast.id); undo.onPress();
+  return true;
 }
 /** The same 6 s as a sign-off's Undo. */
 export const UNDO_WINDOW_MS = 6_000;

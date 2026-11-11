@@ -188,3 +188,26 @@ test("a finished flag with no stated ask headlines the workspace's open question
   assert.equal(flagHeadline(flagged(["finished"]), NOW, [])!.key, "finished", "no question: still Finished");
   assert.equal(flagHeadline(flagged(["finished"], { kind: "decision", ask: "Pick one" }), NOW, [q] as never)!.key, "decision", "a real ask wins");
 });
+
+// 1.4.0-beta.59: during Done's Undo window the pill still read "Action": Done waits on the toast, so the brief is still
+// open on the daemon. The developer's own move owns the pill for its window, the same way Signed off and Later do.
+test("Done owns the pill for its Undo window: 'Done', then back to the ask if undone", () => {
+  const r = flagged(["finished"], { kind: "action", ask: "Rotate the staging API key" });
+  assert.equal(pillState({ row: r, items: [], recent: null, now: NOW })?.mode, "flag");
+  assert.deepEqual(pillState({ row: r, items: [], recent: null, done: true, now: NOW }), { mode: "undo", label: "Done" });
+  // A sign-off elsewhere inside the window doesn't take Done's place (critique: one shared `recent` slot did).
+  assert.deepEqual(pillState({ row: r, items: [], recent: { agentIds: ["other"], at: NOW }, done: true, now: NOW + 1_000 }), { mode: "undo", label: "Done" });
+  assert.equal(pillState({ row: r, items: [], recent: null, done: false, now: NOW + 1_000 })?.mode, "flag", "undone: the ask is back");
+});
+
+test("Done windows are per agent: a second Done or a sign-off can't take one over, and Undo cancels only its own", async () => {
+  const { createDoneWindows } = await import("../client/done-windows");
+  let changes = 0; const cancelled: string[] = [];
+  const w = createDoneWindows(() => { changes++; });
+  w.note("a1", () => cancelled.push("a1")); w.note("a2", () => cancelled.push("a2"));
+  assert.ok(w.has("a1") && w.has("a2"), "two windows at once");
+  assert.equal(w.undo(["a3"]), false, "another agent's Undo isn't Done's");
+  assert.equal(w.undo(["a1"]), true); assert.deepEqual(cancelled, ["a1"]); assert.equal(w.has("a1"), false); assert.equal(w.has("a2"), true);
+  w.end("a2"); assert.equal(w.has("a2"), false); assert.deepEqual(cancelled, ["a1"], "the toast ending is not an undo");
+  assert.equal(changes, 4);
+});

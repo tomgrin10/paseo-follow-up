@@ -14,7 +14,11 @@ import type { Theme } from "./kit";
  */
 
 export { pushToast, dismissToast, runAction, runUndoable, openQuestion, useQuestionOpener, hasToastHost } from "./toast-store";
-import { dismissToast, emit, holdToast, hosts, subscribe, toastsNow, type ToastItem } from "./toast-store";
+import { dismissToast, emit, holdToast, hosts, subscribe, toastsNow, undoShortcut, type KeyLike, type ToastItem } from "./toast-store";
+type UndoKey = KeyLike & { preventDefault(): void; stopPropagation(): void };
+const isMac = () => /Mac|iPhone|iPad/.test((globalThis as { navigator?: { platform?: string } }).navigator?.platform ?? "");
+/** Web only: the Undo button's name says its key, so screen readers and hover-less users can find it. */
+const undoKeyHint = () => Platform.OS === "web" ? (isMac() ? " (⌘Z)" : " (Ctrl+Z)") : "";
 let nextHost = 1;
 
 // The host toast's tokens (Paseo 0.15 app-toast): radius 2xl, padding 8/12, gap 8, top 12 below the safe area.
@@ -47,6 +51,16 @@ export function ToastHost({ theme, compact }: { theme: Theme; compact: boolean }
   // trapped and the toast never shows. The leader hands its theme to a layer of its own on document.body.
   const layered = Platform.OS === "web" && webLayer();
   useEffect(() => { if (layered && leader) setLayerProps({ theme, compact }); }, [layered, leader, theme, compact]);
+  // Ctrl/Cmd+Z runs the showing Undo toast's Undo (undoShortcut decides when). One listener: the leader's.
+  useEffect(() => {
+    const doc = (globalThis as { document?: { addEventListener(t: string, f: (e: UndoKey) => void, c: boolean): void; removeEventListener(t: string, f: (e: UndoKey) => void, c: boolean): void } }).document;
+    if (Platform.OS !== "web" || !leader || !doc) return;
+    const mac = isMac();
+    // Stopped here: the host's own Ctrl/Cmd+Z mustn't also act on the same press.
+    const onKey = (e: UndoKey) => { if (undoShortcut(e, mac)) { e.preventDefault(); e.stopPropagation(); } };
+    doc.addEventListener("keydown", onKey, true);
+    return () => doc.removeEventListener("keydown", onKey, true);
+  }, [leader]);
   if (layered) return null;
   return leader ? <ToastStack theme={theme} compact={compact} /> : null;
 }
@@ -114,6 +128,7 @@ function ToastStack({ theme, compact }: { theme: Theme; compact: boolean }) {
 function ToastView({ item, theme, compact }: { item: ToastItem; theme: Theme; compact: boolean }) {
   const c = theme.colors;
   const tone = item.tone === "error" ? c.statusDanger : item.tone === "warning" ? c.statusWarning : item.tone === "success" ? c.statusSuccess : c.foregroundMuted;
+  const opens = item.actions.some(a => a.label === "Open");
   const icon = item.tone === "error" ? "CircleAlert" : item.tone === "warning" ? "TriangleAlert" : item.tone === "success" ? "CircleCheck" : "Info";
   // pointerEvents="auto": the web layer and the stack are pointer-transparent (pointer-events is inherited), so the
   // toast itself must take clicks back, or Undo, Retry and Open can't be pressed.
@@ -125,15 +140,19 @@ function ToastView({ item, theme, compact }: { item: ToastItem; theme: Theme; co
     <View style={{ alignSelf: "center", maxWidth: "100%", flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8, paddingHorizontal: 12,
       borderRadius: 16, borderWidth: 1, borderColor: item.tone === "error" ? tone : c.border, backgroundColor: c.surface0,
       shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 4 }}>
-      <Icon name={icon} size={15} color={tone} />
-      <Text style={{ flexShrink: 1, color: c.foreground, fontSize: 14, lineHeight: 20 }}>{item.message}</Text>
-      {item.actions.map(a => <Pressable key={a.label} accessibilityRole="button" accessibilityLabel={`${a.label}: ${item.message}`} hitSlop={compact ? 8 : 4}
+      {/* Never crushed by a wrapping message. */}
+      <View style={{ flexShrink: 0 }}><Icon name={icon} size={15} color={tone} /></View>
+      {/* With Open the message is one short line and the reason waits behind Open, so it may clamp; otherwise it is the
+          only copy of the reason and shows in full. */}
+      <Text style={{ flexShrink: 1, color: c.foreground, fontSize: 14, lineHeight: 20 }} numberOfLines={opens ? 2 : undefined}>{item.message}</Text>
+      {item.actions.map(a => <Pressable key={a.label} accessibilityRole="button" accessibilityLabel={`${a.label}${a.label === "Undo" ? undoKeyHint() : ""}: ${item.message}`} hitSlop={8}
         onPress={() => { dismissToast(item.id); a.onPress(); }}
-        style={(s: { pressed: boolean; hovered?: boolean }) => ({ minHeight: compact ? 36 : 24, paddingHorizontal: 8, borderRadius: 8, justifyContent: "center", backgroundColor: s.pressed || s.hovered ? c.surface2 : "transparent" })}>
+        // Desktop matches the host toast's height (no 24 px floor); phones keep 36 px and use hitSlop instead of padding.
+        style={(s: { pressed: boolean; hovered?: boolean }) => ({ minHeight: compact ? 36 : 20, paddingHorizontal: compact ? 4 : 8, borderRadius: 8, justifyContent: "center", backgroundColor: s.pressed || s.hovered ? c.surface2 : "transparent" })}>
         <Text style={{ color: c.foreground, fontSize: 13, lineHeight: 18, fontWeight: "600" }}>{a.label}</Text>
       </Pressable>)}
       {item.sticky && <Pressable accessibilityRole="button" accessibilityLabel="Dismiss" hitSlop={compact ? 10 : 6} onPress={() => dismissToast(item.id)}
-        style={(s: { pressed: boolean; hovered?: boolean }) => ({ padding: 6, minWidth: 28, minHeight: 28, alignItems: "center", justifyContent: "center", borderRadius: 8, backgroundColor: s.pressed || s.hovered ? c.surface2 : "transparent" })}>
+        style={(s: { pressed: boolean; hovered?: boolean }) => ({ padding: compact ? 6 : 4, minWidth: compact ? 28 : 24, minHeight: compact ? 28 : 24, alignItems: "center", justifyContent: "center", borderRadius: 8, backgroundColor: s.pressed || s.hovered ? c.surface2 : "transparent" })}>
         <Icon name="X" size={14} color={c.foregroundMuted} />
       </Pressable>}
     </View>
