@@ -55,6 +55,7 @@ const EXEMPT: Record<string, string> = {
   "follow.install-update": "Checks the install's source with Paseo before the detached install.",
   "follow.release-notes": "What's new asks Paseo for this install's version and source; read-only.",
   "follow.whats-new-seen": "Marks What's new seen, then returns the view above.",
+  "follow.retry-move": "2.0's Try again on the plugin-id move asks Paseo for this install's id and source to see the move failed, records the ask, then returns the view above; the move itself runs after the reply. A timeout loses nothing; one click asks again.",
   // The Overseer. Follow-up: queue the developer's question like brief answers (overseer-ask carries their words).
   "follow.overseer-start": "Starts the Overseer agent through Paseo; its status says starting until it's up.",
   "follow.overseer-restart": "Restarts the Overseer agent through Paseo.",
