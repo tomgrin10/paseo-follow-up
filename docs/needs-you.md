@@ -87,6 +87,18 @@
   over the needs it covers (`needKey`). `workspaceSnoozed()` in `shared/attention.ts` keeps the row in Later until the time passes or a new need
   appears; Bring back now clears it. Every count (the header dot, the pill, Home) goes through `activeNeeds()`, so none
   counts a workspace in Later; the panel's card stays, reading "Later until …". The Undo bar undoes it like an agent's Later. Invariant `snooze-can-wake`.
+- **A workspace Later under an agent flag.** If the main agent raises a flag while the workspace's own items are in
+  Later, the agent's row shows and the workspace Later stays: it covers the workspace's items, which the flag doesn't
+  change, and the developer chose its time. The agent's pane lists it under the agent's own Later, one row each
+  ("This agent · Back at 22:19", "Workspace items · Back at 23:18"), each with its own Bring back now. After the flag is signed off, the workspace row is back in Later until its time or a new item.
+- **Times.** The row menu resolves "Tonight 18:00" and "Tomorrow 09:00" on the device that picks them. An agent tool's
+  `tonight`/`tomorrow` resolves on the daemon, in the timezone the developer's Follow-up client last reported
+  (`follow.client-time-zone`, kept in `client-time-zone.json`); before any client has reported, the host's clock.
+- **What Later looks like.** A Later row's time column says when it comes back ("in 25m", "in 2h", "18:00",
+  "tomorrow 09:00", "next event"; `wakeShort`), and its accessible label adds how long it has waited. In the detail
+  pane the header reads "Later until …", the body says when it's back ("Back at 22:19") next to Bring back now, and the
+  attention card goes quiet like the row: no attention colour, labelled "Later", no age. Bring back now moves focus to the pane's Sign off; Undo moves it to the restored row. The Undo bar waits
+  while its Undo has focus or the pointer and resumes with at least 2 s, and Escape closes it.
 
 ## The brief and `needs_you`
 

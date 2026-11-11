@@ -12,7 +12,7 @@ type List = RpcOutput<typeof inboxListRpc>;
  */
 export type Recent = { agentIds: string[]; label: string; at: number; batch: boolean } & ({ kind: "sign_off" } | { kind: "later"; until: string; prev: Record<string, InboxRow["snooze"]> }
   /** A workspace's own Later (no agent flag): `restore` puts back the workspace snooze it replaced. */
-  | { kind: "later_ws"; until: string; restore: () => Promise<void> });
+  | { kind: "later_ws"; until: string; restore: () => Promise<void>; /** The Home row's key, where focus goes after Undo. */ key?: string });
 /**
  * The backstop poll. Changes arrive sooner by push: an agent's status or attention changing in Paseo's agent stream
  * calls `nudge` (1.4.0). Nothing polls while the app is hidden; it refreshes once on return.
@@ -149,8 +149,8 @@ export function createInboxStore(client: PluginClientContext) {
       refresh();
     },
     /** A workspace Later, for the same Undo bar. */
-    noteLater(label: string, until: string, restore: () => Promise<void>) {
-      recent = { kind: "later_ws", agentIds: [], label, at: Date.now(), batch: false, until, restore };
+    noteLater(label: string, until: string, restore: () => Promise<void>, key?: string) {
+      recent = { kind: "later_ws", agentIds: [], label, at: Date.now(), batch: false, until, restore, key };
       emit();
     },
     async undo(agentIds?: string[]) {

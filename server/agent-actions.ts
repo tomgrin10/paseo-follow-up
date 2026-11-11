@@ -38,7 +38,8 @@ const RPC_TOOL = new Map<string, RpcTool>(RPC_TOOLS.map(t => [t.name, t]));
 void DISPLAY_TOOLS;
 
 /** The developer's control panel switches (Auto-send, Resume, Retry). The button and the agent tool share it. */
-export function controlWorkspace(state: State, input: { workspaceId: string; enable_auto_sends?: boolean; clearHold?: boolean; retryBatchId?: string; mainAgentId?: string; snooze?: { until: string } | null }, now = Date.now()): Workspace {
+/** `timeZone`: where a snooze's "tonight"/"tomorrow" are (the developer's, from their client; the host's without one). */
+export function controlWorkspace(state: State, input: { workspaceId: string; enable_auto_sends?: boolean; clearHold?: boolean; retryBatchId?: string; mainAgentId?: string; snooze?: { until: string } | null }, now = Date.now(), timeZone?: string | null): Workspace {
   const w = findWorkspace(state, input.workspaceId);
   if (!w.enable_tracking || w.archived) throw new Error("Activate this workspace before changing follow-up controls.");
   if (input.mainAgentId && input.mainAgentId !== w.mainAgentId) {
@@ -49,7 +50,7 @@ export function controlWorkspace(state: State, input: { workspaceId: string; ena
   // Later on a workspace-only Needs-you row, and Bring back now (null).
   if (input.snooze === null) w.snooze = null;
   else if (input.snooze) {
-    const until = resolveUntil(input.snooze.until, new Date(now));
+    const until = resolveUntil(input.snooze.until, new Date(now), timeZone);
     if (!until || until.startsWith("pr:")) throw new Error("snooze: give until as next-event, 1h, tonight, tomorrow or an ISO time.");
     const items = needsYou(w, now);
     if (!items.length) throw new Error("Nothing needs you on this workspace, so there's nothing to put off.");
@@ -71,6 +72,8 @@ export function controlWorkspace(state: State, input: { workspaceId: string; ena
 
 type Result = { state: "submitted" | "failed" | "uncertain"; result: string };
 export type AgentActionDeps = {
+  /** The developer's IANA timezone, as their Follow-up client last reported it: snooze's "tonight"/"tomorrow" use it. */
+  timeZone?: () => string | null;
   store: { snapshot(): Promise<State>; mutate<T>(fn: (state: State) => T): Promise<T> };
   prActions: {
     prepare(workspaceId: string, key: string, kind: "merge" | "enable_mwr" | "disable_mwr"): Promise<ActionPlan>;
@@ -379,7 +382,7 @@ export class AgentActions {
   }
 
   private async control(caller: string, tool: AgentTool, input: Parameters<typeof controlWorkspace>[1]) {
-    const w = await this.d.store.mutate(state => controlWorkspace(state, input, this.now()));
+    const w = await this.d.store.mutate(state => controlWorkspace(state, input, this.now(), this.d.timeZone?.()));
     await this.note(caller, w.mainAgentId, tool);
     return { workspaceId: w.id, enable_auto_sends: w.enable_auto_sends, hold: w.hold, snooze: w.snooze ?? null, batches: w.batches.filter(b => !["completed", "cancelled"].includes(b.state)).map(b => ({ id: b.id, state: b.state })) };
   }
@@ -390,7 +393,7 @@ export class AgentActions {
     if (!args.bring_back && !args.until) throw new Error("snooze_workspace: give until (next-event, 1h, tonight, tomorrow or an ISO time), or bring_back=true.");
     const snooze = args.bring_back ? null : { until: args.until! };
     // The dry run runs the mutator on a copy, so a bad until or a workspace with nothing to put off fails here.
-    const preview = controlWorkspace(structuredClone(await this.d.store.snapshot()), { workspaceId: args.workspace, snooze }, this.now());
+    const preview = controlWorkspace(structuredClone(await this.d.store.snapshot()), { workspaceId: args.workspace, snooze }, this.now(), this.d.timeZone?.());
     const planId = this.plan(caller, "snooze_workspace", () => this.control(caller, "snooze_workspace", { workspaceId: args.workspace!, snooze }));
     return { dryRun: true, planId, workspaceId: preview.id, snooze: preview.snooze ?? null, next: `Only on the developer's request: call snooze_workspace with confirm=true and planId=${planId}.` };
   }
@@ -410,7 +413,7 @@ export class AgentActions {
     if (!args.agentIds?.length) throw new Error(`${tool}: give agentIds (from inbox_list).`);
     if (args.agentIds.includes(caller)) throw new Error(tool === "sign_off" ? "An agent can't sign itself off. Only the developer clears your flag." : `${tool} is for other agents' rows, not your own.`);
     if (tool === "snooze" && !args.until) throw new Error("snooze: give until (\"next-event\", \"1h\", \"tomorrow\" or an ISO time).");
-    const until = tool === "snooze" ? resolveUntil(args.until!, new Date(this.now())) : null;
+    const until = tool === "snooze" ? resolveUntil(args.until!, new Date(this.now()), this.d.timeZone?.()) : null;
     if (tool === "snooze" && !until) throw new Error(`snooze: until "${args.until}" isn't one of next-event, 1h, tonight, tomorrow, pr:<repo#n> or an ISO time.`);
     const { rows } = await this.d.inbox.list();
     const plan = args.agentIds.map(agentId => {

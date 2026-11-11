@@ -4,11 +4,11 @@ import { Icon } from "@getpaseo/plugin/client/ui";
 import { GROUP_TITLE, quietFolds, type Badge, type HomeGroupId, type HomeModel, type Workstream } from "../shared/home";
 import { ASK_KEY, type OmniboxItem, type WorkspaceItem } from "../shared/search";
 import { AskRow, PriorityLine, ResultRow } from "./home-chrome";
-import { age } from "../shared/inbox";
+import { age, wakeLabel, wakeShort } from "../shared/inbox";
 import { headlineColor, mergedColor, readable, runningColor, tint, toneColor, withAlpha, type Colors } from "./theme";
 import { useMinute } from "./home-data";
 import { Spinner } from "./motion";
-import type { Theme } from "./kit";
+import { rowDomId, type Theme } from "./kit";
 import { RowMenu, useRowMenuTrigger, type OpenRowMenu, type RowMenuOpen } from "./row-menu";
 import type { RowMenuItem, RowMenuSection } from "../shared/row-menu";
 
@@ -257,6 +257,17 @@ export function PrSummaryText({ s, c, lead = "" }: { s: Workstream; c: Colors; l
     {checks && <Text style={{ color: checks.tone === "muted" ? c.foregroundMuted : badgeColor({ text: "", tone: checks.tone }, c) }}>{` ${checks.text}`}</Text>}</Text>;
 }
 
+/** A Later row's time column: when it comes back ("in 25m", "tomorrow 09:00"), on the same minute clock as Age. */
+export function WakeTime({ until, c, size = 12 }: { until: string; c: Colors; size?: number }) {
+  const now = useMinute();
+  const text = wakeShort(until, Math.max(now, Date.now()));
+  return text ? <Text style={{ color: c.foregroundMuted, fontSize: size, fontVariant: ["tabular-nums"], minWidth: 26, textAlign: "right" }}>{text}</Text> : null;
+}
+/** The right-hand time: when a Later row comes back, otherwise how long ago. */
+function RowTime({ s, c, size }: { s: Workstream; c: Colors; size: number }) {
+  return s.group === "later" && s.wakeAt ? <WakeTime until={s.wakeAt} c={c} size={size} /> : <Age iso={s.at} c={c} size={size} />;
+}
+
 /** The age on the right. It re-renders on the shared minute clock without touching its row. */
 export function Age({ iso, c, size = 12 }: { iso: string | null; c: Colors; size?: number }) {
   const now = useMinute();
@@ -274,8 +285,11 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onMe
   const line = [s.word && s.group !== "needs" ? s.word : null, s.line].filter(Boolean).join(" · ");
   // Phones: "Working" under every row of a "Running 9" group says nothing the header didn't; one line per row instead.
   const generic = touch && !s.word && (s.line === "Working" || s.line === "Fixing");
-  const label = [s.title + (s.agent ? ` › ${s.agent}` : ""), s.word, s.line].filter(Boolean).join(". ");
-  return <Pressable ref={trigger.ref} accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={label} accessibilityHint={onMenu ? quickActionsHint(touch) : undefined}
+  // A Later row says when it comes back on screen; the label also keeps how long it has waited.
+  const wake = s.group === "later" && s.wakeAt ? wakeLabel({ until: s.wakeAt, at: s.at ?? new Date().toISOString() }, Date.now()) : "";
+  const waited = s.group === "later" && s.at ? age(s.at, Date.now()) : "";
+  const label = [s.title + (s.agent ? ` › ${s.agent}` : ""), s.word, s.line, wake && `Later until ${wake}`, waited && (waited === "now" ? "just now" : `waiting ${waited}`)].filter(Boolean).join(". ");
+  return <Pressable ref={trigger.ref} nativeID={rowDomId(s.key)} accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={label} accessibilityHint={onMenu ? quickActionsHint(touch) : undefined}
     onPress={() => onSelect(s.key)} onLongPress={trigger.onLongPress} delayLongPress={450}
     style={state => ({ flexDirection: "row", alignItems: dense ? "flex-start" : "center", gap: touch ? 10 : dense ? 8 : 10, minHeight: touch ? 56 : dense ? 36 : 38, paddingLeft: touch ? 14 : dense ? 8 : 16, paddingRight: touch ? 16 : dense ? 8 : 16, paddingVertical: touch ? 12 : dense ? 6 : 0,
       ...(touch ? { borderBottomWidth: 1, borderBottomColor: withAlpha(c.border, 0.6) } : {}),
@@ -288,7 +302,7 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onMe
     {touch ? <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
       <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
         <Text numberOfLines={2} style={{ flex: 1, minWidth: 0, color: muted ? c.foregroundMuted : c.foreground, fontSize: 15, lineHeight: 20, fontWeight: muted ? "400" : "500" }}>{s.title}</Text>
-        <View style={{ paddingTop: 2 }}><Age iso={s.at} c={c} size={12} /></View>
+        <View style={{ paddingTop: 2 }}><RowTime s={s} c={c} size={12} /></View>
       </View>
       {(!!s.word || !!s.line) && !generic && <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>
         {s.word && s.group === "needs" ? <Text style={{ color, fontWeight: "600" }}>{s.word}</Text> : null}{s.word && s.group === "needs" && s.line ? " · " : ""}{line}
@@ -312,6 +326,6 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onMe
       {s.badges.map(b => <BadgeView key={b.text} b={b} c={c} />)}
       <PrChipView s={s} c={c} />
     </View>{!!s.priority?.reason && <View style={{ paddingRight: 40 }}><PriorityLine reason={s.priority.reason} source={s.priority.source} c={c} /></View>}</View>}
-    {!touch && <Age iso={s.at} c={c} size={dense ? 11 : 12} />}
+    {!touch && <RowTime s={s} c={c} size={dense ? 11 : 12} />}
   </Pressable>;
 }, (a, b) => a.sig === b.sig && a.selected === b.selected && a.theme === b.theme && a.dense === b.dense && a.touch === b.touch && a.onSelect === b.onSelect && a.onMenu === b.onMenu && a.menuOpen === b.menuOpen);

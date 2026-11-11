@@ -63,7 +63,7 @@ export function useRowMenu(host: RowMenuHost) {
           const until = snoozeUntil(arg as LaterChoice, new Date());
           return runAction({ label: "Later", run: async () => {
             await control({ workspaceId, snooze: { until } }); after();
-            inbox.noteLater(s.title, until, async () => { await control({ workspaceId, snooze: prev && Date.parse(prev.until) > Date.now() || prev?.until === "next-event" ? { until: prev.until } : null }); after(); });
+            inbox.noteLater(s.title, until, async () => { await control({ workspaceId, snooze: prev && Date.parse(prev.until) > Date.now() || prev?.until === "next-event" ? { until: prev.until } : null }); after(); }, s.key);
           }, success: null }, `later_ws:${workspaceId}`);
         }
         case "bring_back_ws": return runAction({ label: "Bring back now", run: async () => { await control({ workspaceId, snooze: null }); after(); }, success: "Back in Needs you" }, `bring_back_ws:${workspaceId}`);
