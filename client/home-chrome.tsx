@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Platform, ScrollView, TextInput, View } from "react-native";
+import { Pressable, Text } from "./text";
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
 import { GROUP_TITLE, homeCounts, type HomeGroupId, type HomeModel } from "../shared/home";
 import { FIELD_LABEL, excerpt, highlightRuns, homeSearchDocs, indexDocs, defaultActive, omniboxResults, overseerProvider, workspaceProvider, type OmniboxItem, type OmniboxProvider, type Range, type WorkspaceItem } from "../shared/search";

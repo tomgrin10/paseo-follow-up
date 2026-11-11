@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Platform, Pressable, Text, View } from "react-native";
+import { Platform, View } from "react-native";
+import { Pressable, Text } from "./text";
 import type { PluginClientContext, PluginTimelineItemProps } from "@getpaseo/plugin/client";
 import { Icon, ScrollView } from "@getpaseo/plugin/client/ui";
 import { answerCardSchema, answerCardWhose, batchCardSchema, createMomentLedger, followTimelineItem, parseBatchPrompt, toolRowSchema, type AnswerCard, type BatchCard, type ToolRow } from "../shared/chat";

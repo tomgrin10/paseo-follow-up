@@ -1,4 +1,5 @@
-import { Platform, Text, type StyleProp, type TextStyle } from "react-native";
+import { Platform, type StyleProp, type TextStyle } from "react-native";
+import { Text } from "./text";
 import { openExternalUrl } from "@getpaseo/plugin/client";
 import { linkify } from "../shared/links";
 
