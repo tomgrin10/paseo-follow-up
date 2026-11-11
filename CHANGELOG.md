@@ -115,6 +115,7 @@ Thanks to [Progress](https://github.com/stevecastaneda/paseo-plugins/tree/main/p
 
 - Home, the panel and the header agree on what Follow-up is doing, and "Follow-up is fixing" shows only while repairs are really with the agent.
 - A question an agent asks again no longer shows up twice.
+- A workspace whose agent is still working no longer shows in Needs you.
 - A card in the chat closes only when you answer it, not on another agent's message, a Follow-up prompt or a schedule.
 - A card shows a PR's checks and reviews only when it's about that PR.
 - Recent steps label other agents' messages and Follow-up's own, and never report Follow-up's bookkeeping as the agent's work.
