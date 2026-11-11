@@ -13,6 +13,7 @@ import { freshPriorities, type Priority } from "./priorities";
 import { agentCard, automaticHold, batchView } from "./status";
 import { followUpObligations } from "./follow-up";
 import { cadence, movingReason, OBSERVATION_FRESH_MS, POLL_IDLE_MS, RUNNING_POLL_MS, TICK_MS } from "./poll";
+import { staleUpdatePhase, type UpdatePhase } from "./updates";
 
 /**
  * Status invariants: what must hold for any workspace, whatever path changed it. Pure, no IO, and never throwing:
@@ -279,4 +280,15 @@ export function holdViolations(w: Pick<Workspace, "id" | "hold" | "interruption"
  */
 export function actorViolations(rows: readonly { path: string; actor: Actor; recorded: string | null | undefined }[]): { id: string; detail: string }[] {
   return rows.filter(r => r.actor.kind === "agent" && (!r.recorded || r.recorded === "developer")).map(r => ({ id: "only-developer-acts-as-developer", detail: `${r.path} by agent ${r.actor.kind === "agent" ? r.actor.agentId : ""} recorded as ${r.recorded ?? "nobody"}` }));
+}
+
+/**
+ * `update-phase-never-outlives-its-version`: Settings → General, Home's marker and `updates_status` never show a phase
+ * tied to a version (failed, rolled back, untrusted, waiting, installing, available) once that version is at or below
+ * the one running, however it got installed (Follow-up's installer, `paseo plugin` from outside, the 2.0 move). Only a
+ * live installer's own phases (installing, settling) may name the running version. The updater applies the same rule
+ * (`staleUpdatePhase` in shared/updates.ts) on every view; this checks its output.
+ */
+export function updatePhaseViolations(phase: UpdatePhase, running: string, installerAlive: boolean): { id: string; detail: string }[] {
+  return staleUpdatePhase(phase, running, installerAlive) ? [{ id: "update-phase-never-outlives-its-version", detail: `${phase.kind} for ${"version" in phase ? phase.version : "?"} while ${running} runs` }] : [];
 }
