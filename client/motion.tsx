@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { initialReducedMotion, rememberReducedMotion } from "../shared/motion";
-import { AccessibilityInfo, ActivityIndicator, Animated, Easing, Platform, Pressable, View, type PressableProps, type StyleProp, type ViewStyle } from "react-native";
+import { AccessibilityInfo, ActivityIndicator, Animated, Easing, Platform, View, type PressableProps, type StyleProp, type ViewStyle } from "react-native";
+import { Pressable } from "./text";
 
 // The native driver is unavailable on web, where react-native-web animates in JS.
 const native = () => Platform.OS !== "web";

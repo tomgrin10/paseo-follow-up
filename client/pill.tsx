@@ -1,7 +1,8 @@
 import { useState, useSyncExternalStore } from "react";
 import { browserKey, BROWSER_POLL_MS } from "./keys";
 import { useWorkspace } from "./workspace-data";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { ScrollView, View } from "react-native";
+import { Pressable, Text } from "./text";
 import { useQuery } from "@tanstack/react-query";
 import { useRpc, type PluginButtonContentProps, type PluginButtonIconProps, type PluginButtonRegistration, type PluginClientContext } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/ui";

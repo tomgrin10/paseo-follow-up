@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
-import { Text, View } from "react-native";
+import { View } from "react-native";
+import { Text } from "./text";
 import type { PluginButtonIconProps, PluginClientContext, PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { Icon, SidebarRow } from "@getpaseo/plugin/client/ui";
 import { listRpc } from "../shared/contracts";

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { View } from "react-native";
+import { Pressable, Text } from "./text";
 import { openExternalUrl, useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, TextInput, useToast } from "@getpaseo/plugin/client/ui";
 import { useQueryClient } from "@tanstack/react-query";

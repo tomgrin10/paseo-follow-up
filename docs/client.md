@@ -27,6 +27,9 @@ Nothing polls while the app is hidden.
   light and dark.
 - `npm run preview` starts an isolated daemon with the packed plugin ([testing.md](testing.md)).
 - User copy says "Summary" for the `about` feature.
+- **Text a person may copy is selectable** (`client/text.tsx`). react-native-web sets user-select on a Text only when
+  `selectable` is passed, and Paseo's containers set none, so text inherited none. Follow-up's `Text` is selectable on
+  web unless it labels a control-role `Pressable`; `tests/selectable-text.test.ts` keeps every surface on it.
 - **Agent-written text renders through `RichText`** (`client/rich-text.tsx`). Root cause of the unclickable artifact
   link: every surface put agent-written text in a plain `<Text>`. `linkify` in `shared/links.ts` turns http(s) URLs
   and `owner/repo#123` into links (no markdown). `tests/rich-text.test.ts` fails when a field an agent or the
@@ -89,6 +92,7 @@ Nothing polls while the app is hidden.
 | `client/release-notes.tsx` | What's new and the notes list. Home's version marker is `VersionMark` in `client/updates.tsx`. |
 | `client/kit.tsx`, `client/motion.tsx`, `shared/motion.ts`, `client/theme.ts`, `client/keys.ts` | The type scale, motion (and the first-render reduced-motion read), theme helpers and query keys. |
 | `client/rich-text.tsx`, `shared/links.ts` | The one renderer for agent-written text, and the linkifier behind it. |
+| `client/text.tsx`, `client/text-rules.ts` | Follow-up's own `Text` and `Pressable`: text is selectable on web and desktop, except a control's label (a Pressable with a button, link, tab or option role). Surfaces never import react-native's. |
 | `client/toasts.tsx`, `client/toast-store.ts`, `client/pending-answers.ts` | The toast host, `runAction` for quick actions, and answers kept until the server has them. |
 
 ## Row menu

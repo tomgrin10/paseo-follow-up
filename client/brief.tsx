@@ -1,6 +1,7 @@
 import { useState, useSyncExternalStore } from "react";
 import { browserKey, BROWSER_POLL_MS } from "./keys";
-import { Platform, Pressable, Text, View, useWindowDimensions } from "react-native";
+import { Platform, View, useWindowDimensions } from "react-native";
+import { Pressable, Text } from "./text";
 import { useQuery } from "@tanstack/react-query";
 import { openExternalUrl, useRpc, type PluginClientContext, type PluginTimelineItemProps } from "@getpaseo/plugin/client";
 import { Icon, TextInput, copyText, useToast } from "@getpaseo/plugin/client/ui";

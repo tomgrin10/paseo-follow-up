@@ -1,0 +1,1 @@
+- You can select and copy text in Follow-up's cards, panel, Home, sheets and toasts. Buttons and chips still respond to a tap as before.

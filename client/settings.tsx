@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, ScrollView, TextInput, View } from "react-native";
+import { Pressable, Text } from "./text";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useRpc, useSettings } from "@getpaseo/plugin/client";
 import { Icon, SettingsAction, SettingsCard, SettingsSection, SettingsSelect, SettingsSwitch, useToast } from "@getpaseo/plugin/client/ui";

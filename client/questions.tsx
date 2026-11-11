@@ -2,7 +2,8 @@
 // "what the agent does meanwhile" line and Copy are adapted from Progress
 // (@stevecastaneda/paseo-progress, MIT, © 2026 Steve Castaneda); see THIRD_PARTY_NOTICES.md.
 import { useEffect, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { View } from "react-native";
+import { Pressable, Text } from "./text";
 import { openExternalUrl, useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, ScrollView, TextInput, copyText, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";

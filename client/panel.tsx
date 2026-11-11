@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { ScrollView, View } from "react-native";
+import { Text } from "./text";
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
 import { useAgent, useRpc, useTabState, openExternalUrl, type PluginHostProps, type PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { z } from "zod";

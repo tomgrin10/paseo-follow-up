@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Platform, Pressable, Text, useWindowDimensions, View, type ViewStyle } from "react-native";
+import { Platform, useWindowDimensions, View, type ViewStyle } from "react-native";
+import { Pressable, Text } from "./text";
 import { Icon, Modal } from "@getpaseo/plugin/client/ui";
 import { flatItems, isMenuKey, moveFocus, placeMenu, sheetArmed, type RowMenuItem, type RowMenuSection } from "../shared/row-menu";
 import type { Workstream } from "../shared/home";

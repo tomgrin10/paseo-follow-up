@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { FlatList, Pressable, Text, View } from "react-native";
+import { FlatList, View } from "react-native";
+import { Pressable, Text } from "./text";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { GROUP_TITLE, quietFolds, type Badge, type HomeGroupId, type HomeModel, type Workstream } from "../shared/home";
 import { ASK_KEY, type OmniboxItem, type WorkspaceItem } from "../shared/search";
