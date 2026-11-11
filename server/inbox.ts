@@ -2,8 +2,9 @@ import { DEVELOPER, ledgerBy, onBehalfLine, type Actor } from "../shared/actor";
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { stableMessageId, withDeadline } from "./delivery";
 import { BackgroundAgents } from "./background-agents";
-import { emptyInbox, expired, inboxStateSchema, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason, liveFlag, withoutRunState } from "../shared/inbox";
+import { emptyInbox, expired, inboxStateSchema, type OutboxEntry, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason, liveFlag, withoutRunState } from "../shared/inbox";
 import type { State as FollowState, Workspace as FollowWorkspace } from "../shared/model";
 import { prActionBlocks } from "../shared/pr-actions";
 import { configuredReviewers, noReviewers, reviewerLabel, withoutAuthor } from "../shared/reviewers";
@@ -93,6 +94,8 @@ export type BriefHost = {
   /** A brief collapsed; its decisions stored as questions may need settling. */
   settled?(agentId: string, brief: Brief): Promise<void>;
 };
+/** Sends one message to the brief's agent. */
+export type Send = (text: string, messageId: string) => Promise<void>;
 export type InboxOptions = {
   enabled: () => Promise<{ enable_inbox: boolean; enable_inbox_pr_closed: boolean }>;
   briefs?: BriefHost;
@@ -401,7 +404,7 @@ export class Inbox {
   pendingPermissions(): string[] { return [...this.pending]; }
 
   /** Stop pending grace timers when the worker stops. */
-  stop(): void { for (const { timer, done } of this.grace.values()) { clearTimeout(timer); done(); } this.grace.clear(); }
+  stop(): void { for (const { timer, done } of this.grace.values()) { clearTimeout(timer); done(); } this.grace.clear(); for (const t of this.retryTimers.values()) clearTimeout(t); this.retryTimers.clear(); }
 
   async closed(agent: { id: string; workspaceId: string | null; parentAgentId?: string | null }): Promise<void> {
     const wasLive = this.live.delete(agent.id);
@@ -436,11 +439,25 @@ export class Inbox {
 
   /**
    * The developer clicked an option or a move on the brief. Validated against the stored brief (a stale card is refused),
-   * logged in the ledger as the developer's (so the classifier clears the flag, #11), then sent, then collapsed.
+   * then recorded: the ledger notes the message as the developer's (so the classifier clears the flag, #11), the brief
+   * collapses, and the answer goes into the outbox, all before this returns. Getting it to the agent runs after
+   * (deliverAnswer): Paseo may first have to resume a dormant agent and wait for its run to start, which took 86 s on
+   * 2026-11-11, far past the 30 s a plugin RPC gets ("Plugin RPC timed out: follow-through.invoke" for an answer that
+   * did arrive). See docs/needs-you.md#answering-a-brief.
+   *
+   * `answerId` makes it idempotent: the client sends the same one on Retry, so a retry or a double click returns the
+   * recorded answer instead of sending it twice. The messageId is derived from it, so Paseo's own receipts also make a
+   * resend a no-op.
    */
-  async briefAction(agentId: string, input: { briefId: string; decisionId?: string; choice?: string; words?: string; choices?: { decisionId: string; choice: string; words?: string }[]; move?: "retry" | "done" }, send: (text: string, messageId: string) => Promise<void>, actor: Actor = DEVELOPER): Promise<Brief> {
+  async briefAction(agentId: string, input: { briefId: string; decisionId?: string; choice?: string; words?: string; choices?: { decisionId: string; choice: string; words?: string }[]; move?: "retry" | "done"; answerId?: string }, send: Send, actor: Actor = DEVELOPER): Promise<Brief> {
     const state = await this.store.snapshot();
     const b = state.entries[agentId]?.brief;
+    // The same answer again (Retry after a lost reply, a double click): what was recorded, and delivery resumed if it had failed.
+    if (input.answerId && b?.id === input.briefId && b.answerId === input.answerId) {
+      const queued = state.outbox.find(o => o.answerId === input.answerId && o.agentId === agentId);
+      if (queued?.state === "failed") return this.resend(queued, send);
+      return b;
+    }
     if (!b || b.id !== input.briefId) throw new Error("This brief was replaced by a newer one. Read the newest card.");
     if (b.state !== "open") throw new Error("This brief was already answered or signed off.");
     let text: string; let event: BriefEvent;
@@ -469,27 +486,98 @@ export class Inbox {
       text = briefAnswer(d.id, d.question, input.choice, o?.label ?? "", input.words);
       event = { type: "option", decisionId: d.id, choice: input.choice, ...(isOther(input.choice) ? { words: input.words!.trim() } : {}) };
     }
-    const messageId = randomUUID();
+    const answerId = input.answerId ?? randomUUID();
+    const messageId = stableMessageId(`brief:${agentId}:${b.id}:${answerId}`);
     // The developer's click counts as their message (F6); another agent's brief_action is that agent's, never theirs.
     const byline = onBehalfLine(actor);
     if (byline) text = `${text}\n${byline}`;
     await this.noteDelivery(agentId, messageId, ledgerBy(actor));
-    await send(text, messageId);
     const appends: { agentId: string; brief: Brief }[] = [];
     const at = this.iso();
+    const entry: OutboxEntry = { answerId, agentId, briefId: b.id, messageId, text, at, attempts: 0, state: "sending", error: null };
     const result = await this.store.mutate(s => {
-      if (s.entries[agentId]?.brief?.id === b.id) this.step(s, agentId, event, at, appends);
+      const current = s.entries[agentId]?.brief;
+      // Another answer won the race between the check above and this write: refuse rather than send both.
+      if (current?.id !== b.id || current.state !== "open") throw new Error("This brief was already answered or signed off.");
+      this.step(s, agentId, event, at, appends);
       const brief = s.entries[agentId]?.brief;
-      if (brief?.id === b.id && brief.state !== "open") {
-        brief.answeredBy = ledgerBy(actor);
-        if (actor.kind === "agent") brief.answeredByTitle = actor.title;
-        if (actor.kind === "agent" && brief.outcome) brief.outcome = brief.outcome.replace(/^You /, `${actor.title ?? "Another agent"} `);
-        for (const a of appends) if (a.brief.id === b.id) { a.brief.answeredBy = brief.answeredBy; a.brief.answeredByTitle = brief.answeredByTitle; a.brief.outcome = brief.outcome; }
+      if (brief?.id === b.id) {
+        brief.answerId = answerId;
+        brief.delivery = { state: "sending", error: null };
+        if (brief.state !== "open") {
+          brief.answeredBy = ledgerBy(actor);
+          if (actor.kind === "agent") brief.answeredByTitle = actor.title;
+          if (actor.kind === "agent" && brief.outcome) brief.outcome = brief.outcome.replace(/^You /, `${actor.title ?? "Another agent"} `);
+        }
+        for (const a of appends) if (a.brief.id === b.id) Object.assign(a.brief, { answeredBy: brief.answeredBy, answeredByTitle: brief.answeredByTitle, outcome: brief.outcome, answerId, delivery: brief.delivery });
       }
+      s.outbox = [...s.outbox.filter(o => o.answerId !== answerId), entry];
       return s.entries[agentId]?.brief ?? b;
     });
-    await this.flush(appends);
+    // Recorded: everything that talks to Paseo (the timeline row, the message itself) runs after the reply.
+    this.after(async () => { await this.flush(appends); await this.deliverAnswer(entry, send); });
     return result;
+  }
+
+  /** Background work after an RPC replied; failures are kept on the record, never thrown at nobody. Tests await `idle()`. */
+  private running = new Set<Promise<unknown>>();
+  private after(work: () => Promise<unknown>): void {
+    const p = work().catch(error => console.warn(`[follow-up] background inbox work failed: ${error instanceof Error ? error.message : String(error)}`)).finally(() => this.running.delete(p));
+    this.running.add(p);
+  }
+  async idle(): Promise<void> { while (this.running.size) await Promise.allSettled([...this.running]); }
+
+  /** Retry delays for an answer Paseo didn't confirm. Each attempt is capped; the same messageId makes a retry safe. */
+  deliveryRetryMs = [15_000, 60_000, 300_000];
+  deliveryAttemptMs = 120_000;
+  private retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  /** One attempt to get a recorded answer to its agent; on failure, a later retry, then `failed` on the brief with the reason. */
+  private async deliverAnswer(entry: OutboxEntry, send: Send): Promise<void> {
+    const outcome = await withDeadline(send(entry.text, entry.messageId), this.deliveryAttemptMs, "Paseo didn't confirm the answer in time")
+      .then(() => null, (error: unknown) => error instanceof Error ? error.message : String(error));
+    const attempts = entry.attempts + 1;
+    const retryIn = outcome === null ? null : this.deliveryRetryMs[attempts - 1] ?? null;
+    await this.store.mutate(s => {
+      const queued = s.outbox.find(o => o.answerId === entry.answerId);
+      if (!queued) return;
+      const brief = s.entries[entry.agentId]?.brief;
+      const own = brief?.id === entry.briefId && brief.answerId === entry.answerId ? brief : null;
+      if (outcome === null) {
+        s.outbox = s.outbox.filter(o => o.answerId !== entry.answerId);
+        if (own) own.delivery = null;
+      } else {
+        queued.attempts = attempts; queued.error = outcome; queued.state = retryIn === null ? "failed" : "sending";
+        if (own) own.delivery = { state: queued.state, error: retryIn === null ? outcome : null };
+      }
+    });
+    if (outcome !== null) console.warn(`[follow-up] answer ${entry.answerId} to ${entry.agentId} not confirmed (attempt ${attempts}): ${outcome}`);
+    const brief = (await this.store.snapshot()).entries[entry.agentId]?.brief;
+    if (brief?.id === entry.briefId) await this.o.briefs?.sink(entry.agentId, brief).catch(() => undefined);
+    if (retryIn !== null) {
+      clearTimeout(this.retryTimers.get(entry.answerId));
+      const timer = setTimeout(() => { this.retryTimers.delete(entry.answerId); this.after(() => this.deliverAnswer({ ...entry, attempts }, send)); }, retryIn);
+      (timer as { unref?: () => void }).unref?.();
+      this.retryTimers.set(entry.answerId, timer);
+    }
+  }
+
+  /** A failed answer, sent again on the developer's Retry: back to sending, same messageId. */
+  private async resend(entry: OutboxEntry, send: Send): Promise<Brief> {
+    const brief = await this.store.mutate(s => {
+      const queued = s.outbox.find(o => o.answerId === entry.answerId);
+      if (queued) { queued.state = "sending"; queued.attempts = 0; queued.error = null; }
+      const b = s.entries[entry.agentId]?.brief;
+      if (b?.answerId === entry.answerId) b.delivery = { state: "sending", error: null };
+      return b!;
+    });
+    this.after(() => this.deliverAnswer({ ...entry, attempts: 0 }, send));
+    return brief;
+  }
+
+  /** At worker start: answers recorded before a reload that Paseo never confirmed go out again (same messageId). */
+  async resumeAnswers(send: (agentId: string) => Send): Promise<void> {
+    for (const entry of (await this.store.snapshot()).outbox) if (entry.state === "sending") this.after(() => this.deliverAnswer(entry, send(entry.agentId)));
   }
 
   /** #7: Session Guard pauses that need a decision flag; waiting ones show on the Running row. */

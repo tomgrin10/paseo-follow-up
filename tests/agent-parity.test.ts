@@ -1,9 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { AgentActions, AGENT_TOOLS, PLANNED_TOOLS, READ_ONLY_TOOLS, type AgentActionDeps } from "../server/agent-actions";
 import { PARITY, RPC_TOOLS } from "../server/agent-parity";
+import { clientRpcs } from "./support/client-rpcs";
 import { actionTools, toolList } from "../server/mcp.mjs";
 import type { State } from "../shared/model";
 
@@ -12,28 +11,6 @@ import type { State } from "../shared/model";
  * a switch, a settings field) needs an agent tool that does the same, or an explicit exemption with a reason. A new
  * developer RPC without an entry in server/agent-parity.ts PARITY fails here.
  */
-async function clientRpcs(): Promise<Map<string, string>> {
-  const files = [join("index.client.tsx"), ...(await readdir("client")).filter(f => /\.tsx?$/.test(f)).map(f => join("client", f))];
-  const found = new Map<string, string>(); // rpc name -> first client file using it
-  for (const file of files) {
-    const source = await readFile(file, "utf8");
-    for (const m of source.matchAll(/import \{([^}]*)\} from "(\.\.?\/shared\/[\w-]+)"/g)) {
-      const names = m[1].split(",").map(n => n.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0]).filter(n => /Rpc$/.test(n));
-      if (!names.length) continue;
-      const mod = await import(join(process.cwd(), m[2].replace(/^\.\.?\//, "") + ".ts"));
-      for (const name of names) {
-        const contract = mod[name];
-        // Host settings (settingsRpc): one entry for the settings document, e.g. settings.display.
-        const rpc = typeof contract?.name === "string" ? contract.name : typeof contract?.read?.name === "string" ? contract.read.name.replace(/\.read$/, "") : null;
-        assert.ok(rpc, `${file}: ${name} isn't an RPC contract`);
-        if (!found.has(rpc)) found.set(rpc, file);
-      }
-    }
-    if (/useSettings\(displayPreferences\)/.test(source) && !found.has("settings.display")) found.set("settings.display", file);
-  }
-  return found;
-}
-
 const allToolNames = new Set<string>([...toolList(false, false, true, false, true).map((t: unknown[]) => t[0] as string), ...actionTools.map((t: unknown[]) => t[0] as string)]);
 
 test("parity: every RPC the client calls has an agent tool, or an exemption with a reason", async () => {

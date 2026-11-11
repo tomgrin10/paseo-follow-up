@@ -23,6 +23,9 @@ not a patch for one instance.
   - `tests/status-invariants.test.ts`: every invariant in `shared/status-invariants.ts` holds over a grid and the
     bug fixtures.
   - `tests/agent-parity.test.ts`: every client RPC has a tool or an exemption.
+  - `tests/rpc-ack.test.ts`: every client RPC replies within 500 ms with Paseo, the daemon and gh hanging
+    (`tests/support/hanging-host.ts` runs the real `contribute()` in a temp home), or has an `EXEMPT` reason.
+    `tests/answer-ack.test.ts` covers the answer paths: fast ack, one send per answer, retries, resume after reload.
   - `tests/docs.test.ts`: every RPC, tool and source file is documented, and the docs reference no missing paths
     or npm scripts.
   - `tests/mcp-usage.test.ts` and `tests/mcp.test.ts`: tool schemas, the tool count, and both transports.

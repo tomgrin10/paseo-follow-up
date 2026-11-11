@@ -4,7 +4,7 @@ import { Platform, Pressable, Text, View, useWindowDimensions } from "react-nati
 import { useQuery } from "@tanstack/react-query";
 import { openExternalUrl, useRpc, type PluginClientContext, type PluginTimelineItemProps } from "@getpaseo/plugin/client";
 import { Icon, TextInput, copyText, useToast } from "@getpaseo/plugin/client/ui";
-import { BRIEF_KIND, BRIEF_VERSION, askedDecisions, pickedCount, briefSchema, collapsedLine, extrasFit, hasOriginal, nothingNeededLine, isTight, pastRows, pastTone, selectsFirst, sendBar, type Brief, type BriefDecision, type BriefMove } from "../shared/brief";
+import { BRIEF_KIND, BRIEF_VERSION, askedDecisions, pickedCount, briefSchema, collapsedLine, extrasFit, hasOriginal, nothingNeededLine, isTight, pastRows, pastTone, selectsFirst, sendBar, newAnswerId, undeliveredReason, type Brief, type BriefDecision, type BriefMove } from "../shared/brief";
 import { age } from "../shared/inbox";
 import { briefKey, HEADLINE_WORD } from "../shared/headline";
 /** The card's kind word comes from the same table as the pill and the Needs-you row. */
@@ -232,17 +232,25 @@ function Reveal({ label, open, onPress, c, compact }: { label: string; open: boo
  * A card that's no longer open keeps its question (1.4.0). Answered: the ask, each decision with what was picked, and
  * "Show full question" opens the original read-only. Superseded or signed off: the one muted line, plus "Show original".
  */
-function Past({ b, c, now, compact, height, pending = false }: { b: Brief; c: Colors; now: number; compact: boolean; height: number; pending?: boolean }) {
+function Past({ b, c, now, compact, height, pending = false, onResend, resending = false }: { b: Brief; c: Colors; now: number; compact: boolean; height: number; pending?: boolean; onResend?: () => void; resending?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const answered = b.state === "answered";
   const asked = askedDecisions(b);
   const picked = answered && asked.some(d => d.chosen);
+  // The answer is recorded the moment Send is pressed; getting it to the agent can take Paseo a minute or more (a dormant
+  // agent resumes first). Until it lands the card reads as in progress, and if every retry failed it says so with Send again.
+  const sending = pending || b.delivery?.state === "sending";
+  const failed = b.delivery?.state === "failed";
   // Pending reads as in progress (a dashed circle), and becomes the solid check when the send lands.
-  const icon = b.state === "superseded" ? "History" : pending ? "CircleDashed" : "CircleCheck";
-  const spoken = pending ? `Done, sending (undo available): ${b.ask}` : undefined;
-  const color = pastTone(b.state, pending) === "success" ? c.statusSuccess : c.foregroundMuted;
+  const icon = b.state === "superseded" ? "History" : failed ? "CircleAlert" : sending ? "CircleDashed" : "CircleCheck";
+  const spoken = pending ? `Done, sending (undo available): ${b.ask}` : failed ? `Answer not delivered: ${b.ask}` : sending ? `Answered, sending to the agent: ${b.ask}` : undefined;
+  const color = failed ? c.statusDanger : pastTone(b.state, sending) === "success" ? c.statusSuccess : c.foregroundMuted;
   // A Done card already says "Done" as its outcome; its time stands alone rather than repeating it.
-  const right = answered && b.outcomeAt ? (b.outcome === "Done" ? clock(b.outcomeAt) : `Answered ${clock(b.outcomeAt)}`) : age(b.outcomeAt ?? b.at, now);
+  const right = b.delivery?.state === "sending" && !pending ? "Sending…" : answered && b.outcomeAt ? (b.outcome === "Done" ? clock(b.outcomeAt) : `Answered ${clock(b.outcomeAt)}`) : age(b.outcomeAt ?? b.at, now);
+  const undelivered = (indent: number) => failed && <View style={{ paddingLeft: indent, gap: 8, alignItems: "flex-start" }}>
+    <Text accessibilityRole="alert" style={{ color: c.statusDanger, fontSize: 13, lineHeight: 18 }}>{`Not delivered to the agent: ${undeliveredReason(b.delivery?.error)} Your answer is kept.`}</Text>
+    {onResend && <Btn label={resending ? "Sending…" : "Send again"} icon="RotateCcw" onPress={onResend} disabled={resending} c={c} compact={compact} hint="Sends the same answer once more" />}
+  </View>;
   const body = expanded && <View style={{ gap: 10, paddingTop: 4 }}>
     <BriefBody b={b} c={c} compact={compact} tight={false} embedded height={height} mode="readonly" picks={{}} onPick={() => undefined} busy={null} />
   </View>;
@@ -257,14 +265,15 @@ function Past({ b, c, now, compact, height, pending = false }: { b: Brief; c: Co
         : <Text numberOfLines={expanded ? undefined : 1} style={{ flex: 1, minWidth: 0, color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>{collapsedLine(b)}</Text>}
       <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontVariant: ["tabular-nums"] }}>{right}</Text>
     </View>
+    {undelivered(25)}
     {hasOriginal(b) && <View style={{ paddingLeft: 25 }}><Reveal label={answered ? (b.kind === "action" ? "Show full ask" : "Show full question") : "Show original"} open={expanded} onPress={() => setExpanded(v => !v)} c={c} compact={compact} /></View>}
     {body}
   </View>;
   // Answered with picks: the ask, then each decision's question and the picked option, so the answer is never
   // separated from what it answered.
-  return <View accessibilityRole="summary" accessibilityLabel={`Answered: ${b.ask}`} style={{ marginVertical: 10, gap: 8, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: c.border }}>
+  return <View accessibilityRole="summary" accessibilityLabel={spoken ?? `Answered: ${b.ask}`} style={{ marginVertical: 10, gap: 8, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: c.border }}>
     <View style={{ flexDirection: "row", gap: 8, alignItems: "flex-start" }}>
-      <View style={{ paddingTop: 2 }}><Icon name="CircleCheck" size={15} color={color} /></View>
+      <View style={{ paddingTop: 2 }}><Icon name={icon} size={15} color={color} /></View>
       <RichText style={{ flex: 1, minWidth: 0, color: c.foreground, fontSize: 14, lineHeight: 20, fontWeight: "600" }}>{b.ask}</RichText>
       <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 20, fontVariant: ["tabular-nums"] }}>{right}</Text>
     </View>
@@ -274,6 +283,7 @@ function Past({ b, c, now, compact, height, pending = false }: { b: Brief; c: Co
         <RichText style={{ color: r.answer ? c.foreground : c.foregroundMuted, fontSize: 13, lineHeight: 19, fontWeight: r.answer ? "600" : "400" }}>{r.answer ?? "Skipped"}</RichText>
       </View>)}
     </View>}
+    {undelivered(23)}
     <View style={{ paddingLeft: 23 }}><Reveal label="Show full question" open={expanded} onPress={() => setExpanded(v => !v)} c={c} compact={compact} /></View>
     {expanded && <View style={{ paddingLeft: 23 }}>{body}</View>}
   </View>;
@@ -300,7 +310,12 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" } | null>(null);
   const workspace = b.workspaceId ? deps.workspace(b.workspaceId) : undefined;
   const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), refetchInterval: BROWSER_POLL_MS, enabled: !!sheet });
-  if (b.state !== "open") return <Past b={b} c={c} now={now} compact={compact} height={height} />;
+  // Send again on an undelivered answer: the same answerId, so the server resends that answer and never a second one.
+  const resend = () => {
+    if (busy || !b.answerId) return; setBusy("resend");
+    void runAction({ label: "Answer", toast, run: () => act({ agentId, briefId: b.id, answerId: b.answerId! }), success: () => null, failure: "Your answer wasn't sent again" }).finally(() => setBusy(null));
+  };
+  if (b.state !== "open") return <Past b={b} c={c} now={now} compact={compact} height={height} onResend={b.answerId ? resend : undefined} resending={busy === "resend"} />;
   // Muted until the send lands: the server's answered brief then replaces this, green.
   if (marked) return <Past b={{ ...b, state: "answered", outcome: "Done", outcomeAt: marked }} pending={!sent} c={c} now={now} compact={compact} height={height} />;
 
@@ -313,9 +328,11 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   const border = acts ? withAlpha(attention, isLight(c) ? 0.5 : 0.45) : c.border;
   // Every send from the card (a pick, Something else, Send answers, the keyboard's Send) goes through runAction: the
   // card keeps the picks and words and says what failed, and the toast offers Retry. Success is the card itself.
-  const run = async (key: string, work: () => Promise<unknown>, failure = "Your answer wasn't sent") => {
+  // One answerId per Send: the toast's Retry runs the same closure, so it repeats this answer instead of sending a second.
+  const run = async (key: string, work: (answerId: string) => Promise<unknown>, failure = "Your answer wasn't sent") => {
     if (busy) return; setBusy(key); setError(null);
-    await runAction({ label: "Brief", toast, run: work, success: () => null, onError: e => setError(errorText(e)), failure });
+    const answerId = newAnswerId();
+    await runAction({ label: "Brief", toast, run: () => work(answerId), success: () => null, onError: e => setError(errorText(e)), failure });
     setBusy(null);
   };
   // Done: "Done: <ask>" can't be unsent, so it goes out when the toast's Undo window ends (runUndoable). A failure
@@ -323,7 +340,8 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   const markDone = () => {
     if (busy || marked) return;
     setError(null); setSent(false); setMarked(new Date().toISOString());
-    const id = runUndoable("Telling the agent it's done", { label: "Done", toast, run: () => act({ agentId, briefId: b.id, move: "done" }), success: "Marked done. The agent has it.",
+    const doneId = newAnswerId();
+    const id = runUndoable("Telling the agent it's done", { label: "Done", toast, run: () => act({ agentId, briefId: b.id, move: "done", answerId: doneId }), success: "Marked done. The agent has it.",
       failure: "Done not sent", open: () => deps.openAgent(agentId), onSuccess: () => setSent(true), onError: e => { setMarked(null); setError(errorText(e)); } }, () => setMarked(null), `done:${b.id}`, () => deps.endDone?.(agentId));
     // The pill's Undo is this toast's Undo: it closes the toast (so nothing is sent) and reopens the card.
     if (id !== null) deps.noteDone?.(agentId, () => { dismissToast(id); setMarked(null); });
@@ -332,7 +350,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
     if ((m.kind === "merge" || m.kind === "add_reviewers") && m.prKey) { if (workspace?.prs.some(p => p.key === m.prKey)) setSheet({ key: m.prKey, intent: m.kind === "merge" ? "merge" : "reviewers" }); else if (b.workspaceId) deps.openPanel(b.workspaceId); }
     else if (m.kind === "open_pr" && m.url) void openExternalUrl(m.url).catch(() => undefined);
     else if (m.kind === "sign_off_next") { deps.signOff(agentId); deps.openNext(agentId); }
-    else if (m.kind === "retry") void run("retry", () => act({ agentId, briefId: b.id, move: "retry" }), "Retry didn't start");
+    else if (m.kind === "retry") void run("retry", answerId => act({ agentId, briefId: b.id, move: "retry", answerId }), "Retry didn't start");
     else if (m.kind === "done") markDone();
     else if (m.kind === "copy_error" && b.mono) void copyText(b.mono).catch(() => undefined);
     else if (m.kind === "open_subagent" && m.agentId) deps.openAgent(m.agentId);
@@ -372,13 +390,13 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   const tight = isTight(b, compact, height);
   const pad = compact ? 14 : 16;
   const multi = selectsFirst(b);
-  const sendOne = (key: string) => { const [decisionId, choice] = key.split(":"); void run(key, () => act({ agentId, briefId: b.id, decisionId, choice })); };
+  const sendOne = (key: string) => { const [decisionId, choice] = key.split(":"); void run(key, answerId => act({ agentId, briefId: b.id, decisionId, choice, answerId })); };
   const sendable = ready(picks, words);
-  const sendAll = () => void run("answers", async () => { await act({ agentId, briefId: b.id, choices: Object.entries(sendable).map(([decisionId, choice]) => ({ decisionId, choice, ...(isOther(choice) ? { words: words[decisionId].trim() } : {}) })) }); pickStore.clear(b.id); wordStore.clear(b.id); });
+  const sendAll = () => void run("answers", async answerId => { await act({ agentId, briefId: b.id, answerId, choices: Object.entries(sendable).map(([decisionId, choice]) => ({ decisionId, choice, ...(isOther(choice) ? { words: words[decisionId].trim() } : {}) })) }); pickStore.clear(b.id); wordStore.clear(b.id); });
   // The keyboard's Send: every pick on a multi-decision card, or a single card's Something else once it has words.
   const otherId = !multi ? askedDecisions(b).find(d => isOther(picks[d.id]))?.id : undefined;
   const keySend = multi ? (sendBar(b, sendable).ready ? () => sendAll() : null) : otherId && words[otherId]?.trim() ? () => sendOther(otherId) : null;
-  const sendOther = (decisionId: string) => { const text = words[decisionId]?.trim(); if (text) void run(`${decisionId}:${OTHER}`, async () => { await act({ agentId, briefId: b.id, decisionId, choice: OTHER, words: text }); pickStore.clear(b.id); wordStore.clear(b.id); }); };
+  const sendOther = (decisionId: string) => { const text = words[decisionId]?.trim(); if (text) void run(`${decisionId}:${OTHER}`, async answerId => { await act({ agentId, briefId: b.id, decisionId, choice: OTHER, words: text, answerId }); pickStore.clear(b.id); wordStore.clear(b.id); }); };
   return <View accessibilityRole="summary" accessibilityLabel={`${acts ? "Needs you" : flaggedAct ? "Later" : word(b.kind)}: ${b.ask}`}
     style={{ marginVertical: embedded ? 0 : 10, borderRadius: 12, borderWidth: 1, borderColor: border, backgroundColor: c.surface1, overflow: "hidden" }}>
     <SubmitScope enabled={!!keySend && !busy} onSubmit={() => keySend?.()} style={{ paddingHorizontal: pad, paddingTop: compact ? 12 : 14, paddingBottom: 14, gap: tight ? 10 : 12 }}>

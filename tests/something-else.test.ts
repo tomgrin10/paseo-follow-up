@@ -109,6 +109,7 @@ test("the server refuses Something else without words, then records it with the 
     await assert.rejects(inbox.briefAction("main", { briefId: "brief:t1", decisionId: "Q9", choice: "other", words: " " }, async t => { sent.push(t); }), /Something else needs your answer in words/);
     assert.equal(sent.length, 0, "nothing sent");
     const after = await inbox.briefAction("main", { briefId: "brief:t1", choices: [{ decisionId: "Q9", choice: "other", words: "Until the next billing date" }, { decisionId: "Q10", choice: "A" }] }, async t => { sent.push(t); });
+    await inbox.idle();
     assert.equal(sent.length, 1);
     assert.deepEqual(after.decisions.map(d => [d.chosen, d.words]), [["other", "Until the next billing date"], ["A", null]]);
     assert.equal(after.outcome, "You picked 1. Something else · 2. A");

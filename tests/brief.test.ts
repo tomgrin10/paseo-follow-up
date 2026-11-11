@@ -389,6 +389,7 @@ test("Done sends \"Done: <ask>\" as the developer, clears the flag's source, and
   const id = (await s.entry()).brief!.id;
   const sent: { text: string; messageId: string }[] = [];
   const after = await s.inbox.briefAction("main", { briefId: id, move: "done" }, async (text, messageId) => { sent.push({ text, messageId }); });
+  await s.inbox.idle();
   assert.equal(after.state, "answered"); assert.equal(after.outcome, "Done");
   assert.deepEqual(sent.map(m => m.text), ["Done: Rotate the staging API key"]);
   assert.deepEqual((await s.inbox.store.snapshot()).ledger.map(l => [l.messageId, l.by]), [[sent[0].messageId, "developer"]]);
@@ -424,6 +425,7 @@ test("§6 an option click is the developer's message: ledger by developer, the c
   const id = (await s.entry()).brief!.id;
   const sent: { text: string; messageId: string }[] = [];
   const after = await s.inbox.briefAction("main", { briefId: id, decisionId: "D1", choice: "A" }, async (text, messageId) => { sent.push({ text, messageId }); });
+  await s.inbox.idle();
   assert.equal(after.state, "answered"); assert.match(sent[0].text, /^Follow-up answer D1 \(Per-tenant buckets or one global bucket\?\): A — Per-tenant buckets/);
   const ledger = (await s.inbox.store.snapshot()).ledger;
   assert.deepEqual(ledger.map(l => [l.messageId, l.by]), [[sent[0].messageId, "developer"]]);
