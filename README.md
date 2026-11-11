@@ -16,7 +16,7 @@ Screenshots use synthetic workspaces, people and PRs.
 ## Install
 
 ```sh
-paseo plugin install npm:paseo-follow-up@2.0.0-rc.0
+paseo plugin install npm:paseo-follow-up
 ```
 
 Needs Paseo 0.15 or later, Node 22+ and a signed-in GitHub CLI (`gh`) on the machine the Paseo daemon runs on. Then

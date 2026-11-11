@@ -6,7 +6,7 @@ What changed in each version of Follow-up, newest first. Follow-up shows the cur
 
 Follow-up keeps track of every workspace your coding agents work in, until the work is merged and done. It shows you in one place which agents are waiting on you and why, sends failed checks and review comments back to the right agent by itself, and lets you answer an agent's question without opening its chat.
 
-![Follow-up Home: every workspace in one list, grouped by what it needs from you, with the selected workspace's question on the right](https://raw.githubusercontent.com/tomgrin10/paseo-follow-up/329e050a2a1a8c333da77341f145b50d47295612/docs/screenshots/follow-up-notes-home.png#1120x680)
+![Follow-up Home: every workspace in one list, grouped by what it needs from you, with the selected workspace's question on the right](https://raw.githubusercontent.com/tomgrin10/paseo-follow-up/d00dcb7da27c6ce7676dbf4c41050d45daf8c3cc/docs/screenshots/follow-up-notes-home.png#1120x680)
 
 ### One list of what needs you
 
@@ -16,7 +16,7 @@ Home lists every workspace, grouped by what it needs from you. When an agent fin
 
 The Follow-up tab beside a workspace's chat shows how far its PRs are, what needs you and what's left to fix, with a bar for the PR stack, what the agent is doing now and the question it's waiting on.
 
-![The Follow-up panel on a workspace: 1 of 3 PRs merged, 3 need you, 1 to fix, a stack bar, Auto-send, and the agent's question with three lettered options, one recommended](https://raw.githubusercontent.com/tomgrin10/paseo-follow-up/fda6f2daf038347bb46f3073a5956d82f5e0469f/docs/screenshots/follow-up-notes-panel.png#320x910)
+![The Follow-up panel on a workspace: 1 of 3 PRs merged, 3 need you, 1 to fix, a stack bar, Auto-send, and the agent's question with three lettered options, one recommended](https://raw.githubusercontent.com/tomgrin10/paseo-follow-up/d00dcb7da27c6ce7676dbf4c41050d45daf8c3cc/docs/screenshots/follow-up-notes-panel.png#320x910)
 
 ### Answer questions from anywhere
 
