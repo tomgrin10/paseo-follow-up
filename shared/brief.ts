@@ -300,9 +300,28 @@ export function extrasFit(b: Pick<Brief, "decisions" | "context" | "facts" | "mo
 }
 
 /** One muted line for a collapsed brief: what was asked and what happened to it. */
+/** Why a card stopped being open without the developer answering it: Follow-up's words, shown as the card's line. */
+export const RESOLVED = {
+  replaced: "Replaced by a newer card",
+  movedOn: "No longer needed · the agent moved on",
+  withdrawn: "The agent withdrew this question",
+} as const;
+const OWN_OUTCOMES: readonly string[] = Object.values(RESOLVED);
+
+/**
+ * The agent's ask as a resolved card's line. An agent sometimes writes the card's status into its ask ("Still open:
+ * Q35, which plugin…"); once the card is resolved that contradicts it, so the status framing goes.
+ */
+export function pastAsk(ask: string): string {
+  // Only a status word followed by punctuation or a question id: "Open the PR when CI is green" is an ask, not a status.
+  const t = ask.replace(/^\s*(still open|open|pending|waiting on|needs you|blocked)(\s*[:,·-]\s*|\s+(?=Q\d+\b))(Q\d+\s*[:,·-]?\s*)?/i, "").trim();
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : ask;
+}
+
 export function collapsedLine(b: Pick<Brief, "state" | "source" | "outcome" | "ask">): string {
-  if (b.state === "superseded") return b.source === "none" ? "No ask was stated · the agent kept going" : `Earlier ask, the agent kept going: ${b.ask}`;
-  return `${b.outcome} · ${b.ask}`;
+  if (b.state === "superseded" && b.outcome && OWN_OUTCOMES.includes(b.outcome)) return b.outcome;
+  if (b.state === "superseded") return b.source === "none" ? "No ask was stated · the agent kept going" : `Earlier ask, the agent kept going: ${pastAsk(b.ask)}`;
+  return `${b.outcome} · ${pastAsk(b.ask)}`;
 }
 
 // ---------- PR facts (S5) ----------
@@ -433,7 +452,7 @@ export function briefStep(prev: Brief | null, event: BriefEvent, now: string): {
       if (prev?.state !== "open" || !prev.questionIds.length || !prev.questionIds.every(id => id in event.answers)) return keep;
       const decisions = prev.decisions.map(d => { const a = event.answers[d.id]; return a && !d.chosen ? { ...d, chosen: a.choice, words: isOther(a.choice) ? a.words : null } : d; });
       const answered = prev.questionIds.some(id => event.answers[id]);
-      const b = answered ? { ...collapse(prev, "answered", answeredOutcome(decisions)), decisions } : collapse(prev, "superseded", "The agent withdrew the question");
+      const b = answered ? { ...collapse(prev, "answered", answeredOutcome(decisions)), decisions } : collapse(prev, "superseded", RESOLVED.withdrawn);
       return { brief: b, appends: [b] };
     }
     case "facts":
@@ -542,7 +561,7 @@ export function shownBrief(row: Brief, live: { brief: Brief | null } | undefined
     const allAnswered = linked.length > 0 && linked.length === brief.questionIds.length && linked.every(id => byId.get(id)!.answer);
     const elsewhere = !!live && live.brief?.id !== row.id;
     if (allAnswered) brief = { ...brief, state: "answered", outcome: answeredOutcome(decisions), outcomeAt: brief.outcomeAt ?? null };
-    else if (elsewhere) brief = { ...brief, state: "superseded", outcome: "Replaced by a newer update", outcomeAt: brief.outcomeAt ?? null };
+    else if (elsewhere) brief = { ...brief, state: "superseded", outcome: live!.brief ? RESOLVED.replaced : RESOLVED.movedOn, outcomeAt: brief.outcomeAt ?? null };
   }
   return { brief, actionable: !!live && live.brief?.id === row.id && brief.state === "open" };
 }

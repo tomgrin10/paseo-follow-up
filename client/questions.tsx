@@ -11,7 +11,7 @@ import { answerQuestionRpc } from "../shared/contracts";
 import type { Workspace } from "../shared/model";
 import { OTHER, OTHER_LABEL, answerLabel, isOpen, isOther, questionState, replyText, type Question } from "../shared/questions";
 import { ago } from "../shared/attention";
-import { sentence } from "../shared/errors";
+import { mootNote, sentence } from "../shared/errors";
 import { activity, type ActivityTone } from "../shared/activity";
 import { Button, Card, CardRow, Chip, FoldRow, IconButton, SubmitScope, errorText, text, type Theme } from "./kit";
 import { Spinner } from "./motion";
@@ -145,7 +145,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
       onSuccess: () => { clearPendingAnswer(w.id, q.id); refresh(); },
       onError: error => { failPendingAnswer(w.id, q.id, errorText(error)); refresh(); },
       // Answered or withdrawn elsewhere first: nothing to retry. Drop the unsent copy; the card shows the recorded answer.
-      reconcile: e => { clearPendingAnswer(w.id, q.id); refresh(); notice(`${sentence(errorText(e))} Your pick wasn't sent.`, toast); },
+      reconcile: e => { clearPendingAnswer(w.id, q.id); refresh(); notice(mootNote(e, free || isOther(answer)), toast); },
       failure: `Answer to ${q.id} not sent`, open: () => openQuestion(w.id, q.id),
     });
     onClose?.(); onAnswered?.();

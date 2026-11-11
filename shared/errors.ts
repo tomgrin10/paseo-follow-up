@@ -26,3 +26,21 @@ export function isMoot(error: unknown): boolean {
   const t = errorText(error);
   return MOOT.some(r => r.test(t));
 }
+
+/** Which moot refusal it is, so a surface says it in its own words instead of echoing the server's. */
+export function mootKind(error: unknown): "answered" | "withdrawn" | "replaced" | null {
+  const t = errorText(error);
+  if (/^This brief was replaced by a newer one\./.test(t)) return "replaced";
+  if (/^Q\d+ (is already withdrawn|was withdrawn)\b/.test(t)) return "withdrawn";
+  return isMoot(error) ? "answered" : null;
+}
+
+/** The note a surface shows when an answer turned out moot: what happened, and that nothing was sent. */
+export function mootNote(error: unknown, typed = false): string {
+  const kept = typed ? "Your answer wasn't sent." : "Your pick wasn't sent.";
+  switch (mootKind(error)) {
+    case "withdrawn": return `The agent withdrew this question. ${kept}`;
+    case "replaced": return `A newer card replaced this one. ${kept}`;
+    default: return `Already answered elsewhere. ${kept}`;
+  }
+}

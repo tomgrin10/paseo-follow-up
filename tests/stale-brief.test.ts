@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { briefStep, pickBrief, shownBrief, type Brief, type NeedsYouCall } from "../shared/brief";
-import { isMoot, STALE_BRIEF } from "../shared/errors";
+import { briefStep, collapsedLine, pastAsk, pickBrief, shownBrief, type Brief, type NeedsYouCall } from "../shared/brief";
+import { isMoot, mootNote, STALE_BRIEF } from "../shared/errors";
 import { decisionOf } from "../server/questions";
 import type { Question } from "../shared/questions";
 
@@ -50,8 +50,11 @@ test("a superseded or missing brief renders resolved: answered from its question
   const replaced = shownBrief(row, { brief: newer }, [q35()]);
   assert.equal(replaced.actionable, false);
   assert.equal(replaced.brief.state, "superseded");
-  assert.equal(replaced.brief.outcome, "Replaced by a newer update");
-  assert.equal(shownBrief(row, { brief: null }, []).brief.state, "superseded", "the agent has no brief at all now");
+  assert.equal(replaced.brief.outcome, "Replaced by a newer card");
+  assert.equal(collapsedLine(replaced.brief), "Replaced by a newer card", "the card shows Follow-up's line, not the agent's stale ask");
+  const gone = shownBrief(row, { brief: null }, []);
+  assert.equal(gone.brief.state, "superseded", "the agent has no brief at all now");
+  assert.equal(gone.brief.outcome, "No longer needed · the agent moved on", "nothing replaced it");
 });
 
 test("a brief whose questions are all answered isn't open, even if the stored brief still says so", () => {
@@ -169,4 +172,18 @@ test("store.onChanged never awaits a write to the store it runs in (it runs insi
   const server = await readFile(join(import.meta.dirname, "..", "index.server.ts"), "utf8");
   const hook = server.slice(server.indexOf("store.onChanged = "), server.indexOf("\n", server.indexOf("store.onChanged = ")));
   assert.doesNotMatch(hook, /await inbox\.questionsChanged/, "resolving briefs can write the store (settled), so onChanged starts it without awaiting");
+});
+
+test("a resolved card never leads with the agent's stale status line", () => {
+  assert.equal(pastAsk("Still open: Q35, which plugin should own the agent/workspace link card"), "Which plugin should own the agent/workspace link card");
+  assert.equal(pastAsk("Needs you: rotate the key"), "Rotate the key");
+  assert.equal(pastAsk("Open the PR when CI is green"), "Open the PR when CI is green", "only a status word followed by punctuation or a question id goes");
+  assert.equal(pastAsk("Still open Q35: which plugin?"), "Which plugin?");
+  assert.equal(pastAsk("Pick how the export API is rate-limited"), "Pick how the export API is rate-limited");
+});
+
+test("a moot answer's note is Follow-up's words: what happened and that nothing was sent", () => {
+  assert.equal(mootNote(new Error("Request failed: Q35 is already answered. requestType=x")), "Already answered elsewhere. Your pick wasn't sent.");
+  assert.equal(mootNote(new Error("Q35 was withdrawn: Replaced by a newer needs_you call."), true), "The agent withdrew this question. Your answer wasn't sent.");
+  assert.equal(mootNote(new Error(STALE_BRIEF.replaced)), "A newer card replaced this one. Your pick wasn't sent.");
 });
