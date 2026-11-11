@@ -68,6 +68,7 @@ Thanks to [Progress](https://github.com/stevecastaneda/paseo-plugins/tree/main/p
 - Reviewers per repository, plus a default list, for Add reviewers.
 - A deploy Follow-up has seen stays counted until a rollback, and Done goes through with a note when Follow-up can't check what production serves.
 - Saving a spec link, a task's schedule or a reviewer pick closes at once and confirms with a short message.
+- An agent can mark a PR it merges itself, so Follow-up stops asking you to review or merge it. Work the agent is waiting on reads as Waiting, with what it waits on.
 
 ### Agents and the main agent
 
@@ -126,5 +127,6 @@ Thanks to [Progress](https://github.com/stevecastaneda/paseo-plugins/tree/main/p
 - An answer card shows your whole answer and note.
 - If your Claude or Codex settings file is a link, Follow-up updates the file it points to and keeps the link.
 - Error messages are as short as Paseo's own, with the full reason where Open takes you.
+- A workspace no longer shows Needs you for "Add reviewers" in a repository nobody is set up to review, and the flag goes away on its own once the PR merges or gets reviewers.
 
 </details>
