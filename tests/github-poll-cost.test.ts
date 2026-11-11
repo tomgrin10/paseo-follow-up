@@ -216,3 +216,15 @@ test("the engine's timer tick may back off; a refresh during it still gets a fre
   assert.deepEqual([...seen[1]!.fresh!], ["example/app#1"], "the refreshed workspace's PRs are read now");
   await engine.tick(); assert.deepEqual(seen[2], {}, "any other caller: a full fresh read");
 });
+
+test("a first read is not a change: a settled repository backs off right after the worker starts", async () => {
+  let now = clock;
+  const { rows, prs } = fleet(6, 2, i => (i === 0 ? { checksPending: true } : {}));
+  const f = fakeGithub(rows);
+  const github = new Github(undefined, undefined, undefined, f.api, () => now);
+  await github.observe(prs, { background: true });
+  f.calls.perRepo.clear();
+  for (let i = 0; i < 4; i++) { now += TICK_MS; await github.observe(prs, { background: true }); }
+  assert.equal(f.calls.perRepo.get(prs[0].repo), 4, "the repository with pending checks: every tick");
+  assert.equal(f.calls.perRepo.get(prs[1].repo), 1, "the settled one: once per POLL_IDLE_MS from the start");
+});
