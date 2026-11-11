@@ -10,6 +10,8 @@ import { Store } from "../server/store";
 import { askQuestion } from "../server/questions";
 import { clock, pr, workspace } from "./fixtures";
 import { settleTime } from "./support/hanging-host";
+import { FakeTimers } from "./support/fake-timers";
+import { readFile } from "node:fs/promises";
 
 /**
  * Bug (2026-11-11): "Your answer wasn't sent. Plugin RPC timed out: follow-up.invoke" on a question card.
@@ -20,6 +22,9 @@ import { settleTime } from "./support/hanging-host";
  *
  * The rule these tests hold: an answer RPC replies once the answer is recorded, within ACK_MS, whatever Paseo does;
  * the send runs after, under one messageId per answer, and a retry or a double click never sends twice.
+ *
+ * Retry delays and attempt deadlines run on FakeTimers: a test fires them in order and awaits idle(), never the wall
+ * clock (the last test below holds that for this file and tests/rpc-ack.test.ts).
  */
 const ACK_MS = 500;
 const NOW = "2026-11-11T08:52:42.000Z";
@@ -36,10 +41,11 @@ async function inbox(t: { after(fn: () => unknown): void }) {
   const rows: Brief[] = [];
   const box = new Inbox(dir, { enabled: async () => ({ enable_inbox: true, enable_inbox_pr_closed: true }), directory, sources: { ledger: async () => [], defer: async () => false, session: async () => false, schedule: async () => false } as never,
     guard: async () => null, graceMs: 5, now: () => Date.parse(NOW), briefs: { sink: async (_a: string, b: Brief) => { rows.push(b); }, call: async () => null, pr: async () => null } } as never);
-  box.deliveryRetryMs = [5, 5]; box.deliveryAttemptMs = 50;
+  const timers = new FakeTimers();
+  box.deliveryRetryMs = [15_000, 60_000]; box.deliveryAttemptMs = 120_000; box.timers = timers;
   await box.store.mutate(s => { s.entries.main = { ...(s.entries.main ?? {}), agentId: "main", brief: open() } as never; });
   t.after(async () => { box.stop(); await rm(dir, { recursive: true, force: true }); });
-  return { box, rows, brief: async () => (await box.store.snapshot()).entries.main!.brief!, outbox: async () => (await box.store.snapshot()).outbox };
+  return { box, rows, timers, brief: async () => (await box.store.snapshot()).entries.main!.brief!, outbox: async () => (await box.store.snapshot()).outbox };
 }
 
 test("brief-action replies within ACK_MS while Paseo is still resuming the agent, and the answer is recorded", async t => {
@@ -70,12 +76,16 @@ test("Retry and double clicks: the same answerId never sends twice, and every at
 });
 
 test("a send that fails is retried under the same messageId, then the card says it failed, and Retry resends it", async t => {
-  const { box, brief, outbox, rows } = await inbox(t);
+  const { box, brief, outbox, rows, timers } = await inbox(t);
   const ids: string[] = [];
   let ok = false;
   const flaky: Send = async (_text, messageId) => { ids.push(messageId); if (!ok) throw new Error("Agent is busy loading"); };
   await box.briefAction("main", { briefId: "brief:t1", decisionId: "D1", choice: "A", answerId: "answer-0004" }, flaky);
-  await box.idle(); await new Promise(r => setTimeout(r, 40)); await box.idle();
+  await box.idle();
+  assert.deepEqual(timers.pending, [15_000], "the first attempt failed; one retry waits");
+  assert.equal(await timers.fire(), 15_000); await box.idle();
+  assert.equal(await timers.fire(), 60_000); await box.idle();
+  assert.deepEqual(timers.pending, [], "no retry after the last one");
   assert.equal(ids.length, 3, "the first attempt and two retries");
   assert.equal(new Set(ids).size, 1, "every attempt reuses the answer's messageId, so Paseo's receipts dedupe");
   assert.deepEqual((await brief()).delivery, { state: "failed", error: "Agent is busy loading" });
@@ -90,24 +100,35 @@ test("a send that fails is retried under the same messageId, then the card says 
 });
 
 test("a hung send is capped: it counts as a failed attempt, never `sending` forever", async t => {
-  const { box, brief } = await inbox(t);
+  const { box, brief, timers } = await inbox(t);
   box.deliveryRetryMs = [];
   await box.briefAction("main", { briefId: "brief:t1", decisionId: "D1", choice: "A", answerId: "answer-0005" }, never);
-  await box.idle();
+  assert.equal(await timers.fire(), 120_000, "the attempt's deadline"); await box.idle();
   assert.deepEqual((await brief()).delivery, { state: "failed", error: "Paseo didn't confirm the answer in time" });
 });
 
 test("an answer recorded before a reload goes out at the next worker start, under the same messageId", async t => {
-  const { box, outbox } = await inbox(t);
+  const { box, outbox, timers } = await inbox(t);
   await box.briefAction("main", { briefId: "brief:t1", decisionId: "D1", choice: "A", answerId: "answer-0006" }, never);
   const [pending] = await outbox();
   box.stop();
+  // Each Inbox's store queues only its own writes: a stopped worker that still wrote could lose the next one's update
+  // (beta.67's publish run: the old attempt's deadline fired mid-way and put the delivered answer back, 1 !== 0).
+  let writesAfterStop = 0;
+  const mutate = box.store.mutate.bind(box.store);
+  box.store.mutate = (work => { writesAfterStop++; return mutate(work); }) as typeof box.store.mutate;
   // The worker reloads: a fresh Inbox over the same directory.
   const next = new Inbox(box.store.directory, box["o"]);
+  next.timers = new FakeTimers();
   const sent: { agentId: string; messageId: string }[] = [];
   await next.resumeAnswers(agentId => async (_text, messageId) => { sent.push({ agentId, messageId }); });
   await next.idle();
   assert.deepEqual(sent, [{ agentId: "main", messageId: pending.messageId }]);
+  assert.equal((await next.store.snapshot()).outbox.length, 0);
+  // The stopped worker's attempt gives up afterwards: it must not write its stale outbox back over the new one's.
+  assert.equal(await timers.fire(), 120_000); await box.idle();
+  assert.equal(writesAfterStop, 0, "a stopped worker writes nothing");
+  assert.deepEqual(timers.pending, [], "a stopped worker schedules no retry");
   assert.equal((await next.store.snapshot()).outbox.length, 0);
 });
 
@@ -138,4 +159,14 @@ test("the card's answer ids pass the RPC's schema, and an undelivered reason rea
   for (const answerId of ids) assert.ok(briefActionRpc.input.safeParse({ agentId: "main", briefId: "brief:t1", answerId }).success, answerId);
   assert.equal(undeliveredReason("Agent is busy loading"), "Agent is busy loading.");
   assert.equal(undeliveredReason(null), "Paseo didn't confirm it.");
+});
+
+test("invariant: answer-ack and rpc-ack never wait on the wall clock for retries or deadlines", async () => {
+  // settleTime's cap (tests/support/hanging-host.ts) bounds an ACK and is the only timer allowed; retries use FakeTimers.
+  for (const file of ["answer-ack.test.ts", "rpc-ack.test.ts"]) {
+    const source = (await readFile(new URL(file, import.meta.url), "utf8")).replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+    const name = "invariant: answer-ack and rpc-ack never wait";
+    const own = file === "answer-ack.test.ts" ? source.slice(0, source.indexOf(name)) : source;
+    assert.doesNotMatch(own, /setTimeout|setInterval|\bsleep\(|timers\/promises|deliveryRetryMs = \[\s*\d{1,3}\b/, `${file} waits on real time: fire FakeTimers instead`);
+  }
 });
