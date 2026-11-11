@@ -46,7 +46,7 @@ not a patch for one instance.
 | `scripts/check-wait.mjs` | `test:wait`, `test:wait-live` | Wait with real Haiku agents. Skips without credentials or Paseo 0.15; `test:wait-live` fails instead. |
 | `scripts/check-move.mjs` | `test:move` | 2.0's move from 1.x on a real daemon: the published 1.x beta auto-updates from a fake npm registry to a broken 2.0 (rolled back), then a good one; the move to the new plugin id fails probation once (rolled back, data intact), then succeeds on Try again. Same `follow_*` tool names; Paseo's plugin list shows the new id only. Screenshots (`--shots <dir>`): Home before and after, Settings → General after the rollback and after the move (desktop, 390 px, dark). Passes on Paseo 0.15.4 and 0.16 (`HARNESS_PASEO=0.16`). About 15 minutes. |
 | `scripts/check-move.mjs --registry` | `test:move:registry` | The same move for an install from Paseo's plugin list: a fake plugin registry (`PASEO_PLUGIN_REGISTRY`) pins the live pin (1.0.1) as `tomgrin10/follow-up`, which installs under the old id. The pin moves to 2.0, `paseo plugin update` installs it under the old id, and the move reinstalls from the same registry under the new id with data and plugin settings. About 8 minutes. |
-| `scripts/check-github-mode.mjs` | `test:github-mode` | Plain-GitHub mode on the running preview, with a fake `gh`. |
+| `scripts/check-github-mode.mjs` | `test:github-mode` | Plain-GitHub mode on the running preview, with a fake `gh` (reads reach it through check-install's `fakeGithub`). |
 
 Every script in the table above starts its own isolated daemon, except `test:github-mode`. The scripts below don't:
 they need a running `npm run preview` and read `.preview-isolated.json`. Some drive a browser with Send to Paseo
@@ -85,6 +85,14 @@ plays a scripted turn (timeline items, Follow-up RPCs, a permission) for a given
   root, refuses any of them outside it, and strips the session's `PASEO_*`, `CODEX_*`, Follow-up and Claude session
   variables. A hand-built `{ ...process.env, … }` once missed `CLAUDE_CONFIG_DIR`, and its daemon installed hooks into
   a real account. `tests/harness-env.test.ts` fails on a check script that builds its env by hand.
+- **Fake GitHub over HTTP, not only `gh`.** Follow-up reads GitHub over in-process HTTPS (`server/github-api.ts`); a
+  fake `gh` on PATH only answers writes. A script whose daemon needs PR reads starts `fakeGithub({ dir, gh })` from
+  `scripts/fake-github.mjs` and passes its `env` and `strip` to `harnessEnv`. The server answers each request with the
+  script's fixture `gh` (GH_REPO set), and only for the owner's own token, resolved through an account map and a fake
+  `gh auth token --user` like the real host. `harnessEnv` points `FOLLOW_UP_GITHUB_API` at a closed port by default,
+  so a daemon never reads the real api.github.com. 2026-11-11: check-install's fake `gh` was bypassed after reads
+  moved to HTTPS and the v2.0.0-rc.3 publish failed; `tests/harness-env.test.ts` fails on a script that fakes `gh` for
+  a daemon without this.
 - **Take a slot.** Every script that starts a Paseo daemon or a browser calls `await harness()` from
   `scripts/harness.mjs` before its heavy work, and starts daemons with `spawnDaemon`. `tests/harness.test.ts` fails
   when a script skips either. `harness()`:

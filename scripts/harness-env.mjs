@@ -17,8 +17,11 @@ import { ENV_PREFIX, LEGACY_ENV_PREFIX } from "../shared/legacy.ts";
  * 2026-11-11: dictation and voice mode are off by default. A fresh PASEO_HOME made every harness daemon download and
  * bzip2-unpack the sherpa-onnx speech model; harness-slot exports these as "false", but the session-key strip drops
  * them, so they're set here. A caller's `set` wins.
+ *
+ * 2026-11-11: FOLLOW_UP_GITHUB_API defaults to a closed local port, so a harness daemon never reads the real
+ * api.github.com with whatever token the host has. A script that wants GitHub sets it (scripts/fake-github.mjs).
  */
-export const HARNESS_DEFAULTS = { PASEO_DICTATION_ENABLED: "false", PASEO_VOICE_MODE_ENABLED: "false" };
+export const HARNESS_DEFAULTS = { PASEO_DICTATION_ENABLED: "false", PASEO_VOICE_MODE_ENABLED: "false", FOLLOW_UP_GITHUB_API: "http://127.0.0.1:9" };
 export const SESSION_KEYS = new RegExp(`^(PASEO_|CODEX_|${ENV_PREFIX}|${LEGACY_ENV_PREFIX})|^CLAUDE_(CONFIG_DIR|SESSION_ID|PROJECT_DIR|CODE_ENTRYPOINT|CODE_SSE_PORT)$|^CLAUDECODE$`);
 const ISOLATED = ["HOME", "XDG_CONFIG_HOME", "PASEO_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"];
 
