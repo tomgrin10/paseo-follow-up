@@ -26,6 +26,10 @@ not a patch for one instance.
   - `tests/rpc-ack.test.ts`: every client RPC replies within 500 ms with Paseo, the daemon and gh hanging
     (`tests/support/hanging-host.ts` runs the real `contribute()` in a temp home), or has an `EXEMPT` reason.
     `tests/answer-ack.test.ts` covers the answer paths: fast ack, one send per answer, retries, resume after reload.
+    Retry delays and attempt deadlines run on injected `Timers` (`server/delivery.ts`); these tests pass
+    `tests/support/fake-timers.ts`, fire timers in order with `await timers.fire()` and settle with `idle()`, and never
+    sleep: a test that waits on the wall clock for a retry fails under CI load (2026-11-11, beta.67's publish run).
+    An invariant in `answer-ack.test.ts` rejects `setTimeout`/sleeps in both files. A stopped `Inbox` writes nothing.
   - `tests/docs.test.ts`: every RPC, tool and source file is documented, and the docs reference no missing paths
     or npm scripts.
   - `tests/mcp-usage.test.ts` and `tests/mcp.test.ts`: tool schemas, the tool count, and both transports.
