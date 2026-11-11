@@ -59,7 +59,8 @@ export class PluginMove {
     const view = await this.view();
     if (view.phase !== "rolled-back" && view.phase !== "failed") throw new Error(view.phase === "moved" || view.phase === "none" ? "Follow-up already runs under its new plugin id." : view.phase === "manual" ? "This copy isn't installed from npm; move it by hand (see Settings → General)." : "The move is already on its way.");
     await this.write({ since: this.now(), lastBusyAt: null, retryAsked: true });
-    await this.evaluate();
+    // The ask is recorded; the quiet-rule check (it asks Paseo who is busy) runs after the reply.
+    void this.evaluate().catch(() => undefined);
     return this.view();
   }
 
