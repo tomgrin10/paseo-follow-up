@@ -1,5 +1,9 @@
 # Releasing
 
+**Permission.** A release needs Tom's manual permission, every time; no agent releases on its own. Features and fixes
+ship to a beta by default. An rc, a stable version, npm `latest` or a hotfix needs his explicit OK for that exact
+version first (a hotfix skips the beta, not the permission). Quote his OK in the release commit body.
+
 ## In a feature PR
 
 - **Release-note fragment.** If users can see or feel the change, add `changes/<branch>.md` with one to three `- ` bullets. Write them for the person using Follow-up, in plain words,

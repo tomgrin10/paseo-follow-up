@@ -168,6 +168,10 @@ the extra scripts, and how to start an isolated preview daemon (`npm run preview
 
 See [docs/releasing.md](docs/releasing.md). In short:
 
+- **A release needs Tom's manual permission, every time.** No agent releases on its own. Features and fixes ship to a
+  beta by default (`X.Y.Z-beta.N`, npm `beta` dist-tag). Anything else needs Tom's explicit OK for that exact version
+  before it's tagged: an rc (`2.0.0-rc.0`), a stable version, npm `latest`, or a hotfix (a hotfix skips the beta, not
+  the permission). Ask him, and quote his OK in the release commit body.
 - A PR that changes something users see adds `changes/<branch>.md` (rules in `changes/README.md`).
 - The orchestrator (Tom, or the coordinating agent he runs releases from), not the feature PR, runs
   `npm run release:notes <version>`, then bumps the version in the same release commit, tags `vX.Y.Z`, and lets the
