@@ -4,7 +4,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { liveSources, mcpproxyText } from "./about";
-import { LIMITS, TEAMS_TTL_MS, applyCheck, classifyLink, emptyWorkspaceLinks, excludeItem, linkedView, noteCandidate, noteRefs, setTeams, dueChecks, emptyLinkedFile, linkedFileSchema, migrateAboutLinks, takeBudget, teamOf, toneOf, unexcludeItem, upsertItem, type LinearIssueFacts, type LinkedFile, type LinkedItem, type LinkRef, type LinkedView } from "../shared/linked";
+import { LIMITS, LINKED_FULL, TEAMS_TTL_MS, applyCheck, classifyLink, emptyWorkspaceLinks, excludeItem, linkedView, noteCandidate, noteRefs, setTeams, dueChecks, emptyLinkedFile, linkedFileSchema, linkedSearchIndex, migrateAboutLinks, takeBudget, teamOf, toneOf, unexcludeItem, upsertItem, type LinearIssueFacts, type LinkedFile, type LinkedItem, type LinkRef, type LinkedView } from "../shared/linked";
 
 /**
  * linked.json beside state.json (see shared/linked.ts). Read from disk on each use and never held whole in the worker:
@@ -132,7 +132,7 @@ export class LinkedService {
         key: c.key, kind: c.kind, url: facts?.url ?? c.url, title: facts?.title ?? opts.title ?? null, origin: opts.origin, by: opts.by, why: opts.why ?? null,
         ...(facts ? { status: facts.state, statusTone: toneOf(facts.state), checkedAt: new Date(now).toISOString() } : {}),
       }, now);
-      if (!r.ok) return { ok: false as const, reason: r.reason === "excluded" ? excludedReason(c.key) : `This workspace already has ${LIMITS.items} linked items. Unlink one first.` };
+      if (!r.ok) return { ok: false as const, reason: r.reason === "excluded" ? excludedReason(c.key) : LINKED_FULL };
       return { ok: true as const, pending: false, key: c.key, item: r.item, created: r.created };
     });
   }
@@ -155,6 +155,11 @@ export class LinkedService {
 
   async view(workspaceId: string, derived: Parameters<typeof linkedView>[2]): Promise<LinkedView> {
     return linkedView(workspaceId, (await this.deps.store.read()).workspaces[workspaceId], derived);
+  }
+
+  /** Home's search index: one read of linked.json, made only while the developer searches. */
+  async searchIndex(): Promise<ReturnType<typeof linkedSearchIndex>> {
+    return linkedSearchIndex(await this.deps.store.read());
   }
 
   /** Passive sightings (shared/linked-extract.ts), one write for the whole batch. Nothing to note costs nothing. */

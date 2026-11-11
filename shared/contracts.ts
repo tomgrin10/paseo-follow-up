@@ -3,7 +3,7 @@ import { MAX_REVIEWERS, REPO, reviewerConfigSchema, reviewerEntrySchema, reviewe
 import { prioritySchema } from "./priorities";
 import { usageSchema } from "./usage";
 import { aboutViewSchema } from "./about";
-import { linkedItemSchema } from "./linked";
+import { LINKED_KINDS, linkedItemSchema } from "./linked";
 import { AGENT_ROLES, agentSettingsViewSchema, savedRoleSchema } from "./agent-settings";
 import { defineRpc } from "@getpaseo/plugin";
 import { ONBOARDING_ACTIONS, ONBOARDING_STEPS, checksSchema, onboardingViewSchema } from "./onboarding";
@@ -135,6 +135,13 @@ export const setLinkedItemsRpc = defineRpc({ name: "follow.set-linked-items", in
   z.strictObject({ workspaceId: idSchema, action: z.literal("remove"), ref: linkRef }),
   z.strictObject({ workspaceId: idSchema, action: z.literal("undo"), ref: linkRef }),
 ]), output: linkedViewSchema.extend({ message: z.string().nullable() }) });
+/**
+ * Home's search over linked keys and titles, every workspace at once. Home fetches it only while its search field has
+ * text (and keeps it a minute), so the list's poll never reads linked.json.
+ */
+export const linkedIndexRpc = defineRpc({ name: "follow.linked-index", input: z.strictObject({}), output: z.object({
+  workspaces: z.record(z.string(), z.array(z.object({ key: z.string(), kind: z.enum(LINKED_KINDS), title: z.string().nullable() }))),
+}) });
 
 // Needs-you inbox. Names stay under follow. like the rest of the plugin.
 /**

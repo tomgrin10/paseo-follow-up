@@ -75,7 +75,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
 | Needs-you inbox, brief, Home | `server/inbox.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts` | [needs-you](docs/needs-you.md) |
 | Summary (internal id `about`) | `server/about.ts`, `server/transcript.ts`, `shared/about.ts` | [ai-roles](docs/ai-roles.md) |
-| Linked items (Linear issues, Slack threads, docs a workspace is about) | `server/linked.ts`, `shared/linked.ts` | [linked-items](docs/linked-items.md) |
+| Linked items (Linear issues, Slack threads, docs a workspace is about) | `server/linked.ts`, `shared/linked.ts`, `shared/linked-extract.ts`, `shared/linked-display.ts`, `client/linked.tsx`, `client/brand-icons.ts` | [linked-items](docs/linked-items.md) |
 | Overseer, priority ranker, AI jobs, Settings → Agents | `server/overseer.ts`, `server/overseer-prompt.md`, `server/ranker.ts`, `server/priorities.ts`, `server/ai-jobs.ts`, `server/agent-settings.ts`, `shared/overseer.ts`, `shared/ranker.ts`, `shared/priorities.ts`, `shared/agent-settings.ts` | [ai-roles](docs/ai-roles.md) |
 | PR workflow (Graphite or GitHub), PR actions, reviewers, deployments, Send to Paseo | `server/pr-workflow.ts`, `server/github.ts`, `server/graphite.ts`, `server/pr-actions.ts`, `server/browser-bridge.ts`, `server/reviewer-config.ts`, `server/deployments.ts`, `server/deployment-anchor.ts`, `shared/pr-workflow.ts`, `shared/pr-actions.ts`, `shared/reviewers.ts` | [prs](docs/prs.md) |
 | Agent tools and agent parity | `server/mcp.mjs`, `server/native-tools.ts`, `server/session-mcp.ts`, `server/agent-mcp.ts`, `server/mcp-registrations.ts`, `server/scopes.ts`, `server/agent-actions.ts`, `server/agent-parity.ts`, `shared/actor.ts`, `shared/chat.ts` | [rpcs-and-tools](docs/rpcs-and-tools.md) |
@@ -128,7 +128,10 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    wasn't seen is `unknown`, and only the developer (`tom`) may answer a brief.
 8. **Design through `/impeccable`.** Every UI change goes through `/impeccable critique`, and you render every
    state yourself: desktop and 390×844, light and dark, no horizontal overflow. DESIGN.md and PRODUCT.md set the
-   system and voice. User-facing copy calls the `about` feature "Summary".
+   system and voice. User-facing copy calls the `about` feature "Summary". A 44px bar holds icons only: chips and counts go on
+   their own wrapping line, so nothing pushes settings off-screen at 390pt. Never offer an action the server will
+   refuse (an Add row at a cap): refuse up front with the reason. Search never fuzzes numbers: ids match exactly
+   or by prefix.
 9. **No root treatment for background agents.** A Paseo 0.16 `background: true` agent is another plugin's helper.
    Follow-up gives it no tools, no Wait, no `needs_you` or Stop-hook nudge, no inbox rows and no directory row
    (`server/background-agents.ts`, `tests/background-agents.test.ts`). On 0.15 the field is absent.

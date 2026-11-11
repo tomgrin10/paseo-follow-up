@@ -20,6 +20,8 @@ const TRUST: Record<LinkedOrigin, number> = { manual: 4, registered: 3, spec: 2,
 export const STATUS_TONES = ["done", "active", "todo", "cancelled"] as const;
 
 export const LIMITS = { items: 50, excluded: 200, candidates: 40, rejected: 2000, checksPerDrain: 6, dailyChecks: 120 } as const;
+/** Said at the cap, by the server and by the sheet (which then offers no Add row). */
+export const LINKED_FULL = `${LIMITS.items} linked. Remove one to add another.`;
 /** A candidate whose check failed (Linear unreachable) waits 1h, 6h, then 24h, then is dropped. */
 export const RETRY_MS = [3_600_000, 6 * 3_600_000, 24 * 3_600_000] as const;
 export const TEAMS_TTL_MS = 24 * 3_600_000;
@@ -336,4 +338,18 @@ export function linkedView(workspaceId: string, ws: WorkspaceLinks | undefined, 
   const counts: Partial<Record<LinkedKind, number>> = {};
   for (const i of items) if (!i.spec) counts[i.kind] = (counts[i.kind] ?? 0) + 1;
   return { workspaceId, items, excluded: stored.excluded.map(({ key, at, by, reason }) => ({ key, at, by, reason })), counts, pending: stored.candidates.length };
+}
+
+// ---------- Home search ----------
+
+/**
+ * Home's search index for linked items (`follow.linked-index`): every workspace's stored items as key, kind and title.
+ * Built from one read of linked.json, only while the developer is typing a search, never on the list's poll.
+ */
+export function linkedSearchIndex(file: LinkedFile): Record<string, { key: string; kind: LinkedKind; title: string | null }[]> {
+  const out: Record<string, { key: string; kind: LinkedKind; title: string | null }[]> = {};
+  for (const [workspaceId, ws] of Object.entries(file.workspaces)) {
+    if (ws.items.length) out[workspaceId] = ws.items.map(i => ({ key: i.key, kind: i.kind, title: i.title }));
+  }
+  return out;
 }

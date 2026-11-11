@@ -6,7 +6,7 @@ import { Button, IconButton, Switch, text, type Theme } from "./kit";
 import { VersionMark } from "./updates";
 import { IconSwap, Spinner } from "./motion";
 import { segmentPaint, type Colors } from "./theme";
-import { SpecChip } from "./spec";
+import { ReferencesLine } from "./linked";
 import { SummaryLine } from "./about";
 
 /** PR status older than this means the poll has stopped working; say so instead of looking current. */
@@ -60,7 +60,6 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
   const toneOf = (tone?: string) => tone === "warning" ? c.statusWarning : tone === "danger" ? c.statusDanger : tone === "success" ? c.statusSuccess : undefined;
   const pad = compact ? 16 : 12;
   const controls = <View style={{ flexDirection: "row", alignItems: "center", gap: 2, marginVertical: compact ? -12 : -4, marginRight: compact ? -10 : -4 }}>
-    {!!w.spec?.url && <View style={{ marginRight: 4 }}><SpecChip workspace={w} theme={theme} compact={compact} /></View>}
     {resize && <IconButton icon={resize.icon} label={resize.label} onPress={resize.onPress} theme={theme} compact={compact} />}
     <IconButton icon="Settings" label="Follow-up settings" onPress={onSettings} theme={theme} compact={compact} />
   </View>;
@@ -84,7 +83,7 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
     </View>
   </>;
   if (compact && onHome) return <View style={{ paddingHorizontal: pad, paddingTop: 4, paddingBottom: 12, gap: 8, borderBottomWidth: 1, borderBottomColor: c.border }}>
-    {/* One bar: Home on the left, the Spec chip and settings on the right. The host header above names the workspace,
+    {/* One bar: Home on the left, settings on the right. The host header above names the workspace,
         so the Summary (or the goal, until there is one) is the first line under it. */}
     <View style={{ flexDirection: "row", alignItems: "center", minHeight: 44, marginLeft: -14 }}>
       <Button theme={theme} compact kind="ghost" icon="House" title="Home" accessibilityHint="Opens Follow-up Home with every workspace" onPress={onHome} />
@@ -94,6 +93,9 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
       <View style={{ marginVertical: 12 }}>{controls}</View>
     </View>
     <SummaryLine workspace={w} theme={theme} compact />
+    {/* Spec and Linked: their own line, as on desktop and Home. The 44px bar can't hold them beside Home, the version
+        and settings at 390pt without pushing settings off-screen. */}
+    <ReferencesLine workspace={w} theme={theme} compact />
     <Text accessibilityLiveRegion="polite" style={[t.ask, { color: c.foregroundMuted }]}>
       {parts.map((part, i) => <Text key={part.text} style={toneOf(part.tone) ? { color: toneOf(part.tone) } : { color: c.foreground }}>{i ? <Text style={{ color: c.foregroundMuted, fontWeight: "400" }}>{" · "}</Text> : null}{part.text}</Text>)}
     </Text>
@@ -109,6 +111,8 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
     </View>
     {/* The Summary takes the goal's place; the goal shows until there is one. */}
     {!compact && !hideTitle && <SummaryLine workspace={w} theme={theme} compact={false} />}
+    {/* The references line: Spec and Linked, one line, only when there's a spec or anything linked. */}
+    <ReferencesLine workspace={w} theme={theme} compact={compact} />
     <Text accessibilityLiveRegion="polite" style={[t.meta, { color: c.foregroundMuted, marginTop: 2 }]}>
       {parts.map((part, i) => <Text key={part.text} style={toneOf(part.tone) ? { color: toneOf(part.tone), fontWeight: "600" } : { color: c.foreground }}>{i ? <Text style={{ color: c.foregroundMuted, fontWeight: "400" }}>{" · "}</Text> : null}{part.text}</Text>)}
     </Text>

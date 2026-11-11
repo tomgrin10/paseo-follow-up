@@ -27,6 +27,7 @@ import { TasksCard } from "./tasks";
 import { PrSheet } from "./pr-sheet";
 import { ActivityCard, QuestionSheet } from "./questions";
 import { SpecRow, SpecSheet } from "./spec";
+import { LinkedItemsRow } from "./linked";
 import { mergedColor, tint } from "./theme";
 import { SummaryRow } from "./about";
 import { WhatsNewGate } from "./release-notes";
@@ -224,6 +225,7 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
     <View style={{ marginTop: -1 }}><FoldRow theme={theme} compact={compact} open={shown} onPress={() => toggle("workspace")} icon="SlidersHorizontal" iconColor={c.foregroundMuted} label="Spec, agent and recovery" /></View>
     {shown && <>
       <SpecRow workspace={w} theme={theme} compact={compact} onEdit={editSpec} />
+      <LinkedItemsRow workspace={w} theme={theme} compact={compact} />
       <CardRow theme={theme} compact={compact}><SummaryRow workspaceId={w.id} theme={theme} compact={compact} /></CardRow>
       <CardRow theme={theme} compact={compact}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
