@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { OBSERVATION_FRESH_MS } from "./poll";
 import { followUpObligations, deployState, recoveryBatch } from "./follow-up";
 import { communicationSchema, replyRecorded } from "./communication";
 import { taskTriggerSchema } from "./task-trigger";
@@ -166,7 +167,7 @@ export function completionGate(w: Workspace, now = Date.now()): CompletionGate {
       else if (deploy === "unconfirmed") unconfirmed.push(ref);
       continue;
     }
-    if (pr.error || !pr.snapshot?.complete || now - Date.parse(pr.snapshot.observedAt) > 120_000) { add("wait", `Refresh status for ${ref}`); continue; }
+    if (pr.error || !pr.snapshot?.complete || now - Date.parse(pr.snapshot.observedAt) > OBSERVATION_FRESH_MS) { add("wait", `Refresh status for ${ref}`); continue; }
     if (pr.snapshot.state === "CLOSED") add("agent", `Settle ${ref} with a disposition`);
     else add("developer", `Settle ${ref}`);
   }

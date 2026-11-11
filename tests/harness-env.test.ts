@@ -13,7 +13,7 @@ const handBuilt = /\{\s*\.\.\.process\.env\s*,/;
 const spawns = new RegExp(`spawnDaemon\\(|createPaseoDaemon|\\(\\s*["']paseo["']\\s*,|${handBuilt.source}`);
 test("every scripts/check-*.mjs (and screenshots, scale-check) that spawns a daemon, CLI or plugin builds its env with harnessEnv", async () => {
   const offenders: string[] = [];
-  for (const name of (await readdir("scripts")).filter(n => /^(check-.*|screenshots|scale-check)\.mjs$/.test(n))) {
+  for (const name of (await readdir("scripts")).filter(n => /^(check-.*|screenshots|scale-check|poll-cost)\.mjs$/.test(n))) {
     const text = await readFile(join("scripts", name), "utf8");
     if (!spawns.test(text)) continue;
     if (!/from ["']\.\/harness-env\.mjs["']/.test(text) || !/harnessEnv\(/.test(text)) offenders.push(name);

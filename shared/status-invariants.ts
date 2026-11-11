@@ -12,6 +12,7 @@ import { trackedGroup, type HomeModel } from "./home";
 import { freshPriorities, type Priority } from "./priorities";
 import { agentCard, automaticHold, batchView } from "./status";
 import { followUpObligations } from "./follow-up";
+import { cadence, movingReason, OBSERVATION_FRESH_MS, POLL_IDLE_MS, TICK_MS } from "./poll";
 
 /**
  * Status invariants: what must hold for any workspace, whatever path changed it. Pure, no IO, and never throwing:
@@ -25,6 +26,15 @@ const inFlight = (w: Workspace) => w.batches.some(b => ["sending", "sent"].inclu
 const lines = (w: Workspace, now: number) => [liveLine(w, now).text, agentCard(w, now)?.line ?? "", batchView(w, now)?.line ?? "", ...needsYou(w, now).flatMap(i => [i.title, "blocker" in i ? i.blocker ?? "" : ""])];
 
 export const INVARIANTS: Invariant[] = [
+  {
+    id: "poll-backoff-never-hides-a-moving-pr",
+    why: "2026-11-11 cpu-load §5: PR polling backs off for settled repositories. A PR that can still change without bumping what the last read saw (checks pending, merge queue, merge when ready, unknown mergeability, an error) is read every tick, and a backed-off PR is never older than the completion gate allows (shared/poll.ts).",
+    check(w, now) {
+      if (POLL_IDLE_MS + TICK_MS >= OBSERVATION_FRESH_MS) return `idle poll ${POLL_IDLE_MS} ms + tick ${TICK_MS} ms reaches the ${OBSERVATION_FRESH_MS} ms freshness gate`;
+      const backedOff = w.prs.find(p => movingReason(p.snapshot, p.error) && cadence(p.snapshot, p.error, null, now) !== "tick");
+      return backedOff ? `${backedOff.key} (${movingReason(backedOff.snapshot, backedOff.error)}) would back off` : null;
+    },
+  },
   {
     id: "no-duplicate-open-question",
     why: "Needs-you never shows two cards for the same open question: every path that creates a question links to a matching open one instead (shared/questions.ts findOpenMatch).",

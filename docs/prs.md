@@ -16,9 +16,27 @@
 
 ## Observing PRs
 
-`server/github.ts` (`Github.observe`) reads each tracked PR with one `gh api graphql` query: state, checks, review
-threads, merge state, and the repository's merge settings. `server/graphite.ts` adds Graphite's status, only in
-Graphite repositories. GitHub repositories make no Graphite calls.
+`server/github.ts` (`Github.observe`) reads tracked PRs with one aliased GraphQL query per repository per tick
+(15 PRs per query): state, checks, review threads, merge state, the repository's merge settings, and each base
+branch's ruleset checks (`Ref.rules`, ACTIVE rulesets only, the same set REST `rules/branches/<branch>` returns).
+A partial response fails only the PRs its errors point at. REST `rules/branches` is a fallback for a branch whose
+rules didn't come back whole, cached 10 minutes. `server/graphite.ts` adds Graphite's status, only in Graphite
+repositories. GitHub repositories make no Graphite calls.
+
+**No process per read.** Polling talks HTTPS in-process (`server/github-api.ts`, `httpApi`). Each owner's token is
+resolved once, like the developer's gh wrapper: an explicit `GH_TOKEN`/`GITHUB_TOKEN`, else the account
+`~/.config/gh/account-map` names for the owner (`gh auth token --user`, run on the real gh with a dead
+`DBUS_SESSION_BUS_ADDRESS` so no keyring daemon leaks), and it's resolved again after a 401. Writes (merge, retarget,
+reviewers) still run `gh`. `FOLLOW_UP_GITHUB_API` points the client at a fake for harness runs.
+
+**Backoff** (`shared/poll.ts`). The engine ticks every 15 s. On a timer tick a repository is read only when one of
+its PRs is moving, its workspace is busy, the developer refreshed or opened that workspace, or `POLL_IDLE_MS` (60 s)
+has passed; otherwise the last observations stand in. Moving means: not read yet, an error, an incomplete read,
+checks pending (finishing checks don't bump a PR's `updatedAt`), a merge queue, merge when ready on, unknown
+mergeability, or a content change in the last 5 minutes. Every other caller (the developer's Refresh, actions,
+`declare_done`) reads fresh. A settled PR's change shows within 75 s, inside the completion gate's 120 s freshness;
+the `poll-backoff-never-hides-a-moving-pr` invariant holds both. Opening a workspace's panel refreshes it.
+Cost per tick is pinned by `tests/github-poll-cost.test.ts`; `scripts/poll-cost.mjs` measures it in a harness.
 
 ## PR actions (merge, merge when ready, reviewers)
 
@@ -45,7 +63,8 @@ Graphite repositories. GitHub repositories make no Graphite calls.
 ## Deployments
 
 `server/deployments.ts` reports deploy state only for specifically configured repositories; elsewhere it stays
-unknown. Tasks with `trigger: deploy` wait for it ([workspaces.md](workspaces.md)).
+unknown. A fleet read (at most once a minute) is one `gcloud run services list`; each serving revision is described
+once, since a revision's image never changes. Tasks with `trigger: deploy` wait for it ([workspaces.md](workspaces.md)).
 
 ## Send to Paseo (browser companion)
 
