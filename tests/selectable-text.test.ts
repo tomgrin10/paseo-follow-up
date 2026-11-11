@@ -31,15 +31,46 @@ test("an option card's description stays copyable: its letter and label are the 
   assert.match(q, /\{!!consequence && <RichText selectable=\{copyable\}/, "OptionCard's consequence opts back into selection");
 });
 
+/**
+ * The ways a file can reach react-native's Text, Pressable or a Touchable* past client/text.tsx: a named import or
+ * re-export in any shape (multi-line, aliased, single-quoted, after a default import), a namespace or default import
+ * (`RN.Text`), or a require. Type-only names (TextProps, PressableProps) are fine.
+ */
+export function reactNativeBypasses(source: string): string[] {
+  const found: string[] = [];
+  const from = String.raw`from\s*(?:"react-native"|'react-native')`;
+  for (const m of source.matchAll(new RegExp(String.raw`(?:import|export)\s+(?:type\s+)?(?:([\w$]+)\s*,\s*)?(?:\*\s+as\s+([\w$]+)\s+|\{([^}]*)\}\s*|([\w$]+)\s+)` + from, "g"))) {
+    const [, defaultName, namespace, named, onlyDefault] = m;
+    if (namespace || defaultName || onlyDefault) found.push(`the whole of react-native as ${namespace ?? defaultName ?? onlyDefault}`);
+    for (const raw of (named ?? "").split(",")) {
+      const spec = raw.trim();
+      if (!spec || /^type\s/.test(spec)) continue;
+      const name = spec.split(/\s+as\s+/)[0];
+      if (name === "Text" || name === "Pressable" || /^Touchable/.test(name)) found.push(name);
+    }
+  }
+  if (/require\(\s*['"]react-native['"]\s*\)/.test(source)) found.push("require(\"react-native\")");
+  return found;
+}
+
+test("reactNativeBypasses catches every import shape, not just the one-line named import", () => {
+  assert.deepEqual(reactNativeBypasses(`import { Platform, Text, View } from "react-native";`), ["Text"]);
+  assert.deepEqual(reactNativeBypasses(`import {\n  Platform,\n  Text,\n  Pressable,\n} from "react-native";`), ["Text", "Pressable"]);
+  assert.deepEqual(reactNativeBypasses(`import { Text as RNText } from 'react-native';`), ["Text"]);
+  assert.deepEqual(reactNativeBypasses(`import { TouchableOpacity } from "react-native";`), ["TouchableOpacity"]);
+  assert.deepEqual(reactNativeBypasses(`import * as RN from "react-native";`), ["the whole of react-native as RN"]);
+  assert.deepEqual(reactNativeBypasses(`import RN, { View } from "react-native";`), ["the whole of react-native as RN"]);
+  assert.deepEqual(reactNativeBypasses(`export { Text } from "react-native";`), ["Text"]);
+  assert.deepEqual(reactNativeBypasses(`const { Text } = require("react-native");`), ['require("react-native")']);
+  assert.deepEqual(reactNativeBypasses(`import { View, type TextProps, type PressableProps } from "react-native";`), []);
+  assert.deepEqual(reactNativeBypasses(`import type { TextInput as NativeTextInput } from "react-native";`), []);
+  assert.deepEqual(reactNativeBypasses(`import { Pressable, Text } from "./text";`), []);
+});
+
 test("every Text and Pressable in Follow-up is its own (client/text.tsx), never react-native's directly", async () => {
   for (const { f, text } of await sources()) {
     if (f === "client/text.tsx") continue;
-    for (const m of text.matchAll(/import \{([^}]*)\} from "react-native"/g)) {
-      const names = m[1].split(",").map(s => s.trim().replace(/^type\s+/, ""));
-      assert.ok(!names.includes("Text"), `${f}: imports Text from react-native; use ./text so content stays selectable`);
-      assert.ok(!names.includes("Pressable"), `${f}: imports Pressable from react-native; use ./text so control labels stay unselectable`);
-      assert.ok(!names.some(n => /^Touchable/.test(n)), `${f}: a Touchable* bypasses the control rule`);
-    }
+    assert.deepEqual(reactNativeBypasses(text), [], `${f}: reaches react-native's Text/Pressable/Touchable directly; import Text and Pressable from ./text so content stays selectable and control labels don't`);
   }
 });
 
