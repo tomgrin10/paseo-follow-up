@@ -142,7 +142,7 @@ test("release notes script: an rc of a major writes the major's section, consume
   await assert.rejects(run("--check"), /2\.0\.0 is still the draft/, "an rc can't ship a draft either");
   await writeFile(join(dir, "CHANGELOG.md"), "# Release notes\n\n## 2.0.0 (2026-11-11)\n\nFollow-up is a plugin.\n\n### Home\n\nOne list.\n\n<details><summary>Full changelog since 1.0.1</summary>\n\n### More\n\n- Beta work.\n\n</details>\n\n## 1.0.1 (2026-01-02)\n\n- Old.\n");
   await run("--check");
-  // A later rc keeps the curated text as written; its fragments join the full list.
+  // A later rc keeps the curated text as written; its fragment joins the full list in a group of its own.
   await writeFile(join(dir, "changes/b.md"), "- Rc fix that no longer drops a row.\n");
   await run("2.0.0-rc.1");
   const after = await changelog();
@@ -152,6 +152,32 @@ test("release notes script: an rc of a major writes the major's section, consume
   // The stable release carries the same section: nothing new to write, and --check passes.
   await run("2.0.0"); await pkg("2.0.0"); await run("--check");
   assert.equal((await changelog()).match(/^## 2\.0\.0/gm)?.length, 1);
+});
+
+test("release notes script: a curated section is never regrouped or relabeled; 0 fragments is a no-op, 1 adds one line", async () => {
+  // The bug: release:notes on a curated 2.0.0 with no fragments rebuilt its full list with the area classifier,
+  // moving hand-placed lines between groups and changing the summary. release-fu runs it for every release.
+  const dir = await mkdtemp(join(tmpdir(), "notes-curated-"));
+  await mkdir(join(dir, "scripts")); await mkdir(join(dir, "changes"));
+  await cp("scripts/release-notes.mjs", join(dir, "scripts/release-notes.mjs"));
+  await cp("CHANGELOG.md", join(dir, "CHANGELOG.md")); // the shipped, hand-curated one
+  const run = (...a: string[]) => exec("node", [join(dir, "scripts/release-notes.mjs"), ...a]);
+  const before = await readFile(join(dir, "CHANGELOG.md"), "utf8");
+  for (const v of ["2.0.0-rc.0", "2.0.0-rc.1", "2.0.0"]) {
+    await run(v, "--date", "2026-12-01");
+    assert.equal(await readFile(join(dir, "CHANGELOG.md"), "utf8"), before, `${v} with no fragments leaves CHANGELOG.md byte-identical`);
+  }
+  await writeFile(join(dir, "changes/x.md"), "- A workspace no longer flickers between groups.\n");
+  await run("2.0.0-rc.1");
+  const after = (await readFile(join(dir, "CHANGELOG.md"), "utf8")).split("\n");
+  const added = after.filter(l => !before.split("\n").includes(l));
+  assert.deepEqual(added, ["- A workspace no longer flickers between groups."], "one new line, nothing else changes");
+  assert.deepEqual(after.filter(l => l !== added[0]), before.split("\n"), "every existing line keeps its place, headings and summary included");
+  const fixes = after.indexOf("### Fixes"), line = after.indexOf(added[0]!);
+  assert.ok(fixes >= 0 && line > fixes && line < after.indexOf("</details>"), "it joins its own area's group");
+  await writeFile(join(dir, "changes/y.md"), "- A workspace no longer flickers between groups.\n");
+  await run("2.0.0");
+  assert.equal(after.join("\n"), await readFile(join(dir, "CHANGELOG.md"), "utf8"), "a note already in the list isn't added twice");
 });
 
 test("changelog: a <details> archive below the notes never reaches What's new; image lines are skipped", () => {

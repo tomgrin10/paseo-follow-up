@@ -48,12 +48,44 @@ export function groupByArea(bullets) {
   for (const b of bullets) {
     const key = b.toLowerCase().replace(/\W+/g, " ").trim();
     if (!key || seen.has(key)) continue; seen.add(key);
-    groups.get(AREAS.find(([, re]) => re.test(b))?.[0] ?? "More").push(b);
+    groups.get(areaOf(b)).push(b);
   }
   // Fixes match first (a fix to Home is a fix) but read last.
   const order = [...groups].filter(([name]) => name !== "Fixes").concat([["Fixes", groups.get("Fixes")]]);
   return order.filter(([, list]) => list.length).map(([name, list]) => `### ${name}\n\n${list.map(b => `- ${b}`).join("\n")}`).join("\n\n");
 }
+/** The area a note belongs to (see AREAS). */
+export const areaOf = b => AREAS.find(([, re]) => re.test(b))?.[0] ?? "More";
+/**
+ * A section's lines with new notes added to its "Full changelog" <details>: each note goes after the last line of its
+ * area's `###` group, or into a new group just before `</details>`. Existing lines, their order, the headings and the
+ * summary are never touched. A section without the block gets one, holding only the new notes.
+ */
+export function appendToFull(sectionLines, since, bullets) {
+  const out = [...sectionLines];
+  const open = out.findIndex(l => /^<details><summary>Full changelog/.test(l));
+  const close = open < 0 ? -1 : out.findIndex((l, i) => i > open && /^<\/details>/.test(l));
+  if (open < 0 || close < 0) {
+    while (out.length && !out[out.length - 1].trim()) out.pop();
+    return [...out, "", ...fullBlock(since, bullets).split("\n"), ""];
+  }
+  const known = new Set(out.slice(open, close).map(l => /^[-*]\s+(.*)$/.exec(l)?.[1]?.toLowerCase().replace(/\W+/g, " ").trim()).filter(Boolean));
+  for (const b of bullets) {
+    const key = b.toLowerCase().replace(/\W+/g, " ").trim();
+    if (known.has(key)) continue; known.add(key);
+    const end = out.findIndex((l, i) => i > open && /^<\/details>/.test(l));
+    const head = out.findIndex((l, i) => i > open && i < end && l === `### ${areaOf(b)}`);
+    if (head >= 0) {
+      let last = head; for (let i = head + 1; i < end && !/^###\s/.test(out[i]); i++) if (/^[-*]\s/.test(out[i])) last = i;
+      out.splice(last + 1, 0, `- ${b}`);
+    } else {
+      let at = end; while (at > open + 1 && !out[at - 1].trim()) at--;
+      out.splice(at, 0, "", `### ${areaOf(b)}`, "", `- ${b}`);
+    }
+  }
+  return out;
+}
+
 /** The collapsible full list that follows a curated section. */
 export const fullBlock = (since, bullets) => `<details><summary>Full changelog since ${since}</summary>\n\n${groupByArea(bullets)}\n\n</details>`;
 
@@ -151,16 +183,13 @@ export async function release(version, date, allowEmpty, { since = null } = {}) 
   const from = since ?? lines.map(l => HEADING.exec(l)?.[1]).find(v => v && v !== target && !isPrerelease(v)) ?? "the last release";
   if (at >= 0) {
     if (!/^\d+\.0\.0$/.test(target)) throw new Error(`CHANGELOG.md already has ${version}`);
-    // The major's section exists (curated by hand, or by an earlier rc). Its text stays as written; the new fragments
-    // join the full list under it.
+    // The major's section exists (curated by hand, or by an earlier rc). Nothing in it is ever regrouped or
+    // relabeled: with no new fragments the file is left as it is, byte for byte, and new fragments are only added
+    // (appendToFull), each under its own area, after the lines already there.
+    if (!bullets.length) return { version, target, date, existing: true, bullets: 0, fragments: [] };
     let end = at + 1;
     while (end < lines.length && !HEADING.test(lines[end]) && !/^#{1,2}\s/.test(lines[end])) end++;
-    const block = lines.slice(at + 1, end).join("\n");
-    const open = block.search(/^<details><summary>Full changelog/m);
-    let curated = open >= 0 ? block.slice(0, open) : block, old = [];
-    if (open >= 0) old = block.slice(open).split("\n").map(l => /^[-*]\s+(.*)$/.exec(l)?.[1]).filter(Boolean);
-    if (bullets.length || open >= 0) curated = `${curated.trimEnd()}\n\n${fullBlock(from, [...old, ...bullets])}\n`;
-    lines.splice(at + 1, end - at - 1, ...`${curated.trimEnd()}\n`.split("\n"));
+    lines.splice(at + 1, end - at - 1, ...appendToFull(lines.slice(at + 1, end), from, bullets));
     await writeFile(CHANGELOG, lines.join("\n"));
     await Promise.all(pending.map(f => unlink(join(CHANGES, f.name))));
     return { version, target, date, existing: true, bullets: bullets.length, fragments: pending.map(f => f.name) };
