@@ -20,8 +20,8 @@ import { BackgroundAgents, backgroundAgentsFile } from "./server/background-agen
 import { Store } from "./server/store";
 import { PriorityStore } from "./server/priorities";
 import { UsageReader } from "./server/usage";
-import { Engine, agentWorkspace, findWorkspace, interruptionHold } from "./server/engine";
-import { holdSuperseded, liftHold } from "./shared/status";
+import { Engine, agentWorkspace, findWorkspace } from "./server/engine";
+import { holdOnTurnEnd, holdSuperseded, liftHold } from "./shared/status";
 import { Github } from "./server/github";
 import { ReviewerConfigStore, ReviewerSuggestions } from "./server/reviewer-config";
 import { repoKey } from "./shared/reviewers";
@@ -45,7 +45,7 @@ import { scopes } from "./server/scopes";
 import { updateObligation } from "./server/obligations";
 import { Inbox, type GuardPause } from "./server/inbox";
 import { daemonDirectory, guardPath } from "./server/inbox-directory";
-import { fileSources } from "./server/inbox-classifier";
+import { fileSources, turnPrompt } from "./server/inbox-classifier";
 import { onBeforeSend } from "./server/daemon";
 import { copyFile, readFile, rename, stat } from "node:fs/promises";
 import { HistoryCache } from "./server/history-cache";
@@ -286,6 +286,8 @@ export default function contribute(server: PluginServerContext) {
   const inboxHook = (work: () => Promise<void>) => void (async () => { await ready; if (!stopped && !loadError) await work(); })().catch(error => { inboxError = error instanceof Error ? error.message : String(error); });
   let unlock: (() => Promise<void>) | null = null;
   let stopped = false;
+  /** Each agent's latest started turn, so a turn end can tell it was already replaced (holdOnTurnEnd). */
+  const startedTurns = new Map<string, string>();
   let timer: ReturnType<typeof setTimeout> | null = null;
   let hookTimer: ReturnType<typeof setInterval> | null = null;
   let hooksStarted = false;
@@ -1209,6 +1211,7 @@ export default function contribute(server: PluginServerContext) {
     server.on("agent.turn_started", async (event, { paseo }) => { seen(paseo); inboxHook(() => inbox.turnStarted(event.agent, event.turnId)); }),
     // A newer main-agent turn supersedes the failed turn's automatic hold (shared/status.ts holdSuperseded).
     server.on("agent.turn_started", async event => {
+      if (event.turnId) startedTurns.set(event.agent.id, event.turnId);
       await ready;
       if (stopped || loadError) return;
       const turn = { agentId: event.agent.id, turnId: event.turnId ?? null };
@@ -1303,12 +1306,17 @@ export default function contribute(server: PluginServerContext) {
         if (w) applyHistory(w, extractHistory(history.entries.map(entry => entry.item), w.inventory?.historyComplete ?? false, w.inventory?.historyError ?? null), null);
       });
       const guarded = interruption && await sessionGuardOwnsInterruption(event.agent.id, interruption).catch(() => false);
+      // Only the developer's Stop holds (shared/status.ts cancelCause): a turn already replaced by a newer one (the
+      // developer's or another agent's message), a /compact, or a closed or reloaded session never does.
+      const started = startedTurns.get(event.agent.id);
+      const newerTurn = !!started && started !== event.turnId;
+      const prompt = history ? turnPrompt(history.entries.map(entry => entry.item)).message?.text ?? null : null;
       if (["canceled", "failed"].includes(event.outcome.kind) && !guarded) await store.mutate(state => {
         const w = state.workspaces.find(w => w.enable_tracking && (w.mainAgentId === event.agent.id || w.contributorAgentIds?.includes(event.agent.id)));
         if (!w || w.mainAgentId !== event.agent.id || !interruption) return;
         // The provider lost the conversation: every later send fails the same way, so stop sending instead of holding.
         if (event.outcome.kind === "failed" && conversationGone(event.outcome.error.message)) { w.goneAgent = { agentId: event.agent.id, at: interruption.at, reason: event.outcome.error.message }; w.completion = null; w.declaration = null; return; }
-        w.hold = interruptionHold(interruption.kind); w.interruption = { ...interruption, agentId: event.agent.id }; w.completion = null; w.declaration = null;
+        holdOnTurnEnd(w, { agentId: event.agent.id, turnId: interruption.turnId, at: interruption.at, outcome: event.outcome, prompt, newerTurn });
       });
       void engine.tick();
     }),

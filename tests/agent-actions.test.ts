@@ -15,6 +15,7 @@ import type { NeedItem } from "../shared/attention";
 import type { InboxRow } from "../shared/inbox";
 import { snapshot, pr, workspace, clock } from "./fixtures";
 import type { Snapshot, State } from "../shared/model";
+import { interruptionHold } from "../shared/status";
 
 const reviewers = (patch = {}) => ({ author: "author", requested: [] as string[], teams: [] as string[], reviewed: [] as string[], complete: true, ...patch });
 const row = (patch: Partial<InboxRow> & { agentId: string }): InboxRow => ({ workspaceId: "workspace", title: "Agent", workspaceTitle: "Migration rollout", multiRoot: false, status: "idle", delegatedFrom: null, resumesAt: null, lastActivityAt: null, needs: null, snooze: null, signedOffAt: null, ...patch } as InboxRow);
@@ -119,6 +120,14 @@ test("sign_off: an agent can't sign itself off; other agents go through the inbo
   // The same input the pill's Sign off sends (client/inbox-store.ts).
   assert.deepEqual(f.acts, [{ action: "sign_off", agentIds: ["a1"], seqs: { a1: 4 } }]);
   assert.deepEqual(f.notes, [{ by: "agent:orchestrator", agentId: "a1", action: "sign_off" }]);
+});
+
+test("the main agent can resume its own workspace from Follow-up's Stop hold, like the Resume button, audited", async t => {
+  const f = await fixture(t);
+  await f.store.mutate(s => { Object.assign(s.workspaces[0], { hold: interruptionHold("canceled"), interruption: { turnId: "t1", at: "2026-01-01T09:00:00Z", kind: "canceled", agentId: "main-agent", cause: "stop" } }); });
+  await f.agent.run("main-agent", "clear_hold", { workspace: "workspace" });
+  assert.equal((await f.get()).hold, null);
+  assert.deepEqual(f.notes.map(n => [n.by, n.action]), [["agent:main-agent", "clear_hold"]]);
 });
 
 test("workspace controls share the panel's mutator and its guards", async t => {

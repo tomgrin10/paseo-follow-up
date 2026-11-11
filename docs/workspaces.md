@@ -89,12 +89,19 @@ Tests: `tests/main-claim.test.ts`, `tests/main-handover.test.ts`.
    - A sent batch with no acknowledgment after 2 idle minutes becomes `blocked`.
    - A reload mid-send makes it `uncertain` (`engine.recover()`).
    - Never-sent cancelled batches are pruned to `archive/` (`server/batch-archive.ts`).
-6. **Holds.** A canceled or failed main-agent turn sets `hold`, unless Session Guard owns the interruption
-   (`server/session-guard.ts`, `sessionGuardOwnsInterruption`). A failed turn's hold is run state: a newer main-agent
-   turn (a different turn id, from anyone) lifts it, on the turn start and, as a repair, on the next refresh
-   (`holdSuperseded` in `shared/status.ts`, invariant `automatic-hold-is-not-stale`). A stop ("You stopped the main
-   agent") and a hold the developer set stay until they resume. A lost provider conversation sets `goneAgent`
-   (`server/delivery.ts`, `conversationGone`), and Follow-up stops sending to that agent.
+6. **Holds.** A failed main-agent turn, or the developer's Stop, sets `hold` (`holdOnTurnEnd` in `shared/status.ts`),
+   unless Session Guard owns the interruption (`server/session-guard.ts`, `sessionGuardOwnsInterruption`).
+   - Only a Stop holds. Paseo reports a Stop, a turn replaced by a newer message (the developer's or another
+     agent's) and a refreshed session all as "Interrupted", so `cancelCause` reads the context: a newer turn already
+     started (`replaced`), the turn was a `/compact` (`compaction`), the reason names a reload or close (`reload`,
+     `closed`), else `stop`. When unsure it doesn't hold: a missed pause is cheap, a stuck one silently stops repairs
+     (invariant `only-a-stop-holds`, `tests/cancel-hold.test.ts`).
+   - Follow-up's automatic hold is run state: a newer main-agent turn (a different turn id, from anyone) means the
+     agent was resumed and lifts it, on the turn start and, as a repair, on the next refresh (`holdSuperseded`,
+     invariant `automatic-hold-is-not-stale`). A hold from before the interruption was recorded lifts on any
+     main-agent turn. A hold the developer set stays until they resume; Resume and the `clear_hold` tool clear any hold.
+   - A lost provider conversation sets `goneAgent` (`server/delivery.ts`, `conversationGone`), and Follow-up stops
+     sending to that agent.
 7. **Done label.** Paseo's Done label is set only when the label changes.
 
 The repair wording follows the PR workflow ([prs.md](prs.md)): the review-fix command (e.g. `/fix-pr`), and GitHub
