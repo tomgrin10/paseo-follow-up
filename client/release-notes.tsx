@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { Image, View } from "react-native";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Image, Modal as RNModal, View, useWindowDimensions } from "react-native";
 import { Pressable, Text } from "./text";
-import { openExternalUrl, useRpc } from "@getpaseo/plugin/client";
+import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, ScrollView } from "@getpaseo/plugin/client/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { releaseNotesRpc, whatsNewSeenRpc } from "../shared/contracts";
@@ -9,6 +9,8 @@ import { LAST_SEEN_KEY, recentNotes, whatsNew, type NoteBlock, type ReleaseNote,
 import { deviceStorage } from "../shared/settings-nav";
 import { Button, text, type Theme } from "./kit";
 import { useOnboarding } from "./onboarding";
+import { useReducedMotion } from "./motion";
+import { ImageViewer, ImageViewerContext, refocus, useImageViewer, viewerInline, type ViewedImage } from "./image-viewer";
 
 /**
  * Release notes on the client: What's new after an update, the full list, and Home's quiet version line. The notes
@@ -26,10 +28,17 @@ const fmtDate = (iso: string | null) => iso ? new Date(`${iso}T12:00:00`).toLoca
 /** Hidden from screen readers: a visual separator only. */
 const Dot = ({ style }: { style: object }) => <Text style={style} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden>·</Text>;
 
+/**
+ * The text measure in the wide dialog: text lines stop here (about 75 characters) while screenshots use the full
+ * width. Unset (no cap) in the host's 520px dialog, on phones and in Settings' inline notes.
+ */
+const MeasureContext = createContext<number | undefined>(undefined);
+const useMeasure = () => { const m = useContext(MeasureContext); return m ? { maxWidth: m } : null; };
+
 /** One bullet: a small dot and its text. */
 function Bullet({ text: line, theme, compact }: { text: string; theme: Theme; compact: boolean }) {
   const c = theme.colors; const t = text(c, compact);
-  return <View style={{ flexDirection: "row", gap: 8 }}>
+  return <View style={[{ flexDirection: "row", gap: 8 }, useMeasure()]}>
     <View style={{ width: 4, height: 4, borderRadius: 2, marginTop: compact ? 8 : 7, backgroundColor: c.foregroundMuted }} />
     <Text style={[t.body, { flex: 1 }]}>{line}</Text>
   </View>;
@@ -39,20 +48,28 @@ function Bullet({ text: line, theme, compact }: { text: string; theme: Theme; co
  * A screenshot in the notes: at most its CSS width (never larger than the UI it shows) and at most the column, left
  * aligned like the text, at its own shape (reserved before it loads, so nothing below it jumps), in a hairline frame
  * with the host's radius. It loads by URL; if it can't (offline, blocked), it is left out entirely, with
- * no empty frame. A tap opens it full size in the browser.
+ * no empty frame. It is a button (react-native-web maps no role from "imagebutton"). A tap shows it larger in Follow-up's image viewer, over the notes; it never opens a browser tab.
  */
-function NoteImage({ block, theme }: { block: Extract<NoteBlock, { kind: "image" }>; theme: Theme }) {
+function NoteImage({ block, theme, compact }: { block: Extract<NoteBlock, { kind: "image" }>; theme: Theme; compact: boolean }) {
   const c = theme.colors;
   const [failed, setFailed] = useState(false);
   const [aspect, setAspect] = useState(block.aspect ?? 16 / 10);
+  const viewer = useImageViewer();
+  const self = useRef<View>(null);
+  // Outside a notes dialog (Settings' inline notes) the image shows its own viewer.
+  const [own, setOwn] = useState(false);
   if (failed) return null;
-  return <Pressable accessibilityRole="imagebutton" accessibilityLabel={block.text} accessibilityHint="Opens the full-size image"
-    onPress={() => { void openExternalUrl(block.url).catch(() => undefined); }}
-    style={state => ({ alignSelf: "stretch", maxWidth: block.width ?? undefined, marginVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: c.border, overflow: "hidden", backgroundColor: c.surface1, opacity: state.pressed ? 0.85 : 1 })}>
+  const image: ViewedImage = { url: block.url, label: block.text, width: block.width, aspect };
+  return <>
+  <Pressable ref={self} role="button" accessibilityLabel={block.text} accessibilityHint="Shows the image larger"
+    onPress={() => { if (viewer) viewer(image, self.current); else setOwn(true); }}
+    style={state => ({ alignSelf: "stretch", maxWidth: block.width ?? undefined, marginVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: (state as { hovered?: boolean }).hovered ? c.foregroundMuted : c.border, overflow: "hidden", backgroundColor: c.surface1, opacity: state.pressed ? 0.85 : 1, cursor: "zoom-in" } as object)}>
     <Image source={{ uri: block.url }} accessibilityIgnoresInvertColors resizeMode="cover" style={{ width: "100%", aspectRatio: aspect }}
       onError={() => setFailed(true)}
       onLoad={e => { const src = (e.nativeEvent as { source?: { width?: number; height?: number } } | undefined)?.source; if (!block.aspect && src?.width && src?.height) setAspect(src.width / src.height); }} />
-  </Pressable>;
+  </Pressable>
+  {own && <ImageViewer image={image} inline={false} onClose={() => { setOwn(false); refocus(self.current); }} />}
+  </>;
 }
 
 /**
@@ -63,6 +80,7 @@ function NoteImage({ block, theme }: { block: Extract<NoteBlock, { kind: "image"
 export function VersionNotes({ note, theme, compact = false, max = 8 }: { note: ReleaseNote; theme: Theme; compact?: boolean; max?: number }) {
   const c = theme.colors; const t = text(c, compact);
   const [all, setAll] = useState(false);
+  const measure = useMeasure();
   if (note.blocks?.length) {
     const lead: object = { fontSize: compact ? 16 : 15, lineHeight: compact ? 24 : 22 };
     const quietFrom = note.blocks.findIndex(b => b.kind === "rule");
@@ -70,11 +88,11 @@ export function VersionNotes({ note, theme, compact = false, max = 8 }: { note: 
     return <View style={{ gap: 6 }}>
       {note.blocks.map((b, i) => {
         const quiet = quietFrom >= 0 && i > quietFrom;
-        if (b.kind === "image") return <NoteImage key={i} block={b} theme={theme} />;
+        if (b.kind === "image") return <NoteImage key={i} block={b} theme={theme} compact={compact} />;
         if (b.kind === "rule") return <View key={i} style={{ height: 1, backgroundColor: c.border, marginTop: 16, marginBottom: 4 }} />;
         // Section headings: semibold, one step above body (body 13/14, heading 15/17, the title role), clearly headings.
-        if (b.kind === "heading") return <Text key={i} accessibilityRole="header" style={quiet ? [t.meta, { fontWeight: "600" }] : [t.title, { fontWeight: "600", marginTop: i ? 16 : 0 }]}>{b.text}</Text>;
-        if (b.kind === "text") return <Text key={i} style={quiet ? t.meta : i === 0 ? [t.body, lead] : t.body}>{b.text}</Text>;
+        if (b.kind === "heading") return <Text key={i} accessibilityRole="header" style={[quiet ? [t.meta, { fontWeight: "600" }] : [t.title, { fontWeight: "600", marginTop: i ? 16 : 0 }], measure]}>{b.text}</Text>;
+        if (b.kind === "text") return <Text key={i} style={[quiet ? t.meta : i === 0 ? [t.body, lead] : t.body, measure]}>{b.text}</Text>;
         return <Bullet key={i} text={b.text} theme={theme} compact={compact} />;
       })}
     </View>;
@@ -141,18 +159,55 @@ export function NotesList({ notes, theme, compact, cap = 10, onMore, titled = fa
 
 /** The host sheet's own inset on the phone, so our body lines up with its title. */
 const SHEET_INSET = 24;
+/**
+ * From this window width the notes get a wider dialog of their own: the host's Modal is 520px wide with no way to
+ * widen it, which leaves Home's screenshot at under half its size on a large screen. Below it, the host's dialog.
+ */
+const WIDE_FROM = 1280; const WIDE_CARD = 840; const TEXT_MEASURE = 600;
 
 /**
- * "What's new in X": the host's dialog on desktop, its sheet on the phone. On the phone our own scroll body with a
- * pinned footer, so Close stays in thumb reach however long the notes are. "See all release notes" switches the same
- * sheet to every version, so nothing navigates away from under it.
+ * The wide dialog, drawn like the host's (same dim, card, header and X) so the two widths read as one dialog.
+ * `onDismiss` is the notes' own close: Esc, the dim and the X all go through it.
+ */
+function WideDialog({ title, open, onDismiss, theme, width, children, overlay }: { title: string; open: boolean; onDismiss: () => void; theme: Theme; width: number; children: ReactNode; overlay?: ReactNode }) {
+  const c = theme.colors;
+  const reduced = useReducedMotion();
+  const close = useRef<View>(null);
+  useEffect(() => { if (open) (close.current as unknown as { focus?: () => void } | null)?.focus?.(); }, [open]);
+  return <RNModal transparent visible={open} animationType={reduced ? "none" : "fade"} onRequestClose={onDismiss}>
+    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: "rgba(0,0,0,0.55)" }}>
+      <Pressable accessible={false} focusable={false} importantForAccessibility="no" onPress={onDismiss} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
+      <View role="dialog" aria-modal aria-label={title} style={{ width, maxHeight: "85%", flexShrink: 1, minHeight: 0, overflow: "hidden", backgroundColor: c.surface0, borderRadius: 12, borderWidth: 1, borderColor: c.surface2 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 24, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: c.surface2 }}>
+          <Text role="heading" numberOfLines={1} style={{ flex: 1, minWidth: 0, color: c.foreground, fontSize: 14, fontWeight: "500" }}>{title}</Text>
+          <Pressable ref={close} accessibilityRole="button" accessibilityLabel="Close" onPress={onDismiss} style={state => ({ padding: 8, marginRight: -8, borderRadius: 8, backgroundColor: (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
+            {state => <Icon name="X" size={16} color={state.pressed ? c.foreground : c.foregroundMuted} />}
+          </Pressable>
+        </View>
+        <ScrollView style={{ flexShrink: 1, minHeight: 0 }} contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16, paddingBottom: 16, gap: 12 }}>{children}</ScrollView>
+      </View>
+      {overlay}
+    </View>
+  </RNModal>;
+}
+
+/**
+ * "What's new in X": the host's dialog on desktop (a wider one of ours from 1280px windows), its sheet on the phone.
+ * On the phone our own scroll body with a pinned footer, so Close stays in thumb reach however long the notes are.
+ * "See all release notes" switches the same sheet to every version, so nothing navigates away from under it. A tapped
+ * screenshot opens the image viewer over the notes; Esc or a click closes the viewer first, then the notes.
  */
 export function WhatsNewSheet({ open, notes, all, theme, compact, onClose, startAll = false }: { open: boolean; notes: readonly ReleaseNote[]; all: readonly ReleaseNote[]; theme: Theme; compact: boolean; onClose: () => void; startAll?: boolean }) {
   const c = theme.colors; const t = text(c, compact);
   const [full, setFull] = useState(startAll);
+  const [viewing, setViewing] = useState<{ image: ViewedImage; from: unknown } | null>(null);
+  const win = useWindowDimensions();
   const list = full ? all : notes;
   const newest = list[0];
   if (!newest) return null;
+  const wide = !compact && win.width >= WIDE_FROM;
+  const closeViewer = () => { const from = viewing?.from; setViewing(null); refocus(from); };
+  const dismiss = () => { if (viewing) closeViewer(); else onClose(); };
   const meta = !full && list.length > 1 ? `${list.length} versions since you last looked` : null;
   const body = <>
     {meta && <Text style={t.meta}>{meta}</Text>}
@@ -163,14 +218,28 @@ export function WhatsNewSheet({ open, notes, all, theme, compact, onClose, start
     {!full && all.length > list.length && <Button title="See all release notes" kind="ghost" theme={theme} compact={compact} grow={compact} onPress={() => setFull(true)} />}
     <Button title="Close" kind="secondary" theme={theme} compact={compact} grow={compact} onPress={onClose} />
   </View>;
-  return <Modal title={full ? "Release notes" : `What's new in ${newest.version}`} open={open} onOpenChange={next => { if (!next) onClose(); }}>
+  const viewer = viewing && <ImageViewer image={viewing.image} inline={viewerInline(compact)} onClose={closeViewer} />;
+  const provide = (children: ReactNode) => <ImageViewerContext.Provider value={(image, from) => setViewing({ image, from })}>
+    <MeasureContext.Provider value={wide ? TEXT_MEASURE : undefined}>{children}</MeasureContext.Provider>
+  </ImageViewerContext.Provider>;
+  const title = full ? "Release notes" : `What's new in ${newest.version}`;
+  // The viewer always sits outside the scroll view: react-native-web's ScrollView sets translateZ(0), which would trap
+  // the viewer's fixed position inside the dialog.
+  if (wide) return <WideDialog title={title} open={open} onDismiss={dismiss} theme={theme} width={Math.min(WIDE_CARD, win.width - 96)} overlay={viewer}>
+    {provide(<>{body}{footer(false)}</>)}
+  </WideDialog>;
+  return <Modal title={title} open={open} onOpenChange={next => { if (!next) dismiss(); }}>
     {compact
       ? <Modal.Content scrollable={false} contentContainerStyle={{ padding: 0, gap: 0 }} style={{ flex: 1 }}>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: SHEET_INSET, paddingTop: 12, paddingBottom: 16, gap: 12 }}>{body}</ScrollView>
-        {footer(true)}
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: SHEET_INSET, paddingTop: 12, paddingBottom: 16, gap: 12 }}>{provide(body)}</ScrollView>
+        {footer(true)}{viewer}
       </Modal.Content>
-      // Desktop: the dialog sizes to its notes (up to the host's 85%); Esc and the X close it too.
-      : <Modal.Content contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 4, paddingBottom: 16, gap: 12 }}>{body}{footer(false)}</Modal.Content>}
+      // Desktop: the host's dialog at its 85% height with our own scroll body, so the viewer can sit outside it; Esc and
+      // the X close it too (the viewer first).
+      : <Modal.Content scrollable={false} contentContainerStyle={{ padding: 0, gap: 0 }} style={{ flex: 1 }}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 4, paddingBottom: 16, gap: 12 }}>{provide(<>{body}{footer(false)}</>)}</ScrollView>
+        {viewer}
+      </Modal.Content>}
   </Modal>;
 }
 
