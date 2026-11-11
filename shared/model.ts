@@ -37,6 +37,8 @@ export const prSchema = z.object({
   snapshot: snapshotSchema.nullable(), error: z.string().nullable(),
   registeredAgentId: idSchema.optional(),
   discoveredFromSubmission: z.boolean().optional(),
+  /** The agent merges this PR itself (register_pr agentMerges): Follow-up never asks the developer to review or merge it. */
+  agentMerges: z.boolean().optional(),
   deploymentAnchor: z.object({ mergeCommit: z.string(), at: z.string() }).optional(),
 });
 export const obligationSchema = z.object({

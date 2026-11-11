@@ -305,6 +305,7 @@ export const RESOLVED = {
   replaced: "Replaced by a newer card",
   movedOn: "No longer needed · the agent moved on",
   withdrawn: "The agent withdrew this question",
+  factEnded: "No longer needed · the PR moved on",
 } as const;
 const OWN_OUTCOMES: readonly string[] = Object.values(RESOLVED);
 
@@ -371,7 +372,9 @@ export type BriefEvent =
   /** A PR's new state: lands only on the open brief whose facts are about that PR. */
   | { type: "facts"; prKey: string; facts: BriefFact[] }
   /** Every question the brief points at is settled, by any path (briefQuestionsEvent): an answer, or null if withdrawn. */
-  | { type: "questions"; answers: Record<string, { choice: string; words: string | null } | null> };
+  | { type: "questions"; answers: Record<string, { choice: string; words: string | null } | null> }
+  /** The PR facts a Follow-up card reported no longer hold (shared/inbox.ts FACT_REASONS): its card of these kinds closes. */
+  | { type: "fact_ended"; kinds: BriefKind[] };
 
 /** A bare letter, or an option's label, as the developer's message counts as picking it (§2 Keyboard). */
 export function matchOption(b: Pick<Brief, "decisions">, text: string | null): { decision: BriefDecision; letter: string } | null {
@@ -455,6 +458,10 @@ export function briefStep(prev: Brief | null, event: BriefEvent, now: string): {
       const b = answered ? { ...collapse(prev, "answered", answeredOutcome(decisions)), decisions } : collapse(prev, "superseded", RESOLVED.withdrawn);
       return { brief: b, appends: [b] };
     }
+    case "fact_ended":
+      // Only Follow-up's own PR card: an agent's ask, or a card with questions, waits for the developer.
+      if (prev?.state !== "open" || prev.source !== "followup" || prev.questionIds.length || !event.kinds.includes(prev.kind)) return keep;
+      { const b = collapse(prev, "superseded", RESOLVED.factEnded); return { brief: b, appends: [b] }; }
     case "facts":
       if (prev?.state !== "open" || prev.factsPr !== event.prKey || JSON.stringify(prev.facts) === JSON.stringify(event.facts.slice(0, 3))) return keep;
       { const b = { ...prev, facts: event.facts.slice(0, 3) }; return { brief: b, appends: [b] }; }

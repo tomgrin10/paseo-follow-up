@@ -8,12 +8,22 @@
 - **Run state is the last turn's, not an outside fact.** `error` and `paused` (`RUN_STATE_REASONS`) describe the
   agent's last turn, so a newer turn start from anyone (the developer, another agent, the host resuming it) drops
   them, along with an open card that only reported them (`briefStep` `turn_start`, unless it has open questions). A
-  new failure flags again. Outside facts (permission by request, ci, review, reviewers, pr_closed) and a finish with
-  its ask stay until handled. Rows apply `liveFlag` with the turn start the worker saw (`turnStartedAt`), so a running
+  new failure flags again. Permission by request, pr_closed and a finish with its ask stay until handled. Rows apply `liveFlag` with the turn start the worker saw (`turnStartedAt`), so a running
   agent never headlines an Error or Paused from before its current turn (`rowViolations`, invariant
   `running-is-not-stale`). Status alone isn't enough: Paseo can still read "running" right after a turn fails, and that
   failure is real news. And `Inbox.start` drops such flags for agents already running
   after a restart (a 0.16 host resumes them; on 0.15 the agent stopped, and the flag stays).
+- **PR facts last as long as the fact.** `ci`, `review` and `reviewers` (`FACT_REASONS`) mirror a PR fact Follow-up
+  observes. After each PR pass, `liveFacts` (`server/inbox.ts`) lists the facts still live per agent, and a
+  `facts_live` event withdraws the rest, with Follow-up's own PR card of that kind (`briefStep` `fact_ended`). An agent
+  with a PR Follow-up couldn't read keeps everything (unknown is not off). One predicate, `asksForReviewers`
+  (`shared/attention.ts`), decides "Add reviewers" for both the flag and the Needs-you item: an open, non-draft PR with
+  no reviewers, in a repository someone is set up to review, that the agent doesn't merge itself. Invariants
+  `outside-fact-is-live` (`factFlagViolations`) and `agent-merges-asks-nothing`.
+- **In-flight work reads as waiting.** A PR registered with `agentMerges` is the agent's own merge, so it asks the
+  developer for neither reviewers nor a merge. A working or waiting task puts the workspace in Waiting (never Quiet),
+  and a waiting task is the agent's declared wait: the live line reads `Waiting · <task title>`. Invariant
+  `in-flight-reads-waiting`; `tests/in-flight-status.test.ts` enumerates every in-flight signal.
 - **Background work is running (Paseo 0.16).** An agent that started a shell or task and ended its turn reports
   `backgroundWork.count > 0`. The inbox's directory reads it as running (`liveStatus` in `shared/agent-load.ts`), so a
   plain finish doesn't flag (F7's settle sees "running"), its row sits in Running with `backgroundWork`, and
