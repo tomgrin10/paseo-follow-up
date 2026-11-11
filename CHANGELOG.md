@@ -14,9 +14,9 @@ Home lists every workspace, grouped by what it needs from you. When an agent fin
 
 ### A panel on every workspace
 
-The Follow-up tab beside a workspace's chat shows how far its PRs are, what needs you and what's left to fix, with a bar for the PR stack and what the agent is doing now.
+The Follow-up tab beside a workspace's chat shows how far its PRs are, what needs you and what's left to fix, with a bar for the PR stack, what the agent is doing now and the question it's waiting on.
 
-![The Follow-up panel on a workspace: 1 of 3 PRs merged, 3 need you, 1 to fix, a stack bar and the Auto-send switch](https://raw.githubusercontent.com/tomgrin10/paseo-follow-up/329e050a2a1a8c333da77341f145b50d47295612/docs/screenshots/follow-up-notes-panel.png#320x298)
+![The Follow-up panel on a workspace: 1 of 3 PRs merged, 3 need you, 1 to fix, a stack bar, Auto-send, and the agent's question with three lettered options, one recommended](https://raw.githubusercontent.com/tomgrin10/paseo-follow-up/fda6f2daf038347bb46f3073a5956d82f5e0469f/docs/screenshots/follow-up-notes-panel.png#320x910)
 
 ### Answer questions from anywhere
 
