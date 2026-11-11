@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { Image, Modal as RNModal, View, useWindowDimensions } from "react-native";
+import { Image, Platform, Modal as RNModal, View, useWindowDimensions, type ScrollView as NativeScrollView, type StyleProp, type ViewStyle } from "react-native";
 import { Pressable, Text } from "./text";
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, ScrollView } from "@getpaseo/plugin/client/ui";
@@ -10,6 +10,7 @@ import { deviceStorage } from "../shared/settings-nav";
 import { Button, text, type Theme } from "./kit";
 import { useOnboarding } from "./onboarding";
 import { useReducedMotion } from "./motion";
+import { NOTES_SCROLL_ATTR, notesScrollbarCss } from "../shared/notes-scrollbar";
 import { ImageViewer, ImageViewerContext, refocus, useImageViewer, viewerInline, type ViewedImage } from "./image-viewer";
 
 /**
@@ -157,6 +158,33 @@ export function NotesList({ notes, theme, compact, cap = 10, onMore, titled = fa
   </View>;
 }
 
+/**
+ * The notes' scroll body: its scrollbar stays visible whenever the notes overflow. Web: the scoped style above, put
+ * in the page once and kept to the current theme. Android: persistentScrollbar. iOS: native.
+ */
+function NotesScroll({ theme, style, contentContainerStyle, children }: { theme: Theme; style: StyleProp<ViewStyle>; contentContainerStyle: StyleProp<ViewStyle>; children: ReactNode }) {
+  const ref = useRef<NativeScrollView>(null);
+  const css = notesScrollbarCss(theme.colors);
+  useEffect(() => {
+    type El = { id: string; textContent: string | null; isConnected: boolean; setAttribute(k: string, v: string): void };
+    const doc = (globalThis as { document?: { getElementById(id: string): El | null; createElement(tag: string): El; head: { appendChild(el: El): void } } }).document;
+    if (Platform.OS !== "web" || !doc) return;
+    const node = ((ref.current as unknown as { getScrollableNode?: () => unknown } | null)?.getScrollableNode?.() ?? ref.current) as { setAttribute?: (k: string, v: string) => void } | null;
+    node?.setAttribute?.(NOTES_SCROLL_ATTR, "");
+    const id = "follow-up-notes-scrollbar";
+    const tag = doc.getElementById(id) ?? Object.assign(doc.createElement("style"), { id });
+    if (tag.textContent !== css) tag.textContent = css;
+    if (!tag.isConnected) doc.head.appendChild(tag);
+  }, [css]);
+  return <ScrollView ref={ref} style={style} contentContainerStyle={contentContainerStyle} showsVerticalScrollIndicator persistentScrollbar>{children}</ScrollView>;
+}
+
+/**
+ * The notes' titles name the plugin, from its manifest (the view's `name`): "What's new in Follow-up 2.0.0", and
+ * "Follow-up release notes" for every version. Exported for the tests.
+ */
+export const notesTitle = (name: string, version: string | null) => version ? `What's new in ${name} ${version}` : `${name} release notes`;
+
 /** The host sheet's own inset on the phone, so our body lines up with its title. */
 const SHEET_INSET = 24;
 /**
@@ -184,7 +212,7 @@ function WideDialog({ title, open, onDismiss, theme, width, children, overlay }:
             {state => <Icon name="X" size={16} color={state.pressed ? c.foreground : c.foregroundMuted} />}
           </Pressable>
         </View>
-        <ScrollView style={{ flexShrink: 1, minHeight: 0 }} contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16, paddingBottom: 16, gap: 12 }}>{children}</ScrollView>
+        <NotesScroll theme={theme} style={{ flexShrink: 1, minHeight: 0 }} contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16, paddingBottom: 16, gap: 12 }}>{children}</NotesScroll>
       </View>
       {overlay}
     </View>
@@ -197,7 +225,7 @@ function WideDialog({ title, open, onDismiss, theme, width, children, overlay }:
  * "See all release notes" switches the same sheet to every version, so nothing navigates away from under it. A tapped
  * screenshot opens the image viewer over the notes; Esc or a click closes the viewer first, then the notes.
  */
-export function WhatsNewSheet({ open, notes, all, theme, compact, onClose, startAll = false }: { open: boolean; notes: readonly ReleaseNote[]; all: readonly ReleaseNote[]; theme: Theme; compact: boolean; onClose: () => void; startAll?: boolean }) {
+export function WhatsNewSheet({ open, name, notes, all, theme, compact, onClose, startAll = false }: { open: boolean; name: string; notes: readonly ReleaseNote[]; all: readonly ReleaseNote[]; theme: Theme; compact: boolean; onClose: () => void; startAll?: boolean }) {
   const c = theme.colors; const t = text(c, compact);
   const [full, setFull] = useState(startAll);
   const [viewing, setViewing] = useState<{ image: ViewedImage; from: unknown } | null>(null);
@@ -222,7 +250,7 @@ export function WhatsNewSheet({ open, notes, all, theme, compact, onClose, start
   const provide = (children: ReactNode) => <ImageViewerContext.Provider value={(image, from) => setViewing({ image, from })}>
     <MeasureContext.Provider value={wide ? TEXT_MEASURE : undefined}>{children}</MeasureContext.Provider>
   </ImageViewerContext.Provider>;
-  const title = full ? "Release notes" : `What's new in ${newest.version}`;
+  const title = notesTitle(name, full ? null : newest.version);
   // The viewer always sits outside the scroll view: react-native-web's ScrollView sets translateZ(0), which would trap
   // the viewer's fixed position inside the dialog.
   if (wide) return <WideDialog title={title} open={open} onDismiss={dismiss} theme={theme} width={Math.min(WIDE_CARD, win.width - 96)} overlay={viewer}>
@@ -231,13 +259,13 @@ export function WhatsNewSheet({ open, notes, all, theme, compact, onClose, start
   return <Modal title={title} open={open} onOpenChange={next => { if (!next) dismiss(); }}>
     {compact
       ? <Modal.Content scrollable={false} contentContainerStyle={{ padding: 0, gap: 0 }} style={{ flex: 1 }}>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: SHEET_INSET, paddingTop: 12, paddingBottom: 16, gap: 12 }}>{provide(body)}</ScrollView>
+        <NotesScroll theme={theme} style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: SHEET_INSET, paddingTop: 12, paddingBottom: 16, gap: 12 }}>{provide(body)}</NotesScroll>
         {footer(true)}{viewer}
       </Modal.Content>
       // Desktop: the host's dialog at its 85% height with our own scroll body, so the viewer can sit outside it; Esc and
       // the X close it too (the viewer first).
       : <Modal.Content scrollable={false} contentContainerStyle={{ padding: 0, gap: 0 }} style={{ flex: 1 }}>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 4, paddingBottom: 16, gap: 12 }}>{provide(<>{body}{footer(false)}</>)}</ScrollView>
+        <NotesScroll theme={theme} style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 4, paddingBottom: 16, gap: 12 }}>{provide(<>{body}{footer(false)}</>)}</NotesScroll>
         {viewer}
       </Modal.Content>}
   </Modal>;
@@ -281,12 +309,12 @@ export function WhatsNewGate({ surface, theme, compact }: { surface: string; the
     deviceStorage.set(LAST_SEEN_KEY, view.version); setClosed(true);
     void seen({ version: view.version }).then(v => cache.setQueryData(releaseNotesKey, v), () => undefined);
   };
-  return <WhatsNewSheet open notes={decision.notes} all={view.notes} theme={theme} compact={compact} onClose={close} />;
+  return <WhatsNewSheet open name={view.name} notes={decision.notes} all={view.notes} theme={theme} compact={compact} onClose={close} />;
 }
 
 /** What's new opened by hand (Home's footer): since the previous version, or every version with `all`. */
 export function ReleaseNotesSheet({ theme, compact, all = false, onClose }: { theme: Theme; compact: boolean; all?: boolean; onClose: () => void }) {
   const view = useReleaseNotes().data;
   if (!view) return null;
-  return <WhatsNewSheet open notes={recentNotes(view)} all={view.notes} startAll={all} theme={theme} compact={compact} onClose={onClose} />;
+  return <WhatsNewSheet open name={view.name} notes={recentNotes(view)} all={view.notes} startAll={all} theme={theme} compact={compact} onClose={onClose} />;
 }

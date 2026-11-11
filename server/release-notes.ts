@@ -24,11 +24,12 @@ export function describeSelf(rows: readonly PluginRow[]): Omit<SelfInstall, "ver
   return { id: row.id, path: row.path, version: row.installation?.currentRevision ?? null, installKind, status: row.status ?? null, error: row.error ?? null, registry };
 }
 
-/** The installed package's version and its CHANGELOG.md, read from the plugin's own folder. */
-export async function readPackage(path: string): Promise<{ version: string | null; notes: ReleaseNote[] }> {
+/** The installed package's version, its display name (the manifest's `name`) and CHANGELOG.md, read from the plugin's own folder. */
+export async function readPackage(path: string): Promise<{ version: string | null; name: string | null; notes: ReleaseNote[] }> {
   const pkg = await readFile(join(path, "package.json"), "utf8").then(t => JSON.parse(t) as { version?: string }, () => null);
+  const manifest = await readFile(join(path, "paseo-plugin.json"), "utf8").then(t => JSON.parse(t) as { name?: unknown }, () => null);
   const notes = await readFile(join(path, "CHANGELOG.md"), "utf8").then(parseChangelog, () => []);
-  return { version: pkg?.version ?? null, notes };
+  return { version: pkg?.version ?? null, name: typeof manifest?.name === "string" && manifest.name.trim() ? manifest.name.trim() : null, notes };
 }
 
 /** versions.json: which version this host runs, the one before it, and the host-wide What's new record. */
