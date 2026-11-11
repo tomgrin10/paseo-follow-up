@@ -1,3 +1,4 @@
+import { isRecoveryTaskFor } from "../shared/legacy";
 import { isWorkspaceRoot } from "./workspace-agent";
 import type { Workspace } from "../shared/model";
 import type { Agent, Daemon } from "./daemon";
@@ -29,7 +30,7 @@ export async function recoveryHandoff(client: Daemon, w: Workspace, caller: Agen
   const initialTask = (await userMessages(client, caller.id))[0];
   if (!initialTask) return null;
   for (const b of candidates) {
-    if (!initialTask.startsWith(`Follow-through recovery ${b.id}\n`)) continue;
+    if (!isRecoveryTaskFor(initialTask, b.id)) continue;
     const prior = (await client.fetchAgent(b.recipientAgentId!))?.agent;
     if (!prior?.archivedAt || prior.workspaceId !== w.id || Date.parse(caller.createdAt) < Date.parse(b.sentAt ?? b.createdAt)) continue;
     // An archived recipient plus the exact initial user task proves a handoff, not a historical mention.

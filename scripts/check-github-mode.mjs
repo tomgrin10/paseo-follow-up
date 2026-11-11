@@ -63,7 +63,7 @@ const mutate = async change => { const d = JSON.parse(await readFile(fixture, 'u
 const logged = async () => (await readFile(writes, 'utf8')).trim().split('\n').filter(Boolean);
 
 const client = new DaemonClient({ url: env.PASEO_DAEMON_URL, clientId: 'github-mode-test', clientType: 'cli', reconnect: { enabled: false } }); await client.connect();
-const call = (name, input = {}) => client.invokePluginRpc('follow-through', name, input);
+const call = (name, input = {}) => client.invokePluginRpc('follow-up', name, input);
 // Refresh runs in the background: wait until every PR was observed after the call.
 const refresh = async () => {
   const since = new Date().toISOString();
@@ -118,7 +118,7 @@ try {
     await fetch(`http://127.0.0.1:${preview.port}/llms.txt`);
     const open = async () => {
       await page.goto(`http://127.0.0.1:${preview.port}/`);
-      await page.getByText('Follow-through POC test', { exact: true }).first().click();
+      await page.getByText('Follow-up POC test', { exact: true }).first().click();
       // The sidebar's Follow-up row opens Home; the workspace header's button (the last one) docks its panel.
       await page.waitForTimeout(2000);
       // The panel stays docked across reloads; the header button toggles it, so press it only when it's closed.

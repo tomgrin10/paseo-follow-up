@@ -76,7 +76,7 @@ export function SpecSheet({ workspace: w, open, theme, compact, onClose }: { wor
       onSuccess: () => {
         void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey });
         // The spec is a linked item too (derived in the view), so the Linked sheet re-reads.
-        void cache.invalidateQueries({ queryKey: ["follow-through", "linked", w.id] });
+        void cache.invalidateQueries({ queryKey: ["follow-up", "linked", w.id] });
       },
       failure: input.action === "set" ? "Spec link not saved" : "Spec link not changed",
     });

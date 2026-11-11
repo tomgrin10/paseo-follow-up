@@ -30,7 +30,7 @@ try {
   await fs.writeFile(join(home, "config.json"), JSON.stringify({ pluginsEnabled: true, daemon: { listen: `127.0.0.1:${port}`, relay: { enabled: false }, mcp: { enabled: false }, browserTools: { enabled: false } }, features: { webUi: { enabled: true } } }));
   const pack = arg("--pack") ? resolve(arg("--pack")) : join(root, JSON.parse((await exec("npm", ["pack", "--json", "--pack-destination", root], { timeout: 60000 })).stdout)[0].filename);
   await exec("tar", ["-xzf", pack, "--strip-components=1", "-C", plugin]);
-  await fs.writeFile(join(fixture, "paseo-plugin.json"), JSON.stringify({ id: "followthrough-fixture", requirements: { paseo: ">=0.11.0" } }));
+  await fs.writeFile(join(fixture, "paseo-plugin.json"), JSON.stringify({ id: "followup-fixture", requirements: { paseo: ">=0.11.0" } }));
   await fs.writeFile(join(fixture, "index.server.ts"), await fs.readFile("scripts/fixture-provider.ts", "utf8"));
   await fs.writeFile(join(home, "fixture-chat.json"), JSON.stringify(mixedTurn()));
   const env = harnessEnv(root, { home, set: { PASEO_DAEMON_URL: url, PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true" } });
@@ -41,7 +41,7 @@ try {
   client = new DaemonClient({ url, clientId: "follow-chat-grouping", clientType: "cli", reconnect: { enabled: false }, suppressSendErrors: true }); await client.connect();
   const api = createPaseoApi(client);
   const w = await api.workspaces.create({ title: "Chat grouping", source: { kind: "directory", path: root } });
-  const agent = await w.agents.create({ config: { provider: "followthrough-fixture/fixture", model: "fixture", modeId: "default" }, title: "Retry backoff" });
+  const agent = await w.agents.create({ config: { provider: "followup-fixture/fixture", model: "fixture", modeId: "default" }, title: "Retry backoff" });
   await client.sendMessage(agent.id, "Fixture: chat — ship the retry backoff and verify it", { messageId: "fixture-chat" });
   for (let i = 0; i < 80; i++) {
     const history = await client.fetchAgentTimeline(agent.id, { projection: "canonical", limit: 100 });

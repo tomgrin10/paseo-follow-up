@@ -142,7 +142,7 @@ export function PanelTop({ theme, compact, openOverview, openSettings }: { theme
 function MainAsk({ w, theme, compact, inbox, briefDeps }: { w: Workspace; theme: Theme; compact: boolean; inbox: InboxStore; briefDeps: BriefDeps }) {
   const row = useInbox(inbox, () => inbox.rows().find(r => r.agentId === w.mainAgentId) ?? null);
   const readBrief = useRpc(inboxBriefRpc);
-  const brief = useQuery({ queryKey: ["follow-through", "home-brief", w.mainAgentId, row?.seq ?? 0], queryFn: () => readBrief({ agentId: w.mainAgentId }), enabled: !!row?.needs && !!row?.brief });
+  const brief = useQuery({ queryKey: ["follow-up", "home-brief", w.mainAgentId, row?.seq ?? 0], queryFn: () => readBrief({ agentId: w.mainAgentId }), enabled: !!row?.needs && !!row?.brief });
   const b = brief.data?.brief?.state === "open" ? brief.data.brief : null;
   // "No ask stated" only repeats the chat beside it; the panel shows real asks.
   if (!row?.needs || row.snooze || !b || b.source === "none") return null;

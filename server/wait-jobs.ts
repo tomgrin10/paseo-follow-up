@@ -6,7 +6,7 @@ import { runnerSource } from "./wait-runner-source";
 
 /**
  * Wait's job store (folded in from the standalone paseo-wait plugin). A job is a directory under
- * `plugin-data/follow-through/wait/jobs/<agentId>/<jobId>/`:
+ * `plugin-data/follow-up/wait/jobs/<agentId>/<jobId>/`:
  *
  * - `job.json`: who prepared it (agent id and cwd, from the daemon, never from model input) and what it is.
  * - `started/`: created once by the runner, so a prepared command runs at most once.
@@ -51,11 +51,20 @@ async function jsonFile(file: string) {
 export class WaitJobs {
   private active = new Set<AbortController>();
   private closed = false;
-  constructor(readonly directory: string) {}
+  /** `legacyDirectory`: 1.x's wait directory. A job prepared before the 2.0 data move keeps writing its receipt there. */
+  constructor(readonly directory: string, readonly legacyDirectory: string | null = null) {}
 
-  private path(owner: Owner, jobId: string) {
+  private path(owner: Owner, jobId: string, root = this.directory) {
     if (!/^[a-z0-9_-]{1,128}$/i.test(owner.id)) throw new Error("Invalid agent identity");
-    return join(this.directory, "jobs", owner.id, z.string().uuid().parse(jobId));
+    return join(root, "jobs", owner.id, z.string().uuid().parse(jobId));
+  }
+  /** Where an existing job lives: the current directory, or 1.x's for a job that was running across the upgrade. */
+  private async locate(owner: Owner, jobId: string) {
+    const path = this.path(owner, jobId);
+    if (!this.legacyDirectory) return path;
+    if (await lstat(join(path, "job.json")).then(() => true, () => false)) return path;
+    const legacy = this.path(owner, jobId, this.legacyDirectory);
+    return await lstat(join(legacy, "job.json")).then(() => legacy, () => path);
   }
 
   /** Writes the job record and returns the exact command to run. Runs nothing. */
@@ -81,7 +90,7 @@ export class WaitJobs {
   }
 
   async status(owner: Owner, jobId: string): Promise<JobStatus> {
-    const path = this.path(owner, jobId);
+    const path = await this.locate(owner, jobId);
     let record;
     try { record = metadataSchema.parse(await jsonFile(join(path, "job.json"))); }
     catch (error) { if (missing(error)) throw new Error("Unknown job for this agent"); throw error; }

@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 export default function contribute(server: PluginServerContext) {
   server.registerProvider({
-    id: "followthrough-fixture", label: "Follow-through test agent",
+    id: "followup-fixture", label: "Follow-up test agent",
     async status() { return { available: true }; },
     async connect() {
       const listeners = new Set<(event: ProviderEvent) => void>();
@@ -26,7 +26,7 @@ export default function contribute(server: PluginServerContext) {
             sessions.set(input.sessionId, { ...input.config.env, FIXTURE_MARKER: String(input.config.providerOptions?.fixture_marker ?? ""), FIXTURE_MODE: String(input.config.providerOptions?.fixture_mode ?? "rollout"), FIXTURE_GOAL: String(input.config.providerOptions?.fixture_goal ?? "Ship and verify the migration rollout") });
             await writeFile(join(process.env.PASEO_HOME!, `fixture-settings-${input.config.env.PASEO_AGENT_ID}.json`), JSON.stringify(sessions.get(input.sessionId)));
             await writeFile(join(process.env.PASEO_HOME!, `fixture-agent-config-${input.config.env.PASEO_AGENT_ID}.json`), JSON.stringify(input.config));
-            await writeFile(join(process.env.PASEO_HOME!, "fixture-config.json"), JSON.stringify({ mcp: Object.keys(input.config.mcpServers), bridge: input.config.env.FOLLOW_THROUGH_CLI, instructions: input.config.systemPrompt }));
+            await writeFile(join(process.env.PASEO_HOME!, "fixture-config.json"), JSON.stringify({ mcp: Object.keys(input.config.mcpServers), bridge: input.config.env.FOLLOW_UP_CLI, instructions: input.config.systemPrompt }));
             emit({ type: "session.opened", requestId: input.requestId, sessionId: input.sessionId, capabilities, restoration: "core", cwd: input.config.cwd, persistence: { version: 1, data: { sessionId: input.sessionId } } });
             // Report the session's mode the way real providers do, so the agent's currentModeId is set.
             emit({ type: "session.config", sessionId: input.sessionId, config: { model: "fixture", mode: input.config.mode ?? "default", models: [{ id: "fixture", label: "Fixture", isDefault: true }], modes: [{ id: "default", label: "Default" }, { id: "bypassPermissions", label: "Bypass" }, { id: "full-access", label: "Full access" }, { id: "auto", label: "Auto" }, { id: "acceptEdits", label: "Accept edits" }, { id: "plan", label: "Plan" }], thinkingOptions: [], settings: [] } });
@@ -69,7 +69,7 @@ export default function contribute(server: PluginServerContext) {
                     emit({ type: "timeline.item", sessionId: input.sessionId, item: item as never });
                     await new Promise(resolve => setTimeout(resolve, 15));
                   }
-                  if (step.rpc) await rpcClient.invokePluginRpc("follow-through", step.rpc, { agentId, ...step.input });
+                  if (step.rpc) await rpcClient.invokePluginRpc("follow-up", step.rpc, { agentId, ...step.input });
                   if (step.permission) {
                     const permissionId = randomUUID(); const ask = step.permission;
                     await new Promise<void>(resolve => { permissions.set(permissionId, resolve); emit({ type: "session.permission", sessionId: input.sessionId, request: { id: permissionId, kind: (ask.kind ?? "tool") as "tool", name: ask.name, title: ask.title, input: ask.input as never } }); });
@@ -105,7 +105,7 @@ export default function contribute(server: PluginServerContext) {
                   if (!evidence.mainAgent.id) throw new Error("Recovery evidence has no main agent identity");
                 }
                 const mode = settings.FIXTURE_MODE;
-                const call = (method: string, args: Record<string, unknown>) => client.invokePluginRpc("follow-through", method, { ...args, agentId });
+                const call = (method: string, args: Record<string, unknown>) => client.invokePluginRpc("follow-up", method, { ...args, agentId });
                 if (inventory) {
                   const record: any = await call("follow.agent-status", {});
                   await call("follow.enroll", { goal: settings.FIXTURE_GOAL });
@@ -114,12 +114,12 @@ export default function contribute(server: PluginServerContext) {
                     await call("follow.obligation", { id: record.obligations.find((o: any) => o.title === "Verify deployed revision")?.id, title: "Verify deployed revision", status: "waiting", afterPrs: ["example/app#1"], evidence: record.obligations.find((o: any) => o.title === "Verify deployed revision")?.evidence ?? "", enable_follow_up: false });
                   } else if (mode === "blocked") await call("follow.obligation", { title: "Choose build-time metadata or declared migration owners", status: "blocked", evidence: "Design decision needed before implementation", afterPrs: [], enable_follow_up: false });
                 }
-                const batchId = /^Follow-through (?:batch|recovery) ([^\n]+)/.exec(text)![1];
+                const batchId = /^Follow-up (?:batch|recovery) ([^\n]+)/.exec(text)![1];
                 await call("follow.acknowledge", { batchId, outcome: "completed", result: inventory ? "Recovered owned PR and deployment requirement; excluded external reference" : "Goal and deployed revision verified" });
                 if (completion) await call("follow.done", { summary: mode === "done" ? "Recovery verified; ready to archive" : "Shipped and verified" });
               } finally { await client.close(); }
             }
-            const item = { id: randomUUID(), type: "assistant_message" as const, text: text.includes("Fixture: ship migration") ? "Created https://github.com/example/app/pull/1. This external reference is unrelated: https://github.com/example/unrelated/pull/7. Deployment verification remains." : "The isolated test agent received the follow-through batch." };
+            const item = { id: randomUUID(), type: "assistant_message" as const, text: text.includes("Fixture: ship migration") ? "Created https://github.com/example/app/pull/1. This external reference is unrelated: https://github.com/example/unrelated/pull/7. Deployment verification remains." : "The isolated test agent received the follow-up batch." };
             await appendFile(join(process.env.PASEO_HOME!, `fixture-history-${sessions.get(input.sessionId)!.PASEO_AGENT_ID}.jsonl`), JSON.stringify(item) + "\n");
             emit({ type: "timeline.item", sessionId: input.sessionId, item });
             emit({ type: "session.turn", sessionId: input.sessionId, turnId, state: "completed" });

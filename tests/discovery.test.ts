@@ -13,13 +13,13 @@ import { clock, workspace, pr, snapshot } from "./fixtures";
 
 test("recovers GitHub and Graphite references without treating mentions as ownership", () => {
   const history = extractHistory([
-    { type: "user_message", text: "Follow-through batch fixture-batch\n\n1. Use /fix-pr for example/system#10 (1 open thread)" },
-    { type: "user_message", text: "Follow-through recovery fixture-recovery\nEvidence file: /fixture/recovery.json" },
+    { type: "user_message", text: "Follow-up batch fixture-batch\n\n1. Use /fix-pr for example/system#10 (1 open thread)" },
+    { type: "user_message", text: "Follow-up recovery fixture-recovery\nEvidence file: /fixture/recovery.json" },
     { type: "user_message", text: "Ship the rollout and verify deployment" },
     { type: "assistant_message", text: "Created https://github.com/example/app/pull/1. Also https://app.graphite.dev/github/pr/example/app/2," },
     { type: "user_message", text: "Reference https://github.com/example/unrelated/pull/7" },
     { type: "reasoning", text: "https://github.com/example/secret/pull/9" },
-    { type: "user_message", text: "Workspace follow-through batch inventory\nhttps://github.com/example/system/pull/10" },
+    { type: "user_message", text: "Workspace Follow-up batch inventory\nhttps://github.com/example/system/pull/10" },
   ]);
   assert.equal(history.goal, "Ship the rollout and verify deployment");
   assert.deepEqual(history.candidates, ["example/app#1", "example/app#2", "example/unrelated#7"]);

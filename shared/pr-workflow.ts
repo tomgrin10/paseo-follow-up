@@ -44,7 +44,7 @@ export const repoWorkflowSchema = z.object({
   reviewFix: reviewFixSchema.optional(),
 });
 export type RepoWorkflow = z.infer<typeof repoWorkflowSchema>;
-/** `plugin-data/follow-through/pr-workflow.json`. Missing fields are the defaults. */
+/** `plugin-data/follow-up/pr-workflow.json`. Missing fields are the defaults. */
 export const prWorkflowConfigSchema = z.object({
   version: z.literal(1).default(1),
   default: prWorkflowSettingSchema.default("auto"),

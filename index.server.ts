@@ -1,4 +1,7 @@
 import { actorBy, actorOf, type Actor } from "./shared/actor";
+import { PluginMove } from "./server/plugin-move";
+import { moveData, dataDirs, writeLegacyHeartbeat, type DataMove } from "./server/data-move";
+import { isRecovery, withRuntimePrelude, invokeSelf, PLUGIN_ID } from "./shared/legacy";
 import { displayPreferences } from "./shared/display";
 import { DEFAULT_QUESTION_MODE, QUESTION_DEDUPE_MIGRATION, collapseDuplicateQuestions, questionPreferences, type QuestionMode } from "./shared/questions";
 import { askQuestion, needsYouQuestions, recordAnswer, syncTaskQuestions, withdrawQuestion } from "./server/questions";
@@ -97,7 +100,11 @@ export default function contribute(server: PluginServerContext) {
   const questionSettings = server.registerSettings(questionPreferences);
   // An unreadable setting means the default, which never lets an agent build ahead of the developer.
   const questionMode = async (): Promise<QuestionMode> => { try { const state = await questionSettings.read(); return state.status === "ready" ? state.values.mode : DEFAULT_QUESTION_MODE; } catch { return DEFAULT_QUESTION_MODE; } };
-  const directory = join(paseoHome, "plugin-data", "follow-through");
+  // 2.0's one-time move from 1.x's data directory; synchronous, before anything below writes to the new one.
+  let dataMove: DataMove | null = null;
+  try { dataMove = moveData(paseoHome); if (dataMove.status === "moved") console.warn(`[follow-up] moved data from ${dataMove.from} to ${dataMove.to}`); }
+  catch (error) { console.error("[follow-up] couldn't move 1.x's data; starting on whatever the new directory holds", error); }
+  const directory = dataDirs(paseoHome).directory;
   const timeZonePath = join(directory, "client-time-zone.json");
   let clientTimeZone: string | null = (() => { try { const z = JSON.parse(readFileSync(timeZonePath, "utf8")).timeZone; return isTimeZone(z) ? z : null; } catch { return null; } })();
   const bridge = join(directory, "mcp.mjs");
@@ -342,9 +349,9 @@ export default function contribute(server: PluginServerContext) {
     await onboarding.init().catch(() => undefined);
     unlock = await store.lock();
     await mkdir(directory, { recursive: true, mode: 0o700 });
-    await writeFile(bridge, mcpSource, { mode: 0o600 });
+    await writeFile(bridge, withRuntimePrelude(mcpSource), { mode: 0o600 });
     // 1.4.0-beta.2: tools are per agent now; drop the old user-scope registrations that spawned mcp.mjs in every session.
-    void removeGlobalRegistrations().then(results => { const removed = results.filter(r => r.status === "removed").map(r => r.path); if (removed.length) console.warn(`[follow-up] removed the global follow-through MCP registration from ${removed.length} file(s); backups end in .follow-through-unregister.bak`); });
+    void removeGlobalRegistrations().then(results => { const removed = results.filter(r => r.status === "removed").map(r => r.path); if (removed.length) console.warn(`[follow-up] removed the global follow-up MCP registration from ${removed.length} file(s); backups end in .follow-up-unregister.bak`); });
     governor.start();
     await engine.recover();
     await migrateTracking();
@@ -364,10 +371,10 @@ export default function contribute(server: PluginServerContext) {
     await writeBriefState().catch(() => undefined);
     // Brief answers recorded before a reload that Paseo never confirmed go out again, under the same messageId.
     await inbox.resumeAnswers(sendTo).catch(() => undefined);
-  })().catch(() => { loadError = "Follow-through could not start. Check its saved state and worker lock."; });
-  const requireReady = async () => { await ready; if (loadError || stopped) throw new Error(loadError ?? "Follow-through is stopping"); };
+  })().catch(() => { loadError = "Follow-up could not start. Check its saved state and worker lock."; });
+  const requireReady = async () => { await ready; if (loadError || stopped) throw new Error(loadError ?? "Follow-up is stopping"); };
   // 1.4.0-beta.2: Follow-up's tools per agent: natively through Paseo's MCP when the host serves plugin tools,
-  // otherwise the stdio bridge for this launch only. FOLLOW_THROUGH_TOOLS tells the hooks which names the agent has.
+  // otherwise the stdio bridge for this launch only. FOLLOW_UP_TOOLS tells the hooks which names the agent has.
   let configCache: { mtimeMs: number; value: unknown } | null = null;
   const paseoConfig = async () => {
     try { const path = join(paseoHome, "config.json"); const { mtimeMs } = await stat(path); if (configCache?.mtimeMs !== mtimeMs) configCache = { mtimeMs, value: JSON.parse(await readFile(path, "utf8")) }; return configCache.value as Parameters<typeof nativeToolsAvailable>[1]; } catch { return null; }
@@ -375,7 +382,7 @@ export default function contribute(server: PluginServerContext) {
   // Wait for background jobs (folded in from paseo-wait): native tools for interactive Claude sessions.
   // Paseo 0.16 runs background jobs itself (features.agentBackgroundWork): Wait retires there (docs/wait.md).
   const hostBackgroundWork = hostFeature("agentBackgroundWork", () => withDaemon(async client => (client as ServerInfoClient).getLastServerInfoMessage?.()));
-  const wait = new Wait(join(directory, "wait"), { enabled: () => agentSettings.waitEnabled(), config: async () => await paseoConfig() as WaitPaseoConfig | null, hostBackgroundWork });
+  const wait = new Wait(join(directory, "wait"), { enabled: () => agentSettings.waitEnabled(), config: async () => await paseoConfig() as WaitPaseoConfig | null, hostBackgroundWork, legacyDirectory: existsSync(dataDirs(paseoHome).legacy) ? join(dataDirs(paseoHome).legacy, "wait") : null });
   const currentWait = async () => waitStatus(await agentSettings.waitEnabled(), await paseoConfig() as WaitPaseoConfig | null, await hostBackgroundWork());
   const live = async (agentId: string): Promise<Live> => ({ role: scopes(await store.snapshot())[agentId]?.role ?? null, inbox: (await inboxSettings()).enable_inbox });
   const invoke: Invoke = async (method, input, context) => {
@@ -383,16 +390,16 @@ export default function contribute(server: PluginServerContext) {
     return handler.run(await handler.input.parseAsync(input), { paseo: context.paseo });
   };
   const withTools = async <R extends Parameters<typeof withSessionMcp>[0]>(request: R, recovery: boolean, brief: string | null, root: boolean, overseer = false): Promise<R> => {
-    // FOLLOW_THROUGH_TOOL_PROVIDERS / FOLLOW_THROUGH_FORCE_STDIO exist for the isolated harness (scripts/check-native-tools.mjs).
-    const providers = (process.env.FOLLOW_THROUGH_TOOL_PROVIDERS ?? "claude,codex").split(",");
+    // FOLLOW_UP_TOOL_PROVIDERS / FOLLOW_UP_FORCE_STDIO exist for the isolated harness (scripts/check-native-tools.mjs).
+    const providers = (process.env.FOLLOW_UP_TOOL_PROVIDERS ?? "claude,codex").split(",");
     if (request.purpose !== "interactive" || !providers.includes(request.provider) || request.labels["plugin-tools/enabled"] === "false") return request;
-    if (process.env.FOLLOW_THROUGH_FORCE_STDIO !== "1" && nativeToolsAvailable(request, await paseoConfig())) {
+    if (process.env.FOLLOW_UP_FORCE_STDIO !== "1" && nativeToolsAvailable(request, await paseoConfig())) {
       const flags = { recovery, brief: !!brief && !recovery, root: root && !recovery, overseer: overseer && !recovery };
-      const env = { ...request.env, FOLLOW_THROUGH_TOOLS: "native", FOLLOW_THROUGH_PROVIDER: request.provider, ...(flags.root ? { FOLLOW_THROUGH_ROOT: "1" } : {}), ...(flags.overseer ? { FOLLOW_THROUGH_OVERSEER: "1" } : {}) };
+      const env = { ...request.env, FOLLOW_UP_TOOLS: "native", FOLLOW_UP_PROVIDER: request.provider, ...(flags.root ? { FOLLOW_UP_ROOT: "1" } : {}), ...(flags.overseer ? { FOLLOW_UP_OVERSEER: "1" } : {}) };
       if (/^[\w-]+$/.test(request.agentId)) await writeFile(join(directory, "hook-state", `native-${request.agentId}.json`), JSON.stringify({ instance: toolsInstance }), { mode: 0o600 }).catch(() => undefined);
       return { ...request, env, tools: [...request.tools, ...nativeTools(flags, live, invoke, workflowSummary([...knownRepos(await store.snapshot())].map(r => prWorkflow.cachedWorkflow(r))))] };
     }
-    return withSessionMcp({ ...request, env: { ...request.env, FOLLOW_THROUGH_TOOLS: "stdio", FOLLOW_THROUGH_PROVIDER: request.provider } }, directory, clientEntry(), paseoHome, recovery, process.env, brief, root, overseer, providers) as R;
+    return withSessionMcp({ ...request, env: { ...request.env, FOLLOW_UP_TOOLS: "stdio", FOLLOW_UP_PROVIDER: request.provider } }, directory, clientEntry(), paseoHome, recovery, process.env, brief, root, overseer, providers) as R;
   };
   let compacted = false;
   const loop = async () => {
@@ -411,7 +418,7 @@ export default function contribute(server: PluginServerContext) {
     const agent = (await paseo.agents.ref(agentId).refresh())?.agent;
     if (!agent?.workspaceId) throw new Error(`Cannot locate the caller's workspace: expected agent in a recorded workspace, received agent ${agentId}.`);
     const record = (await store.snapshot()).workspaces.find(w => w.id === agent.workspaceId);
-    if (record?.contributorAgentIds?.includes(agentId) && !record.batches.some(b => b.recipientAgentId === agentId && !b.settledAt && b.tasks.every(t => t.kind === "inventory")) && (!await isWorkspaceRoot(agent, async id => (await paseo.agents.ref(id).refresh())?.agent) || agent.labels["follow-through.recovery"])) throw new Error("PR registration requires an available root agent in this tracked workspace.");
+    if (record?.contributorAgentIds?.includes(agentId) && !record.batches.some(b => b.recipientAgentId === agentId && !b.settledAt && b.tasks.every(t => t.kind === "inventory")) && (!await isWorkspaceRoot(agent, async id => (await paseo.agents.ref(id).refresh())?.agent) || isRecovery(agent.labels))) throw new Error("PR registration requires an available root agent in this tracked workspace.");
     if (allowHandoff) {
       const w = (await store.snapshot()).workspaces.find(w => w.id === agent.workspaceId);
       if (w && w.mainAgentId !== agentId && !w.batches.some(b => b.recipientAgentId === agentId)) {
@@ -686,7 +693,7 @@ export default function contribute(server: PluginServerContext) {
       for (const edit of tasks) {
         const o = w.obligations.find(o => o.id === edit.id);
         if (!o || ["done", "waived", "working"].includes(o.status)) throw new Error("Task changed or is no longer editable. Refresh before refining it.");
-        if (lifecycleOnly(edit) || edit.afterPrs.some(key => !w.prs.some(p => p.key === key))) throw new Error("Record concrete follow-through and owned PR dependencies.");
+        if (lifecycleOnly(edit) || edit.afterPrs.some(key => !w.prs.some(p => p.key === key))) throw new Error("Record concrete follow-up and owned PR dependencies.");
         if (o.title !== edit.title) o.previousTitles = [...(o.previousTitles ?? []), o.title];
         updateObligation(w, { ...edit, status: o.status, evidence: o.evidence });
       }
@@ -849,49 +856,75 @@ export default function contribute(server: PluginServerContext) {
   const watchdogLock = join(directory, "update-watchdog.lock");
   // Only the isolated update harness sets this: short quiet window and probation, so a rollback shows in minutes.
   const fastUpdates = process.env.FOLLOW_UP_UPDATES_FAST === "1";
-  const installerAlive = async () => {
-    const lock = await readFile(watchdogLock, "utf8").then(t => JSON.parse(t) as { pid?: number }, () => null);
+  const lockAlive = async (path: string) => {
+    const lock = await readFile(path, "utf8").then(t => JSON.parse(t) as { pid?: number }, () => null);
     if (!lock?.pid) return false;
     try { process.kill(lock.pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === "EPERM"; }
+  };
+  const installerAlive = () => lockAlive(watchdogLock);
+  const busyNow = async (fresh: boolean) => {
+    const busy: Busy[] = [];
+    const rows = await gateway.directory.read(fresh ? { fresh: "agents" } : {});
+    const agents = busyAgents(rows.agents.map(({ agent }) => ({ status: agent.status, archivedAt: agent.archivedAt, hasFollowTools: true })));
+    if (agents) busy.push({ kind: "agent", count: agents });
+    if (ranker?.isRunning()) busy.push({ kind: "ranker" });
+    else if (aiJobs.active > 0) busy.push({ kind: "about" });
+    const state = await store.snapshot();
+    const prActions = state.workspaces.reduce((n, w) => n + w.prActions.filter(a => a.state === "sending").length, 0);
+    const repairs = state.workspaces.reduce((n, w) => n + w.batches.filter(b => b.state === "sending").length, 0);
+    if (prActions) busy.push({ kind: "pr-action", count: prActions });
+    if (repairs) busy.push({ kind: "repair", count: repairs });
+    return busy;
+  };
+  const watchdogTiming = fastUpdates ? { timing: { probationMs: 60_000, loadTimeoutMs: 45_000, watchEveryMs: 5_000 } } : {};
+  /** Writes the installer and starts it detached, with its job in the environment (it carries the daemon password). */
+  const startWatchdog = async (job: Record<string, unknown>, to: string) => {
+    const script = join(directory, "update-watchdog.mjs");
+    await writeFile(script, watchdogSource, { mode: 0o600 });
+    const env = { ...process.env, FOLLOW_UP_UPDATE_JOB: JSON.stringify({ ...job, directory, clientEntry: clientEntry(), daemon: await daemonOptions(), ...watchdogTiming }) };
+    const child = spawn(process.execPath, [script], { detached: true, stdio: "ignore", env });
+    child.unref();
+    await writeFile(watchdogLock, JSON.stringify({ pid: child.pid, to }), { mode: 0o600 });
   };
   const updater = new Updater({
     directory, read: () => updatesStore.read(), defaultMode: () => onboarding.init().then(f => f.install === "fresh" ? "auto" as const : "notify" as const, () => "notify" as const), write: next => updatesStore.write(next), self: () => selfInstall(), registry,
     changelog: (tarball, integrity) => tarballChangelog({ fetch: (url, init) => fetch(url, init), tarball, integrity }),
     provenance: version => checkProvenance({ fetch: (url, init) => fetch(url, init), registry: registryUrl(), name: "paseo-follow-up", version }),
-    busy: async fresh => {
-      const busy: Busy[] = [];
-      const rows = await gateway.directory.read(fresh ? { fresh: "agents" } : {});
-      const agents = busyAgents(rows.agents.map(({ agent }) => ({ status: agent.status, archivedAt: agent.archivedAt, hasFollowTools: true })));
-      if (agents) busy.push({ kind: "agent", count: agents });
-      if (ranker?.isRunning()) busy.push({ kind: "ranker" });
-      else if (aiJobs.active > 0) busy.push({ kind: "about" });
-      const state = await store.snapshot();
-      const prActions = state.workspaces.reduce((n, w) => n + w.prActions.filter(a => a.state === "sending").length, 0);
-      const repairs = state.workspaces.reduce((n, w) => n + w.batches.filter(b => b.state === "sending").length, 0);
-      if (prActions) busy.push({ kind: "pr-action", count: prActions });
-      if (repairs) busy.push({ kind: "repair", count: repairs });
-      return busy;
-    },
+    busy: busyNow,
     installerAlive,
     spawn: async job => {
       if (await installerAlive()) return false;
-      const script = join(directory, "update-watchdog.mjs");
-      await writeFile(script, watchdogSource, { mode: 0o600 });
-      const env = { ...process.env, FOLLOW_UP_UPDATE_JOB: JSON.stringify({ ...job, directory, pluginId: "follow-through", clientEntry: clientEntry(), daemon: await daemonOptions(), ...(fastUpdates ? { timing: { probationMs: 60_000, loadTimeoutMs: 45_000, watchEveryMs: 5_000 } } : {}) }) };
-      const child = spawn(process.execPath, [script], { detached: true, stdio: "ignore", env });
-      child.unref();
-      await writeFile(watchdogLock, JSON.stringify({ pid: child.pid, to: job.to }), { mode: 0o600 });
+      await startWatchdog({ ...job, pluginId: (await selfInstall()).id ?? PLUGIN_ID }, job.to);
       return true;
     },
     log: message => console.warn(message),
     timing: fastUpdates ? { quietMs: 90_000, probationMs: 60_000 } : undefined,
   });
-  const updatesView = async (): Promise<UpdatesView> => demoOverride(directory, "updates", updatesViewSchema, await updater.view());
+  // 2.0's one-time move from 1.x's plugin id (server/plugin-move.ts; the move itself runs in update-watchdog.mjs).
+  const pluginMove = new PluginMove({
+    directory, self: () => selfInstall(), busy: busyNow,
+    // A 1.x installer (#61) on probation for this version holds the old directory's lock; moving now would look to it
+    // like Follow-up vanished, and it would roll back.
+    installerAlive: async () => await installerAlive() || await lockAlive(join(dataDirs(paseoHome).legacy, "update-watchdog.lock")),
+    spawn: async job => {
+      if (await installerAlive()) return false;
+      await startWatchdog({ kind: "move", ...job, packageName: "paseo-follow-up", settingsRoot: join(paseoHome, "plugin-settings") }, job.version);
+      return true;
+    },
+    quietMs: fastUpdates ? 90_000 : undefined,
+  });
+  // A worker that couldn't start never moves: under probation it is rolled back, and a later good start moves.
+  const evaluateMove = () => stopped || loadError ? Promise.resolve() : pluginMove.evaluate().catch(() => undefined);
+  const updatesView = async (): Promise<UpdatesView> => demoOverride(directory, "updates", updatesViewSchema, { ...await updater.view(), move: await pluginMove.view().catch(() => null) });
   // The new worker reports in for the installer's probation once it is ready, with the reason if it couldn't start.
   void ready.then(async () => {
     const me = await selfInstall();
-    await writeFile(join(directory, "heartbeat.json"), JSON.stringify({ version: me.version, at: Date.now(), error: loadError ? String(loadError).slice(0, 300) : null }), { mode: 0o600 });
+    const beat = JSON.stringify({ version: me.version, at: Date.now(), error: loadError ? String(loadError).slice(0, 300) : null });
+    await writeFile(join(directory, "heartbeat.json"), beat, { mode: 0o600 });
+    // A 1.x installer on probation reads the old directory's heartbeat; can go in the release after 2.0.0.
+    try { writeLegacyHeartbeat(paseoHome, beat); } catch { /* no 1.x directory, or not writable: nothing watches it */ }
     if (!stopped) await updater.start();
+    await evaluateMove();
   }).catch(() => undefined);
   handle(rpc.updatesRpc, async ({ check }) => {
     if (check) await updater.check(check).catch(() => undefined);
@@ -899,6 +932,7 @@ export default function contribute(server: PluginServerContext) {
   });
   handle(rpc.setUpdatesRpc, async ({ mode, channel }) => { await updater.setSettings({ mode, channel }); return updatesView(); });
   handle(rpc.installUpdateRpc, async ({ version, anyway }) => { await updater.install(version, !!anyway); return updatesView(); });
+  handle(rpc.retryMoveRpc, async () => { await pluginMove.retry(); return updatesView(); });
   handle(rpc.dismissUpdateNoticeRpc, async ({ id }) => { await updater.dismiss(id); return updatesView(); });
   handle(rpc.agentSettingsRpc, async ({ catalog, fresh }, { paseo }) => { await requireReady(); seen(paseo); return agentSettingsView(!!catalog, !!fresh); });
   handle(rpc.setAgentSettingRpc, async ({ role, entry }, { paseo }) => { await requireReady(); seen(paseo); await agentSettings.save(role, entry); return agentSettingsView(true); });
@@ -1011,7 +1045,7 @@ export default function contribute(server: PluginServerContext) {
   const displayBridge = {
     async read() { const state = await displaySettings.read(); if (state.status !== "ready") throw new Error(`Display preferences can't be read: ${state.error}`); return { revision: state.revision, values: state.values as Record<string, unknown> }; },
     async write(revision: string, values: Record<string, unknown>) {
-      const result = await withDaemon(client => client.invokePluginRpc("follow-through", `settings.${displayPreferences.id}.write`, { revision, values })) as { status?: string; error?: string } | null;
+      const result = await withDaemon(client => invokeSelf(id => client.invokePluginRpc(id, `settings.${displayPreferences.id}.write`, { revision, values }))) as { status?: string; error?: string } | null;
       // "saved", or "conflict" (someone changed them since the read) / "invalid".
       if (result?.status !== "saved") throw new Error(result?.status === "conflict" ? "Display preferences changed since the dry run. Run set_display again." : result?.error ?? "Display preferences weren't saved. Try again.");
       return result;
@@ -1030,7 +1064,7 @@ export default function contribute(server: PluginServerContext) {
     // Root agents only, the same rule as needs_you: never recovery, contributors or subagents.
     const agent = (await paseo.agents.ref(agentId).refresh())?.agent;
     if (!agent?.workspaceId || agent.archivedAt) throw new Error("Cannot locate the caller's workspace.");
-    if (agent.labels["follow-through.recovery"]) throw new Error("Recovery sessions can't act for the developer. Acknowledge your batch instead.");
+    if (isRecovery(agent.labels)) throw new Error("Recovery sessions can't act for the developer. Acknowledge your batch instead.");
     // Contributors (the workspace's other root agents) get one tool: make_main_agent, with its claim rules.
     if (tool !== "make_main_agent" && (await store.snapshot()).workspaces.some(w => w.enable_tracking && !w.archived && w.contributorAgentIds?.includes(agentId))) throw new Error("Contributor sessions can't act for the developer. Report to the main agent.");
     if (!await isWorkspaceRoot(agent, async id => (await paseo.agents.ref(id).refresh())?.agent)) throw new Error("Follow-up's action tools are for root agents. Ask your parent agent.");
@@ -1051,7 +1085,7 @@ export default function contribute(server: PluginServerContext) {
     const saved = await store.snapshot();
     const tracked = saved.workspaces.find(w => w.id === agent.workspaceId && w.enable_tracking && !w.archived);
     // F2: root agents only. Contributors and recovery sessions report to the main agent; subagents to their parent.
-    if (agent.labels["follow-through.recovery"] || tracked && tracked.mainAgentId !== agentId) throw new Error("needs_you is for the workspace's main agent. Report to the main agent instead.");
+    if (isRecovery(agent.labels) || tracked && tracked.mainAgentId !== agentId) throw new Error("needs_you is for the workspace's main agent. Report to the main agent instead.");
     if (!await isWorkspaceRoot(agent, async id => (await paseo.agents.ref(id).refresh())?.agent)) throw new Error("needs_you is for root agents. Report to your parent agent instead.");
     let call = validateNeedsYou(input, ref => {
       const key = ref.trim().replace(/^#/, "");
@@ -1171,7 +1205,7 @@ export default function contribute(server: PluginServerContext) {
     server.on("workspace.created", async event => gateway.directory.workspaceCreated(event.workspace)),
     server.on("workspace.archived", async event => gateway.directory.workspaceArchived(event.workspace.id)),
     server.on("agent.turn_started", async () => updater.activity()),
-    server.on("agent.turn_ended", async () => updater.activity()),
+    server.on("agent.turn_ended", async () => { updater.activity(); void evaluateMove(); }),
     server.on("agent.turn_started", async (event, { paseo }) => { seen(paseo); inboxHook(() => inbox.turnStarted(event.agent, event.turnId)); }),
     // A newer main-agent turn supersedes the failed turn's automatic hold (shared/status.ts holdSuperseded).
     server.on("agent.turn_started", async event => {
@@ -1213,7 +1247,7 @@ export default function contribute(server: PluginServerContext) {
       if (await isBackground(request.agentId, paseo)) return request;
       // The Overseer: needs_you (no Stop-hook nudge), the action tools and its routing tools. Never tracked.
       if (request.labels[OVERSEER_LABEL] === "1" && ["claude", "codex"].includes(request.provider)) {
-        const env = { ...request.env, FOLLOW_THROUGH_OVERSEER: "1", FOLLOW_THROUGH_BRIEF: request.provider };
+        const env = { ...request.env, FOLLOW_UP_OVERSEER: "1", FOLLOW_UP_BRIEF: request.provider };
         return withTools({ ...request, env }, false, request.provider, true, true);
       }
       const saved = await store.snapshot();
@@ -1226,10 +1260,10 @@ export default function contribute(server: PluginServerContext) {
           const current = await store.snapshot();
           w = current.workspaces.find(w => w.enable_tracking && w.mainAgentId === request.agentId);
           if (!current.workspaces.some(w => w.id === request.workspaceId) && current.projectDefaults?.[project.id] !== false)
-            return { ...request, env: { ...request.env, FOLLOW_THROUGH_CLI: bridge, FOLLOW_THROUGH_CLIENT_ENTRY: clientEntry() } };
+            return { ...request, env: { ...request.env, FOLLOW_UP_CLI: bridge, FOLLOW_UP_CLIENT_ENTRY: clientEntry() } };
         }
       }
-      const root = !!request.workspaceId && !request.labels["follow-through.recovery"] && await isWorkspaceRoot({ id: request.agentId, workspaceId: request.workspaceId, labels: request.labels }, async id => (await paseo.agents.ref(id).refresh())?.agent);
+      const root = !!request.workspaceId && !isRecovery(request.labels) && await isWorkspaceRoot({ id: request.agentId, workspaceId: request.workspaceId, labels: request.labels }, async id => (await paseo.agents.ref(id).refresh())?.agent);
       // F2: needs_you and the Stop-hook nudge reach every root agent while the inbox is on, tracked or not.
       const brief = (await inboxSettings()).enable_inbox && ["claude", "codex"].includes(request.provider) ? request.provider : null;
       if (!w && root) {
@@ -1242,11 +1276,11 @@ export default function contribute(server: PluginServerContext) {
       if (!w) {
         // Root agents get the action tools (agent parity) and, while the inbox is on, needs_you.
         if (!root) return request;
-        return withTools({ ...request, env: { ...request.env, ...(brief ? { FOLLOW_THROUGH_BRIEF: brief } : {}) } }, false, brief, true);
+        return withTools({ ...request, env: { ...request.env, ...(brief ? { FOLLOW_UP_BRIEF: brief } : {}) } }, false, brief, true);
       }
       const recovery = w.mainAgentId !== request.agentId && !w.contributorAgentIds?.includes(request.agentId);
       const main = !recovery && w.mainAgentId === request.agentId ? brief : null;
-      return withTools({ ...request, env: { ...request.env, FOLLOW_THROUGH_CLI: bridge, FOLLOW_THROUGH_CLIENT_ENTRY: clientEntry(), ...(recovery ? { FOLLOW_THROUGH_RECOVERY: "1" } : {}), ...(main ? { FOLLOW_THROUGH_BRIEF: main } : {}) } }, recovery, main, root && !recovery);
+      return withTools({ ...request, env: { ...request.env, FOLLOW_UP_CLI: bridge, FOLLOW_UP_CLIENT_ENTRY: clientEntry(), ...(recovery ? { FOLLOW_UP_RECOVERY: "1" } : {}), ...(main ? { FOLLOW_UP_BRIEF: main } : {}) } }, recovery, main, root && !recovery);
     })),
     server.on("agent.turn_ended", async (event, { paseo, signal }) => {
       await ready;
@@ -1281,7 +1315,7 @@ export default function contribute(server: PluginServerContext) {
     server.on("workspace.archived", async event => { await ready; if (!loadError && !stopped) await store.mutate(state => { const w = state.workspaces.find(w => w.id === event.workspace.id); if (w) w.archived = true; }); }),
   ];
   return async () => {
-    stopped = true; wait.close(); updater.stop(); governor.stop(); if (timer) clearTimeout(timer); if (aboutTimer) clearTimeout(aboutTimer); if (linkedTimer) clearTimeout(linkedTimer); aiJobs.stop(); ranker = null; if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); rpcTiming.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
+    stopped = true; wait.close(); updater.stop(); pluginMove.stop(); governor.stop(); if (timer) clearTimeout(timer); if (aboutTimer) clearTimeout(aboutTimer); if (linkedTimer) clearTimeout(linkedTimer); aiJobs.stop(); ranker = null; if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); rpcTiming.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
     await ready; if (hooksStarted) await agentHooks.stop().catch(() => {});
     await actions.close(); await closeConnections(); await engine.stop(); await ready; await store.flush().catch(() => undefined); await unlock?.();
   };

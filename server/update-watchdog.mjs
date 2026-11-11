@@ -1,4 +1,4 @@
-// Follow-up's installer and watchdog (1.4.0-beta.24). Written to plugin-data/follow-through/update-watchdog.mjs and run
+// Follow-up's installer and watchdog (1.4.0-beta.24). Written to plugin-data/follow-up/update-watchdog.mjs and run
 // detached, because installing reloads Follow-up: the worker that asked for the update stops while this keeps going.
 //
 // It asks Paseo for the reviewed version (the integrity Follow-up checked must match), applies it, then watches the
@@ -6,7 +6,7 @@
 // version fails to load, reports an error, or never reports in, it installs the old version again the same way.
 // Every step goes to updates.jsonl, which Settings → General reads. Plain JavaScript with no dependencies besides
 // Paseo's own daemon client (its path comes from the worker), so it runs whichever Follow-up version is installed.
-import { appendFile, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, cp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
@@ -51,7 +51,7 @@ export async function run(job, io = {}) {
   const log = event => appendFile(join(job.directory, "updates.jsonl"), `${JSON.stringify({ at: now(), from: job.from, to: job.to, ...event })}\n`, { mode: 0o600 });
   const connect = io.connect ?? (async () => {
     const { DaemonClient } = createRequire(import.meta.url)(job.clientEntry);
-    const client = new DaemonClient({ ...job.daemon, clientId: "follow-through-updater" });
+    const client = new DaemonClient({ ...job.daemon, clientId: "follow-up-updater" });
     await client.connect();
     return client;
   });
@@ -120,13 +120,90 @@ export async function run(job, io = {}) {
   }
 }
 
+/**
+ * 2.0's one-time move to the new plugin id (server/plugin-move.ts starts it, under the same quiet rule as an update).
+ * Paseo never changes an installed plugin's id, so an upgraded install still runs under 1.x's. The move:
+ *   1. copies plugin-settings/<old>/ to plugin-settings/<new>/ (Paseo deletes a plugin's settings when it's removed);
+ *   2. disables the old id, so there is never a second worker (this stops the worker that started the move);
+ *   3. installs the same version from npm, which takes the manifest's id;
+ *   4. watches it like an update (probation);
+ *   5. removes the old id only once the new one passed.
+ * Any failure removes the new id and enables the old one again, which is still on disk.
+ * `job`: { kind: "move", directory, oldId, newId, packageName, version, settingsRoot, clientEntry, daemon, timing? }.
+ */
+export async function runMove(job, io = {}) {
+  const now = io.now ?? Date.now;
+  const timing = job.timing ?? {};
+  const wait = io.sleep ?? sleep;
+  const log = event => appendFile(join(job.directory, "updates.jsonl"), `${JSON.stringify({ at: now(), from: job.version, to: job.version, ...event })}\n`, { mode: 0o600 });
+  const connect = io.connect ?? (async () => {
+    const { DaemonClient } = createRequire(import.meta.url)(job.clientEntry);
+    const client = new DaemonClient({ ...job.daemon, clientId: "follow-up-mover" });
+    await client.connect();
+    return client;
+  });
+  let client = null;
+  const daemon = async () => client ??= await connect();
+  const drop = async () => { const c = client; client = null; await c?.close?.().catch?.(() => undefined); };
+  // Disabling Follow-up reloads plugins, which can drop this connection: reconnect once. Any other error is the answer.
+  const dropped = e => /clos|connect|socket|ECONN|EPIPE|timed? ?out|not open/i.test(String(e?.message ?? e));
+  const retry = async action => { try { return await action(await daemon()); } catch (e) { if (!dropped(e)) throw e; await drop(); return action(await daemon()); } };
+  const copySettings = io.copySettings ?? (async () => {
+    const from = join(job.settingsRoot, job.oldId), to = join(job.settingsRoot, job.newId);
+    if (!await stat(from).then(() => true, () => false) || await stat(to).then(() => true, () => false)) return;
+    await cp(from, to, { recursive: true, preserveTimestamps: true });
+  });
+  const observe = async () => {
+    let plugin;
+    try {
+      const rows = await (await daemon()).listPlugins();
+      const row = rows.find(p => p.id === job.newId);
+      plugin = row ? { status: row.status, version: row.installation?.currentRevision ?? null, error: row.error ?? null } : { status: "missing", version: null, error: null };
+    } catch { await drop(); return null; }
+    const heartbeat = await readFile(join(job.directory, "heartbeat.json"), "utf8").then(JSON.parse, () => null);
+    return { plugin, heartbeat };
+  };
+  const rollback = async reason => {
+    await log({ event: "move-rolling-back", reason });
+    let failed = null;
+    try { await retry(c => c.removePlugin(job.newId)).catch(() => undefined); await retry(c => c.enablePlugin(job.oldId)); }
+    catch (e) { failed = clip(e?.message ?? e); }
+    await log(failed ? { event: "move-rollback-failed", reason: `${reason} Enabling ${job.oldId} again failed too: ${failed}` } : { event: "move-rolled-back", reason });
+    return failed ? "move-rollback-failed" : "move-rolled-back";
+  };
+  try {
+    await log({ event: "moving", pid: process.pid, oldId: job.oldId, newId: job.newId });
+    try { await copySettings(); } catch (e) { await log({ event: "move-failed", reason: `Couldn't copy Follow-up's settings: ${clip(e?.message ?? e)}` }); return "move-failed"; }
+    try { await retry(c => c.disablePlugin(job.oldId)); } catch (e) { await log({ event: "move-failed", reason: `Couldn't disable ${job.oldId}: ${clip(e?.message ?? e)}` }); return "move-failed"; }
+    const appliedAt = now();
+    try { await retry(c => c.installPluginSource({ source: `npm:${job.packageName}@${job.version}` })); }
+    catch (e) { return await rollback(`Installing as ${job.newId} failed: ${clip(e?.message ?? e)}`); }
+    await log({ event: "move-installed" });
+    for (;;) {
+      await wait(timing.watchEveryMs ?? WATCH_EVERY_MS);
+      const seen = await observe();
+      if (!seen) { if (now() - appliedAt >= (timing.loadTimeoutMs ?? LOAD_TIMEOUT_MS) * 2) return await rollback("Paseo stopped answering after the move."); continue; }
+      const verdict = probation({ now: now(), appliedAt, to: job.version, ...seen, ...timing });
+      if (verdict.verdict === "rollback") return await rollback(verdict.reason);
+      if (verdict.verdict === "ok") break;
+    }
+    try { await retry(c => c.removePlugin(job.oldId)); }
+    catch (e) { await log({ event: "moved", warning: `The old id is still installed (disabled): ${clip(e?.message ?? e)}` }); return "moved"; }
+    await log({ event: "moved" });
+    return "moved";
+  } finally {
+    await drop();
+    await rm(join(job.directory, "update-watchdog.lock"), { force: true }).catch(() => undefined);
+  }
+}
+
 // Run as a script: the job comes in the environment (it carries the daemon password, so never on the command line).
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) void (async () => {
   const job = JSON.parse(process.env.FOLLOW_UP_UPDATE_JOB ?? "null");
   delete process.env.FOLLOW_UP_UPDATE_JOB;
   if (!job) process.exit(2);
   await writeFile(join(job.directory, "update-watchdog.lock"), JSON.stringify({ pid: process.pid, to: job.to }), { mode: 0o600 });
-  await run(job).catch(async e => {
+  await (job.kind === "move" ? runMove(job) : run(job)).catch(async e => {
     await appendFile(join(job.directory, "updates.jsonl"), `${JSON.stringify({ at: Date.now(), from: job.from, to: job.to, event: "failed", reason: clip(e?.message ?? e) || "The installer stopped." })}\n`).catch(() => undefined);
   });
   process.exit(0);

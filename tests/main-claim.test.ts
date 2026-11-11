@@ -96,7 +96,7 @@ test("main-agent work is noted at most hourly, and makes a handover stick", () =
 });
 
 test("rule 3: the old main hears on its next turn through the hook, from scopes.json, for a day", async () => {
-  process.env.FOLLOW_THROUGH_HOOK_IMPORT = "1";
+  process.env.FOLLOW_UP_HOOK_IMPORT = "1";
   // @ts-expect-error plain JS hook, generated into hook-source.ts
   const { demotedNotice } = await import("../server/agent-hook.mjs");
   const w = ws(); setMainAgent(w, "helper", "claim", clock, { by: "agent:helper", reason: "Tom asked" });

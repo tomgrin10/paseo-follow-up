@@ -1,4 +1,5 @@
 import { onBehalfOf } from "./actor";
+import { BATCH_PREFIXES, RECOVERY_TITLES, LEGACY_HOOK_TEXT_PREFIXES } from "./legacy";
 /**
  * Who wrote a user-role message, from its text alone. Pure and shared by every surface that reads a conversation.
  *
@@ -36,10 +37,11 @@ export type MessageSender =
  * recognised whichever one shared/overseer.ts sends today.
  */
 export const FORWARD_PREFIXES = ["From the developer via Overseer:", "From Tom via Overseer:"] as const;
-/** Follow-up's own message prefixes, newest spelling first. "Workspace follow-through batch" is the pre-1.0 one. */
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** Follow-up's own message prefixes, any version's spelling (shared/legacy.ts keeps 1.x's). */
 const FOLLOW_UP: { prefix: RegExp; what: "batch" | "recovery" | "answer" }[] = [
-  { prefix: /^(?:Workspace follow-through batch|Follow-through batch)\b/, what: "batch" },
-  { prefix: /^Follow-through recovery\b/, what: "recovery" },
+  { prefix: new RegExp(`^(?:${BATCH_PREFIXES.map(escapeRe).join("|")})\\b`), what: "batch" },
+  { prefix: new RegExp(`^(?:${RECOVERY_TITLES.map(escapeRe).join("|")})\\b`), what: "recovery" },
   { prefix: /^Follow-up answer\b/, what: "answer" },
 ];
 /**
@@ -53,7 +55,7 @@ export const HOOK_TEXT_PREFIXES = [
   "Before you stop, call ",
   "Follow-up was updated while this session was open",
   "Do routine bookkeeping silently.",
-  "Maintain this tracked workspace's Follow-through sidebar",
+  "Maintain this tracked workspace's Follow-up sidebar",
 ] as const;
 /** A provider's wrapper around hook feedback: Codex's `<hook_prompt …>` element or Claude Code's "Stop hook feedback:" line. */
 function hookBody(text: string): string | null {
@@ -62,7 +64,9 @@ function hookBody(text: string): string | null {
   const claude = /^(?:Stop|PostToolUse|UserPromptSubmit|SessionStart) hook feedback:\s*\n?([\s\S]*)$/.exec(text);
   return claude ? claude[1].trim() : null;
 }
-const isHookText = (text: string) => HOOK_TEXT_PREFIXES.some(p => text.startsWith(p));
+/** Today's hook texts plus 1.x's, which old transcripts still carry. */
+export const ANY_HOOK_TEXT_PREFIXES: readonly string[] = [...HOOK_TEXT_PREFIXES, ...LEGACY_HOOK_TEXT_PREFIXES];
+const isHookText = (text: string) => ANY_HOOK_TEXT_PREFIXES.some(p => text.startsWith(p));
 
 /** Harness text that is never typed: a message that opens with a tag and ends with one, or a known instruction header. */
 const HARNESS = /^(?:<([A-Za-z][\w-]*)\b[^>]*>[\s\S]*<\/[A-Za-z][\w-]*>\s*$|# AGENTS\.md instructions|<INSTRUCTIONS>|Caveat: The messages below)/;

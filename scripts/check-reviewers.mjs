@@ -16,7 +16,7 @@ const exec=promisify(execFile);
 const packed=JSON.parse((await exec('npm',['pack','--json','--pack-destination',preview.root],{timeout:30000})).stdout)[0];
 await exec('tar',['-xzf',join(preview.root,packed.filename),'--strip-components=1','-C',join(preview.root,'plugin')]);
 const previewEnv=harnessEnv(preview.root,{home:preview.home,set:{PASEO_DAEMON_URL:`ws://127.0.0.1:${preview.port}/ws`}});
-await exec('paseo',['--home',preview.home,'plugin','reload','follow-through','--json'],{env:previewEnv,timeout:120000});
+await exec('paseo',['--home',preview.home,'plugin','reload','follow-up','--json'],{env:previewEnv,timeout:120000});
 const fixturePath=join(preview.home,'reviewers-fixture.json');
 await writeFile(fixturePath,JSON.stringify({requested:[],deny:false,attempts:[],delay:500}));
 const gh=`#!/usr/bin/env node
@@ -42,11 +42,11 @@ console.log(JSON.stringify({data:{repository}}));
 await writeFile(join(preview.root,'bin/gh'),gh);await chmod(join(preview.root,'bin/gh'),0o700);
 const client=new DaemonClient({url:`ws://127.0.0.1:${preview.port}/ws`,clientId:'reviewers-ui-test',clientType:'cli',reconnect:{enabled:false}});
 await client.connect();const api=createPaseoApi(client);
-const call=(method,input={})=>client.invokePluginRpc('follow-through',method,input);
+const call=(method,input={})=>client.invokePluginRpc('follow-up',method,input);
 const directory=join(preview.root,'reviewer-workspace');await mkdir(directory,{recursive:true});
 const title='Reviewer controls test '+Date.now().toString(36);
 const workspace=await api.workspaces.create({title,source:{kind:'directory',path:directory}});
-const agent=await workspace.agents.create({config:{provider:'followthrough-fixture/fixture',model:'fixture'},title:'Synthetic reviewer main'});
+const agent=await workspace.agents.create({config:{provider:'followup-fixture/fixture',model:'fixture'},title:'Synthetic reviewer main'});
 await call('follow.activate',{workspaceId:workspace.id});
 await call('follow.save-reviewers',{repo:'acme/acme-poc',reviewers:[{login:'reviewer-a',name:'Uri'},{login:'reviewer-b',name:'Yuval'}]});
 for(const number of [1,2,3,4,5])await call('follow.register-pr',{agentId:agent.id,repo:'acme/acme-poc',number,stack:'Vendor behavior',parentNumber:null});
@@ -57,12 +57,12 @@ const context=await chromium.launchPersistentContext(profile,{executablePath:pro
 const errors=[];context.on('weberror',error=>errors.push(String(error.error())));
 try{
  const page=await context.newPage();await fetch(`http://127.0.0.1:${preview.port}/llms.txt`);await page.goto(`http://127.0.0.1:${preview.port}/`);
- await page.getByRole('button',{name:new RegExp('^'+title)}).click();await page.getByRole('button',{name:'Open workspace follow-through',exact:true}).click();
+ await page.getByRole('button',{name:new RegExp('^'+title)}).click();await page.getByRole('button',{name:'Open workspace follow-up',exact:true}).click();
  const add=page.getByRole('button',{name:'Add reviewers: Uri and Yuval for acme/acme-poc pull request 1',exact:true});
  await add.waitFor();await page.getByText('Draft',{exact:true}).waitFor();assert.equal(await page.getByText('No reviewers',{exact:true}).count(),2);
  assert.equal(await page.getByRole('button',{name:/^Add reviewers:/}).count(),1);
  await mkdir('docs/screenshots',{recursive:true});await page.screenshot({path:'docs/screenshots/reviewers-desktop.png'});
- await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'Open workspace follow-through',exact:true}).click();await add.waitFor();
+ await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'Open workspace follow-up',exact:true}).click();await add.waitFor();
  assert.ok((await add.boundingBox()).height>=44);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),390);
  await page.screenshot({path:'docs/screenshots/reviewers-mobile.png'});
  const mutate=async patch=>{const data=JSON.parse(await readFile(fixturePath,'utf8'));await writeFile(fixturePath,JSON.stringify({...data,...patch}));};

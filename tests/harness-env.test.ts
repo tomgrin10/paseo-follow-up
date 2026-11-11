@@ -23,10 +23,10 @@ test("every scripts/check-*.mjs (and screenshots, scale-check) that spawns a dae
   assert.deepEqual(offenders, []);
 });
 test("harnessEnv puts HOME, CLAUDE_CONFIG_DIR, CODEX_HOME and PASEO_HOME inside the temp root and strips session vars", () => {
-  const base = { PATH: "/bin", HOME: "/home/real", CLAUDE_CONFIG_DIR: "/home/real/.paseo/zerosub/homes/x", CODEX_HOME: "/home/real/.codex", PASEO_HOME: "/home/real/.paseo", PASEO_AGENT_ID: "a", PASEO_WORKSPACE_ID: "w", CLAUDE_SESSION_ID: "s", CODEX_THREAD_ID: "t", CLAUDECODE: "1", FOLLOW_THROUGH_CLI: "x", ANTHROPIC_API_KEY: "keep" };
+  const base = { PATH: "/bin", HOME: "/home/real", CLAUDE_CONFIG_DIR: "/home/real/.paseo/zerosub/homes/x", CODEX_HOME: "/home/real/.codex", PASEO_HOME: "/home/real/.paseo", PASEO_AGENT_ID: "a", PASEO_WORKSPACE_ID: "w", CLAUDE_SESSION_ID: "s", CODEX_THREAD_ID: "t", CLAUDECODE: "1", FOLLOW_UP_CLI: "x", ANTHROPIC_API_KEY: "keep" };
   const env = harnessEnv("/tmp/follow-x", { base, set: { PASEO_DAEMON_URL: "ws://127.0.0.1:1/ws" } });
   assert.equal(env.HOME, "/tmp/follow-x/home"); assert.equal(env.CLAUDE_CONFIG_DIR, "/tmp/follow-x/home/.claude"); assert.equal(env.CODEX_HOME, "/tmp/follow-x/home/.codex"); assert.equal(env.PASEO_HOME, "/tmp/follow-x/home");
-  for (const key of ["PASEO_AGENT_ID", "PASEO_WORKSPACE_ID", "CLAUDE_SESSION_ID", "CODEX_THREAD_ID", "CLAUDECODE", "FOLLOW_THROUGH_CLI"]) assert.equal(env[key], undefined, key);
+  for (const key of ["PASEO_AGENT_ID", "PASEO_WORKSPACE_ID", "CLAUDE_SESSION_ID", "CODEX_THREAD_ID", "CLAUDECODE", "FOLLOW_UP_CLI"]) assert.equal(env[key], undefined, key);
   assert.equal(env.PASEO_DAEMON_URL, "ws://127.0.0.1:1/ws"); assert.equal(env.ANTHROPIC_API_KEY, "keep"); assert.equal(env.PATH, "/bin");
   assert.throws(() => harnessEnv("/tmp/follow-x", { base, set: { CLAUDE_CONFIG_DIR: "/home/real/.claude" } }), /outside the harness root/);
   assert.throws(() => harnessEnv("/tmp/follow-x", { base, home: "/home/real" }), /outside the harness root/);

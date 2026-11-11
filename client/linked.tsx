@@ -20,8 +20,8 @@ import type { Colors } from "./theme";
  * shared/linked-display.ts; this file only draws them.
  */
 
-export const linkedKey = (workspaceId: string) => ["follow-through", "linked", workspaceId] as const;
-export const linkedIndexKey = ["follow-through", "linked-index"] as const;
+export const linkedKey = (workspaceId: string) => ["follow-up", "linked", workspaceId] as const;
+export const linkedIndexKey = ["follow-up", "linked-index"] as const;
 
 /** One workspace's linked view. Read when a surface showing it mounts, then kept a minute; never polled. */
 export function useLinked(workspaceId: string) {

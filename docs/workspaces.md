@@ -127,7 +127,7 @@ card (`agentCard`) and Needs you all read it. Rules it encodes:
 
 The invariants in `shared/status-invariants.ts` check these over a grid of states
 (`tests/status-invariants.test.ts`). After each refresh the worker runs `violations()` and appends changes to
-`plugin-data/follow-through/status-diagnostics.jsonl` (`server/status-check.ts`, rotated at 256 KB).
+`plugin-data/follow-up/status-diagnostics.jsonl` (`server/status-check.ts`, rotated at 256 KB).
 
 ## Tasks (obligations)
 

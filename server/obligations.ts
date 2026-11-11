@@ -17,7 +17,7 @@ export function updateObligation(w: Workspace, input: Update): Obligation {
   const evidence = input.evidence ?? existing?.evidence ?? "";
   if (["done", "waived"].includes(status) && !(existing?.status === status ? evidence.trim() : input.evidence?.trim())) throw new Error("Completed or waived work requires result evidence.");
   if (afterPrs.some(key => !w.prs.some(p => p.key === key))) throw new Error("Register dependency PRs before referencing them.");
-  if (lifecycleOnly({ title, afterPrs })) throw new Error("PR approval, merging and deployment belong in Pull requests. Record a concrete follow-through action such as verifying behavior after deployment, with afterPrs and dependencyStage=deployed.");
+  if (lifecycleOnly({ title, afterPrs })) throw new Error("PR approval, merging and deployment belong in Pull requests. Record a concrete follow-up action such as verifying behavior after deployment, with afterPrs and dependencyStage=deployed.");
   const destination = communication ? communicationSchema.parse({ ...existing?.communication, ...communication }) : existing?.communication;
   if (destination?.replyUrl && !replyRecorded(destination)) throw new Error("The reply receipt must be a different message in the original Slack workspace/channel/thread.");
   if (destination && status === "done" && !replyRecorded(destination)) throw new Error("A draft is not a sent reply. Record communication.replyUrl before completing this task; use blocked when posting is unavailable or uncertain.");

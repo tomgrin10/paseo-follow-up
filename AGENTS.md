@@ -13,9 +13,12 @@ Paseo's plugin listing. [PRODUCT.md](PRODUCT.md) and [DESIGN.md](DESIGN.md) cove
 
 ## Hard rules
 
-- The public name is Follow-up and the npm package is `paseo-follow-up`. Keep the installation id `follow-through`,
-  the `follow.*` RPC names and `plugin-data/follow-through` so existing installs keep working. Never reset tracked
-  work or settings during an upgrade.
+- The name is Follow-up everywhere: the npm package `paseo-follow-up`, the plugin id `follow-up` and
+  `plugin-data/follow-up`. 1.x ran under an older internal name; only `shared/legacy.ts` (and CHANGELOG.md) may spell
+  it, to recognise and clean up what 1.x left behind. `tests/no-legacy-name.test.ts` enforces this and
+  `scripts/rename-legacy-name.mjs` fixes the mechanical cases. Keep the `follow.*` RPC names and the `follow_*` tool
+  names. Never reset tracked work or settings during an upgrade; 2.0 moves 1.x's data and plugin id once
+  ([docs/updates.md](docs/updates.md#moving-from-1x)).
 - Never commit credentials, daemon state, transcripts or local machine paths. Follow-up is public: prompts, prefixes, tool text and UI copy say "the developer" (they/their), never a person's name (tests/no-personal-names.test.ts). Where old text is matched, such as the Overseer's forward prefix, keep recognising the legacy spelling.
 - Boolean settings use positive `enable_` names.
 - Subprocesses take argument arrays, never a shell.
@@ -38,9 +41,9 @@ Paseo's plugin listing. [PRODUCT.md](PRODUCT.md) and [DESIGN.md](DESIGN.md) cove
 ```
 Paseo app (web, desktop, phone)          Paseo daemon (host)                          Agent sessions (Claude Code, Codex)
   index.client.tsx                         index.server.ts: the plugin worker            native tools: mcp__paseo__follow_<name>,
-  client/*.tsx: Home, panel, pill,   RPC     one process, owns plugin-data/follow-through   wait_* (served by Paseo's MCP, run in the worker)
+  client/*.tsx: Home, panel, pill,   RPC     one process, owns plugin-data/follow-up   wait_* (served by Paseo's MCP, run in the worker)
   settings, brief card, chat rows   ────▶   handlers keyed by shared/contracts.ts   ◀──  stdio bridge: server/mcp.mjs (Paseo 0.14 or fallback,
-  shared/*.ts: pure logic, schemas         server/*.ts: engine, inbox, stores...          also a CLI: node "$FOLLOW_THROUGH_CLI" call …)
+  shared/*.ts: pure logic, schemas         server/*.ts: engine, inbox, stores...          also a CLI: node "$FOLLOW_UP_CLI" call …)
                                            lifecycle hooks: server.on / server.before   provider hooks: server/agent-hook.mjs
                                                                                          wait runner: plugin-data/.../wait/run-job.sh
 ```
@@ -63,7 +66,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
   `hooks.json` for SessionStart, UserPromptSubmit, PostToolUse and Stop. It's gated by the `hooks-enabled.json` lease,
   which the worker renews. The hook adds context, nudges sync and `needs_you`, and adds Wait's guidance:
   [docs/hooks.md](docs/hooks.md).
-- **Data**: everything lives in `$PASEO_HOME/plugin-data/follow-through/`. Each file is listed in
+- **Data**: everything lives in `$PASEO_HOME/plugin-data/follow-up/`. Each file is listed in
   [docs/data-files.md](docs/data-files.md).
 
 ## File index
@@ -82,7 +85,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | Provider hooks | `server/agent-hooks.ts`, `server/agent-hook.mjs` | [hooks](docs/hooks.md) |
 | Wait for background jobs | `server/wait.ts`, `server/host-features.ts`, `server/wait-jobs.ts`, `server/wait-runner.sh`, `shared/wait.ts` | [wait](docs/wait.md) |
 | Onboarding, release notes and What's new, display settings, trust bypass | `server/onboarding.ts`, `server/release-notes.ts`, `server/trust-bypass.ts`, `shared/onboarding.ts`, `shared/changelog.ts`, `shared/version.ts`, `shared/display.ts`, `shared/settings-nav.ts` | [settings](docs/settings.md) |
-| Self-update (check, install, watchdog, rollback) | `server/updater.ts`, `server/update-registry.ts`, `server/update-provenance.ts`, `server/update-watchdog.mjs`, `server/updates.ts`, `shared/updates.ts`, `shared/update-policy.ts`, `client/updates.tsx` | [updates](docs/updates.md) |
+| Self-update (check, install, watchdog, rollback), 2.0's move from 1.x | `server/plugin-move.ts`, `server/data-move.ts`, `shared/plugin-move.ts`, `shared/legacy.ts`, `server/updater.ts`, `server/update-registry.ts`, `server/update-provenance.ts`, `server/update-watchdog.mjs`, `server/updates.ts`, `shared/updates.ts`, `shared/update-policy.ts`, `client/updates.tsx` | [updates](docs/updates.md) |
 | Resource governor, never waking agents, worker memory, usage meters | `server/governor.ts`, `server/memory.ts`, `server/agent-load.ts`, `server/usage.ts`, `shared/agent-load.ts`, `shared/resources.ts`, `shared/usage.ts` | [resources](docs/resources.md) |
 | UI | `index.client.tsx`, `client/` | [client](docs/client.md) |
 | Shared copy and errors | `shared/presentation.ts`, `shared/errors.ts` | [client](docs/client.md) |
@@ -150,7 +153,7 @@ Every bug is fixed for its whole class:
 Status bugs (two surfaces disagreeing, a label that isn't true) come from computing a status inline. Every
 user-facing status (Home bucket, header live line, agent card, batch line, Needs you, pills) derives from
 `shared/status.ts`. The worker logs contradictions it meets at runtime to
-`plugin-data/follow-through/status-diagnostics.jsonl` (`server/status-check.ts`); read it when a status looks wrong.
+`plugin-data/follow-up/status-diagnostics.jsonl` (`server/status-check.ts`); read it when a status looks wrong.
 
 ## How to test
 

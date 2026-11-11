@@ -31,7 +31,7 @@ try {
   await fs.writeFile(join(home, "config.json"), JSON.stringify({ pluginsEnabled: true, daemon: { listen: `127.0.0.1:${port}`, relay: { enabled: false }, mcp: { enabled: false }, browserTools: { enabled: false } }, features: { webUi: { enabled: true } } }));
   const pack = arg("--pack") ? resolve(arg("--pack")) : join(root, JSON.parse((await exec("npm", ["pack", "--json", "--pack-destination", root], { timeout: 60000 })).stdout)[0].filename);
   await exec("tar", ["-xzf", pack, "--strip-components=1", "-C", plugin]);
-  await fs.writeFile(join(fixture, "paseo-plugin.json"), JSON.stringify({ id: "followthrough-fixture", requirements: { paseo: ">=0.11.0" } }));
+  await fs.writeFile(join(fixture, "paseo-plugin.json"), JSON.stringify({ id: "followup-fixture", requirements: { paseo: ">=0.11.0" } }));
   await fs.writeFile(join(fixture, "index.server.ts"), await fs.readFile("scripts/fixture-provider.ts", "utf8"));
   await fs.writeFile(join(home, "fixture-chat.json"), JSON.stringify(senderTurn()));
   const env = harnessEnv(root, { home, set: { PASEO_DAEMON_URL: url, PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true" } });
@@ -42,7 +42,7 @@ try {
   client = new DaemonClient({ url, clientId: "follow-sender-steps", clientType: "cli", reconnect: { enabled: false }, suppressSendErrors: true }); await client.connect();
   const api = createPaseoApi(client);
   const w = await api.workspaces.create({ title: "Sender steps", source: { kind: "directory", path: root } });
-  const agent = await w.agents.create({ config: { provider: "followthrough-fixture/fixture", model: "fixture", modeId: "default" }, title: "Export fixes" });
+  const agent = await w.agents.create({ config: { provider: "followup-fixture/fixture", model: "fixture", modeId: "default" }, title: "Export fixes" });
   await client.sendMessage(agent.id, "Fixture: chat — fix the CSV export", { messageId: "fixture-chat" });
   for (let i = 0; i < 80; i++) {
     const history = await client.fetchAgentTimeline(agent.id, { projection: "canonical", limit: 100 });
@@ -52,7 +52,7 @@ try {
   }
   // Track it so Home lists it (discovery first, then the same activate call the demo seeder makes).
   for (let i = 0; ; i++) {
-    try { await client.invokePluginRpc("follow-through", "follow.refresh", {}); await client.invokePluginRpc("follow-through", "follow.activate", { workspaceId: w.id }); break; }
+    try { await client.invokePluginRpc("follow-up", "follow.refresh", {}); await client.invokePluginRpc("follow-up", "follow.activate", { workspaceId: w.id }); break; }
     catch (error) { if (i > 40) throw error; await new Promise(r => setTimeout(r, 500)); }
   }
   const timeline = (await client.fetchAgentTimeline(agent.id, { projection: "canonical", limit: 100 })).entries.map(e => e.item);
@@ -112,7 +112,7 @@ function senderTurn() {
     { type: "tool_call", callId: id(), name: "Bash", status: "completed", error: null, detail: { type: "shell", command: "npm test -- export", output: "pass 18" } },
     user('<paseo-system version="1" kind="agent-message" source-agent-id="agent-captain" message-id="m1" source-agent-title="Release captain">\nThe export truncates rows over 10k. Fix it before the 1.4 cut.\n</paseo-system>'),
     user('<paseo-system version="1" kind="agent-notification" source-agent-id="agent-tests" message-id="m2" source-agent-title="Test runner" event="finished">\nAgent agent-tests (Test runner) finished.\n\n&lt;agent-response&gt;\nAll 42 export tests pass, including the 50k-row case.\n&lt;/agent-response&gt;\n</paseo-system>'),
-    user("Follow-through batch b-7\n\n- Fix CI on example/app#412: lint"),
+    user("Follow-up batch b-7\n\n- Fix CI on example/app#412: lint"),
     user("From the developer via Overseer: also keep the header row on every page"),
     // An answer another agent sent on the developer's behalf (brief_action): "Answer from Release captain", never "You".
     user(`Follow-up answer D1 (Which encoding?): B — UTF-8 with BOM\nContinue with this choice.\nAnswered by Release captain (agent agent-captain) for the developer.`),

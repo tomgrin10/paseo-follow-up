@@ -25,7 +25,7 @@ import type { AgentSettingsView } from "../shared/agent-settings";
 import { jobRow, jobsHeader } from "../shared/job-rows";
 import type { ReviewerConfig } from "../shared/reviewers";
 
-const settingsKey = ["follow-through", "project-settings"];
+const settingsKey = ["follow-up", "project-settings"];
 
 /** What agents do between asking a question and getting the answer. Applies to questions asked from now on. */
 function QuestionSettings({ theme }: Pick<PluginSurfaceProps, "theme">) {
@@ -48,7 +48,7 @@ function QuestionSettings({ theme }: Pick<PluginSurfaceProps, "theme">) {
   </SettingsSection>;
 }
 
-const followKey = ["follow-through", "follow-settings"];
+const followKey = ["follow-up", "follow-settings"];
 
 /**
  * Following: the three switches, then Projects and Workspaces as folds. Both lists are exceptions to "Follow every
@@ -101,7 +101,7 @@ function ProjectsFold({ theme, compact }: { theme: Theme; compact: boolean }) {
       cache.setQueryData(settingsKey, value);
       const project = value.projects.find(p => p.id === input.projectId);
       toast.show(input.enable_default_tracking ? `Following ${project?.name ?? "the project"}'s workspaces` : `New ${project?.name ?? "project"} workspaces won't be followed`, { variant: "success" });
-      void cache.invalidateQueries({ queryKey: ["follow-through", "overview"] }); void cache.invalidateQueries({ queryKey: ["follow-through", "workspace"] }); void cache.invalidateQueries({ queryKey: followKey });
+      void cache.invalidateQueries({ queryKey: ["follow-up", "overview"] }); void cache.invalidateQueries({ queryKey: ["follow-up", "workspace"] }); void cache.invalidateQueries({ queryKey: followKey });
     },
     onError: error => toast.error(errorText(error)),
   });

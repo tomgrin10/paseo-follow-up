@@ -25,7 +25,7 @@ export function briefShareText(stats: { days: number; total: number; tool: numbe
 
 function TrustCount({ theme, inCard = false }: Pick<PluginSurfaceProps, "theme"> & { inCard?: boolean }) {
   const read = useRpc(trustBypassRpc);
-  const stats = useQuery({ queryKey: ["follow-through", "trust-bypass"], queryFn: () => read({}), refetchInterval: 60_000 });
+  const stats = useQuery({ queryKey: ["follow-up", "trust-bypass"], queryFn: () => read({}), refetchInterval: 60_000 });
   const text = trustCountText(stats.data);
   if (!text) return null;
   return <View style={inCard ? { paddingHorizontal: 16, paddingVertical: 10 } : { paddingHorizontal: 4 }}>
@@ -66,7 +66,7 @@ export function BetaChip({ theme }: Pick<PluginSurfaceProps, "theme">) {
 export function DisplaySections({ theme }: Pick<PluginSurfaceProps, "theme">) {
   const settings = useSettings(displayPreferences);
   const list = useRpc(inboxListRpc);
-  const share = useQuery({ queryKey: ["follow-through", "brief-share"], queryFn: () => list({}), refetchInterval: 60_000 });
+  const share = useQuery({ queryKey: ["follow-up", "brief-share"], queryFn: () => list({}), refetchInterval: 60_000 });
   const values = settings.status === "ready" ? settings.values : undefined;
   useEffect(() => {
     if (values !== undefined) for (const listener of listeners) listener(values);

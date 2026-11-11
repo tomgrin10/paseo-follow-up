@@ -6,7 +6,7 @@ const fixture = JSON.parse(await readFile(".preview-isolated.json", "utf8"));
 if (!fixture.root.startsWith("/tmp/follow-install-")) throw new Error("Demo seeding only supports an isolated test daemon.");
 const client = new DaemonClient({ url: `ws://127.0.0.1:${fixture.port}/ws`, clientId: "follow-demo-seed", clientType: "cli", reconnect: { enabled: false } });
 await client.connect(); const api = createPaseoApi(client);
-const call = (method, input) => client.invokePluginRpc("follow-through", method, input);
+const call = (method, input) => client.invokePluginRpc("follow-up", method, input);
 try {
   const definitions = {
     1: { title: "Record migration versions", state: "MERGED" },
@@ -29,11 +29,11 @@ try {
   await call("follow.obligation", { agentId: fixture.agentId, title: "Check which migrations Resume would launch", status: "waiting", evidence: "", afterPrs: ["example/app#2"], enable_follow_up: false });
   await call("follow.obligation", { agentId: fixture.agentId, title: "Complete the production backfill", status: "pending", evidence: "", afterPrs: ["example/app#4"], enable_follow_up: false });
   const done = await api.workspaces.create({ title: "Session recovery · demo", source: { kind: "directory", path: join(fixture.root, "fixture") } });
-  const doneAgent = await done.agents.create({ config: { provider: "followthrough-fixture/fixture", providerOptions: { fixture_mode: "done", fixture_goal: "Verify session recovery after a daemon restart" } }, title: "Completed demo agent" });
+  const doneAgent = await done.agents.create({ config: { provider: "followup-fixture/fixture", providerOptions: { fixture_mode: "done", fixture_goal: "Verify session recovery after a daemon restart" } }, title: "Completed demo agent" });
 
   const blockedPath = join(fixture.root, "blocked-demo"); await import("node:fs/promises").then(fs => fs.mkdir(blockedPath));
   const blocked = await api.workspaces.create({ title: "Migration provenance · demo", source: { kind: "directory", path: blockedPath } });
-  const blockedAgent = await blocked.agents.create({ config: { provider: "followthrough-fixture/fixture", providerOptions: { fixture_mode: "blocked", fixture_goal: "Show the author and source of each migration" } }, title: "Design demo agent" });
+  const blockedAgent = await blocked.agents.create({ config: { provider: "followup-fixture/fixture", providerOptions: { fixture_mode: "blocked", fixture_goal: "Show the author and source of each migration" } }, title: "Design demo agent" });
   for (let i = 0; i < 100; i++) {
     if (i === 0) { await call("follow.activate", { workspaceId: done.id }); await call("follow.activate", { workspaceId: blocked.id }); await call("follow.recover", { workspaceId: done.id }); await call("follow.recover", { workspaceId: blocked.id }); }
     await call("follow.refresh", {});
@@ -46,7 +46,7 @@ try {
   }
   if (process.argv.includes("--freeze-pr-display")) {
     await call("follow.refresh", {});
-    const path = join(fixture.home, "plugin-data/follow-through/state.json");
+    const path = join(fixture.home, "plugin-data/follow-up/state.json");
     const state = JSON.parse(await readFile(path, "utf8"));
     const workspace = state.workspaces.find(w => w.id === fixture.workspaceId);
     workspace.archived = true;
