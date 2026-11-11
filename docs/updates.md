@@ -91,6 +91,12 @@ old one. 1.x ran under an older id and data directory (`shared/legacy.ts` names 
 - **What you see**: one quiet line in Settings → General ("Moved to Follow-up's new plugin id", or why it went back,
   with Try again). `updates_status` reports the same as `move`, and `retry_move` (planned) is Try again. Git and
   local installs can't reinstall themselves; the line says how to move by hand.
+- **Installs from Paseo's plugin list** (the registry, `tomgrin10/follow-up`; 0.3.1 and 1.0.1 were pinned there): they
+  run under the old id too, and Paseo updates them only to the registry's reviewed pin (`--version` is refused), so
+  1.x's updater never touches them. Once the pin is 2.0 and the developer updates, the move above runs the same way,
+  except the install step reinstalls from the same registry (`owner/slug`, then `host/owner/slug` for an HTTPS
+  registry), checks that the new id came from that registry, and runs probation against the version the pin installed.
+  `npm run test:move:registry` covers it.
 - **Labels, prefixes, env, registrations**: recovery agents 1.x started keep their labels and `isRecovery` accepts
   both; old batch and recovery prefixes in transcripts are recognised (`splitBatchText`, `isPluginPrompt`); sessions
   opened before the upgrade keep 1.x's env names, which the hook and bridge still read (the worker writes them with a
