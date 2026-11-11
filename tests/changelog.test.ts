@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { LEGACY_BASELINE, announcesUpdate, notesSince, notesVersion, parseChangelog, recentNotes, recentUpdate, whatsNew } from "../shared/changelog";
+import { LEGACY_BASELINE, announcesUpdate, imageBlock, notesSince, notesVersion, parseChangelog, recentNotes, recentUpdate, whatsNew } from "../shared/changelog";
 // @ts-expect-error plain ESM script without types
 import { DRAFT_MARKER, fragmentBullets, lintBullet } from "../scripts/release-notes.mjs";
 
@@ -51,6 +51,37 @@ test("changelog: the shipped CHANGELOG.md shows only the curated 2.0.0 in the ap
   assert.ok(blocks.every(b => !/1\.x|upgrad|roll ?back|0\.15/i.test(b.text)), "no upgrade or Paseo version talk in the curated notes");
   assert.ok(text.split("\n").map(l => /^[-*]\s+(.*)$/.exec(l)?.[1]).filter(Boolean).every(b => !lintBullet(b!).length), "every bullet, full list included, is lint-clean");
   assert.match(text, /<details><summary>Full changelog since 1\.0\.1<\/summary>/);
+  // Tom, testing rc.0's sheet: no "is a Paseo plugin that" lead, and screenshots in it, Home first, the panel second.
+  assert.equal(blocks[0]!.kind, "text"); assert.match(blocks[0]!.text, /^Follow-up keeps track of every workspace/);
+  const images = blocks.filter(b => b.kind === "image");
+  assert.deepEqual(images.map(b => b.kind === "image" && b.url.split("/").pop()), ["follow-up-notes-home.png", "follow-up-notes-panel.png"]);
+  assert.equal(blocks[1]!.kind, "image", "Home right after the intro");
+  assert.ok(images.every(b => b.kind === "image" && b.text.length > 20 && b.aspect), "alt text for screen readers and a shape to reserve");
+  assert.ok(blocks.at(-2)!.kind === "rule" && /Progress.*Better Paseo/.test(blocks.at(-1)!.text), "credits last, as the quiet footnote");
+});
+
+/** The PNG's own width and height (IHDR). */
+const pngSize = (b: Buffer) => [b.readUInt32BE(16), b.readUInt32BE(20)] as const;
+const git = (args: string[], encoding: BufferEncoding | "buffer" = "utf8") => exec("git", args, { encoding: encoding as "utf8", maxBuffer: 1 << 26 });
+
+test("changelog: every image in the notes loads from a commit on this branch that holds it, at the shape the URL says", async t => {
+  // Notes that ship must never change after release: an image URL names a commit (never main or a branch), that
+  // commit is in this branch's history (so a rebase or squash that drops it fails here, not on users' phones), and
+  // the #WxH shape the sheet reserves matches the PNG. CI checks out full history for this (ci.yml fetch-depth 0).
+  if ((await git(["rev-parse", "--is-shallow-repository"])).stdout.trim() === "true") return t.skip("shallow clone: no history to check pins against");
+  const text = await readFile("CHANGELOG.md", "utf8");
+  const lines = text.split("\n").filter(l => /^\s*!\[/.test(l));
+  assert.ok(lines.length >= 2);
+  for (const line of lines) {
+    const m = /\]\((https:\/\/raw\.githubusercontent\.com\/tomgrin10\/paseo-follow-up\/([0-9a-f]{40})\/(\S+?)(?:#(\d+)x(\d+))?)\)\s*$/.exec(line);
+    assert.ok(m, `pinned to a full commit hash on raw.githubusercontent.com: ${line}`);
+    const [, url, sha, path, w, h] = m;
+    await git(["merge-base", "--is-ancestor", sha!, "HEAD"]).catch(() => assert.fail(`${sha} isn't in this branch's history (rebased or squashed?): re-pin ${path}`));
+    const png = (await exec("git", ["show", `${sha}:${path}`], { encoding: "buffer", maxBuffer: 1 << 26 })).stdout as Buffer;
+    const [pw, ph] = pngSize(png);
+    assert.ok(w && h, `${url}: a #WxH shape`);
+    assert.ok(Math.abs(pw / ph - +w! / +h!) < 0.01, `${path}: the URL's ${w}x${h} matches the PNG's ${pw}x${ph}`);
+  }
 });
 
 const notes = parseChangelog(["# R", ...[14, 13, 12, 11, 10].map(n => `## 1.4.0-beta.${n} (2026-11-1${n % 10})\n\n- Note ${n}.`)].join("\n\n"));
@@ -180,21 +211,27 @@ test("release notes script: a curated section is never regrouped or relabeled; 0
   assert.equal(after.join("\n"), await readFile(join(dir, "CHANGELOG.md"), "utf8"), "a note already in the list isn't added twice");
 });
 
-test("changelog: a <details> archive below the notes never reaches What's new; image lines are skipped", () => {
+test("changelog: a <details> archive below the notes never reaches What's new; image lines become image blocks", () => {
   const text = "# R\n\n## 2.0.0 (2026-11-11)\n\n![Home](https://example.com/home.png)\n\n- Home.\n\n<details><summary>1.1-1.4 betas</summary>\n\n## 1.4.0-beta.2 (2026-11-09)\n\n- Old beta.\n\n</details>\n";
-  assert.deepEqual(parseChangelog(text), [{ version: "2.0.0", date: "2026-11-11", items: ["Home."] }]);
+  assert.deepEqual(parseChangelog(text), [{ version: "2.0.0", date: "2026-11-11", items: ["Home."], blocks: [
+    { kind: "image", text: "Home", url: "https://example.com/home.png", aspect: null }, { kind: "bullet", text: "Home." }] }]);
 });
 
-test("changelog: a curated section's ### headings and paragraphs reach What's new as blocks, inline markdown as text, images left out", () => {
-  const text = "## 2.0.0 (2026-11-11)\n\nFollow-up is a [Paseo](https://paseo.sh) plugin\nthat keeps track of `workspaces`.\n\n![Home](https://example.com/h.png)\n\n### One list\n\nHome lists **every** workspace.\n\n- A bullet\n  that wraps.\n\n<details><summary>Full changelog</summary>\n\n### Fixes\n\n- Hidden.\n\n</details>\n";
+test("changelog: a curated section's ### headings and paragraphs reach What's new as blocks, inline markdown as text, images and rules as their own blocks", () => {
+  const text = "## 2.0.0 (2026-11-11)\n\nFollow-up is a [Paseo](https://paseo.sh) plugin\nthat keeps track of `workspaces`.\n\n![Home **list**](https://example.com/h.png#1600x1000)\n\n### One list\n\nHome lists **every** workspace.\n\n- A bullet\n  that wraps.\n\n---\n\nThanks.\n\n![relative](docs/x.png)\n\n<details><summary>Full changelog</summary>\n\n### Fixes\n\n- Hidden.\n\n</details>\n";
   const [note] = parseChangelog(text);
   assert.deepEqual(note!.items, ["A bullet that wraps."]);
   assert.deepEqual(note!.blocks, [
     { kind: "text", text: "Follow-up is a Paseo plugin that keeps track of workspaces." },
+    { kind: "image", text: "Home list", url: "https://example.com/h.png", aspect: 1.6 },
     { kind: "heading", text: "One list" },
     { kind: "text", text: "Home lists every workspace." },
     { kind: "bullet", text: "A bullet that wraps." },
-  ]);
+    { kind: "rule", text: "" },
+    { kind: "text", text: "Thanks." },
+  ], "a relative image path means nothing to the app and is dropped");
+  assert.deepEqual(imageBlock("![a](https://x.test/i.png#16x9)"), { kind: "image", text: "a", url: "https://x.test/i.png", aspect: 16 / 9 });
+  assert.equal(imageBlock("text ![a](https://x.test/i.png)"), null, "only an image alone on its line");
   assert.equal(parseChangelog("## 1.0.1\n\n- Only bullets.\n")[0]!.blocks, undefined, "a bullets-only note stays items");
 });
 

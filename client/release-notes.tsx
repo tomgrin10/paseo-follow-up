@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { View } from "react-native";
+import { Image, View } from "react-native";
 import { Pressable, Text } from "./text";
-import { useRpc } from "@getpaseo/plugin/client";
+import { openExternalUrl, useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, ScrollView } from "@getpaseo/plugin/client/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { releaseNotesRpc, whatsNewSeenRpc } from "../shared/contracts";
-import { LAST_SEEN_KEY, recentNotes, whatsNew, type ReleaseNote, type ReleaseNotesView } from "../shared/changelog";
+import { LAST_SEEN_KEY, recentNotes, whatsNew, type NoteBlock, type ReleaseNote, type ReleaseNotesView } from "../shared/changelog";
 import { deviceStorage } from "../shared/settings-nav";
 import { Button, text, type Theme } from "./kit";
 import { useOnboarding } from "./onboarding";
@@ -36,19 +36,47 @@ function Bullet({ text: line, theme, compact }: { text: string; theme: Theme; co
 }
 
 /**
- * One version's notes. Shared by What's new, the release notes and Settings. A curated section (headings and
- * paragraphs, like 2.0.0) reads in full as written; a list of bullets folds past `max` behind "Show all N".
+ * A screenshot in the notes: full width at its own shape (reserved before it loads, so nothing below it jumps), in a
+ * hairline frame with the host's radius. It loads by URL; if it can't (offline, blocked), it is left out entirely, with
+ * no empty frame. A tap opens it full size in the browser.
+ */
+function NoteImage({ block, theme }: { block: Extract<NoteBlock, { kind: "image" }>; theme: Theme }) {
+  const c = theme.colors;
+  const [failed, setFailed] = useState(false);
+  const [aspect, setAspect] = useState(block.aspect ?? 16 / 10);
+  if (failed) return null;
+  return <Pressable accessibilityRole="imagebutton" accessibilityLabel={block.text} accessibilityHint="Opens the full-size image"
+    onPress={() => { void openExternalUrl(block.url).catch(() => undefined); }}
+    style={state => ({ marginVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: c.border, overflow: "hidden", backgroundColor: c.surface1, opacity: state.pressed ? 0.85 : 1 })}>
+    <Image source={{ uri: block.url }} accessibilityIgnoresInvertColors resizeMode="cover" style={{ width: "100%", aspectRatio: aspect }}
+      onError={() => setFailed(true)}
+      onLoad={e => { const src = (e.nativeEvent as { source?: { width?: number; height?: number } } | undefined)?.source; if (!block.aspect && src?.width && src?.height) setAspect(src.width / src.height); }} />
+  </Pressable>;
+}
+
+/**
+ * One version's notes. Shared by What's new, the release notes and Settings. A curated section (headings, paragraphs
+ * and images, like 2.0.0) reads in full as written: its opening paragraph a step larger as the intro, and whatever
+ * follows a `---` rule (the credits) as a quiet footnote. A list of bullets folds past `max` behind "Show all N".
  */
 export function VersionNotes({ note, theme, compact = false, max = 8 }: { note: ReleaseNote; theme: Theme; compact?: boolean; max?: number }) {
   const c = theme.colors; const t = text(c, compact);
   const [all, setAll] = useState(false);
-  // Headings sit a step above body text and closer to the paragraph they open than to the one before.
-  if (note.blocks?.length) return <View style={{ gap: 6 }}>
-    {note.blocks.map((b, i) => b.kind === "heading"
-      ? <Text key={i} accessibilityRole="header" style={[t.label, { fontSize: compact ? 16 : 14, lineHeight: compact ? 22 : 20, marginTop: i ? 14 : 0 }]}>{b.text}</Text>
-      : b.kind === "text" ? <Text key={i} style={t.body}>{b.text}</Text>
-      : <Bullet key={i} text={b.text} theme={theme} compact={compact} />)}
-  </View>;
+  if (note.blocks?.length) {
+    const lead: object = { fontSize: compact ? 16 : 15, lineHeight: compact ? 24 : 22 };
+    const quietFrom = note.blocks.findIndex(b => b.kind === "rule");
+    // Headings sit a step above body text and closer to the paragraph they open than to the one before.
+    return <View style={{ gap: 6 }}>
+      {note.blocks.map((b, i) => {
+        const quiet = quietFrom >= 0 && i > quietFrom;
+        if (b.kind === "image") return <NoteImage key={i} block={b} theme={theme} />;
+        if (b.kind === "rule") return <View key={i} style={{ height: 1, backgroundColor: c.border, marginTop: 16, marginBottom: 4 }} />;
+        if (b.kind === "heading") return <Text key={i} accessibilityRole="header" style={quiet ? [t.meta, { fontWeight: "600" }] : [t.label, { fontSize: compact ? 16 : 14, lineHeight: compact ? 22 : 20, marginTop: i ? 14 : 0 }]}>{b.text}</Text>;
+        if (b.kind === "text") return <Text key={i} style={quiet ? t.meta : i === 0 ? [t.body, lead] : t.body}>{b.text}</Text>;
+        return <Bullet key={i} text={b.text} theme={theme} compact={compact} />;
+      })}
+    </View>;
+  }
   const items = all ? note.items : note.items.slice(0, max);
   return <View style={{ gap: 6 }}>
     {items.map((item, i) => <Bullet key={i} text={item} theme={theme} compact={compact} />)}
@@ -63,7 +91,7 @@ export function VersionNotes({ note, theme, compact = false, max = 8 }: { note: 
 function VersionHeader({ note, theme, compact, dateOnly = false }: { note: ReleaseNote; theme: Theme; compact: boolean; dateOnly?: boolean }) {
   const c = theme.colors; const t = text(c, compact);
   const date = fmtDate(note.date);
-  if (dateOnly) return date ? <Text style={t.meta}>{date}</Text> : null;
+  if (dateOnly) return date ? <Text style={t.meta}>{`Released ${date}`}</Text> : null;
   return <View accessibilityRole="header" accessibilityLabel={`${note.version}${date ? `, ${date}` : ""}`} style={{ flexDirection: "row", alignItems: "baseline", gap: 6 }}>
     <Text style={[t.label, { fontVariant: ["tabular-nums"] }]}>{note.version}</Text>
     {date && <><Dot style={t.meta} /><Text style={t.meta}>{date}</Text></>}
@@ -81,7 +109,7 @@ function FoldedVersion({ note, theme, compact }: { note: ReleaseNote; theme: The
       <Icon name={open ? "ChevronDown" : "ChevronRight"} size={14} color={c.foregroundMuted} />
       <Text accessibilityRole="header" style={[t.label, { fontVariant: ["tabular-nums"], flexShrink: 0 }]}>{note.version}</Text>
       {note.date && <Text style={[t.meta, { flexShrink: 0 }]}>{fmtDate(note.date)}</Text>}
-      {!open && <Text numberOfLines={1} style={[t.meta, { flex: 1, minWidth: 0 }]}>{note.items[0] ?? note.blocks?.find(b => b.kind !== "heading")?.text ?? ""}</Text>}
+      {!open && <Text numberOfLines={1} style={[t.meta, { flex: 1, minWidth: 0 }]}>{note.items[0] ?? note.blocks?.find(b => b.kind === "text" || b.kind === "bullet")?.text ?? ""}</Text>}
     </Pressable>
     {open && <View style={{ paddingLeft: 22, paddingBottom: 12 }}><VersionNotes note={note} theme={theme} compact={compact} /></View>}
   </View>;

@@ -26,8 +26,13 @@ stop.
      "Full changelog since <last stable>" in a collapsed `<details>` block (every fragment, deduplicated and grouped by
      area), and deletes the fragments. Rewrite the draft into a short section grouped by what a user gets, lead with
      what matters, cut internal fixes, and delete the DRAFT line. `check:notes` (in `verify`, so in the publish
-     workflow too) fails while the line is there. A curated section can use `###` headings and paragraphs; What's
-     new shows them as written, without images. Pass `-- --allow-empty` for a release with nothing user-facing.
+     workflow too) fails while the line is there. A curated section can use `###` headings, paragraphs, images and
+     a `---` rule; What's new shows them as written, the first paragraph as the intro and what follows the rule (the
+     credits) as a quiet footnote. An image is a line of its own, `![alt](url#WxH)`: the alt text is what a screen
+     reader says, `#WxH` is its shape (so the sheet reserves it before it loads), and the URL is
+     raw.githubusercontent.com at a full commit hash, never `main`, so re-shooting a screenshot never changes notes
+     already shipped. Commit the image first, pin to that commit, and merge with a merge commit (not squash or rebase),
+     so the commit stays in `main`'s history; `tests/changelog.test.ts` fails otherwise. Pass `-- --allow-empty` for a release with nothing user-facing.
    - **A major's rc** (`2.0.0-rc.N`) carries the major's own section (`## 2.0.0`). A later rc or the final `2.0.0`
      keeps the curated text as written and adds its new fragments to the full list. In the app, `notesVersion`
      (`shared/changelog.ts`) maps an rc to that section, so 1.x → rc.0 shows What's new once, and rc.N → 2.0.0

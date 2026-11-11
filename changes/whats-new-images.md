@@ -1,0 +1,1 @@
+- What's new shows screenshots of what it describes.
