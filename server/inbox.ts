@@ -7,6 +7,7 @@ import { BackgroundAgents } from "./background-agents";
 import { emptyInbox, expired, inboxStateSchema, type OutboxEntry, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason, liveFlag, withoutRunState, FACT_REASONS } from "../shared/inbox";
 import type { State as FollowState, Workspace as FollowWorkspace } from "../shared/model";
 import { asksForReviewers } from "../shared/attention";
+import { followUpObligations } from "../shared/follow-up";
 import { configuredReviewers, reviewerLabel, withoutAuthor } from "../shared/reviewers";
 import { classify, finishedReply, turnPrompt, type Sources } from "./inbox-classifier";
 import { STALE_BRIEF } from "../shared/errors";
@@ -623,7 +624,10 @@ export class Inbox {
   }
 
   /** #8–#10 from Follow-up's own PR observations. The first pass only primes dedupe keys. */
+  /** Main agents whose workspace has a working or waiting task: their declared wait (liveFlag `waiting`). */
+  private waitingMains = new Set<string>();
   async observeFollowUp(follow: FollowState): Promise<void> {
+    this.waitingMains = new Set(follow.workspaces.filter(w => w.enable_tracking && !w.archived && w.mainAgentId && followUpObligations(w).some(o => o.status === "working" || o.status === "waiting")).map(w => w.mainAgentId!));
     const settings = await this.o.enabled().catch(() => ({ enable_inbox: true, enable_inbox_pr_closed: true }));
     if (!settings.enable_inbox) return;
     const events = followUpEvents(follow, settings.enable_inbox_pr_closed);
@@ -873,7 +877,7 @@ export class Inbox {
     const row = (agent: AgentInfo, delegatedFrom: string | null, e: Entry | undefined): InboxRow => {
       const turn = this.turns.get(agent.id);
       const turnStartedAt = turn && ["running", "initializing"].includes(agent.status) ? new Date(turn.at).toISOString() : null;
-      const live = liveFlag(agent.status, e?.needs ?? null, e?.brief ? { kind: e.brief.kind, source: e.brief.source, state: e.brief.state, ask: e.brief.ask, questionIds: e.brief.questionIds, at: e.brief.at } : null, turnStartedAt, !!agent.backgroundWork);
+      const live = liveFlag(agent.status, e?.needs ?? null, e?.brief ? { kind: e.brief.kind, source: e.brief.source, state: e.brief.state, ask: e.brief.ask, questionIds: e.brief.questionIds, at: e.brief.at } : null, turnStartedAt, !!agent.backgroundWork, this.waitingMains.has(agent.id));
       return {
       agentId: agent.id, workspaceId: agent.workspaceId, title: agent.title || "Agent",
       workspaceTitle: agent.workspaceId ? names.get(agent.workspaceId) ?? null : null,

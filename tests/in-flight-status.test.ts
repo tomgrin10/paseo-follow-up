@@ -140,3 +140,16 @@ test("invariants: the bug's own fixture breaks each new invariant before the fix
   assert.deepEqual(factFlagViolations([flagged], [merged]).map(v => v.id), ["outside-fact-is-live"]);
   assert.deepEqual(factFlagViolations([flagged], [workspace({ ...merged, prs: [greenUnreviewed({ error: "gh timed out" })] })]), [], "unknown is not a violation");
 });
+
+test("a declared wait absorbs a finish that states no ask; the agent's own ask still flags", async () => {
+  const s = await inbox([agent("main-agent")]);
+  await s.box.store.mutate(st => { st.entries["main-agent"] = { agentId: "main-agent", needs: { reasons: [{ reason: "finished", at: iso(), detail: "Waiting on the release.", dedupeKey: "finished" }], since: iso() }, snooze: null, signedOffAt: null, lastTomMessageAt: iso(-3), seq: 1, undo: null, muteTurn: false, enable_finish_flags: true, goneAt: null, seenKeys: [], lastEventAt: iso(), brief: null }; });
+  const rowOf = async () => (await s.box.list()).rows.find(r => r.agentId === "main-agent")!;
+  assert.ok((await rowOf()).needs, "no declared wait: Finished shows");
+  const waiting = workspace({ mainAgentId: "main-agent", prs: [], obligations: [obligation("waiting", "beta.68 install")] as never });
+  await s.box.observeFollowUp({ version: 1, workspaces: [waiting] } as never);
+  assert.equal((await rowOf()).needs, null, "a declared wait reads as waiting, not Finished");
+  await s.box.observeFollowUp({ version: 1, workspaces: [workspace({ ...waiting, obligations: [] })] } as never);
+  assert.ok((await rowOf()).needs, "the wait ended: the finish shows again");
+  await s.done();
+});

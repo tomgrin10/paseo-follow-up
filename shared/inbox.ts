@@ -162,9 +162,13 @@ export const FACT_REASONS: readonly Reason[] = ["ci", "review", "reviewers"];
  * What a row shows for an agent: a running agent has outlived its last turn's run-state flags and the card that only
  * reported them (`running-is-not-stale`). A card with open questions stays: only the developer closes it.
  */
-export function liveFlag<B extends { kind: string; state: string; questionIds?: string[]; at?: string }>(status: string, needs: Needs | null, brief: B | null, turnStartedAt: string | null = null, background = false): { needs: Needs | null; brief: B | null } {
+export function liveFlag<B extends { kind: string; state: string; questionIds?: string[]; at?: string; source?: string }>(status: string, needs: Needs | null, brief: B | null, turnStartedAt: string | null = null, background = false, waiting = false): { needs: Needs | null; brief: B | null } {
   // Paseo 0.16 background work still live: the agent isn't finished yet, so a finish waits (shown, not erased).
   if (background) needs = withoutReasons(needs, ["finished"]);
+  // The main agent declared a wait (a working or waiting task in its workspace): a finish that states no ask is that
+  // wait, not news, so it waits too (shown again once the task settles). An agent's own ask still flags.
+  // Status invariant in-flight-reads-waiting; tests/in-flight-status.test.ts.
+  if (waiting && !(brief?.state === "open" && brief.source !== "none" && !["done", "unknown"].includes(brief.kind))) needs = withoutReasons(needs, ["finished"]);
   // Only a flag older than the current turn's start is stale. Paseo can still read "running" for a moment after a
   // turn fails (server/directory.ts keeps a failed agent busy until its re-read), so status alone isn't enough, and
   // without a known turn start nothing is dropped here (the reducer and the load repair cover those turns).

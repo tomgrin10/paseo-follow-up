@@ -121,6 +121,7 @@ import { followUpEvents, repairsGoToAgent } from "../server/inbox";
 import { firstTracking } from "../server/discovery";
 import { newEntry, reduce, type InboxEvent } from "../shared/inbox";
 import { pickBrief } from "../shared/brief";
+import { emptyReviewerConfig, setReviewerConfig } from "../shared/reviewers";
 import type { State } from "../shared/model";
 
 const noOne = { author: "dev", requested: [], teams: [], reviewed: [], complete: true };
@@ -152,7 +153,10 @@ test("(1) a workspace tracked for the first time sends repairs on its own; one t
   assert.equal(firstTracking(workspace({ enable_tracking: false })), false, "it held PRs before");
   assert.equal(firstTracking(workspace({ enable_tracking: true, prs: [] })), false);
 });
-test("(3) 'Add reviewers' is a Needs-you reason that doesn't wait for open threads or CI", () => {
+test("(3) 'Add reviewers' is a Needs-you reason that doesn't wait for open threads or CI", t => {
+  // Only in a repository someone is set up to review (asksForReviewers, tests/in-flight-status.test.ts).
+  setReviewerConfig({ ...emptyReviewerConfig(), repos: { "example/app": [{ login: "reviewer", name: "Reviewer" }] } });
+  t.after(() => setReviewerConfig(emptyReviewerConfig()));
   const w = workspace({ enable_auto_sends: true, prs: [pr({ number: 1499, key: "example/app#1499", snapshot: snapshot({ failedChecks: ["unit"], threads: [{ id: "t1", updatedAt: since }], reviewers: noOne }) })] });
   const { events, reasons } = flagsFrom(w);
   assert.deepEqual(reasons, ["reviewers"], "threads and CI go to the agent; reviewers flag the developer");
