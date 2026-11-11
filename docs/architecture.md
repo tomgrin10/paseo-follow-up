@@ -51,6 +51,18 @@ To add an RPC:
 3. If the client calls it, add a `PARITY` entry in `server/agent-parity.ts` (a tool, or an exemption with a reason).
 4. Add a line in [rpcs-and-tools.md](rpcs-and-tools.md). `tests/docs.test.ts` checks it.
 
+**Every client RPC replies fast.** Paseo gives a plugin RPC 30 s, then shows the developer "Plugin RPC timed out"
+whatever the handler does next. A handler records the developer's action and returns; anything that waits on Paseo
+(sending to an agent, which may first resume a dormant one), GitHub or the daemon runs after the reply, or is
+queued durably and retried. `tests/rpc-ack.test.ts` runs every client RPC against the real worker with Paseo, the
+daemon socket and gh hanging, and fails on one that doesn't reply within 500 ms; the ones that still wait are in its
+`EXEMPT` list with a reason, and that list only shrinks. The answer paths (`follow.brief-action`,
+`follow.answer-question`) are the model: see [needs-you.md](needs-you.md#answering-a-brief).
+
+**Slow RPCs name themselves.** `server/rpc-timing.ts` wraps every handler: one that takes over a second logs
+`[follow-up] slow rpc <method> <ms> ms (event loop since last: p99 …, max …)` to the plugin's output (daemon.log).
+A long call with a small event-loop delay awaited something; a large delay means synchronous work blocked the worker.
+
 Answers that the client polls are kept small:
 
 - `follow.list` takes `since` (a revision) and returns only changed workspaces (`server/list-cache.ts`).

@@ -60,6 +60,7 @@ import { ACTIVE_SCOPE_MIGRATION, PRUNE_MIGRATION, autoSendsByDefault, FOLLOW_EVE
 import { Overseer, OVERSEER_TOOLS, type OverseerPaseo, type OverseerTool } from "./server/overseer";
 import { OVERSEER_LABEL } from "./shared/overseer";
 import { withDaemon } from "./server/daemon";
+import { RpcTiming } from "./server/rpc-timing";
 import { hostFeature, type ServerInfo } from "./server/host-features";
 type ServerInfoClient = { getLastServerInfoMessage?: () => ServerInfo };
 import { inboxAnswer } from "./server/etag";
@@ -114,10 +115,12 @@ export default function contribute(server: PluginServerContext) {
   } catch { /* Without it the hook assumes the tools are attached, as before. */ }
   // Every RPC handler, also callable in-process: native agent tools run the same handlers the stdio bridge reaches.
   const handlers = new Map<string, { input: { parseAsync(value: unknown): Promise<unknown> }; run: (input: any, context: PluginHandlerContext) => unknown }>();
+  // Slow RPCs name themselves in the plugin's output, with the event loop's delay (server/rpc-timing.ts).
+  const rpcTiming = new RpcTiming(); rpcTiming.start();
   const handle: PluginServerContext["handle"] = (contract, handler) => {
     // Main-agent work by a successor makes its handover stick (see handBackMainAgent): noted after the call succeeds.
     const run = MAIN_WORK.has(contract.name) ? (async (input: { agentId?: string }, context: PluginHandlerContext) => { const out = await (handler as (i: unknown, c: PluginHandlerContext) => unknown)(input, context); if (input?.agentId) await noteMainWork(input.agentId).catch(() => undefined); return out; }) as typeof handler : handler;
-    handlers.set(contract.name, { input: contract.input, run: run as never }); server.handle(contract, run);
+    handlers.set(contract.name, { input: contract.input, run: run as never }); server.handle(contract, rpcTiming.timed(contract.name, run as (i: unknown, c: PluginHandlerContext) => unknown) as typeof handler);
   };
   const noteMainWork = async (agentId: string) => {
     // A cheap check on the snapshot first: almost every call has no open handover, so nothing is written.
@@ -179,6 +182,11 @@ export default function contribute(server: PluginServerContext) {
   const append = async (agentId: string, brief: Brief) => {
     if (!api) { unsent.set(`${agentId}|${brief.id}`, { agentId, brief }); return; }
     await api.agents.ref(agentId).timeline.append({ type: "plugin", id: brief.id, kind: BRIEF_KIND, version: BRIEF_VERSION, data: brief });
+  };
+  /** A message to one agent: through the plugin session once a handler has seen one, else a daemon connection (worker start). */
+  const sendTo = (agentId: string) => async (text: string, messageId: string) => {
+    if (api) await api.agents.ref(agentId).send(text, { messageId, activeTurnBehavior: "steer" });
+    else await withDaemon(client => client.sendMessage(agentId, text, { messageId, activeTurnBehavior: "steer" }));
   };
   const seen = (paseo: PaseoApi) => {
     api = paseo;
@@ -349,6 +357,8 @@ export default function contribute(server: PluginServerContext) {
     await agentHooks.start().catch(() => { hookError = "Automatic sidebar instructions could not be registered for every provider. Check Claude/Codex hook settings; following still works."; });
     hookTimer = setInterval(() => void agentHooks.heartbeat().catch(() => {}), 30_000);
     await writeBriefState().catch(() => undefined);
+    // Brief answers recorded before a reload that Paseo never confirmed go out again, under the same messageId.
+    await inbox.resumeAnswers(sendTo).catch(() => undefined);
   })().catch(() => { loadError = "Follow-through could not start. Check its saved state and worker lock."; });
   const requireReady = async () => { await ready; if (loadError || stopped) throw new Error(loadError ?? "Follow-through is stopping"); };
   // 1.4.0-beta.2: Follow-up's tools per agent: natively through Paseo's MCP when the host serves plugin tools,
@@ -1064,12 +1074,12 @@ export default function contribute(server: PluginServerContext) {
     await rename(temporary, needsYouPath(agentId));
     return { ok: true as const, briefId: `brief:${turn?.turnId ?? record.at}` };
   });
-  handle(rpc.briefActionRpc, async ({ agentId, briefId, decisionId, choice, words, choices, move }, context) => {
+  // Replies once the answer is recorded; the send runs after (Inbox.briefAction), so a dormant agent's slow resume never
+  // times the card out.
+  handle(rpc.briefActionRpc, async ({ agentId, briefId, decisionId, choice, words, choices, move, answerId }, context) => {
     const { paseo } = context;
     await requireReady(); seen(paseo);
-    const brief = await inbox.briefAction(agentId, { briefId, decisionId, choice, words, choices, move }, async (text, messageId) => {
-      await paseo.agents.ref(agentId).send(text, { messageId, activeTurnBehavior: "steer" });
-    }, actorOf(context));
+    const brief = await inbox.briefAction(agentId, { briefId, decisionId, choice, words, choices, move, answerId }, sendTo(agentId), actorOf(context));
     return { brief };
   });
 
@@ -1261,7 +1271,7 @@ export default function contribute(server: PluginServerContext) {
     server.on("workspace.archived", async event => { await ready; if (!loadError && !stopped) await store.mutate(state => { const w = state.workspaces.find(w => w.id === event.workspace.id); if (w) w.archived = true; }); }),
   ];
   return async () => {
-    stopped = true; wait.close(); updater.stop(); governor.stop(); if (timer) clearTimeout(timer); if (aboutTimer) clearTimeout(aboutTimer); if (linkedTimer) clearTimeout(linkedTimer); aiJobs.stop(); ranker = null; if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
+    stopped = true; wait.close(); updater.stop(); governor.stop(); if (timer) clearTimeout(timer); if (aboutTimer) clearTimeout(aboutTimer); if (linkedTimer) clearTimeout(linkedTimer); aiJobs.stop(); ranker = null; if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); rpcTiming.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
     await ready; if (hooksStarted) await agentHooks.stop().catch(() => {});
     await actions.close(); await closeConnections(); await engine.stop(); await ready; await store.flush().catch(() => undefined); await unlock?.();
   };

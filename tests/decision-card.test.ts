@@ -93,6 +93,7 @@ test("the server sends every pick in one message and records them all", async ()
     await inbox.store.mutate(s => { s.entries.main = { ...(s.entries.main ?? {}), agentId: "main", brief: open() } as never; });
     const sent: string[] = [];
     const after = await inbox.briefAction("main", { briefId: "brief:t1", choices: [{ decisionId: "Q9", choice: "A" }, { decisionId: "Q10", choice: "B" }, { decisionId: "Q11", choice: "A" }] }, async text => { sent.push(text); });
+    await inbox.idle();
     assert.equal(sent.length, 1, "one message, not one per decision");
     assert.match(sent[0], /^Follow-up answer Q9, Q10, Q11 /);
     assert.deepEqual(after.decisions.map(d => d.chosen), ["A", "B", "A"]);

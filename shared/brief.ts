@@ -71,6 +71,16 @@ export const briefSchema = z.object({
   answeredByTitle: z.string().nullable().optional(),
   /** For the card's PR moves: the tracked workspace, when there is one. */
   workspaceId: z.string().nullable().default(null),
+  /**
+   * The answer's id: the client makes one per Send and reuses it on Retry, so a retried or double-clicked answer is
+   * recognised and never sent twice. Absent on briefs answered before 1.4.0-beta.65.
+   */
+  answerId: z.string().nullable().optional(),
+  /**
+   * Getting the answer to the agent, after the card already recorded it (server/inbox.ts AnswerOutbox): "sending"
+   * until Paseo confirms, "failed" with the reason once every retry failed. Absent once delivered, and on old briefs.
+   */
+  delivery: z.object({ state: z.enum(["sending", "failed"]), error: z.string().nullable().default(null) }).nullable().optional(),
 });
 export type Brief = z.infer<typeof briefSchema>;
 export type BriefDecision = z.infer<typeof briefDecisionSchema>;
@@ -491,3 +501,8 @@ export function shouldReopen(b: Pick<Brief, "state" | "outcome" | "questionIds">
   if (b.state === "superseded") return true;
   return !trustReplies && b.state === "answered" && b.outcome === "You replied";
 }
+
+/** An answer's id, made once per Send (no crypto needed: phones run Hermes). */
+export const newAnswerId = (): string => `a${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12).padEnd(10, "0")}`;
+/** The delivery failure as one sentence, or a plain fallback. */
+export const undeliveredReason = (error: string | null | undefined): string => { const e = (error ?? "").trim() || "Paseo didn't confirm it"; return /[.!?]$/.test(e) ? e : `${e}.`; };
