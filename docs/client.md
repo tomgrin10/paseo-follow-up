@@ -29,7 +29,9 @@ Nothing polls while the app is hidden.
 - User copy says "Summary" for the `about` feature.
 - **Text a person may copy is selectable** (`client/text.tsx`). react-native-web sets user-select on a Text only when
   `selectable` is passed, and Paseo's containers set none, so text inherited none. Follow-up's `Text` is selectable on
-  web unless it labels a control-role `Pressable`; `tests/selectable-text.test.ts` keeps every surface on it.
+  web unless it labels a control-role `Pressable`; `tests/selectable-text.test.ts` keeps every surface on it. Content
+  inside a control (an option card's description) opts back in with `copyable`. Links don't drag, and a click that
+  ends a selection doesn't open them. An explicit `selectable` is only needed for native, where the default is unchanged.
 - **Agent-written text renders through `RichText`** (`client/rich-text.tsx`). Root cause of the unclickable artifact
   link: every surface put agent-written text in a plain `<Text>`. `linkify` in `shared/links.ts` turns http(s) URLs
   and `owner/repo#123` into links (no markdown). `tests/rich-text.test.ts` fails when a field an agent or the

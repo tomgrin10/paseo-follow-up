@@ -6,6 +6,11 @@
  */
 export const CONTROL_ROLES: ReadonlySet<string> = new Set(["button", "link", "checkbox", "radio", "switch", "tab", "menuitem", "togglebutton", "combobox"]);
 
+/** A link click opens it, unless it ends a drag that selected text: then the person was marking, not clicking. */
+export function linkClickOpens(selection: string): boolean {
+  return selection.length === 0;
+}
+
 export function selectableFor(explicit: boolean | undefined, inControl: boolean, os: string): boolean | undefined {
   if (explicit !== undefined) return explicit;
   if (os !== "web") return undefined;

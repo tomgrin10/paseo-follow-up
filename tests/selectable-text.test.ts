@@ -26,6 +26,20 @@ test("selectableFor: content is selectable on web, control labels aren't, an exp
   for (const role of ["button", "link", "checkbox", "radio", "switch", "tab", "menuitem"]) assert.ok(CONTROL_ROLES.has(role), role);
 });
 
+test("a link in content can be drag-selected: it isn't draggable, and a click that ends a selection doesn't open it", async () => {
+  const { linkClickOpens } = await import("../client/text-rules");
+  assert.equal(linkClickOpens(""), true, "a plain click opens the link");
+  assert.equal(linkClickOpens("The old key leaked into a CI log on https://github.com/x"), false, "finishing a drag-select on a link keeps the selection");
+  const rich = await readFile(join(ROOT, "client/rich-text.tsx"), "utf8");
+  assert.match(rich, /setAttribute\?\.\("draggable", "false"\)/, "web anchors are natively draggable; a drag that starts on a URL must select it, not drag it");
+  assert.match(rich, /linkClickOpens\(/, "the link's press checks for a selection first");
+});
+
+test("an option card's description stays copyable: its letter and label are the control, its prose is content", async () => {
+  const q = await readFile(join(ROOT, "client/questions.tsx"), "utf8");
+  assert.match(q, /\{!!consequence && <RichText selectable=\{copyable\}/, "OptionCard's consequence opts back into selection");
+});
+
 test("every Text and Pressable in Follow-up is its own (client/text.tsx), never react-native's directly", async () => {
   for (const { f, text } of await sources()) {
     if (f === "client/text.tsx") continue;
@@ -43,14 +57,15 @@ test("no content text is switched off by hand, and no control wraps content text
     if (f === "client/text.tsx") continue;
     assert.doesNotMatch(text, /selectable=\{false\}/, `${f}: selectable={false} by hand; a control's label gets it from its Pressable role`);
     // A button/link/tab/menu-item Pressable around RichText (the content renderer) would make that content uncopyable.
-    // Titles in tappable rows use RichText's `plain` mode, which is a label. A radio or checkbox option card's text is
-    // its label (you tap it to pick), so it is the one control allowed to carry RichText.
+    // Titles in tappable rows use RichText's `plain` mode, which is a label. A radio or checkbox option card is the one
+    // control allowed to carry RichText: its label is what you tap to pick, and its description opts back into
+    // selection (`copyable`). PressScale is a Pressable too.
     const lines = text.split("\n");
     let depth = 0; let control = 0;
     for (const [i, line] of lines.entries()) {
-      for (const tok of line.matchAll(/<Pressable\b[^>]*?(accessibilityRole|role)="(\w+)"|<Pressable\b|<\/Pressable>|<RichText\b(?![^>]*\bplain\b)/g)) {
-        if (tok[0] === "</Pressable>") { if (control && control === depth) control = 0; depth--; continue; }
-        if (tok[0].startsWith("<Pressable")) { depth++; if (!control && tok[2] && ["button", "link", "tab", "menuitem"].includes(tok[2])) control = depth; continue; }
+      for (const tok of line.matchAll(/<(?:Pressable|PressScale)\b[^>]*?(accessibilityRole|role)="(\w+)"|<(?:Pressable|PressScale)\b|<\/(?:Pressable|PressScale)>|<RichText\b(?![^>]*\bplain\b)/g)) {
+        if (tok[0].startsWith("</")) { if (control && control === depth) control = 0; depth--; continue; }
+        if (tok[0].startsWith("<Pressable") || tok[0].startsWith("<PressScale")) { depth++; if (!control && tok[2] && ["button", "link", "tab", "menuitem"].includes(tok[2])) control = depth; continue; }
         assert.ok(!control, `${f}:${i + 1}: content RichText inside a ${"control"} Pressable can't be selected`);
       }
     }
