@@ -139,11 +139,14 @@ These are product rules. Each has tests, and breaking one is a bug even when the
 9. **No root treatment for background agents.** A Paseo 0.16 `background: true` agent is another plugin's helper.
    Follow-up gives it no tools, no Wait, no `needs_you` or Stop-hook nudge, no inbox rows and no directory row
    (`server/background-agents.ts`, `tests/background-agents.test.ts`). On 0.15 the field is absent.
-10. **Stopping never waits on stuck work** (`worker-stop-never-waits-on-a-stuck-pass`). The worker's stop clears its
-   timers, so a wait with no bound on work stuck on the daemon, Paseo or a CLI that never answers leaves stop pending
-   for good (a reload waits on the old worker). Every wait in teardown goes through `settleWithin`
-   (`server/teardown.ts`): `Engine.stop`, `PrActions.close`, `closeConnections` and start-up. `Store.close` then refuses
-   every mutation, so work that outlives its bound writes nothing. Guarded by `tests/worker-stop.test.ts`.
+10. **Stopping never waits on stuck work** (`worker-stop-never-waits-on-a-stuck-pass`): stop finishes within one
+   deadline, and work that ends inside it is kept. The worker's stop clears its timers, so a wait with no bound on work
+   stuck on the daemon, Paseo or a CLI that never answers leaves stop pending for good (a reload waits on the old
+   worker). `stopWorker` (`server/teardown.ts`) gives the whole stop one deadline (`STOP_WAIT_MS`, from when stop
+   starts) and every wait what is left of it: start-up, hooks, `PrActions.close`, `closeConnections`, `Engine.stop` and
+   the store's queue; bounds per wait added up to about 45 s. `Store.close` refuses new mutations at once, commits one
+   already accepted if it finishes inside the deadline, and drops (with the "stopping" error, writing nothing) one that
+   finishes after it. Guarded by `tests/worker-stop.test.ts`.
 
 ## Bugs
 
