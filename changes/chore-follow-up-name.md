@@ -1,1 +1,0 @@
-- Follow-up moves to its new plugin id by itself, once, at a quiet moment, keeping your workspaces and settings. Settings → General says when it's done.
