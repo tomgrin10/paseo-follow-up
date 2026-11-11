@@ -4,7 +4,7 @@ import type { Graphite } from "./graphite";
 import type { PrWorkflow } from "../shared/pr-workflow";
 import type { Pr, Snapshot } from "../shared/model";
 import type { Deployments } from "./deployments";
-import { cadence, POLL_IDLE_MS } from "../shared/poll";
+import { budgetTier, cadence, dueForRead, type Budget } from "../shared/poll";
 import { cliApi, httpApi, type GithubApi } from "./github-api";
 import { splitReviewers, TEAM_SLUG, USER_LOGIN } from "../shared/reviewers";
 const exec = promisify(execFile);
@@ -60,7 +60,7 @@ export function parsePr(pr: Node, trunk: string, observedAt: string, required: s
     },
     mergeWhenReady: "unknown",
     threads: threads.nodes.filter((t: Node) => !t.isResolved).map((t: Node) => ({ id: t.id, updatedAt: t.comments.nodes[0]?.updatedAt ?? observedAt })),
-    failedChecks, otherFailedChecks, checksPending, checksRunning: checksRunning || checksPending,
+    failedChecks, otherFailedChecks, checksPending, checksRunning,
     complete: !threads.pageInfo.hasNextPage && !contexts?.pageInfo.hasNextPage && (pr.state !== "OPEN" || pr.mergeable !== "UNKNOWN"), observedAt,
     ...(typeof pr.mergeStateStatus === "string" ? { mergeStateStatus: pr.mergeStateStatus } : {}),
     ...(typeof pr.isInMergeQueue === "boolean" ? { inMergeQueue: pr.isInMergeQueue } : {}),
@@ -116,9 +116,15 @@ export function ruleChecks(ref: Node | null | undefined): string[] | null {
     .flatMap((r: Node) => (r.parameters?.requiredStatusChecks ?? []).map((c: Node) => c.context as string));
 }
 
+function rateLimited(error: unknown): boolean {
+  const e = error as { rateLimited?: boolean; stderr?: string; message?: string };
+  return !!e?.rateLimited || /rate limit|RATE_LIMITED/i.test(`${e?.stderr ?? ""} ${e?.message ?? ""}`);
+}
+
 export class Github {
   private ruleCache = new Map<string, { until: number; contexts: Promise<string[]> }>();
-  private polledAt = new Map<string, number>();
+  private readAt = new Map<string, number>();
+  private budgets = new Map<string, Budget>();
   private last = new Map<string, Observation>();
   private prints = new Map<string, string>();
   private changedAt = new Map<string, number>();
@@ -183,7 +189,7 @@ export class Github {
     return cadence(last?.snapshot, p.error || last?.error, this.changedAt.get(p.key) ?? null, this.now()) === "tick";
   }
   /** Requests GitHub reads made, for tests and the poll-cost harness. */
-  readonly stats = { graphql: 0, rest: 0, skippedRepos: 0 };
+  readonly stats = { graphql: 0, rest: 0, skipped: 0, points: 0 };
   /**
    * Reads every PR fresh, unless `background` (the engine's timer tick) allows backoff. Then only `fresh` keys,
    * `hot` keys (busy workspaces) and hot PRs force their repository to be read this tick.
@@ -195,28 +201,37 @@ export class Github {
     for (const repo of repositories) modes.set(repo, this.workflow ? await this.workflow(repo).catch((): PrWorkflow => "github") : "graphite");
     for (const repo of repositories) {
       const targets = [...new Map(prs.filter(p => p.repo === repo).map(p => [p.key, p])).values()];
-      // Backoff: a repository whose PRs are all settled, on idle workspaces, is read every POLL_IDLE_MS instead of
-      // every tick. Its last observations stand in meanwhile (still younger than the 120 s completion gate).
-      const fresh = !o.background || targets.some(p => o.fresh?.has(p.key) || o.hot?.has(p.key) || this.hot(p));
-      const polled = this.polledAt.get(repo);
-      if (!fresh && polled !== undefined && this.now() - polled < POLL_IDLE_MS) {
-        this.stats.skippedRepos++;
-        for (const p of targets) { const last = this.last.get(p.key)!; result.set(p.key, { snapshot: last.snapshot && { ...last.snapshot }, error: last.error }); }
-        continue;
-      }
-      this.polledAt.set(repo, this.now());
-      for (let offset = 0; offset < targets.length; offset += CHUNK) {
-        const group = targets.slice(offset, offset + CHUNK);
+      const owner = repo.split("/")[0];
+      const tier = budgetTier(this.budgets.get(owner), this.now());
+      const pinned = (p: Pr) => o.hot?.has(p.key) || o.fresh?.has(p.key);
+      const repoUrgent = targets.some(p => pinned(p) || this.hot(p));
+      // Per-PR backoff (shared/poll.ts): only due PRs go into this tick's queries; the rest reuse their last
+      // observation. A read costs ~1 GraphQL point per PR, so reading fewer PRs is what saves the budget.
+      const due = targets.filter(p => {
+        if (tier === "critical") return false;
+        if (!o.background || !this.last.has(p.key) || o.fresh?.has(p.key) || o.hot?.has(p.key)) return true;
+        const last = this.last.get(p.key)!;
+        return dueForRead({ snapshot: last.snapshot, error: p.error || last.error, changedAt: this.changedAt.get(p.key) ?? null, readAt: this.readAt.get(p.key) ?? 0, now: this.now(), tier, repoUrgent });
+      });
+      const dueKeys = new Set(due.map(p => p.key));
+      for (const p of targets) if (!dueKeys.has(p.key)) { this.stats.skipped++; result.set(p.key, this.standIn(p.key, owner)); }
+      if (!due.length) continue;
+      for (let offset = 0; offset < due.length; offset += CHUNK) {
+        const group = due.slice(offset, offset + CHUNK);
         const [owner, name] = repo.split("/");
-        const query = `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){defaultBranchRef{name branchProtectionRule{requiredStatusCheckContexts} ${RULES}} squashMergeAllowed mergeCommitAllowed rebaseMergeAllowed autoMergeAllowed viewerDefaultMergeMethod mergeQueue{id} ${group.map((p, i) => `p${i}:pullRequest(number:${p.number}){${fields}}`).join(" ")}}}`;
+        const query = `query($owner:String!,$name:String!){rateLimit{cost remaining resetAt} repository(owner:$owner,name:$name){defaultBranchRef{name branchProtectionRule{requiredStatusCheckContexts} ${RULES}} squashMergeAllowed mergeCommitAllowed rebaseMergeAllowed autoMergeAllowed viewerDefaultMergeMethod mergeQueue{id} ${group.map((p, i) => `p${i}:pullRequest(number:${p.number}){${fields}}`).join(" ")}}}`;
         try {
           this.stats.graphql++;
           const payload = await this.api.graphql(repo, query, { owner, name });
+          const rate = payload.data?.rateLimit;
+          if (rate && typeof rate.remaining === "number") { this.budgets.set(owner, { remaining: rate.remaining, resetAt: Date.parse(rate.resetAt) || this.now() + 3_600_000 }); this.stats.points += Number(rate.cost) || 0; }
+          for (const p of group) this.readAt.set(p.key, this.now());
           // A partial response fails only the PRs its errors point at. An error outside any PR fails the group.
           const broken = new Set<string>(); const rulesBroken = new Set<string>();
           for (const e of (payload.errors ?? []) as Node[]) {
             const path: unknown[] = Array.isArray(e.path) ? e.path : [];
             const at = typeof path[1] === "string" ? path[1] : null;
+            if (e.type === "RATE_LIMITED") throw Object.assign(new Error("rate limited"), { rateLimited: true });
             if (path[0] !== "repository" || !at) throw new Error("GitHub response error");
             (path.includes("rules") ? rulesBroken : broken).add(at);
           }
@@ -253,7 +268,13 @@ export class Github {
             return [p, { snapshot, error: null }] as const;
           }));
           for (const [p, value] of observed) result.set(p.key, value);
-        } catch {
+        } catch (error) {
+          // Out of GraphQL budget: don't fail. Keep the last observations and wait for the reset.
+          if (rateLimited(error)) {
+            this.budgets.set(owner, { remaining: 0, resetAt: (error as { resetAt?: number }).resetAt ?? this.now() + 10 * 60_000 });
+            for (const p of group) result.set(p.key, this.standIn(p.key, owner));
+            continue;
+          }
           for (const p of group) result.set(p.key, { snapshot: null, error: "GitHub status unavailable; check gh authentication and repository access" });
         }
       }
@@ -275,6 +296,15 @@ export class Github {
     for (const [key, value] of result) this.remember(key, value);
     return result;
   }
+  /** The last observation, or (never read and out of budget) an error saying when reads resume. */
+  private standIn(key: string, owner: string): Observation {
+    const last = this.last.get(key);
+    if (last) return { snapshot: last.snapshot && { ...last.snapshot }, error: last.error };
+    const reset = this.budgets.get(owner)?.resetAt;
+    return { snapshot: null, error: `GitHub's API limit for this account is used up${reset ? `; Follow-up reads again after ${new Date(reset).toISOString().slice(11, 16)} UTC` : ""}` };
+  }
+  /** Each owner's GraphQL budget from the last query's rateLimit (owners on one account report the same). */
+  budget(owner: string): Budget | undefined { return this.budgets.get(owner); }
   /** Keeps each PR's last observation for backoff, and when its content last changed (observedAt aside). */
   private remember(key: string, value: Observation): void {
     const { observedAt: _, deployment: __, ...content } = value.snapshot ?? ({} as Partial<Snapshot>);

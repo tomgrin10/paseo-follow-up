@@ -98,6 +98,10 @@ export function httpApi(o: { tokens?: TokenSource; request?: typeof fetch; base?
       const text = await response.text();
       if (text.length > LIMIT) throw new Error("GitHub response exceeds the read limit");
       if (response.status === 401) throw new GithubAuthError("GitHub refused the token (HTTP 401)");
+      if ((response.status === 403 || response.status === 429) && (response.headers?.get("x-ratelimit-remaining") === "0" || response.headers?.get("retry-after"))) {
+        const reset = Number(response.headers.get("x-ratelimit-reset")) * 1000 || Date.now() + Number(response.headers.get("retry-after") ?? 600) * 1000;
+        throw Object.assign(new Error("GitHub API rate limit exceeded"), { status: response.status, rateLimited: true, resetAt: reset });
+      }
       if (!response.ok) throw Object.assign(new Error(`GitHub HTTP ${response.status}`), { status: response.status });
       return JSON.parse(text);
     } finally { clearTimeout(timer); }

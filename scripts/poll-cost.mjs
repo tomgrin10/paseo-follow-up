@@ -5,7 +5,7 @@
 // `gh` shim first on PATH that counts every spawn. It installs the plugin, waits one warm-up minute, then measures
 // gh spawns, HTTP requests and the worker's CPU over a window. Run it on two builds at the same N for before/after:
 //
-//   node scripts/poll-cost.mjs [--prs 30] [--workspaces 10] [--repos 3] [--pending 3] [--minutes 3] [--plugin <dir>] [--cpu-prof <dir>] [--json]
+//   node scripts/poll-cost.mjs [--prs 30] [--workspaces 10] [--repos 3] [--pending 3] [--merged 0] [--closed 0] [--minutes 3] [--plugin <dir>] [--cpu-prof <dir>] [--json]
 //
 // --pending K keeps K PRs (one per repository first) with checks in progress. --cpu-prof writes the worker's V8 CPU profile (node --cpu-prof) for the window. Run under the harness-slot wrapper.
 import { spawn, execFile } from "node:child_process";
@@ -25,7 +25,7 @@ const exec = promisify(execFile);
 await harness();
 const arg = (name, fallback) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : fallback; };
 const N = Number(arg("prs", "30")); const W = Number(arg("workspaces", "10")); const R = Number(arg("repos", "3")); const MINUTES = Number(arg("minutes", "3"));
-const PENDING = Number(arg("pending", String(Math.max(1, Math.round(N / 10))))); const profileDir = arg("cpu-prof", null);
+const PENDING = Number(arg("pending", String(Math.max(1, Math.round(N / 10))))); const MERGED = Number(arg("merged", "0")); const CLOSED = Number(arg("closed", "0")); const profileDir = arg("cpu-prof", null);
 const root = await mkdtemp(join(tmpdir(), "follow-poll-cost-"));
 const home = join(root, "home"); const fixture = join(root, "fixture"); const bin = join(root, "bin"); let plugin = arg("plugin", null);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -34,12 +34,12 @@ const free = async () => { const s = createNet(); await new Promise(r => s.liste
 // The fake GitHub. One PR row per tracked PR; PENDING of them keep checks in progress.
 const repos = Array.from({ length: R }, (_, i) => `example-${i}/app`);
 const rows = new Map();
-for (let i = 0; i < N; i++) { const repo = repos[i % R]; const number = 100 + i; rows.set(`${repo}#${number}`, { repo, number, base: i < R ? "main" : `b${number - R}`, pending: i < PENDING }); }
-const counts = { graphql: 0, rest: 0, ghSpawns: 0, gcloudSpawns: 0 };
+for (let i = 0; i < N; i++) { const repo = repos[i % R]; const number = 100 + i; rows.set(`${repo}#${number}`, { repo, number, base: i < R ? "main" : `b${number - R}`, pending: i < PENDING, state: i >= N - MERGED ? "MERGED" : i >= N - MERGED - CLOSED ? "CLOSED" : "OPEN" }); }
+const counts = { points: 0, graphql: 0, rest: 0, ghSpawns: 0, gcloudSpawns: 0 };
 const prNode = (repo, number) => {
   const row = rows.get(`${repo}#${number}`); if (!row) return null;
-  return { number, title: `Synthetic PR ${number}`, url: `https://github.com/${repo}/pull/${number}`, state: "OPEN", headRefOid: `head${number}`, headRefName: `b${number}`, baseRefName: row.base, isDraft: false,
-    mergeable: "MERGEABLE", mergeStateStatus: "BLOCKED", reviewDecision: "REVIEW_REQUIRED", mergedAt: null, mergeCommit: null, isInMergeQueue: false, autoMergeRequest: null, author: { login: "developer" },
+  return { number, title: `Synthetic PR ${number}`, url: `https://github.com/${repo}/pull/${number}`, state: row.state, headRefOid: `head${number}`, headRefName: `b${number}`, baseRefName: row.base, isDraft: false,
+    mergeable: "MERGEABLE", mergeStateStatus: "BLOCKED", reviewDecision: "REVIEW_REQUIRED", mergedAt: row.state === "MERGED" ? "2026-11-01T00:00:00Z" : null, mergeCommit: row.state === "MERGED" ? { oid: "a".repeat(40) } : null, isInMergeQueue: false, autoMergeRequest: null, author: { login: "developer" },
     reviewRequests: { pageInfo: { hasNextPage: false }, nodes: [{ requestedReviewer: { __typename: "User", login: "reviewer" } }] },
     latestReviews: { pageInfo: { hasNextPage: false }, nodes: [{ state: "COMMENTED", author: { __typename: "User", login: "reviewer" } }] },
     baseRef: { branchProtectionRule: null, rules: { pageInfo: { hasNextPage: false }, nodes: [] }, associatedPullRequests: { nodes: row.base === "main" ? [] : [{ number: number - R, headRefName: row.base, state: "OPEN", headRepository: { nameWithOwner: repo } }] } },
@@ -51,8 +51,11 @@ const graphql = (query, variables) => {
   const repo = `${variables.owner}/${variables.name}`;
   const repository = { defaultBranchRef: { name: "main", branchProtectionRule: { requiredStatusCheckContexts: ["build"] }, rules: { pageInfo: { hasNextPage: false }, nodes: [{ type: "REQUIRED_STATUS_CHECKS", repositoryRuleset: { enforcement: "ACTIVE" }, parameters: { requiredStatusChecks: [{ context: "test" }] } }] } },
     squashMergeAllowed: true, mergeCommitAllowed: false, rebaseMergeAllowed: false, autoMergeAllowed: true, viewerDefaultMergeMethod: "SQUASH", mergeQueue: null };
-  for (const [, alias, number] of query.matchAll(/(p\d+):pullRequest\(number:(\d+)\)/g)) repository[alias] = prNode(repo, Number(number));
-  return { data: { repository } };
+  let cost = 0;
+  for (const [, alias, number] of query.matchAll(/(p\d+):pullRequest\(number:(\d+)\)/g)) { repository[alias] = prNode(repo, Number(number)); cost++; }
+  // GitHub charges this query shape ~1 point per PR (measured with rateLimit(dryRun:true): 15 PRs = 16 points).
+  counts.points += Math.max(1, cost);
+  return { data: { rateLimit: { cost: Math.max(1, cost), remaining: 4000, resetAt: new Date(Date.now() + 3_600_000).toISOString() }, repository } };
 };
 const answer = (method, path, body) => {
   if (method === "POST" && path === "/graphql") { const { query, variables } = JSON.parse(body); return graphql(query, variables); }
@@ -130,8 +133,8 @@ const base = process.env.POLL_COST_API; const args = process.argv.slice(2);
   const rate = k => Math.round((counts[k] - start[k]) / minutes * 10) / 10;
   const state = JSON.parse(await readFile(join(home, "plugin-data/follow-up/state.json"), "utf8"));
   const observed = state.workspaces.flatMap(w => w.prs).filter(p => p.snapshot && !p.error).length;
-  const result = { prs: N, workspaces: W, repos: R, pendingChecks: PENDING, minutes: Math.round(minutes * 10) / 10, observedPrs: observed,
-    perMinute: { ghSpawns: rate("ghSpawns"), processesViaWrapper: Math.round(rate("ghSpawns") * 3 * 10) / 10, gcloudSpawns: rate("gcloudSpawns"), graphqlRequests: rate("graphql"), restRequests: rate("rest") },
+  const result = { prs: N, workspaces: W, repos: R, runningChecks: PENDING, merged: MERGED, closed: CLOSED, minutes: Math.round(minutes * 10) / 10, observedPrs: observed,
+    perMinute: { ghSpawns: rate("ghSpawns"), processesViaWrapper: Math.round(rate("ghSpawns") * 3 * 10) / 10, gcloudSpawns: rate("gcloudSpawns"), graphqlRequests: rate("graphql"), restRequests: rate("rest"), graphqlPointsPerHour: Math.round(rate("points") * 60) },
     workerCpuPct: Math.round(((await ticks()) - start.cpu) / hz / (minutes * 60) * 1000) / 10 };
   console.log(process.argv.includes("--json") ? JSON.stringify(result) : result);
   if (observed < N) { console.error(`only ${observed} of ${N} PRs observed`); process.exitCode = 1; }
