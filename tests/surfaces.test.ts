@@ -219,8 +219,9 @@ test("a past card's check is green only once its outcome landed; a pending Done 
   assert.equal(pastTone("answered", false), "success");
   assert.equal(pastTone("answered", true), "muted", "Done inside its Undo window (or still sending)");
   assert.equal(pastTone("superseded", false), "muted");
+  assert.equal(pastTone("signed", false), "success", "a signed-off card stays green (critique: an early draft greyed it for good)");
   const { readFile } = await import("node:fs/promises"); const { join } = await import("node:path");
   const view = await readFile(join(import.meta.dirname, "..", "client", "brief.tsx"), "utf8");
-  assert.match(view, /if \(marked\) return <Past [^\n]*pending /, "the locally marked Done renders as pending");
+  assert.match(view, /if \(marked\) return <Past [^\n]*pending=\{!sent\}/, "the locally marked Done renders as pending");
   assert.doesNotMatch(view.slice(view.indexOf("function Past"), view.indexOf("function Past") + 4000), /color=\{c\.statusSuccess\}/, "Past takes its colour from pastTone only");
 });

@@ -237,14 +237,16 @@ function Past({ b, c, now, compact, height, pending = false }: { b: Brief; c: Co
   const answered = b.state === "answered";
   const asked = askedDecisions(b);
   const picked = answered && asked.some(d => d.chosen);
-  const icon = b.state === "superseded" ? "History" : "CircleCheck";
+  // Pending reads as in progress (a dashed circle), and becomes the solid check when the send lands.
+  const icon = b.state === "superseded" ? "History" : pending ? "CircleDashed" : "CircleCheck";
+  const spoken = pending ? `Done, sending (undo available): ${b.ask}` : undefined;
   const color = pastTone(b.state, pending) === "success" ? c.statusSuccess : c.foregroundMuted;
   // A Done card already says "Done" as its outcome; its time stands alone rather than repeating it.
   const right = answered && b.outcomeAt ? (b.outcome === "Done" ? clock(b.outcomeAt) : `Answered ${clock(b.outcomeAt)}`) : age(b.outcomeAt ?? b.at, now);
   const body = expanded && <View style={{ gap: 10, paddingTop: 4 }}>
     <BriefBody b={b} c={c} compact={compact} tight={false} embedded height={height} mode="readonly" picks={{}} onPick={() => undefined} busy={null} />
   </View>;
-  if (!picked) return <View accessibilityLiveRegion="polite" style={{ marginVertical: 10, gap: 6, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: c.border }}>
+  if (!picked) return <View accessibilityLiveRegion="polite" accessibilityLabel={spoken} style={{ marginVertical: 10, gap: 6, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: c.border }}>
     <View style={{ flexDirection: "row", gap: 10, alignItems: answered ? "flex-start" : "center", minHeight: 24 }}>
       <View style={{ paddingTop: answered ? 2 : 0 }}><Icon name={icon} size={15} color={color} /></View>
       {answered && b.outcome !== "Done"
@@ -291,6 +293,8 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   const [why, setWhy] = useState(false);
   // Done collapses the card the moment it's pressed; the server's answered brief replaces this when the send lands.
   const [marked, setMarked] = useState<string | null>(null);
+  // The send landed: green at once, before the server's answered brief replaces the card.
+  const [sent, setSent] = useState(false);
   const picks = usePicks(b.id);
   const words = useWords(b.id);
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" } | null>(null);
@@ -298,7 +302,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), refetchInterval: BROWSER_POLL_MS, enabled: !!sheet });
   if (b.state !== "open") return <Past b={b} c={c} now={now} compact={compact} height={height} />;
   // Muted until the send lands: the server's answered brief then replaces this, green.
-  if (marked) return <Past b={{ ...b, state: "answered", outcome: "Done", outcomeAt: marked }} pending c={c} now={now} compact={compact} height={height} />;
+  if (marked) return <Past b={{ ...b, state: "answered", outcome: "Done", outcomeAt: marked }} pending={!sent} c={c} now={now} compact={compact} height={height} />;
 
   const attention = c.statusWarning;
   const flaggedAct = b.flagged && ACTS.includes(b.kind);
@@ -318,9 +322,9 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   // reopens the card with the reason; the toast keeps Retry, and Open brings the agent's chat back.
   const markDone = () => {
     if (busy || marked) return;
-    setError(null); setMarked(new Date().toISOString());
+    setError(null); setSent(false); setMarked(new Date().toISOString());
     const id = runUndoable("Telling the agent it's done", { label: "Done", toast, run: () => act({ agentId, briefId: b.id, move: "done" }), success: "Marked done. The agent has it.",
-      failure: "Done not sent", open: () => deps.openAgent(agentId), onError: e => { setMarked(null); setError(errorText(e)); } }, () => setMarked(null), `done:${b.id}`, () => deps.endDone?.(agentId));
+      failure: "Done not sent", open: () => deps.openAgent(agentId), onSuccess: () => setSent(true), onError: e => { setMarked(null); setError(errorText(e)); } }, () => setMarked(null), `done:${b.id}`, () => deps.endDone?.(agentId));
     // The pill's Undo is this toast's Undo: it closes the toast (so nothing is sent) and reopens the card.
     if (id !== null) deps.noteDone?.(agentId, () => { dismissToast(id); setMarked(null); });
   };
