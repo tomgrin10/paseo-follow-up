@@ -333,7 +333,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   const resend = () => {
     // Only a send in flight blocks it: a resolved card is never "actionable", but its undelivered answer can go again.
     if (sending || !b.answerId) return; setBusy("resend");
-    void runAction({ label: "Answer", toast, run: () => act({ agentId, briefId: b.id, answerId: b.answerId! }), success: () => null, failure: "Your answer wasn't sent again" }).finally(() => setBusy(null));
+    void runAction({ label: "Answer", toast, run: () => act({ agentId, briefId: b.id, answerId: b.answerId! }), success: () => null, reconcile, failure: "Your answer wasn't sent again" }).finally(() => setBusy(null));
   };
   if (shown.brief.state !== "open") return <Past b={shown.brief} c={c} now={now} compact={compact} height={height} onResend={b.answerId ? resend : undefined} resending={sending === "resend"} />;
   // Muted until the send lands: the server's answered brief then replaces this, green.
