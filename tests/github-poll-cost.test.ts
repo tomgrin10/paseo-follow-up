@@ -11,7 +11,7 @@ import { clock, pr } from "./fixtures";
 // read spawned the gh wrapper (~3 processes), settled PRs were re-read every 15 s tick, and the deploy probe described
 // every serving revision each minute. These tests pin the cost per tick so it can't creep back.
 
-type Row = { checksPending?: boolean; queued?: boolean; autoMerge?: boolean; state?: string; base?: string; rules?: "ok" | "error" | "truncated"; missing?: boolean; updated?: number };
+type Row = { optionalRunning?: boolean; checksPending?: boolean; queued?: boolean; autoMerge?: boolean; state?: string; base?: string; rules?: "ok" | "error" | "truncated"; missing?: boolean; updated?: number };
 function fakeGithub(rows: Map<string, Row>) {
   const calls = { graphql: 0, rest: 0, restPaths: [] as string[], perRepo: new Map<string, number>() };
   const ruleNodes = { pageInfo: { hasNextPage: false }, nodes: [{ type: "REQUIRED_STATUS_CHECKS", repositoryRuleset: { enforcement: "ACTIVE" }, parameters: { requiredStatusChecks: [{ context: "ci" }] } }, { type: "REQUIRED_STATUS_CHECKS", repositoryRuleset: { enforcement: "EVALUATE" }, parameters: { requiredStatusChecks: [{ context: "trial" }] } }] };
@@ -31,7 +31,7 @@ function fakeGithub(rows: Map<string, Row>) {
           reviewRequests: { pageInfo: { hasNextPage: false }, nodes: [] }, latestReviews: { pageInfo: { hasNextPage: false }, nodes: [] },
           baseRef: { branchProtectionRule: null, rules: row.rules === "truncated" ? { ...ruleNodes, pageInfo: { hasNextPage: true } } : row.rules === "error" ? null : ruleNodes, associatedPullRequests: { nodes: base === "main" ? [] : [{ number: Number(number) - 1, headRefName: base, state: "OPEN", headRepository: { nameWithOwner: repo } }] } },
           reviewThreads: { pageInfo: { hasNextPage: false }, nodes: [] },
-          commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false }, nodes: [{ name: "ci", status: row.checksPending ? "IN_PROGRESS" : "COMPLETED", conclusion: row.checksPending ? null : "SUCCESS" }] } } } }] },
+          commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false }, nodes: [{ name: "ci", status: row.checksPending ? "IN_PROGRESS" : "COMPLETED", conclusion: row.checksPending ? null : "SUCCESS" }, { name: "optional-e2e", status: row.optionalRunning ? "IN_PROGRESS" : "COMPLETED", conclusion: row.optionalRunning ? null : "SUCCESS" }] } } } }] },
         };
       }
       return { data: { repository }, ...(errors.length ? { errors } : {}) };
@@ -227,4 +227,18 @@ test("a first read is not a change: a settled repository backs off right after t
   for (let i = 0; i < 4; i++) { now += TICK_MS; await github.observe(prs, { background: true }); }
   assert.equal(f.calls.perRepo.get(prs[0].repo), 4, "the repository with pending checks: every tick");
   assert.equal(f.calls.perRepo.get(prs[1].repo), 1, "the settled one: once per POLL_IDLE_MS from the start");
+});
+
+test("a running non-required check also keeps every-tick reads: it can still fail and show", async () => {
+  let now = clock;
+  const { rows, prs } = fleet(4, 2, i => (i === 0 ? { optionalRunning: true } : {}));
+  const f = fakeGithub(rows);
+  const github = new Github(undefined, undefined, undefined, f.api, () => now);
+  const first = await github.observe(prs, { background: true });
+  assert.equal(first.get(prs[0].key)!.snapshot!.checksPending, false, "not required");
+  assert.equal(first.get(prs[0].key)!.snapshot!.checksRunning, true);
+  f.calls.perRepo.clear();
+  for (let i = 0; i < 4; i++) { now += TICK_MS; await github.observe(prs, { background: true }); }
+  assert.equal(f.calls.perRepo.get(prs[0].repo), 4);
+  assert.equal(f.calls.perRepo.get(prs[1].repo), 1);
 });
