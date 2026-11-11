@@ -456,7 +456,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       const sheet = phone => async page => {
         await openHome(page, { keepDialogs: true });
         if (phone) await page.setViewportSize(PHONE);
-        await page.getByRole("dialog").getByText("What's new in 2.0.0").first().waitFor().catch(() => page.getByText("What's new in 2.0.0").first().waitFor());
+        await page.getByRole("dialog").getByText("What's new in Follow-up 2.0.0").first().waitFor().catch(() => page.getByText("What's new in Follow-up 2.0.0").first().waitFor());
         // The notes' screenshots load by URL: wait until each has loaded or failed (a failed one is left out).
         await page.waitForFunction(() => [...document.images].every(i => i.complete), null, { timeout: 30000 });
       };
@@ -495,7 +495,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
         const whatsNewAt = vp => async page => {
           await openHome(page, { keepDialogs: true });
           await page.setViewportSize(vp);
-          await page.getByText("What's new in 2.0.0").first().waitFor();
+          await page.getByText("What's new in Follow-up 2.0.0").first().waitFor();
           await images(page);
         };
         /** Settings → Plugins → Follow-up → General → Release notes, See all. */
@@ -503,7 +503,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
           await page.setViewportSize(vp);
           await page.goto(`${ORIGIN}/settings/hosts/${SERVER_ID}/plugins/follow-up/projects`);
           await page.getByRole("button", { name: "See all" }).first().click();
-          await page.getByText("Release notes", { exact: true }).last().waitFor();
+          await page.getByText("Follow-up release notes", { exact: true }).last().waitFor();
           await images(page);
         };
         const viewer = (base, alt) => async page => {
@@ -514,6 +514,11 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
           // The viewer covers the window, not the dialog: its X sits in the window's top-right corner.
           const x = await page.getByRole("button", { name: "Close image" }).boundingBox(); const vp = page.viewportSize();
           if (!x || x.x + x.width < vp.width - 24 || x.y > 24) throw new Error(`the viewer is boxed in: its X is at ${JSON.stringify(x)} in ${vp.width}x${vp.height}`);
+        };
+        /** The notes' scroll container carries the scoped scrollbar style and shows a bar at rest (it takes width). */
+        const scrollbar = async page => {
+          const r = await page.evaluate(() => { const el = document.querySelector("[data-follow-up-notes-scroll]"); if (!el) return null; const s = getComputedStyle(el); return { gutter: el.offsetWidth - el.clientWidth, overflows: el.scrollHeight > el.clientHeight, styled: !!document.getElementById("follow-up-notes-scrollbar")?.textContent?.includes("::-webkit-scrollbar"), overflowY: s.overflowY }; });
+          if (!r || !r.styled || !r.overflows || r.gutter < 8) throw new Error(`the notes' scrollbar is not showing at rest: ${JSON.stringify(r)}`);
         };
         /** Esc closes the viewer, then the notes; a click on the viewer closes it. Throws (a failed shot) if not. */
         const escOrder = base => async page => {
@@ -531,12 +536,21 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
           await page.getByRole("button", { name: HOME_ALT }).first().waitFor({ state: "detached", timeout: 3000 });
         };
         const viewerOnly = argv.includes("--viewer-only");
+        if (argv.includes("--scrollbar-only")) {
+          for (const scheme of ["dark", "light"]) {
+            const sfx = scheme === "light" ? "-light" : "";
+            await shoot(`notes-1440${sfx}`, DESKTOP, scheme, async page => { await whatsNewAt(DESKTOP)(page); await scrollbar(page); }, { seen: WHATS_NEW_FROM });
+            await shoot(`release-notes-1440${sfx}`, DESKTOP, scheme, async page => { await releaseNotesAt(DESKTOP)(page); await scrollbar(page); }, { seen: WHATS_NEW_TO });
+          }
+          await shoot("notes-1180", NARROW, "dark", async page => { await whatsNewAt(NARROW)(page); await scrollbar(page); }, { seen: WHATS_NEW_FROM });
+          return;
+        }
         for (const scheme of viewerOnly ? [] : ["dark", "light"]) {
           const sfx = scheme === "light" ? "-light" : "";
           await shoot(`notes-2560${sfx}`, BIG, scheme, whatsNewAt(BIG), { seen: WHATS_NEW_FROM });
-          await shoot(`notes-1440${sfx}`, DESKTOP, scheme, whatsNewAt(DESKTOP), { seen: WHATS_NEW_FROM });
+          await shoot(`notes-1440${sfx}`, DESKTOP, scheme, async page => { await whatsNewAt(DESKTOP)(page); await scrollbar(page); }, { seen: WHATS_NEW_FROM });
           await shoot(`release-notes-2560${sfx}`, BIG, scheme, releaseNotesAt(BIG), { seen: WHATS_NEW_TO });
-          await shoot(`release-notes-1440${sfx}`, DESKTOP, scheme, releaseNotesAt(DESKTOP), { seen: WHATS_NEW_TO });
+          await shoot(`release-notes-1440${sfx}`, DESKTOP, scheme, async page => { await releaseNotesAt(DESKTOP)(page); await scrollbar(page); }, { seen: WHATS_NEW_TO });
           await shoot(`notes-phone${sfx}`, PHONE, scheme, sheet(true), { seen: WHATS_NEW_FROM });
           await shoot(`viewer-2560${sfx}`, BIG, scheme, viewer(whatsNewAt(BIG), HOME_ALT), { seen: WHATS_NEW_FROM });
           await shoot(`viewer-phone${sfx}`, PHONE, scheme, viewer(sheet(true), PANEL_ALT), { seen: WHATS_NEW_FROM });
@@ -667,7 +681,8 @@ try {
   log(`isolated daemon on 127.0.0.1:${port} (${paseoVersion}), root ${root}`);
 
   const { chromium } = createRequire(join(process.env.PLAYWRIGHT_CORE, "package.json"))("playwright-core");
-  browser = await chromium.launch({ executablePath: process.env.CHROMIUM, headless: true });
+  // Headless Chromium hides scrollbars by default; the notes review shows them, as the notes' bar is part of the review.
+  browser = await chromium.launch({ executablePath: process.env.CHROMIUM, headless: true, ...(argv.includes("--notes-review") ? { ignoreDefaultArgs: ["--hide-scrollbars"] } : {}) });
   const shoot = makeShooter({ browser, port, out, scheme, optimiser, results });
 
   // setup: the first step of Getting started, on this fresh install, before anything is seeded.
