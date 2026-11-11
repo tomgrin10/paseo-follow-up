@@ -22,6 +22,7 @@ import { tmpdir, homedir } from "node:os";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { createServer } from "node:net";
 import { harness, onShutdown } from "./harness.mjs";
+import { harnessEnv, applyEnv } from "./harness-env.mjs";
 
 const exec = promisify(execFile);
 const source = fileURLToPath(new URL("../", import.meta.url));
@@ -63,8 +64,7 @@ const root = await mkdtemp(join(tmpdir(), "follow-wait-install-"));
 const home = join(root, "paseo"); const userHome = join(root, "user"); const packedDirectory = join(root, "plugin"); const cwd = join(root, "work");
 await Promise.all([home, userHome, packedDirectory, cwd].map(path => mkdir(path, { recursive: true })));
 const actualClaude = liveClaude;
-const keys = ["HOME", "PASEO_HOME", "PASEO_DAEMON_URL", "PASEO_PASSWORD", "PASEO_PASSWORD_FILE", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "PASEO_AGENT_ID", "PASEO_WORKSPACE_ID", "PASEO_AGENT_CWD"];
-const original = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+const original = { ...process.env };
 const reservation = createServer(); await new Promise(resolve => reservation.listen(0, "127.0.0.1", resolve)); const port = reservation.address().port; await new Promise(resolve => reservation.close(resolve));
 const url = `ws://127.0.0.1:${port}/ws`;
 const pluginId = "follow-through";
@@ -151,8 +151,9 @@ async function runCase(workspaceId, label, command, maxWait, action) {
 }
 
 try {
-  Object.assign(process.env, { HOME: userHome, PASEO_HOME: home, PASEO_DAEMON_URL: url, CLAUDE_CONFIG_DIR: join(userHome, ".claude"), CODEX_HOME: join(userHome, ".codex") });
-  for (const key of ["PASEO_PASSWORD", "PASEO_PASSWORD_FILE", "PASEO_AGENT_ID", "PASEO_WORKSPACE_ID", "PASEO_AGENT_CWD"]) delete process.env[key];
+  // The daemon runs in this process, so process.env itself is the harness env. Only the Claude provider gets the
+  // real config dir (actualClaude, for credentials), explicitly; Follow-up's hooks land in userHome.
+  applyEnv(harnessEnv(root, { home: userHome, paseoHome: home, set: { PASEO_DAEMON_URL: url } }));
   await writeConfig();
   // Explicit activation only (as check-install.mjs): no tracking, so Follow-up doesn't call gh or a model here.
   await mkdir(join(home, "plugin-data", pluginId), { recursive: true });
@@ -219,7 +220,7 @@ try {
   result.error = error.stack; log("FAIL", { message: error.message, root, lastTimeline: result.lastTimeline }); process.exitCode = 1;
 } finally {
   await client?.close().catch(() => {}); await daemon?.stop().catch(error => { result.cleanupError = error.message; });
-  for (const key of keys) { if (original[key] === undefined) delete process.env[key]; else process.env[key] = original[key]; }
+  applyEnv(original);
   if (process.argv.includes("--output")) await writeFile(process.argv[process.argv.indexOf("--output") + 1], JSON.stringify(result, null, 2) + "\n");
   if (!result.error) await rm(root, { recursive: true, force: true });
   else log("failure_evidence", { directory: root });
