@@ -448,6 +448,14 @@ export function sendBar(b: Pick<Brief, "decisions">, picks: Record<string, strin
 /** How many asked decisions have a pick, for the card's "1 of 3 picked". */
 export const pickedCount = (b: Pick<Brief, "decisions">, picks: Record<string, string>) => askedDecisions(b).filter(d => picks[d.id]).length;
 /** The answered card's summary (1.4.0): each asked decision's question (numbered when there are several) and the pick. */
+/**
+ * A past card's check: green once its outcome has landed on the daemon. A Done still waiting on its toast's Undo
+ * window (or its send) is muted: nothing has happened yet, and green would claim it had.
+ */
+export function pastTone(state: Brief["state"], pending: boolean): "success" | "muted" {
+  return state === "superseded" || pending ? "muted" : "success";
+}
+
 export function pastRows(b: Pick<Brief, "decisions" | "ask">): { id: string; question: string | null; answer: string | null }[] {
   const asked = askedDecisions(b); const numbered = asked.length > 1;
   return asked.map((d, i) => ({ id: d.id, question: numbered || d.question.trim() !== b.ask.trim() ? `${numbered ? `${i + 1}. ` : ""}${d.question}` : null, answer: pickLabel(d) }));

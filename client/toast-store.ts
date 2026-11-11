@@ -145,13 +145,17 @@ export function runUndoable<T>(message: string, opts: ActionSpec<T>, onUndo: () 
     onExpire: () => { void runAction({ ...opts, success: null }, key).finally(() => onEnd?.()); } });
 }
 
-export type KeyLike = { key: string; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; target: unknown };
+export type KeyLike = { key: string; code?: string; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; target: unknown };
 /**
  * Ctrl+Z (Cmd+Z on a Mac) while an Undo toast shows: the newest one's Undo, as if pressed. Only then, and never while
  * typing (a text field keeps its own undo) or with Shift (redo). True when it acted, so the caller stops the key.
  */
 export function undoShortcut(e: KeyLike, mac: boolean): boolean {
-  if (e.key.toLowerCase() !== "z" || e.shiftKey || e.altKey || (mac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey)) return false;
+  // A Latin layout's own letter decides (AZERTY, QWERTZ, Dvorak); a non-Latin one (Hebrew ז, Cyrillic я) reports the
+  // physical key instead, so KeyZ stands in only there.
+  const letter = e.key.toLowerCase();
+  const z = /^[a-z]$/.test(letter) ? letter === "z" : e.code === "KeyZ";
+  if (!z || e.shiftKey || e.altKey || (mac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey)) return false;
   const t = e.target as { tagName?: string; isContentEditable?: boolean } | null;
   if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/i.test(t.tagName ?? ""))) return false;
   const toast = [...items].reverse().find(x => x.actions.some(a => a.label === "Undo"));
