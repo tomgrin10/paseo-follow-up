@@ -36,7 +36,7 @@ const exec = promisify(execFile);
 const argv = process.argv.slice(2);
 const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : fallback; };
 // What's new reinstalls the plugin as 2.0.0-rc.0, so it goes last: every other shot shows the version under test.
-const SHOTS = ["setup", "home", "panel", "questions", "pill", "pr-sheet", "phone", "context-menu", "linked-items", "whats-new"];
+const SHOTS = ["setup", "home", "panel", "questions", "pill", "pr-sheet", "phone", "context-menu", "linked-items", "notes-home", "notes-panel", "whats-new"];
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
 for (const name of only) if (!SHOTS.includes(name)) fail(`unknown shot "${name}" (known: ${SHOTS.join(", ")})`);
 const scheme = arg("--scheme");
@@ -421,6 +421,22 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       await sheet.getByText("Added by you").first().waitFor();
       // Desktop focuses the filter field once the sheet opens; wait for it, so capture's blur clears the focus ring.
       await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Filter, or paste a link or key");
+    });
+    // The 2.0.0 notes' two images (What's new and the GitHub page): the same scenes as home and panel, cropped to what
+    // a ~500px sheet can show legibly. Home without Paseo's own sidebar; the panel's head (its tab, the status line, the
+    // stack bar, Auto-send), which the sheet shows near full width, so shoot it with --scale 3 to stay sharp.
+    // The rectangles are CSS pixels of the 1440x900 DESKTOP viewport. CHANGELOG.md pins them to a commit, never main.
+    if (name === "notes-home") await shoot("notes-home", DESKTOP, "dark", async page => {
+      await openHome(page);
+      await (await homeRow(page, "Billing retries")).click();
+      await page.getByText("Only network failures").first().waitFor();
+      return { x: 320, y: 0, width: 1120, height: 680 };
+    });
+    if (name === "notes-panel") await shoot("notes-panel", DESKTOP, "dark", async page => {
+      await openChat(page, "Billing retries", billing.prompt);
+      await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+      await page.getByRole("button", { name: /^Pull request 142: / }).first().waitFor();
+      return { x: 1120, y: 0, width: 320, height: 298 };
     });
     if (name === "whats-new") {
       // The packed copy Paseo runs: the path its plugin list reports (the unpacked folder for a directory install).
