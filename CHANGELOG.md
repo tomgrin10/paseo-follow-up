@@ -110,6 +110,8 @@ Follow-up borrows ideas from [Progress](https://github.com/stevecastaneda/paseo-
 - Follow-up updates itself: Install automatically, Tell me or Off, on the Stable or Beta channel. It installs only when no agent is busy and goes back to the old version if the new one fails.
 - What's new pops up only after a major update, once per device.
 - With reduced motion on, setup's steps show at once.
+- Installed from Paseo's plugin list? Follow-up moves to its new plugin id by itself there too, keeping your workspaces and settings.
+- What's new shows screenshots of what it describes.
 
 ### Phone and performance
 
