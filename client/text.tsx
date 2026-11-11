@@ -9,6 +9,9 @@ import { CONTROL_ROLES, selectableFor } from "./text-rules";
  */
 const InControl = createContext(false);
 
+/** Content inside a control that a person may still copy, such as an option card's description: selectable on web. */
+export const copyable: true | undefined = Platform.OS === "web" ? true : undefined;
+
 export const Text = forwardRef<ElementRef<typeof RNText>, TextProps>(function Text(props, ref) {
   const inControl = useContext(InControl);
   return <RNText ref={ref} {...props} selectable={selectableFor(props.selectable, inControl, Platform.OS)} />;

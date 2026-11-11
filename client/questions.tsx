@@ -3,7 +3,7 @@
 // (@stevecastaneda/paseo-progress, MIT, © 2026 Steve Castaneda); see THIRD_PARTY_NOTICES.md.
 import { useEffect, useState } from "react";
 import { View } from "react-native";
-import { Pressable, Text } from "./text";
+import { Pressable, Text, copyable } from "./text";
 import { openExternalUrl, useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, ScrollView, TextInput, copyText, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -70,7 +70,7 @@ export function OptionCard({ theme, letter, label, consequence, recommended, sel
           : <Text style={t.label}>{letter ? <><Text style={{ fontVariant: ["tabular-nums"] }}>{letter}</Text>{"  "}</> : null}<RichText linkColor={c.foreground} style={t.label}>{label}</RichText></Text>}
         {recommended && <Chip theme={theme} icon="ThumbsUp" label="Recommended" color={c.foregroundMuted} />}
       </View>
-      {!!consequence && <RichText linkColor={c.foreground} numberOfLines={dense ? 2 : undefined} style={t.meta}>{consequence}</RichText>}
+      {!!consequence && <RichText selectable={copyable} linkColor={c.foreground} numberOfLines={dense ? 2 : undefined} style={t.meta}>{consequence}</RichText>}
     </View>
   </Pressable>;
 }
