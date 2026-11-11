@@ -1,4 +1,4 @@
-import { STOP_WAIT_MS, settleWithin } from "./teardown";
+import { settleWithin, stopDeadline, type Deadline } from "./teardown";
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -23,8 +23,12 @@ export class Store {
   private saved: State | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private flushing: Promise<void> | null = null;
-  /** Set by close(): no mutation commits after it (worker-stop-never-waits-on-a-stuck-pass). */
-  private closed = false;
+  /**
+   * Set by close() (worker-stop-never-waits-on-a-stuck-pass). `closing`: new mutations are refused at once. `sealed`:
+   * close stopped waiting on the queue at the deadline, so a mutation still running commits nothing.
+   */
+  private closing = false;
+  private sealed = false;
   /**
    * Called inside each mutation with the new state, before it returns, so files derived from it (scopes.json)
    * are current as soon as the mutation is, independent of the batched state.json write. It runs inside the write
@@ -72,11 +76,13 @@ export class Store {
   }
   /** Runs a mutation in order. A null `next` means nothing changed: the state, the pending write and derived files stay as they are. */
   private apply<T>(work: (current: State) => Promise<{ value: T; next: State | null }>): Promise<T> {
+    if (this.closing) return Promise.reject(stopping());
     const next = this.tail.then(async () => {
-      if (this.closed) throw stopping();
+      if (this.sealed) throw stopping();
       const { value, next } = await work(await this.load());
-      // A mutation that was in flight when the worker stopped (its work awaited a daemon that answered late) is dropped.
-      if (this.closed) throw stopping();
+      // Accepted before the worker stopped: it commits if it finished before the stop's deadline, and is dropped if
+      // it finished after (its work awaited a daemon that answered late).
+      if (this.sealed) throw stopping();
       if (next) {
         // Write-through keeps the old contract: a failed write leaves the saved state as it was. The draft may hold
         // objects owned by callers (observations), so only the validated copy the write returns is frozen.
@@ -102,17 +108,22 @@ export class Store {
     await this.flushing;
   }
   /**
-   * The worker's last word on its state: refuses every mutation from now on, waits a bounded time for the one in
-   * flight (which then can't commit), and writes changes still pending from batched mutations. Never throws.
+   * The worker's last word on its state. Refuses new mutations at once; mutations already accepted commit if they
+   * finish by `work`, and anything finishing later is dropped. Then it writes what is pending, by `save` (the end of
+   * the stop's deadline). Given ms (or nothing), it splits a deadline that far from now. Never throws.
    */
-  async close(ms = STOP_WAIT_MS): Promise<void> {
-    this.closed = true;
-    await settleWithin(this.tail, ms);
+  async close(within?: number | Deadline, save?: Deadline): Promise<void> {
+    let work: Deadline;
+    if (within === undefined || typeof within === "number") ({ work, save } = stopDeadline(within));
+    else { work = within; save ??= within; }
+    this.closing = true;
+    await settleWithin(this.tail, work);
+    this.sealed = true;
     const pending = this.timer !== null;
     if (this.timer) { clearTimeout(this.timer); this.timer = null; }
-    if (this.flushing) await settleWithin(this.flushing, ms);
+    if (this.flushing) await settleWithin(this.flushing, save);
     const current = this.state;
-    if (pending && current) await settleWithin(this.write(current).then(saved => { if (this.state === current) this.state = saved; }), ms);
+    if (pending && current) await settleWithin(this.write(current).then(saved => { if (this.state === current) this.state = saved; }), save);
   }
   private schedule(): void {
     this.timer ??= setTimeout(() => { this.timer = null; void this.flush().catch(() => undefined); }, this.writeMs);
