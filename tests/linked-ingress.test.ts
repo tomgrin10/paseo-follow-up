@@ -40,7 +40,7 @@ test("timeline: receipts and the developer's words are strong, agent prose weak,
     tool(4, "Bash", { command: "git log --grep HER-999" }),
     tool(5, "mcp__mcpproxy__slack-user__slack_read_thread", { channel_id: "C0DEF", message_ts: "1731230001.000100" }),
     tool(6, "agent_message", { text: "From the lead: OPS-80 too" }),
-    user(7, "Workspace follow-through batch b1: fix HER-5000"),
+    user(7, "Workspace Follow-up batch b1: fix HER-5000"),
     tool(8, "mcp__mcpproxy__linear__get_issue", { id: "HER-1401" }, "failed"),
   ]);
   const by = Object.fromEntries(refs.map(r => [r.raw, r.strong]));

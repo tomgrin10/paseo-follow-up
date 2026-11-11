@@ -10,7 +10,7 @@ import { Button, text, type Theme } from "./kit";
 import { useReducedMotion } from "./motion";
 import { useTick } from "./home-data";
 
-export const aboutKey = (workspaceId: string) => ["follow-through", "about", workspaceId] as const;
+export const aboutKey = (workspaceId: string) => ["follow-up", "about", workspaceId] as const;
 
 /**
  * The Summary: one sentence under the workspace's title saying what it's for (Tom, 2026-11-10). One read shape for

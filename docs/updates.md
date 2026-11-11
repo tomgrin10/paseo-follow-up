@@ -60,7 +60,44 @@ Updates part of Settings → General (`UpdatesSections` in `client/updates.tsx`)
    check. Paseo itself refuses a build that can't load while applying it, which shows as "Couldn't install".
 6. `VersionsStore.started` treats a downgrade as no update, so a rollback never shows "Updated to" or What's new.
 
-## Data files (plugin-data/follow-through)
+## Moving from 1.x
+
+Paseo never changes an installed plugin's id: an update or the 1.x auto-updater keeps the id the plugin was installed
+under (checked on Paseo 0.15.4 and 0.16 in an isolated harness), and a plain install of the new id sits next to the
+old one. 1.x ran under an older id and data directory (`shared/legacy.ts` names both), so 2.0 moves itself once.
+
+- **Data** (`server/data-move.ts`): the first 2.0 start that finds `plugin-data/follow-up` missing copies 1.x's
+  directory to a temporary sibling and renames it into place. It runs synchronously at the top of `contribute()`,
+  skips files that belong to a live process (`worker.lock`, `heartbeat.json`, `update-watchdog.lock`,
+  `hooks-enabled.json`), waits up to 10 s for a 1.x worker that still holds the old lock, and writes
+  `migrated-from.json` (with the old `state.json`'s time). A second start finds the directory and does nothing, unless
+  1.x wrote its `state.json` after the copy (a failed 2.0 start was rolled back to 1.x): then the stale copy is kept
+  as `.follow-up.before-<time>` and the data is copied again. The old directory is never deleted.
+  Two compatibility files are written there: `mcp.mjs` becomes a shim that runs the current bridge (1.x recovery
+  agents run that path), and `heartbeat.json` is written next to the new one while the old directory exists, because
+  a 1.x installer on probation reads it (drop that in the release after 2.0.0). Wait jobs prepared before the move
+  keep their receipts in the old `wait/jobs`; `server/wait-jobs.ts` looks there for a job it can't find.
+  The 1.x installer that installed 2.0 logs the end of its probation (`applied`, `updated`) in the old `updates.jsonl`,
+  after 2.0's first start made the copy; `readEvents` (`server/updater.ts`) adds the old file's events newer than
+  `migrated-from.json`, so the update history ends with that update (drop that with the heartbeat).
+- **Plugin id** (`server/plugin-move.ts`, run by `runMove` in `server/update-watchdog.mjs`): an npm install still
+  under the old id waits for the same quiet rule as an update (no agent mid-turn, nothing busy, a quiet stretch) and
+  for no installer to be alive, Follow-up's or a 1.x one still on probation (its lock is in the old directory). Then
+  the watchdog copies `plugin-settings/<old>/` to `plugin-settings/follow-up/` (Paseo deletes a plugin's settings
+  when it's removed), disables the old id (never two workers), installs the same version from npm (which takes the
+  manifest's id), runs probation, and removes the old id only after it passed. Any failure removes the new id and
+  enables the old one again, which is still on disk. Each step goes to `updates.jsonl` (`moving`, `move-installed`,
+  `moved`, `move-rolling-back`, `move-rolled-back`, `move-failed`). A move that failed isn't retried by itself.
+- **What you see**: one quiet line in Settings → General ("Moved to Follow-up's new plugin id", or why it went back,
+  with Try again). `updates_status` reports the same as `move`, and `retry_move` (planned) is Try again. Git and
+  local installs can't reinstall themselves; the line says how to move by hand.
+- **Labels, prefixes, env, registrations**: recovery agents 1.x started keep their labels and `isRecovery` accepts
+  both; old batch and recovery prefixes in transcripts are recognised (`splitBatchText`, `isPluginPrompt`); sessions
+  opened before the upgrade keep 1.x's env names, which the hook and bridge still read (the worker writes them with a
+  prelude from `withRuntimePrelude`); the hook reconcile drops both markers; the bridge and the worker call the
+  plugin under either id (`invokeSelf`).
+
+## Data files (plugin-data/follow-up)
 
 `updates.json` (mode, channel, dismissed notices, the waiting update, provenance and notes caches),
 `registry.json` (the last npm answer), `updates.jsonl` (every install step), `heartbeat.json`,

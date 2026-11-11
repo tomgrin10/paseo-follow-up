@@ -43,11 +43,11 @@ if (args.includes('POST')) {
 await writeFile(join(preview.root, "bin/gh"), gh); await chmod(join(preview.root, "bin/gh"), 0o700);
 const client = new DaemonClient({ url: `ws://127.0.0.1:${preview.port}/ws`, clientId: "reviewer-concurrency", clientType: "cli", reconnect: { enabled: false } });
 await client.connect(); const api = createPaseoApi(client);
-const call = (method, input) => client.invokePluginRpc("follow-through", method, input);
+const call = (method, input) => client.invokePluginRpc("follow-up", method, input);
 const directory = join(preview.root, "concurrent-reviewer-workspace"); await mkdir(directory, { recursive: true });
 const title = `Reviewer concurrency fixture ${Date.now()}`;
 const w = await api.workspaces.create({ title, source: { kind: "directory", path: directory } });
-const agent = await w.agents.create({ config: { provider: "followthrough-fixture/fixture", model: "fixture" }, title: "Synthetic main" });
+const agent = await w.agents.create({ config: { provider: "followup-fixture/fixture", model: "fixture" }, title: "Synthetic main" });
 await call("follow.activate", { workspaceId: w.id });
 await call("follow.save-reviewers", { repo: "herosecurity/hero-poc", reviewers: [{ login: "uyy-hero-security", name: "Uri" }, { login: "yuvalgoder-star", name: "Yuval" }] });
 for (const number of [1, 2]) await call("follow.register-pr", { agentId: agent.id, repo: "herosecurity/hero-poc", number, stack: "Synthetic reviewer stack" });

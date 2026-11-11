@@ -20,7 +20,7 @@ Screenshots use synthetic workspaces and PRs.
 paseo plugin install paseo-follow-up
 ```
 
-Needs Node 22+ and an authenticated GitHub CLI (`gh`) on the daemon host. The installed plugin ID stays `follow-through`, so existing settings and tracked work carry over.
+Needs Node 22+ and an authenticated GitHub CLI (`gh`) on the daemon host. The installed plugin ID stays `follow-up`, so existing settings and tracked work carry over.
 
 ## Getting started
 
@@ -51,7 +51,7 @@ Follow-up can update itself. **Settings → General** has three modes:
 
 Follow-up asks npm about once every six hours (one small request, nothing when unchanged), opening Settings → General checks at most once a minute, and **Check now** always asks. **Channel** picks Stable (`latest`) or Beta; it starts on Beta when you run a beta, and never offers a stable older than what you run.
 
-Before installing a version on its own, Follow-up reads the version's npm provenance and checks that it was built by this repository's GitHub workflow and is the exact file npm serves. That file's checksum is then pinned for the install. Follow-up does not verify the provenance signature itself, so this guards against a version published by hand or from another repository, not against a compromised registry. A version that fails the check is never installed from Settings; install it by hand with `paseo plugin update follow-through --version <version>` only if you trust it.
+Before installing a version on its own, Follow-up reads the version's npm provenance and checks that it was built by this repository's GitHub workflow and is the exact file npm serves. That file's checksum is then pinned for the install. Follow-up does not verify the provenance signature itself, so this guards against a version published by hand or from another repository, not against a compromised registry. A version that fails the check is never installed from Settings; install it by hand with `paseo plugin update follow-up --version <version>` only if you trust it.
 
 An installer runs alongside Follow-up for the install and the ten minutes after it. If the new version fails to load, reports an error, or doesn't start within two minutes, it installs the previous version again, and Settings and Home say what happened. Follow-up doesn't retry a rolled-back version on its own. Every update is listed under **Update history**. Installs from a Git checkout or a local folder are left alone: pull and rebuild to update.
 
@@ -238,7 +238,7 @@ This replaces the separate **Wait** plugin (`paseo-wait`). While that plugin is 
 Install the beta:
 
 ```sh
-paseo plugin update follow-through --version 1.4.0-beta.68
+paseo plugin update follow-up --version 1.4.0-beta.68
 # or, for a fresh install:
 paseo plugin install npm:paseo-follow-up@beta
 ```
@@ -246,7 +246,7 @@ paseo plugin install npm:paseo-follow-up@beta
 Go back to the stable release (the inbox file stays on disk and is ignored by 1.0.1):
 
 ```sh
-paseo plugin update follow-through --version 1.0.1
+paseo plugin update follow-up --version 1.0.1
 ```
 
 Betas publish to npm's `beta` dist-tag, so `paseo plugin update` without `--version`, and scheduled updates that follow `latest`, never pick one up.
@@ -282,7 +282,7 @@ With [Send to Paseo](https://github.com/tomgrin10/send-to-paseo) on the same dae
 
 ## Data and access
 
-Paseo plugins run trusted, unsandboxed code on the daemon host. Follow-up reads workspace metadata, agent history and GitHub PR status with your existing credentials, and keeps its state in `$PASEO_HOME/plugin-data/follow-through`. It registers scoped MCP tools and reversible provider hooks only for tracked sessions, plus the action tools for root agents (above). GitHub (and, in Graphite repositories, Graphite) writes happen only after an explicit click, or a root agent's confirmed plan, and a fresh eligibility check.
+Paseo plugins run trusted, unsandboxed code on the daemon host. Follow-up reads workspace metadata, agent history and GitHub PR status with your existing credentials, and keeps its state in `$PASEO_HOME/plugin-data/follow-up`. It registers scoped MCP tools and reversible provider hooks only for tracked sessions, plus the action tools for root agents (above). GitHub (and, in Graphite repositories, Graphite) writes happen only after an explicit click, or a root agent's confirmed plan, and a fresh eligibility check.
 
 ## Development
 
@@ -290,7 +290,7 @@ Paseo plugins run trusted, unsandboxed code on the daemon host. Follow-up reads 
 npm ci
 npm run verify
 npm run test:install
-paseo plugin reload follow-through   # after changes
+paseo plugin reload follow-up   # after changes
 ```
 
 Integration checks use a separate Paseo home with synthetic agents. Working on Follow-up with an agent? Start at [AGENTS.md](AGENTS.md): the architecture map, a file index per subsystem, the invariants, and the docs in [docs/](docs/).

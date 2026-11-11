@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { followShellCall, followToolName, parseBatchPrompt, readText, toolRow, toolRowSchema, batchCardSchema } from "../shared/chat";
 
 test("Follow-up tools are recognised under Claude and Codex names only", () => {
-  assert.equal(followToolName("mcp__follow-through__register_pr"), "register_pr");
-  assert.equal(followToolName("follow-through.declare_done"), "declare_done");
+  assert.equal(followToolName("mcp__follow-up__register_pr"), "register_pr");
+  assert.equal(followToolName("follow-up.declare_done"), "declare_done");
   assert.equal(followToolName("mcp__other__register_pr"), null);
-  assert.equal(followToolName("mcp__follow-through__unknown_tool"), null);
+  assert.equal(followToolName("mcp__follow-up__unknown_tool"), null);
   assert.equal(followToolName("register_pr"), null, "a bare name could belong to any server");
   // 1.4.0-beta.2: served through Paseo's own MCP.
   assert.equal(followToolName("mcp__paseo__follow_register_pr"), "register_pr");
@@ -16,19 +16,19 @@ test("Follow-up tools are recognised under Claude and Codex names only", () => {
 });
 
 test("the CLI fallback is recognised with its JSON input, including escaped quotes", () => {
-  const call = followShellCall(`FOLLOW_THROUGH_CLIENT_ENTRY='/x/y.js' node '/home/u/.paseo/plugin-data/follow-through/mcp.mjs' call update_obligation '{"title":"Verify the user'"'"'s rollout","status":"done"}'`);
+  const call = followShellCall(`FOLLOW_UP_CLIENT_ENTRY='/x/y.js' node '/home/u/.paseo/plugin-data/follow-up/mcp.mjs' call update_obligation '{"title":"Verify the user'"'"'s rollout","status":"done"}'`);
   assert.deepEqual(call, { tool: "update_obligation", input: { title: "Verify the user's rollout", status: "done" } });
   assert.equal(followShellCall("npm test"), null);
-  assert.deepEqual(followShellCall("node ~/.paseo/plugin-data/follow-through/mcp.mjs call workspace_status"), { tool: "workspace_status", input: {} });
+  assert.deepEqual(followShellCall("node ~/.paseo/plugin-data/follow-up/mcp.mjs call workspace_status"), { tool: "workspace_status", input: {} });
 });
 
 test("repair batches become cards and ordinary messages stay untouched", () => {
-  const card = parseBatchPrompt("Follow-through batch 9b2\n\n1. Resolve merge conflicts on acme/app#2\n2. Use /fix-pr for acme/app#3 (2 open threads)");
+  const card = parseBatchPrompt("Follow-up batch 9b2\n\n1. Resolve merge conflicts on acme/app#2\n2. Use /fix-pr for acme/app#3 (2 open threads)");
   assert.deepEqual(card?.tasks, ["Resolve merge conflicts on acme/app#2", "Use /fix-pr for acme/app#3 (2 open threads)"]);
   assert.ok(batchCardSchema.safeParse(card).success);
-  assert.equal(parseBatchPrompt("Follow-through recovery abc\n\nWorkspace: X")?.kind, "recovery");
-  assert.equal(parseBatchPrompt("Please follow-through on the batch"), null);
-  assert.equal(parseBatchPrompt("Follow-through batch 1\n\nno numbered tasks"), null);
+  assert.equal(parseBatchPrompt("Follow-up recovery abc\n\nWorkspace: X")?.kind, "recovery");
+  assert.equal(parseBatchPrompt("Please follow-up on the batch"), null);
+  assert.equal(parseBatchPrompt("Follow-up batch 1\n\nno numbered tasks"), null);
 });
 
 test("tool rows say what changed in one line", () => {
@@ -57,14 +57,14 @@ test("tool output text is read from Claude and Codex result shapes", () => {
 
 test("question and spec tools read as one line; answers sent from Follow-up become a card", async () => {
   const { parseAnswerMessage, answerMessage } = await import("../shared/questions");
-  assert.equal(followToolName("mcp__follow-through__ask_question"), "ask_question");
+  assert.equal(followToolName("mcp__follow-up__ask_question"), "ask_question");
   const asked = toolRow("ask_question", "completed", { title: "Retry window", question: "How long should retries run?" }, JSON.stringify({ question: { id: "Q4", title: "Retry window" }, mode: "work-around", instruction: "Asked Q4. Question mode: Work around." }));
   assert.equal(asked.line, "Q4 · Retry window · asked"); assert.equal(asked.tone, "warning"); assert.match(asked.more!, /How long should retries run\?\n\nAsked Q4/);
   assert.equal(toolRow("record_answer", "completed", { id: "Q4", choice: "B" }, "{}").line, "Q4 · answer recorded: B");
   assert.equal(toolRow("withdraw_question", "completed", { id: "Q4", reason: "Settled in review" }, "{}").line, "Q4 · withdrawn: Settled in review");
   assert.equal(toolRow("set_spec", "completed", { url: "https://claude.ai/code/artifact/abc" }, JSON.stringify({ applied: true, message: "Spec link saved." })).line, "Spec link: claude.ai");
   assert.equal(toolRow("set_spec", "completed", { url: "https://claude.ai/code/artifact/abc", title: "Retry spec" }, JSON.stringify({ applied: false, message: "The developer chose…" })).line, "Spec link kept · the developer chose it");
-  assert.deepEqual(followShellCall(`node ~/.paseo/plugin-data/follow-through/mcp.mjs call set_spec '{"url":"https://claude.ai/artifact/x"}'`), { tool: "set_spec", input: { url: "https://claude.ai/artifact/x" } });
+  assert.deepEqual(followShellCall(`node ~/.paseo/plugin-data/follow-up/mcp.mjs call set_spec '{"url":"https://claude.ai/artifact/x"}'`), { tool: "set_spec", input: { url: "https://claude.ai/artifact/x" } });
   const q = { id: "Q4", title: "Retry window", question: "How long?", options: [{ letter: "B", label: "A day" }], recommend: "B", big: null, background: null, links: [], prKey: null, taskId: null, taskRevision: null, askedBy: "main-agent", askedAt: "2026-11-04T08:00:00Z", mode: "work-around" as const, answer: null, closed: null };
   assert.deepEqual(parseAnswerMessage(answerMessage(q, "B", "Alert after that")), { id: "Q4", title: "Retry window", choice: "B", label: "A day", words: "Alert after that" });
   assert.equal(parseBatchPrompt(answerMessage(q, "B")), null, "an answer is not a repair batch");

@@ -4,7 +4,8 @@ import { Pressable, Text } from "./text";
 import { openExternalUrl, useRpc } from "@getpaseo/plugin/client";
 import { Icon, SettingsAction, SettingsCard, SettingsSection, SettingsSelect, copyText, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { dismissUpdateNoticeRpc, installUpdateRpc, setUpdatesRpc, updatesRpc } from "../shared/contracts";
+import { dismissUpdateNoticeRpc, installUpdateRpc, retryMoveRpc, setUpdatesRpc, updatesRpc } from "../shared/contracts";
+import { moveLine } from "../shared/plugin-move";
 import { MODE_HINT, MODE_LABEL, UPDATE_MODES, channelHint, checkedText, copyCommand, statusCopy, versionMark, type StatusAction, type UpdateMode, type UpdatesView } from "../shared/updates";
 import { writeCategory } from "../shared/settings-nav";
 import type { Channel } from "../shared/version";
@@ -15,7 +16,7 @@ import { withAlpha } from "./theme";
 import { OptionCard } from "./questions";
 import { ReleaseNotesSheet, VersionNotes } from "./release-notes";
 
-export const updatesKey = ["follow-through", "updates"];
+export const updatesKey = ["follow-up", "updates"];
 
 /** The server's updates view. Reading it never asks the registry; `check` does (rate-limited on the server). */
 export function useUpdates(check?: "settings") {
@@ -114,6 +115,20 @@ function StatusCard({ view, theme, compact, onWhatsNew }: { view: UpdatesView; t
   </View>;
 }
 
+/** 2.0's one-time move to its new plugin id: one quiet line, with Try again after a rollback. Never a popup. */
+function MoveLine({ view, theme, compact }: { view: UpdatesView; theme: Theme; compact: boolean }) {
+  const c = theme.colors; const t = text(c);
+  const retry = useRpc(retryMoveRpc); const cache = useQueryClient(); const toast = useToast();
+  const run = useMutation({ mutationFn: () => retry({}), onSuccess: v => cache.setQueryData(updatesKey, v), onError: e => toast.error(errorText(e)) });
+  const line = view.move ? moveLine(view.move) : null;
+  if (!line || !view.move) return null;
+  const failed = view.move.phase === "rolled-back" || view.move.phase === "failed";
+  return <View style={{ flexDirection: compact ? "column" : "row", alignItems: compact ? "stretch" : "center", gap: 8, paddingHorizontal: 2 }}>
+    <Text style={[t.small, { flex: compact ? undefined : 1, color: failed ? c.statusWarning : c.foregroundMuted }]}>{line}</Text>
+    {failed && <Button title="Try again" kind="ghost" theme={theme} compact={compact} loading={run.isPending} onPress={() => run.mutate()} />}
+  </View>;
+}
+
 const HISTORY_RESULT: Record<string, string> = { updated: "Updated", "rolled-back": "Rolled back", failed: "Failed", skipped: "Skipped" };
 const stamp = (at: number) => { const d = new Date(at); return `${d.toLocaleDateString(undefined, { day: "numeric", month: "short" })} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
 
@@ -134,6 +149,7 @@ export function UpdatesSections({ theme, compact }: { theme: Theme; compact: boo
   return <View style={{ gap: 18 }}>
     <SettingsSection title="Updates">
       <StatusCard view={view} theme={theme} compact={compact} onWhatsNew={() => setSheet(false)} />
+      <MoveLine view={view} theme={theme} compact={compact} />
     </SettingsSection>
     <SettingsSection title={view.installKind === "npm" ? "How Follow-up updates" : "Release notes"}>
       <SettingsCard>

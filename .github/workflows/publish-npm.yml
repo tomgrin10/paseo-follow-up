@@ -149,7 +149,7 @@ jobs:
             *-*)
               stable="$(npm view paseo-follow-up dist-tags.latest --registry https://registry.npmjs.org)"
               channel=(--prerelease --latest=false)
-              install="\`paseo plugin update follow-through --version ${RELEASE_TAG#v}\` (beta). Return to stable with \`paseo plugin update follow-through --version ${stable}\`" ;;
+              install="\`paseo plugin update follow-up --version ${RELEASE_TAG#v}\` (beta). Return to stable with \`paseo plugin update follow-up --version ${stable}\`" ;;
             *) channel=(--latest); install='`paseo plugin install paseo-follow-up`' ;;
           esac
           cat > /tmp/release-notes.md <<'NOTES'
@@ -157,7 +157,7 @@ jobs:
 
           Install with: INSTALL_LINE on Paseo 0.14.0 or newer.
 
-          The installation ID remains `follow-through` to preserve saved work and settings.
+          The installation ID remains `follow-up` to preserve saved work and settings.
           This release passed plugin verification, isolated packed installation checks,
           and npm registry integrity verification before these notes were published.
           NOTES

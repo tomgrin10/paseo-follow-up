@@ -16,7 +16,7 @@ not a patch for one instance.
 - **Shared code.** Most logic is pure and lives in `shared/`, so tests target it directly.
 - **Fixtures.** `tests/fixtures.ts` builds workspaces, PRs, snapshots and a clock.
 - **A clean environment.** `npm test` preloads `tests/hermetic-env.mjs`, which clears the Follow-up and Paseo session
-  variables (`FOLLOW_THROUGH_*`, `PASEO_AGENT_ID`, `PASEO_HOME`…). A run from inside a live agent session then
+  variables (`FOLLOW_UP_*`, `PASEO_AGENT_ID`, `PASEO_HOME`…). A run from inside a live agent session then
   matches CI.
 - **Tests that guard a whole class of bug:**
   - `tests/never-wake.test.ts` and `tests/daemon-load.test.ts`: no wake-ups, bounded reads.
@@ -40,6 +40,7 @@ not a patch for one instance.
 | `scripts/check-trust-bypass.mjs` | `test:trust` | Trust bypass on a real daemon. |
 | `scripts/check-install.mjs` | `test:install`, `preview` | The packed install. `--keep` (`npm run preview`) leaves the daemon running for screenshots, prints "Isolated browser app: http://127.0.0.1:<port>", and writes `.preview-isolated.json`. |
 | `scripts/check-wait.mjs` | `test:wait`, `test:wait-live` | Wait with real Haiku agents. Skips without credentials or Paseo 0.15; `test:wait-live` fails instead. |
+| `scripts/check-move.mjs` | `test:move` | 2.0's move from 1.x on a real daemon: the published 1.x beta auto-updates from a fake npm registry to a broken 2.0 (rolled back), then a good one; the move to the new plugin id fails probation once (rolled back, data intact), then succeeds on Try again. Same `follow_*` tool names; Paseo's plugin list shows the new id only. Screenshots (`--shots <dir>`): Home before and after, Settings → General after the rollback and after the move (desktop, 390 px, dark). Passes on Paseo 0.15.4 and 0.16 (`HARNESS_PASEO=0.16`). About 15 minutes. |
 | `scripts/check-github-mode.mjs` | `test:github-mode` | Plain-GitHub mode on the running preview, with a fake `gh`. |
 
 Every script in the table above starts its own isolated daemon, except `test:github-mode`. The scripts below don't:

@@ -9,7 +9,7 @@
 //   await (await homeRow(page, "TKT-1 Fix the build")).click();
 
 /** Follow-up Home's route in Paseo's web app. `serverId` is the daemon's `$PASEO_HOME/server-id`. */
-export const homeUrl = (origin, serverId) => `${origin.replace(/\/$/, "")}/h/${serverId}/plugin/follow-through/surface/follow-through`;
+export const homeUrl = (origin, serverId) => `${origin.replace(/\/$/, "")}/h/${serverId}/plugin/follow-up/surface/follow-up`;
 
 // Only Home renders these, on desktop and phone: the status strip and the search field (client/home-chrome.tsx).
 // The "Home" heading is desktop-only; phones use the host's header.

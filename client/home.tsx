@@ -35,7 +35,7 @@ import { laterChoices } from "../shared/row-menu";
 import { RichText } from "./rich-text";
 import { ToastHost, useQuestionOpener } from "./toasts";
 
-export const HOME_SCREEN = "follow-through";
+export const HOME_SCREEN = "follow-up";
 
 const mono = Platform.OS === "ios" ? "Menlo" : "ui-monospace, SFMono-Regular, Menlo, monospace";
 
@@ -287,7 +287,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
   const agent = useAgentLive(s.agentId);
   const readBrief = useRpc(inboxBriefRpc);
   const control = useRpc(controlRpc);
-  const brief = useQuery({ queryKey: ["follow-through", "home-brief", s.agentId, row?.seq ?? 0], queryFn: () => readBrief({ agentId: s.agentId! }), enabled: !!s.agentId && !!row?.brief });
+  const brief = useQuery({ queryKey: ["follow-up", "home-brief", s.agentId, row?.seq ?? 0], queryFn: () => readBrief({ agentId: s.agentId! }), enabled: !!s.agentId && !!row?.brief });
   const tail = useTail(agent.handle, `${row?.seq ?? 0}:${agent.status ?? ""}`);
   const browserRead = useRpc(browserStatusRpc);
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" } | null>(null);
@@ -475,7 +475,7 @@ function OverseerPane({ theme, compact, o, focus = 0, pending = null, agentId, m
   const agent = useAgentLive(agentId);
   const tail = useTail(agent.handle, `${row?.seq ?? 0}:${agent.status ?? ""}`, 8);
   const readBrief = useRpc(inboxBriefRpc);
-  const brief = useQuery({ queryKey: ["follow-through", "overseer-brief", agentId, row?.seq ?? 0], queryFn: () => readBrief({ agentId: agentId! }), enabled: !!agentId && !!row?.brief });
+  const brief = useQuery({ queryKey: ["follow-up", "overseer-brief", agentId, row?.seq ?? 0], queryFn: () => readBrief({ agentId: agentId! }), enabled: !!agentId && !!row?.brief });
   const b = brief.data?.brief?.state === "open" ? brief.data.brief : null;
   const [starting, setStarting] = useState(false);
   const [restarting, setRestarting] = useState(false);

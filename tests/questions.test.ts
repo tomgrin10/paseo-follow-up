@@ -101,7 +101,7 @@ test("answer messages name the question, carry the developer's words and undo a 
   assert.deepEqual(parseAnswerMessage(text), { id: "Q1", title: "Retry window", choice: "B", label: "Retry for a day", words: "One day, then alert" });
   assert.match(answerMessage(keep, "A"), /already recorded/);
   assert.deepEqual(parseAnswerMessage(answerMessage(keep, "A")), { id: "Q1", title: "Retry window", choice: "A", label: "Retry for an hour", words: null });
-  assert.equal(parseAnswerMessage("Follow-through batch b1\n\n1. Fix"), null);
+  assert.equal(parseAnswerMessage("Follow-up batch b1\n\n1. Fix"), null);
   assert.equal(replyText(keep, "B", "One day"), "Q1 (Retry window): B — Retry for a day\nOne day");
   assert.deepEqual(answerRecipients({ ...w, mainAgentId: "main-agent" }, { ...keep, askedBy: null }), ["main-agent"]);
 });

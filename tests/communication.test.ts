@@ -75,7 +75,7 @@ test("communication records survive storage and only a receipt or explicit waive
   const engine = new Engine(store, { observe: async () => new Map() }, gateway, () => clock);
   await engine.tick(); const batch = (await store.snapshot()).workspaces[0].batches[0];
   await engine.sendPending(w.id, batch.id);
-  assert.equal(sends[0], `Follow-through batch ${batch.id}\n\n1. Update the requester in Slack`);
+  assert.equal(sends[0], `Follow-up batch ${batch.id}\n\n1. Update the requester in Slack`);
   await assert.rejects(engine.acknowledge(w.mainAgentId, batch.id, "completed", "Draft prepared"), /Record the sent reply/);
   await engine.acknowledge(w.mainAgentId, batch.id, "blocked", "Posting is unavailable");
   assert.equal((await engine.declareDone(w.mainAgentId, "Finished")).blockers.includes(o.title), true);

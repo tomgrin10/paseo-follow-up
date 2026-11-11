@@ -87,7 +87,7 @@ export class Engine {
         if (["Recovery stopped or failed. Check the recovery agent before retrying.", "Recovery acknowledgment was refused. Check the identity error on this batch."].includes(w.hold ?? "")) w.hold = null;
       }
 
-      for (const w of state.workspaces) for (const a of w.prActions) if (a.state === "sending") { a.state = "uncertain"; a.result = `Follow-through reloaded before ${a.kind === "request_reviewers" ? "GitHub confirmed the review request" : w.prs.some(p => a.prs.includes(p.key) && p.snapshot?.prWorkflow === "github") ? "GitHub confirmed the action" : "Graphite confirmed the action"}. Check state before sending another request.`; }
+      for (const w of state.workspaces) for (const a of w.prActions) if (a.state === "sending") { a.state = "uncertain"; a.result = `Follow-up reloaded before ${a.kind === "request_reviewers" ? "GitHub confirmed the review request" : w.prs.some(p => a.prs.includes(p.key) && p.snapshot?.prWorkflow === "github") ? "GitHub confirmed the action" : "Graphite confirmed the action"}. Check state before sending another request.`; }
       for (const w of state.workspaces) for (const q of w.questions) if (q.answer?.delivery.state === "sending") q.answer.delivery = { ...q.answer.delivery, state: "unconfirmed", reason: "Follow-up reloaded before Paseo confirmed the answer. Check the agent's chat before resending." };
       for (const w of state.workspaces) for (const b of w.batches) if (b.state === "sending") {
         b.state = "uncertain";
@@ -100,7 +100,7 @@ export class Engine {
   tick(): Promise<void> {
     if (this.stopped) return Promise.resolve();
     if (this.running) return this.running;
-    this.running = this.run().catch(() => { this.error = "Follow-through refresh failed. Saved work is intact; refresh will retry."; }).finally(() => { this.running = null; });
+    this.running = this.run().catch(() => { this.error = "Follow-up refresh failed. Saved work is intact; refresh will retry."; }).finally(() => { this.running = null; });
     return this.running;
   }
   private async run(): Promise<void> {
@@ -326,7 +326,7 @@ export class Engine {
         claimed.b.recipientAgentId = claimed.w.mainAgentId;
         await this.store.mutate(state => { findWorkspace(state, workspaceId).batches.find(b => b.id === batchId)!.recipientAgentId = claimed.w.mainAgentId; });
       }
-      if (this.stopped) throw new Error("Follow-through stopped before delivery");
+      if (this.stopped) throw new Error("Follow-up stopped before delivery");
       sending = true;
       await this.gateway.send(claimed.w, claimed.b, batchPrompt(claimed.w, claimed.b));
       await this.store.mutate(state => {
@@ -473,7 +473,7 @@ function relatedWorkspace(state: State, agentId: string, workspaceId?: string): 
   return state.workspaces.find(w => w.mainAgentId === agentId || w.batches.some(b => b.recipientAgentId === agentId));
 }
 function accessError(w: Workspace | undefined, agentId: string, access: "read" | "write", workspaceId?: string): Error {
-  return new Error(`Cannot ${access} follow-through for workspace ${w?.id ?? workspaceId ?? "unknown"}: expected main agent ${w?.mainAgentId ?? "not recorded"}, received agent ${agentId}. Only the main agent or its assigned recovery agent has access. Recorded recovery recipients: ${w?.batches.filter(b => isRecovery(b)).map(b => b.recipientAgentId).filter(Boolean).join(", ") || "none"}.`);
+  return new Error(`Cannot ${access} follow-up for workspace ${w?.id ?? workspaceId ?? "unknown"}: expected main agent ${w?.mainAgentId ?? "not recorded"}, received agent ${agentId}. Only the main agent or its assigned recovery agent has access. Recorded recovery recipients: ${w?.batches.filter(b => isRecovery(b)).map(b => b.recipientAgentId).filter(Boolean).join(", ") || "none"}.`);
 }
 function requireTracking(w: Workspace, agentId: string): void {
   if (!w.enable_tracking) throw new Error(`Tracking is inactive for workspace ${w.id}: expected main agent ${w.mainAgentId}, received agent ${agentId}. Saved ownership is intact; agent tools cannot enable tracking.`);

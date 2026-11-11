@@ -1,6 +1,6 @@
 # Data files
 
-Everything lives in `$PASEO_HOME/plugin-data/follow-through/`.
+Everything lives in `$PASEO_HOME/plugin-data/follow-up/`.
 
 - Files are owner-only (0600, folders 0700).
 - Writes are atomic: a temp file, then rename.
@@ -33,6 +33,7 @@ Everything lives in `$PASEO_HOME/plugin-data/follow-through/`.
 | `onboarding.json` | `server/onboarding.ts` | Setup progress: fresh or existing install, the current step, offer state. |
 | `versions.json` | `server/release-notes.ts` | The installed version, the previous one, and the host-wide What's new record. |
 | `updates.json`, `registry.json`, `updates.jsonl`, `heartbeat.json`, `update-watchdog.mjs`, `update-watchdog.lock` | `server/updater.ts`, `server/updates.ts`, `server/update-watchdog.mjs` | Self-update settings and caches, the last npm answer, the install log, the new worker's readiness, and the detached installer and its lock ([updates.md](updates.md)). |
+| `move.json`, `migrated-from.json` | `server/plugin-move.ts`, `server/data-move.ts` | 2.0's move from 1.x: when the plugin-id move became ready and the last busy time, and where the data was copied from and when ([updates.md](updates.md#moving-from-1x)). |
 | `trust-bypass.jsonl` | `server/trust-bypass.ts` | Permission prompts trust bypass approved, with a redacted summary. |
 | `wait/` | `server/wait-jobs.ts` | `run-job.sh`, plus `jobs/<agentId>/<jobId>/` with `job.json`, the `started` marker, and `result.json` (the exit receipt, written by the runner in the agent's shell). |
 
@@ -45,4 +46,4 @@ Outside this folder, Follow-up reads (never writes):
 - Provider transcripts (`~/.claude/projects`, `~/.codex/sessions`).
 
 It writes its hook entries into `~/.claude/settings.json` and `~/.codex/hooks.json`, which is reversible: entries
-carry the `# paseo-follow-through-hook` marker. [OVERVIEW.md](../OVERVIEW.md) is the user-facing statement of this.
+carry the `# paseo-follow-up-hook` marker. [OVERVIEW.md](../OVERVIEW.md) is the user-facing statement of this.

@@ -1,3 +1,4 @@
+import { LEGACY_GLOBAL_MCP } from "../shared/legacy";
 import { mkdir, readFile, readdir, realpath, rmdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -5,14 +6,14 @@ import { backupOnce, writeThrough } from "./write-through";
 
 /**
  * 1.4.0-beta.2: Follow-up's tools are served per agent (natively through Paseo's MCP, or a per-agent stdio bridge
- * as the fallback), so the old user-scope "follow-through" registration only made every Claude/Codex session on
+ * as the fallback), so the old user-scope "follow-up" registration only made every Claude/Codex session on
  * the machine, Paseo's or not, spawn its own node mcp.mjs. This removes the entries Follow-up wrote
- * (FOLLOW_THROUGH_MANAGED=1) from every Claude and Codex home Paseo launches agents with, backing each file up first.
+ * (FOLLOW_UP_MANAGED=1) from every Claude and Codex home Paseo launches agents with, backing each file up first.
  * Entries the user added themselves are left alone.
  */
 export type Unregistered = { path: string; status: "removed" | "absent" | "foreign" | "busy" | "error"; error?: string };
-const NAME = "follow-through";
-const BACKUP = ".follow-through-unregister.bak";
+const NAME = LEGACY_GLOBAL_MCP.name;
+const BACKUP = LEGACY_GLOBAL_MCP.backup;
 
 /** Every Claude global config (.claude.json) and Codex config.toml Paseo may launch an agent with. */
 export async function agentHomes(env: NodeJS.ProcessEnv = process.env, paseoHome = env.PASEO_HOME ?? join(homedir(), ".paseo"), home = homedir()): Promise<{ claude: string[]; codex: string[] }> {
@@ -54,7 +55,7 @@ async function replace(path: string, text: string): Promise<void> {
   await backupOnce(path, BACKUP);
   await writeThrough(path, text, (await stat(path)).mode & 0o777);
 }
-const managed = (server: unknown) => (server as { env?: Record<string, string> } | null)?.env?.FOLLOW_THROUGH_MANAGED === "1";
+const managed = (server: unknown) => (server as { env?: Record<string, string> } | null)?.env?.[LEGACY_GLOBAL_MCP.managedEnv] === "1";
 
 export async function unregisterClaude(path: string): Promise<Unregistered> {
   try {
@@ -72,7 +73,7 @@ export async function unregisterClaude(path: string): Promise<Unregistered> {
   } catch (error) { return { path, status: "error", error: (error as Error).message }; }
 }
 
-/** Removes [mcp_servers.follow-through] and its .env table when they're Follow-up's, keeping everything else verbatim. */
+/** Removes [mcp_servers.follow-up] and its .env table when they're Follow-up's, keeping everything else verbatim. */
 export function withoutCodexEntry(text: string): string | null {
   const lines = text.split("\n");
   const header = (line: string) => /^\s*\[\[?\s*([^\]]+?)\s*\]\]?\s*(?:#.*)?$/.exec(line)?.[1].replace(/["']/g, "") ?? null;
@@ -88,7 +89,7 @@ export function withoutCodexEntry(text: string): string | null {
   }
   if (!tables.length) return null;
   const body = tables.map(t => lines.slice(t.start, t.end).join("\n")).join("\n");
-  if (!/FOLLOW_THROUGH_MANAGED\s*=\s*["']1["']/.test(body)) return text;
+  if (!new RegExp(`${LEGACY_GLOBAL_MCP.managedEnv}\\s*=\\s*["']1["']`).test(body)) return text;
   const keep = lines.filter((_, i) => !tables.some(t => i >= t.start && i < t.end));
   return keep.join("\n").replace(/\n{3,}/g, "\n\n");
 }

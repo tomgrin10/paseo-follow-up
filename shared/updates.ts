@@ -1,3 +1,4 @@
+import { moveViewSchema } from "./plugin-move";
 import { z } from "zod";
 import { compareVersions, type Channel } from "./version";
 import { INSTALL_KINDS, releaseNoteSchema as noteSchema } from "./changelog";
@@ -55,6 +56,8 @@ export const updatesViewSchema = z.object({
   history: z.array(historyEntrySchema),
   /** The Home line, if one should show (dismissed ones are already filtered out). */
   notice: z.object({ id: z.string(), kind: z.enum(["available", "rolled-back"]), version: z.string(), from: z.string().nullable() }).nullable(),
+  /** 2.0's one-time move to the new plugin id (shared/plugin-move.ts); absent or null when there's nothing to say. */
+  move: moveViewSchema.nullable().optional(),
 });
 export type UpdatesView = z.infer<typeof updatesViewSchema>;
 
@@ -163,7 +166,7 @@ export function generalSummary(view: Pick<UpdatesView, "version" | "installKind"
 export const needsLook = (view: Pick<UpdatesView, "installKind" | "mode" | "phase">) =>
   view.installKind === "npm" && (view.phase.kind === "rolled-back" || view.phase.kind === "untrusted" || view.phase.kind === "install-failed" || (view.phase.kind === "available" && view.mode !== "auto"));
 
-export const copyCommand = (version: string) => `paseo plugin update follow-through --version ${version}`;
+export const copyCommand = (version: string) => `paseo plugin update follow-up --version ${version}`;
 export type { ReleaseNote } from "./changelog";
 
 /**

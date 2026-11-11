@@ -11,7 +11,7 @@ import type { Runner, RunInput } from "./ai-jobs";
  * workspace is the supported way to stay out of sight. Idle cost is zero: nothing runs between jobs.
  */
 export const JOBS_TITLE = "Follow-up jobs";
-export const JOB_LABEL = "follow-through-job";
+export const JOB_LABEL = "follow-up-job";
 
 type JobAgent = {
   readonly id: string;

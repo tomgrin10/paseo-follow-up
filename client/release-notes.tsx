@@ -15,7 +15,7 @@ import { useOnboarding } from "./onboarding";
  * come from the installed package's CHANGELOG.md through `follow.release-notes`, read once per app session.
  */
 
-export const releaseNotesKey = ["follow-through", "release-notes"];
+export const releaseNotesKey = ["follow-up", "release-notes"];
 export function useReleaseNotes() {
   const read = useRpc(releaseNotesRpc);
   return useQuery({ queryKey: releaseNotesKey, queryFn: () => read({}), staleTime: Infinity, retry: 1 });

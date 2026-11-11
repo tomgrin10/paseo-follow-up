@@ -1,4 +1,5 @@
 import { join, relative, isAbsolute, resolve } from "node:path";
+import { ENV_PREFIX, LEGACY_ENV_PREFIX } from "../shared/legacy.ts";
 
 /**
  * The one env builder for every harness script that spawns a Paseo daemon, the Paseo CLI or a plugin
@@ -13,7 +14,7 @@ import { join, relative, isAbsolute, resolve } from "node:path";
  * `set` adds or overrides variables (PASEO_DAEMON_URL, PATH, NODE_OPTIONS…); it can't move an isolated dir outside
  * the root. `strip` removes extra keys.
  */
-export const SESSION_KEYS = /^(PASEO_|CODEX_|FOLLOW_THROUGH_|FOLLOW_UP_)|^CLAUDE_(CONFIG_DIR|SESSION_ID|PROJECT_DIR|CODE_ENTRYPOINT|CODE_SSE_PORT)$|^CLAUDECODE$/;
+export const SESSION_KEYS = new RegExp(`^(PASEO_|CODEX_|${ENV_PREFIX}|${LEGACY_ENV_PREFIX})|^CLAUDE_(CONFIG_DIR|SESSION_ID|PROJECT_DIR|CODE_ENTRYPOINT|CODE_SSE_PORT)$|^CLAUDECODE$`);
 const ISOLATED = ["HOME", "XDG_CONFIG_HOME", "PASEO_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"];
 
 export function harnessEnv(root, { home = join(root, "home"), paseoHome = home, set = {}, strip = [], base = process.env } = {}) {

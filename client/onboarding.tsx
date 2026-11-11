@@ -23,9 +23,9 @@ import { raised, runningColor, tint, withAlpha, type Colors } from "./theme";
  * saves which step it's on, so a reload resumes there.
  */
 
-export const onboardingKey = ["follow-through", "onboarding"];
-const checksKey = ["follow-through", "onboarding-checks"];
-const followKey = ["follow-through", "follow-settings"];
+export const onboardingKey = ["follow-up", "onboarding"];
+const checksKey = ["follow-up", "onboarding-checks"];
+const followKey = ["follow-up", "follow-settings"];
 
 /** The server's view of setup. Read once per Home mount (no polling) and refreshed after each action. */
 export function useOnboarding() {
@@ -334,7 +334,7 @@ function DefaultsStep({ theme, compact, held }: { theme: Theme; compact: boolean
   const [all, setAll] = useState(false);
   const change = useMutation({
     mutationFn: async (inputs: Parameters<typeof write>[0][]) => { let last = null; for (const input of inputs) last = await write(input); return last; },
-    onSuccess: value => { if (value) cache.setQueryData(followKey, value); void cache.invalidateQueries({ queryKey: ["follow-through", "project-settings"] }); },
+    onSuccess: value => { if (value) cache.setQueryData(followKey, value); void cache.invalidateQueries({ queryKey: ["follow-up", "project-settings"] }); },
     onError: error => toast.error(errorText(error)),
   });
   const data = follow.data;

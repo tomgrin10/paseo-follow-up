@@ -18,7 +18,7 @@ import { detect, PR_WORKFLOW_LABELS } from "../shared/pr-workflow";
 import type { Pr, Snapshot } from "../shared/model";
 import { pr, snapshot, workspace } from "./fixtures";
 
-process.env.FOLLOW_THROUGH_HOOK_IMPORT = "1";
+process.env.FOLLOW_UP_HOOK_IMPORT = "1";
 // @ts-expect-error plain JS hook, generated into hook-source.ts
 const hook = await import("../server/agent-hook.mjs") as { batchParagraph: (workflow?: unknown) => string };
 const mcp = await import("../server/mcp.mjs");

@@ -231,4 +231,6 @@ export const installUpdateRpc = defineRpc({ name: "follow.install-update", input
 /** Hides a Home update notice on every device (until the next version, for "available"). */
 /** The developer's IANA timezone, from their Follow-up client: an agent tool's "tonight"/"tomorrow" resolve in it. */
 export const clientTimeZoneRpc = defineRpc({ name: "follow.client-time-zone", input: z.strictObject({ timeZone: z.string().min(1).max(64) }), output: z.object({ ok: z.boolean() }) });
+/** 2.0's move to the new plugin id: ask again after it rolled back or failed (same quiet rule as an update). */
+export const retryMoveRpc = defineRpc({ name: "follow.retry-move", input: z.strictObject({}), output: updatesViewSchema });
 export const dismissUpdateNoticeRpc = defineRpc({ name: "follow.dismiss-update-notice", input: z.strictObject({ id: z.string().max(120) }), output: updatesViewSchema });

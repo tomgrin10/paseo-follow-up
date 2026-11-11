@@ -230,7 +230,7 @@ const items = [
   { type: "reasoning", text: "secret thoughts" },
   { type: "tool_call", name: "Bash", status: "completed", detail: { output: "https://github.com/acme/api/pull/1352" } },
   { type: "assistant_message", text: "Opened PR #1352 with the index. Waiting on Hadar to review." },
-  { type: "user_message", text: "Workspace follow-through batch 1: fix the CI" },
+  { type: "user_message", text: "Workspace Follow-up batch 1: fix the CI" },
 ];
 
 test("timeline lines keep the developer and agent words, drop reasoning and Follow-up's own messages, and keep tool output for links only", () => {

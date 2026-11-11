@@ -9,9 +9,9 @@ import { workspace } from "./fixtures";
 async function handshake(agent: boolean, recovery = false, contributor = false): Promise<any[]> {
   const env = { ...process.env }; delete env.PASEO_AGENT_ID;
   if (agent) env.PASEO_AGENT_ID = "fixture-agent";
-  if (recovery) env.FOLLOW_THROUGH_RECOVERY = "1"; else delete env.FOLLOW_THROUGH_RECOVERY;
+  if (recovery) env.FOLLOW_UP_RECOVERY = "1"; else delete env.FOLLOW_UP_RECOVERY;
   const root = await mkdtemp(join(tmpdir(), "follow-mcp-")); env.PASEO_HOME = root;
-  const directory = join(root, "plugin-data/follow-through"); await mkdir(directory, { recursive: true });
+  const directory = join(root, "plugin-data/follow-up"); await mkdir(directory, { recursive: true });
   const w = workspace({ mainAgentId: recovery || contributor ? "other-main" : "fixture-agent", contributorAgentIds: contributor ? ["fixture-agent"] : [], batches: recovery ? [{ id: "recovery", state: "sent", recipientAgentId: "fixture-agent", settledAt: null, tasks: [{kind: "inventory"}] }] as any : [] });
   await writeFile(join(directory, "state.json"), JSON.stringify({ workspaces: [w] }));
   await writeFile(join(directory, "hooks-enabled.json"), JSON.stringify({ expiresAt: Date.now() + 60_000 }));
@@ -24,7 +24,7 @@ async function handshake(agent: boolean, recovery = false, contributor = false):
   return output.trim().split("\n").map(line => JSON.parse(line));
 }
 test("MCP stdout contains only protocol and outside-Paseo sessions have no mutation tools", async () => {
-  const result = await handshake(false); assert.equal(result.length, 2); assert.equal(result[0].result.serverInfo.name, "paseo-follow-through"); assert.deepEqual(result[1].result.tools, []);
+  const result = await handshake(false); assert.equal(result.length, 2); assert.equal(result[0].result.serverInfo.name, "paseo-follow-up"); assert.deepEqual(result[1].result.tools, []);
 });
 test("Paseo MCP sessions expose scoped schemas without an agentId override", async () => {
   const instruction = (await handshake(true))[0].result.instructions; assert.match(instruction, /Perform bookkeeping silently/);

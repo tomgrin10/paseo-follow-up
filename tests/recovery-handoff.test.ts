@@ -11,7 +11,7 @@ function fixture() {
   const caller = { id: "replacement", workspaceId: w.id, labels: {}, createdAt: "2026-01-01T10:01:00Z", status: "running", activeTurn: null } as Agent;
   // Loaded here so its transcript may be read; the unloaded case is covered below.
   const prior = { id: "old-helper", workspaceId: w.id, archivedAt: "2026-01-01T10:01:00Z", status: "idle", activeTurn: null } as Agent;
-  const task = "Follow-through recovery recovery\n\nRead /evidence.json and reconcile ownership";
+  const task = "Follow-up recovery recovery\n\nRead /evidence.json and reconcile ownership";
   const histories = new Map<string, unknown[]>([[caller.id, [{ type: "user_message", text: task }]], [prior.id, [{ type: "user_message", text: task }]]]);
   const reads: string[] = [];
   const client = { fetchAgent: async () => ({ agent: prior }), fetchAgentTimeline: async (id: string) => (reads.push(id), { entries: (histories.get(id) ?? []).map((item, i) => ({ seqStart: i, item })), hasOlder: false, error: null, gap: false, staleCursor: false }) } as unknown as Daemon;

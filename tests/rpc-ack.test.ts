@@ -6,7 +6,7 @@ import { FIXTURE, sample } from "./support/sample-input";
 import { seed } from "./support/seed";
 
 /**
- * Invariant (2026-11-11, "Your answer wasn't sent. Plugin RPC timed out: follow-through.invoke"): every RPC the client
+ * Invariant (2026-11-11, "Your answer wasn't sent. Plugin RPC timed out: follow-up.invoke"): every RPC the client
  * calls replies within ACK_MS even when everything slow hangs: the Paseo API never answers, the daemon socket accepts
  * and stays silent, and gh, gt, mcpproxy, claude and codex never exit. Paseo gives a plugin RPC 30 s and then shows the
  * developer an error, whatever the handler later does; an answer that arrived 88 s later still read "wasn't sent".
@@ -55,6 +55,7 @@ const EXEMPT: Record<string, string> = {
   "follow.install-update": "Checks the install's source with Paseo before the detached install.",
   "follow.release-notes": "What's new asks Paseo for this install's version and source; read-only.",
   "follow.whats-new-seen": "Marks What's new seen, then returns the view above.",
+  "follow.retry-move": "2.0's Try again on the plugin-id move asks Paseo for this install's id and source to see the move failed, records the ask, then returns the view above; the move itself runs after the reply. A timeout loses nothing; one click asks again.",
   // The Overseer. Follow-up: queue the developer's question like brief answers (overseer-ask carries their words).
   "follow.overseer-start": "Starts the Overseer agent through Paseo; its status says starting until it's up.",
   "follow.overseer-restart": "Restarts the Overseer agent through Paseo.",

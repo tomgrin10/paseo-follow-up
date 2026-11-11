@@ -1,4 +1,5 @@
 import { onBehalfOf } from "./actor";
+import { BRIDGE_TOOL, BRIDGE_SHELL_CALL, splitBatchText, isRecoveryText } from "./legacy";
 import { z } from "zod";
 
 /** Follow-up's own messages and tool calls, recognised in agent chats so they render as compact rows. */
@@ -6,17 +7,17 @@ export const FOLLOW_TOOLS = ["workspace_status", "sync_workspace", "enroll_works
 export type FollowTool = (typeof FOLLOW_TOOLS)[number];
 
 /**
- * Claude records mcp__follow-through__register_pr; Codex records follow-through.register_pr. Since 1.4.0-beta.2 the
+ * Claude records mcp__follow-up__register_pr; Codex records follow-up.register_pr. Since 1.4.0-beta.2 the
  * tools are served through Paseo's own MCP as follow_register_pr: mcp__paseo__follow_register_pr / paseo.follow_register_pr.
  */
 export function followToolName(name: string): FollowTool | null {
-  const match = /^(?:mcp__)?follow-through(?:__|\.|\/|:)([a-z_]+)$/.exec(name) ?? /^(?:mcp__)?paseo(?:__|\.|\/|:)follow_([a-z_]+)$/.exec(name);
+  const match = BRIDGE_TOOL.exec(name) ?? /^(?:mcp__)?paseo(?:__|\.|\/|:)follow_([a-z_]+)$/.exec(name);
   return match && (FOLLOW_TOOLS as readonly string[]).includes(match[1]) ? match[1] as FollowTool : null;
 }
 
-/** The CLI fallback agents run when MCP is unavailable: node …/follow-through/mcp.mjs call <tool> '<json>'. */
+/** The CLI fallback agents run when MCP is unavailable: node …/follow-up/mcp.mjs call <tool> '<json>'. */
 export function followShellCall(command: string): { tool: FollowTool; input: Record<string, unknown> } | null {
-  const match = /plugin-data\/follow-through\/mcp\.mjs['"]?\s+call\s+([a-z_]+)(?:\s+'((?:[^']|'"'"')*)')?/.exec(command);
+  const match = BRIDGE_SHELL_CALL.exec(command);
   if (!match || !(FOLLOW_TOOLS as readonly string[]).includes(match[1])) return null;
   let input: Record<string, unknown> = {};
   try { const parsed = JSON.parse((match[2] ?? "{}").replace(/'"'"'/g, "'")); if (record(parsed)) input = parsed; } catch {}
@@ -28,12 +29,12 @@ export type BatchCard = z.infer<typeof batchCardSchema>;
 
 /** A repair batch or recovery brief that Follow-up sent as a user message. */
 export function parseBatchPrompt(text: string): BatchCard | null {
-  const batch = /^(?:Workspace follow-through batch|Follow-through batch) \S+\n\n([\s\S]+)$/.exec(text.trim());
+  const batch = splitBatchText(text);
   if (batch) {
-    const tasks = batch[1].split("\n").map(line => /^\d+\.\s+(.+)$/.exec(line.trim())?.[1]).filter((t): t is string => !!t);
+    const tasks = batch.body.split("\n").map(line => /^\d+\.\s+(.+)$/.exec(line.trim())?.[1]).filter((t): t is string => !!t);
     return tasks.length ? { kind: "batch", tasks, text } : null;
   }
-  if (/^Follow-through recovery \S+/.test(text.trim())) return { kind: "recovery", tasks: [], text };
+  if (isRecoveryText(text)) return { kind: "recovery", tasks: [], text };
   return null;
 }
 
@@ -157,7 +158,7 @@ export const TOOL_PRESENTATION: Record<string, "routine" | "moment"> = {
   rerank_priorities: "routine", overseer_status: "routine", overseer_start: "routine", overseer_restart: "routine", overseer_ask: "routine",
   inbox_brief: "routine", brief_action: "routine", inbox_act: "routine", answer_question: "routine", run_recovery: "routine",
   set_workspace_spec: "routine", link_item: "routine", unlink_item: "routine", link_items: "routine", set_linked_items: "routine", set_task_trigger: "routine", pr_controls: "routine", browser_status: "routine", trust_bypass_status: "routine",
-  release_notes: "routine", updates_status: "routine", check_updates: "routine", set_updates: "routine", install_update: "routine", make_main_agent: "routine", wait_prepare_job: "routine", wait_for_job: "routine", wait_get_job: "routine",
+  release_notes: "routine", updates_status: "routine", check_updates: "routine", set_updates: "routine", install_update: "routine", retry_move: "routine", make_main_agent: "routine", wait_prepare_job: "routine", wait_for_job: "routine", wait_get_job: "routine",
   // The developer's moments: the workspace is done, or the agent asked them something. needs_you runs every turn, so a
   // card there would be noise; the inbox already carries it.
   declare_done: "moment", ask_question: "moment",
