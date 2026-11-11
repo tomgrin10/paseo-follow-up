@@ -1,7 +1,7 @@
 import type { Actor } from "./actor";
 import { HOOK_TEXT_PREFIXES } from "./message-sender";
 import type { Workspace } from "./model";
-import { duplicateOpenQuestions } from "./questions";
+import { answerMessage, duplicateOpenQuestions, isOther, parseAnswerMessage } from "./questions";
 import { shouldReopen, type Brief } from "./brief";
 import { flagHeadline } from "./headline";
 import type { InboxRow } from "./inbox";
@@ -94,6 +94,24 @@ export const INVARIANTS: Invariant[] = [
     check(w) {
       const u = w.snooze?.until;
       return u && u !== "next-event" && !Number.isFinite(Date.parse(u)) ? `snooze until "${u}" never wakes` : null;
+    },
+  },
+  {
+    id: "answer-card-round-trip",
+    why: "The answer the agent receives parses back, on the chat card, to what was picked: the whole note and free answer, not their first line, and a title with parentheses doesn't swallow the choice (shared/questions.ts answerTitle, parseAnswerMessage).",
+    check(w) {
+      for (const q of w.questions) {
+        if (!q.answer) continue;
+        const card = parseAnswerMessage(answerMessage(q, q.answer.choice, q.answer.words));
+        if (!card) return `${q.id}'s answer doesn't parse as an answer card`;
+        const other = isOther(q.answer.choice), option = q.options.some(o => o.letter === q.answer!.choice);
+        // A free answer has no option to split on, so the card's two halves together are the answer.
+        const shown = other ? card.words ?? "" : option ? card.choice : [card.choice, card.label].filter(Boolean).join(" — ");
+        const want = other ? (q.answer.words ?? "").trim() : q.answer.choice;
+        if (shown !== want) return `${q.id}'s card shows "${shown}", not "${want}"`;
+        if (!other && option && (card.words ?? "") !== (q.answer.words ?? "").trim()) return `${q.id}'s card drops part of the note`;
+      }
+      return null;
     },
   },
 ];
