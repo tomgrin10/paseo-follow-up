@@ -98,7 +98,7 @@ export function PrControls({ pr, workspace, theme, compact, browserReady: compan
           label: "Reviewers", toast, run: () => requestReviewers({ workspaceId: workspace.id, prKey: pr.key, reviewers: picked, remember }),
           success: reply => ({ tone: reply.state === "submitted" ? "success" : "info", message: reply.result }),
           onSuccess: reply => { setNotice(reply.result); if (remember) void cache.invalidateQueries({ queryKey: reviewerSettingsKey }); invalidate(); },
-          onError: invalidate, failure: `Reviewers not requested on #${pr.number}`, open: () => setPicking(true),
+          onError: e => { setNotice(`Reviewers not requested: ${errorText(e)}`); invalidate(); }, failure: `Reviewers not requested on #${pr.number}`, open: () => setPicking(true),
         });
       }} />}
     {!plan && <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 12 }}>

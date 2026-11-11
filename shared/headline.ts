@@ -147,10 +147,15 @@ export function pillState(input: {
   items: NeedItem[];
   /** The store's last sign-off or Later ("later"); no kind is a sign-off. */
   recent: { agentIds: string[]; at: number; kind?: "sign_off" | "later" | "later_ws" } | null;
+  /** This agent has a Done waiting on its Undo toast (client/done-windows.ts). */
+  done?: boolean;
   now: number;
 }): PillState {
   const { row, recent, now } = input;
   const items = withoutBriefQuestions(input.items, row);
+  // Done waits on its toast, so the Action brief is still open on the daemon: the developer's move owns the pill for
+  // as long as the toast does (the store clears it when the toast ends), not a fixed 6 s.
+  if (row && input.done) return { mode: "undo", label: "Done" };
   const flag = row ? flagHeadline(row, now, items) : null;
   if (flag) return { mode: "flag", headline: flag, todo: items.length };
   if (row && recent && recent.agentIds.includes(row.agentId) && now - recent.at < UNDO_MS) return { mode: "undo", label: recent.kind === "later" ? "Later" : "Signed off" };

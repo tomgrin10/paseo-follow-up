@@ -115,6 +115,8 @@
   clears) and collapses the card to `Done · <ask>`. The card collapses at once; `runUndoable` (`client/toast-store.ts`)
   holds the send for the toast's Undo window, since a sent message can't be taken back. With no ToastHost mounted it
   sends at once. Only Action briefs take it; reviews, decisions and failed turns are refused.
+  During the window the composer pill reads Done and its Undo cancels the same toast (`client/done-windows.ts`, one
+  window per agent); Ctrl+Z (Cmd+Z on a Mac) presses the showing toast's Undo, never inside a text field.
 - **`needs_you`** (`follow.needs-you`) is the agent's end-of-turn statement.
   - **Point, don't restate.** To refer to questions already open, pass `questions: ["Qn"]` instead of restating
     them as decisions.
