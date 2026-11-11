@@ -5,6 +5,8 @@ import { taskTriggerSchema } from "./task-trigger";
 import { isOpen as questionOpen, questionSchema } from "./questions";
 import { artifactSchema, specSchema } from "./spec";
 
+/** Why a main-agent turn ended canceled (shared/status.ts cancelCause). */
+export const CANCEL_CAUSES = ["stop", "replaced", "compaction", "reload", "closed"] as const;
 export const textSchema = z.string().trim().min(1).max(2000);
 export const idSchema = z.string().min(1).max(200);
 export const deploymentSchema = z.object({
@@ -95,7 +97,7 @@ export const workspaceSchema = z.object({
   sendWait: z.enum(["unloaded", "setup"]).nullable().optional(),
   updatedAt: z.string(), managedDoneLabel: z.boolean(),
   runtimeReason: z.string().nullable(), runtimeBusy: z.boolean(), backgroundBusy: z.boolean().default(false),
-  interruption: z.object({ turnId: z.string().nullable(), at: z.string(), kind: z.enum(["canceled", "failed"]), guardPauseId: z.string().optional(), /** The agent whose turn stopped (since 1.4.0-beta.16). */ agentId: idSchema.optional() }).optional(),
+  interruption: z.object({ turnId: z.string().nullable(), at: z.string(), kind: z.enum(["canceled", "failed"]), /** Why a canceled turn stopped (shared/status.ts cancelCause); only "stop" holds. */ cause: z.enum(CANCEL_CAUSES).optional(), guardPauseId: z.string().optional(), /** The agent whose turn stopped (since 1.4.0-beta.16). */ agentId: idSchema.optional() }).optional(),
   // Added with questions; older saved states parse with none.
   questions: z.array(questionSchema).default([]),
   // Added with spec links; older saved states parse with none.

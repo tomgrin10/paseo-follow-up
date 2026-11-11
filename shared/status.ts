@@ -1,5 +1,5 @@
 import type { Batch, Workspace } from "./model";
-import { completionCheck } from "./model";
+import { completionCheck, CANCEL_CAUSES } from "./model";
 import { recoveryBatch } from "./follow-up";
 
 /**
@@ -10,7 +10,7 @@ import { recoveryBatch } from "./follow-up";
  */
 export const SETTLE_MS = 60_000;
 
-/** Follow-up's own hold after the main agent's turn failed or the developer stopped it (server sets it at turn end). */
+/** Follow-up's own hold after the main agent's turn failed or the developer stopped it (holdOnTurnEnd). */
 export const interruptionHold = (kind: "canceled" | "failed") => kind === "canceled" ? "You stopped the main agent. Resume follow-up when ready." : "The main agent's turn failed. Check it before resuming follow-up.";
 /** The hold is Follow-up's automatic one, not one the developer set (a hold they set never lifts on its own). */
 export const automaticHold = (w: Pick<Workspace, "hold" | "interruption">) => !!w.interruption && w.hold === interruptionHold(w.interruption.kind);
@@ -21,15 +21,52 @@ export const turnIdOf = (activeTurn: unknown): string | null => {
   return typeof id === "string" && id ? id : null;
 };
 /**
- * A failed turn's hold is run state, so a newer main-agent turn (from anyone: the developer, another agent, the host
- * resuming it) supersedes it, like the inbox's error flag (shared/inbox.ts RUN_STATE_REASONS). Newer means another
- * turn id: right after the failure Paseo can still read "running" with no active turn. "You stopped the main agent"
- * is the developer's own Stop, so it stays until they resume. Status invariant automatic-hold-is-not-stale.
+ * Why a main-agent turn ended canceled. Paseo's reason text can't tell them apart on its own: the developer's Stop, a
+ * turn replaced by a newer message (the developer's or another agent's) and a refreshed session all arrive as
+ * "Interrupted"/"interrupted" (Paseo 0.16 agent-manager.js, providers/claude/agent.js); only closing or reloading
+ * the agent names itself ("agent closed", "agent reloaded"). So the cause comes from what happened around the
+ * cancel: a newer turn already started (replaced), the turn was a /compact (Smart Session's or the developer's
+ * compaction is never Follow-up's work), or neither (stop). Status invariant only-a-stop-holds.
+ */
+export { CANCEL_CAUSES };
+export type CancelCause = typeof CANCEL_CAUSES[number];
+export function cancelCause(c: { reason: string | null | undefined; prompt?: string | null; newerTurn?: boolean }): CancelCause {
+  const reason = (c.reason ?? "").trim().toLowerCase();
+  if (/\breload/.test(reason) || /\brestart/.test(reason)) return "reload";
+  if (/\bclos/.test(reason)) return "closed";
+  if (/^\/compact\b/.test((c.prompt ?? "").trimStart())) return "compaction";
+  if (c.newerTurn) return "replaced";
+  return "stop";
+}
+/** Only the developer's own Stop pauses Follow-up. When unsure it doesn't: a missed pause is cheap, a stuck one silently stops repairs. */
+export const cancelHolds = (cause: CancelCause) => cause === "stop";
+export type TurnOutcome = { kind: "completed" } | { kind: "failed"; error: { message: string } } | { kind: "canceled"; reason: string };
+/**
+ * The hold a main-agent turn end leaves (index.server.ts `agent.turn_ended`): a failed turn, or a canceled one whose
+ * cause is the developer's Stop. Another agent's turn, and every other cancel cause, leave the workspace as it was.
+ * `newerTurn`: the agent already started another turn when this one's end is handled.
+ */
+export function holdOnTurnEnd(w: Workspace, e: { agentId: string; turnId: string | null; at: string; outcome: TurnOutcome; prompt: string | null; newerTurn: boolean }): boolean {
+  if (w.mainAgentId !== e.agentId || e.outcome.kind === "completed") return false;
+  if (e.outcome.kind === "canceled" && !cancelHolds(cancelCause({ reason: e.outcome.reason, prompt: e.prompt, newerTurn: e.newerTurn }))) return false;
+  const kind = e.outcome.kind;
+  w.hold = interruptionHold(kind); w.interruption = { turnId: e.turnId, at: e.at, kind, agentId: e.agentId, ...(kind === "canceled" ? { cause: "stop" as const } : {}) }; w.completion = null; w.declaration = null;
+  return true;
+}
+/**
+ * Follow-up's automatic hold is the stopped turn's run state, so a newer main-agent turn (from anyone: the developer,
+ * another agent, the host resuming it) supersedes it, like the inbox's error flag (shared/inbox.ts RUN_STATE_REASONS).
+ * That holds for a Stop too: the agent running again means someone resumed it. Newer means another turn id: right
+ * after the stop Paseo can still read "running" with no active turn. A hold from before Follow-up recorded the
+ * interruption (no turn id) lifts on any main-agent turn. A hold the developer set never lifts on its own. Status
+ * invariant automatic-hold-is-not-stale.
  */
 export function holdSuperseded(w: Pick<Workspace, "hold" | "interruption" | "mainAgentId">, turn: { agentId: string; turnId: string | null }): boolean {
+  if (turn.agentId !== w.mainAgentId || !turn.turnId) return false;
   const stop = w.interruption;
-  if (!stop || stop.kind !== "failed" || !automaticHold(w)) return false;
-  return (stop.agentId ?? w.mainAgentId) === turn.agentId && turn.agentId === w.mainAgentId && !!turn.turnId && turn.turnId !== stop.turnId;
+  if (!stop) return w.hold === interruptionHold("canceled");
+  if (!automaticHold(w)) return false;
+  return (stop.agentId ?? w.mainAgentId) === turn.agentId && turn.turnId !== stop.turnId;
 }
 export function liftHold(w: Workspace): void { w.hold = null; delete w.interruption; }
 /** The Done check's words, the same on every surface: Home, the pill, the header, Needs you and the agent card. */
