@@ -42,6 +42,18 @@ test("fixture (2026-11-10, Q18/Q19): the check catches two open versions of one 
   assert.deepEqual(violations(w, clock), [{ id: "no-duplicate-open-question", detail: "Q19 repeats Q18" }]);
 });
 
+test("answer-card-round-trip: every answer shape reads back on the chat card in full", () => {
+  const answered = (id: string, title: string, labels: string[], choice: string, words?: string) => questionSchema.parse({ id, title, question: title, options: opts(...labels), recommend: "A", askedBy: "main-agent", askedAt: new Date(clock).toISOString(), mode: "work-around", answer: { choice, ...(words ? { words } : {}), at: new Date(clock).toISOString(), by: "developer", delivery: { state: "sent", to: "main-agent", messageId: null, at: new Date(clock).toISOString() } } });
+  const grid = [
+    answered("Q1", "Retry window", ["An hour", "A day"], "B"),
+    answered("Q2", "Retry window", ["An hour", "A day"], "B", "Alert after that\nand page on-call"),
+    answered("Q3", "Retry window", ["An hour", "A day"], "other", "Until the billing date\nthen stop"),
+    answered("Q4", "Where should exports land?", [], "The staging bucket\nthen prod"),
+    answered("Q5", "Ship (v2): now?", ["Now", "Later"], "A"),
+  ];
+  assert.deepEqual(violations(workspace({ questions: grid }), clock).filter(v => v.id === "answer-card-round-trip"), []);
+});
+
 test("brief-follows-questions: while a linked question is open, only the developer closes the card", async () => {
   const { briefViolations } = await import("../shared/status-invariants");
   const { shouldReopen } = await import("../shared/brief");

@@ -9,7 +9,7 @@ import { prActionBlocks } from "../shared/pr-actions";
 import { configuredReviewers, noReviewers, reviewerLabel, withoutAuthor } from "../shared/reviewers";
 import { classify, finishedReply, turnPrompt, type Sources } from "./inbox-classifier";
 import { briefOrigin, briefStep, pickBrief, shouldReopen, validPick, type Brief, type BriefEvent, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
-import { OTHER_LABEL, isOther } from "../shared/questions";
+import { OTHER_LABEL, answerTitle, isOther } from "../shared/questions";
 
 /** The flag store: plugin-data/follow-through/inbox.json. A new file, so existing state never changes shape. */
 export class InboxStore {
@@ -126,7 +126,7 @@ export function pauseSource(p: GuardPause): { note: string | null; resetsAt: str
 }
 /** The developer's option click, in the existing answer format so Follow-up's answer card renders it. */
 export function briefAnswer(id: string, question: string, letter: string, label: string, words?: string): string {
-  const title = question.replace(/[()\n]/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+  const title = answerTitle(question).slice(0, 80);
   if (isOther(letter)) return `Follow-up answer ${id} (${title}): ${OTHER_LABEL} — "${(words ?? "").trim()}"\nNone of your options: the developer's own answer is in the quotes.`;
   return `Follow-up answer ${id} (${title}): ${letter} — ${label}\nContinue with this choice.`;
 }
@@ -135,7 +135,7 @@ export function briefAnswer(id: string, question: string, letter: string, label:
  * line per decision the agent can act on. Skipped decisions are named, so the agent knows they're still open.
  */
 export function briefAnswers(ask: string, decisions: { id: string; question: string; options: { letter: string; label: string }[] }[], picks: Record<string, string>, words: Record<string, string> = {}): string {
-  const clean = (t: string) => t.replace(/[()\n]/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+  const clean = (t: string) => answerTitle(t).slice(0, 80);
   const asked = decisions.filter(d => d.options.length);
   // Something else stays on its decision's one line: the developer's words with line breaks folded to spaces.
   const other = (d: typeof asked[number]) => isOther(picks[d.id]) && words[d.id]?.trim() ? `${OTHER_LABEL} — "${words[d.id].replace(/\s+/g, " ").trim()}"` : null;

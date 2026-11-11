@@ -132,9 +132,16 @@ export function replyText(q: Pick<Question, "id" | "title" | "options">, choice:
 }
 
 export const ANSWER_PREFIX = "Follow-up answer";
+/**
+ * A title or question inside an answer's "(…): " head: no parentheses or line breaks, so the chat card and the
+ * Overseer parse it back exactly. Every answer producer (answerMessage, server/inbox.ts briefAnswer/briefAnswers) uses it.
+ */
+export const answerTitle = (text: string) => text.replace(/\)/g, "").replace(/[(\n]/g, " ").replace(/\s+/g, " ").trim();
+/** The lines Follow-up adds after an answer: the answer and the developer's note run until one of these. */
+const ANSWER_TRAILER = /^(?:The developer added: |None of your options|You were building |Continue|Answered by .+ for the developer\.$)/;
 /** The message sent to the asking agent. It starts with ANSWER_PREFIX so chat rows and history scans recognise it. */
 export function answerMessage(q: Question, choice: string, words?: string): string {
-  const lines = [`${ANSWER_PREFIX} ${q.id} (${q.title}): ${answerHead(q, choice, words)}`];
+  const lines = [`${ANSWER_PREFIX} ${q.id} (${answerTitle(q.title)}): ${answerHead(q, choice, words)}`];
   if (isOther(choice)) lines.push("None of your options: the developer's own answer is in the quotes.");
   else if (words?.trim()) lines.push(`The developer added: ${words.trim()}`);
   if (q.mode === "keep-building" && !q.big && q.recommend && choice !== q.recommend) lines.push(isOther(choice)
@@ -148,13 +155,20 @@ export function answerMessage(q: Question, choice: string, words?: string): stri
   return lines.join("\n");
 }
 
-/** Parses an answer message back into its parts, for the chat card. */
+/** Parses an answer message back into its parts, for the chat card. The answer and the note may run over several lines. */
 export function parseAnswerMessage(text: string): { id: string; title: string; choice: string; label: string | null; words: string | null } | null {
-  // Something else: the developer's words are quoted and may run over several lines.
-  const other = /^Follow-up answer ([QD]\d+) \((.+?)\): Something else — "([\s\S]*)"\n(?:None of your options|Continue|You were building)/.exec(text.trim() + "\n");
-  if (other) return { id: other[1], title: other[2], choice: OTHER_LABEL, label: null, words: other[3].trim() || null };
-  const match = /^Follow-up answer ([QD]\d+) \((.+?)\): ([^\n—]+?)(?: — ([^\n]+))?\n(?:The developer added: ([^\n]+))?/.exec(text.trim() + "\n");
-  return match ? { id: match[1], title: match[2], choice: match[3].trim(), label: match[4]?.trim() ?? null, words: match[5]?.trim() ?? null } : null;
+  const lines = text.trim().split("\n");
+  const head = /^Follow-up answer ([QD]\d+) \((.+?)\): (.*)$/.exec(lines[0] ?? "");
+  if (!head) return null;
+  // Each part runs to the next line Follow-up adds itself.
+  let i = 1;
+  const upToTrailer = (first: string) => { const part = [first]; while (i < lines.length && !ANSWER_TRAILER.test(lines[i])) part.push(lines[i++]); return part.join("\n").trim(); };
+  const answer = upToTrailer(head[3]);
+  const other = /^Something else — "([\s\S]*)"$/.exec(answer);
+  if (other) return { id: head[1], title: head[2], choice: OTHER_LABEL, label: null, words: other[1].trim() || null };
+  const added = lines[i]?.startsWith("The developer added: ") ? (i++, upToTrailer(lines[i - 1].slice("The developer added: ".length))) : "";
+  const pick = /^([^—]+?)(?: — ([\s\S]+))?$/.exec(answer);
+  return { id: head[1], title: head[2], choice: (pick?.[1] ?? answer).trim(), label: pick?.[2]?.trim() ?? null, words: added || null };
 }
 
 /**
@@ -163,9 +177,12 @@ export function parseAnswerMessage(text: string): { id: string; title: string; c
  */
 export function parseAnswersMessage(text: string): { title: string; answers: { id: string; question: string; choice: string | null; label: string | null }[] } | null {
   const lines = text.trim().split("\n");
-  const head = /^Follow-up answer ((?:[QD]\d+, )+[QD]\d+) \((.*?)\): /.exec(lines[0] ?? "");
+  // A summary line ("1. A — … · 2. skipped") then one line per decision. A card with one decision has one id.
+  const head = /^Follow-up answer ((?:[QD]\d+, )*[QD]\d+) \((.*?)\): (?=\d+\. )/.exec(lines[0] ?? "");
   if (!head) return null;
   const ids = head[1].split(", ");
+  // One id: only with its decision line, so a free answer that reads "1. …" stays a single answer.
+  if (ids.length === 1 && !lines.some((l, n) => n > 0 && l.startsWith(`${ids[0]} (`))) return null;
   const answers = ids.map(id => {
     const line = lines.find(l => l.startsWith(`${id} (`));
     const m = line ? /^[QD]\d+ \((.*?)\): (?:([A-Z]|Something else) — (.+)|skipped\b.*)$/.exec(line) : null;
