@@ -1,4 +1,4 @@
-import { LINKED_KINDS, classifyLink, type LinkedKind, type LinkedViewItem } from "./linked";
+import { LIMITS, LINKED_FULL, LINKED_KINDS, classifyLink, type LinkedKind, type LinkedViewItem } from "./linked";
 
 /**
  * What the Linked chip, the Linked sheet and Home's search show (design §5). Pure, so every rule here (counts, order,
@@ -53,9 +53,9 @@ export const FOLD_SHOW = 8;
 
 export type LinkedGroup = {
   kind: LinkedKind; head: string;
-  /** Items in the group, without the spec (its own chip counts it), so heads agree with the chip. */
+  /** Items in the group: exactly its rows, folded ones included. The spec is never in a group (see linkedSpec). */
   count: number;
-  /** Open rows on screen: the spec first, then newest first. */
+  /** Open rows on screen, newest first. */
   rows: LinkedViewItem[];
   /** Open rows behind "Show N more". */
   moreOpen: number;
@@ -73,7 +73,15 @@ export function itemMatches(i: LinkedViewItem, query: string): boolean {
 }
 
 /**
- * The sheet's groups, in the chip's kind order. Open items first (the spec on top, then newest first); done and
+ * The workspace's spec, shown as its own row above the groups (or null; or when a filter hides it). The chip doesn't
+ * count it, so it sits under no head: a head always equals the rows under it.
+ */
+export function linkedSpec(items: readonly LinkedViewItem[], query = ""): LinkedViewItem | null {
+  return items.find(i => i.spec && itemMatches(i, query.trim())) ?? null;
+}
+
+/**
+ * The sheet's groups, in the chip's kind order, without the spec (linkedSpec). Open items first, newest first; done and
  * cancelled fold into "N done" at the end. More than FOLD_OVER open rows show FOLD_SHOW plus "Show N more" unless
  * the kind is in `expanded`. A filter shows every match unfolded.
  */
@@ -82,13 +90,13 @@ export function linkedGroups(items: readonly LinkedViewItem[], opts: { query?: s
   const filtering = !!query;
   const out: LinkedGroup[] = [];
   for (const kind of LINKED_KINDS) {
-    const mine = items.filter(i => i.kind === kind && itemMatches(i, query));
+    const mine = items.filter(i => i.kind === kind && !i.spec && itemMatches(i, query));
     if (!mine.length) continue;
-    const newest = (a: LinkedViewItem, b: LinkedViewItem) => Number(b.spec) - Number(a.spec) || b.firstSeen.localeCompare(a.firstSeen) || a.key.localeCompare(b.key);
+    const newest = (a: LinkedViewItem, b: LinkedViewItem) => b.firstSeen.localeCompare(a.firstSeen) || a.key.localeCompare(b.key);
     const open = mine.filter(i => filtering || !finished(i)).sort(newest);
     const done = filtering ? [] : mine.filter(finished).sort(newest);
     const fold = !filtering && open.length > FOLD_OVER && !opts.expanded?.has(kind);
-    out.push({ kind, head: KIND_HEADS[kind], count: mine.filter(i => !i.spec).length, rows: fold ? open.slice(0, FOLD_SHOW) : open, moreOpen: fold ? open.length - FOLD_SHOW : 0, done });
+    out.push({ kind, head: KIND_HEADS[kind], count: mine.length, rows: fold ? open.slice(0, FOLD_SHOW) : open, moreOpen: fold ? open.length - FOLD_SHOW : 0, done });
   }
   return out;
 }
@@ -99,15 +107,17 @@ export type PasteAdd =
 
 /**
  * The field's "+ Add …" row: what's typed is a Linear key or a link (explicit, so any http(s) URL counts) that isn't in
- * the list yet. A PR is refused on the spot: it has its own card. Anything else is just a filter (null).
+ * the list yet. A PR is refused on the spot: it has its own card. At the cap (the spec doesn't count, as on the server)
+ * a new one is refused with the reason, so there's never an Add row that can only fail. Anything else is a filter (null).
  */
-export function pasteToAdd(query: string, items: readonly Pick<LinkedViewItem, "key">[]): PasteAdd | null {
+export function pasteToAdd(query: string, items: readonly Pick<LinkedViewItem, "key" | "spec">[]): PasteAdd | null {
   const ref = query.trim();
   if (!ref || /\s/.test(ref)) return null;
   const c = classifyLink(ref, true);
   if (!c) return null;
   if (c.kind === "pr") return { action: "refuse", key: c.key, message: "Pull requests live in the Pull requests card, not here." };
   if (items.some(i => i.key === c.key)) return null;
+  if (items.filter(i => !i.spec).length >= LIMITS.items) return { action: "refuse", key: c.key, message: LINKED_FULL };
   const label = c.kind === "linear" || c.kind === "issue" ? c.key : readableUrl(c.url ?? ref);
   const hint = { linear: "Linear issue · checked with Linear", slack: "Slack thread", artifact: "Claude artifact", doc: "Doc", issue: "GitHub issue", link: "Link" }[c.kind];
   return { action: "add", ref, key: c.key, kind: c.kind, label, hint };

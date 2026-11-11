@@ -20,6 +20,8 @@ const TRUST: Record<LinkedOrigin, number> = { manual: 4, registered: 3, spec: 2,
 export const STATUS_TONES = ["done", "active", "todo", "cancelled"] as const;
 
 export const LIMITS = { items: 50, excluded: 200, candidates: 40, rejected: 2000, checksPerDrain: 6, dailyChecks: 120 } as const;
+/** Said at the cap, by the server and by the sheet (which then offers no Add row). */
+export const LINKED_FULL = `${LIMITS.items} linked. Remove one to add another.`;
 /** A candidate whose check failed (Linear unreachable) waits 1h, 6h, then 24h, then is dropped. */
 export const RETRY_MS = [3_600_000, 6 * 3_600_000, 24 * 3_600_000] as const;
 export const TEAMS_TTL_MS = 24 * 3_600_000;

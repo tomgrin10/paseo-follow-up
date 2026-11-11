@@ -66,6 +66,8 @@ export function withinOneEdit(a: string, b: string): boolean {
 export function tokenMatch(q: string, t: string): number {
   if (t === q) return 1;
   if (t.startsWith(q)) return 0.85;
+  // Numbers are identities (HER-1312, PR #1402): 1352 isn't a typo of 1312. Exact or a prefix while typing, nothing fuzzy.
+  if (/^\d+$/.test(q)) return 0;
   if (q.length >= 4) {
     if (withinOneEdit(q, t)) return 0.55;
     // A typo while still typing: compare against the word's start.

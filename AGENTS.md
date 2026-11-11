@@ -128,7 +128,10 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    wasn't seen is `unknown`, and only the developer (`tom`) may answer a brief.
 8. **Design through `/impeccable`.** Every UI change goes through `/impeccable critique`, and you render every
    state yourself: desktop and 390×844, light and dark, no horizontal overflow. DESIGN.md and PRODUCT.md set the
-   system and voice. User-facing copy calls the `about` feature "Summary".
+   system and voice. User-facing copy calls the `about` feature "Summary". A 44px bar holds icons only: chips and counts go on
+   their own wrapping line, so nothing pushes settings off-screen at 390pt. Never offer an action the server will
+   refuse (an Add row at a cap): refuse up front with the reason. Search never fuzzes numbers: ids match exactly
+   or by prefix.
 9. **No root treatment for background agents.** A Paseo 0.16 `background: true` agent is another plugin's helper.
    Follow-up gives it no tools, no Wait, no `needs_you` or Stop-hook nudge, no inbox rows and no directory row
    (`server/background-agents.ts`, `tests/background-agents.test.ts`). On 0.15 the field is absent.
