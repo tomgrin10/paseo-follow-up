@@ -103,6 +103,8 @@ export type InboxEvent =
   /** An open, non-draft PR with nobody asked to review it: the developer's job (it never waits on open threads). */
   | { type: "reviewers"; dedupeKey: string; detail: string; prKey: string; url: string | null; names: string[] }
   | { type: "pr_closed"; dedupeKey: string; detail: string; prKey: string }
+  /** The outside facts (FACT_REASONS) that still hold for this agent's PRs: a flag whose fact ended is withdrawn. */
+  | { type: "facts_live"; live: Reason[] }
   | { type: "sign_off"; seq?: number; muteTurn?: boolean }
   | { type: "undo" }
   | { type: "snooze"; until: string }
@@ -151,12 +153,22 @@ const BREAKS: Reason[] = ["permission", "error", "paused", "ci", "review", "pr_c
  */
 export const RUN_STATE_REASONS: readonly Reason[] = ["error", "paused"];
 /**
+ * Reasons that mirror a PR fact Follow-up observes (red CI, threads or a conflict, no reviewers): they last as long as
+ * the fact does. Once no PR of the agent shows it (fixed, merged, reviewers added, or the agent is on it), the flag is
+ * withdrawn (`facts_live`), so a merged PR never leaves "Add reviewers" behind. Status invariant outside-fact-is-live.
+ */
+export const FACT_REASONS: readonly Reason[] = ["ci", "review", "reviewers"];
+/**
  * What a row shows for an agent: a running agent has outlived its last turn's run-state flags and the card that only
  * reported them (`running-is-not-stale`). A card with open questions stays: only the developer closes it.
  */
-export function liveFlag<B extends { kind: string; state: string; questionIds?: string[]; at?: string }>(status: string, needs: Needs | null, brief: B | null, turnStartedAt: string | null = null, background = false): { needs: Needs | null; brief: B | null } {
+export function liveFlag<B extends { kind: string; state: string; questionIds?: string[]; at?: string; source?: string }>(status: string, needs: Needs | null, brief: B | null, turnStartedAt: string | null = null, background = false, waiting = false): { needs: Needs | null; brief: B | null } {
   // Paseo 0.16 background work still live: the agent isn't finished yet, so a finish waits (shown, not erased).
   if (background) needs = withoutReasons(needs, ["finished"]);
+  // The main agent declared a wait (a working or waiting task in its workspace): a finish that states no ask is that
+  // wait, not news, so it waits too (shown again once the task settles). An agent's own ask still flags.
+  // Status invariant in-flight-reads-waiting; tests/in-flight-status.test.ts.
+  if (waiting && !(brief?.state === "open" && brief.source !== "none" && !["done", "unknown"].includes(brief.kind))) needs = withoutReasons(needs, ["finished"]);
   // Only a flag older than the current turn's start is stale. Paseo can still read "running" for a moment after a
   // turn fails (server/directory.ts keeps a failed agent busy until its re-read), so status alone isn't enough, and
   // without a known turn start nothing is dropped here (the reducer and the load repair cover those turns).
@@ -226,6 +238,9 @@ export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
     case "ci": if (!seen(e, event.dedupeKey) && !event.suppressed) flag("ci", event.detail, "ci"); break; // #8
     case "review": if (!seen(e, event.dedupeKey) && !event.suppressed) flag("review", event.detail, "review"); break; // #9
     case "reviewers": if (!seen(e, event.dedupeKey)) flag("reviewers", event.detail, "reviewers"); break;
+    case "facts_live":
+      if (e.needs) { e.needs = withoutReasons(e.needs, FACT_REASONS.filter(r => !event.live.includes(r))); if (!e.needs) e.snooze = null; }
+      break;
     case "pr_closed": // #10, and a "until this PR merges" snooze wakes here.
       if (!seen(e, event.dedupeKey)) { if (e.snooze?.until === `pr:${event.prKey}`) e.snooze = null; flag("pr_closed", event.detail, "pr_closed"); }
       break;

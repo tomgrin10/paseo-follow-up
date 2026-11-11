@@ -151,7 +151,8 @@ export function trackedGroup(w: Workspace, now: number): HomeGroupId {
   if (w.runtimeBusy) return "running";
   const state = summary(w, now);
   if (state.status === "done") return "quiet";
-  if (w.prs.some(p => p.snapshot?.state === "OPEN") || state.status === "waiting") return "waiting";
+  // In-flight work the agent tracks (a working or waiting task, an open PR) reads Waiting, never Quiet.
+  if (w.prs.some(p => p.snapshot?.state === "OPEN") || state.status === "waiting" || followUpObligations(w).some(o => o.status === "working" || o.status === "waiting")) return "waiting";
   return "quiet";
 }
 

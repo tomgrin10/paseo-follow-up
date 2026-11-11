@@ -42,7 +42,7 @@ is missing from AGENTS.md or docs/, so add a line here when you add one.
 | `workspace_status` | `follow.agent-status` | The workspace's goal, PRs, tasks and work queue. `detail=full` adds history. Includes the PR workflow. |
 | `sync_workspace` | `follow.sync` | Confirms the sidebar matches the work. The Stop hook asks for it after code-changing turns. |
 | `enroll_workspace` | `follow.enroll` | Refines the goal of a workspace the developer activated. |
-| `register_pr` | `follow.register-pr` | Registers a submitted PR and its stack and parent. |
+| `register_pr` | `follow.register-pr` | Registers a submitted PR and its stack and parent. `agentMerges: true` marks a PR the agent merges itself: Follow-up never asks the developer to review or merge it. |
 | `exclude_stack` | `follow.exclude-stack` | Removes a wrongly registered stack, with an audit (`server/exclusions.ts`). |
 | `update_obligation` | `follow.obligation` | Creates or updates a task (an obligation), with an optional trigger and communication receipt. |
 | `acknowledge_batch` | `follow.acknowledge` | Records a repair batch's result: completed or blocked. |

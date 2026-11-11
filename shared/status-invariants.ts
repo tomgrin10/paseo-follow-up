@@ -7,7 +7,7 @@ import { shouldReopen, type Brief } from "./brief";
 import { flagHeadline } from "./headline";
 import type { InboxRow } from "./inbox";
 import { completionCheck, summary } from "./model";
-import { liveLine, needsYou } from "./attention";
+import { asksForReviewers, liveLine, needsYou } from "./attention";
 import { trackedGroup, type HomeModel } from "./home";
 import { freshPriorities, type Priority } from "./priorities";
 import { agentCard, automaticHold, batchView } from "./status";
@@ -87,6 +87,28 @@ export const INVARIANTS: Invariant[] = [
       const live = liveLine(w, now);
       if (live.icon !== "spinner" || !/working/i.test(live.text)) return null;
       return inFlight(w) || w.runtimeBusy || followUpObligations(w).some(o => o.status === "working") ? null : live.text;
+    },
+  },
+  {
+    id: "agent-merges-asks-nothing",
+    why: "2026-11-11 wks_5dfd3a65: a PR the agent merges itself (register_pr agentMerges) is its own work in flight, so Needs you never asks the developer to review or merge it.",
+    check(w, now) {
+      const mine = new Set(w.prs.filter(p => p.agentMerges).map(p => p.key));
+      const asked = needsYou(w, now).filter(i => (i.kind === "merge" || i.kind === "reviewers") && mine.has(i.prKey));
+      return asked.length ? asked.map(i => i.title).join(", ") : null;
+    },
+  },
+  {
+    id: "in-flight-reads-waiting",
+    why: "2026-11-11 wks_5dfd3a65: work the main agent tracks (a working or waiting task) reads as waiting on that work, never Quiet or \"declare Done\".",
+    check(w, now) {
+      if (!followUpObligations(w).some(o => o.status === "working" || o.status === "waiting") || ["done", "needs-you"].includes(summary(w, now).status)) return null;
+      // A Done check queued before a task reopened is cancelled on the engine's next refresh (server/tasks.ts only
+      // queues it once every task is done), so it isn't a reading of in-flight work.
+      if (batchView(w, now)?.kind === "finish") return null;
+      const group = trackedGroup(w, now);
+      const live = liveLine(w, now).text;
+      return group === "quiet" ? `reads Quiet: ${live}` : /declare Done/.test(live) ? live : null;
     },
   },
   {
@@ -185,6 +207,24 @@ export function rowViolations(row: Pick<InboxRow, "agentId" | "status" | "needs"
   if (!h || (h.key !== "error" && h.key !== "paused")) return out;
   const flaggedAt = [...(row.needs?.reasons.filter(r => r.reason === h.key).map(r => r.at) ?? []), ...(row.brief?.kind === h.key && row.brief.at ? [row.brief.at] : [])].sort().at(-1);
   if (!flaggedAt || flaggedAt < row.turnStartedAt) out.push({ id: "running-is-not-stale", detail: `${row.agentId} is ${row.status} since ${row.turnStartedAt} but headlines ${h.label} from ${flaggedAt ?? "an older card"}` });
+  return out;
+}
+
+/**
+ * Inbox flags against the workspaces they come from: an "Add reviewers" flag lasts only while one of the agent's PRs
+ * still asks for reviewers (FACT_REASONS in shared/inbox.ts). A PR Follow-up couldn't read is unknown, never a
+ * violation. `outside-fact-is-live`, 2026-11-11 wks_5dfd3a65: "Add reviewers #107" stayed after #107 merged, in a
+ * repository nobody reviews.
+ */
+export function factFlagViolations(rows: Pick<InboxRow, "agentId" | "needs">[], workspaces: Workspace[]): { id: string; detail: string }[] {
+  const out: { id: string; detail: string }[] = [];
+  for (const row of rows) {
+    const flag = row.needs?.reasons.find(r => r.reason === "reviewers");
+    if (!flag) continue;
+    const prs = workspaces.filter(w => w.enable_tracking && !w.archived).flatMap(w => w.prs.filter(p => (p.registeredAgentId ?? w.mainAgentId) === row.agentId).map(p => ({ p, w })));
+    if (prs.some(({ p }) => p.error || !p.snapshot?.complete)) continue;
+    if (!prs.some(({ p, w }) => p.snapshot!.state === "OPEN" && asksForReviewers(p, w))) out.push({ id: "outside-fact-is-live", detail: `${row.agentId} still flags "Add reviewers ${flag.detail}" but none of its PRs asks for reviewers` });
+  }
   return out;
 }
 
