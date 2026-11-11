@@ -30,6 +30,7 @@
     "preview": "node scripts/check-install.mjs --keep",
     "test:install": "node scripts/check-install.mjs && node scripts/check-wait.mjs",
     "test:move": "tsx scripts/check-move.mjs",
+    "test:move:registry": "tsx scripts/check-move.mjs --registry",
     "test:github-mode": "node scripts/check-github-mode.mjs",
     "test:native": "node scripts/check-native-tools.mjs --agents 10",
     "prepare": "node scripts/build.mjs",
