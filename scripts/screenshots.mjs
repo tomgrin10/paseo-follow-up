@@ -456,7 +456,13 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
         // The notes' screenshots load by URL: wait until each has loaded or failed (a failed one is left out).
         await page.waitForFunction(() => [...document.images].every(i => i.complete), null, { timeout: 30000 });
       };
-      /** The same sheet scrolled to its end: the panel's image and the credits. */
+      /** The same sheet scrolled so `heading` is at the top: the panel's section and its image. */
+      const sheetAt = (phone, heading) => async page => {
+        await sheet(phone)(page);
+        await page.getByText(heading, { exact: true }).last().evaluate(el => el.scrollIntoView({ block: "start" }));
+        await page.waitForFunction(() => [...document.images].every(i => i.complete), null, { timeout: 30000 });
+      };
+      /** The same sheet scrolled to its end: the last section and the credits. */
       const sheetEnd = phone => async page => {
         await sheet(phone)(page);
         // The phone's bottom sheet has no dialog role: wheel over the middle of the screen, where the sheet's body is.
@@ -472,6 +478,8 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
         await shoot("whats-new-light", DESKTOP, "light", sheet(false), { seen: WHATS_NEW_FROM });
         await shoot("whats-new-phone", PHONE, "light", sheet(true), { seen: WHATS_NEW_FROM });
         await shoot("whats-new-phone-dark", PHONE, "dark", sheet(true), { seen: WHATS_NEW_FROM });
+        await shoot("whats-new-mid", DESKTOP, "dark", sheetAt(false, "A panel on every workspace"), { seen: WHATS_NEW_FROM });
+        await shoot("whats-new-phone-mid", PHONE, "dark", sheetAt(true, "A panel on every workspace"), { seen: WHATS_NEW_FROM });
         await shoot("whats-new-end", DESKTOP, "dark", sheetEnd(false), { seen: WHATS_NEW_FROM });
         await shoot("whats-new-phone-end", PHONE, "light", sheetEnd(true), { seen: WHATS_NEW_FROM });
       }
