@@ -1,0 +1,2 @@
+- A Done stays grey while you can still undo it, and turns green once the agent has it.
+- Ctrl+Z undo now works on non-Latin keyboard layouts, such as Hebrew.
