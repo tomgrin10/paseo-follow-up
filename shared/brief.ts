@@ -453,7 +453,7 @@ export const pickedCount = (b: Pick<Brief, "decisions">, picks: Record<string, s
  * window (or its send) is muted: nothing has happened yet, and green would claim it had.
  */
 export function pastTone(state: Brief["state"], pending: boolean): "success" | "muted" {
-  return state === "answered" && !pending ? "success" : "muted";
+  return state === "superseded" || pending ? "muted" : "success";
 }
 
 export function pastRows(b: Pick<Brief, "decisions" | "ask">): { id: string; question: string | null; answer: string | null }[] {
