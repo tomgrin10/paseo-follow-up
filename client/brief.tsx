@@ -31,7 +31,7 @@ export type BriefDeps = {
   /** Opens Follow-up's panel for a workspace whose record this client hasn't loaded yet. */
   openPanel(workspaceId: string): void;
   /** Done's Undo window, so the composer pill says Done (and its Undo cancels the same toast) until it ends. */
-  noteDone?(agentId: string, label: string, cancel: () => void): void;
+  noteDone?(agentId: string, cancel: () => void): void;
   endDone?(agentId: string): void;
 };
 
@@ -318,7 +318,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
     const id = runUndoable("Telling the agent it's done", { label: "Done", toast, run: () => act({ agentId, briefId: b.id, move: "done" }), success: "Marked done. The agent has it.",
       failure: "Done not sent", open: () => deps.openAgent(agentId), onError: e => { setMarked(null); setError(errorText(e)); } }, () => setMarked(null), `done:${b.id}`, () => deps.endDone?.(agentId));
     // The pill's Undo is this toast's Undo: it closes the toast (so nothing is sent) and reopens the card.
-    if (id !== null) deps.noteDone?.(agentId, b.ask, () => { dismissToast(id); setMarked(null); });
+    if (id !== null) deps.noteDone?.(agentId, () => { dismissToast(id); setMarked(null); });
   };
   const press = (m: BriefMove) => {
     if ((m.kind === "merge" || m.kind === "add_reviewers") && m.prKey) { if (workspace?.prs.some(p => p.key === m.prKey)) setSheet({ key: m.prKey, intent: m.kind === "merge" ? "merge" : "reviewers" }); else if (b.workspaceId) deps.openPanel(b.workspaceId); }
