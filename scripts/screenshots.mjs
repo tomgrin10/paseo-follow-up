@@ -423,8 +423,9 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Filter, or paste a link or key");
     });
     // The 2.0.0 notes' two images (What's new and the GitHub page): the same scenes as home and panel, cropped to what
-    // a ~500px sheet can show legibly. Home without Paseo's own sidebar; the panel's head (its tab, the status line, the
-    // stack bar, Auto-send), which the sheet shows near full width, so shoot it with --scale 3 to stay sharp.
+    // a ~500px sheet can show legibly. Home without Paseo's own sidebar; the panel at its real width (320), its head (tab,
+    // status line, stack bar, Auto-send) and the question card under it. Shoot notes-panel with --scale 3: the sheet and
+    // the GitHub page draw it at most 320 wide (#WxH), so it stays sharp and never larger than the UI.
     // The rectangles are CSS pixels of the 1440x900 DESKTOP viewport. CHANGELOG.md pins them to a commit, never main.
     if (name === "notes-home") await shoot("notes-home", DESKTOP, "dark", async page => {
       await openHome(page);
@@ -436,7 +437,10 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       await openChat(page, "Billing retries", billing.prompt);
       await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
       await page.getByRole("button", { name: /^Pull request 142: / }).first().waitFor();
-      return { x: 1120, y: 0, width: 320, height: 298 };
+      // A taller window shows more of the panel; it stays 320 CSS px wide (its real width at 1440), shot at 3x.
+      await page.setViewportSize({ width: DESKTOP.width, height: 1400 });
+      await page.getByRole("button", { name: /^Pull request 142: / }).first().waitFor();
+      return { x: 1120, y: 0, width: 320, height: Number(process.env.NOTES_PANEL_HEIGHT ?? 910) };
     });
     if (name === "whats-new") {
       // The packed copy Paseo runs: the path its plugin list reports (the unpacked folder for a directory install).
