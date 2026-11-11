@@ -29,6 +29,7 @@ import { tmpdir, homedir } from "node:os";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
 import { harness, spawnDaemon } from "./harness.mjs";
+import { harnessEnv } from "./harness-env.mjs";
 import { PLUGIN_ID as NEW, LEGACY_PLUGIN_ID as OLD, DATA_DIR, LEGACY_DATA_DIR, ENV_PREFIX, LEGACY_ENV_PREFIX, HOOK_MARKER, LEGACY_HOOK_MARKER, invokeSelf } from "../shared/legacy.ts";
 import { SOURCE_REPOSITORY } from "../server/update-provenance.ts";
 await harness();
@@ -101,10 +102,9 @@ let daemon = null, client = null, browser = null;
 const port = await free(); const url = `ws://127.0.0.1:${port}/ws`;
 const regPort = await free(); registryUrl = `http://127.0.0.1:${regPort}/`;
 const providers = "claude,codex,followup-fixture";
-const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: join(home, ".config"), PASEO_HOME: home, PASEO_DAEMON_URL: url, PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true",
+const env = harnessEnv(root, { home, set: { PASEO_DAEMON_URL: url, PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true",
   npm_config_registry: registryUrl, npm_config_cache: join(root, "npm-cache"), npm_config_prefer_online: "true", npm_config_audit: "false", npm_config_fund: "false", npm_config_update_notifier: "false",
-  FOLLOW_UP_UPDATES_FAST: "1", [`${ENV_PREFIX}TOOL_PROVIDERS`]: providers, [`${LEGACY_ENV_PREFIX}TOOL_PROVIDERS`]: providers };
-for (const key of ["PASEO_PASSWORD", "PASEO_PASSWORD_FILE", "PASEO_AGENT_ID", "PASEO_WORKSPACE_ID", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "NPM_CONFIG_REGISTRY"]) delete env[key];
+  FOLLOW_UP_UPDATES_FAST: "1", [`${ENV_PREFIX}TOOL_PROVIDERS`]: providers, [`${LEGACY_ENV_PREFIX}TOOL_PROVIDERS`]: providers }, strip: ["NPM_CONFIG_REGISTRY"] });
 const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env, timeout: 300_000, maxBuffer: 8 << 20 })).stdout);
 const rows = async () => (await client.listPlugins()).filter(p => p.id === OLD || p.id === NEW).map(p => ({ id: p.id, status: p.status, version: p.installation?.currentRevision ?? null, enabled: p.enabled ?? null }));
 const events = dir => { try { return readFileSync(join(dir, "updates.jsonl"), "utf8").trim().split("\n").filter(Boolean).map(l => JSON.parse(l)); } catch { return []; } };
