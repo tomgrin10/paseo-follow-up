@@ -16,6 +16,7 @@ import {
 import type { Priority } from "../shared/priorities";
 import type { WorkstreamRow } from "../shared/overseer";
 
+import { ghAccounts, githubApi, type AccountReads } from "./github-api";
 const exec = promisify(execFile);
 
 /** The inputs' fingerprint: equal means the model would see the same material. */
@@ -165,10 +166,10 @@ export function slackUserFrom(toolsList: string): string | null { return /user_i
 const runFile: Run = async (command, args, timeout, env) => (await exec(command, args, { timeout, maxBuffer: 4 * 1024 * 1024, ...(env ? { env: { ...process.env, ...env } } : {}) })).stdout;
 
 /** Every github.com account `gh` is logged in to: review requests can sit on a work account that isn't the active one. */
-export function ghAccounts(status: string): string[] { return [...new Set([...status.matchAll(/account (\S+)/g)].map(m => m[1]))]; }
+export { ghAccounts };
 
-/** The live sources: read-only mcpproxy and gh calls, and one Artifact read for the plan. */
-export function liveRankSources(jobs: AiJobs, opts: { run?: Run; slackSelf?: string | null; slackUser?: string | null; model?: () => Promise<string | null> } = {}): RankSources {
+/** The live sources: read-only mcpproxy calls, in-process GitHub reads, and one Artifact read for the plan. */
+export function liveRankSources(jobs: AiJobs, opts: { run?: Run; github?: AccountReads; slackSelf?: string | null; slackUser?: string | null; model?: () => Promise<string | null> } = {}): RankSources {
   const run = opts.run ?? runFile;
   let slackUser: Promise<string | null> | null = opts.slackUser !== undefined ? Promise.resolve(opts.slackUser) : null;
   const me = () => slackUser ??= run("mcpproxy", ["tools", "list", "--server=slack-user", "-o", "json", "--log-level=error"], 30_000).then(slackUserFrom).catch(() => { slackUser = null; return null; });
@@ -195,19 +196,19 @@ export function liveRankSources(jobs: AiJobs, opts: { run?: Run; slackSelf?: str
       return [...mentions, ...dms].filter(m => { const k = `${m.who}|${m.text}`; if (seen.has(k)) return false; seen.add(k); return true; });
     },
     async github() {
-      // Each logged-in account's own review requests (a work account is often not the active one). The token goes to
-      // that one gh child only, never stored.
-      const status = await run("gh", ["auth", "status", "--hostname", "github.com"], 15_000).catch(e => String((e as { stdout?: string; stderr?: string }).stdout ?? "") + String((e as { stderr?: string }).stderr ?? ""));
-      const accounts = ghAccounts(status);
+      // Each logged-in account's own review requests (a work account is often not the active one).
+      // In process (worker-reads-github-in-process): the account list and each account's token are resolved once
+      // and cached; the searches are HTTPS.
+      const gh = opts.github ?? githubApi();
+      const accounts = await gh.accounts().catch(() => [] as string[]);
       // REST search: `gh search prs` goes through GraphQL search, whose secondary limit a busy work account hits often
       // (it then read as "no review requests").
-      const search = (env?: Record<string, string>) => run("gh", ["api", "-X", "GET", "search/issues", "-f", "q=is:pr is:open archived:false review-requested:@me", "-f", "per_page=30"], 30_000, env).then(parseReviewRequests);
-      if (accounts.length <= 1) return search();
+      const search = async (account: string | null) => parseReviewRequests(JSON.stringify(await gh.restAs(account, "search/issues?q=" + encodeURIComponent("is:pr is:open archived:false review-requested:@me") + "&per_page=30")));
+      if (accounts.length <= 1) return search(accounts[0] ?? null);
       const seen = new Set<string>(); const out: RankReview[] = []; let read = 0; let failed = 0;
       for (const user of accounts) {
         try {
-          const token = (await run("gh", ["auth", "token", "--hostname", "github.com", "--user", user], 15_000)).trim();
-          for (const r of await search(token ? { GH_TOKEN: token } : undefined)) { const k = `${r.repo}#${r.number}`; if (!seen.has(k)) { seen.add(k); out.push(r); } }
+          for (const r of await search(user)) { const k = `${r.repo}#${r.number}`; if (!seen.has(k)) { seen.add(k); out.push(r); } }
           read++;
         } catch { failed++; /* the others still count */ }
       }

@@ -11,7 +11,7 @@ import { harnessEnv } from "../../scripts/harness-env.mjs";
  * A host where everything slow hangs, for the RPC acknowledgement invariant (tests/rpc-ack.test.ts):
  * - the handler context's `paseo` API (agents.ref(id).send, refresh, timeline…) never settles;
  * - `withDaemon` connects to a socket that accepts and never answers (the client gives up after its connect timeout);
- * - `gh` and `gt` on PATH block until the test process exits.
+ * - `gh` and `gt` on PATH block until the test process exits; the GitHub API (FOLLOW_UP_GITHUB_API) is the black hole.
  * The worker itself is the real one: `contribute()` from index.server.ts with its real stores, in a temp PASEO_HOME.
  *
  * Call `hangingHost()` before anything imports index.server.ts or server/daemon.ts: both read PASEO_HOME at import.
@@ -44,7 +44,10 @@ export async function hangingHost(): Promise<{ root: string; directory: string; 
   // Every outside CLI the worker spawns reads stdin until the parent goes away: a call that never returns, never reaches
   // a real account or service, and leaves no orphan. PATH holds only these, node's own dir and the system dirs (git and node stay real; the fakes come first).
   for (const tool of HUNG_TOOLS) { await writeFile(join(bin, tool), "#!/bin/sh\nexec cat >/dev/null\n"); await chmod(join(bin, tool), 0o755); }
-  const env = harnessEnv(root, { set: { PASEO_DAEMON_URL: `ws://127.0.0.1:${port}/ws`, PASEO_PASSWORD: "test", PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin` } }) as Record<string, string>;
+  const env = harnessEnv(root, { set: { PASEO_DAEMON_URL: `ws://127.0.0.1:${port}/ws`, PASEO_PASSWORD: "test", PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`,
+    // GitHub reads are in-process HTTPS (server/github-api.ts): the API is the same black hole, and token lookups run
+    // the hung gh instead of /usr/bin/gh.
+    FOLLOW_UP_GITHUB_API: `http://127.0.0.1:${port}`, FOLLOW_UP_GH_BIN: join(bin, "gh") } }) as Record<string, string>;
   for (const key of Object.keys(process.env)) if (!(key in env)) delete process.env[key];
   Object.assign(process.env, env);
   // The worker runs as CommonJS in Paseo, where server/daemon.ts's require() exists; under tsx's ESM it doesn't, and
