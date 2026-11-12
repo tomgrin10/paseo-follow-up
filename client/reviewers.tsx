@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { TextInput, View } from "react-native";
 import { Pressable, Text } from "./text";
 import { useRpc } from "@getpaseo/plugin/client";
@@ -6,7 +6,7 @@ import { Icon, SettingsAction, SettingsCard, useToast } from "@getpaseo/plugin/c
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { reviewerSettingsRpc, reviewerSuggestionsRpc, saveReviewersRpc } from "../shared/contracts";
 import { MAX_REVIEWERS, TEAM_SLUG, USER_LOGIN, isTeam, resolveReviewers, reviewerConfig, reviewerLabel, sameLogin, setReviewerConfig, type ReviewerEntry } from "../shared/reviewers";
-import { noReviewRepoList, setNoReviewRepos } from "../shared/pr-workflow";
+import { noReviewRepoList, noReviewReposVersion, onNoReviewRepos, setNoReviewRepos } from "../shared/pr-workflow";
 import { Button, Switch, errorText, text, type Theme, SubmitScope } from "./kit";
 import { Disclosure } from "./settings-shell";
 import { repoSummary, reposSummary, reviewersConfigured } from "../shared/settings-nav";
@@ -18,6 +18,8 @@ export function useReviewerSettings() {
   const read = useRpc(reviewerSettingsRpc);
   const cache = useQueryClient();
   const query = useQuery({ queryKey: reviewerSettingsKey, queryFn: () => read({}), staleTime: 60_000 });
+  // A No review change (here, Settings or the Needs-you link) re-renders every surface that computed Needs you.
+  useSyncExternalStore(onNoReviewRepos, noReviewReposVersion, noReviewReposVersion);
   useEffect(() => {
     // Every mounted user shares one query; only a real change re-renders what read the old lists.
     if (!query.data) return;

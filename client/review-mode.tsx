@@ -76,17 +76,18 @@ export function ReviewModeRow({ repo, value, theme, compact, busy, onChange }: {
       <View style={{ position: "relative", alignSelf: compact ? "stretch" : "flex-end" }}>
         <Pressable accessibilityRole="button" accessibilityLabel={`Review for ${repo}: ${REVIEW_MODE_LABELS[value].label}`} aria-expanded={open} accessibilityState={{ expanded: open, disabled: busy }} disabled={busy}
           onPress={() => setOpen(o => !o)} hitSlop={compact ? 0 : 4}
-          style={state => ({ flexDirection: "row", alignItems: "center", justifyContent: compact ? "space-between" : "center", gap: 6, minHeight: compact ? 44 : 32, paddingHorizontal: compact ? 14 : 11,
-            borderRadius: compact ? 8 : 6, borderWidth: 1, borderColor: c.border, opacity: busy ? 0.45 : 1,
-            backgroundColor: open || (state as { hovered?: boolean }).hovered ? c.surface2 : c.surface0 })}>
-          <Text numberOfLines={1} style={{ color: c.foreground, fontSize: compact ? 15 : 13 }}>{REVIEW_MODE_LABELS[value].label}</Text>
+          // The host select's shape (a pill with a hairline), so the row reads like Ship with and Merge method above it.
+          style={state => ({ flexDirection: "row", alignItems: "center", justifyContent: compact ? "space-between" : "center", gap: 8, minHeight: compact ? 44 : 32, paddingHorizontal: 16,
+            borderRadius: 999, borderWidth: 1, borderColor: c.border, opacity: busy ? 0.45 : 1,
+            backgroundColor: open || (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
+          <Text numberOfLines={1} style={{ color: c.foreground, fontSize: compact ? 15 : 14 }}>{REVIEW_MODE_LABELS[value].label}</Text>
           <Icon name="ChevronDown" size={compact ? 16 : 12} color={c.foregroundMuted} />
         </Pressable>
-        {open && <View accessibilityRole="menu" accessibilityLabel={`Review for ${repo}`} style={{ position: "absolute", top: compact ? 50 : 38, right: 0, ...(compact ? { left: 0 } : { width: 340 }), paddingVertical: 4,
+        {open && <View accessibilityRole="menu" accessibilityLabel={`Review for ${repo}`} style={{ position: "absolute", top: compact ? 50 : 38, ...(compact ? { left: 0, width: 264 } : { right: 0, width: 340 }), paddingVertical: 4,
           borderRadius: 8, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1, shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 8 }}>
           {REVIEW_MODES.map(mode => <Pressable key={mode} accessibilityRole="menuitem" accessibilityState={{ selected: mode === value }} onPress={() => { setOpen(false); if (mode !== value) onChange(mode); }}
             style={state => ({ ...menuItemRow(compact), minHeight: compact ? 56 : 44, paddingHorizontal: compact ? 12 : 10, paddingVertical: 6, backgroundColor: (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
-            <MenuItemContent theme={theme} touch={compact} glyph={mode === value ? "Check" : null} label={REVIEW_MODE_LABELS[mode].label} hint={REVIEW_MODE_LABELS[mode].hint} />
+            <MenuItemContent theme={theme} touch={compact} glyph={mode === value ? "Check" : null} label={REVIEW_MODE_LABELS[mode].label} hint={REVIEW_MODE_LABELS[mode].hint} hintLines={compact ? 2 : 1} />
           </Pressable>)}
         </View>}
       </View>

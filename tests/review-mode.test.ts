@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { followUpEvents } from "../server/inbox";
 import { PrWorkflowStore, type Probe } from "../server/pr-workflow";
 import { needsYou } from "../shared/attention";
-import { prEndEvent } from "../shared/inbox";
+import { newEntry, prEndEvent, reduce } from "../shared/inbox";
 import { agentMerges, noReviewRepoList, REVIEW_MODE_LABELS, repoShippingSummary, repoReview, setNoReviewRepos, setPrWorkflowInputSchema } from "../shared/pr-workflow";
 import { emptyReviewerConfig, setReviewerConfig } from "../shared/reviewers";
 import { INVARIANTS as STATUS_INVARIANTS } from "../shared/status-invariants";
@@ -134,4 +134,19 @@ test("agent text: a No review repository tells the agent to merge its own PR onc
 test("one sentence per mode, said the same way everywhere", () => {
   assert.equal(REVIEW_MODE_LABELS.none.hint, "The agent merges its own PRs once checks pass.");
   assert.equal(REVIEW_MODE_LABELS.team.hint, "Follow-up asks you to add reviewers and to merge.");
+});
+
+test("Undo brings Add reviewers back: a withdrawn reviewers flag forgets its key, so the same PR can ask again", () => {
+  const at = new Date(clock).toISOString();
+  const ask = { type: "reviewers" as const, dedupeKey: "example/app#1:reviewers", detail: "#1", prKey: "example/app#1", url: null, names: [] };
+  let e = reduce(newEntry("main-agent"), ask, at);
+  assert.ok(e.needs?.reasons.some(r => r.reason === "reviewers"));
+  e = reduce(e, { type: "facts_live", live: [] }, at); // the repository went No review
+  assert.equal(e.needs, null);
+  e = reduce(e, ask, at); // Undo: Team review again
+  assert.ok(e.needs?.reasons.some(r => r.reason === "reviewers"), "the ask is back");
+  // A flag the developer signed off stays handled: it isn't withdrawn, so its key is kept.
+  let off = reduce(reduce(newEntry("main-agent"), ask, at), { type: "sign_off" }, at);
+  off = reduce(reduce(off, { type: "facts_live", live: [] }, at), ask, at);
+  assert.equal(off.needs, null);
 });
