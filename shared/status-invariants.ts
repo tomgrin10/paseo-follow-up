@@ -12,6 +12,7 @@ import { trackedGroup, type HomeModel } from "./home";
 import { freshPriorities, type Priority } from "./priorities";
 import { agentCard, automaticHold, batchView, holdSuperseded } from "./status";
 import { conditionId, isCapped, NO_PROGRESS_CAP, sendDecision } from "./send-decision";
+import { messageStrip, obligationDelivery, repairRows } from "./task-rows";
 import { followUpObligations } from "./follow-up";
 import { PRESENCE, claimsWorking, taskStatus } from "./task-status";
 import { cadence, movingReason, OBSERVATION_FRESH_MS, POLL_IDLE_MS, RUNNING_POLL_MS, TICK_MS } from "./poll";
@@ -84,6 +85,20 @@ export const INVARIANTS: Invariant[] = [
       if (!v.line.endsWith(d.reason)) return `line "${v.line}" but the decision is "${d.reason}"`;
       if (v.waitingOn !== d.waitingOn) return `line waits on ${v.waitingOn}, the decision on ${d.waitingOn}`;
       if (/going out now|waits a minute so new changes/.test(v.line) && d.waitingOn !== null) return `"${v.line}" while the send waits on ${d.waitingOn}`;
+      return null;
+    },
+  },
+  {
+    id: "message-rows-say-it-once",
+    why: "2026-11-12 (Q49 mock review): every row in the next message repeated \"sends at 14:32\" or \"sends after the agent's current turn\", and the header said it a third time. The Tasks strip carries when and why, straight from the send decision; a row in the message, repair or Auto task, says only Queued or Sent.",
+    check(w, now) {
+      const strip = messageStrip(w, now);
+      if (strip?.phase === "queued" && strip.reason !== sendDecision(w, now).reason) return `strip says "${strip.reason}" but the decision is "${sendDecision(w, now).reason}"`;
+      for (const r of repairRows(w).open) if ((r.state === "queued" && r.text !== "Queued") || (r.state === "sent" && r.text !== "Sent")) return `${r.task.key} row says "${r.text}"`;
+      for (const o of w.obligations ?? []) {
+        const d = obligationDelivery(w, o), s = taskStatus(o, w, w.taskAgents ?? {}, now);
+        if (d && o.status !== "working" && !["done", "waived", "blocked"].includes(o.status) && s.text !== (d === "sent" ? "Sent" : "Queued")) return `task ${o.id} in the message says "${s.text}"`;
+      }
       return null;
     },
   },

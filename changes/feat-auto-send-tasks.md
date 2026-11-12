@@ -1,0 +1,3 @@
+- Fixes Follow-up finds on your PRs (conflicts, review feedback, failing checks, restacks) are now ordinary tasks in the workspace's Tasks, each with its PR and one plain state: Queued, Sent, Needs you or Done.
+- The top of Tasks says who the next message goes to, when it goes and why it waits, with Preview and Send now. You can keep any single task for yourself by turning its Auto-send off.
+- A fix that went out twice with no change on GitHub asks you on its own, and everything else keeps going.
