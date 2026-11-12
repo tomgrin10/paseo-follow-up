@@ -122,19 +122,32 @@ const base = process.env.POLL_COST_API; const args = process.argv.slice(2);
     id: workspaceId, title: `Synthetic workspace ${i}`, goal: "Synthetic", mainAgentId: agentId, enable_tracking: true, enable_auto_sends: false, hold: null, archived: false,
     prs: keys.filter((_, k) => k % W === i).map(key => { const r = rows.get(key); return { key, repo: r.repo, number: r.number, stack: `Stack ${i}`, parent: null, disposition: null, snapshot: null, error: null }; }),
     obligations: [], batches: [], completion: null, updatedAt: now, managedDoneLabel: false, runtimeReason: null, runtimeBusy: false, backgroundBusy: false, inventory: null })) }));
+  if (process.argv.includes("--foreign")) {
+    // Other plugins' state files at their live sizes (synthetic content): Session Guard ~118 KB, Smart Session ~276 KB.
+    await mkdir(join(home, "plugin-data/session-guard"), { recursive: true }); await mkdir(join(home, "plugin-data/smart-session"), { recursive: true });
+    const at = new Date(Date.now() - 86_400_000).toISOString();
+    await writeFile(join(home, "plugin-data/session-guard/state.json"), JSON.stringify({ version: 1, pauses: Array.from({ length: 450 }, (_, i) => ({ id: `pause-${i}`, agentId: `other-${i}`, workspaceId: `other-ws-${i}`, phase: "cancelled", turnId: `turn-${i}`, pausedAt: at, settledAt: at, suspension: { note: "x".repeat(60) } })) }));
+    await writeFile(join(home, "plugin-data/smart-session/compactions.json"), JSON.stringify({ version: 1, items: Array.from({ length: 900 }, (_, i) => ({ id: `c-${i}`, agentId: `other-${i}`, state: "done", createdAt: at, reason: "y".repeat(180) })) }));
+  }
   await cli("plugin", "install", plugin);
   await sleep(60_000); // warm-up: first reads, discovery, settling
   const pid = Number((await readFile(join(home, "plugin-data/follow-up/worker.lock"), "utf8").catch(() => "")).split(":")[0]);
   const ticks = async () => { const f = (await readFile(`/proc/${pid}/stat`, "utf8")).split(") ")[1].split(" "); return Number(f[11]) + Number(f[12]); };
   const hz = Number((await exec("getconf", ["CLK_TCK"])).stdout.trim()) || 100;
+  const io = async () => Number(/rchar: (\d+)/.exec(await readFile(`/proc/${pid}/io`, "utf8"))[1]);
+  const logAt = (await readFile(join(root, "daemon.log"), "utf8")).length; const rchar0 = await io();
   const start = { ...counts, cpu: await ticks(), at: Date.now() };
   await sleep(MINUTES * 60_000);
   const minutes = (Date.now() - start.at) / 60_000;
+  const rcharMBPerMin = Math.round((await io() - rchar0) / minutes / 1e5) / 10;
+  // New daemon connections in the window: distinct connectionIds the daemon logged after the window started.
+  const daemonConnectionsPerMin = Math.round(new Set([...(await readFile(join(root, "daemon.log"), "utf8")).slice(logAt).matchAll(/"connectionId":"([^"]+)"/g)].map(m => m[1])).size / minutes * 10) / 10;
   const rate = k => Math.round((counts[k] - start[k]) / minutes * 10) / 10;
   const state = JSON.parse(await readFile(join(home, "plugin-data/follow-up/state.json"), "utf8"));
   const observed = state.workspaces.flatMap(w => w.prs).filter(p => p.snapshot && !p.error).length;
   const result = { prs: N, workspaces: W, repos: R, runningChecks: PENDING, merged: MERGED, closed: CLOSED, minutes: Math.round(minutes * 10) / 10, observedPrs: observed,
     perMinute: { ghSpawns: rate("ghSpawns"), processesViaWrapper: Math.round(rate("ghSpawns") * 3 * 10) / 10, gcloudSpawns: rate("gcloudSpawns"), graphqlRequests: rate("graphql"), restRequests: rate("rest"), graphqlPointsPerHour: Math.round(rate("points") * 60) },
+    rcharMBPerMin, daemonConnectionsPerMin,
     workerCpuPct: Math.round(((await ticks()) - start.cpu) / hz / (minutes * 60) * 1000) / 10 };
   console.log(process.argv.includes("--json") ? JSON.stringify(result) : result);
   if (observed < N) { console.error(`only ${observed} of ${N} PRs observed`); process.exitCode = 1; }

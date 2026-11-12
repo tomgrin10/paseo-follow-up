@@ -18,10 +18,16 @@ import { OTHER_LABEL, answerTitle, isOther } from "../shared/questions";
 /** The flag store: plugin-data/follow-up/inbox.json. A new file, so existing state never changes shape. */
 export class InboxStore {
   private tail: Promise<unknown> = Promise.resolve();
+  /**
+   * What inbox.json holds, kept after the first read: this store is the file's only writer, so a mutation never
+   * re-reads it (2026-11-12: a 169 KB read and parse per mutation, several a minute live).
+   */
+  private saved: InboxState | null = null;
   constructor(readonly directory: string) {}
   private get path() { return join(this.directory, "inbox.json"); }
   async read(): Promise<InboxState> {
-    try { return inboxStateSchema.parse(JSON.parse(await readFile(this.path, "utf8"))); }
+    if (this.saved) return structuredClone(this.saved);
+    try { this.saved = inboxStateSchema.parse(JSON.parse(await readFile(this.path, "utf8"))); return structuredClone(this.saved); }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptyInbox();
       throw new Error("The Needs-you inbox could not be read. Restore inbox.json or remove it to start fresh.");
@@ -46,6 +52,7 @@ export class InboxStore {
       const file = await open(temporary, "wx", 0o600);
       try { await file.writeFile(JSON.stringify(state, null, 2)); await file.sync(); } finally { await file.close(); }
       await rename(temporary, this.path);
+      this.saved = structuredClone(state);
     } finally { await unlink(temporary).catch(() => undefined); }
   }
 }
