@@ -60,10 +60,10 @@ test("open questions get an Answer each, at most two", () => {
 test("copy, Summary, main agent and Stop following", () => {
   const prs = [pr(), pr({ key: "example/app#2", number: 2, snapshot: snapshot({ url: "https://github.com/example/app/pull/2" }) }), pr({ key: "example/app#3", number: 3, snapshot: snapshot({ state: "MERGED", url: "https://github.com/example/app/pull/3" }) })];
   const tidy = rowMenu({ ...base, w: workspace({ prs }) }).find(x => x.key === "tidy")!.items;
-  assert.deepEqual(tidy.map(i => i.key), ["copy_branch", "copy_pr", "rewrite_summary", "stop_following"]);
+  assert.deepEqual(tidy.map(i => i.key), ["copy_branch", "copy_pr", "rename_ai", "rewrite_summary", "stop_following"]);
   assert.equal(tidy[1].label, "Copy 2 PR links");
   assert.equal(tidy[1].arg, "https://github.com/example/app/pull/1\nhttps://github.com/example/app/pull/2", "open PRs only");
-  assert.ok(tidy[3].confirm, "Stop following asks first");
+  assert.ok(tidy.find(i => i.key === "stop_following")!.confirm, "Stop following asks first");
   const other = rowMenu({ ...base, s: { ...s, agentId: "a2", agent: "Reviewer" } }).find(x => x.key === "tidy")!.items;
   assert.ok(other.some(i => i.action === "make_main" && i.arg === "a2" && i.label === "Make Reviewer the main agent…" && !!i.confirm), "handing over the main role asks first");
   assert.ok(!rowMenu({ ...base, s: { ...s, agentId: "main-agent", agent: "Main" } }).find(x => x.key === "tidy")!.items.some(i => i.action === "make_main"), "already main");
@@ -128,4 +128,52 @@ test("the long-press that opens the sheet never picks an item (bug: long-pressin
 test("Later after 18:00 has no Tonight: it would land after Tomorrow 09:00", () => {
   assert.deepEqual(laterChoices(new Date(2026, 10, 10, 17, 59)).map(([id]) => id), ["hour", "tonight", "tomorrow", "next-event"]);
   assert.deepEqual(laterChoices(new Date(2026, 10, 10, 18, 0)).map(([id]) => id), ["hour", "tomorrow", "next-event"]);
+});
+
+/**
+ * Tom (2026-11-12): right-click on a row in the Follow-up sidebar view opened the desktop app's Copy/Paste/Select All
+ * menu, because that HomeList was rendered without `menu`, so its rows never listened for contextmenu
+ * (useRowMenuTrigger only binds with an opener). Class fix: `menu` is required on HomeList (and onMenu on its rows),
+ * and every HomeList in the client passes the shared row menu (every-list-row-has-the-row-menu).
+ */
+test("invariant every-list-row-has-the-row-menu: every HomeList passes the shared row menu", async () => {
+  const dir = join(import.meta.dirname, "..", "client");
+  const files = (await readdir(dir)).filter(f => f.endsWith(".tsx"));
+  const uses: string[] = [];
+  for (const f of files) {
+    const source = await readFile(join(dir, f), "utf8");
+    for (const m of source.matchAll(/<HomeList\b([\s\S]*?)\/>/g)) {
+      uses.push(f);
+      assert.match(m[1], /\bmenu=\{/, `${f}: a HomeList without menu opens the platform's own context menu on right-click`);
+      assert.match(source, /\buseRowMenu\(/, `${f}: the menu is the shared useRowMenu, so every list offers the same moves`);
+    }
+  }
+  assert.ok(uses.includes("home.tsx") && uses.includes("sidebar-view.tsx"), `HomeList surfaces found: ${uses.join(", ")}`);
+  const list = await readFile(join(dir, "home-list.tsx"), "utf8");
+  assert.match(list, /\n {2}menu: \{/, "menu is required on HomeListProps");
+  assert.match(list, /onMenu: OpenRowMenu;/, "a Row always gets its opener");
+});
+
+test("the sidebar view's menu hides what needs Home's omnibox instead of showing it dead", async () => {
+  const source = await readFile(join(import.meta.dirname, "..", "client", "sidebar-view.tsx"), "utf8");
+  const call = source.match(/useRowMenu\(\{([^}]*)\}\)/)?.[1] ?? "";
+  assert.ok(call && !/prefillAsk/.test(call), "no omnibox in the sidebar, so no prefillAsk");
+  // Without prefillAsk, canAsk is false (row-actions.ts), and the menu has no Ask the Overseer item.
+  assert.ok(!flatItems(rowMenu({ ...base, canAsk: false, flagged: true, needs: [question("Q1"), hold] })).some(i => i.action === "ask_overseer"));
+});
+
+/**
+ * Every label is sentence case ("Rewrite summary", not "Rewrite Summary"): after the first word, a capital is only a
+ * proper name or an acronym. Built from the fullest menu (every section, Later's children, the agent's own name).
+ */
+test("row menu labels are sentence case", () => {
+  const agentRow = { ...s, agent: "Reviewer", agentId: "a2" };
+  const w = { ...workspace({ prs: [pr({ key: "example/app#1", number: 1, snapshot: snapshot({ url: "https://example.test/1", state: "OPEN" }) })] }), mainAgentId: "a1", enable_tracking: true };
+  const items = flatItems(rowMenu({ ...base, s: agentRow, w, flagged: true, needs: [question("Q1"), send(null), retry(false), hold] }), "later");
+  assert.ok(items.some(i => i.action === "rewrite_summary") && items.length > 10, items.map(i => i.label).join(" | "));
+  const proper = new Set(["PR", "AI", "Overseer", "Reviewer"]);
+  for (const item of items)
+    for (const word of item.label.replace(/[…?]/g, "").split(/\s+/).slice(1))
+      assert.ok(!/^\p{Lu}/u.test(word) || proper.has(word) || /^Q\d+$/.test(word) || /^\p{Lu}{2,}$/u.test(word) || /^\d/.test(word),
+        `"${item.label}": "${word}" isn't sentence case`);
 });
