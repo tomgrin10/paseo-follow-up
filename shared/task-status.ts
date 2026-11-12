@@ -36,7 +36,8 @@ export function workingLine(o: Obligation, agents: TaskAgents): TaskStatus {
   if (!id || !live) return { text: "In progress", tone: "progress", agentId: null };
   if (live.state === "working") return { text: `${name(live)} working`, tone: "working", agentId: id };
   if (live.state === "idle") return { text: `${name(live)} idle`, tone: "idle", agentId: id };
-  return { text: "Agent closed", tone: "closed", agentId: null };
+  // Named like the open ones; words only, never a link (opening a closed agent would load it).
+  return { text: live.title?.trim() ? `${live.title.trim()} closed` : "Agent closed", tone: "closed", agentId: null };
 }
 
 export function taskStatus(o: Obligation, w: Workspace, agents: TaskAgents = {}, now = Date.now()): TaskStatus {
