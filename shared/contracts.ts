@@ -1,4 +1,5 @@
 import { projectSchema } from "./settings";
+import { renameResultSchema, renameStatusSchema } from "./rename";
 import { MAX_REVIEWERS, REPO, reviewerConfigSchema, reviewerEntrySchema, reviewerListSchema } from "./reviewers";
 import { prioritySchema } from "./priorities";
 import { usageSchema } from "./usage";
@@ -86,6 +87,9 @@ export const prioritiesRpc = defineRpc({ name: "follow.priorities", input: z.obj
 /** Provider session limits from the Smart Session plugin, for Home's meters. Hidden when it isn't installed. */
 /** Summary: collapsed reads the cache; open may start an overview; refresh always does. */
 export const workspaceAboutRpc = defineRpc({ name: "follow.workspace-about", input: z.object({ workspaceId: idSchema, open: z.boolean().optional(), refresh: z.boolean().optional() }), output: aboutViewSchema });
+// Rename with AI (shared/rename.ts): the dialog's state and one suggestion, and the rename or its Undo.
+export const renameStatusRpc = defineRpc({ name: "follow.rename-status", input: z.object({ workspaceId: idSchema, suggest: z.boolean().optional() }), output: renameStatusSchema });
+export const renameWorkspaceRpc = defineRpc({ name: "follow.rename-workspace", input: z.object({ workspaceId: idSchema, title: z.string().max(300).optional(), undo: z.boolean().optional() }), output: renameResultSchema });
 export const usageRpc = defineRpc({ name: "follow.usage", input: z.object({}), output: usageSchema });
 // Trust bypass agents: how many permission prompts were approved today, and the newest few (tool and a short summary).
 export const trustBypassRpc = defineRpc({ name: "follow.trust-bypass", input: z.object({}), output: z.object({ today: z.number().int().nonnegative(), recent: z.array(z.object({ at: z.string(), agentId: z.string(), tool: z.string(), summary: z.string(), mode: z.string() })).max(20) }) });

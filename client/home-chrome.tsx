@@ -290,7 +290,7 @@ export function GroupChip({ group, c }: { group: HomeGroupId | "archived"; c: Co
   </View>;
 }
 
-export function ResultRow({ item, theme, active, dense, touch, onPress, s: row, onMenu }: { item: WorkspaceItem; theme: Theme; active: boolean; dense: boolean; touch: boolean; onPress: () => void; s?: Workstream; onMenu?: OpenRowMenu }) {
+export function ResultRow({ item, theme, active, dense, touch, onPress, s: row, onMenu }: { item: WorkspaceItem; theme: Theme; active: boolean; dense: boolean; touch: boolean; onPress: () => void; s?: Workstream; onMenu: OpenRowMenu }) {
   const c = theme.colors;
   const trigger = useRowMenuTrigger(row, onMenu, touch);
   const { hit } = item;
@@ -300,7 +300,7 @@ export function ResultRow({ item, theme, active, dense, touch, onPress, s: row, 
   // with the match highlighted. No group pill: the state word already says it.
   if (touch) {
     const tone = row ? glyphColor(row, c, true) : c.foregroundMuted;
-    return <Pressable ref={trigger.ref} onLongPress={trigger.onLongPress} delayLongPress={450} accessibilityHint={onMenu && row ? quickActionsHint(touch) : undefined} accessibilityRole="button" accessibilityState={{ selected: active }} accessibilityLabel={`${hit.title}${row?.word ? `. ${row.word}` : ""}${hit.via ? `, ${FIELD_LABEL[hit.via.field]}: ${hit.via.text}` : ""}`} onPress={onPress}
+    return <Pressable ref={trigger.ref} onLongPress={trigger.onLongPress} delayLongPress={450} accessibilityHint={row ? quickActionsHint(touch) : undefined} accessibilityRole="button" accessibilityState={{ selected: active }} accessibilityLabel={`${hit.title}${row?.word ? `. ${row.word}` : ""}${hit.via ? `, ${FIELD_LABEL[hit.via.field]}: ${hit.via.text}` : ""}`} onPress={onPress}
       style={state => ({ flexDirection: "row", alignItems: "flex-start", gap: 10, minHeight: 56, paddingLeft: 14, paddingRight: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: withAlpha(c.border, 0.6),
         backgroundColor: active || state.pressed ? c.surface2 : "transparent" })}>
       <View style={{ paddingTop: 2 }}><Icon name={archived ? "Archive" : row?.icon ?? "Circle"} size={17} color={archived ? c.foregroundMuted : tone} /></View>
@@ -318,7 +318,7 @@ export function ResultRow({ item, theme, active, dense, touch, onPress, s: row, 
       </View>
     </Pressable>;
   }
-  return <Pressable ref={trigger.ref} onLongPress={trigger.onLongPress} delayLongPress={450} accessibilityHint={onMenu && row ? quickActionsHint(touch) : undefined} accessibilityRole="button" accessibilityState={{ selected: active }} accessibilityLabel={`${hit.title}${hit.via ? `, ${FIELD_LABEL[hit.via.field]}: ${hit.via.text}` : ""}`} onPress={onPress}
+  return <Pressable ref={trigger.ref} onLongPress={trigger.onLongPress} delayLongPress={450} accessibilityHint={row ? quickActionsHint(touch) : undefined} accessibilityRole="button" accessibilityState={{ selected: active }} accessibilityLabel={`${hit.title}${hit.via ? `, ${FIELD_LABEL[hit.via.field]}: ${hit.via.text}` : ""}`} onPress={onPress}
     style={state => ({ flexDirection: "row", alignItems: "center", gap: 10, minHeight: touch ? 56 : dense ? 40 : 44, paddingHorizontal: dense ? 8 : 16, paddingVertical: 4,
       borderLeftWidth: 2, borderLeftColor: active ? withAlpha(c.foreground, 0.5) : "transparent",
       backgroundColor: active ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
