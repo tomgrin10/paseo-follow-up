@@ -37,7 +37,7 @@ test("the stack bar follows merge order and drops settled stacks while work is a
 });
 
 test("needs-you lists one action per decision and respects Auto and send guards", () => {
-  const w = workspace({ prs: stack(), batches: [batch()], obligations: [{ id: "d", title: "Pick a migration strategy", status: "blocked", afterPrs: [], evidence: "Two options", enable_follow_up: false, revision: 0 }] });
+  const w = workspace({ prs: stack(), batches: [batch()], obligations: [{ id: "d", title: "Pick a migration strategy", status: "blocked", afterPrs: [], evidence: "Two options", ask: "Expand-contract or a maintenance window?", enable_follow_up: false, revision: 0 }] });
   const items = needsYou(w, clock);
   assert.deepEqual(items.map(i => i.kind), ["decision", "send", "merge"]);
   const send = items.find(i => i.kind === "send");
@@ -120,7 +120,7 @@ test("RPC errors show only the reason", async () => {
 
 test("questions join Needs you: stop-mode first, blocked tasks fold into their question, unconfirmed answers ask for a check", async () => {
   const { askQuestion, syncTaskQuestions, developerAnswer } = await import("../server/questions");
-  const w = workspace({ prs: [], obligations: [{ id: "cohort", title: "Choose the rollout cohort", status: "blocked", afterPrs: [], enable_follow_up: true, evidence: "Needs a product call", revision: 1 }] });
+  const w = workspace({ prs: [], obligations: [{ id: "cohort", title: "Choose the rollout cohort", status: "blocked", afterPrs: [], enable_follow_up: true, evidence: "Needs a product call", ask: "Which cohort goes first?", revision: 1 }] });
   assert.deepEqual(needsYou(w, clock).map(i => i.kind), ["decision"], "before the server mirrors it, a blocked task is a decision");
   syncTaskQuestions(w, clock);
   askQuestion(w, "main-agent", { title: "Retry window", question: "How long?", options: [{ letter: "A", label: "An hour" }, { letter: "B", label: "A day" }], recommend: "A" }, "work-around", clock);

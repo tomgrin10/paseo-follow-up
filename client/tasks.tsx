@@ -4,7 +4,7 @@ import { Pressable, Text } from "./text";
 import { Icon, Modal, TextInput, useToast } from "@getpaseo/plugin/client/ui";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useQueryClient } from "@tanstack/react-query";
-import type { Obligation, Workspace } from "../shared/model";
+import { blockedOnDeveloper, type Obligation, type Workspace } from "../shared/model";
 import { followUpObligations } from "../shared/follow-up";
 import { taskSchedule, type TaskTrigger } from "../shared/task-trigger";
 import { taskTriggerRpc } from "../shared/contracts";
@@ -65,7 +65,9 @@ function TriggerEditor({ obligation: o, workspace, theme, compact }: { obligatio
 
 function TaskGlyph({ o, w, status, colors }: { o: Obligation; w: Workspace; status: TaskStatus; colors: Colors }) {
   if (finished(o)) return <Icon name={o.status === "done" ? "Check" : "CircleSlash"} size={14} color={o.status === "done" ? colors.statusSuccess : colors.foregroundMuted} />;
-  if (o.status === "blocked") return <Icon name="MessageCircleQuestion" size={14} color={linkedQuestion(o, w) ? colors.foregroundMuted : colors.statusWarning} />;
+  // Blocked on the developer asks them (a question glyph, amber until its question is open); blocked on a PR or an
+  // agent is the agent's to wait out, so it stays muted.
+  if (o.status === "blocked") return blockedOnDeveloper(o) ? <Icon name="MessageCircleQuestion" size={14} color={linkedQuestion(o, w) ? colors.foregroundMuted : colors.statusWarning} /> : <Icon name="CirclePause" size={14} color={colors.foregroundMuted} />;
   // A spinner only while the task's agent is really mid-turn (shared/task-status.ts), never off the stored status.
   if (status.tone === "working") return <Spinner color={colors.accent} size={13} />;
   if (o.enable_follow_up && o.trigger && !taskSchedule(o, w).ready) return <Icon name="Clock" size={14} color={colors.foregroundMuted} />;
@@ -97,7 +99,7 @@ function TaskRow({ o, w, agents, openAgent, theme, onOpen, compact }: { o: Oblig
       <RichText plain numberOfLines={3} style={[t.body, finished(o) ? { color: c.foregroundMuted } : null]}>{o.title}</RichText>
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
         {scheduled && !finished(o) ? <Chip theme={theme} label={`${status}${prs ? ` · ${prs}` : ""}`} color={c.foregroundMuted} />
-          : <Text style={[t.meta, o.status === "blocked" && !linkedQuestion(o, w) ? { color: c.statusWarning } : null, { fontVariant: ["tabular-nums"] }]}>{status}{prs && !finished(o) && !linkedQuestion(o, w) ? ` · waits for ${prs}` : ""}</Text>}
+          : <Text style={[t.meta, blockedOnDeveloper(o) && !linkedQuestion(o, w) ? { color: c.statusWarning } : null, { fontVariant: ["tabular-nums"] }]}>{status}{prs && !finished(o) && !linkedQuestion(o, w) ? ` · waits for ${prs}` : ""}</Text>}
         <OpenAgentLink status={line} openAgent={openAgent} theme={theme} compact={compact} />
       </View>
     </View>
