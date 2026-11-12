@@ -1,2 +1,0 @@
-- A Needs you card shows a PR's checks and review state only when it is about that PR: a review, or a card that links the PR. An ask about something else no longer shows the workspace's PR state, and a failed turn shows only its error.
-- An Action card in Needs you has a Done button. It tells the agent you did it, and Undo takes it back for a few seconds.

@@ -20,7 +20,7 @@ Follow-up watches every pull request a Paseo workspace opens until the work is a
 
 ## Setup
 
-Requires Paseo 0.14+, Node 22+ and an authenticated `gh` on the daemon host. Works with plain GitHub; Graphite is optional and picked per repository (Auto chooses Graphite only where the `gt` CLI is installed, signed in and the repository was set up with `gt init`). In Graphite repositories Merge uses saved Graphite CLI authentication; elsewhere it runs `gh pr merge`, and When ready is GitHub auto-merge. Follow-up follows every workspace that has an agent; Settings has per-project and per-workspace exceptions. The optional Send to Paseo browser companion adds Graphite's Merge when ready switch through its existing pairing; it is not needed for anything else.
+Requires Paseo 0.15+, Node 22+ and an authenticated `gh` on the daemon host. Works with plain GitHub; Graphite is optional and picked per repository (Auto chooses Graphite only where the `gt` CLI is installed, signed in and the repository was set up with `gt init`). In Graphite repositories Merge uses saved Graphite CLI authentication; elsewhere it runs `gh pr merge`, and When ready is GitHub auto-merge. Follow-up follows every workspace that has an agent; Settings has per-project and per-workspace exceptions. The optional Send to Paseo browser companion adds Graphite's Merge when ready switch through its existing pairing; it is not needed for anything else.
 
 ## What it does on its own, and what it never does
 

@@ -1,1 +1,0 @@
-- What's new only pops up after a major update. Betas and smaller updates install quietly, and their changes are collected in the next major release's notes.

@@ -1,1 +1,0 @@
-- On Paseo 0.16, Claude agents no longer hold their turn open to wait for long commands. Paseo runs the command in the background and wakes the agent when it finishes, so waiting costs nothing. Settings → Agents says so.

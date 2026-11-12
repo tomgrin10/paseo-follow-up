@@ -1,3 +1,0 @@
-- Summaries and AI priority can run on any provider Paseo has, not just Claude and Codex. Other providers run each job as a short hidden agent.
-- Setup's Helper agents step and Settings → Agents say what each job needs and recommend a model from what you have, with Use recommended in one click.
-- Settings → Agents now looks like setup's step, with each job's permissions, limits and schedule under More. The ranker is called AI priority everywhere, and the setup tour is its own last step.

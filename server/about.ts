@@ -11,6 +11,7 @@ import {
 import type { Workspace } from "../shared/model";
 import { messageSender, senderLabel, workItems } from "../shared/message-sender";
 import type { AiJobs } from "./ai-jobs";
+import { githubApi, type GithubApi } from "./github-api";
 import { isLoaded, type LoadSignals } from "../shared/agent-load";
 
 const exec = promisify(execFile);
@@ -73,15 +74,17 @@ export function parseSlackThread(text: string): SlackThread | null {
   return { channel, who, excerpt: body[0] ? line(body[0].replace(/^[^:]{1,40}:\s*/, "")) : null };
 }
 
-export function liveSources(run: Run = runFile): AboutSources {
+/** mcpproxy for Linear and Slack; the PR read goes through `api`, in process (worker-reads-github-in-process). */
+export function liveSources(run: Run = runFile, api: Pick<GithubApi, "rest"> = githubApi()): AboutSources {
   const call = async (tool: string, args: unknown) => mcpproxyText(await run("mcpproxy", ["call", "tool-read", `--tool-name=${tool}`, `--json_args=${JSON.stringify(args)}`, "--reason=Follow-up: what a workspace is about", "--log-level=error", "-o", "json"], 45_000));
   return {
     async linear(key) { return parseLinearIssue(await call("linear:get_issue", { id: key })); },
     async slack(channel, ts) { return parseSlackThread(await call("slack-user:slack_read_thread", { channel_id: channel, message_ts: ts, limit: 1 })); },
     async pr(repo, number) {
-      const out = await run("gh", ["pr", "view", String(number), "--repo", repo, "--json", "title,state,body"], 20_000);
-      const j = JSON.parse(out) as { title?: string; state?: string; body?: string };
-      return typeof j.title === "string" ? { title: j.title, state: j.state ?? "", body: (j.body ?? "").slice(0, LIMITS.prBodyChars) } : null;
+      const j = await api.rest(repo, `repos/${repo}/pulls/${number}`) as { title?: string; state?: string; merged_at?: string | null; body?: string | null } | null;
+      // REST says open/closed plus merged_at; the prompt keeps gh's OPEN/CLOSED/MERGED.
+      const state = j?.merged_at ? "MERGED" : (j?.state ?? "").toUpperCase();
+      return typeof j?.title === "string" ? { title: j.title, state, body: (j.body ?? "").slice(0, LIMITS.prBodyChars) } : null;
     },
   };
 }
