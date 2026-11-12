@@ -25,10 +25,12 @@ loaded for an hour.
 - **Tests:**
   - `tests/never-wake.test.ts` counts the reads a daemon would turn into wake-ups.
   - `tests/daemon-load.test.ts` covers the directory and polling.
-  - `npm run test:scale` (`scripts/scale-check.mjs`) runs an isolated daemon with 120 workspaces, 5 awake and 35
-    churned, and fails if the loaded-agent count grows. Budgets: 240 MB RSS, 3 % CPU, 2 idle daemon requests a
-    minute. `scripts/daemon-counter.mjs` counts the requests, and `scripts/heap-summary.mjs` summarises a heap
-    snapshot.
+  - `npm run test:scale` (`scripts/scale-check.mjs`) runs an isolated daemon on the realistic seed (140 workspaces,
+    ~280 agents, 5 awake, a live-shaped state and a fake GitHub) and fails if the loaded-agent count grows. Budgets
+    (reasoning in AGENTS.md, invariant 2): 300 MB peak RSS from the worker's start, 240 MB idle RSS, 3 % CPU, 2 idle
+    daemon requests a minute. `scripts/daemon-counter.mjs` counts the requests, `scripts/heap-summary.mjs` and
+    `scripts/heap-retainers.mjs` read a heap snapshot, and `--cpu-prof` / `--alloc-prof` attribute CPU and garbage
+    ([docs/testing.md](testing.md)).
 
 ## Polling
 

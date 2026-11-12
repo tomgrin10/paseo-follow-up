@@ -175,7 +175,7 @@ export function parseAnswerMessage(text: string): { id: string; title: string; c
  * A multi-decision answer (1.4.0) parsed back for the chat card and the agent: one entry per decision, in order, with
  * the picked letter and label, or `choice: null` for a decision the developer skipped.
  */
-export function parseAnswersMessage(text: string): { title: string; answers: { id: string; question: string; choice: string | null; label: string | null }[] } | null {
+export function parseAnswersMessage(text: string): { title: string; answers: { id: string; question: string; choice: string | null; label: string | null; words: string | null }[] } | null {
   const lines = text.trim().split("\n");
   // A summary line ("1. A — … · 2. skipped") then one line per decision. A card with one decision has one id.
   const head = /^Follow-up answer ((?:[QD]\d+, )*[QD]\d+) \((.*?)\): (?=\d+\. )/.exec(lines[0] ?? "");
@@ -186,7 +186,8 @@ export function parseAnswersMessage(text: string): { title: string; answers: { i
   const answers = ids.map(id => {
     const line = lines.find(l => l.startsWith(`${id} (`));
     const m = line ? /^[QD]\d+ \((.*?)\): (?:([A-Z]|Something else) — (.+)|skipped\b.*)$/.exec(line) : null;
-    return { id, question: m?.[1] ?? "", choice: m?.[2] ?? null, label: m?.[3]?.trim() ?? null };
+    const note = lines.find(l => l.startsWith(`${id} note: `));
+    return { id, question: m?.[1] ?? "", choice: m?.[2] ?? null, label: m?.[3]?.trim() ?? null, words: note ? note.slice(`${id} note: `.length).trim() || null : null };
   });
   return { title: head[2], answers };
 }

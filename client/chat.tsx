@@ -123,6 +123,7 @@ function AnswerCardView({ item, theme }: PluginTimelineItemProps<AnswerCard>) {
         {card.answers.map((a, i) => <View key={a.id} style={{ gap: 1 }}>
           {!!a.question && <RichText linkColor={c.foreground} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{`${i + 1}. ${a.question}`}</RichText>}
           <Text selectable style={{ color: a.choice ? c.foreground : c.foregroundMuted, fontSize: 13, lineHeight: 19 }}>{a.choice ? <><Text style={{ fontWeight: "600" }}>{a.choice}</Text>{a.label ? ` · ${a.label}` : ""}</> : "Skipped · still open"}</Text>
+          {!!a.words && <RichText selectable linkColor={c.foreground} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 19 }}>{a.words}</RichText>}
         </View>)}
       </View> : <View style={{ paddingHorizontal: 12, paddingBottom: 10, gap: 3 }}>
         <Text selectable style={{ color: c.foreground, fontSize: 13, lineHeight: 19 }}><Text style={{ fontWeight: "600", fontVariant: ["tabular-nums"] }}>{card.choice}</Text>{card.label ? ` · ${card.label}` : ""}</Text>
