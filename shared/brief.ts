@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Pr, Workspace } from "./model";
-import { OTHER_LABEL, answerLabel, isOther, type Question } from "./questions";
+import { ANSWER_PREFIX, OTHER_LABEL, answerLabel, answerTitle, isOther, type Question } from "./questions";
 
 /**
  * The brief: "what you need to do", appended as one card at the end of an agent's timeline when it needs
@@ -427,14 +427,14 @@ export function briefStep(prev: Brief | null, event: BriefEvent, now: string): {
       if (prev?.state !== "open") return keep;
       const d = prev.decisions.find(d => d.id === event.decisionId);
       if (!d || !validPick(d, event.choice, event.words)) return keep;
-      const decisions = prev.decisions.map(x => x.id === d.id ? { ...x, chosen: event.choice, words: isOther(event.choice) ? event.words!.trim() : null } : x);
+      const decisions = prev.decisions.map(x => x.id === d.id ? { ...x, chosen: event.choice, words: event.words?.trim() || null } : x);
       const b = { ...collapse(prev, "answered", answeredOutcome(decisions)), decisions };
       return { brief: b, appends: [b] };
     }
     case "options": {
       if (prev?.state !== "open") return keep;
       const chosen = new Map(event.picks.map(p => [p.decisionId, p]));
-      const decisions = prev.decisions.map(d => { const p = chosen.get(d.id); return p && validPick(d, p.choice, p.words) ? { ...d, chosen: p.choice, words: isOther(p.choice) ? p.words!.trim() : null } : d; });
+      const decisions = prev.decisions.map(d => { const p = chosen.get(d.id); return p && validPick(d, p.choice, p.words) ? { ...d, chosen: p.choice, words: p.words?.trim() || null } : d; });
       if (!decisions.some(d => d.chosen)) return keep;
       const b = { ...collapse(prev, "answered", answeredOutcome(decisions)), decisions };
       return { brief: b, appends: [b] };
@@ -453,7 +453,7 @@ export function briefStep(prev: Brief | null, event: BriefEvent, now: string): {
       { const b = collapse(prev, "superseded", "Permission answered"); return { brief: b, appends: [b] }; }
     case "questions": {
       if (prev?.state !== "open" || !prev.questionIds.length || !prev.questionIds.every(id => id in event.answers)) return keep;
-      const decisions = prev.decisions.map(d => { const a = event.answers[d.id]; return a && !d.chosen ? { ...d, chosen: a.choice, words: isOther(a.choice) ? a.words : null } : d; });
+      const decisions = prev.decisions.map(d => { const a = event.answers[d.id]; return a && !d.chosen ? { ...d, chosen: a.choice, words: a.words?.trim() || null } : d; });
       const answered = prev.questionIds.some(id => event.answers[id]);
       const b = answered ? { ...collapse(prev, "answered", answeredOutcome(decisions)), decisions } : collapse(prev, "superseded", RESOLVED.withdrawn);
       return { brief: b, appends: [b] };
@@ -560,7 +560,7 @@ export function shownBrief(row: Brief, live: { brief: Brief | null } | undefined
     if (!q) return d;
     const options = q.options.length ? q.options.map(o => ({ letter: o.letter, label: o.label, consequence: o.consequence ?? null })) : d.options;
     const chosen = d.chosen ?? q.answer?.choice ?? null;
-    return { ...d, question: q.question, options, chosen, words: d.words ?? (chosen && isOther(chosen) ? q.answer?.words ?? null : null) };
+    return { ...d, question: q.question, options, chosen, words: d.words ?? (chosen ? q.answer?.words ?? null : null) };
   });
   let brief: Brief = { ...mine, decisions };
   if (brief.state === "open") {
@@ -589,4 +589,34 @@ export function briefQuestionsEvent(b: Brief, questions: readonly Question[]): E
     else return null;
   }
   return { type: "questions", answers };
+}
+
+/** The developer's option click, in the existing answer format so Follow-up's answer card renders it. */
+export function briefAnswer(id: string, question: string, letter: string, label: string, words?: string): string {
+  const title = answerTitle(question).slice(0, 80);
+  if (isOther(letter)) return `${ANSWER_PREFIX} ${id} (${title}): ${OTHER_LABEL} — "${(words ?? "").trim()}"\nNone of your options: the developer's own answer is in the quotes.`;
+  const note = words?.trim() ? `\nThe developer added: ${words.trim()}` : "";
+  return `${ANSWER_PREFIX} ${id} (${title}): ${letter} — ${label}${note}\nContinue with this choice.`;
+}
+/**
+ * Several decisions answered together (1.4.0): one message, a summary line the developer reads at a glance, then one
+ * line per decision the agent can act on. Skipped decisions are named, so the agent knows they're still open.
+ */
+export function briefAnswers(ask: string, decisions: { id: string; question: string; options: { letter: string; label: string }[] }[], picks: Record<string, string>, words: Record<string, string> = {}): string {
+  const clean = (t: string) => answerTitle(t).slice(0, 80);
+  const asked = decisions.filter(d => d.options.length);
+  // Something else stays on its decision's one line: the developer's words with line breaks folded to spaces.
+  const other = (d: typeof asked[number]) => isOther(picks[d.id]) && words[d.id]?.trim() ? `${OTHER_LABEL} — "${words[d.id].replace(/\s+/g, " ").trim()}"` : null;
+  const picked = (d: typeof asked[number]) => { const o = d.options.find(o => o.letter === picks[d.id]); return other(d) ?? (o ? `${o.letter} — ${o.label}` : null); };
+  const summary = asked.map((d, i) => { const p = picked(d); return `${i + 1}. ${other(d) ? OTHER_LABEL : p ?? "skipped"}`; }).join(" · ");
+  const lines = [`${ANSWER_PREFIX} ${asked.map(d => d.id).join(", ")} (${clean(ask)}): ${summary}`];
+  for (const d of asked) {
+    const p = picked(d);
+    lines.push(p ? `${d.id} (${clean(d.question)}): ${p}` : `${d.id} (${clean(d.question)}): skipped — not answered yet; ask again if it still matters.`);
+    // A note on a letter pick: its own line under the decision, folded to one line like Something else's words.
+    if (p && !isOther(picks[d.id]) && words[d.id]?.trim()) lines.push(`${d.id} note: ${words[d.id].replace(/\s+/g, " ").trim()}`);
+  }
+  const skipped = asked.filter(d => !picked(d));
+  lines.push(skipped.length ? `Continue with the answered ones; ${skipped.map(d => d.id).join(" and ")} ${skipped.length === 1 ? "is" : "are"} still open. The answers are already recorded.` : "Continue with these choices. The answers are already recorded.");
+  return lines.join("\n");
 }
