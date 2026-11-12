@@ -552,3 +552,21 @@ test("load repair: an error from before a restart clears for an agent that is ru
   assert.equal(stateOf((await after.inbox.store.snapshot()).entries.a1), "QUIET", "persisted, not only hidden");
   await after.done();
 });
+
+test("a-tick-copies-the-state-at-most-once: a tick that only moves lastSeen copies nothing; a due snooze still runs", async t => {
+  // 2026-11-12: Inbox.tick ran a full mutate every worker tick for lastSeen alone (copy, validate, stringify the inbox).
+  const dir = await mkdtemp(join(tmpdir(), "follow-inbox-tick-")); t.after(() => rm(dir, { recursive: true, force: true }));
+  let now = Date.parse(at(1));
+  const f = fake([agent({ id: "a1" })]);
+  const inbox = new Inbox(dir, { enabled: async () => ({ enable_inbox: true, enable_inbox_pr_closed: true }), directory: f.directory, sources: f.none, guard: async () => null, now: () => now });
+  await inbox.store.mutate(s => { s.importedAt = at(1); s.entries.a1 = newEntry("a1"); });
+  let copies = 0; const mutate = inbox.store.mutate.bind(inbox.store);
+  inbox.store.mutate = (work => { copies++; return mutate(work); }) as typeof inbox.store.mutate;
+  for (let i = 0; i < 10; i++) { now += 5_000; await inbox.tick(); }
+  assert.equal(copies, 0, "ten quiet ticks copy the inbox zero times");
+  assert.equal((await inbox.store.snapshot()).lastSeen, new Date(now).toISOString(), "lastSeen still moves");
+  // A snooze that ends is a real change: that tick takes the full path.
+  await mutate(s => { s.entries.a1 = { ...s.entries.a1!, snooze: { until: new Date(now + 1_000).toISOString(), at: new Date(now).toISOString() } }; });
+  now += 2_000; await inbox.tick();
+  assert.equal(copies, 1, "the due snooze runs through mutate");
+});

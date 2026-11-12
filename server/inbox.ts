@@ -67,6 +67,20 @@ export class InboxStore {
     return next;
   }
   async snapshot(): Promise<InboxState> { await this.tail; return this.load(); }
+  /**
+   * lastSeen alone, without copying the inbox: the worker's tick sets it every few seconds, and a full mutate copied,
+   * validated and stringified the whole inbox each time (2026-11-12: 60 MB of the idle worker's garbage in 2 min). It
+   * still reaches the file at most every LAST_SEEN_WRITE_MS, through the normal save.
+   */
+  async touchLastSeen(at: string): Promise<void> {
+    const next = this.tail.then(async () => {
+      const current = await this.load();
+      if (!this.written || this.now() - this.written.at >= LAST_SEEN_WRITE_MS) { const draft = structuredClone(current); draft.lastSeen = at; await this.save(draft); return; }
+      this.unsaved = deepFreeze({ ...current, lastSeen: at });
+    });
+    this.tail = next.catch(() => undefined);
+    return next;
+  }
   /** Writes a held lastSeen now; the worker's stop calls it. */
   async flush(): Promise<void> {
     await this.tail;
@@ -727,6 +741,12 @@ export class Inbox {
   /** Snooze expiry, undo expiry and the 7-day keep for archived agents. Records liveness for #20. */
   async tick(): Promise<void> {
     const at = this.iso(); const now = this.now();
+    // Most ticks change nothing but lastSeen: decide on the frozen snapshot, and copy the inbox only when an entry expires,
+    // a snooze or undo runs, or the batch undo ends.
+    const seen = await this.store.snapshot();
+    const moves = (e: Entry) => { try { return JSON.stringify(reduce(e, { type: "tick" }, at)) !== JSON.stringify(e); } catch { return true; } };
+    const due = !!seen.batchUndo && Date.parse(seen.batchUndo.expires) < now || Object.values(seen.entries).some(e => expired(e, now) || (e.snooze || e.undo) && moves(e));
+    if (!due) return this.store.touchLastSeen(at);
     await this.store.mutate(state => {
       for (const [id, e] of Object.entries(state.entries)) {
         if (expired(e, now)) { delete state.entries[id]; continue; }

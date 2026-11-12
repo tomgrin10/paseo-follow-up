@@ -32,7 +32,30 @@ type RecoveryAgentOptions = Partial<PluginBeforeRequests["agent.create"]["config
 
 export const paseoHome = process.env.PASEO_HOME ?? join(homedir(), ".paseo");
 export type Agent = { id: string; provider: string; cwd: string; model?: string | null; currentModeId?: string | null; runtimeInfo?: { modeId?: string | null } | null; thinkingOptionId?: string | null; features?: { id: string; value: unknown }[]; persistence?: { sessionId: string; nativeHandle?: string } | null; title?: string | null; createdAt: string; workspaceId?: string; status: string; archivedAt?: string | null; labels: Record<string, string>; lastUserMessageAt: string | null; pendingPermissions: unknown[]; activeTurn?: unknown; lastError?: string | null; /** Paseo 0.16 background agent; absent on 0.15. */ background?: boolean; /** Paseo 0.16: live background work (absent on 0.15). */ backgroundWork?: { count?: unknown } | null };
-type WorkspaceRow = { id: string; name: string; projectId?: string | null; labels?: string[]; archivingAt?: string | null };
+
+/**
+ * One directory snapshot's agents, indexed once and shared by every workspace a tick observes. 2026-11-12 (realistic
+ * scale check, 140 workspaces, ~280 agents): each workspace's observe mapped, filtered and Map-indexed all agent rows
+ * (52 MB of the idle worker's ~4 MB/s of garbage). Invariant a-tick-copies-the-state-at-most-once.
+ */
+export type AgentIndex = { list: Agent[]; byId: Map<string, Agent>; byWorkspace: Map<string, Agent[]>; recoveryLabeled: string[] };
+const agentIndexes = new WeakMap<object, AgentIndex>();
+/** How many indexes were built (tests: at most one per directory snapshot, so one per tick). */
+export const agentIndexStats = { builds: 0 };
+export function agentIndex(rows: readonly { agent: Agent }[]): AgentIndex {
+  const cached = agentIndexes.get(rows);
+  if (cached) return cached;
+  agentIndexStats.builds++;
+  const list = rows.map(row => row.agent); const byId = new Map<string, Agent>(); const byWorkspace = new Map<string, Agent[]>(); const recoveryLabeled: string[] = [];
+  for (const a of list) {
+    byId.set(a.id, a);
+    if (a.workspaceId) { const group = byWorkspace.get(a.workspaceId); if (group) group.push(a); else byWorkspace.set(a.workspaceId, [a]); }
+    if (isRecovery(a.labels)) recoveryLabeled.push(a.id);
+  }
+  const index = { list, byId, byWorkspace, recoveryLabeled };
+  agentIndexes.set(rows, index);
+  return index;
+}type WorkspaceRow = { id: string; name: string; projectId?: string | null; labels?: string[]; archivingAt?: string | null };
 export interface Daemon {
   connect(): Promise<void>; close(): Promise<void>;
   listProjects(): Promise<{ projects: Project[] }>;
@@ -388,19 +411,21 @@ export class PaseoGateway implements Gateway {
   async observe(w: Workspace, fresh = false): Promise<Runtime> {
     const [rows, compacting, pauses] = await Promise.all([this.directory.read(fresh ? { fresh: "agents" } : {}), this.compacting(w.mainAgentId), this.guard.read()]);
     const { agents, workspaces } = rows;
+    const index = agentIndex(agents);
     // The agents working tasks name, live (invariant `a-task-only-says-working-when-its-agent-is`): every return carries them.
     // An id the directory lacks (Paseo's list leaves archived agents out) is looked up once, on demand, never awaited.
     const taskIds = [...new Set(w.obligations.filter(o => o.status === "working" && o.workingAgentId).map(o => o.workingAgentId!))];
     if (taskIds.length) this.directory.lookup(taskIds);
-    const taskAgents = taskAgentStates(taskIds, taskIds.length ? this.directory.withArchived(taskIds, agents.map(row => row.agent)) : agents.map(row => row.agent));
+    const taskAgents = taskIds.length ? taskAgentStates(taskIds, this.directory.withArchived(taskIds, taskIds.flatMap(id => index.byId.get(id) ?? []))) : {};
     const workspace = workspaces.find(row => row.id === w.id);
     if (!workspace || workspace.archivingAt) return { taskAgents, busy: false, reason: "Workspace is archived", archived: true };
-    const a = agents.find(row => row.agent.id === w.mainAgentId)?.agent ?? await this.connect(client => this.directory.live(client, w.mainAgentId));
+    const a = index.byId.get(w.mainAgentId) ?? await this.connect(client => this.directory.live(client, w.mainAgentId));
     if (!a || a.archivedAt || a.workspaceId !== w.id) return { taskAgents, busy: false, reason: "Main agent is unavailable or moved to another workspace", archived: false };
     const recoveryIds = new Set(w.batches.filter(b => b.tasks.every(t => t.kind === "inventory")).flatMap(b => [b.recipientAgentId, ...b.recoveryHandoffs.map(h => h.fromAgentId)]));
-    for (const { agent } of agents) if (isRecovery(agent.labels)) recoveryIds.add(agent.id);
-    const scoped = agents.filter(row => row.agent.workspaceId === w.id && !row.agent.archivedAt && !recoveryIds.has(row.agent.id));
-    const guarded = this.guard.waiting(pauses, { agentIds: [w.mainAgentId, ...scoped.map(row => row.agent.id)], workspaceId: w.id, excludedAgentIds: [...recoveryIds].filter((id): id is string => !!id) });
+    for (const id of index.recoveryLabeled) recoveryIds.add(id);
+    const here = index.byWorkspace.get(w.id) ?? [];
+    const scoped = here.filter(agent => !agent.archivedAt && !recoveryIds.has(agent.id));
+    const guarded = this.guard.waiting(pauses, { agentIds: [w.mainAgentId, ...scoped.map(agent => agent.id)], workspaceId: w.id, excludedAgentIds: [...recoveryIds].filter((id): id is string => !!id) });
     const guardedInterruptionId = this.guard.ownsInterruption(pauses, w.mainAgentId, w.interruption)?.id;
     const context = { guardedInterruptionId, mainTurnId: turnIdOf(a.activeTurn) };
     if (guarded || !pauses && workspace.labels?.some(label => /^(Paused|Paused by Session Guard)$/i.test(label))) return { taskAgents, ...context, guarded: true, busy: false, reason: "Waiting for Session Guard to resume this workspace", archived: false };
@@ -409,7 +434,7 @@ export class PaseoGateway implements Gateway {
     if (conversationGone(a.lastError)) return { taskAgents, busy: false, reason: a.lastError ?? "Conversation not found", archived: false, gone: a.lastError ?? "Conversation not found", mainLoaded, mainRecent };
     if (a.pendingPermissions.length || a.status === "error") return { taskAgents, busy: false, reason: a.status === "error" ? "Main agent needs recovery" : "Main agent is waiting for a permission or answer", archived: false };
     let busy = false; let backgroundBusy = false;
-    const members = agents.filter(row => row.agent.workspaceId === w.id && !recoveryIds.has(row.agent.id) && !isRecovery(row.agent.labels)).map(row => row.agent);
+    const members = here.filter(agent => !recoveryIds.has(agent.id) && !isRecovery(agent.labels));
     for (const agent of members) {
       if (["running", "initializing"].includes(agent.status)) { busy = true; if (agent.id !== w.mainAgentId) backgroundBusy = true; }
       // 0.16: work an agent started and ended its turn on (a shell, a task) is still work: no repairs, no Done yet.
