@@ -633,3 +633,11 @@ export function cardPicks(picks: Record<string, string>, words: Record<string, s
 }
 /** How many of the picks go with a note: "1 with a note" beside a multi-decision card's Send. */
 export const notedCount = (picks: Record<string, string>, notes: Record<string, string>) => Object.entries(picks).filter(([id, c]) => !isOther(c) && !!notes[id]?.trim()).length;
+/**
+ * a-done-brief-is-never-an-ask: whether the agent's open brief is an ask in Needs you (the panel's and Home's block,
+ * counted there). The row must be flagged; "No ask stated" (source none) only repeats the chat; and kind "done" says
+ * nothing is needed, so a row flagged for something else (a merged PR) shows that reason, never "Nothing needed" as 1.
+ */
+export function briefAsks<B extends Pick<Brief, "state" | "kind" | "source">>(brief: B | null | undefined, row: { needs?: unknown } | null | undefined): brief is B {
+  return !!row?.needs && brief?.state === "open" && brief.source !== "none" && brief.kind !== "done";
+}
