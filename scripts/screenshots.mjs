@@ -397,7 +397,10 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   if (argv.includes("--rename-review")) {
     const mode = m => fs.writeFile(join(home, "claude-mode"), m);
     // One state can't hold the harness slot: each shot gets 90 s, then fails on its own and the run moves on.
+    // --rename-only a,b: a subset of these shots (the rest are skipped).
+    const pick = arg("--rename-only")?.split(",").map(x => x.trim());
     const bounded = async (name, ...rest) => {
+      if (pick && !pick.includes(name)) return;
       let timer;
       const late = new Promise(r => { timer = setTimeout(() => { failures.push(`${name} (timed out)`); r(); }, 90_000); });
       try { await Promise.race([shoot(name, ...rest), late]); } finally { clearTimeout(timer); }
