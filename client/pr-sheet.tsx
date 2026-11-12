@@ -3,7 +3,7 @@ import { Text } from "./text";
 import { openExternalUrl } from "@getpaseo/plugin/client";
 import { Icon, Modal } from "@getpaseo/plugin/client/ui";
 import type { Workspace } from "../shared/model";
-import { compactPrStatus, graphitePrUrl } from "../shared/presentation";
+import { compactPrStatus, graphitePrUrl, staleHint } from "../shared/presentation";
 import { ago, prTone, stackOrder } from "../shared/attention";
 import { Button, Chip, text, type Theme } from "./kit";
 import { PrControls } from "./pr-controls";
@@ -39,7 +39,8 @@ export function PrSheet({ workspace: w, prKey, intent, theme, compact, browserRe
           </View>
         </View>
         <View style={{ gap: 8 }}>
-          {pr.error && <Fact theme={theme} icon="TriangleAlert" color={c.statusWarning}>{pr.error}</Fact>}
+          {/* A known status stays; a failed read after it only makes the Checked line say how old it is. */}
+          {pr.error && !s?.complete && <Fact theme={theme} icon="TriangleAlert" color={c.statusWarning}>{pr.error}</Fact>}
           {parent && <Fact theme={theme} icon="CornerLeftDown">Stacked on #{parent.number} · {parent.snapshot?.title ?? parent.stack}</Fact>}
           {s?.conflict && <Fact theme={theme} icon="TriangleAlert" color={c.statusDanger}>Conflicts with its base branch</Fact>}
           {!!s?.failedChecks.length && <Fact theme={theme} icon="CircleX" color={c.statusDanger}>Required checks failed: {s.failedChecks.join(", ")}</Fact>}
@@ -49,7 +50,7 @@ export function PrSheet({ workspace: w, prKey, intent, theme, compact, browserRe
           {s?.reviewDecision === "CHANGES_REQUESTED" && <Fact theme={theme} icon="MessageSquareWarning" color={c.statusWarning}>Changes requested</Fact>}
           {reviewers.length > 0 && <Fact theme={theme} icon="Users">Reviewers: {reviewers.join(", ")}</Fact>}
           {s?.deployment?.environment && <Fact theme={theme} icon="Rocket">{s.deployment.evidence}</Fact>}
-          {s?.observedAt && <Fact theme={theme} icon="Clock">Checked {ago(s.observedAt)}</Fact>}
+          {s?.observedAt && <Fact theme={theme} icon="Clock">{staleHint(pr, ago) ?? `Checked ${ago(s.observedAt)}`}</Fact>}
         </View>
         {s?.state === "OPEN" && <View style={{ paddingTop: 12, borderTopWidth: 1, borderTopColor: c.border }}>
           <PrControls key={`${pr.key}:${intent ?? ""}`} pr={pr} workspace={w} theme={theme} compact={compact} browserReady={browserReady} intent={intent} />
