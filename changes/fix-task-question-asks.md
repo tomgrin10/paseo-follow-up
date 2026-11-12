@@ -1,0 +1,1 @@
+- A task an agent marks blocked only asks you something when it is blocked on you, with a real question. Tasks waiting on a pull request or another agent show as Blocked in Tasks instead of in Needs you.

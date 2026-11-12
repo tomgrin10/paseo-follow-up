@@ -272,10 +272,14 @@ async function seed({ call, home }) {
   return { workspaces };
 }
 
-/** Waits for `n` more runs of the worker's inbox loop (its tick stamps inbox.json's lastSeen). */
-async function inboxTicks(home, n) {
-  const lastSeen = () => fs.readFile(join(home, "plugin-data/follow-up/inbox.json"), "utf8").then(t => JSON.parse(t).lastSeen ?? null, () => null);
-  for (let i = 0; i < n; i++) { const before = await lastSeen(); await until("an inbox tick", async () => (await lastSeen()) !== before, { tries: 160, every: 250 }); }
+/**
+ * Waits for `n` more runs of the worker's inbox loop, which runs every 15 s of real time (a real setTimeout, not the
+ * crawling clock). Not by watching inbox.json: since #123 (store-writes-only-real-changes) a lastSeen-only change is
+ * written at most every LAST_SEEN_WRITE_MS of the clock, and the fake clock crawls, so it is never written during a run
+ * and a wait on the file times out ("timed out waiting for an inbox tick").
+ */
+async function inboxTicks(_home, n) {
+  await new Promise(r => setTimeout(r, n * 15_000 + 2_000));
 }
 
 async function until(label, check, { tries = 120, every = 250 } = {}) {
