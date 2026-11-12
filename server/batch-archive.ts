@@ -11,7 +11,8 @@ export const KEEP_UNSENT_CANCELLED = 3;
  * Removes all but the newest few from `w` and returns them for the archive.
  */
 export function pruneUnsent(w: Pick<Workspace, "batches">, keep = KEEP_UNSENT_CANCELLED): Batch[] {
-  const unsent = w.batches.filter(b => b.state === "cancelled" && !b.sentAt && !b.settledAt);
+  // Anything sent stays: the no-progress cap counts unacknowledged sends (shared/send-decision.ts cappedTasks).
+  const unsent = w.batches.filter(b => b.state === "cancelled" && !b.sentAt && !b.settledAt && !b.unacknowledged);
   if (unsent.length <= keep) return [];
   const drop = new Set(unsent.slice(0, unsent.length - keep));
   w.batches = w.batches.filter(b => !drop.has(b));
