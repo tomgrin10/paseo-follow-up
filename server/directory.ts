@@ -96,6 +96,8 @@ export class DaemonDirectory {
   }
 
   /** The cached snapshot of one agent, if the directory has it. */
+  /** The rows the engine last read, without waiting or asking the daemon (null before the first read). */
+  snapshot(): DirectoryRows | null { return this.rows; }
   cached(id: string): Agent | undefined { return this.rows?.agents.find(row => row.agent.id === id)?.agent; }
 
   /**

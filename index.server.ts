@@ -20,6 +20,7 @@ import { followUpReporter, reportPrompt } from "./server/report-issue-adapter";
 import { githubApi } from "./server/github-api";
 import { browserRepositories, browserWorkspaces, prClaims, prOwner } from "./server/pr-owner";
 import { type Workspace } from "./shared/model";
+import { createdItems } from "./server/created-items";
 import { isWorkspaceRoot } from "./server/workspace-agent";
 import { BackgroundAgents, backgroundAgentsFile } from "./server/background-agents";
 import { Store } from "./server/store";
@@ -1076,6 +1077,9 @@ export default function contribute(server: PluginServerContext) {
     // The directory's agent list (metadata only): a claim never loads or refreshes the main agent.
     agentInfo: async agentId => { const row = gateway.directory.cached(agentId) ?? (await gateway.directory.read()).agents.find(r => r.agent.id === agentId)?.agent; return row ? { status: row.status, activeTurn: row.activeTurn, pendingPermissions: row.pendingPermissions, archivedAt: row.archivedAt } : null; } });
   handle(rpc.prioritiesRpc, async () => ({ items: await priorityStore.read() }));
+  // The chat's created cards: the engine's directory snapshot as it stands (never waits on or asks the daemon, wakes
+  // nothing) and the store. Before the engine's first read the cards just show no state yet.
+  handle(rpc.createdItemsRpc, async input => createdItems(input, gateway.directory.snapshot(), (await store.snapshot()).workspaces));
   // The Report sheet: who it can send to (directory metadata only; nothing is loaded), Send to agent, Open on GitHub.
   handle(rpc.reportTargetsRpc, async ({ workspaceId, agentId }, { paseo }) => {
     seen(paseo);

@@ -32,15 +32,22 @@ export const linkedQuestion = (o: Obligation, w: Workspace) => o.status === "blo
 
 const name = (live: TaskAgentLive) => live.title?.trim() || "Agent";
 
+/**
+ * The one word and link rule for an agent's live state, shared by task lines and the chat's created-agent card
+ * (shared/created.ts), so "working / idle / closed" can't drift between them. Only an open agent can be opened:
+ * opening a closed one would load it.
+ */
+export const PRESENCE: Readonly<Record<TaskAgentState, { word: string; opens: boolean }>> = {
+  working: { word: "working", opens: true }, idle: { word: "idle", opens: true }, closed: { word: "closed", opens: false },
+};
+
 /** The live part alone, for a task whose stored status is working. */
 export function workingLine(o: Obligation, agents: TaskAgents): TaskStatus {
   const id = o.workingAgentId;
   const live = id ? agents[id] : undefined;
   if (!id || !live) return { text: "In progress", tone: "progress", agentId: null };
-  if (live.state === "working") return { text: `${name(live)} working`, tone: "working", agentId: id };
-  if (live.state === "idle") return { text: `${name(live)} idle`, tone: "idle", agentId: id };
-  // Named like the open ones; words only, never a link (opening a closed agent would load it).
-  return { text: live.title?.trim() ? `${live.title.trim()} closed` : "Agent closed", tone: "closed", agentId: null };
+  // Named the same way in every state; a closed agent is words only, never a link (PRESENCE.closed.opens).
+  return { text: `${name(live)} ${PRESENCE[live.state].word}`, tone: live.state, agentId: PRESENCE[live.state].opens ? id : null };
 }
 
 /** `agents` defaults to the live states the engine stores on the workspace (`w.taskAgents`), the same ones the live line,
