@@ -250,9 +250,3 @@ export const reportSendRpc = defineRpc({ name: "follow.report-issue-send", input
 /** Open on GitHub (no agent to send to): a prefilled new-issue link carrying the redacted versions block. */
 export const reportLinkRpc = defineRpc({ name: "follow.report-issue-link", input: z.object({ kind: reportKindSchema, text: z.string().max(8000) }), output: z.object({ url: z.string() }) });
 
-/**
- * The live state of the agents a workspace's tasks name (Obligation.workingAgentId), for the task row and Task sheet:
- * from Paseo's agent directory, metadata only, so reading it never wakes an agent (shared/task-status.ts).
- */
-export const taskAgentsRpc = defineRpc({ name: "follow.task-agents", input: z.strictObject({ workspaceId: idSchema }),
-  output: z.object({ agents: z.record(z.string(), z.object({ title: z.string().nullable(), state: z.enum(["working", "idle", "closed"]) })) }) });

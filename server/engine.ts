@@ -18,6 +18,8 @@ import { holdSuperseded, liftHold } from "../shared/status";
 
 export interface Runtime {
   busy: boolean; reason: string | null; archived: boolean; backgroundBusy?: boolean;
+  /** Live state of the agents working tasks name (Workspace.taskAgents). Undefined: unknown, so every line says In progress. */
+  taskAgents?: Workspace["taskAgents"];
   guarded?: boolean; guardedInterruptionId?: string;
   /** The main agent's runtime is loaded (see isLoaded). Undefined means unknown. */
   mainLoaded?: boolean;
@@ -135,7 +137,7 @@ export class Engine {
       const runtime = await this.gateway.observe(original).catch((): Runtime => ({ busy: false, reason: "Agent state unavailable; refresh will retry", archived: false }));
       const pruned: Batch[] = [];
       await this.store.mutateWorkspace(original.id, w => {
-        w.runtimeBusy = runtime.busy; w.runtimeReason = runtime.reason;
+        w.runtimeBusy = runtime.busy; w.runtimeReason = runtime.reason; w.taskAgents = runtime.taskAgents;
         w.backgroundBusy = runtime.backgroundBusy ?? false;
         if (runtime.gone && w.goneAgent?.agentId !== w.mainAgentId) w.goneAgent = { agentId: w.mainAgentId, at: new Date(this.now()).toISOString(), reason: runtime.gone };
         if (w.goneAgent?.agentId === w.mainAgentId) w.runtimeReason = GONE_REASON;
@@ -408,7 +410,7 @@ export class Engine {
     ]);
     return this.store.mutate(state => {
       const w = ownedWorkspace(state, agentId, workspaceId);
-      w.runtimeBusy = runtime.busy; w.runtimeReason = runtime.reason;
+      w.runtimeBusy = runtime.busy; w.runtimeReason = runtime.reason; w.taskAgents = runtime.taskAgents;
       w.backgroundBusy = runtime.backgroundBusy ?? false;
       if (runtime.archived) w.archived = true;
       for (const pr of w.prs) {

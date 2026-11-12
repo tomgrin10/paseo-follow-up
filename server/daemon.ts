@@ -1,3 +1,4 @@
+import { taskAgentStates } from "../shared/task-status";
 import { settleWithin, type Deadline } from "./teardown";
 import { isRecovery, RECOVERY_LABEL, RECOVERY_BATCH_LABEL, RECOVERY_TITLE, MCP_SERVER, MCP_SERVERS } from "../shared/legacy";
 import { isOverseerAgent } from "../shared/overseer";
@@ -387,21 +388,23 @@ export class PaseoGateway implements Gateway {
   async observe(w: Workspace, fresh = false): Promise<Runtime> {
     const [rows, compacting, pauses] = await Promise.all([this.directory.read(fresh ? { fresh: "agents" } : {}), this.compacting(w.mainAgentId), this.guard.read()]);
     const { agents, workspaces } = rows;
+    // The agents working tasks name, live (invariant `a-task-only-says-working-when-its-agent-is`): every return carries them.
+    const taskAgents = taskAgentStates([...new Set(w.obligations.filter(o => o.status === "working" && o.workingAgentId).map(o => o.workingAgentId!))], agents.map(row => row.agent));
     const workspace = workspaces.find(row => row.id === w.id);
-    if (!workspace || workspace.archivingAt) return { busy: false, reason: "Workspace is archived", archived: true };
+    if (!workspace || workspace.archivingAt) return { taskAgents, busy: false, reason: "Workspace is archived", archived: true };
     const a = agents.find(row => row.agent.id === w.mainAgentId)?.agent ?? await this.connect(client => this.directory.live(client, w.mainAgentId));
-    if (!a || a.archivedAt || a.workspaceId !== w.id) return { busy: false, reason: "Main agent is unavailable or moved to another workspace", archived: false };
+    if (!a || a.archivedAt || a.workspaceId !== w.id) return { taskAgents, busy: false, reason: "Main agent is unavailable or moved to another workspace", archived: false };
     const recoveryIds = new Set(w.batches.filter(b => b.tasks.every(t => t.kind === "inventory")).flatMap(b => [b.recipientAgentId, ...b.recoveryHandoffs.map(h => h.fromAgentId)]));
     for (const { agent } of agents) if (isRecovery(agent.labels)) recoveryIds.add(agent.id);
     const scoped = agents.filter(row => row.agent.workspaceId === w.id && !row.agent.archivedAt && !recoveryIds.has(row.agent.id));
     const guarded = this.guard.waiting(pauses, { agentIds: [w.mainAgentId, ...scoped.map(row => row.agent.id)], workspaceId: w.id, excludedAgentIds: [...recoveryIds].filter((id): id is string => !!id) });
     const guardedInterruptionId = this.guard.ownsInterruption(pauses, w.mainAgentId, w.interruption)?.id;
     const context = { guardedInterruptionId, mainTurnId: turnIdOf(a.activeTurn) };
-    if (guarded || !pauses && workspace.labels?.some(label => /^(Paused|Paused by Session Guard)$/i.test(label))) return { ...context, guarded: true, busy: false, reason: "Waiting for Session Guard to resume this workspace", archived: false };
-    if (compacting) return { busy: true, reason: "Smart Session is compacting the main agent", archived: false };
+    if (guarded || !pauses && workspace.labels?.some(label => /^(Paused|Paused by Session Guard)$/i.test(label))) return { taskAgents, ...context, guarded: true, busy: false, reason: "Waiting for Session Guard to resume this workspace", archived: false };
+    if (compacting) return { taskAgents, busy: true, reason: "Smart Session is compacting the main agent", archived: false };
     const mainLoaded = isLoaded(a), mainRecent = recentlyUsed(a, this.windowMs, this.now());
-    if (conversationGone(a.lastError)) return { busy: false, reason: a.lastError ?? "Conversation not found", archived: false, gone: a.lastError ?? "Conversation not found", mainLoaded, mainRecent };
-    if (a.pendingPermissions.length || a.status === "error") return { busy: false, reason: a.status === "error" ? "Main agent needs recovery" : "Main agent is waiting for a permission or answer", archived: false };
+    if (conversationGone(a.lastError)) return { taskAgents, busy: false, reason: a.lastError ?? "Conversation not found", archived: false, gone: a.lastError ?? "Conversation not found", mainLoaded, mainRecent };
+    if (a.pendingPermissions.length || a.status === "error") return { taskAgents, busy: false, reason: a.status === "error" ? "Main agent needs recovery" : "Main agent is waiting for a permission or answer", archived: false };
     let busy = false; let backgroundBusy = false;
     const members = agents.filter(row => row.agent.workspaceId === w.id && !recoveryIds.has(row.agent.id) && !isRecovery(row.agent.labels)).map(row => row.agent);
     for (const agent of members) {
@@ -416,7 +419,7 @@ export class PaseoGateway implements Gateway {
         if (await subagentsRunning(client, listed, "Subagent observation unavailable", this.directory)) { busy = true; backgroundBusy = true; break; }
       }
     });
-    return { ...context, busy, reason: null, archived: false, backgroundBusy, mainLoaded, mainRecent };
+    return { taskAgents, ...context, busy, reason: null, archived: false, backgroundBusy, mainLoaded, mainRecent };
   }
   async recoveryRuntime(w: Workspace, batch: Batch): Promise<{ busy: boolean; reason: string | null }> {
     return this.connect(async client => {

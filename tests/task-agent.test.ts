@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { taskStatus, claimsWorking, type TaskAgents } from "../shared/task-status";
 import { INVARIANTS } from "../shared/status-invariants";
 import { updateObligation } from "../server/obligations";
-import { taskAgentStates } from "../server/tasks";
+import { taskAgentStates } from "../shared/task-status";
+import { liveLine } from "../shared/attention";
+import { summary } from "../shared/model";
+import { buildHome } from "../shared/home";
 import type { Obligation, Workspace } from "../shared/model";
 import { workspace } from "./fixtures";
 
@@ -76,4 +79,23 @@ test("the task row and sheet take their line from shared/task-status.ts, never a
   const src = await readFile(join(import.meta.dirname, "../client/tasks.tsx"), "utf8");
   assert.ok(!src.includes("Agent working"), "client/tasks.tsx hard-codes Agent working");
   assert.match(src, /taskStatus\(/);
+});
+
+test("a-task-only-says-working-when-its-agent-is: the live line, the summary and Home use the same live state as the row", () => {
+  // The panel in the 2026-11-12 renders: a spinner on "Backfill the deploy anchors" while its agent had closed.
+  const at = (state: "working" | "idle" | "closed" | null) => ({ ...ws([{ title: "Backfill the deploy anchors", workingAgentId: "sub-1" }]), ...(state ? { taskAgents: { "sub-1": { title: "Backfill pass", state } } } : {}) });
+  const inv = INVARIANTS.find(i => i.id === "a-task-only-says-working-when-its-agent-is")!;
+  const home = (w: Workspace) => buildHome({ rows: [], tracked: [w], paseo: [], now }).groups.flatMap(g => g.items).find(r => r.workspaceId === w.id)!;
+  for (const [state, words] of [["closed", "Backfill pass closed"], ["idle", "Backfill pass idle"], [null, "In progress"]] as const) {
+    const w = at(state);
+    assert.deepEqual(liveLine(w, now), { icon: "waiting", text: `Backfill the deploy anchors · ${words}`, since: null }, `${state}: no spinner, the row's words`);
+    assert.notEqual(summary(w, now).status, "handling", `${state}: not Agent handling`);
+    assert.notEqual(home(w).icon, "LoaderCircle", `${state}: Home row doesn't spin`);
+    assert.equal(taskStatus(w.obligations[0], w, undefined, now).text, words, "the row reads the same stored states");
+    assert.equal(inv.check(w, now), null);
+  }
+  const running = at("working");
+  assert.deepEqual(liveLine(running, now), { icon: "spinner", text: "Backfill the deploy anchors", since: null });
+  assert.equal(summary(running, now).status, "handling");
+  assert.equal(inv.check(running, now), null);
 });

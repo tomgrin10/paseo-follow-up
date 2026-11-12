@@ -3,11 +3,11 @@ import { View } from "react-native";
 import { Pressable, Text } from "./text";
 import { Icon, Modal, TextInput, useToast } from "@getpaseo/plugin/client/ui";
 import { useRpc } from "@getpaseo/plugin/client";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import type { Obligation, Workspace } from "../shared/model";
 import { followUpObligations } from "../shared/follow-up";
 import { taskSchedule, type TaskTrigger } from "../shared/task-trigger";
-import { taskAgentsRpc, taskTriggerRpc } from "../shared/contracts";
+import { taskTriggerRpc } from "../shared/contracts";
 import { linkedQuestion, taskStatus, type TaskAgents, type TaskStatus } from "../shared/task-status";
 import { Button, Card, Chip, FoldRow, text, type Theme, SubmitScope } from "./kit";
 import { Spinner } from "./motion";
@@ -133,10 +133,9 @@ export function TasksCard({ workspace: w, theme, compact, open, toggle, onOpenQu
   const c = theme.colors; const t = text(c);
   const [selected, setSelected] = useState<string | null>(null);
   const all = followUpObligations(w);
-  // Live state of the agents working tasks name: only asked while one does; the directory read wakes nothing.
-  const readAgents = useRpc(taskAgentsRpc);
-  const named = all.some(o => o.status === "working" && o.workingAgentId);
-  const agents = useQuery({ queryKey: ["follow-up", "task-agents", w.id], queryFn: () => readAgents({ workspaceId: w.id }), enabled: named, refetchInterval: 20_000, staleTime: 10_000 }).data?.agents ?? {};
+  // Live state of the agents working tasks name: the engine stores it with runtimeBusy (directory metadata, wakes
+  // nothing), so the row, the sheet, the live line and Home all read the same states.
+  const agents = w.taskAgents ?? {};
   const outstanding = all.filter(o => !finished(o));
   const completed = all.filter(finished);
   const showDone = open("tasks-done");

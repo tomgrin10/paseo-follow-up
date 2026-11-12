@@ -1,5 +1,6 @@
 import type { Obligation, Workspace } from "./model";
 import { taskSchedule } from "./task-trigger";
+import { isLive } from "./agent-load";
 
 /**
  * A task's status line, shared by the task row and the Task sheet (invariant `a-task-only-says-working-when-its-agent-is`).
@@ -8,6 +9,8 @@ import { taskSchedule } from "./task-trigger";
  * for days. So "working" is never read off the record: the line names the agent the task records (`workingAgentId`,
  * set by update_obligation) and says what that agent is doing now, from Paseo's agent directory (metadata only, so
  * reading it wakes nothing). Without a recorded agent, or before the live state is known, it says "In progress".
+ * The engine stores those live states on the workspace (`taskAgents`) with runtimeBusy, so the task row, the Task
+ * sheet, the panel's live line, the summary ("Agent handling") and Home all read one source.
  */
 export type TaskAgentState = "working" | "idle" | "closed";
 export type TaskAgentLive = { title: string | null; state: TaskAgentState };
@@ -40,7 +43,9 @@ export function workingLine(o: Obligation, agents: TaskAgents): TaskStatus {
   return { text: live.title?.trim() ? `${live.title.trim()} closed` : "Agent closed", tone: "closed", agentId: null };
 }
 
-export function taskStatus(o: Obligation, w: Workspace, agents: TaskAgents = {}, now = Date.now()): TaskStatus {
+/** `agents` defaults to the live states the engine stores on the workspace (`w.taskAgents`), the same ones the live line,
+ * the summary and Home read. */
+export function taskStatus(o: Obligation, w: Workspace, agents: TaskAgents = w.taskAgents ?? {}, now = Date.now()): TaskStatus {
   if (finishedTask(o)) return { text: o.status === "done" ? "Done" : "Waived", tone: o.status === "done" ? "done" : "waived", agentId: null };
   const q = linkedQuestion(o, w);
   if (q) return { text: q.answer ? `${q.id} · answered, waiting on the agent` : `${q.id} · waiting on your answer`, tone: "question", agentId: null };
@@ -52,3 +57,18 @@ export function taskStatus(o: Obligation, w: Workspace, agents: TaskAgents = {},
 
 /** True when a line claims an agent is working: the words the invariant guards. */
 export const claimsWorking = (text: string) => /\bworking\b/i.test(text);
+
+/**
+ * The live state of the agents tasks name, from Paseo's agent list (metadata only: reading it never loads an agent).
+ * Mid-turn, starting or with live background work is working; archived, closed or no longer listed is closed;
+ * anything else is idle. A directory that couldn't be read (null) says nothing, so every line reads "In progress".
+ */
+export function taskAgentStates(ids: readonly string[], agents: readonly { id: string; status: string; title?: string | null; archivedAt?: string | null; backgroundWork?: { count?: unknown } | null }[] | null): Record<string, TaskAgentLive> {
+  if (!agents) return {};
+  const byId = new Map(agents.map(a => [a.id, a]));
+  return Object.fromEntries(ids.map(id => {
+    const a = byId.get(id);
+    const state: TaskAgentLive["state"] = !a || a.archivedAt || a.status === "closed" ? "closed" : isLive(a) ? "working" : "idle";
+    return [id, { title: a?.title ?? null, state }];
+  }));
+}

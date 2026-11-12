@@ -7,8 +7,6 @@ import { clientEntry, paseoHome } from "./daemon";
 import { join } from "node:path";
 import { communicationReady } from "../shared/communication";
 import { taskSchedule } from "../shared/task-trigger";
-import { isLive } from "../shared/agent-load";
-import type { TaskAgentLive } from "../shared/task-status";
 
 function fingerprint(value: unknown): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
 /**
@@ -89,17 +87,3 @@ export function batchPrompt(w: Workspace, batch: Batch): string {
   ].join("\n\n");
 }
 
-/**
- * The live state of the agents tasks name, from Paseo's agent list (metadata only: reading it never loads an agent).
- * Mid-turn, starting or with live background work is working; archived, closed or no longer listed is closed;
- * anything else is idle. A directory that couldn't be read (null) says nothing, so every line reads "In progress".
- */
-export function taskAgentStates(ids: readonly string[], agents: readonly { id: string; status: string; title?: string | null; archivedAt?: string | null; backgroundWork?: { count?: unknown } | null }[] | null): Record<string, TaskAgentLive> {
-  if (!agents) return {};
-  const byId = new Map(agents.map(a => [a.id, a]));
-  return Object.fromEntries(ids.map(id => {
-    const a = byId.get(id);
-    const state: TaskAgentLive["state"] = !a || a.archivedAt || a.status === "closed" ? "closed" : isLive(a) ? "working" : "idle";
-    return [id, { title: a?.title ?? null, state }];
-  }));
-}
