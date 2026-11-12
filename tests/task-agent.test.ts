@@ -29,7 +29,8 @@ test("a-task-only-says-working-when-its-agent-is: the stored status alone never 
 test("a working task names its agent and that agent's live state, and opens it only while it's open", () => {
   assert.deepEqual(line({ workingAgentId: "sub-1" }, { "sub-1": { title: "Reader fix", state: "working" } }), { text: "Reader fix working", tone: "working", agentId: "sub-1" });
   assert.deepEqual(line({ workingAgentId: "sub-1" }, { "sub-1": { title: "Reader fix", state: "idle" } }), { text: "Reader fix idle", tone: "idle", agentId: "sub-1" });
-  assert.deepEqual(line({ workingAgentId: "sub-1" }, { "sub-1": { title: "Reader fix", state: "closed" } }), { text: "Agent closed", tone: "closed", agentId: null });
+  assert.deepEqual(line({ workingAgentId: "sub-1" }, { "sub-1": { title: "Backfill pass", state: "closed" } }), { text: "Backfill pass closed", tone: "closed", agentId: null });
+  assert.deepEqual(line({ workingAgentId: "gone" }, { gone: { title: null, state: "closed" } }), { text: "Agent closed", tone: "closed", agentId: null }, "name unknown");
   assert.equal(line({ workingAgentId: "sub-1" }, { "sub-1": { title: null, state: "working" } }).text, "Agent working");
   // Another task's live agent doesn't lend it a state.
   assert.equal(line({ workingAgentId: "sub-2" }, { "sub-1": { title: "Reader fix", state: "working" } }).text, "In progress");

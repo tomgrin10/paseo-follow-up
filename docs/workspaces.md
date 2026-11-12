@@ -145,7 +145,7 @@ The invariants in `shared/status-invariants.ts` check these over a grid of state
   `workspace_status` shows it. The task row and the Task sheet never read "working" off the stored status: their line
   comes from `taskStatus` (`shared/task-status.ts`), which names that agent and its live state from
   `follow.task-agents` (Paseo's agent directory, metadata only, so nothing is woken): "<title> working" (spinner),
-  "<title> idle", or "Agent closed". With no agent recorded, or before the live state is known, it reads "In
+  "<title> idle", or "<title> closed" ("Agent closed" when the name is unknown). With no agent recorded, or before the live state is known, it reads "In
   progress". While the agent is open (working or idle) the row has **Open agent** and the sheet an **Open agent**
   button, which open its chat; a closed or archived agent is words only. The client asks `follow.task-agents` only
   while some working task names an agent, every 20 s while the app is visible.
