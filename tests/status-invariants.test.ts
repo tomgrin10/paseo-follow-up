@@ -192,7 +192,7 @@ test("running-is-not-stale: over every agent status, turn history and card, a ru
   assert.deepEqual(rowViolations({ agentId: "37bc4ab1", status: "running", needs: stale.needs, snooze: null, brief: null, turnStartedAt: iso(-1) }, clock), []);
 });
 
-test("automatic-hold-is-not-stale: over every hold, turn and agent, a newer main-agent turn leaves no failed turn's hold", async () => {
+test("automatic-hold-is-not-stale: over every hold, turn and agent, a newer main-agent turn leaves no automatic hold", async () => {
   const { holdViolations } = await import("../shared/status-invariants");
   const { holdSuperseded, liftHold, interruptionHold } = await import("../shared/status");
   const at = new Date(clock).toISOString();
@@ -210,7 +210,7 @@ test("automatic-hold-is-not-stale: over every hold, turn and agent, a newer main
     // What the worker does on a turn start or a refresh (index.server.ts, server/engine.ts).
     if (holdSuperseded(w, { agentId: w.mainAgentId, turnId: mainTurnId })) liftHold(w);
     for (const v of holdViolations(w, mainTurnId)) failures.push(`${name} · turn=${mainTurnId} · ${v.detail}`);
-    if (name !== "failed" && h.hold) assert.equal(w.hold, h.hold, `${name} · turn=${mainTurnId}: not Follow-up's to lift`);
+    if (!["failed", "stopped"].includes(name) && h.hold) assert.equal(w.hold, h.hold, `${name} · turn=${mainTurnId}: not Follow-up's to lift`);
   }
   assert.deepEqual(failures, []);
   // Fixture (2026-11-10 render): the failed turn's hold, unrepaired, under a newer turn is the bug.

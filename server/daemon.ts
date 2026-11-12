@@ -23,7 +23,7 @@ import { DeliveryDeferred, ConversationGone } from "./delivery";
 import { timelineRefs } from "../shared/linked-extract";
 import type { LinkRef } from "../shared/linked";
 export { ConversationGone } from "./delivery";
-import { turnIdOf } from "../shared/status";
+import { compactionDelivered, turnIdOf } from "../shared/status";
 import { activeWindowMs, backgroundCount, isLive, isLoaded, recentlyUsed, workspaceActive, conversationGone, DEFAULT_ACTIVE_WINDOW_DAYS, DAY_MS } from "./agent-load";
 import { HistoryCache } from "./history-cache";
 import { DaemonDirectory, type DirectoryRows } from "./directory";
@@ -149,6 +149,14 @@ async function compactionPending(agentId: string): Promise<boolean> {
   });
   if (!queue) return false;
   return queue.items.some((item: any) => item.agentId === agentId && (["pending", "sending"].includes(item.state) || (item.state === "sent" && Date.now() - Date.parse(item.createdAt) < 300_000 && item.continueAfterCompaction && !item.resumedAt)));
+}
+/** Smart Session delivered a /compact to this agent just before `endedAt` (shared/status.ts compactionDelivered). */
+export async function compactionJustDelivered(agentId: string, endedAt: number): Promise<boolean> {
+  const queue = await readSharedJson(join(paseoHome, "plugin-data/smart-session/compactions.json"), (raw: any) => {
+    if (raw?.version !== 1 || !Array.isArray(raw.items)) throw new Error("Compaction queue unavailable");
+    return raw as { items: any[] };
+  });
+  return !!queue && compactionDelivered(queue.items, agentId, endedAt);
 }
 export async function sessionGuardPending(agentId: string): Promise<boolean> {
   const guard = new SessionGuard(join(paseoHome, "plugin-data/session-guard"));
