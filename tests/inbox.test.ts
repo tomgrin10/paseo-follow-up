@@ -247,16 +247,16 @@ test("D4 first run imports Paseo's unread and recent unanswered agents; older on
   await inbox.start();
   const s = await inbox.store.snapshot();
   assert.deepEqual(Object.keys(s.entries).filter(id => stateOf(s.entries[id]) === "NEEDS").sort(), ["perm", "recent", "unread"]);
-  assert.deepEqual(s.unsorted?.sort(), ["never-asked", "old"]);
+  assert.deepEqual([...(s.unsorted ?? [])].sort(), ["never-asked", "old"]);
   assert.ok(s.importedAt);
   assert.equal(s.revision, REVISION, "a fresh import needs no migration");
   // A confirmed "Sign off all" empties Unsorted; one Undo restores the whole batch.
   await inbox.act({ action: "unsorted_sign_off" });
   assert.equal((await inbox.store.snapshot()).unsorted, null);
   await inbox.act({ action: "batch_undo" });
-  assert.deepEqual((await inbox.store.snapshot()).unsorted?.sort(), ["never-asked", "old"]);
+  assert.deepEqual([...((await inbox.store.snapshot()).unsorted ?? [])].sort(), ["never-asked", "old"]);
   await inbox.start();
-  assert.deepEqual((await inbox.store.snapshot()).unsorted?.sort(), ["never-asked", "old"], "import runs once");
+  assert.deepEqual([...((await inbox.store.snapshot()).unsorted ?? [])].sort(), ["never-asked", "old"], "import runs once");
   await done();
 });
 
@@ -293,7 +293,7 @@ test("first run: the 7-day rule reads the agent's real last activity, not Paseo'
   assert.equal(stateOf(s.entries.fresh), "NEEDS");
   assert.equal(s.entries.stale?.needs ?? null, null);
   assert.equal(s.entries["stale-created"]?.needs ?? null, null);
-  assert.deepEqual(s.unsorted?.sort(), ["stale", "stale-created"]);
+  assert.deepEqual([...(s.unsorted ?? [])].sort(), ["stale", "stale-created"]);
   await done();
 });
 
@@ -341,7 +341,7 @@ test("migration: a store imported by 1.1.0-beta.0 is repaired once, and only ent
   assert.equal(s.entries.closed.needs, null, "a closed agent's imported flag is dropped");
   assert.equal(s.entries.archived.needs, null, "an archived agent's imported flag is dropped");
   assert.equal(s.entries.old.needs, null, "really idle for 7+ days: moved to Unsorted");
-  assert.deepEqual(s.unsorted?.sort(), ["already-unsorted", "old"]);
+  assert.deepEqual([...(s.unsorted ?? [])].sort(), ["already-unsorted", "old"]);
   assert.equal(s.entries.recent.needs!.since, "2026-11-06T10:00:00.000Z", "a kept flag dates from real activity");
   assert.equal(s.entries.unread.needs!.since, "2026-10-01T10:00:00.000Z", "Paseo's unread stays, re-dated");
   assert.equal(s.entries["signed-off"].needs, null); assert.equal(s.entries["signed-off"].seq, 2, "the developer's sign-off is untouched");
@@ -551,4 +551,44 @@ test("load repair: an error from before a restart clears for an agent that is ru
   await after.inbox.start();
   assert.equal(stateOf((await after.inbox.store.snapshot()).entries.a1), "QUIET", "persisted, not only hidden");
   await after.done();
+});
+
+test("a-tick-copies-the-state-at-most-once: a tick that only moves lastSeen copies nothing; a due snooze still runs", async t => {
+  // 2026-11-12: Inbox.tick ran a full mutate every worker tick for lastSeen alone (copy, validate, stringify the inbox).
+  const dir = await mkdtemp(join(tmpdir(), "follow-inbox-tick-")); t.after(() => rm(dir, { recursive: true, force: true }));
+  let now = Date.parse(at(1));
+  const f = fake([agent({ id: "a1" })]);
+  const inbox = new Inbox(dir, { enabled: async () => ({ enable_inbox: true, enable_inbox_pr_closed: true }), directory: f.directory, sources: f.none, guard: async () => null, now: () => now });
+  await inbox.store.mutate(s => { s.importedAt = at(1); s.entries.a1 = newEntry("a1"); });
+  let copies = 0; const mutate = inbox.store.mutate.bind(inbox.store);
+  inbox.store.mutate = (work => { copies++; return mutate(work); }) as typeof inbox.store.mutate;
+  for (let i = 0; i < 10; i++) { now += 5_000; await inbox.tick(); }
+  assert.equal(copies, 0, "ten quiet ticks copy the inbox zero times");
+  assert.equal((await inbox.store.snapshot()).lastSeen, new Date(now).toISOString(), "lastSeen still moves");
+  // A snooze that ends is a real change: that tick takes the full path.
+  await mutate(s => { s.entries.a1 = { ...s.entries.a1!, snooze: { until: new Date(now + 1_000).toISOString(), at: new Date(now).toISOString() } }; });
+  now += 2_000; await inbox.tick();
+  assert.equal(copies, 1, "the due snooze runs through mutate");
+});
+
+test("a-tick-copies-the-state-at-most-once: the seen-event drop never swallows a PR's first merge; repeats copy nothing", async t => {
+  // #144 added pr_merged ('Merged'); the per-tick drop of already-seen PR events must let its first sighting through.
+  const dir = await mkdtemp(join(tmpdir(), "follow-inbox-merged-")); t.after(() => rm(dir, { recursive: true, force: true }));
+  const f = fake([agent({ id: "a1" }), agent({ id: "a2" })]);
+  const inbox = new Inbox(dir, { enabled: async () => ({ enable_inbox: true, enable_inbox_pr_closed: true }), directory: f.directory, sources: f.none, guard: async () => null, now: () => Date.parse(at(1)) });
+  await inbox.store.mutate(s => { s.importedAt = at(0); s.primedAt = at(0); });
+  const follow = { version: 1 as const, workspaces: [
+    workspace({ id: "w1", mainAgentId: "a1", prs: [pr({ key: "example/app#7", number: 7, snapshot: snapshot({ state: "MERGED" }) })] }),
+    workspace({ id: "w2", mainAgentId: "a2", prs: [pr({ key: "example/app#8", number: 8, agentMerges: true, snapshot: snapshot({ state: "MERGED" }) } as never)] }),
+  ] };
+  await inbox.observeFollowUp(follow as never);
+  const first = await inbox.store.snapshot();
+  assert.deepEqual(first.entries.a1?.needs?.reasons.map(r => r.reason), ["pr_merged"], "the developer's merge flags Merged on first sight");
+  assert.equal(first.entries.a2?.needs ?? null, null, "a merge the agent made flags nothing (a-merge-the-agent-made-never-flags-the-developer)");
+  assert.ok(first.entries.a2?.seenKeys.includes("example/app#8:MERGED"), "but it is recorded as seen");
+  let copies = 0; const mutate = inbox.store.mutate.bind(inbox.store);
+  inbox.store.mutate = (work => { copies++; return mutate(work); }) as typeof inbox.store.mutate;
+  await inbox.observeFollowUp(follow as never); await inbox.observeFollowUp(follow as never);
+  assert.equal(copies, 0, "the same merges on later ticks copy the inbox zero times");
+  assert.deepEqual((await inbox.store.snapshot()).entries.a1?.needs?.reasons.map(r => r.reason), ["pr_merged"]);
 });

@@ -80,3 +80,32 @@ test("store-writes-only-real-changes: the worker's stop flushes the inbox's held
     store: { close: async () => { order.push("store"); } }, inbox: { flush: async () => { order.push("inbox"); } }, unlock: async () => { order.push("unlock"); } }, 2000);
   assert.deepEqual(order, ["store", "inbox", "unlock"]);
 });
+
+test("store-writes-only-real-changes: a history scan that only moves inventory.scannedMessageAt writes nothing until a real change or the volatile interval", async t => {
+  // 2026-11-12 live: 4 of 7 state.json writes (1.3 MB each) only moved inventory.scannedMessageAt, which nothing
+  // reads back (a lost value costs a rescan of history the cache already holds).
+  const d = await dir(t);
+  const store = new Store(d, 20, 60_000);
+  const inventory = { revision: 1, syncedRevision: 1, candidates: ["example/app#1"], historyComplete: true, historyError: null, scannedMessageAt: "2026-01-01T10:00:00Z" };
+  await store.mutate(s => { s.workspaces.push(workspace({ inventory })); });
+  await until(() => store.writes === 1, "the first real change is written"); const base = store.writes;
+  for (let i = 1; i <= 5; i++) await store.mutateWorkspace("workspace", w => { w.inventory!.scannedMessageAt = `2026-01-01T10:0${i}:00Z`; });
+  await sleep(60);
+  assert.equal(store.writes, base, "scan times alone are not written");
+  await store.mutateWorkspace("workspace", w => { w.inventory!.candidates.push("example/app#2"); });
+  await until(() => store.writes === base + 1, "a real inventory change writes");
+  assert.equal(JSON.parse(await readFile(join(d, "state.json"), "utf8")).workspaces[0].inventory.scannedMessageAt, "2026-01-01T10:05:00Z", "carrying the newest scan time");
+  await store.close(1000);
+});
+
+test("the store keeps a fingerprint of what it wrote, not the 1–2 MB state.json text (worker memory, 2026-11-12)", async t => {
+  const d = await dir(t);
+  const store = new Store(d, 0);
+  await store.mutate(s => { for (let i = 0; i < 50; i++) s.workspaces.push(workspace({ id: `w${i}`, goal: "x".repeat(2000) })); });
+  const written = (store as unknown as { written: string }).written;
+  assert.ok(written.length < 64, `kept ${written.length} chars`);
+  const writes = store.writes;
+  await store.mutate(s => { s.workspaces[0]!.goal = "x".repeat(2000); });
+  await store.flush();
+  assert.equal(store.writes, writes, "an identical state still isn't rewritten");
+});

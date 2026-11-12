@@ -39,7 +39,10 @@ not a patch for one instance.
 
 | Script | npm | What it checks |
 | --- | --- | --- |
-| `scripts/scale-check.mjs` | `test:scale` | No dormant agent wakes at 120 workspaces; RSS, CPU and idle request budgets. Skips without the paseo CLI, except in CI. |
+| `scripts/scale-check.mjs` | `test:scale` | No dormant agent wakes at 140 workspaces; RSS (peak from worker start, not only idle), CPU and idle request budgets. `--realistic` seeds a live-shaped state (`scripts/scale-seed.ts`: three PRs with full snapshots, tasks, batches and questions per workspace, ~1.7 MB at 140), two agents per workspace and a fake GitHub with live-sized PR bodies (`scripts/scale-github.mjs`). `--json` reports the worker's RSS steps over 10 MB from its start, heap peaks and idle CPU. `--cpu-prof <dir>` and `--heap-snapshot <dir>` profile every node process the daemon starts. Skips without the paseo CLI, except in CI. |
+| `scripts/cpu-top.mjs` | manual | Where a `.cpuprofile`'s time went (self and app-frame inclusive), optionally in a time window: `node scripts/cpu-top.mjs <file> --from 0 --to 8`. |
+| `scripts/alloc-prof.cjs`, `scripts/alloc-top.mjs` | `scale-check --alloc-prof <dir>` | What each process allocates, garbage included (V8's sampling heap profiler with collected objects; `--heap-prof` shows only what stays live), for 0–60 s and 60–180 s of its life; `alloc-top` lists bytes per function, self and inclusive. |
+| `scripts/heap-retainers.mjs` | manual | Retained sizes in a heap snapshot (dominator tree) with a retaining path for each big owner. |
 | `scripts/check-native-tools.mjs` | `test:native` | Tools are served through Paseo's MCP with no per-agent process. A reload detaches them, the bridge still works, and they come back. |
 | `scripts/check-trust-bypass.mjs` | `test:trust` | Trust bypass on a real daemon. |
 | `scripts/check-install.mjs` | `test:install`, `preview` | The packed install. `--keep` (`npm run preview`) leaves the daemon running for screenshots, prints "Isolated browser app: http://127.0.0.1:<port>", and writes `.preview-isolated.json`. |
