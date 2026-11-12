@@ -1,5 +1,5 @@
 import { batchView, FINISH_LINE, stuckLine, unconfirmedRefs } from "./status";
-import { completionCheck, liveWorkingTask, summary, type Batch, type Pr, type Workspace, type Status } from "./model";
+import { completionCheck, liveWorkingTask, statusKnown, summary, type Batch, type Pr, type Workspace, type Status } from "./model";
 import { workingLine } from "./task-status";
 import { followUpObligations, recoveryBatch } from "./follow-up";
 import { orderedStacks, settledForDisplay } from "./presentation";
@@ -12,7 +12,7 @@ export type PrTone = "merged" | "approved" | "danger" | "warning" | "pending" | 
 
 export function prTone(pr: Pr): PrTone {
   const s = pr.snapshot;
-  if (pr.error || !s?.complete) return "unknown";
+  if (!s?.complete) return "unknown";
   if (s.state === "MERGED") return "merged";
   if (s.state === "CLOSED") return "closed";
   if (s.conflict || s.failedChecks.length) return "danger";
@@ -212,7 +212,7 @@ export function liveLine(w: Workspace, now = Date.now()): { icon: LiveIcon; text
   // waiting icon, Home's Waiting group and the brief's "Waiting on others" already say it waits, so the line doesn't.
   const waiting = followUpObligations(w).find(o => o.status === "waiting");
   if (waiting) return { icon: "waiting", text: waiting.title, since: null };
-  if (w.prs.some(p => p.error || !p.snapshot?.complete)) return { icon: "alert", text: "Some PR status is unavailable · retrying", since: null };
+  if (w.prs.some(p => !statusKnown(p))) return { icon: "alert", text: "Some PR status is unavailable · retrying", since: null };
   if (w.prs.some(p => p.snapshot?.state === "OPEN" && p.snapshot.checksPending)) return { icon: "waiting", text: "Checks are running", since: null };
   if (w.prs.some(p => p.snapshot?.state === "OPEN")) return { icon: "waiting", text: "Waiting on review and merges", since: null };
   return { icon: "idle", text: "Waiting for the main agent to declare Done", since: null };
