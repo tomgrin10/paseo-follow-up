@@ -108,7 +108,7 @@ export function cardPresence(card: CreatedCard, live: CreatedLive | undefined): 
   if (card.phase === "failed" || !card.id) return { word: "", tone: "failed", opens: false, link: null };
   if (card.kind === "workspace") return { word: "", tone: "unknown", opens: true, link: null };
   const state = live?.agents[card.id]?.state;
-  // Unknown (not read yet, or Paseo no longer lists it): words only, like the task line's "In progress".
+  // Unknown (not read yet, or Paseo no longer lists it): words only, like the task line's "Agent unavailable".
   if (!state) return { word: "", tone: "unknown", opens: false, link: null };
   const p = PRESENCE[state];
   return { word: p.word.charAt(0).toUpperCase() + p.word.slice(1), tone: state, opens: p.opens, link: state === "closed" ? p.link : null };

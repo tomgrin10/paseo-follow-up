@@ -18,7 +18,7 @@ import { holdSuperseded, liftHold } from "../shared/status";
 
 export interface Runtime {
   busy: boolean; reason: string | null; archived: boolean; backgroundBusy?: boolean;
-  /** Live state of the agents working tasks name (Workspace.taskAgents). Undefined: unknown, so every line says In progress. */
+  /** Live state of the agents working tasks name (Workspace.taskAgents). Undefined: unknown, so every line naming an agent says "Agent unavailable". */
   taskAgents?: Workspace["taskAgents"];
   guarded?: boolean; guardedInterruptionId?: string;
   /** The main agent's runtime is loaded (see isLoaded). Undefined means unknown. */

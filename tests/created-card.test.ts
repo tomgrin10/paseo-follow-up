@@ -137,6 +137,7 @@ test("the card is feature-detected, polls only while visible and open, and reads
     assert.doesNotMatch(src, /fetchAgent|timeline\.|agents\.ref|\.paseo\b|usePaseo/, `${file} must not read agents itself`);
   const server = await readFile(join(root, "index.server.ts"), "utf8");
   const handler = server.split("\n").find(l => l.includes("handle(rpc.createdItemsRpc"))!;
-  assert.match(handler, /gateway\.directory\.snapshot\(\)/, "the engine's snapshot as it stands");
-  assert.doesNotMatch(handler, /\.read\(|fresh/, "never waits on or asks the daemon");
+  assert.match(handler, /gateway\.directory\.snapshotFor\(input\.agentIds\)/, "the engine's snapshot as it stands, plus remembered archived agents");
+  assert.match(handler, /gateway\.directory\.lookup\(input\.agentIds\); return/, "missing ids are looked up without awaiting");
+  assert.doesNotMatch(handler, /\.read\(|fresh|await gateway/, "never waits on or asks the daemon for the list");
 });
