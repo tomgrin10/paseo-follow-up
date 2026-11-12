@@ -8,7 +8,7 @@ import type { InboxRow, Reason } from "../shared/inbox";
 import type { State, Workspace } from "../shared/model";
 import { followsByDefault, migrateFollowEvery, FOLLOW_EVERY_MIGRATION } from "../shared/settings";
 import { applyDiscovery } from "../server/discovery";
-import { filterHome, homeSearchDocs, indexDocs, omniboxResults, rowHit, search, tokenMatch, withinOneEdit, workspaceProvider, type OmniboxProvider } from "../shared/search";
+import { excerpt, filterHome, homeSearchDocs, indexDocs, omniboxResults, rowHit, search, tokenMatch, withinOneEdit, workspaceProvider, type OmniboxProvider } from "../shared/search";
 import { readFile } from "node:fs/promises";
 import { SORT_MODES, type SortMode } from "../shared/sort";
 import { freshPriorities, mergePriorities, priorityNote, PRIORITY_FRESH_MS, type Priority } from "../shared/priorities";
@@ -142,6 +142,15 @@ test("the sidebar filter keeps exactly what Home search finds (one matcher), in 
   const hook = view.slice(view.indexOf("export function useListFilter"), view.indexOf("export function FilterField"));
   assert.match(hook, /homeSearchDocs\(/); assert.match(hook, /filterHome\(/);
   assert.doesNotMatch(hook, /tokenMatch|includes\(|toLowerCase/, "no matcher of its own");
+});
+
+test("excerpt never starts inside an id, and keeps the match visible", () => {
+  const pr = excerpt("#143 Send the dunning email after the last retry", [[22, 27]], 44);
+  assert.ok(pr.text.startsWith("#143 Send"), pr.text);
+  assert.deepEqual(pr.ranges.map(([a, b]) => pr.text.slice(a, b)), ["email"]);
+  const long = excerpt("When a CSV row matches an existing contact by email, should it update that contact or be skipped?", [[46, 51]], 44);
+  assert.ok(long.text.startsWith("…existing contact"), long.text);
+  assert.deepEqual(long.ranges.map(([a, b]) => long.text.slice(a, b)), ["email"]);
 });
 
 test("rowHit: the match is highlighted where the row shows it, or named as line 2 when it doesn't", () => {

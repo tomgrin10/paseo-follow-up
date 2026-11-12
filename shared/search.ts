@@ -162,7 +162,10 @@ export function highlightRuns(text: string, ranges: Range[]): { text: string; hi
 /** A long field (an ask, a PR title list) cut around its first match so the highlight stays visible. */
 export function excerpt(text: string, ranges: Range[], max = 80): { text: string; ranges: Range[] } {
   if (text.length <= max || !ranges.length) return { text: text.length <= max ? text : `${text.slice(0, max - 1)}…`, ranges: ranges.filter(r => r[1] <= max - 1) };
-  const start = Math.max(0, Math.min(ranges[0][0] - 20, text.length - max));
+  let start = Math.max(0, Math.min(ranges[0][0] - 20, text.length - max));
+  // Never cut into an id ("#143", "APP-139"): from the start when the match already fits, else at a word boundary.
+  if (ranges[0][1] <= max - 2) start = 0;
+  else if (start > 0 && /\S/.test(text[start - 1])) { const next = text.indexOf(" ", start); if (next >= 0 && next < ranges[0][0]) start = next + 1; }
   const end = Math.min(text.length, start + max);
   const pre = start > 0 ? "…" : "";
   const shift = pre.length - start;
