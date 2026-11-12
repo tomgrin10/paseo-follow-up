@@ -128,6 +128,8 @@ export class Github {
   private last = new Map<string, Observation>();
   private prints = new Map<string, string>();
   private changedAt = new Map<string, number>();
+  /** When each PR was first observed in this process: how long its checks have been running, at least. */
+  private seenAt = new Map<string, number>();
   private api: GithubApi;
   /** Each repository's PR workflow; Graphite is asked only about PRs in Graphite repositories. Absent: all Graphite, as before. */
   workflow: ((repo: string) => Promise<PrWorkflow>) | null = null;
@@ -214,7 +216,7 @@ export class Github {
         if (tier === "critical") return false;
         if (!o.background || !this.last.has(p.key) || o.fresh?.has(p.key) || o.hot?.has(p.key)) return true;
         const last = this.last.get(p.key)!;
-        return dueForRead({ snapshot: last.snapshot, error: p.error || last.error, changedAt: this.changedAt.get(p.key) ?? null, readAt: this.readAt.get(p.key) ?? 0, now: this.now(), tier, repoUrgent });
+        return dueForRead({ snapshot: last.snapshot, error: p.error || last.error, changedAt: this.changedAt.get(p.key) ?? null, readAt: this.readAt.get(p.key) ?? 0, now: this.now(), tier, repoUrgent, since: this.changedAt.get(p.key) ?? this.seenAt.get(p.key) ?? null });
       });
       const dueKeys = new Set(due.map(p => p.key));
       for (const p of targets) if (!dueKeys.has(p.key)) { this.stats.skipped++; result.set(p.key, this.standIn(p, owner)); }
@@ -324,5 +326,6 @@ export class Github {
     const previous = this.prints.get(key);
     if (previous !== print) { if (previous !== undefined) this.changedAt.set(key, this.now()); this.prints.set(key, print); }
     this.last.set(key, value);
+    if (!this.seenAt.has(key)) this.seenAt.set(key, this.now());
   }
 }
