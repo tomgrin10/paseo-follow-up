@@ -42,7 +42,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as 2.0.0-rc.0, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["needs-you-states"];
+const REVIEW_SHOTS = ["needs-you-states", "review-mode"];
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
 for (const name of only) if (![...SHOTS, ...REVIEW_SHOTS].includes(name)) fail(`unknown shot "${name}" (known: ${[...SHOTS, ...REVIEW_SHOTS].join(", ")})`);
 const scheme = arg("--scheme");
@@ -125,6 +125,7 @@ function pulls() {
     212: { repo: "example/web", title: "Usage dashboard charts", state: "OPEN", author: "dana", draft: true, checks: [ok("test"), ok("lint")] },
     218: { repo: "example/web", title: "Push notification settings", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
     224: { repo: "example/web", title: "Import contacts from CSV", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
+    240: { title: "Export the audit log as CSV", state: "OPEN", author: "dana", checks: [running("test"), ok("lint")] },
     232: { title: "Usage alert thresholds", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
   };
 }
@@ -322,13 +323,22 @@ const NEEDS_YOU_STATES = [
       msg("Thresholds are in #232. One task needs your call on who gets the alerts.")], flag: false },
 ];
 
+/** review-mode only (a-no-review-repo-never-asks-for-review-or-merge): a PR with no reviewers in a reviewed repository. */
+const REVIEW_MODE_STATES = [
+  { key: "rm-audit", title: "Audit log export", minute: 180, prompt: "APP-190: export the audit log as CSV from the admin page.", flag: false,
+    steps: [rpc("follow.enroll", { goal: "APP-190 Audit log export" }), rpc("follow.register-pr", { repo: "example/app", number: 240, stack: "Audit export" }),
+      msg("Opened example/app#240; checks are running.")] },
+];
+
 async function seed({ call, home }) {
   // A fixed (empty) project folder: Paseo derives the project's avatar color from it, so a random temp path would
   // recolor the sidebar on every run.
   // Two projects, so the sidebar and Quiet's folds don't read as one repo.
   const repos = {};
   for (const name of ["app", "web"]) { repos[name] = join(tmpdir(), "follow-up-shots-fixture", name); await fs.mkdir(repos[name], { recursive: true }); }
-  const specs = [...WORKSPACES, ...(only.includes("needs-you-states") ? NEEDS_YOU_STATES : [])];
+  const specs = [...WORKSPACES, ...(only.includes("needs-you-states") ? NEEDS_YOU_STATES : []), ...(only.includes("review-mode") ? REVIEW_MODE_STATES : [])];
+  // review-mode: someone reviews example/app, so its PR without reviewers asks for them.
+  if (only.includes("review-mode")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }] });
   await fs.writeFile(join(home, "fixture-scripts.json"), JSON.stringify(Object.fromEntries(specs.map(w => [w.prompt, w.steps]))));
   const workspaces = [];
   for (const spec of specs) {
@@ -838,6 +848,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       }
     }
   }
+  if (only.includes("review-mode")) await reviewModeShots({ shoot, call });
   if (only.includes("needs-you-states")) {
     // One Needs you block per surface: each state on the panel (desktop) and Home's detail pane (desktop and phone),
     // light and dark. Tall panel frames so the block, Tasks and their neighbours all fit.
@@ -863,6 +874,36 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       await shoot(`ny-${s.state}-home-phone-${theme}`, PHONE, theme, async page => { await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, s.title)).click(); await settleOn(page); });
     }
   }
+}
+async function reviewModeShots({ shoot, call }) {
+  // The Needs-you reviewers row with its quiet link, then the undo bar after it; the Settings fold with the Review menu
+  // open on a No review repository. Desktop and phone, light and dark. Each shot puts example/app back to Team review.
+  const title = REVIEW_MODE_STATES[0].title;
+  const team = () => call("follow.set-pr-workflow", { repo: "example/app", review: null });
+  const link = page => page.getByRole("button", { name: "Let the agent merge in example/app" }).filter({ visible: true }).first();
+  const row = async (page, vp) => { await openHome(page); if (vp) await page.setViewportSize(vp); await (await homeRow(page, title)).click(); await link(page).waitFor(); };
+  const fold = async (page, vp) => {
+    await page.setViewportSize(vp);
+    await page.goto(`${ORIGIN}/settings/hosts/${SERVER_ID}/plugins/follow-up/following`);
+    const header = page.getByRole("button", { name: /^example\/app, / }).filter({ visible: true }).first();
+    await header.waitFor();
+    if (await header.getAttribute("aria-expanded") !== "true") await header.click();
+    await page.getByRole("button", { name: /^Review for example\/app/ }).filter({ visible: true }).first().click();
+    const menu = page.getByRole("menu", { name: "Review for example/app" }).first();
+    await menu.waitFor();
+    await menu.evaluate(el => el.scrollIntoView({ block: "center" }));
+  };
+  for (const theme of ["light", "dark"]) for (const [size, vp] of [["desktop", DESKTOP], ["phone", PHONE]]) {
+    await team();
+    await shoot(`rm-row-${size}-${theme}`, vp, theme, page => row(page, vp));
+    await shoot(`rm-undo-${size}-${theme}`, vp, theme, async page => {
+      await row(page, vp); await link(page).click();
+      await page.getByText("example/app: no review. The agent merges its own PRs once checks pass.").first().waitFor();
+    });
+    await call("follow.set-pr-workflow", { repo: "example/app", review: "none" });
+    await shoot(`rm-settings-${size}-${theme}`, { width: vp.width, height: size === "phone" ? 1100 : 1000 }, theme, page => fold(page, { width: vp.width, height: size === "phone" ? 1100 : 1000 }));
+  }
+  await team();
 }
 function pick(key) { const w = NEEDS_YOU_STATES.find(x => x.key === key); return { title: w.title, prompt: w.prompt }; }
 

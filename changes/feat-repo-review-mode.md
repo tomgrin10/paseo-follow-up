@@ -1,0 +1,2 @@
+- You can set a repository to No review in Settings → Shipping PRs. There, Follow-up never asks you to add reviewers or merge, and agents merge their own PRs once checks pass. Team review stays the default.
+- The "has no reviewers" row has a "Let the agent merge in" link that switches its repository to No review, with Undo.

@@ -5,6 +5,7 @@ import { followUpObligations, recoveryBatch } from "./follow-up";
 import { orderedStacks, settledForDisplay } from "./presentation";
 import { githubApproved, graphiteReady, isGithubFlow, mergeBlockers, prActionBlocks } from "./pr-actions";
 import { configuredReviewers, noReviewers } from "./reviewers";
+import { agentMerges } from "./pr-workflow";
 import { isOpen as questionOpen, questionState, type QuestionState } from "./questions";
 
 /** One colour language for the stack bar, rail nodes and overview bars. */
@@ -117,7 +118,7 @@ export function activeNeeds(w: Workspace, now = Date.now()): NeedItem[] {
  * request or merge already in flight. Status invariant reviewers-ask-agrees.
  */
 export function asksForReviewers(pr: Pr, w: Pick<Workspace, "prActions">): boolean {
-  return !pr.agentMerges && noReviewers(pr) && !pr.snapshot!.draft && configuredReviewers(pr.repo).length > 0 && !w.prActions.some(a => prActionBlocks(a, [pr.key]));
+  return !agentMerges(pr) && noReviewers(pr) && !pr.snapshot!.draft && configuredReviewers(pr.repo).length > 0 && !w.prActions.some(a => prActionBlocks(a, [pr.key]));
 }
 
 export function needsYou(w: Workspace, now = Date.now()): NeedItem[] {
@@ -156,8 +157,9 @@ export function needsYou(w: Workspace, now = Date.now()): NeedItem[] {
   const blocking = (pr: Pr) => w.prActions.some(a => prActionBlocks(a, [pr.key]));
   for (const pr of stackOrder(w.prs)) {
     // Only offer Merge here when the PR's workflow (Graphite, or GitHub itself) agrees; otherwise the PR sheet explains what is missing.
-    // A PR the agent merges itself is the agent's work in flight, never the developer's merge or review.
-    if (pr.agentMerges) continue;
+    // A PR the agent merges itself (its own register_pr answer, else a No review repository) is the agent's work in
+    // flight, never the developer's merge or review. Invariant a-no-review-repo-never-asks-for-review-or-merge.
+    if (agentMerges(pr)) continue;
     if (mergeReady(pr, w, now) && workflowReady(pr) && !blocking(pr)) items.push({ kind: "merge", key: `merge:${pr.key}`, prKey: pr.key, number: pr.number, title: isGithubFlow(pr.snapshot) && pr.snapshot!.reviewDecision !== "APPROVED" ? `#${pr.number} is ready to merge` : `#${pr.number} is approved`, detail: pr.snapshot!.title });
     else if (asksForReviewers(pr, w)) items.push({ kind: "reviewers", key: `reviewers:${pr.key}`, prKey: pr.key, number: pr.number, title: `#${pr.number} has no reviewers`, detail: pr.snapshot!.title });
   }

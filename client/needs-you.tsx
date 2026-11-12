@@ -19,6 +19,7 @@ import type { Brief } from "../shared/brief";
 import { useState, type ReactNode } from "react";
 import { usePendingAnswer } from "./pending-answers";
 import { useReviewerSettings } from "./reviewers";
+import { NoReviewLink } from "./review-mode";
 
 import { overviewKey, workspaceKey } from "./keys";
 import { RichText } from "./rich-text";
@@ -101,6 +102,7 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
           <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
             <RichText numberOfLines={2} style={t.label}>{item.title}</RichText>
             {"detail" in item && !!item.detail && !sameText(item.detail, item.title.replace(/^Q\d+ · /, "")) && <RichText linkColor={c.foreground} numberOfLines={1} style={t.meta}>{item.detail}</RichText>}
+            {item.kind === "reviewers" && <NoReviewLink repo={item.prKey.split("#")[0]} theme={theme} compact />}
           </View>
           {button}
         </View>
@@ -112,6 +114,7 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
             <RichText style={compact ? t.label : t.body}>{item.title}</RichText>
             {"detail" in item && !!item.detail && !sameText(item.detail, item.title.replace(/^Q\d+ · /, "")) && <RichText linkColor={c.foreground} numberOfLines={item.kind === "question" ? 2 : 3} style={t.meta}>{item.detail}</RichText>}
             {item.kind === "question" && <QuestionState workspace={w} questionId={item.questionId} theme={theme} />}
+            {item.kind === "reviewers" && <NoReviewLink repo={item.prKey.split("#")[0]} theme={theme} compact={compact} />}
             {item.kind === "send" && !item.finish && <View style={{ gap: 2 }}>
               {item.tasks.slice(0, 4).map((task, i) => <Text key={i} numberOfLines={2} style={t.meta}><Text style={{ fontVariant: ["tabular-nums"] }}>{`${i + 1}. `}</Text>{shortRefs(task, w)}</Text>)}
               {item.tasks.length > 4 && <Text style={t.meta}>{`and ${item.tasks.length - 4} more`}</Text>}
