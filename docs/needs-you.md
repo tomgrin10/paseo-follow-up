@@ -228,9 +228,14 @@ card beside a question list.
 - **One answer path.** A question card, the pill, the question dialog and the chat's brief card all answer a stored
   question through `follow.answer-question`; the brief resolves when its questions settle (`briefQuestionsEvent`).
   Only a decision with no tracked question goes through `follow.brief-action`.
-- **One ask, one title** (`one-ask-one-title`): `needs_you` pointing at open questions stores the first one's title
-  as the brief's ask (`foldedAsk`), so the Home row, the sidebar row, the pill, the chat card and the panel name it
-  the same way; the agent's context stays the card's body.
+- **One ask, one title** (`one-ask-one-title`): `needs_you` pointing at one open question stores its title as the
+  brief's ask (`foldedAsk`), so the Home row, the sidebar row, the pill, the chat card and the panel name it the same
+  way; the agent's context stays the card's body. Over several open questions the agent's own ask stays the title
+  ("Two calls on the invoice export"); the first question's title would repeat as the card's item 1.
+- **Say it once** (`say-it-once`): a flag's headline line (the Home and sidebar row's text, the pill sheet's ask)
+  never repeats its word, its pill label or the PR chip. A merged or closed PR's flag carries the PR's title
+  (`ReasonEntry.title`, from `prEndEvent`) and reads it, not "#240 merged"; a flag stored before that keeps its line.
+  Check, review-thread and conflict flags already say what to fix. `tests/say-it-once.test.ts` covers every reason.
 - **No "No ask stated" beside an open question:** the chat's fallback card says "Waiting on your answer to Q1".
 - **A blocked task names what it waits on** (`blockedLine`, `shared/task-status.ts`): "Blocked · waits for Q1", or the
   evidence's first sentence.

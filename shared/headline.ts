@@ -92,7 +92,9 @@ export function flagHeadline(row: Pick<InboxRow, "needs" | "snooze" | "brief">, 
   if ((key === "flagged" || key === "review") && send) return { key: "repairs", label: `Send ${plural(send.tasks.length, "fix", "fixes")}`, line: send.title, source: "flag" };
   // "Add reviewers #1499": the PR number is the detail, so the pill names which PR.
   if (key === "reviewers") return { key, label: `${HEADLINE_WORD.reviewers} ${top.detail}`.trim(), line: brief?.ask ?? `Add reviewers to ${top.detail}`, source: "flag" };
-  const line = brief ? (brief.source === "none" ? "No ask stated" : brief.ask) : top.detail || HEADLINE_WORD[key];
+  // say-it-once: a PR-state flag's detail ("#240 merged") is the PR chip's text, so the line names the PR by its title.
+  const fact = (key === "pr_merged" || key === "pr_closed") && top.title ? top.title : top.detail;
+  const line = brief ? (brief.source === "none" ? "No ask stated" : brief.ask) : fact || HEADLINE_WORD[key];
   return { key, label: since ? `${HEADLINE_WORD[key]} ${since}` : HEADLINE_WORD[key], line, source: "flag" };
 }
 
