@@ -55,6 +55,11 @@ export const obligationSchema = z.object({
   previousTitles: z.array(z.string()).optional(),
   communication: communicationSchema.optional(),
   trigger: taskTriggerSchema.nullable().optional(),
+  /**
+   * Who is working on it: the agent that last set status=working through update_obligation, or the agent it named
+   * (workingAgentId, e.g. an orchestrator's subagent). The task's line reads that agent's live state (shared/task-status.ts).
+   */
+  workingAgentId: idSchema.optional(),
 });
 export const taskSchema = z.object({
   key: idSchema, kind: z.enum(["conflict", "review", "checks", "restack", "obligation", "inventory", "completion"]),
@@ -100,6 +105,9 @@ export const workspaceSchema = z.object({
   sendWait: z.enum(["unloaded", "setup"]).nullable().optional(),
   updatedAt: z.string(), managedDoneLabel: z.boolean(),
   runtimeReason: z.string().nullable(), runtimeBusy: z.boolean(), backgroundBusy: z.boolean().default(false),
+  /** Live state of the agents this workspace's working tasks name, refreshed with runtimeBusy from Paseo's agent list
+   * (metadata only). Every surface that says a task's agent is working reads this, never the stored status alone. */
+  taskAgents: z.record(z.string(), z.object({ title: z.string().nullable(), state: z.enum(["working", "idle", "closed"]) })).optional(),
   interruption: z.object({ turnId: z.string().nullable(), at: z.string(), kind: z.enum(["canceled", "failed"]), /** Why a canceled turn stopped (shared/status.ts cancelCause); only "stop" holds. */ cause: z.enum(CANCEL_CAUSES).optional(), guardPauseId: z.string().optional(), /** The agent whose turn stopped (since 1.4.0-beta.16). */ agentId: idSchema.optional() }).optional(),
   // Added with questions; older saved states parse with none.
   questions: z.array(questionSchema).default([]),
@@ -197,6 +205,10 @@ export function revokesDone(w: Workspace, now = Date.now()): boolean {
   return completionGate(w, now).blockers.some(b => b.owner !== "wait" || b.contrary);
 }
 export type Status = "active" | "handling" | "waiting" | "needs-you" | "done";
+/** The first working task whose recorded agent is running right now (invariant `a-task-only-says-working-when-its-agent-is`). */
+export function liveWorkingTask(w: Workspace): Obligation | undefined {
+  return followUpObligations(w).find(o => o.status === "working" && !!o.workingAgentId && w.taskAgents?.[o.workingAgentId]?.state === "working");
+}
 export function summary(w: Workspace, now = Date.now()): { status: Status; label: string; reason: string } {
   const obligations = followUpObligations(w);
   if (w.hold) return { status: "needs-you", label: "Needs you", reason: w.hold };
@@ -210,7 +222,8 @@ export function summary(w: Workspace, now = Date.now()): { status: Status; label
   if (w.runtimeReason) return { status: "waiting", label: "Waiting", reason: w.runtimeReason };
   const batch = w.batches.find(b => !recoveryBatch(b) && ["pending", "sending", "sent"].includes(b.state) && !(b.state === "pending" && completionCheck(b)));
   if (batch) return { status: batch.state === "pending" ? "active" : "handling", label: batch.state === "pending" ? w.enable_auto_sends ? "Auto queued" : "Ready to send" : "Agent handling", reason: `${batch.tasks.length} follow-up task${batch.tasks.length === 1 ? "" : "s"} ${batch.state === "pending" ? "queued" : batch.recipientAgentId && batch.recipientAgentId !== w.mainAgentId ? "sent to the recovery agent" : "sent to the main agent"}` };
-  if (w.runtimeBusy || obligations.some(o => o.status === "working")) return { status: "handling", label: "Agent handling", reason: obligations.find(o => o.status === "working")?.title ?? "The main agent is working" };
+  const live = liveWorkingTask(w);
+  if (w.runtimeBusy || live) return { status: "handling", label: "Agent handling", reason: live?.title ?? "The main agent is working" };
   if (w.prs.some(pr => pr.error || !pr.snapshot?.complete)) return { status: "waiting", label: "Waiting", reason: "PR status unavailable; refresh will retry" };
   const pending = obligations.find(o => !["done", "waived"].includes(o.status));
   if (pending) return { status: pending.status === "waiting" ? "waiting" : "active", label: pending.status === "waiting" ? "Waiting" : "Active", reason: pending.title };
