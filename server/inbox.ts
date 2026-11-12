@@ -13,8 +13,10 @@ import { configuredReviewers, reviewerLabel, withoutAuthor } from "../shared/rev
 import { classify, finishedReply, turnPrompt, type Sources } from "./inbox-classifier";
 import { STALE_BRIEF } from "../shared/errors";
 import type { Question } from "../shared/questions";
-import { briefOrigin, briefQuestionsEvent, briefStep, pickBrief, shouldReopen, validPick, type Brief, type BriefEvent, type BriefKind, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
-import { OTHER_LABEL, answerTitle, isOther } from "../shared/questions";
+import { briefAnswer, briefAnswers, briefOrigin, briefQuestionsEvent, briefStep, pickBrief, shouldReopen, validPick, type Brief, type BriefEvent, type BriefKind, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
+import { OTHER_LABEL, isOther } from "../shared/questions";
+// The brief answer texts live with the brief (shared, so the status invariants build the same message).
+export { briefAnswer, briefAnswers } from "../shared/brief";
 
 /**
  * How long lastSeen alone may wait in memory (store-writes-only-real-changes). It only marks, at the next start,
@@ -195,30 +197,6 @@ export function pauseSource(p: GuardPause): { note: string | null; resetsAt: str
   const at = typeof p.anchorResetsAt === "string" && Number.isFinite(Date.parse(p.anchorResetsAt)) ? new Date(p.anchorResetsAt) : null;
   return { note, resetsAt: at ? `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}` : null };
 }
-/** The developer's option click, in the existing answer format so Follow-up's answer card renders it. */
-export function briefAnswer(id: string, question: string, letter: string, label: string, words?: string): string {
-  const title = answerTitle(question).slice(0, 80);
-  if (isOther(letter)) return `Follow-up answer ${id} (${title}): ${OTHER_LABEL} — "${(words ?? "").trim()}"\nNone of your options: the developer's own answer is in the quotes.`;
-  return `Follow-up answer ${id} (${title}): ${letter} — ${label}\nContinue with this choice.`;
-}
-/**
- * Several decisions answered together (1.4.0): one message, a summary line the developer reads at a glance, then one
- * line per decision the agent can act on. Skipped decisions are named, so the agent knows they're still open.
- */
-export function briefAnswers(ask: string, decisions: { id: string; question: string; options: { letter: string; label: string }[] }[], picks: Record<string, string>, words: Record<string, string> = {}): string {
-  const clean = (t: string) => answerTitle(t).slice(0, 80);
-  const asked = decisions.filter(d => d.options.length);
-  // Something else stays on its decision's one line: the developer's words with line breaks folded to spaces.
-  const other = (d: typeof asked[number]) => isOther(picks[d.id]) && words[d.id]?.trim() ? `${OTHER_LABEL} — "${words[d.id].replace(/\s+/g, " ").trim()}"` : null;
-  const picked = (d: typeof asked[number]) => { const o = d.options.find(o => o.letter === picks[d.id]); return other(d) ?? (o ? `${o.letter} — ${o.label}` : null); };
-  const summary = asked.map((d, i) => { const p = picked(d); return `${i + 1}. ${other(d) ? OTHER_LABEL : p ?? "skipped"}`; }).join(" · ");
-  const lines = [`${ANSWERS_PREFIX} ${asked.map(d => d.id).join(", ")} (${clean(ask)}): ${summary}`];
-  for (const d of asked) { const p = picked(d); lines.push(p ? `${d.id} (${clean(d.question)}): ${p}` : `${d.id} (${clean(d.question)}): skipped — not answered yet; ask again if it still matters.`); }
-  const skipped = asked.filter(d => !picked(d));
-  lines.push(skipped.length ? `Continue with the answered ones; ${skipped.map(d => d.id).join(" and ")} ${skipped.length === 1 ? "is" : "are"} still open. The answers are already recorded.` : "Continue with these choices. The answers are already recorded.");
-  return lines.join("\n");
-}
-const ANSWERS_PREFIX = "Follow-up answer";
 const ORIGINS = 500;
 export type Root = { rootId: string; subagent: AgentInfo | null; delegated: boolean };
 const DAY = 24 * 3_600_000;
@@ -565,7 +543,8 @@ export class Inbox {
         const d = b.decisions.find(d => d.id === p.decisionId);
         if (!d || !validPick(d, p.choice, p.words)) throw new Error(isOther(p.choice) ? `${OTHER_LABEL} needs your answer in words.` : "Pick one of the options on the card.");
         picks[d.id] = p.choice;
-        if (isOther(p.choice)) words[d.id] = p.words!.trim();
+        // a-pick-note-reaches-the-agent: a note rides with a letter as well as with Something else.
+        if (p.words?.trim()) words[d.id] = p.words.trim();
       }
       if (!Object.keys(picks).length) throw new Error("Pick at least one option before sending.");
       text = briefAnswers(b.ask, b.decisions, picks, words);
@@ -575,7 +554,7 @@ export class Inbox {
       if (!d || !input.choice || !validPick(d, input.choice, input.words)) throw new Error(input.choice && isOther(input.choice) ? `${OTHER_LABEL} needs your answer in words.` : "Pick one of the options on the card.");
       const o = d.options.find(o => o.letter === input.choice);
       text = briefAnswer(d.id, d.question, input.choice, o?.label ?? "", input.words);
-      event = { type: "option", decisionId: d.id, choice: input.choice, ...(isOther(input.choice) ? { words: input.words!.trim() } : {}) };
+      event = { type: "option", decisionId: d.id, choice: input.choice, ...(input.words?.trim() ? { words: input.words.trim() } : {}) };
     }
     const answerId = input.answerId ?? randomUUID();
     const messageId = stableMessageId(`brief:${agentId}:${b.id}:${answerId}`);

@@ -48,9 +48,9 @@ test("send all: one message with every decision, which parses back per decision"
   const text = briefAnswers(b.ask, b.decisions, { Q9: "A", Q10: "B", Q11: "A" });
   assert.equal(text.split("\n")[0], "Follow-up answer Q9, Q10, Q11 (Clean up the stale workspaces?): 1. A — Yes, archive the 4 · 2. B — Keep as backlog · 3. A — Send each agent its read-only checks");
   assert.deepEqual(parseAnswersMessage(text)?.answers, [
-    { id: "Q9", question: "Archive the 4 merged ones?", choice: "A", label: "Yes, archive the 4" },
-    { id: "Q10", question: "What about #4?", choice: "B", label: "Keep as backlog" },
-    { id: "Q11", question: "And the 13 idle workspaces?", choice: "A", label: "Send each agent its read-only checks" },
+    { id: "Q9", question: "Archive the 4 merged ones?", choice: "A", label: "Yes, archive the 4", words: null },
+    { id: "Q10", question: "What about #4?", choice: "B", label: "Keep as backlog", words: null },
+    { id: "Q11", question: "And the 13 idle workspaces?", choice: "A", label: "Send each agent its read-only checks", words: null },
   ]);
   assert.equal(parseAnswersMessage(briefAnswers(b.ask, b.decisions, { Q10: "A" }))?.answers[0].choice, null, "a skipped decision parses as skipped");
   assert.equal(answerLine(text), "Answered: 1. A · Yes, archive the 4; 2. B · Keep as backlog; 3. A · Send each agent its read-only checks");

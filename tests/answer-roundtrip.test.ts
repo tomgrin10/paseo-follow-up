@@ -39,10 +39,10 @@ const decisions = [
   { id: "Q3", question: "Measure (first)?", options: [{ letter: "A", label: "Measure" }] },
   { id: "Q4", question: "Subject sort?", options: [{ letter: "A", label: "Disable" }, { letter: "B", label: "Keep" }] },
 ];
-const several: { name: string; text: string; want: { title: string; answers: { id: string; question: string; choice: string | null; label: string | null }[] } }[] = [
-  { name: "every decision", text: briefAnswers("Two calls", decisions, { Q3: "A", Q4: "B" }), want: { title: "Two calls", answers: [{ id: "Q3", question: "Measure first?", choice: "A", label: "Measure" }, { id: "Q4", question: "Subject sort?", choice: "B", label: "Keep" }] } },
-  { name: "one skipped", text: briefAnswers("Two calls", decisions, { Q4: "A" }), want: { title: "Two calls", answers: [{ id: "Q3", question: "Measure first?", choice: null, label: null }, { id: "Q4", question: "Subject sort?", choice: "A", label: "Disable" }] } },
-  { name: "a card with one decision", text: briefAnswers("One call (today)", decisions.slice(1), { Q4: "B" }), want: { title: "One call today", answers: [{ id: "Q4", question: "Subject sort?", choice: "B", label: "Keep" }] } },
+const several: { name: string; text: string; want: { title: string; answers: { id: string; question: string; choice: string | null; label: string | null; words: string | null }[] } }[] = [
+  { name: "every decision", text: briefAnswers("Two calls", decisions, { Q3: "A", Q4: "B" }), want: { title: "Two calls", answers: [{ id: "Q3", question: "Measure first?", choice: "A", label: "Measure", words: null }, { id: "Q4", question: "Subject sort?", choice: "B", label: "Keep", words: null }] } },
+  { name: "one skipped", text: briefAnswers("Two calls", decisions, { Q4: "A" }), want: { title: "Two calls", answers: [{ id: "Q3", question: "Measure first?", choice: null, label: null, words: null }, { id: "Q4", question: "Subject sort?", choice: "A", label: "Disable", words: null }] } },
+  { name: "a card with one decision", text: briefAnswers("One call (today)", decisions.slice(1), { Q4: "B" }), want: { title: "One call today", answers: [{ id: "Q4", question: "Subject sort?", choice: "B", label: "Keep", words: null }] } },
 ];
 
 for (const c of several) for (const tail of tails) test(`answers round trip: ${c.name} (${tail.name})`, () => {
