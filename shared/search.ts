@@ -164,7 +164,8 @@ export function excerpt(text: string, ranges: Range[], max = 80): { text: string
   if (text.length <= max || !ranges.length) return { text: text.length <= max ? text : `${text.slice(0, max - 1)}…`, ranges: ranges.filter(r => r[1] <= max - 1) };
   let start = Math.max(0, Math.min(ranges[0][0] - 20, text.length - max));
   // Never cut into an id ("#143", "APP-139"): from the start when the match already fits, else at a word boundary.
-  if (ranges[0][1] <= max - 2) start = 0;
+  // (A one-line row shows roughly the first 60% of `max` beside its badges, so "fits" means it ends inside that.)
+  if (ranges[0][1] <= Math.floor(max * 0.6)) start = 0;
   else if (start > 0 && /\S/.test(text[start - 1])) { const next = text.indexOf(" ", start); if (next >= 0 && next < ranges[0][0]) start = next + 1; }
   const end = Math.min(text.length, start + max);
   const pre = start > 0 ? "…" : "";
