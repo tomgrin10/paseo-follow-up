@@ -580,12 +580,14 @@ export default function contribute(server: PluginServerContext) {
     });
     void engine.nudge(result.id); return result;
   });
-  handle(rpc.obligationRpc, async ({ agentId, ...input }, { paseo }) => {
+  handle(rpc.obligationRpc, async ({ agentId, workingAgentId, ...input }, { paseo }) => {
     await requireReady();
     const workspaceId = await callerWorkspaceId(agentId, paseo);
+    // A named worker must be an agent Paseo knows (directory metadata; nothing is loaded).
+    if (workingAgentId && workingAgentId !== agentId && !(gateway.directory.cached(workingAgentId) ?? (await gateway.directory.read({ fresh: "agents" })).agents.find(r => r.agent.id === workingAgentId)?.agent)) throw new Error("workingAgentId isn't an agent Paseo knows. Pass the id of the agent doing the task, or leave it out to record yourself.");
     const result = await store.mutate(state => {
       const w = agentWorkspace(state, agentId, "write", workspaceId);
-      const obligation = updateObligation(w, input);
+      const obligation = updateObligation(w, { ...input, caller: agentId, workingAgentId });
       syncTaskQuestions(w, Date.now());
       changed(w); return { ...w, updatedObligationId: obligation.id };
     });
