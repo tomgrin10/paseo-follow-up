@@ -47,7 +47,7 @@ test("Set up Follow-up again leads General, the first Settings category and the 
   assert.doesNotMatch(general, /<Disclosure/);
   const updates = await readFile(resolve("client/updates.tsx"), "utf8");
   assert.match(updates, /"whats-new": \{ title: "What's new"/); assert.match(updates, /label="Release notes"[^>]*actionLabel="See all"/);
-  assert.match(settings, /category === "general" \? <GeneralCategory theme=\{theme\} compact=\{compact\} setup=\{setup\} \/>/);
+  assert.match(settings, /category === "general" \? <GeneralCategory theme=\{theme\} compact=\{compact\} setup=\{setup\} openReport=\{openReport\} \/>/);
   const client = await readFile(resolve("index.client.tsx"), "utf8");
   assert.match(client, /id: "follow-up-setup"/);
   assert.match(client, /resume \? Promise\.resolve\(\) : client\.rpc\(setOnboardingRpc, \{ action: "restart" \}\)/);

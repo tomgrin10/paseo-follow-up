@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { AgentActions, AGENT_TOOLS, PLANNED_TOOLS, READ_ONLY_TOOLS, type AgentActionDeps } from "../server/agent-actions";
+import { AgentActions, AGENT_TOOLS, PLANNED_TOOLS, READ_ONLY_TOOLS, SELF_PLANNED_TOOLS, type AgentActionDeps } from "../server/agent-actions";
 import { PARITY, RPC_TOOLS } from "../server/agent-parity";
 import { clientRpcs } from "./support/client-rpcs";
 import { actionTools, toolList } from "../server/mcp.mjs";
@@ -30,6 +30,8 @@ test("parity: the bridge, the server and the annotations agree on every action t
   assert.deepEqual(bridge, [...AGENT_TOOLS].sort(), "server/mcp.mjs actionTools and AGENT_TOOLS list the same tools");
   for (const t of actionTools as [string, string, string, Record<string, unknown>, string[]][]) {
     const planned = PLANNED_TOOLS.includes(t[0] as never);
+    // report_issue plans and confirms itself (server/report-issue/); its one-line description leaves the steps to its first reply.
+    if (SELF_PLANNED_TOOLS.includes(t[0] as never)) { assert.ok(!planned && "confirm" in t[3] && "planId" in t[3], `${t[0]}: runs its own dry run and confirm`); continue; }
     assert.equal(planned, "confirm" in t[3] && "planId" in t[3], `${t[0]}: planned tools take planId and confirm`);
     if (planned) assert.match(t[1], /planId/, `${t[0]}: says it runs with confirm and the planId`);
     if (READ_ONLY_TOOLS.includes(t[0] as never)) assert.ok(!planned, `${t[0]}: a read is never planned`);
