@@ -1,2 +1,0 @@
-- Answering a question card no longer says "Your answer wasn't sent" while the agent is still waking up. The card records your answer at once, shows Sending until the agent has it, and offers Send again if it couldn't be delivered.
-- Retrying an answer never sends it to the agent twice.

@@ -1,3 +1,4 @@
+import { STOP_WAIT_MS, settleWithin, type Deadline } from "./teardown";
 import { DEVELOPER, type Actor } from "../shared/actor";
 import { randomUUID } from "node:crypto";
 import { completionBlockers, completionCheck, completionGate, revokesDone, type CompletionGate, type Workspace, type State, type Batch } from "../shared/model";
@@ -97,13 +98,21 @@ export class Engine {
   }
   /** How repair tasks are worded per repository (review-fix command, GitHub restacks). Empty: the original wording. */
   wording: TaskWording = {};
-  tick(): Promise<void> {
+  private runningBackground = false;
+  /**
+   * One refresh at a time. The timer passes `background`, which lets PR polling back off for settled repositories;
+   * every other caller (the developer's refresh, an action, an agent tool) gets a fresh read. A fresh request that
+   * arrives during a background tick runs right after it instead of being folded into it. `workspaceId` narrows a
+   * fresh read to that workspace's PRs (opening its panel).
+   */
+  tick(o: { background?: boolean; workspaceId?: string } = {}): Promise<void> {
     if (this.stopped) return Promise.resolve();
-    if (this.running) return this.running;
-    this.running = this.run().catch(() => { this.error = "Follow-up refresh failed. Saved work is intact; refresh will retry."; }).finally(() => { this.running = null; });
+    if (this.running) return this.runningBackground && !o.background ? this.running.then(() => this.tick(o)) : this.running;
+    this.runningBackground = !!o.background;
+    this.running = this.run(o).catch(() => { this.error = "Follow-up refresh failed. Saved work is intact; refresh will retry."; }).finally(() => { this.running = null; });
     return this.running;
   }
-  private async run(): Promise<void> {
+  private async run(o: { background?: boolean; workspaceId?: string } = {}): Promise<void> {
     if (this.paused()) { this.skipped++; return; }
     const saved = await this.store.snapshot();
     if (this.stopped) return;
@@ -117,7 +126,10 @@ export class Engine {
     // Dormant workspaces stay listed but cost nothing: no PR or agent observation until they're active again.
     const active = (await this.store.snapshot()).workspaces.filter(w => w.enable_tracking && !w.archived && !w.dormant);
     if (!active.length) { this.error = null; return; }
-    const observations = await this.github.observe(active.flatMap(w => w.prs));
+    // Busy workspaces keep every-tick PR reads: their agent may push or answer review at any moment.
+    const keys = (ws: Workspace[]) => new Set(ws.flatMap(w => w.prs.map(p => p.key)));
+    const hot = keys(active.filter(w => w.runtimeBusy || w.backgroundBusy || !!w.declaration || w.batches.some(b => ["sending", "sent"].includes(b.state)) || w.prActions.some(a => a.state === "sending")));
+    const observations = await this.github.observe(active.flatMap(w => w.prs), o.background || o.workspaceId ? { background: true, hot, fresh: keys(active.filter(w => w.id === o.workspaceId)) } : {});
     for (const original of active) {
       if (this.stopped) return;
       const runtime = await this.gateway.observe(original).catch((): Runtime => ({ busy: false, reason: "Agent state unavailable; refresh will retry", archived: false }));
@@ -436,7 +448,10 @@ export class Engine {
     });
     return w;
   }
-  async stop(): Promise<void> { this.stopped = true; await this.running; await Promise.allSettled(this.recoveryOperations); }
+  /** How long stop waits on a pass or recovery in flight (worker-stop-never-waits-on-a-stuck-pass); tests shorten it. */
+  stopWaitMs = STOP_WAIT_MS;
+  /** Stops new passes and waits for the one in flight until the stop's deadline for the one in flight; a pass that outlives it can't write (Store.close). */
+  async stop(within?: Deadline): Promise<void> { this.stopped = true; await settleWithin(Promise.allSettled([this.running, ...this.recoveryOperations]), within ?? this.stopWaitMs); }
 }
 
 export type DoneResult = { workspace: Workspace; blockers: string[]; unconfirmed: string[]; alreadyDone: boolean; next: string };

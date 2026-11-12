@@ -9,22 +9,27 @@ import { parseChangelog, LEGACY_BASELINE, type InstallKind, type ReleaseNote } f
  * Follow-up's own install, as Paseo describes it: where it lives, which version, and from what source. Read from the
  * daemon's plugin list (one request per worker), never by guessing from this process's paths.
  */
-export type SelfInstall = { id?: string | null; path: string | null; version: string; installKind: InstallKind; status: string | null; error: string | null };
+/** `registry`: the Paseo plugin registry (url, owner/slug) a registry install came from; it updates only to that registry's reviewed pin. */
+export type SelfInstall = { id?: string | null; path: string | null; version: string; installKind: InstallKind; status: string | null; error: string | null; registry?: RegistryRef | null };
+export type RegistryRef = { url: string; id: string };
 export type PluginRow = { id: string; path: string; status?: string; error?: string; source?: string; installation?: { identity: { kind: string; registry?: unknown }; currentRevision?: string } };
 
 export function describeSelf(rows: readonly PluginRow[]): Omit<SelfInstall, "version"> & { version: string | null } {
   const row = ownRow(rows);
-  if (!row) return { id: null, path: null, version: null, installKind: "unknown", status: null, error: null };
+  if (!row) return { id: null, path: null, version: null, installKind: "unknown", status: null, error: null, registry: null };
   const identity = row.installation?.identity;
   const installKind: InstallKind = identity?.registry ? "registry" : identity?.kind === "npm" ? "npm" : identity?.kind === "git" || row.source === "git" ? "git" : identity?.kind === "directory" || row.source === "directory" ? "directory" : "unknown";
-  return { id: row.id, path: row.path, version: row.installation?.currentRevision ?? null, installKind, status: row.status ?? null, error: row.error ?? null };
+  const reg = identity?.registry as { url?: unknown; id?: unknown } | null | undefined;
+  const registry = reg && typeof reg.url === "string" && typeof reg.id === "string" ? { url: reg.url, id: reg.id } : null;
+  return { id: row.id, path: row.path, version: row.installation?.currentRevision ?? null, installKind, status: row.status ?? null, error: row.error ?? null, registry };
 }
 
-/** The installed package's version and its CHANGELOG.md, read from the plugin's own folder. */
-export async function readPackage(path: string): Promise<{ version: string | null; notes: ReleaseNote[] }> {
+/** The installed package's version, its display name (the manifest's `name`) and CHANGELOG.md, read from the plugin's own folder. */
+export async function readPackage(path: string): Promise<{ version: string | null; name: string | null; notes: ReleaseNote[] }> {
   const pkg = await readFile(join(path, "package.json"), "utf8").then(t => JSON.parse(t) as { version?: string }, () => null);
+  const manifest = await readFile(join(path, "paseo-plugin.json"), "utf8").then(t => JSON.parse(t) as { name?: unknown }, () => null);
   const notes = await readFile(join(path, "CHANGELOG.md"), "utf8").then(parseChangelog, () => []);
-  return { version: pkg?.version ?? null, notes };
+  return { version: pkg?.version ?? null, name: typeof manifest?.name === "string" && manifest.name.trim() ? manifest.name.trim() : null, notes };
 }
 
 /** versions.json: which version this host runs, the one before it, and the host-wide What's new record. */

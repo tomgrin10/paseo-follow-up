@@ -58,6 +58,7 @@ const r = { defaultBranchRef: { name: 'main', branchProtectionRule: null }, ...d
 for (const m of query.matchAll(/(p\\d+):pullRequest\\(number:(\\d+)\\)/g)) r[m[1]] = d.prs[m[2]] ?? null;
 console.log(JSON.stringify({ data: { repository: r } }));
 `;
+// The preview daemon reads over HTTPS from check-install's fakeGithub, which runs this same bin/gh per request.
 await writeFile(join(preview.root, 'bin/gh'), gh); await chmod(join(preview.root, 'bin/gh'), 0o700);
 const mutate = async change => { const d = JSON.parse(await readFile(fixture, 'utf8')); change(d); await writeFile(fixture, JSON.stringify(d)); };
 const logged = async () => (await readFile(writes, 'utf8')).trim().split('\n').filter(Boolean);

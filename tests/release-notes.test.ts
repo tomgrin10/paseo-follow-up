@@ -50,9 +50,11 @@ test("versions: concurrent writes are serialised, none lost", async () => {
 
 test("self: install kind and path come from Paseo's plugin list", () => {
   const rows = [{ id: "other", path: "/x" }, { id: "follow-up", path: "/p", status: "running", installation: { identity: { kind: "npm" }, currentRevision: "1.4.0-beta.21" } }];
-  assert.deepEqual(describeSelf(rows), { id: "follow-up", path: "/p", version: "1.4.0-beta.21", installKind: "npm", status: "running", error: null });
+  assert.deepEqual(describeSelf(rows), { id: "follow-up", path: "/p", version: "1.4.0-beta.21", installKind: "npm", status: "running", error: null, registry: null });
   assert.equal(describeSelf([{ id: "follow-up", path: "/p", source: "directory" }]).installKind, "directory");
   assert.equal(describeSelf([{ id: "follow-up", path: "/p", installation: { identity: { kind: "npm", registry: {} } } }]).installKind, "registry");
+  // A registry install carries where it came from: 2.0's move reinstalls from that registry (server/plugin-move.ts).
+  assert.deepEqual(describeSelf([{ id: "follow-up", path: "/p", installation: { identity: { kind: "npm", registry: { url: "https://plugins.paseo.sh", id: "tomgrin10/follow-up" } }, currentRevision: "1.0.1" } }]).registry, { url: "https://plugins.paseo.sh", id: "tomgrin10/follow-up" });
   assert.equal(describeSelf([]).installKind, "unknown");
 });
 
@@ -60,8 +62,11 @@ test("self: the package's version and notes are read from its own folder", async
   const d = await dir();
   await writeFile(join(d, "package.json"), JSON.stringify({ version: "1.4.0-beta.21" }));
   await writeFile(join(d, "CHANGELOG.md"), "# Release notes\n\n## 1.4.0-beta.21 (2026-11-10)\n\n- One.\n");
-  assert.deepEqual(await readPackage(d), { version: "1.4.0-beta.21", notes: [{ version: "1.4.0-beta.21", date: "2026-11-10", items: ["One."] }] });
-  assert.deepEqual(await readPackage(join(d, "missing")), { version: null, notes: [] });
+  assert.deepEqual(await readPackage(d), { version: "1.4.0-beta.21", name: null, notes: [{ version: "1.4.0-beta.21", date: "2026-11-10", items: ["One."] }] });
+  // The display name comes from the manifest, as the notes' titles use it.
+  await writeFile(join(d, "paseo-plugin.json"), JSON.stringify({ id: "follow-up", name: "Follow-up" }));
+  assert.equal((await readPackage(d)).name, "Follow-up");
+  assert.deepEqual(await readPackage(join(d, "missing")), { version: null, name: null, notes: [] });
 });
 
 const notes: ReleaseNote[] = [22, 21, 20].map(n => ({ version: `1.4.0-beta.${n}`, date: null, items: [`Note ${n}.`] }));
@@ -76,7 +81,7 @@ test("recent: Home's Updated line lasts three days after a real update", () => {
 
 test("demo override: only with FOLLOW_UP_UPDATES_DEMO=1, relative times become absolute", async () => {
   const d = await dir(); await mkdir(d, { recursive: true });
-  const view = { version: "1.4.0-beta.21", installKind: "npm" as const, previous: null, updatedAt: null, hostSeen: null, notes: [] };
+  const view = { version: "1.4.0-beta.21", name: "Follow-up", installKind: "npm" as const, previous: null, updatedAt: null, hostSeen: null, notes: [] };
   await writeFile(join(d, "release-notes-demo.json"), JSON.stringify({ previous: "1.4.0-beta.20", updatedAt: "-60000" }));
   assert.deepEqual(await demoOverride(d, "release-notes", releaseNotesViewSchema, view, {}), view);
   const out = await demoOverride(d, "release-notes", releaseNotesViewSchema, view, { FOLLOW_UP_UPDATES_DEMO: "1" });

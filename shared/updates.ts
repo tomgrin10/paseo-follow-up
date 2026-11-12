@@ -170,13 +170,24 @@ export const copyCommand = (version: string) => `paseo plugin update follow-up -
 export type { ReleaseNote } from "./changelog";
 
 /**
- * Home's version marker ("v1.4.0-beta.34"): the version the update check runs as (UpdatesView.version, from the
- * running plugin's own install), then a quiet word for the update state. The dot is the tab dot (needsLook): only
- * when something needs the developer, never for an update that's already on its way. Never a popup.
+ * Home's and the panel's version marker: only the version the update check runs as ("v1.4.0-beta.34",
+ * UpdatesView.version, from the running plugin's own install). No word or dot for the update state: Settings → General,
+ * which the marker opens, shows that with the release notes. The accessibility label still says it. Never a popup.
  */
-export function versionMark(view: Pick<UpdatesView, "version" | "installKind" | "mode" | "phase">): { version: string; suffix: string | null; dot: boolean; label: string } {
+export function versionMark(view: Pick<UpdatesView, "version" | "phase">): { version: string; label: string } {
   const k = view.phase.kind;
-  const suffix = k === "available" ? "update" : k === "waiting" || k === "installing" ? "updating" : k === "install-failed" || k === "rolled-back" || k === "untrusted" ? "check" : null;
-  const said = { update: "update available", updating: "update on its way", check: "the last update needs a look" } as const;
-  return { version: `v${view.version}`, suffix, dot: needsLook(view), label: `Follow-up version ${view.version}${suffix ? `, ${said[suffix as keyof typeof said]}` : ""}` };
+  const state = k === "available" ? "update available" : k === "waiting" || k === "installing" ? "update on its way" : k === "install-failed" || k === "rolled-back" || k === "untrusted" ? "the last update needs a look" : null;
+  return { version: `v${view.version}`, label: `Follow-up version ${view.version}${state ? `, ${state}` : ""}` };
+}
+
+/**
+ * A phase that names a version no longer pending: that version is at or below the running one (it was installed,
+ * superseded, or installed from outside by `paseo plugin`). `updated` is the one phase about the running version
+ * itself, and a live installer's own `installing`/`settling` may name it until it finishes. The updater resolves a
+ * stale phase to current/updated on every view (invariant `update-phase-never-outlives-its-version`).
+ */
+export function staleUpdatePhase(phase: UpdatePhase, running: string, installerAlive: boolean): boolean {
+  if (!("version" in phase) || phase.kind === "updated") return false;
+  if (installerAlive && (phase.kind === "installing" || phase.kind === "settling")) return false;
+  return compareVersions(phase.version, running) <= 0;
 }

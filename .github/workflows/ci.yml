@@ -13,12 +13,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # tests/changelog.test.ts checks that the notes' image URLs name commits in this branch's history.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
       - run: npm ci
       # npm run verify includes the scale check, which drives a real (isolated) Paseo daemon.
-      - run: npm install -g @getpaseo/cli@0.15.2
+      # The same CLIs and checks as the publish workflow: a PR passes exactly the gate a release must pass
+      # (tests/publish-gate.test.ts). 2026-11-11: test:install ran only at publish, and v2.0.0-rc.3 failed there.
+      - name: Install CLIs for isolated integration checks
+        run: npm install --global @getpaseo/cli@0.15.2 @anthropic-ai/claude-code@2.1.300 @openai/codex@0.162.1
       - run: npm run verify
+      - run: npm run test:install
       - run: npm pack --dry-run

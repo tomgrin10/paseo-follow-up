@@ -12,6 +12,8 @@ import { trackedGroup, type HomeModel } from "./home";
 import { freshPriorities, type Priority } from "./priorities";
 import { agentCard, automaticHold, batchView, holdSuperseded } from "./status";
 import { followUpObligations } from "./follow-up";
+import { cadence, movingReason, OBSERVATION_FRESH_MS, POLL_IDLE_MS, RUNNING_POLL_MS, TICK_MS } from "./poll";
+import { staleUpdatePhase, type UpdatePhase } from "./updates";
 
 /**
  * Status invariants: what must hold for any workspace, whatever path changed it. Pure, no IO, and never throwing:
@@ -25,6 +27,16 @@ const inFlight = (w: Workspace) => w.batches.some(b => ["sending", "sent"].inclu
 const lines = (w: Workspace, now: number) => [liveLine(w, now).text, agentCard(w, now)?.line ?? "", batchView(w, now)?.line ?? "", ...needsYou(w, now).flatMap(i => [i.title, "blocker" in i ? i.blocker ?? "" : ""])];
 
 export const INVARIANTS: Invariant[] = [
+  {
+    id: "poll-backoff-never-hides-a-moving-pr",
+    why: "2026-11-11 cpu-load §5: PR polling backs off for settled repositories. A PR that can still change without bumping what the last read saw (merge queue, merge when ready, unknown mergeability, an error) is read every tick, one with running checks every 30 s, and a backed-off PR is never older than the completion gate allows (shared/poll.ts).",
+    check(w, now) {
+      if (POLL_IDLE_MS + TICK_MS >= OBSERVATION_FRESH_MS) return `idle poll ${POLL_IDLE_MS} ms + tick ${TICK_MS} ms reaches the ${OBSERVATION_FRESH_MS} ms freshness gate`;
+      if (RUNNING_POLL_MS > POLL_IDLE_MS) return `running checks read every ${RUNNING_POLL_MS} ms, slower than settled PRs`;
+      const backedOff = w.prs.find(p => movingReason(p.snapshot, p.error) && cadence(p.snapshot, p.error, null, now) === "idle");
+      return backedOff ? `${backedOff.key} (${movingReason(backedOff.snapshot, backedOff.error)}) would back off` : null;
+    },
+  },
   {
     id: "no-duplicate-open-question",
     why: "Needs-you never shows two cards for the same open question: every path that creates a question links to a matching open one instead (shared/questions.ts findOpenMatch).",
@@ -276,4 +288,15 @@ export function holdViolations(w: Pick<Workspace, "id" | "hold" | "interruption"
  */
 export function actorViolations(rows: readonly { path: string; actor: Actor; recorded: string | null | undefined }[]): { id: string; detail: string }[] {
   return rows.filter(r => r.actor.kind === "agent" && (!r.recorded || r.recorded === "developer")).map(r => ({ id: "only-developer-acts-as-developer", detail: `${r.path} by agent ${r.actor.kind === "agent" ? r.actor.agentId : ""} recorded as ${r.recorded ?? "nobody"}` }));
+}
+
+/**
+ * `update-phase-never-outlives-its-version`: Settings → General, Home's marker and `updates_status` never show a phase
+ * tied to a version (failed, rolled back, untrusted, waiting, installing, available) once that version is at or below
+ * the one running, however it got installed (Follow-up's installer, `paseo plugin` from outside, the 2.0 move). Only a
+ * live installer's own phases (installing, settling) may name the running version. The updater applies the same rule
+ * (`staleUpdatePhase` in shared/updates.ts) on every view; this checks its output.
+ */
+export function updatePhaseViolations(phase: UpdatePhase, running: string, installerAlive: boolean): { id: string; detail: string }[] {
+  return staleUpdatePhase(phase, running, installerAlive) ? [{ id: "update-phase-never-outlives-its-version", detail: `${phase.kind} for ${"version" in phase ? phase.version : "?"} while ${running} runs` }] : [];
 }

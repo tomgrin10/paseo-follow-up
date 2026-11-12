@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readSharedJson } from "./shared-file";
 import { join } from "node:path";
 import { z } from "zod";
 
@@ -17,11 +17,9 @@ const pending = (p: GuardPause) => ["pausing", "waiting", "resuming", "attention
 export class SessionGuard {
   constructor(private directory: string, private now = Date.now) {}
   async read(): Promise<GuardPause[] | null> {
-    try { return stateSchema.parse(JSON.parse(await readFile(join(this.directory, "state.json"), "utf8"))).pauses; }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw new Error("Session Guard state is unavailable; follow-up will wait and retry.");
-    }
+    // Read again only when the file changed (observe-reads-shared-files-once-per-tick); the pauses are shared, read-only.
+    try { return (await readSharedJson(join(this.directory, "state.json"), raw => stateSchema.parse(raw)))?.pauses ?? null; }
+    catch { throw new Error("Session Guard state is unavailable; follow-up will wait and retry."); }
   }
   waiting(pauses: GuardPause[] | null, scope: GuardScope): GuardPause | undefined {
     return pauses?.find(p => !scope.excludedAgentIds?.includes(p.agentId) &&

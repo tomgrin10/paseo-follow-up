@@ -1,4 +1,6 @@
+import { stopWorker } from "./server/teardown";
 import { actorBy, actorOf, type Actor } from "./shared/actor";
+import { TICK_MS } from "./shared/poll";
 import { PluginMove } from "./server/plugin-move";
 import { moveData, dataDirs, writeLegacyHeartbeat, type DataMove } from "./server/data-move";
 import { isRecovery, withRuntimePrelude, invokeSelf, PLUGIN_ID } from "./shared/legacy";
@@ -89,7 +91,7 @@ import { watchdogSource } from "./server/update-watchdog-source";
 import { busyAgents, type Busy } from "./shared/update-policy";
 import { VersionsStore, demoOverride, describeSelf, readPackage, type SelfInstall } from "./server/release-notes";
 import { updatesViewSchema, type UpdatesView } from "./shared/updates";
-import { releaseNotesViewSchema, type ReleaseNote, type ReleaseNotesView } from "./shared/changelog";
+import { PLUGIN_NAME, releaseNotesViewSchema, type ReleaseNote, type ReleaseNotesView } from "./shared/changelog";
 import { BRIEF_KIND, BRIEF_VERSION, prState, prStates, validateNeedsYou, type Brief, type NeedsYouRecord } from "./shared/brief";
 
 /** Agent calls that only the main agent makes: one of these from a successor means the handover is in use. */
@@ -407,10 +409,10 @@ export default function contribute(server: PluginServerContext) {
   const loop = async () => {
     await ready;
     if (stopped || loadError) return;
-    await engine.tick();
+    await engine.tick({ background: true });
     // Startup is done once the first tick is: release what it grew (see server/memory.ts).
     if (!compacted) { compacted = true; compactHeap(); }
-    if (!stopped) timer = setTimeout(() => void loop(), 15_000);
+    if (!stopped) timer = setTimeout(() => void loop(), TICK_MS);
   };
   void loop();
   void (async () => { await ready; if (stopped || loadError) return; await inbox.start().catch(error => { inboxError = error instanceof Error ? error.message : String(error); }); void inboxLoop(); })();
@@ -686,7 +688,7 @@ export default function contribute(server: PluginServerContext) {
     await requireReady();
     return store.mutate(state => controlWorkspace(state, input, Date.now(), clientTimeZone));
   });
-  handle(rpc.refreshRpc, async () => { await requireReady(); void engine.tick(); return { ok: true }; });
+  handle(rpc.refreshRpc, async ({ workspaceId }) => { await requireReady(); void engine.tick({ workspaceId }); return { ok: true }; });
   handle(rpc.refineTasksRpc, async ({ workspaceId, tasks }) => {
     await requireReady();
     const result = await store.mutate(state => {
@@ -833,21 +835,21 @@ export default function contribute(server: PluginServerContext) {
   // What's new and Settings → General. Follow-up's own install comes from Paseo's plugin list, read once per worker.
   const versions = new VersionsStore(directory);
   const updatesStore = new UpdatesStore(directory);
-  let self: Promise<SelfInstall & { notes: ReleaseNote[] }> | null = null;
+  let self: Promise<SelfInstall & { name: string | null; notes: ReleaseNote[] }> | null = null;
   const selfInstall = () => self ??= withDaemon(async c => describeSelf(await c.listPlugins?.() ?? [])).then(async row => {
-    const pkg = row.path ? await readPackage(row.path) : { version: null, notes: [] };
+    const pkg = row.path ? await readPackage(row.path) : { version: null, name: null, notes: [] };
     const version = pkg.version ?? row.version;
     if (!version) throw new Error("Paseo's plugin list doesn't show Follow-up's version yet.");
     // Fresh or existing comes from setup's own record, decided once before anything else wrote state.
     const existing = await onboarding.init().then(f => f.install === "existing", () => true);
     await versions.started(version, existing).catch(() => undefined);
-    return { ...row, version, notes: pkg.notes };
+    return { ...row, version, name: pkg.name, notes: pkg.notes };
   }).catch(error => { self = null; throw error; });
   // Record the version at start (in the background), so "Updated to X 2h ago" counts from the reload, not first view.
   void ready.then(() => selfInstall()).catch(() => undefined);
   const releaseNotesView = async (): Promise<ReleaseNotesView> => {
     const me = await selfInstall(); const file = await versions.read();
-    return demoOverride(directory, "release-notes", releaseNotesViewSchema, { version: me.version, installKind: me.installKind, previous: file.previous ?? null, updatedAt: file.startedAt ?? null, hostSeen: file.hostSeen ?? null, notes: me.notes });
+    return demoOverride(directory, "release-notes", releaseNotesViewSchema, { version: me.version, name: me.name ?? PLUGIN_NAME, installKind: me.installKind, previous: file.previous ?? null, updatedAt: file.startedAt ?? null, hostSeen: file.hostSeen ?? null, notes: me.notes });
   };
   handle(rpc.releaseNotesRpc, async () => releaseNotesView());
   handle(rpc.whatsNewSeenRpc, async ({ version }) => { await versions.seen(version); return releaseNotesView(); });
@@ -1324,7 +1326,9 @@ export default function contribute(server: PluginServerContext) {
   ];
   return async () => {
     stopped = true; wait.close(); updater.stop(); pluginMove.stop(); governor.stop(); if (timer) clearTimeout(timer); if (aboutTimer) clearTimeout(aboutTimer); if (linkedTimer) clearTimeout(linkedTimer); aiJobs.stop(); ranker = null; if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); rpcTiming.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
-    await ready; if (hooksStarted) await agentHooks.stop().catch(() => {});
-    await actions.close(); await closeConnections(); await engine.stop(); await ready; await store.flush().catch(() => undefined); await unlock?.();
+    // One deadline for every wait (worker-stop-never-waits-on-a-stuck-pass, server/teardown.ts): start-up and the work
+    // in flight may be stuck on a daemon or CLI that never answers. Work that ends inside the deadline is saved; what
+    // outlives it can't write, because the store closes before the lock is released.
+    await stopWorker({ ready, hooks: hooksStarted ? () => agentHooks.stop() : undefined, actions, closeConnections, engine, store, inbox: inbox.store, unlock });
   };
 }

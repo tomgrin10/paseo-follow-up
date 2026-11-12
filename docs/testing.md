@@ -5,7 +5,7 @@
 | Command | What it runs |
 | --- | --- |
 | `npm run verify` | `typecheck`, `check:notes` (release-note fragments), `npm test` (every `tests/*.test.ts` through tsx), `button-visibility.test.mjs`, `test:scale`, `test:native`, `test:trust`. PR CI (`.github/workflows/ci.yml`) runs it with Paseo 0.15.2. |
-| `npm run test:install` | `scripts/check-install.mjs` (packs the plugin and installs it into an isolated daemon with fixture providers: activation, recovery, ownership, hooks, tasks, Session Guard coordination, project defaults), then `scripts/check-wait.mjs` ([wait.md](wait.md)). PR CI doesn't run it. The publish workflow runs it with Paseo 0.14 and no model credentials. |
+| `npm run test:install` | `scripts/check-install.mjs` (packs the plugin and installs it into an isolated daemon with fixture providers: activation, recovery, ownership, hooks, tasks, Session Guard coordination, project defaults), then `scripts/check-wait.mjs` ([wait.md](wait.md)). PR CI doesn't run it. The publish workflow runs it with Paseo 0.15.2 and no model credentials. |
 | `npm pack --dry-run` | Checks the package contents: runtime entries, generated sources, `server/wait-runner.sh`, screenshots, and no state, logs or credentials. |
 
 Write the failing test first. Bugs get a root cause, a failing test, a fix for the whole class, and an invariant,
@@ -45,7 +45,8 @@ not a patch for one instance.
 | `scripts/check-install.mjs` | `test:install`, `preview` | The packed install. `--keep` (`npm run preview`) leaves the daemon running for screenshots, prints "Isolated browser app: http://127.0.0.1:<port>", and writes `.preview-isolated.json`. |
 | `scripts/check-wait.mjs` | `test:wait`, `test:wait-live` | Wait with real Haiku agents. Skips without credentials or Paseo 0.15; `test:wait-live` fails instead. |
 | `scripts/check-move.mjs` | `test:move` | 2.0's move from 1.x on a real daemon: the published 1.x beta auto-updates from a fake npm registry to a broken 2.0 (rolled back), then a good one; the move to the new plugin id fails probation once (rolled back, data intact), then succeeds on Try again. Same `follow_*` tool names; Paseo's plugin list shows the new id only. Screenshots (`--shots <dir>`): Home before and after, Settings → General after the rollback and after the move (desktop, 390 px, dark). Passes on Paseo 0.15.4 and 0.16 (`HARNESS_PASEO=0.16`). About 15 minutes. |
-| `scripts/check-github-mode.mjs` | `test:github-mode` | Plain-GitHub mode on the running preview, with a fake `gh`. |
+| `scripts/check-move.mjs --registry` | `test:move:registry` | The same move for an install from Paseo's plugin list: a fake plugin registry (`PASEO_PLUGIN_REGISTRY`) pins the live pin (1.0.1) as `tomgrin10/follow-up`, which installs under the old id. The pin moves to 2.0, `paseo plugin update` installs it under the old id, and the move reinstalls from the same registry under the new id with data and plugin settings. About 8 minutes. |
+| `scripts/check-github-mode.mjs` | `test:github-mode` | Plain-GitHub mode on the running preview, with a fake `gh` (reads reach it through check-install's `fakeGithub`). |
 
 Every script in the table above starts its own isolated daemon, except `test:github-mode`. The scripts below don't:
 they need a running `npm run preview` and read `.preview-isolated.json`. Some drive a browser with Send to Paseo
@@ -84,6 +85,14 @@ plays a scripted turn (timeline items, Follow-up RPCs, a permission) for a given
   root, refuses any of them outside it, and strips the session's `PASEO_*`, `CODEX_*`, Follow-up and Claude session
   variables. A hand-built `{ ...process.env, … }` once missed `CLAUDE_CONFIG_DIR`, and its daemon installed hooks into
   a real account. `tests/harness-env.test.ts` fails on a check script that builds its env by hand.
+- **Fake GitHub over HTTP, not only `gh`.** Follow-up reads GitHub over in-process HTTPS (`server/github-api.ts`); a
+  fake `gh` on PATH only answers writes. A script whose daemon needs PR reads starts `fakeGithub({ dir, gh })` from
+  `scripts/fake-github.mjs` and passes its `env` and `strip` to `harnessEnv`. The server answers each request with the
+  script's fixture `gh` (GH_REPO set), and only for the owner's own token, resolved through an account map and a fake
+  `gh auth token --user` like the real host. `harnessEnv` points `FOLLOW_UP_GITHUB_API` at a closed port by default,
+  so a daemon never reads the real api.github.com. 2026-11-11: check-install's fake `gh` was bypassed after reads
+  moved to HTTPS and the v2.0.0-rc.3 publish failed; `tests/harness-env.test.ts` fails on a script that fakes `gh` for
+  a daemon without this.
 - **Take a slot.** Every script that starts a Paseo daemon or a browser calls `await harness()` from
   `scripts/harness.mjs` before its heavy work, and starts daemons with `spawnDaemon`. `tests/harness.test.ts` fails
   when a script skips either. `harness()`:
@@ -123,7 +132,8 @@ harness slot:
 PLAYWRIGHT_CORE=<playwright-core dir> CHROMIUM=<chromium binary> ~/paseo-harness/tools/harness-slot npm run shots -- --out <dir>
 ```
 
-- **What it does.** Starts one isolated daemon (the packed plugin, the fixture provider, the web UI, a fake `gh`),
+- **What it does.** Starts one isolated daemon (the packed plugin, the fixture provider, the web UI, a fake `gh`, and a
+  fake `mcpproxy` that confirms a few Linear keys so Linked items render),
   seeds synthetic workspaces through Follow-up's own RPCs and scripted fixture turns, shoots with headless Playwright,
   and stops the daemon on success and on failure. It needs the Paseo CLI 0.15.x.
 - **Deterministic.** Fixed seed data and fixed clocks: the daemon and worker run with a shifted `Date` (a preload),
@@ -132,12 +142,13 @@ PLAYWRIGHT_CORE=<playwright-core dir> CHROMIUM=<chromium binary> ~/paseo-harness
   sleeps.
 - **Synthetic only.** `example/app`, made-up people (Dana, Ravi), Linear-style keys (`APP-142`, `WEB-17`). Never real
   repos, names, channels or anything from a real Paseo home. This is a public repo.
-- **Shots** (PNG, into `--out`, default `docs/screenshots/`): `setup`, `home`, `panel`,
-  `questions`, `pill`, `pr-sheet`, `phone`, `whats-new`. `context-menu` and `linked-items` are stubs for now and are
-  skipped with a log line. `--only a,b` shoots a subset.
+- **Shots** (`follow-up-<shot>.png`, into `--out`, default `docs/screenshots/`): `setup`, `home`, `panel`,
+  `questions`, `pill`, `pr-sheet`, `phone`, `whats-new`, `context-menu` (Home's row menu, right-clicked) and
+  `linked-items` (the Linked list open over Home's detail). `--only a,b` shoots a subset. Home is reached with
+  `scripts/ui-home.mjs`, which fails the shot instead of shooting the wrong page.
 - **Theme.** Dark for desktop shots, light for the phone shot; `--scheme dark|light` overrides both.
-- **What's new** is shot after a reinstall as `2.0.0-rc.0` over `1.4.0-beta.32`, with a `## 2.0.0` section;
-  `--whats-new-changelog <file>` uses that CHANGELOG.md instead of the built-in one.
+- **What's new** is shot after a reinstall as `2.0.0-rc.0` over `1.4.0-beta.32`. It shows the repo's CHANGELOG.md
+  `## 2.0.0` section when there is one, else a built-in stand-in; `--whats-new-changelog <file>` uses that file instead.
 - **Size** (aim under ~300 KB each). With `pngquant` (lossy palette) or `oxipng` on PATH, shots are taken at
   deviceScaleFactor 2 and optimised. Without either, desktop shots use deviceScaleFactor 1.25 and Playwright's own PNG
   (the phone shot stays at 2). `--scale <n>` sets the desktop factor.

@@ -13,7 +13,7 @@ import { moveData, writeLegacyHeartbeat, MOVED_MARKER, dataDirs } from "../serve
 import { WaitJobs } from "../server/wait-jobs";
 import { moveView, moveLine } from "../shared/plugin-move";
 import { PluginMove } from "../server/plugin-move";
-import { runMove } from "../server/update-watchdog.mjs";
+import { runMove, registrySources } from "../server/update-watchdog.mjs";
 import { readEvents, historyOf } from "../server/updater";
 
 /**
@@ -193,6 +193,8 @@ test("move view: one quiet line per phase, and a failed move isn't retried by it
   assert.equal(view({}).phase, "waiting");
   assert.equal(view({ moving: true }).phase, "moving");
   assert.equal(view({ installKind: "git" }).phase, "manual");
+  // Paseo's plugin list installs from its registry (1.0.1, 0.3.1): that moves by itself too, never "remove and reinstall".
+  assert.equal(view({ installKind: "registry" }).phase, "waiting");
   assert.match(moveLine(view({ installKind: "directory" }))!, /paseo plugin remove/);
   assert.equal(view({ events: [{ at: 1, event: "move-rolled-back", reason: "It didn't start within two minutes." }] }).phase, "rolled-back");
   assert.equal(view({ events: [{ at: 1, event: "move-rolled-back" }], retryAsked: true }).phase, "waiting");
@@ -219,7 +221,7 @@ test("the move starts only under the old id, from npm, when quiet and no install
   assert.equal(spawned.length, 0, "never while an installer is alive (a 1.x one may be on probation)");
   alive = false;
   await move.evaluate();
-  assert.deepEqual(spawned, [{ oldId: OLD, newId: legacy.PLUGIN_ID, version: "2.0.0" }]);
+  assert.deepEqual(spawned, [{ oldId: OLD, newId: legacy.PLUGIN_ID, version: "2.0.0", registry: null }]);
   await writeFile(join(dir, "updates.jsonl"), JSON.stringify({ at: now, from: "2.0.0", to: "2.0.0", event: "move-rolled-back", reason: "It failed to load." }) + "\n");
   now += 200_000;
   await move.evaluate();
@@ -234,14 +236,21 @@ test("the move starts only under the old id, from npm, when quiet and no install
   assert.equal((await move.view()).phase, "manual");
 });
 
-function fakeDaemon(opts: { failInstall?: boolean; newStatus?: string } = {}) {
+type Registry = { url: string; id: string };
+function fakeDaemon(opts: { failInstall?: boolean; newStatus?: string; registry?: Registry; installedFrom?: Registry | null; pin?: string; failSources?: readonly string[] } = {}) {
   const calls: string[] = [];
-  const rows = new Map<string, { id: string; status: string; installation: { currentRevision: string } }>([[OLD, { id: OLD, status: "running", installation: { currentRevision: "2.0.0" } }]]);
+  type Row = { id: string; status: string; installation: { currentRevision: string; identity?: { kind: string; registry?: Registry | null } } };
+  const rows = new Map<string, Row>([[OLD, { id: OLD, status: "running", installation: { currentRevision: "2.0.0", identity: { kind: "npm", registry: opts.registry ?? null } } }]]);
   const client = {
     disablePlugin: async (id: string) => { calls.push(`disable ${id}`); rows.get(id)!.status = "disabled"; },
     enablePlugin: async (id: string) => { calls.push(`enable ${id}`); rows.get(id)!.status = "running"; },
     removePlugin: async (id: string) => { calls.push(`remove ${id}`); rows.delete(id); },
-    installPluginSource: async ({ source }: { source: string }) => { calls.push(`install ${source}`); if (opts.failInstall) throw new Error("npm said no"); rows.set(legacy.PLUGIN_ID, { id: legacy.PLUGIN_ID, status: opts.newStatus ?? "running", installation: { currentRevision: "2.0.0" } }); },
+    installPluginSource: async ({ source }: { source: string }) => {
+      calls.push(`install ${source}`);
+      if (opts.failInstall || opts.failSources?.includes(source)) throw new Error("npm said no");
+      const registry = opts.installedFrom !== undefined ? opts.installedFrom : opts.registry ?? null;
+      rows.set(legacy.PLUGIN_ID, { id: legacy.PLUGIN_ID, status: opts.newStatus ?? "running", installation: { currentRevision: registry ? opts.pin ?? "2.0.0" : "2.0.0", identity: { kind: "npm", registry } } });
+    },
     listPlugins: async () => [...rows.values()],
     close: async () => undefined,
   };
@@ -252,18 +261,30 @@ for (const [name, opts, outcome, order] of [
   ["moves: settings, disable old, install new, probation, remove old", {}, "moved", ["disable OLD", "install npm:paseo-follow-up@2.0.0", "remove OLD"]],
   ["install fails: the old id runs again", { failInstall: true }, "move-rolled-back", ["disable OLD", "install npm:paseo-follow-up@2.0.0", "remove NEW", "enable OLD"]],
   ["the new id fails probation: removed, and the old id runs again", { newStatus: "failed" }, "move-rolled-back", ["disable OLD", "install npm:paseo-follow-up@2.0.0", "remove NEW", "enable OLD"]],
+  // Paseo's plugin list: reinstall from the same registry (its reviewed pin), and watch whatever version the pin is.
+  ["registry install: reinstalls from its registry", { registry: { url: "https://plugins.paseo.sh", id: "tomgrin10/follow-up" } }, "moved", ["disable OLD", "install tomgrin10/follow-up", "remove OLD"]],
+  ["registry install: the pin moved on, probation watches the pinned version", { registry: { url: "https://plugins.paseo.sh", id: "tomgrin10/follow-up" }, pin: "2.0.1" }, "moved", ["disable OLD", "install tomgrin10/follow-up", "remove OLD"]],
+  ["registry install: the bare id fails, host/owner/slug works", { registry: { url: "https://plugins.example.com", id: "tomgrin10/follow-up" }, failSources: ["tomgrin10/follow-up"] }, "moved", ["disable OLD", "install tomgrin10/follow-up", "install plugins.example.com/tomgrin10/follow-up", "remove OLD"]],
+  ["registry install: installed from another registry, so it rolls back", { registry: { url: "https://plugins.example.com", id: "tomgrin10/follow-up" }, installedFrom: { url: "https://plugins.paseo.sh", id: "tomgrin10/follow-up" } }, "move-rolled-back", ["disable OLD", "install tomgrin10/follow-up", "remove NEW", "enable OLD"]],
 ] as const) test(`runMove ${name}`, async t => {
   const dir = await mkdtemp(join(tmpdir(), "follow-legacy-run-")); t.after(() => rm(dir, { recursive: true, force: true }));
   const settings = join(dir, "plugin-settings"); await mkdir(join(settings, OLD), { recursive: true });
   await writeFile(join(settings, OLD, "display.json"), "{\"x\":1}");
   const { client, calls } = fakeDaemon(opts);
+  const { registry = null, pin = "2.0.0" } = opts as { registry?: Registry; pin?: string };
   let now = 0;
-  const result = await runMove({ kind: "move", directory: dir, oldId: OLD, newId: legacy.PLUGIN_ID, packageName: "paseo-follow-up", version: "2.0.0", settingsRoot: settings, clientEntry: "", daemon: {}, timing: { probationMs: 30, loadTimeoutMs: 1_000, watchEveryMs: 10 } },
-    { connect: async () => client, now: () => now, sleep: async ms => { now += ms; if (now >= 10) await writeFile(join(dir, "heartbeat.json"), JSON.stringify({ version: "2.0.0", at: now, error: null })); } });
+  const result = await runMove({ kind: "move", directory: dir, oldId: OLD, newId: legacy.PLUGIN_ID, packageName: "paseo-follow-up", version: "2.0.0", registry, settingsRoot: settings, clientEntry: "", daemon: {}, timing: { probationMs: 30, loadTimeoutMs: 1_000, watchEveryMs: 10 } },
+    { connect: async () => client, now: () => now, sleep: async ms => { now += ms; if (now >= 10) await writeFile(join(dir, "heartbeat.json"), JSON.stringify({ version: pin, at: now, error: null })); } });
   assert.equal(result, outcome);
   assert.deepEqual(calls, order.map(c => c.replace("OLD", OLD).replace("NEW", legacy.PLUGIN_ID)));
   assert.equal(JSON.parse(await readFile(join(settings, legacy.PLUGIN_ID, "display.json"), "utf8")).x, 1, "settings copied before the old id is removed");
   const events = (await readFile(join(dir, "updates.jsonl"), "utf8")).trim().split("\n").map(l => JSON.parse(l).event);
   assert.equal(events[0], "moving"); assert.equal(events.at(-1), outcome);
   assert.equal((await stat(join(settings, OLD))).isDirectory(), true, "the old settings stay (Paseo removes them with the old id)");
+});
+
+test("registry move sources: the bare owner/slug first, then host/owner/slug for an HTTPS registry only", () => {
+  assert.deepEqual(registrySources({ url: "https://plugins.paseo.sh", id: "tomgrin10/follow-up" }), ["tomgrin10/follow-up", "plugins.paseo.sh/tomgrin10/follow-up"]);
+  assert.deepEqual(registrySources({ url: "http://127.0.0.1:4000", id: "tomgrin10/follow-up" }), ["tomgrin10/follow-up"]);
+  assert.deepEqual(registrySources({ url: "not a url", id: "tomgrin10/follow-up" }), ["tomgrin10/follow-up"]);
 });

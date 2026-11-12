@@ -1,143 +1,148 @@
 # Release notes
 
-What changed in each version of Follow-up, newest first. Follow-up shows these in "What's new" after an update, and in full from Home's last line.
+What changed in each version of Follow-up, newest first. Follow-up shows the curated part of a major release in "What's new" after the update, and every version's notes from Home's version line.
 
-## 1.4.0-beta.29 (2026-11-10)
+## 2.0.0 (2026-11-11)
 
-- Small fixes and improvements.
+Follow-up keeps track of every workspace your coding agents work in, until the work is merged and done. It shows you in one place which agents are waiting on you and why, sends failed checks and review comments back to the right agent by itself, and lets you answer an agent's question without opening its chat.
 
-## 1.4.0-beta.28 (2026-11-10)
+![Follow-up Home: every workspace in one list, grouped by what it needs from you, with the selected workspace's question on the right](https://raw.githubusercontent.com/tomgrin10/paseo-follow-up/d00dcb7da27c6ce7676dbf4c41050d45daf8c3cc/docs/screenshots/follow-up-notes-home.png#1120x680)
 
-- "What's this about?" is now the Summary: one short sentence under the workspace's name saying what it's for. Rewrite it from the panel's Spec, agent and recovery section.
-- The list of linked issues and threads under it is gone for now.
-- Settings has a new General section first, with Set up Follow-up again and the installed version's release notes.
+### One list of what needs you
 
-## 1.4.0-beta.27 (2026-11-10)
+Home lists every workspace, grouped by what it needs from you. When an agent finishes, asks something, hits an error or waits for a permission, it moves to the top, under Needs you, and stays there until you mark it done or reply. You act on it right there, without switching to its chat.
 
-- Follow-up's routine bookkeeping now sits inside Paseo's grouped tool calls instead of breaking them into loose rows.
-- Only the moments that matter stand out in the chat: a question asked and the Workspace done card, which now shows once even when the agent declares done twice.
+### A panel on every workspace
 
-## 1.4.0-beta.26 (2026-11-10)
+The Follow-up tab beside a workspace's chat shows how far its PRs are, what needs you and what's left to fix, with a bar for the PR stack, what the agent is doing now and the question it's waiting on.
 
-- A finished workspace no longer stalls short of Done when Follow-up can't check what production serves. Done goes through with a "Deploy not confirmed by Follow-up" note.
-- A deploy Follow-up has seen stays counted until a rollback. If the agent declares Done while a rollout is still going, Follow-up records Done when it lands.
-- The chat shows "Workspace done" only when Follow-up accepted it, and declaring Done twice adds no second card.
+![The Follow-up panel on a workspace: 1 of 3 PRs merged, 3 need you, 1 to fix, a stack bar, Auto-send, and the agent's question with three lettered options, one recommended](https://raw.githubusercontent.com/tomgrin10/paseo-follow-up/d00dcb7da27c6ce7676dbf4c41050d45daf8c3cc/docs/screenshots/follow-up-notes-panel.png#320x910)
 
-## 1.4.0-beta.25 (2026-11-10)
+### Answer questions from anywhere
 
-- A question an agent asks again no longer shows up twice in Needs you. Agents get the open question back, and existing duplicates close on update.
+When an agent needs a decision, it asks in a card with lettered options, its recommendation and room for your own answer. Answer it on Home, in the panel, in the bar above the agent's message box, or on your phone. The answer goes straight into the agent's chat.
 
-## 1.4.0-beta.24 (2026-11-10)
+### Fixes go back to the agent
 
-- Claude agents now keep working while a long command runs, checking on it at least once a minute instead of ending their turn to wait. Turn it off in Settings → Agents → Wait for background jobs.
-- This replaces the separate Wait plugin. While that plugin is installed, Follow-up's own Wait stays off and Settings says so.
+When a PR's checks fail, it hits a merge conflict or a reviewer leaves comments, Follow-up sends them to the agent that made the PR, in one message once it's idle. You're only asked for what's yours to decide, like merging. Works with plain GitHub; Graphite is optional.
 
-## 1.4.0-beta.23 (2026-11-10)
+### Context at a glance
 
-- After an update, "What's new" shows the notes for every version since you last looked, once on each device.
-- Home's last line shows your Follow-up version, with the full release notes one tap away.
+Each workspace gets a one-line description of what it's for, and a list of the Linear issues, Slack threads and docs it's about. Ask about any workspace from Home's search box, and an agent that knows all of them passes your question to the one doing the work.
 
-## 1.4.0-beta.22 (2026-11-10)
+### Fits your setup
 
-- An agent can take over as a workspace's main agent when the main one is gone or idle, or when you ask it to. It can hand the role on too, within clear limits.
-- When the main agent changes, the workspace panel shows who took over and why for a day, with Undo, and Home marks the workspace.
+- Its small background jobs, like writing those descriptions, run on any model provider Paseo has.
+- Agents can do anything you can click in Follow-up, after showing you a plan.
+- It updates itself when nothing is busy, and rolls back if an update fails.
 
-## 1.4.0-beta.21 (2026-11-10)
+---
 
-- Agents can do everything you can click in Follow-up: read and change its settings, setup, priorities and the Overseer. Changes show a dry run first.
+Follow-up borrows ideas from [Progress](https://github.com/stevecastaneda/paseo-plugins/tree/main/progress) by Steve Castaneda and [Better Paseo](https://github.com/RoundRedDot/better-paseo) by RoundRedDot. Thank you to both.
 
-## 1.4.0-beta.20 (2026-11-10)
+<details><summary>Full changelog since 1.0.1</summary>
 
-- Follow-up is reworked for phones: Home, the decision card, the composer pill and Settings all fit a phone screen, with real tap targets.
-- On the phone, only Home's search row stays pinned; the status chips and the setup offer scroll with the list.
-- Home on the phone says when nothing is followed yet, and an open question now outranks "Finished".
+### Home and Needs you
 
-## 1.4.0-beta.19 (2026-11-10)
+- Home: every workspace in one list, grouped by what it needs from you, with a detail pane to answer, merge or sign off without leaving it.
+- Needs you: an agent lands there when its turn ends, it asks something, it errors or it waits on a permission, and stays until you sign it off or write to it, from any device.
+- A pill above the composer leads with the one thing that needs you in that chat, and the sidebar's Follow-up item counts the agents that need you.
+- Home's search matches workspace names, branches, PR numbers and titles, and linked issue keys. Sort orders each group by priority, recency, age or name.
+- Right-click a workspace on Home, or long-press it on a phone, for quick actions: Later, Sign off, answer its question, send repairs, copy the branch or PR link, and more.
+- Later puts a workspace off until a time you pick, shows when it comes back, and has Undo and Bring back now. An agent's "tonight" or "tomorrow" means your timezone.
+- Repairs queued for an idle agent show in Needs you with a Send button, and a workspace with everything in but no Done shows Ready to finish.
+- An action card has a Done button that tells the agent you did it. Done shows as in progress while you can still undo it.
+- Ctrl+Z (Cmd+Z on a Mac) undoes the last action while its Undo message shows, on any keyboard layout.
+- You can select and copy text in cards, the panel, Home, sheets and messages.
+- Follow-up's version shows at the top of Home and the panel. Tap it for update status and the release notes.
 
-- Settings → Following → Shipping PRs sets how each repository ships PRs, and setup asks "How do you ship PRs?".
+### Questions and answers
 
-## 1.4.0-beta.18 (2026-11-09)
+- When an agent needs you, a card at the end of its chat says the ask in one line, with decisions as buttons and only the context you need.
+- Every question with options ends with Something else, for your own answer. Questions with several decisions let you pick every answer, then send them in one message.
+- Your answer is recorded at once. The card shows Sending until the agent has it, offers Send again if it couldn't be delivered, and never sends it twice.
+- Press Cmd+Enter (Ctrl+Enter) to send an answer or save a dialog, even while typing a note.
+- Links in questions, cards, tasks and agent replies are clickable, including PR references like owner/repo#123.
+- An answered question stays on its card, folded to what was asked and what you picked, and a card answered somewhere else or replaced by a newer one says so.
+- Question and option text is shown whole; long context opens in full with Show more.
 
-- Graphite is optional: repositories that use plain GitHub PRs work fully, chosen per repository.
+### Repairs and PRs
+
+- Follow every workspace and Send repairs automatically are on by default, also after upgrading from 1.x. On a fresh install, auto-send waits until you finish or skip setup. Turn Follow every workspace off in Settings → Following.
+- Works with plain GitHub; Graphite is optional, chosen per repository. Settings → Following → Shipping PRs sets how each repository ships PRs.
 - On plain GitHub, the PR sheet follows GitHub's own review and check verdict.
+- Reviewers per repository, plus a default list, for Add reviewers.
+- A deploy Follow-up has seen stays counted until a rollback, and Done goes through with a note when Follow-up can't check what production serves.
+- Saving a spec link, a task's schedule or a reviewer pick closes at once and confirms with a short message.
+- An agent can mark a PR it merges itself, so Follow-up stops asking you to review or merge it. Work the agent is waiting on reads as Waiting, with what it waits on.
+- Follow-up checks GitHub with far fewer requests and no helper processes, and checks a workspace's PRs as soon as you open it.
 
-## 1.4.0-beta.17 (2026-11-09)
+### Agents and the main agent
 
-- The workspace panel names the main agent, and swapping that role has an explicit Undo.
-- A main agent that closes briefly keeps its role instead of handing it to another agent. Make main agent hands it back.
+- Agents can do everything you can click in Follow-up, including its settings, setup and priorities. Changes show a plan first.
+- An agent can take over as a workspace's main agent when the main one is gone or idle, or when you ask. The panel names the main agent and shows a change for a day, with Undo.
+- When an agent answers or acts for you, Follow-up records that agent, not you, and the card says whose answer it was.
+- Trust bypass: pick agents whose permission prompts Follow-up approves for you, with secrets masked in what it approved.
+- Claude agents keep working while a long command runs, instead of ending their turn to wait. This replaces the separate Wait plugin. Jobs stop after 3 hours unless the agent asks for longer.
+- On Paseo 0.16, agents leave long commands to Paseo, an agent with a command still running counts as running, and other plugins' background helpers are left alone.
+- Follow-up's routine tool calls stay inside Paseo's grouped rows; only a question asked and Workspace done stand out in the chat.
 
-## 1.4.0-beta.16 (2026-11-09)
+### The Overseer and AI priority
 
+- The Overseer: one agent you talk to about all your workspaces. Ask it from Home's search box or ⌘K, and it passes your ask to the agent that owns the work. What it forwards starts "From the developer via Overseer:".
+- AI priority orders Home from your Linear issues, Slack DMs and mentions and GitHub review requests, with a one-line reason for each workspace. Re-rank now answers at once, and rankings stay steady when nothing changed.
+
+### Summary and Linked items
+
+- Summary: one short sentence under each workspace's name saying what it's for. Rewrite it from the panel.
+- Linked items: the Linear issues, Slack threads, docs and artifacts each workspace is about, next to its Spec with a count for each. Open the list to see who linked each one and why, add one by pasting a link or key, or remove one with Undo.
+- Agents link what they start from, and Follow-up picks links up from your messages and the agent's lookups. A Linear key counts only once Linear confirms it.
+
+### Helper agents and providers
+
+- Settings → Agents sets the provider, model and effort for Summaries, the Overseer, recovery and AI priority, and recommends a model from what you have, with Use recommended.
+- Summaries and AI priority run on any provider Paseo has. Other providers run each job as a short hidden agent.
+
+### Setup, Settings and updates
+
+- Follow-up moves itself to its new plugin id, follow-up, once while nothing is busy, keeping your workspaces and settings. It needs Paseo 0.15 or later.
+- Getting started: a short first-run setup that checks GitHub and the helper agents, shows what Follow-up does on its own, and sets your defaults.
+- Settings has five categories: General, Following, Reviewers, Agents and Inbox & display. Tabs on desktop, a list you tap into on a phone.
+- Follow-up updates itself: Install automatically, Tell me or Off, on the Stable or Beta channel. It installs only when no agent is busy and goes back to the old version if the new one fails.
+- What's new pops up only after a major update, once per device.
+- With reduced motion on, setup's steps show at once.
+- Installed from Paseo's plugin list? Follow-up moves to its new plugin id by itself there too, keeping your workspaces and settings.
+- What's new shows screenshots of what it describes.
+- Release notes and What's new open wider on large screens, so their screenshots are easier to read.
+- The release notes always show their scrollbar when there is more to read, and their titles name Follow-up.
+
+### Phone and performance
+
+- Reworked for phones: Home, the cards, the composer pill and Settings fit a phone screen, with real tap targets.
+- Far less load on Paseo: one shared list of agents and workspaces instead of asking for them every few seconds, and no polling while the app is hidden.
+- On Paseo 0.15 and later, agents get Follow-up's tools through Paseo itself, so no extra process starts per agent. The old per-session registration is removed, with a backup of each file it touched.
+- After an update, agents in the middle of a turn keep using Follow-up's tools instead of hitting "tool not found".
+
+### Fixes
+
+- Home, the panel and the header agree on what Follow-up is doing, and "Follow-up is fixing" shows only while repairs are really with the agent.
+- A question an agent asks again no longer shows up twice.
+- A workspace whose agent is still working no longer shows in Needs you.
+- A card in the chat closes only when you answer it, not on another agent's message, a Follow-up prompt or a schedule.
+- A card shows a PR's checks and reviews only when it's about that PR.
+- Recent steps label other agents' messages and Follow-up's own, and never report Follow-up's bookkeeping as the agent's work.
+- In a workspace with several agents, each row shows only its own reason and error.
+- An agent that failed a turn and kept running no longer shows Error, and Follow-up resumes on its own unless you stopped it.
 - Review requests are found reliably, and an account that fails to load no longer reads as "no review requests".
+- Trusted agents no longer wait on permission prompts that were already showing when Follow-up started.
+- An answer card shows your whole answer and note.
+- If your Claude or Codex settings file is a link, Follow-up updates the file it points to and keeps the link.
+- Error messages are as short as Paseo's own, with the full reason where Open takes you.
+- A workspace no longer shows Needs you for "Add reviewers" in a repository nobody is set up to review, and the flag goes away on its own once the PR merges or gets reviewers.
+- A failed update no longer shows as failed once a newer version of Follow-up is running.
 
-## 1.4.0-beta.15 (2026-11-09)
+### More
 
-- On a fresh install, auto-send waits until you finish or skip setup.
+- Tapping a screenshot in the notes shows it larger inside Paseo instead of opening a browser tab.
 
-## 1.4.0-beta.14 (2026-11-09)
-
-- Getting started: a short first-run setup that checks GitHub, shows what Follow-up does on its own, and sets your defaults.
-
-## 1.4.0-beta.13 (2026-11-09)
-
-- Trusted agents no longer wait on permission prompts that were already showing when Follow-up started or updated.
-
-## 1.4.0-beta.12 (2026-11-09)
-
-- AI priority gives every ranked workspace a reason, and Re-rank now answers at once while ranking runs in the background.
-- Rankings are steadier: a workspace whose inputs didn't change moves only a little between runs.
-- Changing the ranker's model or effort in Settings re-ranks instead of keeping the old order.
-
-## 1.4.0-beta.11 (2026-11-09)
-
-- Settings is split into four categories: Following, Reviewers, Agents, and Inbox & display. Tabs on desktop, a list you tap into on the phone.
-- Reviewers, Projects and Workspaces fold away, with a one-line summary when folded.
-- Trust bypass moved to Following → Permissions, and the phone reopens the category you used last.
-
-## 1.4.0-beta.10 (2026-11-09)
-
-- Questions with several decisions let you pick every answer first, then send them all in one message.
-- An answered question stays on the card, folded to what was asked and what you picked.
-
-## 1.4.0-beta.9 (2026-11-09)
-
-- Trust bypass: pick agents whose tool permission prompts Follow-up approves for you.
-- Secrets are masked in what it approved, and the list says "None approved yet" until it has approved something.
-
-## 1.4.0-beta.8 (2026-11-09)
-
-- What's this about? sits at the top of Home's detail pane on the phone too.
-
-## 1.4.0-beta.7 (2026-11-09)
-
-- AI priority: Home's Priority sort can rank workspaces from your Linear issues, Slack DMs and mentions, GitHub review requests and the weekly plan, each with a one-line reason.
-
-## 1.4.0-beta.6 (2026-11-09)
-
-- Follow-up puts far less load on Paseo: it keeps one shared list of agents and workspaces instead of asking for them every few seconds.
-
-## 1.4.0-beta.5 (2026-11-09)
-
-- After Follow-up updates, agents in the middle of a turn can keep using its tools instead of hitting "tool not found".
-
-## 1.4.0-beta.4 (2026-11-09)
-
-- Settings → Agents: choose the provider, model and effort for What's this about?, the Overseer, recovery agents and the priority ranker.
-
-## 1.4.0-beta.3 (2026-11-09)
-
-- Ask the Overseer from Home's search box or from ⌘K.
-
-## 1.4.0-beta.2 (2026-11-09)
-
-- On Paseo 0.15 and later, agents get Follow-up's tools through Paseo itself, so no extra process starts for each agent.
-- Older versions registered Follow-up for every Claude and Codex session on the machine. That registration is removed, with a backup of each file it touched.
-
-## 1.4.0-beta.1 (2026-11-09)
-
-- What's this about?: a short AI overview of each workspace, with its linked Linear issues, PRs, Slack threads and docs.
-- Reviewers per repository, plus a default list, for Add reviewer.
-
-## 1.4.0-beta.0 (2026-11-09)
-
-- The Overseer: one agent you talk to about all your workspaces. It passes your asks to the agent that owns them.
+</details>

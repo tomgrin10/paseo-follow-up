@@ -333,19 +333,21 @@ test("sources: a Linear reply mcpproxy cut off keeps its whole issues, pages of 
 
 test("sources: review requests come from every logged-in gh account, each with its own token", async () => {
   assert.deepEqual(ghAccounts("✓ Logged in to github.com account tomgrin10 (keyring)\n  - Active account: true\n✓ Logged in to github.com account herotomg (keyring)"), ["tomgrin10", "herotomg"]);
-  const searches: (string | undefined)[] = [];
-  const run = async (_c: string, args: string[], _t: number, env?: Record<string, string>) => {
-    if (args[0] === "auth" && args[1] === "status") return "Logged in to github.com account personal\nLogged in to github.com account work";
-    if (args[0] === "auth" && args[1] === "token") return `token-${args.at(-1)}\n`;
-    searches.push(env?.GH_TOKEN);
-    return JSON.stringify(env?.GH_TOKEN === "token-work" ? [{ number: 7, title: "Review me", url: "https://github.com/w/r/pull/7", repository: { nameWithOwner: "w/r" }, author: { login: "uri" } }] : []);
-  };
-  const reviews = await liveRankSources(new AiJobs(), { run, slackUser: null }).github();
-  assert.deepEqual(searches, ["token-personal", "token-work"]);
+  const searches: (string | null)[] = [];
+  const github = (limitedAccount?: string) => ({
+    accounts: async () => ["personal", "work"],
+    restAs: async (account: string | null, path: string) => {
+      assert.match(path, /^search\/issues\?q=.*review-requested%3A%40me/);
+      searches.push(account); if (account === limitedAccount) throw new Error("API rate limit already exceeded");
+      return account === "work" ? { items: [{ number: 7, title: "Review me", html_url: "https://github.com/w/r/pull/7", repository_url: "https://api.github.com/repos/w/r", user: { login: "uri" } }] } : { items: [] };
+    },
+  });
+  const run = async () => { throw new Error("no process for GitHub reads"); };
+  const reviews = await liveRankSources(new AiJobs(), { run, github: github(), slackUser: null }).github();
+  assert.deepEqual(searches, ["personal", "work"]);
   assert.deepEqual(reviews.map(r => `${r.repo}#${r.number}`), ["w/r#7"], "the work account's request is found");
   // The work account is rate-limited: nothing found plus a failed account reads as failed, not as "no requests".
-  const limited = async (c: string, args: string[], t: number, env?: Record<string, string>) => { if (env?.GH_TOKEN === "token-work") throw new Error("API rate limit already exceeded"); return run(c, args, t, env); };
-  await assert.rejects(liveRankSources(new AiJobs(), { run: limited, slackUser: null }).github(), /couldn't search/);
+  await assert.rejects(liveRankSources(new AiJobs(), { run, github: github("work"), slackUser: null }).github(), /couldn't search/);
 });
 
 test("sources: review requests read from REST search (items with html_url and repository_url)", () => {

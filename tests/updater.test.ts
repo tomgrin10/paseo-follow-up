@@ -11,6 +11,7 @@ import type { UpdatesFile } from "../server/updates";
 import type { Busy } from "../shared/update-policy";
 import type { Provenance } from "../server/update-provenance";
 import { announcesUpdate } from "../shared/changelog";
+import { updatePhaseViolations } from "../shared/status-invariants";
 
 const INTEGRITY = "sha512-kM/c8bZm2HxcQQMwaiSMYCyjq+HTquHiLEbam/EyTedfZ9H+os1VcSNtQecqKxvKA/LyO+rOzm8ShRSOSy/QVQ==";
 const HEX = "90cfdcf1b666d87c5c4103306a248c602ca3abe1d3aae1e22c46da9bf1324de75f67d1fea2cd5571236d41e72a2b1bca03f2f23beacece6f1285148e4b2fd055";
@@ -42,7 +43,7 @@ async function rig(o: { file?: UpdatesFile; installed?: string; tags?: Record<st
   });
   return {
     updater, directory, requests, spawned, provenanceAsked, get file() { return file; },
-    setBusy(b: Busy[]) { busy = b; }, setAlive(a: boolean) { alive = a; },
+    setBusy(b: Busy[]) { busy = b; }, setAlive(a: boolean) { alive = a; }, get alive() { return alive; },
     advance(ms: number) { now += ms; for (const t of [...timers].sort((a, b) => a.at - b.at)) if (t.at <= now) { timers.splice(timers.indexOf(t), 1); t.fn(); } },
     get now() { return now; },
     log: (event: Record<string, unknown>) => appendFile(join(directory, "updates.jsonl"), `${JSON.stringify({ at: now, from: "1.4.0-beta.23", to: "1.4.0-beta.24", ...event })}\n`),
@@ -309,4 +310,46 @@ test("status copy: a reason without a full stop never runs into the next sentenc
   assert.match(failed.detail, /install it\. Nothing changed\./);
   const settling = statusCopy({ ...view, phase: { kind: "settling", version: "1.4.0-beta.25", from: "1.4.0-beta.24", at: 0, until: 60_000 } }, 0);
   assert.match(settling.detail, /If it fails within the next minute,/);
+});
+
+// Invariant (update-phase-never-outlives-its-version): a phase tied to a version (failed, rolled back, untrusted,
+// waiting, installing, available) only stands while that version is newer than what runs, or its installer is alive.
+test("reported 2026-11-11: the 2.0 move's events, then an install of rc.2 from outside, never read as rc.1 failing", async () => {
+  const r = await rig({ installed: "2.0.0-rc.2", file: { mode: "notify" }, tags: { latest: "1.0.1", beta: "2.0.0-rc.2" }, versions: ["1.0.1", "2.0.0-rc.1", "2.0.0-rc.2"] });
+  for (const event of ["moving", "move-installed", "moved"]) await r.log({ from: "2.0.0-rc.1", to: "2.0.0-rc.1", event });
+  await r.updater.check("manual");
+  const view = await r.updater.view();
+  assert.deepEqual(view.phase, { kind: "current" });
+  assert.deepEqual(updatePhaseViolations(view.phase, view.version, false), []);
+});
+
+test("an installer that died mid-way, then a newer version installed from outside: current, not failed", async () => {
+  const r = await rig({ installed: "1.4.0-beta.25", file: { mode: "notify" }, tags: { latest: "1.0.1", beta: "1.4.0-beta.25" }, versions: ["1.4.0-beta.24", "1.4.0-beta.25"] });
+  await r.log({ event: "installing" });
+  assert.deepEqual((await r.updater.view()).phase, { kind: "current" });
+  await r.log({ from: "1.4.0-beta.23", to: "1.4.0-beta.24", event: "applied" });
+  assert.deepEqual((await r.updater.view()).phase, { kind: "current" }, "same after apply");
+});
+
+test("grid (update-phase-never-outlives-its-version): no version-tied phase for a version at or below what runs", async () => {
+  const runs = ["1.4.0-beta.23", "1.4.0-beta.24", "1.4.0-beta.25"];
+  const logs: Record<string, unknown>[][] = [[], [{ event: "installing" }], [{ event: "installing" }, { event: "applied" }],
+    [{ event: "installing" }, { event: "failed", reason: "x" }], [{ event: "installing" }, { event: "applied" }, { event: "rolled-back", reason: "x" }],
+    [{ event: "installing" }, { event: "applied" }, { event: "updated" }], [{ from: "1.4.0-beta.23", to: "1.4.0-beta.23", event: "moved" }]];
+  for (const installed of runs) for (const events of logs) for (const mode of ["auto", "notify"] as const) for (const untrusted of [false, true]) {
+    const r = await rig({ installed, file: { mode, ready: { version: "1.4.0-beta.24", since: 0, manual: true, lastBusyAt: null } }, trust: v => untrusted ? ({ ok: false, version: v, reason: "x", retry: false }) as Provenance : { ok: true, version: v, integrity: INTEGRITY, tarball: `https://r/${v}.tgz`, workflow: "w@t", publishedAt: null } as Provenance });
+    for (const e of events) await r.log(e);
+    await r.updater.check("manual");
+    const view = await r.updater.view();
+    assert.deepEqual(updatePhaseViolations(view.phase, view.version, r.alive), [], `${installed} ${JSON.stringify(events)} ${mode} ${untrusted}: ${JSON.stringify(view.phase)}`);
+  }
+});
+
+test("updatePhaseViolations: flags a version-tied phase at or below the running version; a live installer's own phases stand", () => {
+  assert.deepEqual(updatePhaseViolations({ kind: "install-failed", version: "2.0.0-rc.1", reason: "x", at: 0 }, "2.0.0-rc.2", false).map(v => v.id), ["update-phase-never-outlives-its-version"]);
+  assert.deepEqual(updatePhaseViolations({ kind: "install-failed", version: "2.0.0-rc.3", reason: "x", at: 0 }, "2.0.0-rc.2", false), []);
+  assert.deepEqual(updatePhaseViolations({ kind: "installing", version: "2.0.0-rc.2", since: 0 }, "2.0.0-rc.2", true), []);
+  assert.deepEqual(updatePhaseViolations({ kind: "settling", version: "2.0.0-rc.2", from: "2.0.0-rc.1", at: 0, until: 1 }, "2.0.0-rc.2", true), []);
+  assert.equal(updatePhaseViolations({ kind: "installing", version: "2.0.0-rc.2", since: 0 }, "2.0.0-rc.2", false).length, 1);
+  assert.deepEqual(updatePhaseViolations({ kind: "updated", version: "2.0.0-rc.2", from: "2.0.0-rc.1", at: 0 }, "2.0.0-rc.2", false), []);
 });

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ScrollView, View } from "react-native";
 import { Text } from "./text";
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
@@ -371,6 +371,8 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), refetchInterval: BROWSER_POLL_MS });
   const invalidated = () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); };
   const auto = useMutation({ mutationFn: (next: boolean) => control({ workspaceId: w.id, enable_auto_sends: next }), onSuccess: (_, next) => { toast.show(next ? "Auto-send on for this workspace" : "Auto-send off · repairs wait for your click"); invalidated(); }, onError: e => toast.error(errorText(e)) });
+  // Opening a workspace reads its PRs now: background polling backs off for settled repositories (server/github.ts).
+  useEffect(() => { const t = setTimeout(invalidated, 1500); void refresh({ workspaceId: w.id }).catch(() => undefined); return () => clearTimeout(t); }, [w.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const update = useMutation({ mutationFn: () => refresh({ workspaceId: w.id }), onSuccess: () => setTimeout(invalidated, 1200), onError: e => toast.error(errorText(e)) });
   const openAgent = navigation ? (agentId: string) => navigation.openAgent({ agentId }) : undefined;
   const done = summary(w, now).status === "done";

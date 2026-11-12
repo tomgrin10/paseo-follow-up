@@ -1,1 +1,0 @@
-- In a workspace with more than one agent, each agent's row now shows only its own reason. A finished agent no longer shows the error of another agent in the same workspace.

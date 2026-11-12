@@ -1,10 +1,8 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { State } from "../shared/model";
-import { ghEnvironment } from "./github";
+import { githubApi, type GithubApi } from "./github-api";
 import { cleanList, emptyReviewerConfig, isTeam, repoKey, reviewerConfigSchema, setReviewerConfig, type ReviewerConfig, type ReviewerEntry } from "../shared/reviewers";
 
 /**
@@ -95,7 +93,6 @@ export function seedFromHistory(state: State): Record<string, ReviewerEntry[]> {
 }
 
 export type Suggestion = { login: string; name: string | null; kind: "user" | "team" };
-type Run = (args: string[], repo: string) => Promise<string>;
 
 /**
  * Autocomplete for the picker: the repository's collaborators and teams, read on demand only (never polled),
@@ -103,7 +100,8 @@ type Run = (args: string[], repo: string) => Promise<string>;
  */
 export class ReviewerSuggestions {
   private cache = new Map<string, { until: number; value: Promise<{ suggestions: Suggestion[]; error: string | null }> }>();
-  constructor(private run: Run = async (args, repo) => (await promisify(execFile)("gh", args, { env: ghEnvironment(repo), timeout: 15_000, maxBuffer: 2 * 1024 * 1024 })).stdout, private now = Date.now) {}
+  /** Reads in process through `api` (worker-reads-github-in-process). */
+  constructor(private api: Pick<GithubApi, "rest"> = githubApi(), private now = Date.now) {}
   suggest(repo: string): Promise<{ suggestions: Suggestion[]; error: string | null }> {
     const key = repoKey(repo);
     const hit = this.cache.get(key);
@@ -117,7 +115,7 @@ export class ReviewerSuggestions {
   }
   private async load(repo: string) {
     const owner = repo.split("/")[0];
-    const read = async (path: string) => JSON.parse(await this.run(["api", path], repo)) as unknown;
+    const read = (path: string) => this.api.rest(repo, path);
     const [people, teams] = await Promise.allSettled([read(`repos/${repo}/collaborators?per_page=100`), read(`repos/${repo}/teams?per_page=100`)]);
     const suggestions: Suggestion[] = [];
     if (people.status === "fulfilled" && Array.isArray(people.value))

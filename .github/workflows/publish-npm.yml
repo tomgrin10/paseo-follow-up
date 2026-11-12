@@ -73,7 +73,7 @@ jobs:
 
       - run: npm ci
       - name: Install CLIs for isolated integration checks
-        run: npm install --global @getpaseo/cli@0.14.0 @anthropic-ai/claude-code@2.1.300 @openai/codex@0.162.1
+        run: npm install --global @getpaseo/cli@0.15.2 @anthropic-ai/claude-code@2.1.300 @openai/codex@0.162.1
       - run: npm run verify
       - run: npm run test:install
       - run: npm pack --dry-run
@@ -155,7 +155,7 @@ jobs:
           cat > /tmp/release-notes.md <<'NOTES'
           Track workspace pull requests, queue follow-up work, and verify completion in Paseo.
 
-          Install with: INSTALL_LINE on Paseo 0.14.0 or newer.
+          Install with: INSTALL_LINE on Paseo 0.15 or newer.
 
           The installation ID remains `follow-up` to preserve saved work and settings.
           This release passed plugin verification, isolated packed installation checks,

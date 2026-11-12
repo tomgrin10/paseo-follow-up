@@ -92,6 +92,8 @@ Nothing polls while the app is hidden.
 | `client/onboarding.tsx` | Getting started. |
 | `client/updates.tsx` | Settings → General's Updates sections, Home's update notice, setup's Updates step ([updates.md](updates.md)). |
 | `client/release-notes.tsx` | What's new and the notes list. Home's version marker is `VersionMark` in `client/updates.tsx`. |
+| `client/image-viewer.tsx` | The image viewer a notes screenshot opens in (Paseo's SDK has none for plugins): dimmed, fitted to the window, never past the image's CSS width; closes on a click, Esc or the X. Its sizing is `fitImage` in `shared/image-fit.ts`. |
+| `shared/notes-scrollbar.ts` | The notes' scrollbar style: always visible while they overflow (macOS hides overlay scrollbars otherwise), scoped to the notes' scroll container. |
 | `client/kit.tsx`, `client/motion.tsx`, `shared/motion.ts`, `client/theme.ts`, `client/keys.ts` | The type scale, motion (and the first-render reduced-motion read), theme helpers and query keys. |
 | `client/rich-text.tsx`, `shared/links.ts` | The one renderer for agent-written text, and the linkifier behind it. |
 | `client/text.tsx`, `client/text-rules.ts` | Follow-up's own `Text` and `Pressable`: text is selectable on web and desktop, except a control's label (a Pressable with a button, link, tab or option role). Surfaces never import react-native's. |
