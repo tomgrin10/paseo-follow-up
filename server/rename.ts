@@ -112,7 +112,7 @@ export class RenameService {
       if (check.ok) return check.name;
       rejected = { name: r.value.name, reason: check.reason };
     }
-    throw new Error("Couldn't suggest a usable name. Try again, or type one.");
+    throw new Error(`Couldn't suggest a usable name: ${rejected?.reason ?? "no reply"}`);
   }
 
   /** Renames (the dialog's Rename, ai_rename's confirm) or undoes the newest rename. Recorded for 24 h either way. */

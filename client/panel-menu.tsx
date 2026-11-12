@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Platform, View } from "react-native";
 import type { Workspace } from "../shared/model";
 import type { Workstream } from "../shared/home";
@@ -11,9 +11,11 @@ import type { HomeSources } from "./home-data";
  * The panel header's More button: the same row menu Home and the sidebar show for this workspace (Rename with AI
  * among it), so there is one menu everywhere. A popover under the button on desktop, the sheet on phones.
  */
-export function PanelMore({ w, sources, theme, compact, openAgent, openQuestion }: {
+export function PanelMore({ w, sources, theme, compact, openAgent, openQuestion, showMenu }: {
   w: Workspace; sources: HomeSources; theme: Theme; compact: boolean;
   openAgent?: (agentId: string) => void; openQuestion: (questionId: string) => void;
+  /** Where the open menu draws: the panel's root, after its content (a menu inside the header is painted over). */
+  showMenu: (menu: ReactNode) => void;
 }) {
   const [open, setOpen] = useState<RowMenuOpen | null>(null);
   const anchor = useRef<View>(null);
@@ -26,8 +28,7 @@ export function PanelMore({ w, sources, theme, compact, openAgent, openQuestion 
     const r = !compact && Platform.OS === "web" ? node?.getBoundingClientRect?.() as { right?: number; left: number; bottom: number } | undefined : null;
     setOpen({ s, anchor: r ? { x: r.right ?? r.left, y: r.bottom + 4 } : null, sections: menu.build(s), returnTo: node });
   };
-  return <>
-    <View ref={anchor} collapsable={false}><IconButton icon="Ellipsis" label="More actions for this workspace" onPress={show} theme={theme} compact={compact} /></View>
-    {open && <RowMenu menu={open} theme={theme} onClose={() => setOpen(null)} onPick={item => menu.pick(open.s, item)} />}
-  </>;
+  useEffect(() => { showMenu(open ? <RowMenu menu={open} theme={theme} onClose={() => setOpen(null)} onPick={item => menu.pick(open.s, item)} /> : null); }, [open, theme]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => showMenu(null), []); // eslint-disable-line react-hooks/exhaustive-deps
+  return <View ref={anchor} collapsable={false}><IconButton icon="Ellipsis" label="More actions for this workspace" onPress={show} theme={theme} compact={compact} /></View>;
 }
