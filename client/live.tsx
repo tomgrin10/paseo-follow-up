@@ -3,7 +3,8 @@ import { View } from "react-native";
 import { Text } from "./text";
 import type { PluginButtonIconProps, PluginClientContext, PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { Icon, SidebarRow } from "@getpaseo/plugin/client/ui";
-import { listRpc } from "../shared/contracts";
+import { listRpc, workspacesFeed } from "../shared/contracts";
+import { subscribeFeed } from "./feeds";
 import type { Workspace } from "../shared/model";
 import { activeNeeds, needsYou } from "../shared/attention";
 import { useSidebarViewActive } from "./inbox";
@@ -30,10 +31,8 @@ export function createLiveStore(client: PluginClientContext) {
   let revision: number | undefined;
   let all = new Map<string, Workspace>();
   const emit = () => { version++; for (const l of listeners) l(); };
-  const poll = async () => {
-    try {
-      const result = await client.rpc(listRpc, revision === undefined ? {} : { since: revision });
-      if (stopped) return;
+  let feed: (() => void) | null = null;
+  const apply = (result: { full?: boolean; workspaces: Workspace[]; removed?: string[]; revision?: number }) => {
       const diff = result.full === false;
       if (diff && !result.workspaces.length && !result.removed?.length) return;
       const next = diff ? new Map(all) : new Map<string, Workspace>();
@@ -43,21 +42,30 @@ export function createLiveStore(client: PluginClientContext) {
       workspaces = new Map([...all.values()].filter(w => !w.archived).map(w => [w.id, w]));
       archived = [...all.values()].filter(w => w.archived);
       emit();
-    } catch { /* Keep the last answer through restarts and disconnects. */ }
-    finally { if (!stopped) timer = whileVisible(POLL_MS, () => void poll()); }
   };
-  const offVisible = onVisible(() => { if (timer) clearTimeout(timer); void poll(); });
-  void poll();
+  // Paseo 0.15: poll the revision diff. 0.16: the worker pushes the same diff (follow.workspaces-feed), and nothing polls.
+  const poll = async () => {
+    try {
+      const result = await client.rpc(listRpc, revision === undefined ? {} : { since: revision });
+      if (stopped || feed) return;
+      apply(result);
+    } catch { /* Keep the last answer through restarts and disconnects. */ }
+    finally { if (!stopped && !feed) timer = whileVisible(POLL_MS, () => void poll()); }
+  };
+  feed = subscribeFeed(client, workspacesFeed, {}, event => { if (!stopped) apply(event); }, () => { feed = null; void poll(); });
+  const offVisible = onVisible(() => { if (feed) return; if (timer) clearTimeout(timer); void poll(); });
+  if (!feed) void poll();
   return {
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     version: () => version,
     get: (id: string) => workspaces.get(id),
     all: () => [...workspaces.values()],
     archived: () => archived,
-    refresh: () => { if (timer) clearTimeout(timer); void poll(); },
+    /** After an action: the feed pushes the change by itself; polling hosts read at once. */
+    refresh: () => { if (feed) return; if (timer) clearTimeout(timer); void poll(); },
     /** Paseo reported an agent change: one diff read soon, however many updates arrive together. */
-    nudge: () => { if (nudged || stopped) return; nudged = setTimeout(() => { nudged = null; if (timer) clearTimeout(timer); void poll(); }, 1_500); },
-    stop() { stopped = true; offVisible(); if (timer) clearTimeout(timer); if (nudged) clearTimeout(nudged); listeners.clear(); },
+    nudge: () => { if (nudged || stopped || feed) return; nudged = setTimeout(() => { nudged = null; if (timer) clearTimeout(timer); void poll(); }, 1_500); },
+    stop() { stopped = true; feed?.(); offVisible(); if (timer) clearTimeout(timer); if (nudged) clearTimeout(nudged); listeners.clear(); },
   };
 }
 export type LiveStore = ReturnType<typeof createLiveStore>;

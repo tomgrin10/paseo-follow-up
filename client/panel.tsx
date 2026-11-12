@@ -23,7 +23,7 @@ import { WorkspaceHeader } from "./header";
 import { PanelMore } from "./panel-menu";
 import type { HomeSources } from "./home-data";
 import { NeedsYouBlock, overviewKey, workspaceKey } from "./needs-you";
-import { browserKey, BROWSER_POLL_MS } from "./keys";
+import { browserKey } from "./keys";
 import { useWorkspace } from "./workspace-data";
 import type { LiveStore } from "./live";
 import { StacksCard } from "./stacks";
@@ -376,7 +376,7 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   useQuestionOpener(w.id, setQuestion);
   const [specOpen, setSpecOpen] = useState(false);
   const [moreMenu, setMoreMenu] = useState<ReactNode>(null);
-  const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), refetchInterval: BROWSER_POLL_MS });
+  const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}) });
   const invalidated = () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); };
   const auto = useMutation({ mutationFn: (next: boolean) => control({ workspaceId: w.id, enable_auto_sends: next }), onSuccess: (_, next) => { toast.show(next ? "Auto-send on for this workspace" : "Auto-send off · repairs wait for your click"); invalidated(); }, onError: e => toast.error(errorText(e)) });
   // Opening a workspace reads its PRs now: background polling backs off for settled repositories (server/github.ts).
