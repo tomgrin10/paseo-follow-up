@@ -14,7 +14,7 @@ import { createRequire } from "node:module";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
 import { harness, spawnDaemon } from "./harness.mjs";
-import { harnessEnv } from "./harness-env.mjs";
+import { harnessEnv, harnessConfig } from "./harness-env.mjs";
 await harness();
 const exec = promisify(execFile);
 const arg = (name, fallback) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : fallback; };
@@ -27,7 +27,7 @@ const net = createServer(); await new Promise(r => net.listen(0, "127.0.0.1", r)
 const url = `ws://127.0.0.1:${port}/ws`;
 let daemon; let client; let context;
 try {
-  await fs.writeFile(join(home, "config.json"), JSON.stringify({ pluginsEnabled: true, daemon: { listen: `127.0.0.1:${port}`, relay: { enabled: false }, mcp: { enabled: false }, browserTools: { enabled: false } }, features: { webUi: { enabled: true } } }));
+  await fs.writeFile(join(home, "config.json"), JSON.stringify(harnessConfig({ port, webUi: true })));
   const pack = arg("--pack") ? resolve(arg("--pack")) : join(root, JSON.parse((await exec("npm", ["pack", "--json", "--pack-destination", root], { timeout: 60000 })).stdout)[0].filename);
   await exec("tar", ["-xzf", pack, "--strip-components=1", "-C", plugin]);
   await fs.writeFile(join(fixture, "paseo-plugin.json"), JSON.stringify({ id: "followup-fixture", requirements: { paseo: ">=0.11.0" } }));

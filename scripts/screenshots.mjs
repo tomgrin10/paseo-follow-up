@@ -32,7 +32,7 @@ import { createRequire } from "node:module";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
 import { harness, spawnDaemon } from "./harness.mjs";
-import { harnessEnv } from "./harness-env.mjs";
+import { daemonCrashes, harnessEnv, harnessConfig } from "./harness-env.mjs";
 import { fakeGithub } from "./fake-github.mjs";
 import { openHome as openHomeAt, homeRow } from "./ui-home.mjs";
 
@@ -265,7 +265,9 @@ const WORKSPACES = [
     steps: [rpc("follow.enroll", { goal: "APP-176 SAML single sign-on" }), rpc("follow.register-pr", { repo: "example/app", number: 195, stack: "SSO login" }),
       rpc("follow.register-pr", { repo: "example/app", number: 196, stack: "SSO login", parentNumber: 195 }),
       rpc("follow.obligation", { title: "Try the login on staging after the deploy", status: "waiting", afterPrs: ["example/app#196"] }),
-      msg("Opened example/app#195 and #196 for review.")] },
+      // A declared wait absorbs a finish that states no ask (in-flight-reads-waiting), so the row never flags: wait for
+      // the turn only. Waiting on the flag raced the wait's refresh and timed out once it lost.
+      msg("Opened example/app#195 and #196 for review.")], flag: false },
   { key: "push", project: "web", after: "snooze", title: "Push settings", minute: 60, prompt: "WEB-34: let people pick which push notifications they get.",
     steps: [rpc("follow.enroll", { goal: "WEB-34 Push notification settings" }), rpc("follow.register-pr", { repo: "example/web", number: 218, stack: "Push settings" }),
       rpc("follow.ask-question", { title: "Default for new accounts?", question: "Should new accounts start with every push notification on, or only mentions?",
@@ -438,7 +440,7 @@ let ORIGIN = null; let SERVER_ID = null;
 const openHome = (page, { keepDialogs = false } = {}) => openHomeAt(page, { origin: ORIGIN, serverId: SERVER_ID, keepDialogs });
 
 const failures = [];
-function makeShooter({ browser, port, out, scheme: forced, optimiser, results }) {
+function makeShooter({ browser, port, out, scheme: forced, optimiser, results, crashed }) {
   /** Opens the web app in a fresh context, runs `drive`, and returns the PNG (optionally clipped to what drive returns). */
   async function capture(name, viewport, theme, drive, { seen = null, scale = null } = {}) {
     const colorScheme = forced ?? theme;
@@ -472,7 +474,12 @@ function makeShooter({ browser, port, out, scheme: forced, optimiser, results })
     log(`${name}: ${path} (${Math.round(bytes / 1024)} KB, ${colorScheme})`);
   }
   /** One failed shot is logged and counted; the rest still run, and the script exits non-zero at the end. */
-  const guard = work => async (name, ...rest) => { try { await work(name, ...rest); } catch (error) { failures.push(name); console.error(`[shots] ${name} FAILED: ${error.message.split("\n")[0]} (see ${join(out, `${name}-failed.png`)})`); } };
+  // A crashed daemon worker fails the run at once with its log line: after a restart every later shot only times out.
+  const guard = work => async (name, ...rest) => {
+    try { await work(name, ...rest); } catch (error) { failures.push(name); console.error(`[shots] ${name} FAILED: ${error.message.split("\n")[0]} (see ${join(out, `${name}-failed.png`)})`); }
+    const crash = await crashed();
+    if (crash) throw new Error(`the harness daemon crashed during ${name}: ${crash}`);
+  };
   const shoot = guard(async (name, viewport, theme, drive, options) => { const { png, colorScheme } = await capture(name, viewport, theme, drive, options); await save(name, png, colorScheme); });
   /** Several captures side by side on one canvas (the phone shot: the list and a detail). */
   shoot.side = guard(async (name, theme, frames) => {
@@ -915,6 +922,8 @@ async function setDaemonClock(fakeMs, rate = 0.001) {
 }
 
 let daemon; let client; let api; let browser; let daemonUrl = null;
+/** The first worker crash in the harness daemon's log, or null (set once the daemon starts). */
+let crashed = async () => null;
 /** The fake GitHub's HTTPS server: closed in stopDaemon, or its listening socket keeps the run (and its harness slot) alive after "done". */
 let github = null;
 /** (Re)connects `client` and `api` to the isolated daemon. */
@@ -941,7 +950,7 @@ try {
   await Promise.all([home, plugin, fixture, bin, out].map(p => fs.mkdir(p, { recursive: true })));
   const net = createServer(); await new Promise(r => net.listen(0, "127.0.0.1", r)); const port = net.address().port; await new Promise(r => net.close(r));
   const url = `ws://127.0.0.1:${port}/ws`;
-  await fs.writeFile(join(home, "config.json"), JSON.stringify({ pluginsEnabled: true, daemon: { listen: `127.0.0.1:${port}`, relay: { enabled: false }, mcp: { enabled: false }, browserTools: { enabled: false } }, features: { webUi: { enabled: true } } }));
+  await fs.writeFile(join(home, "config.json"), JSON.stringify(harnessConfig({ port, webUi: true })));
   const packed = JSON.parse((await exec("npm", ["pack", "--json", "--pack-destination", root], { timeout: 120000 })).stdout)[0];
   await exec("tar", ["-xzf", join(root, packed.filename), "--strip-components=1", "-C", plugin]);
   if (asVersion) {
@@ -965,6 +974,7 @@ try {
   const env = harnessEnv(root, { home, strip: github.strip, set: { ...github.env, PASEO_DAEMON_URL: url, PASEO_SERVER_ID: "srv_followupshots", FIXTURE_MODEL_LABEL: "Agent", PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true", PATH: `${bin}:${process.env.PATH}`, FOLLOW_SHOTS_CLOCK: clockFile, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${join(root, "clock.cjs")}`.trim(), TZ: "UTC" } });
   const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env, timeout: 120000, maxBuffer: 1 << 22 })).stdout);
   const daemonLog = openSync(join(root, "daemon.log"), "a");
+  crashed = async () => daemonCrashes(await fs.readFile(join(root, "daemon.log"), "utf8").catch(() => ""))[0] ?? null;
   daemon = spawnDaemon(["daemon", "run", "--home", home], { env, stdio: ["ignore", daemonLog, daemonLog] });
   for (let i = 0; ; i++) {
     try { await cli("workspace", "ls"); break; }
@@ -987,7 +997,7 @@ try {
   const { chromium } = createRequire(join(process.env.PLAYWRIGHT_CORE, "package.json"))("playwright-core");
   // Headless Chromium hides scrollbars by default; the notes review shows them, as the notes' bar is part of the review.
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM, headless: true, ...(argv.includes("--notes-review") ? { ignoreDefaultArgs: ["--hide-scrollbars"] } : {}) });
-  const shoot = makeShooter({ browser, port, out, scheme, optimiser, results });
+  const shoot = makeShooter({ browser, port, out, scheme, optimiser, results, crashed });
 
   // setup: the first step of Getting started, on this fresh install, before anything is seeded.
   if (only.includes("setup")) await shoot("setup", { width: 1440, height: 900 }, "dark", async page => {
@@ -1007,6 +1017,9 @@ try {
   log(`done: ${results.length} image(s) in ${out}`);
 } catch (error) {
   console.error(error?.stack ?? error);
+  // Seeding against a crashed worker fails as a lost connection; name the crash.
+  const crash = /the harness daemon crashed/.test(String(error?.message)) ? null : await crashed().catch(() => null);
+  if (crash) console.error(`[shots] the harness daemon crashed: ${crash} (${join(root, "daemon.log")})`);
   process.exitCode = 1;
 } finally {
   await stopDaemon();
