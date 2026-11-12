@@ -7,6 +7,7 @@ import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
 import { useQuery } from "@tanstack/react-query";
 import { browserStatusRpc, controlRpc, inboxBriefRpc } from "../shared/contracts";
 import { needsYou, workspaceSnoozed } from "../shared/attention";
+import { briefAsks } from "../shared/brief";
 import { briefPane, followUpLog, lastWorkdayEnd, nextNeeds, paneButtons, sameText, sinceLabel, tailSteps, type HomeGroupId, type HomeModel, type LogLine, type TailStep, type Workstream } from "../shared/home";
 import { age, backLabel, snoozeUntil, type InboxRow } from "../shared/inbox";
 import { errorText } from "../shared/errors";
@@ -442,7 +443,8 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
   const showBrief = b && s.agentId && !(b.kind === "permission" && agent.permissions.length) && !(compact && b.source === "none");
   // A flagged ask in a tracked workspace is part of its one Needs you block (shared/needs-block.ts): folded into the
   // question it points at, or the block's first section. In Later, or with no workspace, the card stays on its own.
-  const inBlock = !!w && !!showBrief && !!row?.needs && !later && b.source !== "none";
+  // Only a real ask joins it (shared briefAsks): a done brief on a row flagged for something else stays out of the count.
+  const inBlock = !!w && !!showBrief && !later && briefAsks(b, row);
 
   return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
     {header}
