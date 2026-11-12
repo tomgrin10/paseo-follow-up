@@ -81,8 +81,10 @@ const inputStyle = (c: Colors, compact: boolean, lines: number) => ({ minHeight:
  * One question with its answer form. Send records the answer and messages the asking agent straight
  * away; Copy records it and puts a reply on the clipboard instead. Used by the dialog and the pill.
  */
-export function QuestionBody({ workspace: w, question: q, theme, compact, now = Date.now(), dense = false, bodyMaxHeight, openAgent, onAnswered, onDetails, onClose }: {
+export function QuestionBody({ workspace: w, question: q, theme, compact, now = Date.now(), dense = false, bodyMaxHeight, openAgent, onAnswered, onDetails, onClose, inline = false }: {
   workspace: Workspace; question: Question; theme: Theme; compact: boolean; now?: number; dense?: boolean; bodyMaxHeight?: number; openAgent?: (agentId: string) => void; onAnswered?: () => void; onDetails?: () => void;
+  /** Inside the Needs you block: its header says the title and when it was asked, its footer what the agent does meanwhile. */
+  inline?: boolean;
   /** The dialog's close: Send and Copy close it at once and report the outcome as a toast. */
   onClose?: () => void;
 }) {
@@ -156,7 +158,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   const pr = q.prKey ? w.prs.find(p => p.key === q.prKey) : null;
   const task = q.taskId ? w.obligations.find(o => o.id === q.taskId) : null;
   const deliveryColor = delivery?.tone === "success" ? c.statusSuccess : delivery?.tone === "warning" ? c.statusWarning : c.foregroundMuted;
-  const context = (!!q.background || !!q.links.length || pr || task) && <View style={{ gap: 8 }}>
+  const context = (!!q.background || !!q.links.length || pr || (task && !(inline && task.title.trim() === q.title.trim()))) && <View style={{ gap: 8 }}>
     {!!q.background && <RichText selectable linkColor={c.foreground} numberOfLines={dense ? 3 : undefined} style={t.meta}>{q.background}</RichText>}
     {!dense && q.links.map((link, i) => <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       <Icon name={link.url ? "Globe" : "FileText"} size={13} color={c.foregroundMuted} />
@@ -169,7 +171,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
       <Icon name="GitPullRequest" size={13} color={pr.snapshot?.state === "MERGED" ? mergedColor(c) : c.foregroundMuted} />
       <Text numberOfLines={1} style={[t.meta, { flexShrink: 1 }]}>About #{pr.number}{pr.snapshot?.title ? ` · ${pr.snapshot.title}` : ""}</Text>
     </View>}
-    {!dense && task && <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+    {!dense && task && !(inline && task.title.trim() === q.title.trim()) && <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       <Icon name="ListChecks" size={13} color={c.foregroundMuted} />
       <RichText linkColor={c.foreground} numberOfLines={2} style={[t.meta, { flexShrink: 1 }]}>{`Task: ${task.title}`}</RichText>
     </View>}
@@ -186,10 +188,11 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   // Context comes before the options so the developer reads why before choosing.
   const body = <View style={{ gap: dense ? 10 : 14 }}>
     <View style={{ gap: 6 }}>
-      <RichText selectable style={[t.body, { fontSize: dense ? 13 : 15, lineHeight: dense ? 19 : 22 }]}>{q.question}</RichText>
+      {/* Inline: the block's header carries the title, so the question reads as body text under it. */}
+      <RichText selectable style={inline ? text(c, compact).body : [t.body, { fontSize: dense ? 13 : 15, lineHeight: dense ? 19 : 22 }]}>{q.question}</RichText>
       {/* Phones: who asked and when is meta under the question, not a footnote after the buttons. */}
-      {compact && !dense && <Text style={t.small}>Asked {ago(q.askedAt, now)} by {who(w, q.askedBy)}{q.taskId && !q.options.length ? " (blocked task)" : ""}</Text>}
-      {open && <View style={{ flexDirection: "row", gap: 6 }}>
+      {compact && !dense && !inline && <Text style={t.small}>Asked {ago(q.askedAt, now)} by {who(w, q.askedBy)}{q.taskId && !q.options.length ? " (blocked task)" : ""}</Text>}
+      {open && !inline && <View style={{ flexDirection: "row", gap: 6 }}>
         <View style={{ paddingTop: 2 }}><Icon name={state.icon} size={12} color={state.color(c)} /></View>
         <Text style={[t.meta, { flex: 1, color: state.color(c) }]}>{state.text}</Text>
       </View>}
@@ -239,7 +242,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
     </View>
     {/* Same words as the brief card's, so a disabled Send always says why. */}
     {open && other && !words.trim() ? <Text style={t.small}>Write your answer, then send it.</Text>
-      : open && !dense && !compact && <Text style={t.small}>Send puts your answer straight into the asking agent's chat, even mid-turn. Follow-up keeps it under {q.id}.</Text>}
+      : open && !dense && !compact && !inline && <Text style={t.small}>Send puts your answer straight into the asking agent's chat, even mid-turn. Follow-up keeps it under {q.id}.</Text>}
   </View>;
   // In the pill popover the question scrolls and the answer field and actions stay put, so Send is never cut off.
   if (pinned) {
@@ -262,7 +265,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   return <SubmitScope enabled={submittable} onSubmit={() => open ? quick("send") : run.mutate("send")} style={{ gap: dense ? 10 : 14 }}>
     {body}
     {actions}
-    {!dense && !compact && <Text style={t.small}>Asked {ago(q.askedAt, now)} by {who(w, q.askedBy)}{q.taskId && !q.options.length ? " (blocked task)" : ""}</Text>}
+    {!dense && !compact && !inline && <Text style={t.small}>Asked {ago(q.askedAt, now)} by {who(w, q.askedBy)}{q.taskId && !q.options.length ? " (blocked task)" : ""}</Text>}
   </SubmitScope>;
 }
 

@@ -71,7 +71,7 @@ Nothing polls while the app is hidden.
 | `client/stacks.tsx` | Stacks drawn top to base. |
 | `client/pr-sheet.tsx`, `client/pr-controls.tsx` | One PR's sheet, with merge and reviewer controls. |
 | `client/reviewers.tsx` | Reviewer lists and the picker. |
-| `client/needs-you.tsx` | The workspace's decision queue (Send repairs, Merge, Resume, Retry, Answer). |
+| `client/needs-you.tsx` | The workspace's one Needs you block: the asks (question cards, the brief), then the decision rows (Send repairs, Merge, Resume, Retry, Check). |
 | `client/questions.tsx` | The question dialog and answer form. |
 | `client/tasks.tsx` | Tasks and their triggers. |
 | `client/spec.tsx` | The spec link chip, row and sheet. The chip sits in the references line (`client/linked.tsx`). |
