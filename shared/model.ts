@@ -219,7 +219,7 @@ export function completionGate(w: Workspace, now = Date.now()): CompletionGate {
   const open = w.batches.filter(b => !recoveryBatch(b) && !completionCheck(b));
   if (open.some(b => ["sending", "sent"].includes(b.state))) add("agent", "Acknowledge the open follow-up batch");
   if (open.some(b => ["blocked", "uncertain"].includes(b.state))) add("developer", "Retry or dismiss the stuck follow-up batch");
-  if (open.some(b => b.state === "pending")) add("developer", "Send or dismiss the queued repairs");
+  if (open.some(b => b.state === "pending")) add("developer", "Send or dismiss the queued tasks");
   if (w.prActions.some(a => ["sending", "uncertain"].includes(a.state))) add("developer", "Check the outstanding PR action");
   for (const q of (w.questions ?? []).filter(questionOpen)) add("developer", `Answer or withdraw ${q.id} (${q.title})`);
   if (w.hold) add("developer", w.hold);
