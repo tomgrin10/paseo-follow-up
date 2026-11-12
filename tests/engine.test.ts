@@ -77,8 +77,11 @@ test("a long guard pause preserves delivered receipts and grants a fresh acknowl
   f.advance(14_400_000); await f.engine.tick(); assert.equal((await f.get()).batches[0].state, "sent");
   f.runtime({ busy: false, reason: null, archived: false }); await f.engine.tick();
   f.advance(119_000); await f.engine.tick(); assert.equal((await f.get()).batches[0].state, "sent");
-  f.advance(2_000); await f.engine.tick(); assert.equal((await f.get()).batches[0].state, "blocked");
-  assert.equal((await f.get()).batches[0].sentAt, original.sentAt); assert.equal(f.sends.length, 1);
+  // No acknowledgment after the fresh interval: settled from GitHub, the still-open conflict queued again (Q50).
+  f.advance(2_000); await f.engine.tick(); const w = await f.get();
+  assert.equal(w.batches[0].state, "completed"); assert.equal(w.batches[0].unacknowledged, true);
+  assert.equal(w.batches[0].sentAt, original.sentAt); assert.equal(f.sends.length, 1);
+  assert.equal(w.batches.filter(b => b.state === "pending").length, 1, "the open conflict rides the next message");
 });
 test("only an evidenced Guard interruption clears its generated hold; unproven and explicit holds survive", async t => {
   const f = await fixture(t, workspace({ hold: interruptionHold("failed"), interruption: { turnId: "turn", at: new Date(clock).toISOString(), kind: "failed" }, prs: [pr({ snapshot: snapshot({ conflict: true }) })] }));

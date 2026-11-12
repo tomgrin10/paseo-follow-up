@@ -1,0 +1,3 @@
+- Fixes no longer ask you to Retry when the agent's turn ends without reporting back. Follow-up checks GitHub instead: what's cleared is done, and what's still open goes in the next message.
+- You're asked only when the same problem was sent twice with no change, and the card says which one.
+- After a reload mid-send, Follow-up checks the agent's chat and sends the message again only if it never arrived.

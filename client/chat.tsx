@@ -5,6 +5,8 @@ import type { PluginClientContext, PluginTimelineItemProps } from "@getpaseo/plu
 import { Icon, ScrollView } from "@getpaseo/plugin/client/ui";
 import { answerCardSchema, answerCardWhose, batchCardSchema, createMomentLedger, followTimelineItem, parseBatchPrompt, toolRowSchema, type AnswerCard, type BatchCard, type ToolRow } from "../shared/chat";
 import { parseAnswerMessage, parseAnswersMessage } from "../shared/questions";
+import { CREATED_KIND, CREATED_VERSION, createdCard } from "../shared/created";
+import { timelineSupported } from "./created";
 import { unconfirmedNote, unconfirmedRefs } from "../shared/status";
 import { Reveal } from "./motion";
 import { tint, withAlpha } from "./theme";
@@ -136,6 +138,8 @@ function AnswerCardView({ item, theme }: PluginTimelineItemProps<AnswerCard>) {
 }
 
 export function contributeChat(client: PluginClientContext) {
+  // A host whose client API has no timeline transformers or renderers keeps every plain row.
+  if (!timelineSupported(client)) return () => {};
   const moments = createMomentLedger();
   const removers = [
     // Routine bookkeeping stays Paseo's own tool call so it groups with the turn's other calls (a plugin item always
@@ -144,7 +148,11 @@ export function contributeChat(client: PluginClientContext) {
       id: "follow-tool-calls", query: { itemType: "tool_call" },
       transform({ item }) {
         const row = followTimelineItem(item, moments);
-        return row ? { items: [{ type: "plugin" as const, kind: TOOL_KIND, version: 1, data: row }] } : undefined;
+        if (row) return { items: [{ type: "plugin" as const, kind: TOOL_KIND, version: 1, data: row }] };
+        // Paseo's create_agent / create_workspace: the created card (client/created.tsx). A call whose result has no id
+        // keeps Paseo's row.
+        const card = createdCard(item);
+        return card ? { items: [{ type: "plugin" as const, kind: CREATED_KIND, version: CREATED_VERSION, data: card }] } : undefined;
       },
     }),
     client.addTimelineTransformer({
