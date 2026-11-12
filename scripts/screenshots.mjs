@@ -340,9 +340,10 @@ async function seed({ call, home }) {
 }
 
 /**
- * Waits out `n` more runs of the worker's inbox loop (every 15 s, real time). It used to watch inbox.json's lastSeen,
- * but the worker now holds a lastSeen-only change in memory (store-writes-only-real-changes, LAST_SEEN_WRITE_MS on
- * the crawling fake clock), so a tick leaves no trace on disk: wait the loop's period instead, plus a margin.
+ * Waits for `n` more runs of the worker's inbox loop, which runs every 15 s of real time (a real setTimeout, not the
+ * crawling clock). Not by watching inbox.json: since #123 (store-writes-only-real-changes) a lastSeen-only change is
+ * written at most every LAST_SEEN_WRITE_MS of the clock, and the fake clock crawls, so it is never written during a run
+ * and a wait on the file times out ("timed out waiting for an inbox tick").
  */
 async function inboxTicks(_home, n) {
   await new Promise(r => setTimeout(r, n * 15_000 + 2_000));

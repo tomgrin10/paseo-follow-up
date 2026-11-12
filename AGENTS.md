@@ -76,7 +76,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | --- | --- | --- |
 | Worker entry, RPC wiring, session attach, teardown | `index.server.ts`, `shared/contracts.ts`, `server/rpc-timing.ts`, `server/teardown.ts`, `server/daemon.ts`, `server/shared-file.ts`, `server/directory.ts`, `server/store.ts`, `server/list-cache.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
 | Discovery, ownership, main agent | `server/discovery.ts`, `server/workspace-agent.ts`, `server/background-agents.ts`, `server/submissions.ts`, `server/pr-owner.ts`, `server/exclusions.ts`, `server/history-cache.ts`, `server/recovery-handoff.ts`, `server/recovery-config.ts`, `shared/settings.ts` | [workspaces](docs/workspaces.md) |
-| Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
+| Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/task-status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
 | Needs-you inbox, brief, Home | `server/inbox.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts` | [needs-you](docs/needs-you.md) |
 | Summary (internal id `about`) | `server/about.ts`, `server/transcript.ts`, `shared/about.ts` | [ai-roles](docs/ai-roles.md) |
 | Linked items (Linear issues, Slack threads, docs a workspace is about) | `server/linked.ts`, `shared/linked.ts`, `shared/linked-extract.ts`, `shared/linked-display.ts`, `client/linked.tsx`, `client/brand-icons.ts` | [linked-items](docs/linked-items.md) |
@@ -91,7 +91,8 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | UI | `index.client.tsx`, `client/` | [client](docs/client.md) |
 | Shared copy and errors | `shared/presentation.ts`, `shared/errors.ts` | [client](docs/client.md) |
 | Tests, checks and README screenshots | `tests/`, `scripts/`, `scripts/screenshots.mjs`, `button-visibility.test.mjs` | [testing](docs/testing.md) |
-| Releases | `changes/`, `CHANGELOG.md`, `scripts/release-notes.mjs`, `.github/workflows/` | [releasing](docs/releasing.md) |
+| Report an issue (shared module, Follow-up's adapter, the sheet) | `server/report-issue/index.ts`, `server/report-issue/redact.ts`, `server/report-issue/render.ts`, `server/report-issue/github.ts`, `server/report-issue/diagnostics.ts`, `server/report-issue-adapter.ts`, `client/report-issue.tsx`, `scripts/fake-github.d.mts` | [report-issue](docs/report-issue.md) |
+| Releases | `changes/`, `CHANGELOG.md`, `scripts/release-notes.mjs`, `scripts/release-body.mjs`, `scripts/backfill-release-notes.mjs`, `scripts/check-release-note.mjs`, `.github/workflows/` | [releasing](docs/releasing.md) |
 
 ## Invariants
 
@@ -119,7 +120,7 @@ These are product rules. Each has tests, and breaking one is a bug even when the
 4. **Agents act on others, not themselves.** An agent can't sign itself off, answer its own question through
    `answer_question`, or act on its own brief. Goal, tasks, questions and Done belong to the main agent.
    Contributors get `workspace_status`, `register_pr`, `sync_workspace` and `make_main_agent` (under its claim
-   rules), and nothing else.
+   rules), plus `report_issue` (it changes nothing in Follow-up), and nothing else.
 5. **Ownership comes from the daemon.** The caller is `context.agent.id` (native tools) or `PASEO_AGENT_ID` checked
    by the daemon (bridge), never a tool argument. Unknown parent membership grants no new scope.
 6. **Nothing irreversible on its own.**
@@ -147,6 +148,13 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    the store's queue; bounds per wait added up to about 45 s. `Store.close` refuses new mutations at once, commits one
    already accepted if it finishes inside the deadline, and drops (with the "stopping" error, writing nothing) one that
    finishes after it. Guarded by `tests/worker-stop.test.ts`.
+11. **Reporting an issue costs no standing context and posts nothing without a yes**
+   (`report-issue-costs-no-standing-context`, `report-issue-files-only-after-confirm`,
+   `report-issue-never-carries-secrets`). `report_issue`'s description is one line of at most 150 chars; its procedure
+   comes back from the first call, and nothing is added to hooks or instructions. The dry run only reads; filing needs
+   `confirm` with the plan id (and `screenshot_consent` when there are screenshots). Everything an issue carries goes
+   through one Redactor. Guarded by `tests/report-issue.test.ts` and `tests/report-issue-redact.test.ts`
+   ([docs/report-issue.md](docs/report-issue.md)).
 
 ## Bugs
 
@@ -193,6 +201,8 @@ See [docs/releasing.md](docs/releasing.md). In short:
   npm workflow publish. Versions with a prerelease part (`1.4.0-beta.24`) publish under the `beta` dist-tag.
   Betas get no CHANGELOG section; a stable or a major's rc gets a CURATED one (release:notes writes a draft that
   check:notes refuses until it's rewritten). A major's rc (`2.0.0-rc.0`) carries the major's section, `## 2.0.0`.
+- Every GitHub release has notes in one format (`scripts/release-body.mjs`): a beta's page renders the fragments
+  added since the previous tag, a stable's or an rc's its curated section. In-app What's new stays major-only.
 - Don't bump the version in a feature PR.
 
 ## Common pitfalls

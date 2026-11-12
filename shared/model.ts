@@ -36,7 +36,7 @@ export const snapshotSchema = z.object({
   /** What the repository allows, read with the PR (no extra request): merge methods, auto-merge and a merge queue. */
   repoMerge: z.object({ methods: z.array(z.enum(["squash", "merge", "rebase"])), preferred: z.enum(["squash", "merge", "rebase"]).nullable(), autoMerge: z.boolean(), mergeQueue: z.boolean() }).optional(),
 });
-export const prSchema = z.object({
+const prObjectSchema = z.object({
   key: idSchema, repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/), number: z.number().int().positive(),
   stack: textSchema, parent: idSchema.nullable(), disposition: z.string().nullable(),
   snapshot: snapshotSchema.nullable(), error: z.string().nullable(),
@@ -46,16 +46,38 @@ export const prSchema = z.object({
   agentMerges: z.boolean().optional(),
   deploymentAnchor: z.object({ mergeCommit: z.string(), at: z.string() }).optional(),
 });
+/**
+ * A merged PR with a complete snapshot is final: an error from a later failed read means nothing about it. 2.0.1-beta.0's
+ * RATE_LIMIT failures left such errors in state.json, and merged-is-final never reads those PRs again, so the error is
+ * dropped wherever the state is parsed (load included): existing installs heal without a Refresh.
+ * Invariant a-github-limit-never-blanks-a-known-pr.
+ */
+export const prSchema = prObjectSchema.transform(pr => pr.error && pr.snapshot?.complete && pr.snapshot.state === "MERGED" ? { ...pr, error: null } : pr);
+/** A PR's status is known when its last read was complete. A later failed read (`error`) never blanks it; it only makes it older. */
+export const statusKnown = <P extends { snapshot: { complete: boolean } | null }>(pr: P): pr is P & { snapshot: NonNullable<P["snapshot"]> } => !!pr.snapshot?.complete;
 export const obligationSchema = z.object({
   id: idSchema, title: textSchema,
   status: z.enum(["pending", "waiting", "working", "blocked", "done", "waived"]),
   afterPrs: z.array(idSchema), evidence: z.string().max(4000),
+  /** While blocked: the question the developer must answer. Without one, a blocked task waits on nothing of theirs. */
+  ask: z.string().max(1000).optional(),
   enable_follow_up: z.boolean().default(false), revision: z.number().int().nonnegative(),
   dependencyStage: z.enum(["merged", "deployed"]).optional(), category: z.enum(["follow_up", "pr_lifecycle"]).optional(),
   previousTitles: z.array(z.string()).optional(),
   communication: communicationSchema.optional(),
   trigger: taskTriggerSchema.nullable().optional(),
+  /**
+   * Who is working on it: the agent that last set status=working through update_obligation, or the agent it named
+   * (workingAgentId, e.g. an orchestrator's subagent). The task's line reads that agent's live state (shared/task-status.ts).
+   */
+  workingAgentId: idSchema.optional(),
 });
+/**
+ * A task blocked on the developer: blocked with a real question for them (`ask`). Only these become questions, flag
+ * Needs you or count as the developer's. A task blocked on a PR or another agent has no ask (agents use waiting).
+ * Invariant a-question-always-asks-the-developer-something.
+ */
+export const blockedOnDeveloper = (o: { status: string; ask?: string }): boolean => o.status === "blocked" && !!o.ask?.trim();
 export const taskSchema = z.object({
   key: idSchema, kind: z.enum(["conflict", "review", "checks", "restack", "obligation", "inventory", "completion"]),
   target: idSchema, title: z.string(), fingerprint: z.string(),
@@ -100,6 +122,9 @@ export const workspaceSchema = z.object({
   sendWait: z.enum(["unloaded", "setup"]).nullable().optional(),
   updatedAt: z.string(), managedDoneLabel: z.boolean(),
   runtimeReason: z.string().nullable(), runtimeBusy: z.boolean(), backgroundBusy: z.boolean().default(false),
+  /** Live state of the agents this workspace's working tasks name, refreshed with runtimeBusy from Paseo's agent list
+   * (metadata only). Every surface that says a task's agent is working reads this, never the stored status alone. */
+  taskAgents: z.record(z.string(), z.object({ title: z.string().nullable(), state: z.enum(["working", "idle", "closed"]) })).optional(),
   interruption: z.object({ turnId: z.string().nullable(), at: z.string(), kind: z.enum(["canceled", "failed"]), /** Why a canceled turn stopped (shared/status.ts cancelCause); only "stop" holds. */ cause: z.enum(CANCEL_CAUSES).optional(), guardPauseId: z.string().optional(), /** The agent whose turn stopped (since 1.4.0-beta.16). */ agentId: idSchema.optional() }).optional(),
   // Added with questions; older saved states parse with none.
   questions: z.array(questionSchema).default([]),
@@ -175,7 +200,7 @@ export function completionGate(w: Workspace, now = Date.now()): CompletionGate {
     if (pr.snapshot.state === "CLOSED") add("agent", `Settle ${ref} with a disposition`);
     else add("developer", `Settle ${ref}`);
   }
-  for (const o of followUpObligations(w).filter(o => !["done", "waived"].includes(o.status))) add(o.status === "blocked" ? "developer" : "agent", o.title);
+  for (const o of followUpObligations(w).filter(o => !["done", "waived"].includes(o.status))) add(blockedOnDeveloper(o) ? "developer" : "agent", o.title);
   for (const o of followUpObligations(w).filter(o => o.status === "done" && o.communication && !replyRecorded(o.communication))) add("agent", `Record the sent reply for ${o.title}`);
   const open = w.batches.filter(b => !recoveryBatch(b) && !completionCheck(b));
   if (open.some(b => ["sending", "sent"].includes(b.state))) add("agent", "Acknowledge the open follow-up batch");
@@ -197,6 +222,10 @@ export function revokesDone(w: Workspace, now = Date.now()): boolean {
   return completionGate(w, now).blockers.some(b => b.owner !== "wait" || b.contrary);
 }
 export type Status = "active" | "handling" | "waiting" | "needs-you" | "done";
+/** The first working task whose recorded agent is running right now (invariant `a-task-only-says-working-when-its-agent-is`). */
+export function liveWorkingTask(w: Workspace): Obligation | undefined {
+  return followUpObligations(w).find(o => o.status === "working" && !!o.workingAgentId && w.taskAgents?.[o.workingAgentId]?.state === "working");
+}
 export function summary(w: Workspace, now = Date.now()): { status: Status; label: string; reason: string } {
   const obligations = followUpObligations(w);
   if (w.hold) return { status: "needs-you", label: "Needs you", reason: w.hold };
@@ -204,14 +233,15 @@ export function summary(w: Workspace, now = Date.now()): { status: Status; label
   if (blocked) return { status: "needs-you", label: "Needs you", reason: blocked.result || "Follow-up needs a decision" };
   const question = (w.questions ?? []).find(questionOpen);
   if (question) return { status: "needs-you", label: "Needs you", reason: `${question.id}: ${question.title}` };
-  const obligation = obligations.find(o => o.status === "blocked");
+  const obligation = obligations.find(blockedOnDeveloper);
   if (obligation) return { status: "needs-you", label: "Needs you", reason: obligation.title };
   if (w.completion && completionBlockers(w, now).length === 0) return { status: "done", label: "Done", reason: w.completion.summary };
   if (w.runtimeReason) return { status: "waiting", label: "Waiting", reason: w.runtimeReason };
   const batch = w.batches.find(b => !recoveryBatch(b) && ["pending", "sending", "sent"].includes(b.state) && !(b.state === "pending" && completionCheck(b)));
   if (batch) return { status: batch.state === "pending" ? "active" : "handling", label: batch.state === "pending" ? w.enable_auto_sends ? "Auto queued" : "Ready to send" : "Agent handling", reason: `${batch.tasks.length} follow-up task${batch.tasks.length === 1 ? "" : "s"} ${batch.state === "pending" ? "queued" : batch.recipientAgentId && batch.recipientAgentId !== w.mainAgentId ? "sent to the recovery agent" : "sent to the main agent"}` };
-  if (w.runtimeBusy || obligations.some(o => o.status === "working")) return { status: "handling", label: "Agent handling", reason: obligations.find(o => o.status === "working")?.title ?? "The main agent is working" };
-  if (w.prs.some(pr => pr.error || !pr.snapshot?.complete)) return { status: "waiting", label: "Waiting", reason: "PR status unavailable; refresh will retry" };
+  const live = liveWorkingTask(w);
+  if (w.runtimeBusy || live) return { status: "handling", label: "Agent handling", reason: live?.title ?? "The main agent is working" };
+  if (w.prs.some(pr => !statusKnown(pr))) return { status: "waiting", label: "Waiting", reason: "PR status unavailable; refresh will retry" };
   const pending = obligations.find(o => !["done", "waived"].includes(o.status));
   if (pending) return { status: pending.status === "waiting" ? "waiting" : "active", label: pending.status === "waiting" ? "Waiting" : "Active", reason: pending.title };
   if (w.prs.some(pr => !settled(pr))) return { status: "waiting", label: "Waiting", reason: "Waiting for PR review, checks, or merge" };

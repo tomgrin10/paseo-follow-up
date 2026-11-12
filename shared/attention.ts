@@ -1,5 +1,6 @@
 import { batchView, FINISH_LINE, stuckLine, unconfirmedRefs } from "./status";
-import { completionCheck, summary, type Batch, type Pr, type Workspace, type Status } from "./model";
+import { blockedOnDeveloper, completionCheck, liveWorkingTask, statusKnown, summary, type Batch, type Pr, type Workspace, type Status } from "./model";
+import { workingLine } from "./task-status";
 import { followUpObligations, recoveryBatch } from "./follow-up";
 import { orderedStacks, settledForDisplay } from "./presentation";
 import { githubApproved, graphiteReady, isGithubFlow, mergeBlockers, prActionBlocks } from "./pr-actions";
@@ -11,7 +12,7 @@ export type PrTone = "merged" | "approved" | "danger" | "warning" | "pending" | 
 
 export function prTone(pr: Pr): PrTone {
   const s = pr.snapshot;
-  if (pr.error || !s?.complete) return "unknown";
+  if (!s?.complete) return "unknown";
   if (s.state === "MERGED") return "merged";
   if (s.state === "CLOSED") return "closed";
   if (s.conflict || s.failedChecks.length) return "danger";
@@ -141,8 +142,8 @@ export function needsYou(w: Workspace, now = Date.now()): NeedItem[] {
     items.push({ kind: "answer", key: `answer:${q.id}`, questionId: q.id, title: `Check that the agent got your ${q.id} answer`, detail: q.answer!.delivery.reason ?? "Paseo didn't confirm the message." });
   for (const q of open.filter(q => questionState(q) !== "stopped")) items.push({ kind: "question", key: `question:${q.id}`, questionId: q.id, title: `${q.id} · ${q.title}`, detail: q.question, state: questionState(q), big: q.big });
   // A blocked task is a question once the server mirrors it; until then it still shows as a decision.
-  for (const o of followUpObligations(w).filter(o => o.status === "blocked" && !questions.some(q => q.taskId === o.id && q.taskRevision !== null)))
-    items.push({ kind: "decision", key: `decision:${o.id}`, obligationId: o.id, title: o.title, detail: o.evidence });
+  for (const o of followUpObligations(w).filter(o => blockedOnDeveloper(o) && !questions.some(q => q.taskId === o.id && q.taskRevision !== null)))
+    items.push({ kind: "decision", key: `decision:${o.id}`, obligationId: o.id, title: o.title, detail: o.ask! });
   // Repairs Auto won't send (an idle agent Follow-up doesn't wake) wait on you just like hand-sent ones (shared/status.ts).
   const view = batchView(w, now);
   const idleWait = (b: Batch) => view?.batch.id === b.id && view.phase === "queued" && view.waitingOn === "you" && !w.hold && !w.goneAgent && !w.dormant;
@@ -201,13 +202,17 @@ export function liveLine(w: Workspace, now = Date.now()): { icon: LiveIcon; text
   // Queued work, in the same words as the agent card and Home (shared/status.ts). Repairs you send by hand live in Needs you.
   if (view?.phase === "queued" && (view.kind === "finish" || w.enable_auto_sends)) return { icon: view.fixing ? "spinner" : "waiting", text: view.line, since: view.batch.createdAt };
   if (w.runtimeBusy) return { icon: "spinner", text: "Main agent is working", since: null };
+  // A working task spins only while its recorded agent is running (invariant `a-task-only-says-working-when-its-agent-is`).
+  // Otherwise it says what the task row says: "<agent> idle", "<agent> closed" or "In progress", with no spinner.
+  const live = liveWorkingTask(w);
+  if (live) return { icon: "spinner", text: live.title, since: null };
   const working = followUpObligations(w).find(o => o.status === "working");
-  if (working) return { icon: "spinner", text: working.title, since: null };
+  if (working) return { icon: "waiting", text: `${working.title} · ${workingLine(working, w.taskAgents ?? {}).text}`, since: null };
   // A wait the agent declared (a waiting task: a release, a reload window, a detached job) says what it waits on. The
   // waiting icon, Home's Waiting group and the brief's "Waiting on others" already say it waits, so the line doesn't.
   const waiting = followUpObligations(w).find(o => o.status === "waiting");
   if (waiting) return { icon: "waiting", text: waiting.title, since: null };
-  if (w.prs.some(p => p.error || !p.snapshot?.complete)) return { icon: "alert", text: "Some PR status is unavailable · retrying", since: null };
+  if (w.prs.some(p => !statusKnown(p))) return { icon: "alert", text: "Some PR status is unavailable · retrying", since: null };
   if (w.prs.some(p => p.snapshot?.state === "OPEN" && p.snapshot.checksPending)) return { icon: "waiting", text: "Checks are running", since: null };
   if (w.prs.some(p => p.snapshot?.state === "OPEN")) return { icon: "waiting", text: "Waiting on review and merges", since: null };
   return { icon: "idle", text: "Waiting for the main agent to declare Done", since: null };

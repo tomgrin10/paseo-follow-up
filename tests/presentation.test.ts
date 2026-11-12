@@ -12,7 +12,9 @@ test("active and actionable stacks precede settled history without losing parent
   const unexplained = pr({ stack: "Closed but unresolved", snapshot: snapshot({ state: "CLOSED" }) });
   assert.equal(settledForDisplay(unexplained), false);
   assert.equal(settledForDisplay({ ...unexplained, disposition: "Superseded with evidence" }), true);
-  assert.equal(settledForDisplay({ ...past, error: "Cannot refresh status" }), false);
+  // A failed read after a complete one doesn't unsettle it (a-github-limit-never-blanks-a-known-pr); no complete read does.
+  assert.equal(settledForDisplay({ ...past, error: "Cannot refresh status" }), true);
+  assert.equal(settledForDisplay({ ...past, snapshot: snapshot({ state: "MERGED", complete: false }), error: "Cannot refresh status" }), false);
 });
 test("merged and approved have distinct tones, and failed checks cannot look approved", () => {
   assert.equal(prPresentation(pr({ snapshot: snapshot({ state: "MERGED", reviewDecision: "APPROVED" }) })).tone, "merged");

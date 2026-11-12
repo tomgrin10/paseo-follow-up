@@ -15,6 +15,9 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import * as rpc from "./shared/contracts";
+import { LogRing } from "./server/report-issue/diagnostics";
+import { followUpReporter, reportPrompt } from "./server/report-issue-adapter";
+import { githubApi } from "./server/github-api";
 import { browserRepositories, browserWorkspaces, prClaims, prOwner } from "./server/pr-owner";
 import { type Workspace } from "./shared/model";
 import { isWorkspaceRoot } from "./server/workspace-agent";
@@ -62,8 +65,8 @@ import { statusCheck } from "./server/status-check";
 import { NO_USAGE } from "./shared/usage";
 import { activeWindowMs, conversationGone, DEFAULT_ACTIVE_WINDOW_DAYS } from "./server/agent-load";
 import { ACTIVE_SCOPE_MIGRATION, PRUNE_MIGRATION, autoSendsByDefault, FOLLOW_EVERY_MIGRATION, followsByDefault, followsEvery, migrateFollowEvery, optedOut } from "./shared/settings";
-import { Overseer, OVERSEER_TOOLS, type OverseerPaseo, type OverseerTool } from "./server/overseer";
-import { OVERSEER_LABEL } from "./shared/overseer";
+import { Overseer, OVERSEER_TOOLS, type OverseerPaseo, type OverseerTool, providerModel } from "./server/overseer";
+import { OVERSEER_LABEL, isOverseerAgent } from "./shared/overseer";
 import { withDaemon } from "./server/daemon";
 import { RpcTiming } from "./server/rpc-timing";
 import { hostFeature, type ServerInfo } from "./server/host-features";
@@ -98,6 +101,11 @@ import { BRIEF_KIND, BRIEF_VERSION, prState, prStates, validateNeedsYou, type Br
 const MAIN_WORK = new Set(["follow.sync", "follow.register-pr", "follow.obligation", "follow.done", "follow.acknowledge", "follow.exclude-stack", "follow.ask-question", "follow.record-answer", "follow.withdraw-question", "follow.set-spec", "follow.needs-you"]);
 
 export default function contribute(server: PluginServerContext) {
+  // Report an issue's "recent warnings and errors": this worker's own [follow-up] console lines, in memory only.
+  const startedAt = Date.now();
+  const logRing = new LogRing();
+  const restoreConsole = logRing.capture("[follow-up]");
+  let toolTransport = "stdio bridge, or no session opened yet";
   const displaySettings = server.registerSettings(displayPreferences);
   const questionSettings = server.registerSettings(questionPreferences);
   // An unreadable setting means the default, which never lets an agent build ahead of the developer.
@@ -398,6 +406,7 @@ export default function contribute(server: PluginServerContext) {
     const providers = (process.env.FOLLOW_UP_TOOL_PROVIDERS ?? "claude,codex").split(",");
     if (request.purpose !== "interactive" || !providers.includes(request.provider) || request.labels["plugin-tools/enabled"] === "false") return request;
     if (process.env.FOLLOW_UP_FORCE_STDIO !== "1" && nativeToolsAvailable(request, await paseoConfig())) {
+      toolTransport = "native (Paseo's agent MCP)";
       const flags = { recovery, brief: !!brief && !recovery, root: root && !recovery, overseer: overseer && !recovery };
       const env = { ...request.env, FOLLOW_UP_TOOLS: "native", FOLLOW_UP_PROVIDER: request.provider, ...(flags.root ? { FOLLOW_UP_ROOT: "1" } : {}), ...(flags.overseer ? { FOLLOW_UP_OVERSEER: "1" } : {}) };
       if (/^[\w-]+$/.test(request.agentId)) await writeFile(join(directory, "hook-state", `native-${request.agentId}.json`), JSON.stringify({ instance: toolsInstance }), { mode: 0o600 }).catch(() => undefined);
@@ -452,7 +461,7 @@ export default function contribute(server: PluginServerContext) {
     const projects = await gateway.projects(await store.snapshot());
     if (!projects.some(p => p.id === projectId)) throw new Error("This project is no longer available. Refresh settings.");
     await store.mutate(state => { state.projectDefaults ??= {}; state.projectDefaults[projectId] = enable_default_tracking; });
-    void engine.tick();
+    void engine.nudge();
     return { projects: await gateway.projects(await store.snapshot()) };
   });
   const followSettings = async () => {
@@ -481,7 +490,7 @@ export default function contribute(server: PluginServerContext) {
       if (workspace.follow === true) state.workspaceOptOuts = (state.workspaceOptOuts ?? []).filter(id => id !== w.id);
     });
     if (workspace?.follow === true) await engine.activate(workspace.workspaceId).catch(() => store.mutate(state => { const w = state.workspaces.find(w => w.id === workspace.workspaceId); if (w) w.enable_tracking = true; }));
-    void engine.tick();
+    void engine.nudge(workspace?.workspaceId);
     return followSettings();
   });
   handle(rpc.prOwnerRpc, async ({ repo, number }, { paseo }) => {
@@ -559,7 +568,7 @@ export default function contribute(server: PluginServerContext) {
       else w.prs.push({ registeredAgentId: agentId, key, repo, number, stack, parent, disposition: disposition ?? null, snapshot: null, error: null, ...(agentMerges ? { agentMerges } : {}) });
       if (altered) changed(w); return w;
     });
-    void engine.tick(); return result;
+    void engine.nudge(result.id); return result;
   });
   handle(rpc.excludeStackRpc, async ({ agentId, stack, reason, obligationIds }, { paseo }) => {
     await requireReady();
@@ -569,18 +578,20 @@ export default function contribute(server: PluginServerContext) {
       excludeStack(w, stack, reason, obligationIds, new Date().toISOString());
       return w;
     });
-    void engine.tick(); return result;
+    void engine.nudge(result.id); return result;
   });
-  handle(rpc.obligationRpc, async ({ agentId, ...input }, { paseo }) => {
+  handle(rpc.obligationRpc, async ({ agentId, workingAgentId, ...input }, { paseo }) => {
     await requireReady();
     const workspaceId = await callerWorkspaceId(agentId, paseo);
+    // A named worker must be an agent Paseo knows (directory metadata; nothing is loaded).
+    if (workingAgentId && workingAgentId !== agentId && !(gateway.directory.cached(workingAgentId) ?? (await gateway.directory.read({ fresh: "agents" })).agents.find(r => r.agent.id === workingAgentId)?.agent)) throw new Error("workingAgentId isn't an agent Paseo knows. Pass the id of the agent doing the task, or leave it out to record yourself.");
     const result = await store.mutate(state => {
       const w = agentWorkspace(state, agentId, "write", workspaceId);
-      const obligation = updateObligation(w, input);
+      const obligation = updateObligation(w, { ...input, caller: agentId, workingAgentId });
       syncTaskQuestions(w, Date.now());
       changed(w); return { ...w, updatedObligationId: obligation.id };
     });
-    void engine.tick(); return result;
+    void engine.nudge(result.id); return result;
   });
   handle(rpc.askQuestionRpc, async ({ agentId, ...input }, { paseo }) => {
     await requireReady();
@@ -703,7 +714,7 @@ export default function contribute(server: PluginServerContext) {
       }
       changed(w); return w;
     });
-    void engine.tick(); return result;
+    void engine.nudge(result.id); return result;
   });
   handle(rpc.taskTriggerRpc, async ({ workspaceId, obligationId, expectedRevision, trigger, afterPrs }) => {
     await requireReady();
@@ -716,19 +727,19 @@ export default function contribute(server: PluginServerContext) {
       updateObligation(w, { id: o.id, title: o.title, status: o.status, evidence: o.evidence, afterPrs, trigger, enable_follow_up: !!trigger });
       changed(w); return w;
     });
-    void engine.tick(); return result;
+    void engine.nudge(result.id); return result;
   });
   handle(rpc.browserStatusRpc, async () => { await requireReady(); return browser.status(); });
   handle(rpc.browserExchangeRpc, async ({ clientId, ready: browserReady, acceptJobs, results, repositories }) => { await requireReady(); return { ...browser.exchange(clientId, browserReady, results, acceptJobs, repositories), repositories: browserRepositories(await store.snapshot()) }; });
   handle(rpc.prControlStatusRpc, async ({ workspaceId, prKey }) => { await requireReady(); return actions.status(workspaceId, prKey); });
   handle(rpc.preparePrActionRpc, async ({ workspaceId, prKey, kind }) => { await requireReady(); return actions.prepare(workspaceId, prKey, kind); });
-  handle(rpc.confirmPrActionRpc, async ({ planId, scope }) => { await requireReady(); const result = await actions.confirm(planId, scope); void engine.tick(); return result; });
+  handle(rpc.confirmPrActionRpc, async ({ planId, scope }) => { await requireReady(); const result = await actions.confirm(planId, scope); void engine.nudge(); return result; });
   handle(rpc.checkPrActionRpc, async ({ workspaceId, actionId }) => { await requireReady(); return actions.check(workspaceId, actionId); });
   handle(rpc.requestReviewersRpc, async ({ workspaceId, prKey, reviewers, remember }) => {
     await requireReady();
     // "Remember for <repo>" saves first: it's the developer's choice whatever GitHub answers.
     if (reviewers && remember) await reviewerStore.save(prKey.split("#")[0], reviewers);
-    const result = await actions.requestReviewers(workspaceId, prKey, reviewers?.map(r => r.login)); void engine.tick(); return result;
+    const result = await actions.requestReviewers(workspaceId, prKey, reviewers?.map(r => r.login)); void engine.nudge(workspaceId); return result;
   });
   const reviewerSettings = async () => {
     const config = await reviewerStore.read();
@@ -771,7 +782,7 @@ export default function contribute(server: PluginServerContext) {
       if (reviewFix !== undefined) { if (reviewFix === null) delete own.reviewFix; else own.reviewFix = reviewFix; }
     });
     // A changed workflow changes readiness and merge: check the PRs again now rather than on the next poll.
-    void engine.tick();
+    void engine.nudge();
     return prWorkflowView();
   });
   handle(rpc.reviewerSettingsRpc, async () => { await requireReady(); return reviewerSettings(); });
@@ -1055,10 +1066,45 @@ export default function contribute(server: PluginServerContext) {
       return result;
     },
   };
-  const agentActions = new AgentActions({ timeZone: () => clientTimeZone, store, prActions: actions, engine, inbox, priorities: priorityStore, about, agentSettings, wait: { status: currentWait }, prWorkflows: () => prWorkflowView(), rpc: rpcBridge, display: displayBridge, agentTitle: async id => (await api?.agents.ref(id).refresh().catch(() => null))?.agent?.title ?? null,
+  // Report an issue (server/report-issue/, adapter server/report-issue-adapter.ts): reads only while a report is prepared.
+  const reportKit = followUpReporter({
+    github: githubApi(), updates: () => updatesView(), call: (method, input) => rpcBridge.call(method, input ?? {}), snapshot: () => store.snapshot(),
+    resources: () => governor.current(), serverInfo: () => withDaemon(async client => (client as ServerInfoClient).getLastServerInfoMessage?.() as never), logs: logRing,
+    toolTransport: () => toolTransport, startedAt,
+  });
+  const agentActions = new AgentActions({ timeZone: () => clientTimeZone, store, prActions: actions, engine, inbox, priorities: priorityStore, about, agentSettings, wait: { status: currentWait }, prWorkflows: () => prWorkflowView(), rpc: rpcBridge, display: displayBridge, report: { run: (caller, args) => reportKit.reporter.run(caller, args) }, agentTitle: async id => (await api?.agents.ref(id).refresh().catch(() => null))?.agent?.title ?? null,
     // The directory's agent list (metadata only): a claim never loads or refreshes the main agent.
     agentInfo: async agentId => { const row = gateway.directory.cached(agentId) ?? (await gateway.directory.read()).agents.find(r => r.agent.id === agentId)?.agent; return row ? { status: row.status, activeTurn: row.activeTurn, pendingPermissions: row.pendingPermissions, archivedAt: row.archivedAt } : null; } });
   handle(rpc.prioritiesRpc, async () => ({ items: await priorityStore.read() }));
+  // The Report sheet: who it can send to (directory metadata only; nothing is loaded), Send to agent, Open on GitHub.
+  handle(rpc.reportTargetsRpc, async ({ workspaceId, agentId }, { paseo }) => {
+    seen(paseo);
+    const rows = await gateway.directory.read().catch(() => null);
+    const state = await store.snapshot();
+    const mains = new Map(state.workspaces.filter(w => w.mainAgentId).map(w => [w.mainAgentId, w]));
+    const titles = new Map((rows?.workspaces ?? []).map(w => [w.id, w.name]));
+    const agents = (rows?.agents ?? []).map(r => r.agent).filter(a => !a.archivedAt && !a.background && !isOverseerAgent(a.labels))
+      .map(a => ({ id: a.id, title: a.title ?? "Untitled agent", provider: a.provider, status: a.status, workspaceId: a.workspaceId ?? null, workspaceTitle: a.workspaceId ? titles.get(a.workspaceId) ?? null : null, main: mains.has(a.id), last: Date.parse(a.lastUserMessageAt ?? a.createdAt) || 0 }));
+    const rank = (a: typeof agents[number]) => (a.id === agentId ? 4 : 0) + (workspaceId && a.workspaceId === workspaceId ? 2 : 0) + (a.main ? 1 : 0);
+    const sorted = agents.filter(a => a.id === agentId || a.workspaceId === workspaceId || a.main).sort((x, y) => rank(y) - rank(x) || y.last - x.last).slice(0, 6);
+    const here = workspaceId && titles.has(workspaceId) ? { id: workspaceId, title: titles.get(workspaceId)! } : sorted[0]?.workspaceId ? { id: sorted[0].workspaceId, title: sorted[0].workspaceTitle ?? "Workspace" } : (rows?.workspaces ?? []).filter(w => !w.archivingAt)[0] ? { id: rows!.workspaces[0].id, title: rows!.workspaces[0].name } : null;
+    return { agents: sorted.map(({ last: _l, ...a }) => a), defaultId: sorted[0]?.id ?? null, newAgentWorkspace: here };
+  });
+  handle(rpc.reportSendRpc, async ({ kind, text, error, agentId, newAgentWorkspaceId }, { paseo }) => {
+    seen(paseo);
+    const prompt = reportPrompt(kind, text, error);
+    if (agentId) {
+      await sendTo(agentId)(prompt, randomUUID());
+      const row = (await gateway.directory.read().catch(() => null))?.agents.find(r => r.agent.id === agentId)?.agent;
+      return { agentId, title: row?.title ?? "the agent", started: false };
+    }
+    if (!newAgentWorkspaceId) throw new Error("Pick an agent, or a workspace to start a new one in.");
+    const title = kind === "bug" ? "Report a Follow-up bug" : kind === "feature" ? "Follow-up feature request" : "Follow-up feedback";
+    const providerId = (await agentSettings.role("overseer").catch(() => null))?.provider?.split("/")[0] ?? "claude";
+    const agent = await paseo.workspaces.ref(newAgentWorkspaceId).agents.create({ config: { provider: await providerModel(paseo as unknown as OverseerPaseo, providerId) }, title, prompt });
+    return { agentId: agent.id, title, started: true };
+  });
+  handle(rpc.reportLinkRpc, async ({ kind, text }) => ({ url: (await reportKit.manualLink(kind, text)).url }));
   // Provider limits are non-essential: at critical memory only the VM meter is served.
   handle(rpc.usageRpc, async () => ({ ...(governor.allowsExtras() ? await usage.read() : NO_USAGE), resources: governor.current() }));
   handle(rpc.agentActRpc, async ({ agentId, tool, args }, { paseo }) => {
@@ -1073,7 +1119,7 @@ export default function contribute(server: PluginServerContext) {
     if (tool !== "make_main_agent" && (await store.snapshot()).workspaces.some(w => w.enable_tracking && !w.archived && w.contributorAgentIds?.includes(agentId))) throw new Error("Contributor sessions can't act for the developer. Report to the main agent.");
     if (!await isWorkspaceRoot(agent, async id => (await paseo.agents.ref(id).refresh())?.agent)) throw new Error("Follow-up's action tools are for root agents. Ask your parent agent.");
     const result = await agentActions.run(agentId, tool as AgentTool, args);
-    void engine.tick();
+    void engine.nudge(agent.workspaceId);
     return result;
   });
   // Home, the sidebar badge and the pills poll this; an unchanged list answers in a few bytes (see inboxAnswer).
@@ -1219,7 +1265,7 @@ export default function contribute(server: PluginServerContext) {
       const turn = { agentId: event.agent.id, turnId: event.turnId ?? null };
       if (!(await store.snapshot()).workspaces.some(w => w.enable_tracking && holdSuperseded(w, turn))) return;
       await store.mutate(state => { for (const w of state.workspaces) if (w.enable_tracking && holdSuperseded(w, turn)) liftHold(w); });
-      void engine.tick();
+      for (const w of (await store.snapshot()).workspaces) if (w.enable_tracking && w.mainAgentId === turn.agentId) void engine.nudge(w.id);
     }),
     server.on("agent.turn_ended", async (event, { paseo }) => { seen(paseo); inboxHook(() => inbox.turnEnded(event.agent, event.outcome, event.turnId)); }),
     server.on("agent.permission_requested", async (event, { paseo }) => { seen(paseo); inboxHook(async () => { await inbox.permissionRequested(event.agent, event.request); await writeBriefState(); }); }),
@@ -1243,7 +1289,7 @@ export default function contribute(server: PluginServerContext) {
         const w = owned && state.workspaces.find(w => w.id === owned.id); if (w) { w.completion = null; w.declaration = null; }
         const d = waking && state.workspaces.find(w => w.id === waking.id); if (d) delete d.dormant;
       });
-      if (waking) void engine.tick();
+      if (waking) void engine.nudge(waking.id);
     }),
     // Follow-up's own tools first, then Wait's on top (every interactive Claude session, tracked or not).
     server.before("agent.session_open", withWait(async ({ request }, { paseo }) => {
@@ -1295,7 +1341,7 @@ export default function contribute(server: PluginServerContext) {
       if (assigned) {
         const guarded = interruption && await sessionGuardOwnsInterruption(event.agent.id, interruption).catch(() => false);
         if (["canceled", "failed"].includes(event.outcome.kind) && !guarded) await store.mutate(state => { const w = findWorkspace(state, assigned.id); const b = w.batches.find(b => b.recipientAgentId === event.agent.id && ["sending", "sent", "uncertain"].includes(b.state)); if (b) { b.state = "blocked"; b.result = b.acknowledgmentError ? `Recovery acknowledgment was refused: ${b.acknowledgmentError.error}` : "Recovery stopped or failed. Check its agent before retrying."; } });
-        void engine.tick(); return;
+        void engine.nudge(assigned.id); return;
       }
       if (!(await store.snapshot()).workspaces.some(w => w.enable_tracking && (w.mainAgentId === event.agent.id || w.contributorAgentIds?.includes(event.agent.id)))) return;
       gateway.markDirty(event.agent.id);
@@ -1322,11 +1368,12 @@ export default function contribute(server: PluginServerContext) {
         if (event.outcome.kind === "failed" && conversationGone(event.outcome.error.message)) { w.goneAgent = { agentId: event.agent.id, at: interruption.at, reason: event.outcome.error.message }; w.completion = null; w.declaration = null; return; }
         holdOnTurnEnd(w, { agentId: event.agent.id, turnId: interruption.turnId, at: interruption.at, outcome: event.outcome, prompt, newerTurn, compaction });
       });
-      void engine.tick();
+      for (const w of (await store.snapshot()).workspaces) if (w.enable_tracking && (w.mainAgentId === event.agent.id || w.contributorAgentIds?.includes(event.agent.id))) void engine.nudge(w.id);
     }),
     server.on("workspace.archived", async event => { await ready; if (!loadError && !stopped) await store.mutate(state => { const w = state.workspaces.find(w => w.id === event.workspace.id); if (w) w.archived = true; }); }),
   ];
   return async () => {
+    restoreConsole();
     stopped = true; wait.close(); updater.stop(); pluginMove.stop(); governor.stop(); if (timer) clearTimeout(timer); if (aboutTimer) clearTimeout(aboutTimer); if (linkedTimer) clearTimeout(linkedTimer); aiJobs.stop(); ranker = null; if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); rpcTiming.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
     // One deadline for every wait (worker-stop-never-waits-on-a-stuck-pass, server/teardown.ts): start-up and the work
     // in flight may be stuck on a daemon or CLI that never answers. Work that ends inside the deadline is saved; what
