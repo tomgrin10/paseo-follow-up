@@ -91,7 +91,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | UI | `index.client.tsx`, `client/` | [client](docs/client.md) |
 | Shared copy and errors | `shared/presentation.ts`, `shared/errors.ts` | [client](docs/client.md) |
 | Tests, checks and README screenshots | `tests/`, `scripts/`, `scripts/screenshots.mjs`, `button-visibility.test.mjs` | [testing](docs/testing.md) |
-| Releases | `changes/`, `CHANGELOG.md`, `scripts/release-notes.mjs`, `.github/workflows/` | [releasing](docs/releasing.md) |
+| Releases | `changes/`, `CHANGELOG.md`, `scripts/release-notes.mjs`, `scripts/release-body.mjs`, `scripts/backfill-release-notes.mjs`, `.github/workflows/` | [releasing](docs/releasing.md) |
 
 ## Invariants
 
@@ -193,6 +193,8 @@ See [docs/releasing.md](docs/releasing.md). In short:
   npm workflow publish. Versions with a prerelease part (`1.4.0-beta.24`) publish under the `beta` dist-tag.
   Betas get no CHANGELOG section; a stable or a major's rc gets a CURATED one (release:notes writes a draft that
   check:notes refuses until it's rewritten). A major's rc (`2.0.0-rc.0`) carries the major's section, `## 2.0.0`.
+- Every GitHub release has notes in one format (`scripts/release-body.mjs`): a beta's page renders the fragments
+  added since the previous tag, a stable's or an rc's its curated section. In-app What's new stays major-only.
 - Don't bump the version in a feature PR.
 
 ## Common pitfalls
