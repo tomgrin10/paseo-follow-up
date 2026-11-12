@@ -104,3 +104,21 @@ test("harnessEnv resolves no external tool to a real binary outside the harness 
     assert.deepEqual(optOuts, ["check-wait.mjs"], "only the opt-in live-model check keeps a real tool");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("the codex stub keeps `codex app-server` connected, so a daemon's provider refresh never writes into a closed pipe", async () => {
+  // 2026-11-12: the stub exited 127, Paseo 0.15.4's provider refresh wrote to it, hit EPIPE and crashed the shots' daemon.
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { spawn } = await import("node:child_process");
+  const root = await mkdtemp(join(tmpdir(), "follow-stubs-"));
+  try {
+    const env = harnessEnv(root, { base: process.env });
+    const child = spawn("codex", ["app-server"], { env, stdio: ["pipe", "pipe", "pipe"] });
+    const exited = new Promise<number | null>(done => child.on("exit", code => done(code)));
+    await new Promise(r => setTimeout(r, 200));
+    assert.equal(child.exitCode, null, "still running after start");
+    await new Promise<void>((done, fail) => child.stdin.write('{"jsonrpc":"2.0","id":1,"method":"initialize"}\n', e => e ? fail(e) : done()));
+    child.stdin.end();
+    assert.equal(await exited, 0, "ends when the daemon closes its stdin");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

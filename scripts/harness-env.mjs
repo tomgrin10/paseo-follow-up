@@ -53,7 +53,11 @@ function stubbedPath(top, path, tools) {
   const stubs = join(top, ".harness-stubs");
   mkdirSync(stubs, { recursive: true });
   rmSync(stubs, { recursive: true, force: true }); mkdirSync(stubs, { recursive: true });
-  for (const tool of tools) writeFileSync(join(stubs, tool), `#!/bin/sh\necho "harness: ${tool} is stubbed; a harness run never reaches the host's real ${tool} (scripts/harness-env.mjs)" >&2\nexit 127\n`, { mode: 0o755 });
+  // `codex app-server` is a long-lived server the daemon writes to on every provider refresh: a stub that exits makes
+  // that write EPIPE, and Paseo 0.15.4 crashes on it (the shots' fake clock reaching the hour took the daemon down).
+  // That stub stays connected and never answers, so the daemon's own refresh deadline handles it; closing stdin ends it.
+  const server = (tool) => tool === "codex" ? `if [ "$1" = "app-server" ]; then exec cat >/dev/null; fi\n` : "";
+  for (const tool of tools) writeFileSync(join(stubs, tool), `#!/bin/sh\n${server(tool)}echo "harness: ${tool} is stubbed; a harness run never reaches the host's real ${tool} (scripts/harness-env.mjs)" >&2\nexit 127\n`, { mode: 0o755 });
   const entries = path.split(delimiter).filter(e => e && e !== stubs);
   const inside = e => { const r = relative(top, resolve(e)); return !r.startsWith("..") && !isAbsolute(r); };
   return [...entries.filter(inside), stubs, ...entries.filter(e => !inside(e))].join(delimiter);
