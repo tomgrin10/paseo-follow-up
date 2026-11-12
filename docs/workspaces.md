@@ -74,17 +74,25 @@ Tests: `tests/main-claim.test.ts`, `tests/main-handover.test.ts`.
 3. `reconcile` builds tasks from PR state: conflicts, failing required checks, review threads, restacks
    (`tasksFor` in `server/tasks.ts`). It then builds a pending **batch** for the main agent, with one prompt from
    `batchPrompt`, also in `server/tasks.ts`.
-4. Auto-sends a pending batch only when all of these hold:
+4. Auto-sends a pending batch exactly when `sendDecision(w, now)` (`shared/send-decision.ts`) says `send`. It is
+   the one rule: every surface's batch line shows its `reason` (status invariant
+   `the-send-line-matches-the-send-decision`), and it reads only what the refresh persisted before deciding
+   (`runtimeBusy`, `backgroundBusy`, `runtimeReason`, `sendWait`, PR reads, the batch's last refusal). It sends when:
    - Auto-send is on, nothing is held, and the agent isn't dormant or gone.
-   - The batch isn't a completion check.
-   - The main agent is loaded and recently used, not busy, and has no background work.
-   - No other batch is in flight, and 60 s have passed since the batch was created.
-   - PR observations are complete.
-   - Setup isn't holding auto-sends.
+   - The batch has no completion check.
+   - The main agent is loaded and recently used (else `sendWait` is `unloaded`), not busy, and has no background work.
+   - Setup isn't holding auto-sends (`sendWait` is `setup`).
+   - No other batch is open (`sending`, `sent`, `blocked`, `uncertain`).
+   - Every PR reads cleanly when the batch has PR tasks (`needsPrObservations`): "waits for a clean read of #2 (…)".
+   - No refusal in the last settle window, and 60 s (`SETTLE_MS`) have passed since the batch was created.
 
-   Otherwise the batch waits for the developer's Send (`follow.send`). The worker persists why it held an
-   auto-send for an idle-but-unloaded agent or for setup in `sendWait` (written only when it changes), so the status
-   model can say the real reason.
+   One pending batch per workspace is updated in place as tasks come and go, and its settle clock stays at the
+   first queued task: a task that joins a batch older than 60 s goes out on the next refresh, and a flapping check
+   can't keep it "in a moment". A batch is cancelled only when nothing is left to send.
+   A refused automatic send (the dispatch's own re-check: the agent just started a turn, task dependencies changed)
+   is stored on the batch as `refusal` and is the line's reason ("didn't send: … · tries again shortly"). It is
+   retried once per settle window, and cleared by a send or a changed task list. Otherwise the batch waits for the
+   developer's Send (`follow.send`).
 5. Batch states: `pending` → `sending` → `sent` → acknowledged (`acknowledge_batch`), or `blocked` or `uncertain`.
    - A sent batch with no acknowledgment after 2 idle minutes becomes `blocked`.
    - A reload mid-send makes it `uncertain` (`engine.recover()`).
@@ -117,8 +125,8 @@ agent waits too (`checkMainClaim`).
 
 `shared/status.ts` is the one place a user-facing status is computed. `batchView(w, now)` picks the batch that
 describes Follow-up's work right now: its phase (`queued`, `sent`, `stuck`), who it waits on (the agent's
-turn, the open batch, an idle agent Follow-up won't wake, setup, or you) and its one line. It mirrors the auto-send
-rules above. Home's bucket (`trackedGroup` in `shared/home.ts`), the header live line (`liveLine`), the panel's agent
+turn, the open batch, an idle agent Follow-up won't wake, setup, or you) and its one line. A queued batch's reason
+and who it waits on come from `sendDecision`, never a copy of its rules. Home's bucket (`trackedGroup` in `shared/home.ts`), the header live line (`liveLine`), the panel's agent
 card (`agentCard`) and Needs you all read it. Rules it encodes:
 
 - "Main agent is on it" only while a batch is really sent; a queued one reads "Queued for the main agent".

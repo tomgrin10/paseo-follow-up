@@ -15,6 +15,7 @@ import { DeliveryDeferred, ConversationGone, realTimers, withDeadline, type Time
 import { recordSnapshot } from "./deployment-anchor";
 import { pruneUnsent } from "./batch-archive";
 import { holdSuperseded, liftHold } from "../shared/status";
+import { sendDecision } from "../shared/send-decision";
 
 export interface Runtime {
   busy: boolean; reason: string | null; archived: boolean; backgroundBusy?: boolean;
@@ -32,7 +33,6 @@ export interface Runtime {
 }
 const GONE_REASON = "The main agent's conversation no longer exists, so Follow-up stopped sending to it. Start a new agent in this workspace to continue.";
 /** A batch that asks the agent to verify it's finished and declare Done. These never go out on their own. */
-export const completionBatch = (b: Batch): boolean => b.tasks.some(t => t.kind === "completion");
 export { interruptionHold };
 export interface Gateway {
   discover?(state: State, workspaceId?: string): Promise<DiscoveredWorkspace[]>;
@@ -235,16 +235,18 @@ export class Engine {
       // Persist the holds that live only in this refresh, so every surface can say why repairs wait (shared/status.ts).
       const sendWait = this.autoSendsHeld() ? "setup" : runtime.mainLoaded === false || runtime.mainRecent === false ? "unloaded" : null;
       if ((current.sendWait ?? null) !== sendWait) current = await this.store.mutate(state => { const w = findWorkspace(state, original.id); w.sendWait = sendWait; return w; });
+      // The refresh's runtime state is persisted above, so this reads the same inputs as every surface's line
+      // (shared/send-decision.ts). It never loads an idle agent (sendWait "unloaded") or sends the Done check.
       const pending = current.batches.find(b => b.state === "pending" && !isRecovery(b));
-      // Auto-send only reaches an agent that is loaded and recently used: sending to a dormant one would wake it.
-      // Completion checks never go out on their own; they wait for Tom or the agent's next live turn.
-      if (current.enable_auto_sends && !this.autoSendsHeld() && !current.archived && !current.hold && pending && !current.dormant && !current.goneAgent &&
-          !completionBatch(pending) && runtime.mainLoaded !== false && runtime.mainRecent !== false &&
-          !runtime.busy && !runtime.backgroundBusy && !runtime.reason &&
-          !current.batches.some(b => !isRecovery(b) && ["sending", "sent", "blocked", "uncertain"].includes(b.state)) &&
-          this.now() - Date.parse(pending.createdAt) >= this.settleMs &&
-          (!needsPrObservations(current, pending) || current.prs.every(p => !p.error && p.snapshot?.complete)))
-        await this.dispatch(current.id, pending.id, true).catch(() => undefined);
+      if (pending && sendDecision(current, this.now(), { settleMs: this.settleMs, batch: pending }).send)
+        await this.dispatch(current.id, pending.id, true).catch(async (error: unknown) => {
+          // A refusal is the line's reason until the next try (one per settle window), never swallowed.
+          const reason = error instanceof Error ? error.message : String(error);
+          await this.store.mutate(state => {
+            const b = findWorkspace(state, original.id).batches.find(b => b.id === pending.id);
+            if (b?.state === "pending") b.refusal = { reason, at: new Date(this.now()).toISOString() };
+          });
+        });
       current = findWorkspace(await this.store.snapshot(), original.id);
       const done = !current.archived && !!current.completion && completionBlockers(current, this.now()).length === 0;
       if (done || current.managedDoneLabel) {
@@ -346,7 +348,7 @@ export class Engine {
       if (this.stopped || !w.enable_tracking || w.archived || w.hold || (automatic && !w.enable_auto_sends) || !b || b.state !== "pending" || w.batches.some(other => other.id !== b.id && !isRecovery(other) && ["sending", "sent", "blocked", "uncertain"].includes(other.state))) throw new Error("Workspace or queue changed; refresh before sending");
       const eligible = tasksFor(w, this.now(), this.wording);
       if (b.tasks.some(t => t.kind === "obligation" && !eligible.some(e => e.key === t.key && e.fingerprint === t.fingerprint))) throw new Error("Task dependencies changed or deployment evidence expired. Refresh before sending.");
-      b.state = "sending";
+      b.state = "sending"; delete b.refusal;
       return { w, b };
     });
     return this.deliver(claimed, workspaceId, batchId);
@@ -427,9 +429,9 @@ export class Engine {
       return;
     }
     if (pending) {
-      const changed = JSON.stringify(pending.tasks) !== JSON.stringify(fresh);
-      pending.tasks = fresh;
-      if (changed) pending.createdAt = new Date(this.now()).toISOString();
+      // One queued message per workspace, updated in place: the settle clock stays at the first queued task, so a
+      // flapping check can't keep it "in a moment" forever. A changed list gets a fresh try after a refusal.
+      if (JSON.stringify(pending.tasks) !== JSON.stringify(fresh)) { pending.tasks = fresh; delete pending.refusal; }
     } else {
       pending = { id: randomUUID(), messageId: randomUUID(), tasks: fresh, state: "pending", createdAt: new Date(this.now()).toISOString(), sentAt: null, settledAt: null, attempts: 1, result: "", recipientAgentId: null, contextPath: null, activityAt: null, acknowledgmentError: null, recoveryHandoffs: [] };
       w.batches.push(pending);
