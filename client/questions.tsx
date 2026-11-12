@@ -158,7 +158,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   const pr = q.prKey ? w.prs.find(p => p.key === q.prKey) : null;
   const task = q.taskId ? w.obligations.find(o => o.id === q.taskId) : null;
   const deliveryColor = delivery?.tone === "success" ? c.statusSuccess : delivery?.tone === "warning" ? c.statusWarning : c.foregroundMuted;
-  const context = (!!q.background || !!q.links.length || pr || task) && <View style={{ gap: 8 }}>
+  const context = (!!q.background || !!q.links.length || pr || (task && !(inline && task.title.trim() === q.title.trim()))) && <View style={{ gap: 8 }}>
     {!!q.background && <RichText selectable linkColor={c.foreground} numberOfLines={dense ? 3 : undefined} style={t.meta}>{q.background}</RichText>}
     {!dense && q.links.map((link, i) => <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       <Icon name={link.url ? "Globe" : "FileText"} size={13} color={c.foregroundMuted} />
@@ -171,7 +171,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
       <Icon name="GitPullRequest" size={13} color={pr.snapshot?.state === "MERGED" ? mergedColor(c) : c.foregroundMuted} />
       <Text numberOfLines={1} style={[t.meta, { flexShrink: 1 }]}>About #{pr.number}{pr.snapshot?.title ? ` · ${pr.snapshot.title}` : ""}</Text>
     </View>}
-    {!dense && task && <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+    {!dense && task && !(inline && task.title.trim() === q.title.trim()) && <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       <Icon name="ListChecks" size={13} color={c.foregroundMuted} />
       <RichText linkColor={c.foreground} numberOfLines={2} style={[t.meta, { flexShrink: 1 }]}>{`Task: ${task.title}`}</RichText>
     </View>}
@@ -242,7 +242,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
     </View>
     {/* Same words as the brief card's, so a disabled Send always says why. */}
     {open && other && !words.trim() ? <Text style={t.small}>Write your answer, then send it.</Text>
-      : open && !dense && !compact && <Text style={t.small}>Send puts your answer straight into the asking agent's chat, even mid-turn. Follow-up keeps it under {q.id}.</Text>}
+      : open && !dense && !compact && !inline && <Text style={t.small}>Send puts your answer straight into the asking agent's chat, even mid-turn. Follow-up keeps it under {q.id}.</Text>}
   </View>;
   // In the pill popover the question scrolls and the answer field and actions stay put, so Send is never cut off.
   if (pinned) {
