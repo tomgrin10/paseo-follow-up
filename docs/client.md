@@ -140,6 +140,29 @@ can only return plugin items, so a transformed call always leaves the group and 
 - **Tests and screenshots:** `tests/chat-grouping.test.ts`. `scripts/check-chat-grouping.mjs` renders a synthetic
   mixed turn in an isolated daemon for screenshots; run it through the harness slot.
 
+## Created agent and workspace cards
+
+Paseo's `create_agent` and `create_workspace` tool calls render as a card that opens what they made
+(`client/created.tsx`, parsing in `shared/created.ts`). The card replaces the raw call, so Paseo's "N tool calls"
+group no longer counts it, the same as the Done card (a transform can only replace an item).
+
+- **Card:** a provider tile with a presence dot (green while working, hollow when closed), the title, the status word
+  and a chevron, then "New agent · <model> · <workspace>" or "New workspace · <branch> · <repo>". A Follow-up line
+  shows only when there is something to say: the workspace's first open question, up to two PR chips, or its live
+  line. An agent's card shows it only when that agent is the workspace's main agent.
+- **States:** starting and creating (Follow-up's spinner), created (tappable), closed (words only, no chevron, never
+  opened, since opening would load it), failed ("Couldn't start <title>", the error on two lines, in full in the
+  accessibility label).
+- **Opening:** timeline items get no navigation, so a tap opens Follow-up's Home screen with `open=<agentId>` or
+  `openWorkspace=<id>`. `useNextRelay` hands off to the host: the agent's chat, or the workspace with its Follow-up
+  panel docked.
+- **Live facts:** `follow.created-items`, from the engine's directory snapshot as it stands (`DaemonDirectory.snapshot()`: it never waits on or asks the daemon, and nothing is
+  woken) and the store. Agent states go through `taskAgentStates` and `PRESENCE` (`shared/task-status.ts`), the same
+  words and link rule as task lines. Cards in one chat share one request; they poll every 20 s only while a card shows
+  an open agent and the app is visible.
+- **Feature detection:** without `addTimelineTransformer` / `addTimelineRenderer` nothing is registered; a call whose
+  result has no `agentId` / `workspaceId` keeps Paseo's plain row. Tests: `tests/created-card.test.ts`.
+
 ## Shared copy
 
 - `shared/presentation.ts` is the PR status label and tone (`prPresentation`) and the Graphite link.

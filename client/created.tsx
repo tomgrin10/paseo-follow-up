@@ -1,0 +1,128 @@
+import { View } from "react-native";
+import { useQuery } from "@tanstack/react-query";
+import { useRpc, type PluginClientContext, type PluginTimelineItemProps } from "@getpaseo/plugin/client";
+import { Icon } from "@getpaseo/plugin/client/ui";
+import { Pressable, Text } from "./text";
+import { Spinner } from "./motion";
+import { BRAND_ICONS } from "./brand-icons";
+import { mergedColor, tint } from "./theme";
+import { appVisible } from "./visibility";
+import { createdItemsRpc } from "../shared/contracts";
+import { CREATED_KIND, CREATED_VERSION, cardFollow, cardMeta, cardPresence, cardTitle, createdCard, createdCardSchema, type CreatedCard, type CreatedLive } from "../shared/created";
+
+/** Live facts refresh this often while a card shows an open agent and the app is visible. */
+export const CREATED_POLL_MS = 20_000;
+
+type Rpc = (input: { agentIds: string[]; workspaceIds: string[] }) => Promise<CreatedLive>;
+
+/**
+ * Cards in one chat share one request: ids asked for within a frame go out together, and each card reads its own
+ * entry from the answer. The RPC itself reads the engine's cached directory rows, so this is never a daemon list call.
+ */
+function batcher() {
+  let pending: { agents: Set<string>; workspaces: Set<string>; waiters: ((v: CreatedLive | null) => void)[]; rpc: Rpc } | null = null;
+  return (rpc: Rpc, card: CreatedCard): Promise<CreatedLive | null> => new Promise(resolve => {
+    if (!pending) {
+      const batch = pending = { agents: new Set<string>(), workspaces: new Set<string>(), waiters: [] as ((v: CreatedLive | null) => void)[], rpc };
+      setTimeout(() => {
+        pending = null;
+        batch.rpc({ agentIds: [...batch.agents].slice(0, 40), workspaceIds: [...batch.workspaces].slice(0, 40) })
+          .then(v => batch.waiters.forEach(w => w(v)), () => batch.waiters.forEach(w => w(null)));
+      }, 16);
+    }
+    if (card.id) (card.kind === "agent" ? pending.agents : pending.workspaces).add(card.id);
+    if (card.workspaceId && card.kind === "agent") pending.workspaces.add(card.workspaceId);
+    pending.waiters.push(resolve);
+  });
+}
+const batch = batcher();
+
+export type CreatedDeps = { openAgent(agentId: string): void; openWorkspace(workspaceId: string): void };
+
+function CreatedCardView({ item, theme, layout, deps }: PluginTimelineItemProps<CreatedCard> & { deps: CreatedDeps }) {
+  const c = theme.colors;
+  const card = item.data;
+  const compact = layout.compact;
+  const rpc = useRpc(createdItemsRpc) as unknown as Rpc;
+  const query = useQuery({
+    queryKey: ["follow-up", "created", card.kind, card.id],
+    queryFn: async () => (await batch(rpc, card)) ?? { agents: {}, workspaces: {} },
+    enabled: card.phase === "created" && !!card.id,
+    staleTime: 10_000,
+    // Only while the agent is still open (closed never changes back) and the app is in the foreground.
+    refetchInterval: q => card.kind === "agent" && card.id && q.state.data?.agents[card.id]?.state !== "closed" && appVisible() ? CREATED_POLL_MS : false,
+  });
+  const live = query.data;
+  const presence = cardPresence(card, live);
+  const title = cardTitle(card, live);
+  const meta = cardMeta(card, live);
+  const follow = cardFollow(card, live);
+  const opens = presence.opens && !!card.id;
+  const failed = card.phase === "failed";
+  const dot = presence.tone === "working" ? c.statusSuccess : presence.tone === "closed" ? "closed" : null;
+  const wordColor = presence.tone === "working" ? c.statusSuccess : c.foregroundMuted;
+  const tile = compact ? 32 : 28;
+  const chipColor = (tone: "success" | "danger" | "warning" | "merged" | "muted") => tone === "success" ? c.statusSuccess : tone === "danger" ? c.statusDanger : tone === "warning" ? c.statusWarning : tone === "merged" ? mergedColor(c) : c.foregroundMuted;
+  const glyph = card.phase === "starting" ? <Spinner color={c.foregroundMuted} size={13} label={card.kind === "agent" ? "Starting" : "Creating"} />
+    : failed ? <Icon name="CircleAlert" size={15} color={c.statusDanger} />
+    : card.kind === "workspace" ? <Icon name="GitBranch" size={15} color={c.foregroundMuted} />
+    : card.provider === "claude" ? <Icon icon={BRAND_ICONS.claude} size={15} color={c.foregroundMuted} />
+    : <Icon name={card.provider === "codex" ? "SquareTerminal" : "Bot"} size={15} color={c.foregroundMuted} />;
+  const label = [title, presence.word, meta, follow?.question ? `${follow.question.id} · ${follow.question.title}` : "", ...(follow?.chips.map(x => x.text) ?? []), follow?.line ?? ""].filter(Boolean).join(". ");
+  const open = () => { if (!opens || !card.id) return; if (card.kind === "agent") deps.openAgent(card.id); else deps.openWorkspace(card.id); };
+
+  const body = <>
+    <View style={{ width: tile, height: tile, borderRadius: 7, backgroundColor: c.surface2, alignItems: "center", justifyContent: "center", marginTop: 1 }}>
+      {glyph}
+      {dot && <View style={{ position: "absolute", right: -3, bottom: -3, width: 10, height: 10, borderRadius: 5, borderWidth: 2, borderColor: c.surface1,
+        backgroundColor: dot === "closed" ? c.surface1 : dot }}>{dot === "closed" && <View style={{ flex: 1, borderRadius: 3, borderWidth: 1.5, borderColor: c.foregroundMuted }} />}</View>}
+    </View>
+    <View style={{ flex: 1, minWidth: 0 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, color: c.foreground, fontSize: compact ? 14 : 13, lineHeight: compact ? 20 : 18, fontWeight: card.phase === "created" && opens ? "600" : "500" }}>{title}</Text>
+        {!!presence.word && <Text style={{ color: wordColor, fontSize: 12, lineHeight: 17 }}>{presence.word}</Text>}
+        {opens && <Icon name="ChevronRight" size={14} color={c.foregroundMuted} />}
+      </View>
+      {!!meta && <Text numberOfLines={failed ? 2 : 1} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 17, marginTop: 1 }}>{meta}</Text>}
+      {follow && <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 6 }}>
+        {follow.question && <View style={{ flexDirection: "row", alignItems: "center", gap: 4, borderRadius: 5, paddingHorizontal: 6, paddingVertical: 1, backgroundColor: tint(c.statusWarning, c) }}>
+          <Icon name="CircleHelp" size={12} color={c.statusWarning} /><Text style={{ color: c.statusWarning, fontSize: 12, lineHeight: 17, fontVariant: ["tabular-nums"] }}>{follow.question.id}</Text>
+        </View>}
+        {follow.question && <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, color: c.foregroundMuted, fontSize: 12, lineHeight: 17 }}>{follow.question.title}</Text>}
+        {follow.chips.map(x => <View key={x.text} style={{ borderRadius: 5, paddingHorizontal: 6, paddingVertical: 1, backgroundColor: x.tone === "muted" ? c.surface2 : tint(chipColor(x.tone), c) }}>
+          <Text style={{ color: chipColor(x.tone), fontSize: 12, lineHeight: 17, fontVariant: ["tabular-nums"] }}>{x.text}</Text>
+        </View>)}
+        {!!follow.line && <Text numberOfLines={1} style={{ flexShrink: 1, color: c.foregroundMuted, fontSize: 12, lineHeight: 17 }}>{follow.line}</Text>}
+      </View>}
+    </View>
+  </>;
+  const frame = { flexDirection: "row" as const, gap: 10, alignItems: "flex-start" as const, borderRadius: 10, borderWidth: 1, borderColor: c.border, paddingHorizontal: compact ? 14 : 12, paddingVertical: compact ? 12 : 10, minHeight: compact ? 56 : undefined };
+  return <View style={{ width: "100%", maxWidth: compact ? undefined : 560, marginVertical: 4 }}>
+    {opens
+      ? <Pressable accessibilityRole="link" accessibilityLabel={label} accessibilityHint={card.kind === "agent" ? "Opens the agent" : "Opens the workspace"} onPress={open}
+          style={state => ({ ...frame, backgroundColor: state.pressed || (state as { hovered?: boolean }).hovered ? c.surface2 : c.surface1 })}>{body}</Pressable>
+      : <View accessible accessibilityLabel={label} style={{ ...frame, backgroundColor: c.surface1 }}>{body}</View>}
+  </View>;
+}
+
+/**
+ * Paseo's create_agent / create_workspace calls become a card that opens what they made (docs/client.md). The card
+ * replaces the raw call, so Paseo's "N tool calls" group no longer counts it, like the Done card. Hosts whose client
+ * API has no timeline transformers or renderers get nothing registered and keep the plain row; a call whose result
+ * carries no id keeps it too (`createdCard` returns null).
+ */
+export function contributeCreated(client: PluginClientContext, deps: CreatedDeps): () => void {
+  const api = client as Partial<Pick<PluginClientContext, "addTimelineTransformer" | "addTimelineRenderer">>;
+  if (typeof api.addTimelineTransformer !== "function" || typeof api.addTimelineRenderer !== "function") return () => {};
+  const removers = [
+    client.addTimelineTransformer({
+      id: "follow-created", query: { itemType: "tool_call" },
+      transform({ item }) {
+        const card = createdCard(item);
+        return card ? { items: [{ type: "plugin" as const, kind: CREATED_KIND, version: CREATED_VERSION, data: card }] } : undefined;
+      },
+    }),
+    client.addTimelineRenderer({ kind: CREATED_KIND, version: CREATED_VERSION, schema: createdCardSchema, Component: props => <CreatedCardView {...props} deps={deps} /> }),
+  ];
+  return () => { for (const r of removers) void r(); };
+}
