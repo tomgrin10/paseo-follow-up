@@ -74,13 +74,29 @@ export function taskStatus(o: Obligation, w: Workspace, agents: TaskAgents = w.t
   if (finishedTask(o)) return { text: o.status === "done" ? "Done" : "Waived", tone: o.status === "done" ? "done" : "waived", agentId: null };
   const q = linkedQuestion(o, w);
   if (q) return { text: q.answer ? `${q.id} · answered, waiting on the agent` : `${q.id} · waiting on your answer`, tone: "question", agentId: null };
-  if (o.status === "blocked") return blockedOnDeveloper(o) ? { text: "Needs a decision", tone: "blocked", agentId: null } : { text: "Blocked", tone: "blocked", agentId: null };
+  if (o.status === "blocked") return blockedOnDeveloper(o) ? { text: "Needs a decision", tone: "blocked", agentId: null } : { text: blockedLine(o, w), tone: "blocked", agentId: null };
   if (o.status === "working") return workingLine(o, agents);
   // An Auto task riding the next message reads like every task in it: just Queued or Sent (the strip says when and why).
   const delivery = obligationDelivery(w, o);
   if (delivery) return { text: delivery === "sent" ? "Sent" : "Queued", tone: delivery, agentId: null };
   const schedule = taskSchedule(o, w, now);
   return schedule.ready ? { text: "Ready to send", tone: "ready", agentId: null } : { text: schedule.label, tone: "scheduled", agentId: null };
+}
+
+/**
+ * A task blocked on something other than the developer says what, in a few words: "Blocked · waits for Q1" when its
+ * evidence names an open question, else the evidence's first sentence (skipping "Nothing needed from the developer"),
+ * cut at a word near 56 characters. No evidence: "Blocked".
+ */
+export function blockedLine(o: Pick<Obligation, "evidence">, w: Pick<Workspace, "questions">): string {
+  const evidence = (o.evidence ?? "").trim();
+  const open = new Set((w.questions ?? []).filter(q => !q.answer && !q.closed).map(q => q.id));
+  const named = [...evidence.matchAll(/\bQ\d+\b/g)].map(m => m[0]).find(id => open.has(id));
+  if (named) return `Blocked · waits for ${named}`;
+  const sentence = evidence.split(/(?<=[.!?])\s+|\n+/).map(x => x.trim().replace(/[.!?]+$/, "")).find(x => x && !/^nothing (is )?needed\b/i.test(x));
+  if (!sentence) return "Blocked";
+  const short = sentence.length <= 56 ? sentence : `${sentence.slice(0, 56).replace(/[\s,;:]+\S*$/, "")}…`;
+  return `Blocked · ${/^[A-Z][a-z]/.test(short) ? short[0].toLowerCase() + short.slice(1) : short}`;
 }
 
 /** True when a line claims an agent is working: the words the invariant guards. */

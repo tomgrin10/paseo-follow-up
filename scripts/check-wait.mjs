@@ -153,7 +153,8 @@ async function runCase(workspaceId, label, command, maxWait, action) {
 try {
   // The daemon runs in this process, so process.env itself is the harness env. Only the Claude provider gets the
   // real config dir (actualClaude, for credentials), explicitly; Follow-up's hooks land in userHome.
-  applyEnv(harnessEnv(root, { home: userHome, paseoHome: home, set: { PASEO_DAEMON_URL: url } }));
+  // The one live-model check: its Claude agent runs the real claude CLI with the developer's credentials (opt-in, skipped in CI).
+  applyEnv(harnessEnv(root, { home: userHome, paseoHome: home, set: { PASEO_DAEMON_URL: url }, real: ["claude"] }));
   await writeConfig();
   // Explicit activation only (as check-install.mjs): no tracking, so Follow-up doesn't call gh or a model here.
   await mkdir(join(home, "plugin-data", pluginId), { recursive: true });

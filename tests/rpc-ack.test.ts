@@ -41,6 +41,9 @@ const EXEMPT: Record<string, string> = {
   "follow.reviewer-suggestions": "Suggestions are the repository's collaborators, from GitHub; read-only.",
   "follow.pr-workflow": "Settings → PR workflow resolves each repository's workflow (Graphite or GitHub); read-only.",
   "follow.set-pr-workflow": "Saves the setting, then re-resolves the workflow for the view it returns.",
+  // Rename with AI: the dialog shows "Suggesting a name…" and Try again, and the rename is Paseo's own title.
+  "follow.rename-status": "Reads the workspace's name from Paseo and, with suggest, waits on the model; changes nothing but the day's count.",
+  "follow.rename-workspace": "Setting Paseo's workspace title is the action; on a timeout the name and the undo ledger stay as they were.",
   // Settings screens: reads, or a toggle saved before the slow part.
   "follow.project-settings": "The project list comes from Paseo; read-only.",
   "follow.set-project-tracking": "Checks the project against Paseo's list before saving the toggle.",

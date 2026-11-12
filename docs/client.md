@@ -61,7 +61,7 @@ Nothing polls while the app is hidden.
 | `client/home.tsx` | Home: the list and the detail pane, the Overseer card, the setup flow's place. |
 | `client/home-list.tsx` | The one virtualised list, used by Home and the sidebar view. |
 | `client/home-chrome.tsx` | Omnibox, sort menu, status strip, provider and memory meters. |
-| `client/row-menu.tsx`, `client/row-actions.ts`, `shared/row-menu.ts` | The row menu: right-click, long-press or the menu key (Shift+F10) on a Home row or search result. See [Row menu](#row-menu). |
+| `client/row-menu.tsx`, `client/menu-item.tsx`, `client/row-actions.ts`, `shared/row-menu.ts`, `client/panel-menu.tsx`, `client/rename.tsx` | The row menu: right-click, long-press or the menu key (Shift+F10) on a Home row or search result. See [Row menu](#row-menu). |
 | `client/home-view.ts` | Home's derived model: sort choice, priorities, titles for search, limits. |
 | `client/home-data.ts` | Paseo's own workspace list, for untracked rows (Quiet) and header buttons. |
 | `client/sidebar-view.tsx`, `client/sidebar-visibility.ts` | Home's list as Paseo's sidebar (on hosts that support it), and its registration. |
@@ -71,7 +71,7 @@ Nothing polls while the app is hidden.
 | `client/stacks.tsx` | Stacks drawn top to base. |
 | `client/pr-sheet.tsx`, `client/pr-controls.tsx` | One PR's sheet, with merge and reviewer controls. |
 | `client/reviewers.tsx` | Reviewer lists and the picker. |
-| `client/needs-you.tsx` | The workspace's decision queue (Send repairs, Merge, Resume, Retry, Answer). |
+| `client/needs-you.tsx` | The workspace's one Needs you block: the asks (question cards, the brief), then the decision rows (Send repairs, Merge, Resume, Retry, Check). |
 | `client/questions.tsx` | The question dialog and answer form. |
 | `client/tasks.tsx` | Tasks and their triggers. Repairs are task rows too (Q49): the next-message strip first (Preview, Send now, Open agent while sent), PR-condition rows with their PR chip, the repair task sheet (per-task Auto-send, the message with its line highlighted). Rows come from `shared/task-rows.ts`. |
 | `client/spec.tsx` | The spec link chip, row and sheet. The chip sits in the references line (`client/linked.tsx`). |
@@ -110,15 +110,28 @@ row) for quick moves without opening it. `rowMenu()` in `shared/row-menu.ts` lis
 2. Answer Q<n> for up to two open questions.
 3. Resume follow-up, Send N repairs and Retry repairs, each shown only when it applies.
 4. Open chat, and Ask the Overseer about this (it pre-fills the omnibox and doesn't send).
-5. Copy branch name, Copy PR link(s), Rewrite Summary, Make <agent> the main agent, and Stop following… (which asks
-   first).
+5. Copy branch name, Copy PR link(s), Rename with AI…, Rewrite summary, Make <agent> the main agent, and Stop
+   following… (which asks first).
+
+The same menu opens from the workspace panel header's More button (`client/panel-menu.tsx`, the workspace's own
+`ws:<id>` row) and from the rows of Follow-up's sidebar view (`client/sidebar-view.tsx`), so there is one menu
+everywhere. Rename with AI… opens the rename dialog (`client/rename.tsx`, [ai-roles](ai-roles.md#rename-with-ai)).
+In the sidebar view there is no omnibox, so Ask the Overseer is left out (not shown disabled), and Open and Answer
+open the agent's chat.
 
 Rules:
 
 - **Rows only.** The DOM `contextmenu` listener sits on each row's own node, so the browser's menu stays everywhere
   else. `tests/row-menu.test.ts` fails on a `contextmenu` listener anywhere else.
+- **Every list has it** (`every-list-row-has-the-row-menu`). `menu` is required on `HomeList` (and the opener on
+  its rows), so a new list surface can't ship without it and fall back to the platform's Copy/Paste menu. The test
+  checks every `<HomeList>` in `client/` passes the shared `useRowMenu`.
 - **Parity.** Each action is a `ROW_ACTIONS` entry that names its agent tool, or why it needs none (open, copy,
   pre-fill). Every pick goes through `runAction` and the RPC its usual button calls. Both are tested.
+- **One item layout** (`menu-glyphs-center-on-their-item`). Every menu item, here and in Home's sort menu, renders
+  `MenuItemContent` from `client/menu-item.tsx`: the leading glyph's slot is centred on the item (a check beside a
+  two-line option, not at its top) and the glyph grows on touch with the text. `tests/menu-glyph.test.ts` fails on a
+  menu item that builds its own glyph slot.
 - **Layout.** On desktop it's a popover at the pointer, clamped inside the viewport (`placeMenu`). On a phone it's a
   sheet. It has `role=menu`, arrow keys and Home/End to move, Right and Left to open and close Later, Enter to pick,
   and Escape to close. Focus returns to the row.
