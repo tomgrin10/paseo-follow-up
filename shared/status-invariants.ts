@@ -14,6 +14,7 @@ import { agentCard, automaticHold, batchView, holdSuperseded } from "./status";
 import { followUpObligations } from "./follow-up";
 import { cadence, movingReason, OBSERVATION_FRESH_MS, POLL_IDLE_MS, RUNNING_POLL_MS, TICK_MS } from "./poll";
 import { staleUpdatePhase, type UpdatePhase } from "./updates";
+import { onceViolation } from "./needs-block";
 
 /**
  * Status invariants: what must hold for any workspace, whatever path changed it. Pure, no IO, and never throwing:
@@ -147,6 +148,15 @@ export const INVARIANTS: Invariant[] = [
         if (!other && option && (card.words ?? "") !== (q.answer.words ?? "").trim()) return `${q.id}'s card drops part of the note`;
       }
       return null;
+    },
+  },
+  {
+    id: "an-open-question-renders-once-per-surface",
+    why: "2026-11-12: the panel drew the agent's brief card and the Needs you list side by side, so one open question asked twice (the brief's decision and the Q row), with two answer paths. Each surface's Needs you block (shared/needs-block.ts) shows every open question once, inside the brief's card when the brief points at it.",
+    check(w, now) {
+      const items = needsYou(w, now);
+      const open = items.flatMap(i => i.kind === "question" ? [i.questionId] : []);
+      return onceViolation(items, [null, { questionIds: open.slice(0, 1) }, { questionIds: open }, { questionIds: [...open].reverse() }, { questionIds: ["Q0"] }]);
     },
   },
   {
