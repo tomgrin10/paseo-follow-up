@@ -9,7 +9,8 @@ import { DEFAULT_QUESTION_MODE, QUESTION_DEDUPE_MIGRATION, collapseDuplicateQues
 import { askQuestion, needsYouQuestions, recordAnswer, syncTaskQuestions, withdrawQuestion } from "./server/questions";
 import { agentSetSpec, developerSetSpec } from "./server/spec";
 import type { PluginServerContext, PluginHandlerContext, PluginHookContext, PluginSessionOpenRequest } from "@getpaseo/plugin/server";
-import type { PluginRpcContract } from "@getpaseo/plugin";
+import type { PluginRpcContract, PluginSubscriptionContract } from "@getpaseo/plugin";
+import { ValueFeed, WorkspacesFeed } from "./server/feeds";
 import type { ZodType, output as zOutput } from "zod";
 import { mkdir, writeFile } from "node:fs/promises";
 import { isTimeZone } from "./shared/inbox";
@@ -65,7 +66,7 @@ import { commandName } from "./shared/pr-workflow";
 import { projectRepo } from "./server/daemon";
 import { batchArchive, pruneUnsent } from "./server/batch-archive";
 import { statusCheck } from "./server/status-check";
-import { NO_USAGE } from "./shared/usage";
+import { NO_USAGE, usageKey } from "./shared/usage";
 import { activeWindowMs, conversationGone, DEFAULT_ACTIVE_WINDOW_DAYS } from "./server/agent-load";
 import { ACTIVE_SCOPE_MIGRATION, PRUNE_MIGRATION, autoSendsByDefault, FOLLOW_EVERY_MIGRATION, followsByDefault, followsEvery, migrateFollowEvery, optedOut } from "./shared/settings";
 import { Overseer, OVERSEER_TOOLS, type OverseerPaseo, type OverseerTool, providerModel } from "./server/overseer";
@@ -147,6 +148,9 @@ export default function contribute(server: PluginServerContext) {
     const run = MAIN_WORK.has(contract.name) ? (async (input: { agentId?: string }, context: PluginHandlerContext) => { const out = await (handler as (i: unknown, c: PluginHandlerContext) => unknown)(input, context); if (input?.agentId) await noteMainWork(input.agentId).catch(() => undefined); return out; }) as typeof handler : handler;
     handlers.set(contract.name, { input: contract.input, run: run as never }); server.handle(contract, rpcTiming.timed(contract.name, run as (i: unknown, c: PluginHandlerContext) => unknown) as never);
   };
+  // What each subscription feed is made of may have changed (wired to the feeds below, server/feeds.ts). Cheap: a feed
+  // with no subscriber does nothing, and an unchanged value pushes nothing.
+  const feeds = { workspaces: () => {}, inbox: () => {}, home: () => {} };
   const noteMainWork = async (agentId: string) => {
     // A cheap check on the snapshot first: almost every call has no open handover, so nothing is written.
     if (!(await store.snapshot()).workspaces.some(w => mainWorkDue(w, agentId, Date.now()))) return;
@@ -164,7 +168,7 @@ export default function contribute(server: PluginServerContext) {
   // path writes here, so one check covers them all; tests/stale-brief.test.ts).
   // Not awaited: onChanged runs inside the store's write queue, and resolving a brief can write the store again
   // (settled), which would wait on this very queue forever (harness 2026-11-11: follow.answer-question timed out).
-  store.onChanged = async state => { await writeScopes(state); void inbox.questionsChanged(state.workspaces).catch(() => undefined); };
+  store.onChanged = async state => { await writeScopes(state); void inbox.questionsChanged(state.workspaces).catch(() => undefined); feeds.workspaces(); };
   const agentHooks = new AgentHooks(directory, clientEntry());
   const historyCache = HistoryCache.at(directory);
   const gateway = new PaseoGateway(undefined, undefined, undefined, historyCache);
@@ -299,10 +303,13 @@ export default function contribute(server: PluginServerContext) {
     if (overseer) { await overseer.writeDigest().catch(() => undefined); if (api) await overseer.ensure(api as unknown as OverseerPaseo, { periodic: true }).catch(() => undefined); }
     // The ranker's scheduled run (window, cadence, cap and the governor are its own checks). Never awaited: it can take minutes.
     if (ranker) void ranker.tick().catch(() => undefined);
+    // Wake-ups, the Overseer's status and the directory's titles move with this tick; the feeds diff, so a quiet tick
+    // pushes nothing.
+    feeds.inbox(); feeds.home();
     if (!stopped) inboxTimer = setTimeout(() => void inboxLoop(), 15_000);
   };
   // Hooks run in the background; an inbox failure never blocks the rest of Follow-up.
-  const inboxHook = (work: () => Promise<void>) => void (async () => { await ready; if (!stopped && !loadError) await work(); })().catch(error => { inboxError = error instanceof Error ? error.message : String(error); });
+  const inboxHook = (work: () => Promise<void>) => void (async () => { await ready; if (!stopped && !loadError) { await work(); feeds.inbox(); } })().catch(error => { inboxError = error instanceof Error ? error.message : String(error); });
   let unlock: (() => Promise<void>) | null = null;
   let stopped = false;
   /** Each agent's latest started turn, so a turn end can tell it was already replaced (holdOnTurnEnd). */
@@ -428,6 +435,7 @@ export default function contribute(server: PluginServerContext) {
     await ready;
     if (stopped || loadError) return;
     await engine.tick({ background: true });
+    feeds.workspaces();
     // Startup is done once the first tick is: release what it grew (see server/memory.ts).
     if (!compacted) { compacted = true; compactHeap(); }
     if (!stopped) timer = setTimeout(() => void loop(), TICK_MS);
@@ -1164,7 +1172,44 @@ export default function contribute(server: PluginServerContext) {
   // Home, the sidebar badge and the pills poll this; an unchanged list answers in a few bytes (see inboxAnswer).
   handle(rpc.inboxListRpc, async ({ etag }) => { await requireReady(); return inboxAnswer({ ...await inbox.list(), error: inboxError }, etag); });
   handle(rpc.inboxBriefRpc, async ({ agentId }) => { await requireReady(); return { brief: await inbox.brief(agentId) }; });
-  handle(rpc.inboxActRpc, async (input, context) => { await requireReady(); return inbox.act(input, actorOf(context)); });
+  handle(rpc.inboxActRpc, async (input, context) => { await requireReady(); const out = await inbox.act(input, actorOf(context)); feeds.inbox(); return out; });
+
+  // Subscriptions (Paseo 0.16): every open client used to poll these reads (about 17 a minute for an idle Home); now
+  // the worker pushes from state it already holds, one shared serve per topic (server/feeds.ts, invariant
+  // idle-client-makes-at-most-one-rpc-a-minute). A 0.15 host serves no subscriptions, and its clients keep polling.
+  const workspacesFeed = new WorkspacesFeed(listCache, () => store.snapshot(), () => loadError ?? hookError ?? engine.error);
+  const inboxFeed = new ValueFeed({ read: async () => { await requireReady(); return inboxAnswer({ ...await inbox.list(), error: inboxError }, undefined); }, key: v => v.etag ?? JSON.stringify(v) });
+  let usageWatch: { close(): void } | null = null;
+  const homeFeed = new ValueFeed({
+    read: async () => {
+      await requireReady();
+      const [items, rank, overseerView] = await Promise.all([priorityStore.read(), ranker!.status(), overseerStatus()]);
+      // The worker's live resources change every tick: the client reads those once when Home opens (follow.usage).
+      const meters = governor.allowsExtras() ? await usage.read() : NO_USAGE;
+      return { priorities: items, rank, overseer: overseerView, usage: { available: meters.available, source: meters.source, accounts: meters.accounts }, usageLive: !!usageWatch };
+    },
+    key: v => JSON.stringify([v.priorities, v.rank, v.overseer, usageKey(v.usage), v.usageLive]),
+    // Smart Session's files are watched only while someone looks at Home (server/usage.ts watch()).
+    onFirst: () => { usageWatch = usage.watch(() => void homeFeed.changed()); },
+    onLast: () => { usageWatch?.close(); usageWatch = null; },
+  });
+  const displayFeed = new ValueFeed({ read: () => displaySettings.read() });
+  feeds.workspaces = () => void workspacesFeed.changed();
+  feeds.inbox = () => void inboxFeed.changed();
+  feeds.home = () => void homeFeed.changed();
+  priorityStore.onWrite = feeds.home;
+  ranker!.onRunChange = feeds.home;
+  let displayOff: (() => void) | null = null;
+  try { if (typeof (displaySettings as { subscribe?: unknown }).subscribe === "function") displayOff = displaySettings.subscribe(() => void displayFeed.changed()); } catch { /* 0.15: polled */ }
+  // Straight to the host, never into `handlers` (see handle above). The handler returns at once: a returned promise
+  // would close the subscription when it settles.
+  const serve = <I extends ZodType, E extends ZodType>(contract: PluginSubscriptionContract<I, E>, run: (input: zOutput<I>, push: (event: unknown) => Promise<void>, signal: AbortSignal) => void) => {
+    try { server.handle(contract, (input, context) => { run(input, context.push as (event: unknown) => Promise<void>, context.signal); }); } catch { /* A 0.15 host: no subscriptions. */ }
+  };
+  serve(rpc.workspacesFeed, (input, push, signal) => workspacesFeed.serve(input.since, push, signal));
+  serve(rpc.inboxFeed, (_input, push, signal) => inboxFeed.serve(push, signal));
+  serve(rpc.homeFeed, (_input, push, signal) => homeFeed.serve(push, signal));
+  serve(rpc.displayFeed, (_input, push, signal) => displayFeed.serve(push, signal));
   handle(rpc.needsYouRpc, async ({ agentId, ...input }, { paseo }) => {
     await requireReady(); seen(paseo);
     if (!(await inboxSettings()).enable_inbox) throw new Error("The Needs-you inbox is off, so there's no brief to fill. Finish with your normal reply.");
@@ -1415,7 +1460,7 @@ export default function contribute(server: PluginServerContext) {
   ];
   return async () => {
     restoreConsole();
-    stopped = true; wait.close(); updater.stop(); pluginMove.stop(); governor.stop(); if (timer) clearTimeout(timer); if (aboutTimer) clearTimeout(aboutTimer); if (linkedTimer) clearTimeout(linkedTimer); aiJobs.stop(); ranker = null; if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); rpcTiming.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
+    stopped = true; wait.close(); updater.stop(); pluginMove.stop(); governor.stop(); if (timer) clearTimeout(timer); if (aboutTimer) clearTimeout(aboutTimer); if (linkedTimer) clearTimeout(linkedTimer); aiJobs.stop(); ranker = null; if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); rpcTiming.stop(); if (hookTimer) clearInterval(hookTimer); displayOff?.(); usageWatch?.close(); removers.forEach(remove => remove());
     // One deadline for every wait (worker-stop-never-waits-on-a-stuck-pass, server/teardown.ts): start-up and the work
     // in flight may be stuck on a daemon or CLI that never answers. Work that ends inside the deadline is saved; what
     // outlives it can't write, because the store closes before the lock is released.
