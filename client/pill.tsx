@@ -224,7 +224,7 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
       {flagged && <Text style={touch ? t.section : [t.small, { fontWeight: "600" }]}>In this workspace · {todoLabel(items)}</Text>}
       {asking
         ? <QuestionStepper workspace={w} theme={props.theme} compact={touch} bodyMaxHeight={touch ? undefined : 200} onDetails={setQuestion} onAnswered={() => deps.live.refresh()} />
-        : <NeedsYouList workspace={w} theme={props.theme} compact={touch} flush feature={touch}
+        : <NeedsYouList workspace={w} theme={props.theme} compact={touch} flush
           actions={{ after: () => deps.live.refresh(), openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion }} />}
       {asking && items.some(i => i.kind !== "question") && <Text numberOfLines={2} style={t.small}>Also: {items.filter(i => i.kind !== "question").map(i => i.title).join(" · ")}</Text>}
       <PrSheet workspace={w} prKey={sheet?.key ?? null} intent={sheet?.intent ?? null} theme={props.theme} compact={touch} browserReady={browser.data?.ready ?? false} onClose={() => { setSheet(null); deps.live.refresh(); }} />

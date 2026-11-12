@@ -6,6 +6,7 @@ import { flatItems, isMenuKey, moveFocus, placeMenu, sheetArmed, type RowMenuIte
 import type { Workstream } from "../shared/home";
 import { Button, text, type Theme } from "./kit";
 import { isLight, withAlpha, type Colors } from "./theme";
+import { MenuItemContent, menuItemRow } from "./menu-item";
 
 /**
  * The row menu's two shapes: a popover at the pointer (right-click, or the menu key at the row) and, on touch, a sheet
@@ -204,12 +205,12 @@ function Sheet({ menu, theme, expanded, confirm, setConfirm, choose: pick, close
 function MenuRow({ item, theme, touch, child = false, open = false, active = false, ring = false, nodeRef, onHover, onPress }: {
   item: RowMenuItem; theme: Theme; touch: boolean; child?: boolean; open?: boolean; active?: boolean; ring?: boolean; nodeRef?: (n: DomNode | null) => void; onHover?: () => void; onPress: () => void;
 }) {
-  const c = theme.colors; const t = text(c, touch);
+  const c = theme.colors;
   // Later opens in place (a disclosure), so it says expanded/collapsed, not "has a submenu".
   return <Pressable ref={nodeRef as never} accessibilityRole="menuitem" aria-expanded={item.children ? open : undefined}
     accessibilityState={item.children ? { expanded: open } : undefined} accessibilityLabel={item.hint ? `${item.label}: ${item.hint}` : item.label}
     onPress={onPress} onHoverIn={onHover}
-    style={state => ({ flexDirection: "row", alignItems: "center", gap: touch ? 12 : 9, minHeight: touch ? 48 : 32, paddingVertical: item.hint ? (touch ? 6 : 4) : 0,
+    style={state => ({ ...menuItemRow(touch), minHeight: touch ? 48 : 32, paddingVertical: item.hint ? (touch ? 6 : 4) : 0,
       paddingLeft: (touch ? 16 : 10) + (child ? (touch ? 30 : 23) : 0), paddingRight: touch ? 16 : 10,
       marginHorizontal: touch ? 0 : 4, borderRadius: touch ? 0 : 5,
       // Touch has no hover: a fill without a finger on it reads as selected.
@@ -217,14 +218,8 @@ function MenuRow({ item, theme, touch, child = false, open = false, active = fal
       // The keyboard's focus ring: a 2px ring at 3:1 or better, only while keys drive the menu.
       ...(ring ? { boxShadow: `inset 0 0 0 2px ${withAlpha(c.foreground, 0.55)}` } as object : {}),
       ...(web ? { outlineStyle: "none" } as object : {}) })}>
-    <View style={{ width: touch ? 18 : 14, alignItems: "center" }}>
-      {!child && <Icon name={item.icon} size={touch ? 17 : 14} color={c.foregroundMuted} />}
-    </View>
-    <View style={{ flex: 1, minWidth: 0 }}>
-      <Text numberOfLines={1} style={t.body}>{item.label}</Text>
-      {!!item.hint && <Text numberOfLines={1} style={touch ? t.meta : t.small}>{item.hint}</Text>}
-    </View>
-    {item.children && <Icon name={open ? "ChevronDown" : "ChevronRight"} size={touch ? 16 : 13} color={c.foregroundMuted} />}
+    <MenuItemContent theme={theme} touch={touch} glyph={child ? null : item.icon} quietGlyph label={item.label} hint={item.hint}
+      trailing={item.children && <Icon name={open ? "ChevronDown" : "ChevronRight"} size={touch ? 16 : 13} color={c.foregroundMuted} />} />
   </Pressable>;
 }
 
