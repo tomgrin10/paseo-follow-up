@@ -6,6 +6,7 @@ import { flatItems, isMenuKey, moveFocus, placeMenu, sheetArmed, type RowMenuIte
 import type { Workstream } from "../shared/home";
 import { Button, text, type Theme } from "./kit";
 import { isLight, withAlpha, type Colors } from "./theme";
+import { MenuItemContent, menuItemRow } from "./menu-item";
 
 /**
  * The row menu's two shapes: a popover at the pointer (right-click, or the menu key at the row) and, on touch, a sheet
@@ -134,15 +135,24 @@ function Popover({ menu, theme, expanded, setExpanded, confirm, setConfirm, choo
     return () => d?.removeEventListener("keydown", onKey, true);
   });
 
-  // Drawn invisibly once to measure, then placed inside the viewport (flipped up or left near an edge).
-  const at = size ? placeMenu(anchor, size, viewport) : { left: anchor.x, top: anchor.y };
+  // `fixed` is relative to the nearest transformed ancestor (the workspace panel is one), not always the window: the
+  // overlay measures where it really starts and how big it is, and the menu is placed in that box.
+  const overlay = useRef<DomNode | null>(null);
+  const [box, setBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const r = (overlay.current as unknown as { getBoundingClientRect?: () => { left: number; top: number; width: number; height: number } } | null)?.getBoundingClientRect?.();
+    if (r && r.width > 0) setBox({ x: r.left, y: r.top, width: r.width, height: r.height });
+  }, [viewport.width, viewport.height]);
+  const local = box ? { x: anchor.x - box.x, y: anchor.y - box.y } : anchor;
+  // Drawn invisibly once to measure, then placed inside the box (flipped up or left near an edge).
+  const at = size ? placeMenu(local, size, box ?? viewport) : { left: local.x, top: local.y };
   const fixed = { position: web ? "fixed" : "absolute" } as unknown as ViewStyle;
-  return <View style={[fixed, { top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000 }]}>
+  return <View ref={overlay as never} style={[fixed, { top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000 }]}>
     {/* Outside the menu: a click or another right-click closes it. */}
     <Pressable accessible={false} onPress={close} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
     <View role={confirm ? "alertdialog" : "menu"} aria-label={confirm ? confirm.label.replace(/…$/, "") : `Actions for ${menu.s.title}`}
       onLayout={e => { const { width, height } = e.nativeEvent.layout; if (!size || size.height !== height || size.width !== width) setSize({ width, height }); }}
-      style={{ position: "absolute", left: at.left, top: at.top, opacity: size ? 1 : 0, width: 256, maxHeight: viewport.height - 16, paddingVertical: 4, borderRadius: 8, backgroundColor: c.surface1, ...floating(c) }}>
+      style={{ position: "absolute", left: at.left, top: at.top, opacity: size ? 1 : 0, width: 256, maxHeight: (box ?? viewport).height - 16, paddingVertical: 4, borderRadius: 8, backgroundColor: c.surface1, ...floating(c) }}>
       {confirm ? <ConfirmBody theme={theme} item={confirm} onCancel={() => setConfirm(null)} onConfirm={() => choose(confirm)} cancelRef={confirmRef} /> : menu.sections.map((sec, si) => <View key={sec.key} style={si ? { marginTop: 4, paddingTop: 4, borderTopWidth: 1, borderTopColor: c.border } : undefined}>
         {sec.items.map(item => {
           const open = expanded === item.key;
@@ -195,12 +205,12 @@ function Sheet({ menu, theme, expanded, confirm, setConfirm, choose: pick, close
 function MenuRow({ item, theme, touch, child = false, open = false, active = false, ring = false, nodeRef, onHover, onPress }: {
   item: RowMenuItem; theme: Theme; touch: boolean; child?: boolean; open?: boolean; active?: boolean; ring?: boolean; nodeRef?: (n: DomNode | null) => void; onHover?: () => void; onPress: () => void;
 }) {
-  const c = theme.colors; const t = text(c, touch);
+  const c = theme.colors;
   // Later opens in place (a disclosure), so it says expanded/collapsed, not "has a submenu".
   return <Pressable ref={nodeRef as never} accessibilityRole="menuitem" aria-expanded={item.children ? open : undefined}
     accessibilityState={item.children ? { expanded: open } : undefined} accessibilityLabel={item.hint ? `${item.label}: ${item.hint}` : item.label}
     onPress={onPress} onHoverIn={onHover}
-    style={state => ({ flexDirection: "row", alignItems: "center", gap: touch ? 12 : 9, minHeight: touch ? 48 : 32, paddingVertical: item.hint ? (touch ? 6 : 4) : 0,
+    style={state => ({ ...menuItemRow(touch), minHeight: touch ? 48 : 32, paddingVertical: item.hint ? (touch ? 6 : 4) : 0,
       paddingLeft: (touch ? 16 : 10) + (child ? (touch ? 30 : 23) : 0), paddingRight: touch ? 16 : 10,
       marginHorizontal: touch ? 0 : 4, borderRadius: touch ? 0 : 5,
       // Touch has no hover: a fill without a finger on it reads as selected.
@@ -208,14 +218,8 @@ function MenuRow({ item, theme, touch, child = false, open = false, active = fal
       // The keyboard's focus ring: a 2px ring at 3:1 or better, only while keys drive the menu.
       ...(ring ? { boxShadow: `inset 0 0 0 2px ${withAlpha(c.foreground, 0.55)}` } as object : {}),
       ...(web ? { outlineStyle: "none" } as object : {}) })}>
-    <View style={{ width: touch ? 18 : 14, alignItems: "center" }}>
-      {!child && <Icon name={item.icon} size={touch ? 17 : 14} color={c.foregroundMuted} />}
-    </View>
-    <View style={{ flex: 1, minWidth: 0 }}>
-      <Text numberOfLines={1} style={t.body}>{item.label}</Text>
-      {!!item.hint && <Text numberOfLines={1} style={touch ? t.meta : t.small}>{item.hint}</Text>}
-    </View>
-    {item.children && <Icon name={open ? "ChevronDown" : "ChevronRight"} size={touch ? 16 : 13} color={c.foregroundMuted} />}
+    <MenuItemContent theme={theme} touch={touch} glyph={child ? null : item.icon} quietGlyph label={item.label} hint={item.hint}
+      trailing={item.children && <Icon name={open ? "ChevronDown" : "ChevronRight"} size={touch ? 16 : 13} color={c.foregroundMuted} />} />
   </Pressable>;
 }
 

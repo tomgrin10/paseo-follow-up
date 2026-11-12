@@ -74,20 +74,38 @@ Tests: `tests/main-claim.test.ts`, `tests/main-handover.test.ts`.
 3. `reconcile` builds tasks from PR state: conflicts, failing required checks, review threads, restacks
    (`tasksFor` in `server/tasks.ts`). It then builds a pending **batch** for the main agent, with one prompt from
    `batchPrompt`, also in `server/tasks.ts`.
-4. Auto-sends a pending batch only when all of these hold:
+4. Auto-sends a pending batch exactly when `sendDecision(w, now)` (`shared/send-decision.ts`) says `send`. It is
+   the one rule: every surface's batch line shows its `reason` (status invariant
+   `the-send-line-matches-the-send-decision`), and it reads only what the refresh persisted before deciding
+   (`runtimeBusy`, `backgroundBusy`, `runtimeReason`, `sendWait`, PR reads, the batch's last refusal). It sends when:
    - Auto-send is on, nothing is held, and the agent isn't dormant or gone.
-   - The batch isn't a completion check.
-   - The main agent is loaded and recently used, not busy, and has no background work.
-   - No other batch is in flight, and 60 s have passed since the batch was created.
-   - PR observations are complete.
-   - Setup isn't holding auto-sends.
+   - The batch has no completion check.
+   - The main agent is loaded and recently used (else `sendWait` is `unloaded`), not busy, and has no background work.
+   - Setup isn't holding auto-sends (`sendWait` is `setup`).
+   - No other batch is open (`sending`, `sent`, `blocked`, `uncertain`).
+   - Every PR reads cleanly when the batch has PR tasks (`needsPrObservations`): "waits for a clean read of #2 (…)".
+   - No refusal in the last settle window, and 60 s (`SETTLE_MS`) have passed since the batch was created.
 
-   Otherwise the batch waits for the developer's Send (`follow.send`). The worker persists why it held an
-   auto-send for an idle-but-unloaded agent or for setup in `sendWait` (written only when it changes), so the status
-   model can say the real reason.
+   One pending batch per workspace is updated in place as tasks come and go, and its settle clock stays at the
+   first queued task: a task that joins a batch older than 60 s goes out on the next refresh, and a flapping check
+   can't keep it "in a moment". A batch is cancelled only when nothing is left to send.
+   A refused automatic send (the dispatch's own re-check: the agent just started a turn, task dependencies changed)
+   is stored on the batch as `refusal` and is the line's reason ("didn't send: … · tries again shortly"). It is
+   retried once per settle window, and cleared by a send or a changed task list. Otherwise the batch waits for the
+   developer's Send (`follow.send`).
 5. Batch states: `pending` → `sending` → `sent` → acknowledged (`acknowledge_batch`), or `blocked` or `uncertain`.
-   - A sent batch with no acknowledgment after 2 idle minutes becomes `blocked`.
-   - A reload mid-send makes it `uncertain` (`engine.recover()`).
+   - No routine Retry (Q50). A sent batch whose agent sits idle 2 minutes (`UNACKNOWLEDGED_MS`) without an
+     acknowledgment is settled from GitHub (`settleUnacknowledged`, `shared/send-decision.ts`): tasks GitHub no
+     longer shows are done, and still-open ones go back in the queue (`completed` with `unacknowledged`, which
+     `reconcile` doesn't count as delivered). Once one unchanged condition (same task key and fingerprint) has gone
+     out `NO_PROGRESS_CAP` (2) times without an acknowledgment, the batch is `blocked` with that reason, and only then
+     does Needs you offer Retry (invariant `retry-only-when-capped`). A refused acknowledgment still blocks.
+   - A recovery batch follows the same rule: one that ends without an acknowledgment but caught the PR list up
+     (`inventory.syncedRevision`) is done.
+   - A reload mid-send makes it `uncertain` (`engine.recover()`). The next refresh reads the recipient's chat for the
+     batch's `messageId` (`PaseoGateway.arrived`, at most once a minute, loaded agents only so nothing wakes): found,
+     it's `sent`; missing, it goes back to `pending` under the same `messageId` and sends once; unknown, it stays
+     `uncertain` and asks the developer to check.
    - Never-sent cancelled batches are pruned to `archive/` (`server/batch-archive.ts`).
 6. **Holds.** A failed main-agent turn, or the developer's Stop, sets `hold` (`holdOnTurnEnd` in `shared/status.ts`),
    unless Session Guard owns the interruption (`server/session-guard.ts`, `sessionGuardOwnsInterruption`).
@@ -117,8 +135,8 @@ agent waits too (`checkMainClaim`).
 
 `shared/status.ts` is the one place a user-facing status is computed. `batchView(w, now)` picks the batch that
 describes Follow-up's work right now: its phase (`queued`, `sent`, `stuck`), who it waits on (the agent's
-turn, the open batch, an idle agent Follow-up won't wake, setup, or you) and its one line. It mirrors the auto-send
-rules above. Home's bucket (`trackedGroup` in `shared/home.ts`), the header live line (`liveLine`), the panel's agent
+turn, the open batch, an idle agent Follow-up won't wake, setup, or you) and its one line. A queued batch's reason
+and who it waits on come from `sendDecision`, never a copy of its rules. Home's bucket (`trackedGroup` in `shared/home.ts`), the header live line (`liveLine`), the panel's agent
 card (`agentCard`) and Needs you all read it. Rules it encodes:
 
 - "Main agent is on it" only while a batch is really sent; a queued one reads "Queued for the main agent".
@@ -145,9 +163,15 @@ The invariants in `shared/status-invariants.ts` check these over a grid of state
   `workspace_status` shows it. The task row and the Task sheet never read "working" off the stored status: their line
   comes from `taskStatus` (`shared/task-status.ts`), which names that agent and its live state from
   `taskAgents` on the workspace (Paseo's agent directory, metadata only, so nothing is woken): "<title> working" (spinner),
-  "<title> idle", or "<title> closed" ("Agent closed" when the name is unknown). With no agent recorded, or before the live state is known, it reads "In
-  progress". While the agent is open (working or idle) the row has **Open agent** and the sheet an **Open agent**
-  button, which open its chat; a closed or archived agent is words only. The engine refreshes `taskAgents` with
+  "<title> idle", "<title> closed" ("Agent closed" when the name is unknown) or "<title> archived". With no agent recorded it reads "In
+  progress"; with a recorded agent whose live state isn't known (not read yet, or Paseo doesn't list it) it reads
+  "Agent unavailable": words only, no live state, no link. While the agent is open (working or idle) the row has **Open agent** and the sheet an **Open agent**
+  button, which open its chat. Paseo reads an agent "closed" whenever its session ends (the idle unload, about an hour,
+  and every plugin reload), so a closed agent keeps the link, as "Open chat": opening it is the developer's own tap,
+  and Follow-up never reads, prefetches or previews it. Only an archived agent (or one Paseo no longer lists) is words
+  only. Paseo's agent list leaves archived agents out, so the directory remembers the archived ones it has seen
+  (`DaemonDirectory.withArchived`) and looks up a named agent it lacks once (`lookup`; see
+  [client.md](client.md#created-agent-and-workspace-cards)). One table, `PRESENCE` in `shared/task-status.ts`, sets the word and the link for task lines and chat cards. The engine refreshes `taskAgents` with
   `runtimeBusy` on every tick (`Gateway.observe`, `taskAgentStates` in `server/tasks.ts`), so every surface that
   derives "working" from a task reads the same states (invariant `a-task-only-says-working-when-its-agent-is`): the
   panel's live line spins on a task only while its agent runs, and otherwise reads "<task> · <the row's words>"; the

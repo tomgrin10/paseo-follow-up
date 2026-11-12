@@ -76,9 +76,9 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | --- | --- | --- |
 | Worker entry, RPC wiring, session attach, teardown | `index.server.ts`, `shared/contracts.ts`, `server/rpc-timing.ts`, `server/teardown.ts`, `server/daemon.ts`, `server/shared-file.ts`, `server/directory.ts`, `server/store.ts`, `server/list-cache.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
 | Discovery, ownership, main agent | `server/discovery.ts`, `server/workspace-agent.ts`, `server/background-agents.ts`, `server/submissions.ts`, `server/pr-owner.ts`, `server/exclusions.ts`, `server/history-cache.ts`, `server/recovery-handoff.ts`, `server/recovery-config.ts`, `shared/settings.ts` | [workspaces](docs/workspaces.md) |
-| Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/task-status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
+| Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/send-decision.ts`, `shared/task-status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
 | Needs-you inbox, brief, Home | `server/inbox.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/needs-block.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts` | [needs-you](docs/needs-you.md) |
-| Summary (internal id `about`) | `server/about.ts`, `server/transcript.ts`, `shared/about.ts` | [ai-roles](docs/ai-roles.md) |
+| Summary (internal id `about`), Rename with AI | `server/about.ts`, `server/transcript.ts`, `shared/about.ts`, `server/rename.ts`, `shared/rename.ts` | [ai-roles](docs/ai-roles.md) |
 | Linked items (Linear issues, Slack threads, docs a workspace is about) | `server/linked.ts`, `shared/linked.ts`, `shared/linked-extract.ts`, `shared/linked-display.ts`, `client/linked.tsx`, `client/brand-icons.ts` | [linked-items](docs/linked-items.md) |
 | Overseer, priority ranker, AI jobs, Settings → Agents | `server/overseer.ts`, `server/overseer-prompt.md`, `server/ranker.ts`, `server/priorities.ts`, `server/ai-jobs.ts`, `server/agent-settings.ts`, `shared/overseer.ts`, `shared/ranker.ts`, `shared/priorities.ts`, `shared/agent-settings.ts` | [ai-roles](docs/ai-roles.md) |
 | PR workflow (Graphite or GitHub), PR actions, reviewers, deployments, Send to Paseo | `server/pr-workflow.ts`, `server/github.ts`, `server/github-api.ts`, `shared/poll.ts`, `server/graphite.ts`, `server/pr-actions.ts`, `server/browser-bridge.ts`, `server/reviewer-config.ts`, `server/deployments.ts`, `server/deployment-anchor.ts`, `shared/pr-workflow.ts`, `shared/pr-actions.ts`, `shared/reviewers.ts` | [prs](docs/prs.md) |
@@ -89,6 +89,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | Self-update (check, install, watchdog, rollback), 2.0's move from 1.x | `server/plugin-move.ts`, `server/data-move.ts`, `shared/plugin-move.ts`, `shared/legacy.ts`, `server/updater.ts`, `server/update-registry.ts`, `server/update-provenance.ts`, `server/update-watchdog.mjs`, `server/updates.ts`, `shared/updates.ts`, `shared/update-policy.ts`, `client/updates.tsx` | [updates](docs/updates.md) |
 | Resource governor, never waking agents, worker memory, usage meters | `server/governor.ts`, `server/memory.ts`, `server/agent-load.ts`, `server/usage.ts`, `shared/agent-load.ts`, `shared/resources.ts`, `shared/usage.ts` | [resources](docs/resources.md) |
 | UI | `index.client.tsx`, `client/` | [client](docs/client.md) |
+| Chat card for agents and workspaces an agent creates | `shared/created.ts`, `server/created-items.ts`, `client/created.tsx` | [client](docs/client.md#created-agent-and-workspace-cards) |
 | Shared copy and errors | `shared/presentation.ts`, `shared/errors.ts` | [client](docs/client.md) |
 | Tests, checks and README screenshots | `tests/`, `scripts/`, `scripts/screenshots.mjs`, `button-visibility.test.mjs` | [testing](docs/testing.md) |
 | Report an issue (shared module, Follow-up's adapter, the sheet) | `server/report-issue/index.ts`, `server/report-issue/redact.ts`, `server/report-issue/render.ts`, `server/report-issue/github.ts`, `server/report-issue/diagnostics.ts`, `server/report-issue-adapter.ts`, `client/report-issue.tsx`, `scripts/fake-github.d.mts` | [report-issue](docs/report-issue.md) |
@@ -155,6 +156,19 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    `confirm` with the plan id (and `screenshot_consent` when there are screenshots). Everything an issue carries goes
    through one Redactor. Guarded by `tests/report-issue.test.ts` and `tests/report-issue-redact.test.ts`
    ([docs/report-issue.md](docs/report-issue.md)).
+12. **A rename is always undoable and never wakes an agent** (`rename-is-always-undoable`,
+   `rename-never-wakes-an-agent`). Rename with AI renames only on the developer's Rename (or an agent's confirmed
+   `ai_rename`), records the title it replaced, and Undo restores that exact title for 24 h unless the workspace was
+   renamed again since. Its suggestion reads stored data only, and its daemon calls are `fetch_workspaces` for one id
+   and `set_workspace_title`. Guarded by `tests/rename.test.ts` ([docs/ai-roles.md](docs/ai-roles.md#rename-with-ai)).
+13. **Every list row has the row menu** (`every-list-row-has-the-row-menu`). `menu` is required on `HomeList` and its
+   rows' opener is required, so right-click, long-press and Shift+F10 open Follow-up's row menu on every list (Home,
+   search results, the sidebar view), never the platform's Copy/Paste menu. Items a surface can't serve are left
+   out, not shown dead. Guarded by `tests/row-menu.test.ts` ([docs/client.md](docs/client.md#row-menu)).
+14. **Menu glyphs centre on their item** (`menu-glyphs-center-on-their-item`). Every menu item (the sort menu, the row
+   menu, the panel's More menu) lays out through `MenuItemContent` (`client/menu-item.tsx`): one leading glyph slot
+   centred on the item, sized for touch as its text is. No menu builds its own glyph slot, and none pins a glyph to
+   the first line. Guarded by `tests/menu-glyph.test.ts` ([docs/client.md](docs/client.md#row-menu)).
 
 ## Bugs
 
@@ -212,7 +226,8 @@ See [docs/releasing.md](docs/releasing.md). In short:
   "Tool not found". The hook tells the agent to use the bridge (`tools-instance.json` vs
   `hook-state/native-<agent>.json`). Don't "fix" a missing tool by reinstalling in a loop.
 - **Timeline transforms must not break Paseo's grouping.** A transformed tool call leaves Paseo's tool group and
-  renders loose. Keep routine tools untransformed. Rules: [docs/client.md](docs/client.md#chat-rows-and-paseos-grouping),
+  renders loose. Keep routine tools untransformed. Paseo's `create_agent` / `create_workspace` calls are replaced by
+  Follow-up's created card, so the group's "N tool calls" count excludes them, like the Done card. Rules: [docs/client.md](docs/client.md#chat-rows-and-paseos-grouping),
   guarded by `tests/chat-grouping.test.ts`.
 - **Native tools have no MCP `instructions`.** Guidance for native tools goes through tool descriptions and the
   SessionStart hook (`server/agent-hook.mjs`), not through the bridge's `initialize` reply.

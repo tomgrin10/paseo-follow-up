@@ -61,7 +61,7 @@ Nothing polls while the app is hidden.
 | `client/home.tsx` | Home: the list and the detail pane, the Overseer card, the setup flow's place. |
 | `client/home-list.tsx` | The one virtualised list, used by Home and the sidebar view. |
 | `client/home-chrome.tsx` | Omnibox, sort menu, status strip, provider and memory meters. |
-| `client/row-menu.tsx`, `client/row-actions.ts`, `shared/row-menu.ts` | The row menu: right-click, long-press or the menu key (Shift+F10) on a Home row or search result. See [Row menu](#row-menu). |
+| `client/row-menu.tsx`, `client/menu-item.tsx`, `client/row-actions.ts`, `shared/row-menu.ts`, `client/panel-menu.tsx`, `client/rename.tsx` | The row menu: right-click, long-press or the menu key (Shift+F10) on a Home row or search result. See [Row menu](#row-menu). |
 | `client/home-view.ts` | Home's derived model: sort choice, priorities, titles for search, limits. |
 | `client/home-data.ts` | Paseo's own workspace list, for untracked rows (Quiet) and header buttons. |
 | `client/sidebar-view.tsx`, `client/sidebar-visibility.ts` | Home's list as Paseo's sidebar (on hosts that support it), and its registration. |
@@ -110,15 +110,28 @@ row) for quick moves without opening it. `rowMenu()` in `shared/row-menu.ts` lis
 2. Answer Q<n> for up to two open questions.
 3. Resume follow-up, Send N repairs and Retry repairs, each shown only when it applies.
 4. Open chat, and Ask the Overseer about this (it pre-fills the omnibox and doesn't send).
-5. Copy branch name, Copy PR link(s), Rewrite Summary, Make <agent> the main agent, and Stop following… (which asks
-   first).
+5. Copy branch name, Copy PR link(s), Rename with AI…, Rewrite summary, Make <agent> the main agent, and Stop
+   following… (which asks first).
+
+The same menu opens from the workspace panel header's More button (`client/panel-menu.tsx`, the workspace's own
+`ws:<id>` row) and from the rows of Follow-up's sidebar view (`client/sidebar-view.tsx`), so there is one menu
+everywhere. Rename with AI… opens the rename dialog (`client/rename.tsx`, [ai-roles](ai-roles.md#rename-with-ai)).
+In the sidebar view there is no omnibox, so Ask the Overseer is left out (not shown disabled), and Open and Answer
+open the agent's chat.
 
 Rules:
 
 - **Rows only.** The DOM `contextmenu` listener sits on each row's own node, so the browser's menu stays everywhere
   else. `tests/row-menu.test.ts` fails on a `contextmenu` listener anywhere else.
+- **Every list has it** (`every-list-row-has-the-row-menu`). `menu` is required on `HomeList` (and the opener on
+  its rows), so a new list surface can't ship without it and fall back to the platform's Copy/Paste menu. The test
+  checks every `<HomeList>` in `client/` passes the shared `useRowMenu`.
 - **Parity.** Each action is a `ROW_ACTIONS` entry that names its agent tool, or why it needs none (open, copy,
   pre-fill). Every pick goes through `runAction` and the RPC its usual button calls. Both are tested.
+- **One item layout** (`menu-glyphs-center-on-their-item`). Every menu item, here and in Home's sort menu, renders
+  `MenuItemContent` from `client/menu-item.tsx`: the leading glyph's slot is centred on the item (a check beside a
+  two-line option, not at its top) and the glyph grows on touch with the text. `tests/menu-glyph.test.ts` fails on a
+  menu item that builds its own glyph slot.
 - **Layout.** On desktop it's a popover at the pointer, clamped inside the viewport (`placeMenu`). On a phone it's a
   sheet. It has `role=menu`, arrow keys and Home/End to move, Right and Left to open and close Later, Enter to pick,
   and Escape to close. Focus returns to the row.
@@ -139,6 +152,44 @@ can only return plugin items, so a transformed call always leaves the group and 
 - **A repeated `declare_done`** for the same workspace and summary draws one card.
 - **Tests and screenshots:** `tests/chat-grouping.test.ts`. `scripts/check-chat-grouping.mjs` renders a synthetic
   mixed turn in an isolated daemon for screenshots; run it through the harness slot.
+
+## Created agent and workspace cards
+
+Paseo's `create_agent` and `create_workspace` tool calls render as a card that opens what they made
+(`client/created.tsx`, parsing in `shared/created.ts`). The card replaces the raw call, so Paseo's "N tool calls"
+group no longer counts it, the same as the Done card (a transform can only replace an item).
+
+- **Card:** a provider tile with a presence dot (green while working, hollow when closed), the title, the status word
+  and a chevron, then "New agent · <model> · <workspace>" or "New workspace · <branch> · <repo>". A Follow-up line
+  shows only when there is something to say: the workspace's first open question, up to two PR chips, or its live
+  line. An agent's card shows it only when that agent is the workspace's main agent.
+- **States:** starting and creating (Follow-up's spinner); working and idle (tappable); closed, a session Paseo ended
+  (the idle unload or a plugin reload), reads "Closed · Open chat" with a hollow dot and stays tappable, since the
+  developer's tap is the only load and nothing reads, prefetches or previews it; archived (words only, no chevron);
+  unknown, not listed or not read yet (words only; the task line reads "Agent unavailable"); failed ("Couldn't start <title>", the error on two lines, in full
+  in the accessibility label).
+- **Opening:** timeline items get no navigation, so a tap opens Follow-up's Home screen with `open=<agentId>` or
+  `openWorkspace=<id>`. `useNextRelay` hands off to the host: the agent's chat, or the workspace with its Follow-up
+  panel docked.
+- **Live facts:** `follow.created-items`, from the engine's directory snapshot as it stands (`DaemonDirectory.snapshotFor()`: it never waits on the daemon, and nothing is
+  woken) and the store.
+- **The one exception to snapshot-only: archived agents.** Paseo's `fetch_agents` leaves archived agents out, so after
+  the directory's next re-read an archived agent would vanish and its card and task line would read unknown instead of
+  "archived". Two things cover it, both in `server/directory.ts`:
+  - A memo of archived agents, in memory and bounded (`ARCHIVED_MEMO_MAX`, 500, least recently used out), fed by the
+    archive event, by listed rows that carry `archivedAt` and by lookups. It survives re-reads.
+    `withArchived` / `snapshotFor` add it back only for the ids a card or task line names.
+  - `lookup(ids)`: for an id a card or task line names that the directory lacks, one `fetch_agent`, at most once per
+    id for the worker's life (ids Paseo reports gone included), capped at 40 a call. It runs on demand (the
+    created-items RPC, the engine's task-agent read), never on a timer, and never waits the caller: the answer shows
+    on the next read. `fetch_agent` is metadata only: Paseo projects an unloaded agent from its stored record and
+    doesn't load it (`tests/daemon-load.test.ts`; `scripts/check-archived-lookup.mjs` checks the archived agent is
+    still unloaded afterwards, on 0.15 and 0.16). Agent states go through `taskAgentStates` and `PRESENCE` (`shared/task-status.ts`), the same
+  words and link rule as task lines. Cards in one chat share one request; they poll every 20 s only while a card shows
+  an agent that isn't archived and the app is visible. `tests/daemon-load.test.ts` checks that a closed or archived
+  agent's card and task line cost no daemon request.
+- **Feature detection:** without `addTimelineTransformer` / `addTimelineRenderer` nothing is registered; a call whose
+  result has no `agentId` / `workspaceId` keeps Paseo's plain row. Tests: `tests/created-card.test.ts`.
 
 ## Shared copy
 

@@ -28,7 +28,7 @@
     "verify": "npm run typecheck && npm run check:notes && npm test && node --test button-visibility.test.mjs && npm run test:scale && npm run test:native && npm run test:trust",
     "test:trust": "node scripts/check-trust-bypass.mjs",
     "preview": "node scripts/check-install.mjs --keep",
-    "test:install": "node scripts/check-install.mjs && node scripts/check-wait.mjs",
+    "test:install": "node scripts/check-install.mjs && node scripts/check-wait.mjs && node scripts/check-archived-lookup.mjs",
     "test:move": "tsx scripts/check-move.mjs",
     "test:move:registry": "tsx scripts/check-move.mjs --registry",
     "test:github-mode": "node scripts/check-github-mode.mjs",
@@ -39,7 +39,8 @@
     "release:notes": "node scripts/release-notes.mjs",
     "test:wait": "node scripts/check-wait.mjs",
     "test:wait-live": "node scripts/check-wait.mjs --live",
-    "shots": "node scripts/screenshots.mjs"
+    "shots": "node scripts/screenshots.mjs",
+    "shots:readme": "sh scripts/readme-shots.sh"
   },
   "devDependencies": {
     "@getpaseo/client": "0.14.0",

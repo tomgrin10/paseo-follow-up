@@ -11,6 +11,10 @@ type HookAgent = { id: string; workspaceId: string | null; parentAgentId?: strin
 /** How often the directory may go back to Paseo: a dirty directory at most once a minute, a clean one every 10 min. */
 export const DIRTY_REFRESH_MS = 60_000;
 export const BACKSTOP_REFRESH_MS = 600_000;
+/** Archived agents the directory remembers across re-reads (Paseo's list leaves them out), least recently used first out. */
+export const ARCHIVED_MEMO_MAX = 500;
+/** At most this many ids looked up by one call (the created-items RPC caps its input at 40 too). */
+export const LOOKUP_MAX = 40;
 
 /**
  * Follow-up's one view of Paseo's agents, workspaces and projects, shared by discovery, runtime observation, the
@@ -30,6 +34,14 @@ export class DaemonDirectory {
   private loading: Promise<DirectoryRows> | null = null;
   private dirty = false;
   private projectsStale = false;
+  /**
+   * Archived agents, remembered across re-reads: Paseo's fetch_agents leaves archived agents out, so without this an
+   * archived agent a chat card or task line names would read unknown after the next re-read instead of "archived".
+   * In memory, bounded (ARCHIVED_MEMO_MAX, LRU), fed by the archive event, by rows that carry archivedAt and by lookups.
+   */
+  private archived = new Map<string, Agent>();
+  /** Ids `lookup` has asked Paseo about: each at most once per worker, including ones Paseo reported gone. */
+  private looked = new Set<string>();
   /** Requests this directory has sent, by daemon request type. For tests and the scale check. */
   readonly requests: Record<string, number> = {};
   constructor(private connect: <T>(work: (client: Daemon) => Promise<T>) => Promise<T> = withDaemon, private now = Date.now) {}
@@ -68,6 +80,7 @@ export class DaemonDirectory {
     this.dirty = false; this.projectsStale = false;
     try {
       const fresh = await loading;
+      this.rememberArchived(this.rows?.agents); this.rememberArchived(fresh.agents);
       const at = this.now();
       this.rows = { ...fresh, at, agentsAt: at };
       if (failedProjects) this.projectsStale = true;
@@ -78,6 +91,7 @@ export class DaemonDirectory {
 
   private async refreshAgents(): Promise<DirectoryRows> {
     const agents = await this.connect(client => this.list("fetch_agents_request", cursor => client.fetchAgents({ page: { limit: 100, ...(cursor ? { cursor } : {}) } })));
+    this.rememberArchived(this.rows?.agents); this.rememberArchived(agents);
     if (this.rows) { this.rows.agents = agents; this.rows.agentsAt = this.now(); }
     return this.rows!;
   }
@@ -96,6 +110,46 @@ export class DaemonDirectory {
   }
 
   /** The cached snapshot of one agent, if the directory has it. */
+  /** The rows the engine last read, without waiting or asking the daemon (null before the first read). */
+  snapshot(): DirectoryRows | null { return this.rows; }
+
+  private remember(agent: Agent): void {
+    if (!agent.archivedAt) return;
+    this.archived.delete(agent.id); this.archived.set(agent.id, agent);
+    for (const id of this.archived.keys()) { if (this.archived.size <= ARCHIVED_MEMO_MAX) break; this.archived.delete(id); }
+  }
+  private rememberArchived(rows: readonly { agent: Agent }[] | undefined): void { for (const { agent } of rows ?? []) this.remember(agent); }
+
+  /**
+   * `agents` plus the remembered archived agents among `ids` that it lacks, for the surfaces that name a specific agent
+   * (created cards, task lines). Everything else reads the plain rows, which hold no archived agent after a re-read.
+   */
+  withArchived<T extends { id: string }>(ids: readonly string[], agents: readonly T[]): (T | Agent)[] {
+    const have = new Set(agents.map(a => a.id));
+    const extra = ids.flatMap(id => { const a = this.archived.get(id); if (!a || have.has(id)) return []; this.archived.delete(id); this.archived.set(id, a); return [a]; });
+    return extra.length ? [...agents, ...extra] : [...agents];
+  }
+  /** The rows as they stand (never waits or asks the daemon), plus the remembered archived agents among `ids`. */
+  snapshotFor(ids: readonly string[]): DirectoryRows | null {
+    const rows = this.rows;
+    if (!rows) return null;
+    const agents = this.withArchived(ids, rows.agents.map(r => r.agent));
+    return agents.length === rows.agents.length ? rows : { ...rows, agents: agents.map(agent => ({ agent: agent as Agent })) };
+  }
+
+  /**
+   * Asks Paseo about agents a card or task line names that the directory lacks: one fetch_agent each (metadata only:
+   * Paseo projects an unloaded agent's stored record and never loads it), at most once per id for this worker's life,
+   * including ids Paseo reports gone. On demand only (never on a timer); it never waits the caller, and the answer
+   * lands in the rows (a live agent) or the archived memo for the next read. Before the first read it does nothing.
+   */
+  lookup(ids: readonly string[]): void {
+    if (!this.rows) return;
+    const missing = [...new Set(ids)].filter(id => !this.looked.has(id) && !this.archived.has(id) && !this.cached(id)).slice(0, LOOKUP_MAX);
+    if (!missing.length) return;
+    for (const id of missing) this.looked.add(id);
+    void this.connect(async client => { for (const id of missing) await this.live(client, id).catch(() => null); }).catch(() => undefined);
+  }
   cached(id: string): Agent | undefined { return this.rows?.agents.find(row => row.agent.id === id)?.agent; }
 
   /**
@@ -105,6 +159,7 @@ export class DaemonDirectory {
   async live(client: Daemon, id: string): Promise<Agent | null> {
     this.count("fetch_agent_request");
     const agent = (await client.fetchAgent(id))?.agent ?? null;
+    if (agent?.archivedAt) this.remember(agent);
     // Paseo's own lists leave background agents out, so a row for one would only flicker until the next re-read.
     if (agent && isBackgroundAgent(agent)) { if (this.rows) this.rows.agents = this.rows.agents.filter(row => row.agent.id !== id); return agent; }
     if (agent && this.rows) {
@@ -148,7 +203,7 @@ export class DaemonDirectory {
   permissionResolved(agentId: string, requestId: string): void {
     this.patch(agentId, a => { a.pendingPermissions = a.pendingPermissions.filter(p => (p as { id?: string })?.id !== requestId); });
   }
-  agentArchived(agentId: string, at: string): void { this.patch(agentId, a => { a.archivedAt = at; }); }
+  agentArchived(agentId: string, at: string): void { this.patch(agentId, a => { a.archivedAt = at; this.remember(a); }); }
   agentClosed(agentId: string): void { this.patch(agentId, a => { a.status = "closed"; delete a.activeTurn; }); }
   /** A new agent: its full snapshot (labels, parent) comes from one fetch_agent, so discovery can place it. */
   async agentCreated(agent: HookAgent): Promise<void> {

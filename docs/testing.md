@@ -5,7 +5,7 @@
 | Command | What it runs |
 | --- | --- |
 | `npm run verify` | `typecheck`, `check:notes` (release-note fragments), `npm test` (every `tests/*.test.ts` through tsx), `button-visibility.test.mjs`, `test:scale`, `test:native`, `test:trust`. PR CI (`.github/workflows/ci.yml`) runs it with Paseo 0.15.2. |
-| `npm run test:install` | `scripts/check-install.mjs` (packs the plugin and installs it into an isolated daemon with fixture providers: activation, recovery, ownership, hooks, tasks, Session Guard coordination, project defaults), then `scripts/check-wait.mjs` ([wait.md](wait.md)). PR CI doesn't run it. The publish workflow runs it with Paseo 0.15.2 and no model credentials. |
+| `npm run test:install` | `scripts/check-install.mjs` (packs the plugin and installs it into an isolated daemon with fixture providers: activation, recovery, ownership, hooks, tasks, Session Guard coordination, project defaults), then `scripts/check-wait.mjs` ([wait.md](wait.md)), then `scripts/check-archived-lookup.mjs`. PR CI doesn't run it. The publish workflow runs it with Paseo 0.15.2 and no model credentials. |
 | `npm pack --dry-run` | Checks the package contents: runtime entries, generated sources, `server/wait-runner.sh`, screenshots, and no state, logs or credentials. |
 
 Write the failing test first. Bugs get a root cause, a failing test, a fix for the whole class, and an invariant,
@@ -43,6 +43,7 @@ not a patch for one instance.
 | `scripts/check-native-tools.mjs` | `test:native` | Tools are served through Paseo's MCP with no per-agent process. A reload detaches them, the bridge still works, and they come back. |
 | `scripts/check-trust-bypass.mjs` | `test:trust` | Trust bypass on a real daemon. |
 | `scripts/check-install.mjs` | `test:install`, `preview` | The packed install. `--keep` (`npm run preview`) leaves the daemon running for screenshots, prints "Isolated browser app: http://127.0.0.1:<port>", and writes `.preview-isolated.json`. |
+| `scripts/check-archived-lookup.mjs` | `test:install` | An archived agent a chat card names reads "archived" through the directory's one-off `fetch_agent` lookup, and stays unloaded. Run it on 0.16 too (`HARNESS_PASEO=0.16`). |
 | `scripts/check-wait.mjs` | `test:wait`, `test:wait-live` | Wait with real Haiku agents. Skips without credentials or Paseo 0.15; `test:wait-live` fails instead. |
 | `scripts/check-move.mjs` | `test:move` | 2.0's move from 1.x on a real daemon: the published 1.x beta auto-updates from a fake npm registry to a broken 2.0 (rolled back), then a good one; the move to the new plugin id fails probation once (rolled back, data intact), then succeeds on Try again. Same `follow_*` tool names; Paseo's plugin list shows the new id only. Screenshots (`--shots <dir>`): Home before and after, Settings → General after the rollback and after the move (desktop, 390 px, dark). Passes on Paseo 0.15.4 and 0.16 (`HARNESS_PASEO=0.16`). About 15 minutes. |
 | `scripts/check-move.mjs --registry` | `test:move:registry` | The same move for an install from Paseo's plugin list: a fake plugin registry (`PASEO_PLUGIN_REGISTRY`) pins the live pin (1.0.1) as `tomgrin10/follow-up`, which installs under the old id. The pin moves to 2.0, `paseo plugin update` installs it under the old id, and the move reinstalls from the same registry under the new id with data and plugin settings. About 8 minutes. |
@@ -85,6 +86,12 @@ plays a scripted turn (timeline items, Follow-up RPCs, a permission) for a given
   root, refuses any of them outside it, and strips the session's `PASEO_*`, `CODEX_*`, Follow-up and Claude session
   variables. A hand-built `{ ...process.env, … }` once missed `CLAUDE_CONFIG_DIR`, and its daemon installed hooks into
   a real account. `tests/harness-env.test.ts` fails on a check script that builds its env by hand.
+- **No real external tools.** `harnessEnv` also puts failing stubs (exit 127) for `mcpproxy`, `gh`, `gt`, `gcloud`,
+  `claude` and `codex` on `PATH`, after any entries inside the root (a script's own fake `gh` or `mcpproxy` still
+  wins) and before the host's. A realistic scale run's ranker once ran the host's real `mcpproxy` (Linear and Slack
+  reads as the developer). The Paseo CLI stays real. Only `check-wait`, the opt-in live-model check, keeps the real
+  `claude` (`real: ["claude"]`); `tests/harness-env.test.ts` fails on any other opt-out or a tool that resolves outside
+  the root.
 - **Fake GitHub over HTTP, not only `gh`.** Follow-up reads GitHub over in-process HTTPS (`server/github-api.ts`); a
   fake `gh` on PATH only answers writes. A script whose daemon needs PR reads starts `fakeGithub({ dir, gh })` from
   `scripts/fake-github.mjs` and passes its `env` and `strip` to `harnessEnv`. The server answers each request with the
@@ -143,10 +150,15 @@ PLAYWRIGHT_CORE=<playwright-core dir> CHROMIUM=<chromium binary> ~/paseo-harness
 - **Synthetic only.** `example/app`, made-up people (Dana, Ravi), Linear-style keys (`APP-142`, `WEB-17`). Never real
   repos, names, channels or anything from a real Paseo home. This is a public repo.
 - **Shots** (`follow-up-<shot>.png`, into `--out`, default `docs/screenshots/`): `setup`, `home`, `panel`,
-  `questions`, `pill`, `pr-sheet`, `phone`, `whats-new`, `context-menu` (Home's row menu, right-clicked) and
-  `linked-items` (the Linked list open over Home's detail). `--only a,b` shoots a subset. Home is reached with
+  `questions`, `pill`, `pr-sheet`, `phone`, `whats-new`, `linked-items` (the Linked list open over Home's detail) and
+  `sidebar` (Follow-up's sidebar view on Paseo 0.16, cropped to the sidebar; shoot it alone with
+  `HARNESS_PASEO=0.16`). `--only a,b` shoots a subset. Home is reached with
   `scripts/ui-home.mjs`, which fails the shot instead of shooting the wrong page.
 - **Theme.** Dark for desktop shots, light for the phone shot; `--scheme dark|light` overrides both.
+- **README images.** `npm run shots:readme` (`scripts/readme-shots.sh`) re-renders the three the README leads with,
+  into `docs/screenshots/`: `home` and `phone` on Paseo 0.15, then `sidebar` on Paseo 0.16 (`HARNESS_PASEO=0.16`),
+  each through `harness-slot` and shown as the latest stable tag. Re-run it whenever Home's rows, the panel's copy or
+  the fixture change, then read every image before committing.
 - **What's new** is shot after a reinstall as `2.0.0-rc.0` over `1.4.0-beta.32`. It shows the repo's CHANGELOG.md
   `## 2.0.0` section when there is one, else a built-in stand-in; `--whats-new-changelog <file>` uses that file instead.
 - **Size** (aim under ~300 KB each). With `pngquant` (lossy palette) or `oxipng` on PATH, shots are taken at

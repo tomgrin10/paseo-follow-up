@@ -1,4 +1,5 @@
 import { projectSchema } from "./settings";
+import { renameResultSchema, renameStatusSchema } from "./rename";
 import { MAX_REVIEWERS, REPO, reviewerConfigSchema, reviewerEntrySchema, reviewerListSchema } from "./reviewers";
 import { prioritySchema } from "./priorities";
 import { usageSchema } from "./usage";
@@ -86,6 +87,9 @@ export const prioritiesRpc = defineRpc({ name: "follow.priorities", input: z.obj
 /** Provider session limits from the Smart Session plugin, for Home's meters. Hidden when it isn't installed. */
 /** Summary: collapsed reads the cache; open may start an overview; refresh always does. */
 export const workspaceAboutRpc = defineRpc({ name: "follow.workspace-about", input: z.object({ workspaceId: idSchema, open: z.boolean().optional(), refresh: z.boolean().optional() }), output: aboutViewSchema });
+// Rename with AI (shared/rename.ts): the dialog's state and one suggestion, and the rename or its Undo.
+export const renameStatusRpc = defineRpc({ name: "follow.rename-status", input: z.object({ workspaceId: idSchema, suggest: z.boolean().optional() }), output: renameStatusSchema });
+export const renameWorkspaceRpc = defineRpc({ name: "follow.rename-workspace", input: z.object({ workspaceId: idSchema, title: z.string().max(300).optional(), undo: z.boolean().optional() }), output: renameResultSchema });
 export const usageRpc = defineRpc({ name: "follow.usage", input: z.object({}), output: usageSchema });
 // Trust bypass agents: how many permission prompts were approved today, and the newest few (tool and a short summary).
 export const trustBypassRpc = defineRpc({ name: "follow.trust-bypass", input: z.object({}), output: z.object({ today: z.number().int().nonnegative(), recent: z.array(z.object({ at: z.string(), agentId: z.string(), tool: z.string(), summary: z.string(), mode: z.string() })).max(20) }) });
@@ -250,3 +254,16 @@ export const reportSendRpc = defineRpc({ name: "follow.report-issue-send", input
 /** Open on GitHub (no agent to send to): a prefilled new-issue link carrying the redacted versions block. */
 export const reportLinkRpc = defineRpc({ name: "follow.report-issue-link", input: z.object({ kind: reportKindSchema, text: z.string().max(8000) }), output: z.object({ url: z.string() }) });
 
+/**
+ * The chat's created-agent / created-workspace cards (shared/created.ts): live facts for the ids they show, from the
+ * engine's directory snapshot (the same cached rows the engine and task lines read; no daemon list call, nothing woken)
+ * and Follow-up's store.
+ */
+const followLineSchema = z.object({ question: z.object({ id: z.string(), title: z.string() }).nullable(),
+  chips: z.array(z.object({ text: z.string(), tone: z.enum(["success", "danger", "warning", "merged", "muted"]) })), line: z.string().nullable() });
+export const createdItemsRpc = defineRpc({ name: "follow.created-items",
+  input: z.strictObject({ agentIds: z.array(idSchema).max(40), workspaceIds: z.array(idSchema).max(40) }),
+  output: z.object({
+    agents: z.record(z.string(), z.object({ title: z.string().nullable(), state: z.enum(["working", "idle", "closed", "archived"]), workspaceId: z.string().nullable(), main: z.boolean() })),
+    workspaces: z.record(z.string(), z.object({ name: z.string().nullable(), follow: followLineSchema.nullable() })),
+  }) });
