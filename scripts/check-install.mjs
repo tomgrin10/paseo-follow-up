@@ -9,13 +9,14 @@ import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
 import { harness, spawnDaemon, waitUntil } from "./harness.mjs";
 import { harnessEnv } from "./harness-env.mjs";
+import { fakeGithub } from "./fake-github.mjs";
 await harness();
 const exec = promisify(execFile);
 const root = await mkdtemp(join(tmpdir(), "follow-install-"));
 const home = join(root, "home"); const plugin = join(root, "plugin"); const fixture = join(root, "fixture"); const bin = join(root, "bin");
 const net = createServer(); await new Promise(resolve => net.listen(0, "127.0.0.1", resolve)); const port = net.address().port; await new Promise(resolve => net.close(resolve));
 const url = `ws://127.0.0.1:${port}/ws`;
-let daemon; let client; let api;
+let daemon; let client; let api; let github;
 const keep = process.argv.includes("--keep");
 try {
   await Promise.all(["paseo", "claude", "codex"].map(command => exec(command, ["--version"], { timeout: 30000 })));
@@ -32,7 +33,9 @@ try {
   await writeFile(join(home, "github-fixture.json"), JSON.stringify({ state: "OPEN", conflict: true }));
   const gh = `#!/usr/bin/env node\nif(process.env.GH_REPO!=='example/app')throw new Error('Missing repository authentication context');const fs=require('fs'); const d=JSON.parse(fs.readFileSync(${JSON.stringify(join(home, "github-fixture.json"))},'utf8')); if(process.argv[3]!=='graphql'){console.log('[]');process.exit(0)} const pr={number:1,title:'Migration rollout',url:'https://github.com/example/app/pull/1',state:d.state,headRefName:'fixture-bottom',headRefOid:d.head??'fixture-head',baseRefName:'main',isDraft:false,mergeable:d.conflict?'CONFLICTING':'MERGEABLE',mergeStateStatus:d.conflict?'DIRTY':'CLEAN',reviewDecision:'APPROVED',baseRef:null,reviewThreads:{nodes:[],pageInfo:{hasNextPage:false}},commits:{nodes:[]}};console.log(JSON.stringify({data:{repository:{defaultBranchRef:{name:'main'},p0:pr}}}));\n`;
   await writeFile(join(bin, "gh"), gh); await chmod(join(bin, "gh"), 0o700);
-  const env = harnessEnv(root, { home, set: { PASEO_DAEMON_URL: url, PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true", PATH: `${bin}:${process.env.PATH}` } });
+  // Reads go over HTTPS to this fake, answered by the same fixture gh; writes still run the gh on PATH.
+  github = await fakeGithub({ dir: root, gh: join(bin, "gh") });
+  const env = harnessEnv(root, { home, strip: github.strip, set: { PASEO_DAEMON_URL: url, PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true", PATH: `${bin}:${process.env.PATH}`, ...github.env } });
   const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env, timeout: 120000, maxBuffer: 1024 * 1024 })).stdout);
   const log = await import("node:fs").then(fs => fs.openSync(join(root, "daemon.log"), "a"));
   daemon = spawnDaemon(["daemon", "run", "--home", home], { env, stdio: ["ignore", log, log] });
@@ -176,6 +179,8 @@ try {
   for (let n = 0; n < 3; n++) await call("follow.obligation", { agentId: agent.id, title: `Regression requirement ${n}`, status: "done", evidence: "Verified by the isolated test fixture", afterPrs: ["example/app#1"], enable_follow_up: false });
   assert.equal((await call("follow.agent-status", { agentId: agent.id })).obligations.length, 4);
   await waitFor(w => w.batches.some(b => b.tasks.some(t => t.kind === "conflict") && b.state === "pending"), "queued conflict follow-up");
+  // The packed plugin read the PR over HTTPS with example's own token: no gh spawn, no real api.github.com.
+  assert.ok(github.requests.some(r => r.method === "POST" && r.path === "/graphql" && r.repo === "example/app"), `PR reads reached the fake GitHub: ${JSON.stringify(github.requests.slice(-5))}`);
   await assert.rejects(call("follow.obligation", { agentId: agent.id, title: "Merge the approved PR", status: "waiting", afterPrs: ["example/app#1"] }), /PR approval/);
   const gated = await call("follow.obligation", { agentId: agent.id, title: "Verify behavior after deployment", status: "waiting", afterPrs: ["example/app#1"] });
   const gatedTask = gated.obligations.find(o => o.title === "Verify behavior after deployment");
@@ -410,6 +415,7 @@ try {
   process.exitCode = 1;
 } finally {
   await api?.dispose().catch(() => undefined); await client?.close().catch(() => undefined);
+  await github?.close().catch(() => undefined);
   if (daemon && daemon.exitCode === null) {
     daemon.kill("SIGTERM"); await new Promise(resolve => { const timer = setTimeout(() => { daemon.kill("SIGKILL"); resolve(); }, 5000); daemon.once("exit", () => { clearTimeout(timer); resolve(); }); });
   }

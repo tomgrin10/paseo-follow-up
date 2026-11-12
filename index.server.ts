@@ -1,3 +1,4 @@
+import { stopWorker } from "./server/teardown";
 import { actorBy, actorOf, type Actor } from "./shared/actor";
 import { TICK_MS } from "./shared/poll";
 import { PluginMove } from "./server/plugin-move";
@@ -1317,7 +1318,9 @@ export default function contribute(server: PluginServerContext) {
   ];
   return async () => {
     stopped = true; wait.close(); updater.stop(); pluginMove.stop(); governor.stop(); if (timer) clearTimeout(timer); if (aboutTimer) clearTimeout(aboutTimer); if (linkedTimer) clearTimeout(linkedTimer); aiJobs.stop(); ranker = null; if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); rpcTiming.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
-    await ready; if (hooksStarted) await agentHooks.stop().catch(() => {});
-    await actions.close(); await closeConnections(); await engine.stop(); await ready; await store.flush().catch(() => undefined); await unlock?.();
+    // One deadline for every wait (worker-stop-never-waits-on-a-stuck-pass, server/teardown.ts): start-up and the work
+    // in flight may be stuck on a daemon or CLI that never answers. Work that ends inside the deadline is saved; what
+    // outlives it can't write, because the store closes before the lock is released.
+    await stopWorker({ ready, hooks: hooksStarted ? () => agentHooks.stop() : undefined, actions, closeConnections, engine, store, unlock });
   };
 }

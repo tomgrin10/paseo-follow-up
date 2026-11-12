@@ -1,3 +1,4 @@
+import { STOP_WAIT_MS, settleWithin, type Deadline } from "./teardown";
 import { DEVELOPER, type Actor } from "../shared/actor";
 import { randomUUID } from "node:crypto";
 import { completionBlockers, completionCheck, completionGate, revokesDone, type CompletionGate, type Workspace, type State, type Batch } from "../shared/model";
@@ -447,7 +448,10 @@ export class Engine {
     });
     return w;
   }
-  async stop(): Promise<void> { this.stopped = true; await this.running; await Promise.allSettled(this.recoveryOperations); }
+  /** How long stop waits on a pass or recovery in flight (worker-stop-never-waits-on-a-stuck-pass); tests shorten it. */
+  stopWaitMs = STOP_WAIT_MS;
+  /** Stops new passes and waits for the one in flight until the stop's deadline for the one in flight; a pass that outlives it can't write (Store.close). */
+  async stop(within?: Deadline): Promise<void> { this.stopped = true; await settleWithin(Promise.allSettled([this.running, ...this.recoveryOperations]), within ?? this.stopWaitMs); }
 }
 
 export type DoneResult = { workspace: Workspace; blockers: string[]; unconfirmed: string[]; alreadyDone: boolean; next: string };
