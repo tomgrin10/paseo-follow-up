@@ -84,6 +84,17 @@ Answers that the client polls are kept small:
   - Lifecycle events patch it.
   - A dirty directory re-reads at most once a minute; a clean one, every 10 minutes.
   - Before anything that could load an agent, re-read that one agent.
+- **Per-tick I/O** (2026-11-12: a live worker read ~49 MB/min, ~38 MB of it two other plugins' files re-read per
+  workspace per tick, and opened a daemon WebSocket per workspace per tick, 96/min):
+  - `server/shared-file.ts` (`readSharedJson`): Session Guard's `state.json` and Smart Session's `compactions.json` are
+    read and parsed again only when their inode, size or mtime changes; the parsed value is shared and read-only
+    (`observe-reads-shared-files-once-per-tick`).
+  - `sharedDaemon` (`server/daemon.ts`): `PaseoGateway` (and its directory) share one daemon connection, closed after
+    5 s unused and replaced after 60 s, so a tick opens one whatever the workspace count. It sits in the same client
+    set as `withDaemon`'s, so `closeConnections` closes it within `stopWorker`'s deadline and nothing opens after stop
+    (`one-daemon-connection-per-tick`).
+  - `InboxStore` keeps what `inbox.json` holds after the first read; it's the file's only writer.
+  - Guarded by `tests/observe-io.test.ts`.
 - `server/store.ts`: `state.json` stays in memory once loaded. `mutate()` serializes changes. Writes are batched (at
   most one a second) and skipped when nothing changed. `onChanged` writes `scopes.json` for the hooks and the
   bridge.
