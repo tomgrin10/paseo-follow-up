@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { realTimers, stableMessageId, withDeadline, type Timers } from "./delivery";
 import { BackgroundAgents } from "./background-agents";
 import { deepFreeze } from "./store";
-import { emptyInbox, expired, inboxStateSchema, type OutboxEntry, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason, liveFlag, withoutRunState, FACT_REASONS } from "../shared/inbox";
+import { emptyInbox, expired, inboxStateSchema, type OutboxEntry, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason, liveFlag, withoutRunState, FACT_REASONS, prEndEvent } from "../shared/inbox";
 import type { State as FollowState, Workspace as FollowWorkspace } from "../shared/model";
 import { asksForReviewers } from "../shared/attention";
 import { followUpObligations } from "../shared/follow-up";
@@ -1094,8 +1094,9 @@ export function followUpEvents(follow: FollowState, enablePrClosed: boolean): { 
         if (asksForReviewers(pr, w))
           events.push({ agentId, event: { type: "reviewers", dedupeKey: `${pr.key}:reviewers`, detail: `#${pr.number}`, prKey: pr.key, url: s.url ?? null,
             names: withoutAuthor(configuredReviewers(pr.repo), s.reviewers?.author).map(reviewerLabel) } });
-      } else if (enablePrClosed && (s.state === "MERGED" || s.state === "CLOSED")) {
-        events.push({ agentId, event: { type: "pr_closed", dedupeKey: `${pr.key}:${s.state}`, detail: `#${pr.number} ${s.state === "MERGED" ? "merged" : "closed"}`, prKey: pr.key } });
+      } else if (enablePrClosed) {
+        const event = prEndEvent(pr);
+        if (event) events.push({ agentId, event });
       }
     }
   }
