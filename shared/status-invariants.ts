@@ -83,7 +83,7 @@ export const INVARIANTS: Invariant[] = [
       const d = sendDecision(w, now, { batch: v.batch });
       if (!v.line.endsWith(d.reason)) return `line "${v.line}" but the decision is "${d.reason}"`;
       if (v.waitingOn !== d.waitingOn) return `line waits on ${v.waitingOn}, the decision on ${d.waitingOn}`;
-      if (/\bsending (now|in a moment)\b/.test(v.line) && d.waitingOn !== null) return `"${v.line}" while the send waits on ${d.waitingOn}`;
+      if (/going out now|waits a minute so new changes/.test(v.line) && d.waitingOn !== null) return `"${v.line}" while the send waits on ${d.waitingOn}`;
       return null;
     },
   },

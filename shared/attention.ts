@@ -1,5 +1,6 @@
 import { batchView, FINISH_LINE, stuckLine, unconfirmedRefs } from "./status";
-import { blockedOnDeveloper, completionCheck, liveWorkingTask, statusKnown, summary, type Batch, type Pr, type Workspace, type Status } from "./model";
+import { blockedOnDeveloper, completionCheck, liveWorkingTask, statusKnown, summary, type Batch, type Pr, type Task, type Workspace, type Status } from "./model";
+import { NO_PROGRESS_CAP } from "./send-decision";
 import { workingLine } from "./task-status";
 import { followUpObligations, recoveryBatch } from "./follow-up";
 import { orderedStacks, settledForDisplay } from "./presentation";
@@ -80,6 +81,8 @@ export function sendBlocker(w: Workspace, batch: Batch): string | null {
 export type NeedItem =
   | { kind: "hold"; key: string; title: string; detail: string }
   | { kind: "retry"; key: string; batchId: string; title: string; detail: string; exhausted: boolean }
+  /** One task that went out NO_PROGRESS_CAP times with no change (Q49): Retry sends that task again; the rest of the queue moves on. */
+  | { kind: "capped"; key: string; taskKey: string; title: string; detail: string }
   /** `finish`: the Done check. It never auto-sends, so it always waits on you. */
   | { kind: "send"; key: string; batchId: string; title: string; tasks: string[]; blocker: string | null; finish?: true }
   | { kind: "decision"; key: string; obligationId: string; title: string; detail: string }
@@ -90,6 +93,20 @@ export type NeedItem =
   | { kind: "reviewers"; key: string; prKey: string; number: number; title: string; detail: string };
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+/** The main agent as the developer knows it: its Paseo title, else "the main agent". */
+export const agentName = (w: Pick<Workspace, "mainAgentTitle">) => w.mainAgentTitle?.trim() || "the main agent";
+/** A capped task's Needs-you title: what is still wrong, in plain words. */
+export function cappedTitle(t: Pick<Task, "kind" | "target" | "title">): string {
+  const pr = `#${t.target.split("#")[1] ?? t.target}`;
+  const still = `still there after ${NO_PROGRESS_CAP} messages`;
+  switch (t.kind) {
+    case "conflict": return `Conflicts on ${pr} are ${still}`;
+    case "review": return `Review feedback on ${pr} is ${still}`;
+    case "checks": return `Failing checks on ${pr} are ${still}`;
+    case "restack": return `${pr} still needs a restack after ${NO_PROGRESS_CAP} messages`;
+    default: return `${t.title}: ${still}`;
+  }
+}
 
 /** Everything waiting on the developer, most urgent first. Each item has exactly one action. */
 /** One need as a workspace snooze remembers it: its key plus what it says, so a different hold or blocker is news. */
@@ -133,6 +150,9 @@ export function needsYou(w: Workspace, now = Date.now()): NeedItem[] {
       title: stuckLine(b),
       detail: b.result || (b.state === "uncertain" ? "Delivery wasn't confirmed." : "The main agent reported a blocker.") });
   }
+  for (const h of (w.heldTasks ?? []).filter(h => h.held === "capped"))
+    items.push({ kind: "capped", key: `capped:${h.task.key}`, taskKey: h.task.key, title: cappedTitle(h.task),
+      detail: `Sent ${NO_PROGRESS_CAP} times and GitHub shows no change. Check ${agentName(w)}'s chat, then retry.` });
   for (const a of w.prActions.filter(a => a.state === "uncertain")) {
     const numbers = a.prs.map(key => `#${key.split("#")[1]}`).join(", ");
     items.push({ kind: "check", key: `check:${a.id}`, actionId: a.id, title: `Check the ${a.kind === "merge" ? "merge" : a.kind === "request_reviewers" ? "reviewer request" : "merge-when-ready change"} on ${numbers}`, detail: a.result });

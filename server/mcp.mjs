@@ -48,10 +48,10 @@ const actionTools = [
   ["merge", "Merge a PR (and its downstack with scope=downstack) through Graphite, using Follow-up's merge plan and blockers. Can't be undone." + ask, "follow.agent-act", { pr: prKey, scope: { type: "string", enum: ["target", "downstack"] }, ...planned }, []],
   ["enable_merge_when_ready", "Turn on Graphite merge-when-ready for a PR, as the PR sheet does." + ask, "follow.agent-act", { pr: prKey, scope: { type: "string", enum: ["target", "downstack"] }, ...planned }, []],
   ["disable_merge_when_ready", "Turn off Graphite merge-when-ready for a PR." + ask, "follow.agent-act", { pr: prKey, scope: { type: "string", enum: ["target", "downstack"] }, ...planned }, []],
-  ["send_repairs", "Send a workspace's waiting repairs (review threads, failed checks) to its main agent, like the Send button. Only when the developer asked. batchId defaults to the waiting batch.", "follow.agent-act", { workspace: string, batchId: string }, ["workspace"]],
-  ["set_auto_send", "Turn Auto-send on or off for a workspace, like its switch. Only when the developer asked.", "follow.agent-act", { workspace: string, value: boolean }, ["workspace", "value"]],
+  ["send_repairs", "Send a workspace's next message (its queued tasks) to its main agent now, like Send now. Only when the developer asked. batchId defaults to the queued one.", "follow.agent-act", { workspace: string, batchId: string }, ["workspace"]],
+  ["set_auto_send", "Turn Auto-send on or off for a workspace, or for one task (task: its key), like its switch. Only when the developer asked.", "follow.agent-act", { workspace: string, value: boolean, task: string }, ["workspace", "value"]],
   ["clear_hold", "Resume Follow-up on a held workspace, like the Resume button. Only when the developer asked.", "follow.agent-act", { workspace: string }, ["workspace"]],
-  ["retry_batch", "Queue a blocked or uncertain repair batch again, like the Retry button. Only when the developer asked.", "follow.agent-act", { workspace: string, batchId: string }, ["workspace", "batchId"]],
+  ["retry_batch", "Retry like the Retry button: an uncertain message (batchId) or one capped task (task: its key). Only when the developer asked.", "follow.agent-act", { workspace: string, batchId: string, task: string }, ["workspace"]],
   ["track", "Follow a workspace again after the developer opted it out in Settings. Follow-up follows every workspace by default. Only when the developer asked.", "follow.agent-act", { workspace: string }, ["workspace"]],
   ["workspace_about", "Read a workspace's Summary: one sentence on what the workspace is for (a reminder, not a status), plus the Linear issues, PRs, Slack threads and docs found in its own text. Read-only unless refresh=true, which writes a new sentence like the panel's Rewrite; otherwise it writes one only when none is cached (up to ~90 s). workspaceId is a workspace id or exact title from list_prs.", "follow.agent-act", { workspaceId: string, refresh: boolean }, ["workspaceId"]],
   ["link_items", "Read any workspace's linked items: Linear issues, Slack threads, docs, artifacts (the spec among them) and GitHub issues, each with its origin (registered, manual, spec, published, extracted), plus what was removed. workspaceId is a workspace id from list_prs." + read, "follow.agent-act", { workspaceId: string }, ["workspaceId"]],
@@ -254,6 +254,7 @@ function currentWork(w) {
     spec: w.spec?.url ? { url: w.spec.url, title: w.spec.title, source: w.spec.source } : null,
     recentAnswers: (w.questions ?? []).filter(q => q.answer).slice(-5).map(q => ({ id: q.id, title: q.title, choice: q.answer.choice, words: q.answer.words, delivery: q.answer.delivery.state })),
     batches: w.batches.filter(b => !["completed", "cancelled"].includes(b.state)).map(b => ({ id: b.id, state: b.state, tasks: b.tasks, result: b.result, recipientAgentId: b.recipientAgentId, contextPath: b.contextPath })),
+    nextMessage: w.nextMessageInfo ?? null, heldTasks: w.heldTasks ?? [],
     excludedStacks: w.excludedStacks.map(s => ({ name: s.name, reason: s.reason, prs: s.prs.map(p => p.key) })), ...(w.prWorkflow ? { prWorkflow: w.prWorkflow } : {}), detail: "summary" };
 }
 function compact(tool, input, result) {
