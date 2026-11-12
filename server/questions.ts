@@ -1,6 +1,6 @@
 import { DEVELOPER, type Actor } from "../shared/actor";
 import { randomUUID } from "node:crypto";
-import type { Workspace } from "../shared/model";
+import { blockedOnDeveloper, type Workspace } from "../shared/model";
 import { followUpObligations } from "../shared/follow-up";
 import { OTHER, OTHER_LABEL, QUESTION_MODE_RULES, choiceError, findOpenMatch, isOpen, isOther, nextQuestionId, validChoice, type Question, type QuestionMode } from "../shared/questions";
 
@@ -130,21 +130,26 @@ export function developerAnswer(w: Workspace, id: string, choice: string, words:
 export const answerRecipients = (w: Workspace, q: Question): string[] => [...new Set([q.askedBy, w.mainAgentId].filter((id): id is string => !!id))];
 
 /**
- * Blocked tasks are decisions waiting on the developer, so each gets a question (without options) that
- * links back to it. The task itself is untouched; when it stops being blocked, its open question closes.
+ * A task blocked on the developer (blocked with an `ask`) gets a question without options that links back to it and
+ * asks exactly that. A task blocked on anything else (a PR, another agent) asks nothing: it shows as Blocked in Tasks.
+ * When the task leaves blocked, stops asking, or asks something else, its open question closes (a new ask gets a new
+ * question). Invariant a-question-always-asks-the-developer-something.
  */
 export function syncTaskQuestions(w: Workspace, now: number): boolean {
   let changed = false;
   const at = new Date(now).toISOString();
   for (const o of followUpObligations(w)) {
     const linked = w.questions.filter(q => q.taskId === o.id && q.taskRevision !== null);
-    const open = linked.find(isOpen);
-    if (o.status === "blocked" && !open && !linked.some(q => q.taskRevision === o.revision)) {
-      w.questions.push({ id: nextQuestionId(w.questions), title: o.title.slice(0, 120), question: o.evidence?.trim() || o.title, options: [], recommend: null, big: null,
+    let open = linked.find(isOpen);
+    const ask = blockedOnDeveloper(o) ? o.ask!.trim() : null;
+    if (open && open.question !== ask) {
+      open.closed = { at, by: null, reason: o.status === "done" || o.status === "waived" ? `The task was ${o.status === "done" ? "completed" : "waived"}.`
+        : o.status !== "blocked" ? "The task is no longer blocked." : ask ? "The task asks something else now." : "The task waits on something other than you." };
+      open = undefined; changed = true;
+    }
+    if (ask && !open && !linked.some(q => q.taskRevision === o.revision && q.question === ask)) {
+      w.questions.push({ id: nextQuestionId(w.questions), title: o.title.slice(0, 120), question: ask, options: [], recommend: null, big: null,
         background: null, links: [], prKey: null, taskId: o.id, taskRevision: o.revision, askedBy: w.mainAgentId, askedAt: at, mode: "work-around", answer: null, closed: null, via: "task" });
-      changed = true;
-    } else if (o.status !== "blocked" && open) {
-      open.closed = { at, reason: o.status === "done" || o.status === "waived" ? `The task was ${o.status === "done" ? "completed" : "waived"}.` : "The task is no longer blocked.", by: null };
       changed = true;
     }
   }

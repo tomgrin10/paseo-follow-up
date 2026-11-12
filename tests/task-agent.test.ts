@@ -43,7 +43,7 @@ test("a working task names its agent and that agent's live state, and opens it o
 
 test("other statuses keep their words and never name an agent", () => {
   for (const [status, text] of [["done", "Done"], ["waived", "Waived"], ["blocked", "Needs a decision"]] as const) {
-    const s = line({ status, evidence: "checked", workingAgentId: "sub-1" }, { "sub-1": { title: "Reader fix", state: "working" } });
+    const s = line({ status, evidence: "checked", ...(status === "blocked" ? { ask: "Which reader?" } : {}), workingAgentId: "sub-1" }, { "sub-1": { title: "Reader fix", state: "working" } });
     assert.equal(s.text, text); assert.equal(s.agentId, null);
   }
 });

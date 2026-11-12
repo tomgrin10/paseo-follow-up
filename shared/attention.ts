@@ -1,5 +1,5 @@
 import { batchView, FINISH_LINE, stuckLine, unconfirmedRefs } from "./status";
-import { completionCheck, liveWorkingTask, summary, type Batch, type Pr, type Workspace, type Status } from "./model";
+import { blockedOnDeveloper, completionCheck, liveWorkingTask, summary, type Batch, type Pr, type Workspace, type Status } from "./model";
 import { workingLine } from "./task-status";
 import { followUpObligations, recoveryBatch } from "./follow-up";
 import { orderedStacks, settledForDisplay } from "./presentation";
@@ -142,8 +142,8 @@ export function needsYou(w: Workspace, now = Date.now()): NeedItem[] {
     items.push({ kind: "answer", key: `answer:${q.id}`, questionId: q.id, title: `Check that the agent got your ${q.id} answer`, detail: q.answer!.delivery.reason ?? "Paseo didn't confirm the message." });
   for (const q of open.filter(q => questionState(q) !== "stopped")) items.push({ kind: "question", key: `question:${q.id}`, questionId: q.id, title: `${q.id} · ${q.title}`, detail: q.question, state: questionState(q), big: q.big });
   // A blocked task is a question once the server mirrors it; until then it still shows as a decision.
-  for (const o of followUpObligations(w).filter(o => o.status === "blocked" && !questions.some(q => q.taskId === o.id && q.taskRevision !== null)))
-    items.push({ kind: "decision", key: `decision:${o.id}`, obligationId: o.id, title: o.title, detail: o.evidence });
+  for (const o of followUpObligations(w).filter(o => blockedOnDeveloper(o) && !questions.some(q => q.taskId === o.id && q.taskRevision !== null)))
+    items.push({ kind: "decision", key: `decision:${o.id}`, obligationId: o.id, title: o.title, detail: o.ask! });
   // Repairs Auto won't send (an idle agent Follow-up doesn't wake) wait on you just like hand-sent ones (shared/status.ts).
   const view = batchView(w, now);
   const idleWait = (b: Batch) => view?.batch.id === b.id && view.phase === "queued" && view.waitingOn === "you" && !w.hold && !w.goneAgent && !w.dormant;
