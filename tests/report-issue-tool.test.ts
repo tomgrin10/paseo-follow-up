@@ -51,3 +51,20 @@ test("the sheet's prompt names the tool and the developer's words, and asks to s
   assert.match(p, /show me the exact issue before filing/);
   assert.match(reportPrompt("feature", ""), /^Report a feature request about Follow-up for me: \(I'll describe it/);
 });
+
+test("every error toast offers Report this, which opens the sheet with the error; other toasts don't", async () => {
+  const toasts = await import("../client/toast-store");
+  const opened: { message: string; at: number }[] = [];
+  toasts.setReportError((message, at) => opened.push({ message, at }));
+  try {
+    const id = toasts.pushToast("error", "Send repairs didn't work: GitHub HTTP 502", [{ label: "Retry", onPress: () => {} }]);
+    const t = toasts.toastsNow().find(x => x.id === id)!;
+    assert.deepEqual(t.actions.map(a => a.label), ["Retry", toasts.REPORT_THIS]);
+    t.actions[1].onPress();
+    assert.equal(opened[0].message, "Send repairs didn't work: GitHub HTTP 502");
+    assert.ok(!toasts.toastsNow().some(x => x.id === id), "Report this closes the toast");
+    const info = toasts.pushToast("info", "Sent");
+    assert.deepEqual(toasts.toastsNow().find(x => x.id === info)!.actions, []);
+    toasts.dismissToast(info);
+  } finally { toasts.setReportError(null); }
+});
