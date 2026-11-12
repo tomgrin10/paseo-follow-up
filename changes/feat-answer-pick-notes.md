@@ -1,0 +1,1 @@
+- A note sent with a picked option on a decision card (by an agent's brief_action today) now reaches the agent and shows on the chat's answer card. Before, only Something else kept its words.

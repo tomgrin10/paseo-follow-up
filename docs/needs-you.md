@@ -152,6 +152,11 @@
 - **Answering the brief.** The card's moves go through `follow.brief-action`: pick an option, several picks, or
   Retry. Each sends one message as the developer and is logged as such. Picks that answer stored questions become
   those questions' answers. See [Answering a brief](#answering-a-brief).
+- **A note on a pick.** A letter can carry the developer's note (`words`), like Something else carries its answer. The
+  decision keeps it (`words`), and the message carries it: `briefAnswer` adds "The developer added: …", and
+  `briefAnswers` adds a `D1 note: …` line under that decision, which `parseAnswersMessage` reads back for the chat card.
+  Both builders live in `shared/brief.ts`. Invariant `a-pick-note-reaches-the-agent` (questions in `INVARIANTS`, brief
+  cards in `pickNoteViolations`).
 
 ### Answering a brief
 
