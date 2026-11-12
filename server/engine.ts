@@ -67,6 +67,28 @@ export function inferBaseChains(w: Workspace): void {
 }
 /** How long nudges gather into one read: agents often end turns within a few seconds of each other. */
 export const NUDGE_MS = 2_000;
+/**
+ * Whether an observation carries nothing the stored snapshot lacks: primitives by value, nested fields (threads,
+ * deployment, reviewers) by reference or, when the references differ, by their own JSON. A read's content can change
+ * without a new observedAt (Graphite scheduling and deployments are merged into it), so observedAt alone isn't enough.
+ */
+export function sameSnapshot(a: object | null | undefined, b: object | null | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const x = a as Record<string, unknown>, y = b as Record<string, unknown>;
+  const keys = Object.keys(x);
+  if (keys.length !== Object.keys(y).length) return false;
+  for (const k of keys) {
+    const u = x[k], v = y[k];
+    if (u === v) continue;
+    if (!u || !v || typeof u !== "object" || typeof v !== "object" || JSON.stringify(u) !== JSON.stringify(v)) return false;
+  }
+  return true;
+}
+
+/** The longest an untouched workspace goes without a full observation pass (its time-based rules run then). */
+export const OBSERVE_FULL_MS = 60_000;
+
 export class Engine {
   error: string | null = null;
   private recoveryOperations = new Set<Promise<Workspace>>();
@@ -79,7 +101,7 @@ export class Engine {
   /** Where pruned never-sent batches go (see pruneUnsent); the worker appends them to an archive file. */
   archive: (workspaceId: string, batches: Batch[]) => Promise<void> = async () => {};
   /** Set by the worker: logs a workspace whose status surfaces contradict each other (server/status-check.ts). */
-  statusCheck: (w: Workspace, now: number) => Promise<void> = async () => {};
+  statusCheck: (w: Workspace, now: number, inputs?: string) => Promise<void> = async () => {};
   /** Background refreshes skipped while paused, for tests and the resource check. */
   skipped = 0;
   constructor(readonly store: Store, private github: Pick<Github, "observe">, private gateway: Gateway, private now = Date.now, private settleMs = 60_000, private nudgeMs = NUDGE_MS) {}
@@ -106,6 +128,10 @@ export class Engine {
   /** How repair tasks are worded per repository (review-fix command, GitHub restacks). Empty: the original wording. */
   wording: TaskWording = {};
   private runningBackground = false;
+  /** Per workspace: the state object its last tick left, that tick's runtime (JSON) and when it last observed in full. */
+  private observedPass = new Map<string, { w: Workspace; runtime: string; at: number }>();
+  /** How many full per-workspace observation writes ran (tests). */
+  observationWrites = 0;
   /**
    * One refresh at a time. The timer passes `background`, which lets PR polling back off for settled repositories;
    * the developer's Refresh gets a fresh read. Turn ends, actions and agent tools go through `nudge` instead. A fresh request that
@@ -184,7 +210,15 @@ export class Engine {
       if (this.stopped) return;
       const runtime = await this.gateway.observe(original).catch((): Runtime => ({ busy: false, reason: "Agent state unavailable; refresh will retry", archived: false }));
       const pruned: Batch[] = [];
-      await this.store.mutateWorkspace(original.id, w => {
+      // An untouched workspace isn't copied (a-tick-copies-the-state-at-most-once): same state object as the last pass
+      // left, same runtime, no PR read or error it hasn't recorded, and a full pass under OBSERVE_FULL_MS ago (time-based
+      // rules, like the 120 s acknowledgement, run on that pass). The checks cost a ~200-byte JSON and a shallow compare per PR.
+      const runtimeKey = JSON.stringify(runtime);
+      const last = this.observedPass.get(original.id);
+      const untouched = !!last && last.w === original && last.runtime === runtimeKey && this.now() - last.at < OBSERVE_FULL_MS && o.workspaceId !== original.id &&
+        original.prs.every(p => { const seen = observations.get(p.key); return !seen || seen.error === p.error && sameSnapshot(seen.snapshot, p.snapshot); });
+      if (!untouched) this.observationWrites++;
+      if (!untouched) await this.store.mutateWorkspace(original.id, w => {
         w.runtimeBusy = runtime.busy; w.runtimeReason = runtime.reason; w.taskAgents = runtime.taskAgents;
         w.backgroundBusy = runtime.backgroundBusy ?? false;
         if (runtime.gone && w.goneAgent?.agentId !== w.mainAgentId) w.goneAgent = { agentId: w.mainAgentId, at: new Date(this.now()).toISOString(), reason: runtime.gone };
@@ -271,7 +305,9 @@ export class Engine {
         await this.gateway.label(current, done);
         if (!done) await this.store.mutateWorkspace(current.id, w => { w.managedDoneLabel = false; });
       }
-      await this.statusCheck(findWorkspace(await this.store.snapshot(), original.id), this.now()).catch(() => undefined);
+      const after = findWorkspace(await this.store.snapshot(), original.id);
+      this.observedPass.set(original.id, { w: after, runtime: runtimeKey, at: untouched ? last!.at : this.now() });
+      await this.statusCheck(after, this.now(), runtimeKey).catch(() => undefined);
     }
     this.error = null;
   }

@@ -2,7 +2,7 @@ import { settleWithin, stopDeadline, type Deadline } from "./teardown";
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { stateSchema, type State, type Workspace } from "../shared/model";
+import { stateSchema, workspaceSchema, type State, type Workspace } from "../shared/model";
 
 /**
  * Follow-up's saved state. 1.3.0-beta.4: the state lives in memory once loaded, and writes to state.json are
@@ -57,7 +57,8 @@ export class Store {
     let state: State;
     try { state = text === null ? { version: 1, workspaces: [] } : stateSchema.parse(JSON.parse(text)); }
     catch { throw new Error("Saved follow-up state could not be read. Restore state.json before continuing."); }
-    this.state ??= deepFreeze(state);
+    // Loaded state is validated whole; it is also what the next write's per-workspace validation compares against.
+    if (!this.state) { this.state = deepFreeze(state); this.saved = this.state; }
     return this.state;
   }
   /** A private, mutable copy of the saved state (the old per-call read). */
@@ -184,7 +185,7 @@ export class Store {
   /** Validates (applying schema defaults), writes when changed and returns the saved state, frozen. */
   private async write(state: State): Promise<State> {
     if (state === this.saved) return state;
-    const parsed = deepFreeze(stateSchema.parse(state));
+    const parsed = this.validate(state);
     const text = JSON.stringify(parsed);
     const print = `${text.length}:${createHash("sha1").update(text).digest("base64")}`;
     if (print === this.written) { this.saved = parsed; return parsed; }
@@ -197,6 +198,24 @@ export class Store {
       await rename(temporary, join(this.directory, "state.json"));
       this.written = print; this.saved = parsed; this.writes++;
     } finally { await unlink(temporary).catch(() => undefined); }
+    return parsed;
+  }
+  /**
+   * The state as the schema reads it (defaults applied), frozen. Only workspaces that aren't the very objects last
+   * validated are parsed, plus the small top-level fields: 2026-11-12, parsing the whole 1.7 MB state on every save was
+   * the start-up's biggest allocator after the per-workspace copies. A corrupt workspace still throws before anything is
+   * written. Unchanged workspaces keep their object, so the engine can tell an untouched one by identity.
+   * Under FOLLOW_UP_STORE_FULL_VALIDATION (tests) every write is also parsed whole and must read the same.
+   */
+  private validate(state: State): State {
+    const valid = new Set<Workspace>(this.saved?.workspaces ?? []);
+    const { workspaces, ...top } = state;
+    const head = topSchema.parse(top) as Record<string, unknown>;
+    const checked = workspaces.map(w => valid.has(w) ? w : workspaceSchema.parse(w) as Workspace);
+    const out = {} as Record<string, unknown>;
+    for (const key of Object.keys(stateSchema.shape)) { const value = key === "workspaces" ? checked : head[key]; if (value !== undefined) out[key] = value; }
+    const parsed = deepFreeze(out as State);
+    if (process.env.FOLLOW_UP_STORE_FULL_VALIDATION && JSON.stringify(stateSchema.parse(state)) !== JSON.stringify(parsed)) throw new Error("Store: per-workspace validation disagrees with a full parse");
     return parsed;
   }
   async lock(): Promise<() => Promise<void>> {
@@ -261,6 +280,7 @@ export function deepFreeze<T>(value: T): T {
  * reads every PR fresh.
  */
 export const VOLATILE_WRITE_MS = 300_000;
+const topSchema = stateSchema.omit({ workspaces: true });
 /** The longest a batch (an engine tick) holds its changes before they commit anyway. */
 export const MAX_HOLD_MS = 10_000;
 /**
