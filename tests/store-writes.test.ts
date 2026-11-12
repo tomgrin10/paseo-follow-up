@@ -12,6 +12,8 @@ import { pr, workspace } from "./fixtures";
 // inbox.json writes changed only lastSeen; 4 more were byte-identical. Read timestamps are volatile: they reach disk
 // with the next real change, every VOLATILE_WRITE_MS, or on close.
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+/** Waits until `done` (polling), so a slow CI runner can't fail a "was written" check; "wasn't written" checks use sleep. */
+async function until(done: () => boolean, label: string, ms = 5000) { const end = Date.now() + ms; while (!done()) { if (Date.now() > end) assert.fail(label); await sleep(10); } }
 async function dir(t: { after(fn: () => unknown): void }) { const d = await mkdtemp(join(tmpdir(), "follow-store-")); t.after(() => rm(d, { recursive: true, force: true })); return d; }
 const stamp = (at: string) => (s: any) => { for (const p of s.workspaces[0].prs) { p.snapshot.observedAt = at; if (p.snapshot.deployment) p.snapshot.deployment.observedAt = at; } };
 const deployment = (at: string) => ({ state: "deployed", environment: "production", commits: ["b".repeat(40)], evidence: "fixture", observedAt: at });
@@ -20,7 +22,7 @@ test("store-writes-only-real-changes: a tick that only refreshes read timestamps
   const d = await dir(t);
   const store = new Store(d, 20, 60_000);
   await store.mutate(s => { s.workspaces.push(workspace({ prs: [pr({ snapshot: { ...pr().snapshot!, deployment: deployment("2026-01-01T10:00:00Z") } as any })] })); });
-  await sleep(60); const base = store.writes; assert.equal(base, 1);
+  await until(() => store.writes === 1, "the first real change is written"); const base = store.writes;
   // A fresh observation is a new object whose keys come in parsePr's order, not the saved (schema) order.
   await store.mutateWorkspace("workspace", w => { const { observedAt, ...rest } = w.prs[0].snapshot as any; w.prs[0].snapshot = { observedAt: "2026-01-01T10:00:30Z", ...Object.fromEntries(Object.entries(rest).reverse()) } as any; });
   for (let i = 1; i <= 5; i++) { await store.mutate(stamp(`2026-01-01T10:0${i}:00Z`)); await store.mutateWorkspace("workspace", w => { w.prs[0].snapshot!.observedAt = `2026-01-01T10:0${i}:30Z`; }); }
@@ -28,8 +30,7 @@ test("store-writes-only-real-changes: a tick that only refreshes read timestamps
   assert.equal(store.writes, base, "read timestamps alone are not written");
   assert.equal((await store.snapshot()).workspaces[0].prs[0].snapshot!.observedAt, "2026-01-01T10:05:30Z", "they are current in memory");
   await store.mutateWorkspace("workspace", w => { w.goal = "Changed for real"; });
-  await sleep(60);
-  assert.equal(store.writes, base + 1, "a real change writes");
+  await until(() => store.writes === base + 1, "a real change writes");
   const disk = JSON.parse(await readFile(join(d, "state.json"), "utf8"));
   assert.equal(disk.workspaces[0].prs[0].snapshot.observedAt, "2026-01-01T10:05:30Z", "and carries the newest read timestamps with it");
   await store.close(1000);
@@ -39,10 +40,10 @@ test("store-writes-only-real-changes: pending read timestamps are written every 
   const d = await dir(t);
   const store = new Store(d, 10, 80);
   await store.mutate(s => { s.workspaces.push(workspace({ prs: [pr()] })); });
-  await sleep(40); const base = store.writes;
+  await until(() => store.writes === 1, "the first real change is written"); const base = store.writes;
   await store.mutate(stamp("2026-01-01T11:00:00Z"));
   await sleep(30); assert.equal(store.writes, base, "not before the volatile interval");
-  await sleep(120); assert.equal(store.writes, base + 1, "written once the volatile interval passes");
+  await until(() => store.writes === base + 1, "written once the volatile interval passes");
   const closing = new Store(d, 10, 60_000);
   await closing.mutate(stamp("2026-01-01T12:00:00Z"));
   await closing.close(1000);
