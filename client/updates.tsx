@@ -205,10 +205,10 @@ export function UpdatesStep({ theme, compact }: { theme: Theme; compact: boolean
 }
 
 /**
- * The tiny version marker at the top of Home and the panel: "v1.4.0-beta.34", muted caption, then the update state
- * ("update", "updating", "check") and a warning dot only when something needs a look. Phones keep the version and
- * the dot, so the status chips beside it keep their room. Tapping opens Settings → General (Release notes live there).
- * Loading takes no width; a failed read shows nothing. `touch`: a 44pt box (react-native-web ignores hitSlop).
+ * The tiny version marker at the top of Home and the panel: just "v1.4.0-beta.34" in the muted caption, on desktop and
+ * touch alike. Update state lives in Settings → General, which a tap opens (Release notes live there too); the
+ * accessibility label still says it. Loading takes no width; a failed read shows nothing. `touch`: a 44pt box
+ * (react-native-web ignores hitSlop).
  */
 export function VersionMark({ theme, touch, openSettings }: { theme: Theme; touch: boolean; openSettings: () => void }) {
   const c = theme.colors; const t = text(c, touch);
@@ -220,12 +220,6 @@ export function VersionMark({ theme, touch, openSettings }: { theme: Theme; touc
   return <Pressable accessibilityRole="button" accessibilityLabel={mark.label} accessibilityHint="Opens Follow-up settings, General" hitSlop={touch ? undefined : 8}
     onPress={() => { writeCategory("general"); openSettings(); }} style={[box, { flexShrink: 1, minWidth: 0 }]}>
     {state => { const hover = !!(state as { hovered?: boolean }).hovered || state.pressed; const line = hover ? { color: c.foreground, textDecorationLine: "underline" as const } : null;
-      return <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-        <Text numberOfLines={1} style={[style, { flexShrink: 1 }, line]}>{mark.version}</Text>
-        {(mark.dot || (!touch && mark.suffix)) && <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-          {mark.dot && <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.statusWarning }} />}
-          {!touch && mark.suffix && <Text numberOfLines={1} style={[style, line]}>{mark.suffix}</Text>}
-        </View>}
-      </View>; }}
+      return <Text numberOfLines={1} style={[style, line]}>{mark.version}</Text>; }}
   </Pressable>;
 }

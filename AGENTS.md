@@ -74,7 +74,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 
 | Subsystem | Files | Doc |
 | --- | --- | --- |
-| Worker entry, RPC wiring, session attach | `index.server.ts`, `shared/contracts.ts`, `server/rpc-timing.ts`, `server/daemon.ts`, `server/directory.ts`, `server/store.ts`, `server/list-cache.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
+| Worker entry, RPC wiring, session attach, teardown | `index.server.ts`, `shared/contracts.ts`, `server/rpc-timing.ts`, `server/teardown.ts`, `server/daemon.ts`, `server/directory.ts`, `server/store.ts`, `server/list-cache.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
 | Discovery, ownership, main agent | `server/discovery.ts`, `server/workspace-agent.ts`, `server/background-agents.ts`, `server/submissions.ts`, `server/pr-owner.ts`, `server/exclusions.ts`, `server/history-cache.ts`, `server/recovery-handoff.ts`, `server/recovery-config.ts`, `shared/settings.ts` | [workspaces](docs/workspaces.md) |
 | Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
 | Needs-you inbox, brief, Home | `server/inbox.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts` | [needs-you](docs/needs-you.md) |
@@ -139,6 +139,14 @@ These are product rules. Each has tests, and breaking one is a bug even when the
 9. **No root treatment for background agents.** A Paseo 0.16 `background: true` agent is another plugin's helper.
    Follow-up gives it no tools, no Wait, no `needs_you` or Stop-hook nudge, no inbox rows and no directory row
    (`server/background-agents.ts`, `tests/background-agents.test.ts`). On 0.15 the field is absent.
+10. **Stopping never waits on stuck work** (`worker-stop-never-waits-on-a-stuck-pass`): stop finishes within one
+   deadline, and work that ends inside it is kept. The worker's stop clears its timers, so a wait with no bound on work
+   stuck on the daemon, Paseo or a CLI that never answers leaves stop pending for good (a reload waits on the old
+   worker). `stopWorker` (`server/teardown.ts`) gives the whole stop one deadline (`STOP_WAIT_MS`, from when stop
+   starts) and every wait what is left of it: start-up, hooks, `PrActions.close`, `closeConnections`, `Engine.stop` and
+   the store's queue; bounds per wait added up to about 45 s. `Store.close` refuses new mutations at once, commits one
+   already accepted if it finishes inside the deadline, and drops (with the "stopping" error, writing nothing) one that
+   finishes after it. Guarded by `tests/worker-stop.test.ts`.
 
 ## Bugs
 
@@ -216,9 +224,9 @@ See [docs/releasing.md](docs/releasing.md). In short:
   last message.
 - **Timeline reads on agent events.** `agent.turn_ended` can read a bounded tail (the agent is live). Anything
   outside a live event must check `isLoaded()` first.
-- **CI doesn't run everything.**
-  - PR CI (`.github/workflows/ci.yml`) runs `verify` and `npm pack --dry-run` with Paseo 0.15.2. It doesn't run
-    `test:install`.
-  - The publish workflow (`.github/workflows/publish-npm.yml`) runs `verify` and `test:install` with Paseo 0.15.2 and
-    no model credentials, so `check-wait` skips there.
-  - Run `npm run test:install` and, when you touch Wait, `npm run test:wait-live` locally.
+- **CI doesn't run everything.** It runs no live-model check.
+  - PR CI (`.github/workflows/ci.yml`) runs the publish workflow's gate: `verify`, `test:install` and
+    `npm pack --dry-run`, with Paseo 0.15.2 and the same Claude and Codex CLIs. `tests/publish-gate.test.ts`
+    (invariant `publish-gate-checks-run-on-every-pr`) fails when the publish workflow runs a check PR CI doesn't.
+  - Neither has model credentials, so `check-wait` skips there.
+  - When you touch Wait, run `npm run test:wait-live` locally.
