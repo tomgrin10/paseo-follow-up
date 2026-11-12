@@ -433,6 +433,8 @@ async function settle(page) {
 
 const DESKTOP = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };
+/** The sidebar shot's window: every group of the fixture fits, down to Quiet, and the chat beside it lays out whole. */
+const SIDEBAR = { width: 960, height: 1060 };
 /** A workspace's agent chat, opened from Paseo's sidebar like a person would (deep links land before the host is known). */
 async function openChat(page, title, prompt) {
   await page.getByText(title, { exact: true }).first().click({ timeout: 30000 });
@@ -450,7 +452,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
     });
     // Paseo 0.16's sidebar with Follow-up in it (each workspace's status and subline, the Needs-you badge), cropped
     // to the sidebar plus the edge of Home. 0.15 has no workspace rows to decorate; Follow-up feature-detects 0.16.
-    if (name === "sidebar") await shoot("sidebar", DESKTOP, "dark", async page => {
+    if (name === "sidebar") await shoot("sidebar", SIDEBAR, "dark", async page => {
       await openHome(page);
       await homeRow(page, "Billing retries");
       // Settings → Sidebar → View → Follow-up's, as a developer picks it.
@@ -464,11 +466,12 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       if (await back.isVisible().catch(() => false)) await back.click();
       const view = page.getByTestId("plugin-sidebar-view");
       await view.getByText("Billing retries").first().waitFor();
-      // Tall enough for every group down to Quiet, so nothing reads as cut off; the sidebar alone, plus its border.
-      await page.setViewportSize({ width: DESKTOP.width, height: 1060 });
-      await view.getByText("Audit log export").first().waitFor();
-      const box = await view.boundingBox();
-      return { x: 0, y: 0, width: Math.ceil(box.x + box.width) + 1, height: 1060 };
+      // Tall enough for every group down to Quiet, so nothing reads as cut off. A row opens its workspace's chat beside
+      // it: the context, and a near-square frame that still reads when a chat app scales it down.
+      await page.setViewportSize(SIDEBAR);
+      await view.getByText("Billing retries").first().click();
+      await page.getByText("Only network failures").first().waitFor();
+      return null;
     }, { scale: 2 });
     if (name === "panel") await shoot("panel", DESKTOP, "dark", async page => {
       await openChat(page, "Billing retries", billing.prompt);
