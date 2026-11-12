@@ -1,0 +1,1 @@
+- Follow-up writes its state files only when something really changed, about 8 times less often.

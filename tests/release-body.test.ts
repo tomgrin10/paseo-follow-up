@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { LATEST, MAINTENANCE, NO_NOTES, UNWRITTEN, VERIFIED, VERIFIED_BEFORE_NPM, compare, framed, gitSource, hasNotes, ownNotes, releaseBody, releaseNotes, sizedImages } from "../scripts/release-body.mjs";
 import { plan } from "../scripts/backfill-release-notes.mjs";
+import { LEGACY_PLUGIN_ID } from "../shared/legacy";
 
 // Tom: "the beta releases on github don't display release notes, make sure every github release displays proper clean
 // release notes in the same format". Every GitHub release body comes from scripts/release-body.mjs: betas render their
@@ -80,12 +81,13 @@ test("the publish workflow writes every GitHub release body with scripts/release
   assert.doesNotMatch(release, /Track workspace pull requests|INSTALL_LINE|<<'NOTES'/, "no hand-written boilerplate body");
 });
 
-test("backfill: every page gets the frame; hand-written text is kept, only its install and check boilerplate goes", t => {
+test("backfill: every page gets the frame; a beta's hand-written text is kept, only its install and check boilerplate goes", t => {
   const src = repo(t, [
     ["v0.3.0", { "paseo-plugin.json": manifest(">=0.14.0", "old-id"), ".github/workflows/publish-npm.yml": CHECKED }],
     ["v1.0.1", { "changes/README.md": "rules" }],
     ["v1.1.0-beta.0", { "changes/a.md": "- A.\n" }],
     ["v1.1.0-beta.1", {}],
+    ["v1.1.0-beta.2", {}],
   ]);
   const boilerplate = "Track workspace pull requests, queue follow-up work, and verify completion in Paseo.\n\nInstall with: `paseo plugin update x --version 1` (beta). Return to stable with `paseo plugin update x --version 1.0.1` on Paseo 0.14.0 or newer.\n\nThe installation ID remains `x` to preserve saved work and settings.\nThis release passed plugin verification, isolated packed installation checks,\nand npm registry integrity verification before these notes were published.";
   const handWritten = "Follow-up 1.0.1 fixes things.\n\n## Fixed\n\n- **Closed agents stay closed.**\n\n## Install\n\n```\npaseo plugin install paseo-follow-up\n```\n\nAlready installed: `paseo plugin update old-id`. Requires Paseo 0.14.0 or newer. No data changes.";
@@ -94,22 +96,18 @@ test("backfill: every page gets the frame; hand-written text is kept, only its i
     { tagName: "v1.1.0-beta.1", body: boilerplate },
     { tagName: "v1.0.1", body: handWritten },
     { tagName: "v1.1.0-beta.0", body: boilerplate },
+    { tagName: "v1.1.0-beta.2", body: handWritten },
     { tagName: "v0.3.0", body: old },
     { tagName: "v2.0.0-rc.0", body: "set by hand" },
   ], src, { except: ["v2.0.0-rc.0"] });
-  assert.deepEqual(steps.map(s => [s.tag, s.action]), [["v0.3.0", "write"], ["v1.0.1", "write"], ["v1.1.0-beta.0", "write"], ["v1.1.0-beta.1", "write"]], "--except is left alone");
-  const [b030, b101, b0, b1] = steps.map(s => s.body!);
-  assert.equal(b030, [
-    "**Install:** `paseo plugin install npm:paseo-follow-up@0.3.0`", "", "## What's new", "",
-    "Adds a thing.", "", "Optional integration requires Companion 2.1.0.", "", "A replay recovered all 12 PRs.",
-    "", "## Install", "", "Already installed: `paseo plugin update old-id --version 0.3.0`. Needs Paseo 0.14.0 or newer.", "", VERIFIED_BEFORE_NPM, "",
-  ].join("\n"), "every hand-written fact stays; the era's id, a pinned install, and the claim as it was true then");
-  assert.match(b101, /## What's new\n\nFollow-up 1\.0\.1 fixes things\.\n\n### Fixed\n\n- \*\*Closed agents stay closed\.\*\*\n\nNo data changes\.\n\n## Install/, "its own headings move under the frame's");
-  assert.doesNotMatch(b101, /```/);
+  assert.deepEqual(steps.map(s => [s.tag, s.action]), [["v0.3.0", "keep"], ["v1.0.1", "keep"], ["v1.1.0-beta.0", "write"], ["v1.1.0-beta.1", "write"], ["v1.1.0-beta.2", "write"]], "--except is left alone; curated stable pages too");
+  const [b0, b1, b2] = steps.filter(s => s.action === "write").map(s => s.body!);
+  assert.match(b2, /## What's new\n\nFollow-up 1\.0\.1 fixes things\.\n\n### Fixed\n\n- \*\*Closed agents stay closed\.\*\*\n\nNo data changes\.\n\n## Install/, "a beta's own headings move under the frame's");
+  assert.doesNotMatch(b2, /```/);
   assert.match(b0, /## What's new\n\n- A\.\n/);
   assert.match(b1, new RegExp(MAINTENANCE));
-  assert.ok(steps.every(s => framed(s.body)), "every page ends in the one format");
-  assert.equal(plan([{ tagName: "v1.0.1", body: b101 }], src)[0]!.action, "keep", "running it again changes nothing");
+  assert.ok(steps.filter(s => s.action === "write").every(s => framed(s.body)), "every page it writes is in the one format");
+  assert.equal(plan([{ tagName: "v1.1.0-beta.2", body: b2 }], src)[0]!.action, "keep", "running it again changes nothing");
   assert.match(plan([{ tagName: "v1.0.1", body: boilerplate }], src)[0]!.body!, new RegExp(NO_NOTES), "a stable with no notes anywhere says so");
   assert.equal(hasNotes(boilerplate), false);
   assert.deepEqual(ownNotes("Plain text only.").replaced, []);
@@ -120,4 +118,21 @@ test("a screenshot on the GitHub page is never drawn larger than its CSS size: #
   assert.equal(sizedImages("Intro.\n\n![Home \"list\"](https://x.test/a/h.png#1120x680)\n\n![raw](https://x.test/r.png)\n"),
     'Intro.\n\n<img src="https://x.test/a/h.png" width="1120" alt="Home &quot;list&quot;">\n\n![raw](https://x.test/r.png)\n', "an unsized image stays markdown");
   assert.equal(sizedImages("text ![a](https://x.test/i.png#2x1) inline"), "text ![a](https://x.test/i.png#2x1) inline", "only an image alone on its line");
+});
+
+/**
+ * backfill-keeps-curated-notes. 2026-11-12 dry run: v2.0.0-rc.0's curated page (its real body is the fixture) would
+ * have been reframed, and its install paragraph, which tells 1.x users to update the old plugin id, replaced
+ * by one that is wrong for them. A stable or rc page with notes of its own is curated: the backfill keeps it as it is.
+ */
+test("backfill-keeps-curated-notes: a stable or rc page with its own notes is never rewritten", t => {
+  const src = repo(t, [["v1.0.1", { "changes/README.md": "rules" }], ["v2.0.0-rc.0", {}], ["v2.0.1-beta.0", {}]]);
+  // The old plugin id lives only in shared/legacy.ts (no-legacy-name), so the fixture holds a placeholder for it.
+  const rc0 = readFileSync("tests/fixtures/release-v2.0.0-rc.0.md", "utf8").replaceAll("{{LEGACY_PLUGIN_ID}}", LEGACY_PLUGIN_ID);
+  assert.ok(rc0.includes(`paseo plugin update ${LEGACY_PLUGIN_ID} --version 2.0.0-rc.0`), "the fixture is rc.0's real page");
+  const steps = plan([{ tagName: "v2.0.0-rc.0", body: rc0 }, { tagName: "v1.0.1", body: "Fixes things.\n\n- One." }], src);
+  assert.deepEqual(steps.map(s => [s.tag, s.action]), [["v1.0.1", "keep"], ["v2.0.0-rc.0", "keep"]]);
+  assert.ok(steps.every(s => s.body === undefined), "nothing to write");
+  // A beta's hand-written page is still framed (its text kept), and a curated page with no notes at all still gets them.
+  assert.equal(plan([{ tagName: "v2.0.1-beta.0", body: "Faster.\n\n- Fewer reads." }], src)[0]!.action, "write");
 });
