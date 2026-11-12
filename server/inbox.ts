@@ -28,10 +28,16 @@ export class InboxStore {
   private written: { text: string; rest: string; at: number } | null = null;
   /** A state that differs from the file in lastSeen only, held until LAST_SEEN_WRITE_MS, a real change or flush(). */
   private unsaved: InboxState | null = null;
+  /**
+   * What inbox.json holds, kept after the first read: this store is the file's only writer, so a mutation never
+   * re-reads it (2026-11-12: a 169 KB read and parse per mutation, several a minute live).
+   */
+  private saved: InboxState | null = null;
   constructor(readonly directory: string, private now: () => number = Date.now) {}
   private get path() { return join(this.directory, "inbox.json"); }
   async read(): Promise<InboxState> {
     if (this.unsaved) return structuredClone(this.unsaved);
+    if (this.saved) return structuredClone(this.saved);
     let state: InboxState;
     try { state = inboxStateSchema.parse(JSON.parse(await readFile(this.path, "utf8"))); }
     catch (error) {
@@ -40,6 +46,7 @@ export class InboxStore {
     }
     // What the file means, so an unchanged state isn't rewritten (a pretty-printed file is rewritten compact on its next change).
     this.written ??= { text: JSON.stringify(state), rest: rest(state), at: this.now() };
+    this.saved = structuredClone(state);
     return state;
   }
   async mutate<T>(work: (state: InboxState) => T | Promise<T>): Promise<T> {
@@ -74,7 +81,7 @@ export class InboxStore {
       const file = await open(temporary, "wx", 0o600);
       try { await file.writeFile(text); await file.sync(); } finally { await file.close(); }
       await rename(temporary, this.path);
-      this.written = { text, rest: rest(state), at: this.now() }; this.unsaved = null;
+      this.written = { text, rest: rest(state), at: this.now() }; this.unsaved = null; this.saved = structuredClone(state);
     } finally { await unlink(temporary).catch(() => undefined); }
   }
 }
