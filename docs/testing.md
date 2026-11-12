@@ -96,9 +96,7 @@ plays a scripted turn (timeline items, Follow-up RPCs, a permission) for a given
   wins) and before the host's. A realistic scale run's ranker once ran the host's real `mcpproxy` (Linear and Slack
   reads as the developer). The Paseo CLI stays real. Only `check-wait`, the opt-in live-model check, keeps the real
   `claude` (`real: ["claude"]`); `tests/harness-env.test.ts` fails on any other opt-out or a tool that resolves outside
-  the root. One exception to "exits at once": `codex app-server`, the
-  long-lived server the daemon writes to on every provider refresh, stays connected and never answers (a stub that
-  exited made that write EPIPE, which crashes Paseo 0.15.4's daemon); the daemon's refresh deadline handles it.
+  the root.
 - **Fake GitHub over HTTP, not only `gh`.** Follow-up reads GitHub over in-process HTTPS (`server/github-api.ts`); a
   fake `gh` on PATH only answers writes. A script whose daemon needs PR reads starts `fakeGithub({ dir, gh })` from
   `scripts/fake-github.mjs` and passes its `env` and `strip` to `harnessEnv`. The server answers each request with the
