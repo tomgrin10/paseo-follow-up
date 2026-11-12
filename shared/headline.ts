@@ -75,8 +75,9 @@ export function flagHeadline(row: Pick<InboxRow, "needs" | "snooze" | "brief">, 
   if (!row.needs || row.snooze) return null;
   const top = headReason(row.needs);
   if (!top) return null;
-  const brief = row.brief?.state === "open" ? row.brief : null;
   let key = REASON_KEY[top.reason];
+  // a-done-brief-is-never-an-ask: "Nothing needed" never speaks for a flag raised by something else (a merged PR).
+  const brief = row.brief?.state === "open" && (row.brief.kind !== "done" || top.reason === "finished") ? row.brief : null;
   // pr-label-matches-state: a flag stored before pr_merged existed ("#37 merged" under pr_closed) still reads Merged.
   if (key === "pr_closed" && / merged$/.test(top.detail)) key = "pr_merged";
   if (brief && (top.reason === "finished" || briefKey(brief.kind) === key)) key = briefKey(brief.kind);
