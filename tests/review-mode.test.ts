@@ -180,7 +180,7 @@ test("a-no-review-repo-never-asks-for-review-or-merge: the moment the repository
   const full = { ...pickBrief({ reviewers: { prKey: "example/app#240", repo: "example/app", number: 240, url: null, names: ["Ravi"] } }), state: "open" as const };
   assert.equal(full.ask, "Add reviewers to #240: Ravi");
   const row: Pick<InboxRow, "needs" | "snooze" | "brief"> = {
-    needs: { reasons: [{ reason: "reviewers", at, detail: "#240", dedupeKey: "example/app#240:reviewers" }], since: at }, snooze: null,
+    needs: reduce(newEntry("main-agent"), { type: "reviewers", dedupeKey: "example/app#240:reviewers", detail: "#240", prKey: "example/app#240", url: null, names: ["Ravi"] }, at).needs, snooze: null,
     brief: { kind: "reviewers", source: "followup", state: "open", ask: full.ask, prKey: "example/app#240" },
   };
   const other = { reason: "finished" as const, at, detail: "Finished", dedupeKey: "turn:1" };
@@ -193,6 +193,7 @@ test("a-no-review-repo-never-asks-for-review-or-merge: the moment the repository
   const mixed = withoutWithdrawnAsks({ ...row, needs: { reasons: [...row.needs!.reasons, other], since: at } });
   assert.deepEqual(mixed.needs?.reasons.map(r => r.reason), ["finished"], "another flag on the same agent stays");
   assert.equal(mixed.brief, null);
+  assert.deepEqual(withoutWithdrawnAsks({ ...row, needs: { reasons: [{ ...row.needs!.reasons[0], prKey: undefined }], since: at } }).needs, null, "a flag stored without its PR falls back on the brief's PR");
   setHandedBackPrs(["example/app#240"]); // register_pr agentMerges false: the merge is the developer's again
   assert.deepEqual(drawn(row).needs, ["reviewers"], "a merge handed back still asks");
   assert.equal(handsMergeBack({ repo: "example/app", agentMerges: false }), true);

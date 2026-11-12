@@ -910,7 +910,7 @@ async function reviewModeShots({ shoot, call }) {
       await link(page).waitFor({ state: "hidden", timeout: 5000 });
       await page.evaluate(() => document.fonts.ready); await page.waitForTimeout(300);
       await fs.writeFile(join(out, `follow-up-rm-toast-${size}-${theme}.png`), await page.screenshot({ animations: "disabled", caret: "hide" }));
-      await page.getByRole("button", { name: "Undo", exact: true }).filter({ visible: true }).first().click();
+      await page.getByRole("button", { name: /^Undo\b.*: example\/app: no review/ }).filter({ visible: true }).first().click();
       await bar.waitFor({ state: "hidden", timeout: 15000 });
       await link(page).waitFor({ timeout: 60000 });
       await page.getByText("Add reviewers to #240: Ravi").filter({ visible: true }).first().waitFor({ timeout: 60000 });

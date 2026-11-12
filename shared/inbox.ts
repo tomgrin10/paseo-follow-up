@@ -14,7 +14,9 @@ export type Reason = typeof REASONS[number];
 export const reasonRank = (reason: Reason) => REASONS.indexOf(reason);
 
 const isoSchema = z.string();
-export const reasonEntrySchema = z.object({ reason: z.enum(REASONS), at: isoSchema, detail: z.string(), dedupeKey: z.string() });
+export const reasonEntrySchema = z.object({ reason: z.enum(REASONS), at: isoSchema, detail: z.string(), dedupeKey: z.string(),
+  /** "reviewers" only: the PR it asks about, so the client can withdraw it the moment that PR's repository goes No review. */
+  prKey: z.string().optional() });
 export type ReasonEntry = z.infer<typeof reasonEntrySchema>;
 export const needsSchema = z.object({ reasons: z.array(reasonEntrySchema), since: isoSchema });
 export type Needs = z.infer<typeof needsSchema>;
@@ -137,9 +139,9 @@ export class StaleSignOff extends Error {
   constructor() { super("This agent changed since you looked. Its newest flag is still showing."); }
 }
 
-function add(e: Entry, reason: Reason, detail: string, dedupeKey: string, at: string) {
+function add(e: Entry, reason: Reason, detail: string, dedupeKey: string, at: string, prKey?: string) {
   const reasons = (e.needs?.reasons ?? []).filter(r => r.dedupeKey !== dedupeKey);
-  reasons.push({ reason, at, detail, dedupeKey });
+  reasons.push({ reason, at, detail, dedupeKey, ...(prKey ? { prKey } : {}) });
   e.needs = { reasons, since: e.needs?.since ?? at };
 }
 function seen(e: Entry, key: string): boolean {
@@ -199,7 +201,9 @@ export const reviewersBriefWithdrawn = (b: { kind: string; state: string; moves?
  * to every row it hands out (client/inbox-store.ts); invariant a-no-review-repo-never-asks-for-review-or-merge.
  */
 export function withoutWithdrawnAsks<R extends Pick<InboxRow, "needs" | "brief">>(row: R): R {
-  const reasons = row.needs?.reasons.filter(r => !(r.reason === "reviewers" && r.dedupeKey.endsWith(":reviewers") && agentMergesKey(r.dedupeKey.slice(0, -":reviewers".length))));
+  // A flag stored before reasons carried their PR falls back on the add-reviewers brief's PR.
+  const briefPr = row.brief ? reviewersBriefPr(row.brief) : null;
+  const reasons = row.needs?.reasons.filter(r => { const pr = r.reason === "reviewers" ? r.prKey ?? briefPr : null; return !(pr && agentMergesKey(pr)); });
   const needsGone = !!row.needs && reasons!.length !== row.needs.reasons.length;
   const briefGone = !!row.brief && reviewersBriefWithdrawn(row.brief);
   if (!needsGone && !briefGone) return row;
@@ -227,9 +231,9 @@ export function withoutRunState(needs: Needs | null, before?: string): Needs | n
 export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
   const e: Entry = structuredClone(prev);
   const before = JSON.stringify(e);
-  const flag = (reason: Reason, detail: string, dedupeKey: string) => {
+  const flag = (reason: Reason, detail: string, dedupeKey: string, prKey?: string) => {
     if (e.goneAt) return;
-    add(e, reason, detail, dedupeKey, now);
+    add(e, reason, detail, dedupeKey, now, prKey);
     e.lastEventAt = now;
     const wake = BREAKS.includes(reason) || e.snooze?.until === "next-event";
     if (e.snooze && wake) e.snooze = null;
@@ -267,7 +271,7 @@ export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
     case "paused": if (!seen(e, `paused:${event.pauseId}`)) flag("paused", event.detail, "paused"); break; // #7
     case "ci": if (!seen(e, event.dedupeKey) && !event.suppressed) flag("ci", event.detail, "ci"); break; // #8
     case "review": if (!seen(e, event.dedupeKey) && !event.suppressed) flag("review", event.detail, "review"); break; // #9
-    case "reviewers": if (!seen(e, event.dedupeKey)) flag("reviewers", event.detail, "reviewers"); break;
+    case "reviewers": if (!seen(e, event.dedupeKey)) flag("reviewers", event.detail, "reviewers", event.prKey); break;
     case "facts_live":
       if (e.needs) {
         const dead = FACT_REASONS.filter(r => !event.live.includes(r));
