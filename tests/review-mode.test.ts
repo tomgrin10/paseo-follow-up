@@ -7,7 +7,7 @@ import { followUpEvents } from "../server/inbox";
 import { PrWorkflowStore, type Probe } from "../server/pr-workflow";
 import { needsYou } from "../shared/attention";
 import { newEntry, prEndEvent, reduce } from "../shared/inbox";
-import { agentMerges, noReviewRepoList, REVIEW_MODE_LABELS, repoShippingSummary, repoReview, setNoReviewRepos, setPrWorkflowInputSchema } from "../shared/pr-workflow";
+import { agentMerges, reviewersMissing, noReviewRepoList, REVIEW_MODE_LABELS, repoShippingSummary, repoReview, setNoReviewRepos, setPrWorkflowInputSchema } from "../shared/pr-workflow";
 import { emptyReviewerConfig, setReviewerConfig } from "../shared/reviewers";
 import { INVARIANTS as STATUS_INVARIANTS } from "../shared/status-invariants";
 import { clock, pr, snapshot, workspace } from "./fixtures";
@@ -149,4 +149,20 @@ test("Undo brings Add reviewers back: a withdrawn reviewers flag forgets its key
   let off = reduce(reduce(newEntry("main-agent"), ask, at), { type: "sign_off" }, at);
   off = reduce(reduce(off, { type: "facts_live", live: [] }, at), ask, at);
   assert.equal(off.needs, null);
+});
+
+test("a-no-review-repo-never-asks-for-review-or-merge: a PR the agent merges itself never reads \"No reviewers\"", async t => {
+  // 2026-11-12, Tom's live panel: #139 and #147 (register_pr agentMerges) read "… · No reviewers" in Pull requests.
+  fresh(t);
+  const open = (patch: Partial<Parameters<typeof pr>[0]> = {}) => pr({ snapshot: snapshot({ reviewers: reviewers() }), ...patch });
+  assert.equal(reviewersMissing(open()), true, "a team-review PR keeps it");
+  assert.equal(reviewersMissing(open({ agentMerges: true })), false, "register_pr agentMerges drops it");
+  setNoReviewRepos(["example/app"]);
+  assert.equal(reviewersMissing(open()), false, "a No review repository drops it");
+  assert.equal(reviewersMissing(open({ agentMerges: false })), true, "a merge handed back keeps it");
+  // Every surface that shows the fragment (panel PR rows, the PR sheet) goes through reviewersMissing; Home's chip
+  // comes from Needs you's reviewers item, which asksForReviewers already gates.
+  const offenders: string[] = [];
+  for (const f of await readdir("client")) if (/\.tsx?$/.test(f)) (await readFile(join("client", f), "utf8")).split("\n").forEach((line, i) => { if (/\bnoReviewers\(/.test(line)) offenders.push(`client/${f}:${i + 1}`); });
+  assert.deepEqual(offenders, [], "use reviewersMissing(pr) from shared/pr-workflow.ts");
 });

@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { REPO, repoKey } from "./reviewers";
+import { noReviewers, REPO, repoKey } from "./reviewers";
+import type { Pr } from "./model";
 
 /**
  * How a repository ships PRs. "auto" picks Graphite only where Graphite is actually set up (the CLI on PATH, its
@@ -118,6 +119,13 @@ export const repoReview = (repo: string): ReviewMode => noReview.has(repoKey(rep
 export function agentMerges(pr: { repo: string; agentMerges?: boolean }): boolean {
   return pr.agentMerges ?? noReview.has(repoKey(pr.repo));
 }
+
+/**
+ * Whether a PR's "No reviewers" shows (the panel's PR rows, the PR sheet): an open PR without reviewers that someone
+ * will be asked to review. A PR the agent merges itself never will, so the fragment would be noise there.
+ * Surfaces read this, never `noReviewers` directly (tests/review-mode.test.ts).
+ */
+export const reviewersMissing = (pr: Pr): boolean => !agentMerges(pr) && noReviewers(pr);
 
 export const reviewFixFor = (config: PrWorkflowConfig, repo: string | null): ReviewFix => (repo && config.repos[repoKey(repo)]?.reviewFix) || config.reviewFix;
 
