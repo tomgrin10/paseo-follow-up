@@ -222,7 +222,7 @@ if (isMain) {
       const si = args.indexOf("--since");
       const result = await release(version, date, args.includes("--allow-empty"), { since: si >= 0 ? args[si + 1] : null });
       if (result.existing) console.log(`CHANGELOG.md: ${result.target} already has its section; ${result.bullets ? `added ${result.bullets} note(s) to its full changelog from` : "consumed"} ${result.fragments.length} fragment(s).`);
-      else if (result.skipped) console.log(`${result.version} is a beta: no release notes. ${result.fragments.length} fragment(s) stay in changes/ for the next stable release.`);
+      else if (result.skipped) console.log(`${result.version} is a beta: no CHANGELOG.md section. Its GitHub release notes are rendered from the fragments since the last tag (scripts/release-body.mjs); ${result.fragments.length} fragment(s) stay in changes/ for the next stable release.`);
       else console.log(`CHANGELOG.md: ${result.version} (${result.date}), ${result.bullets} note(s) from ${result.fragments.length} fragment(s)${result.draft ? ". It's a DRAFT: curate it and delete the DRAFT line; check:notes refuses it until then." : ""}`);
     }
   } catch (e) { console.error(e.message); process.exit(1); }

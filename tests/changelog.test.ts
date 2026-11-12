@@ -135,7 +135,7 @@ test("release notes script: lints style; a stable release moves fragments under 
   await writeFile(join(dir, "changes/README.md"), "kept");
   const run = (...a: string[]) => exec("node", [join(dir, "scripts/release-notes.mjs"), ...a]);
   const before = await readFile(join(dir, "CHANGELOG.md"), "utf8");
-  assert.match((await run("1.1.0-beta.0", "--date", "2026-11-09")).stdout, /is a beta: no release notes\. 2 fragment\(s\) stay/);
+  assert.match((await run("1.1.0-beta.0", "--date", "2026-11-09")).stdout, /is a beta: no CHANGELOG\.md section\. Its GitHub release notes are rendered from the fragments since the last tag \(scripts\/release-body\.mjs\); 2 fragment\(s\) stay/);
   assert.equal(await readFile(join(dir, "CHANGELOG.md"), "utf8"), before, "a beta writes no section");
   assert.deepEqual((await readdir(join(dir, "changes"))).sort(), ["README.md", "a-first.md", "b-second.md"], "and its fragments wait");
   await writeFile(join(dir, "package.json"), JSON.stringify({ version: "1.1.0-beta.0", files: ["CHANGELOG.md"] }));
