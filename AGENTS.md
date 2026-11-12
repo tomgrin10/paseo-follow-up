@@ -169,6 +169,14 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    menu, the panel's More menu) lays out through `MenuItemContent` (`client/menu-item.tsx`): one leading glyph slot
    centred on the item, sized for touch as its text is. No menu builds its own glyph slot, and none pins a glyph to
    the first line. Guarded by `tests/menu-glyph.test.ts` ([docs/client.md](docs/client.md#row-menu)).
+15. **A search result is the list's own Row** (`search-row-is-the-list-row`). Home's search results render the same
+   `Row` as Home's groups (`client/home-list.tsx`), with the hit highlighted in place (title, "› agent", the ask line);
+   a match in a field the row doesn't show replaces line 2 with "<Field> · excerpt", so a result is exactly as tall as
+   its row. An archived hit is that Row, muted, with the Archive glyph and "Archived". The sidebar view's "Filter
+   workspaces" narrows its list in place with the same matcher (`filterHome` in `shared/search.ts`,
+   `sidebar-filter-uses-home-search`). Home's order is one Display setting, `home_sort`, for Home and the sidebar view
+   on every device, so `set_display` covers it. Guarded by `tests/search-row.test.ts`, `tests/home-beta2.test.ts` and
+   `tests/home-sort.test.ts`.
 
 ## Bugs
 

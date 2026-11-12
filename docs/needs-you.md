@@ -186,8 +186,13 @@ every `sending` entry.
   fixing, running, waiting, later, quiet). A tracked workspace's group comes from `trackedGroup`, which reads the
   status model ([workspaces.md](workspaces.md#status-model)).
 - **Search, sort and colour:**
-  - `shared/search.ts`: the client-side omnibox index.
-  - `shared/sort.ts`: Priority, Recent, Oldest waiting, Name, By project. Sorting applies within each group.
+  - `shared/search.ts`: the client-side omnibox index. `rowHit` turns a hit into what the list Row shows (in-place
+    highlights, or line 2 as "<Field> · excerpt" for a field the row hides); search results are that Row
+    (`search-row-is-the-list-row`). `filterHome` is the sidebar view's "Filter workspaces": the same matcher, applied
+    in place to the grouped list (groups and order kept, empty groups dropped, archived left out).
+  - `shared/sort.ts`: Priority, Recent, Oldest waiting, Name, By project. Sorting applies within each group. The
+    chosen order is the Display setting `home_sort` (`shared/display.ts`), one for Home and the sidebar view on every
+    device; `homeSortSync` reads it, and the first client to load moves its old per-device choice there once.
   - `shared/attention.ts`: one colour language for the stack bar, rail nodes and overview bars.
 - **Client:** `client/home.tsx`, `client/home-list.tsx`, `client/home-chrome.tsx`, `client/home-view.ts`,
   `client/home-data.ts` ([client.md](client.md)).
