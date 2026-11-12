@@ -884,7 +884,9 @@ async function reviewModeShots({ shoot, call }) {
   const row = async (page, vp) => { await openHome(page); if (vp) await page.setViewportSize(vp); await (await homeRow(page, title)).click(); await link(page).waitFor(); };
   const fold = async (page, vp) => {
     await page.setViewportSize(vp);
-    await page.goto(`${ORIGIN}/settings/hosts/${SERVER_ID}/plugins/follow-up/following`);
+    await page.goto(`${ORIGIN}/settings/hosts/${SERVER_ID}/plugins/follow-up/projects`);
+    // Desktop: a tab per category. Phone: the category list, drilled into.
+    await (vp.width >= 768 ? page.getByRole("tab", { name: /^Following/ }) : page.getByRole("button", { name: "Following", exact: true })).filter({ visible: true }).first().click();
     const header = page.getByRole("button", { name: /^example\/app, / }).filter({ visible: true }).first();
     await header.waitFor();
     if (await header.getAttribute("aria-expanded") !== "true") await header.click();
@@ -892,14 +894,22 @@ async function reviewModeShots({ shoot, call }) {
     const menu = page.getByRole("menu", { name: "Review for example/app" }).first();
     await menu.waitFor();
     await menu.evaluate(el => el.scrollIntoView({ block: "center" }));
+    // Only Follow-up's own pane: the host settings sidebar beside it names the machine.
+    return vp.width >= 768 ? { x: 400, y: 0, width: vp.width - 400, height: vp.height } : undefined;
   };
   for (const theme of ["light", "dark"]) for (const [size, vp] of [["desktop", DESKTOP], ["phone", PHONE]]) {
     await team();
     await shoot(`rm-row-${size}-${theme}`, vp, theme, page => row(page, vp));
+    // The undo bar lasts 10 s and settle() can take longer, so the drive captures it itself; the regular shot after
+    // shows the row gone.
     await shoot(`rm-undo-${size}-${theme}`, vp, theme, async page => {
       await row(page, vp); await link(page).click();
-      await page.getByText("example/app: no review. The agent merges its own PRs once checks pass.").first().waitFor();
+      await page.getByText("example/app: no review. The agent merges its own PRs once checks pass.").filter({ visible: true }).first().waitFor();
+      await page.evaluate(() => document.fonts.ready); await page.waitForTimeout(300);
+      await fs.writeFile(join(out, `follow-up-rm-toast-${size}-${theme}.png`), await page.screenshot({ animations: "disabled", caret: "hide" }));
     });
+    // Undo on the toast brings the ask back (the inbox forgets the withdrawn reviewers key).
+    await team();
     await call("follow.set-pr-workflow", { repo: "example/app", review: "none" });
     await shoot(`rm-settings-${size}-${theme}`, { width: vp.width, height: size === "phone" ? 1100 : 1000 }, theme, page => fold(page, { width: vp.width, height: size === "phone" ? 1100 : 1000 }));
   }

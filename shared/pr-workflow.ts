@@ -96,7 +96,17 @@ export const noReviewRepos = (config: Pick<PrWorkflowConfig, "repos">): string[]
  * `agentMerges`: a set lookup, nothing more.
  */
 let noReview: ReadonlySet<string> = new Set();
-export function setNoReviewRepos(repos: Iterable<string>): void { noReview = new Set([...repos].map(repoKey)); }
+let noReviewVersion = 0;
+const noReviewListeners = new Set<() => void>();
+export function setNoReviewRepos(repos: Iterable<string>): void {
+  const next = new Set([...repos].map(repoKey));
+  if (next.size === noReview.size && [...next].every(r => noReview.has(r))) return;
+  noReview = next; noReviewVersion++;
+  for (const l of noReviewListeners) l();
+}
+/** For the client: re-render what computed Needs you when the set changes (useSyncExternalStore). */
+export function onNoReviewRepos(listener: () => void): () => void { noReviewListeners.add(listener); return () => { noReviewListeners.delete(listener); }; }
+export const noReviewReposVersion = () => noReviewVersion;
 export const noReviewRepoList = (): string[] => [...noReview].sort();
 export const repoReview = (repo: string): ReviewMode => noReview.has(repoKey(repo)) ? "none" : "team";
 /**

@@ -98,7 +98,8 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
       const inline = compact && button && item.kind !== "send" && !(item.kind === "retry" && !item.exhausted);
       if (inline) return <CardRow key={item.key} theme={theme} compact first={index === 0 && flush} style={flush ? { paddingHorizontal: 0 } : undefined}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <Icon name={g.name} size={16} color={g.color} />
+          {/* A row with the quiet link under it is taller: the glyph stays on the title's line. */}
+          <View style={item.kind === "reviewers" ? { alignSelf: "flex-start", paddingTop: 2 } : undefined}><Icon name={g.name} size={16} color={g.color} /></View>
           <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
             <RichText numberOfLines={2} style={t.label}>{item.title}</RichText>
             {"detail" in item && !!item.detail && !sameText(item.detail, item.title.replace(/^Q\d+ · /, "")) && <RichText linkColor={c.foreground} numberOfLines={1} style={t.meta}>{item.detail}</RichText>}
@@ -154,6 +155,7 @@ export function NeedsYouBlock({ workspace: w, theme, compact, actions, now, brie
   /** The agent's open brief this surface shows, or null. */ brief?: Pick<Brief, "questionIds" | "context"> | null;
   /** That brief's own card, drawn when it points at no open question. */ briefCard?: ReactNode; style?: StyleProp<ViewStyle>;
 }) {
+  useReviewerSettings(); // re-renders on a No review change, so the block's rows and count drop the asks at once
   const all = needsYou(w, now);
   const block = needsYouBlock(all, brief && briefCard ? brief : null, w.questions);
   // An accordion: one question open at a time (the block's first by default); its header closes it again.

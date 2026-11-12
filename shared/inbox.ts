@@ -242,7 +242,14 @@ export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
     case "review": if (!seen(e, event.dedupeKey) && !event.suppressed) flag("review", event.detail, "review"); break; // #9
     case "reviewers": if (!seen(e, event.dedupeKey)) flag("reviewers", event.detail, "reviewers"); break;
     case "facts_live":
-      if (e.needs) { e.needs = withoutReasons(e.needs, FACT_REASONS.filter(r => !event.live.includes(r))); if (!e.needs) e.snooze = null; }
+      if (e.needs) {
+        const dead = FACT_REASONS.filter(r => !event.live.includes(r));
+        // A withdrawn "Add reviewers" may come back (Undo on No review, reviewers removed): forget its key so the same
+        // PR can ask again. CI and threads key on the head or the threads, so a new fact already has a new key.
+        // No PR of this agent asks any more, so every "<pr>:reviewers" key goes.
+        if (dead.includes("reviewers") && e.needs.reasons.some(r => r.reason === "reviewers")) e.seenKeys = e.seenKeys.filter(k => !k.endsWith(":reviewers"));
+        e.needs = withoutReasons(e.needs, dead); if (!e.needs) e.snooze = null;
+      }
       break;
     case "pr_closed": // #10, and a "until this PR merges" snooze wakes here.
       if (!seen(e, event.dedupeKey)) {
