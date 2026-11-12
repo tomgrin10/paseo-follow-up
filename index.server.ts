@@ -9,6 +9,8 @@ import { DEFAULT_QUESTION_MODE, QUESTION_DEDUPE_MIGRATION, collapseDuplicateQues
 import { askQuestion, needsYouQuestions, recordAnswer, syncTaskQuestions, withdrawQuestion } from "./server/questions";
 import { agentSetSpec, developerSetSpec } from "./server/spec";
 import type { PluginServerContext, PluginHandlerContext, PluginHookContext, PluginSessionOpenRequest } from "@getpaseo/plugin/server";
+import type { PluginRpcContract } from "@getpaseo/plugin";
+import type { ZodType, output as zOutput } from "zod";
 import { mkdir, writeFile } from "node:fs/promises";
 import { isTimeZone } from "./shared/inbox";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -138,10 +140,12 @@ export default function contribute(server: PluginServerContext) {
   const handlers = new Map<string, { input: { parseAsync(value: unknown): Promise<unknown> }; run: (input: any, context: PluginHandlerContext) => unknown }>();
   // Slow RPCs name themselves in the plugin's output, with the event loop's delay (server/rpc-timing.ts).
   const rpcTiming = new RpcTiming(); rpcTiming.start();
-  const handle: PluginServerContext["handle"] = (contract, handler) => {
+  // RPCs only (0.16 overloads `server.handle` for subscriptions too): a subscription goes straight to `server.handle`
+  // through `serveFeed`, never into `handlers`, so the in-process path can't call one with an RPC context.
+  const handle = <I extends ZodType, O extends ZodType>(contract: PluginRpcContract<I, O>, handler: (input: zOutput<I>, context: PluginHandlerContext) => unknown) => {
     // Main-agent work by a successor makes its handover stick (see handBackMainAgent): noted after the call succeeds.
     const run = MAIN_WORK.has(contract.name) ? (async (input: { agentId?: string }, context: PluginHandlerContext) => { const out = await (handler as (i: unknown, c: PluginHandlerContext) => unknown)(input, context); if (input?.agentId) await noteMainWork(input.agentId).catch(() => undefined); return out; }) as typeof handler : handler;
-    handlers.set(contract.name, { input: contract.input, run: run as never }); server.handle(contract, rpcTiming.timed(contract.name, run as (i: unknown, c: PluginHandlerContext) => unknown) as typeof handler);
+    handlers.set(contract.name, { input: contract.input, run: run as never }); server.handle(contract, rpcTiming.timed(contract.name, run as (i: unknown, c: PluginHandlerContext) => unknown) as never);
   };
   const noteMainWork = async (agentId: string) => {
     // A cheap check on the snapshot first: almost every call has no open handover, so nothing is written.
