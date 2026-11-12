@@ -23,6 +23,10 @@ not a patch for one instance.
   - `tests/status-invariants.test.ts`: every invariant in `shared/status-invariants.ts` holds over a grid and the
     bug fixtures.
   - `tests/agent-parity.test.ts`: every client RPC has a tool or an exemption.
+  - `tests/idle-rpc.test.ts`: the real client stores, bundled with React Native stubbed, run ten simulated minutes against
+    a fake host: at most one RPC a minute with `client.subscribe` (0.16), and still polling without it (0.15).
+  - `tests/feeds.test.ts`: the worker's feeds read once per change, push only changes, and watch Smart Session only
+    while subscribed.
   - `tests/rpc-ack.test.ts`: every client RPC replies within 500 ms with Paseo, the daemon and gh hanging
     (`tests/support/hanging-host.ts` runs the real `contribute()` in a temp home), or has an `EXEMPT` reason.
   - `tests/rpc-cached.test.ts`: the polled reads (Needs you's list, usage, the Summary) answer from what the worker
