@@ -146,7 +146,7 @@ export function useListFilter(model: HomeModel, sources: HomeSources): ListFilte
   const filtered = useMemo(() => index ? filterHome(model, index, query) : { model, hits: null }, [index, model, query]);
   return { query, setQuery, model: filtered.model, hits: filtered.hits, inputRef };
 }
-/** "Filter workspaces": a filter icon, no shortcut, so it never reads as Paseo's own Search (the Command Center, ⌘K). */
+/** "Filter workspaces": a filter icon and no key binding, so it never reads as Paseo's own Search (the Command Center, ⌘K). */
 export function FilterField({ theme, filter, dense }: { theme: Theme; filter: ListFilter; dense: boolean }) {
   return <QueryField theme={theme} value={filter.query} onChange={filter.setQuery} placeholder="Filter workspaces" icon="ListFilter" dense={dense} inputRef={filter.inputRef} slashHint={false} />;
 }
