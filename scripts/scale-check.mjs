@@ -139,6 +139,23 @@ try {
   for (let poll = 1; poll <= POLLS; poll++) { await sleep(POLL_MS); samples.push(loaded(await agents())); }
   await sleep(5_000);
   const after = loaded(await agents());
+  // The idle window measures the steady state, so Follow-up's own sends settle first (2026-11-12, Q49): the realistic
+  // seed's history once tripped the retired 3-strike rule, which blocked every awake workspace's next message, so idle
+  // looked quiet by accident. Under the per-task cap a loaded, idle agent gets each lingering condition at most twice,
+  // then it caps. Quiet: nothing in flight and no queued message that would go out on its own (the plugin's own decision).
+  const { sendDecision } = await import("../shared/send-decision.ts");
+  const { recoveryBatch } = await import("../shared/follow-up.ts");
+  const stateFile = join(home, "plugin-data/follow-up/state.json");
+  const moving = st => st.workspaces.flatMap(w => w.batches.filter(b => !recoveryBatch(b) && (["sending", "sent", "uncertain"].includes(b.state)
+    || b.state === "pending" && [null, "agent"].includes(sendDecision(w, Date.now(), { batch: b }).waitingOn))).map(b => `${w.title}: ${b.state}`));
+  const quietStart = Date.now(); let quietChecks = 0; let still = [];
+  while (Date.now() - quietStart < Number(arg("quiet-timeout", "480")) * 1000) {
+    still = moving(JSON.parse(await readFile(stateFile, "utf8")));
+    if (still.length) quietChecks = 0; else if (++quietChecks >= 3) break;
+    await sleep(5_000);
+  }
+  const quietAfterS = Math.round((Date.now() - quietStart) / 1000);
+  if (quietChecks < 3) { console.error(`Follow-up's sends never settled before the idle window: ${still.slice(0, 5).join("; ")}`); process.exitCode = 1; }
   // The worker: its pid is in the lock it holds. RSS now, CPU and state.json writes over an idle window.
   const pid = Number((await readFile(join(home, "plugin-data/follow-up/worker.lock"), "utf8").catch(() => "")).split(":")[0]);
   const ticks = async () => { const f = (await readFile(`/proc/${pid}/stat`, "utf8")).split(") ")[1].split(" "); return Number(f[11]) + Number(f[12]); };
@@ -171,7 +188,7 @@ try {
   if (worker) worker.trace = { ...trace, githubRequests: github?.requests.length ?? 0 };
   const receipts = (await readFile(join(home, "fixture-receipts.jsonl"), "utf8").catch(() => "")).trim().split("\n").filter(l => /Follow-up (batch|recovery)/.test(l)).length;
   const state = JSON.parse(await readFile(join(home, "plugin-data/follow-up/state.json"), "utf8"));
-  const result = { workspaces: N, awakeOnPurpose: AWAKE, loadedBefore: before, loadedPerPoll: samples, loadedAfter: after, followUpSends: receipts, dormant: state.workspaces.filter(w => w.dormant).length, autoSendOn: state.workspaces.filter(w => w.enable_auto_sends).length, parked: state.autoSendsParked?.length ?? 0, worker };
+  const result = { workspaces: N, awakeOnPurpose: AWAKE, loadedBefore: before, loadedPerPoll: samples, loadedAfter: after, followUpSends: receipts, quietAfterS, dormant: state.workspaces.filter(w => w.dormant).length, autoSendOn: state.workspaces.filter(w => w.enable_auto_sends).length, parked: state.autoSendsParked?.length ?? 0, worker };
   console.log(process.argv.includes("--json") ? JSON.stringify(result) : result);
   if (after > before) { console.error(`Follow-up loaded ${after - before} dormant agents`); process.exitCode = 1; }
   // The budget is the worker's lifetime peak (VmHWM), start-up tick included: 2026-11-12's spike was over before idle began.
