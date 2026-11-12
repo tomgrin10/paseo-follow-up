@@ -1,11 +1,11 @@
 import { FINISH_ASK } from "../shared/status";
 import { View, type StyleProp, type ViewStyle } from "react-native";
-import { Text } from "./text";
+import { Pressable, Text } from "./text";
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { checkPrActionRpc, controlRpc, sendRpc } from "../shared/contracts";
-import { ago, needsYou, shortRefs, workspaceSnoozed, type NeedItem } from "../shared/attention";
+import { needsYou, shortRefs, workspaceSnoozed, type NeedItem } from "../shared/attention";
 import { laterLabel } from "./inbox";
 import { sameText } from "../shared/home";
 import type { Workspace } from "../shared/model";
@@ -13,6 +13,7 @@ import { Button, Card, CardRow, Chip, errorText, text, type Theme } from "./kit"
 import type { Colors } from "./theme";
 import { QuestionBody, meanwhile } from "./questions";
 import { needsYouBlock } from "../shared/needs-block";
+import { age } from "../shared/inbox";
 import { questionState } from "../shared/questions";
 import type { Brief } from "../shared/brief";
 import { useState, type ReactNode } from "react";
@@ -152,7 +153,8 @@ export function NeedsYouBlock({ workspace: w, theme, compact, actions, now, brie
 }) {
   const all = needsYou(w, now);
   const block = needsYouBlock(all, brief && briefCard ? brief : null, w.questions);
-  const [toggled, setToggled] = useState<Record<string, boolean>>({});
+  // An accordion: one question open at a time (the block's first by default); its header closes it again.
+  const [openId, setOpenId] = useState<string | null | undefined>(undefined);
   if (!block.count) return null;
   // In Later the block stays (its moves still work) but reads Later, without the attention border.
   const later = workspaceSnoozed(w, all, now) && w.snooze ? laterLabel(w.snooze.until, now) : null;
@@ -160,7 +162,7 @@ export function NeedsYouBlock({ workspace: w, theme, compact, actions, now, brie
     {block.cards.map(card => card.kind === "brief"
       ? <View key="brief" style={{ borderTopWidth: 1, borderTopColor: theme.colors.border }}>{briefCard}</View>
       : <QuestionAsk key={card.questionId} workspace={w} questionId={card.questionId} context={card.brief ? brief?.context ?? null : null} theme={theme} compact={compact} now={now} openAgent={actions.openAgent}
-        open={toggled[card.questionId] ?? card.expanded} onToggle={() => setToggled(t => ({ ...t, [card.questionId]: !(t[card.questionId] ?? card.expanded) }))} />)}
+        open={openId === undefined ? card.expanded : openId === card.questionId} onToggle={() => setOpenId(id => (id === undefined ? (card.expanded ? card.questionId : null) : id) === card.questionId ? null : card.questionId)} />)}
     <NeedsYouList workspace={w} theme={theme} compact={compact} actions={actions} now={now} rows={block.rows} />
   </Card>;
 }
@@ -176,19 +178,18 @@ function QuestionAsk({ workspace: w, questionId, context, theme, compact, now, o
   const q = w.questions.find(x => x.id === questionId);
   if (!q) return null;
   const state = meanwhile(w, q, pending);
-  const header = <View style={{ flexDirection: "row", alignItems: open ? "flex-start" : "center", gap: 8 }}>
-    <View style={{ paddingTop: open ? 3 : 0 }}><Icon name={questionState(q) === "stopped" ? "CirclePause" : "MessageCircleQuestion"} size={compact ? 16 : 14} color={c.statusWarning} /></View>
-    <View style={{ flex: 1, minWidth: 0, flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 8, rowGap: 4 }}>
-      <RichText accessibilityRole={open ? "header" : undefined} numberOfLines={open ? undefined : 1} style={[open ? t.ask : t.label, { flexShrink: 1 }]}>{q.title}</RichText>
-      <Chip theme={theme} label={q.id} color={c.foregroundMuted} />
-    </View>
-    <Text style={[t.meta, { paddingTop: open ? 2 : 0 }]}>{ago(q.askedAt, now)}</Text>
-    {!open && <Icon name="ChevronDown" size={14} color={c.foregroundMuted} />}
+  // "Q1 · title" (DESIGN.md): the chip leads so a long title wraps under itself, and the age stays on the right.
+  const header = <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+    <View style={{ paddingTop: 2 }}><Icon name={questionState(q) === "stopped" ? "CirclePause" : "MessageCircleQuestion"} size={compact ? 16 : 14} color={c.statusWarning} /></View>
+    <View style={{ paddingTop: 1 }}><Chip theme={theme} label={q.id} color={c.foregroundMuted} /></View>
+    <RichText accessibilityRole="header" numberOfLines={open ? undefined : 1} style={[open ? t.ask : t.label, { flex: 1, minWidth: 0 }]}>{q.title}</RichText>
+    <Text style={[t.meta, { paddingTop: 1 }]}>{age(q.askedAt, now)}</Text>
+    <View style={{ paddingTop: 1 }}><Icon name={open ? "ChevronUp" : "ChevronDown"} size={14} color={c.foregroundMuted} /></View>
   </View>;
   if (!open) return <CardRow theme={theme} compact={compact} onPress={onToggle} accessibilityLabel={`Show ${q.id}: ${q.title}`} style={{ minHeight: compact ? 48 : undefined, justifyContent: "center" }}>{header}</CardRow>;
   return <CardRow theme={theme} compact={compact} style={{ paddingVertical: compact ? 14 : 12 }}>
     <View style={{ gap: 12 }}>
-      {header}
+      <Pressable accessibilityRole="button" aria-expanded accessibilityState={{ expanded: true }} accessibilityLabel={`Hide ${q.id}: ${q.title}`} onPress={onToggle} style={{ minHeight: compact ? 44 : undefined }}>{header}</Pressable>
       {!!context && <RichText selectable linkColor={c.foreground} style={[t.body, { color: c.foregroundMuted }]}>{context}</RichText>}
       <QuestionBody workspace={w} question={q} theme={theme} compact={compact} now={now} openAgent={openAgent} inline />
       <View style={{ flexDirection: "row", gap: 6 }}>
