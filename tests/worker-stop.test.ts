@@ -108,31 +108,41 @@ test("worker stop: the worker's teardown routes every wait through one deadline"
 /**
  * One deadline for the whole stop (2026-11-11 review of #120): each wait had its own 5 s bound and they ran one after
  * another, so a stop with everything stuck took about 45 s, and a plugin reload waited on all of it. The deadline
- * starts when stop starts; every wait gets what is left of it. SLACK_MS covers timer lateness only.
+ * starts when stop starts; every wait gets what is left of it.
+ *
+ * No wall-clock races (2026-11-12, the in-time save flaked on a busy CI runner: its 60 ms share of a 300 ms deadline
+ * ran out before state.json was written). The deadlines here are either already over, so a wait with a bound of its
+ * own (5 s by default) would show up against BOUND_MS, or set by the test; work finishes "inside" a deadline by
+ * ordering (before the deadline's timer can run), never by racing it.
  */
-const DEADLINE_MS = 300;
-const SLACK_MS = 250;
 type StopWorker = (parts: Record<string, unknown>, ms: number) => Promise<void>;
+/** A deadline the test sets: `left` ms from each call (0: already over), counting how many waits consulted it. */
+const fakeDeadline = (left: number) => {
+  const d = { at: 0, consulted: 0, left: () => { d.consulted++; return left; }, expired: () => left <= 0 };
+  return d;
+};
 
-test("worker stop: the whole stop finishes within one deadline when everything is stuck", async t => {
+test("worker stop: the whole stop shares one deadline; once it is over, nothing stuck is waited on", async t => {
   const stopWorker = (teardown as unknown as { stopWorker?: StopWorker }).stopWorker;
   assert.ok(stopWorker, "the worker's stop has no single deadline: each wait gets its own bound, one after another");
   const store = new Store(await directory(t), 1_000);
   let entered!: () => void; const inside = new Promise<void>(resolve => { entered = resolve; });
-  const engine = engineFor(store, gatewayWith(() => { entered(); return never(); }));
+  // Stop bounds of their own left at the 5 s default: a step that used one instead of the shared deadline would
+  // hold the stop past BOUND_MS.
+  const engine = new Engine(store, { observe: async () => new Map() }, gatewayWith(() => { entered(); return never(); }), () => clock);
   void engine.tick(); await inside;
   const actions = new PrActions(store, { observe: async () => new Map() } as never, { invalidate() {}, merge: async () => never() }, new BrowserBridge());
   (actions as unknown as { running: Set<Promise<unknown>> }).running.add(never());
   const late = store.mutate(async state => { await never(); state.workspaces.push(workspace({ id: "late" })); });
   late.catch(() => undefined);
   let unlocked = false;
-  const stop = stopWorker({ ready: never(), hooks: () => never(), actions, closeConnections: () => never(), engine, store, unlock: async () => { unlocked = true; } }, DEADLINE_MS);
-  assert.ok(await settlesWithin(stop, DEADLINE_MS + SLACK_MS), `stop outlived its ${DEADLINE_MS} ms deadline: the waits add up`);
+  const stop = stopWorker({ ready: never(), hooks: () => never(), actions, closeConnections: () => never(), engine, store, unlock: async () => { unlocked = true; } }, 0);
+  assert.ok(await settlesWithin(stop, BOUND_MS), "stop waited on stuck work after its deadline was over");
   assert.ok(unlocked, "the lock is released once the store is closed");
   assert.equal(store.writes, 0, "stuck work wrote nothing");
 });
 
-test("worker stop: Store.close stays within one bound when the queue, a flush and the last write are all stuck", async t => {
+test("worker stop: Store.close bounds the queue, a flush and the last write by the one deadline it is given", async t => {
   const store = new Store(await directory(t), 1_000);
   await store.mutate(state => { state.workspaces.push(workspace({ id: "first" })); });
   (store as unknown as { write: () => Promise<never> }).write = () => never();
@@ -140,25 +150,32 @@ test("worker stop: Store.close stays within one bound when the queue, a flush an
   await new Promise(r => setImmediate(r));
   await store.mutate(state => { state.workspaces.push(workspace({ id: "second" })); }); // pending: the last write is due
   store.mutate(() => never()).catch(() => undefined); // the queue is stuck
-  assert.ok(await settlesWithin(store.close(DEADLINE_MS as never), DEADLINE_MS + SLACK_MS), `Store.close outlived its ${DEADLINE_MS} ms bound: its waits add up`);
+  const over = fakeDeadline(0);
+  assert.ok(await settlesWithin(store.close(over, over), BOUND_MS), "Store.close waited past its deadline: a wait has a bound of its own");
+  assert.equal(over.consulted, 3, "the queue, the flush in flight and the last write each wait on the given deadline");
 });
 
 test("worker stop: a save that finishes inside the deadline is kept; one that finishes after it is dropped", async t => {
   const dir = await directory(t);
   const store = new Store(dir, 1_000); // batched, as in the worker
+  let entered!: () => void; const inside = new Promise<void>(resolve => { entered = resolve; });
   let finish!: () => void; const answered = new Promise<void>(resolve => { finish = resolve; });
   let release!: () => void; const released = new Promise<void>(resolve => { release = resolve; });
-  // A user's answer RPC in flight when a reload starts: it finishes 50 ms into the stop.
-  const kept = store.mutate(async state => { await answered; state.workspaces.push(workspace({ id: "kept" })); return "kept"; });
+  // A user's answer RPC in flight when a reload starts.
+  const kept = store.mutate(async state => { entered(); await answered; state.workspaces.push(workspace({ id: "kept" })); return "kept"; });
   // Queued behind it, stuck until after the deadline.
   const dropped = store.mutate(async state => { await released; state.workspaces.push(workspace({ id: "dropped" })); return "dropped"; });
   dropped.catch(() => undefined);
-  const close = store.close(DEADLINE_MS as never);
+  await inside; // the answer is mid-mutation: its state is loaded and it waits on nothing but `answered`
+  // The queue's wait ends on a timer; saving what finished gets as long as it takes, so the write is never cut short.
+  const close = store.close(fakeDeadline(100), fakeDeadline(60_000));
+  // The answer finishes after close began and before the queue's deadline: it commits in this turn's microtasks,
+  // which always run before any timer.
+  finish();
   await assert.rejects(store.mutate(() => "new"), /stopping/, "a mutation started after close began was accepted");
-  setTimeout(finish, 50);
-  assert.ok(await settlesWithin(close, DEADLINE_MS + SLACK_MS), `Store.close outlived its ${DEADLINE_MS} ms bound`);
+  assert.ok(await settlesWithin(close, BOUND_MS * 10), "Store.close never finished");
   assert.equal(await kept.catch(error => (error as Error).message), "kept", "a save that finished inside the deadline was dropped");
-  release();
+  release(); // after close: the deadline is over
   await assert.rejects(dropped, /stopping/, "a save that finished after the deadline committed");
   const saved = JSON.parse(await readFile(join(dir, "state.json"), "utf8")) as { workspaces: { id: string }[] };
   assert.deepEqual(saved.workspaces.map(w => w.id), ["kept"], "state.json holds the in-time save and nothing after the deadline");
