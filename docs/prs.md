@@ -25,7 +25,8 @@ review stores nothing, so there is no migration).
 
 `agentMerges(pr)` (`shared/pr-workflow.ts`) is the one rule: the PR's register_pr `agentMerges` answer wins
 (false hands one merge back), else the repository's mode decides. It reads a process-wide set of No review
-repositories. The worker fills it from `pr-workflow.json` first thing in `ready`, before the first tick, and on
+repositories. `reviewersMissing(pr)` builds on it: the panel's PR rows and the PR sheet show "No reviewers" only for
+a PR someone will be asked to review. The worker fills it from `pr-workflow.json` first thing in `ready`, before the first tick, and on
 every save. The client fills it from `follow.reviewer-settings` (`noReview`). The agent's instructions follow the
 mode: `scopes.json` carries `workflow.noReview`, and the hook and the tools say "merge your own PR once CI is
 green" instead of "Merging and archiving remain the developer's actions."
