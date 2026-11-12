@@ -1,12 +1,12 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Deployment, Pr } from "../shared/model";
-import { ghEnvironment } from "./github";
+import { githubApi, type GithubApi } from "./github-api";
 
 const exec = promisify(execFile);
 const sha = /^[a-f0-9]{40}$/;
 type Node = Record<string, any>;
-type Run = (command: string, args: string[], repo?: string) => Promise<string>;
+type Run = (command: string, args: string[]) => Promise<string>;
 type Fleet = { commits: string[]; evidence: string; observedAt: string };
 const repository = "acme/acme-poc";
 const project = "acme-prod";
@@ -33,9 +33,11 @@ export class Deployments {
   private ancestry = new Map<string, Promise<boolean>>();
   private token: { value: string; until: number } | null = null;
   constructor(
-    private run: Run = async (command, args, repo) => (await exec(command, args, { env: repo ? ghEnvironment(repo) : process.env, timeout: 25_000, maxBuffer: 4 * 1024 * 1024 })).stdout,
+    /** gcloud only: GitHub reads go through `api`, in process (worker-reads-github-in-process). */
+    private run: Run = async (command, args) => (await exec(command, args, { env: process.env, timeout: 25_000, maxBuffer: 4 * 1024 * 1024 })).stdout,
     private request: typeof fetch = fetch,
     private now = Date.now,
+    private api: Pick<GithubApi, "rest"> = githubApi(),
   ) {}
   private async json(url: string): Promise<Node> {
     if (!this.token || this.token.until <= this.now()) this.token = { value: (await this.run("gcloud", ["auth", "print-access-token"])).trim(), until: this.now() + 2_700_000 };
@@ -54,7 +56,8 @@ export class Deployments {
     const work = (async () => {
       const match = image.match(/^us-central1-docker\.pkg\.dev\/(acme-prod\/acme-docker\/prod-app-(?:backend|web))@(sha256:[a-f0-9]{64})$/);
       if (!match) throw new Error("Serving image must have an immutable production digest");
-      const base = `https://us-central1-docker.pkg.dev/v2/${match[1]}`;
+      // FOLLOW_UP_DEPLOY_REGISTRY points harness runs (scripts/poll-cost.mjs) at a fake registry.
+      const base = `${(process.env.FOLLOW_UP_DEPLOY_REGISTRY || "https://us-central1-docker.pkg.dev").replace(/\/$/, "")}/v2/${match[1]}`;
       const manifest = await this.json(`${base}/manifests/${match[2]}`);
       if (!/^sha256:[a-f0-9]{64}$/.test(manifest.config?.digest)) throw new Error("Serving image config unavailable");
       const config = (await this.json(`${base}/blobs/${manifest.config.digest}`)).config;
@@ -100,9 +103,9 @@ export class Deployments {
   private contains(merge: string, commit: string): Promise<boolean> {
     if (merge === commit) return Promise.resolve(true);
     const key = `${merge}:${commit}`; const cached = this.ancestry.get(key); if (cached) return cached;
-    const work = this.run("gh", ["api", `repos/${repository}/compare/${merge}...${commit}`], repository).then(body => {
-      const value = JSON.parse(body);
-      if (!["ahead", "identical", "behind", "diverged"].includes(value.status)) throw new Error("Commit ancestry unknown");
+    const work = this.api.rest(repository, `repos/${repository}/compare/${merge}...${commit}`).then(body => {
+      const value = body as { status?: string };
+      if (!["ahead", "identical", "behind", "diverged"].includes(value?.status ?? "")) throw new Error("Commit ancestry unknown");
       return value.status === "ahead" || value.status === "identical";
     });
     if (this.ancestry.size > 1000) this.ancestry.clear();
