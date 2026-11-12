@@ -51,6 +51,10 @@ mergeability, or a content change in the last 5 minutes. The developer's Refresh
 `a-turn-end-never-reads-other-workspaces-prs`; until 2026-11-12 each one re-read every tracked PR fresh). A settled open PR's change shows within 75 s, inside the completion gate's 120 s
 freshness; the `poll-backoff-never-hides-a-moving-pr` invariant holds both. Opening a workspace's panel refreshes it.
 
+**Long-running checks.** Checks still running 10 minutes after a PR's last change (or since Follow-up first saw it)
+are read every 2 minutes instead of 30 s (invariant `long-running-checks-read-every-2-min`; 2026-11-12, 25 stacked
+PRs with checks running for hours cost ~3000 GraphQL points an hour).
+
 **Budget.** Each query asks for `rateLimit { cost remaining resetAt }`. Under 500 points left, settled PRs wait 5
 minutes and only in repositories with something moving, and merged PRs aren't read (see below). Under 100, or when GitHub
 answers with a rate limit (GraphQL's `RATE_LIMIT` or `RATE_LIMITED` error, or a 403/429 with `retry-after` or no
