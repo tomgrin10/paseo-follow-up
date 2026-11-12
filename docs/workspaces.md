@@ -163,7 +163,14 @@ The invariants in `shared/status-invariants.ts` check these over a grid of state
   seen for.
 - **Communication receipts** (`shared/communication.ts`): stakeholder replies need the developer's authorization and
   a sent-message receipt.
-- **Questions from blocked tasks.** A blocked task becomes a question (`syncTaskQuestions`).
+- **Questions from blocked tasks.** Only a task blocked on the developer asks them something: `status: "blocked"` with
+  `ask`, the question they must answer (`blockedOnDeveloper`, `shared/model.ts`). It becomes a question that asks exactly
+  that, never the task's evidence (`syncTaskQuestions`). A task blocked without an ask waits on a PR or another agent:
+  it shows as Blocked in Tasks and never reaches Needs you or the workspace's Needs you status; agents should use
+  `waiting` for that, and the hook says so. Leaving blocked, dropping the ask or changing it closes the open question.
+  An ask set while blocked is kept by blocked updates that leave it out. Invariant
+  `a-question-always-asks-the-developer-something` (`tests/task-question-asks.test.ts`): 2026-11-12, Q48 put a task's
+  evidence in the developer's Needs you as a question with no options while the task waited on a PR.
 - **The activity log.** `shared/activity.ts` builds it from stored state.
 
 ## Questions
