@@ -19,6 +19,8 @@ import { DISPLAY_TOOLS, RPC_TOOLS, type RpcTool } from "./agent-parity";
 import { waitNote, type WaitStatus } from "../shared/wait";
 import { reportInputSchema } from "./report-issue";
 import type { RenameStatus } from "../shared/rename";
+import { DISPLAY_KEYS, displayPreferences } from "../shared/display";
+import { DEFAULT_SORT, SORT_MODES } from "../shared/sort";
 
 /**
  * Agent parity: every action the developer can click in Follow-up has a tool that runs the same server path.
@@ -140,7 +142,7 @@ export const TOOL_INPUT = {
   set_priorities: z.strictObject({ priorities: z.array(priorityInputSchema).max(200).optional(), replace: z.boolean().optional(), ...confirm }),
   display_settings: z.strictObject({}),
   make_main_agent: z.strictObject({ agentId: id.optional(), reason: z.string().trim().min(1).max(200).optional(), requested: z.enum(["developer", "self"]).optional(), ...confirm }),
-  set_display: z.strictObject({ values: z.record(z.string(), z.boolean()).optional(), ...confirm }),
+  set_display: z.strictObject({ values: z.record(z.string(), z.union([z.boolean(), z.string()])).optional(), ...confirm }),
   report_issue: reportInputSchema,
   ...Object.fromEntries(RPC_TOOLS.map(t => [t.name, t.input])),
 } as unknown as Record<AgentTool, z.ZodType>;
@@ -292,12 +294,15 @@ export class AgentActions {
   private async displayTool(caller: string, tool: "display_settings" | "set_display", args: Record<string, any>) {
     if (!this.d.display) throw new Error(`${tool} isn't available in this Follow-up.`);
     const current = await this.d.display.read();
-    if (tool === "display_settings") return { values: current.values, change: "set_display changes these, only when the developer asked." };
-    const values = args.values as Record<string, boolean> | undefined;
-    if (!values || !Object.keys(values).length) throw new Error("set_display: give values, e.g. { enable_trust_bypass: false }. display_settings lists them.");
-    const unknown = Object.keys(values).filter(k => !(k in current.values));
+    if (tool === "display_settings") return { values: { home_sort: DEFAULT_SORT, ...current.values }, sorts: SORT_MODES, change: "set_display changes these, only when the developer asked. home_sort orders Home and the sidebar view." };
+    const values = args.values as Record<string, boolean | string> | undefined;
+    if (!values || !Object.keys(values).length) throw new Error("set_display: give values, e.g. { enable_trust_bypass: false } or { home_sort: \"recent\" }. display_settings lists them.");
+    const unknown = Object.keys(values).filter(k => !DISPLAY_KEYS.includes(k));
     if (unknown.length) throw new Error(`set_display: unknown setting ${unknown.join(", ")}. display_settings lists them.`);
-    const changes = Object.entries(values).filter(([k, v]) => current.values[k] !== v).map(([key, to]) => ({ key, from: current.values[key], to }));
+    const parsed = displayPreferences.schema.safeParse({ ...current.values, ...values });
+    if (!parsed.success) throw new Error(`set_display: ${parsed.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+    const was = (k: string) => current.values[k] ?? (k === "home_sort" ? DEFAULT_SORT : undefined);
+    const changes = Object.entries(values).filter(([k, v]) => was(k) !== v).map(([key, to]) => ({ key, from: was(key), to }));
     const planId = changes.length ? this.plan(caller, "set_display", async () => {
       const now = await this.d.display!.read();
       await this.d.display!.write(now.revision, { ...now.values, ...values });

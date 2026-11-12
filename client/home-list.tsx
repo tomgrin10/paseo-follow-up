@@ -3,8 +3,8 @@ import { FlatList, View } from "react-native";
 import { Pressable, Text } from "./text";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { GROUP_TITLE, quietFolds, type Badge, type HomeGroupId, type HomeModel, type Workstream } from "../shared/home";
-import { ASK_KEY, type OmniboxItem, type WorkspaceItem } from "../shared/search";
-import { AskRow, PriorityLine, ResultRow } from "./home-chrome";
+import { ASK_KEY, excerpt, FIELD_LABEL, highlightRuns, rowHit, type OmniboxItem, type Range, type RowHit, type SearchHit, type WorkspaceItem } from "../shared/search";
+import { AskRow, PriorityLine } from "./home-chrome";
 import { age, wakeLabel, wakeShort } from "../shared/inbox";
 import { headlineColor, mergedColor, readable, runningColor, tint, toneColor, withAlpha, type Colors } from "./theme";
 import { useMinute } from "./home-data";
@@ -29,10 +29,10 @@ type Entry =
   | { type: "brief"; key: string }
   | { type: "overseer"; key: string }
   | { type: "header"; key: string; group: HomeGroupId; title: string; count: number; open: boolean }
-  | { type: "row"; key: string; s: Workstream }
+  | { type: "row"; key: string; s: Workstream; hit?: RowHit | null }
   | { type: "fold"; key: string; project: string; count: number; archivable: number; open: boolean }
   | { type: "more"; key: string; project: string; left: number }
-  | { type: "result"; key: string; item: WorkspaceItem; index: number }
+  | { type: "result"; key: string; item: WorkspaceItem; index: number; s: Workstream; hit: RowHit; archived: boolean }
   | { type: "ask"; key: string; ask: string; index: number }
   | { type: "label"; key: string; text: string }
   | { type: "empty"; key: string }
@@ -60,6 +60,11 @@ export type HomeListProps = {
   emptyAction?: ReactNode;
   /** While searching: one flat ranked list instead of the groups. */
   results?: OmniboxItem[] | null;
+  /**
+   * The sidebar view's filter: `model` is already narrowed to matches (shared/search.ts filterHome); these are the
+   * hits, highlighted on the rows. Every group and Quiet fold holding a match is open while it's set.
+   */
+  hits?: Map<string, SearchHit> | null;
   activeResult?: number;
   onResult?: (item: OmniboxItem) => void;
   /** The status strip's filter: only this group, expanded. */
@@ -76,7 +81,9 @@ export type HomeListProps = {
   menu: { build: (s: Workstream) => RowMenuSection[]; pick: (s: Workstream, item: RowMenuItem) => void };
 };
 
-export function HomeList({ model, theme, dense = false, touch, selectedKey, onSelect, briefLine, renderExpanded, header, footer, top, afterNeeds, emptyAction, results, activeResult = 0, onResult, filter = null, overseer = null, asking = false, menu }: HomeListProps) {
+const noMenu: OpenRowMenu = () => undefined;
+
+export function HomeList({ model, theme, dense = false, touch, selectedKey, onSelect, briefLine, renderExpanded, header, footer, top, afterNeeds, emptyAction, results, hits = null, activeResult = 0, onResult, filter = null, overseer = null, asking = false, menu }: HomeListProps) {
   const c = theme.colors;
   const [openMenu, setOpenMenu] = useState<RowMenuOpen | null>(null);
   const build = menu.build;
@@ -104,7 +111,9 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
           return;
         }
         if (item.hit.group === "archived" && !archivedShown) { archivedShown = true; out.push({ type: "label", key: "l:archived", text: "Archived" }); }
-        out.push({ type: "result", key: `r:${item.provider}:${item.key}`, item, index });
+        const live = model.byKey.get(item.key);
+        const s = live ?? archivedRow(item.hit);
+        out.push({ type: "result", key: `r:${item.provider}:${item.key}`, item, index, s, hit: rowHit(item.hit, s), archived: !live });
       });
       if (!results.length) out.push({ type: "label", key: "l:none", text: "No workspace, branch or PR matches." });
       return out;
@@ -113,38 +122,48 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
     if (overseer && !filter) out.push({ type: "overseer", key: OVERSEER_KEY });
     for (const g of model.groups) {
       if (filter && g.id !== filter) continue;
-      const open = !!filter || !closed.has(g.id);
+      const open = !!filter || !!hits || !closed.has(g.id);
       // Phones with one group filtered: the chip above already says "N Needs you ×"; no header repeating it.
       if (!(touch && filter)) out.push({ type: "header", key: `h:${g.id}`, group: g.id, title: g.title, count: g.items.length, open });
       if (!open) { if (g.id === "needs" && afterNeeds && !filter) out.push({ type: "slot", key: "s:afterNeeds" }); continue; }
-      if (g.id !== "quiet") { for (const s of g.items) out.push({ type: "row", key: s.key, s }); if (g.id === "needs" && afterNeeds && !filter) out.push({ type: "slot", key: "s:afterNeeds" }); continue; }
+      const hitOf = (s: Workstream) => { const h = hits?.get(s.key); return h ? rowHit(h, s) : null; };
+      if (g.id !== "quiet") { for (const s of g.items) out.push({ type: "row", key: s.key, s, hit: hitOf(s) }); if (g.id === "needs" && afterNeeds && !filter) out.push({ type: "slot", key: "s:afterNeeds" }); continue; }
       for (const f of quietFolds(g.items)) {
-        const fopen = openProjects.has(f.project);
+        const fopen = !!hits || openProjects.has(f.project);
         out.push({ type: "fold", key: `f:${f.project}`, project: f.project, count: f.items.length, archivable: f.archivable, open: fopen });
         if (!fopen) continue;
         const shown = (pages[f.project] ?? 1) * QUIET_PAGE;
-        for (const s of f.items.slice(0, shown)) out.push({ type: "row", key: s.key, s });
+        for (const s of f.items.slice(0, shown)) out.push({ type: "row", key: s.key, s, hit: hitOf(s) });
         if (f.items.length > shown) out.push({ type: "more", key: `m:${f.project}`, project: f.project, left: f.items.length - shown });
       }
     }
     // Phones: nothing followed yet says so and what fills the list, instead of a blank screen under the pinned rows.
-    if (touch && !filter && model.groups.every(g => !g.items.length)) out.push({ type: "empty", key: "l:nothing" });
+    if (hits && !out.some(e => e.type === "row")) out.push({ type: "label", key: "l:none", text: "No workspace matches." });
+    else if (touch && !filter && !hits && model.groups.every(g => !g.items.length)) out.push({ type: "empty", key: "l:nothing" });
     return out;
     if (filter && !out.length) out.push({ type: "label", key: "l:empty", text: `Nothing in ${GROUP_TITLE[filter as HomeGroupId]} right now.` });
     return out;
-  }, [model, closed, openProjects, pages, briefLine, results, filter, !!overseer, touch, !!afterNeeds]);
+  }, [model, closed, openProjects, pages, briefLine, results, hits, filter, !!overseer, touch, !!afterNeeds]);
+  // A result picks through onResult; Row only knows its key.
+  const pickResult = useCallback((key: string) => {
+    const item = results?.find(i => !i.ask && i.key === key);
+    if (item) onResult?.(item);
+  }, [results, onResult]);
 
   const render = useCallback(({ item }: { item: Entry }) => {
     switch (item.type) {
-      case "label": return <Text accessibilityRole={item.key === "l:archived" ? "header" : undefined} style={{ color: c.foregroundMuted, fontSize: item.key === "l:archived" ? 11 : 13, fontWeight: item.key === "l:archived" ? "600" : "400",
-        letterSpacing: item.key === "l:archived" ? 0.6 : 0, textTransform: item.key === "l:archived" ? "uppercase" : "none", paddingHorizontal: dense ? 8 : 16, paddingTop: 12, paddingBottom: 4 }}>{item.text}</Text>;
+      // "Archived" heads its results like a group: small caps on desktop, sentence case at 13 on phones (GroupHeader).
+      case "label": return <Text accessibilityRole={item.key === "l:archived" ? "header" : undefined} style={{ color: c.foregroundMuted, fontSize: item.key === "l:archived" && !touch ? 11 : 13, fontWeight: item.key === "l:archived" ? "600" : "400",
+        letterSpacing: item.key === "l:archived" && !touch ? 0.6 : 0, textTransform: item.key === "l:archived" && !touch ? "uppercase" : "none", paddingHorizontal: dense ? 8 : 16, paddingTop: 12, paddingBottom: 4 }}>{item.text}</Text>;
       case "empty": return <View accessibilityRole="summary" style={{ marginHorizontal: 16, marginTop: 20, gap: 6 }}>
         <Text accessibilityRole="header" style={{ color: c.foreground, fontSize: 17, lineHeight: 23, fontWeight: "600" }}>Nothing followed yet</Text>
         <Text style={{ color: c.foregroundMuted, fontSize: 14, lineHeight: 20 }}>Follow a workspace from its Follow-up panel, or turn a project on in Settings so its workspaces join on their own. They show up here once their agents work.</Text>
         {emptyAction ? <View style={{ flexDirection: "row", marginTop: 6 }}>{emptyAction}</View> : null}
       </View>;
       case "slot": return <View style={{ paddingVertical: 10 }}>{afterNeeds}</View>;
-      case "result": return <ResultRow item={item.item} s={model.byKey.get(item.item.key)} theme={theme} active={item.index === activeResult || menuKey === item.item.key} dense={dense} touch={touch} onPress={() => onResult?.(item.item)} onMenu={onMenu} />;
+      // The list's own Row (search-row-is-the-list-row); the keyboard-active result wears the selected style.
+      case "result": return <Row s={item.s} sig={item.s.sig} hit={item.hit} theme={theme} dense={dense} touch={touch} selected={item.index === activeResult} menuOpen={menuKey === item.s.key}
+        onSelect={pickResult} onMenu={item.archived ? noMenu : onMenu} />;
       case "ask": return <AskRow ask={item.ask} theme={theme} active={item.index === activeResult} dense={dense} touch={touch} sending={!!asking} onPress={() => onResult?.({ provider: "overseer", key: ASK_KEY, ask: item.ask })} />;
       case "brief": return <BriefRow theme={theme} line={briefLine ?? ""} selected={!touch && (selectedKey === null || selectedKey === BRIEF_KEY)} touch={touch} onSelect={onSelect} />;
       case "overseer": return overseer ? <OverseerRow theme={theme} o={overseer} selected={selectedKey === OVERSEER_KEY} touch={touch} onSelect={onSelect} /> : null;
@@ -163,12 +182,12 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
       case "row": {
         const selected = selectedKey === item.key;
         return <View>
-          <Row s={item.s} theme={theme} dense={dense} touch={touch} selected={selected} onSelect={onSelect} sig={item.s.sig} onMenu={onMenu} menuOpen={menuKey === item.key} />
+          <Row s={item.s} theme={theme} dense={dense} touch={touch} selected={selected} onSelect={onSelect} sig={item.s.sig} onMenu={onMenu} menuOpen={menuKey === item.key} hit={item.hit} />
           {selected && renderExpanded ? renderExpanded(item.s) : null}
         </View>;
       }
     }
-  }, [theme, c, dense, touch, selectedKey, onSelect, briefLine, renderExpanded, toggle, toggleProject, activeResult, onResult, model, overseer?.state, overseer?.line, asking, afterNeeds, emptyAction, onMenu, menuKey]);
+  }, [theme, c, dense, touch, selectedKey, onSelect, briefLine, renderExpanded, toggle, toggleProject, activeResult, onResult, pickResult, model, overseer?.state, overseer?.line, asking, afterNeeds, emptyAction, onMenu, menuKey]);
 
   const listRef = useRef<FlatList<Entry>>(null);
   // Keep the keyboard-active result in view.
@@ -280,20 +299,44 @@ export function Age({ iso, c, size = 12 }: { iso: string | null; c: Colors; size
   return text ? <Text style={{ color: c.foregroundMuted, fontSize: size, fontVariant: ["tabular-nums"], minWidth: 26, textAlign: "right" }}>{text}</Text> : null;
 }
 
-type RowProps = { s: Workstream; sig: string; theme: Theme; dense: boolean; touch: boolean; selected: boolean; onSelect: (key: string) => void; onMenu: OpenRowMenu; menuOpen?: boolean };
-const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onMenu, menuOpen = false }: RowProps) {
+/** Matched words, highlighted inside a line of text: the hit colour, semibold, on a light warning tint. */
+export function marks(text: string, ranges: Range[] | null | undefined, c: Colors): ReactNode {
+  if (!ranges?.length) return text;
+  return highlightRuns(text, ranges).map((r, i) => r.hit ? <Text key={i} style={{ color: c.foreground, fontWeight: "600", backgroundColor: withAlpha(c.statusWarning, 0.22), borderRadius: 2 }}>{r.text}</Text> : r.text);
+}
+
+/** A search hit on a workspace Follow-up has archived: a muted row with the Archive glyph, reading "Archived". */
+export function archivedRow(hit: SearchHit): Workstream {
+  return { key: hit.key, agentId: null, workspaceId: hit.key.startsWith("ws:") ? hit.key.slice(3) : null, title: hit.title, agent: null, project: null, group: "quiet", tier: null,
+    icon: "Archive", tone: "muted", line: "Archived", word: null, badges: [], pr: null, at: null, readyToArchive: false, sig: `archived:${hit.key}` } as unknown as Workstream;
+}
+
+/**
+ * One row component for every list, Home's groups and search results alike (search-row-is-the-list-row). A search
+ * passes `hit`: the matched words are highlighted where they already are (title, "› agent", the ask line), and a match
+ * in a field the row doesn't show replaces line 2 with "<Field> · excerpt", so a result is exactly as tall as the row.
+ */
+type RowProps = { s: Workstream; sig: string; theme: Theme; dense: boolean; touch: boolean; selected: boolean; onSelect: (key: string) => void; onMenu: OpenRowMenu; menuOpen?: boolean; hit?: RowHit | null };
+const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onMenu, menuOpen = false, hit = null }: RowProps) {
   const c = theme.colors;
   const trigger = useRowMenuTrigger(s, onMenu, touch);
-  const color = glyphColor(s, c, touch);
+  const archived = s.icon === "Archive" && s.sig.startsWith("archived:");
+  const color = archived ? c.foregroundMuted : glyphColor(s, c, touch);
   const blocking = s.group === "needs" && s.tier === 0;
   const muted = s.group === "quiet" || s.group === "later";
-  const line = [s.word && s.group !== "needs" ? s.word : null, s.line].filter(Boolean).join(" · ");
+  // Desktop rows are one line beside badges and the PR chip: the ask and the "<Field> · excerpt" line are cut around the
+  // match (about 44 characters, the match near the start), so the highlight is never past the "…". Phones and the
+  // sidebar view wrap to two lines and keep more.
+  const shownLine = hit?.lineRanges ? (() => { const e = excerpt(s.line, hit.lineRanges, touch ? 140 : dense ? 90 : 44); return marks(e.text, e.ranges, c); })() : s.line;
+  const line: ReactNode = s.word && s.group !== "needs" ? (s.line ? <>{s.word} · {shownLine}</> : s.word) : shownLine;
+  const via = hit?.via ? (() => { const e = excerpt(hit.via.text, hit.via.ranges, touch ? 90 : dense ? 90 : 44); return <>{FIELD_LABEL[hit.via.field]} · {marks(e.text, e.ranges, c)}</>; })() : null;
+  const title = <>{marks(s.title, hit?.titleRanges, c)}{s.agent ? <Text style={{ color: c.foregroundMuted, fontWeight: "400" }}>{" › "}{marks(s.agent, hit?.agentRanges, c)}</Text> : null}</>;
   // Phones: "Working" under every row of a "Running 9" group says nothing the header didn't; one line per row instead.
   const generic = touch && !s.word && (s.line === "Working" || s.line === "Fixing");
   // A Later row says when it comes back on screen; the label also keeps how long it has waited.
   const wake = s.group === "later" && s.wakeAt ? wakeLabel({ until: s.wakeAt, at: s.at ?? new Date().toISOString() }, Date.now()) : "";
   const waited = s.group === "later" && s.at ? age(s.at, Date.now()) : "";
-  const label = [s.title + (s.agent ? ` › ${s.agent}` : ""), s.word, s.line, wake && `Later until ${wake}`, waited && (waited === "now" ? "just now" : `waiting ${waited}`)].filter(Boolean).join(". ");
+  const label = [s.title + (s.agent ? ` › ${s.agent}` : ""), s.word, s.line, hit?.via && `${FIELD_LABEL[hit.via.field]}: ${hit.via.text}`, wake && `Later until ${wake}`, waited && (waited === "now" ? "just now" : `waiting ${waited}`)].filter(Boolean).join(". ");
   return <Pressable ref={trigger.ref} nativeID={rowDomId(s.key)} accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={label} accessibilityHint={quickActionsHint(touch)}
     onPress={() => onSelect(s.key)} onLongPress={trigger.onLongPress} delayLongPress={450}
     style={state => ({ flexDirection: "row", alignItems: dense ? "flex-start" : "center", gap: touch ? 10 : dense ? 8 : 10, minHeight: touch ? 56 : dense ? 36 : 38, paddingLeft: touch ? 14 : dense ? 8 : 16, paddingRight: touch ? 16 : dense ? 8 : 16, paddingVertical: touch ? 12 : dense ? 6 : 0,
@@ -306,17 +349,19 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onMe
     {/* Phones: title 15/20 over two lines, then state · reason, then the PRs as plain text (no bordered chips). */}
     {touch ? <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
       <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
-        <Text numberOfLines={2} style={{ flex: 1, minWidth: 0, color: muted ? c.foregroundMuted : c.foreground, fontSize: 15, lineHeight: 20, fontWeight: muted ? "400" : "500" }}>{s.title}</Text>
+        <Text numberOfLines={2} style={{ flex: 1, minWidth: 0, color: muted ? c.foregroundMuted : c.foreground, fontSize: 15, lineHeight: 20, fontWeight: muted ? "400" : "500" }}>{title}</Text>
         <View style={{ paddingTop: 2 }}><RowTime s={s} c={c} size={12} /></View>
       </View>
-      {(!!s.word || !!s.line) && !generic && <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>
+      {via ? <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>{via}</Text>
+        : (!!s.word || !!s.line) && !generic && <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>
         {s.word && s.group === "needs" ? <Text style={{ color, fontWeight: "600" }}>{s.word}</Text> : null}{s.word && s.group === "needs" && s.line ? " · " : ""}{line}
       </Text>}
       {!!s.priority?.reason && <PriorityLine reason={s.priority.reason} source={s.priority.source} c={c} size={12} lines={2} />}
       {!!s.pr && <Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 17, fontVariant: ["tabular-nums"] }}><PrSummaryText s={s} c={c} /></Text>}
     </View> : dense ? <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
-      <Text numberOfLines={1} style={{ color: muted ? c.foregroundMuted : c.foreground, fontSize: 13, lineHeight: 18, fontWeight: muted ? "400" : "500" }}>{s.title}{s.agent ? <Text style={{ color: c.foregroundMuted }}>{` › ${s.agent}`}</Text> : null}</Text>
-      {(!!s.word || !!s.line) && <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>
+      <Text numberOfLines={1} style={{ color: muted ? c.foregroundMuted : c.foreground, fontSize: 13, lineHeight: 18, fontWeight: muted ? "400" : "500" }}>{title}</Text>
+      {via ? <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{via}</Text>
+        : (!!s.word || !!s.line) && <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>
         {s.word && s.group === "needs" ? <Text style={{ color, fontWeight: "600" }}>{s.word}</Text> : null}{s.word && s.group === "needs" && s.line ? " · " : ""}{line}
       </Text>}
       {!!s.priority?.reason && <PriorityLine reason={s.priority.reason} source={s.priority.source} c={c} size={11} lines={2} />}
@@ -324,13 +369,13 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onMe
         {s.badges.map(b => <BadgeView key={b.text} b={b} c={c} />)}<PrChipView s={s} c={c} />
       </View>}
     </View> : <View style={{ flex: 1, minWidth: 0, gap: 1, paddingVertical: s.priority?.reason ? 4 : 0 }}><View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-      <Text numberOfLines={1} style={{ flexShrink: 0, maxWidth: "55%", color: muted ? c.foregroundMuted : c.foreground, fontSize: 13, fontWeight: muted ? "400" : "500" }}>{s.title}{s.agent ? <Text style={{ color: c.foregroundMuted, fontWeight: "400" }}>{` › ${s.agent}`}</Text> : null}</Text>
+      <Text numberOfLines={1} style={{ flexShrink: 0, maxWidth: "55%", color: muted ? c.foregroundMuted : c.foreground, fontSize: 13, fontWeight: muted ? "400" : "500" }}>{title}</Text>
       <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, color: c.foregroundMuted, fontSize: 12 }}>
-        {s.word && s.group === "needs" ? <Text style={{ color }}>{s.word}</Text> : null}{s.word && s.group === "needs" && s.line ? " · " : ""}{line}
+        {via ?? <>{s.word && s.group === "needs" ? <Text style={{ color }}>{s.word}</Text> : null}{s.word && s.group === "needs" && s.line ? " · " : ""}{line}</>}
       </Text>
       {s.badges.map(b => <BadgeView key={b.text} b={b} c={c} />)}
       <PrChipView s={s} c={c} />
     </View>{!!s.priority?.reason && <View style={{ paddingRight: 40 }}><PriorityLine reason={s.priority.reason} source={s.priority.source} c={c} /></View>}</View>}
     {!touch && <RowTime s={s} c={c} size={dense ? 11 : 12} />}
   </Pressable>;
-}, (a, b) => a.sig === b.sig && a.selected === b.selected && a.theme === b.theme && a.dense === b.dense && a.touch === b.touch && a.onSelect === b.onSelect && a.onMenu === b.onMenu && a.menuOpen === b.menuOpen);
+}, (a, b) => a.sig === b.sig && a.selected === b.selected && a.theme === b.theme && a.dense === b.dense && a.touch === b.touch && a.onSelect === b.onSelect && a.onMenu === b.onMenu && a.menuOpen === b.menuOpen && a.hit === b.hit);

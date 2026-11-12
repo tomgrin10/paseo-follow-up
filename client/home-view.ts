@@ -3,14 +3,20 @@ import { overseerAskRpc, overseerRestartRpc, overseerStartRpc, overseerStatusRpc
 import type { RpcOutput } from "@getpaseo/plugin";
 import type { Priority } from "../shared/priorities";
 import { DEFAULT_SORT, isSortMode, type SortMode } from "../shared/sort";
+import { homeSortSync } from "../shared/display";
 import type { AgentLite } from "../shared/search";
 import { NO_USAGE, USAGE_POLL_MS, type Usage } from "../shared/usage";
 import { onVisible, whileVisible } from "./visibility";
 
 /**
- * What Home adds on top of the inbox, live and Paseo stores (1.3.0-beta.2): the sort choice (per device), external
+ * What Home adds on top of the inbox, live and Paseo stores (1.3.0-beta.2): the sort choice, external
  * priorities, agent titles for search, provider limits, and a "focus the search" signal for ⌘K and `/`.
  * One instance per client, shared by Home, the sidebar item and the sidebar view.
+ */
+/**
+ * Before 2.1 the sort was kept per device under this key. It's now the Display setting `home_sort` (one order for Home
+ * and the sidebar view, on every device, and agents set it with set_display). The key stays as this device's cache, so
+ * the list opens in the right order before the setting arrives, and as the value the first device migrates.
  */
 const SORT_KEY = "follow-up.home.sort";
 const PRIORITY_POLL_MS = 60_000;
@@ -26,6 +32,8 @@ type AgentEntry = { agent?: { id?: string; title?: string | null; workspaceId?: 
 export function createHomeExtras(client: PluginClientContext) {
   const saved = storage.get(SORT_KEY);
   let sort: SortMode = isSortMode(saved) ? saved : DEFAULT_SORT;
+  const sync = homeSortSync(client, () => sort, next => { sort = next; storage.set(SORT_KEY, next); });
+  const writeSort = sync.write, readSort = sync.read;
   let priorities: Priority[] = [];
   let usage: Usage = NO_USAGE;
   let overseer: RpcOutput<typeof overseerStatusRpc> | null = null;
@@ -56,6 +64,8 @@ export function createHomeExtras(client: PluginClientContext) {
     void run();
   };
   const offVisible = onVisible(() => { for (const r of runs) void r(); });
+  // Another device or an agent (set_display) changed the order: picked up within a minute, or on return.
+  poll(PRIORITY_POLL_MS, readSort);
   poll(PRIORITY_POLL_MS, async () => {
     const next = (await client.rpc(prioritiesRpc, {})).items;
     if (JSON.stringify(next) === JSON.stringify(priorities)) return false;
@@ -121,7 +131,8 @@ export function createHomeExtras(client: PluginClientContext) {
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     version: () => version,
     sort: () => sort,
-    setSort(next: SortMode) { if (next === sort) return; sort = next; storage.set(SORT_KEY, next); emit(); },
+    /** Home's and the sidebar view's order: shown at once, saved as the Display setting `home_sort`. */
+    setSort(next: SortMode) { if (next === sort) return; sort = next; storage.set(SORT_KEY, next); emit(); void writeSort(next).catch(() => undefined); },
     priorities: () => priorities,
     usage: () => usage,
     /** The ranker: on or off, its last run and which sources it could read. */
