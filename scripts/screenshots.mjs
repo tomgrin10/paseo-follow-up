@@ -41,8 +41,10 @@ const argv = process.argv.slice(2);
 const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : fallback; };
 // What's new reinstalls the plugin as 2.0.0-rc.0, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "whats-new"];
+/** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
+const REVIEW_SHOTS = ["needs-you-states"];
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
-for (const name of only) if (!SHOTS.includes(name)) fail(`unknown shot "${name}" (known: ${SHOTS.join(", ")})`);
+for (const name of only) if (![...SHOTS, ...REVIEW_SHOTS].includes(name)) fail(`unknown shot "${name}" (known: ${[...SHOTS, ...REVIEW_SHOTS].join(", ")})`);
 const scheme = arg("--scheme");
 if (scheme && !["dark", "light"].includes(scheme)) fail("--scheme is dark or light");
 const out = resolve(arg("--out", "docs/screenshots"));
@@ -123,6 +125,7 @@ function pulls() {
     212: { repo: "example/web", title: "Usage dashboard charts", state: "OPEN", author: "dana", draft: true, checks: [ok("test"), ok("lint")] },
     218: { repo: "example/web", title: "Push notification settings", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
     224: { repo: "example/web", title: "Import contacts from CSV", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
+    232: { title: "Usage alert thresholds", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
   };
 }
 /** A fake `gh`: GraphQL PR reads from the fixture file, `[]` for everything else (branch rules, auth). fakeGithub serves it over HTTP. */
@@ -284,15 +287,51 @@ const WORKSPACES = [
       msg("Opened example/web#205.")] },
 ].sort((a, b) => a.minute - b.minute);
 
+/**
+ * needs-you-states only (an-open-question-renders-once-per-surface, task asks): one workspace per Needs you state.
+ * Billing retries above is the brief pointing at its own question.
+ */
+const ask = (title, question, options, recommend = "A") => rpc("follow.ask-question", { title, question, options: options.map((label, i) => ({ letter: "ABC"[i], label })), recommend });
+const NEEDS_YOU_STATES = [
+  { key: "ny-other", title: "Invoice exports", minute: 150, prompt: "APP-171: export invoices as a spreadsheet from the billing page.",
+    steps: [rpc("follow.enroll", { goal: "APP-171 Invoice exports" }),
+      ask("Export format", "Which format should the invoice export use?", ["CSV", "XLSX"]),
+      msg("The export runs. Q1 asks which format; the bucket for large exports needs your approval."),
+      rpc("follow.needs-you", { kind: "action", ask: "Approve the staging export bucket", context: "Large exports stream to a private bucket. It needs an owner's approval in the cloud console before the first run." })] },
+  { key: "ny-two", title: "Rate limits", minute: 156, prompt: "APP-176: rate-limit the public API per API key.",
+    steps: [rpc("follow.enroll", { goal: "APP-176 Rate-limit the public API" }),
+      ask("Limit scope", "Should the limit apply per tenant or per API key?", ["Per tenant", "Per API key"]),
+      ask("Over-limit response", "What should a request over the limit get?", ["429 with Retry-After", "Queue it for up to 5 seconds"]),
+      msg("The limiter is in place behind a flag. Two choices decide how it behaves."),
+      rpc("follow.needs-you", { kind: "decision", ask: "Pick how the rate limit applies", questions: ["Q1", "Q2"], context: "Both choices change what customers see when they hit the limit, so they go out together." })] },
+  { key: "ny-lone", title: "Locale fallback", minute: 162, prompt: "WEB-30: fall back to the base language when a regional translation is missing.", flag: false,
+    steps: [rpc("follow.enroll", { goal: "WEB-30 Locale fallback" }),
+      ask("Missing keys", "When a key is missing in both the regional and the base language, what should show?", ["The English text", "The key itself"]),
+      msg("The fallback chain is wired; Q1 is open.")] },
+  { key: "ny-answered", title: "Receipt emails", minute: 168, prompt: "APP-180: send a receipt email after each successful charge.",
+    steps: [rpc("follow.enroll", { goal: "APP-180 Receipt emails" }),
+      ask("Receipt sender", "Which address should receipts come from?", ["billing@", "no-reply@"]),
+      msg("The receipt template is ready. Q1 asks which sender."),
+      rpc("follow.needs-you", { kind: "decision", ask: "Pick the receipt sender", questions: ["Q1"] })], answer: { questionId: "Q1", choice: "A" } },
+  { key: "ny-tasks", title: "Usage alerts", minute: 174, prompt: "APP-185: email workspace admins when usage passes 80% of the plan.",
+    steps: [rpc("follow.enroll", { goal: "APP-185 Usage alerts" }),
+      rpc("follow.register-pr", { repo: "example/app", number: 232, stack: "Usage alerts" }),
+      rpc("follow.obligation", { title: "Pick who gets usage alerts", status: "blocked", ask: "Should usage alerts go to the workspace owner only, or to every admin?", enable_follow_up: false }),
+      rpc("follow.obligation", { title: "Wire alert thresholds", status: "blocked", evidence: "Waits for #232's review before the thresholds move to config", enable_follow_up: false }),
+      rpc("follow.obligation", { title: "Check alert emails in staging", status: "waiting", afterPrs: ["example/app#232"] }),
+      msg("Thresholds are in #232. One task needs your call on who gets the alerts.")], flag: false },
+];
+
 async function seed({ call, home }) {
   // A fixed (empty) project folder: Paseo derives the project's avatar color from it, so a random temp path would
   // recolor the sidebar on every run.
   // Two projects, so the sidebar and Quiet's folds don't read as one repo.
   const repos = {};
   for (const name of ["app", "web"]) { repos[name] = join(tmpdir(), "follow-up-shots-fixture", name); await fs.mkdir(repos[name], { recursive: true }); }
-  await fs.writeFile(join(home, "fixture-scripts.json"), JSON.stringify(Object.fromEntries(WORKSPACES.map(w => [w.prompt, w.steps]))));
+  const specs = [...WORKSPACES, ...(only.includes("needs-you-states") ? NEEDS_YOU_STATES : [])];
+  await fs.writeFile(join(home, "fixture-scripts.json"), JSON.stringify(Object.fromEntries(specs.map(w => [w.prompt, w.steps]))));
   const workspaces = [];
-  for (const spec of WORKSPACES) {
+  for (const spec of specs) {
     await setDaemonClock(at(spec.minute));
     const w = await api.workspaces.create({ title: spec.title, source: { kind: "directory", path: repos[spec.project ?? "app"] } });
     const agent = await w.agents.create({ config: { provider: "followup-fixture/fixture", model: "fixture", modeId: "default" }, title: spec.title });
@@ -319,7 +358,7 @@ async function seed({ call, home }) {
     // settle windows (a permission's 30 s) only pass when the clock moves, so step it a minute and wait for the row and
     // two inbox ticks (every 15 s, real time). Otherwise they settle in whichever later phase comes first.
     await setDaemonClock(at(spec.minute + (spec.worked ?? 0)) + 61_000);
-    if (spec.waitFor !== "running") await until(`${spec.key} inbox flag`, async () => (await call("follow.inbox-list", {})).rows.some(r => r.agentId === agent.id && r.needs), { tries: 120, every: 500 });
+    if (spec.waitFor !== "running" && spec.flag !== false) await until(`${spec.key} inbox flag`, async () => (await call("follow.inbox-list", {})).rows.some(r => r.agentId === agent.id && r.needs), { tries: 120, every: 500 });
     await inboxTicks(home, 2);
     workspaces.push({ key: spec.key, title: spec.title, workspaceId: w.id, agentId: agent.id });
   }
@@ -362,6 +401,8 @@ async function seed({ call, home }) {
   // One item the developer added by hand ("Added by you" in the Linked list).
   const billing = workspaces.find(w => w.key === "billing");
   await call("follow.set-linked-items", { workspaceId: billing.workspaceId, action: "add", ref: "APP-151" });
+  // needs-you-states: the developer answers, so the question and its brief leave every surface.
+  for (const spec of specs.filter(s => s.answer)) await call("follow.answer-question", { workspaceId: workspaces.find(w => w.key === spec.key).workspaceId, ...spec.answer, action: "send" });
   await call("follow.refresh", {});
   // The inbox loop folds PR, CI and review state into each brief; let it run on the snapshots before the clock moves.
   await inboxTicks(home, 2);
@@ -797,7 +838,33 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       }
     }
   }
+  if (only.includes("needs-you-states")) {
+    // One Needs you block per surface: each state on the panel (desktop) and Home's detail pane (desktop and phone),
+    // light and dark. Tall panel frames so the block, Tasks and their neighbours all fit.
+    const states = [
+      { state: "brief-same-q", title: "Billing retries", prompt: billing.prompt, wait: "Retry declined cards?" },
+      { state: "brief-other-q", ...pick("ny-other"), wait: "Approve the staging export bucket" },
+      { state: "two-qs", ...pick("ny-two"), wait: "Limit scope" },
+      { state: "q-no-brief", ...pick("ny-lone"), wait: "Missing keys" },
+      { state: "just-answered", ...pick("ny-answered"), wait: null },
+      { state: "tasks", ...pick("ny-tasks"), wait: "Wire alert thresholds", homeToo: false },
+    ];
+    const TALL = { width: DESKTOP.width, height: 1300 };
+    for (const s of states) for (const theme of ["light", "dark"]) {
+      const settleOn = async page => { if (s.wait) await page.getByText(s.wait).filter({ visible: true }).first().waitFor(); else await page.waitForTimeout(1500); };
+      await shoot(`ny-${s.state}-panel-${theme}`, TALL, theme, async page => {
+        await page.setViewportSize(TALL);
+        await openChat(page, s.title, s.prompt);
+        await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+        await settleOn(page);
+      });
+      if (s.homeToo === false) continue;
+      await shoot(`ny-${s.state}-home-${theme}`, DESKTOP, theme, async page => { await openHome(page); await (await homeRow(page, s.title)).click(); await settleOn(page); });
+      await shoot(`ny-${s.state}-home-phone-${theme}`, PHONE, theme, async page => { await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, s.title)).click(); await settleOn(page); });
+    }
+  }
 }
+function pick(key) { const w = NEEDS_YOU_STATES.find(x => x.key === key); return { title: w.title, prompt: w.prompt }; }
 
 async function optimise(path, tool) {
   if (tool === "pngquant") await exec("pngquant", ["--force", "--skip-if-larger", "--quality", "70-95", "--strip", "--output", path, path]).catch(e => { if (e.code !== 98 && e.code !== 99) throw e; });
