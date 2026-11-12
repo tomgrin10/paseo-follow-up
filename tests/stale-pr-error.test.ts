@@ -6,9 +6,9 @@ import { join } from "node:path";
 import { Store } from "../server/store";
 import { Github } from "../server/github";
 import type { GithubApi } from "../server/github-api";
-import { compactPrStatus, prPresentation, settledForDisplay, orderedStacks, staleHint } from "../shared/presentation";
+import { compactPrStatus, prPresentation, settledForDisplay, orderedStacks } from "../shared/presentation";
 import { liveLine, prTone } from "../shared/attention";
-import { summary } from "../shared/model";
+import { prSchema, summary } from "../shared/model";
 import { violations } from "../shared/status-invariants";
 import { clock, pr, snapshot, workspace } from "./fixtures";
 
@@ -27,7 +27,6 @@ test("a-github-limit-never-blanks-a-known-pr: a complete snapshot shows its own 
   assert.equal(compactPrStatus(merged).label, "Merged");
   assert.equal(prTone(merged), "merged");
   assert.equal(settledForDisplay(merged), true, "a merged PR folds as settled");
-  assert.equal(staleHint(merged, () => "3d ago"), "Last checked 3d ago", "the error adds at most a quiet hint");
   const open = pr({ snapshot: snapshot({ state: "OPEN", reviewDecision: "APPROVED" }), error: ERROR });
   assert.equal(prPresentation(open).label, "Approved", "an open PR keeps its last known status too");
   const w = workspace({ prs: [merged, open] });
@@ -37,6 +36,21 @@ test("a-github-limit-never-blanks-a-known-pr: a complete snapshot shows its own 
   // Only a PR with no complete read says so.
   assert.equal(prPresentation(pr({ snapshot: null, error: ERROR })).label, "Status unavailable");
   assert.equal(compactPrStatus(pr({ snapshot: snapshot({ complete: false }), error: null })).label, "Unknown");
+});
+
+test("a-github-limit-never-blanks-a-known-pr: parsing the stored live PR drops its stale error", () => {
+  const stored = prSchema.parse(JSON.parse(JSON.stringify(live())));
+  assert.equal(stored.error, null, "a merged PR with a complete snapshot never stores an error");
+  assert.equal(prPresentation(stored).label, "Merged");
+  const open = prSchema.parse(JSON.parse(JSON.stringify(pr({ snapshot: snapshot({ state: "OPEN" }), error: ERROR }))));
+  assert.equal(open.error, ERROR, "an open PR keeps its error until the next read decides");
+});
+
+// Extra coverage through this PR's own helper (absent on main).
+test("a-github-limit-never-blanks-a-known-pr: the error adds at most a quiet 'Last checked' hint", async () => {
+  const { staleHint } = await import("../shared/presentation") as { staleHint: (pr: unknown, ago: (iso: string) => string) => string | null };
+  assert.equal(staleHint(live(), () => "3d ago"), "Last checked 3d ago");
+  assert.equal(staleHint(pr(), () => "3d ago"), null);
 });
 
 test("a-github-limit-never-blanks-a-known-pr: the merged-is-final skip clears a stored error without a read", async () => {
