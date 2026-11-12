@@ -146,8 +146,11 @@ test("the sidebar filter keeps exactly what Home search finds (one matcher), in 
 
 test("excerpt never starts inside an id, and keeps the match visible", () => {
   const pr = excerpt("#143 Send the dunning email after the last retry", [[22, 27]], 44);
-  assert.ok(pr.text.startsWith("#143 Send"), pr.text);
+  assert.ok(pr.text.startsWith("…Send the dunning"), pr.text);
   assert.deepEqual(pr.ranges.map(([a, b]) => pr.text.slice(a, b)), ["email"]);
+  const linked = excerpt("APP-139 Customers charged twice after a gateway timeout", [[26, 31]], 44);
+  assert.ok(linked.text.startsWith("…Customers charged twice"), `not "…9 Customers": ${linked.text}`);
+  assert.equal(excerpt("APP-182 Invoice PDFs on the receipt email", [[36, 41]], 44).text, "APP-182 Invoice PDFs on the receipt email", "short text stays whole");
   const long = excerpt("When a CSV row matches an existing contact by email, should it update that contact or be skipped?", [[46, 51]], 44);
   assert.ok(long.text.startsWith("…existing contact"), long.text);
   assert.deepEqual(long.ranges.map(([a, b]) => long.text.slice(a, b)), ["email"]);
