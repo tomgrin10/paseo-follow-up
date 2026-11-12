@@ -74,7 +74,7 @@ test("merge readiness matches the PR controls and waits for queued or recent mer
 test("headline, live line and pill read the same state", () => {
   const w = workspace({ prs: stack(), batches: [batch()] });
   assert.deepEqual(headline(w, clock).map(p => p.text), ["1 of 4 PRs merged", "2 need you", "1 to fix"]);
-  assert.equal(workspaceHeadline(needsYou(w, clock))?.label, "Send 1 fix", "the pill names the top item, never \"N need you\"");
+  assert.equal(workspaceHeadline(needsYou(w, clock))?.label, "Send 1 task", "the pill names the top item, never \"N need you\"");
   assert.equal(workspaceHeadline(needsYou(workspace({ prs: [pr({ snapshot: snapshot({ reviewDecision: "APPROVED", graphiteMergeStatus: "READY_TO_MERGE_AS_STACK" }) })] }), clock))?.label, "Merge #1");
   assert.equal(workspaceHeadline(needsYou(workspace({ prs: [pr()] }), clock)), null, "no pill unless something needs you");
   const sent = { ...w, batches: [batch({ state: "sent", sentAt: new Date(clock - 120_000).toISOString() })] };
