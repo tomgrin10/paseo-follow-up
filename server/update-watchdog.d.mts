@@ -6,6 +6,7 @@ export type ProbationVerdict = { verdict: "wait" } | { verdict: "ok" } | { verdi
 export declare function probation(input: ProbationInput): ProbationVerdict;
 export type UpdateJob = { directory: string; pluginId: string; from: string; to: string; integrity: string; tarball: string; clientEntry: string; daemon: Record<string, unknown>; timing?: { probationMs?: number; loadTimeoutMs?: number; watchEveryMs?: number } };
 export declare function run(job: UpdateJob, io?: { connect?: () => Promise<unknown>; now?: () => number; sleep?: (ms: number) => Promise<void> }): Promise<"failed" | "updated" | "rolled-back">;
-export type MoveJob = { kind: "move"; directory: string; oldId: string; newId: string; packageName: string; version: string; settingsRoot: string; clientEntry: string; daemon: Record<string, unknown>; timing?: { probationMs?: number; loadTimeoutMs?: number; watchEveryMs?: number } };
+export type MoveJob = { kind: "move"; directory: string; oldId: string; newId: string; packageName: string; version: string; registry?: { url: string; id: string } | null; settingsRoot: string; clientEntry: string; daemon: Record<string, unknown>; timing?: { probationMs?: number; loadTimeoutMs?: number; watchEveryMs?: number } };
 export type MoveOutcome = "moved" | "move-failed" | "move-rolled-back" | "move-rollback-failed";
+export declare function registrySources(registry: { url: string; id: string }): string[];
 export declare function runMove(job: MoveJob, io?: { connect?: () => Promise<unknown>; now?: () => number; sleep?: (ms: number) => Promise<void>; copySettings?: () => Promise<void> }): Promise<MoveOutcome>;

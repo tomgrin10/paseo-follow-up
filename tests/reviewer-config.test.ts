@@ -141,10 +141,10 @@ test("migration: a fresh install, or one that never requested reviewers, starts 
 
 test("suggestions: collaborators and teams read on demand, cached, bounded; a failure is graceful and retried later", async () => {
   let now = 0; const calls: string[] = []; let fail = false;
-  const s = new ReviewerSuggestions(async args => {
-    calls.push(args[1]); if (fail) throw new Error("HTTP 403");
-    return args[1].includes("/teams") ? JSON.stringify([{ slug: "platform", name: "Platform" }]) : JSON.stringify([{ login: "ana", type: "User" }, { login: "ci-bot", type: "Bot" }]);
-  }, () => now);
+  const s = new ReviewerSuggestions({ rest: async (_repo: string, path: string) => {
+    calls.push(path); if (fail) throw new Error("HTTP 403");
+    return path.includes("/teams") ? [{ slug: "platform", name: "Platform" }] : [{ login: "ana", type: "User" }, { login: "ci-bot", type: "Bot" }];
+  } }, () => now);
   assert.deepEqual(await s.suggest("acme/api"), { suggestions: [{ login: "ana", name: null, kind: "user" }, { login: "acme/platform", name: "Platform", kind: "team" }], error: null });
   await s.suggest("ACME/api"); assert.equal(calls.length, 2, "cached per repository");
   now += 601_000; await s.suggest("acme/api"); assert.equal(calls.length, 4, "the cache expires");

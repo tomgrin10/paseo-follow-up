@@ -59,6 +59,12 @@ Updates part of Settings → General (`UpdatesSections` in `client/updates.tsx`)
 5. A rolled-back version is never retried automatically. A failed install is retried after the next successful
    check. Paseo itself refuses a build that can't load while applying it, which shows as "Couldn't install".
 6. `VersionsStore.started` treats a downgrade as no update, so a rollback never shows "Updated to" or What's new.
+7. The phase is read back from `updates.jsonl` on every view, from the installer's steps only (the move's steps share
+   the file) and settled against the running version: a phase tied to a version at or below the one running (an
+   installer that died before a newer version went in through `paseo plugin`, a failure or rollback since superseded)
+   reads as current, or updated (`staleUpdatePhase` in `shared/updates.ts`). A live installer's own installing and
+   settling are the exception. The invariant is `update-phase-never-outlives-its-version` (`updatePhaseViolations` in
+   `shared/status-invariants.ts`, grid in `tests/updater.test.ts`).
 
 ## Moving from 1.x
 
@@ -91,6 +97,12 @@ old one. 1.x ran under an older id and data directory (`shared/legacy.ts` names 
 - **What you see**: one quiet line in Settings → General ("Moved to Follow-up's new plugin id", or why it went back,
   with Try again). `updates_status` reports the same as `move`, and `retry_move` (planned) is Try again. Git and
   local installs can't reinstall themselves; the line says how to move by hand.
+- **Installs from Paseo's plugin list** (the registry, `tomgrin10/follow-up`; 0.3.1 and 1.0.1 were pinned there): they
+  run under the old id too, and Paseo updates them only to the registry's reviewed pin (`--version` is refused), so
+  1.x's updater never touches them. Once the pin is 2.0 and the developer updates, the move above runs the same way,
+  except the install step reinstalls from the same registry (`owner/slug`, then `host/owner/slug` for an HTTPS
+  registry), checks that the new id came from that registry, and runs probation against the version the pin installed.
+  `npm run test:move:registry` covers it.
 - **Labels, prefixes, env, registrations**: recovery agents 1.x started keep their labels and `isRecovery` accepts
   both; old batch and recovery prefixes in transcripts are recognised (`splitBatchText`, `isPluginPrompt`); sessions
   opened before the upgrade keep 1.x's env names, which the hook and bridge still read (the worker writes them with a

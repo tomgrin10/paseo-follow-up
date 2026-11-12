@@ -1,6 +1,9 @@
 // Re-shoots every README image from the current UI: `npm run shots` (through ~/paseo-harness/tools/harness-slot).
 // Usage: node scripts/screenshots.mjs [--out <dir>] [--only home,panel,...] [--scheme dark|light] [--scale <n>]
-//                                     [--whats-new-changelog <CHANGELOG.md>] [--whats-new-all] [--keep]
+//                                     [--whats-new-changelog <CHANGELOG.md>] [--whats-new-all] [--notes-review] [--keep]
+//                                     [--as-version <X.Y.Z>]
+// `--as-version` installs the packed plugin under that version, so Home and the panel read "vX.Y.Z" (stable notes
+// and README images never show an rc). The notes shots set their own scale: notes-home 2x, notes-panel 3x.
 //
 // One isolated daemon (temp HOME and PASEO_HOME, the packed plugin, the fixture provider from
 // scripts/fixture-provider.ts, the web UI, a fake `gh` and a fake `mcpproxy` for Linear on PATH), seeded through Follow-up's own RPCs and fixture agents
@@ -30,13 +33,14 @@ import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
 import { harness, spawnDaemon } from "./harness.mjs";
 import { harnessEnv } from "./harness-env.mjs";
+import { fakeGithub } from "./fake-github.mjs";
 import { openHome as openHomeAt, homeRow } from "./ui-home.mjs";
 
 const exec = promisify(execFile);
 const argv = process.argv.slice(2);
 const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : fallback; };
 // What's new reinstalls the plugin as 2.0.0-rc.0, so it goes last: every other shot shows the version under test.
-const SHOTS = ["setup", "home", "panel", "questions", "pill", "pr-sheet", "phone", "context-menu", "linked-items", "whats-new"];
+const SHOTS = ["setup", "home", "panel", "questions", "pill", "pr-sheet", "phone", "context-menu", "linked-items", "notes-home", "notes-panel", "whats-new"];
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
 for (const name of only) if (!SHOTS.includes(name)) fail(`unknown shot "${name}" (known: ${SHOTS.join(", ")})`);
 const scheme = arg("--scheme");
@@ -44,6 +48,8 @@ if (scheme && !["dark", "light"].includes(scheme)) fail("--scheme is dark or lig
 const out = resolve(arg("--out", "docs/screenshots"));
 const changelogArg = arg("--whats-new-changelog");
 const keep = argv.includes("--keep");
+const asVersion = arg("--as-version");
+if (asVersion && !/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(asVersion)) fail("--as-version is a version like 2.0.0");
 const log = (...a) => console.log("[shots]", ...a);
 function fail(message) { console.error(`screenshots: ${message}`); process.exit(1); }
 
@@ -103,7 +109,7 @@ function pulls() {
     181: { title: "Dark mode color tokens", state: "MERGED", author: "dana", checks: [ok("test"), ok("lint")] },
   };
 }
-/** A fake `gh`: GraphQL PR reads from the fixture file, `[]` for everything else (branch rules, auth). */
+/** A fake `gh`: GraphQL PR reads from the fixture file, `[]` for everything else (branch rules, auth). fakeGithub serves it over HTTP. */
 function fakeGh(file) {
   return `#!/usr/bin/env node
 const d = JSON.parse(require("fs").readFileSync(${JSON.stringify(file)}, "utf8"));
@@ -293,10 +299,10 @@ const openHome = (page, { keepDialogs = false } = {}) => openHomeAt(page, { orig
 const failures = [];
 function makeShooter({ browser, port, out, scheme: forced, optimiser, results }) {
   /** Opens the web app in a fresh context, runs `drive`, and returns the PNG (optionally clipped to what drive returns). */
-  async function capture(name, viewport, theme, drive, { seen = null } = {}) {
+  async function capture(name, viewport, theme, drive, { seen = null, scale = null } = {}) {
     const colorScheme = forced ?? theme;
     // Always open at desktop width: on a phone Paseo's sidebar is a drawer, so phone frames open Home first, then narrow.
-    const context = await browser.newContext({ viewport: DESKTOP, colorScheme, deviceScaleFactor: viewport.width < 768 ? 2 : desktopScale, reducedMotion: "reduce", timezoneId: "UTC", locale: "en-US" });
+    const context = await browser.newContext({ viewport: DESKTOP, colorScheme, deviceScaleFactor: scale ?? (viewport.width < 768 ? 2 : desktopScale), reducedMotion: "reduce", timezoneId: "UTC", locale: "en-US" });
     try {
       await context.addInitScript(INIT, { seen });
       const page = await context.newPage();
@@ -422,6 +428,26 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       // Desktop focuses the filter field once the sheet opens; wait for it, so capture's blur clears the focus ring.
       await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Filter, or paste a link or key");
     });
+    // The 2.0.0 notes' two images (What's new and the GitHub page): the same scenes as home and panel, cropped to what
+    // a ~500px sheet can show legibly. Home without Paseo's own sidebar; the panel at its real width (320), its head (tab,
+    // status line, stack bar, Auto-send) and the question card under it. Shoot notes-panel with --scale 3: the sheet and
+    // the GitHub page draw it at most 320 wide (#WxH), so it stays sharp and never larger than the UI.
+    // The rectangles are CSS pixels of the 1440x900 DESKTOP viewport. CHANGELOG.md pins them to a commit, never main.
+    if (name === "notes-home") await shoot("notes-home", DESKTOP, "dark", async page => {
+      await openHome(page);
+      await (await homeRow(page, "Billing retries")).click();
+      await page.getByText("Only network failures").first().waitFor();
+      return { x: 320, y: 0, width: 1120, height: 680 };
+    }, { scale: 2 });
+    if (name === "notes-panel") await shoot("notes-panel", DESKTOP, "dark", async page => {
+      await openChat(page, "Billing retries", billing.prompt);
+      await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+      await page.getByRole("button", { name: /^Pull request 142: / }).first().waitFor();
+      // A taller window shows more of the panel; it stays 320 CSS px wide (its real width at 1440), shot at 3x.
+      await page.setViewportSize({ width: DESKTOP.width, height: 1400 });
+      await page.getByRole("button", { name: /^Pull request 142: / }).first().waitFor();
+      return { x: 1120, y: 0, width: 320, height: Number(process.env.NOTES_PANEL_HEIGHT ?? 910) };
+    }, { scale: 3 });
     if (name === "whats-new") {
       // The packed copy Paseo runs: the path its plugin list reports (the unpacked folder for a directory install).
       const installed = (await cli("plugin", "ls")).find(row => row.id === "follow-up")?.path ?? plugin;
@@ -436,7 +462,25 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       const sheet = phone => async page => {
         await openHome(page, { keepDialogs: true });
         if (phone) await page.setViewportSize(PHONE);
-        await page.getByRole("dialog").getByText("What's new in 2.0.0").first().waitFor().catch(() => page.getByText("What's new in 2.0.0").first().waitFor());
+        await page.getByRole("dialog").getByText("What's new in Follow-up 2.0.0").first().waitFor().catch(() => page.getByText("What's new in Follow-up 2.0.0").first().waitFor());
+        // The notes' screenshots load by URL: wait until each has loaded or failed (a failed one is left out).
+        await page.waitForFunction(() => [...document.images].every(i => i.complete), null, { timeout: 30000 });
+      };
+      /** The same sheet scrolled so `heading` is at the top: the panel's section and its image. */
+      const sheetAt = (phone, heading) => async page => {
+        await sheet(phone)(page);
+        await page.getByText(heading, { exact: true }).last().evaluate(el => el.scrollIntoView({ block: "start" }));
+        await page.waitForFunction(() => [...document.images].every(i => i.complete), null, { timeout: 30000 });
+      };
+      /** The same sheet scrolled to its end: the last section and the credits. */
+      const sheetEnd = phone => async page => {
+        await sheet(phone)(page);
+        // The phone's bottom sheet has no dialog role: wheel over the middle of the screen, where the sheet's body is.
+        const box = await page.getByRole("dialog").last().boundingBox({ timeout: 3000 }).catch(() => null);
+        const vp = page.viewportSize();
+        await page.mouse.move(box ? box.x + box.width / 2 : vp.width / 2, box ? box.y + box.height / 2 : vp.height * 0.6);
+        for (let i = 0; i < 8; i++) await page.mouse.wheel(0, 1200);
+        await page.waitForFunction(() => [...document.images].every(i => i.complete), null, { timeout: 30000 });
       };
       await shoot("whats-new", DESKTOP, "dark", sheet(false), { seen: WHATS_NEW_FROM });
       // Review evidence for the sheet itself (not README images): light, and the phone's bottom sheet.
@@ -444,6 +488,91 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
         await shoot("whats-new-light", DESKTOP, "light", sheet(false), { seen: WHATS_NEW_FROM });
         await shoot("whats-new-phone", PHONE, "light", sheet(true), { seen: WHATS_NEW_FROM });
         await shoot("whats-new-phone-dark", PHONE, "dark", sheet(true), { seen: WHATS_NEW_FROM });
+        await shoot("whats-new-mid", DESKTOP, "dark", sheetAt(false, "A panel on every workspace"), { seen: WHATS_NEW_FROM });
+        await shoot("whats-new-phone-mid", PHONE, "dark", sheetAt(true, "A panel on every workspace"), { seen: WHATS_NEW_FROM });
+        await shoot("whats-new-end", DESKTOP, "dark", sheetEnd(false), { seen: WHATS_NEW_FROM });
+        await shoot("whats-new-phone-end", PHONE, "light", sheetEnd(true), { seen: WHATS_NEW_FROM });
+      }
+      // Review evidence for the wide notes dialog (from 1280px windows) and the image viewer, both entry points.
+      if (argv.includes("--notes-review")) {
+        const BIG = { width: 2560, height: 1440 }; const NARROW = { width: 1180, height: 800 };
+        const HOME_ALT = /^Follow-up Home: every workspace/; const PANEL_ALT = /^The Follow-up panel on a workspace/;
+        const images = page => page.waitForFunction(() => [...document.images].every(i => i.complete), null, { timeout: 30000 });
+        const whatsNewAt = vp => async page => {
+          await openHome(page, { keepDialogs: true });
+          await page.setViewportSize(vp);
+          await page.getByText("What's new in Follow-up 2.0.0").first().waitFor();
+          await images(page);
+        };
+        /** Settings → Plugins → Follow-up → General → Release notes, See all. */
+        const releaseNotesAt = vp => async page => {
+          await page.setViewportSize(vp);
+          await page.goto(`${ORIGIN}/settings/hosts/${SERVER_ID}/plugins/follow-up/projects`);
+          await page.getByRole("button", { name: "See all" }).first().click();
+          await page.getByText("Follow-up release notes", { exact: true }).last().waitFor();
+          await images(page);
+        };
+        const viewer = (base, alt) => async page => {
+          await base(page);
+          await page.getByRole("button", { name: alt }).first().click();
+          await page.getByRole("button", { name: "Close image" }).waitFor();
+          await images(page);
+          // The viewer covers the window, not the dialog: its X sits in the window's top-right corner.
+          const x = await page.getByRole("button", { name: "Close image" }).boundingBox(); const vp = page.viewportSize();
+          if (!x || x.x + x.width < vp.width - 24 || x.y > 24) throw new Error(`the viewer is boxed in: its X is at ${JSON.stringify(x)} in ${vp.width}x${vp.height}`);
+        };
+        /** The notes' scroll container carries the scoped scrollbar style and shows a bar at rest (it takes width). */
+        const scrollbar = async page => {
+          const r = await page.evaluate(() => { const el = document.querySelector("[data-follow-up-notes-scroll]"); if (!el) return null; const s = getComputedStyle(el); return { gutter: el.offsetWidth - el.clientWidth, overflows: el.scrollHeight > el.clientHeight, styled: !!document.getElementById("follow-up-notes-scrollbar")?.textContent?.includes("::-webkit-scrollbar"), overflowY: s.overflowY }; });
+          if (!r || !r.styled || !r.overflows || r.gutter < 8) throw new Error(`the notes' scrollbar is not showing at rest: ${JSON.stringify(r)}`);
+        };
+        /** Esc closes the viewer, then the notes; a click on the viewer closes it. Throws (a failed shot) if not. */
+        const escOrder = base => async page => {
+          await viewer(base, HOME_ALT)(page);
+          await page.keyboard.press("Escape");
+          await page.getByRole("button", { name: "Close image" }).waitFor({ state: "detached", timeout: 3000 });
+          if (!(await page.getByRole("button", { name: HOME_ALT }).first().isVisible())) throw new Error("Esc closed the notes along with the viewer");
+          const focused = await page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? "");
+          if (!/^Follow-up Home/.test(focused)) throw new Error(`focus did not return to the screenshot (it is on "${focused}")`);
+          await page.getByRole("button", { name: HOME_ALT }).first().click();
+          await page.getByRole("button", { name: "Close image" }).waitFor();
+          await page.mouse.click(20, 20);
+          await page.getByRole("button", { name: "Close image" }).waitFor({ state: "detached", timeout: 3000 });
+          await page.keyboard.press("Escape");
+          await page.getByRole("button", { name: HOME_ALT }).first().waitFor({ state: "detached", timeout: 3000 });
+        };
+        const viewerOnly = argv.includes("--viewer-only");
+        if (argv.includes("--scrollbar-only")) {
+          for (const scheme of ["dark", "light"]) {
+            const sfx = scheme === "light" ? "-light" : "";
+            await shoot(`notes-1440${sfx}`, DESKTOP, scheme, async page => { await whatsNewAt(DESKTOP)(page); await scrollbar(page); }, { seen: WHATS_NEW_FROM });
+            await shoot(`release-notes-1440${sfx}`, DESKTOP, scheme, async page => { await releaseNotesAt(DESKTOP)(page); await scrollbar(page); }, { seen: WHATS_NEW_TO });
+          }
+          await shoot("notes-1180", NARROW, "dark", async page => { await whatsNewAt(NARROW)(page); await scrollbar(page); }, { seen: WHATS_NEW_FROM });
+          return;
+        }
+        for (const scheme of viewerOnly ? [] : ["dark", "light"]) {
+          const sfx = scheme === "light" ? "-light" : "";
+          await shoot(`notes-2560${sfx}`, BIG, scheme, whatsNewAt(BIG), { seen: WHATS_NEW_FROM });
+          await shoot(`notes-1440${sfx}`, DESKTOP, scheme, async page => { await whatsNewAt(DESKTOP)(page); await scrollbar(page); }, { seen: WHATS_NEW_FROM });
+          await shoot(`release-notes-2560${sfx}`, BIG, scheme, releaseNotesAt(BIG), { seen: WHATS_NEW_TO });
+          await shoot(`release-notes-1440${sfx}`, DESKTOP, scheme, async page => { await releaseNotesAt(DESKTOP)(page); await scrollbar(page); }, { seen: WHATS_NEW_TO });
+          await shoot(`notes-phone${sfx}`, PHONE, scheme, sheet(true), { seen: WHATS_NEW_FROM });
+          await shoot(`viewer-2560${sfx}`, BIG, scheme, viewer(whatsNewAt(BIG), HOME_ALT), { seen: WHATS_NEW_FROM });
+          await shoot(`viewer-phone${sfx}`, PHONE, scheme, viewer(sheet(true), PANEL_ALT), { seen: WHATS_NEW_FROM });
+        }
+        if (viewerOnly) for (const scheme of ["dark", "light"]) {
+          const sfx = scheme === "light" ? "-light" : "";
+          await shoot(`viewer-2560${sfx}`, BIG, scheme, viewer(whatsNewAt(BIG), HOME_ALT), { seen: WHATS_NEW_FROM });
+          await shoot(`viewer-phone${sfx}`, PHONE, scheme, viewer(sheet(true), PANEL_ALT), { seen: WHATS_NEW_FROM });
+        }
+        await shoot("viewer-1440-panel", DESKTOP, "dark", viewer(whatsNewAt(DESKTOP), PANEL_ALT), { seen: WHATS_NEW_FROM });
+        await shoot("viewer-release-notes-1440", DESKTOP, "dark", viewer(releaseNotesAt(DESKTOP), HOME_ALT), { seen: WHATS_NEW_TO });
+        // Below 1280 the host's own 520px dialog, with the viewer inside its focus scope.
+        if (!viewerOnly) await shoot("notes-1180", NARROW, "dark", whatsNewAt(NARROW), { seen: WHATS_NEW_FROM });
+        await shoot("viewer-1180", NARROW, "dark", viewer(whatsNewAt(NARROW), HOME_ALT), { seen: WHATS_NEW_FROM });
+        await shoot("esc-order-1440", DESKTOP, "dark", escOrder(whatsNewAt(DESKTOP)), { seen: WHATS_NEW_FROM });
+        await shoot("esc-order-1180", NARROW, "dark", escOrder(whatsNewAt(NARROW)), { seen: WHATS_NEW_FROM });
       }
     }
   }
@@ -524,18 +653,24 @@ try {
   await fs.writeFile(join(home, "config.json"), JSON.stringify({ pluginsEnabled: true, daemon: { listen: `127.0.0.1:${port}`, relay: { enabled: false }, mcp: { enabled: false }, browserTools: { enabled: false } }, features: { webUi: { enabled: true } } }));
   const packed = JSON.parse((await exec("npm", ["pack", "--json", "--pack-destination", root], { timeout: 120000 })).stdout)[0];
   await exec("tar", ["-xzf", join(root, packed.filename), "--strip-components=1", "-C", plugin]);
+  if (asVersion) {
+    const pkgPath = join(plugin, "package.json");
+    await fs.writeFile(pkgPath, JSON.stringify({ ...JSON.parse(await fs.readFile(pkgPath, "utf8")), version: asVersion }, null, 2));
+  }
   await fs.writeFile(join(fixture, "paseo-plugin.json"), JSON.stringify({ id: "followup-fixture", requirements: { paseo: ">=0.11.0" } }));
   await fs.writeFile(join(fixture, "index.server.ts"), await fs.readFile("scripts/fixture-provider.ts", "utf8"));
   await fs.writeFile(join(root, "clock.cjs"), CLOCK_PRELOAD);
   await fs.writeFile(join(home, "gh-fixture.json"), JSON.stringify(pulls()));
   await fs.writeFile(join(bin, "gh"), fakeGh(join(home, "gh-fixture.json"))); await fs.chmod(join(bin, "gh"), 0o700);
+  // PR reads go over HTTPS (server/github-api.ts) to this fake, which answers with the same fixture gh.
+  const github = await fakeGithub({ dir: root, gh: join(bin, "gh") });
   await fs.writeFile(join(home, "linear-fixture.json"), JSON.stringify(linearIssues()));
   await fs.writeFile(join(bin, "mcpproxy"), fakeMcpproxy(join(home, "linear-fixture.json"))); await fs.chmod(join(bin, "mcpproxy"), 0o700);
   // Real speed while the daemon starts and the plugin installs; seeding and shooting crawl (setDaemonClock).
   // It starts ten minutes before BASE, so the clock only ever moves forward.
   await fs.writeFile(clockFile, JSON.stringify({ fake: at(-10), real: Date.now(), rate: 1 }));
 
-  const env = harnessEnv(root, { home, set: { PASEO_DAEMON_URL: url, PASEO_SERVER_ID: "srv_followupshots", PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true", PATH: `${bin}:${process.env.PATH}`, FOLLOW_SHOTS_CLOCK: clockFile, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${join(root, "clock.cjs")}`.trim(), TZ: "UTC" } });
+  const env = harnessEnv(root, { home, strip: github.strip, set: { ...github.env, PASEO_DAEMON_URL: url, PASEO_SERVER_ID: "srv_followupshots", PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true", PATH: `${bin}:${process.env.PATH}`, FOLLOW_SHOTS_CLOCK: clockFile, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${join(root, "clock.cjs")}`.trim(), TZ: "UTC" } });
   const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env, timeout: 120000, maxBuffer: 1 << 22 })).stdout);
   const daemonLog = openSync(join(root, "daemon.log"), "a");
   daemon = spawnDaemon(["daemon", "run", "--home", home], { env, stdio: ["ignore", daemonLog, daemonLog] });
@@ -558,7 +693,8 @@ try {
   log(`isolated daemon on 127.0.0.1:${port} (${paseoVersion}), root ${root}`);
 
   const { chromium } = createRequire(join(process.env.PLAYWRIGHT_CORE, "package.json"))("playwright-core");
-  browser = await chromium.launch({ executablePath: process.env.CHROMIUM, headless: true });
+  // Headless Chromium hides scrollbars by default; the notes review shows them, as the notes' bar is part of the review.
+  browser = await chromium.launch({ executablePath: process.env.CHROMIUM, headless: true, ...(argv.includes("--notes-review") ? { ignoreDefaultArgs: ["--hide-scrollbars"] } : {}) });
   const shoot = makeShooter({ browser, port, out, scheme, optimiser, results });
 
   // setup: the first step of Getting started, on this fresh install, before anything is seeded.
