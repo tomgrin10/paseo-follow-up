@@ -46,8 +46,9 @@ refreshed or opened its workspace, or its interval passed: 60 s for settled open
 ones (merged is final; deploy state is probed separately every tick). Otherwise its last observation stands in.
 Moving means: not read yet, an error, an incomplete read, a check actually running (finishing checks don't bump a
 PR's `updatedAt`; a required check that never reported isn't running), a merge queue, merge when ready on, unknown
-mergeability, or a content change in the last 5 minutes. Every other caller (the developer's Refresh, actions,
-`declare_done`) reads fresh. A settled open PR's change shows within 75 s, inside the completion gate's 120 s
+mergeability, or a content change in the last 5 minutes. The developer's Refresh reads fresh. A turn end, an action or an agent tool nudges only its own workspace
+(`engine.nudge`): that workspace's PRs, with the same backoff, and nudges within 2 s share one read (invariant
+`a-turn-end-never-reads-other-workspaces-prs`; until 2026-11-12 each one re-read every tracked PR fresh). A settled open PR's change shows within 75 s, inside the completion gate's 120 s
 freshness; the `poll-backoff-never-hides-a-moving-pr` invariant holds both. Opening a workspace's panel refreshes it.
 
 **Budget.** Each query asks for `rateLimit { cost remaining resetAt }`. Under 500 points left, settled PRs wait 5
