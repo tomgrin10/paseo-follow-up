@@ -38,10 +38,24 @@ export type ReviewFix = z.infer<typeof reviewFixSchema>;
 export const BUILTIN_REVIEW_FIX: ReviewFix = { kind: "builtin" };
 export const commandName = (fix: ReviewFix): string | null => fix.kind === "command" ? (fix.command.startsWith("/") ? fix.command : `/${fix.command}`) : null;
 
+/**
+ * Who reviews and merges a repository's PRs. "team" (the default): the developer adds reviewers and merges, so
+ * Follow-up asks for both. "none": the agent reviews and merges its own PRs once checks pass, so Follow-up never asks.
+ */
+export const REVIEW_MODES = ["team", "none"] as const;
+export type ReviewMode = typeof REVIEW_MODES[number];
+export const reviewModeSchema = z.enum(REVIEW_MODES);
+/** One sentence per mode, said the same way everywhere: Settings, its menu and the undo bar. */
+export const REVIEW_MODE_LABELS: Record<ReviewMode, { label: string; hint: string }> = {
+  team: { label: "Team review", hint: "Follow-up asks you to add reviewers and to merge." },
+  none: { label: "No review", hint: "The agent merges its own PRs once checks pass." },
+};
+
 export const repoWorkflowSchema = z.object({
   workflow: prWorkflowSettingSchema.optional(),
   mergeMethod: mergeMethodSchema.optional(),
   reviewFix: reviewFixSchema.optional(),
+  review: reviewModeSchema.optional(),
 });
 export type RepoWorkflow = z.infer<typeof repoWorkflowSchema>;
 /** `plugin-data/follow-up/pr-workflow.json`. Missing fields are the defaults. */
@@ -73,12 +87,35 @@ export function repoSetting(config: PrWorkflowConfig, repo: string): { setting: 
 export function resolveWorkflow(setting: PrWorkflowSetting, detected: PrWorkflow): PrWorkflow {
   return setting === "auto" ? detected : setting;
 }
+/** Repositories set to No review, from a saved config (keys are already lower-case owner/name). */
+export const noReviewRepos = (config: Pick<PrWorkflowConfig, "repos">): string[] => Object.entries(config.repos).filter(([, r]) => r.review === "none").map(([repo]) => repo).sort();
+
+/**
+ * The repositories set to No review in this process. The server fills it from pr-workflow.json before the first
+ * engine tick and on every save; the client fills it from `follow.reviewers-config`. Hot paths read it through
+ * `agentMerges`: a set lookup, nothing more.
+ */
+let noReview: ReadonlySet<string> = new Set();
+export function setNoReviewRepos(repos: Iterable<string>): void { noReview = new Set([...repos].map(repoKey)); }
+export const noReviewRepoList = (): string[] => [...noReview].sort();
+export const repoReview = (repo: string): ReviewMode => noReview.has(repoKey(repo)) ? "none" : "team";
+/**
+ * Whether the agent merges this PR itself, so Follow-up never asks the developer to add reviewers or merge it and its
+ * merge flags nobody. The PR's own register_pr answer wins (false hands a merge back even in a No review repository);
+ * otherwise the repository's review mode decides. The ONE reader of `pr.agentMerges`: every consumer goes through it
+ * (tests/review-mode.test.ts scans for direct reads). Invariant a-no-review-repo-never-asks-for-review-or-merge.
+ */
+export function agentMerges(pr: { repo: string; agentMerges?: boolean }): boolean {
+  return pr.agentMerges ?? noReview.has(repoKey(pr.repo));
+}
+
 export const reviewFixFor = (config: PrWorkflowConfig, repo: string | null): ReviewFix => (repo && config.repos[repoKey(repo)]?.reviewFix) || config.reviewFix;
 
 export const repoWorkflowViewSchema = z.object({
   repo: z.string(), setting: prWorkflowSettingSchema, detected: prWorkflowSchema, effective: prWorkflowSchema, reason: z.string(),
   path: z.string().nullable(), inherits: z.boolean(),
   mergeMethod: mergeMethodSchema.nullable(), reviewFix: reviewFixSchema.nullable(),
+  review: reviewModeSchema.default("team"),
   /** What GitHub allows here, from the newest PR Follow-up read in this repository; null until it has read one. */
   github: z.object({ methods: z.array(mergeMethodSchema), preferred: mergeMethodSchema.nullable(), autoMerge: z.boolean(), mergeQueue: z.boolean() }).nullable().default(null),
 });
@@ -96,6 +133,8 @@ export const setPrWorkflowInputSchema = z.strictObject({
   default: prWorkflowSettingSchema.optional(),
   mergeMethod: mergeMethodSchema.nullable().optional(),
   reviewFix: reviewFixSchema.nullable().optional(),
+  /** null: back to the default, Team review. */
+  review: reviewModeSchema.nullable().optional(),
 });
 
 /** Settings' line for the default: "Auto · GitHub in 5 repositories, Graphite in 3". */
@@ -110,17 +149,18 @@ export function shippingSummary(view: Pick<PrWorkflowView, "default" | "repos">)
 export function repoShippingSummary(row: RepoWorkflowView): string {
   // What was set here comes before "Auto", so a phone's truncation cuts the least useful part.
   const method = row.mergeMethod && row.effective === "github" ? MERGE_METHOD_SHORT[row.mergeMethod] : "";
-  return [workflowName(row.effective), method, row.inherits ? (row.setting === "auto" ? "Auto" : "default") : "set here"].filter(Boolean).join(" · ");
+  const review = row.review === "none" ? REVIEW_MODE_LABELS.none.label : "";
+  return [workflowName(row.effective), method, review, row.inherits ? (row.setting === "auto" ? "Auto" : "default") : "set here"].filter(Boolean).join(" · ");
 }
 /** "3 GitHub · 2 Graphite · 1 set here". */
 export function reposShippingSummary(rows: readonly RepoWorkflowView[]): string {
-  const gh = rows.filter(r => r.effective === "github").length, gt = rows.length - gh, own = rows.filter(r => !r.inherits || r.mergeMethod || r.reviewFix).length;
+  const gh = rows.filter(r => r.effective === "github").length, gt = rows.length - gh, own = rows.filter(r => !r.inherits || r.mergeMethod || r.reviewFix || r.review === "none").length;
   return [gh ? `${gh} GitHub` : "", gt ? `${gt} Graphite` : "", own ? `${own} set here` : ""].filter(Boolean).join(" · ") || "None yet";
 }
 export const reviewFixLabel = (fix: ReviewFix) => fix.kind === "builtin" ? "Built-in steps" : commandName(fix)!;
 
 /** What an agent's instructions depend on: the workspace's workflow and its review-fix command (null: built-in). */
-export type AgentWorkflow = { mode: PrWorkflow; reviewFix: string | null };
+export type AgentWorkflow = { mode: PrWorkflow; reviewFix: string | null; noReview?: boolean };
 
 /**
  * What setup's per-repository select writes. "Auto" while the default is Auto means inherit (null), as Settings'

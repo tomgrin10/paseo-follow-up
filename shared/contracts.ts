@@ -59,7 +59,8 @@ export const confirmPrActionRpc = defineRpc({ name: "follow.confirm-pr-action", 
 export const checkPrActionRpc = defineRpc({ name: "follow.check-pr-action", input: z.object({ workspaceId: idSchema, actionId: idSchema }), output: actionResultSchema });
 /** `reviewers` picks who to ask for this PR only (the picker); `remember` also saves them as the repository's list. */
 export const requestReviewersRpc = defineRpc({ name: "follow.request-reviewers", input: z.object({ workspaceId: idSchema, prKey: idSchema, reviewers: z.array(reviewerEntrySchema).min(1).max(MAX_REVIEWERS).optional(), remember: z.boolean().optional() }), output: actionResultSchema });
-const reviewerSettingsSchema = z.object({ config: reviewerConfigSchema, repos: z.array(z.string()) });
+/** `noReview`: the repositories set to No review (pr-workflow.json), so the client's Needs you agrees with the server's. */
+const reviewerSettingsSchema = z.object({ config: reviewerConfigSchema, repos: z.array(z.string()), noReview: z.array(z.string()).default([]) });
 /** Settings → Reviewers: the saved lists and the repositories Follow-up has seen PRs in. */
 export const reviewerSettingsRpc = defineRpc({ name: "follow.reviewer-settings", input: z.object({}), output: reviewerSettingsSchema });
 /** `repo: null` is the default for all repos. An empty list clears it. */

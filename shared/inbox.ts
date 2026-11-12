@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { briefSchema, BRIEF_KINDS, BRIEF_SOURCES, BRIEF_STATES } from "./brief";
+import { agentMerges } from "./pr-workflow";
 
 /**
  * The "Needs you" inbox: one flag per root agent that only the developer clears, by signing it off or
@@ -491,11 +492,11 @@ export function rowTitle(row: Pick<InboxRow, "title" | "workspaceTitle" | "multi
 /**
  * The inbox event for a registered PR that left OPEN, or null while it is open (or unread). One place for the rule, so
  * the worker (server/inbox.ts followUpEvents) and the status invariants agree: a merge is `merged`, and a merge the
- * agent made itself (register_pr agentMerges, which promises the developer is never asked about it) is `quiet`.
+ * agent made itself (register_pr agentMerges, or any merge in a No review repository: `agentMerges`) is `quiet`.
  */
-export function prEndEvent(pr: { key: string; number: number; agentMerges?: boolean; snapshot: { state: string; complete: boolean } | null }): Extract<InboxEvent, { type: "pr_closed" }> | null {
+export function prEndEvent(pr: { key: string; repo: string; number: number; agentMerges?: boolean; snapshot: { state: string; complete: boolean } | null }): Extract<InboxEvent, { type: "pr_closed" }> | null {
   const s = pr.snapshot;
   if (!s?.complete || (s.state !== "MERGED" && s.state !== "CLOSED")) return null;
   const merged = s.state === "MERGED";
-  return { type: "pr_closed", dedupeKey: `${pr.key}:${s.state}`, detail: `#${pr.number} ${merged ? "merged" : "closed"}`, prKey: pr.key, merged, ...(merged && pr.agentMerges ? { quiet: true } : {}) };
+  return { type: "pr_closed", dedupeKey: `${pr.key}:${s.state}`, detail: `#${pr.number} ${merged ? "merged" : "closed"}`, prKey: pr.key, merged, ...(merged && agentMerges(pr) ? { quiet: true } : {}) };
 }

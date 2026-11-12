@@ -18,6 +18,7 @@ import { cadence, movingReason, OBSERVATION_FRESH_MS, POLL_IDLE_MS, RUNNING_POLL
 import { staleUpdatePhase, type UpdatePhase } from "./updates";
 import { onceViolation } from "./needs-block";
 import { compactPrStatus, prPresentation } from "./presentation";
+import { agentMerges } from "./pr-workflow";
 
 /**
  * Status invariants: what must hold for any workspace, whatever path changed it. Pure, no IO, and never throwing:
@@ -156,7 +157,7 @@ export const INVARIANTS: Invariant[] = [
     id: "agent-merges-asks-nothing",
     why: "2026-11-11 wks_5dfd3a65: a PR the agent merges itself (register_pr agentMerges) is its own work in flight, so Needs you never asks the developer to review or merge it.",
     check(w, now) {
-      const mine = new Set(w.prs.filter(p => p.agentMerges).map(p => p.key));
+      const mine = new Set(w.prs.filter(agentMerges).map(p => p.key));
       const asked = needsYou(w, now).filter(i => (i.kind === "merge" || i.kind === "reviewers") && mine.has(i.prKey));
       return asked.length ? asked.map(i => i.title).join(", ") : null;
     },
@@ -166,7 +167,7 @@ export const INVARIANTS: Invariant[] = [
     why: "2026-11-12 live sidebar: an agent that merged its own PR (register_pr agentMerges) flagged the developer with \"PR closed · #37 merged\". Its merge is its own work, reported in its own turn.",
     check(w, now) {
       const at = new Date(now).toISOString();
-      const flagged = w.prs.filter(p => p.agentMerges).filter(p => { const ev = prEndEvent(p); return ev?.merged && reduce(newEntry("agent"), ev, at).needs; });
+      const flagged = w.prs.filter(agentMerges).filter(p => { const ev = prEndEvent(p); return ev?.merged && reduce(newEntry("agent"), ev, at).needs; });
       return flagged.length ? flagged.map(p => `#${p.number} merged by its agent flags the developer`).join(", ") : null;
     },
   },
