@@ -34,15 +34,17 @@ export function useSetReviewMode() {
     const key = repoKey(repo); const rest = noReviewRepoList().filter(r => r !== key);
     setNoReviewRepos(mode === "none" ? [...rest, key] : rest);
   };
-  const set = (repo: string, mode: ReviewMode, undoable: boolean) => {
+  /** `undoable`: the toast offers Undo (the Needs-you link). "undo": that Undo itself, which restores without a toast. */
+  const set = (repo: string, mode: ReviewMode, undoable: boolean | "undo") => {
     const before: ReviewMode = noReviewRepoList().includes(repoKey(repo)) ? "none" : "team";
     local(repo, mode); refresh();
     return runAction({ label: "Review", toast, run: () => write({ repo, review: mode === "team" ? null : mode }), onSuccess: refresh,
       failure: `Couldn't change review for ${repo}`,
       success: () => {
         const message = mode === "none" ? noReviewNotice(repo) : `${repo}: team review. ${REVIEW_MODE_LABELS.team.hint}`;
+        if (undoable === "undo") return null;
         if (!undoable || !hasToastHost()) return message;
-        pushToast("success", message, [{ label: "Undo", onPress: () => void set(repo, before, false) }], { durationMs: REVIEW_UNDO_MS, keep: true });
+        pushToast("success", message, [{ label: "Undo", onPress: () => void set(repo, before, "undo") }], { durationMs: REVIEW_UNDO_MS, keep: true });
         return null;
       } }, `review:${repoKey(repo)}`).then(ok => { if (!ok) { local(repo, before); refresh(); } return ok; });
   };
