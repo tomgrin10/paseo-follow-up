@@ -180,12 +180,20 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    menu, the panel's More menu) lays out through `MenuItemContent` (`client/menu-item.tsx`): one leading glyph slot
    centred on the item, sized for touch as its text is. No menu builds its own glyph slot, and none pins a glyph to
    the first line. Guarded by `tests/menu-glyph.test.ts` ([docs/client.md](docs/client.md#row-menu)).
-15. **Auto-send says the truth and keeps moving** (`the-send-line-matches-the-send-decision`,
+15. **A search result is the list's own Row** (`search-row-is-the-list-row`). Home's search results render the same
+   `Row` as Home's groups (`client/home-list.tsx`), with the hit highlighted in place (title, "› agent", the ask line);
+   a match in a field the row doesn't show replaces line 2 with "<Field> · excerpt", so a result is exactly as tall as
+   its row. An archived hit is that Row, muted, with the Archive glyph and "Archived". The sidebar view's "Filter
+   workspaces" narrows its list in place with the same matcher (`filterHome` in `shared/search.ts`,
+   `sidebar-filter-uses-home-search`). Home's order is one Display setting, `home_sort`, for Home and the sidebar view
+   on every device, so `set_display` covers it. Guarded by `tests/search-row.test.ts`, `tests/home-beta2.test.ts` and
+   `tests/home-sort.test.ts`.
+16. **Auto-send says the truth and keeps moving** (`the-send-line-matches-the-send-decision`,
    `message-rows-say-it-once`, `a-capped-task-never-holds-the-queue`). One pure `sendDecision`
    (`shared/send-decision.ts`) decides an auto-send and writes every line about it; the engine sends exactly when it
    says send. Repairs are tasks: a row in the next message says only Queued or Sent, and the Tasks strip carries when
-   and why. A turn without an acknowledgment never blocks; only a condition sent twice unchanged waits, as its own
-   task. Guarded by `tests/send-decision.test.ts`, `tests/no-retry.test.ts` and `tests/task-rows.test.ts`
+   and why. A turn without an acknowledgment never blocks; only a condition sent twice unchanged, acknowledged or not,
+   waits, as its own task. Guarded by `tests/send-decision.test.ts`, `tests/no-retry.test.ts` and `tests/task-rows.test.ts`
    ([docs/workspaces.md](docs/workspaces.md#repairs-are-tasks-q49)).
 
 ## Bugs

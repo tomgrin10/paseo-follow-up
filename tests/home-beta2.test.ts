@@ -8,7 +8,8 @@ import type { InboxRow, Reason } from "../shared/inbox";
 import type { State, Workspace } from "../shared/model";
 import { followsByDefault, migrateFollowEvery, FOLLOW_EVERY_MIGRATION } from "../shared/settings";
 import { applyDiscovery } from "../server/discovery";
-import { homeSearchDocs, indexDocs, omniboxResults, search, tokenMatch, withinOneEdit, workspaceProvider, type OmniboxProvider } from "../shared/search";
+import { excerpt, filterHome, homeSearchDocs, indexDocs, omniboxResults, rowHit, search, tokenMatch, withinOneEdit, workspaceProvider, type OmniboxProvider } from "../shared/search";
+import { readFile } from "node:fs/promises";
 import { SORT_MODES, type SortMode } from "../shared/sort";
 import { freshPriorities, mergePriorities, priorityNote, PRIORITY_FRESH_MS, type Priority } from "../shared/priorities";
 import { fromAccountRows, fromBudget, fromSubscriptions, meters, meterText, toneOf, type Usage } from "../shared/usage";
@@ -115,6 +116,58 @@ test("results highlight the title or say where they matched, and providers list 
   const overseer: OmniboxProvider = { id: "overseer", results: q => [{ provider: "overseer", key: `ask:${q}`, hit: { key: "ask", title: `Ask: ${q}`, group: "needs", score: 0, titleRanges: [], via: null } }] };
   const rows = omniboxResults([workspaceProvider(index, NOW), overseer], "1402");
   assert.equal(rows[0].key, "ws:okta"); assert.equal(rows.at(-1)!.provider, "overseer");
+});
+
+/**
+ * The sidebar view's filter and Home's search answer the same question the same way: `filterHome` keeps exactly the
+ * live workspaces `search` finds, in the list's own groups and order (sidebar-filter-uses-home-search).
+ */
+test("the sidebar filter keeps exactly what Home search finds (one matcher), in the list's groups and order", async () => {
+  const { index, model } = fixture();
+  for (const q of ["okta", "1402", "her-1312", "saml", "chore", "nothing-like-this"]) {
+    const found = new Set(search(index, q, NOW, Infinity).filter(h => h.group !== "archived").map(h => h.key));
+    const { model: narrowed, hits } = filterHome(model, index, q, NOW);
+    const kept = narrowed.groups.flatMap(g => g.items.map(s => s.key));
+    assert.deepEqual(new Set(kept), found, `"${q}": same rows as Home search`);
+    assert.deepEqual([...hits!.keys()].sort(), [...found].sort());
+    for (const g of narrowed.groups) {
+      assert.ok(g.items.length, "a group with no match drops out");
+      const order = model.groups.find(x => x.id === g.id)!.items.map(s => s.key).filter(k => found.has(k));
+      assert.deepEqual(g.items.map(s => s.key), order, "the chosen sort, not match rank");
+    }
+  }
+  assert.ok(!filterHome(model, index, "legacy connector", NOW).model.groups.length, "archived workspaces stay out of the filter");
+  assert.equal(filterHome(model, index, "  ", NOW).model, model, "no query: the list as it is");
+  const view = await readFile(new URL("../client/home-chrome.tsx", import.meta.url), "utf8");
+  const hook = view.slice(view.indexOf("export function useListFilter"), view.indexOf("export function FilterField"));
+  assert.match(hook, /homeSearchDocs\(/); assert.match(hook, /filterHome\(/);
+  assert.doesNotMatch(hook, /tokenMatch|includes\(|toLowerCase/, "no matcher of its own");
+});
+
+test("excerpt never starts inside an id, and keeps the match visible", () => {
+  const pr = excerpt("#143 Send the dunning email after the last retry", [[22, 27]], 44);
+  assert.ok(pr.text.startsWith("…Send the dunning"), pr.text);
+  assert.deepEqual(pr.ranges.map(([a, b]) => pr.text.slice(a, b)), ["email"]);
+  const linked = excerpt("APP-139 Customers charged twice after a gateway timeout", [[26, 31]], 44);
+  assert.ok(linked.text.startsWith("…Customers charged twice"), `not "…9 Customers": ${linked.text}`);
+  assert.equal(excerpt("APP-182 Invoice PDFs on the receipt email", [[36, 41]], 44).text, "APP-182 Invoice PDFs on the receipt email", "short text stays whole");
+  const long = excerpt("When a CSV row matches an existing contact by email, should it update that contact or be skipped?", [[46, 51]], 44);
+  assert.ok(long.text.startsWith("…existing contact"), long.text);
+  assert.deepEqual(long.ranges.map(([a, b]) => long.text.slice(a, b)), ["email"]);
+});
+
+test("rowHit: the match is highlighted where the row shows it, or named as line 2 when it doesn't", () => {
+  const { index } = fixture();
+  const [scim] = search(index, "scim", NOW);
+  assert.deepEqual(rowHit(scim, { title: "Okta SCIM sync" }).titleRanges, [[5, 9]], "title words in place");
+  const [branch] = search(index, "chore", NOW);
+  const hit = rowHit(branch, { title: "Billing cleanup", line: "" });
+  assert.equal(hit.via?.field, "branch", "a hidden field becomes line 2");
+  const ask = { key: "k", title: "Billing retries", group: "needs" as const, score: 1, titleRanges: [], via: { field: "ask" as const, text: "Pick whether declined cards retry", ranges: [[28, 33]] as [number, number][] } };
+  const inPlace = rowHit(ask, { title: "Billing retries", line: "Pick whether declined cards retry" });
+  assert.deepEqual(inPlace.lineRanges, [[28, 33]]); assert.equal(inPlace.via, null, "the ask the row shows is highlighted there, not repeated");
+  const agent = rowHit({ ...ask, title: "Okta SCIM sync › Reviewer", titleRanges: [[17, 25]], via: null }, { title: "Okta SCIM sync", agent: "Reviewer" });
+  assert.deepEqual(agent.agentRanges, [[0, 8]]); assert.deepEqual(agent.titleRanges, []);
 });
 
 test("searching 100 workspaces and 200 agents stays fast", () => {
