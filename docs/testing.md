@@ -99,8 +99,16 @@ plays a scripted turn (timeline items, Follow-up RPCs, a permission) for a given
   `claude` and `codex` on `PATH`, after any entries inside the root (a script's own fake `gh` or `mcpproxy` still
   wins) and before the host's. A realistic scale run's ranker once ran the host's real `mcpproxy` (Linear and Slack
   reads as the developer). The Paseo CLI stays real. Only `check-wait`, the opt-in live-model check, keeps the real
-  `claude` (`real: ["claude"]`); `tests/harness-env.test.ts` fails on any other opt-out or a tool that resolves outside
-  the root.
+  `claude` (`real: REAL`, one constant for its env and its config); `tests/harness-env.test.ts` fails on any other
+  opt-out or a tool that resolves outside the root.
+- **One config.json, `harnessConfig`.** Every harness daemon's `config.json` comes from
+  `harnessConfig({ port, mcp, webUi, real, extra })` in `scripts/harness-env.mjs`. It turns off the agent provider of
+  each stubbed tool (`PROVIDER_TOOLS`), from the same `stubbedTools(real)` list as the stubs. With `codex` stubbed but
+  its provider on, a browser's provider refresh wrote to the dead stub and Paseo 0.15.4's worker crashed on the EPIPE,
+  so every shot after the first landed on the welcome screen. `tests/harness-env.test.ts` fails when a script writes
+  its own config or a stubbed provider stays on.
+- **A crashed worker fails the run.** `screenshots.mjs` checks the daemon's log after every shot (`daemonCrashes`:
+  "Uncaught exception", a worker restart) and fails at that shot with the log line, not with timeouts after it.
 - **Fake GitHub over HTTP, not only `gh`.** Follow-up reads GitHub over in-process HTTPS (`server/github-api.ts`); a
   fake `gh` on PATH only answers writes. A script whose daemon needs PR reads starts `fakeGithub({ dir, gh })` from
   `scripts/fake-github.mjs` and passes its `env` and `strip` to `harnessEnv`. The server answers each request with the

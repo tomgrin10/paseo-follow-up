@@ -35,7 +35,7 @@ import { tmpdir, homedir } from "node:os";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
 import { harness, spawnDaemon } from "./harness.mjs";
-import { harnessEnv } from "./harness-env.mjs";
+import { harnessEnv, harnessConfig } from "./harness-env.mjs";
 import { PLUGIN_ID as NEW, LEGACY_PLUGIN_ID as OLD, DATA_DIR, LEGACY_DATA_DIR, ENV_PREFIX, LEGACY_ENV_PREFIX, HOOK_MARKER, LEGACY_HOOK_MARKER, invokeSelf } from "../shared/legacy.ts";
 import { SOURCE_REPOSITORY } from "../server/update-provenance.ts";
 await harness();
@@ -251,7 +251,7 @@ try {
   tarballs.set(RC1, good);
   say(`registry ${registryUrl}: ${[...tarballs.keys()].join(", ")}`);
 
-  await writeFile(join(home, "config.json"), JSON.stringify({ pluginsEnabled: true, daemon: { listen: `127.0.0.1:${port}`, relay: { enabled: false }, mcp: { enabled: true, injectIntoAgents: true }, browserTools: { enabled: false } }, features: { webUi: { enabled: true } } }));
+  await writeFile(join(home, "config.json"), JSON.stringify(harnessConfig({ port, mcp: true, webUi: true })));
   await writeFile(join(fixture, "paseo-plugin.json"), JSON.stringify({ id: "followup-fixture", requirements: { paseo: ">=0.11.0" } }));
   await writeFile(join(fixture, "index.server.ts"), await readFile("scripts/fixture-provider.ts", "utf8"));
   const log = openSync(join(root, "daemon.log"), "a");
