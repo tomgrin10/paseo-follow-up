@@ -149,6 +149,44 @@ can only return plugin items, so a transformed call always leaves the group and 
 - **Tests and screenshots:** `tests/chat-grouping.test.ts`. `scripts/check-chat-grouping.mjs` renders a synthetic
   mixed turn in an isolated daemon for screenshots; run it through the harness slot.
 
+## Created agent and workspace cards
+
+Paseo's `create_agent` and `create_workspace` tool calls render as a card that opens what they made
+(`client/created.tsx`, parsing in `shared/created.ts`). The card replaces the raw call, so Paseo's "N tool calls"
+group no longer counts it, the same as the Done card (a transform can only replace an item).
+
+- **Card:** a provider tile with a presence dot (green while working, hollow when closed), the title, the status word
+  and a chevron, then "New agent · <model> · <workspace>" or "New workspace · <branch> · <repo>". A Follow-up line
+  shows only when there is something to say: the workspace's first open question, up to two PR chips, or its live
+  line. An agent's card shows it only when that agent is the workspace's main agent.
+- **States:** starting and creating (Follow-up's spinner); working and idle (tappable); closed, a session Paseo ended
+  (the idle unload or a plugin reload), reads "Closed · Open chat" with a hollow dot and stays tappable, since the
+  developer's tap is the only load and nothing reads, prefetches or previews it; archived (words only, no chevron);
+  unknown, not listed or not read yet (words only; the task line reads "Agent unavailable"); failed ("Couldn't start <title>", the error on two lines, in full
+  in the accessibility label).
+- **Opening:** timeline items get no navigation, so a tap opens Follow-up's Home screen with `open=<agentId>` or
+  `openWorkspace=<id>`. `useNextRelay` hands off to the host: the agent's chat, or the workspace with its Follow-up
+  panel docked.
+- **Live facts:** `follow.created-items`, from the engine's directory snapshot as it stands (`DaemonDirectory.snapshotFor()`: it never waits on the daemon, and nothing is
+  woken) and the store.
+- **The one exception to snapshot-only: archived agents.** Paseo's `fetch_agents` leaves archived agents out, so after
+  the directory's next re-read an archived agent would vanish and its card and task line would read unknown instead of
+  "archived". Two things cover it, both in `server/directory.ts`:
+  - A memo of archived agents, in memory and bounded (`ARCHIVED_MEMO_MAX`, 500, least recently used out), fed by the
+    archive event, by listed rows that carry `archivedAt` and by lookups. It survives re-reads.
+    `withArchived` / `snapshotFor` add it back only for the ids a card or task line names.
+  - `lookup(ids)`: for an id a card or task line names that the directory lacks, one `fetch_agent`, at most once per
+    id for the worker's life (ids Paseo reports gone included), capped at 40 a call. It runs on demand (the
+    created-items RPC, the engine's task-agent read), never on a timer, and never waits the caller: the answer shows
+    on the next read. `fetch_agent` is metadata only: Paseo projects an unloaded agent from its stored record and
+    doesn't load it (`tests/daemon-load.test.ts`; `scripts/check-archived-lookup.mjs` checks the archived agent is
+    still unloaded afterwards, on 0.15 and 0.16). Agent states go through `taskAgentStates` and `PRESENCE` (`shared/task-status.ts`), the same
+  words and link rule as task lines. Cards in one chat share one request; they poll every 20 s only while a card shows
+  an agent that isn't archived and the app is visible. `tests/daemon-load.test.ts` checks that a closed or archived
+  agent's card and task line cost no daemon request.
+- **Feature detection:** without `addTimelineTransformer` / `addTimelineRenderer` nothing is registered; a call whose
+  result has no `agentId` / `workspaceId` keeps Paseo's plain row. Tests: `tests/created-card.test.ts`.
+
 ## Shared copy
 
 - `shared/presentation.ts` is the PR status label and tone (`prPresentation`) and the Graphite link.
