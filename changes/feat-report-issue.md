@@ -1,0 +1,2 @@
+- Report a bug, an idea or feedback from Settings → General, Command-K or any error message. Your agent writes it up with versions and recent errors, removes private names, and shows you the issue before it goes to GitHub.
+- Ask any agent to "report a bug about Follow-up" and it files a detailed issue only after you say yes. Screenshots are uploaded only if you agree for that report.

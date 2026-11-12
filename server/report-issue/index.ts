@@ -50,9 +50,8 @@ export const reportToolDescription = (plugin: string) => `Report a bug, feature 
 
 const kind = z.enum(REPORT_KINDS);
 const text = (max: number) => z.string().trim().max(max);
-export const reportInputSchema = z.strictObject({
-  kind: kind.optional(),
-  summary: text(500).optional(),
+/** Everything the issue says. One object in the tool's schema, so the schema stays small; the first reply lists the keys. */
+export const reportFieldsSchema = z.strictObject({
   title: text(120).optional(),
   what_happened: text(4000).optional(),
   steps: z.union([z.array(text(500)).max(30), text(6000)]).optional(),
@@ -67,6 +66,11 @@ export const reportInputSchema = z.strictObject({
   screenshots: z.array(z.strictObject({ path: z.string().trim().min(1).max(1000), description: text(300).min(1) })).max(6).optional(),
   comment_on: z.number().int().positive().optional(),
   allow_names: z.array(text(200).min(1)).max(20).optional(),
+});
+export const reportInputSchema = z.strictObject({
+  kind: kind.optional(),
+  summary: text(500).optional(),
+  fields: reportFieldsSchema.optional(),
   planId: z.string().trim().min(1).max(200).optional(),
   confirm: z.boolean().optional(),
   screenshot_consent: z.boolean().optional(),
@@ -76,13 +80,11 @@ export type ReportInput = z.infer<typeof reportInputSchema>;
 /** The tool's JSON schema, for MCP registration (kept beside the zod one; a test checks they agree). */
 export const reportToolProperties = {
   kind: { type: "string", enum: [...REPORT_KINDS] },
-  summary: { type: "string" }, title: { type: "string" }, what_happened: { type: "string" },
-  steps: { type: "array", items: { type: "string" } }, expected: { type: "string" }, actual: { type: "string" },
-  problem: { type: "string" }, proposal: { type: "string" }, alternatives: { type: "string" },
-  feedback: { type: "string" }, context: { type: "string" }, findings: { type: "string" },
-  screenshots: { type: "array", items: { type: "object", properties: { path: { type: "string" }, description: { type: "string" } }, required: ["path", "description"] } },
-  comment_on: { type: "integer", minimum: 1 }, allow_names: { type: "array", items: { type: "string" } },
-  planId: { type: "string" }, confirm: { type: "boolean" }, screenshot_consent: { type: "boolean" },
+  summary: { type: "string" },
+  fields: { type: "object" },
+  planId: { type: "string" },
+  confirm: { type: "boolean" },
+  screenshot_consent: { type: "boolean" },
 } as const;
 
 const IMAGE = new Map([[".png", "png"], [".jpg", "jpg"], [".jpeg", "jpg"], [".gif", "gif"], [".webp", "webp"]]);
@@ -112,9 +114,8 @@ export class Reporter {
     const a = parsed.data;
     if (a.confirm) return this.confirm(caller, a);
     if (!a.kind) throw new Error(`${this.c.toolName}: give kind (bug, feature or feedback) and a one-line summary first.`);
-    const given = FIELDS.some(f => a[f] !== undefined && f !== "title") || a.title !== undefined;
-    if (!given) return this.procedure(a.kind, a.summary);
-    return this.dryRun(caller, a as ReportInput & { kind: ReportKind });
+    if (!a.fields || !Object.keys(a.fields).length) return this.procedure(a.kind, a.summary);
+    return this.dryRun(caller, a.kind, a.fields);
   }
 
   /** Call 1: the whole procedure, only now that someone is reporting. */
@@ -124,6 +125,7 @@ export class Reporter {
     return {
       stage: "procedure",
       plugin: this.c.name, repo: this.c.repo, kind: k, ...(summary ? { summary } : {}),
+      howToCall: `${this.c.toolName}({ kind: "${k}", fields: { ${REQUIRED[k].join(", ")}, … } }); the keys below go inside fields.`,
       required: fields(REQUIRED[k]),
       recommended: fields(RECOMMENDED[k]),
       optional: { screenshots: "[{path, description}]: local image files the developer gives you (png, jpg, gif, webp; up to 6). describe each in words: the words go in the issue either way", comment_on: "an existing issue number from the duplicates, to add these details there instead", allow_names: "names the developer chose to keep (a repository, a title) that would otherwise be replaced" },
@@ -131,13 +133,13 @@ export class Reporter {
         `1. Interview the developer for anything required above that you don't already know, in one short message. Use their words; don't invent steps or results.`,
         `2. Inspect or reproduce it yourself where you can (${this.c.name}'s read tools, its state and logs, trying the steps) and put what you found in findings.`,
         `3. Screenshots: ask if they have any. Take local paths, describe each one, and look at each image yourself: point out anything that looks private (repository or company names, hostnames, Slack or email text, people) before going on.`,
-        `4. Call ${t} again with kind and every field. The reply is a dry run: the exact title, labels and body, likely duplicates, what was redacted, and a planId. ${this.c.name} adds versions, environment and recent errors itself and removes tokens, emails, hostnames, home paths and private repository names and PR titles.`,
+        `4. Call ${t} again with kind and fields: { …every key above }. The reply is a dry run: the exact title, labels and body, likely duplicates, what was redacted, and a planId. ${this.c.name} adds versions, environment and recent errors itself and removes tokens, emails, hostnames, home paths and private repository names and PR titles.`,
         `5. Show the developer the title, labels and body exactly as returned, the duplicates and the redaction summary. If a duplicate matches, offer to add these details to it instead (comment_on). Fix anything they want changed and dry-run again.`,
         `6. Screenshots become public: tell them exactly which files and where (the dry run says), ask them to check the images for private information, and ask yes or no for this report.`,
         `7. Only after an explicit yes to filing: call ${t} with confirm=true, the planId, and screenshot_consent=true or false. Never file without that yes; ${this.c.repo} is public.`,
         `8. Give them the link. If the images weren't uploaded, ask them to drag them into the issue at that link.`,
       ],
-      next: `Interview the developer, then call ${t} with kind="${k}" and the fields.`,
+      next: `Interview the developer, then call ${t} with kind="${k}" and fields.`,
     };
   }
 
@@ -177,12 +179,11 @@ export class Reporter {
   }
 
   /** Call 2: refuse with what's missing, or plan the issue. Reads only (invariant `report-issue-files-only-after-confirm`). */
-  private async dryRun(caller: string, a: ReportInput & { kind: ReportKind }) {
-    const k = a.kind;
+  private async dryRun(caller: string, k: ReportKind, a: z.infer<typeof reportFieldsSchema>) {
     const fields: ReportFields = Object.fromEntries(FIELDS.filter(f => a[f] !== undefined).map(f => [f, a[f]]));
     const missing = missingFields(k, fields);
     if (missing.required.length) {
-      return { stage: "missing", kind: k, missing: missing.required, help: Object.fromEntries(missing.required.map(f => [f, FIELD_HELP[f]])), next: `Ask the developer for ${missing.required.join(", ")}, then call ${this.c.toolName} again with every field. Nothing was filed.` };
+      return { stage: "missing", kind: k, missing: missing.required, help: Object.fromEntries(missing.required.map(f => [f, FIELD_HELP[f]])), next: `Ask the developer for ${missing.required.join(", ")}, then call ${this.c.toolName} again with kind and every field in fields. Nothing was filed.` };
     }
     const r = await this.redactor(a.allow_names ?? []);
     const clean = r.deep(fields);

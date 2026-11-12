@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report from Paseo (recommended)
+    url: https://github.com/tomgrin10/paseo-follow-up#report-a-bug-or-request-a-feature
+    about: Ask an agent to "report a bug about Follow-up", or use Settings → General → Report a bug. It adds versions and recent errors and removes private names.

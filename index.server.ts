@@ -15,6 +15,9 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import * as rpc from "./shared/contracts";
+import { LogRing } from "./server/report-issue/diagnostics";
+import { followUpReporter, reportPrompt } from "./server/report-issue-adapter";
+import { githubApi } from "./server/github-api";
 import { browserRepositories, browserWorkspaces, prClaims, prOwner } from "./server/pr-owner";
 import { type Workspace } from "./shared/model";
 import { isWorkspaceRoot } from "./server/workspace-agent";
@@ -62,8 +65,8 @@ import { statusCheck } from "./server/status-check";
 import { NO_USAGE } from "./shared/usage";
 import { activeWindowMs, conversationGone, DEFAULT_ACTIVE_WINDOW_DAYS } from "./server/agent-load";
 import { ACTIVE_SCOPE_MIGRATION, PRUNE_MIGRATION, autoSendsByDefault, FOLLOW_EVERY_MIGRATION, followsByDefault, followsEvery, migrateFollowEvery, optedOut } from "./shared/settings";
-import { Overseer, OVERSEER_TOOLS, type OverseerPaseo, type OverseerTool } from "./server/overseer";
-import { OVERSEER_LABEL } from "./shared/overseer";
+import { Overseer, OVERSEER_TOOLS, type OverseerPaseo, type OverseerTool, providerModel } from "./server/overseer";
+import { OVERSEER_LABEL, isOverseerAgent } from "./shared/overseer";
 import { withDaemon } from "./server/daemon";
 import { RpcTiming } from "./server/rpc-timing";
 import { hostFeature, type ServerInfo } from "./server/host-features";
@@ -98,6 +101,11 @@ import { BRIEF_KIND, BRIEF_VERSION, prState, prStates, validateNeedsYou, type Br
 const MAIN_WORK = new Set(["follow.sync", "follow.register-pr", "follow.obligation", "follow.done", "follow.acknowledge", "follow.exclude-stack", "follow.ask-question", "follow.record-answer", "follow.withdraw-question", "follow.set-spec", "follow.needs-you"]);
 
 export default function contribute(server: PluginServerContext) {
+  // Report an issue's "recent warnings and errors": this worker's own [follow-up] console lines, in memory only.
+  const startedAt = Date.now();
+  const logRing = new LogRing();
+  const restoreConsole = logRing.capture("[follow-up]");
+  let toolTransport = "stdio bridge, or no session opened yet";
   const displaySettings = server.registerSettings(displayPreferences);
   const questionSettings = server.registerSettings(questionPreferences);
   // An unreadable setting means the default, which never lets an agent build ahead of the developer.
@@ -396,6 +404,7 @@ export default function contribute(server: PluginServerContext) {
     const providers = (process.env.FOLLOW_UP_TOOL_PROVIDERS ?? "claude,codex").split(",");
     if (request.purpose !== "interactive" || !providers.includes(request.provider) || request.labels["plugin-tools/enabled"] === "false") return request;
     if (process.env.FOLLOW_UP_FORCE_STDIO !== "1" && nativeToolsAvailable(request, await paseoConfig())) {
+      toolTransport = "native (Paseo's agent MCP)";
       const flags = { recovery, brief: !!brief && !recovery, root: root && !recovery, overseer: overseer && !recovery };
       const env = { ...request.env, FOLLOW_UP_TOOLS: "native", FOLLOW_UP_PROVIDER: request.provider, ...(flags.root ? { FOLLOW_UP_ROOT: "1" } : {}), ...(flags.overseer ? { FOLLOW_UP_OVERSEER: "1" } : {}) };
       if (/^[\w-]+$/.test(request.agentId)) await writeFile(join(directory, "hook-state", `native-${request.agentId}.json`), JSON.stringify({ instance: toolsInstance }), { mode: 0o600 }).catch(() => undefined);
@@ -1053,10 +1062,45 @@ export default function contribute(server: PluginServerContext) {
       return result;
     },
   };
-  const agentActions = new AgentActions({ timeZone: () => clientTimeZone, store, prActions: actions, engine, inbox, priorities: priorityStore, about, agentSettings, wait: { status: currentWait }, prWorkflows: () => prWorkflowView(), rpc: rpcBridge, display: displayBridge, agentTitle: async id => (await api?.agents.ref(id).refresh().catch(() => null))?.agent?.title ?? null,
+  // Report an issue (server/report-issue/, adapter server/report-issue-adapter.ts): reads only while a report is prepared.
+  const reportKit = followUpReporter({
+    github: githubApi(), updates: () => updatesView(), call: (method, input) => rpcBridge.call(method, input ?? {}), snapshot: () => store.snapshot(),
+    resources: () => governor.current(), serverInfo: () => withDaemon(async client => (client as ServerInfoClient).getLastServerInfoMessage?.() as never), logs: logRing,
+    toolTransport: () => toolTransport, startedAt,
+  });
+  const agentActions = new AgentActions({ timeZone: () => clientTimeZone, store, prActions: actions, engine, inbox, priorities: priorityStore, about, agentSettings, wait: { status: currentWait }, prWorkflows: () => prWorkflowView(), rpc: rpcBridge, display: displayBridge, report: { run: (caller, args) => reportKit.reporter.run(caller, args) }, agentTitle: async id => (await api?.agents.ref(id).refresh().catch(() => null))?.agent?.title ?? null,
     // The directory's agent list (metadata only): a claim never loads or refreshes the main agent.
     agentInfo: async agentId => { const row = gateway.directory.cached(agentId) ?? (await gateway.directory.read()).agents.find(r => r.agent.id === agentId)?.agent; return row ? { status: row.status, activeTurn: row.activeTurn, pendingPermissions: row.pendingPermissions, archivedAt: row.archivedAt } : null; } });
   handle(rpc.prioritiesRpc, async () => ({ items: await priorityStore.read() }));
+  // The Report sheet: who it can send to (directory metadata only; nothing is loaded), Send to agent, Open on GitHub.
+  handle(rpc.reportTargetsRpc, async ({ workspaceId, agentId }, { paseo }) => {
+    seen(paseo);
+    const rows = await gateway.directory.read().catch(() => null);
+    const state = await store.snapshot();
+    const mains = new Map(state.workspaces.filter(w => w.mainAgentId).map(w => [w.mainAgentId, w]));
+    const titles = new Map((rows?.workspaces ?? []).map(w => [w.id, w.name]));
+    const agents = (rows?.agents ?? []).map(r => r.agent).filter(a => !a.archivedAt && !a.background && !isOverseerAgent(a.labels))
+      .map(a => ({ id: a.id, title: a.title ?? "Untitled agent", provider: a.provider, status: a.status, workspaceId: a.workspaceId ?? null, workspaceTitle: a.workspaceId ? titles.get(a.workspaceId) ?? null : null, main: mains.has(a.id), last: Date.parse(a.lastUserMessageAt ?? a.createdAt) || 0 }));
+    const rank = (a: typeof agents[number]) => (a.id === agentId ? 4 : 0) + (workspaceId && a.workspaceId === workspaceId ? 2 : 0) + (a.main ? 1 : 0);
+    const sorted = agents.filter(a => a.id === agentId || a.workspaceId === workspaceId || a.main).sort((x, y) => rank(y) - rank(x) || y.last - x.last).slice(0, 12);
+    const here = workspaceId && titles.has(workspaceId) ? { id: workspaceId, title: titles.get(workspaceId)! } : sorted[0]?.workspaceId ? { id: sorted[0].workspaceId, title: sorted[0].workspaceTitle ?? "Workspace" } : (rows?.workspaces ?? []).filter(w => !w.archivingAt)[0] ? { id: rows!.workspaces[0].id, title: rows!.workspaces[0].name } : null;
+    return { agents: sorted.map(({ last: _l, ...a }) => a), defaultId: sorted[0]?.id ?? null, newAgentWorkspace: here };
+  });
+  handle(rpc.reportSendRpc, async ({ kind, text, error, agentId, newAgentWorkspaceId }, { paseo }) => {
+    seen(paseo);
+    const prompt = reportPrompt(kind, text, error);
+    if (agentId) {
+      await sendTo(agentId)(prompt, randomUUID());
+      const row = (await gateway.directory.read().catch(() => null))?.agents.find(r => r.agent.id === agentId)?.agent;
+      return { agentId, title: row?.title ?? "the agent", started: false };
+    }
+    if (!newAgentWorkspaceId) throw new Error("Pick an agent, or a workspace to start a new one in.");
+    const title = kind === "bug" ? "Report a Follow-up bug" : kind === "feature" ? "Follow-up feature request" : "Follow-up feedback";
+    const providerId = (await agentSettings.role("overseer").catch(() => null))?.provider?.split("/")[0] ?? "claude";
+    const agent = await paseo.workspaces.ref(newAgentWorkspaceId).agents.create({ config: { provider: await providerModel(paseo as unknown as OverseerPaseo, providerId) }, title, prompt });
+    return { agentId: agent.id, title, started: true };
+  });
+  handle(rpc.reportLinkRpc, async ({ kind, text }) => ({ url: (await reportKit.manualLink(kind, text)).url }));
   // Provider limits are non-essential: at critical memory only the VM meter is served.
   handle(rpc.usageRpc, async () => ({ ...(governor.allowsExtras() ? await usage.read() : NO_USAGE), resources: governor.current() }));
   handle(rpc.agentActRpc, async ({ agentId, tool, args }, { paseo }) => {
@@ -1317,6 +1361,7 @@ export default function contribute(server: PluginServerContext) {
     server.on("workspace.archived", async event => { await ready; if (!loadError && !stopped) await store.mutate(state => { const w = state.workspaces.find(w => w.id === event.workspace.id); if (w) w.archived = true; }); }),
   ];
   return async () => {
+    restoreConsole();
     stopped = true; wait.close(); updater.stop(); pluginMove.stop(); governor.stop(); if (timer) clearTimeout(timer); if (aboutTimer) clearTimeout(aboutTimer); if (linkedTimer) clearTimeout(linkedTimer); aiJobs.stop(); ranker = null; if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); rpcTiming.stop(); if (hookTimer) clearInterval(hookTimer); removers.forEach(remove => remove());
     // One deadline for every wait (worker-stop-never-waits-on-a-stuck-pass, server/teardown.ts): start-up and the work
     // in flight may be stuck on a daemon or CLI that never answers. Work that ends inside the deadline is saved; what
