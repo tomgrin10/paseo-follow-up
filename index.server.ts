@@ -68,6 +68,8 @@ import { ACTIVE_SCOPE_MIGRATION, PRUNE_MIGRATION, autoSendsByDefault, FOLLOW_EVE
 import { Overseer, OVERSEER_TOOLS, type OverseerPaseo, type OverseerTool, providerModel } from "./server/overseer";
 import { OVERSEER_LABEL, isOverseerAgent } from "./shared/overseer";
 import { withDaemon } from "./server/daemon";
+import { RenameService, RenameStore, renameDaemon } from "./server/rename";
+import { currentSummary } from "./shared/about";
 import { RpcTiming } from "./server/rpc-timing";
 import { hostFeature, type ServerInfo } from "./server/host-features";
 type ServerInfoClient = { getLastServerInfoMessage?: () => ServerInfo };
@@ -185,7 +187,8 @@ export default function contribute(server: PluginServerContext) {
   const engine = new Engine(store, github, gateway);
   engine.wording = { reviewFix: repo => commandName(prWorkflow.reviewFix(repo)) };
   const governor = new Governor();
-  const linked = new LinkedService({ store: new LinkedStore(directory), sources: liveLinkedSources(), roomForBackground: async () => governor.allowsBackground() });
+  const linkedStore = new LinkedStore(directory);
+  const linked = new LinkedService({ store: linkedStore, sources: liveLinkedSources(), roomForBackground: async () => governor.allowsBackground() });
   // Extraction rides discovery's own timeline batch (loaded agents only): no extra reads (shared/linked-extract.ts).
   gateway.linkRefs = batch => void linked.note(batch).catch(() => undefined);
   const listCache = new ListCache();
@@ -1021,6 +1024,32 @@ export default function contribute(server: PluginServerContext) {
     firstMessage: async agentId => { await historyCache.load(); return historyCache.get(agentId)?.history.goal ?? null; }, roomForBackground: async () => governor.allowsBackground(), roomOnDemand: async () => governor.allowsExtras(),
   });
   handle(rpc.workspaceAboutRpc, async ({ workspaceId, open, refresh }, { paseo }) => { await requireReady(); seen(paseo); return about.view(workspaceId, { open, refresh }); });
+  // Rename with AI (server/rename.ts): stored data only, Summaries' model, Paseo's own workspace title.
+  const renamer = new RenameService({
+    store: new RenameStore(directory), jobs: aiJobs, role: () => agentSettings.role("about"),
+    titles: renameDaemon(withDaemon as never, () => gateway.directory.markDirty()),
+    room: async () => governor.allowsExtras() ? null : "The VM is short on memory right now. Try again in a few minutes.",
+    inputs: async (workspaceId, current) => {
+      const w = (await store.snapshot()).workspaces.find(x => x.id === workspaceId) ?? null;
+      const rows = await gateway.directory.read().catch(() => null);
+      const row = rows?.workspaces.find(x => x.id === workspaceId) as { gitRuntime?: { currentBranch?: string | null } | null } | undefined;
+      if (!w && !row) return null;
+      const summary = currentSummary((await aboutStore.read()).entries[workspaceId])?.gist ?? null;
+      const links = (await linkedStore.read()).workspaces[workspaceId]?.items ?? [];
+      // Agent titles from the cached list (no fetch_agent, no timeline): never wakes an agent.
+      const agents = (rows?.agents ?? []).map(r => r.agent).filter(a => a.workspaceId === workspaceId && !a.archivedAt && a.title).map(a => a.title!);
+      return { current, branch: row?.gitRuntime?.currentBranch ?? null, goal: w?.goal || null, summary, spec: w?.spec?.title ?? null,
+        prs: (w?.prs ?? []).map(p => p.snapshot?.title ?? "").filter(Boolean), linked: links.map(l => ({ key: l.key, title: l.title })), agents: [...new Set(agents)] };
+    },
+  });
+  handle(rpc.renameStatusRpc, async ({ workspaceId, suggest }) => { await requireReady(); return renamer.status(workspaceId, !!suggest); });
+  handle(rpc.renameWorkspaceRpc, async ({ workspaceId, title, undo }, context) => {
+    await requireReady();
+    const out = await renamer.rename(workspaceId, { title, undo }, actorBy(actorOf(context)));
+    // Home and the panel show the new name now, not after the next discovery pass.
+    await store.mutate(state => { const w = state.workspaces.find(x => x.id === workspaceId); if (w) w.title = out.title; }).catch(() => undefined);
+    return out;
+  });
   // Pre-write overviews for what's in Needs you, so opening one there is instant. Every 10 minutes, capped per day.
   let aboutTimer: ReturnType<typeof setTimeout> | null = null;
   const aboutLoop = async () => {

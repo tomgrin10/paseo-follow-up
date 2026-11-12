@@ -98,6 +98,7 @@ the developer's; it never clears a Needs-you flag and never passes the Overseer'
 | `answer_question` | `follow.answer-question` | planned; never your own question |
 | `set_workspace_spec` | `follow.workspace-spec` | planned |
 | `set_task_trigger` | `follow.set-task-trigger` | planned |
+| `ai_rename` | `follow.rename-status` (the dry run: name now, suggestion, undoable rename), `follow.rename-workspace` (rename or `undo`) | planned. `title` skips the model; `undo=true` restores the name before the last rename for 24 h. |
 | `link_items`, `set_linked_items` | `follow.linked-items`, `follow.set-linked-items` (add, remove, undo) | read / planned. The Linked sheet calls both; `link_item` and `unlink_item` also count for `follow.set-linked-items`. |
 | `link_items` (per workspace) | `follow.linked-index` | read. Home's search over every workspace's linked keys and titles, fetched only while the search field has text. |
 | `pr_controls`, `browser_status` | `follow.pr-control-status`, `follow.browser-status` | read |
@@ -148,7 +149,7 @@ These have no tool because only another component calls them:
 
 | Surface | RPCs |
 | --- | --- |
-| Home, panel, larger view, pill | `follow.list`, `follow.get`, `follow.control`, `follow.send`, `follow.recover`, `follow.refresh`, `follow.answer-question`, `follow.workspace-spec`, `follow.set-task-trigger`, `follow.workspace-about`, `follow.priorities`, `follow.usage`, `follow.rank-status`, `follow.rank-now` |
+| Home, panel, larger view, pill | `follow.list`, `follow.get`, `follow.control`, `follow.send`, `follow.recover`, `follow.refresh`, `follow.answer-question`, `follow.workspace-spec`, `follow.set-task-trigger`, `follow.workspace-about`, `follow.rename-status`, `follow.rename-workspace`, `follow.priorities`, `follow.usage`, `follow.rank-status`, `follow.rank-now` |
 | Needs-you inbox and brief card | `follow.inbox-list`, `follow.inbox-act`, `follow.inbox-brief`, `follow.brief-action` |
 | PR sheet | `follow.pr-control-status`, `follow.prepare-pr-action`, `follow.confirm-pr-action`, `follow.check-pr-action`, `follow.request-reviewers`, `follow.browser-status` |
 | Overseer card | `follow.overseer-status`, `follow.overseer-start`, `follow.overseer-restart`, `follow.overseer-ask` |

@@ -20,6 +20,7 @@ import { contributeBrief } from "./client/brief";
 import { clientTimeZoneRpc, setOnboardingRpc } from "./shared/contracts";
 import { isCategory, writeCategory } from "./shared/settings-nav";
 import { openReportSheet, ReportSheetHost, setReportFallback } from "./client/report-issue";
+import { openRename, RenameHost } from "./client/rename";
 import { setReportError } from "./client/toast-store";
 import { reportSendRpc } from "./shared/contracts";
 
@@ -56,7 +57,7 @@ export default function contribute(host: PluginClientContext) {
   // and its host shows the request already waiting.
   setReportFallback(() => client.openScreen({ screenId: OVERVIEW }));
   setReportError((message, at) => openReportSheet({ kind: "bug", error: message, at }));
-  const reportHost = (props: PluginSurfaceProps | PluginWorkspacePanelProps) => <ReportSheetHost theme={props.theme} layout={props.layout} openAgent={props.navigation ? agentId => props.navigation!.openAgent({ agentId }) : undefined} />;
+  const reportHost = (props: PluginSurfaceProps | PluginWorkspacePanelProps) => <><ReportSheetHost theme={props.theme} layout={props.layout} openAgent={props.navigation ? agentId => props.navigation!.openAgent({ agentId }) : undefined} /><RenameHost theme={props.theme} compact={props.layout.compact} /></>;
   const Settings = (props: PluginSurfaceProps) => <><FollowSettings {...props} openSetup={openSetup} openReport={() => openReportSheet()} />{reportHost(props)}</>;
   const store = createLiveStore(client);
   const inbox = createInboxStore(host);
@@ -86,7 +87,7 @@ export default function contribute(host: PluginClientContext) {
   const openItem = (key: string, extra: { question?: string } = {}) => client.openScreen({ screenId: OVERVIEW, params: { item: key, ...(extra.question ? { question: extra.question } : {}) } });
   const homeDeps = { sources, openSettings, openPanel, openLog, openHome: openOverview, openItem, briefDeps };
   const Overview = (props: PluginScreenProps) => <><FollowHome {...props} deps={homeDeps} />{reportHost(props)}</>;
-  const Panel = (props: PluginWorkspacePanelProps) => <><FollowPanel {...props} openSettings={openSettings} openOverview={openOverview} openLarge={openLarge} inbox={inbox} live={store} briefDeps={briefDeps} />{reportHost(props)}</>;
+  const Panel = (props: PluginWorkspacePanelProps) => <><FollowPanel {...props} openSettings={openSettings} openOverview={openOverview} openLarge={openLarge} inbox={inbox} live={store} briefDeps={briefDeps} sources={sources} />{reportHost(props)}</>;
   const Large = (props: PluginScreenProps) => <FollowLarge {...props} openSettings={openSettings} openOverview={openOverview} live={store} />;
   const removers: (() => unknown)[] = [
     client.addScreen({ id: OVERVIEW, title: "Follow-up", Component: Overview }),
@@ -101,6 +102,9 @@ export default function contribute(host: PluginClientContext) {
       // Without a link yet, open the panel, where the spec link can be added.
       if (url) void openExternalUrl(url).catch(() => undefined); else openPanel(PANEL, { location: location() });
     } }),
+    client.addCommandCenterItem({ id: "follow-up-rename", title: "Follow-up: Rename this workspace with AI", icon: "Sparkles", keywords: ["rename", "name", "title", "AI", "suggest"], context: "workspace", onSelect({ workspace, openPanel }) {
+      // The dialog lives in Follow-up's surfaces: open the panel, which mounts a host, then ask.
+      openPanel(PANEL, { location: location() }); setTimeout(() => openRename({ workspaceId: workspace.id }), 0); } }),
     client.addCommandCenterItem({ id: "follow-up-overview", title: "Follow-up: Home", icon: "House", keywords: ["home", "workspaces", "needs you", "inbox", "attention", "brief", "overview"], context: "global", onSelect({ openScreen }) { openScreen({ screenId: OVERVIEW }); } }),
     // Opens Home and focuses its search field (also `/` while Home is on screen).
     client.addCommandCenterItem({ id: "follow-up-search", title: "Follow-up: Search", icon: "Search", keywords: ["search", "find", "workspace", "branch", "PR", "omnibox"], context: "global", onSelect({ openScreen }) { openScreen({ screenId: OVERVIEW }); setTimeout(() => extras.focusSearch(), 150); } }),

@@ -161,6 +161,8 @@ export const PARITY: Record<string, { tools: readonly string[]; note?: string } 
   "follow.brief-action": { tools: ["brief_action"] },
   "follow.answer-question": { tools: ["answer_question"] },
   "follow.workspace-about": { tools: ["workspace_about"] },
+  "follow.rename-status": { tools: ["ai_rename"], note: "The dry run shows the name now and the suggestion." },
+  "follow.rename-workspace": { tools: ["ai_rename"], note: "confirm=true renames; undo=true plans Undo." },
   "follow.linked-items": { tools: ["link_items"] },
   "follow.set-linked-items": { tools: ["set_linked_items", "link_item", "unlink_item"] },
   "follow.linked-index": { tools: ["link_items"], note: "Home's search over every workspace's links; an agent reads them per workspace with link_items." },

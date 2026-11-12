@@ -67,6 +67,28 @@ User-facing copy calls it **Summary** (the Settings → Agents role is "Summarie
 - **Agent tool:** `workspace_about`.
 - **UI:** `client/about.tsx`. Placement tests: `tests/about-placement.test.ts`.
 
+## Rename with AI
+
+A short workspace name from what Follow-up already stored, on Summaries' agent (Settings → Agents → Summaries, Claude
+Haiku by default). About $0.001 and 3 s a suggestion.
+
+- **Files.** `shared/rename.ts` has the name rules (`checkName`), the prompt and the Undo rules; `server/rename.ts`
+  has `RenameService`, `RenameStore` (`rename.json`) and `renameDaemon`; `client/rename.tsx` the dialog.
+- **Inputs, stored data only:** the name now, the branch, the goal, the Summary sentence, the spec name, PR titles,
+  linked items and the titles of the workspace's agents from the cached directory. Never a timeline, a transcript or a
+  `fetch_agent` (invariant `rename-never-wakes-an-agent`).
+- **The name.** Sentence case, verb first, at most 8 words and 60 characters, no quotes or branch shapes; a linked
+  Linear key may lead (`ABC-123: …`, not counted as a word), a key alone never. The prompt carries four real-shaped
+  examples. A reply that breaks a rule gets one retry with the reason, then an error; never more effort. The
+  developer's edits pass the same `checkName`.
+- **Limits.** 30 suggestions a day (each model run counts), separate from Summaries' cap. Refused while the governor
+  reports the VM critical.
+- **Renaming** sets Paseo's own workspace title (`set_workspace_title`) and records the old title in `rename.json`.
+  The toast after it has Undo for 10 s; for 24 h the dialog's Undo last rename and `ai_rename undo=true` restore it,
+  but only while the workspace still has the name the rename gave it (invariant `rename-is-always-undoable`).
+- **Entry points:** the row menu (Home, Follow-up's sidebar view, the panel's More button), ⌘K "Follow-up: Rename
+  this workspace with AI", and the agent tool `ai_rename` (planned). Tests: `tests/rename.test.ts`.
+
 ## The Overseer (beta)
 
 One long-lived agent the developer talks to about all workspaces. It routes asks and never does the work.

@@ -19,6 +19,8 @@ import { Button, Card, CardRow, FoldRow, IconButton, errorText, text, useNow, ty
 import { VersionMark } from "./updates";
 import { Reveal, Skeleton } from "./motion";
 import { WorkspaceHeader } from "./header";
+import { PanelMore } from "./panel-menu";
+import type { HomeSources } from "./home-data";
 import { NeedsYouCard, overviewKey, workspaceKey } from "./needs-you";
 import { browserKey, BROWSER_POLL_MS } from "./keys";
 import { useWorkspace } from "./workspace-data";
@@ -38,7 +40,7 @@ import { ToastHost, useQuestionOpener } from "./toasts";
 export { overviewKey, workspaceKey };
 
 export type PanelLinks = { openSettings: () => void; openOverview: () => void; openLarge?: (workspaceId: string) => void };
-type PanelProps = PluginWorkspacePanelProps & PanelLinks & { inbox?: InboxStore; live?: LiveStore; briefDeps?: BriefDeps };
+type PanelProps = PluginWorkspacePanelProps & PanelLinks & { inbox?: InboxStore; live?: LiveStore; briefDeps?: BriefDeps; sources?: HomeSources };
 
 /**
  * The workspace panel (explorer column, or a tab on the phone): this workspace only. A Home button on top, then
@@ -354,9 +356,11 @@ const folds = z.object({ open: z.array(z.string()) });
 /** Two columns from this content width: actions on the left, the stacks on the right. */
 export const WIDE_MIN = 820;
 
-export function WorkspaceView({ theme, layout, workspace: w, navigation, loadError, openSettings, openOverview, folds: { isOpen, toggle }, resize, large = false, top, ask }: PluginHostProps & {
+export function WorkspaceView({ theme, layout, workspace: w, navigation, loadError, openSettings, openOverview, folds: { isOpen, toggle }, resize, large = false, top, ask, sources }: PluginHostProps & {
   navigation?: PluginWorkspacePanelProps["navigation"]; workspace: Workspace; loadError?: string | null; openSettings: () => void; openOverview: () => void; top?: ReactNode; ask?: ReactNode;
   folds: Folds; resize: { icon: "Maximize2" | "Minimize2"; label: string; onPress: () => void } | null; large?: boolean;
+  /** Home's sources: the header's More menu (the row menu). Absent in the larger view. */
+  sources?: HomeSources;
 }) {
   const control = useRpc(controlRpc); const refresh = useRpc(refreshRpc); const browserRead = useRpc(browserStatusRpc);
   const cache = useQueryClient(); const toast = useToast();
@@ -379,7 +383,8 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const openPr = (key: string) => setSheet({ key, intent: null });
   // The expand button only appears while the panel is narrow; a wide panel or the larger view keeps its collapse button.
   const resizeShown = compact ? null : resize?.icon === "Maximize2" && wide ? null : resize;
-  const header = <WorkspaceHeader workspace={w} theme={theme} compact={compact} now={now} onSettings={openSettings} onRefresh={() => update.mutate()} refreshing={update.isPending} onAuto={next => auto.mutate(next)} autoPending={auto.isPending} notice={loadError ?? null} onOpenPr={openPr} resize={resizeShown} hideTitle={large} onHome={compact ? openOverview : undefined} />;
+  const header = <WorkspaceHeader workspace={w} theme={theme} compact={compact} now={now} onSettings={openSettings} onRefresh={() => update.mutate()} refreshing={update.isPending} onAuto={next => auto.mutate(next)} autoPending={auto.isPending} notice={loadError ?? null} onOpenPr={openPr} resize={resizeShown} hideTitle={large} onHome={compact ? openOverview : undefined}
+    more={sources ? <PanelMore w={w} sources={sources} theme={theme} compact={compact} openAgent={openAgent} openQuestion={setQuestion} /> : undefined} />;
   const shipped = <ShippedCard workspace={w} theme={theme} compact={compact} now={now} />;
   const needs = <NeedsYouCard workspace={w} theme={theme} compact={compact} now={now} actions={{ openAgent, openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion }} />;
   const agent = <AgentCard workspace={w} theme={theme} compact={compact} now={now} openAgent={openAgent} />;

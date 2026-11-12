@@ -34,6 +34,7 @@ export const ROW_ACTIONS = {
   copy_branch: { exempt: "Copies text to the clipboard and changes nothing." },
   copy_pr: { exempt: "Copies text to the clipboard and changes nothing." },
   rewrite_summary: { tool: "workspace_about" },
+  rename_ai: { tool: "ai_rename" },
   make_main: { tool: "make_main_agent" },
   stop_following: { tool: "set_follow_settings" },
 } as const satisfies Record<string, { tool: string; note?: string } | { exempt: string }>;
@@ -135,6 +136,7 @@ export function rowMenu(input: RowMenuInput): RowMenuSection[] {
   add("tidy", [
     !!branch && { key: "copy_branch", action: "copy_branch", label: "Copy branch name", icon: "GitBranch", arg: branch },
     links.length > 0 && { key: "copy_pr", action: "copy_pr", label: links.length === 1 ? "Copy PR link" : `Copy ${links.length} PR links`, icon: "Link", arg: links.join("\n") },
+    !!s.workspaceId && { key: "rename_ai", action: "rename_ai", label: "Rename with AI…", icon: "Sparkles" },
     !!w && { key: "rewrite_summary", action: "rewrite_summary", label: "Rewrite Summary", icon: "RefreshCw" },
     multiRootOther && { key: "make_main", action: "make_main", label: `Make ${s.agent} the main agent…`, icon: "Crown", arg: s.agentId!,
       confirm: `Make ${s.agent} the main agent of ${s.title}? It takes over the goal, tasks, questions and Done.` },
