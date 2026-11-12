@@ -93,7 +93,7 @@ export const INVARIANTS: Invariant[] = [
     why: "2026-11-12 (Q49 mock review): every row in the next message repeated \"sends at 14:32\" or \"sends after the agent's current turn\", and the header said it a third time. The Tasks strip carries when and why, straight from the send decision; a row in the message, repair or Auto task, says only Queued or Sent.",
     check(w, now) {
       const strip = messageStrip(w, now);
-      if (strip?.phase === "queued" && strip.reason !== sendDecision(w, now).reason) return `strip says "${strip.reason}" but the decision is "${sendDecision(w, now).reason}"`;
+      if (strip?.phase === "queued" && sendDecision(w, now).waitingOn !== "you" && strip.reason !== sendDecision(w, now).reason) return `strip says "${strip.reason}" but the decision is "${sendDecision(w, now).reason}"`;
       for (const r of repairRows(w).open) if ((r.state === "queued" && r.text !== "Queued") || (r.state === "sent" && r.text !== "Sent")) return `${r.task.key} row says "${r.text}"`;
       for (const o of w.obligations ?? []) {
         const d = obligationDelivery(w, o), s = taskStatus(o, w, w.taskAgents ?? {}, now);

@@ -45,6 +45,10 @@ export type MessageStrip = {
   batchId: string;
 };
 
+/** The strip's reason when the send waits on the developer: Needs you already says why and holds the Send. */
+export const WAITS_ON_YOU = "waits for your Send in Needs you";
+/** A task's title as a row shows it: the agent's instruction up to its first colon, without the PR it names (the chip carries it). */
+export const shortTitle = (t: Pick<Task, "title">) => t.title.split(": ")[0].replace(/ (on|for) [\w.-]+\/[\w.-]+#\d+/, "").replace(/[\w.-]+\/[\w.-]+#(\d+)/g, "#$1");
 const agent = (w: Pick<Workspace, "mainAgentTitle">) => w.mainAgentTitle?.trim() || "the main agent";
 const prOf = (t: Pick<Task, "target">) => `#${t.target.split("#")[1] ?? t.target}`;
 /** The message batches tasks ride in: never recovery, never the Done check (it isn't a task; it stays "Ready to finish"). */
@@ -58,7 +62,8 @@ export function messageStrip(w: Workspace, now: number): MessageStrip | null {
   const pending = pendingMessage(w);
   if (!pending) return null;
   const d = sendDecision(w, now, { batch: pending });
-  return { phase: "queued", to: agent(w), recipientId: w.mainAgentId, count: pending.tasks.length, reason: d.reason, at: d.eta, sendNow: d.canSendNow && d.waitingOn !== "you", batchId: pending.id };
+  // Say it once: when the send waits on the developer, Needs you carries the reason and the Send.
+  return { phase: "queued", to: agent(w), recipientId: w.mainAgentId, count: pending.tasks.length, reason: d.waitingOn === "you" ? WAITS_ON_YOU : d.reason, at: d.eta, sendNow: d.canSendNow && d.waitingOn !== "you", batchId: pending.id };
 }
 
 /** Where an agent's or the developer's own task stands in the message, if it rides one (Auto tasks). */

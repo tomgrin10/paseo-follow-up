@@ -8,7 +8,7 @@ import { blockedOnDeveloper, type Obligation, type Workspace } from "../shared/m
 import { followUpObligations } from "../shared/follow-up";
 import { taskSchedule, type TaskTrigger } from "../shared/task-trigger";
 import { controlRpc, sendRpc, taskTriggerRpc } from "../shared/contracts";
-import { messageStrip, repairRows, type MessageStrip, type RepairRow } from "../shared/task-rows";
+import { messageStrip, repairRows, shortTitle, type MessageStrip, type RepairRow } from "../shared/task-rows";
 import { SETTLE_REASON } from "../shared/send-decision";
 import { linkedQuestion, taskStatus, type TaskAgents, type TaskStatus } from "../shared/task-status";
 import { Button, Card, Chip, FoldRow, Switch, text, type Theme, SubmitScope } from "./kit";
@@ -223,7 +223,7 @@ function RepairTaskRow({ row, w, theme, compact, onOpen }: { row: RepairRow; w: 
 }
 
 /** The task's title without the PR it names: the chip carries the PR. */
-const repairTitle = (row: RepairRow) => row.task.title.replace(/ (on|for) [\w.-]+\/[\w.-]+#\d+/, "").replace(/[\w.-]+\/[\w.-]+#(\d+)/g, "#$1");
+const repairTitle = (row: RepairRow) => shortTitle(row.task);
 
 function RepairSheet({ row, w, strip, theme, compact, onClose }: { row: RepairRow | null; w: Workspace; strip: MessageStrip | null; theme: Theme; compact: boolean; onClose: () => void }) {
   const c = theme.colors; const t = text(c, compact);
