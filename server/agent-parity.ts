@@ -175,5 +175,8 @@ export const PARITY: Record<string, { tools: readonly string[]; note?: string } 
   "follow.client-time-zone": { exempt: "The device reports its timezone so an agent's tonight/tomorrow match the developer's clock; nothing for an agent to do." },
   "follow.retry-move": { tools: ["retry_move"] },
   "follow.dismiss-update-notice": { exempt: "Hides Home's update line for the person looking at it; updates_status already tells an agent what that line said." },
+  "follow.report-issue-targets": { tools: ["report_issue"], note: "The Report sheet's agent picker. An agent asked to report files it itself with report_issue; it has no one to hand the prompt to." },
+  "follow.report-issue-send": { tools: ["report_issue"], note: "The sheet hands the developer's words to an agent, which then uses report_issue; an agent reporting calls the tool directly." },
+  "follow.report-issue-link": { tools: ["report_issue"], note: "Open on GitHub with no agent to send to; report_issue's confirm returns the same prefilled link without GitHub auth." },
   "follow.whats-new-seen": { exempt: "Records that a person closed What's new on a device; an agent reading the notes isn't someone seeing the sheet." },
 };
