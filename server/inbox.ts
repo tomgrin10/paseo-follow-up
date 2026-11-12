@@ -15,40 +15,77 @@ import type { Question } from "../shared/questions";
 import { briefOrigin, briefQuestionsEvent, briefStep, pickBrief, shouldReopen, validPick, type Brief, type BriefEvent, type BriefKind, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
 import { OTHER_LABEL, answerTitle, isOther } from "../shared/questions";
 
+/**
+ * How long lastSeen alone may wait in memory (store-writes-only-real-changes). It only marks, at the next start,
+ * which finishes happened while the worker was down; stop flushes it, so only a crash leaves it this stale.
+ */
+export const LAST_SEEN_WRITE_MS = 300_000;
+
 /** The flag store: plugin-data/follow-up/inbox.json. A new file, so existing state never changes shape. */
 export class InboxStore {
   private tail: Promise<unknown> = Promise.resolve();
-  constructor(readonly directory: string) {}
+  /** What inbox.json holds (compact JSON), that text without lastSeen, and when it was written. */
+  private written: { text: string; rest: string; at: number } | null = null;
+  /** A state that differs from the file in lastSeen only, held until LAST_SEEN_WRITE_MS, a real change or flush(). */
+  private unsaved: InboxState | null = null;
+  /**
+   * What inbox.json holds, kept after the first read: this store is the file's only writer, so a mutation never
+   * re-reads it (2026-11-12: a 169 KB read and parse per mutation, several a minute live).
+   */
+  private saved: InboxState | null = null;
+  constructor(readonly directory: string, private now: () => number = Date.now) {}
   private get path() { return join(this.directory, "inbox.json"); }
   async read(): Promise<InboxState> {
-    try { return inboxStateSchema.parse(JSON.parse(await readFile(this.path, "utf8"))); }
+    if (this.unsaved) return structuredClone(this.unsaved);
+    if (this.saved) return structuredClone(this.saved);
+    let state: InboxState;
+    try { state = inboxStateSchema.parse(JSON.parse(await readFile(this.path, "utf8"))); }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptyInbox();
       throw new Error("The Needs-you inbox could not be read. Restore inbox.json or remove it to start fresh.");
     }
+    // What the file means, so an unchanged state isn't rewritten (a pretty-printed file is rewritten compact on its next change).
+    this.written ??= { text: JSON.stringify(state), rest: rest(state), at: this.now() };
+    this.saved = structuredClone(state);
+    return state;
   }
   async mutate<T>(work: (state: InboxState) => T | Promise<T>): Promise<T> {
     const next = this.tail.then(async () => {
       const state = await this.read();
       const value = await work(state);
-      await this.write(state);
+      await this.save(state);
       return structuredClone(value);
     });
     this.tail = next.catch(() => undefined);
     return next;
   }
   async snapshot(): Promise<InboxState> { await this.tail; return this.read(); }
-  private async write(state: InboxState): Promise<void> {
+  /** Writes a held lastSeen now; the worker's stop calls it. */
+  async flush(): Promise<void> {
+    await this.tail;
+    const pending = this.unsaved;
+    if (pending) await this.write(pending);
+  }
+  /** Writes real changes at once; nothing when unchanged; a lastSeen-only change at most every LAST_SEEN_WRITE_MS. */
+  private async save(state: InboxState): Promise<void> {
     inboxStateSchema.parse(state);
+    const text = JSON.stringify(state);
+    if (this.written?.text === text) { this.unsaved = null; return; }
+    if (this.written && this.written.rest === rest(state) && this.now() - this.written.at < LAST_SEEN_WRITE_MS) { this.unsaved = structuredClone(state); return; }
+    await this.write(state, text);
+  }
+  private async write(state: InboxState, text = JSON.stringify(state)): Promise<void> {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     const temporary = join(this.directory, `inbox.${randomUUID()}.tmp`);
     try {
       const file = await open(temporary, "wx", 0o600);
-      try { await file.writeFile(JSON.stringify(state, null, 2)); await file.sync(); } finally { await file.close(); }
+      try { await file.writeFile(text); await file.sync(); } finally { await file.close(); }
       await rename(temporary, this.path);
+      this.written = { text, rest: rest(state), at: this.now() }; this.unsaved = null; this.saved = structuredClone(state);
     } finally { await unlink(temporary).catch(() => undefined); }
   }
 }
+const rest = (state: InboxState) => JSON.stringify({ ...state, lastSeen: null });
 
 /**
  * F7: whether a completed turn adds nothing. needs_you kind=done is "nothing for the developer"; and while Paseo

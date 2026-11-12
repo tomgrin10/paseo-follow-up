@@ -4,19 +4,23 @@ What changed in each version of Follow-up, newest first. Follow-up shows the cur
 
 ## 2.0.0 (2026-11-11)
 
-Follow-up is a Paseo plugin that keeps track of every workspace your coding agents work in, until the work is merged and done. It shows you in one place which agents are waiting on you and why, sends failed checks and review comments back to the right agent by itself, and lets you answer an agent's question without opening its chat.
+Follow-up keeps track of every workspace your coding agents work in, until the work is merged and done. It shows you in one place which agents are waiting on you and why, sends failed checks and review comments back to the right agent by itself, and lets you answer an agent's question without opening its chat.
 
-![Follow-up Home: every workspace in one list, with the selected workspace's question on the right](https://raw.githubusercontent.com/tomgrin10/paseo-follow-up/main/docs/screenshots/follow-up-home.png)
+![Follow-up Home: every workspace in one list, grouped by what it needs from you, with the selected workspace's question on the right](https://raw.githubusercontent.com/tomgrin10/paseo-follow-up/d00dcb7da27c6ce7676dbf4c41050d45daf8c3cc/docs/screenshots/follow-up-notes-home.png#1120x680)
 
 ### One list of what needs you
 
-Home lists every workspace, grouped by what it needs from you. When an agent finishes, asks something, hits an error or waits for a permission, it moves to the top, under Needs you, and stays there until you mark it done or reply. You can act on it right there, without switching to its chat.
+Home lists every workspace, grouped by what it needs from you. When an agent finishes, asks something, hits an error or waits for a permission, it moves to the top, under Needs you, and stays there until you mark it done or reply. You act on it right there, without switching to its chat.
+
+### A panel on every workspace
+
+The Follow-up tab beside a workspace's chat shows how far its PRs are, what needs you and what's left to fix, with a bar for the PR stack, what the agent is doing now and the question it's waiting on.
+
+![The Follow-up panel on a workspace: 1 of 3 PRs merged, 3 need you, 1 to fix, a stack bar, Auto-send, and the agent's question with three lettered options, one recommended](https://raw.githubusercontent.com/tomgrin10/paseo-follow-up/d00dcb7da27c6ce7676dbf4c41050d45daf8c3cc/docs/screenshots/follow-up-notes-panel.png#320x910)
 
 ### Answer questions from anywhere
 
-When an agent needs a decision, it asks in a card with lettered options, its recommendation and room for your own answer. Answer on Home, in the workspace's side panel, in the bar above the agent's message box, or on your phone. The answer goes straight into the agent's chat.
-
-![A question card with three options, one recommended](https://raw.githubusercontent.com/tomgrin10/paseo-follow-up/main/docs/screenshots/follow-up-questions.png)
+When an agent needs a decision, it asks in a card with lettered options, its recommendation and room for your own answer. Answer it on Home, in the panel, in the bar above the agent's message box, or on your phone. The answer goes straight into the agent's chat.
 
 ### Fixes go back to the agent
 
@@ -24,15 +28,17 @@ When a PR's checks fail, it hits a merge conflict or a reviewer leaves comments,
 
 ### Context at a glance
 
-Each workspace gets a one-line description of what it's for, and a list of the Linear issues, Slack threads and docs it's about. Ask about any workspace from Home's search box, and an agent that knows all of them passes your ask to the one doing the work.
+Each workspace gets a one-line description of what it's for, and a list of the Linear issues, Slack threads and docs it's about. Ask about any workspace from Home's search box, and an agent that knows all of them passes your question to the one doing the work.
 
 ### Fits your setup
 
-Its small background jobs, like writing those descriptions, run on any model provider Paseo has. Agents can do anything you can click in Follow-up, after showing you a plan. It updates itself when nothing is busy and rolls back if an update fails.
+- Its small background jobs, like writing those descriptions, run on any model provider Paseo has.
+- Agents can do anything you can click in Follow-up, after showing you a plan.
+- It updates itself when nothing is busy, and rolls back if an update fails.
 
-### Credits
+---
 
-Thanks to [Progress](https://github.com/stevecastaneda/paseo-plugins/tree/main/progress) by Steve Castaneda and [Better Paseo](https://github.com/RoundRedDot/better-paseo) by RoundRedDot, which Follow-up borrows ideas from.
+Follow-up borrows ideas from [Progress](https://github.com/stevecastaneda/paseo-plugins/tree/main/progress) by Steve Castaneda and [Better Paseo](https://github.com/RoundRedDot/better-paseo) by RoundRedDot. Thank you to both.
 
 <details><summary>Full changelog since 1.0.1</summary>
 
@@ -48,7 +54,7 @@ Thanks to [Progress](https://github.com/stevecastaneda/paseo-plugins/tree/main/p
 - An action card has a Done button that tells the agent you did it. Done shows as in progress while you can still undo it.
 - Ctrl+Z (Cmd+Z on a Mac) undoes the last action while its Undo message shows, on any keyboard layout.
 - You can select and copy text in cards, the panel, Home, sheets and messages.
-- Follow-up's version shows at the top of Home and the panel. Tap it for Settings and the release notes.
+- Follow-up's version shows at the top of Home and the panel. Tap it for update status and the release notes.
 
 ### Questions and answers
 
@@ -62,13 +68,14 @@ Thanks to [Progress](https://github.com/stevecastaneda/paseo-plugins/tree/main/p
 
 ### Repairs and PRs
 
-- Follow every workspace and Send repairs automatically are on by default. On a fresh install, auto-send waits until you finish or skip setup.
+- Follow every workspace and Send repairs automatically are on by default, also after upgrading from 1.x. On a fresh install, auto-send waits until you finish or skip setup. Turn Follow every workspace off in Settings → Following.
 - Works with plain GitHub; Graphite is optional, chosen per repository. Settings → Following → Shipping PRs sets how each repository ships PRs.
 - On plain GitHub, the PR sheet follows GitHub's own review and check verdict.
 - Reviewers per repository, plus a default list, for Add reviewers.
 - A deploy Follow-up has seen stays counted until a rollback, and Done goes through with a note when Follow-up can't check what production serves.
 - Saving a spec link, a task's schedule or a reviewer pick closes at once and confirms with a short message.
 - An agent can mark a PR it merges itself, so Follow-up stops asking you to review or merge it. Work the agent is waiting on reads as Waiting, with what it waits on.
+- Follow-up checks GitHub with far fewer requests and no helper processes, and checks a workspace's PRs as soon as you open it.
 
 ### Agents and the main agent
 
@@ -104,6 +111,10 @@ Thanks to [Progress](https://github.com/stevecastaneda/paseo-plugins/tree/main/p
 - Follow-up updates itself: Install automatically, Tell me or Off, on the Stable or Beta channel. It installs only when no agent is busy and goes back to the old version if the new one fails.
 - What's new pops up only after a major update, once per device.
 - With reduced motion on, setup's steps show at once.
+- Installed from Paseo's plugin list? Follow-up moves to its new plugin id by itself there too, keeping your workspaces and settings.
+- What's new shows screenshots of what it describes.
+- Release notes and What's new open wider on large screens, so their screenshots are easier to read.
+- The release notes always show their scrollbar when there is more to read, and their titles name Follow-up.
 
 ### Phone and performance
 
@@ -128,5 +139,10 @@ Thanks to [Progress](https://github.com/stevecastaneda/paseo-plugins/tree/main/p
 - If your Claude or Codex settings file is a link, Follow-up updates the file it points to and keeps the link.
 - Error messages are as short as Paseo's own, with the full reason where Open takes you.
 - A workspace no longer shows Needs you for "Add reviewers" in a repository nobody is set up to review, and the flag goes away on its own once the PR merges or gets reviewers.
+- A failed update no longer shows as failed once a newer version of Follow-up is running.
+
+### More
+
+- Tapping a screenshot in the notes shows it larger inside Paseo instead of opening a browser tab.
 
 </details>

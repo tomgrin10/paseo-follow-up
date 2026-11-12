@@ -1,8 +1,10 @@
+import { settleWithin, type Deadline } from "./teardown";
 import { isRecovery, RECOVERY_LABEL, RECOVERY_BATCH_LABEL, RECOVERY_TITLE, MCP_SERVER, MCP_SERVERS } from "../shared/legacy";
 import { isOverseerAgent } from "../shared/overseer";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { readSharedJson } from "./shared-file";
 import { createRequire } from "node:module";
 import type { Workspace, Batch } from "../shared/model";
 import type { Gateway, Runtime } from "./engine";
@@ -74,7 +76,60 @@ export async function withDaemon<T>(work: (client: Daemon) => Promise<T>): Promi
   try { await client.connect(); return await work(client); }
   finally { clients.delete(client); await client.close().catch(() => undefined); }
 }
-export async function closeConnections(): Promise<void> { stopped = true; await Promise.allSettled([...clients].map(c => c.close())); }
+/**
+ * One daemon connection shared by everything a tick asks (one-daemon-connection-per-tick). 2026-11-12: PaseoGateway
+ * opened a WebSocket per workspace per tick through withDaemon (96 a minute live, each with its own hello and status).
+ * The connection closes after `idleMs` unused and is replaced after `maxMs`, so it never outlives a tick by much; it
+ * is in `clients`, so closeConnections closes it within the stop's deadline, and nothing opens after stop.
+ */
+export type SharedConnect = (<T>(work: (client: Daemon) => Promise<T>) => Promise<T>) & { idle(): Promise<void> };
+type Shared = { client: Promise<Daemon>; opened: number; users: number; lastUsed: number; retired: boolean };
+export function sharedDaemon(open: () => Promise<Daemon> = openDaemon, o: { idleMs?: number; maxMs?: number; now?: () => number } = {}): SharedConnect {
+  const idleMs = o.idleMs ?? 5_000, maxMs = o.maxMs ?? 60_000, now = o.now ?? Date.now;
+  let current: Shared | null = null;
+  const close = async (entry: Shared) => {
+    if (current === entry) current = null;
+    const client = await entry.client.catch(() => null);
+    if (client) { clients.delete(client); await client.close().catch(() => undefined); }
+  };
+  const settle = (entry: Shared) => { if (entry.users === 0 && (entry.retired || now() - entry.lastUsed >= idleMs)) void close(entry); };
+  const connect = (async <T>(work: (client: Daemon) => Promise<T>): Promise<T> => {
+    if (stopped) throw new Error("Follow-up is stopping");
+    if (current && now() - current.opened >= maxMs) { current.retired = true; const old = current; current = null; settle(old); }
+    if (!current) {
+      const client = open().then(c => { if (stopped) { void c.close().catch(() => undefined); throw new Error("Follow-up is stopping"); } clients.add(c); return c; });
+      const entry: Shared = { client, opened: now(), users: 0, lastUsed: now(), retired: false };
+      current = entry;
+      void client.catch(() => { if (current === entry) current = null; });
+    }
+    const entry = current;
+    entry.users++;
+    try {
+      const client = await entry.client;
+      try { return await work(client); }
+      catch (error) {
+        // A dropped connection isn't reused: the next call opens a fresh one.
+        const status = (client as unknown as { connectionState?: { status?: string } }).connectionState?.status;
+        if (status !== undefined && status !== "connected") entry.retired = true;
+        throw error;
+      }
+    } finally {
+      entry.users--; entry.lastUsed = now();
+      if (entry.users === 0) { if (entry.retired) settle(entry); else setTimeout(() => settle(entry), idleMs).unref?.(); }
+    }
+  }) as SharedConnect;
+  connect.idle = async () => { if (current) { const entry = current; if (entry.users === 0 && now() - entry.lastUsed >= idleMs) await close(entry); } };
+  return connect;
+}
+async function openDaemon(): Promise<Daemon> {
+  const module = require(["@getpaseo", "client", "internal", "daemon-client"].join("/")) as Module;
+  const client = new module.DaemonClient(await daemonOptions());
+  try { await client.connect(); return client; }
+  catch (error) { await client.close().catch(() => undefined); throw error; }
+}
+/** The worker's shared connection (PaseoGateway's default). */
+export const sharedConnect = sharedDaemon();
+export async function closeConnections(within?: Deadline): Promise<void> { stopped = true; await settleWithin(Promise.allSettled([...clients].map(c => c.close())), within); }
 
 export async function pages<T>(fetch: (cursor?: string) => Promise<{ entries: T[]; pageInfo: { hasMore: boolean; nextCursor: string | null } }>): Promise<T[]> {
   const rows: T[] = []; let cursor: string | undefined;
@@ -87,11 +142,13 @@ export async function pages<T>(fetch: (cursor?: string) => Promise<{ entries: T[
   throw new Error("Workspace observation exceeded page limit");
 }
 async function compactionPending(agentId: string): Promise<boolean> {
-  try {
-    const queue = JSON.parse(await readFile(join(paseoHome, "plugin-data/smart-session/compactions.json"), "utf8"));
-    if (queue.version !== 1 || !Array.isArray(queue.items)) throw new Error("Compaction queue unavailable");
-    return queue.items.some((item: any) => item.agentId === agentId && (["pending", "sending"].includes(item.state) || (item.state === "sent" && Date.now() - Date.parse(item.createdAt) < 300_000 && item.continueAfterCompaction && !item.resumedAt)));
-  } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }
+  // Read again only when the file changed (observe-reads-shared-files-once-per-tick); a missing queue is none.
+  const queue = await readSharedJson(join(paseoHome, "plugin-data/smart-session/compactions.json"), (raw: any) => {
+    if (raw?.version !== 1 || !Array.isArray(raw.items)) throw new Error("Compaction queue unavailable");
+    return raw as { items: any[] };
+  });
+  if (!queue) return false;
+  return queue.items.some((item: any) => item.agentId === agentId && (["pending", "sending"].includes(item.state) || (item.state === "sent" && Date.now() - Date.parse(item.createdAt) < 300_000 && item.continueAfterCompaction && !item.resumedAt)));
 }
 export async function sessionGuardPending(agentId: string): Promise<boolean> {
   const guard = new SessionGuard(join(paseoHome, "plugin-data/session-guard"));
@@ -173,7 +230,7 @@ export class PaseoGateway implements Gateway {
    * per workspace. Only entries past the cached cursor count, so a re-read overlap is never a second sighting.
    */
   linkRefs: ((batch: Map<string, LinkRef[]>) => void) | null = null;
-  constructor(private connect: typeof withDaemon = withDaemon, private guard = new SessionGuard(join(paseoHome, "plugin-data/session-guard")), private compacting = compactionPending, private histories = new HistoryCache(null), private now = Date.now, readonly directory = new DaemonDirectory(connect, now)) {}
+  constructor(private connect: typeof withDaemon = sharedConnect, private guard = new SessionGuard(join(paseoHome, "plugin-data/session-guard")), private compacting = compactionPending, private histories = new HistoryCache(null), private now = Date.now, readonly directory = new DaemonDirectory(connect, now)) {}
   private dirty = new Set<string>();
   /** Parent ids the directory doesn't list and Paseo didn't know either, until the directory next re-reads. */
   private unknownParents = new Map<string, Agent | null>();

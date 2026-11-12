@@ -1,7 +1,7 @@
 {
   "name": "paseo-follow-up",
   "private": false,
-  "version": "2.0.0-rc.0",
+  "version": "2.0.1-beta.0",
   "description": "A Paseo plugin that follows every workspace until the work is done: one Home for what needs you, questions you answer anywhere, and repairs that send themselves.",
   "type": "module",
   "files": [
@@ -30,6 +30,7 @@
     "preview": "node scripts/check-install.mjs --keep",
     "test:install": "node scripts/check-install.mjs && node scripts/check-wait.mjs",
     "test:move": "tsx scripts/check-move.mjs",
+    "test:move:registry": "tsx scripts/check-move.mjs --registry",
     "test:github-mode": "node scripts/check-github-mode.mjs",
     "test:native": "node scripts/check-native-tools.mjs --agents 10",
     "prepare": "node scripts/build.mjs",

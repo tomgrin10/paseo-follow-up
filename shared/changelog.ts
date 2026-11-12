@@ -8,7 +8,8 @@ import { compareVersions, parseVersion } from "./version";
  * Format: `## <version> (<yyyy-mm-dd>)` headings, newest first, each followed by `- ` bullets. Anything before the
  * first version heading is a preamble and is ignored. A bullet may wrap onto indented continuation lines. A `<details>`
  * line ends the notes: older history (the 1.1-1.4 betas) is archived below one, for people reading CHANGELOG.md, and
- * never shows in What's new. Image lines (`![…](…)`) are left out; the in-app sheet is text only.
+ * never shows in What's new. An image line (`![alt](url)`, alone on its line) becomes an image block, and a `---` line
+ * a rule: what follows it (the credits) reads as a quiet footnote.
  *
  * Release candidates of a major (2.0.0-rc.0) carry that major's own section (`## 2.0.0`): betas ship no notes, and the
  * rc is where 2.0's notes first reach people. `notesVersion` maps a version to the section it carries.
@@ -24,10 +25,27 @@ export const isMajorRc = (version: string): boolean => notesVersion(version) !==
 
 /**
  * A note's content in order. `items` keeps the bullets alone (what betas and older notes are); `blocks` adds a curated
- * section's `###` headings and paragraphs, so an announcement (2.0.0) reads as written. Inline markdown is reduced to
- * its text (links to their label, no backticks or bold); image lines are left out: the sheet is text only.
+ * section's `###` headings, paragraphs, images and rules, so an announcement (2.0.0) reads as written. Inline markdown
+ * is reduced to its text (links to their label, no backticks or bold).
+ *
+ * An image's `text` is its alt text and `url` where it loads from: the app may run on a phone away from the daemon's
+ * host, so images load by URL, pinned to a commit (tests/changelog.test.ts). A `#<width>x<height>` fragment on the URL
+ * is the image's size in CSS pixels (the PNG is shot at 2x or 3x of it): the sheet reserves that shape before the
+ * image loads, so nothing jumps, and never draws it wider than that width, so a screenshot is never larger than the UI
+ * it shows.
  */
-export type NoteBlock = { kind: "heading" | "text" | "bullet"; text: string };
+export type NoteBlock =
+  | { kind: "heading" | "text" | "bullet" | "rule"; text: string }
+  | { kind: "image"; text: string; url: string; aspect: number | null; width: number | null };
+const IMAGE = /^\s*!\[([^\]]*)\]\(\s*(\S+?)\s*\)\s*$/;
+/** An image line's block, or null. Only http(s) URLs: a relative path means nothing to the app. */
+export function imageBlock(line: string): NoteBlock | null {
+  const m = IMAGE.exec(line);
+  if (!m || !/^https?:\/\//.test(m[2]!)) return null;
+  const size = /#(\d+)x(\d+)$/.exec(m[2]!);
+  const aspect = size && +size[2]! > 0 ? +size[1]! / +size[2]! : null;
+  return { kind: "image", text: plainInline(m[1]!), url: m[2]!.replace(/#.*$/, ""), aspect, width: size && aspect ? +size[1]! : null };
+}
 export type ReleaseNote = { version: string; date: string | null; items: string[]; blocks?: NoteBlock[] };
 /** Inline markdown to plain text: `[label](url)` to label, no backticks, bold or italics markers. */
 export const plainInline = (s: string): string =>
@@ -54,11 +72,13 @@ export function parseChangelog(text: string): ReleaseNote[] {
     if (!line.trim()) { if (open?.kind === "text") open = null; continue; }
     const sub = /^#{3,6}\s+(.*)$/.exec(line);
     if (sub) { blocks.push({ kind: "heading", text: plainInline(sub[1]!) }); open = null; continue; }
-    if (/^\s*!\[[^\]]*\]\([^)]*\)\s*$/.test(line) || /^\s*<!--.*-->\s*$/.test(line) || /^\s*<\/?\w/.test(line)) { open = null; continue; }
+    if (IMAGE.test(line)) { const img = imageBlock(line); if (img) blocks.push(img); open = null; continue; }
+    if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { blocks.push({ kind: "rule", text: "" }); open = null; continue; }
+    if (/^\s*<!--.*-->\s*$/.test(line) || /^\s*<\/?\w/.test(line)) { open = null; continue; }
     const bullet = /^[-*]\s+(.*)$/.exec(line);
     if (bullet) {
       current.items.push(bullet[1]!.trim());
-      blocks.push(open = { kind: "bullet", text: plainInline(bullet[1]!) });
+      blocks.push(open = { kind: "bullet", text: plainInline(bullet[1]!) } as NoteBlock);
     } else if (/^\s+\S/.test(line) && open?.kind === "bullet") {
       current.items[current.items.length - 1] += ` ${line.trim()}`;
       open.text = `${open.text} ${plainInline(line)}`;
@@ -150,10 +170,17 @@ export const INSTALL_KINDS = ["npm", "git", "directory", "registry", "unknown"] 
 export type InstallKind = typeof INSTALL_KINDS[number];
 
 export const releaseNoteSchema = z.object({ version: z.string(), date: z.string().nullable(), items: z.array(z.string()),
-  blocks: z.array(z.object({ kind: z.enum(["heading", "text", "bullet"]), text: z.string() })).optional() });
+  blocks: z.array(z.union([
+    z.object({ kind: z.enum(["heading", "text", "bullet", "rule"]), text: z.string() }),
+    z.object({ kind: z.literal("image"), text: z.string(), url: z.string(), aspect: z.number().nullable(), width: z.number().nullable() }),
+  ])).optional() });
 /** `follow.release-notes`: this host's version record and every shipped note. Read once per app session; never polled. */
+/** The display name when the manifest can't be read; the manifest's `name` (paseo-plugin.json) is the source. */
+export const PLUGIN_NAME = "Follow-up";
 export const releaseNotesViewSchema = z.object({
   version: z.string(),
+  /** The plugin's display name from its manifest, for the notes' titles ("Follow-up release notes"). */
+  name: z.string().default(PLUGIN_NAME),
   installKind: z.enum(INSTALL_KINDS),
   /** The version Follow-up ran before this one on this host, null on a fresh install (What's new baseline). */
   previous: z.string().nullable(),

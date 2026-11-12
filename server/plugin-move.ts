@@ -21,7 +21,7 @@ export type MoveDeps = {
   busy(fresh: boolean): Promise<Busy[]>;
   /** Any installer alive: Follow-up's own, or a 1.x installer (#61) still watching its update to this version. */
   installerAlive(): Promise<boolean>;
-  spawn(job: Pick<MoveJob, "oldId" | "newId" | "version">): Promise<boolean>;
+  spawn(job: Pick<MoveJob, "oldId" | "newId" | "version" | "registry">): Promise<boolean>;
   now?: () => number;
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
@@ -79,7 +79,7 @@ export class PluginMove {
     if (decision.install) {
       const live = await this.d.busy(true);
       if (!live.length && !await this.d.installerAlive()) {
-        if (await this.d.spawn({ oldId: LEGACY_PLUGIN_ID, newId: PLUGIN_ID, version: me.version })) { await this.write({ since: file.since, lastBusyAt: file.lastBusyAt }); return; }
+        if (await this.d.spawn({ oldId: LEGACY_PLUGIN_ID, newId: PLUGIN_ID, version: me.version, registry: me.installKind === "registry" ? me.registry ?? null : null })) { await this.write({ since: file.since, lastBusyAt: file.lastBusyAt }); return; }
       }
       await this.write({ ...file, lastBusyAt: this.now() });
       this.wake(this.d.quietMs ?? QUIET_MS);
