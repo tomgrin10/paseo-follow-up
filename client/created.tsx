@@ -8,7 +8,7 @@ import { BRAND_ICONS } from "./brand-icons";
 import { mergedColor, tint } from "./theme";
 import { appVisible } from "./visibility";
 import { createdItemsRpc } from "../shared/contracts";
-import { CREATED_KIND, CREATED_VERSION, cardFollow, cardMeta, cardPresence, cardTitle, createdCard, createdCardSchema, type CreatedCard, type CreatedLive } from "../shared/created";
+import { CREATED_KIND, CREATED_VERSION, cardFollow, cardMeta, cardPresence, cardTitle, createdCardSchema, type CreatedCard, type CreatedLive } from "../shared/created";
 
 /** Live facts refresh this often while a card shows an open agent and the app is visible. */
 export const CREATED_POLL_MS = 20_000;
@@ -97,7 +97,7 @@ function CreatedCardView({ item, theme, layout, deps }: PluginTimelineItemProps<
     </View>
   </>;
   const frame = { flexDirection: "row" as const, gap: 10, alignItems: "flex-start" as const, borderRadius: 10, borderWidth: 1, borderColor: c.border, paddingHorizontal: compact ? 14 : 12, paddingVertical: compact ? 12 : 10, minHeight: compact ? 56 : undefined };
-  return <View style={{ width: "100%", maxWidth: compact ? undefined : 560, marginVertical: 4 }}>
+  return <View style={{ width: "100%", maxWidth: compact ? undefined : 560 }}>
     {opens
       ? <Pressable accessibilityRole="link" accessibilityLabel={label} accessibilityHint={card.kind === "agent" ? "Opens the agent" : "Opens the workspace"} onPress={open}
           style={state => ({ ...frame, backgroundColor: state.pressed || (state as { hovered?: boolean }).hovered ? c.surface2 : c.surface1 })}>{body}</Pressable>
@@ -107,22 +107,16 @@ function CreatedCardView({ item, theme, layout, deps }: PluginTimelineItemProps<
 
 /**
  * Paseo's create_agent / create_workspace calls become a card that opens what they made (docs/client.md). The card
- * replaces the raw call, so Paseo's "N tool calls" group no longer counts it, like the Done card. Hosts whose client
- * API has no timeline transformers or renderers get nothing registered and keep the plain row; a call whose result
- * carries no id keeps it too (`createdCard` returns null).
+ * replaces the raw call, so Paseo's "N tool calls" group no longer counts it, like the Done card. The transform lives
+ * in client/chat.tsx's one tool_call transformer (`createdCard`); this registers the renderer. Hosts whose client API
+ * has no timeline transformers or renderers get nothing registered and keep the plain row.
  */
-export function contributeCreated(client: PluginClientContext, deps: CreatedDeps): () => void {
+export const timelineSupported = (client: PluginClientContext) => {
   const api = client as Partial<Pick<PluginClientContext, "addTimelineTransformer" | "addTimelineRenderer">>;
-  if (typeof api.addTimelineTransformer !== "function" || typeof api.addTimelineRenderer !== "function") return () => {};
-  const removers = [
-    client.addTimelineTransformer({
-      id: "follow-created", query: { itemType: "tool_call" },
-      transform({ item }) {
-        const card = createdCard(item);
-        return card ? { items: [{ type: "plugin" as const, kind: CREATED_KIND, version: CREATED_VERSION, data: card }] } : undefined;
-      },
-    }),
-    client.addTimelineRenderer({ kind: CREATED_KIND, version: CREATED_VERSION, schema: createdCardSchema, Component: props => <CreatedCardView {...props} deps={deps} /> }),
-  ];
-  return () => { for (const r of removers) void r(); };
+  return typeof api.addTimelineTransformer === "function" && typeof api.addTimelineRenderer === "function";
+};
+export function contributeCreated(client: PluginClientContext, deps: CreatedDeps): () => void {
+  if (!timelineSupported(client)) return () => {};
+  const remove = client.addTimelineRenderer({ kind: CREATED_KIND, version: CREATED_VERSION, schema: createdCardSchema, Component: props => <CreatedCardView {...props} deps={deps} /> });
+  return () => { void remove(); };
 }

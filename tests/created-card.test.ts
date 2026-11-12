@@ -115,7 +115,15 @@ test("the Follow-up line says something only when there is something: a question
 test("the card is feature-detected, polls only while visible and open, and reads the cached directory", async () => {
   const root = join(import.meta.dirname, "..");
   const client = await readFile(join(root, "client/created.tsx"), "utf8");
-  assert.match(client, /typeof api\.addTimelineTransformer !== "function" \|\| typeof api\.addTimelineRenderer !== "function"\) return/);
+  assert.match(client, /typeof api\.addTimelineTransformer === "function" && typeof api\.addTimelineRenderer === "function"/);
+  assert.match(client, /if \(!timelineSupported\(client\)\) return/);
+  const chat = await readFile(join(root, "client/chat.tsx"), "utf8");
+  assert.match(chat, /if \(!timelineSupported\(client\)\) return/, "the chat transforms are feature-detected too");
+  // The host refuses a renderer kind outside [a-z0-9-] ("Invalid timeline renderer kind"), and that one throw stops
+  // Follow-up's whole client from loading. Every kind is a plain slug.
+  const kinds = [...(chat + client + await readFile(join(root, "shared/created.ts"), "utf8") + await readFile(join(root, "shared/brief.ts"), "utf8")).matchAll(/_KIND = "([^"]+)"/g)].map(m => m[1]);
+  assert.ok(kinds.length >= 4);
+  for (const kind of kinds) assert.match(kind!, /^[a-z][a-z0-9-]*$/, `timeline kind "${kind}"`);
   assert.match(client, /!== "closed" && appVisible\(\) \? CREATED_POLL_MS : false/);
   assert.match(client, /<Spinner /, "starting uses Follow-up's spinner");
   const server = await readFile(join(root, "index.server.ts"), "utf8");
