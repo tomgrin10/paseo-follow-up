@@ -1,0 +1,1 @@
+- When GitHub's API limit for your account runs out, pull requests keep their last known status instead of turning Unknown, and Follow-up waits for the limit to reset before asking again.
