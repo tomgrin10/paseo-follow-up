@@ -6,6 +6,8 @@ import type { TaskTrigger } from "../shared/task-trigger";
 
 type Update = {
   id?: string; title: string; status: Obligation["status"]; afterPrs?: string[]; evidence?: string;
+  /** While blocked: the developer's question. Kept across blocked updates that omit it; dropped when the task leaves blocked. */
+  ask?: string;
   dependencyStage?: "merged" | "deployed"; enable_follow_up?: boolean; communication?: Pick<Communication, "threadUrl" | "recipient"> & Partial<Communication>;
   trigger?: TaskTrigger | null;
   /** The calling agent (from the daemon, never an argument). */
@@ -19,6 +21,7 @@ export function updateObligation(w: Workspace, input: Update): Obligation {
   if (id && !existing) throw new Error("Obligation does not exist. Omit id to add one.");
   const afterPrs = input.afterPrs ?? existing?.afterPrs ?? [];
   const evidence = input.evidence ?? existing?.evidence ?? "";
+  const ask = status === "blocked" ? (input.ask ?? (existing?.status === "blocked" ? existing.ask : undefined))?.trim() || undefined : undefined;
   if (["done", "waived"].includes(status) && !(existing?.status === status ? evidence.trim() : input.evidence?.trim())) throw new Error("Completed or waived work requires result evidence.");
   if (afterPrs.some(key => !w.prs.some(p => p.key === key))) throw new Error("Register dependency PRs before referencing them.");
   if (lifecycleOnly({ title, afterPrs })) throw new Error("PR approval, merging and deployment belong in Pull requests. Record a concrete follow-up action such as verifying behavior after deployment, with afterPrs and dependencyStage=deployed.");
@@ -36,9 +39,11 @@ export function updateObligation(w: Workspace, input: Update): Obligation {
   if (worker) Object.assign(record, { workingAgentId: worker });
   if (existing) {
     const reopened = ["done", "waived", "blocked"].includes(existing.status) && ["pending", "waiting"].includes(status);
-    if (reopened || existing.title !== title || JSON.stringify(existing.afterPrs) !== JSON.stringify(afterPrs) || existing.dependencyStage !== stage || JSON.stringify(existing.communication) !== JSON.stringify(destination) || JSON.stringify(existing.trigger) !== JSON.stringify(trigger) || existing.enable_follow_up !== followUp) existing.revision++;
-    Object.assign(existing, record); return existing;
+    if (reopened || existing.title !== title || JSON.stringify(existing.afterPrs) !== JSON.stringify(afterPrs) || existing.dependencyStage !== stage || JSON.stringify(existing.communication) !== JSON.stringify(destination) || JSON.stringify(existing.trigger) !== JSON.stringify(trigger) || existing.enable_follow_up !== followUp || (existing.ask ?? "") !== (ask ?? "")) existing.revision++;
+    Object.assign(existing, record);
+    if (ask) existing.ask = ask; else delete existing.ask;
+    return existing;
   }
-  const added = { ...record, id: randomUUID(), revision: 0 };
+  const added = { ...record, ...(ask ? { ask } : {}), id: randomUUID(), revision: 0 };
   w.obligations.push(added); return added;
 }
