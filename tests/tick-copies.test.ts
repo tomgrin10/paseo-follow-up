@@ -126,3 +126,19 @@ test("a-tick-copies-the-state-at-most-once: a read that only moves observedAt wa
   now += 61_000; readAt = now; await engine.tick();
   assert.equal((await store.snapshot()).workspaces.find(w => w.id === "w0")!.prs[0].snapshot!.observedAt, new Date(now).toISOString(), "the full pass records it");
 });
+
+test("a-tick-copies-the-state-at-most-once: unchanged discovery rows don't copy the state again until OBSERVE_FULL_MS", async t => {
+  const store = await fleet(t, 10);
+  let now = clock;
+  const gateway: Gateway = { prepareRecovery: async () => ({ agentId: "r", contextPath: "/r.json" }), send: async () => {}, label: async () => {}, discover: async () => [],
+    observe: async () => ({ busy: false, reason: null, archived: false, mainLoaded: true, mainRecent: true }) };
+  const github = { observe: async (prs: { key: string; snapshot: unknown; error: string | null }[]) => new Map(prs.map(p => [p.key, { snapshot: p.snapshot, error: p.error }])) };
+  const engine = new Engine(store, github as never, gateway, () => now);
+  await engine.tick(); now += 15_000; await engine.tick();
+  let mutates = 0; const mutate = store.mutate.bind(store);
+  store.mutate = (work => { mutates++; return mutate(work); }) as typeof store.mutate;
+  now += 15_000; await engine.tick();
+  assert.equal(mutates, 0, "same rows, same state: no whole-state copy");
+  now += 61_000; await engine.tick();
+  assert.equal(mutates, 1, "the full pass applies discovery again");
+});

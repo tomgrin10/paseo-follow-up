@@ -141,6 +141,8 @@ export class Engine {
   wording: TaskWording = {};
   private runningBackground = false;
   /** Per workspace: the state object its last tick left, that tick's runtime (JSON) and when it last observed in full. */
+  /** The discovery rows (JSON) the last tick applied, and the state that write left. */
+  private lastDiscovery: { rows: string; state: State; at: number } | null = null;
   private observedPass = new Map<string, { w: Workspace; runtime: string; at: number }>();
   /** How many full per-workspace observation writes ran (tests). */
   observationWrites = 0;
@@ -200,10 +202,17 @@ export class Engine {
     if (this.stopped) return;
     if (this.gateway.discover) {
       const discovered = await this.gateway.discover(saved);
-      await this.store.mutate(state => {
+      // Discovery's write copies the whole state; skip it when the rows and the state are what the last one left
+      // (a-tick-copies-the-state-at-most-once), at most OBSERVE_FULL_MS (its time-based rules run then). The rows are
+      // ~150 small objects, so their JSON is cheap.
+      const rowsKey = JSON.stringify(discovered);
+      const lastDiscovery = this.lastDiscovery;
+      const fresh = !lastDiscovery || lastDiscovery.rows !== rowsKey || lastDiscovery.state !== saved || this.now() - lastDiscovery.at >= OBSERVE_FULL_MS;
+      if (fresh) await this.store.mutate(state => {
         applyDiscovery(state, discovered.filter(row => followsByDefault(state, row) || saved.workspaces.some(w => w.id === row.id && w.enable_tracking && !w.archived)), this.now());
         migrateActiveScope(state, new Set(discovered.filter(row => row.active !== false).map(row => row.id)));
       });
+      this.lastDiscovery = { rows: rowsKey, state: await this.store.snapshot(), at: fresh ? this.now() : lastDiscovery!.at };
     }
     // Dormant workspaces stay listed but cost nothing: no PR or agent observation until they're active again.
     const current = await this.store.snapshot();
@@ -297,7 +306,7 @@ export class Engine {
       let current = findWorkspace(await this.store.snapshot(), original.id);
       // Persist the holds that live only in this refresh, so every surface can say why repairs wait (shared/status.ts).
       const sendWait = this.autoSendsHeld() ? "setup" : runtime.mainLoaded === false || runtime.mainRecent === false ? "unloaded" : null;
-      if ((current.sendWait ?? null) !== sendWait) current = await this.store.mutateWorkspace(original.id, w => { w.sendWait = sendWait; return w; });
+      if ((current.sendWait ?? null) !== sendWait) { await this.store.mutateWorkspace(original.id, w => { w.sendWait = sendWait; }); current = findWorkspace(await this.store.snapshot(), original.id); }
       // The refresh's runtime state is persisted above, so this reads the same inputs as every surface's line
       // (shared/send-decision.ts). It never loads an idle agent (sendWait "unloaded") or sends the Done check.
       const pending = current.batches.find(b => b.state === "pending" && !isRecovery(b));
