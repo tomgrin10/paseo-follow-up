@@ -12,6 +12,7 @@ import { trackedGroup, type HomeModel } from "./home";
 import { freshPriorities, type Priority } from "./priorities";
 import { agentCard, automaticHold, batchView, holdSuperseded } from "./status";
 import { followUpObligations } from "./follow-up";
+import { claimsWorking, taskStatus } from "./task-status";
 import { cadence, movingReason, OBSERVATION_FRESH_MS, POLL_IDLE_MS, RUNNING_POLL_MS, TICK_MS } from "./poll";
 import { staleUpdatePhase, type UpdatePhase } from "./updates";
 
@@ -27,6 +28,15 @@ const inFlight = (w: Workspace) => w.batches.some(b => ["sending", "sent"].inclu
 const lines = (w: Workspace, now: number) => [liveLine(w, now).text, agentCard(w, now)?.line ?? "", batchView(w, now)?.line ?? "", ...needsYou(w, now).flatMap(i => [i.title, "blocker" in i ? i.blocker ?? "" : ""])];
 
 export const INVARIANTS: Invariant[] = [
+  {
+    id: "a-task-only-says-working-when-its-agent-is",
+    why: "2026-11-12: tasks read \"Agent working\" for days because the label mirrored the stored status=working, not any agent's live state. A task's line names its recorded agent and that agent's live state (shared/task-status.ts); with no live state known it says In progress, never working.",
+    check(w, now) {
+      // The record alone (no live agent states): nothing may claim an agent is working.
+      const claim = followUpObligations(w).map(o => taskStatus(o, w, {}, now)).find(s => claimsWorking(s.text) || s.tone === "working");
+      return claim ? `"${claim.text}" with no live working agent` : null;
+    },
+  },
   {
     id: "poll-backoff-never-hides-a-moving-pr",
     why: "2026-11-11 cpu-load §5: PR polling backs off for settled repositories. A PR that can still change without bumping what the last read saw (merge queue, merge when ready, unknown mergeability, an error) is read every tick, one with running checks every 30 s, and a backed-off PR is never older than the completion gate allows (shared/poll.ts).",
