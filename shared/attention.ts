@@ -1,4 +1,4 @@
-import { batchView, FINISH_LINE, stuckLine, unconfirmedRefs } from "./status";
+import { batchView, FINISH_LINE, perSnapshot, stuckLine, unconfirmedRefs } from "./status";
 import { blockedOnDeveloper, completionCheck, liveWorkingTask, statusKnown, summary, type Batch, type Pr, type Task, type Workspace, type Status } from "./model";
 import { idleReason, NO_PROGRESS_CAP } from "./send-decision";
 import { workingLine } from "./task-status";
@@ -138,7 +138,10 @@ export function asksForReviewers(pr: Pr, w: Pick<Workspace, "prActions">): boole
   return !pr.agentMerges && noReviewers(pr) && !pr.snapshot!.draft && configuredReviewers(pr.repo).length > 0 && !w.prActions.some(a => prActionBlocks(a, [pr.key]));
 }
 
-export function needsYou(w: Workspace, now = Date.now()): NeedItem[] {
+/** What needs the developer, most urgent first. Answered once per store snapshot and clock reading (perSnapshot); each caller gets its own array. */
+const needsYouOnce = perSnapshot(computeNeedsYou);
+export const needsYou = (w: Workspace, now = Date.now()): NeedItem[] => [...needsYouOnce(w, now)];
+function computeNeedsYou(w: Workspace, now: number): NeedItem[] {
   if (!w.enable_tracking || w.archived) return [];
   const items: NeedItem[] = [];
   const questions = w.questions ?? [];
