@@ -86,6 +86,12 @@ plays a scripted turn (timeline items, Follow-up RPCs, a permission) for a given
   root, refuses any of them outside it, and strips the session's `PASEO_*`, `CODEX_*`, Follow-up and Claude session
   variables. A hand-built `{ ...process.env, … }` once missed `CLAUDE_CONFIG_DIR`, and its daemon installed hooks into
   a real account. `tests/harness-env.test.ts` fails on a check script that builds its env by hand.
+- **No real external tools.** `harnessEnv` also puts failing stubs (exit 127) for `mcpproxy`, `gh`, `gt`, `gcloud`,
+  `claude` and `codex` on `PATH`, after any entries inside the root (a script's own fake `gh` or `mcpproxy` still
+  wins) and before the host's. A realistic scale run's ranker once ran the host's real `mcpproxy` (Linear and Slack
+  reads as the developer). The Paseo CLI stays real. Only `check-wait`, the opt-in live-model check, keeps the real
+  `claude` (`real: ["claude"]`); `tests/harness-env.test.ts` fails on any other opt-out or a tool that resolves outside
+  the root.
 - **Fake GitHub over HTTP, not only `gh`.** Follow-up reads GitHub over in-process HTTPS (`server/github-api.ts`); a
   fake `gh` on PATH only answers writes. A script whose daemon needs PR reads starts `fakeGithub({ dir, gh })` from
   `scripts/fake-github.mjs` and passes its `env` and `strip` to `harnessEnv`. The server answers each request with the
