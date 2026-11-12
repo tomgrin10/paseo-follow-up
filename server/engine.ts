@@ -473,7 +473,8 @@ export class Engine {
     // One rule for every task in a message (Q49): a task the developer keeps for themselves, or a condition that went
     // out NO_PROGRESS_CAP times unchanged, stays out of it; only that task waits, the rest go out.
     const manual = new Set(w.manualTasks ?? []);
-    const held: NonNullable<Workspace["heldTasks"]> = open.flatMap(t => t.kind === "completion" ? [] : manual.has(t.key) ? [{ task: t, held: "manual" as const }] : isCapped(w, t) ? [{ task: t, held: "capped" as const }] : []);
+    const held: NonNullable<Workspace["heldTasks"]> = [];
+    for (const t of open) if (t.kind !== "completion" && (manual.has(t.key) || isCapped(w, t))) held.push({ task: t, held: manual.has(t.key) ? "manual" : "capped" });
     const fresh = open.filter(t => !held.some(h => h.task === t));
     if (held.length || w.heldTasks?.length) w.heldTasks = held;
     let pending = w.batches.find(b => b.state === "pending" && !isRecovery(b));
