@@ -4,7 +4,7 @@ import { Text } from "./text";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { workspaceAboutRpc } from "../shared/contracts";
-import { shortFooter, summaryDisplay, summaryLine, type AboutView } from "../shared/about";
+import { pendingPollMs, shortFooter, summaryDisplay, summaryLine, type AboutView } from "../shared/about";
 import { errorText } from "../shared/errors";
 import { Button, text, type Theme } from "./kit";
 import { useReducedMotion } from "./motion";
@@ -21,10 +21,12 @@ export const aboutKey = (workspaceId: string) => ["follow-up", "about", workspac
 export function useSummary(workspaceId: string) {
   const read = useRpc(workspaceAboutRpc);
   const client = useQueryClient();
+  // Pending replies in a row: the next ask comes after 500 ms, backing off to 3 s (pendingPollMs). None while not pending.
+  const pendingRun = useRef(0);
   const query = useQuery({
     queryKey: aboutKey(workspaceId),
-    queryFn: () => read({ workspaceId, open: true }),
-    refetchInterval: q => (q.state.data as AboutView | undefined)?.status === "pending" ? 3000 : false,
+    queryFn: async () => { const v = await read({ workspaceId, open: true }); pendingRun.current = v.status === "pending" ? pendingRun.current + 1 : 0; return v; },
+    refetchInterval: q => (q.state.data as AboutView | undefined)?.status === "pending" ? pendingPollMs(pendingRun.current) : false,
     staleTime: 60_000,
   });
   const [rewriting, setRewriting] = useState(false);

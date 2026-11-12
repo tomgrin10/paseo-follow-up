@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { Inbox, type AgentInfo, type Directory } from "../server/inbox";
 import { UsageReader } from "../server/usage";
 import { AboutService, AboutStore, type AboutContext } from "../server/about";
+import { pendingPollMs } from "../shared/about";
 import { AiJobs } from "../server/ai-jobs";
 import { RpcTiming } from "../server/rpc-timing";
 import { newEntry, reduce } from "../shared/inbox";
@@ -56,19 +57,43 @@ test("usage's first read, with nothing cached and Smart Session silent, answers 
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 
-test("workspace-about on open replies pending while the history read hangs; the inputs are read after", async () => {
+async function aboutService(history: () => Promise<unknown>) {
   const dir = await mkdtemp(join(tmpdir(), "follow-about-ack-"));
+  const w = workspace({ id: "w1", title: "Vendor query", goal: "Speed up the vendor activity query (HER-1312)", mainAgentId: "a1", prs: [] });
+  const ctx = { history, subagents: async () => [] } as unknown as AboutContext;
+  const s = new AboutService({
+    store: new AboutStore(dir), jobs: new AiJobs({ runner: () => hang() }), sources: {} as never,
+    workspace: async id => id === w.id ? w : null, context: () => ctx, usage: async () => ({ accounts: [] }), now: () => NOW,
+  });
+  return { s, done: () => rm(dir, { recursive: true, force: true }) };
+}
+const linked = (v: { links: { key: string }[] }) => v.links.some(l => l.key === "HER-1312");
+
+test("workspace-about: a fast read of the inputs answers in full on the first reply, links included", async () => {
+  const { s, done } = await aboutService(async () => ({ first: [], items: [], source: "live" }));
   try {
-    const w = workspace({ id: "w1", title: "Vendor query", goal: "Speed up the vendor activity query (HER-1312)", mainAgentId: "a1", prs: [] });
-    const ctx: AboutContext = { history: () => hang(), subagents: () => hang() } as unknown as AboutContext;
-    const s = new AboutService({
-      store: new AboutStore(dir), jobs: new AiJobs({ runner: async () => ({ text: "{}", costUsd: 0, inputTokens: 0, outputTokens: 0 }) }), sources: {} as never,
-      workspace: async id => id === w.id ? w : null, context: () => ctx, usage: async () => ({ accounts: [] }), now: () => NOW,
-    });
+    const started = performance.now();
+    const first = await s.view("w1", { open: true });
+    assert.ok(performance.now() - started < ACK_MS);
+    assert.ok(linked(first), "the links are on the first reply when the read is fast");
+  } finally { await done(); }
+});
+
+test("workspace-about: a slow read replies pending within the budget, and the next poll carries the links", async () => {
+  let release!: () => void; const read = new Promise<void>(r => { release = r; });
+  const { s, done } = await aboutService(async () => { await read; return { first: [], items: [], source: "live" }; });
+  try {
     const r = await settleTime(() => s.view("w1", { open: true }), 5_000);
-    assert.ok(r.ms !== null && r.ms < ACK_MS, `workspace-about took ${r.ms === null ? "more than 5 s" : `${Math.round(r.ms)} ms`} with the history read hanging`);
-    assert.equal((await s.view("w1", { open: true })).status, "pending", "the client polls while the inputs are read");
-  } finally { await rm(dir, { recursive: true, force: true }); }
+    assert.ok(r.ms !== null && r.ms < ACK_MS, `workspace-about took ${r.ms === null ? "more than 5 s" : `${Math.round(r.ms)} ms`} with the history read slow`);
+    const first = await s.view("w1", { open: true });
+    assert.equal(first.status, "pending"); assert.equal(linked(first), false);
+    release(); await new Promise(r => setTimeout(r, 10));
+    assert.ok(linked(await s.view("w1", { open: true })), "the next poll carries the links");
+  } finally { await done(); }
+});
+
+test("workspace-about: while pending the client asks again after 500 ms, backing off to 3 s", () => {
+  assert.deepEqual([1, 2, 3, 4, 9].map(pendingPollMs), [500, 1_000, 2_000, 3_000, 3_000]);
 });
 
 const agent = (id: string, title: string): AgentInfo => ({ id, workspaceId: "w", parentAgentId: null, title, status: "idle", archivedAt: null, updatedAt: null, lastUserMessageAt: null, requiresAttention: false, attentionReason: null });
