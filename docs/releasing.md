@@ -50,10 +50,36 @@ stop.
    Then it publishes:
    - A version with a prerelease part (`1.4.0-beta.24`) goes to the `beta` dist-tag and must never be `latest`.
    - A stable version goes to `latest`.
-   - A GitHub release follows: a prerelease for betas.
+   - A GitHub release follows (a prerelease for any version with a prerelease part). **Every release page has
+     notes, in one format** from `scripts/release-body.mjs`: an install line on top, `## What's new`, then
+     `## Install` and the verification sentence. The notes are the version's curated CHANGELOG.md section for a
+     stable or a major's rc (the collapsed full changelog included), and for a beta the `changes/` fragments added
+     since the previous tag, as written. A beta only renders its fragments; they stay in `changes/` for the next
+     curated section. A beta with no fragments says "Maintenance release; no user-visible changes." The install
+     command appears once, at the top; `## Install` holds the update command, the dist-tag note, the Paseo floor and,
+     only when that run did those checks, the verification sentence. Preview a body
+     with `node scripts/release-body.mjs <tag>`. This is the GitHub page only: What's new in the app stays
+     major-only. `tests/release-body.test.ts` covers the format and that the workflow uses the renderer.
 5. Wait for registry integrity verification before saying the version is on npm. To retry a failed publish, run the
    workflow with `workflow_dispatch` and the existing tag. If a fix is needed, ship it as the next version rather
    than moving the tag.
+
+## Backfilling old release pages
+
+`node scripts/backfill-release-notes.mjs` puts every existing GitHub release page in the same format and writes the
+new bodies to a folder; it edits nothing. Read them, then run it again with `--apply` (`--only a,b` limits it,
+`--except v2.0.0-rc.0` leaves a page alone) to `gh release edit` each one.
+
+- Every page's current body is saved first (`<tag>.before.md` and `backup.json`), so any page can be restored.
+- A page someone wrote keeps its text verbatim under `## What's new`. Only the old install and check boilerplate
+  sentences go (the Paseo floor, the install id, install and update commands, the generic checks claim); the dry run
+  lists each one. The page's own `## ` headings move one level down.
+- A page with no notes gets the release's rendered notes: the betas up to 1.4.0-beta.29 use the per-beta sections
+  CHANGELOG.md had at `v1.4.0-beta.68`, later betas their fragments. The 1.1 to 1.3 betas and any release with
+  nothing at all say so in one line.
+- A backfilled page installs the exact version, uses that release's plugin id, and keeps the verification sentence
+  only when the tag's own publish workflow ran those checks, worded "before it was published to npm".
+- Running it again changes nothing: a page already in the format is left alone.
 
 ## Installing on a host
 
