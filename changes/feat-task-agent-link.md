@@ -1,1 +1,1 @@
-- A task says which agent is working on it and whether that agent is working, idle or closed, instead of a stale "Agent working". Open agent takes you to its chat.
+- A task says which agent is working on it and whether that agent is working, idle or closed, instead of a stale "Agent working". Open agent takes you to its chat. The workspace's status line, Home and the summary follow the same live state: a spinner only while that agent is really running.

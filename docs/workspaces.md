@@ -144,11 +144,14 @@ The invariants in `shared/status-invariants.ts` check these over a grid of state
   orchestrator's subagent; refused unless Paseo knows that agent). The record keeps it after the task moves on, and
   `workspace_status` shows it. The task row and the Task sheet never read "working" off the stored status: their line
   comes from `taskStatus` (`shared/task-status.ts`), which names that agent and its live state from
-  `follow.task-agents` (Paseo's agent directory, metadata only, so nothing is woken): "<title> working" (spinner),
+  `taskAgents` on the workspace (Paseo's agent directory, metadata only, so nothing is woken): "<title> working" (spinner),
   "<title> idle", or "<title> closed" ("Agent closed" when the name is unknown). With no agent recorded, or before the live state is known, it reads "In
   progress". While the agent is open (working or idle) the row has **Open agent** and the sheet an **Open agent**
-  button, which open its chat; a closed or archived agent is words only. The client asks `follow.task-agents` only
-  while some working task names an agent, every 20 s while the app is visible.
+  button, which open its chat; a closed or archived agent is words only. The engine refreshes `taskAgents` with
+  `runtimeBusy` on every tick (`Gateway.observe`, `taskAgentStates` in `server/tasks.ts`), so every surface that
+  derives "working" from a task reads the same states (invariant `a-task-only-says-working-when-its-agent-is`): the
+  panel's live line spins on a task only while its agent runs, and otherwise reads "<task> · <the row's words>"; the
+  summary says "Agent handling" (Home's Agent working) only for a running agent, never for the stored status alone.
 
 - **Writing tasks.** `update_obligation` writes tasks (`server/obligations.ts`). `afterPrs` uses `owner/repo#number`
   keys.

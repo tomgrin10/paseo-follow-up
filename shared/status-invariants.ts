@@ -6,7 +6,7 @@ import { answerMessage, duplicateOpenQuestions, isOther, parseAnswerMessage } fr
 import { shouldReopen, type Brief } from "./brief";
 import { flagHeadline } from "./headline";
 import type { InboxRow } from "./inbox";
-import { completionCheck, summary } from "./model";
+import { completionCheck, liveWorkingTask, summary } from "./model";
 import { asksForReviewers, liveLine, needsYou } from "./attention";
 import { trackedGroup, type HomeModel } from "./home";
 import { freshPriorities, type Priority } from "./priorities";
@@ -30,11 +30,22 @@ const lines = (w: Workspace, now: number) => [liveLine(w, now).text, agentCard(w
 export const INVARIANTS: Invariant[] = [
   {
     id: "a-task-only-says-working-when-its-agent-is",
-    why: "2026-11-12: tasks read \"Agent working\" for days because the label mirrored the stored status=working, not any agent's live state. A task's line names its recorded agent and that agent's live state (shared/task-status.ts); with no live state known it says In progress, never working.",
+    why: "2026-11-12: tasks read \"Agent working\" for days because the label mirrored the stored status=working, not any agent's live state; the panel's live line kept a spinner on a task whose agent had closed. Every surface that derives \"working\" from a task (the task row and sheet, the live line, the summary's Agent handling, Home's Agent working group) reads the recorded agent's live state (Workspace.taskAgents, shared/task-status.ts); with no live state known it says In progress, never working.",
     check(w, now) {
-      // The record alone (no live agent states): nothing may claim an agent is working.
-      const claim = followUpObligations(w).map(o => taskStatus(o, w, {}, now)).find(s => claimsWorking(s.text) || s.tone === "working");
-      return claim ? `"${claim.text}" with no live working agent` : null;
+      const agents = w.taskAgents ?? {};
+      const running = (id: string | undefined) => !!id && agents[id]?.state === "working";
+      // The task row and sheet, with the stored live states and with none.
+      for (const o of followUpObligations(w)) for (const known of [agents, {}]) {
+        const s = taskStatus(o, w, known, now);
+        if ((claimsWorking(s.text) || s.tone === "working") && !(known === agents && running(o.workingAgentId))) return `task row "${s.text}" with no live working agent`;
+      }
+      // Anything else that spins or says handling needs a running agent or Follow-up's own batch in flight.
+      const working = followUpObligations(w).find(o => o.status === "working" && !running(o.workingAgentId));
+      const live = liveLine(w, now);
+      if (working && live.icon === "spinner" && live.text.startsWith(working.title)) return `live line spins on "${working.title}" with no live working agent`;
+      if (summary(w, now).status === "handling" && !w.runtimeBusy && !inFlight(w) && !liveWorkingTask(w)) return `"${summary(w, now).label}: ${summary(w, now).reason}" with no live working agent`;
+      if (trackedGroup(w, now) === "running" && !w.runtimeBusy) return "Home's running group with no live working agent";
+      return null;
     },
   },
   {
@@ -108,7 +119,7 @@ export const INVARIANTS: Invariant[] = [
     check: (w, now) => {
       const live = liveLine(w, now);
       if (live.icon !== "spinner" || !/working/i.test(live.text)) return null;
-      return inFlight(w) || w.runtimeBusy || followUpObligations(w).some(o => o.status === "working") ? null : live.text;
+      return inFlight(w) || w.runtimeBusy || liveWorkingTask(w) ? null : live.text;
     },
   },
   {
