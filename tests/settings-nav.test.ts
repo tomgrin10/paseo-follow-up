@@ -11,7 +11,7 @@ const store = (): KeyValue & { data: Map<string, string> } => { const data = new
 test("categories: five, General first, in order; every setting the old page had is still rendered (moved, not dropped)", async () => {
   assert.deepEqual(SETTINGS_CATEGORIES.map(c => c.id), ["general", "following", "reviewers", "agents", "display"]);
   const source = (await Promise.all(["client/settings.tsx", "client/display.tsx", "client/reviewers.tsx", "client/agents.tsx", "client/job-rows.tsx"].map(f => readFile(f, "utf8")))).join("\n");
-  for (const label of ["Follow every workspace", "Send repairs automatically", "Rest workspaces after", "Follow this workspace", "While a question is open", "Sidebar item", "Workspace header button", "Composer pill",
+  for (const label of ["Follow every workspace", "Send tasks automatically", "Rest workspaces after", "Follow this workspace", "While a question is open", "Sidebar item", "Workspace header button", "Composer pill",
     "Needs-you inbox", "Flag merged and closed PRs", "Ask agents to state what they need", "Default for all repos", "Add reviewer", "Trust bypass agents"]) assert.ok(source.includes(label), label);
   assert.ok(/<PermissionsSection theme=\{theme\} \/>[\s\S]*<ProjectsFold/.test(source), "Permissions sits in Following, after Defaults");
   assert.ok(!/title="Permissions"[\s\S]{0,400}title="Needs-you inbox"|DisplaySections[\s\S]*<PermissionsSection/.test(source.slice(source.indexOf("export function DisplaySections"))), "and not under Inbox & display");
@@ -64,7 +64,7 @@ test("Workspaces: search by title words, exceptions first, capped with the rest 
   assert.deepEqual(workspaceRows(all, true, "seat BILLING").rows.map(x => x.title), ["Billing seat sync"]);
   assert.equal(workspacesSummary(all, true), "64 workspaces · 2 exceptions");
   assert.equal(workspacesSummary([w("x")], true), "1 workspace · no exceptions");
-  assert.equal(workspaceState(all[1]), "Not followed"); assert.equal(workspaceState(all[3]), "Followed · repairs wait for you · paused while resting");
+  assert.equal(workspaceState(all[1]), "Not followed"); assert.equal(workspaceState(all[3]), "Followed · tasks wait for you · paused while resting");
   assert.equal(projectsSummary([{ enable_default_tracking: true }, { enable_default_tracking: false }]), "1 of 2 followed");
   assert.equal(projectsSummary([{ enable_default_tracking: true }]), "All 1 followed");
   assert.equal(projectsOpenByDefault(6), true); assert.equal(projectsOpenByDefault(7), false);

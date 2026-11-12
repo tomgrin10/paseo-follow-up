@@ -171,7 +171,7 @@ export function needsYou(w: Workspace, now = Date.now()): NeedItem[] {
     items.push(completionCheck(b)
       ? { kind: "send", key: `send:${b.id}`, batchId: b.id, tasks: b.tasks.map(t => t.title), blocker: sendBlocker(w, b), title: FINISH_LINE, finish: true }
       : { kind: "send", key: `send:${b.id}`, batchId: b.id, tasks: b.tasks.map(t => t.title), blocker: sendBlocker(w, b),
-      title: `${plural(b.tasks.length, "repair")} ready for the main agent${w.enable_auto_sends ? " · it's idle, and Follow-up doesn't wake it" : ""}` });
+      title: `${plural(b.tasks.length, "task")} ready for the main agent${w.enable_auto_sends ? " · it's idle, and Follow-up doesn't wake it" : ""}` });
   }
   const blocking = (pr: Pr) => w.prActions.some(a => prActionBlocks(a, [pr.key]));
   for (const pr of stackOrder(w.prs)) {

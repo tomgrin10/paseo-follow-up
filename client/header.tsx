@@ -79,7 +79,7 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
       <Text numberOfLines={1} style={[t.small, { flexShrink: 1 }, stale ? { color: c.statusWarning } : null]}>{checked ? `Checked ${ago(checked, now)}${stale ? " · may be out of date" : ""}` : "Checks GitHub every 15s"}</Text>
       <IconButton icon="RefreshCw" label="Refresh PR status" onPress={onRefresh} theme={theme} compact={compact} disabled={refreshing} spinning={refreshing} />
       <View style={{ flex: 1 }} />
-      <Switch theme={theme} compact={compact} label="Auto-send" accessibilityLabel="Auto-send repairs" hint="Send repair batches to the main agent on its own when the agent is idle. Off means each batch waits for your click."
+      <Switch theme={theme} compact={compact} label="Auto-send" accessibilityLabel="Auto-send tasks" hint="Send tasks to the main agent on its own when the agent is idle. Off means each message waits for your click."
         value={w.enable_auto_sends} disabled={autoPending} onChange={onAuto} />
     </View>
   </>;

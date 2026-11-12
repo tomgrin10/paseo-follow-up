@@ -369,7 +369,7 @@ function DefaultsStep({ theme, compact, held }: { theme: Theme; compact: boolean
           </Pressable>}
         </View>}
       </SwitchRow>
-      <SwitchRow theme={theme} compact={compact} label="Send repairs automatically" value={data?.enable_auto_sends_default ?? null} disabled={change.isPending}
+      <SwitchRow theme={theme} compact={compact} label="Send tasks automatically" value={data?.enable_auto_sends_default ?? null} disabled={change.isPending}
         hint={`Review threads and failed checks go to the workspace's agent on their own, once it's idle. Off: each batch waits for your click.${followed ? ` Here it also applies to the ${followed} already followed.` : ""}${held ? " Nothing goes out on its own until you finish setup." : ""}`}
         onChange={v => change.mutate(autoSendWrites(v, list))} />
       <SwitchRow theme={theme} compact={compact} label="Trust bypass agents" value={trust}
