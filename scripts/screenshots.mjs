@@ -313,10 +313,13 @@ async function seed({ call, home }) {
   return { workspaces };
 }
 
-/** Waits for `n` more runs of the worker's inbox loop (its tick stamps inbox.json's lastSeen). */
+/**
+ * Waits for `n` more runs of the worker's inbox loop. The loop runs every 15 s of real time (a real setTimeout, not the
+ * crawling clock). It no longer stamps inbox.json each run: a lastSeen-only change is written at most every
+ * LAST_SEEN_WRITE_MS of the (fake, crawling) clock (store-writes-only-real-changes), so waiting on the file never ends.
+ */
 async function inboxTicks(home, n) {
-  const lastSeen = () => fs.readFile(join(home, "plugin-data/follow-up/inbox.json"), "utf8").then(t => JSON.parse(t).lastSeen ?? null, () => null);
-  for (let i = 0; i < n; i++) { const before = await lastSeen(); await until("an inbox tick", async () => (await lastSeen()) !== before, { tries: 160, every: 250 }); }
+  await new Promise(r => setTimeout(r, n * 15_000 + 2_000));
 }
 
 async function until(label, check, { tries = 120, every = 250 } = {}) {
@@ -630,7 +633,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
     ];
     const TALL = { width: DESKTOP.width, height: 1300 };
     for (const s of states) for (const theme of ["light", "dark"]) {
-      const settleOn = async page => { if (s.wait) await page.getByText(s.wait).first().waitFor(); else await page.waitForTimeout(1500); };
+      const settleOn = async page => { if (s.wait) await page.getByText(s.wait).filter({ visible: true }).first().waitFor(); else await page.waitForTimeout(1500); };
       await shoot(`ny-${s.state}-panel-${theme}`, TALL, theme, async page => {
         await page.setViewportSize(TALL);
         await openChat(page, s.title, s.prompt);

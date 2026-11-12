@@ -188,7 +188,8 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   // Context comes before the options so the developer reads why before choosing.
   const body = <View style={{ gap: dense ? 10 : 14 }}>
     <View style={{ gap: 6 }}>
-      <RichText selectable style={[t.body, { fontSize: dense ? 13 : 15, lineHeight: dense ? 19 : 22 }]}>{q.question}</RichText>
+      {/* Inline: the block's header carries the title, so the question reads as body text under it. */}
+      <RichText selectable style={inline ? text(c, compact).body : [t.body, { fontSize: dense ? 13 : 15, lineHeight: dense ? 19 : 22 }]}>{q.question}</RichText>
       {/* Phones: who asked and when is meta under the question, not a footnote after the buttons. */}
       {compact && !dense && !inline && <Text style={t.small}>Asked {ago(q.askedAt, now)} by {who(w, q.askedBy)}{q.taskId && !q.options.length ? " (blocked task)" : ""}</Text>}
       {open && !inline && <View style={{ flexDirection: "row", gap: 6 }}>

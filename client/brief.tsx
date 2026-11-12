@@ -447,7 +447,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
         <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
           <Icon name={ICON[b.kind]} size={14} color={tone} />
           <Text style={{ color: acts ? attention : tone, fontSize: 12, lineHeight: 16, fontWeight: "600" }}>{acts && !bare ? "Needs you" : flaggedAct && !bare ? "Later" : word(b.kind)}</Text>
-          {flaggedAct && <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{word(b.kind)}</Text>}
+          {flaggedAct && !bare && <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{word(b.kind)}</Text>}
           {multi && <Text accessibilityLiveRegion="polite" style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontVariant: ["tabular-nums"] }}>· {pickedCount(b, sendable)} of {askedDecisions(b).length} picked</Text>}
           <View style={{ flex: 1 }} />
           {/* In Later the age would read as a second clock beside "Later until"; the pane header keeps it. */}
@@ -459,7 +459,8 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
           </Pressable>}
         </View>
         {/* The ask role on phones (react-native-web ignores hitSlop, so the ⓘ above is a real 44 box); desktop keeps 19/26. */}
-        <RichText accessibilityRole="header" style={compact ? text(c, true).ask : { color: c.foreground, fontSize: 19, lineHeight: 26, fontWeight: "600", letterSpacing: -0.2 }}>{b.ask}</RichText>
+        {/* Bare: a section of the Needs you block, so the same size as its question titles. */}
+        <RichText accessibilityRole="header" style={compact || bare ? text(c, compact).ask : { color: c.foreground, fontSize: 19, lineHeight: 26, fontWeight: "600", letterSpacing: -0.2 }}>{b.ask}</RichText>
       </View>
 
       <BriefBody b={b} c={c} compact={compact} tight={tight} embedded={embedded} height={height} mode={multi ? "select" : "send"} picks={picks}
