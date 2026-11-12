@@ -226,7 +226,7 @@ function useSummaries(): Partial<Record<SettingsCategory, string | null>> {
  * data loads.
  */
 /** Settings → General → Help → Report a bug. */
-export const REPORT_HINT = "Or an idea, or feedback. An agent writes it up and shows you the issue before anything goes to GitHub.";
+export const REPORT_HINT = "Or an idea or feedback. An agent writes it up and shows you the issue before filing it.";
 
 export function FollowSettings({ theme, layout, openSetup, openReport }: PluginSurfaceProps & { openSetup?: (resume?: boolean) => void; openReport?: () => void }) {
   const compact = layout.compact;

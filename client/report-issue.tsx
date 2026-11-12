@@ -118,8 +118,8 @@ export function ReportSheet({ request, theme, layout, openAgent, onClose }: { re
     </Pressable>;
   const newLines: [string, string] = ["A new agent", `Starts in ${targets?.newAgentWorkspace?.title ?? "this workspace"}, with the default model`];
 
-  if (phase.kind === "sent") return <>
-    <Modal.Content contentContainerStyle={{ padding: pad, gap: 12 }}>
+  if (phase.kind === "sent") return <Modal.Content contentContainerStyle={{ padding: 0, gap: 0 }}>
+    <View style={{ padding: pad, gap: 12 }}>
       <View accessibilityRole="alert" style={{ flexDirection: "row", gap: 10, padding: 12, borderRadius: 8, backgroundColor: tint(c.statusSuccess, c) }}>
         <Icon name="CircleCheck" size={16} color={c.statusSuccess} />
         <View style={{ flex: 1 }}>
@@ -127,15 +127,15 @@ export function ReportSheet({ request, theme, layout, openAgent, onClose }: { re
           <Text style={t.body}>It'll ask you anything it needs in that chat, then show you the issue before filing it.</Text>
         </View>
       </View>
-    </Modal.Content>
+    </View>
     <Footer compact={compact} theme={theme}>
       <Button title="Close" kind="ghost" theme={theme} compact={compact} grow={compact} onPress={onClose} />
       {openAgent && <Button title="Open the chat" kind="primary" theme={theme} compact={compact} grow={compact} onPress={() => { openAgent(phase.agentId); onClose(); }} />}
     </Footer>
-  </>;
+  </Modal.Content>;
 
-  return <SubmitScope enabled={!empty && !!chosen && phase.kind !== "sending"} onSubmit={() => void submit()}>
-    <Modal.Content contentContainerStyle={{ padding: pad, gap: 12, opacity: phase.kind === "sending" ? 0.7 : 1 }}>
+  return <Modal.Content contentContainerStyle={{ padding: 0, gap: 0 }}><SubmitScope enabled={!empty && !!chosen && phase.kind !== "sending"} onSubmit={() => void submit()}>
+    <View style={{ padding: pad, gap: 12, opacity: phase.kind === "sending" ? 0.7 : 1 }}>
       <Segmented value={kind} onChange={setKind} theme={theme} compact={compact} />
       {error && <View style={{ flexDirection: "row", gap: 8, alignItems: "flex-start", backgroundColor: c.surface2, borderRadius: 8, padding: 10 }}>
         <Icon name="CircleAlert" size={16} color={c.statusDanger} />
@@ -145,7 +145,7 @@ export function ReportSheet({ request, theme, layout, openAgent, onClose }: { re
         </View>
         <Pressable accessibilityRole="button" accessibilityLabel="Remove the error" hitSlop={8} onPress={() => setError(null)}><Icon name="X" size={14} color={c.foregroundMuted} /></Pressable>
       </View>}
-      <TextInput value={words} onChangeText={setWords} multiline autoFocus placeholder={placeholder} placeholderTextColor={c.foregroundMuted} accessibilityLabel="Describe it"
+      <TextInput value={words} onChangeText={setWords} multiline autoFocus={!compact} placeholder={placeholder} placeholderTextColor={c.foregroundMuted} accessibilityLabel="Describe it"
         style={{ minHeight: compact ? 132 : 112, borderWidth: 1, borderColor: c.border, borderRadius: 8, backgroundColor: c.surface0, paddingHorizontal: 12, paddingVertical: 10, color: c.foreground, fontSize: compact ? 14 : 13, lineHeight: compact ? 20 : 18, textAlignVertical: "top" }} />
       {nowhere ? <View style={{ flexDirection: "row", gap: 10, padding: 12, borderRadius: 8, backgroundColor: c.surface2 }}>
         <Icon name="Info" size={14} color={c.foregroundMuted} />
@@ -169,13 +169,13 @@ export function ReportSheet({ request, theme, layout, openAgent, onClose }: { re
         <Text style={[t.meta, { flex: 1 }]}>{TRUST_LINE}</Text>
       </View>}
       {phase.kind === "failed" && <Text accessibilityRole="alert" style={{ color: c.statusDanger, fontSize: 12, lineHeight: 17 }}>Not sent: {phase.message}</Text>}
-    </Modal.Content>
+    </View>
     <Footer compact={compact} theme={theme}>
       <Button title="Cancel" kind="ghost" theme={theme} compact={compact} grow={compact} onPress={onClose} />
       {nowhere ? <Button title="Open on GitHub" icon="ExternalLink" kind="primary" theme={theme} compact={compact} grow={compact} disabled={empty} onPress={() => void openGithub()} />
         : <Button title={chosen === NEW ? "Start agent and send" : "Send to agent"} kind="primary" theme={theme} compact={compact} grow={compact} shortcut disabled={empty || !chosen} loading={phase.kind === "sending"} onPress={() => void submit()} />}
     </Footer>
-  </SubmitScope>;
+  </SubmitScope></Modal.Content>;
 }
 
 function Footer({ children, compact, theme }: { children: React.ReactNode; compact: boolean; theme: Theme }) {

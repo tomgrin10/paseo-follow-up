@@ -94,7 +94,7 @@ restores the console at stop.
 RPCs, for the sheet:
 
 - `follow.report-issue-targets`: who the sheet can send to. Directory metadata only, so nothing is loaded: the agent
-  in focus, then this workspace's agents (main first), then other main agents, at most 12; and the workspace a new
+  in focus, then this workspace's agents (main first), then other main agents (most recently used first), at most 6; and the workspace a new
   agent would start in.
 - `follow.report-issue-send`: sends the report prompt to the chosen agent, or starts a new one in that workspace with
   the prompt (the Overseer role's provider, the default model).
@@ -105,7 +105,7 @@ directly; it doesn't need to hand a prompt to itself), `follow.report-issue-link
 
 ## The UI: `client/report-issue.tsx`
 
-- **Settings → General → Help:** a **Report a bug** row ("Or an idea, or feedback…") with Report.
+- **Settings → General → Help:** a **Report a bug** row ("Or an idea or feedback…") with Report.
 - **Command Center:** "Follow-up: Report a bug, idea or feedback" (keywords bug, issue, feature request, feedback,
   GitHub).
 - **`/report-issue`** in an agent's composer: with words, they go straight to that agent; without, the sheet opens
