@@ -208,8 +208,9 @@ export class Github {
       // Per-PR backoff (shared/poll.ts): only due PRs go into this tick's queries; the rest reuse their last
       // observation. A read costs ~1 GraphQL point per PR, so reading fewer PRs is what saves the budget.
       const due = targets.filter(p => {
-        // Merged is final: a merged PR whose status is known is never read again, not even on a cold start.
-        if (p.snapshot?.state === "MERGED" && p.snapshot.complete && !p.error) return false;
+        // Merged is final: a merged PR whose status is known isn't read again, not even on a cold start. Only the
+        // developer's Refresh of its workspace (fresh) reads it.
+        if (p.snapshot?.state === "MERGED" && p.snapshot.complete && !p.error && !o.fresh?.has(p.key)) return false;
         if (tier === "critical") return false;
         if (!o.background || !this.last.has(p.key) || o.fresh?.has(p.key) || o.hot?.has(p.key)) return true;
         const last = this.last.get(p.key)!;

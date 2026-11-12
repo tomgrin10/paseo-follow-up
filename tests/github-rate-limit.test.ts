@@ -71,4 +71,6 @@ test("a merged PR whose status is known is never read again", async () => {
   assert.equal(graphql, 0, "no query for a merged PR, even on a cold start");
   assert.equal(result.get(merged.key)!.snapshot?.state, "MERGED");
   assert.equal(result.get(merged.key)!.error, null);
+  await github.observe([merged], { background: true, fresh: new Set([merged.key]) });
+  assert.equal(graphql, 1, "the developer's Refresh of its workspace still reads it");
 });
