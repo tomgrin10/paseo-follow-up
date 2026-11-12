@@ -4,6 +4,7 @@ import { useRpc, type PluginClientContext, type PluginTimelineItemProps } from "
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { Pressable, Text } from "./text";
 import { Spinner } from "./motion";
+import { RichText } from "./rich-text";
 import { BRAND_ICONS } from "./brand-icons";
 import { mergedColor, tint } from "./theme";
 import { appVisible } from "./visibility";
@@ -86,9 +87,9 @@ function CreatedCardView({ item, theme, layout, deps }: PluginTimelineItemProps<
       {!!meta && <Text numberOfLines={failed ? 2 : 1} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 17, marginTop: 1 }}>{meta}</Text>}
       {follow && <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 6 }}>
         {follow.question && <View style={{ flexDirection: "row", alignItems: "center", gap: 4, borderRadius: 5, paddingHorizontal: 6, paddingVertical: 1, backgroundColor: tint(c.statusWarning, c) }}>
-          <Icon name="CircleHelp" size={12} color={c.statusWarning} /><Text style={{ color: c.statusWarning, fontSize: 12, lineHeight: 17, fontVariant: ["tabular-nums"] }}>{follow.question.id}</Text>
+          <Icon name="CircleHelp" size={12} color={c.statusWarning} /><RichText plain style={{ color: c.statusWarning, fontSize: 12, lineHeight: 17, fontVariant: ["tabular-nums"] }}>{follow.question.id}</RichText>
         </View>}
-        {follow.question && <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, color: c.foregroundMuted, fontSize: 12, lineHeight: 17 }}>{follow.question.title}</Text>}
+        {follow.question && <RichText plain numberOfLines={1} style={{ flex: 1, minWidth: 0, color: c.foregroundMuted, fontSize: 12, lineHeight: 17 }}>{follow.question.title}</RichText>}
         {follow.chips.map(x => <View key={x.text} style={{ borderRadius: 5, paddingHorizontal: 6, paddingVertical: 1, backgroundColor: x.tone === "muted" ? c.surface2 : tint(chipColor(x.tone), c) }}>
           <Text style={{ color: chipColor(x.tone), fontSize: 12, lineHeight: 17, fontVariant: ["tabular-nums"] }}>{x.text}</Text>
         </View>)}
