@@ -13,7 +13,9 @@ export type Reason = typeof REASONS[number];
 export const reasonRank = (reason: Reason) => REASONS.indexOf(reason);
 
 const isoSchema = z.string();
-export const reasonEntrySchema = z.object({ reason: z.enum(REASONS), at: isoSchema, detail: z.string(), dedupeKey: z.string() });
+/** `title`: the PR's title on a PR-state flag (pr_closed, pr_merged). The headline reads it rather than `detail` ("#240 merged"),
+ * which only repeats the PR chip beside it (say-it-once). Flags stored before it existed have none. */
+export const reasonEntrySchema = z.object({ reason: z.enum(REASONS), at: isoSchema, detail: z.string(), dedupeKey: z.string(), title: z.string().optional() });
 export type ReasonEntry = z.infer<typeof reasonEntrySchema>;
 export const needsSchema = z.object({ reasons: z.array(reasonEntrySchema), since: isoSchema });
 export type Needs = z.infer<typeof needsSchema>;
@@ -104,7 +106,7 @@ export type InboxEvent =
   | { type: "reviewers"; dedupeKey: string; detail: string; prKey: string; url: string | null; names: string[] }
   /** A registered PR left OPEN. `merged`: it merged (else it closed unmerged). `quiet`: the agent merged it itself
    * (register_pr agentMerges), so it wakes a "until this PR merges" snooze but flags nobody. Older events: neither. */
-  | { type: "pr_closed"; dedupeKey: string; detail: string; prKey: string; merged?: boolean; quiet?: boolean }
+  | { type: "pr_closed"; dedupeKey: string; detail: string; prKey: string; merged?: boolean; quiet?: boolean; title?: string }
   /** The outside facts (FACT_REASONS) that still hold for this agent's PRs: a flag whose fact ended is withdrawn. */
   | { type: "facts_live"; live: Reason[] }
   | { type: "sign_off"; seq?: number; muteTurn?: boolean }
@@ -136,9 +138,9 @@ export class StaleSignOff extends Error {
   constructor() { super("This agent changed since you looked. Its newest flag is still showing."); }
 }
 
-function add(e: Entry, reason: Reason, detail: string, dedupeKey: string, at: string) {
+function add(e: Entry, reason: Reason, detail: string, dedupeKey: string, at: string, title?: string) {
   const reasons = (e.needs?.reasons ?? []).filter(r => r.dedupeKey !== dedupeKey);
-  reasons.push({ reason, at, detail, dedupeKey });
+  reasons.push({ reason, at, detail, dedupeKey, ...(title ? { title } : {}) });
   e.needs = { reasons, since: e.needs?.since ?? at };
 }
 function seen(e: Entry, key: string): boolean {
@@ -199,9 +201,9 @@ export function withoutRunState(needs: Needs | null, before?: string): Needs | n
 export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
   const e: Entry = structuredClone(prev);
   const before = JSON.stringify(e);
-  const flag = (reason: Reason, detail: string, dedupeKey: string) => {
+  const flag = (reason: Reason, detail: string, dedupeKey: string, title?: string) => {
     if (e.goneAt) return;
-    add(e, reason, detail, dedupeKey, now);
+    add(e, reason, detail, dedupeKey, now, title);
     e.lastEventAt = now;
     const wake = BREAKS.includes(reason) || e.snooze?.until === "next-event";
     if (e.snooze && wake) e.snooze = null;
@@ -248,7 +250,7 @@ export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
         if (e.snooze?.until === `pr:${event.prKey}`) e.snooze = null;
         // pr-label-matches-state: a merge flags as merged; a-merge-the-agent-made-never-flags-the-developer: quiet flags nothing.
         const merged = event.merged ?? / merged$/.test(event.detail);
-        if (!event.quiet) flag(merged ? "pr_merged" : "pr_closed", event.detail, merged ? "pr_merged" : "pr_closed");
+        if (!event.quiet) flag(merged ? "pr_merged" : "pr_closed", event.detail, merged ? "pr_merged" : "pr_closed", event.title);
       }
       break;
     case "sign_off": { // #13
@@ -493,9 +495,9 @@ export function rowTitle(row: Pick<InboxRow, "title" | "workspaceTitle" | "multi
  * the worker (server/inbox.ts followUpEvents) and the status invariants agree: a merge is `merged`, and a merge the
  * agent made itself (register_pr agentMerges, which promises the developer is never asked about it) is `quiet`.
  */
-export function prEndEvent(pr: { key: string; number: number; agentMerges?: boolean; snapshot: { state: string; complete: boolean } | null }): Extract<InboxEvent, { type: "pr_closed" }> | null {
+export function prEndEvent(pr: { key: string; number: number; agentMerges?: boolean; snapshot: { state: string; complete: boolean; title?: string } | null }): Extract<InboxEvent, { type: "pr_closed" }> | null {
   const s = pr.snapshot;
   if (!s?.complete || (s.state !== "MERGED" && s.state !== "CLOSED")) return null;
   const merged = s.state === "MERGED";
-  return { type: "pr_closed", dedupeKey: `${pr.key}:${s.state}`, detail: `#${pr.number} ${merged ? "merged" : "closed"}`, prKey: pr.key, merged, ...(merged && pr.agentMerges ? { quiet: true } : {}) };
+  return { type: "pr_closed", dedupeKey: `${pr.key}:${s.state}`, detail: `#${pr.number} ${merged ? "merged" : "closed"}`, prKey: pr.key, merged, ...(s.title ? { title: s.title } : {}), ...(merged && pr.agentMerges ? { quiet: true } : {}) };
 }
