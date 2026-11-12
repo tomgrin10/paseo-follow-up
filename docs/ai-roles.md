@@ -63,7 +63,8 @@ User-facing copy calls it **Summary** (the Settings → Agents role is "Summarie
   - Never while a Claude account is above 85 % of a limit, or while the governor holds background work.
   - Opening the section (`follow.workspace-about` with `open`) starts one when the cached overview is older than
     `ABOUT_TTL_MS` (1 h) and its inputs changed; `refresh` always does. A failed attempt retries after
-    `ABOUT_RETRY_MS` (10 min).
+    `ABOUT_RETRY_MS` (10 min). Its inputs (history, subagents) are read after the reply, one read per workspace,
+    and the view says pending meanwhile, so the client polls; the agent tool's `wait` waits for them.
 - **Agent tool:** `workspace_about`.
 - **UI:** `client/about.tsx`. Placement tests: `tests/about-placement.test.ts`.
 
