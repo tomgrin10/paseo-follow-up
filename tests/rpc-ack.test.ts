@@ -30,9 +30,6 @@ const INPUT: Record<string, unknown> = {
 const MUST_SUCCEED = new Set(Object.keys(INPUT));
 
 const EXEMPT: Record<string, string> = {
-  // Needs you. Reads and row moves; no typed input. Follow-up: serve the last directory snapshot instead of waiting.
-  "follow.inbox-list": "The Needs-you list refreshes Paseo's agent directory (cached 3 s) before it answers; read-only, the panel keeps its last list.",
-  "follow.inbox-act": "Sign-off, Later and Undo clear Paseo's attention flag before replying; a timeout leaves the row as it was, one click redoes it.",
   // Workspaces and PRs. Nothing changes until the developer confirms, or the change is GitHub's own request.
   "follow.send": "Sending a repair batch first asks Paseo whether the agents are busy, then dispatches; the batch stays queued on a timeout.",
   "follow.prepare-pr-action": "A merge or reviewer plan reads the PR's live state from GitHub; nothing changes until confirm.",
@@ -51,7 +48,6 @@ const EXEMPT: Record<string, string> = {
   "follow.set-agent-setting": "Saves the role's agent, then returns the view with Paseo's provider catalog.",
   "follow.set-wait": "Saves the switch, then returns the Agents view with Paseo's provider catalog.",
   "follow.onboarding-checks": "Getting started's readiness checks run gh and ask Paseo; read-only.",
-  "follow.usage": "The usage meters read the providers' usage when the governor allows extras; read-only.",
   "follow.updates": "Settings → General asks Paseo for this install's source and npm for a newer version; read-only.",
   "follow.set-updates": "Saves the update mode, then returns the view above.",
   "follow.dismiss-update-notice": "Dismisses the notice, then returns the view above.",

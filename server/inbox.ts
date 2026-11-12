@@ -200,6 +200,10 @@ export function pauseSource(p: GuardPause): { note: string | null; resetsAt: str
 const ORIGINS = 500;
 export type Root = { rootId: string; subagent: AgentInfo | null; delegated: boolean };
 const DAY = 24 * 3_600_000;
+/** A cached directory snapshot younger than this answers a list without asking Paseo again. */
+const LIST_FRESH_MS = 3_000;
+/** The longest one directory call (list agents, clear the unread dot) may stay in flight. */
+const DIRECTORY_MS = 20_000;
 const stub = (a: { id: string; workspaceId: string | null; parentAgentId?: string | null }): AgentInfo => ({ id: a.id, workspaceId: a.workspaceId, parentAgentId: a.parentAgentId ?? null, title: null, status: "", archivedAt: null, updatedAt: null, lastUserMessageAt: null, requiresAttention: false, attentionReason: null });
 const one = (text: string, max = 140) => { const line = text.replace(/\s+/g, " ").trim(); return line.length > max ? `${line.slice(0, max - 1)}…` : line; };
 const lastLine = (text: string) => one(text.split(/\n+/).map(l => l.trim()).filter(Boolean).at(-1) ?? "");
@@ -212,6 +216,15 @@ export class Inbox {
   private resolved = new Set<string>();
   private waiting = new Map<string, string>();
   private cache: { at: number; agents: AgentInfo[]; workspaces: { id: string; name: string }[] } | null = null;
+  private directoryRefresh: Promise<void> | null = null;
+  /** How long the first list (no snapshot yet) waits for Paseo's directory before answering "still loading". */
+  firstListMs = 300;
+  /** One directory read at a time, capped so a silent daemon can't keep it in flight forever. */
+  refreshDirectory(): Promise<void> {
+    return this.directoryRefresh ??= withDeadline(Promise.all([this.o.directory.agents(), this.o.directory.workspaces()]), DIRECTORY_MS, "Paseo didn't list its agents in time")
+      .then(([agents, workspaces]) => { this.cache = { at: this.now(), agents, workspaces }; })
+      .finally(() => { this.directoryRefresh = null; });
+  }
   private hookState: string;
   constructor(directory: string, private o: InboxOptions) { this.store = new InboxStore(directory); this.hookState = join(directory, "hook-state"); }
   private now() { return this.o.now?.() ?? Date.now(); }
@@ -864,9 +877,12 @@ export class Inbox {
         }
       }
     });
-    await this.flush(appends);
-    // D8, one way: signing off also clears Paseo's own unread dot.
-    if (cleared.length) await this.o.directory.clearAttention(cleared).catch(() => undefined);
+    // After the reply (tests/rpc-ack.test.ts): the rows moved in our store above. The chat cards follow, and (D8, one
+    // way) signing off clears Paseo's own unread dot, when the daemon answers.
+    this.after(async () => {
+      await this.flush(appends);
+      if (cleared.length) await withDeadline(this.o.directory.clearAttention(cleared), DIRECTORY_MS, "Paseo didn't clear the unread dot in time").catch(() => undefined);
+    });
     return { results };
   }
 
@@ -910,10 +926,11 @@ export class Inbox {
     const overseerId = await this.o.overseer?.().catch(() => null) ?? null;
     if (!enabled) return { enabled, rows: [], unsorted: null, firstRun: false, batchUndo: null, signOffs: state.signOffs, briefStats, overseer: null };
     const now = this.now();
-    if (!this.cache || now - this.cache.at > 3_000) {
-      const [agents, workspaces] = await Promise.all([this.o.directory.agents(), this.o.directory.workspaces()]);
-      this.cache = { at: now, agents, workspaces };
-    }
+    // Stale-while-revalidate: answer from the last directory snapshot and refresh after; the client polls this list, so
+    // the next poll carries the fresh one. Only the very first list waits, briefly (tests/rpc-ack.test.ts).
+    if (!this.cache || now - this.cache.at > LIST_FRESH_MS) void this.refreshDirectory().catch(() => undefined);
+    if (!this.cache) await Promise.race([this.directoryRefresh?.catch(() => undefined), new Promise(r => setTimeout(r, this.firstListMs))]);
+    if (!this.cache) throw new Error("Paseo's agent list is still loading");
     const { agents, workspaces } = this.cache;
     const byId = new Map(agents.map(a => [a.id, a]));
     const names = new Map(workspaces.map(w => [w.id, w.name]));
