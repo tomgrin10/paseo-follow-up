@@ -115,7 +115,8 @@ export class Engine {
     // it runs after a background tick in flight instead of being folded into it.
     if (this.running) return this.runningBackground && (!o.background || o.affected) ? this.running.then(() => this.tick(o)) : this.running;
     this.runningBackground = !!o.background;
-    this.running = this.run(o).catch(() => { this.error = "Follow-up refresh failed. Saved work is intact; refresh will retry."; }).finally(() => { this.running = null; });
+    // One tick saves and derives once (a-tick-copies-the-state-at-most-once, Store.batch).
+    this.running = this.store.batch(() => this.run(o)).catch(() => { this.error = "Follow-up refresh failed. Saved work is intact; refresh will retry."; }).finally(() => { this.running = null; });
     return this.running;
   }
   /** Reads one workspace's PRs fresh and records what came back, nothing else (a Refresh of a dormant workspace). */
@@ -220,12 +221,12 @@ export class Engine {
       if (pruned.length) await this.archive(original.id, pruned).catch(() => undefined);
       for (const b of (await this.store.snapshot()).workspaces.find(w => w.id === original.id)!.batches.filter(b => isRecovery(b) && b.state === "sent")) {
         const status = await this.gateway.recoveryRuntime?.(original, b).catch(() => ({ busy: true, reason: "Recovery status unavailable" }));
-        if (status?.busy) await this.store.mutate(state => {
-          const current = findWorkspace(state, original.id).batches.find(x => x.id === b.id)!;
+        if (status?.busy) await this.store.mutateWorkspace(original.id, w => {
+          const current = w.batches.find(x => x.id === b.id)!;
           if (current.state === "sent") current.activityAt = new Date(this.now()).toISOString();
         });
-        if (!status?.busy && this.now() - Date.parse(b.activityAt ?? b.sentAt!) > 120_000) await this.store.mutate(state => {
-          const current = findWorkspace(state, original.id).batches.find(x => x.id === b.id)!;
+        if (!status?.busy && this.now() - Date.parse(b.activityAt ?? b.sentAt!) > 120_000) await this.store.mutateWorkspace(original.id, w => {
+          const current = w.batches.find(x => x.id === b.id)!;
           if (current.state !== "sent") return;
           current.state = "blocked"; current.result = current.acknowledgmentError ? `Acknowledgment was refused for agent ${current.acknowledgmentError.agentId}: ${current.acknowledgmentError.error}` : status?.reason ?? "Recovery finished without an accepted acknowledgment. Check its result before retrying.";
         });
@@ -234,7 +235,7 @@ export class Engine {
       let current = findWorkspace(await this.store.snapshot(), original.id);
       // Persist the holds that live only in this refresh, so every surface can say why repairs wait (shared/status.ts).
       const sendWait = this.autoSendsHeld() ? "setup" : runtime.mainLoaded === false || runtime.mainRecent === false ? "unloaded" : null;
-      if ((current.sendWait ?? null) !== sendWait) current = await this.store.mutate(state => { const w = findWorkspace(state, original.id); w.sendWait = sendWait; return w; });
+      if ((current.sendWait ?? null) !== sendWait) current = await this.store.mutateWorkspace(original.id, w => { w.sendWait = sendWait; return w; });
       const pending = current.batches.find(b => b.state === "pending" && !isRecovery(b));
       // Auto-send only reaches an agent that is loaded and recently used: sending to a dormant one would wake it.
       // Completion checks never go out on their own; they wait for Tom or the agent's next live turn.
@@ -248,9 +249,9 @@ export class Engine {
       current = findWorkspace(await this.store.snapshot(), original.id);
       const done = !current.archived && !!current.completion && completionBlockers(current, this.now()).length === 0;
       if (done || current.managedDoneLabel) {
-        if (done && !current.managedDoneLabel) await this.store.mutate(state => { findWorkspace(state, current.id).managedDoneLabel = true; });
+        if (done && !current.managedDoneLabel) await this.store.mutateWorkspace(current.id, w => { w.managedDoneLabel = true; });
         await this.gateway.label(current, done);
-        if (!done) await this.store.mutate(state => { findWorkspace(state, current.id).managedDoneLabel = false; });
+        if (!done) await this.store.mutateWorkspace(current.id, w => { w.managedDoneLabel = false; });
       }
       await this.statusCheck(findWorkspace(await this.store.snapshot(), original.id), this.now()).catch(() => undefined);
     }
