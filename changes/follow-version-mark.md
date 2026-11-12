@@ -1,2 +1,0 @@
-- The version at the top of Home and the panel shows just the version. Tap it for update status and release notes.
-- A failed update no longer shows as failed once a newer version of Follow-up is running.
