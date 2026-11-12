@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import {
-  ABOUT_TTL_MS, aboutRecordSchema, currentSummary, dailyBudget, extractLinks, keysFromBranch, needsOverview, summaryOutputSchema, stableJson, usageAllows, SUMMARY_MAX_CHARS,
+  ABOUT_RETRY_MS, ABOUT_TTL_MS, aboutRecordSchema, currentSummary, dailyBudget, extractLinks, keysFromBranch, needsOverview, summaryOutputSchema, stableJson, usageAllows, SUMMARY_MAX_CHARS,
   type AboutLink, type AboutRecord, type AboutView, type SummaryOutput,
 } from "../shared/about";
 import type { Workspace } from "../shared/model";
@@ -301,6 +301,12 @@ export type AboutDeps = {
 
 export class AboutService {
   private inflight = new Map<string, Promise<void>>();
+  /** Reading a workspace's inputs (history, subagents) for an open or a Rewrite: after the reply, one per workspace. */
+  private collecting = new Map<string, Promise<void>>();
+  /** What the last read of inputs found, for the replies while no sentence exists yet. */
+  private found = new Map<string, { links: AboutLink[]; firstMessage: string | null }>();
+  /** How long an open's reply waits for the inputs before it says pending (the ack budget leaves room for the rest). */
+  collectWaitMs = 300;
   constructor(private deps: AboutDeps) {}
   private now() { return (this.deps.now ?? Date.now)(); }
 
@@ -317,29 +323,51 @@ export class AboutService {
     if ((opts.open || opts.refresh) && this.deps.roomOnDemand && !await this.deps.roomOnDemand().catch(() => true)) opts = { ...opts, open: false, refresh: false };
     if (!opts.open && !opts.refresh) {
       const running = this.inflight.has(workspaceId);
-      return { status: running ? "pending" : cached ? "ready" : "idle", record: cached, firstMessage, links: [], error: null };
+      return { status: running ? "pending" : cached ? "ready" : "idle", record: cached, firstMessage, links: cached ? [] : this.found.get(workspaceId)?.links ?? [], error: null };
     }
-    let running = this.inflight.get(workspaceId);
-    let links: AboutLink[] = [];
-    // A cached overview younger than the TTL can't be replaced yet, so its inputs aren't even read.
+    // Reading the inputs waits on the history cache and Paseo's subagents. The reply waits for it up to
+    // `collectWaitMs`, so a fast read answers in full as before; past that the view says pending and the client asks
+    // again soon (tests/rpc-cached.test.ts). Only an agent's `wait` waits for the whole read.
     const fresh = !!cached && this.now() - Date.parse(cached.generatedAt) < ABOUT_TTL_MS;
-    if (!running && (opts.refresh || !fresh)) {
-      const ctx = this.deps.context();
-      const inputs = ctx ? await collectInputs(w, ctx) : null;
-      if (inputs) {
-        links = workspaceLinks(inputs);
-        firstMessage ??= inputs.firstMessages.find(m => m.trim().toLowerCase() !== w.title.trim().toLowerCase()) ?? null;
-        const hash = inputsHash(inputs);
-        const failure = file.failures[workspaceId];
-        if (needsOverview(cached, hash, this.now(), { refresh: opts.refresh, failedAt: failure?.at ?? null })) running = this.start(w, inputs, hash);
+    // A read already under way (the previous ask's) is waited on the same way, so a poll lands as it finishes.
+    const collected = this.collecting.get(workspaceId) ?? (!this.inflight.has(workspaceId) && (opts.refresh || !fresh) ? this.collect(w, !!opts.refresh) : null);
+    if (collected) {
+      if (opts.wait) await collected;
+      else {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([collected, new Promise<void>(resolve => { timer = setTimeout(resolve, this.collectWaitMs); timer.unref?.(); })]);
+        clearTimeout(timer);
       }
     }
+    const running = this.inflight.get(workspaceId);
     if (running && opts.wait) await running;
     const after = await this.deps.store.read();
     const failure = after.failures[workspaceId];
-    const pending = this.inflight.has(workspaceId);
+    // Inside a failure's back-off a read of inputs only refreshes links, so it isn't "pending".
+    const mayWrite = opts.refresh || !(failure && this.now() - failure.at < ABOUT_RETRY_MS);
+    const pending = this.inflight.has(workspaceId) || (this.collecting.has(workspaceId) && !!mayWrite);
     const record = currentSummary(after.entries[workspaceId]);
-    return { status: pending ? "pending" : record ? "ready" : failure ? "failed" : "idle", record, firstMessage, links: record ? [] : links, error: !pending && failure && (!record || failure.at > Date.parse(record.generatedAt)) ? failure.error : null };
+    const found = this.found.get(workspaceId);
+    firstMessage ??= found?.firstMessage ?? null;
+    return { status: pending ? "pending" : record ? "ready" : failure ? "failed" : "idle", record, firstMessage, links: record ? [] : found?.links ?? [], error: !pending && failure && (!record || failure.at > Date.parse(record.generatedAt)) ? failure.error : null };
+  }
+
+  /** Reads a workspace's inputs once (a second open joins the first) and starts a write when they call for one. */
+  private collect(w: Workspace, refresh: boolean): Promise<void> {
+    const prior = this.collecting.get(w.id);
+    if (prior) return prior;
+    const work = (async () => {
+      const ctx = this.deps.context();
+      if (!ctx) return;
+      const inputs = await collectInputs(w, ctx);
+      this.found.set(w.id, { links: workspaceLinks(inputs), firstMessage: inputs.firstMessages.find(m => m.trim().toLowerCase() !== w.title.trim().toLowerCase()) ?? null });
+      const file = await this.deps.store.read();
+      const cached = currentSummary(file.entries[w.id]);
+      const failure = file.failures[w.id];
+      if (!this.inflight.has(w.id) && needsOverview(cached, inputsHash(inputs), this.now(), { refresh, failedAt: failure?.at ?? null })) void this.start(w, inputs, inputsHash(inputs));
+    })().catch(() => undefined).finally(() => { this.collecting.delete(w.id); });
+    this.collecting.set(w.id, work);
+    return work;
   }
 
   /** The developer's first words: the history cache's goal, else the workspace goal unless it only repeats the title. */

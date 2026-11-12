@@ -1,0 +1,2 @@
+- Needs you, the usage meters and a workspace's Summary answer at once instead of waiting on Paseo; what's new arrives on the next refresh.
+- Signing off, Later and Undo no longer wait for Paseo to clear the unread dot.

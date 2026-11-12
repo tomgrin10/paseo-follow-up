@@ -71,6 +71,8 @@ loaded for an hour.
 
 - It reads provider limits from Smart Session's `smart-session.subscriptions` and `smart-session.budget` RPCs at most
   once a minute, or the newest rows of its accounts file.
+- A read answers from the last reading at once and refreshes after (one refresh in flight, 20 s deadline); the
+  client's next poll carries it. Only a read with nothing cached waits, at most 300 ms, then shows no meters.
 - It never asks ZeroSub to refresh or switch.
 - When Smart Session isn't installed, the meters are hidden.
 
