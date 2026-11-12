@@ -253,3 +253,33 @@ export function homeSearchDocs(input: { model: HomeModel; paseo: PaseoWorkspaceL
   }
   return docs;
 }
+
+// ---------- hits on list rows ----------
+
+/**
+ * What a search hit shows on the list's own Row (search-row-is-the-list-row): the matched words highlighted in place
+ * in the title (and "› agent") and in the ask line, or, when the match is in a field the row doesn't show (PR, branch,
+ * linked item, agent, project, goal), that field as line 2: "<Field> · excerpt".
+ */
+export type RowHit = { titleRanges: Range[]; agentRanges: Range[]; lineRanges: Range[] | null; via: SearchHit["via"] };
+export function rowHit(hit: SearchHit, row: { title: string; agent?: string | null; line?: string }): RowHit {
+  const cut = row.title.length;
+  const titleRanges = hit.titleRanges.filter(r => r[0] < cut).map(r => [r[0], Math.min(r[1], cut)] as Range);
+  const agentAt = cut + " › ".length;
+  const agentRanges = row.agent ? hit.titleRanges.filter(r => r[0] >= agentAt).map(r => [r[0] - agentAt, r[1] - agentAt] as Range) : [];
+  // The ask the row already shows: highlight it there instead of repeating it under a label.
+  if (hit.via?.field === "ask" && row.line && hit.via.text === row.line) return { titleRanges, agentRanges, lineRanges: hit.via.ranges, via: null };
+  return { titleRanges, agentRanges, lineRanges: null, via: hit.via };
+}
+
+/**
+ * The sidebar view's filter (2.1): the same matcher as Home's search, applied in place. Groups keep their order and
+ * the chosen sort; only matching rows stay, groups left empty drop out, and archived workspaces aren't listed (Home's
+ * search finds those). An empty query returns the model unchanged.
+ */
+export function filterHome(model: HomeModel, index: SearchIndex, query: string, now = Date.now()): { model: HomeModel; hits: Map<string, SearchHit> | null } {
+  if (!queryTokens(query).length) return { model, hits: null };
+  const hits = new Map(search(index, query, now, Infinity).filter(h => h.group !== "archived").map(h => [h.key, h]));
+  const groups = model.groups.map(g => ({ ...g, items: g.items.filter(s => hits.has(s.key)) })).filter(g => g.items.length);
+  return { model: { ...model, groups, needs: groups.find(g => g.id === "needs")?.items.length ?? 0 }, hits };
+}

@@ -101,10 +101,9 @@ test("phones: every state word's hue is lifted to text contrast, not only succes
 });
 
 test("phones: Home's search results use the list row, the offer sits after Needs you, and the empty state has an action", async () => {
-  const chrome = await source("client/home-chrome.tsx");
-  const result = chrome.slice(chrome.indexOf("export function ResultRow"), chrome.indexOf("export function AskRow"));
-  assert.match(result, /if \(touch\) \{[^]*?size=\{15\} weight="500" lines=\{2\}/, "two-line 15px title on phones");
-  assert.ok(!/if \(touch\) \{[^]*?<GroupChip[^]*?\n  \}\n  return/.test(result), "no group pill on phones");
+  const list = await source("client/home-list.tsx");
+  assert.match(list, /case "result": return <Row /, "a result is the list's own Row (search-row-is-the-list-row), two-line 15px title and all");
+  assert.ok(!/GroupChip/.test(await source("client/home-chrome.tsx")), "no group pill: the state word already says it");
   const home = await source("client/home.tsx");
   assert.match(home, /afterNeeds=\{compact && model\.needs > 0 \? <SetupOffer/);
   assert.match(home, /emptyAction=\{compact \? <Button [^>]*title="Project settings"/);
