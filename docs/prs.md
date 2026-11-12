@@ -62,7 +62,8 @@ stand in instead of errors.
   observation, else the stored snapshot (after a restart nothing is in memory). Only a PR never read says why it has
   none (invariant `a-github-limit-never-blanks-a-known-pr`, `tests/github-rate-limit.test.ts`). 2026-11-12: the
   account's GraphQL budget ran out, GitHub answered `RATE_LIMIT`, and every PR on it showed Unknown.
-- **Merged is final.** A merged PR with a known status is never read again, not even on a cold start.
+- **Merged is final.** A merged PR with a known status isn't read again, not even on a cold start; only the
+  developer's Refresh of its workspace reads it.
 Cost per tick is pinned by `tests/github-poll-cost.test.ts`; `scripts/poll-cost.mjs` measures it in a harness
 (`--deploy-merged K` adds K merged PRs in the deployment repository, with a fake fleet and registry; `warmup` reports
 the cold start's spawns and compares).
