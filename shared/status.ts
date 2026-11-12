@@ -30,13 +30,32 @@ export const turnIdOf = (activeTurn: unknown): string | null => {
  */
 export { CANCEL_CAUSES };
 export type CancelCause = typeof CANCEL_CAUSES[number];
-export function cancelCause(c: { reason: string | null | undefined; prompt?: string | null; newerTurn?: boolean }): CancelCause {
+export function cancelCause(c: { reason: string | null | undefined; prompt?: string | null; newerTurn?: boolean; compaction?: boolean }): CancelCause {
   const reason = (c.reason ?? "").trim().toLowerCase();
   if (/\breload/.test(reason) || /\brestart/.test(reason)) return "reload";
   if (/\bclos/.test(reason)) return "closed";
-  if (/^\/compact\b/.test((c.prompt ?? "").trimStart())) return "compaction";
+  if (c.compaction || /^\/compact\b/.test((c.prompt ?? "").trimStart())) return "compaction";
   if (c.newerTurn) return "replaced";
   return "stop";
+}
+/** How long after Smart Session delivers a /compact a canceled turn is still that compaction's. */
+export const COMPACTION_CANCEL_MS = 600_000;
+/**
+ * Smart Session's queue (plugin-data/smart-session/compactions.json) says it just delivered a /compact to this agent:
+ * one being sent, or sent within COMPACTION_CANCEL_MS before `endedAt` and not yet confirmed done. It sends only to an
+ * idle agent, so a turn canceled then is the compaction (Claude Code's "Compaction canceled."), whatever the
+ * timeline tail shows when the end is handled. 2026-11-12 08:06: a second /compact replaced the first 22 ms later.
+ */
+export function compactionDelivered(items: readonly unknown[], agentId: string, endedAt: number): boolean {
+  return items.some(raw => {
+    const item = raw as { agentId?: unknown; state?: unknown; settledAt?: unknown; confirmedAt?: unknown } | null;
+    if (!item || item.agentId !== agentId) return false;
+    if (item.state === "sending") return true;
+    if (item.state !== "sent" || typeof item.settledAt !== "string") return false;
+    const sent = Date.parse(item.settledAt), done = typeof item.confirmedAt === "string" ? Date.parse(item.confirmedAt) : NaN;
+    // Delivery is stamped after the send returns, so the cancel can precede it by a moment.
+    return sent - 5_000 <= endedAt && endedAt - sent <= COMPACTION_CANCEL_MS && !(done <= endedAt);
+  });
 }
 /** Only the developer's own Stop pauses Follow-up. When unsure it doesn't: a missed pause is cheap, a stuck one silently stops repairs. */
 export const cancelHolds = (cause: CancelCause) => cause === "stop";
@@ -46,9 +65,9 @@ export type TurnOutcome = { kind: "completed" } | { kind: "failed"; error: { mes
  * cause is the developer's Stop. Another agent's turn, and every other cancel cause, leave the workspace as it was.
  * `newerTurn`: the agent already started another turn when this one's end is handled.
  */
-export function holdOnTurnEnd(w: Workspace, e: { agentId: string; turnId: string | null; at: string; outcome: TurnOutcome; prompt: string | null; newerTurn: boolean }): boolean {
+export function holdOnTurnEnd(w: Workspace, e: { agentId: string; turnId: string | null; at: string; outcome: TurnOutcome; prompt: string | null; newerTurn: boolean; compaction?: boolean }): boolean {
   if (w.mainAgentId !== e.agentId || e.outcome.kind === "completed") return false;
-  if (e.outcome.kind === "canceled" && !cancelHolds(cancelCause({ reason: e.outcome.reason, prompt: e.prompt, newerTurn: e.newerTurn }))) return false;
+  if (e.outcome.kind === "canceled" && !cancelHolds(cancelCause({ reason: e.outcome.reason, prompt: e.prompt, newerTurn: e.newerTurn, compaction: e.compaction }))) return false;
   const kind = e.outcome.kind;
   w.hold = interruptionHold(kind); w.interruption = { turnId: e.turnId, at: e.at, kind, agentId: e.agentId, ...(kind === "canceled" ? { cause: "stop" as const } : {}) }; w.completion = null; w.declaration = null;
   return true;
