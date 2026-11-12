@@ -19,7 +19,7 @@ import { openSync } from "node:fs";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
 import { harness, spawnDaemon } from "./harness.mjs";
-import { harnessEnv } from "./harness-env.mjs";
+import { harnessEnv, harnessConfig } from "./harness-env.mjs";
 
 const exec = promisify(execFile);
 await harness();
@@ -106,7 +106,7 @@ const gcloud = a => a[0] === "auth" ? "registry-token" : a[1] === "services" ? $
   process.stdout.write(typeof JSON.parse(text) === "string" ? JSON.parse(text) : text); })();
 `;
   for (const kind of ["gh", "gcloud"]) { await writeFile(join(bin, kind), shimSource(kind)); await chmod(join(bin, kind), 0o755); }
-  await writeFile(join(home, "config.json"), JSON.stringify({ pluginsEnabled: true, daemon: { listen: `127.0.0.1:${port}`, relay: { enabled: false }, mcp: { enabled: false }, browserTools: { enabled: false } } }));
+  await writeFile(join(home, "config.json"), JSON.stringify(harnessConfig({ port })));
   await writeFile(join(fixture, "paseo-plugin.json"), JSON.stringify({ id: "followup-fixture", requirements: { paseo: ">=0.11.0" } }));
   await writeFile(join(fixture, "index.server.ts"), await readFile("scripts/fixture-provider.ts", "utf8"));
   if (!plugin) {
