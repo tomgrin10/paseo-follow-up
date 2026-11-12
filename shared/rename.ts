@@ -12,8 +12,15 @@ export const RENAME_DAILY_CAP = 30;
 /** How long a rename stays undoable after the toast is gone: the tool's `undo` and the dialog's link. */
 export const UNDO_WINDOW_MS = 24 * 60 * 60_000;
 
+/**
+ * The rule the dialog states under the field and the prompt gives the model, word for word. checkName enforces it:
+ * one rule, stated once.
+ */
+export const NAME_RULE = `Start with a verb. Up to ${NAME_MAX_WORDS} words.`;
+
 const ISSUE_KEY = /^([A-Z][A-Z0-9]{1,9}-\d{1,7})$/;
-const KEY_PREFIX = /^([A-Z][A-Z0-9]{1,9}-\d{1,7})\s*:\s*(.*)$/;
+/** A token that is an issue key, with any punctuation after it ("ABC-12:", "ABC-12,"). */
+const keyOf = (token: string) => ISSUE_KEY.exec(token.replace(/[:,;.!?)]+$/, ""))?.[1] ?? null;
 const QUOTES = /["`“”„«»]|^'|'$|‘|’(?=\s|$)|^’/;
 /** "feat/x", "fix: x", "chore(x): x": the shapes of a branch or a commit subject, not a name. */
 const BRANCH_PREFIX = /^(feat|fix|chore|refactor|docs|test|tests|ci|build|perf|style|wip|hotfix|release)(\([^)]*\))?[:/!]/i;
@@ -26,9 +33,10 @@ export function normalizeName(raw: string): string {
 }
 
 /**
- * The one rule for a workspace name, for the model's reply and for the developer's edit alike. `keys`: Linear keys
- * linked to the workspace; only those may lead the name ("ABC-123: Fix …"), and the key isn't counted as a word.
- * `current`: the name it has now; the same name is no rename.
+ * The one rule for a workspace name (NAME_RULE), for the model's reply and for the developer's edit alike: it starts
+ * with a verb, so never with an issue key. `keys`: Linear keys linked to the workspace; only those may appear, inline
+ * after the verb ("Verify ABC-123 vendor mismatch"), and a key isn't counted as a word. `current`: the name it has
+ * now; the same name is no rename.
  */
 export function checkName(raw: string, opts: { keys?: readonly string[]; current?: string | null } = {}): NameCheck {
   const name = normalizeName(raw);
@@ -36,17 +44,16 @@ export function checkName(raw: string, opts: { keys?: readonly string[]; current
   if (name.length > NAME_MAX_CHARS) return { ok: false, reason: `Keep it to ${NAME_MAX_CHARS} characters (now ${name.length}).` };
   if (QUOTES.test(name)) return { ok: false, reason: "Leave out quotes and backticks." };
   if (/[\n\r\t<>{}[\]|\\]/.test(name)) return { ok: false, reason: "Use plain words." };
-  if (ISSUE_KEY.test(name)) return { ok: false, reason: "Add a few words after the issue key." };
-  let body = name;
-  const prefixed = KEY_PREFIX.exec(name);
-  if (prefixed) {
-    const key = prefixed[1];
-    if (!(opts.keys ?? []).includes(key)) return { ok: false, reason: `${key} isn't linked to this workspace, so leave it out.` };
-    body = prefixed[2].trim();
-    if (!body) return { ok: false, reason: "Add a few words after the issue key." };
+  const tokens = name.split(" ");
+  const lead = keyOf(tokens[0]);
+  if (lead) return { ok: false, reason: tokens.length > 1 ? `Start with a verb, not the issue key; put ${lead} after it.` : `Start with a verb, then ${lead} and what the work does.` };
+  for (const t of tokens) {
+    const key = keyOf(t);
+    if (key && !(opts.keys ?? []).includes(key)) return { ok: false, reason: `${key} isn't linked to this workspace, so leave it out.` };
   }
-  if (BRANCH_PREFIX.test(body) || /\//.test(body) || /^[\w.-]+$/.test(body) && /[-_]/.test(body)) return { ok: false, reason: "Use words, not a branch name." };
-  const words = body.split(" ").filter(Boolean);
+  if (BRANCH_PREFIX.test(name) || /\//.test(name) || /^[\w.-]+$/.test(name) && /[-_]/.test(name)) return { ok: false, reason: "Use words, not a branch name." };
+  if (!/^\p{L}/u.test(name)) return { ok: false, reason: "Start with a verb." };
+  const words = tokens.filter(t => t && !keyOf(t));
   if (words.length > NAME_MAX_WORDS) return { ok: false, reason: `Keep it to ${NAME_MAX_WORDS} words (now ${words.length}).` };
   if (opts.current && opts.current.trim().toLowerCase() === name.toLowerCase()) return { ok: false, reason: "That's the name it has now." };
   return { ok: true, name };
@@ -68,10 +75,10 @@ export const RENAME_SYSTEM = "You name software workspaces. Reply with one JSON 
 
 /** Real-shaped examples (anonymised) of how the developer's workspaces read. */
 export const NAME_EXAMPLES = [
-  "Verify vendor mismatch and check migrations",
+  "Verify ABC-1234 vendor mismatch, check migrations",
   "Plan admin page for schema migrations",
   "Fix retry backoff in the billing worker",
-  "ABC-1234: Add CSV export to the audit log",
+  "Add CSV export to the audit log",
 ];
 
 const clip = (s: string, n: number) => { const t = s.replace(/\s+/g, " ").trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
@@ -81,8 +88,8 @@ export function renamePrompt(i: RenameInputs, rejected?: { name: string; reason:
   const keys = i.linked.map(l => l.key).filter(k => ISSUE_KEY.test(k));
   const lines = [
     "Write a short name for this workspace: what the work does, so the developer can tell it apart in a list.",
-    `Rules: sentence case, start with a verb, specific, at most ${NAME_MAX_WORDS} words and ${NAME_MAX_CHARS} characters, no quotes, no branch names, no trailing period.`,
-    keys.length ? `It may start with one linked issue key and a colon (${keys.slice(0, 3).join(", ")}); never only the key.` : "Don't add an issue key.",
+    `Rule: ${NAME_RULE} Also: sentence case, specific, at most ${NAME_MAX_CHARS} characters, no quotes, no branch names, no trailing period.`,
+    keys.length ? `A linked issue key (${keys.slice(0, 3).join(", ")}) may go inline after the verb when it helps tell the work apart; never first.` : "Don't add an issue key.",
     `Examples of good names:\n${NAME_EXAMPLES.map(e => `- ${e}`).join("\n")}`,
     "",
     `Current name: ${clip(i.current, 120)}`,

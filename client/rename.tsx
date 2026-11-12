@@ -5,7 +5,7 @@ import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, TextInput, useToast } from "@getpaseo/plugin/client/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { renameStatusRpc, renameWorkspaceRpc } from "../shared/contracts";
-import { checkName, NAME_MAX_CHARS, type RenameStatus } from "../shared/rename";
+import { checkName, NAME_MAX_CHARS, NAME_RULE, type RenameStatus } from "../shared/rename";
 import { ago } from "../shared/attention";
 import { errorText } from "../shared/errors";
 import { Button, SubmitScope, text, type Theme } from "./kit";
@@ -140,7 +140,7 @@ export function RenameDialog({ request, theme, compact, onClose }: { request: Re
             <View style={{ paddingTop: 1 }}><Icon name="CircleAlert" size={13} color={c.statusDanger} /></View>
             <Text style={[t.small, { flex: 1, color: c.statusDanger }]}>{check.reason}</Text>
           </View>}
-          {(!edited || !name.trim()) && phase !== "error" && <Text style={t.small}>Start with a verb. Up to 8 words.</Text>}
+          {(!edited || !name.trim()) && phase !== "error" && <Text style={t.small}>{NAME_RULE}</Text>}
         </View>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
           {/* After a failed suggestion with nothing typed, Try again is the likely next step, so it leads. */}

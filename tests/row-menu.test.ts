@@ -161,3 +161,19 @@ test("the sidebar view's menu hides what needs Home's omnibox instead of showing
   // Without prefillAsk, canAsk is false (row-actions.ts), and the menu has no Ask the Overseer item.
   assert.ok(!flatItems(rowMenu({ ...base, canAsk: false, flagged: true, needs: [question("Q1"), hold] })).some(i => i.action === "ask_overseer"));
 });
+
+/**
+ * Every label is sentence case ("Rewrite summary", not "Rewrite Summary"): after the first word, a capital is only a
+ * proper name or an acronym. Built from the fullest menu (every section, Later's children, the agent's own name).
+ */
+test("row menu labels are sentence case", () => {
+  const agentRow = { ...s, agent: "Reviewer", agentId: "a2" };
+  const w = { ...workspace({ prs: [pr({ key: "example/app#1", number: 1, snapshot: snapshot({ url: "https://example.test/1", state: "OPEN" }) })] }), mainAgentId: "a1", enable_tracking: true };
+  const items = flatItems(rowMenu({ ...base, s: agentRow, w, flagged: true, needs: [question("Q1"), send(null), retry(false), hold] }), "later");
+  assert.ok(items.some(i => i.action === "rewrite_summary") && items.length > 10, items.map(i => i.label).join(" | "));
+  const proper = new Set(["PR", "AI", "Overseer", "Reviewer"]);
+  for (const item of items)
+    for (const word of item.label.replace(/[…?]/g, "").split(/\s+/).slice(1))
+      assert.ok(!/^\p{Lu}/u.test(word) || proper.has(word) || /^Q\d+$/.test(word) || /^\p{Lu}{2,}$/u.test(word) || /^\d/.test(word),
+        `"${item.label}": "${word}" isn't sentence case`);
+});

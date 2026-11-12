@@ -137,7 +137,7 @@ export function rowMenu(input: RowMenuInput): RowMenuSection[] {
     !!branch && { key: "copy_branch", action: "copy_branch", label: "Copy branch name", icon: "GitBranch", arg: branch },
     links.length > 0 && { key: "copy_pr", action: "copy_pr", label: links.length === 1 ? "Copy PR link" : `Copy ${links.length} PR links`, icon: "Link", arg: links.join("\n") },
     !!s.workspaceId && { key: "rename_ai", action: "rename_ai", label: "Rename with AI…", icon: "Sparkles" },
-    !!w && { key: "rewrite_summary", action: "rewrite_summary", label: "Rewrite Summary", icon: "RefreshCw" },
+    !!w && { key: "rewrite_summary", action: "rewrite_summary", label: "Rewrite summary", icon: "RefreshCw" },
     multiRootOther && { key: "make_main", action: "make_main", label: `Make ${s.agent} the main agent…`, icon: "Crown", arg: s.agentId!,
       confirm: `Make ${s.agent} the main agent of ${s.title}? It takes over the goal, tasks, questions and Done.` },
     !!w?.enable_tracking && { key: "stop_following", action: "stop_following", label: "Stop following…", icon: "EyeOff",
