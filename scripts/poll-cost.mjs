@@ -5,7 +5,7 @@
 // `gh` shim first on PATH that counts every spawn. It installs the plugin, waits one warm-up minute, then measures
 // gh spawns, HTTP requests and the worker's CPU over a window. Run it on two builds at the same N for before/after:
 //
-//   node scripts/poll-cost.mjs [--prs 30] [--workspaces 10] [--repos 3] [--pending 3] [--merged 0] [--closed 0] [--minutes 3] [--plugin <dir>] [--cpu-prof <dir>] [--json]
+//   node scripts/poll-cost.mjs [--prs 30] [--workspaces 10] [--repos 3] [--pending 3] [--merged 0] [--closed 0] [--deploy-merged 0] [--minutes 3] [--plugin <dir>] [--cpu-prof <dir>] [--json]
 //
 // --pending K keeps K PRs (one per repository first) with checks in progress. --cpu-prof writes the worker's V8 CPU profile (node --cpu-prof) for the window. Run under the harness-slot wrapper.
 import { spawn, execFile } from "node:child_process";
@@ -26,6 +26,9 @@ await harness();
 const arg = (name, fallback) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : fallback; };
 const N = Number(arg("prs", "30")); const W = Number(arg("workspaces", "10")); const R = Number(arg("repos", "3")); const MINUTES = Number(arg("minutes", "3"));
 const PENDING = Number(arg("pending", String(Math.max(1, Math.round(N / 10))))); const MERGED = Number(arg("merged", "0")); const CLOSED = Number(arg("closed", "0")); const profileDir = arg("cpu-prof", null);
+// Merged PRs in the deployment repository (herosecurity/hero-poc): each needs a fleet read (gcloud), the serving image's
+// commit (registry) and one ancestry compare per (merge, serving commit). 2026-11-12: those compares still spawned gh.
+const DEPLOY_MERGED = Number(arg("deploy-merged", "0"));
 const root = await mkdtemp(join(tmpdir(), "follow-poll-cost-"));
 const home = join(root, "home"); const fixture = join(root, "fixture"); const bin = join(root, "bin"); let plugin = arg("plugin", null);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -35,11 +38,12 @@ const free = async () => { const s = createNet(); await new Promise(r => s.liste
 const repos = Array.from({ length: R }, (_, i) => `example-${i}/app`);
 const rows = new Map();
 for (let i = 0; i < N; i++) { const repo = repos[i % R]; const number = 100 + i; rows.set(`${repo}#${number}`, { repo, number, base: i < R ? "main" : `b${number - R}`, pending: i < PENDING, state: i >= N - MERGED ? "MERGED" : i >= N - MERGED - CLOSED ? "CLOSED" : "OPEN" }); }
-const counts = { points: 0, graphql: 0, rest: 0, ghSpawns: 0, gcloudSpawns: 0 };
+for (let i = 0; i < DEPLOY_MERGED; i++) { const repo = "herosecurity/hero-poc"; const number = 5000 + i; rows.set(`${repo}#${number}`, { repo, number, base: "main", pending: false, state: "MERGED", merge: i.toString(16).padStart(40, "d") }); }
+const counts = { points: 0, graphql: 0, rest: 0, ghSpawns: 0, gcloudSpawns: 0, compares: 0 };
 const prNode = (repo, number) => {
   const row = rows.get(`${repo}#${number}`); if (!row) return null;
   return { number, title: `Synthetic PR ${number}`, url: `https://github.com/${repo}/pull/${number}`, state: row.state, headRefOid: `head${number}`, headRefName: `b${number}`, baseRefName: row.base, isDraft: false,
-    mergeable: "MERGEABLE", mergeStateStatus: "BLOCKED", reviewDecision: "REVIEW_REQUIRED", mergedAt: row.state === "MERGED" ? "2026-11-01T00:00:00Z" : null, mergeCommit: row.state === "MERGED" ? { oid: "a".repeat(40) } : null, isInMergeQueue: false, autoMergeRequest: null, author: { login: "developer" },
+    mergeable: "MERGEABLE", mergeStateStatus: "BLOCKED", reviewDecision: "REVIEW_REQUIRED", mergedAt: row.state === "MERGED" ? "2026-11-01T00:00:00Z" : null, mergeCommit: row.state === "MERGED" ? { oid: row.merge ?? "a".repeat(40) } : null, isInMergeQueue: false, autoMergeRequest: null, author: { login: "developer" },
     reviewRequests: { pageInfo: { hasNextPage: false }, nodes: [{ requestedReviewer: { __typename: "User", login: "reviewer" } }] },
     latestReviews: { pageInfo: { hasNextPage: false }, nodes: [{ state: "COMMENTED", author: { __typename: "User", login: "reviewer" } }] },
     baseRef: { branchProtectionRule: null, rules: { pageInfo: { hasNextPage: false }, nodes: [] }, associatedPullRequests: { nodes: row.base === "main" ? [] : [{ number: number - R, headRefName: row.base, state: "OPEN", headRepository: { nameWithOwner: repo } }] } },
@@ -59,6 +63,7 @@ const graphql = (query, variables) => {
 };
 const answer = (method, path, body) => {
   if (method === "POST" && path === "/graphql") { const { query, variables } = JSON.parse(body); return graphql(query, variables); }
+  if (/\/compare\//.test(path)) { counts.compares++; return { status: "ahead" }; }
   if (/\/rules\/branches\//.test(path)) { counts.rest++; return [{ type: "required_status_checks", parameters: { required_status_checks: [{ context: "test" }] } }]; }
   counts.rest++; return [];
 };
@@ -66,6 +71,8 @@ const apiPort = await free();
 const api = createServer((req, res) => { let body = ""; req.on("data", c => { body += c; }); req.on("end", () => {
   const url = new URL(req.url, "http://x");
   if (url.pathname === "/__spawn") { counts[url.searchParams.get("kind") === "gcloud" ? "gcloudSpawns" : "ghSpawns"]++; res.end("{}"); return; }
+  // The fake Artifact Registry: the serving image's config names the serving commit.
+  if (url.pathname.startsWith("/v2/")) { res.setHeader("content-type", "application/json"); res.end(JSON.stringify(url.pathname.includes("/manifests/") ? { config: { digest: `sha256:${"3".repeat(64)}` } } : { config: { Labels: { "org.opencontainers.image.revision": "b".repeat(40) } } })); return; }
   if (url.pathname === "/__shim") { const { args } = JSON.parse(body); res.end(JSON.stringify(shim(args))); return; }
   res.setHeader("content-type", "application/json"); res.end(JSON.stringify(answer(req.method, url.pathname, body)));
 }); });
@@ -79,17 +86,22 @@ const shim = args => {
 await new Promise(r => api.listen(apiPort, "127.0.0.1", r));
 
 const port = await free(); const url = `ws://127.0.0.1:${port}/ws`;
-const env = harnessEnv(root, { home, set: { PATH: `${bin}:${process.env.PATH}`, PASEO_RELAY_ENABLED: "false", GH_TOKEN: "fake-token", FOLLOW_UP_GITHUB_API: `http://127.0.0.1:${apiPort}`, POLL_COST_API: `http://127.0.0.1:${apiPort}`, ...(profileDir ? { NODE_OPTIONS: `--cpu-prof --cpu-prof-dir=${profileDir}` } : {}) } });
+const env = harnessEnv(root, { home, set: { PATH: `${bin}:${process.env.PATH}`, PASEO_RELAY_ENABLED: "false", GH_TOKEN: "fake-token", FOLLOW_UP_GITHUB_API: `http://127.0.0.1:${apiPort}`, FOLLOW_UP_DEPLOY_REGISTRY: `http://127.0.0.1:${apiPort}`, POLL_COST_API: `http://127.0.0.1:${apiPort}`, ...(profileDir ? { NODE_OPTIONS: `--cpu-prof --cpu-prof-dir=${profileDir}` } : {}) } });
 const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env: { ...env, NODE_OPTIONS: "" }, timeout: 120_000, maxBuffer: 8 << 20 })).stdout);
 let daemon = null; let client = null;
 try {
   await mkdir(home, { recursive: true }); await mkdir(fixture, { recursive: true }); await mkdir(bin, { recursive: true });
   if (profileDir) await mkdir(profileDir, { recursive: true });
-  // gh and gcloud shims: count the spawn, answer from the fake. Plain node, no shell.
+  // gh and gcloud shims: count the spawn, answer from the fake. Plain node, no shell. gcloud answers the production
+  // fleet: five ready services, one revision each, all serving the image whose commit is "b"×40.
+  const gcloudSource = "x";
+  const fleet = ["backend", "etl", "interpretation", "public-api", "web"].map(role => ({ metadata: { name: `hero-service-vspm-${role}-x`, labels: { "cloud.googleapis.com/location": "us-central1" } }, status: { conditions: [{ type: "Ready", status: "True" }], traffic: [{ revisionName: `${role}-r1`, percent: 100 }] } }));
+  const revision = { spec: { containers: [{ name: "app", image: `us-central1-docker.pkg.dev/hero-production-environments/hero-docker-repo/prod-vspm-backend@sha256:${"1".repeat(64)}` }] }, status: { conditions: [{ type: "Ready", status: "True" }] } };
   const shimSource = kind => `#!/usr/bin/env node
 const base = process.env.POLL_COST_API; const args = process.argv.slice(2);
+const gcloud = a => a[0] === "auth" ? "registry-token" : a[1] === "services" ? ${JSON.stringify(JSON.stringify(fleet))} : ${JSON.stringify(JSON.stringify(revision))};
 (async () => { await fetch(base + "/__spawn?kind=${kind}");
-  if (${JSON.stringify(kind)} === "gcloud") { process.stdout.write("[]"); return; }
+  if (${JSON.stringify(kind)} === "gcloud") { process.stdout.write(${JSON.stringify(gcloudSource)}[0] ? gcloud(args) : "[]"); return; }
   const r = await fetch(base + "/__shim", { method: "POST", body: JSON.stringify({ args }) }); const text = await r.text();
   process.stdout.write(typeof JSON.parse(text) === "string" ? JSON.parse(text) : text); })();
 `;
@@ -133,8 +145,10 @@ const base = process.env.POLL_COST_API; const args = process.argv.slice(2);
   const rate = k => Math.round((counts[k] - start[k]) / minutes * 10) / 10;
   const state = JSON.parse(await readFile(join(home, "plugin-data/follow-up/state.json"), "utf8"));
   const observed = state.workspaces.flatMap(w => w.prs).filter(p => p.snapshot && !p.error).length;
-  const result = { prs: N, workspaces: W, repos: R, runningChecks: PENDING, merged: MERGED, closed: CLOSED, minutes: Math.round(minutes * 10) / 10, observedPrs: observed,
-    perMinute: { ghSpawns: rate("ghSpawns"), processesViaWrapper: Math.round(rate("ghSpawns") * 3 * 10) / 10, gcloudSpawns: rate("gcloudSpawns"), graphqlRequests: rate("graphql"), restRequests: rate("rest"), graphqlPointsPerHour: Math.round(rate("points") * 60) },
+  const result = { prs: N, workspaces: W, repos: R, runningChecks: PENDING, merged: MERGED, closed: CLOSED, deployMerged: DEPLOY_MERGED, minutes: Math.round(minutes * 10) / 10, observedPrs: observed,
+    perMinute: { ghSpawns: rate("ghSpawns"), processesViaWrapper: Math.round(rate("ghSpawns") * 3 * 10) / 10, gcloudSpawns: rate("gcloudSpawns"), graphqlRequests: rate("graphql"), restRequests: rate("rest"), compares: rate("compares"), graphqlPointsPerHour: Math.round(rate("points") * 60) },
+    // The warm-up minute: a cold start's reads (the deploy probe's compares land here).
+    warmup: { ghSpawns: start.ghSpawns, gcloudSpawns: start.gcloudSpawns, compares: start.compares },
     workerCpuPct: Math.round(((await ticks()) - start.cpu) / hz / (minutes * 60) * 1000) / 10 };
   console.log(process.argv.includes("--json") ? JSON.stringify(result) : result);
   if (observed < N) { console.error(`only ${observed} of ${N} PRs observed`); process.exitCode = 1; }
