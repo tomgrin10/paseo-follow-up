@@ -18,6 +18,8 @@ import { holdSuperseded, liftHold } from "../shared/status";
 
 export interface Runtime {
   busy: boolean; reason: string | null; archived: boolean; backgroundBusy?: boolean;
+  /** Live state of the agents working tasks name (Workspace.taskAgents). Undefined: unknown, so every line says In progress. */
+  taskAgents?: Workspace["taskAgents"];
   guarded?: boolean; guardedInterruptionId?: string;
   /** The main agent's runtime is loaded (see isLoaded). Undefined means unknown. */
   mainLoaded?: boolean;
@@ -60,6 +62,8 @@ export function inferBaseChains(w: Workspace): void {
     pr.parent = parent.key;
   }
 }
+/** How long nudges gather into one read: agents often end turns within a few seconds of each other. */
+export const NUDGE_MS = 2_000;
 export class Engine {
   error: string | null = null;
   private recoveryOperations = new Set<Promise<Workspace>>();
@@ -75,7 +79,7 @@ export class Engine {
   statusCheck: (w: Workspace, now: number) => Promise<void> = async () => {};
   /** Background refreshes skipped while paused, for tests and the resource check. */
   skipped = 0;
-  constructor(readonly store: Store, private github: Pick<Github, "observe">, private gateway: Gateway, private now = Date.now, private settleMs = 60_000) {}
+  constructor(readonly store: Store, private github: Pick<Github, "observe">, private gateway: Gateway, private now = Date.now, private settleMs = 60_000, private nudgeMs = NUDGE_MS) {}
   async recover(): Promise<void> {
     await this.store.mutate(state => {
       for (const w of state.workspaces) {
@@ -101,13 +105,15 @@ export class Engine {
   private runningBackground = false;
   /**
    * One refresh at a time. The timer passes `background`, which lets PR polling back off for settled repositories;
-   * every other caller (the developer's refresh, an action, an agent tool) gets a fresh read. A fresh request that
+   * the developer's Refresh gets a fresh read. Turn ends, actions and agent tools go through `nudge` instead. A fresh request that
    * arrives during a background tick runs right after it instead of being folded into it. `workspaceId` narrows a
    * fresh read to that workspace's PRs (opening its panel).
    */
-  tick(o: { background?: boolean; workspaceId?: string } = {}): Promise<void> {
+  tick(o: { background?: boolean; workspaceId?: string; affected?: Set<string> } = {}): Promise<void> {
     if (this.stopped) return Promise.resolve();
-    if (this.running) return this.runningBackground && !o.background ? this.running.then(() => this.tick(o)) : this.running;
+    // A nudge (affected) is a background read, but it reacts to something that just happened: like a fresh request,
+    // it runs after a background tick in flight instead of being folded into it.
+    if (this.running) return this.runningBackground && (!o.background || o.affected) ? this.running.then(() => this.tick(o)) : this.running;
     this.runningBackground = !!o.background;
     this.running = this.run(o).catch(() => { this.error = "Follow-up refresh failed. Saved work is intact; refresh will retry."; }).finally(() => { this.running = null; });
     return this.running;
@@ -124,7 +130,29 @@ export class Engine {
       }
     });
   }
-  private async run(o: { background?: boolean; workspaceId?: string } = {}): Promise<void> {
+  private nudged: Set<string> | "all" | null = null;
+  private nudgeTimer: ReturnType<typeof setTimeout> | null = null;
+  private nudgeWaiters: (() => void)[] = [];
+  /**
+   * Something changed in a workspace (an agent's turn ended, an action ran, a tool registered a PR): read its PRs soon,
+   * with the per-PR backoff, and nothing else's (a-turn-end-never-reads-other-workspaces-prs). Nudges inside
+   * `nudgeMs` share one read. No workspace: every workspace, as the timer would. 2026-11-12: every turn end and
+   * action ran a full fresh read of every tracked PR, and the account's shared GraphQL budget ran out.
+   */
+  nudge(workspaceId?: string): Promise<void> {
+    if (this.stopped) return Promise.resolve();
+    if (!workspaceId) this.nudged = "all";
+    else if (this.nudged !== "all") { const set: Set<string> = this.nudged ?? new Set(); set.add(workspaceId); this.nudged = set; }
+    return new Promise(resolve => {
+      this.nudgeWaiters.push(resolve);
+      this.nudgeTimer ??= setTimeout(() => {
+        const scope = this.nudged, waiters = this.nudgeWaiters;
+        this.nudged = null; this.nudgeWaiters = []; this.nudgeTimer = null;
+        void this.tick(scope === "all" || !scope ? { background: true } : { background: true, affected: scope }).finally(() => waiters.forEach(w => w()));
+      }, this.nudgeMs);
+    });
+  }
+  private async run(o: { background?: boolean; workspaceId?: string; affected?: Set<string> } = {}): Promise<void> {
     if (this.paused()) { this.skipped++; return; }
     const saved = await this.store.snapshot();
     if (this.stopped) return;
@@ -146,13 +174,14 @@ export class Engine {
     // Busy workspaces keep every-tick PR reads: their agent may push or answer review at any moment.
     const keys = (ws: Workspace[]) => new Set(ws.flatMap(w => w.prs.map(p => p.key)));
     const hot = keys(active.filter(w => w.runtimeBusy || w.backgroundBusy || !!w.declaration || w.batches.some(b => ["sending", "sent"].includes(b.state)) || w.prActions.some(a => a.state === "sending")));
-    const observations = await this.github.observe(active.flatMap(w => w.prs), o.background || o.workspaceId ? { background: true, hot, fresh: keys(active.filter(w => w.id === o.workspaceId)) } : {});
+    const read = o.affected ? active.filter(w => o.affected!.has(w.id)) : active;
+    const observations = await this.github.observe(read.flatMap(w => w.prs), o.background || o.workspaceId ? { background: true, hot, fresh: keys(active.filter(w => w.id === o.workspaceId)) } : {});
     for (const original of active) {
       if (this.stopped) return;
       const runtime = await this.gateway.observe(original).catch((): Runtime => ({ busy: false, reason: "Agent state unavailable; refresh will retry", archived: false }));
       const pruned: Batch[] = [];
       await this.store.mutateWorkspace(original.id, w => {
-        w.runtimeBusy = runtime.busy; w.runtimeReason = runtime.reason;
+        w.runtimeBusy = runtime.busy; w.runtimeReason = runtime.reason; w.taskAgents = runtime.taskAgents;
         w.backgroundBusy = runtime.backgroundBusy ?? false;
         if (runtime.gone && w.goneAgent?.agentId !== w.mainAgentId) w.goneAgent = { agentId: w.mainAgentId, at: new Date(this.now()).toISOString(), reason: runtime.gone };
         if (w.goneAgent?.agentId === w.mainAgentId) w.runtimeReason = GONE_REASON;
@@ -425,7 +454,7 @@ export class Engine {
     ]);
     return this.store.mutate(state => {
       const w = ownedWorkspace(state, agentId, workspaceId);
-      w.runtimeBusy = runtime.busy; w.runtimeReason = runtime.reason;
+      w.runtimeBusy = runtime.busy; w.runtimeReason = runtime.reason; w.taskAgents = runtime.taskAgents;
       w.backgroundBusy = runtime.backgroundBusy ?? false;
       if (runtime.archived) w.archived = true;
       for (const pr of w.prs) {
@@ -468,7 +497,7 @@ export class Engine {
   /** How long stop waits on a pass or recovery in flight (worker-stop-never-waits-on-a-stuck-pass); tests shorten it. */
   stopWaitMs = STOP_WAIT_MS;
   /** Stops new passes and waits for the one in flight until the stop's deadline for the one in flight; a pass that outlives it can't write (Store.close). */
-  async stop(within?: Deadline): Promise<void> { this.stopped = true; await settleWithin(Promise.allSettled([this.running, ...this.recoveryOperations]), within ?? this.stopWaitMs); }
+  async stop(within?: Deadline): Promise<void> { this.stopped = true; if (this.nudgeTimer) clearTimeout(this.nudgeTimer); this.nudgeTimer = null; this.nudgeWaiters.splice(0).forEach(w => w()); await settleWithin(Promise.allSettled([this.running, ...this.recoveryOperations]), within ?? this.stopWaitMs); }
 }
 
 export type DoneResult = { workspace: Workspace; blockers: string[]; unconfirmed: string[]; alreadyDone: boolean; next: string };

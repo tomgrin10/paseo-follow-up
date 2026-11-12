@@ -8,6 +8,10 @@ type Update = {
   id?: string; title: string; status: Obligation["status"]; afterPrs?: string[]; evidence?: string;
   dependencyStage?: "merged" | "deployed"; enable_follow_up?: boolean; communication?: Pick<Communication, "threadUrl" | "recipient"> & Partial<Communication>;
   trigger?: TaskTrigger | null;
+  /** The calling agent (from the daemon, never an argument). */
+  caller?: string;
+  /** The agent actually doing it, when the caller names another (an orchestrator's subagent). */
+  workingAgentId?: string;
 };
 export function updateObligation(w: Workspace, input: Update): Obligation {
   const { id, title, status, dependencyStage, enable_follow_up, communication } = input;
@@ -27,6 +31,9 @@ export function updateObligation(w: Workspace, input: Update): Obligation {
   const stage = trigger?.event === "merge" ? "merged" : trigger?.event === "deploy" ? "deployed" : dependencyStage ?? existing?.dependencyStage ?? "deployed";
   const followUp = enable_follow_up ?? (input.trigger !== undefined ? !!trigger : existing?.enable_follow_up ?? false);
   const record = { title, status, afterPrs, evidence: evidence || (destination ? `Reply to ${destination.recipient}: ${destination.threadUrl}` : ""), enable_follow_up: followUp, dependencyStage: stage, category: "follow_up" as const, ...(destination ? { communication: destination } : {}), ...(trigger !== undefined ? { trigger } : {}) };
+  // Who is working on it: set whenever status is working (the named agent, else the caller); kept as history otherwise.
+  const worker = status === "working" ? input.workingAgentId ?? input.caller ?? existing?.workingAgentId : input.workingAgentId ?? existing?.workingAgentId;
+  if (worker) Object.assign(record, { workingAgentId: worker });
   if (existing) {
     const reopened = ["done", "waived", "blocked"].includes(existing.status) && ["pending", "waiting"].includes(status);
     if (reopened || existing.title !== title || JSON.stringify(existing.afterPrs) !== JSON.stringify(afterPrs) || existing.dependencyStage !== stage || JSON.stringify(existing.communication) !== JSON.stringify(destination) || JSON.stringify(existing.trigger) !== JSON.stringify(trigger) || existing.enable_follow_up !== followUp) existing.revision++;
