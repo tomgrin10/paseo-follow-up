@@ -1,0 +1,1 @@
+- Follow-up uses about half the CPU it did, reads about 50 times less from disk and opens one daemon connection at a time instead of one per workspace.

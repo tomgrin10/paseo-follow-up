@@ -103,6 +103,14 @@ export interface AccountReads {
   restAs(account: string | null, path: string): Promise<unknown>;
 }
 
+/**
+ * One REST call as the account `repo`'s owner maps to, resolving with any HTTP status: issue reports
+ * (server/report-issue/) create issues, comments and screenshot files through it, in-process like every read.
+ */
+export interface RestSend {
+  send(repo: string, method: "GET" | "POST" | "PUT", path: string, body?: unknown): Promise<{ status: number; data: any }>;
+}
+
 const LIMIT = 4 * 1024 * 1024;
 /** In-process HTTPS with one token per owner, refreshed once on a 401. `FOLLOW_UP_GITHUB_API` points tests at a fake. */
 /** Requests in flight per token: GitHub's secondary limits punish bursts, and one account backs many owners. */
@@ -110,7 +118,7 @@ export const PER_TOKEN_CONCURRENCY = 4;
 /** GitHub's GraphQL answer when the account's budget is spent: HTTP 200 with this error type (2026-11-12 live). */
 const LIMIT_TYPES = new Set(["RATE_LIMIT", "RATE_LIMITED"]);
 const limitError = (resetAt: number, status: number) => Object.assign(new Error("GitHub API rate limit exceeded"), { status, rateLimited: true, resetAt });
-export function httpApi(o: { tokens?: TokenSource; accountToken?: (account: string | null) => Promise<string>; status?: () => Promise<string>; request?: typeof fetch; base?: string; timeoutMs?: number; now?: () => number; log?: (line: string) => void } = {}): GithubApi & AccountReads {
+export function httpApi(o: { tokens?: TokenSource; accountToken?: (account: string | null) => Promise<string>; status?: () => Promise<string>; request?: typeof fetch; base?: string; timeoutMs?: number; now?: () => number; log?: (line: string) => void } = {}): GithubApi & AccountReads & RestSend {
   const tokens = o.tokens ?? ghTokens();
   const accountToken = o.accountToken ?? ghAccountToken();
   const request = o.request ?? fetch;
@@ -135,7 +143,7 @@ export function httpApi(o: { tokens?: TokenSource; accountToken?: (account: stri
     if (slot.busy >= PER_TOKEN_CONCURRENCY) await new Promise<void>(resolve => slot.queue.push(resolve)); else slot.busy++;
     return () => { const next = slot.queue.shift(); if (next) next(); else slot.busy--; };
   };
-  const call = async (key: string, label: string, url: string, init: { method: string; body?: string }, retried = false): Promise<unknown> => {
+  const call = async (key: string, label: string, url: string, init: { method: string; body?: string }, retried = false, raw = false): Promise<unknown> => {
     const secret = await token(key);
     const until = resting.get(secret);
     if (until !== undefined) { if (until > now()) throw limitError(until, 0); resting.delete(secret); }
@@ -146,9 +154,10 @@ export function httpApi(o: { tokens?: TokenSource; accountToken?: (account: stri
     try {
       const response = await request(url, { ...init, signal: abort.signal, headers: { authorization: `bearer ${secret}`, accept: "application/vnd.github+json", "content-type": "application/json", "user-agent": "paseo-follow-up", "x-github-api-version": "2022-11-28" } });
       status = response.status;
-      if (response.status === 401 && !retried) { cache.delete(key); release(); clearTimeout(timer); return call(key, label, url, init, true); }
+      if (response.status === 401 && !retried) { cache.delete(key); release(); clearTimeout(timer); return call(key, label, url, init, true, raw); }
       const text = await response.text();
       if (text.length > LIMIT) throw new Error("GitHub response exceeds the read limit");
+      if (raw) { let data: unknown = null; try { data = text ? JSON.parse(text) : null; } catch { data = text; } return { status: response.status, data }; }
       if (response.status === 401) throw new GithubAuthError("GitHub refused the token (HTTP 401)");
       const reset = () => Number(response.headers?.get("x-ratelimit-reset")) * 1000 || now() + Number(response.headers?.get("retry-after") || 60) * 1000;
       if ((response.status === 403 || response.status === 429) && (response.headers?.get("x-ratelimit-remaining") === "0" || response.headers?.get("retry-after"))) {
@@ -174,9 +183,10 @@ export function httpApi(o: { tokens?: TokenSource; accountToken?: (account: stri
       return accounts.value;
     },
     restAs: (account, path) => call(`@${account ?? ""}`, `@${account ?? "active account"}`, `${base}/${path.replace(/^\//, "")}`, { method: "GET" }),
+    send: (repo, method, path, body) => call(ownerOf(repo), repo, `${base}/${path.replace(/^\//, "")}`, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }, false, true) as Promise<{ status: number; data: any }>,
   };
 }
 
-let shared: (GithubApi & AccountReads) | null = null;
+let shared: (GithubApi & AccountReads & RestSend) | null = null;
 /** The worker's one client: every read path shares its per-owner and per-account token cache. */
-export function githubApi(): GithubApi & AccountReads { return shared ??= httpApi(); }
+export function githubApi(): GithubApi & AccountReads & RestSend { return shared ??= httpApi(); }
