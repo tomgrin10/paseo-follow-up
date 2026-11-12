@@ -887,8 +887,9 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
     for (const [theme, size, frame] of [["light", "", TALL], ["dark", "-phone", PHONE]]) {
       await shoot(`db-panel${size}-${theme}`, frame, theme, async page => {
         await page.setViewportSize(TALL); await openChat(page, w.title, w.prompt);
-        if (frame === PHONE) await page.setViewportSize(PHONE);
-        await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+        // On a phone the tab strip is off screen: shoot the flag pill's sheet, which carries the same Needs-you list.
+        if (frame === PHONE) { await page.setViewportSize(PHONE); await page.getByRole("button", { name: /^Follow-up · / }).last().click(); }
+        else await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
         await settle(page);
       });
       await shoot(`db-home${size}-${theme}`, frame, theme, async page => { await openHome(page); if (frame === PHONE) await page.setViewportSize(PHONE); await (await homeRow(page, w.title)).click(); await settle(page); });
