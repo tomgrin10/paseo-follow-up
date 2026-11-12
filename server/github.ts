@@ -208,13 +208,15 @@ export class Github {
       // Per-PR backoff (shared/poll.ts): only due PRs go into this tick's queries; the rest reuse their last
       // observation. A read costs ~1 GraphQL point per PR, so reading fewer PRs is what saves the budget.
       const due = targets.filter(p => {
+        // Merged is final: a merged PR whose status is known is never read again, not even on a cold start.
+        if (p.snapshot?.state === "MERGED" && p.snapshot.complete && !p.error) return false;
         if (tier === "critical") return false;
         if (!o.background || !this.last.has(p.key) || o.fresh?.has(p.key) || o.hot?.has(p.key)) return true;
         const last = this.last.get(p.key)!;
         return dueForRead({ snapshot: last.snapshot, error: p.error || last.error, changedAt: this.changedAt.get(p.key) ?? null, readAt: this.readAt.get(p.key) ?? 0, now: this.now(), tier, repoUrgent });
       });
       const dueKeys = new Set(due.map(p => p.key));
-      for (const p of targets) if (!dueKeys.has(p.key)) { this.stats.skipped++; result.set(p.key, this.standIn(p.key, owner)); }
+      for (const p of targets) if (!dueKeys.has(p.key)) { this.stats.skipped++; result.set(p.key, this.standIn(p, owner)); }
       if (!due.length) continue;
       for (let offset = 0; offset < due.length; offset += CHUNK) {
         const group = due.slice(offset, offset + CHUNK);
@@ -231,7 +233,7 @@ export class Github {
           for (const e of (payload.errors ?? []) as Node[]) {
             const path: unknown[] = Array.isArray(e.path) ? e.path : [];
             const at = typeof path[1] === "string" ? path[1] : null;
-            if (e.type === "RATE_LIMITED") throw Object.assign(new Error("rate limited"), { rateLimited: true });
+            if (e.type === "RATE_LIMITED" || e.type === "RATE_LIMIT") throw Object.assign(new Error("rate limited"), { rateLimited: true });
             if (path[0] !== "repository" || !at) throw new Error("GitHub response error");
             (path.includes("rules") ? rulesBroken : broken).add(at);
           }
@@ -272,10 +274,12 @@ export class Github {
           // Out of GraphQL budget: don't fail. Keep the last observations and wait for the reset.
           if (rateLimited(error)) {
             this.budgets.set(owner, { remaining: 0, resetAt: (error as { resetAt?: number }).resetAt ?? this.now() + 10 * 60_000 });
-            for (const p of group) result.set(p.key, this.standIn(p.key, owner));
+            for (const p of group) result.set(p.key, this.standIn(p, owner));
             continue;
           }
-          for (const p of group) result.set(p.key, { snapshot: null, error: "GitHub status unavailable; check gh authentication and repository access" });
+          // Any other failure (a timeout, a 5xx, a refused token) keeps what is known too: a PR with a status keeps it
+          // until a read succeeds (a-github-limit-never-blanks-a-known-pr); only a never-read PR says it has none.
+          for (const p of group) result.set(p.key, this.standIn(p, owner, "GitHub status unavailable; check gh authentication and repository access"));
         }
       }
     }
@@ -296,10 +300,16 @@ export class Github {
     for (const [key, value] of result) this.remember(key, value);
     return result;
   }
-  /** The last observation, or (never read and out of budget) an error saying when reads resume. */
-  private standIn(key: string, owner: string): Observation {
-    const last = this.last.get(key);
-    if (last) return { snapshot: last.snapshot && { ...last.snapshot }, error: last.error };
+  /**
+   * What is known without a read: the last observation, else the stored snapshot (after a restart nothing is in
+   * memory), else an error: `why`, or (out of budget) when reads resume.
+   */
+  private standIn(p: Pr, owner: string, why?: string): Observation {
+    const last = this.last.get(p.key);
+    if (last?.snapshot) return { snapshot: { ...last.snapshot }, error: last.error };
+    if (p.snapshot?.complete) return { snapshot: { ...p.snapshot }, error: null };
+    if (last) return { snapshot: null, error: last.error };
+    if (why) return { snapshot: null, error: why };
     const reset = this.budgets.get(owner)?.resetAt;
     return { snapshot: null, error: `GitHub's API limit for this account is used up${reset ? `; Follow-up reads again after ${new Date(reset).toISOString().slice(11, 16)} UTC` : ""}` };
   }
