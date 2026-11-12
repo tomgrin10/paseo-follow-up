@@ -116,7 +116,8 @@ test("open questions show as needs-you and block Done until answered or withdraw
 });
 
 test("blocked tasks become questions without losing the task; unblocking closes them; re-blocking asks again", () => {
-  const w = workspace({ obligations: [task({ status: "blocked", revision: 2 })] });
+  // Blocked on the developer: blocked with an ask (a-question-always-asks-the-developer-something).
+  const w = workspace({ obligations: [task({ status: "blocked", ask: "Needs a product call", revision: 2 })] });
   assert.equal(syncTaskQuestions(w, clock), true);
   assert.equal(w.questions.length, 1);
   const [mirrored] = w.questions;
