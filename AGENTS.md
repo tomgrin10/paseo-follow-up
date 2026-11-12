@@ -89,6 +89,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | Self-update (check, install, watchdog, rollback), 2.0's move from 1.x | `server/plugin-move.ts`, `server/data-move.ts`, `shared/plugin-move.ts`, `shared/legacy.ts`, `server/updater.ts`, `server/update-registry.ts`, `server/update-provenance.ts`, `server/update-watchdog.mjs`, `server/updates.ts`, `shared/updates.ts`, `shared/update-policy.ts`, `client/updates.tsx` | [updates](docs/updates.md) |
 | Resource governor, never waking agents, worker memory, usage meters | `server/governor.ts`, `server/memory.ts`, `server/agent-load.ts`, `server/usage.ts`, `shared/agent-load.ts`, `shared/resources.ts`, `shared/usage.ts` | [resources](docs/resources.md) |
 | UI | `index.client.tsx`, `client/` | [client](docs/client.md) |
+| Chat card for agents and workspaces an agent creates | `shared/created.ts`, `server/created-items.ts`, `client/created.tsx` | [client](docs/client.md#created-agent-and-workspace-cards) |
 | Shared copy and errors | `shared/presentation.ts`, `shared/errors.ts` | [client](docs/client.md) |
 | Tests, checks and README screenshots | `tests/`, `scripts/`, `scripts/screenshots.mjs`, `button-visibility.test.mjs` | [testing](docs/testing.md) |
 | Report an issue (shared module, Follow-up's adapter, the sheet) | `server/report-issue/index.ts`, `server/report-issue/redact.ts`, `server/report-issue/render.ts`, `server/report-issue/github.ts`, `server/report-issue/diagnostics.ts`, `server/report-issue-adapter.ts`, `client/report-issue.tsx`, `scripts/fake-github.d.mts` | [report-issue](docs/report-issue.md) |
@@ -212,7 +213,8 @@ See [docs/releasing.md](docs/releasing.md). In short:
   "Tool not found". The hook tells the agent to use the bridge (`tools-instance.json` vs
   `hook-state/native-<agent>.json`). Don't "fix" a missing tool by reinstalling in a loop.
 - **Timeline transforms must not break Paseo's grouping.** A transformed tool call leaves Paseo's tool group and
-  renders loose. Keep routine tools untransformed. Rules: [docs/client.md](docs/client.md#chat-rows-and-paseos-grouping),
+  renders loose. Keep routine tools untransformed. Paseo's `create_agent` / `create_workspace` calls are replaced by
+  Follow-up's created card, so the group's "N tool calls" count excludes them, like the Done card. Rules: [docs/client.md](docs/client.md#chat-rows-and-paseos-grouping),
   guarded by `tests/chat-grouping.test.ts`.
 - **Native tools have no MCP `instructions`.** Guidance for native tools goes through tool descriptions and the
   SessionStart hook (`server/agent-hook.mjs`), not through the bridge's `initialize` reply.

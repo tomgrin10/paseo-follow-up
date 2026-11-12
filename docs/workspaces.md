@@ -163,9 +163,15 @@ The invariants in `shared/status-invariants.ts` check these over a grid of state
   `workspace_status` shows it. The task row and the Task sheet never read "working" off the stored status: their line
   comes from `taskStatus` (`shared/task-status.ts`), which names that agent and its live state from
   `taskAgents` on the workspace (Paseo's agent directory, metadata only, so nothing is woken): "<title> working" (spinner),
-  "<title> idle", or "<title> closed" ("Agent closed" when the name is unknown). With no agent recorded, or before the live state is known, it reads "In
-  progress". While the agent is open (working or idle) the row has **Open agent** and the sheet an **Open agent**
-  button, which open its chat; a closed or archived agent is words only. The engine refreshes `taskAgents` with
+  "<title> idle", "<title> closed" ("Agent closed" when the name is unknown) or "<title> archived". With no agent recorded it reads "In
+  progress"; with a recorded agent whose live state isn't known (not read yet, or Paseo doesn't list it) it reads
+  "Agent unavailable": words only, no live state, no link. While the agent is open (working or idle) the row has **Open agent** and the sheet an **Open agent**
+  button, which open its chat. Paseo reads an agent "closed" whenever its session ends (the idle unload, about an hour,
+  and every plugin reload), so a closed agent keeps the link, as "Open chat": opening it is the developer's own tap,
+  and Follow-up never reads, prefetches or previews it. Only an archived agent (or one Paseo no longer lists) is words
+  only. Paseo's agent list leaves archived agents out, so the directory remembers the archived ones it has seen
+  (`DaemonDirectory.withArchived`) and looks up a named agent it lacks once (`lookup`; see
+  [client.md](client.md#created-agent-and-workspace-cards)). One table, `PRESENCE` in `shared/task-status.ts`, sets the word and the link for task lines and chat cards. The engine refreshes `taskAgents` with
   `runtimeBusy` on every tick (`Gateway.observe`, `taskAgentStates` in `server/tasks.ts`), so every surface that
   derives "working" from a task reads the same states (invariant `a-task-only-says-working-when-its-agent-is`): the
   panel's live line spins on a task only while its agent runs, and otherwise reads "<task> · <the row's words>"; the

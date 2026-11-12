@@ -128,7 +128,7 @@ export const workspaceSchema = z.object({
   runtimeReason: z.string().nullable(), runtimeBusy: z.boolean(), backgroundBusy: z.boolean().default(false),
   /** Live state of the agents this workspace's working tasks name, refreshed with runtimeBusy from Paseo's agent list
    * (metadata only). Every surface that says a task's agent is working reads this, never the stored status alone. */
-  taskAgents: z.record(z.string(), z.object({ title: z.string().nullable(), state: z.enum(["working", "idle", "closed"]) })).optional(),
+  taskAgents: z.record(z.string(), z.object({ title: z.string().nullable(), state: z.enum(["working", "idle", "closed", "archived"]) })).optional(),
   interruption: z.object({ turnId: z.string().nullable(), at: z.string(), kind: z.enum(["canceled", "failed"]), /** Why a canceled turn stopped (shared/status.ts cancelCause); only "stop" holds. */ cause: z.enum(CANCEL_CAUSES).optional(), guardPauseId: z.string().optional(), /** The agent whose turn stopped (since 1.4.0-beta.16). */ agentId: idSchema.optional() }).optional(),
   // Added with questions; older saved states parse with none.
   questions: z.array(questionSchema).default([]),

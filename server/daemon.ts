@@ -389,7 +389,10 @@ export class PaseoGateway implements Gateway {
     const [rows, compacting, pauses] = await Promise.all([this.directory.read(fresh ? { fresh: "agents" } : {}), this.compacting(w.mainAgentId), this.guard.read()]);
     const { agents, workspaces } = rows;
     // The agents working tasks name, live (invariant `a-task-only-says-working-when-its-agent-is`): every return carries them.
-    const taskAgents = taskAgentStates([...new Set(w.obligations.filter(o => o.status === "working" && o.workingAgentId).map(o => o.workingAgentId!))], agents.map(row => row.agent));
+    // An id the directory lacks (Paseo's list leaves archived agents out) is looked up once, on demand, never awaited.
+    const taskIds = [...new Set(w.obligations.filter(o => o.status === "working" && o.workingAgentId).map(o => o.workingAgentId!))];
+    if (taskIds.length) this.directory.lookup(taskIds);
+    const taskAgents = taskAgentStates(taskIds, taskIds.length ? this.directory.withArchived(taskIds, agents.map(row => row.agent)) : agents.map(row => row.agent));
     const workspace = workspaces.find(row => row.id === w.id);
     if (!workspace || workspace.archivingAt) return { taskAgents, busy: false, reason: "Workspace is archived", archived: true };
     const a = agents.find(row => row.agent.id === w.mainAgentId)?.agent ?? await this.connect(client => this.directory.live(client, w.mainAgentId));

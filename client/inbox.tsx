@@ -104,17 +104,22 @@ export function nextTarget(store: InboxStore, from: string | null): InboxRow | n
   return nextAfter(store.rows(), from, Date.now());
 }
 
-/** Follow-up's screen relays "& next": opening the screen with `next` hands off to the host's navigation. */
-export function useNextRelay(store: InboxStore, params: Record<string, string>, openAgent: ((row: InboxRow) => void) | undefined) {
+/**
+ * Follow-up's screen relays "& next": opening the screen with `next` hands off to the host's navigation. Timeline
+ * items get no navigation, so the brief card and the created-agent card relay "open this agent" (`open`) and the
+ * created-workspace card "open this workspace" (`openWorkspace`, which lands on that workspace's Follow-up panel).
+ */
+export function useNextRelay(store: InboxStore, params: Record<string, string>, openAgent: ((row: InboxRow) => void) | undefined, openWorkspace?: (workspaceId: string) => void) {
   const done = useRef<string | null>(null);
   const ready = useInbox(store, () => !!store.data());
   useEffect(() => {
     const token = params.next;
-    if (!token || !openAgent || !ready || done.current === token) return;
+    if (!token || done.current === token) return;
+    if (params.openWorkspace) { if (!openWorkspace) return; done.current = token; openWorkspace(params.openWorkspace); return; }
+    if (!openAgent || !ready) return;
     done.current = token;
-    // The brief card can't navigate on its own (timeline items get no navigation), so it relays "open this agent" here.
     if (params.open) { openAgent({ agentId: params.open } as InboxRow); return; }
     const target = nextTarget(store, params.from ?? null);
     if (target) openAgent(target);
-  }, [params.next, params.from, params.open, ready, openAgent, store]);
+  }, [params.next, params.from, params.open, params.openWorkspace, ready, openAgent, openWorkspace, store]);
 }
