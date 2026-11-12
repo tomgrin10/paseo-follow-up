@@ -8,7 +8,7 @@ import { PRESENCE, type TaskAgentState } from "./task-status";
  * replace an item, like the Done card). Parsing is pure and conservative: a completed call whose result carries no
  * agentId / workspaceId keeps Paseo's plain row.
  */
-export const CREATED_KIND = "follow-up.created";
+export const CREATED_KIND = "created-card";
 export const CREATED_VERSION = 1;
 
 export const createdCardSchema = z.object({
