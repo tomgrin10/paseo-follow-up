@@ -5,7 +5,7 @@ import type { Workspace } from "./model";
 import { answerMessage, duplicateOpenQuestions, isOther, parseAnswerMessage } from "./questions";
 import { shouldReopen, type Brief } from "./brief";
 import { flagHeadline } from "./headline";
-import type { InboxRow } from "./inbox";
+import { newEntry, prEndEvent, reduce, type InboxRow } from "./inbox";
 import { blockedOnDeveloper, completionCheck, liveWorkingTask, summary } from "./model";
 import { asksForReviewers, liveLine, needsYou } from "./attention";
 import { trackedGroup, type HomeModel } from "./home";
@@ -158,6 +158,29 @@ export const INVARIANTS: Invariant[] = [
       const mine = new Set(w.prs.filter(p => p.agentMerges).map(p => p.key));
       const asked = needsYou(w, now).filter(i => (i.kind === "merge" || i.kind === "reviewers") && mine.has(i.prKey));
       return asked.length ? asked.map(i => i.title).join(", ") : null;
+    },
+  },
+  {
+    id: "a-merge-the-agent-made-never-flags-the-developer",
+    why: "2026-11-12 live sidebar: an agent that merged its own PR (register_pr agentMerges) flagged the developer with \"PR closed · #37 merged\". Its merge is its own work, reported in its own turn.",
+    check(w, now) {
+      const at = new Date(now).toISOString();
+      const flagged = w.prs.filter(p => p.agentMerges).filter(p => { const ev = prEndEvent(p); return ev?.merged && reduce(newEntry("agent"), ev, at).needs; });
+      return flagged.length ? flagged.map(p => `#${p.number} merged by its agent flags the developer`).join(", ") : null;
+    },
+  },
+  {
+    id: "pr-label-matches-state",
+    why: "2026-11-12 live sidebar: rows read \"PR closed · #37 merged\". A merged PR reads Merged; only a PR closed without merging reads PR closed.",
+    check(w, now) {
+      const at = new Date(now).toISOString();
+      for (const p of w.prs) {
+        const ev = prEndEvent(p);
+        const h = ev && flagHeadline({ needs: reduce(newEntry("agent"), { ...ev, quiet: false }, at).needs, snooze: null, brief: null }, now);
+        const want = p.snapshot?.state === "MERGED" ? "pr_merged" : "pr_closed";
+        if (h && h.key !== want) return `#${p.number} is ${p.snapshot!.state} but reads ${h.label}`;
+      }
+      return null;
     },
   },
   {

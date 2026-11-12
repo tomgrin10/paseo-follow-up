@@ -1,0 +1,1 @@
+- Needs you: a merged PR reads "Merged", not "PR closed", which now means closed without merging. A PR the agent merged itself no longer flags you; a Later "until this PR merges" still wakes.
