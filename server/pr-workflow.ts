@@ -157,9 +157,15 @@ export class PrWorkflowStore {
     await this.machineState(false);
     for (const repo of new Set([...repos].map(repoKey))) await this.detect(repo).catch(() => undefined);
   }
-  agentWorkflow(repo: string | null): AgentWorkflow {
+  /**
+   * `repos`: every repository the workspace touches (its PRs and its checkout). The agent is told it merges its own PRs
+   * (`noReview`) only when all of them are No review: one team repository among them keeps the team wording, since the
+   * hook text is per workspace, not per PR.
+   */
+  agentWorkflow(repo: string | null, repos: Iterable<string> = repo ? [repo] : []): AgentWorkflow {
     const workflow: AgentWorkflow = { mode: this.cachedWorkflow(repo), reviewFix: commandName(reviewFixFor(this.current(), repo)) };
-    return repo && repoReview(repo) === "none" ? { ...workflow, noReview: true } : workflow;
+    const all = [...repos];
+    return all.length && all.every(r => repoReview(r) === "none") ? { ...workflow, noReview: true } : workflow;
   }
   reviewFix(repo: string | null): ReviewFix { return reviewFixFor(this.current(), repo); }
 

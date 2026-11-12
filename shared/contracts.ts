@@ -157,7 +157,9 @@ export const inboxListRpc = defineRpc({ name: "follow.inbox-list", input: z.obje
   /** Adoption share of needs_you over the last 7 days of flagged turns (R2). Optional for older daemons. */
   briefStats: z.object({ days: z.number().int(), total: z.number().int(), tool: z.number().int(), structured: z.number().int(), extraction: z.number().int(), fallback: z.number().int() }).optional(),
   /** The Overseer's own row (1.4.0-beta.0), kept out of rows and every Needs-you count. */
-  overseer: inboxRowSchema.nullable().optional() }) });
+  overseer: inboxRowSchema.nullable().optional(),
+  /** PRs in No review repositories that hand their merge back (shared/pr-workflow.ts handsMergeBack). Usually empty. */
+  handedBack: z.array(z.string()).optional() }) });
 export const inboxActRpc = defineRpc({ name: "follow.inbox-act", input: z.strictObject({
   action: z.enum(["sign_off", "undo", "snooze", "unsnooze", "mute_turn", "set_finish_flags", "unsorted_flag", "unsorted_sign_off", "batch_undo"]),
   agentIds: z.array(idSchema).max(500).optional(), seqs: z.record(z.string(), z.number().int()).optional(),

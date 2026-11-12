@@ -8,6 +8,7 @@ import type { InboxStore } from "./inbox-store";
 import { useInbox } from "./inbox";
 import { BriefCard, type BriefDeps } from "./brief";
 import type { Brief } from "../shared/brief";
+import { reviewersBriefWithdrawn } from "../shared/inbox";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { controlRpc, refreshRpc, browserStatusRpc, recoverRpc, sendRpc, inboxBriefRpc } from "../shared/contracts";
 import { summary, type Workspace } from "../shared/model";
@@ -150,7 +151,7 @@ function useMainBrief(w: Workspace, inbox: InboxStore | undefined): Brief | null
   const row = useInbox(inbox ?? NO_INBOX, () => inbox?.rows().find(r => r.agentId === w.mainAgentId) ?? null);
   const readBrief = useRpc(inboxBriefRpc);
   const brief = useQuery({ queryKey: ["follow-up", "home-brief", w.mainAgentId, row?.seq ?? 0], queryFn: () => readBrief({ agentId: w.mainAgentId }), enabled: !!inbox && !!row?.needs && !!row?.brief });
-  const b = brief.data?.brief?.state === "open" ? brief.data.brief : null;
+  const b = brief.data?.brief?.state === "open" && !reviewersBriefWithdrawn(brief.data.brief) ? brief.data.brief : null;
   // "No ask stated" only repeats the chat beside it; the panel shows real asks.
   return !row?.needs || row.snooze || !b || b.source === "none" ? null : b;
 }

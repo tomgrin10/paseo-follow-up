@@ -119,6 +119,29 @@ export const repoReview = (repo: string): ReviewMode => noReview.has(repoKey(rep
 export function agentMerges(pr: { repo: string; agentMerges?: boolean }): boolean {
   return pr.agentMerges ?? noReview.has(repoKey(pr.repo));
 }
+/** A PR in a No review repository whose register_pr said agentMerges false: Follow-up still asks about it. */
+export const handsMergeBack = (pr: { repo: string; agentMerges?: boolean }): boolean => !agentMerges(pr) && noReview.has(repoKey(pr.repo));
+
+/**
+ * The PRs that hand their merge back (`handsMergeBack`), for the client: it sees inbox rows by PR key, not the PRs, so
+ * `agentMergesKey` needs them to keep "false wins". The client fills this from every inbox read.
+ */
+let handedBack: ReadonlySet<string> = new Set();
+export function setHandedBackPrs(keys: Iterable<string>): void {
+  const next = new Set(keys);
+  if (next.size === handedBack.size && [...next].every(k => handedBack.has(k))) return;
+  handedBack = next; noReviewVersion++;
+  for (const l of noReviewListeners) l();
+}
+/**
+ * `agentMerges` for a PR known only by its key ("owner/name#123"): an inbox reason or a brief. The same rule, so an
+ * add-reviewers ask leaves every client surface the moment the repository flips to No review, before the daemon's next
+ * tick withdraws it, and comes back on Undo.
+ */
+export function agentMergesKey(prKey: string): boolean {
+  const hash = prKey.lastIndexOf("#");
+  return hash > 0 && !handedBack.has(prKey) && noReview.has(repoKey(prKey.slice(0, hash)));
+}
 
 /**
  * Whether a PR's "No reviewers" shows (the panel's PR rows, the PR sheet): an open PR without reviewers that someone

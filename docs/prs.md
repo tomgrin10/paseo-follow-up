@@ -27,8 +27,13 @@ review stores nothing, so there is no migration).
 (false hands one merge back), else the repository's mode decides. It reads a process-wide set of No review
 repositories. `reviewersMissing(pr)` builds on it: the panel's PR rows and the PR sheet show "No reviewers" only for
 a PR someone will be asked to review. The worker fills it from `pr-workflow.json` first thing in `ready`, before the first tick, and on
-every save. The client fills it from `follow.reviewer-settings` (`noReview`). The agent's instructions follow the
-mode: `scopes.json` carries `workflow.noReview`, and the hook and the tools say "merge your own PR once CI is
+every save. The client fills it from `follow.reviewer-settings` (`noReview`), and from each `follow.inbox-list`
+answer the PRs that hand their merge back (`handedBack`). The daemon withdraws an add-reviewers flag on its next tick;
+the client doesn't wait: its inbox store hands every surface rows through `withoutWithdrawnAsks` and the brief cards
+check `reviewersBriefWithdrawn` (`shared/inbox.ts`, both keyed by `agentMergesKey`), so the ask leaves the pill, the
+inbox row, Home and the panel count the moment the repository flips, and comes back on Undo. The agent's instructions
+follow the mode: `scopes.json` carries `workflow.noReview`, true only when every repository the workspace touches is
+No review, and the hook and the tools say "merge your own PR once CI is
 green" instead of "Merging and archiving remain the developer's actions."
 
 Set it in Settings → Following → Shipping PRs → a repository → Review, from the Needs-you reviewers row ("Let the

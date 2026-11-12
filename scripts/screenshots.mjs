@@ -900,15 +900,21 @@ async function reviewModeShots({ shoot, call }) {
   for (const theme of ["light", "dark"]) for (const [size, vp] of [["desktop", DESKTOP], ["phone", PHONE]]) {
     await team();
     await shoot(`rm-row-${size}-${theme}`, vp, theme, page => row(page, vp));
-    // The undo bar lasts 10 s and settle() can take longer, so the drive captures it itself; the regular shot after
-    // shows the row gone.
+    // The undo bar lasts 10 s and settle() can take longer, so the drive captures it itself (rm-toast: the ask gone from
+    // Needs you, the header and Home at once). Then it taps Undo, waits for the bar to leave and the ask to come back
+    // (the inbox forgets the withdrawn reviewers key; the daemon re-asks on its next tick), and the shot is rm-undo.
     await shoot(`rm-undo-${size}-${theme}`, vp, theme, async page => {
       await row(page, vp); await link(page).click();
-      await page.getByText("example/app: no review. The agent merges its own PRs once checks pass.").filter({ visible: true }).first().waitFor();
+      const bar = page.getByText("example/app: no review. The agent merges its own PRs once checks pass.").filter({ visible: true }).first();
+      await bar.waitFor();
+      await link(page).waitFor({ state: "hidden", timeout: 5000 });
       await page.evaluate(() => document.fonts.ready); await page.waitForTimeout(300);
       await fs.writeFile(join(out, `follow-up-rm-toast-${size}-${theme}.png`), await page.screenshot({ animations: "disabled", caret: "hide" }));
+      await page.getByRole("button", { name: "Undo", exact: true }).filter({ visible: true }).first().click();
+      await bar.waitFor({ state: "hidden", timeout: 15000 });
+      await link(page).waitFor({ timeout: 60000 });
+      await page.getByText("Add reviewers to #240: Ravi").filter({ visible: true }).first().waitFor({ timeout: 60000 });
     });
-    // Undo on the toast brings the ask back (the inbox forgets the withdrawn reviewers key).
     await team();
     await call("follow.set-pr-workflow", { repo: "example/app", review: "none" });
     await shoot(`rm-settings-${size}-${theme}`, { width: vp.width, height: size === "phone" ? 1100 : 1000 }, theme, page => fold(page, { width: vp.width, height: size === "phone" ? 1100 : 1000 }));

@@ -6,8 +6,10 @@ import { join } from "node:path";
 import { followUpEvents } from "../server/inbox";
 import { PrWorkflowStore, type Probe } from "../server/pr-workflow";
 import { needsYou } from "../shared/attention";
-import { newEntry, prEndEvent, reduce } from "../shared/inbox";
-import { agentMerges, reviewersMissing, noReviewRepoList, REVIEW_MODE_LABELS, repoShippingSummary, repoReview, setNoReviewRepos, setPrWorkflowInputSchema } from "../shared/pr-workflow";
+import { newEntry, prEndEvent, reduce, reviewersBriefWithdrawn, withoutWithdrawnAsks, type InboxRow } from "../shared/inbox";
+import { pickBrief } from "../shared/brief";
+import { flagHeadline } from "../shared/headline";
+import { agentMerges, agentMergesKey, handsMergeBack, setHandedBackPrs, reviewersMissing, noReviewRepoList, REVIEW_MODE_LABELS, repoShippingSummary, repoReview, setNoReviewRepos, setPrWorkflowInputSchema } from "../shared/pr-workflow";
 import { emptyReviewerConfig, setReviewerConfig } from "../shared/reviewers";
 import { INVARIANTS as STATUS_INVARIANTS } from "../shared/status-invariants";
 import { clock, pr, snapshot, workspace } from "./fixtures";
@@ -31,9 +33,9 @@ const merged = (patch: Partial<Parameters<typeof pr>[0]> = {}) => pr({ snapshot:
 const asks = (w: ReturnType<typeof workspace>) => [...needsYou(w, clock).map(i => i.kind), ...followUpEvents({ version: 1, workspaces: [w] } as never, true).map(e => e.event.type)];
 /** The process-wide set is module state: every test that sets it puts it back, so no test leaks a No review repository. */
 function fresh(t: { after: (fn: () => void) => void }, noReview: string[] = []) {
-  setNoReviewRepos(noReview);
+  setNoReviewRepos(noReview); setHandedBackPrs([]);
   setReviewerConfig({ ...emptyReviewerConfig(), repos: { "example/app": [{ login: "reviewer", name: "Reviewer" }] } });
-  t.after(() => { setNoReviewRepos([]); setReviewerConfig(emptyReviewerConfig()); });
+  t.after(() => { setNoReviewRepos([]); setHandedBackPrs([]); setReviewerConfig(emptyReviewerConfig()); });
 }
 
 test("a-no-review-repo-never-asks-for-review-or-merge: a No review repository asks for neither reviewers nor a merge, in Needs you or the inbox", t => {
@@ -108,6 +110,9 @@ test("set_pr_workflow review: none saves, team clears back to the default, and e
   assert.equal(repoReview("example/app"), "none");
   assert.equal(store.agentWorkflow("example/app").noReview, true);
   assert.equal(store.agentWorkflow("example/web").noReview, undefined, "team repositories' agent text is unchanged");
+  // The hook text is per workspace: it says "merge your own PR" only when every repository the workspace touches is No review.
+  assert.equal(store.agentWorkflow("example/app", ["example/app", "example/web"]).noReview, undefined, "one team repository keeps the team wording");
+  assert.equal(store.agentWorkflow("example/web", ["example/app"]).noReview, true);
   const view = await store.view(["example/app", "example/web"]);
   assert.deepEqual(view.repos.map(r => [r.repo, r.review]), [["example/app", "none"], ["example/web", "team"]]);
   assert.match(repoShippingSummary(view.repos[0]), /No review/);
@@ -165,4 +170,54 @@ test("a-no-review-repo-never-asks-for-review-or-merge: a PR the agent merges its
   const offenders: string[] = [];
   for (const f of await readdir("client")) if (/\.tsx?$/.test(f)) (await readFile(join("client", f), "utf8")).split("\n").forEach((line, i) => { if (/\bnoReviewers\(/.test(line)) offenders.push(`client/${f}:${i + 1}`); });
   assert.deepEqual(offenders, [], "use reviewersMissing(pr) from shared/pr-workflow.ts");
+});
+
+test("a-no-review-repo-never-asks-for-review-or-merge: the moment the repository flips, no surface draws the add-reviewers ask; Undo brings it back", t => {
+  // 2026-11-12, #147 renders: right after "example/app: no review … Undo", Needs you, the header and the Home row still
+  // read "Add reviewers to #240: Ravi" until the daemon's next tick (up to 15 s), contradicting the toast just tapped.
+  fresh(t);
+  const at = new Date(clock).toISOString();
+  const full = { ...pickBrief({ reviewers: { prKey: "example/app#240", repo: "example/app", number: 240, url: null, names: ["Ravi"] } }), state: "open" as const };
+  assert.equal(full.ask, "Add reviewers to #240: Ravi");
+  const row: Pick<InboxRow, "needs" | "snooze" | "brief"> = {
+    needs: { reasons: [{ reason: "reviewers", at, detail: "#240", dedupeKey: "example/app#240:reviewers" }], since: at }, snooze: null,
+    brief: { kind: "reviewers", source: "followup", state: "open", ask: full.ask, prKey: "example/app#240" },
+  };
+  const other = { reason: "finished" as const, at, detail: "Finished", dedupeKey: "turn:1" };
+  const drawn = (r: typeof row) => { const shown = withoutWithdrawnAsks(r); return { needs: shown.needs?.reasons.map(x => x.reason) ?? [], headline: flagHeadline(shown, clock)?.line ?? null, brief: shown.brief?.ask ?? null }; };
+  assert.deepEqual(drawn(row), { needs: ["reviewers"], headline: "Add reviewers to #240: Ravi", brief: "Add reviewers to #240: Ravi" }, "Team review asks");
+  assert.equal(reviewersBriefWithdrawn(full), false);
+  setNoReviewRepos(["example/app"]); // the link's tap: the client's set flips before any daemon round trip
+  assert.deepEqual(drawn(row), { needs: [], headline: null, brief: null }, "the pill, the row, Home's group and the count all lose it at once");
+  assert.equal(reviewersBriefWithdrawn(full), true, "the panel's brief card and the chat's card draw nothing");
+  const mixed = withoutWithdrawnAsks({ ...row, needs: { reasons: [...row.needs!.reasons, other], since: at } });
+  assert.deepEqual(mixed.needs?.reasons.map(r => r.reason), ["finished"], "another flag on the same agent stays");
+  assert.equal(mixed.brief, null);
+  setHandedBackPrs(["example/app#240"]); // register_pr agentMerges false: the merge is the developer's again
+  assert.deepEqual(drawn(row).needs, ["reviewers"], "a merge handed back still asks");
+  assert.equal(handsMergeBack({ repo: "example/app", agentMerges: false }), true);
+  setHandedBackPrs([]);
+  setNoReviewRepos([]); // Undo
+  assert.deepEqual(drawn(row), { needs: ["reviewers"], headline: "Add reviewers to #240: Ravi", brief: "Add reviewers to #240: Ravi" }, "Undo brings it back");
+  assert.equal(agentMergesKey("example/app#240"), false);
+});
+
+test("a-no-review-repo-never-asks-for-review-or-merge: nothing on the client draws an add-reviewers ask around the helpers", async () => {
+  const src = async (f: string) => readFile(join("client", f), "utf8");
+  const store = await src("inbox-store.ts");
+  assert.match(store, /const view = \(\) => shown \?\?= \{ rows: \(data\?\.rows \?\? \[\]\)\.map\(r => withoutWithdrawnAsks\(r\)\), overseer: data\?\.overseer \? withoutWithdrawnAsks/, "every row the inbox store hands out goes through withoutWithdrawnAsks");
+  assert.match(store, /rows: \(\) => \(enabled && data\?\.enabled \? view\(\)\.rows : \[\]\)/);
+  assert.match(store, /overseer: \(\) => view\(\)\.overseer/);
+  assert.match(store, /onNoReviewRepos\(\(\) => \{ shown = null; emit\(\); \}\)/, "a flip re-renders every inbox surface");
+  assert.match(await src("brief.tsx"), /if \(reviewersBriefWithdrawn\(b\)\) return null;/, "the brief card draws nothing for a withdrawn ask");
+  const offenders: string[] = [];
+  for (const f of await readdir("client")) {
+    if (!/\.tsx?$/.test(f) || f === "inbox-store.ts") continue;
+    (await src(f)).split("\n").forEach((line, i) => {
+      // The raw inbox answer skips the filter; an open brief read from the daemon must ask the helper on the same line.
+      if (/\.data\(\)\??\.(rows|overseer)\b/.test(line)) offenders.push(`client/${f}:${i + 1} reads raw inbox rows`);
+      if (/brief\.data\?\.brief\?\.state === "open"/.test(line) && !/reviewersBriefWithdrawn\(/.test(line)) offenders.push(`client/${f}:${i + 1} opens a brief without reviewersBriefWithdrawn`);
+    });
+  }
+  assert.deepEqual(offenders, []);
 });
