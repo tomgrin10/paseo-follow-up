@@ -464,6 +464,37 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
     });
     await call("follow.rename-workspace", { workspaceId: billingId, undo: true }).catch(error => log(`undo after review: ${error.message}`));
   }
+  // Review evidence for the sidebar view's row menu (Paseo 0.16+, HARNESS_PASEO=0.16): Follow-up's view picked in
+  // Settings → Sidebar, then a row's menu from a right-click and from Shift+F10; dark and light. On a host without
+  // sidebar views this fails at "Follow-up: Needs you" (the option doesn't exist).
+  if (argv.includes("--sidebar-review")) {
+    const sidebarRow = async page => {
+      await page.goto(`${ORIGIN}/settings/sidebar`);
+      await page.getByText("Default view", { exact: true }).first().click();
+      await page.getByText("Follow-up: Needs you", { exact: true }).last().click();
+      await openHome(page);
+      const view = page.getByTestId("plugin-sidebar-view");
+      const row = view.getByRole("button", { name: /^Billing retries/ }).first();
+      await row.waitFor();
+      return { view, row };
+    };
+    const menuOpen = page => page.getByRole("menu", { name: "Actions for Billing retries" }).getByRole("menuitem", { name: "Rename with AI…" }).waitFor();
+    for (const scheme of ["dark", "light"]) {
+      await shoot(`sidebar-menu-click-${scheme}`, DESKTOP, scheme, async page => {
+        const { row } = await sidebarRow(page);
+        await row.click({ button: "right", position: { x: 60, y: 12 } });
+        await menuOpen(page);
+        // Ask the Overseer needs Home's omnibox, so it isn't in this menu at all.
+        if (await page.getByRole("menuitem", { name: /Ask the Overseer/ }).count()) throw new Error("Ask the Overseer shown in the sidebar view");
+      });
+      await shoot(`sidebar-menu-key-${scheme}`, DESKTOP, scheme, async page => {
+        const { row } = await sidebarRow(page);
+        await row.focus();
+        await page.keyboard.press("Shift+F10");
+        await menuOpen(page);
+      });
+    }
+  }
   for (const name of SHOTS) {
     if (!only.includes(name) || name === "setup") continue;
     if (name === "home") await shoot("home", DESKTOP, "dark", async page => {

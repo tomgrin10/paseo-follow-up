@@ -160,6 +160,10 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    `ai_rename`), records the title it replaced, and Undo restores that exact title for 24 h unless the workspace was
    renamed again since. Its suggestion reads stored data only, and its daemon calls are `fetch_workspaces` for one id
    and `set_workspace_title`. Guarded by `tests/rename.test.ts` ([docs/ai-roles.md](docs/ai-roles.md#rename-with-ai)).
+13. **Every list row has the row menu** (`every-list-row-has-the-row-menu`). `menu` is required on `HomeList` and its
+   rows' opener is required, so right-click, long-press and Shift+F10 open Follow-up's row menu on every list (Home,
+   search results, the sidebar view), never the platform's Copy/Paste menu. Items a surface can't serve are left
+   out, not shown dead. Guarded by `tests/row-menu.test.ts` ([docs/client.md](docs/client.md#row-menu)).
 
 ## Bugs
 
