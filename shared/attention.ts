@@ -1,5 +1,6 @@
 import { batchView, FINISH_LINE, stuckLine, unconfirmedRefs } from "./status";
-import { completionCheck, statusKnown, summary, type Batch, type Pr, type Workspace, type Status } from "./model";
+import { completionCheck, liveWorkingTask, statusKnown, summary, type Batch, type Pr, type Workspace, type Status } from "./model";
+import { workingLine } from "./task-status";
 import { followUpObligations, recoveryBatch } from "./follow-up";
 import { orderedStacks, settledForDisplay } from "./presentation";
 import { githubApproved, graphiteReady, isGithubFlow, mergeBlockers, prActionBlocks } from "./pr-actions";
@@ -201,8 +202,12 @@ export function liveLine(w: Workspace, now = Date.now()): { icon: LiveIcon; text
   // Queued work, in the same words as the agent card and Home (shared/status.ts). Repairs you send by hand live in Needs you.
   if (view?.phase === "queued" && (view.kind === "finish" || w.enable_auto_sends)) return { icon: view.fixing ? "spinner" : "waiting", text: view.line, since: view.batch.createdAt };
   if (w.runtimeBusy) return { icon: "spinner", text: "Main agent is working", since: null };
+  // A working task spins only while its recorded agent is running (invariant `a-task-only-says-working-when-its-agent-is`).
+  // Otherwise it says what the task row says: "<agent> idle", "<agent> closed" or "In progress", with no spinner.
+  const live = liveWorkingTask(w);
+  if (live) return { icon: "spinner", text: live.title, since: null };
   const working = followUpObligations(w).find(o => o.status === "working");
-  if (working) return { icon: "spinner", text: working.title, since: null };
+  if (working) return { icon: "waiting", text: `${working.title} · ${workingLine(working, w.taskAgents ?? {}).text}`, since: null };
   // A wait the agent declared (a waiting task: a release, a reload window, a detached job) says what it waits on. The
   // waiting icon, Home's Waiting group and the brief's "Waiting on others" already say it waits, so the line doesn't.
   const waiting = followUpObligations(w).find(o => o.status === "waiting");

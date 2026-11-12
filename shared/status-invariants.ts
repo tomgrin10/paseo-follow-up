@@ -6,12 +6,13 @@ import { answerMessage, duplicateOpenQuestions, isOther, parseAnswerMessage } fr
 import { shouldReopen, type Brief } from "./brief";
 import { flagHeadline } from "./headline";
 import type { InboxRow } from "./inbox";
-import { completionCheck, summary } from "./model";
+import { completionCheck, liveWorkingTask, summary } from "./model";
 import { asksForReviewers, liveLine, needsYou } from "./attention";
 import { trackedGroup, type HomeModel } from "./home";
 import { freshPriorities, type Priority } from "./priorities";
 import { agentCard, automaticHold, batchView, holdSuperseded } from "./status";
 import { followUpObligations } from "./follow-up";
+import { claimsWorking, taskStatus } from "./task-status";
 import { cadence, movingReason, OBSERVATION_FRESH_MS, POLL_IDLE_MS, RUNNING_POLL_MS, TICK_MS } from "./poll";
 import { staleUpdatePhase, type UpdatePhase } from "./updates";
 import { compactPrStatus, prPresentation } from "./presentation";
@@ -28,6 +29,26 @@ const inFlight = (w: Workspace) => w.batches.some(b => ["sending", "sent"].inclu
 const lines = (w: Workspace, now: number) => [liveLine(w, now).text, agentCard(w, now)?.line ?? "", batchView(w, now)?.line ?? "", ...needsYou(w, now).flatMap(i => [i.title, "blocker" in i ? i.blocker ?? "" : ""])];
 
 export const INVARIANTS: Invariant[] = [
+  {
+    id: "a-task-only-says-working-when-its-agent-is",
+    why: "2026-11-12: tasks read \"Agent working\" for days because the label mirrored the stored status=working, not any agent's live state; the panel's live line kept a spinner on a task whose agent had closed. Every surface that derives \"working\" from a task (the task row and sheet, the live line, the summary's Agent handling, Home's Agent working group) reads the recorded agent's live state (Workspace.taskAgents, shared/task-status.ts); with no live state known it says In progress, never working.",
+    check(w, now) {
+      const agents = w.taskAgents ?? {};
+      const running = (id: string | undefined) => !!id && agents[id]?.state === "working";
+      // The task row and sheet, with the stored live states and with none.
+      for (const o of followUpObligations(w)) for (const known of [agents, {}]) {
+        const s = taskStatus(o, w, known, now);
+        if ((claimsWorking(s.text) || s.tone === "working") && !(known === agents && running(o.workingAgentId))) return `task row "${s.text}" with no live working agent`;
+      }
+      // Anything else that spins or says handling needs a running agent or Follow-up's own batch in flight.
+      const working = followUpObligations(w).find(o => o.status === "working" && !running(o.workingAgentId));
+      const live = liveLine(w, now);
+      if (working && live.icon === "spinner" && live.text.startsWith(working.title)) return `live line spins on "${working.title}" with no live working agent`;
+      if (summary(w, now).status === "handling" && !w.runtimeBusy && !inFlight(w) && !liveWorkingTask(w)) return `"${summary(w, now).label}: ${summary(w, now).reason}" with no live working agent`;
+      if (trackedGroup(w, now) === "running" && !w.runtimeBusy) return "Home's running group with no live working agent";
+      return null;
+    },
+  },
   {
     id: "poll-backoff-never-hides-a-moving-pr",
     why: "2026-11-11 cpu-load §5: PR polling backs off for settled repositories. A PR that can still change without bumping what the last read saw (merge queue, merge when ready, unknown mergeability, an error) is read every tick, one with running checks every 30 s, and a backed-off PR is never older than the completion gate allows (shared/poll.ts).",
@@ -99,7 +120,7 @@ export const INVARIANTS: Invariant[] = [
     check: (w, now) => {
       const live = liveLine(w, now);
       if (live.icon !== "spinner" || !/working/i.test(live.text)) return null;
-      return inFlight(w) || w.runtimeBusy || followUpObligations(w).some(o => o.status === "working") ? null : live.text;
+      return inFlight(w) || w.runtimeBusy || liveWorkingTask(w) ? null : live.text;
     },
   },
   {

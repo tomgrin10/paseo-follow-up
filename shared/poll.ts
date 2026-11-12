@@ -22,6 +22,13 @@ const GRAPHITE_IN_FLIGHT = /QUEUED_TO_MERGE|WAITING_TO_MERGE|REBASING|HANDED_OFF
 export type Cadence = "tick" | "checks" | "idle";
 /** A PR whose only movement is running checks is read this often. */
 export const RUNNING_POLL_MS = 30_000;
+/**
+ * Checks still running LONG_CHECKS_MS after the PR's last change (or since Follow-up first saw it) are read every
+ * LONG_RUNNING_POLL_MS: a result 2 minutes late beats spending the shared budget on checks that run for hours.
+ * 2026-11-12 live: 25 stacked PRs in one workspace had checks running for hours, ~3000 GraphQL points an hour at 30 s.
+ */
+export const LONG_CHECKS_MS = 10 * 60_000;
+export const LONG_RUNNING_POLL_MS = 120_000;
 /** Why a PR must be read every tick, or null when it may back off. */
 export function movingReason(s: Snapshot | null | undefined, error: string | null | undefined): string | null {
   return movingReasons(s, error)[0] ?? null;
@@ -73,13 +80,16 @@ export function budgetTier(b: Budget | null | undefined, now: number): Tier {
  * only checks are running (unless the budget is critical).
  * Settled open or closed PRs: every POLL_IDLE_MS. Merged: every MERGED_POLL_MS.
  */
-export function dueForRead(i: { snapshot: Snapshot | null | undefined; error: string | null | undefined; changedAt: number | null; readAt: number; now: number; tier: Tier; repoUrgent: boolean }): boolean {
+export function dueForRead(i: { snapshot: Snapshot | null | undefined; error: string | null | undefined; changedAt: number | null; readAt: number; now: number; tier: Tier; repoUrgent: boolean; since?: number | null }): boolean {
   if (i.tier === "critical") return false;
   const c = cadence(i.snapshot, i.error, i.changedAt, i.now);
   if (c === "tick") return true;
   const age = i.now - i.readAt;
   // Half a tick of slack: ticks drift a little, and 29.9 s must not wait for the next tick.
-  if (c === "checks") return age >= RUNNING_POLL_MS - TICK_MS / 2;
+  if (c === "checks") {
+    const long = i.since != null && i.now - i.since >= LONG_CHECKS_MS;
+    return age >= (long ? LONG_RUNNING_POLL_MS : RUNNING_POLL_MS) - TICK_MS / 2;
+  }
   if (i.tier === "low") return i.snapshot?.state !== "MERGED" && i.repoUrgent && age >= LOW_IDLE_MS;
   return age >= (i.snapshot?.state === "MERGED" ? MERGED_POLL_MS : POLL_IDLE_MS);
 }

@@ -1,0 +1,1 @@
+- Follow-up uses far less of your GitHub API limit: an agent finishing a turn rechecks only its own workspace's pull requests, and agents finishing together share one check.

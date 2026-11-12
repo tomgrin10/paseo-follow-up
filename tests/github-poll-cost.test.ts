@@ -258,8 +258,9 @@ test("per-PR backoff: a PR with running checks doesn't drag its repository's mer
   await github.observe(prs, { background: true });
   const start = f.calls.points;
   for (let i = 0; i < 4 * 60; i++) { now += TICK_MS; await github.observe(prs, { background: true }); }
-  // One hour: the running PR every 30 s (120 points) + 19 merged PRs twice (38) instead of 20 × 240 = 4800.
-  assert.equal(f.calls.points - start, 120 + 19 * 2);
+  // One hour: the running PR every 30 s for its first 10 minutes, then every 2 minutes (44 points), + 19 merged PRs
+  // twice (38), instead of 20 × 240 = 4800.
+  assert.equal(f.calls.points - start, 44 + 19 * 2);
 });
 
 test("a required check that never reported isn't running: the PR backs off like any settled PR", async () => {
