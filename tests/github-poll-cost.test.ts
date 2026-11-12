@@ -184,8 +184,8 @@ test("tokens: one lookup per owner, the account map like the gh wrapper, a dead 
   assert.equal(await explicit("acme"), "explicit");
 });
 
-test("the deploy probe runs one gcloud call per fleet read once its serving revisions are known", async () => {
-  let now = clock; const calls: string[] = [];
+test("the deploy probe runs one gcloud call per fleet read once its serving revisions are known, and spawns no gh", async () => {
+  let now = clock; const calls: string[] = []; const compares: string[] = [];
   const sha = "b".repeat(40);
   const deployments = new Deployments(async (command, args) => {
     calls.push(`${command} ${args.slice(0, 3).join(" ")}`);
@@ -193,12 +193,15 @@ test("the deploy probe runs one gcloud call per fleet read once its serving revi
     if (args[0] === "auth") return "token";
     if (args[1] === "services") return JSON.stringify(["backend", "etl", "interpretation", "public-api", "web"].map(role => ({ metadata: { name: `hero-service-vspm-${role}-x`, labels: { "cloud.googleapis.com/location": "us-central1" } }, status: { conditions: [{ type: "Ready", status: "True" }], traffic: [{ revisionName: `${role}-r1`, percent: 100 }] } })));
     return JSON.stringify({ spec: { containers: [{ name: "app", image: `us-central1-docker.pkg.dev/hero-production-environments/hero-docker-repo/prod-vspm-backend@sha256:${"1".repeat(64)}` }] }, status: { conditions: [{ type: "Ready", status: "True" }] } });
-  }, (async (url: string) => ({ ok: true, text: async () => JSON.stringify(url.includes("/manifests/") ? { config: { digest: `sha256:${"3".repeat(64)}` } } : { config: { Labels: { "org.opencontainers.image.revision": sha } } }) })) as unknown as typeof fetch, () => now);
+  }, (async (url: string) => ({ ok: true, text: async () => JSON.stringify(url.includes("/manifests/") ? { config: { digest: `sha256:${"3".repeat(64)}` } } : { config: { Labels: { "org.opencontainers.image.revision": sha } } }) })) as unknown as typeof fetch, () => now, { rest: async (_repo: string, path: string) => { compares.push(path); return { status: "ahead" }; } } as any);
   const target = pr({ repo: "herosecurity/hero-poc", key: "herosecurity/hero-poc#1", snapshot: { ...pr().snapshot!, state: "MERGED", mergeCommit: "a".repeat(40) } });
   for (let minute = 0; minute < 10; minute++) { for (let t = 0; t < 4; t++) { await deployments.observe([target]); now += TICK_MS; } }
   const gcloud = calls.filter(c => c.startsWith("gcloud run"));
   assert.equal(gcloud.filter(c => c.includes("services")).length, 10, "one fleet read a minute");
   assert.equal(gcloud.filter(c => c.includes("revisions")).length, 5, "each serving revision described once, not every minute");
+  // 2026-11-12 (rc.3 live check): the ancestry compare still spawned gh, ~50 at a time after a start or a deploy.
+  assert.deepEqual(calls.filter(c => c.startsWith("gh ")), [], "ancestry reads go in process, not through gh");
+  assert.equal(compares.length, 1, "one compare per (merge, serving commit), cached");
 });
 
 test("the engine's timer tick may back off; a refresh during it still gets a fresh read right after", async t => {
