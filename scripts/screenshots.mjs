@@ -397,7 +397,11 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   if (argv.includes("--rename-review")) {
     const mode = m => fs.writeFile(join(home, "claude-mode"), m);
     // One state can't hold the harness slot: each shot gets 90 s, then fails on its own and the run moves on.
-    const bounded = (name, ...rest) => Promise.race([shoot(name, ...rest), new Promise(r => setTimeout(() => { failures.push(`${name} (timed out)`); r(); }, 90_000))]);
+    const bounded = async (name, ...rest) => {
+      let timer;
+      const late = new Promise(r => { timer = setTimeout(() => { failures.push(`${name} (timed out)`); r(); }, 90_000); });
+      try { await Promise.race([shoot(name, ...rest), late]); } finally { clearTimeout(timer); }
+    };
     const billingId = seeded.workspaces.find(w => w.key === "billing").workspaceId;
     const rowMenuAt = async page => {
       await openHome(page);
@@ -444,6 +448,9 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       await ready(page);
       await page.getByRole("button", { name: "Rename" }).last().click();
       await page.getByText(/^Renamed to APP-142: Retry soft card declines with backoff/).last().waitFor();
+      // The toast lasts 10 s (held under the pointer): shoot it now, with the pointer resting on it.
+      await page.getByText(/^Renamed to APP-142/).last().hover();
+      await page.screenshot({ path: join(out, "follow-up-rename-toast-live.png"), animations: "disabled", caret: "hide" });
     }));
     await bounded("rename-undo-link", DESKTOP, "light", async page => {
       await openHome(page);

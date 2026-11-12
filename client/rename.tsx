@@ -7,6 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { renameStatusRpc, renameWorkspaceRpc } from "../shared/contracts";
 import { checkName, NAME_MAX_CHARS, type RenameStatus } from "../shared/rename";
 import { ago } from "../shared/attention";
+import { errorText } from "../shared/errors";
 import { Button, SubmitScope, text, type Theme } from "./kit";
 import { overviewKey } from "./keys";
 import { Spinner } from "./motion";
@@ -69,7 +70,7 @@ export function RenameDialog({ request, theme, compact, onClose }: { request: Re
       setInfo(s); setName(s.suggestion ?? ""); setEdited(false); setPhase("ready");
     } catch (e) {
       if (mine !== run.current) return;
-      setError(e instanceof Error ? e.message : String(e)); setPhase("error");
+      setError(errorText(e).replace(/^Couldn't suggest a (usable )?name[:.]?\s*/i, "").replace(/\s*Try again, or type one\.?$/i, "") || null); setPhase("error");
     }
   }, [request.workspaceId, status]);
   useEffect(() => { void suggest(); return () => { run.current++; }; }, [suggest]);
@@ -120,7 +121,10 @@ export function RenameDialog({ request, theme, compact, onClose }: { request: Re
           </View>
           {phase === "error" && <View accessibilityRole="alert" style={{ flexDirection: "row", gap: 6 }}>
             <View style={{ paddingTop: 2 }}><Icon name="TriangleAlert" size={13} color={c.statusWarning} /></View>
-            <Text style={[t.meta, { flex: 1, color: c.statusWarning }]}>{error}</Text>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={[t.meta, { color: c.statusWarning }]}>Couldn't suggest a name. Type one, or try again.</Text>
+              {!!error && <Text style={t.small}>{error}</Text>}
+            </View>
           </View>}
           {phase === "ready" && edited && !check.ok && <Text accessibilityLiveRegion="polite" style={[t.small, { color: c.statusDanger }]}>{check.reason}</Text>}
           {phase === "ready" && !edited && <Text style={t.small}>From the Summary, PRs and linked items. Edit it if it's not quite right.</Text>}

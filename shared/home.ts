@@ -176,7 +176,9 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
     if (row.workspaceId && !anyAgent.has(row.workspaceId)) anyAgent.set(row.workspaceId, row.agentId);
     const section = sectionOf(row, now);
     const w = row.workspaceId ? tracked.get(row.workspaceId) : undefined;
-    const t = rowTitle(row);
+    // Paseo's live workspace list names the workspace (a rename shows at once); the inbox's copy can be a minute old.
+    const live = row.workspaceId && row.workspaceTitle ? paseo.get(row.workspaceId)?.name : undefined;
+    const t = rowTitle(live ? { ...row, workspaceTitle: live } : row);
     const base = { key: `agent:${row.agentId}`, agentId: row.agentId, workspaceId: row.workspaceId, title: t.primary, agent: t.agent, project: project(row.workspaceId), readyToArchive: false };
     if (section === "needs") {
       // The workspace's items go with its main agent's flag; another root agent's flag stands on its own.
