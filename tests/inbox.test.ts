@@ -247,16 +247,16 @@ test("D4 first run imports Paseo's unread and recent unanswered agents; older on
   await inbox.start();
   const s = await inbox.store.snapshot();
   assert.deepEqual(Object.keys(s.entries).filter(id => stateOf(s.entries[id]) === "NEEDS").sort(), ["perm", "recent", "unread"]);
-  assert.deepEqual(s.unsorted?.sort(), ["never-asked", "old"]);
+  assert.deepEqual([...(s.unsorted ?? [])].sort(), ["never-asked", "old"]);
   assert.ok(s.importedAt);
   assert.equal(s.revision, REVISION, "a fresh import needs no migration");
   // A confirmed "Sign off all" empties Unsorted; one Undo restores the whole batch.
   await inbox.act({ action: "unsorted_sign_off" });
   assert.equal((await inbox.store.snapshot()).unsorted, null);
   await inbox.act({ action: "batch_undo" });
-  assert.deepEqual((await inbox.store.snapshot()).unsorted?.sort(), ["never-asked", "old"]);
+  assert.deepEqual([...((await inbox.store.snapshot()).unsorted ?? [])].sort(), ["never-asked", "old"]);
   await inbox.start();
-  assert.deepEqual((await inbox.store.snapshot()).unsorted?.sort(), ["never-asked", "old"], "import runs once");
+  assert.deepEqual([...((await inbox.store.snapshot()).unsorted ?? [])].sort(), ["never-asked", "old"], "import runs once");
   await done();
 });
 
@@ -293,7 +293,7 @@ test("first run: the 7-day rule reads the agent's real last activity, not Paseo'
   assert.equal(stateOf(s.entries.fresh), "NEEDS");
   assert.equal(s.entries.stale?.needs ?? null, null);
   assert.equal(s.entries["stale-created"]?.needs ?? null, null);
-  assert.deepEqual(s.unsorted?.sort(), ["stale", "stale-created"]);
+  assert.deepEqual([...(s.unsorted ?? [])].sort(), ["stale", "stale-created"]);
   await done();
 });
 
@@ -341,7 +341,7 @@ test("migration: a store imported by 1.1.0-beta.0 is repaired once, and only ent
   assert.equal(s.entries.closed.needs, null, "a closed agent's imported flag is dropped");
   assert.equal(s.entries.archived.needs, null, "an archived agent's imported flag is dropped");
   assert.equal(s.entries.old.needs, null, "really idle for 7+ days: moved to Unsorted");
-  assert.deepEqual(s.unsorted?.sort(), ["already-unsorted", "old"]);
+  assert.deepEqual([...(s.unsorted ?? [])].sort(), ["already-unsorted", "old"]);
   assert.equal(s.entries.recent.needs!.since, "2026-11-06T10:00:00.000Z", "a kept flag dates from real activity");
   assert.equal(s.entries.unread.needs!.since, "2026-10-01T10:00:00.000Z", "Paseo's unread stays, re-dated");
   assert.equal(s.entries["signed-off"].needs, null); assert.equal(s.entries["signed-off"].seq, 2, "the developer's sign-off is untouched");

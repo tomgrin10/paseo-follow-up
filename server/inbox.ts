@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { realTimers, stableMessageId, withDeadline, type Timers } from "./delivery";
 import { BackgroundAgents } from "./background-agents";
+import { deepFreeze } from "./store";
 import { emptyInbox, expired, inboxStateSchema, type OutboxEntry, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason, liveFlag, withoutRunState, FACT_REASONS } from "../shared/inbox";
 import type { State as FollowState, Workspace as FollowWorkspace } from "../shared/model";
 import { asksForReviewers } from "../shared/attention";
@@ -35,9 +36,15 @@ export class InboxStore {
   private saved: InboxState | null = null;
   constructor(readonly directory: string, private now: () => number = Date.now) {}
   private get path() { return join(this.directory, "inbox.json"); }
-  async read(): Promise<InboxState> {
-    if (this.unsaved) return structuredClone(this.unsaved);
-    if (this.saved) return structuredClone(this.saved);
+  /** A private, mutable copy (what a mutation works on). */
+  async read(): Promise<InboxState> { return structuredClone(await this.load()); }
+  /**
+   * The current state, shared and deep-frozen (unsaved lastSeen included). 2026-11-12: snapshot() deep-copied the whole
+   * inbox on every read, about half the idle worker's CPU at 140 workspaces; a caller that changes it now throws.
+   */
+  private async load(): Promise<InboxState> {
+    if (this.unsaved) return this.unsaved;
+    if (this.saved) return this.saved;
     let state: InboxState;
     try { state = inboxStateSchema.parse(JSON.parse(await readFile(this.path, "utf8"))); }
     catch (error) {
@@ -46,8 +53,8 @@ export class InboxStore {
     }
     // What the file means, so an unchanged state isn't rewritten (a pretty-printed file is rewritten compact on its next change).
     this.written ??= { text: JSON.stringify(state), rest: rest(state), at: this.now() };
-    this.saved = structuredClone(state);
-    return state;
+    this.saved = deepFreeze(state);
+    return this.saved;
   }
   async mutate<T>(work: (state: InboxState) => T | Promise<T>): Promise<T> {
     const next = this.tail.then(async () => {
@@ -59,7 +66,7 @@ export class InboxStore {
     this.tail = next.catch(() => undefined);
     return next;
   }
-  async snapshot(): Promise<InboxState> { await this.tail; return this.read(); }
+  async snapshot(): Promise<InboxState> { await this.tail; return this.load(); }
   /** Writes a held lastSeen now; the worker's stop calls it. */
   async flush(): Promise<void> {
     await this.tail;
@@ -71,7 +78,7 @@ export class InboxStore {
     inboxStateSchema.parse(state);
     const text = JSON.stringify(state);
     if (this.written?.text === text) { this.unsaved = null; return; }
-    if (this.written && this.written.rest === rest(state) && this.now() - this.written.at < LAST_SEEN_WRITE_MS) { this.unsaved = structuredClone(state); return; }
+    if (this.written && this.written.rest === rest(state) && this.now() - this.written.at < LAST_SEEN_WRITE_MS) { this.unsaved = deepFreeze(state); return; }
     await this.write(state, text);
   }
   private async write(state: InboxState, text = JSON.stringify(state)): Promise<void> {
@@ -81,7 +88,7 @@ export class InboxStore {
       const file = await open(temporary, "wx", 0o600);
       try { await file.writeFile(text); await file.sync(); } finally { await file.close(); }
       await rename(temporary, this.path);
-      this.written = { text, rest: rest(state), at: this.now() }; this.unsaved = null; this.saved = structuredClone(state);
+      this.written = { text, rest: rest(state), at: this.now() }; this.unsaved = null; this.saved = deepFreeze(state);
     } finally { await unlink(temporary).catch(() => undefined); }
   }
 }
