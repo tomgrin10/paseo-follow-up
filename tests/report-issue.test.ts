@@ -77,12 +77,14 @@ async function setup(gh: ReturnType<typeof memoryGithub>, extra: Partial<ReportP
   return { reporter, shot, dir, fake, close: async () => { await fake.close(); await rm(dir, { recursive: true, force: true }); } };
 }
 
-const bug = {
-  kind: "bug", title: "Send repairs stays queued after GitHub returns 502",
+const bugFields = {
+  title: "Send repairs stays queued after GitHub returns 502",
   what_happened: "Send on acme/billing shows \"didn't work\" every time; mail me at sam@acme.io.",
   steps: ["Track a workspace with a failed check", "Click Send"], expected: "The batch goes to the agent.", actual: "Error toast, batch stays queued.",
   findings: "send_repairs gave HTTP 502 on 'Retry declined cards with backoff' twice.",
 };
+const bug = { kind: "bug", fields: bugFields };
+const withFields = (extra: Record<string, unknown>) => ({ kind: "bug", fields: { ...bugFields, ...extra } });
 
 test("report-issue-costs-no-standing-context: the tool's description is one short line and nothing else is always on", () => {
   const d = reportToolDescription("Follow-up");
@@ -111,11 +113,11 @@ test("call 1 (kind + summary) returns the procedure, reads nothing and writes no
 test("missing required fields are refused with the list, per kind", async () => {
   const gh = memoryGithub(); const s = await setup(gh);
   try {
-    const out = await s.reporter.run("agent-1", { kind: "bug", title: "x", what_happened: "y" });
+    const out = await s.reporter.run("agent-1", { kind: "bug", fields: { title: "x", what_happened: "y" } });
     assert.equal(out.stage, "missing"); assert.deepEqual(out.missing, ["steps", "expected", "actual"]); assert.equal(out.planId, undefined);
-    const f = await s.reporter.run("agent-1", { kind: "feature", title: "Dark pills" });
+    const f = await s.reporter.run("agent-1", { kind: "feature", fields: { title: "Dark pills" } });
     assert.deepEqual(f.missing, ["problem", "proposal"]);
-    const fb = await s.reporter.run("agent-1", { kind: "feedback", title: "Love it", feedback: "The pill is great" });
+    const fb = await s.reporter.run("agent-1", { kind: "feedback", fields: { title: "Love it", feedback: "The pill is great" } });
     assert.equal(fb.stage, "dry_run");
   } finally { await s.close(); }
 });
@@ -134,7 +136,7 @@ test("report-issue-files-only-after-confirm: the dry run only reads; confirm wit
     const filed = await s.reporter.run("agent-1", { confirm: true, planId: dry.planId });
     assert.equal(filed.filed, true); assert.equal(filed.url, `https://github.com/${REPO}/issues/200`);
     const post = gh.writes().find(r => r.path === `repos/${REPO}/issues`)!;
-    assert.equal(post.body.title, bug.title); assert.deepEqual(post.body.labels, ["bug", "via-agent"]);
+    assert.equal(post.body.title, bugFields.title); assert.deepEqual(post.body.labels, ["bug", "via-agent"]);
     await assert.rejects(s.reporter.run("agent-1", { confirm: true, planId: dry.planId }), /expired or was already used/);
   } finally { await s.close(); }
 });
@@ -158,19 +160,19 @@ test("report-issue-never-carries-secrets: what the dry run shows and what GitHub
 test("comment_on adds the details to an existing issue instead", async () => {
   const gh = memoryGithub({ issues: [{ number: 131, title: "Send repairs fails" }] }); const s = await setup(gh);
   try {
-    const dry = await s.reporter.run("agent-1", { ...bug, comment_on: 131 });
+    const dry = await s.reporter.run("agent-1", withFields({ comment_on: 131 }));
     assert.match(String(dry.action), /^comment on #131/);
     const out = await s.reporter.run("agent-1", { confirm: true, planId: dry.planId });
     assert.equal(out.action, "commented");
     assert.ok(gh.writes().every(r => r.path !== `repos/${REPO}/issues`));
-    await assert.rejects(s.reporter.run("agent-1", { ...bug, comment_on: 999 }), /isn't an issue/);
+    await assert.rejects(s.reporter.run("agent-1", withFields({ comment_on: 999 })), /isn't an issue/);
   } finally { await s.close(); }
 });
 
 test("screenshots: no upload without consent, and confirm asks for an explicit choice", async () => {
   const gh = memoryGithub(); const s = await setup(gh);
   try {
-    const dry = await s.reporter.run("agent-1", { ...bug, screenshots: [{ path: s.shot, description: "The error toast" }] });
+    const dry = await s.reporter.run("agent-1", withFields({ screenshots: [{ path: s.shot, description: "The error toast" }] }));
     const shots = dry.screenshots as { consent: string; files: string[]; ask: string };
     assert.equal(shots.consent, "required"); assert.match(shots.ask, /check them/);
     assert.deepEqual(shots.files, [`${s.shot} → follow-up/2026-11-12-send-repairs-stays-queued-after-github-returns-502/1.png`]);
@@ -187,7 +189,7 @@ test("screenshots: no upload without consent, and confirm asks for an explicit c
 test("screenshots: with consent they upload to a new public assets repo with a README and embed raw URLs", async () => {
   const gh = memoryGithub({ assetsRepo: "missing" }); const s = await setup(gh);
   try {
-    const dry = await s.reporter.run("agent-1", { ...bug, screenshots: [{ path: s.shot, description: "The error toast" }] });
+    const dry = await s.reporter.run("agent-1", withFields({ screenshots: [{ path: s.shot, description: "The error toast" }] }));
     const out = await s.reporter.run("agent-1", { confirm: true, planId: dry.planId, screenshot_consent: true });
     const path = "follow-up/2026-11-12-send-repairs-stays-queued-after-github-returns-502/1.png";
     assert.deepEqual([...gh.files.keys()], ["README.md", path]);
@@ -202,7 +204,7 @@ test("screenshots: an upload failure or a private assets repo files text-only an
   for (const o of [{ failUpload: true, assetsRepo: "public" as const }, { assetsRepo: "private" as const }]) {
     const gh = memoryGithub(o); const s = await setup(gh);
     try {
-      const dry = await s.reporter.run("agent-1", { ...bug, screenshots: [{ path: s.shot, description: "The error toast" }] });
+      const dry = await s.reporter.run("agent-1", withFields({ screenshots: [{ path: s.shot, description: "The error toast" }] }));
       const out = await s.reporter.run("agent-1", { confirm: true, planId: dry.planId, screenshot_consent: true });
       assert.equal(out.filed, true);
       assert.match(String((out.screenshots as { reason: string }).reason), /Upload failed/);
@@ -240,8 +242,8 @@ test("a long body is cut to fit the link, with a note to paste the full text", (
 test("a screenshot that isn't an image or doesn't exist is refused at the dry run", async () => {
   const gh = memoryGithub(); const s = await setup(gh);
   try {
-    await assert.rejects(s.reporter.run("agent-1", { ...bug, screenshots: [{ path: join(s.dir, "notes.txt"), description: "x" }] }), /not an image/);
-    await assert.rejects(s.reporter.run("agent-1", { ...bug, screenshots: [{ path: join(s.dir, "gone.png"), description: "x" }] }), /no such file/);
+    await assert.rejects(s.reporter.run("agent-1", withFields({ screenshots: [{ path: join(s.dir, "notes.txt"), description: "x" }] })), /not an image/);
+    await assert.rejects(s.reporter.run("agent-1", withFields({ screenshots: [{ path: join(s.dir, "gone.png"), description: "x" }] })), /no such file/);
   } finally { await s.close(); }
 });
 
