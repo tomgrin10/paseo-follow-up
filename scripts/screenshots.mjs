@@ -193,7 +193,8 @@ const WORKSPACES = [
     done: "Dark mode tokens shipped in #181 and checked in both themes" },
   { key: "webhooks", project: "app", title: "Webhook signing", minute: 25, prompt: "APP-160: sign outgoing webhook payloads with HMAC and document the header.",
     steps: [rpc("follow.enroll", { goal: "APP-160 Sign webhook payloads" }), rpc("follow.register-pr", { repo: "example/app", number: 170, stack: "Webhook signing" }),
-      bash("pnpm test webhooks", "pass 36"), msg("Opened example/app#170 and asked Ravi for review. The signature header is documented in docs/webhooks.md.")] },
+      bash("pnpm test webhooks", "pass 36"), msg("Opened example/app#170 and asked Ravi for review. The signature header is documented in docs/webhooks.md."),
+      rpc("follow.needs-you", { kind: "review", ask: "Read the signature header docs in #170 before it merges" })] },
   { key: "email", project: "app", title: "Onboarding email", minute: 50, prompt: "APP-155: add the welcome email template and send it after sign-up.",
     steps: [rpc("follow.enroll", { goal: "APP-155 Welcome email after sign-up" }), rpc("follow.register-pr", { repo: "example/app", number: 160, stack: "Onboarding email" }),
       msg("Opened example/app#160 with the welcome template.")] },
@@ -227,7 +228,8 @@ const WORKSPACES = [
         links: [{ path: "docs/billing/retries.md", label: "Retry notes" }], pr: "example/app#142" }),
       msg("The backoff is in example/app#142 and the dunning email in #143. Q1 asks whether declined cards should retry."),
       rpc("follow.needs-you", { kind: "decision", ask: "Pick whether declined cards retry", questions: ["Q1"] }),
-    ] },
+      { gate: "billing" },
+    ], worked: 4 },
   // The README hero's other groups: Waiting (signed off, PRs out), Later (snoozed), Fixing (a repair batch sent and
   // the agent on it). `after` runs once every PR snapshot is in.
   { key: "usage", project: "web", after: "signoff", title: "Usage dashboard", minute: 8, prompt: "WEB-30: charts for the usage dashboard. Keep the PR a draft until the design review.",
@@ -278,6 +280,13 @@ async function seed({ call, home }) {
     await call("follow.control", { workspaceId: w.id, enable_auto_sends: false });
     await client.sendMessage(agent.id, spec.prompt, { messageId: `shots-${spec.key}` });
     const last = [...spec.steps].reverse().find(s => s.item?.type === "assistant_message")?.item.text;
+    // `worked`: the turn spans that many minutes of the clock (the chat's "Worked for"), held at its gate meanwhile.
+    const gate = spec.steps.find(s => s.gate)?.gate;
+    if (gate) {
+      await until(`${spec.key} at its gate`, () => fs.access(join(home, `fixture-gated-${gate}`)).then(() => true, () => false));
+      await setDaemonClock(at(spec.minute + (spec.worked ?? 0)));
+      await fs.writeFile(join(home, `fixture-gate-${gate}`), "");
+    }
     await until(`${spec.key} turn`, async () => {
       const entries = (await client.fetchAgentTimeline(agent.id, { projection: "canonical", limit: 50 })).entries;
       const failure = entries.find(e => e.item.type === "assistant_message" && /\[System Error\]/.test(e.item.text));
@@ -289,7 +298,7 @@ async function seed({ call, home }) {
     // Settle this workspace inside its own phase. Under the crawling clock, Date-based caches (the daemon directory) and
     // settle windows (a permission's 30 s) only pass when the clock moves, so step it a minute and wait for the row and
     // two inbox ticks (every 15 s, real time). Otherwise they settle in whichever later phase comes first.
-    await setDaemonClock(at(spec.minute) + 61_000);
+    await setDaemonClock(at(spec.minute + (spec.worked ?? 0)) + 61_000);
     if (spec.waitFor !== "running") await until(`${spec.key} inbox flag`, async () => (await call("follow.inbox-list", {})).rows.some(r => r.agentId === agent.id && r.needs), { tries: 120, every: 500 });
     await inboxTicks(home, 2);
     workspaces.push({ key: spec.key, title: spec.title, workspaceId: w.id, agentId: agent.id });
@@ -756,7 +765,7 @@ try {
   // It starts ten minutes before BASE, so the clock only ever moves forward.
   await fs.writeFile(clockFile, JSON.stringify({ fake: at(-10), real: Date.now(), rate: 1 }));
 
-  const env = harnessEnv(root, { home, strip: github.strip, set: { ...github.env, PASEO_DAEMON_URL: url, PASEO_SERVER_ID: "srv_followupshots", PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true", PATH: `${bin}:${process.env.PATH}`, FOLLOW_SHOTS_CLOCK: clockFile, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${join(root, "clock.cjs")}`.trim(), TZ: "UTC" } });
+  const env = harnessEnv(root, { home, strip: github.strip, set: { ...github.env, PASEO_DAEMON_URL: url, PASEO_SERVER_ID: "srv_followupshots", FIXTURE_MODEL_LABEL: "Agent", PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true", PATH: `${bin}:${process.env.PATH}`, FOLLOW_SHOTS_CLOCK: clockFile, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${join(root, "clock.cjs")}`.trim(), TZ: "UTC" } });
   const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env, timeout: 120000, maxBuffer: 1 << 22 })).stdout);
   const daemonLog = openSync(join(root, "daemon.log"), "a");
   daemon = spawnDaemon(["daemon", "run", "--home", home], { env, stdio: ["ignore", daemonLog, daemonLog] });

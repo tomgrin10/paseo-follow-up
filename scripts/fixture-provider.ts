@@ -20,7 +20,7 @@ export default function contribute(server: PluginServerContext) {
         onEvent(listener) { listeners.add(listener); return () => listeners.delete(listener); },
         async close() { listeners.clear(); },
         async send(input) {
-          if (input.type === "catalog") emit({ type: "catalog", requestId: input.requestId, catalog: { models: [{ id: "fixture", label: "Fixture", isDefault: true }], modes: [{ id: "default", label: "Default" }, { id: "bypassPermissions", label: "Bypass" }, { id: "full-access", label: "Full access" }, { id: "auto", label: "Auto" }, { id: "acceptEdits", label: "Accept edits" }, { id: "plan", label: "Plan" }] } });
+          if (input.type === "catalog") emit({ type: "catalog", requestId: input.requestId, catalog: { models: [{ id: "fixture", label: process.env.FIXTURE_MODEL_LABEL || "Fixture", isDefault: true }], modes: [{ id: "default", label: "Default" }, { id: "bypassPermissions", label: "Bypass" }, { id: "full-access", label: "Full access" }, { id: "auto", label: "Auto" }, { id: "acceptEdits", label: "Accept edits" }, { id: "plan", label: "Plan" }] } });
           else if (input.type === "sessions") emit({ type: "sessions", requestId: input.requestId, sessions: [] });
           else if (input.type === "session.open") {
             sessions.set(input.sessionId, { ...input.config.env, FIXTURE_MARKER: String(input.config.providerOptions?.fixture_marker ?? ""), FIXTURE_MODE: String(input.config.providerOptions?.fixture_mode ?? "rollout"), FIXTURE_GOAL: String(input.config.providerOptions?.fixture_goal ?? "Ship and verify the migration rollout") });
@@ -29,7 +29,7 @@ export default function contribute(server: PluginServerContext) {
             await writeFile(join(process.env.PASEO_HOME!, "fixture-config.json"), JSON.stringify({ mcp: Object.keys(input.config.mcpServers), bridge: input.config.env.FOLLOW_UP_CLI, instructions: input.config.systemPrompt }));
             emit({ type: "session.opened", requestId: input.requestId, sessionId: input.sessionId, capabilities, restoration: "core", cwd: input.config.cwd, persistence: { version: 1, data: { sessionId: input.sessionId } } });
             // Report the session's mode the way real providers do, so the agent's currentModeId is set.
-            emit({ type: "session.config", sessionId: input.sessionId, config: { model: "fixture", mode: input.config.mode ?? "default", models: [{ id: "fixture", label: "Fixture", isDefault: true }], modes: [{ id: "default", label: "Default" }, { id: "bypassPermissions", label: "Bypass" }, { id: "full-access", label: "Full access" }, { id: "auto", label: "Auto" }, { id: "acceptEdits", label: "Accept edits" }, { id: "plan", label: "Plan" }], thinkingOptions: [], settings: [] } });
+            emit({ type: "session.config", sessionId: input.sessionId, config: { model: "fixture", mode: input.config.mode ?? "default", models: [{ id: "fixture", label: process.env.FIXTURE_MODEL_LABEL || "Fixture", isDefault: true }], modes: [{ id: "default", label: "Default" }, { id: "bypassPermissions", label: "Bypass" }, { id: "full-access", label: "Full access" }, { id: "auto", label: "Auto" }, { id: "acceptEdits", label: "Accept edits" }, { id: "plan", label: "Plan" }], thinkingOptions: [], settings: [] } });
             const history = await readFile(join(process.env.PASEO_HOME!, `fixture-history-${input.config.env.PASEO_AGENT_ID}.jsonl`), "utf8").catch(() => "");
             if (input.history === "replay") for (const line of history.trim().split("\n").filter(Boolean))
               emit({ type: "timeline.item", sessionId: input.sessionId, item: JSON.parse(line) });
@@ -54,7 +54,7 @@ export default function contribute(server: PluginServerContext) {
             // scripts/screenshots.mjs: fixture-scripts.json maps a prompt to a list of steps, so the chat shows a natural
             // prompt. { item } emits a timeline item, { rpc, input } calls a Follow-up RPC as this agent, { permission }
             // asks for a permission and waits for the answer, { hold: true } leaves the turn running.
-            const scripts = JSON.parse(await readFile(join(process.env.PASEO_HOME!, "fixture-scripts.json"), "utf8").catch(() => "{}")) as Record<string, { item?: Record<string, unknown>; rpc?: string; input?: Record<string, unknown>; permission?: { kind?: string; name: string; title: string; input: Record<string, unknown> }; hold?: boolean }[]>;
+            const scripts = JSON.parse(await readFile(join(process.env.PASEO_HOME!, "fixture-scripts.json"), "utf8").catch(() => "{}")) as Record<string, { item?: Record<string, unknown>; rpc?: string; input?: Record<string, unknown>; permission?: { kind?: string; name: string; title: string; input: Record<string, unknown> }; hold?: boolean; gate?: string }[]>;
             // "agent:<id>" scripts any other prompt to that one agent (a repair batch whose text the screenshots can't know).
             const steps = scripts[text] ?? scripts[`agent:${sessions.get(input.sessionId)!.PASEO_AGENT_ID}`];
             if (steps) {
@@ -76,6 +76,13 @@ export default function contribute(server: PluginServerContext) {
                     await new Promise<void>(resolve => { permissions.set(permissionId, resolve); emit({ type: "session.permission", sessionId: input.sessionId, request: { id: permissionId, kind: (ask.kind ?? "tool") as "tool", name: ask.name, title: ask.title, input: ask.input as never } }); });
                   }
                   if (step.hold) return;
+                  // { gate: name }: marks fixture-gated-<name> and waits for fixture-gate-<name>, so a script can move
+                  // the clock while the turn is still open (screenshots: a turn that worked for minutes, not 0 s).
+                  if (step.gate) {
+                    const home = process.env.PASEO_HOME!;
+                    await appendFile(join(home, `fixture-gated-${step.gate}`), "");
+                    while (!(await readFile(join(home, `fixture-gate-${step.gate}`), "utf8").then(() => true, () => false))) await new Promise(resolve => setTimeout(resolve, 100));
+                  }
                 }
               } finally { await rpcClient?.close(); }
               emit({ type: "session.turn", sessionId: input.sessionId, turnId, state: "completed" });
@@ -129,7 +136,7 @@ export default function contribute(server: PluginServerContext) {
             emit({ type: "request.completed", requestId: input.requestId });
           } else if (input.type === "session.configure") {
             const modes = [{ id: "default", label: "Default" }, { id: "bypassPermissions", label: "Bypass" }, { id: "full-access", label: "Full access" }, { id: "auto", label: "Auto" }, { id: "acceptEdits", label: "Accept edits" }, { id: "plan", label: "Plan" }];
-            emit({ type: "session.config", sessionId: input.sessionId, config: { model: "fixture", mode: input.changes.mode ?? undefined, models: [{ id: "fixture", label: "Fixture", isDefault: true }], modes, thinkingOptions: [], settings: [] } });
+            emit({ type: "session.config", sessionId: input.sessionId, config: { model: "fixture", mode: input.changes.mode ?? undefined, models: [{ id: "fixture", label: process.env.FIXTURE_MODEL_LABEL || "Fixture", isDefault: true }], modes, thinkingOptions: [], settings: [] } });
             emit({ type: "request.completed", requestId: input.requestId });
           } else if (input.type === "session.permission") {
             permissions.get(input.permissionId)?.(); permissions.delete(input.permissionId);
