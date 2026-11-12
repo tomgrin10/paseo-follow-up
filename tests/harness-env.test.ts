@@ -100,7 +100,49 @@ test("harnessEnv resolves no external tool to a real binary outside the harness 
     assert.ok(!(await which("claude", live.PATH))?.startsWith(root), "real: claude stays the host's");
     assert.ok((await which("mcpproxy", live.PATH))?.startsWith(root), "everything else stays stubbed");
     const optOuts: string[] = [];
-    for (const name of (await readdir("scripts")).filter(n => n.endsWith(".mjs") && n !== "harness-env.mjs")) if (/\breal:\s*\[/.test(await readFile(join("scripts", name), "utf8"))) optOuts.push(name);
+    for (const name of (await readdir("scripts")).filter(n => n.endsWith(".mjs") && n !== "harness-env.mjs")) if (/\breal:\s*(\[|REAL\b)/.test(await readFile(join("scripts", name), "utf8"))) optOuts.push(name);
     assert.deepEqual(optOuts, ["check-wait.mjs"], "only the opt-in live-model check keeps a real tool");
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+// 2026-11-12: harnessEnv stubbed codex (exit 127) while every harness daemon's config left the codex provider on. A
+// browser's provider refresh wrote to the dead stub and 0.15.4's worker crashed on the EPIPE; every shot after the first
+// landed on the welcome screen and timed out. The stubs and the providers come from one list (stubbedTools).
+test("harnessConfig turns off every provider whose tool is stubbed, and only those", async () => {
+  const { harnessConfig, stubbedTools, PROVIDER_TOOLS, STUBBED_TOOLS } = await import(resolve("scripts/harness-env.mjs"));
+  for (const tool of Object.keys(PROVIDER_TOOLS)) assert.ok(STUBBED_TOOLS.includes(tool), `${tool} is a provider tool the harness stubs`);
+  for (const real of [[], ["claude"], ["codex"], ["claude", "codex"]]) {
+    const providers = harnessConfig({ port: 1, real }).agents.providers;
+    for (const tool of Object.keys(PROVIDER_TOOLS)) {
+      const stubbed = stubbedTools(real).includes(tool);
+      assert.equal(providers[PROVIDER_TOOLS[tool]]?.enabled === false, stubbed, `real=[${real}]: ${tool}'s provider is ${stubbed ? "off, its tool is a stub" : "on, its tool is real"}`);
+    }
+  }
+  const config = harnessConfig({ port: 4321, mcp: true, webUi: true, extra: { plugins: { x: { enabled: true } } } });
+  assert.equal(config.daemon.listen, "127.0.0.1:4321");
+  assert.deepEqual([config.daemon.relay.enabled, config.daemon.browserTools.enabled, config.daemon.mcp.injectIntoAgents, config.features.webUi.enabled, config.plugins.x.enabled], [false, false, true, true, true]);
+});
+
+test("every harness daemon's config.json comes from harnessConfig, with the same `real` as its env", async () => {
+  const offenders: string[] = [];
+  for (const file of (await readdir("scripts")).filter(f => f.endsWith(".mjs") && f !== "harness-env.mjs")) {
+    const src = await readFile(join("scripts", file), "utf8");
+    if (/config\.json"\),\s*JSON\.stringify\((?!harnessConfig\()/.test(src) || /writeFile\(configFile,\s*JSON\.stringify\((?!harnessConfig\()/.test(src)) offenders.push(file);
+    if (/real:\s*\[/.test(src)) offenders.push(`${file} (a literal real list: share one constant between harnessEnv and harnessConfig)`);
+  }
+  assert.deepEqual(offenders, []);
+});
+
+test("daemonCrashes reads a worker crash out of a harness daemon's log", async () => {
+  const { daemonCrashes } = await import(resolve("scripts/harness-env.mjs"));
+  const log = [
+    JSON.stringify({ level: 30, msg: "Server listening on http://127.0.0.1:1" }),
+    JSON.stringify({ level: 40, msg: "Failed to refresh provider snapshot", err: { message: "Codex app-server exited with code 127" } }),
+    JSON.stringify({ level: 60, msg: "Uncaught exception — daemon crashing", err: { message: "write EPIPE" } }),
+    "[DaemonRunner] Worker crashed (code 1). Restarting worker...",
+  ].join("\n");
+  assert.deepEqual(daemonCrashes(log), ["Uncaught exception — daemon crashing: write EPIPE", "[DaemonRunner] Worker crashed (code 1). Restarting worker..."]);
+  assert.deepEqual(daemonCrashes(log.split("\n").slice(0, 2).join("\n")), [], "a failed refresh alone isn't a crash");
+  const shots = await readFile("scripts/screenshots.mjs", "utf8");
+  assert.match(shots, /const crash = await crashed\(\);\s*if \(crash\) throw new Error\(`the harness daemon crashed during \$\{name\}/, "screenshots fail at the shot that crashed the worker");
 });
