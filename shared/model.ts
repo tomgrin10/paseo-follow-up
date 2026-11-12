@@ -144,6 +144,16 @@ export const workspaceSchema = z.object({
   dormant: z.boolean().optional(),
   /** The main agent's provider conversation no longer exists; Follow-up stops sending to it. */
   goneAgent: z.object({ agentId: idSchema, at: z.string(), reason: z.string() }).nullable().optional(),
+  /** The main agent's title from Paseo, for "Next message to <title>". Absent: "the main agent". */
+  mainAgentTitle: z.string().nullable().optional(),
+  /** Open tasks kept out of the next message (reconcile): capped (sent NO_PROGRESS_CAP times unchanged) or manual (Auto off for that task). */
+  heldTasks: z.array(z.object({ task: taskSchema, held: z.enum(["capped", "manual"]) })).optional(),
+  /** Task keys the developer keeps for themselves: never auto-sent (shared/send-decision.ts). */
+  manualTasks: z.array(z.string()).optional(),
+  /** Per condition ("<key>:<fingerprint>"), the unacknowledged sends counted when the developer pressed Retry. */
+  taskRetries: z.record(z.string(), z.number().int().nonnegative()).optional(),
+  /** The exact text of the next message (the pending batch's prompt without its id line), for Preview and workspace_status. */
+  nextMessage: z.string().nullable().optional(),
 });
 export const stateSchema = z.object({
   version: z.literal(1), workspaces: z.array(workspaceSchema),

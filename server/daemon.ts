@@ -402,7 +402,7 @@ export class PaseoGateway implements Gateway {
     const scoped = agents.filter(row => row.agent.workspaceId === w.id && !row.agent.archivedAt && !recoveryIds.has(row.agent.id));
     const guarded = this.guard.waiting(pauses, { agentIds: [w.mainAgentId, ...scoped.map(row => row.agent.id)], workspaceId: w.id, excludedAgentIds: [...recoveryIds].filter((id): id is string => !!id) });
     const guardedInterruptionId = this.guard.ownsInterruption(pauses, w.mainAgentId, w.interruption)?.id;
-    const context = { guardedInterruptionId, mainTurnId: turnIdOf(a.activeTurn) };
+    const context = { guardedInterruptionId, mainTurnId: turnIdOf(a.activeTurn), mainTitle: a.title?.trim() || null };
     if (guarded || !pauses && workspace.labels?.some(label => /^(Paused|Paused by Session Guard)$/i.test(label))) return { taskAgents, ...context, guarded: true, busy: false, reason: "Waiting for Session Guard to resume this workspace", archived: false };
     if (compacting) return { taskAgents, busy: true, reason: "Smart Session is compacting the main agent", archived: false };
     const mainLoaded = isLoaded(a), mainRecent = recentlyUsed(a, this.windowMs, this.now());

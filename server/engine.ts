@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { completionBlockers, completionCheck, completionGate, revokesDone, type CompletionGate, type Workspace, type State, type Batch } from "../shared/model";
 import { Store } from "./store";
 import { Github } from "./github";
-import { batchPrompt, tasksFor, isRecovery, needsPrObservations, type TaskWording } from "./tasks";
+import { batchPrompt, messageText, tasksFor, isRecovery, needsPrObservations, type TaskWording } from "./tasks";
 import { answerRecipients, developerAnswer, syncTaskQuestions } from "./questions";
 import { answerMessage, isOpen as isOpenQuestion, type Question } from "../shared/questions";
 import { reconcileSubmittedStacks } from "./submissions";
@@ -15,7 +15,7 @@ import { DeliveryDeferred, ConversationGone, realTimers, withDeadline, type Time
 import { recordSnapshot } from "./deployment-anchor";
 import { pruneUnsent } from "./batch-archive";
 import { holdSuperseded, liftHold } from "../shared/status";
-import { sendDecision, settleUnacknowledged, UNACKNOWLEDGED_MS } from "../shared/send-decision";
+import { isCapped, sendDecision, settleUnacknowledged, UNACKNOWLEDGED_MS } from "../shared/send-decision";
 export { settleUnacknowledged, UNACKNOWLEDGED_MS, NO_PROGRESS_CAP } from "../shared/send-decision";
 
 export interface Runtime {
@@ -27,6 +27,8 @@ export interface Runtime {
   mainLoaded?: boolean;
   /** The main agent had a user message within the active window. Undefined means unknown. */
   mainRecent?: boolean;
+  /** The main agent's title in Paseo. Undefined means unknown. */
+  mainTitle?: string | null;
   /** The main agent's current turn id (shared/status.ts turnIdOf), when it has one. Undefined means unknown. */
   mainTurnId?: string | null;
   /** The main agent's provider conversation no longer exists. */
@@ -97,6 +99,8 @@ export class Engine {
 
       for (const w of state.workspaces) for (const a of w.prActions) if (a.state === "sending") { a.state = "uncertain"; a.result = `Follow-up reloaded before ${a.kind === "request_reviewers" ? "GitHub confirmed the review request" : w.prs.some(p => a.prs.includes(p.key) && p.snapshot?.prWorkflow === "github") ? "GitHub confirmed the action" : "Graphite confirmed the action"}. Check state before sending another request.`; }
       for (const w of state.workspaces) for (const q of w.questions) if (q.answer?.delivery.state === "sending") q.answer.delivery = { ...q.answer.delivery, state: "unconfirmed", reason: "Follow-up reloaded before Paseo confirmed the answer. Check the agent's chat before resending." };
+      // 2.0 betas before Q49 blocked a batch whose capped condition went out twice; the cap is per task now.
+      for (const w of state.workspaces) for (const b of w.batches) if (b.state === "blocked" && b.unacknowledged) b.state = "completed";
       for (const w of state.workspaces) for (const b of w.batches) if (b.state === "sending") {
         b.state = "uncertain";
         b.result = "Follow-up reloaded mid-send. It checks the agent's chat for the message and sends it only if it never arrived.";
@@ -186,6 +190,7 @@ export class Engine {
       await this.store.mutateWorkspace(original.id, w => {
         w.runtimeBusy = runtime.busy; w.runtimeReason = runtime.reason; w.taskAgents = runtime.taskAgents;
         w.backgroundBusy = runtime.backgroundBusy ?? false;
+        if (runtime.mainTitle !== undefined && (w.mainAgentTitle ?? null) !== runtime.mainTitle) w.mainAgentTitle = runtime.mainTitle;
         if (runtime.gone && w.goneAgent?.agentId !== w.mainAgentId) w.goneAgent = { agentId: w.mainAgentId, at: new Date(this.now()).toISOString(), reason: runtime.gone };
         if (w.goneAgent?.agentId === w.mainAgentId) w.runtimeReason = GONE_REASON;
         if (runtime.guardedInterruptionId && w.interruption && w.hold === interruptionHold(w.interruption.kind)) {
@@ -464,10 +469,17 @@ export class Engine {
     if (queuedCheck && w.runtimeBusy && !tasks.some(t => t.kind === "completion")) tasks.push(...tasksFor({ ...w, runtimeBusy: false }, this.now(), this.wording).filter(t => t.kind === "completion"));
     // A batch settled without an acknowledgment delivered nothing for sure: its still-open tasks go out again.
     const delivered = new Set(w.batches.filter(b => ["sending", "sent", "completed", "blocked", "uncertain"].includes(b.state) && !(b.state === "completed" && b.unacknowledged)).flatMap(b => b.tasks.map(t => `${t.key}:${t.fingerprint}`)));
-    const fresh = tasks.filter(t => !delivered.has(`${t.key}:${t.fingerprint}`));
+    const open = tasks.filter(t => !delivered.has(`${t.key}:${t.fingerprint}`));
+    // One rule for every task in a message (Q49): a task the developer keeps for themselves, or a condition that went
+    // out NO_PROGRESS_CAP times unchanged, stays out of it; only that task waits, the rest go out.
+    const manual = new Set(w.manualTasks ?? []);
+    const held: NonNullable<Workspace["heldTasks"]> = open.flatMap(t => t.kind === "completion" ? [] : manual.has(t.key) ? [{ task: t, held: "manual" as const }] : isCapped(w, t) ? [{ task: t, held: "capped" as const }] : []);
+    const fresh = open.filter(t => !held.some(h => h.task === t));
+    if (held.length || w.heldTasks?.length) w.heldTasks = held;
     let pending = w.batches.find(b => b.state === "pending" && !isRecovery(b));
     if (!fresh.length) {
       if (pending) { pending.state = "cancelled"; pending.result = "Conditions resolved before delivery"; }
+      if (w.nextMessage) w.nextMessage = null;
       return;
     }
     if (pending) {
@@ -481,6 +493,7 @@ export class Engine {
     if (fresh.some(t => ["conflict", "review", "checks", "restack"].includes(t.kind) && w.batches.filter(b => b.id !== pending!.id && ["completed", "blocked"].includes(b.state)).filter(b => b.tasks.some(old => old.key === t.key)).length >= 3)) {
       pending.state = "blocked"; pending.result = "This PR still needs repairs after three follow-up batches. Review it before retrying.";
     }
+    w.nextMessage = pending.state === "pending" ? messageText(w, pending) : null;
     // New repairs or tasks reopen the work; the Done check itself does not.
     if (fresh.some(t => t.kind !== "completion")) { w.completion = null; w.declaration = null; }
   }
