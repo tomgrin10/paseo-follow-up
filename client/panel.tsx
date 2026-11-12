@@ -13,8 +13,8 @@ import { summary, type Workspace } from "../shared/model";
 import { recentMainChange } from "../shared/home";
 import { followUpObligations, recoveryBatch } from "../shared/follow-up";
 import { settledForDisplay } from "../shared/presentation";
-import { ago, shortRefs } from "../shared/attention";
-import { agentCard, unconfirmedNote } from "../shared/status";
+import { ago } from "../shared/attention";
+import { unconfirmedNote } from "../shared/status";
 import { Button, Card, CardRow, FoldRow, IconButton, errorText, text, useNow, type Theme } from "./kit";
 import { VersionMark } from "./updates";
 import { Reveal, Skeleton } from "./motion";
@@ -163,26 +163,6 @@ function PanelWorkspace(props: PanelProps & { workspace: Workspace; loadError?: 
 }
 
 
-
-/** The agent that has Follow-up's work right now, in the same words as Home and the header (shared/status.ts). */
-function AgentCard({ workspace: w, theme, compact, now, openAgent }: { workspace: Workspace; theme: Theme; compact: boolean; now: number; openAgent?: (id: string) => void }) {
-  const c = theme.colors; const t = text(c);
-  const card = agentCard(w, now);
-  if (!card) return null;
-  const batch = card.view.batch;
-  const recipient = batch.recipientAgentId && batch.recipientAgentId !== w.mainAgentId ? batch.recipientAgentId : w.mainAgentId;
-  return <Card theme={theme} compact={compact} icon="Bot" title={card.title}
-    right={openAgent && <Button theme={theme} compact={compact} kind="ghost" icon="ArrowUpRight" title="Open" accessibilityLabel="Open the agent's chat" onPress={() => openAgent(recipient)} />}>
-    <CardRow theme={theme} compact={compact}>
-      <Text style={[t.meta, { marginBottom: 6 }]}>{card.view.phase === "sent" ? `Sent ${batch.tasks.length} repair${batch.tasks.length === 1 ? "" : "s"} ${ago(batch.sentAt, now)}. Follow-up waits for the agent to report back.` : card.line}</Text>
-      {batch.tasks.map((task, i) => <View key={task.key} style={{ flexDirection: "row", gap: 6 }}>
-        <Text style={[t.meta, { width: 16, fontVariant: ["tabular-nums"] }]}>{i + 1}.</Text>
-        <RichText linkColor={c.foreground} style={[t.meta, { flex: 1 }]}>{shortRefs(task.title, w)}</RichText>
-      </View>)}
-      {!!batch.result && <RichText style={[t.meta, { marginTop: 6, color: c.statusWarning }]}>{batch.result}</RichText>}
-    </CardRow>
-  </Card>;
-}
 
 /** The moment the loop closes: the agent declared Done and every requirement settled. */
 function ShippedCard({ workspace: w, theme, compact, now }: { workspace: Workspace; theme: Theme; compact: boolean; now: number }) {
@@ -382,14 +362,13 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const header = <WorkspaceHeader workspace={w} theme={theme} compact={compact} now={now} onSettings={openSettings} onRefresh={() => update.mutate()} refreshing={update.isPending} onAuto={next => auto.mutate(next)} autoPending={auto.isPending} notice={loadError ?? null} onOpenPr={openPr} resize={resizeShown} hideTitle={large} onHome={compact ? openOverview : undefined} />;
   const shipped = <ShippedCard workspace={w} theme={theme} compact={compact} now={now} />;
   const needs = <NeedsYouCard workspace={w} theme={theme} compact={compact} now={now} actions={{ openAgent, openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion }} />;
-  const agent = <AgentCard workspace={w} theme={theme} compact={compact} now={now} openAgent={openAgent} />;
   // Once shipped, the stack and tasks are history: one quiet fold instead of two near-empty cards.
   const history = done && <View style={{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.colors.border, overflow: "hidden" }}>
     <View style={{ marginTop: -1 }}><FoldRow theme={theme} compact={compact} open={isOpen("history")} onPress={() => toggle("history")} icon="History" iconColor={theme.colors.foregroundMuted} label={historyLabel(w)} /></View>
   </View>;
   const showWork = !done || isOpen("history");
   const stacks = showWork && <StacksCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} onOpen={openPr} wide={wide} />;
-  const tasks = showWork && <TasksCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} onOpenQuestion={setQuestion} openAgent={openAgent} />;
+  const tasks = showWork && <TasksCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} onOpenQuestion={setQuestion} openAgent={openAgent} now={now} />;
   const log = <ActivityCard workspace={w} theme={theme} compact={compact} now={now} open={isOpen} toggle={toggle} onOpenQuestion={setQuestion} />;
   const extras = <WorkspaceCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} openAgent={openAgent} browserReady={browser.data ? browser.data.ready : null} openOverview={openOverview} editSpec={() => setSpecOpen(true)} />;
   return <View onLayout={event => setWidth(event.nativeEvent.layout.width)} style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>
@@ -399,9 +378,9 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
       {header}
       {ask}
       {wide ? <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
-        <View style={{ flex: 5, minWidth: 0 }}>{shipped}{needs}{agent}{history}{tasks}</View>
+        <View style={{ flex: 5, minWidth: 0 }}>{shipped}{needs}{history}{tasks}</View>
         <View style={{ flex: 6, minWidth: 0 }}>{stacks}{log}{extras}</View>
-      </View> : <>{shipped}{needs}{agent}{history}{stacks}{tasks}{log}{extras}</>}
+      </View> : <>{shipped}{needs}{history}{stacks}{tasks}{log}{extras}</>}
     </ScrollView>
     <PrSheet workspace={w} prKey={sheet?.key ?? null} intent={sheet?.intent ?? null} theme={theme} compact={compact} browserReady={browser.data?.ready ?? false} onClose={() => setSheet(null)} />
     <QuestionSheet workspace={w} questionId={question} theme={theme} compact={compact} openAgent={openAgent} onClose={() => setQuestion(null)} />
