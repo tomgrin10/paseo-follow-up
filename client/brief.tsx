@@ -321,6 +321,10 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   const unverifiable = live.isError || !agentId;
   const shown = row.state !== "open" ? { brief: row, actionable: false } : unverifiable && checked.brief.state === "open" ? { ...checked, actionable: true } : checked;
   const b = shown.brief;
+  // "No ask stated" while this workspace has an open question would tell the developer there's nothing to do: the
+  // fallback points at the questions instead (Needs you asks them; one ask, one surface each).
+  const waitingOn = b.source === "none" && b.state === "open" ? (workspace?.questions ?? []).filter(q => !q.answer && !q.closed).map(q => q.id) : [];
+  const askText = waitingOn.length ? `Waiting on your answer to ${waitingOn.join(", ")}` : b.ask;
   // A refusal that means "already answered or replaced" isn't a failure: re-read, and the card shows what happened.
   const reconcile = (e?: unknown) => { if (e !== undefined) notice(mootNote(e), toast); setError(null); void cache.invalidateQueries({ queryKey: liveBriefKey(agentId) }); if (row.workspaceId) void cache.invalidateQueries({ queryKey: workspaceKey(row.workspaceId) }); };
   const now = useNow(60_000);
@@ -402,7 +406,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   if (b.slim) {
     // Permission: Paseo's own prompt below is the control (F9). Fallback: the paragraph is right above.
     // The label and age share the top line so the ask always gets the full width; at a narrow panel the move wraps under it.
-    return <View accessibilityRole="summary" accessibilityLabel={`${acts ? "Needs you: " : ""}${b.ask}. ${b.sourceLine}`}
+    return <View accessibilityRole="summary" accessibilityLabel={`${acts ? "Needs you: " : ""}${askText}. ${b.sourceLine}`}
       style={[{ marginVertical: embedded ? 0 : 10, gap: 4, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: border }, bare && BARE]}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
         <Icon name={ICON[b.kind]} size={14} color={tone} />
@@ -412,8 +416,8 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
         {!snoozed && <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontVariant: ["tabular-nums"] }}>{ageText}</Text>}
       </View>
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 10, rowGap: 8 }}>
-        <RichText numberOfLines={3} tooltip={b.ask}
-          style={{ flexGrow: 1, flexShrink: 1, flexBasis: 200, minWidth: 0, color: acts ? c.foreground : c.foregroundMuted, fontSize: 14, lineHeight: 20, fontWeight: acts ? "600" : "400" }}>{b.ask}</RichText>
+        <RichText numberOfLines={3} tooltip={askText}
+          style={{ flexGrow: 1, flexShrink: 1, flexBasis: 200, minWidth: 0, color: acts ? c.foreground : c.foregroundMuted, fontSize: 14, lineHeight: 20, fontWeight: acts ? "600" : "400" }}>{askText}</RichText>
         {!embedded && moves.map(m => <Btn key={m.kind} label={busy === m.kind ? `${m.label}…` : m.label} icon={MOVE_ICON[m.kind]} disabled={!!busy} onPress={() => press(m)} c={c} compact={compact} hint={MOVE_HINT[m.kind]} />)}
       </View>
       {!!error && <Text accessibilityRole="alert" style={{ color: c.statusDanger, fontSize: 13, lineHeight: 18 }}>{error}</Text>}
@@ -440,7 +444,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   const otherId = !multi ? askedDecisions(b).find(d => isOther(picks[d.id]))?.id : undefined;
   const keySend = multi ? (sendBar(b, sendable).ready ? () => sendAll() : null) : otherId && words[otherId]?.trim() ? () => sendOther(otherId) : null;
   const sendOther = (decisionId: string) => { const text = words[decisionId]?.trim(); if (text) void run(`${decisionId}:${OTHER}`, async answerId => { await answer([{ decisionId, choice: OTHER, words: text }], answerId); pickStore.clear(b.id); wordStore.clear(b.id); }); };
-  return <View accessibilityRole="summary" accessibilityLabel={`${acts ? "Needs you" : flaggedAct ? "Later" : word(b.kind)}: ${b.ask}`}
+  return <View accessibilityRole="summary" accessibilityLabel={`${acts ? "Needs you" : flaggedAct ? "Later" : word(b.kind)}: ${askText}`}
     style={[{ marginVertical: embedded ? 0 : 10, borderRadius: 12, borderWidth: 1, borderColor: border, backgroundColor: c.surface1, overflow: "hidden" }, bare && BARE]}>
     <SubmitScope enabled={!!keySend && !busy} onSubmit={() => keySend?.()} style={{ paddingHorizontal: pad, paddingTop: compact ? 12 : 14, paddingBottom: 14, gap: tight ? 10 : 12 }}>
       <View style={{ gap: 4 }}>
@@ -460,7 +464,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
         </View>
         {/* The ask role on phones (react-native-web ignores hitSlop, so the ⓘ above is a real 44 box); desktop keeps 19/26. */}
         {/* Bare: a section of the Needs you block, so the same size as its question titles. */}
-        <RichText accessibilityRole="header" style={compact || bare ? text(c, compact).ask : { color: c.foreground, fontSize: 19, lineHeight: 26, fontWeight: "600", letterSpacing: -0.2 }}>{b.ask}</RichText>
+        <RichText accessibilityRole="header" style={compact || bare ? text(c, compact).ask : { color: c.foreground, fontSize: 19, lineHeight: 26, fontWeight: "600", letterSpacing: -0.2 }}>{askText}</RichText>
       </View>
 
       <BriefBody b={b} c={c} compact={compact} tight={tight} embedded={embedded} height={height} mode={multi ? "select" : "send"} picks={picks}

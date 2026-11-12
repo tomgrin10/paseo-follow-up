@@ -96,6 +96,7 @@ import { VersionsStore, demoOverride, describeSelf, readPackage, type SelfInstal
 import { updatesViewSchema, type UpdatesView } from "./shared/updates";
 import { PLUGIN_NAME, releaseNotesViewSchema, type ReleaseNote, type ReleaseNotesView } from "./shared/changelog";
 import { BRIEF_KIND, BRIEF_VERSION, prState, prStates, validateNeedsYou, type Brief, type NeedsYouRecord } from "./shared/brief";
+import { foldedAsk } from "./shared/needs-block";
 
 /** Agent calls that only the main agent makes: one of these from a successor means the handover is in use. */
 const MAIN_WORK = new Set(["follow.sync", "follow.register-pr", "follow.obligation", "follow.done", "follow.acknowledge", "follow.exclude-stack", "follow.ask-question", "follow.record-answer", "follow.withdraw-question", "follow.set-spec", "follow.needs-you"]);
@@ -1153,9 +1154,11 @@ export default function contribute(server: PluginServerContext) {
         const w = findWorkspace(state, tracked.id);
         const result = needsYouQuestions(w, agentId, call, mode, Date.now(), sameTurn ? previous : null);
         if (result.questionIds.length || sameTurn) changed(w);
-        return result;
+        return { ...result, ask: foldedAsk(call.ask, result.questionIds, w.questions) };
       });
       questionIds = linked.questionIds; createdIds = linked.createdIds;
+      // one-ask-one-title: a brief that folds into its question is named by the question everywhere.
+      call = { ...call, ask: linked.ask };
       // The brief maps decisions to questions by position, so the record keeps them aligned (a linked question shows as itself).
       const { questions: _refs, ...rest } = call;
       call = { ...rest, ...(linked.decisions.length ? { decisions: linked.decisions } : {}) };

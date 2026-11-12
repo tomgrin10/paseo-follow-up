@@ -24,7 +24,7 @@ test("a-question-always-asks-the-developer-something: a task blocked on a PR or 
   assert.deepEqual(w.questions, [], "no question from evidence text");
   assert.deepEqual(needsYou(w, clock).filter(i => i.kind === "decision" || i.kind === "question"), [], "nothing in Needs you");
   assert.notEqual(summary(w, clock).status, "needs-you");
-  assert.equal(taskStatus(w.obligations[0], w).text, "Blocked", "it shows as Blocked in Tasks");
+  assert.equal(taskStatus(w.obligations[0], w).text, "Blocked · fix #131 is conflicting after #129, and another agent…", "it shows as Blocked in Tasks, with what it waits on");
   assert.deepEqual(violations(w, clock).filter(v => v.id === "a-question-always-asks-the-developer-something"), []);
 });
 

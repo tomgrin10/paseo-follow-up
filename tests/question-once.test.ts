@@ -73,3 +73,29 @@ test("an-open-question-renders-once-per-surface: the chat's brief card answers a
   const brief = src("client/brief.tsx");
   assert.match(brief, /answerQuestionRpc/, "one answer path: the question's own");
 });
+
+test("one-ask-one-title: a brief folded into its question is named by the question everywhere", async () => {
+  const { foldedAsk } = await import("../shared/needs-block");
+  const w = await asked(["Retry declined cards", "Invoice copy"]);
+  assert.equal(foldedAsk("Pick whether declined cards retry", ["Q1"], w.questions), "Retry declined cards", "the brief's ask becomes the question's title");
+  assert.equal(foldedAsk("Pick how the rate limit applies", ["Q2", "Q1"], w.questions), "Invoice copy", "the first question it points at names it");
+  assert.equal(foldedAsk("Approve the staging bucket", [], w.questions), "Approve the staging bucket", "an ask with no question keeps its own words");
+  w.questions[0].closed = { at: new Date(clock).toISOString(), reason: "moot", by: null };
+  assert.equal(foldedAsk("Pick whether declined cards retry", ["Q1"], w.questions), "Pick whether declined cards retry", "no open question to fold into");
+  const server = src("index.server.ts");
+  assert.match(server, /call = \{ \.\.\.call, ask: linked\.ask \}/, "needs_you stores the folded title, so the row, pill, chat card and panel all read it");
+});
+
+test("one-ask-one-title: the chat's fallback card points at open questions instead of saying there's no ask", () => {
+  const brief = src("client/brief.tsx");
+  assert.match(brief, /Waiting on your answer to \$\{waitingOn\.join\(", "\)\}/);
+});
+
+test("a blocked task without an ask says what it waits on", async () => {
+  const { blockedLine } = await import("../shared/task-status");
+  const w = await asked(["Alert recipients"]);
+  assert.equal(blockedLine({ evidence: "Needs Q1 settled before the thresholds move" }, w), "Blocked · waits for Q1");
+  assert.equal(blockedLine({ evidence: "Waits for #212's review before the thresholds move to config" }, w), "Blocked · waits for #212's review before the thresholds move to…");
+  assert.equal(blockedLine({ evidence: "PR #212 must merge first." }, w), "Blocked · PR #212 must merge first");
+  assert.equal(blockedLine({ evidence: "" }, w), "Blocked");
+});
