@@ -30,7 +30,7 @@ a PR someone will be asked to review. The worker fills it from `pr-workflow.json
 every save. The client fills it from `follow.reviewer-settings` (`noReview`), and from each `follow.inbox-list`
 answer the PRs that hand their merge back (`handedBack`). The daemon withdraws an add-reviewers flag on its next tick;
 the client doesn't wait: its inbox store hands every surface rows through `withoutWithdrawnAsks` and the brief cards
-check `reviewersBriefWithdrawn` (`shared/inbox.ts`, both keyed by `agentMergesKey`), so the ask leaves the pill, the
+read the daemon's brief through `liveBrief` (`shared/brief.ts`, which `briefAsks` builds on, so the done-brief rule and this one compose in one place; both keyed by `agentMergesKey`), so the ask leaves the pill, the
 inbox row, Home and the panel count the moment the repository flips, and comes back on Undo. The agent's instructions
 follow the mode: `scopes.json` carries `workflow.noReview`, true only when every repository the workspace touches is
 No review, and the hook and the tools say "merge your own PR once CI is

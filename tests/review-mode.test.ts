@@ -7,7 +7,7 @@ import { followUpEvents } from "../server/inbox";
 import { PrWorkflowStore, type Probe } from "../server/pr-workflow";
 import { needsYou } from "../shared/attention";
 import { newEntry, prEndEvent, reduce, reviewersBriefWithdrawn, withoutWithdrawnAsks, type InboxRow } from "../shared/inbox";
-import { pickBrief } from "../shared/brief";
+import { briefAsks, liveBrief, pickBrief } from "../shared/brief";
 import { flagHeadline } from "../shared/headline";
 import { agentMerges, agentMergesKey, handsMergeBack, setHandedBackPrs, reviewersMissing, noReviewRepoList, REVIEW_MODE_LABELS, repoShippingSummary, repoReview, setNoReviewRepos, setPrWorkflowInputSchema } from "../shared/pr-workflow";
 import { emptyReviewerConfig, setReviewerConfig } from "../shared/reviewers";
@@ -190,6 +190,8 @@ test("a-no-review-repo-never-asks-for-review-or-merge: the moment the repository
   setNoReviewRepos(["example/app"]); // the link's tap: the client's set flips before any daemon round trip
   assert.deepEqual(drawn(row), { needs: [], headline: null, brief: null }, "the pill, the row, Home's group and the count all lose it at once");
   assert.equal(reviewersBriefWithdrawn(full), true, "the panel's brief card and the chat's card draw nothing");
+  assert.equal(liveBrief(full), null, "liveBrief, the one place the check composes, drops it");
+  assert.equal(briefAsks(full, row), false, "and so does briefAsks (a-done-brief-is-never-an-ask's predicate)");
   const mixed = withoutWithdrawnAsks({ ...row, needs: { reasons: [...row.needs!.reasons, other], since: at } });
   assert.deepEqual(mixed.needs?.reasons.map(r => r.reason), ["finished"], "another flag on the same agent stays");
   assert.equal(mixed.brief, null);
@@ -210,14 +212,14 @@ test("a-no-review-repo-never-asks-for-review-or-merge: nothing on the client dra
   assert.match(store, /rows: \(\) => \(enabled && data\?\.enabled \? view\(\)\.rows : \[\]\)/);
   assert.match(store, /overseer: \(\) => view\(\)\.overseer/);
   assert.match(store, /onNoReviewRepos\(\(\) => \{ shown = null; emit\(\); \}\)/, "a flip re-renders every inbox surface");
-  assert.match(await src("brief.tsx"), /if \(reviewersBriefWithdrawn\(b\)\) return null;/, "the brief card draws nothing for a withdrawn ask");
+  assert.match(await src("brief.tsx"), /if \(b\.state === "open" && !liveBrief\(b\)\) return null;/, "the brief card draws nothing for a withdrawn ask");
   const offenders: string[] = [];
   for (const f of await readdir("client")) {
     if (!/\.tsx?$/.test(f) || f === "inbox-store.ts") continue;
     (await src(f)).split("\n").forEach((line, i) => {
       // The raw inbox answer skips the filter; an open brief read from the daemon must ask the helper on the same line.
       if (/\.data\(\)\??\.(rows|overseer)\b/.test(line)) offenders.push(`client/${f}:${i + 1} reads raw inbox rows`);
-      if (/brief\.data\?\.brief\?\.state === "open"/.test(line) && !/reviewersBriefWithdrawn\(/.test(line)) offenders.push(`client/${f}:${i + 1} opens a brief without reviewersBriefWithdrawn`);
+      if (/brief\.data\?\.brief\b/.test(line) && !/liveBrief\(brief\.data\?\.brief\)/.test(line)) offenders.push(`client/${f}:${i + 1} reads the daemon's brief without liveBrief`);
     });
   }
   assert.deepEqual(offenders, []);

@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { briefSchema, BRIEF_KINDS, BRIEF_SOURCES, BRIEF_STATES } from "./brief";
+import { briefSchema, BRIEF_KINDS, BRIEF_SOURCES, BRIEF_STATES, reviewersBriefPr, reviewersBriefWithdrawn } from "./brief";
+export { reviewersBriefPr, reviewersBriefWithdrawn };
 import { agentMerges, agentMergesKey } from "./pr-workflow";
 
 /**
@@ -181,19 +182,6 @@ export function liveFlag<B extends { kind: string; state: string; questionIds?: 
   const stale = brief?.state === "open" && (brief.kind === "error" || brief.kind === "paused") && !brief.questionIds?.length && !!brief.at && brief.at < turnStartedAt;
   return { needs: withoutRunState(needs, turnStartedAt), brief: stale ? null : brief };
 }
-/** The PR an add-reviewers brief asks about: its Add reviewers move's PR. Null for every other kind. */
-export function reviewersBriefPr(b: { kind: string; moves?: readonly { kind: string; prKey?: string | null }[]; prKey?: string }): string | null {
-  if (b.kind !== "reviewers") return null;
-  return b.prKey ?? b.moves?.find(m => m.kind === "add_reviewers")?.prKey ?? null;
-}
-/**
- * An open add-reviewers brief whose PR the agent merges itself (`agentMergesKey`): not an ask, so no surface draws it.
- * Invariant a-no-review-repo-never-asks-for-review-or-merge.
- */
-export const reviewersBriefWithdrawn = (b: { kind: string; state: string; moves?: readonly { kind: string; prKey?: string | null }[]; prKey?: string }): boolean => {
-  const pr = b.state === "open" ? reviewersBriefPr(b) : null;
-  return !!pr && agentMergesKey(pr);
-};
 /**
  * A row as the client draws it: without the add-reviewers flags and brief of PRs the agent merges itself. The daemon
  * withdraws those on its next tick; this closes the gap, so the moment a repository flips to No review its asks leave
