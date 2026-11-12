@@ -91,6 +91,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | UI | `index.client.tsx`, `client/` | [client](docs/client.md) |
 | Shared copy and errors | `shared/presentation.ts`, `shared/errors.ts` | [client](docs/client.md) |
 | Tests, checks and README screenshots | `tests/`, `scripts/`, `scripts/screenshots.mjs`, `button-visibility.test.mjs` | [testing](docs/testing.md) |
+| Report an issue (shared module, Follow-up's adapter, the sheet) | `server/report-issue/index.ts`, `server/report-issue/redact.ts`, `server/report-issue/render.ts`, `server/report-issue/github.ts`, `server/report-issue/diagnostics.ts`, `server/report-issue-adapter.ts`, `client/report-issue.tsx`, `scripts/fake-github.d.mts` | [report-issue](docs/report-issue.md) |
 | Releases | `changes/`, `CHANGELOG.md`, `scripts/release-notes.mjs`, `scripts/release-body.mjs`, `scripts/backfill-release-notes.mjs`, `.github/workflows/` | [releasing](docs/releasing.md) |
 
 ## Invariants
@@ -119,7 +120,7 @@ These are product rules. Each has tests, and breaking one is a bug even when the
 4. **Agents act on others, not themselves.** An agent can't sign itself off, answer its own question through
    `answer_question`, or act on its own brief. Goal, tasks, questions and Done belong to the main agent.
    Contributors get `workspace_status`, `register_pr`, `sync_workspace` and `make_main_agent` (under its claim
-   rules), and nothing else.
+   rules), plus `report_issue` (it changes nothing in Follow-up), and nothing else.
 5. **Ownership comes from the daemon.** The caller is `context.agent.id` (native tools) or `PASEO_AGENT_ID` checked
    by the daemon (bridge), never a tool argument. Unknown parent membership grants no new scope.
 6. **Nothing irreversible on its own.**
@@ -147,6 +148,13 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    the store's queue; bounds per wait added up to about 45 s. `Store.close` refuses new mutations at once, commits one
    already accepted if it finishes inside the deadline, and drops (with the "stopping" error, writing nothing) one that
    finishes after it. Guarded by `tests/worker-stop.test.ts`.
+11. **Reporting an issue costs no standing context and posts nothing without a yes**
+   (`report-issue-costs-no-standing-context`, `report-issue-files-only-after-confirm`,
+   `report-issue-never-carries-secrets`). `report_issue`'s description is one line of at most 150 chars; its procedure
+   comes back from the first call, and nothing is added to hooks or instructions. The dry run only reads; filing needs
+   `confirm` with the plan id (and `screenshot_consent` when there are screenshots). Everything an issue carries goes
+   through one Redactor. Guarded by `tests/report-issue.test.ts` and `tests/report-issue-redact.test.ts`
+   ([docs/report-issue.md](docs/report-issue.md)).
 
 ## Bugs
 
