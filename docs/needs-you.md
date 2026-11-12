@@ -210,6 +210,12 @@ card beside a question list.
 - **One answer path.** A question card, the pill, the question dialog and the chat's brief card all answer a stored
   question through `follow.answer-question`; the brief resolves when its questions settle (`briefQuestionsEvent`).
   Only a decision with no tracked question goes through `follow.brief-action`.
+- **One ask, one title** (`one-ask-one-title`): `needs_you` pointing at open questions stores the first one's title
+  as the brief's ask (`foldedAsk`), so the Home row, the sidebar row, the pill, the chat card and the panel name it
+  the same way; the agent's context stays the card's body.
+- **No "No ask stated" beside an open question:** the chat's fallback card says "Waiting on your answer to Q1".
+- **A blocked task names what it waits on** (`blockedLine`, `shared/task-status.ts`): "Blocked · waits for Q1", or the
+  evidence's first sentence.
 - Home's chips and the composer pill stay pointers. Tests: `tests/question-once.test.ts`.
 
 Tests: `tests/inbox.test.ts`, `tests/brief.test.ts`, `tests/decision-card.test.ts`, `tests/home.test.ts`,

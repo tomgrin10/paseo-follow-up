@@ -55,3 +55,16 @@ export function onceViolation(items: readonly NeedItem[], briefs: readonly ({ qu
   }
   return null;
 }
+
+/**
+ * one-ask-one-title: a brief that points at open questions folds into the first one's card (needsYouBlock), so it takes
+ * that question's title as its ask. The Home row, the sidebar row, the pill, the chat card and the panel then name the
+ * one thing the developer acts on the same way. The agent's context stays the card's body. No open question: unchanged.
+ */
+export function foldedAsk(ask: string, questionIds: readonly string[], questions: readonly Pick<Question, "id" | "title" | "answer" | "closed">[]): string {
+  for (const id of questionIds) {
+    const q = questions.find(q => q.id === id && !q.answer && !q.closed);
+    if (q) return q.title;
+  }
+  return ask;
+}

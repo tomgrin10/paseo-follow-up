@@ -1,1 +1,1 @@
-- An open question shows once in the panel and on Home: the agent's ask and its question are one card in Needs you, with the other questions as headers below. Answering anywhere clears it everywhere.
+- An open question shows once in the panel and on Home, under one name: the agent's ask and its question are one card in Needs you, with other questions as headers below. Blocked tasks say what they wait on.
