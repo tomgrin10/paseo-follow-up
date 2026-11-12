@@ -1,10 +1,11 @@
 import * as sdk from "@getpaseo/plugin/client";
 import type { PluginClientContext, PluginHostProps } from "@getpaseo/plugin/client";
-import { useCallback, useMemo, type ComponentType } from "react";
+import { useCallback, useMemo, useSyncExternalStore, type ComponentType } from "react";
 import { View } from "react-native";
 import { Text } from "./text";
 import { UndoBar, useSidebarViewMounted } from "./inbox";
 import { HomeList } from "./home-list";
+import { FilterField, SortMenu, useListFilter } from "./home-chrome";
 import { useHomeModel, type HomeSources } from "./home-data";
 import { useRowMenu } from "./row-actions";
 import { RenameHost } from "./rename";
@@ -41,7 +42,11 @@ export function inboxSidebarView(sources: HomeSources) {
   return function NeedsYouSidebar(view: SidebarViewProps) {
     const refs = sdk as unknown as RefSdk;
     useSidebarViewMounted();
-    const model = useHomeModel(sources);
+    const full = useHomeModel(sources);
+    // "Filter workspaces" narrows this list in place with Home search's matcher; the sort is Home's own setting.
+    const filter = useListFilter(full, sources);
+    const model = filter.model;
+    const rank = useSyncExternalStore(sources.extras.subscribe, sources.extras.rank, sources.extras.rank);
     const agents = refs.useAgents({});
     const workspaces = refs.useWorkspaces({});
     const agentRef = useMemo(() => new Map(agents.map(r => [r.id, r])), [agents]);
@@ -51,21 +56,28 @@ export function inboxSidebarView(sources: HomeSources) {
     const activeAgent = view.active.agent?.id ?? null;
     const activeWorkspace = view.active.workspace?.id ?? null;
     const selectedKey = useMemo(() => {
-      const all = [...model.byKey.values()];
+      const all = [...full.byKey.values()];
       return all.find(s => activeAgent && s.agentId === activeAgent)?.key ?? all.find(s => activeWorkspace && s.workspaceId === activeWorkspace)?.key ?? null;
-    }, [model, activeAgent, activeWorkspace]);
+    }, [full, activeAgent, activeWorkspace]);
     const onSelect = useCallback((key: string) => {
-      const s = model.byKey.get(key);
+      const s = full.byKey.get(key);
       const agent = s?.agentId ? agentRef.get(s.agentId) : undefined;
       const workspace = s?.workspaceId ? workspaceRef.get(s.workspaceId) : undefined;
       if (agent) view.navigation.openAgent(agent); else if (workspace) view.navigation.openWorkspace(workspace);
-    }, [model, agentRef, workspaceRef, view.navigation]);
+    }, [full, agentRef, workspaceRef, view.navigation]);
     // The row menu, as on Home (rename among it). No omnibox here, so no Ask; Open and Answer go to the chat.
     const openKey = (s: Workstream) => onSelect(s.key);
     const menu = useRowMenu({ sources, openFull: openKey, openQuestion: openKey, overseerOn: false });
     if (!sources.inbox.enabled()) return <View style={{ padding: 12 }}><Text style={{ color: c.foregroundMuted, fontSize: 12 }}>The Needs-you inbox is off. Turn it on in Follow-up's display settings.</Text></View>;
     return <View style={{ flex: 1 }}>
-      <HomeList model={model} theme={view.theme} dense touch={touch} selectedKey={selectedKey} onSelect={onSelect} menu={menu} />
+      <HomeList model={model} hits={filter.hits} theme={view.theme} dense touch={touch} selectedKey={selectedKey} onSelect={onSelect} menu={menu}
+        // One row, nothing else (invariant 8): the filter takes the width, the sort is an icon. zIndex keeps the
+        // sort menu above the list on web, where every View is its own stacking context.
+        top={<View style={{ zIndex: 10, flexDirection: "row", alignItems: "center", gap: touch ? 8 : 4, paddingHorizontal: touch ? 12 : 8, paddingVertical: touch ? 8 : 6, borderBottomWidth: 1, borderBottomColor: c.border }}>
+          <FilterField theme={view.theme} filter={filter} dense={touch} />
+          <SortMenu theme={view.theme} mode={full.sort} onChange={sources.extras.setSort} rankedAt={full.rankedAt} touch={touch} compact shared rank={rank} onRerank={sources.extras.rankNow} />
+        </View>}
+        footer={filter.hits && !touch ? <Text style={{ color: c.foregroundMuted, fontSize: 11, paddingHorizontal: 8, paddingTop: 10, paddingBottom: 32 }}>Filtering this list · Esc clears</Text> : undefined} />
       <View style={{ position: "absolute", left: 8, right: 8, bottom: 8 }}><UndoBar store={sources.inbox} theme={view.theme} touch={touch} /></View>
       <RenameHost theme={view.theme} compact={touch} />
     </View>;

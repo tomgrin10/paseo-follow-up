@@ -82,7 +82,7 @@ the developer's; it never clears a Needs-you flag and never passes the Overseer'
 | `run_recovery` | `follow.recover` | planned |
 | `workspace_about` | `follow.workspace-about` | read (writes a Summary when none is cached) |
 | `agent_settings`, `set_agent_setting`, `set_wait_for_jobs` | `follow.agent-settings`, `follow.set-agent-setting`, `follow.set-wait` | read / planned |
-| `display_settings`, `set_display` | the host's `settings.display` document | read / planned |
+| `display_settings`, `set_display` | the host's `settings.display` document, Home's order (`home_sort`) among it | read / planned |
 | `follow_settings`, `set_follow_settings` | `follow.follow-settings`, `follow.set-follow-settings` | read / planned |
 | `project_settings`, `set_project_tracking` | `follow.project-settings`, `follow.set-project-tracking` | read / planned |
 | `pr_workflow`, `set_pr_workflow` | `follow.pr-workflow`, `follow.set-pr-workflow` | read / planned |
