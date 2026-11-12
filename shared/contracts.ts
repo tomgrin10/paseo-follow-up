@@ -260,6 +260,6 @@ const followLineSchema = z.object({ question: z.object({ id: z.string(), title: 
 export const createdItemsRpc = defineRpc({ name: "follow.created-items",
   input: z.strictObject({ agentIds: z.array(idSchema).max(40), workspaceIds: z.array(idSchema).max(40) }),
   output: z.object({
-    agents: z.record(z.string(), z.object({ title: z.string().nullable(), state: z.enum(["working", "idle", "closed"]), workspaceId: z.string().nullable(), main: z.boolean() })),
+    agents: z.record(z.string(), z.object({ title: z.string().nullable(), state: z.enum(["working", "idle", "closed", "archived"]), workspaceId: z.string().nullable(), main: z.boolean() })),
     workspaces: z.record(z.string(), z.object({ name: z.string().nullable(), follow: followLineSchema.nullable() })),
   }) });

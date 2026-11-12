@@ -150,16 +150,19 @@ group no longer counts it, the same as the Done card (a transform can only repla
   and a chevron, then "New agent · <model> · <workspace>" or "New workspace · <branch> · <repo>". A Follow-up line
   shows only when there is something to say: the workspace's first open question, up to two PR chips, or its live
   line. An agent's card shows it only when that agent is the workspace's main agent.
-- **States:** starting and creating (Follow-up's spinner), created (tappable), closed (words only, no chevron, never
-  opened, since opening would load it), failed ("Couldn't start <title>", the error on two lines, in full in the
-  accessibility label).
+- **States:** starting and creating (Follow-up's spinner); working and idle (tappable); closed, a session Paseo ended
+  (the idle unload or a plugin reload), reads "Closed · Open chat" with a hollow dot and stays tappable, since the
+  developer's tap is the only load and nothing reads, prefetches or previews it; archived (words only, no chevron);
+  unknown, not listed or not read yet (words only); failed ("Couldn't start <title>", the error on two lines, in full
+  in the accessibility label).
 - **Opening:** timeline items get no navigation, so a tap opens Follow-up's Home screen with `open=<agentId>` or
   `openWorkspace=<id>`. `useNextRelay` hands off to the host: the agent's chat, or the workspace with its Follow-up
   panel docked.
 - **Live facts:** `follow.created-items`, from the engine's directory snapshot as it stands (`DaemonDirectory.snapshot()`: it never waits on or asks the daemon, and nothing is
   woken) and the store. Agent states go through `taskAgentStates` and `PRESENCE` (`shared/task-status.ts`), the same
   words and link rule as task lines. Cards in one chat share one request; they poll every 20 s only while a card shows
-  an open agent and the app is visible.
+  an agent that isn't archived and the app is visible. `tests/daemon-load.test.ts` checks that a closed or archived
+  agent's card and task line cost no daemon request.
 - **Feature detection:** without `addTimelineTransformer` / `addTimelineRenderer` nothing is registered; a call whose
   result has no `agentId` / `workspaceId` keeps Paseo's plain row. Tests: `tests/created-card.test.ts`.
 

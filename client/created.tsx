@@ -50,8 +50,9 @@ function CreatedCardView({ item, theme, layout, deps }: PluginTimelineItemProps<
     queryFn: async () => (await batch(rpc, card)) ?? { agents: {}, workspaces: {} },
     enabled: card.phase === "created" && !!card.id,
     staleTime: 10_000,
-    // Only while the agent is still open (closed never changes back) and the app is in the foreground.
-    refetchInterval: q => card.kind === "agent" && card.id && q.state.data?.agents[card.id]?.state !== "closed" && appVisible() ? CREATED_POLL_MS : false,
+    // Only while the agent isn't archived (a closed session can resume) and the app is in the foreground. This reads the
+    // engine's directory snapshot; nothing here reads, prefetches or previews the agent itself.
+    refetchInterval: q => card.kind === "agent" && card.id && q.state.data?.agents[card.id]?.state !== "archived" && appVisible() ? CREATED_POLL_MS : false,
   });
   const live = query.data;
   const presence = cardPresence(card, live);
@@ -60,7 +61,8 @@ function CreatedCardView({ item, theme, layout, deps }: PluginTimelineItemProps<
   const follow = cardFollow(card, live);
   const opens = presence.opens && !!card.id;
   const failed = card.phase === "failed";
-  const dot = presence.tone === "working" ? c.statusSuccess : presence.tone === "closed" ? "closed" : null;
+  // Green while working; hollow (no fill) for a closed session or an archived agent.
+  const dot = presence.tone === "working" ? c.statusSuccess : presence.tone === "closed" || presence.tone === "archived" ? "closed" : null;
   const wordColor = presence.tone === "working" ? c.statusSuccess : c.foregroundMuted;
   const tile = compact ? 32 : 28;
   const chipColor = (tone: "success" | "danger" | "warning" | "merged" | "muted") => tone === "success" ? c.statusSuccess : tone === "danger" ? c.statusDanger : tone === "warning" ? c.statusWarning : tone === "merged" ? mergedColor(c) : c.foregroundMuted;
@@ -81,7 +83,7 @@ function CreatedCardView({ item, theme, layout, deps }: PluginTimelineItemProps<
     <View style={{ flex: 1, minWidth: 0 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, color: c.foreground, fontSize: compact ? 14 : 13, lineHeight: compact ? 20 : 18, fontWeight: card.phase === "created" && opens ? "600" : "500" }}>{title}</Text>
-        {!!presence.word && <Text style={{ color: wordColor, fontSize: 12, lineHeight: 17 }}>{presence.word}</Text>}
+        {!!presence.word && <Text style={{ color: wordColor, fontSize: 12, lineHeight: 17 }}>{presence.word}{presence.link ? <Text style={{ color: c.foregroundMuted }}> · </Text> : null}{presence.link ? <Text style={{ color: c.foreground, fontWeight: "500" }}>{presence.link}</Text> : null}</Text>}
         {opens && <Icon name="ChevronRight" size={14} color={c.foregroundMuted} />}
       </View>
       {!!meta && <Text numberOfLines={failed ? 2 : 1} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 17, marginTop: 1 }}>{meta}</Text>}
@@ -100,7 +102,7 @@ function CreatedCardView({ item, theme, layout, deps }: PluginTimelineItemProps<
   const frame = { flexDirection: "row" as const, gap: 10, alignItems: "flex-start" as const, borderRadius: 10, borderWidth: 1, borderColor: c.border, paddingHorizontal: compact ? 14 : 12, paddingVertical: compact ? 12 : 10, minHeight: compact ? 56 : undefined };
   return <View style={{ width: "100%", maxWidth: compact ? undefined : 560 }}>
     {opens
-      ? <Pressable accessibilityRole="link" accessibilityLabel={label} accessibilityHint={card.kind === "agent" ? "Opens the agent" : "Opens the workspace"} onPress={open}
+      ? <Pressable accessibilityRole="link" accessibilityLabel={label} accessibilityHint={card.kind === "agent" ? presence.link === "Open chat" ? "Opens the agent's chat" : "Opens the agent" : "Opens the workspace"} onPress={open}
           style={state => ({ ...frame, backgroundColor: state.pressed || (state as { hovered?: boolean }).hovered ? c.surface2 : c.surface1 })}>{body}</Pressable>
       : <View accessible accessibilityLabel={label} style={{ ...frame, backgroundColor: c.surface1 }}>{body}</View>}
   </View>;
