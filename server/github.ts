@@ -80,6 +80,9 @@ commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){pageInfo{hasN
 }}}}}}`;
 
 /** A GitHub write that failed outright (refused) or whose outcome is unknown (timed out, no reply). */
+/** Merged with a complete snapshot: final. Never read again except on its workspace's Refresh, and never in error. */
+const finalMerged = (p: Pr): boolean => p.snapshot?.state === "MERGED" && !!p.snapshot.complete;
+
 export class GithubWriteError extends Error { constructor(message: string, readonly uncertain: boolean) { super(message); } }
 type Method = "squash" | "merge" | "rebase";
 /** `gh pr merge` for one PR, pinned to the reviewed head. A merge queue picks its own method, so none is passed. */
@@ -210,14 +213,15 @@ export class Github {
       const due = targets.filter(p => {
         // Merged is final: a merged PR whose status is known isn't read again, not even on a cold start. Only the
         // developer's Refresh of its workspace (fresh) reads it.
-        if (p.snapshot?.state === "MERGED" && p.snapshot.complete && !p.error && !o.fresh?.has(p.key)) return false;
+        // A stored error doesn't undo that (2.0.1-beta.0 left some behind): the skip below reports no error, clearing it.
+        if (finalMerged(p) && !o.fresh?.has(p.key)) return false;
         if (tier === "critical") return false;
         if (!o.background || !this.last.has(p.key) || o.fresh?.has(p.key) || o.hot?.has(p.key)) return true;
         const last = this.last.get(p.key)!;
         return dueForRead({ snapshot: last.snapshot, error: p.error || last.error, changedAt: this.changedAt.get(p.key) ?? null, readAt: this.readAt.get(p.key) ?? 0, now: this.now(), tier, repoUrgent });
       });
       const dueKeys = new Set(due.map(p => p.key));
-      for (const p of targets) if (!dueKeys.has(p.key)) { this.stats.skipped++; result.set(p.key, this.standIn(p, owner)); }
+      for (const p of targets) if (!dueKeys.has(p.key)) { this.stats.skipped++; result.set(p.key, finalMerged(p) ? { snapshot: { ...p.snapshot! }, error: null } : this.standIn(p, owner)); }
       if (!due.length) continue;
       for (let offset = 0; offset < due.length; offset += CHUNK) {
         const group = due.slice(offset, offset + CHUNK);

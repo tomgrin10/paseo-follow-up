@@ -14,6 +14,7 @@ import { agentCard, automaticHold, batchView, holdSuperseded } from "./status";
 import { followUpObligations } from "./follow-up";
 import { cadence, movingReason, OBSERVATION_FRESH_MS, POLL_IDLE_MS, RUNNING_POLL_MS, TICK_MS } from "./poll";
 import { staleUpdatePhase, type UpdatePhase } from "./updates";
+import { compactPrStatus, prPresentation } from "./presentation";
 
 /**
  * Status invariants: what must hold for any workspace, whatever path changed it. Pure, no IO, and never throwing:
@@ -145,6 +146,18 @@ export const INVARIANTS: Invariant[] = [
         const want = other ? (q.answer.words ?? "").trim() : q.answer.choice;
         if (shown !== want) return `${q.id}'s card shows "${shown}", not "${want}"`;
         if (!other && option && (card.words ?? "") !== (q.answer.words ?? "").trim()) return `${q.id}'s card drops part of the note`;
+      }
+      return null;
+    },
+  },
+  {
+    id: "a-github-limit-never-blanks-a-known-pr",
+    why: "2026-11-12 live 2.0.1-beta.1: merged PRs with a complete snapshot kept an error from beta.0's RATE_LIMIT failures, the panel let the error win and merged-is-final never re-read them, so they read Unknown for good. A complete snapshot always shows its own status (shared/presentation.ts), and a merged one never stores an error (shared/model.ts prSchema, server/github.ts finalMerged).",
+    check(w) {
+      for (const p of w.prs) {
+        if (!p.snapshot?.complete) continue;
+        if (prPresentation(p).label === "Status unavailable" || compactPrStatus(p).label === "Unknown") return `${p.key} has a complete snapshot but reads unknown`;
+        if (p.snapshot.state === "MERGED" && p.error) return `${p.key} is merged and complete but stores "${p.error}"`;
       }
       return null;
     },

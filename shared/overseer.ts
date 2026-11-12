@@ -80,7 +80,7 @@ export const linearKeys = (...texts: (string | null | undefined)[]): string[] =>
 
 const prChecks = (p: Workspace["prs"][number]): WorkstreamPr["checks"] => {
   const s = p.snapshot;
-  if (!s || p.error) return "unknown";
+  if (!s?.complete) return "unknown";
   return s.failedChecks.length ? "failed" : s.checksPending ? "pending" : "passed";
 };
 

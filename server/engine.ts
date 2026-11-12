@@ -112,6 +112,18 @@ export class Engine {
     this.running = this.run(o).catch(() => { this.error = "Follow-up refresh failed. Saved work is intact; refresh will retry."; }).finally(() => { this.running = null; });
     return this.running;
   }
+  /** Reads one workspace's PRs fresh and records what came back, nothing else (a Refresh of a dormant workspace). */
+  private async refreshPrs(w: Workspace): Promise<void> {
+    const observations = await this.github.observe(w.prs, { background: true, fresh: new Set(w.prs.map(p => p.key)) });
+    await this.store.mutateWorkspace(w.id, current => {
+      for (const p of current.prs) {
+        const observed = observations.get(p.key);
+        if (!observed) continue;
+        p.error = observed.error;
+        if (observed.snapshot) recordSnapshot(p, observed.snapshot, this.now());
+      }
+    });
+  }
   private async run(o: { background?: boolean; workspaceId?: string } = {}): Promise<void> {
     if (this.paused()) { this.skipped++; return; }
     const saved = await this.store.snapshot();
@@ -124,7 +136,12 @@ export class Engine {
       });
     }
     // Dormant workspaces stay listed but cost nothing: no PR or agent observation until they're active again.
-    const active = (await this.store.snapshot()).workspaces.filter(w => w.enable_tracking && !w.archived && !w.dormant);
+    const current = await this.store.snapshot();
+    const active = current.workspaces.filter(w => w.enable_tracking && !w.archived && !w.dormant);
+    // The developer's Refresh of a dormant workspace still reads its PRs (only its PRs: no agent observation, repairs or
+    // sends). Before 2.0.1-beta.2 it read nothing, so a stale PR error there outlived every Refresh.
+    const asleep = o.workspaceId ? current.workspaces.find(w => w.id === o.workspaceId && w.enable_tracking && !w.archived && w.dormant) : undefined;
+    if (asleep) await this.refreshPrs(asleep);
     if (!active.length) { this.error = null; return; }
     // Busy workspaces keep every-tick PR reads: their agent may push or answer review at any moment.
     const keys = (ws: Workspace[]) => new Set(ws.flatMap(w => w.prs.map(p => p.key)));
