@@ -55,7 +55,8 @@ export default function contribute(server: PluginServerContext) {
             // prompt. { item } emits a timeline item, { rpc, input } calls a Follow-up RPC as this agent, { permission }
             // asks for a permission and waits for the answer, { hold: true } leaves the turn running.
             const scripts = JSON.parse(await readFile(join(process.env.PASEO_HOME!, "fixture-scripts.json"), "utf8").catch(() => "{}")) as Record<string, { item?: Record<string, unknown>; rpc?: string; input?: Record<string, unknown>; permission?: { kind?: string; name: string; title: string; input: Record<string, unknown> }; hold?: boolean }[]>;
-            const steps = scripts[text];
+            // "agent:<id>" scripts any other prompt to that one agent (a repair batch whose text the screenshots can't know).
+            const steps = scripts[text] ?? scripts[`agent:${sessions.get(input.sessionId)!.PASEO_AGENT_ID}`];
             if (steps) {
               const agentId = sessions.get(input.sessionId)!.PASEO_AGENT_ID;
               const { DaemonClient } = require(["@getpaseo", "client", "internal", "daemon-client"].join("/"));

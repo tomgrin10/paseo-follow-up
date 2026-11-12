@@ -59,6 +59,11 @@ Every switch is the same one Settings shows. Run it again from Settings → Gene
 Open **Follow-up** in Paseo's sidebar for Home, or the Follow-up icon in a workspace's header for that workspace's
 panel. ⌘K (Ctrl+K) has a Follow-up command for most things.
 
+On Paseo 0.16 or newer, Follow-up can also be your sidebar: pick **Follow-up: Needs you** in Settings → Sidebar →
+View. Follow-up 2.0 still runs on Paseo 0.15; there it simply doesn't offer the view.
+
+<img alt="Paseo 0.16's sidebar showing Follow-up's view: workspaces grouped by what they need from you, each with its status" src="https://raw.githubusercontent.com/tomgrin10/paseo-follow-up/main/docs/screenshots/follow-up-sidebar.png" width="320">
+
 <img alt="The workspace panel beside the agent's chat: 1 of 3 PRs merged, a stack bar, a question to answer, a failed check to repair and a task waiting on a deploy" src="https://raw.githubusercontent.com/tomgrin10/paseo-follow-up/main/docs/screenshots/follow-up-panel.png">
 
 - **Answer a question.** Pick an option, add a note if you like, and send. Cmd+Enter (Ctrl+Enter) sends. If the agent
@@ -74,11 +79,6 @@ panel. ⌘K (Ctrl+K) has a Follow-up command for most things.
   yet, the sheet says what it's waiting for. Follow-up never merges on its own, and Merge checks the stack again first.
 
   <img alt="The PR sheet for a PR whose required test check failed" src="https://raw.githubusercontent.com/tomgrin10/paseo-follow-up/main/docs/screenshots/follow-up-pr-sheet.png">
-
-- **Quick actions.** Right-click a workspace on Home, or long-press it on a phone: Later, Sign off, answer its
-  question, send repairs, copy the branch or PR link, and more.
-
-  <img alt="Home's row menu open on a workspace: Later, Sign off, Answer, Send repairs and Copy actions" src="https://raw.githubusercontent.com/tomgrin10/paseo-follow-up/main/docs/screenshots/follow-up-context-menu.png">
 
 - **Linked items.** Next to a workspace's Spec: the Linear issues, Slack threads and docs it's about, with who linked
   each one and why. Paste a link or a key to add one. Agents link what they start from, and a Linear key counts only

@@ -143,8 +143,9 @@ PLAYWRIGHT_CORE=<playwright-core dir> CHROMIUM=<chromium binary> ~/paseo-harness
 - **Synthetic only.** `example/app`, made-up people (Dana, Ravi), Linear-style keys (`APP-142`, `WEB-17`). Never real
   repos, names, channels or anything from a real Paseo home. This is a public repo.
 - **Shots** (`follow-up-<shot>.png`, into `--out`, default `docs/screenshots/`): `setup`, `home`, `panel`,
-  `questions`, `pill`, `pr-sheet`, `phone`, `whats-new`, `context-menu` (Home's row menu, right-clicked) and
-  `linked-items` (the Linked list open over Home's detail). `--only a,b` shoots a subset. Home is reached with
+  `questions`, `pill`, `pr-sheet`, `phone`, `whats-new`, `linked-items` (the Linked list open over Home's detail) and
+  `sidebar` (Follow-up's sidebar view on Paseo 0.16, cropped to the sidebar; shoot it alone with
+  `HARNESS_PASEO=0.16`). `--only a,b` shoots a subset. Home is reached with
   `scripts/ui-home.mjs`, which fails the shot instead of shooting the wrong page.
 - **Theme.** Dark for desktop shots, light for the phone shot; `--scheme dark|light` overrides both.
 - **What's new** is shot after a reinstall as `2.0.0-rc.0` over `1.4.0-beta.32`. It shows the repo's CHANGELOG.md
