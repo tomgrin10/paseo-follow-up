@@ -4,7 +4,7 @@
 
 | Setting | Stored in | Code |
 | --- | --- | --- |
-| Display (header button, sidebar item, composer pill, inbox, closed-PR flags, brief nudge, Overseer, ranker, trust bypass) | Paseo host settings document `display` (`displayPreferences`). It's host-scoped and keeps older saved sidebar values. | `shared/display.ts`, `client/display.tsx` |
+| Display (header button, sidebar item, composer pill, inbox, closed-PR flags, brief nudge, Overseer, ranker, trust bypass, Home's order) | Paseo host settings document `display` (`displayPreferences`). It's host-scoped and keeps older saved sidebar values. | `shared/display.ts`, `client/display.tsx` |
 | Question mode | host settings `questionPreferences` | `shared/questions.ts` |
 | Following, projects, per-workspace exceptions, active window | `state.json` | `shared/settings.ts`; RPCs `follow.follow-settings`, `follow.set-follow-settings`, `follow.project-settings`, `follow.set-project-tracking` |
 | Agents and Wait | `agents.json` | [ai-roles.md](ai-roles.md), [wait.md](wait.md) |
@@ -13,6 +13,9 @@
 
 - **Booleans** use positive `enable_` names. Fields only ever gain defaults, so documents saved by older versions
   keep parsing.
+- **Home's order** is the Display field `home_sort` (absent until first chosen, read as Priority). The sort menu on
+  Home and in the sidebar view writes it, so the order is the same on every device, and `set_display` sets it with
+  `{ values: { home_sort: "recent" } }`.
 - **Display fields** are read and written by agents through `display_settings` and `set_display`
   (`DISPLAY_TOOLS` in `server/agent-parity.ts`, PARITY key `settings.display`).
 - **The settings screen.** `client/settings.tsx` (categories), `client/settings-shell.tsx` (collapsible blocks) and
