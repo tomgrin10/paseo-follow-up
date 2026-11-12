@@ -98,7 +98,7 @@ test("never on yourself: an agent can't answer its own brief or act on its own i
 
 test("set_display: trust bypass and the other Display switches, planned, merged into the current document", async () => {
   const f = rpcFixture();
-  assert.deepEqual((await f.agent.run("a", "display_settings", {}) as { values: unknown }).values, { enable_trust_bypass: true, enable_inbox: true });
+  assert.deepEqual((await f.agent.run("a", "display_settings", {}) as { values: unknown }).values, { home_sort: "priority", enable_trust_bypass: true, enable_inbox: true });
   await assert.rejects(f.agent.run("a", "set_display", { values: { enable_everything: true } }), /unknown setting/);
   const same = await f.agent.run("a", "set_display", { values: { enable_inbox: true } }) as { planId: string | null };
   assert.equal(same.planId, null, "nothing changes, nothing to confirm");
@@ -107,4 +107,21 @@ test("set_display: trust bypass and the other Display switches, planned, merged 
   assert.deepEqual(f.writes, []);
   await f.agent.run("a", "set_display", { confirm: true, planId: plan.planId });
   assert.deepEqual(f.writes, [{ revision: "r1", values: { enable_trust_bypass: false, enable_inbox: true } }]);
+});
+
+/**
+ * Home's order is a Display setting (2.1): the sort menu and set_display write the same host document, so an agent
+ * can set it when asked and the developer's order follows them across devices (home-sort-is-a-display-setting).
+ */
+test("home_sort round-trips through set_display and display_settings", async () => {
+  const f = rpcFixture();
+  await assert.rejects(f.agent.run("a", "set_display", { values: { home_sort: "loudest" } }), /home_sort/);
+  const same = await f.agent.run("a", "set_display", { values: { home_sort: "priority" } }) as { planId: string | null };
+  assert.equal(same.planId, null, "unset reads as the default order, so choosing it changes nothing");
+  const plan = await f.agent.run("a", "set_display", { values: { home_sort: "recent" } }) as { planId: string; changes: unknown };
+  assert.deepEqual(plan.changes, [{ key: "home_sort", from: "priority", to: "recent" }]);
+  assert.deepEqual(f.writes, [], "a dry run first");
+  await f.agent.run("a", "set_display", { confirm: true, planId: plan.planId });
+  assert.deepEqual(f.writes.at(-1), { revision: "r1", values: { enable_trust_bypass: true, enable_inbox: true, home_sort: "recent" } });
+  assert.equal((await f.agent.run("a", "display_settings", {}) as { values: { home_sort: string } }).values.home_sort, "recent");
 });

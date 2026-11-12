@@ -2,21 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { Platform, ScrollView, TextInput, View } from "react-native";
 import { Pressable, Text } from "./text";
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
-import { GROUP_TITLE, homeCounts, type HomeGroupId, type HomeModel } from "../shared/home";
-import { FIELD_LABEL, excerpt, highlightRuns, homeSearchDocs, indexDocs, defaultActive, omniboxResults, overseerProvider, workspaceProvider, type OmniboxItem, type OmniboxProvider, type Range, type WorkspaceItem } from "../shared/search";
+import { homeCounts, type HomeGroupId, type HomeModel } from "../shared/home";
+import { filterHome, homeSearchDocs, indexDocs, defaultActive, omniboxResults, overseerProvider, workspaceProvider, type OmniboxItem, type OmniboxProvider } from "../shared/search";
 import { DEFAULT_SORT, SORT_HINT, SORT_LABEL, SORT_MODES, type SortMode } from "../shared/sort";
 import { priorityNote, PRIORITY_SOURCE_LABEL } from "../shared/priorities";
 import { rankCost } from "../shared/ranker";
 import { meters, meterText, type Meter } from "../shared/usage";
 import { resourceMeter, type Resources } from "../shared/resources";
 import type { HomeSources } from "./home-data";
-import type { Workstream } from "../shared/home";
-import { Age, glyphColor, PrChipView, PrSummaryText, quickActionsHint } from "./home-list";
 import { useMinute } from "./home-data";
 import { Spinner } from "./motion";
 import { withAlpha, type Colors } from "./theme";
 import type { Theme } from "./kit";
-import { useRowMenuTrigger, type OpenRowMenu } from "./row-menu";
 import { MenuItemContent, menuGlyph, menuItemRow } from "./menu-item";
 import { useLinkedIndex } from "./linked";
 
@@ -91,31 +88,67 @@ export function useSlashToFocus(omnibox: Omnibox, enabled = true) {
   }, [omnibox.inputRef, enabled]);
 }
 
-export function SearchField({ theme, omnibox, dense, onEnter }: { theme: Theme; omnibox: Omnibox; dense: boolean; onEnter: (item: OmniboxItem) => void }) {
+/**
+ * The one query field: Home's omnibox (SearchField) and the sidebar view's filter (FilterField) are this with
+ * different words. `dense` is the phone layout: a 44px field with a rounder shape and body-size text.
+ */
+function QueryField({ theme, value, onChange, placeholder, icon, dense, inputRef, slashHint, onSubmit, onArrow }: {
+  theme: Theme; value: string; onChange: (q: string) => void; placeholder: string; icon: string; dense: boolean;
+  inputRef: { current: TextInput | null }; slashHint: boolean; onSubmit?: () => void; onArrow?: (delta: number) => void;
+}) {
   const c = theme.colors;
   const [focused, setFocused] = useState(false);
-  const { query, setQuery, results, active, move, inputRef, askOn } = omnibox;
-  const placeholder = askOn ? dense ? "Search or ask the Overseer" : "Search, or ask the Overseer" : "Search workspaces, branches, PRs";
-  // `dense` is the phone layout: a 44px field with a rounder shape and body-size text.
   return <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: dense ? 8 : 6, height: dense ? 44 : 32, paddingHorizontal: dense ? 12 : 8, borderRadius: dense ? 12 : 6,
     borderWidth: 1, borderColor: focused ? withAlpha(c.foreground, 0.35) : c.border, backgroundColor: c.surface1 }}>
-    <Icon name="Search" size={dense ? 16 : 13} color={c.foregroundMuted} />
-    <TextInput ref={inputRef} value={query} onChangeText={setQuery} placeholder={placeholder} placeholderTextColor={c.foregroundMuted}
+    <Icon name={icon as never} size={dense ? 16 : 13} color={c.foregroundMuted} />
+    <TextInput ref={inputRef} value={value} onChangeText={onChange} placeholder={placeholder} placeholderTextColor={c.foregroundMuted}
       accessibilityLabel={placeholder} autoCorrect={false} autoCapitalize="none" spellCheck={false} returnKeyType="go"
       onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-      onSubmitEditing={() => { const item = results?.[active]; if (item) onEnter(item); }}
+      onSubmitEditing={onSubmit}
       onKeyPress={e => {
         const key = (e.nativeEvent as { key?: string }).key;
-        if (key === "ArrowDown") { e.preventDefault?.(); move(1); }
-        else if (key === "ArrowUp") { e.preventDefault?.(); move(-1); }
-        else if (key === "Escape") { if (query) setQuery(""); else inputRef.current?.blur(); }
+        if (key === "ArrowDown" && onArrow) { e.preventDefault?.(); onArrow(1); }
+        else if (key === "ArrowUp" && onArrow) { e.preventDefault?.(); onArrow(-1); }
+        else if (key === "Escape") { if (value) onChange(""); else inputRef.current?.blur(); }
       }}
       style={{ flex: 1, minWidth: 0, color: c.foreground, fontSize: dense ? 15 : 13, paddingVertical: 0, ...(Platform.OS === "web" ? { outlineStyle: "none" } as object : {}) }} />
-    {!!query && <Pressable accessibilityRole="button" accessibilityLabel="Clear search" hitSlop={dense ? 14 : 8} onPress={() => { setQuery(""); inputRef.current?.focus(); }}>
+    {!!value && <Pressable accessibilityRole="button" accessibilityLabel={`Clear ${placeholder.toLowerCase()}`} hitSlop={dense ? 14 : 8} onPress={() => { onChange(""); inputRef.current?.focus(); }}>
       <Icon name="X" size={dense ? 16 : 13} color={c.foregroundMuted} />
     </Pressable>}
-    {!query && !focused && !dense && Platform.OS === "web" && <Text style={{ color: c.foregroundMuted, fontSize: 11, paddingHorizontal: 4, borderRadius: 3, borderWidth: 1, borderColor: c.border }}>/</Text>}
+    {slashHint && !value && !focused && !dense && Platform.OS === "web" && <Text style={{ color: c.foregroundMuted, fontSize: 11, paddingHorizontal: 4, borderRadius: 3, borderWidth: 1, borderColor: c.border }}>/</Text>}
   </View>;
+}
+
+export function SearchField({ theme, omnibox, dense, onEnter }: { theme: Theme; omnibox: Omnibox; dense: boolean; onEnter: (item: OmniboxItem) => void }) {
+  const { query, setQuery, results, active, move, inputRef, askOn } = omnibox;
+  const placeholder = askOn ? dense ? "Search or ask the Overseer" : "Search, or ask the Overseer" : "Search workspaces, branches, PRs";
+  return <QueryField theme={theme} value={query} onChange={setQuery} placeholder={placeholder} icon="Search" dense={dense} inputRef={inputRef} slashHint
+    onSubmit={() => { const item = results?.[active]; if (item) onEnter(item); }} onArrow={move} />;
+}
+
+/**
+ * The sidebar view's filter (2.1): narrows the list in place with Home search's matcher (shared/search.ts
+ * `filterHome`), keeping groups and the chosen order. Archived workspaces stay out; Home's search finds those.
+ */
+export type ListFilter = { query: string; setQuery: (q: string) => void; model: HomeModel; hits: ReturnType<typeof filterHome>["hits"]; inputRef: { current: TextInput | null } };
+export function useListFilter(model: HomeModel, sources: HomeSources): ListFilter {
+  const [query, setQuery] = useState("");
+  const inputRef = useRef<TextInput | null>(null);
+  const live = useSyncExternalStore(sources.live.subscribe, sources.live.version, sources.live.version);
+  const paseo = useSyncExternalStore(sources.paseo.subscribe, sources.paseo.version, sources.paseo.version);
+  const extras = useSyncExternalStore(sources.extras.subscribe, sources.extras.version, sources.extras.version);
+  const searching = query.trim().length > 0;
+  const linked = useLinkedIndex(searching);
+  // The same documents Home's search indexes, minus archived ones; built only while there's a query.
+  const index = useMemo(() => searching ? indexDocs(homeSearchDocs({ model, paseo: sources.paseo.all(), tracked: sources.live.all(), agents: sources.extras.agents(), linked })) : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [searching, model, live, paseo, extras, linked]);
+  const filtered = useMemo(() => index ? filterHome(model, index, query) : { model, hits: null }, [index, model, query]);
+  return { query, setQuery, model: filtered.model, hits: filtered.hits, inputRef };
+}
+/** "Filter workspaces": a filter icon and no key binding, so it never reads as Paseo's own Search (the Command Center, ⌘K). */
+export function FilterField({ theme, filter, dense }: { theme: Theme; filter: ListFilter; dense: boolean }) {
+  return <QueryField theme={theme} value={filter.query} onChange={filter.setQuery} placeholder="Filter workspaces" icon="ListFilter" dense={dense} inputRef={filter.inputRef} slashHint={false} />;
 }
 
 // ---------- sort ----------
@@ -123,7 +156,9 @@ export function SearchField({ theme, omnibox, dense, onEnter }: { theme: Theme; 
 export type RankState = { enabled: boolean; running: boolean; healthLine: string; error: string | null; costUsd?: number | null; last?: { ok: boolean; skipped: string | null; provider: string | null } | null } | null;
 
 
-export function SortMenu({ theme, mode, onChange, rankedAt, touch, rank = null, onRerank }: { theme: Theme; mode: SortMode; onChange: (m: SortMode) => void; rankedAt: string | null; touch: boolean; rank?: RankState; onRerank?: () => Promise<{ ok: boolean; skipped: string | null; error: string | null; top?: { title: string }[] }> }) {
+export function SortMenu({ theme, mode, onChange, rankedAt, touch, rank = null, onRerank, compact = touch, shared = false }: { theme: Theme; mode: SortMode; onChange: (m: SortMode) => void; rankedAt: string | null; touch: boolean; rank?: RankState; onRerank?: () => Promise<{ ok: boolean; skipped: string | null; error: string | null; top?: { title: string }[] }>;
+  /** An icon without the mode's name (phones, and the sidebar view's narrow column). */ compact?: boolean;
+  /** Shown away from Home (the sidebar view): the menu says the order is Home's too. */ shared?: boolean }) {
   const c = theme.colors;
   const [open, setOpen] = useState(false);
   const now = useMinute();
@@ -144,15 +179,15 @@ export function SortMenu({ theme, mode, onChange, rankedAt, touch, rank = null, 
   const note = [priorityNote(rankedAt, now), rankedAt && rank?.enabled ? rankCost(rank) : "", rank?.enabled ? rank.healthLine : ""].filter(Boolean).join(" · ");
   return <View style={{ position: "relative", zIndex: 20 }}>
     <Pressable accessibilityRole="button" accessibilityLabel={`Sort: ${SORT_LABEL[mode]}${running ? ", ranking" : ""}`} aria-expanded={open} accessibilityState={{ expanded: open }} onPress={() => setOpen(o => !o)}
-      style={state => ({ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, height: touch ? 44 : 30, minWidth: touch ? 44 : undefined, paddingHorizontal: touch ? 0 : 8, borderRadius: touch ? 8 : 6, backgroundColor: open || (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
-      {/* Phones: an icon; the mode's name lives in the menu (and the accessible name). */}
-      {running ? <Spinner color={c.foreground} size={12} label="Ranking" /> : <Icon name="ArrowUpDown" size={touch ? 18 : 13} color={touch && mode !== DEFAULT_SORT ? c.foreground : c.foregroundMuted} />}
-      {/* Phones: the icon carries no label, so a non-default sort shows as a dot on it. */}
-      {touch && mode !== DEFAULT_SORT && <View style={{ position: "absolute", top: 9, right: 9, width: 7, height: 7, borderRadius: 4, backgroundColor: c.accent }} />}
-      {!touch && <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 12 }}>{SORT_LABEL[mode]}</Text>}
-      {!touch && <Icon name="ChevronDown" size={12} color={c.foregroundMuted} />}
+      style={state => ({ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, height: touch ? 44 : compact ? 32 : 30, minWidth: touch ? 44 : compact ? 32 : undefined, paddingHorizontal: compact ? 0 : 8, borderRadius: touch ? 8 : 6, backgroundColor: open || (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
+      {/* Phones and the sidebar view: an icon; the mode's name lives in the menu (and the accessible name). */}
+      {running ? <Spinner color={c.foreground} size={12} label="Ranking" /> : <Icon name="ArrowUpDown" size={touch ? 18 : compact ? 14 : 13} color={compact && mode !== DEFAULT_SORT ? c.foreground : c.foregroundMuted} />}
+      {/* The icon carries no label, so a non-default sort shows as a dot on it. */}
+      {compact && mode !== DEFAULT_SORT && <View style={{ position: "absolute", top: touch ? 9 : 5, right: touch ? 9 : 5, width: 7, height: 7, borderRadius: 4, backgroundColor: c.accent }} />}
+      {!compact && <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 12 }}>{SORT_LABEL[mode]}</Text>}
+      {!compact && <Icon name="ChevronDown" size={12} color={c.foregroundMuted} />}
     </Pressable>
-    {open && <View accessibilityRole="menu" style={{ position: "absolute", top: touch ? 48 : 34, right: 0, minWidth: touch ? 240 : 220, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1,
+    {open && <View accessibilityRole="menu" style={{ position: "absolute", top: touch ? 48 : compact ? 36 : 34, right: 0, minWidth: touch ? 240 : 220, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1,
       shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 8 }}>
       {SORT_MODES.map(m => <Pressable key={m} accessibilityRole="menuitem" accessibilityState={{ selected: m === mode }} onPress={() => { onChange(m); setOpen(false); }}
         style={state => ({ ...menuItemRow(touch), minHeight: touch ? 48 : 34, paddingHorizontal: touch ? 12 : 10, backgroundColor: (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
@@ -164,7 +199,9 @@ export function SortMenu({ theme, mode, onChange, rankedAt, touch, rank = null, 
           <MenuItemContent theme={theme} touch={touch} glyph={running ? <Spinner color={c.foregroundMuted} size={menuGlyph(touch).size - 2} label="Ranking" /> : "RefreshCw"} label={running ? "Ranking…" : "Re-rank now"} muted={running} />
         </Pressable>}
         {/* Phones: before anything is ranked, "Priority: By urgency" only repeats the checked row's hint. */}
-        {!(touch && !rankedAt) && <Text style={{ color: c.foregroundMuted, fontSize: 11, paddingHorizontal: 10, paddingTop: 4, paddingBottom: 4 }}>Priority: {note}</Text>}
+        {!(touch && !rankedAt) && <Text style={{ color: c.foregroundMuted, fontSize: 11, paddingHorizontal: 10, paddingTop: 4, paddingBottom: shared ? 0 : 4 }}>Priority: {note}</Text>}
+        {/* One order, saved as the Display setting home_sort: changing it here reorders Home as well. */}
+        {shared && <Text style={{ color: c.foregroundMuted, fontSize: 11, paddingHorizontal: 10, paddingTop: 2, paddingBottom: 6 }}>Home uses this order too.</Text>}
       </View>
     </View>}
   </View>;
@@ -270,67 +307,6 @@ function Bar({ pct, color, c }: { pct: number; color: string; c: Colors }) {
 }
 
 // ---------- results ----------
-
-export function Highlighted({ text, ranges, color, hit, mark, size, weight, lines = 1 }: { text: string; ranges: Range[]; color: string; hit: string; mark: string; size: number; weight?: "400" | "500" | "600"; lines?: number }) {
-  return <Text numberOfLines={lines} style={{ color, fontSize: size, fontWeight: weight ?? "400" }}>
-    {highlightRuns(text, ranges).map((r, i) => r.hit ? <Text key={i} style={{ color: hit, fontWeight: "600", backgroundColor: withAlpha(mark, 0.22), borderRadius: 2 }}>{r.text}</Text> : r.text)}
-  </Text>;
-}
-
-/** The group as a small status chip on a search result. */
-export function GroupChip({ group, c }: { group: HomeGroupId | "archived"; c: Colors }) {
-  const label = group === "archived" ? "Archived" : group === "needs" ? "Needs you" : group === "fixing" ? "Fixing" : GROUP_TITLE[group];
-  const color = group === "needs" ? c.statusWarning : group === "fixing" || group === "running" ? c.foreground : c.foregroundMuted;
-  return <View style={{ paddingHorizontal: 6, height: 18, justifyContent: "center", borderRadius: 9, borderWidth: 1, borderColor: c.border }}>
-    <Text numberOfLines={1} style={{ color, fontSize: 10, lineHeight: 13 }}>{label}</Text>
-  </View>;
-}
-
-export function ResultRow({ item, theme, active, dense, touch, onPress, s: row, onMenu }: { item: WorkspaceItem; theme: Theme; active: boolean; dense: boolean; touch: boolean; onPress: () => void; s?: Workstream; onMenu: OpenRowMenu }) {
-  const c = theme.colors;
-  const trigger = useRowMenuTrigger(row, onMenu, touch);
-  const { hit } = item;
-  const via = hit.via ? excerpt(hit.via.text, hit.via.ranges, dense ? 56 : 90) : null;
-  const archived = hit.group === "archived";
-  // Phones: the list's own row (glyph, two-line 15/20 title with the age, state word in tone, PRs as text, a divider),
-  // with the match highlighted. No group pill: the state word already says it.
-  if (touch) {
-    const tone = row ? glyphColor(row, c, true) : c.foregroundMuted;
-    return <Pressable ref={trigger.ref} onLongPress={trigger.onLongPress} delayLongPress={450} accessibilityHint={row ? quickActionsHint(touch) : undefined} accessibilityRole="button" accessibilityState={{ selected: active }} accessibilityLabel={`${hit.title}${row?.word ? `. ${row.word}` : ""}${hit.via ? `, ${FIELD_LABEL[hit.via.field]}: ${hit.via.text}` : ""}`} onPress={onPress}
-      style={state => ({ flexDirection: "row", alignItems: "flex-start", gap: 10, minHeight: 56, paddingLeft: 14, paddingRight: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: withAlpha(c.border, 0.6),
-        backgroundColor: active || state.pressed ? c.surface2 : "transparent" })}>
-      <View style={{ paddingTop: 2 }}><Icon name={archived ? "Archive" : row?.icon ?? "Circle"} size={17} color={archived ? c.foregroundMuted : tone} /></View>
-      <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
-        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
-          <View style={{ flex: 1, minWidth: 0 }}><Highlighted text={hit.title} ranges={hit.titleRanges} color={archived ? c.foregroundMuted : c.foreground} hit={c.foreground} mark={c.statusWarning} size={15} weight="500" lines={2} /></View>
-          {row && <Age iso={row.at} c={c} size={12} />}
-        </View>
-        {via ? <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>{FIELD_LABEL[hit.via!.field]} · <Highlighted text={via.text} ranges={via.ranges} color={c.foregroundMuted} hit={c.foreground} mark={c.statusWarning} size={13} /></Text>
-          : archived ? <Text style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>Archived</Text>
-          : row && (row.word || row.line) ? <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>
-            {row.word ? <Text style={{ color: tone, fontWeight: "600" }}>{row.word}</Text> : null}{row.word && row.line ? " · " : ""}{row.line}
-          </Text> : null}
-        {row?.pr && <Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 17 }}><PrSummaryText s={row} c={c} /></Text>}
-      </View>
-    </Pressable>;
-  }
-  return <Pressable ref={trigger.ref} onLongPress={trigger.onLongPress} delayLongPress={450} accessibilityHint={row ? quickActionsHint(touch) : undefined} accessibilityRole="button" accessibilityState={{ selected: active }} accessibilityLabel={`${hit.title}${hit.via ? `, ${FIELD_LABEL[hit.via.field]}: ${hit.via.text}` : ""}`} onPress={onPress}
-    style={state => ({ flexDirection: "row", alignItems: "center", gap: 10, minHeight: touch ? 56 : dense ? 40 : 44, paddingHorizontal: dense ? 8 : 16, paddingVertical: 4,
-      borderLeftWidth: 2, borderLeftColor: active ? withAlpha(c.foreground, 0.5) : "transparent",
-      backgroundColor: active ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
-    <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-      <Highlighted text={hit.title} ranges={hit.titleRanges} color={archived ? c.foregroundMuted : c.foreground} hit={c.foreground} mark={c.statusWarning} size={13} weight="500" />
-      {!via && row && (row.word || row.line) ? <Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 12 }}>{[row.word, row.line].filter(Boolean).join(" · ")}</Text> : null}
-      {via && <View style={{ flexDirection: "row", gap: 6, alignItems: "baseline" }}>
-        <Text style={{ color: c.foregroundMuted, fontSize: 11 }}>{FIELD_LABEL[hit.via!.field]}</Text>
-        <View style={{ flex: 1, minWidth: 0 }}><Highlighted text={via.text} ranges={via.ranges} color={c.foregroundMuted} hit={c.foreground} mark={c.statusWarning} size={12} /></View>
-      </View>}
-    </View>
-    {row && !dense && <PrChipView s={row} c={c} />}
-    <GroupChip group={hit.group} c={c} />
-    {row && <Age iso={row.at} c={c} size={dense ? 11 : 12} />}
-  </Pressable>;
-}
 
 /**
  * The omnibox's last row: the query as an ask for the Overseer. Enter (or a tap) sends it as typed; the Overseer
