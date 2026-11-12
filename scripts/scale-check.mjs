@@ -5,7 +5,7 @@
 // wakes a few on purpose. It then installs Follow-up with every workspace tracked and auto-send on (the 1.3.0-beta.2
 // blast radius) and counts loaded agents before and after three poll cycles.
 //
-//   node scripts/scale-check.mjs [--workspaces 120] [--awake 5] [--plugin <unpacked plugin dir>] [--json]
+//   node scripts/scale-check.mjs [--workspaces 120] [--awake 5] [--realistic] [--plugin <unpacked plugin dir>] [--json]
 //
 // Exits non-zero when the loaded count grows, or when --rss-budget / --cpu-budget are exceeded. Skips (exit 0) when
 // the paseo CLI is missing, except under CI. Run it inside a memory-capped scope, e.g.
@@ -36,7 +36,7 @@ await harness();
 const arg = (name, fallback) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : fallback; };
 const N = Number(arg("workspaces", "120")); const AWAKE = Number(arg("awake", "5")); const POLLS = 3; const POLL_MS = 15_000;
 /** Seeds each workspace with this many never-sent cancelled batches, like the VM's 1.3.0-beta.2 state. */
-const CHURN = Number(arg("churn", "0")); const IDLE_MS = Number(arg("idle", "30")) * 1000;
+const CHURN = Number(arg("churn", "0")); const REALISTIC = process.argv.includes("--realistic"); const IDLE_MS = Number(arg("idle", "30")) * 1000;
 const budget = { rssMb: Number(arg("rss-budget", "0")), cpuPct: Number(arg("cpu-budget", "0")), requestsPerMin: Number(arg("request-budget", "0")) };
 const root = await mkdtemp(join(tmpdir(), "follow-scale-"));
 const home = join(root, "home"); const fixture = join(root, "fixture"); let plugin = arg("plugin", null);
@@ -94,6 +94,12 @@ try {
   const now = new Date().toISOString();
   const churn = i => Array.from({ length: CHURN }, (_, k) => ({ id: `churn-${i}-${k}`, messageId: `churn-m-${i}-${k}`, tasks: [{ key: `completion:w${i}`, kind: "completion", target: `w${i}`, title: "Verify the workspace is finished and declare Done", fingerprint: `f${k}` }], state: "cancelled", createdAt: now, sentAt: null, settledAt: null, attempts: 1, result: "Conditions resolved before delivery", recipientAgentId: null, contextPath: null, activityAt: null, acknowledgmentError: null, recoveryHandoffs: [] }));
   await writeFile(join(home, "plugin-data/follow-up/state.json"), JSON.stringify({ version: 1, migrations: ["follow-every-1"], workspaces: created.map(({ workspaceId, agentId }, i) => ({ id: workspaceId, title: `Synthetic workspace ${i}`, goal: "Synthetic", mainAgentId: agentId, enable_tracking: true, enable_auto_sends: true, hold: null, archived: false, prs: [], obligations: [], batches: churn(i), completion: null, updatedAt: now, managedDoneLabel: false, runtimeReason: null, runtimeBusy: false, backgroundBusy: false, inventory: null })) }));
+  // --realistic: the live install's shape (about 9 KB a workspace: PRs with snapshots, tasks, batch history, questions),
+  // from scripts/scale-seed.ts. The empty seed above let a 450 MB worker pass a 240 MB budget (2026-11-12).
+  if (REALISTIC) {
+    await writeFile(join(root, "created.json"), JSON.stringify(created));
+    await exec("npx", ["tsx", "scripts/scale-seed.ts", join(home, "plugin-data/follow-up/state.json"), join(root, "created.json")], { timeout: 120_000 });
+  }
   const stateBytesBefore = (await readFile(join(home, "plugin-data/follow-up/state.json"))).length;
   const before = loaded(await agents());
   await cli("plugin", "install", plugin);

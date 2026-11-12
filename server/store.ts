@@ -221,8 +221,12 @@ function deepFreeze<T>(value: T): T {
  * reads every PR fresh.
  */
 export const VOLATILE_WRITE_MS = 300_000;
-/** Read timestamps: when a PR or its deployment was last observed. Nothing else is volatile. */
-const READ_TIMES = new Set(["observedAt"]);
+/**
+ * Read timestamps: when a PR or its deployment was last observed (observedAt), and when discovery last scanned a
+ * workspace's history (inventory.scannedMessageAt; 2026-11-12 live: 4 of 7 state.json writes moved only that, and
+ * nothing reads it back). Nothing else is volatile.
+ */
+const READ_TIMES = new Set(["observedAt", "scannedMessageAt"]);
 /**
  * True when two values differ in read timestamps at most. Structural like sameJson: key order doesn't count (a parsed
  * snapshot's keys come in a different order from the saved, schema-ordered one).
