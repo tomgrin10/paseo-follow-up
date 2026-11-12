@@ -50,11 +50,14 @@ const port = await free(); const url = `ws://127.0.0.1:${port}/ws`;
 // Every client but this script reaches the daemon through a counting proxy, so the worker's request rate is measured.
 const counter = await startCounter(port); const counted = `ws://127.0.0.1:${counter.port}/ws`;
 const heapDir = arg("heap-snapshot", null);
+// --cpu-prof <dir>: every node process the daemon starts (the worker too) writes a .cpuprofile when it exits, so a
+// startup burst or idle CPU can be attributed to functions (node scripts/cpu-top.mjs <file>).
+const cpuDir = arg("cpu-prof", null);
 // --realistic also answers GitHub reads with live-sized PR bodies (scripts/scale-github.mjs), so a cold start reads
 // every PR the way the live worker does.
 let github = null;
 if (REALISTIC) { await mkdir(join(root, "bin"), { recursive: true }); await writeFile(join(root, "bin/gh"), scaleGh()); const { chmod } = await import("node:fs/promises"); await chmod(join(root, "bin/gh"), 0o700); github = await fakeGithub({ dir: root, gh: join(root, "bin/gh"), owners: ["example"] }); }
-const env = harnessEnv(root, { home, strip: github?.strip ?? [], set: { ...(heapDir ? { NODE_OPTIONS: `--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=${heapDir}` } : {}), PASEO_DAEMON_URL: counted, PASEO_RELAY_ENABLED: "false", ...(github?.env ?? {}) } });
+const env = harnessEnv(root, { home, strip: github?.strip ?? [], set: { ...(heapDir || cpuDir ? { NODE_OPTIONS: [heapDir && `--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=${heapDir}`, cpuDir && `--cpu-prof --cpu-prof-dir=${cpuDir}`].filter(Boolean).join(" ") } : {}), PASEO_DAEMON_URL: counted, PASEO_RELAY_ENABLED: "false", ...(github?.env ?? {}) } });
 const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env, timeout: 120_000, maxBuffer: 8 << 20 })).stdout);
 let daemon = null; let client = null;
 const start = async () => {
