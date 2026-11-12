@@ -1,0 +1,1 @@
+- Right-click a workspace in the sidebar view to open its menu.

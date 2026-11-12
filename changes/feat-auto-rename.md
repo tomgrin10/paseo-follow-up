@@ -1,0 +1,1 @@
+- Rename with AI: pick it from a workspace's menu (Home, the sidebar view, the panel's new More button) or ⌘K, and Follow-up suggests a short name from the Summary, PRs and linked items. Edit it or accept it; Undo puts the old name back.

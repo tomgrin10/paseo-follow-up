@@ -11,6 +11,7 @@ import { asksForReviewers, liveLine, needsYou } from "./attention";
 import { trackedGroup, type HomeModel } from "./home";
 import { freshPriorities, type Priority } from "./priorities";
 import { agentCard, automaticHold, batchView, holdSuperseded } from "./status";
+import { cappedTasks, NO_PROGRESS_CAP, sendDecision } from "./send-decision";
 import { followUpObligations } from "./follow-up";
 import { PRESENCE, claimsWorking, taskStatus } from "./task-status";
 import { cadence, movingReason, OBSERVATION_FRESH_MS, POLL_IDLE_MS, RUNNING_POLL_MS, TICK_MS } from "./poll";
@@ -71,6 +72,27 @@ export const INVARIANTS: Invariant[] = [
     check(w) {
       const dupes = duplicateOpenQuestions(w.questions ?? []);
       return dupes.length ? dupes.map(d => `${d.duplicate.id} repeats ${d.of.id}`).join(", ") : null;
+    },
+  },
+  {
+    id: "the-send-line-matches-the-send-decision",
+    why: "2026-11-12: the panel said \"4 repairs queued · sending now\" while the worker wouldn't send (a PR it couldn't read, a refused dispatch it swallowed): the line and the auto-send were two copies of one rule. A queued batch's line is the worker's own decision (shared/send-decision.ts), so it only says sending when the next refresh sends.",
+    check(w, now) {
+      const v = batchView(w, now);
+      if (v?.phase !== "queued" || v.kind !== "repairs") return null;
+      const d = sendDecision(w, now, { batch: v.batch });
+      if (!v.line.endsWith(d.reason)) return `line "${v.line}" but the decision is "${d.reason}"`;
+      if (v.waitingOn !== d.waitingOn) return `line waits on ${v.waitingOn}, the decision on ${d.waitingOn}`;
+      if (/\bsending (now|in a moment)\b/.test(v.line) && d.waitingOn !== null) return `"${v.line}" while the send waits on ${d.waitingOn}`;
+      return null;
+    },
+  },
+  {
+    id: "retry-only-when-capped",
+    why: "2026-11-12 (Q50): Needs you asked for Retry whenever a sent batch's turn ended without acknowledge_batch, often after the agent did the work. Follow-up now settles such a turn from GitHub and re-queues what's open; a turn without an acknowledgment asks the developer only once one unchanged condition went out NO_PROGRESS_CAP times.",
+    check(w) {
+      const early = w.batches.find(b => b.state === "blocked" && b.unacknowledged && !cappedTasks(w, b).length);
+      return early ? `${early.id} is blocked for a missing acknowledgment before any condition went out ${NO_PROGRESS_CAP} times` : null;
     },
   },
   {
