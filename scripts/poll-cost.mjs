@@ -10,7 +10,7 @@
 // --pending K keeps K PRs (one per repository first) with checks in progress. --cpu-prof writes the worker's V8 CPU profile (node --cpu-prof) for the window. Run under the harness-slot wrapper.
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, readFile, writeFile, rm, chmod, readdir } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, rm, chmod, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer as createNet } from "node:net";
@@ -128,13 +128,18 @@ const base = process.env.POLL_COST_API; const args = process.argv.slice(2);
   const ticks = async () => { const f = (await readFile(`/proc/${pid}/stat`, "utf8")).split(") ")[1].split(" "); return Number(f[11]) + Number(f[12]); };
   const hz = Number((await exec("getconf", ["CLK_TCK"])).stdout.trim()) || 100;
   const start = { ...counts, cpu: await ticks(), at: Date.now() };
+  // Store writes in the window (store-writes-only-real-changes): each atomic rename gives the file a new inode.
+  const files = { "state.json": 0, "inbox.json": 0 }; const seen = {};
+  const watch = setInterval(async () => { for (const f of Object.keys(files)) { const s = await stat(join(home, "plugin-data/follow-up", f)).catch(() => null); const k = s ? `${s.ino}:${s.mtimeMs}` : null; if (k && seen[f] && seen[f] !== k) files[f]++; if (k) seen[f] = k; } }, 200);
   await sleep(MINUTES * 60_000);
+  clearInterval(watch);
   const minutes = (Date.now() - start.at) / 60_000;
   const rate = k => Math.round((counts[k] - start[k]) / minutes * 10) / 10;
   const state = JSON.parse(await readFile(join(home, "plugin-data/follow-up/state.json"), "utf8"));
   const observed = state.workspaces.flatMap(w => w.prs).filter(p => p.snapshot && !p.error).length;
   const result = { prs: N, workspaces: W, repos: R, runningChecks: PENDING, merged: MERGED, closed: CLOSED, minutes: Math.round(minutes * 10) / 10, observedPrs: observed,
     perMinute: { ghSpawns: rate("ghSpawns"), processesViaWrapper: Math.round(rate("ghSpawns") * 3 * 10) / 10, gcloudSpawns: rate("gcloudSpawns"), graphqlRequests: rate("graphql"), restRequests: rate("rest"), graphqlPointsPerHour: Math.round(rate("points") * 60) },
+    storeWritesPerMinute: Object.fromEntries(Object.entries(files).map(([f, n]) => [f, Math.round(n / ((Date.now() - start.at) / 60_000) * 10) / 10])),
     workerCpuPct: Math.round(((await ticks()) - start.cpu) / hz / (minutes * 60) * 1000) / 10 };
   console.log(process.argv.includes("--json") ? JSON.stringify(result) : result);
   if (observed < N) { console.error(`only ${observed} of ${N} PRs observed`); process.exitCode = 1; }

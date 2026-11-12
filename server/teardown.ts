@@ -43,6 +43,8 @@ export interface WorkerParts {
   closeConnections(within: Deadline): Promise<void>;
   engine: { stop(within: Deadline): Promise<void> };
   store: { close(work: Deadline, save: Deadline): Promise<void> };
+  /** The inbox's held lastSeen (store-writes-only-real-changes), written with the store before the lock goes. */
+  inbox?: { flush(): Promise<void> };
   unlock?: (() => Promise<unknown>) | null;
 }
 /**
@@ -61,5 +63,6 @@ export async function stopWorker(parts: WorkerParts, ms = STOP_WAIT_MS): Promise
   await step(() => parts.engine.stop(work));
   await settleWithin(parts.ready, work);
   await step(() => parts.store.close(work, save), save);
+  if (parts.inbox) await step(() => parts.inbox!.flush(), save);
   if (parts.unlock) await step(parts.unlock, save);
 }
