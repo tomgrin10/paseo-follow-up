@@ -103,9 +103,17 @@ export interface AccountReads {
   restAs(account: string | null, path: string): Promise<unknown>;
 }
 
+/**
+ * One REST call as the account `repo`'s owner maps to, resolving with any HTTP status: issue reports
+ * (server/report-issue/) create issues, comments and screenshot files through it, in-process like every read.
+ */
+export interface RestSend {
+  send(repo: string, method: "GET" | "POST" | "PUT", path: string, body?: unknown): Promise<{ status: number; data: any }>;
+}
+
 const LIMIT = 4 * 1024 * 1024;
 /** In-process HTTPS with one token per owner, refreshed once on a 401. `FOLLOW_UP_GITHUB_API` points tests at a fake. */
-export function httpApi(o: { tokens?: TokenSource; accountToken?: (account: string | null) => Promise<string>; status?: () => Promise<string>; request?: typeof fetch; base?: string; timeoutMs?: number; now?: () => number } = {}): GithubApi & AccountReads {
+export function httpApi(o: { tokens?: TokenSource; accountToken?: (account: string | null) => Promise<string>; status?: () => Promise<string>; request?: typeof fetch; base?: string; timeoutMs?: number; now?: () => number } = {}): GithubApi & AccountReads & RestSend {
   const tokens = o.tokens ?? ghTokens();
   const accountToken = o.accountToken ?? ghAccountToken();
   const request = o.request ?? fetch;
@@ -120,13 +128,14 @@ export function httpApi(o: { tokens?: TokenSource; accountToken?: (account: stri
   };
   const status = o.status ?? (async () => { const { env, bin } = realGh(process.env); return new Promise<string>(resolve => execFile(bin, ["auth", "status", "--hostname", "github.com"], { env, timeout: 15_000 }, (_e, stdout, stderr) => resolve(`${stdout ?? ""}${stderr ?? ""}`))); });
   let accounts: { until: number; value: Promise<string[]> } | null = null;
-  const call = async (key: string, url: string, init: { method: string; body?: string }, retried = false): Promise<unknown> => {
+  const call = async (key: string, url: string, init: { method: string; body?: string }, retried = false, raw = false): Promise<unknown> => {
     const abort = new AbortController(); const timer = setTimeout(() => abort.abort(), o.timeoutMs ?? 25_000);
     try {
       const response = await request(url, { ...init, signal: abort.signal, headers: { authorization: `bearer ${await token(key)}`, accept: "application/vnd.github+json", "content-type": "application/json", "user-agent": "paseo-follow-up", "x-github-api-version": "2022-11-28" } });
-      if (response.status === 401 && !retried) { cache.delete(key); return call(key, url, init, true); }
+      if (response.status === 401 && !retried) { cache.delete(key); return call(key, url, init, true, raw); }
       const text = await response.text();
       if (text.length > LIMIT) throw new Error("GitHub response exceeds the read limit");
+      if (raw) { let data: unknown = null; try { data = text ? JSON.parse(text) : null; } catch { data = text; } return { status: response.status, data }; }
       if (response.status === 401) throw new GithubAuthError("GitHub refused the token (HTTP 401)");
       if ((response.status === 403 || response.status === 429) && (response.headers?.get("x-ratelimit-remaining") === "0" || response.headers?.get("retry-after"))) {
         const reset = Number(response.headers.get("x-ratelimit-reset")) * 1000 || Date.now() + Number(response.headers.get("retry-after") ?? 600) * 1000;
@@ -145,9 +154,10 @@ export function httpApi(o: { tokens?: TokenSource; accountToken?: (account: stri
       return accounts.value;
     },
     restAs: (account, path) => call(`@${account ?? ""}`, `${base}/${path.replace(/^\//, "")}`, { method: "GET" }),
+    send: (repo, method, path, body) => call(ownerOf(repo), `${base}/${path.replace(/^\//, "")}`, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }, false, true) as Promise<{ status: number; data: any }>,
   };
 }
 
-let shared: (GithubApi & AccountReads) | null = null;
+let shared: (GithubApi & AccountReads & RestSend) | null = null;
 /** The worker's one client: every read path shares its per-owner and per-account token cache. */
-export function githubApi(): GithubApi & AccountReads { return shared ??= httpApi(); }
+export function githubApi(): GithubApi & AccountReads & RestSend { return shared ??= httpApi(); }
