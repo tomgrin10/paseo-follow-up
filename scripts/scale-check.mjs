@@ -14,7 +14,8 @@ import assert from "node:assert/strict";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, mkdir, readFile, writeFile, readdir, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { openSync } from "node:fs";
@@ -53,11 +54,13 @@ const heapDir = arg("heap-snapshot", null);
 // --cpu-prof <dir>: every node process the daemon starts (the worker too) writes a .cpuprofile when it exits, so a
 // startup burst or idle CPU can be attributed to functions (node scripts/cpu-top.mjs <file>).
 const cpuDir = arg("cpu-prof", null);
+// --alloc-prof <dir>: what every node process allocates, garbage included (scripts/alloc-prof.cjs, alloc-top.mjs).
+const allocDir = arg("alloc-prof", null);
 // --realistic also answers GitHub reads with live-sized PR bodies (scripts/scale-github.mjs), so a cold start reads
 // every PR the way the live worker does.
 let github = null;
 if (REALISTIC) { await mkdir(join(root, "bin"), { recursive: true }); await writeFile(join(root, "bin/gh"), scaleGh()); const { chmod } = await import("node:fs/promises"); await chmod(join(root, "bin/gh"), 0o700); github = await fakeGithub({ dir: root, gh: join(root, "bin/gh"), owners: ["example"] }); }
-const env = harnessEnv(root, { home, strip: github?.strip ?? [], set: { ...(heapDir || cpuDir ? { NODE_OPTIONS: [heapDir && `--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=${heapDir}`, cpuDir && `--cpu-prof --cpu-prof-dir=${cpuDir}`].filter(Boolean).join(" ") } : {}), PASEO_DAEMON_URL: counted, PASEO_RELAY_ENABLED: "false", ...(github?.env ?? {}) } });
+const env = harnessEnv(root, { home, strip: github?.strip ?? [], set: { ...(heapDir || cpuDir || allocDir ? { NODE_OPTIONS: [heapDir && `--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=${heapDir}`, cpuDir && `--cpu-prof --cpu-prof-dir=${cpuDir}`, allocDir && `--require ${join(dirname(fileURLToPath(import.meta.url)), "alloc-prof.cjs")}`].filter(Boolean).join(" ") } : {}), ...(allocDir ? { FOLLOW_UP_ALLOC_PROF: allocDir } : {}), PASEO_DAEMON_URL: counted, PASEO_RELAY_ENABLED: "false", ...(github?.env ?? {}) } });
 const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env, timeout: 120_000, maxBuffer: 8 << 20 })).stdout);
 let daemon = null; let client = null;
 const start = async () => {
