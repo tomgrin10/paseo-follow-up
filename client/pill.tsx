@@ -1,5 +1,5 @@
 import { useState, useSyncExternalStore } from "react";
-import { browserKey, BROWSER_POLL_MS } from "./keys";
+import { browserKey } from "./keys";
 import { useWorkspace } from "./workspace-data";
 import { ScrollView, View } from "react-native";
 import { Pressable, Text } from "./text";
@@ -151,7 +151,7 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
   // The live store already holds this workspace; the popover reads it once on open (Paseo can leave a stray mounted
   // copy, so nothing here polls it: 1.4.0).
   const query = useWorkspace(deps.live, props.workspaceId, { enabled: main });
-  const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), refetchInterval: BROWSER_POLL_MS, enabled: main });
+  const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), enabled: main });
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" } | null>(null);
   const [question, setQuestion] = useState<string | null>(null);
   const w = main ? query.workspace ?? target.workspace : null;

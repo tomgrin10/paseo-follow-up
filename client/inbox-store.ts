@@ -1,5 +1,6 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
-import { inboxActRpc, inboxListRpc } from "../shared/contracts";
+import { inboxActRpc, inboxFeed, inboxListRpc } from "../shared/contracts";
+import { subscribeFeed } from "./feeds";
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type { InboxRow } from "../shared/inbox";
 import { subscribeDisplay } from "./display";
@@ -45,35 +46,47 @@ export function createInboxStore(client: PluginClientContext) {
   const rpcList = (): Promise<List> => client.rpc(inboxListRpc, data?.etag ? { etag: data.etag } : {});
   const act = (input: RpcInput<typeof inboxActRpc>) => client.rpc(inboxActRpc, input);
 
-  const poll = async () => {
+  let feed: (() => void) | null = null;
+  /** Sign-offs queued while the worker was unreachable go out before the next read. */
+  const flush = async () => {
+    if (!pending.length) return;
+    const queued = pending; pending = [];
     try {
-      if (pending.length) {
-        const queued = pending; pending = [];
-        const result = await act({ action: "sign_off", agentIds: queued.map(p => p.agentId), seqs: Object.fromEntries(queued.map(p => [p.agentId, p.seq])) });
-        cameBack = [...cameBack, ...result.results.filter(r => r.cameBack).map(r => r.agentId)];
-      }
-      const next = await rpcList();
-      if (stopped) return;
+      const result = await act({ action: "sign_off", agentIds: queued.map(p => p.agentId), seqs: Object.fromEntries(queued.map(p => [p.agentId, p.seq])) });
+      cameBack = [...cameBack, ...result.results.filter(r => r.cameBack).map(r => r.agentId)];
+    } catch (error) { pending = [...queued, ...pending]; throw error; }
+  };
+  const apply = (next: List) => {
       // Nothing changed since the answer this store holds: keep it, and only re-render if we were offline.
       if (next.unchanged && data) { if (offlineSince !== null || failures) { offlineSince = null; failures = 0; emit(); } return; }
       data = next; offlineSince = null; failures = 0;
       // Rows signed off while offline stay hidden until the replay lands.
       emit();
+  };
+  // Paseo 0.15 polls the etag'd list; 0.16 gets it pushed (follow.inbox-feed) and polls nothing.
+  const poll = async () => {
+    try {
+      await flush();
+      const next = await rpcList();
+      if (stopped || feed) return;
+      apply(next);
     } catch {
       failures++;
       if (failures >= 2 && offlineSince === null) { offlineSince = Date.now(); emit(); }
-    } finally { if (!stopped) timer = whileVisible(POLL_MS, () => void poll()); }
+    } finally { if (!stopped && !feed) timer = whileVisible(POLL_MS, () => void poll()); }
   };
-  const refresh = () => { if (timer) clearTimeout(timer); void poll(); };
+  /** After an action: the feed pushes the change by itself (only queued sign-offs go out); polling hosts read at once. */
+  const refresh = () => { if (feed) { void flush().catch(() => undefined); return; } if (timer) clearTimeout(timer); void poll(); };
   let nudged: ReturnType<typeof setTimeout> | null = null;
   /** Something changed in Paseo: refresh soon, coalescing a burst of agent updates into one read. */
-  const nudge = () => { if (nudged || stopped) return; nudged = setTimeout(() => { nudged = null; refresh(); }, 750); };
+  const nudge = () => { if (nudged || stopped || feed) return; nudged = setTimeout(() => { nudged = null; refresh(); }, 750); };
   const unsubscribe = subscribeDisplay(values => {
     const on = values.enable_inbox !== false;
     if (on !== enabled) { enabled = on; emit(); if (on) refresh(); }
   });
+  feed = subscribeFeed(client, inboxFeed, {}, next => { if (stopped) return; void flush().catch(() => undefined); apply(next); }, () => { feed = null; void poll(); });
   const offVisible = onVisible(refresh);
-  void poll();
+  if (!feed) void poll();
 
   const patch = (agentIds: string[], change: (row: InboxRow) => InboxRow) => {
     if (!data) return;
@@ -115,7 +128,7 @@ export function createInboxStore(client: PluginClientContext) {
     clearRecent() { recent = null; emit(); },
     refresh,
     nudge,
-    stop() { stopped = true; offVisible(); if (timer) clearTimeout(timer); if (nudged) clearTimeout(nudged); listeners.clear(); unsubscribe(); },
+    stop() { stopped = true; feed?.(); offVisible(); if (timer) clearTimeout(timer); if (nudged) clearTimeout(nudged); listeners.clear(); unsubscribe(); },
 
     /** Sign off now; queue for replay when the host can't be reached. */
     async signOff(requested: string[], options: { muteTurn?: boolean } = {}) {
