@@ -152,8 +152,9 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
 
   const render = useCallback(({ item }: { item: Entry }) => {
     switch (item.type) {
-      case "label": return <Text accessibilityRole={item.key === "l:archived" ? "header" : undefined} style={{ color: c.foregroundMuted, fontSize: item.key === "l:archived" ? 11 : 13, fontWeight: item.key === "l:archived" ? "600" : "400",
-        letterSpacing: item.key === "l:archived" ? 0.6 : 0, textTransform: item.key === "l:archived" ? "uppercase" : "none", paddingHorizontal: dense ? 8 : 16, paddingTop: 12, paddingBottom: 4 }}>{item.text}</Text>;
+      // "Archived" heads its results like a group: small caps on desktop, sentence case at 13 on phones (GroupHeader).
+      case "label": return <Text accessibilityRole={item.key === "l:archived" ? "header" : undefined} style={{ color: c.foregroundMuted, fontSize: item.key === "l:archived" && !touch ? 11 : 13, fontWeight: item.key === "l:archived" ? "600" : "400",
+        letterSpacing: item.key === "l:archived" && !touch ? 0.6 : 0, textTransform: item.key === "l:archived" && !touch ? "uppercase" : "none", paddingHorizontal: dense ? 8 : 16, paddingTop: 12, paddingBottom: 4 }}>{item.text}</Text>;
       case "empty": return <View accessibilityRole="summary" style={{ marginHorizontal: 16, marginTop: 20, gap: 6 }}>
         <Text accessibilityRole="header" style={{ color: c.foreground, fontSize: 17, lineHeight: 23, fontWeight: "600" }}>Nothing followed yet</Text>
         <Text style={{ color: c.foregroundMuted, fontSize: 14, lineHeight: 20 }}>Follow a workspace from its Follow-up panel, or turn a project on in Settings so its workspaces join on their own. They show up here once their agents work.</Text>
@@ -323,9 +324,12 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onMe
   const color = archived ? c.foregroundMuted : glyphColor(s, c, touch);
   const blocking = s.group === "needs" && s.tier === 0;
   const muted = s.group === "quiet" || s.group === "later";
-  const shownLine = hit?.lineRanges ? marks(s.line, hit.lineRanges, c) : s.line;
+  // Desktop rows are one line beside badges and the PR chip: the ask and the "<Field> · excerpt" line are cut around the
+  // match (about 44 characters, the match near the start), so the highlight is never past the "…". Phones and the
+  // sidebar view wrap to two lines and keep more.
+  const shownLine = hit?.lineRanges ? (() => { const e = excerpt(s.line, hit.lineRanges, touch ? 140 : dense ? 90 : 44); return marks(e.text, e.ranges, c); })() : s.line;
   const line: ReactNode = s.word && s.group !== "needs" ? (s.line ? <>{s.word} · {shownLine}</> : s.word) : shownLine;
-  const via = hit?.via ? (() => { const e = excerpt(hit.via.text, hit.via.ranges, touch ? 90 : dense ? 56 : 90); return <>{FIELD_LABEL[hit.via.field]} · {marks(e.text, e.ranges, c)}</>; })() : null;
+  const via = hit?.via ? (() => { const e = excerpt(hit.via.text, hit.via.ranges, touch ? 90 : dense ? 90 : 44); return <>{FIELD_LABEL[hit.via.field]} · {marks(e.text, e.ranges, c)}</>; })() : null;
   const title = <>{marks(s.title, hit?.titleRanges, c)}{s.agent ? <Text style={{ color: c.foregroundMuted, fontWeight: "400" }}>{" › "}{marks(s.agent, hit?.agentRanges, c)}</Text> : null}</>;
   // Phones: "Working" under every row of a "Running 9" group says nothing the header didn't; one line per row instead.
   const generic = touch && !s.word && (s.line === "Working" || s.line === "Fixing");
