@@ -84,7 +84,7 @@ export function useRowMenu(host: RowMenuHost) {
         case "ask_overseer": return runAction({ label: "Ask the Overseer", run: async () => prefillAsk?.(`About ${s.title}: `), success: null });
         case "copy_branch": return runAction({ label: "Copy branch", run: () => copyText(arg), success: "Branch name copied", failure: "Couldn't copy here" });
         case "copy_pr": return runAction({ label: "Copy PR link", run: () => copyText(arg), success: arg.includes("\n") ? "PR links copied" : "PR link copied", failure: "Couldn't copy here" });
-        case "rewrite_summary": return runAction({ label: "Rewrite Summary", run: async () => cache.setQueryData(aboutKey(workspaceId), await about({ workspaceId, open: true, refresh: true })), success: "Summary rewritten" }, `about:${workspaceId}`);
+        case "rewrite_summary": return runAction({ label: "Rewrite summary", run: async () => cache.setQueryData(aboutKey(workspaceId), await about({ workspaceId, open: true, refresh: true })), success: "Summary rewritten" }, `about:${workspaceId}`);
         case "rename_ai": return runAction({ label: "Rename with AI", run: async () => openRename({ workspaceId, title: s.title }), success: null });
         case "make_main": return runAction({ label: "Make main agent", run: async () => { await control({ workspaceId, mainAgentId: arg }); after(); }, success: `${s.agent ?? "That agent"} is now the main agent` }, `main:${workspaceId}`);
         case "stop_following": return runAction({ label: "Stop following", run: async () => { await setFollow({ workspace: { workspaceId, follow: false } }); after(); }, success: `Stopped following ${s.title}` }, `follow:${workspaceId}`);

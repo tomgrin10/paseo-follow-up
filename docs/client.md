@@ -110,7 +110,7 @@ row) for quick moves without opening it. `rowMenu()` in `shared/row-menu.ts` lis
 2. Answer Q<n> for up to two open questions.
 3. Resume follow-up, Send N repairs and Retry repairs, each shown only when it applies.
 4. Open chat, and Ask the Overseer about this (it pre-fills the omnibox and doesn't send).
-5. Copy branch name, Copy PR link(s), Rename with AI…, Rewrite Summary, Make <agent> the main agent, and Stop
+5. Copy branch name, Copy PR link(s), Rename with AI…, Rewrite summary, Make <agent> the main agent, and Stop
    following… (which asks first).
 
 The same menu opens from the workspace panel header's More button (`client/panel-menu.tsx`, the workspace's own

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { checkName, lastRename, NAME_EXAMPLES, RENAME_DAILY_CAP, renamePrompt, undoRefusal, UNDO_WINDOW_MS, type RenameInputs } from "../shared/rename";
+import { checkName, lastRename, NAME_EXAMPLES, NAME_RULE, RENAME_DAILY_CAP, renamePrompt, undoRefusal, UNDO_WINDOW_MS, type RenameInputs } from "../shared/rename";
 import { RenameService, RenameStore, renameDaemon, type WorkspaceTitles } from "../server/rename";
 import { AiJobs, type Runner } from "../server/ai-jobs";
 import { resolveRole } from "../shared/agent-settings";
@@ -33,11 +33,33 @@ test("checkName: length, words, quotes and branch junk are refused with a reason
   assert.equal(checkName("Don't retry on 4xx in billing").ok, true);
 });
 
-test("checkName: a linked issue key may lead and isn't counted; a key alone or an unlinked key is refused", () => {
-  assert.equal(checkName("ABC-1234: Add CSV export to the audit log page", { keys: ["ABC-1234"] }).ok, true, "8 words after the key");
-  assert.match((checkName("ABC-1234", { keys: ["ABC-1234"] }) as { reason: string }).reason, /after the issue key/);
-  assert.match((checkName("ABC-1234:", { keys: ["ABC-1234"] }) as { reason: string }).reason, /after the issue key/);
-  assert.match((checkName("XYZ-9: Fix retries", { keys: ["ABC-1234"] }) as { reason: string }).reason, /isn't linked/);
+test("checkName: a linked key goes inline after the verb and isn't counted; leading, alone or unlinked is refused", () => {
+  const reason = (s: string, keys = ["ABC-1234"]) => (checkName(s, { keys }) as { reason?: string }).reason ?? "";
+  assert.equal(checkName("Add ABC-1234 CSV export to the audit log page", { keys: ["ABC-1234"] }).ok, true, "8 words besides the key");
+  assert.equal(checkName("Verify ABC-1234 vendor mismatch, check migrations", { keys: ["ABC-1234"] }).ok, true);
+  assert.match(reason("ABC-1234"), /Start with a verb, then ABC-1234/);
+  assert.match(reason("ABC-1234:"), /Start with a verb/);
+  assert.match(reason("XYZ-9 fix retries"), /Start with a verb/);
+  assert.match(reason("Fix XYZ-9 retries"), /isn't linked/);
+  assert.match(reason("#142 retries"), /Start with a verb/);
+});
+
+// One rule, stated once and enforced: the helper under the field and the prompt carry NAME_RULE word for word, and a
+// key-led name (the shape the rule forbids) is refused with that rule, so the model's one retry gets it verb-first.
+test("one rule: NAME_RULE is what the dialog states, what the prompt says and what checkName enforces", async () => {
+  assert.equal(NAME_RULE, "Start with a verb. Up to 8 words.");
+  assert.ok(renamePrompt(inputs()).includes(`Rule: ${NAME_RULE}`));
+  const dialog = await readFile(join(import.meta.dirname, "..", "client", "rename.tsx"), "utf8");
+  assert.match(dialog, /\{NAME_RULE\}/, "the dialog's helper line is NAME_RULE itself");
+  assert.doesNotMatch(dialog, /Start with a verb/, "and nowhere restated by hand");
+  const ledByKey = checkName("ABC-1234: Retry soft card declines with backoff", { keys: ["ABC-1234"] });
+  assert.equal(ledByKey.ok, false);
+  assert.match((ledByKey as { reason: string }).reason, /^Start with a verb/);
+  for (const e of NAME_EXAMPLES) assert.doesNotMatch(e, /^[A-Z][A-Z0-9]+-\d+/, `example leads with a key: ${e}`);
+  const a = await setup(['{"name":"ABC-1234: Retry soft card declines with backoff"}', '{"name":"Retry ABC-1234 soft card declines with backoff"}']);
+  assert.equal((await a.service.status("w1", true)).suggestion, "Retry ABC-1234 soft card declines with backoff");
+  assert.match(a.seen[1].prompt, /was rejected: Start with a verb, not the issue key; put ABC-1234 after it\./);
+  await a.done();
 });
 
 test("renamePrompt: the rules, the examples, the material and the retry reason, bounded", () => {

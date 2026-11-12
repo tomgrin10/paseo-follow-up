@@ -149,7 +149,7 @@ if (!process.argv.some(a => a.startsWith("You name software workspaces"))) { pro
 let input = ""; process.stdin.on("data", d => input += d); process.stdin.on("end", () => {
   const mode = (() => { try { return fs.readFileSync(${JSON.stringify(modeFile)}, "utf8").trim(); } catch { return "ready"; } })();
   if (mode === "fail") { process.stdout.write(JSON.stringify({ is_error: true, subtype: "error_during_execution" })); process.exit(0); }
-  const reply = () => process.stdout.write(JSON.stringify({ result: JSON.stringify({ name: "APP-142: Retry soft card declines with backoff" }), total_cost_usd: 0.0004, usage: { input_tokens: 420, output_tokens: 14 } }));
+  const reply = () => process.stdout.write(JSON.stringify({ result: JSON.stringify({ name: "Add APP-142 backoff for soft card declines" }), total_cost_usd: 0.0004, usage: { input_tokens: 420, output_tokens: 14 } }));
   if (mode === "slow") setTimeout(reply, 20000); else reply();
 });
 `;
@@ -452,14 +452,14 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
     await bounded("rename-toast", DESKTOP, "dark", dialog(DESKTOP, async page => {
       await ready(page);
       await page.getByRole("button", { name: "Rename" }).last().click();
-      await page.getByText(/^Renamed to APP-142: Retry soft card declines with backoff/).last().waitFor();
+      await page.getByText(/^Renamed to Add APP-142 backoff for soft card declines/).last().waitFor();
       // The toast lasts 10 s (held under the pointer): shoot it now, with the pointer resting on it.
-      await page.getByText(/^Renamed to APP-142/).last().hover();
+      await page.getByText(/^Renamed to Add APP-142/).last().hover();
       await page.screenshot({ path: join(out, "follow-up-rename-toast-live.png"), animations: "disabled", caret: "hide" });
     }));
     await bounded("rename-undo-link", DESKTOP, "light", async page => {
       await openHome(page);
-      await (await homeRow(page, "APP-142: Retry soft card declines with backoff")).click({ button: "right", position: { x: 160, y: 18 } });
+      await (await homeRow(page, "Add APP-142 backoff for soft card declines")).click({ button: "right", position: { x: 160, y: 18 } });
       await page.getByRole("menuitem", { name: "Rename with AI…" }).click();
       await page.getByRole("button", { name: "Undo last rename" }).last().waitFor();
       await page.getByText("Suggesting a name…").last().waitFor({ state: "detached" });
@@ -481,15 +481,18 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       return { view, row };
     };
     const menuOpen = page => page.getByRole("menu", { name: "Actions for Billing retries" }).getByRole("menuitem", { name: "Rename with AI…" }).waitFor();
+    // --rename-only also picks among these (sidebar-menu-click-dark, sidebar-menu-key-light, …).
+    const pick = arg("--rename-only")?.split(",").map(x => x.trim());
+    const pickShot = (name, ...rest) => !pick || pick.includes(name) ? shoot(name, ...rest) : undefined;
     for (const scheme of ["dark", "light"]) {
-      await shoot(`sidebar-menu-click-${scheme}`, DESKTOP, scheme, async page => {
+      await pickShot(`sidebar-menu-click-${scheme}`, DESKTOP, scheme, async page => {
         const { row } = await sidebarRow(page);
         await row.click({ button: "right", position: { x: 60, y: 12 } });
         await menuOpen(page);
         // Ask the Overseer needs Home's omnibox, so it isn't in this menu at all.
         if (await page.getByRole("menuitem", { name: /Ask the Overseer/ }).count()) throw new Error("Ask the Overseer shown in the sidebar view");
       });
-      await shoot(`sidebar-menu-key-${scheme}`, DESKTOP, scheme, async page => {
+      await pickShot(`sidebar-menu-key-${scheme}`, DESKTOP, scheme, async page => {
         const { row } = await sidebarRow(page);
         await row.focus();
         await page.keyboard.press("Shift+F10");
