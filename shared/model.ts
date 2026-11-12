@@ -50,6 +50,8 @@ export const obligationSchema = z.object({
   id: idSchema, title: textSchema,
   status: z.enum(["pending", "waiting", "working", "blocked", "done", "waived"]),
   afterPrs: z.array(idSchema), evidence: z.string().max(4000),
+  /** While blocked: the question the developer must answer. Without one, a blocked task waits on nothing of theirs. */
+  ask: z.string().max(1000).optional(),
   enable_follow_up: z.boolean().default(false), revision: z.number().int().nonnegative(),
   dependencyStage: z.enum(["merged", "deployed"]).optional(), category: z.enum(["follow_up", "pr_lifecycle"]).optional(),
   previousTitles: z.array(z.string()).optional(),
@@ -61,6 +63,12 @@ export const obligationSchema = z.object({
    */
   workingAgentId: idSchema.optional(),
 });
+/**
+ * A task blocked on the developer: blocked with a real question for them (`ask`). Only these become questions, flag
+ * Needs you or count as the developer's. A task blocked on a PR or another agent has no ask (agents use waiting).
+ * Invariant a-question-always-asks-the-developer-something.
+ */
+export const blockedOnDeveloper = (o: { status: string; ask?: string }): boolean => o.status === "blocked" && !!o.ask?.trim();
 export const taskSchema = z.object({
   key: idSchema, kind: z.enum(["conflict", "review", "checks", "restack", "obligation", "inventory", "completion"]),
   target: idSchema, title: z.string(), fingerprint: z.string(),
@@ -183,7 +191,7 @@ export function completionGate(w: Workspace, now = Date.now()): CompletionGate {
     if (pr.snapshot.state === "CLOSED") add("agent", `Settle ${ref} with a disposition`);
     else add("developer", `Settle ${ref}`);
   }
-  for (const o of followUpObligations(w).filter(o => !["done", "waived"].includes(o.status))) add(o.status === "blocked" ? "developer" : "agent", o.title);
+  for (const o of followUpObligations(w).filter(o => !["done", "waived"].includes(o.status))) add(blockedOnDeveloper(o) ? "developer" : "agent", o.title);
   for (const o of followUpObligations(w).filter(o => o.status === "done" && o.communication && !replyRecorded(o.communication))) add("agent", `Record the sent reply for ${o.title}`);
   const open = w.batches.filter(b => !recoveryBatch(b) && !completionCheck(b));
   if (open.some(b => ["sending", "sent"].includes(b.state))) add("agent", "Acknowledge the open follow-up batch");
@@ -216,7 +224,7 @@ export function summary(w: Workspace, now = Date.now()): { status: Status; label
   if (blocked) return { status: "needs-you", label: "Needs you", reason: blocked.result || "Follow-up needs a decision" };
   const question = (w.questions ?? []).find(questionOpen);
   if (question) return { status: "needs-you", label: "Needs you", reason: `${question.id}: ${question.title}` };
-  const obligation = obligations.find(o => o.status === "blocked");
+  const obligation = obligations.find(blockedOnDeveloper);
   if (obligation) return { status: "needs-you", label: "Needs you", reason: obligation.title };
   if (w.completion && completionBlockers(w, now).length === 0) return { status: "done", label: "Done", reason: w.completion.summary };
   if (w.runtimeReason) return { status: "waiting", label: "Waiting", reason: w.runtimeReason };

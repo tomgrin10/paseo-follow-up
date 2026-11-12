@@ -6,7 +6,7 @@ import { answerMessage, duplicateOpenQuestions, isOther, parseAnswerMessage } fr
 import { shouldReopen, type Brief } from "./brief";
 import { flagHeadline } from "./headline";
 import type { InboxRow } from "./inbox";
-import { completionCheck, liveWorkingTask, summary } from "./model";
+import { blockedOnDeveloper, completionCheck, liveWorkingTask, summary } from "./model";
 import { asksForReviewers, liveLine, needsYou } from "./attention";
 import { trackedGroup, type HomeModel } from "./home";
 import { freshPriorities, type Priority } from "./priorities";
@@ -168,6 +168,23 @@ export const INVARIANTS: Invariant[] = [
         if (!other && option && (card.words ?? "") !== (q.answer.words ?? "").trim()) return `${q.id}'s card drops part of the note`;
       }
       return null;
+    },
+  },
+  {
+    id: "a-question-always-asks-the-developer-something",
+    why: "2026-11-12 Q48: a task the agent marked blocked on a PR became an open question whose text was the task's evidence, with no options, in the developer's Needs you; they answered \"what's the question to me?\". A task asks only when blocked on the developer, with its own ask (shared/model.ts blockedOnDeveloper, server/questions.ts syncTaskQuestions).",
+    check(w, now) {
+      for (const q of w.questions ?? []) {
+        if (q.answer || q.closed) continue;
+        if (!q.question.trim()) return `${q.id} is open but asks nothing`;
+        if (q.taskId && q.taskRevision !== null) {
+          const o = w.obligations.find(o => o.id === q.taskId);
+          if (!o || !blockedOnDeveloper(o)) return `${q.id} is open for a task that isn't blocked on the developer`;
+          if (q.question !== o.ask!.trim()) return `${q.id} asks "${q.question.slice(0, 60)}" instead of its task's question`;
+        }
+      }
+      const stray = needsYou(w, now).find(i => i.kind === "decision" && !blockedOnDeveloper(w.obligations.find(o => o.id === i.obligationId) ?? { status: "" }));
+      return stray ? `Needs you asks about task ${stray.title}, which isn't blocked on the developer` : null;
     },
   },
   {
