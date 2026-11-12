@@ -55,6 +55,10 @@ const EXEMPT: Record<string, string> = {
   "follow.install-update": "Checks the install's source with Paseo before the detached install.",
   "follow.release-notes": "What's new asks Paseo for this install's version and source; read-only.",
   "follow.whats-new-seen": "Marks What's new seen, then returns the view above.",
+  // Report a bug (docs/report-issue.md): the sheet shows its own spinner, keeps the typed words on failure, and nothing is filed by these.
+  "follow.report-issue-targets": "The sheet's agent picker reads Paseo's agent directory (cached); read-only, the picker shows a spinner meanwhile.",
+  "follow.report-issue-send": "Hands the developer's words to an agent through Paseo (or starts one); the sheet keeps the text and shows Not sent on a timeout.",
+  "follow.report-issue-link": "Open on GitHub builds the prefilled link with the versions block, asking Paseo for the daemon's version; read-only.",
   "follow.retry-move": "2.0's Try again on the plugin-id move asks Paseo for this install's id and source to see the move failed, records the ask, then returns the view above; the move itself runs after the reply. A timeout loses nothing; one click asks again.",
   // The Overseer. Follow-up: queue the developer's question like brief answers (overseer-ask carries their words).
   "follow.overseer-start": "Starts the Overseer agent through Paseo; its status says starting until it's up.",

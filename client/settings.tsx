@@ -179,12 +179,16 @@ function AgentsCategory({ theme, compact }: { theme: Theme; compact: boolean }) 
  * General: setup and the installed version with its release notes. Auto-update adds its Updates section here.
  * "Set up Follow-up again" is the first row, so it's on the first screen Settings opens on.
  */
-function GeneralCategory({ theme, compact, setup }: { theme: Theme; compact: boolean; setup?: { entry: SetupEntry; open: () => void } }) {
+function GeneralCategory({ theme, compact, setup, openReport }: { theme: Theme; compact: boolean; setup?: { entry: SetupEntry; open: () => void }; openReport?: () => void }) {
   return <>
     {setup && <SettingsSection title="Setup">
       <SettingsCard><SettingsAction label={setup.entry.label} hint={setup.entry.hint} actionLabel={setup.entry.action} onPress={setup.open} /></SettingsCard>
     </SettingsSection>}
     <UpdatesSections theme={theme} compact={compact} />
+    {/* Report a bug (docs/report-issue.md): findable where people look for it, next to the version and release notes. */}
+    {openReport && <SettingsSection title="Help">
+      <SettingsCard><SettingsAction label="Report a bug" hint={REPORT_HINT} actionLabel="Report" onPress={openReport} /></SettingsCard>
+    </SettingsSection>}
   </>;
 }
 
@@ -221,7 +225,10 @@ function useSummaries(): Partial<Record<SettingsCategory, string | null>> {
  * on this device. Phone: the category list, drilling in with a back row. Only the open category mounts, so only its
  * data loads.
  */
-export function FollowSettings({ theme, layout, openSetup }: PluginSurfaceProps & { openSetup?: (resume?: boolean) => void }) {
+/** Settings → General → Help → Report a bug. */
+export const REPORT_HINT = "Or an idea or feedback. An agent writes it up and shows you the issue before filing it.";
+
+export function FollowSettings({ theme, layout, openSetup, openReport }: PluginSurfaceProps & { openSetup?: (resume?: boolean) => void; openReport?: () => void }) {
   const compact = layout.compact;
   const c = theme.colors; const t = text(c, compact);
   const [category, setCategory] = useState<SettingsCategory>(() => readCategory());
@@ -233,7 +240,7 @@ export function FollowSettings({ theme, layout, openSetup }: PluginSurfaceProps 
   const onboarding = useOnboarding();
   const entry = setupEntry(onboarding.data);
   const setup = openSetup ? { entry, open: () => openSetup(entry.resume) } : undefined;
-  const content = category === "general" ? <GeneralCategory theme={theme} compact={compact} setup={setup} />
+  const content = category === "general" ? <GeneralCategory theme={theme} compact={compact} setup={setup} openReport={openReport} />
     : category === "following" ? <FollowingCategory theme={theme} compact={compact} />
     : category === "reviewers" ? <View style={{ gap: 8 }}>
       <Text style={t.meta}>Who Add reviewers asks on a PR: a list per repository, or the default for every repository without one. A login is a GitHub user (octocat) or a team (org/team). Teammates each keep their own lists.</Text>

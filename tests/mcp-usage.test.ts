@@ -50,7 +50,7 @@ test("CLI retains full replies for existing scripts and offers compact calls plu
   const run=async(args:string[])=>JSON.parse((await exec(process.execPath,[resolve("server/mcp.mjs"),...args],{env:f.env})).stdout);
   assert.equal((await run(["call","workspace_status","{}"])) .obligations.length,2);
   assert.equal((await run(["call","workspace_status","{}","--compact"])).obligations.length,1);
-  assert.equal((await run(["list"])).tools.length, 83); // retry_move + 33 (link_item, unlink_item, snooze_workspace among them) + the Overseer's 5 routing tools + rerank + 42 parity tools (server/agent-parity.ts, release_notes, set_wait_for_jobs, the four Updates tools, link_items and set_linked_items among them) + make_main_agent
+  assert.equal((await run(["list"])).tools.length, 84); // report_issue + retry_move + 33 (link_item, unlink_item, snooze_workspace among them) + the Overseer's 5 routing tools + rerank + 42 parity tools (server/agent-parity.ts, release_notes, set_wait_for_jobs, the four Updates tools, link_items and set_linked_items among them) + make_main_agent
   assert.ok((await exec(process.execPath,[resolve("server/mcp.mjs"),"--help"],{env:f.env})).stdout.includes("--compact"));
 });
 test("native discovery is silent outside tracked scope and recovery never gains main-only tools",async t=>{
