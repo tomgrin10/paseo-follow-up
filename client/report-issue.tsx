@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { Platform, Pressable, Text, View } from "react-native";
+import { Platform, ScrollView, View } from "react-native";
+import { Pressable, Text } from "./text";
 import { openExternalUrl, useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
 import { Icon, Modal, TextInput } from "@getpaseo/plugin/client/ui";
 import { reportLinkRpc, reportSendRpc, reportTargetsRpc } from "../shared/contracts";
@@ -46,6 +47,8 @@ export const TRUST_LINE = "The agent gathers versions and recent errors, removes
 
 type Target = { id: string; title: string; provider: string; status: string; workspaceId: string | null; workspaceTitle: string | null; main: boolean };
 const NEW = "new";
+/** The picker's height: about five rows (52 desktop, 54 on phones), plus half a row so it's clear the list scrolls. */
+export const PICKER_MAX = (compact: boolean) => Math.round((compact ? 54 : 52) * 5.5);
 
 /** "Billing retries · main agent", "Claude Code · idle". */
 export function targetLines(t: Target): [string, string] {
@@ -159,10 +162,11 @@ export function ReportSheet({ request, theme, layout, openAgent, onClose }: { re
             <View style={{ flex: 1, minWidth: 0 }}>{(target ? targetLines(target) : newLines).map((l, i) => <Text key={i} numberOfLines={1} style={i ? t.meta : t.body}>{l}</Text>)}</View>
             <Icon name="ChevronsUpDown" size={14} color={c.foregroundMuted} />
           </Pressable>}
-        {choosing && targets && <View style={{ marginTop: 6, borderWidth: 1, borderColor: c.border, borderRadius: 8, overflow: "hidden", backgroundColor: c.surface0 }}>
+        {/* About five rows show; more scroll inside, so a long list never pushes the trust line and Send off the dialog. */}
+        {choosing && targets && <ScrollView nestedScrollEnabled style={{ marginTop: 6, maxHeight: PICKER_MAX(compact), borderWidth: 1, borderColor: c.border, borderRadius: 8, backgroundColor: c.surface0 }}>
           {targets.agents.map((a, i) => row(a.id, targetLines(a), a.provider, a.id === chosen, () => { setPicked(a.id); setChoosing(false); }, i === 0))}
           {targets.newAgentWorkspace && row(NEW, newLines, null, chosen === NEW, () => { setPicked(NEW); setChoosing(false); }, !targets.agents.length)}
-        </View>}
+        </ScrollView>}
       </View>}
       {!nowhere && <View style={{ flexDirection: "row", gap: 8 }}>
         <Icon name="ShieldCheck" size={14} color={c.foregroundMuted} />
