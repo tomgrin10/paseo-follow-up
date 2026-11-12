@@ -30,6 +30,14 @@ import { ENV_PREFIX, LEGACY_ENV_PREFIX } from "../shared/legacy.ts";
  * `real` keeps named tools unstubbed: only the opt-in live-model check (check-wait, `claude`) passes it.
  */
 export const STUBBED_TOOLS = ["mcpproxy", "gh", "gt", "gcloud", "claude", "codex"];
+/**
+ * The stubbed tools that are also Paseo agent providers, by provider id. 2026-11-12: with codex stubbed but its provider
+ * on, a browser's provider refresh wrote to the dead stub and 0.15.4's worker crashed on the EPIPE, so every shot after
+ * the first landed on the welcome screen. harnessConfig turns off exactly the providers whose tool is stubbed.
+ */
+export const PROVIDER_TOOLS = { claude: "claude", codex: "codex" };
+/** The tools a run stubs: all of STUBBED_TOOLS but the `real` ones. One list for the stubs and the providers. */
+export const stubbedTools = (real = []) => STUBBED_TOOLS.filter(t => !real.includes(t));
 export const HARNESS_DEFAULTS = { PASEO_DICTATION_ENABLED: "false", PASEO_VOICE_MODE_ENABLED: "false", FOLLOW_UP_GITHUB_API: "http://127.0.0.1:9" };
 export const SESSION_KEYS = new RegExp(`^(PASEO_|CODEX_|${ENV_PREFIX}|${LEGACY_ENV_PREFIX})|^CLAUDE_(CONFIG_DIR|SESSION_ID|PROJECT_DIR|CODE_ENTRYPOINT|CODE_SSE_PORT)$|^CLAUDECODE$`);
 const ISOLATED = ["HOME", "XDG_CONFIG_HOME", "PASEO_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"];
@@ -40,12 +48,40 @@ export function harnessEnv(root, { home = join(root, "home"), paseoHome = home, 
   Object.assign(env, { HOME: home, XDG_CONFIG_HOME: join(home, ".config"), PASEO_HOME: paseoHome, CLAUDE_CONFIG_DIR: join(home, ".claude"), CODEX_HOME: join(home, ".codex") }, HARNESS_DEFAULTS, set);
   for (const key of strip) delete env[key];
   const top = resolve(root);
-  env.PATH = stubbedPath(top, env.PATH ?? "", STUBBED_TOOLS.filter(t => !real.includes(t)));
+  env.PATH = stubbedPath(top, env.PATH ?? "", stubbedTools(real));
   for (const key of ISOLATED) {
     const r = relative(top, resolve(env[key]));
     if (r.startsWith("..") || isAbsolute(r)) throw new Error(`harnessEnv: ${key}=${env[key]} is outside the harness root ${top}`);
   }
   return env;
+}
+
+/**
+ * The one config.json for every harness daemon (scripts/check-*.mjs, screenshots, scale, poll-cost, preview): local
+ * listen, no relay or browser tools, and every provider whose tool is stubbed turned off. Pass the same `real` as to
+ * harnessEnv (check-wait keeps claude, so its provider stays on). `mcp` injects Paseo's agent MCP; `webUi` serves the
+ * web app; `extra` adds top-level keys (plugins…). tests/harness-env.test.ts fails when a script writes its own.
+ */
+export function harnessConfig({ port, mcp = false, webUi = false, real = [], extra = {} }) {
+  const off = stubbedTools(real).filter(t => t in PROVIDER_TOOLS).map(t => [PROVIDER_TOOLS[t], { enabled: false }]);
+  return {
+    pluginsEnabled: true,
+    daemon: { listen: `127.0.0.1:${port}`, relay: { enabled: false }, mcp: mcp ? { enabled: true, injectIntoAgents: true } : { enabled: false }, browserTools: { enabled: false } },
+    ...(webUi ? { features: { webUi: { enabled: true } } } : {}),
+    agents: { providers: Object.fromEntries(off) },
+    ...extra,
+  };
+}
+
+/**
+ * The lines of a harness daemon's log that say its worker died: an uncaught exception, or the supervisor restarting a
+ * crashed worker. A browser run checks this after each shot and fails with the line, rather than timing out later on
+ * the welcome screen a restart leaves behind.
+ */
+export function daemonCrashes(log) {
+  return log.split("\n").filter(l => /Uncaught exception|Worker crashed|Restarting worker/.test(l)).map(l => {
+    try { const d = JSON.parse(l); return `${d.msg}${d.err?.message ? `: ${d.err.message}` : ""}`; } catch { return l.trim(); }
+  });
 }
 
 /** PATH with the stub dir after the entries inside the root and before everything else. */

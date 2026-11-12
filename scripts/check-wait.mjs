@@ -22,7 +22,7 @@ import { tmpdir, homedir } from "node:os";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { createServer } from "node:net";
 import { harness, onShutdown } from "./harness.mjs";
-import { harnessEnv, applyEnv } from "./harness-env.mjs";
+import { harnessEnv, applyEnv, harnessConfig } from "./harness-env.mjs";
 
 const exec = promisify(execFile);
 const source = fileURLToPath(new URL("../", import.meta.url));
@@ -69,7 +69,9 @@ const reservation = createServer(); await new Promise(resolve => reservation.lis
 const url = `ws://127.0.0.1:${port}/ws`;
 const pluginId = "follow-up";
 const configFile = join(home, "config.json");
-const writeConfig = (extra = {}) => writeFile(configFile, JSON.stringify({ pluginsEnabled: true, daemon: { listen: `127.0.0.1:${port}`, mcp: { enabled: true, injectIntoAgents: true }, relay: { enabled: false } }, plugins: { [pluginId]: { source: "directory", path: packedDirectory, enabled: true }, ...extra } }));
+// The live-model check: claude stays real, in the env (its stub skipped) and in the config (its provider on).
+const REAL = ["claude"];
+const writeConfig = (extra = {}) => writeFile(configFile, JSON.stringify(harnessConfig({ port, mcp: true, real: REAL, extra: { plugins: { [pluginId]: { source: "directory", path: packedDirectory, enabled: true }, ...extra } } })));
 const result = { cases: [], memory: [] };
 const log = (name, data = {}) => console.log(JSON.stringify({ event: name, ...data }));
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -154,7 +156,7 @@ try {
   // The daemon runs in this process, so process.env itself is the harness env. Only the Claude provider gets the
   // real config dir (actualClaude, for credentials), explicitly; Follow-up's hooks land in userHome.
   // The one live-model check: its Claude agent runs the real claude CLI with the developer's credentials (opt-in, skipped in CI).
-  applyEnv(harnessEnv(root, { home: userHome, paseoHome: home, set: { PASEO_DAEMON_URL: url }, real: ["claude"] }));
+  applyEnv(harnessEnv(root, { home: userHome, paseoHome: home, set: { PASEO_DAEMON_URL: url }, real: REAL }));
   await writeConfig();
   // Explicit activation only (as check-install.mjs): no tracking, so Follow-up doesn't call gh or a model here.
   await mkdir(join(home, "plugin-data", pluginId), { recursive: true });
