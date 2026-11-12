@@ -11,7 +11,7 @@ import { asksForReviewers, liveLine, needsYou } from "./attention";
 import { trackedGroup, type HomeModel } from "./home";
 import { freshPriorities, type Priority } from "./priorities";
 import { agentCard, automaticHold, batchView, holdSuperseded } from "./status";
-import { cappedTasks, NO_PROGRESS_CAP, sendDecision } from "./send-decision";
+import { conditionId, isCapped, NO_PROGRESS_CAP, sendDecision } from "./send-decision";
 import { followUpObligations } from "./follow-up";
 import { PRESENCE, claimsWorking, taskStatus } from "./task-status";
 import { cadence, movingReason, OBSERVATION_FRESH_MS, POLL_IDLE_MS, RUNNING_POLL_MS, TICK_MS } from "./poll";
@@ -88,11 +88,18 @@ export const INVARIANTS: Invariant[] = [
     },
   },
   {
-    id: "retry-only-when-capped",
-    why: "2026-11-12 (Q50): Needs you asked for Retry whenever a sent batch's turn ended without acknowledge_batch, often after the agent did the work. Follow-up now settles such a turn from GitHub and re-queues what's open; a turn without an acknowledgment asks the developer only once one unchanged condition went out NO_PROGRESS_CAP times.",
+    id: "a-capped-task-never-holds-the-queue",
+    why: "2026-11-12 (Q49/Q50): a turn that ended without acknowledge_batch blocked the whole batch and asked for Retry, so every other task waited behind one stubborn condition. Such a turn settles its batch (never blocked), and only a condition that went out NO_PROGRESS_CAP times unchanged is held, as its own task, while the rest of the queue keeps moving.",
     check(w) {
-      const early = w.batches.find(b => b.state === "blocked" && b.unacknowledged && !cappedTasks(w, b).length);
-      return early ? `${early.id} is blocked for a missing acknowledgment before any condition went out ${NO_PROGRESS_CAP} times` : null;
+      const blocked = w.batches.find(b => b.state === "blocked" && b.unacknowledged);
+      if (blocked) return `${blocked.id} is blocked for a missing acknowledgment`;
+      const pending = w.batches.find(b => b.state === "pending");
+      for (const h of w.heldTasks ?? []) {
+        if (h.held === "capped" && !isCapped(w, h.task)) return `${h.task.key} is held as capped below ${NO_PROGRESS_CAP} sends`;
+        if (h.held === "manual" && !(w.manualTasks ?? []).includes(h.task.key)) return `${h.task.key} is held as manual without the developer's choice`;
+        if (pending?.tasks.some(t => conditionId(t) === conditionId(h.task))) return `${h.task.key} is held and in the next message`;
+      }
+      return null;
     },
   },
   {
