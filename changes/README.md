@@ -10,6 +10,10 @@ Every PR that changes something a user can see or feel adds one file here, named
 Write for the person using Follow-up: what changed for them, in plain words. Short. No PR numbers,
 file names or internal terms, no emoji, no em dashes. Pure refactors, tests and CI changes need no file.
 
+CI checks it (`scripts/check-release-note.mjs`, invariant `user-visible-change-has-a-note`): a PR that changes
+`server/`, `client/`, `shared/` or the entry files needs a fragment here, or the `no-release-note` label when users
+can't see or feel the change.
+
 A beta's GitHub release shows its own fragments; the fragments stay here. At a stable release or a major's release
 candidate (`2.0.0-rc.0`), `npm run release:notes <version>` drafts that version's section in CHANGELOG.md from every
 fragment, adds the full list of them in a collapsed `<details>` block, and deletes the fragments. The draft is then
