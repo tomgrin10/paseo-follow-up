@@ -5,7 +5,7 @@ import type { PrWorkflow } from "../shared/pr-workflow";
 import type { Pr, Snapshot } from "../shared/model";
 import type { Deployments } from "./deployments";
 import { budgetTier, cadence, dueForRead, type Budget } from "../shared/poll";
-import { cliApi, httpApi, type GithubApi } from "./github-api";
+import { cliApi, githubApi, type GithubApi } from "./github-api";
 import { splitReviewers, TEAM_SLUG, USER_LOGIN } from "../shared/reviewers";
 const exec = promisify(execFile);
 type Node = Record<string, any>;
@@ -138,7 +138,7 @@ export class Github {
    */
   constructor(run?: (args: string[], repo: string) => Promise<string>, private graphite?: Pick<Graphite, "observe" | "status">, private deployments?: Pick<Deployments, "observe">, api?: GithubApi, private now = Date.now) {
     this.run = run ?? (async (args, repo) => (await exec("gh", args, { env: ghEnvironment(repo), timeout: 25_000, maxBuffer: 4 * 1024 * 1024 })).stdout);
-    this.api = api ?? (run ? cliApi(run) : httpApi());
+    this.api = api ?? (run ? cliApi(run) : githubApi());
   }
   async requestReviewers(pr: Pr, reviewers: string[]): Promise<void> {
     if (!reviewers.length || reviewers.some(login => !USER_LOGIN.test(login) && !TEAM_SLUG.test(login))) throw new Error("No eligible reviewers selected.");
