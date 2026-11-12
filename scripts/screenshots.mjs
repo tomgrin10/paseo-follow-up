@@ -142,8 +142,9 @@ console.log(JSON.stringify({ data: { repository } }));
 function fakeClaude(modeFile) {
   return `#!/usr/bin/env node
 const fs = require("node:fs");
+// Anything but the rename job (its own system prompt) fails at once, as an unlogged-in CLI does, without reading stdin.
+if (!process.argv.some(a => a.startsWith("You name software workspaces"))) { process.stderr.write("not logged in"); process.exit(1); }
 let input = ""; process.stdin.on("data", d => input += d); process.stdin.on("end", () => {
-  if (!input.includes("Write a short name for this workspace")) { process.stderr.write("not logged in"); process.exit(1); }
   const mode = (() => { try { return fs.readFileSync(${JSON.stringify(modeFile)}, "utf8").trim(); } catch { return "ready"; } })();
   if (mode === "fail") { process.stdout.write(JSON.stringify({ is_error: true, subtype: "error_during_execution" })); process.exit(0); }
   const reply = () => process.stdout.write(JSON.stringify({ result: JSON.stringify({ name: "APP-142: Retry soft card declines with backoff" }), total_cost_usd: 0.0004, usage: { input_tokens: 420, output_tokens: 14 } }));
@@ -391,6 +392,8 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   // dialog suggesting, ready, edited and failed, the toast with Undo and the Undo link; desktop and phone, dark and light.
   if (argv.includes("--rename-review")) {
     const mode = m => fs.writeFile(join(home, "claude-mode"), m);
+    // One state can't hold the harness slot: each shot gets 90 s, then fails on its own and the run moves on.
+    const bounded = (name, ...rest) => Promise.race([shoot(name, ...rest), new Promise(r => setTimeout(() => { failures.push(`${name} (timed out)`); r(); }, 90_000))]);
     const billingId = seeded.workspaces.find(w => w.key === "billing").workspaceId;
     const rowMenuAt = async page => {
       await openHome(page);
@@ -410,42 +413,42 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
       await page.getByRole("button", { name: "More actions for this workspace" }).first().waitFor();
     };
-    await shoot("rename-menu", DESKTOP, "dark", async page => { await rowMenuAt(page); });
-    await shoot("rename-panel-header", DESKTOP, "light", async page => { await panelOpen(page); });
-    await shoot("rename-panel-more", DESKTOP, "dark", async page => {
+    await bounded("rename-menu", DESKTOP, "dark", async page => { await rowMenuAt(page); });
+    await bounded("rename-panel-header", DESKTOP, "light", async page => { await panelOpen(page); });
+    await bounded("rename-panel-more", DESKTOP, "dark", async page => {
       await panelOpen(page);
       await page.getByRole("button", { name: "More actions for this workspace" }).first().click();
       await page.getByRole("menuitem", { name: "Rename with AI…" }).waitFor();
     });
     await mode("slow");
     for (const [n, vp, sc] of [["rename-suggesting", DESKTOP, "dark"], ["rename-suggesting-phone-light", PHONE, "light"]])
-      await shoot(n, vp, sc, dialog(vp, page => page.getByText("Suggesting a name…").last().waitFor()));
+      await bounded(n, vp, sc, dialog(vp, page => page.getByText("Suggesting a name…").last().waitFor()));
     // Let the slow replies drain from the job queue (one at a time) before the next state.
     await new Promise(r => setTimeout(r, 42000));
     await mode("fail");
     for (const [n, vp, sc] of [["rename-error", DESKTOP, "dark"], ["rename-error-phone-light", PHONE, "light"]])
-      await shoot(n, vp, sc, dialog(vp, page => page.getByText(/Couldn't suggest a name/).last().waitFor()));
+      await bounded(n, vp, sc, dialog(vp, page => page.getByText(/Couldn't suggest a name/).last().waitFor()));
     await mode("ready");
     for (const [n, vp, sc] of [["rename-ready", DESKTOP, "dark"], ["rename-ready-light", DESKTOP, "light"], ["rename-ready-phone", PHONE, "dark"], ["rename-ready-phone-light", PHONE, "light"]])
-      await shoot(n, vp, sc, dialog(vp, ready));
-    await shoot("rename-invalid", DESKTOP, "dark", dialog(DESKTOP, async page => {
+      await bounded(n, vp, sc, dialog(vp, ready));
+    await bounded("rename-invalid", DESKTOP, "dark", dialog(DESKTOP, async page => {
       await ready(page);
       await page.getByRole("textbox", { name: "New name" }).last().fill("feat/retry-soft-declines");
       await page.getByText("Use words, not a branch name.").last().waitFor();
     }));
-    await shoot("rename-toast", DESKTOP, "dark", dialog(DESKTOP, async page => {
+    await bounded("rename-toast", DESKTOP, "dark", dialog(DESKTOP, async page => {
       await ready(page);
       await page.getByRole("button", { name: "Rename" }).last().click();
       await page.getByText(/^Renamed to APP-142: Retry soft card declines with backoff/).last().waitFor();
     }));
-    await shoot("rename-undo-link", DESKTOP, "light", async page => {
+    await bounded("rename-undo-link", DESKTOP, "light", async page => {
       await openHome(page);
       await (await homeRow(page, "APP-142: Retry soft card declines with backoff")).click({ button: "right", position: { x: 160, y: 18 } });
       await page.getByRole("menuitem", { name: "Rename with AI…" }).click();
       await page.getByRole("button", { name: "Undo last rename" }).last().waitFor();
       await page.getByText("Suggesting a name…").last().waitFor({ state: "detached" });
     });
-    await call("follow.rename-workspace", { workspaceId: billingId, undo: true });
+    await call("follow.rename-workspace", { workspaceId: billingId, undo: true }).catch(error => log(`undo after review: ${error.message}`));
   }
   for (const name of SHOTS) {
     if (!only.includes(name) || name === "setup") continue;
