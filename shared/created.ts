@@ -102,14 +102,16 @@ export type CreatedLive = {
 export type FollowLine = { question: { id: string; title: string } | null; chips: { text: string; tone: "success" | "danger" | "warning" | "merged" | "muted" }[]; line: string | null };
 
 /** The card's status word and whether it opens, from the same table task lines use (PRESENCE). */
-export function cardPresence(card: CreatedCard, live: CreatedLive | undefined): { word: string; tone: TaskAgentState | "pending" | "failed" | "unknown"; opens: boolean } {
-  if (card.phase === "starting") return { word: "", tone: "pending", opens: false };
-  if (card.phase === "failed" || !card.id) return { word: "", tone: "failed", opens: false };
-  if (card.kind === "workspace") return { word: "", tone: "unknown", opens: true };
+/** The card's status word, whether it opens, and the link words a closed agent adds ("Closed · Open chat"). */
+export function cardPresence(card: CreatedCard, live: CreatedLive | undefined): { word: string; tone: TaskAgentState | "pending" | "failed" | "unknown"; opens: boolean; link: string | null } {
+  if (card.phase === "starting") return { word: "", tone: "pending", opens: false, link: null };
+  if (card.phase === "failed" || !card.id) return { word: "", tone: "failed", opens: false, link: null };
+  if (card.kind === "workspace") return { word: "", tone: "unknown", opens: true, link: null };
   const state = live?.agents[card.id]?.state;
-  if (!state) return { word: "", tone: "unknown", opens: true };
+  // Unknown (not read yet, or Paseo no longer lists it): words only, like the task line's "In progress".
+  if (!state) return { word: "", tone: "unknown", opens: false, link: null };
   const p = PRESENCE[state];
-  return { word: p.word.charAt(0).toUpperCase() + p.word.slice(1), tone: state, opens: p.opens };
+  return { word: p.word.charAt(0).toUpperCase() + p.word.slice(1), tone: state, opens: p.opens, link: state === "closed" ? p.link : null };
 }
 
 /** "New agent · Opus 5.5 · Pill cleanup" / "New workspace · feat/billing-retry · billing". */

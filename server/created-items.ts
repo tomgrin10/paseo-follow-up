@@ -21,8 +21,9 @@ export function createdItems(input: { agentIds: readonly string[]; workspaceIds:
   const names = new Map(rows.workspaces.map(w => [w.id, w.name]));
   const wsIds = new Set(input.workspaceIds);
   for (const id of input.agentIds) {
-    const a = byId.get(id); const live = states[id]!;
-    const workspaceId = a?.workspaceId ?? null;
+    const a = byId.get(id); const live = states[id];
+    if (!a || !live) continue; // Not listed: unknown, so the card is words only.
+    const workspaceId = a.workspaceId ?? null;
     out.agents[id] = { title: live.title, state: live.state, workspaceId, main: !!workspaceId && store.get(workspaceId)?.mainAgentId === id };
     if (workspaceId) wsIds.add(workspaceId);
   }

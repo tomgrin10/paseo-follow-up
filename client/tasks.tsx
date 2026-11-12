@@ -72,14 +72,14 @@ function TaskGlyph({ o, w, status, colors }: { o: Obligation; w: Workspace; stat
   return <View style={{ width: 14, height: 14, alignItems: "center", justifyContent: "center" }}><View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: colors.foregroundMuted, opacity: 0.6 }} /></View>;
 }
 
-/** "Open agent": goes to the task's agent's chat. Only for an agent that's still open; a closed one is just the words. */
+/** "Open agent" ("Open chat" for a closed one): goes to the task's agent's chat on the developer's tap. An archived one is just the words. */
 function OpenAgentLink({ status, openAgent, theme, compact }: { status: TaskStatus; openAgent?: (agentId: string) => void; theme: Theme; compact: boolean }) {
   const c = theme.colors;
   if (!status.agentId || !openAgent) return null;
   const id = status.agentId;
-  return <><Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 17 }} accessibilityElementsHidden importantForAccessibility="no">·</Text><Pressable accessibilityRole="link" accessibilityLabel={`Open agent: ${status.text}`} hitSlop={compact ? 12 : 6} onPress={() => openAgent(id)}
+  return <><Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 17 }} accessibilityElementsHidden importantForAccessibility="no">·</Text><Pressable accessibilityRole="link" accessibilityLabel={`${status.link ?? "Open agent"}: ${status.text}`} hitSlop={compact ? 12 : 6} onPress={() => openAgent(id)}
     style={state => ({ flexDirection: "row", alignItems: "center", gap: 3, borderRadius: 4, opacity: state.pressed ? 0.6 : 1, ...((state as { hovered?: boolean }).hovered ? { textDecorationLine: "underline" } : {}) } as object)}>
-    <Text style={{ color: c.foreground, fontSize: 12, lineHeight: 17, fontWeight: "500" }}>Open agent</Text>
+    <Text style={{ color: c.foreground, fontSize: 12, lineHeight: 17, fontWeight: "500" }}>{status.link ?? "Open agent"}</Text>
     <Icon name="ArrowUpRight" size={12} color={c.foreground} />
   </Pressable></>;
 }
@@ -116,7 +116,7 @@ function TaskSheet({ o, w, agents, openAgent, theme, compact, onClose }: { o: Ob
           <RichText selectable style={[t.title, { fontSize: 16, lineHeight: 22 }]}>{o.title}</RichText>
           <Text style={t.meta}>{line!.text}{o.afterPrs.length ? ` · after ${o.afterPrs.map(p => `#${p.split("#")[1]}`).join(", ")}` : ""}{schedule?.dueAt ? ` · due ${new Date(schedule.dueAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : ""}</Text>
         </View>
-        {line?.agentId && openAgent && <Button title="Open agent" icon="MessageSquare" accessibilityLabel={`Open agent: ${line.text}`} theme={theme} compact={compact} onPress={() => { openAgent(line.agentId!); onClose(); }} />}
+        {line?.agentId && openAgent && <Button title={line.link ?? "Open agent"} icon="MessageSquare" accessibilityLabel={`${line.link ?? "Open agent"}: ${line.text}`} theme={theme} compact={compact} onPress={() => { openAgent(line.agentId!); onClose(); }} />}
         <View style={{ gap: 4 }}>
           <Text style={t.label}>Evidence</Text>
           <RichText selectable linkColor={c.foreground} style={t.meta}>{o.evidence || "Nothing recorded yet. The agent adds evidence when it checks or finishes the task."}</RichText>

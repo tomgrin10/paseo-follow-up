@@ -30,7 +30,7 @@ const lines = (w: Workspace, now: number) => [liveLine(w, now).text, agentCard(w
 export const INVARIANTS: Invariant[] = [
   {
     id: "a-task-only-says-working-when-its-agent-is",
-    why: "2026-11-12: tasks read \"Agent working\" for days because the label mirrored the stored status=working, not any agent's live state; the panel's live line kept a spinner on a task whose agent had closed. Every surface that derives \"working\" from a task (the task row and sheet, the live line, the summary's Agent handling, Home's Agent working group) reads the recorded agent's live state (Workspace.taskAgents, shared/task-status.ts); with no live state known it says In progress, never working.",
+    why: "2026-11-12: tasks read \"Agent working\" for days because the label mirrored the stored status=working, not any agent's live state; the panel's live line kept a spinner on a task whose agent had closed. Every surface that derives \"working\" from a task (the task row and sheet, the live line, the summary's Agent handling, Home's Agent working group) reads the recorded agent's live state (Workspace.taskAgents, shared/task-status.ts); with no live state known it says In progress, never working. Only a working agent spins; idle, closed (Paseo ended the session: the idle unload or a plugin reload; it keeps its Open chat link, the developer's tap being the only load) and archived (words only) never claim working.",
     check(w, now) {
       const agents = w.taskAgents ?? {};
       const running = (id: string | undefined) => !!id && agents[id]?.state === "working";

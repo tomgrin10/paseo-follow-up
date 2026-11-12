@@ -65,16 +65,20 @@ test("a created workspace card opens the workspace and names its branch and repo
 test("one presence table: the card's words and links match the task line's for every state", () => {
   const card = createdCard(call("mcp__paseo__create_agent", "completed", { title: "Reader fix" }, agentResult))!;
   const o = { id: "t", title: "Fix", status: "working", afterPrs: [], evidence: "", enable_follow_up: false, revision: 0, workingAgentId: "agent-new" } as Obligation;
-  for (const state of ["working", "idle", "closed"] as const) {
+  for (const state of ["working", "idle", "closed", "archived"] as const) {
     const live: CreatedLive = { agents: { "agent-new": { title: "Reader fix", state, workspaceId: "wks_pill", main: false } }, workspaces: { wks_pill: { name: "Pill cleanup", follow: null } } };
     const p = cardPresence(card, live);
     const line = workingLine(o, { "agent-new": { title: "Reader fix", state } });
     assert.equal(p.word.toLowerCase(), PRESENCE[state].word);
     assert.equal(line.text, `Reader fix ${PRESENCE[state].word}`);
     assert.equal(p.opens, !!line.agentId, `${state}: the card opens exactly when the task line links`);
+    assert.equal(p.link, state === "closed" ? line.link : null, `${state}: a closed agent says "Open chat" on both`);
     assert.equal(cardMeta(card, live), "New agent · Pill cleanup");
   }
-  assert.equal(PRESENCE.closed.opens, false, "a closed agent is never opened: that would load it");
+  // Closed (Paseo ended the session: idle unload, a plugin reload) keeps its link; the developer's tap is the only load.
+  assert.deepEqual(PRESENCE.closed, { word: "closed", opens: true, link: "Open chat" });
+  assert.deepEqual(PRESENCE.archived, { word: "archived", opens: false, link: null }, "archived: words only");
+  assert.equal(cardPresence(card, { agents: {}, workspaces: {} }).opens, false, "unknown agent: words only");
 });
 
 const rows = (agents: { id: string; status: string; title?: string; workspaceId?: string; archivedAt?: string | null }[]): DirectoryRows => ({
@@ -88,7 +92,7 @@ test("created-items: live states from the directory snapshot, main-agent flag, a
     rows([{ id: "run-1", status: "running", title: "Reader fix", workspaceId: "wks_pill" }, { id: "idle-1", status: "idle", workspaceId: "wks_pill" }, { id: "main-1", status: "idle", workspaceId: "wks_billing" }]), [w]);
   assert.equal(live.agents["run-1"]!.state, "working");
   assert.equal(live.agents["idle-1"]!.state, "idle");
-  assert.equal(live.agents.gone!.state, "closed", "not listed: closed, words only");
+  assert.equal(live.agents.gone, undefined, "not listed: unknown, so the card is words only");
   assert.equal(live.agents["main-1"]!.main, true);
   assert.equal(live.agents["run-1"]!.main, false);
   assert.equal(live.workspaces.wks_pill!.name, "Pill cleanup");
@@ -124,8 +128,13 @@ test("the card is feature-detected, polls only while visible and open, and reads
   const kinds = [...(chat + client + await readFile(join(root, "shared/created.ts"), "utf8") + await readFile(join(root, "shared/brief.ts"), "utf8")).matchAll(/_KIND = "([^"]+)"/g)].map(m => m[1]);
   assert.ok(kinds.length >= 4);
   for (const kind of kinds) assert.match(kind!, /^[a-z][a-z0-9-]*$/, `timeline kind "${kind}"`);
-  assert.match(client, /!== "closed" && appVisible\(\) \? CREATED_POLL_MS : false/);
+  assert.match(client, /!== "archived" && appVisible\(\) \? CREATED_POLL_MS : false/);
   assert.match(client, /<Spinner /, "starting uses Follow-up's spinner");
+  // Rendering a card or a task row never loads an agent on its own: no Paseo API, timeline or agent fetch in either
+  // component; the only load is the developer's tap (navigation).
+  const tasks = await readFile(join(root, "client/tasks.tsx"), "utf8");
+  for (const [file, src] of [["client/created.tsx", client], ["client/tasks.tsx", tasks]] as const)
+    assert.doesNotMatch(src, /fetchAgent|timeline\.|agents\.ref|\.paseo\b|usePaseo/, `${file} must not read agents itself`);
   const server = await readFile(join(root, "index.server.ts"), "utf8");
   const handler = server.split("\n").find(l => l.includes("handle(rpc.createdItemsRpc"))!;
   assert.match(handler, /gateway\.directory\.snapshot\(\)/, "the engine's snapshot as it stands");

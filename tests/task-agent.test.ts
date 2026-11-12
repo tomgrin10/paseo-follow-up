@@ -29,16 +29,18 @@ test("a-task-only-says-working-when-its-agent-is: the stored status alone never 
   assert.equal(inv.check(ws([{}, { workingAgentId: "sub-1" }, { status: "pending" }]), now), null);
 });
 
-test("a working task names its agent and that agent's live state, and opens it only while it's open", () => {
-  assert.deepEqual(line({ workingAgentId: "sub-1" }, { "sub-1": { title: "Reader fix", state: "working" } }), { text: "Reader fix working", tone: "working", agentId: "sub-1" });
-  assert.deepEqual(line({ workingAgentId: "sub-1" }, { "sub-1": { title: "Reader fix", state: "idle" } }), { text: "Reader fix idle", tone: "idle", agentId: "sub-1" });
-  assert.deepEqual(line({ workingAgentId: "sub-1" }, { "sub-1": { title: "Backfill pass", state: "closed" } }), { text: "Backfill pass closed", tone: "closed", agentId: null });
-  assert.deepEqual(line({ workingAgentId: "gone" }, { gone: { title: null, state: "closed" } }), { text: "Agent closed", tone: "closed", agentId: null }, "name unknown");
+test("a working task names its agent and that agent's live state, and opens it unless it's archived", () => {
+  assert.deepEqual(line({ workingAgentId: "sub-1" }, { "sub-1": { title: "Reader fix", state: "working" } }), { text: "Reader fix working", tone: "working", agentId: "sub-1", link: "Open agent" });
+  assert.deepEqual(line({ workingAgentId: "sub-1" }, { "sub-1": { title: "Reader fix", state: "idle" } }), { text: "Reader fix idle", tone: "idle", agentId: "sub-1", link: "Open agent" });
+  // Paseo closes a session on the idle unload and every plugin reload: still the developer's agent, so it keeps a link.
+  assert.deepEqual(line({ workingAgentId: "sub-1" }, { "sub-1": { title: "Backfill pass", state: "closed" } }), { text: "Backfill pass closed", tone: "closed", agentId: "sub-1", link: "Open chat" });
+  assert.deepEqual(line({ workingAgentId: "gone" }, { gone: { title: null, state: "closed" } }), { text: "Agent closed", tone: "closed", agentId: "gone", link: "Open chat" }, "name unknown");
+  assert.deepEqual(line({ workingAgentId: "sub-1" }, { "sub-1": { title: "Backfill pass", state: "archived" } }), { text: "Backfill pass archived", tone: "archived", agentId: null, link: null }, "archived: words only");
   assert.equal(line({ workingAgentId: "sub-1" }, { "sub-1": { title: null, state: "working" } }).text, "Agent working");
   // Another task's live agent doesn't lend it a state.
   assert.equal(line({ workingAgentId: "sub-2" }, { "sub-1": { title: "Reader fix", state: "working" } }).text, "In progress");
   // Only a live working agent's line claims working.
-  for (const state of ["idle", "closed"] as const) assert.equal(claimsWorking(line({ workingAgentId: "a" }, { a: { title: "x", state } }).text), false);
+  for (const state of ["idle", "closed", "archived"] as const) assert.equal(claimsWorking(line({ workingAgentId: "a" }, { a: { title: "x", state } }).text), false);
 });
 
 test("other statuses keep their words and never name an agent", () => {
@@ -62,7 +64,7 @@ test("update_obligation records who works on it: the caller, or the agent it nam
   assert.equal(fresh.workingAgentId, undefined, "only working records an agent");
 });
 
-test("taskAgentStates reads the directory's metadata: running is working, closed, archived or missing is closed", () => {
+test("taskAgentStates reads the directory's metadata: running is working, a closed session closed, archived archived, missing unknown", () => {
   const agents = [
     { id: "a", status: "running", title: "Reader fix" }, { id: "b", status: "idle", title: "Docs" },
     { id: "c", status: "closed", title: "Old" }, { id: "d", status: "idle", title: "Gone", archivedAt: "2026-11-11T00:00:00Z" },
@@ -70,8 +72,8 @@ test("taskAgentStates reads the directory's metadata: running is working, closed
   ];
   assert.deepEqual(taskAgentStates(["a", "b", "c", "d", "e", "x"], agents), {
     a: { title: "Reader fix", state: "working" }, b: { title: "Docs", state: "idle" }, c: { title: "Old", state: "closed" },
-    d: { title: "Gone", state: "closed" }, e: { title: "Shell", state: "working" }, x: { title: null, state: "closed" },
-  });
+    d: { title: "Gone", state: "archived" }, e: { title: "Shell", state: "working" },
+  }, "x isn't listed: left out (unknown, words only)");
   assert.deepEqual(taskAgentStates(["a"], null), {}, "an unreadable directory says nothing (In progress)");
 });
 

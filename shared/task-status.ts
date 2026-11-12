@@ -12,7 +12,7 @@ import { isLive } from "./agent-load";
  * The engine stores those live states on the workspace (`taskAgents`) with runtimeBusy, so the task row, the Task
  * sheet, the panel's live line, the summary ("Agent handling") and Home all read one source.
  */
-export type TaskAgentState = "working" | "idle" | "closed";
+export type TaskAgentState = "working" | "idle" | "closed" | "archived";
 export type TaskAgentLive = { title: string | null; state: TaskAgentState };
 /** Live state of the agents tasks name, by agent id. Missing: unknown (not read yet, or Paseo doesn't list it). */
 export type TaskAgents = Readonly<Record<string, TaskAgentLive>>;
@@ -20,9 +20,11 @@ export type TaskAgents = Readonly<Record<string, TaskAgentLive>>;
 export type TaskStatus = {
   text: string;
   /** Which glyph: a spinner only for a live working agent. */
-  tone: "done" | "waived" | "question" | "blocked" | "working" | "idle" | "closed" | "progress" | "scheduled" | "ready";
-  /** The agent the line names and can open: only one that's still open (working or idle). Never a closed one. */
+  tone: "done" | "waived" | "question" | "blocked" | "working" | "idle" | "closed" | "archived" | "progress" | "scheduled" | "ready";
+  /** The agent the line names and can open: working, idle or closed (the developer's tap opens it); never an archived one. */
   agentId: string | null;
+  /** What the link to that agent says ("Open agent", or "Open chat" for a closed one), from PRESENCE. */
+  link?: string | null;
 };
 
 export const finishedTask = (o: Obligation) => o.status === "done" || o.status === "waived";
@@ -34,11 +36,18 @@ const name = (live: TaskAgentLive) => live.title?.trim() || "Agent";
 
 /**
  * The one word and link rule for an agent's live state, shared by task lines and the chat's created-agent card
- * (shared/created.ts), so "working / idle / closed" can't drift between them. Only an open agent can be opened:
- * opening a closed one would load it.
+ * (shared/created.ts), so "working / idle / closed / archived" can't drift between them.
+ *
+ * Paseo reads an agent "closed" whenever its session ends: the idle unload (about an hour) and every plugin reload. It
+ * is still the developer's agent, so it keeps its link ("Open chat"): opening it is the developer's own click, like
+ * Paseo's sidebar. Invariant 1 is about Follow-up loading agents by itself, so nothing here reads, prefetches or
+ * previews a closed agent; the only load is that tap. An archived agent is words only.
  */
-export const PRESENCE: Readonly<Record<TaskAgentState, { word: string; opens: boolean }>> = {
-  working: { word: "working", opens: true }, idle: { word: "idle", opens: true }, closed: { word: "closed", opens: false },
+export const PRESENCE: Readonly<Record<TaskAgentState, { word: string; opens: boolean; link: string | null }>> = {
+  working: { word: "working", opens: true, link: "Open agent" },
+  idle: { word: "idle", opens: true, link: "Open agent" },
+  closed: { word: "closed", opens: true, link: "Open chat" },
+  archived: { word: "archived", opens: false, link: null },
 };
 
 /** The live part alone, for a task whose stored status is working. */
@@ -46,8 +55,9 @@ export function workingLine(o: Obligation, agents: TaskAgents): TaskStatus {
   const id = o.workingAgentId;
   const live = id ? agents[id] : undefined;
   if (!id || !live) return { text: "In progress", tone: "progress", agentId: null };
-  // Named the same way in every state; a closed agent is words only, never a link (PRESENCE.closed.opens).
-  return { text: `${name(live)} ${PRESENCE[live.state].word}`, tone: live.state, agentId: PRESENCE[live.state].opens ? id : null };
+  // Named the same way in every state; only an archived agent is words only (PRESENCE[state].opens).
+  const p = PRESENCE[live.state];
+  return { text: `${name(live)} ${p.word}`, tone: live.state, agentId: p.opens ? id : null, link: p.link };
 }
 
 /** `agents` defaults to the live states the engine stores on the workspace (`w.taskAgents`), the same ones the live line,
@@ -67,15 +77,17 @@ export const claimsWorking = (text: string) => /\bworking\b/i.test(text);
 
 /**
  * The live state of the agents tasks name, from Paseo's agent list (metadata only: reading it never loads an agent).
- * Mid-turn, starting or with live background work is working; archived, closed or no longer listed is closed;
- * anything else is idle. A directory that couldn't be read (null) says nothing, so every line reads "In progress".
+ * Mid-turn, starting or with live background work is working; archived is archived; a session Paseo closed is closed;
+ * anything else is idle. An agent the directory doesn't list is left out (unknown: words only), and a directory that
+ * couldn't be read (null) says nothing, so every line reads "In progress".
  */
 export function taskAgentStates(ids: readonly string[], agents: readonly { id: string; status: string; title?: string | null; archivedAt?: string | null; backgroundWork?: { count?: unknown } | null }[] | null): Record<string, TaskAgentLive> {
   if (!agents) return {};
   const byId = new Map(agents.map(a => [a.id, a]));
-  return Object.fromEntries(ids.map(id => {
+  return Object.fromEntries(ids.flatMap(id => {
     const a = byId.get(id);
-    const state: TaskAgentLive["state"] = !a || a.archivedAt || a.status === "closed" ? "closed" : isLive(a) ? "working" : "idle";
-    return [id, { title: a?.title ?? null, state }];
+    if (!a) return [];
+    const state: TaskAgentLive["state"] = a.archivedAt ? "archived" : a.status === "closed" ? "closed" : isLive(a) ? "working" : "idle";
+    return [[id, { title: a.title ?? null, state }]];
   }));
 }

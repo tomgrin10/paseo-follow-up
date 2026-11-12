@@ -187,3 +187,25 @@ test("Track right after an agent is created re-reads agents once when the direct
   assert.equal(rows[0]?.mainAgentId, "fresh");
   assert.equal(f.d.requests.fetch_agents, 2); assert.equal(f.d.requests.fetch_workspaces, 1);
 });
+
+test("a closed or archived agent's card and task line cost no daemon request: never a timeline read or fetch_agent", async () => {
+  const { createdItems } = await import("../server/created-items");
+  const { taskStatus } = await import("../shared/task-status");
+  const closed = agent("closed-1", "w", { status: "closed", title: "Backfill pass", activeTurn: undefined, lastUserMessageAt: iso(clock - 30 * DAY) } as Partial<Agent>);
+  const archived = agent("arch-1", "w", { status: "idle", title: "Docs pass", archivedAt: iso(clock - DAY) } as Partial<Agent>);
+  const d = daemon([closed, archived], [{ id: "w", name: "w", projectId: "project" }]);
+  const directory = new DaemonDirectory(d.connect);
+  await directory.read();
+  const before = d.total();
+  // What follow.created-items does: the engine's snapshot as it stands.
+  const live = createdItems({ agentIds: ["closed-1", "arch-1"], workspaceIds: ["w"] }, directory.snapshot(), []);
+  assert.equal(live.agents["closed-1"]!.state, "closed");
+  assert.equal(live.agents["arch-1"]!.state, "archived");
+  // The task line reads the states the engine stored on the workspace; nothing else.
+  const w = workspace({ id: "w", taskAgents: { "closed-1": { title: "Backfill pass", state: "closed" } },
+    obligations: [{ id: "t", title: "Backfill", status: "working", afterPrs: [], evidence: "", enable_follow_up: false, revision: 0, workingAgentId: "closed-1" }] });
+  assert.equal(taskStatus(w.obligations[0]!, w).link, "Open chat");
+  assert.equal(d.total(), before, "no request at all");
+  assert.equal(d.requests.fetch_agent_timeline, undefined, "never a timeline read");
+  assert.equal(d.requests.fetch_agent, undefined, "never fetch_agent");
+});
