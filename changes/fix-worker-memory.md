@@ -1,0 +1,1 @@
+- Follow-up uses much less memory and CPU with many workspaces, and no longer spikes when it starts.

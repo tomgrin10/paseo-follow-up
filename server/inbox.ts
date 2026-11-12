@@ -705,7 +705,10 @@ export class Inbox {
       });
       return;
     }
-    await this.apply(await Promise.all(events.map(async ({ agentId, event }) => ({ agentId, event, brief: await this.prBrief(agentId, event) }))));
+    // An event whose key the entry has already seen changes nothing (reduce dedupes it), and every tick re-derives the
+    // same facts for ~400 PRs: drop those before apply, so a quiet tick neither copies the inbox nor builds briefs.
+    const unseen = events.filter(({ agentId, event }) => !("dedupeKey" in event) || !state.entries[agentId]?.seenKeys.includes(event.dedupeKey));
+    await this.apply(await Promise.all(unseen.map(async ({ agentId, event }) => ({ agentId, event, brief: await this.prBrief(agentId, event) }))));
     // Then withdraw the flags (and Follow-up's PR cards) whose fact ended since: merged, fixed, reviewed, or the agent is on it.
     const live = liveFacts(follow, events);
     const entries = (await this.store.snapshot()).entries;

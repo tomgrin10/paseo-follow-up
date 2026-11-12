@@ -106,6 +106,18 @@ Answers that the client polls are kept small:
   stop flushes it (`stopWorker`). 2026-11-12, live: 17 of 19 `state.json` writes (1.3 MB each) only moved read
   timestamps, and 14 of 14 sampled `inbox.json` writes were lastSeen-only or identical. Guarded by
   `tests/store-writes.test.ts`.
+- **A tick copies the state at most once** (`a-tick-copies-the-state-at-most-once`). The engine's per-workspace writes
+  use `mutateWorkspace` (one workspace copied), never a whole-state `mutate`, and a tick runs inside `Store.batch`:
+  its mutations apply in order in memory, and `state.json` is saved (or scheduled) and `onChanged` runs once, at its
+  end (`MAX_HOLD_MS`, 10 s, commits a stuck tick's changes anyway). An untouched workspace (same state object, same
+  runtime, no new PR read, full pass under `OBSERVE_FULL_MS`) isn't copied at all, and `statusCheck` skips it until
+  its inputs change or the 5-minute sweep. A save validates only the workspaces that aren't the objects it last
+  validated (`Store.validate`), so unchanged workspaces keep their identity; tests also parse every write whole
+  (`FOLLOW_UP_STORE_FULL_VALIDATION`). The directory's agents are indexed once per snapshot (`agentIndex`), and
+  `InboxStore.snapshot` is shared and deep-frozen; a quiet `Inbox.tick` records lastSeen without copying the inbox
+  (`touchLastSeen`). 2026-11-12, live 2.0.1-beta.2: a cold-start tick copied the 1.7 MB state ~150 times, and the
+  worker sat at ~450 MB RSS (85 MB live heap). Guarded by `tests/tick-copies.test.ts`, the agent-index test in
+  `tests/never-wake.test.ts`, the quiet-tick test in `tests/inbox.test.ts` and `test:scale`.
 
 ## Lifecycle of an agent session
 
