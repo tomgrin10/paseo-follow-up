@@ -8,6 +8,7 @@ import { Store } from "../server/store";
 import type { Snapshot, Workspace } from "../shared/model";
 import { needsYou } from "../shared/attention";
 import { violations } from "../shared/status-invariants";
+import { pruneUnsent } from "../server/batch-archive";
 import { clock, workspace, pr, snapshot } from "./fixtures";
 
 // Q50, 2026-11-12: no routine Retry. A turn that ends without acknowledge_batch is settled from GitHub; still-open
@@ -103,4 +104,20 @@ test("retry-only-when-capped catches a missing acknowledgment blocked below the 
     tasks: [{ key: "conflict:example/app#1", kind: "conflict" as const, target: "example/app#1", title: "Resolve merge conflicts on example/app#1", fingerprint: "f" }] };
   assert.deepEqual(violations(workspace({ batches: [b] }), clock).map(v => v.id), ["retry-only-when-capped"]);
   assert.deepEqual(violations(workspace({ batches: [{ ...b, id: "b0", state: "completed" }, b] }), clock).map(v => v.id), []);
+});
+
+test("the cap survives pruning: send, settle, prune, send, settle, and it caps", async t => {
+  const f = await fixture(t, conflicted());
+  await sendAndGoQuiet(f);
+  // Pile up never-sent cancelled batches around it, then prune as hard as possible.
+  await f.store.mutate(s => {
+    const w = s.workspaces[0];
+    for (let i = 0; i < 10; i++) w.batches.unshift({ ...w.batches[0], id: `noise-${i}`, messageId: `noise-${i}`, state: "cancelled", sentAt: null, settledAt: null, unacknowledged: undefined, result: "Conditions resolved before delivery" });
+    assert.equal(pruneUnsent(w, 0).length, 10, "only never-sent batches go");
+  });
+  assert.ok((await f.get()).batches.some(b => b.unacknowledged), "the unacknowledged send is kept");
+  f.advance(61_000); await f.engine.tick(); assert.equal(f.sends.length, 2);
+  f.advance(121_000); await f.engine.tick();
+  assert.equal((await f.get()).batches.filter(b => b.state === "blocked").length, 1, "capped after the second quiet send");
+  f.advance(600_000); await f.engine.tick(); assert.equal(f.sends.length, 2);
 });
