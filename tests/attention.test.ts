@@ -21,7 +21,8 @@ test("PR tones keep merged, approved, repairs and pending work apart", () => {
   assert.equal(prTone(pr({ snapshot: snapshot({ threads: [{ id: "t", updatedAt: "x" }] }) })), "warning");
   assert.equal(prTone(pr({ snapshot: snapshot({ otherFailedChecks: ["preview"] }) })), "warning", "optional failures warn without counting as broken");
   assert.equal(prTone(pr({ snapshot: snapshot({ draft: true }) })), "draft");
-  assert.equal(prTone(pr({ error: "unavailable" })), "unknown");
+  assert.equal(prTone(pr({ snapshot: null, error: "unavailable" })), "unknown");
+  assert.equal(prTone(pr({ error: "unavailable" })), "pending", "a failed read never blanks a known status (a-github-limit-never-blanks-a-known-pr)");
   assert.equal(prTone(pr()), "pending");
 });
 
