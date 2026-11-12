@@ -21,7 +21,7 @@ import { promisify } from "node:util";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
 import { harness, spawnDaemon } from "./harness.mjs";
-import { harnessEnv } from "./harness-env.mjs";
+import { harnessEnv, harnessConfig } from "./harness-env.mjs";
 await harness();
 
 const exec = promisify(execFile);
@@ -41,7 +41,7 @@ let daemon = null; let client = null;
 
 try {
   for (const dir of [home, fixture, plugin]) await mkdir(dir, { recursive: true });
-  await writeFile(join(home, "config.json"), JSON.stringify({ pluginsEnabled: true, daemon: { listen: `127.0.0.1:${port}`, relay: { enabled: false }, mcp: { enabled: true, injectIntoAgents: true }, browserTools: { enabled: false } } }));
+  await writeFile(join(home, "config.json"), JSON.stringify(harnessConfig({ port, mcp: true })));
   await writeFile(join(fixture, "paseo-plugin.json"), JSON.stringify({ id: "followup-fixture", requirements: { paseo: ">=0.11.0" } }));
   await writeFile(join(fixture, "index.server.ts"), await readFile("scripts/fixture-provider.ts", "utf8"));
   const packed = JSON.parse((await exec("npm", ["pack", "--json", "--pack-destination", root], { timeout: 60_000 })).stdout)[0];
