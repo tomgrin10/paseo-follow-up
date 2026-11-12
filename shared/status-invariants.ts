@@ -11,7 +11,7 @@ import { asksForReviewers, liveLine, needsYou } from "./attention";
 import { trackedGroup, type HomeModel } from "./home";
 import { freshPriorities, type Priority } from "./priorities";
 import { agentCard, automaticHold, batchView, holdSuperseded } from "./status";
-import { sendDecision } from "./send-decision";
+import { cappedTasks, NO_PROGRESS_CAP, sendDecision } from "./send-decision";
 import { followUpObligations } from "./follow-up";
 import { claimsWorking, taskStatus } from "./task-status";
 import { cadence, movingReason, OBSERVATION_FRESH_MS, POLL_IDLE_MS, RUNNING_POLL_MS, TICK_MS } from "./poll";
@@ -79,6 +79,14 @@ export const INVARIANTS: Invariant[] = [
       if (v.waitingOn !== d.waitingOn) return `line waits on ${v.waitingOn}, the decision on ${d.waitingOn}`;
       if (/\bsending (now|in a moment)\b/.test(v.line) && d.waitingOn !== null) return `"${v.line}" while the send waits on ${d.waitingOn}`;
       return null;
+    },
+  },
+  {
+    id: "retry-only-when-capped",
+    why: "2026-11-12 (Q50): Needs you asked for Retry whenever a sent batch's turn ended without acknowledge_batch, often after the agent did the work. Follow-up now settles such a turn from GitHub and re-queues what's open; a turn without an acknowledgment asks the developer only once one unchanged condition went out NO_PROGRESS_CAP times.",
+    check(w) {
+      const early = w.batches.find(b => b.state === "blocked" && b.unacknowledged && !cappedTasks(w, b).length);
+      return early ? `${early.id} is blocked for a missing acknowledgment before any condition went out ${NO_PROGRESS_CAP} times` : null;
     },
   },
   {

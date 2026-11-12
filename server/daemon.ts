@@ -430,6 +430,29 @@ export class PaseoGateway implements Gateway {
       return { busy: isLive(agent) || !!agent.pendingPermissions.length || children, reason: agent.pendingPermissions.length ? "Recovery is waiting for a permission or answer." : agent.status === "error" ? "Recovery failed. Check its agent before retrying." : null };
     });
   }
+  /**
+   * Whether the batch's message is in its recipient's chat, read back to before the batch was queued. Null when that
+   * can't be known: the agent isn't loaded (a timeline read would wake it, Invariant 1), or the read ran out first.
+   */
+  async arrived(w: Workspace, batch: Batch): Promise<boolean | null> {
+    return this.connect(async client => {
+      const recipient = batch.recipientAgentId ?? w.mainAgentId;
+      const a = (await client.fetchAgent(recipient))?.agent;
+      if (!a || !isLoaded(a)) return null;
+      const since = Date.parse(batch.createdAt);
+      let cursor: Cursor | null = null;
+      for (let pageIndex = 0; pageIndex < 5; pageIndex++) {
+        const page = await client.fetchAgentTimeline(recipient, { direction: cursor ? "before" : "tail", ...(cursor ? { cursor } : {}), limit: 200, projection: "canonical", timeout: 15_000 });
+        if (page.error || page.gap || page.staleCursor) return null;
+        if (page.entries.some(e => { const item = e.item as { messageId?: unknown; clientMessageId?: unknown } | null; return item?.messageId === batch.messageId || item?.clientMessageId === batch.messageId; })) return true;
+        const oldest = page.entries.reduce((min, e) => Math.min(min, e.timestamp ? Date.parse(e.timestamp) : Infinity), Infinity);
+        if (!page.hasOlder || oldest < since) return false;
+        if (!page.startCursor) return null;
+        cursor = page.startCursor;
+      }
+      return null;
+    }).catch(() => null);
+  }
   async send(w: Workspace, batch: Batch, text: string): Promise<void> {
     if (!(batch.tasks.length > 0 && batch.tasks.every(t => t.kind === "inventory"))) {
       let runtime: Runtime;
