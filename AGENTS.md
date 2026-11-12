@@ -156,6 +156,13 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    `confirm` with the plan id (and `screenshot_consent` when there are screenshots). Everything an issue carries goes
    through one Redactor. Guarded by `tests/report-issue.test.ts` and `tests/report-issue-redact.test.ts`
    ([docs/report-issue.md](docs/report-issue.md)).
+12. **Auto-send says the truth and keeps moving** (`the-send-line-matches-the-send-decision`,
+   `message-rows-say-it-once`, `a-capped-task-never-holds-the-queue`). One pure `sendDecision`
+   (`shared/send-decision.ts`) decides an auto-send and writes every line about it; the engine sends exactly when it
+   says send. Repairs are tasks: a row in the next message says only Queued or Sent, and the Tasks strip carries when
+   and why. A turn without an acknowledgment never blocks; only a condition sent twice unchanged waits, as its own
+   task. Guarded by `tests/send-decision.test.ts`, `tests/no-retry.test.ts` and `tests/task-rows.test.ts`
+   ([docs/workspaces.md](docs/workspaces.md#repairs-are-tasks-q49)).
 
 ## Bugs
 
