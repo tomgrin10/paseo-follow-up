@@ -32,7 +32,7 @@ async function fixture(t: any, w: Workspace) {
     line: async () => batchView(await get(), now)?.line ?? "",
   };
 }
-const says = (line: string) => /sending (now|in a moment)/.test(line);
+const says = (line: string) => /going out now|waits a minute so new changes/.test(line);
 const conflicted = () => workspace({ enable_auto_sends: true, prs: [pr({ snapshot: snapshot({ conflict: true }) })] });
 
 test("regression 2026-11-12: a PR read error with PR tasks queued never says 'sending now' while nothing sends", async t => {
@@ -44,7 +44,7 @@ test("regression 2026-11-12: a PR read error with PR tasks queued never says 'se
   assert.equal(f.sends.length, 0, "the engine waits for a clean PR read");
   const line = await f.line();
   assert.ok(!says(line), `the line doesn't promise a send: ${line}`);
-  assert.match(line, /clean read of #2 \(GitHub rate limit\)/);
+  assert.match(line, /GitHub answers for #2 \(GitHub rate limit\)/);
   f.prError(null); await f.engine.tick();
   assert.equal(f.sends.length, 1, "it goes out once the PR reads cleanly");
 });
@@ -55,7 +55,7 @@ test("a tick where the agent just went busy neither sends nor says sending", asy
   f.runtime({ busy: true, reason: null, archived: false });
   await f.engine.tick();
   assert.equal(f.sends.length, 0);
-  assert.match(await f.line(), /sends after the agent's current turn/);
+  assert.match(await f.line(), /sends when its current turn ends/);
 });
 
 test("every refresh does what the line said before it", async t => {

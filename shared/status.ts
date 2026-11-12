@@ -96,7 +96,7 @@ export const FINISH_LINE = `${FINISH_WORD} · ${FINISH_ASK}`;
 /** A blocked or unconfirmed batch, in its own words: the Done check is never called a repair. */
 export function stuckLine(b: Batch): string {
   if (completionCheck(b)) return b.state === "uncertain" ? "Check whether the Done request arrived" : "The Done check didn't go through";
-  return b.state === "uncertain" ? "Check whether the repairs arrived" : "The repairs didn't finish";
+  return b.state === "uncertain" ? "Check whether the message arrived" : "The tasks didn't finish";
 }
 /** "#1" or "#1, #3": the merged PRs whose deploy Follow-up never confirmed. */
 export const unconfirmedRefs = (keys: readonly string[]) => keys.map(k => `#${k.split("#")[1] ?? k}`).join(", ");
@@ -135,7 +135,7 @@ export function batchView(w: Workspace, now = Date.now()): BatchView | null {
   if (sent) {
     const finish = completionCheck(sent);
     return { batch: sent, kind: finish ? "finish" : "repairs", phase: "sent", recipient: recipientOf(sent), waitingOn: "agent", fixing: true,
-      line: finish ? `${who(sent)} is checking the work is finished` : `${who(sent)} is working on ${plural(sent.tasks.length, "repair")}` };
+      line: finish ? `${who(sent)} is checking the work is finished` : `${who(sent)} is working on ${plural(sent.tasks.length, "task")}` };
   }
   const recovering = w.batches.find(b => recoveryBatch(b) && ["sending", "sent"].includes(b.state));
   if (recovering) return { batch: recovering, kind: "recovery", phase: "sent", recipient: "recovery", waitingOn: "agent", fixing: true, line: "Recovery agent is rebuilding the PR list" };
@@ -145,7 +145,7 @@ export function batchView(w: Workspace, now = Date.now()): BatchView | null {
   const repairs = work.find(b => b.state === "pending" && !completionCheck(b));
   if (repairs) {
     const why = queuedReason(w, repairs, now);
-    return { batch: repairs, kind: "repairs", phase: "queued", recipient: "main", waitingOn: why.waitingOn, fixing: why.fixing, line: `${plural(repairs.tasks.length, "repair")} queued · ${why.text}` };
+    return { batch: repairs, kind: "repairs", phase: "queued", recipient: "main", waitingOn: why.waitingOn, fixing: why.fixing, line: `${plural(repairs.tasks.length, "task")} queued · ${why.text}` };
   }
   // The Done check never goes out on its own (it would wake an idle agent for bookkeeping): it waits on you.
   const finish = work.find(b => b.state === "pending" && completionCheck(b));

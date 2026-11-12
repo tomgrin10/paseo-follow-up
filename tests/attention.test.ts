@@ -79,11 +79,11 @@ test("headline, live line and pill read the same state", () => {
   assert.equal(workspaceHeadline(needsYou(workspace({ prs: [pr()] }), clock)), null, "no pill unless something needs you");
   const sent = { ...w, batches: [batch({ state: "sent", sentAt: new Date(clock - 120_000).toISOString() })] };
   assert.equal(liveLine(sent, clock).icon, "spinner");
-  assert.match(liveLine(sent, clock).text, /Main agent is working on 1 repair/);
+  assert.match(liveLine(sent, clock).text, /Main agent is working on 1 task/);
   // The line says why repairs wait, never "sends when the agent is idle" while it is idle.
-  assert.equal(liveLine({ ...w, enable_auto_sends: true }, clock).text, "1 repair queued · sending now");
-  assert.equal(liveLine({ ...w, enable_auto_sends: true, runtimeBusy: true }, clock).text, "1 repair queued · sends after the agent's current turn");
-  assert.equal(liveLine({ ...w, enable_auto_sends: true, sendWait: "unloaded" }, clock).text, "1 repair queued · the agent is idle and Follow-up doesn't wake it · send it now");
+  assert.equal(liveLine({ ...w, enable_auto_sends: true }, clock).text, "1 task queued · going out now");
+  assert.equal(liveLine({ ...w, enable_auto_sends: true, runtimeBusy: true }, clock).text, "1 task queued · sends when its current turn ends, so it isn't interrupted");
+  assert.equal(liveLine({ ...w, enable_auto_sends: true, sendWait: "unloaded" }, clock).text, "1 task queued · the agent is idle and Follow-up doesn't wake it · send it now");
 });
 
 test("done workspaces read as shipped and sort into Done", () => {

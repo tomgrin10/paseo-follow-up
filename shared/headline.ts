@@ -107,10 +107,11 @@ export function workspaceHeadline(items: NeedItem[]): Headline | null {
   switch (top.kind) {
     case "hold": return { key: "blocked", label: "On hold", line: top.detail || top.title, source: "workspace" };
     case "retry": return { key: "blocked", label: "Fixes stuck", line: top.title, source: "workspace" };
+    case "capped": return { key: "blocked", label: "Task unchanged", line: top.title, source: "workspace" };
     case "check": return { key: "blocked", label: "Check PR", line: top.title, source: "workspace" };
     case "answer": return { key: "blocked", label: "Check answer", line: top.title, source: "workspace" };
     case "decision": return { key: "decision", label: "Decision", line: top.title, source: "workspace" };
-    case "send": return top.finish ? { key: "finish", label: FINISH_WORD, line: FINISH_ASK[0].toUpperCase() + FINISH_ASK.slice(1), source: "workspace" } : { key: "repairs", label: `Send ${plural(top.tasks.length, "fix", "fixes")}`, line: top.title, source: "workspace" };
+    case "send": return top.finish ? { key: "finish", label: FINISH_WORD, line: FINISH_ASK[0].toUpperCase() + FINISH_ASK.slice(1), source: "workspace" } : { key: "repairs", label: `Send ${plural(top.tasks.length, "task")}`, line: top.title, source: "workspace" };
     case "merge": return { key: "merge", label: `Merge #${top.number}`, line: top.title, source: "workspace" };
     case "reviewers": return { key: "reviewers", label: `Add reviewers #${top.number}`, line: top.title, source: "workspace" };
   }
