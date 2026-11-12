@@ -161,6 +161,8 @@ export const PARITY: Record<string, { tools: readonly string[]; note?: string } 
   "follow.brief-action": { tools: ["brief_action"] },
   "follow.answer-question": { tools: ["answer_question"] },
   "follow.workspace-about": { tools: ["workspace_about"] },
+  "follow.rename-status": { tools: ["ai_rename"], note: "The dry run shows the name now and the suggestion." },
+  "follow.rename-workspace": { tools: ["ai_rename"], note: "confirm=true renames; undo=true plans Undo." },
   "follow.linked-items": { tools: ["link_items"] },
   "follow.set-linked-items": { tools: ["set_linked_items", "link_item", "unlink_item"] },
   "follow.linked-index": { tools: ["link_items"], note: "Home's search over every workspace's links; an agent reads them per workspace with link_items." },
@@ -177,6 +179,7 @@ export const PARITY: Record<string, { tools: readonly string[]; note?: string } 
   "follow.dismiss-update-notice": { exempt: "Hides Home's update line for the person looking at it; updates_status already tells an agent what that line said." },
   "follow.report-issue-targets": { tools: ["report_issue"], note: "The Report sheet's agent picker. An agent asked to report files it itself with report_issue; it has no one to hand the prompt to." },
   "follow.report-issue-send": { tools: ["report_issue"], note: "The sheet hands the developer's words to an agent, which then uses report_issue; an agent reporting calls the tool directly." },
+  "follow.created-items": { tools: ["workspace_status"], note: "Read-only live facts for the chat's created-agent / created-workspace cards; an agent reads them through workspace_status and Paseo's own list_agents." },
   "follow.report-issue-link": { tools: ["report_issue"], note: "Open on GitHub with no agent to send to; report_issue's confirm returns the same prefilled link without GitHub auth." },
   "follow.whats-new-seen": { exempt: "Records that a person closed What's new on a device; an agent reading the notes isn't someone seeing the sheet." },
 };

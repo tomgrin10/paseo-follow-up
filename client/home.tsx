@@ -80,7 +80,12 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
   const [filter, setFilter] = useState<HomeGroupId | null>(null);
   const [selected, setSelected] = useState<string | null>(() => params.item ?? (params.select ? `agent:${params.select}` : null));
   const openAgentRow = useMemo(() => navigation ? (row: InboxRow) => navigation.openAgent({ agentId: row.agentId }) : undefined, [navigation]);
-  useNextRelay(inbox, params, openAgentRow);
+  // A created-workspace card in chat: open that workspace, then dock its Follow-up panel (the same steps as openFull).
+  const openWorkspaceRelay = useMemo(() => navigation ? (workspaceId: string) => {
+    navigation.openWorkspace({ workspaceId });
+    if (compact) deps.openPanel(workspaceId); else setTimeout(() => deps.openPanel(workspaceId), 900);
+  } : undefined, [navigation, compact, deps]);
+  useNextRelay(inbox, params, openAgentRow, openWorkspaceRelay);
   useEffect(() => { if (params.select) setSelected(`agent:${params.select}`); }, [params.select]);
   // Phones show one thing at a time. A row opens its own screen (pushed by the host) instead of swapping in place, so the
   // host's ← is the only back control and it lands on the list. Desktop selects in place beside the list.

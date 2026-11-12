@@ -187,3 +187,79 @@ test("Track right after an agent is created re-reads agents once when the direct
   assert.equal(rows[0]?.mainAgentId, "fresh");
   assert.equal(f.d.requests.fetch_agents, 2); assert.equal(f.d.requests.fetch_workspaces, 1);
 });
+
+test("a closed or archived agent's card and task line cost no daemon request: never a timeline read or fetch_agent", async () => {
+  const { createdItems } = await import("../server/created-items");
+  const { taskStatus } = await import("../shared/task-status");
+  const closed = agent("closed-1", "w", { status: "closed", title: "Backfill pass", activeTurn: undefined, lastUserMessageAt: iso(clock - 30 * DAY) } as Partial<Agent>);
+  const archived = agent("arch-1", "w", { status: "idle", title: "Docs pass", archivedAt: iso(clock - DAY) } as Partial<Agent>);
+  const d = daemon([closed, archived], [{ id: "w", name: "w", projectId: "project" }]);
+  const directory = new DaemonDirectory(d.connect);
+  await directory.read();
+  const before = d.total();
+  // What follow.created-items does: the engine's snapshot as it stands.
+  const live = createdItems({ agentIds: ["closed-1", "arch-1"], workspaceIds: ["w"] }, directory.snapshot(), []);
+  assert.equal(live.agents["closed-1"]!.state, "closed");
+  assert.equal(live.agents["arch-1"]!.state, "archived");
+  // The task line reads the states the engine stored on the workspace; nothing else.
+  const w = workspace({ id: "w", taskAgents: { "closed-1": { title: "Backfill pass", state: "closed" } },
+    obligations: [{ id: "t", title: "Backfill", status: "working", afterPrs: [], evidence: "", enable_follow_up: false, revision: 0, workingAgentId: "closed-1" }] });
+  assert.equal(taskStatus(w.obligations[0]!, w).link, "Open chat");
+  assert.equal(d.total(), before, "no request at all");
+  assert.equal(d.requests.fetch_agent_timeline, undefined, "never a timeline read");
+  assert.equal(d.requests.fetch_agent, undefined, "never fetch_agent");
+});
+
+test("archived agents: remembered across re-reads, and a named agent the directory lacks is looked up once, never loaded", async () => {
+  const { createdItems } = await import("../server/created-items");
+  const { ARCHIVED_MEMO_MAX } = await import("../server/directory");
+  const live = agent("live-1", "w", { title: "Reader fix" });
+  const seen = agent("seen-1", "w", { title: "Docs pass", activeTurn: undefined });
+  const before = agent("before-1", "w", { title: "Backfill pass", activeTurn: undefined, archivedAt: iso(clock - DAY) } as Partial<Agent>);
+  const all = [live, seen, before];
+  const d = daemon(all, [{ id: "w", name: "w", projectId: "project" }]);
+  // Like Paseo: fetch_agents leaves archived agents out; fetch_agent still answers for them (metadata only).
+  (d.client as { fetchAgents: unknown }).fetchAgents = async () => { d.requests.fetch_agents = (d.requests.fetch_agents ?? 0) + 1; return { entries: all.filter(a => !a.archivedAt).map(a => ({ agent: structuredClone(a) })), pageInfo: { hasMore: false, nextCursor: null } }; };
+  let now = clock;
+  const directory = new DaemonDirectory(d.connect, () => now);
+  const flush = () => new Promise(r => setImmediate(r));
+  const ids = ["seen-1", "before-1", "gone-1"];
+  const read = () => createdItems({ agentIds: ids, workspaceIds: [] }, directory.snapshotFor(ids), []).agents;
+  await directory.read();
+
+  // Archived while the worker watched: the event feeds the memo, which survives the re-read that drops the row.
+  seen.archivedAt = iso(clock); directory.agentArchived("seen-1", iso(clock));
+  now += BACKSTOP_REFRESH_MS; await directory.read();
+  assert.equal(directory.snapshot()!.agents.some(r => r.agent.id === "seen-1"), false, "Paseo's list dropped it");
+  assert.equal(read()["seen-1"]?.state, "archived", "still archived, from the memo");
+
+  // Archived before the worker started, and an id Paseo never had: one fetch_agent each, on demand.
+  assert.equal(read()["before-1"], undefined, "unknown until looked up");
+  const requests = d.total();
+  directory.lookup(ids); await flush(); await flush();
+  assert.equal(d.requests.fetch_agent, 2, "one fetch_agent per missing id; seen-1 was remembered");
+  assert.equal(read()["before-1"]?.state, "archived");
+  assert.equal(read()["gone-1"], undefined, "gone stays unknown: words only");
+  // At most once per id for the worker's life, gone ids included; re-reads and further lookups never repeat it.
+  for (let i = 0; i < 5; i++) { directory.lookup(ids); now += BACKSTOP_REFRESH_MS; await directory.read(); await flush(); }
+  assert.equal(d.requests.fetch_agent, 2, "never again, whatever the cadence");
+  assert.equal(read()["before-1"]?.state, "archived", "survives re-reads");
+  assert.equal(d.requests.fetch_agent_timeline, undefined, "a lookup never reads a timeline (that would load the agent)");
+  assert.equal(d.requests.provider_subagents, undefined, "nor provider subagents");
+  assert.deepEqual(Object.keys(d.requests).sort(), ["fetch_agent", "fetch_agents", "fetch_workspaces", "project.list"], "only the lookups and the list re-reads");
+  assert.ok(d.total() > requests);
+
+  // The task line: the engine's observation looks up and reads the same memo.
+  const w = workspace({ id: "w", mainAgentId: "live-1", obligations: [{ id: "t", title: "Docs", status: "working", afterPrs: [], evidence: "", enable_follow_up: false, revision: 0, workingAgentId: "before-1" }] });
+  const gateway = new PaseoGateway(d.connect, new SessionGuard(await mkdtemp(join(tmpdir(), "follow-arch-"))), async () => false, new HistoryCache(null), () => now, directory);
+  const runtime = await gateway.observe(w);
+  assert.equal(runtime.taskAgents?.["before-1"]?.state, "archived");
+  assert.equal(d.requests.fetch_agent_timeline, undefined);
+
+  // Bounded: the memo keeps the most recent ARCHIVED_MEMO_MAX.
+  for (let i = 0; i <= ARCHIVED_MEMO_MAX; i++) { all.push(agent(`old-${i}`, "w", { activeTurn: undefined })); }
+  now += BACKSTOP_REFRESH_MS; await directory.read();
+  for (let i = 0; i <= ARCHIVED_MEMO_MAX; i++) directory.agentArchived(`old-${i}`, iso(clock));
+  assert.equal(directory.withArchived(["old-0"], []).length, 0, "the oldest fell out");
+  assert.equal(directory.withArchived([`old-${ARCHIVED_MEMO_MAX}`], []).length, 1);
+});

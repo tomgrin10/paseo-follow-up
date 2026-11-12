@@ -98,6 +98,7 @@ the developer's; it never clears a Needs-you flag and never passes the Overseer'
 | `answer_question` | `follow.answer-question` | planned; never your own question |
 | `set_workspace_spec` | `follow.workspace-spec` | planned |
 | `set_task_trigger` | `follow.set-task-trigger` | planned |
+| `ai_rename` | `follow.rename-status` (the dry run: name now, suggestion, undoable rename), `follow.rename-workspace` (rename or `undo`) | planned. `title` skips the model; `undo=true` restores the name before the last rename for 24 h. |
 | `link_items`, `set_linked_items` | `follow.linked-items`, `follow.set-linked-items` (add, remove, undo) | read / planned. The Linked sheet calls both; `link_item` and `unlink_item` also count for `follow.set-linked-items`. |
 | `link_items` (per workspace) | `follow.linked-index` | read. Home's search over every workspace's linked keys and titles, fetched only while the search field has text. |
 | `pr_controls`, `browser_status` | `follow.pr-control-status`, `follow.browser-status` | read |
@@ -106,6 +107,7 @@ the developer's; it never clears a Needs-you flag and never passes the Overseer'
 | `set_updates`, `install_update` | `follow.set-updates`, `follow.install-update` | planned ([updates.md](updates.md)) |
 | `retry_move` | `follow.retry-move` | planned ([updates.md](updates.md#moving-from-1x)) |
 | `report_issue` | `follow.report-issue-targets`, `follow.report-issue-send`, `follow.report-issue-link` | its own dry run and confirm (`SELF_PLANNED_TOOLS`); files a bug, feature request or feedback in Follow-up's repository after the developer's yes. Served to contributors too. [report-issue.md](report-issue.md) |
+| `workspace_status` | `follow.created-items` | read. The chat's created-agent / created-workspace cards: live states from the engine's cached directory rows and Follow-up's line for the workspace ([client.md](client.md#created-agent-and-workspace-cards)). |
 | `trust_bypass_status` | `follow.trust-bypass` | read |
 
 Exempt in `PARITY`, with the reason recorded there:
@@ -148,11 +150,12 @@ These have no tool because only another component calls them:
 
 | Surface | RPCs |
 | --- | --- |
-| Home, panel, larger view, pill | `follow.list`, `follow.get`, `follow.control`, `follow.send`, `follow.recover`, `follow.refresh`, `follow.answer-question`, `follow.workspace-spec`, `follow.set-task-trigger`, `follow.workspace-about`, `follow.priorities`, `follow.usage`, `follow.rank-status`, `follow.rank-now` |
+| Home, panel, larger view, pill | `follow.list`, `follow.get`, `follow.control`, `follow.send`, `follow.recover`, `follow.refresh`, `follow.answer-question`, `follow.workspace-spec`, `follow.set-task-trigger`, `follow.workspace-about`, `follow.rename-status`, `follow.rename-workspace`, `follow.priorities`, `follow.usage`, `follow.rank-status`, `follow.rank-now` |
 | Needs-you inbox and brief card | `follow.inbox-list`, `follow.inbox-act`, `follow.inbox-brief`, `follow.brief-action` |
 | PR sheet | `follow.pr-control-status`, `follow.prepare-pr-action`, `follow.confirm-pr-action`, `follow.check-pr-action`, `follow.request-reviewers`, `follow.browser-status` |
 | Overseer card | `follow.overseer-status`, `follow.overseer-start`, `follow.overseer-restart`, `follow.overseer-ask` |
 | Settings | `follow.follow-settings`, `follow.set-follow-settings`, `follow.project-settings`, `follow.set-project-tracking`, `follow.reviewer-settings`, `follow.save-reviewers`, `follow.reviewer-suggestions`, `follow.agent-settings`, `follow.set-agent-setting`, `follow.set-wait`, `follow.pr-workflow`, `follow.set-pr-workflow`, `follow.trust-bypass` |
 | Getting started | `follow.onboarding`, `follow.set-onboarding`, `follow.onboarding-checks` |
+| Chat: created agent and workspace cards | `follow.created-items` |
 | Report a bug (Settings → General → Help, ⌘K, `/report-issue`, error toasts) | `follow.report-issue-targets`, `follow.report-issue-send`, `follow.report-issue-link` |
 | Release notes and updates | `follow.release-notes`, `follow.whats-new-seen`, `follow.updates`, `follow.set-updates`, `follow.install-update`, `follow.retry-move`, `follow.dismiss-update-notice` |

@@ -27,7 +27,7 @@ test("harnessEnv puts HOME, CLAUDE_CONFIG_DIR, CODEX_HOME and PASEO_HOME inside 
   const env = harnessEnv("/tmp/follow-x", { base, set: { PASEO_DAEMON_URL: "ws://127.0.0.1:1/ws" } });
   assert.equal(env.HOME, "/tmp/follow-x/home"); assert.equal(env.CLAUDE_CONFIG_DIR, "/tmp/follow-x/home/.claude"); assert.equal(env.CODEX_HOME, "/tmp/follow-x/home/.codex"); assert.equal(env.PASEO_HOME, "/tmp/follow-x/home");
   for (const key of ["PASEO_AGENT_ID", "PASEO_WORKSPACE_ID", "CLAUDE_SESSION_ID", "CODEX_THREAD_ID", "CLAUDECODE", "FOLLOW_UP_CLI"]) assert.equal(env[key], undefined, key);
-  assert.equal(env.PASEO_DAEMON_URL, "ws://127.0.0.1:1/ws"); assert.equal(env.ANTHROPIC_API_KEY, "keep"); assert.equal(env.PATH, "/bin");
+  assert.equal(env.PASEO_DAEMON_URL, "ws://127.0.0.1:1/ws"); assert.equal(env.ANTHROPIC_API_KEY, "keep"); assert.equal(env.PATH, "/tmp/follow-x/.harness-stubs:/bin");
   assert.throws(() => harnessEnv("/tmp/follow-x", { base, set: { CLAUDE_CONFIG_DIR: "/home/real/.claude" } }), /outside the harness root/);
   assert.throws(() => harnessEnv("/tmp/follow-x", { base, home: "/home/real" }), /outside the harness root/);
 });
@@ -71,4 +71,36 @@ test("fakeGithub answers reads through the fixture gh, only with the owner's own
     assert.deepEqual(await (await fetch(`${github.url}/repos/example/app/rules/branches/main`, { headers: { authorization: `bearer ${token}` } })).json(), []);
     assert.match(await (await import("node:fs/promises")).readFile(github.env.GH_ACCOUNT_MAP, "utf8"), /^example fixture-example$/m);
   } finally { await github.close(); await rm(dir, { recursive: true, force: true }); }
+});
+test("harnessEnv resolves no external tool to a real binary outside the harness root; a script's own fake still wins", async () => {
+  // 2026-11-12: the realistic scale run's ranker ran the host's real mcpproxy (Linear and Slack reads as the developer).
+  const { STUBBED_TOOLS } = await import(resolve("scripts/harness-env.mjs"));
+  const { mkdtemp, writeFile, chmod, rm, access, constants } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const root = await mkdtemp(join(tmpdir(), "follow-stubs-"));
+  try {
+    const which = async (tool: string, path: string) => { for (const d of path.split(":")) { try { await access(join(d, tool), constants.X_OK); return join(d, tool); } catch {} } return null; };
+    // The host PATH (with whatever real mcpproxy, gh, claude… it has) and the session's own, as every script passes it.
+    const env = harnessEnv(root, { base: process.env, set: { PATH: `/usr/local/bin:/usr/bin:/bin:${process.env.PATH}` } });
+    for (const tool of STUBBED_TOOLS) {
+      const found = await which(tool, env.PATH);
+      assert.ok(found && found.startsWith(root + "/"), `${tool} resolves to ${found}`);
+      await assert.rejects(promisify(execFile)(tool, ["--version"], { env }), (e: { code?: number; stderr?: string }) => e.code === 127 && /stubbed/.test(e.stderr ?? ""), tool);
+    }
+    // A fake inside the root, put first on PATH by the script, still answers.
+    const bin = join(root, "bin"); await (await import("node:fs/promises")).mkdir(bin);
+    await writeFile(join(bin, "gh"), "#!/bin/sh\necho fake\n"); await chmod(join(bin, "gh"), 0o755);
+    const faked = harnessEnv(root, { base: process.env, set: { PATH: `${bin}:${process.env.PATH}` } });
+    assert.equal(await which("gh", faked.PATH), join(bin, "gh"));
+    assert.equal(await which("paseo", faked.PATH), await which("paseo", process.env.PATH ?? ""), "the Paseo CLI stays the host's");
+    // Only the live-model check opts out, and only of claude.
+    const live = harnessEnv(root, { base: process.env, real: ["claude"] });
+    assert.ok(!(await which("claude", live.PATH))?.startsWith(root), "real: claude stays the host's");
+    assert.ok((await which("mcpproxy", live.PATH))?.startsWith(root), "everything else stays stubbed");
+    const optOuts: string[] = [];
+    for (const name of (await readdir("scripts")).filter(n => n.endsWith(".mjs") && n !== "harness-env.mjs")) if (/\breal:\s*\[/.test(await readFile(join("scripts", name), "utf8"))) optOuts.push(name);
+    assert.deepEqual(optOuts, ["check-wait.mjs"], "only the opt-in live-model check keeps a real tool");
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

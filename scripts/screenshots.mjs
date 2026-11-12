@@ -40,7 +40,7 @@ const exec = promisify(execFile);
 const argv = process.argv.slice(2);
 const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : fallback; };
 // What's new reinstalls the plugin as 2.0.0-rc.0, so it goes last: every other shot shows the version under test.
-const SHOTS = ["setup", "home", "panel", "questions", "pill", "pr-sheet", "phone", "context-menu", "linked-items", "notes-home", "notes-panel", "whats-new"];
+const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
 const REVIEW_SHOTS = ["needs-you-states"];
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
@@ -59,7 +59,13 @@ function fail(message) { console.error(`screenshots: ${message}`); process.exit(
 if (!process.env.PLAYWRIGHT_CORE || !existsSync(join(process.env.PLAYWRIGHT_CORE, "package.json"))) fail("set PLAYWRIGHT_CORE to a playwright-core directory (e.g. ~/paseo-switcher/node_modules/playwright-core)");
 if (!process.env.CHROMIUM || !existsSync(process.env.CHROMIUM)) fail("set CHROMIUM to a Chromium or chrome-headless-shell binary");
 const paseoVersion = await exec("paseo", ["--version"], { timeout: 30000 }).then(r => r.stdout.trim(), () => null);
-if (!paseoVersion || !/(^|\D)0\.15\.\d+/.test(paseoVersion)) fail(`needs the Paseo CLI 0.15.x on PATH (found ${paseoVersion ?? "none"}); run through harness-slot or put ~/paseo-harness/cli/0.15.4/bin first`);
+// The sidebar shot and --sidebar-review need sidebar views, which arrive in Paseo 0.16 (HARNESS_PASEO=0.16); every
+// other shot stays on 0.15.x.
+const paseo016 = /(^|\D)0\.16\.\d+/.test(paseoVersion ?? "");
+if (only.includes("sidebar") && only.some(n => n !== "sidebar")) fail("shoot --only sidebar on its own, with HARNESS_PASEO=0.16");
+if (only.includes("sidebar") && !paseo016) fail(`the sidebar shot needs the Paseo CLI 0.16.x (found ${paseoVersion ?? "none"}); run with HARNESS_PASEO=0.16`);
+const paseoOk = only.includes("sidebar") || argv.includes("--sidebar-review") ? /(^|\D)0\.1[56]\.\d+/ : /(^|\D)0\.15\.\d+/;
+if (!paseoVersion || !paseoOk.test(paseoVersion)) fail(`needs the Paseo CLI 0.15.x on PATH (found ${paseoVersion ?? "none"}); run through harness-slot or put ~/paseo-harness/cli/0.15.4/bin first`);
 if (changelogArg && !existsSync(changelogArg)) fail(`--whats-new-changelog: no file at ${changelogArg}`);
 const optimiser = await findOptimiser();
 await harness();
@@ -99,17 +105,27 @@ require("node:module").syncBuiltinESMExports();
 // ---------- fixture data (synthetic only: this is a public repo) ----------
 const ok = name => ({ name, status: "COMPLETED", conclusion: "SUCCESS" });
 const failed = name => ({ name, status: "COMPLETED", conclusion: "FAILURE" });
-/** What the fake `gh` answers for example/app, by PR number. */
+const running = name => ({ name, status: "IN_PROGRESS", conclusion: null });
+/** What the fake `gh` answers, by PR number (numbers are unique across example/app and example/web). */
 function pulls() {
   return {
     141: { title: "Add the retry schedule table", state: "MERGED", author: "dana", checks: [ok("test"), ok("lint")] },
     142: { title: "Retry failed charges with exponential backoff", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [failed("test"), ok("lint"), ok("typecheck")] },
     143: { title: "Send the dunning email after the last retry", state: "OPEN", author: "dana", base: "branch-142", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint"), ok("typecheck")] },
-    151: { title: "Saved search filters", state: "OPEN", author: "dana", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint")] },
+    151: { repo: "example/web", title: "Saved search filters", state: "OPEN", author: "dana", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint")] },
     160: { title: "Welcome email template", state: "OPEN", author: "dana", conflict: true, threads: 2, reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
     170: { title: "Sign webhook payloads", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
-    181: { title: "Dark mode color tokens", state: "MERGED", author: "dana", checks: [ok("test"), ok("lint")] },
-    212: { title: "Usage alert thresholds", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
+    181: { repo: "example/web", title: "Dark mode color tokens", state: "MERGED", author: "dana", checks: [ok("test"), ok("lint")] },
+    // The README hero's other groups (2.0.x): Waiting, Fixing, Later.
+    188: { title: "Render invoices as PDF", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [failed("test"), ok("lint"), ok("e2e")] },
+    191: { title: "Team invite links", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [running("test"), ok("lint")] },
+    195: { title: "Add the SAML provider", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
+    196: { title: "SSO login button", state: "OPEN", author: "dana", base: "branch-195", checks: [ok("test"), ok("lint")] },
+    205: { repo: "example/web", title: "Saved dashboard views", state: "OPEN", author: "dana", conflict: true, changes: ["ravi"], threads: 1, checks: [ok("test"), ok("lint")] },
+    212: { repo: "example/web", title: "Usage dashboard charts", state: "OPEN", author: "dana", draft: true, checks: [ok("test"), ok("lint")] },
+    218: { repo: "example/web", title: "Push notification settings", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
+    224: { repo: "example/web", title: "Import contacts from CSV", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
+    232: { title: "Usage alert thresholds", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
   };
 }
 /** A fake `gh`: GraphQL PR reads from the fixture file, `[]` for everything else (branch rules, auth). fakeGithub serves it over HTTP. */
@@ -124,17 +140,35 @@ for (const m of query.matchAll(/(p\\d+):pullRequest\\(number:(\\d+)\\)/g)) {
   const n = Number(m[2]); const p = d[n];
   if (!p) { repository[m[1]] = null; continue; }
   const base = p.base ?? "main";
-  repository[m[1]] = { number: n, title: p.title, url: "https://github.com/example/app/pull/" + n, state: p.state, headRefName: "branch-" + n, headRefOid: "0f3c9a" + n, baseRefName: base,
-    isDraft: false, mergeable: p.conflict ? "CONFLICTING" : "MERGEABLE", mergeStateStatus: p.conflict ? "DIRTY" : "CLEAN", reviewDecision: p.approved ? "APPROVED" : "REVIEW_REQUIRED",
+  repository[m[1]] = { number: n, title: p.title, url: "https://github.com/" + (p.repo ?? "example/app") + "/pull/" + n, state: p.state, headRefName: "branch-" + n, headRefOid: "0f3c9a" + n, baseRefName: base,
+    isDraft: !!p.draft, mergeable: p.conflict ? "CONFLICTING" : "MERGEABLE", mergeStateStatus: p.conflict ? "DIRTY" : p.draft ? "DRAFT" : "CLEAN", reviewDecision: p.changes ? "CHANGES_REQUESTED" : p.approved ? "APPROVED" : "REVIEW_REQUIRED",
     mergedAt: p.state === "MERGED" ? "2026-03-04T08:00:00Z" : null, mergeCommit: p.state === "MERGED" ? { oid: "9a1b2c" + n } : null, isInMergeQueue: false, autoMergeRequest: null,
     author: { login: p.author },
     reviewRequests: { pageInfo: { hasNextPage: false }, nodes: (p.reviewers ?? []).map(l => ({ requestedReviewer: user(l) })) },
-    latestReviews: { pageInfo: { hasNextPage: false }, nodes: (p.reviewed ?? []).map(l => ({ state: "APPROVED", author: user(l) })) },
-    baseRef: { branchProtectionRule: base === "main" ? { requiredStatusCheckContexts: ["test", "lint"] } : null, associatedPullRequests: { nodes: base === "main" ? [] : [{ number: Number(base.slice(7)), headRefName: base, state: d[Number(base.slice(7))]?.state ?? "OPEN", headRepository: { nameWithOwner: "example/app" } }] } },
+    latestReviews: { pageInfo: { hasNextPage: false }, nodes: [...(p.reviewed ?? []).map(l => ({ state: "APPROVED", author: user(l) })), ...(p.changes ?? []).map(l => ({ state: "CHANGES_REQUESTED", author: user(l) }))] },
+    baseRef: { branchProtectionRule: base === "main" ? { requiredStatusCheckContexts: ["test", "lint"] } : null, associatedPullRequests: { nodes: base === "main" ? [] : [{ number: Number(base.slice(7)), headRefName: base, state: d[Number(base.slice(7))]?.state ?? "OPEN", headRepository: { nameWithOwner: p.repo ?? "example/app" } }] } },
     reviewThreads: { pageInfo: { hasNextPage: false }, nodes: Array.from({ length: p.threads ?? 0 }, (_, i) => ({ id: "thread-" + n + "-" + i, isResolved: false, comments: { nodes: [{ updatedAt: "2026-03-04T08:30:00Z" }] } })) },
     commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false }, nodes: p.checks ?? [] } } } }] } };
 }
 console.log(JSON.stringify({ data: { repository } }));
+`;
+}
+
+/**
+ * A fake `claude` for Rename with AI's review shots (--rename-review): it answers only the rename prompt, as
+ * `claude -p --output-format json` does, and the mode file picks the state: ready, slow (still suggesting) or fail.
+ */
+function fakeClaude(modeFile) {
+  return `#!/usr/bin/env node
+const fs = require("node:fs");
+// Anything but the rename job (its own system prompt) fails at once, as an unlogged-in CLI does, without reading stdin.
+if (!process.argv.some(a => a.startsWith("You name software workspaces"))) { process.stderr.write("not logged in"); process.exit(1); }
+let input = ""; process.stdin.on("data", d => input += d); process.stdin.on("end", () => {
+  const mode = (() => { try { return fs.readFileSync(${JSON.stringify(modeFile)}, "utf8").trim(); } catch { return "ready"; } })();
+  if (mode === "fail") { process.stdout.write(JSON.stringify({ is_error: true, subtype: "error_during_execution" })); process.exit(0); }
+  const reply = () => process.stdout.write(JSON.stringify({ result: JSON.stringify({ name: "Add APP-142 backoff for soft card declines" }), total_cost_usd: 0.0004, usage: { input_tokens: 420, output_tokens: 14 } }));
+  if (mode === "slow") setTimeout(reply, 20000); else reply();
+});
 `;
 }
 
@@ -176,25 +210,26 @@ const rpc = (name, input) => ({ rpc: name, input });
  * browser shows BASE + VIEW. `prompt` is the developer's message; `steps` is the fixture agent's turn.
  */
 const WORKSPACES = [
-  { key: "theme", title: "Dark mode tokens", minute: 0, prompt: "WEB-9: move the dashboard to the new color tokens and ship it.",
-    steps: [rpc("follow.enroll", { goal: "WEB-9 Dark mode color tokens" }), rpc("follow.register-pr", { repo: "example/app", number: 181, stack: "Dark mode tokens" }),
-      bash("pnpm test --filter dashboard", "pass 128"), msg("Shipped in example/app#181. The dashboard uses the new tokens in both themes.")],
+  { key: "theme", project: "web", after: "signoff", title: "Dark mode tokens", minute: 0, prompt: "WEB-9: move the dashboard to the new color tokens and ship it.",
+    steps: [rpc("follow.enroll", { goal: "WEB-9 Dark mode color tokens" }), rpc("follow.register-pr", { repo: "example/web", number: 181, stack: "Dark mode tokens" }),
+      bash("pnpm test --filter dashboard", "pass 128"), msg("Shipped in example/web#181. The dashboard uses the new tokens in both themes.")],
     done: "Dark mode tokens shipped in #181 and checked in both themes" },
-  { key: "webhooks", title: "Webhook signing", minute: 25, prompt: "APP-160: sign outgoing webhook payloads with HMAC and document the header.",
+  { key: "webhooks", project: "app", title: "Webhook signing", minute: 25, prompt: "APP-160: sign outgoing webhook payloads with HMAC and document the header.",
     steps: [rpc("follow.enroll", { goal: "APP-160 Sign webhook payloads" }), rpc("follow.register-pr", { repo: "example/app", number: 170, stack: "Webhook signing" }),
-      bash("pnpm test webhooks", "pass 36"), msg("Opened example/app#170 and asked Ravi for review. The signature header is documented in docs/webhooks.md.")] },
-  { key: "email", title: "Onboarding email", minute: 50, prompt: "APP-155: add the welcome email template and send it after sign-up.",
+      bash("pnpm test webhooks", "pass 36"), msg("Opened example/app#170 and asked Ravi for review. The signature header is documented in docs/webhooks.md."),
+      rpc("follow.needs-you", { kind: "review", ask: "Read the signature header docs in #170 before it merges" })] },
+  { key: "email", project: "app", title: "Onboarding email", minute: 50, prompt: "APP-155: add the welcome email template and send it after sign-up.",
     steps: [rpc("follow.enroll", { goal: "APP-155 Welcome email after sign-up" }), rpc("follow.register-pr", { repo: "example/app", number: 160, stack: "Onboarding email" }),
       msg("Opened example/app#160 with the welcome template.")] },
-  { key: "search", title: "Search filters", minute: 80, prompt: "WEB-17: saved search filters. Run the staging migration when the PR is green.",
-    steps: [rpc("follow.enroll", { goal: "WEB-17 Saved search filters" }), rpc("follow.register-pr", { repo: "example/app", number: 151, stack: "Search filters" }),
+  { key: "search", project: "web", title: "Search filters", minute: 80, prompt: "WEB-17: saved search filters. Run the staging migration when the PR is green.",
+    steps: [rpc("follow.enroll", { goal: "WEB-17 Saved search filters" }), rpc("follow.register-pr", { repo: "example/web", number: 151, stack: "Search filters" }),
       bash("pnpm test search", "pass 54"), msg("The filters save and load, and tests pass. The new column needs migration 0042 on staging first."),
       { permission: { name: "Bash", title: "Run the staging migration", input: { command: "pnpm db:migrate --env staging --to 0042" } } }],
     waitFor: "permission" },
-  { key: "audit", title: "Audit log export", minute: 120, prompt: "WEB-21: export the audit log as CSV, streamed, with a date range.",
+  { key: "audit", project: "web", title: "Audit log export", minute: 120, prompt: "WEB-21: export the audit log as CSV, streamed, with a date range.",
     steps: [rpc("follow.enroll", { goal: "WEB-21 Audit log CSV export" }), think("Stream rows so large ranges don't buffer in memory."), bash("pnpm test audit", "pass 12"), { hold: true }],
     waitFor: "running" },
-  { key: "billing", title: "Billing retries", minute: 140, prompt: "APP-142: retry failed charges with exponential backoff, then send the dunning email after the last retry.",
+  { key: "billing", project: "app", title: "Billing retries", minute: 140, prompt: "APP-142: retry failed charges with exponential backoff, then send the dunning email after the last retry.",
     steps: [
       rpc("follow.enroll", { goal: "APP-142 Retry failed charges with backoff and send the dunning email" }),
       rpc("follow.register-pr", { repo: "example/app", number: 141, stack: "Billing retries" }),
@@ -216,8 +251,41 @@ const WORKSPACES = [
         links: [{ path: "docs/billing/retries.md", label: "Retry notes" }], pr: "example/app#142" }),
       msg("The backoff is in example/app#142 and the dunning email in #143. Q1 asks whether declined cards should retry."),
       rpc("follow.needs-you", { kind: "decision", ask: "Pick whether declined cards retry", questions: ["Q1"] }),
-    ] },
-];
+      { gate: "billing" },
+    ], worked: 4 },
+  // The README hero's other groups: Waiting (signed off, PRs out), Later (snoozed), Fixing (a repair batch sent and
+  // the agent on it). `after` runs once every PR snapshot is in.
+  { key: "usage", project: "web", after: "signoff", title: "Usage dashboard", minute: 8, prompt: "WEB-30: charts for the usage dashboard. Keep the PR a draft until the design review.",
+    steps: [rpc("follow.enroll", { goal: "WEB-30 Usage dashboard charts" }), rpc("follow.register-pr", { repo: "example/web", number: 212, stack: "Usage dashboard" }),
+      msg("Opened example/web#212 as a draft until the design review.")] },
+  { key: "invites", project: "app", after: "signoff", title: "Team invites", minute: 15, prompt: "APP-171: invite links for teams, valid for 7 days.",
+    steps: [rpc("follow.enroll", { goal: "APP-171 Team invite links" }), rpc("follow.register-pr", { repo: "example/app", number: 191, stack: "Team invites" }),
+      bash("pnpm test invites", "pass 41"), msg("Opened example/app#191. CI is running.")] },
+  { key: "sso", project: "app", after: "signoff", title: "SSO login", minute: 35, prompt: "APP-176: SAML single sign-on. The provider first, then the login button.",
+    steps: [rpc("follow.enroll", { goal: "APP-176 SAML single sign-on" }), rpc("follow.register-pr", { repo: "example/app", number: 195, stack: "SSO login" }),
+      rpc("follow.register-pr", { repo: "example/app", number: 196, stack: "SSO login", parentNumber: 195 }),
+      rpc("follow.obligation", { title: "Try the login on staging after the deploy", status: "waiting", afterPrs: ["example/app#196"] }),
+      msg("Opened example/app#195 and #196 for review.")] },
+  { key: "push", project: "web", after: "snooze", title: "Push settings", minute: 60, prompt: "WEB-34: let people pick which push notifications they get.",
+    steps: [rpc("follow.enroll", { goal: "WEB-34 Push notification settings" }), rpc("follow.register-pr", { repo: "example/web", number: 218, stack: "Push settings" }),
+      rpc("follow.ask-question", { title: "Default for new accounts?", question: "Should new accounts start with every push notification on, or only mentions?",
+        options: [{ letter: "A", label: "Only mentions", consequence: "Quiet by default; people opt in to the rest." }, { letter: "B", label: "Everything on", consequence: "Nothing missed, but more people turn push off entirely." }],
+        recommend: "A", pr: "example/web#218" }),
+      msg("example/web#218 is up. Q1 asks the default for new accounts."),
+      rpc("follow.needs-you", { kind: "decision", ask: "Pick the default for new accounts", questions: ["Q1"] })] },
+  { key: "csv", project: "web", title: "Contact import", minute: 95, prompt: "WEB-38: import contacts from a CSV, with a preview before saving.",
+    steps: [rpc("follow.enroll", { goal: "WEB-38 Import contacts from CSV" }), rpc("follow.register-pr", { repo: "example/web", number: 224, stack: "Contact import" }),
+      rpc("follow.ask-question", { title: "Duplicate contacts?", question: "When a CSV row matches an existing contact by email, should it update that contact or be skipped?",
+        options: [{ letter: "A", label: "Update the existing contact", consequence: "The CSV wins; old values are overwritten." }, { letter: "B", label: "Skip the row", consequence: "Existing contacts never change; the preview lists what was skipped." }],
+        recommend: "B", pr: "example/web#224" }),
+      msg("The preview works in example/web#224. Q1 asks what to do with duplicates.")] },
+  { key: "invoices", project: "app", after: "fix", title: "Invoice PDFs", minute: 105, prompt: "APP-182: render invoices as PDF and attach them to the receipt email.",
+    steps: [rpc("follow.enroll", { goal: "APP-182 Invoice PDFs on the receipt email" }), rpc("follow.register-pr", { repo: "example/app", number: 188, stack: "Invoice PDFs" }),
+      msg("Opened example/app#188.")] },
+  { key: "views", project: "web", after: "fix", title: "Saved views", minute: 112, prompt: "WEB-41: save dashboard layouts as named views.",
+    steps: [rpc("follow.enroll", { goal: "WEB-41 Saved dashboard views" }), rpc("follow.register-pr", { repo: "example/web", number: 205, stack: "Saved views" }),
+      msg("Opened example/web#205.")] },
+].sort((a, b) => a.minute - b.minute);
 
 /**
  * needs-you-states only (an-open-question-renders-once-per-surface, task asks): one workspace per Needs you state.
@@ -247,28 +315,37 @@ const NEEDS_YOU_STATES = [
       rpc("follow.needs-you", { kind: "decision", ask: "Pick the receipt sender", questions: ["Q1"] })], answer: { questionId: "Q1", choice: "A" } },
   { key: "ny-tasks", title: "Usage alerts", minute: 174, prompt: "APP-185: email workspace admins when usage passes 80% of the plan.",
     steps: [rpc("follow.enroll", { goal: "APP-185 Usage alerts" }),
-      rpc("follow.register-pr", { repo: "example/app", number: 212, stack: "Usage alerts" }),
+      rpc("follow.register-pr", { repo: "example/app", number: 232, stack: "Usage alerts" }),
       rpc("follow.obligation", { title: "Pick who gets usage alerts", status: "blocked", ask: "Should usage alerts go to the workspace owner only, or to every admin?", enable_follow_up: false }),
-      rpc("follow.obligation", { title: "Wire alert thresholds", status: "blocked", evidence: "Waits for #212's review before the thresholds move to config", enable_follow_up: false }),
-      rpc("follow.obligation", { title: "Check alert emails in staging", status: "waiting", afterPrs: ["example/app#212"] }),
-      msg("Thresholds are in #212. One task needs your call on who gets the alerts.")], flag: false },
+      rpc("follow.obligation", { title: "Wire alert thresholds", status: "blocked", evidence: "Waits for #232's review before the thresholds move to config", enable_follow_up: false }),
+      rpc("follow.obligation", { title: "Check alert emails in staging", status: "waiting", afterPrs: ["example/app#232"] }),
+      msg("Thresholds are in #232. One task needs your call on who gets the alerts.")], flag: false },
 ];
 
 async function seed({ call, home }) {
   // A fixed (empty) project folder: Paseo derives the project's avatar color from it, so a random temp path would
   // recolor the sidebar on every run.
-  const repo = join(tmpdir(), "follow-up-shots-fixture", "app"); await fs.mkdir(repo, { recursive: true });
+  // Two projects, so the sidebar and Quiet's folds don't read as one repo.
+  const repos = {};
+  for (const name of ["app", "web"]) { repos[name] = join(tmpdir(), "follow-up-shots-fixture", name); await fs.mkdir(repos[name], { recursive: true }); }
   const specs = [...WORKSPACES, ...(only.includes("needs-you-states") ? NEEDS_YOU_STATES : [])];
   await fs.writeFile(join(home, "fixture-scripts.json"), JSON.stringify(Object.fromEntries(specs.map(w => [w.prompt, w.steps]))));
   const workspaces = [];
   for (const spec of specs) {
     await setDaemonClock(at(spec.minute));
-    const w = await api.workspaces.create({ title: spec.title, source: { kind: "directory", path: repo } });
+    const w = await api.workspaces.create({ title: spec.title, source: { kind: "directory", path: repos[spec.project ?? "app"] } });
     const agent = await w.agents.create({ config: { provider: "followup-fixture/fixture", model: "fixture", modeId: "default" }, title: spec.title });
     await call("follow.activate", { workspaceId: w.id });
     await call("follow.control", { workspaceId: w.id, enable_auto_sends: false });
     await client.sendMessage(agent.id, spec.prompt, { messageId: `shots-${spec.key}` });
     const last = [...spec.steps].reverse().find(s => s.item?.type === "assistant_message")?.item.text;
+    // `worked`: the turn spans that many minutes of the clock (the chat's "Worked for"), held at its gate meanwhile.
+    const gate = spec.steps.find(s => s.gate)?.gate;
+    if (gate) {
+      await until(`${spec.key} at its gate`, () => fs.access(join(home, `fixture-gated-${gate}`)).then(() => true, () => false));
+      await setDaemonClock(at(spec.minute + (spec.worked ?? 0)));
+      await fs.writeFile(join(home, `fixture-gate-${gate}`), "");
+    }
     await until(`${spec.key} turn`, async () => {
       const entries = (await client.fetchAgentTimeline(agent.id, { projection: "canonical", limit: 50 })).entries;
       const failure = entries.find(e => e.item.type === "assistant_message" && /\[System Error\]/.test(e.item.text));
@@ -280,7 +357,7 @@ async function seed({ call, home }) {
     // Settle this workspace inside its own phase. Under the crawling clock, Date-based caches (the daemon directory) and
     // settle windows (a permission's 30 s) only pass when the clock moves, so step it a minute and wait for the row and
     // two inbox ticks (every 15 s, real time). Otherwise they settle in whichever later phase comes first.
-    await setDaemonClock(at(spec.minute) + 61_000);
+    await setDaemonClock(at(spec.minute + (spec.worked ?? 0)) + 61_000);
     if (spec.waitFor !== "running" && spec.flag !== false) await until(`${spec.key} inbox flag`, async () => (await call("follow.inbox-list", {})).rows.some(r => r.agentId === agent.id && r.needs), { tries: 120, every: 500 });
     await inboxTicks(home, 2);
     workspaces.push({ key: spec.key, title: spec.title, workspaceId: w.id, agentId: agent.id });
@@ -302,6 +379,25 @@ async function seed({ call, home }) {
     const done = await call("follow.done", { agentId: w.agentId, summary: spec.done });
     if (done.blockers.length) throw new Error(`${spec.key} could not be Done: ${done.blockers.join("; ")}`);
   }
+  // The developer's moves: sign a turn off (its PRs then wait on others), put a question off until tomorrow, or send a
+  // repair batch the agent is now working on (Fixing). The agent holds that turn open, so it stays Fixing.
+  const scripts = JSON.parse(await fs.readFile(join(home, "fixture-scripts.json"), "utf8"));
+  for (const spec of WORKSPACES.filter(s => s.after)) {
+    const w = workspaces.find(x => x.key === spec.key);
+    if (spec.after === "snooze") { await call("follow.inbox-act", { action: "snooze", agentIds: [w.agentId], until: "2026-03-05T09:00:00.000Z" }); continue; }
+    await call("follow.inbox-act", { action: "sign_off", agentIds: [w.agentId] });
+    if (spec.after !== "fix") continue;
+    let batch = null;
+    await until(`${spec.key} repair batch`, async () => {
+      await call("follow.refresh", {});
+      batch = (await call("follow.list", {})).workspaces.find(x => x.id === w.workspaceId)?.batches.find(b => b.state === "pending");
+      return !!batch;
+    }, { tries: 120, every: 500 });
+    scripts[`agent:${w.agentId}`] = [think("Reproduce the failure locally first, then fix it at the source."), { hold: true }];
+    await fs.writeFile(join(home, "fixture-scripts.json"), JSON.stringify(scripts));
+    await call("follow.send", { workspaceId: w.workspaceId, batchId: batch.id });
+    await until(`${spec.key} fixing`, async () => (await client.fetchAgent(w.agentId)).agent?.status === "running", { tries: 120, every: 500 });
+  }
   // One item the developer added by hand ("Added by you" in the Linked list).
   const billing = workspaces.find(w => w.key === "billing");
   await call("follow.set-linked-items", { workspaceId: billing.workspaceId, action: "add", ref: "APP-151" });
@@ -314,11 +410,12 @@ async function seed({ call, home }) {
 }
 
 /**
- * Waits for `n` more runs of the worker's inbox loop. The loop runs every 15 s of real time (a real setTimeout, not the
- * crawling clock). It no longer stamps inbox.json each run: a lastSeen-only change is written at most every
- * LAST_SEEN_WRITE_MS of the (fake, crawling) clock (store-writes-only-real-changes), so waiting on the file never ends.
+ * Waits for `n` more runs of the worker's inbox loop, which runs every 15 s of real time (a real setTimeout, not the
+ * crawling clock). Not by watching inbox.json: since #123 (store-writes-only-real-changes) a lastSeen-only change is
+ * written at most every LAST_SEEN_WRITE_MS of the clock, and the fake clock crawls, so it is never written during a run
+ * and a wait on the file times out ("timed out waiting for an inbox tick").
  */
-async function inboxTicks(home, n) {
+async function inboxTicks(_home, n) {
   await new Promise(r => setTimeout(r, n * 15_000 + 2_000));
 }
 
@@ -406,6 +503,8 @@ async function settle(page) {
 
 const DESKTOP = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };
+/** The sidebar shot's window: every group of the fixture fits, down to Quiet, and the chat beside it lays out whole. */
+const SIDEBAR = { width: 960, height: 1060 };
 /** A workspace's agent chat, opened from Paseo's sidebar like a person would (deep links land before the host is known). */
 async function openChat(page, title, prompt) {
   await page.getByText(title, { exact: true }).first().click({ timeout: 30000 });
@@ -414,6 +513,112 @@ async function openChat(page, title, prompt) {
 
 async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   const billing = WORKSPACES.find(w => w.key === "billing");
+  // Review evidence for Rename with AI (not README images): the row menu item, the panel's More button and menu, the
+  // dialog suggesting, ready, edited and failed, the toast with Undo and the Undo link; desktop and phone, dark and light.
+  if (argv.includes("--rename-review")) {
+    const mode = m => fs.writeFile(join(home, "claude-mode"), m);
+    // One state can't hold the harness slot: each shot gets 90 s, then fails on its own and the run moves on.
+    // --rename-only a,b: a subset of these shots (the rest are skipped).
+    const pick = arg("--rename-only")?.split(",").map(x => x.trim());
+    const bounded = async (name, ...rest) => {
+      if (pick && !pick.includes(name)) return;
+      let timer;
+      const late = new Promise(r => { timer = setTimeout(() => { failures.push(`${name} (timed out)`); r(); }, 90_000); });
+      try { await Promise.race([shoot(name, ...rest), late]); } finally { clearTimeout(timer); }
+    };
+    const billingId = seeded.workspaces.find(w => w.key === "billing").workspaceId;
+    const rowMenuAt = async page => {
+      await openHome(page);
+      await (await homeRow(page, "Billing retries")).click({ button: "right", position: { x: 160, y: 18 } });
+      const menu = page.getByRole("menu", { name: "Actions for Billing retries" });
+      await menu.getByRole("menuitem", { name: "Rename with AI…" }).waitFor();
+      return menu;
+    };
+    const dialog = (vp, wait) => async page => {
+      await (await rowMenuAt(page)).getByRole("menuitem", { name: "Rename with AI…" }).click();
+      if (vp !== DESKTOP) await page.setViewportSize(vp);
+      await wait(page);
+    };
+    const ready = page => page.getByRole("textbox", { name: "New name" }).last().evaluate(el => el.value.length > 0 || Promise.reject(new Error("empty"))).catch(async () => { await page.waitForFunction(() => [...document.querySelectorAll('[aria-label="New name"]')].some(el => el.value)); });
+    const panelOpen = async page => {
+      await openChat(page, "Billing retries", billing.prompt);
+      await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+      await page.getByRole("button", { name: "More actions for this workspace" }).first().waitFor();
+    };
+    await bounded("rename-menu", DESKTOP, "dark", async page => { await rowMenuAt(page); });
+    await bounded("rename-panel-header", DESKTOP, "light", async page => { await panelOpen(page); });
+    await bounded("rename-panel-more", DESKTOP, "dark", async page => {
+      await panelOpen(page);
+      await page.getByRole("button", { name: "More actions for this workspace" }).first().click();
+      await page.getByRole("menuitem", { name: "Rename with AI…" }).waitFor();
+    });
+    await mode("slow");
+    for (const [n, vp, sc] of [["rename-suggesting", DESKTOP, "dark"], ["rename-suggesting-phone-light", PHONE, "light"]])
+      await bounded(n, vp, sc, dialog(vp, page => page.getByText("Suggesting a name…").last().waitFor()));
+    // Let the slow replies drain from the job queue (one at a time) before the next state.
+    await new Promise(r => setTimeout(r, 42000));
+    await mode("fail");
+    for (const [n, vp, sc] of [["rename-error", DESKTOP, "dark"], ["rename-error-phone-light", PHONE, "light"]])
+      await bounded(n, vp, sc, dialog(vp, page => page.getByText(/Couldn't suggest a name/).last().waitFor()));
+    await mode("ready");
+    for (const [n, vp, sc] of [["rename-ready", DESKTOP, "dark"], ["rename-ready-light", DESKTOP, "light"], ["rename-ready-phone", PHONE, "dark"], ["rename-ready-phone-light", PHONE, "light"]])
+      await bounded(n, vp, sc, dialog(vp, ready));
+    await bounded("rename-invalid", DESKTOP, "dark", dialog(DESKTOP, async page => {
+      await ready(page);
+      await page.getByRole("textbox", { name: "New name" }).last().fill("feat/retry-soft-declines");
+      await page.getByText("Use words, not a branch name.").last().waitFor();
+    }));
+    await bounded("rename-toast", DESKTOP, "dark", dialog(DESKTOP, async page => {
+      await ready(page);
+      await page.getByRole("button", { name: "Rename" }).last().click();
+      await page.getByText(/^Renamed to Add APP-142 backoff for soft card declines/).last().waitFor();
+      // The toast lasts 10 s (held under the pointer): shoot it now, with the pointer resting on it.
+      await page.getByText(/^Renamed to Add APP-142/).last().hover();
+      await page.screenshot({ path: join(out, "follow-up-rename-toast-live.png"), animations: "disabled", caret: "hide" });
+    }));
+    await bounded("rename-undo-link", DESKTOP, "light", async page => {
+      await openHome(page);
+      await (await homeRow(page, "Add APP-142 backoff for soft card declines")).click({ button: "right", position: { x: 160, y: 18 } });
+      await page.getByRole("menuitem", { name: "Rename with AI…" }).click();
+      await page.getByRole("button", { name: "Undo last rename" }).last().waitFor();
+      await page.getByText("Suggesting a name…").last().waitFor({ state: "detached" });
+    });
+    await call("follow.rename-workspace", { workspaceId: billingId, undo: true }).catch(error => log(`undo after review: ${error.message}`));
+  }
+  // Review evidence for the sidebar view's row menu (Paseo 0.16+, HARNESS_PASEO=0.16): Follow-up's view picked in
+  // Settings → Sidebar, then a row's menu from a right-click and from Shift+F10; dark and light. On a host without
+  // sidebar views this fails at "Follow-up: Needs you" (the option doesn't exist).
+  if (argv.includes("--sidebar-review")) {
+    const sidebarRow = async page => {
+      await page.goto(`${ORIGIN}/settings/sidebar`);
+      await page.getByText("Default view", { exact: true }).first().click();
+      await page.getByText("Follow-up: Needs you", { exact: true }).last().click();
+      await openHome(page);
+      const view = page.getByTestId("plugin-sidebar-view");
+      const row = view.getByRole("button", { name: /^Billing retries/ }).first();
+      await row.waitFor();
+      return { view, row };
+    };
+    const menuOpen = page => page.getByRole("menu", { name: "Actions for Billing retries" }).getByRole("menuitem", { name: "Rename with AI…" }).waitFor();
+    // --rename-only also picks among these (sidebar-menu-click-dark, sidebar-menu-key-light, …).
+    const pick = arg("--rename-only")?.split(",").map(x => x.trim());
+    const pickShot = (name, ...rest) => !pick || pick.includes(name) ? shoot(name, ...rest) : undefined;
+    for (const scheme of ["dark", "light"]) {
+      await pickShot(`sidebar-menu-click-${scheme}`, DESKTOP, scheme, async page => {
+        const { row } = await sidebarRow(page);
+        await row.click({ button: "right", position: { x: 60, y: 12 } });
+        await menuOpen(page);
+        // Ask the Overseer needs Home's omnibox, so it isn't in this menu at all.
+        if (await page.getByRole("menuitem", { name: /Ask the Overseer/ }).count()) throw new Error("Ask the Overseer shown in the sidebar view");
+      });
+      await pickShot(`sidebar-menu-key-${scheme}`, DESKTOP, scheme, async page => {
+        const { row } = await sidebarRow(page);
+        await row.focus();
+        await page.keyboard.press("Shift+F10");
+        await menuOpen(page);
+      });
+    }
+  }
   for (const name of SHOTS) {
     if (!only.includes(name) || name === "setup") continue;
     if (name === "home") await shoot("home", DESKTOP, "dark", async page => {
@@ -421,6 +626,29 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       await (await homeRow(page, "Billing retries")).click();
       await page.getByText("Only network failures").first().waitFor();
     });
+    // Paseo 0.16's sidebar with Follow-up in it (each workspace's status and subline, the Needs-you badge), cropped
+    // to the sidebar plus the edge of Home. 0.15 has no workspace rows to decorate; Follow-up feature-detects 0.16.
+    if (name === "sidebar") await shoot("sidebar", SIDEBAR, "dark", async page => {
+      await openHome(page);
+      await homeRow(page, "Billing retries");
+      // Settings → Sidebar → View → Follow-up's, as a developer picks it.
+      await page.getByRole("button", { name: /^Settings$/i }).last().click();
+      await page.getByText("Sidebar", { exact: true }).first().click();
+      await page.getByText("Default view", { exact: true }).first().click();
+      await page.getByText("Follow-up: Needs you", { exact: true }).last().click();
+      // Escape closes the picker and then Settings; Back is there only if Settings is still open.
+      await page.keyboard.press("Escape").catch(() => {});
+      const back = page.getByText("Back", { exact: true }).first();
+      if (await back.isVisible().catch(() => false)) await back.click();
+      const view = page.getByTestId("plugin-sidebar-view");
+      await view.getByText("Billing retries").first().waitFor();
+      // Tall enough for every group down to Quiet, so nothing reads as cut off. A row opens its workspace's chat beside
+      // it: the context, and a near-square frame that still reads when a chat app scales it down.
+      await page.setViewportSize(SIDEBAR);
+      await view.getByText("Billing retries").first().click();
+      await page.getByText("Only network failures").first().waitFor();
+      return null;
+    }, { scale: 2 });
     if (name === "panel") await shoot("panel", DESKTOP, "dark", async page => {
       await openChat(page, "Billing retries", billing.prompt);
       await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
@@ -451,16 +679,6 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       { viewport: PHONE, drive: async page => { await openHome(page); await page.setViewportSize(PHONE); await homeRow(page, "Billing retries"); } },
       { viewport: PHONE, drive: async page => { await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, "Billing retries")).click(); await page.getByText("Only network failures").first().waitFor(); } },
     ]);
-    if (name === "context-menu") await shoot("context-menu", DESKTOP, "dark", async page => {
-      await openHome(page);
-      await (await homeRow(page, "Billing retries")).click();
-      await page.getByText("Only network failures").first().waitFor();
-      await (await homeRow(page, "Billing retries")).click({ button: "right", position: { x: 160, y: 18 } });
-      const menu = page.getByRole("menu", { name: "Actions for Billing retries" });
-      await menu.waitFor();
-      await menu.getByRole("menuitem", { name: /^Answer Q1/ }).first().waitFor();
-      await menu.getByRole("menuitem", { name: /^Copy \d* ?PR links?/ }).first().waitFor();
-    });
     if (name === "linked-items") await shoot("linked-items", DESKTOP, "dark", async page => {
       await openHome(page);
       await (await homeRow(page, "Billing retries")).click();
@@ -697,6 +915,8 @@ async function setDaemonClock(fakeMs, rate = 0.001) {
 }
 
 let daemon; let client; let api; let browser; let daemonUrl = null;
+/** The fake GitHub's HTTPS server: closed in stopDaemon, or its listening socket keeps the run (and its harness slot) alive after "done". */
+let github = null;
 /** (Re)connects `client` and `api` to the isolated daemon. */
 async function connect() {
   await api?.dispose?.()?.catch?.(() => {}); await client?.close().catch(() => {});
@@ -707,6 +927,7 @@ async function connect() {
 const stopDaemon = async () => {
   await browser?.close().catch(() => {}); browser = null;
   await api?.dispose?.().catch?.(() => {}); await client?.close().catch(() => {}); client = null;
+  await github?.close().catch(() => {}); github = null;
   if (daemon && daemon.exitCode === null) {
     daemon.kill("SIGTERM");
     for (let i = 0; i < 40 && daemon.exitCode === null; i++) await new Promise(r => setTimeout(r, 100));
@@ -733,14 +954,15 @@ try {
   await fs.writeFile(join(home, "gh-fixture.json"), JSON.stringify(pulls()));
   await fs.writeFile(join(bin, "gh"), fakeGh(join(home, "gh-fixture.json"))); await fs.chmod(join(bin, "gh"), 0o700);
   // PR reads go over HTTPS (server/github-api.ts) to this fake, which answers with the same fixture gh.
-  const github = await fakeGithub({ dir: root, gh: join(bin, "gh") });
+  github = await fakeGithub({ dir: root, gh: join(bin, "gh") });
   await fs.writeFile(join(home, "linear-fixture.json"), JSON.stringify(linearIssues()));
   await fs.writeFile(join(bin, "mcpproxy"), fakeMcpproxy(join(home, "linear-fixture.json"))); await fs.chmod(join(bin, "mcpproxy"), 0o700);
+  if (argv.includes("--rename-review")) { await fs.writeFile(join(bin, "claude"), fakeClaude(join(home, "claude-mode"))); await fs.chmod(join(bin, "claude"), 0o700); }
   // Real speed while the daemon starts and the plugin installs; seeding and shooting crawl (setDaemonClock).
   // It starts ten minutes before BASE, so the clock only ever moves forward.
   await fs.writeFile(clockFile, JSON.stringify({ fake: at(-10), real: Date.now(), rate: 1 }));
 
-  const env = harnessEnv(root, { home, strip: github.strip, set: { ...github.env, PASEO_DAEMON_URL: url, PASEO_SERVER_ID: "srv_followupshots", PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true", PATH: `${bin}:${process.env.PATH}`, FOLLOW_SHOTS_CLOCK: clockFile, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${join(root, "clock.cjs")}`.trim(), TZ: "UTC" } });
+  const env = harnessEnv(root, { home, strip: github.strip, set: { ...github.env, PASEO_DAEMON_URL: url, PASEO_SERVER_ID: "srv_followupshots", FIXTURE_MODEL_LABEL: "Agent", PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true", PATH: `${bin}:${process.env.PATH}`, FOLLOW_SHOTS_CLOCK: clockFile, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${join(root, "clock.cjs")}`.trim(), TZ: "UTC" } });
   const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env, timeout: 120000, maxBuffer: 1 << 22 })).stdout);
   const daemonLog = openSync(join(root, "daemon.log"), "a");
   daemon = spawnDaemon(["daemon", "run", "--home", home], { env, stdio: ["ignore", daemonLog, daemonLog] });
@@ -790,3 +1012,5 @@ try {
   await stopDaemon();
   if (process.exitCode) log(`kept ${root} for the daemon log`); else await fs.rm(root, { recursive: true, force: true });
 }
+// Something (a held fixture turn's socket, the fake GitHub server) can keep the loop alive after the daemon is gone.
+process.exit(process.exitCode ?? 0);
