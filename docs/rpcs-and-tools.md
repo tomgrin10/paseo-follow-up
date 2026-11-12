@@ -44,7 +44,7 @@ is missing from AGENTS.md or docs/, so add a line here when you add one.
 | `enroll_workspace` | `follow.enroll` | Refines the goal of a workspace the developer activated. |
 | `register_pr` | `follow.register-pr` | Registers a submitted PR and its stack and parent. `agentMerges: true` marks a PR the agent merges itself: Follow-up never asks the developer to review or merge it. |
 | `exclude_stack` | `follow.exclude-stack` | Removes a wrongly registered stack, with an audit (`server/exclusions.ts`). |
-| `update_obligation` | `follow.obligation` | Creates or updates a task (an obligation), with an optional trigger and communication receipt. |
+| `update_obligation` | `follow.obligation` | Creates or updates a task (an obligation), with an optional trigger and communication receipt. `status: working` records the caller as the task's agent, or `workingAgentId` (another agent Paseo knows). |
 | `acknowledge_batch` | `follow.acknowledge` | Records a repair batch's result: completed or blocked. |
 | `ask_question`, `record_answer`, `withdraw_question` | `follow.ask-question`, `follow.record-answer`, `follow.withdraw-question` | Questions for the developer (`server/questions.ts`). |
 | `set_spec` | `follow.set-spec` | The agent's spec link. The developer's own link wins over it. |
@@ -154,5 +154,6 @@ These have no tool because only another component calls them:
 | Overseer card | `follow.overseer-status`, `follow.overseer-start`, `follow.overseer-restart`, `follow.overseer-ask` |
 | Settings | `follow.follow-settings`, `follow.set-follow-settings`, `follow.project-settings`, `follow.set-project-tracking`, `follow.reviewer-settings`, `follow.save-reviewers`, `follow.reviewer-suggestions`, `follow.agent-settings`, `follow.set-agent-setting`, `follow.set-wait`, `follow.pr-workflow`, `follow.set-pr-workflow`, `follow.trust-bypass` |
 | Getting started | `follow.onboarding`, `follow.set-onboarding`, `follow.onboarding-checks` |
+| Tasks card (live agent line, Open agent) | `follow.task-agents` |
 | Report a bug (Settings → General → Help, ⌘K, `/report-issue`, error toasts) | `follow.report-issue-targets`, `follow.report-issue-send`, `follow.report-issue-link` |
 | Release notes and updates | `follow.release-notes`, `follow.whats-new-seen`, `follow.updates`, `follow.set-updates`, `follow.install-update`, `follow.retry-move`, `follow.dismiss-update-notice` |

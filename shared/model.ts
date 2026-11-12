@@ -55,6 +55,11 @@ export const obligationSchema = z.object({
   previousTitles: z.array(z.string()).optional(),
   communication: communicationSchema.optional(),
   trigger: taskTriggerSchema.nullable().optional(),
+  /**
+   * Who is working on it: the agent that last set status=working through update_obligation, or the agent it named
+   * (workingAgentId, e.g. an orchestrator's subagent). The task's line reads that agent's live state (shared/task-status.ts).
+   */
+  workingAgentId: idSchema.optional(),
 });
 export const taskSchema = z.object({
   key: idSchema, kind: z.enum(["conflict", "review", "checks", "restack", "obligation", "inventory", "completion"]),

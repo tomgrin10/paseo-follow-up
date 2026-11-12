@@ -1,0 +1,1 @@
+- A task says which agent is working on it and whether that agent is working, idle or closed, instead of a stale "Agent working". Open agent takes you to its chat.

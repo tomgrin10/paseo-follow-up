@@ -15,6 +15,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import * as rpc from "./shared/contracts";
+import { taskAgentStates } from "./server/tasks";
 import { LogRing } from "./server/report-issue/diagnostics";
 import { followUpReporter, reportPrompt } from "./server/report-issue-adapter";
 import { githubApi } from "./server/github-api";
@@ -580,12 +581,14 @@ export default function contribute(server: PluginServerContext) {
     });
     void engine.tick(); return result;
   });
-  handle(rpc.obligationRpc, async ({ agentId, ...input }, { paseo }) => {
+  handle(rpc.obligationRpc, async ({ agentId, workingAgentId, ...input }, { paseo }) => {
     await requireReady();
     const workspaceId = await callerWorkspaceId(agentId, paseo);
+    // A named worker must be an agent Paseo knows (directory metadata; nothing is loaded).
+    if (workingAgentId && workingAgentId !== agentId && !(gateway.directory.cached(workingAgentId) ?? (await gateway.directory.read({ fresh: "agents" })).agents.find(r => r.agent.id === workingAgentId)?.agent)) throw new Error("workingAgentId isn't an agent Paseo knows. Pass the id of the agent doing the task, or leave it out to record yourself.");
     const result = await store.mutate(state => {
       const w = agentWorkspace(state, agentId, "write", workspaceId);
-      const obligation = updateObligation(w, input);
+      const obligation = updateObligation(w, { ...input, caller: agentId, workingAgentId });
       syncTaskQuestions(w, Date.now());
       changed(w); return { ...w, updatedObligationId: obligation.id };
     });
@@ -1074,6 +1077,14 @@ export default function contribute(server: PluginServerContext) {
     // The directory's agent list (metadata only): a claim never loads or refreshes the main agent.
     agentInfo: async agentId => { const row = gateway.directory.cached(agentId) ?? (await gateway.directory.read()).agents.find(r => r.agent.id === agentId)?.agent; return row ? { status: row.status, activeTurn: row.activeTurn, pendingPermissions: row.pendingPermissions, archivedAt: row.archivedAt } : null; } });
   handle(rpc.prioritiesRpc, async () => ({ items: await priorityStore.read() }));
+  // Tasks' agents, live: the cached directory (metadata only), never a timeline read, so nothing wakes.
+  handle(rpc.taskAgentsRpc, async ({ workspaceId }) => {
+    const w = (await store.snapshot()).workspaces.find(x => x.id === workspaceId);
+    const ids = [...new Set((w?.obligations ?? []).filter(o => o.status === "working" && o.workingAgentId).map(o => o.workingAgentId!))];
+    if (!ids.length) return { agents: {} };
+    const rows = await gateway.directory.read().catch(() => null);
+    return { agents: taskAgentStates(ids, rows?.agents.map(r => r.agent) ?? null) };
+  });
   // The Report sheet: who it can send to (directory metadata only; nothing is loaded), Send to agent, Open on GitHub.
   handle(rpc.reportTargetsRpc, async ({ workspaceId, agentId }, { paseo }) => {
     seen(paseo);
