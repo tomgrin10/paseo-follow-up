@@ -406,7 +406,17 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
         await page.getByText("Next message", { exact: true }).last().waitFor();
       });
       // Phones reach the panel from the workspace: open it at desktop size, then narrow to the phone.
-      if (name === "tasks-phone") await shoot("tasks-phone", DESKTOP, "light", async page => { await open(page); await page.setViewportSize(PHONE); await page.getByText(/^Next message to /).first().scrollIntoViewIfNeeded(); });
+      // The clip starts below the host's own header, which names the host machine.
+      if (name === "tasks-phone") await shoot("tasks-phone", DESKTOP, "light", async page => {
+        await openChat(page, spec.title, spec.prompt);
+        await page.setViewportSize(PHONE);
+        await page.getByRole("button", { name: "Open workspace follow-up", exact: true }).last().click();
+        const strip = page.getByText(/^Next message to /).last();
+        await strip.waitFor({ timeout: 60000 });
+        await strip.scrollIntoViewIfNeeded();
+        if (await page.evaluate(() => document.documentElement.scrollWidth) > PHONE.width) throw new Error("tasks-phone scrolls sideways");
+        return { x: 0, y: 80, width: PHONE.width, height: PHONE.height - 80 };
+      });
     }
     if (name === "questions") await shoot("questions", DESKTOP, "dark", async page => {
       await openChat(page, "Billing retries", billing.prompt);
