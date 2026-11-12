@@ -447,6 +447,8 @@ function makeShooter({ browser, port, out, scheme: forced, optimiser, results })
     try {
       await context.addInitScript(INIT, { seen });
       const page = await context.newPage();
+      // SHOTS_CONSOLE=1 prints the page's errors, to tell a real bug from a flaky frame.
+      if (process.env.SHOTS_CONSOLE) { page.on("console", m => { if (m.type() === "error") log(`${name} console:`, m.text().slice(0, 600)); }); page.on("pageerror", e => log(`${name} pageerror:`, e.message.slice(0, 600))); }
       await page.clock.setFixedTime(BASE + VIEW);
       page.setDefaultTimeout(30000);
       await page.goto(`http://127.0.0.1:${port}/`);
