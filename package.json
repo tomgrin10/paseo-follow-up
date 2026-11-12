@@ -28,7 +28,7 @@
     "verify": "npm run typecheck && npm run check:notes && npm test && node --test button-visibility.test.mjs && npm run test:scale && npm run test:native && npm run test:trust",
     "test:trust": "node scripts/check-trust-bypass.mjs",
     "preview": "node scripts/check-install.mjs --keep",
-    "test:install": "node scripts/check-install.mjs && node scripts/check-wait.mjs",
+    "test:install": "node scripts/check-install.mjs && node scripts/check-wait.mjs && node scripts/check-archived-lookup.mjs",
     "test:move": "tsx scripts/check-move.mjs",
     "test:move:registry": "tsx scripts/check-move.mjs --registry",
     "test:github-mode": "node scripts/check-github-mode.mjs",

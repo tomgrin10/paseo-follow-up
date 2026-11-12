@@ -6,6 +6,9 @@ import { Text } from "./text";
 import { UndoBar, useSidebarViewMounted } from "./inbox";
 import { HomeList } from "./home-list";
 import { useHomeModel, type HomeSources } from "./home-data";
+import { useRowMenu } from "./row-actions";
+import { RenameHost } from "./rename";
+import type { Workstream } from "../shared/home";
 
 /**
  * Phase 2: Home's list as Paseo's sidebar (the same HomeList component Home uses). `addSidebarView` and the ref queries exist on Paseo main
@@ -57,10 +60,14 @@ export function inboxSidebarView(sources: HomeSources) {
       const workspace = s?.workspaceId ? workspaceRef.get(s.workspaceId) : undefined;
       if (agent) view.navigation.openAgent(agent); else if (workspace) view.navigation.openWorkspace(workspace);
     }, [model, agentRef, workspaceRef, view.navigation]);
+    // The row menu, as on Home (rename among it). No omnibox here, so no Ask; Open and Answer go to the chat.
+    const openKey = (s: Workstream) => onSelect(s.key);
+    const menu = useRowMenu({ sources, openFull: openKey, openQuestion: openKey, overseerOn: false });
     if (!sources.inbox.enabled()) return <View style={{ padding: 12 }}><Text style={{ color: c.foregroundMuted, fontSize: 12 }}>The Needs-you inbox is off. Turn it on in Follow-up's display settings.</Text></View>;
     return <View style={{ flex: 1 }}>
-      <HomeList model={model} theme={view.theme} dense touch={touch} selectedKey={selectedKey} onSelect={onSelect} />
+      <HomeList model={model} theme={view.theme} dense touch={touch} selectedKey={selectedKey} onSelect={onSelect} menu={menu} />
       <View style={{ position: "absolute", left: 8, right: 8, bottom: 8 }}><UndoBar store={sources.inbox} theme={view.theme} touch={touch} /></View>
+      <RenameHost theme={view.theme} compact={touch} />
     </View>;
   };
 }

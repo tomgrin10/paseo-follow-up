@@ -94,8 +94,9 @@ const BATCHES: Record<string, Batch[]> = {
   none: [], "repairs-queued": [batch("repairs", "pending")], "repairs-settling": [batch("repairs", "pending", { createdAt: at(5_000) })], "repairs-sent": [batch("repairs", "sent")],
   "repairs-stuck": [batch("repairs", "blocked")], "repairs-uncertain": [batch("repairs", "uncertain")], "finish-queued": [batch("finish", "pending")], "finish-sent": [batch("finish", "sent")],
   "recovery-sent": [batch("recovery", "sent")], "finish-and-repairs": [batch("repairs", "pending"), batch("finish", "pending")],
+  "repairs-refused": [batch("repairs", "pending", { refusal: { reason: "Task dependencies changed", at: at(5_000) } })], "repairs-refused-long-ago": [batch("repairs", "pending", { refusal: { reason: "Task dependencies changed", at: at(5 * 60_000) } })],
 };
-const PRS: Record<string, Workspace["prs"]> = { open: [pr()], latched: [merged("latched")], unconfirmed: [merged("unconfirmed")], none: [] };
+const PRS: Record<string, Workspace["prs"]> = { open: [pr()], unreadable: [pr(), pr({ key: "example/app#2", number: 2, snapshot: null, error: "GitHub rate limit" })], latched: [merged("latched")], unconfirmed: [merged("unconfirmed")], none: [] };
 const TASKS: Record<string, Obligation[]> = { none: [], open: [obligation("pending")], done: [obligation("done")], blocked: [obligation("blocked")], working: [obligation("working")],
   "working-live": [{ ...obligation("working"), workingAgentId: "sub-1" }], "working-idle": [{ ...obligation("working"), workingAgentId: "sub-1" }], "working-closed": [{ ...obligation("working"), workingAgentId: "sub-1" }] };
 /** The live state of the task's agent (Workspace.taskAgents), as the engine stores it. */
@@ -219,4 +220,15 @@ test("automatic-hold-is-not-stale: over every hold, turn and agent, a newer main
   // Fixture (2026-11-10 render): the failed turn's hold, unrepaired, under a newer turn is the bug.
   const raw = { ...workspace({ id: "w1", mainAgentId: "main" }), ...holds.failed } as import("../shared/model").Workspace;
   assert.equal(holdViolations(raw, "t2")[0]?.id, "automatic-hold-is-not-stale");
+});
+
+test("regression 2026-11-12: queued repairs with an unreadable PR never say 'sending now'", () => {
+  const w = workspace({ enable_auto_sends: true, prs: [pr(), pr({ key: "example/app#2", number: 2, snapshot: null, error: "GitHub rate limit" })], batches: [batch("repairs", "pending")] });
+  assert.deepEqual(violations(w, clock), []);
+  const line = agentCard(w, clock)?.line ?? "";
+  assert.doesNotMatch(line, /sending (now|in a moment)/);
+  assert.match(line, /clean read of #2 \(GitHub rate limit\)/);
+  const refused = workspace({ enable_auto_sends: true, prs: [pr()], batches: [batch("repairs", "pending", { refusal: { reason: "Task dependencies changed", at: at(10_000) } })] });
+  assert.match(agentCard(refused, clock)?.line ?? "", /didn't send: Task dependencies changed/);
+  assert.deepEqual(violations(refused, clock), []);
 });

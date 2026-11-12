@@ -18,6 +18,7 @@ import { ROLE_INFO, roleSummary, type RoleConfig } from "../shared/agent-setting
 import { DISPLAY_TOOLS, RPC_TOOLS, type RpcTool } from "./agent-parity";
 import { waitNote, type WaitStatus } from "../shared/wait";
 import { reportInputSchema } from "./report-issue";
+import type { RenameStatus } from "../shared/rename";
 
 /**
  * Agent parity: every action the developer can click in Follow-up has a tool that runs the same server path.
@@ -27,14 +28,14 @@ import { reportInputSchema } from "./report-issue";
  * return a dry-run plan first; `confirm: true` with that plan's id runs it. Every agent write is recorded in
  * the inbox ledger as `by: "agent:<id>"`, which never counts as the developer writing to the agent.
  */
-export const AGENT_TOOLS = ["make_main_agent", "list_prs", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "track", "inbox_list", "sign_off", "snooze", "snooze_workspace", "set_finish_flags", "set_priorities", "workspace_about", "agent_settings", "follow_settings", "set_follow_settings", "project_settings", "set_project_tracking", "pr_workflow", "set_pr_workflow", "reviewer_settings", "reviewer_suggestions", "save_reviewers", "set_agent_setting", "set_wait_for_jobs", "onboarding_status", "onboarding_checks", "set_onboarding", "priorities", "rank_status", "rerank_priorities", "usage", "overseer_status", "overseer_start", "overseer_restart", "overseer_ask", "inbox_brief", "brief_action", "inbox_act", "answer_question", "run_recovery", "refresh", "set_workspace_spec", "set_task_trigger", "pr_controls", "browser_status", "trust_bypass_status", "release_notes", "link_items", "set_linked_items", "updates_status", "check_updates", "set_updates", "install_update", "display_settings", "set_display", "retry_move", "report_issue"] as const;
+export const AGENT_TOOLS = ["make_main_agent", "list_prs", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "track", "inbox_list", "sign_off", "snooze", "snooze_workspace", "set_finish_flags", "set_priorities", "workspace_about", "agent_settings", "follow_settings", "set_follow_settings", "project_settings", "set_project_tracking", "pr_workflow", "set_pr_workflow", "reviewer_settings", "reviewer_suggestions", "save_reviewers", "set_agent_setting", "set_wait_for_jobs", "onboarding_status", "onboarding_checks", "set_onboarding", "priorities", "rank_status", "rerank_priorities", "usage", "overseer_status", "overseer_start", "overseer_restart", "overseer_ask", "inbox_brief", "brief_action", "inbox_act", "answer_question", "run_recovery", "refresh", "set_workspace_spec", "set_task_trigger", "pr_controls", "browser_status", "trust_bypass_status", "release_notes", "link_items", "set_linked_items", "updates_status", "check_updates", "set_updates", "install_update", "display_settings", "set_display", "retry_move", "report_issue", "ai_rename"] as const;
 export type AgentTool = typeof AGENT_TOOLS[number];
 /** Tools that only read. */
 export const READ_ONLY_TOOLS: readonly AgentTool[] = ["list_prs", "inbox_list", "workspace_about", "agent_settings", "display_settings", ...RPC_TOOLS.filter(t => t.kind === "read").map(t => t.name as AgentTool)];
 /** Tools that can't be undone from Follow-up. */
 export const DESTRUCTIVE_TOOLS: readonly AgentTool[] = ["merge"];
 /** Tools that plan first and run only with `confirm: true` and the plan's id. */
-export const PLANNED_TOOLS: readonly AgentTool[] = ["make_main_agent", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "sign_off", "snooze", "snooze_workspace", "set_finish_flags", "set_priorities", "set_display", ...RPC_TOOLS.filter(t => t.kind === "planned").map(t => t.name as AgentTool)];
+export const PLANNED_TOOLS: readonly AgentTool[] = ["make_main_agent", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "sign_off", "snooze", "snooze_workspace", "set_finish_flags", "set_priorities", "set_display", "ai_rename", ...RPC_TOOLS.filter(t => t.kind === "planned").map(t => t.name as AgentTool)];
 /** Tools with a dry run and confirm of their own (not AgentActions' plans): report_issue (server/report-issue/). */
 export const SELF_PLANNED_TOOLS: readonly AgentTool[] = ["report_issue"];
 const RPC_TOOL = new Map<string, RpcTool>(RPC_TOOLS.map(t => [t.name, t]));
@@ -133,6 +134,7 @@ export const TOOL_INPUT = {
   agent_settings: z.strictObject({}),
   sign_off: z.strictObject({ agentIds: agentIds.optional(), ...confirm }),
   snooze: z.strictObject({ agentIds: agentIds.optional(), until: z.string().trim().min(1).max(200).optional(), ...confirm }),
+  ai_rename: z.strictObject({ workspaceId: id.optional(), title: z.string().trim().min(1).max(300).optional(), undo: z.boolean().optional(), ...confirm }),
   snooze_workspace: z.strictObject({ workspace: id.optional(), until: z.string().trim().min(1).max(200).optional(), bring_back: z.boolean().optional(), ...confirm }),
   set_finish_flags: z.strictObject({ agentIds: agentIds.optional(), value: z.boolean().optional(), ...confirm }),
   set_priorities: z.strictObject({ priorities: z.array(priorityInputSchema).max(200).optional(), replace: z.boolean().optional(), ...confirm }),
@@ -202,6 +204,7 @@ export class AgentActions {
       case "send_repairs": return this.sendRepairs(caller, args as { workspace: string; batchId?: string });
       case "set_auto_send": return this.control(caller, tool, { workspaceId: args.workspace, enable_auto_sends: args.value });
       case "clear_hold": return this.control(caller, tool, { workspaceId: args.workspace, clearHold: true });
+      case "ai_rename": return this.planRename(caller, args as { workspaceId?: string; title?: string; undo?: boolean });
       case "snooze_workspace": return this.planWorkspaceSnooze(caller, args as { workspace?: string; until?: string; bring_back?: boolean });
       case "retry_batch": return this.control(caller, tool, { workspaceId: args.workspace, retryBatchId: args.batchId });
       case "track": {
@@ -396,6 +399,24 @@ export class AgentActions {
   }
 
   /** Later and Bring back now on a workspace-only Needs-you row, planned like snooze. Same mutator as the row menu. */
+  /**
+   * Rename with AI (server/rename.ts): the dry run asks for a suggestion (or takes `title`, or plans Undo) and shows the
+   * name now and the name after; confirm runs the dialog's Rename with that exact name.
+   */
+  private async planRename(caller: string, args: { workspaceId?: string; title?: string; undo?: boolean }) {
+    if (!this.d.rpc) throw new Error("ai_rename isn't available in this Follow-up.");
+    if (!args.workspaceId) throw new Error("ai_rename: give workspaceId (a Paseo workspace id, or one from list_prs).");
+    const workspaceId = args.workspaceId;
+    const actor = agentActor(caller, await this.d.agentTitle?.(caller).catch(() => null));
+    const status = await this.d.rpc.call("follow.rename-status", { workspaceId, suggest: !args.title && !args.undo }) as RenameStatus;
+    if (args.undo && !status.last) throw new Error("Nothing to undo: no rename of this workspace in the last 24 hours.");
+    const to = args.undo ? status.last!.from : args.title ?? status.suggestion!;
+    const input = args.undo ? { workspaceId, undo: true } : { workspaceId, title: to };
+    const planId = this.plan(caller, "ai_rename", async () => { const out = await this.d.rpc!.call("follow.rename-workspace", input, actor); await this.note(caller, caller, "ai_rename"); return out; });
+    return { dryRun: true, planId, workspaceId, from: status.current, to, ...(status.last && !args.undo ? { undoable: status.last } : {}),
+      next: `Only when the developer asked for this: call ai_rename with confirm=true and planId=${planId} within 5 minutes. It can be undone for 24 h with undo=true.` };
+  }
+
   private async planWorkspaceSnooze(caller: string, args: { workspace?: string; until?: string; bring_back?: boolean }) {
     if (!args.workspace) throw new Error("snooze_workspace: give workspace (an id from list_prs).");
     if (!args.bring_back && !args.until) throw new Error("snooze_workspace: give until (next-event, 1h, tonight, tomorrow or an ISO time), or bring_back=true.");

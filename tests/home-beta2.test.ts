@@ -133,7 +133,7 @@ test("searching 100 workspaces and 200 agents stays fast", () => {
 function sortFixture(sort: SortMode, priorities: Priority[] = []) {
   return buildHome({ now: NOW, sort, priorities,
     rows: [flagged("perm", "permission", 5), flagged("old", "finished", 120), flagged("new", "finished", 3, { workspaceTitle: "Alpha" }), flagged("mid", "finished", 60, { workspaceTitle: "Zulu", lastActivityAt: at(1) })],
-    tracked: [], paseo: [lite("w-old", { project: "b" }), lite("w-new", { project: "a" }), lite("w-mid", { project: "a" }), lite("w-perm", { project: "c" }), lite("idle", { project: "c" })] });
+    tracked: [], paseo: [lite("w-old", { project: "b" }), lite("w-new", { project: "a", name: "Alpha" }), lite("w-mid", { project: "a", name: "Zulu" }), lite("w-perm", { project: "c" }), lite("idle", { project: "c" })] });
 }
 const needsOrder = (m: ReturnType<typeof buildHome>) => m.groups.find(g => g.id === "needs")!.items.map(s => s.agentId);
 
