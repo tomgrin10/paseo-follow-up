@@ -57,9 +57,13 @@ whatever the handler does next. A handler records the developer's action and ret
 queued durably and retried. `tests/rpc-ack.test.ts` runs every client RPC against the real worker with Paseo, the
 daemon socket and gh hanging, and fails on one that doesn't reply within 500 ms; the ones that still wait are in its
 `EXEMPT` list with a reason, and that list only shrinks. The answer paths (`follow.brief-action`,
-`follow.answer-question`) are the model: see [needs-you.md](needs-you.md#answering-a-brief).
+`follow.answer-question`) are the model: see [needs-you.md](needs-you.md#answering-a-brief). Reads the client polls
+answer from what the worker already holds and refresh after, so the next poll carries the refresh: Needs you's list
+serves the last directory snapshot (only a first list, with none yet, waits up to 300 ms, then says it's still
+loading), the usage meters serve their last reading, and a Summary's inputs are read after the reply while the view
+says pending. Both caches are primed when the worker starts. `tests/rpc-cached.test.ts` hangs each slow side.
 
-**Slow RPCs name themselves.** `server/rpc-timing.ts` wraps every handler: one that takes over a second logs
+**Slow RPCs name themselves.** `server/rpc-timing.ts` wraps every handler: one slower than the 500 ms ack budget (`RPC_SLOW_MS`) logs
 `[follow-up] slow rpc <method> <ms> ms (event loop since last: p99 …, max …)` to the plugin's output (daemon.log).
 A long call with a small event-loop delay awaited something; a large delay means synchronous work blocked the worker.
 

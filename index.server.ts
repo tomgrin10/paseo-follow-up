@@ -429,7 +429,7 @@ export default function contribute(server: PluginServerContext) {
     if (!stopped) timer = setTimeout(() => void loop(), TICK_MS);
   };
   void loop();
-  void (async () => { await ready; if (stopped || loadError) return; await inbox.start().catch(error => { inboxError = error instanceof Error ? error.message : String(error); }); void inboxLoop(); })();
+  void (async () => { await ready; if (stopped || loadError) return; void inbox.refreshDirectory().catch(() => undefined); if (governor.allowsExtras()) void usage.refresh(); await inbox.start().catch(error => { inboxError = error instanceof Error ? error.message : String(error); }); void inboxLoop(); })();
   const changed = (w: Workspace) => { w.completion = null; w.declaration = null; w.updatedAt = new Date().toISOString(); };
 
   const callerWorkspaceId = async (agentId: string, paseo: PluginHandlerContext["paseo"], allowHandoff = true) => {

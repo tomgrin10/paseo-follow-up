@@ -310,7 +310,10 @@ test("the service: collapsed reads only the cache; open writes once; unchanged i
     assert.equal((await s.view("w1")).firstMessage, "Investigate why the vendor activity query is slow (HER-1312)");
     const first = await s.view("w1", { open: true });
     assert.equal(first.status, "pending"); assert.equal(first.firstMessage, "Investigate why the vendor activity query is slow (HER-1312)");
-    assert.ok(first.links.some(l => l.key === "HER-1312"));
+    // The inputs are read after the reply (tests/rpc-cached.test.ts); the client's next poll carries their links.
+    const links = (v: typeof first) => v.links.length ? v.links : v.record?.links ?? [];
+    let polled = first; for (let i = 0; i < 50 && !links(polled).length; i++) { await new Promise(r => setTimeout(r, 5)); polled = await s.view("w1", { open: true }); }
+    assert.ok(links(polled).some(l => l.key === "HER-1312"));
     const done = await s.view("w1", { open: true, wait: true });
     assert.equal(done.status, "ready"); assert.equal(done.record?.gist, "Speed up the vendor activity query so the vendor page loads fast.");
     assert.equal(done.record?.costUsd, 0.0012);
