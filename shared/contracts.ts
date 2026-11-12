@@ -234,3 +234,18 @@ export const clientTimeZoneRpc = defineRpc({ name: "follow.client-time-zone", in
 /** 2.0's move to the new plugin id: ask again after it rolled back or failed (same quiet rule as an update). */
 export const retryMoveRpc = defineRpc({ name: "follow.retry-move", input: z.strictObject({}), output: updatesViewSchema });
 export const dismissUpdateNoticeRpc = defineRpc({ name: "follow.dismiss-update-notice", input: z.strictObject({ id: z.string().max(120) }), output: updatesViewSchema });
+
+/**
+ * Report an issue (server/report-issue/, the sheet in client/report-issue.tsx). The sheet only hands the developer's
+ * words to an agent, which files the issue with follow_report_issue after its own dry run and the developer's yes.
+ */
+export const reportKindSchema = z.enum(["bug", "feature", "feedback"]);
+const reportTargetSchema = z.object({ id: idSchema, title: z.string(), provider: z.string(), status: z.string(), workspaceId: z.string().nullable(), workspaceTitle: z.string().nullable(), main: z.boolean() });
+/** Who the sheet can send to: live agents (metadata only, nothing is loaded), the default first; where a new one would start. */
+export const reportTargetsRpc = defineRpc({ name: "follow.report-issue-targets", input: z.object({ workspaceId: z.string().max(200).optional(), agentId: z.string().max(200).optional() }),
+  output: z.object({ agents: z.array(reportTargetSchema), defaultId: z.string().nullable(), newAgentWorkspace: z.object({ id: idSchema, title: z.string() }).nullable() }) });
+/** Send to agent: the report prompt goes to `agentId`, or to a new agent started in `newAgentWorkspaceId`. */
+export const reportSendRpc = defineRpc({ name: "follow.report-issue-send", input: z.object({ kind: reportKindSchema, text: z.string().max(8000), error: z.string().max(2000).nullable().optional(), agentId: z.string().max(200).optional(), newAgentWorkspaceId: z.string().max(200).optional() }),
+  output: z.object({ agentId: idSchema, title: z.string(), started: z.boolean() }) });
+/** Open on GitHub (no agent to send to): a prefilled new-issue link carrying the redacted versions block. */
+export const reportLinkRpc = defineRpc({ name: "follow.report-issue-link", input: z.object({ kind: reportKindSchema, text: z.string().max(8000) }), output: z.object({ url: z.string() }) });

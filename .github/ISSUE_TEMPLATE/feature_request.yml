@@ -1,0 +1,29 @@
+name: Feature request
+description: Something you'd like Follow-up to do.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: Easier: ask any agent in Paseo to "report a feature request about Follow-up". It writes it up and shows you the issue before filing it.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you're trying to do, and what gets in the way.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd like
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: input
+    id: follow_up_version
+    attributes:
+      label: Follow-up version
+      placeholder: 2.0.1-beta.2

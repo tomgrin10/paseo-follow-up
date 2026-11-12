@@ -17,7 +17,12 @@ import { join } from "node:path";
  * real api.github.com and the v2.0.0-rc.3 publish failed. tests/harness-env.test.ts fails when a harness script fakes
  * `gh` without this server.
  */
-export async function fakeGithub({ dir, gh, owners = ["example"] }) {
+/**
+ * `handle` (optional) answers a request before the fixture `gh` does: { method, path, body, authorization } →
+ * { status, body } or undefined to fall through. Issue-report tests use it for writes (issues, comments, contents)
+ * and for paths outside a repository (`user`, `search/issues`), which the fixture `gh` can't answer.
+ */
+export async function fakeGithub({ dir, gh, owners = ["example"], handle }) {
   const tokenOf = owner => `fixture-token-${owner}`;
   const accountMap = join(dir, "gh-account-map"); const auth = join(dir, "gh-auth");
   await writeFile(accountMap, owners.map(o => `${o} fixture-${o}`).join("\n") + "\n");
@@ -30,6 +35,10 @@ export async function fakeGithub({ dir, gh, owners = ["example"] }) {
     try {
       let raw = ""; for await (const chunk of req) raw += chunk;
       const graphql = req.method === "POST" && req.url === "/graphql";
+      if (handle && !graphql) {
+        const answer = await handle({ method: req.method, path: req.url.replace(/^\//, ""), body: raw ? JSON.parse(raw) : undefined, authorization: req.headers.authorization ?? null });
+        if (answer) { requests.push({ method: req.method, path: req.url, repo: null }); return send(answer.status, answer.body ?? {}); }
+      }
       const body = graphql ? JSON.parse(raw) : null;
       const rest = req.url.replace(/^\//, "");
       const [owner, name] = graphql ? [body.variables?.owner, body.variables?.name] : (rest.match(/^repos\/([^/]+)\/([^/?]+)/) ?? []).slice(1);

@@ -17,6 +17,7 @@ import type { AboutView } from "../shared/about";
 import { ROLE_INFO, roleSummary, type RoleConfig } from "../shared/agent-settings";
 import { DISPLAY_TOOLS, RPC_TOOLS, type RpcTool } from "./agent-parity";
 import { waitNote, type WaitStatus } from "../shared/wait";
+import { reportInputSchema } from "./report-issue";
 
 /**
  * Agent parity: every action the developer can click in Follow-up has a tool that runs the same server path.
@@ -26,7 +27,7 @@ import { waitNote, type WaitStatus } from "../shared/wait";
  * return a dry-run plan first; `confirm: true` with that plan's id runs it. Every agent write is recorded in
  * the inbox ledger as `by: "agent:<id>"`, which never counts as the developer writing to the agent.
  */
-export const AGENT_TOOLS = ["make_main_agent", "list_prs", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "track", "inbox_list", "sign_off", "snooze", "snooze_workspace", "set_finish_flags", "set_priorities", "workspace_about", "agent_settings", "follow_settings", "set_follow_settings", "project_settings", "set_project_tracking", "pr_workflow", "set_pr_workflow", "reviewer_settings", "reviewer_suggestions", "save_reviewers", "set_agent_setting", "set_wait_for_jobs", "onboarding_status", "onboarding_checks", "set_onboarding", "priorities", "rank_status", "rerank_priorities", "usage", "overseer_status", "overseer_start", "overseer_restart", "overseer_ask", "inbox_brief", "brief_action", "inbox_act", "answer_question", "run_recovery", "refresh", "set_workspace_spec", "set_task_trigger", "pr_controls", "browser_status", "trust_bypass_status", "release_notes", "link_items", "set_linked_items", "updates_status", "check_updates", "set_updates", "install_update", "display_settings", "set_display", "retry_move"] as const;
+export const AGENT_TOOLS = ["make_main_agent", "list_prs", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "track", "inbox_list", "sign_off", "snooze", "snooze_workspace", "set_finish_flags", "set_priorities", "workspace_about", "agent_settings", "follow_settings", "set_follow_settings", "project_settings", "set_project_tracking", "pr_workflow", "set_pr_workflow", "reviewer_settings", "reviewer_suggestions", "save_reviewers", "set_agent_setting", "set_wait_for_jobs", "onboarding_status", "onboarding_checks", "set_onboarding", "priorities", "rank_status", "rerank_priorities", "usage", "overseer_status", "overseer_start", "overseer_restart", "overseer_ask", "inbox_brief", "brief_action", "inbox_act", "answer_question", "run_recovery", "refresh", "set_workspace_spec", "set_task_trigger", "pr_controls", "browser_status", "trust_bypass_status", "release_notes", "link_items", "set_linked_items", "updates_status", "check_updates", "set_updates", "install_update", "display_settings", "set_display", "retry_move", "report_issue"] as const;
 export type AgentTool = typeof AGENT_TOOLS[number];
 /** Tools that only read. */
 export const READ_ONLY_TOOLS: readonly AgentTool[] = ["list_prs", "inbox_list", "workspace_about", "agent_settings", "display_settings", ...RPC_TOOLS.filter(t => t.kind === "read").map(t => t.name as AgentTool)];
@@ -34,6 +35,8 @@ export const READ_ONLY_TOOLS: readonly AgentTool[] = ["list_prs", "inbox_list", 
 export const DESTRUCTIVE_TOOLS: readonly AgentTool[] = ["merge"];
 /** Tools that plan first and run only with `confirm: true` and the plan's id. */
 export const PLANNED_TOOLS: readonly AgentTool[] = ["make_main_agent", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "sign_off", "snooze", "snooze_workspace", "set_finish_flags", "set_priorities", "set_display", ...RPC_TOOLS.filter(t => t.kind === "planned").map(t => t.name as AgentTool)];
+/** Tools with a dry run and confirm of their own (not AgentActions' plans): report_issue (server/report-issue/). */
+export const SELF_PLANNED_TOOLS: readonly AgentTool[] = ["report_issue"];
 const RPC_TOOL = new Map<string, RpcTool>(RPC_TOOLS.map(t => [t.name, t]));
 void DISPLAY_TOOLS;
 
@@ -104,6 +107,8 @@ export type AgentActionDeps = {
   agentInfo?: (agentId: string) => Promise<MainAgentInfo>;
   /** Settings → Display (host-scoped preferences, trust bypass among them). */
   display?: { read(): Promise<{ revision: string; values: Record<string, unknown> }>; write(revision: string, values: Record<string, unknown>): Promise<unknown> };
+  /** Report an issue (server/report-issue/): plans and files in Follow-up's repository with its own dry run and confirm. */
+  report?: { run(caller: string, args: unknown): Promise<unknown> };
   now?: () => number;
 };
 
@@ -134,6 +139,7 @@ export const TOOL_INPUT = {
   display_settings: z.strictObject({}),
   make_main_agent: z.strictObject({ agentId: id.optional(), reason: z.string().trim().min(1).max(200).optional(), requested: z.enum(["developer", "self"]).optional(), ...confirm }),
   set_display: z.strictObject({ values: z.record(z.string(), z.boolean()).optional(), ...confirm }),
+  report_issue: reportInputSchema,
   ...Object.fromEntries(RPC_TOOLS.map(t => [t.name, t.input])),
 } as unknown as Record<AgentTool, z.ZodType>;
 
@@ -173,6 +179,8 @@ export class AgentActions {
     if (rpcTool) return this.runRpc(caller, rpcTool, args);
     if (tool === "display_settings" || tool === "set_display") return this.displayTool(caller, tool, args);
     if (tool === "make_main_agent") return this.planMakeMain(caller, args);
+    // Its own planned flow (dry run, planId, confirm with screenshot consent), so it isn't in PLANNED_TOOLS.
+    if (tool === "report_issue") { if (!this.d.report) throw new Error("report_issue isn't available in this Follow-up."); return this.d.report.run(caller, args); }
     switch (tool) {
       case "list_prs": return this.listPrs(args);
       case "inbox_list": return this.inboxList(caller, args);

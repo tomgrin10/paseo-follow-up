@@ -15,6 +15,10 @@ export type ToastItem = { id: number; tone: ToastTone; message: string; actions:
   /** Not dropped to make room while it lasts (an Undo window whose work waits on it). */
   keep?: boolean };
 /** How long a toast lasts, whether it is kept, and what runs when it times out (not when it's dismissed or acted on). */
+export const REPORT_THIS = "Report this";
+let reportError: ((message: string, at: number) => void) | null = null;
+/** Set once by the client: what an error toast's Report this does (open the Report sheet with the error). */
+export function setReportError(open: ((message: string, at: number) => void) | null): void { reportError = open; }
 export type ToastOptions = { durationMs?: number; keep?: boolean; onExpire?: () => void };
 
 const MAX = 3;
@@ -39,6 +43,8 @@ function arm(id: number, t: Timer) {
  */
 export function pushToast(tone: ToastTone, message: string, actions: ToastAction[] = [], options: ToastOptions = {}): number {
   const id = nextId++;
+  // Every Follow-up error can be reported from where it happened (docs/report-issue.md): Report this opens the sheet with it.
+  if (tone === "error" && reportError && !actions.some(a => a.label === REPORT_THIS)) { const at = Date.now(); actions = [...actions, { label: REPORT_THIS, onPress: () => { dismissToast(id); reportError!(message, at); } }]; }
   const sticky = tone === "error";
   items = [...items, { id, tone, message, actions, sticky, ...(options.keep ? { keep: true } : {}) }];
   while (items.length > MAX) {
