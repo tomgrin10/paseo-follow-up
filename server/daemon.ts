@@ -440,7 +440,10 @@ export class PaseoGateway implements Gateway {
       // 0.16: work an agent started and ended its turn on (a shell, a task) is still work: no repairs, no Done yet.
       else if (backgroundCount(agent) > 0) backgroundBusy = true;
     }
-    const subagentsMatter = fresh || !!w.completion || w.batches.some(b => !b.tasks.every(t => t.kind === "inventory") && ["pending", "sent"].includes(b.state));
+    // Subagents only decide an auto-send or a sent message's turn. A queued message only the developer sends (Auto off,
+    // a hold, the Done check) is re-checked when they press Send, so it never makes every tick list subagents (2026-11-12).
+    const autoPending = (b: Workspace["batches"][number]) => b.state === "pending" && w.enable_auto_sends && !w.hold && !b.tasks.some(t => t.kind === "completion");
+    const subagentsMatter = fresh || !!w.completion || w.batches.some(b => !b.tasks.every(t => t.kind === "inventory") && (b.state === "sent" || autoPending(b)));
     const idleLoaded = members.filter(agent => isLoaded(agent) && !["running", "initializing"].includes(agent.status));
     if (subagentsMatter && !backgroundBusy && idleLoaded.length) await this.connect(async client => {
       for (const listed of idleLoaded) {
