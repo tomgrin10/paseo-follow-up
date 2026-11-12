@@ -57,13 +57,7 @@ export function isRecovery(batch: Pick<Batch, "tasks">): boolean {
   return recoveryBatch(batch);
 }
 
-export function needsPrObservations(w: Workspace, batch: Pick<Batch, "tasks">): boolean {
-  return batch.tasks.some(t => {
-    if (["inventory", "completion"].includes(t.kind)) return false;
-    const o = t.kind === "obligation" && w.obligations.find(o => o.id === t.target);
-    return !o || !o.communication || o.afterPrs.length > 0;
-  });
-}
+export { needsPrObservations } from "../shared/send-decision";
 
 export function batchPrompt(w: Workspace, batch: Batch): string {
   if (!isRecovery(batch)) {
