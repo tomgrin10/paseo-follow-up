@@ -68,18 +68,22 @@ export type HomeListProps = {
   overseer?: OverseerRowState | null;
   /** An omnibox ask is on its way to the Overseer. */
   asking?: boolean;
-  /** The row menu (right-click, long-press, the menu key): what a row offers, and what a pick does. Absent: no menu. */
-  menu?: { build: (s: Workstream) => RowMenuSection[]; pick: (s: Workstream, item: RowMenuItem) => void };
+  /**
+   * The row menu (right-click, long-press, the menu key): what a row offers, and what a pick does. Required, so no
+   * list of workspaces ships without it (every-list-row-has-the-row-menu): without it the browser's or desktop app's
+   * own Copy/Paste menu opens instead.
+   */
+  menu: { build: (s: Workstream) => RowMenuSection[]; pick: (s: Workstream, item: RowMenuItem) => void };
 };
 
 export function HomeList({ model, theme, dense = false, touch, selectedKey, onSelect, briefLine, renderExpanded, header, footer, top, afterNeeds, emptyAction, results, activeResult = 0, onResult, filter = null, overseer = null, asking = false, menu }: HomeListProps) {
   const c = theme.colors;
   const [openMenu, setOpenMenu] = useState<RowMenuOpen | null>(null);
-  const build = menu?.build;
-  const onMenu = useMemo<OpenRowMenu | undefined>(() => build ? (s, anchor, node, keyboard) => {
+  const build = menu.build;
+  const onMenu = useMemo<OpenRowMenu>(() => (s, anchor, node, keyboard) => {
     const sections = build(s);
     if (sections.length) setOpenMenu({ s, anchor, sections, returnTo: node, keyboard });
-  } : undefined, [build]);
+  }, [build]);
   const menuKey = openMenu?.s.key ?? null;
   const [closed, setClosed] = useState<Set<string>>(new Set(["quiet"]));
   const [openProjects, setOpenProjects] = useState<Set<string>>(new Set());
@@ -177,9 +181,9 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
     initialNumToRender={30} maxToRenderPerBatch={30} windowSize={9} removeClippedSubviews={false}
     ListHeaderComponent={header ? <>{header}</> : null} ListFooterComponent={footer ? <>{footer}</> : <View style={{ height: 32 }} />}
     style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 8 }} keyboardShouldPersistTaps="handled" />;
-  const overlay = openMenu && menu ? <RowMenu key={`${openMenu.s.key}:${openMenu.anchor?.x ?? "sheet"}:${openMenu.anchor?.y ?? ""}`} menu={openMenu} theme={theme} onClose={() => setOpenMenu(null)} onPick={item => menu.pick(openMenu.s, item)} /> : null;
-  // With a menu the wrapper is always there, so opening one never remounts the list (and its scroll).
-  return top || menu ? <View style={{ flex: 1, minHeight: 0 }}>{top}{list}{overlay}</View> : list;
+  const overlay = openMenu ? <RowMenu key={`${openMenu.s.key}:${openMenu.anchor?.x ?? "sheet"}:${openMenu.anchor?.y ?? ""}`} menu={openMenu} theme={theme} onClose={() => setOpenMenu(null)} onPick={item => menu.pick(openMenu.s, item)} /> : null;
+  // The wrapper is always there, so opening the menu never remounts the list (and its scroll).
+  return <View style={{ flex: 1, minHeight: 0 }}>{top}{list}{overlay}</View>;
 }
 
 function GroupHeader({ theme, title, count, open, tone, dense, touch, onPress }: { theme: Theme; title: string; count: number; open: boolean; tone?: string; dense: boolean; touch: boolean; onPress: () => void }) {
@@ -276,7 +280,7 @@ export function Age({ iso, c, size = 12 }: { iso: string | null; c: Colors; size
   return text ? <Text style={{ color: c.foregroundMuted, fontSize: size, fontVariant: ["tabular-nums"], minWidth: 26, textAlign: "right" }}>{text}</Text> : null;
 }
 
-type RowProps = { s: Workstream; sig: string; theme: Theme; dense: boolean; touch: boolean; selected: boolean; onSelect: (key: string) => void; onMenu?: OpenRowMenu; menuOpen?: boolean };
+type RowProps = { s: Workstream; sig: string; theme: Theme; dense: boolean; touch: boolean; selected: boolean; onSelect: (key: string) => void; onMenu: OpenRowMenu; menuOpen?: boolean };
 const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onMenu, menuOpen = false }: RowProps) {
   const c = theme.colors;
   const trigger = useRowMenuTrigger(s, onMenu, touch);
@@ -290,7 +294,7 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onMe
   const wake = s.group === "later" && s.wakeAt ? wakeLabel({ until: s.wakeAt, at: s.at ?? new Date().toISOString() }, Date.now()) : "";
   const waited = s.group === "later" && s.at ? age(s.at, Date.now()) : "";
   const label = [s.title + (s.agent ? ` › ${s.agent}` : ""), s.word, s.line, wake && `Later until ${wake}`, waited && (waited === "now" ? "just now" : `waiting ${waited}`)].filter(Boolean).join(". ");
-  return <Pressable ref={trigger.ref} nativeID={rowDomId(s.key)} accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={label} accessibilityHint={onMenu ? quickActionsHint(touch) : undefined}
+  return <Pressable ref={trigger.ref} nativeID={rowDomId(s.key)} accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={label} accessibilityHint={quickActionsHint(touch)}
     onPress={() => onSelect(s.key)} onLongPress={trigger.onLongPress} delayLongPress={450}
     style={state => ({ flexDirection: "row", alignItems: dense ? "flex-start" : "center", gap: touch ? 10 : dense ? 8 : 10, minHeight: touch ? 56 : dense ? 36 : 38, paddingLeft: touch ? 14 : dense ? 8 : 16, paddingRight: touch ? 16 : dense ? 8 : 16, paddingVertical: touch ? 12 : dense ? 6 : 0,
       ...(touch ? { borderBottomWidth: 1, borderBottomColor: withAlpha(c.border, 0.6) } : {}),

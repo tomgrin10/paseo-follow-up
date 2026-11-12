@@ -116,11 +116,16 @@ row) for quick moves without opening it. `rowMenu()` in `shared/row-menu.ts` lis
 The same menu opens from the workspace panel header's More button (`client/panel-menu.tsx`, the workspace's own
 `ws:<id>` row) and from the rows of Follow-up's sidebar view (`client/sidebar-view.tsx`), so there is one menu
 everywhere. Rename with AI… opens the rename dialog (`client/rename.tsx`, [ai-roles](ai-roles.md#rename-with-ai)).
+In the sidebar view there is no omnibox, so Ask the Overseer is left out (not shown disabled), and Open and Answer
+open the agent's chat.
 
 Rules:
 
 - **Rows only.** The DOM `contextmenu` listener sits on each row's own node, so the browser's menu stays everywhere
   else. `tests/row-menu.test.ts` fails on a `contextmenu` listener anywhere else.
+- **Every list has it** (`every-list-row-has-the-row-menu`). `menu` is required on `HomeList` (and the opener on
+  its rows), so a new list surface can't ship without it and fall back to the platform's Copy/Paste menu. The test
+  checks every `<HomeList>` in `client/` passes the shared `useRowMenu`.
 - **Parity.** Each action is a `ROW_ACTIONS` entry that names its agent tool, or why it needs none (open, copy,
   pre-fill). Every pick goes through `runAction` and the RPC its usual button calls. Both are tested.
 - **Layout.** On desktop it's a popover at the pointer, clamped inside the viewport (`placeMenu`). On a phone it's a

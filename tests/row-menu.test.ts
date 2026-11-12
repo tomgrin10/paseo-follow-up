@@ -129,3 +129,35 @@ test("Later after 18:00 has no Tonight: it would land after Tomorrow 09:00", () 
   assert.deepEqual(laterChoices(new Date(2026, 10, 10, 17, 59)).map(([id]) => id), ["hour", "tonight", "tomorrow", "next-event"]);
   assert.deepEqual(laterChoices(new Date(2026, 10, 10, 18, 0)).map(([id]) => id), ["hour", "tomorrow", "next-event"]);
 });
+
+/**
+ * Tom (2026-11-12): right-click on a row in the Follow-up sidebar view opened the desktop app's Copy/Paste/Select All
+ * menu, because that HomeList was rendered without `menu`, so its rows never listened for contextmenu
+ * (useRowMenuTrigger only binds with an opener). Class fix: `menu` is required on HomeList (and onMenu on its rows),
+ * and every HomeList in the client passes the shared row menu (every-list-row-has-the-row-menu).
+ */
+test("invariant every-list-row-has-the-row-menu: every HomeList passes the shared row menu", async () => {
+  const dir = join(import.meta.dirname, "..", "client");
+  const files = (await readdir(dir)).filter(f => f.endsWith(".tsx"));
+  const uses: string[] = [];
+  for (const f of files) {
+    const source = await readFile(join(dir, f), "utf8");
+    for (const m of source.matchAll(/<HomeList\b([\s\S]*?)\/>/g)) {
+      uses.push(f);
+      assert.match(m[1], /\bmenu=\{/, `${f}: a HomeList without menu opens the platform's own context menu on right-click`);
+      assert.match(source, /\buseRowMenu\(/, `${f}: the menu is the shared useRowMenu, so every list offers the same moves`);
+    }
+  }
+  assert.ok(uses.includes("home.tsx") && uses.includes("sidebar-view.tsx"), `HomeList surfaces found: ${uses.join(", ")}`);
+  const list = await readFile(join(dir, "home-list.tsx"), "utf8");
+  assert.match(list, /\n {2}menu: \{/, "menu is required on HomeListProps");
+  assert.match(list, /onMenu: OpenRowMenu;/, "a Row always gets its opener");
+});
+
+test("the sidebar view's menu hides what needs Home's omnibox instead of showing it dead", async () => {
+  const source = await readFile(join(import.meta.dirname, "..", "client", "sidebar-view.tsx"), "utf8");
+  const call = source.match(/useRowMenu\(\{([^}]*)\}\)/)?.[1] ?? "";
+  assert.ok(call && !/prefillAsk/.test(call), "no omnibox in the sidebar, so no prefillAsk");
+  // Without prefillAsk, canAsk is false (row-actions.ts), and the menu has no Ask the Overseer item.
+  assert.ok(!flatItems(rowMenu({ ...base, canAsk: false, flagged: true, needs: [question("Q1"), hold] })).some(i => i.action === "ask_overseer"));
+});

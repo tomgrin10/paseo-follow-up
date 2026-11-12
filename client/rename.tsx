@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { View } from "react-native";
-import { Text } from "./text";
+import { View, type TextInput as NativeTextInput } from "react-native";
+import { Pressable, Text } from "./text";
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, TextInput, useToast } from "@getpaseo/plugin/client/ui";
 import { useQueryClient } from "@tanstack/react-query";
@@ -57,27 +57,32 @@ export function RenameDialog({ request, theme, compact, onClose }: { request: Re
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [edited, setEdited] = useState(false);
+  const [details, setDetails] = useState(false);
   const run = useRef(0);
+  // Typing while the model runs wins: the suggestion only fills a field nobody has touched.
+  const typed = useRef(false);
+  const input = useRef<NativeTextInput>(null);
 
   const suggest = useCallback(async () => {
     const mine = ++run.current;
-    setPhase("suggesting"); setError(null);
+    setPhase("suggesting"); setError(null); setDetails(false); typed.current = false; setEdited(false); setName("");
     // The quick read first (the name now, the Undo link), so the dialog is never blank while the model runs.
     status({ workspaceId: request.workspaceId }).then(s => { if (mine === run.current) setInfo(prev => prev ?? s); }).catch(() => undefined);
     try {
       const s = await status({ workspaceId: request.workspaceId, suggest: true });
       if (mine !== run.current) return;
-      setInfo(s); setName(s.suggestion ?? ""); setEdited(false); setPhase("ready");
+      setInfo(s); if (!typed.current) setName(s.suggestion ?? ""); setPhase("ready");
     } catch (e) {
       if (mine !== run.current) return;
       setError(errorText(e).replace(/^Couldn't suggest a (usable )?name[:.]?\s*/i, "").replace(/\s*Try again, or type one\.?$/i, "") || null); setPhase("error");
+      setTimeout(() => input.current?.focus(), 0);
     }
   }, [request.workspaceId, status]);
   useEffect(() => { void suggest(); return () => { run.current++; }; }, [suggest]);
 
   const now = info?.current ?? request.title ?? "";
   const check = checkName(name, { keys: info?.keys ?? [], current: now || null });
-  const canRename = phase !== "suggesting" && check.ok;
+  const canRename = check.ok && (phase !== "suggesting" || edited);
   const refresh = () => { void cache.invalidateQueries({ queryKey: overviewKey }); void cache.invalidateQueries({ queryKey: ["follow-up"] }); };
 
   const undo = (workspaceId: string) => void runAction({ label: "Undo rename", toast, run: () => rename({ workspaceId, undo: true }),
@@ -98,6 +103,9 @@ export function RenameDialog({ request, theme, compact, onClose }: { request: Re
   const field = { minHeight: compact ? 44 : 34, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, color: c.foreground, backgroundColor: c.surface1, fontSize: compact ? 16 : 14,
     borderColor: edited && !check.ok ? c.statusDanger : c.border };
   const counter = name.trim().length;
+  // Only near the limit: the reason text covers the rest (words, keys, branch names).
+  const showCounter = counter > NAME_MAX_CHARS - 15;
+  const waiting = phase === "suggesting" && !name;
   return <Modal title="Rename with AI" icon={<Icon name="Sparkles" size={18} color={c.foregroundMuted} />} open onOpenChange={next => { if (!next) onClose(); }}>
     <Modal.Content contentContainerStyle={{ padding: compact ? 16 : 20 }}>
       <SubmitScope enabled={canRename} onSubmit={apply} style={{ gap: compact ? 16 : 14, maxWidth: 520 }}>
@@ -108,30 +116,40 @@ export function RenameDialog({ request, theme, compact, onClose }: { request: Re
         <View style={{ gap: 6 }}>
           <View style={{ flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
             <Text style={t.label}>New name</Text>
-            {phase !== "suggesting" && <Text style={[t.small, { fontVariant: ["tabular-nums"] }, counter > NAME_MAX_CHARS ? { color: c.statusDanger } : null]}>{counter}/{NAME_MAX_CHARS}</Text>}
+            {showCounter && <Text style={[t.small, { fontVariant: ["tabular-nums"] }, counter > NAME_MAX_CHARS ? { color: c.statusDanger } : null]}>{counter}/{NAME_MAX_CHARS}</Text>}
           </View>
           <View>
-            <TextInput accessibilityLabel="New name" value={phase === "suggesting" ? "" : name} editable={phase !== "suggesting"} autoFocus={!compact} selectTextOnFocus
-              placeholder={phase === "suggesting" ? "" : "Type a name"} placeholderTextColor={c.foregroundMuted}
-              onChangeText={v => { setName(v); setEdited(true); }} autoCapitalize="sentences" maxLength={NAME_MAX_CHARS + 20} style={[field, phase === "suggesting" ? { opacity: 0.6 } : null]} />
-            {phase === "suggesting" && <View pointerEvents="none" accessibilityLiveRegion="polite" style={{ position: "absolute", left: 10, top: 0, bottom: 0, flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <TextInput ref={input} accessibilityLabel="New name" accessibilityHint="Suggested from the Summary, PRs and linked items" value={name} autoFocus={!compact} selectTextOnFocus
+              placeholder={waiting ? "" : "Type a name"} placeholderTextColor={c.foregroundMuted}
+              onChangeText={v => { typed.current = true; setName(v); setEdited(true); }} autoCapitalize="sentences" maxLength={NAME_MAX_CHARS + 20} style={field} />
+            {waiting && <View pointerEvents="none" accessibilityLiveRegion="polite" style={{ position: "absolute", left: 10, top: 0, bottom: 0, flexDirection: "row", alignItems: "center", gap: 8 }}>
               <Spinner color={c.foregroundMuted} size={12} />
               <Text style={[t.meta, { color: c.foregroundMuted }]}>Suggesting a name…</Text>
             </View>}
           </View>
-          {phase === "error" && <View accessibilityRole="alert" style={{ flexDirection: "row", gap: 6 }}>
+          {phase === "error" && !edited && <View accessibilityRole="alert" style={{ flexDirection: "row", gap: 6 }}>
             <View style={{ paddingTop: 2 }}><Icon name="TriangleAlert" size={13} color={c.statusWarning} /></View>
             <View style={{ flex: 1, gap: 2 }}>
               <Text style={[t.meta, { color: c.statusWarning }]}>Couldn't suggest a name. Type one, or try again.</Text>
-              {!!error && <Text style={t.small}>{error}</Text>}
+              {!!error && (details
+                ? <Text selectable style={t.small}>{error}</Text>
+                : <Pressable accessibilityRole="button" onPress={() => setDetails(true)} style={{ alignSelf: "flex-start" }}><Text style={[t.small, { textDecorationLine: "underline" }]}>Details</Text></Pressable>)}
             </View>
           </View>}
-          {phase === "ready" && edited && !check.ok && <Text accessibilityLiveRegion="polite" style={[t.small, { color: c.statusDanger }]}>{check.reason}</Text>}
-          {phase === "ready" && !edited && <Text style={t.small}>From the Summary, PRs and linked items. Edit it if it's not quite right.</Text>}
+          {edited && !check.ok && !!name.trim() && <View accessibilityLiveRegion="polite" style={{ flexDirection: "row", gap: 6 }}>
+            <View style={{ paddingTop: 1 }}><Icon name="CircleAlert" size={13} color={c.statusDanger} /></View>
+            <Text style={[t.small, { flex: 1, color: c.statusDanger }]}>{check.reason}</Text>
+          </View>}
+          {(!edited || !name.trim()) && phase !== "error" && <Text style={t.small}>Start with a verb. Up to 8 words.</Text>}
         </View>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-          <Button shortcut theme={theme} compact={compact} kind="primary" icon="Check" title="Rename" disabled={!canRename} onPress={apply} />
-          <Button theme={theme} compact={compact} kind="ghost" icon="RefreshCw" title={phase === "error" ? "Try again" : "Suggest another"} disabled={phase === "suggesting"} onPress={() => void suggest()} />
+          {/* After a failed suggestion with nothing typed, Try again is the likely next step, so it leads. */}
+          {phase === "error" && !canRename
+            ? <Button theme={theme} compact={compact} kind="primary" icon="RefreshCw" title="Try again" onPress={() => void suggest()} />
+            : <>
+              <Button shortcut={canRename} theme={theme} compact={compact} kind="primary" icon="Check" title="Rename" disabled={!canRename} onPress={apply} />
+              <Button theme={theme} compact={compact} kind="ghost" icon="RefreshCw" title={phase === "error" ? "Try again" : "Suggest another"} disabled={phase === "suggesting"} onPress={() => void suggest()} />
+            </>}
         </View>
         {info?.last && <View style={{ borderTopWidth: 1, borderTopColor: c.border, paddingTop: compact ? 12 : 10, flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <Text style={[t.small, { flex: 1, minWidth: 160 }]} numberOfLines={2}>Renamed from {info.last.from} {ago(info.last.at)}</Text>
