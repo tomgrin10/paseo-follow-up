@@ -8,7 +8,7 @@ import { createServer } from "node:net";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
 import { harness, spawnDaemon, waitUntil } from "./harness.mjs";
-import { harnessEnv } from "./harness-env.mjs";
+import { harnessEnv, harnessConfig } from "./harness-env.mjs";
 import { fakeGithub } from "./fake-github.mjs";
 await harness();
 const exec = promisify(execFile);
@@ -25,7 +25,7 @@ try {
   await mkdir(join(home, ".codex"), { recursive: true });
   await writeFile(join(home, ".codex/config.toml"), codexFixture, { mode: 0o600 });
   if (process.env.FOLLOW_TEST_GRAPHITE_AUTH) { await mkdir(join(home, ".config/graphite"), { recursive: true }); await writeFile(join(home, ".config/graphite/auth"), JSON.stringify({ authToken: "isolated-fixture-token" }), { mode: 0o600 }); }
-  await writeFile(join(home, "config.json"), JSON.stringify({ pluginsEnabled: true, daemon: { listen: `127.0.0.1:${port}`, relay: { enabled: false }, mcp: { enabled: false }, browserTools: { enabled: false } }, features: { webUi: { enabled: true } } }));
+  await writeFile(join(home, "config.json"), JSON.stringify(harnessConfig({ port, webUi: true })));
   const packed = JSON.parse((await exec("npm", ["pack", "--json", "--pack-destination", root], { timeout: 30000 })).stdout)[0];
   await exec("tar", ["-xzf", join(root, packed.filename), "--strip-components=1", "-C", plugin]);
   await writeFile(join(fixture, "paseo-plugin.json"), JSON.stringify({ id: "followup-fixture", requirements: { paseo: ">=0.11.0" } }));
