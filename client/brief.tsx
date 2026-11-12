@@ -5,8 +5,8 @@ import { Pressable, Text } from "./text";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { openExternalUrl, useRpc, type PluginClientContext, type PluginTimelineItemProps } from "@getpaseo/plugin/client";
 import { Icon, TextInput, copyText, useToast } from "@getpaseo/plugin/client/ui";
-import { BRIEF_KIND, BRIEF_VERSION, askedDecisions, pickedCount, briefSchema, collapsedLine, extrasFit, hasOriginal, nothingNeededLine, isTight, pastRows, pastTone, selectsFirst, sendBar, shownBrief, pastAsk, newAnswerId, undeliveredReason, type Brief, type BriefDecision, type BriefMove } from "../shared/brief";
-import { age, reviewersBriefWithdrawn } from "../shared/inbox";
+import { BRIEF_KIND, BRIEF_VERSION, askedDecisions, pickedCount, briefSchema, collapsedLine, extrasFit, hasOriginal, nothingNeededLine, isTight, pastRows, pastTone, selectsFirst, sendBar, shownBrief, pastAsk, liveBrief, newAnswerId, undeliveredReason, type Brief, type BriefDecision, type BriefMove } from "../shared/brief";
+import { age } from "../shared/inbox";
 import { noReviewReposVersion, onNoReviewRepos } from "../shared/pr-workflow";
 import { briefKey, HEADLINE_WORD } from "../shared/headline";
 /** The card's kind word comes from the same table as the pill and the Needs-you row. */
@@ -356,7 +356,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   };
   // An add-reviewers card for a PR the agent merges itself isn't an ask: gone the moment the repository flips to No
   // review, back on Undo (invariant a-no-review-repo-never-asks-for-review-or-merge).
-  if (reviewersBriefWithdrawn(b)) return null;
+  if (b.state === "open" && !liveBrief(b)) return null;
   if (shown.brief.state !== "open") return <Past b={shown.brief} c={c} now={now} compact={compact} height={height} onResend={b.answerId ? resend : undefined} resending={sending === "resend"} />;
   // Muted until the send lands: the server's answered brief then replaces this, green.
   if (marked) return <Past b={{ ...b, state: "answered", outcome: "Done", outcomeAt: marked }} pending={!sent} c={c} now={now} compact={compact} height={height} />;
