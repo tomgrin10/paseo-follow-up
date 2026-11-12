@@ -303,7 +303,7 @@ test("GraphQL budget: low stretches settled reads and pauses merged and quiet re
   now = clock + 3_600_000 + 1; budget.limited = true;
   const refused = await github.observe(prs, { background: true });
   assert.ok([...refused.values()].every(o => o.error === null && o.snapshot));
-  const unseen = pr({ key: "org0/repo0#99", repo: "org0/repo0", number: 99 });
+  const unseen = pr({ key: "org0/repo0#99", repo: "org0/repo0", number: 99, snapshot: null });
   now += TICK_MS; assert.match((await github.observe([unseen])).get(unseen.key)!.error!, /API limit .* used up; Follow-up reads again after/);
   budget.limited = false; now += 10 * 60_000 + 1;
   await github.observe(prs, { background: true }); assert.ok(github.budget("org0")!.remaining > 0);
