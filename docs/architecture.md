@@ -60,8 +60,8 @@ daemon socket and gh hanging, and fails on one that doesn't reply within 500 ms;
 `follow.answer-question`) are the model: see [needs-you.md](needs-you.md#answering-a-brief). Reads the client polls
 answer from what the worker already holds and refresh after, so the next poll carries the refresh: Needs you's list
 serves the last directory snapshot (only a first list, with none yet, waits up to 300 ms, then says it's still
-loading), the usage meters serve their last reading, and a Summary's inputs are read after the reply while the view
-says pending. Both caches are primed when the worker starts. `tests/rpc-cached.test.ts` hangs each slow side.
+loading), the usage meters serve their last reading, and a Summary's open waits up to 300 ms for its inputs, then says
+pending and the client asks again after 500 ms, backing off to 3 s. Both caches are primed when the worker starts. `tests/rpc-cached.test.ts` hangs each slow side.
 
 **Slow RPCs name themselves.** `server/rpc-timing.ts` wraps every handler: one slower than the 500 ms ack budget (`RPC_SLOW_MS`) logs
 `[follow-up] slow rpc <method> <ms> ms (event loop since last: p99 …, max …)` to the plugin's output (daemon.log).

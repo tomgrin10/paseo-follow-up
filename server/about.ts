@@ -305,6 +305,8 @@ export class AboutService {
   private collecting = new Map<string, Promise<void>>();
   /** What the last read of inputs found, for the replies while no sentence exists yet. */
   private found = new Map<string, { links: AboutLink[]; firstMessage: string | null }>();
+  /** How long an open's reply waits for the inputs before it says pending (the ack budget leaves room for the rest). */
+  collectWaitMs = 300;
   constructor(private deps: AboutDeps) {}
   private now() { return (this.deps.now ?? Date.now)(); }
 
@@ -323,12 +325,19 @@ export class AboutService {
       const running = this.inflight.has(workspaceId);
       return { status: running ? "pending" : cached ? "ready" : "idle", record: cached, firstMessage, links: cached ? [] : this.found.get(workspaceId)?.links ?? [], error: null };
     }
-    // Reading the inputs waits on the history cache and Paseo's subagents, so it runs after the reply
-    // (tests/rpc-cached.test.ts): the view says pending and the client polls while it is. Only an agent's `wait` waits.
+    // Reading the inputs waits on the history cache and Paseo's subagents. The reply waits for it up to
+    // `collectWaitMs`, so a fast read answers in full as before; past that the view says pending and the client asks
+    // again soon (tests/rpc-cached.test.ts). Only an agent's `wait` waits for the whole read.
     const fresh = !!cached && this.now() - Date.parse(cached.generatedAt) < ABOUT_TTL_MS;
-    if (!this.inflight.has(workspaceId) && (opts.refresh || !fresh)) {
-      const collected = this.collect(w, !!opts.refresh);
+    // A read already under way (the previous ask's) is waited on the same way, so a poll lands as it finishes.
+    const collected = this.collecting.get(workspaceId) ?? (!this.inflight.has(workspaceId) && (opts.refresh || !fresh) ? this.collect(w, !!opts.refresh) : null);
+    if (collected) {
       if (opts.wait) await collected;
+      else {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([collected, new Promise<void>(resolve => { timer = setTimeout(resolve, this.collectWaitMs); timer.unref?.(); })]);
+        clearTimeout(timer);
+      }
     }
     const running = this.inflight.get(workspaceId);
     if (running && opts.wait) await running;

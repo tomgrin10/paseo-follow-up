@@ -212,6 +212,14 @@ export function summaryDisplay(view: AboutView | null | undefined, now: number):
   };
 }
 
+/**
+ * While the Summary view is pending (its inputs or its sentence still on the way), how long the client waits before
+ * asking again after the `pending`-th pending reply in a row: 500 ms, then 1 s, 2 s, and 3 s from then on.
+ */
+export function pendingPollMs(pending: number): number {
+  return Math.min(3_000, 500 * 2 ** Math.max(0, pending - 1));
+}
+
 /** Under the title: the sentence, else the goal when it says more than the title, else "Writing a summary…" while one is being written. */
 export function summaryLine(d: Pick<ReturnType<typeof summaryDisplay>, "sentence" | "pending">, w: { title: string; goal: string }): { text: string; kind: "summary" | "goal" | "writing" } | null {
   if (d.sentence) return { text: d.sentence, kind: "summary" };
