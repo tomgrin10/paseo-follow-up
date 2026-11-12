@@ -57,44 +57,74 @@ export function accountFor(map: string, owner: string): string | null {
 export const DEAD_BUS = "unix:path=/nonexistent/gh-no-session-bus";
 
 type TokenSource = (owner: string) => Promise<string>;
-/**
- * A token per repository owner, resolved like the wrapper: an explicit GH_TOKEN/GITHUB_TOKEN wins; else the account
- * the account map names for the owner (`gh auth token --user`), else gh's active account. The real gh is called
- * directly (never the wrapper, which would inject a token of its own) with GH_TOKEN stripped and a dead bus.
- */
-export function ghTokens(environment: NodeJS.ProcessEnv = process.env, run = async (bin: string, args: string[], env: NodeJS.ProcessEnv) => (await exec(bin, args, { env, timeout: 15_000 })).stdout): TokenSource {
-  return async owner => {
-    const explicit = environment.GH_TOKEN || environment.GITHUB_TOKEN;
-    if (explicit) return explicit;
-    const mapPath = environment.GH_ACCOUNT_MAP || join(environment.HOME || homedir(), ".config/gh/account-map");
-    const account = accountFor(await readFile(mapPath, "utf8").catch(() => ""), owner);
-    const { GH_TOKEN: _a, GITHUB_TOKEN: _b, ...rest } = environment;
-    const env = { ...rest, DBUS_SESSION_BUS_ADDRESS: environment.DBUS_SESSION_BUS_ADDRESS || DEAD_BUS };
-    const bin = environment.FOLLOW_UP_GH_BIN || (existsSync("/usr/bin/gh") ? "/usr/bin/gh" : "gh");
+type GhRun = (bin: string, args: string[], env: NodeJS.ProcessEnv) => Promise<string>;
+const ghRun: GhRun = async (bin, args, env) => (await exec(bin, args, { env, timeout: 15_000 })).stdout;
+
+/** The real gh (never the wrapper, which would inject a token of its own), with GH_TOKEN stripped and a dead bus. */
+function realGh(environment: NodeJS.ProcessEnv) {
+  const { GH_TOKEN: _a, GITHUB_TOKEN: _b, ...rest } = environment;
+  return { env: { ...rest, DBUS_SESSION_BUS_ADDRESS: environment.DBUS_SESSION_BUS_ADDRESS || DEAD_BUS }, bin: environment.FOLLOW_UP_GH_BIN || (existsSync("/usr/bin/gh") ? "/usr/bin/gh" : "gh") };
+}
+
+/** A gh account's token (`gh auth token --user`), or the active account's for null. */
+export function ghAccountToken(environment: NodeJS.ProcessEnv = process.env, run: GhRun = ghRun) {
+  return async (account: string | null): Promise<string> => {
+    if (!account && (environment.GH_TOKEN || environment.GITHUB_TOKEN)) return (environment.GH_TOKEN || environment.GITHUB_TOKEN)!;
+    const { env, bin } = realGh(environment);
     const token = (await run(bin, ["auth", "token", ...(account ? ["--user", account] : [])], env).catch(() => "")).trim();
-    if (!token) throw new GithubAuthError("No GitHub token for this repository's owner; sign in with gh auth login");
+    if (!token) throw new GithubAuthError(account ? `No GitHub token for the gh account ${account}; sign in with gh auth login` : "No GitHub token for this repository's owner; sign in with gh auth login");
     return token;
   };
 }
 
+/** Every github.com account gh is logged in to (`gh auth status` prints "account <login>"). */
+export function ghAccounts(status: string): string[] { return [...new Set([...status.matchAll(/account (\S+)/g)].map(m => m[1]))]; }
+
+/**
+ * A token per repository owner, resolved like the wrapper: an explicit GH_TOKEN/GITHUB_TOKEN wins; else the account
+ * the account map names for the owner (`gh auth token --user`), else gh's active account.
+ */
+export function ghTokens(environment: NodeJS.ProcessEnv = process.env, run: GhRun = ghRun): TokenSource {
+  const token = ghAccountToken(environment, run);
+  return async owner => {
+    const explicit = environment.GH_TOKEN || environment.GITHUB_TOKEN;
+    if (explicit) return explicit;
+    const mapPath = environment.GH_ACCOUNT_MAP || join(environment.HOME || homedir(), ".config/gh/account-map");
+    return token(accountFor(await readFile(mapPath, "utf8").catch(() => ""), owner));
+  };
+}
+
+/**
+ * Reads made as a gh account rather than for a repository: the ranker's review-requested:@me search runs once per
+ * logged-in account. The account list is read once an hour; tokens are cached like owners' ones.
+ */
+export interface AccountReads {
+  accounts(): Promise<string[]>;
+  restAs(account: string | null, path: string): Promise<unknown>;
+}
+
 const LIMIT = 4 * 1024 * 1024;
 /** In-process HTTPS with one token per owner, refreshed once on a 401. `FOLLOW_UP_GITHUB_API` points tests at a fake. */
-export function httpApi(o: { tokens?: TokenSource; request?: typeof fetch; base?: string; timeoutMs?: number } = {}): GithubApi {
+export function httpApi(o: { tokens?: TokenSource; accountToken?: (account: string | null) => Promise<string>; status?: () => Promise<string>; request?: typeof fetch; base?: string; timeoutMs?: number; now?: () => number } = {}): GithubApi & AccountReads {
   const tokens = o.tokens ?? ghTokens();
+  const accountToken = o.accountToken ?? ghAccountToken();
   const request = o.request ?? fetch;
+  const now = o.now ?? Date.now;
   const base = (o.base ?? process.env.FOLLOW_UP_GITHUB_API ?? "https://api.github.com").replace(/\/$/, "");
   const cache = new Map<string, Promise<string>>();
-  const token = (owner: string) => {
-    let value = cache.get(owner);
-    if (!value) { value = tokens(owner); cache.set(owner, value); void value.catch(() => cache.delete(owner)); }
+  // Owners are keyed by name, accounts by "@login" (null: gh's active account).
+  const token = (key: string) => {
+    let value = cache.get(key);
+    if (!value) { value = key.startsWith("@") ? accountToken(key.slice(1) || null) : tokens(key); cache.set(key, value); void value.catch(() => cache.delete(key)); }
     return value;
   };
-  const call = async (repo: string, url: string, init: { method: string; body?: string }, retried = false): Promise<unknown> => {
-    const owner = repo.split("/")[0];
+  const status = o.status ?? (async () => { const { env, bin } = realGh(process.env); return new Promise<string>(resolve => execFile(bin, ["auth", "status", "--hostname", "github.com"], { env, timeout: 15_000 }, (_e, stdout, stderr) => resolve(`${stdout ?? ""}${stderr ?? ""}`))); });
+  let accounts: { until: number; value: Promise<string[]> } | null = null;
+  const call = async (key: string, url: string, init: { method: string; body?: string }, retried = false): Promise<unknown> => {
     const abort = new AbortController(); const timer = setTimeout(() => abort.abort(), o.timeoutMs ?? 25_000);
     try {
-      const response = await request(url, { ...init, signal: abort.signal, headers: { authorization: `bearer ${await token(owner)}`, accept: "application/vnd.github+json", "content-type": "application/json", "user-agent": "paseo-follow-up", "x-github-api-version": "2022-11-28" } });
-      if (response.status === 401 && !retried) { cache.delete(owner); return call(repo, url, init, true); }
+      const response = await request(url, { ...init, signal: abort.signal, headers: { authorization: `bearer ${await token(key)}`, accept: "application/vnd.github+json", "content-type": "application/json", "user-agent": "paseo-follow-up", "x-github-api-version": "2022-11-28" } });
+      if (response.status === 401 && !retried) { cache.delete(key); return call(key, url, init, true); }
       const text = await response.text();
       if (text.length > LIMIT) throw new Error("GitHub response exceeds the read limit");
       if (response.status === 401) throw new GithubAuthError("GitHub refused the token (HTTP 401)");
@@ -106,8 +136,18 @@ export function httpApi(o: { tokens?: TokenSource; request?: typeof fetch; base?
       return JSON.parse(text);
     } finally { clearTimeout(timer); }
   };
+  const ownerOf = (repo: string) => repo.split("/")[0];
   return {
-    graphql: async (repo, query, variables) => call(repo, `${base}/graphql`, { method: "POST", body: JSON.stringify({ query, variables }) }) as Promise<Node>,
-    rest: (repo, path) => call(repo, `${base}/${path.replace(/^\//, "")}`, { method: "GET" }),
+    graphql: async (repo, query, variables) => call(ownerOf(repo), `${base}/graphql`, { method: "POST", body: JSON.stringify({ query, variables }) }) as Promise<Node>,
+    rest: (repo, path) => call(ownerOf(repo), `${base}/${path.replace(/^\//, "")}`, { method: "GET" }),
+    accounts: () => {
+      if (!accounts || accounts.until <= now()) { const value = status().then(ghAccounts); accounts = { until: now() + 3_600_000, value }; void value.catch(() => { accounts = null; }); }
+      return accounts.value;
+    },
+    restAs: (account, path) => call(`@${account ?? ""}`, `${base}/${path.replace(/^\//, "")}`, { method: "GET" }),
   };
 }
+
+let shared: (GithubApi & AccountReads) | null = null;
+/** The worker's one client: every read path shares its per-owner and per-account token cache. */
+export function githubApi(): GithubApi & AccountReads { return shared ??= httpApi(); }
