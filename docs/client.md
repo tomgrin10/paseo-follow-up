@@ -80,6 +80,7 @@ Nothing polls while the app is hidden.
 | `client/about.tsx` | Summary at the top of Home's detail pane and the panel. |
 | `client/inbox.tsx`, `client/inbox-store.ts`, `client/done-windows.ts` | Needs-you rows, the undo bar and inbox commands, plus the shared inbox poll and Done's per-agent Undo windows (the pill says Done while one is open). |
 | `client/brief.tsx` | The brief card in agent timelines. |
+| `client/card-store.ts` | Per-card picks, Something else words and pick notes, shared by every copy of a card and kept across re-renders. |
 | `client/pill.tsx` | The composer pill. |
 | `client/chat.tsx` | Compact rows for Follow-up's tool calls, batch cards and Done cards in chats (recognised by `shared/chat.ts`). |
 | `client/live.tsx`, `client/workspace-data.ts` | The shared workspace poll (diffed `follow.list`) and the per-workspace view of it. |
