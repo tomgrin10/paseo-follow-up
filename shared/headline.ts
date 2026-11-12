@@ -10,7 +10,7 @@ import { age, displayReason, reasonRank, type InboxRow, type Reason, type Reason
  * The agent's own flag (the Needs-you inbox entry and its open brief) always decides the headline. Workspace
  * items (PRs to merge, repairs to send, questions) only headline when the agent isn't flagged; otherwise they
  * sit inside the popover. A failed CI check is never the headline on its own: Paseo's own checks chip already
- * shows it, so it only surfaces as "Send N fixes" when Follow-up has repairs ready.
+ * shows it, so it only surfaces as "Send N tasks" when Follow-up has tasks ready to send.
  */
 export const HEADLINE_KEYS = ["permission", "error", "paused", "blocked", "decision", "question", "action", "repairs", "finish", "merge", "reviewers", "review", "finished", "flagged", "pr_closed"] as const;
 export type HeadlineKey = typeof HEADLINE_KEYS[number];
@@ -19,11 +19,11 @@ export type HeadlineTone = "danger" | "warning" | "accent" | "merged" | "muted";
 /** The decisive word each key leads with. The pill, the card header and the row all read it from here. */
 export const HEADLINE_WORD: Record<HeadlineKey, string> = {
   permission: "Permission", error: "Error", paused: "Paused", blocked: "Blocked", decision: "Decision", question: "Question", action: "Action",
-  repairs: "Fixes", finish: FINISH_WORD, merge: "Merge", reviewers: "Add reviewers", review: "Review", finished: "Finished", flagged: "Flagged", pr_closed: "PR closed",
+  repairs: "Tasks", finish: FINISH_WORD, merge: "Merge", reviewers: "Add reviewers", review: "Review", finished: "Finished", flagged: "Flagged", pr_closed: "PR closed",
 };
 export const HEADLINE_ICON: Record<HeadlineKey, string> = {
   permission: "ShieldQuestion", error: "CircleX", paused: "CirclePause", blocked: "OctagonAlert", decision: "MessageCircleQuestion", question: "MessageCircleQuestion",
-  action: "Hand", repairs: "Wrench", finish: "ListChecks", merge: "GitMerge", reviewers: "UserPlus", review: "GitPullRequest", finished: "Flag", flagged: "Flag", pr_closed: "GitMerge",
+  action: "Hand", repairs: "Send", finish: "ListChecks", merge: "GitMerge", reviewers: "UserPlus", review: "GitPullRequest", finished: "Flag", flagged: "Flag", pr_closed: "GitMerge",
 };
 export const HEADLINE_TONE: Record<HeadlineKey, HeadlineTone> = {
   permission: "warning", error: "danger", paused: "warning", blocked: "danger", decision: "warning", question: "warning", action: "warning",
@@ -84,9 +84,9 @@ export function flagHeadline(row: Pick<InboxRow, "needs" | "snooze" | "brief">, 
     const asked = workspaceHeadline(items.filter(i => i.kind === "question"));
     if (asked) return { ...asked, source: "flag" };
   }
-  // A failed check or review thread headlines as the developer's action: repairs ready to send.
+  // A failed check or review thread headlines as the developer's action: tasks ready to send.
   const send = items.find((i): i is Extract<NeedItem, { kind: "send" }> => i.kind === "send" && !i.finish);
-  if ((key === "flagged" || key === "review") && send) return { key: "repairs", label: `Send ${plural(send.tasks.length, "fix", "fixes")}`, line: send.title, source: "flag" };
+  if ((key === "flagged" || key === "review") && send) return { key: "repairs", label: `Send ${plural(send.tasks.length, "task")}`, line: send.title, source: "flag" };
   // "Add reviewers #1499": the PR number is the detail, so the pill names which PR.
   if (key === "reviewers") return { key, label: `${HEADLINE_WORD.reviewers} ${top.detail}`.trim(), line: brief?.ask ?? `Add reviewers to ${top.detail}`, source: "flag" };
   const line = brief ? (brief.source === "none" ? "No ask stated" : brief.ask) : top.detail || HEADLINE_WORD[key];
@@ -106,7 +106,7 @@ export function workspaceHeadline(items: NeedItem[]): Headline | null {
   }
   switch (top.kind) {
     case "hold": return { key: "blocked", label: "On hold", line: top.detail || top.title, source: "workspace" };
-    case "retry": return { key: "blocked", label: "Fixes stuck", line: top.title, source: "workspace" };
+    case "retry": return { key: "blocked", label: "Tasks stuck", line: top.title, source: "workspace" };
     case "capped": return { key: "blocked", label: "Task unchanged", line: top.title, source: "workspace" };
     case "check": return { key: "blocked", label: "Check PR", line: top.title, source: "workspace" };
     case "answer": return { key: "blocked", label: "Check answer", line: top.title, source: "workspace" };

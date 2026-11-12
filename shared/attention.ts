@@ -1,6 +1,6 @@
 import { batchView, FINISH_LINE, stuckLine, unconfirmedRefs } from "./status";
 import { blockedOnDeveloper, completionCheck, liveWorkingTask, statusKnown, summary, type Batch, type Pr, type Task, type Workspace, type Status } from "./model";
-import { NO_PROGRESS_CAP } from "./send-decision";
+import { idleReason, NO_PROGRESS_CAP } from "./send-decision";
 import { workingLine } from "./task-status";
 import { followUpObligations, recoveryBatch } from "./follow-up";
 import { orderedStacks, settledForDisplay } from "./presentation";
@@ -94,6 +94,7 @@ export type NeedItem =
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 /** The main agent as the developer knows it: its Paseo title, else "the main agent". */
+const capitalize = (s: string) => s[0].toUpperCase() + s.slice(1);
 export const agentName = (w: Pick<Workspace, "mainAgentTitle">) => w.mainAgentTitle?.trim() || "the main agent";
 /** A capped task's Needs-you title: what is still wrong, in plain words. */
 export function cappedTitle(t: Pick<Task, "kind" | "target" | "title">): string {
@@ -171,7 +172,8 @@ export function needsYou(w: Workspace, now = Date.now()): NeedItem[] {
     items.push(completionCheck(b)
       ? { kind: "send", key: `send:${b.id}`, batchId: b.id, tasks: b.tasks.map(t => t.title), blocker: sendBlocker(w, b), title: FINISH_LINE, finish: true }
       : { kind: "send", key: `send:${b.id}`, batchId: b.id, tasks: b.tasks.map(t => t.title), blocker: sendBlocker(w, b),
-      title: `${plural(b.tasks.length, "task")} ready for the main agent${w.enable_auto_sends ? " · it's idle, and Follow-up doesn't wake it" : ""}` });
+      // Say it once: the tasks are rows in Tasks; the send item says only why it waits on you, and its button how many.
+      title: w.enable_auto_sends ? capitalize(idleReason(w)) : `${plural(b.tasks.length, "task")} ready for ${agentName(w)}` });
   }
   const blocking = (pr: Pr) => w.prActions.some(a => prActionBlocks(a, [pr.key]));
   for (const pr of stackOrder(w.prs)) {

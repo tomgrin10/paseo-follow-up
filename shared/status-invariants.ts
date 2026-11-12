@@ -1,3 +1,4 @@
+import { recoveryBatch } from "./follow-up";
 import type { Actor } from "./actor";
 import { ANY_HOOK_TEXT_PREFIXES } from "./message-sender";
 import { BATCH_PREFIXES, RECOVERY_TITLES } from "./legacy";
@@ -105,10 +106,13 @@ export const INVARIANTS: Invariant[] = [
   },
   {
     id: "a-capped-task-never-holds-the-queue",
-    why: "2026-11-12 (Q49/Q50): a turn that ended without acknowledge_batch blocked the whole batch and asked for Retry, so every other task waited behind one stubborn condition. Such a turn settles its batch (never blocked), and only a condition that went out NO_PROGRESS_CAP times unchanged is held, as its own task, while the rest of the queue keeps moving.",
+    why: "2026-11-12 (Q49/Q50): a turn that ended without acknowledge_batch blocked the whole batch and asked for Retry, so every other task waited behind one stubborn condition; a second rule blocked a PR's next message after three acknowledged ones. Such a turn settles its batch (never blocked), and only a condition that went out NO_PROGRESS_CAP times unchanged (acknowledged or not) is held, as its own task, while the rest of the queue keeps moving.",
     check(w) {
       const blocked = w.batches.find(b => b.state === "blocked" && b.unacknowledged);
       if (blocked) return `${blocked.id} is blocked for a missing acknowledgment`;
+      // One cap: only an agent's own blocked acknowledgment blocks a message, never a count of earlier messages.
+      const unsent = w.batches.find(b => b.state === "blocked" && !b.sentAt && !recoveryBatch(b));
+      if (unsent) return `${unsent.id} is blocked before it went out`;
       const pending = w.batches.find(b => b.state === "pending");
       for (const h of w.heldTasks ?? []) {
         if (h.held === "capped" && !isCapped(w, h.task)) return `${h.task.key} is held as capped below ${NO_PROGRESS_CAP} sends`;

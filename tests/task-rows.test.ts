@@ -11,7 +11,8 @@ import type { Batch, Obligation, Task, Workspace } from "../shared/model";
 import { messageStrip, nextMessageInfo, repairRows } from "../shared/task-rows";
 import { sendDecision, SETTLE_REASON } from "../shared/send-decision";
 import { taskStatus } from "../shared/task-status";
-import { headerLine, liveLine } from "../shared/attention";
+import { headerLine, liveLine, needsYou } from "../shared/attention";
+import { workspaceHeadline } from "../shared/headline";
 import { violations } from "../shared/status-invariants";
 import { clock, workspace, pr, snapshot } from "./fixtures";
 
@@ -65,6 +66,17 @@ test("the panel header says who and what while a message is queued; the strip al
     assert.ok(liveLine(w, clock).text.endsWith(sendDecision(w, clock).reason), "Home (no strip) keeps the full line");
   }
   assert.deepEqual(headerLine(message("sent"), clock), liveLine(message("sent"), clock), "only the queued line changes");
+});
+
+test("the Needs-you Send says why it waits on you once, with the agent's title, and no second task list", () => {
+  const w = message("pending", { sendWait: "unloaded" });
+  const send = needsYou(w, clock).find(i => i.kind === "send");
+  assert.equal(send?.title, "Billing fix is idle, and Follow-up doesn't wake it");
+  assert.ok(!REPAIRS.some(r => send!.title.includes(r.title)), "the tasks are rows in Tasks, not repeated here");
+  assert.equal(liveLine(w, clock).text, "5 tasks queued · Billing fix is idle, and Follow-up doesn't wake it", "Home says it in the same words");
+  assert.deepEqual([workspaceHeadline(needsYou(w, clock))?.label, workspaceHeadline(needsYou(w, clock))?.line], ["Send 5 tasks", send?.title], "the pill and inbox: tasks, the same line");
+  const off = needsYou(message("pending", { enable_auto_sends: false }), clock).find(i => i.kind === "send");
+  assert.equal(off?.title, "5 tasks ready for Billing fix");
 });
 
 test("done rows say how they finished; a resolved-before-sent repair never shows", () => {
