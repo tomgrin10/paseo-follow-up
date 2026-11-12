@@ -74,7 +74,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 
 | Subsystem | Files | Doc |
 | --- | --- | --- |
-| Worker entry, RPC wiring, session attach, teardown | `index.server.ts`, `shared/contracts.ts`, `server/rpc-timing.ts`, `server/teardown.ts`, `server/daemon.ts`, `server/directory.ts`, `server/store.ts`, `server/list-cache.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
+| Worker entry, RPC wiring, session attach, teardown | `index.server.ts`, `shared/contracts.ts`, `server/rpc-timing.ts`, `server/teardown.ts`, `server/daemon.ts`, `server/shared-file.ts`, `server/directory.ts`, `server/store.ts`, `server/list-cache.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
 | Discovery, ownership, main agent | `server/discovery.ts`, `server/workspace-agent.ts`, `server/background-agents.ts`, `server/submissions.ts`, `server/pr-owner.ts`, `server/exclusions.ts`, `server/history-cache.ts`, `server/recovery-handoff.ts`, `server/recovery-config.ts`, `shared/settings.ts` | [workspaces](docs/workspaces.md) |
 | Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
 | Needs-you inbox, brief, Home | `server/inbox.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts` | [needs-you](docs/needs-you.md) |
@@ -92,7 +92,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | Shared copy and errors | `shared/presentation.ts`, `shared/errors.ts` | [client](docs/client.md) |
 | Tests, checks and README screenshots | `tests/`, `scripts/`, `scripts/screenshots.mjs`, `button-visibility.test.mjs` | [testing](docs/testing.md) |
 | Report an issue (shared module, Follow-up's adapter, the sheet) | `server/report-issue/index.ts`, `server/report-issue/redact.ts`, `server/report-issue/render.ts`, `server/report-issue/github.ts`, `server/report-issue/diagnostics.ts`, `server/report-issue-adapter.ts`, `client/report-issue.tsx`, `scripts/fake-github.d.mts` | [report-issue](docs/report-issue.md) |
-| Releases | `changes/`, `CHANGELOG.md`, `scripts/release-notes.mjs`, `.github/workflows/` | [releasing](docs/releasing.md) |
+| Releases | `changes/`, `CHANGELOG.md`, `scripts/release-notes.mjs`, `scripts/release-body.mjs`, `scripts/backfill-release-notes.mjs`, `.github/workflows/` | [releasing](docs/releasing.md) |
 
 ## Invariants
 
@@ -201,6 +201,8 @@ See [docs/releasing.md](docs/releasing.md). In short:
   npm workflow publish. Versions with a prerelease part (`1.4.0-beta.24`) publish under the `beta` dist-tag.
   Betas get no CHANGELOG section; a stable or a major's rc gets a CURATED one (release:notes writes a draft that
   check:notes refuses until it's rewritten). A major's rc (`2.0.0-rc.0`) carries the major's section, `## 2.0.0`.
+- Every GitHub release has notes in one format (`scripts/release-body.mjs`): a beta's page renders the fragments
+  added since the previous tag, a stable's or an rc's its curated section. In-app What's new stays major-only.
 - Don't bump the version in a feature PR.
 
 ## Common pitfalls

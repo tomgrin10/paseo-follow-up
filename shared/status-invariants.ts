@@ -10,7 +10,7 @@ import { completionCheck, summary } from "./model";
 import { asksForReviewers, liveLine, needsYou } from "./attention";
 import { trackedGroup, type HomeModel } from "./home";
 import { freshPriorities, type Priority } from "./priorities";
-import { agentCard, automaticHold, batchView } from "./status";
+import { agentCard, automaticHold, batchView, holdSuperseded } from "./status";
 import { followUpObligations } from "./follow-up";
 import { cadence, movingReason, OBSERVATION_FRESH_MS, POLL_IDLE_MS, RUNNING_POLL_MS, TICK_MS } from "./poll";
 import { staleUpdatePhase, type UpdatePhase } from "./updates";
@@ -149,6 +149,14 @@ export const INVARIANTS: Invariant[] = [
       return null;
     },
   },
+  {
+    id: "only-a-stop-holds",
+    why: "2026-11-11 wks_5dfd3a653ad3c305: a /compact replaced by an agent's message read as \"You stopped the main agent\" and paused auto-sends until Resume. Of every cancel cause (shared/status.ts CANCEL_CAUSES) only the developer's Stop holds.",
+    check(w) {
+      const stop = w.interruption;
+      return stop?.kind === "canceled" && automaticHold(w) && stop.cause && stop.cause !== "stop" ? `holds for a ${stop.cause} turn ${stop.turnId ?? "?"}` : null;
+    },
+  },
 ];
 
 export function violations(w: Workspace, now: number): { id: string; detail: string }[] {
@@ -262,15 +270,15 @@ export function homeViolations(model: Pick<HomeModel, "byKey">, priorities: read
 }
 
 /**
- * Workspaces against their main agent's current turn: Follow-up's automatic hold after a failed turn is that turn's
- * run state, so it never outlives a newer turn (holdSuperseded in shared/status.ts). A hold the developer set, and
- * "You stopped the main agent", are theirs and may. `automatic-hold-is-not-stale`, 2026-11-10: a running agent's
- * pane said "Follow-up is paused · The main agent's turn failed" under a Working row.
+ * Workspaces against their main agent's current turn: Follow-up's automatic hold (a failed turn, or the developer's
+ * Stop) is that turn's run state, so it never outlives a newer turn (holdSuperseded in shared/status.ts). A hold the
+ * developer set may. `automatic-hold-is-not-stale`, 2026-11-10: a running agent's pane said "Follow-up is paused · The
+ * main agent's turn failed" under a Working row; 2026-11-11 wks_5dfd3a653ad3c305: "You stopped the main agent" stayed
+ * for an hour of newer turns after a replaced /compact.
  */
 export function holdViolations(w: Pick<Workspace, "id" | "hold" | "interruption" | "mainAgentId">, mainTurnId: string | null): { id: string; detail: string }[] {
-  const stop = w.interruption;
-  if (!stop || stop.kind !== "failed" || !automaticHold(w) || !mainTurnId || mainTurnId === stop.turnId || (stop.agentId && stop.agentId !== w.mainAgentId)) return [];
-  return [{ id: "automatic-hold-is-not-stale", detail: `${w.id} holds for failed turn ${stop.turnId ?? "?"} while the main agent is on turn ${mainTurnId}` }];
+  if (!w.hold || !holdSuperseded(w, { agentId: w.mainAgentId, turnId: mainTurnId })) return [];
+  return [{ id: "automatic-hold-is-not-stale", detail: `${w.id} holds for ${w.interruption?.kind ?? "canceled"} turn ${w.interruption?.turnId ?? "?"} while the main agent is on turn ${mainTurnId}` }];
 }
 
 /**
