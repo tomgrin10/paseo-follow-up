@@ -8,7 +8,8 @@ import { isLive } from "./agent-load";
  * A task's stored status=working is only what an agent last wrote; it isn't anyone's live state, and it can sit there
  * for days. So "working" is never read off the record: the line names the agent the task records (`workingAgentId`,
  * set by update_obligation) and says what that agent is doing now, from Paseo's agent directory (metadata only, so
- * reading it wakes nothing). Without a recorded agent, or before the live state is known, it says "In progress".
+ * reading it wakes nothing). Without a recorded agent it says "In progress"; with one whose live state isn't known,
+ * "Agent unavailable" (words only, no live state).
  * The engine stores those live states on the workspace (`taskAgents`) with runtimeBusy, so the task row, the Task
  * sheet, the panel's live line, the summary ("Agent handling") and Home all read one source.
  */
@@ -20,7 +21,7 @@ export type TaskAgents = Readonly<Record<string, TaskAgentLive>>;
 export type TaskStatus = {
   text: string;
   /** Which glyph: a spinner only for a live working agent. */
-  tone: "done" | "waived" | "question" | "blocked" | "working" | "idle" | "closed" | "archived" | "progress" | "scheduled" | "ready";
+  tone: "done" | "waived" | "question" | "blocked" | "working" | "idle" | "closed" | "archived" | "unknown" | "progress" | "scheduled" | "ready";
   /** The agent the line names and can open: working, idle or closed (the developer's tap opens it); never an archived one. */
   agentId: string | null;
   /** What the link to that agent says ("Open agent", or "Open chat" for a closed one), from PRESENCE. */
@@ -50,11 +51,17 @@ export const PRESENCE: Readonly<Record<TaskAgentState, { word: string; opens: bo
   archived: { word: "archived", opens: false, link: null },
 };
 
+/** What a task line says when its recorded agent's live state isn't known. */
+export const UNKNOWN_AGENT = "Agent unavailable";
+
 /** The live part alone, for a task whose stored status is working. */
 export function workingLine(o: Obligation, agents: TaskAgents): TaskStatus {
   const id = o.workingAgentId;
   const live = id ? agents[id] : undefined;
-  if (!id || !live) return { text: "In progress", tone: "progress", agentId: null };
+  if (!id) return { text: "In progress", tone: "progress", agentId: null };
+  // A recorded agent the directory doesn't know (not read yet, or Paseo doesn't list it): words only, no live state and
+  // no link. Never "In progress", which reads as if someone were on it.
+  if (!live) return { text: UNKNOWN_AGENT, tone: "unknown", agentId: null, link: null };
   // Named the same way in every state; only an archived agent is words only (PRESENCE[state].opens).
   const p = PRESENCE[live.state];
   return { text: `${name(live)} ${p.word}`, tone: live.state, agentId: p.opens ? id : null, link: p.link };
@@ -79,7 +86,7 @@ export const claimsWorking = (text: string) => /\bworking\b/i.test(text);
  * The live state of the agents tasks name, from Paseo's agent list (metadata only: reading it never loads an agent).
  * Mid-turn, starting or with live background work is working; archived is archived; a session Paseo closed is closed;
  * anything else is idle. An agent the directory doesn't list is left out (unknown: words only), and a directory that
- * couldn't be read (null) says nothing, so every line reads "In progress".
+ * couldn't be read (null) says nothing, so every line with a recorded agent reads "Agent unavailable".
  */
 export function taskAgentStates(ids: readonly string[], agents: readonly { id: string; status: string; title?: string | null; archivedAt?: string | null; backgroundWork?: { count?: unknown } | null }[] | null): Record<string, TaskAgentLive> {
   if (!agents) return {};

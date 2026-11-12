@@ -1079,7 +1079,8 @@ export default function contribute(server: PluginServerContext) {
   handle(rpc.prioritiesRpc, async () => ({ items: await priorityStore.read() }));
   // The chat's created cards: the engine's directory snapshot as it stands (never waits on or asks the daemon, wakes
   // nothing) and the store. Before the engine's first read the cards just show no state yet.
-  handle(rpc.createdItemsRpc, async input => createdItems(input, gateway.directory.snapshot(), (await store.snapshot()).workspaces));
+  // The engine's snapshot as it stands, plus remembered archived agents; ids it lacks are looked up once, not awaited.
+  handle(rpc.createdItemsRpc, async input => { gateway.directory.lookup(input.agentIds); return createdItems(input, gateway.directory.snapshotFor(input.agentIds), (await store.snapshot()).workspaces); });
   // The Report sheet: who it can send to (directory metadata only; nothing is loaded), Send to agent, Open on GitHub.
   handle(rpc.reportTargetsRpc, async ({ workspaceId, agentId }, { paseo }) => {
     seen(paseo);

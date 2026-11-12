@@ -203,7 +203,7 @@ export function liveLine(w: Workspace, now = Date.now()): { icon: LiveIcon; text
   if (view?.phase === "queued" && (view.kind === "finish" || w.enable_auto_sends)) return { icon: view.fixing ? "spinner" : "waiting", text: view.line, since: view.batch.createdAt };
   if (w.runtimeBusy) return { icon: "spinner", text: "Main agent is working", since: null };
   // A working task spins only while its recorded agent is running (invariant `a-task-only-says-working-when-its-agent-is`).
-  // Otherwise it says what the task row says: "<agent> idle", "<agent> closed" or "In progress", with no spinner.
+  // Otherwise it says what the task row says: "<agent> idle", "<agent> closed", "Agent unavailable" or "In progress", with no spinner.
   const live = liveWorkingTask(w);
   if (live) return { icon: "spinner", text: live.title, since: null };
   const working = followUpObligations(w).find(o => o.status === "working");

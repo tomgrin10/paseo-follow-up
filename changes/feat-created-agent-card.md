@@ -1,2 +1,3 @@
 - When an agent creates another agent or a workspace, the chat shows a card for it: its name, model, live status and what Follow-up knows (an open question, PR state). Tap it to open the agent or workspace.
 - An agent whose session Paseo closed (after an hour idle or a plugin reload) keeps its link as "Open chat" on task rows and cards. Only archived agents show words alone.
+- A task whose agent Paseo no longer knows reads "Agent unavailable" instead of "In progress", and archived agents keep reading "archived" after Follow-up re-reads Paseo's list.

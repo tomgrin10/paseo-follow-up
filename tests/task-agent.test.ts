@@ -24,7 +24,8 @@ const line = (o: Partial<Obligation>, agents: TaskAgents = {}) => { const w = ws
 
 test("a-task-only-says-working-when-its-agent-is: the stored status alone never says working", () => {
   assert.deepEqual(line({}), { text: "In progress", tone: "progress", agentId: null });
-  assert.deepEqual(line({ workingAgentId: "sub-1" }), { text: "In progress", tone: "progress", agentId: null }, "live state unknown");
+  // A recorded agent the directory doesn't know: words only, no live state, no link, never "In progress".
+  assert.deepEqual(line({ workingAgentId: "sub-1" }), { text: "Agent unavailable", tone: "unknown", agentId: null, link: null }, "live state unknown");
   const inv = INVARIANTS.find(i => i.id === "a-task-only-says-working-when-its-agent-is")!;
   assert.equal(inv.check(ws([{}, { workingAgentId: "sub-1" }, { status: "pending" }]), now), null);
 });
@@ -38,7 +39,7 @@ test("a working task names its agent and that agent's live state, and opens it u
   assert.deepEqual(line({ workingAgentId: "sub-1" }, { "sub-1": { title: "Backfill pass", state: "archived" } }), { text: "Backfill pass archived", tone: "archived", agentId: null, link: null }, "archived: words only");
   assert.equal(line({ workingAgentId: "sub-1" }, { "sub-1": { title: null, state: "working" } }).text, "Agent working");
   // Another task's live agent doesn't lend it a state.
-  assert.equal(line({ workingAgentId: "sub-2" }, { "sub-1": { title: "Reader fix", state: "working" } }).text, "In progress");
+  assert.equal(line({ workingAgentId: "sub-2" }, { "sub-1": { title: "Reader fix", state: "working" } }).text, "Agent unavailable");
   // Only a live working agent's line claims working.
   for (const state of ["idle", "closed", "archived"] as const) assert.equal(claimsWorking(line({ workingAgentId: "a" }, { a: { title: "x", state } }).text), false);
 });
@@ -74,7 +75,7 @@ test("taskAgentStates reads the directory's metadata: running is working, a clos
     a: { title: "Reader fix", state: "working" }, b: { title: "Docs", state: "idle" }, c: { title: "Old", state: "closed" },
     d: { title: "Gone", state: "archived" }, e: { title: "Shell", state: "working" },
   }, "x isn't listed: left out (unknown, words only)");
-  assert.deepEqual(taskAgentStates(["a"], null), {}, "an unreadable directory says nothing (In progress)");
+  assert.deepEqual(taskAgentStates(["a"], null), {}, "an unreadable directory says nothing (Agent unavailable)");
 });
 
 test("the task row and sheet take their line from shared/task-status.ts, never a hard-coded Agent working", async () => {
@@ -88,7 +89,7 @@ test("a-task-only-says-working-when-its-agent-is: the live line, the summary and
   const at = (state: "working" | "idle" | "closed" | null) => ({ ...ws([{ title: "Backfill the deploy anchors", workingAgentId: "sub-1" }]), ...(state ? { taskAgents: { "sub-1": { title: "Backfill pass", state } } } : {}) });
   const inv = INVARIANTS.find(i => i.id === "a-task-only-says-working-when-its-agent-is")!;
   const home = (w: Workspace) => buildHome({ rows: [], tracked: [w], paseo: [], now }).groups.flatMap(g => g.items).find(r => r.workspaceId === w.id)!;
-  for (const [state, words] of [["closed", "Backfill pass closed"], ["idle", "Backfill pass idle"], [null, "In progress"]] as const) {
+  for (const [state, words] of [["closed", "Backfill pass closed"], ["idle", "Backfill pass idle"], [null, "Agent unavailable"]] as const) {
     const w = at(state);
     assert.deepEqual(liveLine(w, now), { icon: "waiting", text: `Backfill the deploy anchors · ${words}`, since: null }, `${state}: no spinner, the row's words`);
     assert.notEqual(summary(w, now).status, "handling", `${state}: not Agent handling`);
