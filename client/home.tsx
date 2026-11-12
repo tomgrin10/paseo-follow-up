@@ -15,7 +15,7 @@ import { BriefCard, type BriefDeps } from "./brief";
 import { SummaryLine } from "./about";
 import { ReferencesLine } from "./linked";
 import { bottomGap, bottomInset, Button, focusSoon, IconButton, space, text, type Theme } from "./kit";
-import { NeedsYouList } from "./needs-you";
+import { NeedsYouBlock } from "./needs-you";
 import { PrSheet } from "./pr-sheet";
 import { QuestionSheet } from "./questions";
 import { Age, BadgeView, BRIEF_KEY, glyphColor, HomeList, OVERSEER_KEY, PrChipView, PrSummaryText, type OverseerRowState } from "./home-list";
@@ -435,16 +435,20 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
   </View>;
   // "No ask stated" only repeats the chat; the panel already hides it, and on a phone it's dead weight above the ask.
   const showBrief = b && s.agentId && !(b.kind === "permission" && agent.permissions.length) && !(compact && b.source === "none");
+  // A flagged ask in a tracked workspace is part of its one Needs you block (shared/needs-block.ts): folded into the
+  // question it points at, or the block's first section. In Later, or with no workspace, the card stays on its own.
+  const inBlock = !!w && !!showBrief && !!row?.needs && !later && b.source !== "none";
 
   return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
     {header}
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: compact ? 16 : 20, gap: 16, paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
       {agent.permissions.map(p => <PermissionBlock key={p.id} p={p} theme={theme} compact={compact} busy={busy === `perm:${p.id}`} primary={plan.primary === "allow"} onRespond={r => void respond(p, r)} />)}
-      {showBrief ? <BriefCard {...({ embedded: true, snoozed: !!later, item: { data: b }, theme, layout: { compact }, agentId: s.agentId, deps: deps.briefDeps } as unknown as Parameters<typeof BriefCard>[0])} />
+      {showBrief ? inBlock ? null : <BriefCard {...({ embedded: true, snoozed: !!later, item: { data: b }, theme, layout: { compact }, agentId: s.agentId, deps: deps.briefDeps } as unknown as Parameters<typeof BriefCard>[0])} />
         : echoed || (b && compact && b.source === "none" && asks.length) ? null
         : row?.needs && !agent.permissions.length && !b ? <Text style={compact ? t.ask : [t.body, { fontSize: 15, lineHeight: 21, fontWeight: "600" }]}>{s.line || s.word || "Needs you"}</Text>
         : !row?.needs && s.line ? <Text style={t.body}>{s.line}</Text> : null}
-      {w && <NeedsYouList workspace={w} theme={theme} compact={compact} flush skip={b?.decisions.length ? ["question"] : []} feature={compact}
+      {w && <NeedsYouBlock workspace={w} theme={theme} compact={compact} now={Date.now()} style={{ marginHorizontal: 0, marginTop: 0 }}
+        brief={inBlock ? b : null} briefCard={inBlock && <BriefCard {...({ embedded: true, bare: true, item: { data: b }, theme, layout: { compact }, agentId: s.agentId, deps: deps.briefDeps } as unknown as Parameters<typeof BriefCard>[0])} />}
         actions={{ openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion, openAgent: () => openFull(s) }} />}
       {actionBar}
       {laterBlock}
