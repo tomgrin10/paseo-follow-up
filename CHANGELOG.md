@@ -54,8 +54,7 @@ Follow-up borrows ideas from [Progress](https://github.com/stevecastaneda/paseo-
 - An action card has a Done button that tells the agent you did it. Done shows as in progress while you can still undo it.
 - Ctrl+Z (Cmd+Z on a Mac) undoes the last action while its Undo message shows, on any keyboard layout.
 - You can select and copy text in cards, the panel, Home, sheets and messages.
-- Follow-up's version shows at the top of Home and the panel. Tap it for Settings and the release notes.
-- The version at the top of Home and the panel shows just the version. Tap it for update status and release notes.
+- Follow-up's version shows at the top of Home and the panel. Tap it for update status and the release notes.
 
 ### Questions and answers
 
