@@ -86,6 +86,18 @@ test("every script that starts a Paseo daemon or a browser takes a slot, and sta
   assert.ok(heavy.length >= 10, `found only ${heavy.length} harness scripts; the scan is broken`);
 });
 
+// Bug class (2026-11-12): screenshots.mjs never closed the fake GitHub server, so every run stayed alive after "done"
+// and held its harness slot until an outer timeout. A script that starts a server closes it.
+test("every script that starts the fake GitHub closes it, so the run exits and frees its slot", async () => {
+  const { readdir, readFile } = await import("node:fs/promises");
+  for (const name of (await readdir("scripts")).filter(n => n.endsWith(".mjs") && n !== "fake-github.mjs")) {
+    const source = await readFile(join("scripts", name), "utf8");
+    const started = /(\w+)\s*=\s*await fakeGithub\(/.exec(source);
+    if (!started) continue;
+    assert.match(source, new RegExp(`${started[1]}\\??\\.close\\(`), `${name} closes ${started[1]} (the fake GitHub server)`);
+  }
+});
+
 test("HARNESS_SLOT_HELD runs at once, like the wrapper's re-entry; a held slot exports it to children", async t => {
   const f = await fixture(t);
   const a = f.run(); await until(() => a.out.stdout.includes("slot 1"), "first takes the only slot");

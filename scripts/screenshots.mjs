@@ -631,6 +631,8 @@ async function setDaemonClock(fakeMs, rate = 0.001) {
 }
 
 let daemon; let client; let api; let browser; let daemonUrl = null;
+/** The fake GitHub's HTTPS server: closed in stopDaemon, or its listening socket keeps the run (and its harness slot) alive after "done". */
+let github = null;
 /** (Re)connects `client` and `api` to the isolated daemon. */
 async function connect() {
   await api?.dispose?.()?.catch?.(() => {}); await client?.close().catch(() => {});
@@ -641,6 +643,7 @@ async function connect() {
 const stopDaemon = async () => {
   await browser?.close().catch(() => {}); browser = null;
   await api?.dispose?.().catch?.(() => {}); await client?.close().catch(() => {}); client = null;
+  await github?.close().catch(() => {}); github = null;
   if (daemon && daemon.exitCode === null) {
     daemon.kill("SIGTERM");
     for (let i = 0; i < 40 && daemon.exitCode === null; i++) await new Promise(r => setTimeout(r, 100));
@@ -667,7 +670,7 @@ try {
   await fs.writeFile(join(home, "gh-fixture.json"), JSON.stringify(pulls()));
   await fs.writeFile(join(bin, "gh"), fakeGh(join(home, "gh-fixture.json"))); await fs.chmod(join(bin, "gh"), 0o700);
   // PR reads go over HTTPS (server/github-api.ts) to this fake, which answers with the same fixture gh.
-  const github = await fakeGithub({ dir: root, gh: join(bin, "gh") });
+  github = await fakeGithub({ dir: root, gh: join(bin, "gh") });
   await fs.writeFile(join(home, "linear-fixture.json"), JSON.stringify(linearIssues()));
   await fs.writeFile(join(bin, "mcpproxy"), fakeMcpproxy(join(home, "linear-fixture.json"))); await fs.chmod(join(bin, "mcpproxy"), 0o700);
   // Real speed while the daemon starts and the plugin installs; seeding and shooting crawl (setDaemonClock).
