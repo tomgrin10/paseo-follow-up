@@ -4,10 +4,11 @@ import { Pressable, Text } from "./text";
 import { Icon, Modal, TextInput, useToast } from "@getpaseo/plugin/client/ui";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useQueryClient } from "@tanstack/react-query";
-import type { Obligation, Workspace } from "../shared/model";
+import { blockedOnDeveloper, type Obligation, type Workspace } from "../shared/model";
 import { followUpObligations } from "../shared/follow-up";
 import { taskSchedule, type TaskTrigger } from "../shared/task-trigger";
 import { taskTriggerRpc } from "../shared/contracts";
+import { linkedQuestion, taskStatus, type TaskAgents, type TaskStatus } from "../shared/task-status";
 import { Button, Card, Chip, FoldRow, text, type Theme, SubmitScope } from "./kit";
 import { Spinner } from "./motion";
 import type { Colors } from "./theme";
@@ -62,55 +63,62 @@ function TriggerEditor({ obligation: o, workspace, theme, compact }: { obligatio
   </SubmitScope>;
 }
 
-/** The question a blocked task became, if the server has mirrored it. */
-const linkedQuestion = (o: Obligation, w: Workspace) => o.status === "blocked" ? [...(w.questions ?? [])].reverse().find(q => q.taskId === o.id && q.taskRevision !== null) ?? null : null;
-
-function statusOf(o: Obligation, w: Workspace) {
-  const schedule = taskSchedule(o, w);
-  if (finished(o)) return o.status === "done" ? "Done" : "Waived";
-  const q = linkedQuestion(o, w);
-  if (q) return q.answer ? `${q.id} · answered, waiting on the agent` : `${q.id} · waiting on your answer`;
-  if (o.status === "blocked") return "Needs a decision";
-  if (o.status === "working") return "Agent working";
-  return schedule.ready ? "Ready to send" : schedule.label;
-}
-function TaskGlyph({ o, w, colors }: { o: Obligation; w: Workspace; colors: Colors }) {
+function TaskGlyph({ o, w, status, colors }: { o: Obligation; w: Workspace; status: TaskStatus; colors: Colors }) {
   if (finished(o)) return <Icon name={o.status === "done" ? "Check" : "CircleSlash"} size={14} color={o.status === "done" ? colors.statusSuccess : colors.foregroundMuted} />;
-  if (o.status === "blocked") return <Icon name="MessageCircleQuestion" size={14} color={linkedQuestion(o, w) ? colors.foregroundMuted : colors.statusWarning} />;
-  if (o.status === "working") return <Spinner color={colors.accent} size={13} />;
+  // Blocked on the developer asks them (a question glyph, amber until its question is open); blocked on a PR or an
+  // agent is the agent's to wait out, so it stays muted.
+  if (o.status === "blocked") return blockedOnDeveloper(o) ? <Icon name="MessageCircleQuestion" size={14} color={linkedQuestion(o, w) ? colors.foregroundMuted : colors.statusWarning} /> : <Icon name="CirclePause" size={14} color={colors.foregroundMuted} />;
+  // A spinner only while the task's agent is really mid-turn (shared/task-status.ts), never off the stored status.
+  if (status.tone === "working") return <Spinner color={colors.accent} size={13} />;
   if (o.enable_follow_up && o.trigger && !taskSchedule(o, w).ready) return <Icon name="Clock" size={14} color={colors.foregroundMuted} />;
   return <View style={{ width: 14, height: 14, alignItems: "center", justifyContent: "center" }}><View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: colors.foregroundMuted, opacity: 0.6 }} /></View>;
 }
 
-function TaskRow({ o, w, theme, onOpen, compact }: { o: Obligation; w: Workspace; theme: Theme; onOpen: () => void; compact: boolean }) {
+/** "Open agent": goes to the task's agent's chat. Only for an agent that's still open; a closed one is just the words. */
+function OpenAgentLink({ status, openAgent, theme, compact }: { status: TaskStatus; openAgent?: (agentId: string) => void; theme: Theme; compact: boolean }) {
+  const c = theme.colors;
+  if (!status.agentId || !openAgent) return null;
+  const id = status.agentId;
+  return <><Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 17 }} accessibilityElementsHidden importantForAccessibility="no">·</Text><Pressable accessibilityRole="link" accessibilityLabel={`Open agent: ${status.text}`} hitSlop={compact ? 12 : 6} onPress={() => openAgent(id)}
+    style={state => ({ flexDirection: "row", alignItems: "center", gap: 3, borderRadius: 4, opacity: state.pressed ? 0.6 : 1, ...((state as { hovered?: boolean }).hovered ? { textDecorationLine: "underline" } : {}) } as object)}>
+    <Text style={{ color: c.foreground, fontSize: 12, lineHeight: 17, fontWeight: "500" }}>Open agent</Text>
+    <Icon name="ArrowUpRight" size={12} color={c.foreground} />
+  </Pressable></>;
+}
+
+function TaskRow({ o, w, agents, openAgent, theme, onOpen, compact }: { o: Obligation; w: Workspace; agents: TaskAgents; openAgent?: (agentId: string) => void; theme: Theme; onOpen: () => void; compact: boolean }) {
   const c = theme.colors; const t = text(c);
-  const status = statusOf(o, w);
+  const line = taskStatus(o, w, agents);
+  const status = line.text;
   const scheduled = o.enable_follow_up && !!o.trigger;
   const prs = o.afterPrs.map(p => `#${p.split("#")[1]}`).join(", ");
   return <Pressable accessibilityRole="button" accessibilityLabel={`Task: ${o.title}. ${status}. Open details`} onPress={onOpen}
     style={state => ({ flexDirection: "row", gap: 10, paddingHorizontal: 12, paddingVertical: 9, minHeight: compact ? 52 : 44, borderTopWidth: 1, borderTopColor: c.border, backgroundColor: state.pressed ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
-    <View style={{ width: 16, paddingTop: 2, alignItems: "center" }}><TaskGlyph o={o} w={w} colors={c} /></View>
+    <View style={{ width: 16, paddingTop: 2, alignItems: "center" }}><TaskGlyph o={o} w={w} status={line} colors={c} /></View>
     <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
       <RichText plain numberOfLines={3} style={[t.body, finished(o) ? { color: c.foregroundMuted } : null]}>{o.title}</RichText>
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
         {scheduled && !finished(o) ? <Chip theme={theme} label={`${status}${prs ? ` · ${prs}` : ""}`} color={c.foregroundMuted} />
-          : <Text style={[t.meta, o.status === "blocked" && !linkedQuestion(o, w) ? { color: c.statusWarning } : null, { fontVariant: ["tabular-nums"] }]}>{status}{prs && !finished(o) && !linkedQuestion(o, w) ? ` · waits for ${prs}` : ""}</Text>}
+          : <Text style={[t.meta, blockedOnDeveloper(o) && !linkedQuestion(o, w) ? { color: c.statusWarning } : null, { fontVariant: ["tabular-nums"] }]}>{status}{prs && !finished(o) && !linkedQuestion(o, w) ? ` · waits for ${prs}` : ""}</Text>}
+        <OpenAgentLink status={line} openAgent={openAgent} theme={theme} compact={compact} />
       </View>
     </View>
     <View style={{ paddingTop: 2 }}><Icon name="ChevronRight" size={14} color={c.foregroundMuted} /></View>
   </Pressable>;
 }
 
-function TaskSheet({ o, w, theme, compact, onClose }: { o: Obligation | null; w: Workspace; theme: Theme; compact: boolean; onClose: () => void }) {
+function TaskSheet({ o, w, agents, openAgent, theme, compact, onClose }: { o: Obligation | null; w: Workspace; agents: TaskAgents; openAgent?: (agentId: string) => void; theme: Theme; compact: boolean; onClose: () => void }) {
   const c = theme.colors; const t = text(c);
   const schedule = o ? taskSchedule(o, w) : null;
+  const line = o ? taskStatus(o, w, agents) : null;
   return <Modal title="Task" icon={<Icon name="ListTodo" size={18} color={c.foreground} />} open={!!o} onOpenChange={next => { if (!next) onClose(); }}>
     <Modal.Content contentContainerStyle={{ padding: compact ? 16 : 20, gap: 14 }}>
       {o && <>
         <View style={{ gap: 6 }}>
           <RichText selectable style={[t.title, { fontSize: 16, lineHeight: 22 }]}>{o.title}</RichText>
-          <Text style={t.meta}>{statusOf(o, w)}{o.afterPrs.length ? ` · after ${o.afterPrs.map(p => `#${p.split("#")[1]}`).join(", ")}` : ""}{schedule?.dueAt ? ` · due ${new Date(schedule.dueAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : ""}</Text>
+          <Text style={t.meta}>{line!.text}{o.afterPrs.length ? ` · after ${o.afterPrs.map(p => `#${p.split("#")[1]}`).join(", ")}` : ""}{schedule?.dueAt ? ` · due ${new Date(schedule.dueAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : ""}</Text>
         </View>
+        {line?.agentId && openAgent && <Button title="Open agent" icon="MessageSquare" accessibilityLabel={`Open agent: ${line.text}`} theme={theme} compact={compact} onPress={() => { openAgent(line.agentId!); onClose(); }} />}
         <View style={{ gap: 4 }}>
           <Text style={t.label}>Evidence</Text>
           <RichText selectable linkColor={c.foreground} style={t.meta}>{o.evidence || "Nothing recorded yet. The agent adds evidence when it checks or finishes the task."}</RichText>
@@ -123,10 +131,13 @@ function TaskSheet({ o, w, theme, compact, onClose }: { o: Obligation | null; w:
   </Modal>;
 }
 
-export function TasksCard({ workspace: w, theme, compact, open, toggle, onOpenQuestion }: { workspace: Workspace; theme: Theme; compact: boolean; open: (key: string) => boolean; toggle: (key: string) => void; onOpenQuestion?: (id: string) => void }) {
+export function TasksCard({ workspace: w, theme, compact, open, toggle, onOpenQuestion, openAgent }: { workspace: Workspace; theme: Theme; compact: boolean; open: (key: string) => boolean; toggle: (key: string) => void; onOpenQuestion?: (id: string) => void; openAgent?: (agentId: string) => void }) {
   const c = theme.colors; const t = text(c);
   const [selected, setSelected] = useState<string | null>(null);
   const all = followUpObligations(w);
+  // Live state of the agents working tasks name: the engine stores it with runtimeBusy (directory metadata, wakes
+  // nothing), so the row, the sheet, the live line and Home all read the same states.
+  const agents = w.taskAgents ?? {};
   const outstanding = all.filter(o => !finished(o));
   const completed = all.filter(finished);
   const showDone = open("tasks-done");
@@ -134,9 +145,9 @@ export function TasksCard({ workspace: w, theme, compact, open, toggle, onOpenQu
     {!all.length && <View style={{ paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border }}>
       <Text style={t.meta}>No follow-up tasks. The agent records work that outlives a merge here, like a migration to run or a production check.</Text>
     </View>}
-    {outstanding.map(o => { const q = linkedQuestion(o, w); return <TaskRow key={o.id} o={o} w={w} theme={theme} compact={compact} onOpen={() => q && onOpenQuestion ? onOpenQuestion(q.id) : setSelected(o.id)} />; })}
+    {outstanding.map(o => { const q = linkedQuestion(o, w); return <TaskRow key={o.id} o={o} w={w} agents={agents} openAgent={openAgent} theme={theme} compact={compact} onOpen={() => q && onOpenQuestion ? onOpenQuestion(q.id) : setSelected(o.id)} />; })}
     {completed.length > 0 && <FoldRow theme={theme} compact={compact} open={showDone} onPress={() => toggle("tasks-done")} icon="Check" iconColor={c.statusSuccess} label={`${completed.length} done`} />}
-    {showDone && completed.map(o => <TaskRow key={o.id} o={o} w={w} theme={theme} compact={compact} onOpen={() => setSelected(o.id)} />)}
-    <TaskSheet o={all.find(o => o.id === selected) ?? null} w={w} theme={theme} compact={compact} onClose={() => setSelected(null)} />
+    {showDone && completed.map(o => <TaskRow key={o.id} o={o} w={w} agents={agents} openAgent={openAgent} theme={theme} compact={compact} onOpen={() => setSelected(o.id)} />)}
+    <TaskSheet o={all.find(o => o.id === selected) ?? null} w={w} agents={agents} openAgent={openAgent} theme={theme} compact={compact} onClose={() => setSelected(null)} />
   </Card>;
 }

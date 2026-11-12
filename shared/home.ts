@@ -107,7 +107,7 @@ export function prChip(w: Workspace | undefined): PrChip | null {
   const pr: Pr = open[0] ?? ordered.at(-1)!;
   const more = (open.length || ordered.length) - 1;
   const s = pr.snapshot;
-  const checks = !s || pr.error ? null
+  const checks = !s?.complete ? null
     : s.state === "MERGED" ? { text: "merged", tone: "merged" as const }
     : s.state === "CLOSED" ? { text: "closed", tone: "muted" as const }
     : s.failedChecks.length ? { text: `✗ ${s.failedChecks.length}`, tone: "danger" as const }

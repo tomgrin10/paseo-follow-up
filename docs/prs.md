@@ -46,9 +46,14 @@ refreshed or opened its workspace, or its interval passed: 60 s for settled open
 ones (merged is final; deploy state is probed separately every tick). Otherwise its last observation stands in.
 Moving means: not read yet, an error, an incomplete read, a check actually running (finishing checks don't bump a
 PR's `updatedAt`; a required check that never reported isn't running), a merge queue, merge when ready on, unknown
-mergeability, or a content change in the last 5 minutes. Every other caller (the developer's Refresh, actions,
-`declare_done`) reads fresh. A settled open PR's change shows within 75 s, inside the completion gate's 120 s
+mergeability, or a content change in the last 5 minutes. The developer's Refresh reads fresh. A turn end, an action or an agent tool nudges only its own workspace
+(`engine.nudge`): that workspace's PRs, with the same backoff, and nudges within 2 s share one read (invariant
+`a-turn-end-never-reads-other-workspaces-prs`; until 2026-11-12 each one re-read every tracked PR fresh). A settled open PR's change shows within 75 s, inside the completion gate's 120 s
 freshness; the `poll-backoff-never-hides-a-moving-pr` invariant holds both. Opening a workspace's panel refreshes it.
+
+**Long-running checks.** Checks still running 10 minutes after a PR's last change (or since Follow-up first saw it)
+are read every 2 minutes instead of 30 s (invariant `long-running-checks-read-every-2-min`; 2026-11-12, 25 stacked
+PRs with checks running for hours cost ~3000 GraphQL points an hour).
 
 **Budget.** Each query asks for `rateLimit { cost remaining resetAt }`. Under 500 points left, settled PRs wait 5
 minutes and only in repositories with something moving, and merged PRs aren't read (see below). Under 100, or when GitHub
@@ -63,7 +68,15 @@ stand in instead of errors.
   none (invariant `a-github-limit-never-blanks-a-known-pr`, `tests/github-rate-limit.test.ts`). 2026-11-12: the
   account's GraphQL budget ran out, GitHub answered `RATE_LIMIT`, and every PR on it showed Unknown.
 - **Merged is final.** A merged PR with a known status isn't read again, not even on a cold start; only the
-  developer's Refresh of its workspace reads it.
+  developer's Refresh of its workspace reads it. A stored error doesn't change that: the skip reports no error, and
+  parsing the state (load included) drops an error from a merged PR with a complete snapshot (`prSchema`), so an
+  install heals without a Refresh. The developer's Refresh of a dormant workspace reads that workspace's PRs (only its PRs:
+  no agent observation, repairs or sends); before 2.0.1-beta.2 it read nothing there.
+- **A complete snapshot shows its own status.** Every surface reads a PR's status from its last complete snapshot
+  (`statusKnown`, `shared/model.ts`); a failed read after it only turns the PR sheet's Checked line into "Last checked
+  <age>" (`staleHint`, `shared/presentation.ts`). "Status unavailable" (Unknown in rows) means no complete read yet.
+  2026-11-12, live 2.0.1-beta.1: 13 merged PRs kept an error from beta.0's limit failures and read Unknown for good
+  (`tests/stale-pr-error.test.ts`). Gates that act on a PR (merge, reviewers, repairs) still want a fresh read.
 Cost per tick is pinned by `tests/github-poll-cost.test.ts`; `scripts/poll-cost.mjs` measures it in a harness
 (`--deploy-merged K` adds K merged PRs in the deployment repository, with a fake fleet and registry; `warmup` reports
 the cold start's spawns and compares).

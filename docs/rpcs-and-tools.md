@@ -44,7 +44,7 @@ is missing from AGENTS.md or docs/, so add a line here when you add one.
 | `enroll_workspace` | `follow.enroll` | Refines the goal of a workspace the developer activated. |
 | `register_pr` | `follow.register-pr` | Registers a submitted PR and its stack and parent. `agentMerges: true` marks a PR the agent merges itself: Follow-up never asks the developer to review or merge it. |
 | `exclude_stack` | `follow.exclude-stack` | Removes a wrongly registered stack, with an audit (`server/exclusions.ts`). |
-| `update_obligation` | `follow.obligation` | Creates or updates a task (an obligation), with an optional trigger and communication receipt. |
+| `update_obligation` | `follow.obligation` | Creates or updates a task (an obligation), with an optional trigger and communication receipt. `status: working` records the caller as the task's agent, or `workingAgentId` (another agent Paseo knows). `ask`, with `blocked`, is the question the developer must answer; only then does the task ask them. |
 | `acknowledge_batch` | `follow.acknowledge` | Records a repair batch's result: completed or blocked. |
 | `ask_question`, `record_answer`, `withdraw_question` | `follow.ask-question`, `follow.record-answer`, `follow.withdraw-question` | Questions for the developer (`server/questions.ts`). |
 | `set_spec` | `follow.set-spec` | The agent's spec link. The developer's own link wins over it. |
