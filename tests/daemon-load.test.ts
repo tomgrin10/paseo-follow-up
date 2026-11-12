@@ -110,6 +110,21 @@ test("idle request budget: under 2 daemon requests a minute with 120 workspaces"
   assert.ok((f.d.connections() - connectionsBefore) / 10 < 2, "and under 2 connections a minute");
 });
 
+test("a queued message only the developer sends (Auto off, a hold) costs no subagent listing per tick", async t => {
+  // 2026-11-12 (Q49 test:scale): repairs for awake agents with Auto off sat pending, and every tick listed their subagents.
+  const f = await fixture(t);
+  const queued = (w: State["workspaces"][number]) => w.batches.push({ id: `b-${w.id}`, messageId: "m", attempts: 1, result: "", recipientAgentId: null, contextPath: null, activityAt: null, acknowledgmentError: null, recoveryHandoffs: [],
+    tasks: [{ key: `review:example/app#${w.id}`, kind: "review", target: `example/app#1`, title: "Address review comments", fingerprint: "f" }], state: "pending", createdAt: iso(clock), sentAt: null, settledAt: null });
+  for (const w of f.state.workspaces.slice(0, 5)) { queued(w); w.enable_auto_sends = false; }
+  await tick(f); f.advance(15_000); await tick(f);
+  const before = f.d.requests.provider_subagents ?? 0;
+  for (let i = 0; i < 8; i++) { f.advance(15_000); await tick(f); }
+  assert.equal((f.d.requests.provider_subagents ?? 0) - before, 0, "no per-tick subagent listing for a send that waits on the developer");
+  for (const w of f.state.workspaces.slice(0, 5)) w.enable_auto_sends = true;
+  f.advance(15_000); await tick(f);
+  assert.ok((f.d.requests.provider_subagents ?? 0) > before, "with Auto on, the send decision still checks subagents");
+});
+
 test("Home and the panel read the shared directory: inbox reads cost no daemon request", async t => {
   const f = await fixture(t);
   await tick(f);
