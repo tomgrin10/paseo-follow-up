@@ -41,7 +41,7 @@ test("the strip carries when and why, and its reason is the send decision's", ()
     const w = message("pending", patch);
     const strip = messageStrip(w, clock)!;
     const d = sendDecision(w, clock);
-    assert.equal(strip.reason, d.reason, JSON.stringify(patch));
+    assert.equal(strip.reason, d.waitingOn === "you" ? "waits for your Send in Needs you" : d.reason, JSON.stringify(patch));
     assert.equal(strip.to, "Billing fix");
     // Send now only where the server takes it, and never where the send waits on the developer (Send lives in Needs you).
     assert.equal(strip.sendNow, d.canSendNow && d.waitingOn !== "you", JSON.stringify(patch));
@@ -115,4 +115,10 @@ test("workspace_status carries the next message: recipient, tasks, exact text, a
   assert.deepEqual({ to: info.to, reason: info.reason, text: info.text }, { to: "Billing fix", reason: sendDecision(w, clock).reason, text: "1. Resolve merge conflicts on example/app#1" });
   const status = compact("workspace_status", {}, { ...w, nextMessageInfo: info }) as { nextMessage: unknown };
   assert.deepEqual(status.nextMessage, info);
+});
+
+test("a row shows the task's short title; the agent's full instruction stays in the message", async () => {
+  const { shortTitle } = await import("../shared/task-rows");
+  assert.equal(shortTitle({ title: "Address review comments on example/app#160 (2 open threads): read the unresolved threads, fix, push, then reply and resolve" }), "Address review comments (2 open threads)");
+  assert.equal(shortTitle({ title: "Restack example/app#3 onto example/app#2" }), "Restack #3 onto #2");
 });

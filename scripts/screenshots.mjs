@@ -405,7 +405,8 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
         await page.getByRole("button", { name: /^Task: Resolve merge conflicts/ }).first().click();
         await page.getByText("Next message", { exact: true }).last().waitFor();
       });
-      if (name === "tasks-phone") await shoot("tasks-phone", PHONE, "light", async page => { await page.setViewportSize(PHONE); await open(page); });
+      // Phones reach the panel from the workspace: open it at desktop size, then narrow to the phone.
+      if (name === "tasks-phone") await shoot("tasks-phone", DESKTOP, "light", async page => { await open(page); await page.setViewportSize(PHONE); await page.getByText(/^Next message to /).first().scrollIntoViewIfNeeded(); });
     }
     if (name === "questions") await shoot("questions", DESKTOP, "dark", async page => {
       await openChat(page, "Billing retries", billing.prompt);
