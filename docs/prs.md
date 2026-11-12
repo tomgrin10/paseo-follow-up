@@ -51,9 +51,19 @@ mergeability, or a content change in the last 5 minutes. Every other caller (the
 freshness; the `poll-backoff-never-hides-a-moving-pr` invariant holds both. Opening a workspace's panel refreshes it.
 
 **Budget.** Each query asks for `rateLimit { cost remaining resetAt }`. Under 500 points left, settled PRs wait 5
-minutes and only in repositories with something moving, and merged PRs wait for the reset. Under 100, or when GitHub
-answers `RATE_LIMITED`, nothing is read until the reset (10 minutes when GitHub doesn't say) and the last
-observations stand in instead of errors.
+minutes and only in repositories with something moving, and merged PRs aren't read (see below). Under 100, or when GitHub
+answers with a rate limit (GraphQL's `RATE_LIMIT` or `RATE_LIMITED` error, or a 403/429 with `retry-after` or no
+remaining budget), nothing is read until the reset (10 minutes when GitHub doesn't say) and the last observations
+stand in instead of errors.
+- **Per token.** The in-process client (`server/github-api.ts`) rests a token whose budget is spent: no request goes
+  out on it until the reset, whichever owner asks (one account's token serves many owners). At most 4 requests are in
+  flight per token. Every failed read is logged (`[follow-up] GitHub read failed: <repo> HTTP <status>: …`).
+- **Never blanks a known PR.** Any failed read (a limit, a timeout, a 5xx) keeps each PR's last known status: the last
+  observation, else the stored snapshot (after a restart nothing is in memory). Only a PR never read says why it has
+  none (invariant `a-github-limit-never-blanks-a-known-pr`, `tests/github-rate-limit.test.ts`). 2026-11-12: the
+  account's GraphQL budget ran out, GitHub answered `RATE_LIMIT`, and every PR on it showed Unknown.
+- **Merged is final.** A merged PR with a known status isn't read again, not even on a cold start; only the
+  developer's Refresh of its workspace reads it.
 Cost per tick is pinned by `tests/github-poll-cost.test.ts`; `scripts/poll-cost.mjs` measures it in a harness
 (`--deploy-merged K` adds K merged PRs in the deployment repository, with a fake fleet and registry; `warmup` reports
 the cold start's spawns and compares).
