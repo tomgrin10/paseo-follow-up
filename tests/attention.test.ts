@@ -142,3 +142,15 @@ test("questions join Needs you: stop-mode first, blocked tasks fold into their q
   w.questions[2].answer!.delivery.state = "sent";
   assert.deepEqual(needsYou(w, clock), [], "an answered blocked-task question doesn't ask again while the agent catches up");
 });
+
+test("perSnapshot: a frozen store snapshot is answered once per clock reading; a mutable fixture is always fresh", async () => {
+  // 2026-11-12 realistic test:scale: each status invariant re-ran needsYou and batchView (and the send decision) per workspace.
+  const { perSnapshot } = await import("../shared/status");
+  const { deepFreeze } = await import("../server/store");
+  let runs = 0; const f = perSnapshot((w, now) => { runs++; return `${w.id}@${now}`; });
+  const frozen = deepFreeze(workspace({ id: "a" }));
+  assert.equal(f(frozen, 1), "a@1"); assert.equal(f(frozen, 1), "a@1"); assert.equal(runs, 1, "same snapshot, same clock: once");
+  f(frozen, 2); assert.equal(runs, 2, "a new clock reading recomputes");
+  const live = workspace({ id: "b" }); f(live, 1); f(live, 1); assert.equal(runs, 4, "an unfrozen workspace can change in place, so it's never cached");
+  const items = needsYou(frozen, 1); items.push(items[0]); assert.notEqual(needsYou(frozen, 1).length, items.length, "each caller gets its own array");
+});

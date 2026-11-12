@@ -126,7 +126,23 @@ function queuedReason(w: Workspace, b: Batch, now: number): { waitingOn: BatchVi
 }
 
 /** The batch that describes Follow-up's work right now: in flight, then stuck, then queued repairs, then the Done check. */
-export function batchView(w: Workspace, now = Date.now()): BatchView | null {
+/**
+ * Answers a pure (workspace, clock) function once per frozen workspace and clock reading. The store hands out deep-frozen
+ * snapshots, and one refresh asks the same questions of a workspace many times (each status invariant calls needsYou and
+ * batchView again): with queued messages that each run the send decision, that was the worker's top allocator on the
+ * realistic test:scale (2026-11-12). An unfrozen workspace (a test's mutable fixture) is always computed afresh.
+ */
+export function perSnapshot<T>(fn: (w: Workspace, now: number) => T): (w: Workspace, now?: number) => T {
+  const cache = new WeakMap<Workspace, { now: number; value: T }>();
+  return (w, now = Date.now()) => {
+    if (!Object.isFrozen(w)) return fn(w, now);
+    const hit = cache.get(w);
+    if (hit && hit.now === now) return hit.value;
+    const value = fn(w, now); cache.set(w, { now, value }); return value;
+  };
+}
+export const batchView = perSnapshot(computeBatchView);
+function computeBatchView(w: Workspace, now: number): BatchView | null {
   const recipientOf = (b: Batch): "main" | "recovery" => b.recipientAgentId && b.recipientAgentId !== w.mainAgentId ? "recovery" : "main";
   const who = (b: Batch) => recipientOf(b) === "recovery" ? "Recovery agent" : "Main agent";
   // Once Done, a Done check is moot (the worker settles it on the next refresh): it never shows as work.
