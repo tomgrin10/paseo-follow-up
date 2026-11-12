@@ -59,7 +59,7 @@ import { Governor } from "./server/governor";
 import { ListCache } from "./server/list-cache";
 import { scopeWriter, workflowSummary } from "./server/scopes";
 import { PrWorkflowStore } from "./server/pr-workflow";
-import { commandName, noReviewRepos } from "./shared/pr-workflow";
+import { commandName, handsMergeBack, noReviewRepoList, noReviewRepos } from "./shared/pr-workflow";
 import { projectRepo } from "./server/daemon";
 import { batchArchive, pruneUnsent } from "./server/batch-archive";
 import { statusCheck } from "./server/status-check";
@@ -154,8 +154,10 @@ export default function contribute(server: PluginServerContext) {
   const prWorkflow = new PrWorkflowStore(directory);
   let workspaceRepos: Map<string, string> = new Map();
   const workspaceRepo = (w: Workspace): string | null => (w.prs.find(p => p.snapshot?.state === "OPEN") ?? w.prs.at(-1))?.repo ?? workspaceRepos.get(w.id) ?? null;
+  /** Every repository a workspace touches: its open PRs' and its checkout's (the agent text's No review is all-or-nothing). */
+  const touchedRepos = (w: Workspace): string[] => [...new Set([...w.prs.filter(p => p.snapshot?.state !== "MERGED" && p.snapshot?.state !== "CLOSED").map(p => repoKey(p.repo)), ...(workspaceRepo(w) ? [repoKey(workspaceRepo(w)!)] : [])])];
   const knownRepos = (state: { workspaces: Workspace[] }) => new Set([...state.workspaces.filter(w => w.enable_tracking && !w.archived).flatMap(w => w.prs.map(p => repoKey(p.repo))), ...[...workspaceRepos.values()].map(repoKey)]);
-  const writeScopes = scopeWriter(directory, { agent: w => prWorkflow.agentWorkflow(workspaceRepo(w)), summary: state => workflowSummary([...knownRepos(state)].map(r => prWorkflow.cachedWorkflow(r))) });
+  const writeScopes = scopeWriter(directory, { agent: w => prWorkflow.agentWorkflow(workspaceRepo(w), touchedRepos(w)), summary: state => workflowSummary([...knownRepos(state)].map(r => prWorkflow.cachedWorkflow(r))) });
   // Every write: scopes for the hooks, then any open brief whose questions are now all settled resolves (every answer
   // path writes here, so one check covers them all; tests/stale-brief.test.ts).
   // Not awaited: onChanged runs inside the store's write queue, and resolving a brief can write the store again
@@ -529,7 +531,7 @@ export default function contribute(server: PluginServerContext) {
     await agentHooks.confirm(w.id, agentId, summary);
     return { workspaceId: w.id, synced: true as const };
   });
-  handle(rpc.agentStatusRpc, async ({ agentId }, { paseo }) => { await requireReady(); const workspaceId = await callerWorkspaceId(agentId, paseo); const w = agentWorkspace(await store.snapshot(), agentId, "read", workspaceId, "pr"); return { ...w, prWorkflow: prWorkflow.agentWorkflow(workspaceRepo(w)) }; });
+  handle(rpc.agentStatusRpc, async ({ agentId }, { paseo }) => { await requireReady(); const workspaceId = await callerWorkspaceId(agentId, paseo); const w = agentWorkspace(await store.snapshot(), agentId, "read", workspaceId, "pr"); return { ...w, prWorkflow: prWorkflow.agentWorkflow(workspaceRepo(w), touchedRepos(w)) }; });
   handle(rpc.activateRpc, async ({ workspaceId }) => { await requireReady(); return engine.activate(workspaceId); });
   handle(rpc.sendRpc, async ({ workspaceId, batchId }) => { await requireReady(); return engine.sendPending(workspaceId, batchId); });
   handle(rpc.recoverRpc, async ({ workspaceId }) => { await requireReady(); return engine.startRecovery(workspaceId); });
@@ -1161,7 +1163,8 @@ export default function contribute(server: PluginServerContext) {
     return result;
   });
   // Home, the sidebar badge and the pills poll this; an unchanged list answers in a few bytes (see inboxAnswer).
-  handle(rpc.inboxListRpc, async ({ etag }) => { await requireReady(); return inboxAnswer({ ...await inbox.list(), error: inboxError }, etag); });
+  handle(rpc.inboxListRpc, async ({ etag }) => { await requireReady(); const handedBack = noReviewRepoList().length ? (await store.snapshot()).workspaces.flatMap(w => w.prs.filter(handsMergeBack).map(p => p.key)) : [];
+    return inboxAnswer({ ...await inbox.list(), error: inboxError, ...(handedBack.length ? { handedBack } : {}) }, etag); });
   handle(rpc.inboxBriefRpc, async ({ agentId }) => { await requireReady(); return { brief: await inbox.brief(agentId) }; });
   handle(rpc.inboxActRpc, async (input, context) => { await requireReady(); return inbox.act(input, actorOf(context)); });
   handle(rpc.needsYouRpc, async ({ agentId, ...input }, { paseo }) => {

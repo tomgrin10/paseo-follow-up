@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { briefSchema, BRIEF_KINDS, BRIEF_SOURCES, BRIEF_STATES } from "./brief";
-import { agentMerges } from "./pr-workflow";
+import { agentMerges, agentMergesKey } from "./pr-workflow";
 
 /**
  * The "Needs you" inbox: one flag per root agent that only the developer clears, by signing it off or
@@ -178,6 +178,33 @@ export function liveFlag<B extends { kind: string; state: string; questionIds?: 
   if (!["running", "initializing"].includes(status) || !turnStartedAt) return { needs, brief };
   const stale = brief?.state === "open" && (brief.kind === "error" || brief.kind === "paused") && !brief.questionIds?.length && !!brief.at && brief.at < turnStartedAt;
   return { needs: withoutRunState(needs, turnStartedAt), brief: stale ? null : brief };
+}
+/** The PR an add-reviewers brief asks about: its Add reviewers move's PR. Null for every other kind. */
+export function reviewersBriefPr(b: { kind: string; moves?: readonly { kind: string; prKey?: string | null }[]; prKey?: string }): string | null {
+  if (b.kind !== "reviewers") return null;
+  return b.prKey ?? b.moves?.find(m => m.kind === "add_reviewers")?.prKey ?? null;
+}
+/**
+ * An open add-reviewers brief whose PR the agent merges itself (`agentMergesKey`): not an ask, so no surface draws it.
+ * Invariant a-no-review-repo-never-asks-for-review-or-merge.
+ */
+export const reviewersBriefWithdrawn = (b: { kind: string; state: string; moves?: readonly { kind: string; prKey?: string | null }[]; prKey?: string }): boolean => {
+  const pr = b.state === "open" ? reviewersBriefPr(b) : null;
+  return !!pr && agentMergesKey(pr);
+};
+/**
+ * A row as the client draws it: without the add-reviewers flags and brief of PRs the agent merges itself. The daemon
+ * withdraws those on its next tick; this closes the gap, so the moment a repository flips to No review its asks leave
+ * the pill, the inbox row, Home and the panel count together, and come back on Undo. The client inbox store applies it
+ * to every row it hands out (client/inbox-store.ts); invariant a-no-review-repo-never-asks-for-review-or-merge.
+ */
+export function withoutWithdrawnAsks<R extends Pick<InboxRow, "needs" | "brief">>(row: R): R {
+  const reasons = row.needs?.reasons.filter(r => !(r.reason === "reviewers" && r.dedupeKey.endsWith(":reviewers") && agentMergesKey(r.dedupeKey.slice(0, -":reviewers".length))));
+  const needsGone = !!row.needs && reasons!.length !== row.needs.reasons.length;
+  const briefGone = !!row.brief && reviewersBriefWithdrawn(row.brief);
+  if (!needsGone && !briefGone) return row;
+  const needs = needsGone ? reasons!.length ? { reasons: reasons!, since: reasons!.map(r => r.at).sort()[0] } : null : row.needs;
+  return { ...row, needs, brief: briefGone ? null : row.brief };
 }
 function withoutReasons(needs: Needs | null, drop: readonly Reason[]): Needs | null {
   if (!needs) return null;
@@ -459,7 +486,8 @@ export const inboxRowSchema = z.object({
   muteTurn: z.boolean(),
   enable_finish_flags: z.boolean(),
   /** The open or collapsed brief's one-liner, so every surface says the same thing (§4). */
-  brief: z.object({ kind: z.enum(BRIEF_KINDS), source: z.enum(BRIEF_SOURCES), state: z.enum(BRIEF_STATES), ask: z.string(), questionIds: z.array(z.string()).optional(), at: z.string().optional() }).nullable().optional(),
+  brief: z.object({ kind: z.enum(BRIEF_KINDS), source: z.enum(BRIEF_SOURCES), state: z.enum(BRIEF_STATES), ask: z.string(), questionIds: z.array(z.string()).optional(), at: z.string().optional(),
+    /** An add-reviewers brief's PR, so the client withdraws it with the PR's reviewers flag (`withoutWithdrawnAsks`). */ prKey: z.string().optional() }).nullable().optional(),
   /** When the agent's current turn started, if the worker saw it start (status invariant running-is-not-stale). */
   turnStartedAt: z.string().nullable().optional(),
   /** Paseo 0.16: the agent's live background work (shells, tasks); absent means none or a 0.15 host. */
