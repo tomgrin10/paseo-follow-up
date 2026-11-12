@@ -82,3 +82,32 @@ test("only-a-stop-holds: a workspace never holds for a cancel that wasn't the de
     assert.deepEqual(violations(w, clock).filter(v => v.id === "only-a-stop-holds"), [], c.cause);
   }
 });
+
+/**
+ * 2026-11-12 08:06, wks_5dfd3a653ad3c305: Smart Session delivered a /compact (queue item settled 08:06:23.965) and a
+ * second one replaced it 22 ms later ("Compaction canceled."). The canceled turn's prompt need not be in the timeline
+ * tail when its end is handled, and the replacing turn may not have started yet: Smart Session's own queue says a
+ * /compact was just delivered, so the cancel is the compaction's, never the developer's Stop.
+ */
+test("only-a-stop-holds: a cancel right after Smart Session delivered a /compact is the compaction's", () => {
+  const { cancelCause, compactionDelivered, holdOnTurnEnd } = status;
+  const end = Date.parse("2026-11-12T08:06:24.018Z");
+  const item = (patch: Record<string, unknown>) => ({ id: "c1", agentId: "main", state: "sent", createdAt: "2026-11-12T08:06:08.719Z", settledAt: "2026-11-12T08:06:23.965Z", confirmedAt: null, ...patch });
+  assert.equal(compactionDelivered([item({})], "main", end), true, "delivered 53 ms before the cancel");
+  assert.equal(compactionDelivered([item({ state: "sending", settledAt: null })], "main", end), true, "still being delivered: the send hadn't returned");
+  assert.equal(compactionDelivered([item({ agentId: "other" })], "main", end), false, "another agent's compaction");
+  assert.equal(compactionDelivered([item({ settledAt: "2026-11-12T07:50:00.000Z" })], "main", end), false, "delivered long before");
+  assert.equal(compactionDelivered([item({ confirmedAt: "2026-11-12T08:06:20.000Z", settledAt: "2026-11-12T08:05:00.000Z" })], "main", end), false, "that compaction already finished");
+  assert.equal(compactionDelivered([item({ state: "pending", settledAt: null })], "main", end), false, "queued, not sent: the turn isn't the /compact");
+  assert.equal(cancelCause({ reason: "Interrupted", prompt: null, newerTurn: false, compaction: true }), "compaction");
+  const w = main();
+  holdOnTurnEnd(w, { agentId: "main", turnId: "t1", at, outcome: { kind: "canceled", reason: "Interrupted" }, prompt: null, newerTurn: false, compaction: true });
+  assert.equal(w.hold, null, "no hold");
+});
+
+test("only-a-stop-holds: the worker's turn-end handler asks Smart Session's queue before holding", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile("index.server.ts", "utf8");
+  assert.match(source, /compactionJustDelivered\(event\.agent\.id/, "agent.turn_ended reads the compaction queue");
+  assert.match(source, /holdOnTurnEnd\(w, \{[^}]*\bcompaction\b[^}]*\}\)/, "and passes it to holdOnTurnEnd");
+});

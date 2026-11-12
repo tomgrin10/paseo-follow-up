@@ -93,7 +93,8 @@ Tests: `tests/main-claim.test.ts`, `tests/main-handover.test.ts`.
    unless Session Guard owns the interruption (`server/session-guard.ts`, `sessionGuardOwnsInterruption`).
    - Only a Stop holds. Paseo reports a Stop, a turn replaced by a newer message (the developer's or another
      agent's) and a refreshed session all as "Interrupted", so `cancelCause` reads the context: a newer turn already
-     started (`replaced`), the turn was a `/compact` (`compaction`), the reason names a reload or close (`reload`,
+     started (`replaced`), the turn was a `/compact` (`compaction`: its prompt, or Smart Session's queue showing a
+     `/compact` it just delivered, `compactionDelivered`), the reason names a reload or close (`reload`,
      `closed`), else `stop`. When unsure it doesn't hold: a missed pause is cheap, a stuck one silently stops repairs
      (invariant `only-a-stop-holds`, `tests/cancel-hold.test.ts`).
    - Follow-up's automatic hold is run state: a newer main-agent turn (a different turn id, from anyone) means the

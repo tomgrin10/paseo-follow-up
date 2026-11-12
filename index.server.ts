@@ -31,7 +31,7 @@ import { Graphite } from "./server/graphite";
 import { BrowserBridge } from "./server/browser-bridge";
 import { PrActions } from "./server/pr-actions";
 import { AgentActions, AGENT_TOOLS, controlWorkspace, type AgentTool } from "./server/agent-actions";
-import { PaseoGateway, paseoHome, clientEntry, daemonOptions, closeConnections, sessionGuardOwnsInterruption } from "./server/daemon";
+import { PaseoGateway, paseoHome, clientEntry, daemonOptions, closeConnections, sessionGuardOwnsInterruption, compactionJustDelivered } from "./server/daemon";
 import { mcpSource } from "./server/mcp-source";
 import { excludeStack } from "./server/exclusions";
 import { applyHistory, applyDiscovery, extractHistory, mainWorkDue, markMainWork } from "./server/discovery";
@@ -1313,12 +1313,14 @@ export default function contribute(server: PluginServerContext) {
       const started = startedTurns.get(event.agent.id);
       const newerTurn = !!started && started !== event.turnId;
       const prompt = history ? turnPrompt(history.entries.map(entry => entry.item)).message?.text ?? null : null;
+      // Smart Session's own record of a /compact it just delivered: the canceled turn was that compaction.
+      const compaction = event.outcome.kind === "canceled" && await compactionJustDelivered(event.agent.id, Date.parse(interruption!.at)).catch(() => false);
       if (["canceled", "failed"].includes(event.outcome.kind) && !guarded) await store.mutate(state => {
         const w = state.workspaces.find(w => w.enable_tracking && (w.mainAgentId === event.agent.id || w.contributorAgentIds?.includes(event.agent.id)));
         if (!w || w.mainAgentId !== event.agent.id || !interruption) return;
         // The provider lost the conversation: every later send fails the same way, so stop sending instead of holding.
         if (event.outcome.kind === "failed" && conversationGone(event.outcome.error.message)) { w.goneAgent = { agentId: event.agent.id, at: interruption.at, reason: event.outcome.error.message }; w.completion = null; w.declaration = null; return; }
-        holdOnTurnEnd(w, { agentId: event.agent.id, turnId: interruption.turnId, at: interruption.at, outcome: event.outcome, prompt, newerTurn });
+        holdOnTurnEnd(w, { agentId: event.agent.id, turnId: interruption.turnId, at: interruption.at, outcome: event.outcome, prompt, newerTurn, compaction });
       });
       void engine.tick();
     }),
