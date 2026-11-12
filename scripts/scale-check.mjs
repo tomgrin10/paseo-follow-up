@@ -169,7 +169,7 @@ try {
   const runBatches = settledState.workspaces.flatMap(w => w.batches.filter(b => b.sentAt && Date.parse(b.sentAt) > installedAt && !b.tasks.some(t => t.kind === "inventory")));
   const sendPhase = { seconds: Math.round((Date.now() - installedAt) / 1000), sends: await sendsSoFar(), acks: runBatches.filter(b => b.state === "completed" && !b.unacknowledged).length,
     unacknowledged: runBatches.filter(b => b.unacknowledged).length, capped: settledState.workspaces.reduce((n, w) => n + (w.heldTasks ?? []).filter(h => h.held === "capped").length, 0),
-    requestsPerMin: ratePerMinute(sendPhaseRequests, counter.snapshot(), "follow-up-worker", Date.now() - installedAt).total, peakCpuPct: peakCpu, settled: quiet >= 2 };
+    requestsPerMin: ratePerMinute(sendPhaseRequests, counter.snapshot(), "follow-up-worker", Date.now() - installedAt), peakCpuPct: peakCpu, settled: quiet >= 2 };
   if (!sendPhase.settled) { console.error(`Follow-up's sends didn't settle within ${SETTLE_BOUND_MS / 1000} s of seed load; open: ${still.slice(0, 10).join("; ")}`); process.exitCode = 1; }
   // The worker: its pid is in the lock it holds. RSS now, CPU and state.json writes over an idle window.
   const pid = Number((await readFile(join(home, "plugin-data/follow-up/worker.lock"), "utf8").catch(() => "")).split(":")[0]);
