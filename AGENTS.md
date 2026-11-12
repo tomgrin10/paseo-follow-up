@@ -165,6 +165,10 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    rows' opener is required, so right-click, long-press and Shift+F10 open Follow-up's row menu on every list (Home,
    search results, the sidebar view), never the platform's Copy/Paste menu. Items a surface can't serve are left
    out, not shown dead. Guarded by `tests/row-menu.test.ts` ([docs/client.md](docs/client.md#row-menu)).
+14. **Menu glyphs centre on their item** (`menu-glyphs-center-on-their-item`). Every menu item (the sort menu, the row
+   menu, the panel's More menu) lays out through `MenuItemContent` (`client/menu-item.tsx`): one leading glyph slot
+   centred on the item, sized for touch as its text is. No menu builds its own glyph slot, and none pins a glyph to
+   the first line. Guarded by `tests/menu-glyph.test.ts` ([docs/client.md](docs/client.md#row-menu)).
 
 ## Bugs
 

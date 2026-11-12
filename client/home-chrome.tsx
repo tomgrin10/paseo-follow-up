@@ -14,6 +14,7 @@ import { useMinute } from "./home-data";
 import { Spinner } from "./motion";
 import { withAlpha, type Colors } from "./theme";
 import type { Theme } from "./kit";
+import { MenuItemContent, menuGlyph, menuItemRow } from "./menu-item";
 import { useLinkedIndex } from "./linked";
 
 /**
@@ -189,18 +190,13 @@ export function SortMenu({ theme, mode, onChange, rankedAt, touch, rank = null, 
     {open && <View accessibilityRole="menu" style={{ position: "absolute", top: touch ? 48 : compact ? 36 : 34, right: 0, minWidth: touch ? 240 : 220, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1,
       shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 8 }}>
       {SORT_MODES.map(m => <Pressable key={m} accessibilityRole="menuitem" accessibilityState={{ selected: m === mode }} onPress={() => { onChange(m); setOpen(false); }}
-        style={state => ({ flexDirection: "row", alignItems: "center", gap: 8, minHeight: touch ? 48 : 34, paddingHorizontal: touch ? 12 : 10, backgroundColor: (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
-        <View style={{ width: 14, alignSelf: "flex-start", paddingTop: 2 }}>{m === mode && <Icon name="Check" size={13} color={c.foreground} />}</View>
-        <View style={{ flex: 1 }}>
-          <Text style={{ color: c.foreground, fontSize: 13, lineHeight: 17 }}>{SORT_LABEL[m]}</Text>
-          <Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 11, lineHeight: 15 }}>{SORT_HINT[m]}</Text>
-        </View>
+        style={state => ({ ...menuItemRow(touch), minHeight: touch ? 48 : 34, paddingHorizontal: touch ? 12 : 10, backgroundColor: (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
+        <MenuItemContent theme={theme} touch={touch} glyph={m === mode ? "Check" : null} label={SORT_LABEL[m]} hint={SORT_HINT[m]} />
       </Pressable>)}
       <View style={{ marginTop: 4, borderTopWidth: 1, borderTopColor: c.border, paddingTop: 2 }}>
         {rank?.enabled && onRerank && <Pressable accessibilityRole="menuitem" accessibilityState={{ busy: running, disabled: running }} disabled={running} onPress={() => void rerank()}
-          style={state => ({ flexDirection: "row", alignItems: "center", gap: 8, minHeight: touch ? 44 : 34, paddingHorizontal: 10, backgroundColor: (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
-          <View style={{ width: 14 }}>{running ? <Spinner color={c.foregroundMuted} size={12} label="Ranking" /> : <Icon name="RefreshCw" size={13} color={c.foreground} />}</View>
-          <Text style={{ color: running ? c.foregroundMuted : c.foreground, fontSize: 13 }}>{running ? "Ranking…" : "Re-rank now"}</Text>
+          style={state => ({ ...menuItemRow(touch), minHeight: touch ? 48 : 34, paddingHorizontal: touch ? 12 : 10, backgroundColor: (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
+          <MenuItemContent theme={theme} touch={touch} glyph={running ? <Spinner color={c.foregroundMuted} size={menuGlyph(touch).size - 2} label="Ranking" /> : "RefreshCw"} label={running ? "Ranking…" : "Re-rank now"} muted={running} />
         </Pressable>}
         {/* Phones: before anything is ranked, "Priority: By urgency" only repeats the checked row's hint. */}
         {!(touch && !rankedAt) && <Text style={{ color: c.foregroundMuted, fontSize: 11, paddingHorizontal: 10, paddingTop: 4, paddingBottom: shared ? 0 : 4 }}>Priority: {note}</Text>}
