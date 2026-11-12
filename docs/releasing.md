@@ -71,7 +71,9 @@ new bodies to a folder; it edits nothing. Read them, then run it again with `--a
 `--except v2.0.0-rc.0` leaves a page alone) to `gh release edit` each one.
 
 - Every page's current body is saved first (`<tag>.before.md` and `backup.json`), so any page can be restored.
-- A page someone wrote keeps its text verbatim under `## What's new`. Only the old install and check boilerplate
+- A stable or rc page with notes of its own was curated and is left exactly as it is (invariant
+  `backfill-keeps-curated-notes`; rc.0's page tells 1.x users the old id to update).
+- A beta page someone wrote keeps its text verbatim under `## What's new`. Only the old install and check boilerplate
   sentences go (the Paseo floor, the install id, install and update commands, the generic checks claim); the dry run
   lists each one. The page's own `## ` headings move one level down.
 - A page with no notes gets the release's rendered notes: the betas up to 1.4.0-beta.29 use the per-beta sections

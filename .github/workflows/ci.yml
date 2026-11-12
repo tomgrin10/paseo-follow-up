@@ -2,6 +2,8 @@ name: CI
 
 on:
   pull_request:
+    # labeled/unlabeled: the release note check reads the no-release-note label.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
 
@@ -21,6 +23,10 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # user-visible-change-has-a-note (scripts/check-release-note.mjs).
+      - name: Release note check
+        if: github.event_name == 'pull_request'
+        run: node scripts/check-release-note.mjs
       # npm run verify includes the scale check, which drives a real (isolated) Paseo daemon.
       # The same CLIs and checks as the publish workflow: a PR passes exactly the gate a release must pass
       # (tests/publish-gate.test.ts). 2026-11-11: test:install ran only at publish, and v2.0.0-rc.3 failed there.

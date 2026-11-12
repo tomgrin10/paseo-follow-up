@@ -1,7 +1,8 @@
 // One-shot: puts every existing GitHub release page in the format a new release gets (scripts/release-body.mjs).
 // - A page with no notes gets that release's rendered notes, or "No notes were written for this release."
-// - A page with hand-written notes keeps its text verbatim under ## What's new; only its old install and
+// - A beta page with hand-written notes keeps its text verbatim under ## What's new; only its old install and
 //   verification paragraphs are replaced by the frame's (ownNotes, listed in the dry run).
+// - A stable or rc page with notes of its own is curated and left exactly as it is.
 // - A page already in the format, or named in --except, is left alone.
 // Every page's current body is saved first as <tag>.before.md and in backup.json, so it can be restored.
 //   node scripts/backfill-release-notes.mjs [--out <dir>] [--only a,b] [--except v2.0.0-rc.0]   dry run, edits nothing
@@ -26,6 +27,9 @@ export function plan(releases, src, { only = null, except = [] } = {}) {
       if (framed(r.body)) return { tag: r.tagName, action: "keep", reason: "already in the format" };
       // Anything a person wrote on the page (whatever survives the boilerplate filter) is kept.
       const own = ownNotes(r.body);
+      // A stable or rc page with notes of its own was curated: kept as it is, install paragraph and all
+      // (backfill-keeps-curated-notes; 2026-11-12, rc.0's page told 1.x users the old id to update).
+      if (own.text && !/-beta\./.test(r.tagName)) return { tag: r.tagName, action: "keep", reason: "curated notes kept as they are" };
       if (own.text) {
         return { tag: r.tagName, action: "write", reason: `own notes kept, ${own.replaced.length} install/verification paragraph(s) replaced`, body: releaseBody(r.tagName, src, { notes: own.text || NO_NOTES, backfill: true }), replaced: own.replaced };
       }
