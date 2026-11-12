@@ -97,3 +97,15 @@ test("store-writes-only-real-changes: a history scan that only moves inventory.s
   assert.equal(JSON.parse(await readFile(join(d, "state.json"), "utf8")).workspaces[0].inventory.scannedMessageAt, "2026-01-01T10:05:00Z", "carrying the newest scan time");
   await store.close(1000);
 });
+
+test("the store keeps a fingerprint of what it wrote, not the 1–2 MB state.json text (worker memory, 2026-11-12)", async t => {
+  const d = await dir(t);
+  const store = new Store(d, 0);
+  await store.mutate(s => { for (let i = 0; i < 50; i++) s.workspaces.push(workspace({ id: `w${i}`, goal: "x".repeat(2000) })); });
+  const written = (store as unknown as { written: string }).written;
+  assert.ok(written.length < 64, `kept ${written.length} chars`);
+  const writes = store.writes;
+  await store.mutate(s => { s.workspaces[0]!.goal = "x".repeat(2000); });
+  await store.flush();
+  assert.equal(store.writes, writes, "an identical state still isn't rewritten");
+});
