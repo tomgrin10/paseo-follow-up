@@ -15,7 +15,8 @@ import { DeliveryDeferred, ConversationGone, realTimers, withDeadline, type Time
 import { recordSnapshot } from "./deployment-anchor";
 import { pruneUnsent } from "./batch-archive";
 import { holdSuperseded, liftHold } from "../shared/status";
-import { isCapped, sendDecision, settleUnacknowledged, UNACKNOWLEDGED_MS } from "../shared/send-decision";
+import { conditionId, isCapped, readSince, sendDecision, settleUnacknowledged, UNACKNOWLEDGED_MS } from "../shared/send-decision";
+import { isRepair } from "../shared/task-rows";
 export { settleUnacknowledged, UNACKNOWLEDGED_MS, NO_PROGRESS_CAP } from "../shared/send-decision";
 
 export interface Runtime {
@@ -101,6 +102,8 @@ export class Engine {
       for (const w of state.workspaces) for (const q of w.questions) if (q.answer?.delivery.state === "sending") q.answer.delivery = { ...q.answer.delivery, state: "unconfirmed", reason: "Follow-up reloaded before Paseo confirmed the answer. Check the agent's chat before resending." };
       // 2.0 betas before Q49 blocked a batch whose capped condition went out twice; the cap is per task now.
       for (const w of state.workspaces) for (const b of w.batches) if (b.state === "blocked" && b.unacknowledged) b.state = "completed";
+      // The retired 3-strike rule blocked a message before it went out; the per-task cap decides now, so it is re-formed.
+      for (const w of state.workspaces) for (const b of w.batches) if (b.state === "blocked" && !b.sentAt) { b.state = "cancelled"; b.result = "Re-formed under the per-task cap"; }
       for (const w of state.workspaces) for (const b of w.batches) if (b.state === "sending") {
         b.state = "uncertain";
         b.result = "Follow-up reloaded mid-send. It checks the agent's chat for the message and sends it only if it never arrived.";
@@ -467,9 +470,12 @@ export class Engine {
     // Hysteresis: a queued Done check survives the agent's own turns; only a real change (new work, Done) ends it.
     const queuedCheck = w.batches.find(b => b.state === "pending" && completionCheck(b));
     if (queuedCheck && w.runtimeBusy && !tasks.some(t => t.kind === "completion")) tasks.push(...tasksFor({ ...w, runtimeBusy: false }, this.now(), this.wording).filter(t => t.kind === "completion"));
-    // A batch settled without an acknowledgment delivered nothing for sure: its still-open tasks go out again.
-    const delivered = new Set(w.batches.filter(b => ["sending", "sent", "completed", "blocked", "uncertain"].includes(b.state) && !(b.state === "completed" && b.unacknowledged)).flatMap(b => b.tasks.map(t => `${t.key}:${t.fingerprint}`)));
-    const open = tasks.filter(t => !delivered.has(`${t.key}:${t.fingerprint}`));
+    // One cap (Q49): a send that left a PR condition as it was, acknowledged or not, delivered nothing GitHub shows, so
+    // the condition goes out again until it has gone out NO_PROGRESS_CAP times unchanged. An acknowledged one waits
+    // for a GitHub read newer than the acknowledgment, so a fix GitHub hasn't shown yet is never sent twice.
+    const delivered = new Set(w.batches.filter(b => ["sending", "sent", "completed", "blocked", "uncertain"].includes(b.state) && !(b.state === "completed" && b.unacknowledged))
+      .flatMap(b => b.tasks.filter(t => b.state !== "completed" || !isRepair(t) || !readSince(w, t, b.settledAt)).map(conditionId)));
+    const open = tasks.filter(t => !delivered.has(conditionId(t)));
     // One rule for every task in a message (Q49): a task the developer keeps for themselves, or a condition that went
     // out NO_PROGRESS_CAP times unchanged, stays out of it; only that task waits, the rest go out.
     const manual = new Set(w.manualTasks ?? []);
@@ -490,9 +496,6 @@ export class Engine {
     } else {
       pending = { id: randomUUID(), messageId: randomUUID(), tasks: fresh, state: "pending", createdAt: new Date(this.now()).toISOString(), sentAt: null, settledAt: null, attempts: 1, result: "", recipientAgentId: null, contextPath: null, activityAt: null, acknowledgmentError: null, recoveryHandoffs: [] };
       w.batches.push(pending);
-    }
-    if (fresh.some(t => ["conflict", "review", "checks", "restack"].includes(t.kind) && w.batches.filter(b => b.id !== pending!.id && ["completed", "blocked"].includes(b.state)).filter(b => b.tasks.some(old => old.key === t.key)).length >= 3)) {
-      pending.state = "blocked"; pending.result = "This PR still needs repairs after three follow-up batches. Review it before retrying.";
     }
     w.nextMessage = pending.state === "pending" ? messageText(w, pending) : null;
     // New repairs or tasks reopen the work; the Done check itself does not.

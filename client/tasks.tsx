@@ -18,6 +18,9 @@ import type { Colors } from "./theme";
 import { RichText } from "./rich-text";
 import { runAction } from "./toasts";
 
+/** The one-line hint under a task's Auto-send switch (the approved mock). */
+const AUTO_OFF_HINT = "Off: it stays here for you";
+
 const finished = (o: Obligation) => ["done", "waived"].includes(o.status);
 
 function TriggerEditor({ obligation: o, workspace, theme, compact }: { obligation: Obligation; workspace: Workspace; theme: Theme; compact: boolean }) {
@@ -248,9 +251,10 @@ function RepairSheet({ row, w, strip, theme, compact, onClose }: { row: RepairRo
             <Text style={t.meta}>{row.text}{where}</Text>
           </View>
         </View>
-        {row.state !== "done" && row.state !== "sent" && <View style={{ paddingTop: 12, borderTopWidth: 1, borderTopColor: c.border }}>
+        {row.state !== "done" && row.state !== "sent" && <View style={{ paddingTop: 12, gap: 4, borderTopWidth: 1, borderTopColor: c.border }}>
           <Switch theme={theme} compact={compact} label="Auto-send" value={!manual} disabled={saving} accessibilityLabel={`Auto-send ${row.task.title}`}
-            hint={`Follow-up sends this to ${strip?.to ?? w.mainAgentTitle ?? "the main agent"}. Off: it stays here for you.`} onChange={next => void setAuto(next)} />
+            hint={`Follow-up sends this to ${strip?.to ?? w.mainAgentTitle ?? "the main agent"}. ${AUTO_OFF_HINT}.`} onChange={next => void setAuto(next)} />
+          <Text style={t.meta}>{AUTO_OFF_HINT}</Text>
         </View>}
         {row.state === "queued" && !!w.nextMessage && <View style={{ gap: 6 }}>
           <Text style={t.label}>Next message</Text>

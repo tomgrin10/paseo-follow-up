@@ -80,7 +80,7 @@ function BatchCardView({ item, theme }: PluginTimelineItemProps<BatchCard>) {
   return <View style={{ alignSelf: "flex-end", width: "100%", maxWidth: 560, marginVertical: 4 }}>
     <View style={{ borderRadius: 10, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1, overflow: "hidden" }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingTop: 10, paddingBottom: recovery ? 10 : 6 }}>
-        <Icon name={recovery ? "History" : "Wrench"} size={14} color={c.foregroundMuted} />
+        <Icon name={recovery ? "History" : "Send"} size={14} color={c.foregroundMuted} />
         <Text style={{ flex: 1, color: c.foreground, fontSize: 13, lineHeight: 18, fontWeight: "600" }}>{recovery ? "Follow-up recovery brief" : `Follow-up sent ${card.tasks.length} task${card.tasks.length === 1 ? "" : "s"}`}</Text>
         <Pressable accessibilityRole="button" aria-expanded={expanded} accessibilityLabel={expanded ? "Hide the full message" : "Show the full message"} onPress={() => setExpanded(v => !v)} hitSlop={6}
           style={state => ({ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: state.pressed ? c.surface2 : "transparent" })}>

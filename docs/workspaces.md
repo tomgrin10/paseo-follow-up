@@ -97,9 +97,9 @@ Tests: `tests/main-claim.test.ts`, `tests/main-handover.test.ts`.
    - No routine Retry (Q50). A sent batch whose agent sits idle 2 minutes (`UNACKNOWLEDGED_MS`) without an
      acknowledgment is settled from GitHub (`settleUnacknowledged`, `shared/send-decision.ts`): tasks GitHub no
      longer shows are done, and still-open ones go back in the queue (`completed` with `unacknowledged`, which
-     `reconcile` doesn't count as delivered). Once one unchanged condition (same task key and fingerprint) has gone
-     out `NO_PROGRESS_CAP` (2) times without an acknowledgment, the batch is `blocked` with that reason, and only then
-     does Needs you offer Retry (invariant `retry-only-when-capped`). A refused acknowledgment still blocks.
+     `reconcile` doesn't count as delivered). The per-task cap below decides when an unchanged condition stops going
+     out. A refused acknowledgment, and the agent's own `blocked` acknowledgment (its reason is the Needs-you text),
+     still block.
    - A recovery batch follows the same rule: one that ends without an acknowledgment but caught the PR list up
      (`inventory.syncedRevision`) is done.
    - A reload mid-send makes it `uncertain` (`engine.recover()`). The next refresh reads the recipient's chat for the
@@ -141,12 +141,15 @@ back (`heldTasks`), or a settled message (Done). The batch is the internal deliv
   A row in the message says only Queued or Sent (invariant `message-rows-say-it-once`). Send now shows only where the
   server takes it (`canSendNow`) and the send doesn't wait on the developer (then Send lives in Needs you only). While
   sent, the strip reads "Sent to <agent> at 14:32 · N tasks · waiting for it to report back" with Open agent.
-- **The cap is per task.** A turn without an acknowledgment always settles its batch (completed + unacknowledged).
-  A condition that went out `NO_PROGRESS_CAP` times unchanged is held as `capped`: it stays out of the next message,
+- **The cap is per task, and it is the only one.** A turn without an acknowledgment always settles its batch
+  (completed + unacknowledged). An acknowledged `completed` whose PR condition GitHub still shows, read after the
+  acknowledgment (`readSince`), goes out again too. A condition that went out `NO_PROGRESS_CAP` times unchanged,
+  acknowledged or not, is held as `capped`: it stays out of the next message,
   shows its own Needs-you row ("Conflicts on #142 are still there after 2 messages", Retry and Open agent), and the
   rest of the queue keeps moving (invariant `a-capped-task-never-holds-the-queue`). Retry (`follow.control`
   `retryTask`, the `retry_batch` tool with `task`) records the sends so far in `taskRetries`, re-arming that one
-  condition. 2.0 betas that blocked a batch for this are settled by `recover()`.
+  condition. 2.0 betas that blocked a batch for this are settled by `recover()`, and a message the retired "three
+  batches" rule blocked before it went out is re-formed under the cap.
 - **Auto per task.** The task sheet's Auto-send switch (`follow.control` `taskAuto`, the `set_auto_send` tool with
   `task`) adds the task key to `manualTasks`; `reconcile` holds it as `manual` ("Auto off · stays with you").
 - **Done.** A task that went out and is gone from GitHub is Done: "Billing fix finished it" when acknowledged,

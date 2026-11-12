@@ -29,6 +29,10 @@ export type SendDecision = {
   canSendNow: boolean;
 };
 
+/** The idle wait in one sentence, with the agent's own title, said the same on every surface (Needs you, Home, the inbox). */
+export const idleReason = (w: Pick<Workspace, "mainAgentTitle">) => {
+  return `${w.mainAgentTitle?.trim() || "the main agent"} is idle, and Follow-up doesn't wake it`;
+};
 const iso = (ms: number) => new Date(ms).toISOString();
 /** The reason the settle gives: why "in a minute" and not now (Tom, 2026-11-12: "sending in a moment? why not now?"). */
 export const SETTLE_REASON = "waits a minute so new changes join the same message";
@@ -63,7 +67,7 @@ export function sendDecision(w: Workspace, now: number, o: { settleMs?: number; 
   if (openBatch) return wait("follow-up", "waits for the last message to finish");
   if (w.dormant) return wait("you", "waits until the workspace is active again");
   if (w.sendWait === "setup") return wait("follow-up", "sends once setup finishes");
-  if (w.sendWait === "unloaded") return wait("you", "the agent is idle and Follow-up doesn't wake it · send it now");
+  if (w.sendWait === "unloaded") return wait("you", idleReason(w));
   if (prUnread) return wait("follow-up", `waits until GitHub answers for #${prUnread.number}${prUnread.error ? ` (${prUnread.error})` : ""}, so the message isn't based on stale PRs`);
   // A refused send is retried once per settle window, never every refresh.
   if (b.refusal && now - Date.parse(b.refusal.at) < settleMs) return wait("follow-up", `didn't send: ${b.refusal.reason} · tries again shortly`, iso(Date.parse(b.refusal.at) + settleMs));
@@ -78,12 +82,20 @@ export const UNACKNOWLEDGED_MS = 120_000;
 export const NO_PROGRESS_CAP = 2;
 /** A condition's identity: the same task key and fingerprint is the same unchanged problem. */
 export const conditionId = (t: Pick<Task, "key" | "fingerprint">) => `${t.key}:${t.fingerprint}`;
-/** Unacknowledged sends of this condition since the developer last pressed Retry on it. */
+/**
+ * Settled sends of this condition since the developer last pressed Retry on it, acknowledged or not. The condition is
+ * still open with the same fingerprint wherever this is asked, so each of them left it as it was on GitHub.
+ */
 export function noProgressSends(w: Pick<Workspace, "batches" | "taskRetries">, t: Pick<Task, "key" | "fingerprint">, also?: Batch): number {
   const id = conditionId(t);
-  const sends = w.batches.filter(x => (x === also || x.unacknowledged) && x.tasks.some(y => conditionId(y) === id)).length;
+  const sends = w.batches.filter(x => (x === also || x.state === "completed" && !!x.sentAt) && x.tasks.some(y => conditionId(y) === id)).length;
   return sends - (w.taskRetries?.[id] ?? 0);
 }
+/** GitHub was read for the task's PR after `at` (an acknowledgment), so what it shows reflects the agent's work. */
+export const readSince = (w: Pick<Workspace, "prs">, t: Pick<Task, "target">, at: string | null | undefined) => {
+  const seen = w.prs.find(p => p.key === t.target)?.snapshot?.observedAt;
+  return !!at && !!seen && Date.parse(seen) > Date.parse(at);
+};
 /** The condition went out NO_PROGRESS_CAP times unchanged: it stops going out on its own, and only it (Q49). */
 export const isCapped = (w: Pick<Workspace, "batches" | "taskRetries">, t: Pick<Task, "key" | "fingerprint">) => noProgressSends(w, t) >= NO_PROGRESS_CAP;
 /**
