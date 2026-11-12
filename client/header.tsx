@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { View } from "react-native";
 import { Pressable, Text } from "./text";
 import { Icon } from "@getpaseo/plugin/client/ui";
@@ -44,7 +45,7 @@ function LiveGlyph({ icon, colors }: { icon: LiveIcon; colors: Colors }) {
   }
 }
 
-export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings, onRefresh, refreshing, onAuto, autoPending, notice, onOpenPr, resize, hideTitle = false, onHome }: {
+export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings, onRefresh, refreshing, onAuto, autoPending, notice, onOpenPr, resize, hideTitle = false, onHome, more }: {
   workspace: Workspace; theme: Theme; compact: boolean; now: number; onSettings: () => void; onRefresh: () => void; refreshing: boolean; onAuto: (next: boolean) => void; autoPending: boolean; notice: string | null; onOpenPr?: (key: string) => void;
   /** Expand to the larger view, or collapse back to the panel. Absent where the panel is already as wide as it gets. */
   resize?: { icon: "Maximize2" | "Minimize2"; label: string; onPress: () => void } | null;
@@ -52,6 +53,8 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
   hideTitle?: boolean;
   /** Phones: the panel's Home link joins the header's own bar, one 44px row instead of two. */
   onHome?: () => void;
+  /** The More button (client/panel-menu.tsx), before the gear. */
+  more?: ReactNode;
 }) {
   const c = theme.colors; const t = text(c, compact);
   const parts = headline(w, now);
@@ -62,6 +65,7 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
   const pad = compact ? 16 : 12;
   const controls = <View style={{ flexDirection: "row", alignItems: "center", gap: 2, marginVertical: compact ? -12 : -4, marginRight: compact ? -10 : -4 }}>
     {resize && <IconButton icon={resize.icon} label={resize.label} onPress={resize.onPress} theme={theme} compact={compact} />}
+    {more}
     <IconButton icon="Settings" label="Follow-up settings" onPress={onSettings} theme={theme} compact={compact} />
   </View>;
   const tail = <>

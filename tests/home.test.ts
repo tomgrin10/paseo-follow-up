@@ -153,3 +153,10 @@ test("the detail pane fills exactly one primary: Allow, then a workspace item, t
   assert.deepEqual(paneButtons({ ...base, permissions: 1 }).buttons, ["deny", "allow", "sign_off", "sign_off_next", "later", "open_full", "reply"]);
   assert.ok(!paneButtons({ ...base, hasAgent: false, flagged: false }).buttons.includes("reply"));
 });
+
+// Bug class: a name that changed in Paseo (Rename with AI, or a rename in Paseo) must show on Home at once, not after
+// the inbox's directory refreshes.
+test("a Needs-you row is named by Paseo's live workspace list, not the inbox's older copy", () => {
+  const model = buildHome({ now: NOW, rows: [row("agent-r", { workspaceId: "r", workspaceTitle: "Old name" })], tracked: [], paseo: [{ ...paseo("r"), name: "Retry soft declines with backoff" }] });
+  assert.equal([...model.byKey.values()].find(s => s.agentId === "agent-r")?.title, "Retry soft declines with backoff");
+});

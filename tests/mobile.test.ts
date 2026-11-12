@@ -85,7 +85,9 @@ test("phones: the pill sheet has one primary; Sign off steps back while the work
   const pill = await source("client/pill.tsx");
   assert.match(pill, /const itemFirst = touch && !!w && \(asking \|\| items\.length > 0\)/);
   assert.match(pill, /kind=\{itemFirst \? "secondary" : "primary"\} icon="Check" title="Sign off"/);
-  assert.match(pill, /<NeedsYouList [^>]*feature=\{touch\}/);
+  // An open question is the stepper's (its Send is the primary); the list only draws the other rows. The featured
+  // question row is gone: the Needs you block's question card is the one place a question renders (an-open-question-renders-once-per-surface).
+  assert.match(pill, /asking\s*\? <QuestionStepper[^]*?: <NeedsYouList /);
 });
 
 test("phones: only Home's search row stays pinned; the status chips and the setup offer scroll with the list", async () => {

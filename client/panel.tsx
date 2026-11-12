@@ -7,6 +7,7 @@ import { z } from "zod";
 import type { InboxStore } from "./inbox-store";
 import { useInbox } from "./inbox";
 import { BriefCard, type BriefDeps } from "./brief";
+import type { Brief } from "../shared/brief";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { controlRpc, refreshRpc, browserStatusRpc, recoverRpc, sendRpc, inboxBriefRpc } from "../shared/contracts";
 import { summary, type Workspace } from "../shared/model";
@@ -19,7 +20,9 @@ import { Button, Card, CardRow, FoldRow, IconButton, errorText, text, useNow, ty
 import { VersionMark } from "./updates";
 import { Reveal, Skeleton } from "./motion";
 import { WorkspaceHeader } from "./header";
-import { NeedsYouCard, overviewKey, workspaceKey } from "./needs-you";
+import { PanelMore } from "./panel-menu";
+import type { HomeSources } from "./home-data";
+import { NeedsYouBlock, overviewKey, workspaceKey } from "./needs-you";
 import { browserKey, BROWSER_POLL_MS } from "./keys";
 import { useWorkspace } from "./workspace-data";
 import type { LiveStore } from "./live";
@@ -38,7 +41,7 @@ import { ToastHost, useQuestionOpener } from "./toasts";
 export { overviewKey, workspaceKey };
 
 export type PanelLinks = { openSettings: () => void; openOverview: () => void; openLarge?: (workspaceId: string) => void };
-type PanelProps = PluginWorkspacePanelProps & PanelLinks & { inbox?: InboxStore; live?: LiveStore; briefDeps?: BriefDeps };
+type PanelProps = PluginWorkspacePanelProps & PanelLinks & { inbox?: InboxStore; live?: LiveStore; briefDeps?: BriefDeps; sources?: HomeSources };
 
 /**
  * The workspace panel (explorer column, or a tab on the phone): this workspace only. A Home button on top, then
@@ -138,17 +141,18 @@ export function PanelTop({ theme, compact, openOverview, openSettings }: { theme
   </View>;
 }
 
-/** The main agent's open ask, as the chat's brief card with its own moves (decisions, Sign off, Later). */
-function MainAsk({ w, theme, compact, inbox, briefDeps }: { w: Workspace; theme: Theme; compact: boolean; inbox: InboxStore; briefDeps: BriefDeps }) {
-  const row = useInbox(inbox, () => inbox.rows().find(r => r.agentId === w.mainAgentId) ?? null);
+const NO_INBOX = { subscribe: () => () => undefined, version: () => 0 } as unknown as InboxStore;
+/**
+ * The main agent's open ask (the chat's brief), for the Needs you block: null unless it is a real, flagged ask. The block
+ * folds it into the question it points at, or draws its card (with its moves) as the block's first section.
+ */
+function useMainBrief(w: Workspace, inbox: InboxStore | undefined): Brief | null {
+  const row = useInbox(inbox ?? NO_INBOX, () => inbox?.rows().find(r => r.agentId === w.mainAgentId) ?? null);
   const readBrief = useRpc(inboxBriefRpc);
-  const brief = useQuery({ queryKey: ["follow-up", "home-brief", w.mainAgentId, row?.seq ?? 0], queryFn: () => readBrief({ agentId: w.mainAgentId }), enabled: !!row?.needs && !!row?.brief });
+  const brief = useQuery({ queryKey: ["follow-up", "home-brief", w.mainAgentId, row?.seq ?? 0], queryFn: () => readBrief({ agentId: w.mainAgentId }), enabled: !!inbox && !!row?.needs && !!row?.brief });
   const b = brief.data?.brief?.state === "open" ? brief.data.brief : null;
   // "No ask stated" only repeats the chat beside it; the panel shows real asks.
-  if (!row?.needs || row.snooze || !b || b.source === "none") return null;
-  return <View style={{ marginHorizontal: compact ? 16 : 12, marginTop: 8 }}>
-    <BriefCard {...({ item: { data: b }, theme, layout: { compact }, agentId: w.mainAgentId, deps: briefDeps } as unknown as Parameters<typeof BriefCard>[0])} />
-  </View>;
+  return !row?.needs || row.snooze || !b || b.source === "none" ? null : b;
 }
 
 function PanelWorkspace(props: PanelProps & { workspace: Workspace; loadError?: string | null }) {
@@ -158,7 +162,8 @@ function PanelWorkspace(props: PanelProps & { workspace: Workspace; loadError?: 
   const { openLarge } = props;
   const compact = props.layout.compact;
   const top = <PanelTop theme={props.theme} compact={compact} openOverview={props.openOverview} openSettings={props.openSettings} />;
-  const ask = props.inbox && props.briefDeps ? <MainAsk w={props.workspace} theme={props.theme} compact={compact} inbox={props.inbox} briefDeps={props.briefDeps} /> : null;
+  const brief = useMainBrief(props.workspace, props.briefDeps ? props.inbox : undefined);
+  const ask = brief && props.briefDeps ? { brief, card: <BriefCard {...({ item: { data: brief }, theme: props.theme, layout: { compact }, agentId: props.workspace.mainAgentId, deps: props.briefDeps, bare: true } as unknown as Parameters<typeof BriefCard>[0])} /> } : null;
   return <WorkspaceView {...props} top={top} ask={ask} folds={{ isOpen, toggle }} resize={openLarge ? { icon: "Maximize2", label: "Open the larger view", onPress: () => openLarge(props.workspaceId) } : null} />;
 }
 
@@ -334,9 +339,11 @@ const folds = z.object({ open: z.array(z.string()) });
 /** Two columns from this content width: actions on the left, the stacks on the right. */
 export const WIDE_MIN = 820;
 
-export function WorkspaceView({ theme, layout, workspace: w, navigation, loadError, openSettings, openOverview, folds: { isOpen, toggle }, resize, large = false, top, ask }: PluginHostProps & {
-  navigation?: PluginWorkspacePanelProps["navigation"]; workspace: Workspace; loadError?: string | null; openSettings: () => void; openOverview: () => void; top?: ReactNode; ask?: ReactNode;
+export function WorkspaceView({ theme, layout, workspace: w, navigation, loadError, openSettings, openOverview, folds: { isOpen, toggle }, resize, large = false, top, ask, sources }: PluginHostProps & {
+  navigation?: PluginWorkspacePanelProps["navigation"]; workspace: Workspace; loadError?: string | null; openSettings: () => void; openOverview: () => void; top?: ReactNode; /** The main agent's open brief and its card, for the Needs you block. */ ask?: { brief: Brief; card: ReactNode } | null;
   folds: Folds; resize: { icon: "Maximize2" | "Minimize2"; label: string; onPress: () => void } | null; large?: boolean;
+  /** Home's sources: the header's More menu (the row menu). Absent in the larger view. */
+  sources?: HomeSources;
 }) {
   const control = useRpc(controlRpc); const refresh = useRpc(refreshRpc); const browserRead = useRpc(browserStatusRpc);
   const cache = useQueryClient(); const toast = useToast();
@@ -348,6 +355,7 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const [question, setQuestion] = useState<string | null>(null);
   useQuestionOpener(w.id, setQuestion);
   const [specOpen, setSpecOpen] = useState(false);
+  const [moreMenu, setMoreMenu] = useState<ReactNode>(null);
   const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), refetchInterval: BROWSER_POLL_MS });
   const invalidated = () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); };
   const auto = useMutation({ mutationFn: (next: boolean) => control({ workspaceId: w.id, enable_auto_sends: next }), onSuccess: (_, next) => { toast.show(next ? "Auto-send on for this workspace" : "Auto-send off · repairs wait for your click"); invalidated(); }, onError: e => toast.error(errorText(e)) });
@@ -359,9 +367,10 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const openPr = (key: string) => setSheet({ key, intent: null });
   // The expand button only appears while the panel is narrow; a wide panel or the larger view keeps its collapse button.
   const resizeShown = compact ? null : resize?.icon === "Maximize2" && wide ? null : resize;
-  const header = <WorkspaceHeader workspace={w} theme={theme} compact={compact} now={now} onSettings={openSettings} onRefresh={() => update.mutate()} refreshing={update.isPending} onAuto={next => auto.mutate(next)} autoPending={auto.isPending} notice={loadError ?? null} onOpenPr={openPr} resize={resizeShown} hideTitle={large} onHome={compact ? openOverview : undefined} />;
+  const header = <WorkspaceHeader workspace={w} theme={theme} compact={compact} now={now} onSettings={openSettings} onRefresh={() => update.mutate()} refreshing={update.isPending} onAuto={next => auto.mutate(next)} autoPending={auto.isPending} notice={loadError ?? null} onOpenPr={openPr} resize={resizeShown} hideTitle={large} onHome={compact ? openOverview : undefined}
+    more={sources ? <PanelMore w={w} sources={sources} theme={theme} compact={compact} openAgent={openAgent} openQuestion={setQuestion} showMenu={setMoreMenu} /> : undefined} />;
   const shipped = <ShippedCard workspace={w} theme={theme} compact={compact} now={now} />;
-  const needs = <NeedsYouCard workspace={w} theme={theme} compact={compact} now={now} actions={{ openAgent, openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion }} />;
+  const needs = <NeedsYouBlock workspace={w} theme={theme} compact={compact} now={now} brief={ask?.brief ?? null} briefCard={ask?.card ?? null} actions={{ openAgent, openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion }} />;
   // Once shipped, the stack and tasks are history: one quiet fold instead of two near-empty cards.
   const history = done && <View style={{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.colors.border, overflow: "hidden" }}>
     <View style={{ marginTop: -1 }}><FoldRow theme={theme} compact={compact} open={isOpen("history")} onPress={() => toggle("history")} icon="History" iconColor={theme.colors.foregroundMuted} label={historyLabel(w)} /></View>
@@ -376,7 +385,6 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
     {!compact && top}
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20, ...(large ? { maxWidth: 1240, width: "100%", alignSelf: "center", paddingHorizontal: 12 } : null) }}>
       {header}
-      {ask}
       {wide ? <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
         <View style={{ flex: 5, minWidth: 0 }}>{shipped}{needs}{history}{tasks}</View>
         <View style={{ flex: 6, minWidth: 0 }}>{stacks}{log}{extras}</View>
@@ -385,5 +393,7 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
     <PrSheet workspace={w} prKey={sheet?.key ?? null} intent={sheet?.intent ?? null} theme={theme} compact={compact} browserReady={browser.data?.ready ?? false} onClose={() => setSheet(null)} />
     <QuestionSheet workspace={w} questionId={question} theme={theme} compact={compact} openAgent={openAgent} onClose={() => setQuestion(null)} />
     <SpecSheet workspace={w} open={specOpen} theme={theme} compact={compact} onClose={() => setSpecOpen(false)} />
+    {/* The More menu draws last, at the panel's root, so the panel's own content never paints over it. */}
+    {moreMenu}
   </View>;
 }
