@@ -94,6 +94,8 @@ export const batchSchema = z.object({
   recoveryHandoffs: z.array(z.object({ fromAgentId: idSchema, toAgentId: idSchema, at: z.string() })).default([]),
   /** The last automatic send Follow-up refused for this queued batch (shared/send-decision.ts). Cleared on a send or a task change. */
   refusal: z.object({ reason: z.string(), at: z.string() }).nullable().optional(),
+  /** The agent's turn ended without acknowledge_batch; Follow-up settled it from GitHub instead (settleUnacknowledged). */
+  unacknowledged: z.boolean().optional(),
 });
 export const workspaceSchema = z.object({
   id: idSchema, title: textSchema, goal: textSchema, mainAgentId: idSchema,

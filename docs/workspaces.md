@@ -94,8 +94,18 @@ Tests: `tests/main-claim.test.ts`, `tests/main-handover.test.ts`.
    retried once per settle window, and cleared by a send or a changed task list. Otherwise the batch waits for the
    developer's Send (`follow.send`).
 5. Batch states: `pending` → `sending` → `sent` → acknowledged (`acknowledge_batch`), or `blocked` or `uncertain`.
-   - A sent batch with no acknowledgment after 2 idle minutes becomes `blocked`.
-   - A reload mid-send makes it `uncertain` (`engine.recover()`).
+   - No routine Retry (Q50). A sent batch whose agent sits idle 2 minutes (`UNACKNOWLEDGED_MS`) without an
+     acknowledgment is settled from GitHub (`settleUnacknowledged`, `shared/send-decision.ts`): tasks GitHub no
+     longer shows are done, and still-open ones go back in the queue (`completed` with `unacknowledged`, which
+     `reconcile` doesn't count as delivered). Once one unchanged condition (same task key and fingerprint) has gone
+     out `NO_PROGRESS_CAP` (2) times without an acknowledgment, the batch is `blocked` with that reason, and only then
+     does Needs you offer Retry (invariant `retry-only-when-capped`). A refused acknowledgment still blocks.
+   - A recovery batch follows the same rule: one that ends without an acknowledgment but caught the PR list up
+     (`inventory.syncedRevision`) is done.
+   - A reload mid-send makes it `uncertain` (`engine.recover()`). The next refresh reads the recipient's chat for the
+     batch's `messageId` (`PaseoGateway.arrived`, at most once a minute, loaded agents only so nothing wakes): found,
+     it's `sent`; missing, it goes back to `pending` under the same `messageId` and sends once; unknown, it stays
+     `uncertain` and asks the developer to check.
    - Never-sent cancelled batches are pruned to `archive/` (`server/batch-archive.ts`).
 6. **Holds.** A failed main-agent turn, or the developer's Stop, sets `hold` (`holdOnTurnEnd` in `shared/status.ts`),
    unless Session Guard owns the interruption (`server/session-guard.ts`, `sessionGuardOwnsInterruption`).
