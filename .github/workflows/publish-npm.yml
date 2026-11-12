@@ -139,29 +139,27 @@ jobs:
       GH_REPO: ${{ github.repository }}
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
       - name: Publish release notes after npm verification
         run: |
           if gh release view "$RELEASE_TAG" --json tagName > /dev/null 2>&1; then
             exit 0
           fi
-          # Versions with a prerelease part (v1.1.0-beta.0) are GitHub prereleases and never "Latest".
+          # Every release gets notes in one format (scripts/release-body.mjs): a beta renders its own changes/
+          # fragments, a stable version or a major's rc its curated CHANGELOG.md section. Versions with a prerelease
+          # part (v1.1.0-beta.0, v2.0.0-rc.0) are GitHub prereleases and never "Latest".
           case "$RELEASE_TAG" in
-            *-*)
-              stable="$(npm view paseo-follow-up dist-tags.latest --registry https://registry.npmjs.org)"
-              channel=(--prerelease --latest=false)
-              install="\`paseo plugin update follow-up --version ${RELEASE_TAG#v}\` (beta). Return to stable with \`paseo plugin update follow-up --version ${stable}\`" ;;
-            *) channel=(--latest); install='`paseo plugin install paseo-follow-up`' ;;
+            *-*) channel=(--prerelease --latest=false) ;;
+            *) channel=(--latest) ;;
           esac
-          cat > /tmp/release-notes.md <<'NOTES'
-          Track workspace pull requests, queue follow-up work, and verify completion in Paseo.
-
-          Install with: INSTALL_LINE on Paseo 0.15 or newer.
-
-          The installation ID remains `follow-up` to preserve saved work and settings.
-          This release passed plugin verification, isolated packed installation checks,
-          and npm registry integrity verification before these notes were published.
-          NOTES
-          sed -i "s|INSTALL_LINE|$install|" /tmp/release-notes.md
+          node scripts/release-body.mjs "$RELEASE_TAG" > "$RUNNER_TEMP/release-notes.md"
           gh release create "$RELEASE_TAG" --verify-tag \
-            --title "Paseo Follow-up $RELEASE_TAG" \
-            --notes-file /tmp/release-notes.md "${channel[@]}"
+            --title "Follow-up $RELEASE_TAG" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" "${channel[@]}"
