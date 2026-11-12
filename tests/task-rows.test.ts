@@ -11,6 +11,7 @@ import type { Batch, Obligation, Task, Workspace } from "../shared/model";
 import { messageStrip, nextMessageInfo, repairRows } from "../shared/task-rows";
 import { sendDecision, SETTLE_REASON } from "../shared/send-decision";
 import { taskStatus } from "../shared/task-status";
+import { headerLine, liveLine } from "../shared/attention";
 import { violations } from "../shared/status-invariants";
 import { clock, workspace, pr, snapshot } from "./fixtures";
 
@@ -52,6 +53,18 @@ test("the strip carries when and why, and its reason is the send decision's", ()
   assert.equal(messageStrip(message("pending", { runtimeBusy: true }), clock)!.reason, "sends when its current turn ends, so it isn't interrupted");
   const sent = messageStrip(message("sent"), clock)!;
   assert.equal(sent.phase, "sent"); assert.equal(sent.reason, "waiting for it to report back");
+});
+
+test("the panel header says who and what while a message is queued; the strip alone says when and why", () => {
+  for (const patch of [{}, { runtimeBusy: true }, { sendWait: "unloaded" as const }]) {
+    const w = message("pending", patch);
+    const head = headerLine(w, clock);
+    assert.equal(head.text, "5 tasks queued for Billing fix", JSON.stringify(patch));
+    assert.equal(head.since, null, "never the time");
+    assert.ok(!head.text.includes(sendDecision(w, clock).reason), "the reason lives in the strip");
+    assert.ok(liveLine(w, clock).text.endsWith(sendDecision(w, clock).reason), "Home (no strip) keeps the full line");
+  }
+  assert.deepEqual(headerLine(message("sent"), clock), liveLine(message("sent"), clock), "only the queued line changes");
 });
 
 test("done rows say how they finished; a resolved-before-sent repair never shows", () => {

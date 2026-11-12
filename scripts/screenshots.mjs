@@ -405,17 +405,17 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
         await page.getByRole("button", { name: /^Task: Resolve merge conflicts/ }).first().click();
         await page.getByText("Next message", { exact: true }).last().waitFor();
       });
-      // Phones reach the panel from the workspace: open it at desktop size, then narrow to the phone.
-      // The clip starts below the host's own header, which names the host machine.
-      if (name === "tasks-phone") await shoot("tasks-phone", DESKTOP, "light", async page => {
-        await openChat(page, spec.title, spec.prompt);
+      // Phones see a workspace's Tasks in the larger view (a Paseo screen; Home's phone focus view has no Tasks):
+      // open it from the panel at desktop size, then narrow to the phone.
+      if (name === "tasks-phone") await shoot("tasks-phone", PHONE, "light", async page => {
+        await open(page);
+        await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
+        await page.getByText(/^Next message to /).last().waitFor({ timeout: 60000 });
         await page.setViewportSize(PHONE);
-        await page.getByRole("button", { name: "Open workspace follow-up", exact: true }).last().click();
         const strip = page.getByText(/^Next message to /).last();
         await strip.waitFor({ timeout: 60000 });
-        await strip.scrollIntoViewIfNeeded();
+        await strip.evaluate(el => el.scrollIntoView({ block: "center" }));
         if (await page.evaluate(() => document.documentElement.scrollWidth) > PHONE.width) throw new Error("tasks-phone scrolls sideways");
-        return { x: 0, y: 80, width: PHONE.width, height: PHONE.height - 80 };
       });
     }
     if (name === "questions") await shoot("questions", DESKTOP, "dark", async page => {
