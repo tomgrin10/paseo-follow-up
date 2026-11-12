@@ -1,4 +1,4 @@
-import type { Batch, Workspace } from "./model";
+import type { Batch, Task, Workspace } from "./model";
 import { recoveryBatch } from "./follow-up";
 
 /** How long a new batch waits before it goes out on its own, so tasks that land together go in one message. */
@@ -63,4 +63,36 @@ export function sendDecision(w: Workspace, now: number, o: { settleMs?: number; 
   const due = Date.parse(b.createdAt) + settleMs;
   if (now < due) return { send: false, waitingOn: null, reason: "sending in a moment", eta: iso(due) };
   return { send: true, waitingOn: null, reason: "sending now", eta: iso(now) };
+}
+
+/** How long a sent batch's agent may sit idle without acknowledge_batch before Follow-up settles it from GitHub. */
+export const UNACKNOWLEDGED_MS = 120_000;
+/** Sends of one condition (same task key and fingerprint) with no progress before it stops going out on its own. */
+export const NO_PROGRESS_CAP = 2;
+/**
+ * A sent batch whose turn ended without an acknowledgment (Q50: no routine retry). `open` is what GitHub and the
+ * tasks show now (server/tasks.ts tasksFor). Tasks no longer open are done. Still-open ones go back in the queue (reconcile skips an
+ * unacknowledged completed batch), unless one has now gone out NO_PROGRESS_CAP times unchanged: then the batch is
+ * blocked with that reason and Retry is the developer's.
+ */
+export function settleUnacknowledged(w: Workspace, b: Batch, open: readonly Task[], now: number): void {
+  const id = (t: Pick<Task, "key" | "fingerprint">) => `${t.key}:${t.fingerprint}`;
+  const openIds = new Set(open.map(id));
+  const still = b.tasks.filter(t => openIds.has(id(t)));
+  const capped = cappedTasks(w, b).filter(t => openIds.has(id(t)));
+  b.unacknowledged = true; b.settledAt = new Date(now).toISOString();
+  if (capped.length) {
+    b.state = "blocked";
+    b.result = `Sent ${NO_PROGRESS_CAP} times with no change on GitHub: ${capped.map(t => t.title).join("; ")}. Check the main agent's chat, then Retry.`;
+    return;
+  }
+  b.state = "completed";
+  const done = b.tasks.length - still.length;
+  b.result = !still.length ? "The turn ended without an acknowledgment; GitHub no longer shows these, so they're done."
+    : `The turn ended without an acknowledgment.${done ? ` ${done} done on GitHub;` : ""} ${still.length} still open ${still.length === 1 ? "goes" : "go"} in the next message.`;
+}
+/** The unchanged conditions in `b` that went out NO_PROGRESS_CAP times without an acknowledgment. */
+export function cappedTasks(w: Pick<Workspace, "batches">, b: Batch): Task[] {
+  const id = (t: Pick<Task, "key" | "fingerprint">) => `${t.key}:${t.fingerprint}`;
+  return b.tasks.filter(t => w.batches.filter(x => (x === b || x.unacknowledged) && x.tasks.some(y => id(y) === id(t))).length >= NO_PROGRESS_CAP);
 }
