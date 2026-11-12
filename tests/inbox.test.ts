@@ -570,3 +570,25 @@ test("a-tick-copies-the-state-at-most-once: a tick that only moves lastSeen copi
   now += 2_000; await inbox.tick();
   assert.equal(copies, 1, "the due snooze runs through mutate");
 });
+
+test("a-tick-copies-the-state-at-most-once: the seen-event drop never swallows a PR's first merge; repeats copy nothing", async t => {
+  // #144 added pr_merged ('Merged'); the per-tick drop of already-seen PR events must let its first sighting through.
+  const dir = await mkdtemp(join(tmpdir(), "follow-inbox-merged-")); t.after(() => rm(dir, { recursive: true, force: true }));
+  const f = fake([agent({ id: "a1" }), agent({ id: "a2" })]);
+  const inbox = new Inbox(dir, { enabled: async () => ({ enable_inbox: true, enable_inbox_pr_closed: true }), directory: f.directory, sources: f.none, guard: async () => null, now: () => Date.parse(at(1)) });
+  await inbox.store.mutate(s => { s.importedAt = at(0); s.primedAt = at(0); });
+  const follow = { version: 1 as const, workspaces: [
+    workspace({ id: "w1", mainAgentId: "a1", prs: [pr({ key: "example/app#7", number: 7, snapshot: snapshot({ state: "MERGED" }) })] }),
+    workspace({ id: "w2", mainAgentId: "a2", prs: [pr({ key: "example/app#8", number: 8, agentMerges: true, snapshot: snapshot({ state: "MERGED" }) } as never)] }),
+  ] };
+  await inbox.observeFollowUp(follow as never);
+  const first = await inbox.store.snapshot();
+  assert.deepEqual(first.entries.a1?.needs?.reasons.map(r => r.reason), ["pr_merged"], "the developer's merge flags Merged on first sight");
+  assert.equal(first.entries.a2?.needs ?? null, null, "a merge the agent made flags nothing (a-merge-the-agent-made-never-flags-the-developer)");
+  assert.ok(first.entries.a2?.seenKeys.includes("example/app#8:MERGED"), "but it is recorded as seen");
+  let copies = 0; const mutate = inbox.store.mutate.bind(inbox.store);
+  inbox.store.mutate = (work => { copies++; return mutate(work); }) as typeof inbox.store.mutate;
+  await inbox.observeFollowUp(follow as never); await inbox.observeFollowUp(follow as never);
+  assert.equal(copies, 0, "the same merges on later ticks copy the inbox zero times");
+  assert.deepEqual((await inbox.store.snapshot()).entries.a1?.needs?.reasons.map(r => r.reason), ["pr_merged"]);
+});
