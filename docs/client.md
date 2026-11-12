@@ -61,7 +61,7 @@ Nothing polls while the app is hidden.
 | `client/home.tsx` | Home: the list and the detail pane, the Overseer card, the setup flow's place. |
 | `client/home-list.tsx` | The one virtualised list, used by Home and the sidebar view. |
 | `client/home-chrome.tsx` | Omnibox, sort menu, status strip, provider and memory meters. |
-| `client/row-menu.tsx`, `client/row-actions.ts`, `shared/row-menu.ts` | The row menu: right-click, long-press or the menu key (Shift+F10) on a Home row or search result. See [Row menu](#row-menu). |
+| `client/row-menu.tsx`, `client/row-actions.ts`, `shared/row-menu.ts`, `client/panel-menu.tsx`, `client/rename.tsx` | The row menu: right-click, long-press or the menu key (Shift+F10) on a Home row or search result. See [Row menu](#row-menu). |
 | `client/home-view.ts` | Home's derived model: sort choice, priorities, titles for search, limits. |
 | `client/home-data.ts` | Paseo's own workspace list, for untracked rows (Quiet) and header buttons. |
 | `client/sidebar-view.tsx`, `client/sidebar-visibility.ts` | Home's list as Paseo's sidebar (on hosts that support it), and its registration. |
@@ -110,8 +110,12 @@ row) for quick moves without opening it. `rowMenu()` in `shared/row-menu.ts` lis
 2. Answer Q<n> for up to two open questions.
 3. Resume follow-up, Send N repairs and Retry repairs, each shown only when it applies.
 4. Open chat, and Ask the Overseer about this (it pre-fills the omnibox and doesn't send).
-5. Copy branch name, Copy PR link(s), Rewrite Summary, Make <agent> the main agent, and Stop following… (which asks
-   first).
+5. Copy branch name, Copy PR link(s), Rename with AI…, Rewrite Summary, Make <agent> the main agent, and Stop
+   following… (which asks first).
+
+The same menu opens from the workspace panel header's More button (`client/panel-menu.tsx`, the workspace's own
+`ws:<id>` row) and from the rows of Follow-up's sidebar view (`client/sidebar-view.tsx`), so there is one menu
+everywhere. Rename with AI… opens the rename dialog (`client/rename.tsx`, [ai-roles](ai-roles.md#rename-with-ai)).
 
 Rules:
 

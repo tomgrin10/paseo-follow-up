@@ -60,10 +60,10 @@ test("open questions get an Answer each, at most two", () => {
 test("copy, Summary, main agent and Stop following", () => {
   const prs = [pr(), pr({ key: "example/app#2", number: 2, snapshot: snapshot({ url: "https://github.com/example/app/pull/2" }) }), pr({ key: "example/app#3", number: 3, snapshot: snapshot({ state: "MERGED", url: "https://github.com/example/app/pull/3" }) })];
   const tidy = rowMenu({ ...base, w: workspace({ prs }) }).find(x => x.key === "tidy")!.items;
-  assert.deepEqual(tidy.map(i => i.key), ["copy_branch", "copy_pr", "rewrite_summary", "stop_following"]);
+  assert.deepEqual(tidy.map(i => i.key), ["copy_branch", "copy_pr", "rename_ai", "rewrite_summary", "stop_following"]);
   assert.equal(tidy[1].label, "Copy 2 PR links");
   assert.equal(tidy[1].arg, "https://github.com/example/app/pull/1\nhttps://github.com/example/app/pull/2", "open PRs only");
-  assert.ok(tidy[3].confirm, "Stop following asks first");
+  assert.ok(tidy.find(i => i.key === "stop_following")!.confirm, "Stop following asks first");
   const other = rowMenu({ ...base, s: { ...s, agentId: "a2", agent: "Reviewer" } }).find(x => x.key === "tidy")!.items;
   assert.ok(other.some(i => i.action === "make_main" && i.arg === "a2" && i.label === "Make Reviewer the main agent…" && !!i.confirm), "handing over the main role asks first");
   assert.ok(!rowMenu({ ...base, s: { ...s, agentId: "main-agent", agent: "Main" } }).find(x => x.key === "tidy")!.items.some(i => i.action === "make_main"), "already main");
