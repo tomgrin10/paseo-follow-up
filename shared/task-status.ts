@@ -1,4 +1,4 @@
-import type { Obligation, Workspace } from "./model";
+import { blockedOnDeveloper, type Obligation, type Workspace } from "./model";
 import { taskSchedule } from "./task-trigger";
 import { isLive } from "./agent-load";
 
@@ -49,7 +49,7 @@ export function taskStatus(o: Obligation, w: Workspace, agents: TaskAgents = w.t
   if (finishedTask(o)) return { text: o.status === "done" ? "Done" : "Waived", tone: o.status === "done" ? "done" : "waived", agentId: null };
   const q = linkedQuestion(o, w);
   if (q) return { text: q.answer ? `${q.id} · answered, waiting on the agent` : `${q.id} · waiting on your answer`, tone: "question", agentId: null };
-  if (o.status === "blocked") return { text: "Needs a decision", tone: "blocked", agentId: null };
+  if (o.status === "blocked") return blockedOnDeveloper(o) ? { text: "Needs a decision", tone: "blocked", agentId: null } : { text: "Blocked", tone: "blocked", agentId: null };
   if (o.status === "working") return workingLine(o, agents);
   const schedule = taskSchedule(o, w, now);
   return schedule.ready ? { text: "Ready to send", tone: "ready", agentId: null } : { text: schedule.label, tone: "scheduled", agentId: null };
