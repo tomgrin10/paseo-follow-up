@@ -81,8 +81,10 @@ const inputStyle = (c: Colors, compact: boolean, lines: number) => ({ minHeight:
  * One question with its answer form. Send records the answer and messages the asking agent straight
  * away; Copy records it and puts a reply on the clipboard instead. Used by the dialog and the pill.
  */
-export function QuestionBody({ workspace: w, question: q, theme, compact, now = Date.now(), dense = false, bodyMaxHeight, openAgent, onAnswered, onDetails, onClose }: {
+export function QuestionBody({ workspace: w, question: q, theme, compact, now = Date.now(), dense = false, bodyMaxHeight, openAgent, onAnswered, onDetails, onClose, inline = false }: {
   workspace: Workspace; question: Question; theme: Theme; compact: boolean; now?: number; dense?: boolean; bodyMaxHeight?: number; openAgent?: (agentId: string) => void; onAnswered?: () => void; onDetails?: () => void;
+  /** Inside the Needs you block: its header says the title and when it was asked, its footer what the agent does meanwhile. */
+  inline?: boolean;
   /** The dialog's close: Send and Copy close it at once and report the outcome as a toast. */
   onClose?: () => void;
 }) {
@@ -188,8 +190,8 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
     <View style={{ gap: 6 }}>
       <RichText selectable style={[t.body, { fontSize: dense ? 13 : 15, lineHeight: dense ? 19 : 22 }]}>{q.question}</RichText>
       {/* Phones: who asked and when is meta under the question, not a footnote after the buttons. */}
-      {compact && !dense && <Text style={t.small}>Asked {ago(q.askedAt, now)} by {who(w, q.askedBy)}{q.taskId && !q.options.length ? " (blocked task)" : ""}</Text>}
-      {open && <View style={{ flexDirection: "row", gap: 6 }}>
+      {compact && !dense && !inline && <Text style={t.small}>Asked {ago(q.askedAt, now)} by {who(w, q.askedBy)}{q.taskId && !q.options.length ? " (blocked task)" : ""}</Text>}
+      {open && !inline && <View style={{ flexDirection: "row", gap: 6 }}>
         <View style={{ paddingTop: 2 }}><Icon name={state.icon} size={12} color={state.color(c)} /></View>
         <Text style={[t.meta, { flex: 1, color: state.color(c) }]}>{state.text}</Text>
       </View>}
@@ -262,7 +264,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   return <SubmitScope enabled={submittable} onSubmit={() => open ? quick("send") : run.mutate("send")} style={{ gap: dense ? 10 : 14 }}>
     {body}
     {actions}
-    {!dense && !compact && <Text style={t.small}>Asked {ago(q.askedAt, now)} by {who(w, q.askedBy)}{q.taskId && !q.options.length ? " (blocked task)" : ""}</Text>}
+    {!dense && !compact && !inline && <Text style={t.small}>Asked {ago(q.askedAt, now)} by {who(w, q.askedBy)}{q.taskId && !q.options.length ? " (blocked task)" : ""}</Text>}
   </SubmitScope>;
 }
 

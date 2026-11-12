@@ -195,5 +195,22 @@ every `sending` entry.
   ([ai-roles.md](ai-roles.md)).
 - **Priority sort** reads `follow.priorities` ([ai-roles.md](ai-roles.md)).
 
+## One Needs you block per surface
+
+`an-open-question-renders-once-per-surface`: the panel and Home's detail pane each draw one "Needs you · N" block
+(`NeedsYouBlock` in `client/needs-you.tsx`, laid out by `needsYouBlock` in `shared/needs-block.ts`), never a brief
+card beside a question list.
+
+- **Asks first.** The agent's open brief that points at open questions (`questionIds`) becomes the first of those
+  questions' cards: the question's title, its Q chip and asked age, the brief's context, the options with Send, and
+  what the agent does meanwhile as the footer. A brief that points at no open question keeps its own card, drawn bare
+  as the block's first section (unless every question it points at is settled: it is resolving).
+- **Every other open question** gets the same card. The first is open, the rest are headers that open in place.
+- **Rows** follow: every other decision (send, merge, retry, a check), never a question.
+- **One answer path.** A question card, the pill, the question dialog and the chat's brief card all answer a stored
+  question through `follow.answer-question`; the brief resolves when its questions settle (`briefQuestionsEvent`).
+  Only a decision with no tracked question goes through `follow.brief-action`.
+- Home's chips and the composer pill stay pointers. Tests: `tests/question-once.test.ts`.
+
 Tests: `tests/inbox.test.ts`, `tests/brief.test.ts`, `tests/decision-card.test.ts`, `tests/home.test.ts`,
 `tests/home-beta2.test.ts`, `tests/attention.test.ts`.

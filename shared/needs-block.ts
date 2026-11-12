@@ -1,4 +1,5 @@
 import type { NeedItem } from "./attention";
+import type { Question } from "./questions";
 
 /**
  * What one surface's Needs you block shows (the workspace panel, Home's detail pane): one "Needs you · N" frame whose
@@ -6,7 +7,8 @@ import type { NeedItem } from "./attention";
  *
  *  - the agent's open brief that points at questions (`questionIds`, set by needs_you) becomes the first of those
  *    questions' cards, carrying the brief's context. The brief's own card is never drawn beside it;
- *  - a brief that points at no open question keeps its own card;
+ *  - a brief that points at no open question keeps its own card, unless every question it points at is settled (it
+ *    is resolving);
  *  - every other open question gets the same card. The first question card is open, the rest are collapsed headers
  *    that expand in place;
  *  - the rows below drop every question, so nothing asks twice. Status invariant an-open-question-renders-once-per-surface.
@@ -21,10 +23,13 @@ export type AskCard =
 export type NeedsBlock = { cards: AskCard[]; rows: NeedItem[]; count: number };
 
 /** `items`: needsYou(w) (or the snooze-aware activeNeeds). `brief`: the agent's open brief this surface would show, or null. */
-export function needsYouBlock(items: readonly NeedItem[], brief: { questionIds: readonly string[] } | null): NeedsBlock {
+export function needsYouBlock(items: readonly NeedItem[], brief: { questionIds: readonly string[] } | null, questions: readonly Pick<Question, "id" | "answer" | "closed">[] = []): NeedsBlock {
   const open = items.filter((i): i is Extract<NeedItem, { kind: "question" }> => i.kind === "question").map(i => i.questionId);
   const linked = brief ? brief.questionIds.filter((id, i, all) => open.includes(id) && all.indexOf(id) === i) : [];
-  const cards: AskCard[] = brief && !linked.length ? [{ kind: "brief" }] : [];
+  // Every question the brief points at is answered or withdrawn: the brief is resolving (briefQuestionsEvent), so the
+  // answered question never comes back as the brief's own card while the server catches up.
+  const resolving = !!brief?.questionIds.length && brief.questionIds.every(id => questions.some(q => q.id === id && (q.answer || q.closed)));
+  const cards: AskCard[] = brief && !linked.length && !resolving ? [{ kind: "brief" }] : [];
   const order = [...linked, ...open.filter(id => !linked.includes(id))];
   order.forEach((questionId, i) => cards.push({ kind: "question", questionId, brief: questionId === linked[0], expanded: i === 0 }));
   const rows = items.filter(i => i.kind !== "question");
