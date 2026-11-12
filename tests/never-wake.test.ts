@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PaseoGateway, type Agent, type Daemon, type withDaemon } from "../server/daemon";
+import { PaseoGateway, agentIndexStats, type Agent, type Daemon, type withDaemon } from "../server/daemon";
 import { daemonDirectory } from "../server/inbox-directory";
 import { DaemonDirectory } from "../server/directory";
 import { HistoryCache } from "../server/history-cache";
@@ -196,4 +196,19 @@ test("upgrade parks auto-send outside the active scope once and restores it when
   assert.equal(s.workspaces[0].enable_auto_sends, true, "auto-send comes back once it's active");
   assert.equal(s.workspaces[0].dormant, undefined); assert.equal(s.autoSendsParked, undefined);
   assert.deepEqual(d.reads, ["sleeper"], "now loaded, its history is read once");
+});
+
+test("a-tick-copies-the-state-at-most-once: observing 140 workspaces indexes the directory's agents once", async t => {
+  // 2026-11-12: each workspace's observe mapped, filtered and Map-indexed all ~280 agent rows (52 MB of idle garbage).
+  const dir = await temp(t);
+  const ids = Array.from({ length: 140 }, (_, i) => `w${i}`);
+  const agents = ids.flatMap(id => [agent(`${id}-main`, id), agent(`${id}-helper`, id, { status: "running" })]);
+  const d = daemon(agents, ids.map(id => ({ id, name: id, projectId: "project" })));
+  const gateway = new PaseoGateway(d.connect, new SessionGuard(dir), async () => false, new HistoryCache(null), () => clock);
+  const before = agentIndexStats.builds;
+  const runtimes = [];
+  for (const id of ids) runtimes.push(await gateway.observe(workspace({ id, mainAgentId: `${id}-main`, prs: [] })));
+  assert.equal(agentIndexStats.builds - before, 1, "one agent index for the directory snapshot");
+  assert.ok(runtimes.every(r => r.busy && r.backgroundBusy && r.mainLoaded === false), "each workspace still sees only its own agents");
+  assert.deepEqual(d.reads, [], "no timeline read");
 });

@@ -3,10 +3,10 @@ import type { Actor } from "./actor";
 import { ANY_HOOK_TEXT_PREFIXES } from "./message-sender";
 import { BATCH_PREFIXES, RECOVERY_TITLES } from "./legacy";
 import type { Workspace } from "./model";
-import { answerMessage, duplicateOpenQuestions, isOther, parseAnswerMessage } from "./questions";
-import { shouldReopen, type Brief } from "./brief";
+import { answerMessage, duplicateOpenQuestions, isOther, parseAnswerMessage, parseAnswersMessage } from "./questions";
+import { briefAnswer, briefAnswers, briefStep, shouldReopen, type Brief } from "./brief";
 import { flagHeadline } from "./headline";
-import type { InboxRow } from "./inbox";
+import { newEntry, prEndEvent, reduce, type InboxRow } from "./inbox";
 import { blockedOnDeveloper, completionCheck, liveWorkingTask, summary } from "./model";
 import { asksForReviewers, liveLine, needsYou } from "./attention";
 import { trackedGroup, type HomeModel } from "./home";
@@ -188,6 +188,29 @@ export const INVARIANTS: Invariant[] = [
     },
   },
   {
+    id: "a-merge-the-agent-made-never-flags-the-developer",
+    why: "2026-11-12 live sidebar: an agent that merged its own PR (register_pr agentMerges) flagged the developer with \"PR closed · #37 merged\". Its merge is its own work, reported in its own turn.",
+    check(w, now) {
+      const at = new Date(now).toISOString();
+      const flagged = w.prs.filter(p => p.agentMerges).filter(p => { const ev = prEndEvent(p); return ev?.merged && reduce(newEntry("agent"), ev, at).needs; });
+      return flagged.length ? flagged.map(p => `#${p.number} merged by its agent flags the developer`).join(", ") : null;
+    },
+  },
+  {
+    id: "pr-label-matches-state",
+    why: "2026-11-12 live sidebar: rows read \"PR closed · #37 merged\". A merged PR reads Merged; only a PR closed without merging reads PR closed.",
+    check(w, now) {
+      const at = new Date(now).toISOString();
+      for (const p of w.prs) {
+        const ev = prEndEvent(p);
+        const h = ev && flagHeadline({ needs: reduce(newEntry("agent"), { ...ev, quiet: false }, at).needs, snooze: null, brief: null }, now);
+        const want = p.snapshot?.state === "MERGED" ? "pr_merged" : "pr_closed";
+        if (h && h.key !== want) return `#${p.number} is ${p.snapshot!.state} but reads ${h.label}`;
+      }
+      return null;
+    },
+  },
+  {
     id: "in-flight-reads-waiting",
     why: "2026-11-11 wks_5dfd3a65: work the main agent tracks (a working or waiting task) reads as waiting on that work, never Quiet or \"declare Done\".",
     check(w, now) {
@@ -222,6 +245,18 @@ export const INVARIANTS: Invariant[] = [
         const want = other ? (q.answer.words ?? "").trim() : q.answer.choice;
         if (shown !== want) return `${q.id}'s card shows "${shown}", not "${want}"`;
         if (!other && option && (card.words ?? "") !== (q.answer.words ?? "").trim()) return `${q.id}'s card drops part of the note`;
+      }
+      return null;
+    },
+  },
+  {
+    id: "a-pick-note-reaches-the-agent",
+    why: "Task 32deeb27, the developer's ask: \"A, but make sure to…\". A note on a lettered pick reaches the agent's message and the record, on a question here and on a brief card (pickNoteViolations).",
+    check(w) {
+      for (const q of w.questions) {
+        const a = q.answer;
+        if (!a?.words?.trim() || isOther(a.choice) || !q.options.some(o => o.letter === a.choice)) continue;
+        if (parseAnswerMessage(answerMessage(q, a.choice, a.words))?.words !== a.words.trim()) return `${q.id}'s note on ${a.choice} doesn't reach the agent`;
       }
       return null;
     },
@@ -414,4 +449,32 @@ export function actorViolations(rows: readonly { path: string; actor: Actor; rec
  */
 export function updatePhaseViolations(phase: UpdatePhase, running: string, installerAlive: boolean): { id: string; detail: string }[] {
   return staleUpdatePhase(phase, running, installerAlive) ? [{ id: "update-phase-never-outlives-its-version", detail: `${phase.kind} for ${"version" in phase ? phase.version : "?"} while ${running} runs` }] : [];
+}
+
+/**
+ * `a-pick-note-reaches-the-agent` on a brief card: letter picks with notes, sent alone (briefAnswer) or together
+ * (briefAnswers), keep each note on the card's decision and parse back from the message the agent receives.
+ */
+export function pickNoteViolations(b: Brief, picks: { decisionId: string; choice: string; words?: string }[], now: string): { id: string; detail: string }[] {
+  const id = "a-pick-note-reaches-the-agent";
+  const noted = picks.filter(p => !isOther(p.choice) && p.words?.trim());
+  if (!noted.length) return [];
+  const out: { id: string; detail: string }[] = [];
+  const fold = (t: string) => t.replace(/\s+/g, " ").trim();
+  if (picks.length === 1) {
+    const p = picks[0], d = b.decisions.find(d => d.id === p.decisionId);
+    const kept = briefStep(b, { type: "option", decisionId: p.decisionId, choice: p.choice, words: p.words }, now).brief?.decisions.find(d => d.id === p.decisionId)?.words;
+    if (kept !== p.words!.trim()) out.push({ id, detail: `${p.decisionId}'s card drops the note on ${p.choice}` });
+    const label = d?.options.find(o => o.letter === p.choice)?.label ?? "";
+    if (parseAnswerMessage(briefAnswer(p.decisionId, d?.question ?? "", p.choice, label, p.words))?.words !== p.words!.trim()) out.push({ id, detail: `${p.decisionId}'s message drops the note on ${p.choice}` });
+    return out;
+  }
+  const after = briefStep(b, { type: "options", picks }, now).brief;
+  const words = Object.fromEntries(picks.filter(p => p.words?.trim()).map(p => [p.decisionId, p.words!.trim()]));
+  const parsed = parseAnswersMessage(briefAnswers(b.ask, b.decisions, Object.fromEntries(picks.map(p => [p.decisionId, p.choice])), words));
+  for (const p of noted) {
+    if (after?.decisions.find(d => d.id === p.decisionId)?.words !== p.words!.trim()) out.push({ id, detail: `${p.decisionId}'s card drops the note on ${p.choice}` });
+    if (parsed?.answers.find(a => a.id === p.decisionId)?.words !== fold(p.words!)) out.push({ id, detail: `${p.decisionId}'s message drops the note on ${p.choice}` });
+  }
+  return out;
 }

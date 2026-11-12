@@ -12,22 +12,22 @@ import { age, displayReason, reasonRank, type InboxRow, type Reason, type Reason
  * sit inside the popover. A failed CI check is never the headline on its own: Paseo's own checks chip already
  * shows it, so it only surfaces as "Send N tasks" when Follow-up has tasks ready to send.
  */
-export const HEADLINE_KEYS = ["permission", "error", "paused", "blocked", "decision", "question", "action", "repairs", "finish", "merge", "reviewers", "review", "finished", "flagged", "pr_closed"] as const;
+export const HEADLINE_KEYS = ["permission", "error", "paused", "blocked", "decision", "question", "action", "repairs", "finish", "merge", "reviewers", "review", "finished", "flagged", "pr_closed", "pr_merged"] as const;
 export type HeadlineKey = typeof HEADLINE_KEYS[number];
 export type HeadlineTone = "danger" | "warning" | "accent" | "merged" | "muted";
 
 /** The decisive word each key leads with. The pill, the card header and the row all read it from here. */
 export const HEADLINE_WORD: Record<HeadlineKey, string> = {
   permission: "Permission", error: "Error", paused: "Paused", blocked: "Blocked", decision: "Decision", question: "Question", action: "Action",
-  repairs: "Tasks", finish: FINISH_WORD, merge: "Merge", reviewers: "Add reviewers", review: "Review", finished: "Finished", flagged: "Flagged", pr_closed: "PR closed",
+  repairs: "Tasks", finish: FINISH_WORD, merge: "Merge", reviewers: "Add reviewers", review: "Review", finished: "Finished", flagged: "Flagged", pr_closed: "PR closed", pr_merged: "Merged",
 };
 export const HEADLINE_ICON: Record<HeadlineKey, string> = {
   permission: "ShieldQuestion", error: "CircleX", paused: "CirclePause", blocked: "OctagonAlert", decision: "MessageCircleQuestion", question: "MessageCircleQuestion",
-  action: "Hand", repairs: "Send", finish: "ListChecks", merge: "GitMerge", reviewers: "UserPlus", review: "GitPullRequest", finished: "Flag", flagged: "Flag", pr_closed: "GitMerge",
+  action: "Hand", repairs: "Send", finish: "ListChecks", merge: "GitMerge", reviewers: "UserPlus", review: "GitPullRequest", finished: "Flag", flagged: "Flag", pr_closed: "GitPullRequestClosed", pr_merged: "GitMerge",
 };
 export const HEADLINE_TONE: Record<HeadlineKey, HeadlineTone> = {
   permission: "warning", error: "danger", paused: "warning", blocked: "danger", decision: "warning", question: "warning", action: "warning",
-  repairs: "warning", finish: "warning", merge: "merged", reviewers: "warning", review: "warning", finished: "accent", flagged: "warning", pr_closed: "merged",
+  repairs: "warning", finish: "warning", merge: "merged", reviewers: "warning", review: "warning", finished: "accent", flagged: "warning", pr_closed: "muted", pr_merged: "merged",
 };
 export const headlineRank = (key: HeadlineKey) => HEADLINE_KEYS.indexOf(key);
 
@@ -45,7 +45,7 @@ export function briefKey(kind: BriefKind): HeadlineKey {
   }
 }
 
-const REASON_KEY: Record<Reason, HeadlineKey> = { permission: "permission", error: "error", paused: "paused", ci: "flagged", review: "review", reviewers: "reviewers", finished: "finished", pr_closed: "pr_closed" };
+const REASON_KEY: Record<Reason, HeadlineKey> = { permission: "permission", error: "error", paused: "paused", ci: "flagged", review: "review", reviewers: "reviewers", finished: "finished", pr_closed: "pr_closed", pr_merged: "pr_merged" };
 
 export type Headline = {
   key: HeadlineKey;
@@ -77,6 +77,8 @@ export function flagHeadline(row: Pick<InboxRow, "needs" | "snooze" | "brief">, 
   if (!top) return null;
   const brief = row.brief?.state === "open" ? row.brief : null;
   let key = REASON_KEY[top.reason];
+  // pr-label-matches-state: a flag stored before pr_merged existed ("#37 merged" under pr_closed) still reads Merged.
+  if (key === "pr_closed" && / merged$/.test(top.detail)) key = "pr_merged";
   if (brief && (top.reason === "finished" || briefKey(brief.kind) === key)) key = briefKey(brief.kind);
   const since = age(row.needs.since, now);
   // "Finished · No ask stated" while the workspace has an open question tells Tom to skip it; the question is the ask.

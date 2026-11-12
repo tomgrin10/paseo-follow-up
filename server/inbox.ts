@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { realTimers, stableMessageId, withDeadline, type Timers } from "./delivery";
 import { BackgroundAgents } from "./background-agents";
-import { emptyInbox, expired, inboxStateSchema, type OutboxEntry, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason, liveFlag, withoutRunState, FACT_REASONS } from "../shared/inbox";
+import { deepFreeze } from "./store";
+import { emptyInbox, expired, inboxStateSchema, type OutboxEntry, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason, liveFlag, withoutRunState, FACT_REASONS, prEndEvent } from "../shared/inbox";
 import type { State as FollowState, Workspace as FollowWorkspace } from "../shared/model";
 import { asksForReviewers } from "../shared/attention";
 import { followUpObligations } from "../shared/follow-up";
@@ -12,8 +13,10 @@ import { configuredReviewers, reviewerLabel, withoutAuthor } from "../shared/rev
 import { classify, finishedReply, turnPrompt, type Sources } from "./inbox-classifier";
 import { STALE_BRIEF } from "../shared/errors";
 import type { Question } from "../shared/questions";
-import { briefOrigin, briefQuestionsEvent, briefStep, pickBrief, shouldReopen, validPick, type Brief, type BriefEvent, type BriefKind, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
-import { OTHER_LABEL, answerTitle, isOther } from "../shared/questions";
+import { briefAnswer, briefAnswers, briefOrigin, briefQuestionsEvent, briefStep, pickBrief, shouldReopen, validPick, type Brief, type BriefEvent, type BriefKind, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
+import { OTHER_LABEL, isOther } from "../shared/questions";
+// The brief answer texts live with the brief (shared, so the status invariants build the same message).
+export { briefAnswer, briefAnswers } from "../shared/brief";
 
 /**
  * How long lastSeen alone may wait in memory (store-writes-only-real-changes). It only marks, at the next start,
@@ -35,9 +38,15 @@ export class InboxStore {
   private saved: InboxState | null = null;
   constructor(readonly directory: string, private now: () => number = Date.now) {}
   private get path() { return join(this.directory, "inbox.json"); }
-  async read(): Promise<InboxState> {
-    if (this.unsaved) return structuredClone(this.unsaved);
-    if (this.saved) return structuredClone(this.saved);
+  /** A private, mutable copy (what a mutation works on). */
+  async read(): Promise<InboxState> { return structuredClone(await this.load()); }
+  /**
+   * The current state, shared and deep-frozen (unsaved lastSeen included). 2026-11-12: snapshot() deep-copied the whole
+   * inbox on every read, about half the idle worker's CPU at 140 workspaces; a caller that changes it now throws.
+   */
+  private async load(): Promise<InboxState> {
+    if (this.unsaved) return this.unsaved;
+    if (this.saved) return this.saved;
     let state: InboxState;
     try { state = inboxStateSchema.parse(JSON.parse(await readFile(this.path, "utf8"))); }
     catch (error) {
@@ -46,8 +55,8 @@ export class InboxStore {
     }
     // What the file means, so an unchanged state isn't rewritten (a pretty-printed file is rewritten compact on its next change).
     this.written ??= { text: JSON.stringify(state), rest: rest(state), at: this.now() };
-    this.saved = structuredClone(state);
-    return state;
+    this.saved = deepFreeze(state);
+    return this.saved;
   }
   async mutate<T>(work: (state: InboxState) => T | Promise<T>): Promise<T> {
     const next = this.tail.then(async () => {
@@ -59,7 +68,21 @@ export class InboxStore {
     this.tail = next.catch(() => undefined);
     return next;
   }
-  async snapshot(): Promise<InboxState> { await this.tail; return this.read(); }
+  async snapshot(): Promise<InboxState> { await this.tail; return this.load(); }
+  /**
+   * lastSeen alone, without copying the inbox: the worker's tick sets it every few seconds, and a full mutate copied,
+   * validated and stringified the whole inbox each time (2026-11-12: 60 MB of the idle worker's garbage in 2 min). It
+   * still reaches the file at most every LAST_SEEN_WRITE_MS, through the normal save.
+   */
+  async touchLastSeen(at: string): Promise<void> {
+    const next = this.tail.then(async () => {
+      const current = await this.load();
+      if (!this.written || this.now() - this.written.at >= LAST_SEEN_WRITE_MS) { const draft = structuredClone(current); draft.lastSeen = at; await this.save(draft); return; }
+      this.unsaved = deepFreeze({ ...current, lastSeen: at });
+    });
+    this.tail = next.catch(() => undefined);
+    return next;
+  }
   /** Writes a held lastSeen now; the worker's stop calls it. */
   async flush(): Promise<void> {
     await this.tail;
@@ -71,7 +94,7 @@ export class InboxStore {
     inboxStateSchema.parse(state);
     const text = JSON.stringify(state);
     if (this.written?.text === text) { this.unsaved = null; return; }
-    if (this.written && this.written.rest === rest(state) && this.now() - this.written.at < LAST_SEEN_WRITE_MS) { this.unsaved = structuredClone(state); return; }
+    if (this.written && this.written.rest === rest(state) && this.now() - this.written.at < LAST_SEEN_WRITE_MS) { this.unsaved = deepFreeze(state); return; }
     await this.write(state, text);
   }
   private async write(state: InboxState, text = JSON.stringify(state)): Promise<void> {
@@ -81,7 +104,7 @@ export class InboxStore {
       const file = await open(temporary, "wx", 0o600);
       try { await file.writeFile(text); await file.sync(); } finally { await file.close(); }
       await rename(temporary, this.path);
-      this.written = { text, rest: rest(state), at: this.now() }; this.unsaved = null; this.saved = structuredClone(state);
+      this.written = { text, rest: rest(state), at: this.now() }; this.unsaved = null; this.saved = deepFreeze(state);
     } finally { await unlink(temporary).catch(() => undefined); }
   }
 }
@@ -174,30 +197,6 @@ export function pauseSource(p: GuardPause): { note: string | null; resetsAt: str
   const at = typeof p.anchorResetsAt === "string" && Number.isFinite(Date.parse(p.anchorResetsAt)) ? new Date(p.anchorResetsAt) : null;
   return { note, resetsAt: at ? `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}` : null };
 }
-/** The developer's option click, in the existing answer format so Follow-up's answer card renders it. */
-export function briefAnswer(id: string, question: string, letter: string, label: string, words?: string): string {
-  const title = answerTitle(question).slice(0, 80);
-  if (isOther(letter)) return `Follow-up answer ${id} (${title}): ${OTHER_LABEL} — "${(words ?? "").trim()}"\nNone of your options: the developer's own answer is in the quotes.`;
-  return `Follow-up answer ${id} (${title}): ${letter} — ${label}\nContinue with this choice.`;
-}
-/**
- * Several decisions answered together (1.4.0): one message, a summary line the developer reads at a glance, then one
- * line per decision the agent can act on. Skipped decisions are named, so the agent knows they're still open.
- */
-export function briefAnswers(ask: string, decisions: { id: string; question: string; options: { letter: string; label: string }[] }[], picks: Record<string, string>, words: Record<string, string> = {}): string {
-  const clean = (t: string) => answerTitle(t).slice(0, 80);
-  const asked = decisions.filter(d => d.options.length);
-  // Something else stays on its decision's one line: the developer's words with line breaks folded to spaces.
-  const other = (d: typeof asked[number]) => isOther(picks[d.id]) && words[d.id]?.trim() ? `${OTHER_LABEL} — "${words[d.id].replace(/\s+/g, " ").trim()}"` : null;
-  const picked = (d: typeof asked[number]) => { const o = d.options.find(o => o.letter === picks[d.id]); return other(d) ?? (o ? `${o.letter} — ${o.label}` : null); };
-  const summary = asked.map((d, i) => { const p = picked(d); return `${i + 1}. ${other(d) ? OTHER_LABEL : p ?? "skipped"}`; }).join(" · ");
-  const lines = [`${ANSWERS_PREFIX} ${asked.map(d => d.id).join(", ")} (${clean(ask)}): ${summary}`];
-  for (const d of asked) { const p = picked(d); lines.push(p ? `${d.id} (${clean(d.question)}): ${p}` : `${d.id} (${clean(d.question)}): skipped — not answered yet; ask again if it still matters.`); }
-  const skipped = asked.filter(d => !picked(d));
-  lines.push(skipped.length ? `Continue with the answered ones; ${skipped.map(d => d.id).join(" and ")} ${skipped.length === 1 ? "is" : "are"} still open. The answers are already recorded.` : "Continue with these choices. The answers are already recorded.");
-  return lines.join("\n");
-}
-const ANSWERS_PREFIX = "Follow-up answer";
 const ORIGINS = 500;
 export type Root = { rootId: string; subagent: AgentInfo | null; delegated: boolean };
 const DAY = 24 * 3_600_000;
@@ -544,7 +543,8 @@ export class Inbox {
         const d = b.decisions.find(d => d.id === p.decisionId);
         if (!d || !validPick(d, p.choice, p.words)) throw new Error(isOther(p.choice) ? `${OTHER_LABEL} needs your answer in words.` : "Pick one of the options on the card.");
         picks[d.id] = p.choice;
-        if (isOther(p.choice)) words[d.id] = p.words!.trim();
+        // a-pick-note-reaches-the-agent: a note rides with a letter as well as with Something else.
+        if (p.words?.trim()) words[d.id] = p.words.trim();
       }
       if (!Object.keys(picks).length) throw new Error("Pick at least one option before sending.");
       text = briefAnswers(b.ask, b.decisions, picks, words);
@@ -554,7 +554,7 @@ export class Inbox {
       if (!d || !input.choice || !validPick(d, input.choice, input.words)) throw new Error(input.choice && isOther(input.choice) ? `${OTHER_LABEL} needs your answer in words.` : "Pick one of the options on the card.");
       const o = d.options.find(o => o.letter === input.choice);
       text = briefAnswer(d.id, d.question, input.choice, o?.label ?? "", input.words);
-      event = { type: "option", decisionId: d.id, choice: input.choice, ...(isOther(input.choice) ? { words: input.words!.trim() } : {}) };
+      event = { type: "option", decisionId: d.id, choice: input.choice, ...(input.words?.trim() ? { words: input.words.trim() } : {}) };
     }
     const answerId = input.answerId ?? randomUUID();
     const messageId = stableMessageId(`brief:${agentId}:${b.id}:${answerId}`);
@@ -684,7 +684,10 @@ export class Inbox {
       });
       return;
     }
-    await this.apply(await Promise.all(events.map(async ({ agentId, event }) => ({ agentId, event, brief: await this.prBrief(agentId, event) }))));
+    // An event whose key the entry has already seen changes nothing (reduce dedupes it), and every tick re-derives the
+    // same facts for ~400 PRs: drop those before apply, so a quiet tick neither copies the inbox nor builds briefs.
+    const unseen = events.filter(({ agentId, event }) => !("dedupeKey" in event) || !state.entries[agentId]?.seenKeys.includes(event.dedupeKey));
+    await this.apply(await Promise.all(unseen.map(async ({ agentId, event }) => ({ agentId, event, brief: await this.prBrief(agentId, event) }))));
     // Then withdraw the flags (and Follow-up's PR cards) whose fact ended since: merged, fixed, reviewed, or the agent is on it.
     const live = liveFacts(follow, events);
     const entries = (await this.store.snapshot()).entries;
@@ -720,6 +723,12 @@ export class Inbox {
   /** Snooze expiry, undo expiry and the 7-day keep for archived agents. Records liveness for #20. */
   async tick(): Promise<void> {
     const at = this.iso(); const now = this.now();
+    // Most ticks change nothing but lastSeen: decide on the frozen snapshot, and copy the inbox only when an entry expires,
+    // a snooze or undo runs, or the batch undo ends.
+    const seen = await this.store.snapshot();
+    const moves = (e: Entry) => { try { return JSON.stringify(reduce(e, { type: "tick" }, at)) !== JSON.stringify(e); } catch { return true; } };
+    const due = !!seen.batchUndo && Date.parse(seen.batchUndo.expires) < now || Object.values(seen.entries).some(e => expired(e, now) || (e.snooze || e.undo) && moves(e));
+    if (!due) return this.store.touchLastSeen(at);
     await this.store.mutate(state => {
       for (const [id, e] of Object.entries(state.entries)) {
         if (expired(e, now)) { delete state.entries[id]; continue; }
@@ -1064,8 +1073,9 @@ export function followUpEvents(follow: FollowState, enablePrClosed: boolean): { 
         if (asksForReviewers(pr, w))
           events.push({ agentId, event: { type: "reviewers", dedupeKey: `${pr.key}:reviewers`, detail: `#${pr.number}`, prKey: pr.key, url: s.url ?? null,
             names: withoutAuthor(configuredReviewers(pr.repo), s.reviewers?.author).map(reviewerLabel) } });
-      } else if (enablePrClosed && (s.state === "MERGED" || s.state === "CLOSED")) {
-        events.push({ agentId, event: { type: "pr_closed", dedupeKey: `${pr.key}:${s.state}`, detail: `#${pr.number} ${s.state === "MERGED" ? "merged" : "closed"}`, prKey: pr.key } });
+      } else if (enablePrClosed) {
+        const event = prEndEvent(pr);
+        if (event) events.push({ agentId, event });
       }
     }
   }
