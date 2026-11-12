@@ -7,7 +7,7 @@ import { briefSchema, BRIEF_KINDS, BRIEF_SOURCES, BRIEF_STATES } from "./brief";
  * Everything here is pure so the reducer can be tested row by row against the design's event table.
  */
 
-export const REASONS = ["permission", "error", "paused", "ci", "review", "reviewers", "finished", "pr_closed"] as const;
+export const REASONS = ["permission", "error", "paused", "ci", "review", "reviewers", "finished", "pr_closed", "pr_merged"] as const;
 export type Reason = typeof REASONS[number];
 /** Most urgent first. The displayed reason is the first unresolved one in this order. */
 export const reasonRank = (reason: Reason) => REASONS.indexOf(reason);
@@ -102,7 +102,9 @@ export type InboxEvent =
   | { type: "review"; dedupeKey: string; detail: string; suppressed?: boolean }
   /** An open, non-draft PR with nobody asked to review it: the developer's job (it never waits on open threads). */
   | { type: "reviewers"; dedupeKey: string; detail: string; prKey: string; url: string | null; names: string[] }
-  | { type: "pr_closed"; dedupeKey: string; detail: string; prKey: string }
+  /** A registered PR left OPEN. `merged`: it merged (else it closed unmerged). `quiet`: the agent merged it itself
+   * (register_pr agentMerges), so it wakes a "until this PR merges" snooze but flags nobody. Older events: neither. */
+  | { type: "pr_closed"; dedupeKey: string; detail: string; prKey: string; merged?: boolean; quiet?: boolean }
   /** The outside facts (FACT_REASONS) that still hold for this agent's PRs: a flag whose fact ended is withdrawn. */
   | { type: "facts_live"; live: Reason[] }
   | { type: "sign_off"; seq?: number; muteTurn?: boolean }
@@ -145,7 +147,7 @@ function seen(e: Entry, key: string): boolean {
   return false;
 }
 /** Permission, error and paused always break a snooze; a plain finish never does. */
-const BREAKS: Reason[] = ["permission", "error", "paused", "ci", "review", "pr_closed"];
+const BREAKS: Reason[] = ["permission", "error", "paused", "ci", "review", "pr_closed", "pr_merged"];
 /**
  * Reasons that describe the agent's last turn, not an outside fact: a newer turn start from anyone (the developer,
  * another agent, the host resuming it) supersedes them, and a new failure flags again. Outside facts (permission by
@@ -242,7 +244,12 @@ export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
       if (e.needs) { e.needs = withoutReasons(e.needs, FACT_REASONS.filter(r => !event.live.includes(r))); if (!e.needs) e.snooze = null; }
       break;
     case "pr_closed": // #10, and a "until this PR merges" snooze wakes here.
-      if (!seen(e, event.dedupeKey)) { if (e.snooze?.until === `pr:${event.prKey}`) e.snooze = null; flag("pr_closed", event.detail, "pr_closed"); }
+      if (!seen(e, event.dedupeKey)) {
+        if (e.snooze?.until === `pr:${event.prKey}`) e.snooze = null;
+        // pr-label-matches-state: a merge flags as merged; a-merge-the-agent-made-never-flags-the-developer: quiet flags nothing.
+        const merged = event.merged ?? / merged$/.test(event.detail);
+        if (!event.quiet) flag(merged ? "pr_merged" : "pr_closed", event.detail, merged ? "pr_merged" : "pr_closed");
+      }
       break;
     case "sign_off": { // #13
       if (event.seq !== undefined && event.seq !== e.seq) throw new StaleSignOff();
@@ -479,4 +486,16 @@ export function nextAfter(rows: InboxRow[], currentAgentId: string | null, now: 
 export function rowTitle(row: Pick<InboxRow, "title" | "workspaceTitle" | "multiRoot">): { primary: string; agent: string | null } {
   if (row.multiRoot && row.workspaceTitle) return { primary: row.workspaceTitle, agent: row.title };
   return { primary: row.workspaceTitle || row.title, agent: null };
+}
+
+/**
+ * The inbox event for a registered PR that left OPEN, or null while it is open (or unread). One place for the rule, so
+ * the worker (server/inbox.ts followUpEvents) and the status invariants agree: a merge is `merged`, and a merge the
+ * agent made itself (register_pr agentMerges, which promises the developer is never asked about it) is `quiet`.
+ */
+export function prEndEvent(pr: { key: string; number: number; agentMerges?: boolean; snapshot: { state: string; complete: boolean } | null }): Extract<InboxEvent, { type: "pr_closed" }> | null {
+  const s = pr.snapshot;
+  if (!s?.complete || (s.state !== "MERGED" && s.state !== "CLOSED")) return null;
+  const merged = s.state === "MERGED";
+  return { type: "pr_closed", dedupeKey: `${pr.key}:${s.state}`, detail: `#${pr.number} ${merged ? "merged" : "closed"}`, prKey: pr.key, merged, ...(merged && pr.agentMerges ? { quiet: true } : {}) };
 }

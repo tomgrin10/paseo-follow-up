@@ -8,7 +8,7 @@
 - **Run state is the last turn's, not an outside fact.** `error` and `paused` (`RUN_STATE_REASONS`) describe the
   agent's last turn, so a newer turn start from anyone (the developer, another agent, the host resuming it) drops
   them, along with an open card that only reported them (`briefStep` `turn_start`, unless it has open questions). A
-  new failure flags again. Permission by request, pr_closed and a finish with its ask stay until handled. Rows apply `liveFlag` with the turn start the worker saw (`turnStartedAt`), so a running
+  new failure flags again. Permission by request, pr_closed, pr_merged and a finish with its ask stay until handled. Rows apply `liveFlag` with the turn start the worker saw (`turnStartedAt`), so a running
   agent never headlines an Error or Paused from before its current turn (`rowViolations`, invariant
   `running-is-not-stale`). Status alone isn't enough: Paseo can still read "running" right after a turn fails, and that
   failure is real news. And `Inbox.start` drops such flags for agents already running
@@ -30,8 +30,12 @@
   `liveFlag` hides an older "finished" until the work ends (shown again after, not erased). Invariant
   `background-work-is-running` in `rowViolations`. On 0.15 the field is absent and nothing changes.
 - **Pure logic** is in `shared/inbox.ts`: the reducer, `REASONS` in urgency order (permission, error, paused, ci,
-  review, reviewers, finished, pr_closed), snoozes (`next-event`, an ISO time, or `pr:<repo#n>`), finish flags, and
-  undo. Undo covers the last sign-off or Later: a Later's undo puts back the snooze it replaced, unless a flag broke
+  review, reviewers, finished, pr_closed, pr_merged), snoozes (`next-event`, an ISO time, or `pr:<repo#n>`), finish flags, and
+  undo. A registered PR that leaves OPEN (`prEndEvent`, shared by the worker and the invariants) flags `pr_merged`
+  ("Merged") when it merged and `pr_closed` ("PR closed") only when it closed unmerged; a flag stored before
+  `pr_merged` existed ("#37 merged" under pr_closed) still reads Merged. A merge the agent made itself (register_pr
+  `agentMerges`) flags nobody but still wakes a "until this PR merges" snooze. Invariants
+  `a-merge-the-agent-made-never-flags-the-developer` and `pr-label-matches-state`. Undo covers the last sign-off or Later: a Later's undo puts back the snooze it replaced, unless a flag broke
   that snooze since. The Undo bar and the pill say which one it was ("Signed off", "Later · until 09:00").
 - **Storage and loop.** `server/inbox.ts` stores `inbox.json` (`InboxStore`). `Inbox` turns lifecycle events into
   reducer events (`turnStarted`, `turnEnded`, `permissionRequested`…). `tick()` runs every 15 s from `inboxLoop`
