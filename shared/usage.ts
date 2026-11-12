@@ -106,6 +106,17 @@ export function meters(usage: Usage, now: number): Meter[] {
   });
 }
 
+/**
+ * What the meters show, as a key for the usage feed (server/feeds.ts): percentages rounded as displayed, the reset
+ * times, and how old the reading is in five-minute steps (the "40m old" tag). A new reading with the same numbers
+ * pushes nothing.
+ */
+export function usageKey(usage: Usage | null): string {
+  if (!usage) return "none";
+  return JSON.stringify([usage.available, usage.source, usage.accounts.map(a => [a.id, a.family, !!a.isDefault,
+    a.readAt ? Math.floor(Date.parse(a.readAt) / 300_000) : null, a.windows.map(w => [w.id, Math.round(w.pct), w.resetsAt])])]);
+}
+
 /** "14:10" today, "Tue 14:10" later this week, else a date. */
 export function resetLabel(at: string | null, now: number): string | null {
   if (!at) return null;
