@@ -1,7 +1,7 @@
 import { settleWithin, stopDeadline, type Deadline } from "./teardown";
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { stateSchema, type State, type Workspace } from "../shared/model";
 
 /**
@@ -19,6 +19,7 @@ const stopping = () => new Error("Follow-up is stopping; nothing was saved.");
 export class Store {
   private tail: Promise<unknown> = Promise.resolve();
   private state: State | null = null;
+  /** What state.json holds now, as length + SHA-1 (not the 1–2 MB text itself), to skip identical writes. */
   private written: string | null = null;
   private saved: State | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -148,7 +149,8 @@ export class Store {
     if (state === this.saved) return state;
     const parsed = deepFreeze(stateSchema.parse(state));
     const text = JSON.stringify(parsed);
-    if (text === this.written) { this.saved = parsed; return parsed; }
+    const print = `${text.length}:${createHash("sha1").update(text).digest("base64")}`;
+    if (print === this.written) { this.saved = parsed; return parsed; }
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     const temporary = join(this.directory, `state.${randomUUID()}.tmp`);
     try {
@@ -156,7 +158,7 @@ export class Store {
       try { await file.writeFile(text); await file.sync(); }
       finally { await file.close(); }
       await rename(temporary, join(this.directory, "state.json"));
-      this.written = text; this.saved = parsed; this.writes++;
+      this.written = print; this.saved = parsed; this.writes++;
     } finally { await unlink(temporary).catch(() => undefined); }
     return parsed;
   }
