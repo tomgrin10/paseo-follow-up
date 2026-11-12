@@ -29,6 +29,16 @@ resolved once, like the developer's gh wrapper: an explicit `GH_TOKEN`/`GITHUB_T
 `DBUS_SESSION_BUS_ADDRESS` so no keyring daemon leaks), and it's resolved again after a 401. Writes (merge, retarget,
 reviewers) still run `gh`. `FOLLOW_UP_GITHUB_API` points the client at a fake for harness runs.
 
+Every worker read shares that one client (`githubApi()`): PR polling, the deploy probe's ancestry compare
+(`server/deployments.ts`), Summary's PR read (`server/about.ts`), reviewer suggestions (`server/reviewer-config.ts`)
+and the ranker's review-requested search (`server/ranker.ts`, `restAs` once per logged-in account; the account list
+comes from `gh auth status` once an hour). 2026-11-12: the rc.3 live check still saw ~50 `gh api …/compare/…`
+spawns after a start or a deploy; `tests/worker-reads-github-in-process.test.ts` (invariant
+`worker-reads-github-in-process`) runs every read path with its default wiring and fails if one spawns gh, and scans
+`server/` for new gh spawns that aren't writes or token lookups. The setup flow's readiness check still runs
+`gh api user` on demand: it checks gh itself. `FOLLOW_UP_DEPLOY_REGISTRY` points the deploy probe's registry reads
+at a fake (`scripts/poll-cost.mjs --deploy-merged`).
+
 **Backoff** (`shared/poll.ts`). A read costs about one GraphQL point per PR (15 PRs = 16 points), from the
 developer's 5000-point hourly budget that every agent shares, so only PRs that are due go into a tick's queries.
 The engine ticks every 15 s. On a timer tick a PR is due when it's moving (every 30 s when only checks are running), its workspace is busy, the developer
@@ -44,7 +54,9 @@ freshness; the `poll-backoff-never-hides-a-moving-pr` invariant holds both. Open
 minutes and only in repositories with something moving, and merged PRs wait for the reset. Under 100, or when GitHub
 answers `RATE_LIMITED`, nothing is read until the reset (10 minutes when GitHub doesn't say) and the last
 observations stand in instead of errors.
-Cost per tick is pinned by `tests/github-poll-cost.test.ts`; `scripts/poll-cost.mjs` measures it in a harness.
+Cost per tick is pinned by `tests/github-poll-cost.test.ts`; `scripts/poll-cost.mjs` measures it in a harness
+(`--deploy-merged K` adds K merged PRs in the deployment repository, with a fake fleet and registry; `warmup` reports
+the cold start's spawns and compares).
 
 ## PR actions (merge, merge when ready, reviewers)
 
