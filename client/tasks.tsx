@@ -77,11 +77,11 @@ function OpenAgentLink({ status, openAgent, theme, compact }: { status: TaskStat
   const c = theme.colors;
   if (!status.agentId || !openAgent) return null;
   const id = status.agentId;
-  return <Pressable accessibilityRole="link" accessibilityLabel={`Open agent: ${status.text}`} hitSlop={compact ? 12 : 6} onPress={() => openAgent(id)}
+  return <><Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 17 }} accessibilityElementsHidden importantForAccessibility="no">·</Text><Pressable accessibilityRole="link" accessibilityLabel={`Open agent: ${status.text}`} hitSlop={compact ? 12 : 6} onPress={() => openAgent(id)}
     style={state => ({ flexDirection: "row", alignItems: "center", gap: 3, borderRadius: 4, opacity: state.pressed ? 0.6 : 1, ...((state as { hovered?: boolean }).hovered ? { textDecorationLine: "underline" } : {}) } as object)}>
     <Text style={{ color: c.foreground, fontSize: 12, lineHeight: 17, fontWeight: "500" }}>Open agent</Text>
     <Icon name="ArrowUpRight" size={12} color={c.foreground} />
-  </Pressable>;
+  </Pressable></>;
 }
 
 function TaskRow({ o, w, agents, openAgent, theme, onOpen, compact }: { o: Obligation; w: Workspace; agents: TaskAgents; openAgent?: (agentId: string) => void; theme: Theme; onOpen: () => void; compact: boolean }) {
