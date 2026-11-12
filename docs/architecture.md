@@ -87,6 +87,13 @@ Answers that the client polls are kept small:
 - `server/store.ts`: `state.json` stays in memory once loaded. `mutate()` serializes changes. Writes are batched (at
   most one a second) and skipped when nothing changed. `onChanged` writes `scopes.json` for the hooks and the
   bridge.
+- **Only real changes are written** (`store-writes-only-real-changes`). PR read timestamps (`snapshot.observedAt`,
+  `deployment.observedAt`) are volatile: a mutation that changes nothing else stays in memory and reaches
+  `state.json` with the next real change, after `VOLATILE_WRITE_MS` (5 min), or on close. `InboxStore` writes compact
+  JSON, skips unchanged states, and holds a lastSeen-only change for up to `LAST_SEEN_WRITE_MS` (5 min); the worker's
+  stop flushes it (`stopWorker`). 2026-11-12, live: 17 of 19 `state.json` writes (1.3 MB each) only moved read
+  timestamps, and 14 of 14 sampled `inbox.json` writes were lastSeen-only or identical. Guarded by
+  `tests/store-writes.test.ts`.
 
 ## Lifecycle of an agent session
 
