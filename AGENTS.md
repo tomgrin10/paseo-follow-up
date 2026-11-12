@@ -110,7 +110,18 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    - Background work (scans, auto-sends, AI jobs) waits while the governor reports the VM constrained
      (Paseo's cgroup working set ≥ 75 %, or pressure).
    - Extras stop at critical (≥ 85 %).
-   - `test:scale` budgets: 240 MB RSS, 3 % CPU, 2 idle daemon requests a minute at 120 workspaces.
+   - `test:scale` budgets, on the realistic seed (`--realistic`: 140 workspaces, ~280 agents, a live-shaped 1.7 MB
+     state, a fake GitHub with live-sized PR bodies): **300 MB peak RSS** from the worker's start (VmHWM, so the
+     cold-start tick counts), **240 MB idle RSS**, **3 % idle CPU**, **2 idle daemon requests a minute**. Measured
+     2026-11-12 (two runs): peak 262–264 MB (a ~2 s cold-start tick that changes and validates every workspace once),
+     idle 198–200 MB and flat, CPU 1.3–1.4 %, 1.3 requests a minute; the bare plugin process is ~120 MB. Headroom
+     (~15 % peak, ~20 % idle) covers live's extras the seed lacks (archived agents, real transcripts, AI jobs) and CI
+     noise. The old 240 MB budget was checked on an empty-workspace seed and only after start-up, so a 450 MB live
+     worker passed it.
+   - **A tick copies the state at most once** (`a-tick-copies-the-state-at-most-once`): per-workspace writes copy one
+     workspace, a tick saves and runs `onChanged` once (`Store.batch`), an untouched workspace isn't copied or
+     re-checked, and a save validates only changed workspaces. Per-tick work never scales with workspaces × agents.
+     See [docs/architecture.md](docs/architecture.md); guarded by `tests/tick-copies.test.ts` and `test:scale`.
 3. **Agent parity.** Every action the developer can take in Follow-up also has an agent tool that runs the same
    server path, or an exemption with a reason in `PARITY` (`server/agent-parity.ts`).
    - Writes return a dry-run plan first and run with `confirm: true` and the plan id.
