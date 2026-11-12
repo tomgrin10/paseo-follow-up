@@ -40,7 +40,7 @@ const exec = promisify(execFile);
 const argv = process.argv.slice(2);
 const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : fallback; };
 // What's new reinstalls the plugin as 2.0.0-rc.0, so it goes last: every other shot shows the version under test.
-const SHOTS = ["setup", "home", "panel", "questions", "pill", "pr-sheet", "phone", "context-menu", "linked-items", "notes-home", "notes-panel", "whats-new"];
+const SHOTS = ["setup", "home", "panel", "questions", "pill", "pr-sheet", "phone", "context-menu", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
 for (const name of only) if (!SHOTS.includes(name)) fail(`unknown shot "${name}" (known: ${SHOTS.join(", ")})`);
 const scheme = arg("--scheme");
@@ -386,6 +386,27 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
       await page.getByRole("button", { name: /^Pull request 142: / }).first().waitFor();
     });
+    // Repairs are tasks (Q49): Onboarding email's PR #160 has a conflict and review threads. With Auto on, the strip
+    // says who gets the next message, when and why; the crawling clock keeps it inside the settle, so nothing sends.
+    if (name === "tasks" || name === "tasks-sheet" || name === "tasks-phone") {
+      const email = seeded.workspaces.find(w => w.key === "email");
+      await call("follow.control", { workspaceId: email.workspaceId, enable_auto_sends: true });
+      const spec = WORKSPACES.find(w => w.key === "email");
+      const open = async page => {
+        await openChat(page, spec.title, spec.prompt);
+        await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+        const strip = page.getByText(/^Next message to /).first();
+        await strip.waitFor({ timeout: 60000 });
+        await strip.scrollIntoViewIfNeeded();
+      };
+      if (name === "tasks") await shoot("tasks", DESKTOP, "dark", open);
+      if (name === "tasks-sheet") await shoot("tasks-sheet", DESKTOP, "dark", async page => {
+        await open(page);
+        await page.getByRole("button", { name: /^Task: Resolve merge conflicts/ }).first().click();
+        await page.getByText("Next message", { exact: true }).last().waitFor();
+      });
+      if (name === "tasks-phone") await shoot("tasks-phone", PHONE, "light", async page => { await page.setViewportSize(PHONE); await open(page); });
+    }
     if (name === "questions") await shoot("questions", DESKTOP, "dark", async page => {
       await openChat(page, "Billing retries", billing.prompt);
       await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
