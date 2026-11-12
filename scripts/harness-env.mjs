@@ -1,5 +1,6 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join, relative, isAbsolute, resolve, delimiter } from "node:path";
+import { join, relative, isAbsolute, resolve, delimiter, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { ENV_PREFIX, LEGACY_ENV_PREFIX } from "../shared/legacy.ts";
 
 /**
@@ -28,6 +29,12 @@ import { ENV_PREFIX, LEGACY_ENV_PREFIX } from "../shared/legacy.ts";
  * The stubs sit after any PATH entries inside the root (a script's own fake gh or mcpproxy still wins) and before the
  * host's dirs. The Paseo CLI stays real. tests/harness-env.test.ts fails when one resolves outside the root.
  * `real` keeps named tools unstubbed: only the opt-in live-model check (check-wait, `claude`) passes it.
+ *
+ * 2026-11-12: a phone render showed the VM's real hostname in Paseo's header (Paseo labels its host with os.hostname(),
+ * with no setting to override it), and renders go into this public repo's PRs and README. Every harness process
+ * preloads scripts/harness-hostname.cjs (first on NODE_OPTIONS, after a caller's set and strip), so os.hostname() and
+ * HOSTNAME read HARNESS_HOST. tests/harness-env.test.ts fails when a harness daemon can read the real one; the
+ * screenshot run fails a shot whose page text contains it.
  */
 export const STUBBED_TOOLS = ["mcpproxy", "gh", "gt", "gcloud", "claude", "codex"];
 /**
@@ -39,6 +46,9 @@ export const PROVIDER_TOOLS = { claude: "claude", codex: "codex" };
 /** The tools a run stubs: all of STUBBED_TOOLS but the `real` ones. One list for the stubs and the providers. */
 export const stubbedTools = (real = []) => STUBBED_TOOLS.filter(t => !real.includes(t));
 export const HARNESS_DEFAULTS = { PASEO_DICTATION_ENABLED: "false", PASEO_VOICE_MODE_ENABLED: "false", FOLLOW_UP_GITHUB_API: "http://127.0.0.1:9" };
+/** The host name every harness process reports (os.hostname(), HOSTNAME, Paseo's host label). */
+export const HARNESS_HOST = "dev-box";
+const HOSTNAME_PRELOAD = join(dirname(fileURLToPath(import.meta.url)), "harness-hostname.cjs");
 export const SESSION_KEYS = new RegExp(`^(PASEO_|CODEX_|${ENV_PREFIX}|${LEGACY_ENV_PREFIX})|^CLAUDE_(CONFIG_DIR|SESSION_ID|PROJECT_DIR|CODE_ENTRYPOINT|CODE_SSE_PORT)$|^CLAUDECODE$`);
 const ISOLATED = ["HOME", "XDG_CONFIG_HOME", "PASEO_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"];
 
@@ -47,6 +57,8 @@ export function harnessEnv(root, { home = join(root, "home"), paseoHome = home, 
   for (const [key, value] of Object.entries(base)) if (value !== undefined && !SESSION_KEYS.test(key) && !strip.includes(key)) env[key] = value;
   Object.assign(env, { HOME: home, XDG_CONFIG_HOME: join(home, ".config"), PASEO_HOME: paseoHome, CLAUDE_CONFIG_DIR: join(home, ".claude"), CODEX_HOME: join(home, ".codex") }, HARNESS_DEFAULTS, set);
   for (const key of strip) delete env[key];
+  Object.assign(env, { HOSTNAME: HARNESS_HOST, HARNESS_HOSTNAME: HARNESS_HOST });
+  env.NODE_OPTIONS = [`--require "${HOSTNAME_PRELOAD}"`, env.NODE_OPTIONS].filter(Boolean).join(" ");
   const top = resolve(root);
   env.PATH = stubbedPath(top, env.PATH ?? "", stubbedTools(real));
   for (const key of ISOLATED) {
