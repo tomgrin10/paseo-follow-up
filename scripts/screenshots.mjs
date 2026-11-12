@@ -57,7 +57,9 @@ function fail(message) { console.error(`screenshots: ${message}`); process.exit(
 if (!process.env.PLAYWRIGHT_CORE || !existsSync(join(process.env.PLAYWRIGHT_CORE, "package.json"))) fail("set PLAYWRIGHT_CORE to a playwright-core directory (e.g. ~/paseo-switcher/node_modules/playwright-core)");
 if (!process.env.CHROMIUM || !existsSync(process.env.CHROMIUM)) fail("set CHROMIUM to a Chromium or chrome-headless-shell binary");
 const paseoVersion = await exec("paseo", ["--version"], { timeout: 30000 }).then(r => r.stdout.trim(), () => null);
-if (!paseoVersion || !/(^|\D)0\.15\.\d+/.test(paseoVersion)) fail(`needs the Paseo CLI 0.15.x on PATH (found ${paseoVersion ?? "none"}); run through harness-slot or put ~/paseo-harness/cli/0.15.4/bin first`);
+// --sidebar-review needs sidebar views, which arrive in 0.16 (HARNESS_PASEO=0.16); every other shot stays on 0.15.x.
+const paseoOk = argv.includes("--sidebar-review") ? /(^|\D)0\.1[56]\.\d+/ : /(^|\D)0\.15\.\d+/;
+if (!paseoVersion || !paseoOk.test(paseoVersion)) fail(`needs the Paseo CLI 0.15.x on PATH (found ${paseoVersion ?? "none"}); run through harness-slot or put ~/paseo-harness/cli/0.15.4/bin first`);
 if (changelogArg && !existsSync(changelogArg)) fail(`--whats-new-changelog: no file at ${changelogArg}`);
 const optimiser = await findOptimiser();
 await harness();
@@ -132,6 +134,24 @@ for (const m of query.matchAll(/(p\\d+):pullRequest\\(number:(\\d+)\\)/g)) {
     commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false }, nodes: p.checks ?? [] } } } }] } };
 }
 console.log(JSON.stringify({ data: { repository } }));
+`;
+}
+
+/**
+ * A fake `claude` for Rename with AI's review shots (--rename-review): it answers only the rename prompt, as
+ * `claude -p --output-format json` does, and the mode file picks the state: ready, slow (still suggesting) or fail.
+ */
+function fakeClaude(modeFile) {
+  return `#!/usr/bin/env node
+const fs = require("node:fs");
+// Anything but the rename job (its own system prompt) fails at once, as an unlogged-in CLI does, without reading stdin.
+if (!process.argv.some(a => a.startsWith("You name software workspaces"))) { process.stderr.write("not logged in"); process.exit(1); }
+let input = ""; process.stdin.on("data", d => input += d); process.stdin.on("end", () => {
+  const mode = (() => { try { return fs.readFileSync(${JSON.stringify(modeFile)}, "utf8").trim(); } catch { return "ready"; } })();
+  if (mode === "fail") { process.stdout.write(JSON.stringify({ is_error: true, subtype: "error_during_execution" })); process.exit(0); }
+  const reply = () => process.stdout.write(JSON.stringify({ result: JSON.stringify({ name: "Add APP-142 backoff for soft card declines" }), total_cost_usd: 0.0004, usage: { input_tokens: 420, output_tokens: 14 } }));
+  if (mode === "slow") setTimeout(reply, 20000); else reply();
+});
 `;
 }
 
@@ -374,6 +394,112 @@ async function openChat(page, title, prompt) {
 
 async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   const billing = WORKSPACES.find(w => w.key === "billing");
+  // Review evidence for Rename with AI (not README images): the row menu item, the panel's More button and menu, the
+  // dialog suggesting, ready, edited and failed, the toast with Undo and the Undo link; desktop and phone, dark and light.
+  if (argv.includes("--rename-review")) {
+    const mode = m => fs.writeFile(join(home, "claude-mode"), m);
+    // One state can't hold the harness slot: each shot gets 90 s, then fails on its own and the run moves on.
+    // --rename-only a,b: a subset of these shots (the rest are skipped).
+    const pick = arg("--rename-only")?.split(",").map(x => x.trim());
+    const bounded = async (name, ...rest) => {
+      if (pick && !pick.includes(name)) return;
+      let timer;
+      const late = new Promise(r => { timer = setTimeout(() => { failures.push(`${name} (timed out)`); r(); }, 90_000); });
+      try { await Promise.race([shoot(name, ...rest), late]); } finally { clearTimeout(timer); }
+    };
+    const billingId = seeded.workspaces.find(w => w.key === "billing").workspaceId;
+    const rowMenuAt = async page => {
+      await openHome(page);
+      await (await homeRow(page, "Billing retries")).click({ button: "right", position: { x: 160, y: 18 } });
+      const menu = page.getByRole("menu", { name: "Actions for Billing retries" });
+      await menu.getByRole("menuitem", { name: "Rename with AI…" }).waitFor();
+      return menu;
+    };
+    const dialog = (vp, wait) => async page => {
+      await (await rowMenuAt(page)).getByRole("menuitem", { name: "Rename with AI…" }).click();
+      if (vp !== DESKTOP) await page.setViewportSize(vp);
+      await wait(page);
+    };
+    const ready = page => page.getByRole("textbox", { name: "New name" }).last().evaluate(el => el.value.length > 0 || Promise.reject(new Error("empty"))).catch(async () => { await page.waitForFunction(() => [...document.querySelectorAll('[aria-label="New name"]')].some(el => el.value)); });
+    const panelOpen = async page => {
+      await openChat(page, "Billing retries", billing.prompt);
+      await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+      await page.getByRole("button", { name: "More actions for this workspace" }).first().waitFor();
+    };
+    await bounded("rename-menu", DESKTOP, "dark", async page => { await rowMenuAt(page); });
+    await bounded("rename-panel-header", DESKTOP, "light", async page => { await panelOpen(page); });
+    await bounded("rename-panel-more", DESKTOP, "dark", async page => {
+      await panelOpen(page);
+      await page.getByRole("button", { name: "More actions for this workspace" }).first().click();
+      await page.getByRole("menuitem", { name: "Rename with AI…" }).waitFor();
+    });
+    await mode("slow");
+    for (const [n, vp, sc] of [["rename-suggesting", DESKTOP, "dark"], ["rename-suggesting-phone-light", PHONE, "light"]])
+      await bounded(n, vp, sc, dialog(vp, page => page.getByText("Suggesting a name…").last().waitFor()));
+    // Let the slow replies drain from the job queue (one at a time) before the next state.
+    await new Promise(r => setTimeout(r, 42000));
+    await mode("fail");
+    for (const [n, vp, sc] of [["rename-error", DESKTOP, "dark"], ["rename-error-phone-light", PHONE, "light"]])
+      await bounded(n, vp, sc, dialog(vp, page => page.getByText(/Couldn't suggest a name/).last().waitFor()));
+    await mode("ready");
+    for (const [n, vp, sc] of [["rename-ready", DESKTOP, "dark"], ["rename-ready-light", DESKTOP, "light"], ["rename-ready-phone", PHONE, "dark"], ["rename-ready-phone-light", PHONE, "light"]])
+      await bounded(n, vp, sc, dialog(vp, ready));
+    await bounded("rename-invalid", DESKTOP, "dark", dialog(DESKTOP, async page => {
+      await ready(page);
+      await page.getByRole("textbox", { name: "New name" }).last().fill("feat/retry-soft-declines");
+      await page.getByText("Use words, not a branch name.").last().waitFor();
+    }));
+    await bounded("rename-toast", DESKTOP, "dark", dialog(DESKTOP, async page => {
+      await ready(page);
+      await page.getByRole("button", { name: "Rename" }).last().click();
+      await page.getByText(/^Renamed to Add APP-142 backoff for soft card declines/).last().waitFor();
+      // The toast lasts 10 s (held under the pointer): shoot it now, with the pointer resting on it.
+      await page.getByText(/^Renamed to Add APP-142/).last().hover();
+      await page.screenshot({ path: join(out, "follow-up-rename-toast-live.png"), animations: "disabled", caret: "hide" });
+    }));
+    await bounded("rename-undo-link", DESKTOP, "light", async page => {
+      await openHome(page);
+      await (await homeRow(page, "Add APP-142 backoff for soft card declines")).click({ button: "right", position: { x: 160, y: 18 } });
+      await page.getByRole("menuitem", { name: "Rename with AI…" }).click();
+      await page.getByRole("button", { name: "Undo last rename" }).last().waitFor();
+      await page.getByText("Suggesting a name…").last().waitFor({ state: "detached" });
+    });
+    await call("follow.rename-workspace", { workspaceId: billingId, undo: true }).catch(error => log(`undo after review: ${error.message}`));
+  }
+  // Review evidence for the sidebar view's row menu (Paseo 0.16+, HARNESS_PASEO=0.16): Follow-up's view picked in
+  // Settings → Sidebar, then a row's menu from a right-click and from Shift+F10; dark and light. On a host without
+  // sidebar views this fails at "Follow-up: Needs you" (the option doesn't exist).
+  if (argv.includes("--sidebar-review")) {
+    const sidebarRow = async page => {
+      await page.goto(`${ORIGIN}/settings/sidebar`);
+      await page.getByText("Default view", { exact: true }).first().click();
+      await page.getByText("Follow-up: Needs you", { exact: true }).last().click();
+      await openHome(page);
+      const view = page.getByTestId("plugin-sidebar-view");
+      const row = view.getByRole("button", { name: /^Billing retries/ }).first();
+      await row.waitFor();
+      return { view, row };
+    };
+    const menuOpen = page => page.getByRole("menu", { name: "Actions for Billing retries" }).getByRole("menuitem", { name: "Rename with AI…" }).waitFor();
+    // --rename-only also picks among these (sidebar-menu-click-dark, sidebar-menu-key-light, …).
+    const pick = arg("--rename-only")?.split(",").map(x => x.trim());
+    const pickShot = (name, ...rest) => !pick || pick.includes(name) ? shoot(name, ...rest) : undefined;
+    for (const scheme of ["dark", "light"]) {
+      await pickShot(`sidebar-menu-click-${scheme}`, DESKTOP, scheme, async page => {
+        const { row } = await sidebarRow(page);
+        await row.click({ button: "right", position: { x: 60, y: 12 } });
+        await menuOpen(page);
+        // Ask the Overseer needs Home's omnibox, so it isn't in this menu at all.
+        if (await page.getByRole("menuitem", { name: /Ask the Overseer/ }).count()) throw new Error("Ask the Overseer shown in the sidebar view");
+      });
+      await pickShot(`sidebar-menu-key-${scheme}`, DESKTOP, scheme, async page => {
+        const { row } = await sidebarRow(page);
+        await row.focus();
+        await page.keyboard.press("Shift+F10");
+        await menuOpen(page);
+      });
+    }
+  }
   for (const name of SHOTS) {
     if (!only.includes(name) || name === "setup") continue;
     if (name === "home") await shoot("home", DESKTOP, "dark", async page => {
@@ -631,6 +757,8 @@ async function setDaemonClock(fakeMs, rate = 0.001) {
 }
 
 let daemon; let client; let api; let browser; let daemonUrl = null;
+/** The fake GitHub's HTTPS server: closed in stopDaemon, or its listening socket keeps the run (and its harness slot) alive after "done". */
+let github = null;
 /** (Re)connects `client` and `api` to the isolated daemon. */
 async function connect() {
   await api?.dispose?.()?.catch?.(() => {}); await client?.close().catch(() => {});
@@ -641,6 +769,7 @@ async function connect() {
 const stopDaemon = async () => {
   await browser?.close().catch(() => {}); browser = null;
   await api?.dispose?.().catch?.(() => {}); await client?.close().catch(() => {}); client = null;
+  await github?.close().catch(() => {}); github = null;
   if (daemon && daemon.exitCode === null) {
     daemon.kill("SIGTERM");
     for (let i = 0; i < 40 && daemon.exitCode === null; i++) await new Promise(r => setTimeout(r, 100));
@@ -667,9 +796,10 @@ try {
   await fs.writeFile(join(home, "gh-fixture.json"), JSON.stringify(pulls()));
   await fs.writeFile(join(bin, "gh"), fakeGh(join(home, "gh-fixture.json"))); await fs.chmod(join(bin, "gh"), 0o700);
   // PR reads go over HTTPS (server/github-api.ts) to this fake, which answers with the same fixture gh.
-  const github = await fakeGithub({ dir: root, gh: join(bin, "gh") });
+  github = await fakeGithub({ dir: root, gh: join(bin, "gh") });
   await fs.writeFile(join(home, "linear-fixture.json"), JSON.stringify(linearIssues()));
   await fs.writeFile(join(bin, "mcpproxy"), fakeMcpproxy(join(home, "linear-fixture.json"))); await fs.chmod(join(bin, "mcpproxy"), 0o700);
+  if (argv.includes("--rename-review")) { await fs.writeFile(join(bin, "claude"), fakeClaude(join(home, "claude-mode"))); await fs.chmod(join(bin, "claude"), 0o700); }
   // Real speed while the daemon starts and the plugin installs; seeding and shooting crawl (setDaemonClock).
   // It starts ten minutes before BASE, so the clock only ever moves forward.
   await fs.writeFile(clockFile, JSON.stringify({ fake: at(-10), real: Date.now(), rate: 1 }));

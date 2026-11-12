@@ -1,4 +1,5 @@
-import { join, relative, isAbsolute, resolve } from "node:path";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join, relative, isAbsolute, resolve, delimiter } from "node:path";
 import { ENV_PREFIX, LEGACY_ENV_PREFIX } from "../shared/legacy.ts";
 
 /**
@@ -20,22 +21,42 @@ import { ENV_PREFIX, LEGACY_ENV_PREFIX } from "../shared/legacy.ts";
  *
  * 2026-11-11: FOLLOW_UP_GITHUB_API defaults to a closed local port, so a harness daemon never reads the real
  * api.github.com with whatever token the host has. A script that wants GitHub sets it (scripts/fake-github.mjs).
+ *
+ * 2026-11-12: a realistic scale run's ranker shelled out to the host's real `mcpproxy` (Linear and Slack reads as the
+ * developer); it failed only because the harness HOME had no proxy config. Every tool the plugin, its AI jobs or a
+ * daemon provider could reach on the host (STUBBED_TOOLS) resolves to a stub in <root>/.harness-stubs that exits 127.
+ * The stubs sit after any PATH entries inside the root (a script's own fake gh or mcpproxy still wins) and before the
+ * host's dirs. The Paseo CLI stays real. tests/harness-env.test.ts fails when one resolves outside the root.
+ * `real` keeps named tools unstubbed: only the opt-in live-model check (check-wait, `claude`) passes it.
  */
+export const STUBBED_TOOLS = ["mcpproxy", "gh", "gt", "gcloud", "claude", "codex"];
 export const HARNESS_DEFAULTS = { PASEO_DICTATION_ENABLED: "false", PASEO_VOICE_MODE_ENABLED: "false", FOLLOW_UP_GITHUB_API: "http://127.0.0.1:9" };
 export const SESSION_KEYS = new RegExp(`^(PASEO_|CODEX_|${ENV_PREFIX}|${LEGACY_ENV_PREFIX})|^CLAUDE_(CONFIG_DIR|SESSION_ID|PROJECT_DIR|CODE_ENTRYPOINT|CODE_SSE_PORT)$|^CLAUDECODE$`);
 const ISOLATED = ["HOME", "XDG_CONFIG_HOME", "PASEO_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"];
 
-export function harnessEnv(root, { home = join(root, "home"), paseoHome = home, set = {}, strip = [], base = process.env } = {}) {
+export function harnessEnv(root, { home = join(root, "home"), paseoHome = home, set = {}, strip = [], base = process.env, real = [] } = {}) {
   const env = {};
   for (const [key, value] of Object.entries(base)) if (value !== undefined && !SESSION_KEYS.test(key) && !strip.includes(key)) env[key] = value;
   Object.assign(env, { HOME: home, XDG_CONFIG_HOME: join(home, ".config"), PASEO_HOME: paseoHome, CLAUDE_CONFIG_DIR: join(home, ".claude"), CODEX_HOME: join(home, ".codex") }, HARNESS_DEFAULTS, set);
   for (const key of strip) delete env[key];
   const top = resolve(root);
+  env.PATH = stubbedPath(top, env.PATH ?? "", STUBBED_TOOLS.filter(t => !real.includes(t)));
   for (const key of ISOLATED) {
     const r = relative(top, resolve(env[key]));
     if (r.startsWith("..") || isAbsolute(r)) throw new Error(`harnessEnv: ${key}=${env[key]} is outside the harness root ${top}`);
   }
   return env;
+}
+
+/** PATH with the stub dir after the entries inside the root and before everything else. */
+function stubbedPath(top, path, tools) {
+  const stubs = join(top, ".harness-stubs");
+  mkdirSync(stubs, { recursive: true });
+  rmSync(stubs, { recursive: true, force: true }); mkdirSync(stubs, { recursive: true });
+  for (const tool of tools) writeFileSync(join(stubs, tool), `#!/bin/sh\necho "harness: ${tool} is stubbed; a harness run never reaches the host's real ${tool} (scripts/harness-env.mjs)" >&2\nexit 127\n`, { mode: 0o755 });
+  const entries = path.split(delimiter).filter(e => e && e !== stubs);
+  const inside = e => { const r = relative(top, resolve(e)); return !r.startsWith("..") && !isAbsolute(r); };
+  return [...entries.filter(inside), stubs, ...entries.filter(e => !inside(e))].join(delimiter);
 }
 
 /** For scripts that run the daemon in-process: make process.env exactly `env`. */

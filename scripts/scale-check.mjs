@@ -171,7 +171,8 @@ try {
   const result = { workspaces: N, awakeOnPurpose: AWAKE, loadedBefore: before, loadedPerPoll: samples, loadedAfter: after, followUpSends: receipts, dormant: state.workspaces.filter(w => w.dormant).length, autoSendOn: state.workspaces.filter(w => w.enable_auto_sends).length, parked: state.autoSendsParked?.length ?? 0, worker };
   console.log(process.argv.includes("--json") ? JSON.stringify(result) : result);
   if (after > before) { console.error(`Follow-up loaded ${after - before} dormant agents`); process.exitCode = 1; }
-  if (budget.rssMb && worker && worker.idlePeakRssMb > budget.rssMb) { console.error(`Worker RSS peaked at ${worker.idlePeakRssMb} MB, over ${budget.rssMb} MB`); process.exitCode = 1; }
+  // The budget is the worker's lifetime peak (VmHWM), start-up tick included: 2026-11-12's spike was over before idle began.
+  if (budget.rssMb && worker && worker.lifetimePeakRssMb > budget.rssMb) { console.error(`Worker RSS peaked at ${worker.lifetimePeakRssMb} MB (idle peak ${worker.idlePeakRssMb}), over ${budget.rssMb} MB`); process.exitCode = 1; }
   if (budget.requestsPerMin && worker && worker.daemonRequestsPerMin.total > budget.requestsPerMin) { console.error(`Worker sent ${worker.daemonRequestsPerMin.total} daemon requests/min while idle, over ${budget.requestsPerMin}: ${JSON.stringify(worker.daemonRequestsPerMin.byType)}`); process.exitCode = 1; }
   if (budget.cpuPct && worker && worker.cpuPct > budget.cpuPct) { console.error(`Worker CPU ${worker.cpuPct}% exceeds ${budget.cpuPct}% while idle`); process.exitCode = 1; }
 } finally {

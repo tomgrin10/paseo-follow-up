@@ -1,14 +1,15 @@
 import type { Batch, Workspace } from "./model";
 import { completionCheck, CANCEL_CAUSES } from "./model";
 import { recoveryBatch } from "./follow-up";
+import { SETTLE_MS, sendDecision } from "./send-decision";
 
 /**
  * The one status model for Follow-up's own work on a workspace. Home's bucket, the panel's agent card, the header's
  * live line and Needs you all read this, so no surface can say the agent is on it while another says it is idle.
- * Mirrors the worker's auto-send rules (server/engine.ts): change both together, and the invariants in
+ * A queued batch's line is the worker's own send decision (shared/send-decision.ts), and the invariants in
  * shared/status-invariants.ts catch a surface that drifts.
  */
-export const SETTLE_MS = 60_000;
+export { SETTLE_MS };
 
 /** Follow-up's own hold after the main agent's turn failed or the developer stopped it (holdOnTurnEnd). */
 export const interruptionHold = (kind: "canceled" | "failed") => kind === "canceled" ? "You stopped the main agent. Resume follow-up when ready." : "The main agent's turn failed. Check it before resuming follow-up.";
@@ -117,19 +118,11 @@ export type BatchView = {
   fixing: boolean;
 };
 
-/** Why a queued repair batch hasn't gone out, in the worker's own order. Null: it goes out on the next refresh. */
+/** Why a queued repair batch hasn't gone out: the worker's own decision (shared/send-decision.ts), never a copy of it. */
 function queuedReason(w: Workspace, b: Batch, now: number): { waitingOn: BatchView["waitingOn"]; text: string; fixing: boolean } {
-  if (!w.enable_auto_sends) return { waitingOn: "you", text: "ready to send", fixing: false };
-  if (w.hold) return { waitingOn: "you", text: "paused until you resume", fixing: false };
-  if (w.goneAgent) return { waitingOn: "you", text: "the main agent's conversation is gone", fixing: false };
-  if (w.runtimeBusy) return { waitingOn: "agent", text: "sends after the agent's current turn", fixing: true };
-  if (w.backgroundBusy) return { waitingOn: "agent", text: "sends after the agent's background work", fixing: true };
-  if (w.runtimeReason) return { waitingOn: "follow-up", text: w.runtimeReason, fixing: false };
-  if (w.batches.some(o => o.id !== b.id && !recoveryBatch(o) && ["sending", "sent", "blocked", "uncertain"].includes(o.state))) return { waitingOn: "follow-up", text: "waits for the open batch to finish", fixing: false };
-  if (w.dormant) return { waitingOn: "you", text: "waits until the workspace is active again", fixing: false };
-  if (w.sendWait === "setup") return { waitingOn: "follow-up", text: "sends once setup finishes", fixing: false };
-  if (w.sendWait === "unloaded") return { waitingOn: "you", text: "the agent is idle and Follow-up doesn't wake it · send it now", fixing: false };
-  return { waitingOn: null, text: now - Date.parse(b.createdAt) < SETTLE_MS ? "sending in a moment" : "sending now", fixing: true };
+  const d = sendDecision(w, now, { batch: b });
+  // Fixing: it goes out on its own once the agent's turn ends or the settle passes.
+  return { waitingOn: d.waitingOn, text: d.reason, fixing: d.waitingOn === null || d.waitingOn === "agent" };
 }
 
 /** The batch that describes Follow-up's work right now: in flight, then stuck, then queued repairs, then the Done check. */

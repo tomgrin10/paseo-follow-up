@@ -134,15 +134,24 @@ function Popover({ menu, theme, expanded, setExpanded, confirm, setConfirm, choo
     return () => d?.removeEventListener("keydown", onKey, true);
   });
 
-  // Drawn invisibly once to measure, then placed inside the viewport (flipped up or left near an edge).
-  const at = size ? placeMenu(anchor, size, viewport) : { left: anchor.x, top: anchor.y };
+  // `fixed` is relative to the nearest transformed ancestor (the workspace panel is one), not always the window: the
+  // overlay measures where it really starts and how big it is, and the menu is placed in that box.
+  const overlay = useRef<DomNode | null>(null);
+  const [box, setBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const r = (overlay.current as unknown as { getBoundingClientRect?: () => { left: number; top: number; width: number; height: number } } | null)?.getBoundingClientRect?.();
+    if (r && r.width > 0) setBox({ x: r.left, y: r.top, width: r.width, height: r.height });
+  }, [viewport.width, viewport.height]);
+  const local = box ? { x: anchor.x - box.x, y: anchor.y - box.y } : anchor;
+  // Drawn invisibly once to measure, then placed inside the box (flipped up or left near an edge).
+  const at = size ? placeMenu(local, size, box ?? viewport) : { left: local.x, top: local.y };
   const fixed = { position: web ? "fixed" : "absolute" } as unknown as ViewStyle;
-  return <View style={[fixed, { top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000 }]}>
+  return <View ref={overlay as never} style={[fixed, { top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000 }]}>
     {/* Outside the menu: a click or another right-click closes it. */}
     <Pressable accessible={false} onPress={close} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
     <View role={confirm ? "alertdialog" : "menu"} aria-label={confirm ? confirm.label.replace(/…$/, "") : `Actions for ${menu.s.title}`}
       onLayout={e => { const { width, height } = e.nativeEvent.layout; if (!size || size.height !== height || size.width !== width) setSize({ width, height }); }}
-      style={{ position: "absolute", left: at.left, top: at.top, opacity: size ? 1 : 0, width: 256, maxHeight: viewport.height - 16, paddingVertical: 4, borderRadius: 8, backgroundColor: c.surface1, ...floating(c) }}>
+      style={{ position: "absolute", left: at.left, top: at.top, opacity: size ? 1 : 0, width: 256, maxHeight: (box ?? viewport).height - 16, paddingVertical: 4, borderRadius: 8, backgroundColor: c.surface1, ...floating(c) }}>
       {confirm ? <ConfirmBody theme={theme} item={confirm} onCancel={() => setConfirm(null)} onConfirm={() => choose(confirm)} cancelRef={confirmRef} /> : menu.sections.map((sec, si) => <View key={sec.key} style={si ? { marginTop: 4, paddingTop: 4, borderTopWidth: 1, borderTopColor: c.border } : undefined}>
         {sec.items.map(item => {
           const open = expanded === item.key;
