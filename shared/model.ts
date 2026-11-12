@@ -36,7 +36,7 @@ export const snapshotSchema = z.object({
   /** What the repository allows, read with the PR (no extra request): merge methods, auto-merge and a merge queue. */
   repoMerge: z.object({ methods: z.array(z.enum(["squash", "merge", "rebase"])), preferred: z.enum(["squash", "merge", "rebase"]).nullable(), autoMerge: z.boolean(), mergeQueue: z.boolean() }).optional(),
 });
-export const prSchema = z.object({
+const prObjectSchema = z.object({
   key: idSchema, repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/), number: z.number().int().positive(),
   stack: textSchema, parent: idSchema.nullable(), disposition: z.string().nullable(),
   snapshot: snapshotSchema.nullable(), error: z.string().nullable(),
@@ -46,6 +46,15 @@ export const prSchema = z.object({
   agentMerges: z.boolean().optional(),
   deploymentAnchor: z.object({ mergeCommit: z.string(), at: z.string() }).optional(),
 });
+/**
+ * A merged PR with a complete snapshot is final: an error from a later failed read means nothing about it. 2.0.1-beta.0's
+ * RATE_LIMIT failures left such errors in state.json, and merged-is-final never reads those PRs again, so the error is
+ * dropped wherever the state is parsed (load included): existing installs heal without a Refresh.
+ * Invariant a-github-limit-never-blanks-a-known-pr.
+ */
+export const prSchema = prObjectSchema.transform(pr => pr.error && pr.snapshot?.complete && pr.snapshot.state === "MERGED" ? { ...pr, error: null } : pr);
+/** A PR's status is known when its last read was complete. A later failed read (`error`) never blanks it; it only makes it older. */
+export const statusKnown = <P extends { snapshot: { complete: boolean } | null }>(pr: P): pr is P & { snapshot: NonNullable<P["snapshot"]> } => !!pr.snapshot?.complete;
 export const obligationSchema = z.object({
   id: idSchema, title: textSchema,
   status: z.enum(["pending", "waiting", "working", "blocked", "done", "waived"]),
@@ -232,7 +241,7 @@ export function summary(w: Workspace, now = Date.now()): { status: Status; label
   if (batch) return { status: batch.state === "pending" ? "active" : "handling", label: batch.state === "pending" ? w.enable_auto_sends ? "Auto queued" : "Ready to send" : "Agent handling", reason: `${batch.tasks.length} follow-up task${batch.tasks.length === 1 ? "" : "s"} ${batch.state === "pending" ? "queued" : batch.recipientAgentId && batch.recipientAgentId !== w.mainAgentId ? "sent to the recovery agent" : "sent to the main agent"}` };
   const live = liveWorkingTask(w);
   if (w.runtimeBusy || live) return { status: "handling", label: "Agent handling", reason: live?.title ?? "The main agent is working" };
-  if (w.prs.some(pr => pr.error || !pr.snapshot?.complete)) return { status: "waiting", label: "Waiting", reason: "PR status unavailable; refresh will retry" };
+  if (w.prs.some(pr => !statusKnown(pr))) return { status: "waiting", label: "Waiting", reason: "PR status unavailable; refresh will retry" };
   const pending = obligations.find(o => !["done", "waived"].includes(o.status));
   if (pending) return { status: pending.status === "waiting" ? "waiting" : "active", label: pending.status === "waiting" ? "Waiting" : "Active", reason: pending.title };
   if (w.prs.some(pr => !settled(pr))) return { status: "waiting", label: "Waiting", reason: "Waiting for PR review, checks, or merge" };
