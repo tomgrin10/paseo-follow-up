@@ -71,8 +71,10 @@ export const NUDGE_MS = 2_000;
  * Whether an observation carries nothing the stored snapshot lacks: primitives by value, nested fields (threads,
  * deployment, reviewers) by reference or, when the references differ, by their own JSON. A read's content can change
  * without a new observedAt (Graphite scheduling and deployments are merged into it), so observedAt alone isn't enough.
+ * `ignoreReadTimes` (a workspace that isn't hot): a read that only moved observedAt is no change; the full pass every
+ * OBSERVE_FULL_MS records the read time (store-writes-only-real-changes treats it as volatile too).
  */
-export function sameSnapshot(a: object | null | undefined, b: object | null | undefined): boolean {
+export function sameSnapshot(a: object | null | undefined, b: object | null | undefined, ignoreReadTimes = false): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
   const x = a as Record<string, unknown>, y = b as Record<string, unknown>;
@@ -80,10 +82,20 @@ export function sameSnapshot(a: object | null | undefined, b: object | null | un
   if (keys.length !== Object.keys(y).length) return false;
   for (const k of keys) {
     const u = x[k], v = y[k];
-    if (u === v) continue;
-    if (!u || !v || typeof u !== "object" || typeof v !== "object" || JSON.stringify(u) !== JSON.stringify(v)) return false;
+    if (u === v || ignoreReadTimes && k === "observedAt") continue;
+    if (!u || !v || typeof u !== "object" || typeof v !== "object") return false;
+    if (ignoreReadTimes && k === "deployment") { if (JSON.stringify({ ...u, observedAt: null }) !== JSON.stringify({ ...v, observedAt: null })) return false; continue; }
+    if (JSON.stringify(u) !== JSON.stringify(v)) return false;
   }
   return true;
+}
+
+/**
+ * A workspace whose agent may act any moment, or whose decision reads PR freshness (a declaration, Done, a send in
+ * flight): every tick reads its PRs and records every read, read time included.
+ */
+export function isHot(w: Workspace): boolean {
+  return w.runtimeBusy || w.backgroundBusy || !!w.declaration || !!w.completion || w.batches.some(b => ["sending", "sent"].includes(b.state)) || w.prActions.some(a => a.state === "sending");
 }
 
 /** The longest an untouched workspace goes without a full observation pass (its time-based rules run then). */
@@ -203,7 +215,7 @@ export class Engine {
     if (!active.length) { this.error = null; return; }
     // Busy workspaces keep every-tick PR reads: their agent may push or answer review at any moment.
     const keys = (ws: Workspace[]) => new Set(ws.flatMap(w => w.prs.map(p => p.key)));
-    const hot = keys(active.filter(w => w.runtimeBusy || w.backgroundBusy || !!w.declaration || w.batches.some(b => ["sending", "sent"].includes(b.state)) || w.prActions.some(a => a.state === "sending")));
+    const hot = keys(active.filter(isHot));
     const read = o.affected ? active.filter(w => o.affected!.has(w.id)) : active;
     const observations = await this.github.observe(read.flatMap(w => w.prs), o.background || o.workspaceId ? { background: true, hot, fresh: keys(active.filter(w => w.id === o.workspaceId)) } : {});
     for (const original of active) {
@@ -216,7 +228,7 @@ export class Engine {
       const runtimeKey = JSON.stringify(runtime);
       const last = this.observedPass.get(original.id);
       const untouched = !!last && last.w === original && last.runtime === runtimeKey && this.now() - last.at < OBSERVE_FULL_MS && o.workspaceId !== original.id &&
-        original.prs.every(p => { const seen = observations.get(p.key); return !seen || seen.error === p.error && sameSnapshot(seen.snapshot, p.snapshot); });
+        original.prs.every(p => { const seen = observations.get(p.key); return !seen || seen.error === p.error && sameSnapshot(seen.snapshot, p.snapshot, !isHot(original)); });
       if (!untouched) this.observationWrites++;
       if (!untouched) await this.store.mutateWorkspace(original.id, w => {
         w.runtimeBusy = runtime.busy; w.runtimeReason = runtime.reason; w.taskAgents = runtime.taskAgents;

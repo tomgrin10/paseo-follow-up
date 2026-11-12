@@ -108,3 +108,21 @@ test("a-tick-copies-the-state-at-most-once: when only an agent row changes, the 
   const log = (await readFile(join(store.directory, "diag.jsonl"), "utf8")).trim().split("\n").map(l => JSON.parse(l));
   assert.deepEqual(log.map(l => [l.workspaceId, l.violations[0].id]), [["w1", "agent-idle"]], "the invariant fired on the tick the agent row changed");
 });
+
+test("a-tick-copies-the-state-at-most-once: a read that only moves observedAt waits for the full pass, except on a hot workspace", async t => {
+  const store = await fleet(t, 2);
+  let now = clock; let readAt = clock;
+  const runtime = (id: string): Runtime => ({ busy: id === "w1", reason: null, archived: false, mainLoaded: true, mainRecent: true });
+  const gateway: Gateway = { prepareRecovery: async () => ({ agentId: "r", contextPath: "/r.json" }), observe: async w => runtime(w.id), send: async () => {}, label: async () => {} };
+  const github = { observe: async (prs: { key: string; snapshot: Record<string, unknown> }[]) => new Map(prs.map(p => [p.key, { snapshot: { ...p.snapshot, observedAt: new Date(readAt).toISOString() }, error: null }])) };
+  const engine = new Engine(store, github as never, gateway, () => now);
+  await engine.tick(); await engine.tick();
+  const settled = engine.observationWrites;
+  now += 15_000; readAt = now; await engine.tick();
+  assert.equal(engine.observationWrites - settled, 1, "only the hot (busy) workspace records a read-time-only change");
+  const state = await store.snapshot();
+  assert.equal(state.workspaces.find(w => w.id === "w1")!.prs[0].snapshot!.observedAt, new Date(now).toISOString());
+  assert.equal(state.workspaces.find(w => w.id === "w0")!.prs[0].snapshot!.observedAt, new Date(clock).toISOString(), "the quiet one keeps its last recorded read until the full pass");
+  now += 61_000; readAt = now; await engine.tick();
+  assert.equal((await store.snapshot()).workspaces.find(w => w.id === "w0")!.prs[0].snapshot!.observedAt, new Date(now).toISOString(), "the full pass records it");
+});
