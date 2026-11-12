@@ -1,0 +1,1 @@
+- Merged pull requests no longer show Unknown after GitHub was briefly unreachable or out of API budget. Every pull request keeps its last known status, and its details say when it was last checked.

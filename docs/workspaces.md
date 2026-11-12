@@ -139,6 +139,20 @@ The invariants in `shared/status-invariants.ts` check these over a grid of state
 
 ## Tasks (obligations)
 
+- **Who is working on a task** (invariant `a-task-only-says-working-when-its-agent-is`). `update_obligation` with
+  `status: working` records the calling agent as `workingAgentId`, or the agent it names with `workingAgentId` (an
+  orchestrator's subagent; refused unless Paseo knows that agent). The record keeps it after the task moves on, and
+  `workspace_status` shows it. The task row and the Task sheet never read "working" off the stored status: their line
+  comes from `taskStatus` (`shared/task-status.ts`), which names that agent and its live state from
+  `taskAgents` on the workspace (Paseo's agent directory, metadata only, so nothing is woken): "<title> working" (spinner),
+  "<title> idle", or "<title> closed" ("Agent closed" when the name is unknown). With no agent recorded, or before the live state is known, it reads "In
+  progress". While the agent is open (working or idle) the row has **Open agent** and the sheet an **Open agent**
+  button, which open its chat; a closed or archived agent is words only. The engine refreshes `taskAgents` with
+  `runtimeBusy` on every tick (`Gateway.observe`, `taskAgentStates` in `server/tasks.ts`), so every surface that
+  derives "working" from a task reads the same states (invariant `a-task-only-says-working-when-its-agent-is`): the
+  panel's live line spins on a task only while its agent runs, and otherwise reads "<task> · <the row's words>"; the
+  summary says "Agent handling" (Home's Agent working) only for a running agent, never for the stored status alone.
+
 - **Writing tasks.** `update_obligation` writes tasks (`server/obligations.ts`). `afterPrs` uses `owner/repo#number`
   keys.
 - **Triggers** (`shared/task-trigger.ts`): `now`, `merge` or `deploy`, with an optional `delayDays`. Deploy state
@@ -149,7 +163,14 @@ The invariants in `shared/status-invariants.ts` check these over a grid of state
   seen for.
 - **Communication receipts** (`shared/communication.ts`): stakeholder replies need the developer's authorization and
   a sent-message receipt.
-- **Questions from blocked tasks.** A blocked task becomes a question (`syncTaskQuestions`).
+- **Questions from blocked tasks.** Only a task blocked on the developer asks them something: `status: "blocked"` with
+  `ask`, the question they must answer (`blockedOnDeveloper`, `shared/model.ts`). It becomes a question that asks exactly
+  that, never the task's evidence (`syncTaskQuestions`). A task blocked without an ask waits on a PR or another agent:
+  it shows as Blocked in Tasks and never reaches Needs you or the workspace's Needs you status; agents should use
+  `waiting` for that, and the hook says so. Leaving blocked, dropping the ask or changing it closes the open question.
+  An ask set while blocked is kept by blocked updates that leave it out. Invariant
+  `a-question-always-asks-the-developer-something` (`tests/task-question-asks.test.ts`): 2026-11-12, Q48 put a task's
+  evidence in the developer's Needs you as a question with no options while the task waited on a PR.
 - **The activity log.** `shared/activity.ts` builds it from stored state.
 
 ## Questions

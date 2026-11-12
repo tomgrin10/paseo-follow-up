@@ -19,6 +19,9 @@ import { inboxSidebarView, sidebarViewHost } from "./client/sidebar-view";
 import { contributeBrief } from "./client/brief";
 import { clientTimeZoneRpc, setOnboardingRpc } from "./shared/contracts";
 import { isCategory, writeCategory } from "./shared/settings-nav";
+import { openReportSheet, ReportSheetHost, setReportFallback } from "./client/report-issue";
+import { setReportError } from "./client/toast-store";
+import { reportSendRpc } from "./shared/contracts";
 
 /** Home. The same screen id the Overview had, so the sidebar row, ⌘K and saved links land on Home. */
 const OVERVIEW = HOME_SCREEN;
@@ -49,7 +52,12 @@ export default function contribute(host: PluginClientContext) {
   // "Set up Follow-up again" (Settings and ⌘K): restart the flow on the server, then open Home, which shows it.
   // `resume`: setup is already in progress, so open it where it was left instead of from the top.
   const openSetup = (resume = false) => { void (resume ? Promise.resolve() : client.rpc(setOnboardingRpc, { action: "restart" }).catch(() => undefined)).then(() => client.openScreen({ screenId: OVERVIEW, params: { setup: String(Date.now()) } })); };
-  const Settings = (props: PluginSurfaceProps) => <FollowSettings {...props} openSetup={openSetup} />;
+  // Report a bug (docs/report-issue.md): the sheet lives on Home, the panel and Settings; with none on screen, Home opens
+  // and its host shows the request already waiting.
+  setReportFallback(() => client.openScreen({ screenId: OVERVIEW }));
+  setReportError((message, at) => openReportSheet({ kind: "bug", error: message, at }));
+  const reportHost = (props: PluginSurfaceProps | PluginWorkspacePanelProps) => <ReportSheetHost theme={props.theme} layout={props.layout} openAgent={props.navigation ? agentId => props.navigation!.openAgent({ agentId }) : undefined} />;
+  const Settings = (props: PluginSurfaceProps) => <><FollowSettings {...props} openSetup={openSetup} openReport={() => openReportSheet()} />{reportHost(props)}</>;
   const store = createLiveStore(client);
   const inbox = createInboxStore(host);
   const HeaderIcon = headerIcon(store);
@@ -77,8 +85,8 @@ export default function contribute(host: PluginClientContext) {
   };
   const openItem = (key: string, extra: { question?: string } = {}) => client.openScreen({ screenId: OVERVIEW, params: { item: key, ...(extra.question ? { question: extra.question } : {}) } });
   const homeDeps = { sources, openSettings, openPanel, openLog, openHome: openOverview, openItem, briefDeps };
-  const Overview = (props: PluginScreenProps) => <FollowHome {...props} deps={homeDeps} />;
-  const Panel = (props: PluginWorkspacePanelProps) => <FollowPanel {...props} openSettings={openSettings} openOverview={openOverview} openLarge={openLarge} inbox={inbox} live={store} briefDeps={briefDeps} />;
+  const Overview = (props: PluginScreenProps) => <><FollowHome {...props} deps={homeDeps} />{reportHost(props)}</>;
+  const Panel = (props: PluginWorkspacePanelProps) => <><FollowPanel {...props} openSettings={openSettings} openOverview={openOverview} openLarge={openLarge} inbox={inbox} live={store} briefDeps={briefDeps} />{reportHost(props)}</>;
   const Large = (props: PluginScreenProps) => <FollowLarge {...props} openSettings={openSettings} openOverview={openOverview} live={store} />;
   const removers: (() => unknown)[] = [
     client.addScreen({ id: OVERVIEW, title: "Follow-up", Component: Overview }),
@@ -100,6 +108,12 @@ export default function contribute(host: PluginClientContext) {
     client.addCommandCenterItem({ id: "follow-up-settings", title: "Follow-up: settings", icon: "Settings", keywords: ["default", "following", "project", "display", "sidebar", "pill", "header", "inbox", "questions"], context: "global", onSelect() { openSettings(); } }),
     // "Set up Follow-up again": the setup flow from the top, on Home.
     client.addCommandCenterItem({ id: "follow-up-setup", title: "Follow-up: Set up again", icon: "ListChecks", keywords: ["setup", "set up again", "restart setup", "onboarding", "getting started", "checks", "gh", "tour", "welcome"], context: "global", onSelect() { openSetup(); } }),
+    client.addCommandCenterItem({ id: "follow-up-report-issue", title: "Follow-up: Report a bug, idea or feedback", icon: "Bug", keywords: ["bug", "report", "issue", "problem", "broken", "feature request", "idea", "feedback", "github", "help"], context: "global", onSelect() { openReportSheet(); } }),
+    // /report-issue: words go straight to this agent; with none, the sheet opens with this agent picked.
+    client.addSlashCommand({ name: "report-issue", description: "Report a Follow-up bug, idea or feedback; this agent files it on GitHub after you OK it", argumentHint: "what happened", context: "agent", async onSubmit({ args, agent, workspace, rpc }) {
+      if (args.trim()) await rpc(reportSendRpc, { kind: "bug", text: args.trim(), agentId: agent.id }).catch(() => openReportSheet({ agentId: agent.id, workspaceId: workspace.id }));
+      else openReportSheet({ agentId: agent.id, workspaceId: workspace.id });
+    } }),
     client.addSlashCommand({ name: "follow-up", description: "Open this workspace's PRs and remaining work", argumentHint: "", context: "agent", onSubmit({ openPanel }) { openPanel(PANEL, { location: location() }); } }),
     contributeChat(client),
     contributeFollowUpPill(client, { inbox, live: store, openPanel, openNext }),
@@ -120,6 +134,7 @@ export default function contribute(host: PluginClientContext) {
   if (views) removers.push(views.addSidebarView({ id: "needs-you", title: "Follow-up: Needs you", description: "Agents that need you until you sign them off, then your workspaces.", Component: inboxSidebarView(sources) }));
 
   return async () => {
+    setReportFallback(null); setReportError(null);
     stopped = true;
     offActivity(); visibility.dispose(); removeDisplay(); store.stop(); inbox.stop();
     for (const r of removers) void r();

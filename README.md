@@ -126,6 +126,16 @@ Settings (the gear on Home, or ⌘K → **Follow-up: settings**) has five catego
 - Answer a question for you. Answers go out only when you send them.
 - Wake an agent that's resting to read it. It reads the transcript on disk instead.
 
+## Report a bug or request a feature
+
+Ask any agent in Paseo to "report a bug about Follow-up" (or a feature request, or feedback), or use **Report a bug**
+in Settings → General, Command-K, `/report-issue` in the composer, or **Report this** on any error. The agent asks what
+it needs, checks what it can, and shows you the exact issue before filing it in this repository with your own GitHub
+sign-in. It adds Follow-up's version, Paseo's, your OS and recent errors, and replaces private repository names, PR
+titles, hostnames, emails and paths with placeholders. Screenshots are uploaded to a public `paseo-issue-assets`
+repository in your account only if you say yes for that report; otherwise you drag them into the issue. Without a
+GitHub sign-in you get a prefilled link instead. You can also [open an issue](https://github.com/tomgrin10/paseo-follow-up/issues/new/choose) by hand.
+
 ## Upgrading from 1.x
 
 Update as usual. 2.0 copies your data to its new folder and moves itself to the plugin id `follow-up` once, while

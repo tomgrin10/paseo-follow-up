@@ -245,6 +245,9 @@ try {
   // The rest checks that a workspace with Auto off is never sent to, so turn it off here.
   await call("follow.control", { workspaceId: other.id, enable_auto_sends: false });
   await writeFile(join(home, "github-fixture.json"), JSON.stringify({ state: "OPEN", conflict: true, head: "auto-head" }));
+  // The fixture reuses the merged PR as an open one; a merged PR is only read again on its workspace's Refresh (a
+  // Refresh during another tick joins it, so ask until the reopened PR is seen).
+  await waitUntil("the reopened PR", async () => { await call("follow.refresh", { workspaceId: w.id }); return (await call("follow.get", { workspaceId: w.id })).workspace.prs[0]?.snapshot?.state === "OPEN"; }, { baseMs: 30_000, everyMs: 1000 });
   const guardDirectory = join(home, "plugin-data/session-guard"); await mkdir(guardDirectory, { recursive: true });
   const guardPause = { id: "fixture-guard-pause", agentId: agent.id, workspaceId: w.id, phase: "waiting", turnId: "fixture-turn", pausedAt: new Date().toISOString(), settledAt: null };
   const saveGuard = () => writeFile(join(guardDirectory, "state.json"), JSON.stringify({ version: 1, pauses: [guardPause] }));

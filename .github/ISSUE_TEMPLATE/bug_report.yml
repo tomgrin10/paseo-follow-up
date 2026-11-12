@@ -1,0 +1,62 @@
+name: Bug report
+description: Something in Follow-up doesn't work the way it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Easier: ask any agent in Paseo to "report a bug about Follow-up", or use Settings → General → Report a bug. The agent collects versions and recent errors, removes private names, and shows you the issue before filing it.
+
+        Filing by hand? Replace private repository names, PR titles, hostnames and emails before you submit; this repository is public.
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened
+      description: What you saw, with any exact error text.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Track a workspace with an open PR
+        2. Click Send
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual
+    validations:
+      required: true
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: Drag images here. Check them for private names first.
+  - type: input
+    id: follow_up_version
+    attributes:
+      label: Follow-up version
+      description: Settings → General shows it.
+      placeholder: 2.0.1-beta.2
+    validations:
+      required: true
+  - type: input
+    id: paseo_version
+    attributes:
+      label: Paseo version
+      placeholder: 0.15.4
+  - type: input
+    id: environment
+    attributes:
+      label: OS and Node
+      placeholder: macOS 15.1 (arm64), Node 22.11

@@ -258,8 +258,9 @@ test("per-PR backoff: a PR with running checks doesn't drag its repository's mer
   await github.observe(prs, { background: true });
   const start = f.calls.points;
   for (let i = 0; i < 4 * 60; i++) { now += TICK_MS; await github.observe(prs, { background: true }); }
-  // One hour: the running PR every 30 s (120 points) + 19 merged PRs twice (38) instead of 20 × 240 = 4800.
-  assert.equal(f.calls.points - start, 120 + 19 * 2);
+  // One hour: the running PR every 30 s for its first 10 minutes, then every 2 minutes (44 points), + 19 merged PRs
+  // twice (38), instead of 20 × 240 = 4800.
+  assert.equal(f.calls.points - start, 44 + 19 * 2);
 });
 
 test("a required check that never reported isn't running: the PR backs off like any settled PR", async () => {
@@ -303,7 +304,7 @@ test("GraphQL budget: low stretches settled reads and pauses merged and quiet re
   now = clock + 3_600_000 + 1; budget.limited = true;
   const refused = await github.observe(prs, { background: true });
   assert.ok([...refused.values()].every(o => o.error === null && o.snapshot));
-  const unseen = pr({ key: "org0/repo0#99", repo: "org0/repo0", number: 99 });
+  const unseen = pr({ key: "org0/repo0#99", repo: "org0/repo0", number: 99, snapshot: null });
   now += TICK_MS; assert.match((await github.observe([unseen])).get(unseen.key)!.error!, /API limit .* used up; Follow-up reads again after/);
   budget.limited = false; now += 10 * 60_000 + 1;
   await github.observe(prs, { background: true }); assert.ok(github.budget("org0")!.remaining > 0);
