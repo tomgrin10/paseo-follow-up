@@ -1,8 +1,8 @@
 import { settleWithin, stopDeadline, type Deadline } from "./teardown";
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
-import { stateSchema, type State, type Workspace } from "../shared/model";
+import { createHash, randomUUID } from "node:crypto";
+import { stateSchema, workspaceSchema, type State, type Workspace } from "../shared/model";
 
 /**
  * Follow-up's saved state. 1.3.0-beta.4: the state lives in memory once loaded, and writes to state.json are
@@ -19,6 +19,7 @@ const stopping = () => new Error("Follow-up is stopping; nothing was saved.");
 export class Store {
   private tail: Promise<unknown> = Promise.resolve();
   private state: State | null = null;
+  /** What state.json holds now, as length + SHA-1 (not the 1–2 MB text itself), to skip identical writes. */
   private written: string | null = null;
   private saved: State | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -37,6 +38,13 @@ export class Store {
    * queue, so it must never await a write to this store: that write would wait on the queue it holds.
    */
   onChanged: (state: State) => Promise<void> = async () => {};
+  /**
+   * Inside batch() (a-tick-copies-the-state-at-most-once): mutations update the in-memory state only; the batch's end
+   * saves and runs onChanged once. `held` says whether anything changed and whether all of it was read timestamps.
+   */
+  private holds = 0;
+  private held: { volatile: boolean } | null = null;
+  private holdTimer: ReturnType<typeof setTimeout> | null = null;
   /** Writes to state.json, for tests and the resource check. */
   writes = 0;
   /** `writeMs` 0 writes through inside each mutation (tools, tests); the worker batches with 1000. */
@@ -49,7 +57,8 @@ export class Store {
     let state: State;
     try { state = text === null ? { version: 1, workspaces: [] } : stateSchema.parse(JSON.parse(text)); }
     catch { throw new Error("Saved follow-up state could not be read. Restore state.json before continuing."); }
-    this.state ??= deepFreeze(state);
+    // Loaded state is validated whole; it is also what the next write's per-workspace validation compares against.
+    if (!this.state) { this.state = deepFreeze(state); this.saved = this.state; }
     return this.state;
   }
   /** A private, mutable copy of the saved state (the old per-call read). */
@@ -85,7 +94,13 @@ export class Store {
       // Accepted before the worker stopped: it commits if it finished before the stop's deadline, and is dropped if
       // it finished after (its work awaited a daemon that answered late).
       if (this.sealed) throw stopping();
-      if (next) {
+      if (next && this.holds) {
+        this.state = next;
+        this.held = { volatile: (this.held?.volatile ?? true) && !!volatile };
+        // A batch stuck on the daemon doesn't hold changes for good: they commit at most MAX_HOLD_MS later.
+        this.holdTimer ??= setTimeout(() => { this.holdTimer = null; void this.commitHeld(); }, MAX_HOLD_MS);
+        (this.holdTimer as { unref?: () => void }).unref?.();
+      } else if (next) {
         // Write-through keeps the old contract: a failed write leaves the saved state as it was. The draft may hold
         // objects owned by callers (observations), so only the validated copy the write returns is frozen.
         if (this.writeMs <= 0) this.state = await this.write(next);
@@ -96,6 +111,29 @@ export class Store {
     });
     this.tail = next.catch(() => undefined);
     return next;
+  }
+  /**
+   * Runs `work` (the engine's tick) with its mutations committed together: each still applies in order and is seen by
+   * the next read, but state.json is saved (or scheduled) and onChanged runs once, at the end. A 140-workspace tick
+   * otherwise ran onChanged 140 times and saved once a second while it lasted (2026-11-12).
+   */
+  async batch<T>(work: () => Promise<T>): Promise<T> {
+    this.holds++;
+    try { return await work(); }
+    finally { if (--this.holds === 0) await this.commitHeld(); }
+  }
+  /** Commits what a batch held, in the write queue (after every mutation the batch started). */
+  private commitHeld(): Promise<void> {
+    if (this.holdTimer) { clearTimeout(this.holdTimer); this.holdTimer = null; }
+    const next = this.tail.then(async () => {
+      const held = this.held; this.held = null;
+      if (!held || this.sealed || !this.state) return;
+      if (this.writeMs <= 0) this.state = await this.write(this.state);
+      else this.schedule(held.volatile);
+      await this.onChanged(this.state).catch(() => undefined);
+    });
+    this.tail = next.catch(() => undefined);
+    return next.catch(() => undefined);
   }
   /** The current state, shared and frozen. */
   async snapshot(): Promise<State> { await this.tail; return this.load(); }
@@ -122,7 +160,7 @@ export class Store {
     await settleWithin(this.tail, work);
     this.sealed = true;
     // Pending read timestamps count too: close writes them (store-writes-only-real-changes).
-    const pending = this.timer !== null || this.volatileTimer !== null;
+    const pending = this.timer !== null || this.volatileTimer !== null || this.held !== null;
     this.clearTimers();
     if (this.flushing) await settleWithin(this.flushing, save);
     const current = this.state;
@@ -142,13 +180,15 @@ export class Store {
   private clearTimers(): void {
     if (this.timer) { clearTimeout(this.timer); this.timer = null; }
     if (this.volatileTimer) { clearTimeout(this.volatileTimer); this.volatileTimer = null; }
+    if (this.holdTimer) { clearTimeout(this.holdTimer); this.holdTimer = null; }
   }
   /** Validates (applying schema defaults), writes when changed and returns the saved state, frozen. */
   private async write(state: State): Promise<State> {
     if (state === this.saved) return state;
-    const parsed = deepFreeze(stateSchema.parse(state));
+    const parsed = this.validate(state);
     const text = JSON.stringify(parsed);
-    if (text === this.written) { this.saved = parsed; return parsed; }
+    const print = `${text.length}:${createHash("sha1").update(text).digest("base64")}`;
+    if (print === this.written) { this.saved = parsed; return parsed; }
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     const temporary = join(this.directory, `state.${randomUUID()}.tmp`);
     try {
@@ -156,8 +196,26 @@ export class Store {
       try { await file.writeFile(text); await file.sync(); }
       finally { await file.close(); }
       await rename(temporary, join(this.directory, "state.json"));
-      this.written = text; this.saved = parsed; this.writes++;
+      this.written = print; this.saved = parsed; this.writes++;
     } finally { await unlink(temporary).catch(() => undefined); }
+    return parsed;
+  }
+  /**
+   * The state as the schema reads it (defaults applied), frozen. Only workspaces that aren't the very objects last
+   * validated are parsed, plus the small top-level fields: 2026-11-12, parsing the whole 1.7 MB state on every save was
+   * the start-up's biggest allocator after the per-workspace copies. A corrupt workspace still throws before anything is
+   * written. Unchanged workspaces keep their object, so the engine can tell an untouched one by identity.
+   * Under FOLLOW_UP_STORE_FULL_VALIDATION (tests) every write is also parsed whole and must read the same.
+   */
+  private validate(state: State): State {
+    const valid = new Set<Workspace>(this.saved?.workspaces ?? []);
+    const { workspaces, ...top } = state;
+    const head = topSchema.parse(top) as Record<string, unknown>;
+    const checked = workspaces.map(w => valid.has(w) ? w : workspaceSchema.parse(w) as Workspace);
+    const out = {} as Record<string, unknown>;
+    for (const key of Object.keys(stateSchema.shape)) { const value = key === "workspaces" ? checked : head[key]; if (value !== undefined) out[key] = value; }
+    const parsed = deepFreeze(out as State);
+    if (process.env.FOLLOW_UP_STORE_FULL_VALIDATION && JSON.stringify(stateSchema.parse(state)) !== JSON.stringify(parsed)) throw new Error("Store: per-workspace validation disagrees with a full parse");
     return parsed;
   }
   async lock(): Promise<() => Promise<void>> {
@@ -206,7 +264,8 @@ export function sameJson(a: unknown, b: unknown, ignore?: ReadonlySet<string>): 
   return keys === 0;
 }
 
-function deepFreeze<T>(value: T): T {
+/** Freezes a value and everything in it, so a caller that mutates a shared snapshot throws (strict mode). */
+export function deepFreeze<T>(value: T): T {
   if (value && typeof value === "object" && !Object.isFrozen(value)) {
     Object.freeze(value);
     for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child);
@@ -221,8 +280,15 @@ function deepFreeze<T>(value: T): T {
  * reads every PR fresh.
  */
 export const VOLATILE_WRITE_MS = 300_000;
-/** Read timestamps: when a PR or its deployment was last observed. Nothing else is volatile. */
-const READ_TIMES = new Set(["observedAt"]);
+const topSchema = stateSchema.omit({ workspaces: true });
+/** The longest a batch (an engine tick) holds its changes before they commit anyway. */
+export const MAX_HOLD_MS = 10_000;
+/**
+ * Read timestamps: when a PR or its deployment was last observed (observedAt), and when discovery last scanned a
+ * workspace's history (inventory.scannedMessageAt; 2026-11-12 live: 4 of 7 state.json writes moved only that, and
+ * nothing reads it back). Nothing else is volatile.
+ */
+const READ_TIMES = new Set(["observedAt", "scannedMessageAt"]);
 /**
  * True when two values differ in read timestamps at most. Structural like sameJson: key order doesn't count (a parsed
  * snapshot's keys come in a different order from the saved, schema-ordered one).
