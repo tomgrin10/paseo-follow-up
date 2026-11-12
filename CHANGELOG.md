@@ -55,6 +55,7 @@ Follow-up borrows ideas from [Progress](https://github.com/stevecastaneda/paseo-
 - Ctrl+Z (Cmd+Z on a Mac) undoes the last action while its Undo message shows, on any keyboard layout.
 - You can select and copy text in cards, the panel, Home, sheets and messages.
 - Follow-up's version shows at the top of Home and the panel. Tap it for Settings and the release notes.
+- The version at the top of Home and the panel shows just the version. Tap it for update status and release notes.
 
 ### Questions and answers
 
@@ -139,6 +140,7 @@ Follow-up borrows ideas from [Progress](https://github.com/stevecastaneda/paseo-
 - If your Claude or Codex settings file is a link, Follow-up updates the file it points to and keeps the link.
 - Error messages are as short as Paseo's own, with the full reason where Open takes you.
 - A workspace no longer shows Needs you for "Add reviewers" in a repository nobody is set up to review, and the flag goes away on its own once the PR merges or gets reviewers.
+- A failed update no longer shows as failed once a newer version of Follow-up is running.
 
 ### More
 
