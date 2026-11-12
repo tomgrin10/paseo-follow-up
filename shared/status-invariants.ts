@@ -6,15 +6,17 @@ import { answerMessage, duplicateOpenQuestions, isOther, parseAnswerMessage } fr
 import { shouldReopen, type Brief } from "./brief";
 import { flagHeadline } from "./headline";
 import type { InboxRow } from "./inbox";
-import { completionCheck, summary } from "./model";
+import { blockedOnDeveloper, completionCheck, liveWorkingTask, summary } from "./model";
 import { asksForReviewers, liveLine, needsYou } from "./attention";
 import { trackedGroup, type HomeModel } from "./home";
 import { freshPriorities, type Priority } from "./priorities";
 import { agentCard, automaticHold, batchView, holdSuperseded } from "./status";
 import { followUpObligations } from "./follow-up";
+import { claimsWorking, taskStatus } from "./task-status";
 import { cadence, movingReason, OBSERVATION_FRESH_MS, POLL_IDLE_MS, RUNNING_POLL_MS, TICK_MS } from "./poll";
 import { staleUpdatePhase, type UpdatePhase } from "./updates";
 import { onceViolation } from "./needs-block";
+import { compactPrStatus, prPresentation } from "./presentation";
 
 /**
  * Status invariants: what must hold for any workspace, whatever path changed it. Pure, no IO, and never throwing:
@@ -28,6 +30,26 @@ const inFlight = (w: Workspace) => w.batches.some(b => ["sending", "sent"].inclu
 const lines = (w: Workspace, now: number) => [liveLine(w, now).text, agentCard(w, now)?.line ?? "", batchView(w, now)?.line ?? "", ...needsYou(w, now).flatMap(i => [i.title, "blocker" in i ? i.blocker ?? "" : ""])];
 
 export const INVARIANTS: Invariant[] = [
+  {
+    id: "a-task-only-says-working-when-its-agent-is",
+    why: "2026-11-12: tasks read \"Agent working\" for days because the label mirrored the stored status=working, not any agent's live state; the panel's live line kept a spinner on a task whose agent had closed. Every surface that derives \"working\" from a task (the task row and sheet, the live line, the summary's Agent handling, Home's Agent working group) reads the recorded agent's live state (Workspace.taskAgents, shared/task-status.ts); with no live state known it says In progress, never working.",
+    check(w, now) {
+      const agents = w.taskAgents ?? {};
+      const running = (id: string | undefined) => !!id && agents[id]?.state === "working";
+      // The task row and sheet, with the stored live states and with none.
+      for (const o of followUpObligations(w)) for (const known of [agents, {}]) {
+        const s = taskStatus(o, w, known, now);
+        if ((claimsWorking(s.text) || s.tone === "working") && !(known === agents && running(o.workingAgentId))) return `task row "${s.text}" with no live working agent`;
+      }
+      // Anything else that spins or says handling needs a running agent or Follow-up's own batch in flight.
+      const working = followUpObligations(w).find(o => o.status === "working" && !running(o.workingAgentId));
+      const live = liveLine(w, now);
+      if (working && live.icon === "spinner" && live.text.startsWith(working.title)) return `live line spins on "${working.title}" with no live working agent`;
+      if (summary(w, now).status === "handling" && !w.runtimeBusy && !inFlight(w) && !liveWorkingTask(w)) return `"${summary(w, now).label}: ${summary(w, now).reason}" with no live working agent`;
+      if (trackedGroup(w, now) === "running" && !w.runtimeBusy) return "Home's running group with no live working agent";
+      return null;
+    },
+  },
   {
     id: "poll-backoff-never-hides-a-moving-pr",
     why: "2026-11-11 cpu-load §5: PR polling backs off for settled repositories. A PR that can still change without bumping what the last read saw (merge queue, merge when ready, unknown mergeability, an error) is read every tick, one with running checks every 30 s, and a backed-off PR is never older than the completion gate allows (shared/poll.ts).",
@@ -99,7 +121,7 @@ export const INVARIANTS: Invariant[] = [
     check: (w, now) => {
       const live = liveLine(w, now);
       if (live.icon !== "spinner" || !/working/i.test(live.text)) return null;
-      return inFlight(w) || w.runtimeBusy || followUpObligations(w).some(o => o.status === "working") ? null : live.text;
+      return inFlight(w) || w.runtimeBusy || liveWorkingTask(w) ? null : live.text;
     },
   },
   {
@@ -157,6 +179,35 @@ export const INVARIANTS: Invariant[] = [
       const items = needsYou(w, now);
       const open = items.flatMap(i => i.kind === "question" ? [i.questionId] : []);
       return onceViolation(items, [null, { questionIds: open.slice(0, 1) }, { questionIds: open }, { questionIds: [...open].reverse() }, { questionIds: ["Q0"] }]);
+    },
+  },
+  {
+    id: "a-question-always-asks-the-developer-something",
+    why: "2026-11-12 Q48: a task the agent marked blocked on a PR became an open question whose text was the task's evidence, with no options, in the developer's Needs you; they answered \"what's the question to me?\". A task asks only when blocked on the developer, with its own ask (shared/model.ts blockedOnDeveloper, server/questions.ts syncTaskQuestions).",
+    check(w, now) {
+      for (const q of w.questions ?? []) {
+        if (q.answer || q.closed) continue;
+        if (!q.question.trim()) return `${q.id} is open but asks nothing`;
+        if (q.taskId && q.taskRevision !== null) {
+          const o = w.obligations.find(o => o.id === q.taskId);
+          if (!o || !blockedOnDeveloper(o)) return `${q.id} is open for a task that isn't blocked on the developer`;
+          if (q.question !== o.ask!.trim()) return `${q.id} asks "${q.question.slice(0, 60)}" instead of its task's question`;
+        }
+      }
+      const stray = needsYou(w, now).find(i => i.kind === "decision" && !blockedOnDeveloper(w.obligations.find(o => o.id === i.obligationId) ?? { status: "" }));
+      return stray ? `Needs you asks about task ${stray.title}, which isn't blocked on the developer` : null;
+    },
+  },
+  {
+    id: "a-github-limit-never-blanks-a-known-pr",
+    why: "2026-11-12 live 2.0.1-beta.1: merged PRs with a complete snapshot kept an error from beta.0's RATE_LIMIT failures, the panel let the error win and merged-is-final never re-read them, so they read Unknown for good. A complete snapshot always shows its own status (shared/presentation.ts), and a merged one never stores an error (shared/model.ts prSchema, server/github.ts finalMerged).",
+    check(w) {
+      for (const p of w.prs) {
+        if (!p.snapshot?.complete) continue;
+        if (prPresentation(p).label === "Status unavailable" || compactPrStatus(p).label === "Unknown") return `${p.key} has a complete snapshot but reads unknown`;
+        if (p.snapshot.state === "MERGED" && p.error) return `${p.key} is merged and complete but stores "${p.error}"`;
+      }
+      return null;
     },
   },
   {

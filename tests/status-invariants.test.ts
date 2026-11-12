@@ -96,12 +96,15 @@ const BATCHES: Record<string, Batch[]> = {
   "recovery-sent": [batch("recovery", "sent")], "finish-and-repairs": [batch("repairs", "pending"), batch("finish", "pending")],
 };
 const PRS: Record<string, Workspace["prs"]> = { open: [pr()], latched: [merged("latched")], unconfirmed: [merged("unconfirmed")], none: [] };
-const TASKS: Record<string, Obligation[]> = { none: [], open: [obligation("pending")], done: [obligation("done")], blocked: [obligation("blocked")], working: [obligation("working")] };
+const TASKS: Record<string, Obligation[]> = { none: [], open: [obligation("pending")], done: [obligation("done")], blocked: [obligation("blocked")], working: [obligation("working")],
+  "working-live": [{ ...obligation("working"), workingAgentId: "sub-1" }], "working-idle": [{ ...obligation("working"), workingAgentId: "sub-1" }], "working-closed": [{ ...obligation("working"), workingAgentId: "sub-1" }] };
+/** The live state of the task's agent (Workspace.taskAgents), as the engine stores it. */
+const TASK_AGENTS: Record<string, Workspace["taskAgents"]> = { "working-live": { "sub-1": { title: "Reader fix", state: "working" } }, "working-idle": { "sub-1": { title: "Reader fix", state: "idle" } }, "working-closed": { "sub-1": { title: "Backfill pass", state: "closed" } } };
 
 function* grid(): Generator<[string, Workspace]> {
   for (const [agent, a] of Object.entries(AGENTS)) for (const [b, batches] of Object.entries(BATCHES)) for (const auto of [true, false])
     for (const [p, prs] of Object.entries(PRS)) for (const [t, obligations] of Object.entries(TASKS)) for (const done of [false, true]) for (const hold of [null, "Paused: the agent stopped"]) {
-      const w = workspace({ ...a, batches: batches.map(x => ({ ...x })), enable_auto_sends: auto, prs, obligations, hold,
+      const w = workspace({ ...a, batches: batches.map(x => ({ ...x })), enable_auto_sends: auto, prs, obligations, hold, taskAgents: TASK_AGENTS[t],
         completion: done ? { summary: "Shipped", declaredAt: at(60_000) } : null });
       yield [`agent=${agent} batch=${b} auto=${auto} prs=${p} tasks=${t} done=${done} hold=${!!hold}`, w];
     }
