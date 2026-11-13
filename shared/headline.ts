@@ -1,6 +1,6 @@
 import type { NeedItem } from "./attention";
 import { FINISH_ASK, FINISH_WORD } from "./status";
-import { reviewersBriefPr, type BriefKind } from "./brief";
+import { briefAsks, briefCardShown, reviewersBriefPr, type BriefKind } from "./brief";
 import { age, displayReason, reasonRank, type InboxRow, type Reason, type ReasonEntry } from "./inbox";
 
 /**
@@ -92,10 +92,17 @@ export function flagHeadline(row: Pick<InboxRow, "needs" | "snooze" | "brief">, 
   const send = items.find((i): i is Extract<NeedItem, { kind: "send" }> => i.kind === "send" && !i.finish);
   if ((key === "flagged" || key === "review") && send) return { key: "repairs", label: `Send ${plural(send.tasks.length, "task")}`, line: send.title, source: "flag" };
   // "Add reviewers #1499": the PR number is the detail, so the pill names which PR.
-  if (key === "reviewers") return { key, label: `${HEADLINE_WORD.reviewers} ${top.detail}`.trim(), line: brief?.ask ?? `Add reviewers to ${top.detail}`, source: "flag" };
+  if (key === "reviewers") return { key, label: `${HEADLINE_WORD.reviewers} ${top.detail}`.trim(), line: brief && briefAsks(brief, row) ? brief.ask : `Add reviewers to ${top.detail}`, source: "flag" };
   // say-it-once: a PR-state flag's detail ("#240 merged") is the PR chip's text, so the line names the PR by its title.
   const fact = (key === "pr_merged" || key === "pr_closed") && top.title ? top.title : top.detail;
-  const line = brief ? (brief.source === "none" ? "No ask stated" : brief.ask) : fact || HEADLINE_WORD[key];
+  // a-brief-without-an-ask-never-sits-beside-needs-you: a brief that asks nothing ("No ask stated", "Nothing needed")
+  // speaks only where its card would draw (briefCardShown) and only for the finish it came with. Beside drawn Needs-you
+  // items the top item is the line; for another flag (a merged PR) the flag's own fact is (2026-11-13: Billing's row
+  // read "Merged · No ask stated" over "1 task ready" and "#143 is approved").
+  const speaks = !!brief && briefCardShown(brief, row, items.length) && (briefAsks(brief, row) || key === "finished");
+  const line = speaks ? (brief!.source === "none" ? "No ask stated" : brief!.ask)
+    : brief && items.length ? items[0].title
+    : fact || HEADLINE_WORD[key];
   return { key, label: since ? `${HEADLINE_WORD[key]} ${since}` : HEADLINE_WORD[key], line, source: "flag" };
 }
 

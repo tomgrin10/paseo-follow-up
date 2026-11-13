@@ -249,6 +249,9 @@ card beside a question list.
 - **A brief without an ask never sits beside Needs you** (`a-brief-without-an-ask-never-sits-beside-needs-you`).
   "No ask stated" or "Nothing needed" is drawn only while nothing in Needs you speaks for the row (`briefCardShown`,
   `shared/brief.ts`); beside a question or an answer waiting to be sent it would say there's nothing to do.
+  The flag's headline (`flagHeadline`: Home row, sidebar row, pill) follows the same rule: such a brief supplies the
+  line only where its card would draw and only for the finish it came with. Beside drawn items the top item is the
+  line; for another flag the flag's own fact is (a merged PR's title), never "Merged · No ask stated".
 - **The newest brief decides** (`newest-brief-decides`). An agent's needs_you kind=done is its newest word: it
   resolves an older finish flag whose brief asked nothing ("No ask stated", source none) and replaces that brief
   (`resolveStaleFinish` in `shared/inbox.ts`, the quiet guard in `server/inbox.ts` `creator`). Only an ask the
