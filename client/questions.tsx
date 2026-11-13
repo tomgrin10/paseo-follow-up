@@ -9,7 +9,7 @@ import { Icon, Modal, ScrollView, TextInput, copyText, useToast } from "@getpase
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { answerQuestionRpc } from "../shared/contracts";
 import type { Workspace } from "../shared/model";
-import { OTHER, OTHER_LABEL, answerLabel, isOpen, isOther, questionState, replyText, type Question } from "../shared/questions";
+import { OTHER, OTHER_LABEL, answerLabel, answerMessage, isOpen, isOther, questionState, type Question } from "../shared/questions";
 import { ago } from "../shared/attention";
 import { mootNote, sentence } from "../shared/errors";
 import { activity, type ActivityTone } from "../shared/activity";
@@ -19,6 +19,8 @@ import { mergedColor, tint, withAlpha, type Colors } from "./theme";
 import { overviewKey, workspaceKey } from "./keys";
 import { RichText } from "./rich-text";
 import { notice, openQuestion, runAction } from "./toasts";
+import { putInChatOrCopy } from "../shared/put-in-chat";
+import { useChatComposer } from "./put-in-chat";
 import { clearPendingAnswer, failPendingAnswer, pendingKey, setPendingAnswer, usePendingAnswer, usePendingAnswers, type PendingAnswer } from "./pending-answers";
 
 const who = (w: Workspace, agentId: string | null) => !agentId || agentId === w.mainAgentId ? "the main agent" : "a root session";
@@ -50,6 +52,8 @@ function deliveryLine(w: Workspace, q: Question, now: number): { icon: string; t
     case "queued": return { icon: "Clock", tone: "muted", text: `${d.reason ?? "Waiting for the agent."} It goes out on the next check.` };
     case "unconfirmed": return { icon: "TriangleAlert", tone: "warning", text: d.reason ?? "Paseo didn't confirm the message. Check the agent's chat before resending." };
     case "copied": return { icon: "Copy", tone: "muted", text: `Copied ${ago(d.at, now)}. Paste it into the agent's chat, or send it from here.` };
+    case "signed-off": return { icon: "Check", tone: "muted", text: `You signed it off ${ago(d.at, now)}; Follow-up didn't see it in the chat.` };
+    case "in-chat": return { icon: "MessageSquareText", tone: "muted", text: `Put in ${who(w, d.to)}'s chat ${ago(d.at, now)}. Send it there, or send it from here.` };
     case "recorded": return { icon: "MessageSquare", tone: "muted", text: `You answered in chat; the agent recorded it ${ago(d.at, now)}.` };
   }
 }
@@ -92,6 +96,9 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   const toast = useToast(); const cache = useQueryClient();
   const answerRpc = useRpc(answerQuestionRpc);
   const open = isOpen(q);
+  // Paseo 0.16: the asking agent's composer, for Put in chat. Null on 0.15, or when the app doesn't know that agent.
+  const asker = q.askedBy ?? w.mainAgentId ?? null;
+  const composer = useChatComposer(open || q.answer?.delivery.state === "in-chat" ? asker : null);
   const [choice, setChoice] = useState<string | null>(q.answer?.choice ?? null);
   const [words, setWords] = useState(q.answer?.words ?? "");
   const [noteOpen, setNoteOpen] = useState(false);
@@ -112,7 +119,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   const note = free ? undefined : words.trim() || undefined;
   const run = useMutation({
     mutationFn: async (action: "send" | "copy" | "resend") => {
-      if (action === "copy") await copyText(replyText(q, q.answer?.choice ?? answer!, q.answer?.words ?? note));
+      if (action === "copy") await copyText(answerMessage(q, q.answer?.choice ?? answer!, q.answer?.words ?? note));
       return answerRpc({ workspaceId: w.id, questionId: q.id, choice: q.answer?.choice ?? answer!, words: q.answer?.words ?? note, action });
     },
     onSuccess: (result, action) => {
@@ -129,10 +136,23 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
    * Send (or Copy) from an open question closes the dialog or moves the pill on at once; the server call runs in
    * the background and its outcome is a toast. The answer is kept in pending-answers until the server has it.
    */
-  const quick = (action: "send" | "copy") => {
+  /**
+   * Put in chat: the answer goes into the asking agent's composer (put-in-chat-never-rewrites-a-draft) and is recorded
+   * as in-chat once it is there. When the composer can't be reached nothing was inserted, so it falls back to Copy.
+   */
+  const putIn = () => {
+    if (!answer || !composer) return;
+    const message = answerMessage(q, answer, note);
+    onClose?.();
+    void putInChatOrCopy(composer, message, {
+      inChat: () => quick("chat"),
+      copy: () => { toast.show("Couldn't open the agent's chat, so your answer was copied instead.", { variant: "info" }); quick("copy"); },
+    });
+  };
+  const quick = (action: "send" | "copy" | "chat") => {
     if (!answer) return;
     const input = { workspaceId: w.id, questionId: q.id, choice: answer, words: note, action };
-    if (action === "copy") void copyText(replyText(q, answer, note)).catch(() => undefined);
+    if (action === "copy") void copyText(answerMessage(q, answer, note)).catch(() => undefined);
     setPendingAnswer(w.id, q.id, { choice: answer, words: note ?? (free ? undefined : words.trim() || undefined) });
     const agent = who(w, q.askedBy);
     void runAction({
@@ -140,6 +160,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
       success: result => {
         const d = result.question.answer?.delivery;
         if (action === "copy") return { message: `Copied the ${q.id} answer. Paste it into the agent's chat.` };
+        if (action === "chat") return { message: `Your ${q.id} answer is in ${agent}'s chat. Send it there.` };
         if (d?.state === "sent") return { message: `Sent to ${agent}` };
         if (d?.state === "queued") return { tone: "info", message: `Answer saved; ${agent} gets it when it can` };
         return { tone: "warning", message: "Paseo didn't confirm the message. Check the agent's chat before resending." };
@@ -177,7 +198,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
     </View>}
   </View>;
   // Cmd+Enter (and Enter outside the answer field) does what Send does, only when Send is enabled.
-  const submittable = !run.isPending && (open ? !!answer : q.answer?.delivery.state === "copied");
+  const submittable = !run.isPending && (open ? !!answer : q.answer?.delivery.state === "copied" || q.answer?.delivery.state === "in-chat");
   // In the pill popover the answer field and actions stay pinned below a scrolling body.
   const pinned = dense && !!bodyMaxHeight;
   const input = <View style={{ gap: 6 }}>
@@ -229,19 +250,25 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
     </View>}
     {open && !pinned && input}
   </View>;
-  const actions = (open || q.answer && ["queued", "unconfirmed", "copied"].includes(q.answer.delivery.state)) && <View style={{ gap: 6 }}>
+  const actions = (open || q.answer && ["queued", "unconfirmed", "copied", "in-chat"].includes(q.answer.delivery.state)) && <View style={{ gap: 6 }}>
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
       {open && <Button shortcut theme={theme} compact={compact} grow={compact} kind="primary" icon="Send" title="Send to agent" accessibilityLabel={`Send your ${q.id} answer to the agent`} accessibilityHint={other && !words.trim() ? "Write your answer first" : compact ? `Puts your answer straight into the asking agent's chat, even mid-turn. Follow-up keeps it under ${q.id}.` : undefined} disabled={!answer || run.isPending} onPress={() => quick("send")} />}
-      {open && <Button theme={theme} compact={compact} icon="Copy" title="Copy" accessibilityLabel={`Copy your ${q.id} answer instead of sending it`} disabled={!answer || run.isPending} onPress={() => quick("copy")} />}
-      {q.answer?.delivery.state === "copied" && <Button shortcut theme={theme} compact={compact} kind="primary" icon="Send" title="Send to agent" accessibilityLabel={`Send your ${q.id} answer to the agent`} loading={run.isPending} onPress={() => run.mutate("send")} />}
+      {open && composer && <Button theme={theme} compact={compact} icon="MessageSquareText" title="Put in chat" accessibilityLabel={`Put your ${q.id} answer in the agent's chat, to read over and send there`} disabled={!answer || run.isPending} onPress={putIn} />}
+      {/* Paseo 0.16: Copy steps back to an icon beside Put in chat (both move the words without sending). 0.15 keeps the label. */}
+      {open && !composer && <Button theme={theme} compact={compact} icon="Copy" title="Copy" accessibilityLabel={`Copy your ${q.id} answer instead of sending it`} disabled={!answer || run.isPending} onPress={() => quick("copy")} />}
+      {open && composer && <IconButton theme={theme} compact={compact} icon="Copy" label="Copy answer" tooltip disabled={!answer || run.isPending} onPress={() => quick("copy")} />}
+      {(q.answer?.delivery.state === "copied" || q.answer?.delivery.state === "in-chat") && <Button shortcut theme={theme} compact={compact} kind="primary" icon="Send" title="Send to agent" accessibilityLabel={`Send your ${q.id} answer to the agent`} loading={run.isPending} onPress={() => run.mutate("send")} />}
       {q.answer && ["queued", "unconfirmed"].includes(q.answer.delivery.state) && <Button theme={theme} compact={compact} icon="RotateCcw" title={q.answer.delivery.state === "queued" ? "Try now" : "Resend"} accessibilityLabel={`Send the ${q.id} answer again`} loading={run.isPending} onPress={() => run.mutate("resend")} />}
-      {q.answer && ["queued", "unconfirmed"].includes(q.answer.delivery.state) && <Button theme={theme} compact={compact} kind="ghost" icon="Copy" title="Copy" accessibilityLabel={`Copy the ${q.id} answer`} onPress={() => { void copyText(replyText(q, q.answer!.choice, q.answer!.words)).then(() => toast.show("Copied", { variant: "success" }), () => toast.error("Couldn't copy here")); }} />}
+      {q.answer && ["queued", "unconfirmed"].includes(q.answer.delivery.state) && <Button theme={theme} compact={compact} kind="ghost" icon="Copy" title="Copy" accessibilityLabel={`Copy the ${q.id} answer`} onPress={() => { void copyText(answerMessage(q, q.answer!.choice, q.answer!.words)).then(() => toast.show("Copied", { variant: "success" }), () => toast.error("Couldn't copy here")); }} />}
+      {q.answer?.delivery.state === "in-chat" && composer && <Button theme={theme} compact={compact} kind="ghost" icon="MessageSquareText" title="Open chat" accessibilityLabel={`Open the chat your ${q.id} answer is in`} onPress={() => { onClose?.(); void composer.focus().catch(() => undefined); }} />}
       {q.answer?.delivery.state === "unconfirmed" && openAgent && <Button theme={theme} compact={compact} kind="ghost" icon="MessageSquare" title="Open agent" onPress={() => openAgent(q.askedBy ?? w.mainAgentId)} />}
       {pinned && open && !free && !other && !noteOpen && <Button theme={theme} compact={compact} kind="ghost" icon="Pencil" title="Note" accessibilityLabel={`Add a note for the agent about ${q.id}`} onPress={() => setNoteOpen(true)} />}
       {dense && onDetails && <IconButton theme={theme} compact={compact} icon="Maximize2" label={`Open ${q.id} with its links and full context`} onPress={onDetails} />}
     </View>
     {/* Same words as the brief card's, so a disabled Send always says why. */}
     {open && other && !words.trim() ? <Text style={t.small}>Write your answer, then send it.</Text>
+      // Two ways to deliver (Paseo 0.16) need telling apart everywhere, the phone and the Needs you block included.
+      : open && !dense && composer ? <Text style={t.small}>Send delivers it now, even mid-turn. Put in chat adds it to your message box to edit first.</Text>
       : open && !dense && !compact && !inline && <Text style={t.small}>Send puts your answer straight into the asking agent's chat, even mid-turn. Follow-up keeps it under {q.id}.</Text>}
   </View>;
   // In the pill popover the question scrolls and the answer field and actions stay put, so Send is never cut off.

@@ -242,7 +242,9 @@ The invariants in `shared/status-invariants.ts` check these over a grid of state
 - `server/questions.ts` and `shared/questions.ts` (adapted from Progress): refs Q1, Q2…, lettered options, a
   recommendation, and what the agent does while it waits.
 - The question mode (Stop, Work around, Keep building) is a host setting, `questionPreferences`.
-- Answers from the UI go through `follow.answer-question`: Send, Copy or Resend. An answer the agent can't take yet
+- Answers from the UI go through `follow.answer-question`: Send, Copy, Put in chat (`chat`, Paseo 0.16) or Resend.
+  Copy and Put in chat record the answer as `copied` or `in-chat` and send nothing; it waits in Needs you until it is
+  delivered ([needs-you.md](needs-you.md#answers-waiting-to-be-sent)). An answer the agent can't take yet
   queues, and the engine delivers it on a later tick.
 - Answers given in chat are recorded with `record_answer`.
 - **Something else on every question with options.** A built-in last choice, recorded as `choice: "other"` with
