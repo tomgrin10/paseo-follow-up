@@ -4,7 +4,7 @@ import { Github, RULES_TTL_MS } from "../server/github";
 import { accountFor, ghTokens, httpApi, DEAD_BUS, type GithubApi } from "../server/github-api";
 import { Deployments } from "../server/deployments";
 import { POLL_IDLE_MS, TICK_MS, RECENT_CHANGE_MS, movingReason } from "../shared/poll";
-import { clock, pr } from "./fixtures";
+import { acmeDeploy, clock, pr } from "./fixtures";
 
 // 2026-11-11 cpu-load REPORT.md §5: the live worker made ~40 gh calls/min (+6 gcloud) for ~30 PRs. Root causes:
 // ruleset checks were one REST call per base branch per minute (every stacked PR's base is a different branch), every
@@ -193,7 +193,7 @@ test("the deploy probe runs one gcloud call per fleet read once its serving revi
     if (args[0] === "auth") return "token";
     if (args[1] === "services") return JSON.stringify(["backend", "etl", "interpretation", "public-api", "web"].map(role => ({ metadata: { name: `acme-service-app-${role}-x`, labels: { "cloud.googleapis.com/location": "us-central1" } }, status: { conditions: [{ type: "Ready", status: "True" }], traffic: [{ revisionName: `${role}-r1`, percent: 100 }] } })));
     return JSON.stringify({ spec: { containers: [{ name: "app", image: `us-central1-docker.pkg.dev/acme-prod/acme-docker/prod-app-backend@sha256:${"1".repeat(64)}` }] }, status: { conditions: [{ type: "Ready", status: "True" }] } });
-  }, (async (url: string) => ({ ok: true, text: async () => JSON.stringify(url.includes("/manifests/") ? { config: { digest: `sha256:${"3".repeat(64)}` } } : { config: { Labels: { "org.opencontainers.image.revision": sha } } }) })) as unknown as typeof fetch, () => now, { rest: async (_repo: string, path: string) => { compares.push(path); return { status: "ahead" }; } } as any);
+  }, (async (url: string) => ({ ok: true, text: async () => JSON.stringify(url.includes("/manifests/") ? { config: { digest: `sha256:${"3".repeat(64)}` } } : { config: { Labels: { "org.opencontainers.image.revision": sha } } }) })) as unknown as typeof fetch, () => now, { rest: async (_repo: string, path: string) => { compares.push(path); return { status: "ahead" }; } } as any, acmeDeploy);
   const target = pr({ repo: "acme/acme-poc", key: "acme/acme-poc#1", snapshot: { ...pr().snapshot!, state: "MERGED", mergeCommit: "a".repeat(40) } });
   for (let minute = 0; minute < 10; minute++) { for (let t = 0; t < 4; t++) { await deployments.observe([target]); now += TICK_MS; } }
   const gcloud = calls.filter(c => c.startsWith("gcloud run"));
@@ -308,4 +308,43 @@ test("GraphQL budget: low stretches settled reads and pauses merged and quiet re
   now += TICK_MS; assert.match((await github.observe([unseen])).get(unseen.key)!.error!, /API limit .* used up; Follow-up reads again after/);
   budget.limited = false; now += 10 * 60_000 + 1;
   await github.observe(prs, { background: true }); assert.ok(github.budget("org0")!.remaining > 0);
+});
+
+test("public-code-carries-no-host-identifiers: between the install and the seed, a repository without a deploy check is harmless", async () => {
+  // The window: the new version runs before the private seed writes the deploy config. Nothing fires, errors or is lost.
+  const { taskSchedule } = await import("../shared/task-trigger");
+  const { workspace } = await import("./fixtures");
+  const rows = new Map([["org0/repo0#1", { state: "MERGED" }]]);
+  const f = fakeGithub(rows);
+  let configured = true;
+  const kept = { state: "deployed" as const, environment: "production", commits: ["c".repeat(40)], evidence: "Production serving revisions: app-1=ccc", observedAt: new Date(clock).toISOString() };
+  const deployments = { observe: async (prs: Parameters<Deployments["observe"]>[0]) => new Map(configured ? prs.filter(p => p.snapshot?.state === "MERGED").map(p => [p.key, kept]) : []) };
+  const github = new Github(undefined, undefined, deployments, f.api, () => clock);
+  const first = (await github.observe([pr({ key: "org0/repo0#1", repo: "org0/repo0", number: 1 })])).get("org0/repo0#1")!;
+  assert.equal(first.snapshot!.deployment!.state, "deployed");
+  const task = (p: ReturnType<typeof pr>) => workspace({ prs: [p], obligations: [{ id: "verify", title: "Verify in production", status: "waiting", afterPrs: [p.key], enable_follow_up: true, revision: 3, evidence: "", trigger: { event: "deploy", delayDays: 0 } }] });
+
+  configured = false;
+  const stored = pr({ key: "org0/repo0#1", repo: "org0/repo0", number: 1, snapshot: first.snapshot! });
+  const window = (await github.observe([stored])).get("org0/repo0#1")!;
+  assert.equal(window.error, null, "no error");
+  assert.deepEqual({ ...window.snapshot!.deployment, notSetUp: undefined }, { ...kept, notSetUp: undefined }, "the kept observation and its evidence are not erased");
+  assert.equal(window.snapshot!.deployment!.notSetUp, true);
+  const w = task(pr({ ...stored, snapshot: window.snapshot! }));
+  const schedule = taskSchedule(w.obligations[0], w, clock);
+  assert.deepEqual(schedule, { ready: false, dueAt: null, label: "Deploy check not set up for org0/repo0" }, "a deploy-triggered task waits and says why, never fires");
+  assert.equal(w.obligations[0].status, "waiting"); assert.equal(w.obligations[0].revision, 3, "task state unchanged");
+
+  const fresh = (await github.observe([pr({ key: "org0/repo0#1", repo: "org0/repo0", number: 1 })])).get("org0/repo0#1")!;
+  assert.equal(fresh.snapshot!.deployment!.notSetUp, true, "even a PR read again keeps its last observation");
+
+  const never = new Github(undefined, undefined, deployments, fakeGithub(new Map([["org1/repo1#2", { state: "MERGED" }]])).api, () => clock);
+  const unseen = (await never.observe([pr({ key: "org1/repo1#2", repo: "org1/repo1", number: 2 })])).get("org1/repo1#2")!;
+  assert.deepEqual([unseen.snapshot!.deployment!.state, unseen.snapshot!.deployment!.evidence, unseen.snapshot!.deployment!.notSetUp], ["unknown", "Deploy check not set up for org1/repo1.", true]);
+
+  configured = true;
+  const back = (await github.observe([stored])).get("org0/repo0#1")!;
+  assert.equal(back.snapshot!.deployment!.notSetUp, undefined, "the check comes back with its config");
+  const v = task(pr({ ...stored, snapshot: back.snapshot! }));
+  assert.equal(taskSchedule(v.obligations[0], v, clock).ready, true);
 });

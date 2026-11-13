@@ -26,6 +26,8 @@ await harness();
 const arg = (name, fallback) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : fallback; };
 const N = Number(arg("prs", "30")); const W = Number(arg("workspaces", "10")); const R = Number(arg("repos", "3")); const MINUTES = Number(arg("minutes", "3"));
 const PENDING = Number(arg("pending", String(Math.max(1, Math.round(N / 10))))); const MERGED = Number(arg("merged", "0")); const CLOSED = Number(arg("closed", "0")); const profileDir = arg("cpu-prof", null);
+/** A fictional deploy check for acme/acme-poc (tests/fixtures.ts ACME_DEPLOY). */
+const DEPLOY = { gcpProject: "acme-prod", serviceLabel: "rollout-group=app", servicePrefix: "acme-service-app-", roles: ["backend", "etl", "interpretation", "public-api", "web"], registry: "us-central1-docker.pkg.dev", imagePath: "acme-prod/acme-docker", images: ["prod-app-backend", "prod-app-web"], buildShaEnv: "APP_BUILD_SHA" };
 // Merged PRs in the deployment repository (acme/acme-poc): each needs a fleet read (gcloud), the serving image's
 // commit (registry) and one ancestry compare per (merge, serving commit). 2026-11-12: those compares still spawned gh.
 const DEPLOY_MERGED = Number(arg("deploy-merged", "0"));
@@ -130,6 +132,8 @@ const gcloud = a => a[0] === "auth" ? "registry-token" : a[1] === "services" ? $
   await sleep(3_000);
   const now = new Date().toISOString(); const keys = [...rows.keys()];
   await mkdir(join(home, "plugin-data/follow-up"), { recursive: true });
+  // The deploy check is host settings (set_pr_workflow deploy); a fictional one for the deployment repository.
+  await writeFile(join(home, "plugin-data/follow-up/pr-workflow.json"), JSON.stringify({ version: 1, migratedAt: now, repos: { "acme/acme-poc": { deploy: DEPLOY } } }));
   await writeFile(join(home, "plugin-data/follow-up/state.json"), JSON.stringify({ version: 1, migrations: ["follow-every-1"], workspaces: created.map(({ workspaceId, agentId }, i) => ({
     id: workspaceId, title: `Synthetic workspace ${i}`, goal: "Synthetic", mainAgentId: agentId, enable_tracking: true, enable_auto_sends: false, hold: null, archived: false,
     prs: keys.filter((_, k) => k % W === i).map(key => { const r = rows.get(key); return { key, repo: r.repo, number: r.number, stack: `Stack ${i}`, parent: null, disposition: null, snapshot: null, error: null }; }),

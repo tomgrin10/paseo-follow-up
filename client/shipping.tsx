@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { ActivityIndicator, TextInput, View } from "react-native";
+import { ActivityIndicator, TextInput, useWindowDimensions, View } from "react-native";
 import { Text } from "./text";
 import { useRpc } from "@getpaseo/plugin/client";
-import { SettingsAction, SettingsCard, SettingsSection, SettingsSelect, useToast } from "@getpaseo/plugin/client/ui";
+import { SettingsAction, SettingsCard, SettingsRow, SettingsSection, SettingsSelect, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { z } from "zod";
 import { prWorkflowRpc, setPrWorkflowRpc } from "../shared/contracts";
@@ -111,7 +111,23 @@ function RepoShipping({ row, view, theme, compact, busy, set }: { row: RepoWorkf
       onChange={mode => set({ review: mode === "team" ? null : mode }, mode === "none" ? `no review. ${REVIEW_MODE_LABELS.none.hint}` : `team review. ${REVIEW_MODE_LABELS.team.hint}`)} /></View>
     <View>{rule}<ReviewFixSelect label="Review comments" value={row.reviewFix} inherited={view.reviewFix} theme={theme} compact={compact} busy={busy}
       onSave={fix => set({ reviewFix: fix }, fix ? `review comments: ${reviewFixLabel(fix)}` : "review comments back to the default")} /></View>
+    <View>{rule}<DeployCheckRow deploy={row.deploy} theme={theme} compact={compact} /></View>
   </View>;
+}
+/**
+ * Read-only: the deploy check lives in this machine's settings and an agent sets it (set_pr_workflow), since its
+ * values come from the cloud project, not from a person typing them. Not set up is a plain state, not a warning.
+ */
+function DeployCheckRow({ deploy, theme, compact }: { deploy: RepoWorkflowView["deploy"]; theme: Theme; compact: boolean }) {
+  const c = theme.colors; const t = text(c, compact);
+  const narrow = useWindowDimensions().width < 600;
+  const services = deploy ? `${deploy.roles.length} Cloud Run service${deploy.roles.length === 1 ? "" : "s"}` : "";
+  return <SettingsRow label="Deploy check" hint={deploy
+    ? `Merged PRs show Deployed once the ${services} in ${deploy.gcpProject} serve them.`
+    : "Merged PRs stay Merged. An agent sets it up with set_pr_workflow."}>
+    {/* Narrow: too wide to sit beside the hint, so the row wraps it to its own line, where the other rows put their control. */}
+    <Text style={[t.body, { color: deploy ? c.foreground : c.foregroundMuted }, narrow && { minWidth: 240 }]} numberOfLines={1}>{deploy ? `Production · ${deploy.gcpProject}` : "Not set up"}</Text>
+  </SettingsRow>;
 }
 /** "squash", "squash and rebase", "squash, merge commits and rebase". */
 function listMethods(methods: MergeMethod[]): string {
