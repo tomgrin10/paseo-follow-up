@@ -994,15 +994,15 @@ async function sendingShots({ shoot, seeded, call, home }) {
   };
   await shoot("sending-home-light", DESKTOP, "light", shown([busyLine, "Auto-send is off for this workspace"]));
   await shoot("sending-home-phone-light", PHONE, "light", shown([busyLine], true));
-  // 2. The machine-wide hold: Paseo's (fake) cgroup at 78% of memory.high pauses auto-sends. Then Onboarding email is
-  //    signed off and its Auto turned on: its tasks queue for "when auto-sends resume", with Send now (the developer's
-  //    Send still goes). One hold line at the top of Sending, the same words on both widths.
+  // 2. The machine-wide hold: Paseo's (fake) cgroup at 78% of memory.high pauses auto-sends; one hold line at the top
+  //    of Sending, the same words on both widths. Onboarding email is signed off and its Auto turned on: its agent is
+  //    idle (the fixture's isn't loaded), so its Send stays in Needs you, said once ("The agent is idle; …").
   await fs.writeFile(process.env.FOLLOW_SHOTS_CGROUP, JSON.stringify({ high: 1000, current: 780 }));
   await until("the governor holds auto-sends", async () => (await call("follow.usage", {})).resources?.level === "constrained", { tries: 120, every: 500 });
   await call("follow.inbox-act", { action: "sign_off", agentIds: [ws("email").agentId] });
   await call("follow.control", { workspaceId: ws("email").workspaceId, enable_auto_sends: true });
-  const held = [/^Auto-sends are paused on this machine/, /next when auto-sends resume/, busyLine];
-  await shoot("sending-hold-home-light", DESKTOP, "light", shown(held));
+  const held = [/^Auto-sends are paused on this machine/, busyLine];
+  await shoot("sending-hold-home-light", DESKTOP, "light", shown([...held, "The agent is idle; Follow-up doesn't wake it"]));
   await shoot("sending-hold-home-phone-light", PHONE, "light", shown(held, true));
   await fs.writeFile(process.env.FOLLOW_SHOTS_CGROUP, JSON.stringify({ high: 1000, current: 100 }));
 }
