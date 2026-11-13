@@ -75,8 +75,8 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | Subsystem | Files | Doc |
 | --- | --- | --- |
 | Worker entry, RPC wiring, session attach, teardown | `index.server.ts`, `shared/contracts.ts`, `server/rpc-timing.ts`, `server/teardown.ts`, `server/daemon.ts`, `server/shared-file.ts`, `server/directory.ts`, `server/store.ts`, `server/list-cache.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
-| Discovery, ownership, main agent | `server/discovery.ts`, `server/workspace-agent.ts`, `server/background-agents.ts`, `server/submissions.ts`, `server/pr-owner.ts`, `server/exclusions.ts`, `server/history-cache.ts`, `server/recovery-handoff.ts`, `server/recovery-config.ts`, `shared/settings.ts` | [workspaces](docs/workspaces.md) |
-| Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/send-decision.ts`, `shared/task-status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
+| Discovery, ownership, main agent | `server/discovery.ts`, `server/turn-events.ts`, `server/workspace-agent.ts`, `server/background-agents.ts`, `server/submissions.ts`, `server/pr-owner.ts`, `server/exclusions.ts`, `server/history-cache.ts`, `server/recovery-handoff.ts`, `server/recovery-config.ts`, `shared/settings.ts` | [workspaces](docs/workspaces.md) |
+| Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/send-decision.ts`, `shared/task-rows.ts`, `shared/task-status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
 | Needs-you inbox, brief, Home | `server/inbox.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/needs-block.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts` | [needs-you](docs/needs-you.md) |
 | Summary (internal id `about`), Rename with AI | `server/about.ts`, `server/transcript.ts`, `shared/about.ts`, `server/rename.ts`, `shared/rename.ts` | [ai-roles](docs/ai-roles.md) |
 | Linked items (Linear issues, Slack threads, docs a workspace is about) | `server/linked.ts`, `shared/linked.ts`, `shared/linked-extract.ts`, `shared/linked-display.ts`, `client/linked.tsx`, `client/brand-icons.ts` | [linked-items](docs/linked-items.md) |
@@ -122,6 +122,14 @@ These are product rules. Each has tests, and breaking one is a bug even when the
      workspace, a tick saves and runs `onChanged` once (`Store.batch`), an untouched workspace isn't copied or
      re-checked, and a save validates only changed workspaces. Per-tick work never scales with workspaces × agents.
      See [docs/architecture.md](docs/architecture.md); guarded by `tests/tick-copies.test.ts` and `test:scale`.
+   - **A send never clones the whole state** (`a-send-never-clones-the-whole-state`): a send, its acknowledgment, an
+     answer's delivery and every agent turn event write only the workspace they are about (`mutateWorkspace`,
+     `server/turn-events.ts`), never walking all of them, and a whole-state `mutate` keeps unchanged workspaces'
+     objects so a save validates only what changed. Guarded by `tests/send-clones.test.ts` and `test:scale`.
+   - **A send lists agents at most once per tick** (`a-send-lists-agents-at-most-once-per-tick`): sends read the tick's
+     agent list (patched by events); no `fetch_agents` or `fetch_agent` per send or per turn event, and subagents at
+     most once per agent per tick. Guarded by `tests/daemon-load.test.ts` and `test:scale`
+     ([docs/architecture.md](docs/architecture.md)).
 3. **Agent parity.** Every action the developer can take in Follow-up also has an agent tool that runs the same
    server path, or an exemption with a reason in `PARITY` (`server/agent-parity.ts`).
    - Writes return a dry-run plan first and run with `confirm: true` and the plan id.
@@ -188,6 +196,13 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    `sidebar-filter-uses-home-search`). Home's order is one Display setting, `home_sort`, for Home and the sidebar view
    on every device, so `set_display` covers it. Guarded by `tests/search-row.test.ts`, `tests/home-beta2.test.ts` and
    `tests/home-sort.test.ts`.
+16. **Auto-send says the truth and keeps moving** (`the-send-line-matches-the-send-decision`,
+   `message-rows-say-it-once`, `a-capped-task-never-holds-the-queue`). One pure `sendDecision`
+   (`shared/send-decision.ts`) decides an auto-send and writes every line about it; the engine sends exactly when it
+   says send. Repairs are tasks: a row in the next message says only Queued or Sent, and the Tasks strip carries when
+   and why. A turn without an acknowledgment never blocks; only a condition sent twice unchanged, acknowledged or not,
+   waits, as its own task. Guarded by `tests/send-decision.test.ts`, `tests/no-retry.test.ts` and `tests/task-rows.test.ts`
+   ([docs/workspaces.md](docs/workspaces.md#repairs-are-tasks-q49)).
 
 ## Bugs
 

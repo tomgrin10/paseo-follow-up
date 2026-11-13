@@ -34,9 +34,10 @@ export function daemonDirectory(shared: DaemonDirectory = new DaemonDirectory(),
     },
     async tail(id, limit) {
       return connect(async client => {
-        // Called from turn hooks, so the agent is normally live. Never wake one that isn't.
-        const row = await client.fetchAgent(id);
-        if (!isLoaded(row?.agent)) return [];
+        // Called from turn hooks, so the agent is normally live. Never wake one that isn't. The directory row, patched
+        // by the turn event that called this, answers without a fetch_agent per turn (a-send-lists-agents-at-most-once-per-tick).
+        const agent = shared.cached(id) ?? (await client.fetchAgent(id))?.agent;
+        if (!isLoaded(agent)) return [];
         const page = await client.fetchAgentTimeline(id, { direction: "tail", limit, projection: "canonical", timeout: 10_000 });
         return [...page.entries].sort((a, b) => a.seqStart - b.seqStart).map(e => e.item);
       });

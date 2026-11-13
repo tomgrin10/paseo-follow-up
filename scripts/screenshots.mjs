@@ -40,7 +40,7 @@ const exec = promisify(execFile);
 const argv = process.argv.slice(2);
 const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : fallback; };
 // What's new reinstalls the plugin as 2.0.0-rc.0, so it goes last: every other shot shows the version under test.
-const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "whats-new"];
+const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
 const REVIEW_SHOTS = ["needs-you-states", "done-brief", "pick-notes"];
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
@@ -473,6 +473,8 @@ function makeShooter({ browser, port, out, scheme: forced, optimiser, results, c
     try {
       await context.addInitScript(INIT, { seen });
       const page = await context.newPage();
+      // SHOTS_CONSOLE=1 prints the page's errors, to tell a real bug from a flaky frame.
+      if (process.env.SHOTS_CONSOLE) { page.on("console", m => { if (m.type() === "error") log(`${name} console:`, m.text().slice(0, 600)); }); page.on("pageerror", e => log(`${name} pageerror:`, e.message.slice(0, 600))); }
       await page.clock.setFixedTime(BASE + VIEW);
       page.setDefaultTimeout(30000);
       await page.goto(`http://127.0.0.1:${port}/`);
@@ -685,6 +687,38 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
       await page.getByRole("button", { name: /^Pull request 142: / }).first().waitFor();
     });
+    // Repairs are tasks (Q49): Onboarding email's PR #160 has a conflict and review threads. With Auto on, the strip
+    // says who gets the next message, when and why; the crawling clock keeps it inside the settle, so nothing sends.
+    if (name === "tasks" || name === "tasks-sheet" || name === "tasks-phone") {
+      const email = seeded.workspaces.find(w => w.key === "email");
+      await call("follow.control", { workspaceId: email.workspaceId, enable_auto_sends: true });
+      const spec = WORKSPACES.find(w => w.key === "email");
+      const open = async page => {
+        await openChat(page, spec.title, spec.prompt);
+        await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+        const strip = page.getByText(/^Next message to /).first();
+        await strip.waitFor({ timeout: 60000 });
+        await strip.scrollIntoViewIfNeeded();
+      };
+      if (name === "tasks") await shoot("tasks", DESKTOP, "dark", open);
+      if (name === "tasks-sheet") await shoot("tasks-sheet", DESKTOP, "dark", async page => {
+        await open(page);
+        await page.getByRole("button", { name: /^Task: Resolve merge conflicts/ }).first().click();
+        await page.getByText("Next message", { exact: true }).last().waitFor();
+      });
+      // Phones see a workspace's Tasks in the larger view (a Paseo screen; Home's phone focus view has no Tasks):
+      // open it from the panel at desktop size, then narrow to the phone.
+      if (name === "tasks-phone") await shoot("tasks-phone", PHONE, "light", async page => {
+        await open(page);
+        await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
+        await page.getByText(/^Next message to /).last().waitFor({ timeout: 60000 });
+        await page.setViewportSize(PHONE);
+        const strip = page.getByText(/^Next message to /).last();
+        await strip.waitFor({ timeout: 60000 });
+        await strip.evaluate(el => el.scrollIntoView({ block: "center" }));
+        if (await page.evaluate(() => document.documentElement.scrollWidth) > PHONE.width) throw new Error("tasks-phone scrolls sideways");
+      });
+    }
     if (name === "questions") await shoot("questions", DESKTOP, "dark", async page => {
       await openChat(page, "Billing retries", billing.prompt);
       await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();

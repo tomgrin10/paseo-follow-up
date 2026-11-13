@@ -52,12 +52,12 @@ test("labels lead with the decisive word and stay short; no 'Needs you ·' prefi
   }
 });
 
-test("a failed CI check never headlines on its own: it falls to the next reason, or to Send N fixes when Follow-up can act", () => {
+test("a failed CI check never headlines on its own: it falls to the next reason, or to Send N tasks when Follow-up can act", () => {
   assert.equal(flagHeadline(flagged(["ci", "finished"]), NOW)?.label, "Finished 12m", "Paseo's checks chip already shows the failure");
   assert.equal(flagHeadline(flagged(["ci"]), NOW)?.key, "flagged");
   const repairs = needsYou(workspace({ prs: [pr()], batches: [batch()] }), NOW).filter(i => i.kind === "send");
   assert.equal(repairs.length, 1);
-  assert.equal(flagHeadline(flagged(["ci"]), NOW, repairs)?.label, "Send 1 fix");
+  assert.equal(flagHeadline(flagged(["ci"]), NOW, repairs)?.label, "Send 1 task");
 });
 
 test("the agent's flag wins over workspace items; those go in the popover as 'N to do', never 'N need you' on the pill", () => {
