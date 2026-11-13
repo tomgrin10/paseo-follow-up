@@ -8,7 +8,7 @@ const file = process.env.FOLLOW_UP_REQUEST_TRACE;
 if (file) {
   const wrapped = new WeakSet();
   const caller = frames => frames
-    .filter(l => !/request-trace\.cjs|node:internal|daemon-client|@getpaseo/.test(l)).slice(0, 4)
+    .filter(l => !/request-trace\.cjs|node:internal|daemon-client|@getpaseo|undici|node:events/.test(l)).slice(0, 5)
     .map(l => l.trim().replace(/^at /, "").replace(/\(?(?:file:\/\/)?\/[^)]*\/([^/)]+:\d+):\d+\)?$/, "$1")).join(" < ");
   const wrap = Client => {
     if (!Client?.prototype || wrapped.has(Client)) return;
@@ -25,6 +25,23 @@ if (file) {
       };
     }
   };
+  // The plugin host may load the client through its own loader (not Module._load), so every request is also caught
+  // where it leaves: the global WebSocket's send. Its caller frames include V8's async frames ("async Gateway.discover").
+  const WS = globalThis.WebSocket;
+  if (WS?.prototype?.send) {
+    const send = WS.prototype.send;
+    WS.prototype.send = function (data) {
+      try {
+        const frame = typeof data === "string" ? JSON.parse(data) : null;
+        const type = frame?.message?.type ?? frame?.type;
+        if (type && type !== "pong" && type !== "ping") {
+          const method = /plugin.*rpc/i.test(type) && typeof frame.message?.method === "string" ? `plugin_rpc:${frame.message.method}` : type;
+          appendFileSync(file, JSON.stringify({ t: Date.now(), pid: process.pid, method, via: "ws", caller: caller((new Error().stack ?? "").split("\n").slice(2)) }) + "\n");
+        }
+      } catch {}
+      return send.call(this, data);
+    };
+  }
   const load = Module._load;
   Module._load = function (request, ...rest) {
     const m = load.call(this, request, ...rest);
