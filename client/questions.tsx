@@ -9,7 +9,7 @@ import { Icon, Modal, ScrollView, TextInput, copyText, useToast } from "@getpase
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { answerQuestionRpc } from "../shared/contracts";
 import type { Workspace } from "../shared/model";
-import { OTHER, OTHER_LABEL, answerLabel, answerMessage, isOpen, isOther, questionState, type Question } from "../shared/questions";
+import { OTHER, OTHER_LABEL, answerHeading, answerLabel, answerStatus, answerMessage, isOpen, isOther, questionState, type Question } from "../shared/questions";
 import { ago } from "../shared/attention";
 import { mootNote, sentence } from "../shared/errors";
 import { activity, type ActivityTone } from "../shared/activity";
@@ -177,6 +177,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   // The body says Not sent · Retry itself, with the button; the state line stays on what the agent is doing.
   const state = meanwhile(w, q, null);
   const delivery = deliveryLine(w, q, now);
+  const heading = answerHeading(q);
   const pr = q.prKey ? w.prs.find(p => p.key === q.prKey) : null;
   const task = q.taskId ? w.obligations.find(o => o.id === q.taskId) : null;
   const deliveryColor = delivery?.tone === "success" ? c.statusSuccess : delivery?.tone === "warning" ? c.statusWarning : c.foregroundMuted;
@@ -232,12 +233,13 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
       {(open || isOther(q.answer?.choice)) && <OptionCard theme={theme} compact={compact} dense={dense} own label={OTHER_LABEL} consequence={open && !dense ? "Write your own answer" : undefined} recommended={false}
         selected={(open ? choice : q.answer?.choice) === OTHER} disabled={!open || run.isPending} onPress={() => { setChoice(OTHER); if (pinned) setNoteOpen(true); }} />}
     </View>}
-    {q.answer && <View style={{ gap: 6, padding: 10, borderRadius: 8, backgroundColor: tint(c.statusSuccess, c) }}>
+    {/* Not sent yet (copied, or in the agent's message box) never reads as answered: no check, no green (answerHeading). */}
+    {heading && <View style={{ gap: 6, padding: 10, borderRadius: 8, backgroundColor: heading.waiting ? c.surface1 : tint(c.statusSuccess, c) }}>
       <View style={{ flexDirection: "row", gap: 6 }}>
-        <View style={{ paddingTop: 2 }}><Icon name="CircleCheck" size={13} color={c.statusSuccess} /></View>
-        <RichText selectable style={[t.label, { flex: 1 }]}>{`${q.answer.by === "agent" ? "Answered in chat: " : "You answered "}${isOther(q.answer.choice) ? OTHER_LABEL : answerLabel(q, q.answer.choice)}`}</RichText>
+        <View style={{ paddingTop: 2 }}><Icon name={heading.waiting ? "CircleDashed" : "CircleCheck"} size={13} color={heading.waiting ? c.foregroundMuted : c.statusSuccess} /></View>
+        <RichText selectable style={[t.label, { flex: 1 }]}>{heading.text}</RichText>
       </View>
-      {!!q.answer.words && <RichText selectable style={[t.meta, { color: c.foreground, paddingLeft: 19 }]}>{q.answer.words}</RichText>}
+      {!!q.answer?.words && <RichText selectable style={[t.meta, { color: c.foreground, paddingLeft: 19 }]}>{q.answer.words}</RichText>}
       {delivery && <View style={{ flexDirection: "row", gap: 6, paddingLeft: 19 }}>
         {delivery.tone === "spinner" ? <View style={{ paddingTop: 2 }}><Spinner color={c.foregroundMuted} size={11} /></View> : <View style={{ paddingTop: 2 }}><Icon name={delivery.icon} size={11} color={deliveryColor} /></View>}
         <Text style={[t.meta, { flex: 1, color: deliveryColor }]}>{delivery.text}</Text>
@@ -385,9 +387,11 @@ export function ActivityCard({ workspace: w, theme, compact, now, open, toggle, 
         </View>;
       })}
     </View> : (shown as typeof questions).map(q => {
-      const status = q.answer ? answerLabel(q, q.answer.choice, q.answer.words) : q.closed ? `Withdrawn: ${q.closed.reason}` : "Waiting for you";
+      // Until it reached the agent the row says where it is, in muted, like every other surface (answerStatus).
+      const s = answerStatus(q);
+      const status = q.answer ? `${s && !s.delivered ? `${s.label} · ` : ""}${answerLabel(q, q.answer.choice, q.answer.words)}` : q.closed ? `Withdrawn: ${q.closed.reason}` : "Waiting for you";
       const icon = q.answer ? "MessageCircleReply" : q.closed ? "MessageCircleOff" : "MessageCircleQuestion";
-      const color = q.answer ? c.statusSuccess : q.closed ? c.foregroundMuted : c.statusWarning;
+      const color = s?.delivered ? c.statusSuccess : q.answer || q.closed ? c.foregroundMuted : c.statusWarning;
       return <CardRow key={q.id} theme={theme} onPress={() => onOpenQuestion(q.id)} accessibilityLabel={`${q.id}, ${q.title}. ${status}. Open`}>
         <View style={{ flexDirection: "row", gap: 9 }}>
           <View style={{ paddingTop: 2 }}><Icon name={icon} size={13} color={color} /></View>

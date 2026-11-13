@@ -42,7 +42,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as 2.0.0-rc.0, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["needs-you-states", "done-brief", "pick-notes", "review-mode", "feeds", "put-in-chat", "pr-link", "merge-click"];
+const REVIEW_SHOTS = ["needs-you-states", "done-brief", "pick-notes", "review-mode", "feeds", "put-in-chat", "sending", "pr-link", "merge-click"];
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
 for (const name of only) if (![...SHOTS, ...REVIEW_SHOTS].includes(name)) fail(`unknown shot "${name}" (known: ${[...SHOTS, ...REVIEW_SHOTS].join(", ")})`);
 const scheme = arg("--scheme");
@@ -92,7 +92,12 @@ globalThis.Date = ShiftedDate;
 // the governor treats as unknown (never "over budget") and Home shows no meter.
 const fsp = require("node:fs/promises"); const readFile = fsp.readFile;
 const hidden = path => { if (typeof path !== "string") return false; const leaf = path.split("/").pop(); return path.startsWith("/proc/pressure/") || path === "/proc/stat" || path.startsWith("/sys/fs/cgroup/") && (leaf.startsWith("memory.") || leaf.startsWith("cpu.")); };
-fsp.readFile = function (path, ...rest) { return hidden(path) ? Promise.reject(Object.assign(new Error("ENOENT: hidden by scripts/screenshots.mjs"), { code: "ENOENT" })) : readFile.call(this, path, ...rest); };
+// The sending review set alone gives the governor a fake cgroup (FOLLOW_SHOTS_CGROUP: {high, current}), so Home can
+// show the auto-send hold on cue; every other shot keeps it unreadable.
+const fakeCgroup = path => { const f = process.env.FOLLOW_SHOTS_CGROUP; if (!f || typeof path !== "string" || !path.startsWith("/sys/fs/cgroup/")) return null;
+  let v; try { v = JSON.parse(fs.readFileSync(f, "utf8")); } catch { return null; }
+  const leaf = path.split("/").pop(); return leaf === "memory.high" ? String(v.high) : leaf === "memory.current" ? String(v.current) : leaf === "memory.stat" ? "" : null; };
+fsp.readFile = function (path, ...rest) { const fake = fakeCgroup(path); if (fake !== null) return Promise.resolve(fake); return hidden(path) ? Promise.reject(Object.assign(new Error("ENOENT: hidden by scripts/screenshots.mjs"), { code: "ENOENT" })) : readFile.call(this, path, ...rest); };
 // Paseo colours a project's avatar from a hash of its server id and project id. The server id is fixed through
 // PASEO_SERVER_ID; project and workspace ids come from a counter here, so the avatar is the same colour every run.
 const crypto = require("node:crypto"); const randomBytes = crypto.randomBytes; let idCount = 0;
@@ -118,6 +123,7 @@ function pulls() {
     251: { title: "Filter exports by date range", state: "OPEN", author: "dana", base: "branch-250", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint")] },
     252: { title: "Show export filters in the admin page", state: "OPEN", author: "dana", base: "branch-251", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint")] },
     151: { repo: "example/web", title: "Saved search filters", state: "OPEN", author: "dana", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint")] },
+    247: { title: "Checkout button copy", state: "OPEN", author: "dana", conflict: true, threads: 1, reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
     160: { title: "Welcome email template", state: "OPEN", author: "dana", conflict: true, threads: 2, reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
     170: { title: "Sign webhook payloads", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
     181: { repo: "example/web", title: "Dark mode color tokens", state: "MERGED", author: "dana", checks: [ok("test"), ok("lint")] },
@@ -301,6 +307,17 @@ const WORKSPACES = [
 ].sort((a, b) => a.minute - b.minute);
 
 /**
+ * sending only (Q51): an agent still mid-turn whose PR has a conflict and a thread, so its tasks wait in Sending for
+ * the turn to end, with no Send now. Saved views and Invoice PDFs are out with their agents; Onboarding email's tasks
+ * wait on the developer (Needs you).
+ */
+const SENDING_STATES = [
+  { key: "sd-busy", title: "Checkout copy", minute: 146, prompt: "APP-188: tighten the checkout button copy and keep the old string for the A/B test.", flag: false, waitFor: "running",
+    steps: [rpc("follow.enroll", { goal: "APP-188 Checkout button copy" }), rpc("follow.register-pr", { repo: "example/app", number: 247, stack: "Checkout copy" }),
+      think("Keep the old string behind the experiment flag."), bash("pnpm test checkout", "pass 18"), { hold: true }] },
+];
+
+/**
  * needs-you-states only (an-open-question-renders-once-per-surface, task asks): one workspace per Needs you state.
  * Billing retries above is the brief pointing at its own question.
  */
@@ -382,7 +399,7 @@ async function seed({ call, home }) {
   for (const name of ["app", "web"]) { repos[name] = join(tmpdir(), "follow-up-shots-fixture", name); await fs.mkdir(repos[name], { recursive: true }); }
   // review-mode: someone reviews example/app, so its PR without reviewers asks for them.
   if (only.includes("review-mode") || only.includes("pr-link")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }] });
-  const specs = [...WORKSPACES, ...(only.includes("needs-you-states") ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("merge-click") ? MERGE_CLICK_STATES : [])];
+  const specs = [...WORKSPACES, ...(only.includes("needs-you-states") ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") ? MERGE_CLICK_STATES : [])];
   await fs.writeFile(join(home, "fixture-scripts.json"), JSON.stringify(Object.fromEntries(specs.map(w => [w.prompt, w.steps]))));
   const workspaces = [];
   for (const spec of specs) {
@@ -787,9 +804,8 @@ async function clearDock(page, inPane, dockButton) {
     if (cut && cut.r.bottom - edge + 12 < 240) pane.scrollTop += cut.r.bottom - edge + 12;
   }, dockTop);
 }
-/** A workspace's agent chat, opened from Paseo's sidebar like a person would (deep links land before the host is known). */
 /**
- * Opens a workspace's chat from Paseo's sidebar. The sidebar shows a project's first rows and folds the rest under
+ * Opens a workspace's chat from Paseo's sidebar like a person would (deep links land before the host is known). The sidebar shows a project's first rows and folds the rest under
  * "Show more", and the order moves as earlier shots touch workspaces: a later pass found "Billing retries" folded and
  * timed out (ny-brief-same-q-panel-dark, 2026-11-13). Unfold every project until the row is there, then click it.
  */
@@ -855,7 +871,9 @@ async function putInChatShots({ shoot, seeded, call, billing }) {
   await shoot("pic-phone-after-put-in-chat-light", PHONE, "light", async page => { await phone(page); await pickAnswer(page);
     await page.getByRole("button", { name: /^Put your Q1 answer in the agent's chat/ }).last().click();
     await page.waitForFunction(() => [...document.querySelectorAll("textarea")].some(t => t.offsetParent && t.value.includes("Follow-up answer Q1 (")), null, { timeout: 15000 });
-    if (await page.getByText("Couldn't open the agent's chat").count()) throw new Error("fell back to Copy"); });
+    if (await page.getByText("Couldn't open the agent's chat").count()) throw new Error("fell back to Copy");
+    // The chat's card says where the answer is, not Answered (answerStatus).
+    await page.getByText("In your message box · not sent yet").locator("visible=true").first().waitFor(); });
   await shoot("pic-phone-copy-light", PHONE, "light", async page => {
     await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, "Contact import")).click();
     await page.getByText("Update the existing contact").first().click();
@@ -875,6 +893,23 @@ async function putInChatShots({ shoot, seeded, call, billing }) {
     await shoot(`pic-wait-in-chat-phone-${theme}`, PHONE, theme, detailPhone("Billing retries", "Your Q1 answer isn't sent yet"));
     await shoot(`pic-in-chat-dialog-${theme}`, DESKTOP, theme, async page => { await dialog(page); await page.getByText(/^Put in .*'s chat/).last().waitFor(); });
   }
+  // The chat's own card for each answer, desktop and phone: never "Answered" before it is delivered.
+  const card = (title, prompt, says, size) => async page => {
+    await openChat(page, title, prompt);
+    if (size) await page.setViewportSize(size);
+    await page.getByText(says).locator("visible=true").first().waitFor();
+    if (await page.getByText(/^Answered \d/).locator("visible=true").count()) throw new Error(`${title}: Answered before it was delivered`);
+  };
+  // Contact import's chat card is a "No ask stated" brief (no needs_you call), so the copied card is Push settings':
+  // its brief points at its Q1, copied here.
+  await call("follow.answer-question", { workspaceId: ws("push").workspaceId, questionId: "Q1", choice: "A", action: "copy" });
+  const pushPrompt = WORKSPACES.find(w => w.key === "push").prompt;
+  for (const theme of ["light", "dark"]) {
+    await shoot(`pic-card-in-chat-${theme}`, DESKTOP, theme, card("Billing retries", billing.prompt, "In your message box · not sent yet"));
+    await shoot(`pic-card-copied-${theme}`, DESKTOP, theme, card("Push settings", pushPrompt, "Copied · not sent yet"));
+  }
+  await shoot("pic-card-in-chat-phone-light", DESKTOP, "light", card("Billing retries", billing.prompt, "In your message box · not sent yet", PHONE));
+  await shoot("pic-card-copied-phone-light", DESKTOP, "light", card("Push settings", pushPrompt, "Copied · not sent yet", PHONE));
   // The escape hatch: the developer edited the marker away, so Follow-up never saw it arrive; signing the agent's row
   // off settles it. Contact import after Sign off: gone from Needs you, and the question says so.
   const signed = await call("follow.inbox-act", { action: "sign_off", agentIds: [ws("csv").agentId] });
@@ -895,6 +930,16 @@ async function putInChatShots({ shoot, seeded, call, billing }) {
     await page.getByRole("button", { name: /^Send your Q1 answer to / }).last().click();
     await page.getByText(/^(Sent your Q1 answer to|Answer saved;|Paseo didn't confirm)/).last().waitFor();
     await page.getByText("Your Q1 answer isn't sent yet").waitFor({ state: "detached" }); });
+  // Delivered: the same card now reads Answered (sending flips to sent once Paseo confirms).
+  // The answer steers the agent, so Paseo folds the turn's earlier items (the card among them) into its "Ran N
+  // command" group under the new reply: open the group, as a person would, to see the card.
+  const delivered = size => async page => { await openChat(page, "Billing retries", billing.prompt); if (size) await page.setViewportSize(size);
+    const answered = page.getByText(/^Answered \d/).locator("visible=true").first();
+    await page.getByText(/^Ran \d+ commands?$/).locator("visible=true").first().click().catch(() => undefined);
+    await answered.waitFor({ timeout: 60000 });
+    await answered.evaluate(el => el.scrollIntoView({ block: "center" })); };
+  for (const theme of ["light", "dark"]) await shoot(`pic-card-delivered-${theme}`, DESKTOP, theme, delivered(null));
+  await shoot("pic-card-delivered-phone-light", DESKTOP, "light", delivered(PHONE));
 }
 
 async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
@@ -1261,6 +1306,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   if (only.includes("pr-link")) await prLinkShots({ shoot, billing });
   if (only.includes("merge-click")) await mergeClickShots({ shoot, billing });
   if (only.includes("put-in-chat")) await putInChatShots({ shoot, seeded, call, billing });
+  if (only.includes("sending")) await sendingShots({ shoot, seeded, call, home });
   if (only.includes("needs-you-states")) {
     // One Needs you block per surface: each state on the panel (desktop) and Home's detail pane (desktop and phone),
     // light and dark. Tall panel frames so the block, Tasks and their neighbours all fit.
@@ -1391,6 +1437,50 @@ async function mergeClickShots({ shoot, billing }) {
   await shoot("mc-done-panel-dark", TALL, "dark", click(stackRow, "dark", panel, "panel"));
 }
 
+async function sendingShots({ shoot, seeded, call, home }) {
+  // Q51 Home "Sending", light, desktop and phone (phones filter to Sending with its strip chip).
+  // 1. Checkout copy's tasks wait for its agent's turn (no Send now); Saved views and Invoice PDFs are out with their
+  //    agents (the send glyph); Onboarding email's tasks wait on the developer (Auto off), in Needs you only, said once.
+  const ws = key => seeded.workspaces.find(w => w.key === key);
+  await call("follow.control", { workspaceId: ws("sd-busy").workspaceId, enable_auto_sends: true });
+  await until("Checkout copy queued behind its turn", async () => {
+    await call("follow.refresh", {});
+    return (await call("follow.list", {})).workspaces.find(x => x.id === ws("sd-busy").workspaceId)?.batches.some(b => b.state === "pending");
+  }, { tries: 120, every: 500 });
+  const busyLine = /sends when its current turn ends/;
+  const shown = (wait, phone) => async page => {
+    await openHome(page);
+    if (phone) { await page.setViewportSize(PHONE); await page.getByRole("button", { name: /^Sending, \d+\. Show only these/ }).first().click(); }
+    for (const w of wait) await page.getByText(w).filter({ visible: true }).first().waitFor({ timeout: 90000 });
+  };
+  await shoot("sending-home-light", DESKTOP, "light", shown([busyLine, "2 tasks ready · auto-send is off here"]));
+  await shoot("sending-home-phone-light", PHONE, "light", shown([busyLine], true));
+  // The phone strip on its own row, scrolled to its end: every chip reachable, nothing over it (the version moved to
+  // the end of the list).
+  await shoot("sending-strip-phone-light", PHONE, "light", async page => {
+    await openHome(page); await page.setViewportSize(PHONE);
+    // The strip re-renders after the resize, so scroll it in the page (no stale handle): the toolbar or its
+    // scrolling ancestor goes to its end, where "Later" sits.
+    await page.getByRole("toolbar", { name: "Status" }).first().getByText("Later").first().waitFor();
+    await until("the strip scrolls to its end", () => page.evaluate(() => {
+      const bar = document.querySelector('[role="toolbar"][aria-label="Status"]');
+      for (let el = bar; el; el = el.parentElement) if (el.scrollWidth > el.clientWidth + 1) { el.scrollLeft = el.scrollWidth; return el.scrollLeft > 0; }
+      return false;
+    }), { tries: 40, every: 250 });
+    await page.waitForTimeout(300);
+  });
+  // 2. The machine-wide hold: Paseo's (fake) cgroup at 78% of memory.high pauses auto-sends; one hold line at the top
+  //    of Sending, the same words on both widths. Onboarding email is signed off and its Auto turned on: its agent is
+  //    idle (the fixture's isn't loaded), so its Send stays in Needs you, said once ("The agent is idle; …").
+  await fs.writeFile(process.env.FOLLOW_SHOTS_CGROUP, JSON.stringify({ high: 1000, current: 780 }));
+  await until("the governor holds auto-sends", async () => (await call("follow.usage", {})).resources?.level === "constrained", { tries: 120, every: 500 });
+  await call("follow.inbox-act", { action: "sign_off", agentIds: [ws("email").agentId] });
+  await call("follow.control", { workspaceId: ws("email").workspaceId, enable_auto_sends: true });
+  const held = [/^Auto-sends are paused on this machine/, busyLine];
+  await shoot("sending-hold-home-light", DESKTOP, "light", shown([...held, "The agent is idle; Follow-up doesn't wake it"]));
+  await shoot("sending-hold-home-phone-light", PHONE, "light", shown(held, true));
+  await fs.writeFile(process.env.FOLLOW_SHOTS_CGROUP, JSON.stringify({ high: 1000, current: 100 }));
+}
 async function reviewModeShots({ shoot, call }) {
   // The Needs-you reviewers row with its quiet link, then the undo bar after it; the Settings fold with the Review menu
   // open on a No review repository. Desktop and phone, light and dark. Each shot puts example/app back to Team review.
@@ -1545,8 +1635,10 @@ try {
   // Real speed while the daemon starts and the plugin installs; seeding and shooting crawl (setDaemonClock).
   // It starts ten minutes before BASE, so the clock only ever moves forward.
   await fs.writeFile(clockFile, JSON.stringify({ fake: at(-10), real: Date.now(), rate: 1 }));
+  // sending only: a fake cgroup at 10% of memory.high from the start (the governor finds its cgroup once), raised later.
+  if (only.includes("sending")) { process.env.FOLLOW_SHOTS_CGROUP = join(root, "cgroup.json"); await fs.writeFile(process.env.FOLLOW_SHOTS_CGROUP, JSON.stringify({ high: 1000, current: 100 })); }
 
-  const env = harnessEnv(root, { home, strip: github.strip, set: { ...github.env, PASEO_DAEMON_URL: url, PASEO_SERVER_ID: "srv_followupshots", FIXTURE_MODEL_LABEL: "Agent", PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true", PATH: `${bin}:${process.env.PATH}`, FOLLOW_SHOTS_CLOCK: clockFile, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${join(root, "clock.cjs")}`.trim(), TZ: "UTC" } });
+  const env = harnessEnv(root, { home, strip: github.strip, set: { ...github.env, ...(process.env.FOLLOW_SHOTS_CGROUP ? { FOLLOW_SHOTS_CGROUP: process.env.FOLLOW_SHOTS_CGROUP } : {}), PASEO_DAEMON_URL: url, PASEO_SERVER_ID: "srv_followupshots", FIXTURE_MODEL_LABEL: "Agent", PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true", PATH: `${bin}:${process.env.PATH}`, FOLLOW_SHOTS_CLOCK: clockFile, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${join(root, "clock.cjs")}`.trim(), TZ: "UTC" } });
   const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env, timeout: 120000, maxBuffer: 1 << 22 })).stdout);
   const daemonLog = openSync(join(root, "daemon.log"), "a");
   crashed = async () => daemonCrashes(await fs.readFile(join(root, "daemon.log"), "utf8").catch(() => ""))[0] ?? null;

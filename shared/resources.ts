@@ -54,8 +54,11 @@ export type ResourceMeter = {
   stale: boolean;
 };
 
-/** Everything the Home meter shows, or null when nothing is readable. */
-export function resourceMeter(r: Resources, now: number, clock: (ms: number) => string = ms => new Date(ms).toTimeString().slice(0, 5)): ResourceMeter | null {
+/**
+ * Everything the Home meter shows, or null when nothing is readable. `holdShown`: Home's Sending group already says
+ * auto-sends are paused (shared/sending.ts autoSendHold), so the meter keeps its reading and drops "· paused" (say it once).
+ */
+export function resourceMeter(r: Resources, now: number, clock: (ms: number) => string = ms => new Date(ms).toTimeString().slice(0, 5), o: { holdShown?: boolean } = {}): ResourceMeter | null {
   const base = resourceText(r);
   if (!base) return null;
   const tone = r.level === "critical" ? "danger" : r.level === "constrained" ? "warning" : "ok";
@@ -71,5 +74,5 @@ export function resourceMeter(r: Resources, now: number, clock: (ms: number) => 
     [memory, r.cpuPct !== null ? `CPU ${r.cpuPct}%` : null].filter(Boolean).join(", ") + (tone === "danger" ? ", critical" : tone === "warning" ? ", high" : ""),
     paused, stale ? `Last read at ${clock(at)}` : null,
   ].filter(Boolean).join(". ");
-  return { text, suffix: paused ? "· paused" : null, label, tone, pct, stale };
+  return { text, suffix: paused && !o.holdShown ? "· paused" : null, label, tone, pct, stale };
 }

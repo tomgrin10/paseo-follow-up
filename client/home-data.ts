@@ -1,3 +1,4 @@
+import { autoSendHold } from "../shared/sending";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { buildHome, type HomeModel, type PaseoWorkspaceLite } from "../shared/home";
@@ -72,12 +73,14 @@ export function useHomeModel(sources: HomeSources): HomeModel {
   const a = useSyncExternalStore(inbox.subscribe, inbox.version, inbox.version);
   const b = useSyncExternalStore(live.subscribe, live.version, live.version);
   const c = useSyncExternalStore(paseo.subscribe, paseo.version, paseo.version);
-  // Only the sort and priorities rebuild the model; agent titles and usage don't touch it.
+  // Only the sort, priorities and the auto-send hold rebuild the model; agent titles and the meters don't touch it.
   const sort = useSyncExternalStore(extras.subscribe, extras.sort, extras.sort);
   const priorities = useSyncExternalStore(extras.subscribe, extras.priorities, extras.priorities);
   const overseer = useSyncExternalStore(extras.subscribe, () => extras.overseer()?.workspaceId ?? null, () => null);
   const now = useMinute();
-  return useMemo(() => buildHome({ rows: inbox.rows(), tracked: live.all(), paseo: paseo.all(), now: Date.now(), sort, priorities, hidden: overseer ? [overseer] : [] }), [a, b, c, now, sort, priorities, inbox, live, paseo, overseer]);
+  // The machine-wide auto-send hold: a string, so a usage poll that changes nothing else doesn't rebuild the model.
+  const hold = useSyncExternalStore(extras.subscribe, () => autoSendHold(extras.usage().resources, Date.now()), () => null);
+  return useMemo(() => buildHome({ rows: inbox.rows(), tracked: live.all(), paseo: paseo.all(), now: Date.now(), sort, priorities, hidden: overseer ? [overseer] : [], hold }), [a, b, c, now, sort, priorities, inbox, live, paseo, overseer, hold]);
 }
 
 /** Rebuilds a value at most every `ms` while mounted (used for the brief pane's source ages). */

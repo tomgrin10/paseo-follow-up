@@ -51,7 +51,7 @@ export type NeedActions = {
 };
 
 /** The developer's queue: one row per decision, each with its single action inline. `rows`: the block's rows (no questions); default every item. */
-export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date.now(), flush = false, rows }: { workspace: Workspace; theme: Theme; compact: boolean; actions: NeedActions; now?: number; flush?: boolean; rows?: readonly NeedItem[] }) {
+export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date.now(), flush = false, rows, untitled }: { workspace: Workspace; theme: Theme; compact: boolean; actions: NeedActions; now?: number; flush?: boolean; rows?: readonly NeedItem[]; /** say-it-once: rows whose title the headline above already says; they keep their controls. */ untitled?: ReadonlySet<string> }) {
   const c = theme.colors; const t = text(c, compact);
   useReviewerSettings();
   const toast = useToast();
@@ -129,6 +129,7 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
       const scopeLine = item.kind === "merge" ? mergeScope(w, item.prKey)?.detail ?? null : null;
       const notice = merging?.notice ?? null;
       const button = act || link ? <>{act}{link}</> : null;
+      const said = !!untitled?.has(item.key);
       // Phones: the action sits at the row's right edge so rows never grow a second line of controls. A send batch
       // (the primary, with its task list) and Retry's pair keep their buttons full width under the row.
       // A stack's scope line and a blocker need the row's full width, so those rows put their button under the text.
@@ -138,7 +139,7 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
           {/* A row with the quiet link under it is taller: the glyph stays on the title's line. */}
           <View style={item.kind === "reviewers" ? { alignSelf: "flex-start", paddingTop: 2 } : undefined}><Icon name={g.name} size={16} color={g.color} /></View>
           <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-            <RichText numberOfLines={2} style={t.label}>{item.title}</RichText>
+            {!said && <RichText numberOfLines={2} style={t.label}>{item.title}</RichText>}
             {"detail" in item && !!item.detail && !sameText(item.detail, item.title.replace(/^Q\d+ · /, "")) && <RichText linkColor={c.foreground} numberOfLines={1} style={t.meta}>{item.detail}</RichText>}
             {item.kind === "reviewers" && <NoReviewLink repo={item.prKey.split("#")[0]} theme={theme} compact />}
           </View>
@@ -149,7 +150,7 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
         <View style={{ flexDirection: "row", gap: 9 }}>
           <View style={{ paddingTop: 2 }}><Icon name={g.name} size={14} color={g.color} /></View>
           <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
-            <RichText style={compact ? t.label : t.body}>{item.title}</RichText>
+            {!said && <RichText style={compact ? t.label : t.body}>{item.title}</RichText>}
             {"detail" in item && !!item.detail && !sameText(item.detail, item.title.replace(/^Q\d+ · /, "")) && <RichText linkColor={c.foreground} numberOfLines={item.kind === "question" ? 2 : 3} style={t.meta}>{item.detail}</RichText>}
             {scopeLine && <RichText style={t.meta}>{scopeLine}</RichText>}
             {item.kind === "question" && <QuestionState workspace={w} questionId={item.questionId} theme={theme} />}

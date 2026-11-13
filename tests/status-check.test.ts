@@ -15,9 +15,9 @@ test("the runtime self-check logs a contradiction once per change, with the work
   // Each tick that changes something hands over a new workspace object (the store's frozen state).
   await check(w, clock); await check({ ...w }, clock + 15_000);
   found = []; await check({ ...w }, clock + 30_000);
-  found = [{ id: "fixing-means-acting", detail: "fixing with no batch" }]; await check({ ...w }, clock + 45_000);
+  found = [{ id: "sending-never-waits-on-you", detail: "sending with no batch" }]; await check({ ...w }, clock + 45_000);
   const lines = (await readFile(file, "utf8")).trim().split("\n").map(l => JSON.parse(l));
-  assert.deepEqual(lines.map(l => [l.workspaceId, l.violations[0].id]), [["wks_contradiction", "on-it-means-sent"], ["wks_contradiction", "fixing-means-acting"]]);
+  assert.deepEqual(lines.map(l => [l.workspaceId, l.violations[0].id]), [["wks_contradiction", "on-it-means-sent"], ["wks_contradiction", "sending-never-waits-on-you"]]);
 });
 
 test("a consistent workspace writes nothing", async t => {

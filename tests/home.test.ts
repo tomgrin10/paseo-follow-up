@@ -28,7 +28,7 @@ test("each workstream lands in the group of what it needs from the developer", (
       flagged("later", "finished", 10, { snooze: { until: at(-60), at: at(1) } }),
     ],
     tracked: [
-      ws("fixing", { batches: [batch()] }),
+      ws("sending", { batches: [batch()] }),
       ws("merge", { prs: [pr({ snapshot: snapshot({ reviewDecision: "APPROVED", graphiteMergeStatus: "READY_TO_MERGE" }) })] }),
       ws("waiting", { prs: [pr({ snapshot: snapshot({ reviewDecision: "REVIEW_REQUIRED" }) })] }),
       ws("done", { prs: [pr({ snapshot: snapshot({ state: "MERGED", mergedAt: at(600), observedAt: new Date(NOW).toISOString() }) })], completion: { summary: "Shipped", declaredAt: at(500) } }),
@@ -40,13 +40,13 @@ test("each workstream lands in the group of what it needs from the developer", (
   assert.equal(groupOf(model, "ws:merge"), "needs");
   assert.equal(groupOf(model, "agent:run"), "running");
   assert.equal(groupOf(model, "agent:later"), "later");
-  assert.equal(groupOf(model, "ws:fixing"), "fixing");
+  assert.equal(groupOf(model, "ws:sending"), "sending");
   assert.equal(groupOf(model, "ws:waiting"), "waiting");
   assert.equal(groupOf(model, "ws:done"), "quiet");
   assert.equal(model.byKey.get("ws:done")!.readyToArchive, true);
   assert.equal(groupOf(model, "ws:untracked"), "quiet");
   // Groups appear in the design's order, and empty groups are left out rather than shown empty.
-  assert.deepEqual(model.groups.map(g => g.id), ["needs", "fixing", "running", "waiting", "later", "quiet"]);
+  assert.deepEqual(model.groups.map(g => g.id), ["needs", "sending", "running", "waiting", "later", "quiet"]);
   assert.equal(model.needs, 3);
 });
 
@@ -68,9 +68,9 @@ test("Needs you: blocking asks first, then decisions only the developer makes, t
   assert.equal(nextNeeds(model, "agent:err-old")!.key, "agent:decision");
 });
 
-test("a running main agent working on Follow-up's repairs shows under Follow-up is fixing, not Running", () => {
+test("a running main agent working on Follow-up's repairs shows under Sending, not Running", () => {
   const model = buildHome({ now: NOW, rows: [row("agent-x", { workspaceId: "x", status: "running" })], tracked: [ws("x", { batches: [batch()] })], paseo: [] });
-  assert.equal(groupOf(model, "agent:agent-x"), "fixing");
+  assert.equal(groupOf(model, "agent:agent-x"), "sending");
   assert.equal(model.groups.length, 1);
 });
 
