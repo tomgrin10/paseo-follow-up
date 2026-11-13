@@ -130,19 +130,21 @@ try {
   const openHome = async () => {
     await page.goto(`http://127.0.0.1:${p.port}/`); await dismissNotes();
     await page.getByRole("button", { name: "Follow-up", exact: true }).first().click();
-    await page.getByRole("button", { name: /^Needs you, \d+\./ }).first().waitFor({ timeout: 30000 });
+    await page.locator('[role="button"][aria-expanded][aria-label^="Needs you, "]').first().waitFor({ timeout: 30000 });
   };
   await openHome();
-  const needs = () => page.getByRole("button", { name: /^Needs you, \d+\./ }).first();
+  // The group header, not the filter strip's chip of the same name: only the header has aria-expanded.
+  const header = title => page.locator(`[role="button"][aria-expanded][aria-label^="${title}, "]`).first();
+  const needs = () => header("Needs you");
   const headers = await page.locator('[role="button"][aria-expanded][aria-label]').evaluateAll(els => els.map(e => e.getAttribute("aria-label")).filter(l => /^[^,]+, \d+\. (Collapse|Expand)$/.test(l) && !l.startsWith("Needs you")));
   const otherTitle = headers[0]?.split(",")[0];
   record("Home shows Needs you and another group to fold", !!otherTitle, headers.join(" | "));
-  const other = () => page.getByRole("button", { name: new RegExp(`^${otherTitle}, \\d+\\.`) }).first();
+  const other = () => header(otherTitle);
   const otherBefore = await other().getAttribute("aria-expanded");
   await other().click(); await needs().click();
   record("closing Needs you holds for this mount", await needs().getAttribute("aria-expanded") === "false");
   await page.waitForTimeout(1500);
-  await page.reload(); await page.getByRole("button", { name: /^Needs you, \d+\./ }).first().waitFor({ timeout: 30000 }).catch(openHome);
+  await page.reload(); await needs().waitFor({ timeout: 30000 }).catch(openHome);
   await page.waitForTimeout(1500);
   record("after reload Needs you opens again", await needs().getAttribute("aria-expanded") === "true");
   const otherAfter = await other().getAttribute("aria-expanded");
