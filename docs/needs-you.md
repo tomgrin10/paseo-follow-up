@@ -241,7 +241,10 @@ card beside a question list.
 - **Say it once** (`say-it-once`): a flag's headline line (the Home and sidebar row's text, the pill sheet's ask)
   never repeats its word, its pill label or the PR chip. A merged or closed PR's flag carries the PR's title
   (`ReasonEntry.title`, from `prEndEvent`) and reads it, not "#240 merged"; a flag stored before that keeps its line.
-  Check, review-thread and conflict flags already say what to fix. `tests/say-it-once.test.ts` covers every reason.
+  Check, review-thread and conflict flags already say what to fix.
+  In the pill sheet, a to-do that only says the headline again (`echoedItems`: the same text, or a reviewers row for
+  the headline's PR) drops its title and keeps its controls. `tests/say-it-once.test.ts` covers every reason and the
+  sheet.
 - **No "No ask stated" beside an open question:** the chat's fallback card says "Waiting on your answer to Q1".
 - **A blocked task names what it waits on** (`blockedLine`, `shared/task-status.ts`): "Blocked · waits for Q1", or the
   evidence's first sentence.

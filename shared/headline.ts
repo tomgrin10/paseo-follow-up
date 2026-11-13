@@ -1,6 +1,6 @@
 import type { NeedItem } from "./attention";
 import { FINISH_ASK, FINISH_WORD } from "./status";
-import type { BriefKind } from "./brief";
+import { reviewersBriefPr, type BriefKind } from "./brief";
 import { age, displayReason, reasonRank, type InboxRow, type Reason, type ReasonEntry } from "./inbox";
 
 /**
@@ -130,6 +130,22 @@ export function briefQuestionIds(row: Pick<InboxRow, "brief"> | null): Set<strin
 export function withoutBriefQuestions(items: NeedItem[], row: Pick<InboxRow, "brief"> | null): NeedItem[] {
   const asked = briefQuestionIds(row);
   return asked.size ? items.filter(i => !(i.kind === "question" && asked.has(i.questionId))) : items;
+}
+
+/**
+ * say-it-once: the to-dos under a headline that only say the headline again ("Add reviewers to #246: Ravi" above and
+ * as the one row under it). Such a row drops its title and keeps its controls. A reviewers row repeats a reviewers
+ * headline for its PR even when the wording differs ("Add reviewers to #246" over "Add reviewers to #246: Ravi").
+ */
+export function echoedItems(items: readonly NeedItem[], headline: Pick<Headline, "key" | "label" | "line"> | null, row: Pick<InboxRow, "brief"> | null): Set<string> {
+  if (!headline) return new Set();
+  const n = (x: string | null | undefined) => (x ?? "").trim().replace(/[.!?…:;,\s]+$/u, "").replace(/\s+/g, " ").toLowerCase();
+  const said = n(headline.line);
+  const brief = row?.brief?.state === "open" ? row.brief : null;
+  const briefPr = brief ? reviewersBriefPr(brief) : null;
+  const names = (i: Extract<NeedItem, { kind: "reviewers" }>) => briefPr ? briefPr === i.prKey
+    : new RegExp(`#${i.number}(?!\\d)`).test(`${headline.label} ${headline.line}`);
+  return new Set(items.filter(i => (!!said && n(i.title) === said) || (headline.key === "reviewers" && i.kind === "reviewers" && names(i))).map(i => i.key));
 }
 
 /** "3 to do": the workspace count shown inside the popover. Never on the pill, where it read like a count of agents. */

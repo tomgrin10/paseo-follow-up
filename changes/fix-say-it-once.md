@@ -1,2 +1,3 @@
-- A merged or closed PR now reads by its title in Home, the sidebar and the pill, instead of repeating "#240 merged" next to the PR chip.
-- A card with several decisions is titled with the agent's ask, not its first question.
+- A merged or closed PR reads by its title, not "#240 merged" beside the PR chip.
+- A card with several decisions is titled with the agent's ask, not Q1.
+- Follow-up's popup no longer lists its own ask a second time below it.

@@ -8,7 +8,7 @@ import { useRpc, type PluginButtonContentProps, type PluginButtonIconProps, type
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { browserStatusRpc } from "../shared/contracts";
 import { activeNeeds, needsYou, type NeedItem } from "../shared/attention";
-import { briefQuestionIds, HEADLINE_ICON, HEADLINE_TONE, pillState, todoLabel, withoutBriefQuestions, type PillState } from "../shared/headline";
+import { briefQuestionIds, echoedItems, HEADLINE_ICON, HEADLINE_TONE, pillState, todoLabel, withoutBriefQuestions, type PillState } from "../shared/headline";
 import { snoozeUntil, type InboxRow } from "../shared/inbox";
 import { laterChoices } from "../shared/row-menu";
 import { isOpen as questionOpen } from "../shared/questions";
@@ -167,6 +167,8 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
   // Phones: one primary per sheet. While the workspace has something to act on, that's the primary and Sign off steps back.
   const itemFirst = touch && !!w && (asking || items.length > 0);
   const tone = headline ? headlineColor(HEADLINE_TONE[headline.key], c) : c.foregroundMuted;
+  // say-it-once: a to-do that only repeats the headline keeps its controls, not its title.
+  const echoed = flagged ? echoedItems(items, headline, row) : new Set<string>();
 
   // The 6 s after a sign-off (or Done's toast window): the pill stays a popover, and Undo is its one action.
   const doneWindow = state?.mode === "undo" && state.label === "Done";
@@ -224,9 +226,9 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
       {flagged && <Text style={touch ? t.section : [t.small, { fontWeight: "600" }]}>In this workspace · {todoLabel(items)}</Text>}
       {asking
         ? <QuestionStepper workspace={w} theme={props.theme} compact={touch} bodyMaxHeight={touch ? undefined : 200} onDetails={setQuestion} onAnswered={() => deps.live.refresh()} />
-        : <NeedsYouList workspace={w} theme={props.theme} compact={touch} flush
+        : <NeedsYouList workspace={w} theme={props.theme} compact={touch} flush untitled={echoed}
           actions={{ after: () => deps.live.refresh(), openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion }} />}
-      {asking && items.some(i => i.kind !== "question") && <Text numberOfLines={2} style={t.small}>Also: {items.filter(i => i.kind !== "question").map(i => i.title).join(" · ")}</Text>}
+      {asking && items.some(i => i.kind !== "question" && !echoed.has(i.key)) && <Text numberOfLines={2} style={t.small}>Also: {items.filter(i => i.kind !== "question" && !echoed.has(i.key)).map(i => i.title).join(" · ")}</Text>}
       <PrSheet workspace={w} prKey={sheet?.key ?? null} intent={sheet?.intent ?? null} theme={props.theme} compact={touch} browserReady={browser.data?.ready ?? false} onClose={() => { setSheet(null); deps.live.refresh(); }} />
       <QuestionSheet workspace={w} questionId={question} theme={props.theme} compact={touch} onClose={() => { setQuestion(null); deps.live.refresh(); }} />
     </View>}
