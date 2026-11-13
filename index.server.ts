@@ -206,6 +206,7 @@ export default function contribute(server: PluginServerContext) {
   actions.savedMethod = repo => prWorkflow.current().repos[repoKey(repo)]?.mergeMethod ?? null;
   const engine = new Engine(store, github, gateway);
   engine.wording = { reviewFix: repo => commandName(prWorkflow.reviewFix(repo)) };
+  actions.settleTasks = w => engine.settleTasks(w);
   const governor = new Governor();
   const linkedStore = new LinkedStore(directory);
   const linked = new LinkedService({ store: linkedStore, sources: liveLinkedSources(), roomForBackground: async () => governor.allowsBackground() });

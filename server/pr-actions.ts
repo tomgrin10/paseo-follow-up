@@ -29,6 +29,8 @@ export class PrActions {
   savedMethod: (repo: string) => MergeMethod | null = () => null;
   /** Pause between a parent's merge and its child's, while GitHub recomputes the child's mergeability. */
   settle = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+  /** Re-derives a workspace's queued tasks inside the write that records a merge (Engine.settleTasks). */
+  settleTasks: (w: Workspace) => void = () => undefined;
   constructor(private store: Store, private github: Pick<Github, "observe"> & Partial<Pick<Github, "requestReviewers" | "merge" | "autoMerge" | "retarget">>, private graphite: Pick<Graphite, "merge" | "invalidate">, readonly browser: BrowserBridge, private now = Date.now, private reviewersFor: (repo: string) => ReviewerEntry[] = configuredReviewers) {}
 
   private async fresh(workspaceId: string): Promise<Workspace> {
@@ -217,6 +219,8 @@ export class PrActions {
       if (state === "submitted" && merge === "merged") for (const p of current.prs) if (prs.some(m => m.key === p.key) && p.snapshot && p.snapshot.state === "OPEN") {
         p.snapshot = { ...p.snapshot, state: "MERGED", mergedAt: p.snapshot.mergedAt ?? new Date(this.now()).toISOString() };
       }
+      // Tasks and Needs you agree too: a queued repair for a PR that just merged goes now, not on the nudged tick.
+      if (state === "submitted" && merge === "merged") this.settleTasks(current);
     });
     this.graphite.invalidate();
     return { state, result, ...(state === "submitted" && merge ? { merge } : {}) };
