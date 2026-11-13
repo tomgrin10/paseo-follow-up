@@ -33,5 +33,8 @@ jobs:
       - name: Install CLIs for isolated integration checks
         run: npm install --global @getpaseo/cli@0.15.2 @anthropic-ai/claude-code@2.1.300 @openai/codex@0.162.1
       - run: npm run verify
+      # The live-sized busy window (live's outliers, 20 turns/min). It reports its RSS, CPU and request budgets without
+      # failing until the derived budgets land (scripts/scale-check.mjs --budgets-report-only); wakes and sends still fail.
+      - run: npm run test:scale:live
       - run: npm run test:install
       - run: npm pack --dry-run

@@ -12,6 +12,8 @@ import { Spinner } from "./motion";
 import { Button, rowDomId, type Theme } from "./kit";
 import { RowMenu, useRowMenuTrigger, type OpenRowMenu, type RowMenuOpen } from "./row-menu";
 import type { RowMenuItem, RowMenuSection } from "../shared/row-menu";
+import { homeGroupOpen, writeHomeGroupOpen } from "../shared/settings-nav";
+import { useViewVersion } from "./view-store";
 
 /**
  * The one list: Home's left side and (on hosts that have it) the sidebar
@@ -95,10 +97,14 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
     if (sections.length) setOpenMenu({ s, anchor, sections, returnTo: node, keyboard });
   }, [build]);
   const menuKey = openMenu?.s.key ?? null;
-  const [closed, setClosed] = useState<Set<string>>(new Set(["quiet"]));
+  // Group folds persist per device (device document on 0.16), read on every render so the cache paints first. Needs
+  // you is the exception: it opens on every mount, and closing it holds only for this mount.
+  const view = useViewVersion();
+  const [needsClosed, setNeedsClosed] = useState(false);
+  const closed = useMemo(() => { const n = new Set(model.groups.map(g => g.id).filter(id => id !== "needs" && !homeGroupOpen(id))); if (needsClosed) n.add("needs"); return n; }, [model.groups, needsClosed, view]);
   const [openProjects, setOpenProjects] = useState<Set<string>>(new Set());
   const [pages, setPages] = useState<Record<string, number>>({});
-  const toggle = useCallback((key: string) => setClosed(s => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; }), []);
+  const toggle = useCallback((key: string) => { if (key === "needs") setNeedsClosed(v => !v); else writeHomeGroupOpen(key, !homeGroupOpen(key)); }, []);
   const toggleProject = useCallback((p: string) => setOpenProjects(s => { const n = new Set(s); if (n.has(p)) n.delete(p); else n.add(p); return n; }), []);
 
   const data = useMemo(() => {
