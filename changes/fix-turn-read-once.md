@@ -1,0 +1,1 @@
+- Follow-up reads each agent turn once, picking up where its last read stopped, instead of re-reading the newest part of the chat at the start of the turn, at its end and again for discovery.

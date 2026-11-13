@@ -30,6 +30,7 @@ import { activeWindowMs, backgroundCount, isLive, isLoaded, recentlyUsed, worksp
 import { HistoryCache } from "./history-cache";
 import { DaemonDirectory, type DirectoryRows } from "./directory";
 import { traceDaemon } from "./request-trace";
+import type { TurnTimeline } from "./turn-timeline";
 type RecoveryAgentOptions = Partial<PluginBeforeRequests["agent.create"]["config"]> & { workspaceId: string; labels: Record<string, string>; idempotencyKey: string; env: Record<string, string>; /** Paseo 0.16 (features.backgroundAgents): no tab, no notification, no sidebar row. */ background?: boolean };
 
 /**
@@ -310,6 +311,8 @@ export class PaseoGateway implements Gateway {
   readonly workspaceCwds = new Map<string, string[]>();
   /** Settings → Agents' "recovery" role; unset or "Same as main agent" copies the main agent. */
   recoveryRole: (() => Promise<RecoveryRole>) | null = null;
+  /** The turn reads' shared cursor: a rescan after a turn end takes that read instead of fetching it again. */
+  turnTimeline: TurnTimeline | null = null;
   /** Whether the host advertises features.backgroundAgents (server/host-features.ts); false on Paseo 0.15. */
   backgroundAgents: () => Promise<boolean> = async () => false;
   /**
@@ -413,7 +416,7 @@ export class PaseoGateway implements Gateway {
         this.timelineReads++;
         const cached = this.histories.get(agent.id);
         try {
-          const read = (cached?.cursor && cached.history.complete && !cached.history.error ? await readSince(client, agent.id, cached.cursor) : null) ?? await readAll(client, agent.id);
+          const read = (cached?.cursor && cached.history.complete && !cached.history.error ? this.turnTimeline?.since(agent.id, cached.cursor, OVERLAP) ?? await readSince(client, agent.id, cached.cursor) : null) ?? await readAll(client, agent.id);
           end = read.end;
           const items = read.entries.map(e => e.item);
           // Linked items ride this read. Best-effort: a throw here must never mark the history unreadable.
