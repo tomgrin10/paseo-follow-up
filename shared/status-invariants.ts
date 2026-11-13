@@ -6,11 +6,11 @@ import { BATCH_PREFIXES, RECOVERY_TITLES } from "./legacy";
 import type { Workspace } from "./model";
 import { answerMessage, awaitingSend, duplicateOpenQuestions, isOther, parseAnswerMessage, parseAnswersMessage } from "./questions";
 import { briefAnswer, briefAnswers, briefAsks, briefStep, reviewersBriefPr, shouldReopen, type Brief } from "./brief";
-import { flagHeadline } from "./headline";
+import { flagHeadline, HEADLINE_WORD } from "./headline";
 import { newEntry, prEndEvent, REASONS, reduce, type InboxRow } from "./inbox";
 import { blockedOnDeveloper, completionCheck, liveWorkingTask, summary } from "./model";
 import { asksForReviewers, liveLine, needsYou, type NeedItem } from "./attention";
-import { HOME_GROUPS, homeCounts, trackedGroup, type HomeModel } from "./home";
+import { HOME_GROUPS, homeCounts, prChip, trackedGroup, type HomeModel } from "./home";
 import { freshPriorities, type Priority } from "./priorities";
 import { agentCard, automaticHold, batchView, holdSuperseded } from "./status";
 import { conditionId, isCapped, NO_PROGRESS_CAP, sendDecision } from "./send-decision";
@@ -19,7 +19,7 @@ import { followUpObligations } from "./follow-up";
 import { PRESENCE, claimsWorking, taskStatus } from "./task-status";
 import { cadence, movingReason, OBSERVATION_FRESH_MS, POLL_IDLE_MS, RUNNING_POLL_MS, TICK_MS } from "./poll";
 import { staleUpdatePhase, type UpdatePhase } from "./updates";
-import { needsYouBlock, onceViolation } from "./needs-block";
+import { foldedAsk, needsYouBlock, onceViolation } from "./needs-block";
 import { compactPrStatus, prPresentation } from "./presentation";
 import { agentMerges } from "./pr-workflow";
 
@@ -283,6 +283,25 @@ export const INVARIANTS: Invariant[] = [
         const v = doneBriefViolations(row, items, now)[0];
         if (v) return `${reason}/${source}: ${v.detail}`;
       }
+      return null;
+    },
+  },
+  {
+    id: "say-it-once",
+    why: "2026-11-12: Home's row read \"Merged · #240 merged\" beside a \"#240 merged\" PR chip, and a two-decision card was titled with its first question, which then repeated as item 1. A flag's headline line never repeats its word, its pill label or the PR chip (a merged or closed PR's flag names the PR by title), and a brief over several open questions keeps the agent's own ask (foldedAsk).",
+    check(w, now) {
+      const at = new Date(now).toISOString();
+      for (const pr of w.prs) {
+        const event = prEndEvent({ ...pr, agentMerges: false });
+        if (!event) continue;
+        const row = { agentId: "main", needs: reduce(newEntry("main"), event, at).needs, snooze: null, brief: null } as unknown as InboxRow;
+        const h = flagHeadline(row, now);
+        const chip = prChip({ ...w, prs: [pr] });
+        const said = [h && HEADLINE_WORD[h.key], h?.label, chip && [chip.label, chip.checks?.text].filter(Boolean).join(" ")];
+        if (h && h.line !== HEADLINE_WORD[h.key] && said.includes(h.line)) return `#${pr.number}'s ${h.label} headline repeats "${h.line}"`;
+      }
+      const open = w.questions.filter(q => !q.answer && !q.closed);
+      if (open.length > 1 && foldedAsk("The agent's ask", open.map(q => q.id), w.questions) !== "The agent's ask") return `a brief over ${open.length} open questions is titled with one of them`;
       return null;
     },
   },

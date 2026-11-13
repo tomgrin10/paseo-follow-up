@@ -1,0 +1,1 @@
+- An answer you copied or put in the agent's message box now reads "not sent yet" on the chat's card, in the question and in Activity, like Needs you, instead of "Answered" with a check. It reads Answered once it reaches the agent.
