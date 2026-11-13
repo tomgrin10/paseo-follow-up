@@ -39,10 +39,15 @@ test("the stack bar follows merge order and drops settled stacks while work is a
 test("needs-you lists one action per decision and respects Auto and send guards", () => {
   const w = workspace({ prs: stack(), batches: [batch()], obligations: [{ id: "d", title: "Pick a migration strategy", status: "blocked", afterPrs: [], evidence: "Two options", ask: "Expand-contract or a maintenance window?", enable_follow_up: false, revision: 0 }] });
   const items = needsYou(w, clock);
-  assert.deepEqual(items.map(i => i.kind), ["decision", "send", "merge"]);
+  // #3 is approved but sits on #2, which conflicts: its one-click Merge would merge #2 too and be refused, so it isn't
+  // offered (a-click-on-merge-merges). The conflict on #2 is the work.
+  assert.deepEqual(items.map(i => i.kind), ["decision", "send"]);
   const send = items.find(i => i.kind === "send");
   assert.equal(send?.kind === "send" && send.blocker, null);
-  assert.deepEqual(needsYou({ ...w, enable_auto_sends: true }, clock).map(i => i.kind), ["decision", "merge"], "Auto sends without asking");
+  assert.deepEqual(needsYou({ ...w, enable_auto_sends: true }, clock).map(i => i.kind), ["decision"], "Auto sends without asking");
+  // Once #2 can merge too, #3 offers Merge (its click merges #2 and #3).
+  const fixed = w.prs.map(p => p.number === 2 ? { ...p, snapshot: { ...p.snapshot!, conflict: false, reviewDecision: "APPROVED" as const, graphiteMergeStatus: "READY_TO_MERGE" } } : p);
+  assert.deepEqual(needsYou({ ...w, prs: fixed, enable_auto_sends: true }, clock).filter(i => i.kind === "merge").map(i => i.kind === "merge" && i.number), [2, 3]);
   const busy = needsYou({ ...w, runtimeBusy: true }, clock).find(i => i.kind === "send");
   assert.equal(busy?.kind === "send" && busy.blocker, "Sends after the agent's current turn");
   const held = needsYou({ ...w, hold: "You stopped the main agent. Resume follow-up when ready." }, clock);
@@ -73,7 +78,7 @@ test("merge readiness matches the PR controls and waits for queued or recent mer
 
 test("headline, live line and pill read the same state", () => {
   const w = workspace({ prs: stack(), batches: [batch()] });
-  assert.deepEqual(headline(w, clock).map(p => p.text), ["1 of 4 PRs merged", "2 need you", "1 to fix"]);
+  assert.deepEqual(headline(w, clock).map(p => p.text), ["1 of 4 PRs merged", "1 needs you", "1 to fix"]);
   assert.equal(workspaceHeadline(needsYou(w, clock))?.label, "Send 1 task", "the pill names the top item, never \"N need you\"");
   assert.equal(workspaceHeadline(needsYou(workspace({ prs: [pr({ snapshot: snapshot({ reviewDecision: "APPROVED", graphiteMergeStatus: "READY_TO_MERGE_AS_STACK" }) })] }), clock))?.label, "Merge #1");
   assert.equal(workspaceHeadline(needsYou(workspace({ prs: [pr()] }), clock)), null, "no pill unless something needs you");

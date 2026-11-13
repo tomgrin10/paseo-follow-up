@@ -22,6 +22,7 @@ import { staleUpdatePhase, type UpdatePhase } from "./updates";
 import { needsYouBlock, onceViolation } from "./needs-block";
 import { compactPrStatus, prLink, prPresentation } from "./presentation";
 import { agentMerges } from "./pr-workflow";
+import { mergeScope } from "./merge-click";
 
 /**
  * Status invariants: what must hold for any workspace, whatever path changed it. Pure, no IO, and never throwing:
@@ -334,6 +335,19 @@ export const INVARIANTS: Invariant[] = [
           : i.kind === "check" ? (a => a?.prs.length === 1 ? a.prs[0] : undefined)(w.prActions.find(a => a.id === i.actionId)) : undefined;
         const pr = key ? w.prs.find(p => p.key === key) : undefined;
         if (pr && i.pr?.url !== prLink(pr).url) return `${i.key} is about #${pr.number} but ${i.pr ? `links ${i.pr.url}` : "has no link to it"}`;
+      }
+      return null;
+    },
+  },
+  {
+    id: "a-click-on-merge-merges",
+    why: "2026-11-13: Merge on a Needs you row opened the PR sheet and asked \"Merge this PR?\" with a second Merge #N. A Merge row's click merges what its label names, so the label must know that scope; a row whose scope can't be read falls back to the confirm",
+    check(w, now) {
+      for (const i of needsYou(w, now)) {
+        if (i.kind !== "merge") continue;
+        const scope = mergeScope(w, i.prKey);
+        if (!scope) return `${i.key}: its stack can't be read, so Merge asks again`;
+        if (scope.prs.at(-1)?.key !== i.prKey) return `${i.key}: its Merge would not merge #${i.number} last`;
       }
       return null;
     },

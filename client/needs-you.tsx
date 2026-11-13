@@ -23,6 +23,8 @@ import { NoReviewLink } from "./review-mode";
 
 import { overviewKey, workspaceKey } from "./keys";
 import { PrLinksProvider, RichText } from "./rich-text";
+import { useMergeButtons } from "./merge-button";
+import { mergeScope } from "../shared/merge-click";
 import { prLinksByNumber } from "../shared/presentation";
 export { overviewKey, workspaceKey };
 
@@ -84,6 +86,7 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
   }, onError: fail });
   const inspect = useMutation({ mutationFn: (actionId: string) => check({ workspaceId: w.id, actionId }), onSuccess: reply => { toast.show(reply.result, { variant: reply.state === "failed" ? "warning" : "info" }); refresh(); }, onError: fail });
   const items = rows ?? needsYou(w, now);
+  const mergeControl = useMergeButtons(w);
   if (!items.length) return null;
   const busy = resume.isPending || retry.isPending || retryTask.isPending || deliver.isPending || sendAnswer.isPending || inspect.isPending;
   const openMain = actions.openAgent ? () => actions.openAgent!(w.mainAgentId) : undefined;
@@ -110,7 +113,8 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
         </>
         : actions.openQuestion && <Button theme={theme} compact={compact} icon="Eye" title="Check" accessibilityLabel={`Check the ${item.questionId} answer`} onPress={() => actions.openQuestion!(item.questionId)} />;
       case "send": return <Button theme={theme} compact={compact} kind="primary" icon="Send" title={item.finish ? "Ask to finish" : `Send ${item.tasks.length} task${item.tasks.length === 1 ? "" : "s"}`} accessibilityLabel={item.finish ? `Ask to finish: ${FINISH_ASK}` : `Send ${item.tasks.length} task${item.tasks.length === 1 ? "" : "s"} to ${agentName(w)}`} accessibilityHint={item.blocker ?? undefined} loading={deliver.isPending} disabled={busy || !!item.blocker} onPress={() => deliver.mutate(item.batchId)} />;
-      case "merge": return actions.openPr && <Button theme={theme} compact={compact} icon="GitMerge" title={`Merge #${item.number}`} accessibilityLabel={`Review and merge pull request ${item.number}`} onPress={() => actions.openPr!(item.prKey, "merge")} />;
+      // One click merges what the button names (a-click-on-merge-merges); the sheet's confirm only when the scope can't be known.
+      case "merge": return mergeControl(item.prKey, { theme, compact, fallback: actions.openPr ? () => actions.openPr!(item.prKey, "merge") : undefined }).button;
       case "reviewers": return actions.openPr && <Button theme={theme} compact={compact} icon="UserPlus" title="Add reviewers" onPress={() => actions.openPr!(item.prKey, "reviewers")} />;
     }
   };
@@ -120,10 +124,15 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
       // A row about one PR opens it in one click, beside its action and never instead of it.
       const link = item.pr ? <PrLinkButton link={item.pr} theme={theme} compact={compact} /> : null;
       const act = action(item);
+      // A stack's Merge names its scope on the row ("Merges #1628, #1629, then #1630"); a click-time blocker shows here too.
+      const merging = item.kind === "merge" ? mergeControl(item.prKey, { theme, compact }) : null;
+      const scopeLine = item.kind === "merge" ? mergeScope(w, item.prKey)?.detail ?? null : null;
+      const notice = merging?.notice ?? null;
       const button = act || link ? <>{act}{link}</> : null;
       // Phones: the action sits at the row's right edge so rows never grow a second line of controls. A send batch
       // (the primary, with its task list) and Retry's pair keep their buttons full width under the row.
-      const inline = compact && button && item.kind !== "send" && !(item.kind === "retry" && !item.exhausted);
+      // A stack's scope line and a blocker need the row's full width, so those rows put their button under the text.
+      const inline = compact && button && item.kind !== "send" && !(item.kind === "retry" && !item.exhausted) && !scopeLine && !notice;
       if (inline) return <CardRow key={item.key} theme={theme} compact first={index === 0 && flush} style={flush ? { paddingHorizontal: 0 } : undefined}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
           {/* A row with the quiet link under it is taller: the glyph stays on the title's line. */}
@@ -142,12 +151,14 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
           <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
             <RichText style={compact ? t.label : t.body}>{item.title}</RichText>
             {"detail" in item && !!item.detail && !sameText(item.detail, item.title.replace(/^Q\d+ · /, "")) && <RichText linkColor={c.foreground} numberOfLines={item.kind === "question" ? 2 : 3} style={t.meta}>{item.detail}</RichText>}
+            {scopeLine && <RichText style={t.meta}>{scopeLine}</RichText>}
             {item.kind === "question" && <QuestionState workspace={w} questionId={item.questionId} theme={theme} />}
             {item.kind === "reviewers" && <NoReviewLink repo={item.prKey.split("#")[0]} theme={theme} compact={compact} />}
             {(button || (item.kind === "send" && item.blocker)) && <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 5 }}>
               {button}
               {item.kind === "send" && item.blocker && <Text style={[t.small, { flexShrink: 1 }]}>{item.blocker}</Text>}
             </View>}
+            {notice}
           </View>
         </View>
       </CardRow>;
