@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { ActionPlan } from "../shared/pr-actions";
 import { mergeBlockers } from "../shared/pr-actions";
 import { recoveryBatch } from "../shared/follow-up";
+import { prLink, type PrLink } from "../shared/presentation";
 import { flagHeadline } from "../shared/headline";
 import { resolveUntil, type InboxRow } from "../shared/inbox";
 import { needKey, needsYou } from "../shared/attention";
@@ -32,6 +33,19 @@ import { DEFAULT_SORT, SORT_MODES } from "../shared/sort";
  * return a dry-run plan first; `confirm: true` with that plan's id runs it. Every agent write is recorded in
  * the inbox ledger as `by: "agent:<id>"`, which never counts as the developer writing to the agent.
  */
+/**
+ * The PRs an inbox row is flagged about, with the link the row opens (agent parity for
+ * a-row-that-names-a-pr-opens-it-in-one-click): its PR flags, and the Needs-you items of the workspace it is main agent of.
+ */
+export function rowPrs(state: State, r: InboxRow, now: number): PrLink[] {
+  const w = r.workspaceId ? state.workspaces.find(x => x.id === r.workspaceId) : undefined;
+  if (!w) return [];
+  const out = new Map<string, PrLink>();
+  for (const reason of r.needs?.reasons ?? []) { const pr = reason.prKey ? w.prs.find(p => p.key === reason.prKey) : undefined; if (pr) out.set(pr.key, prLink(pr)); }
+  if (w.mainAgentId === r.agentId) for (const item of needsYou(w, now)) if (item.pr) out.set(item.pr.key, item.pr);
+  return [...out.values()];
+}
+
 export const AGENT_TOOLS = ["make_main_agent", "list_prs", "add_reviewers", "merge", "enable_merge_when_ready", "disable_merge_when_ready", "send_repairs", "set_auto_send", "clear_hold", "retry_batch", "track", "inbox_list", "sign_off", "snooze", "snooze_workspace", "set_finish_flags", "set_priorities", "workspace_about", "agent_settings", "follow_settings", "set_follow_settings", "project_settings", "set_project_tracking", "pr_workflow", "set_pr_workflow", "reviewer_settings", "reviewer_suggestions", "save_reviewers", "set_agent_setting", "set_wait_for_jobs", "onboarding_status", "onboarding_checks", "set_onboarding", "priorities", "rank_status", "rerank_priorities", "usage", "overseer_status", "overseer_start", "overseer_restart", "overseer_ask", "inbox_brief", "brief_action", "inbox_act", "answer_question", "run_recovery", "refresh", "set_workspace_spec", "set_task_trigger", "pr_controls", "browser_status", "trust_bypass_status", "release_notes", "link_items", "set_linked_items", "updates_status", "check_updates", "set_updates", "install_update", "display_settings", "set_display", "retry_move", "report_issue", "ai_rename"] as const;
 export type AgentTool = typeof AGENT_TOOLS[number];
 /** Tools that only read. */
@@ -452,14 +466,15 @@ export class AgentActions {
   private async inboxList(caller: string, args: { flagged_only?: boolean }) {
     const { enabled, rows } = await this.d.inbox.list();
     const now = this.now();
-    const tracked = new Map((await this.d.store.snapshot()).workspaces.map(w => [w.id, w]));
+    const state = await this.d.store.snapshot();
+    const tracked = new Map(state.workspaces.map(w => [w.id, w]));
     const held = !!this.d.autoSendsHeld?.();
     return { enabled, you: caller, rows: rows.filter(r => !args.flagged_only || r.needs && !r.snooze).map(r => {
       const head = flagHeadline(r, now);
       // Home's Sending row rides its workspace's main agent: queued or sent, when and why, and whether send_repairs would go through.
       const w = r.workspaceId ? tracked.get(r.workspaceId) : undefined;
       const sending = w && w.mainAgentId === r.agentId ? sendingOf(w, now, { held }) : null;
-      return { agentId: r.agentId, title: r.title, workspace: r.workspaceTitle, workspaceId: r.workspaceId, status: r.status, flagged: !!head, headline: head?.label ?? null, ask: head?.line ?? null, sending,
+      return { agentId: r.agentId, title: r.title, workspace: r.workspaceTitle, workspaceId: r.workspaceId, status: r.status, flagged: !!head, headline: head?.label ?? null, ask: head?.line ?? null, prs: rowPrs(state, r, now), sending,
         snoozedUntil: r.snooze ? (r.snooze as { until?: string }).until ?? "next-event" : null, enable_finish_flags: r.enable_finish_flags, self: r.agentId === caller };
     }) };
   }

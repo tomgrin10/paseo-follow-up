@@ -3,6 +3,29 @@ import { deployed } from "./follow-up";
 
 export const graphitePrUrl = (pr: Pick<Pr, "repo" | "number">): string => `https://app.graphite.com/github/pr/${pr.repo}/${pr.number}`;
 
+/** A PR as a row links it: where one click opens it, and what a screen reader says. */
+export type PrLink = { key: string; number: number; url: string; label: string };
+/**
+ * Where a row's "Open #N" goes (a-row-that-names-a-pr-opens-it-in-one-click): Graphite for a PR its repository ships
+ * through Graphite, else the PR on GitHub (the PR sheet's primary link). Every surface that names a PR links it through this, so they agree.
+ */
+export function prLink(pr: Pick<Pr, "key" | "repo" | "number" | "snapshot">): PrLink {
+  const s = pr.snapshot;
+  // The PR sheet's rule: a read PR not in GitHub mode ships through Graphite (isGithubFlow); unread, GitHub.
+  const url = s && s.prWorkflow !== "github" ? graphitePrUrl(pr) : s?.url || `https://github.com/${pr.repo}/pull/${pr.number}`;
+  return { key: pr.key, number: pr.number, url, label: `Open pull request #${pr.number}` };
+}
+/**
+ * A workspace's PRs by number, for linking a bare "#1630" in a row's text. A number two tracked repositories share is
+ * left out: "#12" alone can't say which one it means.
+ */
+export function prLinksByNumber(prs: readonly Pick<Pr, "key" | "repo" | "number" | "snapshot">[]): ReadonlyMap<number, PrLink> {
+  const out = new Map<number, PrLink>(); const twice = new Set<number>();
+  for (const pr of prs) { if (out.has(pr.number) && out.get(pr.number)!.key !== pr.key) twice.add(pr.number); else out.set(pr.number, prLink(pr)); }
+  for (const n of twice) out.delete(n);
+  return out;
+}
+
 /**
  * A complete snapshot always shows its own status; a failed read after it (`pr.error`) adds at most a quiet "last
  * checked" hint (staleHint). "Status unavailable" means no complete read ever (a-github-limit-never-blanks-a-known-pr).

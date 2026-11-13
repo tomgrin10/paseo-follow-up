@@ -92,7 +92,7 @@ the developer's; it never clears a Needs-you flag and never passes the Overseer'
 | `rank_status`, `rerank_priorities` | `follow.rank-status`, `follow.rank-now` | read / planned |
 | `usage` | `follow.usage` | read |
 | `overseer_status`, `overseer_start`, `overseer_restart`, `overseer_ask` | `follow.overseer-status`, `follow.overseer-start`, `follow.overseer-restart`, `follow.overseer-ask` | read / planned |
-| `inbox_list`, `inbox_brief` | `follow.inbox-list`, `follow.inbox-brief` | read |
+| `inbox_list`, `inbox_brief` | `follow.inbox-list`, `follow.inbox-brief` | read (`inbox_list` rows carry `prs`: each PR the row is about, with its url) |
 | `sign_off`, `snooze`, `set_finish_flags`, `inbox_act` | `follow.inbox-act` | planned; other agents only |
 | `brief_action` | `follow.brief-action` | planned; never your own brief |
 | `answer_question` | `follow.answer-question` | planned; never your own question. The tool sends; the UI's Copy and Put in chat (`action: "copy" \| "chat"`) only move the developer's own words into their clipboard or composer, so they have no tool (`server/agent-parity.ts`). |

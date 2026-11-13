@@ -305,3 +305,19 @@ card beside a question list.
 
 Tests: `tests/inbox.test.ts`, `tests/brief.test.ts`, `tests/decision-card.test.ts`, `tests/home.test.ts`,
 `tests/home-beta2.test.ts`, `tests/attention.test.ts`.
+
+## Opening the PR a row names
+
+`a-row-that-names-a-pr-opens-it-in-one-click`: a row about one PR opens that PR in one click, without the PR sheet.
+
+- Every Needs-you item about one PR (merge, reviewers, a capped repair on a PR, an uncertain action on one PR) carries
+  `pr`, from `prLink` (`shared/presentation.ts`): Graphite when the PR ships through Graphite, else GitHub, the same
+  rule as the PR sheet's links. `NeedsYouList` draws it as `PrLinkButton` (`client/kit.tsx`) after the row's action:
+  an icon link labelled "Open pull request #N", an anchor on web. It is navigation, so it never counts as the row's
+  one action (DESIGN.md).
+- Every "#N" in a Needs-you row's or a brief's text that names a PR the workspace tracks links it: `NeedsYouList` and
+  `BriefCard` wrap their rows in `PrLinksProvider` (`client/rich-text.tsx`), and `linkify` (`shared/links.ts`) links a
+  bare number only when it maps to exactly one tracked PR. A done brief's "#240 is merged" opens #240.
+- A brief about a PR (review, action or decision with a linked PR, reviewers, a PR event) has an Open PR move.
+- `inbox_list` gives each row `prs`: its PR flags' and its Needs-you items' PRs with their urls (`rowPrs`,
+  `server/agent-actions.ts`), so an agent can hand the developer the link.
