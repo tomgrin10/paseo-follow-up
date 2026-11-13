@@ -11,6 +11,8 @@ export class ListCache {
   // Revisions start at boot time, so a token from before a worker restart is always older than `floor`.
   private revision = Date.now();
   private json = new Map<string, string>();
+  /** The workspace object each `json` entry was serialised from: the same frozen object needs no new serialisation. */
+  private objects = new Map<string, Workspace>();
   private changedAt = new Map<string, number>();
   private removedAt = new Map<string, number>();
   private current: Workspace[] = [];
@@ -26,10 +28,16 @@ export class ListCache {
     const revision = this.revision + 1;
     for (const w of next) {
       seen.add(w.id);
+      // a-list-answer-serializes-only-what-changed: the store keeps an unchanged workspace's frozen object
+      // (a-mutation-copies-only-what-it-changes), so the same object is the same workspace and isn't serialised again.
+      // 2026-11-13 (run W, live copy under live load): every state change stringified every tracked workspace (1.4 MB)
+      // to find the one a turn touched, 23 MB of garbage every 5 minutes.
+      if (this.objects.get(w.id) === w && Object.isFrozen(w)) continue;
+      this.objects.set(w.id, w);
       const text = JSON.stringify(w);
       if (this.json.get(w.id) !== text) { this.json.set(w.id, text); this.changedAt.set(w.id, revision); this.removedAt.delete(w.id); changed = true; }
     }
-    for (const id of [...this.json.keys()]) if (!seen.has(id)) { this.json.delete(id); this.changedAt.delete(id); this.removedAt.set(id, revision); changed = true; }
+    for (const id of [...this.json.keys()]) if (!seen.has(id)) { this.json.delete(id); this.objects.delete(id); this.changedAt.delete(id); this.removedAt.set(id, revision); changed = true; }
     // Removal records are kept for a while so slow clients still learn about them; past that they resync fully.
     if (this.removedAt.size > 500) { const cut = [...this.removedAt.values()].sort((a, b) => a - b)[this.removedAt.size - 500]; for (const [id, at] of this.removedAt) if (at < cut) this.removedAt.delete(id); this.floor = cut; }
     this.current = next;

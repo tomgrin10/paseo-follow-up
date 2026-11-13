@@ -146,6 +146,18 @@ These are product rules. Each has tests, and breaking one is a bug even when the
      the store serialises once per real write. Every JSON writer in `server/` uses it or carries an exemption with a
      reason. Guarded by `tests/inbox-copies.test.ts`, `tests/store-copies.test.ts`, `tests/discovery-noop.test.ts`
      (a discovery tick that finds nothing new copies nothing) and `test:scale`'s busy window.
+   - **A list answer serializes only what changed** (`a-list-answer-serializes-only-what-changed`): `ListCache`
+     (`server/list-cache.ts`) skips a workspace whose frozen object is the one it last serialised, so a state change
+     stringifies only the workspaces it touched, never every tracked one. 2026-11-13 (run W, live copy under live
+     load): every change stringified all 1.4 MB of tracked workspaces, 23 MB of garbage every 5 minutes. Guarded by
+     `tests/list-cache.test.ts` (1 of 150).
+   - **The inbox writes at most once per window** (`the-inbox-writes-at-most-once-per-window`): the worker's
+     `InboxStore` holds a real change in memory, where every reader in the worker reads it, and writes `inbox.json`
+     once per `INBOX_WRITE_MS` (2 s) for all of the window's changes; stop flushes it, so only a crash loses at most
+     the window. Nothing outside the worker reads `inbox.json` (the MCP bridge and the CLI ask over RPC, the hooks read
+     `brief.json` and `scopes.json`, onboarding checks only that it exists); a new direct reader must accept being up
+     to one window behind. 2026-11-13 (run W): about two whole-inbox writes (133 KB) a turn, 54 MB of garbage every 5
+     minutes. Guarded by `tests/inbox-write-window.test.ts`.
    - **A timeline entry is read once** (`a-rescan-reads-only-new-entries`, `a-turn-end-reads-the-turn-once`,
      `a-turn-s-timeline-is-read-once`): every reader of a turn shares one cursor per agent (`server/turn-timeline.ts`).
      The turn start reads what's new since the agent's last read (the prompt), the turn end reads what's new since
