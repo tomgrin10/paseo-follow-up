@@ -7,6 +7,11 @@ import { mergeClick, mergeScope, type MergeClickResult, type MergeScope } from "
 import type { Workspace } from "../shared/model";
 import { Button, errorText, text, type ButtonKind, type Theme } from "./kit";
 import { Text } from "./text";
+import { View } from "react-native";
+import { Icon } from "@getpaseo/plugin/client/ui";
+import { heldMerges } from "../shared/attention";
+import { prLinksByNumber } from "../shared/presentation";
+import { PrLinksProvider, RichText } from "./rich-text";
 
 type Outcome = MergeClickResult | { state: "error"; result: string };
 const whyNot = (o: Outcome | undefined) => o?.state === "blocked" ? `Not merged: ${o.blockers.join(" · ")}` : o?.state === "failed" || o?.state === "error" ? `Not merged: ${o.result}` : null;
@@ -65,4 +70,21 @@ export function useMergeButtons(w: Workspace | undefined): MergeButtons {
       run: () => { if (!merge.isPending && !submitted) merge.mutate({ prKey, scope }); } };
   };
   return Object.assign(control, { view });
+}
+
+/**
+ * "#143 approved · waits on #142 (checks failing)": an approved PR that Merge isn't offered on because a PR under it
+ * can't merge yet (heldMerges). Quiet, not an ask; both numbers open their PRs. The panel's Pull requests card and
+ * Home's detail pane draw it, so an approved PR never goes invisible.
+ */
+export function HeldMerges({ workspace: w, theme, compact, now = Date.now(), framed = false }: { workspace: Workspace; theme: Theme; compact: boolean; now?: number; framed?: boolean }) {
+  const held = heldMerges(w, now);
+  if (!held.length) return null;
+  const c = theme.colors; const t = text(c, compact);
+  return <PrLinksProvider prs={prLinksByNumber(w.prs)}><View accessibilityRole="summary" style={framed ? { paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1, borderTopColor: c.border, gap: 6 } : { gap: 6 }}>
+    {held.map(h => <View key={h.pr.key} style={{ flexDirection: "row", gap: 8 }}>
+      <View style={{ paddingTop: 2 }}><Icon name="Clock" size={13} color={c.foregroundMuted} /></View>
+      <RichText linkColor={c.foreground} style={[t.meta, { flex: 1 }]}>{h.line}</RichText>
+    </View>)}
+  </View></PrLinksProvider>;
 }

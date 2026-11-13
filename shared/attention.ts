@@ -211,6 +211,37 @@ function computeNeedsYou(w: Workspace, now: number): NeedItem[] {
   return items;
 }
 
+/** Why a downstack PR holds a merge, in a few words ("checks failing"). */
+function holdReason(p: Pr): string {
+  const s = p.snapshot;
+  if (!s?.complete || p.error) return "status unknown";
+  if (s.conflict) return "conflicts";
+  if (s.failedChecks.length) return "checks failing";
+  if (s.checksPending) return "checks running";
+  if (s.draft) return "a draft";
+  if (s.threads.length) return "open threads";
+  if (s.reviewDecision !== "APPROVED") return "not approved yet";
+  return isGithubFlow(s) ? "GitHub can't merge it yet" : "Graphite can't merge it yet";
+}
+/**
+ * Approved PRs that Merge isn't offered on because a PR under them can't merge yet (a-click-on-merge-merges: a Merge
+ * row merges its whole downstack). Needs you leaves them out (the PR below is the agent's repair), so the panel's
+ * Pull requests card and Home's detail pane say it: "#143 approved · waits on #142 (checks failing)". An approved PR
+ * never goes quiet.
+ */
+export function heldMerges(w: Workspace, now = Date.now()): { pr: Pr; by: Pr; line: string }[] {
+  if (!w.enable_tracking || w.archived) return [];
+  const blocking = (pr: Pr) => w.prActions.some(a => prActionBlocks(a, [pr.key]));
+  const out: { pr: Pr; by: Pr; line: string }[] = [];
+  for (const pr of stackOrder(w.prs)) {
+    if (agentMerges(pr) || !mergeReady(pr, w, now) || !workflowReady(pr) || blocking(pr)) continue;
+    let below: Pr[]; try { below = downstack(w.prs, pr.key).slice(0, -1); } catch { continue; }
+    const by = below.find(p => !(mergeReady(p, w, now) && workflowReady(p) && !blocking(p)));
+    if (by) out.push({ pr, by, line: `#${pr.number} ${isGithubFlow(pr.snapshot) && pr.snapshot!.reviewDecision !== "APPROVED" ? "is ready" : "approved"} · waits on #${by.number} (${holdReason(by)})` });
+  }
+  return out;
+}
+
 export type HeadlinePart = { text: string; tone?: "warning" | "danger" | "success" };
 /** "2 of 6 PRs merged, 3 need you, 1 to fix": counts that say where the work stands. */
 export function headline(w: Workspace, now = Date.now()): HeadlinePart[] {

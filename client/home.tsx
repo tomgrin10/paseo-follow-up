@@ -17,6 +17,7 @@ import { SummaryLine } from "./about";
 import { ReferencesLine } from "./linked";
 import { bottomGap, bottomInset, Button, focusSoon, IconButton, space, text, type Theme } from "./kit";
 import { NeedsYouBlock } from "./needs-you";
+import { HeldMerges } from "./merge-button";
 import { PrSheet } from "./pr-sheet";
 import { QuestionSheet } from "./questions";
 import { Age, BadgeView, BRIEF_KEY, glyphColor, HomeList, OVERSEER_KEY, PrChipView, PrSummaryText, type OverseerRowState } from "./home-list";
@@ -458,6 +459,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
       {w && <NeedsYouBlock workspace={w} theme={theme} compact={compact} now={Date.now()} style={{ marginHorizontal: 0, marginTop: 0 }}
         brief={inBlock ? b : null} briefCard={inBlock && <BriefCard {...({ embedded: true, bare: true, item: { data: b }, theme, layout: { compact }, agentId: s.agentId, deps: deps.briefDeps } as unknown as Parameters<typeof BriefCard>[0])} />}
         actions={{ openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion, openAgent: () => openFull(s) }} />}
+      {w && <HeldMerges workspace={w} theme={theme} compact={compact} />}
       {actionBar}
       {laterBlock}
       {steps}
