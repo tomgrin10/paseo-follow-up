@@ -1,4 +1,4 @@
-import type { Batch, Workspace } from "./model";
+import type { ListBatch as Batch, ListWorkspace as Workspace } from "./list";
 import { completionCheck, CANCEL_CAUSES } from "./model";
 import { recoveryBatch } from "./follow-up";
 import { SETTLE_MS, sendDecision } from "./send-decision";

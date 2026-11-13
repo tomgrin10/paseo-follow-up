@@ -3,7 +3,7 @@ import { oneReading } from "./status";
 import type { Actor } from "./actor";
 import { ANY_HOOK_TEXT_PREFIXES } from "./message-sender";
 import { BATCH_PREFIXES, RECOVERY_TITLES } from "./legacy";
-import type { Workspace } from "./model";
+import type { ListWorkspace as Workspace } from "./list";
 import { answerMessage, awaitingSend, duplicateOpenQuestions, isOther, parseAnswerMessage, parseAnswersMessage } from "./questions";
 import { briefAnswer, briefAnswers, briefAsks, briefStep, reviewersBriefPr, shouldReopen, type Brief } from "./brief";
 import { flagHeadline } from "./headline";

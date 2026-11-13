@@ -4,7 +4,8 @@ import { activity, type Activity } from "./activity";
 import { followUpObligations, recoveryBatch } from "./follow-up";
 import { flagHeadline, HEADLINE_ICON, HEADLINE_TONE, HEADLINE_WORD, workspaceHeadline, withoutBriefQuestions, type Headline, type HeadlineKey, type HeadlineTone } from "./headline";
 import { rowTitle, sectionOf, type InboxRow } from "./inbox";
-import { completionCheck, settled, summary, type Pr, type Workspace } from "./model";
+import { completionCheck, settled, summary } from "./model";
+import type { ListPr as Pr, ListWorkspace as Workspace } from "./list";
 import { isOpen as questionOpen } from "./questions";
 import { taskSchedule } from "./task-trigger";
 import { freshPriorities, priorityRow, type Priority, type PrioritySourceKind } from "./priorities";
@@ -110,10 +111,10 @@ export function prChip(w: Workspace | undefined): PrChip | null {
   const checks = !s?.complete ? null
     : s.state === "MERGED" ? { text: "merged", tone: "merged" as const }
     : s.state === "CLOSED" ? { text: "closed", tone: "muted" as const }
-    : s.failedChecks.length ? { text: `✗ ${s.failedChecks.length}`, tone: "danger" as const }
+    : s.failedChecks?.length ? { text: `✗ ${s.failedChecks?.length}`, tone: "danger" as const }
     : s.checksPending ? { text: "running", tone: "muted" as const }
     : s.draft ? { text: "draft", tone: "muted" as const }
-    : s.threads.length ? { text: plural(s.threads.length, "thread"), tone: "warning" as const }
+    : s.threads?.length ? { text: plural(s.threads?.length, "thread"), tone: "warning" as const }
     : { text: "✓", tone: "success" as const };
   return { label: `#${pr.number}${more > 0 ? `+${more}` : ""}`, tone: prTone(pr), checks, url: s?.url ?? null };
 }

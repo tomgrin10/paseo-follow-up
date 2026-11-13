@@ -1,34 +1,34 @@
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRpc } from "@getpaseo/plugin/client";
 import { getRpc } from "../shared/contracts";
-import type { Workspace } from "../shared/model";
 import type { LiveStore } from "./live";
 import { workspaceKey } from "./keys";
 
 const none = () => () => {};
-const newer = (a: Workspace | null | undefined, b: Workspace | null | undefined): Workspace | null => {
-  if (!a) return b ?? null; if (!b) return a;
-  return Date.parse(b.updatedAt) > Date.parse(a.updatedAt) ? b : a;
-};
 
 /**
- * One workspace for the panel, the larger view and the pill (1.4.0). The client's shared live store already holds
- * every followed workspace and keeps it current (one diff poll for the whole client, nudged by agent changes), so a
- * surface paints from it at once. On open it makes one small read of its own workspace, never a poll; a mutation's
- * invalidation re-reads it once. Whichever copy is newer wins.
+ * One workspace in full for the panel, the larger view, the pill's popover and Home's open row (1.4.0; full since
+ * 2.0.1). The client's shared live store holds every followed workspace in its LIST form only (shared/list.ts,
+ * a-list-carries-only-what-lists-draw): what Home, the pill and the sidebar draw, without deployment evidence, task
+ * evidence or question background. A surface that draws detail makes one small read of its own workspace on open,
+ * never a poll; when the list copy changes after that read, it reads once more; a mutation's invalidation re-reads it.
  */
-export function useWorkspace(live: LiveStore | undefined, workspaceId: string, options: { enabled?: boolean; read?: boolean } = {}) {
+export function useWorkspace(live: LiveStore | undefined, workspaceId: string, options: { enabled?: boolean } = {}) {
   const enabled = (options.enabled ?? true) && !!workspaceId;
   const read = useRpc(getRpc);
-  useSyncExternalStore(live?.subscribe ?? none, live?.version ?? (() => 0), live?.version ?? (() => 0));
-  const cached = enabled ? live?.get(workspaceId) : undefined;
-  const query = useQuery({ queryKey: workspaceKey(workspaceId), queryFn: () => read({ workspaceId }), enabled: enabled && (options.read ?? true), staleTime: 15_000, refetchOnWindowFocus: false });
-  const workspace = enabled ? newer(cached, query.data?.workspace) : null;
+  const listedAt = useSyncExternalStore(live?.subscribe ?? none, () => enabled ? live?.get(workspaceId)?.updatedAt ?? null : null, () => null);
+  const query = useQuery({ queryKey: workspaceKey(workspaceId), queryFn: () => read({ workspaceId }), enabled, staleTime: 15_000, refetchOnWindowFocus: false });
+  const readAt = query.data?.workspace?.updatedAt ?? null;
+  const { refetch, isFetching } = query;
+  useEffect(() => {
+    if (enabled && listedAt && readAt && !isFetching && Date.parse(listedAt) > Date.parse(readAt)) void refetch();
+  }, [enabled, listedAt, readAt, isFetching, refetch]);
+  const workspace = enabled ? query.data?.workspace ?? null : null;
   return {
     workspace,
-    /** Nothing to show yet: no live copy and the read hasn't answered. */
-    pending: !workspace && query.isPending && enabled && (options.read ?? true),
+    /** Nothing to show yet: the read hasn't answered. */
+    pending: !workspace && query.isPending && enabled,
     error: query.error,
     loadError: query.data?.error ?? null,
     refetching: query.isRefetching,

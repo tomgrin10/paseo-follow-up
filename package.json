@@ -34,7 +34,7 @@
     "test:github-mode": "node scripts/check-github-mode.mjs",
     "test:native": "node scripts/check-native-tools.mjs --agents 10",
     "prepare": "node scripts/build.mjs",
-    "test:scale": "node scripts/scale-check.mjs --workspaces 140 --awake 5 --idle 90 --realistic --rss-budget 300 --idle-rss-budget 240 --cpu-budget 3 --request-budget 2",
+    "test:scale": "node scripts/scale-check.mjs --workspaces 140 --awake 5 --busy 180 --idle 90 --realistic --rss-budget 300 --idle-rss-budget 240 --cpu-budget 3 --request-budget 2",
     "check:notes": "node scripts/release-notes.mjs --check",
     "release:notes": "node scripts/release-notes.mjs",
     "test:feeds": "node scripts/screenshots.mjs --only feeds --out .feeds-check",

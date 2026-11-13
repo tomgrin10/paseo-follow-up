@@ -74,7 +74,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 
 | Subsystem | Files | Doc |
 | --- | --- | --- |
-| Worker entry, RPC wiring, session attach, teardown | `index.server.ts`, `shared/contracts.ts`, `server/feeds.ts`, `server/rpc-timing.ts`, `server/teardown.ts`, `server/daemon.ts`, `server/shared-file.ts`, `server/directory.ts`, `server/store.ts`, `server/list-cache.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
+| Worker entry, RPC wiring, session attach, teardown | `index.server.ts`, `shared/contracts.ts`, `server/feeds.ts`, `server/rpc-timing.ts`, `server/teardown.ts`, `server/daemon.ts`, `server/shared-file.ts`, `server/directory.ts`, `server/store.ts`, `server/cow.ts`, `server/json-file-store.ts`, `server/list-cache.ts`, `shared/list.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
 | Discovery, ownership, main agent | `server/discovery.ts`, `server/turn-events.ts`, `server/workspace-agent.ts`, `server/background-agents.ts`, `server/submissions.ts`, `server/pr-owner.ts`, `server/exclusions.ts`, `server/history-cache.ts`, `server/recovery-handoff.ts`, `server/recovery-config.ts`, `shared/settings.ts` | [workspaces](docs/workspaces.md) |
 | Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/send-decision.ts`, `shared/task-rows.ts`, `shared/task-status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/put-in-chat.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
 | Needs-you inbox, brief, Home | `server/inbox.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/needs-block.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts` | [needs-you](docs/needs-you.md) |
@@ -110,10 +110,12 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    - Background work (scans, auto-sends, AI jobs) waits while the governor reports the VM constrained
      (Paseo's cgroup working set ≥ 75 %, or pressure).
    - Extras stop at critical (≥ 85 %).
-   - `test:scale` budgets, on the realistic seed (`--realistic`: 140 workspaces, ~280 agents, a live-shaped 1.7 MB
-     state, a fake GitHub with live-sized PR bodies): **300 MB peak RSS** from the worker's start (VmHWM, so the
-     cold-start tick counts), **240 MB idle RSS** (the idle window's median), **3 % idle CPU**, **2 idle daemon
-     requests a minute**. Measured 2026-11-12 (two runs): peak 262–264 MB (a ~2 s cold-start tick that changes and
+   - `test:scale` budgets, on the realistic seed (`--realistic`: 140 workspaces, ~280 agents, a live-sized 1.9 MB
+     state with one 153-PR workspace, a live-shaped 120 KB inbox, a fake GitHub with live-sized PR bodies) after a
+     180 s **busy window** (awake agents end 20 turns a minute with live-sized timelines): **300 MB peak RSS** from the
+     worker's start (VmHWM, so the cold-start tick counts), **busy-window growth** under `BUSY_GROWTH_BUDGET_MB`
+     (`scripts/scale-budget.mjs`), **240 MB idle RSS** (the median of the idle window after it), **3 % idle CPU**, **2
+     idle daemon requests a minute**. Measured 2026-11-12 (two runs): peak 262–264 MB (a ~2 s cold-start tick that changes and
      validates every workspace once), idle 198–200 MB and flat, CPU 1.3–1.4 %, 1.3 requests a minute; the bare plugin
      process is ~120 MB. Headroom (~15 % peak, ~20 % idle) covers live's extras the seed lacks (archived agents, real
      transcripts, AI jobs) and CI noise. The old 240 MB budget was checked on an empty-workspace seed and only after
@@ -132,6 +134,18 @@ These are product rules. Each has tests, and breaking one is a bug even when the
      answer's delivery and every agent turn event write only the workspace they are about (`mutateWorkspace`,
      `server/turn-events.ts`), never walking all of them, and a whole-state `mutate` keeps unchanged workspaces'
      objects so a save validates only what changed. Guarded by `tests/send-clones.test.ts` and `test:scale`.
+   - **A mutation copies only what it changes** (`a-mutation-copies-only-what-it-changes`, which generalises
+     `a-send-never-clones-the-whole-state` to every store): a store's mutation works on a copy-on-access draft
+     (`server/cow.ts`), copies only the items it reads, keeps unchanged items' frozen objects, validates only what
+     changed and serialises once per real write. Every JSON writer in `server/` uses it or carries an exemption with a
+     reason. Guarded by `tests/inbox-copies.test.ts`, `tests/store-copies.test.ts` and `test:scale`'s busy window.
+   - **A running worker holds one daemon connection** (`a-running-worker-holds-one-daemon-connection`): the shared
+     connection's idle close is the engine's tick plus a named margin, so ticks reuse it. Guarded by
+     `tests/daemon-connection.test.ts`.
+   - **A list carries only what lists draw** (`a-list-carries-only-what-lists-draw`): `follow.list` and the
+     workspaces feed send each workspace's list form (`shared/list.ts`); detail is one `follow.get` away and agent
+     tools read the stored workspace. A full reply on the live-sized seed stays under `LIST_REPLY_BUDGET_KB`. Guarded
+     by `tests/list-reply-budget.test.ts` and the type check (list views take `ListWorkspace`).
    - **A send lists agents at most once per tick** (`a-send-lists-agents-at-most-once-per-tick`): sends read the tick's
      agent list (patched by events); no `fetch_agents` or `fetch_agent` per send or per turn event, and subagents at
      most once per agent per tick. Guarded by `tests/daemon-load.test.ts` and `test:scale`

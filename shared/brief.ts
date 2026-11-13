@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Pr, Workspace } from "./model";
+import type { ListPr as Pr, ListWorkspace as Workspace } from "./list";
 import { agentMergesKey } from "./pr-workflow";
 import { reviewersAsk } from "./reviewers";
 import { ANSWER_PREFIX, OTHER_LABEL, answerLabel, answerTitle, isOther, type Question } from "./questions";
@@ -345,15 +345,15 @@ export function prStates(w: Pick<Workspace, "prs"> | null | undefined): PrState[
 function prFactsOf(pr: Pr, event: string | null): PrState {
   const s = pr.snapshot!;
   const facts: BriefFact[] = [];
-  if (s.failedChecks.length) facts.push({ icon: "CircleX", label: `Checks failed · ${s.failedChecks.slice(0, 2).join(", ")}`, tone: "bad" });
+  if (s.failedChecks?.length) facts.push({ icon: "CircleX", label: `Checks failed · ${s.failedChecks.slice(0, 2).join(", ")}`, tone: "bad" });
   else if (s.checksPending) facts.push({ icon: "Clock", label: "Checks running", tone: "muted" });
   else facts.push({ icon: "CircleCheck", label: "Required checks pass", tone: "ok" });
   const approved = s.reviewDecision === "APPROVED";
   facts.push(s.conflict ? { icon: "TriangleAlert", label: "Conflicts with its base", tone: "warn" }
-    : s.threads.length ? { icon: "MessageSquare", label: `${s.threads.length} open thread${s.threads.length === 1 ? "" : "s"}`, tone: "warn" }
+    : s.threads?.length ? { icon: "MessageSquare", label: `${s.threads?.length} open thread${s.threads?.length === 1 ? "" : "s"}`, tone: "warn" }
     : { icon: approved ? "UserCheck" : "User", label: approved ? "Approved · no conflicts" : "Review required", tone: approved ? "ok" : "muted" });
   if (s.draft) facts.push({ icon: "FilePen", label: "Draft", tone: "muted" });
-  const mergeable = !s.draft && !s.conflict && !s.failedChecks.length && !s.checksPending && approved && !s.threads.length;
+  const mergeable = !s.draft && !s.conflict && !s.failedChecks?.length && !s.checksPending && approved && !s.threads?.length;
   return { key: pr.key, number: pr.number, url: s.url || null, title: s.title, facts, mergeable, event };
 }
 
@@ -554,7 +554,7 @@ export const undeliveredReason = (error: string | null | undefined): string => {
  *  - every question it points at is answered: answered, even if the stored brief hasn't caught up.
  * Decisions backed by a stored question show that question's live, full text and its recorded answer.
  */
-export function shownBrief(row: Brief, live: { brief: Brief | null } | undefined, questions: readonly Question[] = []): { brief: Brief; actionable: boolean } {
+export function shownBrief(row: Brief, live: { brief: Brief | null } | undefined, questions: readonly Pick<Question, "id" | "question" | "options" | "answer">[] = []): { brief: Brief; actionable: boolean } {
   const mine = live?.brief?.id === row.id ? live.brief! : row;
   const byId = new Map(questions.map(q => [q.id, q]));
   const decisions = mine.decisions.map(d => {

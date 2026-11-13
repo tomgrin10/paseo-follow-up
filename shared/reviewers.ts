@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Pr } from "./model";
+import type { ListPr as Pr } from "./list";
 
 /**
  * Who "Add reviewers" asks, per repository, set by the developer in Settings → Reviewers or remembered from the

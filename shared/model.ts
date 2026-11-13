@@ -5,6 +5,7 @@ import { communicationSchema, replyRecorded } from "./communication";
 import { taskTriggerSchema } from "./task-trigger";
 import { isOpen as questionOpen, questionSchema } from "./questions";
 import { artifactSchema, specSchema } from "./spec";
+import type { ListPr, ListWorkspace } from "./list";
 
 /** Why a main-agent turn ended canceled (shared/status.ts cancelCause). */
 export const CANCEL_CAUSES = ["stop", "replaced", "compaction", "reload", "closed"] as const;
@@ -36,7 +37,7 @@ export const snapshotSchema = z.object({
   /** What the repository allows, read with the PR (no extra request): merge methods, auto-merge and a merge queue. */
   repoMerge: z.object({ methods: z.array(z.enum(["squash", "merge", "rebase"])), preferred: z.enum(["squash", "merge", "rebase"]).nullable(), autoMerge: z.boolean(), mergeQueue: z.boolean() }).optional(),
 });
-const prObjectSchema = z.object({
+export const prObjectSchema = z.object({
   key: idSchema, repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/), number: z.number().int().positive(),
   stack: textSchema, parent: idSchema.nullable(), disposition: z.string().nullable(),
   snapshot: snapshotSchema.nullable(), error: z.string().nullable(),
@@ -181,7 +182,7 @@ export type Batch = z.infer<typeof batchSchema>;
 export type Workspace = z.infer<typeof workspaceSchema>;
 export type State = z.infer<typeof stateSchema>;
 
-export function settled(pr: Pr): boolean {
+export function settled(pr: ListPr): boolean {
   return pr.snapshot?.state === "MERGED" || (pr.snapshot?.state === "CLOSED" && !!pr.disposition);
 }
 /**
@@ -197,7 +198,7 @@ export type Blocker = { text: string; owner: BlockerOwner; contrary?: true };
 export type CompletionGate = { blockers: Blocker[]; unconfirmed: string[] };
 /** A completion check is the nudge to declare Done; it never blocks Done itself. */
 export const completionCheck = (b: Pick<Batch, "tasks">): boolean => b.tasks.length > 0 && b.tasks.every(t => t.kind === "completion");
-export function completionGate(w: Workspace, now = Date.now()): CompletionGate {
+export function completionGate(w: ListWorkspace, now = Date.now()): CompletionGate {
   const blockers: Blocker[] = [];
   const unconfirmed: string[] = [];
   const add = (owner: BlockerOwner, text: string, contrary?: true) => blockers.push(contrary ? { owner, text, contrary } : { owner, text });
@@ -228,19 +229,19 @@ export function completionGate(w: Workspace, now = Date.now()): CompletionGate {
   if (w.runtimeReason) add("wait", w.runtimeReason);
   return { blockers, unconfirmed };
 }
-export function completionBlockers(w: Workspace, now = Date.now()): string[] {
+export function completionBlockers(w: ListWorkspace, now = Date.now()): string[] {
   return completionGate(w, now).blockers.map(b => b.text);
 }
 /** Only new work or contrary evidence takes a Done back; waiting and observation gaps never do. */
-export function revokesDone(w: Workspace, now = Date.now()): boolean {
+export function revokesDone(w: ListWorkspace, now = Date.now()): boolean {
   return completionGate(w, now).blockers.some(b => b.owner !== "wait" || b.contrary);
 }
 export type Status = "active" | "handling" | "waiting" | "needs-you" | "done";
 /** The first working task whose recorded agent is running right now (invariant `a-task-only-says-working-when-its-agent-is`). */
-export function liveWorkingTask(w: Workspace): Obligation | undefined {
+export function liveWorkingTask<W extends ListWorkspace>(w: W): W["obligations"][number] | undefined {
   return followUpObligations(w).find(o => o.status === "working" && !!o.workingAgentId && w.taskAgents?.[o.workingAgentId]?.state === "working");
 }
-export function summary(w: Workspace, now = Date.now()): { status: Status; label: string; reason: string } {
+export function summary(w: ListWorkspace, now = Date.now()): { status: Status; label: string; reason: string } {
   const obligations = followUpObligations(w);
   if (w.hold) return { status: "needs-you", label: "Needs you", reason: w.hold };
   const blocked = w.batches.find(b => !recoveryBatch(b) && ["blocked", "uncertain"].includes(b.state) && !(w.completion && completionCheck(b)));

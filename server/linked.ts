@@ -2,33 +2,18 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { JsonFileStore } from "./json-file-store";
 import { promisify } from "node:util";
 import { liveSources, mcpproxyText } from "./about";
-import { LIMITS, LINKED_FULL, TEAMS_TTL_MS, applyCheck, classifyLink, emptyWorkspaceLinks, excludeItem, linkedView, noteCandidate, noteRefs, setTeams, dueChecks, emptyLinkedFile, linkedFileSchema, linkedSearchIndex, migrateAboutLinks, takeBudget, teamOf, toneOf, unexcludeItem, upsertItem, type LinearIssueFacts, type LinkedFile, type LinkedItem, type LinkRef, type LinkedView } from "../shared/linked";
+import { LIMITS, LINKED_FULL, TEAMS_TTL_MS, applyCheck, classifyLink, emptyWorkspaceLinks, excludeItem, linkedView, noteCandidate, noteRefs, setTeams, dueChecks, emptyLinkedFile, linkedFileSchema, workspaceLinksSchema, linkedSearchIndex, migrateAboutLinks, takeBudget, teamOf, toneOf, unexcludeItem, upsertItem, type LinearIssueFacts, type LinkedFile, type LinkedItem, type LinkRef, type LinkedView } from "../shared/linked";
 
 /**
  * linked.json beside state.json (see shared/linked.ts). Read from disk on each use and never held whole in the worker:
  * it is small and read rarely (a panel open, one drain per observe cycle). Writes are serialized and atomic.
  */
-export class LinkedStore {
-  private tail: Promise<unknown> = Promise.resolve();
-  constructor(private directory: string) {}
-  private get path() { return join(this.directory, "linked.json"); }
-  async read(): Promise<LinkedFile> {
-    try { return linkedFileSchema.parse(JSON.parse(await readFile(this.path, "utf8"))); } catch { return emptyLinkedFile(); }
-  }
-  mutate<T>(fn: (file: LinkedFile) => T): Promise<T> {
-    const next = this.tail.then(async () => {
-      const file = await this.read();
-      const result = fn(file);
-      await mkdir(this.directory, { recursive: true, mode: 0o700 });
-      const temporary = `${this.path}.${randomUUID()}`;
-      await writeFile(temporary, JSON.stringify(file), { mode: 0o600 });
-      await rename(temporary, this.path);
-      return result;
-    });
-    this.tail = next.catch(() => undefined);
-    return next;
+export class LinkedStore extends JsonFileStore<LinkedFile> {
+  constructor(directory: string) {
+    super({ path: join(directory, "linked.json"), schema: linkedFileSchema as never, empty: emptyLinkedFile, collections: { workspaces: { kind: "record", item: workspaceLinksSchema } } });
   }
 }
 

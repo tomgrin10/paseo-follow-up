@@ -1,5 +1,5 @@
 import type { HomeGroupId, HomeModel, PaseoWorkspaceLite } from "./home";
-import type { Workspace } from "./model";
+import type { ArchivedListWorkspace, ListWorkspace as Workspace } from "./list";
 import { linkedSearchText, type LinkedSearchItem } from "./linked-display";
 
 /**
@@ -219,12 +219,12 @@ export type AgentLite = { id: string; title: string | null; workspaceId: string 
  * One document per Home row, plus Follow-up's archived workspaces. A workspace row carries every agent title in
  * that workspace; an agent row (one of several roots) carries its own title too.
  */
-export function homeSearchDocs(input: { model: HomeModel; paseo: PaseoWorkspaceLite[]; tracked: Workspace[]; archived?: Workspace[]; agents?: AgentLite[]; linked?: Record<string, readonly LinkedSearchItem[]> }): SearchDoc[] {
+export function homeSearchDocs(input: { model: HomeModel; paseo: PaseoWorkspaceLite[]; tracked: Workspace[]; archived?: ArchivedListWorkspace[]; agents?: AgentLite[]; linked?: Record<string, readonly LinkedSearchItem[]> }): SearchDoc[] {
   const paseo = new Map(input.paseo.map(p => [p.id, p]));
   const tracked = new Map(input.tracked.map(w => [w.id, w]));
   const agentsBy = new Map<string, string[]>();
   for (const a of input.agents ?? []) if (a.workspaceId && a.title) agentsBy.set(a.workspaceId, [...agentsBy.get(a.workspaceId) ?? [], a.title]);
-  const workspaceFields = (id: string | null, w: Workspace | undefined): SearchDoc["fields"] => {
+  const workspaceFields = (id: string | null, w: Pick<Workspace | ArchivedListWorkspace, "prs"> | undefined): SearchDoc["fields"] => {
     if (!id) return [];
     const p = paseo.get(id);
     const out: SearchDoc["fields"] = [];

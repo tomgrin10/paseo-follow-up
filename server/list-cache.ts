@@ -1,10 +1,15 @@
 import type { State, Workspace } from "../shared/model";
+import { listEntry, type ListEntry } from "../shared/list";
 
 /**
  * Diffed answers for follow.list (1.3.0-beta.4). Clients send the revision they hold and get back only the
  * workspaces that changed since then, plus the ids that left the list, instead of every tracked workspace's full
  * state on every poll. Work is done once per saved-state change (the store hands out the same object until a
  * mutation), not once per client or poll.
+ *
+ * Each workspace goes out in its list form (shared/list.ts, a-list-carries-only-what-lists-draw). The store keeps an
+ * unchanged workspace's saved object across mutations (a-mutation-copies-only-what-it-changes), so the list form and
+ * its JSON are computed once per changed workspace, not for every workspace on every change.
  */
 export class ListCache {
   private state: State | null = null;
@@ -13,20 +18,25 @@ export class ListCache {
   private json = new Map<string, string>();
   private changedAt = new Map<string, number>();
   private removedAt = new Map<string, number>();
-  private current: Workspace[] = [];
+  private current: ListEntry[] = [];
+  /** The list form and its JSON per saved workspace object; a workspace no longer saved drops out with its object. */
+  private forms = new WeakMap<Workspace, { entry: ListEntry; text: string }>();
   /** The oldest revision a diff can be computed from; older clients get the full list. */
   private floor = this.revision;
   constructor(private select: (state: State) => Workspace[] = state => state.workspaces.filter(w => w.enable_tracking)) {}
   private update(state: State): void {
     if (state === this.state) return;
     this.state = state;
-    const next = this.select(state);
+    const next: ListEntry[] = [];
     const seen = new Set<string>();
     let changed = false;
     const revision = this.revision + 1;
-    for (const w of next) {
+    for (const w of this.select(state)) {
+      let form = this.forms.get(w);
+      if (!form) { const entry = listEntry(w); form = { entry, text: JSON.stringify(entry) }; this.forms.set(w, form); }
+      const text = form.text;
+      next.push(form.entry);
       seen.add(w.id);
-      const text = JSON.stringify(w);
       if (this.json.get(w.id) !== text) { this.json.set(w.id, text); this.changedAt.set(w.id, revision); this.removedAt.delete(w.id); changed = true; }
     }
     for (const id of [...this.json.keys()]) if (!seen.has(id)) { this.json.delete(id); this.changedAt.delete(id); this.removedAt.set(id, revision); changed = true; }
@@ -36,7 +46,7 @@ export class ListCache {
     if (changed) this.revision = revision;
   }
   /** Everything when `since` is absent, unknown or too old; otherwise only what changed after it. */
-  answer(state: State, since?: number): { revision: number; full: boolean; workspaces: Workspace[]; removed: string[] } {
+  answer(state: State, since?: number): { revision: number; full: boolean; workspaces: ListEntry[]; removed: string[] } {
     this.update(state);
     if (since === undefined || since > this.revision || since < this.floor) return { revision: this.revision, full: true, workspaces: this.current, removed: [] };
     return {

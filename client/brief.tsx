@@ -14,7 +14,8 @@ const word = (kind: Brief["kind"]) => HEADLINE_WORD[briefKey(kind)];
 import { answerQuestionRpc, briefActionRpc, browserStatusRpc, inboxBriefRpc } from "../shared/contracts";
 import { errorText, mootNote } from "../shared/errors";
 import { OTHER, OTHER_LABEL, isOther } from "../shared/questions";
-import type { Workspace } from "../shared/model";
+import type { ListWorkspace } from "../shared/list";
+import { useWorkspace } from "./workspace-data";
 import { SubmitScope, submitHint, text, useNow } from "./kit";
 import { RichText } from "./rich-text";
 import { cardStore } from "./card-store";
@@ -30,7 +31,8 @@ export type BriefDeps = {
   signOff(agentId: string): void;
   openNext(from: string): void;
   openAgent(agentId: string): void;
-  workspace(id: string): Workspace | undefined;
+  /** The workspace's list form (shared/list.ts); the PR sheet reads the full one itself. */
+  workspace(id: string): ListWorkspace | undefined;
   /** Opens Follow-up's panel for a workspace whose record this client hasn't loaded yet. */
   openPanel(workspaceId: string): void;
   /** Done's Undo window, so the composer pill says Done (and its Undo cancels the same toast) until it ends. */
@@ -375,6 +377,8 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   const notes = useNotes(b.id);
   const notesOpen = useNotesOpen(b.id);
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" } | null>(null);
+  // The PR sheet draws review and deploy detail the list form leaves out: one read of the full workspace while it's open.
+  const detail = useWorkspace(undefined, row.workspaceId ?? "", { enabled: !!sheet });
   const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), enabled: !!sheet, staleTime: 0, refetchOnMount: "always" });
   // Send again on an undelivered answer: the same answerId, so the server resends that answer and never a second one.
   const resend = () => {
@@ -525,7 +529,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
       <Icon name="Info" size={12} color={c.foregroundMuted} />
       <Text style={{ flex: 1, color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{b.sourceLine}</Text>
     </View>}
-    {workspace && sheet && <PrSheet workspace={workspace} prKey={sheet.key} intent={sheet.intent} theme={theme} compact={compact} browserReady={browser.data?.ready ?? false} onClose={() => setSheet(null)} />}
+    {detail.workspace && sheet && <PrSheet workspace={detail.workspace} prKey={sheet.key} intent={sheet.intent} theme={theme} compact={compact} browserReady={browser.data?.ready ?? false} onClose={() => setSheet(null)} />}
   </View>;
 }
 

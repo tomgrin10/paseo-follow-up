@@ -5,7 +5,7 @@ import type { PluginButtonIconProps, PluginClientContext, PluginSidebarItemProps
 import { Icon, SidebarRow } from "@getpaseo/plugin/client/ui";
 import { listRpc, workspacesFeed } from "../shared/contracts";
 import { openFeed, type Feed } from "./feeds";
-import type { Workspace } from "../shared/model";
+import { isArchivedEntry, type ArchivedListWorkspace, type ListEntry, type ListWorkspace } from "../shared/list";
 import { activeNeeds, needsYou } from "../shared/attention";
 import { useSidebarViewActive } from "./inbox";
 import { homeCounts } from "../shared/home";
@@ -19,9 +19,10 @@ const POLL_MS = 15_000;
 
 /** One shared poll of tracked workspaces for the pills, header-button dots and the sidebar count. */
 export function createLiveStore(client: PluginClientContext) {
-  let workspaces = new Map<string, Workspace>();
-  /** Archived ones, only for search ("Archived" at the bottom of results). */
-  let archived: Workspace[] = [];
+  /** Each followed workspace in its list form (shared/list.ts); a surface that draws detail reads it with follow.get. */
+  let workspaces = new Map<string, ListWorkspace>();
+  /** Archived ones, only for search ("Archived" at the bottom of results): name and PRs only. */
+  let archived: ArchivedListWorkspace[] = [];
   let version = 0;
   const listeners = new Set<() => void>();
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -29,19 +30,19 @@ export function createLiveStore(client: PluginClientContext) {
   let stopped = false;
   /** The worker's list revision this store holds; each poll asks only for what changed since (1.3.0-beta.4). */
   let revision: number | undefined;
-  let all = new Map<string, Workspace>();
+  let all = new Map<string, ListEntry>();
   const emit = () => { version++; for (const l of listeners) l(); };
   let feed: Feed | null = null;
   const pushed = () => feed?.live === true;
-  const apply = (result: { full?: boolean; workspaces: Workspace[]; removed?: string[]; revision?: number }) => {
+  const apply = (result: { full?: boolean; workspaces: ListEntry[]; removed?: string[]; revision?: number }) => {
       const diff = result.full === false;
       if (diff && !result.workspaces.length && !result.removed?.length) return;
-      const next = diff ? new Map(all) : new Map<string, Workspace>();
+      const next = diff ? new Map(all) : new Map<string, ListEntry>();
       for (const id of result.removed ?? []) next.delete(id);
       for (const w of result.workspaces) next.set(w.id, w);
       all = next; revision = result.revision;
-      workspaces = new Map([...all.values()].filter(w => !w.archived).map(w => [w.id, w]));
-      archived = [...all.values()].filter(w => w.archived);
+      workspaces = new Map([...all.values()].filter((w): w is ListWorkspace => !isArchivedEntry(w)).map(w => [w.id, w]));
+      archived = [...all.values()].filter(isArchivedEntry);
       emit();
   };
   // Paseo 0.15: poll the revision diff. 0.16: the worker pushes the same diff (follow.workspaces-feed), and nothing polls.

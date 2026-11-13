@@ -35,6 +35,7 @@ import { useRowMenu } from "./row-actions";
 import { laterChoices } from "../shared/row-menu";
 import { RichText } from "./rich-text";
 import { ToastHost, useQuestionOpener } from "./toasts";
+import { useWorkspace } from "./workspace-data";
 
 export const HOME_SCREEN = "follow-up";
 
@@ -289,7 +290,8 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
   const toast = useToast();
   const { inbox, live } = deps.sources;
   const row = useInbox(inbox, () => s.agentId ? inbox.rows().find(r => r.agentId === s.agentId) ?? null : null);
-  const w = useSyncExternalStore(live.subscribe, () => s.workspaceId ? live.get(s.workspaceId) : undefined, () => undefined);
+  // The open row draws its workspace's needs, questions and PR sheet: the full workspace, read once (useWorkspace).
+  const { workspace: w } = useWorkspace(live, s.workspaceId ?? "");
   const agent = useAgentLive(s.agentId);
   const readBrief = useRpc(inboxBriefRpc);
   const control = useRpc(controlRpc);

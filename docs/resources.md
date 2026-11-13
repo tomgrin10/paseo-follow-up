@@ -76,4 +76,4 @@ loaded for an hour.
 - It never asks ZeroSub to refresh or switch.
 - When Smart Session isn't installed, the meters are hidden.
 
-Tests: `tests/governor.test.ts`, `tests/incremental.test.ts`, `tests/list-cache.test.ts`, `tests/closed-sessions.test.ts`.
+Tests: `tests/governor.test.ts`, `tests/incremental.test.ts`, `tests/list-cache.test.ts`, `tests/list-reply-budget.test.ts`, `tests/closed-sessions.test.ts`.

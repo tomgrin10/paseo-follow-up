@@ -1,5 +1,6 @@
 import { batchView, FINISH_LINE, perSnapshot, stuckLine, unconfirmedRefs } from "./status";
-import { blockedOnDeveloper, completionCheck, liveWorkingTask, statusKnown, summary, type Batch, type Pr, type Task, type Workspace, type Status } from "./model";
+import { blockedOnDeveloper, completionCheck, liveWorkingTask, statusKnown, summary, type Task, type Status } from "./model";
+import type { ListBatch as Batch, ListPr as Pr, ListWorkspace as Workspace } from "./list";
 import { idleReason, NO_PROGRESS_CAP } from "./send-decision";
 import { workingLine } from "./task-status";
 import { followUpObligations, recoveryBatch } from "./follow-up";
@@ -17,8 +18,8 @@ export function prTone(pr: Pr): PrTone {
   if (!s?.complete) return "unknown";
   if (s.state === "MERGED") return "merged";
   if (s.state === "CLOSED") return "closed";
-  if (s.conflict || s.failedChecks.length) return "danger";
-  if (s.threads.length || s.reviewDecision === "CHANGES_REQUESTED" || s.otherFailedChecks?.length) return "warning";
+  if (s.conflict || s.failedChecks?.length) return "danger";
+  if (s.threads?.length || s.reviewDecision === "CHANGES_REQUESTED" || s.otherFailedChecks?.length) return "warning";
   if (s.draft) return "draft";
   return s.reviewDecision === "APPROVED" ? "approved" : "pending";
 }
@@ -26,7 +27,7 @@ export function prTone(pr: Pr): PrTone {
 /** PRs that still need repairs from the agent: conflicts, required checks or review feedback. */
 export function needsRepair(pr: Pr): boolean {
   const s = pr.snapshot;
-  return !pr.error && !!s?.complete && s.state === "OPEN" && !s.draft && (s.conflict || s.failedChecks.length > 0 || s.threads.length > 0 || s.reviewDecision === "CHANGES_REQUESTED");
+  return !pr.error && !!s?.complete && s.state === "OPEN" && !s.draft && (s.conflict || !!s.failedChecks?.length || !!s.threads?.length || s.reviewDecision === "CHANGES_REQUESTED");
 }
 
 function depth(prs: Pr[], p: Pr, seen = new Set<string>()): number {
@@ -36,7 +37,7 @@ function depth(prs: Pr[], p: Pr, seen = new Set<string>()): number {
   return parent ? depth(prs, parent, seen) + 1 : 0;
 }
 /** Parents before children, then by number: the order a stack merges in. */
-export function stackOrder(prs: Pr[]): Pr[] {
+export function stackOrder<P extends Pr>(prs: P[]): P[] {
   return [...prs].sort((a, b) => depth(prs, a) - depth(prs, b) || a.number - b.number);
 }
 
@@ -64,7 +65,7 @@ export function mergeReady(pr: Pr, w: Pick<Workspace, "prActions">, now = Date.n
   const recentlySubmitted = w.prActions.some(a => a.kind === "merge" && a.state === "submitted" && a.heads[pr.key] === s?.head && now - Date.parse(a.createdAt) < 30_000);
   // GitHub mode: the same verdict Needs you and the merge plan use, so the sheet never offers Merge on a draft, conflict or red check.
   if (isGithubFlow(s)) return mergeBlockers(pr).length === 0 && !recentlySubmitted;
-  return !pr.error && !!s?.complete && s.state === "OPEN" && s.reviewDecision === "APPROVED" && !s.draft && !s.conflict && !s.failedChecks.length && !s.checksPending && !queued && !recentlySubmitted;
+  return !pr.error && !!s?.complete && s.state === "OPEN" && s.reviewDecision === "APPROVED" && !s.draft && !s.conflict && !s.failedChecks?.length && !s.checksPending && !queued && !recentlySubmitted;
 }
 export const mergeQueued = (pr: Pr) => isGithubFlow(pr.snapshot) ? !!pr.snapshot?.inMergeQueue : QUEUED.includes(pr.snapshot?.graphiteMergeStatus ?? "");
 /** Whether the workflow that ships this PR says it can merge now: Graphite's readiness, or GitHub's own verdict. */

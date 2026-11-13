@@ -1,4 +1,6 @@
-import type { Batch, Obligation, Task, Workspace } from "./model";
+import type { Task } from "./model";
+import type { Workspace as FullWorkspace } from "./model";
+import type { ListBatch as Batch, ListObligation as Obligation, ListWorkspace as Workspace } from "./list";
 import { completionCheck } from "./model";
 import { recoveryBatch } from "./follow-up";
 import { sendDecision } from "./send-decision";
@@ -95,7 +97,7 @@ export function repairRows(w: Workspace, doneLimit = 20): { open: RepairRow[]; d
 }
 
 /** The next message for workspace_status (agent parity with Preview): who it goes to, its tasks, exact text, and when and why. */
-export function nextMessageInfo(w: Workspace, now: number): { to: string; tasks: string[]; text: string; reason: string; eta: string | null } | null {
+export function nextMessageInfo(w: FullWorkspace, now: number): { to: string; tasks: string[]; text: string; reason: string; eta: string | null } | null {
   const pending = pendingMessage(w);
   if (!pending) return null;
   const d = sendDecision(w, now, { batch: pending });

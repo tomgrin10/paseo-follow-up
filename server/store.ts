@@ -3,6 +3,8 @@ import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { stateSchema, workspaceSchema, type State, type Workspace } from "../shared/model";
+import { sameJson, deepFreeze, copyOnAccess, detach } from "./cow";
+export { sameJson, deepFreeze } from "./cow";
 
 /**
  * Follow-up's saved state. 1.3.0-beta.4: the state lives in memory once loaded, and writes to state.json are
@@ -65,14 +67,14 @@ export class Store {
   async read(): Promise<State> { return structuredClone(await this.load()); }
   async mutate<T>(work: (state: State) => T | Promise<T>): Promise<T> {
     return this.apply(async current => {
-      const draft = structuredClone(current);
+      // a-mutation-copies-only-what-it-changes (server/cow.ts): the draft copies a workspace or field only when the
+      // mutation reads it, and an unchanged workspace keeps its saved object, so the next save validates only the changed
+      // ones and the engine still tells untouched workspaces by identity (a-send-never-clones-the-whole-state: 2026-11-13,
+      // a whole-state mutate re-validated all 140 workspaces on the next save, ~47 MB per send window).
+      const { draft, finish } = copyOnAccess(current, { workspaces: { kind: "array", id: (w: Workspace) => w.id } });
       const value = await work(draft);
-      // An unchanged workspace gets its saved object back, so the next save validates only the changed ones and the
-      // engine still tells untouched workspaces by identity (a-send-never-clones-the-whole-state: 2026-11-13, a
-      // whole-state mutate re-validated all 140 workspaces on the next save, ~47 MB per send window).
-      const saved = new Map(current.workspaces.map(w => [w.id, w]));
-      draft.workspaces = draft.workspaces.map(w => { const was = saved.get(w.id); return was && sameJson(w, was) ? was : w; });
-      return { value, next: sameJson(draft, current) ? null : draft, volatile: sameIgnoringReadTimes(draft, current) };
+      const { next, changed } = finish();
+      return { value, next: changed ? next : null, volatile: changed && sameIgnoringReadTimes(next, current) };
     });
   }
   /**
@@ -112,7 +114,7 @@ export class Store {
         else { this.state = next; this.schedule(!!volatile); }
         await this.onChanged(this.state).catch(() => undefined);
       }
-      return structuredClone(value);
+      return detach(value);
     });
     this.tail = next.catch(() => undefined);
     return next;
@@ -247,35 +249,6 @@ export class Store {
     }
     return async () => { if (await readFile(path, "utf8").catch(() => "") === token) await unlink(path); };
   }
-}
-
-/**
- * Whether two values would save the same: JSON-equal, ignoring key order and undefined properties (the schema
- * normalizes both). Anything else (a Date, a Map) counts as different, so a real change is never skipped.
- */
-export function sameJson(a: unknown, b: unknown, ignore?: ReadonlySet<string>): boolean {
-  if (a === b) return true;
-  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
-  if (Array.isArray(a)) {
-    if (!Array.isArray(b) || a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) if (!sameJson(a[i], b[i], ignore)) return false;
-    return true;
-  }
-  if (Array.isArray(b) || Object.getPrototypeOf(a) !== Object.prototype || Object.getPrototypeOf(b) !== Object.prototype) return false;
-  const x = a as Record<string, unknown>, y = b as Record<string, unknown>;
-  let keys = 0;
-  for (const key in x) { if (x[key] === undefined || ignore?.has(key)) continue; keys++; if (!Object.hasOwn(y, key) || !sameJson(x[key], y[key], ignore)) return false; }
-  for (const key in y) if (y[key] !== undefined && !ignore?.has(key)) keys--;
-  return keys === 0;
-}
-
-/** Freezes a value and everything in it, so a caller that mutates a shared snapshot throws (strict mode). */
-export function deepFreeze<T>(value: T): T {
-  if (value && typeof value === "object" && !Object.isFrozen(value)) {
-    Object.freeze(value);
-    for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child);
-  }
-  return value;
 }
 
 /**

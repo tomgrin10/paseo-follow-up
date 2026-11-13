@@ -1,0 +1,1 @@
+- Home and the pill load faster and Follow-up uses less memory: lists now carry only what they show, and a workspace's full detail loads when you open it.

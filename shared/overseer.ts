@@ -2,7 +2,7 @@ import { parseAnswersMessage } from "./questions";
 import { z } from "zod";
 import { HOME_GROUPS, buildHome, type HomeGroupId, type PaseoWorkspaceLite, type Workstream } from "./home";
 import type { InboxRow } from "./inbox";
-import type { Workspace } from "./model";
+import type { ListWorkspace as Workspace } from "./list";
 import type { Priority } from "./priorities";
 
 /**
@@ -81,7 +81,7 @@ export const linearKeys = (...texts: (string | null | undefined)[]): string[] =>
 const prChecks = (p: Workspace["prs"][number]): WorkstreamPr["checks"] => {
   const s = p.snapshot;
   if (!s?.complete) return "unknown";
-  return s.failedChecks.length ? "failed" : s.checksPending ? "pending" : "passed";
+  return s.failedChecks?.length ? "failed" : s.checksPending ? "pending" : "passed";
 };
 
 /**
@@ -122,7 +122,7 @@ function resting(r: WorkstreamRow, w: Workspace | undefined, now: number, window
 }
 
 function rowOf(s: Workstream, w: Workspace | undefined, p: PaseoWorkspaceLite | undefined, status: string | null): WorkstreamRow {
-  const prs = (w?.prs ?? []).map(pr => ({ key: pr.key, number: pr.number, state: pr.snapshot?.state ?? "unknown", checks: prChecks(pr), threads: pr.snapshot?.threads.length ?? 0, url: pr.snapshot?.url ?? null }));
+  const prs = (w?.prs ?? []).map(pr => ({ key: pr.key, number: pr.number, state: pr.snapshot?.state ?? "unknown", checks: prChecks(pr), threads: pr.snapshot?.threads?.length ?? 0, url: pr.snapshot?.url ?? null }));
   const needs = s.group === "needs";
   return {
     workspaceId: s.workspaceId!, key: s.key, title: s.title, project: s.project, branch: p?.branch ?? null, group: s.group,

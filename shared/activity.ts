@@ -1,4 +1,4 @@
-import type { Workspace } from "./model";
+import type { ListWorkspace as Workspace } from "./list";
 import { recoveryBatch } from "./follow-up";
 import { shortRefs } from "./attention";
 import { isGithubFlow } from "./pr-actions";

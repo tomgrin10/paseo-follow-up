@@ -12,6 +12,7 @@ import { z } from "zod";
 import { inboxRowSchema } from "./inbox";
 import { briefSchema } from "./brief";
 import { idSchema, textSchema, workspaceSchema } from "./model";
+import { listEntrySchema } from "./list";
 import { communicationSchema } from "./communication";
 import { taskTriggerSchema } from "./task-trigger";
 import { QUESTION_MODES, questionSchema } from "./questions";
@@ -31,7 +32,7 @@ const agentCommunicationSchema = z.strictObject({
  * Tracked workspaces. 1.3.0-beta.4: pass the `revision` you hold as `since` to get only what changed (`full` false,
  * plus `removed` ids). Without it, or when it's too old, the answer is the full list.
  */
-export const listRpc = defineRpc({ name: "follow.list", input: z.object({ since: z.number().optional() }), output: z.object({ workspaces: z.array(workspaceSchema), error: z.string().nullable(), revision: z.number().optional(), full: z.boolean().optional(), removed: z.array(z.string()).optional() }) });
+export const listRpc = defineRpc({ name: "follow.list", input: z.object({ since: z.number().optional() }), output: z.object({ workspaces: z.array(listEntrySchema), error: z.string().nullable(), revision: z.number().optional(), full: z.boolean().optional(), removed: z.array(z.string()).optional() }) });
 export const getRpc = defineRpc({ name: "follow.get", input: z.object({ workspaceId: idSchema }), output: z.object({ workspace: workspaceSchema.nullable(), error: z.string().nullable() }) });
 /** `prWorkflow` (1.4.0-beta.14): how this workspace ships PRs (graphite | github) and its review-fix command (null: built-in steps). */
 export const agentStatusRpc = defineRpc({ name: "follow.agent-status", input: z.strictObject({ agentId: idSchema, detail: z.enum(["summary", "full"]).optional() }), output: workspaceSchema.extend({ prWorkflow: z.object({ mode: z.enum(["graphite", "github"]), reviewFix: z.string().nullable() }).optional(), /** The next message: recipient, tasks, exact text, and when and why it goes (Preview's agent form). */ nextMessageInfo: z.object({ to: z.string(), tasks: z.array(z.string()), text: z.string(), reason: z.string(), eta: z.string().nullable() }).nullable().optional() }) });
@@ -278,7 +279,7 @@ export const createdItemsRpc = defineRpc({ name: "follow.created-items",
  */
 const subscription = <I extends z.ZodType, E extends z.ZodType>(name: string, input: I, event: E): PluginSubscriptionContract<I, E> => ({ name, input, event });
 export const workspacesFeed = subscription("follow.workspaces-feed", z.object({ since: z.number().optional() }),
-  z.object({ revision: z.number(), full: z.boolean(), workspaces: z.array(workspaceSchema), removed: z.array(z.string()), error: z.string().nullable() }));
+  z.object({ revision: z.number(), full: z.boolean(), workspaces: z.array(listEntrySchema), removed: z.array(z.string()), error: z.string().nullable() }));
 export const inboxFeed = subscription("follow.inbox-feed", z.object({}), inboxListRpc.output);
 /** Home's extras: priorities, the ranker, the Overseer and the usage meters (without the worker's live resources). */
 export const homeFeed = subscription("follow.home-feed", z.object({}), z.object({

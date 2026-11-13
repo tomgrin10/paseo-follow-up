@@ -16,6 +16,7 @@ import { fromAccountRows, fromBudget, fromSubscriptions, meters, meterText, tone
 import { UsageReader } from "../server/usage";
 import { AgentActions } from "../server/agent-actions";
 import { pr, snapshot, workspace } from "./fixtures";
+import { isArchivedEntry, listEntry } from "../shared/list";
 
 const NOW = Date.parse("2026-11-09T09:50:00.000Z");
 const at = (minutesAgo: number) => new Date(NOW - minutesAgo * 60_000).toISOString();
@@ -77,7 +78,7 @@ function fixture() {
   const paseo = [lite("okta", { name: "Okta SCIM sync", branch: "feat/okta-scim" }), lite("vanta", { name: "Fix HER-1312 Vanta custom status approvals", branch: "tom/her-1312-vanta" }),
     lite("billing", { name: "Billing cleanup", branch: "chore/billing" }), lite("ramp", { name: "Ramp export", branch: "feat/okta-adjacent", project: "ledger" })];
   const model = buildHome({ rows: [], tracked, paseo, now: NOW });
-  const archived = [ws("gone", { title: "Okta legacy connector", archived: true })];
+  const archived = [listEntry(ws("gone", { title: "Okta legacy connector", archived: true }))].filter(isArchivedEntry);
   const docs = homeSearchDocs({ model, paseo, tracked, archived, agents: [{ id: "sub", title: "Write the SAML adapter", workspaceId: "billing" }] });
   return { index: indexDocs(docs), model };
 }
