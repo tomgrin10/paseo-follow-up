@@ -26,7 +26,8 @@ import { promisify } from "node:util";
 import { openSync, existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { tmpdir, hostname } from "node:os";
+import { tmpdir } from "node:os";
+import { assertNoRealNames } from "./real-names.mjs";
 import { createServer } from "node:net";
 import { createRequire } from "node:module";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
@@ -123,7 +124,7 @@ function pulls() {
     160: { title: "Welcome email template", state: "OPEN", author: "dana", conflict: true, threads: 2, reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
     170: { title: "Sign webhook payloads", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
     181: { repo: "example/web", title: "Dark mode color tokens", state: "MERGED", author: "dana", checks: [ok("test"), ok("lint")] },
-    // The README hero's other groups (2.0.x): Waiting, Fixing, Later.
+    // The README lead shot's other groups (2.0.x): Waiting, Fixing, Later.
     188: { title: "Render invoices as PDF", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [failed("test"), ok("lint"), ok("e2e")] },
     191: { title: "Team invite links", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [running("test"), ok("lint")] },
     195: { title: "Add the SAML provider", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
@@ -262,7 +263,7 @@ const WORKSPACES = [
       rpc("follow.needs-you", { kind: "decision", ask: "Pick whether declined cards retry", questions: ["Q1"] }),
       { gate: "billing" },
     ], worked: 4 },
-  // The README hero's other groups: Waiting (signed off, PRs out), Later (snoozed), Fixing (a repair batch sent and
+  // The README lead shot's other groups: Waiting (signed off, PRs out), Later (snoozed), Fixing (a repair batch sent and
   // the agent on it). `after` runs once every PR snapshot is in.
   { key: "usage", project: "web", after: "signoff", title: "Usage dashboard", minute: 8, prompt: "WEB-30: charts for the usage dashboard. Keep the PR a draft until the design review.",
     steps: [rpc("follow.enroll", { goal: "WEB-30 Usage dashboard charts" }), rpc("follow.register-pr", { repo: "example/web", number: 212, stack: "Usage dashboard" }),
@@ -494,13 +495,10 @@ const openHome = (page, { keepDialogs = false } = {}) => openHomeAt(page, { orig
 /**
  * Renders go into this public repo's PRs and README. harnessEnv pins every harness process's hostname to HARNESS_HOST;
  * this is the backstop: a shot whose page text or title names the real machine (its full name or first label, as a
- * truncated header shows it) fails instead of being saved.
+ * truncated header shows it), its user or the company fails instead of being saved (scripts/real-names.mjs).
  */
-const REAL_HOST = [hostname(), hostname().split(".")[0]].filter(h => h.length >= 4);
 async function noRealHost(page) {
-  const text = await page.evaluate(() => `${document.title}\n${document.body.innerText}`);
-  const hit = REAL_HOST.find(h => text.includes(h));
-  if (hit) throw new Error(`the page shows the real hostname (${hit}); a harness daemon must report HARNESS_HOST`);
+  assertNoRealNames(await page.evaluate(() => `${document.title}\n${document.body.innerText}`), "the page");
 }
 
 const failures = [];

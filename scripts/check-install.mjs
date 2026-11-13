@@ -361,10 +361,10 @@ try {
   const rootProject = settingsBefore.projects.find(p => p.path === root);
   assert.ok(rootProject); assert.equal(rootProject.enable_default_tracking, false);
   const priorReceipts = (await readFile(join(home, "fixture-receipts.jsonl"), "utf8")).trim().split("\n").length;
-  const heroPath = join(root, "acme-project"); await mkdir(heroPath);
-  await exec("git", ["init", "--initial-branch=main", heroPath], { env });
-  await exec("git", ["-C", heroPath, "remote", "add", "origin", "https://github.com/example/acme-poc.git"], { env });
-  const defaultWorkspace = await api.workspaces.create({ title: "Default-tracked workspace", source: { kind: "directory", path: heroPath } });
+  const trackedPath = join(root, "acme-project"); await mkdir(trackedPath);
+  await exec("git", ["init", "--initial-branch=main", trackedPath], { env });
+  await exec("git", ["-C", trackedPath, "remote", "add", "origin", "https://github.com/example/acme-poc.git"], { env });
+  const defaultWorkspace = await api.workspaces.create({ title: "Default-tracked workspace", source: { kind: "directory", path: trackedPath } });
   const defaultAgent = await defaultWorkspace.agents.create({ config: { provider: "followup-fixture/fixture" }, title: "Default main" });
   await call("follow.refresh", {});
   let defaultRecord;
@@ -374,7 +374,7 @@ try {
   assert.ok(defaultEnv.FOLLOW_UP_CLI, "the default main gets its bridge on its first session");
   // Match agent-scoped CLI launches: the parent label survives even with a new workspace.
   for (let index = 0; index < 3; index++) {
-    const launched = await api.workspaces.create({ title: `Created task ${index}`, source: { kind: "directory", path: heroPath } });
+    const launched = await api.workspaces.create({ title: `Created task ${index}`, source: { kind: "directory", path: trackedPath } });
     assert.equal((await call("follow.get", { workspaceId: launched.id })).workspace, null);
     const localMain = await launched.agents.create({ config: { provider: "followup-fixture/fixture" }, labels: { "paseo.parent-agent-id": agent.id }, title: `Created main ${index}` });
     let record;
@@ -391,17 +391,17 @@ try {
     await assert.rejects(call("follow.enroll", { agentId: agent.id, workspaceId: launched.id, goal: "Cannot claim the child workspace" }), /another workspace/);
   }
   console.log("PASS: workspace-first creation of three cross-workspace child agents auto-tracks each local main, provides the bridge on its first session, permits Track and enroll, and excludes same-workspace children and the creator's cross-workspace claims.");
-  const heroProject = (await call("follow.project-settings", {})).projects.find(p => p.path === heroPath);
-  assert.equal(heroProject.enable_default_tracking, true);
-  await call("follow.set-project-tracking", { projectId: heroProject.id, enable_default_tracking: false });
-  const disabledWorkspace = await api.workspaces.create({ title: "Default disabled", source: { kind: "directory", path: heroPath } });
+  const trackedProject = (await call("follow.project-settings", {})).projects.find(p => p.path === trackedPath);
+  assert.equal(trackedProject.enable_default_tracking, true);
+  await call("follow.set-project-tracking", { projectId: trackedProject.id, enable_default_tracking: false });
+  const disabledWorkspace = await api.workspaces.create({ title: "Default disabled", source: { kind: "directory", path: trackedPath } });
   await disabledWorkspace.agents.create({ config: { provider: "followup-fixture/fixture" }, title: "Untracked main" });
   await call("follow.refresh", {});
   assert.equal((await call("follow.get", { workspaceId: disabledWorkspace.id })).workspace, null);
   assert.ok((await call("follow.get", { workspaceId: defaultWorkspace.id })).workspace, "turning off defaults preserves existing tracking");
   await cli("plugin", "reload", "follow-up");
-  assert.equal((await call("follow.project-settings", {})).projects.find(p => p.id === heroProject.id).enable_default_tracking, false);
-  await call("follow.set-project-tracking", { projectId: heroProject.id, enable_default_tracking: true });
+  assert.equal((await call("follow.project-settings", {})).projects.find(p => p.id === trackedProject.id).enable_default_tracking, false);
+  await call("follow.set-project-tracking", { projectId: trackedProject.id, enable_default_tracking: true });
   await waitUntil("Enabled project did not enroll its existing workspace", async () => { await call("follow.refresh", {}); return (await call("follow.get", { workspaceId: disabledWorkspace.id })).workspace; }, { baseMs: 10_000 });
   assert.equal((await readFile(join(home, "fixture-receipts.jsonl"), "utf8")).trim().split("\n").length, priorReceipts, "default enrollment must not send or launch recovery");
   console.log("PASS: project defaults enroll existing/new workspaces, expose the bridge on the first main session, persist off across reload and preserve records without any messages.");

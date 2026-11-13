@@ -56,7 +56,7 @@ test("unknown teams: candidates wait; when the list arrives, the ones that aren'
   const f = emptyLinkedFile();
   noteCandidate(f, "w1", "STATUS-1025", clock); noteCandidate(f, "w1", "HER-1312", clock);
   assert.deepEqual(dueChecks(f, clock), [], "no checks until the team list is known");
-  setTeams(f, parseLinearTeams(JSON.stringify({ teams: [{ id: "t1", key: "HER", name: "Hero" }, { id: "t2", key: "OPS" }] })), clock);
+  setTeams(f, parseLinearTeams(JSON.stringify({ teams: [{ id: "t1", key: "HER", name: "Acme" }, { id: "t2", key: "OPS" }] })), clock);
   assert.deepEqual(f.workspaces.w1.candidates.map(c => c.key), ["HER-1312"]);
   assert.deepEqual(parseLinearTeams('noise {"key": "HER"} {"key":"lower"}'), ["HER"]);
 });

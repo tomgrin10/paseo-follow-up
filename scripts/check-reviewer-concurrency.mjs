@@ -49,7 +49,7 @@ const title = `Reviewer concurrency fixture ${Date.now()}`;
 const w = await api.workspaces.create({ title, source: { kind: "directory", path: directory } });
 const agent = await w.agents.create({ config: { provider: "followup-fixture/fixture", model: "fixture" }, title: "Synthetic main" });
 await call("follow.activate", { workspaceId: w.id });
-await call("follow.save-reviewers", { repo: "acme/acme-poc", reviewers: [{ login: "reviewer-a", name: "Uri" }, { login: "reviewer-b", name: "Yuval" }] });
+await call("follow.save-reviewers", { repo: "acme/acme-poc", reviewers: [{ login: "uri-reviewer", name: "Uri" }, { login: "reviewer-b", name: "Yuval" }] });
 for (const number of [1, 2]) await call("follow.register-pr", { agentId: agent.id, repo: "acme/acme-poc", number, stack: "Synthetic reviewer stack" });
 await call("follow.refresh", { workspaceId: w.id });
 const { chromium } = createRequire(join(process.env.SEND_TO_PASEO_SOURCE, "extension/package.json"))("playwright-core");
