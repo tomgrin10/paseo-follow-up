@@ -78,7 +78,7 @@ export const toastsNow = () => items;
 
 type Done = { tone?: ToastTone; message: string } | string | null;
 export type ActionSpec<T> = {
-  /** What runs ("Later", "Send repairs"): the failure toast's default subject. */
+  /** What runs ("Later", "Send tasks"): the failure toast's default subject. */
   label: string;
   run: () => Promise<T>;
   /** The success toast, or null for none (a card or Undo bar that already says it). Throwing here counts as a failure. */

@@ -122,7 +122,7 @@ test("the brief pane names the first move and what Follow-up did since the last 
 test("the log lists only Follow-up's own actions, not merges or questions", () => {
   const w = ws("l", { batches: [batch({ sentAt: at(60) })], prs: [pr({ snapshot: snapshot({ state: "MERGED", mergedAt: at(30) }) })] });
   const lines = followUpLog([w], NOW - 86_400_000);
-  assert.deepEqual(lines.map(l => l.text), ["Sent 1 repair to the main agent"]);
+  assert.deepEqual(lines.map(l => l.text), ["Sent 1 task to the main agent"]);
 });
 
 test("last workday skips the weekend", () => {

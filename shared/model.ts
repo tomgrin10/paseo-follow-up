@@ -144,6 +144,16 @@ export const workspaceSchema = z.object({
   dormant: z.boolean().optional(),
   /** The main agent's provider conversation no longer exists; Follow-up stops sending to it. */
   goneAgent: z.object({ agentId: idSchema, at: z.string(), reason: z.string() }).nullable().optional(),
+  /** The main agent's title from Paseo, for "Next message to <title>". Absent: "the main agent". */
+  mainAgentTitle: z.string().nullable().optional(),
+  /** Open tasks kept out of the next message (reconcile): capped (sent NO_PROGRESS_CAP times unchanged) or manual (Auto off for that task). */
+  heldTasks: z.array(z.object({ task: taskSchema, held: z.enum(["capped", "manual"]) })).optional(),
+  /** Task keys the developer keeps for themselves: never auto-sent (shared/send-decision.ts). */
+  manualTasks: z.array(z.string()).optional(),
+  /** Per condition ("<key>:<fingerprint>"), the unacknowledged sends counted when the developer pressed Retry. */
+  taskRetries: z.record(z.string(), z.number().int().nonnegative()).optional(),
+  /** The exact text of the next message (the pending batch's prompt without its id line), for Preview and workspace_status. */
+  nextMessage: z.string().nullable().optional(),
 });
 export const stateSchema = z.object({
   version: z.literal(1), workspaces: z.array(workspaceSchema),
@@ -209,7 +219,7 @@ export function completionGate(w: Workspace, now = Date.now()): CompletionGate {
   const open = w.batches.filter(b => !recoveryBatch(b) && !completionCheck(b));
   if (open.some(b => ["sending", "sent"].includes(b.state))) add("agent", "Acknowledge the open follow-up batch");
   if (open.some(b => ["blocked", "uncertain"].includes(b.state))) add("developer", "Retry or dismiss the stuck follow-up batch");
-  if (open.some(b => b.state === "pending")) add("developer", "Send or dismiss the queued repairs");
+  if (open.some(b => b.state === "pending")) add("developer", "Send or dismiss the queued tasks");
   if (w.prActions.some(a => ["sending", "uncertain"].includes(a.state))) add("developer", "Check the outstanding PR action");
   for (const q of (w.questions ?? []).filter(questionOpen)) add("developer", `Answer or withdraw ${q.id} (${q.title})`);
   if (w.hold) add("developer", w.hold);

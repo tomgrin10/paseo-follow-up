@@ -23,7 +23,7 @@ export default function contribute(server: PluginServerContext) {
           if (input.type === "catalog") emit({ type: "catalog", requestId: input.requestId, catalog: { models: [{ id: "fixture", label: process.env.FIXTURE_MODEL_LABEL || "Fixture", isDefault: true }], modes: [{ id: "default", label: "Default" }, { id: "bypassPermissions", label: "Bypass" }, { id: "full-access", label: "Full access" }, { id: "auto", label: "Auto" }, { id: "acceptEdits", label: "Accept edits" }, { id: "plan", label: "Plan" }] } });
           else if (input.type === "sessions") emit({ type: "sessions", requestId: input.requestId, sessions: [] });
           else if (input.type === "session.open") {
-            sessions.set(input.sessionId, { ...input.config.env, FIXTURE_MARKER: String(input.config.providerOptions?.fixture_marker ?? ""), FIXTURE_MODE: String(input.config.providerOptions?.fixture_mode ?? "rollout"), FIXTURE_GOAL: String(input.config.providerOptions?.fixture_goal ?? "Ship and verify the migration rollout") });
+            sessions.set(input.sessionId, { ...input.config.env, FIXTURE_MARKER: String(input.config.providerOptions?.fixture_marker ?? ""), FIXTURE_MODE: String(input.config.providerOptions?.fixture_mode ?? "rollout"), FIXTURE_ACK: String(input.config.providerOptions?.fixture_ack ?? ""), FIXTURE_GOAL: String(input.config.providerOptions?.fixture_goal ?? "Ship and verify the migration rollout") });
             await writeFile(join(process.env.PASEO_HOME!, `fixture-settings-${input.config.env.PASEO_AGENT_ID}.json`), JSON.stringify(sessions.get(input.sessionId)));
             await writeFile(join(process.env.PASEO_HOME!, `fixture-agent-config-${input.config.env.PASEO_AGENT_ID}.json`), JSON.stringify(input.config));
             await writeFile(join(process.env.PASEO_HOME!, "fixture-config.json"), JSON.stringify({ mcp: Object.keys(input.config.mcpServers), bridge: input.config.env.FOLLOW_UP_CLI, instructions: input.config.systemPrompt }));
@@ -100,6 +100,18 @@ export default function contribute(server: PluginServerContext) {
             if (text === "Fixture: fail recovery") { emit({ type: "session.turn", sessionId: input.sessionId, turnId, state: "failed", error: { message: "Synthetic recovery failure" } }); return; }
             const inventory = text.includes("Recover workspace PR stacks and remaining work");
             const completion = text.includes("Verify the workspace is finished and declare Done");
+            // fixture_ack: "repairs" (test:scale): the agent acknowledges a repair message the way real agents do, without
+            // changing GitHub, so the per-task cap sees acknowledged-but-unchanged sends.
+            const repairs = /^Follow-up batch /.test(text) && !inventory && !completion && sessions.get(input.sessionId)!.FIXTURE_ACK === "repairs";
+            if (repairs) {
+              const { DaemonClient } = require(["@getpaseo", "client", "internal", "daemon-client"].join("/"));
+              const client = new DaemonClient({ url: process.env.PASEO_DAEMON_URL!, clientId: "fixture-agent", clientType: "cli", reconnect: { enabled: false } });
+              try {
+                await client.connect();
+                const batchId = /^Follow-up batch ([^\n]+)/.exec(text)![1];
+                await client.invokePluginRpc("follow-up", "follow.acknowledge", { batchId, outcome: "completed", result: "Fixture: looked at it", agentId: sessions.get(input.sessionId)!.PASEO_AGENT_ID });
+              } finally { await client.close(); }
+            }
             if ((inventory || completion) && sessions.get(input.sessionId)!.FIXTURE_MODE !== "deferred") {
               const { DaemonClient } = require(["@getpaseo", "client", "internal", "daemon-client"].join("/"));
               const client = new DaemonClient({ url: process.env.PASEO_DAEMON_URL!, clientId: "fixture-agent", clientType: "cli", reconnect: { enabled: false } });

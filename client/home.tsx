@@ -727,7 +727,7 @@ function LogView({ theme, compact, sources, onHome, onOpen }: { theme: Theme; co
       <Button theme={theme} compact={compact} kind="ghost" icon="House" title="Home" onPress={onHome} />
     </View>
     <Text accessibilityRole="header" style={[t.title, { fontSize: 20, lineHeight: 26 }]}>Done while you were away</Text>
-    <Text style={t.meta}>What Follow-up did on its own {days ? `in the last ${days} days` : `since ${sinceLabel(Date.now())}`}: repairs it sent and how they went. It never merges, messages people, starts or archives workspaces.</Text>
+    <Text style={t.meta}>What Follow-up did on its own {days ? `in the last ${days} days` : `since ${sinceLabel(Date.now())}`}: tasks it sent and how they went. It never merges, messages people, starts or archives workspaces.</Text>
     <Pressable accessibilityRole="button" onPress={onHome} style={{ flexDirection: "row", alignItems: "center", gap: 8, padding: 10, borderRadius: 8, backgroundColor: c.surface1 }}>
       <Icon name="Inbox" size={14} color={needs ? c.statusWarning : c.foregroundMuted} />
       <Text style={[t.body, { flex: 1 }]}>{needs ? `${needs} thing${needs === 1 ? "" : "s"} it left for you are on Home.` : "Nothing is waiting for you on Home."}</Text>
