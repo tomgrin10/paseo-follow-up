@@ -80,7 +80,11 @@ test("no-real-names-in-renders-or-fixtures: a render naming the machine or compa
 });
 
 test("no-real-names-in-renders-or-fixtures: every render path uses the shared check", async () => {
-  for (const file of ["scripts/screenshots.mjs", "scripts/check-recovery-background.mjs", "scripts/check-project-settings.mjs"]) {
+  // No script keeps a private hostname-only check (a new render script copying the old pattern fails here).
+  for (const file of execFileSync("git", ["ls-files", "scripts"], { cwd: root, encoding: "utf8" }).split("\n").filter(f => f.endsWith(".mjs"))) {
+    assert.doesNotMatch(await readFile(join(root, file), "utf8"), /REAL_HOST/, `${file}: use assertNoRealNames`);
+  }
+  for (const file of ["scripts/screenshots.mjs", "scripts/check-recovery-background.mjs", "scripts/check-project-settings.mjs", "scripts/check-view-settings.mjs"]) {
     const src = await readFile(join(root, file), "utf8");
     assert.match(src, /assertNoRealNames/, file);
     assert.doesNotMatch(src, /REAL_HOST/, `${file}: no private hostname-only check`);
