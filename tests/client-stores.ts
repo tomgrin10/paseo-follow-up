@@ -53,13 +53,14 @@ const ANSWERS: Record<string, unknown> = {
   "follow.usage": { available: false, source: null, accounts: [] },
 };
 
-/** What the worker does with a subscribe: serve it, refuse it (`ready` rejects), or the call throws. */
-export type SubscribeMode = "serve" | "refuse" | "throw";
+/** What the worker does with a subscribe: serve it, refuse it (`ready` rejects), the call throws, or it accepts and drops it at once (a flapping host). */
+export type SubscribeMode = "serve" | "refuse" | "throw" | "flap";
 type Sub = { name: string; push(event: unknown): void; close(error?: Error): void; open: boolean };
 
 export function fakeHost(withFeeds: boolean) {
   const calls: { at: number; name: string }[] = [];
   const subscriptions: string[] = [];
+  const subscribed: { at: number; name: string }[] = [];
   const open: Sub[] = [];
   let mode: (name: string) => SubscribeMode = () => "serve";
   const client: Record<string, unknown> = {
@@ -68,24 +69,27 @@ export function fakeHost(withFeeds: boolean) {
     addSidebarHeaderItem: () => () => undefined,
   };
   if (withFeeds) client.subscribe = (contract: { name: string }, _input: unknown, onEvent: (e: unknown) => void, options?: { onClosed?: (c: { error?: Error }) => void }) => {
-    subscriptions.push(contract.name);
+    subscriptions.push(contract.name); subscribed.push({ at: Date.now(), name: contract.name });
     const m = mode(contract.name);
     if (m === "throw") throw new Error(`no subscription ${contract.name}`);
     let released = false;
     const sub: Sub = {
-      name: contract.name, open: m === "serve",
+      name: contract.name, open: m === "serve" || m === "flap",
       push: event => { if (sub.open && !released) onEvent(event); },
       close: error => { if (!sub.open || released) return; sub.open = false; options?.onClosed?.({ error }); },
     };
     if (m === "serve") open.push(sub);
     const release = () => { released = true; sub.open = false; };
+    const ready = m === "refuse" ? Promise.reject(new Error(`Unknown plugin subscription ${contract.name}`)) : Promise.resolve();
+    // Two hops, so the subscriber sees `ready` before the drop.
+    if (m === "flap") void ready.then(() => undefined).then(() => sub.close(new Error("subscription dropped")));
     return Object.assign(release, {
-      ready: m === "serve" ? Promise.resolve() : Promise.reject(new Error(`Unknown plugin subscription ${contract.name}`)),
+      ready,
       release: async () => release(),
     });
   };
   return {
-    client, calls, subscriptions,
+    client, calls, subscriptions, subscribed,
     /** How the worker answers the next subscribes (a stopped worker, or an older one that doesn't know a topic). */
     setMode(next: (name: string) => SubscribeMode) { mode = next; },
     /** The worker exited: Paseo closes every open subscription with the reason. */
