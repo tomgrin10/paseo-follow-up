@@ -1,3 +1,4 @@
+import { sendingOf, type Sending } from "./sending";
 import { parseAnswersMessage } from "./questions";
 import { z } from "zod";
 import { HOME_GROUPS, buildHome, type HomeGroupId, type PaseoWorkspaceLite, type Workstream } from "./home";
@@ -72,6 +73,8 @@ export type WorkstreamRow = {
    * window. Listed compactly at the end; its agent is likely unloaded, so sending to it wakes it.
    */
   dormant: boolean;
+  /** Home's Sending row (shared/sending.ts): queued or sent, when and why, and whether send_repairs would go through. */
+  sending?: Sending | null;
 };
 
 const KEY = /\b[A-Z][A-Z0-9]{1,9}-\d{1,6}\b/g;
@@ -93,11 +96,13 @@ export function workstreams(input: {
   agentStatus?: (agentId: string) => string | null; now: number; exclude?: { agentId: string | null; workspaceId: string | null } | null;
   /** The active window (default 3 days), for workspaces Follow-up doesn't track. */
   windowMs?: number;
+  /** The machine holds auto-sends (the resource governor). */
+  autoSendsHeld?: boolean;
 }): WorkstreamRow[] {
   const ex = input.exclude;
   const rows = input.rows.filter(r => r.agentId !== ex?.agentId && (!ex?.workspaceId || r.workspaceId !== ex.workspaceId));
   const paseo = input.paseo.filter(p => p.id !== ex?.workspaceId);
-  const model = buildHome({ rows, tracked: input.tracked.filter(w => w.id !== ex?.workspaceId), paseo, now: input.now, sort: "priority", priorities: input.priorities });
+  const model = buildHome({ rows, tracked: input.tracked.filter(w => w.id !== ex?.workspaceId), paseo, now: input.now, sort: "priority", priorities: input.priorities, autoSendsHeld: input.autoSendsHeld });
   const tracked = new Map(input.tracked.map(w => [w.id, w]));
   const lite = new Map(paseo.map(p => [p.id, p]));
   const statuses = new Map(rows.map(r => [r.agentId, r.status]));
@@ -108,13 +113,15 @@ export function workstreams(input: {
     seen.add(s.workspaceId);
     const row = rowOf(s, tracked.get(s.workspaceId), lite.get(s.workspaceId), s.agentId ? statuses.get(s.agentId) ?? input.agentStatus?.(s.agentId) ?? null : null);
     row.dormant = resting(row, tracked.get(s.workspaceId), input.now, input.windowMs ?? 3 * 86_400_000);
+    const w = tracked.get(s.workspaceId);
+    if (s.group === "sending" && w) row.sending = sendingOf(w, input.now, { held: input.autoSendsHeld });
     out.push(row);
   }
   return out;
 }
 
 function resting(r: WorkstreamRow, w: Workspace | undefined, now: number, windowMs: number): boolean {
-  if (r.group === "needs" || r.group === "running" || r.group === "fixing") return false;
+  if (r.group === "needs" || r.group === "running" || r.group === "sending") return false;
   if (w) return !!w.dormant;
   if (r.prs.some(p => p.state === "OPEN")) return false;
   const at = r.activityAt ? Date.parse(r.activityAt) : NaN;
@@ -126,7 +133,7 @@ function rowOf(s: Workstream, w: Workspace | undefined, p: PaseoWorkspaceLite | 
   const needs = s.group === "needs";
   return {
     workspaceId: s.workspaceId!, key: s.key, title: s.title, project: s.project, branch: p?.branch ?? null, group: s.group,
-    agentId: s.agentId, agentStatus: status ?? (s.group === "running" || s.group === "fixing" ? "running" : null), prs,
+    agentId: s.agentId, agentStatus: status ?? (s.group === "running" ? "running" : null), prs,
     ask: needs ? [s.word, s.line].filter(Boolean).join(": ") || null : null, askKind: needs ? s.word : null,
     activity: needs ? null : s.line || null, activityAt: s.activityAt ?? s.at,
     priority: s.priority ? { score: s.priority.score, reason: s.priority.reason } : null,

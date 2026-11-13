@@ -180,7 +180,8 @@ and who it waits on come from `sendDecision`, never a copy of its rules. Home's 
 all read it (`agentCard` stays as a pure helper for the invariants; the panel no longer draws an agent card). Rules it encodes:
 
 - "Main agent is on it" only while a batch is really sent; a queued one reads "Queued for the main agent".
-- "Follow-up is fixing" only for work in flight or about to auto-send.
+- Home's "Sending" (it replaced "Follow-up is fixing") only for a message in flight or queued to go out without the
+  developer; one that waits on the developer is in Needs you only (`sending-never-waits-on-you`).
 - The Done check never auto-sends, so it waits on you: Needs you shows "Ready to finish · ask the main agent to
   declare Done" with **Ask to finish**, whether Auto is on or off. Done settles any open Done check
   (`settleDoneChecks`).
