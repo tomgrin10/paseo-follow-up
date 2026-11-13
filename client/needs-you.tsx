@@ -128,6 +128,8 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
       const merging = item.kind === "merge" ? mergeControl(item.prKey, { theme, compact }) : null;
       const scopeLine = item.kind === "merge" ? mergeScope(w, item.prKey)?.detail ?? null : null;
       const notice = merging?.notice ?? null;
+      // The action and its link are one group, so the link never wraps under the button (a long "Add reviewers").
+      const pair = act && link ? <View style={{ flexDirection: "row", alignItems: "center", gap: 4, flexShrink: 0 }}>{act}{link}</View> : null;
       const button = act || link ? <>{act}{link}</> : null;
       const said = !!untitled?.has(item.key);
       // Phones: the action sits at the row's right edge so rows never grow a second line of controls. A send batch
@@ -143,7 +145,7 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
             {"detail" in item && !!item.detail && !sameText(item.detail, item.title.replace(/^Q\d+ · /, "")) && <RichText linkColor={c.foreground} numberOfLines={1} style={t.meta}>{item.detail}</RichText>}
             {item.kind === "reviewers" && <NoReviewLink repo={item.prKey.split("#")[0]} theme={theme} compact />}
           </View>
-          {button}
+          <View style={item.kind === "reviewers" ? { alignSelf: "flex-start" } : undefined}>{pair ?? button}</View>
         </View>
       </CardRow>;
       return <CardRow key={item.key} theme={theme} compact={compact} first={index === 0 && flush} style={flush ? { paddingHorizontal: 0 } : undefined}>
