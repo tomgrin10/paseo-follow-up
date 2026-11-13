@@ -65,6 +65,6 @@ test("the one-line state follows Follow-up's groups and the main agent's live at
   assert.equal(state({}, { requiresAttention: true, attentionReason: "error" }), "Needs you · Error");
   const threads = pr({ snapshot: snapshot({ threads: [{ id: "t1", updatedAt: "x" }, { id: "t2", updatedAt: "x" }, { id: "t3", updatedAt: "x" }] }) });
   const batch = { id: "b1", state: "sent", tasks: [{ id: "t", title: "Fix threads" }], attempts: 1, createdAt: new Date(clock).toISOString(), sentAt: new Date(clock).toISOString() };
-  assert.equal(state({ prs: [threads], batches: [batch as never] }), "Follow-up is fixing · 3 threads");
+  assert.equal(state({ prs: [threads], batches: [batch as never] }), "Sending · 3 threads");
   assert.equal(state({ prs: [pr({ snapshot: snapshot({ state: "MERGED" }) })], completion: { summary: "Shipped", declaredAt: new Date(clock).toISOString() } as never }), "Done · ready to archive");
 });

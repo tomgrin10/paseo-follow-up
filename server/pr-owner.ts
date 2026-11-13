@@ -53,7 +53,7 @@ export function browserWorkspaceState(w: Workspace, agent: BrowserAgent, now = D
   // 0.16: live background work counts as running too (no "Finished" while a job it started still runs).
   const running = isLive(agent);
   if (agent.status === "error" || agent.attentionReason === "error" && !running) return { group: "needs", state: `${GROUP_TITLE.needs} · Error` };
-  if (group === "fixing") return { group, state: `${GROUP_TITLE.fixing} · ${fixDetail(w, row!.line)}` };
+  if (group === "sending") return { group, state: `${GROUP_TITLE.sending} · ${fixDetail(w, row!.line)}` };
   if (group === "running" || running) return { group: "running", state: GROUP_TITLE.running };
   if (agent.requiresAttention) return { group: "needs", state: `${GROUP_TITLE.needs} · Finished` };
   if (group === "waiting") return { group, state: row!.line ? `${GROUP_TITLE.waiting} · ${row!.line}` : GROUP_TITLE.waiting };

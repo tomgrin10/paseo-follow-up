@@ -118,7 +118,7 @@ test("invariant: no in-flight signal can make a workspace read Needs you, Finish
     const home = buildHome({ rows: [row(w, patch)], tracked: [w], paseo: [{ id: w.id, name: w.title, project: null, activityAt: iso() }] as never, now: clock });
     const mine = home.groups.flatMap(g => g.items).filter(i => i.workspaceId === w.id);
     assert.equal(mine.length, 1, `${signal}: one row`);
-    assert.ok(["running", "fixing", "waiting"].includes(mine[0].group), `${signal}: reads ${mine[0].group}, not running/fixing/waiting`);
+    assert.ok(["running", "sending", "waiting"].includes(mine[0].group), `${signal}: reads ${mine[0].group}, not running/sending/waiting`);
     assert.doesNotMatch(`${mine[0].word ?? ""} ${mine[0].line}`, /Finished|ready|Ready|declare Done/, `${signal}: "${mine[0].line}"`);
   }
   setReviewerConfig(emptyReviewerConfig());

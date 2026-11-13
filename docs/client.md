@@ -67,6 +67,7 @@ Nothing polls while the app is hidden.
 | `client/home-data.ts` | Paseo's own workspace list, for untracked rows (Quiet) and header buttons. |
 | `client/sidebar-view.tsx`, `client/sidebar-visibility.ts` | Home's list as Paseo's sidebar (on hosts that support it), and its registration. |
 | `client/panel.tsx` | The workspace panel: this workspace only. |
+| `client/recovery-actions.ts` | The Recovery block's one primary action per state (`recovery-offers-one-primary-action`): Retry recovery after a failure, Run recovery (or Run queued recovery) otherwise, plus Open recovery agent when an agent exists. |
 | `client/large.tsx` | The panel as a two-column screen. |
 | `client/header.tsx` | The stack bar and the header status. |
 | `client/stacks.tsx` | Stacks drawn top to base. |

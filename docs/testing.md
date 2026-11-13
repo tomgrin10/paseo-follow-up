@@ -26,7 +26,8 @@ not a patch for one instance.
   - `tests/answer-delivery.test.ts`: a copied or in-chat answer stays in Needs you until the agent's turn shows its
     marker, Send delivers it, or Sign off settles it; `tests/put-in-chat.test.ts` drives a fake composer (empty draft,
     typing during focus, repeat press, focus refused falls back to Copy); `tests/brief-card.test.ts`: no "No ask
-    stated" card beside a Needs-you item.
+    stated" card beside a Needs-you item; `tests/answer-status.test.ts`: every delivery state times every surface (chat
+    card, dialog, Needs you, Home row, Activity) reads the same, and "Answered" only once delivered.
   - `tests/idle-rpc.test.ts`: the real client stores, bundled with React Native stubbed, run ten simulated minutes against
     a fake host: at most one RPC a minute with `client.subscribe` (0.16), and still polling without it (0.15).
   - `tests/feeds.test.ts`: the worker's feeds read once per change, push only changes, and watch Smart Session only
