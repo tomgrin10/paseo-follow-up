@@ -43,8 +43,15 @@ export const entrySchema = z.object({
   enable_finish_flags: z.boolean().default(true),
   /** Archived: hidden, kept for 7 days so an unarchive restores it. */
   goneAt: isoSchema.nullable().default(null),
-  /** Dedupe keys that already flagged (CI head SHA, review thread ids, PR state), so a sign-off sticks. */
+  /** Dedupe keys that already flagged and aren't about a PR (Session Guard pauses), newest last, capped. */
   seenKeys: z.array(z.string()).default([]),
+  /**
+   * a-pr-flag-fires-once-per-transition: per tracked PR, the state each flag kind last notified ("end": MERGED or
+   * CLOSED, "checks": the head, "threads": the thread ids, "conflict": the head, "reviewers": "asked"). One record
+   * per PR, kept while the PR is tracked and pruned with it (`pruneNotified`), never a ring: a 200-key ring evicted
+   * old merges in a 153-PR workspace and re-flagged "#92 merged" two days later (2026-11-13).
+   */
+  notified: z.record(z.string(), z.record(z.string(), z.string())).optional(),
   /** Last turn end or flag this entry saw; restart reconciliation compares agent activity against it. */
   lastEventAt: isoSchema.nullable().default(null),
   /** The brief card for this agent's newest flagged turn (additive; older builds ignore it). */
@@ -82,6 +89,8 @@ export const inboxStateSchema = z.object({
   lastSeen: isoSchema.nullable().default(null),
   /** Set once Follow-up's existing PR states were recorded as already seen. */
   primedAt: isoSchema.nullable().default(null),
+  /** Set once every PR flag's state was backfilled into `notified` without flagging (the upgrade off the ring). */
+  notifiedAt: isoSchema.nullable().default(null),
   signOffs: z.number().int().default(0),
   /** One-time repairs applied to this store (additive; `version` stays 1 so older builds still read it). */
   revision: z.number().int().default(0),
@@ -147,9 +156,42 @@ function add(e: Entry, reason: Reason, detail: string, dedupeKey: string, at: st
   reasons.push({ reason, at, detail, dedupeKey, ...(prKey ? { prKey } : {}) });
   e.needs = { reasons, since: e.needs?.since ?? at };
 }
+/** A PR flag's dedupe key ("owner/repo#7:<head>:checks", "…#7:MERGED"), split into its PR, flag kind and state. */
+export function prNotice(key: string): { pr: string; kind: string; value: string } | null {
+  const m = /^([^:\s]+#\d+):(.+)$/.exec(key);
+  if (!m) return null;
+  const [, pr, rest] = m;
+  if (rest === "MERGED" || rest === "CLOSED") return { pr, kind: "end", value: rest };
+  if (rest === "reviewers") return { pr, kind: "reviewers", value: "asked" };
+  if (rest.endsWith(":checks")) return { pr, kind: "checks", value: rest.slice(0, -":checks".length) };
+  const c = /^(threads|conflict):(.*)$/.exec(rest);
+  return c ? { pr, kind: c[1], value: c[2] } : null;
+}
+/** Whether this entry already notified the state a dedupe key names (no change to the entry). */
+export function notifiedBefore(e: Pick<Entry, "seenKeys" | "notified"> | undefined, key: string): boolean {
+  if (!e) return false;
+  const n = prNotice(key);
+  return n ? e.notified?.[n.pr]?.[n.kind] === n.value : e.seenKeys.includes(key);
+}
+/** Records keys as notified, without flagging: first-run priming and the upgrade backfill. */
+export function markNotified(e: Entry, keys: readonly string[]): Entry {
+  let out = e;
+  for (const key of keys) if (!notifiedBefore(out, key)) { out = { ...out, notified: { ...out.notified ?? {} }, seenKeys: [...out.seenKeys] }; seen(out, key); }
+  return out;
+}
+/** Drops the records of PRs no longer tracked; the same entry when nothing goes (so a quiet tick copies nothing). */
+export function pruneNotified(e: Entry, tracked: ReadonlySet<string>): Entry {
+  const gone = Object.keys(e.notified ?? {}).filter(pr => !tracked.has(pr));
+  const ring = e.seenKeys.filter(k => !prNotice(k));
+  if (!gone.length && ring.length === e.seenKeys.length) return e;
+  const notified = { ...e.notified ?? {} }; for (const pr of gone) delete notified[pr];
+  return { ...e, notified, seenKeys: ring };
+}
 function seen(e: Entry, key: string): boolean {
-  if (e.seenKeys.includes(key)) return true;
-  e.seenKeys = [...e.seenKeys, key].slice(-SEEN_LIMIT);
+  if (notifiedBefore(e, key)) return true;
+  const n = prNotice(key);
+  if (n) e.notified = { ...e.notified ?? {}, [n.pr]: { ...e.notified?.[n.pr], [n.kind]: n.value } };
+  else e.seenKeys = [...e.seenKeys, key].slice(-SEEN_LIMIT);
   return false;
 }
 /** Permission, error and paused always break a snooze; a plain finish never does. */
@@ -283,7 +325,8 @@ export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
         // A withdrawn "Add reviewers" may come back (Undo on No review, reviewers removed): forget its key so the same
         // PR can ask again. CI and threads key on the head or the threads, so a new fact already has a new key.
         // No PR of this agent asks any more, so every "<pr>:reviewers" key goes.
-        if (dead.includes("reviewers") && e.needs.reasons.some(r => r.reason === "reviewers")) e.seenKeys = e.seenKeys.filter(k => !k.endsWith(":reviewers"));
+        if (dead.includes("reviewers") && e.needs.reasons.some(r => r.reason === "reviewers"))
+          e.notified = Object.fromEntries(Object.entries(e.notified ?? {}).map(([pr, kinds]) => { const { reviewers: _, ...rest } = kinds; return [pr, rest]; }));
         e.needs = withoutReasons(e.needs, dead); if (!e.needs) e.snooze = null;
       }
       break;
