@@ -125,8 +125,8 @@ function DeployCheckRow({ deploy, theme, compact }: { deploy: RepoWorkflowView["
   return <SettingsRow label="Deploy check" hint={deploy
     ? `Merged PRs show Deployed once the ${services} in ${deploy.gcpProject} serve them.`
     : "Merged PRs stay Merged. An agent sets it up with set_pr_workflow."}>
-    {/* Narrow: on its own line under the hint, where the other rows put their control. */}
-    <Text style={[t.body, { color: deploy ? c.foreground : c.foregroundMuted }, narrow && { width: "100%" }]} numberOfLines={1}>{deploy ? `Production · ${deploy.gcpProject}` : "Not set up"}</Text>
+    {/* Narrow: too wide to sit beside the hint, so the row wraps it to its own line, where the other rows put their control. */}
+    <Text style={[t.body, { color: deploy ? c.foreground : c.foregroundMuted }, narrow && { minWidth: 240 }]} numberOfLines={1}>{deploy ? `Production · ${deploy.gcpProject}` : "Not set up"}</Text>
   </SettingsRow>;
 }
 /** "squash", "squash and rebase", "squash, merge commits and rebase". */
