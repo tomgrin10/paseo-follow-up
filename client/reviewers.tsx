@@ -214,7 +214,7 @@ export function ReviewerPicker({ repo, author, theme, compact, busy, onCancel, o
   </SubmitScope>;
 }
 
-/** "Will ask Uri and Yuval": the configured reviewers for a PR, minus its author. */
+/** "Will ask Omar and Lena": the configured reviewers for a PR, minus its author. */
 export function willAsk(list: ReviewerEntry[]): string {
   const names = list.map(reviewerLabel);
   return names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0] ?? "";

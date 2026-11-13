@@ -132,8 +132,20 @@ plays a scripted turn (timeline items, Follow-up RPCs, a permission) for a given
 - **A fictional host name, `dev-box`.** Paseo labels its host with `os.hostname()` (the phone header, `server_info`)
   and has no setting for it, and renders go into this public repo. `harnessEnv` puts
   `scripts/harness-hostname.cjs` first on `NODE_OPTIONS` (after a caller's `set` and `strip`), so every harness
-  process's `os.hostname()` and `HOSTNAME` read `HARNESS_HOST`. `screenshots.mjs` fails a shot whose page text names
-  the real machine. `tests/harness-env.test.ts` fails when a harness process can read the real name.
+  process's `os.hostname()` and `HOSTNAME` read `HARNESS_HOST`. `tests/harness-env.test.ts` fails when a harness
+  process can read the real name.
+- **Fictional names everywhere** (`no-real-names-in-renders-or-fixtures`). Fixtures use `acme-*` names (the project
+  `acme-project`, the repository `acme/acme-poc`, `linear.app/acme`, `acme.slack.com`), never the company's. Every
+  render path (`screenshots.mjs`, `check-recovery-background.mjs`, `check-project-settings.mjs`,
+  `check-view-settings.mjs`) passes its page text
+  through `assertNoRealNames` (`scripts/real-names.mjs`), which fails a shot naming the real hostname, its user, the
+  company, its people, customers or ticket keys; `tests/no-real-names.test.ts` fails any committed file (PNG text
+  chunks included) that does. Fixtures use fictional people and ticket keys (`ACME-123`, `APP-142`). The hostname and user name are read at run time (`os.hostname()`,
+  `os.userInfo()`, skipped in CI), and the denied words are stored only as sha256 hashes of word tokens (names match only capitalised; ticket keys as a hashed prefix followed by digits)
+  (text is split on `[a-z0-9]+`), so the denylist puts no plain text in the repo. Tests of the checker use an injected
+  fictional denylist. The product files that still carry the company's configuration, and the tests that exercise
+  them, are excluded by path (`EXCLUDED`) until the Q55 host-config PR moves that configuration into host settings;
+  scripts that need the default-tracked repository read it from `shared/settings.ts` at run time.
 - **Fake GitHub over HTTP, not only `gh`.** Follow-up reads GitHub over in-process HTTPS (`server/github-api.ts`); a
   fake `gh` on PATH only answers writes. A script whose daemon needs PR reads starts `fakeGithub({ dir, gh })` from
   `scripts/fake-github.mjs` and passes its `env` and `strip` to `harnessEnv`. The server answers each request with the
