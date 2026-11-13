@@ -141,10 +141,11 @@ plays a scripted turn (timeline items, Follow-up RPCs, a permission) for a given
   through `assertNoRealNames` (`scripts/real-names.mjs`), which fails a shot naming the real hostname, its user or the
   company; `tests/no-real-names.test.ts` fails a committed file under `scripts/`, `tests/`, `docs/` (PNG text chunks
   included) or `changes/` that does. The hostname and user name are read at run time (`os.hostname()`,
-  `os.userInfo()`, skipped in CI), so the denylist holds only generic company words. Product configuration that names
-  the company on purpose (the deploy check's targets, the default-tracked repository, the legacy reviewer login map)
-  is allowed as exact tokens in the files that test it, each with a reason (`ALLOWED`), until Q55 decides whether it
-  moves into host settings.
+  `os.userInfo()`, skipped in CI), and the company words are stored only as sha256 hashes of lowercase word tokens
+  (text is split on `[a-z0-9]+`), so the denylist puts no plain text in the repo. Tests of the checker use an injected
+  fictional denylist. The product files that still carry the company's configuration, and the tests that exercise
+  them, are excluded by path (`EXCLUDED`) until the Q55 host-config PR moves that configuration into host settings;
+  scripts that need the default-tracked repository read it from `shared/settings.ts` at run time.
 - **Fake GitHub over HTTP, not only `gh`.** Follow-up reads GitHub over in-process HTTPS (`server/github-api.ts`); a
   fake `gh` on PATH only answers writes. A script whose daemon needs PR reads starts `fakeGithub({ dir, gh })` from
   `scripts/fake-github.mjs` and passes its `env` and `strip` to `harnessEnv`. The server answers each request with the
