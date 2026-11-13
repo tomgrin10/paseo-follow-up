@@ -76,7 +76,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | --- | --- | --- |
 | Worker entry, RPC wiring, session attach, teardown | `index.server.ts`, `shared/contracts.ts`, `server/feeds.ts`, `server/rpc-timing.ts`, `server/teardown.ts`, `server/daemon.ts`, `server/shared-file.ts`, `server/directory.ts`, `server/store.ts`, `server/list-cache.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
 | Discovery, ownership, main agent | `server/discovery.ts`, `server/turn-events.ts`, `server/workspace-agent.ts`, `server/background-agents.ts`, `server/submissions.ts`, `server/pr-owner.ts`, `server/exclusions.ts`, `server/history-cache.ts`, `server/recovery-handoff.ts`, `server/recovery-config.ts`, `shared/settings.ts` | [workspaces](docs/workspaces.md) |
-| Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/send-decision.ts`, `shared/task-rows.ts`, `shared/task-status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
+| Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/send-decision.ts`, `shared/task-rows.ts`, `shared/task-status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/put-in-chat.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
 | Needs-you inbox, brief, Home | `server/inbox.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/sending.ts`, `shared/needs-block.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts` | [needs-you](docs/needs-you.md) |
 | Summary (internal id `about`), Rename with AI | `server/about.ts`, `server/transcript.ts`, `shared/about.ts`, `server/rename.ts`, `shared/rename.ts` | [ai-roles](docs/ai-roles.md) |
 | Linked items (Linear issues, Slack threads, docs a workspace is about) | `server/linked.ts`, `shared/linked.ts`, `shared/linked-extract.ts`, `shared/linked-display.ts`, `client/linked.tsx`, `client/brand-icons.ts` | [linked-items](docs/linked-items.md) |
@@ -225,6 +225,28 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    instead of looping (`openFeed`, `client/feeds.ts`). Guarded by `tests/idle-rpc.test.ts`
    (ten simulated minutes of the real stores, on both hosts), `tests/feed-recovery.test.ts`, `tests/feeds.test.ts`
    and `npm run test:feeds` (the harness, end to end) ([docs/client.md](docs/client.md#feeds)).
+19. **The recovery agent is quiet, keeps its tools and unloads** (`recovery-is-quiet-keeps-its-tools-and-unloads`).
+   On a host with `features.backgroundAgents` (Paseo 0.16) it is created `background: true` (no tab, no ping, no
+   sidebar row); never on 0.15, whose path is unchanged. Invariant 9's background skip exempts only the agent
+   Follow-up's own record names as a recovery recipient, never one carrying recovery labels. The same record lets it
+   through every "root agents only" gate it needs (`mayEnroll` for `enroll_workspace`). "Unloads" means
+   host-collectable: no plugin API closes an agent by id, so a settled batch (acknowledged or failed) leaves no running
+   turn, pending permission or background work, and Paseo's idle-runtime cleanup releases it. Guarded by
+   `tests/recovery-background.test.ts` and `scripts/check-recovery-background.mjs`
+   ([docs/workspaces.md](docs/workspaces.md)).
+20. **An answer leaves Needs you only when delivered** (`an-answer-leaves-needs-you-only-when-delivered`,
+   `put-in-chat-never-rewrites-a-draft`). Copy and Put in chat (Paseo 0.16) record the developer's answer but send
+   nothing, so it stays in Needs you as "Your Qn answer isn't sent yet" until a turn of that agent ends with
+   `Follow-up answer Qn (` in its user messages (the bounded tail `turn_ended` already reads; no new reads), Send
+   delivers it (the row's Send sends the recorded pick and note in one click), or Sign off on that agent's row settles
+   it. Put in chat never calls `setPrompt`: it focuses the agent's composer at the end of the draft and inserts the
+   answer (after a blank line when there's a draft), does nothing when the exact answer is already there, and falls
+   back to Copy when the composer can't come on screen (`putInChat`, `shared/put-in-chat.ts`). Guarded by
+   `tests/answer-delivery.test.ts`, `tests/put-in-chat.test.ts` and `INVARIANTS` ([docs/needs-you.md](docs/needs-you.md#answers-waiting-to-be-sent)).
+21. **A brief without an ask never sits beside Needs you** (`a-brief-without-an-ask-never-sits-beside-needs-you`).
+   "No ask stated" or a done brief's "Nothing needed" is drawn only while nothing in Needs you speaks for the row;
+   beside a question or an answer waiting to be sent it would say there's nothing to do. One predicate decides it,
+   `briefCardShown` in `shared/brief.ts`. Guarded by `tests/brief-card.test.ts`.
 
 ## Bugs
 

@@ -59,7 +59,7 @@ export const answerSchema = z.object({
   agentId: z.string().optional(),
   agentTitle: z.string().nullable().optional(),
   delivery: z.object({
-    state: z.enum(["sending", "sent", "queued", "unconfirmed", "copied", "recorded"]),
+    state: z.enum(["sending", "sent", "queued", "unconfirmed", "copied", "in-chat", "signed-off", "recorded"]),
     to: z.string().nullable(),
     messageId: z.string().nullable(),
     at: z.string(),
@@ -297,4 +297,38 @@ export function collapseDuplicateQuestions(questions: Question[], now: number): 
     duplicate.closed = { at, reason: `Duplicate of ${of.id}.`, by: null };
     return { closed: duplicate.id, of: of.id };
   });
+}
+
+/**
+ * Invariant an-answer-leaves-needs-you-only-when-delivered. A copied answer, or one put in the agent's chat (Paseo
+ * 0.16), is the developer's to send: until it is, it stays in Needs you as waiting to be sent. It counts as delivered
+ * when a turn of an agent in its workspace ends with a message carrying its marker in the timeline tail the worker
+ * already reads at turn end (`deliveredInChat`, server/turn-events.ts), or when the developer signs that agent's row
+ * off (they edited the marker away, or answered another way). 2026-11-13: Copy recorded the answer and the question left
+ * Needs you at once, though nothing had been sent.
+ */
+export const awaitingSend = (q: Pick<Question, "answer">) => q.answer?.by === "developer" && (q.answer.delivery.state === "copied" || q.answer.delivery.state === "in-chat");
+/** What marks a pasted or composer-sent answer in the agent's chat: answerMessage's first words. */
+export const answerMarker = (id: string) => `${ANSWER_PREFIX} ${id} (`;
+
+/** Marks each answer waiting to be sent whose marker is in one of `texts` (the developer's messages to `agentId`) as sent to it. */
+export function deliveredInChat(questions: Question[], agentId: string, texts: readonly string[], at: string): string[] {
+  const done: string[] = [];
+  for (const q of questions) {
+    if (!awaitingSend(q) || !texts.some(t => t.includes(answerMarker(q.id)))) continue;
+    q.answer!.delivery = { state: "sent", to: agentId, messageId: null, at, reason: null };
+    done.push(q.id);
+  }
+  return done;
+}
+
+/** The developer signed `agentId`'s row off: answers waiting to be sent to it stop waiting. */
+export function signedOffAnswers(questions: Question[], recipients: (q: Question) => readonly string[], agentId: string, at: string): string[] {
+  const done: string[] = [];
+  for (const q of questions) {
+    if (!awaitingSend(q) || !recipients(q).includes(agentId)) continue;
+    q.answer!.delivery = { state: "signed-off", to: agentId, messageId: null, at, reason: null };
+    done.push(q.id);
+  }
+  return done;
 }

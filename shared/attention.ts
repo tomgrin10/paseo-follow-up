@@ -7,7 +7,7 @@ import { orderedStacks, settledForDisplay } from "./presentation";
 import { githubApproved, graphiteReady, isGithubFlow, mergeBlockers, prActionBlocks } from "./pr-actions";
 import { configuredReviewers, noReviewers, reviewersAsk, suggestedReviewers } from "./reviewers";
 import { agentMerges } from "./pr-workflow";
-import { isOpen as questionOpen, questionState, type QuestionState } from "./questions";
+import { awaitingSend, isOpen as questionOpen, questionState, type QuestionState } from "./questions";
 
 /** One colour language for the stack bar, rail nodes and overview bars. */
 export type PrTone = "merged" | "approved" | "danger" | "warning" | "pending" | "draft" | "closed" | "unknown";
@@ -88,7 +88,7 @@ export type NeedItem =
   | { kind: "send"; key: string; batchId: string; title: string; tasks: string[]; blocker: string | null; finish?: true }
   | { kind: "decision"; key: string; obligationId: string; title: string; detail: string }
   | { kind: "question"; key: string; questionId: string; title: string; detail: string; state: QuestionState; big: string | null }
-  | { kind: "answer"; key: string; questionId: string; title: string; detail: string }
+  | { kind: "answer"; key: string; questionId: string; title: string; detail: string; waiting?: "copied" | "in-chat" }
   | { kind: "check"; key: string; actionId: string; title: string; detail: string }
   | { kind: "merge"; key: string; prKey: string; number: number; title: string; detail: string }
   | { kind: "reviewers"; key: string; prKey: string; number: number; /** Whom Follow-up suggests (reviewerLabel). */ suggested: string[]; title: string; detail: string };
@@ -167,6 +167,13 @@ function computeNeedsYou(w: Workspace, now: number): NeedItem[] {
   // Answers Paseo didn't confirm need a look before anything is sent again.
   for (const q of questions.filter(q => q.answer?.delivery.state === "unconfirmed"))
     items.push({ kind: "answer", key: `answer:${q.id}`, questionId: q.id, title: `Check that the agent got your ${q.id} answer`, detail: q.answer!.delivery.reason ?? "Paseo didn't confirm the message." });
+  // Copied or put in the agent's chat: the developer's to send, so it stays here until it is
+  // (an-answer-leaves-needs-you-only-when-delivered, shared/questions.ts awaitingSend).
+  for (const q of questions.filter(awaitingSend)) {
+    const inChat = q.answer!.delivery.state === "in-chat";
+    items.push({ kind: "answer", key: `answer:${q.id}`, questionId: q.id, waiting: inChat ? "in-chat" : "copied", title: `Your ${q.id} answer isn't sent yet`,
+      detail: inChat ? "It's in the agent's chat. Send it there, or from here." : "You copied it. Paste it into the agent's chat, or send it from here." });
+  }
   for (const q of open.filter(q => questionState(q) !== "stopped")) items.push({ kind: "question", key: `question:${q.id}`, questionId: q.id, title: `${q.id} · ${q.title}`, detail: q.question, state: questionState(q), big: q.big });
   // A blocked task is a question once the server mirrors it; until then it still shows as a decision.
   for (const o of followUpObligations(w).filter(o => blockedOnDeveloper(o) && !questions.some(q => q.taskId === o.id && q.taskRevision !== null)))

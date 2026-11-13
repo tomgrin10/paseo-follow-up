@@ -644,6 +644,18 @@ export function briefAsks<B extends Pick<Brief, "state" | "kind" | "source">>(br
   return !!row?.needs && !!liveBrief(brief) && brief!.source !== "none" && brief!.kind !== "done";
 }
 
+/**
+ * a-brief-without-an-ask-never-sits-beside-needs-you: whether a surface draws the agent's open brief as a card. A real
+ * ask always draws (`briefAsks`). One that isn't ("No ask stated", or a done brief's "Nothing needed") draws only while
+ * nothing in Needs you speaks for the row: beside a drawn item (a question, an answer waiting to be sent) it would say
+ * "nothing to do" right above what there is to do. Home draws through it; the panel draws only real asks (`briefAsks`, which
+ * this implies); the pill draws no brief card, only the flag headline (shared/headline.ts), which defers to Needs you.
+ */
+export function briefCardShown<B extends Pick<Brief, "state" | "kind" | "source">>(brief: B | null | undefined, row: { needs?: unknown } | null | undefined, drawnNeeds: number): brief is B {
+  const b = liveBrief(brief);
+  return !!b && (briefAsks(b, row) || drawnNeeds === 0);
+}
+
 /** The PR an add-reviewers brief asks about: its Add reviewers move's PR. Null for every other kind. */
 export function reviewersBriefPr(b: { kind: string; moves?: readonly { kind: string; prKey?: string | null }[]; prKey?: string }): string | null {
   if (b.kind !== "reviewers") return null;

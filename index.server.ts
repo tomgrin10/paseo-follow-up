@@ -5,8 +5,8 @@ import { PluginMove } from "./server/plugin-move";
 import { moveData, dataDirs, writeLegacyHeartbeat, type DataMove } from "./server/data-move";
 import { isRecovery, withRuntimePrelude, invokeSelf, PLUGIN_ID } from "./shared/legacy";
 import { displayPreferences } from "./shared/display";
-import { DEFAULT_QUESTION_MODE, QUESTION_DEDUPE_MIGRATION, collapseDuplicateQuestions, questionPreferences, type QuestionMode } from "./shared/questions";
-import { askQuestion, needsYouQuestions, recordAnswer, syncTaskQuestions, withdrawQuestion } from "./server/questions";
+import { DEFAULT_QUESTION_MODE, QUESTION_DEDUPE_MIGRATION, awaitingSend, collapseDuplicateQuestions, questionPreferences, signedOffAnswers, type QuestionMode } from "./shared/questions";
+import { answerRecipients, askQuestion, needsYouQuestions, recordAnswer, syncTaskQuestions, withdrawQuestion } from "./server/questions";
 import { agentSetSpec, developerSetSpec } from "./server/spec";
 import type { PluginServerContext, PluginHandlerContext, PluginHookContext, PluginSessionOpenRequest } from "@getpaseo/plugin/server";
 import type { PluginRpcContract, PluginSubscriptionContract } from "@getpaseo/plugin";
@@ -26,6 +26,7 @@ import { type Workspace } from "./shared/model";
 import { createdItems } from "./server/created-items";
 import { isWorkspaceRoot } from "./server/workspace-agent";
 import { BackgroundAgents, backgroundAgentsFile } from "./server/background-agents";
+import { mayEnroll, recordedRecoveryAgent } from "./server/tasks";
 import { Store } from "./server/store";
 import { PriorityStore } from "./server/priorities";
 import { UsageReader } from "./server/usage";
@@ -416,6 +417,8 @@ export default function contribute(server: PluginServerContext) {
   // Wait for background jobs (folded in from paseo-wait): native tools for interactive Claude sessions.
   // Paseo 0.16 runs background jobs itself (features.agentBackgroundWork): Wait retires there (docs/wait.md).
   const hostBackgroundWork = hostFeature("agentBackgroundWork", () => withDaemon(async client => (client as ServerInfoClient).getLastServerInfoMessage?.()));
+  // Paseo 0.16 background agents (features.backgroundAgents): the recovery agent is created background (plan #8).
+  gateway.backgroundAgents = hostFeature("backgroundAgents", () => withDaemon(async client => (client as ServerInfoClient).getLastServerInfoMessage?.()));
   const wait = new Wait(join(directory, "wait"), { enabled: () => agentSettings.waitEnabled(), config: async () => await paseoConfig() as WaitPaseoConfig | null, hostBackgroundWork, legacyDirectory: existsSync(dataDirs(paseoHome).legacy) ? join(dataDirs(paseoHome).legacy, "wait") : null });
   const currentWait = async () => waitStatus(await agentSettings.waitEnabled(), await paseoConfig() as WaitPaseoConfig | null, await hostBackgroundWork());
   const live = async (agentId: string): Promise<Live> => ({ role: scopes(await store.snapshot())[agentId]?.role ?? null, inbox: (await inboxSettings()).enable_inbox });
@@ -552,7 +555,7 @@ export default function contribute(server: PluginServerContext) {
   handle(rpc.enrollRpc, async ({ agentId, workspaceId, goal }, { paseo }) => {
     await requireReady();
     const agent = (await paseo.agents.ref(agentId).refresh())?.agent;
-    if (!agent?.workspaceId || !await isWorkspaceRoot(agent, async id => (await paseo.agents.ref(id).refresh())?.agent)) throw new Error("Choose an available main agent in this workspace.");
+    if (!agent?.workspaceId || !await mayEnroll(await store.snapshot(), agent, async id => (await paseo.agents.ref(id).refresh())?.agent)) throw new Error("Choose an available main agent in this workspace.");
     if (workspaceId && workspaceId !== agent.workspaceId) throw new Error("The chosen agent belongs to another workspace.");
     await callerWorkspaceId(agentId, paseo);
     const workspace = await paseo.workspaces.ref(agent.workspaceId).refresh();
@@ -1180,7 +1183,18 @@ export default function contribute(server: PluginServerContext) {
   handle(rpc.inboxListRpc, async ({ etag }) => { await requireReady(); const handedBack = noReviewRepoList().length ? (await store.snapshot()).workspaces.flatMap(w => w.prs.filter(handsMergeBack).map(p => p.key)) : [];
     return inboxAnswer({ ...await inbox.list(), error: inboxError, ...(handedBack.length ? { handedBack } : {}) }, etag); });
   handle(rpc.inboxBriefRpc, async ({ agentId }) => { await requireReady(); return { brief: await inbox.brief(agentId) }; });
-  handle(rpc.inboxActRpc, async (input, context) => { await requireReady(); const out = await inbox.act(input, actorOf(context)); feeds.inbox(); return out; });
+  handle(rpc.inboxActRpc, async (input, context) => {
+    await requireReady();
+    const out = await inbox.act(input, actorOf(context));
+    // Signing an agent's row off also settles an answer the developer copied or put in its chat and Follow-up never
+    // saw arrive (the marker edited away, or answered another way): an-answer-leaves-needs-you-only-when-delivered.
+    if (input.action === "sign_off" || input.action === "mute_turn") for (const r of out.results.filter(r => r.ok)) {
+      const w = agentTrackedWorkspace(await store.snapshot(), r.agentId);
+      if (w?.questions.some(awaitingSend)) await store.mutateWorkspace(w.id, current => { signedOffAnswers(current.questions, q => answerRecipients(current, q), r.agentId, new Date().toISOString()); });
+    }
+    feeds.inbox();
+    return out;
+  });
 
   // Subscriptions (Paseo 0.16): every open client used to poll these reads (about 17 a minute for an idle Home); now
   // the worker pushes from state it already holds, one shared serve per topic (server/feeds.ts, invariant
@@ -1375,7 +1389,10 @@ export default function contribute(server: PluginServerContext) {
     server.before("agent.session_open", withWait(async ({ request }, { paseo }) => {
       await ready;
       if (loadError || stopped || request.purpose !== "interactive") return request;
-      if (await isBackground(request.agentId, paseo)) return request;
+      // A background agent gets no Follow-up treatment, except Follow-up's own recovery agent: exempt by Follow-up's
+      // record (a recovery batch names it as recipient), never by labels, which any plugin can write. Without this, a
+      // background recovery agent loses its tools on its second session (resume, reload, plugin update).
+      if (await isBackground(request.agentId, paseo) && !recordedRecoveryAgent(await store.snapshot(), request.agentId)) return request;
       // The Overseer: needs_you (no Stop-hook nudge), the action tools and its routing tools. Never tracked.
       if (request.labels[OVERSEER_LABEL] === "1" && ["claude", "codex"].includes(request.provider)) {
         const env = { ...request.env, FOLLOW_UP_OVERSEER: "1", FOLLOW_UP_BRIEF: request.provider };

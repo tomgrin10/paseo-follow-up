@@ -46,6 +46,12 @@
   - **Recovery agents:** a separate agent that reads history for missed PRs and tasks, and never edits code.
     `server/recovery-config.ts` applies Settings → Agents' recovery role; `server/recovery-handoff.ts` proves a
     handoff without reading timelines.
+    On a host that advertises `features.backgroundAgents` (Paseo 0.16) it is created `background: true`
+    (`withBackground` in `server/daemon.ts`): no tab, no notification, no sidebar row; its batch shows in the panel.
+    Follow-up skips background agents at `agent.session_open`, except the one its own record names as a recovery
+    recipient (`recordedRecoveryAgent` in `server/tasks.ts`, never labels), so it keeps its tools on every session.
+    No plugin API releases an agent by id, so "unloads" means host-collectable: a settled batch leaves nothing that
+    vetoes Paseo's idle-runtime cleanup (`recoveryCollectable`). Paseo 0.15 creates it exactly as before.
 - **The PR owner.** `server/pr-owner.ts` records the latest explicit registering agent on each PR. Legacy
   registrations keep their workspace main. Duplicate claims are ambiguous: never route by recency or by title.
 
@@ -237,7 +243,9 @@ The invariants in `shared/status-invariants.ts` check these over a grid of state
 - `server/questions.ts` and `shared/questions.ts` (adapted from Progress): refs Q1, Q2…, lettered options, a
   recommendation, and what the agent does while it waits.
 - The question mode (Stop, Work around, Keep building) is a host setting, `questionPreferences`.
-- Answers from the UI go through `follow.answer-question`: Send, Copy or Resend. An answer the agent can't take yet
+- Answers from the UI go through `follow.answer-question`: Send, Copy, Put in chat (`chat`, Paseo 0.16) or Resend.
+  Copy and Put in chat record the answer as `copied` or `in-chat` and send nothing; it waits in Needs you until it is
+  delivered ([needs-you.md](needs-you.md#answers-waiting-to-be-sent)). An answer the agent can't take yet
   queues, and the engine delivers it on a later tick.
 - Answers given in chat are recorded with `record_answer`.
 - **Something else on every question with options.** A built-in last choice, recorded as `choice: "other"` with

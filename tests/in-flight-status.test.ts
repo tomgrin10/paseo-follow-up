@@ -57,7 +57,7 @@ async function inbox(agents: AgentInfo[]) {
     guard: async () => null, graceMs: 5, settleMs: 40, settleStepMs: 5, now: () => now,
     briefs: { async sink() {}, async call() { return null; }, async pr() { return null; }, async prs() { return []; } },
   });
-  await box.store.mutate(s => { s.importedAt = iso(-10); s.lastSeen = iso(-5); s.primedAt = iso(-10); });
+  await box.store.mutate(s => { s.importedAt = iso(-10); s.lastSeen = iso(-5); s.primedAt = iso(-10); s.notifiedAt = iso(-10); });
   return { box, advance: (min: number) => { now += min * 60_000; }, entry: async (id = "main-agent") => (await box.store.snapshot()).entries[id], done: () => rm(dir, { recursive: true, force: true }) };
 }
 
