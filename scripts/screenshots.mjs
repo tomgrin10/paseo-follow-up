@@ -1445,8 +1445,10 @@ async function mergeClickShots({ shoot, billing }) {
     await page.getByText(/Merging…/).filter({ visible: true }).first().waitFor();
     await shoot.now(`mc-merging-${size}-${theme}`, page, theme);
     await page.getByText(r.merged).filter({ visible: true }).first().waitFor({ timeout: 90_000 });
-    // The toast and the header say the same thing (a-merge-outcome-reads-the-same-everywhere): capture both.
-    if (r.header) await page.getByRole("progressbar", { name: r.header }).filter({ visible: true }).first().waitFor({ timeout: 15_000 });
+    // The toast shows once the header and rows read the merge (a-merge-outcome-reads-the-same-everywhere): catch the
+    // toast beside them before it closes, then the settled frame.
+    if (r.header) await page.getByRole("progressbar", { name: r.header }).filter({ visible: true }).first().waitFor({ timeout: 2_000 });
+    await shoot.now(`mc-toast-${size}-${theme}`, page, theme);
   };
   await shoot("mc-done-home-phone-light", PHONE, "light", click(single, "light", phone, "home-phone"));
   await shoot("mc-done-panel-dark", TALL, "dark", click(stackRow, "dark", panel, "panel"));
