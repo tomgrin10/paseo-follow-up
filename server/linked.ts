@@ -23,7 +23,7 @@ export type LinkedSources = {
   teams(): Promise<string[]>;
 };
 
-/** `linear:list_teams` text: JSON with team objects carrying `key`, or anything with "key": "HER" pairs. */
+/** `linear:list_teams` text: JSON with team objects carrying `key`, or anything with "key": "ACME" pairs. */
 export function parseLinearTeams(text: string): string[] {
   const keys = new Set<string>();
   const visit = (v: unknown) => {
@@ -88,7 +88,7 @@ export class LinkedService {
    */
   async link(workspaceId: string, raw: string, opts: { origin: "registered" | "manual"; by: string; why?: string | null; title?: string | null }): Promise<LinkResult> {
     const c = classifyLink(raw, true);
-    if (!c) return { ok: false, reason: "Not a link or a Linear key. Give an http(s) URL or a key like HER-1312." };
+    if (!c) return { ok: false, reason: "Not a link or a Linear key. Give an http(s) URL or a key like ACME-1312." };
     if (c.kind === "pr") return { ok: false, reason: `${c.key} is a pull request, not a linked item. Register it with register_pr.` };
     const now = this.now();
     let facts: LinearIssueFacts | null = null;

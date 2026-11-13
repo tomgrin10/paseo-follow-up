@@ -19,7 +19,7 @@ Paseo's plugin listing. [PRODUCT.md](PRODUCT.md) and [DESIGN.md](DESIGN.md) cove
   `scripts/rename-legacy-name.mjs` fixes the mechanical cases. Keep the `follow.*` RPC names and the `follow_*` tool
   names. Never reset tracked work or settings during an upgrade; 2.0 moves 1.x's data and plugin id once
   ([docs/updates.md](docs/updates.md#moving-from-1x)).
-- Never commit credentials, daemon state, transcripts or local machine paths. Follow-up is public: prompts, prefixes, tool text and UI copy say "the developer" (they/their), never a person's name (tests/no-personal-names.test.ts). Where old text is matched, such as the Overseer's forward prefix, keep recognising the legacy spelling.
+- Never commit credentials, daemon state, transcripts or local machine paths. Follow-up is public: prompts, prefixes, tool text and UI copy say "the developer" (they/their), never a person's name (tests/no-personal-names.test.ts). Fixtures and renders use fictional names (`acme-*`), never the company, its people, customers or ticket keys, the machine or its user (`scripts/real-names.mjs`, tests/no-real-names.test.ts). Where old text is matched, such as the Overseer's forward prefix, keep recognising the legacy spelling.
 - Boolean settings use positive `enable_` names.
 - Subprocesses take argument arrays, never a shell.
 - Minimum Paseo is 0.15.0 (`requirements.paseo`). Agent tools are native; the stdio bridge stays as the fallback for hosts

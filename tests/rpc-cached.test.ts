@@ -60,7 +60,7 @@ test("usage's first read, with nothing cached and Smart Session silent, answers 
 
 async function aboutService(history: () => Promise<unknown>) {
   const dir = await mkdtemp(join(tmpdir(), "follow-about-ack-"));
-  const w = workspace({ id: "w1", title: "Vendor query", goal: "Speed up the vendor activity query (HER-1312)", mainAgentId: "a1", prs: [] });
+  const w = workspace({ id: "w1", title: "Vendor query", goal: "Speed up the vendor activity query (ACME-1312)", mainAgentId: "a1", prs: [] });
   const ctx = { history, subagents: async () => [] } as unknown as AboutContext;
   const s = new AboutService({
     store: new AboutStore(dir), jobs: new AiJobs({ runner: () => hang() }), sources: {} as never,
@@ -68,7 +68,7 @@ async function aboutService(history: () => Promise<unknown>) {
   });
   return { s, done: () => rm(dir, { recursive: true, force: true }) };
 }
-const linked = (v: { links: { key: string }[] }) => v.links.some(l => l.key === "HER-1312");
+const linked = (v: { links: { key: string }[] }) => v.links.some(l => l.key === "ACME-1312");
 
 test("workspace-about: a fast read of the inputs answers in full on the first reply, links included", async () => {
   const { s, done } = await aboutService(async () => ({ first: [], items: [], source: "live" }));

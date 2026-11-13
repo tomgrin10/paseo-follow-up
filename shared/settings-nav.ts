@@ -85,7 +85,7 @@ export const isViewKey = (key: string) => key === CATEGORY_KEY || key.startsWith
 const names = (list: readonly ReviewerEntry[], max = 3) => list.length <= max ? list.map(reviewerLabel).join(", ") : `${list.slice(0, max).map(reviewerLabel).join(", ")} +${list.length - max}`;
 /** Anything saved: then Reviewers starts collapsed, since it's set up. */
 export const reviewersConfigured = (config: Pick<ReviewerConfig, "defaults" | "repos">) => config.defaults.length > 0 || Object.values(config.repos).some(l => l.length > 0);
-/** "3 own lists · default: Uri, Yuval", "No lists yet". Counts repositories with their own list. */
+/** "3 own lists · default: Omar, Lena", "No lists yet". Counts repositories with their own list. */
 export function reviewersSummary(config: Pick<ReviewerConfig, "defaults" | "repos">): string {
   const own = Object.values(config.repos).filter(l => l.length > 0).length;
   const parts = [own ? `${own} own list${own === 1 ? "" : "s"}` : "", config.defaults.length ? `default: ${names(config.defaults)}` : ""].filter(Boolean);

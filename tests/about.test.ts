@@ -27,22 +27,22 @@ const iso = (minutesAgo: number) => new Date(NOW - minutesAgo * 60_000).toISOStr
 
 test("extracts Linear keys, Slack, GitHub, Linear, claude.ai and doc links, deduped in first-seen order", () => {
   const links = extractLinks([
-    "Fixing HER-1312 and her-9 (lower case isn't a key). See HER-1312 again.",
+    "Fixing ACME-1312 and acme-9 (lower case isn't a key). See ACME-1312 again.",
     "Thread: https://acme.slack.com/archives/C07ABCDEF/p1731140000123456 and the same https://acme.slack.com/archives/C07ABCDEF/p1731140000123456.",
     "Reply link https://acme.slack.com/archives/C07ABCDEF/p1731149999000001?thread_ts=1731140000.123456&cid=C07ABCDEF",
     "PR https://github.com/tomgrin10/paseo-follow-up/pull/24, graphite https://app.graphite.com/github/pr/tomgrin10/paseo-follow-up/24/title",
-    "Issue https://linear.app/acme/issue/HER-1312/vendor-service-accounts and plan https://claude.ai/artifact/abc-123 and https://docs.google.com/document/d/xyz/edit#heading=1",
-    "UTF-8, ISO-8601, SHA-256 and GPT-4 are not issues; HER-0 isn't either. https://example.com/page is ignored.",
+    "Issue https://linear.app/acme/issue/ACME-1312/vendor-service-accounts and plan https://claude.ai/artifact/abc-123 and https://docs.google.com/document/d/xyz/edit#heading=1",
+    "UTF-8, ISO-8601, SHA-256 and GPT-4 are not issues; ACME-0 isn't either. https://example.com/page is ignored.",
   ]);
   assert.deepEqual(links.map(l => l.key), [
-    "HER-1312",
+    "ACME-1312",
     "slack:C07ABCDEF/1731140000.123456",
     "tomgrin10/paseo-follow-up#24",
     "https://claude.ai/artifact/abc-123",
     "https://docs.google.com/document/d/xyz/edit",
   ]);
   // The bare key gained the Linear URL seen later; the reply link folded into its thread.
-  assert.equal(links[0].url, "https://linear.app/acme/issue/HER-1312/vendor-service-accounts");
+  assert.equal(links[0].url, "https://linear.app/acme/issue/ACME-1312/vendor-service-accounts");
   assert.equal(links[2].url, "https://github.com/tomgrin10/paseo-follow-up/pull/24");
   assert.ok(links.every(l => l.title === null), "extraction never writes titles");
 });
@@ -55,15 +55,15 @@ test("URL classification trims trailing punctuation and rejects non-thread Slack
 });
 
 test("Linear keys come from branch names", () => {
-  assert.deepEqual(keysFromBranch("tom/her-1312-vendor-fix"), ["HER-1312"]);
+  assert.deepEqual(keysFromBranch("tom/acme-1312-vendor-fix"), ["ACME-1312"]);
   assert.deepEqual(keysFromBranch("feature/utf-8-cleanup"), []);
   assert.deepEqual(keysFromBranch(null), []);
 });
 
 test("workspace links include the workspace's own PRs and keys from its branches", () => {
-  const w = workspace({ title: "Investigate and plan database query fix", goal: "Look into the vendor activity query (HER-1290)", prs: [pr({ key: "acme/api#1352", repo: "acme/api", number: 1352, snapshot: snapshot({ title: "Speed up vendor activity", headBranch: "tom/her-1312-index", state: "MERGED" }) })] });
-  const links = workspaceLinks({ workspaceId: w.id, source: "live", title: w.title, goal: w.goal, branches: ["tom/her-1312-index"], firstMessages: [w.goal], tail: [], subagents: [], prs: [{ key: "acme/api#1352", title: "Speed up vendor activity", state: "MERGED" }], linkTexts: [w.title, w.goal] });
-  assert.deepEqual(links.map(l => l.key), ["HER-1312", "HER-1290", "acme/api#1352"]);
+  const w = workspace({ title: "Investigate and plan database query fix", goal: "Look into the vendor activity query (ACME-1290)", prs: [pr({ key: "acme/api#1352", repo: "acme/api", number: 1352, snapshot: snapshot({ title: "Speed up vendor activity", headBranch: "tom/acme-1312-index", state: "MERGED" }) })] });
+  const links = workspaceLinks({ workspaceId: w.id, source: "live", title: w.title, goal: w.goal, branches: ["tom/acme-1312-index"], firstMessages: [w.goal], tail: [], subagents: [], prs: [{ key: "acme/api#1352", title: "Speed up vendor activity", state: "MERGED" }], linkTexts: [w.title, w.goal] });
+  assert.deepEqual(links.map(l => l.key), ["ACME-1312", "ACME-1290", "acme/api#1352"]);
   assert.equal(links[2].title, "Speed up vendor activity");
 });
 
@@ -169,10 +169,10 @@ test("the claude call strips tools, MCP, settings and sessions; the envelope giv
 // ---------- sources ----------
 
 test("mcpproxy output: banner skipped, the map wrapper unwrapped, tool errors thrown", () => {
-  const inner = JSON.stringify({ id: "HER-1", title: "Synthetic issue", status: "In Progress", priority: { value: 2, name: "High" }, dueDate: "2026-11-12", url: "https://linear.app/x/issue/HER-1/s", description: "d" });
+  const inner = JSON.stringify({ id: "ACME-1", title: "Synthetic issue", status: "In Progress", priority: { value: 2, name: "High" }, dueDate: "2026-11-12", url: "https://linear.app/x/issue/ACME-1/s", description: "d" });
   const stdout = `🚀 Tool Call\n━━━━\n${JSON.stringify({ content: [{ type: "text", text: `[map[text:${inner} type:text]]` }], isError: false })}`;
   const issue = parseLinearIssue(mcpproxyText(stdout));
-  assert.deepEqual(issue, { title: "Synthetic issue", state: "In Progress", priority: "High", due: "2026-11-12", url: "https://linear.app/x/issue/HER-1/s", description: "d" });
+  assert.deepEqual(issue, { title: "Synthetic issue", state: "In Progress", priority: "High", due: "2026-11-12", url: "https://linear.app/x/issue/ACME-1/s", description: "d" });
   assert.throws(() => mcpproxyText(JSON.stringify({ content: [{ text: "boom" }], isError: true })), /boom/);
   assert.throws(() => mcpproxyText("Error: daemon not running"), /no result/);
   assert.equal(parseLinearIssue("Issue not found"), null);
@@ -186,22 +186,22 @@ test("Slack thread parsing reads JSON or the text rendering", () => {
 });
 
 const fakeSources = (over: Partial<AboutSources> = {}): AboutSources => ({
-  async linear(key) { return key === "HER-404" ? null : { title: `Issue ${key}`, state: "Todo", priority: "High", due: null, url: `https://linear.app/x/issue/${key}/s`, description: "desc" }; },
+  async linear(key) { return key === "ACME-404" ? null : { title: `Issue ${key}`, state: "Todo", priority: "High", due: null, url: `https://linear.app/x/issue/${key}/s`, description: "desc" }; },
   async slack() { return { channel: "eng", who: "Dana Synthetic", excerpt: "ping" }; },
   async pr(repo, n) { return { title: `PR ${n}`, state: "OPEN", body: "body" }; },
   ...over,
 });
 
 test("never invent: unknown Linear keys drop, a failed source keeps the bare link and is named", async () => {
-  const links = extractLinks(["HER-1 HER-404 https://acme.slack.com/archives/C1/p1731140000123456 https://github.com/a/b/pull/2"]);
+  const links = extractLinks(["ACME-1 ACME-404 https://acme.slack.com/archives/C1/p1731140000123456 https://github.com/a/b/pull/2"]);
   const ok = await enrichLinks(links, fakeSources());
-  assert.deepEqual(ok.links.map(l => l.key), ["HER-1", "slack:C1/1731140000.123456", "a/b#2"]);
-  assert.equal(ok.links[0].title, "Issue HER-1"); assert.equal(ok.links[1].who, "Dana Synthetic"); assert.deepEqual(ok.failed, []);
+  assert.deepEqual(ok.links.map(l => l.key), ["ACME-1", "slack:C1/1731140000.123456", "a/b#2"]);
+  assert.equal(ok.links[0].title, "Issue ACME-1"); assert.equal(ok.links[1].who, "Dana Synthetic"); assert.deepEqual(ok.failed, []);
   const down = await enrichLinks(links, fakeSources({ async slack() { throw new Error("mcpproxy down"); }, async linear() { throw new Error("mcpproxy down"); } }));
   assert.deepEqual(down.failed.sort(), ["Linear", "Slack"]);
   const slack = down.links.find(l => l.kind === "slack")!;
   assert.equal(slack.title, null); assert.equal(slack.excerpt, null); assert.ok(slack.url);
-  assert.ok(down.links.some(l => l.key === "HER-404"), "unread keys stay bare rather than dropped");
+  assert.ok(down.links.some(l => l.key === "ACME-404"), "unread keys stay bare rather than dropped");
 });
 
 test("never invent: the line under the title is the sentence, else the goal, else Writing a summary… while one is written", () => {
@@ -220,22 +220,22 @@ test("never invent: the line under the title is the sentence, else the goal, els
   const failed = summaryDisplay({ ...empty, status: "failed", error: "The reply was longer than allowed." }, NOW);
   assert.deepEqual([failed.failed, failed.sentence], [true, null]);
   assert.equal(footerText({ ...record, basis: { chat: false, source: "live", prs: 0, issues: [] } }, NOW), "Summarized 2h ago");
-  assert.deepEqual(linkLine({ kind: "linear", key: "HER-1", url: null, title: "T", state: "Todo", priority: "High", due: "2026-11-12", who: null, excerpt: null }), { lead: "HER-1", title: "T", meta: ["Todo", "High", "due 2026-11-12"] });
+  assert.deepEqual(linkLine({ kind: "linear", key: "ACME-1", url: null, title: "T", state: "Todo", priority: "High", due: "2026-11-12", who: null, excerpt: null }), { lead: "ACME-1", title: "T", meta: ["Todo", "High", "due 2026-11-12"] });
 });
 
 // ---------- inputs and the service ----------
 
 const items = [
-  { type: "user_message", text: "Investigate why the vendor activity query is slow (HER-1312)" },
+  { type: "user_message", text: "Investigate why the vendor activity query is slow (ACME-1312)" },
   { type: "reasoning", text: "secret thoughts" },
   { type: "tool_call", name: "Bash", status: "completed", detail: { output: "https://github.com/acme/api/pull/1352" } },
-  { type: "assistant_message", text: "Opened PR #1352 with the index. Waiting on Hadar to review." },
+  { type: "assistant_message", text: "Opened PR #1352 with the index. Waiting on Mira to review." },
   { type: "user_message", text: "Workspace Follow-up batch 1: fix the CI" },
 ];
 
 test("timeline lines keep the developer and agent words, drop reasoning and Follow-up's own messages, and keep tool output for links only", () => {
   const t = tailLines(items);
-  assert.deepEqual(t.lines, ["Developer: Investigate why the vendor activity query is slow (HER-1312)", "(tool: Bash)", "Agent: Opened PR #1352 with the index. Waiting on Hadar to review."]);
+  assert.deepEqual(t.lines, ["Developer: Investigate why the vendor activity query is slow (ACME-1312)", "(tool: Bash)", "Agent: Opened PR #1352 with the index. Waiting on Mira to review."]);
   assert.ok(t.raw.some(r => r.includes("acme/api/pull/1352")));
   assert.ok(!t.lines.join("\n").includes("secret"));
 });
@@ -243,7 +243,7 @@ test("timeline lines keep the developer and agent words, drop reasoning and Foll
 const ctx = (over: Partial<AboutContext> = {}): AboutContext => ({ async history() { return { first: [], items, source: "live" as const }; }, async subagents() { return ["Benchmark the index"]; }, ...over });
 
 test("the Summary prompt asks for one sentence of purpose and sends only name, goal, first asks and PR titles", async () => {
-  const w = workspace({ title: "Investigate and plan database query fix", goal: "Investigate why the vendor activity query is slow (HER-1312)", prs: [pr({ snapshot: snapshot({ title: "Add an index for vendor activity" }) })] });
+  const w = workspace({ title: "Investigate and plan database query fix", goal: "Investigate why the vendor activity query is slow (ACME-1312)", prs: [pr({ snapshot: snapshot({ title: "Add an index for vendor activity" }) })] });
   const inputs = await collectInputs(w, ctx({ async history() { return { first: [], items: Array.from({ length: 200 }, (_, i) => ({ type: "assistant_message", text: `step ${i} ${"x".repeat(900)}` })), source: "live" as const }; } }));
   const prompt = summaryPrompt(inputs);
   assert.ok(prompt.length < 3000, `small: ${prompt.length} chars`);
@@ -277,7 +277,7 @@ test("an over-long reply fails the job and keeps the previous sentence", async (
 test("older long overviews are never shown; the first view writes the sentence", async () => {
   const { s, dir, calls } = await service();
   try {
-    const old: AboutRecord = { workspaceId: "w1", inputsHash: "old", generatedAt: iso(5), gist: "Fix slow vendor-activity query; PR #1352 merged, waiting on Hadar", overview: "A long overview.", links: [], basis: { chat: true, source: "live", prs: 1, issues: [] }, failed: [], costUsd: null };
+    const old: AboutRecord = { workspaceId: "w1", inputsHash: "old", generatedAt: iso(5), gist: "Fix slow vendor-activity query; PR #1352 merged, waiting on Mira", overview: "A long overview.", links: [], basis: { chat: true, source: "live", prs: 1, issues: [] }, failed: [], costUsd: null };
     await new AboutStore(dir).mutate(f => { f.entries.w1 = old; });
     const collapsed = await s.view("w1");
     assert.equal(collapsed.record, null, "nothing until the new sentence exists");
@@ -291,7 +291,7 @@ test("older long overviews are never shown; the first view writes the sentence",
 async function service(over: { runner?: Runner; sources?: AboutSources; usage?: number; room?: boolean; ws?: ReturnType<typeof workspace>[]; role?: () => Promise<{ provider: string; model: string | null; thinking: string | null; dailyCap: number | null; maxPromptChars: number | null }> } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "about-"));
   let now = NOW;
-  const all = over.ws ?? [workspace({ id: "w1", title: "Investigate and plan database query fix", goal: "Investigate why the vendor activity query is slow (HER-1312)", mainAgentId: "a1", prs: [] })];
+  const all = over.ws ?? [workspace({ id: "w1", title: "Investigate and plan database query fix", goal: "Investigate why the vendor activity query is slow (ACME-1312)", mainAgentId: "a1", prs: [] })];
   let calls = 0;
   const runner: Runner = over.runner ?? (async () => { calls++; return { text: JSON.stringify({ sentence: "Speed up the vendor activity query so the vendor page loads fast." }), costUsd: 0.0012, inputTokens: 1500, outputTokens: 80 }; });
   const s = new AboutService({
@@ -307,14 +307,14 @@ test("the service: collapsed reads only the cache; open writes once; unchanged i
   try {
     const collapsed = await s.view("w1");
     assert.equal(collapsed.status, "idle"); assert.equal(calls(), 0, "collapsed never starts a job");
-    assert.equal((await s.view("w1")).firstMessage, "Investigate why the vendor activity query is slow (HER-1312)");
+    assert.equal((await s.view("w1")).firstMessage, "Investigate why the vendor activity query is slow (ACME-1312)");
     const first = await s.view("w1", { open: true });
-    assert.equal(first.status, "pending"); assert.equal(first.firstMessage, "Investigate why the vendor activity query is slow (HER-1312)");
-    assert.ok(first.links.some(l => l.key === "HER-1312"));
+    assert.equal(first.status, "pending"); assert.equal(first.firstMessage, "Investigate why the vendor activity query is slow (ACME-1312)");
+    assert.ok(first.links.some(l => l.key === "ACME-1312"));
     const done = await s.view("w1", { open: true, wait: true });
     assert.equal(done.status, "ready"); assert.equal(done.record?.gist, "Speed up the vendor activity query so the vendor page loads fast.");
     assert.equal(done.record?.costUsd, 0.0012);
-    assert.deepEqual(done.record?.links.map(l => l.key), ["HER-1312", "acme/api#1352"]);
+    assert.deepEqual(done.record?.links.map(l => l.key), ["ACME-1312", "acme/api#1352"]);
     assert.deepEqual(done.record?.basis.issues, [], "no source is read for the sentence");
     assert.equal(calls(), 1);
     await s.view("w1", { open: true, wait: true });
@@ -357,12 +357,12 @@ test("background: under the daily cap, skipped above 85% usage", async () => {
 test("workspace_about returns the Summary sentence and links, and refresh rewrites it like the panel's button", async () => {
   const { s, dir, calls } = await service();
   try {
-    const w = workspace({ id: "w1", title: "Investigate and plan database query fix", goal: "Investigate why the vendor activity query is slow (HER-1312)", mainAgentId: "a1" });
+    const w = workspace({ id: "w1", title: "Investigate and plan database query fix", goal: "Investigate why the vendor activity query is slow (ACME-1312)", mainAgentId: "a1" });
     const actions = new AgentActions({ store: { snapshot: async () => ({ workspaces: [w] }) as never, mutate: async () => { throw new Error("read-only"); } }, prActions: {} as never, engine: {} as never, inbox: {} as never, about: s });
     assert.ok(READ_ONLY_TOOLS.includes("workspace_about"));
     const out = await actions.run("caller", "workspace_about", { workspaceId: "Investigate and plan database query fix" }) as { status: string; summary: string; gist: string; links: { key: string }[] };
     assert.equal(out.status, "ready"); assert.match(out.summary, /vendor activity query/); assert.equal(out.gist, out.summary);
-    assert.ok(out.links.some(l => l.key === "HER-1312"));
+    assert.ok(out.links.some(l => l.key === "ACME-1312"));
     await assert.rejects(actions.run("caller", "workspace_about", { workspaceId: "nope" }), /No tracked workspace/);
     // Agent parity with the panel's Rewrite: refresh writes a new sentence even when one is cached.
     const before = calls();
@@ -397,14 +397,14 @@ test("transcripts: Claude and Codex files are found from the agent record, injec
     const dir = join(roots.claude, "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-")); await mkdir(dir, { recursive: true });
     await writeFile(join(dir, "sess-1.jsonl"), [
       JSON.stringify({ type: "user", message: { role: "user", content: "<command-name>/clear</command-name>" } }),
-      JSON.stringify({ type: "user", message: { role: "user", content: "Fix the slow vendor query (HER-1312)" } }),
+      JSON.stringify({ type: "user", message: { role: "user", content: "Fix the slow vendor query (ACME-1312)" } }),
       "{not json",
       JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "Opened the PR." }, { type: "tool_use", name: "Bash", input: {} }] } }),
       JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", content: "https://github.com/acme/api/pull/7" }] } }),
       JSON.stringify({ type: "summary", whatever: true }),
     ].join("\n"));
     const claude = await readTranscript(roots.paseoHome, "agent-c", 30, roots);
-    assert.deepEqual(claude?.first.map(i => i.text), ["Fix the slow vendor query (HER-1312)"]);
+    assert.deepEqual(claude?.first.map(i => i.text), ["Fix the slow vendor query (ACME-1312)"]);
     assert.deepEqual(claude?.tail.map(i => i.type), ["user_message", "assistant_message", "tool_call", "tool_call"]);
     assert.match(JSON.stringify(claude?.tail), /pull\/7/);
 
@@ -457,7 +457,7 @@ test("the claude runner kills its whole process tree on timeout and caps stdout"
 test("the footer names where the history came from", () => {
   const r = { generatedAt: iso(5), failed: [], basis: { chat: true, source: "transcript" as const, prs: 1, issues: [] } };
   assert.equal(footerText(r, NOW), "Summarized 5m ago from the saved transcript, 1 PR");
-  assert.equal(footerText({ ...r, basis: { chat: false, source: "none" as const, prs: 0, issues: ["HER-1"] } }, NOW), "Summarized 5m ago from the goal, HER-1");
+  assert.equal(footerText({ ...r, basis: { chat: false, source: "none" as const, prs: 0, issues: ["ACME-1"] } }, NOW), "Summarized 5m ago from the goal, ACME-1");
   assert.equal(footerText({ ...r, basis: { ...r.basis, source: "live" as const } }, NOW), "Summarized 5m ago from the chat, 1 PR");
 });
 

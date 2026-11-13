@@ -97,14 +97,14 @@ test("a blocker the agent can't fix says so, so the agent doesn't retry", () => 
 });
 
 test("the chat only draws a Done card from a reply Follow-up wrote", () => {
-  const input = { summary: "HER-1454 done" };
+  const input = { summary: "ACME-1454 done" };
   assert.equal(toolRow("declare_done", "completed", input, undefined).done, null, "a missing result is not a success");
   assert.equal(toolRow("declare_done", "completed", input, "not json").done, null);
   const refused = toolRow("declare_done", "completed", input, JSON.stringify({ workspaceId: "w", completion: null, blockers: ["Verify production deployment of x#1"] }));
   assert.equal(refused.done, null); assert.equal(refused.tone, "warning");
-  const accepted = toolRow("declare_done", "completed", input, JSON.stringify({ workspaceId: "w", done: true, completion: { summary: "HER-1454 done", declaredAt: "t", unconfirmed: ["x#1"] }, blockers: [] }));
-  assert.deepEqual(accepted.done, { summary: "HER-1454 done", unconfirmed: ["x#1"] });
-  const repeat = toolRow("declare_done", "completed", input, JSON.stringify({ workspaceId: "w", done: true, alreadyDone: true, completion: { summary: "HER-1454 done", declaredAt: "t" }, blockers: [], next: "Already Done" }));
+  const accepted = toolRow("declare_done", "completed", input, JSON.stringify({ workspaceId: "w", done: true, completion: { summary: "ACME-1454 done", declaredAt: "t", unconfirmed: ["x#1"] }, blockers: [] }));
+  assert.deepEqual(accepted.done, { summary: "ACME-1454 done", unconfirmed: ["x#1"] });
+  const repeat = toolRow("declare_done", "completed", input, JSON.stringify({ workspaceId: "w", done: true, alreadyDone: true, completion: { summary: "ACME-1454 done", declaredAt: "t" }, blockers: [], next: "Already Done" }));
   assert.equal(repeat.done, null, "a repeat adds no second card"); assert.match(repeat.line, /Already done/);
   const wrapped = toolRow("declare_done", "completed", input, `Result: ${JSON.stringify({ workspaceId: "w", completion: { summary: "s", declaredAt: "t" }, blockers: [] })}`);
   assert.ok(wrapped.done);

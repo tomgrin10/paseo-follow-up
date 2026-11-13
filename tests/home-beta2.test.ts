@@ -71,10 +71,10 @@ test("Follow every workspace is on by default: discovery follows any project's n
 function fixture() {
   const tracked = [
     ws("okta", { title: "Okta SCIM sync", prs: [pr({ key: "acme/app#1402", number: 1402, stack: "feat/okta-scim", snapshot: snapshot({ title: "Add SCIM provisioning for Okta" }) })] }),
-    ws("vanta", { title: "Fix HER-1312 Vanta custom status approvals", updatedAt: at(10) }),
+    ws("vanta", { title: "Fix ACME-1312 Vanta custom status approvals", updatedAt: at(10) }),
     ws("billing", { title: "Billing cleanup", goal: "Ask finance about okta invoices" }),
   ];
-  const paseo = [lite("okta", { name: "Okta SCIM sync", branch: "feat/okta-scim" }), lite("vanta", { name: "Fix HER-1312 Vanta custom status approvals", branch: "tom/her-1312-vanta" }),
+  const paseo = [lite("okta", { name: "Okta SCIM sync", branch: "feat/okta-scim" }), lite("vanta", { name: "Fix ACME-1312 Vanta custom status approvals", branch: "tom/acme-1312-vanta" }),
     lite("billing", { name: "Billing cleanup", branch: "chore/billing" }), lite("ramp", { name: "Ramp export", branch: "feat/okta-adjacent", project: "ledger" })];
   const model = buildHome({ rows: [], tracked, paseo, now: NOW });
   const archived = [ws("gone", { title: "Okta legacy connector", archived: true })];
@@ -87,7 +87,7 @@ test("search matches name, branch, PR number and title, Linear keys, agents and 
   assert.equal(keys("scim okta")[0], "ws:okta", "tokens in any order");
   assert.equal(keys("#1402")[0], "ws:okta"); assert.equal(keys("1402")[0], "ws:okta");
   assert.equal(keys("provisioning")[0], "ws:okta", "PR title");
-  assert.equal(keys("HER-1312")[0], "ws:vanta"); assert.equal(keys("her 1312")[0], "ws:vanta");
+  assert.equal(keys("ACME-1312")[0], "ws:vanta"); assert.equal(keys("acme 1312")[0], "ws:vanta");
   assert.equal(keys("chore/billing")[0], "ws:billing", "branch");
   assert.equal(keys("saml adapter")[0], "ws:billing", "a subagent's title");
   assert.deepEqual(keys("ledger"), ["ws:ramp"], "project");
@@ -124,7 +124,7 @@ test("results highlight the title or say where they matched, and providers list 
  */
 test("the sidebar filter keeps exactly what Home search finds (one matcher), in the list's groups and order", async () => {
   const { index, model } = fixture();
-  for (const q of ["okta", "1402", "her-1312", "saml", "chore", "nothing-like-this"]) {
+  for (const q of ["okta", "1402", "acme-1312", "saml", "chore", "nothing-like-this"]) {
     const found = new Set(search(index, q, NOW, Infinity).filter(h => h.group !== "archived").map(h => h.key));
     const { model: narrowed, hits } = filterHome(model, index, q, NOW);
     const kept = narrowed.groups.flatMap(g => g.items.map(s => s.key));
@@ -171,13 +171,13 @@ test("rowHit: the match is highlighted where the row shows it, or named as line 
 });
 
 test("searching 100 workspaces and 200 agents stays fast", () => {
-  const tracked = Array.from({ length: 100 }, (_, i) => ws(`w${i}`, { title: `Workspace ${i} HER-${1000 + i}`, prs: [pr({ key: `acme/app#${i}`, number: 2000 + i, snapshot: snapshot({ title: `Change ${i}` }) })] }));
+  const tracked = Array.from({ length: 100 }, (_, i) => ws(`w${i}`, { title: `Workspace ${i} ACME-${1000 + i}`, prs: [pr({ key: `acme/app#${i}`, number: 2000 + i, snapshot: snapshot({ title: `Change ${i}` }) })] }));
   const paseo = tracked.map(w => lite(w.id, { name: w.title, branch: `feat/branch-${w.id}` }));
   const model = buildHome({ rows: [], tracked, paseo, now: NOW });
   const agents = Array.from({ length: 200 }, (_, i) => ({ id: `a${i}`, title: `Agent ${i} reviewing`, workspaceId: `w${i % 100}` }));
   const index = indexDocs(homeSearchDocs({ model, paseo, tracked, agents }));
   const start = performance.now();
-  for (const q of ["work", "her-1050", "2077", "branch w9", "agnet", "reviewing 42"]) search(index, q, NOW);
+  for (const q of ["work", "acme-1050", "2077", "branch w9", "agnet", "reviewing 42"]) search(index, q, NOW);
   assert.ok(performance.now() - start < 200, `six queries took ${performance.now() - start}ms`);
 });
 
@@ -202,14 +202,14 @@ test("each sort reorders inside the group and the group order stays", () => {
 // ---------- priorities ----------
 
 const prio = (workspaceId: string, score: number, minutesAgo: number, reason = `Reason ${workspaceId}`): Priority =>
-  ({ workspaceId, score, reason, sources: [{ kind: "linear", label: "HER-1" }], at: at(minutesAgo) });
+  ({ workspaceId, score, reason, sources: [{ kind: "linear", label: "ACME-1" }], at: at(minutesAgo) });
 
 test("fresh priorities rank Needs you but never above a blocking ask; stale ones fall back to urgency", () => {
   const ranked = sortFixture("priority", [prio("w-new", 90, 12), prio("w-old", 10, 12), prio("w-perm", 5, 12)]);
   assert.deepEqual(needsOrder(ranked), ["perm", "new", "old", "mid"]);
   assert.equal(ranked.rankedAt, at(12)); assert.equal(priorityNote(ranked.rankedAt, NOW), "Ranked 12m ago");
   const row = ranked.byKey.get("agent:new")!;
-  assert.deepEqual(row.priority, { score: 90, reason: "Reason w-new", source: { kind: "linear", label: "HER-1" } });
+  assert.deepEqual(row.priority, { score: 90, reason: "Reason w-new", source: { kind: "linear", label: "ACME-1" } });
   const stale = sortFixture("priority", [prio("w-new", 90, PRIORITY_FRESH_MS / 60_000 + 1)]);
   assert.deepEqual(needsOrder(stale), ["perm", "old", "mid", "new"]);
   assert.equal(stale.rankedAt, null); assert.equal(priorityNote(stale.rankedAt, NOW), "By urgency");
@@ -226,7 +226,7 @@ test("set_priorities plans first, then stores what it showed", async () => {
     inbox: { list: async () => ({ enabled: true, rows: [] }), act: async () => ({ results: [] }), noteAction: async () => {} },
     priorities: { write: async (batch, replace) => { stored.push(batch); assert.equal(replace, false); return batch; } }, now: () => NOW });
   const plan = await actions.run("ranker", "set_priorities", { priorities: [
-    { workspace: "Okta SCIM sync", score: 80, reason: "Blocks the Okta launch", sources: [{ kind: "linear", label: "HER-1402" }] },
+    { workspace: "Okta SCIM sync", score: 80, reason: "Blocks the Okta launch", sources: [{ kind: "linear", label: "ACME-1402" }] },
     { workspace: "nope", score: 10, reason: "x" },
   ] }) as { planId: string; rows: { workspaceId: string | null; blockers: string[] }[] };
   assert.equal(plan.rows[0].workspaceId, "okta"); assert.equal(plan.rows[1].blockers.length, 1); assert.equal(stored.length, 0);
