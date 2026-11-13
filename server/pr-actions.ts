@@ -206,7 +206,7 @@ export class PrActions {
       state = (error instanceof GraphiteWriteError || error instanceof GithubWriteError) && error.uncertain ? "uncertain" : "failed";
       result = error instanceof Error ? error.message : `${via(prs)} action failed.`;
     }
-    await this.store.mutate(s => { const action = findWorkspace(s, w.id).prActions.find(a => a.id === id)!; action.state = state; action.result = result; });
+    await this.store.mutate(s => { const action = findWorkspace(s, w.id).prActions.find(a => a.id === id)!; action.state = state; action.result = result; if (state === "submitted" && merge) action.merge = merge; });
     this.graphite.invalidate();
     return { state, result, ...(state === "submitted" && merge ? { merge } : {}) };
   }

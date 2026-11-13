@@ -1412,7 +1412,7 @@ async function prLinkShots({ shoot, billing }) {
 async function mergeClickShots({ shoot, billing }) {
   const TALL = { width: DESKTOP.width, height: 1100 };
   const single = { title: "Search filters", prompt: WORKSPACES.find(w => w.key === "search").prompt, button: "Merge pull request #151", merged: /Merged #151/ };
-  const stackRow = { title: MERGE_CLICK_STATES[0].title, prompt: MERGE_CLICK_STATES[0].prompt, button: "Merge 3 pull requests in order: #250, #251, then #252", merged: /Merged #252/ };
+  const stackRow = { title: MERGE_CLICK_STATES[0].title, prompt: MERGE_CLICK_STATES[0].prompt, button: "Merge 3 pull requests in order: #250, #251, then #252", merged: /Merged #250, #251, then #252/ };
   const button = (page, name) => page.getByRole("button", { name, exact: true }).filter({ visible: true }).first();
   const panel = async (page, r) => { await page.setViewportSize(TALL); await openChat(page, r.title, r.prompt); await page.getByRole("button", { name: "Follow-up", exact: true }).last().click(); await button(page, r.button).waitFor({ timeout: 60_000 }); };
   const phone = async (page, r) => { await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, r.title)).click(); await button(page, r.button).waitFor({ timeout: 60_000 }); };

@@ -136,6 +136,11 @@ test("merge-click: the button and the toast read one outcome and never disagree"
   assert.deepEqual(r.state === "submitted" && r.stage, "requested", "no stage from the server is never Merged");
   assert.equal(mergeWords(single, r, false, true).button, "Requested");
   assert.equal(mergeWords(single, null, true).button, "Merging…");
+  // Activity says the same outcome: Merged only when the server said merged.
+  const { activity } = await import("../shared/activity");
+  const action = (merge?: "merged" | "queued" | "requested") => ({ id: "a", kind: "merge", prs: ["example/app#151"], heads: {}, createdAt: "2026-01-01T10:00:00Z", state: "submitted", result: "", ...(merge ? { merge } : {}) });
+  const said = (merge?: "merged" | "queued" | "requested") => activity(workspace({ prs: [open(151, null)], prActions: [action(merge)] as never })).find(r => r.key === "action:a")!.text;
+  assert.deepEqual([said("merged"), said("queued"), said("requested"), said()], ["Merged #151", "Queued #151 to merge", "Merge requested for #151", "Merge requested for #151"]);
   // The client shows only mergeWords' toast: no raw server result as the toast.
   const button = await readFile(join(import.meta.dirname, "../client/merge-button.tsx"), "utf8");
   assert.doesNotMatch(button, /toast\.show\(result\.result/);
