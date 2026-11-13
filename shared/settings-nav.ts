@@ -18,13 +18,40 @@ export const DEFAULT_CATEGORY: SettingsCategory = "general";
 export const isCategory = (v: unknown): v is SettingsCategory => typeof v === "string" && SETTINGS_CATEGORIES.some(c => c.id === v);
 export const categoryTitle = (id: SettingsCategory) => SETTINGS_CATEGORIES.find(c => c.id === id)!.title;
 
-/** Per-device view state (web and desktop storage); blocked or missing storage falls back to memory. */
+/**
+ * Per-device view state: the settings category, its section folds, Home's group folds and What's new "seen"
+ * (`view-state-is-per-device-settings-are-per-host`). On Paseo 0.16 these live in the device settings document
+ * `follow-up-view` (client/view-store.ts sets it as the backend once it loads; on the phone that is native storage that
+ * survives reopening the app). Until then, and on 0.15, web and desktop storage (localStorage), else memory. Reads take
+ * the document's value when it has one, else the localStorage cache, so the first paint never flashes the default;
+ * writes go to both while the localStorage cache is kept (one release after 2.1's device settings).
+ * Anything an agent can set (Display, home_sort) stays host-scoped and never comes here.
+ */
 export type KeyValue = { get(key: string): string | null; set(key: string, value: string): void };
 const memory = new Map<string, string>();
-export const deviceStorage: KeyValue = {
-  get(key) { try { const v = (globalThis as { localStorage?: Storage }).localStorage?.getItem(key); if (v != null) return v; } catch { /* memory only */ } return memory.get(key) ?? null; },
-  set(key, value) { memory.set(key, value); try { (globalThis as { localStorage?: Storage }).localStorage?.setItem(key, value); } catch { /* memory only */ } },
+let backend: KeyValue | null = null;
+const viewListeners = new Set<() => void>();
+let viewVersion = 0;
+/** Swap in (or out, with null) the device document behind deviceStorage; re-renders whatever reads view state. */
+export function setDeviceBackend(next: KeyValue | null) { backend = next; if (next) status = "ready"; viewChanged(); }
+/** none: this host keeps no device document (0.15). loading: expected, not loaded yet. ready / failed. */
+export type ViewStatus = "none" | "loading" | "ready" | "failed";
+let status: ViewStatus = "none";
+export const viewStatus = (): ViewStatus => status;
+export function setViewStatus(next: ViewStatus) { if (status !== next) { status = next; viewChanged(); } }
+export function viewChanged() { viewVersion++; for (const l of viewListeners) l(); }
+export const subscribeView = (l: () => void) => { viewListeners.add(l); return () => { viewListeners.delete(l); }; };
+export const viewSnapshot = () => viewVersion;
+const local = {
+  get(key: string): string | null { try { const v = (globalThis as { localStorage?: Storage }).localStorage?.getItem(key); if (v != null) return v; } catch { /* memory only */ } return memory.get(key) ?? null; },
+  set(key: string, value: string) { memory.set(key, value); try { (globalThis as { localStorage?: Storage }).localStorage?.setItem(key, value); } catch { /* memory only */ } },
 };
+export const deviceStorage: KeyValue = {
+  get(key) { return backend?.get(key) ?? local.get(key); },
+  set(key, value) { local.set(key, value); backend?.set(key, value); viewChanged(); },
+};
+/** The localStorage cache alone: what a device migrates into its document once. */
+export const localViewStorage: KeyValue = local;
 export const CATEGORY_KEY = "follow-up.settings.category";
 export const collapseKey = (id: string) => `follow-up.settings.fold.${id}`;
 export function readCategory(store: KeyValue = deviceStorage): SettingsCategory {
@@ -40,6 +67,20 @@ export function readOpen(id: string, fallback: boolean, store: KeyValue = device
   return v === "1" ? true : v === "0" ? false : fallback;
 }
 export const writeOpen = (id: string, open: boolean, store: KeyValue = deviceStorage) => store.set(collapseKey(id), open ? "1" : "0");
+
+/**
+ * Home's group folds persist per device, except Needs you: it always opens on mount, because asks are the one thing
+ * the developer must not miss behind a fold made days ago (closing it holds only for this mount). Quiet starts closed.
+ */
+export const homeFoldKey = (group: string) => `follow-up.home.fold.${group}`;
+export const homeGroupOpen = (group: string, store: KeyValue = deviceStorage): boolean => {
+  if (group === "needs") return true;
+  const v = store.get(homeFoldKey(group));
+  return v === "1" ? true : v === "0" ? false : group !== "quiet";
+};
+export const writeHomeGroupOpen = (group: string, open: boolean, store: KeyValue = deviceStorage) => { if (group !== "needs") store.set(homeFoldKey(group), open ? "1" : "0"); };
+/** Every key that is view state: what a device copies into its document the first time (never home_sort). */
+export const isViewKey = (key: string) => key === CATEGORY_KEY || key.startsWith("follow-up.settings.fold.") || (key.startsWith("follow-up.home.fold.") && key !== homeFoldKey("needs")) || key === "follow-up.whats-new.seen";
 
 const names = (list: readonly ReviewerEntry[], max = 3) => list.length <= max ? list.map(reviewerLabel).join(", ") : `${list.slice(0, max).map(reviewerLabel).join(", ")} +${list.length - max}`;
 /** Anything saved: then Reviewers starts collapsed, since it's set up. */

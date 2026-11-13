@@ -10,6 +10,7 @@
 | Agents and Wait | `agents.json` | [ai-roles.md](ai-roles.md), [wait.md](wait.md) |
 | Shipping PRs | `pr-workflow.json` | [prs.md](prs.md) |
 | Reviewers | `reviewers.json` | [prs.md](prs.md) |
+| View state: settings category, settings folds, Home group folds, What's new "seen" | Paseo 0.16 device settings document `follow-up-view`, with localStorage as the first-paint cache; on 0.15, localStorage (memory on the phone) | `client/view-store.ts`, `shared/settings-nav.ts` |
 
 - **Booleans** use positive `enable_` names. Fields only ever gain defaults, so documents saved by older versions
   keep parsing.
@@ -18,6 +19,28 @@
   `{ values: { home_sort: "recent" } }`.
 - **Display fields** are read and written by agents through `display_settings` and `set_display`
   (`DISPLAY_TOOLS` in `server/agent-parity.ts`, PARITY key `settings.display`).
+- **View state is per device; settings are per host** (invariant 20, `view-state-is-per-device-settings-are-per-host`).
+  View state is how this screen looks on this device: the settings category, which sections are folded, Home's group
+  folds and the What's new version last seen. On Paseo 0.16 it lives in the device settings document `follow-up-view`
+  (`{ migrated, entries }`, keyed by the old localStorage names). The worker and agents never see it, so it has no
+  tool and no PARITY entry. Anything an agent can set stays host-scoped: `home_sort` is a Display field on purpose
+  (`tests/view-settings.test.ts` fails if it ever moves to a device document).
+  - **Where 0.16 keeps a device document.** The app stores it with AsyncStorage under
+    `@paseo:plugin-device-settings:follow-up/follow-up-view`. On web and desktop AsyncStorage is `window.localStorage`,
+    which is where Follow-up already kept this state, so nothing changes there. On the phone it is native storage:
+    the category and folds now survive reopening the app (before, they were memory only). A plugin reinstall keeps
+    it; an app reinstall or cleared app data does not.
+  - **No flash.** Reads take the document's value once it loads, else the localStorage cache, and every reader
+    re-renders when the document arrives (`useViewVersion`). The first paint is the cached value, never the default.
+    What's new waits for the document before deciding, so it never shows from a stale "seen".
+  - **Migration.** The first time a device loads an empty document, it copies its view keys from localStorage and
+    marks it `migrated: true`; a migrated document is never overwritten. Writes still go to localStorage too, as a
+    cache and a downgrade path, for one release.
+  - **Home group folds** persist per device, except Needs you: it opens on every mount, and closing it holds only for
+    that mount. Quiet starts closed until the developer opens it.
+  - **0.15.** `useSettings` is missing there, so nothing syncs and view state stays in localStorage, else memory.
+  - **Manual check (the harness can't drive the phone):** on the phone app, pick a settings category and fold a
+    section, close the app fully, reopen it: the same category and folds come back.
 - **The settings screen.** `client/settings.tsx` (categories), `client/settings-shell.tsx` (collapsible blocks) and
   `shared/settings-nav.ts` (categories, summaries, saved view state). Settings open through Paseo's settings screen
   `projects`; legacy screen ids still map there.

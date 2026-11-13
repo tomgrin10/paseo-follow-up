@@ -1,0 +1,2 @@
+- Home remembers which groups you folded. Needs you always opens, so nothing waiting on you hides behind a fold.
+- On the phone, Follow-up now keeps your settings category and folded sections after you reopen the app.
