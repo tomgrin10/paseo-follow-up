@@ -108,7 +108,7 @@ export function SubmitScope({ enabled, onSubmit, children, style, accessibilityR
   return <View ref={ref} style={style} accessibilityRole={accessibilityRole} accessibilityLabel={accessibilityLabel}>{children}</View>;
 }
 
-type ButtonKind = "primary" | "secondary" | "ghost" | "danger";
+export type ButtonKind = "primary" | "secondary" | "ghost" | "danger";
 /** One button vocabulary for the whole plugin: 32px on desktop with a hit slop, 44px on touch layouts. */
 export function Button({ title, onPress, theme, kind = "secondary", disabled = false, loading = false, icon, compact = false, accessibilityLabel, accessibilityHint, grow = false, shortcut = false, nativeID, onInteract }: {
   /** Focus and hover, for a surface that pauses while the button is in use (the Undo bar). */ onInteract?: (event: "focus" | "blur" | "hoverIn" | "hoverOut") => void;

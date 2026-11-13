@@ -4,7 +4,7 @@ import { idleReason, NO_PROGRESS_CAP } from "./send-decision";
 import { workingLine } from "./task-status";
 import { followUpObligations, recoveryBatch } from "./follow-up";
 import { orderedStacks, prLink, settledForDisplay, type PrLink } from "./presentation";
-import { githubApproved, graphiteReady, isGithubFlow, mergeBlockers, prActionBlocks } from "./pr-actions";
+import { downstack, githubApproved, graphiteReady, isGithubFlow, mergeBlockers, prActionBlocks } from "./pr-actions";
 import { configuredReviewers, noReviewers, reviewersAsk, suggestedReviewers } from "./reviewers";
 import { agentMerges } from "./pr-workflow";
 import { awaitingSend, isOpen as questionOpen, questionState, type QuestionState } from "./questions";
@@ -194,12 +194,16 @@ function computeNeedsYou(w: Workspace, now: number): NeedItem[] {
       title: w.enable_auto_sends ? capitalize(idleReason(w)) : `${plural(b.tasks.length, "task")} ready for ${agentName(w)}` });
   }
   const blocking = (pr: Pr) => w.prActions.some(a => prActionBlocks(a, [pr.key]));
+  // One click merges the PR and its unmerged downstack (a-click-on-merge-merges), so Merge is offered only when every
+  // PR it would merge can merge: never a button the plan will refuse. A stack it can't read keeps the PR's own verdict.
+  const stackReady = (pr: Pr) => { let below: Pr[]; try { below = downstack(w.prs, pr.key).slice(0, -1); } catch { return true; }
+    return below.every(p => mergeReady(p, w, now) && workflowReady(p) && !blocking(p)); };
   for (const pr of stackOrder(w.prs)) {
     // Only offer Merge here when the PR's workflow (Graphite, or GitHub itself) agrees; otherwise the PR sheet explains what is missing.
     // A PR the agent merges itself (its own register_pr answer, else a No review repository) is the agent's work in
     // flight, never the developer's merge or review. Invariant a-no-review-repo-never-asks-for-review-or-merge.
     if (agentMerges(pr)) continue;
-    if (mergeReady(pr, w, now) && workflowReady(pr) && !blocking(pr)) items.push({ kind: "merge", key: `merge:${pr.key}`, prKey: pr.key, number: pr.number, pr: prLink(pr), title: isGithubFlow(pr.snapshot) && pr.snapshot!.reviewDecision !== "APPROVED" ? `#${pr.number} is ready to merge` : `#${pr.number} is approved`, detail: pr.snapshot!.title });
+    if (mergeReady(pr, w, now) && workflowReady(pr) && !blocking(pr) && stackReady(pr)) items.push({ kind: "merge", key: `merge:${pr.key}`, prKey: pr.key, number: pr.number, pr: prLink(pr), title: isGithubFlow(pr.snapshot) && pr.snapshot!.reviewDecision !== "APPROVED" ? `#${pr.number} is ready to merge` : `#${pr.number} is approved`, detail: pr.snapshot!.title });
     // One ask per PR (one-reviewers-ask-per-pr): it names whom Follow-up suggests, so Follow-up's own reviewers brief
     // folds into it (shared/needs-block.ts) instead of drawing a second ask for the same PR.
     else if (asksForReviewers(pr, w)) { const suggested = suggestedReviewers(pr.repo, pr.snapshot!.reviewers?.author); items.push({ kind: "reviewers", key: `reviewers:${pr.key}`, prKey: pr.key, number: pr.number, pr: prLink(pr), suggested, title: reviewersAsk(pr.number, suggested, `#${pr.number} has no reviewers`), detail: pr.snapshot!.title }); }

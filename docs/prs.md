@@ -116,6 +116,13 @@ the cold start's spawns and compares).
   `follow.confirm-pr-action` runs it (target or downstack), and `follow.check-pr-action` polls progress.
 - **Merging.** Graphite repositories merge through saved Graphite CLI auth. Elsewhere, `gh pr merge`, with GitHub
   auto-merge for "When ready".
+- **One click** (`a-click-on-merge-merges`). Every Merge button (Needs you, the pill, Home, a brief, the PR card)
+  goes through `useMergeButtons` (`client/merge-button.tsx`). `mergeScope` (`shared/merge-click.ts`) names what the
+  click merges when the button draws: the PR and its unmerged downstack (`downstack`), "Merge #N", "Merge N PRs" or
+  "Add #N to merge queue". `mergeClick` prepares, and confirms the plan at once only when `planBlockers` finds none:
+  no plan or row blocker, the same PRs, the same heads the button showed. Otherwise nothing merges and the row says
+  why. `mergeScope` is null only when `downstack` throws (a parent cycle, a PR outside the inventory); that button
+  opens the PR sheet's confirm instead.
 - **Agents** use `merge`, `enable_merge_when_ready` and `disable_merge_when_ready`, which plan and then confirm.
 - **Interrupted sends.** A reload mid-send marks the action `uncertain`.
 

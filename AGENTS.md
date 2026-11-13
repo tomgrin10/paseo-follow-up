@@ -150,8 +150,9 @@ These are product rules. Each has tests, and breaking one is a bug even when the
 5. **Ownership comes from the daemon.** The caller is `context.agent.id` (native tools) or `PASEO_AGENT_ID` checked
    by the daemon (bridge), never a tool argument. Unknown parent membership grants no new scope.
 6. **Nothing irreversible on its own.**
-   - Follow-up never merges, turns on merge-when-ready, requests reviewers or archives by itself. Merge re-checks
-     the stack and asks again.
+   - Follow-up never merges, turns on merge-when-ready, requests reviewers or archives by itself. The developer's
+     Merge is one click that names its whole scope first and merges exactly that at the heads it showed
+     (`a-click-on-merge-merges`, `shared/merge-click.ts`); agent tools still dry-run, then run with `confirm: true`.
    - Completion checks never auto-send.
    - Answers go out only on the developer's Send.
 7. **Unknown is not off.** An unreadable toggle or setting means the default, never "off". A seen user message
