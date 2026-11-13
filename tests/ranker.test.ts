@@ -43,7 +43,7 @@ function fixture(t: any, opts: { sources?: Partial<RankSources>; reply?: () => s
     const sources: RankSources = {
       async linear() { reads.linear++; return LINEAR; },
       async slack() { reads.slack++; return [{ where: "DM with Tom", who: "Dana Levi", text: "can you look at the SCIM PR?", at: "2026-11-10 09:00" }]; },
-      async github() { reads.github++; return [{ repo: "hero/app", number: 1425, title: "Vendor risk CSV export", url: "https://github.com/hero/app/pull/1425", author: "avi" }]; },
+      async github() { reads.github++; return [{ repo: "acme/app", number: 1425, title: "Vendor risk CSV export", url: "https://github.com/acme/app/pull/1425", author: "avi" }]; },
       async planning() { reads.planning++; return { title: "Week 46", url: "https://claude.ai/artifact/abc", items: [{ level: "milestone", title: "Okta GA", keys: ["HER-1312"] }] }; },
       ...opts.sources,
     };
@@ -332,7 +332,7 @@ test("sources: a Linear reply mcpproxy cut off keeps its whole issues, pages of 
 });
 
 test("sources: review requests come from every logged-in gh account, each with its own token", async () => {
-  assert.deepEqual(ghAccounts("✓ Logged in to github.com account tomgrin10 (keyring)\n  - Active account: true\n✓ Logged in to github.com account herotomg (keyring)"), ["tomgrin10", "herotomg"]);
+  assert.deepEqual(ghAccounts("✓ Logged in to github.com account tomgrin10 (keyring)\n  - Active account: true\n✓ Logged in to github.com account work-account (keyring)"), ["tomgrin10", "work-account"]);
   const searches: (string | null)[] = [];
   const github = (limitedAccount?: string) => ({
     accounts: async () => ["personal", "work"],

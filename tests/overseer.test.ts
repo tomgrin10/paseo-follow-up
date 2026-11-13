@@ -31,8 +31,8 @@ const row = (agentId: string, patch: Partial<InboxRow> = {}): InboxRow => ({
 // ---------- routing ----------
 
 const fleet = [
-  ws("scim", { title: "Fix HER-1282 SCIM group sync", branch: "tom/her-1282-scim-groups", keys: ["HER-1282"], prs: [{ key: "hero/app#1402", number: 1402, state: "OPEN", checks: "passed", threads: 0, url: null }] }),
-  ws("vanta", { title: "Vanta custom status approvals", branch: "tom/vanta-status", prs: [{ key: "hero/app#1425", number: 1425, state: "OPEN", checks: "failed", threads: 2, url: null }] }),
+  ws("scim", { title: "Fix HER-1282 SCIM group sync", branch: "tom/her-1282-scim-groups", keys: ["HER-1282"], prs: [{ key: "acme/app#1402", number: 1402, state: "OPEN", checks: "passed", threads: 0, url: null }] }),
+  ws("vanta", { title: "Vanta custom status approvals", branch: "tom/vanta-status", prs: [{ key: "acme/app#1425", number: 1425, state: "OPEN", checks: "failed", threads: 2, url: null }] }),
   ws("export", { title: "Export findings to CSV", branch: "tom/csv-export", activityAt: at(10) }),
   ws("export2", { title: "Export audit log", branch: "tom/audit-export" }),
 ];
@@ -76,7 +76,7 @@ const hundred = Array.from({ length: 100 }, (_, i) => ws(`w${i}`, {
   group: i < 8 ? "needs" : i < 20 ? "running" : i < 35 ? "waiting" : "quiet",
   ask: i < 8 ? `Decision: pick the migration strategy for tenant ${i} before staging deploy` : null,
   activity: i >= 8 ? `Pushed a41f0c${i % 10} · Bash pnpm test --filter feature-${i}` : null,
-  prs: [{ key: `hero/app#${1300 + i}`, number: 1300 + i, state: "OPEN", checks: i % 3 ? "passed" : "failed", threads: i % 4, url: null }],
+  prs: [{ key: `acme/app#${1300 + i}`, number: 1300 + i, state: "OPEN", checks: i % 3 ? "passed" : "failed", threads: i % 4, url: null }],
   priority: i < 30 ? { score: 90 - i, reason: `HER-${1200 + i} · Urgent · due today` } : null,
 }));
 const hook = async () => { process.env.FOLLOW_UP_HOOK_IMPORT = "1";
@@ -186,7 +186,7 @@ function fakePaseo(agents: Record<string, { workspaceId: string; status?: string
         timeline: { refetch: async () => { timelineReads.push(id); return { entries: (tails[id] ?? []).map((item, i) => ({ seqStart: i, item })) }; } },
       }),
     },
-    projects: { list: async () => ({ entries: [{ projectId: "p", projectName: "hero-app" }] }) },
+    projects: { list: async () => ({ entries: [{ projectId: "p", projectName: "acme-app" }] }) },
   };
   return { paseo, sent, created, agents, timelineReads };
 }
@@ -198,10 +198,10 @@ async function overseerFixture(t: any, rows: InboxRow[], tails: Record<string, u
     async list() { return { rows }; }, async brief() { return null; },
     async noteDelivery(agentId: string, messageId: string | null, by?: "developer") { ledger.push({ agentId, messageId, at: new Date(NOW).toISOString(), ...(by ? { by } : {}) }); },
   };
-  const state: State = { version: 1, workspaces: [workspace({ id: "w1", title: "SCIM", mainAgentId: "a1", prs: [pr({ key: "hero/app#1402", repo: "hero/app", number: 1402, snapshot: snapshot({ title: "HER-1282 SCIM sync" }) })] })] };
+  const state: State = { version: 1, workspaces: [workspace({ id: "w1", title: "SCIM", mainAgentId: "a1", prs: [pr({ key: "acme/app#1402", repo: "acme/app", number: 1402, snapshot: snapshot({ title: "HER-1282 SCIM sync" }) })] })] };
   const overseer = new Overseer({ directory: dir, store: { snapshot: async () => state }, inbox, sources: sources(ledger), priorities: { read: async () => [] }, enabled: extra.enabled ?? (async () => true), provider: "demo/claude-opus-5-5", now: () => NOW,
     tight: extra.tight ?? (async () => false), paseoHome: extra.paseoHome,
-    workspaces: async () => [{ id: "w1", name: "SCIM", project: "hero-app", projectId: "p", activityAt: at(5), branch: "tom/her-1282-scim" }, { id: "w2", name: "Export", project: "hero-app", projectId: "p", activityAt: at(9), branch: "tom/export" }] });
+    workspaces: async () => [{ id: "w1", name: "SCIM", project: "acme-app", projectId: "p", activityAt: at(5), branch: "tom/her-1282-scim" }, { id: "w2", name: "Export", project: "acme-app", projectId: "p", activityAt: at(9), branch: "tom/export" }] });
   const fake = fakePaseo({ a1: { workspaceId: "w1" }, a2: { workspaceId: "w2" } }, tails);
   if (extra.start !== false) await overseer.start(fake.paseo);
   const ov = (await overseer.state()).agentId!;
@@ -265,7 +265,7 @@ test("a new workspace waits for the developer's approval", async t => {
   f.ledger.push({ agentId: f.ov, messageId: "answer-1", at: new Date(NOW).toISOString(), by: "developer" });
   tails[f.ov] = [{ type: "user_message", text: "Follow-up answer D1 (Which agent?): C — New workspace\nContinue with this choice.", messageId: "answer-1" }];
   const plan = await f.overseer.act(f.paseo, f.ov, "start_workspace", { task: "HER-1400 fix the CSV export" }) as { planId: string; plan: { title: string; branch: string; project: string } };
-  assert.ok(plan.planId); assert.deepEqual(plan.plan, { ...plan.plan, title: "HER-1400 Fix the CSV export", branch: "her-1400-fix-the-csv-export", project: "hero-app" });
+  assert.ok(plan.planId); assert.deepEqual(plan.plan, { ...plan.plan, title: "HER-1400 Fix the CSV export", branch: "her-1400-fix-the-csv-export", project: "acme-app" });
   const done = await f.overseer.act(f.paseo, f.ov, "start_workspace", { confirm: true, planId: plan.planId }) as { started: boolean };
   assert.equal(done.started, true);
   const w = f.created.filter(c => c.kind === "workspace").at(-1)!;
@@ -407,7 +407,7 @@ test("the digest is written only when it changes, and not at all while memory is
 test("resting workspaces: last and compact in workstreams, one line in the digest, small at 100 workspaces", async () => {
   const fleet100 = Array.from({ length: 100 }, (_, i) => ws(`w${i}`, { title: `Workspace number ${i} with a fairly long descriptive title`, branch: `tom/feature-${i}`, dormant: i >= 30,
     group: i < 5 ? "needs" as const : i < 15 ? "running" as const : "quiet" as const, ask: i < 5 ? "Decision: which approach for the migration" : null, activity: i >= 5 ? "Ran the test suite and pushed a fix" : null,
-    prs: i < 30 ? [{ key: `hero/app#${1300 + i}`, number: 1300 + i, state: "OPEN", checks: "passed" as const, threads: 1, url: null }] : [] }));
+    prs: i < 30 ? [{ key: `acme/app#${1300 + i}`, number: 1300 + i, state: "OPEN", checks: "passed" as const, threads: 1, url: null }] : [] }));
   const page = pageRows(fleet100, { size: 100 });
   assert.equal(page.resting, 70);
   assert.deepEqual(page.rows.at(-1), { workspaceId: page.rows.at(-1)!.workspaceId, title: page.rows.at(-1)!.title, agentId: page.rows.at(-1)!.agentId, dormant: true });

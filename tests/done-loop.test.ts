@@ -1,5 +1,5 @@
 /**
- * Regression: wks_4b27f268b5dc2fc6 (2026-11-10). Three hero-poc PRs merged and deployed, both tasks done, yet the
+ * Regression: wks_4b27f268b5dc2fc6 (2026-11-10). Three acme-poc PRs merged and deployed, both tasks done, yet the
  * workspace sat in "Follow-up is fixing": the deploy probe failed now and then, declare_done refused twice on a
  * blocker the agent couldn't fix, the chat drew two "Workspace done" cards anyway, and the Done check was created and
  * cancelled every time the probe flapped.
@@ -31,8 +31,8 @@ async function fixture(t: any, w: Workspace) {
   return { engine, get: async () => (await store.snapshot()).workspaces[0], advance: (ms: number) => { now += ms; }, probe: (p: Probe) => { probe = p; }, runtime: (r: Runtime) => { runtime = r; }, now: () => now };
 }
 const shipped = () => workspace({
-  prs: ["#1", "#2", "#3"].map((n, i) => pr({ key: `herosecurity/hero-poc${n}`, repo: "herosecurity/hero-poc", number: i + 1, snapshot: snapshot({ state: "MERGED", mergeCommit: `merge-${i}` }) })),
-  obligations: [obligation({ id: "verify", title: "Verify on prod", status: "done", afterPrs: ["herosecurity/hero-poc#1"] })],
+  prs: ["#1", "#2", "#3"].map((n, i) => pr({ key: `acme/acme-poc${n}`, repo: "acme/acme-poc", number: i + 1, snapshot: snapshot({ state: "MERGED", mergeCommit: `merge-${i}` }) })),
+  obligations: [obligation({ id: "verify", title: "Verify on prod", status: "done", afterPrs: ["acme/acme-poc#1"] })],
 });
 
 test("a deploy Follow-up never confirmed doesn't block Done: it is accepted with a note", async t => {

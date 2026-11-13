@@ -28,10 +28,10 @@ const iso = (minutesAgo: number) => new Date(NOW - minutesAgo * 60_000).toISOStr
 test("extracts Linear keys, Slack, GitHub, Linear, claude.ai and doc links, deduped in first-seen order", () => {
   const links = extractLinks([
     "Fixing HER-1312 and her-9 (lower case isn't a key). See HER-1312 again.",
-    "Thread: https://herosecurity.slack.com/archives/C07ABCDEF/p1731140000123456 and the same https://herosecurity.slack.com/archives/C07ABCDEF/p1731140000123456.",
-    "Reply link https://herosecurity.slack.com/archives/C07ABCDEF/p1731149999000001?thread_ts=1731140000.123456&cid=C07ABCDEF",
+    "Thread: https://acme.slack.com/archives/C07ABCDEF/p1731140000123456 and the same https://acme.slack.com/archives/C07ABCDEF/p1731140000123456.",
+    "Reply link https://acme.slack.com/archives/C07ABCDEF/p1731149999000001?thread_ts=1731140000.123456&cid=C07ABCDEF",
     "PR https://github.com/tomgrin10/paseo-follow-up/pull/24, graphite https://app.graphite.com/github/pr/tomgrin10/paseo-follow-up/24/title",
-    "Issue https://linear.app/herosecurity/issue/HER-1312/vendor-service-accounts and plan https://claude.ai/artifact/abc-123 and https://docs.google.com/document/d/xyz/edit#heading=1",
+    "Issue https://linear.app/acme/issue/HER-1312/vendor-service-accounts and plan https://claude.ai/artifact/abc-123 and https://docs.google.com/document/d/xyz/edit#heading=1",
     "UTF-8, ISO-8601, SHA-256 and GPT-4 are not issues; HER-0 isn't either. https://example.com/page is ignored.",
   ]);
   assert.deepEqual(links.map(l => l.key), [
@@ -42,7 +42,7 @@ test("extracts Linear keys, Slack, GitHub, Linear, claude.ai and doc links, dedu
     "https://docs.google.com/document/d/xyz/edit",
   ]);
   // The bare key gained the Linear URL seen later; the reply link folded into its thread.
-  assert.equal(links[0].url, "https://linear.app/herosecurity/issue/HER-1312/vendor-service-accounts");
+  assert.equal(links[0].url, "https://linear.app/acme/issue/HER-1312/vendor-service-accounts");
   assert.equal(links[2].url, "https://github.com/tomgrin10/paseo-follow-up/pull/24");
   assert.ok(links.every(l => l.title === null), "extraction never writes titles");
 });

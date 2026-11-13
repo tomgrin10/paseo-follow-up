@@ -48,8 +48,8 @@ const title='Reviewer controls test '+Date.now().toString(36);
 const workspace=await api.workspaces.create({title,source:{kind:'directory',path:directory}});
 const agent=await workspace.agents.create({config:{provider:'followup-fixture/fixture',model:'fixture'},title:'Synthetic reviewer main'});
 await call('follow.activate',{workspaceId:workspace.id});
-await call('follow.save-reviewers',{repo:'herosecurity/hero-poc',reviewers:[{login:'uyy-hero-security',name:'Uri'},{login:'yuvalgoder-star',name:'Yuval'}]});
-for(const number of [1,2,3,4,5])await call('follow.register-pr',{agentId:agent.id,repo:'herosecurity/hero-poc',number,stack:'Vendor behavior',parentNumber:null});
+await call('follow.save-reviewers',{repo:'acme/acme-poc',reviewers:[{login:'uri-reviewer',name:'Uri'},{login:'yuvalgoder-star',name:'Yuval'}]});
+for(const number of [1,2,3,4,5])await call('follow.register-pr',{agentId:agent.id,repo:'acme/acme-poc',number,stack:'Vendor behavior',parentNumber:null});
 await call('follow.refresh');
 const {chromium}=createRequire(join(process.env.SEND_TO_PASEO_SOURCE,'extension/package.json'))('playwright-core');
 const profile=await mkdtemp(join(tmpdir(),'follow-reviewer-browser-'));
@@ -58,7 +58,7 @@ const errors=[];context.on('weberror',error=>errors.push(String(error.error())))
 try{
  const page=await context.newPage();await fetch(`http://127.0.0.1:${preview.port}/llms.txt`);await page.goto(`http://127.0.0.1:${preview.port}/`);
  await page.getByRole('button',{name:new RegExp('^'+title)}).click();await page.getByRole('button',{name:'Open workspace follow-up',exact:true}).click();
- const add=page.getByRole('button',{name:'Add reviewers: Uri and Yuval for herosecurity/hero-poc pull request 1',exact:true});
+ const add=page.getByRole('button',{name:'Add reviewers: Uri and Yuval for acme/acme-poc pull request 1',exact:true});
  await add.waitFor();await page.getByText('Draft',{exact:true}).waitFor();assert.equal(await page.getByText('No reviewers',{exact:true}).count(),2);
  assert.equal(await page.getByRole('button',{name:/^Add reviewers:/}).count(),1);
  await mkdir('docs/screenshots',{recursive:true});await page.screenshot({path:'docs/screenshots/reviewers-desktop.png'});
@@ -72,11 +72,11 @@ try{
  assert.equal(await page.getByRole('button',{name:/^Add reviewers:/}).count(),0);assert.equal(await page.getByText('No reviewers',{exact:true}).count(),1);
  await page.getByRole('link',{name:/pull request 1 in Graphite:/}).scrollIntoViewIfNeeded();
  await page.screenshot({path:'docs/screenshots/reviewers-requested-mobile.png'});
- await page.setViewportSize({width:1440,height:1050});const sidebar=page.getByTestId('workspace-explorer-sidebar');await sidebar.getByRole('button',{name:'Show details for PR 1',exact:true}).click();await sidebar.getByText('Reviewers: uyy-hero-security, yuvalgoder-star',{exact:true}).waitFor();
+ await page.setViewportSize({width:1440,height:1050});const sidebar=page.getByTestId('workspace-explorer-sidebar');await sidebar.getByRole('button',{name:'Show details for PR 1',exact:true}).click();await sidebar.getByText('Reviewers: uri-reviewer, yuvalgoder-star',{exact:true}).waitFor();
  await sidebar.screenshot({path:'docs/screenshots/reviewers-requested-desktop.png'});
- await call('follow.request-reviewers',{workspaceId:workspace.id,prKey:'herosecurity/hero-poc#1'});
- const result=JSON.parse(await readFile(fixturePath,'utf8'));assert.equal(result.attempts.length,2);assert.deepEqual(result.requested,['uyy-hero-security','yuvalgoder-star']);
- assert.ok(result.attempts.every(a=>a.endpoint==='repos/herosecurity/hero-poc/pulls/1/requested_reviewers'));
+ await call('follow.request-reviewers',{workspaceId:workspace.id,prKey:'acme/acme-poc#1'});
+ const result=JSON.parse(await readFile(fixturePath,'utf8'));assert.equal(result.attempts.length,2);assert.deepEqual(result.requested,['uri-reviewer','yuvalgoder-star']);
+ assert.ok(result.attempts.every(a=>a.endpoint==='repos/acme/acme-poc/pulls/1/requested_reviewers'));
  const record=(await call('follow.get',{workspaceId:workspace.id})).workspace;assert.equal(record.enable_auto_sends,false);assert.equal(record.mainAgentId,agent.id);assert.equal(record.completion,null);
  assert.deepEqual(errors,[]);console.log('PASS: native no-reviewer distinction, pending/approved/draft/unknown states, real click -> isolated gh argv, failure/retry, loading/success, deduplication, desktop/mobile controls and no overflow/browser errors. No real review request sent.');
 }finally{await context.close();await client.close();await rm(profile,{recursive:true,force:true});}

@@ -7,7 +7,8 @@
 import assert from "node:assert/strict";
 import { readFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { hostname, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
+import { assertNoRealNames } from "./real-names.mjs";
 import { createRequire } from "node:module";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -78,13 +79,8 @@ record("after a failed batch: host-collectable too", failed.status === "idle" &&
 
 // The panel's Recovery row, and what "Open recovery agent" does on this host.
 // Renders go into PRs: harnessEnv pins the daemon's hostname to a fictional one; this is the backstop (as in
-// scripts/screenshots.mjs): a page that names the real machine fails instead of being saved.
-const REAL_HOST = [hostname(), hostname().split(".")[0]].filter(h => h.length >= 4);
-const noRealHost = async page => {
-  const text = await page.evaluate(() => `${document.title}\n${document.body.innerText}`);
-  const hit = REAL_HOST.find(h => text.includes(h));
-  if (hit) throw new Error(`the page shows the real hostname (${hit}); a harness daemon must report HARNESS_HOST`);
-};
+// scripts/screenshots.mjs): a page that names the real machine, its user or the company fails instead of being saved.
+const noRealHost = async page => assertNoRealNames(await page.evaluate(() => `${document.title}\n${document.body.innerText}`), "the page");
 const { chromium } = createRequire(process.env.PLAYWRIGHT_CORE + "/package.json")("playwright-core");
 const profile = await mkdtemp(join(tmpdir(), "follow-recovery-bg-browser-"));
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM, headless: true });

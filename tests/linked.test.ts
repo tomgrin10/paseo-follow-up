@@ -14,7 +14,7 @@ const withTeams = (keys = ["HER"]) => { const f = emptyLinkedFile(); setTeams(f,
 const items = (f: LinkedFile, w = "w1") => f.workspaces[w]?.items.map(i => i.key) ?? [];
 
 test("identity: a Linear URL and its bare key are one item; Slack replies collapse to the thread; PRs are refused", () => {
-  assert.equal(classifyLink("https://linear.app/hero/issue/HER-1312/vendor-sync")?.key, "HER-1312");
+  assert.equal(classifyLink("https://linear.app/acme/issue/HER-1312/vendor-sync")?.key, "HER-1312");
   assert.equal(classifyLink("her-1312")?.key, "HER-1312");
   assert.equal(classifyLink("https://acme.slack.com/archives/C01/p1700000000000100?thread_ts=1699999999.000200")?.key, "slack:C01/1699999999.000200");
   assert.equal(classifyLink("https://github.com/acme/app/pull/12")?.kind, "pr");
@@ -23,9 +23,9 @@ test("identity: a Linear URL and its bare key are one item; Slack replies collap
   assert.equal(classifyLink("https://www.rfc-editor.org/rfc/rfc4180#section-2", true)?.key, "https://www.rfc-editor.org/rfc/rfc4180");
   const ws = emptyWorkspaceLinks();
   upsertItem(ws, { key: "HER-1312", kind: "linear", url: null, origin: "extracted" }, clock);
-  upsertItem(ws, { key: "HER-1312", kind: "linear", url: "https://linear.app/hero/issue/HER-1312", title: "Vendor sync drops SCIM groups", origin: "registered", by: "main", why: "started from this" }, clock + 1);
+  upsertItem(ws, { key: "HER-1312", kind: "linear", url: "https://linear.app/acme/issue/HER-1312", title: "Vendor sync drops SCIM groups", origin: "registered", by: "main", why: "started from this" }, clock + 1);
   assert.equal(ws.items.length, 1);
-  assert.deepEqual([ws.items[0].origin, ws.items[0].why, ws.items[0].url], ["registered", "started from this", "https://linear.app/hero/issue/HER-1312"]);
+  assert.deepEqual([ws.items[0].origin, ws.items[0].why, ws.items[0].url], ["registered", "started from this", "https://linear.app/acme/issue/HER-1312"]);
   upsertItem(ws, { key: "HER-1312", kind: "linear", url: null, origin: "extracted", why: "noise" }, clock + 2);
   assert.equal(ws.items[0].origin, "registered", "a less trusted origin never downgrades");
 });
@@ -39,7 +39,7 @@ test("validation: non-issues never become items; Linear decides; not-found is re
   assert.equal(noteCandidate(f, "w1", "HER-1390", clock), true);
   assert.deepEqual(items(f), [], "candidates never render");
   assert.deepEqual(linkedCounts(f.workspaces.w1), {});
-  applyCheck(f, "HER-1312", { found: { title: "Vendor sync drops SCIM groups", state: "In Progress", url: "https://linear.app/hero/issue/HER-1312" } }, clock);
+  applyCheck(f, "HER-1312", { found: { title: "Vendor sync drops SCIM groups", state: "In Progress", url: "https://linear.app/acme/issue/HER-1312" } }, clock);
   applyCheck(f, "HER-99999", { found: null }, clock);
   applyCheck(f, "HER-1390", { error: "Linear unreachable" }, clock);
   assert.deepEqual(items(f), ["HER-1312"]); assert.equal(f.workspaces.w1.items[0].statusTone, "active");
@@ -56,7 +56,7 @@ test("unknown teams: candidates wait; when the list arrives, the ones that aren'
   const f = emptyLinkedFile();
   noteCandidate(f, "w1", "STATUS-1025", clock); noteCandidate(f, "w1", "HER-1312", clock);
   assert.deepEqual(dueChecks(f, clock), [], "no checks until the team list is known");
-  setTeams(f, parseLinearTeams(JSON.stringify({ teams: [{ id: "t1", key: "HER", name: "Hero" }, { id: "t2", key: "OPS" }] })), clock);
+  setTeams(f, parseLinearTeams(JSON.stringify({ teams: [{ id: "t1", key: "HER", name: "Acme" }, { id: "t2", key: "OPS" }] })), clock);
   assert.deepEqual(f.workspaces.w1.candidates.map(c => c.key), ["HER-1312"]);
   assert.deepEqual(parseLinearTeams('noise {"key": "HER"} {"key":"lower"}'), ["HER"]);
 });
@@ -97,7 +97,7 @@ test("counts leave out the spec; tones read Linear's states", () => {
 test("migration: only verified About links carry over; junk rows become candidates or go; it runs once", () => {
   const f = emptyLinkedFile();
   const about = { w1: { links: [
-    { kind: "linear", key: "HER-1312", url: "https://linear.app/hero/issue/HER-1312", title: "Vendor sync drops SCIM groups", state: "In Progress" },
+    { kind: "linear", key: "HER-1312", url: "https://linear.app/acme/issue/HER-1312", title: "Vendor sync drops SCIM groups", state: "In Progress" },
     { kind: "linear", key: "STATUS-1025", url: null, title: null },
     { kind: "linear", key: "HER-1340", url: null, title: null },
     { kind: "pr", key: "acme/app#12", url: "https://github.com/acme/app/pull/12", title: "Fix" },

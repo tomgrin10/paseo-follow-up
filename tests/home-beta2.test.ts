@@ -70,7 +70,7 @@ test("Follow every workspace is on by default: discovery follows any project's n
 
 function fixture() {
   const tracked = [
-    ws("okta", { title: "Okta SCIM sync", prs: [pr({ key: "hero/app#1402", number: 1402, stack: "feat/okta-scim", snapshot: snapshot({ title: "Add SCIM provisioning for Okta" }) })] }),
+    ws("okta", { title: "Okta SCIM sync", prs: [pr({ key: "acme/app#1402", number: 1402, stack: "feat/okta-scim", snapshot: snapshot({ title: "Add SCIM provisioning for Okta" }) })] }),
     ws("vanta", { title: "Fix HER-1312 Vanta custom status approvals", updatedAt: at(10) }),
     ws("billing", { title: "Billing cleanup", goal: "Ask finance about okta invoices" }),
   ];
@@ -171,7 +171,7 @@ test("rowHit: the match is highlighted where the row shows it, or named as line 
 });
 
 test("searching 100 workspaces and 200 agents stays fast", () => {
-  const tracked = Array.from({ length: 100 }, (_, i) => ws(`w${i}`, { title: `Workspace ${i} HER-${1000 + i}`, prs: [pr({ key: `hero/app#${i}`, number: 2000 + i, snapshot: snapshot({ title: `Change ${i}` }) })] }));
+  const tracked = Array.from({ length: 100 }, (_, i) => ws(`w${i}`, { title: `Workspace ${i} HER-${1000 + i}`, prs: [pr({ key: `acme/app#${i}`, number: 2000 + i, snapshot: snapshot({ title: `Change ${i}` }) })] }));
   const paseo = tracked.map(w => lite(w.id, { name: w.title, branch: `feat/branch-${w.id}` }));
   const model = buildHome({ rows: [], tracked, paseo, now: NOW });
   const agents = Array.from({ length: 200 }, (_, i) => ({ id: `a${i}`, title: `Agent ${i} reviewing`, workspaceId: `w${i % 100}` }));

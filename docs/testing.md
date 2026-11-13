@@ -127,8 +127,18 @@ plays a scripted turn (timeline items, Follow-up RPCs, a permission) for a given
 - **A fictional host name, `dev-box`.** Paseo labels its host with `os.hostname()` (the phone header, `server_info`)
   and has no setting for it, and renders go into this public repo. `harnessEnv` puts
   `scripts/harness-hostname.cjs` first on `NODE_OPTIONS` (after a caller's `set` and `strip`), so every harness
-  process's `os.hostname()` and `HOSTNAME` read `HARNESS_HOST`. `screenshots.mjs` fails a shot whose page text names
-  the real machine. `tests/harness-env.test.ts` fails when a harness process can read the real name.
+  process's `os.hostname()` and `HOSTNAME` read `HARNESS_HOST`. `tests/harness-env.test.ts` fails when a harness
+  process can read the real name.
+- **Fictional names everywhere** (`no-real-names-in-renders-or-fixtures`). Fixtures use `acme-*` names (the project
+  `acme-project`, the repository `acme/acme-poc`, `linear.app/acme`, `acme.slack.com`), never the company's. Every
+  render path (`screenshots.mjs`, `check-recovery-background.mjs`, `check-project-settings.mjs`) passes its page text
+  through `assertNoRealNames` (`scripts/real-names.mjs`), which fails a shot naming the real hostname, its user or the
+  company; `tests/no-real-names.test.ts` fails a committed file under `scripts/`, `tests/`, `docs/` (PNG text chunks
+  included) or `changes/` that does. The hostname and user name are read at run time (`os.hostname()`,
+  `os.userInfo()`, skipped in CI), so the denylist holds only generic company words. Product configuration that names
+  the company on purpose (the deploy check's targets, the default-tracked repository, the legacy reviewer login map)
+  is allowed as exact tokens in the files that test it, each with a reason (`ALLOWED`), until Q55 decides whether it
+  moves into host settings.
 - **Fake GitHub over HTTP, not only `gh`.** Follow-up reads GitHub over in-process HTTPS (`server/github-api.ts`); a
   fake `gh` on PATH only answers writes. A script whose daemon needs PR reads starts `fakeGithub({ dir, gh })` from
   `scripts/fake-github.mjs` and passes its `env` and `strip` to `harnessEnv`. The server answers each request with the

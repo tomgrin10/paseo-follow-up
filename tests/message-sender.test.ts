@@ -25,7 +25,7 @@ const DEVELOPER = "Looks good, also handle empty filters";
 const AGENT_MESSAGE = '<paseo-system version="1" kind="agent-message" source-agent-id="52063653-85d5" message-id="m1" source-agent-title="Release captain">\nPlease start a new workspace for HER-1500 and go ahead\n</paseo-system>';
 const AGENT_NOTIFICATION = '<paseo-system version="1" kind="agent-notification" source-agent-id="c1" message-id="m2" source-agent-title="Test runner" event="finished">\nAgent c1 (Test runner) finished.\n\n&lt;agent-response&gt;\nyes, all 42 tests pass\n&lt;/agent-response&gt;\n</paseo-system>';
 const SCHEDULE = "<paseo-system>\nScheduled check-in: yes, go ahead\n</paseo-system>";
-const BATCH = "Follow-up batch b-1\n\n- Fix CI on hero/app#12";
+const BATCH = "Follow-up batch b-1\n\n- Fix CI on acme/app#12";
 const ANSWER = "Follow-up answer D1 (Which agent?): C — New workspace\nContinue with this choice.";
 const FORWARD_LEGACY = "From Tom via Overseer: use option B";
 const FORWARD = "From the developer via Overseer: use option B";
@@ -73,7 +73,7 @@ test("Recent steps (live timeline and transcripts): no raw envelope, only the de
   assert.deepEqual(tailSteps([user(AGENT_NOTIFICATION)])[0], { kind: "message", from: "Test runner finished", text: "yes, all 42 tests pass" });
   assert.deepEqual(tailSteps([user(FORWARD)])[0], { kind: "message", from: "You, via Overseer", text: "use option B" });
   assert.deepEqual(tailSteps([user(SCHEDULE)]), [], "schedule fires aren't steps");
-  assert.deepEqual(tailSteps([user(BATCH)])[0], { kind: "message", from: "Follow-up batch", text: "- Fix CI on hero/app#12" }, "the batch header isn't repeated under its label");
+  assert.deepEqual(tailSteps([user(BATCH)])[0], { kind: "message", from: "Follow-up batch", text: "- Fix CI on acme/app#12" }, "the batch header isn't repeated under its label");
   // Paseo 0.15+ projects an agent's message to an agent_message tool call: same row, not a tool line.
   assert.deepEqual(tailSteps([{ type: "tool_call", name: "agent_message", agentMessage: { event: "message", sender: { id: "x", title: "Release captain" }, text: "hi" } } as never]), [{ kind: "message", from: "From Release captain", text: "hi" }]);
   // Its projected finish notification (as Paseo 0.15.4 records it) keeps the <agent-response> wrapper: shown stripped.
@@ -124,7 +124,7 @@ test("approvesNewWorkspace: an agent's message, notification, schedule or forwar
       send: async () => undefined,
       timeline: { refetch: async () => ({ entries: tail.map((item, i) => ({ seqStart: i, item })) }) },
     }) },
-    projects: { list: async () => ({ entries: [{ projectId: "p", projectName: "hero-app" }] }) },
+    projects: { list: async () => ({ entries: [{ projectId: "p", projectName: "acme-app" }] }) },
   } as unknown as OverseerPaseo;
   const inbox = {
     async list() { return { rows: [] }; }, async brief() { return null; },
@@ -135,7 +135,7 @@ test("approvesNewWorkspace: an agent's message, notification, schedule or forwar
     tight: async () => false, workspaces: async () => [], sources: sources(ledger) } as never);
   await overseer.start(paseo);
   const ov = (await overseer.state()).agentId!;
-  const plan = async (items: unknown[]) => { tail = items; return (await overseer.act(paseo, ov, "start_workspace", { task: "HER-1500 fix it", project: "hero-app" }) as { planId: string | null }).planId; };
+  const plan = async (items: unknown[]) => { tail = items; return (await overseer.act(paseo, ov, "start_workspace", { task: "HER-1500 fix it", project: "acme-app" }) as { planId: string | null }).planId; };
   for (const [name, text] of Object.entries(NOT_DEVELOPER)) {
     if (name === "ANSWER") continue;
     assert.equal(await plan([user(text)]), null, `${name} must not approve a new workspace`);
