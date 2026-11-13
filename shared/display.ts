@@ -61,8 +61,8 @@ export function homeSortSync(client: DisplayClient, current: () => SortMode, ado
       if (out.status !== "conflict") return;
     }
   };
-  const read = async (): Promise<boolean> => {
-    const doc = await call(displayRpc.read, {}) as { status: string; revision: string; values: unknown };
+  /** Applies a Display document (read, or pushed by follow.display-feed): true when this device's order changed. */
+  const apply = async (doc: { status: string; values?: unknown }): Promise<boolean> => {
     if (doc.status !== "ready") return false;
     const stored = (doc.values as { home_sort?: unknown }).home_sort;
     if (!isSortMode(stored)) { if (current() !== DEFAULT_SORT) await write(current()); return false; }
@@ -70,5 +70,6 @@ export function homeSortSync(client: DisplayClient, current: () => SortMode, ado
     adopt(stored);
     return changed;
   };
-  return { read, write };
+  const read = async (): Promise<boolean> => apply(await call(displayRpc.read, {}) as { status: string; values: unknown });
+  return { read, write, apply };
 }

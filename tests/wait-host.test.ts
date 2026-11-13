@@ -13,13 +13,15 @@ import { Wait, WAIT_TOOLS, waitStatus } from "../server/wait";
 import { hostFeature } from "../server/host-features";
 import { backgroundWorkInstruction, waitInstruction } from "../server/mcp.mjs";
 import { WAIT_HINT, WAIT_HOST_HINT, WAIT_HOST_NOTE, WAIT_HOST_TITLE, WAIT_TITLE, waitNote, waitSwitchCopy } from "../shared/wait";
+/** Paseo 0.16 requires `metadata` on hook agents and session requests; spread, so 0.15's types accept it too. */
+const withMetadata = { metadata: {} };
 
 async function dir(t: { after: (f: () => Promise<void>) => void }, prefix = "follow-wait-host-") {
   const root = await mkdtemp(join(tmpdir(), prefix)); t.after(() => rm(root, { recursive: true, force: true })); return root;
 }
 const request = (cwd: string, patch: Partial<PluginSessionOpenRequest> = {}): PluginSessionOpenRequest => ({
   agentId: "synthetic", provider: "claude", cwd, workspaceId: null, title: null, labels: {}, tools: [], mcpServers: {},
-  reason: "create", purpose: "interactive", env: { KEEP: "yes" }, ...patch,
+  reason: "create", purpose: "interactive", env: { KEEP: "yes" }, ...withMetadata, ...patch,
 });
 
 test("the host feature: only an explicit true counts; the first real answer is kept, a failed read isn't", async () => {
