@@ -162,6 +162,8 @@ export interface Directory {
   tail(id: string, limit: number): Promise<unknown[]>;
   /** The ended turn's items, oldest first, read once per turn end and shared with the engine (inbox-directory.ts). */
   turnItems?(id: string, turnId: string | null): Promise<unknown[]>;
+  /** A turn start's read: what's new since the agent's last read, normally the prompt (a-turn-s-timeline-is-read-once). */
+  turnStart?(id: string): Promise<unknown[]>;
   clearAttention(ids: string[]): Promise<void>;
 }
 export type GuardPause = { id: string; agentId: string; phase: string; turnId?: string | null; anchorResetsAt?: string; dismissed?: boolean; note?: string };
@@ -368,7 +370,7 @@ export class Inbox {
     if (root.subagent) return;
     const at = this.now();
     this.turns.set(agent.id, { turnId: turnId ?? null, at });
-    const items = await this.o.directory.tail(agent.id, 20).catch(() => []);
+    const items = await (this.o.directory.turnStart?.(agent.id) ?? this.o.directory.tail(agent.id, 20)).catch(() => []);
     const prompt = turnPrompt(items);
     const sender = prompt.from ?? await classify(prompt.message, agent.id, at, this.o.sources);
     // Only the developer's own message answers the open brief. Another agent's message, Follow-up's prompts, a
