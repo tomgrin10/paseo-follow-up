@@ -2,7 +2,7 @@ import { sendingOf, type Sending } from "./sending";
 import { liveLine, needsYou, prTone, stackOrder, workspaceSnoozed, type NeedItem, type PrTone } from "./attention";
 import { activity, type Activity } from "./activity";
 import { followUpObligations, recoveryBatch } from "./follow-up";
-import { flagHeadline, HEADLINE_ICON, HEADLINE_TONE, HEADLINE_WORD, workspaceHeadline, withoutBriefQuestions, type Headline, type HeadlineKey, type HeadlineTone } from "./headline";
+import { sayNew, flagHeadline, HEADLINE_ICON, HEADLINE_TONE, HEADLINE_WORD, workspaceHeadline, withoutBriefQuestions, type Headline, type HeadlineKey, type HeadlineTone } from "./headline";
 import { rowTitle, sectionOf, type InboxRow } from "./inbox";
 import { settled, summary, type Pr, type Workspace } from "./model";
 import { isOpen as questionOpen } from "./questions";
@@ -195,13 +195,15 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
       const items = w && w.mainAgentId === row.agentId ? withoutBriefQuestions(needsYou(w, now), row) : [];
       const h = flagHeadline(row, now, items);
       if (!h) continue;
+      // a-headline-says-only-what-is-new: the row's chip names its PR, so the line drops that ref ("on #240").
+      const chip = prChip(w); const line = sayNew(h.line, { chip: chip?.label });
       out.push(make({ ...base, group: "needs", tier: tierOf(h.key), icon: HEADLINE_ICON[h.key], tone: HEADLINE_TONE[h.key], word: HEADLINE_WORD[h.key],
-        line: h.line === HEADLINE_WORD[h.key] ? "" : h.line, badges: badges({ headline: h, row, workspace: w, items }), pr: prChip(w), at: row.needs!.since }));
+        line: line === HEADLINE_WORD[h.key] ? "" : line, badges: badges({ headline: h, row, workspace: w, items }), pr: chip, at: row.needs!.since }));
       if (row.workspaceId) covered.add(row.workspaceId);
     } else if (section === "later") {
       const h = flagHeadline({ ...row, snooze: null }, now);
       out.push(make({ ...base, group: "later", tier: null, icon: "AlarmClock", tone: "muted", word: h ? HEADLINE_WORD[h.key] : null,
-        line: h && h.line !== HEADLINE_WORD[h.key] ? h.line : "", badges: [], pr: prChip(w), at: row.needs?.since ?? null, wakeAt: row.snooze?.until ?? null }));
+        line: h && sayNew(h.line, { chip: prChip(w)?.label }) !== HEADLINE_WORD[h.key] ? sayNew(h.line, { chip: prChip(w)?.label }) : "", badges: [], pr: prChip(w), at: row.needs?.since ?? null, wakeAt: row.snooze?.until ?? null }));
       if (row.workspaceId) covered.add(row.workspaceId);
     } else if (section === "running") {
       const sending = w && w.mainAgentId === row.agentId ? sendingOf(w, now, { held }) : null;
@@ -221,11 +223,11 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
     const h = workspaceHeadline(items);
     // Later on the workspace's own needs: it waits in Later until its time or a new need.
     if (group === "later" && h) {
-      out.push(make({ ...base, group: "later", tier: null, icon: "AlarmClock", tone: "muted", word: HEADLINE_WORD[h.key], line: h.line, badges: [], pr: prChip(w), at: w.updatedAt, wakeAt: w.snooze?.until ?? null, readyToArchive: false }));
+      out.push(make({ ...base, group: "later", tier: null, icon: "AlarmClock", tone: "muted", word: HEADLINE_WORD[h.key], line: sayNew(h.line, { chip: prChip(w)?.label }), badges: [], pr: prChip(w), at: w.updatedAt, wakeAt: w.snooze?.until ?? null, readyToArchive: false }));
       continue;
     }
     if (group === "needs" && h) {
-      out.push(make({ ...base, group: "needs", tier: tierOf(h.key), icon: HEADLINE_ICON[h.key], tone: HEADLINE_TONE[h.key], word: HEADLINE_WORD[h.key], line: h.line,
+      out.push(make({ ...base, group: "needs", tier: tierOf(h.key), icon: HEADLINE_ICON[h.key], tone: HEADLINE_TONE[h.key], word: HEADLINE_WORD[h.key], line: sayNew(h.line, { chip: prChip(w)?.label }),
         badges: badges({ headline: h, workspace: w, items }), pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
       continue;
     }
