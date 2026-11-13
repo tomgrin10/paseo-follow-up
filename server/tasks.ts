@@ -59,10 +59,14 @@ export function isRecovery(batch: Pick<Batch, "tasks">): boolean {
 
 export { needsPrObservations } from "../shared/send-decision";
 
+/** The message's task lines as the agent reads them, without the batch id line: Preview, the task sheet and workspace_status. */
+export function messageText(w: Workspace, batch: Pick<Batch, "tasks">): string {
+  return orderTasks(w, batch.tasks).map((t, i) => `${i + 1}. ${t.title}`).join("\n");
+}
+
 export function batchPrompt(w: Workspace, batch: Batch): string {
   if (!isRecovery(batch)) {
-    const tasks = orderTasks(w, batch.tasks).map((t, i) => `${i + 1}. ${t.title}`).join("\n");
-    return `${BATCH_PREFIX} ${batch.id}\n\n${tasks}`;
+    return `${BATCH_PREFIX} ${batch.id}\n\n${messageText(w, batch)}`;
   }
   const quote = (text: string) => `'${text.replace(/'/g, `'"'"'`)}'`;
   const bridge = `FOLLOW_UP_CLIENT_ENTRY=${quote(clientEntry())} node ${quote(join(paseoHome, "plugin-data/follow-up/mcp.mjs"))} call <tool> '<json>'`;

@@ -1,0 +1,138 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tasks mock</title>
+<style>
+:root{--s0:#ffffff;--s1:#f6f6f7;--s2:#ececee;--bd:#e4e4e7;--fg:#18181b;--mu:#71717a;--ac:#2563eb;--acf:#fff;--ok:#16a34a;--warn:#b45309;--bad:#dc2626;--mer:#7347af;--page:#fafafa;--ring:0 0 0 1px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.05)}
+[data-theme=dark]{--s0:#18181b;--s1:#1f1f23;--s2:#2a2a2f;--bd:#2e2e33;--fg:#f4f4f5;--mu:#a1a1aa;--ac:#60a5fa;--acf:#0b0b0c;--ok:#4ade80;--warn:#fbbf24;--bad:#f87171;--mer:#a890d5;--page:#0f0f11;--ring:0 0 0 1px rgba(255,255,255,.08)}
+*{box-sizing:border-box}body{margin:0;background:var(--page);color:var(--fg);font:13px/18px -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;font-variant-numeric:tabular-nums}
+.frames{display:flex;gap:28px;padding:24px;align-items:flex-start;flex-wrap:wrap}
+.frame{width:400px;display:flex;flex-direction:column;gap:12px}
+.cap{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--mu);font-weight:600}
+.card{background:var(--s0);border-radius:10px;box-shadow:var(--ring);overflow:hidden}
+.card.att{box-shadow:none;border:1px solid var(--warn)}
+.head{display:flex;align-items:center;gap:8px;padding:10px 12px;font-weight:600}
+.count{font-size:11px;line-height:15px;padding:1px 6px;border-radius:6px;background:var(--s2);color:var(--mu);font-weight:500}
+.count.w{background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn)}
+.row{display:flex;gap:10px;padding:9px 12px;border-top:1px solid var(--bd);min-height:44px}
+.g{width:16px;padding-top:2px;display:flex;justify-content:center}
+.body{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.title{font-size:13px;line-height:18px}
+.meta{font-size:12px;line-height:17px;color:var(--mu);display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.meta .w{color:var(--warn)}
+.chip{font-size:11px;line-height:15px;padding:1px 6px;border-radius:6px;font-weight:500}
+.chip.r{background:color-mix(in srgb,var(--bad) 13%,transparent);color:var(--bad)}
+.chip.a{background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn)}
+.chip.p{background:color-mix(in srgb,var(--mer) 14%,transparent);color:var(--mer)}
+.chip.m{background:var(--s2);color:var(--mu)}
+.link{color:var(--fg);font-weight:500;display:inline-flex;align-items:center;gap:2px}
+.chev{color:var(--mu);padding-top:2px}
+.dot{width:7px;height:7px;border-radius:4px;background:var(--mu);opacity:.6;margin-top:4px}
+.next{display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid var(--bd);background:var(--s1)}
+.next .txt{flex:1;min-width:0;font-size:12px;line-height:17px;color:var(--mu)}
+.next .txt b{color:var(--fg);font-weight:500}
+.btn{font:inherit;font-size:12px;line-height:16px;padding:5px 10px;border-radius:7px;border:1px solid var(--bd);background:var(--s0);color:var(--fg);font-weight:500;white-space:nowrap}
+.btn.q{border-color:transparent;background:transparent;color:var(--fg);padding:5px 6px}
+.btn.pr{background:var(--ac);border-color:var(--ac);color:var(--acf)}
+.fold{display:flex;gap:8px;align-items:center;padding:9px 12px;border-top:1px solid var(--bd);color:var(--mu);font-size:12px}
+.need{padding:10px 12px;border-top:1px solid var(--bd);display:flex;gap:10px}
+.need .body .title{font-weight:500}
+.acts{display:flex;gap:8px;margin-top:6px}
+.live{display:flex;gap:6px;align-items:center;color:var(--mu);font-size:12px;padding:0 2px}
+.spin{width:12px;height:12px;border-radius:50%;border:2px solid color-mix(in srgb,var(--ac) 25%,transparent);border-top-color:var(--ac);margin-top:2px}
+.sheet{background:var(--s0);border-radius:12px;box-shadow:var(--ring),0 12px 32px rgba(0,0,0,.12);padding:18px;display:flex;flex-direction:column;gap:12px}
+.sheet h3{margin:0;font-size:16px;line-height:22px;font-weight:600}
+.label{font-size:12px;font-weight:600}
+.sw{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;padding-top:12px;border-top:1px solid var(--bd)}
+.toggle{width:34px;height:20px;border-radius:10px;background:var(--ac);position:relative;flex:none}.toggle:after{content:"";position:absolute;right:2px;top:2px;width:16px;height:16px;border-radius:8px;background:#fff}
+.toggle.off{background:var(--s2)}.toggle.off:after{left:2px;right:auto}
+pre{margin:0;background:var(--s1);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;font:12px/17px ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;color:var(--fg)}
+svg{flex:none}
+.phone .frame{width:358px}
+.phone .frames{padding:16px;gap:16px}
+.phone .row{min-height:52px;padding:12px 14px}
+.phone .title{font-size:14px;line-height:20px}
+.phone .btn{padding:11px 14px;font-size:14px;line-height:20px}
+.phone .btn.q{padding:11px 8px}
+.phone .next{flex-wrap:wrap;padding:12px 14px;row-gap:8px}
+.phone .next .txt{flex:1 1 calc(100% - 24px);font-size:13px;line-height:18px}
+.phone .next .btn:first-of-type{margin-left:21px}
+</style></head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+<symbol id="list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M13 5h8M13 12h8M13 19h8M3 17l2 2 4-4M3 7l2 2 4-4"/></symbol>
+<symbol id="up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 17 17 7M7 7h10v10"/></symbol>
+<symbol id="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m9 18 6-6-6-6"/></symbol>
+<symbol id="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></symbol>
+<symbol id="send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></symbol>
+<symbol id="clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+<symbol id="alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7.9 2h8.2L22 7.9v8.2L16.1 22H7.9L2 16.1V7.9Z"/><path d="M12 8v4M12 16h.01"/></symbol>
+<symbol id="wrench" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14.7 6.3a4 4 0 0 0 5 5L22 14l-8 8-2.3-2.3a4 4 0 0 0-5-5L2 10l8-8 2.3 2.3a4 4 0 0 0 2.4 2"/></symbol>
+<symbol id="user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+</svg>
+<div id="root"></div>
+<script>
+const I=(id,c,s=14)=>`<svg width="${s}" height="${s}" style="color:${c}"><use href="#${id}"/></svg>`;
+const link=(t)=>`<span>·</span><span class="link">${t}${I("up","var(--fg)",12)}</span>`;
+const row=(g,title,meta,chip='')=>`<div class="row"><div class="g">${g}</div><div class="body"><div class="title">${title}</div><div class="meta">${chip}${meta}</div></div><div class="chev">${I("chev","var(--mu)")}</div></div>`;
+const dot='<div class="dot"></div>', spin='<div class="spin"></div>';
+const repairG=c=>I("wrench",c,13);
+const tasks=(count,inner)=>`<div class="card"><div class="head">${I("list","var(--fg)",15)}Tasks <span class="count">${count}</span></div>${inner}</div>`;
+const next=(txt,btns)=>`<div class="next">${I("send","var(--mu)",13)}<div class="txt">${txt}</div>${btns}</div>`;
+const own=row(dot,"Run the tenant migration in production","Manual · waits for #142");
+const sub=row(spin,"Fix workspace reading on restart","Reader fix working"+link("Open agent"));
+const done='<div class="fold">'+I("check","var(--ok)",13)+'4 done</div>';
+const Q='<svg width="14" height="14" viewBox="0 0 24 24" style="color:var(--mu)"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3.2 3"/></svg>';
+const R={
+ conflict:(m,g)=>row(g??Q,"Resolve merge conflicts",m,'<span class="chip r">#142</span>'),
+ review:(m,g)=>row(g??Q,"Fix 2 review threads",m,'<span class="chip a">#143</span>'),
+ checks:(m,g)=>row(g??Q,"Fix failing check: unit-tests",m,'<span class="chip r">#143</span>'),
+ restack:(m,g)=>row(g??Q,"Restack onto #143",m,'<span class="chip m">#144</span>'),
+};
+const all=(m,g)=>R.conflict(m,g)+R.review(m,g)+R.checks(m,g)+R.restack(m,g);
+const P='<button class="btn">Preview</button>', N='<button class="btn">Send now</button>', O='<button class="btn">Open agent</button>';
+const live=(g,t)=>`<div class="live">${g}${t}</div>`;
+const F=[
+["1 · Queued, Auto on (no clicks needed)",
+ live(I("clock","var(--mu)",13),"Billing fix is idle · 4 tasks queued")+
+ tasks("6 left",
+  next("<b>Next message to Billing fix</b> · 4 tasks · sends at 14:32 · waits a minute so new changes join the same message",P+N)+
+  all("Queued")+own+sub+done)],
+["2 · Queued, and why it waits",
+ live(spin,"Billing fix is working")+
+ tasks("6 left",
+  next("<b>Next message to Billing fix</b> · 4 tasks · sends when its current turn ends, so it isn't interrupted",P)+
+  all("Queued")+own+sub+done)+
+ tasks("6 left",
+  next("<b>Next message to Billing fix</b> · 4 tasks · waits until GitHub answers for #144 (rate limited), so the message isn't based on stale PRs",P+N)+
+  all("Queued")+own+sub+done)],
+["3 · Sent, waiting for the agent",
+ live(spin,"Billing fix is working on 4 tasks")+
+ tasks("6 left",
+  next("<b>Sent to Billing fix</b> at 14:32 · 4 tasks · waiting for it to report back",O)+
+  all("Sent",spin)+own+sub+done)],
+["4 · Capped: the one case that asks you",
+ `<div class="card att"><div class="head" style="color:var(--warn)">Needs you <span class="count w">1</span></div>
+   <div class="need"><div class="g">${I("alert","var(--warn)",14)}</div><div class="body"><div class="title">Conflicts on #142 are still there after 2 messages</div><div class="meta">Sent at 14:32 and 14:41, and GitHub shows no change. Check Billing fix's chat, then retry.</div><div class="acts"><button class="btn pr">Retry</button><button class="btn">Open agent</button></div></div></div></div>`+
+ tasks("5 left",
+  next("<b>Next message to Billing fix</b> · 2 tasks · sends at 14:47 · waits a minute so new changes join the same message",P+N)+
+  R.review("Queued")+R.checks("Queued")+
+  R.conflict('<span class="w">Needs you · sent twice, no change on GitHub</span>',I("alert","var(--warn)",13))+
+  row(dot,"Run the tenant migration in production","Auto off · stays with you")+
+  sub+'<div class="fold">'+I("check","var(--ok)",13)+'5 done</div>')],
+["5 · Done · task sheet",
+ tasks("2 left", own+sub+'<div class="fold">'+I("check","var(--ok)",13)+'8 done</div>'+
+  row(I("check","var(--ok)",13),'<span style="color:var(--mu)">Resolve merge conflicts</span>',"Done · resolved on GitHub 14:39",'<span class="chip m">#142</span>')+
+  row(I("check","var(--ok)",13),'<span style="color:var(--mu)">Fix 2 review threads</span>',"Done · Billing fix finished it 14:38",'<span class="chip m">#143</span>'))+
+ `<div class="sheet"><h3>Fix failing check: unit-tests</h3><div class="meta"><span class="chip r">#143</span>Queued · in the next message to Billing fix, at 14:32</div>
+   <div class="sw"><div class="body"><div class="label">Auto-send</div><div class="meta">Follow-up sends this to Billing fix. Off: it stays here for you.</div></div><div class="toggle"></div></div>
+   <div class="label">Next message</div><pre>1. Resolve merge conflicts on example/app#142
+2. Use /fix-pr for example/app#143 (2 open threads)
+<mark style="background:color-mix(in srgb,var(--ac) 18%,transparent);color:inherit;border-radius:3px">3. Fix failing required check unit-tests on example/app#143</mark>
+4. Restack example/app#144 onto example/app#143</pre></div>`],
+];
+const theme=new URLSearchParams(location.search).get("theme")||"light";
+const only=new URLSearchParams(location.search).get("only");
+document.documentElement.dataset.theme=theme;
+if(new URLSearchParams(location.search).get("phone"))document.body.classList.add("phone");
+document.getElementById("root").innerHTML='<div class="frames">'+F.filter((_,i)=>!only||only.split(",").includes(String(i+1))).map(([cap,html])=>`<div class="frame"><div class="cap">${cap}</div>${html}</div>`).join("")+'</div>';
+</script></body></html>

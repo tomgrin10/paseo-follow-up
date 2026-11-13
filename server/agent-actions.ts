@@ -1,4 +1,5 @@
 import { agentActor, type Actor } from "../shared/actor";
+import { conditionId, noProgressSends } from "../shared/send-decision";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { ActionPlan } from "../shared/pr-actions";
@@ -45,7 +46,7 @@ void DISPLAY_TOOLS;
 
 /** The developer's control panel switches (Auto-send, Resume, Retry). The button and the agent tool share it. */
 /** `timeZone`: where a snooze's "tonight"/"tomorrow" are (the developer's, from their client; the host's without one). */
-export function controlWorkspace(state: State, input: { workspaceId: string; enable_auto_sends?: boolean; clearHold?: boolean; retryBatchId?: string; mainAgentId?: string; snooze?: { until: string } | null }, now = Date.now(), timeZone?: string | null): Workspace {
+export function controlWorkspace(state: State, input: { workspaceId: string; enable_auto_sends?: boolean; clearHold?: boolean; retryBatchId?: string; retryTask?: string; taskAuto?: { key: string; auto: boolean }; mainAgentId?: string; snooze?: { until: string } | null }, now = Date.now(), timeZone?: string | null): Workspace {
   const w = findWorkspace(state, input.workspaceId);
   if (!w.enable_tracking || w.archived) throw new Error("Activate this workspace before changing follow-up controls.");
   if (input.mainAgentId && input.mainAgentId !== w.mainAgentId) {
@@ -63,6 +64,19 @@ export function controlWorkspace(state: State, input: { workspaceId: string; ena
     w.snooze = { until, at: new Date(now).toISOString(), keys: items.map(needKey) };
   }
   if (input.clearHold) w.hold = null;
+  if (input.retryTask) {
+    // Re-arm one capped condition for NO_PROGRESS_CAP more sends; the next refresh puts it in the next message.
+    const h = w.heldTasks?.find(h => h.held === "capped" && h.task.key === input.retryTask);
+    if (!h) throw new Error("That task isn't waiting for a retry. Refresh to see its state.");
+    const id = conditionId(h.task);
+    w.taskRetries = { ...w.taskRetries, [id]: (w.taskRetries?.[id] ?? 0) + noProgressSends(w, h.task) };
+    w.heldTasks = w.heldTasks!.filter(x => x !== h);
+  }
+  if (input.taskAuto) {
+    const keys = new Set(w.manualTasks ?? []);
+    if (input.taskAuto.auto) keys.delete(input.taskAuto.key); else keys.add(input.taskAuto.key);
+    w.manualTasks = [...keys];
+  }
   if (input.retryBatchId) {
     const b = w.batches.find(b => b.id === input.retryBatchId);
     if (!b || !["blocked", "uncertain"].includes(b.state)) throw new Error("This batch cannot be retried.");
@@ -127,9 +141,9 @@ export const TOOL_INPUT = {
   enable_merge_when_ready: z.strictObject({ pr: prKey.optional(), scope: z.enum(["target", "downstack"]).optional(), ...confirm }),
   disable_merge_when_ready: z.strictObject({ pr: prKey.optional(), scope: z.enum(["target", "downstack"]).optional(), ...confirm }),
   send_repairs: z.strictObject({ workspace: id, batchId: id.optional() }),
-  set_auto_send: z.strictObject({ workspace: id, value: z.boolean() }),
+  set_auto_send: z.strictObject({ workspace: id, value: z.boolean(), task: z.string().max(400).optional() }),
   clear_hold: z.strictObject({ workspace: id }),
-  retry_batch: z.strictObject({ workspace: id, batchId: id }),
+  retry_batch: z.strictObject({ workspace: id, batchId: id.optional(), task: z.string().max(400).optional() }).refine(a => !!a.batchId !== !!a.task, "retry_batch: give batchId or task, not both"),
   track: z.strictObject({ workspace: id }),
   inbox_list: z.strictObject({ flagged_only: z.boolean().optional() }),
   workspace_about: z.strictObject({ workspaceId: id, refresh: z.boolean().optional() }),
@@ -204,11 +218,11 @@ export class AgentActions {
       case "sign_off": case "snooze": case "set_finish_flags": return this.planInbox(caller, tool, args);
       case "set_priorities": return this.planPriorities(caller, args as { priorities?: z.infer<typeof priorityInputSchema>[]; replace?: boolean });
       case "send_repairs": return this.sendRepairs(caller, args as { workspace: string; batchId?: string });
-      case "set_auto_send": return this.control(caller, tool, { workspaceId: args.workspace, enable_auto_sends: args.value });
+      case "set_auto_send": return this.control(caller, tool, args.task ? { workspaceId: args.workspace, taskAuto: { key: args.task, auto: args.value } } : { workspaceId: args.workspace, enable_auto_sends: args.value });
       case "clear_hold": return this.control(caller, tool, { workspaceId: args.workspace, clearHold: true });
       case "ai_rename": return this.planRename(caller, args as { workspaceId?: string; title?: string; undo?: boolean });
       case "snooze_workspace": return this.planWorkspaceSnooze(caller, args as { workspace?: string; until?: string; bring_back?: boolean });
-      case "retry_batch": return this.control(caller, tool, { workspaceId: args.workspace, retryBatchId: args.batchId });
+      case "retry_batch": return this.control(caller, tool, args.task ? { workspaceId: args.workspace, retryTask: args.task } : { workspaceId: args.workspace, retryBatchId: args.batchId });
       case "track": {
         const w = await this.d.engine.activate(args.workspace);
         await this.note(caller, w.mainAgentId, tool);

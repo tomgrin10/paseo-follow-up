@@ -1,5 +1,6 @@
-import { batchView, FINISH_LINE, stuckLine, unconfirmedRefs } from "./status";
-import { blockedOnDeveloper, completionCheck, liveWorkingTask, statusKnown, summary, type Batch, type Pr, type Workspace, type Status } from "./model";
+import { batchView, FINISH_LINE, perSnapshot, stuckLine, unconfirmedRefs } from "./status";
+import { blockedOnDeveloper, completionCheck, liveWorkingTask, statusKnown, summary, type Batch, type Pr, type Task, type Workspace, type Status } from "./model";
+import { idleReason, NO_PROGRESS_CAP } from "./send-decision";
 import { workingLine } from "./task-status";
 import { followUpObligations, recoveryBatch } from "./follow-up";
 import { orderedStacks, settledForDisplay } from "./presentation";
@@ -81,6 +82,8 @@ export function sendBlocker(w: Workspace, batch: Batch): string | null {
 export type NeedItem =
   | { kind: "hold"; key: string; title: string; detail: string }
   | { kind: "retry"; key: string; batchId: string; title: string; detail: string; exhausted: boolean }
+  /** One task that went out NO_PROGRESS_CAP times with no change (Q49): Retry sends that task again; the rest of the queue moves on. */
+  | { kind: "capped"; key: string; taskKey: string; title: string; detail: string }
   /** `finish`: the Done check. It never auto-sends, so it always waits on you. */
   | { kind: "send"; key: string; batchId: string; title: string; tasks: string[]; blocker: string | null; finish?: true }
   | { kind: "decision"; key: string; obligationId: string; title: string; detail: string }
@@ -91,6 +94,21 @@ export type NeedItem =
   | { kind: "reviewers"; key: string; prKey: string; number: number; title: string; detail: string };
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+/** The main agent as the developer knows it: its Paseo title, else "the main agent". */
+const capitalize = (s: string) => s[0].toUpperCase() + s.slice(1);
+export const agentName = (w: Pick<Workspace, "mainAgentTitle">) => w.mainAgentTitle?.trim() || "the main agent";
+/** A capped task's Needs-you title: what is still wrong, in plain words. */
+export function cappedTitle(t: Pick<Task, "kind" | "target" | "title">): string {
+  const pr = `#${t.target.split("#")[1] ?? t.target}`;
+  const still = `still there after ${NO_PROGRESS_CAP} messages`;
+  switch (t.kind) {
+    case "conflict": return `Conflicts on ${pr} are ${still}`;
+    case "review": return `Review feedback on ${pr} is ${still}`;
+    case "checks": return `Failing checks on ${pr} are ${still}`;
+    case "restack": return `${pr} still needs a restack after ${NO_PROGRESS_CAP} messages`;
+    default: return `${t.title}: ${still}`;
+  }
+}
 
 /** Everything waiting on the developer, most urgent first. Each item has exactly one action. */
 /** One need as a workspace snooze remembers it: its key plus what it says, so a different hold or blocker is news. */
@@ -121,7 +139,10 @@ export function asksForReviewers(pr: Pr, w: Pick<Workspace, "prActions">): boole
   return !agentMerges(pr) && noReviewers(pr) && !pr.snapshot!.draft && configuredReviewers(pr.repo).length > 0 && !w.prActions.some(a => prActionBlocks(a, [pr.key]));
 }
 
-export function needsYou(w: Workspace, now = Date.now()): NeedItem[] {
+/** What needs the developer, most urgent first. Answered once per store snapshot and clock reading (perSnapshot); each caller gets its own array. */
+const needsYouOnce = perSnapshot(computeNeedsYou);
+export const needsYou = (w: Workspace, now = Date.now()): NeedItem[] => [...needsYouOnce(w, now)];
+function computeNeedsYou(w: Workspace, now: number): NeedItem[] {
   if (!w.enable_tracking || w.archived) return [];
   const items: NeedItem[] = [];
   const questions = w.questions ?? [];
@@ -134,6 +155,9 @@ export function needsYou(w: Workspace, now = Date.now()): NeedItem[] {
       title: stuckLine(b),
       detail: b.result || (b.state === "uncertain" ? "Delivery wasn't confirmed." : "The main agent reported a blocker.") });
   }
+  for (const h of (w.heldTasks ?? []).filter(h => h.held === "capped"))
+    items.push({ kind: "capped", key: `capped:${h.task.key}`, taskKey: h.task.key, title: cappedTitle(h.task),
+      detail: `Sent ${NO_PROGRESS_CAP} times and GitHub shows no change. Check ${agentName(w)}'s chat, then retry.` });
   for (const a of w.prActions.filter(a => a.state === "uncertain")) {
     const numbers = a.prs.map(key => `#${key.split("#")[1]}`).join(", ");
     items.push({ kind: "check", key: `check:${a.id}`, actionId: a.id, title: `Check the ${a.kind === "merge" ? "merge" : a.kind === "request_reviewers" ? "reviewer request" : "merge-when-ready change"} on ${numbers}`, detail: a.result });
@@ -152,7 +176,8 @@ export function needsYou(w: Workspace, now = Date.now()): NeedItem[] {
     items.push(completionCheck(b)
       ? { kind: "send", key: `send:${b.id}`, batchId: b.id, tasks: b.tasks.map(t => t.title), blocker: sendBlocker(w, b), title: FINISH_LINE, finish: true }
       : { kind: "send", key: `send:${b.id}`, batchId: b.id, tasks: b.tasks.map(t => t.title), blocker: sendBlocker(w, b),
-      title: `${plural(b.tasks.length, "repair")} ready for the main agent${w.enable_auto_sends ? " · it's idle, and Follow-up doesn't wake it" : ""}` });
+      // Say it once: the tasks are rows in Tasks; the send item says only why it waits on you, and its button how many.
+      title: w.enable_auto_sends ? capitalize(idleReason(w)) : `${plural(b.tasks.length, "task")} ready for ${agentName(w)}` });
   }
   const blocking = (pr: Pr) => w.prActions.some(a => prActionBlocks(a, [pr.key]));
   for (const pr of stackOrder(w.prs)) {
@@ -189,6 +214,18 @@ export function headline(w: Workspace, now = Date.now()): HeadlinePart[] {
 
 export type LiveIcon = "spinner" | "done" | "paused" | "waiting" | "alert" | "idle";
 /** What is happening right now, in one line, with the time it started when known. */
+/**
+ * The panel header's live line. Say it once (Q49): while a message is queued, the Tasks strip right below carries when
+ * and why, so the header says only who and what. Home has no strip and keeps liveLine's full line.
+ */
+export function headerLine(w: Workspace, now = Date.now()): { icon: LiveIcon; text: string; since: string | null } {
+  const live = liveLine(w, now);
+  const view = batchView(w, now);
+  if (view?.phase !== "queued" || view.kind !== "repairs" || live.text !== view.line) return live;
+  const to = w.mainAgentTitle?.trim() || "the main agent";
+  return { icon: live.icon, text: `${view.batch.tasks.length === 1 ? "1 task" : `${view.batch.tasks.length} tasks`} queued for ${to}`, since: null };
+}
+
 export function liveLine(w: Workspace, now = Date.now()): { icon: LiveIcon; text: string; since: string | null } {
   const state = summary(w, now);
   if (state.status === "done") {
