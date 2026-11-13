@@ -798,9 +798,9 @@ export default function contribute(server: PluginServerContext) {
     if (refresh) prWorkflow.onChanged();
     return view;
   });
-  handle(rpc.setPrWorkflowRpc, async ({ repo, setting, default: fallback, mergeMethod, reviewFix, review }) => {
+  handle(rpc.setPrWorkflowRpc, async ({ repo, setting, default: fallback, mergeMethod, reviewFix, review, deploy }) => {
     await requireReady();
-    if ((setting !== undefined || mergeMethod !== undefined || review !== undefined || (reviewFix !== undefined && repo)) && !repo) throw new Error("Name the repository (owner/name) to change.");
+    if ((setting !== undefined || mergeMethod !== undefined || review !== undefined || deploy !== undefined || (reviewFix !== undefined && repo)) && !repo) throw new Error("Name the repository (owner/name) to change.");
     await prWorkflow.mutate(config => {
       if (fallback !== undefined) config.default = fallback;
       if (!repo) { if (reviewFix) config.reviewFix = reviewFix; return; }
@@ -809,6 +809,7 @@ export default function contribute(server: PluginServerContext) {
       if (mergeMethod !== undefined) { if (mergeMethod === null) delete own.mergeMethod; else own.mergeMethod = mergeMethod; }
       if (reviewFix !== undefined) { if (reviewFix === null) delete own.reviewFix; else own.reviewFix = reviewFix; }
       if (review !== undefined) { if (review === null || review === "team") delete own.review; else own.review = review; }
+      if (deploy !== undefined) { if (deploy === null) delete own.deploy; else own.deploy = deploy; }
     });
     // A changed workflow changes readiness and merge: check the PRs again now rather than on the next poll.
     void engine.nudge();
