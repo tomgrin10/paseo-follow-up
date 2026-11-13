@@ -26,7 +26,9 @@ await harness();
 const arg = (name, fallback) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : fallback; };
 const N = Number(arg("prs", "30")); const W = Number(arg("workspaces", "10")); const R = Number(arg("repos", "3")); const MINUTES = Number(arg("minutes", "3"));
 const PENDING = Number(arg("pending", String(Math.max(1, Math.round(N / 10))))); const MERGED = Number(arg("merged", "0")); const CLOSED = Number(arg("closed", "0")); const profileDir = arg("cpu-prof", null);
-// Merged PRs in the deployment repository (herosecurity/hero-poc): each needs a fleet read (gcloud), the serving image's
+/** A fictional deploy check for acme/acme-poc (tests/fixtures.ts ACME_DEPLOY). */
+const DEPLOY = { gcpProject: "acme-prod", serviceLabel: "rollout-group=app", servicePrefix: "acme-service-app-", roles: ["backend", "etl", "interpretation", "public-api", "web"], registry: "us-central1-docker.pkg.dev", imagePath: "acme-prod/acme-docker", images: ["prod-app-backend", "prod-app-web"], buildShaEnv: "APP_BUILD_SHA" };
+// Merged PRs in the deployment repository (acme/acme-poc): each needs a fleet read (gcloud), the serving image's
 // commit (registry) and one ancestry compare per (merge, serving commit). 2026-11-12: those compares still spawned gh.
 const DEPLOY_MERGED = Number(arg("deploy-merged", "0"));
 const root = await mkdtemp(join(tmpdir(), "follow-poll-cost-"));
@@ -38,7 +40,7 @@ const free = async () => { const s = createNet(); await new Promise(r => s.liste
 const repos = Array.from({ length: R }, (_, i) => `example-${i}/app`);
 const rows = new Map();
 for (let i = 0; i < N; i++) { const repo = repos[i % R]; const number = 100 + i; rows.set(`${repo}#${number}`, { repo, number, base: i < R ? "main" : `b${number - R}`, pending: i < PENDING, state: i >= N - MERGED ? "MERGED" : i >= N - MERGED - CLOSED ? "CLOSED" : "OPEN" }); }
-for (let i = 0; i < DEPLOY_MERGED; i++) { const repo = "herosecurity/hero-poc"; const number = 5000 + i; rows.set(`${repo}#${number}`, { repo, number, base: "main", pending: false, state: "MERGED", merge: i.toString(16).padStart(40, "d") }); }
+for (let i = 0; i < DEPLOY_MERGED; i++) { const repo = "acme/acme-poc"; const number = 5000 + i; rows.set(`${repo}#${number}`, { repo, number, base: "main", pending: false, state: "MERGED", merge: i.toString(16).padStart(40, "d") }); }
 const counts = { points: 0, graphql: 0, rest: 0, ghSpawns: 0, gcloudSpawns: 0, compares: 0 };
 const prNode = (repo, number) => {
   const row = rows.get(`${repo}#${number}`); if (!row) return null;
@@ -95,8 +97,8 @@ try {
   // gh and gcloud shims: count the spawn, answer from the fake. Plain node, no shell. gcloud answers the production
   // fleet: five ready services, one revision each, all serving the image whose commit is "b"×40.
   const gcloudSource = "x";
-  const fleet = ["backend", "etl", "interpretation", "public-api", "web"].map(role => ({ metadata: { name: `hero-service-vspm-${role}-x`, labels: { "cloud.googleapis.com/location": "us-central1" } }, status: { conditions: [{ type: "Ready", status: "True" }], traffic: [{ revisionName: `${role}-r1`, percent: 100 }] } }));
-  const revision = { spec: { containers: [{ name: "app", image: `us-central1-docker.pkg.dev/hero-production-environments/hero-docker-repo/prod-vspm-backend@sha256:${"1".repeat(64)}` }] }, status: { conditions: [{ type: "Ready", status: "True" }] } };
+  const fleet = ["backend", "etl", "interpretation", "public-api", "web"].map(role => ({ metadata: { name: `acme-service-app-${role}-x`, labels: { "cloud.googleapis.com/location": "us-central1" } }, status: { conditions: [{ type: "Ready", status: "True" }], traffic: [{ revisionName: `${role}-r1`, percent: 100 }] } }));
+  const revision = { spec: { containers: [{ name: "app", image: `us-central1-docker.pkg.dev/acme-prod/acme-docker/prod-app-backend@sha256:${"1".repeat(64)}` }] }, status: { conditions: [{ type: "Ready", status: "True" }] } };
   const shimSource = kind => `#!/usr/bin/env node
 const base = process.env.POLL_COST_API; const args = process.argv.slice(2);
 const gcloud = a => a[0] === "auth" ? "registry-token" : a[1] === "services" ? ${JSON.stringify(JSON.stringify(fleet))} : ${JSON.stringify(JSON.stringify(revision))};
@@ -130,6 +132,8 @@ const gcloud = a => a[0] === "auth" ? "registry-token" : a[1] === "services" ? $
   await sleep(3_000);
   const now = new Date().toISOString(); const keys = [...rows.keys()];
   await mkdir(join(home, "plugin-data/follow-up"), { recursive: true });
+  // The deploy check is host settings (set_pr_workflow deploy); a fictional one for the deployment repository.
+  await writeFile(join(home, "plugin-data/follow-up/pr-workflow.json"), JSON.stringify({ version: 1, migratedAt: now, repos: { "acme/acme-poc": { deploy: DEPLOY } } }));
   await writeFile(join(home, "plugin-data/follow-up/state.json"), JSON.stringify({ version: 1, migrations: ["follow-every-1"], workspaces: created.map(({ workspaceId, agentId }, i) => ({
     id: workspaceId, title: `Synthetic workspace ${i}`, goal: "Synthetic", mainAgentId: agentId, enable_tracking: true, enable_auto_sends: false, hold: null, archived: false,
     prs: keys.filter((_, k) => k % W === i).map(key => { const r = rows.get(key); return { key, repo: r.repo, number: r.number, stack: `Stack ${i}`, parent: null, disposition: null, snapshot: null, error: null }; }),

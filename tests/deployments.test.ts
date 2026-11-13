@@ -1,27 +1,29 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Deployments } from "../server/deployments";
+import type { DeployConfig } from "../shared/pr-workflow";
 import { tasksFor } from "../server/tasks";
 import { lifecycleOnly } from "../shared/follow-up";
 import { completionBlockers } from "../shared/model";
 import { compactPrStatus, settledForDisplay } from "../shared/presentation";
-import { clock, pr, snapshot, workspace } from "./fixtures";
+import { ACME_DEPLOY, clock, pr, snapshot, workspace } from "./fixtures";
 
+const ACME: DeployConfig = ACME_DEPLOY;
 const merged = "a".repeat(40), current = "b".repeat(40), old = "c".repeat(40);
 function fixture() {
-  let now = clock, failure = false, missing = false, ready = true, rollback = false, split = false;
+  let now = clock, configured = true, failure = false, missing = false, ready = true, rollback = false, split = false;
   const calls: string[] = [];
   const run = async (command: string, args: string[]) => {
     calls.push(`${command} ${args.slice(0, 3).join(" ")}`);
     if (failure) throw new Error("private transport details");
     if (command === "gh") return JSON.stringify({ status: args[1].endsWith(current) ? "ahead" : "behind" });
     if (args[0] === "auth") return "private-fixture-access-token";
-    if (args[1] === "services") return JSON.stringify(["backend", "etl", "interpretation", "public-api", "web"].filter(r => !missing || r !== "web").map(role => ({ metadata: { name: `hero-service-vspm-${role}-hash`, labels: { "cloud.googleapis.com/location": "us-central1" } }, status: { conditions: [{ type: "Ready", status: ready ? "True" : "False" }], traffic: split ? [{ revisionName: "new", percent: 50 }, { revisionName: "old", percent: 50 }] : [{ revisionName: rollback ? "old" : "new", percent: 100 }] } })));
-    return JSON.stringify({ spec: { containers: [{ name: "app", image: `us-central1-docker.pkg.dev/hero-production-environments/hero-docker-repo/prod-vspm-backend@sha256:${(args[3] === "old" ? "2" : "1").repeat(64)}` }] }, status: { conditions: [{ type: "Ready", status: "True" }] } });
+    if (args[1] === "services") return JSON.stringify(["backend", "etl", "interpretation", "public-api", "web"].filter(r => !missing || r !== "web").map(role => ({ metadata: { name: `acme-service-app-${role}-hash`, labels: { "cloud.googleapis.com/location": "us-central1" } }, status: { conditions: [{ type: "Ready", status: ready ? "True" : "False" }], traffic: split ? [{ revisionName: "new", percent: 50 }, { revisionName: "old", percent: 50 }] : [{ revisionName: rollback ? "old" : "new", percent: 100 }] } })));
+    return JSON.stringify({ spec: { containers: [{ name: "app", image: `us-central1-docker.pkg.dev/acme-prod/acme-docker/prod-app-backend@sha256:${(args[3] === "old" ? "2" : "1").repeat(64)}` }] }, status: { conditions: [{ type: "Ready", status: "True" }] } });
   };
-  const adapter = new Deployments(run, (async (url: any) => ({ ok: true, text: async () => JSON.stringify(String(url).includes("/manifests/") ? { config: { digest: `sha256:${String(url).includes("2".repeat(64)) ? "4".repeat(64) : "3".repeat(64)}` } } : { config: { Labels: { "org.opencontainers.image.revision": String(url).includes("4".repeat(64)) ? old : current } } }) })) as any, () => now, { rest: async (_repo: string, path: string) => JSON.parse(await run("gh", ["api", path])) });
-  const target = pr({ repo: "herosecurity/hero-poc", key: "herosecurity/hero-poc#1", snapshot: snapshot({ state: "MERGED", head: "unmerged-head-not-in-history", mergeCommit: merged }) });
-  return { adapter, target, calls, failure: () => { failure = true; }, heal: () => { failure = false; }, wait: (ms: number) => { now += ms; }, missing: () => { missing = true; }, unready: () => { ready = false; }, rollback: () => { rollback = true; }, split: () => { split = true; }, advance: () => { now += 61_000; } };
+  const adapter = new Deployments(run, (async (url: any) => ({ ok: true, text: async () => JSON.stringify(String(url).includes("/manifests/") ? { config: { digest: `sha256:${String(url).includes("2".repeat(64)) ? "4".repeat(64) : "3".repeat(64)}` } } : { config: { Labels: { "org.opencontainers.image.revision": String(url).includes("4".repeat(64)) ? old : current } } }) })) as any, () => now, { rest: async (_repo: string, path: string) => JSON.parse(await run("gh", ["api", path])) }, repo => configured && repo === "acme/acme-poc" ? ACME : undefined);
+  const target = pr({ repo: "acme/acme-poc", key: "acme/acme-poc#1", snapshot: snapshot({ state: "MERGED", head: "unmerged-head-not-in-history", mergeCommit: merged }) });
+  return { adapter, target, calls, failure: () => { failure = true; }, heal: () => { failure = false; }, wait: (ms: number) => { now += ms; }, missing: () => { missing = true; }, unready: () => { ready = false; }, rollback: () => { rollback = true; }, split: () => { split = true; }, advance: () => { now += 61_000; }, unconfigure: () => { configured = false; }, configure: () => { configured = true; } };
 }
 test("deployment follows the squash merge commit into actual serving images, and caches fleet reads", async () => {
   const f = fixture(); const result = (await f.adapter.observe([f.target])).get(f.target.key)!;
@@ -51,7 +53,16 @@ test("a failed probe says why, without transport detail, and retries on the next
 });
 test("unknown merge commits and repositories cannot claim deployment", async () => {
   const f = fixture(); f.target.snapshot!.mergeCommit = null; assert.equal((await f.adapter.observe([f.target])).get(f.target.key)?.state, "unknown");
-  const g = fixture(); g.target.repo = "example/app"; assert.equal((await g.adapter.observe([g.target])).get(g.target.key)?.state, "unknown"); assert.equal(g.calls.length, 0);
+  const g = fixture(); g.target.repo = "example/app"; assert.equal((await g.adapter.observe([g.target])).has(g.target.key), false, "no deploy check: no entry"); assert.equal(g.calls.length, 0);
+});
+test("public-code-carries-no-host-identifiers: the probe reads only repositories with a deploy check, from injected config", async () => {
+  const f = fixture(); f.unconfigure();
+  assert.equal(f.adapter.configured("acme/acme-poc"), false);
+  assert.equal((await f.adapter.observe([f.target])).size, 0); assert.equal(f.calls.length, 0, "empty config: no gcloud or GitHub call");
+  f.configure();
+  assert.equal((await f.adapter.observe([f.target])).get(f.target.key)?.state, "deployed", "the check comes back with its config");
+  assert.ok(f.calls.some(c => c.startsWith("gcloud run services")), "reads the configured project's services");
+  assert.equal(new Deployments().configured("acme/acme-poc"), false, "the default: no repository has a deploy check");
 });
 test("all post-deploy dependencies must be freshly deployed; closed, partial, missing and stale do not qualify", () => {
   const d = { state: "deployed" as const, environment: "production", commits: [current], evidence: "Serving image contains the merge", observedAt: new Date(clock).toISOString() };

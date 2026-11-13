@@ -4,6 +4,7 @@ import type { Graphite } from "./graphite";
 import type { PrWorkflow } from "../shared/pr-workflow";
 import type { Pr, Snapshot } from "../shared/model";
 import type { Deployments } from "./deployments";
+import { notSetUpEvidence } from "../shared/task-trigger";
 import { budgetTier, cadence, dueForRead, type Budget } from "../shared/poll";
 import { cliApi, githubApi, type GithubApi } from "./github-api";
 import { splitReviewers, TEAM_SLUG, USER_LOGIN } from "../shared/reviewers";
@@ -300,9 +301,17 @@ export class Github {
       }
     }
     if (this.deployments) {
+      const stored = new Map(prs.map(p => [p.key, p]));
       const targets = prs.flatMap(p => { const observed = result.get(p.key); return observed?.snapshot && !observed.error ? [{ ...p, snapshot: observed.snapshot }] : []; });
       const deployment = await this.deployments.observe(targets);
       for (const [key, value] of deployment) result.get(key)!.snapshot!.deployment = value;
+      // No deploy check for the repository: keep the last observation (it returns when the check does), marked.
+      for (const p of targets) if (p.snapshot.state === "MERGED" && !deployment.has(p.key)) {
+        const before = p.snapshot.deployment ?? this.last.get(p.key)?.snapshot?.deployment ?? stored.get(p.key)?.snapshot?.deployment;
+        result.get(p.key)!.snapshot!.deployment = before
+          ? { ...before, notSetUp: true }
+          : { state: "unknown", environment: "", commits: [], evidence: notSetUpEvidence(p.repo), observedAt: new Date(this.now()).toISOString(), notSetUp: true };
+      }
     }
     for (const [key, value] of result) this.remember(key, value);
     return result;

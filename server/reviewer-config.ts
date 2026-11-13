@@ -71,13 +71,11 @@ export class ReviewerConfigStore {
   }
 }
 
-/** Display names for the reviewers earlier versions hardcoded, so a seeded list reads as it used to. */
-const LEGACY_NAMES: Record<string, string> = { "uyy-hero-security": "Uri", "yuvalgoder-star": "Yuval" };
-
 /**
  * Upgrades keep what the developer already used: for each repository, the reviewers of the most recent submitted
  * Add-reviewers request become its saved list. Only Follow-up's own recorded requests count, so a fresh install
- * (or one that never requested reviewers) starts empty and gets the picker.
+ * (or one that never requested reviewers) starts empty and gets the picker. Logins only: names come from the developer
+ * or an agent (save_reviewers), never from the code (public-code-carries-no-host-identifiers).
  */
 export function seedFromHistory(state: State): Record<string, ReviewerEntry[]> {
   const latest = new Map<string, { at: string; logins: string[] }>();
@@ -89,7 +87,7 @@ export function seedFromHistory(state: State): Record<string, ReviewerEntry[]> {
       if (!seen || a.createdAt > seen.at) latest.set(repo, { at: a.createdAt, logins: a.reviewers });
     }
   }
-  return Object.fromEntries([...latest].map(([repo, { logins }]) => [repo, cleanList(logins.map(login => ({ login, name: isTeam(login) ? null : LEGACY_NAMES[login.toLowerCase()] ?? null })))]));
+  return Object.fromEntries([...latest].map(([repo, { logins }]) => [repo, cleanList(logins.map(login => ({ login, name: null })))]));
 }
 
 export type Suggestion = { login: string; name: string | null; kind: "user" | "team" };
