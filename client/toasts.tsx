@@ -29,6 +29,17 @@ const GAP = 8;
 /** Web: where Paseo's own toast ends, so Follow-up's stack sits below it rather than on top of it. */
 /** Where Paseo's own toast last sat (its top), so Follow-up's lands in the same place when it shows alone. */
 let hostTop = 0;
+/**
+ * Phones: the bottom dock a screen marks with this nativeID (Home's moves and reply). Follow-up's toasts sit just above
+ * it, in thumb reach, never over the screen's heading (a toast at the top covered "WEB-17 Saved search filters").
+ */
+export const TOAST_ANCHOR = "follow-up-toast-anchor";
+function anchorTop(): number {
+  const doc = (globalThis as { document?: { getElementById(id: string): { getBoundingClientRect(): { top: number; height: number } } | null } }).document;
+  if (Platform.OS !== "web" || !doc) return 0;
+  const box = doc.getElementById(TOAST_ANCHOR)?.getBoundingClientRect();
+  return box && box.height > 0 ? box.top : 0;
+}
 function hostToastBottom(): number {
   type Box = { top: number; bottom: number; height: number };
   type El = { closest(sel: string): El | null; parentElement: El | null; getBoundingClientRect(): Box };
@@ -108,14 +119,26 @@ class IconSafe extends Component<{ children: ReactNode }, { failed: boolean }> {
 function ToastStack({ theme, compact }: { theme: Theme; compact: boolean }) {
   const list = useSyncExternalStore(subscribe, toastsNow, toastsNow);
   const [hostBottom, setHostBottom] = useState(0);
-  // Only while Follow-up shows a toast: watch for Paseo's own above it (one cheap DOM read a quarter second).
+  const [dock, setDock] = useState(0);
+  // Only while Follow-up shows a toast: watch for Paseo's own above it, and on phones the dock below it (cheap DOM
+  // reads a quarter second).
   useEffect(() => {
-    if (!list.length || Platform.OS !== "web") { setHostBottom(0); return; }
-    const tick = () => setHostBottom(b => { const next = hostToastBottom(); return next === b ? b : next; });
+    if (!list.length || Platform.OS !== "web") { setHostBottom(0); setDock(0); return; }
+    const tick = () => { setHostBottom(b => { const next = hostToastBottom(); return next === b ? b : next; }); if (compact) setDock(d => { const next = anchorTop(); return next === d ? d : next; }); };
     tick(); const timer = setInterval(tick, 250);
     return () => clearInterval(timer);
-  }, [list.length]);
+  }, [list.length, compact]);
   if (!list.length) return null;
+  // Phones on the web: at the bottom, above the screen's dock when it marks one (TOAST_ANCHOR), in thumb reach and
+  // clear of the heading. The window's height is read here, as the dock's top is.
+  if (Platform.OS === "web" && compact) {
+    const height = (globalThis as { innerHeight?: number }).innerHeight ?? 0;
+    const above = dock && height ? Math.max(height - dock + GAP, 16) : 16;
+    const bottom = { position: "fixed", bottom: dock ? `${above}px` : `calc(env(safe-area-inset-bottom) + ${above}px)` } as unknown as object;
+    return <View pointerEvents="box-none" style={[{ left: 16, right: 16, zIndex: 1000, alignItems: "center", gap: GAP }, bottom]}>
+      {list.map(item => <ToastView key={item.id} item={item} theme={theme} compact={compact} />)}
+    </View>;
+  }
   // Alone, it takes Paseo's toast place: below the app header (measured once a host toast has shown), not over it.
   const top = hostBottom ? hostBottom + GAP : hostTop || (Platform.OS === "web" ? (compact ? 72 : 44) : TOP);
   const position = Platform.OS === "web"

@@ -130,7 +130,9 @@ the cold start's spawns and compares).
   After a click the button, the toast and Activity read one outcome (`mergeWords`, `shared/merge-click.ts`): Merged
   only when GitHub merged, Queued, or Merge requested (Graphite). A GitHub merge also marks its PRs merged in the
   store at once, so the header, rows and progress agree before the next PR read confirms it. The same write re-derives
-  the queued message (`Engine.settleTasks`), so a repair for a PR that just merged leaves Tasks and Needs you too
+  the queued message (`Engine.settleTasks`), so a repair for a PR that just merged leaves Tasks and Needs you too. On
+  the client, the merge's fresh read reaches every live store before the toast (`readWorkspace`, `acceptWorkspace`,
+  `client/live-copies.ts`), so Home and the pill drop the row with the panel; a store keeps the newer copy by updatedAt
   (`a-merge-outcome-reads-the-same-everywhere`, `tests/pr-workflow.test.ts`).
 - **Agents** use `merge`, `enable_merge_when_ready` and `disable_merge_when_ready`, which plan and then confirm.
 - **Interrupted sends.** A reload mid-send marks the action `uncertain`.

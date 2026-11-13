@@ -300,6 +300,36 @@ test("GitHub mode: a merge click drops the queued repair for the PR it merged in
   } finally { await f.close(); }
 });
 
+test("GitHub mode: after a merge click Home and the pill read the merged copy too (the shared live store), Needs you 0", { timeout: 60_000 }, async () => {
+  const { bundleStores, fakeHost, settle } = await import("./client-stores");
+  const stores = await bundleStores();
+  const host = fakeHost(true);
+  const live = stores.createLiveStore(host.client as never);
+  const f = await githubFixture({ refuseFirstChildMerge: false }); try {
+    await settle();
+    // Home and the pill read the live store, fed by the workspaces feed: the copy from before the click.
+    const before = (await f.store.snapshot()).workspaces[0];
+    host.push("follow.workspaces-feed", { revision: 1, full: true, workspaces: [before], removed: [], error: null });
+    await settle();
+    const held = () => live.get(before.id) as typeof before;
+    assert.ok(needsYou(held()).some(i => i.kind === "merge"), "precondition: Home lists the merge");
+    const plan = await f.actions.prepare("workspace", f.top.key, "merge");
+    assert.equal((await f.actions.confirm(plan.id, "downstack")).merge, "merged");
+    // The merge button's fresh read (readWorkspace, before its toast) reaches every live store.
+    const after = (await f.store.snapshot()).workspaces[0];
+    stores.acceptWorkspace(after);
+    assert.deepEqual(held().prs.map(p => p.snapshot?.state), ["MERGED", "MERGED"], "Home's rows say merged");
+    assert.equal(needsYou(held()).length, 0, `Home's and the pill's Needs you is empty: ${JSON.stringify(needsYou(held()))}`);
+    // A late diff carrying the older copy never undoes it.
+    host.push("follow.workspaces-feed", { revision: 2, full: false, workspaces: [before], removed: [], error: null });
+    await settle();
+    assert.equal(needsYou(held()).length, 0, "an older copy from a late diff is ignored");
+    const button = await readFile(new URL("../client/merge-button.tsx", import.meta.url), "utf8");
+    assert.match(button, /queryFn: \(\) => readWorkspace\(read, w\.id\)/, "the merge's read goes through readWorkspace");
+    assert.match(button, /await refresh\(\);\n\s*const said = mergeWords/, "and finishes before the toast");
+  } finally { live.stop(); await f.close(); }
+});
+
 test("the server wires the merge write to the engine's task settle", async () => {
   const source = await readFile(new URL("../index.server.ts", import.meta.url), "utf8");
   assert.match(source, /actions\.settleTasks = w => engine\.settleTasks\(w\);/);
