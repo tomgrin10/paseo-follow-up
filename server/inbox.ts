@@ -26,6 +26,15 @@ export { briefAnswer, briefAnswers } from "../shared/brief";
  * which finishes happened while the worker was down; stop flushes it, so only a crash leaves it this stale.
  */
 export const LAST_SEEN_WRITE_MS = 300_000;
+/**
+ * The inbox writes at most once per window (the-inbox-writes-at-most-once-per-window). 2026-11-13 (run W, a copy of a
+ * live install under 20 turns a minute): every inbox mutation stringified the whole inbox (133 KB) and wrote it, about
+ * twice a turn, 54 MB of garbage every 5 minutes. Now a real change is held in memory, where every in-process reader
+ * already reads it (load() returns it first), and one write per window carries all of the window's changes. Nothing
+ * outside the worker reads inbox.json: the MCP bridge and the CLI ask the worker over RPC, the hooks read brief.json
+ * and scopes.json, onboarding only checks the file exists. Stop flushes it, so only a crash loses at most this window.
+ */
+export const INBOX_WRITE_MS = 2_000;
 
 /** The flag store: plugin-data/follow-up/inbox.json. A new file, so existing state never changes shape. */
 export class InboxStore {
@@ -41,7 +50,10 @@ export class InboxStore {
   private saved: InboxState | null = null;
   /** Writes to inbox.json, for tests. */
   writes = 0;
-  constructor(readonly directory: string, private now: () => number = Date.now) {}
+  /** The pending window's write (the-inbox-writes-at-most-once-per-window). */
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  /** `writeMs` 0 writes each real change through at once (tools, tests); the worker passes INBOX_WRITE_MS. */
+  constructor(readonly directory: string, private now: () => number = Date.now, private writeMs = 0) {}
   private get path() { return join(this.directory, "inbox.json"); }
   /** A private, mutable copy of the whole inbox. Nothing in the worker needs one; mutate() hands out a draft instead. */
   async read(): Promise<InboxState> { return structuredClone(await this.load()); }
@@ -96,11 +108,21 @@ export class InboxStore {
     this.tail = next.catch(() => undefined);
     return next;
   }
-  /** Writes a held lastSeen now; the worker's stop calls it. */
+  /** Writes a held change or lastSeen now; the worker's stop calls it. */
   async flush(): Promise<void> {
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
     await this.tail;
     const pending = this.unsaved;
     if (pending) await this.write(pending);
+  }
+  /** One write for everything the window changed, queued behind the mutations in flight. */
+  private schedule(): void {
+    this.timer ??= setTimeout(() => {
+      this.timer = null;
+      const next = this.tail.then(async () => { const pending = this.unsaved; if (pending) await this.write(pending); });
+      this.tail = next.catch(() => this.schedule()); // a failed write keeps the change and tries again next window
+    }, this.writeMs);
+    (this.timer as { unref?: () => void }).unref?.();
   }
   /**
    * Validates what changed (each changed entry, and the small top-level fields when one of them changed), then writes
@@ -116,6 +138,7 @@ export class InboxStore {
     Object.freeze(entries); Object.freeze(next);
     const lastSeenOnly = top.length === 1 && top[0] === "lastSeen" && !changes.fields.has("entries");
     if (lastSeenOnly && this.written && this.now() - this.written.at < LAST_SEEN_WRITE_MS) { this.unsaved = next; return; }
+    if (this.writeMs > 0) { this.unsaved = next; this.schedule(); return; }
     await this.write(next);
   }
   private async write(state: InboxState): Promise<void> {
@@ -185,6 +208,8 @@ export type BriefHost = {
 /** Sends one message to the brief's agent. */
 export type Send = (text: string, messageId: string) => Promise<void>;
 export type InboxOptions = {
+  /** The inbox file's write window (INBOX_WRITE_MS in the worker; 0 writes through, for tests). */
+  writeMs?: number;
   enabled: () => Promise<{ enable_inbox: boolean; enable_inbox_pr_closed: boolean }>;
   briefs?: BriefHost;
   directory: Directory;
@@ -251,7 +276,7 @@ export class Inbox {
       .finally(() => { this.directoryRefresh = null; });
   }
   private hookState: string;
-  constructor(directory: string, private o: InboxOptions) { this.store = new InboxStore(directory); this.hookState = join(directory, "hook-state"); }
+  constructor(directory: string, private o: InboxOptions) { this.store = new InboxStore(directory, Date.now, o.writeMs ?? 0); this.hookState = join(directory, "hook-state"); }
   private now() { return this.o.now?.() ?? Date.now(); }
   /**
    * Paseo still reports "running" for a moment after a turn completes, so a status read at turn end would make
