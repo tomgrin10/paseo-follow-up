@@ -147,9 +147,22 @@ the cold start's spawns and compares).
 
 ## Deployments
 
-`server/deployments.ts` reports deploy state only for specifically configured repositories; elsewhere it stays
-unknown. A fleet read (at most once a minute) is one `gcloud run services list`; each serving revision is described
-once, since a revision's image never changes. Tasks with `trigger: deploy` wait for it ([workspaces.md](workspaces.md)).
+`server/deployments.ts` reports deploy state only for repositories with a **deploy check**: a per-repository `deploy`
+entry in `pr-workflow.json` (`deployConfigSchema` in `shared/pr-workflow.ts`: GCP project, service label and name
+prefix, roles, registry, image path and names, an optional build-SHA env var). It is host settings, never code
+(invariant `public-code-carries-no-host-identifiers`): an agent sets or clears it with `set_pr_workflow` (`deploy`,
+planned and confirmed), `pr_workflow` returns it, and Settings → Following → PR workflow → the repository's fold shows
+it read-only (Deploy check: Production · project, or Not set up). With no config there is no gcloud call.
+
+A fleet read (at most once a minute per configuration) is one `gcloud run services list`; each serving revision is
+described once, since a revision's image never changes. Tasks with `trigger: deploy` wait for it
+([workspaces.md](workspaces.md)).
+
+**No deploy check** (a fresh install, or the window between an install and the private seed that writes it):
+`server/github.ts` keeps each merged PR's last observation and evidence, marks it `notSetUp`, and a deploy-triggered
+task waits with "Deploy check not set up for owner/repo" without firing, erroring or changing state
+(`shared/task-trigger.ts`). When the config returns, the next read replaces the mark. Tests:
+`tests/deployments.test.ts`, `tests/github-poll-cost.test.ts`.
 
 ## Send to Paseo (browser companion)
 

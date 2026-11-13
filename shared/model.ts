@@ -13,6 +13,11 @@ export const idSchema = z.string().min(1).max(200);
 export const deploymentSchema = z.object({
   state: z.enum(["deployed", "pending", "partial", "unknown"]), environment: z.string(),
   commits: z.array(z.string()), evidence: z.string(), observedAt: z.string(),
+  /**
+   * The repository has no deploy check on this machine (host settings). The rest is the last observation, kept so it
+   * comes back unchanged when the check is set up again; a deploy-triggered task waits, saying why (shared/task-trigger.ts).
+   */
+  notSetUp: z.boolean().optional(),
 });
 export const snapshotSchema = z.object({
   title: z.string(), url: z.string(), state: z.enum(["OPEN", "MERGED", "CLOSED"]),

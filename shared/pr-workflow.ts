@@ -52,11 +52,35 @@ export const REVIEW_MODE_LABELS: Record<ReviewMode, { label: string; hint: strin
   none: { label: "No review", hint: "The agent merges its own PRs once checks pass." },
 };
 
+/**
+ * A repository's deploy check (Cloud Run): which production services to read and how their images name the commit
+ * they were built from. Host settings only, never in the code (invariant public-code-carries-no-host-identifiers):
+ * an agent sets it with set_pr_workflow. A repository without one has no deploy check.
+ */
+const word = /^[a-z][a-z0-9-]*[a-z0-9]$/;
+export const deployConfigSchema = z.strictObject({
+  /** The GCP project the production services run in. */
+  gcpProject: z.string().regex(/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/, "A GCP project ID, such as acme-prod."),
+  /** The label every production service carries, as key=value (gcloud --filter metadata.labels.<key>=<value>). */
+  serviceLabel: z.string().regex(/^[a-z][a-z0-9_-]*=[a-z0-9_-]+$/, "A label as key=value, such as rollout-group=app."),
+  /** Service names are <servicePrefix><role>-…; every role must have a ready service. */
+  servicePrefix: z.string().regex(/^[a-z][a-z0-9-]*-$/, "A service name prefix ending in a hyphen, such as acme-service-app-."),
+  roles: z.array(z.string().regex(word)).min(1).max(20),
+  /** Artifact Registry host and repository path: <registry>/<imagePath>/<image>@sha256:… */
+  registry: z.string().regex(/^[a-z0-9-]+-docker\.pkg\.dev$/, "An Artifact Registry host, such as us-central1-docker.pkg.dev."),
+  imagePath: z.string().regex(/^[a-z][a-z0-9-]*\/[a-z][a-z0-9_-]*$/, "project/repository, such as acme-prod/acme-docker."),
+  images: z.array(z.string().regex(word)).min(1).max(20),
+  /** An env var the image bakes its commit into, besides the OCI revision label and GIT_SHA. */
+  buildShaEnv: z.string().regex(/^[A-Z][A-Z0-9_]*$/).optional(),
+});
+export type DeployConfig = z.infer<typeof deployConfigSchema>;
+
 export const repoWorkflowSchema = z.object({
   workflow: prWorkflowSettingSchema.optional(),
   mergeMethod: mergeMethodSchema.optional(),
   reviewFix: reviewFixSchema.optional(),
   review: reviewModeSchema.optional(),
+  deploy: deployConfigSchema.optional(),
 });
 export type RepoWorkflow = z.infer<typeof repoWorkflowSchema>;
 /** `plugin-data/follow-up/pr-workflow.json`. Missing fields are the defaults. */
@@ -157,6 +181,8 @@ export const repoWorkflowViewSchema = z.object({
   path: z.string().nullable(), inherits: z.boolean(),
   mergeMethod: mergeMethodSchema.nullable(), reviewFix: reviewFixSchema.nullable(),
   review: reviewModeSchema.default("team"),
+  /** The deploy check, when this machine has one for the repository (Settings shows the project, agents the whole config). */
+  deploy: deployConfigSchema.nullable().default(null),
   /** What GitHub allows here, from the newest PR Follow-up read in this repository; null until it has read one. */
   github: z.object({ methods: z.array(mergeMethodSchema), preferred: mergeMethodSchema.nullable(), autoMerge: z.boolean(), mergeQueue: z.boolean() }).nullable().default(null),
 });
@@ -176,6 +202,8 @@ export const setPrWorkflowInputSchema = z.strictObject({
   reviewFix: reviewFixSchema.nullable().optional(),
   /** null: back to the default, Team review. */
   review: reviewModeSchema.nullable().optional(),
+  /** The repository's deploy check; null removes it. */
+  deploy: deployConfigSchema.nullable().optional(),
 });
 
 /** Settings' line for the default: "Auto · GitHub in 5 repositories, Graphite in 3". */
