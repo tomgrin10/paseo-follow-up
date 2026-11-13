@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { realTimers, stableMessageId, withDeadline, type Timers } from "./delivery";
 import { BackgroundAgents } from "./background-agents";
 import { deepFreeze } from "./store";
-import { emptyInbox, expired, inboxStateSchema, type OutboxEntry, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason, liveFlag, withoutRunState, FACT_REASONS, prEndEvent, reviewersBriefPr } from "../shared/inbox";
+import { emptyInbox, expired, inboxStateSchema, type OutboxEntry, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason, liveFlag, withoutRunState, FACT_REASONS, prEndEvent, reviewersBriefPr, markNotified, notifiedBefore, prNotice, pruneNotified } from "../shared/inbox";
 import type { State as FollowState, Workspace as FollowWorkspace } from "../shared/model";
 import { asksForReviewers } from "../shared/attention";
 import { followUpObligations } from "../shared/follow-up";
@@ -689,18 +689,30 @@ export class Inbox {
     const events = followUpEvents(follow, settings.enable_inbox_pr_closed);
     const state = await this.store.snapshot();
     if (!state.importedAt) return;
-    if (!state.primedAt) {
-      // Existing red CI and open threads predate the inbox: remember them without flagging.
+    if (!state.primedAt || !state.notifiedAt) {
+      // Existing red CI and open threads predate the inbox: remember them without flagging. The same once on the upgrade
+      // off the 200-key ring (a-pr-flag-fires-once-per-transition): the ring had evicted old merges, so every ended or
+      // flagged PR is recorded in `notified` first, and nothing it already knows re-flags.
       await this.store.mutate(s => {
-        for (const { agentId, event } of events) if ("dedupeKey" in event) { const e = s.entries[agentId] ?? newEntry(agentId); s.entries[agentId] = { ...e, seenKeys: [...new Set([...e.seenKeys, event.dedupeKey])].slice(-200) }; }
-        s.primedAt = this.iso();
+        const keys = new Map<string, string[]>();
+        for (const { agentId, event } of events) if ("dedupeKey" in event) keys.set(agentId, [...keys.get(agentId) ?? [], event.dedupeKey]);
+        for (const [agentId, e] of Object.entries(s.entries)) s.entries[agentId] = markNotified(e, e.seenKeys);
+        for (const [agentId, list] of keys) s.entries[agentId] = markNotified(s.entries[agentId] ?? newEntry(agentId), list);
+        // The ring keeps only what isn't about a PR (Session Guard pauses).
+        for (const [agentId, e] of Object.entries(s.entries)) s.entries[agentId] = { ...e, seenKeys: e.seenKeys.filter(k => !prNotice(k)) };
+        const at = this.iso(); s.primedAt ??= at; s.notifiedAt = at;
       });
       return;
     }
-    // An event whose key the entry has already seen changes nothing (reduce dedupes it), and every tick re-derives the
+    // An event whose state the entry already notified changes nothing (reduce dedupes it), and every tick re-derives the
     // same facts for ~400 PRs: drop those before apply, so a quiet tick neither copies the inbox nor builds briefs.
-    const unseen = events.filter(({ agentId, event }) => !("dedupeKey" in event) || !state.entries[agentId]?.seenKeys.includes(event.dedupeKey));
+    const unseen = events.filter(({ agentId, event }) => !("dedupeKey" in event) || !notifiedBefore(state.entries[agentId], event.dedupeKey));
     await this.apply(await Promise.all(unseen.map(async ({ agentId, event }) => ({ agentId, event, brief: await this.prBrief(agentId, event) }))));
+    // A PR's record lives while some workspace tracks it: prune the rest (only when something goes).
+    const tracked = new Set(follow.workspaces.flatMap(w => w.prs.map(p => p.key)));
+    const before = (await this.store.snapshot()).entries;
+    if (Object.values(before).some(e => pruneNotified(e, tracked) !== e))
+      await this.store.mutate(s => { for (const [agentId, e] of Object.entries(s.entries)) s.entries[agentId] = pruneNotified(e, tracked); });
     // Then withdraw the flags (and Follow-up's PR cards) whose fact ended since: merged, fixed, reviewed, or the agent is on it.
     const live = liveFacts(follow, events);
     const entries = (await this.store.snapshot()).entries;
