@@ -108,6 +108,6 @@ test("merge-click: a PR on a parent that can't merge offers no Merge (never a cl
   const { needsYou } = await import("../shared/attention");
   const ready = (n: number, parent: number | null, patch = {}) => open(n, parent, { snapshot: snapshot({ head: `head-${n}`, reviewDecision: "APPROVED", graphiteMergeStatus: "READY_TO_MERGE", ...patch }) });
   const merges = (prs: Pr[]) => needsYou(workspace({ prs }), Date.parse("2026-01-01T10:00:00Z")).filter(i => i.kind === "merge").map(i => i.kind === "merge" && i.number);
-  assert.deepEqual(merges([ready(1628, null), ready(1629, 1628), ready(1630, 1629)]), [1628, 1629, 1630]);
+  assert.deepEqual(merges([ready(1628, null), ready(1629, 1628), ready(1630, 1629)]), [1630], "one Merge per stack, naming all three");
   assert.deepEqual(merges([ready(1628, null, { failedChecks: ["test"] }), ready(1629, 1628), ready(1630, 1629)]), [], "#1628 is red: nothing above it offers Merge");
 });
