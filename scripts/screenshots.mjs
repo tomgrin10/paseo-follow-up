@@ -960,24 +960,33 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   }
 }
 async function sendingShots({ shoot, seeded, call, home }) {
-  // Q51 Home "Sending", light, desktop and phone: Checkout copy's tasks wait for its agent's turn (no Send now), Saved
-  // views and Invoice PDFs are out with their agents (the send glyph), and Onboarding email's tasks wait on the
-  // developer, so they're in Needs you only, said once ("Send · The agent is idle; …").
+  // Q51 Home "Sending", light, desktop and phone (phones filter to Sending with its strip chip).
+  // 1. Checkout copy's tasks wait for its agent's turn (no Send now); Saved views and Invoice PDFs are out with their
+  //    agents (the send glyph); Onboarding email's tasks wait on the developer (Auto off), in Needs you only, said once.
   const ws = key => seeded.workspaces.find(w => w.key === key);
-  for (const key of ["email", "sd-busy"]) await call("follow.control", { workspaceId: ws(key).workspaceId, enable_auto_sends: true });
+  await call("follow.control", { workspaceId: ws("sd-busy").workspaceId, enable_auto_sends: true });
   await until("Checkout copy queued behind its turn", async () => {
     await call("follow.refresh", {});
     return (await call("follow.list", {})).workspaces.find(x => x.id === ws("sd-busy").workspaceId)?.batches.some(b => b.state === "pending");
   }, { tries: 120, every: 500 });
-  const sendingShown = async page => { await openHome(page); await page.getByText("Checkout copy").filter({ visible: true }).first().waitFor(); await page.getByText(/sends when its current turn ends/).filter({ visible: true }).first().waitFor({ timeout: 60000 }); };
-  await shoot("sending-home-light", DESKTOP, "light", sendingShown);
-  await shoot("sending-home-phone-light", PHONE, "light", async page => { await page.setViewportSize(PHONE); await sendingShown(page); });
-  // The machine-wide hold: Paseo's (fake) cgroup at 78% of memory.high. The governor pauses auto-sends; Home shows one
-  // line at the top of Sending, the same words on both widths.
+  const busyLine = /sends when its current turn ends/;
+  const shown = (wait, phone) => async page => {
+    await openHome(page);
+    if (phone) { await page.setViewportSize(PHONE); await page.getByRole("button", { name: /^Sending, \d+\. Show only these/ }).first().click(); }
+    for (const w of wait) await page.getByText(w).filter({ visible: true }).first().waitFor({ timeout: 90000 });
+  };
+  await shoot("sending-home-light", DESKTOP, "light", shown([busyLine, "Auto-send is off for this workspace"]));
+  await shoot("sending-home-phone-light", PHONE, "light", shown([busyLine], true));
+  // 2. The machine-wide hold: Paseo's (fake) cgroup at 78% of memory.high pauses auto-sends. Then Onboarding email is
+  //    signed off and its Auto turned on: its tasks queue for "when auto-sends resume", with Send now (the developer's
+  //    Send still goes). One hold line at the top of Sending, the same words on both widths.
   await fs.writeFile(process.env.FOLLOW_SHOTS_CGROUP, JSON.stringify({ high: 1000, current: 780 }));
-  const holdShown = async page => { await sendingShown(page); await page.getByText(/^Auto-sends are paused on this machine/).filter({ visible: true }).first().waitFor({ timeout: 90000 }); };
-  await shoot("sending-hold-home-light", DESKTOP, "light", holdShown);
-  await shoot("sending-hold-home-phone-light", PHONE, "light", async page => { await page.setViewportSize(PHONE); await holdShown(page); });
+  await until("the governor holds auto-sends", async () => (await call("follow.usage", {})).resources?.level === "constrained", { tries: 120, every: 500 });
+  await call("follow.inbox-act", { action: "sign_off", agentIds: [ws("email").agentId] });
+  await call("follow.control", { workspaceId: ws("email").workspaceId, enable_auto_sends: true });
+  const held = [/^Auto-sends are paused on this machine/, /next when auto-sends resume/, busyLine];
+  await shoot("sending-hold-home-light", DESKTOP, "light", shown(held));
+  await shoot("sending-hold-home-phone-light", PHONE, "light", shown(held, true));
   await fs.writeFile(process.env.FOLLOW_SHOTS_CGROUP, JSON.stringify({ high: 1000, current: 100 }));
 }
 async function reviewModeShots({ shoot, call }) {
