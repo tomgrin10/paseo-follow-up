@@ -219,7 +219,8 @@ export class Overseer {
 
   async workstreams(fresh = false): Promise<WorkstreamRow[]> {
     const [state, inbox, paseo, priorities, me, windowMs] = await Promise.all([this.d.store.snapshot(), this.d.inbox.list(), this.d.workspaces(fresh), this.d.priorities.read(), this.state(), this.d.windowMs?.()]);
-    return workstreams({ rows: inbox.rows, tracked: state.workspaces.filter(w => w.enable_tracking), paseo, priorities, now: this.now(), windowMs, exclude: { agentId: me.agentId, workspaceId: me.workspaceId } });
+    const autoSendsHeld = !!await this.d.tight?.();
+    return workstreams({ rows: inbox.rows, tracked: state.workspaces.filter(w => w.enable_tracking), paseo, priorities, now: this.now(), windowMs, autoSendsHeld, exclude: { agentId: me.agentId, workspaceId: me.workspaceId } });
   }
 
   /**

@@ -2,6 +2,7 @@ import { projectSchema } from "./settings";
 import { renameResultSchema, renameStatusSchema } from "./rename";
 import { MAX_REVIEWERS, REPO, reviewerConfigSchema, reviewerEntrySchema, reviewerListSchema } from "./reviewers";
 import { prioritySchema } from "./priorities";
+import { sendingSchema } from "./sending";
 import { usageSchema } from "./usage";
 import { aboutViewSchema } from "./about";
 import { LINKED_KINDS, linkedItemSchema } from "./linked";
@@ -34,7 +35,9 @@ const agentCommunicationSchema = z.strictObject({
 export const listRpc = defineRpc({ name: "follow.list", input: z.object({ since: z.number().optional() }), output: z.object({ workspaces: z.array(workspaceSchema), error: z.string().nullable(), revision: z.number().optional(), full: z.boolean().optional(), removed: z.array(z.string()).optional() }) });
 export const getRpc = defineRpc({ name: "follow.get", input: z.object({ workspaceId: idSchema }), output: z.object({ workspace: workspaceSchema.nullable(), error: z.string().nullable() }) });
 /** `prWorkflow` (1.4.0-beta.14): how this workspace ships PRs (graphite | github) and its review-fix command (null: built-in steps). */
-export const agentStatusRpc = defineRpc({ name: "follow.agent-status", input: z.strictObject({ agentId: idSchema, detail: z.enum(["summary", "full"]).optional() }), output: workspaceSchema.extend({ prWorkflow: z.object({ mode: z.enum(["graphite", "github"]), reviewFix: z.string().nullable() }).optional(), /** The next message: recipient, tasks, exact text, and when and why it goes (Preview's agent form). */ nextMessageInfo: z.object({ to: z.string(), tasks: z.array(z.string()), text: z.string(), reason: z.string(), eta: z.string().nullable() }).nullable().optional() }) });
+export const agentStatusRpc = defineRpc({ name: "follow.agent-status", input: z.strictObject({ agentId: idSchema, detail: z.enum(["summary", "full"]).optional() }), output: workspaceSchema.extend({ prWorkflow: z.object({ mode: z.enum(["graphite", "github"]), reviewFix: z.string().nullable() }).optional(), /** The next message: recipient, tasks, exact text, and when and why it goes (Preview's agent form). */ nextMessageInfo: z.object({ to: z.string(), tasks: z.array(z.string()), text: z.string(), reason: z.string(), eta: z.string().nullable() }).nullable().optional(),
+  /** Home's Sending row for this workspace (shared/sending.ts): queued or sent, when and why, and whether Send now (send_repairs) would go through. */
+  sending: sendingSchema.nullable().optional() }) });
 export const syncWorkspaceRpc = defineRpc({ name: "follow.sync", input: z.strictObject({ agentId: idSchema, summary: z.string().trim().min(1).max(1000) }), output: z.object({ workspaceId: idSchema, synced: z.literal(true) }) });
 export const enrollRpc = defineRpc({ name: "follow.enroll", input: z.strictObject({ workspaceId: idSchema.optional(), agentId: idSchema, goal: textSchema }), output: workspaceSchema });
 export const registerPrRpc = defineRpc({ name: "follow.register-pr", input: z.strictObject({ agentId: idSchema, repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/), number: z.number().int().positive(), stack: textSchema, parentNumber: z.number().int().positive().nullable().optional(), disposition: z.string().max(2000).optional(), agentMerges: z.boolean().optional() }), output: workspaceSchema });
