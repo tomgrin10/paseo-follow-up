@@ -146,3 +146,28 @@ test("daemonCrashes reads a worker crash out of a harness daemon's log", async (
   const shots = await readFile("scripts/screenshots.mjs", "utf8");
   assert.match(shots, /const crash = await crashed\(\);\s*if \(crash\) throw new Error\(`the harness daemon crashed during \$\{name\}/, "screenshots fail at the shot that crashed the worker");
 });
+
+// 2026-11-12: a phone render showed the VM's real hostname in Paseo's header; Paseo labels its host with os.hostname()
+// and renders go into this public repo. Every harness process reports HARNESS_HOST instead, and no harness env or
+// daemon config carries the real name.
+test("a harness process never sees the real hostname: os.hostname() (ESM and CJS) and HOSTNAME read HARNESS_HOST", async () => {
+  const { HARNESS_HOST, harnessConfig } = await import(resolve("scripts/harness-env.mjs"));
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir, hostname } = await import("node:os");
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const real = hostname();
+  assert.notEqual(real, HARNESS_HOST);
+  const root = await mkdtemp(join(tmpdir(), "follow-host-"));
+  try {
+    // A caller's own NODE_OPTIONS (screenshots' clock, scale-check's profilers) and strip keep the preload.
+    for (const options of [{}, { set: { NODE_OPTIONS: "--max-old-space-size=512" } }, { strip: ["NODE_OPTIONS"] }]) {
+      const env = harnessEnv(root, { base: { ...process.env, HOSTNAME: real }, ...options });
+      assert.ok(!Object.values(env).some(v => String(v).includes(real)), `no harness env value carries ${real}`);
+      const probe = 'import { hostname } from "node:os"; import os from "node:os"; import { createRequire } from "node:module"; console.log([hostname(), os.hostname(), createRequire(import.meta.url)("os").hostname(), process.env.HOSTNAME].join(" "))';
+      const { stdout } = await promisify(execFile)(process.execPath, ["--input-type=module", "-e", probe], { env });
+      assert.equal(stdout.trim(), Array(4).fill(HARNESS_HOST).join(" "), JSON.stringify(options));
+    }
+    assert.ok(!JSON.stringify(harnessConfig({ port: 1, mcp: true, webUi: true })).includes(real), "harnessConfig carries no hostname");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
