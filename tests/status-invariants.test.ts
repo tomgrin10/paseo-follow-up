@@ -126,14 +126,14 @@ test("no generated workspace state produces contradictory status labels", () => 
 const screenshot = () => workspace({ enable_auto_sends: true, prs: [merged("latched"), { ...merged("latched"), key: "example/app#2", number: 2 }, { ...merged("latched"), key: "example/app#3", number: 3 }],
   obligations: [obligation("done"), { ...obligation("done"), id: "task-2" }], batches: [batch("finish", "pending", { createdAt: at(7 * 60_000) })] });
 
-test("regression wks_4b27f268: an idle agent with a queued Done check is not 'on it', not 'fixing', and never 'sends when idle'", () => {
+test("regression wks_4b27f268: an idle agent with a queued Done check is not 'on it', not 'sending', and never 'sends when idle'", () => {
   const w = screenshot();
   assert.deepEqual(violations(w, clock), []);
   assert.doesNotMatch(liveLine(w, clock).text, /sends when the agent is idle/);
   assert.equal(agentCard(w, clock), null, "no 'Main agent is on it' card");
-  assert.notEqual(trackedGroup(w, clock), "fixing");
+  assert.notEqual(trackedGroup(w, clock), "sending");
   const home = buildHome({ rows: [], tracked: [w], paseo: [], now: clock });
-  assert.ok(!home.groups.some(g => g.id === "fixing" && g.items.length), "Home doesn't put it under Follow-up is fixing");
+  assert.ok(!home.groups.some(g => g.id === "sending" && g.items.length), "Home doesn't put it under Sending");
   const row = home.groups.find(g => g.id === "needs")?.items[0];
   assert.ok(row, "it waits on you: Ready to finish");
   assert.equal(row.word, "Ready to finish", "the Done check isn't labelled as a fix");

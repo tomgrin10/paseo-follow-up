@@ -8,7 +8,7 @@ import { useRpc, type PluginButtonContentProps, type PluginButtonIconProps, type
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { browserStatusRpc } from "../shared/contracts";
 import { activeNeeds, needsYou, type NeedItem } from "../shared/attention";
-import { briefQuestionIds, HEADLINE_ICON, HEADLINE_TONE, pillState, todoLabel, withoutBriefQuestions, type PillState } from "../shared/headline";
+import { briefQuestionIds, echoedItems, HEADLINE_ICON, todoLine, HEADLINE_TONE, pillState, todoLabel, withoutBriefQuestions, type PillState } from "../shared/headline";
 import { snoozeUntil, type InboxRow } from "../shared/inbox";
 import { laterChoices } from "../shared/row-menu";
 import { isOpen as questionOpen } from "../shared/questions";
@@ -98,7 +98,7 @@ export function contributeFollowUpPill(client: PluginClientContext, deps: Deps) 
       const label = undo ? state.label : state.headline.label;
       // The tooltip (and accessible name) says whose pill it is and what kind of ask. On phones the host shows it as the
       // sheet's title right above the popover, which carries the ask itself in full, so the title doesn't repeat it.
-      const title = undo ? `Follow-up · ${state.label === "Done" ? "Done" : UNDO_TITLE[recent?.kind ?? "sign_off"] ?? "Signed off"}` : `Follow-up · ${state.headline.label}${state.todo && state.mode === "flag" ? ` · ${todoLabel(withoutBriefQuestions(target.items, target.row))} in this workspace` : ""}`;
+      const title = undo ? `Follow-up · ${state.label === "Done" ? "Done" : UNDO_TITLE[recent?.kind ?? "sign_off"] ?? "Signed off"}` : `Follow-up · ${state.headline.label}`;
       const key = `${state.mode}|${label}|${title}`;
       // Always a popover, Undo included: Paseo 0.16 draws a chevron on popover pills, so switching kinds for the undo
       // window made the chevron and the pill's width jump (tests/pill-popover.test.ts).
@@ -167,6 +167,11 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
   // Phones: one primary per sheet. While the workspace has something to act on, that's the primary and Sign off steps back.
   const itemFirst = touch && !!w && (asking || items.length > 0);
   const tone = headline ? headlineColor(HEADLINE_TONE[headline.key], c) : c.foregroundMuted;
+  // say-it-once: a to-do that only repeats the headline keeps its controls, not its title.
+  const echoed = flagged ? echoedItems(items, headline, row) : new Set<string>();
+  // The count is said once: the section header when the items show, else the meta line (todoLine).
+  const count = todoLine({ flagged, todo: state?.mode === "flag" ? state.todo : 0, section: !!w && (asking || items.length > 0) });
+  const countText = todoLabel(items.length ? items : withoutBriefQuestions(target.items, row));
 
   // The 6 s after a sign-off (or Done's toast window): the pill stays a popover, and Undo is its one action.
   const doneWindow = state?.mode === "undo" && state.label === "Done";
@@ -188,10 +193,10 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
         <Icon name={HEADLINE_ICON[headline.key]} size={14} color={tone} />
         {/* Phones: the host's sheet title already says "Follow-up · <label>", so the meta line doesn't repeat it. */}
         {touch
-          ? <Text style={t.small}>{main ? "Main agent" : "This agent"}{flagged && state.todo > 0 ? ` · ${todoLabel(items.length ? items : withoutBriefQuestions(target.items, row))} in this workspace` : ""}</Text>
+          ? <Text style={t.small}>{main ? "Main agent" : "This agent"}{count.meta ? ` · ${countText} in this workspace` : ""}</Text>
           : <>
             <Text style={{ color: tone, fontSize: 12, lineHeight: 16, fontWeight: "600" }}>{headline.label}</Text>
-            {flagged && state.todo > 0 && <Text style={t.small}>· {todoLabel(items.length ? items : withoutBriefQuestions(target.items, row))} in this workspace</Text>}
+            {count.meta && <Text style={t.small}>· {countText} in this workspace</Text>}
           </>}
       </View>
       <Text numberOfLines={touch ? 3 : 2} style={touch ? t.ask : { color: c.foreground, fontSize: 14, lineHeight: 20, fontWeight: "600" }}>{headline.line}</Text>
@@ -221,12 +226,12 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
 
     {/* 3. The workspace's own items, only when there are some. */}
     {w && (asking || items.length > 0) && <View style={{ gap: 8, paddingTop: flagged ? 12 : 0, borderTopWidth: flagged ? 1 : 0, borderTopColor: c.border }}>
-      {flagged && <Text style={touch ? t.section : [t.small, { fontWeight: "600" }]}>In this workspace · {todoLabel(items)}</Text>}
+      {count.section && <Text style={touch ? t.section : [t.small, { fontWeight: "600" }]}>In this workspace · {todoLabel(items)}</Text>}
       {asking
         ? <QuestionStepper workspace={w} theme={props.theme} compact={touch} bodyMaxHeight={touch ? undefined : 200} onDetails={setQuestion} onAnswered={() => deps.live.refresh()} />
-        : <NeedsYouList workspace={w} theme={props.theme} compact={touch} flush
+        : <NeedsYouList workspace={w} theme={props.theme} compact={touch} flush untitled={echoed}
           actions={{ after: () => deps.live.refresh(), openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion }} />}
-      {asking && items.some(i => i.kind !== "question") && <Text numberOfLines={2} style={t.small}>Also: {items.filter(i => i.kind !== "question").map(i => i.title).join(" · ")}</Text>}
+      {asking && items.some(i => i.kind !== "question" && !echoed.has(i.key)) && <Text numberOfLines={2} style={t.small}>Also: {items.filter(i => i.kind !== "question" && !echoed.has(i.key)).map(i => i.title).join(" · ")}</Text>}
       <PrSheet workspace={w} prKey={sheet?.key ?? null} intent={sheet?.intent ?? null} theme={props.theme} compact={touch} browserReady={browser.data?.ready ?? false} onClose={() => { setSheet(null); deps.live.refresh(); }} />
       <QuestionSheet workspace={w} questionId={question} theme={props.theme} compact={touch} onClose={() => { setQuestion(null); deps.live.refresh(); }} />
     </View>}

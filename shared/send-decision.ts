@@ -29,10 +29,11 @@ export type SendDecision = {
   canSendNow: boolean;
 };
 
-/** The idle wait in one sentence, with the agent's own title, said the same on every surface (Needs you, Home, the inbox). */
-export const idleReason = (w: Pick<Workspace, "mainAgentTitle">) => {
-  return `${w.mainAgentTitle?.trim() || "the main agent"} is idle, and Follow-up doesn't wake it`;
-};
+/**
+ * The idle wait in one sentence, said the same on every surface (Needs you, Home, the panel, the inbox). Say it once
+ * (Q51): never the agent's title, which is usually the row's own title.
+ */
+export const IDLE_REASON = "the agent is idle; Follow-up doesn't wake it";
 const iso = (ms: number) => new Date(ms).toISOString();
 /** The reason the settle gives: why "in a minute" and not now (Tom, 2026-11-12: "sending in a moment? why not now?"). */
 export const SETTLE_REASON = "waits a minute so new changes join the same message";
@@ -67,7 +68,7 @@ export function sendDecision(w: Workspace, now: number, o: { settleMs?: number; 
   if (openBatch) return wait("follow-up", "waits for the last message to finish");
   if (w.dormant) return wait("you", "waits until the workspace is active again");
   if (w.sendWait === "setup") return wait("follow-up", "sends once setup finishes");
-  if (w.sendWait === "unloaded") return wait("you", idleReason(w));
+  if (w.sendWait === "unloaded") return wait("you", IDLE_REASON);
   if (prUnread) return wait("follow-up", `waits until GitHub answers for #${prUnread.number}${prUnread.error ? ` (${prUnread.error})` : ""}, so the message isn't based on stale PRs`);
   // A refused send is retried once per settle window, never every refresh.
   if (b.refusal && now - Date.parse(b.refusal.at) < settleMs) return wait("follow-up", `didn't send: ${b.refusal.reason} · tries again shortly`, iso(Date.parse(b.refusal.at) + settleMs));

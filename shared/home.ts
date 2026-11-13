@@ -1,10 +1,10 @@
-import { batchView } from "./status";
+import { sendingOf, type Sending } from "./sending";
 import { liveLine, needsYou, prTone, stackOrder, workspaceSnoozed, type NeedItem, type PrTone } from "./attention";
 import { activity, type Activity } from "./activity";
 import { followUpObligations, recoveryBatch } from "./follow-up";
 import { flagHeadline, HEADLINE_ICON, HEADLINE_TONE, HEADLINE_WORD, workspaceHeadline, withoutBriefQuestions, type Headline, type HeadlineKey, type HeadlineTone } from "./headline";
 import { rowTitle, sectionOf, type InboxRow } from "./inbox";
-import { completionCheck, settled, summary, type Pr, type Workspace } from "./model";
+import { settled, summary, type Pr, type Workspace } from "./model";
 import { isOpen as questionOpen } from "./questions";
 import { taskSchedule } from "./task-trigger";
 import { freshPriorities, priorityRow, type Priority, type PrioritySourceKind } from "./priorities";
@@ -17,10 +17,10 @@ import { messageSender, notificationText, senderLabel, workItems } from "./messa
  * agent; a workspace with several flagged root agents shows one row per agent.
  */
 
-export const HOME_GROUPS = ["needs", "fixing", "running", "waiting", "later", "quiet"] as const;
+export const HOME_GROUPS = ["needs", "sending", "running", "waiting", "later", "quiet"] as const;
 export type HomeGroupId = typeof HOME_GROUPS[number];
 export const GROUP_TITLE: Record<HomeGroupId, string> = {
-  needs: "Needs you", fixing: "Follow-up is fixing", running: "Running", waiting: "Waiting on others", later: "Later", quiet: "Quiet",
+  needs: "Needs you", sending: "Sending", running: "Running", waiting: "Waiting on others", later: "Later", quiet: "Quiet",
 };
 
 /** Inside Needs you: blocking asks first, then decisions only the developer makes, then finished turns to sign off. */
@@ -84,6 +84,8 @@ export type Workstream = {
   due?: string | null;
   /** A fresh external priority (Priority sort): the one-line reason and its sources. Never invented. */
   priority?: { score: number; reason: string; source: { kind: PrioritySourceKind; label: string } | null } | null;
+  /** Sending rows: the Send now the server would take (never one that waits on the developer: that's in Needs you). */
+  sendNow?: { batchId: string; count: number } | null;
   /** Changes whenever anything shown on the row changes, so a memoised row re-renders only then. */
   sig: string;
 };
@@ -91,13 +93,15 @@ export type Workstream = {
 export type HomeGroup = { id: HomeGroupId; title: string; items: Workstream[] };
 export type HomeModel = {
   groups: HomeGroup[]; needs: number; byKey: Map<string, Workstream>;
+  /** One hold line per machine, shown once at the top of Sending, and only while Sending has rows. */
+  hold: string | null;
   /** The sort the groups are in, and when fresh external priorities were ranked (null: "By urgency"). */
   sort: SortMode; rankedAt: string | null;
 };
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-/** "Follow-up is fixing": only work that is in flight or about to go out on its own (shared/status.ts). */
-const fixingBatch = (w: Workspace, now: number) => { const view = batchView(w, now); return view?.fixing && summary(w, now).status !== "done" ? view.batch : undefined; };
+/** In flight: the send glyph. Queued to go out on its own: the clock family, never Running's spinner (Q51). */
+const sendingIcon = (s: Sending) => s.state === "sent" ? "Send" : "ClockArrowUp";
 
 /** The PR chip: the first PR that hasn't settled (else the last one), "+n" for the rest, and its checks. */
 export function prChip(w: Workspace | undefined): PrChip | null {
@@ -138,8 +142,9 @@ export function badges(input: { headline: Headline | null; row?: InboxRow; works
 
 function sigOf(s: Omit<Workstream, "sig">): string {
   return [s.group, s.tier, s.icon, s.tone, s.title, s.agent, s.line, s.word, s.at, s.wakeAt ?? "", s.readyToArchive, s.badges.map(b => b.text).join("|"), s.pr ? `${s.pr.label}:${s.pr.checks?.text}` : "",
-    s.priority ? `${s.priority.reason}:${s.priority.source?.label}` : ""].join("\u0001");
+    s.priority ? `${s.priority.reason}:${s.priority.source?.label}` : "", s.sendNow ? `send:${s.sendNow.batchId}` : ""].join("\u0001");
 }
+const sendNowOf = (s: Sending) => s.state === "queued" && s.canSendNow ? { batchId: s.batchId, count: s.count } : null;
 const make = (s: Omit<Workstream, "sig">): Workstream => ({ ...s, sig: sigOf(s) });
 const stripSig = ({ sig: _sig, ...s }: Workstream): Omit<Workstream, "sig"> => s;
 
@@ -147,7 +152,7 @@ const stripSig = ({ sig: _sig, ...s }: Workstream): Omit<Workstream, "sig"> => s
 export function trackedGroup(w: Workspace, now: number): HomeGroupId {
   const items = needsYou(w, now);
   if (items.length) return workspaceSnoozed(w, items, now) ? "later" : "needs";
-  if (fixingBatch(w, now)) return "fixing";
+  if (sendingOf(w, now)) return "sending";
   if (w.runtimeBusy) return "running";
   const state = summary(w, now);
   if (state.status === "done") return "quiet";
@@ -157,7 +162,12 @@ export function trackedGroup(w: Workspace, now: number): HomeGroupId {
 }
 
 /** Build every group from the inbox rows, Follow-up's tracked workspaces and Paseo's workspace list. */
-export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo: PaseoWorkspaceLite[]; now: number; sort?: SortMode; priorities?: readonly Priority[]; hidden?: readonly string[] }): HomeModel {
+export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo: PaseoWorkspaceLite[]; now: number; sort?: SortMode; priorities?: readonly Priority[]; hidden?: readonly string[];
+  /** The machine-wide hold line (autoSendHold in shared/sending.ts), null when auto-sends aren't held. */
+  hold?: string | null;
+  /** The machine holds auto-sends without a line to show (the agent tools): queued Sending rows still say so. */
+  autoSendsHeld?: boolean }): HomeModel {
+  const held = !!input.hold || !!input.autoSendsHeld;
   // Workspaces Follow-up keeps off the list (the Overseer's own): no row, no count.
   const hidden = new Set(input.hidden ?? []);
   const rows = input.rows.filter(r => !r.workspaceId || !hidden.has(r.workspaceId));
@@ -194,9 +204,10 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
         line: h && h.line !== HEADLINE_WORD[h.key] ? h.line : "", badges: [], pr: prChip(w), at: row.needs?.since ?? null, wakeAt: row.snooze?.until ?? null }));
       if (row.workspaceId) covered.add(row.workspaceId);
     } else if (section === "running") {
-      const fixing = w && w.mainAgentId === row.agentId ? fixingBatch(w, now) : undefined;
-      out.push(make({ ...base, group: fixing ? "fixing" : "running", tier: null, icon: fixing ? completionCheck(fixing) ? "ListChecks" : "Wrench" : row.resumesAt ? "CirclePause" : "LoaderCircle", tone: "running",
-        word: null, line: fixing ? w ? liveLine(w, now).text : "Fixing" : row.resumesAt ? "Paused at the usage limit" : "Working", badges: [], pr: prChip(w), at: fixing?.sentAt ?? row.lastActivityAt }));
+      const sending = w && w.mainAgentId === row.agentId ? sendingOf(w, now, { held }) : null;
+      if (sending) out.push(make({ ...base, group: "sending", tier: null, icon: sendingIcon(sending), tone: "running", word: null, line: sending.line, badges: [], pr: prChip(w), at: sending.state === "sent" ? sending.when ?? row.lastActivityAt : row.lastActivityAt, sendNow: sendNowOf(sending) }));
+      else out.push(make({ ...base, group: "running", tier: null, icon: row.resumesAt ? "CirclePause" : "LoaderCircle", tone: "running",
+        word: null, line: row.resumesAt ? "Paused at the usage limit" : "Working", badges: [], pr: prChip(w), at: row.lastActivityAt }));
       if (row.workspaceId) covered.add(row.workspaceId);
     }
   }
@@ -218,10 +229,10 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
         badges: badges({ headline: h, workspace: w, items }), pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
       continue;
     }
-    const fixing = fixingBatch(w, now);
+    const sending = group === "sending" ? sendingOf(w, now, { held }) : null;
     const state = summary(w, now);
     const live = liveLine(w, now);
-    if (group === "fixing" && fixing) out.push(make({ ...base, group: "fixing", tier: null, icon: completionCheck(fixing) ? "ListChecks" : "Wrench", tone: "running", word: null, line: live.text, badges: [], pr: prChip(w), at: fixing.sentAt ?? fixing.createdAt, readyToArchive: false }));
+    if (sending) out.push(make({ ...base, group: "sending", tier: null, icon: sendingIcon(sending), tone: "running", word: null, line: sending.line, badges: [], pr: prChip(w), at: sending.state === "sent" ? sending.when : w.updatedAt, readyToArchive: false, sendNow: sendNowOf(sending) }));
     else if (group === "running") out.push(make({ ...base, group: "running", tier: null, icon: "LoaderCircle", tone: "running", word: null, line: live.text, badges: [], pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
     else if (state.status === "done") out.push(make({ ...base, group: "quiet", tier: null, icon: "CircleCheck", tone: "success", word: null, line: w.completion?.summary ?? "Done", badges: [], pr: prChip(w), at: w.completion?.declaredAt ?? w.updatedAt, readyToArchive: true }));
     else if (group === "waiting") out.push(make({ ...base, group: "waiting", tier: null, icon: "Clock", tone: "muted", word: null, line: live.text, badges: badges({ headline: null, workspace: w, items }), pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
@@ -264,7 +275,8 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
     byGroup.set(id, id === "quiet" ? [...items].sort((a, b) => (a.project ?? "￿").localeCompare(b.project ?? "￿")) : items);
   }
   const groups = HOME_GROUPS.map(id => ({ id, title: GROUP_TITLE[id], items: byGroup.get(id)! })).filter(g => g.items.length > 0);
-  return { groups, needs: byGroup.get("needs")!.length, byKey: new Map(finished.map(s => [s.key, s])), sort, rankedAt: fresh.rankedAt };
+  const hold = input.hold && byGroup.get("sending")!.length ? input.hold : null;
+  return { groups, needs: byGroup.get("needs")!.length, byKey: new Map(finished.map(s => [s.key, s])), hold, sort, rankedAt: fresh.rankedAt };
 }
 
 /**
@@ -339,15 +351,15 @@ export function briefPane(input: { model: HomeModel; rows: InboxRow[]; tracked: 
   const { model, rows, tracked, now } = input;
   const since = lastWorkdayEnd(now);
   const get = (id: HomeGroupId) => model.groups.find(g => g.id === id)?.items ?? [];
-  const needs = get("needs"), fixing = get("fixing"), live = get("running"), waiting = get("waiting");
+  const needs = get("needs"), sending = get("sending"), live = get("running"), waiting = get("waiting");
   const first = needs[0] ?? null;
   let headline: string;
   if (first) {
     const key = keyOfWord(first.word);
     const more = needs.length > 1 ? ` ${plural(needs.length - 1, "other thing", "other things")} after that.` : "";
     headline = `Start with ${first.title}. ${(key && MOVE[key]) ?? "It needs you."}${more}`;
-  } else headline = fixing.length || live.length
-    ? `Nothing needs you. ${[live.length ? `${live.length} running` : "", fixing.length ? `Follow-up is fixing ${fixing.length}` : ""].filter(Boolean).join(", ")}.`
+  } else headline = sending.length || live.length
+    ? `Nothing needs you. ${[live.length ? `${live.length} running` : "", sending.length ? `${sending.length} sending` : ""].filter(Boolean).join(", ")}.`
     : "Nothing needs you.";
   const oldestWait = waiting[0];
   const waitingNote = oldestWait ? `${oldestWait.title}${oldestWait.pr ? ` (${oldestWait.pr.label})` : ""}: ${oldestWait.line || "waiting"}${waiting.length > 1 ? `, and ${waiting.length - 1} more waiting on others` : ""}.` : null;
