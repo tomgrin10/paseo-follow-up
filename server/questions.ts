@@ -106,8 +106,11 @@ export function withdrawQuestion(w: Workspace, agentId: string, id: string, reas
   return q;
 }
 
+/** How the developer's answer leaves the card: sent by Follow-up, copied, or put in the agent's chat (Paseo 0.16), or sent again. */
+export type AnswerAction = "send" | "copy" | "chat" | "resend";
+
 /** The developer's answer from the UI. Sending happens outside the state lock; this only records it. */
-export function developerAnswer(w: Workspace, id: string, choice: string, words: string | undefined, action: "send" | "copy" | "resend", now: number, actor: Actor = DEVELOPER): Question {
+export function developerAnswer(w: Workspace, id: string, choice: string, words: string | undefined, action: AnswerAction, now: number, actor: Actor = DEVELOPER): Question {
   const q = w.questions.find(q => q.id === id);
   if (!q) throw new Error(`No question ${id} in this workspace.`);
   if (q.closed) throw new Error(`${id} was withdrawn: ${q.closed.reason}`);
@@ -117,12 +120,14 @@ export function developerAnswer(w: Workspace, id: string, choice: string, words:
     q.answer.delivery = { ...q.answer.delivery, state: "sending", at, reason: null };
     return q;
   }
-  if (q.answer && !(q.answer.by === "developer" && q.answer.delivery.state === "copied" && action === "send")) throw new Error(`${id} is already answered.`);
+  if (q.answer && !(q.answer.by === "developer" && ["copied", "in-chat"].includes(q.answer.delivery.state) && action === "send")) throw new Error(`${id} is already answered.`);
   choice = normalChoice(choice);
   if (!validChoice(q, choice, words)) throw new Error(choiceError(q, choice));
   // An agent answering for the developer (answer_question) is recorded as that agent, never as the developer.
   q.answer = { choice, ...(words?.trim() ? { words: words.trim() } : {}), at, ...(actor.kind === "agent" ? { by: "agent" as const, agentId: actor.agentId, agentTitle: actor.title } : { by: "developer" as const }),
-    delivery: action === "copy" ? { state: "copied", to: null, messageId: null, at, reason: null } : { state: "sending", to: null, messageId: randomUUID(), at, reason: null } };
+    delivery: action === "copy" ? { state: "copied", to: null, messageId: null, at, reason: null }
+      : action === "chat" ? { state: "in-chat", to: q.askedBy ?? w.mainAgentId ?? null, messageId: null, at, reason: null }
+      : { state: "sending", to: null, messageId: randomUUID(), at, reason: null } };
   return q;
 }
 

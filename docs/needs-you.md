@@ -219,6 +219,23 @@ every `sending` entry.
   ([ai-roles.md](ai-roles.md)).
 - **Priority sort** reads `follow.priorities` ([ai-roles.md](ai-roles.md)).
 
+## Answers waiting to be sent
+
+`an-answer-leaves-needs-you-only-when-delivered`. Copy and Put in chat move the developer's own words without
+sending them, so the answer stays in Needs you as "Your Qn answer isn't sent yet" (`awaitingSend`,
+`shared/questions.ts`; the headline reads "Send answer").
+
+- **Sent from the composer.** When a turn of that agent ends, `turnEnded` (`server/turn-events.ts`) looks for
+  `Follow-up answer Qn (` in the user messages of the tail it already reads; a match records the answer as sent. An
+  edited message counts as long as the marker survives. No new reads, and an unloaded agent is never read.
+- **Sent from here.** The row's Send delivers the recorded pick and note in one click (`follow.answer-question`,
+  action `send`); the dialog's Send to agent does the same.
+- **Escape hatch.** If the marker was edited away, Sign off (or mute) on that agent's row settles it as signed off
+  (`signedOffAnswers`); the dialog reads "You signed it off; Follow-up didn't see it in the chat."
+- **Put in chat** (`put-in-chat-never-rewrites-a-draft`, `shared/put-in-chat.ts`): focus the composer at the end of
+  the draft, then insert the answer, after a blank line when there's a draft. It never calls `setPrompt`, inserts
+  nothing when the exact answer is already there, and falls back to Copy when the composer can't come on screen.
+
 ## One Needs you block per surface
 
 `an-open-question-renders-once-per-surface`: the panel and Home's detail pane each draw one "Needs you · N" block
@@ -229,6 +246,9 @@ card beside a question list.
   `briefAsks` (`shared/brief.ts`): a flagged row and a stated ask, never kind `done` ("Nothing needed"). A done brief
   on a row flagged for something else (a merged PR) leaves the block to that reason, and the flag's headline
   (`flagHeadline`: pill, sidebar row, Home row) reads it too (`doneBriefViolations` in `shared/status-invariants.ts`).
+- **A brief without an ask never sits beside Needs you** (`a-brief-without-an-ask-never-sits-beside-needs-you`).
+  "No ask stated" or "Nothing needed" is drawn only while nothing in Needs you speaks for the row (`briefCardShown`,
+  `shared/brief.ts`); beside a question or an answer waiting to be sent it would say there's nothing to do.
 - **The newest brief decides** (`newest-brief-decides`). An agent's needs_you kind=done is its newest word: it
   resolves an older finish flag whose brief asked nothing ("No ask stated", source none) and replaces that brief
   (`resolveStaleFinish` in `shared/inbox.ts`, the quiet guard in `server/inbox.ts` `creator`). Only an ask the

@@ -59,9 +59,9 @@ test("no dialog primary action awaits its RPC before closing (quick actions clos
   assert.deepEqual(found, [], "Close first and run the work through runAction (client/toast-store.ts), or add a BLOCKING reason");
 });
 
-test("Send and Copy on a question close the dialog before the server answers", async () => {
+test("Send, Copy and Put in chat on a question close the dialog before the server answers", async () => {
   const source = await readFile(join(import.meta.dirname, "..", "client", "questions.tsx"), "utf8");
-  const quick = /const quick = \(action: "send" \| "copy"\) => \{([\s\S]*?)\n  \};/.exec(source);
+  const quick = /const quick = \(action: "send" \| "copy" \| "chat"\) => \{([\s\S]*?)\n  \};/.exec(source);
   assert.ok(quick, "QuestionBody has its quick send");
   assert.match(quick[1], /setPendingAnswer\([\s\S]*void runAction\([\s\S]*\}\);\s*onClose\?\.\(\); onAnswered\?\.\(\);$/, "the answer is kept, the work starts, and the dialog closes without awaiting it");
   assert.match(source, /onPress=\{\(\) => quick\("send"\)\}/);
