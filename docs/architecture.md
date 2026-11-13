@@ -140,6 +140,19 @@ and at most `TURN_READ_CAP` entries, and the engine's and the inbox's handlers s
   (`touchLastSeen`). 2026-11-12, live 2.0.1-beta.2: a cold-start tick copied the 1.7 MB state ~150 times, and the
   worker sat at ~450 MB RSS (85 MB live heap). Guarded by `tests/tick-copies.test.ts`, the agent-index test in
   `tests/never-wake.test.ts`, the quiet-tick test in `tests/inbox.test.ts` and `test:scale`.
+- **A nudge costs its workspace** (`a-nudge-costs-its-workspace`). `Engine.nudge` (a turn end, an action, a tool that
+  registered a PR) runs a tick scoped to the nudged workspaces: their PRs are read, only they are observed, and their
+  discovery is `PaseoGateway.discover` with `scope`, which places only those workspaces and rescans only their dirty
+  agents. A dirty agent's rescan takes the turn read still kept (`TurnTimeline.since`, no daemon request), so a PR the
+  turn just opened shows at once; one without a kept read (its next turn already started, the read expired after
+  `TURN_READ_KEEP_MS`, or no cursor yet) is read by the nudge itself, from its cursor, so nothing moves to the timer's
+  tick or into the idle window. Each row is applied with `mutateWorkspace` (`Engine.discoverScoped`), never a
+  whole-state `mutate`. The timer's tick still discovers and observes everything. A nudged workspace that needs the whole state (not yet
+  saved, parked by the active-scope migration, or the migration not yet run) gets the full discovery instead.
+  2026-11-13, run Y (the CI live shape, 140 workspaces): every turn end's nudge ran discovery over all 140 workspaces,
+  a whole-state copy and an observation of every workspace, and the busy window grew V8's committed pages from 87 to
+  165 MB. Guarded by `tests/nudge-costs-its-workspace.test.ts` (20 nudges of 1 of 140: no full discovery, no
+  whole-state copy, no timeline read beyond the turn's own; after the turns end, idle ticks read no timeline).
 - **A send never clones the whole state** (`a-send-never-clones-the-whole-state`). A send's claim, recipient, sent and
   acknowledgment writes, an answer's delivery writes and an agent's turn events (`server/turn-events.ts`: a superseded
   hold, the Done a turn ends, a woken dormant workspace, the history and Stop hold at turn end) each write the one

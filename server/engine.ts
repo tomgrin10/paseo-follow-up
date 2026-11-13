@@ -9,7 +9,7 @@ import { answerRecipients, developerAnswer, syncTaskQuestions, type AnswerAction
 import { answerMessage, isOpen as isOpenQuestion, type Question } from "../shared/questions";
 import { reconcileSubmittedStacks } from "./submissions";
 import { applyDiscovery, interruptionHold, startsWithAutoSend, type DiscoveredWorkspace } from "./discovery";
-import { followsByDefault, migrateActiveScope } from "../shared/settings";
+import { ACTIVE_SCOPE_MIGRATION, followsByDefault, migrateActiveScope } from "../shared/settings";
 import { replyRecorded } from "../shared/communication";
 import { DeliveryDeferred, ConversationGone, realTimers, withDeadline, type Timers } from "./delivery";
 import { recordSnapshot } from "./deployment-anchor";
@@ -39,7 +39,8 @@ const GONE_REASON = "The main agent's conversation no longer exists, so Follow-u
 /** A batch that asks the agent to verify it's finished and declare Done. These never go out on their own. */
 export { interruptionHold };
 export interface Gateway {
-  discover?(state: State, workspaceId?: string): Promise<DiscoveredWorkspace[]>;
+  /** `scope`: a nudge's pass, only those workspaces and only reads already in hand (a-nudge-costs-its-workspace). */
+  discover?(state: State, workspaceId?: string, scope?: { workspaces: ReadonlySet<string> }): Promise<DiscoveredWorkspace[]>;
   observe(w: Workspace, fresh?: boolean): Promise<Runtime>;
   send(w: Workspace, batch: Batch, text: string): Promise<void>;
   prepareRecovery(w: Workspace, batch: Batch): Promise<{ agentId: string; contextPath: string }>;
@@ -210,7 +211,7 @@ export class Engine {
     this.gateway.tickStarted?.();
     const saved = await this.store.snapshot();
     if (this.stopped) return;
-    if (this.gateway.discover) {
+    if (this.gateway.discover && !(o.affected && await this.discoverScoped(saved, o.affected))) {
       const discovered = await this.gateway.discover(saved);
       // Discovery's write copies the whole state; skip it when the rows and the state are what the last one left
       // (a-tick-copies-the-state-at-most-once), at most OBSERVE_FULL_MS (its time-based rules run then). The rows are
@@ -237,7 +238,8 @@ export class Engine {
     const hot = keys(active.filter(isHot));
     const read = o.affected ? active.filter(w => o.affected!.has(w.id)) : active;
     const observations = await this.github.observe(read.flatMap(w => w.prs), o.background || o.workspaceId ? { background: true, hot, fresh: keys(active.filter(w => w.id === o.workspaceId)) } : {});
-    for (const original of active) {
+    // A nudge observes only its workspaces (a-nudge-costs-its-workspace); the timer's tick observes every active one.
+    for (const original of o.affected ? read : active) {
       if (this.stopped) return;
       const runtime = await this.gateway.observe(original).catch((): Runtime => ({ busy: false, reason: "Agent state unavailable; refresh will retry", archived: false }));
       const pruned: Batch[] = [];
@@ -342,6 +344,24 @@ export class Engine {
       await this.statusCheck(after, this.now(), runtimeKey).catch(() => undefined);
     }
     this.error = null;
+  }
+  /**
+   * A nudge's discovery (a-nudge-costs-its-workspace): only the nudged workspaces and their dirty agents (the kept turn
+   * read, else a read of that agent), each applied with a one-workspace mutation. 2026-11-13 (run Y, the CI live shape): every turn end's nudge ran
+   * discovery over all 140 workspaces and a whole-state copy, and the burst grew V8's committed pages from 87 to 165 MB.
+   * False when a nudged workspace needs the whole state (not yet saved, parked by the active-scope migration, or the
+   * migration not yet run): the full discovery runs instead.
+   */
+  private async discoverScoped(saved: State, affected: ReadonlySet<string>): Promise<boolean> {
+    if (!saved.migrations?.includes(ACTIVE_SCOPE_MIGRATION)) return false;
+    if ([...affected].some(id => !saved.workspaces.some(w => w.id === id) || saved.autoSendsParked?.includes(id))) return false;
+    const rows = await this.gateway.discover!(saved, undefined, { workspaces: affected });
+    for (const row of rows) {
+      const current = await this.store.snapshot();
+      if (!followsByDefault(current, row) && !current.workspaces.some(w => w.id === row.id && w.enable_tracking && !w.archived)) continue;
+      await this.store.mutateWorkspace(row.id, w => applyDiscovery({ ...current, workspaces: current.workspaces.map(x => x.id === w.id ? w : x) }, [row], this.now()));
+    }
+    return true;
   }
   async activate(workspaceId: string): Promise<Workspace> {
     if (this.stopped || !this.gateway.discover) throw new Error("Workspace tracking is unavailable");
