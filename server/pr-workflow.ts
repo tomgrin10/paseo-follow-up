@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { repoKey } from "../shared/reviewers";
 import {
   commandName, detect, emptyPrWorkflowConfig, prWorkflowConfigSchema, repoSetting, resolveWorkflow, reviewFixFor,
-  type AgentWorkflow, type Detection, type PrWorkflow, type PrWorkflowConfig, type PrWorkflowView, type RepoWorkflowView, type ReviewFix,
+  noReviewRepos, repoReview, setNoReviewRepos, type AgentWorkflow, type Detection, type PrWorkflow, type PrWorkflowConfig, type PrWorkflowView, type RepoWorkflowView, type ReviewFix,
 } from "../shared/pr-workflow";
 
 /**
@@ -79,7 +79,7 @@ export class PrWorkflowStore {
       config = emptyPrWorkflowConfig();
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") config.migratedAt = new Date(this.now()).toISOString();
     }
-    this.cached = config;
+    this.cached = config; setNoReviewRepos(noReviewRepos(config));
     return config;
   }
   /** Synchronous view for hot paths (attention, scopes); defaults until the first read finishes. */
@@ -89,10 +89,10 @@ export class PrWorkflowStore {
     const next = this.tail.then(async () => {
       const config = structuredClone(await this.read());
       work(config);
-      for (const [key, value] of Object.entries(config.repos)) if (!value.workflow && !value.mergeMethod && !value.reviewFix) delete config.repos[key];
+      for (const [key, value] of Object.entries(config.repos)) { if (value.review === "team") delete value.review; if (!value.workflow && !value.mergeMethod && !value.reviewFix && !value.review) delete config.repos[key]; }
       const parsed = prWorkflowConfigSchema.parse(config);
       await this.write(parsed);
-      this.cached = parsed;
+      this.cached = parsed; setNoReviewRepos(noReviewRepos(parsed));
       this.onChanged();
       return parsed;
     });
@@ -157,8 +157,15 @@ export class PrWorkflowStore {
     await this.machineState(false);
     for (const repo of new Set([...repos].map(repoKey))) await this.detect(repo).catch(() => undefined);
   }
-  agentWorkflow(repo: string | null): AgentWorkflow {
-    return { mode: this.cachedWorkflow(repo), reviewFix: commandName(reviewFixFor(this.current(), repo)) };
+  /**
+   * `repos`: every repository the workspace touches (its PRs and its checkout). The agent is told it merges its own PRs
+   * (`noReview`) only when all of them are No review: one team repository among them keeps the team wording, since the
+   * hook text is per workspace, not per PR.
+   */
+  agentWorkflow(repo: string | null, repos: Iterable<string> = repo ? [repo] : []): AgentWorkflow {
+    const workflow: AgentWorkflow = { mode: this.cachedWorkflow(repo), reviewFix: commandName(reviewFixFor(this.current(), repo)) };
+    const all = [...repos];
+    return all.length && all.every(r => repoReview(r) === "none") ? { ...workflow, noReview: true } : workflow;
   }
   reviewFix(repo: string | null): ReviewFix { return reviewFixFor(this.current(), repo); }
 
@@ -170,7 +177,7 @@ export class PrWorkflowStore {
       const d = await this.detect(repo, fresh, false);
       const { setting, inherits } = repoSetting(config, repo);
       const own = config.repos[repo];
-      rows.push({ repo, setting, inherits, detected: d.workflow, effective: resolveWorkflow(setting, d.workflow), reason: d.reason, path: d.path, mergeMethod: own?.mergeMethod ?? null, reviewFix: own?.reviewFix ?? null, github: github(repo) });
+      rows.push({ repo, setting, inherits, detected: d.workflow, effective: resolveWorkflow(setting, d.workflow), reason: d.reason, path: d.path, mergeMethod: own?.mergeMethod ?? null, reviewFix: own?.reviewFix ?? null, review: own?.review ?? "team", github: github(repo) });
     }
     return { gt: { installed: machine.gtInstalled, signedIn: machine.signedIn }, default: config.default, reviewFix: config.reviewFix, repos: rows };
   }

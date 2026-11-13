@@ -14,6 +14,33 @@
 - **UI:** Settings → Following → Shipping PRs (`client/shipping.tsx`). Tests: `tests/pr-workflow.test.ts`.
   End to end: `npm run test:github-mode`.
 
+## Review mode
+
+Each repository is **Team review** (the default) or **No review** (`review: "none"` in `pr-workflow.json`; Team
+review stores nothing, so there is no migration).
+
+- **Team review:** Follow-up asks you to add reviewers and to merge.
+- **No review:** The agent merges its own PRs once checks pass. Follow-up never asks for reviewers or a merge there,
+  and a merge flags nobody.
+
+`agentMerges(pr)` (`shared/pr-workflow.ts`) is the one rule: the PR's register_pr `agentMerges` answer wins
+(false hands one merge back), else the repository's mode decides. It reads a process-wide set of No review
+repositories. `reviewersMissing(pr)` builds on it: the panel's PR rows and the PR sheet show "No reviewers" only for
+a PR someone will be asked to review. The worker fills it from `pr-workflow.json` first thing in `ready`, before the first tick, and on
+every save. The client fills it from `follow.reviewer-settings` (`noReview`), and from each `follow.inbox-list`
+answer the PRs that hand their merge back (`handedBack`). The daemon withdraws an add-reviewers flag on its next tick;
+the client doesn't wait: its inbox store hands every surface rows through `withoutWithdrawnAsks` and the brief cards
+read the daemon's brief through `liveBrief` (`shared/brief.ts`, which `briefAsks` builds on, so the done-brief rule and this one compose in one place; both keyed by `agentMergesKey`), so the ask leaves the pill, the
+inbox row, Home and the panel count the moment the repository flips, and comes back on Undo. The agent's instructions
+follow the mode: `scopes.json` carries `workflow.noReview`, true only when every repository the workspace touches is
+No review, and the hook and the tools say "merge your own PR once CI is
+green" instead of "Merging and archiving remain the developer's actions."
+
+Set it in Settings → Following → Shipping PRs → a repository → Review, from the Needs-you reviewers row ("Let the
+agent merge in <repo>", with Undo), or with `set_pr_workflow` (`review: "team" | "none"`, a dry run first, then
+`confirm`). `pr_workflow` reads it. UI: `client/review-mode.tsx`. Invariant
+`a-no-review-repo-never-asks-for-review-or-merge`, `tests/review-mode.test.ts`.
+
 ## Observing PRs
 
 `server/github.ts` (`Github.observe`) reads tracked PRs with one aliased GraphQL query per repository per tick

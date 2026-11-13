@@ -10,7 +10,8 @@ import type { MergeMethod } from "../shared/pr-workflow";
 import { mergeQueued, mergeReady } from "../shared/attention";
 import type { Pr, Workspace } from "../shared/model";
 import { Button, Switch, errorText, text, type Theme } from "./kit";
-import { noReviewers, resolveReviewers, withoutAuthor, type ReviewerEntry } from "../shared/reviewers";
+import { reviewersMissing } from "../shared/pr-workflow";
+import { resolveReviewers, withoutAuthor, type ReviewerEntry } from "../shared/reviewers";
 import { ReviewerPicker, reviewerSettingsKey, useReviewerSettings, willAsk } from "./reviewers";
 import { runAction } from "./toasts";
 
@@ -53,7 +54,7 @@ export function PrControls({ pr, workspace, theme, compact, browserReady: compan
   const recentlySubmitted = workspace.prActions.some(a => a.kind === "merge" && a.state === "submitted" && a.heads[pr.key] === pr.snapshot?.head && Date.now() - Date.parse(a.createdAt) < 30_000);
   const canMerge = mergeReady(pr, workspace) && !actual?.merging;
   const disabled = busy || reviewRequest.isPending || pendingAction || workspace.archived;
-  const missingReviewers = noReviewers(pr);
+  const missingReviewers = reviewersMissing(pr);
   const reviewers = reviewerSettings.data ? withoutAuthor(resolveReviewers(reviewerSettings.data.config, pr.repo).reviewers, pr.snapshot?.reviewers?.author) : [];
   const begin = (kind: PrActionKind) => { setPlan(null); setNotice(null); submit.reset(); checking.reset(); checking.mutate(kind); };
   const failure = checking.error ?? submit.error ?? reviewRequest.error;
