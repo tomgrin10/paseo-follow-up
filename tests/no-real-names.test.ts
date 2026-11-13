@@ -58,11 +58,8 @@ test("no-real-names-in-renders-or-fixtures: the denylist stores the company only
   for (const name of machineNames()) assert.ok(!src.toLowerCase().includes(name.toLowerCase()), `${SELF} spells this machine's name`);
 });
 
-test("no-real-names-in-renders-or-fixtures: every excluded path exists and names the PR that removes it", async () => {
-  for (const [file, reason] of Object.entries(EXCLUDED)) {
-    assert.equal(reason, "removed by the Q55 host-config PR", file);
-    await readFile(join(root, file)); // a path that's gone drops off the list
-  }
+test("public-code-carries-no-host-identifiers: no file is excluded from the scan", () => {
+  assert.deepEqual(EXCLUDED, {}, "host configuration belongs in host settings, not in an excluded file");
 });
 
 test("no-real-names-in-renders-or-fixtures: what counts as a real name", () => {
