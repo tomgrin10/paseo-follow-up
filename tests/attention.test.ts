@@ -53,7 +53,7 @@ test("needs-you lists one action per decision and respects Auto and send guards"
   assert.deepEqual(needsYou({ ...w, enable_auto_sends: true }, clock).map(i => i.kind), ["decision"], "Auto sends without asking");
   // Once #2 can merge too, #3 offers Merge (its click merges #2 and #3).
   const fixed = w.prs.map(p => p.number === 2 ? { ...p, snapshot: { ...p.snapshot!, conflict: false, reviewDecision: "APPROVED" as const, graphiteMergeStatus: "READY_TO_MERGE" } } : p);
-  assert.deepEqual(needsYou({ ...w, prs: fixed, enable_auto_sends: true }, clock).filter(i => i.kind === "merge").map(i => i.kind === "merge" && i.number), [2, 3]);
+  assert.deepEqual(needsYou({ ...w, prs: fixed, enable_auto_sends: true }, clock).filter(i => i.kind === "merge").map(i => i.kind === "merge" && i.number), [3], "one Merge per stack: #3's names #2 too");
   assert.deepEqual(heldMerges({ ...w, prs: fixed }, clock), [], "nothing held once #2 can merge");
   const busy = needsYou({ ...w, runtimeBusy: true }, clock).find(i => i.kind === "send");
   assert.equal(busy?.kind === "send" && busy.blocker, "Sends after the agent's current turn");

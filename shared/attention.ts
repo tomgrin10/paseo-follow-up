@@ -208,7 +208,11 @@ function computeNeedsYou(w: Workspace, now: number): NeedItem[] {
     // folds into it (shared/needs-block.ts) instead of drawing a second ask for the same PR.
     else if (asksForReviewers(pr, w)) { const suggested = suggestedReviewers(pr.repo, pr.snapshot!.reviewers?.author); items.push({ kind: "reviewers", key: `reviewers:${pr.key}`, prKey: pr.key, number: pr.number, pr: prLink(pr), suggested, title: reviewersAsk(pr.number, suggested, `#${pr.number} has no reviewers`), detail: pr.snapshot!.title }); }
   }
-  return items;
+  // One Merge per stack: the topmost ready PR's Merge names and merges the PRs under it ("Merge 3 PRs"), so a ready PR
+  // under it isn't a second ask for the same decision. Merging only a lower one stays in its PR sheet.
+  const merges = items.filter((i): i is Extract<NeedItem, { kind: "merge" }> => i.kind === "merge");
+  const covered = new Set(merges.flatMap(m => { try { return downstack(w.prs, m.prKey).slice(0, -1).map(p => p.key); } catch { return []; } }));
+  return items.filter(i => i.kind !== "merge" || !covered.has(i.prKey));
 }
 
 /** Why a downstack PR holds a merge, in a few words ("checks failing"). */
