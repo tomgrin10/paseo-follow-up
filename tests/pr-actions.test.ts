@@ -30,7 +30,8 @@ test("upper PR confirmation includes owned downstack, and cancel/prepare sends n
     await assert.rejects(f.actions.confirm(plan.id, "target"), /depends on downstack/);
     assert.deepEqual(f.merges, []);
     const approved = await f.actions.prepare("workspace", f.top.key, "merge");
-    assert.equal((await f.actions.confirm(approved.id, "downstack")).state, "submitted"); assert.deepEqual(f.merges, [[1, 2]]);
+    const graphiteReply = await f.actions.confirm(approved.id, "downstack"); assert.equal(graphiteReply.state, "submitted"); assert.deepEqual(f.merges, [[1, 2]]);
+    assert.equal(graphiteReply.merge, "requested", "Graphite took the request; nothing may say Merged yet");
     await assert.rejects(f.actions.confirm(approved.id, "downstack"), /expired/);
     const w = (await f.store.snapshot()).workspaces[0]; assert.equal(w.enable_auto_sends, false); assert.equal(w.mainAgentId, "main-agent"); assert.equal(w.completion, null);
     const duplicate = await f.actions.prepare("workspace", f.top.key, "merge"); assert.ok(duplicate.blockers.some(b => b.includes("just submitted")));

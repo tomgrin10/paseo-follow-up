@@ -3,7 +3,7 @@ import { useRpc } from "@getpaseo/plugin/client";
 import { useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { confirmPrActionRpc, preparePrActionRpc } from "../shared/contracts";
-import { mergeClick, mergeScope, type MergeClickResult, type MergeScope } from "../shared/merge-click";
+import { mergeClick, mergeScope, mergeWords, type MergeClickResult, type MergeScope } from "../shared/merge-click";
 import type { Workspace } from "../shared/model";
 import { Button, errorText, text, type ButtonKind, type Theme } from "./kit";
 import { Text } from "./text";
@@ -19,8 +19,9 @@ type Control = { button: ReactNode; notice: ReactNode; label: string | null };
 
 /**
  * Every Merge button (a Needs-you row, the composer pill, Home, a brief, the PR card): one click merges what the
- * button names (a-click-on-merge-merges, shared/merge-click.ts). The button says "Merging…" while it runs; a toast
- * says what happened and the row clears on the next read. A blocker found at click time merges nothing and comes back
+ * button names (a-click-on-merge-merges, shared/merge-click.ts). The button says "Merging…" while it runs; then the
+ * button and a toast say the same outcome (mergeWords: "Merged", "Queued", "Merge requested"),
+ * and the row clears on the next read. A blocker found at click time merges nothing and comes back
  * as `notice`, for the surface to put under its row. One hook per surface (a list draws many rows), so `control`
  * is a plain function. `fallback` is the PR sheet's confirm, only for a PR whose scope can't be known (mergeScope is
  * null: a parent cycle or a downstack PR outside the inventory).
@@ -38,10 +39,11 @@ export function useMergeButtons(w: Workspace | undefined): MergeButtons {
   const merge = useMutation({
     mutationFn: ({ prKey, scope }: { prKey: string; scope: MergeScope }) => mergeClick({ prepare: key => prepare({ workspaceId: w!.id, prKey: key, kind: "merge" }), confirm: input => confirm(input) }, prKey, scope),
     onMutate: ({ prKey }) => settle(prKey, null),
-    onSuccess: (result, { prKey }) => {
+    onSuccess: (result, { prKey, scope }) => {
       settle(prKey, result);
-      if (result.state === "submitted") toast.show(result.result, { variant: "success" });
-      else if (result.state === "uncertain") toast.show(result.result, { variant: "warning" });
+      // The toast and the button read one outcome (mergeWords), so they can't disagree.
+      const said = mergeWords(scope, result).toast;
+      if (said) toast.show(said.text, { variant: said.variant });
       refresh();
     },
     onError: (e, { prKey }) => { settle(prKey, { state: "error", result: errorText(e) }); refresh(); },
@@ -55,7 +57,7 @@ export function useMergeButtons(w: Workspace | undefined): MergeButtons {
     const outcome = outcomes[prKey];
     const submitted = outcome?.state === "submitted" || outcome?.state === "uncertain";
     // Phones keep the button on the row's line: a short done label, so the row's title keeps its one line.
-    const title = running ? scope.queue ? "Adding to queue…" : "Merging…" : submitted ? scope.queue ? compact ? "Queued" : "Added to merge queue" : compact ? "Submitted" : "Merge submitted" : scope.label;
+    const title = mergeWords(scope, outcome && outcome.state !== "error" ? outcome : null, running, compact).button;
     const button = <Button theme={theme} compact={compact} kind={kind} grow={grow} icon={submitted ? "Check" : scope.queue ? "ListPlus" : "GitMerge"} title={title} accessibilityLabel={scope.a11y}
       loading={running} disabled={disabled || merge.isPending || submitted} onPress={() => merge.mutate({ prKey, scope })} />;
     const why = whyNot(outcome);
@@ -67,7 +69,7 @@ export function useMergeButtons(w: Workspace | undefined): MergeButtons {
     if (!scope) return null;
     const running = merge.isPending && merge.variables?.prKey === prKey;
     const o = outcomes[prKey]; const submitted = o?.state === "submitted" || o?.state === "uncertain";
-    return { why: whyNot(o), label: running ? scope.queue ? "Adding to queue…" : "Merging…" : submitted ? scope.queue ? "Added to merge queue" : "Merge submitted" : scope.label, a11y: scope.a11y, running, submitted,
+    return { why: whyNot(o), label: mergeWords(scope, o && o.state !== "error" ? o : null, running).button, a11y: scope.a11y, running, submitted,
       run: () => { if (!merge.isPending && !submitted) merge.mutate({ prKey, scope }); } };
   };
   return Object.assign(control, { view });
