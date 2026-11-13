@@ -40,9 +40,9 @@ const exec = promisify(execFile);
 const argv = process.argv.slice(2);
 const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : fallback; };
 // What's new reinstalls the plugin as 2.0.0-rc.0, so it goes last: every other shot shows the version under test.
-const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "whats-new"];
+const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["needs-you-states", "done-brief"];
+const REVIEW_SHOTS = ["needs-you-states", "done-brief", "review-mode"];
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
 for (const name of only) if (![...SHOTS, ...REVIEW_SHOTS].includes(name)) fail(`unknown shot "${name}" (known: ${[...SHOTS, ...REVIEW_SHOTS].join(", ")})`);
 const scheme = arg("--scheme");
@@ -125,6 +125,7 @@ function pulls() {
     212: { repo: "example/web", title: "Usage dashboard charts", state: "OPEN", author: "dana", draft: true, checks: [ok("test"), ok("lint")] },
     218: { repo: "example/web", title: "Push notification settings", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
     224: { repo: "example/web", title: "Import contacts from CSV", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
+    246: { title: "Export the audit log as CSV", state: "OPEN", author: "dana", checks: [running("test"), ok("lint")] },
     240: { title: "Stream large invoice exports", state: "MERGED", author: "dana", checks: [ok("test"), ok("lint")] },
     232: { title: "Usage alert thresholds", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
   };
@@ -325,6 +326,13 @@ const NEEDS_YOU_STATES = [
       msg("Thresholds are in #232. One task needs your call on who gets the alerts.")], flag: false },
 ];
 
+/** review-mode only (a-no-review-repo-never-asks-for-review-or-merge): a PR with no reviewers in a reviewed repository. */
+const REVIEW_MODE_STATES = [
+  { key: "rm-audit", title: "Audit log export", minute: 180, prompt: "APP-190: export the audit log as CSV from the admin page.", flag: false,
+    steps: [rpc("follow.enroll", { goal: "APP-190 Audit log export" }), rpc("follow.register-pr", { repo: "example/app", number: 246, stack: "Audit export" }),
+      msg("Opened example/app#246; checks are running.")] },
+];
+
 /** done-brief only (a-done-brief-is-never-an-ask): the agent's turn ends "nothing needed" while its PR's merge flags the row. */
 const DONE_BRIEF = [
   { key: "db-merged", title: "Export streaming", minute: 177, prompt: "APP-195: stream large invoice exports instead of building them in memory.",
@@ -339,7 +347,9 @@ async function seed({ call, home }) {
   // Two projects, so the sidebar and Quiet's folds don't read as one repo.
   const repos = {};
   for (const name of ["app", "web"]) { repos[name] = join(tmpdir(), "follow-up-shots-fixture", name); await fs.mkdir(repos[name], { recursive: true }); }
-  const specs = [...WORKSPACES, ...(only.includes("needs-you-states") ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : [])];
+  // review-mode: someone reviews example/app, so its PR without reviewers asks for them.
+  if (only.includes("review-mode")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }] });
+  const specs = [...WORKSPACES, ...(only.includes("needs-you-states") ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("review-mode") ? REVIEW_MODE_STATES : [])];
   await fs.writeFile(join(home, "fixture-scripts.json"), JSON.stringify(Object.fromEntries(specs.map(w => [w.prompt, w.steps]))));
   const workspaces = [];
   for (const spec of specs) {
@@ -458,6 +468,8 @@ function makeShooter({ browser, port, out, scheme: forced, optimiser, results, c
     try {
       await context.addInitScript(INIT, { seen });
       const page = await context.newPage();
+      // SHOTS_CONSOLE=1 prints the page's errors, to tell a real bug from a flaky frame.
+      if (process.env.SHOTS_CONSOLE) { page.on("console", m => { if (m.type() === "error") log(`${name} console:`, m.text().slice(0, 600)); }); page.on("pageerror", e => log(`${name} pageerror:`, e.message.slice(0, 600))); }
       await page.clock.setFixedTime(BASE + VIEW);
       page.setDefaultTimeout(30000);
       await page.goto(`http://127.0.0.1:${port}/`);
@@ -670,6 +682,38 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
       await page.getByRole("button", { name: /^Pull request 142: / }).first().waitFor();
     });
+    // Repairs are tasks (Q49): Onboarding email's PR #160 has a conflict and review threads. With Auto on, the strip
+    // says who gets the next message, when and why; the crawling clock keeps it inside the settle, so nothing sends.
+    if (name === "tasks" || name === "tasks-sheet" || name === "tasks-phone") {
+      const email = seeded.workspaces.find(w => w.key === "email");
+      await call("follow.control", { workspaceId: email.workspaceId, enable_auto_sends: true });
+      const spec = WORKSPACES.find(w => w.key === "email");
+      const open = async page => {
+        await openChat(page, spec.title, spec.prompt);
+        await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+        const strip = page.getByText(/^Next message to /).first();
+        await strip.waitFor({ timeout: 60000 });
+        await strip.scrollIntoViewIfNeeded();
+      };
+      if (name === "tasks") await shoot("tasks", DESKTOP, "dark", open);
+      if (name === "tasks-sheet") await shoot("tasks-sheet", DESKTOP, "dark", async page => {
+        await open(page);
+        await page.getByRole("button", { name: /^Task: Resolve merge conflicts/ }).first().click();
+        await page.getByText("Next message", { exact: true }).last().waitFor();
+      });
+      // Phones see a workspace's Tasks in the larger view (a Paseo screen; Home's phone focus view has no Tasks):
+      // open it from the panel at desktop size, then narrow to the phone.
+      if (name === "tasks-phone") await shoot("tasks-phone", PHONE, "light", async page => {
+        await open(page);
+        await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
+        await page.getByText(/^Next message to /).last().waitFor({ timeout: 60000 });
+        await page.setViewportSize(PHONE);
+        const strip = page.getByText(/^Next message to /).last();
+        await strip.waitFor({ timeout: 60000 });
+        await strip.evaluate(el => el.scrollIntoView({ block: "center" }));
+        if (await page.evaluate(() => document.documentElement.scrollWidth) > PHONE.width) throw new Error("tasks-phone scrolls sideways");
+      });
+    }
     if (name === "questions") await shoot("questions", DESKTOP, "dark", async page => {
       await openChat(page, "Billing retries", billing.prompt);
       await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
@@ -854,6 +898,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       }
     }
   }
+  if (only.includes("review-mode")) await reviewModeShots({ shoot, call });
   if (only.includes("needs-you-states")) {
     // One Needs you block per surface: each state on the panel (desktop) and Home's detail pane (desktop and phone),
     // light and dark. Tall panel frames so the block, Tasks and their neighbours all fit.
@@ -895,6 +940,52 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       await shoot(`db-home${size}-${theme}`, frame, theme, async page => { await openHome(page); if (frame === PHONE) await page.setViewportSize(PHONE); await (await homeRow(page, w.title)).click(); await settle(page); });
     }
   }
+}
+async function reviewModeShots({ shoot, call }) {
+  // The Needs-you reviewers row with its quiet link, then the undo bar after it; the Settings fold with the Review menu
+  // open on a No review repository. Desktop and phone, light and dark. Each shot puts example/app back to Team review.
+  const title = REVIEW_MODE_STATES[0].title;
+  const team = () => call("follow.set-pr-workflow", { repo: "example/app", review: null });
+  const link = page => page.getByRole("button", { name: "Let the agent merge in example/app" }).filter({ visible: true }).first();
+  const row = async (page, vp) => { await openHome(page); if (vp) await page.setViewportSize(vp); await (await homeRow(page, title)).click(); await link(page).waitFor(); };
+  const fold = async (page, vp) => {
+    await page.setViewportSize(vp);
+    await page.goto(`${ORIGIN}/settings/hosts/${SERVER_ID}/plugins/follow-up/projects`);
+    // Desktop: a tab per category. Phone: the category list, drilled into.
+    await (vp.width >= 768 ? page.getByRole("tab", { name: /^Following/ }) : page.getByRole("button", { name: "Following", exact: true })).filter({ visible: true }).first().click();
+    const header = page.getByRole("button", { name: /^example\/app, / }).filter({ visible: true }).first();
+    await header.waitFor();
+    if (await header.getAttribute("aria-expanded") !== "true") await header.click();
+    await page.getByRole("button", { name: /^Review for example\/app/ }).filter({ visible: true }).first().click();
+    const menu = page.getByRole("menu", { name: "Review for example/app" }).first();
+    await menu.waitFor();
+    await menu.evaluate(el => el.scrollIntoView({ block: "center" }));
+    // Only Follow-up's own pane: the host settings sidebar beside it names the machine.
+    return vp.width >= 768 ? { x: 400, y: 0, width: vp.width - 400, height: vp.height } : undefined;
+  };
+  for (const theme of ["light", "dark"]) for (const [size, vp] of [["desktop", DESKTOP], ["phone", PHONE]]) {
+    await team();
+    await shoot(`rm-row-${size}-${theme}`, vp, theme, page => row(page, vp));
+    // The undo bar lasts 10 s and settle() can take longer, so the drive captures it itself (rm-toast: the ask gone from
+    // Needs you, the header and Home at once). Then it taps Undo, waits for the bar to leave and the ask to come back
+    // (the inbox forgets the withdrawn reviewers key; the daemon re-asks on its next tick), and the shot is rm-undo.
+    await shoot(`rm-undo-${size}-${theme}`, vp, theme, async page => {
+      await row(page, vp); await link(page).click();
+      const bar = page.getByText("example/app: no review. The agent merges its own PRs once checks pass.").filter({ visible: true }).first();
+      await bar.waitFor();
+      await link(page).waitFor({ state: "hidden", timeout: 5000 });
+      await page.evaluate(() => document.fonts.ready); await page.waitForTimeout(300);
+      await fs.writeFile(join(out, `follow-up-rm-toast-${size}-${theme}.png`), await page.screenshot({ animations: "disabled", caret: "hide" }));
+      await page.getByRole("button", { name: /^Undo\b.*: example\/app: no review/ }).filter({ visible: true }).first().click();
+      await bar.waitFor({ state: "hidden", timeout: 15000 });
+      await link(page).waitFor({ timeout: 60000 });
+      await page.getByText("Add reviewers to #246: Ravi").filter({ visible: true }).first().waitFor({ timeout: 60000 });
+    });
+    await team();
+    await call("follow.set-pr-workflow", { repo: "example/app", review: "none" });
+    await shoot(`rm-settings-${size}-${theme}`, { width: vp.width, height: size === "phone" ? 1100 : 1000 }, theme, page => fold(page, { width: vp.width, height: size === "phone" ? 1100 : 1000 }));
+  }
+  await team();
 }
 function pick(key) { const w = NEEDS_YOU_STATES.find(x => x.key === key); return { title: w.title, prompt: w.prompt }; }
 

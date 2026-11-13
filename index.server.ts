@@ -27,7 +27,8 @@ import { Store } from "./server/store";
 import { PriorityStore } from "./server/priorities";
 import { UsageReader } from "./server/usage";
 import { Engine, agentWorkspace, findWorkspace } from "./server/engine";
-import { holdOnTurnEnd, holdSuperseded, liftHold } from "./shared/status";
+import { turnStarted, turnEnded, agentTrackedWorkspace } from "./server/turn-events";
+import { nextMessageInfo } from "./shared/task-rows";
 import { Github } from "./server/github";
 import { ReviewerConfigStore, ReviewerSuggestions } from "./server/reviewer-config";
 import { repoKey } from "./shared/reviewers";
@@ -38,7 +39,7 @@ import { AgentActions, AGENT_TOOLS, controlWorkspace, type AgentTool } from "./s
 import { PaseoGateway, paseoHome, clientEntry, daemonOptions, closeConnections, sessionGuardOwnsInterruption, compactionJustDelivered } from "./server/daemon";
 import { mcpSource } from "./server/mcp-source";
 import { excludeStack } from "./server/exclusions";
-import { applyHistory, applyDiscovery, extractHistory, mainWorkDue, markMainWork } from "./server/discovery";
+import { applyDiscovery, mainWorkDue, markMainWork } from "./server/discovery";
 import { lifecycleOnly, recoveryBatch } from "./shared/follow-up";
 import { Deployments } from "./server/deployments";
 import { AgentHooks } from "./server/agent-hooks";
@@ -51,7 +52,7 @@ import { scopes } from "./server/scopes";
 import { updateObligation } from "./server/obligations";
 import { Inbox, type GuardPause } from "./server/inbox";
 import { daemonDirectory, guardPath } from "./server/inbox-directory";
-import { fileSources, turnPrompt } from "./server/inbox-classifier";
+import { fileSources } from "./server/inbox-classifier";
 import { onBeforeSend } from "./server/daemon";
 import { copyFile, readFile, rename, stat } from "node:fs/promises";
 import { HistoryCache } from "./server/history-cache";
@@ -59,12 +60,12 @@ import { Governor } from "./server/governor";
 import { ListCache } from "./server/list-cache";
 import { scopeWriter, workflowSummary } from "./server/scopes";
 import { PrWorkflowStore } from "./server/pr-workflow";
-import { commandName } from "./shared/pr-workflow";
+import { commandName, handsMergeBack, noReviewRepoList, noReviewRepos } from "./shared/pr-workflow";
 import { projectRepo } from "./server/daemon";
 import { batchArchive, pruneUnsent } from "./server/batch-archive";
 import { statusCheck } from "./server/status-check";
 import { NO_USAGE } from "./shared/usage";
-import { activeWindowMs, conversationGone, DEFAULT_ACTIVE_WINDOW_DAYS } from "./server/agent-load";
+import { activeWindowMs, DEFAULT_ACTIVE_WINDOW_DAYS } from "./server/agent-load";
 import { ACTIVE_SCOPE_MIGRATION, PRUNE_MIGRATION, autoSendsByDefault, FOLLOW_EVERY_MIGRATION, followsByDefault, followsEvery, migrateFollowEvery, optedOut } from "./shared/settings";
 import { Overseer, OVERSEER_TOOLS, type OverseerPaseo, type OverseerTool, providerModel } from "./server/overseer";
 import { OVERSEER_LABEL, isOverseerAgent } from "./shared/overseer";
@@ -154,8 +155,10 @@ export default function contribute(server: PluginServerContext) {
   const prWorkflow = new PrWorkflowStore(directory);
   let workspaceRepos: Map<string, string> = new Map();
   const workspaceRepo = (w: Workspace): string | null => (w.prs.find(p => p.snapshot?.state === "OPEN") ?? w.prs.at(-1))?.repo ?? workspaceRepos.get(w.id) ?? null;
+  /** Every repository a workspace touches: its open PRs' and its checkout's (the agent text's No review is all-or-nothing). */
+  const touchedRepos = (w: Workspace): string[] => [...new Set([...w.prs.filter(p => p.snapshot?.state !== "MERGED" && p.snapshot?.state !== "CLOSED").map(p => repoKey(p.repo)), ...(workspaceRepo(w) ? [repoKey(workspaceRepo(w)!)] : [])])];
   const knownRepos = (state: { workspaces: Workspace[] }) => new Set([...state.workspaces.filter(w => w.enable_tracking && !w.archived).flatMap(w => w.prs.map(p => repoKey(p.repo))), ...[...workspaceRepos.values()].map(repoKey)]);
-  const writeScopes = scopeWriter(directory, { agent: w => prWorkflow.agentWorkflow(workspaceRepo(w)), summary: state => workflowSummary([...knownRepos(state)].map(r => prWorkflow.cachedWorkflow(r))) });
+  const writeScopes = scopeWriter(directory, { agent: w => prWorkflow.agentWorkflow(workspaceRepo(w), touchedRepos(w)), summary: state => workflowSummary([...knownRepos(state)].map(r => prWorkflow.cachedWorkflow(r))) });
   // Every write: scopes for the hooks, then any open brief whose questions are now all settled resolves (every answer
   // path writes here, so one check covers them all; tests/stale-brief.test.ts).
   // Not awaited: onChanged runs inside the store's write queue, and resolving a brief can write the store again
@@ -365,6 +368,8 @@ export default function contribute(server: PluginServerContext) {
     // Getting started: fresh or existing is decided from what's on disk before anything below writes state.
     await onboarding.init().catch(() => undefined);
     unlock = await store.lock();
+    // Before anything ticks: which repositories are No review (agentMerges), so the first tick after a restart is already quiet.
+    await prWorkflow.read();
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await writeFile(bridge, withRuntimePrelude(mcpSource), { mode: 0o600 });
     // 1.4.0-beta.2: tools are per agent now; drop the old user-scope registrations that spawned mcp.mjs in every session.
@@ -527,7 +532,7 @@ export default function contribute(server: PluginServerContext) {
     await agentHooks.confirm(w.id, agentId, summary);
     return { workspaceId: w.id, synced: true as const };
   });
-  handle(rpc.agentStatusRpc, async ({ agentId }, { paseo }) => { await requireReady(); const workspaceId = await callerWorkspaceId(agentId, paseo); const w = agentWorkspace(await store.snapshot(), agentId, "read", workspaceId, "pr"); return { ...w, prWorkflow: prWorkflow.agentWorkflow(workspaceRepo(w)) }; });
+  handle(rpc.agentStatusRpc, async ({ agentId }, { paseo }) => { await requireReady(); const workspaceId = await callerWorkspaceId(agentId, paseo); const w = agentWorkspace(await store.snapshot(), agentId, "read", workspaceId, "pr"); return { ...w, prWorkflow: prWorkflow.agentWorkflow(workspaceRepo(w), touchedRepos(w)), nextMessageInfo: nextMessageInfo(w, Date.now()) }; });
   handle(rpc.activateRpc, async ({ workspaceId }) => { await requireReady(); return engine.activate(workspaceId); });
   handle(rpc.sendRpc, async ({ workspaceId, batchId }) => { await requireReady(); return engine.sendPending(workspaceId, batchId); });
   handle(rpc.recoverRpc, async ({ workspaceId }) => { await requireReady(); return engine.startRecovery(workspaceId); });
@@ -568,9 +573,9 @@ export default function contribute(server: PluginServerContext) {
         if (seen.has(ancestor)) throw new Error("PR parent relationships cannot form a cycle.");
         seen.add(ancestor); ancestor = w.prs.find(p => p.key === ancestor)?.parent ?? null;
       }
-      const altered = !existing || existing.stack !== stack || existing.parent !== parent || disposition !== undefined && existing.disposition !== disposition || agentMerges !== undefined && !!existing.agentMerges !== agentMerges;
+      const altered = !existing || existing.stack !== stack || existing.parent !== parent || disposition !== undefined && existing.disposition !== disposition || agentMerges !== undefined && existing.agentMerges !== agentMerges;
       if (existing) { existing.registeredAgentId = agentId; existing.discoveredFromSubmission = false; existing.stack = stack; existing.parent = parent; if (disposition !== undefined) existing.disposition = disposition; if (agentMerges !== undefined) existing.agentMerges = agentMerges; }
-      else w.prs.push({ registeredAgentId: agentId, key, repo, number, stack, parent, disposition: disposition ?? null, snapshot: null, error: null, ...(agentMerges ? { agentMerges } : {}) });
+      else w.prs.push({ registeredAgentId: agentId, key, repo, number, stack, parent, disposition: disposition ?? null, snapshot: null, error: null, ...(agentMerges !== undefined ? { agentMerges } : {}) });
       if (altered) changed(w); return w;
     });
     void engine.nudge(result.id); return result;
@@ -750,7 +755,7 @@ export default function contribute(server: PluginServerContext) {
     const config = await reviewerStore.read();
     const seen = new Set(Object.keys(config.repos));
     for (const w of (await store.snapshot()).workspaces) for (const p of w.prs) seen.add(repoKey(p.repo));
-    return { config, repos: [...seen].sort() };
+    return { config, repos: [...seen].sort(), noReview: noReviewRepos(prWorkflow.current()) };
   };
   const prWorkflowRepos = async () => {
     const repos = new Set((await reviewerSettings()).repos);
@@ -775,9 +780,9 @@ export default function contribute(server: PluginServerContext) {
     if (refresh) prWorkflow.onChanged();
     return view;
   });
-  handle(rpc.setPrWorkflowRpc, async ({ repo, setting, default: fallback, mergeMethod, reviewFix }) => {
+  handle(rpc.setPrWorkflowRpc, async ({ repo, setting, default: fallback, mergeMethod, reviewFix, review }) => {
     await requireReady();
-    if ((setting !== undefined || mergeMethod !== undefined || (reviewFix !== undefined && repo)) && !repo) throw new Error("Name the repository (owner/name) to change.");
+    if ((setting !== undefined || mergeMethod !== undefined || review !== undefined || (reviewFix !== undefined && repo)) && !repo) throw new Error("Name the repository (owner/name) to change.");
     await prWorkflow.mutate(config => {
       if (fallback !== undefined) config.default = fallback;
       if (!repo) { if (reviewFix) config.reviewFix = reviewFix; return; }
@@ -785,6 +790,7 @@ export default function contribute(server: PluginServerContext) {
       if (setting !== undefined) { if (setting === null) delete own.workflow; else own.workflow = setting; }
       if (mergeMethod !== undefined) { if (mergeMethod === null) delete own.mergeMethod; else own.mergeMethod = mergeMethod; }
       if (reviewFix !== undefined) { if (reviewFix === null) delete own.reviewFix; else own.reviewFix = reviewFix; }
+      if (review !== undefined) { if (review === null || review === "team") delete own.review; else own.review = review; }
     });
     // A changed workflow changes readiness and merge: check the PRs again now rather than on the next poll.
     void engine.nudge();
@@ -1158,7 +1164,8 @@ export default function contribute(server: PluginServerContext) {
     return result;
   });
   // Home, the sidebar badge and the pills poll this; an unchanged list answers in a few bytes (see inboxAnswer).
-  handle(rpc.inboxListRpc, async ({ etag }) => { await requireReady(); return inboxAnswer({ ...await inbox.list(), error: inboxError }, etag); });
+  handle(rpc.inboxListRpc, async ({ etag }) => { await requireReady(); const handedBack = noReviewRepoList().length ? (await store.snapshot()).workspaces.flatMap(w => w.prs.filter(handsMergeBack).map(p => p.key)) : [];
+    return inboxAnswer({ ...await inbox.list(), error: inboxError, ...(handedBack.length ? { handedBack } : {}) }, etag); });
   handle(rpc.inboxBriefRpc, async ({ agentId }) => { await requireReady(); return { brief: await inbox.brief(agentId) }; });
   handle(rpc.inboxActRpc, async (input, context) => { await requireReady(); return inbox.act(input, actorOf(context)); });
   handle(rpc.needsYouRpc, async ({ agentId, ...input }, { paseo }) => {
@@ -1295,14 +1302,15 @@ export default function contribute(server: PluginServerContext) {
     server.on("agent.turn_ended", async () => { updater.activity(); void evaluateMove(); }),
     server.on("agent.turn_started", async (event, { paseo }) => { seen(paseo); inboxHook(() => inbox.turnStarted(event.agent, event.turnId)); }),
     // A newer main-agent turn supersedes the failed turn's automatic hold (shared/status.ts holdSuperseded).
+    // A turn writes only the workspace it is about (server/turn-events.ts, a-send-never-clones-the-whole-state): a
+    // superseded hold lifts, the owned workspace's Done ends, and a dormant workspace becomes active again.
     server.on("agent.turn_started", async event => {
       if (event.turnId) startedTurns.set(event.agent.id, event.turnId);
       await ready;
       if (stopped || loadError) return;
-      const turn = { agentId: event.agent.id, turnId: event.turnId ?? null };
-      if (!(await store.snapshot()).workspaces.some(w => w.enable_tracking && holdSuperseded(w, turn))) return;
-      await store.mutate(state => { for (const w of state.workspaces) if (w.enable_tracking && holdSuperseded(w, turn)) liftHold(w); });
-      for (const w of (await store.snapshot()).workspaces) if (w.enable_tracking && w.mainAgentId === turn.agentId) void engine.nudge(w.id);
+      const { lifted, owned, woken } = await turnStarted(store, event.agent, event.turnId ?? null);
+      if (owned) gateway.markDirty(event.agent.id);
+      for (const id of new Set([...lifted, ...(woken ? [woken] : [])])) void engine.nudge(id);
     }),
     server.on("agent.turn_ended", async (event, { paseo }) => { seen(paseo); inboxHook(() => inbox.turnEnded(event.agent, event.outcome, event.turnId)); }),
     server.on("agent.permission_requested", async (event, { paseo }) => { seen(paseo); inboxHook(async () => { await inbox.permissionRequested(event.agent, event.request); await writeBriefState(); }); }),
@@ -1313,21 +1321,6 @@ export default function contribute(server: PluginServerContext) {
     server.on("agent.archived", async (event, { paseo }) => { seen(paseo); inboxHook(async () => { if (event.agent.id === (await overseer!.state()).agentId) await overseer!.ensure(paseo as unknown as OverseerPaseo); }); }),
     server.on("workspace.archived", async (event, { paseo }) => { seen(paseo); inboxHook(async () => { if (event.workspace.id === (await overseer!.state()).workspaceId) await overseer!.ensure(paseo as unknown as OverseerPaseo); }); }),
     server.on("workspace.archived", async event => inboxHook(() => inbox.workspaceArchived(event.workspace.id))),
-    server.on("agent.turn_started", async event => {
-      await ready;
-      if (stopped || loadError) return;
-      // A turn in a dormant workspace makes it active again; discovery reads the now-loaded agent on the next poll.
-      const saved = await store.snapshot();
-      const owned = saved.workspaces.find(w => w.enable_tracking && (w.mainAgentId === event.agent.id || w.contributorAgentIds?.includes(event.agent.id)));
-      const waking = saved.workspaces.find(w => w.dormant && w.id === event.agent.workspaceId);
-      if (!owned && !waking) return;
-      if (owned) gateway.markDirty(event.agent.id);
-      await store.mutate(state => {
-        const w = owned && state.workspaces.find(w => w.id === owned.id); if (w) { w.completion = null; w.declaration = null; }
-        const d = waking && state.workspaces.find(w => w.id === waking.id); if (d) delete d.dormant;
-      });
-      if (waking) void engine.nudge(waking.id);
-    }),
     // Follow-up's own tools first, then Wait's on top (every interactive Claude session, tracked or not).
     server.before("agent.session_open", withWait(async ({ request }, { paseo }) => {
       await ready;
@@ -1377,35 +1370,25 @@ export default function contribute(server: PluginServerContext) {
       const assigned = (await store.snapshot()).workspaces.find(w => w.enable_tracking && w.batches.some(b => b.recipientAgentId === event.agent.id && b.tasks.every(t => t.kind === "inventory") && ["sending", "sent", "uncertain"].includes(b.state)));
       if (assigned) {
         const guarded = interruption && await sessionGuardOwnsInterruption(event.agent.id, interruption).catch(() => false);
-        if (["canceled", "failed"].includes(event.outcome.kind) && !guarded) await store.mutate(state => { const w = findWorkspace(state, assigned.id); const b = w.batches.find(b => b.recipientAgentId === event.agent.id && ["sending", "sent", "uncertain"].includes(b.state)); if (b) { b.state = "blocked"; b.result = b.acknowledgmentError ? `Recovery acknowledgment was refused: ${b.acknowledgmentError.error}` : "Recovery stopped or failed. Check its agent before retrying."; } });
+        if (["canceled", "failed"].includes(event.outcome.kind) && !guarded) await store.mutateWorkspace(assigned.id, w => { const b = w.batches.find(b => b.recipientAgentId === event.agent.id && ["sending", "sent", "uncertain"].includes(b.state)); if (b) { b.state = "blocked"; b.result = b.acknowledgmentError ? `Recovery acknowledgment was refused: ${b.acknowledgmentError.error}` : "Recovery stopped or failed. Check its agent before retrying."; } });
         void engine.nudge(assigned.id); return;
       }
-      if (!(await store.snapshot()).workspaces.some(w => w.enable_tracking && (w.mainAgentId === event.agent.id || w.contributorAgentIds?.includes(event.agent.id)))) return;
+      if (!agentTrackedWorkspace(await store.snapshot(), event.agent.id)) return;
       gateway.markDirty(event.agent.id);
       // Since Paseo 0.13 the lifecycle payload deliberately contains no history.
       // Read a bounded tail through the plugin-owned API, outside the state lock.
       const history = await paseo.agents.ref(event.agent.id).timeline.refetch({ direction: "tail", limit: 100, projection: "canonical" }).catch(() => null);
       if (signal.aborted || stopped) return;
-      if (history) await store.mutate(state => {
-        const w = state.workspaces.find(w => w.enable_tracking && (w.mainAgentId === event.agent.id || w.contributorAgentIds?.includes(event.agent.id)));
-        if (w) applyHistory(w, extractHistory(history.entries.map(entry => entry.item), w.inventory?.historyComplete ?? false, w.inventory?.historyError ?? null), null);
-      });
-      const guarded = interruption && await sessionGuardOwnsInterruption(event.agent.id, interruption).catch(() => false);
+      const items = history ? history.entries.map(entry => entry.item) : null;
+      const guarded = !!interruption && await sessionGuardOwnsInterruption(event.agent.id, interruption).catch(() => false);
       // Only the developer's Stop holds (shared/status.ts cancelCause): a turn already replaced by a newer one (the
       // developer's or another agent's message), a /compact, or a closed or reloaded session never does.
       const started = startedTurns.get(event.agent.id);
       const newerTurn = !!started && started !== event.turnId;
-      const prompt = history ? turnPrompt(history.entries.map(entry => entry.item)).message?.text ?? null : null;
       // Smart Session's own record of a /compact it just delivered: the canceled turn was that compaction.
       const compaction = event.outcome.kind === "canceled" && await compactionJustDelivered(event.agent.id, Date.parse(interruption!.at)).catch(() => false);
-      if (["canceled", "failed"].includes(event.outcome.kind) && !guarded) await store.mutate(state => {
-        const w = state.workspaces.find(w => w.enable_tracking && (w.mainAgentId === event.agent.id || w.contributorAgentIds?.includes(event.agent.id)));
-        if (!w || w.mainAgentId !== event.agent.id || !interruption) return;
-        // The provider lost the conversation: every later send fails the same way, so stop sending instead of holding.
-        if (event.outcome.kind === "failed" && conversationGone(event.outcome.error.message)) { w.goneAgent = { agentId: event.agent.id, at: interruption.at, reason: event.outcome.error.message }; w.completion = null; w.declaration = null; return; }
-        holdOnTurnEnd(w, { agentId: event.agent.id, turnId: interruption.turnId, at: interruption.at, outcome: event.outcome, prompt, newerTurn, compaction });
-      });
-      for (const w of (await store.snapshot()).workspaces) if (w.enable_tracking && (w.mainAgentId === event.agent.id || w.contributorAgentIds?.includes(event.agent.id))) void engine.nudge(w.id);
+      const nudged = await turnEnded(store, event.agent.id, event.outcome, event.turnId ?? null, items, { interruption, guarded, newerTurn, compaction });
+      if (nudged) void engine.nudge(nudged);
     }),
     server.on("workspace.archived", async event => { await ready; if (!loadError && !stopped) await store.mutate(state => { const w = state.workspaces.find(w => w.id === event.workspace.id); if (w) w.archived = true; }); }),
   ];

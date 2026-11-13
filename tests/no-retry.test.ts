@@ -47,22 +47,72 @@ test("a turn that ends without an acknowledgment, with GitHub cleared, closes as
   assert.ok(!needsYou(w, f.now()).some(i => i.kind === "retry"), "no Retry");
 });
 
-test("still open: rides the next message; the same condition stops after two sends with the reason", async t => {
+test("still open: rides the next message; after two sends that one task waits for you and the queue keeps moving (Q49)", async t => {
   const f = await fixture(t, conflicted());
   await sendAndGoQuiet(f);
   let w = await f.get();
   assert.equal(w.batches[0].state, "completed"); assert.match(w.batches[0].result, /1 still open goes in the next message/);
-  assert.ok(!needsYou(w, f.now()).some(i => i.kind === "retry"), "no Retry after the first quiet turn");
+  assert.ok(!needsYou(w, f.now()).some(i => i.kind === "capped" || i.kind === "retry"), "nothing asks you after the first quiet turn");
   f.advance(61_000); await f.engine.tick(); assert.equal(f.sends.length, 2, "re-queued and sent on its own");
   assert.notEqual(f.sends[1].messageId, f.sends[0].messageId);
   f.advance(121_000); await f.engine.tick();
   w = await f.get();
-  const capped = w.batches.find(b => b.state === "blocked")!;
-  assert.match(capped.result, /Sent 2 times with no change on GitHub: Resolve merge conflicts on example\/app#1/);
-  const retry = needsYou(w, f.now()).find(i => i.kind === "retry");
-  assert.ok(retry, "Needs you, with Retry, only in the capped case");
+  assert.equal(w.batches.filter(b => b.state === "blocked").length, 0, "no batch blocks: the cap is per task");
+  assert.deepEqual(w.heldTasks?.map(h => [h.task.key, h.held]), [["conflict:example/app#1", "capped"]]);
+  const capped = needsYou(w, f.now()).find(i => i.kind === "capped");
+  assert.equal(capped?.title, "Conflicts on #1 are still there after 2 messages");
+  assert.deepEqual(violations(w, f.now()), []);
+  f.advance(600_000); await f.engine.tick(); assert.equal(f.sends.length, 2, "no third send of that task on its own");
+  // A new condition on another PR still goes out: the capped task doesn't hold the queue.
+  await f.store.mutate(s => { s.workspaces[0].prs.push(pr({ key: "example/app#2", number: 2, snapshot: snapshot({ threads: [{ id: "r", updatedAt: "t" }] }) })); });
+  f.observe("example/app#2", snapshot({ threads: [{ id: "r", updatedAt: "t" }] }));
+  await f.engine.tick(); f.advance(61_000); await f.engine.tick();
+  assert.equal(f.sends.length, 3); assert.match(f.sends[2].text, /example\/app#2/); assert.doesNotMatch(f.sends[2].text, /conflicts on example\/app#1/);
+  // Retry re-arms that one task: it rides the next message.
+  await f.engine.acknowledge("main-agent", (await f.get()).batches.find(b => b.state === "sent")!.id, "completed", "Fixed the review thread");
+  const { controlWorkspace } = await import("../server/agent-actions");
+  await f.store.mutate(s => { controlWorkspace(s, { workspaceId: "workspace", retryTask: "conflict:example/app#1" }, f.now()); });
+  await f.engine.tick(); f.advance(61_000); await f.engine.tick();
+  assert.equal(f.sends.length, 4); assert.match(f.sends[3].text, /Resolve merge conflicts on example\/app#1/);
+});
+
+test("one cap: a key acknowledged twice with no change on GitHub caps, and the queue keeps moving (no 3-strike block)", async t => {
+  const f = await fixture(t, conflicted());
+  const ackSent = async () => f.engine.acknowledge("main-agent", (await f.get()).batches.find(b => b.state === "sent")!.id, "completed", "Rebased and pushed");
+  await f.engine.tick(); f.advance(61_000); await f.engine.tick(); assert.equal(f.sends.length, 1);
+  await ackSent(); await f.engine.tick();
+  assert.equal((await f.get()).batches.filter(b => b.state === "pending").length, 0, "no resend before GitHub is read after the acknowledgment");
+  f.advance(1_000); await f.engine.tick();
+  assert.equal((await f.get()).batches.filter(b => b.state === "pending").length, 1, "GitHub still shows it: it goes out again");
+  f.advance(61_000); await f.engine.tick(); assert.equal(f.sends.length, 2);
+  await ackSent(); f.advance(1_000); await f.engine.tick();
+  const w = await f.get();
+  assert.deepEqual(w.heldTasks?.map(h => [h.task.key, h.held]), [["conflict:example/app#1", "capped"]], "acknowledged twice, unchanged: capped");
+  assert.equal(w.batches.filter(b => b.state === "blocked" || b.state === "pending").length, 0, "nothing blocks or waits in the queue");
+  assert.equal(needsYou(w, f.now()).find(i => i.kind === "capped")?.title, "Conflicts on #1 are still there after 2 messages");
   assert.deepEqual(violations(w, f.now()), []);
   f.advance(600_000); await f.engine.tick(); assert.equal(f.sends.length, 2, "no third send on its own");
+});
+
+test("an agent's explicit blocked acknowledgment keeps its reason as the Needs-you text", async t => {
+  const f = await fixture(t, conflicted());
+  await f.engine.tick(); f.advance(61_000); await f.engine.tick();
+  await f.engine.acknowledge("main-agent", (await f.get()).batches.find(b => b.state === "sent")!.id, "blocked", "The conflict is in a file another PR owns; which one wins?");
+  f.advance(1_000); await f.engine.tick();
+  const item = needsYou(await f.get(), f.now()).find(i => i.kind === "retry");
+  assert.equal(item && "detail" in item ? item.detail : null, "The conflict is in a file another PR owns; which one wins?");
+  assert.equal(f.sends.length, 1, "a blocked task isn't sent again on its own");
+});
+
+test("a message the retired 3-strike rule blocked before it went out is re-formed under the cap at startup", async t => {
+  const w = conflicted();
+  w.batches.push({ id: "old", messageId: "m", attempts: 1, result: "This PR still needs repairs after three follow-up batches. Review it before retrying.", recipientAgentId: null, contextPath: null, activityAt: null, acknowledgmentError: null, recoveryHandoffs: [],
+    tasks: [{ key: "conflict:example/app#1", kind: "conflict", target: "example/app#1", title: "Resolve merge conflicts on example/app#1", fingerprint: "f" }], state: "blocked", createdAt: new Date(clock).toISOString(), sentAt: null, settledAt: null });
+  assert.ok(violations(w, clock).some(v => v.id === "a-capped-task-never-holds-the-queue"), "the invariant catches it");
+  const f = await fixture(t, w);
+  await f.engine.recover(); await f.engine.tick(); f.advance(61_000); await f.engine.tick();
+  assert.equal((await f.get()).batches.find(b => b.id === "old")?.state, "cancelled");
+  assert.equal(f.sends.length, 1, "the condition goes out under the per-task cap");
 });
 
 test("a new fingerprint is progress: it resets the count", async t => {
@@ -99,11 +149,12 @@ test("a recovery that ends without an acknowledgment but caught the PR list up i
   assert.equal(b.state, "completed"); assert.equal(b.unacknowledged, true);
 });
 
-test("retry-only-when-capped catches a missing acknowledgment blocked below the cap", () => {
+test("a-capped-task-never-holds-the-queue catches a batch blocked for a missing acknowledgment", () => {
   const b = { id: "b1", messageId: "m", attempts: 1, result: "", recipientAgentId: null, contextPath: null, activityAt: null, acknowledgmentError: null, recoveryHandoffs: [], state: "blocked" as const, unacknowledged: true, createdAt: new Date(clock).toISOString(), sentAt: new Date(clock).toISOString(), settledAt: new Date(clock).toISOString(),
     tasks: [{ key: "conflict:example/app#1", kind: "conflict" as const, target: "example/app#1", title: "Resolve merge conflicts on example/app#1", fingerprint: "f" }] };
-  assert.deepEqual(violations(workspace({ batches: [b] }), clock).map(v => v.id), ["retry-only-when-capped"]);
-  assert.deepEqual(violations(workspace({ batches: [{ ...b, id: "b0", state: "completed" }, b] }), clock).map(v => v.id), []);
+  assert.deepEqual(violations(workspace({ batches: [b] }), clock).map(v => v.id), ["a-capped-task-never-holds-the-queue"]);
+  assert.deepEqual(violations(workspace({ batches: [{ ...b, state: "completed" }] }), clock).map(v => v.id), []);
+  assert.deepEqual(violations(workspace({ batches: [{ ...b, state: "completed" }], heldTasks: [{ task: b.tasks[0], held: "capped" }] }), clock).map(v => v.id), ["a-capped-task-never-holds-the-queue"], "held as capped after one send");
 });
 
 test("the cap survives pruning: send, settle, prune, send, settle, and it caps", async t => {
@@ -118,6 +169,6 @@ test("the cap survives pruning: send, settle, prune, send, settle, and it caps",
   assert.ok((await f.get()).batches.some(b => b.unacknowledged), "the unacknowledged send is kept");
   f.advance(61_000); await f.engine.tick(); assert.equal(f.sends.length, 2);
   f.advance(121_000); await f.engine.tick();
-  assert.equal((await f.get()).batches.filter(b => b.state === "blocked").length, 1, "capped after the second quiet send");
+  assert.equal((await f.get()).heldTasks?.filter(h => h.held === "capped").length, 1, "capped after the second quiet send");
   f.advance(600_000); await f.engine.tick(); assert.equal(f.sends.length, 2);
 });

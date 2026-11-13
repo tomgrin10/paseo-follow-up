@@ -1,6 +1,7 @@
 import { blockedOnDeveloper, type Obligation, type Workspace } from "./model";
 import { taskSchedule } from "./task-trigger";
 import { isLive } from "./agent-load";
+import { obligationDelivery } from "./task-rows";
 
 /**
  * A task's status line, shared by the task row and the Task sheet (invariant `a-task-only-says-working-when-its-agent-is`).
@@ -21,7 +22,7 @@ export type TaskAgents = Readonly<Record<string, TaskAgentLive>>;
 export type TaskStatus = {
   text: string;
   /** Which glyph: a spinner only for a live working agent. */
-  tone: "done" | "waived" | "question" | "blocked" | "working" | "idle" | "closed" | "archived" | "unknown" | "progress" | "scheduled" | "ready";
+  tone: "done" | "waived" | "question" | "blocked" | "working" | "idle" | "closed" | "archived" | "unknown" | "progress" | "scheduled" | "ready" | "queued" | "sent";
   /** The agent the line names and can open: working, idle or closed (the developer's tap opens it); never an archived one. */
   agentId: string | null;
   /** What the link to that agent says ("Open agent", or "Open chat" for a closed one), from PRESENCE. */
@@ -75,6 +76,9 @@ export function taskStatus(o: Obligation, w: Workspace, agents: TaskAgents = w.t
   if (q) return { text: q.answer ? `${q.id} · answered, waiting on the agent` : `${q.id} · waiting on your answer`, tone: "question", agentId: null };
   if (o.status === "blocked") return blockedOnDeveloper(o) ? { text: "Needs a decision", tone: "blocked", agentId: null } : { text: blockedLine(o, w), tone: "blocked", agentId: null };
   if (o.status === "working") return workingLine(o, agents);
+  // An Auto task riding the next message reads like every task in it: just Queued or Sent (the strip says when and why).
+  const delivery = obligationDelivery(w, o);
+  if (delivery) return { text: delivery === "sent" ? "Sent" : "Queued", tone: delivery, agentId: null };
   const schedule = taskSchedule(o, w, now);
   return schedule.ready ? { text: "Ready to send", tone: "ready", agentId: null } : { text: schedule.label, tone: "scheduled", agentId: null };
 }

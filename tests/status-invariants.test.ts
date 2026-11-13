@@ -226,8 +226,8 @@ test("regression 2026-11-12: queued repairs with an unreadable PR never say 'sen
   const w = workspace({ enable_auto_sends: true, prs: [pr(), pr({ key: "example/app#2", number: 2, snapshot: null, error: "GitHub rate limit" })], batches: [batch("repairs", "pending")] });
   assert.deepEqual(violations(w, clock), []);
   const line = agentCard(w, clock)?.line ?? "";
-  assert.doesNotMatch(line, /sending (now|in a moment)/);
-  assert.match(line, /clean read of #2 \(GitHub rate limit\)/);
+  assert.doesNotMatch(line, /going out now|waits a minute so new changes/);
+  assert.match(line, /GitHub answers for #2 \(GitHub rate limit\)/);
   const refused = workspace({ enable_auto_sends: true, prs: [pr()], batches: [batch("repairs", "pending", { refusal: { reason: "Task dependencies changed", at: at(10_000) } })] });
   assert.match(agentCard(refused, clock)?.line ?? "", /didn't send: Task dependencies changed/);
   assert.deepEqual(violations(refused, clock), []);
