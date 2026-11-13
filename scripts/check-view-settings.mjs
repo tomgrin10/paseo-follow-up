@@ -59,11 +59,24 @@ try {
     await notes.waitFor({ state: "hidden", timeout: 10000 });
   };
   await dismissNotes();
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Plugins", exact: true }).click();
-  await page.getByRole("button", { name: "Actions for follow-up", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Follow-up", exact: true }).click();
+  // Follow-up's settings: Home's gear (both hosts), else Paseo's Settings → Plugins → Follow-up (0.15's plugin menu).
   const tab = name => page.getByRole("tab", { name, exact: true });
+  const viaHome = async () => {
+    await page.getByRole("button", { name: "Follow-up", exact: true }).first().click();
+    const gear = page.getByRole("button", { name: "Follow-up settings", exact: true }).filter({ visible: true }).first();
+    await gear.waitFor({ timeout: 20000 }); await gear.click();
+    await tab("General").waitFor({ timeout: 20000 });
+  };
+  const viaPlugins = async () => {
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Plugins", exact: true }).click();
+    await page.getByRole("button", { name: "Actions for follow-up", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Follow-up", exact: true }).click();
+  };
+  try { await viaHome(); } catch (error) {
+    console.log(`Home's gear didn't open settings (${String(error.message).split("\n")[0]}); trying Settings → Plugins`);
+    await page.goto(`http://127.0.0.1:${p.port}/`); await dismissNotes(); await viaPlugins();
+  }
   await tab("General").waitFor({ timeout: 30000 });
   const selected = async () => (await page.locator('[role="tab"][aria-selected="true"]').first().textContent())?.trim();
   record("a device that never picked a category opens on General", await selected() === "General");
@@ -110,6 +123,10 @@ try {
     await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeout(800); await noRealHost(page);
     await page.screenshot({ path: join(shots, `view-settings-${host}-phone.png`) });
   }
+} catch (error) {
+  const page = context.pages()[0];
+  const names = await page?.getByRole("button").evaluateAll(els => els.map(e => e.getAttribute("aria-label") || e.textContent?.trim()).filter(Boolean).slice(0, 80)).catch(() => []);
+  console.error("Buttons on the page:", JSON.stringify(names)); throw error;
 } finally {
   await context.close(); await rm(profile, { recursive: true, force: true });
 }
