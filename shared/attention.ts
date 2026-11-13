@@ -5,7 +5,7 @@ import { workingLine } from "./task-status";
 import { followUpObligations, recoveryBatch } from "./follow-up";
 import { orderedStacks, settledForDisplay } from "./presentation";
 import { githubApproved, graphiteReady, isGithubFlow, mergeBlockers, prActionBlocks } from "./pr-actions";
-import { configuredReviewers, noReviewers } from "./reviewers";
+import { configuredReviewers, noReviewers, reviewersAsk, suggestedReviewers } from "./reviewers";
 import { agentMerges } from "./pr-workflow";
 import { isOpen as questionOpen, questionState, type QuestionState } from "./questions";
 
@@ -91,7 +91,7 @@ export type NeedItem =
   | { kind: "answer"; key: string; questionId: string; title: string; detail: string }
   | { kind: "check"; key: string; actionId: string; title: string; detail: string }
   | { kind: "merge"; key: string; prKey: string; number: number; title: string; detail: string }
-  | { kind: "reviewers"; key: string; prKey: string; number: number; title: string; detail: string };
+  | { kind: "reviewers"; key: string; prKey: string; number: number; /** Whom Follow-up suggests (reviewerLabel). */ suggested: string[]; title: string; detail: string };
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 /** The main agent as the developer knows it: its Paseo title, else "the main agent". */
@@ -186,7 +186,9 @@ function computeNeedsYou(w: Workspace, now: number): NeedItem[] {
     // flight, never the developer's merge or review. Invariant a-no-review-repo-never-asks-for-review-or-merge.
     if (agentMerges(pr)) continue;
     if (mergeReady(pr, w, now) && workflowReady(pr) && !blocking(pr)) items.push({ kind: "merge", key: `merge:${pr.key}`, prKey: pr.key, number: pr.number, title: isGithubFlow(pr.snapshot) && pr.snapshot!.reviewDecision !== "APPROVED" ? `#${pr.number} is ready to merge` : `#${pr.number} is approved`, detail: pr.snapshot!.title });
-    else if (asksForReviewers(pr, w)) items.push({ kind: "reviewers", key: `reviewers:${pr.key}`, prKey: pr.key, number: pr.number, title: `#${pr.number} has no reviewers`, detail: pr.snapshot!.title });
+    // One ask per PR (one-reviewers-ask-per-pr): it names whom Follow-up suggests, so Follow-up's own reviewers brief
+    // folds into it (shared/needs-block.ts) instead of drawing a second ask for the same PR.
+    else if (asksForReviewers(pr, w)) { const suggested = suggestedReviewers(pr.repo, pr.snapshot!.reviewers?.author); items.push({ kind: "reviewers", key: `reviewers:${pr.key}`, prKey: pr.key, number: pr.number, suggested, title: reviewersAsk(pr.number, suggested, `#${pr.number} has no reviewers`), detail: pr.snapshot!.title }); }
   }
   return items;
 }

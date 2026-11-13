@@ -5,7 +5,7 @@ import { ANY_HOOK_TEXT_PREFIXES } from "./message-sender";
 import { BATCH_PREFIXES, RECOVERY_TITLES } from "./legacy";
 import type { Workspace } from "./model";
 import { answerMessage, duplicateOpenQuestions, isOther, parseAnswerMessage, parseAnswersMessage } from "./questions";
-import { briefAnswer, briefAnswers, briefAsks, briefStep, shouldReopen, type Brief } from "./brief";
+import { briefAnswer, briefAnswers, briefAsks, briefStep, reviewersBriefPr, shouldReopen, type Brief } from "./brief";
 import { flagHeadline } from "./headline";
 import { newEntry, prEndEvent, REASONS, reduce, type InboxRow } from "./inbox";
 import { blockedOnDeveloper, completionCheck, liveWorkingTask, summary } from "./model";
@@ -513,6 +513,26 @@ export function pickNoteViolations(b: Brief, picks: { decisionId: string; choice
 }
 
 /**
+ * `one-reviewers-ask-per-pr` (2026-11-12, #147 renders): before the fold, a PR without reviewers asked twice in Needs you:
+ * Follow-up's brief "Add reviewers to #240: Ravi" and the row "#240 has no reviewers", counted 2 for one thing. Now
+ * the row names the suggested reviewer and the brief folds into it (needsYouBlock): no brief card beside its PR's row,
+ * the count is the rows', and the row says the same ask as the brief, so the Home row and the panel agree.
+ */
+export function reviewersBriefViolations(row: Pick<InboxRow, "agentId" | "needs" | "brief">, items: NeedItem[]): { id: string; detail: string }[] {
+  const id = "one-reviewers-ask-per-pr";
+  const b = row.brief;
+  const pr = b && briefAsks(b, row) ? reviewersBriefPr(b) : null;
+  const item = pr ? items.find((i): i is Extract<NeedItem, { kind: "reviewers" }> => i.kind === "reviewers" && i.prKey === pr) : undefined;
+  if (!b || !item) return [];
+  const out: { id: string; detail: string }[] = [];
+  const block = needsYouBlock(items, { questionIds: b.questionIds ?? [], kind: b.kind, prKey: pr! });
+  if (block.cards.some(c => c.kind === "brief")) out.push({ id, detail: `${row.agentId}'s Needs you draws the reviewers brief beside #${item.number}'s row` });
+  if (block.count !== needsYouBlock(items, null).count) out.push({ id, detail: `${row.agentId}'s Needs you counts ${block.count} for ${needsYouBlock(items, null).count} asks` });
+  if (item.suggested.length && item.title !== b.ask) out.push({ id, detail: `#${item.number}'s row reads "${item.title}", the brief "${b.ask}"` });
+  return out;
+}
+
+/**
  * `a-done-brief-is-never-an-ask` (2026-11-12, the developer's phone on 2.0.1-beta.3): the agent's turn-end needs_you
  * kind=done ("Nothing needed") on a row flagged for something else (a merged PR) drew inside the panel's Needs you and
  * counted 1. Enumerated per surface: the Needs-you block (the panel and Home's detail pane pick their brief with
@@ -524,7 +544,7 @@ export function doneBriefViolations(row: Pick<InboxRow, "agentId" | "needs" | "s
   const b = row.brief;
   if (b?.state !== "open" || b.kind !== "done") return [];
   const out: { id: string; detail: string }[] = [];
-  const block = needsYouBlock(items, briefAsks(b, row) ? { questionIds: b.questionIds ?? [] } : null);
+  const block = needsYouBlock(items, briefAsks(b, row) ? { questionIds: b.questionIds ?? [], kind: b.kind, prKey: b.prKey } : null);
   if (block.cards.some(c => c.kind === "brief")) out.push({ id, detail: `${row.agentId}'s Needs you draws its done brief as an ask` });
   if (block.count !== needsYouBlock(items, null).count) out.push({ id, detail: `${row.agentId}'s Needs you counts ${block.count} for ${needsYouBlock(items, null).count} real asks` });
   const h = flagHeadline(row, now, items);
