@@ -309,3 +309,42 @@ test("GraphQL budget: low stretches settled reads and pauses merged and quiet re
   budget.limited = false; now += 10 * 60_000 + 1;
   await github.observe(prs, { background: true }); assert.ok(github.budget("org0")!.remaining > 0);
 });
+
+test("public-code-carries-no-host-identifiers: between the install and the seed, a repository without a deploy check is harmless", async () => {
+  // The window: the new version runs before the private seed writes the deploy config. Nothing fires, errors or is lost.
+  const { taskSchedule } = await import("../shared/task-trigger");
+  const { workspace } = await import("./fixtures");
+  const rows = new Map([["org0/repo0#1", { state: "MERGED" }]]);
+  const f = fakeGithub(rows);
+  let configured = true;
+  const kept = { state: "deployed" as const, environment: "production", commits: ["c".repeat(40)], evidence: "Production serving revisions: app-1=ccc", observedAt: new Date(clock).toISOString() };
+  const deployments = { observe: async (prs: Parameters<Deployments["observe"]>[0]) => new Map(configured ? prs.filter(p => p.snapshot?.state === "MERGED").map(p => [p.key, kept]) : []) };
+  const github = new Github(undefined, undefined, deployments, f.api, () => clock);
+  const first = (await github.observe([pr({ key: "org0/repo0#1", repo: "org0/repo0", number: 1 })])).get("org0/repo0#1")!;
+  assert.equal(first.snapshot!.deployment!.state, "deployed");
+  const task = (p: ReturnType<typeof pr>) => workspace({ prs: [p], obligations: [{ id: "verify", title: "Verify in production", status: "waiting", afterPrs: [p.key], enable_follow_up: true, revision: 3, evidence: "", trigger: { event: "deploy", delayDays: 0 } }] });
+
+  configured = false;
+  const stored = pr({ key: "org0/repo0#1", repo: "org0/repo0", number: 1, snapshot: first.snapshot! });
+  const window = (await github.observe([stored])).get("org0/repo0#1")!;
+  assert.equal(window.error, null, "no error");
+  assert.deepEqual({ ...window.snapshot!.deployment, notSetUp: undefined }, { ...kept, notSetUp: undefined }, "the kept observation and its evidence are not erased");
+  assert.equal(window.snapshot!.deployment!.notSetUp, true);
+  const w = task(pr({ ...stored, snapshot: window.snapshot! }));
+  const schedule = taskSchedule(w.obligations[0], w, clock);
+  assert.deepEqual(schedule, { ready: false, dueAt: null, label: "Deploy check not set up for org0/repo0" }, "a deploy-triggered task waits and says why, never fires");
+  assert.equal(w.obligations[0].status, "waiting"); assert.equal(w.obligations[0].revision, 3, "task state unchanged");
+
+  const fresh = (await github.observe([pr({ key: "org0/repo0#1", repo: "org0/repo0", number: 1 })])).get("org0/repo0#1")!;
+  assert.equal(fresh.snapshot!.deployment!.notSetUp, true, "even a PR read again keeps its last observation");
+
+  const never = new Github(undefined, undefined, deployments, fakeGithub(new Map([["org1/repo1#2", { state: "MERGED" }]])).api, () => clock);
+  const unseen = (await never.observe([pr({ key: "org1/repo1#2", repo: "org1/repo1", number: 2 })])).get("org1/repo1#2")!;
+  assert.deepEqual([unseen.snapshot!.deployment!.state, unseen.snapshot!.deployment!.evidence, unseen.snapshot!.deployment!.notSetUp], ["unknown", "Deploy check not set up for org1/repo1.", true]);
+
+  configured = true;
+  const back = (await github.observe([stored])).get("org0/repo0#1")!;
+  assert.equal(back.snapshot!.deployment!.notSetUp, undefined, "the check comes back with its config");
+  const v = task(pr({ ...stored, snapshot: back.snapshot! }));
+  assert.equal(taskSchedule(v.obligations[0], v, clock).ready, true);
+});
