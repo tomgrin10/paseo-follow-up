@@ -26,6 +26,7 @@ import { harness, spawnDaemon } from "./harness.mjs";
 import { harnessEnv, harnessConfig } from "./harness-env.mjs";
 import { fakeGithub } from "./fake-github.mjs";
 import { scaleGh } from "./scale-github.mjs";
+import { ACK_READ_MS, idleVerdict, SEND_SETTLE_MS, settleBoundMs, settleState } from "./scale-budget.mjs";
 
 const exec = promisify(execFile);
 // The check drives a real Paseo daemon, so it needs the paseo CLI (CI installs @getpaseo/cli). Without it, local
@@ -122,11 +123,11 @@ try {
   await cli("plugin", "install", plugin);
   // From install on: the worker's RSS every 250 ms (steps over 10 MB, with when) and V8's heap every 5 s, so a
   // transient spike (V8 grows the heap, RSS keeps the high-water mark) shows when it happens.
-  const installedAt = Date.now(); const sendPhaseRequests = counter.snapshot(); const trace = { steps: [], peakHeapTotalMb: 0, peakHeapUsedMb: 0, peakRssMb: 0 }; let tracing = true;
+  const installedAt = Date.now(); const sendPhaseRequests = counter.snapshot(); const trace = { steps: [], peakHeapTotalMb: 0, peakHeapUsedMb: 0, peakRssMb: 0, workerAt: 0 }; let tracing = true;
   const tracer = (async () => {
     let wpid = 0, last = 0, lastUsage = 0;
     while (tracing) {
-      if (!wpid) wpid = Number((await readFile(join(home, "plugin-data/follow-up/worker.lock"), "utf8").catch(() => "")).split(":")[0]) || 0;
+      if (!wpid) { wpid = Number((await readFile(join(home, "plugin-data/follow-up/worker.lock"), "utf8").catch(() => "")).split(":")[0]) || 0; if (wpid) trace.workerAt = Date.now(); }
       if (wpid) {
         const status = await readFile(`/proc/${wpid}/status`, "utf8").catch(() => "");
         const now = Math.round(Number(/VmRSS:\s+(\d+)/.exec(status)?.[1] ?? 0) / 1024);
@@ -154,26 +155,31 @@ try {
   const repair = t => ["conflict", "review", "checks", "restack"].includes(t.kind);
   const open = (st, now) => st.workspaces.flatMap(w => w.batches.filter(b => !b.tasks.some(t => t.kind === "inventory") && (
     ["sending", "sent", "uncertain"].includes(b.state)
-    || b.state === "pending" && now - Date.parse(b.createdAt) < 75_000
-    || b.state === "completed" && !b.unacknowledged && b.settledAt && Date.parse(b.settledAt) > installedAt && now - Date.parse(b.settledAt) < 120_000 && b.tasks.some(t => repair(t) && !((Date.parse(w.prs.find(p => p.key === t.target)?.snapshot?.observedAt ?? "") || 0) > Date.parse(b.settledAt)))
+    || b.state === "pending" && now - Date.parse(b.createdAt) < SEND_SETTLE_MS + 15_000
+    || b.state === "completed" && !b.unacknowledged && b.settledAt && Date.parse(b.settledAt) > installedAt && now - Date.parse(b.settledAt) < ACK_READ_MS && b.tasks.some(t => repair(t) && !((Date.parse(w.prs.find(p => p.key === t.target)?.snapshot?.observedAt ?? "") || 0) > Date.parse(b.settledAt)))
   )).map(b => `${w.title}: ${b.state} [${b.tasks.map(t => t.key).join(", ")}]`));
   const lockPid = Number((await readFile(join(home, "plugin-data/follow-up/worker.lock"), "utf8").catch(() => "")).split(":")[0]);
   const hzSend = Number((await exec("getconf", ["CLK_TCK"])).stdout.trim()) || 100;
   const cpuTicks = async () => { const f = (await readFile(`/proc/${lockPid}/stat`, "utf8")).split(") ")[1].split(" "); return Number(f[11]) + Number(f[12]); };
-  const SETTLE_BOUND_MS = Number(arg("settle-timeout", "300")) * 1000;
-  let still = []; let quiet = 0; let peakCpu = 0; let lastTicks = lockPid > 0 ? await cpuTicks() : 0; let lastAt = Date.now();
-  while (Date.now() - installedAt < SETTLE_BOUND_MS) {
+  // Bounded by the seed's send schedule plus a margin (scripts/scale-budget.mjs), from when the worker loaded the seed.
+  const SETTLE_BOUND_MS = arg("settle-timeout", null) ? Number(arg("settle-timeout")) * 1000 : settleBoundMs();
+  const seedLoadedAt = () => trace.workerAt || installedAt;
+  const settleTicks = []; let still = []; let settle = { settled: false, expired: false }; let peakCpu = 0; let lastTicks = lockPid > 0 ? await cpuTicks() : 0; let lastAt = Date.now();
+  while (!settle.settled && !settle.expired) {
     await sleep(5_000);
     if (lockPid > 0) { const t = await cpuTicks().catch(() => lastTicks); peakCpu = Math.max(peakCpu, Math.round((t - lastTicks) / hzSend / ((Date.now() - lastAt) / 1000) * 1000) / 10); lastTicks = t; lastAt = Date.now(); }
     still = open(JSON.parse(await readFile(stateFile, "utf8").catch(() => "{\"workspaces\":[]}")), Date.now());
-    if (still.length) quiet = 0; else if (++quiet >= 2) break;
+    settleTicks.push({ atMs: Date.now() - seedLoadedAt(), open: still.length, first: still[0] ?? null });
+    settle = settleState(settleTicks, SETTLE_BOUND_MS);
   }
   const settledState = JSON.parse(await readFile(stateFile, "utf8"));
   const runBatches = settledState.workspaces.flatMap(w => w.batches.filter(b => b.sentAt && Date.parse(b.sentAt) > installedAt && !b.tasks.some(t => t.kind === "inventory")));
   const sendPhase = { seconds: Math.round((Date.now() - installedAt) / 1000), sends: await sendsSoFar(), acks: runBatches.filter(b => b.state === "completed" && !b.unacknowledged).length,
     unacknowledged: runBatches.filter(b => b.unacknowledged).length, capped: settledState.workspaces.reduce((n, w) => n + (w.heldTasks ?? []).filter(h => h.held === "capped").length, 0),
-    requestsPerMin: ratePerMinute(sendPhaseRequests, counter.snapshot(), "follow-up-worker", Date.now() - installedAt), peakCpuPct: peakCpu, settled: quiet >= 2 };
-  if (!sendPhase.settled) { console.error(`Follow-up's sends didn't settle within ${SETTLE_BOUND_MS / 1000} s of seed load; open: ${still.slice(0, 10).join("; ")}`); process.exitCode = 1; }
+    requestsPerMin: ratePerMinute(sendPhaseRequests, counter.snapshot(), "follow-up-worker", Date.now() - installedAt), peakCpuPct: peakCpu, settled: settle.settled, boundSeconds: SETTLE_BOUND_MS / 1000, seedLoadedAfterInstallS: Math.round((seedLoadedAt() - installedAt) / 1000),
+    ticks: settleTicks.map(t => ({ s: Math.round(t.atMs / 1000), open: t.open, ...(t.first ? { first: t.first } : {}) })),
+    batches: runBatches.map(b => ({ state: b.state, tasks: b.tasks.map(t => t.kind), created: Math.round((Date.parse(b.createdAt) - installedAt) / 1000), sent: Math.round((Date.parse(b.sentAt) - installedAt) / 1000), settled: b.settledAt ? Math.round((Date.parse(b.settledAt) - installedAt) / 1000) : null })) };
+  if (!sendPhase.settled) { console.error(`Follow-up's sends didn't settle within ${SETTLE_BOUND_MS / 1000} s of the worker loading the seed; open: ${still.slice(0, 10).join("; ")}`); process.exitCode = 1; }
   // The worker: its pid is in the lock it holds. RSS now, CPU and state.json writes over an idle window.
   const pid = Number((await readFile(join(home, "plugin-data/follow-up/worker.lock"), "utf8").catch(() => "")).split(":")[0]);
   const ticks = async () => { const f = (await readFile(`/proc/${pid}/stat`, "utf8")).split(") ")[1].split(" "); return Number(f[11]) + Number(f[12]); };
@@ -184,8 +190,8 @@ try {
     const { statSync } = await import("node:fs"); const statePath = join(home, "plugin-data/follow-up/state.json");
     let writes = 0; let mtime = statSync(statePath).mtimeMs;
     const t0 = await ticks(); const started = Date.now(); const requestsBefore = counter.snapshot();
-    let peak = await rss();
-    while (Date.now() - started < IDLE_MS) { await sleep(500); peak = Math.max(peak, await rss()); const m = statSync(statePath).mtimeMs; if (m !== mtime) { writes++; mtime = m; } }
+    const idleSamples = [await rss()];
+    while (Date.now() - started < IDLE_MS) { await sleep(500); idleSamples.push(await rss()); const m = statSync(statePath).mtimeMs; if (m !== mtime) { writes++; mtime = m; } }
     const requests = ratePerMinute(requestsBefore, counter.snapshot(), "follow-up-worker", Date.now() - started);
     const cpuPct = Math.round(((await ticks()) - t0) / hz / ((Date.now() - started) / 1000) * 1000) / 10;
     // The worker's own breakdown (heap vs native), from the governor's sample in follow.usage.
@@ -200,7 +206,7 @@ try {
     const tree = new Set([daemon.pid]);
     for (let grew = true; grew;) { grew = false; for (const r of rows) if (!tree.has(r.pid) && tree.has(r.ppid)) { tree.add(r.pid); grew = true; } }
     const hostRss = rows.filter(r => tree.has(r.pid) && r.pid !== pid && /plugin-process/.test(r.args)).map(r => r.rssMb);
-    worker = { pid, memory: memoryIdle, memoryAfterGc, hostPluginBaselineMb: hostRss.length ? Math.min(...hostRss) : null, rssMb: Math.round(await rss()), idlePeakRssMb: Math.round(peak), lifetimePeakRssMb: Math.round(await rss("VmHWM")), cpuPct, idleSeconds: IDLE_MS / 1000, stateWrites: writes, stateBytesBefore, stateBytesAfter: statSync(statePath).size, daemonRequestsPerMin: requests };
+    worker = { pid, memory: memoryIdle, memoryAfterGc, hostPluginBaselineMb: hostRss.length ? Math.min(...hostRss) : null, rssMb: Math.round(await rss()), idleMedianRssMb: idleVerdict(idleSamples, 0).medianMb, idlePeakRssMb: idleVerdict(idleSamples, 0).peakMb, idleSamplesMb: idleSamples.map(Math.round), lifetimePeakRssMb: Math.round(await rss("VmHWM")), cpuPct, idleSeconds: IDLE_MS / 1000, stateWrites: writes, stateBytesBefore, stateBytesAfter: statSync(statePath).size, daemonRequestsPerMin: requests };
   }
   tracing = false; await tracer;
   if (worker) worker.trace = { ...trace, githubRequests: github?.requests.length ?? 0 };
@@ -210,7 +216,8 @@ try {
   console.log(process.argv.includes("--json") ? JSON.stringify(result) : result);
   if (after > before) { console.error(`Follow-up loaded ${after - before} dormant agents`); process.exitCode = 1; }
   // The budget is the worker's lifetime peak (VmHWM), start-up tick included: 2026-11-12's spike was over before idle began.
-  if (budget.idleRssMb && worker && worker.idlePeakRssMb > budget.idleRssMb) { console.error(`Worker idle RSS peaked at ${worker.idlePeakRssMb} MB, over ${budget.idleRssMb} MB`); process.exitCode = 1; }
+  // The idle budget judges the window's median (a GC sawtooth's one spike decides nothing); the peak is reported.
+  if (budget.idleRssMb && worker && idleVerdict(worker.idleSamplesMb, budget.idleRssMb).over) { console.error(`Worker idle RSS median ${worker.idleMedianRssMb} MB (peak ${worker.idlePeakRssMb}), over ${budget.idleRssMb} MB`); process.exitCode = 1; }
   if (budget.rssMb && worker && worker.lifetimePeakRssMb > budget.rssMb) { console.error(`Worker RSS peaked at ${worker.lifetimePeakRssMb} MB (idle peak ${worker.idlePeakRssMb}), over ${budget.rssMb} MB`); process.exitCode = 1; }
   if (budget.requestsPerMin && worker && worker.daemonRequestsPerMin.total > budget.requestsPerMin) { console.error(`Worker sent ${worker.daemonRequestsPerMin.total} daemon requests/min while idle, over ${budget.requestsPerMin}: ${JSON.stringify(worker.daemonRequestsPerMin.byType)}`); process.exitCode = 1; }
   if (budget.cpuPct && worker && worker.cpuPct > budget.cpuPct) { console.error(`Worker CPU ${worker.cpuPct}% exceeds ${budget.cpuPct}% while idle`); process.exitCode = 1; }

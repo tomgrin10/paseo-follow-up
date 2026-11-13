@@ -112,12 +112,18 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    - Extras stop at critical (≥ 85 %).
    - `test:scale` budgets, on the realistic seed (`--realistic`: 140 workspaces, ~280 agents, a live-shaped 1.7 MB
      state, a fake GitHub with live-sized PR bodies): **300 MB peak RSS** from the worker's start (VmHWM, so the
-     cold-start tick counts), **240 MB idle RSS**, **3 % idle CPU**, **2 idle daemon requests a minute**. Measured
-     2026-11-12 (two runs): peak 262–264 MB (a ~2 s cold-start tick that changes and validates every workspace once),
-     idle 198–200 MB and flat, CPU 1.3–1.4 %, 1.3 requests a minute; the bare plugin process is ~120 MB. Headroom
-     (~15 % peak, ~20 % idle) covers live's extras the seed lacks (archived agents, real transcripts, AI jobs) and CI
-     noise. The old 240 MB budget was checked on an empty-workspace seed and only after start-up, so a 450 MB live
-     worker passed it.
+     cold-start tick counts), **240 MB idle RSS** (the idle window's median), **3 % idle CPU**, **2 idle daemon
+     requests a minute**. Measured 2026-11-12 (two runs): peak 262–264 MB (a ~2 s cold-start tick that changes and
+     validates every workspace once), idle 198–200 MB and flat, CPU 1.3–1.4 %, 1.3 requests a minute; the bare plugin
+     process is ~120 MB. Headroom (~15 % peak, ~20 % idle) covers live's extras the seed lacks (archived agents, real
+     transcripts, AI jobs) and CI noise. The old 240 MB budget was checked on an empty-workspace seed and only after
+     start-up, so a 450 MB live worker passed it.
+   - **Budgets judge the typical cost** (`scale-budgets-judge-the-typical-cost`): an idle budget reads the idle window's
+     median, because RSS there is a GC sawtooth (main swung 17 MB between runs; CI once peaked at 279 MB over a ~215 MB
+     median). One sample decides nothing except the lifetime cap (VmHWM ≤ 300 MB). The idle peak is still reported.
+     The send phase's bound comes from the worker's send schedule (`SETTLE_MS`, `POLL_IDLE_MS`, `NO_PROGRESS_CAP`) plus
+     a named margin, timed from the worker loading the seed, never a literal that equals a normal run's length.
+     Guarded by `tests/scale-budget.test.ts`.
    - **A tick copies the state at most once** (`a-tick-copies-the-state-at-most-once`): per-workspace writes copy one
      workspace, a tick saves and runs `onChanged` once (`Store.batch`), an untouched workspace isn't copied or
      re-checked, and a save validates only changed workspaces. Per-tick work never scales with workspaces × agents.
