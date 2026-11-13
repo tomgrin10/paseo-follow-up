@@ -134,6 +134,12 @@ These are product rules. Each has tests, and breaking one is a bug even when the
      workspace, a tick saves and runs `onChanged` once (`Store.batch`), an untouched workspace isn't copied or
      re-checked, and a save validates only changed workspaces. Per-tick work never scales with workspaces × agents.
      See [docs/architecture.md](docs/architecture.md); guarded by `tests/tick-copies.test.ts` and `test:scale`.
+   - **A nudge costs its workspace** (`a-nudge-costs-its-workspace`): a nudge (turn end, action, tool) reads, observes
+     and discovers only its workspaces. Discovery there rescans only their dirty agents from the turn read already kept
+     (`TurnTimeline.since`, no daemon request) and writes with `mutateWorkspace`. The timer's tick still discovers
+     everything, including an agent whose kept read expired. Run Y, 2026-11-13 (CI live shape): every nudge ran
+     discovery over all 140 workspaces and a whole-state copy, and V8's committed pages grew 87 → 165 MB. Guarded by
+     `tests/nudge-costs-its-workspace.test.ts` (20 nudges of 1 of 140).
    - **A send never clones the whole state** (`a-send-never-clones-the-whole-state`): a send, its acknowledgment, an
      answer's delivery and every agent turn event write only the workspace they are about (`mutateWorkspace`,
      `server/turn-events.ts`), never walking all of them, and a whole-state `mutate` keeps unchanged workspaces'
