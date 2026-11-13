@@ -3,7 +3,7 @@ import { blockedOnDeveloper, completionCheck, liveWorkingTask, statusKnown, summ
 import { IDLE_REASON, NO_PROGRESS_CAP } from "./send-decision";
 import { workingLine } from "./task-status";
 import { followUpObligations, recoveryBatch } from "./follow-up";
-import { orderedStacks, settledForDisplay } from "./presentation";
+import { orderedStacks, prLink, settledForDisplay, type PrLink } from "./presentation";
 import { githubApproved, graphiteReady, isGithubFlow, mergeBlockers, prActionBlocks } from "./pr-actions";
 import { configuredReviewers, noReviewers, reviewersAsk, suggestedReviewers } from "./reviewers";
 import { agentMerges } from "./pr-workflow";
@@ -99,7 +99,7 @@ export function sendBlocker(w: Workspace, batch: Batch): string | null {
   return null;
 }
 
-export type NeedItem =
+type NeedItemBase =
   | { kind: "hold"; key: string; title: string; detail: string }
   | { kind: "retry"; key: string; batchId: string; title: string; detail: string; exhausted: boolean }
   /** One task that went out NO_PROGRESS_CAP times with no change (Q49): Retry sends that task again; the rest of the queue moves on. */
@@ -112,6 +112,11 @@ export type NeedItem =
   | { kind: "check"; key: string; actionId: string; title: string; detail: string }
   | { kind: "merge"; key: string; prKey: string; number: number; title: string; detail: string }
   | { kind: "reviewers"; key: string; prKey: string; number: number; /** Whom Follow-up suggests (reviewerLabel). */ suggested: string[]; title: string; detail: string };
+/**
+ * Every Needs-you item that is about one PR carries `pr`: the row's one-click open of it, and what an agent hands the
+ * developer (invariant a-row-that-names-a-pr-opens-it-in-one-click).
+ */
+export type NeedItem = NeedItemBase & { pr?: PrLink };
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 /** The main agent as the developer knows it: its Paseo title, else "the main agent". */
@@ -168,6 +173,8 @@ function computeNeedsYou(w: Workspace, now: number): NeedItem[] {
   if (!w.enable_tracking || w.archived) return [];
   const items: NeedItem[] = [];
   const questions = w.questions ?? [];
+  // A capped task or an uncertain action about one tracked PR links it like the merge and reviewers rows do.
+  const linkFor = (key: string) => { const pr = w.prs.find(p => p.key === key); return pr ? { pr: prLink(pr) } : {}; };
   // A question that stopped the agent outranks everything: nothing moves until it's answered.
   const open = questions.filter(questionOpen);
   for (const q of open.filter(q => questionState(q) === "stopped")) items.push({ kind: "question", key: `question:${q.id}`, questionId: q.id, title: `${q.id} · ${q.title}`, detail: q.question, state: "stopped", big: q.big });
@@ -178,11 +185,11 @@ function computeNeedsYou(w: Workspace, now: number): NeedItem[] {
       detail: b.result || (b.state === "uncertain" ? "Delivery wasn't confirmed." : "The main agent reported a blocker.") });
   }
   for (const h of (w.heldTasks ?? []).filter(h => h.held === "capped"))
-    items.push({ kind: "capped", key: `capped:${h.task.key}`, taskKey: h.task.key, title: cappedTitle(h.task),
+    items.push({ kind: "capped", key: `capped:${h.task.key}`, taskKey: h.task.key, title: cappedTitle(h.task), ...linkFor(h.task.target),
       detail: `Sent ${NO_PROGRESS_CAP} times and GitHub shows no change. Check ${agentName(w)}'s chat, then retry.` });
   for (const a of w.prActions.filter(a => a.state === "uncertain")) {
     const numbers = a.prs.map(key => `#${key.split("#")[1]}`).join(", ");
-    items.push({ kind: "check", key: `check:${a.id}`, actionId: a.id, title: `Check the ${a.kind === "merge" ? "merge" : a.kind === "request_reviewers" ? "reviewer request" : "merge-when-ready change"} on ${numbers}`, detail: a.result });
+    items.push({ kind: "check", key: `check:${a.id}`, actionId: a.id, ...(a.prs.length === 1 ? linkFor(a.prs[0]) : {}), title: `Check the ${a.kind === "merge" ? "merge" : a.kind === "request_reviewers" ? "reviewer request" : "merge-when-ready change"} on ${numbers}`, detail: a.result });
   }
   // Answers Paseo didn't confirm need a look before anything is sent again.
   for (const q of questions.filter(q => q.answer?.delivery.state === "unconfirmed"))
@@ -214,10 +221,10 @@ function computeNeedsYou(w: Workspace, now: number): NeedItem[] {
     // A PR the agent merges itself (its own register_pr answer, else a No review repository) is the agent's work in
     // flight, never the developer's merge or review. Invariant a-no-review-repo-never-asks-for-review-or-merge.
     if (agentMerges(pr)) continue;
-    if (mergeReady(pr, w, now) && workflowReady(pr) && !blocking(pr)) items.push({ kind: "merge", key: `merge:${pr.key}`, prKey: pr.key, number: pr.number, title: isGithubFlow(pr.snapshot) && pr.snapshot!.reviewDecision !== "APPROVED" ? `#${pr.number} is ready to merge` : `#${pr.number} is approved`, detail: pr.snapshot!.title });
+    if (mergeReady(pr, w, now) && workflowReady(pr) && !blocking(pr)) items.push({ kind: "merge", key: `merge:${pr.key}`, prKey: pr.key, number: pr.number, pr: prLink(pr), title: isGithubFlow(pr.snapshot) && pr.snapshot!.reviewDecision !== "APPROVED" ? `#${pr.number} is ready to merge` : `#${pr.number} is approved`, detail: pr.snapshot!.title });
     // One ask per PR (one-reviewers-ask-per-pr): it names whom Follow-up suggests, so Follow-up's own reviewers brief
     // folds into it (shared/needs-block.ts) instead of drawing a second ask for the same PR.
-    else if (asksForReviewers(pr, w)) { const suggested = suggestedReviewers(pr.repo, pr.snapshot!.reviewers?.author); items.push({ kind: "reviewers", key: `reviewers:${pr.key}`, prKey: pr.key, number: pr.number, suggested, title: reviewersAsk(pr.number, suggested, `#${pr.number} has no reviewers`), detail: pr.snapshot!.title }); }
+    else if (asksForReviewers(pr, w)) { const suggested = suggestedReviewers(pr.repo, pr.snapshot!.reviewers?.author); items.push({ kind: "reviewers", key: `reviewers:${pr.key}`, prKey: pr.key, number: pr.number, pr: prLink(pr), suggested, title: reviewersAsk(pr.number, suggested, `#${pr.number} has no reviewers`), detail: pr.snapshot!.title }); }
   }
   return items;
 }

@@ -283,6 +283,12 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    when it loads, never the default in between. Needs you opens on every mount. Guarded by
    `tests/view-settings.test.ts` (including the `home_sort` host-scope scan) and `scripts/check-view-settings.mjs`
    ([docs/settings.md](docs/settings.md)).
+23. **A row that names a PR opens it in one click** (`a-row-that-names-a-pr-opens-it-in-one-click`). Every Needs-you
+   item about one PR carries `pr` (`prLink` in `shared/presentation.ts`: Graphite when the PR ships through Graphite,
+   else GitHub, the PR sheet's rule), and its row draws that link beside its action, never instead of it. Every "#N"
+   that a Needs-you row, a brief or Home's Recent steps name, and the workspace tracks, links that PR (`PrLinksProvider`,
+   `client/rich-text.tsx`); a brief about a PR has Open PR; `inbox_list` gives agents each row's PR urls. Guarded by
+   `tests/pr-open-link.test.ts` and `INVARIANTS`.
 
 ## Bugs
 

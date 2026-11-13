@@ -20,7 +20,7 @@ import { PRESENCE, claimsWorking, taskStatus } from "./task-status";
 import { cadence, movingReason, OBSERVATION_FRESH_MS, POLL_IDLE_MS, RUNNING_POLL_MS, TICK_MS } from "./poll";
 import { staleUpdatePhase, type UpdatePhase } from "./updates";
 import { foldedAsk, needsYouBlock, onceViolation } from "./needs-block";
-import { compactPrStatus, prPresentation } from "./presentation";
+import { compactPrStatus, prLink, prPresentation } from "./presentation";
 import { agentMerges } from "./pr-workflow";
 
 /**
@@ -339,6 +339,20 @@ export const INVARIANTS: Invariant[] = [
         if (!p.snapshot?.complete) continue;
         if (prPresentation(p).label === "Status unavailable" || compactPrStatus(p).label === "Unknown") return `${p.key} has a complete snapshot but reads unknown`;
         if (p.snapshot.state === "MERGED" && p.error) return `${p.key} is merged and complete but stores "${p.error}"`;
+      }
+      return null;
+    },
+  },
+  {
+    id: "a-row-that-names-a-pr-opens-it-in-one-click",
+    why: "2026-11-13: the Needs you row \"#1630 is approved\" / [Merge #1630] had no way to open #1630; its one button opened Follow-up's merge flow and the PR's link sat at the bottom of the PR sheet. Every item about one PR carries the link its row draws",
+    check(w, now) {
+      for (const i of needsYou(w, now)) {
+        const key = i.kind === "merge" || i.kind === "reviewers" ? i.prKey
+          : i.kind === "capped" ? w.heldTasks?.find(h => h.task.key === i.taskKey)?.task.target
+          : i.kind === "check" ? (a => a?.prs.length === 1 ? a.prs[0] : undefined)(w.prActions.find(a => a.id === i.actionId)) : undefined;
+        const pr = key ? w.prs.find(p => p.key === key) : undefined;
+        if (pr && i.pr?.url !== prLink(pr).url) return `${i.key} is about #${pr.number} but ${i.pr ? `links ${i.pr.url}` : "has no link to it"}`;
       }
       return null;
     },
