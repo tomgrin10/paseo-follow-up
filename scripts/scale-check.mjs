@@ -113,7 +113,9 @@ try {
   // from scripts/scale-seed.ts. The empty seed above let a 450 MB worker pass a 240 MB budget (2026-11-12).
   if (REALISTIC) {
     await writeFile(join(root, "created.json"), JSON.stringify(created));
-    await exec("npx", ["tsx", "scripts/scale-seed.ts", join(home, "plugin-data/follow-up/state.json"), join(root, "created.json")], { timeout: 120_000 });
+    // --awake-fresh: the awake workspaces carry no batch history, so they send under any version's rules (a fair
+    // send-load baseline for a main build that would otherwise block them).
+    await exec("npx", ["tsx", "scripts/scale-seed.ts", join(home, "plugin-data/follow-up/state.json"), join(root, "created.json"), "3", process.argv.includes("--awake-fresh") ? String(AWAKE) : "0"], { timeout: 120_000 });
   }
   const stateBytesBefore = (await readFile(join(home, "plugin-data/follow-up/state.json"))).length;
   const before = loaded(await agents());
@@ -144,7 +146,8 @@ try {
   // looked quiet by accident. Under the per-task cap a loaded, idle agent gets each lingering condition at most twice,
   // then it caps.
   // Quiet: nothing in flight, no queued message still in its settle window, and no acknowledged message whose PR GitHub
-  // hasn't been read since (that read decides whether the condition goes out again). Bounded: a send loop that never
+  // hasn't been read since (that read decides whether the condition goes out again; the worker reads an open PR at least
+  // once a minute, so this waits at most 2 min after an acknowledgment). Bounded: a send loop that never
   // settles fails here instead of passing by never starting the idle window.
   const stateFile = join(home, "plugin-data/follow-up/state.json"); const receiptsFile = join(home, "fixture-receipts.jsonl");
   const sendsSoFar = async () => (await readFile(receiptsFile, "utf8").catch(() => "")).split("\n").filter(l => /Follow-up batch/.test(l)).length;
@@ -152,7 +155,7 @@ try {
   const open = (st, now) => st.workspaces.flatMap(w => w.batches.filter(b => !b.tasks.some(t => t.kind === "inventory") && (
     ["sending", "sent", "uncertain"].includes(b.state)
     || b.state === "pending" && now - Date.parse(b.createdAt) < 75_000
-    || b.state === "completed" && !b.unacknowledged && b.settledAt && Date.parse(b.settledAt) > installedAt && b.tasks.some(t => repair(t) && !((Date.parse(w.prs.find(p => p.key === t.target)?.snapshot?.observedAt ?? "") || 0) > Date.parse(b.settledAt)))
+    || b.state === "completed" && !b.unacknowledged && b.settledAt && Date.parse(b.settledAt) > installedAt && now - Date.parse(b.settledAt) < 120_000 && b.tasks.some(t => repair(t) && !((Date.parse(w.prs.find(p => p.key === t.target)?.snapshot?.observedAt ?? "") || 0) > Date.parse(b.settledAt)))
   )).map(b => `${w.title}: ${b.state} [${b.tasks.map(t => t.key).join(", ")}]`));
   const lockPid = Number((await readFile(join(home, "plugin-data/follow-up/worker.lock"), "utf8").catch(() => "")).split(":")[0]);
   const hzSend = Number((await exec("getconf", ["CLK_TCK"])).stdout.trim()) || 100;

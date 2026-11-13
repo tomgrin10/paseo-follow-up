@@ -2,3 +2,4 @@
 - The top of Tasks says who the next message goes to, when it goes and why it waits, with Preview and Send now. You can keep any single task for yourself by turning its Auto-send off.
 - A task that went out twice with no change on GitHub, even if the agent said it was done, asks you on its own, and everything else keeps going. This replaces the old rule that stopped a PR's messages after three tries.
 - Needs you, Home and the chat pill say "tasks" everywhere, and the Send in Needs you names the agent and doesn't repeat the task list.
+- Sending is lighter: each send writes only its own workspace and reuses the agent list, so a few sends no longer leave the worker ~110 MB larger, and it stays quiet afterwards (it used to keep making ~16 Paseo requests a minute).
