@@ -26,7 +26,7 @@ import { promisify } from "node:util";
 import { openSync, existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
+import { tmpdir, hostname } from "node:os";
 import { createServer } from "node:net";
 import { createRequire } from "node:module";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
@@ -474,6 +474,18 @@ let ORIGIN = null; let SERVER_ID = null;
 /** Follow-up Home by URL, asserted (scripts/ui-home.mjs); `keepDialogs` leaves Getting started or What's new open. */
 const openHome = (page, { keepDialogs = false } = {}) => openHomeAt(page, { origin: ORIGIN, serverId: SERVER_ID, keepDialogs });
 
+/**
+ * Renders go into this public repo's PRs and README. harnessEnv pins every harness process's hostname to HARNESS_HOST;
+ * this is the backstop: a shot whose page text or title names the real machine (its full name or first label, as a
+ * truncated header shows it) fails instead of being saved.
+ */
+const REAL_HOST = [hostname(), hostname().split(".")[0]].filter(h => h.length >= 4);
+async function noRealHost(page) {
+  const text = await page.evaluate(() => `${document.title}\n${document.body.innerText}`);
+  const hit = REAL_HOST.find(h => text.includes(h));
+  if (hit) throw new Error(`the page shows the real hostname (${hit}); a harness daemon must report HARNESS_HOST`);
+}
+
 const failures = [];
 function makeShooter({ browser, port, out, scheme: forced, optimiser, results, crashed }) {
   /** Opens the web app in a fresh context, runs `drive`, and returns the PNG (optionally clipped to what drive returns). */
@@ -495,6 +507,7 @@ function makeShooter({ browser, port, out, scheme: forced, optimiser, results, c
       // A focused field draws a focus ring only some of the time (it depends on how the last key event landed).
       await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
       await settle(page);
+      await noRealHost(page);
       // Spinners and other endless animations stop at their first frame, and the caret is hidden.
       return { png: await page.screenshot({ ...(clip ? { clip } : {}), animations: "disabled", caret: "hide" }), colorScheme };
     } catch (error) {
