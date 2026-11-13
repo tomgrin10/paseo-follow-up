@@ -48,6 +48,15 @@ export function resolveReviewers(config: ReviewerConfig, repo: string): { review
   return { reviewers: [], source: "none" };
 }
 
+/**
+ * The add-reviewers ask, said one way on every surface (Follow-up's reviewers brief, the Needs-you item, the Home row):
+ * "Add reviewers to #240: Ravi" with someone to suggest, else `fallback`. Invariant one-reviewers-ask-per-pr.
+ */
+export const reviewersAsk = (number: number, names: readonly string[], fallback: string): string =>
+  names.length ? `Add reviewers to #${number}: ${names.join(" and ")}` : fallback;
+/** Who Follow-up suggests for a PR: the repository's (or default) reviewers, minus its author. */
+export const suggestedReviewers = (repo: string, author: string | null | undefined): string[] => withoutAuthor(configuredReviewers(repo), author).map(reviewerLabel);
+
 /** The PR author can't review their own PR; a team is never the author. */
 export function withoutAuthor(list: readonly ReviewerEntry[], author: string | null | undefined): ReviewerEntry[] {
   return author ? list.filter(r => isTeam(r.login) || !sameLogin(r.login, author)) : [...list];
