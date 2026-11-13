@@ -33,6 +33,7 @@ import { UsageReader } from "./server/usage";
 import { Engine, agentWorkspace, findWorkspace } from "./server/engine";
 import { turnStarted, turnEnded, agentTrackedWorkspace } from "./server/turn-events";
 import { nextMessageInfo } from "./shared/task-rows";
+import { sendingOf } from "./shared/sending";
 import { Github } from "./server/github";
 import { ReviewerConfigStore, ReviewerSuggestions } from "./server/reviewer-config";
 import { repoKey } from "./shared/reviewers";
@@ -547,7 +548,7 @@ export default function contribute(server: PluginServerContext) {
     await agentHooks.confirm(w.id, agentId, summary);
     return { workspaceId: w.id, synced: true as const };
   });
-  handle(rpc.agentStatusRpc, async ({ agentId }, { paseo }) => { await requireReady(); const workspaceId = await callerWorkspaceId(agentId, paseo); const w = agentWorkspace(await store.snapshot(), agentId, "read", workspaceId, "pr"); return { ...w, prWorkflow: prWorkflow.agentWorkflow(workspaceRepo(w), touchedRepos(w)), nextMessageInfo: nextMessageInfo(w, Date.now()) }; });
+  handle(rpc.agentStatusRpc, async ({ agentId }, { paseo }) => { await requireReady(); const workspaceId = await callerWorkspaceId(agentId, paseo); const w = agentWorkspace(await store.snapshot(), agentId, "read", workspaceId, "pr"); return { ...w, prWorkflow: prWorkflow.agentWorkflow(workspaceRepo(w), touchedRepos(w)), nextMessageInfo: nextMessageInfo(w, Date.now()), sending: sendingOf(w, Date.now(), { held: !governor.allowsBackground() }) }; });
   handle(rpc.activateRpc, async ({ workspaceId }) => { await requireReady(); return engine.activate(workspaceId); });
   handle(rpc.sendRpc, async ({ workspaceId, batchId }) => { await requireReady(); return engine.sendPending(workspaceId, batchId); });
   handle(rpc.recoverRpc, async ({ workspaceId }) => { await requireReady(); return engine.startRecovery(workspaceId); });
@@ -1124,7 +1125,7 @@ export default function contribute(server: PluginServerContext) {
     resources: () => governor.current(), serverInfo: () => withDaemon(async client => (client as ServerInfoClient).getLastServerInfoMessage?.() as never), logs: logRing,
     toolTransport: () => toolTransport, startedAt,
   });
-  const agentActions = new AgentActions({ timeZone: () => clientTimeZone, store, prActions: actions, engine, inbox, priorities: priorityStore, about, agentSettings, wait: { status: currentWait }, prWorkflows: () => prWorkflowView(), rpc: rpcBridge, display: displayBridge, report: { run: (caller, args) => reportKit.reporter.run(caller, args) }, agentTitle: async id => (await api?.agents.ref(id).refresh().catch(() => null))?.agent?.title ?? null,
+  const agentActions = new AgentActions({ timeZone: () => clientTimeZone, autoSendsHeld: () => !governor.allowsBackground(), store, prActions: actions, engine, inbox, priorities: priorityStore, about, agentSettings, wait: { status: currentWait }, prWorkflows: () => prWorkflowView(), rpc: rpcBridge, display: displayBridge, report: { run: (caller, args) => reportKit.reporter.run(caller, args) }, agentTitle: async id => (await api?.agents.ref(id).refresh().catch(() => null))?.agent?.title ?? null,
     // The directory's agent list (metadata only): a claim never loads or refreshes the main agent.
     agentInfo: async agentId => { const row = gateway.directory.cached(agentId) ?? (await gateway.directory.read()).agents.find(r => r.agent.id === agentId)?.agent; return row ? { status: row.status, activeTurn: row.activeTurn, pendingPermissions: row.pendingPermissions, archivedAt: row.archivedAt } : null; } });
   handle(rpc.prioritiesRpc, async () => ({ items: await priorityStore.read() }));

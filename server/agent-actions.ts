@@ -1,3 +1,4 @@
+import { sendingOf } from "../shared/sending";
 import { agentActor, type Actor } from "../shared/actor";
 import { conditionId, noProgressSends } from "../shared/send-decision";
 import { randomUUID } from "node:crypto";
@@ -106,6 +107,8 @@ export function controlWorkspace(state: State, input: { workspaceId: string; ena
 
 type Result = { state: "submitted" | "failed" | "uncertain"; result: string };
 export type AgentActionDeps = {
+  /** The resource governor holds auto-sends machine-wide: queued Sending rows say they go out when it eases. */
+  autoSendsHeld?: () => boolean;
   /** The developer's IANA timezone, as their Follow-up client last reported it: snooze's "tonight"/"tomorrow" use it. */
   timeZone?: () => string | null;
   store: { snapshot(): Promise<State>; mutate<T>(fn: (state: State) => T): Promise<T> };
@@ -464,9 +467,14 @@ export class AgentActions {
     const { enabled, rows } = await this.d.inbox.list();
     const now = this.now();
     const state = await this.d.store.snapshot();
+    const tracked = new Map(state.workspaces.map(w => [w.id, w]));
+    const held = !!this.d.autoSendsHeld?.();
     return { enabled, you: caller, rows: rows.filter(r => !args.flagged_only || r.needs && !r.snooze).map(r => {
       const head = flagHeadline(r, now);
-      return { agentId: r.agentId, title: r.title, workspace: r.workspaceTitle, workspaceId: r.workspaceId, status: r.status, flagged: !!head, headline: head?.label ?? null, ask: head?.line ?? null, prs: rowPrs(state, r, now),
+      // Home's Sending row rides its workspace's main agent: queued or sent, when and why, and whether send_repairs would go through.
+      const w = r.workspaceId ? tracked.get(r.workspaceId) : undefined;
+      const sending = w && w.mainAgentId === r.agentId ? sendingOf(w, now, { held }) : null;
+      return { agentId: r.agentId, title: r.title, workspace: r.workspaceTitle, workspaceId: r.workspaceId, status: r.status, flagged: !!head, headline: head?.label ?? null, ask: head?.line ?? null, prs: rowPrs(state, r, now), sending,
         snoozedUntil: r.snooze ? (r.snooze as { until?: string }).until ?? "next-event" : null, enable_finish_flags: r.enable_finish_flags, self: r.agentId === caller };
     }) };
   }

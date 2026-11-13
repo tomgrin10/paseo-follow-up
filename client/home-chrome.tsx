@@ -210,7 +210,7 @@ export function SortMenu({ theme, mode, onChange, rankedAt, touch, rank = null, 
 // ---------- status strip ----------
 
 const STRIP: { id: HomeGroupId; label: string }[] = [
-  { id: "needs", label: "Needs you" }, { id: "fixing", label: "Fixing" }, { id: "running", label: "Running" }, { id: "waiting", label: "Waiting" }, { id: "quiet", label: "Quiet" },
+  { id: "needs", label: "Needs you" }, { id: "sending", label: "Sending" }, { id: "running", label: "Running" }, { id: "waiting", label: "Waiting" }, { id: "quiet", label: "Quiet" },
 ];
 
 /**
@@ -257,7 +257,8 @@ export function StatusStrip({ theme, model, filter, onFilter, touch, dense }: { 
 const toneColor = (m: Pick<Meter, "tone">, c: Colors) => m.tone === "danger" ? c.statusDanger : m.tone === "warning" ? c.statusWarning : c.foregroundMuted;
 
 /** "Claude 5h 62% · 7d 41% · resets 14:10". Tap for each account. Nothing when Smart Session isn't there. */
-export function UsageMeters({ theme, sources, dense }: { theme: Theme; sources: HomeSources; dense: boolean }) {
+export function UsageMeters({ theme, sources, dense, hold = false }: { theme: Theme; sources: HomeSources; dense: boolean;
+  /** Home's hold line is on screen (HomeModel.hold): the memory meter doesn't repeat "· paused". */ hold?: boolean }) {
   const c = theme.colors;
   const usage = useSyncExternalStore(sources.extras.subscribe, sources.extras.usage, sources.extras.usage);
   const now = useMinute();
@@ -268,7 +269,7 @@ export function UsageMeters({ theme, sources, dense }: { theme: Theme; sources: 
   const detail = list.find(m => m.family === open);
   return <View style={{ paddingHorizontal: dense ? 8 : 16, gap: 4 }}>
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 12, rowGap: 2 }}>
-      {vm && <VmMeter r={vm} c={c} now={Math.max(now, Date.now())} />}
+      {vm && <VmMeter r={vm} c={c} now={Math.max(now, Date.now())} holdShown={hold} />}
       {list.map(m => <Pressable key={m.family} accessibilityRole="button" accessibilityLabel={`${meterText(m, now)}. ${m.accounts.length > 1 ? `${m.accounts.length} accounts; ` : ""}show detail`}
         aria-expanded={open === m.family} onPress={() => setOpen(o => o === m.family ? null : m.family)}
         style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 22 }}>
@@ -289,8 +290,8 @@ export function UsageMeters({ theme, sources, dense }: { theme: Theme; sources: 
  * "Paseo memory 72% · CPU 40%", the resource governor's view. Text stays muted like the provider meters; the bar
  * and the "· paused" suffix take amber or red when Follow-up has held back its own work. Old readings dim.
  */
-function VmMeter({ r, c, now }: { r: Resources; c: Colors; now: number }) {
-  const m = resourceMeter(r, now);
+function VmMeter({ r, c, now, holdShown }: { r: Resources; c: Colors; now: number; holdShown: boolean }) {
+  const m = resourceMeter(r, now, undefined, { holdShown });
   if (!m) return null;
   const color = toneColor(m, c);
   return <View accessibilityRole="text" accessibilityLabel={m.label} style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 22, opacity: m.stale ? 0.6 : 1 }}>
