@@ -90,7 +90,7 @@ try {
   for (let i = 0; i < N; i++) {
     const dir = join(root, "projects", `w${i}`); await mkdir(dir, { recursive: true });
     const w = await api.workspaces.create({ title: `Synthetic workspace ${i}`, source: { kind: "directory", path: dir } });
-    const a = await w.agents.create({ config: { provider: "followup-fixture/fixture", model: "fixture", modeId: "default" }, title: `Synthetic agent ${i}` });
+    const a = await w.agents.create({ config: { provider: "followup-fixture/fixture", model: "fixture", modeId: "default", providerOptions: { fixture_ack: "repairs" } }, title: `Synthetic agent ${i}` });
     await client.sendMessage(a.id, `Synthetic task ${i}: ship https://github.com/example/app/pull/${i + 1}`, { messageId: `scale-${i}` });
     created.push({ workspaceId: w.id, agentId: a.id });
     for (let k = 1; k < PER; k++) await w.agents.create({ config: { provider: "followup-fixture/fixture", model: "fixture", modeId: "default" }, title: `Synthetic helper ${i}.${k}` });
@@ -113,14 +113,16 @@ try {
   // from scripts/scale-seed.ts. The empty seed above let a 450 MB worker pass a 240 MB budget (2026-11-12).
   if (REALISTIC) {
     await writeFile(join(root, "created.json"), JSON.stringify(created));
-    await exec("npx", ["tsx", "scripts/scale-seed.ts", join(home, "plugin-data/follow-up/state.json"), join(root, "created.json")], { timeout: 120_000 });
+    // --awake-fresh: the awake workspaces carry no batch history, so they send under any version's rules (a fair
+    // send-load baseline for a main build that would otherwise block them).
+    await exec("npx", ["tsx", "scripts/scale-seed.ts", join(home, "plugin-data/follow-up/state.json"), join(root, "created.json"), "3", process.argv.includes("--awake-fresh") ? String(AWAKE) : "0"], { timeout: 120_000 });
   }
   const stateBytesBefore = (await readFile(join(home, "plugin-data/follow-up/state.json"))).length;
   const before = loaded(await agents());
   await cli("plugin", "install", plugin);
   // From install on: the worker's RSS every 250 ms (steps over 10 MB, with when) and V8's heap every 5 s, so a
   // transient spike (V8 grows the heap, RSS keeps the high-water mark) shows when it happens.
-  const installedAt = Date.now(); const trace = { steps: [], peakHeapTotalMb: 0, peakHeapUsedMb: 0, peakRssMb: 0 }; let tracing = true;
+  const installedAt = Date.now(); const sendPhaseRequests = counter.snapshot(); const trace = { steps: [], peakHeapTotalMb: 0, peakHeapUsedMb: 0, peakRssMb: 0 }; let tracing = true;
   const tracer = (async () => {
     let wpid = 0, last = 0, lastUsage = 0;
     while (tracing) {
@@ -130,7 +132,7 @@ try {
         const now = Math.round(Number(/VmRSS:\s+(\d+)/.exec(status)?.[1] ?? 0) / 1024);
         if (now && Math.abs(now - last) > 10) { trace.steps.push({ s: Math.round((Date.now() - installedAt) / 100) / 10, at: new Date().toISOString(), rssMb: now }); last = now; }
         trace.peakRssMb = Math.max(trace.peakRssMb, now);
-        if (Date.now() - lastUsage > 5000) { lastUsage = Date.now(); const w = await client.invokePluginRpc("follow-up", "follow.usage", {}).then(u => u?.resources?.worker, () => null); if (w) { trace.peakHeapTotalMb = Math.max(trace.peakHeapTotalMb, w.heapTotalMb ?? 0); trace.peakHeapUsedMb = Math.max(trace.peakHeapUsedMb, w.heapUsedMb ?? 0); } }
+        if (Date.now() - lastUsage > 5000) { lastUsage = Date.now(); const w = await client?.invokePluginRpc("follow-up", "follow.usage", {}).then(u => u?.resources?.worker, () => null); if (w) { trace.peakHeapTotalMb = Math.max(trace.peakHeapTotalMb, w.heapTotalMb ?? 0); trace.peakHeapUsedMb = Math.max(trace.peakHeapUsedMb, w.heapUsedMb ?? 0); } }
       }
       await sleep(250);
     }
@@ -139,6 +141,39 @@ try {
   for (let poll = 1; poll <= POLLS; poll++) { await sleep(POLL_MS); samples.push(loaded(await agents())); }
   await sleep(5_000);
   const after = loaded(await agents());
+  // The idle window measures the steady state, so Follow-up's own sends settle first (2026-11-12, Q49): the realistic
+  // seed's history once tripped the retired 3-strike rule, which blocked every awake workspace's next message, so idle
+  // looked quiet by accident. Under the per-task cap a loaded, idle agent gets each lingering condition at most twice,
+  // then it caps.
+  // Quiet: nothing in flight, no queued message still in its settle window, and no acknowledged message whose PR GitHub
+  // hasn't been read since (that read decides whether the condition goes out again; the worker reads an open PR at least
+  // once a minute, so this waits at most 2 min after an acknowledgment). Bounded: a send loop that never
+  // settles fails here instead of passing by never starting the idle window.
+  const stateFile = join(home, "plugin-data/follow-up/state.json"); const receiptsFile = join(home, "fixture-receipts.jsonl");
+  const sendsSoFar = async () => (await readFile(receiptsFile, "utf8").catch(() => "")).split("\n").filter(l => /Follow-up batch/.test(l)).length;
+  const repair = t => ["conflict", "review", "checks", "restack"].includes(t.kind);
+  const open = (st, now) => st.workspaces.flatMap(w => w.batches.filter(b => !b.tasks.some(t => t.kind === "inventory") && (
+    ["sending", "sent", "uncertain"].includes(b.state)
+    || b.state === "pending" && now - Date.parse(b.createdAt) < 75_000
+    || b.state === "completed" && !b.unacknowledged && b.settledAt && Date.parse(b.settledAt) > installedAt && now - Date.parse(b.settledAt) < 120_000 && b.tasks.some(t => repair(t) && !((Date.parse(w.prs.find(p => p.key === t.target)?.snapshot?.observedAt ?? "") || 0) > Date.parse(b.settledAt)))
+  )).map(b => `${w.title}: ${b.state} [${b.tasks.map(t => t.key).join(", ")}]`));
+  const lockPid = Number((await readFile(join(home, "plugin-data/follow-up/worker.lock"), "utf8").catch(() => "")).split(":")[0]);
+  const hzSend = Number((await exec("getconf", ["CLK_TCK"])).stdout.trim()) || 100;
+  const cpuTicks = async () => { const f = (await readFile(`/proc/${lockPid}/stat`, "utf8")).split(") ")[1].split(" "); return Number(f[11]) + Number(f[12]); };
+  const SETTLE_BOUND_MS = Number(arg("settle-timeout", "300")) * 1000;
+  let still = []; let quiet = 0; let peakCpu = 0; let lastTicks = lockPid > 0 ? await cpuTicks() : 0; let lastAt = Date.now();
+  while (Date.now() - installedAt < SETTLE_BOUND_MS) {
+    await sleep(5_000);
+    if (lockPid > 0) { const t = await cpuTicks().catch(() => lastTicks); peakCpu = Math.max(peakCpu, Math.round((t - lastTicks) / hzSend / ((Date.now() - lastAt) / 1000) * 1000) / 10); lastTicks = t; lastAt = Date.now(); }
+    still = open(JSON.parse(await readFile(stateFile, "utf8").catch(() => "{\"workspaces\":[]}")), Date.now());
+    if (still.length) quiet = 0; else if (++quiet >= 2) break;
+  }
+  const settledState = JSON.parse(await readFile(stateFile, "utf8"));
+  const runBatches = settledState.workspaces.flatMap(w => w.batches.filter(b => b.sentAt && Date.parse(b.sentAt) > installedAt && !b.tasks.some(t => t.kind === "inventory")));
+  const sendPhase = { seconds: Math.round((Date.now() - installedAt) / 1000), sends: await sendsSoFar(), acks: runBatches.filter(b => b.state === "completed" && !b.unacknowledged).length,
+    unacknowledged: runBatches.filter(b => b.unacknowledged).length, capped: settledState.workspaces.reduce((n, w) => n + (w.heldTasks ?? []).filter(h => h.held === "capped").length, 0),
+    requestsPerMin: ratePerMinute(sendPhaseRequests, counter.snapshot(), "follow-up-worker", Date.now() - installedAt), peakCpuPct: peakCpu, settled: quiet >= 2 };
+  if (!sendPhase.settled) { console.error(`Follow-up's sends didn't settle within ${SETTLE_BOUND_MS / 1000} s of seed load; open: ${still.slice(0, 10).join("; ")}`); process.exitCode = 1; }
   // The worker: its pid is in the lock it holds. RSS now, CPU and state.json writes over an idle window.
   const pid = Number((await readFile(join(home, "plugin-data/follow-up/worker.lock"), "utf8").catch(() => "")).split(":")[0]);
   const ticks = async () => { const f = (await readFile(`/proc/${pid}/stat`, "utf8")).split(") ")[1].split(" "); return Number(f[11]) + Number(f[12]); };
@@ -171,7 +206,7 @@ try {
   if (worker) worker.trace = { ...trace, githubRequests: github?.requests.length ?? 0 };
   const receipts = (await readFile(join(home, "fixture-receipts.jsonl"), "utf8").catch(() => "")).trim().split("\n").filter(l => /Follow-up (batch|recovery)/.test(l)).length;
   const state = JSON.parse(await readFile(join(home, "plugin-data/follow-up/state.json"), "utf8"));
-  const result = { workspaces: N, awakeOnPurpose: AWAKE, loadedBefore: before, loadedPerPoll: samples, loadedAfter: after, followUpSends: receipts, dormant: state.workspaces.filter(w => w.dormant).length, autoSendOn: state.workspaces.filter(w => w.enable_auto_sends).length, parked: state.autoSendsParked?.length ?? 0, worker };
+  const result = { workspaces: N, awakeOnPurpose: AWAKE, loadedBefore: before, loadedPerPoll: samples, loadedAfter: after, followUpSends: receipts, sendPhase, dormant: state.workspaces.filter(w => w.dormant).length, autoSendOn: state.workspaces.filter(w => w.enable_auto_sends).length, parked: state.autoSendsParked?.length ?? 0, worker };
   console.log(process.argv.includes("--json") ? JSON.stringify(result) : result);
   if (after > before) { console.error(`Follow-up loaded ${after - before} dormant agents`); process.exitCode = 1; }
   // The budget is the worker's lifetime peak (VmHWM), start-up tick included: 2026-11-12's spike was over before idle began.

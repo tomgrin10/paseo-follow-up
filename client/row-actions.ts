@@ -70,15 +70,15 @@ export function useRowMenu(host: RowMenuHost) {
         case "bring_back_ws": return runAction({ label: "Bring back now", run: async () => { await control({ workspaceId, snooze: null }); after(); }, success: "Back in Needs you" }, `bring_back_ws:${workspaceId}`);
         case "sign_off": return runAction({ label: "Sign off", run: () => inbox.signOff([s.agentId!]), success: null }, `sign_off:${s.key}`);
         case "answer": return runAction({ label: "Answer", run: async () => openQuestion(s, arg), success: null });
-        case "send_repairs": return runAction({ label: "Send repairs", run: async () => { const r = await send({ workspaceId, batchId: arg }); after(); return r; },
+        case "send_repairs": return runAction({ label: "Send tasks", run: async () => { const r = await send({ workspaceId, batchId: arg }); after(); return r; },
           success: r => {
             const b = r.batches.find(x => x.id === arg);
             if (!b || ["sent", "sending", "completed"].includes(b.state)) return "Sent to the main agent";
             if (b.state === "pending") return "Queued. It goes out when the agent is free.";
             if (b.state === "uncertain") return "Delivery wasn't confirmed. Check the agent before retrying.";
-            throw new Error(b.result || "The repairs couldn't be sent.");
+            throw new Error(b.result || "The tasks couldn't be sent.");
           } }, `send:${workspaceId}`);
-        case "retry_batch": return runAction({ label: "Retry repairs", run: async () => { await control({ workspaceId, retryBatchId: arg }); after(); }, success: "Repairs queued again" }, `retry:${workspaceId}`);
+        case "retry_batch": return runAction({ label: "Retry tasks", run: async () => { await control({ workspaceId, retryBatchId: arg }); after(); }, success: "Tasks queued again" }, `retry:${workspaceId}`);
         case "clear_hold": return runAction({ label: "Resume follow-up", run: async () => { await control({ workspaceId, clearHold: true }); after(); }, success: "Follow-up resumed" }, `hold:${workspaceId}`);
         case "open_chat": return runAction({ label: "Open", run: async () => openFull(s), success: null });
         case "ask_overseer": return runAction({ label: "Ask the Overseer", run: async () => prefillAsk?.(`About ${s.title}: `), success: null });

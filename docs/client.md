@@ -73,7 +73,7 @@ Nothing polls while the app is hidden.
 | `client/reviewers.tsx` | Reviewer lists and the picker. |
 | `client/needs-you.tsx` | The workspace's one Needs you block: the asks (question cards, the brief), then the decision rows (Send repairs, Merge, Resume, Retry, Check). |
 | `client/questions.tsx` | The question dialog and answer form. |
-| `client/tasks.tsx` | Tasks and their triggers. |
+| `client/tasks.tsx` | Tasks and their triggers. Repairs are task rows too (Q49): the next-message strip first (Preview, Send now, Open agent while sent), PR-condition rows with their PR chip, the repair task sheet (per-task Auto-send, the message with its line highlighted). Rows come from `shared/task-rows.ts`. |
 | `client/spec.tsx` | The spec link chip, row and sheet. The chip sits in the references line (`client/linked.tsx`). |
 | `client/linked.tsx`, `shared/linked-display.ts` | Linked items on screen: the references line (Spec and Linked chips), the Linked sheet, the disclosure row, and Home search's index. See [linked-items.md](linked-items.md#ui). |
 | `client/brand-icons.ts` | Monochrome brand marks (Simple Icons, CC0) for linked items, passed to the host `Icon` as inline SVG. |
