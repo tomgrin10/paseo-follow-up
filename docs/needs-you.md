@@ -20,8 +20,9 @@
   (`shared/attention.ts`), decides "Add reviewers" for both the flag and the Needs-you item: an open, non-draft PR with
   no reviewers, in a repository someone is set up to review, that the agent doesn't merge itself. Invariants
   `outside-fact-is-live` (`factFlagViolations`) and `agent-merges-asks-nothing`.
-- **In-flight work reads as waiting.** A PR registered with `agentMerges` is the agent's own merge, so it asks the
-  developer for neither reviewers nor a merge. A working or waiting task puts the workspace in Waiting (never Quiet),
+- **In-flight work reads as waiting.** A PR registered with `agentMerges`, or any PR in a No review repository
+  (`agentMerges(pr)`, [review mode](prs.md#review-mode)), is the agent's own merge, so it asks the developer for
+  neither reviewers nor a merge. A working or waiting task puts the workspace in Waiting (never Quiet),
   and a waiting task is the agent's declared wait: its live line is the task's title, with the waiting icon. Invariant
   `in-flight-reads-waiting`; `tests/in-flight-status.test.ts` enumerates every in-flight signal.
 - **Background work is running (Paseo 0.16).** An agent that started a shell or task and ended its turn reports
