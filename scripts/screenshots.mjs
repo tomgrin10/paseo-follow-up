@@ -42,7 +42,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as 2.0.0-rc.0, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["needs-you-states", "done-brief", "review-mode", "feeds", "sending"];
+const REVIEW_SHOTS = ["needs-you-states", "done-brief", "pick-notes", "review-mode", "feeds", "sending"];
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
 for (const name of only) if (![...SHOTS, ...REVIEW_SHOTS].includes(name)) fail(`unknown shot "${name}" (known: ${[...SHOTS, ...REVIEW_SHOTS].join(", ")})`);
 const scheme = arg("--scheme");
@@ -344,6 +344,21 @@ const NEEDS_YOU_STATES = [
       msg("Thresholds are in #232. One task needs your call on who gets the alerts.")], flag: false },
 ];
 
+/** pick-notes only (task 32deeb27): decision cards with no tracked question, one decision and two. */
+const PICK_NOTES = [
+  { key: "pn-one", title: "Export encoding", minute: 176, prompt: "APP-190: export invoices as a spreadsheet finance can open.",
+    steps: [rpc("follow.enroll", { goal: "APP-190 Spreadsheet invoice export" }),
+      msg("The export writes a spreadsheet. One call on the encoding."),
+      rpc("follow.needs-you", { kind: "decision", ask: "Which encoding should the export use?", decisions: [{ question: "Which encoding should the export use?", recommend: 0,
+        options: [{ label: "UTF-8", consequence: "Every spreadsheet app opens it; Excel needs the BOM to guess right." }, { label: "Latin-1", consequence: "Matches the legacy importer, loses non-Latin names." }] }] })] },
+  { key: "pn-two", title: "Export delivery", minute: 178, prompt: "APP-191: deliver large invoice exports without blocking the page.",
+    steps: [rpc("follow.enroll", { goal: "APP-191 Large invoice exports" }),
+      msg("Large exports run in the background now. Two calls decide the format and where it lands."),
+      rpc("follow.needs-you", { kind: "decision", ask: "Two calls on the invoice export", decisions: [
+        { question: "Which encoding should the export use?", recommend: 0, options: [{ label: "UTF-8", consequence: "Every spreadsheet app opens it." }, { label: "Latin-1", consequence: "Matches the legacy importer." }] },
+        { question: "Where should the export land?", recommend: 0, options: [{ label: "The reports bucket" }, { label: "A download link in the email" }] }] })] },
+];
+
 /** review-mode only (a-no-review-repo-never-asks-for-review-or-merge): a PR with no reviewers in a reviewed repository. */
 const REVIEW_MODE_STATES = [
   { key: "rm-audit", title: "Audit log export", minute: 180, prompt: "APP-190: export the audit log as CSV from the admin page.", flag: false,
@@ -367,7 +382,7 @@ async function seed({ call, home }) {
   for (const name of ["app", "web"]) { repos[name] = join(tmpdir(), "follow-up-shots-fixture", name); await fs.mkdir(repos[name], { recursive: true }); }
   // review-mode: someone reviews example/app, so its PR without reviewers asks for them.
   if (only.includes("review-mode")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }] });
-  const specs = [...WORKSPACES, ...(only.includes("needs-you-states") ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("review-mode") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : [])];
+  const specs = [...WORKSPACES, ...(only.includes("needs-you-states") ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") ? PICK_NOTES : []), ...(only.includes("review-mode") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : [])];
   await fs.writeFile(join(home, "fixture-scripts.json"), JSON.stringify(Object.fromEntries(specs.map(w => [w.prompt, w.steps]))));
   const workspaces = [];
   for (const spec of specs) {
@@ -1150,6 +1165,38 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       await shoot(`ny-${s.state}-home-phone-${theme}`, PHONE, theme, async page => { await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, s.title)).click(); await settleOn(page); });
     }
   }
+  if (only.includes("pick-notes")) {
+    // Decision cards with a note (a-pick-note-reaches-the-agent): one decision and two; the note link closed, then
+    // open with text.
+    const NOTE = "Keep the BOM off; the finance team's parser chokes on it.";
+    const TALL = { width: DESKTOP.width, height: 1100 };
+    const write = async (page, decision) => {
+      await page.getByRole("button", { name: decision ? `Add note to decision ${decision}` : "Add note", exact: true }).filter({ visible: true }).first().click();
+      const field = page.getByLabel(decision ? `Note for the agent on decision ${decision}, optional` : "Note for the agent, optional").filter({ visible: true }).first();
+      await field.fill(NOTE);
+      return field;
+    };
+    // The note survives an inbox tick (the card refetches and re-renders) with the caret still in it.
+    const survives = async (page, field, name) => {
+      await page.waitForTimeout(17_000);
+      const ok = await field.evaluate((el, text) => document.activeElement === el && el.value === text, NOTE).catch(() => false);
+      if (!ok) failures.push(`${name}: the note or its focus didn't survive a refresh`); else log(`${name}: note and focus kept across a refresh`);
+    };
+    const pickAll = async page => { for (const name of ["A: UTF-8 (recommended)", "A: The reports bucket (recommended)"]) await page.getByRole("radio", { name, exact: true }).filter({ visible: true }).first().click(); };
+    // needs_you decisions are tracked as questions, so Home and the panel ask them as question cards (their own note
+    // field); the chat's decision card is where "Add note" lives: desktop and phone, light and dark.
+    for (const s of [{ state: "one", ...pick("pn-one"), wait: "Which encoding should the export use?" }, { state: "two", ...pick("pn-two"), wait: "2. Where should the export land?" }]) {
+      for (const theme of ["light", "dark"]) for (const [size, frame] of [["", TALL], ["-phone", PHONE]]) {
+        const open = async page => { await page.setViewportSize(TALL); await openChat(page, s.title, s.prompt); if (frame === PHONE) await page.setViewportSize(PHONE); await page.getByText(s.wait).filter({ visible: true }).first().waitFor(); };
+        await shoot(`pn-${s.state}-chat${size}-${theme}`, frame, theme, open);
+        await shoot(`pn-${s.state}-chat${size}-note-${theme}`, frame, theme, async page => {
+          await open(page); if (s.state === "two") await pickAll(page);
+          const f = await write(page, s.state === "two" ? 1 : 0);
+          if (theme === "light" && !size) await survives(page, f, `pn-${s.state}-chat`);
+        });
+      }
+    }
+  }
   if (only.includes("done-brief")) {
     // A done brief on a row flagged by a merged PR: the panel and Home's detail pane, desktop light and phone dark (the
     // reported view). Needs you shows the merge, or nothing; never "Nothing needed" counted as 1.
@@ -1252,7 +1299,7 @@ async function reviewModeShots({ shoot, call }) {
   }
   await team();
 }
-function pick(key) { const w = NEEDS_YOU_STATES.find(x => x.key === key); return { title: w.title, prompt: w.prompt }; }
+function pick(key) { const w = [...NEEDS_YOU_STATES, ...PICK_NOTES].find(x => x.key === key); return { title: w.title, prompt: w.prompt }; }
 
 async function optimise(path, tool) {
   if (tool === "pngquant") await exec("pngquant", ["--force", "--skip-if-larger", "--quality", "70-95", "--strip", "--output", path, path]).catch(e => { if (e.code !== 98 && e.code !== 99) throw e; });
