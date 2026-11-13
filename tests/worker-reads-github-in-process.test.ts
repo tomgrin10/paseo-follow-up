@@ -19,7 +19,8 @@ test("worker-reads-github-in-process: no read path spawns gh; tokens resolve onc
   const services = ["backend", "etl", "interpretation", "public-api", "web"].map(role => ({ metadata: { name: `acme-service-app-${role}-x`, labels: { "cloud.googleapis.com/location": "us-central1" } }, status: { conditions: [{ type: "Ready", status: "True" }], traffic: [{ revisionName: `${role}-r1`, percent: 100 }] } }));
   const revision = { spec: { containers: [{ name: "app", image: `us-central1-docker.pkg.dev/acme-prod/acme-docker/prod-app-backend@sha256:${"1".repeat(64)}` }] }, status: { conditions: [{ type: "Ready", status: "True" }] } };
   await writeFile(join(dir, "gh"), shim("gh", `console.log(a[1] === "graphql" ? "{}" : "[]");`));
-  await writeFile(join(dir, "gcloud"), shim("gcloud", `console.log(a[0] === "auth" ? "registry-token" : a[1] === "services" ? ${JSON.stringify(JSON.stringify(services))} : ${JSON.stringify(JSON.stringify(revision))});`));
+  // Invariant cloud-run-reads-in-process: gcloud prints the access token and nothing else.
+  await writeFile(join(dir, "gcloud"), shim("gcloud", `if (a[0] === "auth") console.log("registry-token"); else process.exit(1);`));
   await writeFile(join(dir, "gh-auth"), shim("gh-auth", `if (a[1] === "status") console.error("Logged in to github.com account personal\\nLogged in to github.com account work"); else console.log("token-" + (a[a.indexOf("--user") + 1] || "active"));`));
   await writeFile(join(dir, "account-map"), "* personal\n");
   for (const f of ["gh", "gcloud", "gh-auth"]) await chmod(join(dir, f), 0o700);
@@ -46,7 +47,8 @@ test("worker-reads-github-in-process: no read path spawns gh; tokens resolve onc
   const { liveSources } = await import("../server/about");
   const { liveRankSources } = await import("../server/ranker");
   const { AiJobs } = await import("../server/ai-jobs");
-  const registry = (async (url: string) => ({ ok: true, text: async () => JSON.stringify(String(url).includes("/manifests/") ? { config: { digest: `sha256:${"3".repeat(64)}` } } : { config: { Labels: { "org.opencontainers.image.revision": "b".repeat(40) } } }) })) as unknown as typeof fetch;
+  const cloud: string[] = [];
+  const registry = (async (url: string) => { cloud.push(String(url)); return { ok: true, status: 200, text: async () => JSON.stringify(String(url).includes("/services?") ? { items: services } : String(url).includes("/revisions/") ? revision : String(url).includes("/manifests/") ? { config: { digest: `sha256:${"3".repeat(64)}` } } : { config: { Labels: { "org.opencontainers.image.revision": "b".repeat(40) } } }) }; }) as unknown as typeof fetch;
 
   // Every read path, default wiring.
   const deployments = new Deployments(undefined, registry, undefined, undefined, acmeDeploy);
@@ -60,6 +62,9 @@ test("worker-reads-github-in-process: no read path spawns gh; tokens resolve onc
 
   const spawns = (await readFile(log, "utf8")).trim().split("\n").filter(Boolean);
   assert.deepEqual(spawns.filter(s => s.startsWith("gh ")), [], "a read path spawned the gh on PATH");
+  assert.deepEqual(spawns.filter(s => s.startsWith("gcloud ")), ["gcloud auth print-access-token"], "Cloud Run is read in process; gcloud only for the token");
+  assert.ok(cloud.some(u => u.startsWith("https://run.googleapis.com/apis/serving.knative.dev/v1/namespaces/acme-prod/services?")), "the services list reached Cloud Run");
+  assert.ok(cloud.some(u => u.startsWith("https://us-central1-run.googleapis.com/apis/serving.knative.dev/v1/namespaces/acme-prod/revisions/")), "revisions are read from their region");
   assert.ok(reads.some(r => r.includes("/compare/")), "the deployment ancestry read reached the API");
   assert.ok(reads.some(r => /\/pulls\/1 /.test(r)), "Summary's PR read reached the API");
   assert.ok(reads.some(r => r.includes("/collaborators")), "reviewer suggestions reached the API");
@@ -89,5 +94,13 @@ test("worker-reads-github-in-process: server/ spawns gh only for writes and toke
   // index.server.ts: the setup flow's readiness check runs `gh api user` on demand: it checks gh itself, which writes need.
   const index = await readFile("index.server.ts", "utf8");
   for (const line of index.split("\n")) if (/\(\s*"gh"\s*,/.test(line) && !/"api", "user"/.test(line)) offenders.push(`index.server.ts: ${line.trim().slice(0, 120)}`);
+  assert.deepEqual(offenders, []);
+});
+
+test("cloud-run-reads-in-process: server/ spawns gcloud only for the access token", async () => {
+  const offenders: string[] = [];
+  for (const name of (await readdir("server")).filter(n => /\.(ts|mjs)$/.test(n))) {
+    for (const line of (await readFile(join("server", name), "utf8")).split("\n")) if (/\(\s*"gcloud"\s*,/.test(line) && !/"auth", "print-access-token"/.test(line)) offenders.push(`${name}: ${line.trim().slice(0, 120)}`);
+  }
   assert.deepEqual(offenders, []);
 });
