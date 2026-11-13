@@ -234,6 +234,14 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    turn, pending permission or background work, and Paseo's idle-runtime cleanup releases it. Guarded by
    `tests/recovery-background.test.ts` and `scripts/check-recovery-background.mjs`
    ([docs/workspaces.md](docs/workspaces.md)).
+20. **View state is per device; settings are per host** (`view-state-is-per-device-settings-are-per-host`). The
+   settings category, settings folds, Home group folds and What's new "seen" live in the device settings document
+   `follow-up-view` on Paseo 0.16 (`client/view-store.ts`), with localStorage kept as the first-paint cache for one
+   release; on 0.15 they stay in localStorage. Anything an agent can set stays host-scoped, so the worker and its
+   tools reach it: `home_sort` is a Display field, never device-scoped. Reads paint the cache first and the document
+   when it loads, never the default in between. Needs you opens on every mount. Guarded by
+   `tests/view-settings.test.ts` (including the `home_sort` host-scope scan) and `scripts/check-view-settings.mjs`
+   ([docs/settings.md](docs/settings.md)).
 
 ## Bugs
 

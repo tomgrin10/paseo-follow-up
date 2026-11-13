@@ -88,6 +88,7 @@ Nothing polls while the app is hidden.
 | `client/visibility.ts` | Foreground detection; hidden means no polling. |
 | `client/display.tsx`, `client/button-visibility.ts` | Settings → Display, and button visibility (unknown is not off). `button-visibility.test.mjs` covers the lifecycle. |
 | `client/settings.tsx`, `client/settings-shell.tsx` | The settings screen and its collapsible sections. |
+| `client/view-store.ts` | The device settings document `follow-up-view` (Paseo 0.16): view state per device, seeded once from localStorage; `<ViewSync />` mounts it on each surface ([settings.md](settings.md#where-settings-live)). |
 | `client/agents.tsx` | Settings → Agents: the shared job rows with each row's More, and Background jobs (Wait). |
 | `client/job-rows.tsx` | The job rows Settings → Agents and setup's Helper agents step share (`JobRows`, `RolePickers`). |
 | `client/shipping.tsx` | Settings → Following → Shipping PRs. |
