@@ -26,7 +26,8 @@ not a patch for one instance.
   - `tests/answer-delivery.test.ts`: a copied or in-chat answer stays in Needs you until the agent's turn shows its
     marker, Send delivers it, or Sign off settles it; `tests/put-in-chat.test.ts` drives a fake composer (empty draft,
     typing during focus, repeat press, focus refused falls back to Copy); `tests/brief-card.test.ts`: no "No ask
-    stated" card beside a Needs-you item.
+    stated" card beside a Needs-you item; `tests/answer-status.test.ts`: every delivery state times every surface (chat
+    card, dialog, Needs you, Home row, Activity) reads the same, and "Answered" only once delivered.
   - `tests/idle-rpc.test.ts`: the real client stores, bundled with React Native stubbed, run ten simulated minutes against
     a fake host: at most one RPC a minute with `client.subscribe` (0.16), and still polling without it (0.15).
   - `tests/feeds.test.ts`: the worker's feeds read once per change, push only changes, and watch Smart Session only
@@ -83,6 +84,10 @@ they need a running `npm run preview` and read `.preview-isolated.json`. Some dr
   only with `features.backgroundAgents`, tools after a reload, host-collectable after acknowledge or failure, and the
   panel's Recovery row (`--shots <dir>`).
 - `scripts/check-project-settings.mjs`: per-project defaults.
+- `scripts/check-view-settings.mjs`: view state per device on Paseo 0.16 (`HARNESS_PASEO=0.16`) and 0.15: the settings
+  category and a fold survive a reload, the reload never paints the default category first, and on 0.16 the device
+  document `follow-up-view` holds them (migrated, no `home_sort`) (`--shots <dir>`). The phone app is a manual check
+  ([settings.md](settings.md#where-settings-live)).
 - `scripts/check-reviewers.mjs` and `scripts/check-reviewer-concurrency.mjs`: reviewer requests.
 - `scripts/check-task-triggers.mjs`: merge and deploy triggers.
 - `scripts/demo.mjs`: seeds the preview with demo data for screenshots (`node scripts/demo.mjs`, optionally

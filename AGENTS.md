@@ -136,6 +136,12 @@ These are product rules. Each has tests, and breaking one is a bug even when the
      agent list (patched by events); no `fetch_agents` or `fetch_agent` per send or per turn event, and subagents at
      most once per agent per tick. Guarded by `tests/daemon-load.test.ts` and `test:scale`
      ([docs/architecture.md](docs/architecture.md)).
+   - **A check costs linear in its workspace** (`a-check-costs-linear-in-its-workspace`): one status check (and every
+     surface it builds) tokenizes each question once (`featuresOf` in `shared/questions.ts`, cached per question and
+     checked against its text) and orders a stack with one depth pass (`depths` in `shared/attention.ts`), never a
+     pairwise re-tokenize or a parent `find` inside a sort. 2026-11-13: one check of a 153-PR, 52-question workspace
+     allocated 3.9 MB in ~11 ms; now 1.55 MB in 3–6 ms. Guarded by `tests/check-linear.test.ts` (200 questions,
+     300 PRs).
 3. **Agent parity.** Every action the developer can take in Follow-up also has an agent tool that runs the same
    server path, or an exemption with a reason in `PARITY` (`server/agent-parity.ts`).
    - Writes return a dry-run plan first and run with `confirm: true` and the plan id.
@@ -247,6 +253,14 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    "No ask stated" or a done brief's "Nothing needed" is drawn only while nothing in Needs you speaks for the row;
    beside a question or an answer waiting to be sent it would say there's nothing to do. One predicate decides it,
    `briefCardShown` in `shared/brief.ts`. Guarded by `tests/brief-card.test.ts`.
+22. **View state is per device; settings are per host** (`view-state-is-per-device-settings-are-per-host`). The
+   settings category, settings folds, Home group folds and What's new "seen" live in the device settings document
+   `follow-up-view` on Paseo 0.16 (`client/view-store.ts`), with localStorage kept as the first-paint cache for one
+   release; on 0.15 they stay in localStorage. Anything an agent can set stays host-scoped, so the worker and its
+   tools reach it: `home_sort` is a Display field, never device-scoped. Reads paint the cache first and the document
+   when it loads, never the default in between. Needs you opens on every mount. Guarded by
+   `tests/view-settings.test.ts` (including the `home_sort` host-scope scan) and `scripts/check-view-settings.mjs`
+   ([docs/settings.md](docs/settings.md)).
 
 ## Bugs
 

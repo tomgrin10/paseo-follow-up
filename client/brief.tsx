@@ -13,7 +13,7 @@ import { briefKey, HEADLINE_WORD } from "../shared/headline";
 const word = (kind: Brief["kind"]) => HEADLINE_WORD[briefKey(kind)];
 import { answerQuestionRpc, briefActionRpc, browserStatusRpc, inboxBriefRpc } from "../shared/contracts";
 import { errorText, mootNote } from "../shared/errors";
-import { OTHER, OTHER_LABEL, isOther } from "../shared/questions";
+import { OTHER, OTHER_LABEL, briefAnswerStatus, isOther, type Question } from "../shared/questions";
 import type { Workspace } from "../shared/model";
 import { SubmitScope, submitHint, text, useNow } from "./kit";
 import { RichText } from "./rich-text";
@@ -273,22 +273,26 @@ function Reveal({ label, openLabel, open, onPress, c, compact }: { label: string
  * A card that's no longer open keeps its question (1.4.0). Answered: the ask, each decision with what was picked, and
  * "Show full question" opens the original read-only. Superseded or signed off: the one muted line, plus "Show original".
  */
-function Past({ b, c, now, compact, height, pending = false, onResend, resending = false }: { b: Brief; c: Colors; now: number; compact: boolean; height: number; pending?: boolean; onResend?: () => void; resending?: boolean }) {
+function Past({ b, c, now, compact, height, pending = false, onResend, resending = false, questions = [] }: { b: Brief; c: Colors; now: number; compact: boolean; height: number; pending?: boolean; onResend?: () => void; resending?: boolean; questions?: readonly Question[] }) {
   const [expanded, setExpanded] = useState(false);
   const answered = b.state === "answered";
+  // Its questions' answers as every surface reads them (briefAnswerStatus): copied or in the message box is "not sent
+  // yet", never Answered with a check, until the agent's turn shows it arrived.
+  const status = answered ? briefAnswerStatus(b.questionIds, questions) : null;
+  const unsent = !!status && !status.delivered && b.outcome !== "Done";
   const ask = pastAsk(b.ask);
   const asked = askedDecisions(b);
   const picked = answered && asked.some(d => d.chosen);
   // The answer is recorded the moment Send is pressed; getting it to the agent can take Paseo a minute or more (a dormant
   // agent resumes first). Until it lands the card reads as in progress, and if every retry failed it says so with Send again.
-  const sending = pending || b.delivery?.state === "sending";
+  const sending = pending || b.delivery?.state === "sending" || unsent;
   const failed = b.delivery?.state === "failed";
   // Pending reads as in progress (a dashed circle), and becomes the solid check when the send lands.
   const icon = b.state === "superseded" ? "History" : failed ? "CircleAlert" : sending ? "CircleDashed" : "CircleCheck";
-  const spoken = pending ? `Done, sending (undo available): ${ask}` : failed ? `Answer not delivered: ${ask}` : sending ? `Answered, sending to the agent: ${ask}` : undefined;
+  const spoken = pending ? `Done, sending (undo available): ${ask}` : unsent ? `${status!.label}: ${ask}` : failed ? `Answer not delivered: ${ask}` : sending ? `Answered, sending to the agent: ${ask}` : undefined;
   const color = failed ? c.statusDanger : pastTone(b.state, sending) === "success" ? c.statusSuccess : c.foregroundMuted;
   // A Done card already says "Done" as its outcome; its time stands alone rather than repeating it.
-  const right = b.delivery?.state === "sending" && !pending ? "Sending…" : answered && b.outcomeAt ? (b.outcome === "Done" ? clock(b.outcomeAt) : `Answered ${clock(b.outcomeAt)}`) : age(b.outcomeAt ?? b.at, now);
+  const right = b.delivery?.state === "sending" && !pending ? "Sending…" : unsent ? status!.label : answered && b.outcomeAt ? (b.outcome === "Done" ? clock(b.outcomeAt) : `Answered ${clock(b.outcomeAt)}`) : age(b.outcomeAt ?? b.at, now);
   const undelivered = (indent: number) => failed && <View style={{ paddingLeft: indent, gap: 8, alignItems: "flex-start" }}>
     <Text accessibilityRole="alert" style={{ color: c.statusDanger, fontSize: 13, lineHeight: 18 }}>{`Not delivered to the agent: ${undeliveredReason(b.delivery?.error)} Your answer is kept.`}</Text>
     {onResend && <Btn label={resending ? "Sending…" : "Send again"} icon="RotateCcw" onPress={onResend} disabled={resending} c={c} compact={compact} hint="Sends the same answer once more" />}
@@ -385,7 +389,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   // An add-reviewers card for a PR the agent merges itself isn't an ask: gone the moment the repository flips to No
   // review, back on Undo (invariant a-no-review-repo-never-asks-for-review-or-merge).
   if (b.state === "open" && !liveBrief(b)) return null;
-  if (shown.brief.state !== "open") return <Past b={shown.brief} c={c} now={now} compact={compact} height={height} onResend={b.answerId ? resend : undefined} resending={sending === "resend"} />;
+  if (shown.brief.state !== "open") return <Past b={shown.brief} c={c} now={now} compact={compact} height={height} onResend={b.answerId ? resend : undefined} resending={sending === "resend"} questions={workspace?.questions} />;
   // Muted until the send lands: the server's answered brief then replaces this, green.
   if (marked) return <Past b={{ ...b, state: "answered", outcome: "Done", outcomeAt: marked }} pending={!sent} c={c} now={now} compact={compact} height={height} />;
 
