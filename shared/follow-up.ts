@@ -1,4 +1,4 @@
-import type { Obligation, Pr, Workspace, Batch } from "./model";
+import type { ListObligation as Obligation, ListPr as Pr, ListWorkspace as Workspace, ListBatch as Batch } from "./list";
 
 export const recoveryBatch = (batch: Pick<Batch, "tasks">): boolean => batch.tasks.length > 0 && batch.tasks.every(t => t.kind === "inventory");
 
@@ -7,7 +7,7 @@ export function lifecycleOnly(o: Pick<Obligation, "title" | "afterPrs" | "catego
   if (!o.afterPrs.length || /\b(verify|confirm|check|test|run|decide|decision|monitor|resolve|reconcile)\b/i.test(o.title)) return false;
   return /^(merge|approve|publish|land|deploy)\b/i.test(o.title) || /^#\d+.*\bneeds?\b.*\b(approval|merge)\b/i.test(o.title);
 }
-export const followUpObligations = (w: Workspace): Obligation[] => w.obligations.filter(o => !lifecycleOnly(o));
+export const followUpObligations = <W extends Workspace>(w: W): W["obligations"] => w.obligations.filter(o => !lifecycleOnly(o));
 /**
  * Where a merged PR stands against its deploy target.
  * - deployed: Follow-up saw its merge commit serving. Latched by deploymentAnchor: a probe error or an old

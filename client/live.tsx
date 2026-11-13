@@ -5,6 +5,7 @@ import type { PluginButtonIconProps, PluginClientContext, PluginSidebarItemProps
 import { Icon, SidebarRow } from "@getpaseo/plugin/client/ui";
 import { listRpc, workspacesFeed } from "../shared/contracts";
 import { openFeed, type Feed } from "./feeds";
+import { isArchivedEntry, listEntry, type ArchivedListWorkspace, type ListEntry, type ListWorkspace } from "../shared/list";
 import type { Workspace } from "../shared/model";
 import { activeNeeds, needsYou } from "../shared/attention";
 import { useSidebarViewActive } from "./inbox";
@@ -22,9 +23,10 @@ const POLL_MS = 15_000;
 
 /** One shared poll of tracked workspaces for the pills, header-button dots and the sidebar count. */
 export function createLiveStore(client: PluginClientContext) {
-  let workspaces = new Map<string, Workspace>();
-  /** Archived ones, only for search ("Archived" at the bottom of results). */
-  let archived: Workspace[] = [];
+  /** Each followed workspace in its list form (shared/list.ts); a surface that draws detail reads it with follow.get. */
+  let workspaces = new Map<string, ListWorkspace>();
+  /** Archived ones, only for search ("Archived" at the bottom of results): name and PRs only. */
+  let archived: ArchivedListWorkspace[] = [];
   let version = 0;
   const listeners = new Set<() => void>();
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -32,19 +34,19 @@ export function createLiveStore(client: PluginClientContext) {
   let stopped = false;
   /** The worker's list revision this store holds; each poll asks only for what changed since (1.3.0-beta.4). */
   let revision: number | undefined;
-  let all = new Map<string, Workspace>();
+  let all = new Map<string, ListEntry>();
   const emit = () => { version++; for (const l of listeners) l(); };
   let feed: Feed | null = null;
   const pushed = () => feed?.live === true;
-  const apply = (result: { full?: boolean; workspaces: Workspace[]; removed?: string[]; revision?: number }) => {
+  const apply = (result: { full?: boolean; workspaces: ListEntry[]; removed?: string[]; revision?: number }) => {
       const diff = result.full === false;
       if (diff && !result.workspaces.length && !result.removed?.length) return;
-      const next = diff ? new Map(all) : new Map<string, Workspace>();
+      const next = diff ? new Map(all) : new Map<string, ListEntry>();
       for (const id of result.removed ?? []) next.delete(id);
       for (const w of result.workspaces) next.set(w.id, diff ? newer(all.get(w.id), w) : w);
       all = next; revision = result.revision;
-      workspaces = new Map([...all.values()].filter(w => !w.archived).map(w => [w.id, w]));
-      archived = [...all.values()].filter(w => w.archived);
+      workspaces = new Map([...all.values()].filter((w): w is ListWorkspace => !isArchivedEntry(w)).map(w => [w.id, w]));
+      archived = [...all.values()].filter(isArchivedEntry);
       emit();
   };
   // Paseo 0.15: poll the revision diff. 0.16: the worker pushes the same diff (follow.workspaces-feed), and nothing polls.
@@ -58,12 +60,14 @@ export function createLiveStore(client: PluginClientContext) {
   };
   // The feed went down (the worker restarted): read now and poll until it is back.
   feed = openFeed(client, workspacesFeed, {}, { event: event => { if (!stopped) apply(event); }, down: () => { if (timer) clearTimeout(timer); void poll(); }, up: () => { if (timer) clearTimeout(timer); timer = null; } });
+  // The store keeps list forms only: a read's full workspace is projected (shared/list.ts listEntry) before it's held.
   const accept = (w: Workspace) => {
     const held = all.get(w.id);
-    if (!held || newer(held, w) !== w || held === w) return;
-    all = new Map(all).set(w.id, w);
-    workspaces = new Map([...all.values()].filter(x => !x.archived).map(x => [x.id, x]));
-    archived = [...all.values()].filter(x => x.archived);
+    if (!held || Date.parse(w.updatedAt) < Date.parse(held.updatedAt)) return;
+    const entry = listEntry(w);
+    all = new Map(all).set(w.id, entry);
+    workspaces = new Map([...all.values()].filter((x): x is ListWorkspace => !isArchivedEntry(x)).map(x => [x.id, x]));
+    archived = [...all.values()].filter(isArchivedEntry);
     emit();
   };
   opened.add(accept);

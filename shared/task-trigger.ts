@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Obligation, Workspace, Pr } from "./model";
+import type { ListObligation as Obligation, ListWorkspace as Workspace, ListPr as Pr } from "./list";
 import { deployed } from "./follow-up";
 
 export const taskTriggerSchema = z.object({ event: z.enum(["now", "merge", "deploy"]), delayDays: z.number().int().min(0).max(3650).default(0) });

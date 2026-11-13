@@ -1,4 +1,5 @@
-import { blockedOnDeveloper, type Obligation, type Workspace } from "./model";
+import { blockedOnDeveloper } from "./model";
+import type { ListObligation as Obligation, ListWorkspace as Workspace } from "./list";
 import { taskSchedule } from "./task-trigger";
 import { isLive } from "./agent-load";
 import { obligationDelivery } from "./task-rows";

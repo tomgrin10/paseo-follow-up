@@ -12,7 +12,7 @@ import { briefQuestionIds, echoedItems, HEADLINE_ICON, todoLine, HEADLINE_TONE, 
 import { snoozeUntil, type InboxRow } from "../shared/inbox";
 import { laterChoices } from "../shared/row-menu";
 import { isOpen as questionOpen } from "../shared/questions";
-import type { Workspace } from "../shared/model";
+import type { ListWorkspace } from "../shared/list";
 import { Button, errorText, text, type Theme } from "./kit";
 import { headlineColor, withAlpha } from "./theme";
 import { useInbox } from "./inbox";
@@ -29,10 +29,10 @@ const UNDO_TITLE: Record<string, string> = { sign_off: "Signed off", later: "Mov
 
 
 type Deps = { inbox: InboxStore; live: LiveStore; openPanel: (workspaceId: string) => void; openNext: (from: string) => void };
-type Target = { agentId: string; workspaceId: string; row: InboxRow | null; workspace: Workspace | null; items: NeedItem[] };
+type Target = { agentId: string; workspaceId: string; row: InboxRow | null; workspace: ListWorkspace | null; items: NeedItem[] };
 
 /** Every agent that may carry the pill: inbox rows with a workspace, plus each tracked workspace's main agent. */
-export function targets(rows: InboxRow[], workspaces: Workspace[], now: number): Map<string, Target> {
+export function targets(rows: InboxRow[], workspaces: ListWorkspace[], now: number): Map<string, Target> {
   const out = new Map<string, Target>();
   for (const row of rows) if (row.workspaceId) out.set(row.agentId, { agentId: row.agentId, workspaceId: row.workspaceId, row, workspace: null, items: [] });
   for (const w of workspaces) {
@@ -148,13 +148,15 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
   const { target, state, now } = useTarget(deps, agentId, props.workspaceId);
   const browserRead = useRpc(browserStatusRpc);
   const main = !!target.workspace && target.workspace.mainAgentId === agentId;
-  // The live store already holds this workspace; the popover reads it once on open (Paseo can leave a stray mounted
-  // copy, so nothing here polls it: 1.4.0).
+  // The live store holds this workspace's list form; the popover reads it in full once on open (Paseo can leave a stray
+  // mounted copy, so nothing here polls it: 1.4.0).
   const query = useWorkspace(deps.live, props.workspaceId, { enabled: main });
   const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), enabled: main, staleTime: 0, refetchOnMount: "always" });
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" } | null>(null);
   const [question, setQuestion] = useState<string | null>(null);
-  const w = main ? query.workspace ?? target.workspace : null;
+  // The popover paints from the list form at once; its PR sheet and question sheet wait for this read's full workspace.
+  const full = main ? query.workspace : null;
+  const w: ListWorkspace | null = main ? full ?? target.workspace : null;
   const row = target.row;
   const flagged = state?.mode === "flag";
   const running = !!row && ["running", "initializing"].includes(row.status);
@@ -232,8 +234,8 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
         : <NeedsYouList workspace={w} theme={props.theme} compact={touch} flush untitled={echoed}
           actions={{ after: () => deps.live.refresh(), openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion }} />}
       {asking && items.some(i => i.kind !== "question" && !echoed.has(i.key)) && <Text numberOfLines={2} style={t.small}>Also: {items.filter(i => i.kind !== "question" && !echoed.has(i.key)).map(i => i.title).join(" · ")}</Text>}
-      <PrSheet workspace={w} prKey={sheet?.key ?? null} intent={sheet?.intent ?? null} theme={props.theme} compact={touch} browserReady={browser.data?.ready ?? false} onClose={() => { setSheet(null); deps.live.refresh(); }} />
-      <QuestionSheet workspace={w} questionId={question} theme={props.theme} compact={touch} onClose={() => { setQuestion(null); deps.live.refresh(); }} />
+      {full && <PrSheet workspace={full} prKey={sheet?.key ?? null} intent={sheet?.intent ?? null} theme={props.theme} compact={touch} browserReady={browser.data?.ready ?? false} onClose={() => { setSheet(null); deps.live.refresh(); }} />}
+      {full && <QuestionSheet workspace={full} questionId={question} theme={props.theme} compact={touch} onClose={() => { setQuestion(null); deps.live.refresh(); }} />}
     </View>}
     {main && !w && query.error && <Text style={t.meta}>Couldn't read Follow-up: {errorText(query.error)}</Text>}
 

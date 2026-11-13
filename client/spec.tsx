@@ -5,7 +5,7 @@ import { openExternalUrl, useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, TextInput, useToast } from "@getpaseo/plugin/client/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { workspaceSpecRpc } from "../shared/contracts";
-import type { Workspace } from "../shared/model";
+import type { ListWorkspace as Workspace } from "../shared/list";
 import { specLabel, validSpecUrl } from "../shared/spec";
 import { ago } from "../shared/attention";
 import { Button, CardRow, text, type Theme, SubmitScope } from "./kit";

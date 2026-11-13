@@ -1,7 +1,7 @@
 import type { Workspace } from "../shared/model";
 
 /** A copy only replaces one it is newer than (updatedAt): a late diff or poll never undoes a fresher read. */
-export const newer = (held: Workspace | undefined, w: Workspace) => !held || Date.parse(w.updatedAt) >= Date.parse(held.updatedAt) ? w : held;
+export const newer = <T extends { updatedAt: string }>(held: T | undefined, w: T): T => !held || Date.parse(w.updatedAt) >= Date.parse(held.updatedAt) ? w : held;
 export const opened = new Set<(w: Workspace) => void>();
 /**
  * A fresh read of one workspace (useWorkspace's read, a merge's read before its toast) reaches every live store, so

@@ -43,10 +43,11 @@ test("a-list-answer-serializes-only-what-changed: a change to 1 of 150 workspace
   const first = cache.answer(await store.snapshot());
   assert.equal(first.workspaces.length, 150);
   await store.mutateWorkspace("w7", w => { w.title = "Renamed"; });
-  const ids = new Set((await store.snapshot()).workspaces.map(w => w));
+  // A workspace, stored or in its list form (shared/list.ts): what the cache serialises per workspace.
+  const ids = new Set((await store.snapshot()).workspaces.map(w => w.id));
   let stringified = 0;
   const stringify = JSON.stringify;
-  JSON.stringify = function (value: unknown, ...rest: unknown[]) { if (ids.has(value as never)) stringified++; return stringify.call(JSON, value, ...(rest as [])); } as typeof JSON.stringify;
+  JSON.stringify = function (value: unknown, ...rest: unknown[]) { if (value && typeof value === "object" && ids.has((value as { id?: string }).id as never) && "mainAgentId" in value) stringified++; return stringify.call(JSON, value, ...(rest as [])); } as typeof JSON.stringify;
   let diff;
   try { diff = cache.answer(await store.snapshot(), first.revision); } finally { JSON.stringify = stringify; }
   assert.deepEqual(diff.workspaces.map(w => w.id), ["w7"], "the change is still seen");

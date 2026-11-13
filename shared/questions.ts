@@ -91,7 +91,7 @@ export type Question = z.infer<typeof questionSchema>;
 export type QuestionOption = z.infer<typeof questionOptionSchema>;
 export type Answer = z.infer<typeof answerSchema>;
 
-export const isOpen = (q: Question) => !q.answer && !q.closed;
+export const isOpen = (q: Pick<Question, "answer" | "closed">) => !q.answer && !q.closed;
 
 /** Q1, Q2…: unique for the life of the workspace, never reused after a question closes. */
 export function nextQuestionId(questions: Pick<Question, "id">[]): string {
@@ -140,7 +140,7 @@ export const answerTitle = (text: string) => text.replace(/\)/g, "").replace(/[(
 /** The lines Follow-up adds after an answer: the answer and the developer's note run until one of these. */
 const ANSWER_TRAILER = /^(?:The developer added: |None of your options|You were building |Continue|Answered by .+ for the developer\.$)/;
 /** The message sent to the asking agent. It starts with ANSWER_PREFIX so chat rows and history scans recognise it. */
-export function answerMessage(q: Question, choice: string, words?: string): string {
+export function answerMessage(q: Pick<Question, "id" | "title" | "mode" | "big" | "recommend" | "taskId" | "answer"> & { options: readonly { letter: string; label: string }[] }, choice: string, words?: string): string {
   const lines = [`${ANSWER_PREFIX} ${q.id} (${answerTitle(q.title)}): ${answerHead(q, choice, words)}`];
   if (isOther(choice)) lines.push("None of your options: the developer's own answer is in the quotes.");
   else if (words?.trim()) lines.push(`The developer added: ${words.trim()}`);
@@ -280,8 +280,10 @@ const nearIdentical = (a: QuestionShape, b: QuestionShape) => textSimilarity(a, 
  * open needs_you decisions; another agent's question only when near-identical. Blocked-task questions keep their own
  * identity (the task and its revision) and never match.
  */
-export function findOpenMatch(questions: readonly Question[], input: QuestionShape, askedBy: string | null): { question: Question; verdict: "same" | "changed" } | null {
-  let best: { question: Question; verdict: "same" | "changed"; score: number } | null = null;
+/** Matching reads only what list views carry (ListQuestion), so Home's invariant checks run on the list form too. */
+type Matchable = QuestionShape & Pick<Question, "id" | "answer" | "closed" | "taskRevision" | "askedBy" | "via">;
+export function findOpenMatch<Q extends Matchable>(questions: readonly Q[], input: QuestionShape, askedBy: string | null): { question: Q; verdict: "same" | "changed" } | null {
+  let best: { question: Q; verdict: "same" | "changed"; score: number } | null = null;
   for (const q of questions) {
     if (!isOpen(q) || q.taskRevision !== null) continue;
     const own = q.askedBy === askedBy || q.via === "needs_you";
@@ -294,9 +296,9 @@ export function findOpenMatch(questions: readonly Question[], input: QuestionSha
 }
 
 /** Open questions that repeat an older open one in the same workspace: [duplicate, original] pairs. The invariant. */
-export function duplicateOpenQuestions(questions: readonly Question[]): { duplicate: Question; of: Question }[] {
-  const out: { duplicate: Question; of: Question }[] = [];
-  const kept: Question[] = [];
+export function duplicateOpenQuestions<Q extends Matchable>(questions: readonly Q[]): { duplicate: Q; of: Q }[] {
+  const out: { duplicate: Q; of: Q }[] = [];
+  const kept: Q[] = [];
   for (const q of questions) {
     if (!isOpen(q)) continue;
     const match = q.taskRevision === null ? findOpenMatch(kept, q, q.askedBy) : null;

@@ -1,5 +1,6 @@
 import type { ListCache } from "./list-cache";
-import type { State, Workspace } from "../shared/model";
+import type { State } from "../shared/model";
+import type { ListEntry } from "../shared/list";
 
 /**
  * Pushes instead of client polling (Paseo 0.16 subscriptions, plan item 6). A feed is one shared serve per topic: a
@@ -53,7 +54,7 @@ export class ValueFeed<E> {
   }
 }
 
-export type WorkspacesEvent = { revision: number; full: boolean; workspaces: Workspace[]; removed: string[]; error: string | null };
+export type WorkspacesEvent = { revision: number; full: boolean; workspaces: ListEntry[]; removed: string[]; error: string | null };
 
 /**
  * follow.list as a feed: each subscriber holds a revision, and a change sends it only the workspaces changed since,

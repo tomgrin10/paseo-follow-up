@@ -9,6 +9,7 @@ import { Icon, Modal, ScrollView, TextInput, copyText, useToast } from "@getpase
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { answerQuestionRpc } from "../shared/contracts";
 import type { Workspace } from "../shared/model";
+import type { ListQuestion, ListWorkspace } from "../shared/list";
 import { OTHER, OTHER_LABEL, answerHeading, answerLabel, answerStatus, answerMessage, isOpen, isOther, questionState, type Question } from "../shared/questions";
 import { ago } from "../shared/attention";
 import { mootNote, sentence } from "../shared/errors";
@@ -24,14 +25,14 @@ import { putInChatOrCopy } from "../shared/put-in-chat";
 import { useChatComposer } from "./put-in-chat";
 import { clearPendingAnswer, failPendingAnswer, pendingKey, setPendingAnswer, usePendingAnswer, usePendingAnswers, type PendingAnswer } from "./pending-answers";
 
-const who = (w: Workspace, agentId: string | null) => !agentId || agentId === w.mainAgentId ? "the main agent" : "a root session";
+const who = (w: Pick<ListWorkspace, "mainAgentId">, agentId: string | null) => !agentId || agentId === w.mainAgentId ? "the main agent" : "a root session";
 
 /**
  * What the agent is doing while the question is open, in the developer's terms. `pending` is required, so every
  * surface that describes a question also says when the developer's answer didn't reach Paseo, or is on its way;
  * pass null only where the surface shows that itself (QuestionBody's Not sent · Retry line).
  */
-export function meanwhile(w: Workspace, q: Question, pending: PendingAnswer | null | undefined): { icon: string; color: (c: Colors) => string; text: string } {
+export function meanwhile(w: ListWorkspace, q: ListQuestion, pending: PendingAnswer | null | undefined): { icon: string; color: (c: Colors) => string; text: string } {
   if (pending?.error) return { icon: "CircleAlert", color: c => c.statusDanger, text: `Your answer wasn't sent: ${sentence(pending.error)} Open it to retry; your words are kept.` };
   if (pending) return { icon: "Send", color: c => c.foregroundMuted, text: "Sending your answer…" };
   if (q.taskId && !q.options.length) return { icon: "Clock", color: c => c.foregroundMuted, text: "A task is blocked on this. The agent works on the rest." };
@@ -44,7 +45,7 @@ export function meanwhile(w: Workspace, q: Question, pending: PendingAnswer | nu
   }
 }
 
-function deliveryLine(w: Workspace, q: Question, now: number): { icon: string; tone: "success" | "warning" | "muted" | "spinner"; text: string } | null {
+function deliveryLine(w: ListWorkspace, q: ListQuestion, now: number): { icon: string; tone: "success" | "warning" | "muted" | "spinner"; text: string } | null {
   const d = q.answer?.delivery;
   if (!d) return null;
   switch (d.state) {
@@ -87,7 +88,7 @@ const inputStyle = (c: Colors, compact: boolean, lines: number) => ({ minHeight:
  * away; Copy records it and puts a reply on the clipboard instead. Used by the dialog and the pill.
  */
 export function QuestionBody({ workspace: w, question: q, theme, compact, now = Date.now(), dense = false, bodyMaxHeight, openAgent, onAnswered, onDetails, onClose, inline = false }: {
-  workspace: Workspace; question: Question; theme: Theme; compact: boolean; now?: number; dense?: boolean; bodyMaxHeight?: number; openAgent?: (agentId: string) => void; onAnswered?: () => void; onDetails?: () => void;
+  workspace: ListWorkspace; question: ListQuestion; theme: Theme; compact: boolean; now?: number; dense?: boolean; bodyMaxHeight?: number; openAgent?: (agentId: string) => void; onAnswered?: () => void; onDetails?: () => void;
   /** Inside the Needs you block: its header says the title and when it was asked, its footer what the agent does meanwhile. */
   inline?: boolean;
   /** The dialog's close: Send and Copy close it at once and report the outcome as a toast. */
@@ -181,9 +182,9 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   const pr = q.prKey ? w.prs.find(p => p.key === q.prKey) : null;
   const task = q.taskId ? w.obligations.find(o => o.id === q.taskId) : null;
   const deliveryColor = delivery?.tone === "success" ? c.statusSuccess : delivery?.tone === "warning" ? c.statusWarning : c.foregroundMuted;
-  const context = (!!q.background || !!q.links.length || pr || (task && !(inline && task.title.trim() === q.title.trim()))) && <View style={{ gap: 8 }}>
+  const context = (!!q.background || !!q.links?.length || pr || (task && !(inline && task.title.trim() === q.title.trim()))) && <View style={{ gap: 8 }}>
     {!!q.background && <RichText selectable linkColor={c.foreground} numberOfLines={dense ? 3 : undefined} style={t.meta}>{q.background}</RichText>}
-    {!dense && q.links.map((link, i) => <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+    {!dense && q.links?.map((link, i) => <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       <Icon name={link.url ? "Globe" : "FileText"} size={13} color={c.foregroundMuted} />
       {link.url ? <Pressable accessibilityRole="link" accessibilityLabel={`Open ${link.label || link.url}`} onPress={() => { void openExternalUrl(link.url!).catch(() => undefined); }} hitSlop={4}
         style={state => ({ flexShrink: 1, opacity: state.pressed ? 0.7 : 1 })}>
@@ -317,7 +318,7 @@ export function QuestionSheet({ workspace: w, questionId, theme, compact, onClos
 }
 
 /** The pill steps through open questions ("1 of 3") and answers them without leaving the chat. */
-export function QuestionStepper({ workspace: w, theme, compact, openAgent, onAnswered, onDetails, bodyMaxHeight }: { workspace: Workspace; theme: Theme; compact: boolean; openAgent?: (agentId: string) => void; onAnswered?: () => void; onDetails?: (id: string) => void; bodyMaxHeight?: number }) {
+export function QuestionStepper({ workspace: w, theme, compact, openAgent, onAnswered, onDetails, bodyMaxHeight }: { workspace: ListWorkspace; theme: Theme; compact: boolean; openAgent?: (agentId: string) => void; onAnswered?: () => void; onDetails?: (id: string) => void; bodyMaxHeight?: number }) {
   const c = theme.colors; const t = text(c);
   const pending = usePendingAnswers();
   // An answer on its way (sent, no reply yet) steps the pill on at once; one that failed comes back as Not sent.

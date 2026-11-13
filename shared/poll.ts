@@ -1,4 +1,4 @@
-import type { Snapshot } from "./model";
+import type { ListSnapshot as Snapshot } from "./list";
 
 /**
  * PR polling cadence. The engine ticks every TICK_MS. A repository whose PRs are all settled is read at most every

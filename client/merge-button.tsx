@@ -6,7 +6,7 @@ import { confirmPrActionRpc, getRpc, preparePrActionRpc } from "../shared/contra
 import { readWorkspace } from "./workspace-data";
 import { workspaceKey } from "./keys";
 import { mergeClick, mergeScope, mergeWords, type MergeClickResult, type MergeScope } from "../shared/merge-click";
-import type { Workspace } from "../shared/model";
+import type { ListWorkspace as Workspace } from "../shared/list";
 import { Button, errorText, text, type ButtonKind, type Theme } from "./kit";
 import { Text } from "./text";
 import { View } from "react-native";

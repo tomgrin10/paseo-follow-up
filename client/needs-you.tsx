@@ -8,7 +8,7 @@ import { answerQuestionRpc, checkPrActionRpc, controlRpc, sendRpc } from "../sha
 import { agentName, needsYou, workspaceSnoozed, type NeedItem } from "../shared/attention";
 import { laterLabel } from "./inbox";
 import { sameText } from "../shared/home";
-import type { Workspace } from "../shared/model";
+import type { ListWorkspace as Workspace } from "../shared/list";
 import { Button, Card, CardRow, Chip, PrLinkButton, errorText, text, type Theme } from "./kit";
 import type { Colors } from "./theme";
 import { QuestionBody, meanwhile } from "./questions";
