@@ -47,6 +47,8 @@ export interface Gateway {
   /** Whether a batch's message is in its recipient's chat (by messageId). Null: unknown, e.g. reading it would wake the agent. */
   arrived?(w: Workspace, batch: Batch): Promise<boolean | null>;
   label(w: Workspace, assigned: boolean): Promise<void>;
+  /** A tick begins: the gateway may list agents once for it (a-send-lists-agents-at-most-once-per-tick). */
+  tickStarted?(): void;
   /** Sends a developer message to the first available recipient; DeliveryDeferred means try again later. */
   deliver?(w: Workspace, recipients: string[], text: string, messageId: string): Promise<string>;
 }
@@ -205,6 +207,7 @@ export class Engine {
   }
   private async run(o: { background?: boolean; workspaceId?: string; affected?: Set<string> } = {}): Promise<void> {
     if (this.paused()) { this.skipped++; return; }
+    this.gateway.tickStarted?.();
     const saved = await this.store.snapshot();
     if (this.stopped) return;
     if (this.gateway.discover) {
@@ -358,8 +361,7 @@ export class Engine {
   }
   /** Records the developer's answer, then sends it unless they chose to copy it. */
   async answer(workspaceId: string, questionId: string, choice: string, words: string | undefined, action: "send" | "copy" | "resend", actor: Actor = DEVELOPER): Promise<{ workspace: Workspace; question: Question }> {
-    await this.store.mutate(state => {
-      const w = findWorkspace(state, workspaceId);
+    await this.store.mutateWorkspace(workspaceId, w => {
       if (!w.enable_tracking || w.archived) throw new Error("Follow-up isn't following this workspace. Turn it back on in Follow-up settings, under Workspace exceptions.");
       developerAnswer(w, questionId, choice, words, action, this.now(), actor);
       if (!w.questions.some(isOpenQuestion)) w.updatedAt = new Date(this.now()).toISOString();
@@ -395,8 +397,8 @@ export class Engine {
         ? { state: "queued", to: null, reason: error.message }
         : { state: "unconfirmed", to: null, reason: "Paseo didn't confirm the message. Check the agent's chat before resending." };
     }
-    await this.store.mutate(state => {
-      const current = findWorkspace(state, workspaceId).questions.find(x => x.id === questionId);
+    await this.store.mutateWorkspace(workspaceId, w => {
+      const current = w.questions.find(x => x.id === questionId);
       if (!current?.answer || current.answer.delivery.messageId !== q.answer!.delivery.messageId) return;
       current.answer.delivery = { ...current.answer.delivery, ...outcome, at: new Date(this.now()).toISOString() };
     });
@@ -424,8 +426,7 @@ export class Engine {
     if (needsPrObservations(current, batch) && current.prs.some(p => p.error || !p.snapshot?.complete)) throw new Error("PR status is incomplete; refresh before sending repairs");
     const runtime = await this.gateway.observe(current, true);
     if (runtime.busy || runtime.backgroundBusy || runtime.reason || runtime.archived) throw new Error(runtime.reason ?? "The workspace has active agent work. Send when it is idle.");
-    const claimed = await this.store.mutate(state => {
-      const w = findWorkspace(state, workspaceId);
+    const claimed = await this.store.mutateWorkspace(workspaceId, w => {
       const b = w.batches.find(b => b.id === batchId);
       if (this.stopped || !w.enable_tracking || w.archived || w.hold || (automatic && !w.enable_auto_sends) || !b || b.state !== "pending" || w.batches.some(other => other.id !== b.id && !isRecovery(other) && ["sending", "sent", "blocked", "uncertain"].includes(other.state))) throw new Error("Workspace or queue changed; refresh before sending");
       const eligible = tasksFor(w, this.now(), this.wording);
@@ -437,8 +438,7 @@ export class Engine {
   }
   async startRecovery(workspaceId: string): Promise<Workspace> {
     const batchId = randomUUID();
-    await this.store.mutate(state => {
-      const w = findWorkspace(state, workspaceId);
+    await this.store.mutateWorkspace(workspaceId, w => {
       if (!w.enable_tracking || w.archived || this.stopped) throw new Error("Follow-up isn't following this workspace. Turn it back on in Follow-up settings, under Workspace exceptions.");
       if (w.batches.some(b => isRecovery(b) && (["pending", "sending", "sent", "uncertain"].includes(b.state) || b.state === "blocked" && !b.settledAt))) throw new Error("Check the existing recovery before starting another.");
       w.batches.push({ id: batchId, enable_manual_recovery: true, messageId: randomUUID(), tasks: [{ key: `inventory:${w.id}`, kind: "inventory", target: w.id, title: "Recover workspace PR stacks and remaining work", fingerprint: String(w.inventory?.revision ?? 1) }], state: "pending", attempts: 1, createdAt: new Date(this.now()).toISOString(), sentAt: null, settledAt: null, result: "", recipientAgentId: null, contextPath: null, activityAt: null, acknowledgmentError: null, recoveryHandoffs: [] });
@@ -446,8 +446,8 @@ export class Engine {
     return this.sendRecoveryPending(workspaceId, batchId);
   }
   private async sendRecoveryPending(workspaceId: string, batchId: string): Promise<Workspace> {
-    const claimed = await this.store.mutate(state => {
-      const w = findWorkspace(state, workspaceId), b = w.batches.find(b => b.id === batchId);
+    const claimed = await this.store.mutateWorkspace(workspaceId, w => {
+      const b = w.batches.find(b => b.id === batchId);
       if (this.stopped || !w.enable_tracking || w.archived || !b || !isRecovery(b) || b.state !== "pending" || w.batches.some(other => other.id !== b.id && isRecovery(other) && (["pending", "sending", "sent", "uncertain"].includes(other.state) || other.state === "blocked" && !other.settledAt))) throw new Error("Recovery changed or another recovery is active.");
       b.state = "sending"; return { w, b };
     });
@@ -461,28 +461,27 @@ export class Engine {
     try {
       if (isRecovery(claimed.b)) {
         const recovery = await this.gateway.prepareRecovery(claimed.w, claimed.b);
-        await this.store.mutate(state => {
-          const b = findWorkspace(state, workspaceId).batches.find(b => b.id === batchId)!;
+        await this.store.mutateWorkspace(workspaceId, w => {
+          const b = w.batches.find(b => b.id === batchId)!;
           b.recipientAgentId = recovery.agentId; b.contextPath = recovery.contextPath;
         });
         claimed.b.recipientAgentId = recovery.agentId; claimed.b.contextPath = recovery.contextPath;
       } else {
         claimed.b.recipientAgentId = claimed.w.mainAgentId;
-        await this.store.mutate(state => { findWorkspace(state, workspaceId).batches.find(b => b.id === batchId)!.recipientAgentId = claimed.w.mainAgentId; });
+        await this.store.mutateWorkspace(workspaceId, w => { w.batches.find(b => b.id === batchId)!.recipientAgentId = claimed.w.mainAgentId; });
       }
       if (this.stopped) throw new Error("Follow-up stopped before delivery");
       sending = true;
       await this.gateway.send(claimed.w, claimed.b, batchPrompt(claimed.w, claimed.b));
-      await this.store.mutate(state => {
-        const b = findWorkspace(state, workspaceId).batches.find(b => b.id === batchId)!;
+      await this.store.mutateWorkspace(workspaceId, w => {
+        const b = w.batches.find(b => b.id === batchId)!;
         if (b.state === "sending") { b.state = "sent"; b.sentAt = new Date(this.now()).toISOString(); }
       });
     } catch (error) {
-      await this.store.mutate(state => {
-        const b = findWorkspace(state, workspaceId).batches.find(b => b.id === batchId)!;
+      await this.store.mutateWorkspace(workspaceId, w => {
+        const b = w.batches.find(b => b.id === batchId)!;
         if (b.state === "sending" && error instanceof ConversationGone) {
           // Nothing reached the agent. Keep the batch for a new agent and stop retrying this one.
-          const w = findWorkspace(state, workspaceId);
           b.state = "pending"; b.result = ""; b.recipientAgentId = null;
           w.goneAgent = { agentId: error.agentId, at: new Date(this.now()).toISOString(), reason: error.message };
           w.runtimeReason = GONE_REASON;
@@ -490,7 +489,7 @@ export class Engine {
         }
         if (b.state === "sending" && error instanceof DeliveryDeferred) {
           b.state = "pending"; b.result = "";
-          if (!isRecovery(b)) findWorkspace(state, workspaceId).runtimeReason = error.message;
+          if (!isRecovery(b)) w.runtimeReason = error.message;
           return;
         }
         if (b.state === "sending") { b.state = sending ? "uncertain" : "blocked"; b.result = sending ? "Delivery could not be confirmed. Check the assigned agent before retrying." : `Could not prepare the recovery agent: ${error instanceof Error ? error.message : "Unknown error"}`; }
@@ -599,8 +598,10 @@ export class Engine {
     });
   }
   async acknowledge(agentId: string, batchId: string, outcome: "completed" | "blocked", result: string, workspaceId?: string): Promise<Workspace> {
-    const w = await this.store.mutate(state => {
-      const w = agentWorkspace(state, agentId, "read", workspaceId);
+    // Resolved on the snapshot, written to that one workspace (a-send-never-clones-the-whole-state), re-checked inside.
+    const target = agentWorkspace(await this.store.snapshot(), agentId, "read", workspaceId);
+    const w = await this.store.mutateWorkspace(target.id, w => {
+      agentWorkspace({ version: 1, workspaces: [w] }, agentId, "read", w.id);
       requireTracking(w, agentId);
       const b = w.batches.find(b => b.id === batchId);
       if (!b || !["sending", "sent", "blocked", "uncertain"].includes(b.state)) throw new Error("Batch is not awaiting acknowledgment.");

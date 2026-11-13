@@ -126,6 +126,16 @@ function queuedReason(w: Workspace, b: Batch, now: number): { waitingOn: BatchVi
 }
 
 /** The batch that describes Follow-up's work right now: in flight, then stuck, then queued repairs, then the Done check. */
+let activeReading = 0, readings = 0;
+/**
+ * Runs `work` as one reading: inside it, perSnapshot answers an unfrozen workspace once too. For synchronous, pure work
+ * over workspaces that don't change while it runs, such as the status invariants (violations): the engine checks a
+ * tick's drafts before the store freezes them, and each invariant asks needsYou and batchView again.
+ */
+export function oneReading<T>(work: () => T): T {
+  const outer = activeReading; activeReading = ++readings;
+  try { return work(); } finally { activeReading = outer; }
+}
 /**
  * Answers a pure (workspace, clock) function once per frozen workspace and clock reading. The store hands out deep-frozen
  * snapshots, and one refresh asks the same questions of a workspace many times (each status invariant calls needsYou and
@@ -133,12 +143,14 @@ function queuedReason(w: Workspace, b: Batch, now: number): { waitingOn: BatchVi
  * realistic test:scale (2026-11-12). An unfrozen workspace (a test's mutable fixture) is always computed afresh.
  */
 export function perSnapshot<T>(fn: (w: Workspace, now: number) => T): (w: Workspace, now?: number) => T {
-  const cache = new WeakMap<Workspace, { now: number; value: T }>();
+  const cache = new WeakMap<Workspace, { now: number; reading: number; value: T }>();
   return (w, now = Date.now()) => {
-    if (!Object.isFrozen(w)) return fn(w, now);
+    const frozen = Object.isFrozen(w);
+    if (!frozen && !activeReading) return fn(w, now);
+    const reading = frozen ? 0 : activeReading;
     const hit = cache.get(w);
-    if (hit && hit.now === now) return hit.value;
-    const value = fn(w, now); cache.set(w, { now, value }); return value;
+    if (hit && hit.now === now && hit.reading === reading) return hit.value;
+    const value = fn(w, now); cache.set(w, { now, reading, value }); return value;
   };
 }
 export const batchView = perSnapshot(computeBatchView);

@@ -1,4 +1,5 @@
 import { recoveryBatch } from "./follow-up";
+import { oneReading } from "./status";
 import type { Actor } from "./actor";
 import { ANY_HOOK_TEXT_PREFIXES } from "./message-sender";
 import { BATCH_PREFIXES, RECOVERY_TITLES } from "./legacy";
@@ -310,6 +311,10 @@ export const INVARIANTS: Invariant[] = [
 ];
 
 export function violations(w: Workspace, now: number): { id: string; detail: string }[] {
+  // One reading: every invariant asks needsYou and batchView of the same workspace and clock (shared/status.ts perSnapshot).
+  return oneReading(() => checkAll(w, now));
+}
+function checkAll(w: Workspace, now: number): { id: string; detail: string }[] {
   const out: { id: string; detail: string }[] = [];
   for (const inv of INVARIANTS) {
     let detail: string | null;
