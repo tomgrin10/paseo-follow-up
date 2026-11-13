@@ -7,12 +7,13 @@
 import assert from "node:assert/strict";
 import { readFile, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { hostname, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { harness } from "./harness.mjs";
 import { harnessEnv } from "./harness-env.mjs";
+import { assertNoRealNames } from "./real-names.mjs";
 
 await harness();
 const shots = process.argv.includes("--shots") ? process.argv[process.argv.indexOf("--shots") + 1] : null;
@@ -27,12 +28,7 @@ const DOC_KEY = "@paseo:plugin-device-settings:follow-up/follow-up-view";
 const cases = [];
 const record = (name, ok, detail = "") => { cases.push({ name, ok }); console.log(`${ok ? "PASS" : "FAIL"} [${host}] ${name}${detail ? ` (${detail})` : ""}`); };
 
-const REAL_HOST = [hostname(), hostname().split(".")[0]].filter(h => h.length >= 4);
-const noRealHost = async page => {
-  const text = await page.evaluate(() => `${document.title}\n${document.body.innerText}`);
-  const hit = REAL_HOST.find(h => text.includes(h));
-  if (hit) throw new Error(`the page shows the real hostname (${hit}); a harness daemon must report HARNESS_HOST`);
-};
+const noRealHost = async page => assertNoRealNames(await page.evaluate(() => `${document.title}\n${document.body.innerText}`), "the page");
 const { chromium } = createRequire(process.env.PLAYWRIGHT_CORE + "/package.json")("playwright-core");
 const profile = await mkdtemp(join(tmpdir(), "follow-view-settings-browser-"));
 const context = await chromium.launchPersistentContext(profile, { executablePath: process.env.CHROMIUM, headless: true, viewport: { width: 1440, height: 1000 }, colorScheme: "light", args: ["--disable-extensions", "--no-first-run"] });
