@@ -1,1 +1,1 @@
-- A PR without reviewers asks once in Needs you: "Add reviewers to #240: Ravi", with the suggested reviewer on the row, instead of a separate reviewers card beside it.
+- A pull request without reviewers asks once in Needs you, naming the suggested reviewer ("Add reviewers to … : Ravi"), instead of a second reviewers card beside it.
