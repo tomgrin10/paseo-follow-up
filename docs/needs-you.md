@@ -220,6 +220,11 @@ card beside a question list.
   `briefAsks` (`shared/brief.ts`): a flagged row and a stated ask, never kind `done` ("Nothing needed"). A done brief
   on a row flagged for something else (a merged PR) leaves the block to that reason, and the flag's headline
   (`flagHeadline`: pill, sidebar row, Home row) reads it too (`doneBriefViolations` in `shared/status-invariants.ts`).
+- **One reviewers ask per PR** (`one-reviewers-ask-per-pr`). The "has no reviewers" row names whom Follow-up
+  suggests (`suggestedReviewers`: the repository's or default reviewers minus the author) in the brief's own words,
+  "Add reviewers to #240: Ravi" (`reviewersAsk` in `shared/reviewers.ts`). Follow-up's reviewers brief folds into that
+  row (`needsYouBlock`), so the PR asks once and counts 1; a reviewers brief for a PR without a row keeps its card
+  (`reviewersBriefViolations` in `shared/status-invariants.ts`, `tests/fold-reviewers.test.ts`).
 - **Asks first.** The agent's open brief that points at open questions (`questionIds`) becomes the first of those
   questions' cards: the question's title, its Q chip and asked age, the brief's context, the options with Send, and
   what the agent does meanwhile as the footer. A brief that points at no open question keeps its own card, drawn bare
