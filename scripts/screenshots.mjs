@@ -1259,7 +1259,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   }
   if (only.includes("review-mode")) await reviewModeShots({ shoot, call });
   if (only.includes("pr-link")) await prLinkShots({ shoot, billing });
-  if (only.includes("merge-click")) await mergeClickShots({ shoot });
+  if (only.includes("merge-click")) await mergeClickShots({ shoot, billing });
   if (only.includes("put-in-chat")) await putInChatShots({ shoot, seeded, call, billing });
   if (only.includes("needs-you-states")) {
     // One Needs you block per surface: each state on the panel (desktop) and Home's detail pane (desktop and phone),
@@ -1362,7 +1362,7 @@ async function prLinkShots({ shoot, billing }) {
  * Home's detail pane on phone, light and dark. A merge leaves #151 open in the fake, and Follow-up offers it again 30 s
  * after the submit, so each theme waits that out before clicking again.
  */
-async function mergeClickShots({ shoot }) {
+async function mergeClickShots({ shoot, billing }) {
   const TALL = { width: DESKTOP.width, height: 1100 };
   const single = { title: "Search filters", button: "Merge pull request #151", merged: /Merged #151/ };
   const stackRow = { title: MERGE_CLICK_STATES[0].title, prompt: MERGE_CLICK_STATES[0].prompt, button: "Merge 3 pull requests in order: #250, #251, then #252", merged: /Merged #252/ };
@@ -1374,6 +1374,11 @@ async function mergeClickShots({ shoot }) {
     await shoot(`mc-${key}-panel-${theme}`, TALL, theme, page => panel(page, r));
     await shoot(`mc-${key}-home-phone-${theme}`, PHONE, theme, page => phone(page, r));
   }
+  // Held: Billing's #143 is approved but sits on #142, whose checks fail, so it has no Merge row; the Pull requests card
+  // and Home's detail pane say what holds it, both numbers linked.
+  const held = async page => { const line = page.getByText("#143 approved · waits on #142 (checks failing)").filter({ visible: true }).first(); await line.waitFor({ timeout: 60_000 }); await line.scrollIntoViewIfNeeded(); };
+  await shoot("mc-held-panel-light", TALL, "light", async page => { await page.setViewportSize(TALL); await openChat(page, billing.title, billing.prompt); await page.getByRole("button", { name: "Follow-up", exact: true }).last().click(); await held(page); });
+  await shoot("mc-held-home-phone-dark", PHONE, "dark", async page => { await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, billing.title)).click(); await held(page); });
   // The click: "Merging…" while the fake gh runs, then the toast with the row gone. A submitted merge hides its row
   // (Follow-up waits for GitHub), so each click uses its own PR: #151 on a phone in light, the stack on the panel in dark.
   const click = (r, theme, open, size) => async page => {

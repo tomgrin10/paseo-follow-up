@@ -122,7 +122,10 @@ the cold start's spawns and compares).
   "Add #N to merge queue". `mergeClick` prepares, and confirms the plan at once only when `planBlockers` finds none:
   no plan or row blocker, the same PRs, the same heads the button showed. Otherwise nothing merges and the row says
   why. `mergeScope` is null only when `downstack` throws (a parent cycle, a PR outside the inventory); that button
-  opens the PR sheet's confirm instead.
+  opens the PR sheet's confirm instead. Merge is offered only when every PR it would merge can merge; an approved PR
+  held by one under it isn't an ask (that PR is the agent's repair) but never goes quiet: `heldMerges`
+  (`shared/attention.ts`) puts "#143 approved · waits on #142 (checks failing)" in the panel's Pull requests card and
+  Home's detail pane (`HeldMerges`, `client/merge-button.tsx`), both numbers linked.
 - **Agents** use `merge`, `enable_merge_when_ready` and `disable_merge_when_ready`, which plan and then confirm.
 - **Interrupted sends.** A reload mid-send marks the action `uncertain`.
 

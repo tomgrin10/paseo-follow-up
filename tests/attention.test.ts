@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { workspaceHeadline } from "../shared/headline";
-import { ago, headline, liveLine, mergeReady, needsYou, overviewStatus, prTone, stackBar, stackOrder } from "../shared/attention";
+import { heldMerges, ago, headline, liveLine, mergeReady, needsYou, overviewStatus, prTone, stackBar, stackOrder } from "../shared/attention";
+import { linkify } from "../shared/links";
+import { prLinksByNumber } from "../shared/presentation";
 import { clock, pr, snapshot, workspace } from "./fixtures";
 import type { Batch } from "../shared/model";
 
@@ -42,12 +44,17 @@ test("needs-you lists one action per decision and respects Auto and send guards"
   // #3 is approved but sits on #2, which conflicts: its one-click Merge would merge #2 too and be refused, so it isn't
   // offered (a-click-on-merge-merges). The conflict on #2 is the work.
   assert.deepEqual(items.map(i => i.kind), ["decision", "send"]);
+  // It never goes quiet: the panel's Pull requests card and Home's detail pane say what holds it, both numbers linked.
+  const waits = heldMerges(w, clock);
+  assert.deepEqual(waits.map(h => h.line), ["#3 approved · waits on #2 (conflicts)"]);
+  assert.deepEqual(linkify(waits[0].line, prLinksByNumber(w.prs)).filter(r => r.url).map(r => [r.text, r.label]), [["#3", "Open pull request #3"], ["#2", "Open pull request #2"]]);
   const send = items.find(i => i.kind === "send");
   assert.equal(send?.kind === "send" && send.blocker, null);
   assert.deepEqual(needsYou({ ...w, enable_auto_sends: true }, clock).map(i => i.kind), ["decision"], "Auto sends without asking");
   // Once #2 can merge too, #3 offers Merge (its click merges #2 and #3).
   const fixed = w.prs.map(p => p.number === 2 ? { ...p, snapshot: { ...p.snapshot!, conflict: false, reviewDecision: "APPROVED" as const, graphiteMergeStatus: "READY_TO_MERGE" } } : p);
   assert.deepEqual(needsYou({ ...w, prs: fixed, enable_auto_sends: true }, clock).filter(i => i.kind === "merge").map(i => i.kind === "merge" && i.number), [2, 3]);
+  assert.deepEqual(heldMerges({ ...w, prs: fixed }, clock), [], "nothing held once #2 can merge");
   const busy = needsYou({ ...w, runtimeBusy: true }, clock).find(i => i.kind === "send");
   assert.equal(busy?.kind === "send" && busy.blocker, "Sends after the agent's current turn");
   const held = needsYou({ ...w, hold: "You stopped the main agent. Resume follow-up when ready." }, clock);
