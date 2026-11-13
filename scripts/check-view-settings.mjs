@@ -124,6 +124,40 @@ try {
     await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeout(800); await noRealHost(page);
     await page.screenshot({ path: join(shots, `view-settings-${host}-phone.png`) });
   }
+
+  // Home's group folds: every group persists except Needs you, which opens on every mount.
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const openHome = async () => {
+    await page.goto(`http://127.0.0.1:${p.port}/`); await dismissNotes();
+    await page.getByRole("button", { name: "Follow-up", exact: true }).first().click();
+    await page.getByRole("button", { name: /^Needs you, \d+\./ }).first().waitFor({ timeout: 30000 });
+  };
+  await openHome();
+  const needs = () => page.getByRole("button", { name: /^Needs you, \d+\./ }).first();
+  const headers = await page.locator('[role="button"][aria-expanded][aria-label]').evaluateAll(els => els.map(e => e.getAttribute("aria-label")).filter(l => /^[^,]+, \d+\. (Collapse|Expand)$/.test(l) && !l.startsWith("Needs you")));
+  const otherTitle = headers[0]?.split(",")[0];
+  record("Home shows Needs you and another group to fold", !!otherTitle, headers.join(" | "));
+  const other = () => page.getByRole("button", { name: new RegExp(`^${otherTitle}, \\d+\\.`) }).first();
+  const otherBefore = await other().getAttribute("aria-expanded");
+  await other().click(); await needs().click();
+  record("closing Needs you holds for this mount", await needs().getAttribute("aria-expanded") === "false");
+  await page.waitForTimeout(1500);
+  await page.reload(); await page.getByRole("button", { name: /^Needs you, \d+\./ }).first().waitFor({ timeout: 30000 }).catch(openHome);
+  await page.waitForTimeout(1500);
+  record("after reload Needs you opens again", await needs().getAttribute("aria-expanded") === "true");
+  const otherAfter = await other().getAttribute("aria-expanded");
+  record(`after reload ${otherTitle} keeps its fold`, otherAfter !== otherBefore, `before=${otherBefore} after=${otherAfter}`);
+  if (host === "0.16") {
+    const doc = JSON.parse(await page.evaluate(k => localStorage.getItem(k), DOC_KEY) ?? "{}");
+    const keys = Object.keys(doc.values?.entries ?? {});
+    record("0.16: the device document holds the Home fold, never Needs you's", keys.some(k => k.startsWith("follow-up.home.fold.")) && !keys.includes("follow-up.home.fold.needs"), keys.join(","));
+  }
+  if (shots) {
+    await page.mouse.move(0, 0); await noRealHost(page);
+    await page.screenshot({ path: join(shots, `view-home-${host}-desktop.png`) });
+    await page.setViewportSize({ width: 390, height: 844 }); await page.emulateMedia({ colorScheme: "dark" }); await page.waitForTimeout(800); await noRealHost(page);
+    await page.screenshot({ path: join(shots, `view-home-${host}-phone.png`) });
+  }
 } catch (error) {
   const page = context.pages()[0];
   const names = await page?.getByRole("button").evaluateAll(els => els.map(e => e.getAttribute("aria-label") || e.textContent?.trim()).filter(Boolean).slice(0, 80)).catch(() => []);
