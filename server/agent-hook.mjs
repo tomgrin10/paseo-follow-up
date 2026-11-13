@@ -64,7 +64,7 @@ export function overseerDigest(file, seen, now = Date.now(), { needsMax = 20, ch
     if (needs.length > needsMax) lines.push(`- …${needs.length - needsMax} more: workstreams(group="needs")`);
   } else lines.push("Nothing needs the developer right now.");
   if (!prior) {
-    const active = rows.filter(r => r.group === "running" || r.group === "fixing");
+    const active = rows.filter(r => r.group === "running" || r.group === "sending");
     lines.push(`First turn. Running now (${active.length}):`);
     for (const r of active.slice(0, changedMax)) lines.push(`- ${r.line}`);
     if (active.length > changedMax) lines.push(`- …${active.length - changedMax} more: workstreams(group="running")`);

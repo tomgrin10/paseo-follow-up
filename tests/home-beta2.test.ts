@@ -241,7 +241,7 @@ test("set_priorities plans first, then stores what it showed", async () => {
 test("one set of counts for the strip, the badge and the brief", () => {
   const model = sortFixture("priority");
   const counts = homeCounts(model);
-  assert.equal(counts.needs, 4); assert.equal(counts.quiet, 1); assert.equal(counts.fixing, 0); assert.equal(counts.archivable, 0);
+  assert.equal(counts.needs, 4); assert.equal(counts.quiet, 1); assert.equal(counts.sending, 0); assert.equal(counts.archivable, 0);
   assert.equal(counts.needs, model.needs);
 });
 
