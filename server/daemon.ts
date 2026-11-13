@@ -28,7 +28,29 @@ import { compactionDelivered, turnIdOf } from "../shared/status";
 import { activeWindowMs, backgroundCount, isLive, isLoaded, recentlyUsed, workspaceActive, conversationGone, DEFAULT_ACTIVE_WINDOW_DAYS, DAY_MS } from "./agent-load";
 import { HistoryCache } from "./history-cache";
 import { DaemonDirectory, type DirectoryRows } from "./directory";
-type RecoveryAgentOptions = Partial<PluginBeforeRequests["agent.create"]["config"]> & { workspaceId: string; labels: Record<string, string>; idempotencyKey: string; env: Record<string, string> };
+type RecoveryAgentOptions = Partial<PluginBeforeRequests["agent.create"]["config"]> & { workspaceId: string; labels: Record<string, string>; idempotencyKey: string; env: Record<string, string>; /** Paseo 0.16 (features.backgroundAgents): no tab, no notification, no sidebar row. */ background?: boolean };
+
+/**
+ * Plan #8: on a host that advertises features.backgroundAgents (Paseo 0.16) the recovery agent is created
+ * `background: true`, so it opens no tab, pings no phone and shows no sidebar row; Follow-up's panel is where its batch
+ * shows. Elsewhere the options are returned untouched (the same object): the 0.15 path is byte-for-byte today's, and
+ * the 0.16 SDK throws if `background` reaches a host without the feature. Invariant
+ * recovery-is-quiet-keeps-its-tools-and-unloads.
+ */
+export function withBackground<T extends object>(options: T, hostHasBackgroundAgents: boolean): T & { background?: true } {
+  return hostHasBackgroundAgents ? { ...options, background: true as const } : options;
+}
+
+/**
+ * "Unloads" means host-collectable: Paseo's idle-runtime cleanup (agents.idleRuntimeCleanup, on by default) closes an
+ * idle agent after 60 minutes, background ones included, and no plugin API closes one by id. So a settled recovery
+ * batch must leave its agent with nothing that vetoes collection: no running turn, no pending permission, no live
+ * background work. A violation is a bug in the batch's ending (tests/recovery-background.test.ts).
+ */
+export function recoveryCollectable(agent: Pick<Agent, "status" | "pendingPermissions" | "activeTurn" | "backgroundWork">): boolean {
+  const work = Number(agent.backgroundWork?.count ?? 0);
+  return agent.status === "idle" && !agent.activeTurn && agent.pendingPermissions.length === 0 && !(work > 0);
+}
 
 export const paseoHome = process.env.PASEO_HOME ?? join(homedir(), ".paseo");
 export type Agent = { id: string; provider: string; cwd: string; model?: string | null; currentModeId?: string | null; runtimeInfo?: { modeId?: string | null } | null; thinkingOptionId?: string | null; features?: { id: string; value: unknown }[]; persistence?: { sessionId: string; nativeHandle?: string } | null; title?: string | null; createdAt: string; workspaceId?: string; status: string; archivedAt?: string | null; labels: Record<string, string>; lastUserMessageAt: string | null; pendingPermissions: unknown[]; activeTurn?: unknown; lastError?: string | null; /** Paseo 0.16 background agent; absent on 0.15. */ background?: boolean; /** Paseo 0.16: live background work (absent on 0.15). */ backgroundWork?: { count?: unknown } | null };
@@ -261,6 +283,8 @@ export class PaseoGateway implements Gateway {
   readonly workspaceCwds = new Map<string, string[]>();
   /** Settings → Agents' "recovery" role; unset or "Same as main agent" copies the main agent. */
   recoveryRole: (() => Promise<RecoveryRole>) | null = null;
+  /** Whether the host advertises features.backgroundAgents (server/host-features.ts); false on Paseo 0.15. */
+  backgroundAgents: () => Promise<boolean> = async () => false;
   /**
    * Linked items' passive ingress: references in the entries this poll read for loaded agents (shared/linked-extract.ts),
    * per workspace. Only entries past the cached cursor count, so a re-read overlap is never a second sighting.
@@ -600,7 +624,8 @@ export class PaseoGateway implements Gateway {
       const preapproved = (config.toolPolicy?.preapproved ?? []).filter(tool => !(MCP_SERVERS as readonly string[]).includes(tool.server ?? ""));
       // A 1.x main agent may still carry the old bridge; the recovery agent gets only the current one.
       const inherited = Object.fromEntries(Object.entries(config.mcpServers ?? {}).filter(([name]) => !(MCP_SERVERS as readonly string[]).includes(name)));
-      const agent = await client.createAgent({
+      const background = await this.backgroundAgents().catch(() => false);
+      const agent = await client.createAgent(withBackground({
         ...config,
         workspaceId: w.id, cwd: main.cwd, provider: chosen.provider, ...(chosen.model ? { model: chosen.model } : {}),
         title: RECOVERY_TITLE, idempotencyKey: `follow-up-recovery:${batch.id}`,
@@ -609,7 +634,7 @@ export class PaseoGateway implements Gateway {
         mcpServers: { ...inherited, [MCP_SERVER]: { type: "stdio", command: process.execPath, args: [bridge], env: { FOLLOW_UP_CLIENT_ENTRY: clientEntry(), FOLLOW_UP_RECOVERY: "1", ELECTRON_RUN_AS_NODE: "1" } } },
         toolPolicy: { preapproved: [...preapproved, ...tools.map(tool => ({ kind: "mcp" as const, server: MCP_SERVER, tool }))] },
         env: { FOLLOW_UP_CLI: bridge, FOLLOW_UP_CLIENT_ENTRY: clientEntry(), FOLLOW_UP_RECOVERY: "1" },
-      });
+      }, background));
       return { agentId: agent.id, contextPath };
     });
   }

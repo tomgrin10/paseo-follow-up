@@ -135,7 +135,7 @@ test("the inbox keeps the Overseer out of rows and counts and returns its row ap
   const directory: Directory = { async agents() { return agents; }, async workspaces() { return [{ id: "w-ov", name: "Overseer" }, { id: "w1", name: "SCIM" }]; }, async agent(id) { return agents.find(a => a.id === id) ?? null; }, async tail() { return []; }, async clearAttention() {} };
   const none: Sources = { ledger: async () => [], defer: async () => false, session: async () => false, schedule: async () => false };
   const inbox = new Inbox(dir, { enabled: async () => ({ enable_inbox: true, enable_inbox_pr_closed: true }), directory, sources: none, guard: async () => null, graceMs: 5, settleMs: 1, settleStepMs: 1, now: () => NOW, overseer: async () => "ov" });
-  await inbox.store.mutate(s => { s.importedAt = at(60); s.lastSeen = at(1); s.primedAt = at(60); });
+  await inbox.store.mutate(s => { s.importedAt = at(60); s.lastSeen = at(1); s.primedAt = at(60); s.notifiedAt = at(60); });
   await inbox.turnEnded({ id: "ov", workspaceId: "w-ov" }, { kind: "completed" }, "t1");
   await inbox.turnEnded({ id: "a1", workspaceId: "w1" }, { kind: "completed" }, "t2");
   const list = await inbox.list();
