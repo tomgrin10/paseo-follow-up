@@ -71,14 +71,15 @@ export class DaemonDirectory {
 
   /**
    * The cached rows, re-read when due. `fresh: "agents"` re-reads only the agent list (cheap; no paseo.json reads),
-   * for a decision that must see current status. `fresh: true` re-reads everything.
+   * for a decision that must see current status. `fresh: true` re-reads everything. `force` re-lists agents even when
+   * this tick already did: only for a caller whose list lacks an agent it must find (Track; tracking-waits-for-a-new-agent).
    */
-  async read(options: { fresh?: boolean | "agents" } = {}): Promise<DirectoryRows> {
+  async read(options: { fresh?: boolean | "agents"; force?: boolean } = {}): Promise<DirectoryRows> {
     if (this.loading) { await this.loading.catch(() => undefined); if (!options.fresh) return this.read(); }
     const now = this.now();
     const rows = this.rows;
     const due = !rows || options.fresh === true || now - rows.at >= BACKSTOP_REFRESH_MS || (this.dirty && now - rows.at >= DIRTY_REFRESH_MS);
-    if (!due && rows && options.fresh === "agents") return this.listedThisTick() ? rows : this.refreshAgents();
+    if (!due && rows && options.fresh === "agents") return this.listedThisTick() && !options.force ? rows : this.refreshAgents();
     if (!due && rows && !this.projectsStale) return rows;
     if (!due && rows) return this.refreshProjects();
     let failedProjects = false;
