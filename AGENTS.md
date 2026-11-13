@@ -74,7 +74,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 
 | Subsystem | Files | Doc |
 | --- | --- | --- |
-| Worker entry, RPC wiring, session attach, teardown | `index.server.ts`, `shared/contracts.ts`, `server/rpc-timing.ts`, `server/teardown.ts`, `server/daemon.ts`, `server/shared-file.ts`, `server/directory.ts`, `server/store.ts`, `server/list-cache.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
+| Worker entry, RPC wiring, session attach, teardown | `index.server.ts`, `shared/contracts.ts`, `server/feeds.ts`, `server/rpc-timing.ts`, `server/teardown.ts`, `server/daemon.ts`, `server/shared-file.ts`, `server/directory.ts`, `server/store.ts`, `server/list-cache.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
 | Discovery, ownership, main agent | `server/discovery.ts`, `server/turn-events.ts`, `server/workspace-agent.ts`, `server/background-agents.ts`, `server/submissions.ts`, `server/pr-owner.ts`, `server/exclusions.ts`, `server/history-cache.ts`, `server/recovery-handoff.ts`, `server/recovery-config.ts`, `shared/settings.ts` | [workspaces](docs/workspaces.md) |
 | Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/send-decision.ts`, `shared/task-rows.ts`, `shared/task-status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
 | Needs-you inbox, brief, Home | `server/inbox.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/sending.ts`, `shared/needs-block.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts` | [needs-you](docs/needs-you.md) |
@@ -210,6 +210,15 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    review. Every consumer (the reviewers ask, merge asks, the quiet merge, status invariants) reads that helper, never
    `pr.agentMerges`; the set of No review repositories is filled before the first tick and on every save, so the
    lookup costs a set read. Guarded by `tests/review-mode.test.ts` ([docs/prs.md](docs/prs.md#review-mode)).
+18. **An idle open client makes at most one RPC a minute** (`idle-client-makes-at-most-one-rpc-a-minute`). On Paseo
+   0.16 the client subscribes to the worker's feeds (`follow.workspaces-feed`, `follow.inbox-feed`, `follow.home-feed`,
+   `follow.display-feed`) instead of polling. The worker serves each topic once, from state it already holds, and
+   pushes only a value that changed: no polling on the server and no per-subscriber timers (`server/feeds.ts`). On
+   0.15 (no `client.subscribe`) the client polls as before. Quiet must not mean stale: a feed the worker closes (a
+   restart) or refuses polls until it resubscribes and stays subscribed, and a feed that keeps dropping backs off
+   instead of looping (`openFeed`, `client/feeds.ts`). Guarded by `tests/idle-rpc.test.ts`
+   (ten simulated minutes of the real stores, on both hosts), `tests/feed-recovery.test.ts`, `tests/feeds.test.ts`
+   and `npm run test:feeds` (the harness, end to end) ([docs/client.md](docs/client.md#feeds)).
 
 ## Bugs
 

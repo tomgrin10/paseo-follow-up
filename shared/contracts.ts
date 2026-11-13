@@ -7,7 +7,7 @@ import { usageSchema } from "./usage";
 import { aboutViewSchema } from "./about";
 import { LINKED_KINDS, linkedItemSchema } from "./linked";
 import { AGENT_ROLES, agentSettingsViewSchema, savedRoleSchema } from "./agent-settings";
-import { defineRpc } from "@getpaseo/plugin";
+import { defineRpc, type PluginSubscriptionContract } from "@getpaseo/plugin";
 import { ONBOARDING_ACTIONS, ONBOARDING_STEPS, checksSchema, onboardingViewSchema } from "./onboarding";
 import { z } from "zod";
 import { inboxRowSchema } from "./inbox";
@@ -273,3 +273,22 @@ export const createdItemsRpc = defineRpc({ name: "follow.created-items",
     agents: z.record(z.string(), z.object({ title: z.string().nullable(), state: z.enum(["working", "idle", "closed", "archived"]), workspaceId: z.string().nullable(), main: z.boolean() })),
     workspaces: z.record(z.string(), z.object({ name: z.string().nullable(), follow: followLineSchema.nullable() })),
   }) });
+
+/**
+ * Subscriptions (Paseo 0.16, `client.subscribe`): the polled reads above as pushes from the worker's own state
+ * (server/feeds.ts). Plain objects rather than `defineSubscription`, which a 0.15 host's SDK doesn't have; on 0.15 the
+ * client keeps polling the RPCs (`client/feeds.ts`). Each pushes its current value first, then only real changes.
+ */
+const subscription = <I extends z.ZodType, E extends z.ZodType>(name: string, input: I, event: E): PluginSubscriptionContract<I, E> => ({ name, input, event });
+export const workspacesFeed = subscription("follow.workspaces-feed", z.object({ since: z.number().optional() }),
+  z.object({ revision: z.number(), full: z.boolean(), workspaces: z.array(workspaceSchema), removed: z.array(z.string()), error: z.string().nullable() }));
+export const inboxFeed = subscription("follow.inbox-feed", z.object({}), inboxListRpc.output);
+/** Home's extras: priorities, the ranker, the Overseer and the usage meters (without the worker's live resources). */
+export const homeFeed = subscription("follow.home-feed", z.object({}), z.object({
+  priorities: prioritiesRpc.output.shape.items, rank: rankStatusSchema, overseer: overseerStatusSchema,
+  usage: usageSchema.nullable(),
+  /** False when Smart Session's data directory can't be watched: the client reads usage once a minute instead. */
+  usageLive: z.boolean(),
+}));
+export const displayFeed = subscription("follow.display-feed", z.object({}), z.object({ status: z.string(), revision: z.string().optional(), values: z.unknown().optional() }));
+export const FEEDS = [workspacesFeed, inboxFeed, homeFeed, displayFeed] as const;
