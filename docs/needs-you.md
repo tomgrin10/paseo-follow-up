@@ -232,6 +232,9 @@ sending them, so the answer stays in Needs you as "Your Qn answer isn't sent yet
   action `send`); the dialog's Send to agent does the same.
 - **Escape hatch.** If the marker was edited away, Sign off (or mute) on that agent's row settles it as signed off
   (`signedOffAnswers`); the dialog reads "You signed it off; Follow-up didn't see it in the chat."
+- **Every surface tells the same story** (`answerStatus`, `shared/questions.ts`). The chat's card, the dialog's answer
+  block, Needs you, the Home row and the panel's Activity all read one helper: "In your message box · not sent yet" or
+  "Copied · not sent yet" (muted, no check) until the answer is delivered; "Answered" only then.
 - **Put in chat** (`put-in-chat-never-rewrites-a-draft`, `shared/put-in-chat.ts`): focus the composer at the end of
   the draft, then insert the answer, after a blank line when there's a draft. It never calls `setPrompt`, inserts
   nothing when the exact answer is already there, and falls back to Copy when the composer can't come on screen.
