@@ -129,7 +129,7 @@ try {
         const fold = page.getByRole("button", { name: /Spec, agent and recovery/ }).first();
         await fold.waitFor({ timeout: 30000 });
         if (await fold.getAttribute("aria-expanded") !== "true") await fold.click();
-        await page.getByText(state === "failed" ? "Recovery needs a check" : "Last recovery finished", { exact: true }).first().waitFor({ timeout: 30000 });
+        await page.getByText(state === "failed" ? /^Recovery needs a check/ : /^Last recovery finished/).first().waitFor({ timeout: 30000 });
         const open = page.getByRole("button", { name: "Open recovery agent", exact: true }).first();
         const shown = await open.isVisible().catch(() => false);
         record(`${state} ${label}: the Recovery row offers "Open recovery agent"`, shown, `visible=${shown}`);
