@@ -430,9 +430,18 @@ export function rowViolations(row: Pick<InboxRow, "agentId" | "status" | "needs"
  * violation. `outside-fact-is-live`, 2026-11-11 wks_5dfd3a65: "Add reviewers #107" stayed after #107 merged, in a
  * repository nobody reviews.
  */
+/** A merge flag later than this after the merge re-fired an old transition (the worker reads a merged PR within minutes). */
+const REFIRE_MS = 24 * 3_600_000;
 export function factFlagViolations(rows: Pick<InboxRow, "agentId" | "needs">[], workspaces: Workspace[]): { id: string; detail: string }[] {
   const out: { id: string; detail: string }[] = [];
   for (const row of rows) {
+    // a-pr-flag-fires-once-per-transition (2026-11-13): a merge flag raised long after the merge is an old transition
+    // re-fired ("#92 merged" two days later, evicted from a 200-key ring), never news.
+    for (const end of row.needs?.reasons.filter(r => r.reason === "pr_merged") ?? []) {
+      const n = Number(/#(\d+)/.exec(end.detail)?.[1]);
+      const mergedAt = workspaces.flatMap(w => w.prs).find(p => p.number === n && p.snapshot?.state === "MERGED" && p.snapshot.mergedAt)?.snapshot?.mergedAt;
+      if (mergedAt && Date.parse(end.at) - Date.parse(mergedAt) > REFIRE_MS) out.push({ id: "a-pr-flag-fires-once-per-transition", detail: `${row.agentId} flags "${end.detail}" at ${end.at}, the PR merged at ${mergedAt}` });
+    }
     const flag = row.needs?.reasons.find(r => r.reason === "reviewers");
     if (!flag) continue;
     const prs = workspaces.filter(w => w.enable_tracking && !w.archived).flatMap(w => w.prs.filter(p => (p.registeredAgentId ?? w.mainAgentId) === row.agentId).map(p => ({ p, w })));

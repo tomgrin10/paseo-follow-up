@@ -75,6 +75,9 @@ they need a running `npm run preview` and read `.preview-isolated.json`. Some dr
 - `scripts/check-chat-grouping.mjs`: a synthetic mixed turn for chat-grouping screenshots (starts its own isolated daemon).
 - `scripts/check-sender-steps.mjs`: Home's Recent steps with one message from every sender kind; fails on a raw `<paseo-system` envelope or overflow (starts its own isolated daemon).
 - `scripts/check-optional-recovery.mjs`: recovery only on request.
+- `scripts/check-recovery-background.mjs`: the recovery agent on Paseo 0.16 (`HARNESS_PASEO=0.16`) and 0.15: background
+  only with `features.backgroundAgents`, tools after a reload, host-collectable after acknowledge or failure, and the
+  panel's Recovery row (`--shots <dir>`).
 - `scripts/check-project-settings.mjs`: per-project defaults.
 - `scripts/check-reviewers.mjs` and `scripts/check-reviewer-concurrency.mjs`: reviewer requests.
 - `scripts/check-task-triggers.mjs`: merge and deploy triggers.
