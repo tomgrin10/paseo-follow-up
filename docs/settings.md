@@ -19,7 +19,7 @@
   `{ values: { home_sort: "recent" } }`.
 - **Display fields** are read and written by agents through `display_settings` and `set_display`
   (`DISPLAY_TOOLS` in `server/agent-parity.ts`, PARITY key `settings.display`).
-- **View state is per device; settings are per host** (invariant 20, `view-state-is-per-device-settings-are-per-host`).
+- **View state is per device; settings are per host** (invariant 22, `view-state-is-per-device-settings-are-per-host`).
   View state is how this screen looks on this device: the settings category, which sections are folded, Home's group
   folds and the What's new version last seen. On Paseo 0.16 it lives in the device settings document `follow-up-view`
   (`{ migrated, entries }`, keyed by the old localStorage names). The worker and agents never see it, so it has no
