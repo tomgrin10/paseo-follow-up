@@ -117,32 +117,46 @@ try {
       // The Follow-up tab may already be the open one (the phone keeps the last panel): then this click is a no-op.
       await page.getByRole("button", { name: "Follow-up", exact: true }).last().click({ timeout: 5000 }).catch(() => undefined);
     } });
-    await openWorkspace();
-    for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["phone", { width: 390, height: 844 }]]) {
-      if (label === "phone") { await page.setViewportSize(viewport); await page.emulateMedia({ colorScheme: "dark" }); }
-      await panelToggle().click();
-      const fold = page.getByRole("button", { name: /Spec, agent and recovery/ }).first();
-      await fold.waitFor({ timeout: 30000 });
-      if (await fold.getAttribute("aria-expanded") !== "true") await fold.click();
-      const open = page.getByRole("button", { name: "Open recovery agent", exact: true }).first();
-      const shown = await open.isVisible().catch(() => false);
-      record(`${label}: the Recovery row offers "Open recovery agent"`, shown, `visible=${shown}`);
-      await page.getByText("Recovery", { exact: true }).first().scrollIntoViewIfNeeded();
-      await page.waitForTimeout(600);
-      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), viewport.width, "no horizontal overflow");
-      if (shots) { await noRealHost(page); await mkdir(shots, { recursive: true }); await page.screenshot({ path: join(shots, `recovery-row-${host}-${label}.png`) }); }
-      if (label === "desktop" && host016 && shown) {
-        // openAgent on a background agent: it opens a "Follow-up recovery" tab with the agent's chat (plan #8 item 3).
-        await open.click();
-        await page.waitForTimeout(2500);
-        const url = page.url();
-        const opens = url.includes(agentId) || await page.getByText("Follow-up recovery", { exact: true }).first().isVisible().catch(() => false);
-        record("pressing it opens the background agent's chat in a tab (openAgent works, so the button stays)", opens, `url=${url.replace(/^https?:\/\/[^/]+/, "")}`);
-        if (shots) { await noRealHost(page); await page.screenshot({ path: join(shots, `recovery-open-${host}-desktop.png`) }); }
-        await page.goto(`http://127.0.0.1:${p.port}/`);
-        await openWorkspace();
+    // The Recovery block says it once (recovery-offers-one-primary-action): Retry after a failure, Run otherwise.
+    const actionShown = name => page.getByRole("button", { name, exact: true }).filter({ visible: true }).count().then(n => n > 0);
+    const rows = async state => {
+      await page.setViewportSize({ width: 1440, height: 1000 }); await page.emulateMedia({ colorScheme: "light" });
+      await page.goto(`http://127.0.0.1:${p.port}/`);
+      await openWorkspace();
+      for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["phone", { width: 390, height: 844 }]]) {
+        if (label === "phone") { await page.setViewportSize(viewport); await page.emulateMedia({ colorScheme: "dark" }); }
+        await panelToggle().click();
+        const fold = page.getByRole("button", { name: /Spec, agent and recovery/ }).first();
+        await fold.waitFor({ timeout: 30000 });
+        if (await fold.getAttribute("aria-expanded") !== "true") await fold.click();
+        await page.getByText(state === "failed" ? "Recovery needs a check" : "Last recovery finished", { exact: true }).first().waitFor({ timeout: 30000 });
+        const open = page.getByRole("button", { name: "Open recovery agent", exact: true }).first();
+        const shown = await open.isVisible().catch(() => false);
+        record(`${state} ${label}: the Recovery row offers "Open recovery agent"`, shown, `visible=${shown}`);
+        const run = await actionShown("Run recovery"), retry = await actionShown("Retry recovery");
+        record(`${state} ${label}: one primary action, ${state === "failed" ? "Retry recovery" : "Run recovery"}`, state === "failed" ? retry && !run : run && !retry, `run=${run} retry=${retry}`);
+        await page.getByText("Recovery", { exact: true }).first().scrollIntoViewIfNeeded();
+        await page.waitForTimeout(600);
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), viewport.width, "no horizontal overflow");
+        if (shots) { await noRealHost(page); await mkdir(shots, { recursive: true }); await page.screenshot({ path: join(shots, `recovery-row-${host}-${state}-${label}.png`) }); }
+        if (state === "failed" && label === "desktop" && host016 && shown) {
+          // openAgent on a background agent: it opens a "Follow-up recovery" tab with the agent's chat (plan #8 item 3).
+          await open.click();
+          await page.waitForTimeout(2500);
+          const url = page.url();
+          const opens = url.includes(agentId) || await page.getByText("Follow-up recovery", { exact: true }).first().isVisible().catch(() => false);
+          record("pressing it opens the background agent's chat in a tab (openAgent works, so the button stays)", opens, `url=${url.replace(/^https?:\/\/[^/]+/, "")}`);
+          if (shots) { await noRealHost(page); await page.screenshot({ path: join(shots, `recovery-open-${host}-desktop.png`) }); }
+          await page.goto(`http://127.0.0.1:${p.port}/`);
+          await openWorkspace();
+        }
       }
-    }
+    };
+    await rows("failed");
+    // Idle: one more recovery that finishes.
+    const last = await recover();
+    await call("follow.acknowledge", { agentId: last.recipientAgentId, batchId: last.id, outcome: "completed", result: "Synthetic recovery result: nothing missed" });
+    await rows("idle");
   } catch (error) {
     // Show what the page had, so a selector miss is readable without a rerun.
     await page.mouse.move(900, 400).catch(() => undefined);
