@@ -108,17 +108,17 @@ test("an unreadable reviewers.json is reported, never silently replaced", async 
   assert.equal(await readFile(join(dir, "reviewers.json"), "utf8"), "{not json");
 });
 
-test("migration: an install that requested reviewers keeps them (latest submitted request per repo, legacy names); it runs once and never overwrites", async t => {
+test("migration: an install that requested reviewers keeps them (latest submitted request per repo, logins only); it runs once and never overwrites", async t => {
   const state: State = { version: 1, workspaces: [
     workspace({ id: "w1", prActions: [
-      asked(["herosecurity/hero-poc#1362"], ["uyy-hero-security", "yuvalgoder-star"], "2026-10-01T00:00:00.000Z"),
-      asked(["herosecurity/hero-poc#1400"], ["someone-else"], "2026-09-01T00:00:00.000Z"),
-      asked(["herosecurity/hero-poc#1401"], ["failed-person"], "2026-11-01T00:00:00.000Z", "failed"),
+      asked(["acme/acme-poc#1362"], ["reviewer-a", "reviewer-b"], "2026-10-01T00:00:00.000Z"),
+      asked(["acme/acme-poc#1400"], ["someone-else"], "2026-09-01T00:00:00.000Z"),
+      asked(["acme/acme-poc#1401"], ["failed-person"], "2026-11-01T00:00:00.000Z", "failed"),
     ] }),
     workspace({ id: "w2", prActions: [asked(["acme/api#7"], ["ana", "acme/platform"])] }),
   ] } as State;
   assert.deepEqual(seedFromHistory(state), {
-    "herosecurity/hero-poc": [{ login: "uyy-hero-security", name: "Uri" }, { login: "yuvalgoder-star", name: "Yuval" }],
+    "acme/acme-poc": [{ login: "reviewer-a", name: null }, { login: "reviewer-b", name: null }],
     "acme/api": [{ login: "ana", name: null }, { login: "acme/platform", name: null }],
   });
   const dir = await tmp(t);
@@ -126,15 +126,15 @@ test("migration: an install that requested reviewers keeps them (latest submitte
   await store.save("acme/api", people("kept"));
   const migrated = await store.migrate(state, new Date(clock));
   assert.deepEqual(migrated.repos["acme/api"], people("kept"), "a list the developer already set wins");
-  assert.deepEqual(migrated.repos["herosecurity/hero-poc"].map(r => r.name), ["Uri", "Yuval"]);
+  assert.deepEqual(migrated.repos["acme/acme-poc"].map(r => r.name), [null, null], "public-code-carries-no-host-identifiers: no names from the code");
   assert.ok(migrated.migratedAt);
-  await store.save("herosecurity/hero-poc", []);
-  assert.equal((await store.migrate(state)).repos["herosecurity/hero-poc"], undefined, "a second start doesn't seed again");
+  await store.save("acme/acme-poc", []);
+  assert.equal((await store.migrate(state)).repos["acme/acme-poc"], undefined, "a second start doesn't seed again");
   setReviewerConfig(emptyReviewerConfig());
 });
 
 test("migration: a fresh install, or one that never requested reviewers, starts empty", async t => {
-  const fresh = await new ReviewerConfigStore(await tmp(t)).migrate({ version: 1, workspaces: [workspace({ prs: [pr({ repo: "herosecurity/hero-poc", key: "herosecurity/hero-poc#1" })] })] } as State);
+  const fresh = await new ReviewerConfigStore(await tmp(t)).migrate({ version: 1, workspaces: [workspace({ prs: [pr({ repo: "acme/acme-poc", key: "acme/acme-poc#1" })] })] } as State);
   assert.deepEqual(fresh.repos, {}); assert.deepEqual(fresh.defaults, []); assert.ok(fresh.migratedAt);
   setReviewerConfig(emptyReviewerConfig());
 });

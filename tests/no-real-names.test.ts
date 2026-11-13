@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { inflateSync } from "node:zlib";
 import { createHash } from "node:crypto";
-import { COMPANY_HASHES, EXCLUDED, NAME_HASHES, RENDER_ALLOW, TICKET_HASHES, assertNoRealNames, deniedNames, hashWord, machineNames } from "../scripts/real-names.mjs";
+import { COMPANY_HASHES, EXCLUDED, NAME_HASHES, TICKET_HASHES, assertNoRealNames, deniedNames, hashWord, machineNames } from "../scripts/real-names.mjs";
 
 /**
  * no-real-names-in-renders-or-fixtures (2026-11-13). The repo is public, and the harness fixtures named their workspace,
@@ -58,11 +58,8 @@ test("no-real-names-in-renders-or-fixtures: the denylist stores the company only
   for (const name of machineNames()) assert.ok(!src.toLowerCase().includes(name.toLowerCase()), `${SELF} spells this machine's name`);
 });
 
-test("no-real-names-in-renders-or-fixtures: every excluded path exists and names the PR that removes it", async () => {
-  for (const [file, reason] of Object.entries(EXCLUDED)) {
-    assert.equal(reason, "removed by the Q55 host-config PR", file);
-    await readFile(join(root, file)); // a path that's gone drops off the list
-  }
+test("public-code-carries-no-host-identifiers: no file is excluded from the scan", () => {
+  assert.deepEqual(EXCLUDED, {}, "host configuration belongs in host settings, not in an excluded file");
 });
 
 test("no-real-names-in-renders-or-fixtures: what counts as a real name", () => {
@@ -88,7 +85,6 @@ test("no-real-names-in-renders-or-fixtures: what counts as a real name", () => {
 test("no-real-names-in-renders-or-fixtures: a render naming the machine or company is refused", () => {
   for (const name of machineNames()) assert.throws(() => assertNoRealNames(`served by ${name}`, "shot"), /real name/);
   assert.doesNotThrow(() => assertNoRealNames("Home · acme-project · dev-box", "shot"));
-  assert.doesNotThrow(() => assertNoRealNames(`Default tracking for ${RENDER_ALLOW[0]}`, "shot"), "the default-tracked repo, read from product code");
   assert.doesNotThrow(() => assertNoRealNames("Default tracking for acme/app", "shot", ["acme/app"]));
 });
 

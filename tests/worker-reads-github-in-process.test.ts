@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pr } from "./fixtures";
+import { acmeDeploy, pr } from "./fixtures";
 
 // Invariant worker-reads-github-in-process. 2026-11-11 (#116) moved PR polling off gh; the rc.3 live check (2026-11-12)
 // still saw ~50 `gh api …/compare/…` spawns after a start: Deployments.contains() was a read path #116 didn't cover,
@@ -16,8 +16,8 @@ test("worker-reads-github-in-process: no read path spawns gh; tokens resolve onc
   const dir = await mkdtemp(join(tmpdir(), "follow-reads-")); t.after(() => rm(dir, { recursive: true, force: true }));
   const log = join(dir, "spawns.log"); await writeFile(log, "");
   const shim = (name: string, body: string) => `#!/usr/bin/env node\nrequire("fs").appendFileSync(${JSON.stringify(log)}, ${JSON.stringify(name)} + " " + process.argv.slice(2).join(" ") + "\\n");\nconst a = process.argv.slice(2);\n${body}\n`;
-  const services = ["backend", "etl", "interpretation", "public-api", "web"].map(role => ({ metadata: { name: `hero-service-vspm-${role}-x`, labels: { "cloud.googleapis.com/location": "us-central1" } }, status: { conditions: [{ type: "Ready", status: "True" }], traffic: [{ revisionName: `${role}-r1`, percent: 100 }] } }));
-  const revision = { spec: { containers: [{ name: "app", image: `us-central1-docker.pkg.dev/hero-production-environments/hero-docker-repo/prod-vspm-backend@sha256:${"1".repeat(64)}` }] }, status: { conditions: [{ type: "Ready", status: "True" }] } };
+  const services = ["backend", "etl", "interpretation", "public-api", "web"].map(role => ({ metadata: { name: `acme-service-app-${role}-x`, labels: { "cloud.googleapis.com/location": "us-central1" } }, status: { conditions: [{ type: "Ready", status: "True" }], traffic: [{ revisionName: `${role}-r1`, percent: 100 }] } }));
+  const revision = { spec: { containers: [{ name: "app", image: `us-central1-docker.pkg.dev/acme-prod/acme-docker/prod-app-backend@sha256:${"1".repeat(64)}` }] }, status: { conditions: [{ type: "Ready", status: "True" }] } };
   await writeFile(join(dir, "gh"), shim("gh", `console.log(a[1] === "graphql" ? "{}" : "[]");`));
   await writeFile(join(dir, "gcloud"), shim("gcloud", `console.log(a[0] === "auth" ? "registry-token" : a[1] === "services" ? ${JSON.stringify(JSON.stringify(services))} : ${JSON.stringify(JSON.stringify(revision))});`));
   await writeFile(join(dir, "gh-auth"), shim("gh-auth", `if (a[1] === "status") console.error("Logged in to github.com account personal\\nLogged in to github.com account work"); else console.log("token-" + (a[a.indexOf("--user") + 1] || "active"));`));
@@ -49,9 +49,9 @@ test("worker-reads-github-in-process: no read path spawns gh; tokens resolve onc
   const registry = (async (url: string) => ({ ok: true, text: async () => JSON.stringify(String(url).includes("/manifests/") ? { config: { digest: `sha256:${"3".repeat(64)}` } } : { config: { Labels: { "org.opencontainers.image.revision": "b".repeat(40) } } }) })) as unknown as typeof fetch;
 
   // Every read path, default wiring.
-  const deployments = new Deployments(undefined, registry);
+  const deployments = new Deployments(undefined, registry, undefined, undefined, acmeDeploy);
   const github = new Github(undefined, undefined, deployments);
-  const merged = pr({ repo: "herosecurity/hero-poc", key: "herosecurity/hero-poc#1", snapshot: { ...pr().snapshot!, state: "MERGED", mergeCommit: "a".repeat(40) } });
+  const merged = pr({ repo: "acme/acme-poc", key: "acme/acme-poc#1", snapshot: { ...pr().snapshot!, state: "MERGED", mergeCommit: "a".repeat(40) } });
   await github.observe([pr(), merged]);
   await deployments.observe([merged]);
   await new ReviewerSuggestions().suggest("example/app");
