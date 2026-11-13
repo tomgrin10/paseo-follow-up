@@ -77,7 +77,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | Worker entry, RPC wiring, session attach, teardown | `index.server.ts`, `shared/contracts.ts`, `server/feeds.ts`, `server/rpc-timing.ts`, `server/teardown.ts`, `server/daemon.ts`, `server/shared-file.ts`, `server/directory.ts`, `server/request-trace.ts`, `server/store.ts`, `server/cow.ts`, `server/json-file-store.ts`, `server/list-cache.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
 | Discovery, ownership, main agent | `server/discovery.ts`, `server/turn-events.ts`, `server/workspace-agent.ts`, `server/background-agents.ts`, `server/submissions.ts`, `server/pr-owner.ts`, `server/exclusions.ts`, `server/history-cache.ts`, `server/recovery-handoff.ts`, `server/recovery-config.ts`, `shared/settings.ts` | [workspaces](docs/workspaces.md) |
 | Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/send-decision.ts`, `shared/task-rows.ts`, `shared/task-status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/put-in-chat.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
-| Needs-you inbox, brief, Home | `server/inbox.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/sending.ts`, `shared/needs-block.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts` | [needs-you](docs/needs-you.md) |
+| Needs-you inbox, brief, Home | `server/inbox.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `server/turn-timeline.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/sending.ts`, `shared/needs-block.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts` | [needs-you](docs/needs-you.md) |
 | Summary (internal id `about`), Rename with AI | `server/about.ts`, `server/transcript.ts`, `shared/about.ts`, `server/rename.ts`, `shared/rename.ts` | [ai-roles](docs/ai-roles.md) |
 | Linked items (Linear issues, Slack threads, docs a workspace is about) | `server/linked.ts`, `shared/linked.ts`, `shared/linked-extract.ts`, `shared/linked-display.ts`, `client/linked.tsx`, `client/brand-icons.ts` | [linked-items](docs/linked-items.md) |
 | Overseer, priority ranker, AI jobs, Settings → Agents | `server/overseer.ts`, `server/overseer-prompt.md`, `server/ranker.ts`, `server/priorities.ts`, `server/ai-jobs.ts`, `server/agent-settings.ts`, `shared/overseer.ts`, `shared/ranker.ts`, `shared/priorities.ts`, `shared/agent-settings.ts` | [ai-roles](docs/ai-roles.md) |
@@ -146,11 +146,17 @@ These are product rules. Each has tests, and breaking one is a bug even when the
      the store serialises once per real write. Every JSON writer in `server/` uses it or carries an exemption with a
      reason. Guarded by `tests/inbox-copies.test.ts`, `tests/store-copies.test.ts`, `tests/discovery-noop.test.ts`
      (a discovery tick that finds nothing new copies nothing) and `test:scale`'s busy window.
-   - **A timeline entry is read once** (`a-rescan-reads-only-new-entries`, `a-turn-end-reads-the-turn-once`): a running
-     agent's rescan reads forward from its cached cursor (`direction: "after"`), never a fixed newest page, and a turn
-     end reads its own turn (back to the item that started it, at most `TURN_READ_CAP`) once, shared by the engine and
-     the inbox (`turnItems`, `server/inbox-directory.ts`). Guarded by `tests/incremental.test.ts`,
-     `tests/turn-read.test.ts` and `test:scale`'s busy window.
+   - **A timeline entry is read once** (`a-rescan-reads-only-new-entries`, `a-turn-end-reads-the-turn-once`,
+     `a-turn-s-timeline-is-read-once`): every reader of a turn shares one cursor per agent (`server/turn-timeline.ts`).
+     The turn start reads what's new since the agent's last read (the prompt), the turn end reads what's new since
+     then (the turn, one request up to 100 entries), shared by the engine and the inbox (`turnItems`,
+     `server/inbox-directory.ts`), and discovery's rescan after it takes that read instead of fetching it again. A
+     running agent's rescan reads forward from its cached cursor (`direction: "after"`), never a fixed newest page.
+     Without a cursor (first turn after start-up, a new epoch, a gap) a turn read goes back from the tail to the turn's
+     prompt, at most `TURN_READ_CAP`. Run T, 2026-11-13 (live copy, 20 turns a minute of 31 entries of 8 KB): 3.2
+     reads and ~125 entries fetched per turn before; 2 reads and its own entries after. Guarded by
+     `tests/turn-read-once.test.ts`, `tests/incremental.test.ts`, `tests/turn-read.test.ts` and `test:scale`'s busy
+     window.
    - **A running worker holds one daemon connection** (`a-running-worker-holds-one-daemon-connection`): the shared
      connection's idle close is the engine's tick plus a named margin, so ticks reuse it. Guarded by
      `tests/daemon-connection.test.ts`.
