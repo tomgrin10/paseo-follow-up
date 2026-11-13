@@ -154,7 +154,7 @@ function QuestionState({ workspace: w, questionId, theme }: { workspace: Workspa
  */
 export function NeedsYouBlock({ workspace: w, theme, compact, actions, now, brief = null, briefCard = null, style }: {
   workspace: Workspace; theme: Theme; compact: boolean; actions: NeedActions; now: number;
-  /** The agent's open brief this surface shows, or null. */ brief?: Pick<Brief, "questionIds" | "context"> | null;
+  /** The agent's open brief this surface shows, or null. */ brief?: Pick<Brief, "questionIds" | "context" | "kind" | "moves"> | null;
   /** That brief's own card, drawn when it points at no open question. */ briefCard?: ReactNode; style?: StyleProp<ViewStyle>;
 }) {
   useReviewerSettings(); // re-renders on a No review change, so the block's rows and count drop the asks at once

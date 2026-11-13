@@ -10,6 +10,7 @@ import { createPaseoWorkspaces } from "./client/home-data";
 import { createHomeExtras } from "./client/home-view";
 import { contributeChat } from "./client/chat";
 import { contributeCreated } from "./client/created";
+import { hasFeeds } from "./client/feeds";
 import { createLiveStore, headerIcon, sidebarItem } from "./client/live";
 import { contributeFollowUpPill } from "./client/pill";
 import { FollowLarge, LARGE_SCREEN } from "./client/large";
@@ -122,7 +123,7 @@ export default function contribute(host: PluginClientContext) {
     client.addSlashCommand({ name: "follow-up", description: "Open this workspace's PRs and remaining work", argumentHint: "", context: "agent", onSubmit({ openPanel }) { openPanel(PANEL, { location: location() }); } }),
     contributeChat(client),
     // Agents and workspaces an agent creates: a card that opens them, relayed through Home (timeline items get no navigation).
-    contributeCreated(client, { openAgent: briefDeps.openAgent, openWorkspace: workspaceId => client.openScreen({ screenId: OVERVIEW, params: { next: String(++nextToken), openWorkspace: workspaceId } }) }),
+    contributeCreated(client, { watchAgent: hasFeeds(client) ? extras.watchAgent : null, openAgent: briefDeps.openAgent, openWorkspace: workspaceId => client.openScreen({ screenId: OVERVIEW, params: { next: String(++nextToken), openWorkspace: workspaceId } }) }),
     contributeFollowUpPill(client, { inbox, live: store, openPanel, openNext }),
     contributeInboxCommands(client, inbox, openNext),
     contributeBrief(client, briefDeps),

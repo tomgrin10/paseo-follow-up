@@ -1,5 +1,5 @@
 import { useState, useSyncExternalStore } from "react";
-import { browserKey, BROWSER_POLL_MS, liveBriefKey, LIVE_BRIEF_POLL_MS, workspaceKey } from "./keys";
+import { browserKey, liveBriefKey, LIVE_BRIEF_POLL_MS, workspaceKey } from "./keys";
 import { Platform, View, useWindowDimensions } from "react-native";
 import { Pressable, Text } from "./text";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -375,7 +375,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   const notes = useNotes(b.id);
   const notesOpen = useNotesOpen(b.id);
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" } | null>(null);
-  const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), refetchInterval: BROWSER_POLL_MS, enabled: !!sheet });
+  const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), enabled: !!sheet, staleTime: 0, refetchOnMount: "always" });
   // Send again on an undelivered answer: the same answerId, so the server resends that answer and never a second one.
   const resend = () => {
     // Only a send in flight blocks it: a resolved card is never "actionable", but its undelivered answer can go again.
