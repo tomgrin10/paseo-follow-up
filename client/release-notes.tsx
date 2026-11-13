@@ -5,8 +5,9 @@ import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, ScrollView } from "@getpaseo/plugin/client/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { releaseNotesRpc, whatsNewSeenRpc } from "../shared/contracts";
-import { LAST_SEEN_KEY, recentNotes, whatsNew, type NoteBlock, type ReleaseNote, type ReleaseNotesView } from "../shared/changelog";
-import { deviceStorage } from "../shared/settings-nav";
+import { LAST_SEEN_KEY, deviceSeenFrom, recentNotes, whatsNew, type NoteBlock, type ReleaseNote, type ReleaseNotesView } from "../shared/changelog";
+import { deviceStorage, viewStatus } from "../shared/settings-nav";
+import { useViewVersion } from "./view-store";
 import { Button, text, type Theme } from "./kit";
 import { useOnboarding } from "./onboarding";
 import { useReducedMotion } from "./motion";
@@ -272,11 +273,14 @@ export function WhatsNewSheet({ open, name, notes, all, theme, compact, onClose,
 }
 
 /**
- * Where "seen" lives. Web and desktop keep it per device (localStorage). The native app has no localStorage, so it
- * falls back to the host's record: What's new then shows once per host there, not on every launch.
+ * Where "seen" lives: per device, in the device document on 0.16 (the phone included), else localStorage on web and
+ * desktop. A native app without either falls back to the host's record: What's new then shows once per host there,
+ * not on every launch. While the device document is still loading nothing decides (undefined), so What's new never
+ * shows from a stale answer.
  */
-const persistent = () => { try { return typeof (globalThis as { localStorage?: Storage }).localStorage?.getItem === "function"; } catch { return false; } };
-const seenOnDevice = (view: ReleaseNotesView) => persistent() ? deviceStorage.get(LAST_SEEN_KEY) : view.hostSeen;
+const localStore = () => { try { return typeof (globalThis as { localStorage?: Storage }).localStorage?.getItem === "function"; } catch { return false; } };
+const persistent = () => viewStatus() === "ready" || localStore();
+const seenOnDevice = (view: ReleaseNotesView) => deviceSeenFrom({ status: viewStatus(), local: localStore(), stored: () => deviceStorage.get(LAST_SEEN_KEY), hostSeen: view.hostSeen });
 
 // One What's new per app session: the first mounted Follow-up surface claims it, the rest render nothing.
 let claimedBy: string | null = null;
@@ -297,7 +301,11 @@ export function WhatsNewGate({ surface, theme, compact }: { surface: string; the
   const seen = useRpc(whatsNewSeenRpc); const cache = useQueryClient();
   const [closed, setClosed] = useState(false);
   const view = query.data;
-  const decision = useMemo(() => view ? whatsNew({ installed: view.version, deviceSeen: seenOnDevice(view), previous: view.previous, onboarding, notes: view.notes }) : null, [view, onboarding]);
+  const viewVersion = useViewVersion();
+  const decision = useMemo(() => {
+    const deviceSeen = view ? seenOnDevice(view) : undefined;
+    return view && deviceSeen !== undefined ? whatsNew({ installed: view.version, deviceSeen, previous: view.previous, onboarding, notes: view.notes }) : null;
+  }, [view, onboarding, viewVersion]);
   useEffect(() => {
     if (!decision || !view) return;
     if (!decision.show) { if (decision.record && persistent()) deviceStorage.set(LAST_SEEN_KEY, decision.record); return; }
