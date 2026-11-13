@@ -335,7 +335,7 @@ export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
         if (e.snooze?.until === `pr:${event.prKey}`) e.snooze = null;
         // pr-label-matches-state: a merge flags as merged; a-merge-the-agent-made-never-flags-the-developer: quiet flags nothing.
         const merged = event.merged ?? / merged$/.test(event.detail);
-        if (!event.quiet) flag(merged ? "pr_merged" : "pr_closed", event.detail, merged ? "pr_merged" : "pr_closed");
+        if (!event.quiet) flag(merged ? "pr_merged" : "pr_closed", event.detail, merged ? "pr_merged" : "pr_closed", event.prKey);
       }
       break;
     case "sign_off": { // #13

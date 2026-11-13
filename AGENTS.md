@@ -247,6 +247,12 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    "No ask stated" or a done brief's "Nothing needed" is drawn only while nothing in Needs you speaks for the row;
    beside a question or an answer waiting to be sent it would say there's nothing to do. One predicate decides it,
    `briefCardShown` in `shared/brief.ts`. Guarded by `tests/brief-card.test.ts`.
+22. **A row that names a PR opens it in one click** (`a-row-that-names-a-pr-opens-it-in-one-click`). Every Needs-you
+   item about one PR carries `pr` (`prLink` in `shared/presentation.ts`: Graphite when the PR ships through Graphite,
+   else GitHub, the PR sheet's rule), and its row draws that link beside its action, never instead of it. Every "#N"
+   that a Needs-you row or a brief names, and the workspace tracks, links that PR (`PrLinksProvider`,
+   `client/rich-text.tsx`); a brief about a PR has Open PR; `inbox_list` gives agents each row's PR urls. Guarded by
+   `tests/pr-open-link.test.ts` and `INVARIANTS`.
 
 ## Bugs
 
