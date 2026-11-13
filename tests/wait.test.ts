@@ -15,13 +15,15 @@ import { WAIT_STANDALONE_NOTE, waitNote } from "../shared/wait";
 import { setWaitRpc } from "../shared/contracts";
 import { PARITY } from "../server/agent-parity";
 import { parseAgentSettings } from "../shared/agent-settings";
+/** Paseo 0.16 requires `metadata` on hook agents and session requests; spread, so 0.15's types accept it too. */
+const withMetadata = { metadata: {} };
 
 async function dir(t: { after: (f: () => Promise<void>) => void }, prefix = "follow-wait-") {
   const root = await mkdtemp(join(tmpdir(), prefix)); t.after(() => rm(root, { recursive: true, force: true })); return root;
 }
 const request = (cwd: string, patch: Partial<PluginSessionOpenRequest> = {}): PluginSessionOpenRequest => ({
   agentId: "synthetic", provider: "claude", cwd, workspaceId: null, title: null, labels: {}, tools: [], mcpServers: { existing: { type: "http", url: "http://127.0.0.1:1/mcp" } },
-  reason: "create", purpose: "interactive", env: { KEEP: "yes" }, ...patch,
+  reason: "create", purpose: "interactive", env: { KEEP: "yes" }, ...withMetadata, ...patch,
 });
 const tool = (wait: Wait, name: string) => wait.tools.find(t => t.name === name)!;
 function context(agentId: string, cwd: string, opts: { signal?: AbortSignal; lastUserMessageAt?: () => string | null } = {}): AgentToolContext {
