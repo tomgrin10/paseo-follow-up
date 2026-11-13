@@ -29,7 +29,8 @@ not a patch for one instance.
     while subscribed.
   - `tests/feed-recovery.test.ts`: the same stores (`tests/client-stores.ts` bundles them and fakes the host) stay
     correct on their feeds: a push lands with no RPC, a worker restart makes them poll and resubscribe within 5 s of
-    its return, and a feed the worker refuses polls only that store.
+    its return, a feed the worker refuses polls only that store, and a host that accepts each subscription and drops
+    it at once costs no more reads than one that refuses.
   - `tests/rpc-ack.test.ts`: every client RPC replies within 500 ms with Paseo, the daemon and gh hanging
     (`tests/support/hanging-host.ts` runs the real `contribute()` in a temp home), or has an `EXEMPT` reason.
   - `tests/rpc-cached.test.ts`: the polled reads (Needs you's list, usage, the Summary) answer from what the worker

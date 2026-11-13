@@ -215,7 +215,8 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    `follow.display-feed`) instead of polling. The worker serves each topic once, from state it already holds, and
    pushes only a value that changed: no polling on the server and no per-subscriber timers (`server/feeds.ts`). On
    0.15 (no `client.subscribe`) the client polls as before. Quiet must not mean stale: a feed the worker closes (a
-   restart) or refuses polls until it resubscribes (`openFeed`, `client/feeds.ts`). Guarded by `tests/idle-rpc.test.ts`
+   restart) or refuses polls until it resubscribes and stays subscribed, and a feed that keeps dropping backs off
+   instead of looping (`openFeed`, `client/feeds.ts`). Guarded by `tests/idle-rpc.test.ts`
    (ten simulated minutes of the real stores, on both hosts), `tests/feed-recovery.test.ts`, `tests/feeds.test.ts`
    and `npm run test:feeds` (the harness, end to end) ([docs/client.md](docs/client.md#feeds)).
 

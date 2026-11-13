@@ -168,8 +168,9 @@ through `openFeed` ([rpcs-and-tools](rpcs-and-tools.md#subscriptions-paseo-016))
 `client.subscribe` (Paseo 0.15) the store polls its RPC as before. `openFeed` keeps each feed open: when the worker
 restarts (a plugin reload or a crash closes every subscription) or refuses a topic (an older worker during a rolling
 reload), the store reads at once, polls until the feed is back, and subscribes again every second for 15 tries, then
-backing off to 30 s. Once a subscription is acknowledged the poll stops and the worker's first event brings the store
-up to date. A websocket reconnect is the host's: it replays open subscriptions. `tests/feed-recovery.test.ts` and
+backing off to 30 s. A resubscribe's events apply as soon as it is acknowledged, and once it has stayed open for 30 s
+(`FEED_STEADY_MS`) the poll stops and the retry count starts over. So a host that accepts each subscription and drops
+it at once costs what a refusing one does (the store's own poll, retries every 30 s), not a read a second. A websocket reconnect is the host's: it replays open subscriptions. `tests/feed-recovery.test.ts` and
 `npm run test:feeds` (the harness, end to end) prove a push lands, and that a restart or a refused feed recovers. A store's `refresh()`
 after an action is a no-op with a feed, since the worker pushes the change. Opening reads only what a feed leaves
 out: the Home order once (it migrates this device's old choice) and `follow.usage` once (the worker's resources).

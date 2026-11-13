@@ -1,7 +1,7 @@
 import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 import { bundleStores, fakeHost, settle, type SubscribeMode } from "./client-stores";
-import { feedRetryMs, FEED_RETRY_FAST } from "../client/feeds";
+import { feedRetryMs, FEED_RETRY_FAST, FEED_STEADY_MS } from "../client/feeds";
 
 /**
  * Invariant idle-client-makes-at-most-one-rpc-a-minute keeps the client quiet; these keep it correct. A feed that never
@@ -62,6 +62,7 @@ test("the worker restarts: every store reads at once, polls while it's gone, res
     c.host.push("follow.workspaces-feed", { revision: 1, full: true, workspaces: [workspace("w1", "After the restart")], removed: [], error: null });
     await c.tick(500);
     assert.deepEqual(c.live.all().map(w => w.title), ["After the restart"], "the resubscribed feed's events land");
+    await c.tick(FEED_STEADY_MS); // the stores poll until the new subscriptions have stayed open
     const quiet = Date.now();
     await c.tick(5 * 60_000);
     const rpm = c.callsSince(quiet) / 5;
@@ -82,12 +83,34 @@ for (const mode of ["refuse", "throw"] as const) {
       c.host.setMode(() => "serve");
       await c.tick(31_000);
       assert.equal(c.host.live("follow.inbox-feed"), 1, "subscribed once the worker serves it");
+      await c.tick(FEED_STEADY_MS);
       const quiet = Date.now();
       await c.tick(60_000);
       assert.equal(c.callsSince(quiet, "follow.inbox-list"), 0, "and stops polling");
     } finally { await c.close(); }
   });
 }
+
+test("a host that accepts each subscription and drops it at once costs what a refusing host does, not a read a second", { timeout: 120_000 }, async () => {
+  // Reads per minute once the retries have backed off (minutes 2-5), per store, under a host in `mode`.
+  const STORES = ["follow.list", "follow.inbox-list", "follow.overseer-status", "follow.priorities"];
+  const run = async (mode: SubscribeMode) => {
+    const c = await open(() => mode);
+    try {
+      const at = Date.now();
+      await c.tick(5 * 60_000);
+      const tries = c.host.subscribed.filter(s => s.at >= at && s.name === "follow.workspaces-feed").map(s => s.at);
+      const rates = Object.fromEntries(STORES.map(name => [name, c.callsSince(at + 2 * 60_000, name) / 3]));
+      return { gaps: tries.slice(1).map((t, i) => t - tries[i]), rates };
+    } finally { await c.close(); }
+  };
+  const flap = await run("flap"), refuse = await run("refuse");
+  assert.ok(flap.gaps.length >= 3 && flap.gaps.slice(-3).every(g => g >= 30_000), `retries back off to 30 s (gaps ${flap.gaps.join(", ")} ms)`);
+  for (const name of STORES) {
+    assert.ok(flap.rates[name] <= refuse.rates[name], `${name}: ${flap.rates[name]} reads a minute when dropped, ${refuse.rates[name]} when refused`);
+    assert.ok(flap.rates[name] <= 4, `${name}: ${flap.rates[name]} reads a minute, at most the 15 s fallback poll`);
+  }
+});
 
 test("resubscribe: every second for the first tries, then backing off to 30 s", () => {
   assert.equal(feedRetryMs(0), 1_000); assert.equal(feedRetryMs(FEED_RETRY_FAST - 1), 1_000);
