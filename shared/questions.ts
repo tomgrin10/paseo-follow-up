@@ -307,7 +307,50 @@ export function collapseDuplicateQuestions(questions: Question[], now: number): 
  * off (they edited the marker away, or answered another way). 2026-11-13: Copy recorded the answer and the question left
  * Needs you at once, though nothing had been sent.
  */
-export const awaitingSend = (q: Pick<Question, "answer">) => q.answer?.by === "developer" && (q.answer.delivery.state === "copied" || q.answer.delivery.state === "in-chat");
+export const awaitingSend = (q: Pick<Question, "answer">) => !!answerStatus(q)?.waiting;
+
+/**
+ * One answer's delivery as every surface names it: the question dialog's answer block (`answerHeading`), the chat's
+ * brief card (`briefAnswerStatus`), Needs you and the Home row's headline (`awaitingSend` in shared/attention.ts). An
+ * answer copied or put in the agent's chat reads "not sent yet" everywhere until it is delivered; only then "Answered".
+ * Part of an-answer-leaves-needs-you-only-when-delivered: 2026-11-13, the chat card said "Answered 12:00 PM" with a
+ * check while the answer sat unsent in the message box and Needs you said it wasn't sent.
+ */
+export type AnswerStatus = {
+  /** It reached the agent (sent, or the agent recorded it from chat). */
+  delivered: boolean;
+  /** The developer's to send: copied, or in the agent's message box. */
+  waiting: "in-chat" | "copied" | null;
+  /** The short state, for a card's corner: "Answered", "Copied · not sent yet"… */
+  label: string;
+};
+export function answerStatus(q: Pick<Question, "answer">): AnswerStatus | null {
+  const a = q.answer;
+  if (!a) return null;
+  const mine = a.by === "developer";
+  switch (a.delivery.state) {
+    case "in-chat": return { delivered: false, waiting: mine ? "in-chat" : null, label: "In your message box · not sent yet" };
+    case "copied": return { delivered: false, waiting: mine ? "copied" : null, label: "Copied · not sent yet" };
+    case "sending": return { delivered: false, waiting: null, label: "Sending…" };
+    case "queued": return { delivered: false, waiting: null, label: "Waiting for the agent" };
+    case "unconfirmed": return { delivered: false, waiting: null, label: "Not confirmed" };
+    case "signed-off": return { delivered: false, waiting: null, label: "Signed off" };
+    case "sent": case "recorded": return { delivered: true, waiting: null, label: "Answered" };
+  }
+}
+/** The answer block's first line in the question dialog: "You answered B · …", or "Your answer, not sent yet: B · …". */
+export function answerHeading(q: Pick<Question, "answer" | "options">): { text: string; waiting: boolean } | null {
+  const a = q.answer, s = answerStatus(q);
+  if (!a || !s) return null;
+  const label = isOther(a.choice) ? OTHER_LABEL : answerLabel(q, a.choice);
+  if (s.waiting) return { text: `Your answer, not sent yet: ${label}`, waiting: true };
+  return { text: `${a.by === "agent" ? "Answered in chat: " : "You answered "}${label}`, waiting: false };
+}
+/** A brief card over questions (its decisions): the least delivered of their answers, so it never reads Answered early. */
+export function briefAnswerStatus(questionIds: readonly string[], questions: readonly Pick<Question, "id" | "answer">[]): AnswerStatus | null {
+  const all = questionIds.map(id => questions.find(q => q.id === id)).map(q => q ? answerStatus(q) : null).filter((s): s is AnswerStatus => !!s);
+  return all.find(s => s.waiting) ?? all.find(s => !s.delivered) ?? all[0] ?? null;
+}
 /** What marks a pasted or composer-sent answer in the agent's chat: answerMessage's first words. */
 export const answerMarker = (id: string) => `${ANSWER_PREFIX} ${id} (`;
 
