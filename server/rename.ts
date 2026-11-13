@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename as move, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { JsonFileStore } from "./json-file-store";
 import { dailyBudget } from "../shared/about";
 import type { RoleConfig } from "../shared/agent-settings";
 import {
@@ -41,25 +42,9 @@ export function renameDaemon(connect: <T>(work: (client: TitleDaemon) => Promise
   };
 }
 
-export class RenameStore {
-  private tail: Promise<unknown> = Promise.resolve();
-  constructor(private directory: string) {}
-  private get path() { return join(this.directory, "rename.json"); }
-  async read(): Promise<RenameFile> {
-    try { return renameFileSchema.parse(JSON.parse(await readFile(this.path, "utf8"))); } catch { return structuredClone(EMPTY_RENAME_FILE); }
-  }
-  mutate<T>(fn: (file: RenameFile) => T): Promise<T> {
-    const next = this.tail.then(async () => {
-      const file = await this.read();
-      const result = fn(file);
-      await mkdir(this.directory, { recursive: true, mode: 0o700 });
-      const temporary = `${this.path}.${randomUUID()}`;
-      await writeFile(temporary, JSON.stringify(file), { mode: 0o600 });
-      await move(temporary, this.path);
-      return result;
-    });
-    this.tail = next.catch(() => undefined);
-    return next;
+export class RenameStore extends JsonFileStore<RenameFile> {
+  constructor(directory: string) {
+    super({ path: join(directory, "rename.json"), schema: renameFileSchema as never, empty: () => structuredClone(EMPTY_RENAME_FILE), move });
   }
 }
 

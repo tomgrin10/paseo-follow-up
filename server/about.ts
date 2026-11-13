@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { JsonFileStore } from "./json-file-store";
 import { promisify } from "node:util";
 import { z } from "zod";
 import {
@@ -255,29 +256,9 @@ const fileSchema = z.object({
 type AboutFile = z.infer<typeof fileSchema>;
 
 /** Its own file (about.json) beside state.json; a corrupt or missing file is an empty cache. */
-export class AboutStore {
-  private cache: AboutFile | null = null;
-  private tail: Promise<unknown> = Promise.resolve();
-  constructor(private directory: string) {}
-  private get path() { return join(this.directory, "about.json"); }
-  async read(): Promise<AboutFile> {
-    if (this.cache) return this.cache;
-    try { this.cache = fileSchema.parse(JSON.parse(await readFile(this.path, "utf8"))); }
-    catch { this.cache = { version: 1, entries: {}, failures: {}, daily: null }; }
-    return this.cache;
-  }
-  mutate<T>(fn: (file: AboutFile) => T): Promise<T> {
-    const next = this.tail.then(async () => {
-      const file = await this.read();
-      const result = fn(file);
-      await mkdir(this.directory, { recursive: true, mode: 0o700 });
-      const temporary = `${this.path}.${randomUUID()}`;
-      await writeFile(temporary, JSON.stringify(file), { mode: 0o600 });
-      await rename(temporary, this.path);
-      return result;
-    });
-    this.tail = next.catch(() => undefined);
-    return next;
+export class AboutStore extends JsonFileStore<AboutFile> {
+  constructor(directory: string) {
+    super({ path: join(directory, "about.json"), schema: fileSchema as never, empty: () => ({ version: 1, entries: {}, failures: {}, daily: null }), collections: { entries: { kind: "record", item: aboutRecordSchema } } });
   }
 }
 
