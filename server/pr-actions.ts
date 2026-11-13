@@ -209,6 +209,9 @@ export class PrActions {
     await this.store.mutate(s => {
       const current = findWorkspace(s, w.id);
       const action = current.prActions.find(a => a.id === id)!; action.state = state; action.result = result; if (state === "submitted" && merge) action.merge = merge;
+      // A client keeps the newer of its live copy and a fresh read by updatedAt (useWorkspace): without this bump the
+      // read after the click lost to the stale copy, and the panel said "Waiting for GitHub to confirm" beside "Merged".
+      current.updatedAt = new Date(this.now()).toISOString();
       // a-merge-outcome-reads-the-same-everywhere: GitHub answered that it merged these PRs, so every surface says so
       // now (header, rows, progress, Needs you), not after the next PR read, which keeps its backoff. That read confirms.
       if (state === "submitted" && merge === "merged") for (const p of current.prs) if (prs.some(m => m.key === p.key) && p.snapshot && p.snapshot.state === "OPEN") {

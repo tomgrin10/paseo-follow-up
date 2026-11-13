@@ -255,6 +255,7 @@ test("GitHub mode: downstack merge goes in order, retargets the child after its 
     const plan = await f.actions.prepare("workspace", f.top.key, "merge");
     assert.deepEqual(plan.prs.map(p => p.number), [1, 2]);
     assert.ok(plan.prs.every(p => !p.blockers.length), JSON.stringify(plan.prs));
+    const before = (await f.store.snapshot()).workspaces[0];
     const reply = await f.actions.confirm(plan.id, "downstack");
     assert.equal(reply.state, "submitted", reply.result);
     assert.equal(reply.merge, "merged", "gh merged both: the button and toast may say Merged (mergeWords)");
@@ -263,6 +264,7 @@ test("GitHub mode: downstack merge goes in order, retargets the child after its 
     const { activity } = await import("../shared/activity");
     const { stackBar } = await import("../shared/attention");
     const after = (await f.store.snapshot()).workspaces[0];
+    assert.ok(Date.parse(after.updatedAt) > Date.parse(before.updatedAt), "the workspace is newer, so a client's fresh read wins over its live copy (useWorkspace)");
     assert.deepEqual(after.prs.map(p => p.snapshot?.state), ["MERGED", "MERGED"], "the rows say merged");
     assert.deepEqual([stackBar(after).merged, stackBar(after).total], [2, 2], "the progress bar is full");
     assert.ok(headline(after).some(h => h.text === "All 2 PRs merged"), JSON.stringify(headline(after)));
