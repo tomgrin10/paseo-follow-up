@@ -42,7 +42,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as 2.0.0-rc.0, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["needs-you-states", "done-brief", "pick-notes", "review-mode", "feeds", "put-in-chat", "sending"];
+const REVIEW_SHOTS = ["needs-you-states", "done-brief", "pick-notes", "review-mode", "feeds", "put-in-chat", "sending", "pr-link"];
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
 for (const name of only) if (![...SHOTS, ...REVIEW_SHOTS].includes(name)) fail(`unknown shot "${name}" (known: ${[...SHOTS, ...REVIEW_SHOTS].join(", ")})`);
 const scheme = arg("--scheme");
@@ -381,8 +381,8 @@ async function seed({ call, home }) {
   const repos = {};
   for (const name of ["app", "web"]) { repos[name] = join(tmpdir(), "follow-up-shots-fixture", name); await fs.mkdir(repos[name], { recursive: true }); }
   // review-mode: someone reviews example/app, so its PR without reviewers asks for them.
-  if (only.includes("review-mode")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }] });
-  const specs = [...WORKSPACES, ...(only.includes("needs-you-states") ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") ? PICK_NOTES : []), ...(only.includes("review-mode") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : [])];
+  if (only.includes("review-mode") || only.includes("pr-link")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }] });
+  const specs = [...WORKSPACES, ...(only.includes("needs-you-states") ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : [])];
   await fs.writeFile(join(home, "fixture-scripts.json"), JSON.stringify(Object.fromEntries(specs.map(w => [w.prompt, w.steps]))));
   const workspaces = [];
   for (const spec of specs) {
@@ -1284,6 +1284,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
     }
   }
   if (only.includes("review-mode")) await reviewModeShots({ shoot, call });
+  if (only.includes("pr-link")) await prLinkShots({ shoot, billing });
   if (only.includes("put-in-chat")) await putInChatShots({ shoot, seeded, call, billing });
   if (only.includes("sending")) await sendingShots({ shoot, seeded, call, home });
   if (only.includes("needs-you-states")) {
@@ -1360,6 +1361,27 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
     }
   }
 }
+/**
+ * pr-link (a-row-that-names-a-pr-opens-it-in-one-click): Billing's "#143 is approved" merge row and Audit log export's
+ * reviewers row, each with its Open #N link; the panel on desktop, Home's detail pane on desktop and phone.
+ */
+async function prLinkShots({ shoot, billing }) {
+  const rows = [
+    { key: "merge", title: "Billing retries", prompt: billing.prompt, link: "Open pull request #143" },
+    { key: "reviewers", title: REVIEW_MODE_STATES[0].title, prompt: REVIEW_MODE_STATES[0].prompt, link: "Open pull request #246" },
+  ];
+  const TALL = { width: DESKTOP.width, height: 1300 };
+  for (const r of rows) for (const theme of ["light", "dark"]) {
+    // The row may sit below the fold on a phone: bring it on screen.
+    const settle = async page => { const link = page.getByRole("link", { name: r.link }).filter({ visible: true }).first(); await link.waitFor(); await link.scrollIntoViewIfNeeded(); };
+    await shoot(`pl-${r.key}-panel-${theme}`, TALL, theme, async page => {
+      await page.setViewportSize(TALL); await openChat(page, r.title, r.prompt);
+      await page.getByRole("button", { name: "Follow-up", exact: true }).last().click(); await settle(page);
+    });
+    await shoot(`pl-${r.key}-home-phone-${theme}`, PHONE, theme, async page => { await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, r.title)).click(); await settle(page); });
+  }
+}
+
 async function sendingShots({ shoot, seeded, call, home }) {
   // Q51 Home "Sending", light, desktop and phone (phones filter to Sending with its strip chip).
   // 1. Checkout copy's tasks wait for its agent's turn (no Send now); Saved views and Invoice PDFs are out with their

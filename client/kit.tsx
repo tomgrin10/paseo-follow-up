@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Platform, View, type StyleProp, type ViewStyle } from "react-native";
 import { Pressable, Text } from "./text";
 import { Icon } from "@getpaseo/plugin/client/ui";
+import { openExternalUrl } from "@getpaseo/plugin/client";
 import { PressScale, Spinner } from "./motion";
 import { raised, tint, withAlpha, type Colors, type Theme } from "./theme";
 
@@ -134,6 +135,24 @@ export function Button({ title, onPress, theme, kind = "secondary", disabled = f
 }
 
 /** A square icon-only control with an accessible name, for settings and refresh. */
+/**
+ * One click opens a PR in the browser (a-row-that-names-a-pr-opens-it-in-one-click): an icon link beside a row's
+ * action. It is navigation, not a decision, so it never counts as the row's one action and never takes the primary.
+ * Web: an anchor, so Tab reaches it, Enter opens it and the hover title reads "Open #1630".
+ */
+export function PrLinkButton({ link, theme, compact = false }: { link: { url: string; number: number; label: string }; theme: Theme; compact?: boolean }) {
+  const c = theme.colors;
+  const size = compact ? 44 : 28;
+  const tip = useRef<View | null>(null);
+  useEffect(() => { if (Platform.OS === "web") (tip.current as unknown as { setAttribute?: (k: string, v: string) => void } | null)?.setAttribute?.("title", `Open #${link.number}`); }, [link.number]);
+  return <View ref={tip}><PressScale accessibilityRole="link" accessibilityLabel={link.label} accessibilityHint="Opens in your browser" hitSlop={compact ? 0 : 6}
+    {...(Platform.OS === "web" ? { href: link.url, hrefAttrs: { target: "_blank", rel: "noopener noreferrer" } } as object : {})}
+    onPress={(e: { preventDefault?: () => void }) => { e?.preventDefault?.(); void openExternalUrl(link.url).catch(() => undefined); }}
+    style={({ pressed, hovered }) => ({ width: size, height: size, borderRadius: 6, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? c.surface2 : hovered ? c.surface1 : "transparent" })}>
+    <Icon name="ExternalLink" size={compact ? 18 : 15} color={c.foregroundMuted} />
+  </PressScale></View>;
+}
+
 export function IconButton({ icon, label, onPress, theme, compact = false, disabled = false, spinning = false, color, tooltip = false }: { icon: string; label: string; onPress: () => void; theme: Theme; compact?: boolean; disabled?: boolean; spinning?: boolean; color?: string; tooltip?: boolean }) {
   const c = theme.colors;
   const size = compact ? 44 : 28;
