@@ -220,6 +220,11 @@ card beside a question list.
   `briefAsks` (`shared/brief.ts`): a flagged row and a stated ask, never kind `done` ("Nothing needed"). A done brief
   on a row flagged for something else (a merged PR) leaves the block to that reason, and the flag's headline
   (`flagHeadline`: pill, sidebar row, Home row) reads it too (`doneBriefViolations` in `shared/status-invariants.ts`).
+- **The newest brief decides** (`newest-brief-decides`). An agent's needs_you kind=done is its newest word: it
+  resolves an older finish flag whose brief asked nothing ("No ask stated", source none) and replaces that brief
+  (`resolveStaleFinish` in `shared/inbox.ts`, the quiet guard in `server/inbox.ts` `creator`). Only an ask the
+  developer hasn't answered (`briefAsks`: a decision, action or review) outlives a later done (F7). Before this, an
+  agent nobody messages kept its stale "No ask stated" flag for hours (2026-11-13). `rowViolations` checks it.
 - **One reviewers ask per PR** (`one-reviewers-ask-per-pr`). The "has no reviewers" row names whom Follow-up
   suggests (`suggestedReviewers`: the repository's or default reviewers minus the author) in the brief's own words,
   "Add reviewers to #240: Ravi" (`reviewersAsk` in `shared/reviewers.ts`). Follow-up's reviewers brief folds into that
