@@ -411,6 +411,11 @@ export function rowViolations(row: Pick<InboxRow, "agentId" | "status" | "needs"
   // background-work-is-running (Paseo 0.16): a job the agent started and ended its turn on is still its work, so the
   // row is Running and never "finished" until the work ends.
   if (row.backgroundWork && (!["running", "initializing"].includes(row.status) || flagHeadline(row, now)?.key === "finished")) out.push({ id: "background-work-is-running", detail: `${row.agentId} has ${row.backgroundWork} background job(s) but reads ${row.status}${flagHeadline(row, now)?.key === "finished" ? " · finished" : ""}` });
+  // newest-brief-decides (2026-11-13, beta.4 live): the agent's newest word is done, so a "finished" flag from an
+  // earlier turn that asked nothing can't still stand beside it (only an unanswered ask outlives a done).
+  const doneAt = row.brief?.kind === "done" && row.brief.source === "agent" ? row.brief.at ?? null : null;
+  const stale = doneAt ? row.needs?.reasons.find(r => r.reason === "finished" && r.at < doneAt) : undefined;
+  if (stale) out.push({ id: "newest-brief-decides", detail: `${row.agentId} said done at ${doneAt} but still flags the finish from ${stale.at}` });
   if (!["running", "initializing"].includes(row.status) || !row.turnStartedAt) return out;
   const h = flagHeadline(row, now);
   if (!h || (h.key !== "error" && h.key !== "paused")) return out;
