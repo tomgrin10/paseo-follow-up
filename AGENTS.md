@@ -74,7 +74,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 
 | Subsystem | Files | Doc |
 | --- | --- | --- |
-| Worker entry, RPC wiring, session attach, teardown | `index.server.ts`, `shared/contracts.ts`, `server/rpc-timing.ts`, `server/teardown.ts`, `server/daemon.ts`, `server/shared-file.ts`, `server/directory.ts`, `server/store.ts`, `server/list-cache.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
+| Worker entry, RPC wiring, session attach, teardown | `index.server.ts`, `shared/contracts.ts`, `server/feeds.ts`, `server/rpc-timing.ts`, `server/teardown.ts`, `server/daemon.ts`, `server/shared-file.ts`, `server/directory.ts`, `server/store.ts`, `server/list-cache.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
 | Discovery, ownership, main agent | `server/discovery.ts`, `server/turn-events.ts`, `server/workspace-agent.ts`, `server/background-agents.ts`, `server/submissions.ts`, `server/pr-owner.ts`, `server/exclusions.ts`, `server/history-cache.ts`, `server/recovery-handoff.ts`, `server/recovery-config.ts`, `shared/settings.ts` | [workspaces](docs/workspaces.md) |
 | Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/send-decision.ts`, `shared/task-rows.ts`, `shared/task-status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
 | Needs-you inbox, brief, Home | `server/inbox.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/needs-block.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts` | [needs-you](docs/needs-you.md) |
@@ -112,12 +112,18 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    - Extras stop at critical (≥ 85 %).
    - `test:scale` budgets, on the realistic seed (`--realistic`: 140 workspaces, ~280 agents, a live-shaped 1.7 MB
      state, a fake GitHub with live-sized PR bodies): **300 MB peak RSS** from the worker's start (VmHWM, so the
-     cold-start tick counts), **240 MB idle RSS**, **3 % idle CPU**, **2 idle daemon requests a minute**. Measured
-     2026-11-12 (two runs): peak 262–264 MB (a ~2 s cold-start tick that changes and validates every workspace once),
-     idle 198–200 MB and flat, CPU 1.3–1.4 %, 1.3 requests a minute; the bare plugin process is ~120 MB. Headroom
-     (~15 % peak, ~20 % idle) covers live's extras the seed lacks (archived agents, real transcripts, AI jobs) and CI
-     noise. The old 240 MB budget was checked on an empty-workspace seed and only after start-up, so a 450 MB live
-     worker passed it.
+     cold-start tick counts), **240 MB idle RSS** (the idle window's median), **3 % idle CPU**, **2 idle daemon
+     requests a minute**. Measured 2026-11-12 (two runs): peak 262–264 MB (a ~2 s cold-start tick that changes and
+     validates every workspace once), idle 198–200 MB and flat, CPU 1.3–1.4 %, 1.3 requests a minute; the bare plugin
+     process is ~120 MB. Headroom (~15 % peak, ~20 % idle) covers live's extras the seed lacks (archived agents, real
+     transcripts, AI jobs) and CI noise. The old 240 MB budget was checked on an empty-workspace seed and only after
+     start-up, so a 450 MB live worker passed it.
+   - **Budgets judge the typical cost** (`scale-budgets-judge-the-typical-cost`): an idle budget reads the idle window's
+     median, because RSS there is a GC sawtooth (main swung 17 MB between runs; CI once peaked at 279 MB over a ~215 MB
+     median). One sample decides nothing except the lifetime cap (VmHWM ≤ 300 MB). The idle peak is still reported.
+     The send phase's bound comes from the worker's send schedule (`SETTLE_MS`, `POLL_IDLE_MS`, `NO_PROGRESS_CAP`) plus
+     a named margin, timed from the worker loading the seed, never a literal that equals a normal run's length.
+     Guarded by `tests/scale-budget.test.ts`.
    - **A tick copies the state at most once** (`a-tick-copies-the-state-at-most-once`): per-workspace writes copy one
      workspace, a tick saves and runs `onChanged` once (`Store.batch`), an untouched workspace isn't copied or
      re-checked, and a save validates only changed workspaces. Per-tick work never scales with workspaces × agents.
@@ -210,7 +216,16 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    review. Every consumer (the reviewers ask, merge asks, the quiet merge, status invariants) reads that helper, never
    `pr.agentMerges`; the set of No review repositories is filled before the first tick and on every save, so the
    lookup costs a set read. Guarded by `tests/review-mode.test.ts` ([docs/prs.md](docs/prs.md#review-mode)).
-18. **The recovery agent is quiet, keeps its tools and unloads** (`recovery-is-quiet-keeps-its-tools-and-unloads`).
+18. **An idle open client makes at most one RPC a minute** (`idle-client-makes-at-most-one-rpc-a-minute`). On Paseo
+   0.16 the client subscribes to the worker's feeds (`follow.workspaces-feed`, `follow.inbox-feed`, `follow.home-feed`,
+   `follow.display-feed`) instead of polling. The worker serves each topic once, from state it already holds, and
+   pushes only a value that changed: no polling on the server and no per-subscriber timers (`server/feeds.ts`). On
+   0.15 (no `client.subscribe`) the client polls as before. Quiet must not mean stale: a feed the worker closes (a
+   restart) or refuses polls until it resubscribes and stays subscribed, and a feed that keeps dropping backs off
+   instead of looping (`openFeed`, `client/feeds.ts`). Guarded by `tests/idle-rpc.test.ts`
+   (ten simulated minutes of the real stores, on both hosts), `tests/feed-recovery.test.ts`, `tests/feeds.test.ts`
+   and `npm run test:feeds` (the harness, end to end) ([docs/client.md](docs/client.md#feeds)).
+19. **The recovery agent is quiet, keeps its tools and unloads** (`recovery-is-quiet-keeps-its-tools-and-unloads`).
    On a host with `features.backgroundAgents` (Paseo 0.16) it is created `background: true` (no tab, no ping, no
    sidebar row); never on 0.15, whose path is unchanged. Invariant 9's background skip exempts only the agent
    Follow-up's own record names as a recovery recipient, never one carrying recovery labels. The same record lets it

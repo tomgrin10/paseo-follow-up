@@ -23,8 +23,18 @@ not a patch for one instance.
   - `tests/status-invariants.test.ts`: every invariant in `shared/status-invariants.ts` holds over a grid and the
     bug fixtures.
   - `tests/agent-parity.test.ts`: every client RPC has a tool or an exemption.
+  - `tests/idle-rpc.test.ts`: the real client stores, bundled with React Native stubbed, run ten simulated minutes against
+    a fake host: at most one RPC a minute with `client.subscribe` (0.16), and still polling without it (0.15).
+  - `tests/feeds.test.ts`: the worker's feeds read once per change, push only changes, and watch Smart Session only
+    while subscribed.
+  - `tests/feed-recovery.test.ts`: the same stores (`tests/client-stores.ts` bundles them and fakes the host) stay
+    correct on their feeds: a push lands with no RPC, a worker restart makes them poll and resubscribe within 5 s of
+    its return, a feed the worker refuses polls only that store, and a host that accepts each subscription and drops
+    it at once costs no more reads than one that refuses.
   - `tests/rpc-ack.test.ts`: every client RPC replies within 500 ms with Paseo, the daemon and gh hanging
-    (`tests/support/hanging-host.ts` runs the real `contribute()` in a temp home), or has an `EXEMPT` reason.
+    (`tests/support/hanging-host.ts` runs the real `contribute()` in a temp home), or has an `EXEMPT` reason. An
+    exemption is stale only when the method replies in time with no slow wait giving up meanwhile
+    (`tests/support/ack-ratchet.ts`; `tests/ack-ratchet.test.ts` reproduces the shared-wait flake the clock alone misread).
   - `tests/rpc-cached.test.ts`: the polled reads (Needs you's list, usage, the Summary) answer from what the worker
     holds while their slow side hangs, and the slow-RPC log fires at the ack budget.
     `tests/answer-ack.test.ts` covers the answer paths: fast ack, one send per answer, retries, resume after reload.
@@ -41,7 +51,7 @@ not a patch for one instance.
 
 | Script | npm | What it checks |
 | --- | --- | --- |
-| `scripts/scale-check.mjs` | `test:scale` | No dormant agent wakes at 140 workspaces; RSS (peak from worker start, not only idle), CPU and idle request budgets. `--realistic` seeds a live-shaped state (`scripts/scale-seed.ts`: three PRs with full snapshots, tasks, batches and questions per workspace, ~1.7 MB at 140), two agents per workspace and a fake GitHub with live-sized PR bodies (`scripts/scale-github.mjs`). `--json` reports the worker's RSS steps over 10 MB from its start, heap peaks and idle CPU. `--cpu-prof <dir>` and `--heap-snapshot <dir>` profile every node process the daemon starts. Skips without the paseo CLI, except in CI. |
+| `scripts/scale-check.mjs` | `test:scale` | No dormant agent wakes at 140 workspaces; RSS (peak from worker start, not only idle), CPU and idle request budgets. `--realistic` seeds a live-shaped state (`scripts/scale-seed.ts`: three PRs with full snapshots, tasks, batches and questions per workspace, ~1.7 MB at 140), two agents per workspace and a fake GitHub with live-sized PR bodies (`scripts/scale-github.mjs`). `--json` reports the worker's RSS steps over 10 MB from its start, heap peaks and idle CPU. Verdicts live in `scripts/scale-budget.mjs` (typed by `scripts/scale-budget.d.mts`, tested by `tests/scale-budget.test.ts`): the idle budget judges the idle window's median RSS (the peak is reported), and the send phase must settle within its schedule from the worker's constants (2 rounds × (PR read + settle) + a last read) plus a 60 s margin, timed from when the worker loads the seed; `--json` carries the settle polls and each send's timing. `--cpu-prof <dir>` and `--heap-snapshot <dir>` profile every node process the daemon starts. Skips without the paseo CLI, except in CI. |
 | `scripts/cpu-top.mjs` | manual | Where a `.cpuprofile`'s time went (self and app-frame inclusive), optionally in a time window: `node scripts/cpu-top.mjs <file> --from 0 --to 8`. |
 | `scripts/alloc-prof.cjs`, `scripts/alloc-top.mjs` | `scale-check --alloc-prof <dir>` | What each process allocates, garbage included (V8's sampling heap profiler with collected objects; `--heap-prof` shows only what stays live), for 0–60 s and 60–180 s of its life; `alloc-top` lists bytes per function, self and inclusive. |
 | `scripts/heap-retainers.mjs` | manual | Retained sizes in a heap snapshot (dominator tree) with a retaining path for each big owner. |
@@ -49,7 +59,8 @@ not a patch for one instance.
 | `scripts/check-trust-bypass.mjs` | `test:trust` | Trust bypass on a real daemon. |
 | `scripts/check-install.mjs` | `test:install`, `preview` | The packed install. `--keep` (`npm run preview`) leaves the daemon running for screenshots, prints "Isolated browser app: http://127.0.0.1:<port>", and writes `.preview-isolated.json`. |
 | `scripts/check-archived-lookup.mjs` | `test:install` | An archived agent a chat card names reads "archived" through the directory's one-off `fetch_agent` lookup, and stays unloaded. Run it on 0.16 too (`HARNESS_PASEO=0.16`). |
-| `scripts/check-wait.mjs` | `test:wait`, `test:wait-live` | Wait with real Haiku agents. Skips without credentials or Paseo 0.15; `test:wait-live` fails instead. |
+| `scripts/screenshots.mjs --only feeds` | `test:feeds` | Feeds end to end in the harness (run it through `harness-slot`, with `HARNESS_PASEO=0.16` or `0.15.4`): Home, a panel and a collapsed pill open; a new flag, a sort set by an agent and a priorities write must show within 5 s, and a usage file write within `USAGE_WATCH_DEBOUNCE_MS` plus 2 s (7 s), with no poll RPC between, then again after a plugin reload, a killed worker and a daemon restart, with no page reload. On 0.15 it records the poll delays (75 s budget) and skips the usage cases (0.15 reads usage through a cache timed on the worker's clock, which the harness crawls). Writes `feeds.json`. |
+| `scripts/check-wait.mjs` | `test:wait`, `test:wait-live` | Wait with real Haiku agents. Skips without credentials or Paseo 0.15; `test:wait-live` fails instead. Asserts each host's default: on by default on 0.15; on a host that advertises `agentBackgroundWork` (0.16) Wait steps aside (`reason: "host"`, `active: false`), so only that default and the standalone case run there. |
 | `scripts/check-move.mjs` | `test:move` | 2.0's move from 1.x on a real daemon: the published 1.x beta auto-updates from a fake npm registry to a broken 2.0 (rolled back), then a good one; the move to the new plugin id fails probation once (rolled back, data intact), then succeeds on Try again. Same `follow_*` tool names; Paseo's plugin list shows the new id only. Screenshots (`--shots <dir>`): Home before and after, Settings → General after the rollback and after the move (desktop, 390 px, dark). Passes on Paseo 0.15.4 and 0.16 (`HARNESS_PASEO=0.16`). About 15 minutes. |
 | `scripts/check-move.mjs --registry` | `test:move:registry` | The same move for an install from Paseo's plugin list: a fake plugin registry (`PASEO_PLUGIN_REGISTRY`) pins the live pin (1.0.1) as `tomgrin10/follow-up`, which installs under the old id. The pin moves to 2.0, `paseo plugin update` installs it under the old id, and the move reinstalls from the same registry under the new id with data and plugin settings. About 8 minutes. |
 | `scripts/check-github-mode.mjs` | `test:github-mode` | Plain-GitHub mode on the running preview, with a fake `gh` (reads reach it through check-install's `fakeGithub`). |
@@ -108,6 +119,11 @@ plays a scripted turn (timeline items, Follow-up RPCs, a permission) for a given
   its own config or a stubbed provider stays on.
 - **A crashed worker fails the run.** `screenshots.mjs` checks the daemon's log after every shot (`daemonCrashes`:
   "Uncaught exception", a worker restart) and fails at that shot with the log line, not with timeouts after it.
+- **A fictional host name, `dev-box`.** Paseo labels its host with `os.hostname()` (the phone header, `server_info`)
+  and has no setting for it, and renders go into this public repo. `harnessEnv` puts
+  `scripts/harness-hostname.cjs` first on `NODE_OPTIONS` (after a caller's `set` and `strip`), so every harness
+  process's `os.hostname()` and `HOSTNAME` read `HARNESS_HOST`. `screenshots.mjs` fails a shot whose page text names
+  the real machine. `tests/harness-env.test.ts` fails when a harness process can read the real name.
 - **Fake GitHub over HTTP, not only `gh`.** Follow-up reads GitHub over in-process HTTPS (`server/github-api.ts`); a
   fake `gh` on PATH only answers writes. A script whose daemon needs PR reads starts `fakeGithub({ dir, gh })` from
   `scripts/fake-github.mjs` and passes its `env` and `strip` to `harnessEnv`. The server answers each request with the

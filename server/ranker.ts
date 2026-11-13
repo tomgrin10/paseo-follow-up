@@ -289,6 +289,8 @@ export class Ranker {
   private running: Promise<RankResult> | null = null;
   /** Whether a ranking is running now (Settings → General waits for it). */
   isRunning(): boolean { return this.running != null; }
+  /** A run started or finished (the Home feed pushes the ranker's status). */
+  onRunChange: () => void = () => {};
   constructor(private d: RankerDeps) {}
   private now() { return this.d.now?.() ?? Date.now(); }
   private get path() { return join(this.d.directory, "ranker.json"); }
@@ -305,7 +307,8 @@ export class Ranker {
 
   run(opts: { trigger: RankTrigger; dryRun?: boolean; force?: boolean }): Promise<RankResult> {
     if (this.running) return this.running.then(r => ({ ...r, skipped: "busy" as const }));
-    this.running = this.once(opts).finally(() => { this.running = null; });
+    this.running = this.once(opts).finally(() => { this.running = null; this.onRunChange(); });
+    this.onRunChange();
     return this.running;
   }
 

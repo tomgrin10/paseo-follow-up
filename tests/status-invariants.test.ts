@@ -194,6 +194,11 @@ test("running-is-not-stale: over every agent status, turn history and card, a ru
   const stale = reduce(newEntry("37bc4ab1"), histories.failed[0], iso(0));
   assert.equal(rowViolations({ agentId: "37bc4ab1", status: "running", needs: stale.needs, snooze: null, brief: null, turnStartedAt: iso(15) }, clock)[0]?.id, "running-is-not-stale");
   assert.deepEqual(rowViolations({ agentId: "37bc4ab1", status: "running", needs: stale.needs, snooze: null, brief: null, turnStartedAt: iso(-1) }, clock), []);
+  // newest-brief-decides (2026-11-13): a done brief beside an older "No ask stated" finish flag is a violation.
+  const finish = { reason: "finished" as const, at: iso(-30), detail: "Nothing new", dedupeKey: "finished" };
+  const done = { id: "brief:t63", kind: "done", source: "agent", state: "open", ask: "Nothing needed", at: iso(-5) } as unknown as Parameters<typeof rowViolations>[0]["brief"];
+  assert.equal(rowViolations({ agentId: "37bc4ab1", status: "idle", needs: { reasons: [finish], since: iso(-30) }, snooze: null, brief: done, turnStartedAt: null }, clock)[0]?.id, "newest-brief-decides");
+  assert.deepEqual(rowViolations({ agentId: "37bc4ab1", status: "idle", needs: { reasons: [{ ...finish, at: iso(-1) }], since: iso(-1) }, snooze: null, brief: done, turnStartedAt: null }, clock), []);
 });
 
 test("automatic-hold-is-not-stale: over every hold, turn and agent, a newer main-agent turn leaves no automatic hold", async () => {
