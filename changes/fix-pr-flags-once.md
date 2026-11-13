@@ -1,0 +1,1 @@
+- A PR that merged long ago no longer shows up in Needs you again as "Merged" in workspaces with many PRs.

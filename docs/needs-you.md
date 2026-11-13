@@ -38,6 +38,15 @@
   `agentMerges`) flags nobody but still wakes a "until this PR merges" snooze. Invariants
   `a-merge-the-agent-made-never-flags-the-developer` and `pr-label-matches-state`. Undo covers the last sign-off or Later: a Later's undo puts back the snooze it replaced, unless a flag broke
   that snooze since. The Undo bar and the pill say which one it was ("Signed off", "Later · until 09:00").
+- **A PR flag fires once per transition** (`a-pr-flag-fires-once-per-transition`). Each entry keeps, per tracked
+  PR, the state every PR flag kind last notified (`notified`: `end` MERGED/CLOSED, `checks` and `conflict` the head,
+  `threads` the thread ids, `reviewers`), read and written through `prNotice`, `notifiedBefore` and `markNotified` in
+  `shared/inbox.ts`. A record lives while some workspace tracks the PR and goes with it (`pruneNotified`, only when
+  something goes, so a quiet tick copies nothing). The old 200-key ring (`seenKeys`) now holds only Session Guard
+  pause keys: in a 153-PR workspace it evicted old merges and re-flagged "#92 merged" two days later (2026-11-13).
+  On the first tick after the upgrade (`notifiedAt` unset) the worker records every ended or flagged PR without
+  flagging, the same way first-run priming does. `factFlagViolations` flags a merge flag raised more than a day
+  after the merge. Guarded by `tests/pr-flags-once.test.ts`.
 - **Storage and loop.** `server/inbox.ts` stores `inbox.json` (`InboxStore`). `Inbox` turns lifecycle events into
   reducer events (`turnStarted`, `turnEnded`, `permissionRequested`…). `tick()` runs every 15 s from `inboxLoop`
   in `index.server.ts`.
