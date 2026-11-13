@@ -31,7 +31,7 @@ test("a-running-worker-holds-one-daemon-connection: 10 ticks open exactly one We
   assert.equal(closed, 1, "once the ticks stop for longer than the idle bound, it closes");
 });
 
-test("a-running-worker-holds-one-daemon-connection: every worker daemon call shares it; only openDaemon builds a client", async () => {
+test("a-worker-builds-one-daemon-client: every worker daemon call shares the one connection; only openDaemon builds a client", async () => {
   // 2026-11-13 live copy under live load: withDaemon built a DaemonClient per call (turn-end and inbox reads, usage,
   // permission events), 41 WebSockets a minute, while RSS climbed in native memory with a flat JS heap.
   const daemon = await readFile("server/daemon.ts", "utf8");

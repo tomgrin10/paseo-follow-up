@@ -154,6 +154,11 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    - **A running worker holds one daemon connection** (`a-running-worker-holds-one-daemon-connection`): the shared
      connection's idle close is the engine's tick plus a named margin, so ticks reuse it. Guarded by
      `tests/daemon-connection.test.ts`.
+   - **A worker builds one daemon client** (`a-worker-builds-one-daemon-client`): every daemon call the worker makes
+     (`withDaemon`: turn-end and inbox reads, usage meters, permission events, server info) runs on that shared
+     connection; `openDaemon` in `server/daemon.ts` is the only place a `DaemonClient` is built. 2026-11-13 live copy
+     under live load: a client per call opened 41 WebSockets a minute while native memory climbed. Guarded by
+     `tests/daemon-connection.test.ts` (a sweep of the worker's `.ts` files).
    - **A send lists agents at most once per tick** (`a-send-lists-agents-at-most-once-per-tick`): sends read the tick's
      agent list (patched by events); no `fetch_agents` or `fetch_agent` per send or per turn event, and subagents at
      most once per agent per tick. Guarded by `tests/daemon-load.test.ts` and `test:scale`
