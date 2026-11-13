@@ -215,6 +215,10 @@ every `sending` entry.
 (`NeedsYouBlock` in `client/needs-you.tsx`, laid out by `needsYouBlock` in `shared/needs-block.ts`), never a brief
 card beside a question list.
 
+- **A done brief is never an ask** (`a-done-brief-is-never-an-ask`). The panel and Home pick the brief they draw with
+  `briefAsks` (`shared/brief.ts`): a flagged row and a stated ask, never kind `done` ("Nothing needed"). A done brief
+  on a row flagged for something else (a merged PR) leaves the block to that reason, and the flag's headline
+  (`flagHeadline`: pill, sidebar row, Home row) reads it too (`doneBriefViolations` in `shared/status-invariants.ts`).
 - **Asks first.** The agent's open brief that points at open questions (`questionIds`) becomes the first of those
   questions' cards: the question's title, its Q chip and asked age, the brief's context, the options with Send, and
   what the agent does meanwhile as the footer. A brief that points at no open question keeps its own card, drawn bare

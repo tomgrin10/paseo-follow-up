@@ -620,3 +620,12 @@ export function briefAnswers(ask: string, decisions: { id: string; question: str
   lines.push(skipped.length ? `Continue with the answered ones; ${skipped.map(d => d.id).join(" and ")} ${skipped.length === 1 ? "is" : "are"} still open. The answers are already recorded.` : "Continue with these choices. The answers are already recorded.");
   return lines.join("\n");
 }
+
+/**
+ * a-done-brief-is-never-an-ask: whether the agent's open brief is an ask in Needs you (the panel's and Home's block,
+ * counted there). The row must be flagged; "No ask stated" (source none) only repeats the chat; and kind "done" says
+ * nothing is needed, so a row flagged for something else (a merged PR) shows that reason, never "Nothing needed" as 1.
+ */
+export function briefAsks<B extends Pick<Brief, "state" | "kind" | "source">>(brief: B | null | undefined, row: { needs?: unknown } | null | undefined): brief is B {
+  return !!row?.needs && brief?.state === "open" && brief.source !== "none" && brief.kind !== "done";
+}
