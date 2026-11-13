@@ -305,7 +305,7 @@ const WORKSPACES = [
 const SENDING_STATES = [
   { key: "sd-busy", title: "Checkout copy", minute: 146, prompt: "APP-188: tighten the checkout button copy and keep the old string for the A/B test.", flag: false, waitFor: "running",
     steps: [rpc("follow.enroll", { goal: "APP-188 Checkout button copy" }), rpc("follow.register-pr", { repo: "example/app", number: 232, stack: "Checkout copy" }),
-      think("Keep the old string behind the experiment flag."), { hold: true }] },
+      think("Keep the old string behind the experiment flag."), bash("pnpm test checkout", "pass 18"), { hold: true }] },
 ];
 
 /**
