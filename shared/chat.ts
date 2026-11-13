@@ -82,7 +82,7 @@ const RUNNING: Record<FollowTool, string> = {
 };
 const NAMES: Record<FollowTool, string> = {
   workspace_status: "Follow-up status", sync_workspace: "Follow-up sync", enroll_workspace: "Goal update", register_pr: "PR registration",
-  exclude_stack: "Stack exclusion", update_obligation: "Task update", acknowledge_batch: "Repair report", declare_done: "Done check",
+  exclude_stack: "Stack exclusion", update_obligation: "Task update", acknowledge_batch: "Task report", declare_done: "Done check",
   ask_question: "Question", record_answer: "Answer record", withdraw_question: "Question withdrawal", set_spec: "Spec link",
 };
 
@@ -111,7 +111,7 @@ export function toolRow(tool: FollowTool, status: "running" | "completed" | "fai
     }
     case "acknowledge_batch": {
       const blocked = input.outcome === "blocked";
-      return { ...base, state: "done", tone: blocked ? "warning" : "muted", line: `${blocked ? "Repairs blocked" : "Repairs finished"} · ${firstLine(str(input.result))}`, more: str(input.result) || more };
+      return { ...base, state: "done", tone: blocked ? "warning" : "muted", line: `${blocked ? "Tasks blocked" : "Tasks finished"} · ${firstLine(str(input.result))}`, more: str(input.result) || more };
     }
     case "ask_question": {
       const question = record(result?.question) ? result!.question as Record<string, unknown> : null;

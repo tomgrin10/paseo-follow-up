@@ -9,7 +9,7 @@ import { age, wakeLabel, wakeShort } from "../shared/inbox";
 import { headlineColor, mergedColor, readable, runningColor, tint, toneColor, withAlpha, type Colors } from "./theme";
 import { useMinute } from "./home-data";
 import { Spinner } from "./motion";
-import { rowDomId, type Theme } from "./kit";
+import { Button, rowDomId, type Theme } from "./kit";
 import { RowMenu, useRowMenuTrigger, type OpenRowMenu, type RowMenuOpen } from "./row-menu";
 import type { RowMenuItem, RowMenuSection } from "../shared/row-menu";
 import { homeGroupOpen, writeHomeGroupOpen } from "../shared/settings-nav";
@@ -37,6 +37,7 @@ type Entry =
   | { type: "result"; key: string; item: WorkspaceItem; index: number; s: Workstream; hit: RowHit; archived: boolean }
   | { type: "ask"; key: string; ask: string; index: number }
   | { type: "label"; key: string; text: string }
+  | { type: "hold"; key: string; text: string }
   | { type: "empty"; key: string }
   | { type: "slot"; key: string };
 
@@ -75,6 +76,8 @@ export type HomeListProps = {
   overseer?: OverseerRowState | null;
   /** An omnibox ask is on its way to the Overseer. */
   asking?: boolean;
+  /** Sending rows' Send now (only where the server would take it: Workstream.sendNow). Absent: the list offers none. */
+  onSendNow?: (s: Workstream) => Promise<void>;
   /**
    * The row menu (right-click, long-press, the menu key): what a row offers, and what a pick does. Required, so no
    * list of workspaces ships without it (every-list-row-has-the-row-menu): without it the browser's or desktop app's
@@ -85,7 +88,7 @@ export type HomeListProps = {
 
 const noMenu: OpenRowMenu = () => undefined;
 
-export function HomeList({ model, theme, dense = false, touch, selectedKey, onSelect, briefLine, renderExpanded, header, footer, top, afterNeeds, emptyAction, results, hits = null, activeResult = 0, onResult, filter = null, overseer = null, asking = false, menu }: HomeListProps) {
+export function HomeList({ model, theme, dense = false, touch, selectedKey, onSelect, briefLine, renderExpanded, header, footer, top, afterNeeds, emptyAction, results, hits = null, activeResult = 0, onResult, filter = null, overseer = null, asking = false, menu, onSendNow }: HomeListProps) {
   const c = theme.colors;
   const [openMenu, setOpenMenu] = useState<RowMenuOpen | null>(null);
   const build = menu.build;
@@ -132,6 +135,8 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
       // Phones with one group filtered: the chip above already says "N Needs you ×"; no header repeating it.
       if (!(touch && filter)) out.push({ type: "header", key: `h:${g.id}`, group: g.id, title: g.title, count: g.items.length, open });
       if (!open) { if (g.id === "needs" && afterNeeds && !filter) out.push({ type: "slot", key: "s:afterNeeds" }); continue; }
+      // One hold line per machine, once, at the top of Sending (the model has it only while Sending has rows).
+      if (g.id === "sending" && model.hold) out.push({ type: "hold", key: "l:hold", text: model.hold });
       const hitOf = (s: Workstream) => { const h = hits?.get(s.key); return h ? rowHit(h, s) : null; };
       if (g.id !== "quiet") { for (const s of g.items) out.push({ type: "row", key: s.key, s, hit: hitOf(s) }); if (g.id === "needs" && afterNeeds && !filter) out.push({ type: "slot", key: "s:afterNeeds" }); continue; }
       for (const f of quietFolds(g.items)) {
@@ -167,6 +172,7 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
         {emptyAction ? <View style={{ flexDirection: "row", marginTop: 6 }}>{emptyAction}</View> : null}
       </View>;
       case "slot": return <View style={{ paddingVertical: 10 }}>{afterNeeds}</View>;
+      case "hold": return <HoldLine theme={theme} text={item.text} dense={dense} touch={touch} />;
       // The list's own Row (search-row-is-the-list-row); the keyboard-active result wears the selected style.
       case "result": return <Row s={item.s} sig={item.s.sig} hit={item.hit} theme={theme} dense={dense} touch={touch} selected={item.index === activeResult} menuOpen={menuKey === item.s.key}
         onSelect={pickResult} onMenu={item.archived ? noMenu : onMenu} />;
@@ -188,12 +194,12 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
       case "row": {
         const selected = selectedKey === item.key;
         return <View>
-          <Row s={item.s} theme={theme} dense={dense} touch={touch} selected={selected} onSelect={onSelect} sig={item.s.sig} onMenu={onMenu} menuOpen={menuKey === item.key} hit={item.hit} />
+          <Row s={item.s} theme={theme} dense={dense} touch={touch} selected={selected} onSelect={onSelect} sig={item.s.sig} onMenu={onMenu} menuOpen={menuKey === item.key} hit={item.hit} onSendNow={onSendNow} />
           {selected && renderExpanded ? renderExpanded(item.s) : null}
         </View>;
       }
     }
-  }, [theme, c, dense, touch, selectedKey, onSelect, briefLine, renderExpanded, toggle, toggleProject, activeResult, onResult, pickResult, model, overseer?.state, overseer?.line, asking, afterNeeds, emptyAction, onMenu, menuKey]);
+  }, [theme, c, dense, touch, selectedKey, onSelect, briefLine, renderExpanded, toggle, toggleProject, activeResult, onResult, pickResult, model, overseer?.state, overseer?.line, asking, afterNeeds, emptyAction, onMenu, menuKey, onSendNow]);
 
   const listRef = useRef<FlatList<Entry>>(null);
   // Keep the keyboard-active result in view.
@@ -322,8 +328,8 @@ export function archivedRow(hit: SearchHit): Workstream {
  * passes `hit`: the matched words are highlighted where they already are (title, "› agent", the ask line), and a match
  * in a field the row doesn't show replaces line 2 with "<Field> · excerpt", so a result is exactly as tall as the row.
  */
-type RowProps = { s: Workstream; sig: string; theme: Theme; dense: boolean; touch: boolean; selected: boolean; onSelect: (key: string) => void; onMenu: OpenRowMenu; menuOpen?: boolean; hit?: RowHit | null };
-const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onMenu, menuOpen = false, hit = null }: RowProps) {
+type RowProps = { s: Workstream; sig: string; theme: Theme; dense: boolean; touch: boolean; selected: boolean; onSelect: (key: string) => void; onMenu: OpenRowMenu; menuOpen?: boolean; hit?: RowHit | null; onSendNow?: (s: Workstream) => Promise<void> };
+const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onMenu, menuOpen = false, hit = null, onSendNow }: RowProps) {
   const c = theme.colors;
   const trigger = useRowMenuTrigger(s, onMenu, touch);
   const archived = s.icon === "Archive" && s.sig.startsWith("archived:");
@@ -338,7 +344,9 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onMe
   const via = hit?.via ? (() => { const e = excerpt(hit.via.text, hit.via.ranges, touch ? 90 : dense ? 90 : 44); return <>{FIELD_LABEL[hit.via.field]} · {marks(e.text, e.ranges, c)}</>; })() : null;
   const title = <>{marks(s.title, hit?.titleRanges, c)}{s.agent ? <Text style={{ color: c.foregroundMuted, fontWeight: "400" }}>{" › "}{marks(s.agent, hit?.agentRanges, c)}</Text> : null}</>;
   // Phones: "Working" under every row of a "Running 9" group says nothing the header didn't; one line per row instead.
-  const generic = touch && !s.word && (s.line === "Working" || s.line === "Fixing");
+  const generic = touch && !s.word && s.line === "Working";
+  // Send now: outlined (filled is only for what waits on the developer), and only where the server would take it.
+  const sendNow = s.sendNow && onSendNow && !dense ? <SendNowButton s={s} theme={theme} touch={touch} onSendNow={onSendNow} /> : null;
   // A Later row says when it comes back on screen; the label also keeps how long it has waited.
   const wake = s.group === "later" && s.wakeAt ? wakeLabel({ until: s.wakeAt, at: s.at ?? new Date().toISOString() }, Date.now()) : "";
   const waited = s.group === "later" && s.at ? age(s.at, Date.now()) : "";
@@ -364,6 +372,7 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onMe
       </Text>}
       {!!s.priority?.reason && <PriorityLine reason={s.priority.reason} source={s.priority.source} c={c} size={12} lines={2} />}
       {!!s.pr && <Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 17, fontVariant: ["tabular-nums"] }}><PrSummaryText s={s} c={c} /></Text>}
+      {sendNow && <View style={{ flexDirection: "row", marginTop: 6 }}>{sendNow}</View>}
     </View> : dense ? <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
       <Text numberOfLines={1} style={{ color: muted ? c.foregroundMuted : c.foreground, fontSize: 13, lineHeight: 18, fontWeight: muted ? "400" : "500" }}>{title}</Text>
       {via ? <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{via}</Text>
@@ -381,7 +390,26 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onMe
       </Text>
       {s.badges.map(b => <BadgeView key={b.text} b={b} c={c} />)}
       <PrChipView s={s} c={c} />
+      {sendNow}
     </View>{!!s.priority?.reason && <View style={{ paddingRight: 40 }}><PriorityLine reason={s.priority.reason} source={s.priority.source} c={c} /></View>}</View>}
     {!touch && <RowTime s={s} c={c} size={dense ? 11 : 12} />}
   </Pressable>;
-}, (a, b) => a.sig === b.sig && a.selected === b.selected && a.theme === b.theme && a.dense === b.dense && a.touch === b.touch && a.onSelect === b.onSelect && a.onMenu === b.onMenu && a.menuOpen === b.menuOpen && a.hit === b.hit);
+}, (a, b) => a.sig === b.sig && a.selected === b.selected && a.theme === b.theme && a.dense === b.dense && a.touch === b.touch && a.onSelect === b.onSelect && a.onMenu === b.onMenu && a.menuOpen === b.menuOpen && a.hit === b.hit && a.onSendNow === b.onSendNow);
+
+/** The machine-wide auto-send hold, once above Sending's rows: the same words on every width (shared/sending.ts). */
+function HoldLine({ theme, text: line, dense, touch }: { theme: Theme; text: string; dense: boolean; touch: boolean }) {
+  const c = theme.colors;
+  return <View accessibilityRole="text" style={{ flexDirection: "row", alignItems: "flex-start", gap: touch ? 10 : 8, marginHorizontal: touch ? 14 : dense ? 8 : 16, marginVertical: 4, paddingHorizontal: 10, paddingVertical: 8,
+    borderRadius: 6, backgroundColor: withAlpha(c.statusWarning, 0.1) }}>
+    <View style={{ paddingTop: 2 }}><Icon name="CirclePause" size={touch ? 15 : 13} color={c.statusWarning} /></View>
+    <Text style={{ flex: 1, minWidth: 0, color: c.foreground, fontSize: touch ? 13 : 12, lineHeight: touch ? 18 : 17 }}>{line}</Text>
+  </View>;
+}
+
+/** Send now on a Sending row: the developer's Send, through the same path as the Tasks strip's. */
+function SendNowButton({ s, theme, touch, onSendNow }: { s: Workstream; theme: Theme; touch: boolean; onSendNow: (s: Workstream) => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const n = s.sendNow!.count;
+  return <Button theme={theme} compact={touch} kind="secondary" title="Send now" accessibilityLabel={`Send ${n} task${n === 1 ? "" : "s"} to ${s.title} now`} loading={busy} disabled={busy}
+    onPress={() => { setBusy(true); void onSendNow(s).finally(() => setBusy(false)); }} />;
+}
