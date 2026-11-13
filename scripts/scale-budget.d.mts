@@ -9,3 +9,8 @@ export const SETTLE_MARGIN_MS: number;
 export const QUIET_POLLS: number;
 export function settleBoundMs(o?: { rounds?: number; readMs?: number; settleMs?: number; marginMs?: number }): number;
 export function settleState(polls: readonly { atMs: number; open: number }[], boundMs: number): { settled: boolean; expired: boolean; atMs?: number };
+export const BUSY_TURNS_PER_MIN: number;
+export const BUSY_TURN_ITEMS: number;
+export const BUSY_ITEM_BYTES: number;
+export const BUSY_GROWTH_BUDGET_MB: number;
+export function busyVerdict(samplesMb: readonly number[], budgetMb: number): { firstMb: number; lastMb: number; growthMb: number; peakMb: number; over: boolean };

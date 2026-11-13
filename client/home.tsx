@@ -32,6 +32,7 @@ import type { OnboardingView } from "../shared/onboarding";
 import { withAlpha, isLight, mergedColor, type Colors } from "./theme";
 import { UpdateNotice, VersionMark } from "./updates";
 import { WhatsNewGate } from "./release-notes";
+import { ViewSync } from "./view-store";
 import { useRowMenu } from "./row-actions";
 import { laterChoices } from "../shared/row-menu";
 import { PrLinksProvider, RichText } from "./rich-text";
@@ -157,6 +158,7 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
 
   const updateNotice = <UpdateNotice theme={theme} compact={compact} openSettings={deps.openSettings} />;
   const updateSheets = <>
+    <ViewSync />
     <WhatsNewGate surface="home" theme={theme} compact={compact} />
     <ToastHost theme={theme} compact={compact} />
   </>;

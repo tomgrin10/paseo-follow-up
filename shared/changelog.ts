@@ -164,6 +164,15 @@ export function whatsNew({ installed, deviceSeen, previous, onboarding, notes }:
 /** The last Follow-up version before release notes shipped; existing installs that predate the record start here. */
 export const LEGACY_BASELINE = "1.4.0-beta.22";
 export const LAST_SEEN_KEY = "follow-up.whats-new.seen";
+/**
+ * The device's "seen" version for What's new: the device document on 0.16 once it loads (the phone included), else
+ * localStorage on web and desktop, else the host's record. undefined while the device document is still loading: no
+ * decision from a stale answer.
+ */
+export function deviceSeenFrom({ status, local, stored, hostSeen }: { status: "none" | "loading" | "ready" | "failed"; local: boolean; stored: () => string | null; hostSeen: string | null }): string | null | undefined {
+  if (status === "loading") return undefined;
+  return status === "ready" || local ? stored() : hostSeen;
+}
 
 /** Only npm installs can update themselves; everything else is the developer's own checkout. */
 export const INSTALL_KINDS = ["npm", "git", "directory", "registry", "unknown"] as const;

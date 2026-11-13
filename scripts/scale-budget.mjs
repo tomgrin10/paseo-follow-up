@@ -11,6 +11,30 @@ export function median(xs) {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
+/**
+ * The busy window (test:scale --busy <s>): live's load while agents work, before the idle window. 2026-11-13 live
+ * (2.0.1-beta.4, 153-PR workspace): RSS stepped 315 → 405 MB while agents were busy and never came back, with an idle
+ * check passing. Each awake agent ends BUSY_TURNS_PER_MIN turns a minute between them, each with BUSY_TURN_ITEMS
+ * timeline items of BUSY_ITEM_BYTES (a real turn's tool output), so the worker's turn hooks, inbox mutations and tail
+ * reads run at live's rate.
+ */
+export const BUSY_TURNS_PER_MIN = 20;
+export const BUSY_TURN_ITEMS = 30;
+export const BUSY_ITEM_BYTES = 8000;
+/**
+ * How far the busy window's RSS may climb, last fifth's median over first fifth's. Not derived yet: test:scale:live
+ * reports it (--budgets-report-only). Measured 2026-11-13 on the harness: beta.4 39, main 51, the memory fix 28–42 MB.
+ * The budget PR sets it to the final build's observed growth plus the run-to-run spread, named here.
+ */
+export const BUSY_GROWTH_BUDGET_MB = 25;
+/** The busy verdict: growth across the window (medians of its first and last fifths, so one GC spike decides nothing). */
+export function busyVerdict(samplesMb, budgetMb) {
+  const n = Math.max(1, Math.floor(samplesMb.length / 5));
+  const firstMb = Math.round(median(samplesMb.slice(0, n))); const lastMb = Math.round(median(samplesMb.slice(-n)));
+  const growthMb = lastMb - firstMb; const peakMb = Math.round(samplesMb.length ? Math.max(...samplesMb) : 0);
+  return { firstMb, lastMb, growthMb, peakMb, over: !!budgetMb && growthMb > budgetMb };
+}
+
 /** The idle verdict: the window's median against the budget. The peak is reported, never judged. */
 export function idleVerdict(samplesMb, budgetMb) {
   const medianMb = Math.round(median(samplesMb)); const peakMb = Math.round(samplesMb.length ? Math.max(...samplesMb) : 0);

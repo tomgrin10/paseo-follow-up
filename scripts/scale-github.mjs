@@ -7,11 +7,14 @@ if (a[0] !== "api" || a[1] !== "graphql") { console.log("[]"); process.exit(0); 
 const query = (a.find(x => x.startsWith("query=")) || "").slice(6);
 const sha = n => Array.from({ length: 40 }, (_, k) => "0123456789abcdef"[(n * 31 + k * 17) % 16]).join("");
 const checks = n => Array.from({ length: 25 }, (_, k) => k % 6 === 5 ? { context: "deploy/preview-" + k, state: "SUCCESS" } : { name: "ci / job " + k + " (node 22, shard " + (k % 4) + ")", status: "COMPLETED", conclusion: n % 5 === 0 && k === 2 ? "FAILURE" : "SUCCESS" });
+// SCALE_GH_STATES (scale-check --data-from): each PR answers in the state the copied data last saw.
+const states = process.env.SCALE_GH_STATES ? JSON.parse(require("fs").readFileSync(process.env.SCALE_GH_STATES, "utf8")) : null;
+const stateOf = n => states?.[process.env.GH_REPO + "#" + n] ?? (n % 9 === 0 ? "MERGED" : "OPEN");
 const node = n => ({
   number: n, title: "Synthetic change " + n + ": retry backoff for the billing ledger reconcile job", url: "https://github.com/" + process.env.GH_REPO + "/pull/" + n,
-  state: n % 9 === 0 ? "MERGED" : "OPEN", headRefOid: sha(n), headRefName: "feat/synthetic-" + n, baseRefName: n % 3 === 0 ? "main" : "feat/synthetic-" + (n - 1),
+  state: stateOf(n), headRefOid: sha(n), headRefName: "feat/synthetic-" + n, baseRefName: n % 3 === 0 ? "main" : "feat/synthetic-" + (n - 1),
   isDraft: false, mergeable: n % 7 === 0 ? "CONFLICTING" : "MERGEABLE", mergeStateStatus: n % 7 === 0 ? "DIRTY" : "BLOCKED", reviewDecision: n % 2 ? "APPROVED" : "REVIEW_REQUIRED",
-  mergedAt: n % 9 === 0 ? "2026-11-10T10:00:00Z" : null, mergeCommit: n % 9 === 0 ? { oid: sha(n + 1) } : null, isInMergeQueue: false, autoMergeRequest: null,
+  mergedAt: stateOf(n) === "MERGED" ? "2026-11-10T10:00:00Z" : null, mergeCommit: stateOf(n) === "MERGED" ? { oid: sha(n + 1) } : null, isInMergeQueue: false, autoMergeRequest: null,
   author: { login: "fixture-dev" },
   reviewRequests: { pageInfo: { hasNextPage: false }, nodes: [{ requestedReviewer: { __typename: "User", login: "reviewer-one" } }, { requestedReviewer: { __typename: "Team", slug: "platform" } }] },
   latestReviews: { pageInfo: { hasNextPage: false }, nodes: [{ state: "APPROVED", author: { __typename: "User", login: "reviewer-two" } }, { state: "COMMENTED", author: { __typename: "User", login: "reviewer-three" } }] },

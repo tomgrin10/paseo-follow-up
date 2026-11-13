@@ -29,15 +29,35 @@ export function needsRepair(pr: Pr): boolean {
   return !pr.error && !!s?.complete && s.state === "OPEN" && !s.draft && (s.conflict || s.failedChecks.length > 0 || s.threads.length > 0 || s.reviewDecision === "CHANGES_REQUESTED");
 }
 
-function depth(prs: Pr[], p: Pr, seen = new Set<string>()): number {
-  if (seen.has(p.key)) return 0;
-  seen.add(p.key);
-  const parent = prs.find(x => x.key === p.parent);
-  return parent ? depth(prs, parent, seen) + 1 : 0;
+/**
+ * Each PR's distance from its stack's root, every one in one pass (invariant a-check-costs-linear-in-its-workspace).
+ * 2026-11-13: depth walked parents with a linear find inside the sort's comparator, O(n² log n) on a 153-PR
+ * workspace, run by every status check and Home row. A cycle counts from where it closes, as before.
+ */
+function depths<P extends { key: string; parent: string | null }>(prs: readonly P[]): Map<string, number> {
+  const byKey = new Map<string, P>();
+  for (const p of prs) if (!byKey.has(p.key)) byKey.set(p.key, p);
+  const out = new Map<string, number>();
+  for (const start of prs) {
+    if (out.has(start.key)) continue;
+    const chain: string[] = []; const onChain = new Set<string>();
+    let p: P | undefined = start, base = -1;
+    while (p) {
+      const known = out.get(p.key);
+      if (known !== undefined) { base = known; break; }
+      if (onChain.has(p.key)) break;
+      chain.push(p.key); onChain.add(p.key);
+      p = p.parent === null ? undefined : byKey.get(p.parent);
+    }
+    // The chain runs child → root: the last key is the root (or where a cycle closed), at base + 1.
+    for (let i = chain.length - 1; i >= 0; i--) out.set(chain[i]!, base + chain.length - i);
+  }
+  return out;
 }
 /** Parents before children, then by number: the order a stack merges in. */
-export function stackOrder(prs: Pr[]): Pr[] {
-  return [...prs].sort((a, b) => depth(prs, a) - depth(prs, b) || a.number - b.number);
+export function stackOrder<P extends Pr>(prs: readonly P[]): P[] {
+  const d = depths(prs);
+  return [...prs].sort((a, b) => d.get(a.key)! - d.get(b.key)! || a.number - b.number);
 }
 
 export type Segment = { key: string; number: number; stack: string; tone: PrTone };
