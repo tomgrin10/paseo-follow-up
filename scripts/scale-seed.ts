@@ -2,8 +2,8 @@
 // (about 9 KB a workspace: three PRs with full snapshots, tasks with evidence, a settled batch history, questions,
 // main-agent history, artifacts). The old seed (empty workspaces, no PRs) used a fraction of the worker's memory and
 // let a 450 MB worker pass a 240 MB budget. Synthetic data only.
-//   npx tsx scripts/scale-seed.ts <out state.json> <created.json> [prsPerWorkspace=3] [freshFirst=0] [out inbox.json]
-// Live-sized (2026-11-13, the live install that stepped 315 → 405 MB): workspace 0 tracks BIG_PRS PRs, nearly all
+//   npx tsx scripts/scale-seed.ts <out state.json> <created.json> [prsPerWorkspace=3] [freshFirst=0] [out inbox.json] [--live-sized]
+// --live-sized (2026-11-13, the live install that stepped 315 → 405 MB): workspace 0 tracks BIG_PRS PRs, nearly all
 // merged and in their own stacks, with BIG_TASKS tasks and BIG_QUESTIONS questions; inbox.json (when asked for) has
 // INBOX_ENTRIES entries, about half flagged, with seenKeys up to the 200-key ring for the big workspace's agent, briefs,
 // 81 unsorted agents and the 500-row brief-origin log.
@@ -14,7 +14,9 @@ import { stateSchema, type State, type Workspace } from "../shared/model";
 import { inboxStateSchema, newEntry, type InboxState } from "../shared/inbox";
 import { BRIEF_KINDS, BRIEF_SOURCES } from "../shared/brief";
 
-const [out, createdPath, perArg, freshArg, inboxOut] = process.argv.slice(2);
+/** --live-sized: workspace 0 is the big one (BIG_*). Without it every workspace has the --realistic shape. */
+const LIVE_SIZED = process.argv.includes("--live-sized");
+const [out, createdPath, perArg, freshArg, inboxOut] = process.argv.slice(2).filter(a => a !== "--live-sized");
 export const BIG_PRS = 153, BIG_MERGED = 150, BIG_TASKS = 39, BIG_QUESTIONS = 52, INBOX_ENTRIES = 86;
 const FRESH = Number(freshArg ?? 0);
 const created = JSON.parse(readFileSync(createdPath!, "utf8")) as { workspaceId: string; agentId: string; agentIds?: string[] }[];
@@ -31,7 +33,7 @@ const sha = (seed: number) => Array.from({ length: 40 }, (_, k) => "0123456789ab
 function workspace(i: number, { workspaceId, agentId }: { workspaceId: string; agentId: string }): Workspace {
   const repo = repos[i % repos.length]!;
   const stack = `${phrase(i, 2)} ${i}`;
-  const big = i === 0; const count = big ? BIG_PRS : PRS;
+  const big = LIVE_SIZED && i === 0; const count = big ? BIG_PRS : PRS;
   const prs = Array.from({ length: count }, (_, k) => {
     const number = big ? 50_000 + k : 1000 + i * PRS + k;
     const state = big ? (k < BIG_MERGED ? "MERGED" as const : "OPEN" as const) : k === 0 && i % 3 === 0 ? "MERGED" as const : "OPEN" as const;

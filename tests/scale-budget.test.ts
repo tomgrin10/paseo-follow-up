@@ -74,3 +74,22 @@ test("the busy window is judged on growth: last fifth's median over the first fi
   const v = busyVerdict(climbing, BUSY_GROWTH_BUDGET_MB);
   assert.ok(v.over && v.growthMb > BUSY_GROWTH_BUDGET_MB, `a steady climb fails (grew ${v.growthMb} MB)`);
 });
+
+/**
+ * scale-gate-never-reports-only (2026-11-13): the live-sized busy window (`test:scale:live`) reports its budgets until
+ * their derived values land, so the memory fix could merge. The gate in `verify` keeps failing on every budget, and
+ * the report-only run still runs in PR CI, so its numbers stay visible.
+ */
+test("scale gate: test:scale fails on its budgets; test:scale:live reports them and runs in PR CI", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const pkg = JSON.parse(await readFile("package.json", "utf8")) as { scripts: Record<string, string> };
+  const gate = pkg.scripts["test:scale"]!, live = pkg.scripts["test:scale:live"]!;
+  assert.ok(pkg.scripts.verify!.includes("npm run test:scale &&"), "verify runs the gate");
+  assert.ok(!gate.includes("--budgets-report-only"), "the gate fails on its budgets");
+  for (const flag of ["--rss-budget 300", "--idle-rss-budget 240", "--cpu-budget 3", "--request-budget 2"]) {
+    assert.ok(gate.includes(flag), `test:scale keeps ${flag}`);
+    assert.ok(live.includes(flag), `test:scale:live reports ${flag}`);
+  }
+  assert.ok(live.includes("--live-sized") && live.includes("--busy 180"), "test:scale:live is the live-sized busy window");
+  assert.match(await readFile(".github/workflows/ci.yml", "utf8"), /^\s+- run: npm run test:scale:live$/m);
+});

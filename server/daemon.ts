@@ -86,7 +86,7 @@ export interface Daemon {
   respondToPermission(agentId: string, requestId: string, response: { behavior: "allow" }): Promise<void>;
   fetchAgents(options?: unknown): Promise<{ entries: { agent: Agent }[]; pageInfo: { hasMore: boolean; nextCursor: string | null } }>;
   fetchWorkspaces(options?: unknown): Promise<{ entries: WorkspaceRow[]; pageInfo: { hasMore: boolean; nextCursor: string | null } }>;
-  fetchAgentTimeline(id: string, options: unknown): Promise<{ entries: { item: unknown; seqStart: number; timestamp?: string }[]; startCursor: { epoch: string; seq: number } | null; endCursor?: { epoch: string; seq: number } | null; epoch?: string; reset?: boolean; hasOlder: boolean; error: string | null; gap: boolean; staleCursor: boolean }>;
+  fetchAgentTimeline(id: string, options: unknown): Promise<{ entries: { item: unknown; seqStart: number; timestamp?: string }[]; startCursor: { epoch: string; seq: number } | null; endCursor?: { epoch: string; seq: number } | null; epoch?: string; reset?: boolean; hasOlder: boolean; hasNewer?: boolean; error: string | null; gap: boolean; staleCursor: boolean }>;
   listProviderSubagents(id: string): Promise<{ subagents: { status: string }[]; error?: string | null }>;
   sendMessage(id: string, text: string, options: { messageId: string; activeTurnBehavior: "steer" }): Promise<void>;
   setWorkspaceLabel(input: { workspaceId: string; label: { name: string; color: "emerald" }; assigned: boolean }): Promise<unknown>;
@@ -277,20 +277,23 @@ async function readAll(client: Daemon, agentId: string): Promise<Read> {
   return { entries: entries.sort((a, b) => a.seqStart - b.seqStart), complete, end, incremental: false };
 }
 /**
- * Only what's new since `since` (plus a small overlap), for a live agent whose history is already cached.
+ * Only what's new since `since` (plus a small overlap), for a live agent whose history is already cached: read forward
+ * from the cursor (`direction: "after"`, Paseo 0.13+), so a rescan fetches the entries added since, not a fixed page.
+ * 2026-11-13: it read the newest 100 entries on every 15 s rescan of a running agent; with live-sized items (8 KB tool
+ * output) that was ~800 KB parsed per scan to find a handful of new entries (a-rescan-reads-only-new-entries).
  * Null means the cursor no longer applies (new epoch, reset, gap): read everything instead.
  */
 async function readSince(client: Daemon, agentId: string, since: Cursor): Promise<Read | null> {
-  const entries: Entry[] = []; let cursor: Cursor | null = null; let end: Cursor | null = null;
+  const entries: Entry[] = []; let end: Cursor | null = null;
+  let cursor: Cursor = { epoch: since.epoch, seq: Math.max(0, since.seq - OVERLAP) };
   for (let pageIndex = 0; pageIndex < 20; pageIndex++) {
-    const page = await client.fetchAgentTimeline(agentId, { direction: cursor ? "before" : "tail", ...(cursor ? { cursor } : {}), limit: 100, projection: "canonical", timeout: 15_000 });
+    const page = await client.fetchAgentTimeline(agentId, { direction: "after", cursor, limit: 100, projection: "canonical", timeout: 15_000 });
     if (page.error || page.gap || page.staleCursor || page.reset || (page.epoch && page.epoch !== since.epoch)) return null;
-    if (pageIndex === 0) { end = page.endCursor ?? null; if (end && end.epoch !== since.epoch) return null; }
     entries.push(...page.entries);
-    const oldest = page.startCursor?.seq ?? page.entries[0]?.seqStart;
-    if (!page.hasOlder || (oldest !== undefined && oldest <= since.seq - OVERLAP)) return { entries: entries.filter(e => e.seqStart > since.seq - OVERLAP).sort((a, b) => a.seqStart - b.seqStart), complete: true, end, incremental: true };
-    if (!page.startCursor) return null;
-    cursor = page.startCursor;
+    if (page.endCursor) { if (page.endCursor.epoch !== since.epoch) return null; end = page.endCursor; }
+    if (!page.hasNewer) return { entries: entries.filter(e => e.seqStart > since.seq - OVERLAP).sort((a, b) => a.seqStart - b.seqStart), complete: true, end: end ?? since, incremental: true };
+    if (!page.endCursor || page.endCursor.seq <= cursor.seq) return null;
+    cursor = page.endCursor;
   }
   return null;
 }

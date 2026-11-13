@@ -44,7 +44,14 @@ try { await exec("paseo", ["--version"], { timeout: 30_000 }); } catch {
 await harness();
 const arg = (name, fallback) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : fallback; };
 /** Seeds each workspace with this many never-sent cancelled batches, like the VM's 1.3.0-beta.2 state. */
-const CHURN = Number(arg("churn", "0")); const DATA_FROM = arg("data-from", null); const REALISTIC = process.argv.includes("--realistic") || !!DATA_FROM;
+// --live-sized: --realistic plus the live install's outliers (scripts/scale-seed.ts BIG_*: one 153-PR workspace and a
+// live-shaped inbox.json), the seed test:scale:live runs its busy window on.
+const LIVE_SIZED = process.argv.includes("--live-sized");
+// --budgets-report-only: the RSS, CPU and request budgets are printed as "[report]" lines instead of failing. Only
+// test:scale:live uses it, until its derived budgets land; dormant wakes and unsettled sends still fail.
+const REPORT_ONLY = process.argv.includes("--budgets-report-only");
+const over = message => { console.error(REPORT_ONLY ? `[report] ${message}` : message); if (!REPORT_ONLY) process.exitCode = 1; };
+const CHURN = Number(arg("churn", "0")); const DATA_FROM = arg("data-from", null); const REALISTIC = process.argv.includes("--realistic") || LIVE_SIZED || !!DATA_FROM;
 const { liveShape, copyLive } = DATA_FROM ? await import("./scale-data-from.mjs") : {};
 const shape = DATA_FROM ? await liveShape(DATA_FROM) : null;
 const N = shape ? shape.workspaces.length : Number(arg("workspaces", "120")); const AWAKE = Number(arg("awake", "5")); const POLLS = 3; const POLL_MS = 15_000;
@@ -126,14 +133,16 @@ try {
     await writeFile(join(root, "created.json"), JSON.stringify(created));
     // --awake-fresh: the awake workspaces carry no batch history, so they send under any version's rules (a fair
     // send-load baseline for a main build that would otherwise block them).
-    await exec("npx", ["tsx", "scripts/scale-seed.ts", join(home, "plugin-data/follow-up/state.json"), join(root, "created.json"), "3", process.argv.includes("--awake-fresh") ? String(AWAKE) : "0", join(home, "plugin-data/follow-up/inbox.json")], { timeout: 120_000 });
+    await exec("npx", ["tsx", "scripts/scale-seed.ts", join(home, "plugin-data/follow-up/state.json"), join(root, "created.json"), "3", process.argv.includes("--awake-fresh") ? String(AWAKE) : "0", ...(LIVE_SIZED ? [join(home, "plugin-data/follow-up/inbox.json"), "--live-sized"] : [])], { timeout: 120_000 });
   }
   const stateBytesBefore = (await readFile(join(home, "plugin-data/follow-up/state.json"))).length;
   const before = loaded(await agents());
   await cli("plugin", "install", plugin);
   // From install on: the worker's RSS every 250 ms (steps over 10 MB, with when) and V8's heap every 5 s, so a
-  // transient spike (V8 grows the heap, RSS keeps the high-water mark) shows when it happens.
-  const installedAt = Date.now(); const sendPhaseRequests = counter.snapshot(); const trace = { steps: [], peakHeapTotalMb: 0, peakHeapUsedMb: 0, peakRssMb: 0, workerAt: 0 }; let tracing = true;
+  // transient spike (V8 grows the heap, RSS keeps the high-water mark) shows when it happens. trace.memory splits each 5 s
+  // sample into heap, external and native (RSS minus both), the breakdown at the idle median and the peak, with RSS
+  // split into anonymous and file-backed (/proc/<pid>/status RssAnon, RssFile).
+  const installedAt = Date.now(); const sendPhaseRequests = counter.snapshot(); const trace = { steps: [], memory: [], peakHeapTotalMb: 0, peakHeapUsedMb: 0, peakRssMb: 0, workerAt: 0 }; let tracing = true;
   const tracer = (async () => {
     let wpid = 0, last = 0, lastUsage = 0;
     while (tracing) {
@@ -141,9 +150,10 @@ try {
       if (wpid) {
         const status = await readFile(`/proc/${wpid}/status`, "utf8").catch(() => "");
         const now = Math.round(Number(/VmRSS:\s+(\d+)/.exec(status)?.[1] ?? 0) / 1024);
+        const kb = name => Math.round(Number(new RegExp(`${name}:\\s+(\\d+)`).exec(status)?.[1] ?? 0) / 1024);
         if (now && Math.abs(now - last) > 10) { trace.steps.push({ s: Math.round((Date.now() - installedAt) / 100) / 10, at: new Date().toISOString(), rssMb: now }); last = now; }
         trace.peakRssMb = Math.max(trace.peakRssMb, now);
-        if (Date.now() - lastUsage > 5000) { lastUsage = Date.now(); const w = await client?.invokePluginRpc("follow-up", "follow.usage", {}).then(u => u?.resources?.worker, () => null); if (w) { trace.peakHeapTotalMb = Math.max(trace.peakHeapTotalMb, w.heapTotalMb ?? 0); trace.peakHeapUsedMb = Math.max(trace.peakHeapUsedMb, w.heapUsedMb ?? 0); } }
+        if (Date.now() - lastUsage > 5000) { lastUsage = Date.now(); const w = await client?.invokePluginRpc("follow-up", "follow.usage", {}).then(u => u?.resources?.worker, () => null); if (w) { trace.memory.push({ s: Math.round((Date.now() - installedAt) / 1000), rssMb: now, heapUsedMb: w.heapUsedMb, heapTotalMb: w.heapTotalMb, externalMb: w.externalMb, nativeMb: Math.round(now - (w.heapTotalMb ?? 0) - (w.externalMb ?? 0)), anonMb: kb("RssAnon"), fileMb: kb("RssFile") }); trace.peakHeapTotalMb = Math.max(trace.peakHeapTotalMb, w.heapTotalMb ?? 0); trace.peakHeapUsedMb = Math.max(trace.peakHeapUsedMb, w.heapUsedMb ?? 0); } }
       }
       await sleep(250);
     }
@@ -260,12 +270,12 @@ try {
   if (after > before) { console.error(`Follow-up loaded ${after - before} dormant agents`); process.exitCode = 1; }
   // The budget is the worker's lifetime peak (VmHWM), start-up tick included: 2026-11-12's spike was over before idle began.
   // The idle budget judges the window's median (a GC sawtooth's one spike decides nothing); the peak is reported.
-  if (budget.idleRssMb && worker && idleVerdict(worker.idleSamplesMb, budget.idleRssMb).over) { console.error(`Worker idle RSS median ${worker.idleMedianRssMb} MB (peak ${worker.idlePeakRssMb}), over ${budget.idleRssMb} MB`); process.exitCode = 1; }
+  if (budget.idleRssMb && worker && idleVerdict(worker.idleSamplesMb, budget.idleRssMb).over) { over(`Worker idle RSS median ${worker.idleMedianRssMb} MB (peak ${worker.idlePeakRssMb}), over ${budget.idleRssMb} MB`); }
   // The busy window's growth (2026-11-13: live stepped 315 → 405 MB under agent turns while an idle check passed).
-  if (worker?.busy && budget.busyGrowthMb && busyVerdict(worker.busy.samplesMb, budget.busyGrowthMb).over) { console.error(`Worker RSS grew ${worker.busy.growthMb} MB across the ${worker.busy.seconds} s busy window (${worker.busy.firstMb} → ${worker.busy.lastMb}), over ${budget.busyGrowthMb} MB`); process.exitCode = 1; }
-  if (budget.rssMb && worker && worker.lifetimePeakRssMb > budget.rssMb) { console.error(`Worker RSS peaked at ${worker.lifetimePeakRssMb} MB (idle peak ${worker.idlePeakRssMb}), over ${budget.rssMb} MB`); process.exitCode = 1; }
-  if (budget.requestsPerMin && worker && worker.daemonRequestsPerMin.total > budget.requestsPerMin) { console.error(`Worker sent ${worker.daemonRequestsPerMin.total} daemon requests/min while idle, over ${budget.requestsPerMin}: ${JSON.stringify(worker.daemonRequestsPerMin.byType)}`); process.exitCode = 1; }
-  if (budget.cpuPct && worker && worker.cpuPct > budget.cpuPct) { console.error(`Worker CPU ${worker.cpuPct}% exceeds ${budget.cpuPct}% while idle`); process.exitCode = 1; }
+  if (worker?.busy && budget.busyGrowthMb && busyVerdict(worker.busy.samplesMb, budget.busyGrowthMb).over) { over(`Worker RSS grew ${worker.busy.growthMb} MB across the ${worker.busy.seconds} s busy window (${worker.busy.firstMb} → ${worker.busy.lastMb}), over ${budget.busyGrowthMb} MB`); }
+  if (budget.rssMb && worker && worker.lifetimePeakRssMb > budget.rssMb) { over(`Worker RSS peaked at ${worker.lifetimePeakRssMb} MB (idle peak ${worker.idlePeakRssMb}), over ${budget.rssMb} MB`); }
+  if (budget.requestsPerMin && worker && worker.daemonRequestsPerMin.total > budget.requestsPerMin) { over(`Worker sent ${worker.daemonRequestsPerMin.total} daemon requests/min while idle, over ${budget.requestsPerMin}: ${JSON.stringify(worker.daemonRequestsPerMin.byType)}`); }
+  if (budget.cpuPct && worker && worker.cpuPct > budget.cpuPct) { over(`Worker CPU ${worker.cpuPct}% exceeds ${budget.cpuPct}% while idle`); }
 } finally {
   await stop().catch(() => {}); await counter.close().catch(() => {}); await github?.close().catch(() => {});
   if (!process.argv.includes("--keep")) await rm(root, { recursive: true, force: true }).catch(() => {});

@@ -74,6 +74,13 @@ Answers that the client polls are kept small:
 
 ## The daemon, seen from the worker
 
+Timeline reads parse every entry they fetch, and live entries carry tool output (8 KB is common), so each entry is
+read once (`a-rescan-reads-only-new-entries`, `a-turn-end-reads-the-turn-once`). Discovery rescans a running agent
+every 15 s by reading forward from the cursor it cached (`readSince`, `direction: "after"`, plus a 25-entry overlap),
+not the newest 100 entries. A turn end reads its own turn back to the item that started it, in pages of `TURN_PAGE`
+and at most `TURN_READ_CAP` entries, and the engine's and the inbox's handlers share that one read (`turnItems`,
+`server/inbox-directory.ts`).
+
 - `server/daemon.ts` (`PaseoGateway`):
   - lists agents, workspaces and projects;
   - observes a workspace's main agent (busy, loaded, recent, gone);

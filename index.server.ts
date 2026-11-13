@@ -177,6 +177,8 @@ export default function contribute(server: PluginServerContext) {
   const agentHooks = new AgentHooks(directory, clientEntry());
   const historyCache = HistoryCache.at(directory);
   const gateway = new PaseoGateway(undefined, undefined, undefined, historyCache);
+  /** The daemon as the inbox sees it; its turnItems is the one timeline read per turn end (engine and inbox). */
+  const inboxDirectory = daemonDirectory(gateway.directory);
   // Settings → Agents: which agent each special role uses, in agents.json (defaults when absent).
   const agentSettings = new AgentSettingsStore(directory);
   gateway.recoveryRole = () => agentSettings.role("recovery");
@@ -279,7 +281,7 @@ export default function contribute(server: PluginServerContext) {
         });
       },
     },
-    directory: daemonDirectory(gateway.directory),
+    directory: inboxDirectory,
     sources: senderSources,
     guard: async () => {
       try { const state = JSON.parse(await readFile(guardPath(paseoHome), "utf8")); return state?.version === 1 && Array.isArray(state.pauses) ? state.pauses as GuardPause[] : null; }
@@ -1444,9 +1446,9 @@ export default function contribute(server: PluginServerContext) {
       gateway.markDirty(event.agent.id);
       // Since Paseo 0.13 the lifecycle payload deliberately contains no history.
       // Read a bounded tail through the plugin-owned API, outside the state lock.
-      const history = await paseo.agents.ref(event.agent.id).timeline.refetch({ direction: "tail", limit: 100, projection: "canonical" }).catch(() => null);
+      // One read of the ended turn, shared with the inbox's handler (a-turn-end-reads-the-turn-once).
+      const items = await inboxDirectory.turnItems!(event.agent.id, event.turnId ?? null).catch(() => null);
       if (signal.aborted || stopped) return;
-      const items = history ? history.entries.map(entry => entry.item) : null;
       const guarded = !!interruption && await sessionGuardOwnsInterruption(event.agent.id, interruption).catch(() => false);
       // Only the developer's Stop holds (shared/status.ts cancelCause): a turn already replaced by a newer one (the
       // developer's or another agent's message), a /compact, or a closed or reloaded session never does.

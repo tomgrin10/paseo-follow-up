@@ -159,6 +159,8 @@ export interface Directory {
   agent(id: string): Promise<AgentInfo | null>;
   /** Recent timeline items, oldest first. */
   tail(id: string, limit: number): Promise<unknown[]>;
+  /** The ended turn's items, oldest first, read once per turn end and shared with the engine (inbox-directory.ts). */
+  turnItems?(id: string, turnId: string | null): Promise<unknown[]>;
   clearAttention(ids: string[]): Promise<void>;
 }
 export type GuardPause = { id: string; agentId: string; phase: string; turnId?: string | null; anchorResetsAt?: string; dismissed?: boolean; note?: string };
@@ -393,7 +395,7 @@ export class Inbox {
     this.turns.delete(agent.id);
     const stated = await this.sources(agent.id, since, turnId);
     if (outcome.kind === "completed") {
-      const items = await this.o.directory.tail(agent.id, 20).catch(() => []);
+      const items = await (this.o.directory.turnItems?.(agent.id, turnId) ?? this.o.directory.tail(agent.id, 20)).catch(() => []);
       // Never Follow-up's own bookkeeping continuation's reply (finishedReply).
       const saved = /^[\w-]+$/.test(agent.id) ? await readFile(join(this.hookState, `bookkeeping-${agent.id}.json`), "utf8").then(t => JSON.parse(t), () => null) : null;
       const reply = { text: finishedReply(items, saved, turnAt) };

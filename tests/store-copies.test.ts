@@ -119,3 +119,19 @@ for (const [name, s] of Object.entries(COPY_ON_ACCESS)) {
     assert.equal(await store.read(), reread, "a mutation that changed nothing keeps the saved value");
   });
 }
+
+test("a-mutation-copies-only-what-it-changes: searching every workspace inside a mutation copies none of them", async t => {
+  const { Store } = await import("../server/store");
+  const { workspace, pr } = await import("./fixtures");
+  const root = await mkdtemp(join(tmpdir(), "follow-cow-find-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const store = new Store(root);
+  await store.mutate(s => { s.workspaces = Array.from({ length: 50 }, (_, i) => workspace({ id: `ws-${i}`, title: `Workspace ${i}`, prs: [pr({ key: `example/app#${i + 1}`, number: i + 1 })] })); });
+  const original = structuredClone; let clones = 0;
+  globalThis.structuredClone = ((v: unknown, o?: Parameters<typeof structuredClone>[1]) => { clones++; return original(v, o); }) as typeof structuredClone;
+  try {
+    await store.mutate(s => { const w = s.workspaces.find(w => w.id === "ws-40" && w.enable_tracking); if (w) w.title = "Renamed"; });
+  } finally { globalThis.structuredClone = original; }
+  assert.equal(clones, 1, `one workspace copied (the one renamed), not every one the search passed: ${clones}`);
+  assert.equal((await store.snapshot()).workspaces[40].title, "Renamed");
+});
