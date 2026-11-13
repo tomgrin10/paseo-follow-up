@@ -182,36 +182,46 @@ try {
   assert.equal(installed?.status, "running", JSON.stringify(installed));
   await until(async () => { try { return !!JSON.parse(await readFile(join(home, "plugin-data", pluginId, "hooks-enabled.json"), "utf8")).clientEntry; } catch { return false; } }, "Follow-up writes its hook");
   const view = await client.invokePluginRpc(pluginId, "follow.agent-settings", {});
-  assert.deepEqual(view.wait, { enable_wait: true, active: true, reason: null }, "on by default");
+  // Each host's default. Paseo 0.16 advertises features.agentBackgroundWork and tracks an agent's background work
+  // itself, so Follow-up's Wait steps aside (reason "host"; plan item 8 retires it there). On 0.15 Wait is on by default.
+  const hostRunsBackgroundWork = client.getLastServerInfoMessage?.()?.features?.agentBackgroundWork === true;
+  result.host = { version: (await exec("paseo", ["--version"], { timeout: 30000 }).then(r => r.stdout.trim(), () => "")) || null, agentBackgroundWork: hostRunsBackgroundWork };
+  assert.deepEqual(view.wait, hostRunsBackgroundWork
+    ? { enable_wait: true, active: false, reason: "host", host: true }
+    : { enable_wait: true, active: true, reason: null }, hostRunsBackgroundWork ? "steps aside for the host's background work" : "on by default");
+  if (hostRunsBackgroundWork) { result.cases.push({ label: "host-default", reason: "host" }); log("case_passed", result.cases.at(-1)); }
   await memory("idle");
   const workspace = await client.createWorkspace({ source: { kind: "directory", path: cwd }, title: "Synthetic bounded waits" });
   const workspaceId = workspace.workspace.id;
   const want = label => !only || only.has(label);
   let adoption, repeat;
-  if (want("adoption")) adoption = await runCase(workspaceId, "adoption", "sleep 12; printf WAIT_ADOPTED", 2);
-  if (want("repeat")) repeat = await runCase(workspaceId, "repeat", "sleep 12; printf WAIT_JOB_COMPLETE", 2);
-  if (want("failure")) {
-    const other = await runCase(workspaceId, "failure", "sleep 3; exit 7", 2);
-    if (repeat) { const rejected = await call(other.agentId, "wait_get_job", { jobId: repeat.jobId }); assert.equal(rejected.isError, true); assert.match(rejected.text, /Unknown job/); }
-  }
-  if (want("stop")) await runCase(workspaceId, "stop", "sleep 10; printf WAIT_STOP_JOB_COMPLETE", 30, "stop");
-  if (want("message")) await runCase(workspaceId, "message", "sleep 10; printf WAIT_MESSAGE_JOB_COMPLETE", 30, "message");
-  await memory("after_cases");
-  const previous = repeat ?? adoption;
-  if (previous && want("reload")) {
-    assert.equal((await client.reloadPlugin(pluginId)).status, "running");
-    await client.sendMessage(previous.agentId, "Reply WAIT_REOPEN_ACK. Do not start another job.");
-    await until(() => daemon.agentManager.getPluginTools(previous.agentId).some(t => t.name === "wait_get_job"), "Wait comes back on the next prompt");
-    await until(() => daemon.agentManager.getAgent(previous.agentId)?.lifecycle !== "running", "reopen turn ends");
-    const old = await call(previous.agentId, "wait_get_job", { jobId: previous.jobId });
-    assert.equal(old.value.status, "completed", "job records survive a plugin reload");
-    result.cases.push({ label: "reload", preservedExitCode: old.value.exitCode }); log("case_passed", result.cases.at(-1));
+  // The job cases need Follow-up's Wait, which a host that runs background work doesn't attach.
+  if (!hostRunsBackgroundWork) {
+    if (want("adoption")) adoption = await runCase(workspaceId, "adoption", "sleep 12; printf WAIT_ADOPTED", 2);
+    if (want("repeat")) repeat = await runCase(workspaceId, "repeat", "sleep 12; printf WAIT_JOB_COMPLETE", 2);
+    if (want("failure")) {
+      const other = await runCase(workspaceId, "failure", "sleep 3; exit 7", 2);
+      if (repeat) { const rejected = await call(other.agentId, "wait_get_job", { jobId: repeat.jobId }); assert.equal(rejected.isError, true); assert.match(rejected.text, /Unknown job/); }
+    }
+    if (want("stop")) await runCase(workspaceId, "stop", "sleep 10; printf WAIT_STOP_JOB_COMPLETE", 30, "stop");
+    if (want("message")) await runCase(workspaceId, "message", "sleep 10; printf WAIT_MESSAGE_JOB_COMPLETE", 30, "message");
+    await memory("after_cases");
+    const previous = repeat ?? adoption;
+    if (previous && want("reload")) {
+      assert.equal((await client.reloadPlugin(pluginId)).status, "running");
+      await client.sendMessage(previous.agentId, "Reply WAIT_REOPEN_ACK. Do not start another job.");
+      await until(() => daemon.agentManager.getPluginTools(previous.agentId).some(t => t.name === "wait_get_job"), "Wait comes back on the next prompt");
+      await until(() => daemon.agentManager.getAgent(previous.agentId)?.lifecycle !== "running", "reopen turn ends");
+      const old = await call(previous.agentId, "wait_get_job", { jobId: previous.jobId });
+      assert.equal(old.value.status, "completed", "job records survive a plugin reload");
+      result.cases.push({ label: "reload", preservedExitCode: old.value.exitCode }); log("case_passed", result.cases.at(-1));
+    }
   }
   if (want("standalone")) {
     // A stub standalone plugin listed and enabled in config.json: Follow-up's Wait stays off and says why.
     await writeConfig({ "paseo-wait": { source: "directory", path: join(root, "missing-paseo-wait"), enabled: true } });
     const blocked = await client.invokePluginRpc(pluginId, "follow.agent-settings", {});
-    assert.deepEqual(blocked.wait, { enable_wait: true, active: false, reason: "standalone" });
+    assert.deepEqual(blocked.wait, { enable_wait: true, active: false, reason: "standalone", ...(hostRunsBackgroundWork ? { host: true } : {}) });
     const agent = await client.createAgent({ provider: "claude", model: "haiku", modeId: "bypassPermissions", cwd, workspaceId, title: "Wait standalone" });
     await until(() => launches.has(agent.id) || daemon.agentManager.getPluginTools(agent.id).length > 0, "session opens", 30000).catch(() => undefined);
     assert.ok(!daemon.agentManager.getPluginTools(agent.id).some(t => isWait(t.name)), "no double install");
