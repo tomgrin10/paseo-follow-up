@@ -13,8 +13,16 @@ function timeline() {
   let epoch = "e1"; const items: { seqStart: number; item: unknown }[] = [];
   const add = (text: string) => items.push({ seqStart: items.length, item: { type: "assistant_message", text } });
   for (let i = 0; i < 1200; i++) add(i === 3 ? "Opened https://github.com/example/app/pull/1" : `step ${i}`);
-  const calls: { direction: string; limit: number }[] = [];
-  const fetch = async (_id: string, o: { direction: string; cursor?: { seq: number }; limit: number }) => {
+  const calls: { direction: string; limit: number; entries?: number }[] = [];
+  const fetch = async (_id: string, o: { direction: string; cursor?: { epoch: string; seq: number }; limit: number }) => {
+    if (o.direction === "after") {
+      // Paseo's timeline store: rows after the cursor's seq, oldest first; another epoch's cursor is stale.
+      const stale = o.cursor!.epoch !== epoch;
+      const page = stale ? [] : items.filter(i => i.seqStart > o.cursor!.seq).slice(0, o.limit);
+      calls.push({ direction: o.direction, limit: o.limit, entries: page.length });
+      const last = page.at(-1)?.seqStart;
+      return { entries: page, startCursor: page.length ? { epoch, seq: page[0]!.seqStart } : null, endCursor: last !== undefined ? { epoch, seq: last } : null, epoch, reset: stale, hasOlder: true, hasNewer: last !== undefined && last < items.length - 1, error: null, gap: false, staleCursor: stale };
+    }
     calls.push({ direction: o.direction, limit: o.limit });
     const endSeq = o.direction === "tail" ? items.length : o.cursor!.seq;
     const page = items.slice(Math.max(0, endSeq - o.limit), endSeq);
@@ -43,7 +51,7 @@ test("a live agent's rescans fetch only the newest entries and keep what was fou
   tl.add("Opened https://github.com/example/app/pull/2");
   now += 15_000;
   const [row] = await gateway.discover({ version: 1, workspaces: [] });
-  assert.deepEqual(tl.calls, [{ direction: "tail", limit: 100 }], "one small page");
+  assert.deepEqual(tl.calls, [{ direction: "after", limit: 100, entries: 26 }], "one read forward from the cursor: the new entry and the overlap, not a fixed page of 100");
   assert.equal(gateway.incrementalReads, 1);
   assert.deepEqual(row.history?.candidates, ["example/app#1", "example/app#2"], "old and new candidates are kept");
   tl.calls.length = 0; tl.newEpoch(); now += 15_000;
