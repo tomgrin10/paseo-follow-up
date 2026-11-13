@@ -185,7 +185,7 @@ test("a-no-review-repo-never-asks-for-review-or-merge: the moment the repository
   };
   const other = { reason: "finished" as const, at, detail: "Finished", dedupeKey: "turn:1" };
   const drawn = (r: typeof row) => { const shown = withoutWithdrawnAsks(r); return { needs: shown.needs?.reasons.map(x => x.reason) ?? [], headline: flagHeadline(shown, clock)?.line ?? null, brief: shown.brief?.ask ?? null }; };
-  assert.deepEqual(drawn(row), { needs: ["reviewers"], headline: "Add reviewers to #240: Ravi", brief: "Add reviewers to #240: Ravi" }, "Team review asks");
+  assert.deepEqual(drawn(row), { needs: ["reviewers"], headline: "Suggested: Ravi", brief: "Add reviewers to #240: Ravi" }, "Team review asks");
   assert.equal(reviewersBriefWithdrawn(full), false);
   setNoReviewRepos(["example/app"]); // the link's tap: the client's set flips before any daemon round trip
   assert.deepEqual(drawn(row), { needs: [], headline: null, brief: null }, "the pill, the row, Home's group and the count all lose it at once");
@@ -201,7 +201,7 @@ test("a-no-review-repo-never-asks-for-review-or-merge: the moment the repository
   assert.equal(handsMergeBack({ repo: "example/app", agentMerges: false }), true);
   setHandedBackPrs([]);
   setNoReviewRepos([]); // Undo
-  assert.deepEqual(drawn(row), { needs: ["reviewers"], headline: "Add reviewers to #240: Ravi", brief: "Add reviewers to #240: Ravi" }, "Undo brings it back");
+  assert.deepEqual(drawn(row), { needs: ["reviewers"], headline: "Suggested: Ravi", brief: "Add reviewers to #240: Ravi" }, "Undo brings it back");
   assert.equal(agentMergesKey("example/app#240"), false);
 });
 

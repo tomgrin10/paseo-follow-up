@@ -298,6 +298,12 @@ card beside a question list.
   the headline's PR) drops its title and keeps its controls. The popover says its "N to do" once (`todoLine`): the
   section header over the items when they show, else the meta line; the pill's title (a phone sheet's title) never. `tests/say-it-once.test.ts` covers every reason and the
   sheet.
+- **A headline says only what is new** (`a-headline-says-only-what-is-new`, inside `say-it-once`). Not even part of
+  the line may repeat its row: `repeatsRow` (`shared/headline.ts`) fails a line that contains the row's word or label
+  (case and punctuation ignored, the label's age dropped, a hyphenated word kept whole) or a PR ref the label or chip
+  shows. So Add reviewers reads "Suggested: Ravi" (else the PR's title) under "Add reviewers #246", a merge row's line
+  is the PR's title, a review flag reads "2 threads to fix", and Home drops the chip's ref from the line (`sayNew`:
+  "Merge conflict to fix", not "… on #240" beside a #240 chip). A ref the row doesn't show stays.
 - **No "No ask stated" beside an open question:** the chat's fallback card says "Waiting on your answer to Q1".
 - **A blocked task names what it waits on** (`blockedLine`, `shared/task-status.ts`): "Blocked · waits for Q1", or the
   evidence's first sentence.
