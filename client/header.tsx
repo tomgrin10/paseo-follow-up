@@ -37,6 +37,7 @@ export function StackBar({ workspace, theme, height = 6, onOpen }: { workspace: 
 function LiveGlyph({ icon, colors }: { icon: LiveIcon; colors: Colors }) {
   switch (icon) {
     case "spinner": return <Spinner color={colors.accent} size={12} />;
+    case "sent": return <Icon name="Send" size={12} color={colors.accent} />;
     case "done": return <Icon name="CircleCheck" size={12} color={colors.statusSuccess} />;
     case "paused": return <Icon name="CirclePause" size={12} color={colors.statusWarning} />;
     case "alert": return <Icon name="TriangleAlert" size={12} color={colors.statusWarning} />;
@@ -71,7 +72,7 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
   const tail = <>
     <View style={{ flexDirection: "row", gap: 6, marginTop: 2 }}>
       <View style={{ paddingTop: 3 }}><IconSwap swapKey={live.icon} size={12}><LiveGlyph icon={live.icon} colors={c} /></IconSwap></View>
-      <Text accessibilityLiveRegion="polite" style={[t.meta, { flex: 1, color: live.icon === "spinner" ? c.foreground : c.foregroundMuted }]}>
+      <Text accessibilityLiveRegion="polite" style={[t.meta, { flex: 1, color: live.icon === "spinner" || live.icon === "sent" ? c.foreground : c.foregroundMuted }]}>
         {live.text}{live.since ? <Text style={{ color: c.foregroundMuted }}>{` · ${ago(live.since, now)}`}</Text> : null}
       </Text>
     </View>

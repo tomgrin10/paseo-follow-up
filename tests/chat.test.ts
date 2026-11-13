@@ -35,7 +35,7 @@ test("tool rows say what changed in one line", () => {
   const registered = toolRow("register_pr", "completed", { repo: "acme/billing", number: 421, stack: "Retry backoff", parentNumber: 418 }, "{}");
   assert.equal(registered.line, "Registered billing #421 in Retry backoff on #418");
   assert.equal(toolRow("update_obligation", "completed", { title: "Pick a strategy", status: "blocked" }, "{}").tone, "warning");
-  assert.equal(toolRow("acknowledge_batch", "completed", { outcome: "blocked", result: "Needs prod access\nmore" }, "{}").line, "Repairs blocked · Needs prod access");
+  assert.equal(toolRow("acknowledge_batch", "completed", { outcome: "blocked", result: "Needs prod access\nmore" }, "{}").line, "Tasks blocked · Needs prod access");
   assert.equal(toolRow("workspace_status", "running", {}, undefined).line, "Reading Follow-up status…");
   const failed = toolRow("register_pr", "failed", {}, undefined, "Register the parent PR first.\nstack");
   assert.equal(failed.line, "Register the parent PR first."); assert.equal(failed.tone, "danger");
