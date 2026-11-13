@@ -264,6 +264,9 @@ card beside a question list.
 - **A brief without an ask never sits beside Needs you** (`a-brief-without-an-ask-never-sits-beside-needs-you`).
   "No ask stated" or "Nothing needed" is drawn only while nothing in Needs you speaks for the row (`briefCardShown`,
   `shared/brief.ts`); beside a question or an answer waiting to be sent it would say there's nothing to do.
+  The flag's headline (`flagHeadline`: Home row, sidebar row, pill) follows the same rule: such a brief supplies the
+  line only where its card would draw and only for the finish it came with. Beside drawn items the top item is the
+  line; for another flag the flag's own fact is (a merged PR's title), never "Merged · No ask stated".
 - **The newest brief decides** (`newest-brief-decides`). An agent's needs_you kind=done is its newest word: it
   resolves an older finish flag whose brief asked nothing ("No ask stated", source none) and replaces that brief
   (`resolveStaleFinish` in `shared/inbox.ts`, the quiet guard in `server/inbox.ts` `creator`). Only an ask the
@@ -283,9 +286,18 @@ card beside a question list.
 - **One answer path.** A question card, the pill, the question dialog and the chat's brief card all answer a stored
   question through `follow.answer-question`; the brief resolves when its questions settle (`briefQuestionsEvent`).
   Only a decision with no tracked question goes through `follow.brief-action`.
-- **One ask, one title** (`one-ask-one-title`): `needs_you` pointing at open questions stores the first one's title
-  as the brief's ask (`foldedAsk`), so the Home row, the sidebar row, the pill, the chat card and the panel name it
-  the same way; the agent's context stays the card's body.
+- **One ask, one title** (`one-ask-one-title`): `needs_you` pointing at one open question stores its title as the
+  brief's ask (`foldedAsk`), so the Home row, the sidebar row, the pill, the chat card and the panel name it the same
+  way; the agent's context stays the card's body. Over several open questions the agent's own ask stays the title
+  ("Two calls on the invoice export"); the first question's title would repeat as the card's item 1.
+- **Say it once** (`say-it-once`): a flag's headline line (the Home and sidebar row's text, the pill sheet's ask)
+  never repeats its word, its pill label or the PR chip. A merged or closed PR's flag carries the PR's title
+  (`ReasonEntry.title`, from `prEndEvent`) and reads it, not "#240 merged"; a flag stored before that keeps its line.
+  Check, review-thread and conflict flags already say what to fix.
+  In the pill sheet, a to-do that only says the headline again (`echoedItems`: the same text, or a reviewers row for
+  the headline's PR) drops its title and keeps its controls. The popover says its "N to do" once (`todoLine`): the
+  section header over the items when they show, else the meta line; the pill's title (a phone sheet's title) never. `tests/say-it-once.test.ts` covers every reason and the
+  sheet.
 - **No "No ask stated" beside an open question:** the chat's fallback card says "Waiting on your answer to Q1".
 - **A blocked task names what it waits on** (`blockedLine`, `shared/task-status.ts`): "Blocked · waits for Q1", or the
   evidence's first sentence.
