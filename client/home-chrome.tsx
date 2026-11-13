@@ -210,7 +210,7 @@ export function SortMenu({ theme, mode, onChange, rankedAt, touch, rank = null, 
 // ---------- status strip ----------
 
 const STRIP: { id: HomeGroupId; label: string }[] = [
-  { id: "needs", label: "Needs you" }, { id: "fixing", label: "Fixing" }, { id: "running", label: "Running" }, { id: "waiting", label: "Waiting" }, { id: "quiet", label: "Quiet" },
+  { id: "needs", label: "Needs you" }, { id: "sending", label: "Sending" }, { id: "running", label: "Running" }, { id: "waiting", label: "Waiting" }, { id: "quiet", label: "Quiet" },
 ];
 
 /**

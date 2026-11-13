@@ -19,7 +19,7 @@ export type HeadlineTone = "danger" | "warning" | "accent" | "merged" | "muted";
 /** The decisive word each key leads with. The pill, the card header and the row all read it from here. */
 export const HEADLINE_WORD: Record<HeadlineKey, string> = {
   permission: "Permission", error: "Error", paused: "Paused", blocked: "Blocked", decision: "Decision", question: "Question", action: "Action",
-  repairs: "Tasks", finish: FINISH_WORD, merge: "Merge", reviewers: "Add reviewers", review: "Review", finished: "Finished", flagged: "Flagged", pr_closed: "PR closed", pr_merged: "Merged",
+  repairs: "Send", finish: FINISH_WORD, merge: "Merge", reviewers: "Add reviewers", review: "Review", finished: "Finished", flagged: "Flagged", pr_closed: "PR closed", pr_merged: "Merged",
 };
 export const HEADLINE_ICON: Record<HeadlineKey, string> = {
   permission: "ShieldQuestion", error: "CircleX", paused: "CirclePause", blocked: "OctagonAlert", decision: "MessageCircleQuestion", question: "MessageCircleQuestion",

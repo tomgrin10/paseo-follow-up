@@ -142,9 +142,9 @@ function TaskSheet({ o, w, agents, openAgent, theme, compact, onClose }: { o: Ob
 const clock = (iso: string | null | undefined) => iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
 const tasks = (n: number) => `${n} task${n === 1 ? "" : "s"}`;
 
-/** The status column reads one way for every task: dashed ring = queued, spinner = sent while the agent works, send icon = sent. */
+/** The status column reads one way for every task: dashed ring = queued, send glyph = sent (accent while the agent works on it). Never Running's spinner (Q51). */
 function DeliveryGlyph({ state, w, colors }: { state: "queued" | "sent"; w: Workspace; colors: Colors }) {
-  if (state === "sent") return w.runtimeBusy ? <Spinner color={colors.accent} size={13} /> : <Icon name="Send" size={13} color={colors.foregroundMuted} />;
+  if (state === "sent") return <Icon name="Send" size={13} color={w.runtimeBusy ? colors.accent : colors.foregroundMuted} />;
   return <Icon name="CircleDashed" size={14} color={colors.foregroundMuted} />;
 }
 

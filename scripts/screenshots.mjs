@@ -42,7 +42,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as 2.0.0-rc.0, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["needs-you-states", "done-brief", "review-mode"];
+const REVIEW_SHOTS = ["needs-you-states", "done-brief", "review-mode", "sending"];
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
 for (const name of only) if (![...SHOTS, ...REVIEW_SHOTS].includes(name)) fail(`unknown shot "${name}" (known: ${[...SHOTS, ...REVIEW_SHOTS].join(", ")})`);
 const scheme = arg("--scheme");
@@ -91,7 +91,12 @@ globalThis.Date = ShiftedDate;
 // the governor treats as unknown (never "over budget") and Home shows no meter.
 const fsp = require("node:fs/promises"); const readFile = fsp.readFile;
 const hidden = path => { if (typeof path !== "string") return false; const leaf = path.split("/").pop(); return path.startsWith("/proc/pressure/") || path === "/proc/stat" || path.startsWith("/sys/fs/cgroup/") && (leaf.startsWith("memory.") || leaf.startsWith("cpu.")); };
-fsp.readFile = function (path, ...rest) { return hidden(path) ? Promise.reject(Object.assign(new Error("ENOENT: hidden by scripts/screenshots.mjs"), { code: "ENOENT" })) : readFile.call(this, path, ...rest); };
+// The sending review set alone gives the governor a fake cgroup (FOLLOW_SHOTS_CGROUP: {high, current}), so Home can
+// show the auto-send hold on cue; every other shot keeps it unreadable.
+const fakeCgroup = path => { const f = process.env.FOLLOW_SHOTS_CGROUP; if (!f || typeof path !== "string" || !path.startsWith("/sys/fs/cgroup/")) return null;
+  let v; try { v = JSON.parse(fs.readFileSync(f, "utf8")); } catch { return null; }
+  const leaf = path.split("/").pop(); return leaf === "memory.high" ? String(v.high) : leaf === "memory.current" ? String(v.current) : leaf === "memory.stat" ? "" : null; };
+fsp.readFile = function (path, ...rest) { const fake = fakeCgroup(path); if (fake !== null) return Promise.resolve(fake); return hidden(path) ? Promise.reject(Object.assign(new Error("ENOENT: hidden by scripts/screenshots.mjs"), { code: "ENOENT" })) : readFile.call(this, path, ...rest); };
 // Paseo colours a project's avatar from a hash of its server id and project id. The server id is fixed through
 // PASEO_SERVER_ID; project and workspace ids come from a counter here, so the avatar is the same colour every run.
 const crypto = require("node:crypto"); const randomBytes = crypto.randomBytes; let idCount = 0;
@@ -113,6 +118,7 @@ function pulls() {
     142: { title: "Retry failed charges with exponential backoff", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [failed("test"), ok("lint"), ok("typecheck")] },
     143: { title: "Send the dunning email after the last retry", state: "OPEN", author: "dana", base: "branch-142", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint"), ok("typecheck")] },
     151: { repo: "example/web", title: "Saved search filters", state: "OPEN", author: "dana", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint")] },
+    232: { title: "Checkout button copy", state: "OPEN", author: "dana", conflict: true, threads: 1, reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
     160: { title: "Welcome email template", state: "OPEN", author: "dana", conflict: true, threads: 2, reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
     170: { title: "Sign webhook payloads", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
     181: { repo: "example/web", title: "Dark mode color tokens", state: "MERGED", author: "dana", checks: [ok("test"), ok("lint")] },
@@ -292,6 +298,17 @@ const WORKSPACES = [
 ].sort((a, b) => a.minute - b.minute);
 
 /**
+ * sending only (Q51): an agent still mid-turn whose PR has a conflict and a thread, so its tasks wait in Sending for
+ * the turn to end, with no Send now. Saved views and Invoice PDFs are out with their agents; Onboarding email's tasks
+ * wait on the developer (Needs you).
+ */
+const SENDING_STATES = [
+  { key: "sd-busy", title: "Checkout copy", minute: 146, prompt: "APP-188: tighten the checkout button copy and keep the old string for the A/B test.", flag: false, waitFor: "running",
+    steps: [rpc("follow.enroll", { goal: "APP-188 Checkout button copy" }), rpc("follow.register-pr", { repo: "example/app", number: 232, stack: "Checkout copy" }),
+      think("Keep the old string behind the experiment flag."), { hold: true }] },
+];
+
+/**
  * needs-you-states only (an-open-question-renders-once-per-surface, task asks): one workspace per Needs you state.
  * Billing retries above is the brief pointing at its own question.
  */
@@ -349,7 +366,7 @@ async function seed({ call, home }) {
   for (const name of ["app", "web"]) { repos[name] = join(tmpdir(), "follow-up-shots-fixture", name); await fs.mkdir(repos[name], { recursive: true }); }
   // review-mode: someone reviews example/app, so its PR without reviewers asks for them.
   if (only.includes("review-mode")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }] });
-  const specs = [...WORKSPACES, ...(only.includes("needs-you-states") ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("review-mode") ? REVIEW_MODE_STATES : [])];
+  const specs = [...WORKSPACES, ...(only.includes("needs-you-states") ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("review-mode") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : [])];
   await fs.writeFile(join(home, "fixture-scripts.json"), JSON.stringify(Object.fromEntries(specs.map(w => [w.prompt, w.steps]))));
   const workspaces = [];
   for (const spec of specs) {
@@ -899,6 +916,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
     }
   }
   if (only.includes("review-mode")) await reviewModeShots({ shoot, call });
+  if (only.includes("sending")) await sendingShots({ shoot, seeded, call, home });
   if (only.includes("needs-you-states")) {
     // One Needs you block per surface: each state on the panel (desktop) and Home's detail pane (desktop and phone),
     // light and dark. Tall panel frames so the block, Tasks and their neighbours all fit.
@@ -940,6 +958,27 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       await shoot(`db-home${size}-${theme}`, frame, theme, async page => { await openHome(page); if (frame === PHONE) await page.setViewportSize(PHONE); await (await homeRow(page, w.title)).click(); await settle(page); });
     }
   }
+}
+async function sendingShots({ shoot, seeded, call, home }) {
+  // Q51 Home "Sending", light, desktop and phone: Checkout copy's tasks wait for its agent's turn (no Send now), Saved
+  // views and Invoice PDFs are out with their agents (the send glyph), and Onboarding email's tasks wait on the
+  // developer, so they're in Needs you only, said once ("Send · The agent is idle; …").
+  const ws = key => seeded.workspaces.find(w => w.key === key);
+  for (const key of ["email", "sd-busy"]) await call("follow.control", { workspaceId: ws(key).workspaceId, enable_auto_sends: true });
+  await until("Checkout copy queued behind its turn", async () => {
+    await call("follow.refresh", {});
+    return (await call("follow.list", {})).workspaces.find(x => x.id === ws("sd-busy").workspaceId)?.batches.some(b => b.state === "pending");
+  }, { tries: 120, every: 500 });
+  const sendingShown = async page => { await openHome(page); await page.getByText("Checkout copy").filter({ visible: true }).first().waitFor(); await page.getByText(/sends when its current turn ends/).filter({ visible: true }).first().waitFor({ timeout: 60000 }); };
+  await shoot("sending-home-light", DESKTOP, "light", sendingShown);
+  await shoot("sending-home-phone-light", PHONE, "light", async page => { await page.setViewportSize(PHONE); await sendingShown(page); });
+  // The machine-wide hold: Paseo's (fake) cgroup at 78% of memory.high. The governor pauses auto-sends; Home shows one
+  // line at the top of Sending, the same words on both widths.
+  await fs.writeFile(process.env.FOLLOW_SHOTS_CGROUP, JSON.stringify({ high: 1000, current: 780 }));
+  const holdShown = async page => { await sendingShown(page); await page.getByText(/^Auto-sends are paused on this machine/).filter({ visible: true }).first().waitFor({ timeout: 90000 }); };
+  await shoot("sending-hold-home-light", DESKTOP, "light", holdShown);
+  await shoot("sending-hold-home-phone-light", PHONE, "light", async page => { await page.setViewportSize(PHONE); await holdShown(page); });
+  await fs.writeFile(process.env.FOLLOW_SHOTS_CGROUP, JSON.stringify({ high: 1000, current: 100 }));
 }
 async function reviewModeShots({ shoot, call }) {
   // The Needs-you reviewers row with its quiet link, then the undo bar after it; the Settings fold with the Review menu
@@ -1086,8 +1125,10 @@ try {
   // Real speed while the daemon starts and the plugin installs; seeding and shooting crawl (setDaemonClock).
   // It starts ten minutes before BASE, so the clock only ever moves forward.
   await fs.writeFile(clockFile, JSON.stringify({ fake: at(-10), real: Date.now(), rate: 1 }));
+  // sending only: a fake cgroup at 10% of memory.high from the start (the governor finds its cgroup once), raised later.
+  if (only.includes("sending")) { process.env.FOLLOW_SHOTS_CGROUP = join(root, "cgroup.json"); await fs.writeFile(process.env.FOLLOW_SHOTS_CGROUP, JSON.stringify({ high: 1000, current: 100 })); }
 
-  const env = harnessEnv(root, { home, strip: github.strip, set: { ...github.env, PASEO_DAEMON_URL: url, PASEO_SERVER_ID: "srv_followupshots", FIXTURE_MODEL_LABEL: "Agent", PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true", PATH: `${bin}:${process.env.PATH}`, FOLLOW_SHOTS_CLOCK: clockFile, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${join(root, "clock.cjs")}`.trim(), TZ: "UTC" } });
+  const env = harnessEnv(root, { home, strip: github.strip, set: { ...github.env, ...(process.env.FOLLOW_SHOTS_CGROUP ? { FOLLOW_SHOTS_CGROUP: process.env.FOLLOW_SHOTS_CGROUP } : {}), PASEO_DAEMON_URL: url, PASEO_SERVER_ID: "srv_followupshots", FIXTURE_MODEL_LABEL: "Agent", PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true", PATH: `${bin}:${process.env.PATH}`, FOLLOW_SHOTS_CLOCK: clockFile, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${join(root, "clock.cjs")}`.trim(), TZ: "UTC" } });
   const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env, timeout: 120000, maxBuffer: 1 << 22 })).stdout);
   const daemonLog = openSync(join(root, "daemon.log"), "a");
   crashed = async () => daemonCrashes(await fs.readFile(join(root, "daemon.log"), "utf8").catch(() => ""))[0] ?? null;

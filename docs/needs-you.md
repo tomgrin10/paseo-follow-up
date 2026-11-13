@@ -193,8 +193,18 @@ every `sending` entry.
 ## Home
 
 - **Grouping** (`shared/home.ts`): every workstream in one list, grouped by what it needs (`HOME_GROUPS`: needs,
-  fixing, running, waiting, later, quiet). A tracked workspace's group comes from `trackedGroup`, which reads the
+  sending, running, waiting, later, quiet). A tracked workspace's group comes from `trackedGroup`, which reads the
   status model ([workspaces.md](workspaces.md#status-model)).
+- **Sending** (Q51, `shared/sending.ts`; it replaced "Follow-up is fixing"): a message out with the agent (send glyph)
+  or queued to go out on its own (clock glyph), never Running's spinner. `sendingOf` gives each row its line (count,
+  then when and why, never the workspace's or agent's title), and Send now only where the server would take the
+  developer's Send and the send doesn't wait on them; a send that waits on the developer is a Needs-you item only
+  (invariant `sending-never-waits-on-you`). Send now is outlined: filled is only for what waits on the developer.
+  A queued message after a send the agent never acknowledged says "no reply to the last message, so they go again";
+  a refused send says it tries again shortly. `autoSendHold` is the one machine-wide hold line (the resource
+  governor), shown once at the top of Sending and only while it has rows (`HomeModel.hold`), the same words on every
+  width, with the memory % only when the reading is current. Agents read the same rows: `sending` on
+  `workspace_status`, `inbox_list` (on the main agent's row) and `workstreams`; their Send now is `send_repairs`.
 - **Search, sort and colour:**
   - `shared/search.ts`: the client-side omnibox index. `rowHit` turns a hit into what the list Row shows (in-place
     highlights, or line 2 as "<Field> · excerpt" for a field the row hides); search results are that Row

@@ -5,7 +5,7 @@ import { Pressable, Text } from "./text";
 import { usePaseo, useRpc, type PluginScreenProps } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
 import { useQuery } from "@tanstack/react-query";
-import { browserStatusRpc, controlRpc, inboxBriefRpc } from "../shared/contracts";
+import { browserStatusRpc, controlRpc, inboxBriefRpc, sendRpc } from "../shared/contracts";
 import { needsYou, workspaceSnoozed } from "../shared/attention";
 import { briefAsks, liveBrief } from "../shared/brief";
 import { briefPane, followUpLog, lastWorkdayEnd, nextNeeds, paneButtons, sameText, sinceLabel, tailSteps, type HomeGroupId, type HomeModel, type LogLine, type TailStep, type Workstream } from "../shared/home";
@@ -101,6 +101,16 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
   const overseerInbox = useInbox(inbox, () => inbox.overseer());
   const overseer = overseerRowState(overseerStatus, overseerInbox);
   const toast = useToast();
+  // A Sending row's Send now: the developer's Send (follow.send), the same path as the Tasks strip's.
+  const send = useRpc(sendRpc);
+  const sendNow = useCallback(async (s: Workstream) => {
+    if (!s.workspaceId || !s.sendNow) return;
+    try {
+      const after = await send({ workspaceId: s.workspaceId, batchId: s.sendNow.batchId });
+      const b = after.batches.find(x => x.id === s.sendNow!.batchId);
+      toast.show(!b || ["sent", "sending", "completed"].includes(b.state) ? `Sent to ${s.title}` : b.result || "Queued. It goes out when the agent is free.", { variant: !b || ["sent", "sending", "completed"].includes(b.state) ? "success" : "info" });
+    } catch (e) { toast.error(errorText(e)); } finally { deps.sources.live.refresh(); }
+  }, [send, toast, deps.sources.live]);
   // The omnibox's "Ask the Overseer" row: send, then show the conversation it lands in.
   const [asking, setAsking] = useState(false);
   const [pendingAsk, setPendingAsk] = useState<string | null>(null);
@@ -121,7 +131,7 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
     setSelected(OVERSEER_KEY); setReplyFocus(n => n + 1);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.ask]);
-  const briefLine = [pane.counts.needs ? `${pane.counts.needs} need you` : "Nothing needs you", pane.counts.fixing ? `${pane.counts.fixing} being fixed` : "", pane.away.count ? `${pane.away.count} done while away` : ""].filter(Boolean).join(" · ");
+  const briefLine = [pane.counts.needs ? `${pane.counts.needs} need you` : "Nothing needs you", pane.counts.sending ? `${pane.counts.sending} sending` : "", pane.away.count ? `${pane.away.count} done while away` : ""].filter(Boolean).join(" · ");
 
   const openFull = useCallback((s: Workstream) => {
     if (!navigation) return;
@@ -159,7 +169,7 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
   // Nothing followed at all: no sort, no meters, just the empty state and its action.
   const nothing = model.groups.every(g => !g.items.length);
   const list = <HomeList model={model} theme={theme} dense={compact} touch={compact} selectedKey={selected} onSelect={onSelect} briefLine={briefLine}
-    results={omnibox.results} activeResult={omnibox.active} onResult={item => void pick(item)} filter={filter} overseer={overseer} asking={asking} menu={rowMenu}
+    results={omnibox.results} activeResult={omnibox.active} onResult={item => void pick(item)} filter={filter} overseer={overseer} asking={asking} menu={rowMenu} onSendNow={sendNow}
     // Phones: the host header already says Follow-up, so no "Home" title row; search, sort and settings share one row and
     // the meters move to the end of the list.
     footer={omnibox.results ? undefined : compact
