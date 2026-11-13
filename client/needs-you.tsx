@@ -9,7 +9,7 @@ import { agentName, needsYou, workspaceSnoozed, type NeedItem } from "../shared/
 import { laterLabel } from "./inbox";
 import { sameText } from "../shared/home";
 import type { Workspace } from "../shared/model";
-import { Button, Card, CardRow, Chip, errorText, text, type Theme } from "./kit";
+import { Button, Card, CardRow, Chip, PrLinkButton, errorText, text, type Theme } from "./kit";
 import type { Colors } from "./theme";
 import { QuestionBody, meanwhile } from "./questions";
 import { needsYouBlock } from "../shared/needs-block";
@@ -22,7 +22,8 @@ import { useReviewerSettings } from "./reviewers";
 import { NoReviewLink } from "./review-mode";
 
 import { overviewKey, workspaceKey } from "./keys";
-import { RichText } from "./rich-text";
+import { PrLinksProvider, RichText } from "./rich-text";
+import { prLinksByNumber } from "../shared/presentation";
 export { overviewKey, workspaceKey };
 
 function glyph(item: NeedItem, colors: Colors): { name: string; color: string } {
@@ -113,10 +114,13 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
       case "reviewers": return actions.openPr && <Button theme={theme} compact={compact} icon="UserPlus" title="Add reviewers" onPress={() => actions.openPr!(item.prKey, "reviewers")} />;
     }
   };
-  return <View>
+  return <PrLinksProvider prs={prLinksByNumber(w.prs)}><View>
     {items.map((item, index) => {
       const g = glyph(item, c);
-      const button = action(item);
+      // A row about one PR opens it in one click, beside its action and never instead of it.
+      const link = item.pr ? <PrLinkButton link={item.pr} theme={theme} compact={compact} /> : null;
+      const act = action(item);
+      const button = act || link ? <>{act}{link}</> : null;
       const said = !!untitled?.has(item.key);
       // Phones: the action sits at the row's right edge so rows never grow a second line of controls. A send batch
       // (the primary, with its task list) and Retry's pair keep their buttons full width under the row.
@@ -149,7 +153,7 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
         </View>
       </CardRow>;
     })}
-  </View>;
+  </View></PrLinksProvider>;
 }
 
 function QuestionState({ workspace: w, questionId, theme }: { workspace: Workspace; questionId: string; theme: Theme }) {
