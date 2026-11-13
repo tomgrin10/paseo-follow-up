@@ -12,6 +12,7 @@ import { briefPane, followUpLog, lastWorkdayEnd, nextNeeds, paneButtons, sameTex
 import { age, backLabel, snoozeUntil, type InboxRow } from "../shared/inbox";
 import { errorText } from "../shared/errors";
 import { isLoaded, type LoadSignals } from "../shared/agent-load";
+import { prLinksByNumber } from "../shared/presentation";
 import { BriefCard, type BriefDeps } from "./brief";
 import { SummaryLine } from "./about";
 import { ReferencesLine } from "./linked";
@@ -34,7 +35,7 @@ import { UpdateNotice, VersionMark } from "./updates";
 import { WhatsNewGate } from "./release-notes";
 import { useRowMenu } from "./row-actions";
 import { laterChoices } from "../shared/row-menu";
-import { RichText } from "./rich-text";
+import { PrLinksProvider, RichText } from "./rich-text";
 import { ToastHost, useQuestionOpener } from "./toasts";
 
 export const HOME_SCREEN = "follow-up";
@@ -442,7 +443,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
       {!!tail.error && <Text style={t.meta}>{`Couldn't load the agent's steps: ${tail.error}`}</Text>}
       {tail.steps === null ? <Spinner color={c.foregroundMuted} size={12} label="Loading the agent's steps" />
         : tail.steps.length === 0 ? (tail.error ? null : <Text style={t.meta}>{tail.asleep ? "This agent isn't loaded, so its steps aren't shown." : "No steps yet."}</Text>)
-        : tail.steps.map((step, i) => <Step key={i} step={step} c={c} last={i === tail.steps!.length - 1} />)}
+        : <PrLinksProvider prs={w ? prLinksByNumber(w.prs) : undefined}>{tail.steps.map((step, i) => <Step key={i} step={step} c={c} last={i === tail.steps!.length - 1} />)}</PrLinksProvider>}
       {(tail.asleep || (tail.woken && tail.loading)) && <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
         <Button theme={theme} compact={compact} kind="secondary" title={tail.loading ? "Loading…" : "Load recent steps"} loading={tail.loading} disabled={tail.loading} onPress={tail.load} />
         <Text style={[t.small, { flex: 1, minWidth: 160 }]}>Loads the agent into memory for about an hour.</Text>
