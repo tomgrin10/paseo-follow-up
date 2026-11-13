@@ -3,6 +3,7 @@ import {readFile,mkdtemp,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createRequire} from 'node:module';
+import {DEFAULT_TRACKED_BASENAME} from '../shared/settings.ts';
 import {DaemonClient} from '@getpaseo/client/internal/daemon-client';
 import { harness } from "./harness.mjs";
 import { assertNoRealNames } from './real-names.mjs';
@@ -21,8 +22,8 @@ await page.getByRole('button',{name:'Plugins',exact:true}).click();
 await page.getByRole('button',{name:'Actions for follow-up',exact:true}).click();
 await page.getByRole('menuitem',{name:'Follow-up',exact:true}).click();
 await page.getByText('Default tracking by project',{exact:true}).waitFor();
-// The default-tracked repository (shared/settings.ts; see ALLOWED in scripts/real-names.mjs).
-const TRACKED_REPO='example/hero-poc';
+// The default-tracked repository, read from product code (shared/settings.ts), never spelled here.
+const TRACKED_REPO=`example/${DEFAULT_TRACKED_BASENAME}`;
 const tracked=page.getByRole('switch',{name:new RegExp('Default tracking for .*'+TRACKED_REPO)});
 assert.equal(await tracked.getAttribute('aria-checked'),'true');
 assertNoRealNames(await page.evaluate(()=>document.body.innerText),'project settings');await page.screenshot({path:'docs/screenshots/project-settings-desktop.png'});

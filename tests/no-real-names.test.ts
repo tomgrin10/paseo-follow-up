@@ -4,19 +4,19 @@ import { readFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { inflateSync } from "node:zlib";
-import { ALLOWED, assertNoRealNames, deniedNames, machineNames } from "../scripts/real-names.mjs";
+import { COMPANY_HASHES, EXCLUDED, RENDER_ALLOW, assertNoRealNames, deniedNames, hashWord, machineNames } from "../scripts/real-names.mjs";
 
 /**
- * no-real-names-in-renders-or-fixtures (2026-11-13). The repo is public, and the harness fixtures named their workspace
- * after the company ("hero-project", "herosecurity/hero-poc", linear.app/hero...). A render or a committed file under
- * scripts/, tests/, docs/ (screenshots included) or changes/ must name no real machine, user or company. The real
- * hostname and user name come from the environment (scripts/real-names.mjs), so this guard leaks nothing itself.
+ * no-real-names-in-renders-or-fixtures (2026-11-13). The repo is public, and the harness fixtures named their workspace,
+ * repos and chat hosts after the company. A render or a committed file under scripts/, tests/, docs/ (screenshots
+ * included) or changes/ must name no real machine, user or company. The company words are stored only as hashes and
+ * the machine names are read at run time (scripts/real-names.mjs), so this guard leaks nothing itself. The examples
+ * below use an injected fictional denylist ("globex"), never the real words.
  */
 const root = join(import.meta.dirname, "..");
 const SCANNED = ["scripts", "tests", "docs", "changes"];
-const SELF = "scripts/real-names.mjs"; // the denylist's own generic words
-// The guard itself: the denylist and this test, whose examples must spell the words they check.
-const GUARD = new Set([SELF, "tests/no-real-names.test.ts"]);
+const SELF = "scripts/real-names.mjs";
+const FICTIONAL = [hashWord("globex"), hashWord("globexcorp")];
 
 /** A PNG's text: its tEXt, zTXt and iTXt chunks (pixel data is compressed noise and never matched). */
 function pngText(buf: Buffer): string {
@@ -40,23 +40,25 @@ const textOf = async (file: string) => {
 test("no-real-names-in-renders-or-fixtures: no committed file under scripts/, tests/, docs/ or changes/ names the company, machine or user", async () => {
   const hits: string[] = [];
   for (const file of tracked()) {
-    if (GUARD.has(file)) continue;
-    const found = deniedNames(await textOf(file), file);
-    if (found.length) hits.push(`${file}: ${[...new Set(found)].join(", ")}`);
+    if (Object.hasOwn(EXCLUDED, file)) continue;
+    const found = deniedNames(await textOf(file));
+    if (found.length) hits.push(`${file}: ${found.length} hit(s)`);
   }
-  assert.deepEqual(hits, [], "use fictional names (acme-*); product configuration goes in ALLOWED with a reason");
+  assert.deepEqual(hits, [], "use fictional names (acme-*)");
 });
 
-test("no-real-names-in-renders-or-fixtures: the denylist names no machine or user in plain text", async () => {
+test("no-real-names-in-renders-or-fixtures: the denylist stores the company only as hashes, and no machine or user", async () => {
   const src = await readFile(join(root, SELF), "utf8");
   assert.match(src, /hostname\(\)/); assert.match(src, /userInfo\(\)/);
-  for (const name of machineNames()) assert.ok(!src.toLowerCase().includes(name.toLowerCase()), `${SELF} spells this machine's ${name}`);
+  assert.ok(COMPANY_HASHES.length > 0 && COMPANY_HASHES.every(h => /^[0-9a-f]{64}$/.test(h)), "sha256 hex only");
+  assert.deepEqual(deniedNames(src), [], `${SELF} spells a denied word`);
+  for (const name of machineNames()) assert.ok(!src.toLowerCase().includes(name.toLowerCase()), `${SELF} spells this machine's name`);
 });
 
-test("no-real-names-in-renders-or-fixtures: every allowed token has a reason and is still used where it's allowed", async () => {
-  for (const a of ALLOWED) {
-    assert.ok(a.reason.length > 10 && /Q55/.test(a.reason), `${a.token}: a reason naming the open decision`);
-    for (const file of a.files) if (file !== "<render>") assert.ok((await readFile(join(root, file), "utf8")).includes(a.token), `${file} no longer uses ${a.token}: drop it from ALLOWED`);
+test("no-real-names-in-renders-or-fixtures: every excluded path exists and names the PR that removes it", async () => {
+  for (const [file, reason] of Object.entries(EXCLUDED)) {
+    assert.equal(reason, "removed by the Q55 host-config PR", file);
+    await readFile(join(root, file)); // a path that's gone drops off the list
   }
 });
 
@@ -64,19 +66,21 @@ test("no-real-names-in-renders-or-fixtures: what counts as a real name", () => {
   const machine = machineNames({}, "build-box.internal.example", "jane_doe");
   assert.deepEqual(machine, ["build-box.internal.example", "build-box", "jane_doe"], "hostname (full and first label) and user, read at run time");
   assert.deepEqual(machineNames({ CI: "true" }, "fv-az123", "runner"), [], "a CI runner's generic names are not checked");
-  assert.deepEqual(deniedNames("Workspaces: hero-project", "tests/x.test.ts", []), ["hero"]);
-  assert.deepEqual(deniedNames("https://herosecurity.slack.com/x", "tests/x.test.ts", []), ["herosecurity"]);
-  assert.deepEqual(deniedNames("a heroic effort, superhero, Acme", "tests/x.test.ts", []), [], "only the word, not words containing it");
-  assert.deepEqual(deniedNames("served by build-box", "<render>", machine), ["build-box"]);
-  assert.deepEqual(deniedNames("example/hero-poc tracks by default", "tests/project-settings.test.ts", []), [], "an allowed token, in its file");
-  assert.deepEqual(deniedNames("example/hero-poc and hero/app", "tests/project-settings.test.ts", []), ["hero"], "anything else in that file still fails");
-  assert.deepEqual(deniedNames("example/hero-poc", "tests/other.test.ts", []), ["hero"], "an allowed token outside its files fails");
+  const opts = { machine: [], hashes: FICTIONAL };
+  assert.deepEqual(deniedNames("Workspaces: globex-project", opts), ["globex"], "hyphen compounds split into words");
+  assert.deepEqual(deniedNames("https://GlobexCorp.slack.com/x", opts), ["globexcorp"], "dot compounds, any case");
+  assert.deepEqual(deniedNames("org/globex_app", opts), ["globex"], "slash and underscore too");
+  assert.deepEqual(deniedNames("globexian, superglobex, Acme", opts), [], "only the word, not words containing it");
+  assert.deepEqual(deniedNames("served by build-box", { machine, hashes: FICTIONAL }), ["build-box"]);
+  assert.deepEqual(deniedNames("example/globex-poc tracks by default", { ...opts, allow: ["example/globex-poc"] }), [], "an allowed run-time value");
+  assert.deepEqual(deniedNames("example/globex-poc and globex/app", { ...opts, allow: ["example/globex-poc"] }), ["globex"], "anything else still fails");
 });
 
 test("no-real-names-in-renders-or-fixtures: a render naming the machine or company is refused", () => {
-  assert.throws(() => assertNoRealNames("Home · hero-project", "shot"), /real name \(hero\)/);
+  for (const name of machineNames()) assert.throws(() => assertNoRealNames(`served by ${name}`, "shot"), /real name/);
   assert.doesNotThrow(() => assertNoRealNames("Home · acme-project · dev-box", "shot"));
-  assert.doesNotThrow(() => assertNoRealNames("Default tracking for example/hero-poc", "shot"), "the default-tracked repo (Q55)");
+  assert.doesNotThrow(() => assertNoRealNames(`Default tracking for ${RENDER_ALLOW[0]}`, "shot"), "the default-tracked repo, read from product code");
+  assert.doesNotThrow(() => assertNoRealNames("Default tracking for acme/app", "shot", ["acme/app"]));
 });
 
 test("no-real-names-in-renders-or-fixtures: every render path uses the shared check", async () => {
