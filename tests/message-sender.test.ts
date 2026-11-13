@@ -22,7 +22,7 @@ import type { State } from "../shared/model";
  */
 
 const DEVELOPER = "Looks good, also handle empty filters";
-const AGENT_MESSAGE = '<paseo-system version="1" kind="agent-message" source-agent-id="52063653-85d5" message-id="m1" source-agent-title="Release captain">\nPlease start a new workspace for HER-1500 and go ahead\n</paseo-system>';
+const AGENT_MESSAGE = '<paseo-system version="1" kind="agent-message" source-agent-id="52063653-85d5" message-id="m1" source-agent-title="Release captain">\nPlease start a new workspace for ACME-1500 and go ahead\n</paseo-system>';
 const AGENT_NOTIFICATION = '<paseo-system version="1" kind="agent-notification" source-agent-id="c1" message-id="m2" source-agent-title="Test runner" event="finished">\nAgent c1 (Test runner) finished.\n\n&lt;agent-response&gt;\nyes, all 42 tests pass\n&lt;/agent-response&gt;\n</paseo-system>';
 const SCHEDULE = "<paseo-system>\nScheduled check-in: yes, go ahead\n</paseo-system>";
 const BATCH = "Follow-up batch b-1\n\n- Fix CI on acme/app#12";
@@ -36,7 +36,7 @@ const ALL = { DEVELOPER, ...NOT_DEVELOPER };
 
 test("classifier: one category per sender", () => {
   assert.deepEqual(messageSender(DEVELOPER), { kind: "developer", text: DEVELOPER });
-  assert.deepEqual(messageSender(AGENT_MESSAGE), { kind: "agent", event: "message", agentId: "52063653-85d5", title: "Release captain", text: "Please start a new workspace for HER-1500 and go ahead" });
+  assert.deepEqual(messageSender(AGENT_MESSAGE), { kind: "agent", event: "message", agentId: "52063653-85d5", title: "Release captain", text: "Please start a new workspace for ACME-1500 and go ahead" });
   assert.deepEqual(messageSender(AGENT_NOTIFICATION), { kind: "agent", event: "finished", agentId: "c1", title: "Test runner", text: "yes, all 42 tests pass" });
   assert.equal(messageSender(SCHEDULE).kind, "system");
   assert.deepEqual(messageSender(BATCH), { kind: "follow-up", what: "batch", text: BATCH });
@@ -69,7 +69,7 @@ test("Recent steps (live timeline and transcripts): no raw envelope, only the de
     }
   }
   const [agent] = tailSteps([user(AGENT_MESSAGE)]);
-  assert.deepEqual(agent, { kind: "message", from: "From Release captain", text: "Please start a new workspace for HER-1500 and go ahead" });
+  assert.deepEqual(agent, { kind: "message", from: "From Release captain", text: "Please start a new workspace for ACME-1500 and go ahead" });
   assert.deepEqual(tailSteps([user(AGENT_NOTIFICATION)])[0], { kind: "message", from: "Test runner finished", text: "yes, all 42 tests pass" });
   assert.deepEqual(tailSteps([user(FORWARD)])[0], { kind: "message", from: "You, via Overseer", text: "use option B" });
   assert.deepEqual(tailSteps([user(SCHEDULE)]), [], "schedule fires aren't steps");
@@ -91,9 +91,9 @@ test("Summary inputs and discovery's goal: only the developer's words, never an 
 });
 
 test("linked items: another agent's message is prose, never the developer's strong evidence", () => {
-  const refs = timelineRefs([{ seqStart: 1, item: user(AGENT_MESSAGE.replace("HER-1500", "https://linear.app/acme/issue/HER-1500")) }]);
+  const refs = timelineRefs([{ seqStart: 1, item: user(AGENT_MESSAGE.replace("ACME-1500", "https://linear.app/acme/issue/ACME-1500")) }]);
   assert.ok(refs.every(r => !r.strong), "agent text is weak evidence");
-  assert.equal(timelineRefs([{ seqStart: 1, item: user(`${FORWARD} https://linear.app/acme/issue/HER-2`) }]).length, 0, "forwards are Follow-up's own text");
+  assert.equal(timelineRefs([{ seqStart: 1, item: user(`${FORWARD} https://linear.app/acme/issue/ACME-2`) }]).length, 0, "forwards are Follow-up's own text");
 });
 
 const sources = (ledger: Ledger = []): Sources => ({ ledger: async () => ledger, defer: async () => false, session: async () => false, schedule: async () => false });
@@ -135,7 +135,7 @@ test("approvesNewWorkspace: an agent's message, notification, schedule or forwar
     tight: async () => false, workspaces: async () => [], sources: sources(ledger) } as never);
   await overseer.start(paseo);
   const ov = (await overseer.state()).agentId!;
-  const plan = async (items: unknown[]) => { tail = items; return (await overseer.act(paseo, ov, "start_workspace", { task: "HER-1500 fix it", project: "acme-app" }) as { planId: string | null }).planId; };
+  const plan = async (items: unknown[]) => { tail = items; return (await overseer.act(paseo, ov, "start_workspace", { task: "ACME-1500 fix it", project: "acme-app" }) as { planId: string | null }).planId; };
   for (const [name, text] of Object.entries(NOT_DEVELOPER)) {
     if (name === "ANSWER") continue;
     assert.equal(await plan([user(text)]), null, `${name} must not approve a new workspace`);

@@ -56,7 +56,7 @@ export const RANK_SYSTEM = `You rank a developer's workstreams (Paseo workspaces
 {"priorities":[{"workspace":"<workspace id>","score":0-100,"reason":"<one line, at most 60 characters, never empty>","sources":[{"kind":"linear|slack|github|planning|paseo","label":"<short>","url":"<only a url given in the material>"}]}],"notStarted":[{"key":"<Linear key>","title":"<title>","url":"<url>","reason":"<one line>"}]}
 Rules:
 - Rank only workspace ids from WORKSTREAMS. Give every non-resting workstream a score; leave resting ones out unless an input names them.
-- The reason is the concrete fact, at most 60 characters, fact first: "HER-1312 · Urgent · due today", "This week's Okta milestone", "Dana asked twice, demo tomorrow", "Review requested by Avi". Never start it with the source's name ("Slack:", "Plan:", "Linear:"): the list shows the source beside it. Never "important" or "high priority" alone.
+- The reason is the concrete fact, at most 60 characters, fact first: "ACME-1312 · Urgent · due today", "This week's Okta milestone", "Dana asked twice, demo tomorrow", "Review requested by Avi". Never start it with the source's name ("Slack:", "Plan:", "Linear:"): the list shows the source beside it. Never "important" or "high priority" alone.
 - Every ranked workstream has a non-empty reason. When no outside input (Linear, Slack, GitHub, plan) names it, the reason is its strongest Paseo fact (its open ask, PR state or checks, "agent stopped") with sources [{"kind":"paseo","label":"Paseo"}]. Never filler like "no outside signal".
 - Direct asks to the developer weigh at least as much as this week's plan milestones: a Slack DM or mention waiting on them, a GitHub review requested from them, a workstream waiting on their decision (group needs with an open ask). Never rank a plan item above a direct ask of similar urgency; a direct ask from a person with a deadline ranks above any plan item.
 - Stability: PREVIOUS RANKING lists each workstream's last score. Keep a workstream within 10 points of it unless something about that workstream changed (a new Slack line, issue state, review request, PR or ask). Don't reshuffle what didn't change.
@@ -104,7 +104,7 @@ export const REASON_SYSTEM = `You write the one-line reason for workstreams that
 {"reasons":[{"workspace":"<workspace id>","reason":"<one line, at most 60 characters, never empty>","sources":[{"kind":"linear|slack|github|planning|paseo","label":"<short>","url":"<only a url given in the material>"}]}]}
 Rules:
 - One entry for every workspace id in WORKSTREAMS, and no others.
-- The reason is the concrete fact, fact first: "HER-1312 · Urgent · due today", "Dana asked twice, demo tomorrow", "Review requested by Avi". Never start it with the source's name.
+- The reason is the concrete fact, fact first: "ACME-1312 · Urgent · due today", "Dana asked twice, demo tomorrow", "Review requested by Avi". Never start it with the source's name.
 - When no outside input names it, use its strongest Paseo fact (its open ask, PR state or checks, "agent stopped") with sources [{"kind":"paseo","label":"Paseo"}].
 - Use only facts in the material. An empty reason is invalid.`;
 export const reasonReplySchema = z.object({
