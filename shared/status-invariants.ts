@@ -4,7 +4,7 @@ import type { Actor } from "./actor";
 import { ANY_HOOK_TEXT_PREFIXES } from "./message-sender";
 import { BATCH_PREFIXES, RECOVERY_TITLES } from "./legacy";
 import type { Workspace } from "./model";
-import { answerMessage, duplicateOpenQuestions, isOther, parseAnswerMessage, parseAnswersMessage } from "./questions";
+import { answerMessage, awaitingSend, duplicateOpenQuestions, isOther, parseAnswerMessage, parseAnswersMessage } from "./questions";
 import { briefAnswer, briefAnswers, briefAsks, briefStep, reviewersBriefPr, shouldReopen, type Brief } from "./brief";
 import { flagHeadline } from "./headline";
 import { newEntry, prEndEvent, REASONS, reduce, type InboxRow } from "./inbox";
@@ -35,6 +35,15 @@ const inFlight = (w: Workspace) => w.batches.some(b => ["sending", "sent"].inclu
 const lines = (w: Workspace, now: number) => [liveLine(w, now).text, agentCard(w, now)?.line ?? "", batchView(w, now)?.line ?? "", ...needsYou(w, now).flatMap(i => [i.title, "blocker" in i ? i.blocker ?? "" : ""])];
 
 export const INVARIANTS: Invariant[] = [
+  {
+    id: "an-answer-leaves-needs-you-only-when-delivered",
+    why: "2026-11-13: Copy recorded the developer's answer and the question left Needs you at once, though nothing had been sent; an answer forgotten on the clipboard left the agent waiting with nothing asking for it. A copied answer, or one put in the agent's chat (Paseo 0.16), stays in Needs you as waiting to be sent until a turn's tail shows the developer's message carrying its marker (\"Follow-up answer Qn (\"), or the developer signs that agent's row off (shared/questions.ts awaitingSend).",
+    check(w, now) {
+      const listed = new Set(needsYou(w, now).map(i => i.key));
+      const lost = w.enable_tracking && !w.archived ? (w.questions ?? []).filter(q => awaitingSend(q) && !listed.has(`answer:${q.id}`)) : [];
+      return lost.length ? `${lost.map(q => q.id).join(", ")} ${lost.length === 1 ? "is" : "are"} waiting to be sent but not in Needs you` : null;
+    },
+  },
   {
     id: "a-task-only-says-working-when-its-agent-is",
     why: "2026-11-12: tasks read \"Agent working\" for days because the label mirrored the stored status=working, not any agent's live state; the panel's live line kept a spinner on a task whose agent had closed. Every surface that derives \"working\" from a task (the task row and sheet, the live line, the summary's Agent handling, Home's Agent working group) reads the recorded agent's live state (Workspace.taskAgents, shared/task-status.ts); with no agent recorded it says In progress; a recorded agent the directory doesn't know (not read yet, or Paseo doesn't list it) reads \"Agent unavailable\": words only, no live state, no link, never In progress. A known agent's word and link follow PRESENCE, shared with the chat's created cards. Only a working agent spins; idle, closed (Paseo ended the session: the idle unload or a plugin reload; it keeps its Open chat link, the developer's tap being the only load) and archived (words only) never claim working.",

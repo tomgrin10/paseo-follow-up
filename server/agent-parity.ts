@@ -159,7 +159,7 @@ export const PARITY: Record<string, { tools: readonly string[]; note?: string } 
   "follow.inbox-brief": { tools: ["inbox_brief"] },
   "follow.inbox-act": { tools: ["sign_off", "snooze", "set_finish_flags", "inbox_act"] },
   "follow.brief-action": { tools: ["brief_action"] },
-  "follow.answer-question": { tools: ["answer_question"] },
+  "follow.answer-question": { tools: ["answer_question"], note: "The tool sends (action send). Copy and Put in chat (action copy, chat) only move the developer's own words into their clipboard or their composer for them to send; an agent answers by sending, so it has no Put in chat." },
   "follow.workspace-about": { tools: ["workspace_about"] },
   "follow.rename-status": { tools: ["ai_rename"], note: "The dry run shows the name now and the suggestion." },
   "follow.rename-workspace": { tools: ["ai_rename"], note: "confirm=true renames; undo=true plans Undo." },
