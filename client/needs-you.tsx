@@ -4,7 +4,7 @@ import { Pressable, Text } from "./text";
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { checkPrActionRpc, controlRpc, sendRpc } from "../shared/contracts";
+import { answerQuestionRpc, checkPrActionRpc, controlRpc, sendRpc } from "../shared/contracts";
 import { agentName, needsYou, workspaceSnoozed, type NeedItem } from "../shared/attention";
 import { laterLabel } from "./inbox";
 import { sameText } from "../shared/home";
@@ -33,7 +33,7 @@ function glyph(item: NeedItem, colors: Colors): { name: string; color: string } 
     case "check": return { name: "CircleHelp", color: colors.statusWarning };
     case "decision": return { name: "MessageCircleQuestion", color: colors.statusWarning };
     case "question": return { name: item.state === "stopped" ? "CirclePause" : "MessageCircleQuestion", color: colors.statusWarning };
-    case "answer": return { name: "TriangleAlert", color: colors.statusWarning };
+    case "answer": return item.waiting ? { name: item.waiting === "in-chat" ? "MessageSquareText" : "Copy", color: colors.statusWarning } : { name: "TriangleAlert", color: colors.statusWarning };
     case "send": return { name: item.finish ? "ListChecks" : "Send", color: colors.statusWarning };
     case "merge": return { name: "GitMerge", color: colors.statusSuccess };
     case "reviewers": return { name: "UserPlus", color: colors.foregroundMuted };
@@ -53,7 +53,7 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
   useReviewerSettings();
   const toast = useToast();
   const cache = useQueryClient();
-  const control = useRpc(controlRpc); const send = useRpc(sendRpc); const check = useRpc(checkPrActionRpc);
+  const control = useRpc(controlRpc); const send = useRpc(sendRpc); const check = useRpc(checkPrActionRpc); const answer = useRpc(answerQuestionRpc);
   const refresh = () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); };
   const fail = (error: Error) => { toast.error(errorText(error)); refresh(); };
   const resume = useMutation({ mutationFn: () => control({ workspaceId: w.id, clearHold: true }), onSuccess: () => { toast.show("Follow-up resumed", { variant: "success" }); refresh(); actions.after?.(); }, onError: fail });
@@ -68,10 +68,23 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
     else toast.error(b.result || "The message couldn't be sent.");
     refresh(); actions.after?.();
   }, onError: fail });
+  // A waiting answer (copied or put in the agent's chat) is already decided: Send delivers the recorded pick and note
+  // in one click, then reads like any other Send (sent, queued for the agent, or unconfirmed).
+  const sendAnswer = useMutation({ mutationFn: (questionId: string) => {
+    const a = w.questions.find(q => q.id === questionId)?.answer;
+    if (!a) throw new Error(`${questionId} has no recorded answer`);
+    return answer({ workspaceId: w.id, questionId, choice: a.choice, words: a.words ?? undefined, action: "send" });
+  }, onSuccess: (result, questionId) => {
+    const d = result.question.answer?.delivery;
+    if (d?.state === "sent") toast.show(`Sent your ${questionId} answer to ${agentName(w)}`, { variant: "success" });
+    else if (d?.state === "queued") toast.show(`Answer saved; ${agentName(w)} gets it when it can`, { variant: "info" });
+    else toast.show("Paseo didn't confirm the message. Check the agent's chat before resending.", { variant: "warning" });
+    refresh(); actions.after?.();
+  }, onError: fail });
   const inspect = useMutation({ mutationFn: (actionId: string) => check({ workspaceId: w.id, actionId }), onSuccess: reply => { toast.show(reply.result, { variant: reply.state === "failed" ? "warning" : "info" }); refresh(); }, onError: fail });
   const items = rows ?? needsYou(w, now);
   if (!items.length) return null;
-  const busy = resume.isPending || retry.isPending || retryTask.isPending || deliver.isPending || inspect.isPending;
+  const busy = resume.isPending || retry.isPending || retryTask.isPending || deliver.isPending || sendAnswer.isPending || inspect.isPending;
   const openMain = actions.openAgent ? () => actions.openAgent!(w.mainAgentId) : undefined;
   const action = (item: NeedItem) => {
     switch (item.kind) {
@@ -89,7 +102,12 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
       case "check": return <Button theme={theme} compact={compact} icon="RefreshCw" title="Check state" loading={inspect.isPending} disabled={busy} onPress={() => inspect.mutate(item.actionId)} />;
       case "decision": return openMain && <Button theme={theme} compact={compact} icon="MessageSquare" title="Answer in chat" onPress={openMain} />;
       case "question": return actions.openQuestion && <Button theme={theme} compact={compact} icon="MessageCircleReply" title="Answer" accessibilityLabel={`Answer ${item.title}`} onPress={() => actions.openQuestion!(item.questionId)} />;
-      case "answer": return actions.openQuestion && <Button theme={theme} compact={compact} icon="Eye" title="Check" accessibilityLabel={`Check the ${item.questionId} answer`} onPress={() => actions.openQuestion!(item.questionId)} />;
+      case "answer": return item.waiting
+        ? <>
+          <Button theme={theme} compact={compact} icon="Send" title="Send" accessibilityLabel={`Send your ${item.questionId} answer to ${agentName(w)}`} loading={sendAnswer.isPending} disabled={busy} onPress={() => sendAnswer.mutate(item.questionId)} />
+          {actions.openQuestion && !compact && <Button theme={theme} compact={compact} kind="ghost" title="Open" accessibilityLabel={`Open ${item.questionId}`} onPress={() => actions.openQuestion!(item.questionId)} />}
+        </>
+        : actions.openQuestion && <Button theme={theme} compact={compact} icon="Eye" title="Check" accessibilityLabel={`Check the ${item.questionId} answer`} onPress={() => actions.openQuestion!(item.questionId)} />;
       case "send": return <Button theme={theme} compact={compact} kind="primary" icon="Send" title={item.finish ? "Ask to finish" : `Send ${item.tasks.length} task${item.tasks.length === 1 ? "" : "s"}`} accessibilityLabel={item.finish ? `Ask to finish: ${FINISH_ASK}` : `Send ${item.tasks.length} task${item.tasks.length === 1 ? "" : "s"} to ${agentName(w)}`} accessibilityHint={item.blocker ?? undefined} loading={deliver.isPending} disabled={busy || !!item.blocker} onPress={() => deliver.mutate(item.batchId)} />;
       case "merge": return actions.openPr && <Button theme={theme} compact={compact} icon="GitMerge" title={`Merge #${item.number}`} accessibilityLabel={`Review and merge pull request ${item.number}`} onPress={() => actions.openPr!(item.prKey, "merge")} />;
       case "reviewers": return actions.openPr && <Button theme={theme} compact={compact} icon="UserPlus" title="Add reviewers" onPress={() => actions.openPr!(item.prKey, "reviewers")} />;
@@ -177,7 +195,7 @@ export function NeedsYouBlock({ workspace: w, theme, compact, actions, now, brie
 
 /**
  * One open question as a section of the block. Open: title, Q chip and asked age; the brief's context when the agent
- * pointed its brief at it; the options with Send; and what the agent does meanwhile, as the footer. Collapsed: the
+ * pointed its brief at it, under what the agent does meanwhile; then the options with Send. Collapsed: the
  * header alone, which opens it in place.
  */
 function QuestionAsk({ workspace: w, questionId, context, theme, compact, now, open, onToggle, openAgent }: { workspace: Workspace; questionId: string; context: string | null; theme: Theme; compact: boolean; now: number; open: boolean; onToggle: () => void; openAgent?: (agentId: string) => void }) {
@@ -198,12 +216,13 @@ function QuestionAsk({ workspace: w, questionId, context, theme, compact, now, o
   return <CardRow theme={theme} compact={compact} style={{ paddingVertical: compact ? 14 : 12 }}>
     <View style={{ gap: 12 }}>
       <Pressable accessibilityRole="button" aria-expanded accessibilityState={{ expanded: true }} accessibilityLabel={`Hide ${q.id}: ${q.title}`} onPress={onToggle} style={{ minHeight: compact ? 44 : undefined }}>{header}</Pressable>
-      {!!context && <RichText selectable linkColor={c.foreground} style={[t.body, { color: c.foregroundMuted }]}>{context}</RichText>}
-      <QuestionBody workspace={w} question={q} theme={theme} compact={compact} now={now} openAgent={openAgent} inline />
+      {/* What the agent does meanwhile sits under the question, as in the dialog; under the buttons goes what they do. */}
       <View style={{ flexDirection: "row", gap: 6 }}>
         <View style={{ paddingTop: 2 }}><Icon name={state.icon} size={12} color={state.color(c)} /></View>
         <Text style={[t.small, { flex: 1, color: state.color(c) }]}>{state.text}</Text>
       </View>
+      {!!context && <RichText selectable linkColor={c.foreground} style={[t.body, { color: c.foregroundMuted }]}>{context}</RichText>}
+      <QuestionBody workspace={w} question={q} theme={theme} compact={compact} now={now} openAgent={openAgent} inline />
     </View>
   </CardRow>;
 }

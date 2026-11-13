@@ -1,0 +1,3 @@
+- Paseo 0.16: **Put in chat** on a question adds your answer to the end of the agent's message box to edit before sending. It never replaces a draft; if the chat can't open, the answer is copied. Copy becomes an icon (0.15 keeps its label).
+- A copied answer, or one put in the chat, stays in Needs you as "Your Q1 answer isn't sent yet" until it reaches the agent. Sending it from the chat, Send on that row (one click) or Sign off clears it. Before, Copy cleared it at once.
+- A "No ask stated" card no longer sits above a Needs-you item that says what to do.

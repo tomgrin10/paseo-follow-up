@@ -134,13 +134,18 @@ export function Button({ title, onPress, theme, kind = "secondary", disabled = f
 }
 
 /** A square icon-only control with an accessible name, for settings and refresh. */
-export function IconButton({ icon, label, onPress, theme, compact = false, disabled = false, spinning = false, color }: { icon: string; label: string; onPress: () => void; theme: Theme; compact?: boolean; disabled?: boolean; spinning?: boolean; color?: string }) {
+export function IconButton({ icon, label, onPress, theme, compact = false, disabled = false, spinning = false, color, tooltip = false }: { icon: string; label: string; onPress: () => void; theme: Theme; compact?: boolean; disabled?: boolean; spinning?: boolean; color?: string; tooltip?: boolean }) {
   const c = theme.colors;
   const size = compact ? 44 : 28;
-  return <PressScale accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={onPress} hitSlop={compact ? 0 : 6}
+  // tooltip: the label as the desktop hover title. React Native Web drops `title` on a Pressable, so it goes on a
+  // wrapper's DOM node (the client/linked.tsx pattern).
+  const tip = useRef<View | null>(null);
+  useEffect(() => { if (tooltip && Platform.OS === "web") (tip.current as unknown as { setAttribute?: (k: string, v: string) => void } | null)?.setAttribute?.("title", label); }, [tooltip, label]);
+  const button = <PressScale accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={onPress} hitSlop={compact ? 0 : 6}
     style={({ pressed, hovered }) => ({ width: size, height: size, borderRadius: 6, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? c.surface2 : hovered ? c.surface1 : "transparent", opacity: disabled && !spinning ? 0.45 : 1 })}>
     {spinning ? <Spinner color={color ?? c.foregroundMuted} size={14} label={label} /> : <Icon name={icon} size={compact ? 18 : 15} color={color ?? c.foregroundMuted} />}
   </PressScale>;
+  return tooltip ? <View ref={tip}>{button}</View> : button;
 }
 
 export type CardTone = "plain" | "attention" | "success";

@@ -4,6 +4,7 @@ import { holdOnTurnEnd, holdSuperseded, liftHold } from "../shared/status";
 import { applyHistory, extractHistory } from "./discovery";
 import { turnPrompt } from "./inbox-classifier";
 import { conversationGone } from "./agent-load";
+import { answerMarker, awaitingSend, deliveredInChat } from "../shared/questions";
 
 /**
  * The writes an agent's turn makes, each to the one workspace the turn is about (a-send-never-clones-the-whole-state).
@@ -48,6 +49,11 @@ export async function turnEnded(store: Store, agentId: string, outcome: TurnOutc
   if (items) await store.mutateWorkspace(w.id, current => {
     if (tracksAgent(current, agentId)) applyHistory(current, extractHistory(items, current.inventory?.historyComplete ?? false, current.inventory?.historyError ?? null), null);
   });
+  // An answer the developer copied or put in this agent's chat is delivered once their message carrying it is in the
+  // tail just read (an-answer-leaves-needs-you-only-when-delivered). No read of its own.
+  const sent = items ? userTexts(items) : [];
+  if (sent.length && w.questions.some(q => awaitingSend(q) && sent.some(t => t.includes(answerMarker(q.id)))))
+    await store.mutateWorkspace(w.id, current => { if (tracksAgent(current, agentId)) deliveredInChat(current.questions, agentId, sent, new Date().toISOString()); });
   const interruption = o.interruption;
   if ((outcome.kind === "canceled" || outcome.kind === "failed") && !o.guarded && interruption && w.mainAgentId === agentId) {
     const prompt = items ? turnPrompt(items).message?.text ?? null : null;
@@ -59,4 +65,14 @@ export async function turnEnded(store: Store, agentId: string, outcome: TurnOutc
     });
   }
   return w.id;
+}
+
+/** The text of every user message in a timeline tail: the developer's own words (an agent's message is a tool call). */
+export function userTexts(items: unknown[]): string[] {
+  const texts: string[] = [];
+  for (const item of items) {
+    const i = item as { type?: string; text?: unknown } | null;
+    if (i && i.type === "user_message" && typeof i.text === "string") texts.push(i.text);
+  }
+  return texts;
 }
