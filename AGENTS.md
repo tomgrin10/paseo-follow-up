@@ -158,6 +158,12 @@ These are product rules. Each has tests, and breaking one is a bug even when the
      agent list (patched by events); no `fetch_agents` or `fetch_agent` per send or per turn event, and subagents at
      most once per agent per tick. Guarded by `tests/daemon-load.test.ts` and `test:scale`
      ([docs/architecture.md](docs/architecture.md)).
+   - **A check costs linear in its workspace** (`a-check-costs-linear-in-its-workspace`): one status check (and every
+     surface it builds) tokenizes each question once (`featuresOf` in `shared/questions.ts`, cached per question and
+     checked against its text) and orders a stack with one depth pass (`depths` in `shared/attention.ts`), never a
+     pairwise re-tokenize or a parent `find` inside a sort. 2026-11-13: one check of a 153-PR, 52-question workspace
+     allocated 3.9 MB in ~11 ms; now 1.55 MB in 3–6 ms. Guarded by `tests/check-linear.test.ts` (200 questions,
+     300 PRs).
 3. **Agent parity.** Every action the developer can take in Follow-up also has an agent tool that runs the same
    server path, or an exemption with a reason in `PARITY` (`server/agent-parity.ts`).
    - Writes return a dry-run plan first and run with `confirm: true` and the plan id.
