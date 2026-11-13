@@ -96,6 +96,8 @@ export type NeedItem =
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 /** The main agent as the developer knows it: its Paseo title, else "the main agent". */
 const capitalize = (s: string) => s[0].toUpperCase() + s.slice(1);
+/** The Needs-you Send while Auto is off: how much waits and why, never the workspace's title (say it once, Q51). */
+export const autoOffLine = (n: number) => `${plural(n, "task")} ready · auto-send is off here`;
 export const agentName = (w: Pick<Workspace, "mainAgentTitle">) => w.mainAgentTitle?.trim() || "the main agent";
 /** A capped task's Needs-you title: what is still wrong, in plain words. */
 export function cappedTitle(t: Pick<Task, "kind" | "target" | "title">): string {
@@ -177,7 +179,7 @@ function computeNeedsYou(w: Workspace, now: number): NeedItem[] {
       ? { kind: "send", key: `send:${b.id}`, batchId: b.id, tasks: b.tasks.map(t => t.title), blocker: sendBlocker(w, b), title: FINISH_LINE, finish: true }
       : { kind: "send", key: `send:${b.id}`, batchId: b.id, tasks: b.tasks.map(t => t.title), blocker: sendBlocker(w, b),
       // Say it once: the tasks are rows in Tasks; the send item says only why it waits on you, and its button how many.
-      title: w.enable_auto_sends ? capitalize(IDLE_REASON) : "Auto-send is off for this workspace" });
+      title: w.enable_auto_sends ? capitalize(IDLE_REASON) : autoOffLine(b.tasks.length) });
   }
   const blocking = (pr: Pr) => w.prActions.some(a => prActionBlocks(a, [pr.key]));
   for (const pr of stackOrder(w.prs)) {
