@@ -624,6 +624,18 @@ export function briefAnswers(ask: string, decisions: { id: string; question: str
 }
 
 /**
+ * The picks a card sends (a-pick-note-reaches-the-agent): Something else carries its words, a letter carries the
+ * developer's note when there is one. The client's Send and the tests share it.
+ */
+export function cardPicks(picks: Record<string, string>, words: Record<string, string>, notes: Record<string, string>): { decisionId: string; choice: string; words?: string }[] {
+  return Object.entries(picks).map(([decisionId, choice]) => {
+    const text = (isOther(choice) ? words[decisionId] : notes[decisionId])?.trim();
+    return { decisionId, choice, ...(text ? { words: text } : {}) };
+  });
+}
+/** How many of the picks go with a note: "1 with a note" beside a multi-decision card's Send. */
+export const notedCount = (picks: Record<string, string>, notes: Record<string, string>) => Object.entries(picks).filter(([id, c]) => !isOther(c) && !!notes[id]?.trim()).length;
+/**
  * a-done-brief-is-never-an-ask: whether the agent's open brief is an ask in Needs you (the panel's and Home's block,
  * counted there). The row must be flagged; "No ask stated" (source none) only repeats the chat; and kind "done" says
  * nothing is needed, so a row flagged for something else (a merged PR) shows that reason, never "Nothing needed" as 1.
