@@ -966,6 +966,13 @@ async function reviewModeShots({ shoot, call }) {
   for (const theme of ["light", "dark"]) for (const [size, vp] of [["desktop", DESKTOP], ["phone", PHONE]]) {
     await team();
     await shoot(`rm-row-${size}-${theme}`, vp, theme, page => row(page, vp));
+    // The workspace panel (phone: the flag pill's sheet, the same Needs-you list): one reviewers ask, naming Ravi, count 1.
+    await shoot(`rm-panel-${size}-${theme}`, vp, theme, async page => {
+      await page.setViewportSize(DESKTOP); await openChat(page, title, REVIEW_MODE_STATES[0].prompt);
+      if (size === "phone") { await page.setViewportSize(PHONE); await page.getByRole("button", { name: /^Follow-up · / }).last().click(); }
+      else await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+      await link(page).waitFor();
+    });
     // The undo bar lasts 10 s and settle() can take longer, so the drive captures it itself (rm-toast: the ask gone from
     // Needs you, the header and Home at once). Then it taps Undo, waits for the bar to leave and the ask to come back
     // (the inbox forgets the withdrawn reviewers key; the daemon re-asks on its next tick), and the shot is rm-undo.
