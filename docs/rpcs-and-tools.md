@@ -39,10 +39,10 @@ is missing from AGENTS.md or docs/, so add a line here when you add one.
 
 | Tool | RPC | Use |
 | --- | --- | --- |
-| `workspace_status` | `follow.agent-status` | The workspace's goal, PRs, tasks and work queue. `detail=full` adds history. Includes the PR workflow. |
+| `workspace_status` | `follow.agent-status` | The workspace's goal, PRs, tasks and work queue. `detail=full` adds history. Includes the PR workflow, `nextMessage` (recipient, tasks, exact text, reason, eta: Preview's agent form) and `heldTasks`. |
 | `sync_workspace` | `follow.sync` | Confirms the sidebar matches the work. The Stop hook asks for it after code-changing turns. |
 | `enroll_workspace` | `follow.enroll` | Refines the goal of a workspace the developer activated. |
-| `register_pr` | `follow.register-pr` | Registers a submitted PR and its stack and parent. `agentMerges: true` marks a PR the agent merges itself: Follow-up never asks the developer to review or merge it. |
+| `register_pr` | `follow.register-pr` | Registers a submitted PR and its stack and parent. `agentMerges: true` marks a PR the agent merges itself: Follow-up never asks the developer to review or merge it. In a No review repository every PR counts as `agentMerges` unless the agent sets it false ([review mode](prs.md#review-mode)). |
 | `exclude_stack` | `follow.exclude-stack` | Removes a wrongly registered stack, with an audit (`server/exclusions.ts`). |
 | `update_obligation` | `follow.obligation` | Creates or updates a task (an obligation), with an optional trigger and communication receipt. `status: working` records the caller as the task's agent, or `workingAgentId` (another agent Paseo knows). `ask`, with `blocked`, is the question the developer must answer; only then does the task ask them. |
 | `acknowledge_batch` | `follow.acknowledge` | Records a repair batch's result: completed or blocked. |
@@ -74,7 +74,7 @@ the developer's; it never clears a Needs-you flag and never passes the Overseer'
 | `add_reviewers` | `follow.request-reviewers` | planned |
 | `merge`, `enable_merge_when_ready`, `disable_merge_when_ready` | `follow.prepare-pr-action`, `follow.confirm-pr-action` | planned |
 | `send_repairs` | `follow.send` | write |
-| `set_auto_send`, `clear_hold`, `retry_batch` | `follow.control` | write |
+| `set_auto_send`, `clear_hold`, `retry_batch` | `follow.control` | write. `set_auto_send` with `task` is the task sheet's Auto-send switch (`taskAuto`); `retry_batch` with `task` is a capped task's Retry (`retryTask`). |
 | `snooze_workspace` | `follow.control` (`snooze`) | planned; Later and Bring back now on a workspace-only Needs-you row |
 | `make_main_agent` | `follow.control` (`mainAgentId`) | planned; claim rules in `checkMainClaim` |
 | `track` | `follow.activate` (`engine.activate`): follow a workspace again after an opt-out | write |

@@ -30,6 +30,7 @@ function daemon(agents: Agent[], workspaces: { id: string; name: string; project
     fetchAgentTimeline: async (id: string) => { hit("fetch_agent_timeline"); reads.push(id); return { entries: [{ seqStart: 0, item: { type: "user_message", text: "Ship it" } }], startCursor: null, endCursor: null, hasOlder: false, error: null, gap: false, staleCursor: false }; },
     listProviderSubagents: async () => { hit("provider_subagents"); return { subagents: [] }; },
     setWorkspaceLabel: async () => { hit("set_workspace_label"); },
+    sendMessage: async () => { hit("send_message"); },
   } as unknown as Daemon;
   let connections = 0;
   const total = () => Object.values(requests).reduce((s, n) => s + n, 0);
@@ -108,6 +109,51 @@ test("idle request budget: under 2 daemon requests a minute with 120 workspaces"
   const perMinute = (f.d.total() - before) / 10;
   assert.ok(perMinute < 2, `${perMinute} requests/min: ${JSON.stringify(f.d.requests)}`);
   assert.ok((f.d.connections() - connectionsBefore) / 10 < 2, "and under 2 connections a minute");
+});
+
+test("a queued message only the developer sends (Auto off, a hold) costs no subagent listing per tick", async t => {
+  // 2026-11-12 (Q49 test:scale): repairs for awake agents with Auto off sat pending, and every tick listed their subagents.
+  const f = await fixture(t);
+  const queued = (w: State["workspaces"][number]) => w.batches.push({ id: `b-${w.id}`, messageId: "m", attempts: 1, result: "", recipientAgentId: null, contextPath: null, activityAt: null, acknowledgmentError: null, recoveryHandoffs: [],
+    tasks: [{ key: `review:example/app#${w.id}`, kind: "review", target: `example/app#1`, title: "Address review comments", fingerprint: "f" }], state: "pending", createdAt: iso(clock), sentAt: null, settledAt: null });
+  for (const w of f.state.workspaces.slice(0, 5)) { queued(w); w.enable_auto_sends = false; }
+  await tick(f); f.advance(15_000); await tick(f);
+  const before = f.d.requests.provider_subagents ?? 0;
+  for (let i = 0; i < 8; i++) { f.advance(15_000); await tick(f); }
+  assert.equal((f.d.requests.provider_subagents ?? 0) - before, 0, "no per-tick subagent listing for a send that waits on the developer");
+  for (const w of f.state.workspaces.slice(0, 5)) w.enable_auto_sends = true;
+  f.advance(15_000); await tick(f);
+  assert.ok((f.d.requests.provider_subagents ?? 0) > before, "with Auto on, the send decision still checks subagents");
+});
+
+test("a-send-lists-agents-at-most-once-per-tick: auto-sends to five awake agents list agents once and fetch no agent one by one", async t => {
+  // 2026-11-13 (#139 fair-seed test:scale): 6 sends ran 46 daemon requests a minute. Each send listed every agent three
+  // times (the dispatch's fresh observe, the send's own fresh observe, the recovery-label exclusion) and fetched its
+  // recipient, and each fresh observe listed subagents again after the tick just had.
+  const f = await fixture(t);
+  await tick(f);
+  const awake = f.state.workspaces.slice(0, 5);
+  for (const w of awake) { w.enable_auto_sends = true; } for (const w of awake) w.batches.push({ id: `b-${w.id}`, messageId: `m-${w.id}`, attempts: 1, result: "", recipientAgentId: null, contextPath: null, activityAt: null, acknowledgmentError: null, recoveryHandoffs: [],
+    tasks: [{ key: `review:example/app#${w.id}`, kind: "review", target: `example/app#1`, title: "Address review comments", fingerprint: "f" }], state: "pending", createdAt: iso(clock), sentAt: null, settledAt: null });
+  f.advance(15_000);
+  const before = { ...f.d.requests };
+  const spent = (type: string) => (f.d.requests[type] ?? 0) - (before[type] ?? 0);
+  // One engine tick that auto-sends: the tick observes each workspace, then each send observes fresh and delivers.
+  f.gateway.tickStarted();
+  await tick(f);
+  const ticked = f.d.requests.fetch_agent ?? 0;
+  for (const w of awake) {
+    assert.equal((await f.gateway.observe(w, true)).busy, false);
+    await f.gateway.send(w, w.batches[0], "Follow-up batch");
+  }
+  assert.equal(spent("send_message"), 5);
+  assert.ok(spent("fetch_agents") <= 1, `agent lists in one sending tick: ${spent("fetch_agents")}`);
+  assert.equal((f.d.requests.fetch_agent ?? 0) - ticked, 0, "no fetch_agent per send: the tick's list (patched by events) has the recipient");
+  assert.ok(spent("provider_subagents") <= awake.length, `subagent lists: ${spent("provider_subagents")}, at most one per agent per tick`);
+  // The next tick lists again: a send never decides on a list older than its tick.
+  f.advance(15_000); f.gateway.tickStarted();
+  await f.gateway.observe(awake[0], true);
+  assert.equal(spent("fetch_agents"), 2);
 });
 
 test("Home and the panel read the shared directory: inbox reads cost no daemon request", async t => {

@@ -32,7 +32,7 @@ export function activity(w: Workspace): Activity[] {
       continue;
     }
     if (!b.sentAt) continue;
-    const n = plural(b.tasks.length, "repair");
+    const n = plural(b.tasks.length, "task");
     rows.push({ key: `sent:${b.id}`, at: b.sentAt, icon: "Send", tone: "muted", text: `Sent ${n} to the main agent`, detail: b.tasks.map(t => shortRefs(t.title, w)).join(" · "), took: null });
     if (b.settledAt && b.state === "completed") rows.push({ key: `done:${b.id}`, at: b.settledAt, icon: "Wrench", tone: "success", text: `Main agent finished ${n}`, detail: b.result || null, took: duration(b.sentAt, b.settledAt) });
     else if (b.settledAt && ["blocked", "cancelled"].includes(b.state)) rows.push({ key: `stopped:${b.id}`, at: b.settledAt, icon: "OctagonAlert", tone: b.state === "blocked" ? "danger" : "muted", text: b.state === "blocked" ? `${n} didn't finish` : `${n} cancelled`, detail: b.result || null, took: duration(b.sentAt, b.settledAt) });

@@ -42,6 +42,21 @@ export class DaemonDirectory {
   private archived = new Map<string, Agent>();
   /** Ids `lookup` has asked Paseo about: each at most once per worker, including ones Paseo reported gone. */
   private looked = new Set<string>();
+  /**
+   * The engine's tick (a-send-lists-agents-at-most-once-per-tick). A decision that needs current status (`fresh:
+   * "agents"`: a send) re-lists agents at most once per tick, then reads that list, which lifecycle events keep patched.
+   * Within that tick a "loaded" row is trusted without a fetch_agent, and each agent's subagents are listed at most once.
+   * 2026-11-13: each send listed every agent three times and fetched its recipient. Tick 0 (no engine) memoizes nothing.
+   */
+  private tick = 0;
+  private agentsTick = -1;
+  private subagents = new Map<string, { tick: number; running: boolean }>();
+  tickStarted(): void { this.tick++; this.subagents.clear(); }
+  /** Whether the agent rows were listed during this engine tick. */
+  listedThisTick(): boolean { return this.tick > 0 && this.agentsTick === this.tick; }
+  /** An agent's subagent answer from earlier in this tick, or undefined. */
+  subagentsThisTick(id: string): boolean | undefined { const m = this.subagents.get(id); return this.tick > 0 && m?.tick === this.tick ? m.running : undefined; }
+  rememberSubagents(id: string, running: boolean): void { if (this.tick > 0) this.subagents.set(id, { tick: this.tick, running }); }
   /** Requests this directory has sent, by daemon request type. For tests and the scale check. */
   readonly requests: Record<string, number> = {};
   constructor(private connect: <T>(work: (client: Daemon) => Promise<T>) => Promise<T> = withDaemon, private now = Date.now) {}
@@ -63,7 +78,7 @@ export class DaemonDirectory {
     const now = this.now();
     const rows = this.rows;
     const due = !rows || options.fresh === true || now - rows.at >= BACKSTOP_REFRESH_MS || (this.dirty && now - rows.at >= DIRTY_REFRESH_MS);
-    if (!due && rows && options.fresh === "agents") return this.refreshAgents();
+    if (!due && rows && options.fresh === "agents") return this.listedThisTick() ? rows : this.refreshAgents();
     if (!due && rows && !this.projectsStale) return rows;
     if (!due && rows) return this.refreshProjects();
     let failedProjects = false;
@@ -82,7 +97,7 @@ export class DaemonDirectory {
       const fresh = await loading;
       this.rememberArchived(this.rows?.agents); this.rememberArchived(fresh.agents);
       const at = this.now();
-      this.rows = { ...fresh, at, agentsAt: at };
+      this.rows = { ...fresh, at, agentsAt: at }; this.agentsTick = this.tick;
       if (failedProjects) this.projectsStale = true;
       return this.rows;
     } catch (error) { this.dirty = true; throw error; }
@@ -92,7 +107,7 @@ export class DaemonDirectory {
   private async refreshAgents(): Promise<DirectoryRows> {
     const agents = await this.connect(client => this.list("fetch_agents_request", cursor => client.fetchAgents({ page: { limit: 100, ...(cursor ? { cursor } : {}) } })));
     this.rememberArchived(this.rows?.agents); this.rememberArchived(agents);
-    if (this.rows) { this.rows.agents = agents; this.rows.agentsAt = this.now(); }
+    if (this.rows) { this.rows.agents = agents; this.rows.agentsAt = this.now(); this.agentsTick = this.tick; }
     return this.rows!;
   }
   private async refreshProjects(): Promise<DirectoryRows> {
@@ -175,6 +190,8 @@ export class DaemonDirectory {
    */
   async confirmLoaded(client: Daemon, agent: Agent): Promise<Agent | null> {
     if (["running", "initializing"].includes(agent.status)) return agent;
+    // Listed this tick and patched by events since: the daemon's own answer, no older than the tick.
+    if (this.listedThisTick() && this.cached(agent.id) === agent) return isLoaded(agent) ? agent : null;
     const current = await this.live(client, agent.id);
     return current && isLoaded(current) ? current : null;
   }

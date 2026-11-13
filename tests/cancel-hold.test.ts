@@ -109,5 +109,8 @@ test("only-a-stop-holds: the worker's turn-end handler asks Smart Session's queu
   const { readFile } = await import("node:fs/promises");
   const source = await readFile("index.server.ts", "utf8");
   assert.match(source, /compactionJustDelivered\(event\.agent\.id/, "agent.turn_ended reads the compaction queue");
-  assert.match(source, /holdOnTurnEnd\(w, \{[^}]*\bcompaction\b[^}]*\}\)/, "and passes it to holdOnTurnEnd");
+  assert.match(source, /turnEnded\(store, [^\n]*\bcompaction\b/, "and passes it to the turn-end write");
+  // The write itself lives in server/turn-events.ts (a-send-never-clones-the-whole-state).
+  const events = await readFile("server/turn-events.ts", "utf8");
+  assert.match(events, /holdOnTurnEnd\(current, \{[^}]*\bcompaction\b[^}]*\}\)/, "which passes it to holdOnTurnEnd");
 });

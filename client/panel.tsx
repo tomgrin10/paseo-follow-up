@@ -7,15 +7,15 @@ import { z } from "zod";
 import type { InboxStore } from "./inbox-store";
 import { useInbox } from "./inbox";
 import { BriefCard, type BriefDeps } from "./brief";
-import { briefAsks, type Brief } from "../shared/brief";
+import { briefAsks, liveBrief, type Brief } from "../shared/brief";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { controlRpc, refreshRpc, browserStatusRpc, recoverRpc, sendRpc, inboxBriefRpc } from "../shared/contracts";
 import { summary, type Workspace } from "../shared/model";
 import { recentMainChange } from "../shared/home";
 import { followUpObligations, recoveryBatch } from "../shared/follow-up";
 import { settledForDisplay } from "../shared/presentation";
-import { ago, shortRefs } from "../shared/attention";
-import { agentCard, unconfirmedNote } from "../shared/status";
+import { ago } from "../shared/attention";
+import { unconfirmedNote } from "../shared/status";
 import { Button, Card, CardRow, FoldRow, IconButton, errorText, text, useNow, type Theme } from "./kit";
 import { VersionMark } from "./updates";
 import { Reveal, Skeleton } from "./motion";
@@ -150,7 +150,7 @@ function useMainBrief(w: Workspace, inbox: InboxStore | undefined): Brief | null
   const row = useInbox(inbox ?? NO_INBOX, () => inbox?.rows().find(r => r.agentId === w.mainAgentId) ?? null);
   const readBrief = useRpc(inboxBriefRpc);
   const brief = useQuery({ queryKey: ["follow-up", "home-brief", w.mainAgentId, row?.seq ?? 0], queryFn: () => readBrief({ agentId: w.mainAgentId }), enabled: !!inbox && !!row?.needs && !!row?.brief });
-  const b = brief.data?.brief?.state === "open" ? brief.data.brief : null;
+  const b = liveBrief(brief.data?.brief);
   // Only a real ask (shared briefAsks): not "No ask stated", which repeats the chat, nor a done brief's "Nothing needed".
   return row?.snooze || !briefAsks(b, row) ? null : b;
 }
@@ -168,26 +168,6 @@ function PanelWorkspace(props: PanelProps & { workspace: Workspace; loadError?: 
 }
 
 
-
-/** The agent that has Follow-up's work right now, in the same words as Home and the header (shared/status.ts). */
-function AgentCard({ workspace: w, theme, compact, now, openAgent }: { workspace: Workspace; theme: Theme; compact: boolean; now: number; openAgent?: (id: string) => void }) {
-  const c = theme.colors; const t = text(c);
-  const card = agentCard(w, now);
-  if (!card) return null;
-  const batch = card.view.batch;
-  const recipient = batch.recipientAgentId && batch.recipientAgentId !== w.mainAgentId ? batch.recipientAgentId : w.mainAgentId;
-  return <Card theme={theme} compact={compact} icon="Bot" title={card.title}
-    right={openAgent && <Button theme={theme} compact={compact} kind="ghost" icon="ArrowUpRight" title="Open" accessibilityLabel="Open the agent's chat" onPress={() => openAgent(recipient)} />}>
-    <CardRow theme={theme} compact={compact}>
-      <Text style={[t.meta, { marginBottom: 6 }]}>{card.view.phase === "sent" ? `Sent ${batch.tasks.length} repair${batch.tasks.length === 1 ? "" : "s"} ${ago(batch.sentAt, now)}. Follow-up waits for the agent to report back.` : card.line}</Text>
-      {batch.tasks.map((task, i) => <View key={task.key} style={{ flexDirection: "row", gap: 6 }}>
-        <Text style={[t.meta, { width: 16, fontVariant: ["tabular-nums"] }]}>{i + 1}.</Text>
-        <RichText linkColor={c.foreground} style={[t.meta, { flex: 1 }]}>{shortRefs(task.title, w)}</RichText>
-      </View>)}
-      {!!batch.result && <RichText style={[t.meta, { marginTop: 6, color: c.statusWarning }]}>{batch.result}</RichText>}
-    </CardRow>
-  </Card>;
-}
 
 /** The moment the loop closes: the agent declared Done and every requirement settled. */
 function ShippedCard({ workspace: w, theme, compact, now }: { workspace: Workspace; theme: Theme; compact: boolean; now: number }) {
@@ -304,7 +284,7 @@ function MainChangeNotice({ workspace: w, theme, compact }: { workspace: Workspa
     <Text numberOfLines={3} accessibilityLabel={`${to} took over from ${from} ${ago(change.at, now)}${change.reason ? `. ${change.reason}` : ""}`} style={[t.meta, { flex: 1, minWidth: 200 }]}>
       <Text style={{ color: c.foreground }}>Took over from {from}</Text> · {ago(change.at, now)}{change.reason ? ` · ${change.reason}` : ""}
     </Text>
-    {canUndo && <Button theme={theme} compact={compact} kind="ghost" title="Undo" accessibilityLabel={`Undo: make ${from} the main agent again`} accessibilityHint={`Repairs, questions and Done move back to ${from}.`} loading={undo.isPending} disabled={undo.isPending} onPress={() => undo.mutate()} />}
+    {canUndo && <Button theme={theme} compact={compact} kind="ghost" title="Undo" accessibilityLabel={`Undo: make ${from} the main agent again`} accessibilityHint={`Tasks, questions and Done move back to ${from}.`} loading={undo.isPending} disabled={undo.isPending} onPress={() => undo.mutate()} />}
   </View>;
 }
 
@@ -335,7 +315,7 @@ function OtherRootAgent({ agentId, mainAgentId, workspace: w, theme, compact, op
     </View>
     {/* Phones: the two actions split one row (no wrap into a second row). */}
     {(openAgent || canPromote) && <View style={{ flexDirection: "row", flexWrap: compact ? "nowrap" : "wrap", gap: 8 }}>
-      {canPromote && <Button theme={theme} compact={compact} grow={compact} title="Make main agent" accessibilityLabel={`Make ${title} the main agent`} accessibilityHint={`Repairs, questions and Done move from ${formerTitle} to ${title}.`} loading={promote.isPending} disabled={promote.isPending} onPress={() => promote.mutate()} />}
+      {canPromote && <Button theme={theme} compact={compact} grow={compact} title="Make main agent" accessibilityLabel={`Make ${title} the main agent`} accessibilityHint={`Tasks, questions and Done move from ${formerTitle} to ${title}.`} loading={promote.isPending} disabled={promote.isPending} onPress={() => promote.mutate()} />}
       {openAgent && <Button theme={theme} compact={compact} kind={compact ? "secondary" : "ghost"} icon="MessageSquare" title="Open" accessibilityLabel={`Open ${title}`} onPress={() => openAgent(agentId)} />}
     </View>}
   </View>;
@@ -380,7 +360,7 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), staleTime: 0, refetchOnMount: "always" });
   useEffect(() => { if (sheet) void browser.refetch(); }, [sheet?.key]); // eslint-disable-line react-hooks/exhaustive-deps
   const invalidated = () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); };
-  const auto = useMutation({ mutationFn: (next: boolean) => control({ workspaceId: w.id, enable_auto_sends: next }), onSuccess: (_, next) => { toast.show(next ? "Auto-send on for this workspace" : "Auto-send off · repairs wait for your click"); invalidated(); }, onError: e => toast.error(errorText(e)) });
+  const auto = useMutation({ mutationFn: (next: boolean) => control({ workspaceId: w.id, enable_auto_sends: next }), onSuccess: (_, next) => { toast.show(next ? "Auto-send on for this workspace" : "Auto-send off · tasks wait for your Send"); invalidated(); }, onError: e => toast.error(errorText(e)) });
   // Opening a workspace reads its PRs now: background polling backs off for settled repositories (server/github.ts).
   useEffect(() => { const t = setTimeout(invalidated, 1500); void refresh({ workspaceId: w.id }).catch(() => undefined); return () => clearTimeout(t); }, [w.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const update = useMutation({ mutationFn: () => refresh({ workspaceId: w.id }), onSuccess: () => setTimeout(invalidated, 1200), onError: e => toast.error(errorText(e)) });
@@ -393,14 +373,13 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
     more={sources ? <PanelMore w={w} sources={sources} theme={theme} compact={compact} openAgent={openAgent} openQuestion={setQuestion} showMenu={setMoreMenu} /> : undefined} />;
   const shipped = <ShippedCard workspace={w} theme={theme} compact={compact} now={now} />;
   const needs = <NeedsYouBlock workspace={w} theme={theme} compact={compact} now={now} brief={ask?.brief ?? null} briefCard={ask?.card ?? null} actions={{ openAgent, openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion }} />;
-  const agent = <AgentCard workspace={w} theme={theme} compact={compact} now={now} openAgent={openAgent} />;
   // Once shipped, the stack and tasks are history: one quiet fold instead of two near-empty cards.
   const history = done && <View style={{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.colors.border, overflow: "hidden" }}>
     <View style={{ marginTop: -1 }}><FoldRow theme={theme} compact={compact} open={isOpen("history")} onPress={() => toggle("history")} icon="History" iconColor={theme.colors.foregroundMuted} label={historyLabel(w)} /></View>
   </View>;
   const showWork = !done || isOpen("history");
   const stacks = showWork && <StacksCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} onOpen={openPr} wide={wide} />;
-  const tasks = showWork && <TasksCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} onOpenQuestion={setQuestion} openAgent={openAgent} />;
+  const tasks = showWork && <TasksCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} onOpenQuestion={setQuestion} openAgent={openAgent} now={now} />;
   const log = <ActivityCard workspace={w} theme={theme} compact={compact} now={now} open={isOpen} toggle={toggle} onOpenQuestion={setQuestion} />;
   const extras = <WorkspaceCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} openAgent={openAgent} browserReady={browser.data ? browser.data.ready : null} openOverview={openOverview} editSpec={() => setSpecOpen(true)} />;
   return <View onLayout={event => setWidth(event.nativeEvent.layout.width)} style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>
@@ -409,9 +388,9 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20, ...(large ? { maxWidth: 1240, width: "100%", alignSelf: "center", paddingHorizontal: 12 } : null) }}>
       {header}
       {wide ? <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
-        <View style={{ flex: 5, minWidth: 0 }}>{shipped}{needs}{agent}{history}{tasks}</View>
+        <View style={{ flex: 5, minWidth: 0 }}>{shipped}{needs}{history}{tasks}</View>
         <View style={{ flex: 6, minWidth: 0 }}>{stacks}{log}{extras}</View>
-      </View> : <>{shipped}{needs}{agent}{history}{stacks}{tasks}{log}{extras}</>}
+      </View> : <>{shipped}{needs}{history}{stacks}{tasks}{log}{extras}</>}
     </ScrollView>
     <PrSheet workspace={w} prKey={sheet?.key ?? null} intent={sheet?.intent ?? null} theme={theme} compact={compact} browserReady={browser.data?.ready ?? false} onClose={() => setSheet(null)} />
     <QuestionSheet workspace={w} questionId={question} theme={theme} compact={compact} openAgent={openAgent} onClose={() => setQuestion(null)} />
