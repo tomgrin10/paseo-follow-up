@@ -35,7 +35,7 @@ async function fixture(t: any, enableDefault = true, parentIndexed = true) {
   const client = {
     fetchAgents: async () => ({ entries: agents.map(agent => ({ agent })), pageInfo: { hasMore: false } }),
     fetchWorkspaces: async () => ({ entries: [{ id: "new-workspace", name: "Independent task", projectId: "project" }], pageInfo: { hasMore: false } }),
-    listProjects: async () => ({ projects: [{ projectId: "project", projectKey: "remote:github.com/example/hero-poc", projectKind: "git" }] }),
+    listProjects: async () => ({ projects: [{ projectId: "project", projectKey: "remote:github.com/example/acme-poc", projectKind: "git" }] }),
     fetchAgent: async (id: string) => ({ agent: id === parent.id ? parent : agents.find(a => a.id === id) }),
     fetchAgentTimeline: async () => { timelineCalls++; return { entries: [], hasOlder: false, error: null, gap: false, staleCursor: false }; },
   } as unknown as Daemon;

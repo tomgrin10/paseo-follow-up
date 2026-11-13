@@ -65,7 +65,7 @@ test("worker-reads-github-in-process: no read path spawns gh; tokens resolve onc
   assert.ok(reads.some(r => r.includes("/collaborators")), "reviewer suggestions reached the API");
   assert.equal(reads.filter(r => r.startsWith("GET /search/issues")).length, 2, "one review search per logged-in account");
   const auth = spawns.filter(s => s.startsWith("gh-auth "));
-  // Two owners (example, herosecurity) and two accounts (personal, work), each keyed once, plus one account list.
+  // Two owners (example, acme) and two accounts (personal, work), each keyed once, plus one account list.
   assert.equal(auth.filter(s => s.includes("auth status")).length, 1, "the account list is read once");
   assert.ok(auth.filter(s => s.includes("auth token")).length <= 4, `one token lookup per owner or account: ${auth.join(" | ")}`);
   const before = auth.length;

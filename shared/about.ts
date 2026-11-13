@@ -15,7 +15,7 @@ export const SOURCE_LABEL: Record<LinkKind, string> = { linear: "Linear", pr: "G
 
 export const aboutLinkSchema = z.object({
   kind: z.enum(LINK_KINDS),
-  /** Stable identity for dedupe: HER-1312, owner/repo#12, slack:C1/1700000000.000100, or the URL. */
+  /** Stable identity for dedupe: ACME-1312, owner/repo#12, slack:C1/1700000000.000100, or the URL. */
   key: z.string().max(300),
   url: z.string().max(2000).nullable(),
   /** Linear title, PR title, Slack channel or a page title. Null when the source wasn't read: the row shows the bare link. */
@@ -35,7 +35,7 @@ export const aboutRecordSchema = z.object({
   gist: z.string().max(160),
   overview: z.string().max(900),
   links: z.array(aboutLinkSchema).max(40),
-  /** What the overview was built from, for the footer: "from the chat, 2 PRs, HER-1312". */
+  /** What the overview was built from, for the footer: "from the chat, 2 PRs, ACME-1312". */
   basis: z.object({ chat: z.boolean(), source: z.enum(["live", "transcript", "none"]).default("live"), prs: z.number().int().nonnegative(), issues: z.array(z.string().max(40)).max(20) }),
   /** Sources that couldn't be read ("Linear", "Slack", "GitHub"); their rows show the bare link. */
   failed: z.array(z.string().max(40)).max(6),
@@ -133,7 +133,7 @@ export function extractLinks(texts: readonly (string | null | undefined)[], limi
   return [...found.values()];
 }
 
-/** Branch names carry keys in lower case ("tom/her-1312-vendor-fix"). */
+/** Branch names carry keys in lower case ("tom/acme-1312-vendor-fix"). */
 export function keysFromBranch(branch: string | null | undefined): string[] {
   if (!branch) return [];
   return [...branch.matchAll(/(?:^|[/_-])([a-z][a-z0-9]{1,9})-(\d{1,6})(?=$|[/_-])/gi)].map(m => `${m[1].toUpperCase()}-${Number(m[2])}`).filter(k => !NOT_ISSUES.has(k.split("-")[0]));
@@ -191,7 +191,7 @@ function ageWords(iso: string, now: number): string {
   return `${Math.round(h / 24)}d ago`;
 }
 
-/** "Summarized by Haiku · 2h ago from the chat, 2 PRs, HER-1312". Sources that failed follow: "Linear unavailable". */
+/** "Summarized by Haiku · 2h ago from the chat, 2 PRs, ACME-1312". Sources that failed follow: "Linear unavailable". */
 export function footerText(r: Pick<AboutRecord, "generatedAt" | "basis" | "failed" | "by">, now: number): string {
   const chat = r.basis.source === "transcript" ? "the saved transcript" : r.basis.source === "none" ? "the goal" : "the chat";
   const parts = [r.basis.chat || r.basis.source === "none" ? chat : "", r.basis.prs ? `${r.basis.prs} PR${r.basis.prs === 1 ? "" : "s"}` : "", ...r.basis.issues.slice(0, 3), r.basis.issues.length > 3 ? `${r.basis.issues.length - 3} more issues` : ""].filter(Boolean);
@@ -228,7 +228,7 @@ export function summaryLine(d: Pick<ReturnType<typeof summaryDisplay>, "sentence
   return d.pending ? { text: "Writing a summary…", kind: "writing" } : null;
 }
 
-/** One row's text: "HER-1312 · Vendor service accounts… · In Progress · High · due Nov 12". */
+/** One row's text: "ACME-1312 · Vendor service accounts… · In Progress · High · due Nov 12". */
 export function linkLine(l: AboutLink): { lead: string; title: string | null; meta: string[] } {
   const lead = l.kind === "linear" ? l.key : l.kind === "pr" ? `#${l.key.split("#")[1]}` : l.kind === "slack" ? (l.title ?? "Slack thread") : l.title ?? hostOf(l.url);
   const title = l.kind === "slack" ? l.excerpt : l.kind === "linear" || l.kind === "pr" ? l.title : null;
