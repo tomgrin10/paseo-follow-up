@@ -95,3 +95,42 @@ test("say-it-once: the popover says its \"N to do\" once: the section header whe
     assert.ok(said({ flagged, todo, section }) <= 1, `${flagged}/${todo}/${section}`);
   assert.deepEqual(todoLine({ flagged: false, todo: 3, section: true }), { meta: false, section: false }, "an unflagged popover lists items without a count");
 });
+
+test("a-brief-without-an-ask-never-sits-beside-needs-you: the headline never says No ask stated while Needs you draws items", async () => {
+  const { needsYou } = await import("../shared/attention");
+  const { developerAnswer } = await import("../server/questions");
+  const { questionSchema } = await import("../shared/questions");
+  const { workspace, clock } = await import("./fixtures");
+  type Item = Parameters<typeof flagHeadline>[2] extends (infer U)[] | undefined ? U : never;
+  const none = { state: "open", kind: "unknown", source: "none", ask: "No ask stated. Its last paragraph is right above; nothing is guessed." };
+  const drawn: Item[] = [
+    { kind: "send", key: "send:b1", batchId: "b1", title: "1 task ready", tasks: ["Fix the lint"], blocker: null } as Item,
+    { kind: "decision", key: "decision:pr143", title: "#143 is approved", detail: "" } as unknown as Item,
+  ];
+  const failures: string[] = [];
+  for (const reason of REASONS) {
+    const { row: base, snap } = flagged(reason);
+    const row = { ...base, brief: none } as unknown as InboxRow;
+    const beside = flagHeadline(row, NOW, drawn)!;
+    if (beside.line === "No ask stated") failures.push(`${reason}: No ask stated beside ${drawn.length} drawn items`);
+    // The reviewers flag is its own ask ("Add reviewers to #240"); a failed check headlines as the tasks to send.
+    else if (beside.key === "reviewers" ? beside.line !== "Add reviewers to #240" : beside.key !== "repairs" && beside.line !== drawn[0].title) failures.push(`${reason}: "${beside.line}" is not the top drawn item`);
+    const alone = flagHeadline(row, NOW, [])!;
+    if (reason !== "finished" && alone.line === "No ask stated") failures.push(`${reason}: No ask stated speaks for a ${reason} flag`);
+    if ((reason === "pr_merged" || reason === "pr_closed") && alone.line !== TITLE) failures.push(`${reason}: alone reads "${alone.line}", not the PR title`);
+    void snap;
+  }
+  assert.deepEqual(failures, []);
+  // The plain finish with nothing drawn still says so: its card is the row's only word.
+  assert.equal(flagHeadline({ ...flagged("finished").row, brief: none } as unknown as InboxRow, NOW, [])!.line, "No ask stated");
+  // A real ask always speaks, items or not.
+  const ask = { state: "open", kind: "decision", source: "agent", ask: "Pick the export format" };
+  assert.equal(flagHeadline({ ...flagged("finished").row, brief: ask } as unknown as InboxRow, NOW, drawn)!.line, "Pick the export format");
+  // #163's sent-from-row case: the answer was copied, not sent; Needs you draws it, so the Merged row reads it.
+  const w = workspace({ questions: [questionSchema.parse({ id: "Q1", title: "Duplicate contacts?", question: "Update or skip?", askedBy: "main-agent", askedAt: new Date(clock).toISOString(), mode: "stop", options: [{ letter: "A", label: "Update" }] })] });
+  developerAnswer(w, "Q1", "A", undefined, "copy", clock);
+  const items = needsYou(w, clock);
+  const merged = { ...flagged("pr_merged").row, brief: none } as unknown as InboxRow;
+  assert.equal(flagHeadline(merged, NOW, items)!.line, items[0].title);
+  assert.notEqual(flagHeadline(merged, NOW, items)!.line, "No ask stated");
+});

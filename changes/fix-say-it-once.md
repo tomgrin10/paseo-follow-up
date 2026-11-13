@@ -1,3 +1,4 @@
-- A merged or closed PR reads by its title, not "#240 merged" beside the PR chip.
+- A merged PR reads by its title, not "#240 merged" beside the PR chip.
 - A card with several decisions is titled with the agent's ask, not Q1.
-- Follow-up's popup no longer lists its own ask a second time below it.
+- Follow-up's popup no longer repeats its ask or its to-do count.
+- A row never says "No ask stated" above things to do.
