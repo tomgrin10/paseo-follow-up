@@ -98,11 +98,12 @@ try {
       await page.getByRole("button", { name: /^Recovery background check/ }).first().click();
       await page.mouse.move(900, 400); // the sidebar row's hover card names the host machine: never in a render
     };
-    // 0.15 labels the panel toggle "Open workspace follow-up"; 0.16 puts a "Follow-up" icon in the workspace header
-    // (the first "Follow-up" button is the sidebar's Home link).
+    // Older hosts label the panel toggle "Open workspace follow-up"; 0.15.4 and 0.16 put a "Follow-up" icon in the
+    // workspace header (the first "Follow-up" button is the sidebar's Home link).
     // On a 0.16 phone the panels sit behind "Open Explorer sidebar", where Follow-up is a tab.
     const panelToggle = () => ({ click: async () => {
-      if (!host016) return page.getByRole("button", { name: "Open workspace follow-up", exact: true }).first().click();
+      const legacy = page.getByRole("button", { name: "Open workspace follow-up", exact: true }).first();
+      if (await legacy.isVisible().catch(() => false)) return legacy.click();
       const explorer = page.getByRole("button", { name: "Open Explorer sidebar", exact: true });
       if (page.viewportSize().width < 600 && await explorer.isVisible().catch(() => false)) await explorer.click();
       // The Follow-up tab may already be the open one (the phone keeps the last panel): then this click is a no-op.
