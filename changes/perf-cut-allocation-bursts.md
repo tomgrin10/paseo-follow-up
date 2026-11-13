@@ -1,0 +1,1 @@
+- Follow-up's worker makes less short-lived garbage under load: the workspace list re-serializes only the workspaces that changed, and the Needs-you inbox is saved at most once every 2 seconds.
