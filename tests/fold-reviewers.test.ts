@@ -17,7 +17,7 @@ import { clock, pr, snapshot, workspace } from "./fixtures";
  */
 const reviewers = (author = "agent-author") => ({ author, requested: [] as string[], teams: [] as string[], reviewed: [] as string[], complete: true });
 const unreviewed = (number = 240, author?: string) => pr({ key: `example/app#${number}`, number, snapshot: snapshot({ reviewers: reviewers(author), checksPending: true }), registeredAgentId: "main-agent" });
-function fresh(t: { after: (fn: () => void) => void }, names: { login: string; name?: string }[] = [{ login: "ravi", name: "Ravi" }]) {
+function fresh(t: { after: (fn: () => void) => void }, names: { login: string; name: string | null }[] = [{ login: "ravi", name: "Ravi" }]) {
   setReviewerConfig({ ...emptyReviewerConfig(), repos: { "example/app": names } });
   t.after(() => setReviewerConfig(emptyReviewerConfig()));
 }
