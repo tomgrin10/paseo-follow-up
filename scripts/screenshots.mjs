@@ -42,7 +42,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as 2.0.0-rc.0, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["needs-you-states", "done-brief", "pick-notes", "review-mode", "feeds"];
+const REVIEW_SHOTS = ["needs-you-states", "done-brief", "pick-notes", "review-mode", "feeds", "put-in-chat"];
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
 for (const name of only) if (![...SHOTS, ...REVIEW_SHOTS].includes(name)) fail(`unknown shot "${name}" (known: ${[...SHOTS, ...REVIEW_SHOTS].join(", ")})`);
 const scheme = arg("--scheme");
@@ -65,7 +65,7 @@ const paseo016 = /(^|\D)0\.16\.\d+/.test(paseoVersion ?? "");
 if (only.includes("sidebar") && only.some(n => n !== "sidebar")) fail("shoot --only sidebar on its own, with HARNESS_PASEO=0.16");
 if (only.includes("sidebar") && !paseo016) fail(`the sidebar shot needs the Paseo CLI 0.16.x (found ${paseoVersion ?? "none"}); run with HARNESS_PASEO=0.16`);
 if (only.includes("feeds") && only.length > 1) fail("run --only feeds on its own (npm run test:feeds)");
-const paseoOk = only.includes("sidebar") || only.includes("feeds") || argv.includes("--sidebar-review") ? /(^|\D)0\.1[56]\.\d+/ : /(^|\D)0\.15\.\d+/;
+const paseoOk = only.includes("sidebar") || only.includes("feeds") || only.includes("put-in-chat") || argv.includes("--sidebar-review") ? /(^|\D)0\.1[56]\.\d+/ : /(^|\D)0\.15\.\d+/;
 if (!paseoVersion || !paseoOk.test(paseoVersion)) fail(`needs the Paseo CLI 0.15.x on PATH (found ${paseoVersion ?? "none"}); run through harness-slot or put ~/paseo-harness/cli/0.15.4/bin first`);
 if (changelogArg && !existsSync(changelogArg)) fail(`--whats-new-changelog: no file at ${changelogArg}`);
 const optimiser = await findOptimiser();
@@ -774,6 +774,99 @@ async function openChat(page, title, prompt) {
   await page.getByText(prompt).first().waitFor();
 }
 
+/**
+ * Put in chat (plan #9, Paseo 0.16: run with HARNESS_PASEO=0.16): the question's actions row (Send · Put in chat, Copy as
+ * an icon with the hover title "Copy answer") on the question dialog (desktop), Home's detail pane (phone) and the dialog
+ * the pill's Answer opens, light and dark; then answers waiting to be sent (in-chat, copied), Sign off as the escape
+ * hatch, and the waiting row's one-click Send.
+ */
+async function putInChatShots({ shoot, seeded, call, billing }) {
+  const pickAnswer = async page => {
+    await page.getByText("Retry card_declined once after 24 hours").last().click();
+    const note = page.getByPlaceholder(/note for the agent/i).last();
+    if (await note.isVisible().catch(() => false)) await note.fill("Only for soft declines. Hard declines still go straight to dunning.");
+  };
+  const dialog = async page => {
+    await openChat(page, "Billing retries", billing.prompt);
+    await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+    await page.getByRole("tab", { name: /^Questions/ }).first().click();
+    await page.getByRole("button", { name: /^Q1, Retry declined cards\?/ }).first().click();
+    await page.getByText("Should charges that fail with card_declined retry").last().waitFor();
+  };
+  const phone = async page => {
+    await openHome(page); await page.setViewportSize(PHONE);
+    await (await homeRow(page, "Billing retries")).click();
+    await page.getByText("Retry card_declined once after 24 hours").first().waitFor();
+  };
+  const actionsRow = async page => {
+    await page.getByRole("button", { name: /^Put your Q1 answer in the agent's chat/ }).last().waitFor();
+    if (!await page.locator('[title="Copy answer"]').count()) throw new Error("the Copy icon has no hover title");
+  };
+  for (const theme of ["light", "dark"]) {
+    await shoot(`pic-dialog-${theme}`, DESKTOP, theme, async page => { await dialog(page); await pickAnswer(page); await actionsRow(page);
+      await page.getByText("Send delivers it now, even mid-turn. Put in chat adds it to your message box to edit first.").last().waitFor(); });
+    await shoot(`pic-phone-${theme}`, PHONE, theme, async page => { await phone(page); await pickAnswer(page);
+      const put = page.getByRole("button", { name: /^Put your Q1 answer in the agent's chat/ }).last();
+      await put.evaluate(el => el.scrollIntoView({ block: "center" }));
+      if (await page.evaluate(() => document.documentElement.scrollWidth) > PHONE.width) throw new Error("scrolls sideways");
+      await page.getByText("Send delivers it now, even mid-turn. Put in chat adds it to your message box to edit first.").locator("visible=true").first().waitFor(); });
+    await shoot(`pic-pill-${theme}`, DESKTOP, theme, async page => { await openChat(page, "Billing retries", billing.prompt);
+      await page.getByRole("button", { name: /^Follow-up · / }).last().click();
+      // The pill's row has one action, Answer, which opens the same dialog: same buttons.
+      await page.getByRole("button", { name: /^Answer .*Retry declined cards\?/ }).last().click();
+      await page.getByText("Should charges that fail with card_declined retry").last().waitFor(); await pickAnswer(page); await actionsRow(page); });
+  }
+  // Waiting to be sent (an-answer-leaves-needs-you-only-when-delivered): Billing's Q1 put in the agent's chat, Contact
+  // import's Q1 copied. Both stay in Needs you, on Home's detail pane (desktop and phone) and in the dialog.
+  const ws = key => seeded.workspaces.find(w => w.key === key);
+  // On the phone, from Follow-up's own screen (no agent composer on it): Put in chat must take the developer to the
+  // agent's chat with the answer in its box, and Copy (an icon, no hover on a phone) must say it copied. These taps
+  // record Billing's answer as in-chat and Contact import's as copied for the waiting states below.
+  await shoot("pic-phone-after-put-in-chat-light", PHONE, "light", async page => { await phone(page); await pickAnswer(page);
+    await page.getByRole("button", { name: /^Put your Q1 answer in the agent's chat/ }).last().click();
+    await page.waitForFunction(() => [...document.querySelectorAll("textarea")].some(t => t.offsetParent && t.value.includes("Follow-up answer Q1 (")), null, { timeout: 15000 });
+    if (await page.getByText("Couldn't open the agent's chat").count()) throw new Error("fell back to Copy"); });
+  await shoot("pic-phone-copy-light", PHONE, "light", async page => {
+    await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, "Contact import")).click();
+    await page.getByText("Update the existing contact").first().click();
+    const copy = page.getByRole("button", { name: "Copy answer", exact: true }).last();
+    await copy.click();
+    await page.getByText(/^Copied the Q1 answer/).last().waitFor(); });
+  // Fallbacks, so the waiting states below don't depend on the taps (a refusal means the tap already recorded it).
+  await call("follow.answer-question", { workspaceId: ws("billing").workspaceId, questionId: "Q1", choice: "B", words: "Only for soft declines. Hard declines still go straight to dunning.", action: "chat" }).catch(e => log(`put-in-chat: billing already answered (${e.message ?? e})`));
+  await call("follow.answer-question", { workspaceId: ws("csv").workspaceId, questionId: "Q1", choice: "A", action: "copy" }).catch(e => log(`put-in-chat: csv already answered (${e.message ?? e})`));
+  const detail = (title, wait) => async page => { await openHome(page); await (await homeRow(page, title)).click(); await page.getByText(wait).first().waitFor(); };
+  const detailPhone = (title, wait) => async page => { await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, title)).click(); await page.getByText(wait).locator("visible=true").first().waitFor(); };
+  for (const theme of ["light", "dark"]) {
+    await shoot(`pic-wait-in-chat-home-${theme}`, DESKTOP, theme, detail("Billing retries", "Your Q1 answer isn't sent yet"));
+    // a-brief-without-an-ask-never-sits-beside-needs-you: Contact import's "No ask stated" brief isn't drawn beside it.
+    await shoot(`pic-wait-copied-home-${theme}`, DESKTOP, theme, async page => { await detail("Contact import", "Your Q1 answer isn't sent yet")(page);
+      if (await page.getByText(/^No ask stated/).locator("visible=true").count()) throw new Error("No ask stated beside a Needs-you item"); });
+    await shoot(`pic-wait-in-chat-phone-${theme}`, PHONE, theme, detailPhone("Billing retries", "Your Q1 answer isn't sent yet"));
+    await shoot(`pic-in-chat-dialog-${theme}`, DESKTOP, theme, async page => { await dialog(page); await page.getByText(/^Put in .*'s chat/).last().waitFor(); });
+  }
+  // The escape hatch: the developer edited the marker away, so Follow-up never saw it arrive; signing the agent's row
+  // off settles it. Contact import after Sign off: gone from Needs you, and the question says so.
+  const signed = await call("follow.inbox-act", { action: "sign_off", agentIds: [ws("csv").agentId] });
+  log(`put-in-chat: sign off Contact import -> ${JSON.stringify(signed)}`);
+  for (const theme of ["light", "dark"]) {
+    await shoot(`pic-signed-off-home-${theme}`, DESKTOP, theme, async page => { await openHome(page); await (await homeRow(page, "Contact import")).click(); await page.waitForTimeout(1500);
+      if (await page.getByText("Your Q1 answer isn't sent yet").count()) throw new Error("still waiting after Sign off"); });
+    await shoot(`pic-signed-off-dialog-${theme}`, DESKTOP, theme, async page => {
+      await openChat(page, "Contact import", WORKSPACES.find(w => w.key === "csv").prompt);
+      await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+      await page.getByRole("tab", { name: /^Questions/ }).first().click();
+      await page.getByRole("button", { name: /^Q1, Duplicate contacts\?/ }).first().click();
+      await page.getByText(/^You signed it off/).last().waitFor(); });
+  }
+  // The waiting row's Send delivers the recorded answer in one click (Billing's, put in chat above): the row leaves
+  // Needs you and the toast says what happened.
+  await shoot("pic-sent-from-row-light", DESKTOP, "light", async page => { await detail("Billing retries", "Your Q1 answer isn't sent yet")(page);
+    await page.getByRole("button", { name: /^Send your Q1 answer to / }).last().click();
+    await page.getByText(/^(Sent your Q1 answer to|Answer saved;|Paseo didn't confirm)/).last().waitFor();
+    await page.getByText("Your Q1 answer isn't sent yet").waitFor({ state: "detached" }); });
+}
+
 async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   if (only.includes("feeds")) return checkFeeds({ seeded, call, cli, home });
   const billing = WORKSPACES.find(w => w.key === "billing");
@@ -1135,6 +1228,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
     }
   }
   if (only.includes("review-mode")) await reviewModeShots({ shoot, call });
+  if (only.includes("put-in-chat")) await putInChatShots({ shoot, seeded, call, billing });
   if (only.includes("needs-you-states")) {
     // One Needs you block per surface: each state on the panel (desktop) and Home's detail pane (desktop and phone),
     // light and dark. Tall panel frames so the block, Tasks and their neighbours all fit.

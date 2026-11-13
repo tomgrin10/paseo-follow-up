@@ -82,9 +82,10 @@ export function flagHeadline(row: Pick<InboxRow, "needs" | "snooze" | "brief">, 
   if (key === "pr_closed" && / merged$/.test(top.detail)) key = "pr_merged";
   if (brief && (top.reason === "finished" || briefKey(brief.kind) === key)) key = briefKey(brief.kind);
   const since = age(row.needs.since, now);
-  // "Finished · No ask stated" while the workspace has an open question tells Tom to skip it; the question is the ask.
+  // "Finished · No ask stated" while the workspace has an open question, or an answer the developer hasn't sent yet,
+  // tells Tom to skip it; that is the ask.
   if (key === "finished" && (!brief || brief.source === "none")) {
-    const asked = workspaceHeadline(items.filter(i => i.kind === "question"));
+    const asked = workspaceHeadline(items.filter(i => i.kind === "question" || (i.kind === "answer" && i.waiting)));
     if (asked) return { ...asked, source: "flag" };
   }
   // A failed check or review thread headlines as the developer's action: tasks ready to send.
@@ -112,7 +113,7 @@ export function workspaceHeadline(items: NeedItem[]): Headline | null {
     case "retry": return { key: "blocked", label: "Tasks stuck", line: top.title, source: "workspace" };
     case "capped": return { key: "blocked", label: "Task unchanged", line: top.title, source: "workspace" };
     case "check": return { key: "blocked", label: "Check PR", line: top.title, source: "workspace" };
-    case "answer": return { key: "blocked", label: "Check answer", line: top.title, source: "workspace" };
+    case "answer": return top.waiting ? { key: "decision", label: "Send answer", line: top.title, source: "workspace" } : { key: "blocked", label: "Check answer", line: top.title, source: "workspace" };
     case "decision": return { key: "decision", label: "Decision", line: top.title, source: "workspace" };
     case "send": return top.finish ? { key: "finish", label: FINISH_WORD, line: FINISH_ASK[0].toUpperCase() + FINISH_ASK.slice(1), source: "workspace" } : { key: "repairs", label: `Send ${plural(top.tasks.length, "task")}`, line: top.title, source: "workspace" };
     case "merge": return { key: "merge", label: `Merge #${top.number}`, line: top.title, source: "workspace" };
