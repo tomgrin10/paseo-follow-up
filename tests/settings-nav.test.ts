@@ -35,16 +35,16 @@ test("category and open state persist per device; unknown or missing values fall
 });
 
 test("Reviewers summary: collapsed by default once anything is set, with a one-line summary", () => {
-  const uri = { login: "uri-h", name: "Uri" }, yuval = { login: "yuval-g", name: "Yuval" }, team = { login: "acme/backend", name: null };
+  const uri = { login: "uri-h", name: "Omar" }, yuval = { login: "yuval-g", name: "Lena" }, team = { login: "acme/backend", name: null };
   const empty = { defaults: [], repos: {} };
   assert.equal(reviewersConfigured(empty), false); assert.equal(reviewersSummary(empty), "No lists yet; Add reviewers opens a picker");
   const set = { defaults: [uri, yuval], repos: { "acme/app": [uri], "acme/api": [team], "acme/web": [yuval], "acme/old": [] } };
   assert.equal(reviewersConfigured(set), true);
-  assert.equal(reviewersSummary(set), "3 own lists · default: Uri, Yuval");
+  assert.equal(reviewersSummary(set), "3 own lists · default: Omar, Lena");
   assert.equal(reviewersSummary({ defaults: [], repos: { "a/b": [uri] } }), "1 own list");
-  assert.equal(reviewersSummary({ defaults: [uri, yuval, team, { login: "dana", name: null }], repos: {} }), "default: Uri, Yuval, acme/backend +1");
-  assert.equal(repoSummary([team, uri], [yuval]), "acme/backend, Uri");
-  assert.equal(repoSummary([], [uri, yuval, team]), "Uses the default (Uri, Yuval +1)");
+  assert.equal(reviewersSummary({ defaults: [uri, yuval, team, { login: "dana", name: null }], repos: {} }), "default: Omar, Lena, acme/backend +1");
+  assert.equal(repoSummary([team, uri], [yuval]), "acme/backend, Omar");
+  assert.equal(repoSummary([], [uri, yuval, team]), "Uses the default (Omar, Lena +1)");
   assert.equal(repoSummary([], []), "Nobody; opens the picker");
   assert.equal(reposSummary(["acme/app", "acme/api", "acme/web", "acme/old", "acme/docs"], set), "3 own lists · 2 on the default");
   assert.equal(reposSummary(["a/b"], { repos: {} }), "1 on the default");

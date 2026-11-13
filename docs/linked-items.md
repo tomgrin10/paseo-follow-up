@@ -83,9 +83,9 @@ The design is §5 of the Linked items design; the rules below are what the code 
 - **The disclosure row** (`LinkedItemsRow`): "Linked items" under the spec row in "Spec, agent and recovery", with
   Open, or Add when nothing is linked.
 - **Home search** matches linked keys and titles (search field `linked`), and a match through a link says so on the
-  row's second line: "Linked · HER-1312 Vendor sync drops SCIM groups". The index comes from `follow.linked-index`,
+  row's second line: "Linked · ACME-1312 Vendor sync drops SCIM groups". The index comes from `follow.linked-index`,
   fetched only while the search field has text and kept a minute (`useLinkedIndex`), so Home's list poll never reads
-  `linked.json`. Numbers match exactly or by prefix, never by a typo (`tokenMatch`), so "HER-1312" can't find the
-  workspace linking HER-1352; words keep their typo tolerance.
+  `linked.json`. Numbers match exactly or by prefix, never by a typo (`tokenMatch`), so "ACME-1312" can't find the
+  workspace linking ACME-1352; words keep their typo tolerance.
 - **Reads:** a surface showing the line reads `follow.linked-items` once when it mounts and keeps it a minute. Nothing
   polls.

@@ -83,7 +83,7 @@ test("Tom's setup (fakes): gt on PATH, Graphite sign-in, a gt-initialised repo o
     await mkdir(join(root, "config", "graphite"), { recursive: true });
     await writeFile(join(root, "config", "graphite", "auth"), JSON.stringify({ authToken: "synthetic" }));
     // The main checkout has gt's repo config; Paseo's project may point at a worktree whose .git is a file.
-    const repo = join(root, "hero-poc"); await mkdir(join(repo, ".git", "worktrees", "wt"), { recursive: true });
+    const repo = join(root, "acme-poc"); await mkdir(join(repo, ".git", "worktrees", "wt"), { recursive: true });
     await writeFile(join(repo, ".git", ".graphite_repo_config"), JSON.stringify({ trunk: "main" }));
     await writeFile(join(repo, ".git", "worktrees", "wt", "commondir"), "../..\n");
     const worktree = join(root, "wt"); await mkdir(worktree);
@@ -93,13 +93,13 @@ test("Tom's setup (fakes): gt on PATH, Graphite sign-in, a gt-initialised repo o
 
     const environment = { PATH: `/nonexistent:${bin}`, XDG_CONFIG_HOME: join(root, "config"), HOME: root };
     const store = new PrWorkflowStore(join(root, "data"), fsProbe(environment));
-    store.paths = async () => new Map([["herosecurity/hero-poc", [worktree]], ["tomgrin10/plain", [plain]]]);
-    assert.equal(await store.workflow("herosecurity/hero-poc"), "graphite");
+    store.paths = async () => new Map([["acme/acme-poc", [worktree]], ["tomgrin10/plain", [plain]]]);
+    assert.equal(await store.workflow("acme/acme-poc"), "graphite");
     assert.equal(await store.workflow("tomgrin10/plain"), "github");
     // Same machine without gt on PATH: everything is GitHub.
     const bare = new PrWorkflowStore(join(root, "data2"), fsProbe({ ...environment, PATH: "/nonexistent" }));
     bare.paths = store.paths;
-    assert.equal(await bare.workflow("herosecurity/hero-poc"), "github");
+    assert.equal(await bare.workflow("acme/acme-poc"), "github");
     // No checkout registered as a Paseo project: a tracked workspace's working directory for that repository is
     // looked at next. The project's plain checkout comes first, the workspace's gt-initialised worktree still wins.
     const fallback = new PrWorkflowStore(join(root, "data3"), fsProbe(environment));
@@ -348,7 +348,7 @@ test("scopes.json carries each agent's workflow; the summary picks the action to
 test("Settings summaries: the glance lines count what each repository ships with and what's set by hand", async () => {
   const { shippingSummary, repoShippingSummary, reposShippingSummary } = await import("../shared/pr-workflow");
   const row = (repo: string, effective: "github" | "graphite", own: Partial<{ inherits: boolean; mergeMethod: "rebase" | null; setting: "auto" | "github" | "graphite" }> = {}) =>
-    ({ repo, setting: "auto" as const, detected: effective, effective, reason: "", path: null, inherits: true, mergeMethod: null, reviewFix: null, review: "team" as const, github: null, ...own });
+    ({ repo, setting: "auto" as const, detected: effective, effective, reason: "", path: null, inherits: true, mergeMethod: null, reviewFix: null, review: "team" as const, deploy: null, github: null, ...own });
   const repos = [row("a/one", "github"), row("a/two", "github", { mergeMethod: "rebase" }), row("a/three", "graphite"), row("a/four", "github", { inherits: false, setting: "github" })];
   assert.equal(shippingSummary({ default: "auto", repos }), "Auto · GitHub in 3, Graphite in 1");
   assert.equal(shippingSummary({ default: "auto", repos: repos.filter(r => r.effective === "github") }), "Auto · GitHub everywhere");

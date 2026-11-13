@@ -29,6 +29,7 @@ import { compactionDelivered, turnIdOf } from "../shared/status";
 import { activeWindowMs, backgroundCount, isLive, isLoaded, recentlyUsed, workspaceActive, conversationGone, DEFAULT_ACTIVE_WINDOW_DAYS, DAY_MS } from "./agent-load";
 import { HistoryCache } from "./history-cache";
 import { DaemonDirectory, type DirectoryRows } from "./directory";
+import { traceDaemon } from "./request-trace";
 type RecoveryAgentOptions = Partial<PluginBeforeRequests["agent.create"]["config"]> & { workspaceId: string; labels: Record<string, string>; idempotencyKey: string; env: Record<string, string>; /** Paseo 0.16 (features.backgroundAgents): no tab, no notification, no sidebar row. */ background?: boolean };
 
 /**
@@ -114,14 +115,14 @@ export async function daemonOptions(): Promise<Record<string, unknown>> {
   }
   return { url, clientId: "follow-up-worker", clientType: "cli", reconnect: { enabled: false }, connectTimeoutMs: 10_000, suppressSendErrors: true, ...(password ? { password } : {}) };
 }
-export async function withDaemon<T>(work: (client: Daemon) => Promise<T>): Promise<T> {
-  if (stopped) throw new Error("Follow-up is stopping");
-  const module = require(["@getpaseo", "client", "internal", "daemon-client"].join("/")) as Module;
-  const client = new module.DaemonClient(await daemonOptions());
-  if (stopped) throw new Error("Follow-up is stopping");
-  clients.add(client);
-  try { await client.connect(); return await work(client); }
-  finally { clients.delete(client); await client.close().catch(() => undefined); }
+/**
+ * Every daemon call the worker makes, on the worker's one shared connection (a-running-worker-holds-one-daemon-connection).
+ * 2026-11-13 live copy under live load: withDaemon opened a WebSocket per call (turn-end reads, inbox reads, usage,
+ * permission events), 41 connections a minute, each with its own handshake, status and buffers, while RSS climbed
+ * 200 → 310 MB in native memory with a flat JS heap. openDaemon is the only place a DaemonClient is built.
+ */
+export function withDaemon<T>(work: (client: Daemon) => Promise<T>): Promise<T> {
+  return sharedConnect(work);
 }
 /**
  * One daemon connection shared by everything a tick asks (one-daemon-connection-per-tick). 2026-11-12: PaseoGateway
@@ -190,7 +191,7 @@ export function sharedDaemon(open: () => Promise<Daemon> = openDaemon, o: { idle
 }
 async function openDaemon(): Promise<Daemon> {
   const module = require(["@getpaseo", "client", "internal", "daemon-client"].join("/")) as Module;
-  const client = new module.DaemonClient(await daemonOptions());
+  const client = traceDaemon(new module.DaemonClient(await daemonOptions()));
   try { await client.connect(); return client; }
   catch (error) { await client.close().catch(() => undefined); throw error; }
 }

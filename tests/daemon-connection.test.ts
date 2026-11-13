@@ -30,3 +30,17 @@ test("a-running-worker-holds-one-daemon-connection: 10 ticks open exactly one We
   await connect.idle();
   assert.equal(closed, 1, "once the ticks stop for longer than the idle bound, it closes");
 });
+
+test("a-worker-builds-one-daemon-client: every worker daemon call shares the one connection; only openDaemon builds a client", async () => {
+  // 2026-11-13 live copy under live load: withDaemon built a DaemonClient per call (turn-end and inbox reads, usage,
+  // permission events), 41 WebSockets a minute, while RSS climbed in native memory with a flat JS heap.
+  const daemon = await readFile("server/daemon.ts", "utf8");
+  assert.equal(daemon.match(/new module\.DaemonClient\(/g)?.length, 1, "server/daemon.ts builds a DaemonClient in one place");
+  assert.match(daemon, /async function openDaemon\(\)[^]*?new module\.DaemonClient\(/, "and it is openDaemon, the shared connection's opener");
+  assert.match(daemon, /export function withDaemon<T>[^{]*\{\s*return sharedConnect\(work\);/, "withDaemon is the shared connection");
+  const { readdir } = await import("node:fs/promises");
+  // The worker's own code. The .mjs files (the stdio bridge, the hook, the update watchdog) and their generated
+  // server/*-source.ts copies run in other processes.
+  const files = ["index.server.ts", ...(await readdir("server")).filter(f => f.endsWith(".ts") && f !== "daemon.ts" && !f.endsWith("-source.ts")).map(f => `server/${f}`)];
+  for (const f of files) assert.doesNotMatch(await readFile(f, "utf8"), /new [\w.]*DaemonClient\(/, `${f} builds its own DaemonClient`);
+});
