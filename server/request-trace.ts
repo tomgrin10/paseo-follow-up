@@ -16,7 +16,9 @@ export function traceDaemon<T extends object>(client: T, file = process.env.FOLL
       if (typeof value !== "function" || typeof key !== "string" || key === "connect" || key === "close" || key.startsWith("_")) return value;
       return function (this: unknown, ...args: unknown[]) {
         // The plugin itself may be installed under a node_modules path, so only the client's and node's own frames go.
-        const frames = (new Error().stack ?? "").split("\n").slice(2).map(l => l.trim().replace(/^at /, ""))
+        // Paseo's host evaluates the plugin's bundle with eval, so a worker frame reads "fn (eval at evaluateBundle
+        // (.../@getpaseo/server/...), <anonymous>:line:col)": that becomes "fn (bundle:line)" before the host filter.
+        const frames = (new Error().stack ?? "").split("\n").slice(2).map(l => l.trim().replace(/^at /, "").replace(/\(eval at .*, <anonymous>:(\d+):\d+\)$/, "(bundle:$1)"))
           .filter(l => !/node:internal|@getpaseo|request-trace\.[jt]s|^new Promise|^async Promise\.all/.test(l)).slice(0, 5)
           .map(l => l.replace(/\(?(?:file:\/\/)?\/[^)]*\/([^/)]+:\d+):\d+\)?$/, "$1"));
         // A call with no worker frame is the client calling itself (reconnects, its own bookkeeping): not a request.
