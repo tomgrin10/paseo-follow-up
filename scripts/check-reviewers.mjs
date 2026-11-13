@@ -48,7 +48,7 @@ const title='Reviewer controls test '+Date.now().toString(36);
 const workspace=await api.workspaces.create({title,source:{kind:'directory',path:directory}});
 const agent=await workspace.agents.create({config:{provider:'followup-fixture/fixture',model:'fixture'},title:'Synthetic reviewer main'});
 await call('follow.activate',{workspaceId:workspace.id});
-await call('follow.save-reviewers',{repo:'acme/acme-poc',reviewers:[{login:'uri-reviewer',name:'Uri'},{login:'reviewer-b',name:'Yuval'}]});
+await call('follow.save-reviewers',{repo:'acme/acme-poc',reviewers:[{login:'uri-reviewer',name:'Omar'},{login:'reviewer-b',name:'Lena'}]});
 for(const number of [1,2,3,4,5])await call('follow.register-pr',{agentId:agent.id,repo:'acme/acme-poc',number,stack:'Vendor behavior',parentNumber:null});
 await call('follow.refresh');
 const {chromium}=createRequire(join(process.env.SEND_TO_PASEO_SOURCE,'extension/package.json'))('playwright-core');
@@ -58,7 +58,7 @@ const errors=[];context.on('weberror',error=>errors.push(String(error.error())))
 try{
  const page=await context.newPage();await fetch(`http://127.0.0.1:${preview.port}/llms.txt`);await page.goto(`http://127.0.0.1:${preview.port}/`);
  await page.getByRole('button',{name:new RegExp('^'+title)}).click();await page.getByRole('button',{name:'Open workspace follow-up',exact:true}).click();
- const add=page.getByRole('button',{name:'Add reviewers: Uri and Yuval for acme/acme-poc pull request 1',exact:true});
+ const add=page.getByRole('button',{name:'Add reviewers: Omar and Lena for acme/acme-poc pull request 1',exact:true});
  await add.waitFor();await page.getByText('Draft',{exact:true}).waitFor();assert.equal(await page.getByText('No reviewers',{exact:true}).count(),2);
  assert.equal(await page.getByRole('button',{name:/^Add reviewers:/}).count(),1);
  await mkdir('docs/screenshots',{recursive:true});await page.screenshot({path:'docs/screenshots/reviewers-desktop.png'});
@@ -68,7 +68,7 @@ try{
  const mutate=async patch=>{const data=JSON.parse(await readFile(fixturePath,'utf8'));await writeFile(fixturePath,JSON.stringify({...data,...patch}));};
  await mutate({deny:true});await add.click();await page.getByText('GitHub refused the review request. Check repository write access and reviewer eligibility.',{exact:true}).waitFor();
  assert.equal(await add.isEnabled(),true);await page.screenshot({path:'docs/screenshots/reviewers-error-mobile.png'});
- await mutate({deny:false});await add.click();await page.getByText('Requesting…',{exact:true}).waitFor();await page.getByText('Requested Uri and Yuval.',{exact:true}).waitFor();
+ await mutate({deny:false});await add.click();await page.getByText('Requesting…',{exact:true}).waitFor();await page.getByText('Requested Omar and Lena.',{exact:true}).waitFor();
  assert.equal(await page.getByRole('button',{name:/^Add reviewers:/}).count(),0);assert.equal(await page.getByText('No reviewers',{exact:true}).count(),1);
  await page.getByRole('link',{name:/pull request 1 in Graphite:/}).scrollIntoViewIfNeeded();
  await page.screenshot({path:'docs/screenshots/reviewers-requested-mobile.png'});

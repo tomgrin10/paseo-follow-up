@@ -36,7 +36,7 @@ function receiptRefs(name: string, input: unknown): LinkRef[] {
     refs.push({ raw: `https://slack.com/archives/${args.channel_id}/p${args.message_ts.replace(".", "")}`, strong: true });
   const linear = /linear/i.test(name);
   for (const text of stringsOf(input)) for (const r of refsIn(text, true)) {
-    // A bare key in a shell command or a search is noise ("git log --grep HER-12"); only Linear's tools vouch for keys.
+    // A bare key in a shell command or a search is noise ("git log --grep ACME-12"); only Linear's tools vouch for keys.
     if (!linear && !/^https?:/.test(r.raw)) continue;
     refs.push(r);
   }

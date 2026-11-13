@@ -4,19 +4,22 @@ import { readFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { inflateSync } from "node:zlib";
-import { COMPANY_HASHES, EXCLUDED, RENDER_ALLOW, assertNoRealNames, deniedNames, hashWord, machineNames } from "../scripts/real-names.mjs";
+import { createHash } from "node:crypto";
+import { COMPANY_HASHES, EXCLUDED, NAME_HASHES, RENDER_ALLOW, TICKET_HASHES, assertNoRealNames, deniedNames, hashWord, machineNames } from "../scripts/real-names.mjs";
 
 /**
  * no-real-names-in-renders-or-fixtures (2026-11-13). The repo is public, and the harness fixtures named their workspace,
- * repos and chat hosts after the company. A render or a committed file under scripts/, tests/, docs/ (screenshots
- * included) or changes/ must name no real machine, user or company. The company words are stored only as hashes and
+ * repos and chat hosts after the company, and tests carried colleagues' names and logins, a customer and real ticket
+ * keys. No render and no committed file (screenshots' text included) may name the real machine, its user, the company,
+ * its people, customers or tickets. The company words are stored only as hashes and
  * the machine names are read at run time (scripts/real-names.mjs), so this guard leaks nothing itself. The examples
  * below use an injected fictional denylist ("globex"), never the real words.
  */
 const root = join(import.meta.dirname, "..");
-const SCANNED = ["scripts", "tests", "docs", "changes"];
+const BINARY = /\.(jpe?g|gif|webp|ico|woff2?|zip|tgz)$/;
 const SELF = "scripts/real-names.mjs";
 const FICTIONAL = [hashWord("globex"), hashWord("globexcorp")];
+const exact = (w: string) => createHash("sha256").update(w).digest("hex");
 
 /** A PNG's text: its tEXt, zTXt and iTXt chunks (pixel data is compressed noise and never matched). */
 function pngText(buf: Buffer): string {
@@ -31,13 +34,13 @@ function pngText(buf: Buffer): string {
   return out.join("\n");
 }
 
-const tracked = () => execFileSync("git", ["ls-files", "-z", "--", ...SCANNED], { cwd: root, encoding: "utf8" }).split("\0").filter(Boolean);
+const tracked = () => execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8" }).split("\0").filter(f => f && !BINARY.test(f));
 const textOf = async (file: string) => {
   const buf = await readFile(join(root, file));
   return file.endsWith(".png") ? pngText(buf) : buf.toString("utf8");
 };
 
-test("no-real-names-in-renders-or-fixtures: no committed file under scripts/, tests/, docs/ or changes/ names the company, machine or user", async () => {
+test("no-real-names-in-renders-or-fixtures: no committed file names the company, its people, customers or tickets, the machine or its user", async () => {
   const hits: string[] = [];
   for (const file of tracked()) {
     if (Object.hasOwn(EXCLUDED, file)) continue;
@@ -50,7 +53,7 @@ test("no-real-names-in-renders-or-fixtures: no committed file under scripts/, te
 test("no-real-names-in-renders-or-fixtures: the denylist stores the company only as hashes, and no machine or user", async () => {
   const src = await readFile(join(root, SELF), "utf8");
   assert.match(src, /hostname\(\)/); assert.match(src, /userInfo\(\)/);
-  assert.ok(COMPANY_HASHES.length > 0 && COMPANY_HASHES.every(h => /^[0-9a-f]{64}$/.test(h)), "sha256 hex only");
+  for (const list of [COMPANY_HASHES, NAME_HASHES, TICKET_HASHES]) assert.ok(list.length > 0 && list.every(h => /^[0-9a-f]{64}$/.test(h)), "sha256 hex only");
   assert.deepEqual(deniedNames(src), [], `${SELF} spells a denied word`);
   for (const name of machineNames()) assert.ok(!src.toLowerCase().includes(name.toLowerCase()), `${SELF} spells this machine's name`);
 });
@@ -72,6 +75,12 @@ test("no-real-names-in-renders-or-fixtures: what counts as a real name", () => {
   assert.deepEqual(deniedNames("org/globex_app", opts), ["globex"], "slash and underscore too");
   assert.deepEqual(deniedNames("globexian, superglobex, Acme", opts), [], "only the word, not words containing it");
   assert.deepEqual(deniedNames("served by build-box", { machine, hashes: FICTIONAL }), ["build-box"]);
+  const people = { machine: [], hashes: [], names: [exact("Zelda")], tickets: [hashWord("glx")] };
+  assert.deepEqual(deniedNames("Zelda asked twice", people), ["Zelda"], "a person's or customer's name, capitalised");
+  assert.deepEqual(deniedNames("zelda-config, ZELDA", people), [], "names match only as a capitalised word");
+  assert.deepEqual(deniedNames("Fix GLX-1312 and glx-7", people), ["GLX-1312", "glx-7", "GLX"], "a ticket prefix followed by digits (and its capitals)");
+  assert.deepEqual(deniedNames("team GLX, key `GLX-${n}`", people), ["GLX-${", "GLX"], "a team key in capitals, and a template key");
+  assert.deepEqual(deniedNames("glx team, Glx, ACME-1312, xglx-12", people), [], "lower-case words, another prefix, or inside a word");
   assert.deepEqual(deniedNames("example/globex-poc tracks by default", { ...opts, allow: ["example/globex-poc"] }), [], "an allowed run-time value");
   assert.deepEqual(deniedNames("example/globex-poc and globex/app", { ...opts, allow: ["example/globex-poc"] }), ["globex"], "anything else still fails");
 });

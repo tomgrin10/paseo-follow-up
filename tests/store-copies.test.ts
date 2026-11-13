@@ -46,7 +46,7 @@ const COPY_ON_ACCESS: Record<string, Collected> = {
     make: async dir => new LinkedStore(dir) as never,
     seed: (v, n) => { for (let i = 0; i < n; i++) v.workspaces[`w${i}`] = emptyWorkspaceLinks(); },
     items: v => rec(v, "workspaces"),
-    touch: (v, id) => { v.workspaces[id].candidates.push({ key: "HER-1", seen: 1, firstSeen: "2026-11-13T00:00:00.000Z", retryAt: null, failures: 0, strong: true }); },
+    touch: (v, id) => { v.workspaces[id].candidates.push({ key: "ACME-1", seen: 1, firstSeen: "2026-11-13T00:00:00.000Z", retryAt: null, failures: 0, strong: true }); },
   },
   "server/json-file-store.ts (about.json)": {
     make: async dir => new AboutStore(dir) as never,
