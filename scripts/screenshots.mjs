@@ -681,16 +681,22 @@ async function checkFeeds({ seeded, call, cli, home }) {
     ], { note: crashNote });
 
     // The daemon restarts: every page's websocket drops and reconnects; the host replays its subscriptions.
+    // The change waits for Home's page to reconnect (a frame from the new daemon): until then nothing can reach it, push or poll,
+    // and the app's own reconnect backoff is Paseo's, not Follow-up's.
+    let heard = 0;
+    homePage.on("websocket", socket => socket.on("framereceived", () => { heard = Date.now(); }));
     daemon.kill("SIGTERM");
     for (let i = 0; i < 100 && daemon.exitCode === null; i++) await quiet(100);
     if (daemon.exitCode === null) daemon.kill("SIGKILL");
     const restartAt = Date.now();
     await respawnDaemon(); await workerUp();
-    await homePage.getByRole("toolbar", { name: "Status", exact: true }).first().waitFor({ state: "visible", timeout: 60_000 });
+    const daemonBack = Date.now();
+    for (let i = 0; heard <= daemonBack; i++) { if (i > 1800) throw new Error("Home's page did not reconnect within 180 s"); await quiet(100); }
+    const pageBack = Date.now();
     await quiet(3_000);
     await fresh("After a daemon restart (websocket reconnect)", () => agentAct("set_priorities", { priorities: [{ workspace: ws("billing").workspaceId, score: 93, reason: "Feeds check: after the daemon restart" }], replace: false }), [
       ["Home: the priority line", homePage, text("Feeds check: after the daemon restart")],
-    ], { note: `daemon back after ${Math.round((Date.now() - restartAt) / 1000)} s` });
+    ], { note: `daemon back after ${Math.round((daemonBack - restartAt) / 1000)} s, Home's page reconnected ${Math.round((pageBack - daemonBack) / 1000)} s later` });
     await fresh("After a daemon restart: usage", () => writeUsage(71), [
       ["Home: usage meter", homePage, label(/5h 71%/)],
     ], { budget: USAGE_BUDGET, note: `${debounce} ms watch debounce`, only016: USAGE_ON_015 });
