@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { flagHeadline, HEADLINE_WORD } from "../shared/headline";
+import { echoedItems, flagHeadline, HEADLINE_WORD } from "../shared/headline";
 import { newEntry, prEndEvent, reduce, REASONS, type InboxRow, type Reason, type ReasonEntry } from "../shared/inbox";
 import { prChip } from "../shared/home";
 
@@ -59,4 +59,29 @@ test("say-it-once: a merged or closed PR's flag reads its title, and the conflic
   assert.equal(flagHeadline(legacy, NOW)!.line, "#240 merged");
   const conflict = { ...flagged("review").row, needs: { reasons: [{ reason: "review", at: AT, detail: "Merge conflict to fix on #240", dedupeKey: "review" }], since: AT } } as InboxRow;
   assert.equal(flagHeadline(conflict, NOW)!.line, "Merge conflict to fix on #240");
+});
+
+test("say-it-once: the pill sheet's one to-do that repeats the headline keeps its controls, not its title", () => {
+  type Item = Parameters<typeof echoedItems>[0][number];
+  const reviewers = (n: number, names: string[]): Item => ({ kind: "reviewers", key: `reviewers:example/app#${n}`, prKey: `example/app#${n}`, number: n,
+    suggested: names, title: names.length ? `Add reviewers to #${n}: ${names.join(" and ")}` : `#${n} has no reviewers`, detail: TITLE });
+  const flag = { reason: "reviewers", at: AT, detail: "#246", dedupeKey: "reviewers", prKey: "example/app#246" };
+  const brief = (ask: string) => ({ state: "open", kind: "reviewers", source: "followup", ask, moves: [{ kind: "add_reviewers", label: "Add reviewers", prKey: "example/app#246" }] });
+  const row = (b: unknown) => ({ agentId: "a1", needs: { reasons: [flag], since: AT }, snooze: null, brief: b } as unknown as InboxRow);
+  const surface = (r: InboxRow, items: Item[]) => {
+    const h = flagHeadline(r, NOW)!; const echoed = echoedItems(items, h, r);
+    return [h.line, ...items.filter(i => !echoed.has(i.key)).map(i => i.title)];
+  };
+  const repeats = (lines: string[]) => lines.filter((l, i) => lines.findIndex(x => x.trim().toLowerCase() === l.trim().toLowerCase()) !== i);
+  // The #156 render: "Add reviewers to #246: Ravi" as the headline and again as the one row.
+  const ravi = [reviewers(246, ["Ravi"])];
+  assert.deepEqual(surface(row(brief("Add reviewers to #246: Ravi")), ravi), ["Add reviewers to #246: Ravi"]);
+  assert.deepEqual(repeats(surface(row(brief("Add reviewers to #246: Ravi")), ravi)), []);
+  // The same PR in other words (nobody configured; no brief yet) is still the same ask.
+  assert.deepEqual(surface(row(brief("#246 has no reviewers yet")), [reviewers(246, [])]), ["#246 has no reviewers yet"]);
+  assert.deepEqual(surface(row(null), ravi), ["Add reviewers to #246"]);
+  // Another PR's ask, or a different to-do, keeps its title; #2460 isn't #246.
+  const other = [reviewers(2460, ["Ravi"]), reviewers(247, ["Mira"])];
+  assert.deepEqual(surface(row(null), other), ["Add reviewers to #246", "Add reviewers to #2460: Ravi", "Add reviewers to #247: Mira"]);
+  assert.equal(echoedItems(ravi, null, row(null)).size, 0);
 });
