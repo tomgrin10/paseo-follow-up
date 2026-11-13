@@ -367,9 +367,9 @@ try {
   const defaultWorkspace = await api.workspaces.create({ title: "Default-tracked workspace", source: { kind: "directory", path: trackedPath } });
   // No repository tracks by default from the code (public-code-carries-no-host-identifiers): the project's own switch does,
   // as the private seed sets it on the developer's machine.
-  const trackedProject = await waitUntil("the tracked project in Settings", async () => (await call("follow.project-settings", {})).projects.find(p => p.path === trackedPath), { baseMs: 10_000 });
-  assert.equal(trackedProject.enable_default_tracking, false, "no built-in default-tracked repository");
-  await call("follow.set-project-tracking", { projectId: trackedProject.id, enable_default_tracking: true });
+  const switchedProject = await waitUntil("the tracked project in Settings", async () => (await call("follow.project-settings", {})).projects.find(p => p.path === trackedPath), { baseMs: 10_000 });
+  assert.equal(switchedProject.enable_default_tracking, false, "no built-in default-tracked repository");
+  await call("follow.set-project-tracking", { projectId: switchedProject.id, enable_default_tracking: true });
   const defaultAgent = await defaultWorkspace.agents.create({ config: { provider: "followup-fixture/fixture" }, title: "Default main" });
   await call("follow.refresh", {});
   let defaultRecord;
