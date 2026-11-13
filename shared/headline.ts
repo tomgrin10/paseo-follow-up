@@ -148,6 +148,14 @@ export function echoedItems(items: readonly NeedItem[], headline: Pick<Headline,
   return new Set(items.filter(i => (!!said && n(i.title) === said) || (headline.key === "reviewers" && i.kind === "reviewers" && names(i))).map(i => i.key));
 }
 
+/**
+ * say-it-once: where the popover says "N to do". Once: in the section header over the workspace's items when that
+ * section shows, else on the meta line under the headline. Never in the pill's title, which phones show as the
+ * sheet's title right above both (2026-11-13 render: "1 to do in this workspace" three times on one sheet).
+ */
+export const todoLine = (o: { flagged: boolean; todo: number; section: boolean }): { meta: boolean; section: boolean } =>
+  ({ meta: o.flagged && o.todo > 0 && !o.section, section: o.flagged && o.section });
+
 /** "3 to do": the workspace count shown inside the popover. Never on the pill, where it read like a count of agents. */
 export const todoLabel = (items: NeedItem[]) => items.length ? `${items.length} to do` : "";
 
