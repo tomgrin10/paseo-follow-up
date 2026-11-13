@@ -64,3 +64,13 @@ test("scale settle: a run that settles at 301 s, inside its schedule, passes; on
   // One quiet poll between busy ones isn't settled.
   assert.equal(settleState([{ atMs: 60_000, open: 0 }, { atMs: 65_000, open: 1 }, { atMs: 70_000, open: 0 }], settleBoundMs()).settled, false);
 });
+
+test("the busy window is judged on growth: last fifth's median over the first fifth's, one spike decides nothing", async () => {
+  const { busyVerdict, BUSY_GROWTH_BUDGET_MB } = await import("../scripts/scale-budget.mjs");
+  const flat = Array.from({ length: 360 }, (_, i) => 220 + (i % 7) + (i === 200 ? 80 : 0));
+  assert.equal(busyVerdict(flat, BUSY_GROWTH_BUDGET_MB).over, false, "a sawtooth with a spike isn't growth");
+  // 2026-11-13, beta.4 on a live-sized load: 259 → 311 MB over the window.
+  const climbing = Array.from({ length: 360 }, (_, i) => 259 + Math.round(i * 52 / 360));
+  const v = busyVerdict(climbing, BUSY_GROWTH_BUDGET_MB);
+  assert.ok(v.over && v.growthMb > BUSY_GROWTH_BUDGET_MB, `a steady climb fails (grew ${v.growthMb} MB)`);
+});

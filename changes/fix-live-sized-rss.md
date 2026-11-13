@@ -1,0 +1,1 @@
+- Follow-up uses much less memory while your agents are busy, and no longer reconnects to Paseo every few seconds.

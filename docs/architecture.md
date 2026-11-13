@@ -93,11 +93,17 @@ Answers that the client polls are kept small:
   - `server/shared-file.ts` (`readSharedJson`): Session Guard's `state.json` and Smart Session's `compactions.json` are
     read and parsed again only when their inode, size or mtime changes; the parsed value is shared and read-only
     (`observe-reads-shared-files-once-per-tick`).
-  - `sharedDaemon` (`server/daemon.ts`): `PaseoGateway` (and its directory) share one daemon connection, closed after
-    5 s unused and replaced after 60 s, so a tick opens one whatever the workspace count. It sits in the same client
-    set as `withDaemon`'s, so `closeConnections` closes it within `stopWorker`'s deadline and nothing opens after stop
-    (`one-daemon-connection-per-tick`).
-  - `InboxStore` keeps what `inbox.json` holds after the first read; it's the file's only writer.
+  - `sharedDaemon` (`server/daemon.ts`): `PaseoGateway` (and its directory) share one daemon connection, so a tick
+    opens at most one whatever the workspace count (`one-daemon-connection-per-tick`). It sits in the same client set
+    as `withDaemon`'s, so `closeConnections` closes it within `stopWorker`'s deadline and nothing opens after stop.
+  - **A running worker holds one daemon connection** (`a-running-worker-holds-one-daemon-connection`). The shared
+    connection closes only after `SHARED_CLIENT_IDLE_MS` unused: the engine's `TICK_MS` plus `SHARED_CLIENT_MARGIN_MS`
+    (10 s), so consecutive ticks reuse it; a dropped one is retired at once, and `SHARED_CLIENT_MAX_MS` (30 min)
+    replaces a long-lived one. One idle timer per connection, not one per call. 2026-11-13 live: with a 5 s idle close
+    and a 60 s replacement every 15 s tick opened a fresh WebSocket (39 hellos in 12 min). Guarded by
+    `tests/daemon-connection.test.ts` (a drift check against `TICK_MS`, and 10 ticks open exactly one connection).
+  - `InboxStore` keeps what `inbox.json` holds after the first read; it's the file's only writer. Its mutations copy
+    only the entries they touch (`a-mutation-copies-only-what-it-changes`, below).
   - Guarded by `tests/observe-io.test.ts`.
 - `server/store.ts`: `state.json` stays in memory once loaded. `mutate()` serializes changes. Writes are batched (at
   most one a second) and skipped when nothing changed. `onChanged` writes `scopes.json` for the hooks and the
@@ -130,6 +136,20 @@ Answers that the client polls are kept small:
   validates only the changed ones. 2026-11-13, #139 fair-seed `test:scale`: 6 sends copied the 2 MB state for every
   write (93 MB) and made the next save re-validate all 140 workspaces (47 MB); RSS went 227 → 342 MB and stayed.
   Guarded by `tests/send-clones.test.ts` and `test:scale`.
+- **A mutation copies only what it changes** (`a-mutation-copies-only-what-it-changes`; it generalises
+  `a-send-never-clones-the-whole-state` to every store). Every store hands a mutation a copy-on-access draft
+  (`server/cow.ts` `copyOnAccess`): a top-level field is copied when the mutation first reads it, and an item of a
+  keyed collection (state workspaces, inbox entries, linked workspaces, Summary entries) when that item is first read.
+  `finish()` builds the next value from the saved one, keeps every untouched or unchanged item's saved (frozen) object,
+  and says what changed; the store validates and freezes only that, writes nothing when nothing changed, and
+  serialises the file once per real write. `Store.mutate`, `InboxStore.mutate` and `JsonFileStore`
+  (`server/json-file-store.ts`: `about.json`, `linked.json`, `rename.json`, read once and kept in memory; a stat per read
+  picks up someone else's edit) use it. 2026-11-13 live (2.0.1-beta.4, 153-PR workspace, 86 inbox entries): every inbox
+  mutation structuredCloned, validated and stringified the whole inbox 4–5 times, several mutations per agent turn;
+  under live's turn rate that was 28% of the worker's 4.3 MB/s of allocation, and RSS stepped 315 → 405 MB with a
+  harness-sized JS heap. Guarded by `tests/inbox-copies.test.ts`, `tests/store-copies.test.ts` (it walks every JSON
+  writer in `server/`: a new store must use the draft or carry an exemption with its reason) and `test:scale`'s busy
+  window.
 - **A send lists agents at most once per tick** (`a-send-lists-agents-at-most-once-per-tick`). The engine starts each
   tick on the gateway (`tickStarted`); a decision that needs current status (`fresh: "agents"`, before a send)
   re-lists agents once in that tick and then reads that list, which lifecycle events keep patched. Within the tick a
