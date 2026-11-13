@@ -60,7 +60,7 @@ test("a priority for the whole workspace shows on one row: its only row, its own
 });
 
 test("row-lines-own-row holds for every row kind, every sort, with ranked and workspace-wide priorities", () => {
-  // Each workspace mixes row kinds: needs (each flag), later, running, fixing, tracked workspace rows, Paseo-only.
+  // Each workspace mixes row kinds: needs (each flag), later, running, sending, tracked workspace rows, Paseo-only.
   const reasons: Reason[] = ["permission", "error", "paused", "ci", "review", "reviewers", "finished", "pr_closed", "pr_merged"];
   const rows: InboxRow[] = [];
   reasons.forEach((r, i) => {

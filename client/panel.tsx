@@ -218,7 +218,7 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
           <View style={{ flex: 1, minWidth: 160, gap: 2 }}>
             <Text style={t.label}>Main agent</Text>
             <MainAgentName agentId={w.mainAgentId} theme={theme} />
-            <Text style={t.meta}>Owns the PRs, tasks and the Done call. Repairs go here.</Text>
+            <Text style={t.meta}>Owns the PRs, tasks and the Done call. Tasks go here.</Text>
           </View>
           {openAgent && <Button theme={theme} compact={compact} icon="MessageSquare" title="Open" accessibilityLabel="Open main agent" onPress={() => openAgent(w.mainAgentId)} />}
         </View>
