@@ -42,7 +42,8 @@ export function activity(w: Workspace): Activity[] {
   for (const a of w.prActions) {
     const numbers = a.prs.map(key => `#${key.split("#")[1]}`).join(", ");
     const toggle = isGithubFlow(w.prs.find(p => p.key === a.prs[0])?.snapshot) ? "Auto-merge" : "Merge when ready";
-    const what = a.kind === "merge" ? `Merge requested for ${numbers}` : a.kind === "request_reviewers" ? `Reviewers requested on ${numbers}` : a.kind === "enable_mwr" ? `${toggle} on for ${numbers}` : `${toggle} off for ${numbers}`;
+    // The same outcome the button and toast said (mergeWords): Merged only when GitHub merged.
+    const what = a.kind === "merge" ? a.merge === "merged" ? `Merged ${numbers}` : a.merge === "queued" ? `Queued ${numbers.split(", ")[0]} to merge` : `Merge requested for ${numbers}` : a.kind === "request_reviewers" ? `Reviewers requested on ${numbers}` : a.kind === "enable_mwr" ? `${toggle} on for ${numbers}` : `${toggle} off for ${numbers}`;
     rows.push({ key: `action:${a.id}`, at: a.createdAt, icon: a.kind === "request_reviewers" ? "UserPlus" : "GitMerge", tone: a.state === "failed" ? "danger" : a.state === "uncertain" ? "warning" : "muted", text: what, detail: a.state === "submitted" ? null : a.result || null, took: null });
   }
   for (const q of w.questions ?? []) {
