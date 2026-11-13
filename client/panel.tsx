@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { recoveryActions } from "./recovery-actions";
 import { ScrollView, View } from "react-native";
 import { Text } from "./text";
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
@@ -204,6 +205,7 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
   const runQueued = useMutation({ mutationFn: (batchId: string) => send({ workspaceId: w.id, batchId }), onSuccess: invalidate, onError: fail });
   const retry = useMutation({ mutationFn: (batchId: string) => control({ workspaceId: w.id, retryBatchId: batchId }), onSuccess: invalidate, onError: fail });
   const last = w.batches.filter(b => recoveryBatch(b) && b.state !== "cancelled").at(-1);
+  const actions = recoveryActions(last, { archived: w.archived, starting: recovery.isPending });
   const recoveryState = last ? last.state === "sent" ? "Recovery is running" : last.state === "completed" ? "Last recovery finished" : last.state === "pending" ? "Recovery is ready to run" : last.state === "sending" ? "Starting recovery" : "Recovery needs a check" : null;
   const active = w.prs.some(p => !settledForDisplay(p));
   const shown = open("workspace");
@@ -235,11 +237,10 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
           {recoveryState && <Text style={[t.meta, { color: c.foreground }]}>{recoveryState}{last?.settledAt ? ` · ${ago(last.settledAt)}` : ""}</Text>}
           {!!last?.result && <RichText linkColor={c.foreground} numberOfLines={4} selectable style={t.meta}>{last.result}</RichText>}
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-            {last?.state === "pending" ? <Button title="Run queued recovery" theme={theme} compact={compact} loading={runQueued.isPending} onPress={() => runQueued.mutate(last.id)} />
-              : <Button title={recovery.isPending || last?.state === "sending" ? "Starting recovery…" : "Run recovery"} icon="History" theme={theme} compact={compact} loading={recovery.isPending}
-                disabled={recovery.isPending || w.archived || !!last && (["pending", "sending", "sent", "uncertain"].includes(last.state) || last.state === "blocked" && !last.settledAt)} onPress={() => recovery.mutate()} />}
-            {last?.recipientAgentId && openAgent && <Button title="Open recovery agent" kind="ghost" theme={theme} compact={compact} onPress={() => openAgent(last.recipientAgentId!)} />}
-            {last && ["blocked", "uncertain"].includes(last.state) && <Button title="Retry recovery" theme={theme} compact={compact} loading={retry.isPending} onPress={() => retry.mutate(last.id)} />}
+            {actions.primary.kind === "run-queued" ? <Button title={actions.primary.title} theme={theme} compact={compact} loading={runQueued.isPending} onPress={() => runQueued.mutate(last!.id)} />
+              : actions.primary.kind === "retry" ? <Button title={actions.primary.title} icon="RefreshCw" theme={theme} compact={compact} loading={retry.isPending} onPress={() => retry.mutate(last!.id)} />
+              : <Button title={actions.primary.title} icon="History" theme={theme} compact={compact} loading={recovery.isPending} disabled={actions.primary.disabled} onPress={() => recovery.mutate()} />}
+            {actions.openAgent && openAgent && <Button title="Open recovery agent" kind="ghost" theme={theme} compact={compact} onPress={() => openAgent(last!.recipientAgentId!)} />}
           </View>
         </View>
       </CardRow>
