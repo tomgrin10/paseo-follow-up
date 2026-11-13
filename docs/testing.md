@@ -135,7 +135,8 @@ plays a scripted turn (timeline items, Follow-up RPCs, a permission) for a given
   process can read the real name.
 - **Fictional names everywhere** (`no-real-names-in-renders-or-fixtures`). Fixtures use `acme-*` names (the project
   `acme-project`, the repository `acme/acme-poc`, `linear.app/acme`, `acme.slack.com`), never the company's. Every
-  render path (`screenshots.mjs`, `check-recovery-background.mjs`, `check-project-settings.mjs`) passes its page text
+  render path (`screenshots.mjs`, `check-recovery-background.mjs`, `check-project-settings.mjs`,
+  `check-view-settings.mjs`) passes its page text
   through `assertNoRealNames` (`scripts/real-names.mjs`), which fails a shot naming the real hostname, its user or the
   company; `tests/no-real-names.test.ts` fails a committed file under `scripts/`, `tests/`, `docs/` (PNG text chunks
   included) or `changes/` that does. The hostname and user name are read at run time (`os.hostname()`,
