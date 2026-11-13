@@ -6,6 +6,11 @@
 // blast radius) and counts loaded agents before and after three poll cycles.
 //
 //   node scripts/scale-check.mjs [--workspaces 120] [--awake 5] [--realistic] [--plugin <unpacked plugin dir>] [--json]
+//   node scripts/scale-check.mjs --data-from <copied plugin-data/follow-up dir> [--idle 1800] ...   (local only)
+//
+// --data-from starts the worker on a copy of a real data directory, remapped onto the harness's workspaces and agents
+// (scripts/scale-data-from.mjs), so a live install's memory can be reproduced at its exact size. It implies
+// --realistic's fake GitHub and sets --workspaces to the copy's count. The copy holds real names: never in CI or a PR.
 //
 // Exits non-zero when the loaded count grows, or when --rss-budget / --cpu-budget are exceeded. Skips (exit 0) when
 // the paseo CLI is missing, except under CI. Run it inside a memory-capped scope, e.g.
@@ -26,7 +31,7 @@ import { harness, spawnDaemon } from "./harness.mjs";
 import { harnessEnv, harnessConfig } from "./harness-env.mjs";
 import { fakeGithub } from "./fake-github.mjs";
 import { scaleGh } from "./scale-github.mjs";
-import { ACK_READ_MS, idleVerdict, SEND_SETTLE_MS, settleBoundMs, settleState } from "./scale-budget.mjs";
+import { ACK_READ_MS, BUSY_GROWTH_BUDGET_MB, BUSY_ITEM_BYTES, BUSY_TURN_ITEMS, BUSY_TURNS_PER_MIN, busyVerdict, idleVerdict, SEND_SETTLE_MS, settleBoundMs, settleState } from "./scale-budget.mjs";
 
 const exec = promisify(execFile);
 // The check drives a real Paseo daemon, so it needs the paseo CLI (CI installs @getpaseo/cli). Without it, local
@@ -38,12 +43,14 @@ try { await exec("paseo", ["--version"], { timeout: 30_000 }); } catch {
 }
 await harness();
 const arg = (name, fallback) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : fallback; };
-const N = Number(arg("workspaces", "120")); const AWAKE = Number(arg("awake", "5")); const POLLS = 3; const POLL_MS = 15_000;
 /** Seeds each workspace with this many never-sent cancelled batches, like the VM's 1.3.0-beta.2 state. */
-const CHURN = Number(arg("churn", "0")); const REALISTIC = process.argv.includes("--realistic");
+const CHURN = Number(arg("churn", "0")); const DATA_FROM = arg("data-from", null); const REALISTIC = process.argv.includes("--realistic") || !!DATA_FROM;
+const { liveShape, copyLive } = DATA_FROM ? await import("./scale-data-from.mjs") : {};
+const shape = DATA_FROM ? await liveShape(DATA_FROM) : null;
+const N = shape ? shape.workspaces.length : Number(arg("workspaces", "120")); const AWAKE = Number(arg("awake", "5")); const POLLS = 3; const POLL_MS = 15_000;
 /** Agents per workspace: live has ~300 listed agents at 141 workspaces, so --realistic makes two. */
 const PER = Number(arg("agents-per-workspace", REALISTIC ? "2" : "1")); const IDLE_MS = Number(arg("idle", "30")) * 1000;
-const budget = { idleRssMb: Number(arg("idle-rss-budget", "0")), rssMb: Number(arg("rss-budget", "0")), cpuPct: Number(arg("cpu-budget", "0")), requestsPerMin: Number(arg("request-budget", "0")) };
+const budget = { busyGrowthMb: Number(arg("busy-growth-budget", String(BUSY_GROWTH_BUDGET_MB))), idleRssMb: Number(arg("idle-rss-budget", "0")), rssMb: Number(arg("rss-budget", "0")), cpuPct: Number(arg("cpu-budget", "0")), requestsPerMin: Number(arg("request-budget", "0")) };
 const root = await mkdtemp(join(tmpdir(), "follow-scale-"));
 const home = join(root, "home"); const fixture = join(root, "fixture"); let plugin = arg("plugin", null);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -60,8 +67,9 @@ const allocDir = arg("alloc-prof", null);
 // --realistic also answers GitHub reads with live-sized PR bodies (scripts/scale-github.mjs), so a cold start reads
 // every PR the way the live worker does.
 let github = null;
-if (REALISTIC) { await mkdir(join(root, "bin"), { recursive: true }); await writeFile(join(root, "bin/gh"), scaleGh()); const { chmod } = await import("node:fs/promises"); await chmod(join(root, "bin/gh"), 0o700); github = await fakeGithub({ dir: root, gh: join(root, "bin/gh"), owners: ["example"] }); }
-const env = harnessEnv(root, { home, strip: github?.strip ?? [], set: { ...(heapDir || cpuDir || allocDir ? { NODE_OPTIONS: [heapDir && `--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=${heapDir}`, cpuDir && `--cpu-prof --cpu-prof-dir=${cpuDir}`, allocDir && `--require ${join(dirname(fileURLToPath(import.meta.url)), "alloc-prof.cjs")}`].filter(Boolean).join(" ") } : {}), ...(allocDir ? { FOLLOW_UP_ALLOC_PROF: allocDir } : {}), PASEO_DAEMON_URL: counted, PASEO_RELAY_ENABLED: "false", ...(github?.env ?? {}) } });
+if (REALISTIC) { await mkdir(join(root, "bin"), { recursive: true }); await writeFile(join(root, "bin/gh"), scaleGh()); const { chmod } = await import("node:fs/promises"); await chmod(join(root, "bin/gh"), 0o700); if (shape) { await writeFile(join(root, "pr-states.json"), JSON.stringify(shape.prStates)); process.env.SCALE_GH_STATES = join(root, "pr-states.json"); }
+  github = await fakeGithub({ dir: root, gh: join(root, "bin/gh"), owners: shape ? shape.owners : ["example"], gzip: process.argv.includes("--gh-gzip") }); }
+const env = harnessEnv(root, { home, strip: github?.strip ?? [], set: { ...(heapDir || cpuDir || allocDir ? { NODE_OPTIONS: [heapDir && `--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=${heapDir}`, cpuDir && `--cpu-prof --cpu-prof-dir=${cpuDir}`, allocDir && `--require ${join(dirname(fileURLToPath(import.meta.url)), "alloc-prof.cjs")}`].filter(Boolean).join(" ") } : {}), ...(allocDir ? { FOLLOW_UP_ALLOC_PROF: allocDir, ...(process.env.FOLLOW_UP_ALLOC_PROF_WINDOWS ? { FOLLOW_UP_ALLOC_PROF_WINDOWS: process.env.FOLLOW_UP_ALLOC_PROF_WINDOWS } : {}) } : {}), PASEO_DAEMON_URL: counted, PASEO_RELAY_ENABLED: "false", ...(github?.env ?? {}) } });
 const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env, timeout: 120_000, maxBuffer: 8 << 20 })).stdout);
 let daemon = null; let client = null;
 const start = async () => {
@@ -93,8 +101,9 @@ try {
     const w = await api.workspaces.create({ title: `Synthetic workspace ${i}`, source: { kind: "directory", path: dir } });
     const a = await w.agents.create({ config: { provider: "followup-fixture/fixture", model: "fixture", modeId: "default", providerOptions: { fixture_ack: "repairs" } }, title: `Synthetic agent ${i}` });
     await client.sendMessage(a.id, `Synthetic task ${i}: ship https://github.com/example/app/pull/${i + 1}`, { messageId: `scale-${i}` });
-    created.push({ workspaceId: w.id, agentId: a.id });
-    for (let k = 1; k < PER; k++) await w.agents.create({ config: { provider: "followup-fixture/fixture", model: "fixture", modeId: "default" }, title: `Synthetic helper ${i}.${k}` });
+    const agentIds = [a.id];
+    for (let k = 1; k < (shape ? shape.workspaces[i].agents.length : PER); k++) agentIds.push((await w.agents.create({ config: { provider: "followup-fixture/fixture", model: "fixture", modeId: "default" }, title: `Synthetic helper ${i}.${k}` })).id);
+    created.push({ workspaceId: w.id, agentId: a.id, agentIds });
   }
   await sleep(2_000);
   await stop();
@@ -112,11 +121,12 @@ try {
   await writeFile(join(home, "plugin-data/follow-up/state.json"), JSON.stringify({ version: 1, migrations: ["follow-every-1"], workspaces: created.map(({ workspaceId, agentId }, i) => ({ id: workspaceId, title: `Synthetic workspace ${i}`, goal: "Synthetic", mainAgentId: agentId, enable_tracking: true, enable_auto_sends: true, hold: null, archived: false, prs: [], obligations: [], batches: churn(i), completion: null, updatedAt: now, managedDoneLabel: false, runtimeReason: null, runtimeBusy: false, backgroundBusy: false, inventory: null })) }));
   // --realistic: the live install's shape (about 9 KB a workspace: PRs with snapshots, tasks, batch history, questions),
   // from scripts/scale-seed.ts. The empty seed above let a 450 MB worker pass a 240 MB budget (2026-11-12).
-  if (REALISTIC) {
+  if (DATA_FROM) console.error(`data-from: ${JSON.stringify({ ...(await copyLive(DATA_FROM, join(home, "plugin-data/follow-up"), shape, created)), workspaces: N, prs: shape.prs })}`);
+  else if (REALISTIC) {
     await writeFile(join(root, "created.json"), JSON.stringify(created));
     // --awake-fresh: the awake workspaces carry no batch history, so they send under any version's rules (a fair
     // send-load baseline for a main build that would otherwise block them).
-    await exec("npx", ["tsx", "scripts/scale-seed.ts", join(home, "plugin-data/follow-up/state.json"), join(root, "created.json"), "3", process.argv.includes("--awake-fresh") ? String(AWAKE) : "0"], { timeout: 120_000 });
+    await exec("npx", ["tsx", "scripts/scale-seed.ts", join(home, "plugin-data/follow-up/state.json"), join(root, "created.json"), "3", process.argv.includes("--awake-fresh") ? String(AWAKE) : "0", join(home, "plugin-data/follow-up/inbox.json")], { timeout: 120_000 });
   }
   const stateBytesBefore = (await readFile(join(home, "plugin-data/follow-up/state.json"))).length;
   const before = loaded(await agents());
@@ -189,9 +199,42 @@ try {
     const { stdout } = await exec("getconf", ["CLK_TCK"]); const hz = Number(stdout.trim()) || 100;
     const { statSync } = await import("node:fs"); const statePath = join(home, "plugin-data/follow-up/state.json");
     let writes = 0; let mtime = statSync(statePath).mtimeMs;
+    // --busy <s>: live's busy load first (scripts/scale-budget.mjs BUSY_*): awake agents end turns with live-sized
+    // timelines. Judged on growth across the window; the idle window after it then judges the median it settles at.
+    const BUSY_MS = Number(arg("busy", "0")) * 1000; const busySamples = []; let busyTurns = 0;
+    if (BUSY_MS > 0) {
+      const from = Date.now(); let nextBusy = from;
+      while (Date.now() - from < BUSY_MS) {
+        await sleep(500); busySamples.push(await rss());
+        while (nextBusy <= Date.now()) { nextBusy += 60_000 / BUSY_TURNS_PER_MIN; const a = created[busyTurns++ % Math.max(1, AWAKE)].agentId; void client.sendMessage(a, `Fixture: busy turn ${BUSY_TURN_ITEMS} ${BUSY_ITEM_BYTES}`, { messageId: `busy-${busyTurns}` }).catch(() => undefined); }
+      }
+    }
     const t0 = await ticks(); const started = Date.now(); const requestsBefore = counter.snapshot();
     const idleSamples = [await rss()];
-    while (Date.now() - started < IDLE_MS) { await sleep(500); idleSamples.push(await rss()); const m = statSync(statePath).mtimeMs; if (m !== mtime) { writes++; mtime = m; } }
+    // --live-mix <turns/min>,<rpcs/min>: the idle window carries live's load instead of none: awake agents end turns
+    // with live-sized timelines (turn hooks read their tails) and an app reads the usual RPCs. Compare with a plain run.
+    const mix = arg("live-mix", null)?.split(",").map(Number) ?? null; let nextTurn = Date.now(), nextRpc = Date.now(), turnN = 0, rpcN = 0;
+    const MIX_RPCS = [["follow.list", {}], ["follow.inbox-list", {}], ["follow.usage", {}], ["follow.workspace-about", { workspaceId: created[0].workspaceId }]];
+    // --app-burst <rpcs/s>,<seconds>: an open app's reads (beta.4's Home and panel poll; live 2026-11-13 06:53: ~250
+    // plugin RPCs in 2 min), starting 60 s into the idle window, so the step it leaves in RSS shows against the
+    // window's first minute. Each method's reply size is reported (appBurst).
+    const burst = arg("app-burst", null)?.split(",").map(Number) ?? null; const burstAt = started + 60_000; let nextBurst = burstAt, burstN = 0;
+    const bigWs = shape ? created[shape.workspaces.reduce((m, w, i, all) => all[m].agents.length >= w.agents.length ? m : i, 0)]?.workspaceId : created[0].workspaceId;
+    const BURST_RPCS = [["follow.list", () => ({})], ["follow.inbox-list", () => ({})], ["follow.get", () => ({ workspaceId: bigWs })], ["follow.workspace-about", k => ({ workspaceId: created[k % created.length].workspaceId })],
+      ["follow.priorities", () => ({})], ["follow.rank-status", () => ({})], ["follow.usage", () => ({})], ["follow.inbox-brief", k => ({ agentId: created[k % created.length].agentId })]];
+    const appBurst = burst ? { perSecond: burst[0], seconds: burst[1], startSample: 0, endSample: 0, calls: 0, failed: 0, bytes: {} } : null;
+    while (Date.now() - started < IDLE_MS) {
+      await sleep(500); idleSamples.push(await rss());
+      if (appBurst && Date.now() >= nextBurst && Date.now() < burstAt + burst[1] * 1000) {
+        if (!appBurst.startSample) appBurst.startSample = idleSamples.length;
+        appBurst.endSample = idleSamples.length;
+        while (nextBurst <= Date.now()) {
+          nextBurst += 1000 / burst[0]; const k = burstN++; const [m, input] = BURST_RPCS[k % BURST_RPCS.length]; appBurst.calls++;
+          void client.invokePluginRpc("follow-up", m, input(Math.floor(k / BURST_RPCS.length))).then(out => { const b = appBurst.bytes[m] ??= { calls: 0, maxBytes: 0, totalBytes: 0 }; const n = JSON.stringify(out ?? null).length; b.calls++; b.maxBytes = Math.max(b.maxBytes, n); b.totalBytes += n; }, () => { appBurst.failed++; });
+        }
+      }
+      if (mix && mix[0] && Date.now() >= nextTurn) { nextTurn += 60_000 / mix[0]; const a = created[turnN++ % Math.max(1, AWAKE)].agentId; void client.sendMessage(a, "Fixture: busy turn 30 8000", { messageId: `mix-${turnN}` }).catch(() => undefined); }
+      if (mix && mix[1] && Date.now() >= nextRpc) { nextRpc += 60_000 / mix[1]; const [m, input] = MIX_RPCS[rpcN++ % MIX_RPCS.length]; void client.invokePluginRpc("follow-up", m, input).catch(() => undefined); } const m = statSync(statePath).mtimeMs; if (m !== mtime) { writes++; mtime = m; } }
     const requests = ratePerMinute(requestsBefore, counter.snapshot(), "follow-up-worker", Date.now() - started);
     const cpuPct = Math.round(((await ticks()) - t0) / hz / ((Date.now() - started) / 1000) * 1000) / 10;
     // The worker's own breakdown (heap vs native), from the governor's sample in follow.usage.
@@ -206,7 +249,7 @@ try {
     const tree = new Set([daemon.pid]);
     for (let grew = true; grew;) { grew = false; for (const r of rows) if (!tree.has(r.pid) && tree.has(r.ppid)) { tree.add(r.pid); grew = true; } }
     const hostRss = rows.filter(r => tree.has(r.pid) && r.pid !== pid && /plugin-process/.test(r.args)).map(r => r.rssMb);
-    worker = { pid, memory: memoryIdle, memoryAfterGc, hostPluginBaselineMb: hostRss.length ? Math.min(...hostRss) : null, rssMb: Math.round(await rss()), idleMedianRssMb: idleVerdict(idleSamples, 0).medianMb, idlePeakRssMb: idleVerdict(idleSamples, 0).peakMb, idleSamplesMb: idleSamples.map(Math.round), lifetimePeakRssMb: Math.round(await rss("VmHWM")), cpuPct, idleSeconds: IDLE_MS / 1000, stateWrites: writes, stateBytesBefore, stateBytesAfter: statSync(statePath).size, daemonRequestsPerMin: requests };
+    worker = { pid, memory: memoryIdle, memoryAfterGc, hostPluginBaselineMb: hostRss.length ? Math.min(...hostRss) : null, rssMb: Math.round(await rss()), idleMedianRssMb: idleVerdict(idleSamples, 0).medianMb, idlePeakRssMb: idleVerdict(idleSamples, 0).peakMb, idleSamplesMb: idleSamples.map(Math.round), lifetimePeakRssMb: Math.round(await rss("VmHWM")), cpuPct, idleSeconds: IDLE_MS / 1000, ...(BUSY_MS > 0 ? { busy: { seconds: BUSY_MS / 1000, turns: busyTurns, ...busyVerdict(busySamples, 0), samplesMb: busySamples.map(Math.round) } } : {}), ...(appBurst ? { appBurst: { ...appBurst, beforeMedianMb: idleVerdict(idleSamples.slice(0, appBurst.startSample), 0).medianMb, afterMedianMb: idleVerdict(idleSamples.slice(appBurst.endSample + 60), 0).medianMb } } : {}), stateWrites: writes, stateBytesBefore, stateBytesAfter: statSync(statePath).size, daemonRequestsPerMin: requests };
   }
   tracing = false; await tracer;
   if (worker) worker.trace = { ...trace, githubRequests: github?.requests.length ?? 0 };
@@ -218,6 +261,8 @@ try {
   // The budget is the worker's lifetime peak (VmHWM), start-up tick included: 2026-11-12's spike was over before idle began.
   // The idle budget judges the window's median (a GC sawtooth's one spike decides nothing); the peak is reported.
   if (budget.idleRssMb && worker && idleVerdict(worker.idleSamplesMb, budget.idleRssMb).over) { console.error(`Worker idle RSS median ${worker.idleMedianRssMb} MB (peak ${worker.idlePeakRssMb}), over ${budget.idleRssMb} MB`); process.exitCode = 1; }
+  // The busy window's growth (2026-11-13: live stepped 315 → 405 MB under agent turns while an idle check passed).
+  if (worker?.busy && budget.busyGrowthMb && busyVerdict(worker.busy.samplesMb, budget.busyGrowthMb).over) { console.error(`Worker RSS grew ${worker.busy.growthMb} MB across the ${worker.busy.seconds} s busy window (${worker.busy.firstMb} → ${worker.busy.lastMb}), over ${budget.busyGrowthMb} MB`); process.exitCode = 1; }
   if (budget.rssMb && worker && worker.lifetimePeakRssMb > budget.rssMb) { console.error(`Worker RSS peaked at ${worker.lifetimePeakRssMb} MB (idle peak ${worker.idlePeakRssMb}), over ${budget.rssMb} MB`); process.exitCode = 1; }
   if (budget.requestsPerMin && worker && worker.daemonRequestsPerMin.total > budget.requestsPerMin) { console.error(`Worker sent ${worker.daemonRequestsPerMin.total} daemon requests/min while idle, over ${budget.requestsPerMin}: ${JSON.stringify(worker.daemonRequestsPerMin.byType)}`); process.exitCode = 1; }
   if (budget.cpuPct && worker && worker.cpuPct > budget.cpuPct) { console.error(`Worker CPU ${worker.cpuPct}% exceeds ${budget.cpuPct}% while idle`); process.exitCode = 1; }

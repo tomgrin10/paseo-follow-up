@@ -7,6 +7,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { readSharedJson } from "./shared-file";
 import { createRequire } from "node:module";
+import { TICK_MS } from "../shared/poll";
 import type { Workspace, Batch } from "../shared/model";
 import type { Gateway, Runtime } from "./engine";
 import type { State } from "../shared/model";
@@ -125,26 +126,46 @@ export async function withDaemon<T>(work: (client: Daemon) => Promise<T>): Promi
 /**
  * One daemon connection shared by everything a tick asks (one-daemon-connection-per-tick). 2026-11-12: PaseoGateway
  * opened a WebSocket per workspace per tick through withDaemon (96 a minute live, each with its own hello and status).
- * The connection closes after `idleMs` unused and is replaced after `maxMs`, so it never outlives a tick by much; it
- * is in `clients`, so closeConnections closes it within the stop's deadline, and nothing opens after stop.
+ * It is in `clients`, so closeConnections closes it within the stop's deadline, and nothing opens after stop.
+ *
+ * The connection outlives the gap between ticks (a-running-worker-holds-one-daemon-connection): it closes only after
+ * SHARED_CLIENT_IDLE_MS unused, which is the engine's TICK_MS plus a named margin, so a worker that keeps ticking
+ * holds one connection. 2026-11-13 live: with a 5 s idle close and a 60 s replacement, every 15 s tick opened a new
+ * WebSocket (the worker said hello 39 times in 12 min, each with its own handshake, status and buffers). A dropped
+ * connection is still retired at once, and SHARED_CLIENT_MAX_MS replaces a long-lived one now and then.
  */
+/** How far past one tick interval the shared connection stays open unused: a slow tick still finds it. */
+export const SHARED_CLIENT_MARGIN_MS = 10_000;
+export const SHARED_CLIENT_IDLE_MS = TICK_MS + SHARED_CLIENT_MARGIN_MS;
+export const SHARED_CLIENT_MAX_MS = 30 * 60_000;
 export type SharedConnect = (<T>(work: (client: Daemon) => Promise<T>) => Promise<T>) & { idle(): Promise<void> };
-type Shared = { client: Promise<Daemon>; opened: number; users: number; lastUsed: number; retired: boolean };
+type Shared = { client: Promise<Daemon>; opened: number; users: number; lastUsed: number; retired: boolean; timer: ReturnType<typeof setTimeout> | null };
 export function sharedDaemon(open: () => Promise<Daemon> = openDaemon, o: { idleMs?: number; maxMs?: number; now?: () => number } = {}): SharedConnect {
-  const idleMs = o.idleMs ?? 5_000, maxMs = o.maxMs ?? 60_000, now = o.now ?? Date.now;
+  const idleMs = o.idleMs ?? SHARED_CLIENT_IDLE_MS, maxMs = o.maxMs ?? SHARED_CLIENT_MAX_MS, now = o.now ?? Date.now;
   let current: Shared | null = null;
   const close = async (entry: Shared) => {
     if (current === entry) current = null;
+    if (entry.timer) { clearTimeout(entry.timer); entry.timer = null; }
     const client = await entry.client.catch(() => null);
     if (client) { clients.delete(client); await client.close().catch(() => undefined); }
   };
   const settle = (entry: Shared) => { if (entry.users === 0 && (entry.retired || now() - entry.lastUsed >= idleMs)) void close(entry); };
+  // One idle timer per connection, re-armed for what is left of the idle bound (not a timer per call).
+  const arm = (entry: Shared) => {
+    if (entry.timer) return;
+    entry.timer = setTimeout(() => {
+      entry.timer = null;
+      if (current !== entry && !entry.retired) return;
+      if (entry.users === 0 && now() - entry.lastUsed < idleMs) arm(entry); else settle(entry);
+    }, Math.max(0, idleMs - (now() - entry.lastUsed)) || idleMs);
+    (entry.timer as { unref?: () => void }).unref?.();
+  };
   const connect = (async <T>(work: (client: Daemon) => Promise<T>): Promise<T> => {
     if (stopped) throw new Error("Follow-up is stopping");
     if (current && now() - current.opened >= maxMs) { current.retired = true; const old = current; current = null; settle(old); }
     if (!current) {
       const client = open().then(c => { if (stopped) { void c.close().catch(() => undefined); throw new Error("Follow-up is stopping"); } clients.add(c); return c; });
-      const entry: Shared = { client, opened: now(), users: 0, lastUsed: now(), retired: false };
+      const entry: Shared = { client, opened: now(), users: 0, lastUsed: now(), retired: false, timer: null };
       current = entry;
       void client.catch(() => { if (current === entry) current = null; });
     }
@@ -161,7 +182,7 @@ export function sharedDaemon(open: () => Promise<Daemon> = openDaemon, o: { idle
       }
     } finally {
       entry.users--; entry.lastUsed = now();
-      if (entry.users === 0) { if (entry.retired) settle(entry); else setTimeout(() => settle(entry), idleMs).unref?.(); }
+      if (entry.users === 0) { if (entry.retired) settle(entry); else arm(entry); }
     }
   }) as SharedConnect;
   connect.idle = async () => { if (current) { const entry = current; if (entry.users === 0 && now() - entry.lastUsed >= idleMs) await close(entry); } };
