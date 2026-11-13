@@ -49,7 +49,7 @@ const title = `Reviewer concurrency fixture ${Date.now()}`;
 const w = await api.workspaces.create({ title, source: { kind: "directory", path: directory } });
 const agent = await w.agents.create({ config: { provider: "followup-fixture/fixture", model: "fixture" }, title: "Synthetic main" });
 await call("follow.activate", { workspaceId: w.id });
-await call("follow.save-reviewers", { repo: "acme/acme-poc", reviewers: [{ login: "uri-reviewer", name: "Uri" }, { login: "yuvalgoder-star", name: "Yuval" }] });
+await call("follow.save-reviewers", { repo: "acme/acme-poc", reviewers: [{ login: "uri-reviewer", name: "Omar" }, { login: "reviewer-b", name: "Lena" }] });
 for (const number of [1, 2]) await call("follow.register-pr", { agentId: agent.id, repo: "acme/acme-poc", number, stack: "Synthetic reviewer stack" });
 await call("follow.refresh", { workspaceId: w.id });
 const { chromium } = createRequire(join(process.env.SEND_TO_PASEO_SOURCE, "extension/package.json"))("playwright-core");
@@ -61,7 +61,7 @@ try {
   await page.goto(`http://127.0.0.1:${preview.port}/`);
   await page.getByRole("button", { name: new RegExp(`^${title}`) }).click();
   await page.getByRole("button", { name: "Open workspace follow-up", exact: true }).click();
-  const add = number => page.getByRole("button", { name: `Add reviewers: Uri and Yuval for acme/acme-poc pull request ${number}`, exact: true });
+  const add = number => page.getByRole("button", { name: `Add reviewers: Omar and Lena for acme/acme-poc pull request ${number}`, exact: true });
   await add(1).click();
   for (let attempt = 0; ; attempt++) {
     if (JSON.parse(await readFile(fixture, "utf8")).requests.length === 1) break;
@@ -70,7 +70,7 @@ try {
   }
   assert.equal(await add(2).isEnabled(), true, "the second PR stays actionable during the first request");
   await add(2).click();
-  await page.getByText("Requested Uri and Yuval.", { exact: true }).nth(1).waitFor();
+  await page.getByText("Requested Omar and Lena.", { exact: true }).nth(1).waitFor();
   const observed = JSON.parse(await readFile(fixture, "utf8"));
   assert.equal(observed.requests.length, 2);
   assert.ok(observed.requests[1].started < observed.requests[0].finished, "GitHub receives the second request while the first is in flight");

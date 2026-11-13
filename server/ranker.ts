@@ -130,7 +130,7 @@ export const planReplySchema = z.object({
     z.string().trim().min(1).max(300).transform(title => ({ level: "item", title, keys: title.match(/\b[A-Z][A-Z0-9]+-\d+\b/g) ?? [] })),
   ]).nullable().catch(null)).max(120).transform(items => items.filter((i): i is { level: string; title: string; keys: string[] } => !!i).slice(0, 80)),
 });
-export const PLAN_SYSTEM = "You read one Claude artifact with the Artifact tool, action \"read\" only, and summarise its planning content. Never call the Artifact tool with any other action (never publish, update, delete, comment or share). Reply with one JSON object only: {\"title\": string|null, \"items\": [{\"level\": \"initiative|project|milestone|issue\", \"title\": string, \"keys\": [Linear keys like HER-123]}]}. Focus on this week; at most 60 items. Never include share keys, links or raw HTML.";
+export const PLAN_SYSTEM = "You read one Claude artifact with the Artifact tool, action \"read\" only, and summarise its planning content. Never call the Artifact tool with any other action (never publish, update, delete, comment or share). Reply with one JSON object only: {\"title\": string|null, \"items\": [{\"level\": \"initiative|project|milestone|issue\", \"title\": string, \"keys\": [Linear keys like ACME-123]}]}. Focus on this week; at most 60 items. Never include share keys, links or raw HTML.";
 
 /** The plan reader: one Claude turn with only the Artifact tool, which Paseo's Claude provider enables with CLAUDE_CODE_ARTIFACT=1. */
 export const planArgs = (input: RunInput) => {

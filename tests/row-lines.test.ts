@@ -45,14 +45,14 @@ test("a Finished row never shows the reason ranked for its errored sibling", () 
 });
 
 test("a priority for the whole workspace shows on one row: its only row, its own row, or its main agent's", () => {
-  const legacy: Priority = { workspaceId: "w", score: 50, reason: "HER-12 due Friday", sources: [{ kind: "linear", label: "HER-12" }], at: at(2) };
+  const legacy: Priority = { workspaceId: "w", score: 50, reason: "ACME-12 due Friday", sources: [{ kind: "linear", label: "ACME-12" }], at: at(2) };
   const two = [flagged("a", "w", "error", 5), flagged("b", "w", "finished", 3)];
   const untracked = buildHome({ rows: two, tracked: [], paseo: [lite("w")], now: NOW, priorities: [legacy] });
   assert.deepEqual([lineOf(untracked, "agent:a"), lineOf(untracked, "agent:b")], [null, null], "no row to pick: no line, the score still sorts");
   const tracked = buildHome({ rows: two, tracked: [workspace({ id: "w", mainAgentId: "b", prs: [] })], paseo: [lite("w")], now: NOW, priorities: [legacy] });
-  assert.deepEqual([lineOf(tracked, "agent:a"), lineOf(tracked, "agent:b")], [null, "HER-12 due Friday"], "the main agent's row");
+  assert.deepEqual([lineOf(tracked, "agent:a"), lineOf(tracked, "agent:b")], [null, "ACME-12 due Friday"], "the main agent's row");
   const one = buildHome({ rows: [flagged("a", "w", "error", 5)], tracked: [], paseo: [lite("w")], now: NOW, priorities: [legacy] });
-  assert.equal(lineOf(one, "agent:a"), "HER-12 due Friday");
+  assert.equal(lineOf(one, "agent:a"), "ACME-12 due Friday");
   // The row it was ranked from has gone (its flag cleared): the reason described it, so no other row inherits it.
   const gone = buildHome({ rows: [flagged("b", "w", "finished", 3)], tracked: [], paseo: [lite("w")], now: NOW, priorities: [{ ...legacy, row: "agent:a" }] });
   assert.equal(lineOf(gone, "agent:b"), null);

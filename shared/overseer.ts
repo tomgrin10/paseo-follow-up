@@ -66,7 +66,7 @@ export type WorkstreamRow = {
   activity: string | null;
   activityAt: string | null;
   priority: { score: number; reason: string } | null;
-  /** Linear-style keys seen in the title, branch or PR titles (HER-1312). */
+  /** Linear-style keys seen in the title, branch or PR titles (ACME-1312). */
   keys: string[];
   /**
    * Resting: Follow-up's dormant flag, or untracked with nothing running, no open PR and no activity in the active
