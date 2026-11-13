@@ -75,20 +75,24 @@ async function setup(t: { after: (fn: () => Promise<void>) => void }, live: numb
   const mutate = store.mutate.bind(store);
   store.mutate = (work => { copies++; return mutate(work); }) as typeof store.mutate;
   /** One turn as the worker sees it (index.server.ts): its start's read, its end's read, then the agent marked dirty. */
-  const turn = async (i: number, number: number) => {
+  const start = async (i: number, number: number) => {
     const agent = agents[i]!;
     tl.add(agent.id, { type: "user_message", text: `Fixture prompt ${number}` });
     agent.status = "running"; agent.lastUserMessageAt = new Date(now).toISOString();
     await directory.turnStart!(agent.id);
+  };
+  const end = async (i: number, number: number) => {
+    const agent = agents[i]!;
     tl.add(agent.id, { type: "tool_call", status: "completed", detail: { type: "shell", command: "gh pr create --fill", output: `https://github.com/example/app/pull/${number}` } });
     tl.add(agent.id, { type: "assistant_message", text: `Opened PR ${number}` });
     agent.status = "idle"; now += 3_000;
     await directory.turnItems!(agent.id, `turn-${number}`);
     gateway.markDirty(agent.id);
   };
+  const turn = async (i: number, number: number) => { await start(i, number); await end(i, number); };
   const prs = async (id: string) => (await store.snapshot()).workspaces.find(w => w.id === id)!.prs.map(p => p.key);
   const counts = () => ({ full, copies, requests: tl.requests() });
-  return { engine, turn, prs, counts, advance: (ms: number) => { now += ms; } };
+  return { engine, turn, start, end, prs, counts, advance: (ms: number) => { now += ms; } };
 }
 
 test("a-nudge-costs-its-workspace: 20 turn-end nudges of 1 of 140 workspaces run no full discovery and copy no whole state", async t => {
@@ -119,7 +123,7 @@ test("a-nudge-costs-its-workspace: a turn that opens a PR shows it after the nud
   assert.ok(after.requests - before.requests <= 2, "and the nudge read no timeline past the turn's own two reads");
 });
 
-test("a-nudge-costs-its-workspace: the regular tick still discovers everything, including what a nudge left", async t => {
+test("a-nudge-costs-its-workspace: a nudge reads only its workspace's dirty agents; the regular tick still discovers everything", async t => {
   const { engine, turn, prs, counts, advance } = await setup(t, [0, 7]);
   await engine.tick({ background: true });
   await turn(0, 1); await turn(7, 101); await engine.tick({ background: true }); // turn cursors for both
@@ -127,14 +131,33 @@ test("a-nudge-costs-its-workspace: the regular tick still discovers everything, 
   await turn(0, 2); await engine.nudge("w0");
   assert.ok((await prs("w0")).includes("example/app#2"), "the nudged workspace shows its PR");
   assert.ok(!(await prs("w7")).includes("example/app#102"), "a nudge of w0 never discovers w7");
-  // A turn whose kept read expired: the nudge reads nothing and leaves the agent dirty for the full discovery.
+  // A turn whose kept read expired: the nudge reads that agent itself, from its cursor, and nothing else.
   await turn(0, 3); advance(130_000);
   const before = counts();
   await engine.nudge("w0");
-  assert.equal(counts().requests - before.requests, 0, "a nudge never reads the daemon's timeline");
-  assert.ok(!(await prs("w0")).includes("example/app#3"));
+  assert.equal(counts().requests - before.requests, 1, "one read of the nudged workspace's dirty agent");
+  assert.ok((await prs("w0")).includes("example/app#3"), "so its PR shows after the nudge");
+  assert.ok(!(await prs("w7")).includes("example/app#102"), "and w7 still waits for the regular tick");
   await engine.tick({ background: true });
   assert.equal(counts().full - before.full, 1, "the regular tick runs the full discovery");
   assert.ok((await prs("w7")).includes("example/app#102"), "and discovers the un-nudged workspace's PR");
-  assert.ok((await prs("w0")).includes("example/app#3"), "and the PR whose kept read had expired");
+});
+
+test("a-nudge-costs-its-workspace: after the turns end, idle ticks read no timeline: every nudge read its dirty agents", async t => {
+  const { engine, turn, start, end, prs, counts, advance } = await setup(t, [0, 3]);
+  await engine.tick({ background: true });
+  await turn(0, 1); await turn(3, 201); await engine.tick({ background: true });
+  // Busy: turns end and nudge; some agents start their next turn before the nudge lands (the kept read is gone), and one
+  // nudge comes late (the kept read expired).
+  for (let n = 2; n < 8; n++) {
+    await turn(0, n); await engine.nudge("w0"); advance(5_000);
+    await end(3, 200 + n); await start(3, 201 + n); await engine.nudge("w3"); advance(5_000);
+  }
+  await end(3, 208); advance(130_000); await engine.nudge("w3");
+  const shown = await prs("w3");
+  // Idle: ten timer ticks, 15 s apart, with no turn.
+  const before = counts();
+  for (let i = 0; i < 10; i++) { advance(15_000); await engine.tick({ background: true }); }
+  assert.equal(counts().requests - before.requests, 0, `${counts().requests - before.requests} timeline reads in the idle window (a dirty agent a nudge left behind is read here)`);
+  for (let n = 2; n <= 8; n++) assert.ok(shown.includes(`example/app#${200 + n}`), `PR ${200 + n} showed after its nudge`);
 });

@@ -346,8 +346,8 @@ export class Engine {
     this.error = null;
   }
   /**
-   * A nudge's discovery (a-nudge-costs-its-workspace): only the nudged workspaces, only their dirty agents' kept turn
-   * reads, each applied with a one-workspace mutation. 2026-11-13 (run Y, the CI live shape): every turn end's nudge ran
+   * A nudge's discovery (a-nudge-costs-its-workspace): only the nudged workspaces and their dirty agents (the kept turn
+   * read, else a read of that agent), each applied with a one-workspace mutation. 2026-11-13 (run Y, the CI live shape): every turn end's nudge ran
    * discovery over all 140 workspaces and a whole-state copy, and the burst grew V8's committed pages from 87 to 165 MB.
    * False when a nudged workspace needs the whole state (not yet saved, parked by the active-scope migration, or the
    * migration not yet run): the full discovery runs instead.

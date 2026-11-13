@@ -338,8 +338,9 @@ export class PaseoGateway implements Gateway {
    * Which workspaces Follow-up follows, from the shared directory: no daemon request unless the directory is due, a
    * parent agent is missing from it, or a loaded agent's history needs reading. `workspaceId` (Track, session start)
    * places one workspace and never reads history. `scope` (a nudge, a-nudge-costs-its-workspace) places only those
-   * workspaces and rescans only their dirty agents whose turn read is still kept (TurnTimeline.since): no daemon read.
-   * A dirty agent without a kept read stays dirty for the next full discovery.
+   * workspaces and rescans only their dirty agents: from the turn read still kept (TurnTimeline.since, no daemon read),
+   * or, when there is none (the next turn already started, or no turn cursor yet), with its own read of that agent, so
+   * nothing a nudge saw is left for the timer's tick to read later.
    */
   async discover(state: State, workspaceId?: string, scope?: { workspaces: ReadonlySet<string> }): Promise<DiscoveredWorkspace[]> {
     await this.histories.load();
@@ -390,8 +391,9 @@ export class PaseoGateway implements Gateway {
         if (!isLoaded(agent)) continue;
         const cached = this.histories.get(agent.id);
         if (scope) {
-          const kept = this.dirty.has(agent.id) && cached?.cursor && cached.history.complete && !cached.history.error ? this.turnTimeline?.since(agent.id, cached.cursor, OVERLAP) : null;
-          if (kept) scans.push({ row, agent, repo, kept });
+          if (!this.dirty.has(agent.id)) continue;
+          const kept = cached?.cursor && cached.history.complete && !cached.history.error ? this.turnTimeline?.since(agent.id, cached.cursor, OVERLAP) : null;
+          scans.push({ row, agent, repo, ...(kept ? { kept } : {}) });
           continue;
         }
         if (!cached || cached.messageAt !== agent.lastUserMessageAt || this.dirty.has(agent.id) || (cached.history.error && now >= cached.retryAt) || (["running", "initializing"].includes(agent.status) && now - cached.at >= 15_000)) scans.push({ row, agent, repo });
@@ -401,7 +403,7 @@ export class PaseoGateway implements Gateway {
     // Oldest scan first prevents busy workspaces from starving later sessions.
     scans.sort((a, b) => (this.histories.get(a.agent.id)?.at ?? 0) - (this.histories.get(b.agent.id)?.at ?? 0) || (b.agent.lastUserMessageAt ?? "").localeCompare(a.agent.lastUserMessageAt ?? ""));
     // Session opening and Track need only ownership metadata. Read transcripts in the poll.
-    // A scoped pass reads nothing: every scan it holds is a kept read, so it takes them all.
+    // A scoped pass takes all its scans: they are its workspaces' dirty agents only, most of them kept reads.
     const due = scope ? scans : scans.slice(0, workspaceId ? 0 : 4);
     const refs = new Map<string, LinkRef[]>();
     const rescan = async (client: Daemon | null, { row: dueRow, agent: listed, repo, kept }: typeof scans[number]) => {
@@ -439,8 +441,9 @@ export class PaseoGateway implements Gateway {
         this.histories.set(agent.id, { messageAt: agent.lastUserMessageAt, at, failures, retryAt: at + historyRetryDelay(failures), history, submissions, artifacts, cursor: history.error ? null : end });
         this.dirty.delete(agent.id);
     };
-    if (scope) for (const s of due) await rescan(null, s);
-    else if (due.length) await this.connect(async client => { for (const s of due) await rescan(client, s); });
+    for (const s of due.filter(s => s.kept)) await rescan(null, s);
+    const reads = due.filter(s => !s.kept);
+    if (reads.length) await this.connect(async client => { for (const s of reads) await rescan(client, s); });
     if (refs.size) try { this.linkRefs?.(refs); } catch { /* linked items are best-effort */ }
     for (const row of discovered) {
       const ids = [row.mainAgentId, ...(row.contributorAgentIds ?? [])];
