@@ -289,6 +289,12 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    that a Needs-you row, a brief or Home's Recent steps name, and the workspace tracks, links that PR (`PrLinksProvider`,
    `client/rich-text.tsx`); a brief about a PR has Open PR; `inbox_list` gives agents each row's PR urls. Guarded by
    `tests/pr-open-link.test.ts` and `INVARIANTS`.
+24. **Tracking waits for a new agent** (`tracking-waits-for-a-new-agent`). Track and session start look for a workspace
+   created a moment ago. When the directory lacks it or its agent, they re-list past the tick's agent memo
+   (`read({ fresh: "agents", force: true })`, `server/directory.ts`) and retry a bounded number of times
+   (`TRACK_RETRY_MS`, `server/daemon.ts`) before "This workspace has no available main agent". The tick's list
+   predates an agent created after it, and Paseo can list a just-created agent late. Guarded by
+   `tests/track-new-agent.test.ts`.
 
 ## Bugs
 

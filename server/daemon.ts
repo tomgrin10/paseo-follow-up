@@ -236,6 +236,8 @@ export async function sessionGuardOwnsInterruption(agentId: string, interruption
 
 const HISTORY_RETRY_MS = 15_000;
 const HISTORY_RETRY_MAX_MS = 3_600_000;
+/** Track's re-listings for an agent not listed yet, after the first: Paseo can list a just-created agent a moment late. */
+export const TRACK_RETRY_MS = [250, 750];
 export function historyRetryDelay(failures: number): number {
   return failures <= 0 ? HISTORY_RETRY_MS : Math.min(HISTORY_RETRY_MS * 2 ** (failures - 1), HISTORY_RETRY_MAX_MS);
 }
@@ -340,10 +342,18 @@ export class PaseoGateway implements Gateway {
     const now = this.now();
     const windowMs = this.windowMs = activeWindowMs(state);
     let rows = await this.directory.read();
-    // A workspace or agent created a moment ago may not be in the directory yet (its event can still be in flight):
-    // Track and session start re-read what's missing, once.
-    if (workspaceId && !rows.workspaces.some(w => w.id === workspaceId)) rows = await this.directory.read({ fresh: true });
-    else if (workspaceId && !rows.agents.some(({ agent }) => agent.workspaceId === workspaceId && !agent.archivedAt)) rows = await this.directory.read({ fresh: "agents" });
+    // tracking-waits-for-a-new-agent: a workspace or agent created a moment ago may not be listed yet. Its event can still
+    // be in flight, the tick's agent list can predate it, and under load Paseo can list it a moment late. An unknown
+    // workspace costs one full re-read (listing workspaces is the expensive call); a known one whose agent is missing
+    // re-lists agents past the tick's memo (`force`), a bounded number of times.
+    const listsIt = (r: DirectoryRows) => r.workspaces.some(w => w.id === workspaceId);
+    const hasAgent = (r: DirectoryRows) => r.agents.some(({ agent }) => agent.workspaceId === workspaceId && !agent.archivedAt);
+    if (workspaceId && !listsIt(rows)) rows = await this.directory.read({ fresh: true });
+    if (workspaceId && listsIt(rows)) for (const wait of [0, ...TRACK_RETRY_MS]) {
+      if (hasAgent(rows)) break;
+      if (wait) await new Promise(resolve => setTimeout(resolve, wait));
+      rows = await this.directory.read({ fresh: "agents", force: true });
+    }
     const { agents, workspaces, projects } = rows;
     if (this.unknownParentsFor !== rows) { this.unknownParents.clear(); this.unknownParentsFor = rows; }
     const parents = new Map<string, WorkspaceAgent | null>(agents.map(({ agent }) => [agent.id, agent]));
