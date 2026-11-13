@@ -8,6 +8,7 @@ import { createServer } from "node:net";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
 import { harness, spawnDaemon, waitUntil } from "./harness.mjs";
+import { DEFAULT_TRACKED_BASENAME } from "../shared/settings.ts";
 import { harnessEnv, harnessConfig } from "./harness-env.mjs";
 import { fakeGithub } from "./fake-github.mjs";
 await harness();
@@ -363,7 +364,7 @@ try {
   const priorReceipts = (await readFile(join(home, "fixture-receipts.jsonl"), "utf8")).trim().split("\n").length;
   const trackedPath = join(root, "acme-project"); await mkdir(trackedPath);
   await exec("git", ["init", "--initial-branch=main", trackedPath], { env });
-  await exec("git", ["-C", trackedPath, "remote", "add", "origin", "https://github.com/example/acme-poc.git"], { env });
+  await exec("git", ["-C", trackedPath, "remote", "add", "origin", `https://github.com/example/${DEFAULT_TRACKED_BASENAME}.git`], { env });
   const defaultWorkspace = await api.workspaces.create({ title: "Default-tracked workspace", source: { kind: "directory", path: trackedPath } });
   const defaultAgent = await defaultWorkspace.agents.create({ config: { provider: "followup-fixture/fixture" }, title: "Default main" });
   await call("follow.refresh", {});
