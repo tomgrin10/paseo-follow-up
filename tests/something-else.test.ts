@@ -66,8 +66,10 @@ test("validation: Something else without words is refused everywhere, and needs 
 test("every view shows a Something else answer with the words: Activity and the answer label", () => {
   const { w, q } = asked();
   developerAnswer(w, q.id, "other", "Ask finance", "send", clock);
-  const row = activity(w).find(r => r.key === `answered:${q.id}`);
-  assert.equal(row?.detail, `Answered: Something else · "Ask finance"`);
+  // Until Paseo confirms it, Activity says it's on its way (answerStatus); then Answered, words and all.
+  assert.equal(activity(w).find(r => r.key === `answered:${q.id}`)?.detail, `Sending…: Something else · "Ask finance"`);
+  w.questions.find(x => x.id === q.id)!.answer!.delivery.state = "sent";
+  assert.equal(activity(w).find(r => r.key === `answered:${q.id}`)?.detail, `Answered: Something else · "Ask finance"`);
 });
 
 // ---------- the brief card: single and multi-decision ----------
