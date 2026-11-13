@@ -267,7 +267,7 @@ test("GitHub mode: downstack merge goes in order, retargets the child after its 
     assert.deepEqual([stackBar(after).merged, stackBar(after).total], [2, 2], "the progress bar is full");
     assert.ok(headline(after).some(h => h.text === "All 2 PRs merged"), JSON.stringify(headline(after)));
     assert.ok(!needsYou(after).some(i => i.kind === "merge"), "no Merge row left");
-    assert.ok(activity(after).some(r => r.text === "Merged #1, #2"), "Activity says Merged");
+    assert.deepEqual(activity(after).filter(r => /merged|Merge/.test(r.text)).map(r => r.text).sort(), ["#1 merged", "#2 merged"], "Activity says it once per PR, never 'requested'");
     assert.deepEqual(f.calls, ["merge #1 merge a1", "retarget #2 main", "merge #2 merge b1"]);
     assert.deepEqual(f.graphiteCalls, []);
     assert.doesNotMatch(reply.result, GRAPHITE_WORDS);

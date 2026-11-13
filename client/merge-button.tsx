@@ -35,18 +35,19 @@ export function useMergeButtons(w: Workspace | undefined): MergeButtons {
   const cache = useQueryClient(); const toast = useToast();
   const [outcomes, setOutcomes] = useState<Record<string, Outcome>>({});
   const settle = (prKey: string, o: Outcome | null) => setOutcomes(all => { const next = { ...all }; if (o) next[prKey] = o; else delete next[prKey]; return next; });
-  const refresh = () => { if (w) for (const key of [["follow-up", "workspace", w.id], ["follow-up", "pr-controls", w.id], ["follow-up", "overview"]]) void cache.invalidateQueries({ queryKey: key }); };
+  const refresh = () => w ? Promise.all([["follow-up", "workspace", w.id], ["follow-up", "pr-controls", w.id], ["follow-up", "overview"]].map(key => cache.invalidateQueries({ queryKey: key }))).catch(() => undefined) : Promise.resolve();
   const merge = useMutation({
     mutationFn: ({ prKey, scope }: { prKey: string; scope: MergeScope }) => mergeClick({ prepare: key => prepare({ workspaceId: w!.id, prKey: key, kind: "merge" }), confirm: input => confirm(input) }, prKey, scope),
     onMutate: ({ prKey }) => settle(prKey, null),
-    onSuccess: (result, { prKey, scope }) => {
+    onSuccess: async (result, { prKey, scope }) => {
       settle(prKey, result);
-      // The toast and the button read one outcome (mergeWords), so they can't disagree.
+      // The header, rows and progress read the merge first (the server marked the PRs merged), then the toast says it,
+      // so the toast never shows beside a header that hasn't caught up. The toast and the button read one outcome (mergeWords).
+      await refresh();
       const said = mergeWords(scope, result).toast;
       if (said) toast.show(said.text, { variant: said.variant });
-      refresh();
     },
-    onError: (e, { prKey }) => { settle(prKey, { state: "error", result: errorText(e) }); refresh(); },
+    onError: (e, { prKey }) => { settle(prKey, { state: "error", result: errorText(e) }); void refresh(); },
   });
   const control = (prKey: string, { theme, compact, kind = "secondary", grow, disabled, fallback }: Parameters<MergeButtons>[1]): Control => {
     const c = theme.colors; const t = text(c, compact);

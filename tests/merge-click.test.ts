@@ -144,5 +144,5 @@ test("merge-click: the button and the toast read one outcome and never disagree"
   // The client shows only mergeWords' toast: no raw server result as the toast.
   const button = await readFile(join(import.meta.dirname, "../client/merge-button.tsx"), "utf8");
   assert.doesNotMatch(button, /toast\.show\(result\.result/);
-  assert.match(button, /const said = mergeWords\(scope, result\)\.toast;/);
+  assert.match(button, /await refresh\(\);\n\s+const said = mergeWords\(scope, result\)\.toast;/, "the toast waits for the header and rows to read the merge");
 });
