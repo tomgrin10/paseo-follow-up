@@ -8,7 +8,6 @@
 // The real hostname and user name are read from the environment at run time (os.hostname(), os.userInfo()).
 import { createHash } from "node:crypto";
 import { hostname, userInfo } from "node:os";
-import { DEFAULT_TRACKED_BASENAME } from "../shared/settings.ts";
 
 /** sha256 of a lowercase word token. */
 export const hashWord = word => createHash("sha256").update(word.toLowerCase()).digest("hex");
@@ -83,11 +82,8 @@ export function deniedNames(text, { machine = machineNames(), hashes = COMPANY_H
   return [...new Set(hits)];
 }
 
-/** Renders may show the default-tracked repository (Settings → Following), read from product code, never spelled here. */
-export const RENDER_ALLOW = [`example/${DEFAULT_TRACKED_BASENAME}`];
-
 /** For a render: throws when the page names the machine, its user or the company. */
 export function assertNoRealNames(text, label = "render", allow = []) {
-  const hits = deniedNames(text, { allow: [...RENDER_ALLOW, ...allow] });
+  const hits = deniedNames(text, { allow });
   if (hits.length) throw new Error(`${label} shows a real name (${hits.length} hit${hits.length > 1 ? "s" : ""}); renders use fictional names only (scripts/real-names.mjs)`);
 }
