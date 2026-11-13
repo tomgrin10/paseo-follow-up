@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useViewSync, useViewVersion } from "./view-store";
 import { ActivityIndicator, ScrollView, TextInput, View } from "react-native";
 import { Pressable, Text } from "./text";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
@@ -231,11 +232,16 @@ export const REPORT_HINT = "Or an idea or feedback. An agent writes it up and sh
 export function FollowSettings({ theme, layout, openSetup, openReport }: PluginSurfaceProps & { openSetup?: (resume?: boolean) => void; openReport?: () => void }) {
   const compact = layout.compact;
   const c = theme.colors; const t = text(c, compact);
-  const [category, setCategory] = useState<SettingsCategory>(() => readCategory());
-  // The phone reopens in the last category, like desktop; before any pick it starts on the list.
-  const [drilled, setDrilled] = useState(() => hasSavedCategory());
+  // The category comes from device storage on every render, so the first paint is the localStorage cache and the
+  // device document takes over when it loads, never the default in between.
+  useViewSync(); useViewVersion();
+  const category = readCategory();
+  // The phone reopens in the last category, like desktop; before any pick it starts on the list. Until the developer
+  // drills in or out, that follows storage too (the phone's document loads after the first paint).
+  const [chosen, setDrilled] = useState<boolean | null>(null);
+  const drilled = chosen ?? hasSavedCategory();
   const summaries = useSummaries();
-  const pick = (id: SettingsCategory) => { writeCategory(id); setCategory(id); };
+  const pick = (id: SettingsCategory) => writeCategory(id);
   // "Set up Follow-up again" leads General, the first category: what it says depends on where setup stands.
   const onboarding = useOnboarding();
   const entry = setupEntry(onboarding.data);
