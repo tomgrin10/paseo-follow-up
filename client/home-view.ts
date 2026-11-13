@@ -1,6 +1,6 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { displayFeed, homeFeed, overseerAskRpc, overseerRestartRpc, overseerStartRpc, overseerStatusRpc, prioritiesRpc, rankNowRpc, rankStatusRpc, usageRpc } from "../shared/contracts";
-import { subscribeFeed } from "./feeds";
+import { openFeed } from "./feeds";
 import type { RpcOutput } from "@getpaseo/plugin";
 import type { Priority } from "../shared/priorities";
 import { DEFAULT_SORT, isSortMode, type SortMode } from "../shared/sort";
@@ -54,70 +54,82 @@ export function createHomeExtras(client: PluginClientContext) {
   // One pending timer per poll (it used to append one per run and never drop it: about 8 a minute for an open Home).
   const timers = new Set<ReturnType<typeof setTimeout>>();
   // Nothing polls while the app is hidden; each poll runs once when it comes back (1.4.0).
-  const runs: (() => Promise<void>)[] = [];
+  const runs = new Set<() => Promise<void>>();
+  /** Polls `work` every `ms` until the returned stop is called. */
   const poll = (ms: number, work: () => Promise<boolean>) => {
-    let waiting = false;
+    let waiting = false; let off = false; let next: ReturnType<typeof setTimeout> | null = null;
     const run = async () => {
       waiting = false;
       try { if (await work()) emit(); } catch { /* keep the last answer */ }
-      if (stopped) return;
-      const next = whileVisible(ms, () => { timers.delete(next!); void run(); });
+      if (stopped || off) return;
+      next = whileVisible(ms, () => { if (next) timers.delete(next); next = null; void run(); });
       if (next) timers.add(next); else waiting = true;
     };
-    runs.push(async () => { if (waiting) await run(); });
+    const wake = async () => { if (waiting && !off) await run(); };
+    runs.add(wake);
     void run();
+    return () => { off = true; runs.delete(wake); if (next) { clearTimeout(next); timers.delete(next); next = null; } };
   };
-  let feeds: (() => void)[] = [];
   const offVisible = onVisible(() => { for (const r of runs) void r(); });
-  const pollAll = () => {
-    // Paseo 0.15. Another device or an agent (set_display) changed the order: picked up within a minute, or on return.
-    poll(PRIORITY_POLL_MS, readSort);
+  const together = (stops: (() => void)[]) => () => { for (const s of stops) s(); };
+  const readRank = async () => {
+    const next = await client.rpc(rankStatusRpc, {});
+    if (!next.running) { for (const done of rankWaiters) done(); rankWaiters.clear(); }
+    if (JSON.stringify(next) === JSON.stringify(rank)) return false;
+    rank = next; return true;
+  };
+  // Paseo 0.15, or while a feed is down. Another device or an agent (set_display) changed the order: picked up within a
+  // minute, or on return.
+  const pollSort = () => poll(PRIORITY_POLL_MS, readSort);
+  const pollHome = () => together([
     poll(PRIORITY_POLL_MS, async () => {
       const next = (await client.rpc(prioritiesRpc, {})).items;
       if (JSON.stringify(next) === JSON.stringify(priorities)) return false;
       priorities = next; return true;
-    });
+    }),
     // The ranker's last run and source health, with the priorities (the ranker runs at most hourly).
-    poll(PRIORITY_POLL_MS, async () => {
-      const next = await client.rpc(rankStatusRpc, {});
-      if (JSON.stringify(next) === JSON.stringify(rank)) return false;
-      rank = next; return true;
-    });
+    poll(PRIORITY_POLL_MS, readRank),
     poll(15_000, async () => {
       const next = await client.rpc(overseerStatusRpc, {});
       if (JSON.stringify(next) === JSON.stringify(overseer)) return false;
       overseer = next; return true;
-    });
-    pollUsage();
-  };
-  let usagePolled = false;
-  const pollUsage = () => {
-    if (usagePolled) return; usagePolled = true;
-    poll(USAGE_POLL_MS, async () => {
-      const next = await client.rpc(usageRpc, {});
-      if (JSON.stringify(next) === JSON.stringify(usage)) return false;
-      usage = next; return true;
-    });
-  };
+    }),
+    pollUsage(),
+  ]);
+  const pollUsage = () => poll(USAGE_POLL_MS, async () => {
+    const next = await client.rpc(usageRpc, {});
+    if (JSON.stringify(next) === JSON.stringify(usage)) return false;
+    usage = next; return true;
+  });
+  let homePolls: (() => void) | null = null, sortPolls: (() => void) | null = null, usagePolls: (() => void) | null = null;
   // Paseo 0.16: the worker pushes priorities, the ranker, the Overseer, the meters and the Display setting
   // (follow.home-feed, follow.display-feed); nothing polls. Opening reads the order once (it migrates this device's old
-  // choice) and the meters once, for the worker's live resources, which the feed leaves out.
-  const home = subscribeFeed(client, homeFeed, {}, event => {
-    if (stopped) return;
-    priorities = event.priorities; rank = event.rank; overseer = event.overseer;
-    if (event.usage) usage = { ...event.usage, resources: usage.resources };
-    if (!event.rank.running) { for (const done of rankWaiters) done(); rankWaiters.clear(); }
-    // Smart Session's files can't be watched: read the meters once a minute instead.
-    if (!event.usageLive) pollUsage();
-    emit();
-  }, () => { stopFeeds(); pollAll(); });
-  const display = home ? subscribeFeed(client, displayFeed, {}, doc => { if (!stopped) void sync.apply(doc).then(changed => { if (changed) emit(); }); }, () => { stopFeeds(); pollAll(); }) : null;
-  const stopFeeds = () => { for (const off of feeds) off(); feeds = []; };
-  if (home && display) {
-    feeds = [home, display];
+  // choice) and the meters once, for the worker's live resources, which the feed leaves out. A feed that goes down (the
+  // worker restarted) polls its part until it is back (client/feeds.ts).
+  const home = openFeed(client, homeFeed, {}, {
+    event: event => {
+      if (stopped) return;
+      priorities = event.priorities; rank = event.rank; overseer = event.overseer;
+      if (event.usage) usage = { ...event.usage, resources: usage.resources };
+      if (!event.rank.running) { for (const done of rankWaiters) done(); rankWaiters.clear(); }
+      // Smart Session's files can't be watched: read the meters once a minute instead.
+      if (!event.usageLive && !usagePolls) usagePolls = pollUsage();
+      if (event.usageLive && usagePolls) { usagePolls(); usagePolls = null; }
+      emit();
+    },
+    down: () => { if (usagePolls) { usagePolls(); usagePolls = null; } homePolls ??= pollHome(); },
+    up: () => { homePolls?.(); homePolls = null; },
+  });
+  const display = home ? openFeed(client, displayFeed, {}, {
+    event: doc => { if (!stopped) void sync.apply(doc).then(changed => { if (changed) emit(); }); },
+    down: () => { sortPolls ??= pollSort(); },
+    up: () => { sortPolls?.(); sortPolls = null; },
+  }) : null;
+  const stopFeeds = () => { home?.stop(); display?.stop(); for (const off of [homePolls, sortPolls, usagePolls]) off?.(); homePolls = sortPolls = usagePolls = null; };
+  if (home) {
     void readSort().then(changed => { if (changed) emit(); }).catch(() => undefined);
     void client.rpc(usageRpc, {}).then(next => { usage = { ...next, accounts: usage.accounts.length ? usage.accounts : next.accounts }; emit(); }).catch(() => undefined);
-  } else { home?.(); display?.(); pollAll(); }
+  } else { homePolls = pollHome(); sortPolls = pollSort(); }
 
   const putAgent = (a: AgentEntry["agent"]) => {
     if (!a?.id) return;
@@ -180,8 +192,7 @@ export function createHomeExtras(client: PluginClientContext) {
       await client.rpc(rankNowRpc, { force: true });
       rank = rank ? { ...rank, running: true } : rank; emit();
       let st = rank;
-      if (feeds.length) {
-        // The feed pushes the run's end with its priorities; no status loop.
+      if (home?.live) {
         // The feed pushes the run's end with its priorities; no status loop. A run that was over before the push
         // (skipped at once) is caught by one status read.
         const ended = new Promise<void>(resolve => { const t = setTimeout(() => { rankWaiters.delete(done); resolve(); }, 6 * 60_000); const done = () => { clearTimeout(t); resolve(); }; rankWaiters.add(done); });

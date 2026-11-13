@@ -2,7 +2,7 @@ import type { PluginClientContext, PluginSidebarItemContribution, PluginSurfaceP
 import { useRpc, useSettings } from "@getpaseo/plugin/client";
 import { useQuery } from "@tanstack/react-query";
 import { displayFeed, inboxListRpc, trustBypassRpc } from "../shared/contracts";
-import { subscribeFeed } from "./feeds";
+import { openFeed } from "./feeds";
 import { SettingsAction, SettingsCard, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
@@ -143,11 +143,13 @@ export function contributeDisplay(client: PluginClientContext, item: PluginSideb
   // once on return).
   let timer: ReturnType<typeof setInterval> | null = null;
   const pollDisplay = () => { if (timer) return; void refresh(); timer = setInterval(() => { if (appVisible()) void refresh(); }, 60_000); };
-  let feed = subscribeFeed(client, displayFeed, {}, doc => { generation += 1; apply(doc); }, () => { feed = null; pollDisplay(); });
+  const stopPoll = () => { if (timer) clearInterval(timer); timer = null; };
+  // The feed went down (the worker restarted): read now and poll until it is back.
+  const feed = openFeed(client, displayFeed, {}, { event: doc => { generation += 1; apply(doc); }, down: pollDisplay, up: stopPoll });
   if (!feed) pollDisplay();
-  const offVisible = onVisible(() => { if (!feed) void refresh(); });
+  const offVisible = onVisible(() => { if (!feed?.live) void refresh(); });
   return () => {
-    disposed = true; feed?.();
+    disposed = true; feed?.stop();
     if (timer) clearInterval(timer); offVisible();
     listeners.delete(update);
     sidebar.dispose();
