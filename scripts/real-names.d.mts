@@ -1,6 +1,6 @@
 export declare const hashWord: (word: string) => string;
 export declare const COMPANY_HASHES: string[];
-export declare const EXCLUDED: Record<string, string>;
+export declare const EXCLUDED: Record<string, never>;
 export declare function machineNames(env?: Record<string, string | undefined>, host?: string, user?: string): string[];
 export declare const NAME_HASHES: string[];
 export declare const TICKET_HASHES: string[];
