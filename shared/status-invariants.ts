@@ -6,7 +6,7 @@ import { BATCH_PREFIXES, RECOVERY_TITLES } from "./legacy";
 import type { Workspace } from "./model";
 import { answerMessage, awaitingSend, duplicateOpenQuestions, isOther, parseAnswerMessage, parseAnswersMessage } from "./questions";
 import { briefAnswer, briefAnswers, briefAsks, briefStep, reviewersBriefPr, shouldReopen, type Brief } from "./brief";
-import { flagHeadline, HEADLINE_WORD } from "./headline";
+import { workspaceHeadline, sayNew, repeatsRow, flagHeadline, HEADLINE_WORD } from "./headline";
 import { newEntry, prEndEvent, REASONS, reduce, type InboxRow } from "./inbox";
 import { blockedOnDeveloper, completionCheck, liveWorkingTask, summary } from "./model";
 import { asksForReviewers, liveLine, needsYou, type NeedItem } from "./attention";
@@ -299,6 +299,22 @@ export const INVARIANTS: Invariant[] = [
         const chip = prChip({ ...w, prs: [pr] });
         const said = [h && HEADLINE_WORD[h.key], h?.label, chip && [chip.label, chip.checks?.text].filter(Boolean).join(" ")];
         if (h && h.line !== HEADLINE_WORD[h.key] && said.includes(h.line)) return `#${pr.number}'s ${h.label} headline repeats "${h.line}"`;
+      }
+      // a-headline-says-only-what-is-new: not even part of it. Every headline Follow-up composes, against its own label
+      // (the pill) and, as Home shows it, against the word and the PR chip. A question or decision's line is the
+      // agent's own words, said once already, and isn't Follow-up's to reword. The chip is read only for a line that
+      // names a PR ("#N"), since only such a line can repeat it; building it re-orders the stacks
+      // (a-check-costs-linear-in-its-workspace).
+      let chip: ReturnType<typeof prChip> | undefined;
+      const chipOf = () => chip === undefined ? chip = prChip(w) : chip;
+      for (const i of needsYou(w, now)) {
+        if (i.kind === "question" || i.kind === "decision") continue;
+        const h = workspaceHeadline([i]); if (!h || h.line === HEADLINE_WORD[h.key]) continue;
+        const shown = h.line.includes("#") ? chipOf() : null;
+        const home = sayNew(h.line, { chip: shown?.label });
+        const chipText = shown && [shown.label, shown.checks?.text].filter(Boolean).join(" ");
+        const why = repeatsRow(h.line, { word: HEADLINE_WORD[h.key], label: h.label }) ?? (home === HEADLINE_WORD[h.key] ? null : repeatsRow(home, { word: HEADLINE_WORD[h.key], chip: chipText }));
+        if (why) return `${i.key}'s ${h.label} headline "${h.line}" ${why}`;
       }
       const open = w.questions.filter(q => !q.answer && !q.closed);
       if (open.length > 1 && foldedAsk("The agent's ask", open.map(q => q.id), w.questions) !== "The agent's ask") return `a brief over ${open.length} open questions is titled with one of them`;

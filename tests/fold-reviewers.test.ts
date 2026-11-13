@@ -36,7 +36,8 @@ test("one-reviewers-ask-per-pr: Follow-up's reviewers brief folds into its PR's 
   const item = items.find(i => i.kind === "reviewers")!;
   assert.equal(item.title, "Add reviewers to #240: Ravi", "the row says the suggested reviewer");
   assert.equal(item.title, row.brief!.ask, "and the brief's words, so the Home row and the panel agree");
-  assert.equal(flagHeadline(row, clock, items)?.line, item.title);
+  // Under the label "Add reviewers #240" the headline says only what's new (a-headline-says-only-what-is-new).
+  assert.equal(flagHeadline(row, clock, items)?.line, "Suggested: Ravi");
   const block = needsYouBlock(items, { questionIds: [], kind: "reviewers", prKey: "example/app#240" });
   assert.deepEqual(block.cards, [], "no brief card beside the row");
   assert.equal(block.count, 1, "one ask, counted once");

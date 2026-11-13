@@ -91,8 +91,19 @@ export function flagHeadline(row: Pick<InboxRow, "needs" | "snooze" | "brief">, 
   // A failed check or review thread headlines as the developer's action: tasks ready to send.
   const send = items.find((i): i is Extract<NeedItem, { kind: "send" }> => i.kind === "send" && !i.finish);
   if ((key === "flagged" || key === "review") && send) return { key: "repairs", label: `Send ${plural(send.tasks.length, "task")}`, line: send.title, source: "flag" };
-  // "Add reviewers #1499": the PR number is the detail, so the pill names which PR.
-  if (key === "reviewers") return { key, label: `${HEADLINE_WORD.reviewers} ${top.detail}`.trim(), line: brief && briefAsks(brief, row) ? brief.ask : `Add reviewers to ${top.detail}`, source: "flag" };
+  // "Add reviewers #1499": the PR number is the detail, so the pill names which PR. The line is only what's new:
+  // whom Follow-up suggests, else the PR's title (a-headline-says-only-what-is-new).
+  if (key === "reviewers") {
+    const label = `${HEADLINE_WORD.reviewers} ${top.detail}`.trim();
+    const item = items.find((i): i is Extract<NeedItem, { kind: "reviewers" }> => i.kind === "reviewers" && `#${i.number}` === top.detail);
+    // Without the workspace's items (the inbox list), Follow-up's own reviewers brief names whom it suggests.
+    // An agent's own ask in other words stays its ask.
+    const asks = !!brief && briefAsks(brief, row);
+    const named = asks ? /^Add reviewers to #\d+: (.+)$/i.exec(brief!.ask)?.[1] : undefined;
+    const line = item ? reviewersLine(item) : named ? `Suggested: ${named.split(" and ").join(", ")}`
+      : asks && !/^(Add reviewers to )?#\d+\b/i.test(brief!.ask) ? brief!.ask : top.title || "No reviewers yet";
+    return { key, label, line, source: "flag" };
+  }
   // say-it-once: a PR-state flag's detail ("#240 merged") is the PR chip's text, so the line names the PR by its title.
   const fact = (key === "pr_merged" || key === "pr_closed") && top.title ? top.title : top.detail;
   // a-brief-without-an-ask-never-sits-beside-needs-you: a brief that asks nothing ("No ask stated", "Nothing needed")
@@ -102,8 +113,54 @@ export function flagHeadline(row: Pick<InboxRow, "needs" | "snooze" | "brief">, 
   const speaks = !!brief && briefCardShown(brief, row, items.length) && (briefAsks(brief, row) || key === "finished");
   const line = speaks ? (brief!.source === "none" ? "No ask stated" : brief!.ask)
     : brief && items.length ? items[0].title
-    : fact || HEADLINE_WORD[key];
+    : flagFact(key, fact) || HEADLINE_WORD[key];
   return { key, label: since ? `${HEADLINE_WORD[key]} ${since}` : HEADLINE_WORD[key], line, source: "flag" };
+}
+
+/**
+ * a-headline-says-only-what-is-new: what a headline's line repeats from the row it sits in, or null. The row already
+ * shows its word ("Add reviewers"), the pill label ("Add reviewers #246") and the PR chip ("#246 running"), so a line
+ * that contains any of those words, or names a PR ref one of them shows, says it twice. Normalised: case-insensitive,
+ * punctuation ignored, an age ("4m") on the label ignored.
+ */
+export function repeatsRow(line: string, shown: { word?: string | null; label?: string | null; chip?: string | null; title?: string | null }): string | null {
+  // A hyphenated word stays one word: "auto-send" doesn't repeat "Send".
+  const norm = (x: string) => ` ${x.toLowerCase().replace(/[^\p{L}\p{N}#-]+/gu, " ").replace(/(^| )-+|-+( |$)/g, " ").trim()} `;
+  const said = norm(line);
+  for (const text of [shown.word, shown.label]) {
+    if (!text) continue;
+    const words = norm(text).trim().split(" ").filter(w => !/^\d+[smhdw]$/.test(w)).join(" ");
+    if (words && said.includes(` ${words} `)) return `repeats "${words}"`;
+  }
+  const refs = new Set([shown.label, shown.chip, shown.title].flatMap(x => x?.match(/#\d+/g) ?? []));
+  for (const ref of refs) if (new RegExp(`${ref}(?!\\d)`).test(line)) return `repeats ${ref}`;
+  return null;
+}
+
+/** A reviewers ask's new information: whom Follow-up suggests, else the PR's title. */
+const reviewersLine = (i: Extract<NeedItem, { kind: "reviewers" }>) => i.suggested.length ? `Suggested: ${i.suggested.join(", ")}` : i.detail || "No reviewers yet";
+/**
+ * A PR flag's fact without what the row already says: the word ("Review" over "2 review threads") and a failing-checks
+ * flag's PR ref ("#240 test, lint" reads "Failing: test, lint" beside the #240 chip). Home also drops any ref its chip
+ * shows (sayNew).
+ */
+function flagFact(key: HeadlineKey, fact: string): string {
+  if (key === "flagged") { const m = /^(#\d+) (.+)$/.exec(fact); if (m) return `${m[1]} failing: ${m[2]}`; }
+  if (key === "review") return fact.replace(/\breview (threads?)\b/i, "$1");
+  return fact;
+}
+
+/**
+ * The line without the PR refs its row already shows (the pill label's "#246", the chip's "#240"), with the word that
+ * tied them on ("on #240", "to #246:"): "Merge conflict to fix on #240" beside a #240 chip reads "Merge conflict to fix".
+ * A ref the row doesn't show stays: it's how the line says which PR.
+ */
+export function sayNew(line: string, shown: { label?: string | null; chip?: string | null }): string {
+  const refs = new Set([shown.label, shown.chip].flatMap(x => x?.match(/#\d+/g) ?? []));
+  let out = line;
+  for (const ref of refs) out = out.replace(new RegExp(`(?:\\s+(?:on|to|for|in|of))?\\s*${ref}(?!\\d):?`, "gi"), " ");
+  out = out.replace(/\s+/g, " ").trim().replace(/^[,:·-]\s*/, "");
+  return out === line ? line : out ? out[0].toUpperCase() + out.slice(1) : line;
 }
 
 /** The workspace's top item, used only when the agent itself isn't flagged. */
@@ -125,8 +182,9 @@ export function workspaceHeadline(items: NeedItem[]): Headline | null {
     case "answer": return top.waiting ? { key: "decision", label: "Send answer", line: top.title, source: "workspace" } : { key: "blocked", label: "Check answer", line: top.title, source: "workspace" };
     case "decision": return { key: "decision", label: "Decision", line: top.title, source: "workspace" };
     case "send": return top.finish ? { key: "finish", label: FINISH_WORD, line: FINISH_ASK[0].toUpperCase() + FINISH_ASK.slice(1), source: "workspace" } : { key: "repairs", label: `Send ${plural(top.tasks.length, "task")}`, line: top.title, source: "workspace" };
-    case "merge": return { key: "merge", label: `Merge #${top.number}`, line: top.title, source: "workspace" };
-    case "reviewers": return { key: "reviewers", label: `Add reviewers #${top.number}`, line: top.title, source: "workspace" };
+    // a-headline-says-only-what-is-new: the label names the PR, so the line is the PR's title or whom to ask.
+    case "merge": return { key: "merge", label: `Merge #${top.number}`, line: top.detail || top.title, source: "workspace" };
+    case "reviewers": return { key: "reviewers", label: `Add reviewers #${top.number}`, line: reviewersLine(top), source: "workspace" };
   }
 }
 
