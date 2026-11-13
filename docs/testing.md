@@ -84,6 +84,10 @@ they need a running `npm run preview` and read `.preview-isolated.json`. Some dr
   only with `features.backgroundAgents`, tools after a reload, host-collectable after acknowledge or failure, and the
   panel's Recovery row (`--shots <dir>`).
 - `scripts/check-project-settings.mjs`: per-project defaults.
+- `scripts/check-view-settings.mjs`: view state per device on Paseo 0.16 (`HARNESS_PASEO=0.16`) and 0.15: the settings
+  category and a fold survive a reload, the reload never paints the default category first, and on 0.16 the device
+  document `follow-up-view` holds them (migrated, no `home_sort`) (`--shots <dir>`). The phone app is a manual check
+  ([settings.md](settings.md#where-settings-live)).
 - `scripts/check-reviewers.mjs` and `scripts/check-reviewer-concurrency.mjs`: reviewer requests.
 - `scripts/check-task-triggers.mjs`: merge and deploy triggers.
 - `scripts/demo.mjs`: seeds the preview with demo data for screenshots (`node scripts/demo.mjs`, optionally
