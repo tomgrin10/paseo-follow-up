@@ -43,7 +43,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as 2.0.0-rc.0, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["needs-you-states", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link"];
+const REVIEW_SHOTS = ["needs-you-states", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click"];
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
 for (const name of only) if (![...SHOTS, ...REVIEW_SHOTS].includes(name)) fail(`unknown shot "${name}" (known: ${[...SHOTS, ...REVIEW_SHOTS].join(", ")})`);
 const scheme = arg("--scheme");
@@ -119,6 +119,12 @@ function pulls() {
     141: { title: "Add the retry schedule table", state: "MERGED", author: "dana", checks: [ok("test"), ok("lint")] },
     142: { title: "Retry failed charges with exponential backoff", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [failed("test"), ok("lint"), ok("typecheck")] },
     143: { title: "Send the dunning email after the last retry", state: "OPEN", author: "dana", base: "branch-142", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint"), ok("typecheck")] },
+    // merge-click only: a three-PR stack, every PR approved and green, so one click merges all three.
+    250: { title: "Add the export filter model", state: "OPEN", author: "dana", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint")] },
+    251: { title: "Filter exports by date range", state: "OPEN", author: "dana", base: "branch-250", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint")] },
+    252: { title: "Show export filters in the admin page", state: "OPEN", author: "dana", base: "branch-251", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint")] },
+    255: { title: "Attach PDF receipts to invoice emails", state: "OPEN", author: "dana", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint")] },
+    256: { title: "Send a weekly invoice digest", state: "OPEN", author: "dana", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint")] },
     151: { repo: "example/web", title: "Saved search filters", state: "OPEN", author: "dana", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint")] },
     247: { title: "Checkout button copy", state: "OPEN", author: "dana", conflict: true, threads: 1, reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
     160: { title: "Welcome email template", state: "OPEN", author: "dana", conflict: true, threads: 2, reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
@@ -142,6 +148,13 @@ function pulls() {
 function fakeGh(file) {
   return `#!/usr/bin/env node
 const d = JSON.parse(require("fs").readFileSync(${JSON.stringify(file)}, "utf8"));
+// gh pr merge: succeed after a beat, so the merge-click shots can catch "Merging…", and leave the PR merged, as GitHub does.
+if (process.argv[2] === "pr" && process.argv[3] === "merge") setTimeout(() => {
+  const n = Number(process.argv[4]);
+  if (d[n] && !process.argv.includes("--auto") && !process.argv.includes("--disable-auto")) { d[n].state = "MERGED"; d[n].mergedAt = new Date().toISOString(); require("fs").writeFileSync(${JSON.stringify(file)}, JSON.stringify(d)); }
+  process.exit(0);
+}, 6000);
+else {
 if (process.argv[3] !== "graphql") { console.log("[]"); process.exit(0); }
 const query = process.argv.find(a => a.startsWith("query=")) || "";
 const repository = { defaultBranchRef: { name: "main", branchProtectionRule: { requiredStatusCheckContexts: ["test", "lint"] } }, squashMergeAllowed: true, mergeCommitAllowed: false, rebaseMergeAllowed: false, autoMergeAllowed: true, viewerDefaultMergeMethod: "SQUASH", mergeQueue: null };
@@ -152,7 +165,7 @@ for (const m of query.matchAll(/(p\\d+):pullRequest\\(number:(\\d+)\\)/g)) {
   const base = p.base ?? "main";
   repository[m[1]] = { number: n, title: p.title, url: "https://github.com/" + (p.repo ?? "example/app") + "/pull/" + n, state: p.state, headRefName: "branch-" + n, headRefOid: "0f3c9a" + n, baseRefName: base,
     isDraft: !!p.draft, mergeable: p.conflict ? "CONFLICTING" : "MERGEABLE", mergeStateStatus: p.conflict ? "DIRTY" : p.draft ? "DRAFT" : "CLEAN", reviewDecision: p.changes ? "CHANGES_REQUESTED" : p.approved ? "APPROVED" : "REVIEW_REQUIRED",
-    mergedAt: p.state === "MERGED" ? "2026-03-04T08:00:00Z" : null, mergeCommit: p.state === "MERGED" ? { oid: "9a1b2c" + n } : null, isInMergeQueue: false, autoMergeRequest: null,
+    mergedAt: p.state === "MERGED" ? p.mergedAt ?? "2026-03-04T08:00:00Z" : null, mergeCommit: p.state === "MERGED" ? { oid: "9a1b2c" + n } : null, isInMergeQueue: false, autoMergeRequest: null,
     author: { login: p.author },
     reviewRequests: { pageInfo: { hasNextPage: false }, nodes: (p.reviewers ?? []).map(l => ({ requestedReviewer: user(l) })) },
     latestReviews: { pageInfo: { hasNextPage: false }, nodes: [...(p.reviewed ?? []).map(l => ({ state: "APPROVED", author: user(l) })), ...(p.changes ?? []).map(l => ({ state: "CHANGES_REQUESTED", author: user(l) }))] },
@@ -161,6 +174,7 @@ for (const m of query.matchAll(/(p\\d+):pullRequest\\(number:(\\d+)\\)/g)) {
     commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false }, nodes: p.checks ?? [] } } } }] } };
 }
 console.log(JSON.stringify({ data: { repository } }));
+}
 `;
 }
 
@@ -367,6 +381,23 @@ const REVIEW_MODE_STATES = [
       msg("Opened example/app#246; checks are running.")] },
 ];
 
+/** merge-click only (a-click-on-merge-merges): a three-PR stack, all approved, so its top PR's Merge names all three. */
+const MERGE_CLICK_STATES = [
+  { key: "mc-stack", title: "Export filters", minute: 178, prompt: "APP-198: filter invoice exports by date range in the admin page.", flag: false,
+    steps: [rpc("follow.enroll", { goal: "APP-198 Export filters" }), rpc("follow.register-pr", { repo: "example/app", number: 250, stack: "Export filters" }),
+      rpc("follow.register-pr", { repo: "example/app", number: 251, stack: "Export filters", parentNumber: 250 }),
+      rpc("follow.register-pr", { repo: "example/app", number: 252, stack: "Export filters", parentNumber: 251 }),
+      msg("Opened example/app#250, #251 and #252; all three are approved.")] },
+  // The light panel's click: one approved PR, so its done shot shows the header, row and Activity agreeing.
+  { key: "mc-receipts", title: "Receipt PDFs", minute: 179, prompt: "APP-201: attach a PDF receipt to every paid invoice email.", flag: false,
+    steps: [rpc("follow.enroll", { goal: "APP-201 Receipt PDFs" }), rpc("follow.register-pr", { repo: "example/app", number: 255, stack: "Receipt PDFs" }),
+      msg("Opened example/app#255; it's approved and green.")] },
+  // The dark phone's click: Home's detail pane drops the ask with the toast.
+  { key: "mc-digest", title: "Invoice digest", minute: 180, prompt: "APP-202: send a weekly digest of paid invoices.", flag: false,
+    steps: [rpc("follow.enroll", { goal: "APP-202 Invoice digest" }), rpc("follow.register-pr", { repo: "example/app", number: 256, stack: "Invoice digest" }),
+      msg("Opened example/app#256; it's approved and green.")] },
+];
+
 /** done-brief only (a-done-brief-is-never-an-ask): the agent's turn ends "nothing needed" while its PR's merge flags the row. */
 const DONE_BRIEF = [
   { key: "db-merged", title: "Export streaming", minute: 177, prompt: "APP-195: stream large invoice exports instead of building them in memory.",
@@ -383,7 +414,7 @@ async function seed({ call, home }) {
   for (const name of ["app", "web"]) { repos[name] = join(tmpdir(), "follow-up-shots-fixture", name); await fs.mkdir(repos[name], { recursive: true }); }
   // review-mode: someone reviews example/app, so its PR without reviewers asks for them.
   if (only.includes("review-mode") || only.includes("pr-link")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }] });
-  const specs = [...WORKSPACES, ...(only.includes("needs-you-states") ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : [])];
+  const specs = [...WORKSPACES, ...(only.includes("needs-you-states") ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") ? MERGE_CLICK_STATES : [])];
   await fs.writeFile(join(home, "fixture-scripts.json"), JSON.stringify(Object.fromEntries(specs.map(w => [w.prompt, w.steps]))));
   const workspaces = [];
   for (const spec of specs) {
@@ -550,6 +581,8 @@ function makeShooter({ browser, port, out, scheme: forced, optimiser, results, c
     if (crash) throw new Error(`the harness daemon crashed during ${name}: ${crash}`);
   };
   const shoot = guard(async (name, viewport, theme, drive, options) => { const { png, colorScheme } = await capture(name, viewport, theme, drive, options); await save(name, png, colorScheme); });
+  /** A frame taken mid-drive (merge-click's "Merging…"), saved like a shot. */
+  shoot.now = async (name, page, theme) => save(name, await page.screenshot({ animations: "disabled" }), forced ?? theme);
   /** Several captures side by side on one canvas (the phone shot: the list and a detail). */
   shoot.side = guard(async (name, theme, frames) => {
     const shots = [];
@@ -1288,6 +1321,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   if (only.includes("review-mode")) await reviewModeShots({ shoot, call });
   if (only.includes("deploy-check")) await deployCheckShots({ shoot, call });
   if (only.includes("pr-link")) await prLinkShots({ shoot, billing });
+  if (only.includes("merge-click")) await mergeClickShots({ shoot, billing });
   if (only.includes("put-in-chat")) await putInChatShots({ shoot, seeded, call, billing });
   if (only.includes("sending")) await sendingShots({ shoot, seeded, call, home });
   if (only.includes("needs-you-states")) {
@@ -1365,12 +1399,13 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   }
 }
 /**
- * pr-link (a-row-that-names-a-pr-opens-it-in-one-click): Billing's "#143 is approved" merge row and Audit log export's
+ * pr-link (a-row-that-names-a-pr-opens-it-in-one-click): Search filters' "#151 is approved" merge row and Audit log export's
  * reviewers row, each with its Open #N link; the panel on desktop, Home's detail pane on desktop and phone.
  */
 async function prLinkShots({ shoot, billing }) {
   const rows = [
-    { key: "merge", title: "Billing retries", prompt: billing.prompt, link: "Open pull request #143" },
+    // Billing's #143 sits on #142, whose checks fail, so it has no Merge row (one Merge per ready stack): Search filters' #151.
+    { key: "merge", title: "Search filters", prompt: WORKSPACES.find(w => w.key === "search").prompt, link: "Open pull request #151" },
     { key: "reviewers", title: REVIEW_MODE_STATES[0].title, prompt: REVIEW_MODE_STATES[0].prompt, link: "Open pull request #246" },
   ];
   const TALL = { width: DESKTOP.width, height: 1300 };
@@ -1383,6 +1418,51 @@ async function prLinkShots({ shoot, billing }) {
     });
     await shoot(`pl-${r.key}-home-phone-${theme}`, PHONE, theme, async page => { await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, r.title)).click(); await settle(page); });
   }
+}
+
+/**
+ * merge-click (a-click-on-merge-merges): Search filters' "#151 is approved" row before the click, while it merges
+ * (the fake gh takes 6 s) and after (the toast); Export filters' stack row, "Merge 3 PRs". The panel on desktop and
+ * Home's detail pane on phone, light and dark. A merge leaves #151 open in the fake, and Follow-up offers it again 30 s
+ * after the submit, so each theme waits that out before clicking again.
+ */
+async function mergeClickShots({ shoot, billing }) {
+  const TALL = { width: DESKTOP.width, height: 1100 };
+  const single = { title: "Search filters", prompt: WORKSPACES.find(w => w.key === "search").prompt, button: "Merge pull request #151", merged: /Merged #151/, gone: true };
+  const stackRow = { title: MERGE_CLICK_STATES[0].title, prompt: MERGE_CLICK_STATES[0].prompt, button: "Merge 3 pull requests in order: #250, #251, then #252", merged: /Merged #250, #251, then #252/, header: "3 of 3 PRs merged" };
+  const button = (page, name) => page.getByRole("button", { name, exact: true }).filter({ visible: true }).first();
+  const panel = async (page, r) => { await page.setViewportSize(TALL); await openChat(page, r.title, r.prompt); await page.getByRole("button", { name: "Follow-up", exact: true }).last().click(); await button(page, r.button).waitFor({ timeout: 60_000 }); };
+  const phone = async (page, r) => { await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, r.title)).click(); await button(page, r.button).waitFor({ timeout: 60_000 }); };
+  // Before the click: both rows, both themes, desktop panel and phone.
+  for (const theme of ["light", "dark"]) for (const [r, key] of [[single, "single"], [stackRow, "stack"]]) {
+    await shoot(`mc-${key}-panel-${theme}`, TALL, theme, page => panel(page, r));
+    await shoot(`mc-${key}-home-phone-${theme}`, PHONE, theme, page => phone(page, r));
+  }
+  // Held: Billing's #143 is approved but sits on #142, whose checks fail, so it has no Merge row; the Pull requests card
+  // and Home's detail pane say what holds it, both numbers linked.
+  const held = async page => { const line = page.getByText("#143 approved · waits on #142 (checks failing)").filter({ visible: true }).first(); await line.waitFor({ timeout: 60_000 }); await line.scrollIntoViewIfNeeded(); };
+  await shoot("mc-held-panel-light", TALL, "light", async page => { await page.setViewportSize(TALL); await openChat(page, billing.title, billing.prompt); await page.getByRole("button", { name: "Follow-up", exact: true }).last().click(); await held(page); });
+  await shoot("mc-held-home-phone-dark", PHONE, "dark", async page => { await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, billing.title)).click(); await held(page); });
+  // The click: "Merging…" while the fake gh runs, then the toast with the row gone. A submitted merge hides its row
+  // (Follow-up waits for GitHub), so each click uses its own PR: #151 on a phone in light, the stack on the panel in dark.
+  const click = (r, theme, open, size) => async page => {
+    await open(page, r); await button(page, r.button).click();
+    await page.getByText(/Merging…/).filter({ visible: true }).first().waitFor();
+    await shoot.now(`mc-merging-${size}-${theme}`, page, theme);
+    await page.getByText(r.merged).filter({ visible: true }).first().waitFor({ timeout: 90_000 });
+    // The toast shows once the header and rows read the merge (a-merge-outcome-reads-the-same-everywhere): catch the
+    // toast beside them before it closes, then the settled frame.
+    if (r.header) await page.getByRole("progressbar", { name: r.header }).filter({ visible: true }).first().waitFor({ timeout: 2_000 });
+    // Home's Needs you drops the ask with the toast (the live store holds the merge's read): no "is approved" row left.
+    if (r.gone) await page.getByText(/ is approved/).filter({ visible: true }).first().waitFor({ state: "hidden", timeout: 2_000 });
+    await shoot.now(`mc-toast-${size}-${theme}`, page, theme);
+  };
+  await shoot("mc-done-home-phone-light", PHONE, "light", click(single, "light", phone, "home-phone"));
+  await shoot("mc-done-panel-dark", TALL, "dark", click(stackRow, "dark", panel, "panel"));
+  const receipts = { title: MERGE_CLICK_STATES[1].title, prompt: MERGE_CLICK_STATES[1].prompt, button: "Merge pull request #255", merged: /Merged #255/, header: "1 of 1 PRs merged" };
+  await shoot("mc-done-panel-light", TALL, "light", click(receipts, "light", panel, "panel"));
+  const digest = { title: MERGE_CLICK_STATES[2].title, prompt: MERGE_CLICK_STATES[2].prompt, button: "Merge pull request #256", merged: /Merged #256/, gone: true };
+  await shoot("mc-done-home-phone-dark", PHONE, "dark", click(digest, "dark", phone, "home-phone"));
 }
 
 async function sendingShots({ shoot, seeded, call, home }) {

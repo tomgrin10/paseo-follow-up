@@ -17,6 +17,7 @@ import { OTHER, OTHER_LABEL, briefAnswerStatus, isOther, type Question } from ".
 import type { Workspace } from "../shared/model";
 import { SubmitScope, submitHint, text, useNow } from "./kit";
 import { PrLinksProvider, RichText } from "./rich-text";
+import { useMergeButtons } from "./merge-button";
 import { prLinksByNumber } from "../shared/presentation";
 import { cardStore } from "./card-store";
 import { PrSheet } from "./pr-sheet";
@@ -355,6 +356,7 @@ function BriefCardBody({ item, theme, layout, agentId, deps, embedded = false, s
   const cache = useQueryClient();
   const live = useQuery({ queryKey: liveBriefKey(agentId), queryFn: () => readBrief({ agentId }), enabled: row.state === "open" && !!agentId, refetchInterval: LIVE_BRIEF_POLL_MS, staleTime: 5_000 });
   const workspace = row.workspaceId ? deps.workspace(row.workspaceId) : undefined;
+  const merges = useMergeButtons(workspace);
   const checked = shownBrief(row, live.data, workspace?.questions ?? []);
   // The check itself failed (or there's no agent to ask): don't leave a dead card. The server still validates every
   // action against the stored brief, and a moot refusal reconciles, so acting on the row is safe.
@@ -429,8 +431,14 @@ function BriefCardBody({ item, theme, layout, agentId, deps, embedded = false, s
     // The pill's Undo is this toast's Undo: it closes the toast (so nothing is sent) and reopens the card.
     if (id !== null) deps.noteDone?.(agentId, () => { dismissToast(id); setMarked(null); });
   };
+  // A merge move reads what its click merges ("Merge 3 PRs"), then "Merging…".
+  const moveLabel = (m: BriefMove) => (m.kind === "merge" && m.prKey ? merges.view(m.prKey)?.label : null) ?? (busy === m.kind ? `${m.label}…` : m.label);
+  const mergeWhy = b.moves.map(m => m.kind === "merge" && m.prKey ? merges.view(m.prKey)?.why : null).find(Boolean) ?? null;
   const press = (m: BriefMove) => {
-    if ((m.kind === "merge" || m.kind === "add_reviewers") && m.prKey) { if (workspace?.prs.some(p => p.key === m.prKey)) setSheet({ key: m.prKey, intent: m.kind === "merge" ? "merge" : "reviewers" }); else if (b.workspaceId) deps.openPanel(b.workspaceId); }
+    // Merge is one click (a-click-on-merge-merges); the sheet's confirm only for a PR whose scope can't be known.
+    const one = m.kind === "merge" && m.prKey ? merges.view(m.prKey) : null;
+    if (one) one.run();
+    else if ((m.kind === "merge" || m.kind === "add_reviewers") && m.prKey) { if (workspace?.prs.some(p => p.key === m.prKey)) setSheet({ key: m.prKey, intent: m.kind === "merge" ? "merge" : "reviewers" }); else if (b.workspaceId) deps.openPanel(b.workspaceId); }
     else if (m.kind === "open_pr" && m.url) void openExternalUrl(m.url).catch(() => undefined);
     else if (m.kind === "sign_off_next") { deps.signOff(agentId); deps.openNext(agentId); }
     else if (m.kind === "retry") void run("retry", answerId => act({ agentId, briefId: b.id, move: "retry", answerId }), "Retry didn't start");
@@ -464,9 +472,10 @@ function BriefCardBody({ item, theme, layout, agentId, deps, embedded = false, s
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 10, rowGap: 8 }}>
         <RichText numberOfLines={3} tooltip={askText}
           style={{ flexGrow: 1, flexShrink: 1, flexBasis: 200, minWidth: 0, color: acts ? c.foreground : c.foregroundMuted, fontSize: 14, lineHeight: 20, fontWeight: acts ? "600" : "400" }}>{askText}</RichText>
-        {!embedded && moves.map(m => <Btn key={m.kind} label={busy === m.kind ? `${m.label}…` : m.label} icon={MOVE_ICON[m.kind]} disabled={!!busy} onPress={() => press(m)} c={c} compact={compact} hint={MOVE_HINT[m.kind]} />)}
+        {!embedded && moves.map(m => <Btn key={m.kind} label={moveLabel(m)} icon={MOVE_ICON[m.kind]} disabled={!!busy || m.kind === "merge" && !!m.prKey && !!merges.view(m.prKey)?.running} onPress={() => press(m)} c={c} compact={compact} hint={MOVE_HINT[m.kind]} />)}
       </View>
       {!!error && <Text accessibilityRole="alert" style={{ color: c.statusDanger, fontSize: 13, lineHeight: 18 }}>{error}</Text>}
+      {!!mergeWhy && <Text accessibilityRole="alert" style={{ color: c.statusWarning, fontSize: 13, lineHeight: 18 }}>{mergeWhy}</Text>}
     </View>;
   }
 
@@ -523,7 +532,7 @@ function BriefCardBody({ item, theme, layout, agentId, deps, embedded = false, s
       {multi && <SendBar b={b} picks={sendable} noted={notedCount(sendable, openNotes)} busy={busy} error={error} onSend={sendAll} c={c} compact={compact} />}
 
       {!embedded && moves.length > 0 && <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-        {moves.map((m, i) => <Btn key={m.kind} label={busy === m.kind ? `${m.label}…` : m.label} icon={MOVE_ICON[m.kind]} primary={i === 0 && !multi} disabled={!!busy} onPress={() => press(m)} c={c} compact={compact} hint={MOVE_HINT[m.kind]} />)}
+        {moves.map((m, i) => <Btn key={m.kind} label={moveLabel(m)} icon={MOVE_ICON[m.kind]} primary={i === 0 && !multi} disabled={!!busy || m.kind === "merge" && !!m.prKey && !!merges.view(m.prKey)?.running} onPress={() => press(m)} c={c} compact={compact} hint={MOVE_HINT[m.kind]} />)}
       </View>}
 
       {!!error && !multi && <Text accessibilityRole="alert" style={{ color: c.statusDanger, fontSize: 13, lineHeight: 18 }}>{error}</Text>}

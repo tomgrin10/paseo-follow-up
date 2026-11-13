@@ -207,8 +207,9 @@ These are product rules. Each has tests, and breaking one is a bug even when the
 5. **Ownership comes from the daemon.** The caller is `context.agent.id` (native tools) or `PASEO_AGENT_ID` checked
    by the daemon (bridge), never a tool argument. Unknown parent membership grants no new scope.
 6. **Nothing irreversible on its own.**
-   - Follow-up never merges, turns on merge-when-ready, requests reviewers or archives by itself. Merge re-checks
-     the stack and asks again.
+   - Follow-up never merges, turns on merge-when-ready, requests reviewers or archives by itself. The developer's
+     Merge is one click that names its whole scope first and merges exactly that at the heads it showed
+     (`a-click-on-merge-merges`, `shared/merge-click.ts`); agent tools still dry-run, then run with `confirm: true`.
    - Completion checks never auto-send.
    - Answers go out only on the developer's Send.
 7. **Unknown is not off.** An unreadable toggle or setting means the default, never "off". A seen user message
@@ -335,6 +336,12 @@ These are product rules. Each has tests, and breaking one is a bug even when the
      Before every commit, read `git diff --cached` for absolute paths and real names.
    - **Found one already?** Fix it in a commit whose message doesn't quote the value (for example "replace a real name
      with a fictional one"), and tell the developer so they can decide whether history and npm need cleaning too.
+25. **Tracking waits for a new agent** (`tracking-waits-for-a-new-agent`). Track and session start look for a workspace
+   created a moment ago. When the directory lacks it or its agent, they re-list past the tick's agent memo
+   (`read({ fresh: "agents", force: true })`, `server/directory.ts`) and retry a bounded number of times
+   (`TRACK_RETRY_MS`, `server/daemon.ts`) before "This workspace has no available main agent". The tick's list
+   predates an agent created after it, and Paseo can list a just-created agent late. Guarded by
+   `tests/track-new-agent.test.ts`.
 
 ## Bugs
 

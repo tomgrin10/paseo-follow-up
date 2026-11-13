@@ -542,6 +542,12 @@ export class Engine {
       this.arrivalChecks.delete(b.id);
     }
   }
+  /**
+   * Re-derives the workspace's queued message from its PRs as they are now, inside the caller's store write. A merge
+   * click marks its PRs MERGED at once (a-merge-outcome-reads-the-same-everywhere); without this the queued repair for
+   * a PR it just merged ("Restack #3 after #2 merged") stayed in Tasks and Needs you until the nudged tick.
+   */
+  settleTasks(w: Workspace): void { if (w.enable_tracking && !w.archived) this.reconcile(w); }
   private reconcile(w: Workspace): void {
     const tasks = tasksFor(w, this.now(), this.wording);
     // Hysteresis: a queued Done check survives the agent's own turns; only a real change (new work, Done) ends it.
