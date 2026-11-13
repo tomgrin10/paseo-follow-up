@@ -46,6 +46,12 @@
   - **Recovery agents:** a separate agent that reads history for missed PRs and tasks, and never edits code.
     `server/recovery-config.ts` applies Settings → Agents' recovery role; `server/recovery-handoff.ts` proves a
     handoff without reading timelines.
+    On a host that advertises `features.backgroundAgents` (Paseo 0.16) it is created `background: true`
+    (`withBackground` in `server/daemon.ts`): no tab, no notification, no sidebar row; its batch shows in the panel.
+    Follow-up skips background agents at `agent.session_open`, except the one its own record names as a recovery
+    recipient (`recordedRecoveryAgent` in `server/tasks.ts`, never labels), so it keeps its tools on every session.
+    No plugin API releases an agent by id, so "unloads" means host-collectable: a settled batch leaves nothing that
+    vetoes Paseo's idle-runtime cleanup (`recoveryCollectable`). Paseo 0.15 creates it exactly as before.
 - **The PR owner.** `server/pr-owner.ts` records the latest explicit registering agent on each PR. Legacy
   registrations keep their workspace main. Duplicate claims are ambiguous: never route by recency or by title.
 
