@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { browserKey, liveBriefKey, LIVE_BRIEF_POLL_MS, workspaceKey } from "./keys";
 import { Platform, View, useWindowDimensions } from "react-native";
 import { Pressable, Text } from "./text";
@@ -16,7 +16,8 @@ import { errorText, mootNote } from "../shared/errors";
 import { OTHER, OTHER_LABEL, isOther } from "../shared/questions";
 import type { Workspace } from "../shared/model";
 import { SubmitScope, submitHint, text, useNow } from "./kit";
-import { RichText } from "./rich-text";
+import { PrLinksProvider, RichText } from "./rich-text";
+import { prLinksByNumber } from "../shared/presentation";
 import { cardStore } from "./card-store";
 import { PrSheet } from "./pr-sheet";
 import { isLight, withAlpha, type Colors } from "./theme";
@@ -334,7 +335,15 @@ function Past({ b, c, now, compact, height, pending = false, onResend, resending
 /** `embedded`: inside Home's detail pane, which has its own reply box and action bar, so the card drops its moves. */
 /** `snoozed`: the row is in Later, so the card wears the row's muted tone and says "Later" instead of "Needs you". */
 /** `bare`: a section of the Needs you block (client/needs-you.tsx), whose frame says "Needs you": no border, margin or second label. */
-export function BriefCard({ item, theme, layout, agentId, deps, embedded = false, snoozed = false, bare = false }: PluginTimelineItemProps<Brief> & { deps: BriefDeps; embedded?: boolean; snoozed?: boolean; bare?: boolean }) {
+type BriefCardProps = PluginTimelineItemProps<Brief> & { deps: BriefDeps; embedded?: boolean; snoozed?: boolean; bare?: boolean };
+/** A brief names its PRs ("#240 is merged"): each "#N" its workspace tracks opens that PR (a-row-that-names-a-pr-opens-it-in-one-click). */
+export function BriefCard(props: BriefCardProps) {
+  const workspace = props.item.data.workspaceId ? props.deps.workspace(props.item.data.workspaceId) : undefined;
+  const prs = useMemo(() => workspace ? prLinksByNumber(workspace.prs) : undefined, [workspace?.prs]);
+  return <PrLinksProvider prs={prs}><BriefCardBody {...props} /></PrLinksProvider>;
+}
+
+function BriefCardBody({ item, theme, layout, agentId, deps, embedded = false, snoozed = false, bare = false }: BriefCardProps) {
   const c = theme.colors; const row = item.data; const compact = layout.compact;
   // The row is a snapshot; the live brief decides (shownBrief). Only a row that still looks open asks, one query per
   // agent for every card in its chat. A card is actionable only when the server says this exact brief is open.

@@ -1,3 +1,4 @@
+import { prLink } from "../shared/presentation";
 import { DEVELOPER, ledgerBy, onBehalfLine, type Actor } from "../shared/actor";
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -1101,7 +1102,7 @@ export function followUpEvents(follow: FollowState, enablePrClosed: boolean): { 
         // Reviewers are the developer's job, and don't wait for threads or CI. Skipped only while a reviewer request
         // or merge is already in flight for this PR (so a second request isn't asked for while GitHub catches up).
         if (asksForReviewers(pr, w))
-          events.push({ agentId, event: { type: "reviewers", dedupeKey: `${pr.key}:reviewers`, detail: `#${pr.number}`, prKey: pr.key, url: s.url ?? null,
+          events.push({ agentId, event: { type: "reviewers", dedupeKey: `${pr.key}:reviewers`, detail: `#${pr.number}`, prKey: pr.key, url: prLink(pr).url,
             names: withoutAuthor(configuredReviewers(pr.repo), s.reviewers?.author).map(reviewerLabel) } });
       } else if (enablePrClosed) {
         const event = prEndEvent(pr);

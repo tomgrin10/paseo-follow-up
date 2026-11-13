@@ -1,3 +1,4 @@
+import { prLink } from "./presentation";
 import { z } from "zod";
 import type { Pr, Workspace } from "./model";
 import { agentMergesKey } from "./pr-workflow";
@@ -231,6 +232,7 @@ export function pickBrief(s: BriefSources): BriefContent {
       moves: [move("retry", "Retry the turn"), move("copy_error", "Copy error")], sourceLine: "From the failed turn." };
   }
   if (s.agent) {
+    const openPr = (pr: { key: string; url?: string | null } | null) => pr?.url ? [move("open_pr", "Open PR", { url: pr.url, prKey: pr.key })] : [];
     const a = fromAgent(s.agent);
     // F7: "Nothing needed" doesn't flag, so it has nothing to sign off, and shows no PR state.
     const pr = a.kind === "done" ? null : subjectPr(s, a.kind, a.links);
@@ -238,8 +240,9 @@ export function pickBrief(s: BriefSources): BriefContent {
     const moves: BriefMove[] = a.kind === "done" ? []
       : a.kind === "review" && pr ? [...(pr.mergeable ? [move("merge", `Squash & merge #${pr.number}`, { prKey: pr.key })] : []), ...(pr.url ? [move("open_pr", "Open PR", { url: pr.url, prKey: pr.key })] : [])]
       // An Action is something the developer does elsewhere; Done tells the agent in one tap ("Done: <ask>").
-      : a.kind === "action" ? [move("done", "Done")]
-      : [];
+      : a.kind === "action" ? [move("done", "Done"), ...openPr(pr)]
+      // A decision or question about a PR still opens it in one click (a-row-that-names-a-pr-opens-it-in-one-click).
+      : openPr(pr);
     return { ...base, ...a, source: "agent", slim: false, facts, factsPr: facts.length ? pr!.key : null, moves,
       sourceLine: facts.length ? "Stated by the agent. PR, CI and review state from Follow-up." : AGENT_LINE };
   }
@@ -354,7 +357,7 @@ function prFactsOf(pr: Pr, event: string | null): PrState {
     : { icon: approved ? "UserCheck" : "User", label: approved ? "Approved · no conflicts" : "Review required", tone: approved ? "ok" : "muted" });
   if (s.draft) facts.push({ icon: "FilePen", label: "Draft", tone: "muted" });
   const mergeable = !s.draft && !s.conflict && !s.failedChecks.length && !s.checksPending && approved && !s.threads.length;
-  return { key: pr.key, number: pr.number, url: s.url || null, title: s.title, facts, mergeable, event };
+  return { key: pr.key, number: pr.number, url: prLink(pr).url, title: s.title, facts, mergeable, event };
 }
 
 // ---------- lifecycle (§6) ----------
