@@ -1,0 +1,1 @@
+- A pull request without reviewers asks once in Needs you, naming the suggested reviewer ("Add reviewers to … : Ravi"), instead of a second reviewers card beside it.
