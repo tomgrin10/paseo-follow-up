@@ -19,7 +19,7 @@ const IMAGE_ACCEPT = "application/vnd.oci.image.manifest.v1+json, application/vn
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 
 /** Messages this probe throws itself. Anything else (gcloud, gh, fetch) is summarized so no transport detail leaks. */
-const OWN_REASONS = new Set(["Deployment image unavailable", "Deployment image metadata exceeds the read limit", "Serving image must have an immutable production digest", "Serving image config unavailable", "Serving source revision is unknown", "Production service catalog incomplete", "Production traffic is not ready", "Serving revision unavailable", "Serving revision is not ready", "Production services unavailable"]);
+const OWN_REASONS = new Set(["Deployment image unavailable", "Deployment image metadata exceeds the read limit", "Serving image must have an immutable production digest", "Serving image config unavailable", "Serving source revision is unknown", "Production service catalog incomplete", "Production traffic is not ready", "Serving revision unavailable", "Serving revision is not ready", "Production services unavailable", "Production services exceed the read limit", "Serving revision exceeds the read limit"]);
 export function probeReason(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
   if (OWN_REASONS.has(message)) return message;
@@ -59,9 +59,10 @@ export class Deployments {
   }
   /**
    * One authorized JSON read (the registry and Cloud Run), each under READ_TIMEOUT_MS. A 401/403 drops the cached
-   * token and retries once with a fresh one; any other failure throws `failure` (no transport detail).
+   * token and retries once with a fresh one; any other failure throws `failure`, and a body over `limit` throws
+   * `tooLarge`: each caller names what it read, with no transport detail.
    */
-  private async json(url: string, failure: string, o: { accept?: string; limit?: number } = {}): Promise<Node> {
+  private async json(url: string, failure: string, o: { tooLarge: string; accept?: string; limit?: number }): Promise<Node> {
     for (let attempt = 0; ; attempt++) {
       const token = await this.accessToken();
       const abort = new AbortController(); const timeout = setTimeout(() => abort.abort(), READ_TIMEOUT_MS);
@@ -72,7 +73,7 @@ export class Deployments {
         if (!response.ok) throw new Error(failure);
         body = await response.text();
       } finally { clearTimeout(timeout); }
-      if (body.length > (o.limit ?? 1_000_000)) throw new Error("Deployment image metadata exceeds the read limit");
+      if (body.length > (o.limit ?? 1_000_000)) throw new Error(o.tooLarge);
       return JSON.parse(body);
     }
   }
@@ -89,9 +90,9 @@ export class Deployments {
       if (!match) throw new Error("Serving image must have an immutable production digest");
       // FOLLOW_UP_DEPLOY_REGISTRY points harness runs (scripts/poll-cost.mjs) at a fake registry.
       const base = `${(process.env.FOLLOW_UP_DEPLOY_REGISTRY || `https://${deploy.registry}`).replace(/\/$/, "")}/v2/${match[1]}`;
-      const manifest = await this.json(`${base}/manifests/${match[2]}`, "Deployment image unavailable", { accept: IMAGE_ACCEPT });
+      const manifest = await this.json(`${base}/manifests/${match[2]}`, "Deployment image unavailable", { tooLarge: "Deployment image metadata exceeds the read limit", accept: IMAGE_ACCEPT });
       if (!/^sha256:[a-f0-9]{64}$/.test(manifest.config?.digest)) throw new Error("Serving image config unavailable");
-      const config = (await this.json(`${base}/blobs/${manifest.config.digest}`, "Deployment image unavailable", { accept: IMAGE_ACCEPT })).config;
+      const config = (await this.json(`${base}/blobs/${manifest.config.digest}`, "Deployment image unavailable", { tooLarge: "Deployment image metadata exceeds the read limit", accept: IMAGE_ACCEPT })).config;
       const revision = config?.Labels?.["org.opencontainers.image.revision"];
       const baked = (config?.Env ?? []).find((v: string) => (deploy.buildShaEnv && v.startsWith(`${deploy.buildShaEnv}=`)) || v.startsWith("GIT_SHA="))?.split("=")[1];
       if (!sha.test(revision ?? baked ?? "") || (revision && baked && revision !== baked)) throw new Error("Serving source revision is unknown");
@@ -109,7 +110,7 @@ export class Deployments {
     const key = `${config.gcpProject}/${region}/${name}`; const cached = this.revisions.get(key); if (cached) return cached;
     const work = (async () => {
       if (!/^[a-z0-9-]+$/.test(region)) throw new Error("Serving revision unavailable");
-      const revision = await this.json(this.runUrl(region, `namespaces/${encodeURIComponent(config.gcpProject)}/revisions/${encodeURIComponent(name)}`), "Serving revision unavailable");
+      const revision = await this.json(this.runUrl(region, `namespaces/${encodeURIComponent(config.gcpProject)}/revisions/${encodeURIComponent(name)}`), "Serving revision unavailable", { tooLarge: "Serving revision exceeds the read limit" });
       if (!revision.status?.conditions?.some((c: Node) => c.type === "Ready" && c.status === "True")) throw new Error("Serving revision is not ready");
       const image = revision.spec?.containers?.find((c: Node) => c.name === "app")?.image;
       return this.imageCommit(image ?? "", config);
@@ -122,7 +123,7 @@ export class Deployments {
     // --filter` was. 2026-11-13 live: that list spawned gcloud ~0.8 times a minute, ~1 s CPU and ~97 MB each.
     const services: Node[] = []; let next = "";
     for (let page = 0; page < 20; page++) {
-      const list = await this.json(this.runUrl(null, `namespaces/${encodeURIComponent(config.gcpProject)}/services?labelSelector=${encodeURIComponent(config.serviceLabel)}${next ? `&continue=${encodeURIComponent(next)}` : ""}`), "Production services unavailable", { limit: 4 * 1024 * 1024 });
+      const list = await this.json(this.runUrl(null, `namespaces/${encodeURIComponent(config.gcpProject)}/services?labelSelector=${encodeURIComponent(config.serviceLabel)}${next ? `&continue=${encodeURIComponent(next)}` : ""}`), "Production services unavailable", { tooLarge: "Production services exceed the read limit", limit: 4 * 1024 * 1024 });
       services.push(...(Array.isArray(list.items) ? list.items : []));
       next = typeof list.metadata?.continue === "string" ? list.metadata.continue : "";
       if (!next) break;

@@ -11,7 +11,7 @@ import { ACME_DEPLOY, clock, pr, snapshot, workspace } from "./fixtures";
 const ACME: DeployConfig = ACME_DEPLOY;
 const merged = "a".repeat(40), current = "b".repeat(40), old = "c".repeat(40);
 function fixture() {
-  let now = clock, configured = true, failure = false, missing = false, ready = true, rollback = false, split = false, denied = 0;
+  let now = clock, configured = true, failure = false, missing = false, ready = true, rollback = false, split = false, denied = 0, huge = "";
   const calls: string[] = [];
   const run = async (command: string, args: string[]) => {
     calls.push(`${command} ${args.slice(0, 3).join(" ")}`);
@@ -32,11 +32,12 @@ function fixture() {
     if (failure) throw new Error("private transport details");
     assert.equal(init.headers.Authorization, "Bearer private-fixture-access-token");
     if (denied > 0) { denied--; return { ok: false, status: 401, text: async () => "" }; }
+    if (huge && url.includes(huge)) return { ok: true, status: 200, text: async () => " ".repeat(5 * 1024 * 1024) };
     return { ok: true, status: 200, text: async () => JSON.stringify(answer(url)) };
   }) as any;
   const adapter = new Deployments(run, request, () => now, { rest: async (_repo: string, path: string) => JSON.parse(await run("gh", ["api", path])) }, repo => configured && repo === "acme/acme-poc" ? ACME : undefined);
   const target = pr({ repo: "acme/acme-poc", key: "acme/acme-poc#1", snapshot: snapshot({ state: "MERGED", head: "unmerged-head-not-in-history", mergeCommit: merged }) });
-  return { adapter, target, calls, failure: () => { failure = true; }, heal: () => { failure = false; }, wait: (ms: number) => { now += ms; }, missing: () => { missing = true; }, unready: () => { ready = false; }, rollback: () => { rollback = true; }, split: () => { split = true; }, advance: () => { now += 61_000; }, unconfigure: () => { configured = false; }, configure: () => { configured = true; }, deny: (n: number) => { denied = n; } };
+  return { adapter, target, calls, failure: () => { failure = true; }, heal: () => { failure = false; }, wait: (ms: number) => { now += ms; }, missing: () => { missing = true; }, unready: () => { ready = false; }, rollback: () => { rollback = true; }, split: () => { split = true; }, advance: () => { now += 61_000; }, unconfigure: () => { configured = false; }, configure: () => { configured = true; }, deny: (n: number) => { denied = n; }, huge: (part: string) => { huge = part; } };
 }
 test("deployment follows the squash merge commit into actual serving images, and caches fleet reads", async () => {
   const f = fixture(); const result = (await f.adapter.observe([f.target])).get(f.target.key)!;
@@ -65,6 +66,12 @@ test("a 401/403 drops the token and retries once; a second refusal fails without
   const value = (await g.adapter.observe([g.target])).get(g.target.key)!;
   assert.equal(value.state, "unknown"); assert.equal(g.adapter.lastError, "Production services unavailable");
   assert.equal(g.calls.filter(c => c.includes("/services?")).length, 2, "exactly one retry");
+});
+test("an oversized read names what was read, never another source's limit", async () => {
+  for (const [part, reason] of [["/services?", "Production services exceed the read limit"], ["/revisions/", "Serving revision exceeds the read limit"], ["/manifests/", "Deployment image metadata exceeds the read limit"]] as const) {
+    const f = fixture(); f.huge(part);
+    assert.equal((await f.adapter.observe([f.target])).get(f.target.key)?.state, "unknown"); assert.equal(f.adapter.lastError, reason);
+  }
 });
 test("every Cloud Run and registry read is aborted after READ_TIMEOUT_MS", async () => {
   let signal: AbortSignal | undefined;
