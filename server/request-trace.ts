@@ -15,10 +15,12 @@ export function traceDaemon<T extends object>(client: T, file = process.env.FOLL
       const value = Reflect.get(target, key, receiver);
       if (typeof value !== "function" || typeof key !== "string" || key === "connect" || key === "close" || key.startsWith("_")) return value;
       return function (this: unknown, ...args: unknown[]) {
+        // The plugin itself may be installed under a node_modules path, so only the client's and node's own frames go.
         const frames = (new Error().stack ?? "").split("\n").slice(2).map(l => l.trim().replace(/^at /, ""))
-          .filter(l => !/node:internal|node_modules|request-trace\.[jt]s/.test(l)).slice(0, 5)
+          .filter(l => !/node:internal|@getpaseo|request-trace\.[jt]s|^new Promise|^async Promise\.all/.test(l)).slice(0, 5)
           .map(l => l.replace(/\(?(?:file:\/\/)?\/[^)]*\/([^/)]+:\d+):\d+\)?$/, "$1"));
-        try { appendFileSync(file, JSON.stringify({ t: Date.now(), pid: process.pid, method: key, caller: frames.join(" < ") }) + "\n"); } catch { /* tracing never breaks a call */ }
+        // A call with no worker frame is the client calling itself (reconnects, its own bookkeeping): not a request.
+        if (frames.length) try { appendFileSync(file, JSON.stringify({ t: Date.now(), pid: process.pid, method: key, caller: frames.join(" < ") }) + "\n"); } catch { /* tracing never breaks a call */ }
         return value.apply(this === receiver ? target : this, args);
       };
     },
