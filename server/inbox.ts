@@ -13,7 +13,7 @@ import { configuredReviewers, reviewerLabel, withoutAuthor } from "../shared/rev
 import { classify, finishedReply, turnPrompt, type Sources } from "./inbox-classifier";
 import { STALE_BRIEF } from "../shared/errors";
 import type { Question } from "../shared/questions";
-import { briefAnswer, briefAnswers, briefOrigin, briefQuestionsEvent, briefStep, pickBrief, shouldReopen, validPick, type Brief, type BriefEvent, type BriefKind, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
+import { briefAnswer, briefAsks, briefAnswers, briefOrigin, briefQuestionsEvent, briefStep, pickBrief, shouldReopen, validPick, type Brief, type BriefEvent, type BriefKind, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
 import { OTHER_LABEL, isOther } from "../shared/questions";
 // The brief answer texts live with the brief (shared, so the status invariants build the same message).
 export { briefAnswer, briefAnswers } from "../shared/brief";
@@ -311,8 +311,9 @@ export class Inbox {
     return (_prev, next, at) => {
       const flagged = !!reason && !!next.needs?.reasons.some(r => r.reason === reason && r.at === at) && !next.goneAt;
       if (!flagged && !(keepUnflagged && picked.source === "agent")) return null;
-      // F7: a quiet finish never replaces an older ask that still needs the developer; its card stays.
-      if (quiet && next.needs && next.brief?.state === "open" && next.brief.flagged) return null;
+      // F7: a quiet finish never replaces an older ask that still needs the developer; its card stays. An older brief
+      // that asks nothing ("No ask stated", an earlier done) is replaced: the newest brief decides (newest-brief-decides).
+      if (quiet && next.needs && next.brief?.state === "open" && next.brief.flagged && briefAsks(next.brief, next)) return null;
       return { type: "create", id: `brief:${turnId ?? at}${suffix}`, turnId, content: picked, flagged, seq: next.seq, questionIds, workspaceId };
     };
   }
@@ -382,7 +383,7 @@ export class Inbox {
       const quiet = finishIsQuiet(stated.agent?.kind ?? null, status);
       // The ask replaces the reply's last line as the reason's detail (§4); the fallback keeps the old detail.
       const brief = await this.creator(root.rootId, turnId, "", "finished", stated, !quiet || stated.agent?.kind === "done", quiet);
-      await this.apply([{ agentId: root.rootId, event: { type: "turn_end", outcome: "completed", detail: reply?.text ? lastLine(reply.text) : "", delegated: root.delegated, quiet }, brief }]);
+      await this.apply([{ agentId: root.rootId, event: { type: "turn_end", outcome: "completed", detail: reply?.text ? lastLine(reply.text) : "", delegated: root.delegated, quiet, ...(stated.agent?.kind === "done" ? { done: true } : {}) }, brief }]);
     } else if (outcome.kind === "failed") {
       const message = outcome.error.message || "Turn failed";
       await this.apply([{ agentId: root.rootId, event: { type: "turn_end", outcome: "failed", detail: one(message) }, brief: await this.creator(root.rootId, turnId, "", "error", { ...stated, error: { message } }) }]);

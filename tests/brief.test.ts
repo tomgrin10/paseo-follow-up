@@ -626,6 +626,32 @@ test("F7 (3): a turn without needs_you on an idle agent still flags as finished"
   assert.equal(e.brief?.source, "none");
   await s.done();
 });
+test("newest-brief-decides: an agent's done resolves its older \"No ask stated\" finish, flag and card", async () => {
+  // beta.4 live: turn -47 ended without needs_you (source none, "No ask stated"); turns -48..-63 each said kind=done,
+  // and the stale card stayed the row's open, flagged ask for hours.
+  const s = await service([agent({ id: "main", status: "idle" })]);
+  await s.inbox.turnStarted(main, "t1");
+  await s.inbox.turnEnded(main, { kind: "completed" }, "t1");
+  const stored = await s.entry();
+  assert.deepEqual(stored.needs?.reasons.map(r => r.reason), ["finished"]); assert.equal(stored.brief?.source, "none");
+  // A PR flag raised meanwhile is its own fact and stays.
+  const before = structuredClone(stored);
+  before.needs!.reasons.push({ reason: "pr_merged", at: at(2), detail: "#240 merged", dedupeKey: "pr_merged" });
+  const later = await service([agent({ id: "main", status: "idle" })], { calls: { main: { at: Date.parse(at(3)), turnId: "t2", call: doneCall } } });
+  await later.inbox.store.mutate(st => { st.entries.main = before; });
+  await later.inbox.turnStarted(main, "t2");
+  await later.inbox.turnEnded(main, { kind: "completed" }, "t2");
+  const after = await later.entry();
+  assert.deepEqual(after.needs?.reasons.map(r => r.reason), ["pr_merged"], "the stale finish flag is resolved; the merge stays");
+  assert.equal(after.brief?.kind, "done", "the newest brief decides"); assert.equal(after.brief?.source, "agent");
+  // With nothing else flagged, the row leaves Needs you.
+  const alone = await service([agent({ id: "main", status: "idle" })], { calls: { main: { at: Date.parse(at(3)), turnId: "t2", call: doneCall } } });
+  await alone.inbox.store.mutate(st => { st.entries.main = { ...before, needs: { ...before.needs!, reasons: before.needs!.reasons.filter(r => r.reason === "finished") } }; });
+  await alone.inbox.turnStarted(main, "t2");
+  await alone.inbox.turnEnded(main, { kind: "completed" }, "t2");
+  assert.equal((await alone.entry()).needs, null);
+  await s.done(); await later.done(); await alone.done();
+});
 test("F7: finishIsQuiet covers done, running and the unknown case", () => {
   assert.equal(finishIsQuiet("done", "idle"), true);
   assert.equal(finishIsQuiet("done", "running"), true);

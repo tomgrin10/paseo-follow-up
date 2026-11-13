@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { briefSchema, BRIEF_KINDS, BRIEF_SOURCES, BRIEF_STATES, reviewersBriefPr, reviewersBriefWithdrawn } from "./brief";
+import { briefAsks, briefSchema, BRIEF_KINDS, BRIEF_SOURCES, BRIEF_STATES, reviewersBriefPr, reviewersBriefWithdrawn } from "./brief";
 export { reviewersBriefPr, reviewersBriefWithdrawn };
 import { agentMerges, agentMergesKey } from "./pr-workflow";
 
@@ -103,7 +103,9 @@ export const emptyInbox = (): InboxState => inboxStateSchema.parse({ version: 1 
 export type InboxEvent =
   | { type: "turn_end"; outcome: "completed"; detail: string; delegated?: boolean;
       /** F7: the agent said there is nothing for the developer (needs_you kind=done), or Paseo still shows it running. No finish flag. */
-      quiet?: boolean }
+      quiet?: boolean;
+      /** newest-brief-decides: the agent said so itself (needs_you kind=done), not only a still-running turn. */
+      done?: boolean }
   | { type: "turn_end"; outcome: "failed"; detail: string }
   | { type: "turn_end"; outcome: "canceled"; guard: "attention" | "waiting" | null; detail: string }
   | { type: "message"; from: "tom" | "automation" }
@@ -258,6 +260,20 @@ export function withoutRunState(needs: Needs | null, before?: string): Needs | n
  * Apply one event to one agent's entry (design §2.3). Returns the next entry; the input is not mutated.
  * Throws StaleSignOff when a sign-off carries a seq that moved, so an offline replay never clears newer news.
  */
+/**
+ * newest-brief-decides (2026-11-13, beta.4 live): an agent's turn said nothing (source none, "No ask stated"), and
+ * every later turn said needs_you kind=done, yet the old finish flag and its brief stayed open for hours: a quiet
+ * finish kept any older open flag, and only a message from the developer clears needs. The agent's own done resolves
+ * an older "finished" flag unless its brief is still a live ask (an unanswered decision, action or review).
+ */
+function resolveStaleFinish(e: Entry): void {
+  if (!e.needs || briefAsks(e.brief, e)) return;
+  const reasons = e.needs.reasons.filter(r => r.reason !== "finished");
+  if (reasons.length === e.needs.reasons.length) return;
+  e.needs = reasons.length ? { ...e.needs, reasons } : null;
+  if (!e.needs) e.snooze = null;
+}
+
 export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
   const e: Entry = structuredClone(prev);
   const before = JSON.stringify(e);
@@ -274,8 +290,9 @@ export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
       if (event.outcome === "completed") {
         // #1, #1b. D2 mute absorbs one finish; "Don't flag finishes" and D3 delegated agents skip it.
         if (e.muteTurn) { e.muteTurn = false; break; }
-        // F7: "Nothing needed" and still-running turns add nothing. An older open flag stays as it was.
-        if (event.quiet) break;
+        // F7: "Nothing needed" and still-running turns add nothing. An older ask the developer hasn't answered stays.
+        // newest-brief-decides: an older finish that asked nothing ("No ask stated") is resolved by the agent's done.
+        if (event.quiet) { if (event.done) resolveStaleFinish(e); break; }
         if (!e.enable_finish_flags) break;
         if (event.delegated && !e.lastTomMessageAt) break;
         flag("finished", event.detail, "finished");
