@@ -303,7 +303,8 @@ card beside a question list.
   (case and punctuation ignored, the label's age dropped, a hyphenated word kept whole) or a PR ref the label or chip
   shows. So Add reviewers reads "Suggested: Ravi" (else the PR's title) under "Add reviewers #246", a merge row's line
   is the PR's title, a review flag reads "2 threads to fix", and Home drops the chip's ref from the line (`sayNew`:
-  "Merge conflict to fix", not "… on #240" beside a #240 chip). A ref the row doesn't show stays.
+  "Merge conflict to fix", not "… on #240" beside a #240 chip). A ref the row doesn't show stays. It covers the lines
+  Follow-up writes; a question's or decision's line is the agent's own words and isn't reworded.
 - **No "No ask stated" beside an open question:** the chat's fallback card says "Waiting on your answer to Q1".
 - **A blocked task names what it waits on** (`blockedLine`, `shared/task-status.ts`): "Blocked · waits for Q1", or the
   evidence's first sentence.
