@@ -319,7 +319,17 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    (`set_pr_workflow` `deploy`, shown read-only in Settings), which projects track by default (`set_project_tracking`)
    and reviewer names (`save_reviewers`). Nothing is built in: an empty install has no deploy check, no default-tracked
    repository and no names. `tests/no-real-names.test.ts` scans every tracked file (PNG text included) with the hashed
-   denylist in `scripts/real-names.mjs`, with no exclusions.
+   denylist in `scripts/real-names.mjs`, with no exclusions. The same rule covers what the test can't see:
+   - **Everything written here is public:** commit messages, PR titles and descriptions, review replies, issues and
+     release notes. A name in any of them stays in git history, in GitHub's edit history or in every npm version, and
+     removing it later takes a history rewrite, npm unpublishes and GitHub Support. Use the fictional stand-ins: org
+     `example`, repo `example/app`, project `acme`, host `dev-box`, email `alice@example.com`, path `/home/user`.
+   - **Output from a live run stays local.** Logs, sample results and screenshots from the developer's real setup never
+     go into a commit or a PR as they are: describe them, or replace every real value with a fictional one first.
+   - **Commit only source.** Never commit symlinks, `node_modules` or anything that points into the local machine.
+     Before every commit, read `git diff --cached` for absolute paths and real names.
+   - **Found one already?** Fix it in a commit whose message doesn't quote the value (for example "replace a real name
+     with a fictional one"), and tell the developer so they can decide whether history and npm need cleaning too.
 
 ## Bugs
 
