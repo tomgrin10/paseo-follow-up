@@ -95,7 +95,7 @@ the developer's; it never clears a Needs-you flag and never passes the Overseer'
 | `inbox_list`, `inbox_brief` | `follow.inbox-list`, `follow.inbox-brief` | read |
 | `sign_off`, `snooze`, `set_finish_flags`, `inbox_act` | `follow.inbox-act` | planned; other agents only |
 | `brief_action` | `follow.brief-action` | planned; never your own brief |
-| `answer_question` | `follow.answer-question` | planned; never your own question |
+| `answer_question` | `follow.answer-question` | planned; never your own question. The tool sends; the UI's Copy and Put in chat (`action: "copy" \| "chat"`) only move the developer's own words into their clipboard or composer, so they have no tool (`server/agent-parity.ts`). |
 | `set_workspace_spec` | `follow.workspace-spec` | planned |
 | `set_task_trigger` | `follow.set-task-trigger` | planned |
 | `ai_rename` | `follow.rename-status` (the dry run: name now, suggestion, undoable rename), `follow.rename-workspace` (rename or `undo`) | planned. `title` skips the model; `undo=true` restores the name before the last rename for 24 h. |

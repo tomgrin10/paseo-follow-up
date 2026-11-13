@@ -5,8 +5,8 @@ import { PluginMove } from "./server/plugin-move";
 import { moveData, dataDirs, writeLegacyHeartbeat, type DataMove } from "./server/data-move";
 import { isRecovery, withRuntimePrelude, invokeSelf, PLUGIN_ID } from "./shared/legacy";
 import { displayPreferences } from "./shared/display";
-import { DEFAULT_QUESTION_MODE, QUESTION_DEDUPE_MIGRATION, collapseDuplicateQuestions, questionPreferences, type QuestionMode } from "./shared/questions";
-import { askQuestion, needsYouQuestions, recordAnswer, syncTaskQuestions, withdrawQuestion } from "./server/questions";
+import { DEFAULT_QUESTION_MODE, QUESTION_DEDUPE_MIGRATION, awaitingSend, collapseDuplicateQuestions, questionPreferences, signedOffAnswers, type QuestionMode } from "./shared/questions";
+import { answerRecipients, askQuestion, needsYouQuestions, recordAnswer, syncTaskQuestions, withdrawQuestion } from "./server/questions";
 import { agentSetSpec, developerSetSpec } from "./server/spec";
 import type { PluginServerContext, PluginHandlerContext, PluginHookContext, PluginSessionOpenRequest } from "@getpaseo/plugin/server";
 import type { PluginRpcContract, PluginSubscriptionContract } from "@getpaseo/plugin";
@@ -1182,7 +1182,18 @@ export default function contribute(server: PluginServerContext) {
   handle(rpc.inboxListRpc, async ({ etag }) => { await requireReady(); const handedBack = noReviewRepoList().length ? (await store.snapshot()).workspaces.flatMap(w => w.prs.filter(handsMergeBack).map(p => p.key)) : [];
     return inboxAnswer({ ...await inbox.list(), error: inboxError, ...(handedBack.length ? { handedBack } : {}) }, etag); });
   handle(rpc.inboxBriefRpc, async ({ agentId }) => { await requireReady(); return { brief: await inbox.brief(agentId) }; });
-  handle(rpc.inboxActRpc, async (input, context) => { await requireReady(); const out = await inbox.act(input, actorOf(context)); feeds.inbox(); return out; });
+  handle(rpc.inboxActRpc, async (input, context) => {
+    await requireReady();
+    const out = await inbox.act(input, actorOf(context));
+    // Signing an agent's row off also settles an answer the developer copied or put in its chat and Follow-up never
+    // saw arrive (the marker edited away, or answered another way): an-answer-leaves-needs-you-only-when-delivered.
+    if (input.action === "sign_off" || input.action === "mute_turn") for (const r of out.results.filter(r => r.ok)) {
+      const w = agentTrackedWorkspace(await store.snapshot(), r.agentId);
+      if (w?.questions.some(awaitingSend)) await store.mutateWorkspace(w.id, current => { signedOffAnswers(current.questions, q => answerRecipients(current, q), r.agentId, new Date().toISOString()); });
+    }
+    feeds.inbox();
+    return out;
+  });
 
   // Subscriptions (Paseo 0.16): every open client used to poll these reads (about 17 a minute for an idle Home); now
   // the worker pushes from state it already holds, one shared serve per topic (server/feeds.ts, invariant
