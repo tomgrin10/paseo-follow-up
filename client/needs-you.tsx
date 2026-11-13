@@ -19,6 +19,7 @@ import type { Brief } from "../shared/brief";
 import { useState, type ReactNode } from "react";
 import { usePendingAnswer } from "./pending-answers";
 import { useReviewerSettings } from "./reviewers";
+import { NoReviewLink } from "./review-mode";
 
 import { overviewKey, workspaceKey } from "./keys";
 import { RichText } from "./rich-text";
@@ -103,10 +104,12 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
       const inline = compact && button && item.kind !== "send" && !(item.kind === "retry" && !item.exhausted);
       if (inline) return <CardRow key={item.key} theme={theme} compact first={index === 0 && flush} style={flush ? { paddingHorizontal: 0 } : undefined}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <Icon name={g.name} size={16} color={g.color} />
+          {/* A row with the quiet link under it is taller: the glyph stays on the title's line. */}
+          <View style={item.kind === "reviewers" ? { alignSelf: "flex-start", paddingTop: 2 } : undefined}><Icon name={g.name} size={16} color={g.color} /></View>
           <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
             <RichText numberOfLines={2} style={t.label}>{item.title}</RichText>
             {"detail" in item && !!item.detail && !sameText(item.detail, item.title.replace(/^Q\d+ · /, "")) && <RichText linkColor={c.foreground} numberOfLines={1} style={t.meta}>{item.detail}</RichText>}
+            {item.kind === "reviewers" && <NoReviewLink repo={item.prKey.split("#")[0]} theme={theme} compact />}
           </View>
           {button}
         </View>
@@ -118,6 +121,7 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
             <RichText style={compact ? t.label : t.body}>{item.title}</RichText>
             {"detail" in item && !!item.detail && !sameText(item.detail, item.title.replace(/^Q\d+ · /, "")) && <RichText linkColor={c.foreground} numberOfLines={item.kind === "question" ? 2 : 3} style={t.meta}>{item.detail}</RichText>}
             {item.kind === "question" && <QuestionState workspace={w} questionId={item.questionId} theme={theme} />}
+            {item.kind === "reviewers" && <NoReviewLink repo={item.prKey.split("#")[0]} theme={theme} compact={compact} />}
             {(button || (item.kind === "send" && item.blocker)) && <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 5 }}>
               {button}
               {item.kind === "send" && item.blocker && <Text style={[t.small, { flexShrink: 1 }]}>{item.blocker}</Text>}
@@ -153,6 +157,7 @@ export function NeedsYouBlock({ workspace: w, theme, compact, actions, now, brie
   /** The agent's open brief this surface shows, or null. */ brief?: Pick<Brief, "questionIds" | "context"> | null;
   /** That brief's own card, drawn when it points at no open question. */ briefCard?: ReactNode; style?: StyleProp<ViewStyle>;
 }) {
+  useReviewerSettings(); // re-renders on a No review change, so the block's rows and count drop the asks at once
   const all = needsYou(w, now);
   const block = needsYouBlock(all, brief && briefCard ? brief : null, w.questions);
   // An accordion: one question open at a time (the block's first by default); its header closes it again.

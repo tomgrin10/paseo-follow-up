@@ -59,7 +59,8 @@ export const confirmPrActionRpc = defineRpc({ name: "follow.confirm-pr-action", 
 export const checkPrActionRpc = defineRpc({ name: "follow.check-pr-action", input: z.object({ workspaceId: idSchema, actionId: idSchema }), output: actionResultSchema });
 /** `reviewers` picks who to ask for this PR only (the picker); `remember` also saves them as the repository's list. */
 export const requestReviewersRpc = defineRpc({ name: "follow.request-reviewers", input: z.object({ workspaceId: idSchema, prKey: idSchema, reviewers: z.array(reviewerEntrySchema).min(1).max(MAX_REVIEWERS).optional(), remember: z.boolean().optional() }), output: actionResultSchema });
-const reviewerSettingsSchema = z.object({ config: reviewerConfigSchema, repos: z.array(z.string()) });
+/** `noReview`: the repositories set to No review (pr-workflow.json), so the client's Needs you agrees with the server's. */
+const reviewerSettingsSchema = z.object({ config: reviewerConfigSchema, repos: z.array(z.string()), noReview: z.array(z.string()).default([]) });
 /** Settings → Reviewers: the saved lists and the repositories Follow-up has seen PRs in. */
 export const reviewerSettingsRpc = defineRpc({ name: "follow.reviewer-settings", input: z.object({}), output: reviewerSettingsSchema });
 /** `repo: null` is the default for all repos. An empty list clears it. */
@@ -156,7 +157,9 @@ export const inboxListRpc = defineRpc({ name: "follow.inbox-list", input: z.obje
   /** Adoption share of needs_you over the last 7 days of flagged turns (R2). Optional for older daemons. */
   briefStats: z.object({ days: z.number().int(), total: z.number().int(), tool: z.number().int(), structured: z.number().int(), extraction: z.number().int(), fallback: z.number().int() }).optional(),
   /** The Overseer's own row (1.4.0-beta.0), kept out of rows and every Needs-you count. */
-  overseer: inboxRowSchema.nullable().optional() }) });
+  overseer: inboxRowSchema.nullable().optional(),
+  /** PRs in No review repositories that hand their merge back (shared/pr-workflow.ts handsMergeBack). Usually empty. */
+  handedBack: z.array(z.string()).optional() }) });
 export const inboxActRpc = defineRpc({ name: "follow.inbox-act", input: z.strictObject({
   action: z.enum(["sign_off", "undo", "snooze", "unsnooze", "mute_turn", "set_finish_flags", "unsorted_flag", "unsorted_sign_off", "batch_undo"]),
   agentIds: z.array(idSchema).max(500).optional(), seqs: z.record(z.string(), z.number().int()).optional(),
