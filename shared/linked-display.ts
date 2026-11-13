@@ -192,7 +192,7 @@ export const LINKED_EMPTY = "Nothing linked yet. Agents link the issues and thre
 /** An item as Home's search index needs it. */
 export type LinkedSearchItem = { key: string; kind: LinkedKind; title: string | null };
 /**
- * The text a linked item is searched by and shown as on the result's second line ("Linked · HER-1312 Vendor sync drops
+ * The text a linked item is searched by and shown as on the result's second line ("Linked · ACME-1312 Vendor sync drops
  * SCIM groups"). Keys that are URLs or Slack ids are never shown; the title stands in.
  */
 export function linkedSearchText(i: LinkedSearchItem): string | null {

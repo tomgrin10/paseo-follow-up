@@ -172,7 +172,7 @@ test("(3) 'Add reviewers' is a Needs-you reason that doesn't wait for open threa
   assert.deepEqual(flagsFrom(inFlight).reasons, []);
 });
 test("(3) the reviewers brief offers Add reviewers with saved reviewers, and without them says none are set and opens the picker", () => {
-  const withDefaults = pickBrief({ reviewers: { prKey: "herosecurity/hero-poc#1499", number: 1499, url: "https://example.invalid/pr/1499", names: ["Reviewer A", "Reviewer B"] } });
+  const withDefaults = pickBrief({ reviewers: { prKey: "acme/acme-poc#1499", number: 1499, url: "https://example.invalid/pr/1499", names: ["Reviewer A", "Reviewer B"] } });
   assert.equal(withDefaults.kind, "reviewers");
   assert.deepEqual(withDefaults.moves.map(m => m.kind), ["add_reviewers", "open_pr"]);
   assert.match(withDefaults.ask, /^Add reviewers to #1499/);

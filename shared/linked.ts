@@ -60,7 +60,7 @@ export const linkedFileSchema = z.object({
   workspaces: z.record(z.string(), workspaceLinksSchema).default({}),
   /** Keys Linear said don't exist, with when: never checked again (oldest dropped past the cap). */
   rejected: z.record(z.string(), z.string()).default({}),
-  /** Known Linear team prefixes ("HER"), read at most once a day. Null until read: candidates wait. */
+  /** Known Linear team prefixes ("ACME"), read at most once a day. Null until read: candidates wait. */
   teams: z.object({ keys: z.array(z.string()), at: z.string() }).nullable().default(null),
   daily: z.object({ date: z.string(), count: z.number().int() }).nullable().default(null),
   migrations: z.array(z.string()).default([]),
@@ -72,7 +72,7 @@ export const emptyWorkspaceLinks = (): WorkspaceLinks => ({ items: [], excluded:
 // ---------- identity ----------
 
 const LINEAR_KEY = /^([A-Z][A-Z0-9]{1,9})-(\d{1,6})$/;
-/** "her-1312" → "HER-1312"; null when it isn't key-shaped. */
+/** "acme-1312" → "ACME-1312"; null when it isn't key-shaped. */
 export function linearKey(raw: string): string | null {
   const m = LINEAR_KEY.exec(raw.trim().toUpperCase());
   return m && Number(m[2]) > 0 ? `${m[1]}-${Number(m[2])}` : null;

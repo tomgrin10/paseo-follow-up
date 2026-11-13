@@ -31,15 +31,15 @@ const row = (agentId: string, patch: Partial<InboxRow> = {}): InboxRow => ({
 // ---------- routing ----------
 
 const fleet = [
-  ws("scim", { title: "Fix HER-1282 SCIM group sync", branch: "tom/her-1282-scim-groups", keys: ["HER-1282"], prs: [{ key: "hero/app#1402", number: 1402, state: "OPEN", checks: "passed", threads: 0, url: null }] }),
-  ws("vanta", { title: "Vanta custom status approvals", branch: "tom/vanta-status", prs: [{ key: "hero/app#1425", number: 1425, state: "OPEN", checks: "failed", threads: 2, url: null }] }),
+  ws("scim", { title: "Fix ACME-1282 SCIM group sync", branch: "tom/acme-1282-scim-groups", keys: ["ACME-1282"], prs: [{ key: "acme/app#1402", number: 1402, state: "OPEN", checks: "passed", threads: 0, url: null }] }),
+  ws("vanta", { title: "Vanta custom status approvals", branch: "tom/vanta-status", prs: [{ key: "acme/app#1425", number: 1425, state: "OPEN", checks: "failed", threads: 2, url: null }] }),
   ws("export", { title: "Export findings to CSV", branch: "tom/csv-export", activityAt: at(10) }),
   ws("export2", { title: "Export audit log", branch: "tom/audit-export" }),
 ];
 
 test("routing: a Linear key or PR number is decisive", () => {
-  const byKey = scoreCandidates("tell the HER-1282 agent to use option B", fleet, NOW);
-  assert.equal(byKey[0].workspaceId, "scim"); assert.match(byKey[0].reasons.join(), /key HER-1282/);
+  const byKey = scoreCandidates("tell the ACME-1282 agent to use option B", fleet, NOW);
+  assert.equal(byKey[0].workspaceId, "scim"); assert.match(byKey[0].reasons.join(), /key ACME-1282/);
   assert.equal(routeDecision(byKey).confident, true);
   const byPr = scoreCandidates("rebase #1425 on main", fleet, NOW);
   assert.equal(byPr[0].workspaceId, "vanta"); assert.match(byPr[0].reasons.join(), /PR #1425/);
@@ -60,8 +60,8 @@ test("routing: an ambiguous ask is not confident and returns the top candidates"
   assert.deepEqual(scoreCandidates("what's for lunch", fleet, NOW), [], "no match, no candidates");
 });
 test("routing: a new workspace gets its name and branch from the task and key", () => {
-  assert.equal(workspaceTitleFor("HER-1400 add Okta SCIM deprovisioning"), "HER-1400 Add Okta SCIM deprovisioning");
-  assert.equal(branchFor("HER-1400 Add Okta SCIM deprovisioning"), "her-1400-add-okta-scim-deprovisioning");
+  assert.equal(workspaceTitleFor("ACME-1400 add Okta SCIM deprovisioning"), "ACME-1400 Add Okta SCIM deprovisioning");
+  assert.equal(branchFor("ACME-1400 Add Okta SCIM deprovisioning"), "acme-1400-add-okta-scim-deprovisioning");
   assert.equal(approvesNewWorkspace("start a new workspace for it"), true);
   assert.equal(approvesNewWorkspace("Follow-up answer D1 (Which agent should take it?): C — New workspace\nContinue with this choice."), true);
   assert.equal(approvesNewWorkspace("yes, go ahead"), true);
@@ -72,12 +72,12 @@ test("routing: a new workspace gets its name and branch from the task and key", 
 // ---------- digest size and paging ----------
 
 const hundred = Array.from({ length: 100 }, (_, i) => ws(`w${i}`, {
-  title: `HER-${1200 + i} A realistic workspace title about feature ${i}`, branch: `tom/her-${1200 + i}-feature-${i}`,
+  title: `ACME-${1200 + i} A realistic workspace title about feature ${i}`, branch: `tom/acme-${1200 + i}-feature-${i}`,
   group: i < 8 ? "needs" : i < 20 ? "running" : i < 35 ? "waiting" : "quiet",
   ask: i < 8 ? `Decision: pick the migration strategy for tenant ${i} before staging deploy` : null,
   activity: i >= 8 ? `Pushed a41f0c${i % 10} · Bash pnpm test --filter feature-${i}` : null,
-  prs: [{ key: `hero/app#${1300 + i}`, number: 1300 + i, state: "OPEN", checks: i % 3 ? "passed" : "failed", threads: i % 4, url: null }],
-  priority: i < 30 ? { score: 90 - i, reason: `HER-${1200 + i} · Urgent · due today` } : null,
+  prs: [{ key: `acme/app#${1300 + i}`, number: 1300 + i, state: "OPEN", checks: i % 3 ? "passed" : "failed", threads: i % 4, url: null }],
+  priority: i < 30 ? { score: 90 - i, reason: `ACME-${1200 + i} · Urgent · due today` } : null,
 }));
 const hook = async () => { process.env.FOLLOW_UP_HOOK_IMPORT = "1";
   // @ts-expect-error plain JS hook, generated into hook-source.ts
@@ -111,7 +111,7 @@ test("workstreams pages, filters by group and query, and orders what needs Tom f
   assert.equal(pageRows(hundred, { page: 3 }).rows.length, 20);
   assert.equal(pageRows(hundred, { page: 9 }).page, 3, "past the end clamps to the last page");
   assert.equal(pageRows(hundred, { group: "running" }).total, 12);
-  assert.deepEqual(pageRows(hundred, { query: "her-1205" }).rows.map(r => r.workspaceId), ["w5"]);
+  assert.deepEqual(pageRows(hundred, { query: "acme-1205" }).rows.map(r => r.workspaceId), ["w5"]);
   assert.deepEqual(pageRows(hundred, { query: "#1342" }).rows.map(r => r.workspaceId), ["w42"]);
   assert.ok(JSON.stringify(p1).length < 24_000, "one page of the tool stays a few thousand tokens");
 });
@@ -186,7 +186,7 @@ function fakePaseo(agents: Record<string, { workspaceId: string; status?: string
         timeline: { refetch: async () => { timelineReads.push(id); return { entries: (tails[id] ?? []).map((item, i) => ({ seqStart: i, item })) }; } },
       }),
     },
-    projects: { list: async () => ({ entries: [{ projectId: "p", projectName: "hero-app" }] }) },
+    projects: { list: async () => ({ entries: [{ projectId: "p", projectName: "acme-app" }] }) },
   };
   return { paseo, sent, created, agents, timelineReads };
 }
@@ -198,10 +198,10 @@ async function overseerFixture(t: any, rows: InboxRow[], tails: Record<string, u
     async list() { return { rows }; }, async brief() { return null; },
     async noteDelivery(agentId: string, messageId: string | null, by?: "developer") { ledger.push({ agentId, messageId, at: new Date(NOW).toISOString(), ...(by ? { by } : {}) }); },
   };
-  const state: State = { version: 1, workspaces: [workspace({ id: "w1", title: "SCIM", mainAgentId: "a1", prs: [pr({ key: "hero/app#1402", repo: "hero/app", number: 1402, snapshot: snapshot({ title: "HER-1282 SCIM sync" }) })] })] };
+  const state: State = { version: 1, workspaces: [workspace({ id: "w1", title: "SCIM", mainAgentId: "a1", prs: [pr({ key: "acme/app#1402", repo: "acme/app", number: 1402, snapshot: snapshot({ title: "ACME-1282 SCIM sync" }) })] })] };
   const overseer = new Overseer({ directory: dir, store: { snapshot: async () => state }, inbox, sources: sources(ledger), priorities: { read: async () => [] }, enabled: extra.enabled ?? (async () => true), provider: "demo/claude-opus-5-5", now: () => NOW,
     tight: extra.tight ?? (async () => false), paseoHome: extra.paseoHome,
-    workspaces: async () => [{ id: "w1", name: "SCIM", project: "hero-app", projectId: "p", activityAt: at(5), branch: "tom/her-1282-scim" }, { id: "w2", name: "Export", project: "hero-app", projectId: "p", activityAt: at(9), branch: "tom/export" }] });
+    workspaces: async () => [{ id: "w1", name: "SCIM", project: "acme-app", projectId: "p", activityAt: at(5), branch: "tom/acme-1282-scim" }, { id: "w2", name: "Export", project: "acme-app", projectId: "p", activityAt: at(9), branch: "tom/export" }] });
   const fake = fakePaseo({ a1: { workspaceId: "w1" }, a2: { workspaceId: "w2" } }, tails);
   if (extra.start !== false) await overseer.start(fake.paseo);
   const ov = (await overseer.state()).agentId!;
@@ -243,10 +243,10 @@ test("the Overseer is created once in its own labelled workspace, its digest is 
 test("route_candidates, workstreams and agent_digest answer from Follow-up's state", async t => {
   const f = await overseerFixture(t, [row("a1", { workspaceId: "w1", needs: { reasons: [{ reason: "finished", at: at(3), detail: "Ready for review", dedupeKey: "f" }], since: at(3) } }), row("a2", { workspaceId: "w2" })],
     { a1: [{ type: "user_message", text: "fix the sync" }, { type: "tool_call", name: "Bash", detail: { command: "pnpm test" } }, { type: "assistant_message", text: "Fixed and pushed." }] });
-  const route = await f.overseer.act(f.paseo, f.ov, "route_candidates", { ask: "merge plan for HER-1282?" }) as { confident: boolean; candidates: { workspaceId: string }[] };
+  const route = await f.overseer.act(f.paseo, f.ov, "route_candidates", { ask: "merge plan for ACME-1282?" }) as { confident: boolean; candidates: { workspaceId: string }[] };
   assert.equal(route.confident, true); assert.equal(route.candidates[0].workspaceId, "w1");
   const page = await f.overseer.act(f.paseo, f.ov, "workstreams", { group: "needs" }) as { total: number; rows: WorkstreamRow[] };
-  assert.equal(page.total, 1); assert.equal(page.rows[0].branch, "tom/her-1282-scim"); assert.deepEqual(page.rows[0].keys, ["HER-1282"]);
+  assert.equal(page.total, 1); assert.equal(page.rows[0].branch, "tom/acme-1282-scim"); assert.deepEqual(page.rows[0].keys, ["ACME-1282"]);
   const d = await f.overseer.act(f.paseo, f.ov, "agent_digest", { agentId: "a1" }) as { steps: { kind: string; text: string }[]; openAsks: string[]; workspace: string };
   assert.deepEqual(d.steps.map(s => s.kind), ["you", "tool", "agent"]); assert.equal(d.workspace, "SCIM"); assert.equal(d.openAsks.length, 1);
 });
@@ -258,18 +258,18 @@ test("a new workspace waits for the developer's approval", async t => {
   const original = f.paseo.agents.ref;
   f.paseo.agents.ref = (id: string) => { const h = original(id); h.timeline.refetch = async () => ({ entries: (tails[id] ?? []).map((item, i) => ({ seqStart: i, item })) }); return h; };
   tails[f.ov] = [{ type: "user_message", text: "the export is broken, someone should look" }];
-  const blocked = await f.overseer.act(f.paseo, f.ov, "start_workspace", { task: "HER-1400 fix the CSV export" }) as { planId: string | null; blockers: string[]; plan: { title: string; branch: string; project: string } };
+  const blocked = await f.overseer.act(f.paseo, f.ov, "start_workspace", { task: "ACME-1400 fix the CSV export" }) as { planId: string | null; blockers: string[]; plan: { title: string; branch: string; project: string } };
   assert.equal(blocked.planId, null); assert.match(blocked.blockers.join(), /hasn't asked for or approved/);
   assert.equal(f.created.filter(c => c.kind === "workspace").length, 1, "nothing but the Overseer's own workspace");
   // The answer is the developer's click on the Overseer's card: the brief action records it in the ledger first.
   f.ledger.push({ agentId: f.ov, messageId: "answer-1", at: new Date(NOW).toISOString(), by: "developer" });
   tails[f.ov] = [{ type: "user_message", text: "Follow-up answer D1 (Which agent?): C — New workspace\nContinue with this choice.", messageId: "answer-1" }];
-  const plan = await f.overseer.act(f.paseo, f.ov, "start_workspace", { task: "HER-1400 fix the CSV export" }) as { planId: string; plan: { title: string; branch: string; project: string } };
-  assert.ok(plan.planId); assert.deepEqual(plan.plan, { ...plan.plan, title: "HER-1400 Fix the CSV export", branch: "her-1400-fix-the-csv-export", project: "hero-app" });
+  const plan = await f.overseer.act(f.paseo, f.ov, "start_workspace", { task: "ACME-1400 fix the CSV export" }) as { planId: string; plan: { title: string; branch: string; project: string } };
+  assert.ok(plan.planId); assert.deepEqual(plan.plan, { ...plan.plan, title: "ACME-1400 Fix the CSV export", branch: "acme-1400-fix-the-csv-export", project: "acme-app" });
   const done = await f.overseer.act(f.paseo, f.ov, "start_workspace", { confirm: true, planId: plan.planId }) as { started: boolean };
   assert.equal(done.started, true);
   const w = f.created.filter(c => c.kind === "workspace").at(-1)!;
-  assert.deepEqual(w.source, { kind: "worktree", projectId: "p", action: "branch-off", baseBranch: "main", branchName: "her-1400-fix-the-csv-export" });
+  assert.deepEqual(w.source, { kind: "worktree", projectId: "p", action: "branch-off", baseBranch: "main", branchName: "acme-1400-fix-the-csv-export" });
   await assert.rejects(f.overseer.act(f.paseo, f.ov, "start_workspace", { confirm: true, planId: plan.planId }), /expired or was used/);
 });
 
@@ -297,7 +297,7 @@ test("the Overseer's session skips the Stop-hook nudge and gets the digest inste
   });
   const submitted = JSON.parse(await run({ hook_event_name: "UserPromptSubmit", session_id: "s", prompt: "what needs me?" }));
   assert.match(submitted.hookSpecificOutput.additionalContext, /^Follow-up digest \(last change/);
-  assert.match(submitted.hookSpecificOutput.additionalContext, /Fix HER-1282 SCIM group sync/);
+  assert.match(submitted.hookSpecificOutput.additionalContext, /Fix ACME-1282 SCIM group sync/);
   assert.equal(await run({ hook_event_name: "Stop", session_id: "s" }), "", "no needs_you nudge and no sidebar bookkeeping");
 });
 
@@ -362,7 +362,7 @@ test("agent_digest never reads an unloaded agent's timeline: transcript first, t
   assert.equal(d.source, "transcript"); assert.equal(d.loaded, false); assert.match(d.note, /transcript on disk/);
   assert.equal(d.steps.at(-1)!.text, "Fixed the off-by-one; PR #1431 is up.");
   const cached = await f.overseer.act(f.paseo, f.ov, "agent_digest", { agentId: "a1" }) as { source: string; goal: string | null; prs: string[] };
-  assert.equal(cached.source, "cache"); assert.deepEqual(cached.prs, ["#1402 HER-1282 SCIM sync"]);
+  assert.equal(cached.source, "cache"); assert.deepEqual(cached.prs, ["#1402 ACME-1282 SCIM sync"]);
   assert.deepEqual(f.timelineReads, [], "no timeline read for an unloaded agent");
   f.agents.a2.loaded = true;
   assert.equal((await f.overseer.act(f.paseo, f.ov, "agent_digest", { agentId: "a2" }) as { source: string }).source, "timeline");
@@ -407,7 +407,7 @@ test("the digest is written only when it changes, and not at all while memory is
 test("resting workspaces: last and compact in workstreams, one line in the digest, small at 100 workspaces", async () => {
   const fleet100 = Array.from({ length: 100 }, (_, i) => ws(`w${i}`, { title: `Workspace number ${i} with a fairly long descriptive title`, branch: `tom/feature-${i}`, dormant: i >= 30,
     group: i < 5 ? "needs" as const : i < 15 ? "running" as const : "quiet" as const, ask: i < 5 ? "Decision: which approach for the migration" : null, activity: i >= 5 ? "Ran the test suite and pushed a fix" : null,
-    prs: i < 30 ? [{ key: `hero/app#${1300 + i}`, number: 1300 + i, state: "OPEN", checks: "passed" as const, threads: 1, url: null }] : [] }));
+    prs: i < 30 ? [{ key: `acme/app#${1300 + i}`, number: 1300 + i, state: "OPEN", checks: "passed" as const, threads: 1, url: null }] : [] }));
   const page = pageRows(fleet100, { size: 100 });
   assert.equal(page.resting, 70);
   assert.deepEqual(page.rows.at(-1), { workspaceId: page.rows.at(-1)!.workspaceId, title: page.rows.at(-1)!.title, agentId: page.rows.at(-1)!.agentId, dormant: true });
@@ -434,7 +434,7 @@ test("an answer Tom clicked reads as an answer in the Overseer's pane", async ()
 // ---------- the omnibox and ⌘K (slice 2) ----------
 
 test("omnibox: \"Ask the Overseer\" is the last row, as typed, and only while the Overseer is on", () => {
-  const index = indexDocs([{ key: "ws:scim", title: "Fix HER-1282 SCIM group sync", group: "needs", at: at(5), fields: [{ field: "name", text: "Fix HER-1282 SCIM group sync" }] }]);
+  const index = indexDocs([{ key: "ws:scim", title: "Fix ACME-1282 SCIM group sync", group: "needs", at: at(5), fields: [{ field: "name", text: "Fix ACME-1282 SCIM group sync" }] }]);
   const ask = overseerProvider(true);
   const extra: OmniboxProvider = { id: "extra", results: () => [] };
   // Listed first on purpose: the ask still closes the list.
@@ -474,7 +474,7 @@ test("asking brings an archived Overseer back first, and refuses while it's off"
 });
 
 test("omnibox: Enter never sends a one-word miss to the Overseer; a sentence or a real match is picked as before", () => {
-  const index = indexDocs([{ key: "ws:scim", title: "Fix HER-1282 SCIM group sync", group: "needs", at: at(5), fields: [{ field: "name", text: "Fix HER-1282 SCIM group sync" }] }]);
+  const index = indexDocs([{ key: "ws:scim", title: "Fix ACME-1282 SCIM group sync", group: "needs", at: at(5), fields: [{ field: "name", text: "Fix ACME-1282 SCIM group sync" }] }]);
   const rows = (q: string) => omniboxResults([workspaceProvider(index, NOW), overseerProvider(true)], q);
   assert.equal(defaultActive(rows("kubernetes")), -1, "a one-word miss: nothing is active");
   assert.equal(defaultActive(rows("what needs me before standup")), 0, "a sentence: Enter sends it");

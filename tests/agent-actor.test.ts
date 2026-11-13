@@ -28,7 +28,7 @@ test("agent tools hand the acting agent to every RPC they run, read or write", a
     ["inbox_act", { action: "mute_turn", agentIds: ["main-1"] }],
     ["answer_question", { workspaceId: "w1", questionId: "Q1", choice: "A" }],
     ["set_workspace_spec", { workspaceId: "w1", action: "set", url: "https://example.com/spec" }],
-    ["set_linked_items", { workspaceId: "w1", action: "add", ref: "https://linear.app/acme/issue/HER-9" }],
+    ["set_linked_items", { workspaceId: "w1", action: "add", ref: "https://linear.app/acme/issue/ACME-9" }],
   ];
   for (const [tool, args] of runs) {
     const plan = await actions.run("helper-1", tool as never, args) as { planId: string };

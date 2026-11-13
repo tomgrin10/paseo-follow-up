@@ -1,5 +1,5 @@
 /**
- * Regression: wks_4b27f268b5dc2fc6 (2026-11-10). Three hero-poc PRs merged and deployed, both tasks done, yet the
+ * Regression: wks_4b27f268b5dc2fc6 (2026-11-10). Three acme-poc PRs merged and deployed, both tasks done, yet the
  * workspace sat in "Follow-up is fixing": the deploy probe failed now and then, declare_done refused twice on a
  * blocker the agent couldn't fix, the chat drew two "Workspace done" cards anyway, and the Done check was created and
  * cancelled every time the probe flapped.
@@ -31,8 +31,8 @@ async function fixture(t: any, w: Workspace) {
   return { engine, get: async () => (await store.snapshot()).workspaces[0], advance: (ms: number) => { now += ms; }, probe: (p: Probe) => { probe = p; }, runtime: (r: Runtime) => { runtime = r; }, now: () => now };
 }
 const shipped = () => workspace({
-  prs: ["#1", "#2", "#3"].map((n, i) => pr({ key: `herosecurity/hero-poc${n}`, repo: "herosecurity/hero-poc", number: i + 1, snapshot: snapshot({ state: "MERGED", mergeCommit: `merge-${i}` }) })),
-  obligations: [obligation({ id: "verify", title: "Verify on prod", status: "done", afterPrs: ["herosecurity/hero-poc#1"] })],
+  prs: ["#1", "#2", "#3"].map((n, i) => pr({ key: `acme/acme-poc${n}`, repo: "acme/acme-poc", number: i + 1, snapshot: snapshot({ state: "MERGED", mergeCommit: `merge-${i}` }) })),
+  obligations: [obligation({ id: "verify", title: "Verify on prod", status: "done", afterPrs: ["acme/acme-poc#1"] })],
 });
 
 test("a deploy Follow-up never confirmed doesn't block Done: it is accepted with a note", async t => {
@@ -97,14 +97,14 @@ test("a blocker the agent can't fix says so, so the agent doesn't retry", () => 
 });
 
 test("the chat only draws a Done card from a reply Follow-up wrote", () => {
-  const input = { summary: "HER-1454 done" };
+  const input = { summary: "ACME-1454 done" };
   assert.equal(toolRow("declare_done", "completed", input, undefined).done, null, "a missing result is not a success");
   assert.equal(toolRow("declare_done", "completed", input, "not json").done, null);
   const refused = toolRow("declare_done", "completed", input, JSON.stringify({ workspaceId: "w", completion: null, blockers: ["Verify production deployment of x#1"] }));
   assert.equal(refused.done, null); assert.equal(refused.tone, "warning");
-  const accepted = toolRow("declare_done", "completed", input, JSON.stringify({ workspaceId: "w", done: true, completion: { summary: "HER-1454 done", declaredAt: "t", unconfirmed: ["x#1"] }, blockers: [] }));
-  assert.deepEqual(accepted.done, { summary: "HER-1454 done", unconfirmed: ["x#1"] });
-  const repeat = toolRow("declare_done", "completed", input, JSON.stringify({ workspaceId: "w", done: true, alreadyDone: true, completion: { summary: "HER-1454 done", declaredAt: "t" }, blockers: [], next: "Already Done" }));
+  const accepted = toolRow("declare_done", "completed", input, JSON.stringify({ workspaceId: "w", done: true, completion: { summary: "ACME-1454 done", declaredAt: "t", unconfirmed: ["x#1"] }, blockers: [] }));
+  assert.deepEqual(accepted.done, { summary: "ACME-1454 done", unconfirmed: ["x#1"] });
+  const repeat = toolRow("declare_done", "completed", input, JSON.stringify({ workspaceId: "w", done: true, alreadyDone: true, completion: { summary: "ACME-1454 done", declaredAt: "t" }, blockers: [], next: "Already Done" }));
   assert.equal(repeat.done, null, "a repeat adds no second card"); assert.match(repeat.line, /Already done/);
   const wrapped = toolRow("declare_done", "completed", input, `Result: ${JSON.stringify({ workspaceId: "w", completion: { summary: "s", declaredAt: "t" }, blockers: [] })}`);
   assert.ok(wrapped.done);
