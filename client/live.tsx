@@ -14,6 +14,8 @@ import { onVisible, whileVisible } from "./visibility";
 import { WhatsNewGate } from "./release-notes";
 import { ViewSync } from "./view-store";
 import { ToastHost } from "./toasts";
+import { newer, opened } from "./live-copies";
+export { acceptWorkspace } from "./live-copies";
 
 /** The backstop poll; agent changes `nudge` it sooner (1.4.0). Nothing while the app is hidden. */
 const POLL_MS = 15_000;
@@ -39,7 +41,7 @@ export function createLiveStore(client: PluginClientContext) {
       if (diff && !result.workspaces.length && !result.removed?.length) return;
       const next = diff ? new Map(all) : new Map<string, Workspace>();
       for (const id of result.removed ?? []) next.delete(id);
-      for (const w of result.workspaces) next.set(w.id, w);
+      for (const w of result.workspaces) next.set(w.id, diff ? newer(all.get(w.id), w) : w);
       all = next; revision = result.revision;
       workspaces = new Map([...all.values()].filter(w => !w.archived).map(w => [w.id, w]));
       archived = [...all.values()].filter(w => w.archived);
@@ -56,6 +58,15 @@ export function createLiveStore(client: PluginClientContext) {
   };
   // The feed went down (the worker restarted): read now and poll until it is back.
   feed = openFeed(client, workspacesFeed, {}, { event: event => { if (!stopped) apply(event); }, down: () => { if (timer) clearTimeout(timer); void poll(); }, up: () => { if (timer) clearTimeout(timer); timer = null; } });
+  const accept = (w: Workspace) => {
+    const held = all.get(w.id);
+    if (!held || newer(held, w) !== w || held === w) return;
+    all = new Map(all).set(w.id, w);
+    workspaces = new Map([...all.values()].filter(x => !x.archived).map(x => [x.id, x]));
+    archived = [...all.values()].filter(x => x.archived);
+    emit();
+  };
+  opened.add(accept);
   const offVisible = onVisible(() => { if (pushed()) return; if (timer) clearTimeout(timer); void poll(); });
   if (!feed) void poll();
   return {
@@ -68,7 +79,9 @@ export function createLiveStore(client: PluginClientContext) {
     refresh: () => { if (pushed()) return; if (timer) clearTimeout(timer); void poll(); },
     /** Paseo reported an agent change: one diff read soon, however many updates arrive together. */
     nudge: () => { if (nudged || stopped || pushed()) return; nudged = setTimeout(() => { nudged = null; if (timer) clearTimeout(timer); void poll(); }, 1_500); },
-    stop() { stopped = true; feed?.stop(); offVisible(); if (timer) clearTimeout(timer); if (nudged) clearTimeout(nudged); listeners.clear(); },
+    /** A fresh read of one workspace this store follows; kept only if newer (acceptWorkspace). */
+    accept,
+    stop() { stopped = true; opened.delete(accept); feed?.stop(); offVisible(); if (timer) clearTimeout(timer); if (nudged) clearTimeout(nudged); listeners.clear(); },
   };
 }
 export type LiveStore = ReturnType<typeof createLiveStore>;

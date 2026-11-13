@@ -124,6 +124,7 @@ function pulls() {
     251: { title: "Filter exports by date range", state: "OPEN", author: "dana", base: "branch-250", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint")] },
     252: { title: "Show export filters in the admin page", state: "OPEN", author: "dana", base: "branch-251", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint")] },
     255: { title: "Attach PDF receipts to invoice emails", state: "OPEN", author: "dana", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint")] },
+    256: { title: "Send a weekly invoice digest", state: "OPEN", author: "dana", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint")] },
     151: { repo: "example/web", title: "Saved search filters", state: "OPEN", author: "dana", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint")] },
     247: { title: "Checkout button copy", state: "OPEN", author: "dana", conflict: true, threads: 1, reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
     160: { title: "Welcome email template", state: "OPEN", author: "dana", conflict: true, threads: 2, reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
@@ -391,6 +392,10 @@ const MERGE_CLICK_STATES = [
   { key: "mc-receipts", title: "Receipt PDFs", minute: 179, prompt: "APP-201: attach a PDF receipt to every paid invoice email.", flag: false,
     steps: [rpc("follow.enroll", { goal: "APP-201 Receipt PDFs" }), rpc("follow.register-pr", { repo: "example/app", number: 255, stack: "Receipt PDFs" }),
       msg("Opened example/app#255; it's approved and green.")] },
+  // The dark phone's click: Home's detail pane drops the ask with the toast.
+  { key: "mc-digest", title: "Invoice digest", minute: 180, prompt: "APP-202: send a weekly digest of paid invoices.", flag: false,
+    steps: [rpc("follow.enroll", { goal: "APP-202 Invoice digest" }), rpc("follow.register-pr", { repo: "example/app", number: 256, stack: "Invoice digest" }),
+      msg("Opened example/app#256; it's approved and green.")] },
 ];
 
 /** done-brief only (a-done-brief-is-never-an-ask): the agent's turn ends "nothing needed" while its PR's merge flags the row. */
@@ -1423,7 +1428,7 @@ async function prLinkShots({ shoot, billing }) {
  */
 async function mergeClickShots({ shoot, billing }) {
   const TALL = { width: DESKTOP.width, height: 1100 };
-  const single = { title: "Search filters", prompt: WORKSPACES.find(w => w.key === "search").prompt, button: "Merge pull request #151", merged: /Merged #151/ };
+  const single = { title: "Search filters", prompt: WORKSPACES.find(w => w.key === "search").prompt, button: "Merge pull request #151", merged: /Merged #151/, gone: true };
   const stackRow = { title: MERGE_CLICK_STATES[0].title, prompt: MERGE_CLICK_STATES[0].prompt, button: "Merge 3 pull requests in order: #250, #251, then #252", merged: /Merged #250, #251, then #252/, header: "3 of 3 PRs merged" };
   const button = (page, name) => page.getByRole("button", { name, exact: true }).filter({ visible: true }).first();
   const panel = async (page, r) => { await page.setViewportSize(TALL); await openChat(page, r.title, r.prompt); await page.getByRole("button", { name: "Follow-up", exact: true }).last().click(); await button(page, r.button).waitFor({ timeout: 60_000 }); };
@@ -1448,12 +1453,16 @@ async function mergeClickShots({ shoot, billing }) {
     // The toast shows once the header and rows read the merge (a-merge-outcome-reads-the-same-everywhere): catch the
     // toast beside them before it closes, then the settled frame.
     if (r.header) await page.getByRole("progressbar", { name: r.header }).filter({ visible: true }).first().waitFor({ timeout: 2_000 });
+    // Home's Needs you drops the ask with the toast (the live store holds the merge's read): no "is approved" row left.
+    if (r.gone) await page.getByText(/ is approved/).filter({ visible: true }).first().waitFor({ state: "hidden", timeout: 2_000 });
     await shoot.now(`mc-toast-${size}-${theme}`, page, theme);
   };
   await shoot("mc-done-home-phone-light", PHONE, "light", click(single, "light", phone, "home-phone"));
   await shoot("mc-done-panel-dark", TALL, "dark", click(stackRow, "dark", panel, "panel"));
   const receipts = { title: MERGE_CLICK_STATES[1].title, prompt: MERGE_CLICK_STATES[1].prompt, button: "Merge pull request #255", merged: /Merged #255/, header: "1 of 1 PRs merged" };
   await shoot("mc-done-panel-light", TALL, "light", click(receipts, "light", panel, "panel"));
+  const digest = { title: MERGE_CLICK_STATES[2].title, prompt: MERGE_CLICK_STATES[2].prompt, button: "Merge pull request #256", merged: /Merged #256/, gone: true };
+  await shoot("mc-done-home-phone-dark", PHONE, "dark", click(digest, "dark", phone, "home-phone"));
 }
 
 async function sendingShots({ shoot, seeded, call, home }) {

@@ -11,7 +11,8 @@ import { build } from "esbuild";
 const root = join(import.meta.dirname, "..");
 
 export type Stores = {
-  createLiveStore(client: never): { stop(): void; all(): { id: string; title: string }[] };
+  createLiveStore(client: never): { stop(): void; all(): { id: string; title: string }[]; get(id: string): unknown };
+  acceptWorkspace(w: unknown): void;
   createInboxStore(client: never): { stop(): void };
   createHomeExtras(client: never): { stop(): Promise<void>; priorities(): { id: string }[]; usage(): { accounts: unknown[] } };
   contributeDisplay(client: never, context: never): () => void;
@@ -36,7 +37,7 @@ const deep = new Proxy(function Stub() { return null; }, { get: (_t, k) => k ===
 for (const name of ${JSON.stringify([...names])}) exports[name] = special[name] ?? deep;`);
     const out = join(dir, "stores.mjs");
     await build({
-      stdin: { contents: `export { createLiveStore } from "./client/live"; export { createInboxStore } from "./client/inbox-store"; export { createHomeExtras } from "./client/home-view"; export { contributeDisplay } from "./client/display";`, resolveDir: root, loader: "ts" },
+      stdin: { contents: `export { createLiveStore, acceptWorkspace } from "./client/live"; export { createInboxStore } from "./client/inbox-store"; export { createHomeExtras } from "./client/home-view"; export { contributeDisplay } from "./client/display";`, resolveDir: root, loader: "ts" },
       bundle: true, format: "esm", platform: "node", outfile: out, logLevel: "silent", jsx: "automatic",
       alias: { "react-native": stub, "@getpaseo/plugin/client/ui": stub, "@getpaseo/plugin/client": stub },
       external: ["react", "react/*", "zod", "@tanstack/*", "@getpaseo/plugin", "lucide-react-native"],
