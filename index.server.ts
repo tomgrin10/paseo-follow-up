@@ -60,7 +60,7 @@ import { Governor } from "./server/governor";
 import { ListCache } from "./server/list-cache";
 import { scopeWriter, workflowSummary } from "./server/scopes";
 import { PrWorkflowStore } from "./server/pr-workflow";
-import { commandName } from "./shared/pr-workflow";
+import { commandName, handsMergeBack, noReviewRepoList, noReviewRepos } from "./shared/pr-workflow";
 import { projectRepo } from "./server/daemon";
 import { batchArchive, pruneUnsent } from "./server/batch-archive";
 import { statusCheck } from "./server/status-check";
@@ -155,8 +155,10 @@ export default function contribute(server: PluginServerContext) {
   const prWorkflow = new PrWorkflowStore(directory);
   let workspaceRepos: Map<string, string> = new Map();
   const workspaceRepo = (w: Workspace): string | null => (w.prs.find(p => p.snapshot?.state === "OPEN") ?? w.prs.at(-1))?.repo ?? workspaceRepos.get(w.id) ?? null;
+  /** Every repository a workspace touches: its open PRs' and its checkout's (the agent text's No review is all-or-nothing). */
+  const touchedRepos = (w: Workspace): string[] => [...new Set([...w.prs.filter(p => p.snapshot?.state !== "MERGED" && p.snapshot?.state !== "CLOSED").map(p => repoKey(p.repo)), ...(workspaceRepo(w) ? [repoKey(workspaceRepo(w)!)] : [])])];
   const knownRepos = (state: { workspaces: Workspace[] }) => new Set([...state.workspaces.filter(w => w.enable_tracking && !w.archived).flatMap(w => w.prs.map(p => repoKey(p.repo))), ...[...workspaceRepos.values()].map(repoKey)]);
-  const writeScopes = scopeWriter(directory, { agent: w => prWorkflow.agentWorkflow(workspaceRepo(w)), summary: state => workflowSummary([...knownRepos(state)].map(r => prWorkflow.cachedWorkflow(r))) });
+  const writeScopes = scopeWriter(directory, { agent: w => prWorkflow.agentWorkflow(workspaceRepo(w), touchedRepos(w)), summary: state => workflowSummary([...knownRepos(state)].map(r => prWorkflow.cachedWorkflow(r))) });
   // Every write: scopes for the hooks, then any open brief whose questions are now all settled resolves (every answer
   // path writes here, so one check covers them all; tests/stale-brief.test.ts).
   // Not awaited: onChanged runs inside the store's write queue, and resolving a brief can write the store again
@@ -366,6 +368,8 @@ export default function contribute(server: PluginServerContext) {
     // Getting started: fresh or existing is decided from what's on disk before anything below writes state.
     await onboarding.init().catch(() => undefined);
     unlock = await store.lock();
+    // Before anything ticks: which repositories are No review (agentMerges), so the first tick after a restart is already quiet.
+    await prWorkflow.read();
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await writeFile(bridge, withRuntimePrelude(mcpSource), { mode: 0o600 });
     // 1.4.0-beta.2: tools are per agent now; drop the old user-scope registrations that spawned mcp.mjs in every session.
@@ -528,7 +532,7 @@ export default function contribute(server: PluginServerContext) {
     await agentHooks.confirm(w.id, agentId, summary);
     return { workspaceId: w.id, synced: true as const };
   });
-  handle(rpc.agentStatusRpc, async ({ agentId }, { paseo }) => { await requireReady(); const workspaceId = await callerWorkspaceId(agentId, paseo); const w = agentWorkspace(await store.snapshot(), agentId, "read", workspaceId, "pr"); return { ...w, prWorkflow: prWorkflow.agentWorkflow(workspaceRepo(w)), nextMessageInfo: nextMessageInfo(w, Date.now()) }; });
+  handle(rpc.agentStatusRpc, async ({ agentId }, { paseo }) => { await requireReady(); const workspaceId = await callerWorkspaceId(agentId, paseo); const w = agentWorkspace(await store.snapshot(), agentId, "read", workspaceId, "pr"); return { ...w, prWorkflow: prWorkflow.agentWorkflow(workspaceRepo(w), touchedRepos(w)), nextMessageInfo: nextMessageInfo(w, Date.now()) }; });
   handle(rpc.activateRpc, async ({ workspaceId }) => { await requireReady(); return engine.activate(workspaceId); });
   handle(rpc.sendRpc, async ({ workspaceId, batchId }) => { await requireReady(); return engine.sendPending(workspaceId, batchId); });
   handle(rpc.recoverRpc, async ({ workspaceId }) => { await requireReady(); return engine.startRecovery(workspaceId); });
@@ -569,9 +573,9 @@ export default function contribute(server: PluginServerContext) {
         if (seen.has(ancestor)) throw new Error("PR parent relationships cannot form a cycle.");
         seen.add(ancestor); ancestor = w.prs.find(p => p.key === ancestor)?.parent ?? null;
       }
-      const altered = !existing || existing.stack !== stack || existing.parent !== parent || disposition !== undefined && existing.disposition !== disposition || agentMerges !== undefined && !!existing.agentMerges !== agentMerges;
+      const altered = !existing || existing.stack !== stack || existing.parent !== parent || disposition !== undefined && existing.disposition !== disposition || agentMerges !== undefined && existing.agentMerges !== agentMerges;
       if (existing) { existing.registeredAgentId = agentId; existing.discoveredFromSubmission = false; existing.stack = stack; existing.parent = parent; if (disposition !== undefined) existing.disposition = disposition; if (agentMerges !== undefined) existing.agentMerges = agentMerges; }
-      else w.prs.push({ registeredAgentId: agentId, key, repo, number, stack, parent, disposition: disposition ?? null, snapshot: null, error: null, ...(agentMerges ? { agentMerges } : {}) });
+      else w.prs.push({ registeredAgentId: agentId, key, repo, number, stack, parent, disposition: disposition ?? null, snapshot: null, error: null, ...(agentMerges !== undefined ? { agentMerges } : {}) });
       if (altered) changed(w); return w;
     });
     void engine.nudge(result.id); return result;
@@ -751,7 +755,7 @@ export default function contribute(server: PluginServerContext) {
     const config = await reviewerStore.read();
     const seen = new Set(Object.keys(config.repos));
     for (const w of (await store.snapshot()).workspaces) for (const p of w.prs) seen.add(repoKey(p.repo));
-    return { config, repos: [...seen].sort() };
+    return { config, repos: [...seen].sort(), noReview: noReviewRepos(prWorkflow.current()) };
   };
   const prWorkflowRepos = async () => {
     const repos = new Set((await reviewerSettings()).repos);
@@ -776,9 +780,9 @@ export default function contribute(server: PluginServerContext) {
     if (refresh) prWorkflow.onChanged();
     return view;
   });
-  handle(rpc.setPrWorkflowRpc, async ({ repo, setting, default: fallback, mergeMethod, reviewFix }) => {
+  handle(rpc.setPrWorkflowRpc, async ({ repo, setting, default: fallback, mergeMethod, reviewFix, review }) => {
     await requireReady();
-    if ((setting !== undefined || mergeMethod !== undefined || (reviewFix !== undefined && repo)) && !repo) throw new Error("Name the repository (owner/name) to change.");
+    if ((setting !== undefined || mergeMethod !== undefined || review !== undefined || (reviewFix !== undefined && repo)) && !repo) throw new Error("Name the repository (owner/name) to change.");
     await prWorkflow.mutate(config => {
       if (fallback !== undefined) config.default = fallback;
       if (!repo) { if (reviewFix) config.reviewFix = reviewFix; return; }
@@ -786,6 +790,7 @@ export default function contribute(server: PluginServerContext) {
       if (setting !== undefined) { if (setting === null) delete own.workflow; else own.workflow = setting; }
       if (mergeMethod !== undefined) { if (mergeMethod === null) delete own.mergeMethod; else own.mergeMethod = mergeMethod; }
       if (reviewFix !== undefined) { if (reviewFix === null) delete own.reviewFix; else own.reviewFix = reviewFix; }
+      if (review !== undefined) { if (review === null || review === "team") delete own.review; else own.review = review; }
     });
     // A changed workflow changes readiness and merge: check the PRs again now rather than on the next poll.
     void engine.nudge();
@@ -1159,7 +1164,8 @@ export default function contribute(server: PluginServerContext) {
     return result;
   });
   // Home, the sidebar badge and the pills poll this; an unchanged list answers in a few bytes (see inboxAnswer).
-  handle(rpc.inboxListRpc, async ({ etag }) => { await requireReady(); return inboxAnswer({ ...await inbox.list(), error: inboxError }, etag); });
+  handle(rpc.inboxListRpc, async ({ etag }) => { await requireReady(); const handedBack = noReviewRepoList().length ? (await store.snapshot()).workspaces.flatMap(w => w.prs.filter(handsMergeBack).map(p => p.key)) : [];
+    return inboxAnswer({ ...await inbox.list(), error: inboxError, ...(handedBack.length ? { handedBack } : {}) }, etag); });
   handle(rpc.inboxBriefRpc, async ({ agentId }) => { await requireReady(); return { brief: await inbox.brief(agentId) }; });
   handle(rpc.inboxActRpc, async (input, context) => { await requireReady(); return inbox.act(input, actorOf(context)); });
   handle(rpc.needsYouRpc, async ({ agentId, ...input }, { paseo }) => {
