@@ -9,6 +9,8 @@ import { mergePriorities, prioritiesFileSchema, type Priority } from "../shared/
  */
 export class PriorityStore {
   private tail: Promise<unknown> = Promise.resolve();
+  /** After each write (the Home feed pushes the new order). */
+  onWrite: () => void = () => {};
   constructor(readonly directory: string) {}
   private get path() { return join(this.directory, "priorities.json"); }
   async read(): Promise<Priority[]> {
@@ -26,6 +28,7 @@ export class PriorityStore {
       } finally { await unlink(temporary).catch(() => undefined); }
       return items;
     });
+    void next.then(() => this.onWrite(), () => undefined);
     this.tail = next.catch(() => undefined);
     return next;
   }
