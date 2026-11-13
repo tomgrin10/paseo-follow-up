@@ -23,6 +23,10 @@ not a patch for one instance.
   - `tests/status-invariants.test.ts`: every invariant in `shared/status-invariants.ts` holds over a grid and the
     bug fixtures.
   - `tests/agent-parity.test.ts`: every client RPC has a tool or an exemption.
+  - `tests/answer-delivery.test.ts`: a copied or in-chat answer stays in Needs you until the agent's turn shows its
+    marker, Send delivers it, or Sign off settles it; `tests/put-in-chat.test.ts` drives a fake composer (empty draft,
+    typing during focus, repeat press, focus refused falls back to Copy); `tests/brief-card.test.ts`: no "No ask
+    stated" card beside a Needs-you item.
   - `tests/idle-rpc.test.ts`: the real client stores, bundled with React Native stubbed, run ten simulated minutes against
     a fake host: at most one RPC a minute with `client.subscribe` (0.16), and still polling without it (0.15).
   - `tests/feeds.test.ts`: the worker's feeds read once per change, push only changes, and watch Smart Session only
@@ -188,7 +192,9 @@ PLAYWRIGHT_CORE=<playwright-core dir> CHROMIUM=<chromium binary> ~/paseo-harness
 - **Shots** (`follow-up-<shot>.png`, into `--out`, default `docs/screenshots/`): `setup`, `home`, `panel`,
   `questions`, `pill`, `pr-sheet`, `phone`, `whats-new`, `linked-items` (the Linked list open over Home's detail) and
   `sidebar` (Follow-up's sidebar view on Paseo 0.16, cropped to the sidebar; shoot it alone with
-  `HARNESS_PASEO=0.16`). `--only a,b` shoots a subset. Home is reached with
+  `HARNESS_PASEO=0.16`). Review shots (not in the default set): `put-in-chat` (Paseo 0.16: the question's actions row
+  on the dialog, phone and pill, answers waiting to be sent, Sign off as the escape hatch, and the waiting row's
+  one-click Send). `--only a,b` shoots a subset. Home is reached with
   `scripts/ui-home.mjs`, which fails the shot instead of shooting the wrong page.
 - **Theme.** Dark for desktop shots, light for the phone shot; `--scheme dark|light` overrides both.
 - **README images.** `npm run shots:readme` (`scripts/readme-shots.sh`) re-renders the three the README leads with,
