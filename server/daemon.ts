@@ -7,6 +7,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { readSharedJson } from "./shared-file";
 import { createRequire } from "node:module";
+import { TICK_MS } from "../shared/poll";
 import type { Workspace, Batch } from "../shared/model";
 import type { Gateway, Runtime } from "./engine";
 import type { State } from "../shared/model";
@@ -85,7 +86,7 @@ export interface Daemon {
   respondToPermission(agentId: string, requestId: string, response: { behavior: "allow" }): Promise<void>;
   fetchAgents(options?: unknown): Promise<{ entries: { agent: Agent }[]; pageInfo: { hasMore: boolean; nextCursor: string | null } }>;
   fetchWorkspaces(options?: unknown): Promise<{ entries: WorkspaceRow[]; pageInfo: { hasMore: boolean; nextCursor: string | null } }>;
-  fetchAgentTimeline(id: string, options: unknown): Promise<{ entries: { item: unknown; seqStart: number; timestamp?: string }[]; startCursor: { epoch: string; seq: number } | null; endCursor?: { epoch: string; seq: number } | null; epoch?: string; reset?: boolean; hasOlder: boolean; error: string | null; gap: boolean; staleCursor: boolean }>;
+  fetchAgentTimeline(id: string, options: unknown): Promise<{ entries: { item: unknown; seqStart: number; timestamp?: string }[]; startCursor: { epoch: string; seq: number } | null; endCursor?: { epoch: string; seq: number } | null; epoch?: string; reset?: boolean; hasOlder: boolean; hasNewer?: boolean; error: string | null; gap: boolean; staleCursor: boolean }>;
   listProviderSubagents(id: string): Promise<{ subagents: { status: string }[]; error?: string | null }>;
   sendMessage(id: string, text: string, options: { messageId: string; activeTurnBehavior: "steer" }): Promise<void>;
   setWorkspaceLabel(input: { workspaceId: string; label: { name: string; color: "emerald" }; assigned: boolean }): Promise<unknown>;
@@ -125,26 +126,46 @@ export async function withDaemon<T>(work: (client: Daemon) => Promise<T>): Promi
 /**
  * One daemon connection shared by everything a tick asks (one-daemon-connection-per-tick). 2026-11-12: PaseoGateway
  * opened a WebSocket per workspace per tick through withDaemon (96 a minute live, each with its own hello and status).
- * The connection closes after `idleMs` unused and is replaced after `maxMs`, so it never outlives a tick by much; it
- * is in `clients`, so closeConnections closes it within the stop's deadline, and nothing opens after stop.
+ * It is in `clients`, so closeConnections closes it within the stop's deadline, and nothing opens after stop.
+ *
+ * The connection outlives the gap between ticks (a-running-worker-holds-one-daemon-connection): it closes only after
+ * SHARED_CLIENT_IDLE_MS unused, which is the engine's TICK_MS plus a named margin, so a worker that keeps ticking
+ * holds one connection. 2026-11-13 live: with a 5 s idle close and a 60 s replacement, every 15 s tick opened a new
+ * WebSocket (the worker said hello 39 times in 12 min, each with its own handshake, status and buffers). A dropped
+ * connection is still retired at once, and SHARED_CLIENT_MAX_MS replaces a long-lived one now and then.
  */
+/** How far past one tick interval the shared connection stays open unused: a slow tick still finds it. */
+export const SHARED_CLIENT_MARGIN_MS = 10_000;
+export const SHARED_CLIENT_IDLE_MS = TICK_MS + SHARED_CLIENT_MARGIN_MS;
+export const SHARED_CLIENT_MAX_MS = 30 * 60_000;
 export type SharedConnect = (<T>(work: (client: Daemon) => Promise<T>) => Promise<T>) & { idle(): Promise<void> };
-type Shared = { client: Promise<Daemon>; opened: number; users: number; lastUsed: number; retired: boolean };
+type Shared = { client: Promise<Daemon>; opened: number; users: number; lastUsed: number; retired: boolean; timer: ReturnType<typeof setTimeout> | null };
 export function sharedDaemon(open: () => Promise<Daemon> = openDaemon, o: { idleMs?: number; maxMs?: number; now?: () => number } = {}): SharedConnect {
-  const idleMs = o.idleMs ?? 5_000, maxMs = o.maxMs ?? 60_000, now = o.now ?? Date.now;
+  const idleMs = o.idleMs ?? SHARED_CLIENT_IDLE_MS, maxMs = o.maxMs ?? SHARED_CLIENT_MAX_MS, now = o.now ?? Date.now;
   let current: Shared | null = null;
   const close = async (entry: Shared) => {
     if (current === entry) current = null;
+    if (entry.timer) { clearTimeout(entry.timer); entry.timer = null; }
     const client = await entry.client.catch(() => null);
     if (client) { clients.delete(client); await client.close().catch(() => undefined); }
   };
   const settle = (entry: Shared) => { if (entry.users === 0 && (entry.retired || now() - entry.lastUsed >= idleMs)) void close(entry); };
+  // One idle timer per connection, re-armed for what is left of the idle bound (not a timer per call).
+  const arm = (entry: Shared) => {
+    if (entry.timer) return;
+    entry.timer = setTimeout(() => {
+      entry.timer = null;
+      if (current !== entry && !entry.retired) return;
+      if (entry.users === 0 && now() - entry.lastUsed < idleMs) arm(entry); else settle(entry);
+    }, Math.max(0, idleMs - (now() - entry.lastUsed)) || idleMs);
+    (entry.timer as { unref?: () => void }).unref?.();
+  };
   const connect = (async <T>(work: (client: Daemon) => Promise<T>): Promise<T> => {
     if (stopped) throw new Error("Follow-up is stopping");
     if (current && now() - current.opened >= maxMs) { current.retired = true; const old = current; current = null; settle(old); }
     if (!current) {
       const client = open().then(c => { if (stopped) { void c.close().catch(() => undefined); throw new Error("Follow-up is stopping"); } clients.add(c); return c; });
-      const entry: Shared = { client, opened: now(), users: 0, lastUsed: now(), retired: false };
+      const entry: Shared = { client, opened: now(), users: 0, lastUsed: now(), retired: false, timer: null };
       current = entry;
       void client.catch(() => { if (current === entry) current = null; });
     }
@@ -161,7 +182,7 @@ export function sharedDaemon(open: () => Promise<Daemon> = openDaemon, o: { idle
       }
     } finally {
       entry.users--; entry.lastUsed = now();
-      if (entry.users === 0) { if (entry.retired) settle(entry); else setTimeout(() => settle(entry), idleMs).unref?.(); }
+      if (entry.users === 0) { if (entry.retired) settle(entry); else arm(entry); }
     }
   }) as SharedConnect;
   connect.idle = async () => { if (current) { const entry = current; if (entry.users === 0 && now() - entry.lastUsed >= idleMs) await close(entry); } };
@@ -256,20 +277,23 @@ async function readAll(client: Daemon, agentId: string): Promise<Read> {
   return { entries: entries.sort((a, b) => a.seqStart - b.seqStart), complete, end, incremental: false };
 }
 /**
- * Only what's new since `since` (plus a small overlap), for a live agent whose history is already cached.
+ * Only what's new since `since` (plus a small overlap), for a live agent whose history is already cached: read forward
+ * from the cursor (`direction: "after"`, Paseo 0.13+), so a rescan fetches the entries added since, not a fixed page.
+ * 2026-11-13: it read the newest 100 entries on every 15 s rescan of a running agent; with live-sized items (8 KB tool
+ * output) that was ~800 KB parsed per scan to find a handful of new entries (a-rescan-reads-only-new-entries).
  * Null means the cursor no longer applies (new epoch, reset, gap): read everything instead.
  */
 async function readSince(client: Daemon, agentId: string, since: Cursor): Promise<Read | null> {
-  const entries: Entry[] = []; let cursor: Cursor | null = null; let end: Cursor | null = null;
+  const entries: Entry[] = []; let end: Cursor | null = null;
+  let cursor: Cursor = { epoch: since.epoch, seq: Math.max(0, since.seq - OVERLAP) };
   for (let pageIndex = 0; pageIndex < 20; pageIndex++) {
-    const page = await client.fetchAgentTimeline(agentId, { direction: cursor ? "before" : "tail", ...(cursor ? { cursor } : {}), limit: 100, projection: "canonical", timeout: 15_000 });
+    const page = await client.fetchAgentTimeline(agentId, { direction: "after", cursor, limit: 100, projection: "canonical", timeout: 15_000 });
     if (page.error || page.gap || page.staleCursor || page.reset || (page.epoch && page.epoch !== since.epoch)) return null;
-    if (pageIndex === 0) { end = page.endCursor ?? null; if (end && end.epoch !== since.epoch) return null; }
     entries.push(...page.entries);
-    const oldest = page.startCursor?.seq ?? page.entries[0]?.seqStart;
-    if (!page.hasOlder || (oldest !== undefined && oldest <= since.seq - OVERLAP)) return { entries: entries.filter(e => e.seqStart > since.seq - OVERLAP).sort((a, b) => a.seqStart - b.seqStart), complete: true, end, incremental: true };
-    if (!page.startCursor) return null;
-    cursor = page.startCursor;
+    if (page.endCursor) { if (page.endCursor.epoch !== since.epoch) return null; end = page.endCursor; }
+    if (!page.hasNewer) return { entries: entries.filter(e => e.seqStart > since.seq - OVERLAP).sort((a, b) => a.seqStart - b.seqStart), complete: true, end: end ?? since, incremental: true };
+    if (!page.endCursor || page.endCursor.seq <= cursor.seq) return null;
+    cursor = page.endCursor;
   }
   return null;
 }
