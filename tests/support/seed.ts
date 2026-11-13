@@ -15,7 +15,7 @@ export async function seed(directory: string): Promise<void> {
   const brief = briefSchema.parse({ id: FIXTURE.briefId, turnId: "turn-1", source: "agent", kind: "decision", ask: "Which encoding?", sourceLine: "From the agent", at: now,
     decisions: [{ id: "D1", question: "Which encoding?", options: [{ letter: "A", label: "UTF-8" }, { letter: "B", label: "UTF-8 with BOM" }] }] });
   const inbox = emptyInbox();
-  inbox.importedAt = now; inbox.primedAt = now;
+  inbox.importedAt = now; inbox.primedAt = now; inbox.notifiedAt = now;
   inbox.entries[FIXTURE.agentId] = { ...newEntry(FIXTURE.agentId), brief };
   await writeFile(join(directory, "inbox.json"), JSON.stringify(inbox), { mode: 0o600 });
 }

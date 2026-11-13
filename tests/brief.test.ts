@@ -215,7 +215,7 @@ async function service(agents: AgentInfo[], o: { tails?: Record<string, unknown[
     guard: async () => o.pauses ?? null, graceMs: 5, permissionSettleMs: o.settleMs ?? 30_000, settleMs: 40, settleStepMs: 5, now: () => now(),
     briefs: { async sink(agentId, brief) { appended.push({ agentId, brief }); }, async call(id) { if (o.callDelay) await new Promise(r => setTimeout(r, o.callDelay)); return o.calls?.[id] ?? null; }, async pr(_id, event) { return o.pr ? { ...o.pr, event: event ?? null } : null; }, async prs() { return o.prs ?? (o.pr ? [o.pr] : []); } },
   });
-  await inbox.store.mutate(s => { s.importedAt = T0; s.lastSeen = at(0); s.primedAt = T0; });
+  await inbox.store.mutate(s => { s.importedAt = T0; s.lastSeen = at(0); s.primedAt = T0; s.notifiedAt = T0; });
   return { inbox, appended, setNow: (f: () => number) => { now = f; }, entry: async (id = "main") => (await inbox.store.snapshot()).entries[id], done: () => rm(dir, { recursive: true, force: true }) };
 }
 const main = { id: "main", workspaceId: "w1", parentAgentId: null };
