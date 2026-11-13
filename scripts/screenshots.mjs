@@ -1326,7 +1326,8 @@ async function prLinkShots({ shoot, billing }) {
   ];
   const TALL = { width: DESKTOP.width, height: 1300 };
   for (const r of rows) for (const theme of ["light", "dark"]) {
-    const settle = page => page.getByRole("link", { name: r.link }).filter({ visible: true }).first().waitFor();
+    // The row may sit below the fold on a phone: bring it on screen.
+    const settle = async page => { const link = page.getByRole("link", { name: r.link }).filter({ visible: true }).first(); await link.waitFor(); await link.scrollIntoViewIfNeeded(); };
     await shoot(`pl-${r.key}-panel-${theme}`, TALL, theme, async page => {
       await page.setViewportSize(TALL); await openChat(page, r.title, r.prompt);
       await page.getByRole("button", { name: "Follow-up", exact: true }).last().click(); await settle(page);

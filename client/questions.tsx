@@ -17,7 +17,8 @@ import { Button, Card, CardRow, Chip, FoldRow, IconButton, SubmitScope, errorTex
 import { Spinner } from "./motion";
 import { mergedColor, tint, withAlpha, type Colors } from "./theme";
 import { overviewKey, workspaceKey } from "./keys";
-import { RichText } from "./rich-text";
+import { PrLinksProvider, RichText } from "./rich-text";
+import { prLinksByNumber } from "../shared/presentation";
 import { notice, openQuestion, runAction } from "./toasts";
 import { putInChatOrCopy } from "../shared/put-in-chat";
 import { useChatComposer } from "./put-in-chat";
@@ -190,7 +191,8 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
     </View>)}
     {!dense && pr && <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       <Icon name="GitPullRequest" size={13} color={pr.snapshot?.state === "MERGED" ? mergedColor(c) : c.foregroundMuted} />
-      <Text numberOfLines={1} style={[t.meta, { flexShrink: 1 }]}>About #{pr.number}{pr.snapshot?.title ? ` · ${pr.snapshot.title}` : ""}</Text>
+      {/* "#142" opens the PR (a-row-that-names-a-pr-opens-it-in-one-click). */}
+      <PrLinksProvider prs={prLinksByNumber([pr])}><RichText linkColor={c.foreground} numberOfLines={1} style={[t.meta, { flexShrink: 1 }]}>{`About #${pr.number}${pr.snapshot?.title ? ` · ${pr.snapshot.title}` : ""}`}</RichText></PrLinksProvider>
     </View>}
     {!dense && task && !(inline && task.title.trim() === q.title.trim()) && <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       <Icon name="ListChecks" size={13} color={c.foregroundMuted} />
