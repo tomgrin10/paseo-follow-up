@@ -203,6 +203,13 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    and why. A turn without an acknowledgment never blocks; only a condition sent twice unchanged, acknowledged or not,
    waits, as its own task. Guarded by `tests/send-decision.test.ts`, `tests/no-retry.test.ts` and `tests/task-rows.test.ts`
    ([docs/workspaces.md](docs/workspaces.md#repairs-are-tasks-q49)).
+17. **A No review repository never asks for review or merge** (`a-no-review-repo-never-asks-for-review-or-merge`).
+   A repository is Team review (the default: the developer adds reviewers and merges) or No review (the agent merges
+   its own PRs once checks pass), set in Settings → PR workflow or with `set_pr_workflow review`. One rule decides it:
+   `agentMerges(pr)` in `shared/pr-workflow.ts` is the PR's own register_pr answer, else whether its repository is No
+   review. Every consumer (the reviewers ask, merge asks, the quiet merge, status invariants) reads that helper, never
+   `pr.agentMerges`; the set of No review repositories is filled before the first tick and on every save, so the
+   lookup costs a set read. Guarded by `tests/review-mode.test.ts` ([docs/prs.md](docs/prs.md#review-mode)).
 
 ## Bugs
 

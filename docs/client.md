@@ -89,6 +89,7 @@ Nothing polls while the app is hidden.
 | `client/agents.tsx` | Settings → Agents: the shared job rows with each row's More, and Background jobs (Wait). |
 | `client/job-rows.tsx` | The job rows Settings → Agents and setup's Helper agents step share (`JobRows`, `RolePickers`). |
 | `client/shipping.tsx` | Settings → Following → Shipping PRs. |
+| `client/review-mode.tsx` | Per-repository review mode: the Settings Review row (its menu uses `MenuItemContent`), the Needs-you reviewers row's "Let the agent merge in <repo>" link, and the Undo toast both share. See [docs/prs.md](prs.md#review-mode). |
 | `client/onboarding.tsx` | Getting started. |
 | `client/updates.tsx` | Settings → General's Updates sections, Home's update notice, setup's Updates step ([updates.md](updates.md)). |
 | `client/release-notes.tsx` | What's new and the notes list. Home's version marker is `VersionMark` in `client/updates.tsx`. |
