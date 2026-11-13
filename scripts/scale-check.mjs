@@ -71,15 +71,15 @@ const heapDir = arg("heap-snapshot", null);
 const cpuDir = arg("cpu-prof", null);
 // --alloc-prof <dir>: what every node process allocates, garbage included (scripts/alloc-prof.cjs, alloc-top.mjs).
 const allocDir = arg("alloc-prof", null);
-// --request-trace <file>: every DaemonClient call each node process makes, with its caller (scripts/request-trace.cjs),
-// so the idle request budget's misses are attributed to code (scripts/request-top.mjs; worker.idleWindow bounds it).
+// --request-trace <file>: every daemon call the worker makes, with the worker frames that made it (server/request-trace.ts,
+// FOLLOW_UP_REQUEST_TRACE), so request budgets' misses name their code (scripts/request-top.mjs; worker.idleWindow bounds it).
 const traceFile = arg("request-trace", null);
 // --realistic also answers GitHub reads with live-sized PR bodies (scripts/scale-github.mjs), so a cold start reads
 // every PR the way the live worker does.
 let github = null;
 if (REALISTIC) { await mkdir(join(root, "bin"), { recursive: true }); await writeFile(join(root, "bin/gh"), scaleGh()); const { chmod } = await import("node:fs/promises"); await chmod(join(root, "bin/gh"), 0o700); if (shape) { await writeFile(join(root, "pr-states.json"), JSON.stringify(shape.prStates)); process.env.SCALE_GH_STATES = join(root, "pr-states.json"); }
   github = await fakeGithub({ dir: root, gh: join(root, "bin/gh"), owners: shape ? shape.owners : ["example"], gzip: process.argv.includes("--gh-gzip") }); }
-const env = harnessEnv(root, { home, strip: github?.strip ?? [], set: { ...(traceFile ? { FOLLOW_UP_REQUEST_TRACE: traceFile } : {}), ...(heapDir || cpuDir || allocDir || traceFile ? { NODE_OPTIONS: [heapDir && `--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=${heapDir}`, cpuDir && `--cpu-prof --cpu-prof-dir=${cpuDir}`, allocDir && `--require ${join(dirname(fileURLToPath(import.meta.url)), "alloc-prof.cjs")}`, traceFile && `--require ${join(dirname(fileURLToPath(import.meta.url)), "request-trace.cjs")}`].filter(Boolean).join(" ") } : {}), ...(allocDir ? { FOLLOW_UP_ALLOC_PROF: allocDir, ...(process.env.FOLLOW_UP_ALLOC_PROF_WINDOWS ? { FOLLOW_UP_ALLOC_PROF_WINDOWS: process.env.FOLLOW_UP_ALLOC_PROF_WINDOWS } : {}) } : {}), PASEO_DAEMON_URL: counted, PASEO_RELAY_ENABLED: "false", ...(github?.env ?? {}) } });
+const env = harnessEnv(root, { home, strip: github?.strip ?? [], set: { ...(traceFile ? { FOLLOW_UP_REQUEST_TRACE: traceFile } : {}), ...(heapDir || cpuDir || allocDir ? { NODE_OPTIONS: [heapDir && `--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=${heapDir}`, cpuDir && `--cpu-prof --cpu-prof-dir=${cpuDir}`, allocDir && `--require ${join(dirname(fileURLToPath(import.meta.url)), "alloc-prof.cjs")}`].filter(Boolean).join(" ") } : {}), ...(allocDir ? { FOLLOW_UP_ALLOC_PROF: allocDir, ...(process.env.FOLLOW_UP_ALLOC_PROF_WINDOWS ? { FOLLOW_UP_ALLOC_PROF_WINDOWS: process.env.FOLLOW_UP_ALLOC_PROF_WINDOWS } : {}) } : {}), PASEO_DAEMON_URL: counted, PASEO_RELAY_ENABLED: "false", ...(github?.env ?? {}) } });
 const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env, timeout: 120_000, maxBuffer: 8 << 20 })).stdout);
 let daemon = null; let client = null;
 const start = async () => {

@@ -29,6 +29,7 @@ import { compactionDelivered, turnIdOf } from "../shared/status";
 import { activeWindowMs, backgroundCount, isLive, isLoaded, recentlyUsed, workspaceActive, conversationGone, DEFAULT_ACTIVE_WINDOW_DAYS, DAY_MS } from "./agent-load";
 import { HistoryCache } from "./history-cache";
 import { DaemonDirectory, type DirectoryRows } from "./directory";
+import { traceDaemon } from "./request-trace";
 type RecoveryAgentOptions = Partial<PluginBeforeRequests["agent.create"]["config"]> & { workspaceId: string; labels: Record<string, string>; idempotencyKey: string; env: Record<string, string>; /** Paseo 0.16 (features.backgroundAgents): no tab, no notification, no sidebar row. */ background?: boolean };
 
 /**
@@ -190,7 +191,7 @@ export function sharedDaemon(open: () => Promise<Daemon> = openDaemon, o: { idle
 }
 async function openDaemon(): Promise<Daemon> {
   const module = require(["@getpaseo", "client", "internal", "daemon-client"].join("/")) as Module;
-  const client = new module.DaemonClient(await daemonOptions());
+  const client = traceDaemon(new module.DaemonClient(await daemonOptions()));
   try { await client.connect(); return client; }
   catch (error) { await client.close().catch(() => undefined); throw error; }
 }
