@@ -769,8 +769,19 @@ async function clearDock(page, inPane, dockButton) {
   }, dockTop);
 }
 /** A workspace's agent chat, opened from Paseo's sidebar like a person would (deep links land before the host is known). */
+/**
+ * Opens a workspace's chat from Paseo's sidebar. The sidebar shows a project's first rows and folds the rest under
+ * "Show more", and the order moves as earlier shots touch workspaces: a later pass found "Billing retries" folded and
+ * timed out (ny-brief-same-q-panel-dark, 2026-11-13). Unfold every project until the row is there, then click it.
+ */
 async function openChat(page, title, prompt) {
-  await page.getByText(title, { exact: true }).first().click({ timeout: 30000 });
+  const row = page.getByText(title, { exact: true }).first();
+  for (let i = 0; i < 4 && !await row.isVisible().catch(() => false); i++) {
+    const more = page.getByText("Show more", { exact: true }).filter({ visible: true }).first();
+    if (!await more.isVisible().catch(() => false)) break;
+    await more.click();
+  }
+  await row.click({ timeout: 30000 });
   await page.getByText(prompt).first().waitFor();
 }
 
