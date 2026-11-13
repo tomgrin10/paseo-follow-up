@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { availableTools, attachableTools, nativeTools, nativeToolsAvailable, PREFIX, type SessionFlags } from "../server/native-tools";
 import { toolList, overseerTools } from "../server/mcp.mjs";
+/** Paseo 0.16 requires `metadata` on hook agents and session requests; spread, so 0.15's types accept it too. */
+const withMetadata = { metadata: {} };
 
 const flags = (over: Partial<SessionFlags> = {}): SessionFlags => ({ recovery: false, brief: true, root: true, overseer: false, ...over });
 const names = (list: { 0: string }[]) => list.map(t => t[0]).sort();
@@ -46,7 +48,7 @@ test("a call runs the RPC handler with the daemon's agent id, re-checks the role
   });
   for (const tool of tools) assert.match(tool.name, new RegExp(`^${PREFIX}[a-z_]+$`));
   const status = tools.find(t => t.name === "follow_workspace_status")!;
-  const context = { agent: { id: "agent-1", workspaceId: "wks_1", parentAgentId: null, provider: "claude", cwd: "/w", title: null }, paseo: {} as never, signal: new AbortController().signal };
+  const context = { agent: { id: "agent-1", workspaceId: "wks_1", parentAgentId: null, provider: "claude", cwd: "/w", title: null, ...withMetadata }, paseo: {} as never, signal: new AbortController().signal };
   const result = await status.execute({ agentId: "spoofed" } as never, context);
   assert.equal(result.isError, true, "unknown arguments are rejected, so an agentId can't be smuggled in");
   const ok = await status.execute({}, context);
