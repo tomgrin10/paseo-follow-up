@@ -1,0 +1,1 @@
+- An Add reviewers row says only what is new: "Suggested: Ravi" under "Add reviewers #246", not the ask again. No headline repeats its label or a PR number its chip shows.
