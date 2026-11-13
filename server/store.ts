@@ -67,6 +67,11 @@ export class Store {
     return this.apply(async current => {
       const draft = structuredClone(current);
       const value = await work(draft);
+      // An unchanged workspace gets its saved object back, so the next save validates only the changed ones and the
+      // engine still tells untouched workspaces by identity (a-send-never-clones-the-whole-state: 2026-11-13, a
+      // whole-state mutate re-validated all 140 workspaces on the next save, ~47 MB per send window).
+      const saved = new Map(current.workspaces.map(w => [w.id, w]));
+      draft.workspaces = draft.workspaces.map(w => { const was = saved.get(w.id); return was && sameJson(w, was) ? was : w; });
       return { value, next: sameJson(draft, current) ? null : draft, volatile: sameIgnoringReadTimes(draft, current) };
     });
   }
