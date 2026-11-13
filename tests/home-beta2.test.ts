@@ -280,6 +280,7 @@ test("usage prefers Smart Session's RPC, falls back to its file, and hides witho
   const home = await mkdtemp(join(tmpdir(), "follow-usage-")); t.after(() => rm(home, { recursive: true, force: true }));
   const now = () => NOW;
   let calls = 0;
+  await mkdir(join(home, "plugin-data", "smart-session"), { recursive: true });
   const viaRpc = new UsageReader(home, async (_p, method) => { calls++; return method === "smart-session.subscriptions" ? { zerosub: false, accounts: [] } : { windows: [{ id: "five_hour", pct: 50, resetsAt: null }] }; }, now);
   assert.equal((await viaRpc.read()).source, "rpc"); await viaRpc.read();
   assert.equal(calls, 2, "cached for a minute");
@@ -290,4 +291,15 @@ test("usage prefers Smart Session's RPC, falls back to its file, and hides witho
   const file = new UsageReader(home, async () => { throw new Error("Unknown plugin smart-session"); }, now);
   const usage = await file.read();
   assert.equal(usage.source, "file"); assert.equal(usage.accounts[0].family, "codex");
+});
+
+test("usage: without Smart Session's data directory, no read asks the daemon", async t => {
+  // 2026-11-13 test:scale:live: with Smart Session not installed, every usage refresh sent a failing
+  // smart-session.subscriptions RPC (1.3 of the worker's idle daemon requests a minute).
+  const home = await mkdtemp(join(tmpdir(), "follow-usage-")); t.after(() => rm(home, { recursive: true, force: true }));
+  let calls = 0; let now = NOW;
+  const reader = new UsageReader(home, async () => { calls++; throw new Error("Unknown plugin smart-session"); }, () => now);
+  for (let minute = 0; minute < 10; minute++) { await reader.read(); await reader.refresh(); now += 60_000; }
+  assert.equal(calls, 0, `${calls} daemon requests in 10 minutes without Smart Session`);
+  assert.deepEqual(await reader.read(), { available: false, source: null, accounts: [] });
 });
