@@ -89,7 +89,7 @@ export class PrWorkflowStore {
     const next = this.tail.then(async () => {
       const config = structuredClone(await this.read());
       work(config);
-      for (const [key, value] of Object.entries(config.repos)) { if (value.review === "team") delete value.review; if (!value.workflow && !value.mergeMethod && !value.reviewFix && !value.review) delete config.repos[key]; }
+      for (const [key, value] of Object.entries(config.repos)) { if (value.review === "team") delete value.review; if (!value.workflow && !value.mergeMethod && !value.reviewFix && !value.review && !value.deploy) delete config.repos[key]; }
       const parsed = prWorkflowConfigSchema.parse(config);
       await this.write(parsed);
       this.cached = parsed; setNoReviewRepos(noReviewRepos(parsed));
@@ -177,7 +177,7 @@ export class PrWorkflowStore {
       const d = await this.detect(repo, fresh, false);
       const { setting, inherits } = repoSetting(config, repo);
       const own = config.repos[repo];
-      rows.push({ repo, setting, inherits, detected: d.workflow, effective: resolveWorkflow(setting, d.workflow), reason: d.reason, path: d.path, mergeMethod: own?.mergeMethod ?? null, reviewFix: own?.reviewFix ?? null, review: own?.review ?? "team", github: github(repo) });
+      rows.push({ repo, setting, inherits, detected: d.workflow, effective: resolveWorkflow(setting, d.workflow), reason: d.reason, path: d.path, mergeMethod: own?.mergeMethod ?? null, reviewFix: own?.reviewFix ?? null, review: own?.review ?? "team", deploy: own?.deploy ?? null, github: github(repo) });
     }
     return { gt: { installed: machine.gtInstalled, signedIn: machine.signedIn }, default: config.default, reviewFix: config.reviewFix, repos: rows };
   }

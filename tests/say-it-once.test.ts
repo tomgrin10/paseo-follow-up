@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { echoedItems, flagHeadline, HEADLINE_WORD, todoLine } from "../shared/headline";
+import { echoedItems, flagHeadline, HEADLINE_WORD, repeatsRow, sayNew, todoLine } from "../shared/headline";
 import { newEntry, prEndEvent, reduce, REASONS, type InboxRow, type Reason, type ReasonEntry } from "../shared/inbox";
 import { prChip } from "../shared/home";
 
@@ -31,7 +31,8 @@ function flagged(reason: Reason): { row: InboxRow; snap: Snap } {
   } else if (reason === "ci") { snap = { state: "OPEN", failedChecks: ["test", "lint"] }; reasons = [entry("#240 test, lint")]; }
   else if (reason === "review") { snap = { state: "OPEN", threads: 2 }; reasons = [entry("2 review threads to fix on #240")]; }
   else if (reason === "reviewers") reasons = [entry("#240")];
-  else reasons = [entry(`The agent's ${reason} message`)];
+  // What each reason's detail really carries: the permission's request, the failure, the pause, the agent's last line.
+  else reasons = [entry({ permission: "Run pnpm test", error: "API overloaded", paused: "Usage limit until 14:00", finished: "Exports stream now" }[reason as string] ?? "Something happened")];
   const row = { agentId: "a1", needs: { reasons, since: AT }, snooze: null, brief: null } as unknown as InboxRow;
   return { row, snap };
 }
@@ -45,8 +46,14 @@ test("say-it-once: for every flag reason the headline line is not the word, the 
     const chip = prChip({ prs: [pr(snap)] } as never)!;
     const chipText = [chip.label, chip.checks?.text].filter(Boolean).join(" ");
     const said = [HEADLINE_WORD[h.key], h.label, chipText];
-    // Home drops a line that is only the word; anything else it shows must say something new.
-    if (h.line !== HEADLINE_WORD[h.key] && said.includes(h.line)) failures.push(`${reason}: line "${h.line}" repeats ${JSON.stringify(said)}`);
+    // Home drops a line that is only the word; anything else it shows must say something new: not the word or label
+    // (even as a prefix: "Add reviewers to #240: Ravi" under "Add reviewers"), and no PR ref the label or chip shows.
+    // The pill: its title is the label. Home: the word, then the line (sayNew), then the chip.
+    const pill = h.line === HEADLINE_WORD[h.key] ? null : repeatsRow(h.line, { word: HEADLINE_WORD[h.key], label: h.label });
+    const homeLine = sayNew(h.line, { chip: chip.label });
+    const home = homeLine === HEADLINE_WORD[h.key] ? null : repeatsRow(homeLine, { word: HEADLINE_WORD[h.key], chip: chipText });
+    if (pill) failures.push(`${reason}: pill line "${h.line}" ${pill} (shown: ${JSON.stringify(said)})`);
+    if (home) failures.push(`${reason}: Home line "${homeLine}" ${home} (shown: ${JSON.stringify(said)})`);
   }
   assert.deepEqual(failures, []);
 });
@@ -69,20 +76,22 @@ test("say-it-once: the pill sheet's one to-do that repeats the headline keeps it
   const brief = (ask: string) => ({ state: "open", kind: "reviewers", source: "followup", ask, moves: [{ kind: "add_reviewers", label: "Add reviewers", prKey: "example/app#246" }] });
   const row = (b: unknown) => ({ agentId: "a1", needs: { reasons: [flag], since: AT }, snooze: null, brief: b } as unknown as InboxRow);
   const surface = (r: InboxRow, items: Item[]) => {
-    const h = flagHeadline(r, NOW)!; const echoed = echoedItems(items, h, r);
+    const h = flagHeadline(r, NOW, items)!; const echoed = echoedItems(items, h, r);
     return [h.line, ...items.filter(i => !echoed.has(i.key)).map(i => i.title)];
   };
   const repeats = (lines: string[]) => lines.filter((l, i) => lines.findIndex(x => x.trim().toLowerCase() === l.trim().toLowerCase()) !== i);
-  // The #156 render: "Add reviewers to #246: Ravi" as the headline and again as the one row.
+  // The #156 render: "Add reviewers to #246: Ravi" as the headline and again as the one row. Under the title
+  // "Add reviewers #246" the headline now says only what's new (a-headline-says-only-what-is-new), and the row that
+  // asks the same thing still drops its title.
   const ravi = [reviewers(246, ["Ravi"])];
-  assert.deepEqual(surface(row(brief("Add reviewers to #246: Ravi")), ravi), ["Add reviewers to #246: Ravi"]);
+  assert.deepEqual(surface(row(brief("Add reviewers to #246: Ravi")), ravi), ["Suggested: Ravi"]);
   assert.deepEqual(repeats(surface(row(brief("Add reviewers to #246: Ravi")), ravi)), []);
-  // The same PR in other words (nobody configured; no brief yet) is still the same ask.
-  assert.deepEqual(surface(row(brief("#246 has no reviewers yet")), [reviewers(246, [])]), ["#246 has no reviewers yet"]);
-  assert.deepEqual(surface(row(null), ravi), ["Add reviewers to #246"]);
+  // Nobody configured: the PR's title. No brief yet: the same.
+  assert.deepEqual(surface(row(brief("#246 has no reviewers yet")), [reviewers(246, [])]), [TITLE]);
+  assert.deepEqual(surface(row(null), ravi), ["Suggested: Ravi"]);
   // Another PR's ask, or a different to-do, keeps its title; #2460 isn't #246.
   const other = [reviewers(2460, ["Ravi"]), reviewers(247, ["Mira"])];
-  assert.deepEqual(surface(row(null), other), ["Add reviewers to #246", "Add reviewers to #2460: Ravi", "Add reviewers to #247: Mira"]);
+  assert.deepEqual(surface(row(null), other), ["No reviewers yet", "Add reviewers to #2460: Ravi", "Add reviewers to #247: Mira"]);
   assert.equal(echoedItems(ravi, null, row(null)).size, 0);
 });
 
@@ -113,8 +122,8 @@ test("a-brief-without-an-ask-never-sits-beside-needs-you: the headline never say
     const row = { ...base, brief: none } as unknown as InboxRow;
     const beside = flagHeadline(row, NOW, drawn)!;
     if (beside.line === "No ask stated") failures.push(`${reason}: No ask stated beside ${drawn.length} drawn items`);
-    // The reviewers flag is its own ask ("Add reviewers to #240"); a failed check headlines as the tasks to send.
-    else if (beside.key === "reviewers" ? beside.line !== "Add reviewers to #240" : beside.key !== "repairs" && beside.line !== drawn[0].title) failures.push(`${reason}: "${beside.line}" is not the top drawn item`);
+    // The reviewers flag is its own ask (its line: whom to ask, else the PR title); a failed check headlines as the tasks to send.
+    else if (beside.key === "reviewers" ? beside.line !== "No reviewers yet" : beside.key !== "repairs" && beside.line !== drawn[0].title) failures.push(`${reason}: "${beside.line}" is not the top drawn item`);
     const alone = flagHeadline(row, NOW, [])!;
     if (reason !== "finished" && alone.line === "No ask stated") failures.push(`${reason}: No ask stated speaks for a ${reason} flag`);
     if ((reason === "pr_merged" || reason === "pr_closed") && alone.line !== TITLE) failures.push(`${reason}: alone reads "${alone.line}", not the PR title`);
@@ -133,4 +142,27 @@ test("a-brief-without-an-ask-never-sits-beside-needs-you: the headline never say
   const merged = { ...flagged("pr_merged").row, brief: none } as unknown as InboxRow;
   assert.equal(flagHeadline(merged, NOW, items)!.line, items[0].title);
   assert.notEqual(flagHeadline(merged, NOW, items)!.line, "No ask stated");
+});
+
+test("a-headline-says-only-what-is-new: a workspace's top item reads only what its label and chip don't say", async () => {
+  const { workspaceHeadline } = await import("../shared/headline");
+  type Item = Parameters<typeof workspaceHeadline>[0][number];
+  const items: Item[] = [
+    { kind: "merge", key: "merge:a#246", prKey: "example/app#246", number: 246, title: "#246 is approved", detail: TITLE } as Item,
+    { kind: "reviewers", key: "reviewers:a#246", prKey: "example/app#246", number: 246, suggested: ["Ravi"], title: "Add reviewers to #246: Ravi", detail: TITLE } as Item,
+    { kind: "reviewers", key: "reviewers:a#246", prKey: "example/app#246", number: 246, suggested: [], title: "#246 has no reviewers", detail: TITLE } as Item,
+    { kind: "capped", key: "capped:t", taskKey: "t", title: "Conflicts on #246 are still there after 2 messages", detail: "" } as Item,
+    { kind: "check", key: "check:a", actionId: "a", title: "Check the merge on #246", detail: "GitHub didn't answer" } as Item,
+  ];
+  const failures: string[] = [];
+  for (const item of items) {
+    const h = workspaceHeadline([item])!;
+    const home = sayNew(h.line, { chip: "#246" });
+    const why = repeatsRow(h.line, { word: HEADLINE_WORD[h.key], label: h.label }) ?? repeatsRow(home, { word: HEADLINE_WORD[h.key], chip: "#246 ✓" });
+    if (why) failures.push(`${item.kind}: "${h.line}" / Home "${home}" ${why}`);
+  }
+  assert.deepEqual(failures, []);
+  assert.deepEqual(items.slice(0, 3).map(i => workspaceHeadline([i])!.line), [TITLE, "Suggested: Ravi", TITLE]);
+  assert.equal(sayNew("Conflicts on #246 are still there after 2 messages", { chip: "#246" }), "Conflicts are still there after 2 messages");
+  assert.equal(sayNew("Conflicts on #2460", { chip: "#246" }), "Conflicts on #2460", "#2460 isn't #246");
 });

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Re-renders the README's images in place (docs/screenshots/): the Home hero and the phone shot on Paseo 0.15 (what the
+# Re-renders the README's images in place (docs/screenshots/): the Home lead shot and the phone shot on Paseo 0.15 (what the
 # floor serves), then Follow-up's sidebar view on Paseo 0.16, which only 0.16 has. Each run takes the machine-wide
 # harness slot. Home and the panel read the latest stable version, so an image never shows a beta.
 # Needs PLAYWRIGHT_CORE and CHROMIUM (docs/testing.md); HARNESS_SLOT overrides the slot wrapper's path.

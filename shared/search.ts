@@ -8,12 +8,12 @@ import { linkedSearchText, type LinkedSearchItem } from "./linked-display";
  *
  * Matching is token based and case-insensitive: every query token must match a token of the workstream, by exact
  * word, prefix, a single typo (four letters or more) or, from three characters, inside a word. "#1402", "1402",
- * "HER-1312" and "scim okta" all work. Ranking weighs the field the token matched (name above branch and PR above
+ * "ACME-1312" and "scim okta" all work. Ranking weighs the field the token matched (name above branch and PR above
  * agent, project and ask), adds a bonus when the query appears as one phrase, and a little for recency.
  */
 
 export type SearchField = "name" | "branch" | "pr" | "linked" | "agent" | "project" | "ask";
-/** `linked`: a linked item's key and title (Linear, Slack, docs), so "HER-1312" finds the workspace that links it. */
+/** `linked`: a linked item's key and title (Linear, Slack, docs), so "ACME-1312" finds the workspace that links it. */
 export const FIELD_WEIGHT: Record<SearchField, number> = { name: 100, branch: 70, pr: 70, linked: 60, agent: 55, project: 40, ask: 30 };
 export const FIELD_LABEL: Record<SearchField, string> = { name: "Name", branch: "Branch", pr: "PR", linked: "Linked", agent: "Agent", project: "Project", ask: "Ask" };
 
@@ -66,7 +66,7 @@ export function withinOneEdit(a: string, b: string): boolean {
 export function tokenMatch(q: string, t: string): number {
   if (t === q) return 1;
   if (t.startsWith(q)) return 0.85;
-  // Numbers are identities (HER-1312, PR #1402): 1352 isn't a typo of 1312. Exact or a prefix while typing, nothing fuzzy.
+  // Numbers are identities (ACME-1312, PR #1402): 1352 isn't a typo of 1312. Exact or a prefix while typing, nothing fuzzy.
   if (/^\d+$/.test(q)) return 0;
   if (q.length >= 4) {
     if (withinOneEdit(q, t)) return 0.55;

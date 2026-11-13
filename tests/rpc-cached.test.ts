@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Inbox, type AgentInfo, type Directory } from "../server/inbox";
@@ -38,6 +38,7 @@ test("usage answers from its last reading while Smart Session hangs, and refresh
   let now = NOW; let answer: () => Promise<unknown> = async () => ({ windows: [{ id: "five_hour", pct: 40, resetsAt: null }] });
   const home = await mkdtemp(join(tmpdir(), "follow-usage-ack-"));
   try {
+    await mkdir(join(home, "plugin-data", "smart-session"), { recursive: true });
     const reader = new UsageReader(home, async (_p, method) => method === "smart-session.subscriptions" ? { zerosub: false, accounts: [] } : answer(), () => now);
     assert.equal((await reader.read()).accounts[0]?.windows[0]?.pct, 40);
     answer = hang; now += 120_000;
@@ -59,7 +60,7 @@ test("usage's first read, with nothing cached and Smart Session silent, answers 
 
 async function aboutService(history: () => Promise<unknown>) {
   const dir = await mkdtemp(join(tmpdir(), "follow-about-ack-"));
-  const w = workspace({ id: "w1", title: "Vendor query", goal: "Speed up the vendor activity query (HER-1312)", mainAgentId: "a1", prs: [] });
+  const w = workspace({ id: "w1", title: "Vendor query", goal: "Speed up the vendor activity query (ACME-1312)", mainAgentId: "a1", prs: [] });
   const ctx = { history, subagents: async () => [] } as unknown as AboutContext;
   const s = new AboutService({
     store: new AboutStore(dir), jobs: new AiJobs({ runner: () => hang() }), sources: {} as never,
@@ -67,7 +68,7 @@ async function aboutService(history: () => Promise<unknown>) {
   });
   return { s, done: () => rm(dir, { recursive: true, force: true }) };
 }
-const linked = (v: { links: { key: string }[] }) => v.links.some(l => l.key === "HER-1312");
+const linked = (v: { links: { key: string }[] }) => v.links.some(l => l.key === "ACME-1312");
 
 test("workspace-about: a fast read of the inputs answers in full on the first reply, links included", async () => {
   const { s, done } = await aboutService(async () => ({ first: [], items: [], source: "live" }));

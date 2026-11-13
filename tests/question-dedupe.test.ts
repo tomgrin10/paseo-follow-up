@@ -50,7 +50,7 @@ test("needs_you questions=[Qn] points at an open question; a closed one is refus
   w.questions[0].closed = { at: new Date(clock).toISOString(), reason: "done", by: null };
   assert.throws(() => needsYouQuestions(w, "main-agent", { questions: ["Q1"] }, "work-around", clock, null), /isn't open any more/);
   assert.throws(() => validateNeedsYou({ ask: "x", kind: "action", questions: ["Q1"] }, k => k), /only for kind "decision"/);
-  assert.throws(() => validateNeedsYou({ ask: "x", kind: "decision", questions: ["HER-1"] }, k => k), /open question ids/);
+  assert.throws(() => validateNeedsYou({ ask: "x", kind: "decision", questions: ["ACME-1"] }, k => k), /open question ids/);
 });
 
 test("reworded re-ask with the same options is the same question; changed options supersede, never two open", () => {

@@ -26,7 +26,8 @@ import { promisify } from "node:util";
 import { openSync, existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { tmpdir, hostname } from "node:os";
+import { tmpdir } from "node:os";
+import { assertNoRealNames } from "./real-names.mjs";
 import { createServer } from "node:net";
 import { createRequire } from "node:module";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
@@ -42,7 +43,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as 2.0.0-rc.0, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["needs-you-states", "done-brief", "pick-notes", "review-mode", "feeds", "put-in-chat", "sending", "pr-link"];
+const REVIEW_SHOTS = ["needs-you-states", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link"];
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
 for (const name of only) if (![...SHOTS, ...REVIEW_SHOTS].includes(name)) fail(`unknown shot "${name}" (known: ${[...SHOTS, ...REVIEW_SHOTS].join(", ")})`);
 const scheme = arg("--scheme");
@@ -123,7 +124,7 @@ function pulls() {
     160: { title: "Welcome email template", state: "OPEN", author: "dana", conflict: true, threads: 2, reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
     170: { title: "Sign webhook payloads", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
     181: { repo: "example/web", title: "Dark mode color tokens", state: "MERGED", author: "dana", checks: [ok("test"), ok("lint")] },
-    // The README hero's other groups (2.0.x): Waiting, Fixing, Later.
+    // The README lead shot's other groups (2.0.x): Waiting, Fixing, Later.
     188: { title: "Render invoices as PDF", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [failed("test"), ok("lint"), ok("e2e")] },
     191: { title: "Team invite links", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [running("test"), ok("lint")] },
     195: { title: "Add the SAML provider", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
@@ -262,7 +263,7 @@ const WORKSPACES = [
       rpc("follow.needs-you", { kind: "decision", ask: "Pick whether declined cards retry", questions: ["Q1"] }),
       { gate: "billing" },
     ], worked: 4 },
-  // The README hero's other groups: Waiting (signed off, PRs out), Later (snoozed), Fixing (a repair batch sent and
+  // The README lead shot's other groups: Waiting (signed off, PRs out), Later (snoozed), Fixing (a repair batch sent and
   // the agent on it). `after` runs once every PR snapshot is in.
   { key: "usage", project: "web", after: "signoff", title: "Usage dashboard", minute: 8, prompt: "WEB-30: charts for the usage dashboard. Keep the PR a draft until the design review.",
     steps: [rpc("follow.enroll", { goal: "WEB-30 Usage dashboard charts" }), rpc("follow.register-pr", { repo: "example/web", number: 212, stack: "Usage dashboard" }),
@@ -389,7 +390,11 @@ async function seed({ call, home }) {
     await setDaemonClock(at(spec.minute));
     const w = await api.workspaces.create({ title: spec.title, source: { kind: "directory", path: repos[spec.project ?? "app"] } });
     const agent = await w.agents.create({ config: { provider: "followup-fixture/fixture", model: "fixture", modeId: "default" }, title: spec.title });
-    await call("follow.activate", { workspaceId: w.id });
+    // Discovery can miss an agent created a moment ago on a loaded machine: retry that one error for up to 20 s.
+    for (let tries = 0; ; tries++) {
+      try { await call("follow.activate", { workspaceId: w.id }); break; }
+      catch (error) { if (tries >= 20 || !/no available main agent/.test(String(error?.message))) throw error; await new Promise(r => setTimeout(r, 1000)); }
+    }
     await call("follow.control", { workspaceId: w.id, enable_auto_sends: false });
     await client.sendMessage(agent.id, spec.prompt, { messageId: `shots-${spec.key}` });
     const last = [...spec.steps].reverse().find(s => s.item?.type === "assistant_message")?.item.text;
@@ -494,13 +499,10 @@ const openHome = (page, { keepDialogs = false } = {}) => openHomeAt(page, { orig
 /**
  * Renders go into this public repo's PRs and README. harnessEnv pins every harness process's hostname to HARNESS_HOST;
  * this is the backstop: a shot whose page text or title names the real machine (its full name or first label, as a
- * truncated header shows it) fails instead of being saved.
+ * truncated header shows it), its user or the company fails instead of being saved (scripts/real-names.mjs).
  */
-const REAL_HOST = [hostname(), hostname().split(".")[0]].filter(h => h.length >= 4);
 async function noRealHost(page) {
-  const text = await page.evaluate(() => `${document.title}\n${document.body.innerText}`);
-  const hit = REAL_HOST.find(h => text.includes(h));
-  if (hit) throw new Error(`the page shows the real hostname (${hit}); a harness daemon must report HARNESS_HOST`);
+  assertNoRealNames(await page.evaluate(() => `${document.title}\n${document.body.innerText}`), "the page");
 }
 
 const failures = [];
@@ -1284,6 +1286,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
     }
   }
   if (only.includes("review-mode")) await reviewModeShots({ shoot, call });
+  if (only.includes("deploy-check")) await deployCheckShots({ shoot, call });
   if (only.includes("pr-link")) await prLinkShots({ shoot, billing });
   if (only.includes("put-in-chat")) await putInChatShots({ shoot, seeded, call, billing });
   if (only.includes("sending")) await sendingShots({ shoot, seeded, call, home });
@@ -1425,6 +1428,30 @@ async function sendingShots({ shoot, seeded, call, home }) {
   await shoot("sending-hold-home-light", DESKTOP, "light", shown([...held, "The agent is idle; Follow-up doesn't wake it"]));
   await shoot("sending-hold-home-phone-light", PHONE, "light", shown(held, true));
   await fs.writeFile(process.env.FOLLOW_SHOTS_CGROUP, JSON.stringify({ high: 1000, current: 100 }));
+}
+/** A fictional deploy check (Q55 mocks): the values live in host settings, set by an agent. */
+const DEPLOY_FIXTURE = { gcpProject: "acme-prod", serviceLabel: "rollout-group=app", servicePrefix: "acme-service-app-", roles: ["backend", "web", "worker"], registry: "us-central1-docker.pkg.dev", imagePath: "acme-prod/acme-docker", images: ["prod-app-backend", "prod-app-web"] };
+async function deployCheckShots({ shoot, call }) {
+  // Settings → Following → PR workflow → Repositories → example/app, scrolled to its Deploy check row: set up, then not.
+  const fold = async (page, vp) => {
+    await page.setViewportSize(vp);
+    await page.goto(`${ORIGIN}/settings/hosts/${SERVER_ID}/plugins/follow-up/projects`);
+    await (vp.width >= 768 ? page.getByRole("tab", { name: /^Following/ }) : page.getByRole("button", { name: "Following", exact: true })).filter({ visible: true }).first().click();
+    const header = page.getByRole("button", { name: /^example\/app, / }).filter({ visible: true }).first();
+    await header.waitFor();
+    if (await header.getAttribute("aria-expanded") !== "true") await header.click();
+    const label = page.getByText("Deploy check", { exact: true }).filter({ visible: true }).first();
+    await label.waitFor();
+    await label.evaluate(el => el.scrollIntoView({ block: "center" }));
+    // Only Follow-up's own pane: the host settings sidebar beside it names the machine.
+    return vp.width >= 768 ? { x: 400, y: 0, width: vp.width - 400, height: vp.height } : undefined;
+  };
+  for (const theme of ["light", "dark"]) for (const [size, vp] of [["desktop", DESKTOP], ["phone", PHONE]]) {
+    await call("follow.set-pr-workflow", { repo: "example/app", deploy: DEPLOY_FIXTURE });
+    await shoot(`deploy-set-${size}-${theme}`, vp, theme, page => fold(page, vp));
+    await call("follow.set-pr-workflow", { repo: "example/app", deploy: null });
+    await shoot(`deploy-none-${size}-${theme}`, vp, theme, page => fold(page, vp));
+  }
 }
 async function reviewModeShots({ shoot, call }) {
   // The Needs-you reviewers row with its quiet link, then the undo bar after it; the Settings fold with the Review menu

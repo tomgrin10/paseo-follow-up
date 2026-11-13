@@ -6,12 +6,12 @@ export type Project = { projectId: string; projectKey: string; projectDisplayNam
 
 /**
  * Whether a project's workspaces are followed. With Follow every workspace on (the default since 1.3.0-beta.2)
- * every project is, except the ones opted out; off, the old rule applies (explicit choices, else acme-poc only).
+ * every project is, except the ones opted out; off, only the projects switched on (Settings → Following → Projects,
+ * set_project_tracking). No repository is built in (public-code-carries-no-host-identifiers).
  */
 export function defaultTracking(project: Project, overrides: Record<string, boolean> = {}, followEvery = true): boolean {
   if (followEvery) return overrides[project.projectId] !== false;
-  if (Object.hasOwn(overrides, project.projectId)) return overrides[project.projectId];
-  return project.projectKind === "git" && project.projectKey.startsWith("remote:") && project.projectKey.replace(/\.git$/, "").split("/").at(-1) === "acme-poc";
+  return overrides[project.projectId] === true;
 }
 export function projectSetting(project: Project, overrides: Record<string, boolean> = {}, followEvery = true): ProjectSetting {
   return { id: project.projectId, name: project.projectCustomName || project.projectDisplayName, key: project.projectKey, path: project.projectRootPath, enable_default_tracking: defaultTracking(project, overrides, followEvery) };

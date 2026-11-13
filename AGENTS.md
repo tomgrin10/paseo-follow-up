@@ -19,7 +19,7 @@ Paseo's plugin listing. [PRODUCT.md](PRODUCT.md) and [DESIGN.md](DESIGN.md) cove
   `scripts/rename-legacy-name.mjs` fixes the mechanical cases. Keep the `follow.*` RPC names and the `follow_*` tool
   names. Never reset tracked work or settings during an upgrade; 2.0 moves 1.x's data and plugin id once
   ([docs/updates.md](docs/updates.md#moving-from-1x)).
-- Never commit credentials, daemon state, transcripts or local machine paths. Follow-up is public: prompts, prefixes, tool text and UI copy say "the developer" (they/their), never a person's name (tests/no-personal-names.test.ts). Where old text is matched, such as the Overseer's forward prefix, keep recognising the legacy spelling.
+- Never commit credentials, daemon state, transcripts or local machine paths. Follow-up is public: prompts, prefixes, tool text and UI copy say "the developer" (they/their), never a person's name (tests/no-personal-names.test.ts). Fixtures and renders use fictional names (`acme-*`), never the company, its people, customers or ticket keys, the machine or its user (`scripts/real-names.mjs`, tests/no-real-names.test.ts). Where old text is matched, such as the Overseer's forward prefix, keep recognising the legacy spelling.
 - Boolean settings use positive `enable_` names.
 - Subprocesses take argument arrays, never a shell.
 - Minimum Paseo is 0.15.0 (`requirements.paseo`). Agent tools are native; the stdio bridge stays as the fallback for hosts
@@ -74,7 +74,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 
 | Subsystem | Files | Doc |
 | --- | --- | --- |
-| Worker entry, RPC wiring, session attach, teardown | `index.server.ts`, `shared/contracts.ts`, `server/feeds.ts`, `server/rpc-timing.ts`, `server/teardown.ts`, `server/daemon.ts`, `server/shared-file.ts`, `server/directory.ts`, `server/store.ts`, `server/cow.ts`, `server/json-file-store.ts`, `server/list-cache.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
+| Worker entry, RPC wiring, session attach, teardown | `index.server.ts`, `shared/contracts.ts`, `server/feeds.ts`, `server/rpc-timing.ts`, `server/teardown.ts`, `server/daemon.ts`, `server/shared-file.ts`, `server/directory.ts`, `server/request-trace.ts`, `server/store.ts`, `server/cow.ts`, `server/json-file-store.ts`, `server/list-cache.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
 | Discovery, ownership, main agent | `server/discovery.ts`, `server/turn-events.ts`, `server/workspace-agent.ts`, `server/background-agents.ts`, `server/submissions.ts`, `server/pr-owner.ts`, `server/exclusions.ts`, `server/history-cache.ts`, `server/recovery-handoff.ts`, `server/recovery-config.ts`, `shared/settings.ts` | [workspaces](docs/workspaces.md) |
 | Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/send-decision.ts`, `shared/task-rows.ts`, `shared/task-status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/put-in-chat.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
 | Needs-you inbox, brief, Home | `server/inbox.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/sending.ts`, `shared/needs-block.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts` | [needs-you](docs/needs-you.md) |
@@ -112,7 +112,7 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    - Extras stop at critical (≥ 85 %).
    - `test:scale` budgets (the gate in `verify`), on the realistic seed (`--realistic`: 140 workspaces, ~280 agents,
      three PRs with full snapshots per workspace, a fake GitHub with live-sized PR bodies): **300 MB peak RSS** from the
-     worker's start (VmHWM, so the cold-start tick counts), **240 MB idle RSS** (the median of the idle window), **3 %
+     worker's start (VmHWM, so the cold-start tick counts), **`REALISTIC_IDLE_BUDGET_MB` idle RSS** (250: CI's median 220 plus 4 standard deviations of CI's own readings, `scripts/scale-budget.mjs`, checked against `tests/fixtures/ci-idle-rss.txt`; the old 240 sat inside the runner's noise and flaked on a no-op PR), **3 %
      idle CPU**, **2 idle daemon requests a minute**. Measured 2026-11-12 (two runs): peak 262–264 MB (a ~2 s cold-start
      tick that changes and validates every workspace once), idle 198–200 MB and flat, CPU 1.3–1.4 %, 1.3 requests a
      minute; the bare plugin process is ~120 MB. Headroom (~15 % peak, ~20 % idle) covers live's extras the seed lacks
@@ -154,6 +154,11 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    - **A running worker holds one daemon connection** (`a-running-worker-holds-one-daemon-connection`): the shared
      connection's idle close is the engine's tick plus a named margin, so ticks reuse it. Guarded by
      `tests/daemon-connection.test.ts`.
+   - **A worker builds one daemon client** (`a-worker-builds-one-daemon-client`): every daemon call the worker makes
+     (`withDaemon`: turn-end and inbox reads, usage meters, permission events, server info) runs on that shared
+     connection; `openDaemon` in `server/daemon.ts` is the only place a `DaemonClient` is built. 2026-11-13 live copy
+     under live load: a client per call opened 41 WebSockets a minute while native memory climbed. Guarded by
+     `tests/daemon-connection.test.ts` (a sweep of the worker's `.ts` files).
    - **A send lists agents at most once per tick** (`a-send-lists-agents-at-most-once-per-tick`): sends read the tick's
      agent list (patched by events); no `fetch_agents` or `fetch_agent` per send or per turn event, and subagents at
      most once per agent per tick. Guarded by `tests/daemon-load.test.ts` and `test:scale`
@@ -289,7 +294,14 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    that a Needs-you row, a brief or Home's Recent steps name, and the workspace tracks, links that PR (`PrLinksProvider`,
    `client/rich-text.tsx`); a brief about a PR has Open PR; `inbox_list` gives agents each row's PR urls. Guarded by
    `tests/pr-open-link.test.ts` and `INVARIANTS`.
-24. **Tracking waits for a new agent** (`tracking-waits-for-a-new-agent`). Track and session start look for a workspace
+24. **Public code carries no host identifiers** (`public-code-carries-no-host-identifiers`). The repository is public:
+   no committed file names the company, its people, customers or ticket keys, the machine or its user. A host's own
+   configuration lives in its settings, set by an agent through the plugin's tools: the deploy check
+   (`set_pr_workflow` `deploy`, shown read-only in Settings), which projects track by default (`set_project_tracking`)
+   and reviewer names (`save_reviewers`). Nothing is built in: an empty install has no deploy check, no default-tracked
+   repository and no names. `tests/no-real-names.test.ts` scans every tracked file (PNG text included) with the hashed
+   denylist in `scripts/real-names.mjs`, with no exclusions.
+25. **Tracking waits for a new agent** (`tracking-waits-for-a-new-agent`). Track and session start look for a workspace
    created a moment ago. When the directory lacks it or its agent, they re-list past the tick's agent memo
    (`read({ fresh: "agents", force: true })`, `server/directory.ts`) and retry a bounded number of times
    (`TRACK_RETRY_MS`, `server/daemon.ts`) before "This workspace has no available main agent". The tick's list

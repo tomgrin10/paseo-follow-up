@@ -60,6 +60,7 @@ not a patch for one instance.
 | `scripts/scale-data-from.mjs` | `scale-check --data-from <dir>` (local only) | Starts the harness worker on a COPY of a real `plugin-data/follow-up` directory, remapped onto the harness's workspaces and agents (workspace i → harness workspace i, its agents → that workspace's main and helper agents; every copied JSON file goes through the same id map), with the fake GitHub answering each PR in the state the copy saw (`SCALE_GH_STATES`). It reproduces a live install's memory at its exact size. The copy holds real names: keep it in a scratch directory, never in the repo, CI, a PR or a screenshot. Pair it with `--live-mix <turns/min>,<rpcs/min>` (live-like load in the idle window), `--app-burst <rpcs/s>,<seconds>` (an open app's reads; reports each method's reply size and the RSS step), `--gh-gzip` (gzip'd GitHub answers, as api.github.com sends) and `--alloc-prof` (`FOLLOW_UP_ALLOC_PROF_WINDOWS="60,300,600"` sets the profile windows). |
 | `scripts/cpu-top.mjs` | manual | Where a `.cpuprofile`'s time went (self and app-frame inclusive), optionally in a time window: `node scripts/cpu-top.mjs <file> --from 0 --to 8`. |
 | `scripts/alloc-prof.cjs`, `scripts/alloc-top.mjs` | `scale-check --alloc-prof <dir>` | What each process allocates, garbage included (V8's sampling heap profiler with collected objects; `--heap-prof` shows only what stays live), for 0–60 s, 60–180 s and 180–300 s of its life (`FOLLOW_UP_ALLOC_PROF_WINDOWS` sets other window ends); `alloc-top` lists bytes per function, self and inclusive. |
+| `scripts/request-top.mjs` | `scale-check --request-trace <file>` | Every daemon call the worker makes (`server/request-trace.ts`, on only when `FOLLOW_UP_REQUEST_TRACE` is set), with the first frames of the worker code that made it, one JSON line each; `request-top` prints calls a minute by method and caller for one pid and window (`worker.idleWindow` bounds the idle window), so an idle request budget's miss names the code that sent it. |
 | `scripts/heap-retainers.mjs` | manual | Retained sizes in a heap snapshot (dominator tree) with a retaining path for each big owner. |
 | `scripts/check-native-tools.mjs` | `test:native` | Tools are served through Paseo's MCP with no per-agent process. A reload detaches them, the bridge still works, and they come back. |
 | `scripts/check-trust-bypass.mjs` | `test:trust` | Trust bypass on a real daemon. |
@@ -132,8 +133,20 @@ plays a scripted turn (timeline items, Follow-up RPCs, a permission) for a given
 - **A fictional host name, `dev-box`.** Paseo labels its host with `os.hostname()` (the phone header, `server_info`)
   and has no setting for it, and renders go into this public repo. `harnessEnv` puts
   `scripts/harness-hostname.cjs` first on `NODE_OPTIONS` (after a caller's `set` and `strip`), so every harness
-  process's `os.hostname()` and `HOSTNAME` read `HARNESS_HOST`. `screenshots.mjs` fails a shot whose page text names
-  the real machine. `tests/harness-env.test.ts` fails when a harness process can read the real name.
+  process's `os.hostname()` and `HOSTNAME` read `HARNESS_HOST`. `tests/harness-env.test.ts` fails when a harness
+  process can read the real name.
+- **Fictional names everywhere** (`no-real-names-in-renders-or-fixtures`). Fixtures use `acme-*` names (the project
+  `acme-project`, the repository `acme/acme-poc`, `linear.app/acme`, `acme.slack.com`), never the company's. Every
+  render path (`screenshots.mjs`, `check-recovery-background.mjs`, `check-project-settings.mjs`,
+  `check-view-settings.mjs`) passes its page text
+  through `assertNoRealNames` (`scripts/real-names.mjs`), which fails a shot naming the real hostname, its user, the
+  company, its people, customers or ticket keys; `tests/no-real-names.test.ts` fails any committed file (PNG text
+  chunks included) that does. Fixtures use fictional people and ticket keys (`ACME-123`, `APP-142`). The hostname and user name are read at run time (`os.hostname()`,
+  `os.userInfo()`, skipped in CI), and the denied words are stored only as sha256 hashes of word tokens (names match only capitalised; ticket keys as a hashed prefix followed by digits)
+  (text is split on `[a-z0-9]+`), so the denylist puts no plain text in the repo. Tests of the checker use an injected
+  fictional denylist. The product files that still carry the company's configuration, and the tests that exercise
+  them, are excluded by path (`EXCLUDED`) until the Q55 host-config PR moves that configuration into host settings;
+  scripts that need the default-tracked repository read it from `shared/settings.ts` at run time.
 - **Fake GitHub over HTTP, not only `gh`.** Follow-up reads GitHub over in-process HTTPS (`server/github-api.ts`); a
   fake `gh` on PATH only answers writes. A script whose daemon needs PR reads starts `fakeGithub({ dir, gh })` from
   `scripts/fake-github.mjs` and passes its `env` and `strip` to `harnessEnv`. The server answers each request with the

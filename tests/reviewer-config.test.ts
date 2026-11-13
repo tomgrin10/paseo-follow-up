@@ -108,7 +108,7 @@ test("an unreadable reviewers.json is reported, never silently replaced", async 
   assert.equal(await readFile(join(dir, "reviewers.json"), "utf8"), "{not json");
 });
 
-test("migration: an install that requested reviewers keeps them (latest submitted request per repo, legacy names); it runs once and never overwrites", async t => {
+test("migration: an install that requested reviewers keeps them (latest submitted request per repo, logins only); it runs once and never overwrites", async t => {
   const state: State = { version: 1, workspaces: [
     workspace({ id: "w1", prActions: [
       asked(["acme/acme-poc#1362"], ["reviewer-a", "reviewer-b"], "2026-10-01T00:00:00.000Z"),
@@ -118,7 +118,7 @@ test("migration: an install that requested reviewers keeps them (latest submitte
     workspace({ id: "w2", prActions: [asked(["acme/api#7"], ["ana", "acme/platform"])] }),
   ] } as State;
   assert.deepEqual(seedFromHistory(state), {
-    "acme/acme-poc": [{ login: "reviewer-a", name: "Uri" }, { login: "reviewer-b", name: "Yuval" }],
+    "acme/acme-poc": [{ login: "reviewer-a", name: null }, { login: "reviewer-b", name: null }],
     "acme/api": [{ login: "ana", name: null }, { login: "acme/platform", name: null }],
   });
   const dir = await tmp(t);
@@ -126,7 +126,7 @@ test("migration: an install that requested reviewers keeps them (latest submitte
   await store.save("acme/api", people("kept"));
   const migrated = await store.migrate(state, new Date(clock));
   assert.deepEqual(migrated.repos["acme/api"], people("kept"), "a list the developer already set wins");
-  assert.deepEqual(migrated.repos["acme/acme-poc"].map(r => r.name), ["Uri", "Yuval"]);
+  assert.deepEqual(migrated.repos["acme/acme-poc"].map(r => r.name), [null, null], "public-code-carries-no-host-identifiers: no names from the code");
   assert.ok(migrated.migratedAt);
   await store.save("acme/acme-poc", []);
   assert.equal((await store.migrate(state)).repos["acme/acme-poc"], undefined, "a second start doesn't seed again");
