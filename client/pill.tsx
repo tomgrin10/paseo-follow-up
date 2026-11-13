@@ -151,7 +151,7 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
   // The live store already holds this workspace; the popover reads it once on open (Paseo can leave a stray mounted
   // copy, so nothing here polls it: 1.4.0).
   const query = useWorkspace(deps.live, props.workspaceId, { enabled: main });
-  const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), enabled: main });
+  const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), enabled: main, staleTime: 0, refetchOnMount: "always" });
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" } | null>(null);
   const [question, setQuestion] = useState<string | null>(null);
   const w = main ? query.workspace ?? target.workspace : null;

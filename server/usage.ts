@@ -51,7 +51,7 @@ export class UsageReader {
    * watches the directory, not one file, so the monthly file's rollover is seen. Event-driven, no polling; returns
    * null when the directory can't be watched (Smart Session not installed), and the client reads usage itself.
    */
-  watch(onChange: () => void, debounceMs = 5_000): { close(): void } | null {
+  watch(onChange: () => void, debounceMs = 1_500): { close(): void } | null {
     let watcher: FSWatcher;
     let timer: ReturnType<typeof setTimeout> | null = null;
     try {

@@ -3,3 +3,4 @@ node_modules
 .preview/
 .preview-isolated.json
 test-results/
+.feeds-check/
