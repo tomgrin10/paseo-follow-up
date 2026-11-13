@@ -359,7 +359,7 @@ test("scopes.json carries each agent's workflow; the summary picks the action to
 test("Settings summaries: the glance lines count what each repository ships with and what's set by hand", async () => {
   const { shippingSummary, repoShippingSummary, reposShippingSummary } = await import("../shared/pr-workflow");
   const row = (repo: string, effective: "github" | "graphite", own: Partial<{ inherits: boolean; mergeMethod: "rebase" | null; setting: "auto" | "github" | "graphite" }> = {}) =>
-    ({ repo, setting: "auto" as const, detected: effective, effective, reason: "", path: null, inherits: true, mergeMethod: null, reviewFix: null, review: "team" as const, github: null, ...own });
+    ({ repo, setting: "auto" as const, detected: effective, effective, reason: "", path: null, inherits: true, mergeMethod: null, reviewFix: null, review: "team" as const, deploy: null, github: null, ...own });
   const repos = [row("a/one", "github"), row("a/two", "github", { mergeMethod: "rebase" }), row("a/three", "graphite"), row("a/four", "github", { inherits: false, setting: "github" })];
   assert.equal(shippingSummary({ default: "auto", repos }), "Auto · GitHub in 3, Graphite in 1");
   assert.equal(shippingSummary({ default: "auto", repos: repos.filter(r => r.effective === "github") }), "Auto · GitHub everywhere");

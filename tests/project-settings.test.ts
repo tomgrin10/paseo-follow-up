@@ -10,16 +10,19 @@ import { Store } from "../server/store";
 import { clock, workspace } from "./fixtures";
 import type { State } from "../shared/model";
 
-const project: Project = { projectId: "project", projectKey: "remote:github.com/example/acme-poc", projectDisplayName: "Renamed project", projectRootPath: "/work/acme-poc", projectKind: "git" };
-test("repository identity supplies the initial default and explicit overrides survive renaming", () => {
-  // With Follow every workspace off, the pre-1.3.0-beta.2 rule.
-  assert.equal(defaultTracking(project, {}, false), true); assert.equal(defaultTracking(project, { project: false }, false), false);
-  assert.equal(defaultTracking({ ...project, projectKey: "remote:github.com/example/other", projectDisplayName: "acme-poc" }, {}, false), false);
-  assert.equal(defaultTracking({ ...project, projectKey: "host:local/acme-poc", projectKind: "non_git" }, {}, false), false);
-  assert.equal(defaultTracking({ ...project, projectKey: "remote:github.com/example/other" }, { project: true }, false), true);
+const project: Project = { projectId: "project", projectKey: "remote:github.com/acme/acme-poc", projectDisplayName: "Renamed project", projectRootPath: "/work/acme-poc", projectKind: "git" };
+test("public-code-carries-no-host-identifiers: only a project's own switch tracks by default; no repository is built in", async () => {
+  // With Follow every workspace off: explicit choices, else off, whatever the repository is called.
+  assert.equal(defaultTracking(project, {}, false), false, "no override: off");
+  assert.equal(defaultTracking(project, { project: true }, false), true); assert.equal(defaultTracking(project, { project: false }, false), false);
+  assert.equal(defaultTracking({ ...project, projectKey: "host:local/notes", projectKind: "non_git" }, { project: true }, false), true, "the switch, not the repository kind");
   // On (the default): every project, except one opted out.
   assert.equal(defaultTracking({ ...project, projectKey: "host:local/notes", projectKind: "non_git" }), true);
   assert.equal(defaultTracking(project, { project: false }), false);
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(join(import.meta.dirname, "../shared/settings.ts"), "utf8");
+  const body = source.slice(source.indexOf("export function defaultTracking"), source.indexOf("export function projectSetting"));
+  assert.doesNotMatch(body, /projectKey|projectKind|split\(/, "no repository-name rule");
 });
 test("project enrollment preserves existing records and cannot revive sends, archived workspaces or replace owners", () => {
   const old = workspace({ enable_tracking: false, enable_auto_sends: true });
