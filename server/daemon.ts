@@ -339,9 +339,12 @@ export class PaseoGateway implements Gateway {
   /**
    * Which workspaces Follow-up follows, from the shared directory: no daemon request unless the directory is due, a
    * parent agent is missing from it, or a loaded agent's history needs reading. `workspaceId` (Track, session start)
-   * places one workspace and never reads history.
+   * places one workspace and never reads history. `scope` (a nudge, a-nudge-costs-its-workspace) places only those
+   * workspaces and rescans only their dirty agents: from the turn read still kept (TurnTimeline.since, no daemon read),
+   * or, when there is none (the next turn already started, or no turn cursor yet), with its own read of that agent, so
+   * nothing a nudge saw is left for the timer's tick to read later.
    */
-  async discover(state: State, workspaceId?: string): Promise<DiscoveredWorkspace[]> {
+  async discover(state: State, workspaceId?: string, scope?: { workspaces: ReadonlySet<string> }): Promise<DiscoveredWorkspace[]> {
     await this.histories.load();
     const now = this.now();
     const windowMs = this.windowMs = activeWindowMs(state);
@@ -367,9 +370,9 @@ export class PaseoGateway implements Gateway {
       return this.unknownParents.get(id);
     };
     const discovered: DiscoveredWorkspace[] = [];
-    const scans: { row: DiscoveredWorkspace; agent: Agent; repo: string | null }[] = [];
+    const scans: { row: DiscoveredWorkspace; agent: Agent; repo: string | null; kept?: Read }[] = [];
     const defaults = new Set(projects.filter(p => defaultTracking(p, state.projectDefaults, followsEvery(state))).map(p => p.projectId));
-    for (const workspace of workspaces.filter(w => !w.archivingAt && (workspaceId ? w.id === workspaceId : (defaults.has(w.projectId ?? "") && !optedOut(state, w.id)) || state.workspaces.some(saved => saved.id === w.id && saved.enable_tracking && !saved.archived)))) {
+    for (const workspace of workspaces.filter(w => !w.archivingAt && (!scope || scope.workspaces.has(w.id)) && (workspaceId ? w.id === workspaceId : (defaults.has(w.projectId ?? "") && !optedOut(state, w.id)) || state.workspaces.some(saved => saved.id === w.id && saved.enable_tracking && !saved.archived)))) {
       const existing = state.workspaces.find(w => w.id === workspace.id);
       if (existing?.archived) continue;
       // The Overseer's own workspace is Follow-up's, never tracked or repaired (1.4.0-beta.0).
@@ -397,6 +400,12 @@ export class PaseoGateway implements Gateway {
       if (row.active) for (const agent of roots) {
         if (!isLoaded(agent)) continue;
         const cached = this.histories.get(agent.id);
+        if (scope) {
+          if (!this.dirty.has(agent.id)) continue;
+          const kept = cached?.cursor && cached.history.complete && !cached.history.error ? this.turnTimeline?.since(agent.id, cached.cursor, OVERLAP) : null;
+          scans.push({ row, agent, repo, ...(kept ? { kept } : {}) });
+          continue;
+        }
         if (!cached || cached.messageAt !== agent.lastUserMessageAt || this.dirty.has(agent.id) || (cached.history.error && now >= cached.retryAt) || (["running", "initializing"].includes(agent.status) && now - cached.at >= 15_000)) scans.push({ row, agent, repo });
       }
       discovered.push(row);
@@ -404,19 +413,19 @@ export class PaseoGateway implements Gateway {
     // Oldest scan first prevents busy workspaces from starving later sessions.
     scans.sort((a, b) => (this.histories.get(a.agent.id)?.at ?? 0) - (this.histories.get(b.agent.id)?.at ?? 0) || (b.agent.lastUserMessageAt ?? "").localeCompare(a.agent.lastUserMessageAt ?? ""));
     // Session opening and Track need only ownership metadata. Read transcripts in the poll.
-    const due = scans.slice(0, workspaceId ? 0 : 4);
+    // A scoped pass takes all its scans: they are its workspaces' dirty agents only, most of them kept reads.
+    const due = scope ? scans : scans.slice(0, workspaceId ? 0 : 4);
     const refs = new Map<string, LinkRef[]>();
-    if (due.length) await this.connect(async client => {
-      for (const { row: dueRow, agent: listed, repo } of due) {
+    const rescan = async (client: Daemon | null, { row: dueRow, agent: listed, repo, kept }: typeof scans[number]) => {
         // The directory may predate the daemon unloading this agent: confirm it is still loaded before reading,
-        // since a timeline read would wake it.
-        const agent = await this.directory.confirmLoaded(client, listed).catch(() => null);
-        if (!agent) continue;
+        // since a timeline read would wake it. A kept read is already in hand and wakes nothing.
+        const agent = kept ? listed : await this.directory.confirmLoaded(client!, listed).catch(() => null);
+        if (!agent) return;
         let history: History; let submissions: Submission[] = []; let artifacts: Artifact[] = []; let end: { epoch: string; seq: number } | null = null;
         this.timelineReads++;
         const cached = this.histories.get(agent.id);
         try {
-          const read = (cached?.cursor && cached.history.complete && !cached.history.error ? this.turnTimeline?.since(agent.id, cached.cursor, OVERLAP) ?? await readSince(client, agent.id, cached.cursor) : null) ?? await readAll(client, agent.id);
+          const read = kept ?? (cached?.cursor && cached.history.complete && !cached.history.error ? this.turnTimeline?.since(agent.id, cached.cursor, OVERLAP) ?? await readSince(client!, agent.id, cached.cursor) : null) ?? await readAll(client!, agent.id);
           end = read.end;
           const items = read.entries.map(e => e.item);
           // Linked items ride this read. Best-effort: a throw here must never mark the history unreadable.
@@ -441,8 +450,10 @@ export class PaseoGateway implements Gateway {
         const at = this.now();
         this.histories.set(agent.id, { messageAt: agent.lastUserMessageAt, at, failures, retryAt: at + historyRetryDelay(failures), history, submissions, artifacts, cursor: history.error ? null : end });
         this.dirty.delete(agent.id);
-      }
-    });
+    };
+    for (const s of due.filter(s => s.kept)) await rescan(null, s);
+    const reads = due.filter(s => !s.kept);
+    if (reads.length) await this.connect(async client => { for (const s of reads) await rescan(client, s); });
     if (refs.size) try { this.linkRefs?.(refs); } catch { /* linked items are best-effort */ }
     for (const row of discovered) {
       const ids = [row.mainAgentId, ...(row.contributorAgentIds ?? [])];
