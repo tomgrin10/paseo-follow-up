@@ -1382,12 +1382,13 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   }
 }
 /**
- * pr-link (a-row-that-names-a-pr-opens-it-in-one-click): Billing's "#143 is approved" merge row and Audit log export's
+ * pr-link (a-row-that-names-a-pr-opens-it-in-one-click): Search filters' "#151 is approved" merge row and Audit log export's
  * reviewers row, each with its Open #N link; the panel on desktop, Home's detail pane on desktop and phone.
  */
 async function prLinkShots({ shoot, billing }) {
   const rows = [
-    { key: "merge", title: "Billing retries", prompt: billing.prompt, link: "Open pull request #143" },
+    // Billing's #143 sits on #142, whose checks fail, so it has no Merge row (one Merge per ready stack): Search filters' #151.
+    { key: "merge", title: "Search filters", prompt: WORKSPACES.find(w => w.key === "search").prompt, link: "Open pull request #151" },
     { key: "reviewers", title: REVIEW_MODE_STATES[0].title, prompt: REVIEW_MODE_STATES[0].prompt, link: "Open pull request #246" },
   ];
   const TALL = { width: DESKTOP.width, height: 1300 };
