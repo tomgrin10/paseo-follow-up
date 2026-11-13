@@ -4,7 +4,7 @@ import { Github, RULES_TTL_MS } from "../server/github";
 import { accountFor, ghTokens, httpApi, DEAD_BUS, type GithubApi } from "../server/github-api";
 import { Deployments } from "../server/deployments";
 import { POLL_IDLE_MS, TICK_MS, RECENT_CHANGE_MS, movingReason } from "../shared/poll";
-import { clock, pr } from "./fixtures";
+import { acmeDeploy, clock, pr } from "./fixtures";
 
 // 2026-11-11 cpu-load REPORT.md §5: the live worker made ~40 gh calls/min (+6 gcloud) for ~30 PRs. Root causes:
 // ruleset checks were one REST call per base branch per minute (every stacked PR's base is a different branch), every
@@ -191,10 +191,10 @@ test("the deploy probe runs one gcloud call per fleet read once its serving revi
     calls.push(`${command} ${args.slice(0, 3).join(" ")}`);
     if (command === "gh") return JSON.stringify({ status: "ahead" });
     if (args[0] === "auth") return "token";
-    if (args[1] === "services") return JSON.stringify(["backend", "etl", "interpretation", "public-api", "web"].map(role => ({ metadata: { name: `hero-service-vspm-${role}-x`, labels: { "cloud.googleapis.com/location": "us-central1" } }, status: { conditions: [{ type: "Ready", status: "True" }], traffic: [{ revisionName: `${role}-r1`, percent: 100 }] } })));
-    return JSON.stringify({ spec: { containers: [{ name: "app", image: `us-central1-docker.pkg.dev/hero-production-environments/hero-docker-repo/prod-vspm-backend@sha256:${"1".repeat(64)}` }] }, status: { conditions: [{ type: "Ready", status: "True" }] } });
-  }, (async (url: string) => ({ ok: true, text: async () => JSON.stringify(url.includes("/manifests/") ? { config: { digest: `sha256:${"3".repeat(64)}` } } : { config: { Labels: { "org.opencontainers.image.revision": sha } } }) })) as unknown as typeof fetch, () => now, { rest: async (_repo: string, path: string) => { compares.push(path); return { status: "ahead" }; } } as any);
-  const target = pr({ repo: "herosecurity/hero-poc", key: "herosecurity/hero-poc#1", snapshot: { ...pr().snapshot!, state: "MERGED", mergeCommit: "a".repeat(40) } });
+    if (args[1] === "services") return JSON.stringify(["backend", "etl", "interpretation", "public-api", "web"].map(role => ({ metadata: { name: `acme-service-app-${role}-x`, labels: { "cloud.googleapis.com/location": "us-central1" } }, status: { conditions: [{ type: "Ready", status: "True" }], traffic: [{ revisionName: `${role}-r1`, percent: 100 }] } })));
+    return JSON.stringify({ spec: { containers: [{ name: "app", image: `us-central1-docker.pkg.dev/acme-prod/acme-docker/prod-app-backend@sha256:${"1".repeat(64)}` }] }, status: { conditions: [{ type: "Ready", status: "True" }] } });
+  }, (async (url: string) => ({ ok: true, text: async () => JSON.stringify(url.includes("/manifests/") ? { config: { digest: `sha256:${"3".repeat(64)}` } } : { config: { Labels: { "org.opencontainers.image.revision": sha } } }) })) as unknown as typeof fetch, () => now, { rest: async (_repo: string, path: string) => { compares.push(path); return { status: "ahead" }; } } as any, acmeDeploy);
+  const target = pr({ repo: "acme/acme-poc", key: "acme/acme-poc#1", snapshot: { ...pr().snapshot!, state: "MERGED", mergeCommit: "a".repeat(40) } });
   for (let minute = 0; minute < 10; minute++) { for (let t = 0; t < 4; t++) { await deployments.observe([target]); now += TICK_MS; } }
   const gcloud = calls.filter(c => c.startsWith("gcloud run"));
   assert.equal(gcloud.filter(c => c.includes("services")).length, 10, "one fleet read a minute");

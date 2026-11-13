@@ -183,7 +183,7 @@ export default function contribute(server: PluginServerContext) {
   const agentSettings = new AgentSettingsStore(directory);
   gateway.recoveryRole = () => agentSettings.role("recovery");
   const graphite = new Graphite();
-  const github = new Github(undefined, graphite, new Deployments());
+  const github = new Github(undefined, graphite, new Deployments(undefined, undefined, undefined, undefined, repo => prWorkflow.current().repos[repoKey(repo)]?.deploy));
   github.workflow = repo => prWorkflow.workflow(repo);
   workspaceRepos = gateway.workspaceRepos;
   prWorkflow.paths = async () => {
