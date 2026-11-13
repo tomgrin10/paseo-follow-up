@@ -169,9 +169,11 @@ These are product rules. Each has tests, and breaking one is a bug even when the
      reads and ~125 entries fetched per turn before; 2 reads and its own entries after. Guarded by
      `tests/turn-read-once.test.ts`, `tests/incremental.test.ts`, `tests/turn-read.test.ts` and `test:scale`'s busy
      window.
-   - **A running worker holds one daemon connection** (`a-running-worker-holds-one-daemon-connection`): the shared
-     connection's idle close is the engine's tick plus a named margin, so ticks reuse it. Guarded by
-     `tests/daemon-connection.test.ts`.
+   - **A running worker holds one daemon connection** (`a-running-worker-holds-one-daemon-connection`): nothing
+     closes the shared connection for being unused; only stop, a drop or `SHARED_CLIENT_MAX_MS` replaces it. No idle
+     bound is safe: the loop waits `TICK_MS` after a tick ends, GitHub reads follow a tick's daemon calls, and a paused
+     tick calls the daemon not at all (2.0.1-beta.7 live: a tick-plus-10 s idle close still reconnected every 80-130 s).
+     Guarded by `tests/daemon-connection.test.ts` (the real loop with slow reads and paused ticks opens one).
    - **A worker builds one daemon client** (`a-worker-builds-one-daemon-client`): every daemon call the worker makes
      (`withDaemon`: turn-end and inbox reads, usage meters, permission events, server info) runs on that shared
      connection; `openDaemon` in `server/daemon.ts` is the only place a `DaemonClient` is built. 2026-11-13 live copy
