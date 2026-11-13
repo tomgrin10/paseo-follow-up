@@ -227,14 +227,14 @@ test("stacks come from base-branch chains, never overriding a registered parent"
   inferBaseChains(g); assert.equal(g.prs[1].parent, null);
 });
 
-async function githubFixture() {
+async function githubFixture(o: { refuseFirstChildMerge?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "follow-gh-actions-")); const store = new Store(root);
   const bottom = pr({ snapshot: ghSnapshot({ headBranch: "feat-a", head: "a1" }) });
   const top = pr({ key: "example/app#2", number: 2, parent: bottom.key, snapshot: ghSnapshot({ headBranch: "feat-b", base: "feat-a", head: "b1" }) });
   await store.mutate(s => s.workspaces.push(workspace({ prs: [top, bottom] })));
   let observed: Pr[] = [top, bottom];
   const calls: string[] = []; const graphiteCalls: string[] = [];
-  let refuseFirstChildMerge = true;
+  let refuseFirstChildMerge = o.refuseFirstChildMerge ?? true;
   const github = {
     observe: async () => new Map(observed.map(p => [p.key, { snapshot: p.snapshot, error: p.error }])),
     merge: async (p: Pick<Pr, "number">, o: { method: string; head: string }) => {
@@ -255,12 +255,84 @@ test("GitHub mode: downstack merge goes in order, retargets the child after its 
     const plan = await f.actions.prepare("workspace", f.top.key, "merge");
     assert.deepEqual(plan.prs.map(p => p.number), [1, 2]);
     assert.ok(plan.prs.every(p => !p.blockers.length), JSON.stringify(plan.prs));
+    const before = (await f.store.snapshot()).workspaces[0];
     const reply = await f.actions.confirm(plan.id, "downstack");
     assert.equal(reply.state, "submitted", reply.result);
+    assert.equal(reply.merge, "merged", "gh merged both: the button and toast may say Merged (mergeWords)");
+    // a-merge-outcome-reads-the-same-everywhere: every surface agrees with "Merged" before the next PR read.
+    const { headline, needsYou } = await import("../shared/attention");
+    const { activity } = await import("../shared/activity");
+    const { stackBar } = await import("../shared/attention");
+    const after = (await f.store.snapshot()).workspaces[0];
+    assert.ok(Date.parse(after.updatedAt) > Date.parse(before.updatedAt), "the workspace is newer, so a client's fresh read wins over its live copy (useWorkspace)");
+    assert.deepEqual(after.prs.map(p => p.snapshot?.state), ["MERGED", "MERGED"], "the rows say merged");
+    assert.deepEqual([stackBar(after).merged, stackBar(after).total], [2, 2], "the progress bar is full");
+    assert.ok(headline(after).some(h => h.text === "All 2 PRs merged"), JSON.stringify(headline(after)));
+    assert.ok(!needsYou(after).some(i => i.kind === "merge"), "no Merge row left");
+    assert.deepEqual(activity(after).filter(r => /merged|Merge/.test(r.text)).map(r => r.text).sort(), ["#1 merged", "#2 merged"], "Activity says it once per PR, never 'requested'");
     assert.deepEqual(f.calls, ["merge #1 merge a1", "retarget #2 main", "merge #2 merge b1"]);
     assert.deepEqual(f.graphiteCalls, []);
     assert.doesNotMatch(reply.result, GRAPHITE_WORDS);
   } finally { await f.close(); }
+});
+
+test("GitHub mode: a merge click drops the queued repair for the PR it merged in the same write (Tasks and Needs you agree)", async () => {
+  const f = await githubFixture({ refuseFirstChildMerge: false }); try {
+    const { Engine } = await import("../server/engine");
+    const engine = new Engine(f.store, { observe: async () => new Map() }, {} as never);
+    f.actions.settleTasks = w => engine.settleTasks(w);
+    // #1 merged and GitHub retargeted #2 onto main, but a read in between queued "Restack #2 after #1 merged" (the
+    // stack's merges land seconds apart). Then the developer merges #2.
+    const merged = { ...f.bottom, snapshot: { ...f.bottom.snapshot!, state: "MERGED" as const, mergedAt: "2026-01-01T00:00:00.000Z" } };
+    const top = { ...f.top, snapshot: { ...f.top.snapshot!, base: "main" } };
+    f.observe([top, merged]);
+    await f.store.mutate(s => { const w = s.workspaces[0]; w.prs = [top, merged]; engine.settleTasks(w); });
+    const queued = (await f.store.snapshot()).workspaces[0].batches.filter(b => b.state === "pending");
+    assert.deepEqual(queued.flatMap(b => b.tasks.map(t => t.kind)), ["restack"], "precondition: the restack is queued");
+    const plan = await f.actions.prepare("workspace", f.top.key, "merge");
+    const reply = await f.actions.confirm(plan.id, "target");
+    assert.equal(reply.merge, "merged", reply.result);
+    const after = (await f.store.snapshot()).workspaces[0];
+    assert.deepEqual(after.prs.map(p => p.snapshot?.state), ["MERGED", "MERGED"]);
+    // Only the Done check is left: every PR merged, so no repair is queued (Tasks, Needs you "task ready").
+    assert.deepEqual(after.batches.filter(b => b.state === "pending").flatMap(b => b.tasks.map(t => t.kind)), ["completion"]);
+    assert.doesNotMatch(after.nextMessage ?? "", /Restack/);
+  } finally { await f.close(); }
+});
+
+test("GitHub mode: after a merge click Home and the pill read the merged copy too (the shared live store), Needs you 0", { timeout: 60_000 }, async () => {
+  const { bundleStores, fakeHost, settle } = await import("./client-stores");
+  const stores = await bundleStores();
+  const host = fakeHost(true);
+  const live = stores.createLiveStore(host.client as never);
+  const f = await githubFixture({ refuseFirstChildMerge: false }); try {
+    await settle();
+    // Home and the pill read the live store, fed by the workspaces feed: the copy from before the click.
+    const before = (await f.store.snapshot()).workspaces[0];
+    host.push("follow.workspaces-feed", { revision: 1, full: true, workspaces: [before], removed: [], error: null });
+    await settle();
+    const held = () => live.get(before.id) as typeof before;
+    assert.ok(needsYou(held()).some(i => i.kind === "merge"), "precondition: Home lists the merge");
+    const plan = await f.actions.prepare("workspace", f.top.key, "merge");
+    assert.equal((await f.actions.confirm(plan.id, "downstack")).merge, "merged");
+    // The merge button's fresh read (readWorkspace, before its toast) reaches every live store.
+    const after = (await f.store.snapshot()).workspaces[0];
+    stores.acceptWorkspace(after);
+    assert.deepEqual(held().prs.map(p => p.snapshot?.state), ["MERGED", "MERGED"], "Home's rows say merged");
+    assert.equal(needsYou(held()).length, 0, `Home's and the pill's Needs you is empty: ${JSON.stringify(needsYou(held()))}`);
+    // A late diff carrying the older copy never undoes it.
+    host.push("follow.workspaces-feed", { revision: 2, full: false, workspaces: [before], removed: [], error: null });
+    await settle();
+    assert.equal(needsYou(held()).length, 0, "an older copy from a late diff is ignored");
+    const button = await readFile(new URL("../client/merge-button.tsx", import.meta.url), "utf8");
+    assert.match(button, /queryFn: \(\) => readWorkspace\(read, w\.id\)/, "the merge's read goes through readWorkspace");
+    assert.match(button, /await refresh\(\);\n\s*const said = mergeWords/, "and finishes before the toast");
+  } finally { live.stop(); await f.close(); }
+});
+
+test("the server wires the merge write to the engine's task settle", async () => {
+  const source = await readFile(new URL("../index.server.ts", import.meta.url), "utf8");
+  assert.match(source, /actions\.settleTasks = w => engine\.settleTasks\(w\);/);
 });
 
 test("GitHub mode: When ready is GitHub auto-merge, hidden with a reason when the repository doesn't allow it", async () => {

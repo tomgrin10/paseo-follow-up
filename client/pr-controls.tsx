@@ -14,14 +14,16 @@ import { reviewersMissing } from "../shared/pr-workflow";
 import { resolveReviewers, withoutAuthor, type ReviewerEntry } from "../shared/reviewers";
 import { ReviewerPicker, reviewerSettingsKey, useReviewerSettings, willAsk } from "./reviewers";
 import { runAction } from "./toasts";
+import { useMergeButtons } from "./merge-button";
+import { mergeScope } from "../shared/merge-click";
 
 const METHOD_SENTENCE: Record<MergeMethod, string> = { squash: "squash and merge it", merge: "merge it with a merge commit", rebase: "rebase and merge it" };
 /** Blockers read as nouns after "clears:"; proper names (GitHub, Graphite) keep their capital. */
 const lowerFirst = (b: string) => /^(GitHub|Graphite)\b/.test(b) ? b : b[0].toLowerCase() + b.slice(1);
 
 /**
- * Merge, merge-when-ready and reviewer requests for one PR. Every write needs a click; Merge always
- * prepares a fresh plan and asks again before anything reaches Graphite or GitHub. In GitHub mode When ready is
+ * Merge, merge-when-ready and reviewer requests for one PR. Every write needs a click. Merge is one click: it names
+ * its whole scope (the stack under the PR included) and merges exactly that, at the heads it showed, or shows why not. In GitHub mode When ready is
  * GitHub's auto-merge, read with the PR, so it needs no browser companion; it's hidden when the repository disallows it.
  */
 export function PrControls({ pr, workspace, theme, compact, browserReady: companionReady, intent }: { browserReady: boolean; pr: Pr; workspace: Workspace; theme: Theme; compact: boolean; intent?: "merge" | "reviewers" | null }) {
@@ -46,6 +48,7 @@ export function PrControls({ pr, workspace, theme, compact, browserReady: compan
     else setPlan(result);
   } });
   const pendingAction = workspace.prActions.some(a => prActionBlocks(a, [pr.key]));
+  const mergeControl = useMergeButtons(workspace);
   const busy = checking.isPending || submit.isPending;
   const actual = browserReady ? status.data?.pr : null;
   const known = !!actual && !status.error && !status.data?.error;
@@ -61,13 +64,16 @@ export function PrControls({ pr, workspace, theme, compact, browserReady: compan
   const error = failure ? errorText(failure) : (browserReady ? status.data?.error : null) ?? null;
   const scopeBlocked = (scope: "target" | "downstack") => !!plan && (plan.blockers.length > 0 || (scope === "target" ? plan.prs.slice(-1) : plan.prs).some(p => p.blockers.length > 0));
   const act = (scope: "target" | "downstack") => { if (plan) submit.mutate({ planId: plan.id, scope }); };
-  // Opening the sheet from "Merge…" starts the read-only check; the merge itself still needs the confirm click.
+  // Merge is one click (a-click-on-merge-merges, client/merge-button.tsx). Only a PR whose scope can't be known when the
+  // button draws opens here with intent "merge": that starts the read-only check, and the plan below asks to confirm.
   const started = useRef(false);
   useEffect(() => { if (intent === "merge" && canMerge && !disabled && !started.current) { started.current = true; begin("merge"); } }, [intent, canMerge]);
   // Opening from "Add reviewers" with nobody set goes straight to the picker instead of an error.
   const loaded = !!reviewerSettings.data;
   useEffect(() => { if (intent === "reviewers" && loaded && missingReviewers && !pr.snapshot?.draft && !reviewers.length) setPicking(true); }, [intent, loaded]);
   if (pr.snapshot?.state !== "OPEN") return null;
+  const mergeOne = mergeControl(pr.key, { theme, compact, kind: "primary", disabled, fallback: () => begin("merge") });
+  const scopeLine = canMerge ? mergeScope(workspace, pr.key)?.detail ?? null : null;
   const waitingFor = mergeBlockers(pr).filter(b => !b.startsWith("Graphite ")).map(lowerFirst);
   // GitHub refuses auto-merge on a PR it can already merge, so the switch shows only while Merge is waiting, or to turn it off.
   const showSwitch = browserReady && (!github || !canMerge || !!enabled);
@@ -104,10 +110,12 @@ export function PrControls({ pr, workspace, theme, compact, browserReady: compan
         });
       }} />}
     {!plan && <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-      {(canMerge || queued || recentlySubmitted || busy) ? <Button title={busy ? checking.isPending ? "Checking…" : "Submitting…" : queued ? "Queued to merge" : recentlySubmitted ? "Submitted" : `Merge #${pr.number}`} icon={queued ? "Clock" : "GitMerge"} theme={theme} compact={compact} kind={canMerge ? "primary" : "secondary"} loading={busy} disabled={disabled || !canMerge} onPress={() => begin("merge")} />
+      {canMerge && !queued && !recentlySubmitted && !busy && mergeOne.button ? mergeOne.button : (canMerge || queued || recentlySubmitted || busy) ? <Button title={busy ? checking.isPending ? "Checking…" : "Submitting…" : queued ? "Queued to merge" : recentlySubmitted ? "Submitted" : `Merge #${pr.number}`} icon={queued ? "Clock" : "GitMerge"} theme={theme} compact={compact} kind={canMerge ? "primary" : "secondary"} loading={busy} disabled={disabled || !canMerge} onPress={() => begin("merge")} />
         : <Text style={[t.meta, { flex: 1 }]}>{waitingFor.length ? `Merge opens when it clears: ${waitingFor.join(", ")}.` : github ? "Waiting for GitHub to confirm it can merge." : "Waiting for Graphite to report it ready to merge."}</Text>}
       {showSwitch && <Switch theme={theme} compact={compact} label={`${github ? "Auto-merge" : "When ready"}${known ? "" : " · unknown"}`} accessibilityLabel={`${github ? "Auto-merge" : "Merge when ready"} for ${pr.repo} pull request ${pr.number}`} value={known ? !!enabled : null} disabled={disabled} onChange={() => begin(enabled ? "disable_mwr" : "enable_mwr")} />}
     </View>}
+    {!plan && mergeOne.notice}
+    {!plan && scopeLine && <Text style={t.meta}>{scopeLine}</Text>}
     {!plan && autoMergeOff && <Text style={t.meta}>Auto-merge is off for this repository. Turn on Allow auto-merge in its GitHub settings.</Text>}
     {error && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusDanger }]}>{error}</Text>}
     {notice && <Text accessibilityLiveRegion="polite" style={t.meta}>{notice}</Text>}

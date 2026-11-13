@@ -121,7 +121,7 @@ export const workspaceSchema = z.object({
   snooze: z.object({ until: z.string(), at: z.string(), keys: z.array(z.string()) }).nullable().optional(),
   prs: z.array(prSchema), obligations: z.array(obligationSchema), batches: z.array(batchSchema),
   excludedStacks: z.array(z.object({ name: textSchema, reason: textSchema, excludedAt: z.string(), prs: z.array(prSchema), obligations: z.array(obligationSchema) })).default([]),
-  prActions: z.array(z.object({ id: idSchema, kind: z.enum(["merge", "enable_mwr", "disable_mwr", "request_reviewers"]), reviewers: z.array(z.string()).optional(), prs: z.array(idSchema), heads: z.record(z.string(), z.string()), createdAt: z.string(), state: z.enum(["sending", "submitted", "failed", "uncertain"]), result: z.string() })).default([]),
+  prActions: z.array(z.object({ id: idSchema, kind: z.enum(["merge", "enable_mwr", "disable_mwr", "request_reviewers"]), reviewers: z.array(z.string()).optional(), prs: z.array(idSchema), heads: z.record(z.string(), z.string()), createdAt: z.string(), state: z.enum(["sending", "submitted", "failed", "uncertain"]), result: z.string(), /** A submitted merge: how far it got (mergeStageSchema). */ merge: z.enum(["merged", "queued", "requested"]).optional() })).default([]),
   completion: z.object({ summary: textSchema, declaredAt: z.string(),
     /** PRs whose deploy Follow-up could not confirm when Done was accepted ("Deploy not confirmed by Follow-up"). */
     unconfirmed: z.array(z.string()).optional() }).nullable(),

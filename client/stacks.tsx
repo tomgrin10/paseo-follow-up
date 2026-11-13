@@ -10,6 +10,7 @@ import { Card, FoldRow, text, type Theme } from "./kit";
 import { Spinner } from "./motion";
 import { mergedColor, tint, toneColor, type Colors } from "./theme";
 import { RichText } from "./rich-text";
+import { HeldMerges } from "./merge-button";
 
 const NODE = 16;
 
@@ -117,6 +118,7 @@ export function StacksCard({ workspace: w, theme, compact, open, toggle, onOpen,
       <View style={{ paddingTop: 3 }}><Spinner color={c.accent} size={12} /></View>
       <RichText style={[t.meta, { flex: 1, color: c.foreground }]}>{a.result || (isGithubFlow(w.prs.find(p => p.key === a.prs[0])?.snapshot) ? "Sending to GitHub…" : "Submitting to Graphite…")}</RichText>
     </View>)}
+    <HeldMerges workspace={w} theme={theme} compact={compact} framed />
     {!w.prs.length && <View style={{ paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border, gap: 4 }}>
       <Text style={t.body}>No PRs yet</Text>
       <Text style={t.meta}>The main agent registers each PR it opens, and Follow-up also picks up PRs submitted from this workspace's sessions.</Text>
