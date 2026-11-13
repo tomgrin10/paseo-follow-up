@@ -173,7 +173,9 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
     // Phones: the host header already says Follow-up, so no "Home" title row; search, sort and settings share one row and
     // the meters move to the end of the list.
     footer={omnibox.results ? undefined : compact
-      ? <View style={{ paddingTop: 16, paddingBottom: 96, gap: 12 }}>{!nothing && <UsageMeters theme={theme} sources={deps.sources} dense />}</View>
+      ? <View style={{ paddingTop: 16, paddingBottom: 96, gap: 12 }}>{!nothing && <UsageMeters theme={theme} sources={deps.sources} dense hold={!!model.hold} />}
+        {/* Phones: the version is a muted caption at the end of the list, never in the strip (Q51: it hid chips). */}
+        <View style={{ flexDirection: "row", paddingHorizontal: 6 }}><VersionMark theme={theme} touch openSettings={deps.openSettings} /></View></View>
       : undefined}
     // Phones: the setup offer goes after the Needs-you group when there is one, so the first ask stays high.
     afterNeeds={compact && model.needs > 0 ? <SetupOffer theme={theme} compact view={props.onboarding} /> : undefined}
@@ -187,17 +189,15 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
         {compact && <IconButton theme={theme} compact icon="Settings" label="Follow-up settings" onPress={deps.openSettings} />}
       </View>
       {!compact && !omnibox.results && <StatusStrip theme={theme} model={model} filter={filter} onFilter={setFilter} touch={compact} dense={compact} />}
-      {!compact && !omnibox.results && <UsageMeters theme={theme} sources={deps.sources} dense={compact} />}
+      {!compact && !omnibox.results && <UsageMeters theme={theme} sources={deps.sources} dense={compact} hold={!!model.hold} />}
       {!compact && !omnibox.results && <SetupOffer theme={theme} compact={compact} view={props.onboarding} />}
     </ListTop>}
     // Phones: only the search row stays pinned; the status chips and the setup offer scroll away with the list, so a
     // scrolled list keeps the screen instead of sitting under a 250px block.
     header={omnibox.results ? undefined : compact ? <View style={{ gap: 8, paddingTop: 6, paddingBottom: 6 }}>
-      {/* No title row on phones: the version sits at the right of the status chips and scrolls away with them. */}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingRight: 6 }}>
-        <View style={{ flex: 1, minWidth: 0 }}><StatusStrip theme={theme} model={model} filter={filter} onFilter={setFilter} touch dense /></View>
-        <VersionMark theme={theme} touch openSettings={deps.openSettings} />
-      </View>
+      {/* No title row on phones. The strip has the row to itself, so every chip is reachable (Q51: "Sending" pushed
+          Waiting, Quiet and Later behind the version); the version is at the end of the list. */}
+      <StatusStrip theme={theme} model={model} filter={filter} onFilter={setFilter} touch dense />
       {updateNotice}
       {model.needs === 0 && <SetupOffer theme={theme} compact view={props.onboarding} />}
     </View> : updateNotice} />;

@@ -199,11 +199,13 @@ every `sending` entry.
   or queued to go out on its own (clock glyph), never Running's spinner. `sendingOf` gives each row its line (count,
   then when and why, never the workspace's or agent's title), and Send now only where the server would take the
   developer's Send and the send doesn't wait on them; a send that waits on the developer is a Needs-you item only
-  (invariant `sending-never-waits-on-you`). Send now is outlined: filled is only for what waits on the developer.
+  (invariant `sending-never-waits-on-you`), said once: "Send · The agent is idle; Follow-up doesn't wake it", or with
+  Auto off "Send · 2 tasks ready · auto-send is off here", never the row's title. Send now is outlined: filled is only for what waits on the developer.
   A queued message after a send the agent never acknowledged says "no reply to the last message, so they go again";
   a refused send says it tries again shortly. `autoSendHold` is the one machine-wide hold line (the resource
   governor), shown once at the top of Sending and only while it has rows (`HomeModel.hold`), the same words on every
-  width, with the memory % only when the reading is current. Agents read the same rows: `sending` on
+  width, with the memory % only when the reading is current; while it shows, the memory meter keeps its reading and
+  drops "· paused". On phones the status strip has its row to itself (the version is a caption at the end of the list). Agents read the same rows: `sending` on
   `workspace_status`, `inbox_list` (on the main agent's row) and `workstreams`; their Send now is `send_repairs`.
 - **Search, sort and colour:**
   - `shared/search.ts`: the client-side omnibox index. `rowHit` turns a hit into what the list Row shows (in-place

@@ -1243,8 +1243,15 @@ async function sendingShots({ shoot, seeded, call, home }) {
     if (phone) { await page.setViewportSize(PHONE); await page.getByRole("button", { name: /^Sending, \d+\. Show only these/ }).first().click(); }
     for (const w of wait) await page.getByText(w).filter({ visible: true }).first().waitFor({ timeout: 90000 });
   };
-  await shoot("sending-home-light", DESKTOP, "light", shown([busyLine, "Auto-send is off for this workspace"]));
+  await shoot("sending-home-light", DESKTOP, "light", shown([busyLine, "2 tasks ready · auto-send is off here"]));
   await shoot("sending-home-phone-light", PHONE, "light", shown([busyLine], true));
+  // The phone strip on its own row, scrolled to its end: every chip reachable, nothing over it (the version moved to
+  // the end of the list).
+  await shoot("sending-strip-phone-light", PHONE, "light", async page => {
+    await openHome(page); await page.setViewportSize(PHONE);
+    const strip = page.getByRole("toolbar", { name: "Status" }).first();
+    await strip.getByText("Later").first().scrollIntoViewIfNeeded();
+  });
   // 2. The machine-wide hold: Paseo's (fake) cgroup at 78% of memory.high pauses auto-sends; one hold line at the top
   //    of Sending, the same words on both widths. Onboarding email is signed off and its Auto turned on: its agent is
   //    idle (the fixture's isn't loaded), so its Send stays in Needs you, said once ("The agent is idle; …").

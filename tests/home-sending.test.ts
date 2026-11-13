@@ -126,3 +126,35 @@ test("agents read the same Sending rows: workspace_status, inbox_list and workst
   const rows = workstreams({ rows: [], tracked: [w], paseo: [], now: clock });
   assert.deepEqual([rows[0].group, rows[0].sending], ["sending", expected]);
 });
+
+test("say it once: while the hold line shows, the memory meter keeps its reading and drops '· paused'", async () => {
+  const { resourceMeter } = await import("../shared/resources");
+  const r: Resources = { memoryPct: 78, memoryBytes: null, memoryHighBytes: null, cpuPct: 20, memoryPressure: 0, cpuPressure: 0, level: "constrained", at: at(10_000) };
+  assert.equal(resourceMeter(r, clock)!.suffix, "· paused", "on its own the meter says it");
+  const held = resourceMeter(r, clock, undefined, { holdShown: true })!;
+  assert.equal(held.suffix, null);
+  assert.match(held.text, /Paseo memory 78%/, "the reading stays");
+  // Home passes the model's hold to both meters (desktop's under the strip, the phone's at the end of the list).
+  const { readFileSync } = await import("node:fs");
+  const home = readFileSync(new URL("../client/home.tsx", import.meta.url), "utf8");
+  assert.equal((home.match(/<UsageMeters [^>]*hold=\{!!model\.hold\}/g) ?? []).length, 2);
+});
+
+test("the Needs-you Send with Auto off says how much waits and why, never the title", () => {
+  const w = ws("off", { enable_auto_sends: false });
+  const s = row(home([w]), "off");
+  assert.deepEqual([s.group, s.word, s.line], ["needs", "Send", "2 tasks ready · auto-send is off here"]);
+});
+
+test("phones: the status strip has its row to itself, so no chip hides behind the version", async () => {
+  // 2026-11-13 (Q51 review): "Sending" made the strip longer and "v2.0.1-beta.4" beside it hid Waiting, Quiet and
+  // Later at 390pt. The phone header holds the strip alone (it scrolls sideways, nothing over it); the version is a
+  // muted caption at the end of the list.
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../client/home.tsx", import.meta.url), "utf8");
+  const phoneHeader = src.slice(src.indexOf("header={omnibox.results ? undefined : compact"), src.indexOf(": updateNotice} />"));
+  assert.match(phoneHeader, /<StatusStrip [^>]*touch dense \/>/);
+  assert.doesNotMatch(phoneHeader, /VersionMark/, "nothing shares the strip's row");
+  const phoneFooter = src.slice(src.indexOf("footer={omnibox.results ? undefined : compact"), src.indexOf("afterNeeds="));
+  assert.match(phoneFooter, /<VersionMark theme=\{theme\} touch/, "the version is still one tap from Settings");
+});

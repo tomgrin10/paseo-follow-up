@@ -77,7 +77,7 @@ test("the Needs-you Send says why it waits on you once, never the agent's or wor
   assert.equal(liveLine(w, clock).text, "5 tasks queued · the agent is idle; Follow-up doesn't wake it", "Home says it in the same words");
   assert.deepEqual([workspaceHeadline(needsYou(w, clock))?.label, workspaceHeadline(needsYou(w, clock))?.line], ["Send 5 tasks", send?.title], "the pill and inbox: tasks, the same line");
   const off = needsYou(message("pending", { enable_auto_sends: false }), clock).find(i => i.kind === "send");
-  assert.equal(off?.title, "Auto-send is off for this workspace", "why it waits on you; the button says how many");
+  assert.equal(off?.title, "5 tasks ready · auto-send is off here", "how much waits and why, never the title");
 });
 
 test("done rows say how they finished; a resolved-before-sent repair never shows", () => {
