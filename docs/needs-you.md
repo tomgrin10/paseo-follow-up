@@ -243,7 +243,8 @@ card beside a question list.
   (`ReasonEntry.title`, from `prEndEvent`) and reads it, not "#240 merged"; a flag stored before that keeps its line.
   Check, review-thread and conflict flags already say what to fix.
   In the pill sheet, a to-do that only says the headline again (`echoedItems`: the same text, or a reviewers row for
-  the headline's PR) drops its title and keeps its controls. `tests/say-it-once.test.ts` covers every reason and the
+  the headline's PR) drops its title and keeps its controls. The popover says its "N to do" once (`todoLine`): the
+  section header over the items when they show, else the meta line; the pill's title (a phone sheet's title) never. `tests/say-it-once.test.ts` covers every reason and the
   sheet.
 - **No "No ask stated" beside an open question:** the chat's fallback card says "Waiting on your answer to Q1".
 - **A blocked task names what it waits on** (`blockedLine`, `shared/task-status.ts`): "Blocked · waits for Q1", or the

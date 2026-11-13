@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { echoedItems, flagHeadline, HEADLINE_WORD } from "../shared/headline";
+import { echoedItems, flagHeadline, HEADLINE_WORD, todoLine } from "../shared/headline";
 import { newEntry, prEndEvent, reduce, REASONS, type InboxRow, type Reason, type ReasonEntry } from "../shared/inbox";
 import { prChip } from "../shared/home";
 
@@ -84,4 +84,14 @@ test("say-it-once: the pill sheet's one to-do that repeats the headline keeps it
   const other = [reviewers(2460, ["Ravi"]), reviewers(247, ["Mira"])];
   assert.deepEqual(surface(row(null), other), ["Add reviewers to #246", "Add reviewers to #2460: Ravi", "Add reviewers to #247: Mira"]);
   assert.equal(echoedItems(ravi, null, row(null)).size, 0);
+});
+
+test("say-it-once: the popover says its \"N to do\" once: the section header when items show, else the meta line", () => {
+  // The 2026-11-13 phone render said "1 to do in this workspace" in the sheet title, the meta line and the section.
+  const said = (o: Parameters<typeof todoLine>[0]) => Object.values(todoLine(o)).filter(Boolean).length;
+  assert.deepEqual(todoLine({ flagged: true, todo: 1, section: true }), { meta: false, section: true });
+  assert.deepEqual(todoLine({ flagged: true, todo: 2, section: false }), { meta: true, section: false }, "items not loaded yet: the meta line carries it");
+  for (const flagged of [true, false]) for (const todo of [0, 1, 3]) for (const section of [true, false])
+    assert.ok(said({ flagged, todo, section }) <= 1, `${flagged}/${todo}/${section}`);
+  assert.deepEqual(todoLine({ flagged: false, todo: 3, section: true }), { meta: false, section: false }, "an unflagged popover lists items without a count");
 });
