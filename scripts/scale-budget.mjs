@@ -12,6 +12,35 @@ export function median(xs) {
 }
 
 /**
+ * test:scale's idle budget (realistic seed), derived from CI's own distribution: test:scale runs on CI's runner, so its
+ * budget comes from what that runner reads, not from harness terms. 2026-11-13: 49 CI readings of test:scale's idle
+ * median (tests/fixtures/ci-idle-rss.txt, the last 60 CI runs without three failing outliers, plus #174's 243, which
+ * read over the old 240 on a PR that changed no product code and passed on rerun).
+ *   CI_IDLE_P50_MB: the median of those readings. CI_IDLE_SD_MB: their standard deviation.
+ *   SPREAD_SDS: how many standard deviations of run-to-run noise the budget absorbs (4 × 7.5 = 30 MB; #174's 243 is
+ *   23 over the median, so it passes).
+ * What it catches: a regression that adds 30 MB puts the median at the budget and fails about half the runs; one that
+ * adds 45 MB fails every run (even the lowest reading, 206, would read 251). tests/scale-budget.test.ts checks these
+ * constants against the fixture (drift over 1 MB fails).
+ */
+export const CI_IDLE_P50_MB = 220;
+export const CI_IDLE_SD_MB = 7.5;
+export const SPREAD_SDS = 4;
+export const REALISTIC_IDLE_BUDGET_MB = CI_IDLE_P50_MB + SPREAD_SDS * CI_IDLE_SD_MB;
+/**
+ * A named budget for scale-check's --idle-rss-budget: `realistic` (test:scale) or a number of MB. Names keep the
+ * derived values in this file, so package.json never carries a typed-in total.
+ */
+export const IDLE_BUDGETS = { realistic: REALISTIC_IDLE_BUDGET_MB };
+export function idleBudgetMb(value) {
+  if (value === undefined || value === null || value === "" || value === "0") return 0;
+  if (Object.hasOwn(IDLE_BUDGETS, value)) return IDLE_BUDGETS[value];
+  const n = Number(value);
+  if (!Number.isFinite(n)) throw new Error(`Unknown idle budget "${value}": a number of MB or one of ${Object.keys(IDLE_BUDGETS).join(", ")}`);
+  return n;
+}
+
+/**
  * The busy window (test:scale --busy <s>): live's load while agents work, before the idle window. 2026-11-13 live
  * (2.0.1-beta.4, 153-PR workspace): RSS stepped 315 → 405 MB while agents were busy and never came back, with an idle
  * check passing. Each awake agent ends BUSY_TURNS_PER_MIN turns a minute between them, each with BUSY_TURN_ITEMS
