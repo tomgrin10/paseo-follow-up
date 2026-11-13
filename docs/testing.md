@@ -27,6 +27,9 @@ not a patch for one instance.
     a fake host: at most one RPC a minute with `client.subscribe` (0.16), and still polling without it (0.15).
   - `tests/feeds.test.ts`: the worker's feeds read once per change, push only changes, and watch Smart Session only
     while subscribed.
+  - `tests/feed-recovery.test.ts`: the same stores (`tests/client-stores.ts` bundles them and fakes the host) stay
+    correct on their feeds: a push lands with no RPC, a worker restart makes them poll and resubscribe within 5 s of
+    its return, and a feed the worker refuses polls only that store.
   - `tests/rpc-ack.test.ts`: every client RPC replies within 500 ms with Paseo, the daemon and gh hanging
     (`tests/support/hanging-host.ts` runs the real `contribute()` in a temp home), or has an `EXEMPT` reason.
   - `tests/rpc-cached.test.ts`: the polled reads (Needs you's list, usage, the Summary) answer from what the worker
@@ -53,6 +56,7 @@ not a patch for one instance.
 | `scripts/check-trust-bypass.mjs` | `test:trust` | Trust bypass on a real daemon. |
 | `scripts/check-install.mjs` | `test:install`, `preview` | The packed install. `--keep` (`npm run preview`) leaves the daemon running for screenshots, prints "Isolated browser app: http://127.0.0.1:<port>", and writes `.preview-isolated.json`. |
 | `scripts/check-archived-lookup.mjs` | `test:install` | An archived agent a chat card names reads "archived" through the directory's one-off `fetch_agent` lookup, and stays unloaded. Run it on 0.16 too (`HARNESS_PASEO=0.16`). |
+| `scripts/screenshots.mjs --only feeds` | `test:feeds` | Feeds end to end in the harness (run it through `harness-slot`, with `HARNESS_PASEO=0.16` or `0.15.4`): Home, a panel and a collapsed pill open; a new flag, a sort set by an agent, a priorities write and a usage file write must show within 5 s with no poll RPC between, then again after a plugin reload, a killed worker and a daemon restart, with no page reload. On 0.15 it records the poll delays (75 s budget). Writes `feeds.json`. |
 | `scripts/check-wait.mjs` | `test:wait`, `test:wait-live` | Wait with real Haiku agents. Skips without credentials or Paseo 0.15; `test:wait-live` fails instead. |
 | `scripts/check-move.mjs` | `test:move` | 2.0's move from 1.x on a real daemon: the published 1.x beta auto-updates from a fake npm registry to a broken 2.0 (rolled back), then a good one; the move to the new plugin id fails probation once (rolled back, data intact), then succeeds on Try again. Same `follow_*` tool names; Paseo's plugin list shows the new id only. Screenshots (`--shots <dir>`): Home before and after, Settings → General after the rollback and after the move (desktop, 390 px, dark). Passes on Paseo 0.15.4 and 0.16 (`HARNESS_PASEO=0.16`). About 15 minutes. |
 | `scripts/check-move.mjs --registry` | `test:move:registry` | The same move for an install from Paseo's plugin list: a fake plugin registry (`PASEO_PLUGIN_REGISTRY`) pins the live pin (1.0.1) as `tomgrin10/follow-up`, which installs under the old id. The pin moves to 2.0, `paseo plugin update` installs it under the old id, and the move reinstalls from the same registry under the new id with data and plugin settings. About 8 minutes. |

@@ -376,7 +376,9 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   useQuestionOpener(w.id, setQuestion);
   const [specOpen, setSpecOpen] = useState(false);
   const [moreMenu, setMoreMenu] = useState<ReactNode>(null);
-  const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}) });
+  // Read when the panel opens and again when a PR sheet opens (its Open-in-browser actions use it); nothing polls it.
+  const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), staleTime: 0, refetchOnMount: "always" });
+  useEffect(() => { if (sheet) void browser.refetch(); }, [sheet?.key]); // eslint-disable-line react-hooks/exhaustive-deps
   const invalidated = () => { void cache.invalidateQueries({ queryKey: workspaceKey(w.id) }); void cache.invalidateQueries({ queryKey: overviewKey }); };
   const auto = useMutation({ mutationFn: (next: boolean) => control({ workspaceId: w.id, enable_auto_sends: next }), onSuccess: (_, next) => { toast.show(next ? "Auto-send on for this workspace" : "Auto-send off · repairs wait for your click"); invalidated(); }, onError: e => toast.error(errorText(e)) });
   // Opening a workspace reads its PRs now: background polling backs off for settled repositories (server/github.ts).

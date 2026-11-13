@@ -158,7 +158,7 @@ nothing. On 0.15 there is no `client.subscribe`, and the client polls the RPCs a
 | --- | --- | --- |
 | `follow.workspaces-feed` | `follow.list` every 15 s | Store saves and the engine tick (the revision diff, plus the worker's error) |
 | `follow.inbox-feed` | `follow.inbox-list` every 15 s, and its nudge on agent activity | Inbox hooks and actions, and the inbox tick (wake-ups, directory titles) |
-| `follow.home-feed` | `follow.priorities`, `follow.rank-status`, `follow.usage` every 60 s, `follow.overseer-status` every 15 s, and Re-rank's 3 s loop | Priority writes, ranker start and finish, the inbox tick (the Overseer), and Smart Session's accounts directory, watched only while someone subscribes (5 s debounce; the key is the meters as shown). The worker's live resources aren't in it: Home reads `follow.usage` once when it opens. With no directory to watch, `usageLive` is false and the client reads usage every 60 s |
+| `follow.home-feed` | `follow.priorities`, `follow.rank-status`, `follow.usage` every 60 s, `follow.overseer-status` every 15 s, and Re-rank's 3 s loop | Priority writes, ranker start and finish, the inbox tick (the Overseer), and Smart Session's accounts directory, watched only while someone subscribes (1.5 s debounce, so a burst of writes is one read; the key is the meters as shown). The worker's live resources aren't in it: Home reads `follow.usage` once when it opens. With no directory to watch, `usageLive` is false and the client reads usage every 60 s |
 | `follow.display-feed` | the Display settings read every 60 s (sidebar, pills, `home_sort`) | The settings' own subscription |
 
 `follow.browser-status` is read once when a PR sheet, the panel or the pill's popover opens; nothing polls it.

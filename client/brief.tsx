@@ -345,7 +345,7 @@ export function BriefCard({ item, theme, layout, agentId, deps, embedded = false
   const picks = usePicks(b.id);
   const words = useWords(b.id);
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" } | null>(null);
-  const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), enabled: !!sheet });
+  const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), enabled: !!sheet, staleTime: 0, refetchOnMount: "always" });
   // Send again on an undelivered answer: the same answerId, so the server resends that answer and never a second one.
   const resend = () => {
     // Only a send in flight blocks it: a resolved card is never "actionable", but its undelivered answer can go again.
