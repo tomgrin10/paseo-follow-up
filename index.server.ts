@@ -56,7 +56,7 @@ import { removeGlobalRegistrations } from "./server/mcp-registrations";
 import { TrustBypass } from "./server/trust-bypass";
 import { scopes } from "./server/scopes";
 import { updateObligation } from "./server/obligations";
-import { Inbox, type GuardPause } from "./server/inbox";
+import { Inbox, INBOX_WRITE_MS, type GuardPause } from "./server/inbox";
 import { daemonDirectory, guardPath } from "./server/inbox-directory";
 import { fileSources } from "./server/inbox-classifier";
 import { onBeforeSend } from "./server/daemon";
@@ -245,6 +245,7 @@ export default function contribute(server: PluginServerContext) {
   // Who sent a message (server/inbox-classifier.ts): the inbox and the Overseer's new-workspace gate read one ledger.
   const senderSources = fileSources(paseoHome, async () => (await inbox.store.snapshot()).ledger);
   const inbox: Inbox = new Inbox(directory, {
+    writeMs: INBOX_WRITE_MS,
     enabled: inboxSettings,
     overseer: async () => (await overseer?.state())?.agentId ?? null,
     briefs: {
