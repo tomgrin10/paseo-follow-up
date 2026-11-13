@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pr } from "./fixtures";
+import { acmeDeploy, pr } from "./fixtures";
 
 // Invariant worker-reads-github-in-process. 2026-11-11 (#116) moved PR polling off gh; the rc.3 live check (2026-11-12)
 // still saw ~50 `gh api …/compare/…` spawns after a start: Deployments.contains() was a read path #116 didn't cover,
@@ -49,7 +49,7 @@ test("worker-reads-github-in-process: no read path spawns gh; tokens resolve onc
   const registry = (async (url: string) => ({ ok: true, text: async () => JSON.stringify(String(url).includes("/manifests/") ? { config: { digest: `sha256:${"3".repeat(64)}` } } : { config: { Labels: { "org.opencontainers.image.revision": "b".repeat(40) } } }) })) as unknown as typeof fetch;
 
   // Every read path, default wiring.
-  const deployments = new Deployments(undefined, registry);
+  const deployments = new Deployments(undefined, registry, undefined, undefined, acmeDeploy);
   const github = new Github(undefined, undefined, deployments);
   const merged = pr({ repo: "acme/acme-poc", key: "acme/acme-poc#1", snapshot: { ...pr().snapshot!, state: "MERGED", mergeCommit: "a".repeat(40) } });
   await github.observe([pr(), merged]);
