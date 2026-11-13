@@ -22,7 +22,9 @@ export const BUSY_TURNS_PER_MIN = 20;
 export const BUSY_TURN_ITEMS = 30;
 export const BUSY_ITEM_BYTES = 8000;
 /**
- * How far the busy window's RSS may climb, last fifth's median over first fifth's. Placeholder until measured.
+ * How far the busy window's RSS may climb, last fifth's median over first fifth's. Not derived yet: test:scale:live
+ * reports it (--budgets-report-only). Measured 2026-11-13 on the harness: beta.4 39, main 51, the memory fix 28–42 MB.
+ * The budget PR sets it to the final build's observed growth plus the run-to-run spread, named here.
  */
 export const BUSY_GROWTH_BUDGET_MB = 25;
 /** The busy verdict: growth across the window (medians of its first and last fifths, so one GC spike decides nothing). */

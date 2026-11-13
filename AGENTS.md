@@ -110,16 +110,20 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    - Background work (scans, auto-sends, AI jobs) waits while the governor reports the VM constrained
      (Paseo's cgroup working set ≥ 75 %, or pressure).
    - Extras stop at critical (≥ 85 %).
-   - `test:scale` budgets, on the realistic seed (`--realistic`: 140 workspaces, ~280 agents, a live-sized 1.9 MB
-     state with one 153-PR workspace, a live-shaped 120 KB inbox, a fake GitHub with live-sized PR bodies) after a
-     180 s **busy window** (awake agents end 20 turns a minute with live-sized timelines): **300 MB peak RSS** from the
-     worker's start (VmHWM, so the cold-start tick counts), **busy-window growth** under `BUSY_GROWTH_BUDGET_MB`
-     (`scripts/scale-budget.mjs`), **240 MB idle RSS** (the median of the idle window after it), **3 % idle CPU**, **2
-     idle daemon requests a minute**. Measured 2026-11-12 (two runs): peak 262–264 MB (a ~2 s cold-start tick that changes and
-     validates every workspace once), idle 198–200 MB and flat, CPU 1.3–1.4 %, 1.3 requests a minute; the bare plugin
-     process is ~120 MB. Headroom (~15 % peak, ~20 % idle) covers live's extras the seed lacks (archived agents, real
-     transcripts, AI jobs) and CI noise. The old 240 MB budget was checked on an empty-workspace seed and only after
-     start-up, so a 450 MB live worker passed it.
+   - `test:scale` budgets (the gate in `verify`), on the realistic seed (`--realistic`: 140 workspaces, ~280 agents,
+     three PRs with full snapshots per workspace, a fake GitHub with live-sized PR bodies): **300 MB peak RSS** from the
+     worker's start (VmHWM, so the cold-start tick counts), **240 MB idle RSS** (the median of the idle window), **3 %
+     idle CPU**, **2 idle daemon requests a minute**. Measured 2026-11-12 (two runs): peak 262–264 MB (a ~2 s cold-start
+     tick that changes and validates every workspace once), idle 198–200 MB and flat, CPU 1.3–1.4 %, 1.3 requests a
+     minute; the bare plugin process is ~120 MB. Headroom (~15 % peak, ~20 % idle) covers live's extras the seed lacks
+     (archived agents, real transcripts, AI jobs) and CI noise. The old 240 MB budget was checked on an empty-workspace
+     seed and only after start-up, so a 450 MB live worker passed it.
+   - `test:scale:live` (PR CI, after `verify`): the same budgets on the **live-sized** seed (`--live-sized`: plus one
+     153-PR workspace and a live-shaped 120 KB inbox) after a 180 s **busy window** (awake agents end 20 turns a minute
+     with live-sized timelines), plus **busy-window growth** under `BUSY_GROWTH_BUDGET_MB` (`scripts/scale-budget.mjs`).
+     It runs with `--budgets-report-only` (budgets print as `[report]` lines; dormant wakes and unsettled sends still
+     fail) until its derived budgets land: 2026-11-13 the busy window sat at 322–352 MB idle on beta.4, main and the
+     memory fix alike, ~100 MB JS heap and ~220 MB native. Never loosen a `test:scale` budget to pass it.
    - **Budgets judge the typical cost** (`scale-budgets-judge-the-typical-cost`): an idle budget reads the idle window's
      median, because RSS there is a GC sawtooth (main swung 17 MB between runs; CI once peaked at 279 MB over a ~215 MB
      median). One sample decides nothing except the lifetime cap (VmHWM ≤ 300 MB). The idle peak is still reported.
@@ -136,9 +140,17 @@ These are product rules. Each has tests, and breaking one is a bug even when the
      objects so a save validates only what changed. Guarded by `tests/send-clones.test.ts` and `test:scale`.
    - **A mutation copies only what it changes** (`a-mutation-copies-only-what-it-changes`, which generalises
      `a-send-never-clones-the-whole-state` to every store): a store's mutation works on a copy-on-access draft
-     (`server/cow.ts`), copies only the items it reads, keeps unchanged items' frozen objects, validates only what
-     changed and serialises once per real write. Every JSON writer in `server/` uses it or carries an exemption with a
-     reason. Guarded by `tests/inbox-copies.test.ts`, `tests/store-copies.test.ts` and `test:scale`'s busy window.
+     (`server/cow.ts`): reading copies nothing, an item is copied only on its first real write, and **a write that
+     changes nothing isn't a write** (setting a field to the value it has, or deleting one that isn't there: no copy,
+     no stringify, no zod, no flush). Unchanged items keep their frozen objects, only what changed is validated, and
+     the store serialises once per real write. Every JSON writer in `server/` uses it or carries an exemption with a
+     reason. Guarded by `tests/inbox-copies.test.ts`, `tests/store-copies.test.ts`, `tests/discovery-noop.test.ts`
+     (a discovery tick that finds nothing new copies nothing) and `test:scale`'s busy window.
+   - **A timeline entry is read once** (`a-rescan-reads-only-new-entries`, `a-turn-end-reads-the-turn-once`): a running
+     agent's rescan reads forward from its cached cursor (`direction: "after"`), never a fixed newest page, and a turn
+     end reads its own turn (back to the item that started it, at most `TURN_READ_CAP`) once, shared by the engine and
+     the inbox (`turnItems`, `server/inbox-directory.ts`). Guarded by `tests/incremental.test.ts`,
+     `tests/turn-read.test.ts` and `test:scale`'s busy window.
    - **A running worker holds one daemon connection** (`a-running-worker-holds-one-daemon-connection`): the shared
      connection's idle close is the engine's tick plus a named margin, so ticks reuse it. Guarded by
      `tests/daemon-connection.test.ts`.

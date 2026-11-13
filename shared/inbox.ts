@@ -274,8 +274,14 @@ function resolveStaleFinish(e: Entry): void {
   if (!e.needs) e.snooze = null;
 }
 
+/**
+ * A private copy of a JSON value. `prev` may be a store mutation's draft view of an entry (server/cow.ts: copied only
+ * when changed), which structuredClone refuses; JSON is what the inbox saves, so the fallback loses nothing.
+ */
+const plainCopy = <T>(v: T): T => { try { return structuredClone(v); } catch { return JSON.parse(JSON.stringify(v)) as T; } };
+
 export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
-  const e: Entry = structuredClone(prev);
+  const e: Entry = plainCopy(prev);
   const before = JSON.stringify(e);
   const flag = (reason: Reason, detail: string, dedupeKey: string, prKey?: string) => {
     if (e.goneAt) return;
