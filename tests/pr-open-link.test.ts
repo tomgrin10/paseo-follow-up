@@ -73,6 +73,8 @@ test("pr-open-link: every surface that draws Needs-you rows renders the link bes
   assert.match(kit, /href: link\.url/);
   const brief = await readFile(join(import.meta.dirname, "../client/brief.tsx"), "utf8");
   assert.match(brief, /<PrLinksProvider prs=\{prs\}><BriefCardBody/, "brief cards (the done brief too) link the PRs they name");
+  const questions = await readFile(join(import.meta.dirname, "../client/questions.tsx"), "utf8");
+  assert.match(questions, /<PrLinksProvider prs=\{prLinksByNumber\(\[pr\]\)\}><RichText[^>]*>\{`About #\$\{pr\.number\}/, "a question's \"About #142\" links #142");
 });
 
 test("pr-open-link: a Graphite repository's PR opens in Graphite; a GitHub one on GitHub", () => {
