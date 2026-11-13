@@ -54,7 +54,8 @@ export function useMergeButtons(w: Workspace | undefined): MergeButtons {
     const running = merge.isPending && merge.variables?.prKey === prKey;
     const outcome = outcomes[prKey];
     const submitted = outcome?.state === "submitted" || outcome?.state === "uncertain";
-    const title = running ? scope.queue ? "Adding to queue…" : "Merging…" : submitted ? scope.queue ? "Added to merge queue" : "Merge submitted" : scope.label;
+    // Phones keep the button on the row's line: a short done label, so the row's title keeps its one line.
+    const title = running ? scope.queue ? "Adding to queue…" : "Merging…" : submitted ? scope.queue ? compact ? "Queued" : "Added to merge queue" : compact ? "Submitted" : "Merge submitted" : scope.label;
     const button = <Button theme={theme} compact={compact} kind={kind} grow={grow} icon={submitted ? "Check" : scope.queue ? "ListPlus" : "GitMerge"} title={title} accessibilityLabel={scope.a11y}
       loading={running} disabled={disabled || merge.isPending || submitted} onPress={() => merge.mutate({ prKey, scope })} />;
     const why = whyNot(outcome);
