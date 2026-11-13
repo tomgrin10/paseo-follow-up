@@ -137,9 +137,10 @@ test("questions join Needs you: stop-mode first, blocked tasks fold into their q
   w.questions[2].answer!.delivery.state = "unconfirmed";
   developerAnswer(w, "Q2", "A", undefined, "copy", clock);
   developerAnswer(w, "Q1", "Internal users first", undefined, "copy", clock);
-  assert.deepEqual(needsYou(w, clock).map(i => i.kind), ["answer"]);
+  // an-answer-leaves-needs-you-only-when-delivered: the copied answers wait to be sent, after the one to check.
+  assert.deepEqual(needsYou(w, clock).map(i => i.key), ["answer:Q3", "answer:Q1", "answer:Q2"]);
   assert.equal(workspaceHeadline(needsYou(w, clock))?.label, "Check answer");
-  w.questions[2].answer!.delivery.state = "sent";
+  for (const q of w.questions) q.answer!.delivery.state = "sent";
   assert.deepEqual(needsYou(w, clock), [], "an answered blocked-task question doesn't ask again while the agent catches up");
 });
 

@@ -5,7 +5,7 @@ import { completionBlockers, completionCheck, completionGate, revokesDone, type 
 import { Store } from "./store";
 import { Github } from "./github";
 import { batchPrompt, messageText, tasksFor, isRecovery, needsPrObservations, type TaskWording } from "./tasks";
-import { answerRecipients, developerAnswer, syncTaskQuestions } from "./questions";
+import { answerRecipients, developerAnswer, syncTaskQuestions, type AnswerAction } from "./questions";
 import { answerMessage, isOpen as isOpenQuestion, type Question } from "../shared/questions";
 import { reconcileSubmittedStacks } from "./submissions";
 import { applyDiscovery, interruptionHold, startsWithAutoSend, type DiscoveredWorkspace } from "./discovery";
@@ -360,7 +360,7 @@ export class Engine {
     return activated;
   }
   /** Records the developer's answer, then sends it unless they chose to copy it. */
-  async answer(workspaceId: string, questionId: string, choice: string, words: string | undefined, action: "send" | "copy" | "resend", actor: Actor = DEVELOPER): Promise<{ workspace: Workspace; question: Question }> {
+  async answer(workspaceId: string, questionId: string, choice: string, words: string | undefined, action: AnswerAction, actor: Actor = DEVELOPER): Promise<{ workspace: Workspace; question: Question }> {
     await this.store.mutateWorkspace(workspaceId, w => {
       if (!w.enable_tracking || w.archived) throw new Error("Follow-up isn't following this workspace. Turn it back on in Follow-up settings, under Workspace exceptions.");
       developerAnswer(w, questionId, choice, words, action, this.now(), actor);
@@ -368,7 +368,7 @@ export class Engine {
     });
     // Recorded as "sending": the reply goes back now and the message after it. Reaching a dormant agent can take Paseo
     // longer than the 30 s a plugin RPC gets; the question shows sending → sent (or queued, unconfirmed) as it lands.
-    if (action !== "copy") this.later(() => this.deliverAnswer(workspaceId, questionId));
+    if (action !== "copy" && action !== "chat") this.later(() => this.deliverAnswer(workspaceId, questionId));
     const workspace = findWorkspace(await this.store.snapshot(), workspaceId);
     return { workspace, question: workspace.questions.find(q => q.id === questionId)! };
   }

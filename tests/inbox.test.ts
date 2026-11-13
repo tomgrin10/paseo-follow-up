@@ -190,7 +190,7 @@ async function service(agents: AgentInfo[], options: { tails?: Record<string, un
   const inbox = new Inbox(dir, { enabled: async () => ({ enable_inbox: options.enable_inbox ?? true, enable_inbox_pr_closed: true }), directory: f.directory, sources: { ...f.none, ...options.sources }, guard: async () => options.pauses ?? null, graceMs: 5, now: options.now ?? (() => Date.parse(at(1))) });
   return { inbox, cleared: f.cleared, done: () => rm(dir, { recursive: true, force: true }) };
 }
-const mark = async (inbox: Inbox) => inbox.store.mutate(s => { s.importedAt = T0; s.lastSeen = at(1); s.primedAt = T0; });
+const mark = async (inbox: Inbox) => inbox.store.mutate(s => { s.importedAt = T0; s.lastSeen = at(1); s.primedAt = T0; s.notifiedAt = T0; });
 
 test("#19 a subagent's permission and error flag its parent; its finish doesn't", async () => {
   const { inbox, done } = await service([agent({ id: "main" }), agent({ id: "sub", parentAgentId: "main", title: "Reviewer" })]);
@@ -316,7 +316,7 @@ test("migration: a store imported by 1.1.0-beta.0 is repaired once, and only ent
   const imported = (id: string, detail = "You haven't replied") => ({ ...newEntry(id), seq: 1, lastEventAt: importAt, needs: { since: importAt, reasons: [{ reason: "finished" as const, at: importAt, detail, dedupeKey: "finished" }] } });
   // What beta.0 left on disk: no revision field, every imported flag dated at import time.
   const beta0 = {
-    version: 1, importedAt: importAt, lastSeen: importAt, primedAt: importAt, signOffs: 0, unsorted: ["already-unsorted"],
+    version: 1, importedAt: importAt, lastSeen: importAt, primedAt: importAt, notifiedAt: importAt, signOffs: 0, unsorted: ["already-unsorted"],
     entries: {
       closed: imported("closed"), archived: imported("archived"), old: imported("old"), recent: imported("recent"), unread: imported("unread", "Unread in Paseo"),
       "signed-off": { ...imported("signed-off"), needs: null, signedOffAt: "2026-11-08T11:00:00.000Z", seq: 2 },
@@ -576,7 +576,7 @@ test("a-tick-copies-the-state-at-most-once: the seen-event drop never swallows a
   const dir = await mkdtemp(join(tmpdir(), "follow-inbox-merged-")); t.after(() => rm(dir, { recursive: true, force: true }));
   const f = fake([agent({ id: "a1" }), agent({ id: "a2" })]);
   const inbox = new Inbox(dir, { enabled: async () => ({ enable_inbox: true, enable_inbox_pr_closed: true }), directory: f.directory, sources: f.none, guard: async () => null, now: () => Date.parse(at(1)) });
-  await inbox.store.mutate(s => { s.importedAt = at(0); s.primedAt = at(0); });
+  await inbox.store.mutate(s => { s.importedAt = at(0); s.primedAt = at(0); s.notifiedAt = at(0); });
   const follow = { version: 1 as const, workspaces: [
     workspace({ id: "w1", mainAgentId: "a1", prs: [pr({ key: "example/app#7", number: 7, snapshot: snapshot({ state: "MERGED" }) })] }),
     workspace({ id: "w2", mainAgentId: "a2", prs: [pr({ key: "example/app#8", number: 8, agentMerges: true, snapshot: snapshot({ state: "MERGED" }) } as never)] }),
@@ -585,7 +585,7 @@ test("a-tick-copies-the-state-at-most-once: the seen-event drop never swallows a
   const first = await inbox.store.snapshot();
   assert.deepEqual(first.entries.a1?.needs?.reasons.map(r => r.reason), ["pr_merged"], "the developer's merge flags Merged on first sight");
   assert.equal(first.entries.a2?.needs ?? null, null, "a merge the agent made flags nothing (a-merge-the-agent-made-never-flags-the-developer)");
-  assert.ok(first.entries.a2?.seenKeys.includes("example/app#8:MERGED"), "but it is recorded as seen");
+  assert.equal(first.entries.a2?.notified?.["example/app#8"]?.end, "MERGED", "but it is recorded as notified");
   let copies = 0; const mutate = inbox.store.mutate.bind(inbox.store);
   inbox.store.mutate = (work => { copies++; return mutate(work); }) as typeof inbox.store.mutate;
   await inbox.observeFollowUp(follow as never); await inbox.observeFollowUp(follow as never);
