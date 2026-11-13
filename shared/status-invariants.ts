@@ -10,7 +10,7 @@ import { flagHeadline } from "./headline";
 import { newEntry, prEndEvent, REASONS, reduce, type InboxRow } from "./inbox";
 import { blockedOnDeveloper, completionCheck, liveWorkingTask, summary } from "./model";
 import { asksForReviewers, liveLine, needsYou, type NeedItem } from "./attention";
-import { trackedGroup, type HomeModel } from "./home";
+import { HOME_GROUPS, homeCounts, trackedGroup, type HomeModel } from "./home";
 import { freshPriorities, type Priority } from "./priorities";
 import { agentCard, automaticHold, batchView, holdSuperseded } from "./status";
 import { conditionId, isCapped, NO_PROGRESS_CAP, sendDecision } from "./send-decision";
@@ -137,15 +137,15 @@ export const INVARIANTS: Invariant[] = [
     check: (w, now) => { const card = agentCard(w, now); return card && /is on it$/.test(card.title) && !inFlight(w) ? card.title : null; },
   },
   {
-    id: "fixing-means-acting", why: "2026-11-10 wks_4b27f268: Home said \"Follow-up is fixing\" while it only waited on its own check",
+    id: "sending-never-waits-on-you", why: "2026-11-10 wks_4b27f268: Home said \"Follow-up is fixing\" while it only waited on its own check; Q51 (2026-11-13): Sending holds only a message out with the agent or going out on its own, and a send that waits on you lives in Needs you only",
     check: (w, now) => {
-      if (trackedGroup(w, now) !== "fixing") return null;
+      if (trackedGroup(w, now) !== "sending") return null;
       const v = batchView(w, now);
-      return v && (v.phase === "sent" || v.phase === "queued" && v.kind === "repairs" && (v.waitingOn === null || v.waitingOn === "agent")) ? null : `fixing with ${v ? `${v.kind}/${v.phase}/${v.waitingOn}` : "no batch"}`;
+      return v && (v.phase === "sent" || v.phase === "queued" && v.kind === "repairs" && v.waitingOn !== "you" && w.enable_auto_sends) ? null : `sending with ${v ? `${v.kind}/${v.phase}/${v.waitingOn}` : "no batch"}`;
     },
   },
   {
-    id: "done-check-waits-on-you", why: "the Done check never auto-sends, so it must show as yours to send, never as Follow-up fixing",
+    id: "done-check-waits-on-you", why: "the Done check never auto-sends, so it must show as yours to send, never as Sending",
     check: (w, now) => {
       const check = w.batches.find(b => b.state === "pending" && completionCheck(b));
       if (!check || w.completion) return null;
@@ -424,8 +424,21 @@ export function factFlagViolations(rows: Pick<InboxRow, "agentId" | "needs">[], 
  * it, and when the ranker named the row it read, that row. `row-lines-own-row` (1.4.0-beta.34: a Finished agent
  * row showed its errored sibling's "Agent errored before follow-up started" in the sidebar view).
  */
-export function homeViolations(model: Pick<HomeModel, "byKey">, priorities: readonly Priority[], now: number): { id: string; detail: string }[] {
+export function homeViolations(model: Pick<HomeModel, "byKey"> & Partial<Pick<HomeModel, "groups" | "hold">>, priorities: readonly Priority[], now: number): { id: string; detail: string }[] {
   const fresh = freshPriorities(priorities, now).byWorkspace;
+  const counted: { id: string; detail: string }[] = [];
+  if (model.groups) {
+    // `home-group-count-equals-rows` (Q51): the status strip's count is the rows its group shows, every row is in its
+    // group, and a group with no rows is hidden; the hold line is not a row and shows only above Sending's rows.
+    const counts = homeCounts(model as Pick<HomeModel, "groups">);
+    for (const id of HOME_GROUPS) {
+      const rows = [...model.byKey.values()].filter(s => s.group === id).length;
+      const shown = model.groups.find(g => g.id === id);
+      if (counts[id] !== rows || (shown?.items.length ?? 0) !== rows) counted.push({ id: "home-group-count-equals-rows", detail: `${id}: strip ${counts[id]}, rows ${rows}, shown ${shown?.items.length ?? "hidden"}` });
+      if (shown && !shown.items.length) counted.push({ id: "home-group-count-equals-rows", detail: `${id} shows with no rows` });
+    }
+    if (model.hold && !counts.sending) counted.push({ id: "home-group-count-equals-rows", detail: "the auto-send hold shows with no Sending rows" });
+  }
   const carriers = new Map<string, string[]>();
   for (const s of model.byKey.values()) if (s.priority && s.workspaceId) carriers.set(s.workspaceId, [...carriers.get(s.workspaceId) ?? [], s.key]);
   const out: { id: string; detail: string }[] = [];
@@ -436,7 +449,7 @@ export function homeViolations(model: Pick<HomeModel, "byKey">, priorities: read
     else if (p.row && p.row !== keys[0]) out.push({ id: "row-lines-own-row", detail: `${keys[0]} shows the reason ranked for ${p.row}` });
     else if (model.byKey.get(keys[0])!.priority!.reason !== p.reason) out.push({ id: "row-lines-own-row", detail: `${keys[0]} shows another reason than ${workspaceId}'s` });
   }
-  return out;
+  return [...counted, ...out];
 }
 
 /**

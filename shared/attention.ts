@@ -1,6 +1,6 @@
 import { batchView, FINISH_LINE, perSnapshot, stuckLine, unconfirmedRefs } from "./status";
 import { blockedOnDeveloper, completionCheck, liveWorkingTask, statusKnown, summary, type Batch, type Pr, type Task, type Workspace, type Status } from "./model";
-import { idleReason, NO_PROGRESS_CAP } from "./send-decision";
+import { IDLE_REASON, NO_PROGRESS_CAP } from "./send-decision";
 import { workingLine } from "./task-status";
 import { followUpObligations, recoveryBatch } from "./follow-up";
 import { orderedStacks, settledForDisplay } from "./presentation";
@@ -177,7 +177,7 @@ function computeNeedsYou(w: Workspace, now: number): NeedItem[] {
       ? { kind: "send", key: `send:${b.id}`, batchId: b.id, tasks: b.tasks.map(t => t.title), blocker: sendBlocker(w, b), title: FINISH_LINE, finish: true }
       : { kind: "send", key: `send:${b.id}`, batchId: b.id, tasks: b.tasks.map(t => t.title), blocker: sendBlocker(w, b),
       // Say it once: the tasks are rows in Tasks; the send item says only why it waits on you, and its button how many.
-      title: w.enable_auto_sends ? capitalize(idleReason(w)) : `${plural(b.tasks.length, "task")} ready for ${agentName(w)}` });
+      title: w.enable_auto_sends ? capitalize(IDLE_REASON) : "Auto-send is off for this workspace" });
   }
   const blocking = (pr: Pr) => w.prActions.some(a => prActionBlocks(a, [pr.key]));
   for (const pr of stackOrder(w.prs)) {
@@ -212,7 +212,7 @@ export function headline(w: Workspace, now = Date.now()): HeadlinePart[] {
   return parts;
 }
 
-export type LiveIcon = "spinner" | "done" | "paused" | "waiting" | "alert" | "idle";
+export type LiveIcon = "spinner" | "sent" | "done" | "paused" | "waiting" | "alert" | "idle";
 /** What is happening right now, in one line, with the time it started when known. */
 /**
  * The panel header's live line. Say it once (Q49): while a message is queued, the Tasks strip right below carries when
@@ -236,10 +236,10 @@ export function liveLine(w: Workspace, now = Date.now()): { icon: LiveIcon; text
   const stopped = (w.questions ?? []).filter(questionOpen).find(q => questionState(q) === "stopped");
   if (stopped) return { icon: "paused", text: `Main agent stopped until you answer ${stopped.id}`, since: stopped.askedAt };
   const view = batchView(w, now);
-  if (view?.phase === "sent" && view.kind !== "recovery") return { icon: "spinner", text: view.line, since: view.batch.activityAt ?? view.batch.sentAt };
+  if (view?.phase === "sent" && view.kind !== "recovery") return { icon: "sent", text: view.line, since: view.batch.activityAt ?? view.batch.sentAt };
   if (w.runtimeReason) return { icon: "waiting", text: w.runtimeReason, since: null };
   // Queued work, in the same words as the agent card and Home (shared/status.ts). Repairs you send by hand live in Needs you.
-  if (view?.phase === "queued" && (view.kind === "finish" || w.enable_auto_sends)) return { icon: view.fixing ? "spinner" : "waiting", text: view.line, since: view.batch.createdAt };
+  if (view?.phase === "queued" && (view.kind === "finish" || w.enable_auto_sends)) return { icon: "waiting", text: view.line, since: view.batch.createdAt };
   if (w.runtimeBusy) return { icon: "spinner", text: "Main agent is working", since: null };
   // A working task spins only while its recorded agent is running (invariant `a-task-only-says-working-when-its-agent-is`).
   // Otherwise it says what the task row says: "<agent> idle", "<agent> closed", "Agent unavailable" or "In progress", with no spinner.
