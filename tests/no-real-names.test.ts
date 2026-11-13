@@ -50,7 +50,7 @@ test("no-real-names-in-renders-or-fixtures: no committed file under scripts/, te
 test("no-real-names-in-renders-or-fixtures: the denylist names no machine or user in plain text", async () => {
   const src = await readFile(join(root, SELF), "utf8");
   assert.match(src, /hostname\(\)/); assert.match(src, /userInfo\(\)/);
-  for (const name of machineNames({})) assert.ok(!src.toLowerCase().includes(name.toLowerCase()), `${SELF} spells this machine's ${name}`);
+  for (const name of machineNames()) assert.ok(!src.toLowerCase().includes(name.toLowerCase()), `${SELF} spells this machine's ${name}`);
 });
 
 test("no-real-names-in-renders-or-fixtures: every allowed token has a reason and is still used where it's allowed", async () => {
