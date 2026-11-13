@@ -82,7 +82,8 @@ try {
   record("a device that never picked a category opens on General", await selected() === "General");
 
   await tab("Following").click();
-  const projects = page.getByRole("button", { name: /^Projects/ }).first();
+  // Follow-up's Projects fold (it has aria-expanded); Paseo's own settings nav has a "Projects" button too.
+  const projects = page.locator('[role="button"][aria-expanded]').filter({ hasText: /^Projects/ }).first();
   await projects.waitFor({ timeout: 30000 });
   const before = await projects.getAttribute("aria-expanded");
   await projects.click();
