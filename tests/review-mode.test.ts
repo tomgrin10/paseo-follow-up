@@ -224,3 +224,27 @@ test("a-no-review-repo-never-asks-for-review-or-merge: nothing on the client dra
   }
   assert.deepEqual(offenders, []);
 });
+
+test("public-code-carries-no-host-identifiers: set_pr_workflow deploy saves, clears and validates; pr_workflow returns it", async t => {
+  fresh(t);
+  const { ACME_DEPLOY } = await import("./fixtures");
+  const { RPC_TOOLS } = await import("../server/agent-parity");
+  const dir = await mkdtemp(join(tmpdir(), "deploy-config-")); t.after(() => rm(dir, { recursive: true, force: true }));
+  const store = new PrWorkflowStore(dir, probe);
+  assert.equal((await store.view(["acme/acme-poc"])).repos[0].deploy, null, "empty install: no deploy check");
+  await store.mutate(c => { c.repos["acme/acme-poc"] = { deploy: ACME_DEPLOY }; });
+  assert.deepEqual((await store.view(["acme/acme-poc"])).repos[0].deploy, ACME_DEPLOY, "pr_workflow returns the whole config");
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "pr-workflow.json"), "utf8")).repos["acme/acme-poc"].deploy, ACME_DEPLOY, "stored in host settings");
+  await store.mutate(c => { delete c.repos["acme/acme-poc"].deploy; });
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "pr-workflow.json"), "utf8")).repos, {}, "cleared: nothing left");
+  assert.ok(setPrWorkflowInputSchema.safeParse({ repo: "acme/acme-poc", deploy: ACME_DEPLOY }).success);
+  assert.ok(setPrWorkflowInputSchema.safeParse({ repo: "acme/acme-poc", deploy: null }).success);
+  for (const bad of [{ ...ACME_DEPLOY, gcpProject: "Bad Project" }, { ...ACME_DEPLOY, serviceLabel: "no-equals" }, { ...ACME_DEPLOY, roles: [] }, { ...ACME_DEPLOY, extra: 1 }])
+    assert.ok(!setPrWorkflowInputSchema.safeParse({ repo: "acme/acme-poc", deploy: bad }).success, JSON.stringify(bad));
+  // Agent parity: the same planned tool as review (plan, then confirm; audited), and the read tool returns it.
+  const tool = RPC_TOOLS.find(p => p.name === "set_pr_workflow")!;
+  assert.equal(tool.kind, "planned");
+  assert.ok(tool.input.safeParse({ repo: "acme/acme-poc", deploy: ACME_DEPLOY }).success);
+  assert.match(await readFile("server/mcp-source.ts", "utf8"), /set_pr_workflow[^\n]*deploy: \{ type: \[\\"object\\", \\"null\\"\] \}/);
+  assert.match(await readFile("index.server.ts", "utf8"), /if \(deploy !== undefined\) \{ if \(deploy === null\) delete own\.deploy; else own\.deploy = deploy; \}/);
+});

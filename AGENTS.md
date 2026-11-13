@@ -300,6 +300,13 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    that a Needs-you row, a brief or Home's Recent steps name, and the workspace tracks, links that PR (`PrLinksProvider`,
    `client/rich-text.tsx`); a brief about a PR has Open PR; `inbox_list` gives agents each row's PR urls. Guarded by
    `tests/pr-open-link.test.ts` and `INVARIANTS`.
+24. **Public code carries no host identifiers** (`public-code-carries-no-host-identifiers`). The repository is public:
+   no committed file names the company, its people, customers or ticket keys, the machine or its user. A host's own
+   configuration lives in its settings, set by an agent through the plugin's tools: the deploy check
+   (`set_pr_workflow` `deploy`, shown read-only in Settings), which projects track by default (`set_project_tracking`)
+   and reviewer names (`save_reviewers`). Nothing is built in: an empty install has no deploy check, no default-tracked
+   repository and no names. `tests/no-real-names.test.ts` scans every tracked file (PNG text included) with the hashed
+   denylist in `scripts/real-names.mjs`, with no exclusions.
 
 ## Bugs
 
