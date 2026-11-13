@@ -8,7 +8,6 @@ import { createServer } from "node:net";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
 import { harness, spawnDaemon, waitUntil } from "./harness.mjs";
-import { DEFAULT_TRACKED_BASENAME } from "../shared/settings.ts";
 import { harnessEnv, harnessConfig } from "./harness-env.mjs";
 import { fakeGithub } from "./fake-github.mjs";
 await harness();
@@ -364,8 +363,13 @@ try {
   const priorReceipts = (await readFile(join(home, "fixture-receipts.jsonl"), "utf8")).trim().split("\n").length;
   const trackedPath = join(root, "acme-project"); await mkdir(trackedPath);
   await exec("git", ["init", "--initial-branch=main", trackedPath], { env });
-  await exec("git", ["-C", trackedPath, "remote", "add", "origin", `https://github.com/example/${DEFAULT_TRACKED_BASENAME}.git`], { env });
+  await exec("git", ["-C", trackedPath, "remote", "add", "origin", "https://github.com/acme/acme-poc.git"], { env });
   const defaultWorkspace = await api.workspaces.create({ title: "Default-tracked workspace", source: { kind: "directory", path: trackedPath } });
+  // No repository tracks by default from the code (public-code-carries-no-host-identifiers): the project's own switch does,
+  // as the private seed sets it on the developer's machine.
+  const trackedProject = await waitUntil("the tracked project in Settings", async () => (await call("follow.project-settings", {})).projects.find(p => p.path === trackedPath), { baseMs: 10_000 });
+  assert.equal(trackedProject.enable_default_tracking, false, "no built-in default-tracked repository");
+  await call("follow.set-project-tracking", { projectId: trackedProject.id, enable_default_tracking: true });
   const defaultAgent = await defaultWorkspace.agents.create({ config: { provider: "followup-fixture/fixture" }, title: "Default main" });
   await call("follow.refresh", {});
   let defaultRecord;
