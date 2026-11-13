@@ -210,6 +210,15 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    review. Every consumer (the reviewers ask, merge asks, the quiet merge, status invariants) reads that helper, never
    `pr.agentMerges`; the set of No review repositories is filled before the first tick and on every save, so the
    lookup costs a set read. Guarded by `tests/review-mode.test.ts` ([docs/prs.md](docs/prs.md#review-mode)).
+18. **The recovery agent is quiet, keeps its tools and unloads** (`recovery-is-quiet-keeps-its-tools-and-unloads`).
+   On a host with `features.backgroundAgents` (Paseo 0.16) it is created `background: true` (no tab, no ping, no
+   sidebar row); never on 0.15, whose path is unchanged. Invariant 9's background skip exempts only the agent
+   Follow-up's own record names as a recovery recipient, never one carrying recovery labels. The same record lets it
+   through every "root agents only" gate it needs (`mayEnroll` for `enroll_workspace`). "Unloads" means
+   host-collectable: no plugin API closes an agent by id, so a settled batch (acknowledged or failed) leaves no running
+   turn, pending permission or background work, and Paseo's idle-runtime cleanup releases it. Guarded by
+   `tests/recovery-background.test.ts` and `scripts/check-recovery-background.mjs`
+   ([docs/workspaces.md](docs/workspaces.md)).
 
 ## Bugs
 
