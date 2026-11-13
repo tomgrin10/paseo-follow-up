@@ -150,7 +150,7 @@ const d = JSON.parse(require("fs").readFileSync(${JSON.stringify(file)}, "utf8")
 // gh pr merge: succeed after a beat, so the merge-click shots can catch "Merging…", and leave the PR merged, as GitHub does.
 if (process.argv[2] === "pr" && process.argv[3] === "merge") setTimeout(() => {
   const n = Number(process.argv[4]);
-  if (d[n] && !process.argv.includes("--auto") && !process.argv.includes("--disable-auto")) { d[n].state = "MERGED"; require("fs").writeFileSync(${JSON.stringify(file)}, JSON.stringify(d)); }
+  if (d[n] && !process.argv.includes("--auto") && !process.argv.includes("--disable-auto")) { d[n].state = "MERGED"; d[n].mergedAt = new Date().toISOString(); require("fs").writeFileSync(${JSON.stringify(file)}, JSON.stringify(d)); }
   process.exit(0);
 }, 6000);
 else {
@@ -164,7 +164,7 @@ for (const m of query.matchAll(/(p\\d+):pullRequest\\(number:(\\d+)\\)/g)) {
   const base = p.base ?? "main";
   repository[m[1]] = { number: n, title: p.title, url: "https://github.com/" + (p.repo ?? "example/app") + "/pull/" + n, state: p.state, headRefName: "branch-" + n, headRefOid: "0f3c9a" + n, baseRefName: base,
     isDraft: !!p.draft, mergeable: p.conflict ? "CONFLICTING" : "MERGEABLE", mergeStateStatus: p.conflict ? "DIRTY" : p.draft ? "DRAFT" : "CLEAN", reviewDecision: p.changes ? "CHANGES_REQUESTED" : p.approved ? "APPROVED" : "REVIEW_REQUIRED",
-    mergedAt: p.state === "MERGED" ? "2026-03-04T08:00:00Z" : null, mergeCommit: p.state === "MERGED" ? { oid: "9a1b2c" + n } : null, isInMergeQueue: false, autoMergeRequest: null,
+    mergedAt: p.state === "MERGED" ? p.mergedAt ?? "2026-03-04T08:00:00Z" : null, mergeCommit: p.state === "MERGED" ? { oid: "9a1b2c" + n } : null, isInMergeQueue: false, autoMergeRequest: null,
     author: { login: p.author },
     reviewRequests: { pageInfo: { hasNextPage: false }, nodes: (p.reviewers ?? []).map(l => ({ requestedReviewer: user(l) })) },
     latestReviews: { pageInfo: { hasNextPage: false }, nodes: [...(p.reviewed ?? []).map(l => ({ state: "APPROVED", author: user(l) })), ...(p.changes ?? []).map(l => ({ state: "CHANGES_REQUESTED", author: user(l) }))] },
