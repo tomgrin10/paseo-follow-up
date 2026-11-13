@@ -123,6 +123,7 @@ function pulls() {
     250: { title: "Add the export filter model", state: "OPEN", author: "dana", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint")] },
     251: { title: "Filter exports by date range", state: "OPEN", author: "dana", base: "branch-250", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint")] },
     252: { title: "Show export filters in the admin page", state: "OPEN", author: "dana", base: "branch-251", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint")] },
+    255: { title: "Attach PDF receipts to invoice emails", state: "OPEN", author: "dana", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint")] },
     151: { repo: "example/web", title: "Saved search filters", state: "OPEN", author: "dana", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint")] },
     247: { title: "Checkout button copy", state: "OPEN", author: "dana", conflict: true, threads: 1, reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
     160: { title: "Welcome email template", state: "OPEN", author: "dana", conflict: true, threads: 2, reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
@@ -146,8 +147,12 @@ function pulls() {
 function fakeGh(file) {
   return `#!/usr/bin/env node
 const d = JSON.parse(require("fs").readFileSync(${JSON.stringify(file)}, "utf8"));
-// gh pr merge: succeed after a beat, so the merge-click shots can catch "Merging…".
-if (process.argv[2] === "pr" && process.argv[3] === "merge") setTimeout(() => process.exit(0), 6000);
+// gh pr merge: succeed after a beat, so the merge-click shots can catch "Merging…", and leave the PR merged, as GitHub does.
+if (process.argv[2] === "pr" && process.argv[3] === "merge") setTimeout(() => {
+  const n = Number(process.argv[4]);
+  if (d[n] && !process.argv.includes("--auto") && !process.argv.includes("--disable-auto")) { d[n].state = "MERGED"; require("fs").writeFileSync(${JSON.stringify(file)}, JSON.stringify(d)); }
+  process.exit(0);
+}, 6000);
 else {
 if (process.argv[3] !== "graphql") { console.log("[]"); process.exit(0); }
 const query = process.argv.find(a => a.startsWith("query=")) || "";
@@ -382,6 +387,10 @@ const MERGE_CLICK_STATES = [
       rpc("follow.register-pr", { repo: "example/app", number: 251, stack: "Export filters", parentNumber: 250 }),
       rpc("follow.register-pr", { repo: "example/app", number: 252, stack: "Export filters", parentNumber: 251 }),
       msg("Opened example/app#250, #251 and #252; all three are approved.")] },
+  // The light panel's click: one approved PR, so its done shot shows the header, row and Activity agreeing.
+  { key: "mc-receipts", title: "Receipt PDFs", minute: 179, prompt: "APP-201: attach a PDF receipt to every paid invoice email.", flag: false,
+    steps: [rpc("follow.enroll", { goal: "APP-201 Receipt PDFs" }), rpc("follow.register-pr", { repo: "example/app", number: 255, stack: "Receipt PDFs" }),
+      msg("Opened example/app#255; it's approved and green.")] },
 ];
 
 /** done-brief only (a-done-brief-is-never-an-ask): the agent's turn ends "nothing needed" while its PR's merge flags the row. */
@@ -1410,7 +1419,7 @@ async function prLinkShots({ shoot, billing }) {
 async function mergeClickShots({ shoot, billing }) {
   const TALL = { width: DESKTOP.width, height: 1100 };
   const single = { title: "Search filters", prompt: WORKSPACES.find(w => w.key === "search").prompt, button: "Merge pull request #151", merged: /Merged #151/ };
-  const stackRow = { title: MERGE_CLICK_STATES[0].title, prompt: MERGE_CLICK_STATES[0].prompt, button: "Merge 3 pull requests in order: #250, #251, then #252", merged: /Merged #250, #251, then #252/ };
+  const stackRow = { title: MERGE_CLICK_STATES[0].title, prompt: MERGE_CLICK_STATES[0].prompt, button: "Merge 3 pull requests in order: #250, #251, then #252", merged: /Merged #250, #251, then #252/, header: "3 of 3 PRs merged" };
   const button = (page, name) => page.getByRole("button", { name, exact: true }).filter({ visible: true }).first();
   const panel = async (page, r) => { await page.setViewportSize(TALL); await openChat(page, r.title, r.prompt); await page.getByRole("button", { name: "Follow-up", exact: true }).last().click(); await button(page, r.button).waitFor({ timeout: 60_000 }); };
   const phone = async (page, r) => { await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, r.title)).click(); await button(page, r.button).waitFor({ timeout: 60_000 }); };
@@ -1431,9 +1440,13 @@ async function mergeClickShots({ shoot, billing }) {
     await page.getByText(/Merging…/).filter({ visible: true }).first().waitFor();
     await shoot.now(`mc-merging-${size}-${theme}`, page, theme);
     await page.getByText(r.merged).filter({ visible: true }).first().waitFor({ timeout: 90_000 });
+    // The toast and the header say the same thing (a-merge-outcome-reads-the-same-everywhere): capture both.
+    if (r.header) await page.getByRole("progressbar", { name: r.header }).filter({ visible: true }).first().waitFor({ timeout: 15_000 });
   };
   await shoot("mc-done-home-phone-light", PHONE, "light", click(single, "light", phone, "home-phone"));
   await shoot("mc-done-panel-dark", TALL, "dark", click(stackRow, "dark", panel, "panel"));
+  const receipts = { title: MERGE_CLICK_STATES[1].title, prompt: MERGE_CLICK_STATES[1].prompt, button: "Merge pull request #255", merged: /Merged #255/, header: "1 of 1 PRs merged" };
+  await shoot("mc-done-panel-light", TALL, "light", click(receipts, "light", panel, "panel"));
 }
 
 async function sendingShots({ shoot, seeded, call, home }) {
