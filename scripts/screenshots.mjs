@@ -42,7 +42,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as 2.0.0-rc.0, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["needs-you-states"];
+const REVIEW_SHOTS = ["needs-you-states", "done-brief"];
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
 for (const name of only) if (![...SHOTS, ...REVIEW_SHOTS].includes(name)) fail(`unknown shot "${name}" (known: ${[...SHOTS, ...REVIEW_SHOTS].join(", ")})`);
 const scheme = arg("--scheme");
@@ -125,6 +125,7 @@ function pulls() {
     212: { repo: "example/web", title: "Usage dashboard charts", state: "OPEN", author: "dana", draft: true, checks: [ok("test"), ok("lint")] },
     218: { repo: "example/web", title: "Push notification settings", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
     224: { repo: "example/web", title: "Import contacts from CSV", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
+    240: { title: "Stream large invoice exports", state: "MERGED", author: "dana", checks: [ok("test"), ok("lint")] },
     232: { title: "Usage alert thresholds", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
   };
 }
@@ -324,13 +325,21 @@ const NEEDS_YOU_STATES = [
       msg("Thresholds are in #232. One task needs your call on who gets the alerts.")], flag: false },
 ];
 
+/** done-brief only (a-done-brief-is-never-an-ask): the agent's turn ends "nothing needed" while its PR's merge flags the row. */
+const DONE_BRIEF = [
+  { key: "db-merged", title: "Export streaming", minute: 177, prompt: "APP-195: stream large invoice exports instead of building them in memory.",
+    steps: [rpc("follow.enroll", { goal: "APP-195 Stream large invoice exports" }), rpc("follow.register-pr", { repo: "example/app", number: 240, stack: "Export streaming" }),
+      msg("#240 is merged: large exports stream now."),
+      rpc("follow.needs-you", { kind: "done", ask: "Nothing needed: #240 is merged and exports stream." })] },
+];
+
 async function seed({ call, home }) {
   // A fixed (empty) project folder: Paseo derives the project's avatar color from it, so a random temp path would
   // recolor the sidebar on every run.
   // Two projects, so the sidebar and Quiet's folds don't read as one repo.
   const repos = {};
   for (const name of ["app", "web"]) { repos[name] = join(tmpdir(), "follow-up-shots-fixture", name); await fs.mkdir(repos[name], { recursive: true }); }
-  const specs = [...WORKSPACES, ...(only.includes("needs-you-states") ? NEEDS_YOU_STATES : [])];
+  const specs = [...WORKSPACES, ...(only.includes("needs-you-states") ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : [])];
   await fs.writeFile(join(home, "fixture-scripts.json"), JSON.stringify(Object.fromEntries(specs.map(w => [w.prompt, w.steps]))));
   const workspaces = [];
   for (const spec of specs) {
@@ -902,6 +911,22 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       if (s.homeToo === false) continue;
       await shoot(`ny-${s.state}-home-${theme}`, DESKTOP, theme, async page => { await openHome(page); await (await homeRow(page, s.title)).click(); await settleOn(page); });
       await shoot(`ny-${s.state}-home-phone-${theme}`, PHONE, theme, async page => { await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, s.title)).click(); await settleOn(page); });
+    }
+  }
+  if (only.includes("done-brief")) {
+    // A done brief on a row flagged by a merged PR: the panel and Home's detail pane, desktop light and phone dark (the
+    // reported view). Needs you shows the merge, or nothing; never "Nothing needed" counted as 1.
+    const w = DONE_BRIEF[0]; const TALL = { width: DESKTOP.width, height: 1100 };
+    const settle = async page => { await page.getByText("#240").filter({ visible: true }).first().waitFor(); await page.waitForTimeout(1500); };
+    for (const [theme, size, frame] of [["light", "", TALL], ["dark", "-phone", PHONE]]) {
+      await shoot(`db-panel${size}-${theme}`, frame, theme, async page => {
+        await page.setViewportSize(TALL); await openChat(page, w.title, w.prompt);
+        // On a phone the tab strip is off screen: shoot the flag pill's sheet, which carries the same Needs-you list.
+        if (frame === PHONE) { await page.setViewportSize(PHONE); await page.getByRole("button", { name: /^Follow-up · / }).last().click(); }
+        else await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+        await settle(page);
+      });
+      await shoot(`db-home${size}-${theme}`, frame, theme, async page => { await openHome(page); if (frame === PHONE) await page.setViewportSize(PHONE); await (await homeRow(page, w.title)).click(); await settle(page); });
     }
   }
 }

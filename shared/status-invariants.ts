@@ -5,11 +5,11 @@ import { ANY_HOOK_TEXT_PREFIXES } from "./message-sender";
 import { BATCH_PREFIXES, RECOVERY_TITLES } from "./legacy";
 import type { Workspace } from "./model";
 import { answerMessage, duplicateOpenQuestions, isOther, parseAnswerMessage, parseAnswersMessage } from "./questions";
-import { briefAnswer, briefAnswers, briefStep, shouldReopen, type Brief } from "./brief";
+import { briefAnswer, briefAnswers, briefAsks, briefStep, shouldReopen, type Brief } from "./brief";
 import { flagHeadline } from "./headline";
-import { newEntry, prEndEvent, reduce, type InboxRow } from "./inbox";
+import { newEntry, prEndEvent, REASONS, reduce, type InboxRow } from "./inbox";
 import { blockedOnDeveloper, completionCheck, liveWorkingTask, summary } from "./model";
-import { asksForReviewers, liveLine, needsYou } from "./attention";
+import { asksForReviewers, liveLine, needsYou, type NeedItem } from "./attention";
 import { trackedGroup, type HomeModel } from "./home";
 import { freshPriorities, type Priority } from "./priorities";
 import { agentCard, automaticHold, batchView, holdSuperseded } from "./status";
@@ -19,7 +19,7 @@ import { followUpObligations } from "./follow-up";
 import { PRESENCE, claimsWorking, taskStatus } from "./task-status";
 import { cadence, movingReason, OBSERVATION_FRESH_MS, POLL_IDLE_MS, RUNNING_POLL_MS, TICK_MS } from "./poll";
 import { staleUpdatePhase, type UpdatePhase } from "./updates";
-import { onceViolation } from "./needs-block";
+import { needsYouBlock, onceViolation } from "./needs-block";
 import { compactPrStatus, prPresentation } from "./presentation";
 
 /**
@@ -263,6 +263,20 @@ export const INVARIANTS: Invariant[] = [
     },
   },
   {
+    id: "a-done-brief-is-never-an-ask",
+    why: "2026-11-12, the developer's phone on 2.0.1-beta.3: the panel read \"Needs you 1\" with one item, \"Nothing needed\", the agent's turn-end needs_you kind=done on a row flagged by a merged PR. A done brief is never drawn or counted as an ask, and the flag's headline reads its real reason (doneBriefViolations).",
+    check(w, now) {
+      const items = needsYou(w, now);
+      for (const reason of REASONS) for (const source of ["agent", "extracted", "followup"] as const) {
+        const row = { agentId: w.mainAgentId ?? "main", needs: { reasons: [{ reason, at: new Date(now).toISOString(), detail: `${reason} detail`, dedupeKey: reason }], since: new Date(now).toISOString() }, snooze: null,
+          brief: { kind: "done" as const, source, state: "open" as const, ask: "Nothing needed", questionIds: [] } };
+        const v = doneBriefViolations(row, items, now)[0];
+        if (v) return `${reason}/${source}: ${v.detail}`;
+      }
+      return null;
+    },
+  },
+  {
     id: "an-open-question-renders-once-per-surface",
     why: "2026-11-12: the panel drew the agent's brief card and the Needs you list side by side, so one open question asked twice (the brief's decision and the Q row), with two answer paths. Each surface's Needs you block (shared/needs-block.ts) shows every open question once, inside the brief's card when the brief points at it.",
     check(w, now) {
@@ -481,5 +495,25 @@ export function pickNoteViolations(b: Brief, picks: { decisionId: string; choice
     if (after?.decisions.find(d => d.id === p.decisionId)?.words !== p.words!.trim()) out.push({ id, detail: `${p.decisionId}'s card drops the note on ${p.choice}` });
     if (parsed?.answers.find(a => a.id === p.decisionId)?.words !== fold(p.words!)) out.push({ id, detail: `${p.decisionId}'s message drops the note on ${p.choice}` });
   }
+  return out;
+}
+
+/**
+ * `a-done-brief-is-never-an-ask` (2026-11-12, the developer's phone on 2.0.1-beta.3): the agent's turn-end needs_you
+ * kind=done ("Nothing needed") on a row flagged for something else (a merged PR) drew inside the panel's Needs you and
+ * counted 1. Enumerated per surface: the Needs-you block (the panel and Home's detail pane pick their brief with
+ * briefAsks) draws and counts only what it shows, and the flag's headline (pill, sidebar row, Home row) reads the
+ * real reason, not the done brief's line.
+ */
+export function doneBriefViolations(row: Pick<InboxRow, "agentId" | "needs" | "snooze" | "brief">, items: NeedItem[], now: number): { id: string; detail: string }[] {
+  const id = "a-done-brief-is-never-an-ask";
+  const b = row.brief;
+  if (b?.state !== "open" || b.kind !== "done") return [];
+  const out: { id: string; detail: string }[] = [];
+  const block = needsYouBlock(items, briefAsks(b, row) ? { questionIds: b.questionIds ?? [] } : null);
+  if (block.cards.some(c => c.kind === "brief")) out.push({ id, detail: `${row.agentId}'s Needs you draws its done brief as an ask` });
+  if (block.count !== needsYouBlock(items, null).count) out.push({ id, detail: `${row.agentId}'s Needs you counts ${block.count} for ${needsYouBlock(items, null).count} real asks` });
+  const h = flagHeadline(row, now, items);
+  if (h && h.key !== "finished" && b.source !== "none" && h.line === b.ask) out.push({ id, detail: `${row.agentId}'s ${h.label} headline reads the done brief's "${b.ask.slice(0, 40)}"` });
   return out;
 }
