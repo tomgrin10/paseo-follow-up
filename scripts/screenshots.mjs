@@ -1249,8 +1249,15 @@ async function sendingShots({ shoot, seeded, call, home }) {
   // the end of the list).
   await shoot("sending-strip-phone-light", PHONE, "light", async page => {
     await openHome(page); await page.setViewportSize(PHONE);
-    const strip = page.getByRole("toolbar", { name: "Status" }).first();
-    await strip.getByText("Later").first().scrollIntoViewIfNeeded();
+    // The strip re-renders after the resize, so scroll it in the page (no stale handle): the toolbar or its
+    // scrolling ancestor goes to its end, where "Later" sits.
+    await page.getByRole("toolbar", { name: "Status" }).first().getByText("Later").first().waitFor();
+    await until("the strip scrolls to its end", () => page.evaluate(() => {
+      const bar = document.querySelector('[role="toolbar"][aria-label="Status"]');
+      for (let el = bar; el; el = el.parentElement) if (el.scrollWidth > el.clientWidth + 1) { el.scrollLeft = el.scrollWidth; return el.scrollLeft > 0; }
+      return false;
+    }), { tries: 40, every: 250 });
+    await page.waitForTimeout(300);
   });
   // 2. The machine-wide hold: Paseo's (fake) cgroup at 78% of memory.high pauses auto-sends; one hold line at the top
   //    of Sending, the same words on both widths. Onboarding email is signed off and its Auto turned on: its agent is
