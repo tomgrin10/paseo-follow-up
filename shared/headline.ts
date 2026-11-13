@@ -1,6 +1,6 @@
 import type { NeedItem } from "./attention";
 import { FINISH_ASK, FINISH_WORD } from "./status";
-import type { BriefKind } from "./brief";
+import { briefAsks, briefCardShown, reviewersBriefPr, type BriefKind } from "./brief";
 import { age, displayReason, reasonRank, type InboxRow, type Reason, type ReasonEntry } from "./inbox";
 
 /**
@@ -92,8 +92,17 @@ export function flagHeadline(row: Pick<InboxRow, "needs" | "snooze" | "brief">, 
   const send = items.find((i): i is Extract<NeedItem, { kind: "send" }> => i.kind === "send" && !i.finish);
   if ((key === "flagged" || key === "review") && send) return { key: "repairs", label: `Send ${plural(send.tasks.length, "task")}`, line: send.title, source: "flag" };
   // "Add reviewers #1499": the PR number is the detail, so the pill names which PR.
-  if (key === "reviewers") return { key, label: `${HEADLINE_WORD.reviewers} ${top.detail}`.trim(), line: brief?.ask ?? `Add reviewers to ${top.detail}`, source: "flag" };
-  const line = brief ? (brief.source === "none" ? "No ask stated" : brief.ask) : top.detail || HEADLINE_WORD[key];
+  if (key === "reviewers") return { key, label: `${HEADLINE_WORD.reviewers} ${top.detail}`.trim(), line: brief && briefAsks(brief, row) ? brief.ask : `Add reviewers to ${top.detail}`, source: "flag" };
+  // say-it-once: a PR-state flag's detail ("#240 merged") is the PR chip's text, so the line names the PR by its title.
+  const fact = (key === "pr_merged" || key === "pr_closed") && top.title ? top.title : top.detail;
+  // a-brief-without-an-ask-never-sits-beside-needs-you: a brief that asks nothing ("No ask stated", "Nothing needed")
+  // speaks only where its card would draw (briefCardShown) and only for the finish it came with. Beside drawn Needs-you
+  // items the top item is the line; for another flag (a merged PR) the flag's own fact is (2026-11-13: Billing's row
+  // read "Merged · No ask stated" over "1 task ready" and "#143 is approved").
+  const speaks = !!brief && briefCardShown(brief, row, items.length) && (briefAsks(brief, row) || key === "finished");
+  const line = speaks ? (brief!.source === "none" ? "No ask stated" : brief!.ask)
+    : brief && items.length ? items[0].title
+    : fact || HEADLINE_WORD[key];
   return { key, label: since ? `${HEADLINE_WORD[key]} ${since}` : HEADLINE_WORD[key], line, source: "flag" };
 }
 
@@ -130,6 +139,30 @@ export function withoutBriefQuestions(items: NeedItem[], row: Pick<InboxRow, "br
   const asked = briefQuestionIds(row);
   return asked.size ? items.filter(i => !(i.kind === "question" && asked.has(i.questionId))) : items;
 }
+
+/**
+ * say-it-once: the to-dos under a headline that only say the headline again ("Add reviewers to #246: Ravi" above and
+ * as the one row under it). Such a row drops its title and keeps its controls. A reviewers row repeats a reviewers
+ * headline for its PR even when the wording differs ("Add reviewers to #246" over "Add reviewers to #246: Ravi").
+ */
+export function echoedItems(items: readonly NeedItem[], headline: Pick<Headline, "key" | "label" | "line"> | null, row: Pick<InboxRow, "brief"> | null): Set<string> {
+  if (!headline) return new Set();
+  const n = (x: string | null | undefined) => (x ?? "").trim().replace(/[.!?…:;,\s]+$/u, "").replace(/\s+/g, " ").toLowerCase();
+  const said = n(headline.line);
+  const brief = row?.brief?.state === "open" ? row.brief : null;
+  const briefPr = brief ? reviewersBriefPr(brief) : null;
+  const names = (i: Extract<NeedItem, { kind: "reviewers" }>) => briefPr ? briefPr === i.prKey
+    : new RegExp(`#${i.number}(?!\\d)`).test(`${headline.label} ${headline.line}`);
+  return new Set(items.filter(i => (!!said && n(i.title) === said) || (headline.key === "reviewers" && i.kind === "reviewers" && names(i))).map(i => i.key));
+}
+
+/**
+ * say-it-once: where the popover says "N to do". Once: in the section header over the workspace's items when that
+ * section shows, else on the meta line under the headline. Never in the pill's title, which phones show as the
+ * sheet's title right above both (2026-11-13 render: "1 to do in this workspace" three times on one sheet).
+ */
+export const todoLine = (o: { flagged: boolean; todo: number; section: boolean }): { meta: boolean; section: boolean } =>
+  ({ meta: o.flagged && o.todo > 0 && !o.section, section: o.flagged && o.section });
 
 /** "3 to do": the workspace count shown inside the popover. Never on the pill, where it read like a count of agents. */
 export const todoLabel = (items: NeedItem[]) => items.length ? `${items.length} to do` : "";
