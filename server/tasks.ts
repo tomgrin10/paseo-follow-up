@@ -7,6 +7,7 @@ import { clientEntry, paseoHome } from "./daemon";
 import { join } from "node:path";
 import { communicationReady } from "../shared/communication";
 import { taskSchedule } from "../shared/task-trigger";
+import { isWorkspaceRoot, type WorkspaceAgent } from "./workspace-agent";
 
 function fingerprint(value: unknown): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
 /**
@@ -55,6 +56,23 @@ export function orderTasks(w: Workspace, tasks: Task[]): Task[] {
 
 export function isRecovery(batch: Pick<Batch, "tasks">): boolean {
   return recoveryBatch(batch);
+}
+
+/**
+ * Whether Follow-up's own record names this agent as a recovery recipient: the trusted test for "this background agent
+ * is our recovery agent" (labels are writable by any plugin; state.json is the source of truth for ownership).
+ */
+export function recordedRecoveryAgent(state: { workspaces: readonly Pick<Workspace, "batches">[] }, agentId: string): boolean {
+  return state.workspaces.some(w => w.batches.some(b => b.recipientAgentId === agentId && isRecovery(b)));
+}
+
+/**
+ * Who may refine a workspace goal (enroll): a root agent, or Follow-up's recorded recovery agent. On Paseo 0.16 the
+ * recovery agent is background, and isWorkspaceRoot never counts a background agent as a root, so without this its
+ * preapproved enroll_workspace fails mid-batch and the batch blocks.
+ */
+export async function mayEnroll(state: { workspaces: readonly Pick<Workspace, "batches">[] }, agent: WorkspaceAgent, findParent: (id: string) => Promise<WorkspaceAgent | null | undefined>): Promise<boolean> {
+  return !!agent.workspaceId && (recordedRecoveryAgent(state, agent.id) || await isWorkspaceRoot(agent, findParent));
 }
 
 export { needsPrObservations } from "../shared/send-decision";

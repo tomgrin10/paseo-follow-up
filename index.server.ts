@@ -26,6 +26,7 @@ import { type Workspace } from "./shared/model";
 import { createdItems } from "./server/created-items";
 import { isWorkspaceRoot } from "./server/workspace-agent";
 import { BackgroundAgents, backgroundAgentsFile } from "./server/background-agents";
+import { mayEnroll, recordedRecoveryAgent } from "./server/tasks";
 import { Store } from "./server/store";
 import { PriorityStore } from "./server/priorities";
 import { UsageReader } from "./server/usage";
@@ -415,6 +416,8 @@ export default function contribute(server: PluginServerContext) {
   // Wait for background jobs (folded in from paseo-wait): native tools for interactive Claude sessions.
   // Paseo 0.16 runs background jobs itself (features.agentBackgroundWork): Wait retires there (docs/wait.md).
   const hostBackgroundWork = hostFeature("agentBackgroundWork", () => withDaemon(async client => (client as ServerInfoClient).getLastServerInfoMessage?.()));
+  // Paseo 0.16 background agents (features.backgroundAgents): the recovery agent is created background (plan #8).
+  gateway.backgroundAgents = hostFeature("backgroundAgents", () => withDaemon(async client => (client as ServerInfoClient).getLastServerInfoMessage?.()));
   const wait = new Wait(join(directory, "wait"), { enabled: () => agentSettings.waitEnabled(), config: async () => await paseoConfig() as WaitPaseoConfig | null, hostBackgroundWork, legacyDirectory: existsSync(dataDirs(paseoHome).legacy) ? join(dataDirs(paseoHome).legacy, "wait") : null });
   const currentWait = async () => waitStatus(await agentSettings.waitEnabled(), await paseoConfig() as WaitPaseoConfig | null, await hostBackgroundWork());
   const live = async (agentId: string): Promise<Live> => ({ role: scopes(await store.snapshot())[agentId]?.role ?? null, inbox: (await inboxSettings()).enable_inbox });
@@ -551,7 +554,7 @@ export default function contribute(server: PluginServerContext) {
   handle(rpc.enrollRpc, async ({ agentId, workspaceId, goal }, { paseo }) => {
     await requireReady();
     const agent = (await paseo.agents.ref(agentId).refresh())?.agent;
-    if (!agent?.workspaceId || !await isWorkspaceRoot(agent, async id => (await paseo.agents.ref(id).refresh())?.agent)) throw new Error("Choose an available main agent in this workspace.");
+    if (!agent?.workspaceId || !await mayEnroll(await store.snapshot(), agent, async id => (await paseo.agents.ref(id).refresh())?.agent)) throw new Error("Choose an available main agent in this workspace.");
     if (workspaceId && workspaceId !== agent.workspaceId) throw new Error("The chosen agent belongs to another workspace.");
     await callerWorkspaceId(agentId, paseo);
     const workspace = await paseo.workspaces.ref(agent.workspaceId).refresh();
@@ -1374,7 +1377,10 @@ export default function contribute(server: PluginServerContext) {
     server.before("agent.session_open", withWait(async ({ request }, { paseo }) => {
       await ready;
       if (loadError || stopped || request.purpose !== "interactive") return request;
-      if (await isBackground(request.agentId, paseo)) return request;
+      // A background agent gets no Follow-up treatment, except Follow-up's own recovery agent: exempt by Follow-up's
+      // record (a recovery batch names it as recipient), never by labels, which any plugin can write. Without this, a
+      // background recovery agent loses its tools on its second session (resume, reload, plugin update).
+      if (await isBackground(request.agentId, paseo) && !recordedRecoveryAgent(await store.snapshot(), request.agentId)) return request;
       // The Overseer: needs_you (no Stop-hook nudge), the action tools and its routing tools. Never tracked.
       if (request.labels[OVERSEER_LABEL] === "1" && ["claude", "codex"].includes(request.provider)) {
         const env = { ...request.env, FOLLOW_UP_OVERSEER: "1", FOLLOW_UP_BRIEF: request.provider };
