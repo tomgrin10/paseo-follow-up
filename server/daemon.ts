@@ -204,10 +204,14 @@ export function historyRetryDelay(failures: number): number {
 async function subagentsRunning(client: Daemon, agent: Agent, failure: string, directory?: DaemonDirectory): Promise<boolean> {
   if (!isLoaded(agent)) return false;
   // A cached snapshot may predate the daemon unloading the agent; ask about this one agent before the read.
+  const known = directory?.subagentsThisTick(agent.id);
+  if (known !== undefined) return known;
   if (directory && !await directory.confirmLoaded(client, agent)) return false;
   const children = await client.listProviderSubagents(agent.id);
   if (children.error) throw new Error(failure);
-  return children.subagents.some(child => child.status === "running");
+  const running = children.subagents.some(child => child.status === "running");
+  directory?.rememberSubagents(agent.id, running);
+  return running;
 }
 
 type Entry = { item: unknown; seqStart: number; timestamp?: string };
@@ -408,6 +412,8 @@ export class PaseoGateway implements Gateway {
    * agent) are only asked about when an answer depends on them: a send is due or awaiting acknowledgment, or
    * completion is being checked. `fresh` (just before a send) re-reads the agent list first.
    */
+  /** A new engine tick: sends re-list agents at most once in it (a-send-lists-agents-at-most-once-per-tick). */
+  tickStarted(): void { this.directory.tickStarted(); }
   async observe(w: Workspace, fresh = false): Promise<Runtime> {
     const [rows, compacting, pauses] = await Promise.all([this.directory.read(fresh ? { fresh: "agents" } : {}), this.compacting(w.mainAgentId), this.guard.read()]);
     const { agents, workspaces } = rows;
@@ -427,7 +433,7 @@ export class PaseoGateway implements Gateway {
     const scoped = here.filter(agent => !agent.archivedAt && !recoveryIds.has(agent.id));
     const guarded = this.guard.waiting(pauses, { agentIds: [w.mainAgentId, ...scoped.map(agent => agent.id)], workspaceId: w.id, excludedAgentIds: [...recoveryIds].filter((id): id is string => !!id) });
     const guardedInterruptionId = this.guard.ownsInterruption(pauses, w.mainAgentId, w.interruption)?.id;
-    const context = { guardedInterruptionId, mainTurnId: turnIdOf(a.activeTurn) };
+    const context = { guardedInterruptionId, mainTurnId: turnIdOf(a.activeTurn), mainTitle: a.title?.trim() || null };
     if (guarded || !pauses && workspace.labels?.some(label => /^(Paused|Paused by Session Guard)$/i.test(label))) return { taskAgents, ...context, guarded: true, busy: false, reason: "Waiting for Session Guard to resume this workspace", archived: false };
     if (compacting) return { taskAgents, busy: true, reason: "Smart Session is compacting the main agent", archived: false };
     const mainLoaded = isLoaded(a), mainRecent = recentlyUsed(a, this.windowMs, this.now());
@@ -440,7 +446,10 @@ export class PaseoGateway implements Gateway {
       // 0.16: work an agent started and ended its turn on (a shell, a task) is still work: no repairs, no Done yet.
       else if (backgroundCount(agent) > 0) backgroundBusy = true;
     }
-    const subagentsMatter = fresh || !!w.completion || w.batches.some(b => !b.tasks.every(t => t.kind === "inventory") && ["pending", "sent"].includes(b.state));
+    // Subagents only decide an auto-send or a sent message's turn. A queued message only the developer sends (Auto off,
+    // a hold, the Done check) is re-checked when they press Send, so it never makes every tick list subagents (2026-11-12).
+    const autoPending = (b: Workspace["batches"][number]) => b.state === "pending" && w.enable_auto_sends && !w.hold && !b.tasks.some(t => t.kind === "completion");
+    const subagentsMatter = fresh || !!w.completion || w.batches.some(b => !b.tasks.every(t => t.kind === "inventory") && (b.state === "sent" || autoPending(b)));
     const idleLoaded = members.filter(agent => isLoaded(agent) && !["running", "initializing"].includes(agent.status));
     if (subagentsMatter && !backgroundBusy && idleLoaded.length) await this.connect(async client => {
       for (const listed of idleLoaded) {
@@ -484,19 +493,22 @@ export class PaseoGateway implements Gateway {
   async send(w: Workspace, batch: Batch, text: string): Promise<void> {
     if (!(batch.tasks.length > 0 && batch.tasks.every(t => t.kind === "inventory"))) {
       let runtime: Runtime;
+      // The dispatch observed fresh this tick; this re-check reads the same tick's list (a-send-lists-agents-at-most-once-per-tick).
       try { runtime = await this.observe(w, true); }
       catch { throw new DeliveryDeferred("Agent or Session Guard state is unavailable; follow-up will wait and retry."); }
       if (runtime.busy || runtime.backgroundBusy || runtime.reason || runtime.archived) throw new DeliveryDeferred(runtime.reason ?? "The workspace resumed active work; follow-up will wait until it is idle.");
     }
     await this.connect(async client => {
       const recipient = batch.recipientAgentId ?? w.mainAgentId;
-      const a = (await client.fetchAgent(recipient))?.agent;
+      // The tick's list, patched by turn and permission events, has the recipient; fetch it only when it lacks it.
+      const listed = this.directory.listedThisTick() ? this.directory.cached(recipient) : undefined;
+      const a = listed ?? await this.directory.live(client, recipient);
       if (!a || !["idle", "closed"].includes(a.status) || a.pendingPermissions.length || a.archivedAt || a.workspaceId !== w.id) throw new DeliveryDeferred("Assigned agent is no longer idle or available; follow-up will wait.");
       let guarded: boolean;
       try {
         const excludedAgentIds = w.batches.filter(b => b.tasks.every(t => t.kind === "inventory")).flatMap(b => [b.recipientAgentId, ...b.recoveryHandoffs.map(h => h.fromAgentId)]).filter((id): id is string => !!id);
         if (recipient === w.mainAgentId) {
-          const agents = await pages(cursor => client.fetchAgents({ page: { limit: 100, ...(cursor ? { cursor } : {}) } }));
+          const agents = (await this.directory.read({ fresh: "agents" })).agents;
           excludedAgentIds.push(...agents.filter(row => isRecovery(row.agent.labels)).map(row => row.agent.id));
         }
         guarded = !!this.guard.waiting(await this.guard.read(), { agentIds: [recipient], ...(recipient === w.mainAgentId ? { workspaceId: w.id, excludedAgentIds } : {}) });

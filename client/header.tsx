@@ -3,7 +3,7 @@ import { View } from "react-native";
 import { Pressable, Text } from "./text";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import type { Workspace } from "../shared/model";
-import { ago, headline, liveLine, stackBar, type LiveIcon } from "../shared/attention";
+import { ago, headline, headerLine, stackBar, type LiveIcon } from "../shared/attention";
 import { Button, IconButton, Switch, text, type Theme } from "./kit";
 import { VersionMark } from "./updates";
 import { IconSwap, Spinner } from "./motion";
@@ -58,7 +58,7 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
 }) {
   const c = theme.colors; const t = text(c, compact);
   const parts = headline(w, now);
-  const live = liveLine(w, now);
+  const live = headerLine(w, now);
   const checked = w.prs.map(p => p.snapshot?.observedAt).filter((v): v is string => !!v).sort().at(-1);
   const stale = !!checked && w.prs.some(p => p.snapshot?.state === "OPEN") && now - Date.parse(checked) > STALE_MS;
   const toneOf = (tone?: string) => tone === "warning" ? c.statusWarning : tone === "danger" ? c.statusDanger : tone === "success" ? c.statusSuccess : undefined;
@@ -83,7 +83,7 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
       <Text numberOfLines={1} style={[t.small, { flexShrink: 1 }, stale ? { color: c.statusWarning } : null]}>{checked ? `Checked ${ago(checked, now)}${stale ? " · may be out of date" : ""}` : "Checks GitHub every 15s"}</Text>
       <IconButton icon="RefreshCw" label="Refresh PR status" onPress={onRefresh} theme={theme} compact={compact} disabled={refreshing} spinning={refreshing} />
       <View style={{ flex: 1 }} />
-      <Switch theme={theme} compact={compact} label="Auto-send" accessibilityLabel="Auto-send repairs" hint="Send repair batches to the main agent on its own when the agent is idle. Off means each batch waits for your click."
+      <Switch theme={theme} compact={compact} label="Auto-send" accessibilityLabel="Auto-send tasks" hint="Send tasks to the main agent on its own when the agent is idle. Off means each message waits for your click."
         value={w.enable_auto_sends} disabled={autoPending} onChange={onAuto} />
     </View>
   </>;

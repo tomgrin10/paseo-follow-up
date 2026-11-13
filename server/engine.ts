@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { completionBlockers, completionCheck, completionGate, revokesDone, type CompletionGate, type Workspace, type State, type Batch } from "../shared/model";
 import { Store } from "./store";
 import { Github } from "./github";
-import { batchPrompt, tasksFor, isRecovery, needsPrObservations, type TaskWording } from "./tasks";
+import { batchPrompt, messageText, tasksFor, isRecovery, needsPrObservations, type TaskWording } from "./tasks";
 import { answerRecipients, developerAnswer, syncTaskQuestions } from "./questions";
 import { answerMessage, isOpen as isOpenQuestion, type Question } from "../shared/questions";
 import { reconcileSubmittedStacks } from "./submissions";
@@ -15,7 +15,8 @@ import { DeliveryDeferred, ConversationGone, realTimers, withDeadline, type Time
 import { recordSnapshot } from "./deployment-anchor";
 import { pruneUnsent } from "./batch-archive";
 import { holdSuperseded, liftHold } from "../shared/status";
-import { sendDecision, settleUnacknowledged, UNACKNOWLEDGED_MS } from "../shared/send-decision";
+import { conditionId, isCapped, readSince, sendDecision, settleUnacknowledged, UNACKNOWLEDGED_MS } from "../shared/send-decision";
+import { isRepair } from "../shared/task-rows";
 export { settleUnacknowledged, UNACKNOWLEDGED_MS, NO_PROGRESS_CAP } from "../shared/send-decision";
 
 export interface Runtime {
@@ -27,6 +28,8 @@ export interface Runtime {
   mainLoaded?: boolean;
   /** The main agent had a user message within the active window. Undefined means unknown. */
   mainRecent?: boolean;
+  /** The main agent's title in Paseo. Undefined means unknown. */
+  mainTitle?: string | null;
   /** The main agent's current turn id (shared/status.ts turnIdOf), when it has one. Undefined means unknown. */
   mainTurnId?: string | null;
   /** The main agent's provider conversation no longer exists. */
@@ -44,6 +47,8 @@ export interface Gateway {
   /** Whether a batch's message is in its recipient's chat (by messageId). Null: unknown, e.g. reading it would wake the agent. */
   arrived?(w: Workspace, batch: Batch): Promise<boolean | null>;
   label(w: Workspace, assigned: boolean): Promise<void>;
+  /** A tick begins: the gateway may list agents once for it (a-send-lists-agents-at-most-once-per-tick). */
+  tickStarted?(): void;
   /** Sends a developer message to the first available recipient; DeliveryDeferred means try again later. */
   deliver?(w: Workspace, recipients: string[], text: string, messageId: string): Promise<string>;
 }
@@ -131,6 +136,10 @@ export class Engine {
 
       for (const w of state.workspaces) for (const a of w.prActions) if (a.state === "sending") { a.state = "uncertain"; a.result = `Follow-up reloaded before ${a.kind === "request_reviewers" ? "GitHub confirmed the review request" : w.prs.some(p => a.prs.includes(p.key) && p.snapshot?.prWorkflow === "github") ? "GitHub confirmed the action" : "Graphite confirmed the action"}. Check state before sending another request.`; }
       for (const w of state.workspaces) for (const q of w.questions) if (q.answer?.delivery.state === "sending") q.answer.delivery = { ...q.answer.delivery, state: "unconfirmed", reason: "Follow-up reloaded before Paseo confirmed the answer. Check the agent's chat before resending." };
+      // 2.0 betas before Q49 blocked a batch whose capped condition went out twice; the cap is per task now.
+      for (const w of state.workspaces) for (const b of w.batches) if (b.state === "blocked" && b.unacknowledged) b.state = "completed";
+      // The retired 3-strike rule blocked a message before it went out; the per-task cap decides now, so it is re-formed.
+      for (const w of state.workspaces) for (const b of w.batches) if (b.state === "blocked" && !b.sentAt) { b.state = "cancelled"; b.result = "Re-formed under the per-task cap"; }
       for (const w of state.workspaces) for (const b of w.batches) if (b.state === "sending") {
         b.state = "uncertain";
         b.result = "Follow-up reloaded mid-send. It checks the agent's chat for the message and sends it only if it never arrived.";
@@ -198,6 +207,7 @@ export class Engine {
   }
   private async run(o: { background?: boolean; workspaceId?: string; affected?: Set<string> } = {}): Promise<void> {
     if (this.paused()) { this.skipped++; return; }
+    this.gateway.tickStarted?.();
     const saved = await this.store.snapshot();
     if (this.stopped) return;
     if (this.gateway.discover) {
@@ -242,6 +252,7 @@ export class Engine {
       if (!untouched) await this.store.mutateWorkspace(original.id, w => {
         w.runtimeBusy = runtime.busy; w.runtimeReason = runtime.reason; w.taskAgents = runtime.taskAgents;
         w.backgroundBusy = runtime.backgroundBusy ?? false;
+        if (runtime.mainTitle !== undefined && (w.mainAgentTitle ?? null) !== runtime.mainTitle) w.mainAgentTitle = runtime.mainTitle;
         if (runtime.gone && w.goneAgent?.agentId !== w.mainAgentId) w.goneAgent = { agentId: w.mainAgentId, at: new Date(this.now()).toISOString(), reason: runtime.gone };
         if (w.goneAgent?.agentId === w.mainAgentId) w.runtimeReason = GONE_REASON;
         if (runtime.guardedInterruptionId && w.interruption && w.hold === interruptionHold(w.interruption.kind)) {
@@ -350,8 +361,7 @@ export class Engine {
   }
   /** Records the developer's answer, then sends it unless they chose to copy it. */
   async answer(workspaceId: string, questionId: string, choice: string, words: string | undefined, action: "send" | "copy" | "resend", actor: Actor = DEVELOPER): Promise<{ workspace: Workspace; question: Question }> {
-    await this.store.mutate(state => {
-      const w = findWorkspace(state, workspaceId);
+    await this.store.mutateWorkspace(workspaceId, w => {
       if (!w.enable_tracking || w.archived) throw new Error("Follow-up isn't following this workspace. Turn it back on in Follow-up settings, under Workspace exceptions.");
       developerAnswer(w, questionId, choice, words, action, this.now(), actor);
       if (!w.questions.some(isOpenQuestion)) w.updatedAt = new Date(this.now()).toISOString();
@@ -387,8 +397,8 @@ export class Engine {
         ? { state: "queued", to: null, reason: error.message }
         : { state: "unconfirmed", to: null, reason: "Paseo didn't confirm the message. Check the agent's chat before resending." };
     }
-    await this.store.mutate(state => {
-      const current = findWorkspace(state, workspaceId).questions.find(x => x.id === questionId);
+    await this.store.mutateWorkspace(workspaceId, w => {
+      const current = w.questions.find(x => x.id === questionId);
       if (!current?.answer || current.answer.delivery.messageId !== q.answer!.delivery.messageId) return;
       current.answer.delivery = { ...current.answer.delivery, ...outcome, at: new Date(this.now()).toISOString() };
     });
@@ -416,8 +426,7 @@ export class Engine {
     if (needsPrObservations(current, batch) && current.prs.some(p => p.error || !p.snapshot?.complete)) throw new Error("PR status is incomplete; refresh before sending repairs");
     const runtime = await this.gateway.observe(current, true);
     if (runtime.busy || runtime.backgroundBusy || runtime.reason || runtime.archived) throw new Error(runtime.reason ?? "The workspace has active agent work. Send when it is idle.");
-    const claimed = await this.store.mutate(state => {
-      const w = findWorkspace(state, workspaceId);
+    const claimed = await this.store.mutateWorkspace(workspaceId, w => {
       const b = w.batches.find(b => b.id === batchId);
       if (this.stopped || !w.enable_tracking || w.archived || w.hold || (automatic && !w.enable_auto_sends) || !b || b.state !== "pending" || w.batches.some(other => other.id !== b.id && !isRecovery(other) && ["sending", "sent", "blocked", "uncertain"].includes(other.state))) throw new Error("Workspace or queue changed; refresh before sending");
       const eligible = tasksFor(w, this.now(), this.wording);
@@ -429,8 +438,7 @@ export class Engine {
   }
   async startRecovery(workspaceId: string): Promise<Workspace> {
     const batchId = randomUUID();
-    await this.store.mutate(state => {
-      const w = findWorkspace(state, workspaceId);
+    await this.store.mutateWorkspace(workspaceId, w => {
       if (!w.enable_tracking || w.archived || this.stopped) throw new Error("Follow-up isn't following this workspace. Turn it back on in Follow-up settings, under Workspace exceptions.");
       if (w.batches.some(b => isRecovery(b) && (["pending", "sending", "sent", "uncertain"].includes(b.state) || b.state === "blocked" && !b.settledAt))) throw new Error("Check the existing recovery before starting another.");
       w.batches.push({ id: batchId, enable_manual_recovery: true, messageId: randomUUID(), tasks: [{ key: `inventory:${w.id}`, kind: "inventory", target: w.id, title: "Recover workspace PR stacks and remaining work", fingerprint: String(w.inventory?.revision ?? 1) }], state: "pending", attempts: 1, createdAt: new Date(this.now()).toISOString(), sentAt: null, settledAt: null, result: "", recipientAgentId: null, contextPath: null, activityAt: null, acknowledgmentError: null, recoveryHandoffs: [] });
@@ -438,8 +446,8 @@ export class Engine {
     return this.sendRecoveryPending(workspaceId, batchId);
   }
   private async sendRecoveryPending(workspaceId: string, batchId: string): Promise<Workspace> {
-    const claimed = await this.store.mutate(state => {
-      const w = findWorkspace(state, workspaceId), b = w.batches.find(b => b.id === batchId);
+    const claimed = await this.store.mutateWorkspace(workspaceId, w => {
+      const b = w.batches.find(b => b.id === batchId);
       if (this.stopped || !w.enable_tracking || w.archived || !b || !isRecovery(b) || b.state !== "pending" || w.batches.some(other => other.id !== b.id && isRecovery(other) && (["pending", "sending", "sent", "uncertain"].includes(other.state) || other.state === "blocked" && !other.settledAt))) throw new Error("Recovery changed or another recovery is active.");
       b.state = "sending"; return { w, b };
     });
@@ -453,28 +461,27 @@ export class Engine {
     try {
       if (isRecovery(claimed.b)) {
         const recovery = await this.gateway.prepareRecovery(claimed.w, claimed.b);
-        await this.store.mutate(state => {
-          const b = findWorkspace(state, workspaceId).batches.find(b => b.id === batchId)!;
+        await this.store.mutateWorkspace(workspaceId, w => {
+          const b = w.batches.find(b => b.id === batchId)!;
           b.recipientAgentId = recovery.agentId; b.contextPath = recovery.contextPath;
         });
         claimed.b.recipientAgentId = recovery.agentId; claimed.b.contextPath = recovery.contextPath;
       } else {
         claimed.b.recipientAgentId = claimed.w.mainAgentId;
-        await this.store.mutate(state => { findWorkspace(state, workspaceId).batches.find(b => b.id === batchId)!.recipientAgentId = claimed.w.mainAgentId; });
+        await this.store.mutateWorkspace(workspaceId, w => { w.batches.find(b => b.id === batchId)!.recipientAgentId = claimed.w.mainAgentId; });
       }
       if (this.stopped) throw new Error("Follow-up stopped before delivery");
       sending = true;
       await this.gateway.send(claimed.w, claimed.b, batchPrompt(claimed.w, claimed.b));
-      await this.store.mutate(state => {
-        const b = findWorkspace(state, workspaceId).batches.find(b => b.id === batchId)!;
+      await this.store.mutateWorkspace(workspaceId, w => {
+        const b = w.batches.find(b => b.id === batchId)!;
         if (b.state === "sending") { b.state = "sent"; b.sentAt = new Date(this.now()).toISOString(); }
       });
     } catch (error) {
-      await this.store.mutate(state => {
-        const b = findWorkspace(state, workspaceId).batches.find(b => b.id === batchId)!;
+      await this.store.mutateWorkspace(workspaceId, w => {
+        const b = w.batches.find(b => b.id === batchId)!;
         if (b.state === "sending" && error instanceof ConversationGone) {
           // Nothing reached the agent. Keep the batch for a new agent and stop retrying this one.
-          const w = findWorkspace(state, workspaceId);
           b.state = "pending"; b.result = ""; b.recipientAgentId = null;
           w.goneAgent = { agentId: error.agentId, at: new Date(this.now()).toISOString(), reason: error.message };
           w.runtimeReason = GONE_REASON;
@@ -482,7 +489,7 @@ export class Engine {
         }
         if (b.state === "sending" && error instanceof DeliveryDeferred) {
           b.state = "pending"; b.result = "";
-          if (!isRecovery(b)) findWorkspace(state, workspaceId).runtimeReason = error.message;
+          if (!isRecovery(b)) w.runtimeReason = error.message;
           return;
         }
         if (b.state === "sending") { b.state = sending ? "uncertain" : "blocked"; b.result = sending ? "Delivery could not be confirmed. Check the assigned agent before retrying." : `Could not prepare the recovery agent: ${error instanceof Error ? error.message : "Unknown error"}`; }
@@ -520,12 +527,23 @@ export class Engine {
     // Hysteresis: a queued Done check survives the agent's own turns; only a real change (new work, Done) ends it.
     const queuedCheck = w.batches.find(b => b.state === "pending" && completionCheck(b));
     if (queuedCheck && w.runtimeBusy && !tasks.some(t => t.kind === "completion")) tasks.push(...tasksFor({ ...w, runtimeBusy: false }, this.now(), this.wording).filter(t => t.kind === "completion"));
-    // A batch settled without an acknowledgment delivered nothing for sure: its still-open tasks go out again.
-    const delivered = new Set(w.batches.filter(b => ["sending", "sent", "completed", "blocked", "uncertain"].includes(b.state) && !(b.state === "completed" && b.unacknowledged)).flatMap(b => b.tasks.map(t => `${t.key}:${t.fingerprint}`)));
-    const fresh = tasks.filter(t => !delivered.has(`${t.key}:${t.fingerprint}`));
+    // One cap (Q49): a send that left a PR condition as it was, acknowledged or not, delivered nothing GitHub shows, so
+    // the condition goes out again until it has gone out NO_PROGRESS_CAP times unchanged. An acknowledged one waits
+    // for a GitHub read newer than the acknowledgment, so a fix GitHub hasn't shown yet is never sent twice.
+    const delivered = new Set(w.batches.filter(b => ["sending", "sent", "completed", "blocked", "uncertain"].includes(b.state) && !(b.state === "completed" && b.unacknowledged))
+      .flatMap(b => b.tasks.filter(t => b.state !== "completed" || !isRepair(t) || !readSince(w, t, b.settledAt)).map(conditionId)));
+    const open = tasks.filter(t => !delivered.has(conditionId(t)));
+    // One rule for every task in a message (Q49): a task the developer keeps for themselves, or a condition that went
+    // out NO_PROGRESS_CAP times unchanged, stays out of it; only that task waits, the rest go out.
+    const manual = new Set(w.manualTasks ?? []);
+    const held: NonNullable<Workspace["heldTasks"]> = [];
+    for (const t of open) if (t.kind !== "completion" && (manual.has(t.key) || isCapped(w, t))) held.push({ task: t, held: manual.has(t.key) ? "manual" : "capped" });
+    const fresh = open.filter(t => !held.some(h => h.task === t));
+    if (held.length || w.heldTasks?.length) w.heldTasks = held;
     let pending = w.batches.find(b => b.state === "pending" && !isRecovery(b));
     if (!fresh.length) {
       if (pending) { pending.state = "cancelled"; pending.result = "Conditions resolved before delivery"; }
+      if (w.nextMessage) w.nextMessage = null;
       return;
     }
     if (pending) {
@@ -536,9 +554,7 @@ export class Engine {
       pending = { id: randomUUID(), messageId: randomUUID(), tasks: fresh, state: "pending", createdAt: new Date(this.now()).toISOString(), sentAt: null, settledAt: null, attempts: 1, result: "", recipientAgentId: null, contextPath: null, activityAt: null, acknowledgmentError: null, recoveryHandoffs: [] };
       w.batches.push(pending);
     }
-    if (fresh.some(t => ["conflict", "review", "checks", "restack"].includes(t.kind) && w.batches.filter(b => b.id !== pending!.id && ["completed", "blocked"].includes(b.state)).filter(b => b.tasks.some(old => old.key === t.key)).length >= 3)) {
-      pending.state = "blocked"; pending.result = "This PR still needs repairs after three follow-up batches. Review it before retrying.";
-    }
+    w.nextMessage = pending.state === "pending" ? messageText(w, pending) : null;
     // New repairs or tasks reopen the work; the Done check itself does not.
     if (fresh.some(t => t.kind !== "completion")) { w.completion = null; w.declaration = null; }
   }
@@ -582,8 +598,10 @@ export class Engine {
     });
   }
   async acknowledge(agentId: string, batchId: string, outcome: "completed" | "blocked", result: string, workspaceId?: string): Promise<Workspace> {
-    const w = await this.store.mutate(state => {
-      const w = agentWorkspace(state, agentId, "read", workspaceId);
+    // Resolved on the snapshot, written to that one workspace (a-send-never-clones-the-whole-state), re-checked inside.
+    const target = agentWorkspace(await this.store.snapshot(), agentId, "read", workspaceId);
+    const w = await this.store.mutateWorkspace(target.id, w => {
+      agentWorkspace({ version: 1, workspaces: [w] }, agentId, "read", w.id);
       requireTracking(w, agentId);
       const b = w.batches.find(b => b.id === batchId);
       if (!b || !["sending", "sent", "blocked", "uncertain"].includes(b.state)) throw new Error("Batch is not awaiting acknowledgment.");

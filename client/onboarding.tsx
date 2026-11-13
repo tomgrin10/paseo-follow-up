@@ -89,7 +89,7 @@ export function Setup({ theme, compact, view, deps }: { theme: Theme; compact: b
     : step === "helpers" ? <HelpersStep theme={theme} compact={compact} deps={deps} />
     : <TourStep theme={theme} compact={compact} />;
   const lead: Record<OnboardingStep, string> = {
-    intro: "It follows your agents' pull requests until the work is done, sends fixes back to them, and asks you only for decisions.",
+    intro: "It follows your agents' pull requests until the work is done, sends what's left back to them as tasks, and asks you only for decisions.",
     checks: "Follow-up reads PRs with the GitHub CLI, and its helper agents run on the providers you pick. Checking is free.",
     defaults: "These are on now. Change anything here; it saves as you go, and Settings has the same switches.",
     shipping: "Follow-up merges and tracks PRs the way each repository already works. It picked these; change one if it's wrong.",
@@ -196,7 +196,7 @@ const Panel = ({ c, children }: { c: Colors; children: ReactNode }) =>
 
 const EXAMPLE = [
   { glyph: "CircleX", tone: "danger", line: "Checks failed on #418", caption: "Follow-up notices" },
-  { glyph: "spinner", tone: "running", line: "Repair sent to the agent · 2m", caption: "and sends the fix to the agent that made the PR" },
+  { glyph: "spinner", tone: "running", line: "Task sent to the agent · 2m", caption: "and sends it as a task to the agent that made the PR" },
   { glyph: "CircleCheck", tone: "success", dot: "warning", line: "#418 approved", caption: "then asks you only for the decision" },
 ] as const;
 
@@ -244,7 +244,7 @@ function IntroStep({ theme, compact, follow }: { theme: Theme; compact: boolean;
     <View style={{ gap: 4 }}>
       {[
         ["Inbox", "Needs you", "One list of what only you can decide: a merge, a question, a permission."],
-        ["Wrench", "Repairs", "Review comments, conflicts and failed checks go to the workspace's agent in one batch."],
+        ["Send", "Tasks", "Review comments, conflicts and failed checks become tasks and go to the workspace's agent in one message."],
         ["MessageCircleQuestion", "Questions", "Agents ask you here, with options and a recommendation. Your answer goes to their chat."],
       ].map(([icon, title, line]) => <View key={title} style={{ flexDirection: "row", gap: 10, paddingVertical: 6 }}>
         <Icon name={icon} size={16} color={c.foregroundMuted} />
@@ -369,7 +369,7 @@ function DefaultsStep({ theme, compact, held }: { theme: Theme; compact: boolean
           </Pressable>}
         </View>}
       </SwitchRow>
-      <SwitchRow theme={theme} compact={compact} label="Send repairs automatically" value={data?.enable_auto_sends_default ?? null} disabled={change.isPending}
+      <SwitchRow theme={theme} compact={compact} label="Send tasks automatically" value={data?.enable_auto_sends_default ?? null} disabled={change.isPending}
         hint={`Review threads and failed checks go to the workspace's agent on their own, once it's idle. Off: each batch waits for your click.${followed ? ` Here it also applies to the ${followed} already followed.` : ""}${held ? " Nothing goes out on its own until you finish setup." : ""}`}
         onChange={v => change.mutate(autoSendWrites(v, list))} />
       <SwitchRow theme={theme} compact={compact} label="Trust bypass agents" value={trust}
