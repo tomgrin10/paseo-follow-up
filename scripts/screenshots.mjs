@@ -515,7 +515,7 @@ function makeShooter({ browser, port, out, scheme: forced, optimiser, results, c
  * Plan item 6's end-to-end check (invariant idle-client-makes-at-most-one-rpc-a-minute keeps the client quiet; this keeps
  * it correct). Home, a workspace's panel and a chat's collapsed pill are open, each its own client. State changes on the
  * worker's side (an agent's turn ends with a question, an agent sets the sort, a priorities write, Smart Session writes
- * its usage file), and each surface must show it within 5 s with no poll RPC in between. Then the worker is reloaded,
+ * its usage file), and each surface must show it within 5 s (usage: the watch debounce plus 2 s) with no poll RPC in between. Then the worker is reloaded,
  * killed, and the daemon restarted under the open pages: after each, a change must still show within 5 s, with no page
  * reload. On Paseo 0.15 (no subscriptions) the same cases run and record how long the polls take; they pass within the
  * poll interval. Writes feeds.json to --out.
@@ -524,6 +524,10 @@ const POLL_RPCS = /"(follow\.(list|inbox-list|overseer-status|priorities|rank-st
 async function checkFeeds({ seeded, call, cli, home }) {
   const live = paseo016;
   const BUDGET = live ? 5_000 : 75_000;
+  // Usage lands after the worker's watch debounce (shared/usage.ts, read here so the two can't drift), plus 2 s.
+  const debounce = Number((await fs.readFile("shared/usage.ts", "utf8")).match(/USAGE_WATCH_DEBOUNCE_MS = ([\d_]+)/)?.[1].replaceAll("_", ""));
+  if (!debounce) throw new Error("feeds: no USAGE_WATCH_DEBOUNCE_MS in shared/usage.ts");
+  const USAGE_BUDGET = live ? debounce + 2_000 : BUDGET;
   const WAIT = live ? 15_000 : 90_000;
   const ws = key => seeded.workspaces.find(w => w.key === key);
   const spec = key => WORKSPACES.find(w => w.key === key);
@@ -576,7 +580,7 @@ async function checkFeeds({ seeded, call, cli, home }) {
     return label ? Number(label.match(/^Needs you, (\d+)/)[1]) : 0;
   };
   /** Runs `change`, then times each surface until it shows it; counts the poll RPCs every open page made meanwhile. */
-  const fresh = async (name, change, surfaces, { note = "" } = {}) => {
+  const fresh = async (name, change, surfaces, { note = "", budget = BUDGET } = {}) => {
     const t0 = Date.now();
     await change();
     const changed = Date.now();
@@ -585,8 +589,8 @@ async function checkFeeds({ seeded, call, cli, home }) {
       try { await shown(page, WAIT); ms = Date.now() - changed; } catch { /* not shown within WAIT */ }
       const between = polls.filter(p => p.at >= t0 && p.at <= (ms === null ? Date.now() : changed + ms));
       const kept = await page.evaluate(() => window.__followFeedsMark === "kept").catch(() => false);
-      const ok = ms !== null && ms <= BUDGET && kept && (!live || between.length === 0);
-      const row = { case: name, surface, ms, polls: between.length, pollNames: [...new Set(between.map(p => p.name))], pageReloaded: !kept, ok, note };
+      const ok = ms !== null && ms <= budget && kept && (!live || between.length === 0);
+      const row = { case: name, surface, ms, budgetMs: budget, polls: between.length, pollNames: [...new Set(between.map(p => p.name))], pageReloaded: !kept, ok, note };
       rows.push(row);
       log(`feeds ${ok ? "PASS" : "FAIL"} ${name} / ${surface}: ${ms === null ? `not shown in ${WAIT / 1000} s` : `${ms} ms`}, ${between.length} poll RPC(s)${row.pollNames.length ? ` (${row.pollNames.join(", ")})` : ""}${kept ? "" : ", PAGE RELOADED"}${note ? ` [${note}]` : ""}`);
       if (!ok) fail.push(`${name} / ${surface}`);
@@ -629,7 +633,7 @@ async function checkFeeds({ seeded, call, cli, home }) {
     ]);
     await fresh("Usage file written (Smart Session)", () => writeUsage(63), [
       ["Home: usage meter", homePage, label(/5h 63%/)],
-    ]);
+    ], { budget: USAGE_BUDGET, note: `${debounce} ms watch debounce` });
 
     // The worker restarts under the open pages: Paseo closes every subscription, the client polls and resubscribes.
     await cli("plugin", "reload", "follow-up");
@@ -669,7 +673,7 @@ async function checkFeeds({ seeded, call, cli, home }) {
     ], { note: `daemon back after ${Math.round((Date.now() - restartAt) / 1000)} s` });
     await fresh("After a daemon restart: usage", () => writeUsage(71), [
       ["Home: usage meter", homePage, label(/5h 71%/)],
-    ]);
+    ], { budget: USAGE_BUDGET, note: `${debounce} ms watch debounce` });
     await fs.writeFile(join(out, "feeds.json"), JSON.stringify({ paseo: paseoVersion, budgetMs: BUDGET, idlePollsPerMinute: idle, rows }, null, 2));
     if (fail.length) throw new Error(`feeds: ${fail.length} case(s) failed: ${fail.join("; ")}`);
     log(`feeds: all ${rows.length} passed on ${paseoVersion}`);

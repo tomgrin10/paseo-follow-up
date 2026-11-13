@@ -1,7 +1,7 @@
 import { watch, type FSWatcher } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fromAccountRows, fromBudget, fromSubscriptions, NO_USAGE, type Usage } from "../shared/usage";
+import { fromAccountRows, fromBudget, fromSubscriptions, NO_USAGE, USAGE_WATCH_DEBOUNCE_MS, type Usage } from "../shared/usage";
 import { withDaemon } from "./daemon";
 import { withDeadline } from "./delivery";
 
@@ -51,7 +51,7 @@ export class UsageReader {
    * watches the directory, not one file, so the monthly file's rollover is seen. Event-driven, no polling; returns
    * null when the directory can't be watched (Smart Session not installed), and the client reads usage itself.
    */
-  watch(onChange: () => void, debounceMs = 1_500): { close(): void } | null {
+  watch(onChange: () => void, debounceMs = USAGE_WATCH_DEBOUNCE_MS): { close(): void } | null {
     let watcher: FSWatcher;
     let timer: ReturnType<typeof setTimeout> | null = null;
     try {

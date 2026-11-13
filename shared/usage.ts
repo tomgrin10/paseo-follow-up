@@ -139,3 +139,9 @@ const ageText = (ms: number) => { const m = Math.round(ms / 60_000); return m < 
 
 /** Smart Session's recorder ticks every minute; polling faster only repeats it. */
 export const USAGE_POLL_MS = 60_000;
+/**
+ * How long the worker waits after Smart Session writes its accounts files before it reads usage again (server/usage.ts).
+ * Smart Session writes often; the debounce turns a burst into one read. `npm run test:feeds` gives the usage case this
+ * plus 2 s.
+ */
+export const USAGE_WATCH_DEBOUNCE_MS = 5_000;
