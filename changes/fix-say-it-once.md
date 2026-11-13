@@ -1,4 +1,4 @@
-- A merged PR reads by its title, not "#240 merged" beside the PR chip.
-- A card with several decisions is titled with the agent's ask, not Q1.
-- Follow-up's popup no longer repeats its ask or its to-do count.
-- A row never says "No ask stated" above things to do.
+- A merged PR reads by its title, not "#240 merged" beside its chip.
+- A multi-decision card is titled with the agent's ask, not Q1.
+- The popup no longer repeats its ask or to-do count.
+- A row never says "No ask stated" above work to do.
