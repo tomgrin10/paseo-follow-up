@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { fakeServer, hanging, hangingHost, settleTime, type Registered } from "./support/hanging-host";
+import { timeAck } from "./support/ack-ratchet";
 import { clientRpcs } from "./support/client-rpcs";
 import { FIXTURE, sample } from "./support/sample-input";
 import { seed } from "./support/seed";
@@ -17,6 +18,8 @@ import { seed } from "./support/seed";
  *
  * EXEMPT holds the client RPCs that still wait on Paseo or GitHub before replying, each with why that is acceptable
  * for now. The list only shrinks: an exempt method that starts replying in time fails the test until it's removed.
+ * "In time" is judged by `timeAck` (tests/support/ack-ratchet.ts), not the clock alone: a reply that came only because
+ * a shared slow wait gave up meanwhile proves nothing, and the call is run again.
  * Nothing here may lose the developer's input: none of them carries words the developer typed.
  */
 const ACK_MS = 500;
@@ -85,11 +88,11 @@ test("rpc ack: every RPC the client calls replies within ACK_MS while Paseo, the
   assert.ok(names.length >= 40, `found only ${names.length} client RPCs registered; the scan or the harness is broken`);
   for (const name of names) {
     const h = handlers.get(name)!;
-    const r = await settleTime(run(h, INPUT[name] ?? sample(h.input)), ACK_MS);
-    timings.push(`${name} ${r.ms === null ? `>${ACK_MS}` : Math.round(r.ms)} ms${r.error ? ` (${r.error.slice(0, 60)})` : ""}`);
-    if (MUST_SUCCEED.has(name) && r.ms !== null && r.error) failed.push(`${name}: ${r.error}`);
-    if (r.ms === null && !EXEMPT[name]) late.push(name);
-    if (r.ms !== null && EXEMPT[name]) stale.push(name);
+    const r = await timeAck(run(h, INPUT[name] ?? sample(h.input)), ACK_MS, host.giveUps);
+    timings.push(`${name} ${r.verdict === "late" ? `>${ACK_MS} ms` : `${Math.round(r.ms)} ms${r.verdict === "tainted" ? " (a slow wait gave up meanwhile)" : ""}${r.error ? ` (${r.error.slice(0, 60)})` : ""}`}${r.runs > 1 ? `, ${r.runs} runs` : ""}`);
+    if (MUST_SUCCEED.has(name) && r.verdict !== "late" && r.error) failed.push(`${name}: ${r.error}`);
+    if (r.verdict === "late" && !EXEMPT[name]) late.push(name);
+    if (r.verdict === "fast" && EXEMPT[name]) stale.push(name);
   }
   t.diagnostic(timings.join("\n"));
   assert.deepEqual(Object.keys(EXEMPT).filter(name => !client.has(name) || !handlers.has(name)), [], "EXEMPT lists RPCs the client no longer calls: remove them");

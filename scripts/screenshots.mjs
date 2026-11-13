@@ -42,7 +42,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as 2.0.0-rc.0, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["needs-you-states", "done-brief", "review-mode"];
+const REVIEW_SHOTS = ["needs-you-states", "done-brief", "review-mode", "feeds"];
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
 for (const name of only) if (![...SHOTS, ...REVIEW_SHOTS].includes(name)) fail(`unknown shot "${name}" (known: ${[...SHOTS, ...REVIEW_SHOTS].join(", ")})`);
 const scheme = arg("--scheme");
@@ -64,7 +64,8 @@ const paseoVersion = await exec("paseo", ["--version"], { timeout: 30000 }).then
 const paseo016 = /(^|\D)0\.16\.\d+/.test(paseoVersion ?? "");
 if (only.includes("sidebar") && only.some(n => n !== "sidebar")) fail("shoot --only sidebar on its own, with HARNESS_PASEO=0.16");
 if (only.includes("sidebar") && !paseo016) fail(`the sidebar shot needs the Paseo CLI 0.16.x (found ${paseoVersion ?? "none"}); run with HARNESS_PASEO=0.16`);
-const paseoOk = only.includes("sidebar") || argv.includes("--sidebar-review") ? /(^|\D)0\.1[56]\.\d+/ : /(^|\D)0\.15\.\d+/;
+if (only.includes("feeds") && only.length > 1) fail("run --only feeds on its own (npm run test:feeds)");
+const paseoOk = only.includes("sidebar") || only.includes("feeds") || argv.includes("--sidebar-review") ? /(^|\D)0\.1[56]\.\d+/ : /(^|\D)0\.15\.\d+/;
 if (!paseoVersion || !paseoOk.test(paseoVersion)) fail(`needs the Paseo CLI 0.15.x on PATH (found ${paseoVersion ?? "none"}); run through harness-slot or put ~/paseo-harness/cli/0.15.4/bin first`);
 if (changelogArg && !existsSync(changelogArg)) fail(`--whats-new-changelog: no file at ${changelogArg}`);
 const optimiser = await findOptimiser();
@@ -534,6 +535,195 @@ function makeShooter({ browser, port, out, scheme: forced, optimiser, results, c
   return shoot;
 }
 
+// ---------- feeds (npm run test:feeds) ----------
+/**
+ * Plan item 6's end-to-end check (invariant idle-client-makes-at-most-one-rpc-a-minute keeps the client quiet; this keeps
+ * it correct). Home, a workspace's panel and a chat's collapsed pill are open, each its own client. State changes on the
+ * worker's side (an agent's turn ends with a question, an agent sets the sort, a priorities write, Smart Session writes
+ * its usage file), and each surface must show it within 5 s (usage: the watch debounce plus 2 s) with no poll RPC in between. Then the worker is reloaded,
+ * killed, and the daemon restarted under the open pages: after each, a change must still show within 5 s, with no page
+ * reload. On Paseo 0.15 (no subscriptions) the same cases run and record how long the polls take; they pass within the
+ * poll interval. Writes feeds.json to --out.
+ */
+const POLL_RPCS = /"(follow\.(list|inbox-list|overseer-status|priorities|rank-status|usage)|settings\.display\.read)"/;
+async function checkFeeds({ seeded, call, cli, home }) {
+  const live = paseo016;
+  const BUDGET = live ? 5_000 : 75_000;
+  // Usage lands after the worker's watch debounce (shared/usage.ts, read here so the two can't drift), plus 2 s.
+  const debounce = Number((await fs.readFile("shared/usage.ts", "utf8")).match(/USAGE_WATCH_DEBOUNCE_MS = ([\d_]+)/)?.[1].replaceAll("_", ""));
+  if (!debounce) throw new Error("feeds: no USAGE_WATCH_DEBOUNCE_MS in shared/usage.ts");
+  const USAGE_BUDGET = live ? debounce + 2_000 : BUDGET;
+  // 0.15 polls follow.usage, which answers from a cache with a USAGE_POLL_MS TTL on the worker's clock. The harness
+  // crawls that clock (1 s a real 1000 s), so the cache never expires here; in real time it is at most two polls.
+  const USAGE_ON_015 = "0.15 reads usage through follow.usage's 60 s cache, timed on the worker's clock, which the harness crawls; not measurable here";
+  const WAIT = live ? 15_000 : 90_000;
+  const ws = key => seeded.workspaces.find(w => w.key === key);
+  const spec = key => WORKSPACES.find(w => w.key === key);
+  const polls = [];
+  const rows = [];
+  const fail = [];
+  const context = await browser.newContext({ viewport: DESKTOP, colorScheme: "dark", reducedMotion: "reduce", timezoneId: "UTC", locale: "en-US" });
+  await context.addInitScript(INIT, { seen: null });
+  const open = async (label, drive) => {
+    const page = await context.newPage();
+    page.setDefaultTimeout(30_000);
+    page.on("websocket", socket => socket.on("framesent", f => {
+      const text = typeof f.payload === "string" ? f.payload : f.payload.toString("utf8");
+      if (!text.includes("plugin.rpc.invoke")) return;
+      const m = text.match(POLL_RPCS);
+      if (m) polls.push({ at: Date.now(), page: label, name: m[1] });
+    }));
+    await page.clock.setFixedTime(BASE + VIEW);
+    await page.goto(ORIGIN);
+    await page.getByText("Follow-up", { exact: true }).first().waitFor();
+    await drive(page);
+    await page.evaluate(() => { window.__followFeedsMark = "kept"; });
+    return page;
+  };
+  // A usage file the worker can watch: Smart Session's directory exists before anyone subscribes.
+  const smart = join(home, "plugin-data", "smart-session"); await fs.mkdir(smart, { recursive: true });
+  const daemonNow = async () => { const c = JSON.parse(await fs.readFile(clockFile, "utf8")); return c.fake + (Date.now() - c.real) * c.rate; };
+  const writeUsage = async pct => {
+    const now = new Date(await daemonNow());
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const row = { accountId: "claude-main", family: "claude", fetchedAt: now.toISOString(), windows: { five_hour: { pct, resetsAt: new Date(now.getTime() + 3 * 3600_000).toISOString() }, seven_day: { pct: 20, resetsAt: new Date(now.getTime() + 4 * 86400_000).toISOString() } } };
+    await fs.appendFile(join(smart, `accounts-${month}.jsonl`), JSON.stringify(row) + "\n");
+  };
+  await writeUsage(30);
+  const caller = ws("audit").agentId;
+  const agentAct = async (tool, args) => {
+    const plan = await call("follow.agent-act", { agentId: caller, tool, args });
+    if (plan.planId) return call("follow.agent-act", { agentId: caller, tool, args: { ...args, confirm: true, planId: plan.planId } });
+    return plan;
+  };
+  /** An agent's next turn ends with `ask`: Needs you flags it when the turn ends (agent.turn_ended), not on a tick. */
+  const ask = async (key, text) => {
+    const scripts = JSON.parse(await fs.readFile(join(home, "fixture-scripts.json"), "utf8"));
+    scripts[`agent:${ws(key).agentId}`] = [think("Checking before I go on."), { item: { type: "assistant_message", text } }];
+    await fs.writeFile(join(home, "fixture-scripts.json"), JSON.stringify(scripts));
+    await client.sendMessage(ws(key).agentId, `Feeds check: ${text}`, { messageId: `feeds-${key}-${Date.now()}` });
+  };
+  const needsCount = async page => {
+    const label = await page.getByRole("toolbar", { name: "Status", exact: true }).getByRole("button", { name: /^Needs you, \d+/ }).first().getAttribute("aria-label", { timeout: 5_000 }).catch(() => null);
+    return label ? Number(label.match(/^Needs you, (\d+)/)[1]) : 0;
+  };
+  /** Runs `change`, then times each surface until it shows it; counts the poll RPCs every open page made meanwhile. */
+  const fresh = async (name, change, surfaces, { note = "", budget = BUDGET, only016 = null } = {}) => {
+    if (only016 && !live) {
+      rows.push({ case: name, surface: surfaces.map(s => s[0]).join(", "), ms: null, skipped: only016, ok: true });
+      log(`feeds SKIP ${name} on ${paseoVersion}: ${only016}`);
+      return;
+    }
+    const t0 = Date.now();
+    await change();
+    const changed = Date.now();
+    await Promise.all(surfaces.map(async ([surface, page, shown]) => {
+      let ms = null;
+      try { await shown(page, WAIT); ms = Date.now() - changed; } catch { /* not shown within WAIT */ }
+      const between = polls.filter(p => p.at >= t0 && p.at <= (ms === null ? Date.now() : changed + ms));
+      const kept = await page.evaluate(() => window.__followFeedsMark === "kept").catch(() => false);
+      const ok = ms !== null && ms <= budget && kept && (!live || between.length === 0);
+      const row = { case: name, surface, ms, budgetMs: budget, polls: between.length, pollNames: [...new Set(between.map(p => p.name))], pageReloaded: !kept, ok, note };
+      rows.push(row);
+      log(`feeds ${ok ? "PASS" : "FAIL"} ${name} / ${surface}: ${ms === null ? `not shown in ${WAIT / 1000} s` : `${ms} ms`}, ${between.length} poll RPC(s)${row.pollNames.length ? ` (${row.pollNames.join(", ")})` : ""}${kept ? "" : ", PAGE RELOADED"}${note ? ` [${note}]` : ""}`);
+      if (!ok) fail.push(`${name} / ${surface}`);
+    }));
+  };
+  const text = (t, opts = {}) => (page, timeout) => page.getByText(t, opts).first().waitFor({ state: "visible", timeout });
+  const label = re => (page, timeout) => page.getByRole("button", { name: re }).first().waitFor({ state: "visible", timeout });
+  const workerUp = async () => { for (let i = 0; i < 240; i++) { try { await call("follow.inbox-list", {}); return; } catch { await new Promise(r => setTimeout(r, 250)); } } throw new Error("the worker did not come back"); };
+  const quiet = ms => new Promise(r => setTimeout(r, ms));
+  try {
+    // The flagged workspace's own chat: its panel and, in another tab, its collapsed pill.
+    const homePage = await open("home", page => openHome(page));
+    const panelPage = await open("panel", async page => {
+      await openChat(page, spec("invites").title, spec("invites").prompt);
+      await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+    });
+    const pillPage = await open("pill", page => openChat(page, spec("invites").title, spec("invites").prompt));
+    const pillBefore = await pillPage.getByRole("button", { name: /^Follow-up · / }).last().getAttribute("aria-label").catch(() => null);
+    // Idle first: the opening reads are over, and every client is on its feeds.
+    await quiet(20_000);
+    const idleFrom = Date.now(); await quiet(60_000);
+    const idle = polls.filter(p => p.at >= idleFrom).length;
+    log(`feeds idle: ${idle} poll RPC(s) in 60 s across Home, the panel and the pill`);
+
+    const n0 = await needsCount(homePage);
+    const question = "Should invite links expire after 7 days or 30?";
+    await fresh("Needs-you flag (an agent's turn ends with a question)", () => ask("invites", question), [
+      ["Home: Needs you count", homePage, async (page, timeout) => { const end = Date.now() + timeout; while (Date.now() < end) { if (await needsCount(page) > n0) return; await quiet(100); } throw new Error("count"); }],
+      ["panel: the ask", panelPage, text(question)],
+      ["pill (collapsed): its label", pillPage, async (page, timeout) => { await page.waitForFunction(before => [...document.querySelectorAll('[aria-label^="Follow-up · "]')].some(el => el.getAttribute("aria-label") !== before), pillBefore, { timeout }); }],
+    ], { note: "includes the fixture agent's turn" });
+    await fresh("Sort set by another client (set_display home_sort)", () => agentAct("set_display", { values: { home_sort: "name" } }), [
+      ["Home: sort button", homePage, label(/^Sort: Name/)],
+    ]);
+    await fresh("Sort set back by another client", () => agentAct("set_display", { values: { home_sort: "priority" } }), [
+      ["Home: sort button", homePage, label(/^Sort: Priority/)],
+    ]);
+    await fresh("Priorities written (the ranker's store write, via set_priorities)", () => agentAct("set_priorities", { priorities: [{ workspace: ws("billing").workspaceId, score: 90, reason: "Feeds check: first priority" }], replace: false }), [
+      ["Home: the priority line", homePage, text("Feeds check: first priority")],
+    ]);
+    await fresh("Usage file written (Smart Session)", () => writeUsage(63), [
+      ["Home: usage meter", homePage, label(/5h 63%/)],
+    ], { budget: USAGE_BUDGET, note: `${debounce} ms watch debounce`, only016: USAGE_ON_015 });
+
+    // The worker restarts under the open pages: Paseo closes every subscription, the client polls and resubscribes.
+    await cli("plugin", "reload", "follow-up");
+    await workerUp(); await quiet(3_000);
+    await fresh("After a plugin reload", () => agentAct("set_priorities", { priorities: [{ workspace: ws("billing").workspaceId, score: 91, reason: "Feeds check: after the reload" }], replace: false }), [
+      ["Home: the priority line", homePage, text("Feeds check: after the reload")],
+    ]);
+    await fresh("After a plugin reload: a new flag", () => ask("usage", "Should the usage chart default to 30 days?"), [
+      ["Home: Needs you count", homePage, async (page, timeout) => { const n = await needsCount(page); const end = Date.now() + timeout; while (Date.now() < end) { if (await needsCount(page) !== n) return; await quiet(100); } throw new Error("count"); }],
+    ], { note: "includes the fixture agent's turn" });
+
+    // A crash: the worker process is killed. Paseo restarts it, or (if it doesn't) a reload does.
+    // The worker's pid is in the lock it holds.
+    const worker = Number((await fs.readFile(join(home, "plugin-data", "follow-up", "worker.lock"), "utf8").catch(() => "")).split(":")[0]) || 0;
+    let crashNote = "no worker.lock";
+    if (worker) {
+      process.kill(worker, "SIGKILL");
+      crashNote = "Paseo restarted the worker";
+      try { await quiet(1_000); await Promise.race([workerUp(), quiet(30_000).then(() => { throw new Error("late"); })]); }
+      catch { crashNote = "Paseo did not restart the worker within 30 s; reloaded"; await cli("plugin", "reload", "follow-up"); await workerUp(); }
+      await quiet(3_000);
+    }
+    await fresh("After the worker is killed", () => agentAct("set_priorities", { priorities: [{ workspace: ws("billing").workspaceId, score: 92, reason: "Feeds check: after the crash" }], replace: false }), [
+      ["Home: the priority line", homePage, text("Feeds check: after the crash")],
+    ], { note: crashNote });
+
+    // The daemon restarts: every page's websocket drops and reconnects; the host replays its subscriptions.
+    // The change waits for Home's page to reconnect (a frame from the new daemon): until then nothing can reach it, push or poll,
+    // and the app's own reconnect backoff is Paseo's, not Follow-up's.
+    let heard = 0;
+    homePage.on("websocket", socket => socket.on("framereceived", () => { heard = Date.now(); }));
+    daemon.kill("SIGTERM");
+    for (let i = 0; i < 100 && daemon.exitCode === null; i++) await quiet(100);
+    if (daemon.exitCode === null) daemon.kill("SIGKILL");
+    const restartAt = Date.now();
+    await respawnDaemon(); await workerUp();
+    const daemonBack = Date.now();
+    for (let i = 0; heard <= daemonBack; i++) { if (i > 1800) throw new Error("Home's page did not reconnect within 180 s"); await quiet(100); }
+    const pageBack = Date.now();
+    await quiet(3_000);
+    await fresh("After a daemon restart (websocket reconnect)", () => agentAct("set_priorities", { priorities: [{ workspace: ws("billing").workspaceId, score: 93, reason: "Feeds check: after the daemon restart" }], replace: false }), [
+      ["Home: the priority line", homePage, text("Feeds check: after the daemon restart")],
+    ], { note: `daemon back after ${Math.round((daemonBack - restartAt) / 1000)} s, Home's page reconnected ${Math.round((pageBack - daemonBack) / 1000)} s later` });
+    await fresh("After a daemon restart: usage", () => writeUsage(71), [
+      ["Home: usage meter", homePage, label(/5h 71%/)],
+    ], { budget: USAGE_BUDGET, note: `${debounce} ms watch debounce`, only016: USAGE_ON_015 });
+    await fs.writeFile(join(out, "feeds.json"), JSON.stringify({ paseo: paseoVersion, budgetMs: BUDGET, idlePollsPerMinute: idle, rows }, null, 2));
+    if (fail.length) throw new Error(`feeds: ${fail.length} case(s) failed: ${fail.join("; ")}`);
+    log(`feeds: all ${rows.length} passed on ${paseoVersion}`);
+  } catch (error) {
+    await fs.writeFile(join(out, "feeds.json"), JSON.stringify({ paseo: paseoVersion, budgetMs: BUDGET, rows, error: String(error?.message ?? error) }, null, 2)).catch(() => {});
+    for (const [i, page] of context.pages().entries()) await page.screenshot({ path: join(out, `feeds-failed-${i}.png`) }).catch(() => {});
+    failures.push("feeds");
+    throw error;
+  } finally { await context.close().catch(() => {}); }
+}
+
 /** No spinners or skeletons on screen, fonts loaded, and two quiet frames. */
 async function settle(page) {
   await page.evaluate(() => document.fonts.ready);
@@ -546,6 +736,23 @@ const DESKTOP = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };
 /** The sidebar shot's window: every group of the fixture fits, down to Quiet, and the chat beside it lays out whole. */
 const SIDEBAR = { width: 960, height: 1060 };
+/**
+ * The phone detail pane scrolls under a dock pinned to the bottom. Where the dock's top edge cuts a bordered block (an
+ * option card, a button), the shot shows a sliver of it above the dock. Scroll the pane just enough that the cut block
+ * shows whole, so the dock's edge falls in the gap after it.
+ */
+async function clearDock(page, inPane, dockButton) {
+  const dockTop = await page.getByRole("button", { name: dockButton }).first().evaluate(el => el.getBoundingClientRect().top);
+  await page.getByText(inPane).first().evaluate((el, edge) => {
+    let pane = el.parentElement;
+    while (pane && !(pane.scrollHeight > pane.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(pane).overflowY))) pane = pane.parentElement;
+    if (!pane) return;
+    const blocks = [...pane.querySelectorAll("*")].map(e => ({ e, r: e.getBoundingClientRect(), s: getComputedStyle(e) }))
+      .filter(({ r, s }) => r.height > 24 && r.width > 120 && (parseFloat(s.borderTopWidth) > 0 || s.backgroundColor !== "rgba(0, 0, 0, 0)"));
+    const cut = blocks.filter(({ r }) => r.top < edge && r.bottom > edge - 12).sort((a, b) => b.r.top - a.r.top)[0];
+    if (cut && cut.r.bottom - edge + 12 < 240) pane.scrollTop += cut.r.bottom - edge + 12;
+  }, dockTop);
+}
 /** A workspace's agent chat, opened from Paseo's sidebar like a person would (deep links land before the host is known). */
 async function openChat(page, title, prompt) {
   await page.getByText(title, { exact: true }).first().click({ timeout: 30000 });
@@ -553,6 +760,7 @@ async function openChat(page, title, prompt) {
 }
 
 async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
+  if (only.includes("feeds")) return checkFeeds({ seeded, call, cli, home });
   const billing = WORKSPACES.find(w => w.key === "billing");
   // Review evidence for Rename with AI (not README images): the row menu item, the panel's More button and menu, the
   // dialog suggesting, ready, edited and failed, the toast with Undo and the Undo link; desktop and phone, dark and light.
@@ -750,7 +958,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
     });
     if (name === "phone") await shoot.side("phone", "light", [
       { viewport: PHONE, drive: async page => { await openHome(page); await page.setViewportSize(PHONE); await homeRow(page, "Billing retries"); } },
-      { viewport: PHONE, drive: async page => { await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, "Billing retries")).click(); await page.getByText("Only network failures").first().waitFor(); } },
+      { viewport: PHONE, drive: async page => { await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, "Billing retries")).click(); await page.getByText("Only network failures").first().waitFor(); await clearDock(page, "Only network failures", "Sign off"); } },
     ]);
     if (name === "linked-items") await shoot("linked-items", DESKTOP, "dark", async page => {
       await openHome(page);
@@ -979,6 +1187,15 @@ async function reviewModeShots({ shoot, call }) {
   for (const theme of ["light", "dark"]) for (const [size, vp] of [["desktop", DESKTOP], ["phone", PHONE]]) {
     await team();
     await shoot(`rm-row-${size}-${theme}`, vp, theme, page => row(page, vp));
+    // The workspace panel (phone: the flag pill's sheet, the same Needs-you list): one reviewers ask, naming Ravi, count 1.
+    await shoot(`rm-panel-${size}-${theme}`, vp, theme, async page => {
+      await page.setViewportSize(DESKTOP); await openChat(page, title, REVIEW_MODE_STATES[0].prompt);
+      if (size === "phone") { await page.setViewportSize(PHONE); await page.getByRole("button", { name: /^Follow-up · / }).last().click(); }
+      else await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+      await link(page).waitFor();
+      // The phone chat header names the host machine: clip it out.
+      return size === "phone" ? { x: 0, y: 72, width: PHONE.width, height: PHONE.height - 72 } : undefined;
+    });
     // The undo bar lasts 10 s and settle() can take longer, so the drive captures it itself (rm-toast: the ask gone from
     // Needs you, the header and Home at once). Then it taps Undo, waits for the bar to leave and the ask to come back
     // (the inbox forgets the withdrawn reviewers key; the daemon re-asks on its next tick), and the shot is rm-undo.
@@ -1051,6 +1268,8 @@ async function setDaemonClock(fakeMs, rate = 0.001) {
 }
 
 let daemon; let client; let api; let browser; let daemonUrl = null;
+/** Starts the isolated daemon again on the same home and port (the feeds check's daemon restart). */
+let respawnDaemon = null;
 /** The first worker crash in the harness daemon's log, or null (set once the daemon starts). */
 let crashed = async () => null;
 /** The fake GitHub's HTTPS server: closed in stopDaemon, or its listening socket keeps the run (and its harness slot) alive after "done". */
@@ -1105,6 +1324,14 @@ try {
   const daemonLog = openSync(join(root, "daemon.log"), "a");
   crashed = async () => daemonCrashes(await fs.readFile(join(root, "daemon.log"), "utf8").catch(() => ""))[0] ?? null;
   daemon = spawnDaemon(["daemon", "run", "--home", home], { env, stdio: ["ignore", daemonLog, daemonLog] });
+  respawnDaemon = async () => {
+    daemon = spawnDaemon(["daemon", "run", "--home", home], { env, stdio: ["ignore", daemonLog, daemonLog] });
+    for (let i = 0; ; i++) {
+      try { await cli("workspace", "ls"); break; }
+      catch { if (daemon.exitCode !== null || i > 240) throw new Error(`the restarted daemon did not come up; see ${join(root, "daemon.log")}`); await new Promise(r => setTimeout(r, 250)); }
+    }
+    await connect();
+  };
   for (let i = 0; ; i++) {
     try { await cli("workspace", "ls"); break; }
     catch { if (daemon.exitCode !== null) throw new Error(`isolated daemon exited; see ${join(root, "daemon.log")}`); if (i > 120) throw new Error("isolated daemon did not start"); await new Promise(r => setTimeout(r, 250)); }
