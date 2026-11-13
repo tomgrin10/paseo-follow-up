@@ -32,6 +32,7 @@ import { PriorityStore } from "./server/priorities";
 import { UsageReader } from "./server/usage";
 import { Engine, agentWorkspace, findWorkspace } from "./server/engine";
 import { turnStarted, turnEnded, agentTrackedWorkspace } from "./server/turn-events";
+import { TurnTimeline } from "./server/turn-timeline";
 import { nextMessageInfo } from "./shared/task-rows";
 import { sendingOf } from "./shared/sending";
 import { Github } from "./server/github";
@@ -178,7 +179,9 @@ export default function contribute(server: PluginServerContext) {
   const historyCache = HistoryCache.at(directory);
   const gateway = new PaseoGateway(undefined, undefined, undefined, historyCache);
   /** The daemon as the inbox sees it; its turnItems is the one timeline read per turn end (engine and inbox). */
-  const inboxDirectory = daemonDirectory(gateway.directory);
+  const turnTimeline = new TurnTimeline();
+  gateway.turnTimeline = turnTimeline;
+  const inboxDirectory = daemonDirectory(gateway.directory, undefined, turnTimeline);
   // Settings → Agents: which agent each special role uses, in agents.json (defaults when absent).
   const agentSettings = new AgentSettingsStore(directory);
   gateway.recoveryRole = () => agentSettings.role("recovery");
@@ -1443,11 +1446,11 @@ export default function contribute(server: PluginServerContext) {
         void engine.nudge(assigned.id); return;
       }
       if (!agentTrackedWorkspace(await store.snapshot(), event.agent.id)) return;
-      gateway.markDirty(event.agent.id);
       // Since Paseo 0.13 the lifecycle payload deliberately contains no history.
-      // Read a bounded tail through the plugin-owned API, outside the state lock.
-      // One read of the ended turn, shared with the inbox's handler (a-turn-end-reads-the-turn-once).
+      // Read the ended turn through the plugin-owned API, outside the state lock: one read from the agent's cursor,
+      // shared with the inbox's handler and with discovery, which the read is kept for (a-turn-s-timeline-is-read-once).
       const items = await inboxDirectory.turnItems!(event.agent.id, event.turnId ?? null).catch(() => null);
+      gateway.markDirty(event.agent.id);
       if (signal.aborted || stopped) return;
       const guarded = !!interruption && await sessionGuardOwnsInterruption(event.agent.id, interruption).catch(() => false);
       // Only the developer's Stop holds (shared/status.ts cancelCause): a turn already replaced by a newer one (the
