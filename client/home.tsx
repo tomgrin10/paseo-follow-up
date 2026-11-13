@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { browserKey, BROWSER_POLL_MS } from "./keys";
+import { browserKey } from "./keys";
 import { Platform, ScrollView, TextInput, useWindowDimensions, View } from "react-native";
 import { Pressable, Text } from "./text";
 import { usePaseo, useRpc, type PluginScreenProps } from "@getpaseo/plugin/client";
@@ -297,7 +297,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
   const tail = useTail(agent.handle, `${row?.seq ?? 0}:${agent.status ?? ""}`);
   const browserRead = useRpc(browserStatusRpc);
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" } | null>(null);
-  const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), refetchInterval: BROWSER_POLL_MS, enabled: !!sheet });
+  const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), enabled: !!sheet, staleTime: 0, refetchOnMount: "always" });
   const [question, setQuestion] = useState<string | null>(() => ask?.id ?? null);
   useEffect(() => { if (ask) setQuestion(ask.id); }, [ask?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   useQuestionOpener(w?.id, setQuestion);
