@@ -533,6 +533,23 @@ const DESKTOP = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };
 /** The sidebar shot's window: every group of the fixture fits, down to Quiet, and the chat beside it lays out whole. */
 const SIDEBAR = { width: 960, height: 1060 };
+/**
+ * The phone detail pane scrolls under a dock pinned to the bottom. Where the dock's top edge cuts a bordered block (an
+ * option card, a button), the shot shows a sliver of it above the dock. Scroll the pane just enough that the cut block
+ * shows whole, so the dock's edge falls in the gap after it.
+ */
+async function clearDock(page, inPane, dockButton) {
+  const dockTop = await page.getByRole("button", { name: dockButton }).first().evaluate(el => el.getBoundingClientRect().top);
+  await page.getByText(inPane).first().evaluate((el, edge) => {
+    let pane = el.parentElement;
+    while (pane && !(pane.scrollHeight > pane.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(pane).overflowY))) pane = pane.parentElement;
+    if (!pane) return;
+    const blocks = [...pane.querySelectorAll("*")].map(e => ({ e, r: e.getBoundingClientRect(), s: getComputedStyle(e) }))
+      .filter(({ r, s }) => r.height > 24 && r.width > 120 && (parseFloat(s.borderTopWidth) > 0 || s.backgroundColor !== "rgba(0, 0, 0, 0)"));
+    const cut = blocks.filter(({ r }) => r.top < edge && r.bottom > edge - 12).sort((a, b) => b.r.top - a.r.top)[0];
+    if (cut && cut.r.bottom - edge + 12 < 240) pane.scrollTop += cut.r.bottom - edge + 12;
+  }, dockTop);
+}
 /** A workspace's agent chat, opened from Paseo's sidebar like a person would (deep links land before the host is known). */
 async function openChat(page, title, prompt) {
   await page.getByText(title, { exact: true }).first().click({ timeout: 30000 });
@@ -737,7 +754,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
     });
     if (name === "phone") await shoot.side("phone", "light", [
       { viewport: PHONE, drive: async page => { await openHome(page); await page.setViewportSize(PHONE); await homeRow(page, "Billing retries"); } },
-      { viewport: PHONE, drive: async page => { await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, "Billing retries")).click(); await page.getByText("Only network failures").first().waitFor(); } },
+      { viewport: PHONE, drive: async page => { await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, "Billing retries")).click(); await page.getByText("Only network failures").first().waitFor(); await clearDock(page, "Only network failures", "Sign off"); } },
     ]);
     if (name === "linked-items") await shoot("linked-items", DESKTOP, "dark", async page => {
       await openHome(page);
