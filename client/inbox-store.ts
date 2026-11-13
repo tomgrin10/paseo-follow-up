@@ -2,7 +2,8 @@ import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { inboxActRpc, inboxFeed, inboxListRpc } from "../shared/contracts";
 import { openFeed, type Feed } from "./feeds";
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
-import type { InboxRow } from "../shared/inbox";
+import { withoutWithdrawnAsks, type InboxRow } from "../shared/inbox";
+import { onNoReviewRepos, setHandedBackPrs } from "../shared/pr-workflow";
 import { subscribeDisplay } from "./display";
 import { onVisible, whileVisible } from "./visibility";
 import { createDoneWindows } from "./done-windows";
@@ -29,6 +30,8 @@ const POLL_MS = 15_000;
  */
 export function createInboxStore(client: PluginClientContext) {
   let data: List | null = null;
+  /** `view()`'s cache; reset whenever `data` or the review modes change. */
+  let shown: { rows: InboxRow[]; overseer: InboxRow | null } | null = null;
   let offlineSince: number | null = null;
   let failures = 0;
   let version = 0;
@@ -60,7 +63,8 @@ export function createInboxStore(client: PluginClientContext) {
   const apply = (next: List) => {
       // Nothing changed since the answer this store holds: keep it, and only re-render if we were offline.
       if (next.unchanged && data) { if (offlineSince !== null || failures) { offlineSince = null; failures = 0; emit(); } return; }
-      data = next; offlineSince = null; failures = 0;
+      data = next; offlineSince = null; failures = 0; shown = null;
+      setHandedBackPrs(next.handedBack ?? []);
       // Rows signed off while offline stay hidden until the replay lands.
       emit();
   };
@@ -88,11 +92,18 @@ export function createInboxStore(client: PluginClientContext) {
   // The feed went down (the worker restarted): read now and poll until it is back.
   feed = openFeed(client, inboxFeed, {}, { event: next => { if (stopped) return; void flush().catch(() => undefined); apply(next); }, down: () => { if (timer) clearTimeout(timer); void poll(); }, up: () => { if (timer) clearTimeout(timer); timer = null; } });
   const offVisible = onVisible(refresh);
+  // A repository flipping to No review (or back, on Undo) withdraws its add-reviewers asks on every surface at once.
+  const offNoReview = onNoReviewRepos(() => { shown = null; emit(); });
   if (!feed) void poll();
 
+  /**
+   * The rows every surface draws: the daemon's, minus add-reviewers asks for PRs the agent merges itself
+   * (shared/inbox.ts withoutWithdrawnAsks). Cached per answer and per review-mode change, so selectors stay stable.
+   */
+  const view = () => shown ??= { rows: (data?.rows ?? []).map(r => withoutWithdrawnAsks(r)), overseer: data?.overseer ? withoutWithdrawnAsks(data.overseer) : null };
   const patch = (agentIds: string[], change: (row: InboxRow) => InboxRow) => {
     if (!data) return;
-    data = { ...data, rows: data.rows.map(r => agentIds.includes(r.agentId) ? change(r) : r) };
+    data = { ...data, rows: data.rows.map(r => agentIds.includes(r.agentId) ? change(r) : r) }; shown = null;
     emit();
   };
   const titleOf = (id: string) => { const r = data?.rows.find(x => x.agentId === id) ?? data?.unsorted?.find(x => x.agentId === id); return r ? r.workspaceTitle && r.multiRoot ? `${r.workspaceTitle} › ${r.title}` : r.workspaceTitle ?? r.title : "agent"; };
@@ -120,9 +131,9 @@ export function createInboxStore(client: PluginClientContext) {
     version: () => version,
     enabled: () => enabled && (data?.enabled ?? true),
     data: () => data,
-    rows: () => (enabled && data?.enabled ? data.rows : []),
+    rows: () => (enabled && data?.enabled ? view().rows : []),
     /** The Overseer's own row: never in rows, never counted (1.4.0-beta.0). */
-    overseer: () => data?.overseer ?? null,
+    overseer: () => view().overseer,
     offlineSince: () => offlineSince,
     cameBack: () => cameBack,
     clearCameBack() { cameBack = []; emit(); },
@@ -130,7 +141,7 @@ export function createInboxStore(client: PluginClientContext) {
     clearRecent() { recent = null; emit(); },
     refresh,
     nudge,
-    stop() { stopped = true; feed?.stop(); offVisible(); if (timer) clearTimeout(timer); if (nudged) clearTimeout(nudged); listeners.clear(); unsubscribe(); },
+    stop() { stopped = true; feed?.stop(); offVisible(); offNoReview(); if (timer) clearTimeout(timer); if (nudged) clearTimeout(nudged); listeners.clear(); unsubscribe(); },
 
     /** Sign off now; queue for replay when the host can't be reached. */
     async signOff(requested: string[], options: { muteTurn?: boolean } = {}) {
@@ -192,7 +203,7 @@ export function createInboxStore(client: PluginClientContext) {
       await act({ action: "set_finish_flags", agentIds: [agentId], value }); refresh();
     },
     async unsortedSignOff(agentIds?: string[]) {
-      if (data) { data = { ...data, unsorted: agentIds ? data.unsorted?.filter(r => !agentIds.includes(r.agentId)) ?? null : null }; emit(); }
+      if (data) { shown = null; data = { ...data, unsorted: agentIds ? data.unsorted?.filter(r => !agentIds.includes(r.agentId)) ?? null : null }; emit(); }
       await act({ action: "unsorted_sign_off", ...(agentIds ? { agentIds } : {}) }); refresh();
     },
     async unsortedFlag(agentIds: string[]) { await act({ action: "unsorted_flag", agentIds }); refresh(); },

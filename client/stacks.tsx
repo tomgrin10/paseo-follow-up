@@ -4,7 +4,7 @@ import { Icon } from "@getpaseo/plugin/client/ui";
 import type { Pr, Workspace } from "../shared/model";
 import { compactPrStatus, orderedStacks, settledForDisplay } from "../shared/presentation";
 import { mergeQueued, prTone, stackOrder } from "../shared/attention";
-import { noReviewers } from "../shared/reviewers";
+import { reviewersMissing } from "../shared/pr-workflow";
 import { isGithubFlow } from "../shared/pr-actions";
 import { Card, FoldRow, text, type Theme } from "./kit";
 import { Spinner } from "./motion";
@@ -40,7 +40,7 @@ export function PrRow({ pr, theme, first, last, showRepo, onOpen, compact, wide 
   const label = mergeQueued(pr) ? "Queued to merge" : status.label;
   const line = c.border;
   const extras = [
-    s?.state === "OPEN" && noReviewers(pr) ? "No reviewers" : null,
+    s?.state === "OPEN" && reviewersMissing(pr) ? "No reviewers" : null,
     s?.state === "OPEN" && s.mergeWhenReady === "on" && !mergeQueued(pr) ? isGithubFlow(s) ? "Auto-merge" : "Merge when ready" : null,
   ].filter(Boolean) as string[];
   return <Pressable accessibilityRole="button" accessibilityLabel={`Pull request ${pr.number}: ${s?.title ?? pr.stack}. ${label}. Open details`} onPress={() => onOpen(pr.key)}

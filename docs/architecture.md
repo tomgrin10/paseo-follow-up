@@ -122,6 +122,21 @@ Answers that the client polls are kept small:
   (`touchLastSeen`). 2026-11-12, live 2.0.1-beta.2: a cold-start tick copied the 1.7 MB state ~150 times, and the
   worker sat at ~450 MB RSS (85 MB live heap). Guarded by `tests/tick-copies.test.ts`, the agent-index test in
   `tests/never-wake.test.ts`, the quiet-tick test in `tests/inbox.test.ts` and `test:scale`.
+- **A send never clones the whole state** (`a-send-never-clones-the-whole-state`). A send's claim, recipient, sent and
+  acknowledgment writes, an answer's delivery writes and an agent's turn events (`server/turn-events.ts`: a superseded
+  hold, the Done a turn ends, a woken dormant workspace, the history and Stop hold at turn end) each write the one
+  workspace they are about with `mutateWorkspace`; no turn event walks every workspace. A whole-state `mutate` that
+  remains (discovery, settings) hands back the saved object of every workspace it didn't change, so the next save
+  validates only the changed ones. 2026-11-13, #139 fair-seed `test:scale`: 6 sends copied the 2 MB state for every
+  write (93 MB) and made the next save re-validate all 140 workspaces (47 MB); RSS went 227 → 342 MB and stayed.
+  Guarded by `tests/send-clones.test.ts` and `test:scale`.
+- **A send lists agents at most once per tick** (`a-send-lists-agents-at-most-once-per-tick`). The engine starts each
+  tick on the gateway (`tickStarted`); a decision that needs current status (`fresh: "agents"`, before a send)
+  re-lists agents once in that tick and then reads that list, which lifecycle events keep patched. Within the tick a
+  listed "loaded" row is trusted without a `fetch_agent`, each agent's subagents are listed at most once, and the send
+  reads its recipient and the recovery-labelled agents from the list. 2026-11-13: each send listed every agent three
+  times and fetched its recipient (46 daemon requests a minute for 6 sends). Guarded by `tests/daemon-load.test.ts`
+  and `test:scale`.
 
 ## Lifecycle of an agent session
 

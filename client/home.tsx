@@ -7,7 +7,7 @@ import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
 import { useQuery } from "@tanstack/react-query";
 import { browserStatusRpc, controlRpc, inboxBriefRpc } from "../shared/contracts";
 import { needsYou, workspaceSnoozed } from "../shared/attention";
-import { briefAsks } from "../shared/brief";
+import { briefAsks, liveBrief } from "../shared/brief";
 import { briefPane, followUpLog, lastWorkdayEnd, nextNeeds, paneButtons, sameText, sinceLabel, tailSteps, type HomeGroupId, type HomeModel, type LogLine, type TailStep, type Workstream } from "../shared/home";
 import { age, backLabel, snoozeUntil, type InboxRow } from "../shared/inbox";
 import { errorText } from "../shared/errors";
@@ -303,7 +303,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
   useQuestionOpener(w?.id, setQuestion);
   const [laterOpen, setLaterOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const b = brief.data?.brief?.state === "open" ? brief.data.brief : null;
+  const b = liveBrief(brief.data?.brief);
   const asks = w ? needsYou(w) : [];
   const items = asks.map(i => i.kind);
   // Say it once: when a Needs-you row already carries the row's line (a question's title or detail), skip the headline.
@@ -487,7 +487,7 @@ function OverseerPane({ theme, compact, o, focus = 0, pending = null, agentId, m
   const tail = useTail(agent.handle, `${row?.seq ?? 0}:${agent.status ?? ""}`, 8);
   const readBrief = useRpc(inboxBriefRpc);
   const brief = useQuery({ queryKey: ["follow-up", "overseer-brief", agentId, row?.seq ?? 0], queryFn: () => readBrief({ agentId: agentId! }), enabled: !!agentId && !!row?.brief });
-  const b = brief.data?.brief?.state === "open" ? brief.data.brief : null;
+  const b = liveBrief(brief.data?.brief);
   const [starting, setStarting] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const restart = async () => {
@@ -727,7 +727,7 @@ function LogView({ theme, compact, sources, onHome, onOpen }: { theme: Theme; co
       <Button theme={theme} compact={compact} kind="ghost" icon="House" title="Home" onPress={onHome} />
     </View>
     <Text accessibilityRole="header" style={[t.title, { fontSize: 20, lineHeight: 26 }]}>Done while you were away</Text>
-    <Text style={t.meta}>What Follow-up did on its own {days ? `in the last ${days} days` : `since ${sinceLabel(Date.now())}`}: repairs it sent and how they went. It never merges, messages people, starts or archives workspaces.</Text>
+    <Text style={t.meta}>What Follow-up did on its own {days ? `in the last ${days} days` : `since ${sinceLabel(Date.now())}`}: tasks it sent and how they went. It never merges, messages people, starts or archives workspaces.</Text>
     <Pressable accessibilityRole="button" onPress={onHome} style={{ flexDirection: "row", alignItems: "center", gap: 8, padding: 10, borderRadius: 8, backgroundColor: c.surface1 }}>
       <Icon name="Inbox" size={14} color={needs ? c.statusWarning : c.foregroundMuted} />
       <Text style={[t.body, { flex: 1 }]}>{needs ? `${needs} thing${needs === 1 ? "" : "s"} it left for you are on Home.` : "Nothing is waiting for you on Home."}</Text>

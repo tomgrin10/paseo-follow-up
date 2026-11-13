@@ -74,7 +74,7 @@ Nothing polls while the app is hidden.
 | `client/reviewers.tsx` | Reviewer lists and the picker. |
 | `client/needs-you.tsx` | The workspace's one Needs you block: the asks (question cards, the brief), then the decision rows (Send repairs, Merge, Resume, Retry, Check). |
 | `client/questions.tsx` | The question dialog and answer form. |
-| `client/tasks.tsx` | Tasks and their triggers. |
+| `client/tasks.tsx` | Tasks and their triggers. Repairs are task rows too (Q49): the next-message strip first (Preview, Send now, Open agent while sent), PR-condition rows with their PR chip, the repair task sheet (per-task Auto-send, the message with its line highlighted). Rows come from `shared/task-rows.ts`. |
 | `client/spec.tsx` | The spec link chip, row and sheet. The chip sits in the references line (`client/linked.tsx`). |
 | `client/linked.tsx`, `shared/linked-display.ts` | Linked items on screen: the references line (Spec and Linked chips), the Linked sheet, the disclosure row, and Home search's index. See [linked-items.md](linked-items.md#ui). |
 | `client/brand-icons.ts` | Monochrome brand marks (Simple Icons, CC0) for linked items, passed to the host `Icon` as inline SVG. |
@@ -90,6 +90,7 @@ Nothing polls while the app is hidden.
 | `client/agents.tsx` | Settings → Agents: the shared job rows with each row's More, and Background jobs (Wait). |
 | `client/job-rows.tsx` | The job rows Settings → Agents and setup's Helper agents step share (`JobRows`, `RolePickers`). |
 | `client/shipping.tsx` | Settings → Following → Shipping PRs. |
+| `client/review-mode.tsx` | Per-repository review mode: the Settings Review row (its menu uses `MenuItemContent`), the Needs-you reviewers row's "Let the agent merge in <repo>" link, and the Undo toast both share. See [docs/prs.md](prs.md#review-mode). |
 | `client/onboarding.tsx` | Getting started. |
 | `client/updates.tsx` | Settings → General's Updates sections, Home's update notice, setup's Updates step ([updates.md](updates.md)). |
 | `client/release-notes.tsx` | What's new and the notes list. Home's version marker is `VersionMark` in `client/updates.tsx`. |

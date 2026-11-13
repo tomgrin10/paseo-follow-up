@@ -15,11 +15,12 @@ export const menuGlyph = (touch: boolean) => ({ slot: touch ? 18 : 14, size: tou
 /** The item row's own layout; the menu adds its padding, height and state colours. */
 export const menuItemRow = (touch: boolean) => ({ flexDirection: "row" as const, alignItems: "center" as const, gap: menuGlyph(touch).gap });
 
-export function MenuItemContent({ theme, touch, glyph, label, hint, muted = false, quietGlyph = false, trailing }: {
+export function MenuItemContent({ theme, touch, glyph, label, hint, hintLines = 1, muted = false, quietGlyph = false, trailing }: {
   theme: Theme; touch: boolean;
   /** An icon name, a node (a spinner), or nothing: the slot keeps its width either way so labels line up. */
   glyph?: string | ReactNode | null;
   label: string; hint?: string | null;
+  /** A narrow menu (a phone) lets a sentence-long hint wrap instead of cutting it. */ hintLines?: number;
   /** The whole item reads as unavailable (a running job). */ muted?: boolean;
   /** Only the glyph is muted (the row menu's action icons). */ quietGlyph?: boolean;
   trailing?: ReactNode;
@@ -31,7 +32,7 @@ export function MenuItemContent({ theme, touch, glyph, label, hint, muted = fals
     </View>
     <View style={{ flex: 1, minWidth: 0 }}>
       <Text numberOfLines={1} style={muted ? { ...t.body, color: c.foregroundMuted } : t.body}>{label}</Text>
-      {!!hint && <Text numberOfLines={1} style={touch ? t.meta : t.small}>{hint}</Text>}
+      {!!hint && <Text numberOfLines={hintLines} style={touch ? t.meta : t.small}>{hint}</Text>}
     </View>
     {trailing}
   </>;

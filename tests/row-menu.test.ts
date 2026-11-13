@@ -47,7 +47,7 @@ test("a quiet or snoozed row has no triage moves", () => {
 test("fix moves appear only when they apply", () => {
   const all = keys({ ...base, needs: [hold, send(null), retry(false)] }).find(([k]) => k === "fix")!;
   assert.deepEqual(all[1], ["clear_hold", "send_repairs:b1", "retry_batch:b2"]);
-  assert.equal(rowMenu({ ...base, needs: [send(null)] }).find(x => x.key === "fix")!.items[0].label, "Send 2 repairs");
+  assert.equal(rowMenu({ ...base, needs: [send(null)] }).find(x => x.key === "fix")!.items[0].label, "Send 2 tasks");
   assert.ok(!keys({ ...base, needs: [send("The agent is busy"), retry(true)] }).some(([k]) => k === "fix"), "a blocked send and an exhausted retry are hidden");
   assert.ok(!keys({ ...base, w: null, needs: [hold] }).some(([k]) => k === "fix"), "untracked rows have nothing to fix");
 });

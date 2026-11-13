@@ -34,14 +34,14 @@ const agentCommunicationSchema = z.strictObject({
 export const listRpc = defineRpc({ name: "follow.list", input: z.object({ since: z.number().optional() }), output: z.object({ workspaces: z.array(workspaceSchema), error: z.string().nullable(), revision: z.number().optional(), full: z.boolean().optional(), removed: z.array(z.string()).optional() }) });
 export const getRpc = defineRpc({ name: "follow.get", input: z.object({ workspaceId: idSchema }), output: z.object({ workspace: workspaceSchema.nullable(), error: z.string().nullable() }) });
 /** `prWorkflow` (1.4.0-beta.14): how this workspace ships PRs (graphite | github) and its review-fix command (null: built-in steps). */
-export const agentStatusRpc = defineRpc({ name: "follow.agent-status", input: z.strictObject({ agentId: idSchema, detail: z.enum(["summary", "full"]).optional() }), output: workspaceSchema.extend({ prWorkflow: z.object({ mode: z.enum(["graphite", "github"]), reviewFix: z.string().nullable() }).optional() }) });
+export const agentStatusRpc = defineRpc({ name: "follow.agent-status", input: z.strictObject({ agentId: idSchema, detail: z.enum(["summary", "full"]).optional() }), output: workspaceSchema.extend({ prWorkflow: z.object({ mode: z.enum(["graphite", "github"]), reviewFix: z.string().nullable() }).optional(), /** The next message: recipient, tasks, exact text, and when and why it goes (Preview's agent form). */ nextMessageInfo: z.object({ to: z.string(), tasks: z.array(z.string()), text: z.string(), reason: z.string(), eta: z.string().nullable() }).nullable().optional() }) });
 export const syncWorkspaceRpc = defineRpc({ name: "follow.sync", input: z.strictObject({ agentId: idSchema, summary: z.string().trim().min(1).max(1000) }), output: z.object({ workspaceId: idSchema, synced: z.literal(true) }) });
 export const enrollRpc = defineRpc({ name: "follow.enroll", input: z.strictObject({ workspaceId: idSchema.optional(), agentId: idSchema, goal: textSchema }), output: workspaceSchema });
 export const registerPrRpc = defineRpc({ name: "follow.register-pr", input: z.strictObject({ agentId: idSchema, repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/), number: z.number().int().positive(), stack: textSchema, parentNumber: z.number().int().positive().nullable().optional(), disposition: z.string().max(2000).optional(), agentMerges: z.boolean().optional() }), output: workspaceSchema });
 export const obligationRpc = defineRpc({ name: "follow.obligation", input: z.strictObject({ agentId: idSchema, workingAgentId: idSchema.optional(), id: idSchema.optional(), title: textSchema, status: z.enum(["pending", "waiting", "working", "blocked", "done", "waived"]), afterPrs: z.array(idSchema).optional(), dependencyStage: z.enum(["merged", "deployed"]).optional(), evidence: z.string().max(4000).optional(), ask: z.string().trim().min(1).max(1000).optional(), enable_follow_up: z.boolean().optional(), communication: agentCommunicationSchema.optional(), trigger: taskTriggerSchema.strict().nullable().optional() }), output: workspaceSchema.extend({ updatedObligationId: idSchema }) });
 export const declareDoneRpc = defineRpc({ name: "follow.done", input: z.strictObject({ agentId: idSchema, summary: textSchema }), output: z.object({ workspace: workspaceSchema, blockers: z.array(z.string()), unconfirmed: z.array(z.string()).default([]), alreadyDone: z.boolean().default(false), next: z.string().default("") }) });
 export const acknowledgeRpc = defineRpc({ name: "follow.acknowledge", input: z.strictObject({ agentId: idSchema, batchId: idSchema, outcome: z.enum(["completed", "blocked"]), result: textSchema }), output: workspaceSchema });
-export const controlRpc = defineRpc({ name: "follow.control", input: z.object({ workspaceId: idSchema, enable_auto_sends: z.boolean().optional(), clearHold: z.boolean().optional(), retryBatchId: idSchema.optional(), /** The developer's "Make main agent": one of the workspace's other root agents. */ mainAgentId: idSchema.optional(),
+export const controlRpc = defineRpc({ name: "follow.control", input: z.object({ workspaceId: idSchema, enable_auto_sends: z.boolean().optional(), clearHold: z.boolean().optional(), retryBatchId: idSchema.optional(), /** Retry one capped task (Q49): its key. */ retryTask: z.string().max(400).optional(), /** Auto per task: a task key and whether Follow-up sends it. */ taskAuto: z.object({ key: z.string().max(400), auto: z.boolean() }).optional(), /** The developer's "Make main agent": one of the workspace's other root agents. */ mainAgentId: idSchema.optional(),
   /** Later on a workspace-only Needs-you row; null is Bring back now. */ snooze: z.object({ until: z.string().trim().min(1).max(200) }).nullable().optional() }), output: workspaceSchema });
 export const refreshRpc = defineRpc({ name: "follow.refresh", input: z.object({ workspaceId: idSchema.optional() }), output: z.object({ ok: z.boolean() }) });
 
@@ -59,7 +59,8 @@ export const confirmPrActionRpc = defineRpc({ name: "follow.confirm-pr-action", 
 export const checkPrActionRpc = defineRpc({ name: "follow.check-pr-action", input: z.object({ workspaceId: idSchema, actionId: idSchema }), output: actionResultSchema });
 /** `reviewers` picks who to ask for this PR only (the picker); `remember` also saves them as the repository's list. */
 export const requestReviewersRpc = defineRpc({ name: "follow.request-reviewers", input: z.object({ workspaceId: idSchema, prKey: idSchema, reviewers: z.array(reviewerEntrySchema).min(1).max(MAX_REVIEWERS).optional(), remember: z.boolean().optional() }), output: actionResultSchema });
-const reviewerSettingsSchema = z.object({ config: reviewerConfigSchema, repos: z.array(z.string()) });
+/** `noReview`: the repositories set to No review (pr-workflow.json), so the client's Needs you agrees with the server's. */
+const reviewerSettingsSchema = z.object({ config: reviewerConfigSchema, repos: z.array(z.string()), noReview: z.array(z.string()).default([]) });
 /** Settings → Reviewers: the saved lists and the repositories Follow-up has seen PRs in. */
 export const reviewerSettingsRpc = defineRpc({ name: "follow.reviewer-settings", input: z.object({}), output: reviewerSettingsSchema });
 /** `repo: null` is the default for all repos. An empty list clears it. */
@@ -156,7 +157,9 @@ export const inboxListRpc = defineRpc({ name: "follow.inbox-list", input: z.obje
   /** Adoption share of needs_you over the last 7 days of flagged turns (R2). Optional for older daemons. */
   briefStats: z.object({ days: z.number().int(), total: z.number().int(), tool: z.number().int(), structured: z.number().int(), extraction: z.number().int(), fallback: z.number().int() }).optional(),
   /** The Overseer's own row (1.4.0-beta.0), kept out of rows and every Needs-you count. */
-  overseer: inboxRowSchema.nullable().optional() }) });
+  overseer: inboxRowSchema.nullable().optional(),
+  /** PRs in No review repositories that hand their merge back (shared/pr-workflow.ts handsMergeBack). Usually empty. */
+  handedBack: z.array(z.string()).optional() }) });
 export const inboxActRpc = defineRpc({ name: "follow.inbox-act", input: z.strictObject({
   action: z.enum(["sign_off", "undo", "snooze", "unsnooze", "mute_turn", "set_finish_flags", "unsorted_flag", "unsorted_sign_off", "batch_undo"]),
   agentIds: z.array(idSchema).max(500).optional(), seqs: z.record(z.string(), z.number().int()).optional(),

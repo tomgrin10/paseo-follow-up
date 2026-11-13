@@ -97,9 +97,9 @@ Tests: `tests/main-claim.test.ts`, `tests/main-handover.test.ts`.
    - No routine Retry (Q50). A sent batch whose agent sits idle 2 minutes (`UNACKNOWLEDGED_MS`) without an
      acknowledgment is settled from GitHub (`settleUnacknowledged`, `shared/send-decision.ts`): tasks GitHub no
      longer shows are done, and still-open ones go back in the queue (`completed` with `unacknowledged`, which
-     `reconcile` doesn't count as delivered). Once one unchanged condition (same task key and fingerprint) has gone
-     out `NO_PROGRESS_CAP` (2) times without an acknowledgment, the batch is `blocked` with that reason, and only then
-     does Needs you offer Retry (invariant `retry-only-when-capped`). A refused acknowledgment still blocks.
+     `reconcile` doesn't count as delivered). The per-task cap below decides when an unchanged condition stops going
+     out. A refused acknowledgment, and the agent's own `blocked` acknowledgment (its reason is the Needs-you text),
+     still block.
    - A recovery batch follows the same rule: one that ends without an acknowledgment but caught the PR list up
      (`inventory.syncedRevision`) is done.
    - A reload mid-send makes it `uncertain` (`engine.recover()`). The next refresh reads the recipient's chat for the
@@ -126,6 +126,40 @@ Tests: `tests/main-claim.test.ts`, `tests/main-handover.test.ts`.
 The repair wording follows the PR workflow ([prs.md](prs.md)): the review-fix command (e.g. `/fix-pr`), and GitHub
 retargeting instead of Graphite restacks.
 
+## Repairs are tasks (Q49)
+
+A PR condition Follow-up finds (a conflict, review feedback, a failing required check, a restack) is a task row in the
+workspace's Tasks, next to the developer's and agents' own tasks (`shared/task-rows.ts`, `client/tasks.tsx`). Nothing
+is stored per repair: a row comes from the message it rides (the pending or sent batch), the tasks `reconcile` held
+back (`heldTasks`), or a settled message (Done). The batch is the internal delivery record and never shows.
+
+- **One rule for every task in a message.** Repairs and Auto tasks (obligations with Auto and a due trigger) ride the
+  same message and get the same states: Queued, Sent, Needs you (capped), Done. The Done check isn't a task: it stays
+  "Ready to finish" in Needs you.
+- **Say it once.** The strip at the top of Tasks ("Next message to Billing fix · 4 tasks · sends at 14:32 · waits a
+  minute so new changes join the same message", with Preview and Send now) carries when and why, from `sendDecision`.
+  A row in the message says only Queued or Sent (invariant `message-rows-say-it-once`). Send now shows only where the
+  server takes it (`canSendNow`) and the send doesn't wait on the developer (then Send lives in Needs you only). While
+  sent, the strip reads "Sent to <agent> at 14:32 · N tasks · waiting for it to report back" with Open agent.
+- **The cap is per task, and it is the only one.** A turn without an acknowledgment always settles its batch
+  (completed + unacknowledged). An acknowledged `completed` whose PR condition GitHub still shows, read after the
+  acknowledgment (`readSince`), goes out again too. A condition that went out `NO_PROGRESS_CAP` times unchanged,
+  acknowledged or not, is held as `capped`: it stays out of the next message,
+  shows its own Needs-you row ("Conflicts on #142 are still there after 2 messages", Retry and Open agent), and the
+  rest of the queue keeps moving (invariant `a-capped-task-never-holds-the-queue`). Retry (`follow.control`
+  `retryTask`, the `retry_batch` tool with `task`) records the sends so far in `taskRetries`, re-arming that one
+  condition. 2.0 betas that blocked a batch for this are settled by `recover()`, and a message the retired "three
+  batches" rule blocked before it went out is re-formed under the cap.
+- **Auto per task.** The task sheet's Auto-send switch (`follow.control` `taskAuto`, the `set_auto_send` tool with
+  `task`) adds the task key to `manualTasks`; `reconcile` holds it as `manual` ("Auto off · stays with you").
+- **Done.** A task that went out and is gone from GitHub is Done: "Billing fix finished it" when acknowledged,
+  "resolved on GitHub" when the turn ended without one. A task GitHub cleared before it was ever sent vanishes, so
+  flapping checks never flood Done.
+- **Preview.** `nextMessage` is the exact text the agent gets (the pending batch's task lines, no id line). The task
+  sheet highlights the task's own line. `workspace_status` returns it as `nextMessage` with the recipient, the
+  reason and when it goes, so an agent sees what the developer sees.
+- The recipient is the main agent's Paseo title (`mainAgentTitle`, read with the runtime), else "the main agent".
+
 ## Status model
 
 Background work is work (Paseo 0.16): the main agent's `backgroundWork.count > 0` sets `backgroundBusy`
@@ -136,8 +170,8 @@ agent waits too (`checkMainClaim`).
 `shared/status.ts` is the one place a user-facing status is computed. `batchView(w, now)` picks the batch that
 describes Follow-up's work right now: its phase (`queued`, `sent`, `stuck`), who it waits on (the agent's
 turn, the open batch, an idle agent Follow-up won't wake, setup, or you) and its one line. A queued batch's reason
-and who it waits on come from `sendDecision`, never a copy of its rules. Home's bucket (`trackedGroup` in `shared/home.ts`), the header live line (`liveLine`), the panel's agent
-card (`agentCard`) and Needs you all read it. Rules it encodes:
+and who it waits on come from `sendDecision`, never a copy of its rules. Home's bucket (`trackedGroup` in `shared/home.ts`), the header live line (`liveLine`) and Needs you
+all read it (`agentCard` stays as a pure helper for the invariants; the panel no longer draws an agent card). Rules it encodes:
 
 - "Main agent is on it" only while a batch is really sent; a queued one reads "Queued for the main agent".
 - "Follow-up is fixing" only for work in flight or about to auto-send.

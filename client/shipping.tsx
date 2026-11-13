@@ -7,11 +7,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { z } from "zod";
 import { prWorkflowRpc, setPrWorkflowRpc } from "../shared/contracts";
 import {
-  MERGE_METHOD_LABELS, MERGE_METHOD_SHORT, PR_WORKFLOWS, setupValue, setupWrite, type setPrWorkflowInputSchema, PR_WORKFLOW_LABELS, commandName, repoShippingSummary, reposShippingSummary, reviewFixLabel, shippingSummary, workflowName,
+  MERGE_METHOD_LABELS, MERGE_METHOD_SHORT, REVIEW_MODE_LABELS, setNoReviewRepos, PR_WORKFLOWS, setupValue, setupWrite, type setPrWorkflowInputSchema, PR_WORKFLOW_LABELS, commandName, repoShippingSummary, reposShippingSummary, reviewFixLabel, shippingSummary, workflowName,
   type MergeMethod, type PrWorkflowSetting, type PrWorkflowView, type RepoWorkflowView, type ReviewFix,
 } from "../shared/pr-workflow";
 import { Button, errorText, text, type Theme, SubmitScope } from "./kit";
 import { Disclosure } from "./settings-shell";
+import { ReviewModeRow } from "./review-mode";
+import { reviewerSettingsKey } from "./reviewers";
+import { overviewKey } from "./keys";
 
 export const shippingKey = ["follow-up", "pr-workflow"];
 type Write = z.input<typeof setPrWorkflowInputSchema>;
@@ -36,7 +39,9 @@ export function ShippingSettings({ theme, compact }: { theme: Theme; compact: bo
   const recheck = useMutation({ mutationFn: () => read({ refresh: true }), onSuccess: v => { cache.setQueryData(shippingKey, v); toast.show("Checked again", { variant: "success" }); }, onError: e => toast.error(errorText(e)) });
   const change = useMutation({
     mutationFn: (input: Write & { toast?: string }) => { const { toast: _, ...rest } = input; return write(rest); },
-    onSuccess: (v, input) => { cache.setQueryData(shippingKey, v); if (input.toast) toast.show(input.toast, { variant: "success" }); void cache.invalidateQueries({ queryKey: ["follow-up", "workspace"] }); },
+    onSuccess: (v, input) => { cache.setQueryData(shippingKey, v); if (input.toast) toast.show(input.toast, { variant: "success" }); void cache.invalidateQueries({ queryKey: ["follow-up", "workspace"] });
+      // Review mode lives in the reviewer-settings payload too (noReview), which Needs you reads: fetch it again.
+      if (input.review !== undefined) { setNoReviewRepos(v.repos.filter(r => r.review === "none").map(r => r.repo)); void cache.invalidateQueries({ queryKey: reviewerSettingsKey }); void cache.invalidateQueries({ queryKey: overviewKey }); } },
     onError: e => toast.error(errorText(e)),
   });
   const data = query.data;
@@ -102,6 +107,8 @@ function RepoShipping({ row, view, theme, compact, busy, set }: { row: RepoWorkf
         value={row.mergeMethod && methods.includes(row.mergeMethod) ? row.mergeMethod : "default"}
         options={[{ value: "default", label: preferred ? `Default · ${MERGE_METHOD_SHORT[preferred]}` : "Repository default" }, ...methods.map(m => ({ value: m, label: MERGE_METHOD_LABELS[m] }))]}
         onValueChange={value => set({ mergeMethod: value === "default" ? null : value }, value === "default" ? "GitHub's default merge method" : MERGE_METHOD_LABELS[value])} />}</View>}
+    <View style={{ zIndex: 2 }}>{rule}<ReviewModeRow repo={row.repo} value={row.review} theme={theme} compact={compact} busy={busy}
+      onChange={mode => set({ review: mode === "team" ? null : mode }, mode === "none" ? `no review. ${REVIEW_MODE_LABELS.none.hint}` : `team review. ${REVIEW_MODE_LABELS.team.hint}`)} /></View>
     <View>{rule}<ReviewFixSelect label="Review comments" value={row.reviewFix} inherited={view.reviewFix} theme={theme} compact={compact} busy={busy}
       onSave={fix => set({ reviewFix: fix }, fix ? `review comments: ${reviewFixLabel(fix)}` : "review comments back to the default")} /></View>
   </View>;

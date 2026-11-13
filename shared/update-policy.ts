@@ -53,7 +53,7 @@ export function busyText(busy: readonly Busy[]): string {
       case "ranker": return "the priority ranker is running";
       case "about": return "a summary is being written";
       case "pr-action": return b.count === 1 ? "a PR action is finishing" : `${b.count} PR actions are finishing`;
-      case "repair": return b.count === 1 ? "a repair batch is being sent" : `${b.count} repair batches are being sent`;
+      case "repair": return b.count === 1 ? "a message to an agent is being sent" : `${b.count} messages to agents are being sent`;
     }
   });
   if (parts.length <= 1) return parts[0] ?? "";
