@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Inbox, type AgentInfo, type Directory } from "../server/inbox";
@@ -38,6 +38,7 @@ test("usage answers from its last reading while Smart Session hangs, and refresh
   let now = NOW; let answer: () => Promise<unknown> = async () => ({ windows: [{ id: "five_hour", pct: 40, resetsAt: null }] });
   const home = await mkdtemp(join(tmpdir(), "follow-usage-ack-"));
   try {
+    await mkdir(join(home, "plugin-data", "smart-session"), { recursive: true });
     const reader = new UsageReader(home, async (_p, method) => method === "smart-session.subscriptions" ? { zerosub: false, accounts: [] } : answer(), () => now);
     assert.equal((await reader.read()).accounts[0]?.windows[0]?.pct, 40);
     answer = hang; now += 120_000;
