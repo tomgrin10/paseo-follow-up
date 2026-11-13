@@ -75,6 +75,9 @@ they need a running `npm run preview` and read `.preview-isolated.json`. Some dr
 - `scripts/check-chat-grouping.mjs`: a synthetic mixed turn for chat-grouping screenshots (starts its own isolated daemon).
 - `scripts/check-sender-steps.mjs`: Home's Recent steps with one message from every sender kind; fails on a raw `<paseo-system` envelope or overflow (starts its own isolated daemon).
 - `scripts/check-optional-recovery.mjs`: recovery only on request.
+- `scripts/check-recovery-background.mjs`: the recovery agent on Paseo 0.16 (`HARNESS_PASEO=0.16`) and 0.15: background
+  only with `features.backgroundAgents`, tools after a reload, host-collectable after acknowledge or failure, and the
+  panel's Recovery row (`--shots <dir>`).
 - `scripts/check-project-settings.mjs`: per-project defaults.
 - `scripts/check-reviewers.mjs` and `scripts/check-reviewer-concurrency.mjs`: reviewer requests.
 - `scripts/check-task-triggers.mjs`: merge and deploy triggers.
@@ -116,6 +119,11 @@ plays a scripted turn (timeline items, Follow-up RPCs, a permission) for a given
   its own config or a stubbed provider stays on.
 - **A crashed worker fails the run.** `screenshots.mjs` checks the daemon's log after every shot (`daemonCrashes`:
   "Uncaught exception", a worker restart) and fails at that shot with the log line, not with timeouts after it.
+- **A fictional host name, `dev-box`.** Paseo labels its host with `os.hostname()` (the phone header, `server_info`)
+  and has no setting for it, and renders go into this public repo. `harnessEnv` puts
+  `scripts/harness-hostname.cjs` first on `NODE_OPTIONS` (after a caller's `set` and `strip`), so every harness
+  process's `os.hostname()` and `HOSTNAME` read `HARNESS_HOST`. `screenshots.mjs` fails a shot whose page text names
+  the real machine. `tests/harness-env.test.ts` fails when a harness process can read the real name.
 - **Fake GitHub over HTTP, not only `gh`.** Follow-up reads GitHub over in-process HTTPS (`server/github-api.ts`); a
   fake `gh` on PATH only answers writes. A script whose daemon needs PR reads starts `fakeGithub({ dir, gh })` from
   `scripts/fake-github.mjs` and passes its `env` and `strip` to `harnessEnv`. The server answers each request with the
