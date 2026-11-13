@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { briefSchema, BRIEF_KINDS, BRIEF_SOURCES, BRIEF_STATES } from "./brief";
+import { briefSchema, BRIEF_KINDS, BRIEF_SOURCES, BRIEF_STATES, reviewersBriefPr, reviewersBriefWithdrawn } from "./brief";
+export { reviewersBriefPr, reviewersBriefWithdrawn };
+import { agentMerges, agentMergesKey } from "./pr-workflow";
 
 /**
  * The "Needs you" inbox: one flag per root agent that only the developer clears, by signing it off or
@@ -13,9 +15,12 @@ export type Reason = typeof REASONS[number];
 export const reasonRank = (reason: Reason) => REASONS.indexOf(reason);
 
 const isoSchema = z.string();
-/** `title`: the PR's title on a PR-state flag (pr_closed, pr_merged). The headline reads it rather than `detail` ("#240 merged"),
- * which only repeats the PR chip beside it (say-it-once). Flags stored before it existed have none. */
-export const reasonEntrySchema = z.object({ reason: z.enum(REASONS), at: isoSchema, detail: z.string(), dedupeKey: z.string(), title: z.string().optional() });
+export const reasonEntrySchema = z.object({ reason: z.enum(REASONS), at: isoSchema, detail: z.string(), dedupeKey: z.string(),
+  /** "reviewers" only: the PR it asks about, so the client can withdraw it the moment that PR's repository goes No review. */
+  prKey: z.string().optional(),
+  /** pr_closed and pr_merged: the PR's title. The headline reads it rather than `detail` ("#240 merged"), which only repeats
+   * the PR chip beside it (say-it-once). Flags stored before it existed have none. */
+  title: z.string().optional() });
 export type ReasonEntry = z.infer<typeof reasonEntrySchema>;
 export const needsSchema = z.object({ reasons: z.array(reasonEntrySchema), since: isoSchema });
 export type Needs = z.infer<typeof needsSchema>;
@@ -138,9 +143,9 @@ export class StaleSignOff extends Error {
   constructor() { super("This agent changed since you looked. Its newest flag is still showing."); }
 }
 
-function add(e: Entry, reason: Reason, detail: string, dedupeKey: string, at: string, title?: string) {
+function add(e: Entry, reason: Reason, detail: string, dedupeKey: string, at: string, extra: { prKey?: string; title?: string } = {}) {
   const reasons = (e.needs?.reasons ?? []).filter(r => r.dedupeKey !== dedupeKey);
-  reasons.push({ reason, at, detail, dedupeKey, ...(title ? { title } : {}) });
+  reasons.push({ reason, at, detail, dedupeKey, ...(extra.prKey ? { prKey: extra.prKey } : {}), ...(extra.title ? { title: extra.title } : {}) });
   e.needs = { reasons, since: e.needs?.since ?? at };
 }
 function seen(e: Entry, key: string): boolean {
@@ -180,6 +185,22 @@ export function liveFlag<B extends { kind: string; state: string; questionIds?: 
   const stale = brief?.state === "open" && (brief.kind === "error" || brief.kind === "paused") && !brief.questionIds?.length && !!brief.at && brief.at < turnStartedAt;
   return { needs: withoutRunState(needs, turnStartedAt), brief: stale ? null : brief };
 }
+/**
+ * A row as the client draws it: without the add-reviewers flags and brief of PRs the agent merges itself. The daemon
+ * withdraws those on its next tick; this closes the gap, so the moment a repository flips to No review its asks leave
+ * the pill, the inbox row, Home and the panel count together, and come back on Undo. The client inbox store applies it
+ * to every row it hands out (client/inbox-store.ts); invariant a-no-review-repo-never-asks-for-review-or-merge.
+ */
+export function withoutWithdrawnAsks<R extends Pick<InboxRow, "needs" | "brief">>(row: R): R {
+  // A flag stored before reasons carried their PR falls back on the add-reviewers brief's PR.
+  const briefPr = row.brief ? reviewersBriefPr(row.brief) : null;
+  const reasons = row.needs?.reasons.filter(r => { const pr = r.reason === "reviewers" ? r.prKey ?? briefPr : null; return !(pr && agentMergesKey(pr)); });
+  const needsGone = !!row.needs && reasons!.length !== row.needs.reasons.length;
+  const briefGone = !!row.brief && reviewersBriefWithdrawn(row.brief);
+  if (!needsGone && !briefGone) return row;
+  const needs = needsGone ? reasons!.length ? { reasons: reasons!, since: reasons!.map(r => r.at).sort()[0] } : null : row.needs;
+  return { ...row, needs, brief: briefGone ? null : row.brief };
+}
 function withoutReasons(needs: Needs | null, drop: readonly Reason[]): Needs | null {
   if (!needs) return null;
   const reasons = needs.reasons.filter(r => !drop.includes(r.reason));
@@ -201,9 +222,9 @@ export function withoutRunState(needs: Needs | null, before?: string): Needs | n
 export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
   const e: Entry = structuredClone(prev);
   const before = JSON.stringify(e);
-  const flag = (reason: Reason, detail: string, dedupeKey: string, title?: string) => {
+  const flag = (reason: Reason, detail: string, dedupeKey: string, extra: { prKey?: string; title?: string } = {}) => {
     if (e.goneAt) return;
-    add(e, reason, detail, dedupeKey, now, title);
+    add(e, reason, detail, dedupeKey, now, extra);
     e.lastEventAt = now;
     const wake = BREAKS.includes(reason) || e.snooze?.until === "next-event";
     if (e.snooze && wake) e.snooze = null;
@@ -241,16 +262,23 @@ export function reduce(prev: Entry, event: InboxEvent, now: string): Entry {
     case "paused": if (!seen(e, `paused:${event.pauseId}`)) flag("paused", event.detail, "paused"); break; // #7
     case "ci": if (!seen(e, event.dedupeKey) && !event.suppressed) flag("ci", event.detail, "ci"); break; // #8
     case "review": if (!seen(e, event.dedupeKey) && !event.suppressed) flag("review", event.detail, "review"); break; // #9
-    case "reviewers": if (!seen(e, event.dedupeKey)) flag("reviewers", event.detail, "reviewers"); break;
+    case "reviewers": if (!seen(e, event.dedupeKey)) flag("reviewers", event.detail, "reviewers", { prKey: event.prKey }); break;
     case "facts_live":
-      if (e.needs) { e.needs = withoutReasons(e.needs, FACT_REASONS.filter(r => !event.live.includes(r))); if (!e.needs) e.snooze = null; }
+      if (e.needs) {
+        const dead = FACT_REASONS.filter(r => !event.live.includes(r));
+        // A withdrawn "Add reviewers" may come back (Undo on No review, reviewers removed): forget its key so the same
+        // PR can ask again. CI and threads key on the head or the threads, so a new fact already has a new key.
+        // No PR of this agent asks any more, so every "<pr>:reviewers" key goes.
+        if (dead.includes("reviewers") && e.needs.reasons.some(r => r.reason === "reviewers")) e.seenKeys = e.seenKeys.filter(k => !k.endsWith(":reviewers"));
+        e.needs = withoutReasons(e.needs, dead); if (!e.needs) e.snooze = null;
+      }
       break;
     case "pr_closed": // #10, and a "until this PR merges" snooze wakes here.
       if (!seen(e, event.dedupeKey)) {
         if (e.snooze?.until === `pr:${event.prKey}`) e.snooze = null;
         // pr-label-matches-state: a merge flags as merged; a-merge-the-agent-made-never-flags-the-developer: quiet flags nothing.
         const merged = event.merged ?? / merged$/.test(event.detail);
-        if (!event.quiet) flag(merged ? "pr_merged" : "pr_closed", event.detail, merged ? "pr_merged" : "pr_closed", event.title);
+        if (!event.quiet) flag(merged ? "pr_merged" : "pr_closed", event.detail, merged ? "pr_merged" : "pr_closed", { title: event.title });
       }
       break;
     case "sign_off": { // #13
@@ -453,7 +481,8 @@ export const inboxRowSchema = z.object({
   muteTurn: z.boolean(),
   enable_finish_flags: z.boolean(),
   /** The open or collapsed brief's one-liner, so every surface says the same thing (§4). */
-  brief: z.object({ kind: z.enum(BRIEF_KINDS), source: z.enum(BRIEF_SOURCES), state: z.enum(BRIEF_STATES), ask: z.string(), questionIds: z.array(z.string()).optional(), at: z.string().optional() }).nullable().optional(),
+  brief: z.object({ kind: z.enum(BRIEF_KINDS), source: z.enum(BRIEF_SOURCES), state: z.enum(BRIEF_STATES), ask: z.string(), questionIds: z.array(z.string()).optional(), at: z.string().optional(),
+    /** An add-reviewers brief's PR, so the client withdraws it with the PR's reviewers flag (`withoutWithdrawnAsks`). */ prKey: z.string().optional() }).nullable().optional(),
   /** When the agent's current turn started, if the worker saw it start (status invariant running-is-not-stale). */
   turnStartedAt: z.string().nullable().optional(),
   /** Paseo 0.16: the agent's live background work (shells, tasks); absent means none or a 0.15 host. */
@@ -493,11 +522,11 @@ export function rowTitle(row: Pick<InboxRow, "title" | "workspaceTitle" | "multi
 /**
  * The inbox event for a registered PR that left OPEN, or null while it is open (or unread). One place for the rule, so
  * the worker (server/inbox.ts followUpEvents) and the status invariants agree: a merge is `merged`, and a merge the
- * agent made itself (register_pr agentMerges, which promises the developer is never asked about it) is `quiet`.
+ * agent made itself (register_pr agentMerges, or any merge in a No review repository: `agentMerges`) is `quiet`.
  */
-export function prEndEvent(pr: { key: string; number: number; agentMerges?: boolean; snapshot: { state: string; complete: boolean; title?: string } | null }): Extract<InboxEvent, { type: "pr_closed" }> | null {
+export function prEndEvent(pr: { key: string; repo: string; number: number; agentMerges?: boolean; snapshot: { state: string; complete: boolean; title?: string } | null }): Extract<InboxEvent, { type: "pr_closed" }> | null {
   const s = pr.snapshot;
   if (!s?.complete || (s.state !== "MERGED" && s.state !== "CLOSED")) return null;
   const merged = s.state === "MERGED";
-  return { type: "pr_closed", dedupeKey: `${pr.key}:${s.state}`, detail: `#${pr.number} ${merged ? "merged" : "closed"}`, prKey: pr.key, merged, ...(s.title ? { title: s.title } : {}), ...(merged && pr.agentMerges ? { quiet: true } : {}) };
+  return { type: "pr_closed", dedupeKey: `${pr.key}:${s.state}`, detail: `#${pr.number} ${merged ? "merged" : "closed"}`, prKey: pr.key, merged, ...(s.title ? { title: s.title } : {}), ...(merged && agentMerges(pr) ? { quiet: true } : {}) };
 }

@@ -77,7 +77,7 @@ const prKey = (key: string) => key.includes("#") ? `#${key.split("#")[1]}` : key
 const RUNNING: Record<FollowTool, string> = {
   workspace_status: "Reading Follow-up status…", sync_workspace: "Syncing Follow-up…", enroll_workspace: "Updating the goal…",
   register_pr: "Registering a PR…", exclude_stack: "Excluding a stack…", update_obligation: "Updating a task…",
-  acknowledge_batch: "Reporting repair results…", declare_done: "Checking whether the work is done…",
+  acknowledge_batch: "Reporting back on the tasks…", declare_done: "Checking whether the work is done…",
   ask_question: "Asking you a question…", record_answer: "Recording your answer…", withdraw_question: "Withdrawing a question…", set_spec: "Saving the spec link…",
 };
 const NAMES: Record<FollowTool, string> = {

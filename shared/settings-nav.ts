@@ -77,7 +77,7 @@ export function workspaceRows(all: readonly WorkspaceSetting[], autoDefault: boo
 }
 export function workspaceState(w: WorkspaceSetting): string {
   if (w.optedOut || !w.enable_tracking) return "Not followed";
-  return (w.enable_auto_sends ? "Followed · sends repairs automatically" : "Followed · repairs wait for you") + (w.parked ? " · paused while resting" : w.dormant ? " · resting" : "");
+  return (w.enable_auto_sends ? "Followed · sends tasks automatically" : "Followed · tasks wait for you") + (w.parked ? " · paused while resting" : w.dormant ? " · resting" : "");
 }
 /** "120 workspaces · 3 exceptions". */
 export function workspacesSummary(all: readonly WorkspaceSetting[], autoDefault: boolean): string {

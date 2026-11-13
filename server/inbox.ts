@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { realTimers, stableMessageId, withDeadline, type Timers } from "./delivery";
 import { BackgroundAgents } from "./background-agents";
 import { deepFreeze } from "./store";
-import { emptyInbox, expired, inboxStateSchema, type OutboxEntry, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason, liveFlag, withoutRunState, FACT_REASONS, prEndEvent } from "../shared/inbox";
+import { emptyInbox, expired, inboxStateSchema, type OutboxEntry, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason, liveFlag, withoutRunState, FACT_REASONS, prEndEvent, reviewersBriefPr } from "../shared/inbox";
 import type { State as FollowState, Workspace as FollowWorkspace } from "../shared/model";
 import { asksForReviewers } from "../shared/attention";
 import { followUpObligations } from "../shared/follow-up";
@@ -946,7 +946,7 @@ export class Inbox {
     const row = (agent: AgentInfo, delegatedFrom: string | null, e: Entry | undefined): InboxRow => {
       const turn = this.turns.get(agent.id);
       const turnStartedAt = turn && ["running", "initializing"].includes(agent.status) ? new Date(turn.at).toISOString() : null;
-      const live = liveFlag(agent.status, e?.needs ?? null, e?.brief ? { kind: e.brief.kind, source: e.brief.source, state: e.brief.state, ask: e.brief.ask, questionIds: e.brief.questionIds, at: e.brief.at } : null, turnStartedAt, !!agent.backgroundWork, this.waitingMains.has(agent.id));
+      const live = liveFlag(agent.status, e?.needs ?? null, e?.brief ? { kind: e.brief.kind, source: e.brief.source, state: e.brief.state, ask: e.brief.ask, questionIds: e.brief.questionIds, at: e.brief.at, ...(reviewersBriefPr(e.brief) ? { prKey: reviewersBriefPr(e.brief)! } : {}) } : null, turnStartedAt, !!agent.backgroundWork, this.waitingMains.has(agent.id));
       return {
       agentId: agent.id, workspaceId: agent.workspaceId, title: agent.title || "Agent",
       workspaceTitle: agent.workspaceId ? names.get(agent.workspaceId) ?? null : null,

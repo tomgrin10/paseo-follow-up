@@ -2,12 +2,14 @@
 // (about 9 KB a workspace: three PRs with full snapshots, tasks with evidence, a settled batch history, questions,
 // main-agent history, artifacts). The old seed (empty workspaces, no PRs) used a fraction of the worker's memory and
 // let a 450 MB worker pass a 240 MB budget. Synthetic data only.
-//   npx tsx scripts/scale-seed.ts <out state.json> <created.json> [prsPerWorkspace=3]
+//   npx tsx scripts/scale-seed.ts <out state.json> <created.json> [prsPerWorkspace=3] [freshFirst=0]
+// freshFirst: the first N workspaces get no batch history (test:scale --awake-fresh: the awake ones send under any rule).
 // created.json: [{ workspaceId, agentId }] for the daemon's real workspaces and agents. Prints the bytes written.
 import { readFileSync, writeFileSync } from "node:fs";
 import { stateSchema, type State, type Workspace } from "../shared/model";
 
-const [out, createdPath, perArg] = process.argv.slice(2);
+const [out, createdPath, perArg, freshArg] = process.argv.slice(2);
+const FRESH = Number(freshArg ?? 0);
 const created = JSON.parse(readFileSync(createdPath!, "utf8")) as { workspaceId: string; agentId: string }[];
 const PRS = Number(perArg ?? 3);
 const now = Date.now();
@@ -50,7 +52,7 @@ function workspace(i: number, { workspaceId, agentId }: { workspaceId: string; a
     ask: k === 3 ? sentence(i + 9, 10) : undefined, enable_follow_up: k === 3, revision: k + 1, previousTitles: k === 2 ? [sentence(i + 3, 5)] : undefined,
     ...(k === 2 ? { workingAgentId: agentId } : {}),
   }));
-  const batches = Array.from({ length: 3 }, (_, k) => ({
+  const batches = Array.from({ length: i < FRESH ? 0 : 3 }, (_, k) => ({
     id: `b-${i}-${k}`, messageId: `m-${i}-${k}`, state: "completed" as const, createdAt: iso((k + 2) * D), sentAt: iso((k + 2) * D - 60_000), settledAt: iso((k + 2) * D - 30 * 60_000), attempts: 1,
     tasks: Array.from({ length: 3 }, (_, t) => ({ key: `${(["checks", "review", "conflict"] as const)[t]}:${prs[t % PRS]!.key}`, kind: (["checks", "review", "conflict"] as const)[t]!, target: prs[t % PRS]!.key, title: sentence(i * 12 + k * 3 + t, 7), fingerprint: sha(i * 100 + k * 3 + t).slice(0, 16) })),
     result: `Main agent finished: ${sentence(i + k, 9)}`, recipientAgentId: agentId, contextPath: null, activityAt: iso((k + 2) * D - 20 * 60_000), acknowledgmentError: null, recoveryHandoffs: [],

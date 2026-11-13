@@ -1,3 +1,5 @@
+import { recoveryBatch } from "./follow-up";
+import { oneReading } from "./status";
 import type { Actor } from "./actor";
 import { ANY_HOOK_TEXT_PREFIXES } from "./message-sender";
 import { BATCH_PREFIXES, RECOVERY_TITLES } from "./legacy";
@@ -11,13 +13,15 @@ import { asksForReviewers, liveLine, needsYou, type NeedItem } from "./attention
 import { prChip, trackedGroup, type HomeModel } from "./home";
 import { freshPriorities, type Priority } from "./priorities";
 import { agentCard, automaticHold, batchView, holdSuperseded } from "./status";
-import { cappedTasks, NO_PROGRESS_CAP, sendDecision } from "./send-decision";
+import { conditionId, isCapped, NO_PROGRESS_CAP, sendDecision } from "./send-decision";
+import { messageStrip, obligationDelivery, repairRows } from "./task-rows";
 import { followUpObligations } from "./follow-up";
 import { PRESENCE, claimsWorking, taskStatus } from "./task-status";
 import { cadence, movingReason, OBSERVATION_FRESH_MS, POLL_IDLE_MS, RUNNING_POLL_MS, TICK_MS } from "./poll";
 import { staleUpdatePhase, type UpdatePhase } from "./updates";
 import { foldedAsk, needsYouBlock, onceViolation } from "./needs-block";
 import { compactPrStatus, prPresentation } from "./presentation";
+import { agentMerges } from "./pr-workflow";
 
 /**
  * Status invariants: what must hold for any workspace, whatever path changed it. Pure, no IO, and never throwing:
@@ -84,16 +88,40 @@ export const INVARIANTS: Invariant[] = [
       const d = sendDecision(w, now, { batch: v.batch });
       if (!v.line.endsWith(d.reason)) return `line "${v.line}" but the decision is "${d.reason}"`;
       if (v.waitingOn !== d.waitingOn) return `line waits on ${v.waitingOn}, the decision on ${d.waitingOn}`;
-      if (/\bsending (now|in a moment)\b/.test(v.line) && d.waitingOn !== null) return `"${v.line}" while the send waits on ${d.waitingOn}`;
+      if (/going out now|waits a minute so new changes/.test(v.line) && d.waitingOn !== null) return `"${v.line}" while the send waits on ${d.waitingOn}`;
       return null;
     },
   },
   {
-    id: "retry-only-when-capped",
-    why: "2026-11-12 (Q50): Needs you asked for Retry whenever a sent batch's turn ended without acknowledge_batch, often after the agent did the work. Follow-up now settles such a turn from GitHub and re-queues what's open; a turn without an acknowledgment asks the developer only once one unchanged condition went out NO_PROGRESS_CAP times.",
+    id: "message-rows-say-it-once",
+    why: "2026-11-12 (Q49 mock review): every row in the next message repeated \"sends at 14:32\" or \"sends after the agent's current turn\", and the header said it a third time. The Tasks strip carries when and why, straight from the send decision; a row in the message, repair or Auto task, says only Queued or Sent.",
+    check(w, now) {
+      const strip = messageStrip(w, now);
+      if (strip?.phase === "queued" && sendDecision(w, now).waitingOn !== "you" && strip.reason !== sendDecision(w, now).reason) return `strip says "${strip.reason}" but the decision is "${sendDecision(w, now).reason}"`;
+      for (const r of repairRows(w).open) if ((r.state === "queued" && r.text !== "Queued") || (r.state === "sent" && r.text !== "Sent")) return `${r.task.key} row says "${r.text}"`;
+      for (const o of w.obligations ?? []) {
+        const d = obligationDelivery(w, o), s = taskStatus(o, w, w.taskAgents ?? {}, now);
+        if (d && o.status !== "working" && !["done", "waived", "blocked"].includes(o.status) && s.text !== (d === "sent" ? "Sent" : "Queued")) return `task ${o.id} in the message says "${s.text}"`;
+      }
+      return null;
+    },
+  },
+  {
+    id: "a-capped-task-never-holds-the-queue",
+    why: "2026-11-12 (Q49/Q50): a turn that ended without acknowledge_batch blocked the whole batch and asked for Retry, so every other task waited behind one stubborn condition; a second rule blocked a PR's next message after three acknowledged ones. Such a turn settles its batch (never blocked), and only a condition that went out NO_PROGRESS_CAP times unchanged (acknowledged or not) is held, as its own task, while the rest of the queue keeps moving.",
     check(w) {
-      const early = w.batches.find(b => b.state === "blocked" && b.unacknowledged && !cappedTasks(w, b).length);
-      return early ? `${early.id} is blocked for a missing acknowledgment before any condition went out ${NO_PROGRESS_CAP} times` : null;
+      const blocked = w.batches.find(b => b.state === "blocked" && b.unacknowledged);
+      if (blocked) return `${blocked.id} is blocked for a missing acknowledgment`;
+      // One cap: only an agent's own blocked acknowledgment blocks a message, never a count of earlier messages.
+      const unsent = w.batches.find(b => b.state === "blocked" && !b.sentAt && !recoveryBatch(b));
+      if (unsent) return `${unsent.id} is blocked before it went out`;
+      const pending = w.batches.find(b => b.state === "pending");
+      for (const h of w.heldTasks ?? []) {
+        if (h.held === "capped" && !isCapped(w, h.task)) return `${h.task.key} is held as capped below ${NO_PROGRESS_CAP} sends`;
+        if (h.held === "manual" && !(w.manualTasks ?? []).includes(h.task.key)) return `${h.task.key} is held as manual without the developer's choice`;
+        if (pending?.tasks.some(t => conditionId(t) === conditionId(h.task))) return `${h.task.key} is held and in the next message`;
+      }
+      return null;
     },
   },
   {
@@ -156,7 +184,7 @@ export const INVARIANTS: Invariant[] = [
     id: "agent-merges-asks-nothing",
     why: "2026-11-11 wks_5dfd3a65: a PR the agent merges itself (register_pr agentMerges) is its own work in flight, so Needs you never asks the developer to review or merge it.",
     check(w, now) {
-      const mine = new Set(w.prs.filter(p => p.agentMerges).map(p => p.key));
+      const mine = new Set(w.prs.filter(agentMerges).map(p => p.key));
       const asked = needsYou(w, now).filter(i => (i.kind === "merge" || i.kind === "reviewers") && mine.has(i.prKey));
       return asked.length ? asked.map(i => i.title).join(", ") : null;
     },
@@ -166,7 +194,7 @@ export const INVARIANTS: Invariant[] = [
     why: "2026-11-12 live sidebar: an agent that merged its own PR (register_pr agentMerges) flagged the developer with \"PR closed · #37 merged\". Its merge is its own work, reported in its own turn.",
     check(w, now) {
       const at = new Date(now).toISOString();
-      const flagged = w.prs.filter(p => p.agentMerges).filter(p => { const ev = prEndEvent(p); return ev?.merged && reduce(newEntry("agent"), ev, at).needs; });
+      const flagged = w.prs.filter(agentMerges).filter(p => { const ev = prEndEvent(p); return ev?.merged && reduce(newEntry("agent"), ev, at).needs; });
       return flagged.length ? flagged.map(p => `#${p.number} merged by its agent flags the developer`).join(", ") : null;
     },
   },
@@ -317,6 +345,10 @@ export const INVARIANTS: Invariant[] = [
 ];
 
 export function violations(w: Workspace, now: number): { id: string; detail: string }[] {
+  // One reading: every invariant asks needsYou and batchView of the same workspace and clock (shared/status.ts perSnapshot).
+  return oneReading(() => checkAll(w, now));
+}
+function checkAll(w: Workspace, now: number): { id: string; detail: string }[] {
   const out: { id: string; detail: string }[] = [];
   for (const inv of INVARIANTS) {
     let detail: string | null;
