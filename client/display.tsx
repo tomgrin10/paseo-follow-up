@@ -1,7 +1,8 @@
 import type { PluginClientContext, PluginSidebarItemContribution, PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useRpc, useSettings } from "@getpaseo/plugin/client";
 import { useQuery } from "@tanstack/react-query";
-import { inboxListRpc, trustBypassRpc } from "../shared/contracts";
+import { displayFeed, inboxListRpc, trustBypassRpc } from "../shared/contracts";
+import { openFeed } from "./feeds";
 import { SettingsAction, SettingsCard, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
@@ -126,22 +127,30 @@ export function contributeDisplay(client: PluginClientContext, item: PluginSideb
     const currentGeneration = generation;
     try {
       const result = await client.rpc(displayRpc.read, {});
-      if (!disposed && generation === currentGeneration && result.status === "ready") {
-        const parsed = displayPreferences.schema.safeParse(result.values);
-        if (parsed.success) { sidebar.set(parsed.data.showSidebar); for (const listener of listeners) listener(parsed.data); }
-      }
+      if (generation === currentGeneration) apply(result);
     } catch {
       // Retain the last valid preference through temporary disconnects.
     } finally { pending = false; }
   };
-  // Changes made on this client notify at once; other clients' changes are picked up within a minute, and not at all
-  // while the app is hidden (it reads once on return).
-  void refresh();
-  const timer = setInterval(() => { if (appVisible()) void refresh(); }, 60_000);
-  const offVisible = onVisible(() => void refresh());
+  const apply = (result: { status: string; values?: unknown }) => {
+      if (!disposed && result.status === "ready") {
+        const parsed = displayPreferences.schema.safeParse(result.values);
+        if (parsed.success) { sidebar.set(parsed.data.showSidebar); for (const listener of listeners) listener(parsed.data); }
+      }
+  };
+  // Changes made on this client notify at once. Paseo 0.16 pushes other clients' and agents' changes
+  // (follow.display-feed); on 0.15 they're picked up within a minute, and not at all while the app is hidden (it reads
+  // once on return).
+  let timer: ReturnType<typeof setInterval> | null = null;
+  const pollDisplay = () => { if (timer) return; void refresh(); timer = setInterval(() => { if (appVisible()) void refresh(); }, 60_000); };
+  const stopPoll = () => { if (timer) clearInterval(timer); timer = null; };
+  // The feed went down (the worker restarted): read now and poll until it is back.
+  const feed = openFeed(client, displayFeed, {}, { event: doc => { generation += 1; apply(doc); }, down: pollDisplay, up: stopPoll });
+  if (!feed) pollDisplay();
+  const offVisible = onVisible(() => { if (!feed?.live) void refresh(); });
   return () => {
-    disposed = true;
-    clearInterval(timer); offVisible();
+    disposed = true; feed?.stop();
+    if (timer) clearInterval(timer); offVisible();
     listeners.delete(update);
     sidebar.dispose();
   };

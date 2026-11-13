@@ -1,5 +1,6 @@
 import { View } from "react-native";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRpc, type PluginClientContext, type PluginTimelineItemProps } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { Pressable, Text } from "./text";
@@ -8,6 +9,7 @@ import { RichText } from "./rich-text";
 import { BRAND_ICONS } from "./brand-icons";
 import { mergedColor, tint } from "./theme";
 import { appVisible } from "./visibility";
+import { taskAgentStates } from "../shared/task-status";
 import { createdItemsRpc } from "../shared/contracts";
 import { CREATED_KIND, CREATED_VERSION, cardFollow, cardMeta, cardPresence, cardTitle, createdCardSchema, type CreatedCard, type CreatedLive } from "../shared/created";
 
@@ -38,7 +40,11 @@ function batcher() {
 }
 const batch = batcher();
 
-export type CreatedDeps = { openAgent(agentId: string): void; openWorkspace(workspaceId: string): void };
+export type CreatedDeps = {
+  openAgent(agentId: string): void; openWorkspace(workspaceId: string): void;
+  /** Paseo 0.16: an agent card follows Paseo's own agent stream instead of polling (null on 0.15: it polls). */
+  watchAgent: ((agentId: string, listener: (agent: unknown) => void) => () => void) | null;
+};
 
 function CreatedCardView({ item, theme, layout, deps }: PluginTimelineItemProps<CreatedCard> & { deps: CreatedDeps }) {
   const c = theme.colors;
@@ -52,8 +58,22 @@ function CreatedCardView({ item, theme, layout, deps }: PluginTimelineItemProps<
     staleTime: 10_000,
     // Only while the agent isn't archived (a closed session can resume) and the app is in the foreground. This reads the
     // engine's directory snapshot; nothing here reads, prefetches or previews the agent itself.
-    refetchInterval: q => card.kind === "agent" && card.id && q.state.data?.agents[card.id]?.state !== "archived" && appVisible() ? CREATED_POLL_MS : false,
+    refetchInterval: q => !deps.watchAgent && card.kind === "agent" && card.id && q.state.data?.agents[card.id]?.state !== "archived" && appVisible() ? CREATED_POLL_MS : false,
   });
+  // 0.16: Paseo pushes the agent's status and title; the card patches its own entry (taskAgentStates, the mapping the
+  // server's answer uses). No RPC at all after the first read.
+  const cache = useQueryClient();
+  useEffect(() => {
+    if (!deps.watchAgent || card.kind !== "agent" || !card.id) return;
+    const id = card.id; const key = ["follow-up", "created", card.kind, id];
+    return deps.watchAgent(id, agent => cache.setQueryData<CreatedLive>(key, prior => {
+      const entry = prior?.agents[id];
+      if (!prior || !entry) return prior;
+      const a = agent as { id: string; status: string; title?: string | null; archivedAt?: string | null; backgroundWork?: { count?: unknown } | null } | null;
+      const live = a ? taskAgentStates([id], [a])[id] : null;
+      return { ...prior, agents: { ...prior.agents, [id]: live ? { ...entry, title: live.title ?? entry.title, state: live.state } : { ...entry, state: "archived" } } };
+    }));
+  }, [deps.watchAgent, card.kind, card.id, cache]);
   const live = query.data;
   const presence = cardPresence(card, live);
   const title = cardTitle(card, live);
