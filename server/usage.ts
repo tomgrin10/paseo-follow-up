@@ -1,5 +1,5 @@
 import { watch, type FSWatcher } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { fromAccountRows, fromBudget, fromSubscriptions, NO_USAGE, USAGE_WATCH_DEBOUNCE_MS, type Usage } from "../shared/usage";
 import { withDaemon } from "./daemon";
@@ -66,6 +66,9 @@ export class UsageReader {
     return { close: () => { if (timer) clearTimeout(timer); watcher.close(); } };
   }
   private async load(): Promise<Usage> {
+    // No Smart Session data directory, no Smart Session: nothing to ask the daemon (2026-11-13, test:scale:live: a
+    // failing smart-session.subscriptions RPC on every refresh, 1.3 of the worker's idle daemon requests a minute).
+    if (!await stat(join(this.paseoHome, "plugin-data", "smart-session")).then(s => s.isDirectory(), () => false)) return NO_USAGE;
     try {
       const subs = fromSubscriptions(await this.invoke("smart-session", "smart-session.subscriptions", {}));
       if (subs.length) return { available: true, source: "rpc", accounts: subs };
