@@ -1,21 +1,24 @@
-import { useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { View } from "react-native";
 import { Pressable, Text } from "./text";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { readOpen, writeOpen, SETTINGS_CATEGORIES, type SettingsCategory } from "../shared/settings-nav";
 import { text, type Theme } from "./kit";
+import { useViewVersion } from "./view-store";
 
 /**
  * One collapsible block: chevron, title, a one-line summary and a count. Open or closed is remembered per device
- * (`follow-up.settings.fold.<id>`); until the developer chooses, `defaultOpen` decides. The body mounts only when
+ * (`follow-up.settings.fold.<id>`, in the device document on 0.16); until the developer chooses, `defaultOpen` decides. The body mounts only when
  * open, so whatever it loads (gh suggestions, long lists) waits until then.
  */
 export function Disclosure({ id, title, summary, count, defaultOpen, theme, compact, children, framed = true }: {
   id: string; title: string; summary?: string | null; count?: string | number | null; defaultOpen: boolean; theme: Theme; compact: boolean; children: ReactNode; framed?: boolean;
 }) {
   const c = theme.colors; const t = text(c, compact);
-  const [open, setOpen] = useState(() => readOpen(id, defaultOpen));
-  const toggle = () => { const next = !open; writeOpen(id, next); setOpen(next); };
+  // Read from device storage on every render: the localStorage cache paints first, the device document once it loads.
+  useViewVersion();
+  const open = readOpen(id, defaultOpen);
+  const toggle = () => writeOpen(id, !open);
   const header = <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} aria-expanded={open}
     accessibilityLabel={`${title}${summary ? `, ${summary}` : ""}`} accessibilityHint={open ? "Collapses" : "Expands"} onPress={toggle}
     style={state => ({ flexDirection: "row", alignItems: "center", gap: 8, minHeight: compact ? 48 : 36, paddingLeft: framed ? (compact ? 16 : 14) : 36, paddingRight: compact ? 16 : 14, paddingVertical: 6,

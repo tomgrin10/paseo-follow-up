@@ -139,6 +139,10 @@ export default function contribute(server: PluginServerContext) {
                 if (completion) await call("follow.done", { summary: mode === "done" ? "Recovery verified; ready to archive" : "Shipped and verified" });
               } finally { await client.close(); }
             }
+            // "Fixture: busy turn <items> <bytes>" (scale-check --live-mix): a turn the size of a real agent's, so the
+            // worker's turn-end tail reads live-sized timeline items.
+            const busy = /^Fixture: busy turn (\d+) (\d+)/.exec(text);
+            if (busy) for (let k = 0; k < Number(busy[1]); k++) emit({ type: "timeline.item", sessionId: input.sessionId, item: { id: randomUUID(), type: "assistant_message" as const, text: `Step ${k}: ${"synthetic tool output line. ".repeat(Math.ceil(Number(busy[2]) / 28))}` } });
             const item = { id: randomUUID(), type: "assistant_message" as const, text: text.includes("Fixture: ship migration") ? "Created https://github.com/example/app/pull/1. This external reference is unrelated: https://github.com/example/unrelated/pull/7. Deployment verification remains." : "The isolated test agent received the follow-up batch." };
             await appendFile(join(process.env.PASEO_HOME!, `fixture-history-${sessions.get(input.sessionId)!.PASEO_AGENT_ID}.jsonl`), JSON.stringify(item) + "\n");
             emit({ type: "timeline.item", sessionId: input.sessionId, item });

@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { execFile } from "node:child_process";
 import { writeFile, chmod } from "node:fs/promises";
 import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 
 /**
  * The GitHub every harness daemon talks to. Follow-up reads GitHub over in-process HTTPS (server/github-api.ts), so a
@@ -22,7 +23,7 @@ import { join } from "node:path";
  * { status, body } or undefined to fall through. Issue-report tests use it for writes (issues, comments, contents)
  * and for paths outside a repository (`user`, `search/issues`), which the fixture `gh` can't answer.
  */
-export async function fakeGithub({ dir, gh, owners = ["example"], handle }) {
+export async function fakeGithub({ dir, gh, owners = ["example"], handle, gzip = false }) {
   const tokenOf = owner => `fixture-token-${owner}`;
   const accountMap = join(dir, "gh-account-map"); const auth = join(dir, "gh-auth");
   await writeFile(accountMap, owners.map(o => `${o} fixture-${o}`).join("\n") + "\n");
@@ -31,7 +32,13 @@ export async function fakeGithub({ dir, gh, owners = ["example"], handle }) {
   const requests = [];
   const runGh = (repo, args) => new Promise(resolve => execFile(gh, args, { env: { ...process.env, GH_REPO: repo }, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => resolve({ error, stdout, stderr })));
   const server = createServer(async (req, res) => {
-    const send = (status, body) => { res.writeHead(status, { "content-type": "application/json" }); res.end(typeof body === "string" ? body : JSON.stringify(body)); };
+    // gzip: answer compressed when the client accepts it, as api.github.com does (the worker's fetch then inflates every
+    // read, which a plain-text fake never exercises).
+    const send = (status, body) => {
+      const text = typeof body === "string" ? body : JSON.stringify(body);
+      if (gzip && /gzip/.test(req.headers["accept-encoding"] ?? "")) { res.writeHead(status, { "content-type": "application/json", "content-encoding": "gzip" }); res.end(gzipSync(text)); return; }
+      res.writeHead(status, { "content-type": "application/json" }); res.end(text);
+    };
     try {
       let raw = ""; for await (const chunk of req) raw += chunk;
       const graphql = req.method === "POST" && req.url === "/graphql";
