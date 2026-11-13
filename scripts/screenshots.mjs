@@ -768,9 +768,8 @@ async function clearDock(page, inPane, dockButton) {
     if (cut && cut.r.bottom - edge + 12 < 240) pane.scrollTop += cut.r.bottom - edge + 12;
   }, dockTop);
 }
-/** A workspace's agent chat, opened from Paseo's sidebar like a person would (deep links land before the host is known). */
 /**
- * Opens a workspace's chat from Paseo's sidebar. The sidebar shows a project's first rows and folds the rest under
+ * Opens a workspace's chat from Paseo's sidebar like a person would (deep links land before the host is known). The sidebar shows a project's first rows and folds the rest under
  * "Show more", and the order moves as earlier shots touch workspaces: a later pass found "Billing retries" folded and
  * timed out (ny-brief-same-q-panel-dark, 2026-11-13). Unfold every project until the row is there, then click it.
  */
