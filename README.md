@@ -48,7 +48,7 @@ open **Follow-up** in Paseo's sidebar; a two-minute setup walks you through the 
 The first time you open Follow-up from the sidebar, a short setup takes Home's place. It takes about two minutes, and
 **Skip setup** leaves it at any point.
 
-<img alt="Follow-up's setup, first step: an example PR going from failed checks to a repair sent to its agent to a merge only you can approve" src="https://raw.githubusercontent.com/tomgrin10/paseo-follow-up/main/docs/screenshots/follow-up-setup.png">
+<img alt="Follow-up's setup, first step: an example PR going from failed checks to a fix sent to its agent to a merge only you can approve" src="https://raw.githubusercontent.com/tomgrin10/paseo-follow-up/main/docs/screenshots/follow-up-setup.png">
 
 It shows what Follow-up does, checks GitHub and the helper agents (with the fix to copy for anything missing), and asks
 what Follow-up may do without asking you, how you ship PRs, who reviews, how it updates and which helpers to turn on.
@@ -64,7 +64,7 @@ View. Follow-up 2.0 still runs on Paseo 0.15; there it simply doesn't offer the 
 
 <img alt="Paseo 0.16's sidebar showing Follow-up's view: workspaces grouped by what they need from you, each with its status, beside the selected workspace's chat" src="https://raw.githubusercontent.com/tomgrin10/paseo-follow-up/main/docs/screenshots/follow-up-sidebar.png" width="600">
 
-<img alt="The workspace panel beside the agent's chat: 1 of 3 PRs merged, a stack bar, a question to answer, a failed check to repair and a task waiting on a deploy" src="https://raw.githubusercontent.com/tomgrin10/paseo-follow-up/main/docs/screenshots/follow-up-panel.png">
+<img alt="The workspace panel beside the agent's chat: 1 of 3 PRs merged, a stack bar, a question to answer, a failed check for the agent to fix and a task waiting on a deploy" src="https://raw.githubusercontent.com/tomgrin10/paseo-follow-up/main/docs/screenshots/follow-up-panel.png">
 
 - **Answer a question.** Pick an option, add a note if you like, and send. Cmd+Enter (Ctrl+Enter) sends. If the agent
   is busy or waking up, the card says Sending until it has the answer, and offers Send again if it couldn't deliver.
@@ -73,7 +73,7 @@ View. Follow-up 2.0 still runs on Paseo 0.15; there it simply doesn't offer the 
 
 - **The bar above the message box** (the pill) shows what needs you in the chat you're in, with the same actions.
 
-  <img alt="The composer pill opened: a question to answer, repairs ready to send and an approved PR" src="https://raw.githubusercontent.com/tomgrin10/paseo-follow-up/main/docs/screenshots/follow-up-pill.png">
+  <img alt="The composer pill opened: a question to answer, tasks ready to send and an approved PR" src="https://raw.githubusercontent.com/tomgrin10/paseo-follow-up/main/docs/screenshots/follow-up-pill.png">
 
 - **A PR.** Tap a PR, or its segment in the stack bar, for its checks, reviewers and Merge. When Merge isn't available
   yet, the sheet says what it's waiting for. Follow-up never merges on its own, and Merge checks the stack again first.
