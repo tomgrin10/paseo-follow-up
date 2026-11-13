@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { readFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -77,6 +77,14 @@ const failed = await wait(async () => { const a = (await c.fetchAgent(next.recip
 record("after a failed batch: host-collectable too", failed.status === "idle" && (failed.pendingPermissions ?? []).length === 0 && !(Number(failed.backgroundWork?.count ?? 0) > 0));
 
 // The panel's Recovery row, and what "Open recovery agent" does on this host.
+// Renders go into PRs: harnessEnv pins the daemon's hostname to a fictional one; this is the backstop (as in
+// scripts/screenshots.mjs): a page that names the real machine fails instead of being saved.
+const REAL_HOST = [hostname(), hostname().split(".")[0]].filter(h => h.length >= 4);
+const noRealHost = async page => {
+  const text = await page.evaluate(() => `${document.title}\n${document.body.innerText}`);
+  const hit = REAL_HOST.find(h => text.includes(h));
+  if (hit) throw new Error(`the page shows the real hostname (${hit}); a harness daemon must report HARNESS_HOST`);
+};
 const { chromium } = createRequire(process.env.PLAYWRIGHT_CORE + "/package.json")("playwright-core");
 const profile = await mkdtemp(join(tmpdir(), "follow-recovery-bg-browser-"));
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM, headless: true });
@@ -122,7 +130,7 @@ try {
       await page.getByText("Recovery", { exact: true }).first().scrollIntoViewIfNeeded();
       await page.waitForTimeout(600);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), viewport.width, "no horizontal overflow");
-      if (shots) { await mkdir(shots, { recursive: true }); await page.screenshot({ path: join(shots, `recovery-row-${host}-${label}.png`), ...(label === "phone" ? { clip: { x: 0, y: 72, width: 390, height: 772 } } : {}) }); }
+      if (shots) { await noRealHost(page); await mkdir(shots, { recursive: true }); await page.screenshot({ path: join(shots, `recovery-row-${host}-${label}.png`) }); }
       if (label === "desktop" && host016 && shown) {
         // openAgent on a background agent: it opens a "Follow-up recovery" tab with the agent's chat (plan #8 item 3).
         await open.click();
@@ -130,7 +138,7 @@ try {
         const url = page.url();
         const opens = url.includes(agentId) || await page.getByText("Follow-up recovery", { exact: true }).first().isVisible().catch(() => false);
         record("pressing it opens the background agent's chat in a tab (openAgent works, so the button stays)", opens, `url=${url.replace(/^https?:\/\/[^/]+/, "")}`);
-        if (shots) await page.screenshot({ path: join(shots, `recovery-open-${host}-desktop.png`) });
+        if (shots) { await noRealHost(page); await page.screenshot({ path: join(shots, `recovery-open-${host}-desktop.png`) }); }
         await page.goto(`http://127.0.0.1:${p.port}/`);
         await openWorkspace();
       }

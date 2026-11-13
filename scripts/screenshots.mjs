@@ -1240,8 +1240,6 @@ async function reviewModeShots({ shoot, call }) {
       if (size === "phone") { await page.setViewportSize(PHONE); await page.getByRole("button", { name: /^Follow-up · / }).last().click(); }
       else await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
       await link(page).waitFor();
-      // The phone chat header names the host machine: clip it out.
-      return size === "phone" ? { x: 0, y: 72, width: PHONE.width, height: PHONE.height - 72 } : undefined;
     });
     // The undo bar lasts 10 s and settle() can take longer, so the drive captures it itself (rm-toast: the ask gone from
     // Needs you, the header and Home at once). Then it taps Undo, waits for the bar to leave and the ask to come back
