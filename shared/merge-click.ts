@@ -1,4 +1,4 @@
-import { downstack, isGithubFlow, type ActionPlan } from "./pr-actions";
+import { downstack, isGithubFlow, type ActionPlan, type MergeStage } from "./pr-actions";
 import type { Pr, Workspace } from "./model";
 
 /**
@@ -56,7 +56,8 @@ export function planBlockers(scope: MergeScope, plan: Pick<ActionPlan, "prs" | "
 }
 
 export type MergeClickResult =
-  | { state: "submitted" | "uncertain"; result: string }
+  | { state: "submitted"; result: string; stage: MergeStage }
+  | { state: "uncertain"; result: string }
   | { state: "blocked"; blockers: string[] }
   | { state: "failed"; result: string };
 
@@ -66,7 +67,7 @@ export type MergeClickResult =
  */
 export async function mergeClick(io: {
   prepare: (prKey: string) => Promise<ActionPlan>;
-  confirm: (input: { planId: string; scope: "target" | "downstack" }) => Promise<{ state: "submitted" | "failed" | "uncertain"; result: string }>;
+  confirm: (input: { planId: string; scope: "target" | "downstack" }) => Promise<{ state: "submitted" | "failed" | "uncertain"; result: string; merge?: MergeStage }>;
 }, prKey: string, scope: MergeScope): Promise<MergeClickResult> {
   // The plan carries each PR's head; the server pins it from prepare to confirm (PrActions.execute re-checks it), and
   // planBlockers refuses a plan whose heads aren't the ones the button showed.
@@ -74,5 +75,24 @@ export async function mergeClick(io: {
   const blockers = planBlockers(scope, plan);
   if (blockers.length) return { state: "blocked", blockers };
   const reply = await io.confirm({ planId: plan.id, scope: plan.prs.length > 1 ? "downstack" : "target" });
-  return reply.state === "failed" ? { state: "failed", result: reply.result } : { state: reply.state, result: reply.result };
+  // A submit that doesn't say it merged is only a request: never "Merged" without the server saying so.
+  return reply.state === "submitted" ? { state: "submitted", result: reply.result, stage: reply.merge ?? "requested" } : { state: reply.state, result: reply.result };
+}
+
+/**
+ * One source for the button and the toast after a click (a-click-on-merge-merges): the button's word starts the toast,
+ * so "Merged" never sits beside a toast that only queued or requested, nor "Submitted" beside "Merged #151.".
+ * `running`: the click is in flight. Null outcome and not running: the button's own label. `compact`: a phone's
+ * button keeps one short word ("Requested"); the toast says it in full and still contains it.
+ */
+export function mergeWords(scope: MergeScope, outcome: MergeClickResult | null, running = false, compact = false): { button: string; toast: { text: string; variant: "success" | "warning" } | null } {
+  const numbers = scope.prs.map(p => p.number);
+  if (running) return { button: scope.queue ? "Queuing…" : "Merging…", toast: null };
+  if (outcome?.state === "uncertain") return { button: "Unconfirmed", toast: { text: `Unconfirmed: ${outcome.result}`, variant: "warning" } };
+  if (outcome?.state !== "submitted") return { button: scope.label, toast: null };
+  switch (outcome.stage) {
+    case "merged": return { button: "Merged", toast: { text: `Merged ${list(numbers)}.`, variant: "success" } };
+    case "queued": return { button: "Queued", toast: { text: `Queued ${numbers.length > 1 ? `#${numbers[0]} to merge; ${list(numbers.slice(1))} follow after it lands` : `#${numbers[0]} to merge`}.`, variant: "success" } };
+    case "requested": return { button: compact ? "Requested" : "Merge requested", toast: { text: `Merge requested: ${list(numbers)}. Waiting for the merge result.`, variant: "success" } };
+  }
 }

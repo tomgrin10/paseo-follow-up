@@ -257,6 +257,7 @@ test("GitHub mode: downstack merge goes in order, retargets the child after its 
     assert.ok(plan.prs.every(p => !p.blockers.length), JSON.stringify(plan.prs));
     const reply = await f.actions.confirm(plan.id, "downstack");
     assert.equal(reply.state, "submitted", reply.result);
+    assert.equal(reply.merge, "merged", "gh merged both: the button and toast may say Merged (mergeWords)");
     assert.deepEqual(f.calls, ["merge #1 merge a1", "retarget #2 main", "merge #2 merge b1"]);
     assert.deepEqual(f.graphiteCalls, []);
     assert.doesNotMatch(reply.result, GRAPHITE_WORDS);

@@ -111,3 +111,33 @@ test("merge-click: a PR on a parent that can't merge offers no Merge (never a cl
   assert.deepEqual(merges([ready(1628, null), ready(1629, 1628), ready(1630, 1629)]), [1630], "one Merge per stack, naming all three");
   assert.deepEqual(merges([ready(1628, null, { failedChecks: ["test"] }), ready(1629, 1628), ready(1630, 1629)]), [], "#1628 is red: nothing above it offers Merge");
 });
+
+test("merge-click: the button and the toast read one outcome and never disagree", async () => {
+  const { mergeWords } = await import("../shared/merge-click");
+  const single = mergeScope(workspace({ prs: [open(151, null)] }), "example/app#151")!;
+  const many = mergeScope(stack(), "example/app#1630")!;
+  const queue = { ...single, queue: true };
+  const outcomes = [
+    { state: "submitted", result: "Merged #151.", stage: "merged" },
+    { state: "submitted", result: "Added #151 to the merge queue.", stage: "queued" },
+    { state: "submitted", result: "Merge submitted to Graphite for 1 PR.", stage: "requested" },
+    { state: "uncertain", result: "GitHub didn't answer." },
+  ] as const;
+  for (const scope of [single, many, queue]) for (const o of outcomes) for (const compact of [false, true]) {
+    const { button, toast } = mergeWords(scope, o, false, compact);
+    assert.ok(toast, `${o.state}/${"stage" in o ? o.stage : ""}: a toast`);
+    assert.ok(toast!.text.toLowerCase().includes(button.toLowerCase()), `button "${button}" and toast "${toast!.text}" disagree`);
+  }
+  // "Merged" only when the server says it merged; a submit without a stage is a request.
+  assert.equal(mergeWords(single, { state: "submitted", result: "Merged #151.", stage: "merged" }).toast!.text, "Merged #151.");
+  assert.equal(mergeWords(many, { state: "submitted", result: "", stage: "merged" }).toast!.text, "Merged #1628, #1629, then #1630.");
+  const { calls: _c, io: rpc } = io(planOf(workspace({ prs: [open(151, null)] }).prs));
+  const r = await mergeClick({ ...rpc, confirm: async () => ({ state: "submitted", result: "Merge submitted to Graphite for 1 PR." }) }, "example/app#151", single);
+  assert.deepEqual(r.state === "submitted" && r.stage, "requested", "no stage from the server is never Merged");
+  assert.equal(mergeWords(single, r, false, true).button, "Requested");
+  assert.equal(mergeWords(single, null, true).button, "Merging…");
+  // The client shows only mergeWords' toast: no raw server result as the toast.
+  const button = await readFile(join(import.meta.dirname, "../client/merge-button.tsx"), "utf8");
+  assert.doesNotMatch(button, /toast\.show\(result\.result/);
+  assert.match(button, /const said = mergeWords\(scope, result\)\.toast;/);
+});

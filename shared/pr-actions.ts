@@ -16,7 +16,13 @@ export const browserResultSchema = z.object({ id: idSchema, nonce: idSchema, out
 export type BrowserResult = z.infer<typeof browserResultSchema>;
 export const browserExchangeSchema = z.object({ clientId: idSchema, ready: z.boolean(), acceptJobs: z.boolean().default(true), results: z.array(browserResultSchema).max(10).default([]), repositories: z.array(browserPrSchema.shape.repo).max(100).default([]) });
 export const browserStatusSchema = z.object({ ready: z.boolean(), reason: z.string().nullable() });
-export const actionResultSchema = z.object({ state: z.enum(["submitted", "failed", "uncertain"]), result: textSchema });
+/**
+ * `merge`, on a submitted merge only: how far it got. "merged" (GitHub merged every PR), "queued" (the merge queue took
+ * the bottom PR), "requested" (Graphite took the request; its result comes later). Absent: nothing claims a merge.
+ */
+export const mergeStageSchema = z.enum(["merged", "queued", "requested"]);
+export type MergeStage = z.infer<typeof mergeStageSchema>;
+export const actionResultSchema = z.object({ state: z.enum(["submitted", "failed", "uncertain"]), result: textSchema, merge: mergeStageSchema.optional() });
 
 export function downstack(prs: Pr[], target: string): Pr[] {
   const selected: Pr[] = []; const seen = new Set<string>();

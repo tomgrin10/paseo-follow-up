@@ -1,6 +1,6 @@
 import { STOP_WAIT_MS, settleWithin, type Deadline } from "./teardown";
 import { randomUUID } from "node:crypto";
-import { downstack, isGithubFlow, mergeBlockers, prActionBlocks, type ActionPlan, type BrowserPr, type PrActionKind } from "../shared/pr-actions";
+import { downstack, isGithubFlow, mergeBlockers, prActionBlocks, type ActionPlan, type BrowserPr, type MergeStage, type PrActionKind } from "../shared/pr-actions";
 import type { MergeMethod } from "../shared/pr-workflow";
 import type { Workspace, Pr } from "../shared/model";
 import { findWorkspace } from "./engine";
@@ -189,10 +189,12 @@ export class PrActions {
     });
     let state: "submitted" | "failed" | "uncertain" = "submitted";
     let result: string;
+    let merge: MergeStage | undefined;
     try {
-      if (isGithubFlow(prs[0].snapshot)) ({ state, result } = await this.githubExecute(plan.kind, prs));
+      if (isGithubFlow(prs[0].snapshot)) ({ state, result, merge } = await this.githubExecute(plan.kind, prs));
       else if (plan.kind === "merge") {
         await this.graphite.merge(prs[0].repo, prs.map(p => p.number), prs[0].snapshot!.trunk);
+        merge = "requested";
         result = `Merge submitted to Graphite for ${prs.length} PR${prs.length === 1 ? "" : "s"}. Waiting for the merge result.`;
       } else {
         const reply = await this.browser.request(plan.kind, prs[0].repo, wire(prs));
@@ -206,14 +208,14 @@ export class PrActions {
     }
     await this.store.mutate(s => { const action = findWorkspace(s, w.id).prActions.find(a => a.id === id)!; action.state = state; action.result = result; });
     this.graphite.invalidate();
-    return { state, result };
+    return { state, result, ...(state === "submitted" && merge ? { merge } : {}) };
   }
   /**
    * Plain GitHub. Merge goes bottom to top with `gh pr merge` pinned to each reviewed head; after a parent merges, its
    * child is retargeted to trunk with `gh pr edit --base` when GitHub hasn't already, and gets a few seconds for
    * GitHub to recompute mergeability. When ready is GitHub auto-merge. Partial progress is reported as it happened.
    */
-  private async githubExecute(kind: PrActionKind, prs: Pr[]): Promise<{ state: "submitted" | "failed" | "uncertain"; result: string }> {
+  private async githubExecute(kind: PrActionKind, prs: Pr[]): Promise<{ state: "submitted" | "failed" | "uncertain"; result: string; merge?: MergeStage }> {
     const gh = this.github;
     if (!gh.merge || !gh.autoMerge || !gh.retarget) throw new Error("GitHub merging isn't available here.");
     const done: string[] = [];
@@ -236,7 +238,7 @@ export class PrActions {
           done.push(queue ? `Added #${p.number} to the merge queue.` : `Merged #${p.number}.`);
           if (queue) break; // The queue merges the rest in order once the first lands; GitHub retargets nothing yet.
         }
-        return { state: "submitted", result: done.join(" ") };
+        return { state: "submitted", result: done.join(" "), merge: queue ? "queued" : "merged" };
       }
       for (const p of prs) {
         await gh.autoMerge(p, kind === "enable_mwr" ? { enable: true, method: method(p), head: p.snapshot!.head, mergeQueue: !!p.snapshot!.repoMerge?.mergeQueue } : { enable: false });
