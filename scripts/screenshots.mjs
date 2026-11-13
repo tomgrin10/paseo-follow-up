@@ -836,7 +836,9 @@ async function putInChatShots({ shoot, seeded, call, billing }) {
   await shoot("pic-phone-after-put-in-chat-light", PHONE, "light", async page => { await phone(page); await pickAnswer(page);
     await page.getByRole("button", { name: /^Put your Q1 answer in the agent's chat/ }).last().click();
     await page.waitForFunction(() => [...document.querySelectorAll("textarea")].some(t => t.offsetParent && t.value.includes("Follow-up answer Q1 (")), null, { timeout: 15000 });
-    if (await page.getByText("Couldn't open the agent's chat").count()) throw new Error("fell back to Copy"); });
+    if (await page.getByText("Couldn't open the agent's chat").count()) throw new Error("fell back to Copy");
+    // The chat's card says where the answer is, not Answered (answerStatus).
+    await page.getByText("In your message box · not sent yet").locator("visible=true").first().waitFor(); });
   await shoot("pic-phone-copy-light", PHONE, "light", async page => {
     await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, "Contact import")).click();
     await page.getByText("Update the existing contact").first().click();
@@ -856,6 +858,23 @@ async function putInChatShots({ shoot, seeded, call, billing }) {
     await shoot(`pic-wait-in-chat-phone-${theme}`, PHONE, theme, detailPhone("Billing retries", "Your Q1 answer isn't sent yet"));
     await shoot(`pic-in-chat-dialog-${theme}`, DESKTOP, theme, async page => { await dialog(page); await page.getByText(/^Put in .*'s chat/).last().waitFor(); });
   }
+  // The chat's own card for each answer, desktop and phone: never "Answered" before it is delivered.
+  const card = (title, prompt, says, size) => async page => {
+    await openChat(page, title, prompt);
+    if (size) await page.setViewportSize(size);
+    await page.getByText(says).locator("visible=true").first().waitFor();
+    if (await page.getByText(/^Answered \d/).locator("visible=true").count()) throw new Error(`${title}: Answered before it was delivered`);
+  };
+  // Contact import's chat card is a "No ask stated" brief (no needs_you call), so the copied card is Push settings':
+  // its brief points at its Q1, copied here.
+  await call("follow.answer-question", { workspaceId: ws("push").workspaceId, questionId: "Q1", choice: "A", action: "copy" });
+  const pushPrompt = WORKSPACES.find(w => w.key === "push").prompt;
+  for (const theme of ["light", "dark"]) {
+    await shoot(`pic-card-in-chat-${theme}`, DESKTOP, theme, card("Billing retries", billing.prompt, "In your message box · not sent yet"));
+    await shoot(`pic-card-copied-${theme}`, DESKTOP, theme, card("Push settings", pushPrompt, "Copied · not sent yet"));
+  }
+  await shoot("pic-card-in-chat-phone-light", DESKTOP, "light", card("Billing retries", billing.prompt, "In your message box · not sent yet", PHONE));
+  await shoot("pic-card-copied-phone-light", DESKTOP, "light", card("Push settings", pushPrompt, "Copied · not sent yet", PHONE));
   // The escape hatch: the developer edited the marker away, so Follow-up never saw it arrive; signing the agent's row
   // off settles it. Contact import after Sign off: gone from Needs you, and the question says so.
   const signed = await call("follow.inbox-act", { action: "sign_off", agentIds: [ws("csv").agentId] });
@@ -876,6 +895,16 @@ async function putInChatShots({ shoot, seeded, call, billing }) {
     await page.getByRole("button", { name: /^Send your Q1 answer to / }).last().click();
     await page.getByText(/^(Sent your Q1 answer to|Answer saved;|Paseo didn't confirm)/).last().waitFor();
     await page.getByText("Your Q1 answer isn't sent yet").waitFor({ state: "detached" }); });
+  // Delivered: the same card now reads Answered (sending flips to sent once Paseo confirms).
+  // The answer steers the agent, so Paseo folds the turn's earlier items (the card among them) into its "Ran N
+  // command" group under the new reply: open the group, as a person would, to see the card.
+  const delivered = size => async page => { await openChat(page, "Billing retries", billing.prompt); if (size) await page.setViewportSize(size);
+    const answered = page.getByText(/^Answered \d/).locator("visible=true").first();
+    await page.getByText(/^Ran \d+ commands?$/).locator("visible=true").first().click().catch(() => undefined);
+    await answered.waitFor({ timeout: 60000 });
+    await answered.evaluate(el => el.scrollIntoView({ block: "center" })); };
+  for (const theme of ["light", "dark"]) await shoot(`pic-card-delivered-${theme}`, DESKTOP, theme, delivered(null));
+  await shoot("pic-card-delivered-phone-light", DESKTOP, "light", delivered(PHONE));
 }
 
 async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
