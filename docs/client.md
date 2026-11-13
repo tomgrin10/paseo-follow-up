@@ -59,6 +59,7 @@ Nothing polls while the app is hidden.
 | File | What it is |
 | --- | --- |
 | `client/home.tsx` | Home: the list and the detail pane, the Overseer card, the setup flow's place. |
+| `client/feeds.ts` | `openFeed`, `hasFeeds`: the stores subscribe to the worker's feeds on Paseo 0.16 (resubscribing after a worker restart) and poll on 0.15. See [Feeds](#feeds). |
 | `client/home-list.tsx` | The one virtualised list, used by Home and the sidebar view. |
 | `client/home-chrome.tsx` | Omnibox, sort menu, status strip, provider and memory meters. |
 | `client/row-menu.tsx`, `client/menu-item.tsx`, `client/row-actions.ts`, `shared/row-menu.ts`, `client/panel-menu.tsx`, `client/rename.tsx` | The row menu: right-click, long-press or the menu key (Shift+F10) on a Home row or search result. See [Row menu](#row-menu). |
@@ -158,6 +159,28 @@ can only return plugin items, so a transformed call always leaves the group and 
 - **A repeated `declare_done`** for the same workspace and summary draws one card.
 - **Tests and screenshots:** `tests/chat-grouping.test.ts`. `scripts/check-chat-grouping.mjs` renders a synthetic
   mixed turn in an isolated daemon for screenshots; run it through the harness slot.
+
+## Feeds
+
+An idle open client makes at most one RPC a minute (invariant `idle-client-makes-at-most-one-rpc-a-minute`,
+`tests/idle-rpc.test.ts`). The shared stores (the live list in `client/live.tsx`, Needs you in `client/inbox-store.ts`,
+Home's extras in `client/home-view.ts`, the Display preferences in `client/display.tsx`) subscribe to the worker's feeds
+through `openFeed` ([rpcs-and-tools](rpcs-and-tools.md#subscriptions-paseo-016)). When the host has no
+`client.subscribe` (Paseo 0.15) the store polls its RPC as before. `openFeed` keeps each feed open: when the worker
+restarts (a plugin reload or a crash closes every subscription) or refuses a topic (an older worker during a rolling
+reload), the store reads at once, polls until the feed is back, and subscribes again every second for 15 tries, then
+backing off to 30 s. A resubscribe's events apply as soon as it is acknowledged, and once it has stayed open for 30 s
+(`FEED_STEADY_MS`) the poll stops and the retry count starts over. So a host that accepts each subscription and drops
+it at once costs what a refusing one does (the store's own poll, retries every 30 s), not a read a second. A websocket reconnect is the host's: it replays open subscriptions. `tests/feed-recovery.test.ts` and
+`npm run test:feeds` (the harness, end to end) prove a push lands, and that a restart or a refused feed recovers. A store's `refresh()`
+after an action is a no-op with a feed, since the worker pushes the change. Opening reads only what a feed leaves
+out: the Home order once (it migrates this device's old choice) and `follow.usage` once (the worker's resources).
+Browser status (`follow.browser-status`) is read on open only, never polled: when the pill's popover opens, when the
+panel opens and again when its PR sheet opens, and when Home's or a brief's PR sheet opens. Each read is fresh
+(`staleTime: 0`, `refetchOnMount: "always"`), so it is never older than the surface's last open. Screen-scoped polls stay as they are, since they run only while their screen or card is open: the settings screens,
+an open brief card, the PR controls and Summary's pending back-off. A created-agent card follows Paseo's own agent
+stream on 0.16 (`watchAgent` in `client/home-view.ts`) and polls `follow.created-items` every 20 s on 0.15. Clock
+ticks (ages, the pill's 60 s re-render) make no RPC.
 
 ## Created agent and workspace cards
 

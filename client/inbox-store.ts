@@ -1,5 +1,6 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
-import { inboxActRpc, inboxListRpc } from "../shared/contracts";
+import { inboxActRpc, inboxFeed, inboxListRpc } from "../shared/contracts";
+import { openFeed, type Feed } from "./feeds";
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import { withoutWithdrawnAsks, type InboxRow } from "../shared/inbox";
 import { onNoReviewRepos, setHandedBackPrs } from "../shared/pr-workflow";
@@ -48,38 +49,52 @@ export function createInboxStore(client: PluginClientContext) {
   const rpcList = (): Promise<List> => client.rpc(inboxListRpc, data?.etag ? { etag: data.etag } : {});
   const act = (input: RpcInput<typeof inboxActRpc>) => client.rpc(inboxActRpc, input);
 
-  const poll = async () => {
+  let feed: Feed | null = null;
+  const pushed = () => feed?.live === true;
+  /** Sign-offs queued while the worker was unreachable go out before the next read. */
+  const flush = async () => {
+    if (!pending.length) return;
+    const queued = pending; pending = [];
     try {
-      if (pending.length) {
-        const queued = pending; pending = [];
-        const result = await act({ action: "sign_off", agentIds: queued.map(p => p.agentId), seqs: Object.fromEntries(queued.map(p => [p.agentId, p.seq])) });
-        cameBack = [...cameBack, ...result.results.filter(r => r.cameBack).map(r => r.agentId)];
-      }
-      const next = await rpcList();
-      if (stopped) return;
+      const result = await act({ action: "sign_off", agentIds: queued.map(p => p.agentId), seqs: Object.fromEntries(queued.map(p => [p.agentId, p.seq])) });
+      cameBack = [...cameBack, ...result.results.filter(r => r.cameBack).map(r => r.agentId)];
+    } catch (error) { pending = [...queued, ...pending]; throw error; }
+  };
+  const apply = (next: List) => {
       // Nothing changed since the answer this store holds: keep it, and only re-render if we were offline.
       if (next.unchanged && data) { if (offlineSince !== null || failures) { offlineSince = null; failures = 0; emit(); } return; }
       data = next; offlineSince = null; failures = 0; shown = null;
       setHandedBackPrs(next.handedBack ?? []);
       // Rows signed off while offline stay hidden until the replay lands.
       emit();
+  };
+  // Paseo 0.15 polls the etag'd list; 0.16 gets it pushed (follow.inbox-feed) and polls nothing.
+  const poll = async () => {
+    try {
+      await flush();
+      const next = await rpcList();
+      if (stopped || pushed()) return;
+      apply(next);
     } catch {
       failures++;
       if (failures >= 2 && offlineSince === null) { offlineSince = Date.now(); emit(); }
-    } finally { if (!stopped) timer = whileVisible(POLL_MS, () => void poll()); }
+    } finally { if (!stopped && !pushed()) { if (timer) clearTimeout(timer); timer = whileVisible(POLL_MS, () => void poll()); } }
   };
-  const refresh = () => { if (timer) clearTimeout(timer); void poll(); };
+  /** After an action: the feed pushes the change by itself (only queued sign-offs go out); polling hosts read at once. */
+  const refresh = () => { if (pushed()) { void flush().catch(() => undefined); return; } if (timer) clearTimeout(timer); void poll(); };
   let nudged: ReturnType<typeof setTimeout> | null = null;
   /** Something changed in Paseo: refresh soon, coalescing a burst of agent updates into one read. */
-  const nudge = () => { if (nudged || stopped) return; nudged = setTimeout(() => { nudged = null; refresh(); }, 750); };
+  const nudge = () => { if (nudged || stopped || pushed()) return; nudged = setTimeout(() => { nudged = null; refresh(); }, 750); };
   const unsubscribe = subscribeDisplay(values => {
     const on = values.enable_inbox !== false;
     if (on !== enabled) { enabled = on; emit(); if (on) refresh(); }
   });
+  // The feed went down (the worker restarted): read now and poll until it is back.
+  feed = openFeed(client, inboxFeed, {}, { event: next => { if (stopped) return; void flush().catch(() => undefined); apply(next); }, down: () => { if (timer) clearTimeout(timer); void poll(); }, up: () => { if (timer) clearTimeout(timer); timer = null; } });
   const offVisible = onVisible(refresh);
   // A repository flipping to No review (or back, on Undo) withdraws its add-reviewers asks on every surface at once.
   const offNoReview = onNoReviewRepos(() => { shown = null; emit(); });
-  void poll();
+  if (!feed) void poll();
 
   /**
    * The rows every surface draws: the daemon's, minus add-reviewers asks for PRs the agent merges itself
@@ -126,7 +141,7 @@ export function createInboxStore(client: PluginClientContext) {
     clearRecent() { recent = null; emit(); },
     refresh,
     nudge,
-    stop() { stopped = true; offVisible(); offNoReview(); if (timer) clearTimeout(timer); if (nudged) clearTimeout(nudged); listeners.clear(); unsubscribe(); },
+    stop() { stopped = true; feed?.stop(); offVisible(); offNoReview(); if (timer) clearTimeout(timer); if (nudged) clearTimeout(nudged); listeners.clear(); unsubscribe(); },
 
     /** Sign off now; queue for replay when the host can't be reached. */
     async signOff(requested: string[], options: { muteTurn?: boolean } = {}) {

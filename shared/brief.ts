@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Pr, Workspace } from "./model";
 import { agentMergesKey } from "./pr-workflow";
+import { reviewersAsk } from "./reviewers";
 import { ANSWER_PREFIX, OTHER_LABEL, answerLabel, answerTitle, isOther, type Question } from "./questions";
 
 /**
@@ -246,7 +247,7 @@ export function pickBrief(s: BriefSources): BriefContent {
     const r = s.reviewers;
     const named = r.names.length ? r.names.join(" and ") : null;
     return { ...base, source: "followup", kind: "reviewers", slim: false,
-      ask: line(named ? `Add reviewers to #${r.number}: ${named}` : `#${r.number} has no reviewers yet`),
+      ask: line(reviewersAsk(r.number, r.names, `#${r.number} has no reviewers yet`)),
       ...(() => { const facts = (s.pr?.key === r.prKey ? s.pr.facts : []).slice(0, 3); return { facts, factsPr: facts.length ? r.prKey : null }; })(),
       // With nobody set, Add reviewers opens the picker; it never asks anyone without a click.
       moves: [move("add_reviewers", "Add reviewers", { prKey: r.prKey }), ...(r.url ? [move("open_pr", "Open PR", { url: r.url, prKey: r.prKey })] : [])],
