@@ -217,25 +217,45 @@ const STOP = new Set(["a", "an", "the", "and", "or", "of", "to", "for", "in", "o
 const stem = (t: string) => t.length > 4 ? t.replace(/(ations|ation|ings|ing|ed|es|s)$/, "").replace(/e$/, "") : t;
 /** Lower-cased word stems. `keepStop` keeps short words, for option labels like "as is". */
 export function questionTokens(text: string, keepStop = false): Set<string> {
-  const words = text.toLowerCase().replace(/^[a-z][:.)]\s+/, "").replace(/['’]s\b/g, "").split(/[^a-z0-9]+/).filter(Boolean);
-  return new Set(words.filter(w => keepStop || !STOP.has(w)).map(stem));
+  return tokensOf(wordsOf(text), keepStop);
 }
+const wordsOf = (text: string) => text.toLowerCase().replace(/^[a-z][:.)]\s+/, "").replace(/['’]s\b/g, "").split(/[^a-z0-9]+/).filter(Boolean);
+const tokensOf = (words: string[], keepStop: boolean) => new Set(words.filter(w => keepStop || !STOP.has(w)).map(stem));
 const jaccard = (a: Set<string>, b: Set<string>) => { if (!a.size && !b.size) return 1; let n = 0; for (const t of a) if (b.has(t)) n++; return n / (a.size + b.size - n); };
 const contained = (a: Set<string>, b: Set<string>) => { const [small, big] = a.size <= b.size ? [a, b] : [b, a]; if (!small.size) return 0; let n = 0; for (const t of small) if (big.has(t)) n++; return n / small.size; };
 
 export type QuestionShape = { title: string; question: string; options: { label: string }[] };
+type Features = { title: string; question: string; labels: string[]; t: Set<string>; q: Set<string>; both: Set<string>; options: Set<string>[]; specific: number };
+/**
+ * Each question's token sets, built once (invariant a-check-costs-linear-in-its-workspace). 2026-11-13: the status
+ * check's duplicate scan tokenized both sides of every pair, O(Q²) tokenizations, 1.6 MB of a 4 MB check on a
+ * 52-question workspace. Keyed by the question object and checked against its text on every hit, so an edited
+ * question is never compared on stale tokens.
+ */
+const features = new WeakMap<QuestionShape, Features>();
+function featuresOf(x: QuestionShape): Features {
+  const hit = features.get(x);
+  if (hit && hit.title === x.title && hit.question === x.question && hit.labels.length === x.options.length && hit.labels.every((l, i) => l === x.options[i]!.label)) return hit;
+  const t = questionTokens(x.title), q = questionTokens(x.question);
+  const f: Features = { title: x.title, question: x.question, labels: x.options.map(o => o.label), t, q, both: new Set([...t, ...q]), options: [], specific: 0 };
+  const plain = new Set<string>();
+  for (const o of x.options) { const words = wordsOf(o.label); f.options.push(tokensOf(words, true)); for (const t of tokensOf(words, false)) plain.add(t); }
+  f.specific = plain.size;
+  features.set(x, f);
+  return f;
+}
 /** How alike two questions read: 0–1 over the title, the question and both together. */
 export function textSimilarity(a: QuestionShape, b: QuestionShape): number {
-  const at = questionTokens(a.title), bt = questionTokens(b.title), aq = questionTokens(a.question), bq = questionTokens(b.question);
-  return Math.max(jaccard(at, bt), jaccard(aq, bq), jaccard(new Set([...at, ...aq]), new Set([...bt, ...bq])));
+  const fa = featuresOf(a), fb = featuresOf(b);
+  return Math.max(jaccard(fa.t, fb.t), jaccard(fa.q, fb.q), jaccard(fa.both, fb.both));
 }
 /** Share of options that have a counterpart ("Memoize the gate" ~ "A: memoize"). Both free-answer: 1; one only: 0. */
 export function optionOverlap(a: QuestionShape, b: QuestionShape): number {
   if (!a.options.length && !b.options.length) return 1;
   if (!a.options.length || !b.options.length) return 0;
-  const bs = b.options.map(o => questionTokens(o.label, true));
+  const bs = featuresOf(b).options;
   let hits = 0;
-  for (const o of a.options) { const t = questionTokens(o.label, true); if (bs.some(x => contained(t, x) >= 0.5)) hits++; }
+  for (const t of featuresOf(a).options) if (bs.some(x => contained(t, x) >= 0.5)) hits++;
   return hits / Math.max(a.options.length, b.options.length);
 }
 /**
@@ -248,7 +268,7 @@ export function compareQuestions(a: QuestionShape, b: QuestionShape): "same" | "
   // A reworded question with the same options ("How should the gate's added cost be handled?" / "How should PR 6's gate
   // handle the cost increase?", both memoize / as is / prefilter).
   // Generic options (Yes / No, Keep / Defer) say nothing about which question it is, so they never carry a match.
-  const specific = new Set(a.options.flatMap(o => [...questionTokens(o.label)])).size >= 3;
+  const specific = featuresOf(a).specific >= 3;
   if (text >= 0.3 && specific && a.options.length >= 2 && options >= 0.99 && a.options.length === b.options.length) return "same";
   return null;
 }
