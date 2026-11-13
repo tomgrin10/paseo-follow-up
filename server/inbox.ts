@@ -5,7 +5,9 @@ import { randomUUID } from "node:crypto";
 import { realTimers, stableMessageId, withDeadline, type Timers } from "./delivery";
 import { BackgroundAgents } from "./background-agents";
 import { deepFreeze } from "./store";
-import { emptyInbox, expired, inboxStateSchema, type OutboxEntry, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason, liveFlag, withoutRunState, FACT_REASONS, prEndEvent, reviewersBriefPr, markNotified, notifiedBefore, prNotice, pruneNotified } from "../shared/inbox";
+import { copyOnAccess, detach, type Changes } from "./cow";
+import { z } from "zod";
+import { emptyInbox, entrySchema, expired, inboxStateSchema, type OutboxEntry, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason, liveFlag, withoutRunState, FACT_REASONS, prEndEvent, reviewersBriefPr, markNotified, notifiedBefore, prNotice, pruneNotified } from "../shared/inbox";
 import type { State as FollowState, Workspace as FollowWorkspace } from "../shared/model";
 import { asksForReviewers } from "../shared/attention";
 import { followUpObligations } from "../shared/follow-up";
@@ -27,8 +29,8 @@ export const LAST_SEEN_WRITE_MS = 300_000;
 /** The flag store: plugin-data/follow-up/inbox.json. A new file, so existing state never changes shape. */
 export class InboxStore {
   private tail: Promise<unknown> = Promise.resolve();
-  /** What inbox.json holds (compact JSON), that text without lastSeen, and when it was written. */
-  private written: { text: string; rest: string; at: number } | null = null;
+  /** When inbox.json was last written (the store is its only writer, so the saved state is what it holds). */
+  private written: { at: number } | null = null;
   /** A state that differs from the file in lastSeen only, held until LAST_SEEN_WRITE_MS, a real change or flush(). */
   private unsaved: InboxState | null = null;
   /**
@@ -36,9 +38,11 @@ export class InboxStore {
    * re-reads it (2026-11-12: a 169 KB read and parse per mutation, several a minute live).
    */
   private saved: InboxState | null = null;
+  /** Writes to inbox.json, for tests. */
+  writes = 0;
   constructor(readonly directory: string, private now: () => number = Date.now) {}
   private get path() { return join(this.directory, "inbox.json"); }
-  /** A private, mutable copy (what a mutation works on). */
+  /** A private, mutable copy of the whole inbox. Nothing in the worker needs one; mutate() hands out a draft instead. */
   async read(): Promise<InboxState> { return structuredClone(await this.load()); }
   /**
    * The current state, shared and deep-frozen (unsaved lastSeen included). 2026-11-12: snapshot() deep-copied the whole
@@ -53,17 +57,25 @@ export class InboxStore {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptyInbox();
       throw new Error("The Needs-you inbox could not be read. Restore inbox.json or remove it to start fresh.");
     }
-    // What the file means, so an unchanged state isn't rewritten (a pretty-printed file is rewritten compact on its next change).
-    this.written ??= { text: JSON.stringify(state), rest: rest(state), at: this.now() };
+    this.written ??= { at: this.now() };
     this.saved = deepFreeze(state);
     return this.saved;
   }
+  /**
+   * a-mutation-copies-only-what-it-changes (server/cow.ts): the mutation's draft copies an entry (or a top-level field)
+   * only when the mutation reads it; untouched and unchanged entries keep their saved, frozen objects. Only what changed
+   * is validated, nothing is written when nothing changed, and a write serialises the inbox once. 2026-11-13: every
+   * mutation structuredCloned, validated and stringified the whole inbox 4–5 times, 28% of the live worker's allocation
+   * under agent turns (RSS 315 → 405 MB).
+   */
   async mutate<T>(work: (state: InboxState) => T | Promise<T>): Promise<T> {
     const next = this.tail.then(async () => {
-      const state = await this.read();
-      const value = await work(state);
-      await this.save(state);
-      return structuredClone(value);
+      const current = await this.load();
+      const { draft, finish } = copyOnAccess(current, { entries: { kind: "record" } });
+      const value = await work(draft);
+      const done = finish();
+      if (done.changed) await this.save(done.next, done.changes);
+      return detach(value);
     });
     this.tail = next.catch(() => undefined);
     return next;
@@ -77,8 +89,8 @@ export class InboxStore {
   async touchLastSeen(at: string): Promise<void> {
     const next = this.tail.then(async () => {
       const current = await this.load();
-      if (!this.written || this.now() - this.written.at >= LAST_SEEN_WRITE_MS) { const draft = structuredClone(current); draft.lastSeen = at; await this.save(draft); return; }
-      this.unsaved = deepFreeze({ ...current, lastSeen: at });
+      if (current.lastSeen === at) return;
+      await this.save({ ...current, lastSeen: at }, { fields: new Set(["lastSeen"]), items: new Map(), removed: new Map() });
     });
     this.tail = next.catch(() => undefined);
     return next;
@@ -89,26 +101,34 @@ export class InboxStore {
     const pending = this.unsaved;
     if (pending) await this.write(pending);
   }
-  /** Writes real changes at once; nothing when unchanged; a lastSeen-only change at most every LAST_SEEN_WRITE_MS. */
-  private async save(state: InboxState): Promise<void> {
-    inboxStateSchema.parse(state);
-    const text = JSON.stringify(state);
-    if (this.written?.text === text) { this.unsaved = null; return; }
-    if (this.written && this.written.rest === rest(state) && this.now() - this.written.at < LAST_SEEN_WRITE_MS) { this.unsaved = deepFreeze(state); return; }
-    await this.write(state, text);
+  /**
+   * Validates what changed (each changed entry, and the small top-level fields when one of them changed), then writes
+   * a real change at once and a lastSeen-only change at most every LAST_SEEN_WRITE_MS.
+   */
+  private async save(next: InboxState, changes: Changes): Promise<void> {
+    const entries = next.entries as Record<string, unknown>;
+    for (const id of changes.items.get("entries") ?? []) entrySchema.parse(entries[id]);
+    const top = [...changes.fields].filter(f => f !== "entries");
+    if (top.length) topSchema.parse({ ...next, entries: {} });
+    for (const id of changes.items.get("entries") ?? []) deepFreeze(entries[id]);
+    for (const f of top) deepFreeze((next as Record<string, unknown>)[f]);
+    Object.freeze(entries); Object.freeze(next);
+    const lastSeenOnly = top.length === 1 && top[0] === "lastSeen" && !changes.fields.has("entries");
+    if (lastSeenOnly && this.written && this.now() - this.written.at < LAST_SEEN_WRITE_MS) { this.unsaved = next; return; }
+    await this.write(next);
   }
-  private async write(state: InboxState, text = JSON.stringify(state)): Promise<void> {
+  private async write(state: InboxState): Promise<void> {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     const temporary = join(this.directory, `inbox.${randomUUID()}.tmp`);
     try {
       const file = await open(temporary, "wx", 0o600);
-      try { await file.writeFile(text); await file.sync(); } finally { await file.close(); }
+      try { await file.writeFile(JSON.stringify(state)); await file.sync(); } finally { await file.close(); }
       await rename(temporary, this.path);
-      this.written = { text, rest: rest(state), at: this.now() }; this.unsaved = null; this.saved = deepFreeze(state);
+      this.written = { at: this.now() }; this.unsaved = null; this.saved = deepFreeze(state); this.writes++;
     } finally { await unlink(temporary).catch(() => undefined); }
   }
 }
-const rest = (state: InboxState) => JSON.stringify({ ...state, lastSeen: null });
+const topSchema = inboxStateSchema.omit({ entries: true }).extend({ entries: z.object({}) });
 
 /**
  * F7: whether a completed turn adds nothing. needs_you kind=done is "nothing for the developer"; and while Paseo
@@ -139,6 +159,8 @@ export interface Directory {
   agent(id: string): Promise<AgentInfo | null>;
   /** Recent timeline items, oldest first. */
   tail(id: string, limit: number): Promise<unknown[]>;
+  /** The ended turn's items, oldest first, read once per turn end and shared with the engine (inbox-directory.ts). */
+  turnItems?(id: string, turnId: string | null): Promise<unknown[]>;
   clearAttention(ids: string[]): Promise<void>;
 }
 export type GuardPause = { id: string; agentId: string; phase: string; turnId?: string | null; anchorResetsAt?: string; dismissed?: boolean; note?: string };
@@ -373,7 +395,7 @@ export class Inbox {
     this.turns.delete(agent.id);
     const stated = await this.sources(agent.id, since, turnId);
     if (outcome.kind === "completed") {
-      const items = await this.o.directory.tail(agent.id, 20).catch(() => []);
+      const items = await (this.o.directory.turnItems?.(agent.id, turnId) ?? this.o.directory.tail(agent.id, 20)).catch(() => []);
       // Never Follow-up's own bookkeeping continuation's reply (finishedReply).
       const saved = /^[\w-]+$/.test(agent.id) ? await readFile(join(this.hookState, `bookkeeping-${agent.id}.json`), "utf8").then(t => JSON.parse(t), () => null) : null;
       const reply = { text: finishedReply(items, saved, turnAt) };
@@ -712,8 +734,9 @@ export class Inbox {
     // A PR's record lives while some workspace tracks it: prune the rest (only when something goes).
     const tracked = new Set(follow.workspaces.flatMap(w => w.prs.map(p => p.key)));
     const before = (await this.store.snapshot()).entries;
-    if (Object.values(before).some(e => pruneNotified(e, tracked) !== e))
-      await this.store.mutate(s => { for (const [agentId, e] of Object.entries(s.entries)) s.entries[agentId] = pruneNotified(e, tracked); });
+    // Only the entries that lose something are read (a-mutation-copies-only-what-it-changes: reading one copies it).
+    const pruned = Object.keys(before).filter(id => pruneNotified(before[id]!, tracked) !== before[id]);
+    if (pruned.length) await this.store.mutate(s => { for (const id of pruned) if (s.entries[id]) s.entries[id] = pruneNotified(s.entries[id], tracked); });
     // Then withdraw the flags (and Follow-up's PR cards) whose fact ended since: merged, fixed, reviewed, or the agent is on it.
     const live = liveFacts(follow, events);
     const entries = (await this.store.snapshot()).entries;
