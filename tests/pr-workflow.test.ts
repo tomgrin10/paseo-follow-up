@@ -227,14 +227,14 @@ test("stacks come from base-branch chains, never overriding a registered parent"
   inferBaseChains(g); assert.equal(g.prs[1].parent, null);
 });
 
-async function githubFixture() {
+async function githubFixture(o: { refuseFirstChildMerge?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "follow-gh-actions-")); const store = new Store(root);
   const bottom = pr({ snapshot: ghSnapshot({ headBranch: "feat-a", head: "a1" }) });
   const top = pr({ key: "example/app#2", number: 2, parent: bottom.key, snapshot: ghSnapshot({ headBranch: "feat-b", base: "feat-a", head: "b1" }) });
   await store.mutate(s => s.workspaces.push(workspace({ prs: [top, bottom] })));
   let observed: Pr[] = [top, bottom];
   const calls: string[] = []; const graphiteCalls: string[] = [];
-  let refuseFirstChildMerge = true;
+  let refuseFirstChildMerge = o.refuseFirstChildMerge ?? true;
   const github = {
     observe: async () => new Map(observed.map(p => [p.key, { snapshot: p.snapshot, error: p.error }])),
     merge: async (p: Pick<Pr, "number">, o: { method: string; head: string }) => {
@@ -274,6 +274,35 @@ test("GitHub mode: downstack merge goes in order, retargets the child after its 
     assert.deepEqual(f.graphiteCalls, []);
     assert.doesNotMatch(reply.result, GRAPHITE_WORDS);
   } finally { await f.close(); }
+});
+
+test("GitHub mode: a merge click drops the queued repair for the PR it merged in the same write (Tasks and Needs you agree)", async () => {
+  const f = await githubFixture({ refuseFirstChildMerge: false }); try {
+    const { Engine } = await import("../server/engine");
+    const engine = new Engine(f.store, { observe: async () => new Map() }, {} as never);
+    f.actions.settleTasks = w => engine.settleTasks(w);
+    // #1 merged and GitHub retargeted #2 onto main, but a read in between queued "Restack #2 after #1 merged" (the
+    // stack's merges land seconds apart). Then the developer merges #2.
+    const merged = { ...f.bottom, snapshot: { ...f.bottom.snapshot!, state: "MERGED" as const, mergedAt: "2026-01-01T00:00:00.000Z" } };
+    const top = { ...f.top, snapshot: { ...f.top.snapshot!, base: "main" } };
+    f.observe([top, merged]);
+    await f.store.mutate(s => { const w = s.workspaces[0]; w.prs = [top, merged]; engine.settleTasks(w); });
+    const queued = (await f.store.snapshot()).workspaces[0].batches.filter(b => b.state === "pending");
+    assert.deepEqual(queued.flatMap(b => b.tasks.map(t => t.kind)), ["restack"], "precondition: the restack is queued");
+    const plan = await f.actions.prepare("workspace", f.top.key, "merge");
+    const reply = await f.actions.confirm(plan.id, "target");
+    assert.equal(reply.merge, "merged", reply.result);
+    const after = (await f.store.snapshot()).workspaces[0];
+    assert.deepEqual(after.prs.map(p => p.snapshot?.state), ["MERGED", "MERGED"]);
+    // Only the Done check is left: every PR merged, so no repair is queued (Tasks, Needs you "task ready").
+    assert.deepEqual(after.batches.filter(b => b.state === "pending").flatMap(b => b.tasks.map(t => t.kind)), ["completion"]);
+    assert.doesNotMatch(after.nextMessage ?? "", /Restack/);
+  } finally { await f.close(); }
+});
+
+test("the server wires the merge write to the engine's task settle", async () => {
+  const source = await readFile(new URL("../index.server.ts", import.meta.url), "utf8");
+  assert.match(source, /actions\.settleTasks = w => engine\.settleTasks\(w\);/);
 });
 
 test("GitHub mode: When ready is GitHub auto-merge, hidden with a reason when the repository doesn't allow it", async () => {
