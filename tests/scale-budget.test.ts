@@ -86,10 +86,32 @@ test("scale gate: test:scale fails on its budgets; test:scale:live reports them 
   const gate = pkg.scripts["test:scale"]!, live = pkg.scripts["test:scale:live"]!;
   assert.ok(pkg.scripts.verify!.includes("npm run test:scale &&"), "verify runs the gate");
   assert.ok(!gate.includes("--budgets-report-only"), "the gate fails on its budgets");
-  for (const flag of ["--rss-budget 300", "--idle-rss-budget 240", "--cpu-budget 3", "--request-budget 2"]) {
+  for (const flag of ["--rss-budget 300", "--cpu-budget 3", "--request-budget 2"]) {
     assert.ok(gate.includes(flag), `test:scale keeps ${flag}`);
     assert.ok(live.includes(flag), `test:scale:live reports ${flag}`);
   }
+  assert.ok(gate.includes("--idle-rss-budget realistic"), "test:scale's idle budget is the derived REALISTIC_IDLE_BUDGET_MB, not a typed-in number");
   assert.ok(live.includes("--live-sized") && live.includes("--busy 180"), "test:scale:live is the live-sized busy window");
   assert.match(await readFile(".github/workflows/ci.yml", "utf8"), /^\s+- run: npm run test:scale:live$/m);
+});
+
+/**
+ * realistic-idle-budget-matches-ci (2026-11-13): test:scale's idle budget is CI's median plus SPREAD_SDS standard
+ * deviations of CI's own readings. #174 read 243 over the old 240 on a PR that changed no product code: the budget sat
+ * inside the runner's noise. The constants must match the readings they came from (tests/fixtures/ci-idle-rss.txt).
+ */
+test("scale budget: the realistic idle budget is computed from its named terms, which match CI's readings", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const b = await import("../scripts/scale-budget.mjs");
+  assert.equal(b.REALISTIC_IDLE_BUDGET_MB, b.CI_IDLE_P50_MB + b.SPREAD_SDS * b.CI_IDLE_SD_MB, "the total is the sum of its terms");
+  assert.match(await readFile("scripts/scale-budget.mjs", "utf8"), /REALISTIC_IDLE_BUDGET_MB = CI_IDLE_P50_MB \+ SPREAD_SDS \* CI_IDLE_SD_MB;/, "computed, not typed in");
+  assert.equal(b.idleBudgetMb("realistic"), b.REALISTIC_IDLE_BUDGET_MB);
+  const xs = (await readFile("tests/fixtures/ci-idle-rss.txt", "utf8")).split("\n").filter(Boolean).map(Number).sort((x, y) => x - y);
+  assert.ok(xs.length >= 5 && xs.every(Number.isFinite), "at least five CI readings, numbers only");
+  const mean = xs.reduce((n, x) => n + x, 0) / xs.length;
+  const sd = Math.sqrt(xs.reduce((n, x) => n + (x - mean) ** 2, 0) / xs.length);
+  assert.ok(Math.abs(median(xs) - b.CI_IDLE_P50_MB) <= 1, `CI_IDLE_P50_MB ${b.CI_IDLE_P50_MB} vs the readings' median ${median(xs)}`);
+  assert.ok(Math.abs(sd - b.CI_IDLE_SD_MB) <= 1, `CI_IDLE_SD_MB ${b.CI_IDLE_SD_MB} vs the readings' ${sd.toFixed(2)}`);
+  assert.ok(xs.every(x => x <= b.REALISTIC_IDLE_BUDGET_MB), "every reading it came from passes, #174's 243 included");
+  assert.ok(Math.min(...xs) + 45 > b.REALISTIC_IDLE_BUDGET_MB, "a +45 MB regression fails every run");
 });

@@ -112,7 +112,7 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    - Extras stop at critical (≥ 85 %).
    - `test:scale` budgets (the gate in `verify`), on the realistic seed (`--realistic`: 140 workspaces, ~280 agents,
      three PRs with full snapshots per workspace, a fake GitHub with live-sized PR bodies): **300 MB peak RSS** from the
-     worker's start (VmHWM, so the cold-start tick counts), **240 MB idle RSS** (the median of the idle window), **3 %
+     worker's start (VmHWM, so the cold-start tick counts), **`REALISTIC_IDLE_BUDGET_MB` idle RSS** (250: CI's median 220 plus 4 standard deviations of CI's own readings, `scripts/scale-budget.mjs`, checked against `tests/fixtures/ci-idle-rss.txt`; the old 240 sat inside the runner's noise and flaked on a no-op PR), **3 %
      idle CPU**, **2 idle daemon requests a minute**. Measured 2026-11-12 (two runs): peak 262–264 MB (a ~2 s cold-start
      tick that changes and validates every workspace once), idle 198–200 MB and flat, CPU 1.3–1.4 %, 1.3 requests a
      minute; the bare plugin process is ~120 MB. Headroom (~15 % peak, ~20 % idle) covers live's extras the seed lacks

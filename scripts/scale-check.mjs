@@ -31,7 +31,7 @@ import { harness, spawnDaemon } from "./harness.mjs";
 import { harnessEnv, harnessConfig } from "./harness-env.mjs";
 import { fakeGithub } from "./fake-github.mjs";
 import { scaleGh } from "./scale-github.mjs";
-import { ACK_READ_MS, BUSY_GROWTH_BUDGET_MB, BUSY_ITEM_BYTES, BUSY_TURN_ITEMS, BUSY_TURNS_PER_MIN, busyVerdict, idleVerdict, SEND_SETTLE_MS, settleBoundMs, settleState } from "./scale-budget.mjs";
+import { ACK_READ_MS, BUSY_GROWTH_BUDGET_MB, BUSY_ITEM_BYTES, BUSY_TURN_ITEMS, BUSY_TURNS_PER_MIN, busyVerdict, idleBudgetMb, idleVerdict, SEND_SETTLE_MS, settleBoundMs, settleState } from "./scale-budget.mjs";
 
 const exec = promisify(execFile);
 // The check drives a real Paseo daemon, so it needs the paseo CLI (CI installs @getpaseo/cli). Without it, local
@@ -57,7 +57,7 @@ const shape = DATA_FROM ? await liveShape(DATA_FROM) : null;
 const N = shape ? shape.workspaces.length : Number(arg("workspaces", "120")); const AWAKE = Number(arg("awake", "5")); const POLLS = 3; const POLL_MS = 15_000;
 /** Agents per workspace: live has ~300 listed agents at 141 workspaces, so --realistic makes two. */
 const PER = Number(arg("agents-per-workspace", REALISTIC ? "2" : "1")); const IDLE_MS = Number(arg("idle", "30")) * 1000;
-const budget = { busyGrowthMb: Number(arg("busy-growth-budget", String(BUSY_GROWTH_BUDGET_MB))), idleRssMb: Number(arg("idle-rss-budget", "0")), rssMb: Number(arg("rss-budget", "0")), cpuPct: Number(arg("cpu-budget", "0")), requestsPerMin: Number(arg("request-budget", "0")) };
+const budget = { busyGrowthMb: Number(arg("busy-growth-budget", String(BUSY_GROWTH_BUDGET_MB))), idleRssMb: idleBudgetMb(arg("idle-rss-budget", "0")), rssMb: Number(arg("rss-budget", "0")), cpuPct: Number(arg("cpu-budget", "0")), requestsPerMin: Number(arg("request-budget", "0")) };
 const root = await mkdtemp(join(tmpdir(), "follow-scale-"));
 const home = join(root, "home"); const fixture = join(root, "fixture"); let plugin = arg("plugin", null);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
