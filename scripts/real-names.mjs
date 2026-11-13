@@ -39,23 +39,8 @@ export const TICKET_HASHES = [
   "354cbfc814262a7a81d343f7d6ebc4adfb4266e5081a78f6a19ff16802dce8b2",
 ];
 
-/**
- * Product files that still carry the company's configuration on purpose, and the tests and scripts that exercise it.
- * Excluded by path; the Q55 host-config PR moves that configuration into local host settings and deletes this list.
- */
-export const EXCLUDED = Object.fromEntries([
-  "server/deployments.ts",
-  "shared/settings.ts",
-  "server/reviewer-config.ts",
-  "PRODUCT.md",
-  "docs/prs.md",
-  "scripts/poll-cost.mjs",
-  "tests/deployments.test.ts",
-  "tests/github-poll-cost.test.ts",
-  "tests/worker-reads-github-in-process.test.ts",
-  "tests/project-settings.test.ts",
-  "tests/reviewer-config.test.ts",
-].map(path => [path, "removed by the Q55 host-config PR"]));
+/** No exclusions: every committed file is scanned (invariant public-code-carries-no-host-identifiers). */
+export const EXCLUDED = {};
 
 /** This machine's identifying names, from the environment: hostname (full and short) and user name. Not in CI. */
 export function machineNames(env = process.env, host = hostname(), user = (() => { try { return userInfo().username; } catch { return ""; } })()) {
