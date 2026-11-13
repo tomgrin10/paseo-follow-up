@@ -1,0 +1,1 @@
+- An agent that says nothing is needed no longer stays in Needs you with an older "No ask stated" card.
