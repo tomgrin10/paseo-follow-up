@@ -258,6 +258,16 @@ test("GitHub mode: downstack merge goes in order, retargets the child after its 
     const reply = await f.actions.confirm(plan.id, "downstack");
     assert.equal(reply.state, "submitted", reply.result);
     assert.equal(reply.merge, "merged", "gh merged both: the button and toast may say Merged (mergeWords)");
+    // a-merge-outcome-reads-the-same-everywhere: every surface agrees with "Merged" before the next PR read.
+    const { headline, needsYou } = await import("../shared/attention");
+    const { activity } = await import("../shared/activity");
+    const { stackBar } = await import("../shared/attention");
+    const after = (await f.store.snapshot()).workspaces[0];
+    assert.deepEqual(after.prs.map(p => p.snapshot?.state), ["MERGED", "MERGED"], "the rows say merged");
+    assert.deepEqual([stackBar(after).merged, stackBar(after).total], [2, 2], "the progress bar is full");
+    assert.ok(headline(after).some(h => h.text === "All 2 PRs merged"), JSON.stringify(headline(after)));
+    assert.ok(!needsYou(after).some(i => i.kind === "merge"), "no Merge row left");
+    assert.ok(activity(after).some(r => r.text === "Merged #1, #2"), "Activity says Merged");
     assert.deepEqual(f.calls, ["merge #1 merge a1", "retarget #2 main", "merge #2 merge b1"]);
     assert.deepEqual(f.graphiteCalls, []);
     assert.doesNotMatch(reply.result, GRAPHITE_WORDS);

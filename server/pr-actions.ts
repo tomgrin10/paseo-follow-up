@@ -206,7 +206,15 @@ export class PrActions {
       state = (error instanceof GraphiteWriteError || error instanceof GithubWriteError) && error.uncertain ? "uncertain" : "failed";
       result = error instanceof Error ? error.message : `${via(prs)} action failed.`;
     }
-    await this.store.mutate(s => { const action = findWorkspace(s, w.id).prActions.find(a => a.id === id)!; action.state = state; action.result = result; if (state === "submitted" && merge) action.merge = merge; });
+    await this.store.mutate(s => {
+      const current = findWorkspace(s, w.id);
+      const action = current.prActions.find(a => a.id === id)!; action.state = state; action.result = result; if (state === "submitted" && merge) action.merge = merge;
+      // a-merge-outcome-reads-the-same-everywhere: GitHub answered that it merged these PRs, so every surface says so
+      // now (header, rows, progress, Needs you), not after the next PR read, which keeps its backoff. That read confirms.
+      if (state === "submitted" && merge === "merged") for (const p of current.prs) if (prs.some(m => m.key === p.key) && p.snapshot && p.snapshot.state === "OPEN") {
+        p.snapshot = { ...p.snapshot, state: "MERGED", mergedAt: p.snapshot.mergedAt ?? new Date(this.now()).toISOString() };
+      }
+    });
     this.graphite.invalidate();
     return { state, result, ...(state === "submitted" && merge ? { merge } : {}) };
   }

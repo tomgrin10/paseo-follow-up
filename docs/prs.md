@@ -127,6 +127,10 @@ the cold start's spawns and compares).
   held by one under it isn't an ask (that PR is the agent's repair) but never goes quiet: `heldMerges`
   (`shared/attention.ts`) puts "#143 approved · waits on #142 (checks failing)" in the panel's Pull requests card and
   Home's detail pane (`HeldMerges`, `client/merge-button.tsx`), both numbers linked.
+  After a click the button, the toast and Activity read one outcome (`mergeWords`, `shared/merge-click.ts`): Merged
+  only when GitHub merged, Queued, or Merge requested (Graphite). A GitHub merge also marks its PRs merged in the
+  store at once, so the header, rows and progress agree before the next PR read confirms it
+  (`a-merge-outcome-reads-the-same-everywhere`, `tests/pr-workflow.test.ts`).
 - **Agents** use `merge`, `enable_merge_when_ready` and `disable_merge_when_ready`, which plan and then confirm.
 - **Interrupted sends.** A reload mid-send marks the action `uncertain`.
 
