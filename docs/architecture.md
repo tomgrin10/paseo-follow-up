@@ -69,7 +69,9 @@ A long call with a small event-loop delay awaited something; a large delay means
 
 Answers that the client polls are kept small:
 
-- `follow.list` takes `since` (a revision) and returns only changed workspaces (`server/list-cache.ts`).
+- `follow.list` takes `since` (a revision) and returns only changed workspaces (`server/list-cache.ts`). It
+  serialises only a workspace whose object changed (`a-list-answer-serializes-only-what-changed`): the store keeps an
+  unchanged workspace's frozen object, so the same object is skipped.
 - `follow.inbox-list` takes an `etag` and returns `{ unchanged: true }` when nothing changed (`server/etag.ts`).
 
 ## The daemon, seen from the worker
@@ -110,7 +112,8 @@ and at most `TURN_READ_CAP` entries, and the engine's and the inbox's handlers s
     and a 60 s replacement every 15 s tick opened a fresh WebSocket (39 hellos in 12 min). Guarded by
     `tests/daemon-connection.test.ts` (a drift check against `TICK_MS`, and 10 ticks open exactly one connection).
   - `InboxStore` keeps what `inbox.json` holds after the first read; it's the file's only writer. Its mutations copy
-    only the entries they touch (`a-mutation-copies-only-what-it-changes`, below).
+    only the entries they touch (`a-mutation-copies-only-what-it-changes`, below), and the worker writes the file at
+    most once per `INBOX_WRITE_MS` (2 s, `the-inbox-writes-at-most-once-per-window`, below).
   - Guarded by `tests/observe-io.test.ts`.
 - `server/store.ts`: `state.json` stays in memory once loaded. `mutate()` serializes changes. Writes are batched (at
   most one a second) and skipped when nothing changed. `onChanged` writes `scopes.json` for the hooks and the
