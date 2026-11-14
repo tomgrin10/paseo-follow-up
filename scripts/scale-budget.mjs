@@ -108,3 +108,33 @@ export function settleState(polls, boundMs) {
   }
   return { settled: false, expired: false };
 }
+
+// The busy window's tail. 2026-11-14: CI's idle requests scattered 5.3–8.7 a minute run to run (timeline 1.3–4), not
+// from a change but from how much of the busy window ended inside the 90 s idle window: turns still running, their
+// turn-end reads (TurnTimeline.after) and the next tick's discovery rescan. The idle window now starts drained.
+/** TICK_MS (shared/poll.ts): the engine's timer tick. tests/scale-budget.test.ts checks this copy. */
+export const ENGINE_TICK_MS = 15_000;
+/**
+ * Drained: no awake agent running, the worker read no timeline for a whole tick plus this margin, and the directory
+ * re-read the busy window's events made it due (`DIRTY_REFRESH_MS`, a minute after its last read) has happened: in a
+ * 90 s idle window that one re-read (6 requests on the live-sized seed) is 4 requests a minute, there or not by chance.
+ */
+export const DRAIN_QUIET_MS = ENGINE_TICK_MS + 5_000;
+/** The longest the check waits to drain (a dirty re-read is due within a minute); past it the idle window starts anyway and the report says so. */
+export const DRAIN_BOUND_MS = 120_000;
+
+/**
+ * Where the drain stands, from polls since the busy window ended (`atMs`, `running` awake agents, `reads`: the worker's
+ * cumulative timeline reads, `relisted`: the worker has listed workspaces since the busy window ended): settled once
+ * the directory has re-read, nothing runs and `reads` hasn't moved for `quietMs`; expired past the bound.
+ */
+export function drainState(polls, { quietMs = DRAIN_QUIET_MS, boundMs = DRAIN_BOUND_MS } = {}) {
+  let since = 0;
+  for (let i = 0; i < polls.length; i++) {
+    const p = polls[i];
+    if (p.running > 0 || (i > 0 && p.reads !== polls[i - 1].reads)) since = p.atMs;
+    if (p.running === 0 && p.relisted !== false && p.atMs - since >= quietMs) return { settled: true, expired: false, atMs: p.atMs };
+    if (p.atMs > boundMs) return { settled: false, expired: true, atMs: p.atMs };
+  }
+  return { settled: false, expired: false };
+}

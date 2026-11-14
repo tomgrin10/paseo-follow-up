@@ -20,3 +20,7 @@ export const SPREAD_SDS: number;
 export const REALISTIC_IDLE_BUDGET_MB: number;
 export const IDLE_BUDGETS: Record<string, number>;
 export function idleBudgetMb(value: string | null | undefined): number;
+export const ENGINE_TICK_MS: number;
+export const DRAIN_QUIET_MS: number;
+export const DRAIN_BOUND_MS: number;
+export function drainState(polls: readonly { atMs: number; running: number; reads: number; relisted?: boolean }[], options?: { quietMs?: number; boundMs?: number }): { settled: boolean; expired: boolean; atMs?: number };

@@ -115,3 +115,21 @@ test("scale budget: the realistic idle budget is computed from its named terms, 
   assert.ok(xs.every(x => x <= b.REALISTIC_IDLE_BUDGET_MB), "every reading it came from passes, #174's 243 included");
   assert.ok(Math.min(...xs) + 45 > b.REALISTIC_IDLE_BUDGET_MB, "a +45 MB regression fails every run");
 });
+
+test("the idle window starts drained: no awake agent running and no timeline read for a tick plus a margin", async () => {
+  const { DRAIN_BOUND_MS, DRAIN_QUIET_MS, drainState, ENGINE_TICK_MS } = await import("../scripts/scale-budget.mjs");
+  const { TICK_MS } = await import("../shared/poll");
+  assert.equal(ENGINE_TICK_MS, TICK_MS, "the script's copy of the engine tick");
+  assert.ok(DRAIN_QUIET_MS > TICK_MS, "a whole tick's rescan fits in the quiet span");
+  const at = (s: number, running: number, reads: number) => ({ atMs: s * 1000, running, reads });
+  // 2026-11-14: turns still running and their reads landing in the idle window scattered CI's idle rate 5.3–8.7/min.
+  assert.deepEqual(drainState([at(2, 2, 10), at(4, 1, 12), at(6, 0, 13)]), { settled: false, expired: false }, "reads just moved");
+  const quiet = [at(2, 0, 13), at(10, 0, 13), at(20, 0, 14), at(30, 0, 14), at(40, 0, 14)];
+  assert.deepEqual(drainState(quiet), { settled: true, expired: false, atMs: 40_000 }, "quiet from the last read at 20 s");
+  assert.equal(drainState([at(2, 1, 1), at(30, 1, 1)]).settled, false, "a running agent is never drained, however quiet");
+  assert.deepEqual(drainState([at(2, 1, 1), at(DRAIN_BOUND_MS / 1000 + 2, 1, 1)]), { settled: false, expired: true, atMs: DRAIN_BOUND_MS + 2_000 }, "bounded");
+  // The busy window's dirty directory re-read (6 requests, 4 a minute in a 90 s window) lands before the idle window.
+  const relist = (s: number, relisted: boolean) => ({ ...at(s, 0, 13), relisted });
+  assert.equal(drainState([relist(2, false), relist(30, false), relist(50, false)]).settled, false, "quiet, but the due re-read hasn't happened");
+  assert.deepEqual(drainState([relist(2, false), relist(30, false), relist(62, true)]), { settled: true, expired: false, atMs: 62_000 });
+});
