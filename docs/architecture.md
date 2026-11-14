@@ -105,12 +105,14 @@ and at most `TURN_READ_CAP` entries, and the engine's and the inbox's handlers s
   - `sharedDaemon` (`server/daemon.ts`): `PaseoGateway` (and its directory) share one daemon connection, so a tick
     opens at most one whatever the workspace count (`one-daemon-connection-per-tick`). It sits in the same client set
     as `withDaemon`'s, so `closeConnections` closes it within `stopWorker`'s deadline and nothing opens after stop.
-  - **A running worker holds one daemon connection** (`a-running-worker-holds-one-daemon-connection`). The shared
-    connection closes only after `SHARED_CLIENT_IDLE_MS` unused: the engine's `TICK_MS` plus `SHARED_CLIENT_MARGIN_MS`
-    (10 s), so consecutive ticks reuse it; a dropped one is retired at once, and `SHARED_CLIENT_MAX_MS` (30 min)
-    replaces a long-lived one. One idle timer per connection, not one per call. 2026-11-13 live: with a 5 s idle close
-    and a 60 s replacement every 15 s tick opened a fresh WebSocket (39 hellos in 12 min). Guarded by
-    `tests/daemon-connection.test.ts` (a drift check against `TICK_MS`, and 10 ticks open exactly one connection).
+  - **A running worker holds one daemon connection** (`a-running-worker-holds-one-daemon-connection`). Nothing closes
+    the shared connection for being unused: it closes on stop, a dropped one is retired at once, and
+    `SHARED_CLIENT_MAX_MS` (30 min) replaces a long-lived one. No idle bound is safe: the engine's loop waits `TICK_MS`
+    after a tick ends, a tick's daemon calls come before its GitHub reads, and a paused tick (the governor) calls the
+    daemon not at all. 2026-11-13 live: a 5 s idle close opened one per tick (39 hellos in 12 min); 2.0.1-beta.7's
+    `TICK_MS` + 10 s still closed and reopened it every 80-130 s (22 hellos in 30 min, "Client closed" each time).
+    Guarded by `tests/daemon-connection.test.ts` (the real loop with 12 s of reads and paused ticks opens one
+    connection; only stop, a drop or the max age replace it; `sharedDaemon` has no timer).
   - `InboxStore` keeps what `inbox.json` holds after the first read; it's the file's only writer. Its mutations copy
     only the entries they touch (`a-mutation-copies-only-what-it-changes`, below), and the worker writes the file at
     most once per `INBOX_WRITE_MS` (2 s, `the-inbox-writes-at-most-once-per-window`, below).
