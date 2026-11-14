@@ -79,8 +79,9 @@ Answers that the client polls are kept small:
   question's background and links; the inventory, excluded stacks and the next message. An archived workspace is only
   a search hit: its name and its PRs' numbers, titles and stacks. Detail surfaces (the panel, the larger view, the PR
   sheet and question sheet from Home, the pill and briefs) read the full workspace with `follow.get` (`useWorkspace`,
-  `client/workspace-data.ts`). Home's open row and the pill's popover paint from the list form at once and switch to
-  the full read when it answers. A read's copy reaches every live store as its list form (`acceptWorkspace`), and a
+  `client/workspace-data.ts`). Home's open row and the pill's popover paint from the list form at once and then draw
+  the newer of the two copies (`openRowCopy`); a sheet waiting on the read shows the error toast if it fails
+  (`useDetailGate`). A read's copy reaches every live store as its list form (`acceptWorkspace`), and a
   list change newer than a surface's read makes it read again. Agent tools read the stored workspace on the worker.
   `tests/list-reply-budget.test.ts` keeps a full reply on the live-sized seed under `LIST_REPLY_BUDGET_KB` (1904 KB
   of whole workspaces, 1168 KB of list forms, 2026-11-13).
