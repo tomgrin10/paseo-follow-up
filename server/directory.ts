@@ -30,8 +30,15 @@ export const LOOKUP_MAX = 40;
  * agent (a timeline or subagent read) re-checks that one agent first: see `live`.
  */
 export class DaemonDirectory {
-  private rows: (DirectoryRows & { at: number; agentsAt: number }) | null = null;
+  private rows: (DirectoryRows & { at: number; agentsAt: number; projectsAt: number }) | null = null;
+  /**
+   * In-flight reads, joined by every concurrent caller (concurrent-readers-share-one-request): one request per list,
+   * whatever the number of readers. 2026-11-14 live: each repository's PR-workflow detection read the project list
+   * itself, ~19 project.list requests back to back every 10 minutes.
+   */
   private loading: Promise<DirectoryRows> | null = null;
+  private loadingProjects: Promise<DirectoryRows> | null = null;
+  private loadingAgents: Promise<DirectoryRows> | null = null;
   private dirty = false;
   private projectsStale = false;
   /**
@@ -79,7 +86,7 @@ export class DaemonDirectory {
     const now = this.now();
     const rows = this.rows;
     const due = !rows || options.fresh === true || now - rows.at >= BACKSTOP_REFRESH_MS || (this.dirty && now - rows.at >= DIRTY_REFRESH_MS);
-    if (!due && rows && options.fresh === "agents") return this.listedThisTick() && !options.force ? rows : this.refreshAgents();
+    if (!due && rows && options.fresh === "agents") return this.listedThisTick() && !options.force ? rows : this.refreshAgents(options.force === true);
     if (!due && rows && !this.projectsStale) return rows;
     if (!due && rows) return this.refreshProjects();
     let failedProjects = false;
@@ -98,30 +105,42 @@ export class DaemonDirectory {
       const fresh = await loading;
       this.rememberArchived(this.rows?.agents); this.rememberArchived(fresh.agents);
       const at = this.now();
-      this.rows = { ...fresh, at, agentsAt: at }; this.agentsTick = this.tick;
+      this.rows = { ...fresh, at, agentsAt: at, projectsAt: at }; this.agentsTick = this.tick;
       if (failedProjects) this.projectsStale = true;
       return this.rows;
     } catch (error) { this.dirty = true; throw error; }
     finally { if (this.loading === loading) this.loading = null; }
   }
 
-  private async refreshAgents(): Promise<DirectoryRows> {
+  /** Joins a list already in flight, except for `force`: that caller needs a list started after it asked. */
+  private refreshAgents(force: boolean): Promise<DirectoryRows> {
+    if (this.loadingAgents && !force) return this.loadingAgents;
+    const loading = this.listAgents().finally(() => { if (this.loadingAgents === loading) this.loadingAgents = null; });
+    this.loadingAgents = loading; return loading;
+  }
+  private async listAgents(): Promise<DirectoryRows> {
     const agents = await this.connect(client => this.list("fetch_agents_request", cursor => client.fetchAgents({ page: { limit: 100, ...(cursor ? { cursor } : {}) } })));
     this.rememberArchived(this.rows?.agents); this.rememberArchived(agents);
     if (this.rows) { this.rows.agents = agents; this.rows.agentsAt = this.now(); this.agentsTick = this.tick; }
     return this.rows!;
   }
-  private async refreshProjects(): Promise<DirectoryRows> {
-    const catalog = await this.connect(client => { this.count("project.list.request"); return client.listProjects(); });
-    this.projectsStale = false;
-    if (this.rows) this.rows.projects = catalog.projects;
-    return this.rows!;
+  private refreshProjects(): Promise<DirectoryRows> {
+    if (this.loadingProjects) return this.loadingProjects;
+    const loading = (async () => {
+      const catalog = await this.connect(client => { this.count("project.list.request"); return client.listProjects(); });
+      this.projectsStale = false;
+      if (this.rows) { this.rows.projects = catalog.projects; this.rows.projectsAt = this.now(); }
+      return this.rows!;
+    })().finally(() => { if (this.loadingProjects === loading) this.loadingProjects = null; });
+    this.loadingProjects = loading; return loading;
   }
 
   /** The project list, re-read when older than `maxAgeMs` (Settings opening it), else the cached one. */
   async projects(maxAgeMs = BACKSTOP_REFRESH_MS): Promise<Project[]> {
     const rows = await this.read();
-    if (this.rows && this.now() - this.rows.at >= maxAgeMs) { this.projectsStale = true; return (await this.read()).projects; }
+    // Judged by when the projects were listed, not the whole directory: a project re-read doesn't refresh `at`, so this
+    // used to re-list on every call once the directory was a minute old.
+    if (this.rows && this.now() - this.rows.projectsAt >= maxAgeMs) { this.projectsStale = true; return (await this.read()).projects; }
     return rows.projects;
   }
 
