@@ -201,6 +201,13 @@ and at most `TURN_READ_CAP` entries, and the engine's and the inbox's handlers s
   worker's top allocator, 160 of ~600 MB per 5 min; per turn the inbox allocated ~900 KB, 685 KB of it
   structuredCloning, shadow-walking and zod-parsing the 500-item briefOrigins log, and `questionsChanged` drafted the
   inbox on half the turns without ever changing it. Now ~94 KB a turn. Guarded by `tests/inbox-mutation-cost.test.ts`.
+  The write follows the same rule: `inboxJsonParts` builds `inbox.json` from cached UTF-8 bytes per saved, frozen value
+  (each entry and top-level field; a frozen object never changes, so its bytes stay right while it lives), and
+  `writeParts` writes them with `writev`, looping over partial writes, into the same temp file and rename. The bytes
+  are exactly `JSON.stringify(state)`'s (members in insertion order, undefined left out), so nothing reading the file
+  changes. Cached strings joined into one 133 KB string per write would allocate more than `JSON.stringify` itself;
+  only skipping the whole-file string saves anything. 2.0.2-beta.1 live mix: the whole-inbox stringify was 26.5 of the
+  inbox's 76 MB per 5 min; a one-entry change and its write allocate 93 KB (main 181).
 - **A send lists agents at most once per tick** (`a-send-lists-agents-at-most-once-per-tick`). The engine starts each
   tick on the gateway (`tickStarted`); a decision that needs current status (`fresh: "agents"`, before a send)
   re-lists agents once in that tick and then reads that list, which lifecycle events keep patched. Within the tick a
