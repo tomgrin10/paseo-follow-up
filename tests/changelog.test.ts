@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { LEGACY_BASELINE, announcesUpdate, imageBlock, notesSince, notesVersion, parseChangelog, recentNotes, recentUpdate, whatsNew } from "../shared/changelog";
 // @ts-expect-error plain ESM script without types
-import { CURATED_MAX_BULLETS, DRAFT_MARKER, featuresInPatch, fragmentBullets, isMajor, lintBullet } from "../scripts/release-notes.mjs";
+import { CURATED_MAX_BULLETS, DRAFT_MARKER, featuresInPatch, fragmentBullets, isMajor, lintBullet, nextVersion } from "../scripts/release-notes.mjs";
 
 const exec = promisify(execFile);
 const SAMPLE = `# Release notes
@@ -201,6 +201,20 @@ test("release notes script: an rc of a major writes the major's section, consume
   // The stable release carries the same section: nothing new to write, and --check passes.
   await run("2.0.0"); await pkg("2.0.0"); await run("--check");
   assert.equal((await changelog()).match(/^## 2\.0\.0/gm)?.length, 1);
+});
+
+test("release:version picks the next stable from what it carries, never from the betas' number", async () => {
+  // AGENTS.md "Versioning" (version-is-picked-at-release). 2026-11-14: 2.0.1 kept its betas' number and shipped features.
+  const changelog = "# R\n\n## 2.0.1 (2026-11-14)\n\n- Short.\n\n<details><summary>Full changelog since 2.0.0</summary>\n\n## 9.0.0 (2026-01-01)\n\n</details>\n\n## 2.0.0 (2026-11-11)\n\n- Home.\n";
+  assert.deepEqual(nextVersion(changelog, ["fix-a.md", "perf-b.md"]), { last: "2.0.1", version: "2.0.2", reason: "a patch: 2 pending note(s), none a feature" });
+  assert.equal(nextVersion(changelog, ["fix-a.md", "feat-rename.md"]).version, "2.1.0", "a feature makes a minor");
+  assert.match(nextVersion(changelog, ["feat-rename.md"]).reason, /a minor: 1 of 1 pending note\(s\) are features \(feat-rename\.md\)/);
+  assert.equal(nextVersion(changelog + "\n## 2.1.0-beta.3 (2026-11-20)\n\n- Beta.\n", ["fix-a.md"]).version, "2.0.2", "a beta's number is never the base");
+  // The shipped CHANGELOG and changes/ give a version the release-notes rules accept.
+  const shipped = await readFile("CHANGELOG.md", "utf8");
+  const names = (await readdir("changes")).filter(n => n.endsWith(".md") && n !== "README.md");
+  const { version } = nextVersion(shipped, names);
+  assert.equal(featuresInPatch(version, names), null, `release:version's ${version} passes release:notes' feature check`);
 });
 
 test("release notes script: a minor or patch's notes stay short, and a patch never carries features", async () => {

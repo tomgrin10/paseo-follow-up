@@ -21,7 +21,8 @@ stop.
 2. **Notes come in two tiers.**
    - **A beta** gets no CHANGELOG section. Its fragments stay in `changes/` for the next stable or rc, and its GitHub
      release shows them as they are.
-   - **Pick the version and keep the notes short** (AGENTS.md, "Release notes"): features ship in a minor, never a
+   - **Pick the version right before releasing, and keep the notes short** (AGENTS.md, "Versioning" and "Release
+     notes"). Run `npm run release:version` and ask Tom for that exact version. Features ship in a minor, never a
      patch, and a minor or patch gets one intro line and at most 6 bullets.
    - **A stable version or a major's rc is curated.** `npm run release:notes <version>` (`scripts/release-notes.mjs`)
      writes a DRAFT section: the fragments as starting material under a `<!-- DRAFT … -->` line, then a generated

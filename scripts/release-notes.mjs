@@ -149,7 +149,31 @@ export function curatedPart(changelog, version) {
   return out.filter(l => l.trim() && !/^\s*<!--/.test(l));
 }
 /**
- * Features ship in a minor (AGENTS.md, "Release notes"): a patch (x.y.Z, Z > 0) may carry fixes and speed-ups only.
+ * The next stable version, picked right before a release from what it carries (AGENTS.md, "Versioning"): a pending
+ * `feat-*` note makes a minor, anything else a patch, counted from the newest stable section. A major is Tom's call.
+ * Never inherited from the beta line: 2.0.1 kept its betas' number and shipped features as a patch (2026-11-14).
+ */
+export function nextVersion(changelog, names) {
+  // Sections only: a heading inside a <details> list (an archive) isn't a release of its own.
+  let folded = false; const sections = [];
+  for (const line of changelog.split("\n")) {
+    if (folded) { if (/<\/details>/i.test(line)) folded = false; continue; }
+    if (/^\s*<details/i.test(line)) { folded = !/<\/details>/i.test(line); continue; }
+    const h = HEADING.exec(line); if (h) sections.push(h[1]);
+  }
+  const last = sections.filter(v => SEMVER.test(v) && !isPrerelease(v)).sort((a, b) => {
+    const x = a.split(".").map(Number), y = b.split(".").map(Number);
+    return y[0] - x[0] || y[1] - x[1] || y[2] - x[2];
+  })[0];
+  if (!last) throw new Error("CHANGELOG.md has no stable section to count from");
+  const [major, minor, patch] = last.split(".").map(Number);
+  const features = names.filter(n => n.startsWith("feat-"));
+  const version = features.length ? `${major}.${minor + 1}.0` : `${major}.${minor}.${patch + 1}`;
+  const reason = features.length ? `a minor: ${features.length} of ${names.length} pending note(s) are features (${features.join(", ")})` : names.length ? `a patch: ${names.length} pending note(s), none a feature` : "a patch: no pending notes";
+  return { last, version, reason };
+}
+/**
+ * Features ship in a minor (AGENTS.md, "Versioning"): a patch (x.y.Z, Z > 0) may carry fixes and speed-ups only.
  * Fragments are named after their branch, so a pending `feat-*.md` means a feature. 2026-11-14: 2.0.1 shipped
  * Rename with AI, Report a bug and No review as a patch.
  */
@@ -246,7 +270,10 @@ const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.arg
 if (isMain) {
   const args = process.argv.slice(2);
   try {
-    if (args.includes("--check")) {
+    if (args.includes("--next-version")) {
+      const { last, version, reason } = nextVersion(await readFile(CHANGELOG, "utf8"), (await fragments()).map(f => f.name));
+      console.log(`${version}  (${reason}; last stable ${last}. A major is Tom's call. Ask Tom for this exact version before releasing.)`);
+    } else if (args.includes("--check")) {
       const problems = await check();
       if (problems.length) { console.error(problems.join("\n")); process.exit(1); }
       console.log("release notes ok");
