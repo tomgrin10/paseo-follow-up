@@ -188,6 +188,19 @@ and at most `TURN_READ_CAP` entries, and the engine's and the inbox's handlers s
   harness-sized JS heap. Guarded by `tests/inbox-copies.test.ts`, `tests/store-copies.test.ts` (it walks every JSON
   writer in `server/`: a new store must use the draft or carry an exemption with its reason) and `test:scale`'s busy
   window.
+- **A mutation costs what it changes** (`a-mutation-costs-what-it-changes`). Copying only what changes isn't enough
+  when the bookkeeping walks the whole store: `finish()` reads only the ids the draft wrote, copied or deleted (the
+  collection proxy records them) and copies a record once, only when one of them changed; `plain()` allocates a copy
+  only from the first part that holds a view. A field that is only ever read whole and replaced whole drafts as kind
+  `frozen`: the draft hands out the saved, deep-frozen value (readonly in its type, so a reader can't change it in
+  place), a replacement keeps the saved items it carries, and the store validates only the items it adds plus the cap
+  (`InboxState.briefOrigins`, `BRIEF_ORIGINS_MAX`). A pure reader that walks a whole draft item reads `peek()`, the
+  saved value, so the walk makes no view per nested object (`Inbox.apply` hands `reduce` the saved entry; `reduce`
+  copies before it changes anything). A caller that can decide from the frozen snapshot that nothing is due drafts
+  nothing (`Inbox.questionsChanged`, like `Inbox.tick`). 2026-11-14 (2.0.2-beta.0, live turn mix): the inbox was the
+  worker's top allocator, 160 of ~600 MB per 5 min; per turn the inbox allocated ~900 KB, 685 KB of it
+  structuredCloning, shadow-walking and zod-parsing the 500-item briefOrigins log, and `questionsChanged` drafted the
+  inbox on half the turns without ever changing it. Now ~94 KB a turn. Guarded by `tests/inbox-mutation-cost.test.ts`.
 - **A send lists agents at most once per tick** (`a-send-lists-agents-at-most-once-per-tick`). The engine starts each
   tick on the gateway (`tickStarted`); a decision that needs current status (`fresh: "agents"`, before a send)
   re-lists agents once in that tick and then reads that list, which lifecycle events keep patched. Within the tick a
