@@ -414,6 +414,25 @@ See [docs/releasing.md](docs/releasing.md). In short:
   added since the previous tag, a stable's or an rc's its curated section. In-app What's new stays major-only.
 - Don't bump the version in a feature PR.
 
+### Release notes
+
+Guarded by `npm run check:notes` and `release:notes` (`scripts/release-notes.mjs`, tests in `tests/changelog.test.ts`).
+
+- **Pick the version from what it carries** (`features-ship-in-a-minor`). A patch (`2.0.2`) is fixes and speed-ups
+  only. Any new feature, setting or screen makes it a minor (`2.1.0`). A major (`3.0.0`) is for a big or breaking
+  change, and only a major gets the What's new popup. Decide at the stable, from the pending fragments.
+  `release:notes` refuses a patch while a `changes/feat-*.md` is pending; `--allow-features` needs Tom's OK. Once a
+  feature lands, move the beta line to the next minor (`2.1.0-beta.0`), so the betas don't promise a patch.
+- **Curated notes are short** (`release-notes-are-short`). A minor or patch: one intro sentence, then at most 6
+  bullets with no headings, under 1200 characters. Lead with what a user gets, one line each. Fold small fixes into
+  a final "Plus many smaller fixes." A major: an intro and 3 to 8 headed pillars, with screenshots if they help.
+- **Write for the person using Follow-up.** Name what they can now do or what stopped bothering them, in their words:
+  no PR numbers, file names, internal terms (worker, RPC, store), or measurements nobody asked for.
+- **The full list stays collapsed.** `release:notes` puts every fragment in the `<details>` "Full changelog" block.
+  It shows on GitHub, never in the app, and doesn't count toward the limits above. Don't copy it into the curated part.
+- **Fragments** follow `changes/README.md`: one to three plain bullets per PR, named after the branch (`feat-`,
+  `fix-`, `perf-`), which is how `release:notes` tells a feature from a fix.
+
 ## Common pitfalls
 
 - **A plugin reload detaches native tools.** Every `paseo plugin reload` or update drops the `follow_*` and

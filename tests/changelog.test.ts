@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { LEGACY_BASELINE, announcesUpdate, imageBlock, notesSince, notesVersion, parseChangelog, recentNotes, recentUpdate, whatsNew } from "../shared/changelog";
 // @ts-expect-error plain ESM script without types
-import { DRAFT_MARKER, fragmentBullets, lintBullet } from "../scripts/release-notes.mjs";
+import { CURATED_MAX_BULLETS, DRAFT_MARKER, featuresInPatch, fragmentBullets, isMajor, lintBullet } from "../scripts/release-notes.mjs";
 
 const exec = promisify(execFile);
 const SAMPLE = `# Release notes
@@ -51,7 +51,9 @@ test("changelog: the shipped CHANGELOG.md shows only curated stable sections in 
   assert.equal(versions.at(-1), "2.0.0", "2.0.0 is the oldest section the app sees; 1.x stays below <details>");
   for (const n of notes) {
     const headings = (n.blocks ?? []).filter(b => b.kind === "heading").length;
-    assert.ok(headings >= 3 && headings <= 8, `${n.version}: a handful of pillars (${headings})`);
+    // AGENTS.md "Release notes": a major gets a handful of headed pillars; a minor or patch one intro line and a few bullets.
+    if (isMajor(n.version)) assert.ok(headings >= 3 && headings <= 8, `${n.version}: a handful of pillars (${headings})`);
+    else assert.ok(headings === 0 && n.items.length <= CURATED_MAX_BULLETS, `${n.version}: short notes, no headings (${headings} headings, ${n.items.length} bullets)`);
     assert.match(text, new RegExp(`<details><summary>Full changelog since ${n.version === "2.0.0" ? "1\\.0\\.1" : "\\d+\\.\\d+\\.\\d+"}</summary>`));
   }
   const blocks = notes.find(n => n.version === "2.0.0")!.blocks ?? [];
@@ -199,6 +201,30 @@ test("release notes script: an rc of a major writes the major's section, consume
   // The stable release carries the same section: nothing new to write, and --check passes.
   await run("2.0.0"); await pkg("2.0.0"); await run("--check");
   assert.equal((await changelog()).match(/^## 2\.0\.0/gm)?.length, 1);
+});
+
+test("release notes script: a minor or patch's notes stay short, and a patch never carries features", async () => {
+  // 2026-11-14: stable 2.0.1 shipped six headed groups and 24 bullets, and it carried new features as a patch.
+  assert.equal(featuresInPatch("2.0.2", ["fix-a.md", "perf-b.md"]), null, "fixes and speed-ups make a patch");
+  assert.match(featuresInPatch("2.0.2", ["fix-a.md", "feat-rename.md"]) ?? "", /2\.0\.2 is a patch, but 1 pending note\(s\) are features \(feat-rename\.md\)\. Features ship in a minor: release 2\.1\.0/);
+  assert.equal(featuresInPatch("2.1.0", ["feat-rename.md"]), null, "a minor carries features");
+  assert.equal(featuresInPatch("3.0.0", ["feat-rename.md"]), null);
+  const dir = await mkdtemp(join(tmpdir(), "notes-short-"));
+  await mkdir(join(dir, "scripts")); await mkdir(join(dir, "changes"));
+  await cp("scripts/release-notes.mjs", join(dir, "scripts/release-notes.mjs"));
+  await writeFile(join(dir, "CHANGELOG.md"), "# Release notes\n\n## 1.0.0 (2026-01-01)\n\n- Old.\n");
+  await writeFile(join(dir, "changes/feat-rename.md"), "- Rename with AI.\n");
+  const run = (...a: string[]) => exec("node", [join(dir, "scripts/release-notes.mjs"), ...a]);
+  await assert.rejects(run("1.0.1", "--date", "2026-11-14"), /1\.0\.1 is a patch, but 1 pending note\(s\) are features/);
+  assert.deepEqual(await readdir(join(dir, "changes")), ["feat-rename.md"], "a refused patch consumes nothing");
+  await run("1.1.0", "--date", "2026-11-14");
+  // A curated minor with headings and more than a few bullets fails check:notes.
+  const long = `# Release notes\n\n## 1.1.0 (2026-11-14)\n\nIntro.\n\n### Group\n\n${Array.from({ length: CURATED_MAX_BULLETS + 1 }, (_, i) => `- Note ${i}.`).join("\n")}\n\n## 1.0.0 (2026-01-01)\n\n- Old.\n`;
+  await writeFile(join(dir, "CHANGELOG.md"), long);
+  await writeFile(join(dir, "package.json"), JSON.stringify({ version: "1.1.0", files: ["CHANGELOG.md"] }));
+  await assert.rejects(run("--check"), /1\.1\.0: a minor or patch's notes are one intro line and at most 6 bullets/);
+  await writeFile(join(dir, "CHANGELOG.md"), "# Release notes\n\n## 1.1.0 (2026-11-14)\n\nIntro.\n\n- One.\n- Two.\n\n<details><summary>Full changelog since 1.0.0</summary>\n\n### More\n\n" + Array.from({ length: 20 }, (_, i) => `- Listed ${i}.`).join("\n") + "\n\n</details>\n\n## 1.0.0 (2026-01-01)\n\n- Old.\n");
+  await run("--check"); // the full list below <details> doesn't count
 });
 
 test("release notes script: a curated section is never regrouped or relabeled; 0 fragments is a no-op, 1 adds one line", async () => {
