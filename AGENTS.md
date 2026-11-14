@@ -189,6 +189,11 @@ These are product rules. Each has tests, and breaking one is a bug even when the
      agent list (patched by events); no `fetch_agents` or `fetch_agent` per send or per turn event, and subagents at
      most once per agent per tick. Guarded by `tests/daemon-load.test.ts` and `test:scale`
      ([docs/architecture.md](docs/architecture.md)).
+   - **Cloud Run reads in process** (`cloud-run-reads-in-process`): the deploy probe reads the Cloud Run services list
+     and revisions, and the registry, over REST in the worker (`server/deployments.ts`); gcloud runs only for the access
+     token, cached `TOKEN_MS`. A 401/403 drops the token and retries once; every read aborts after `READ_TIMEOUT_MS`.
+     2026-11-13 live: ~0.8 gcloud spawns a minute at ~1 s CPU and ~97 MB each. Guarded by
+     `tests/deployments.test.ts` and `tests/worker-reads-github-in-process.test.ts` (a sweep of `server/`).
    - **A check costs linear in its workspace** (`a-check-costs-linear-in-its-workspace`): one status check (and every
      surface it builds) tokenizes each question once (`featuresOf` in `shared/questions.ts`, cached per question and
      checked against its text) and orders a stack with one depth pass (`depths` in `shared/attention.ts`), never a

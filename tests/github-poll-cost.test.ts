@@ -184,23 +184,23 @@ test("tokens: one lookup per owner, the account map like the gh wrapper, a dead 
   assert.equal(await explicit("acme"), "explicit");
 });
 
-test("the deploy probe runs one gcloud call per fleet read once its serving revisions are known, and spawns no gh", async () => {
-  let now = clock; const calls: string[] = []; const compares: string[] = [];
+test("the deploy probe reads the fleet once a minute in process, each serving revision once, and spawns no gh or gcloud run", async () => {
+  let now = clock; const calls: string[] = []; const reads: string[] = []; const compares: string[] = [];
   const sha = "b".repeat(40);
   const deployments = new Deployments(async (command, args) => {
     calls.push(`${command} ${args.slice(0, 3).join(" ")}`);
-    if (command === "gh") return JSON.stringify({ status: "ahead" });
-    if (args[0] === "auth") return "token";
-    if (args[1] === "services") return JSON.stringify(["backend", "etl", "interpretation", "public-api", "web"].map(role => ({ metadata: { name: `acme-service-app-${role}-x`, labels: { "cloud.googleapis.com/location": "us-central1" } }, status: { conditions: [{ type: "Ready", status: "True" }], traffic: [{ revisionName: `${role}-r1`, percent: 100 }] } })));
-    return JSON.stringify({ spec: { containers: [{ name: "app", image: `us-central1-docker.pkg.dev/acme-prod/acme-docker/prod-app-backend@sha256:${"1".repeat(64)}` }] }, status: { conditions: [{ type: "Ready", status: "True" }] } });
-  }, (async (url: string) => ({ ok: true, text: async () => JSON.stringify(url.includes("/manifests/") ? { config: { digest: `sha256:${"3".repeat(64)}` } } : { config: { Labels: { "org.opencontainers.image.revision": sha } } }) })) as unknown as typeof fetch, () => now, { rest: async (_repo: string, path: string) => { compares.push(path); return { status: "ahead" }; } } as any, acmeDeploy);
+    if (command === "gcloud" && args[0] === "auth") return "token";
+    throw new Error(`unexpected ${command} ${args.join(" ")}`);
+  }, (async (url: string) => { reads.push(String(url)); return { ok: true, status: 200, text: async () => JSON.stringify(
+    url.includes("/services?") ? { items: ["backend", "etl", "interpretation", "public-api", "web"].map(role => ({ metadata: { name: `acme-service-app-${role}-x`, labels: { "cloud.googleapis.com/location": "us-central1" } }, status: { conditions: [{ type: "Ready", status: "True" }], traffic: [{ revisionName: `${role}-r1`, percent: 100 }] } })) }
+    : url.includes("/revisions/") ? { spec: { containers: [{ name: "app", image: `us-central1-docker.pkg.dev/acme-prod/acme-docker/prod-app-backend@sha256:${"1".repeat(64)}` }] }, status: { conditions: [{ type: "Ready", status: "True" }] } }
+    : url.includes("/manifests/") ? { config: { digest: `sha256:${"3".repeat(64)}` } } : { config: { Labels: { "org.opencontainers.image.revision": sha } } }) }; }) as unknown as typeof fetch, () => now, { rest: async (_repo: string, path: string) => { compares.push(path); return { status: "ahead" }; } } as any, acmeDeploy);
   const target = pr({ repo: "acme/acme-poc", key: "acme/acme-poc#1", snapshot: { ...pr().snapshot!, state: "MERGED", mergeCommit: "a".repeat(40) } });
   for (let minute = 0; minute < 10; minute++) { for (let t = 0; t < 4; t++) { await deployments.observe([target]); now += TICK_MS; } }
-  const gcloud = calls.filter(c => c.startsWith("gcloud run"));
-  assert.equal(gcloud.filter(c => c.includes("services")).length, 10, "one fleet read a minute");
-  assert.equal(gcloud.filter(c => c.includes("revisions")).length, 5, "each serving revision described once, not every minute");
-  // 2026-11-12 (rc.3 live check): the ancestry compare still spawned gh, ~50 at a time after a start or a deploy.
-  assert.deepEqual(calls.filter(c => c.startsWith("gh ")), [], "ancestry reads go in process, not through gh");
+  assert.equal(reads.filter(u => u.includes("/services?")).length, 10, "one fleet read a minute");
+  assert.equal(reads.filter(u => u.includes("/revisions/")).length, 5, "each serving revision read once, not every minute");
+  // 2026-11-13 live: the fleet read spawned gcloud (~1 s CPU, ~97 MB) ~0.8 times a minute; now only the token does.
+  assert.deepEqual(calls, ["gcloud auth print-access-token"], "one token in 10 minutes; no gcloud run, no gh");
   assert.equal(compares.length, 1, "one compare per (merge, serving commit), cached");
 });
 
