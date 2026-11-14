@@ -164,6 +164,11 @@ These are product rules. Each has tests, and breaking one is a bug even when the
      2026-11-14 (2.0.2-beta.0, live mix): the inbox was the worker's top allocator, 160 of ~600 MB per 5 min; a turn
      allocated ~900 KB in the inbox, 685 KB of it re-copying the 500-item briefOrigins log, now ~94 KB. Guarded by
      `tests/inbox-mutation-cost.test.ts` (100 turns on a live-sized inbox ≤ 200 KB each; a no-op ≤ 50 KB).
+     The write too: `InboxStore.write` writes `inbox.json` as parts (`writev`) from cached UTF-8 bytes per saved,
+     frozen value (each entry and top-level field), so a write encodes only what changed, and the file is byte for byte
+     `JSON.stringify(state)`. 2.0.2-beta.1 live mix: the whole-inbox stringify was 26.5 of the inbox's 76 MB per 5 min;
+     a one-entry change and its write now allocate 93 KB (main 181). Guarded by the same test (byte-identical after a
+     mix of changes; ≤ 130 KB a write).
    - **A list answer serializes only what changed** (`a-list-answer-serializes-only-what-changed`): `ListCache`
      (`server/list-cache.ts`) skips a workspace whose frozen object is the one it last serialised, so a state change
      stringifies only the workspaces it touched, never every tracked one. 2026-11-13 (run W, live copy under live

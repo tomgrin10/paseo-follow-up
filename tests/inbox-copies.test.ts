@@ -62,11 +62,13 @@ test("an-inbox-mutation-copies-one-entry: reading an entry inside a mutation wit
   assert.equal(await readFile(join(d, "inbox.json"), "utf8"), file, "nothing written");
 });
 
-test("an-inbox-mutation-copies-one-entry: a real change serialises the inbox once (the file's text), not three times", async t => {
+test("an-inbox-mutation-copies-one-entry: a real change never stringifies the whole inbox (a-mutation-costs-what-it-changes: the write encodes only what changed)", async t => {
   const store = new InboxStore(await dir(t));
   await store.mutate(s => seed(s));
+  const writes = store.writes;
   const n = await wholeStringifies(() => store.mutate(s => { s.entries["agent-5"].needs = null; }));
-  assert.equal(n, 1, "one stringify per write");
+  assert.equal(store.writes, writes + 1, "the change was written");
+  assert.equal(n, 0, "no whole-inbox stringify: inbox.json is written from cached parts (main stringified it once per write)");
 });
 
 test("an-inbox-mutation-copies-one-entry: adds, deletes, replacements and root fields still land, and an invalid entry is refused", async t => {

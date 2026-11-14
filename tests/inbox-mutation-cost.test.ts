@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Session } from "node:inspector/promises";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Inbox, InboxStore, type Directory } from "../server/inbox";
@@ -163,4 +163,48 @@ test("a-mutation-costs-what-it-changes: questionsChanged with nothing due drafts
   assert.equal(drafts, 0, "no draft when no brief's questions moved");
   await inbox.questionsChanged([{ id: "w1", questions: [{ id: "q1", answer: { choice: "Yes", words: null }, closed: false } as never] }]);
   assert.equal(drafts, 1, "an answered question still steps the brief");
+});
+
+// The write: inbox.json is written as parts (writev) from cached bytes per saved (frozen) entry and field, so a write
+// after a one-entry change encodes that entry, not the 133 KB inbox (2.0.2-beta.1 live mix: 26.5 MB of the inbox's 76
+// per 5 min). The file stays byte for byte what JSON.stringify(state) wrote. Measured 2026-11-14 (Node 24, median of 5
+// rounds of 50): a one-entry change and its write 93 KB, main 181; the budget sits ~1.4× from both.
+
+/** A write-through store (writeMs 0) on the live-sized inbox, so every real change writes inbox.json. */
+async function writingStore(t: { after(fn: () => unknown): void }) {
+  const dir = await mkdtemp(join(tmpdir(), "follow-write-cost-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const store = new InboxStore(dir, () => T0, 0);
+  const seed = liveSized();
+  await store.mutate(s => { Object.assign(s, seed); });
+  return { store, file: () => readFile(join(dir, "inbox.json"), "utf8") };
+}
+
+test("a-mutation-costs-what-it-changes: inbox.json is byte for byte JSON.stringify of the state after any mix of changes", async t => {
+  const { store, file } = await writingStore(t);
+  const changes: ((s: InboxState) => void)[] = [
+    s => { s.entries["agent-4"]!.lastEventAt = iso(1); },
+    s => { s.entries["agent-90"] = { ...newEntry("agent-90"), lastEventAt: iso(2) }; },
+    s => { delete s.entries["agent-7"]; },
+    s => { s.briefOrigins = [...s.briefOrigins, { at: iso(3), origin: "tool" as const }].slice(-BRIEF_ORIGINS_MAX); },
+    s => { s.ledger = [...s.ledger, { agentId: "agent-1", messageId: "m-new", at: iso(4) }]; s.lastSeen = iso(5); },
+    s => { s.entries["agent-0"]!.needs = null; s.entries["agent-2"]!.seenKeys = [...s.entries["agent-2"]!.seenKeys, "example/app#9:MERGED"]; },
+    s => { s.unsorted = null; s.batchUndo = null; },
+    s => { s.entries["agent-4"]!.lastEventAt = iso(6); s.entries["agent-90"]!.seq = 3; },
+  ];
+  for (const [i, change] of changes.entries()) {
+    await store.mutate(change);
+    const text = await file(), state = await store.snapshot();
+    assert.equal(text, JSON.stringify(state), `write ${i + 1} is the same bytes as JSON.stringify`);
+    assert.deepEqual(JSON.parse(text), JSON.parse(JSON.stringify(state)), `write ${i + 1} parses back to the state`);
+  }
+  assert.equal(store.writes, changes.length + 1);
+});
+
+test("a-mutation-costs-what-it-changes: a write after a one-entry change allocates ≤ 130 KB on a live-sized inbox (main: ~180)", async t => {
+  const { store } = await writingStore(t);
+  const before = store.writes;
+  const kb = await kbPerCall(i => store.mutate(s => { s.entries[`agent-${i % 86}`]!.lastEventAt = new Date(T0 + (i + 1) * 1000).toISOString(); }), 50);
+  assert.equal(store.writes - before, 50 * 6, "every change wrote inbox.json");
+  assert.ok(kb <= 130, `a one-entry change and its write allocated ${kb.toFixed(0)} KB`);
 });

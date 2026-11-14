@@ -1,6 +1,6 @@
 import { prLink } from "../shared/presentation";
 import { DEVELOPER, ledgerBy, onBehalfLine, type Actor } from "../shared/actor";
-import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
+import { mkdir, open, readFile, rename, unlink, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { realTimers, stableMessageId, withDeadline, type Timers } from "./delivery";
@@ -149,10 +149,72 @@ export class InboxStore {
     const temporary = join(this.directory, `inbox.${randomUUID()}.tmp`);
     try {
       const file = await open(temporary, "wx", 0o600);
-      try { await file.writeFile(JSON.stringify(state)); await file.sync(); } finally { await file.close(); }
+      try { await writeParts(file, inboxJsonParts(state)); await file.sync(); } finally { await file.close(); }
       await rename(temporary, this.path);
       this.written = { at: this.now() }; this.unsaved = null; this.saved = deepFreeze(state); this.writes++;
     } finally { await unlink(temporary).catch(() => undefined); }
+  }
+}
+/**
+ * a-mutation-costs-what-it-changes, for the write: inbox.json is JSON.stringify(state), byte for byte, written as the
+ * UTF-8 of each part in order (writev), from a cached buffer per saved (frozen) value: each entry, and each top-level
+ * field (briefOrigins is 26 KB). The saved state is deep-frozen and a frozen object never changes, so its bytes stay
+ * right for as long as the object lives, and a write encodes only what changed since the last one. Cached strings
+ * wouldn't do: joining them back into one 133 KB string per write allocated twice what JSON.stringify did. 2026-11-14
+ * (2.0.2-beta.1, live mix): stringifying the whole inbox, ~20 writes a minute, was 26.5 of the inbox's 76 MB per 5 min.
+ */
+const frozenBytes = new WeakMap<object, Buffer>();
+const keyBytes = new Map<string, Buffer>();
+const OPEN = Buffer.from("{"), CLOSE = Buffer.from("}"), COMMA = Buffer.from(",");
+function valueBytes(value: unknown): Buffer | undefined {
+  const frozen = value !== null && typeof value === "object" && Object.isFrozen(value);
+  const cached = frozen ? frozenBytes.get(value) : undefined;
+  if (cached) return cached;
+  const text = JSON.stringify(value);
+  if (text === undefined) return undefined;
+  const bytes = Buffer.from(text);
+  if (frozen) frozenBytes.set(value, bytes);
+  return bytes;
+}
+function memberKey(key: string): Buffer {
+  let bytes = keyBytes.get(key);
+  if (!bytes) { bytes = Buffer.from(`${JSON.stringify(key)}:`); keyBytes.set(key, bytes); }
+  return bytes;
+}
+/** JSON.stringify of a plain object as parts: members in insertion order, undefined, functions and symbols left out. */
+function objectParts(value: Record<string, unknown>, out: Buffer[], member: (v: unknown, out: Buffer[]) => boolean): void {
+  out.push(OPEN); let first = true;
+  for (const key of Object.keys(value)) {
+    const at = out.length;
+    if (!first) out.push(COMMA);
+    out.push(memberKey(key));
+    if (member(value[key], out)) first = false; else out.length = at;
+  }
+  out.push(CLOSE);
+}
+const pushValue = (v: unknown, out: Buffer[]): boolean => { const b = valueBytes(v); if (b) out.push(b); return !!b; };
+/** inbox.json's bytes, in parts: the same bytes as Buffer.from(JSON.stringify(state)). */
+export function inboxJsonParts(state: InboxState): Buffer[] {
+  const out: Buffer[] = [];
+  objectParts(state as Record<string, unknown>, out, (v, o) => {
+    if (v !== state.entries) return pushValue(v, o);
+    objectParts(state.entries as Record<string, unknown>, o, pushValue);
+    return true;
+  });
+  // Agent ids come and go: keep the key cache to the keys this inbox has.
+  if (keyBytes.size > 4 * (Object.keys(state.entries).length + 32)) keyBytes.clear();
+  return out;
+}
+/** Writes every part, however the OS splits a vectored write. */
+async function writeParts(file: FileHandle, parts: Buffer[]): Promise<void> {
+  let rest = parts;
+  while (rest.length) {
+    const { bytesWritten } = await file.writev(rest.length > 512 ? rest.slice(0, 512) : rest);
+    let n = bytesWritten, i = 0;
+    while (i < rest.length && n >= rest[i]!.length) n -= rest[i++]!.length;
+    rest = rest.slice(i);
+    if (n > 0) rest = [rest[0]!.subarray(n), ...rest.slice(1)];
+    if (bytesWritten === 0 && rest.length) throw new Error("inbox.json: the write made no progress");
   }
 }
 /**
