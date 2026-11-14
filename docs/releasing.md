@@ -21,6 +21,9 @@ stop.
 2. **Notes come in two tiers.**
    - **A beta** gets no CHANGELOG section. Its fragments stay in `changes/` for the next stable or rc, and its GitHub
      release shows them as they are.
+   - **Pick the version right before releasing, and keep the notes short** (AGENTS.md, "Versioning" and "Release
+     notes"). Run `npm run release:version` and ask Tom for that exact version. Features ship in a minor, never a
+     patch, and a minor or patch gets one intro line and at most 6 bullets.
    - **A stable version or a major's rc is curated.** `npm run release:notes <version>` (`scripts/release-notes.mjs`)
      writes a DRAFT section: the fragments as starting material under a `<!-- DRAFT … -->` line, then a generated
      "Full changelog since <last stable>" in a collapsed `<details>` block (every fragment, deduplicated and grouped by
@@ -36,7 +39,8 @@ stop.
    - **A major's rc** (`2.0.0-rc.N`) carries the major's own section (`## 2.0.0`). A later rc or the final `2.0.0`
      keeps the curated text as written and adds its new fragments to the full list. In the app, `notesVersion`
      (`shared/changelog.ts`) maps an rc to that section, so 1.x → rc.0 shows What's new once, and rc.N → 2.0.0
-     doesn't show it again. The parser stops at `<details>`, so the full list never reaches What's new.
+     doesn't show it again. The parser skips each `<details>` list up to its `</details>`, so a full list never reaches What's new and every
+     stable section above or below one still does.
    - `check:notes` also fails when a stable version or a major's rc has no section of its own. Never edit a released
      section, except to fix wording.
 3. In the same commit, bump the version in `package.json` and `package-lock.json` together, commit

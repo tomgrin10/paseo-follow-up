@@ -4,49 +4,14 @@ What changed in each version of Follow-up, newest first. Follow-up shows the cur
 
 ## 2.0.1 (2026-11-14)
 
-Follow-up 2.0.1 turns fixes into plain tasks you can see and steer, makes merging one click, and runs much lighter on your machine.
+Fixes are easier to follow, merging takes one click, and Follow-up runs much lighter.
 
-### Tasks you can see and steer
-
-- What Follow-up finds on your PRs (conflicts, review comments, failing checks, restacks) is now a task in the workspace's Tasks, with one plain state: Queued, Sent, Needs you or Done.
-- The top of Tasks says who the next message goes to, when it goes and why it waits, with Preview and Send now. Turn Auto-send off on a task to keep it for yourself.
-- Follow-up checks GitHub instead of asking you to Retry: what's cleared is done, and what's still open goes in the next message. It asks you only when a task went out twice with no change.
-- Home's "Follow-up is fixing" is now "Sending": each message on its way, with when and why it goes out.
-
-### Merging and review
-
-- One click on Merge merges, and the button names everything it merges first ("Merge 3 PRs"). A blocker found at click time merges nothing and says why.
-- Set a repository to No review in Settings → Shipping PRs, or with "Let the agent merge in" on a no-reviewers row: agents merge their own PRs once checks pass, and Follow-up never asks you for reviewers there.
-- A PR without reviewers asks once in Needs you, naming the suggested reviewer.
-- Every Needs you row about a PR opens it in one click.
-
-### Answering agents
-
-- "Add note" on a decision card sends your pick with a note ("A, but keep the BOM off").
-- On Paseo 0.16, Put in chat adds your answer to the end of the agent's message box. An answer you copied or put in the chat reads "not sent yet" everywhere until it reaches the agent.
-- An open question shows once, under one name, in the panel and on Home.
-
-### New
-
-- Rename with AI from a workspace's menu or ⌘K: Follow-up suggests a short name, and Undo puts the old one back.
-- Report a bug, an idea or feedback from Settings, ⌘K or any error message. Your agent writes it up, removes private names and shows you the issue before it goes to GitHub.
-- When an agent creates another agent or a workspace, the chat shows a card for it with its live status.
-- Search results look like your list's rows, with your words highlighted. The sidebar view has a filter and Home's sort, the same on every device, and right-click opens a workspace's menu.
-- Home remembers which groups you folded (Needs you always opens), and the phone keeps your settings category and folded sections.
-
-### Lighter and faster
-
-- On Paseo 0.16, Home, the sidebar and the pills update the moment something changes instead of checking every 15 to 60 seconds, and an open Follow-up sends almost nothing while you aren't using it.
-- Follow-up uses about half the CPU and much less memory, reads about 50 times less from disk, keeps one connection to Paseo and uses far less of your GitHub API limit.
-- Pull requests keep their last known status when GitHub is unreachable or out of API budget, instead of turning Unknown.
-
-### Settings and fixes
-
-- The deploy check is a per-repository setting on your machine: Settings → Following → PR workflow shows it for each repository, or Not set up.
-- With Follow every workspace off, only the projects you switch on are followed.
-- Follow-up pauses only when you stop the main agent, not after a compaction, a replaced turn or a reload.
-- A merged PR reads "Merged", not "PR closed", and a PR merged long ago no longer comes back to Needs you.
-- "No ask stated" and "Nothing needed" no longer linger in Needs you above real work.
+- **Tasks:** what Follow-up finds on your PRs (conflicts, review comments, failing checks) is now a task with one clear state, and Tasks shows what goes to the agent next and when.
+- **One-click merge,** and a No review setting per repository that lets agents merge their own PRs.
+- **Answers:** add a note to your pick on a decision card, or put your answer straight into the agent's message box.
+- **New:** Rename with AI, Report a bug from Settings or any error, and a card in the chat for each agent or workspace an agent creates.
+- **Lighter:** about half the CPU and much less memory, and on Paseo 0.16 changes show up live instead of by polling.
+- Plus many smaller fixes.
 
 <details><summary>Full changelog since 2.0.0</summary>
 
