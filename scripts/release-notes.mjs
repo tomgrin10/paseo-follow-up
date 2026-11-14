@@ -131,6 +131,59 @@ export function notesVersion(version) {
 /** Betas (any prerelease that isn't a major's rc) get no notes. */
 export const isBeta = version => isPrerelease(version) && notesVersion(version) === version;
 
+/**
+ * Release notes are short (AGENTS.md, "Release notes"). A minor or patch section's curated part is one intro line and
+ * at most CURATED_MAX_BULLETS bullets; a major's gets a few headed pillars instead. The full list stays in <details>.
+ * 2026-11-14: 2.0.1 first shipped six headed groups and 24 bullets.
+ */
+export const CURATED_MAX_BULLETS = 6;
+export const CURATED_MAX_CHARS = 1200;
+export const isMajor = version => /^\d+\.0\.0$/.test(version);
+/** The curated part of a version's section: its lines up to its <details> list or the next heading. */
+export function curatedPart(changelog, version) {
+  const lines = changelog.split("\n");
+  const at = lines.findIndex(l => HEADING.exec(l)?.[1] === version);
+  if (at < 0) return [];
+  const out = [];
+  for (let i = at + 1; i < lines.length && !HEADING.test(lines[i]) && !/^\s*<details/i.test(lines[i]); i++) out.push(lines[i]);
+  return out.filter(l => l.trim() && !/^\s*<!--/.test(l));
+}
+/**
+ * The next stable version, picked right before a release from what it carries (AGENTS.md, "Versioning"): a pending
+ * `feat-*` note makes a minor, anything else a patch, counted from the newest stable section. A major is Tom's call.
+ * Never inherited from the beta line: 2.0.1 kept its betas' number and shipped features as a patch (2026-11-14).
+ */
+export function nextVersion(changelog, names) {
+  // Sections only: a heading inside a <details> list (an archive) isn't a release of its own.
+  let folded = false; const sections = [];
+  for (const line of changelog.split("\n")) {
+    if (folded) { if (/<\/details>/i.test(line)) folded = false; continue; }
+    if (/^\s*<details/i.test(line)) { folded = !/<\/details>/i.test(line); continue; }
+    const h = HEADING.exec(line); if (h) sections.push(h[1]);
+  }
+  const last = sections.filter(v => SEMVER.test(v) && !isPrerelease(v)).sort((a, b) => {
+    const x = a.split(".").map(Number), y = b.split(".").map(Number);
+    return y[0] - x[0] || y[1] - x[1] || y[2] - x[2];
+  })[0];
+  if (!last) throw new Error("CHANGELOG.md has no stable section to count from");
+  const [major, minor, patch] = last.split(".").map(Number);
+  const features = names.filter(n => n.startsWith("feat-"));
+  const version = features.length ? `${major}.${minor + 1}.0` : `${major}.${minor}.${patch + 1}`;
+  const reason = features.length ? `a minor: ${features.length} of ${names.length} pending note(s) are features (${features.join(", ")})` : names.length ? `a patch: ${names.length} pending note(s), none a feature` : "a patch: no pending notes";
+  return { last, version, reason };
+}
+/**
+ * Features ship in a minor (AGENTS.md, "Versioning"): a patch (x.y.Z, Z > 0) may carry fixes and speed-ups only.
+ * Fragments are named after their branch, so a pending `feat-*.md` means a feature. 2026-11-14: 2.0.1 shipped
+ * Rename with AI, Report a bug and No review as a patch.
+ */
+export function featuresInPatch(version, names) {
+  const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+  if (!m || m[3] === "0") return null;
+  const features = names.filter(n => n.startsWith("feat-"));
+  return features.length ? `${version} is a patch, but ${features.length} pending note(s) are features (${features.join(", ")}). Features ship in a minor: release ${m[1]}.${+m[2] + 1}.0.` : null;
+}
+
 async function check() {
   const problems = [];
   const changelog = await readFile(CHANGELOG, "utf8");
@@ -145,6 +198,12 @@ async function check() {
     }
     const b = /^[-*]\s+(.*)$/.exec(line);
     if (b && current) for (const p of lintBullet(b[1])) problems.push(`CHANGELOG.md ${current}: ${p}: ${b[1]}`);
+  }
+  for (const v of seen) {
+    if (isPrerelease(v) || isMajor(v) || draftIn(changelog, v)) continue;
+    const part = curatedPart(changelog, v);
+    const bullets = part.filter(l => /^[-*]\s/.test(l)).length, chars = part.join(" ").length, headings = part.filter(l => /^#{3,6}\s/.test(l)).length;
+    if (bullets > CURATED_MAX_BULLETS || chars > CURATED_MAX_CHARS || headings) problems.push(`CHANGELOG.md ${v}: a minor or patch's notes are one intro line and at most ${CURATED_MAX_BULLETS} bullets (${CURATED_MAX_CHARS} characters, no headings); this one has ${bullets} bullets, ${chars} characters, ${headings} headings. See AGENTS.md, "Release notes".`);
   }
   let pending = [];
   try { pending = await fragments(); } catch (e) { problems.push(e.message); }
@@ -170,12 +229,14 @@ export function draftIn(changelog, version) {
 
 export const isPrerelease = version => /^\d+\.\d+\.\d+-/.test(version);
 
-export async function release(version, date, allowEmpty, { since = null } = {}) {
+export async function release(version, date, allowEmpty, { since = null, allowFeatures = false } = {}) {
   if (!SEMVER.test(version)) throw new Error(`Not a version: ${version}`);
   if (isBeta(version)) return { version, date, skipped: true, fragments: (await fragments()).map(f => f.name) };
   const target = notesVersion(version);
   let changelog = await readFile(CHANGELOG, "utf8");
   const pending = await fragments();
+  const patchProblem = allowFeatures ? null : featuresInPatch(version, pending.map(f => f.name));
+  if (patchProblem) throw new Error(`${patchProblem} (--allow-features only with Tom's OK for a patch.)`);
   const bullets = pending.flatMap(f => f.bullets);
   for (const b of bullets) { const p = lintBullet(b); if (p.length) throw new Error(`${p.join(", ")}: ${b}`); }
   const lines = changelog.split("\n");
@@ -209,7 +270,10 @@ const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.arg
 if (isMain) {
   const args = process.argv.slice(2);
   try {
-    if (args.includes("--check")) {
+    if (args.includes("--next-version")) {
+      const { last, version, reason } = nextVersion(await readFile(CHANGELOG, "utf8"), (await fragments()).map(f => f.name));
+      console.log(`${version}  (${reason}; last stable ${last}. A major is Tom's call. Ask Tom for this exact version before releasing.)`);
+    } else if (args.includes("--check")) {
       const problems = await check();
       if (problems.length) { console.error(problems.join("\n")); process.exit(1); }
       console.log("release notes ok");
@@ -220,7 +284,7 @@ if (isMain) {
       const date = di >= 0 ? args[di + 1] : new Date().toISOString().slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? "")) throw new Error("--date must be yyyy-mm-dd");
       const si = args.indexOf("--since");
-      const result = await release(version, date, args.includes("--allow-empty"), { since: si >= 0 ? args[si + 1] : null });
+      const result = await release(version, date, args.includes("--allow-empty"), { since: si >= 0 ? args[si + 1] : null, allowFeatures: args.includes("--allow-features") });
       if (result.existing) console.log(`CHANGELOG.md: ${result.target} already has its section; ${result.bullets ? `added ${result.bullets} note(s) to its full changelog from` : "consumed"} ${result.fragments.length} fragment(s).`);
       else if (result.skipped) console.log(`${result.version} is a beta: no CHANGELOG.md section. Its GitHub release notes are rendered from the fragments since the last tag (scripts/release-body.mjs); ${result.fragments.length} fragment(s) stay in changes/ for the next stable release.`);
       else console.log(`CHANGELOG.md: ${result.version} (${result.date}), ${result.bullets} note(s) from ${result.fragments.length} fragment(s)${result.draft ? ". It's a DRAFT: curate it and delete the DRAFT line; check:notes refuses it until then." : ""}`);
