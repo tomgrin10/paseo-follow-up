@@ -1,2 +1,0 @@
-- The deploy check is now a per-repository setting on your machine, set by an agent. Settings → Following → PR workflow shows it for each repository, or Not set up.
-- No repository tracks by default from Follow-up itself anymore: with Follow every workspace off, only the projects you switch on are followed.

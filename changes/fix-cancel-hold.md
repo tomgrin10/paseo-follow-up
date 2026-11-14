@@ -1,1 +1,0 @@
-- Follow-up pauses only when you stop the main agent. A turn replaced by a new message, a compaction or a session reload no longer leaves it paused, and any pause lifts once the agent runs again.

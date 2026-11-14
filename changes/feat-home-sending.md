@@ -1,3 +1,0 @@
-- Home's "Follow-up is fixing" is now "Sending": messages on their way to an agent, with when and why each goes out, and Send now where it would go through. A send that waits on you stays in Needs you.
-- When the machine is short on memory, one line at the top of Sending says auto-sends are paused and why.
-- What Follow-up sends the agent is called tasks everywhere, never repairs.

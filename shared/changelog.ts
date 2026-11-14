@@ -57,8 +57,12 @@ export function parseChangelog(text: string): ReleaseNote[] {
   let current: ReleaseNote | null = null;
   /** The block a continuation line joins: the last bullet, or a paragraph still open (no blank line since). */
   let open: NoteBlock | null = null;
+  /** Inside a <details> list (a section's "Full changelog", the 1.x archive): never shown, headings in it included. */
+  let folded = false;
   for (const line of text.replace(/\r\n?/g, "\n").split("\n")) {
-    if (/^\s*<details/i.test(line)) break;
+    // A <details> list ends at its </details>, not the file: each stable section carries one (2.0.1, 2026-11-14).
+    if (folded) { if (/<\/details>/i.test(line)) folded = false; continue; }
+    if (/^\s*<details/i.test(line)) { folded = !/<\/details>/i.test(line); open = null; continue; }
     const heading = HEADING.exec(line);
     if (heading) {
       current = parseVersion(heading[1]!) ? { version: heading[1]!, date: heading[2] ?? null, items: [], blocks: [] } : null;

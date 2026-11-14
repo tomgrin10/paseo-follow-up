@@ -1,1 +1,0 @@
-- After a failed recovery, the Recovery block offers one action, Retry recovery, instead of both Run recovery and Retry recovery.
