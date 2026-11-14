@@ -155,6 +155,15 @@ These are product rules. Each has tests, and breaking one is a bug even when the
      the store serialises once per real write. Every JSON writer in `server/` uses it or carries an exemption with a
      reason. Guarded by `tests/inbox-copies.test.ts`, `tests/store-copies.test.ts`, `tests/discovery-noop.test.ts`
      (a discovery tick that finds nothing new copies nothing) and `test:scale`'s busy window.
+   - **A mutation costs what it changes** (`a-mutation-costs-what-it-changes`): a mutation allocates for the entries and
+     fields it changes, never for the size of the store. `finish()` reads only the ids a draft wrote, copied or deleted
+     and copies a record once, only when one changed; `plain()` copies only a part that holds a view. A field only ever
+     read whole and replaced whole drafts as cow kind `frozen` (the saved, frozen value; readonly in its type), and the
+     store validates only the items a replacement adds (`InboxState.briefOrigins`, capped at `BRIEF_ORIGINS_MAX`). A
+     caller that can tell from the frozen snapshot that nothing is due drafts nothing (`questionsChanged`, like `tick`).
+     2026-11-14 (2.0.2-beta.0, live mix): the inbox was the worker's top allocator, 160 of ~600 MB per 5 min; a turn
+     allocated ~900 KB in the inbox, 685 KB of it re-copying the 500-item briefOrigins log, now ~94 KB. Guarded by
+     `tests/inbox-mutation-cost.test.ts` (100 turns on a live-sized inbox ≤ 200 KB each; a no-op ≤ 50 KB).
    - **A list answer serializes only what changed** (`a-list-answer-serializes-only-what-changed`): `ListCache`
      (`server/list-cache.ts`) skips a workspace whose frozen object is the one it last serialised, so a state change
      stringifies only the workspaces it touched, never every tracked one. 2026-11-13 (run W, live copy under live

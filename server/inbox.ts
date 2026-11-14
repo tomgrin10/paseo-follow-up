@@ -6,9 +6,9 @@ import { randomUUID } from "node:crypto";
 import { realTimers, stableMessageId, withDeadline, type Timers } from "./delivery";
 import { BackgroundAgents } from "./background-agents";
 import { deepFreeze } from "./store";
-import { copyOnAccess, detach, type Changes } from "./cow";
+import { copyOnAccess, detach, peek, type Changes } from "./cow";
 import { z } from "zod";
-import { emptyInbox, entrySchema, expired, inboxStateSchema, type OutboxEntry, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason, liveFlag, withoutRunState, FACT_REASONS, prEndEvent, reviewersBriefPr, markNotified, notifiedBefore, prNotice, pruneNotified } from "../shared/inbox";
+import { BRIEF_ORIGINS_MAX, briefOriginSchema, emptyInbox, entrySchema, expired, inboxStateSchema, type OutboxEntry, newEntry, reduce, StaleSignOff, type Entry, type InboxEvent, type InboxRow, type InboxState, type Reason, liveFlag, withoutRunState, FACT_REASONS, prEndEvent, reviewersBriefPr, markNotified, notifiedBefore, prNotice, pruneNotified } from "../shared/inbox";
 import type { State as FollowState, Workspace as FollowWorkspace } from "../shared/model";
 import { asksForReviewers } from "../shared/attention";
 import { followUpObligations } from "../shared/follow-up";
@@ -84,10 +84,10 @@ export class InboxStore {
   async mutate<T>(work: (state: InboxState) => T | Promise<T>): Promise<T> {
     const next = this.tail.then(async () => {
       const current = await this.load();
-      const { draft, finish } = copyOnAccess(current, { entries: { kind: "record" } });
+      const { draft, finish } = copyOnAccess(current, INBOX_COLLECTIONS);
       const value = await work(draft);
       const done = finish();
-      if (done.changed) await this.save(done.next, done.changes);
+      if (done.changed) await this.save(done.next, done.changes, current);
       return detach(value);
     });
     this.tail = next.catch(() => undefined);
@@ -103,7 +103,7 @@ export class InboxStore {
     const next = this.tail.then(async () => {
       const current = await this.load();
       if (current.lastSeen === at) return;
-      await this.save({ ...current, lastSeen: at }, { fields: new Set(["lastSeen"]), items: new Map(), removed: new Map() });
+      await this.save({ ...current, lastSeen: at }, { fields: new Set(["lastSeen"]), items: new Map(), removed: new Map() }, current);
     });
     this.tail = next.catch(() => undefined);
     return next;
@@ -125,14 +125,17 @@ export class InboxStore {
     (this.timer as { unref?: () => void }).unref?.();
   }
   /**
-   * Validates what changed (each changed entry, and the small top-level fields when one of them changed), then writes
-   * a real change at once and a lastSeen-only change at most every LAST_SEEN_WRITE_MS.
+   * Validates what changed (each changed entry, each changed top-level field, and of briefOrigins only the items it
+   * didn't hold before), then writes a real change at once and a lastSeen-only change at most every LAST_SEEN_WRITE_MS.
    */
-  private async save(next: InboxState, changes: Changes): Promise<void> {
+  private async save(next: InboxState, changes: Changes, before: InboxState): Promise<void> {
     const entries = next.entries as Record<string, unknown>;
     for (const id of changes.items.get("entries") ?? []) entrySchema.parse(entries[id]);
     const top = [...changes.fields].filter(f => f !== "entries");
-    if (top.length) topSchema.parse({ ...next, entries: {} });
+    for (const f of top) {
+      if (f === "briefOrigins") validateOrigins(next.briefOrigins, before.briefOrigins);
+      else (inboxStateSchema.shape as Record<string, z.ZodType>)[f]!.parse((next as Record<string, unknown>)[f]);
+    }
     for (const id of changes.items.get("entries") ?? []) deepFreeze(entries[id]);
     for (const f of top) deepFreeze((next as Record<string, unknown>)[f]);
     Object.freeze(entries); Object.freeze(next);
@@ -152,7 +155,20 @@ export class InboxStore {
     } finally { await unlink(temporary).catch(() => undefined); }
   }
 }
-const topSchema = inboxStateSchema.omit({ entries: true }).extend({ entries: z.object({}) });
+/**
+ * a-mutation-costs-what-it-changes: entries draft per entry; briefOrigins, read whole and replaced whole, drafts as the
+ * saved frozen array (2026-11-14: each turn end structuredCloned, shadow-walked and re-validated all 500 origins,
+ * 685 KB per turn, 68 MB per 5 min under live's turn rate).
+ */
+const INBOX_COLLECTIONS = { entries: { kind: "record" }, briefOrigins: { kind: "frozen" } } as const;
+/** A replaced briefOrigins: its cap, and the items it didn't hold before (the ones it kept were validated when saved). */
+function validateOrigins(next: InboxState["briefOrigins"], before: InboxState["briefOrigins"]): void {
+  if (next.length > BRIEF_ORIGINS_MAX) throw new Error(`briefOrigins holds ${next.length} origins; the cap is ${BRIEF_ORIGINS_MAX}.`);
+  // A replacement keeps a run of the saved items (an append drops the oldest): match them by identity at their offset,
+  // without a lookup structure; anything else is validated.
+  const offset = next.length ? before.indexOf(next[0]!) : -1;
+  for (let i = 0; i < next.length; i++) if (offset < 0 || next[i] !== before[offset + i]) briefOriginSchema.parse(next[i]);
+}
 
 /**
  * F7: whether a completed turn adds nothing. needs_you kind=done is "nothing for the developer"; and while Paseo
@@ -247,7 +263,6 @@ export function pauseSource(p: GuardPause): { note: string | null; resetsAt: str
   const at = typeof p.anchorResetsAt === "string" && Number.isFinite(Date.parse(p.anchorResetsAt)) ? new Date(p.anchorResetsAt) : null;
   return { note, resetsAt: at ? `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}` : null };
 }
-const ORIGINS = 500;
 export type Root = { rootId: string; subagent: AgentInfo | null; delegated: boolean };
 const DAY = 24 * 3_600_000;
 /** A cached directory snapshot younger than this answers a list without asking Paseo again. */
@@ -306,7 +321,7 @@ export class Inbox {
     const appends: { agentId: string; brief: Brief }[] = [];
     await this.store.mutate(state => {
       for (const { agentId, event, brief } of events) {
-        const prev = state.entries[agentId] ?? newEntry(agentId);
+        const prev = peek(state.entries[agentId]) ?? newEntry(agentId);
         const next = reduce(prev, event, at);
         state.entries[agentId] = next;
         const steps = [autoBrief(event, prev), brief?.(prev, next, at) ?? null].filter((s): s is BriefEvent => !!s);
@@ -325,7 +340,7 @@ export class Inbox {
     if (result.brief === e.brief) return;
     e.brief = result.brief;
     for (const b of result.appends) appends.push({ agentId, brief: b });
-    if (event.type === "create" && event.flagged) state.briefOrigins = [...state.briefOrigins, { at, origin: briefOrigin(event.content.source) }].slice(-ORIGINS);
+    if (event.type === "create" && event.flagged) state.briefOrigins = [...state.briefOrigins, { at, origin: briefOrigin(event.content.source) }].slice(-BRIEF_ORIGINS_MAX);
   }
 
   private async flush(appends: { agentId: string; brief: Brief }[]): Promise<void> {
@@ -539,14 +554,18 @@ export class Inbox {
    */
   async questionsChanged(workspaces: readonly { id: string; questions: Question[] }[]): Promise<void> {
     const snap = await this.store.snapshot();
-    const due = Object.entries(snap.entries).filter(([, e]) => e?.brief?.state === "open" && e.brief.questionIds.length && e.brief.workspaceId);
+    const eventFor = (b: Brief | null | undefined) => {
+      const w = b?.workspaceId ? workspaces.find(w => w.id === b.workspaceId) : undefined;
+      return b && w ? briefQuestionsEvent(b, w.questions) : null;
+    };
+    // a-mutation-costs-what-it-changes: decide on the frozen snapshot, and draft the inbox only when a brief's questions
+    // moved (2026-11-14: half the turns called this, and every call changed nothing).
+    const due = Object.entries(snap.entries).filter(([, e]) => e?.brief?.state === "open" && e.brief.questionIds.length && e.brief.workspaceId && eventFor(e.brief));
     if (!due.length) return;
     const appends: { agentId: string; brief: Brief }[] = [];
     await this.store.mutate(state => {
       for (const [agentId] of due) {
-        const b = state.entries[agentId]?.brief;
-        const w = b?.workspaceId ? workspaces.find(w => w.id === b.workspaceId) : undefined;
-        const event = b && w ? briefQuestionsEvent(b, w.questions) : null;
+        const event = eventFor(state.entries[agentId]?.brief);
         if (event) this.step(state, agentId, event, this.iso(), appends);
       }
     });
@@ -889,7 +908,7 @@ export class Inbox {
     await this.store.mutate(state => {
       const each = (event: (id: string) => InboxEvent) => {
         for (const agentId of input.agentIds ?? []) {
-          const prev = state.entries[agentId] ?? newEntry(agentId);
+          const prev = peek(state.entries[agentId]) ?? newEntry(agentId);
           const ev = event(agentId);
           try { state.entries[agentId] = reduce(prev, ev, at); results.push({ agentId, ok: true, cameBack: false }); }
           catch (error) { if (!(error instanceof StaleSignOff)) throw error; results.push({ agentId, ok: false, cameBack: true }); continue; }

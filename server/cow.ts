@@ -19,7 +19,12 @@
  * stepped 315 → 405 MB with a harness-sized JS heap (the second store with the bug after #139's Store.mutate).
  */
 type Obj = Record<string, unknown>;
-export type Collection = { kind: "record" } | { kind: "array"; id: (item: never) => string };
+/**
+ * How a top-level field is drafted. `record` and `array` hand out a lazy view per item. `frozen` is a field that is only
+ * ever read whole and replaced whole (InboxState.briefOrigins, a 500-item log): the draft hands out the saved, frozen
+ * value itself (an in-place write throws), and a replacement keeps the saved items it carries over as they are.
+ */
+export type Collection = { kind: "record" } | { kind: "array"; id: (item: never) => string } | { kind: "frozen" };
 export type Changes = {
   /** Top-level fields whose value changed (a collection counts when an item was added, removed, replaced or changed). */
   fields: Set<string>;
@@ -64,7 +69,8 @@ export function deepFreeze<T>(value: T): T {
 /** A plain, mutable copy of a (possibly frozen) JSON value. */
 const copy = <T>(v: T): T => structuredClone(v);
 
-type Tracked = { target: Obj | unknown[]; copied: Set<string> };
+/** A collection's draft: its target, the items written or copied, and the ids deleted (finish reads only these). */
+type Tracked = { target: Obj | unknown[]; copied: Set<string>; deleted: Set<string> };
 /** One collection item behind its views: the saved (frozen) item until a real write, then a private copy of it. */
 type Item = { saved: object; clone: object | null; map: Map<object, object> | null; onCopy: () => void; views: WeakMap<object, object> };
 /** Every view of a saved node (the item itself or anything inside it): which item, and which saved node. */
@@ -80,6 +86,12 @@ function own(item: Item): void {
   if (item.clone) return;
   item.clone = copy(item.saved); item.map = new Map(); pair(item.saved, item.clone, item.map); item.onCopy();
 }
+/**
+ * What a draft value stands for, to read without views: the saved (frozen) node, or the item's copy once written, or
+ * the value itself when it isn't a view. A pure reader that walks a whole draft item (InboxStore's reduce copies the
+ * entry it is given) reads this instead, so the walk makes no view per nested object; it must never write to it.
+ */
+export function peek<T>(v: T): T { return resolve(v) as T; }
 /** The plain value a view stands for: its item's copy of the node once copied, else the saved node itself. */
 const resolve = (v: unknown): unknown => {
   const view = isObject(v) ? views.get(v) : undefined;
@@ -97,11 +109,17 @@ function plain(v: unknown, into?: Item): unknown {
     const n = view.item === into ? into.map?.get(view.node) : undefined;
     return n ?? copy(view.item.map?.get(view.node) ?? view.node);
   }
-  if (Array.isArray(v)) { let changed = false; const out = v.map(x => { const p = plain(x, into); if (p !== x) changed = true; return p; }); return changed ? out : v; }
-  if (isObject(v) && Object.getPrototypeOf(v) === Object.prototype) {
-    let changed = false; const out: Obj = {};
-    for (const [k, x] of Object.entries(v)) { const p = plain(x, into); if (p !== x) changed = true; out[k] = p; }
-    return changed ? out : v;
+  // A copy only from the first part that holds a view (a-mutation-costs-what-it-changes): 2026-11-14, every new entry
+  // a turn stored was shadow-copied whole and the copy thrown away, 37 MB per 5 min under live's turn rate.
+  if (Array.isArray(v)) {
+    let out: unknown[] | null = null;
+    for (let i = 0; i < v.length; i++) { const x = v[i], p = plain(x, into); if (p !== x) (out ??= v.slice())[i] = p; }
+    return out ?? v;
+  }
+  if (Object.getPrototypeOf(v) === Object.prototype) {
+    let out: Obj | null = null;
+    for (const k of Object.keys(v)) { const x = (v as Obj)[k], p = plain(x, into); if (p !== x) (out ??= { ...(v as Obj) })[k] = p; }
+    return out ?? v;
   }
   return v;
 }
@@ -169,7 +187,7 @@ export function copyOnAccess<T extends object>(saved: T, collections: Readonly<R
   const proxies = new WeakMap<object, Tracked>();
   const collection = (field: string, value: object): object => {
     const target: Obj | unknown[] = Array.isArray(value) ? [...value] : { ...(value as Obj) };
-    const copied = new Set<string>();
+    const copied = new Set<string>(); const deleted = new Set<string>();
     const proxy = new Proxy(target, {
       get(t, k, receiver) {
         if (typeof k !== "string" || !Object.hasOwn(t, k) || copied.has(k) || (Array.isArray(t) && k === "length")) return Reflect.get(t, k, receiver);
@@ -178,9 +196,9 @@ export function copyOnAccess<T extends object>(saved: T, collections: Readonly<R
         return (t as Obj)[k];
       },
       set(t, k, v) { if (typeof k === "string") copied.add(k); return Reflect.set(t, k, item(v)); },
-      deleteProperty(t, k) { if (typeof k === "string") copied.delete(k); return Reflect.deleteProperty(t, k); },
+      deleteProperty(t, k) { if (typeof k === "string") { copied.delete(k); deleted.add(k); } return Reflect.deleteProperty(t, k); },
     });
-    proxies.set(proxy, { target, copied });
+    proxies.set(proxy, { target, copied, deleted });
     void field;
     return proxy;
   };
@@ -189,13 +207,18 @@ export function copyOnAccess<T extends object>(saved: T, collections: Readonly<R
   const draft = new Proxy(root, {
     get(t, k, receiver) {
       if (typeof k !== "string" || !Object.hasOwn(t, k) || touched.has(k)) return Reflect.get(t, k, receiver);
+      if (collections[k]?.kind === "frozen") return t[k];
       const v = t[k]; touched.add(k);
       if (isObject(v)) t[k] = collections[k] ? collection(k, v) : copy(v);
       return t[k];
     },
     // A collection keeps item views (finish resolves them, keeping untouched items' saved objects); anything else is
     // stored plain, so no view reaches the saved value.
-    set(t, k, v) { if (typeof k === "string") touched.add(k); return Reflect.set(t, k, proxies.has(v as object) ? v : collections[k as string] && isObject(v) ? v : plain(v)); },
+    set(t, k, v) {
+      if (typeof k === "string") touched.add(k);
+      const kind = typeof k === "string" ? collections[k]?.kind : undefined;
+      return Reflect.set(t, k, proxies.has(v as object) ? v : kind && kind !== "frozen" && isObject(v) ? v : plain(v));
+    },
     deleteProperty(t, k) { if (typeof k === "string") touched.add(k); return Reflect.deleteProperty(t, k); },
   }) as T;
 
@@ -207,9 +230,16 @@ export function copyOnAccess<T extends object>(saved: T, collections: Readonly<R
       if (!Object.hasOwn(root, k)) { if (before[k] !== undefined) changes.fields.add(k); continue; }
       const was = before[k];
       if (!touched.has(k)) { next[k] = was; continue; }
-      const now = unwrap(root[k]);
       const kind = collections[k];
-      if (kind && isObject(now) && isObject(was)) {
+      const tracked = isObject(root[k]) ? proxies.get(root[k] as object) : undefined;
+      if (kind?.kind === "record" && tracked && isObject(was) && !Array.isArray(tracked.target)) {
+        const { value, items, removed } = mergeTouched(was as Obj, tracked);
+        next[k] = value;
+        if (value !== was) { changes.fields.add(k); changes.items.set(k, items); changes.removed.set(k, removed); }
+        continue;
+      }
+      const now = kind?.kind === "frozen" ? root[k] : unwrap(root[k]);
+      if (kind && kind.kind !== "frozen" && isObject(now) && isObject(was)) {
         const { value, items, removed } = merge(kind, was, now, proxies.get(root[k] as object));
         next[k] = value;
         if (value !== was) { changes.fields.add(k); changes.items.set(k, items); changes.removed.set(k, removed); }
@@ -232,6 +262,24 @@ export function copyOnAccess<T extends object>(saved: T, collections: Readonly<R
   return { draft, finish };
 }
 
+/**
+ * A record collection's next value from only the ids the draft wrote, copied or deleted: the saved record itself when
+ * none of them changed, else one copy of it. 2026-11-14: finish rebuilt the whole 86-entry inbox record twice per
+ * mutation (unwrap, then merge), no-ops included.
+ */
+function mergeTouched(was: Obj, tracked: Tracked) {
+  const t = tracked.target as Obj; const items = new Set<string>(); const removed = new Set<string>();
+  let value: Obj | null = null;
+  for (const id of tracked.copied) {
+    if (!Object.hasOwn(t, id)) continue;
+    const v = item(t[id]);
+    if (Object.hasOwn(was, id) && (v === was[id] || sameJson(v, was[id]))) continue;
+    (value ??= { ...was })[id] = v; items.add(id);
+  }
+  for (const id of tracked.deleted) if (Object.hasOwn(was, id) && !Object.hasOwn(t, id)) { value ??= { ...was }; delete value[id]; removed.add(id); }
+  return { value: value ?? was, items, removed };
+}
+
 /** The next collection: saved items where nothing changed (by identity first, then by value), the draft's otherwise. */
 function merge(kind: Collection, was: object, now: object, tracked: Tracked | undefined) {
   const items = new Set<string>(); const removed = new Set<string>();
@@ -245,6 +293,7 @@ function merge(kind: Collection, was: object, now: object, tracked: Tracked | un
     for (const k of Object.keys(a)) if (!Object.hasOwn(b, k)) { removed.add(k); same = false; }
     return { value: same ? was : value, items, removed };
   }
+  if (kind.kind !== "array") throw new Error(`merge: ${kind.kind} isn't an item collection`);
   const id = kind.id as (item: unknown) => string;
   const a = was as unknown[], b = now as unknown[];
   const byId = new Map(a.map(item => [id(item), item]));

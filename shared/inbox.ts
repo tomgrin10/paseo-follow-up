@@ -67,6 +67,9 @@ export const outboxSchema = z.object({
   attempts: z.number().int().default(0), state: z.enum(["sending", "failed"]).default("sending"), error: z.string().nullable().default(null),
 });
 export type OutboxEntry = z.infer<typeof outboxSchema>;
+/** The newest flagged briefs' origins kept (InboxState.briefOrigins). */
+export const BRIEF_ORIGINS_MAX = 500;
+export const briefOriginSchema = z.object({ at: isoSchema, origin: z.enum(["tool", "structured", "extraction", "fallback"]) });
 export const inboxStateSchema = z.object({
   version: z.literal(1),
   entries: z.record(z.string(), entrySchema).default({}),
@@ -98,9 +101,15 @@ export const inboxStateSchema = z.object({
   /** One-time repairs applied to this store (additive; `version` stays 1 so older builds still read it). */
   revision: z.number().int().default(0),
   /** Where each flagged turn's brief came from, newest last, for the adoption share (R2). Capped. */
-  briefOrigins: z.array(z.object({ at: isoSchema, origin: z.enum(["tool", "structured", "extraction", "fallback"]) })).default([]),
+  /**
+   * Where each flagged brief's content came from, newest last, for the brief share (briefShare). Only ever read whole and
+   * replaced whole (InboxStore drafts it as cow kind "frozen"), so it is readonly: a reader never changes it in place.
+   */
+  briefOrigins: z.array(briefOriginSchema).max(BRIEF_ORIGINS_MAX).default([]),
 });
-export type InboxState = z.infer<typeof inboxStateSchema>;
+export type BriefOrigin = z.infer<typeof briefOriginSchema>;
+/** briefOrigins is readonly for every reader (the store deep-freezes it; see its schema). */
+export type InboxState = Omit<z.infer<typeof inboxStateSchema>, "briefOrigins"> & { briefOrigins: readonly BriefOrigin[] };
 export const emptyInbox = (): InboxState => inboxStateSchema.parse({ version: 1 });
 
 export type InboxEvent =
