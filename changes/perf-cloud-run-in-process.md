@@ -1,0 +1,1 @@
+- The deploy check reads Cloud Run in Follow-up itself instead of starting gcloud for every fleet read; gcloud now only hands out the access token, once every 45 minutes.

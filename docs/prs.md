@@ -157,8 +157,10 @@ prefix, roles, registry, image path and names, an optional build-SHA env var). I
 planned and confirmed), `pr_workflow` returns it, and Settings → Following → PR workflow → the repository's fold shows
 it read-only (Deploy check: Production · project, or Not set up). With no config there is no gcloud call.
 
-A fleet read (at most once a minute per configuration) is one `gcloud run services list`; each serving revision is
-described once, since a revision's image never changes. Tasks with `trigger: deploy` wait for it
+A fleet read (at most once a minute per configuration) is one Cloud Run services list, filtered by the configured label
+and read in process over REST; each serving revision is read once, from its region, since a revision's image never
+changes. gcloud runs only for the access token, reused for 45 minutes (invariant `cloud-run-reads-in-process`): a 401
+or 403 drops it and retries once, and every read is aborted after 8 s. Tasks with `trigger: deploy` wait for it
 ([workspaces.md](workspaces.md)).
 
 **No deploy check** (a fresh install, or the window between an install and the private seed that writes it):

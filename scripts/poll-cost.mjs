@@ -28,7 +28,7 @@ const N = Number(arg("prs", "30")); const W = Number(arg("workspaces", "10")); c
 const PENDING = Number(arg("pending", String(Math.max(1, Math.round(N / 10))))); const MERGED = Number(arg("merged", "0")); const CLOSED = Number(arg("closed", "0")); const profileDir = arg("cpu-prof", null);
 /** A fictional deploy check for acme/acme-poc (tests/fixtures.ts ACME_DEPLOY). */
 const DEPLOY = { gcpProject: "acme-prod", serviceLabel: "rollout-group=app", servicePrefix: "acme-service-app-", roles: ["backend", "etl", "interpretation", "public-api", "web"], registry: "us-central1-docker.pkg.dev", imagePath: "acme-prod/acme-docker", images: ["prod-app-backend", "prod-app-web"], buildShaEnv: "APP_BUILD_SHA" };
-// Merged PRs in the deployment repository (acme/acme-poc): each needs a fleet read (gcloud), the serving image's
+// Merged PRs in the deployment repository (acme/acme-poc): each needs a fleet read (Cloud Run), the serving image's
 // commit (registry) and one ancestry compare per (merge, serving commit). 2026-11-12: those compares still spawned gh.
 const DEPLOY_MERGED = Number(arg("deploy-merged", "0"));
 const root = await mkdtemp(join(tmpdir(), "follow-poll-cost-"));
@@ -41,7 +41,7 @@ const repos = Array.from({ length: R }, (_, i) => `example-${i}/app`);
 const rows = new Map();
 for (let i = 0; i < N; i++) { const repo = repos[i % R]; const number = 100 + i; rows.set(`${repo}#${number}`, { repo, number, base: i < R ? "main" : `b${number - R}`, pending: i < PENDING, state: i >= N - MERGED ? "MERGED" : i >= N - MERGED - CLOSED ? "CLOSED" : "OPEN" }); }
 for (let i = 0; i < DEPLOY_MERGED; i++) { const repo = "acme/acme-poc"; const number = 5000 + i; rows.set(`${repo}#${number}`, { repo, number, base: "main", pending: false, state: "MERGED", merge: i.toString(16).padStart(40, "d") }); }
-const counts = { points: 0, graphql: 0, rest: 0, ghSpawns: 0, gcloudSpawns: 0, compares: 0 };
+const counts = { points: 0, graphql: 0, rest: 0, ghSpawns: 0, gcloudSpawns: 0, compares: 0, cloudRunReads: 0 };
 const prNode = (repo, number) => {
   const row = rows.get(`${repo}#${number}`); if (!row) return null;
   return { number, title: `Synthetic PR ${number}`, url: `https://github.com/${repo}/pull/${number}`, state: row.state, headRefOid: `head${number}`, headRefName: `b${number}`, baseRefName: row.base, isDraft: false,
@@ -69,12 +69,23 @@ const answer = (method, path, body) => {
   if (/\/rules\/branches\//.test(path)) { counts.rest++; return [{ type: "required_status_checks", parameters: { required_status_checks: [{ context: "test" }] } }]; }
   counts.rest++; return [];
 };
+// The production fleet: five ready services, one revision each, all serving the image whose commit is "b"×40.
+const fleet = ["backend", "etl", "interpretation", "public-api", "web"].map(role => ({ metadata: { name: `acme-service-app-${role}-x`, labels: { "cloud.googleapis.com/location": "us-central1" } }, status: { conditions: [{ type: "Ready", status: "True" }], traffic: [{ revisionName: `${role}-r1`, percent: 100 }] } }));
+const revision = { spec: { containers: [{ name: "app", image: `us-central1-docker.pkg.dev/acme-prod/acme-docker/prod-app-backend@sha256:${"1".repeat(64)}` }] }, status: { conditions: [{ type: "Ready", status: "True" }] } };
 const apiPort = await free();
 const api = createServer((req, res) => { let body = ""; req.on("data", c => { body += c; }); req.on("end", () => {
   const url = new URL(req.url, "http://x");
   if (url.pathname === "/__spawn") { counts[url.searchParams.get("kind") === "gcloud" ? "gcloudSpawns" : "ghSpawns"]++; res.end("{}"); return; }
   // The fake Artifact Registry: the serving image's config names the serving commit.
   if (url.pathname.startsWith("/v2/")) { res.setHeader("content-type", "application/json"); res.end(JSON.stringify(url.pathname.includes("/manifests/") ? { config: { digest: `sha256:${"3".repeat(64)}` } } : { config: { Labels: { "org.opencontainers.image.revision": "b".repeat(40) } } })); return; }
+  // The fake Cloud Run (Knative v1, FOLLOW_UP_CLOUD_RUN_API): the labelled services list and a revision by name.
+  if (url.pathname.startsWith("/apis/serving.knative.dev/v1/namespaces/")) {
+    counts.cloudRunReads++; res.setHeader("content-type", "application/json");
+    if (req.headers.authorization !== "Bearer registry-token") { res.statusCode = 401; res.end("{}"); return; }
+    if (url.pathname.endsWith("/services")) { res.end(JSON.stringify({ items: url.searchParams.get("labelSelector") === DEPLOY.serviceLabel ? fleet : [] })); return; }
+    if (url.pathname.includes("/revisions/")) { res.end(JSON.stringify(revision)); return; }
+    res.statusCode = 404; res.end("{}"); return;
+  }
   if (url.pathname === "/__shim") { const { args } = JSON.parse(body); res.end(JSON.stringify(shim(args))); return; }
   res.setHeader("content-type", "application/json"); res.end(JSON.stringify(answer(req.method, url.pathname, body)));
 }); });
@@ -88,17 +99,16 @@ const shim = args => {
 await new Promise(r => api.listen(apiPort, "127.0.0.1", r));
 
 const port = await free(); const url = `ws://127.0.0.1:${port}/ws`;
-const env = harnessEnv(root, { home, set: { PATH: `${bin}:${process.env.PATH}`, PASEO_RELAY_ENABLED: "false", GH_TOKEN: "fake-token", FOLLOW_UP_GITHUB_API: `http://127.0.0.1:${apiPort}`, FOLLOW_UP_DEPLOY_REGISTRY: `http://127.0.0.1:${apiPort}`, POLL_COST_API: `http://127.0.0.1:${apiPort}`, ...(profileDir ? { NODE_OPTIONS: `--cpu-prof --cpu-prof-dir=${profileDir}` } : {}) } });
+const env = harnessEnv(root, { home, set: { PATH: `${bin}:${process.env.PATH}`, PASEO_RELAY_ENABLED: "false", GH_TOKEN: "fake-token", FOLLOW_UP_GITHUB_API: `http://127.0.0.1:${apiPort}`, FOLLOW_UP_DEPLOY_REGISTRY: `http://127.0.0.1:${apiPort}`, FOLLOW_UP_CLOUD_RUN_API: `http://127.0.0.1:${apiPort}`, POLL_COST_API: `http://127.0.0.1:${apiPort}`, ...(profileDir ? { NODE_OPTIONS: `--cpu-prof --cpu-prof-dir=${profileDir}` } : {}) } });
 const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env: { ...env, NODE_OPTIONS: "" }, timeout: 120_000, maxBuffer: 8 << 20 })).stdout);
 let daemon = null; let client = null;
 try {
   await mkdir(home, { recursive: true }); await mkdir(fixture, { recursive: true }); await mkdir(bin, { recursive: true });
   if (profileDir) await mkdir(profileDir, { recursive: true });
-  // gh and gcloud shims: count the spawn, answer from the fake. Plain node, no shell. gcloud answers the production
-  // fleet: five ready services, one revision each, all serving the image whose commit is "b"×40.
+  // gh and gcloud shims: count the spawn, answer from the fake. Plain node, no shell.
+  // (Builds before cloud-run-reads-in-process read the fleet through gcloud; the shim still answers them, so one script
+  // measures both.)
   const gcloudSource = "x";
-  const fleet = ["backend", "etl", "interpretation", "public-api", "web"].map(role => ({ metadata: { name: `acme-service-app-${role}-x`, labels: { "cloud.googleapis.com/location": "us-central1" } }, status: { conditions: [{ type: "Ready", status: "True" }], traffic: [{ revisionName: `${role}-r1`, percent: 100 }] } }));
-  const revision = { spec: { containers: [{ name: "app", image: `us-central1-docker.pkg.dev/acme-prod/acme-docker/prod-app-backend@sha256:${"1".repeat(64)}` }] }, status: { conditions: [{ type: "Ready", status: "True" }] } };
   const shimSource = kind => `#!/usr/bin/env node
 const base = process.env.POLL_COST_API; const args = process.argv.slice(2);
 const gcloud = a => a[0] === "auth" ? "registry-token" : a[1] === "services" ? ${JSON.stringify(JSON.stringify(fleet))} : ${JSON.stringify(JSON.stringify(revision))};
@@ -149,10 +159,12 @@ const gcloud = a => a[0] === "auth" ? "registry-token" : a[1] === "services" ? $
   await sleep(60_000); // warm-up: first reads, discovery, settling
   const pid = Number((await readFile(join(home, "plugin-data/follow-up/worker.lock"), "utf8").catch(() => "")).split(":")[0]);
   const ticks = async () => { const f = (await readFile(`/proc/${pid}/stat`, "utf8")).split(") ")[1].split(" "); return Number(f[11]) + Number(f[12]); };
+  // CPU of the worker's reaped children (gh and gcloud shims; a real gcloud costs far more: ~1 s CPU a call).
+  const childTicks = async () => { const f = (await readFile(`/proc/${pid}/stat`, "utf8")).split(") ")[1].split(" "); return Number(f[13]) + Number(f[14]); };
   const hz = Number((await exec("getconf", ["CLK_TCK"])).stdout.trim()) || 100;
   const io = async () => Number(/rchar: (\d+)/.exec(await readFile(`/proc/${pid}/io`, "utf8"))[1]);
   const logAt = (await readFile(join(root, "daemon.log"), "utf8")).length; const rchar0 = await io();
-  const start = { ...counts, cpu: await ticks(), at: Date.now() };
+  const start = { ...counts, cpu: await ticks(), childCpu: await childTicks(), at: Date.now() };
   // Store writes in the window (store-writes-only-real-changes): each atomic rename gives the file a new inode.
   const files = { "state.json": 0, "inbox.json": 0 }; const seen = {};
   const watch = setInterval(async () => { for (const f of Object.keys(files)) { const s = await stat(join(home, "plugin-data/follow-up", f)).catch(() => null); const k = s ? `${s.ino}:${s.mtimeMs}` : null; if (k && seen[f] && seen[f] !== k) files[f]++; if (k) seen[f] = k; } }, 200);
@@ -166,12 +178,13 @@ const gcloud = a => a[0] === "auth" ? "registry-token" : a[1] === "services" ? $
   const state = JSON.parse(await readFile(join(home, "plugin-data/follow-up/state.json"), "utf8"));
   const observed = state.workspaces.flatMap(w => w.prs).filter(p => p.snapshot && !p.error).length;
   const result = { prs: N, workspaces: W, repos: R, runningChecks: PENDING, merged: MERGED, closed: CLOSED, deployMerged: DEPLOY_MERGED, minutes: Math.round(minutes * 10) / 10, observedPrs: observed,
-    perMinute: { ghSpawns: rate("ghSpawns"), processesViaWrapper: Math.round(rate("ghSpawns") * 3 * 10) / 10, gcloudSpawns: rate("gcloudSpawns"), graphqlRequests: rate("graphql"), restRequests: rate("rest"), compares: rate("compares"), graphqlPointsPerHour: Math.round(rate("points") * 60) },
+    perMinute: { ghSpawns: rate("ghSpawns"), processesViaWrapper: Math.round(rate("ghSpawns") * 3 * 10) / 10, gcloudSpawns: rate("gcloudSpawns"), cloudRunReads: rate("cloudRunReads"), graphqlRequests: rate("graphql"), restRequests: rate("rest"), compares: rate("compares"), graphqlPointsPerHour: Math.round(rate("points") * 60) },
     // The warm-up minute: a cold start's reads (the deploy probe's compares land here).
     warmup: { ghSpawns: start.ghSpawns, gcloudSpawns: start.gcloudSpawns, compares: start.compares },
     storeWritesPerMinute: Object.fromEntries(Object.entries(files).map(([f, n]) => [f, Math.round(n / ((Date.now() - start.at) / 60_000) * 10) / 10])),
     rcharMBPerMin, daemonConnectionsPerMin,
-    workerCpuPct: Math.round(((await ticks()) - start.cpu) / hz / (minutes * 60) * 1000) / 10 };
+    workerCpuPct: Math.round(((await ticks()) - start.cpu) / hz / (minutes * 60) * 1000) / 10,
+    childCpuPct: Math.round(((await childTicks()) - start.childCpu) / hz / (minutes * 60) * 1000) / 10 };
   console.log(process.argv.includes("--json") ? JSON.stringify(result) : result);
   if (observed < N) { console.error(`only ${observed} of ${N} PRs observed`); process.exitCode = 1; }
 } finally {

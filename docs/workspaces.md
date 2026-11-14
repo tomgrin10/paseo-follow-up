@@ -313,6 +313,6 @@ After that, a probe error or a stale observation (older than `DEPLOY_FRESH_MS`, 
 fresh contrary evidence does.
 
 `server/deployments.ts` summarizes probe failures with `probeReason`. It keeps its own messages and reduces anything
-else to "gcloud call failed", "gh call failed", "unreadable response", "registry timed out" or "lookup failed", so no
+else to "gcloud call failed", "gh call failed", "unreadable response", "read timed out" or "lookup failed", so no
 transport detail leaks. The reason goes into the PR's evidence line and `lastError`. A failed read retries on the next
 15 s refresh, and isn't cached for a minute.

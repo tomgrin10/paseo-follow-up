@@ -77,15 +77,15 @@ test("observe-reads-shared-files-once-per-tick: a tick over 24 workspaces reads 
 
 test("one-daemon-connection-per-tick: a tick over 24 workspaces opens one daemon connection, however many workspaces", async () => {
   const f = fixture(); let opened = 0, closed = 0; let now = 0;
-  const connect = sharedDaemon(async () => { opened++; return Object.assign(Object.create(f.client), { close: async () => { closed++; } }); }, { idleMs: 1_000, maxMs: 60_000, now: () => now });
+  const connect = sharedDaemon(async () => { opened++; return Object.assign(Object.create(f.client), { close: async () => { closed++; } }); }, { maxMs: 60_000, now: () => now });
   const gateway = new PaseoGateway(connect, undefined, async () => false, new HistoryCache(null), () => clock);
   await gateway.discover(f.state);
   for (let tick = 0; tick < 4; tick++) {
     await Promise.all(f.state.workspaces.map(w => gateway.observe(w)));
-    now += 15_000; await connect.idle(); // the next tick comes 15 s later: past the idle bound
+    now += 15_000; // the next tick comes 15 s later
   }
-  assert.ok(opened <= 4, `4 ticks over 24 workspaces opened ${opened} connections`);
-  assert.equal(closed, opened, "an idle connection is closed");
+  assert.equal(opened, 1, `4 ticks over 24 workspaces opened ${opened} connections`);
+  assert.equal(closed, 0, "the running worker holds it between ticks");
   // The default gateway shares one bounded connection rather than opening one per call.
   const source = await readFile("server/daemon.ts", "utf8");
   assert.match(source, /constructor\(private connect: typeof withDaemon = sharedConnect/, "PaseoGateway's default connect is the shared one");
@@ -94,7 +94,7 @@ test("one-daemon-connection-per-tick: a tick over 24 workspaces opens one daemon
 test("one-daemon-connection-per-tick: closeConnections closes the shared connection within the stop deadline", async () => {
   const { closeConnections } = await import("../server/daemon");
   let closed = 0;
-  const connect = sharedDaemon(async () => ({ close: async () => { closed++; } }) as never, { idleMs: 60_000, maxMs: 60_000 });
+  const connect = sharedDaemon(async () => ({ close: async () => { closed++; } }) as never, { maxMs: 60_000 });
   await connect(async () => "used");
   const started = Date.now();
   await closeConnections(500 as never);

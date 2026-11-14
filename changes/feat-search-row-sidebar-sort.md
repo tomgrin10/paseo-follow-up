@@ -1,2 +1,0 @@
-- Search results look like the rows of your list, with the words you typed highlighted where they appear. A match in a branch, PR or linked issue shows on the second line.
-- The Follow-up sidebar view has a filter and Home's sort. The sort is one setting for Home and the sidebar, the same on every device, and agents can change it when you ask.

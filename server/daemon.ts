@@ -7,7 +7,6 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { readSharedJson } from "./shared-file";
 import { createRequire } from "node:module";
-import { TICK_MS } from "../shared/poll";
 import type { Workspace, Batch } from "../shared/model";
 import type { Gateway, Runtime } from "./engine";
 import type { State } from "../shared/model";
@@ -130,44 +129,32 @@ export function withDaemon<T>(work: (client: Daemon) => Promise<T>): Promise<T> 
  * opened a WebSocket per workspace per tick through withDaemon (96 a minute live, each with its own hello and status).
  * It is in `clients`, so closeConnections closes it within the stop's deadline, and nothing opens after stop.
  *
- * The connection outlives the gap between ticks (a-running-worker-holds-one-daemon-connection): it closes only after
- * SHARED_CLIENT_IDLE_MS unused, which is the engine's TICK_MS plus a named margin, so a worker that keeps ticking
- * holds one connection. 2026-11-13 live: with a 5 s idle close and a 60 s replacement, every 15 s tick opened a new
- * WebSocket (the worker said hello 39 times in 12 min, each with its own handshake, status and buffers). A dropped
- * connection is still retired at once, and SHARED_CLIENT_MAX_MS replaces a long-lived one now and then.
+ * A running worker holds it (a-running-worker-holds-one-daemon-connection): nothing closes it for being unused. It
+ * closes on stop, when it drops (retired at once, the next call opens a fresh one), and SHARED_CLIENT_MAX_MS replaces a
+ * long-lived one. No idle bound is safe: the engine's loop waits TICK_MS after a tick ends, a tick's daemon calls come
+ * before its GitHub reads, and a paused tick (the governor) calls the daemon not at all. 2026-11-13 live (2.0.1-beta.7):
+ * with a TICK_MS + 10 s idle close the worker closed and reopened it every 80-130 s (22 hellos in 30 min); before that,
+ * a 5 s idle close opened one per tick (39 hellos in 12 min).
  */
-/** How far past one tick interval the shared connection stays open unused: a slow tick still finds it. */
-export const SHARED_CLIENT_MARGIN_MS = 10_000;
-export const SHARED_CLIENT_IDLE_MS = TICK_MS + SHARED_CLIENT_MARGIN_MS;
 export const SHARED_CLIENT_MAX_MS = 30 * 60_000;
-export type SharedConnect = (<T>(work: (client: Daemon) => Promise<T>) => Promise<T>) & { idle(): Promise<void> };
-type Shared = { client: Promise<Daemon>; opened: number; users: number; lastUsed: number; retired: boolean; timer: ReturnType<typeof setTimeout> | null };
-export function sharedDaemon(open: () => Promise<Daemon> = openDaemon, o: { idleMs?: number; maxMs?: number; now?: () => number } = {}): SharedConnect {
-  const idleMs = o.idleMs ?? SHARED_CLIENT_IDLE_MS, maxMs = o.maxMs ?? SHARED_CLIENT_MAX_MS, now = o.now ?? Date.now;
+export type SharedConnect = <T>(work: (client: Daemon) => Promise<T>) => Promise<T>;
+type Shared = { client: Promise<Daemon>; opened: number; users: number; retired: boolean };
+export function sharedDaemon(open: () => Promise<Daemon> = openDaemon, o: { maxMs?: number; now?: () => number } = {}): SharedConnect {
+  const maxMs = o.maxMs ?? SHARED_CLIENT_MAX_MS, now = o.now ?? Date.now;
   let current: Shared | null = null;
   const close = async (entry: Shared) => {
     if (current === entry) current = null;
-    if (entry.timer) { clearTimeout(entry.timer); entry.timer = null; }
     const client = await entry.client.catch(() => null);
     if (client) { clients.delete(client); await client.close().catch(() => undefined); }
   };
-  const settle = (entry: Shared) => { if (entry.users === 0 && (entry.retired || now() - entry.lastUsed >= idleMs)) void close(entry); };
-  // One idle timer per connection, re-armed for what is left of the idle bound (not a timer per call).
-  const arm = (entry: Shared) => {
-    if (entry.timer) return;
-    entry.timer = setTimeout(() => {
-      entry.timer = null;
-      if (current !== entry && !entry.retired) return;
-      if (entry.users === 0 && now() - entry.lastUsed < idleMs) arm(entry); else settle(entry);
-    }, Math.max(0, idleMs - (now() - entry.lastUsed)) || idleMs);
-    (entry.timer as { unref?: () => void }).unref?.();
-  };
-  const connect = (async <T>(work: (client: Daemon) => Promise<T>): Promise<T> => {
+  // A retired connection closes once its last call is done; the current one stays open.
+  const settle = (entry: Shared) => { if (entry.users === 0 && entry.retired) void close(entry); };
+  return async <T>(work: (client: Daemon) => Promise<T>): Promise<T> => {
     if (stopped) throw new Error("Follow-up is stopping");
     if (current && now() - current.opened >= maxMs) { current.retired = true; const old = current; current = null; settle(old); }
     if (!current) {
       const client = open().then(c => { if (stopped) { void c.close().catch(() => undefined); throw new Error("Follow-up is stopping"); } clients.add(c); return c; });
-      const entry: Shared = { client, opened: now(), users: 0, lastUsed: now(), retired: false, timer: null };
+      const entry: Shared = { client, opened: now(), users: 0, retired: false };
       current = entry;
       void client.catch(() => { if (current === entry) current = null; });
     }
@@ -179,16 +166,14 @@ export function sharedDaemon(open: () => Promise<Daemon> = openDaemon, o: { idle
       catch (error) {
         // A dropped connection isn't reused: the next call opens a fresh one.
         const status = (client as unknown as { connectionState?: { status?: string } }).connectionState?.status;
-        if (status !== undefined && status !== "connected") entry.retired = true;
+        if (status !== undefined && status !== "connected") { entry.retired = true; if (current === entry) current = null; }
         throw error;
       }
     } finally {
-      entry.users--; entry.lastUsed = now();
-      if (entry.users === 0) { if (entry.retired) settle(entry); else arm(entry); }
+      entry.users--;
+      settle(entry);
     }
-  }) as SharedConnect;
-  connect.idle = async () => { if (current) { const entry = current; if (entry.users === 0 && now() - entry.lastUsed >= idleMs) await close(entry); } };
-  return connect;
+  };
 }
 async function openDaemon(): Promise<Daemon> {
   const module = require(["@getpaseo", "client", "internal", "daemon-client"].join("/")) as Module;
