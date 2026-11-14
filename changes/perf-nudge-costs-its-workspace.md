@@ -1,1 +1,0 @@
-- Follow-up's worker does less work when an agent's turn ends: it checks only that workspace, and a PR the agent just opened still shows right away.

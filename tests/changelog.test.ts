@@ -42,11 +42,19 @@ test("changelog: headings, dates, bullets, continuation lines; newest first by v
   assert.deepEqual(notes[2]!.items, ["Second, no date."]);
 });
 
-test("changelog: the shipped CHANGELOG.md shows only the curated 2.0.0 in the app; the full list stays below <details>, all lint-clean", async () => {
+test("changelog: the shipped CHANGELOG.md shows only curated stable sections in the app, 2.0.0's as shipped; the full lists stay below <details>, all lint-clean", async () => {
   const text = await readFile("CHANGELOG.md", "utf8");
   const notes = parseChangelog(text);
-  assert.deepEqual(notes.map(n => n.version), ["2.0.0"], "What's new and the release notes see 2.0.0 only");
-  const blocks = notes[0]!.blocks ?? [];
+  // A section is found by its version, never by its place: each stable release adds one on top (2.0.1, 2026-11-14).
+  const versions = notes.map(n => n.version);
+  assert.ok(versions.every(v => /^\d+\.\d+\.\d+$/.test(v)), `What's new and the release notes see stable sections only: ${versions.join(", ")}`);
+  assert.equal(versions.at(-1), "2.0.0", "2.0.0 is the oldest section the app sees; 1.x stays below <details>");
+  for (const n of notes) {
+    const headings = (n.blocks ?? []).filter(b => b.kind === "heading").length;
+    assert.ok(headings >= 3 && headings <= 8, `${n.version}: a handful of pillars (${headings})`);
+    assert.match(text, new RegExp(`<details><summary>Full changelog since ${n.version === "2.0.0" ? "1\\.0\\.1" : "\\d+\\.\\d+\\.\\d+"}</summary>`));
+  }
+  const blocks = notes.find(n => n.version === "2.0.0")!.blocks ?? [];
   assert.ok(blocks.filter(b => b.kind === "heading").length >= 3 && blocks.filter(b => b.kind === "heading").length <= 8, "a handful of pillars");
   assert.ok(blocks.every(b => !/1\.x|upgrad|roll ?back|0\.15/i.test(b.text)), "no upgrade or Paseo version talk in the curated notes");
   assert.ok(text.split("\n").map(l => /^[-*]\s+(.*)$/.exec(l)?.[1]).filter(Boolean).every(b => !lintBullet(b!).length), "every bullet, full list included, is lint-clean");
@@ -212,11 +220,23 @@ test("release notes script: a curated section is never regrouped or relabeled; 0
   const added = after.filter(l => !before.split("\n").includes(l));
   assert.deepEqual(added, ["- A workspace no longer flickers between groups."], "one new line, nothing else changes");
   assert.deepEqual(after.filter(l => l !== added[0]), before.split("\n"), "every existing line keeps its place, headings and summary included");
-  const fixes = after.indexOf("### Fixes"), line = after.indexOf(added[0]!);
-  assert.ok(fixes >= 0 && line > fixes && line < after.indexOf("</details>"), "it joins its own area's group");
+  // Within 2.0.0's own section: a later stable section above it has its own "### Fixes" and </details>.
+  const section = after.findIndex(l => /^## 2\.0\.0\b/.test(l));
+  const fixes = after.indexOf("### Fixes", section), line = after.indexOf(added[0]!);
+  assert.ok(section >= 0 && fixes > section && line > fixes && line < after.indexOf("</details>", section), "it joins its own area's group");
   await writeFile(join(dir, "changes/y.md"), "- A workspace no longer flickers between groups.\n");
   await run("2.0.0");
   assert.equal(after.join("\n"), await readFile(join(dir, "CHANGELOG.md"), "utf8"), "a note already in the list isn't added twice");
+});
+
+test("changelog: a <details> full list ends only its own section; every stable section above and below it still reaches the app", () => {
+  // 2026-11-14, stable 2.0.1: the parser stopped at the first <details>, so a second stable section (each carries its
+  // own "Full changelog" list) hid every older version from Home's notes and from "since last seen".
+  const text = "# R\n\n## 2.0.1 (2026-11-14)\n\nLighter.\n\n### Tasks\n\n- Tasks.\n\n<details><summary>Full changelog since 2.0.0</summary>\n\n### Fixes\n\n- Hidden fix.\n\n## 9.9.9 (2026-01-01)\n\n- Inside the list.\n\n</details>\n\n## 2.0.0 (2026-11-11)\n\n- Home.\n\n<details><summary>Full changelog since 1.0.1</summary>\n\n- Old.\n\n</details>\n";
+  const notes = parseChangelog(text);
+  assert.deepEqual(notes.map(n => n.version), ["2.0.1", "2.0.0"], "both stable sections, nothing from inside a <details> list");
+  assert.deepEqual(notes[0]!.items, ["Tasks."], "a section's full list never reaches What's new");
+  assert.deepEqual(notes[1]!.items, ["Home."]);
 });
 
 test("changelog: a <details> archive below the notes never reaches What's new; image lines become image blocks", () => {

@@ -1,1 +1,0 @@
-- Follow-up keeps one connection to Paseo instead of opening a new one for each read, and asks for usage meters only when Smart Session is installed.

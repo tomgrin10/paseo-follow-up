@@ -1,1 +1,0 @@
-- One click on Merge merges: no second "Merge this PR?". The button names everything it merges first ("Merge 3 PRs"), and a blocker found at click time merges nothing and says why.

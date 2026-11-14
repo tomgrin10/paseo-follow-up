@@ -1,1 +1,0 @@
-- A task names the agent working on it and whether it is working, idle or closed, instead of a stale "Agent working", with Open agent. The status line and Home spin only while that agent really runs.

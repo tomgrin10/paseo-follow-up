@@ -1,1 +1,0 @@
-- A "Nothing needed" turn end no longer shows in Needs you or counts there when the workspace is flagged for something else, like a merged PR. The pill and rows read that reason instead.
