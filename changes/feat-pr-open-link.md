@@ -1,2 +1,0 @@
-- Every Needs you row about a PR opens it in one click: an Open #N link beside its action, and each #N it names is a link.
-- Agents get each inbox row's PR links from inbox_list.

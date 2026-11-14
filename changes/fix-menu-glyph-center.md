@@ -1,1 +1,0 @@
-- In menus on a phone, the check beside the chosen sort and the action icons now sit centred beside their item, sized to match the text.

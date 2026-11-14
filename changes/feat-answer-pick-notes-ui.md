@@ -1,1 +1,0 @@
-- Decision cards: "Add note" under the options lets you send a pick with a note ("A, but keep the BOM off"). One tap still sends; with a note typed, each option reads "Send A with note".

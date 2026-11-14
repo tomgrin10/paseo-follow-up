@@ -1,1 +1,0 @@
-- Follow-up reads GitHub inside its own process, so starting up or finishing a deploy no longer launches dozens of `gh` processes.

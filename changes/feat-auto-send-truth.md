@@ -1,2 +1,0 @@
-- The line under queued fixes now says exactly why they haven't gone out, such as a PR Follow-up couldn't read or a send that was refused, and only says "sending now" when one is really going out.
-- Fixes that keep changing no longer push their send back: they go out a minute after the first one was queued.

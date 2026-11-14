@@ -1,1 +1,0 @@
-- Tracking a workspace right after creating its agent no longer fails with "This workspace has no available main agent".

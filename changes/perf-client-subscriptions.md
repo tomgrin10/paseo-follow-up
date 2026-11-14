@@ -1,1 +1,0 @@
-- On Paseo 0.16, Home, the sidebar and the pills update the moment something changes, on every device, instead of checking every 15 to 60 seconds. An open Follow-up now sends almost nothing while you aren't using it.

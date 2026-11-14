@@ -1,1 +1,0 @@
-- On Paseo 0.16, the recovery agent runs in the background: no tab, no notification and no sidebar row. Its progress shows in the workspace panel.
