@@ -1,6 +1,6 @@
 import { useState, useSyncExternalStore } from "react";
 import { browserKey } from "./keys";
-import { useWorkspace } from "./workspace-data";
+import { openRowCopy, useDetailGate, useWorkspace } from "./workspace-data";
 import { ScrollView, View } from "react-native";
 import { Pressable, Text } from "./text";
 import { useQuery } from "@tanstack/react-query";
@@ -156,7 +156,9 @@ export function PillPopover(props: PluginButtonContentProps & { deps: Deps }) {
   const [question, setQuestion] = useState<string | null>(null);
   // The popover paints from the list form at once; its PR sheet and question sheet wait for this read's full workspace.
   const full = main ? query.workspace : null;
-  const w: ListWorkspace | null = main ? full ?? target.workspace : null;
+  const w: ListWorkspace | null = main ? openRowCopy<ListWorkspace>(target.workspace, full) ?? null : null;
+  useDetailGate(query.failure, !!sheet, () => setSheet(null));
+  useDetailGate(query.failure, !!question, () => setQuestion(null));
   const row = target.row;
   const flagged = state?.mode === "flag";
   const running = !!row && ["running", "initializing"].includes(row.status);

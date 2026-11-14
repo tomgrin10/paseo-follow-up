@@ -160,9 +160,12 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    - **A list carries only what lists draw** (`a-list-carries-only-what-lists-draw`): `follow.list` and the
      workspaces feed send each workspace's list form (`shared/list.ts`), never its detail. A surface that draws detail
      (the panel, the larger view, the PR sheet, the question sheet) reads the full workspace with `follow.get`
-     (`useWorkspace`); the list copy only tells it when to read again. Agent tools read the stored workspace. List
+     (`useWorkspace`); the list copy only tells it when to read again. A surface holding both copies (Home's open row, the
+     pill's popover) draws the newer (`openRowCopy`), and a sheet waiting on the read closes with the error toast if
+     the read fails (`useDetailGate`), never a click that does nothing. Agent tools read the stored workspace. List
      views take `ListWorkspace`, so reading a dropped field there doesn't compile. A full reply on the live-sized seed
-     stays under `LIST_REPLY_BUDGET_KB`. Guarded by `tests/list-reply-budget.test.ts` and the type check.
+     stays under `LIST_REPLY_BUDGET_KB`. Guarded by `tests/list-reply-budget.test.ts`, `tests/open-row-copy.test.ts`
+     and the type check.
    - **The inbox writes at most once per window** (`the-inbox-writes-at-most-once-per-window`): the worker's
      `InboxStore` holds a real change in memory, where every reader in the worker reads it, and writes `inbox.json`
      once per `INBOX_WRITE_MS` (2 s) for all of the window's changes; stop flushes it, so only a crash loses at most

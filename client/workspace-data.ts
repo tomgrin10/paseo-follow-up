@@ -3,7 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useRpc } from "@getpaseo/plugin/client";
 import { getRpc } from "../shared/contracts";
 import type { LiveStore } from "./live";
-import { acceptWorkspace } from "./live-copies";
+import { useToast } from "@getpaseo/plugin/client/ui";
+import { acceptWorkspace, detailFailure } from "./live-copies";
+export { openRowCopy } from "./live-copies";
 import { workspaceKey } from "./keys";
 import type { Workspace } from "../shared/model";
 
@@ -38,6 +40,8 @@ export function useWorkspace(live: LiveStore | undefined, workspaceId: string, o
   const workspace = enabled ? query.data?.workspace ?? null : null;
   return {
     workspace,
+    /** Why there is no workspace to show: the read failed or found none (null while reading, or when disabled). */
+    failure: detailFailure({ enabled, workspace, error: query.error, reply: query.data }),
     /** Nothing to show yet: the read hasn't answered. */
     pending: !workspace && query.isPending && enabled,
     error: query.error,
@@ -45,4 +49,15 @@ export function useWorkspace(live: LiveStore | undefined, workspaceId: string, o
     refetching: query.isRefetching,
     refetch: () => { live?.refresh(); return query.refetch(); },
   };
+}
+
+/**
+ * A sheet that waits for the full read (PR sheet, question sheet): opened while reading, it appears when the read
+ * answers; if the read fails, Follow-up's error toast says so and the request closes, instead of a click doing nothing.
+ */
+export function useDetailGate(failure: string | null, open: boolean, close: () => void): void {
+  const toast = useToast();
+  useEffect(() => {
+    if (open && failure) { toast.error(`Couldn't open it: ${failure}`); close(); }
+  }, [open, failure]); // eslint-disable-line react-hooks/exhaustive-deps
 }

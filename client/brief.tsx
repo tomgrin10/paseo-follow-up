@@ -15,7 +15,7 @@ import { answerQuestionRpc, briefActionRpc, browserStatusRpc, inboxBriefRpc } fr
 import { errorText, mootNote } from "../shared/errors";
 import { OTHER, OTHER_LABEL, briefAnswerStatus, isOther, type Question } from "../shared/questions";
 import type { ListQuestion, ListWorkspace } from "../shared/list";
-import { useWorkspace } from "./workspace-data";
+import { useDetailGate, useWorkspace } from "./workspace-data";
 import { SubmitScope, submitHint, text, useNow } from "./kit";
 import { PrLinksProvider, RichText } from "./rich-text";
 import { useMergeButtons } from "./merge-button";
@@ -394,6 +394,7 @@ function BriefCardBody({ item, theme, layout, agentId, deps, embedded = false, s
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" } | null>(null);
   // The PR sheet draws review and deploy detail the list form leaves out: one read of the full workspace while it's open.
   const detail = useWorkspace(undefined, row.workspaceId ?? "", { enabled: !!sheet });
+  useDetailGate(detail.failure, !!sheet, () => setSheet(null));
   const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), enabled: !!sheet, staleTime: 0, refetchOnMount: "always" });
   // Send again on an undelivered answer: the same answerId, so the server resends that answer and never a second one.
   const resend = () => {
