@@ -121,6 +121,8 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    - `test:scale:live` (PR CI, after `verify`): the same budgets on the **live-sized** seed (`--live-sized`: plus one
      153-PR workspace and a live-shaped 120 KB inbox) after a 180 s **busy window** (awake agents end 20 turns a minute
      with live-sized timelines), plus **busy-window growth** under `BUSY_GROWTH_BUDGET_MB` (`scripts/scale-budget.mjs`).
+     The idle window starts drained (`drainState`): no awake agent running and no worker timeline read for a tick plus
+     a margin (`DRAIN_QUIET_MS`, at most `DRAIN_BOUND_MS`), so the busy window's tail doesn't land in the idle rate.
      It runs with `--budgets-report-only` (budgets print as `[report]` lines; dormant wakes and unsettled sends still
      fail) until its derived budgets land: 2026-11-13 the busy window sat at 322–352 MB idle on beta.4, main and the
      memory fix alike, ~100 MB JS heap and ~220 MB native. Never loosen a `test:scale` budget to pass it.
