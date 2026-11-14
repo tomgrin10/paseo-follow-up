@@ -128,4 +128,8 @@ test("the idle window starts drained: no awake agent running and no timeline rea
   assert.deepEqual(drainState(quiet), { settled: true, expired: false, atMs: 40_000 }, "quiet from the last read at 20 s");
   assert.equal(drainState([at(2, 1, 1), at(30, 1, 1)]).settled, false, "a running agent is never drained, however quiet");
   assert.deepEqual(drainState([at(2, 1, 1), at(DRAIN_BOUND_MS / 1000 + 2, 1, 1)]), { settled: false, expired: true, atMs: DRAIN_BOUND_MS + 2_000 }, "bounded");
+  // The busy window's dirty directory re-read (6 requests, 4 a minute in a 90 s window) lands before the idle window.
+  const relist = (s: number, relisted: boolean) => ({ ...at(s, 0, 13), relisted });
+  assert.equal(drainState([relist(2, false), relist(30, false), relist(50, false)]).settled, false, "quiet, but the due re-read hasn't happened");
+  assert.deepEqual(drainState([relist(2, false), relist(30, false), relist(62, true)]), { settled: true, expired: false, atMs: 62_000 });
 });

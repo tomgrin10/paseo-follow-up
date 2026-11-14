@@ -226,16 +226,16 @@ try {
     // the rescan after them would otherwise land in the idle window, a different amount each run.
     let drain = null;
     if (BUSY_MS > 0) {
-      const from = Date.now(); const polls = []; const awakeIds = new Set(created.slice(0, Math.max(1, AWAKE)).map(c => c.agentId));
+      const from = Date.now(); const polls = []; const listed = () => counter.snapshot().requests["follow-up-worker"]?.fetch_workspaces_request ?? 0; const listedAtEnd = listed(); const awakeIds = new Set(created.slice(0, Math.max(1, AWAKE)).map(c => c.agentId));
       for (;;) {
         await sleep(2_000);
         const reads = counter.snapshot().requests["follow-up-worker"]?.fetch_agent_timeline_request ?? 0;
         const running = (await agents().catch(() => [])).filter(a => awakeIds.has(a.id) && a.status === "running").length;
-        polls.push({ atMs: Date.now() - from, running, reads });
+        polls.push({ atMs: Date.now() - from, running, reads, relisted: listed() > listedAtEnd });
         const state = drainState(polls);
         if (state.settled || state.expired) { drain = { settled: state.settled, seconds: Math.round(state.atMs / 1000), quietSeconds: DRAIN_QUIET_MS / 1000, boundSeconds: DRAIN_BOUND_MS / 1000 }; break; }
       }
-      if (!drain.settled) over(`The busy window didn't drain within ${DRAIN_BOUND_MS / 1000} s (awake agents running or the worker still reading timelines); the idle window starts anyway`);
+      if (!drain.settled) over(`The busy window didn't drain within ${DRAIN_BOUND_MS / 1000} s (awake agents running, the worker still reading timelines, or no directory re-read); the idle window starts anyway`);
     }
     const t0 = await ticks(); const started = Date.now(); const requestsBefore = counter.snapshot();
     const idleSamples = [await rss()];
