@@ -55,6 +55,8 @@ export async function hasFixPr(claudeHome = process.env.CLAUDE_CONFIG_DIR ?? joi
 }
 
 type Detected = { at: number; workflow: PrWorkflow; reason: string; path: string | null };
+/** How long one detect pass's checkout map is reused: a pass over every repository takes well under this. */
+export const PATHS_PASS_MS = 30_000;
 export class PrWorkflowStore {
   private tail: Promise<unknown> = Promise.resolve();
   private cached: PrWorkflowConfig | null = null;
@@ -65,6 +67,17 @@ export class PrWorkflowStore {
    * working directories of tracked workspaces with PRs there (a repository often has no project registered). Set by the server.
    */
   paths: () => Promise<Map<string, string[]>> = async () => new Map();
+  /**
+   * One `paths()` per detect pass: repositories detected together (an observe loop, `warm`) share one map, so the
+   * pass reads Paseo's project list once (concurrent-readers-share-one-request). Kept briefly after it settles.
+   */
+  private pathsRead: { at: number; value: Promise<Map<string, string[]>> } | null = null;
+  private passPaths(): Promise<Map<string, string[]>> {
+    if (this.pathsRead && this.now() - this.pathsRead.at < PATHS_PASS_MS) return this.pathsRead.value;
+    const value = this.paths(); this.pathsRead = { at: this.now(), value };
+    void value.catch(() => { if (this.pathsRead?.value === value) this.pathsRead = null; });
+    return value;
+  }
   /** Called after every save, so derived files (scopes.json) can be rewritten. */
   onChanged: () => void = () => undefined;
   constructor(readonly directory: string, private probe: Probe = fsProbe(), private now = Date.now, private ttl = 600_000) {}
@@ -127,7 +140,7 @@ export class PrWorkflowStore {
     const hit = this.detected.get(key);
     if (!fresh && hit && this.now() - hit.at < this.ttl) return hit;
     const machine = await this.machineState(freshMachine);
-    const candidates = [...new Set((await this.paths()).get(key) ?? [])];
+    const candidates = [...new Set((await this.passPaths()).get(key) ?? [])];
     let path = candidates[0] ?? null;
     const detection: Detection = { gtInstalled: machine.gtInstalled, signedIn: machine.signedIn, path, initialised: false };
     // File reads only, stopping at the first checkout set up for Graphite.

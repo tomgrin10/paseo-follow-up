@@ -198,6 +198,12 @@ These are product rules. Each has tests, and breaking one is a bug even when the
      agent list (patched by events); no `fetch_agents` or `fetch_agent` per send or per turn event, and subagents at
      most once per agent per tick. Guarded by `tests/daemon-load.test.ts` and `test:scale`
      ([docs/architecture.md](docs/architecture.md)).
+   - **Concurrent readers share one request** (`concurrent-readers-share-one-request`): readers of the same daemon
+     list join the read in flight (`DaemonDirectory`: the full read, the agent list unless `force`, the project list),
+     and a list's age is its own (`projectsAt`), so a re-read of one list counts as fresh. A PR-workflow detect pass
+     shares one checkout map (`PATHS_PASS_MS`, `server/pr-workflow.ts`), so it reads the project list once. 2.0.2-beta.0
+     live (2026-11-14): ~19 `project.list` back to back every 10 minutes, one per repository. Guarded by
+     `tests/one-project-list.test.ts`.
    - **Cloud Run reads in process** (`cloud-run-reads-in-process`): the deploy probe reads the Cloud Run services list
      and revisions, and the registry, over REST in the worker (`server/deployments.ts`); gcloud runs only for the access
      token, cached `TOKEN_MS`. A 401/403 drops the token and retries once; every read aborts after `READ_TIMEOUT_MS`.
