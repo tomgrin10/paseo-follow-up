@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Workspace } from "./model";
+import type { ListWorkspace as Workspace } from "./list";
 import { summary } from "./model";
 import { batchView } from "./status";
 import { sendDecision } from "./send-decision";

@@ -72,6 +72,19 @@ Answers that the client polls are kept small:
 - `follow.list` takes `since` (a revision) and returns only changed workspaces (`server/list-cache.ts`). It
   serialises only a workspace whose object changed (`a-list-answer-serializes-only-what-changed`): the store keeps an
   unchanged workspace's frozen object, so the same object is skipped.
+- `follow.list` and `follow.workspaces-feed` carry each workspace's **list form** (`shared/list.ts`, invariant
+  `a-list-carries-only-what-lists-draw`): what Home, the pill, the sidebar, header dots and search draw. It is the
+  stored schema minus named detail fields: deployment evidence and commits; a snapshot's base, trunk and head branch;
+  a merged PR's checks, threads and reviewers; task evidence except while the task is blocked; an answered or closed
+  question's background and links; the inventory, excluded stacks and the next message. An archived workspace is only
+  a search hit: its name and its PRs' numbers, titles and stacks. Detail surfaces (the panel, the larger view, the PR
+  sheet and question sheet from Home, the pill and briefs) read the full workspace with `follow.get` (`useWorkspace`,
+  `client/workspace-data.ts`). Home's open row and the pill's popover paint from the list form at once and then draw
+  the newer of the two copies (`openRowCopy`); a sheet waiting on the read shows the error toast if it fails
+  (`useDetailGate`). A read's copy reaches every live store as its list form (`acceptWorkspace`), and a
+  list change newer than a surface's read makes it read again. Agent tools read the stored workspace on the worker.
+  `tests/list-reply-budget.test.ts` keeps a full reply on the live-sized seed under `LIST_REPLY_BUDGET_KB` (1904 KB
+  of whole workspaces, 1168 KB of list forms, 2026-11-13).
 - `follow.inbox-list` takes an `etag` and returns `{ unchanged: true }` when nothing changed (`server/etag.ts`).
 
 ## The daemon, seen from the worker

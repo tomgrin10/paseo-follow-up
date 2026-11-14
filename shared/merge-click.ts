@@ -1,5 +1,5 @@
 import { downstack, isGithubFlow, type ActionPlan, type MergeStage } from "./pr-actions";
-import type { Pr, Workspace } from "./model";
+import type { ListPr as Pr, ListWorkspace as Workspace } from "./list";
 
 /**
  * a-click-on-merge-merges (2026-11-13): Merge on a Needs-you row opened the PR sheet, which ran a read-only check and

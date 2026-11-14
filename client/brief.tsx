@@ -14,7 +14,8 @@ const word = (kind: Brief["kind"]) => HEADLINE_WORD[briefKey(kind)];
 import { answerQuestionRpc, briefActionRpc, browserStatusRpc, inboxBriefRpc } from "../shared/contracts";
 import { errorText, mootNote } from "../shared/errors";
 import { OTHER, OTHER_LABEL, briefAnswerStatus, isOther, type Question } from "../shared/questions";
-import type { Workspace } from "../shared/model";
+import type { ListQuestion, ListWorkspace } from "../shared/list";
+import { useDetailGate, useWorkspace } from "./workspace-data";
 import { SubmitScope, submitHint, text, useNow } from "./kit";
 import { PrLinksProvider, RichText } from "./rich-text";
 import { useMergeButtons } from "./merge-button";
@@ -32,7 +33,8 @@ export type BriefDeps = {
   signOff(agentId: string): void;
   openNext(from: string): void;
   openAgent(agentId: string): void;
-  workspace(id: string): Workspace | undefined;
+  /** The workspace's list form (shared/list.ts); the PR sheet reads the full one itself. */
+  workspace(id: string): ListWorkspace | undefined;
   /** Opens Follow-up's panel for a workspace whose record this client hasn't loaded yet. */
   openPanel(workspaceId: string): void;
   /** Done's Undo window, so the composer pill says Done (and its Undo cancels the same toast) until it ends. */
@@ -275,7 +277,7 @@ function Reveal({ label, openLabel, open, onPress, c, compact }: { label: string
  * A card that's no longer open keeps its question (1.4.0). Answered: the ask, each decision with what was picked, and
  * "Show full question" opens the original read-only. Superseded or signed off: the one muted line, plus "Show original".
  */
-function Past({ b, c, now, compact, height, pending = false, onResend, resending = false, questions = [] }: { b: Brief; c: Colors; now: number; compact: boolean; height: number; pending?: boolean; onResend?: () => void; resending?: boolean; questions?: readonly Question[] }) {
+function Past({ b, c, now, compact, height, pending = false, onResend, resending = false, questions = [] }: { b: Brief; c: Colors; now: number; compact: boolean; height: number; pending?: boolean; onResend?: () => void; resending?: boolean; questions?: readonly ListQuestion[] }) {
   const [expanded, setExpanded] = useState(false);
   const answered = b.state === "answered";
   // Its questions' answers as every surface reads them (briefAnswerStatus): copied or in the message box is "not sent
@@ -390,6 +392,9 @@ function BriefCardBody({ item, theme, layout, agentId, deps, embedded = false, s
   const notes = useNotes(b.id);
   const notesOpen = useNotesOpen(b.id);
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" } | null>(null);
+  // The PR sheet draws review and deploy detail the list form leaves out: one read of the full workspace while it's open.
+  const detail = useWorkspace(undefined, row.workspaceId ?? "", { enabled: !!sheet });
+  useDetailGate(detail.failure, !!sheet, () => setSheet(null));
   const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), enabled: !!sheet, staleTime: 0, refetchOnMount: "always" });
   // Send again on an undelivered answer: the same answerId, so the server resends that answer and never a second one.
   const resend = () => {
@@ -547,7 +552,7 @@ function BriefCardBody({ item, theme, layout, agentId, deps, embedded = false, s
       <Icon name="Info" size={12} color={c.foregroundMuted} />
       <Text style={{ flex: 1, color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{b.sourceLine}</Text>
     </View>}
-    {workspace && sheet && <PrSheet workspace={workspace} prKey={sheet.key} intent={sheet.intent} theme={theme} compact={compact} browserReady={browser.data?.ready ?? false} onClose={() => setSheet(null)} />}
+    {detail.workspace && sheet && <PrSheet workspace={detail.workspace} prKey={sheet.key} intent={sheet.intent} theme={theme} compact={compact} browserReady={browser.data?.ready ?? false} onClose={() => setSheet(null)} />}
   </View>;
 }
 

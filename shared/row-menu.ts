@@ -1,6 +1,6 @@
 import type { NeedItem } from "./attention";
 import type { Workstream } from "./home";
-import type { Workspace } from "./model";
+import type { ListWorkspace as Workspace } from "./list";
 
 /**
  * Home's row menu (right-click, long-press, the menu key): the quick moves on one workspace row without opening it.

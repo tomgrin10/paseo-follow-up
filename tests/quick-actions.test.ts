@@ -236,7 +236,7 @@ test("pending answers survive a reload where localStorage exists, and an unconfi
 // Harness (2026-11-10): after a failed send the question dialog said Not sent, but the panel's Needs-you row didn't.
 test("every surface that describes a question says when its answer wasn't sent", async () => {
   const source = await readFile(join(import.meta.dirname, "..", "client", "questions.tsx"), "utf8");
-  assert.match(source, /export function meanwhile\(w: Workspace, q: Question, pending: PendingAnswer \| null \| undefined\)/, "the pending answer is a required argument");
+  assert.match(source, /export function meanwhile\(w: ListWorkspace, q: ListQuestion, pending: PendingAnswer \| null \| undefined\)/, "the pending answer is a required argument");
   const row = await readFile(join(import.meta.dirname, "..", "client", "needs-you.tsx"), "utf8");
   assert.match(row, /const pending = usePendingAnswer\(w\.id, questionId\);[\s\S]*meanwhile\(w, q, pending\)/);
   for (const f of (await readdir(join(import.meta.dirname, "..", "client"))).filter(f => f.endsWith(".tsx"))) {

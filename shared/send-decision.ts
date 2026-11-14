@@ -1,4 +1,5 @@
-import type { Batch, Task, Workspace } from "./model";
+import type { Task } from "./model";
+import type { ListBatch as Batch, ListWorkspace as Workspace } from "./list";
 import { recoveryBatch } from "./follow-up";
 
 /** How long a new batch waits before it goes out on its own, so tasks that land together go in one message. */

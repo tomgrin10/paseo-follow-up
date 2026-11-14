@@ -38,6 +38,8 @@ import { useRowMenu } from "./row-actions";
 import { laterChoices } from "../shared/row-menu";
 import { PrLinksProvider, RichText } from "./rich-text";
 import { TOAST_ANCHOR, ToastHost, useQuestionOpener } from "./toasts";
+import { openRowCopy, useDetailGate, useWorkspace } from "./workspace-data";
+import type { ListWorkspace } from "../shared/list";
 
 export const HOME_SCREEN = "follow-up";
 
@@ -303,7 +305,11 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
   const toast = useToast();
   const { inbox, live } = deps.sources;
   const row = useInbox(inbox, () => s.agentId ? inbox.rows().find(r => r.agentId === s.agentId) ?? null : null);
-  const w = useSyncExternalStore(live.subscribe, () => s.workspaceId ? live.get(s.workspaceId) : undefined, () => undefined);
+  // The open row paints from the list form at once; its PR sheet and question sheet draw detail the list leaves out,
+  // so they wait for the full workspace, read once (useWorkspace). Until it answers, the list form draws the rest.
+  const { workspace: full, failure } = useWorkspace(live, s.workspaceId ?? "");
+  const listed = useSyncExternalStore(live.subscribe, () => s.workspaceId ? live.get(s.workspaceId) : undefined, () => undefined);
+  const w: ListWorkspace | undefined = openRowCopy<ListWorkspace>(listed, full);
   const agent = useAgentLive(s.agentId);
   const readBrief = useRpc(inboxBriefRpc);
   const control = useRpc(controlRpc);
@@ -314,6 +320,8 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
   const browser = useQuery({ queryKey: browserKey, queryFn: () => browserRead({}), enabled: !!sheet, staleTime: 0, refetchOnMount: "always" });
   const [question, setQuestion] = useState<string | null>(() => ask?.id ?? null);
   useEffect(() => { if (ask) setQuestion(ask.id); }, [ask?.n]); // eslint-disable-line react-hooks/exhaustive-deps
+  useDetailGate(failure, !!sheet, () => setSheet(null));
+  useDetailGate(failure, !!question, () => setQuestion(null));
   useQuestionOpener(w?.id, setQuestion);
   const [laterOpen, setLaterOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -485,8 +493,8 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
       }} />
     </View>}
     {laterModal}
-    {w && sheet && <PrSheet workspace={w} prKey={sheet.key} intent={sheet.intent} theme={theme} compact={compact} browserReady={browser.data?.ready ?? false} onClose={() => setSheet(null)} />}
-    {w && <QuestionSheet workspace={w} questionId={question} theme={theme} compact={compact} onClose={() => setQuestion(null)} />}
+    {full && sheet && <PrSheet workspace={full} prKey={sheet.key} intent={sheet.intent} theme={theme} compact={compact} browserReady={browser.data?.ready ?? false} onClose={() => setSheet(null)} />}
+    {full && <QuestionSheet workspace={full} questionId={question} theme={theme} compact={compact} onClose={() => setQuestion(null)} />}
   </View>;
 }
 

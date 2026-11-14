@@ -74,7 +74,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 
 | Subsystem | Files | Doc |
 | --- | --- | --- |
-| Worker entry, RPC wiring, session attach, teardown | `index.server.ts`, `shared/contracts.ts`, `server/feeds.ts`, `server/rpc-timing.ts`, `server/teardown.ts`, `server/daemon.ts`, `server/shared-file.ts`, `server/directory.ts`, `server/request-trace.ts`, `server/store.ts`, `server/cow.ts`, `server/json-file-store.ts`, `server/list-cache.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
+| Worker entry, RPC wiring, session attach, teardown | `index.server.ts`, `shared/contracts.ts`, `server/feeds.ts`, `server/rpc-timing.ts`, `server/teardown.ts`, `server/daemon.ts`, `server/shared-file.ts`, `server/directory.ts`, `server/request-trace.ts`, `server/store.ts`, `server/cow.ts`, `server/json-file-store.ts`, `server/list-cache.ts`, `shared/list.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
 | Discovery, ownership, main agent | `server/discovery.ts`, `server/turn-events.ts`, `server/workspace-agent.ts`, `server/background-agents.ts`, `server/submissions.ts`, `server/pr-owner.ts`, `server/exclusions.ts`, `server/history-cache.ts`, `server/recovery-handoff.ts`, `server/recovery-config.ts`, `shared/settings.ts` | [workspaces](docs/workspaces.md) |
 | Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/send-decision.ts`, `shared/task-rows.ts`, `shared/task-status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/put-in-chat.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
 | Needs-you inbox, brief, Home | `server/inbox.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `server/turn-timeline.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/sending.ts`, `shared/needs-block.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts` | [needs-you](docs/needs-you.md) |
@@ -157,6 +157,15 @@ These are product rules. Each has tests, and breaking one is a bug even when the
      stringifies only the workspaces it touched, never every tracked one. 2026-11-13 (run W, live copy under live
      load): every change stringified all 1.4 MB of tracked workspaces, 23 MB of garbage every 5 minutes. Guarded by
      `tests/list-cache.test.ts` (1 of 150).
+   - **A list carries only what lists draw** (`a-list-carries-only-what-lists-draw`): `follow.list` and the
+     workspaces feed send each workspace's list form (`shared/list.ts`), never its detail. A surface that draws detail
+     (the panel, the larger view, the PR sheet, the question sheet) reads the full workspace with `follow.get`
+     (`useWorkspace`); the list copy only tells it when to read again. A surface holding both copies (Home's open row, the
+     pill's popover) draws the newer (`openRowCopy`), and a sheet waiting on the read closes with the error toast if
+     the read fails (`useDetailGate`), never a click that does nothing. Agent tools read the stored workspace. List
+     views take `ListWorkspace`, so reading a dropped field there doesn't compile. A full reply on the live-sized seed
+     stays under `LIST_REPLY_BUDGET_KB`. Guarded by `tests/list-reply-budget.test.ts`, `tests/open-row-copy.test.ts`
+     and the type check.
    - **The inbox writes at most once per window** (`the-inbox-writes-at-most-once-per-window`): the worker's
      `InboxStore` holds a real change in memory, where every reader in the worker reads it, and writes `inbox.json`
      once per `INBOX_WRITE_MS` (2 s) for all of the window's changes; stop flushes it, so only a crash loses at most

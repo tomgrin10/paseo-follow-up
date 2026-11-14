@@ -6,7 +6,7 @@ import { Icon, Modal, TextInput, copyText, useToast } from "@getpaseo/plugin/cli
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { linkedIndexRpc, linkedItemsRpc, setLinkedItemsRpc } from "../shared/contracts";
 import type { LinkedKind, LinkedView, LinkedViewItem } from "../shared/linked";
-import type { Workspace } from "../shared/model";
+import type { ListWorkspace as Workspace } from "../shared/list";
 import { CHIP_MAX, LINKED_EMPTY, linkedChip, linkedGroups, linkedRow, linkedSpec, pasteToAdd, referencesShown, type LinkedChipModel, type RowGlyph } from "../shared/linked-display";
 import { BRAND_ICONS } from "./brand-icons";
 import { Button, CardRow, IconButton, errorText, space, text, type Theme } from "./kit";
