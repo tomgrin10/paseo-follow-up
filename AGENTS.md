@@ -121,6 +121,9 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    - `test:scale:live` (PR CI, after `verify`): the same budgets on the **live-sized** seed (`--live-sized`: plus one
      153-PR workspace and a live-shaped 120 KB inbox) after a 180 s **busy window** (awake agents end 20 turns a minute
      with live-sized timelines), plus **busy-window growth** under `BUSY_GROWTH_BUDGET_MB` (`scripts/scale-budget.mjs`).
+     The idle window starts drained (`drainState`): no awake agent running, no worker timeline read for a tick plus a
+     margin (`DRAIN_QUIET_MS`) and the directory's due re-read done (at most `DRAIN_BOUND_MS`), so the busy window's
+     tail doesn't land in the idle rate.
      It runs with `--budgets-report-only` (budgets print as `[report]` lines; dormant wakes and unsettled sends still
      fail) until its derived budgets land: 2026-11-13 the busy window sat at 322–352 MB idle on beta.4, main and the
      memory fix alike, ~100 MB JS heap and ~220 MB native. Never loosen a `test:scale` budget to pass it.
@@ -412,7 +415,8 @@ See [docs/releasing.md](docs/releasing.md). In short:
 - **A release needs Tom's manual permission, every time.** No agent releases on its own. Features and fixes ship to a
   beta by default (`X.Y.Z-beta.N`, npm `beta` dist-tag). Anything else needs Tom's explicit OK for that exact version
   before it's tagged: an rc (`2.0.0-rc.0`), a stable version, npm `latest`, or a hotfix (a hotfix skips the beta, not
-  the permission). Ask him, and quote his OK in the release commit body.
+  the permission). Ask him for the exact version (see Versioning), and quote his OK in the release commit body or the
+  annotated tag. His OK covers that version only: a different number needs a new OK.
 - A PR that changes something users see adds `changes/<branch>.md` (rules in `changes/README.md`).
 - The orchestrator (Tom, or the coordinating agent he runs releases from), not the feature PR, runs
   `npm run release:notes <version>`, then bumps the version in the same release commit, tags `vX.Y.Z`, and lets the
@@ -422,6 +426,41 @@ See [docs/releasing.md](docs/releasing.md). In short:
 - Every GitHub release has notes in one format (`scripts/release-body.mjs`): a beta's page renders the fragments
   added since the previous tag, a stable's or an rc's its curated section. In-app What's new stays major-only.
 - Don't bump the version in a feature PR.
+
+### Versioning
+
+Semver by what users get (`version-is-picked-at-release`, `features-ship-in-a-minor`):
+
+- **Patch** (`2.0.2`): fixes and speed-ups only.
+- **Minor** (`2.1.0`): anything new a user can use, such as a feature, setting, screen or agent tool.
+- **Major** (`3.0.0`): a big or breaking change. Only a major gets the What's new popup. It's Tom's call.
+
+Pick the version right before the release, never by keeping the betas' number:
+
+1. `npm run release:version` prints the next stable version and why. It counts from the newest stable section:
+   a pending `changes/feat-*.md` makes a minor, and anything else a patch.
+2. Ask Tom for that exact version, with the reason. Nothing that isn't a beta (a stable, an rc, a hotfix) is ever cut
+   without his OK, and his OK names the version.
+3. `npm run release:notes <version>` drafts the section. It refuses a patch while a feature note is pending
+   (`--allow-features` only with Tom's OK). Never hand-write a version's section, and bump only in the release commit.
+
+Betas are previews. `X.Y.Z-beta.N` names the version they're expected to become, not a promise. Number them off
+`release:version` as well: once a feature lands, the next beta moves to the next minor (`2.1.0-beta.0`).
+
+### Release notes
+
+Guarded by `npm run check:notes` and `release:notes` (`scripts/release-notes.mjs`, tests in `tests/changelog.test.ts`).
+
+- **Curated notes are short** (`release-notes-are-short`).
+  - A minor or patch: one intro sentence, then at most 6 bullets with no headings, under 1200 characters. Lead
+    with what a user gets, one line each, and fold small fixes into a final "Plus many smaller fixes."
+  - A major: an intro and 3 to 8 headed pillars, with screenshots if they help.
+- **Write for the person using Follow-up.** Name what they can now do or what stopped bothering them, in their words:
+  no PR numbers, file names, internal terms (worker, RPC, store), or measurements nobody asked for.
+- **The full list stays collapsed.** `release:notes` puts every fragment in the `<details>` "Full changelog" block.
+  It shows on GitHub, never in the app, and doesn't count toward the limits above. Don't copy it into the curated part.
+- **Fragments** follow `changes/README.md`: one to three plain bullets per PR, named after the branch (`feat-`,
+  `fix-`, `perf-`), which is how `release:version` and `release:notes` tell a feature from a fix.
 
 ## Common pitfalls
 
