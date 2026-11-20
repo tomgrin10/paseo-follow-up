@@ -8,7 +8,7 @@ Update the docs in the same PR as the code.
 Follow-up is a trusted Paseo plugin (unsandboxed, runs on the daemon host). It follows every workspace's PRs until
 the work is done, sends repair batches to each workspace's main agent, shows what needs the developer (Home, the
 panel, the pill, the Needs-you inbox), and gives agents tools for everything the developer can click.
-[README.md](README.md) is the user-facing guide, and [OVERVIEW.md](OVERVIEW.md) is the data-access statement shown in
+[README.md](README.md) is the short user-facing front page, [docs/guide.md](docs/guide.md) the full user guide, and [OVERVIEW.md](OVERVIEW.md) is the data-access statement shown in
 Paseo's plugin listing. [PRODUCT.md](PRODUCT.md) and [DESIGN.md](DESIGN.md) cover voice and the design system.
 
 ## Hard rules

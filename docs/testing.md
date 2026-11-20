@@ -222,8 +222,8 @@ PLAYWRIGHT_CORE=<playwright-core dir> CHROMIUM=<chromium binary> ~/paseo-harness
   one-click Send). `--only a,b` shoots a subset. Home is reached with
   `scripts/ui-home.mjs`, which fails the shot instead of shooting the wrong page.
 - **Theme.** Dark for desktop shots, light for the phone shot; `--scheme dark|light` overrides both.
-- **README images.** `npm run shots:readme` (`scripts/readme-shots.sh`) re-renders the three the README leads with,
-  into `docs/screenshots/`: `home` and `phone` on Paseo 0.15, then `sidebar` on Paseo 0.16 (`HARNESS_PASEO=0.16`),
+- **README images.** `npm run shots:readme` (`scripts/readme-shots.sh`) re-renders the README's lead image and the
+  [guide](guide.md)'s phone and sidebar shots, into `docs/screenshots/`: `home` and `phone` on Paseo 0.15, then `sidebar` on Paseo 0.16 (`HARNESS_PASEO=0.16`),
   each through `harness-slot` and shown as the latest stable tag. Re-run it whenever Home's rows, the panel's copy or
   the fixture change, then read every image before committing.
 - **`--whats-new-review`** (review evidence, not README images): the sheet after a minor update (`2.0.1` to `2.1.0`,
