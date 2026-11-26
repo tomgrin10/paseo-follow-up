@@ -7,7 +7,10 @@
 //    the fake agent records what Paseo gave it at session/new (mcpServers, any system prompt) and calls the tool through
 //    the Paseo MCP server it was handed. Asserts the follow_* tools are listed and the call answers for its own
 //    workspace; then reads follow_session_instructions, the tool an ACP agent gets Follow-up's instructions through
-//    (Paseo 0.17.4 passes no plugin system prompt to ACP), and asserts it answers with them.
+//    (Paseo 0.17.4 passes no plugin system prompt to ACP), and asserts it answers with them. Then the turn-end
+//    checks: a quiet turn gets no message; a turn that leaves a task due gets exactly one, and the turn that message
+//    starts gets none. (A Claude agent can't run here: the harness stubs its CLI and Paseo reserves the id, so the
+//    "hooked providers are skipped" case stays in tests/every-provider.test.ts.)
 // 2. Renders Settings → Agents at 1440×900 and 390×844, light and dark: the one notes block shows (Acme ACP reads its
 //    instructions through a tool; Summaries' linked items, Compass and Ask need a provider with no tools), and AI priority shows off with why,
 //    the helper rows show the fallback pick (Acme ACP, never Claude), nothing overflows horizontally.
@@ -99,6 +102,34 @@ try {
   const instructionsText = read.result?.content?.[0]?.text ?? "";
   report.instructionsTool = { chars: instructionsText.length, start: instructionsText.slice(0, 80) };
   assert.ok(read.result && !read.result.isError && /follow_needs_you|follow_wait_for_checks|follow_workspace_status/.test(instructionsText), `follow_session_instructions answered with Follow-up's instructions: ${instructionsText.slice(0, 200)}`);
+
+  // 1b. Turn-end checks on a real daemon for a provider without Follow-up's hook (server/turn-end.ts): one queued
+  // message only when something is due, never for the turn that message started. The worker's own messages start
+  // with the hook's turnEndPrefix; count them as the fake agent received them.
+  const TURN_END = /^Follow-up turn-end check:/;
+  const prompts = async () => (await records()).filter(r => r.kind === "prompt");
+  const turnEnds = async () => (await prompts()).filter(r => TURN_END.test(r.text));
+  // Settle: nothing new reaches the agent for `quietMs` (the queue sends within a tick; a reply's turn is never checked).
+  const settle = async (quietMs = 20_000) => { let last = -1; await waitUntil("the agent to settle", async () => { const n = (await prompts()).length; if (n === last) return true; last = n; await new Promise(r => setTimeout(r, quietMs)); return false; }, { baseMs: 180_000 }); };
+  await settle();
+  // A quiet turn: the agent reports with needs_you and nothing is due, so nothing is sent.
+  let before = (await turnEnds()).length;
+  await client.sendAgentMessage(agent.id, 'Wrap up: call follow_needs_you {"ask":"Nothing needed: checked the workspace.","kind":"done"}');
+  await waitUntil("the quiet turn", async () => (await records()).some(r => r.kind === "mcp" && r.tool === "follow_needs_you" && r.result && !r.result.isError) || null, { baseMs: 60_000 });
+  await settle();
+  const quiet = (await turnEnds()).length - before;
+  // A turn that leaves a task due (an overdue re-check date): exactly one message, naming it.
+  before = (await turnEnds()).length;
+  await client.sendAgentMessage(agent.id, 'Add the check: call follow_update_obligation {"title":"Check the export in production","status":"pending","recheck":"2020-01-01"}');
+  const sent = await waitUntil("the turn-end message", async () => { const t = (await turnEnds()).slice(before); return t.length ? t : null; }, { baseMs: 90_000 });
+  // The turn that message starts is never checked: no second message however long we wait.
+  await settle();
+  const due = (await turnEnds()).slice(before);
+  report.turnEnd = { quietTurn: quiet, dueTurn: due.length, namesTask: /Check the export in production/.test(sent[0].text), start: sent[0].text.slice(0, 120) };
+  log("turn-end on a real daemon:", JSON.stringify(report.turnEnd));
+  assert.equal(quiet, 0, "a quiet turn (needs_you called, nothing due) gets no turn-end message");
+  assert.equal(due.length, 1, `a turn that leaves a task due gets exactly one turn-end message, and its reply's turn none: ${due.map(d => d.text.slice(0, 80)).join(" | ")}`);
+  assert.ok(report.turnEnd.namesTask, "the message names the due task");
 
   // What instruction text reached the agent: the session/new params (any field but mcpServers), the prompts, the env.
   const FOLLOW_TEXT = /Follow-up|follow_workspace_status|needs_you|register_pr/;
