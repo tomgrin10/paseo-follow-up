@@ -82,8 +82,9 @@ export function useOmnibox(model: HomeModel, sources: HomeSources, extraProvider
   const current = active ?? fallback;
   const move = useCallback((delta: number) => setActive(a => Math.max(0, Math.min((results?.length ?? 1) - 1, (a ?? fallback) + delta))), [results, fallback]);
   // every-search-request-lands-in-the-visible-search: this field takes a search request (the key, ⌘K, `/`) while it is
-  // the one on screen, on mount, on layout, or when focus moves without the developer (client/search-focus.ts).
-  const onSearchLayout = useSearchFocusField(sources.extras.searchFocus, inputRef);
+  // the one on screen, on mount, on layout, or when focus moves without the developer (client/search-focus.ts); what
+  // the developer typed before it landed becomes the query.
+  const onSearchLayout = useSearchFocusField(sources.extras.searchFocus, inputRef, setQuery);
   const focusSearch = useCallback(() => { const f = sources.extras.searchFocus; if (!f.shown()) return false; f.request(); return true; }, [sources.extras.searchFocus]);
   const hint = layoutHint((results ?? []).flatMap(r => r.hit ? [r.hit] : []));
   return { query, setQuery, setPhysical, layoutHint: hint, results, active: Math.min(current, Math.max(0, (results?.length ?? 1) - 1)), move, inputRef, onSearchLayout, focusSearch, askOn, images };
