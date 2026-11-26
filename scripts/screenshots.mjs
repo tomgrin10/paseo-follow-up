@@ -3364,14 +3364,15 @@ async function shortcutShots({ shoot, seeded, call, out, billing }) {
 async function searchFocusChecks({ shoot, out, billing }) {
   const checks = [];
   const check = (name, okay, detail = {}) => { checks.push({ name, ok: !!okay, ...detail }); if (!okay) failures.push(`search-focus: ${name}`); log(`search-focus check ${okay ? "ok" : "FAILED"}: ${name} ${JSON.stringify(detail)}`); };
-  const KEY = "Control+Shift+K";
+  // The search key as the platform sends it (Ctrl, or ⌘ in the Mac shots of section 12).
+  let KEY = "Control+Shift+K";
   // The caret is in a Home search field that is on screen (hit-tested), not one kept mounted behind another screen.
   const state = page => page.evaluate(() => {
     const re = /^(Search, or ask the Overseer|Search or ask the Overseer|Search workspaces, branches, PRs)$/;
     const fields = [...document.querySelectorAll("input,textarea")].filter(e => re.test(e.getAttribute("aria-label") ?? e.getAttribute("placeholder") ?? ""));
     const shown = e => { const r = e.getBoundingClientRect(); if (!r.width || !r.height || r.bottom <= 0 || r.top >= innerHeight || r.right <= 0 || r.left >= innerWidth) return false; const hit = document.elementFromPoint(r.left + Math.min(8, r.width / 2), r.top + r.height / 2); return !!hit && (hit === e || e.contains(hit) || hit.contains(e) || e.parentElement?.contains(hit)); };
     const a = document.activeElement;
-    return { fields: fields.length, shownFields: fields.filter(shown).length, focusedSearch: fields.includes(a), focusedShown: fields.includes(a) && shown(a), active: a ? `${a.tagName}[${(a.getAttribute("aria-label") ?? a.getAttribute("placeholder") ?? "").slice(0, 40)}]` : null, url: location.pathname + location.search };
+    return { fields: fields.length, shownFields: fields.filter(shown).length, focusedSearch: fields.includes(a), focusedShown: fields.includes(a) && shown(a), value: fields.includes(a) ? a.value : null, active: a ? `${a.tagName}[${(a.getAttribute("aria-label") ?? a.getAttribute("placeholder") ?? "").slice(0, 40)}]` : null, url: location.pathname + location.search };
   });
   const landed = async page => { for (let i = 0; i < 25; i++) { const s = await state(page); if (s.focusedShown) return s; await page.waitForTimeout(120); } return state(page); };
   let vp = DESKTOP;
@@ -3397,6 +3398,10 @@ async function searchFocusChecks({ shoot, out, billing }) {
       await page.goto(ORIGIN); await page.getByText("Follow-up", { exact: true }).first().waitFor();
       await composer(page);
       await press(page, `${device}: from a chat with Home never opened`);
+      // The caret in Home's search after the key from a chat, at the device's size (focus kept for the frame).
+      if (vp !== DESKTOP) { await page.setViewportSize(vp); await page.waitForTimeout(400); }
+      await shoot.now(`search-focus-caret-${device}`, page, "dark");
+      if (vp !== DESKTOP) { await page.setViewportSize(DESKTOP); await page.waitForTimeout(300); }
       // 2. A second press with the caret moved away.
       await page.evaluate(() => document.activeElement?.blur?.());
       await press(page, `${device}: a second press on Home`);
@@ -3450,6 +3455,64 @@ async function searchFocusChecks({ shoot, out, billing }) {
     await press(page, "sidebar view: from a chat with Home in the history");
     return null;
   });
+  // 12. The keys around the request (2026-11-26, 2.4.0-rc.0: "it goes to the follow up home but not focuses the search
+  // box"), on a Mac (⌘, navigator.platform MacIntel) and elsewhere (Ctrl): the chord held past the key-repeat delay
+  // (repeat keydowns, as a Mac sends while ⌘⇧K is held), a query typed the moment the key is pressed (it must end up in
+  // the search), focus in a workspace's Follow-up panel, and Dispatch open on Home.
+  for (const [os, mod] of [["mac", "Meta"], ["other", "Control"]]) await shoot(`search-focus-keys-${os}`, DESKTOP, "dark", async page => {
+    vp = DESKTOP; KEY = `${mod}+Shift+K`;
+    const hold = async () => {
+      await page.keyboard.down(mod); await page.keyboard.down("Shift"); await page.keyboard.down("KeyK");
+      for (let i = 0; i < 4; i++) { await page.waitForTimeout(35); await page.keyboard.down("KeyK"); }
+      await page.keyboard.up("KeyK"); await page.keyboard.up("Shift"); await page.keyboard.up(mod);
+    };
+    const held = async name => { await hold(); const s = await landed(page); check(name, s.focusedShown, s); };
+    await page.goto(ORIGIN); await page.getByText("Follow-up", { exact: true }).first().waitFor();
+    await composer(page);
+    await held(`${os}: the key held (auto-repeat) from a chat with Home never opened`);
+    await shoot.now(`search-focus-caret-held-${os}`, page, "dark");
+    await appHome(page); await composer(page);
+    await held(`${os}: the key held from a chat with Home in the history`);
+    // Type-ahead: the chord, then a query typed at once (before Home has drawn).
+    for (const [where, before] of [["a chat with Home never opened", async () => { await page.goto(ORIGIN); await page.getByText("Follow-up", { exact: true }).first().waitFor(); await composer(page); }], ["a chat with Home in the history", async () => { await appHome(page); await composer(page); }]]) {
+      await before();
+      await page.keyboard.press(`${mod}+Shift+K`); await page.keyboard.type("acme");
+      const s = await landed(page);
+      check(`${os}: a query typed at once from ${where} lands in the search`, s.focusedShown && s.value === "acme", s);
+      // The chat's draft kept its own words: nothing typed for the search went into it.
+      await page.evaluate(() => document.activeElement?.blur?.());
+    }
+    // The developer's report (2026-11-26): a busy workspace's chat, its agent mid-turn, the caret in its composer.
+    const busy = WORKSPACES.find(w => w.key === "audit");
+    for (const [what, act] of [["held", hold], ["typed at once", async () => { await page.keyboard.press(`${mod}+Shift+K`); await page.keyboard.type("acme"); }]]) {
+      await openChat(page, busy.title, busy.prompt);
+      const c = page.locator("textarea").filter({ visible: true }).last(); await c.click(); await c.fill("draft");
+      await act();
+      const s = await landed(page);
+      check(`${os}: the key ${what} from a running agent's chat composer`, s.focusedShown && (what === "held" || s.value === "acme"), s);
+      if (what !== "held") await shoot.now(`search-focus-caret-typed-${os}`, page, "dark");
+    }
+    // A workspace's Follow-up panel, focus on a control inside it.
+    await openChat(page, billing.title, billing.prompt);
+    await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+    await page.waitForTimeout(1200);
+    await page.evaluate(() => { const b = [...document.querySelectorAll('[role="button"],button')].filter(e => e.getBoundingClientRect().left > innerWidth / 2 && e.getBoundingClientRect().width > 0).pop(); b?.focus(); });
+    await press(page, `${os}: from a workspace's Follow-up panel, a control in it focused`);
+    // Dispatch open on Home: the request waits under the dialog, and lands when it closes.
+    await appHome(page);
+    await page.keyboard.press(`${mod}+Shift+O`);
+    const dispatch = page.locator('[role="dialog"][aria-label="Dispatch"]').filter({ visible: true }).first();
+    if (await dispatch.waitFor({ timeout: 5000 }).then(() => true, () => false)) {
+      await page.keyboard.press(`${mod}+Shift+K`);
+      await page.waitForTimeout(600);
+      const under = await state(page);
+      check(`${os}: with Dispatch open the caret stays in Dispatch`, !under.focusedSearch, under);
+      await page.keyboard.press("Escape");
+      await dispatch.waitFor({ state: "hidden", timeout: 5000 }).catch(() => undefined);
+      await press(page, `${os}: the key after Dispatch closed`);
+    } else check(`${os}: Dispatch opened`, false);
+    return null;
+  }, os === "mac" ? { init: "Object.defineProperty(Navigator.prototype, 'platform', { get() { return 'MacIntel'; } });" } : undefined);
   await fs.writeFile(join(out, "search-focus.json"), JSON.stringify(checks, null, 2));
   log(`search-focus: ${checks.filter(c => c.ok).length}/${checks.length} checks passed`);
 }

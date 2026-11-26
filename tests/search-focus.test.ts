@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { createSearchFocus, type FocusField } from "../shared/search-focus";
+import { createSearchFocus, TYPE_AHEAD_MS, type FocusField } from "../shared/search-focus";
 
 /**
  * every-search-request-lands-in-the-visible-search (2026-11-25, the developer: "sometimes cmd+shift+k goes to the
@@ -124,6 +124,46 @@ test("an unmounted field is forgotten; the newest shown field wins", () => {
   assert.equal(focus.shown(), false);
 });
 
+test("characters typed before the caret lands become the query; after it lands they are the field's own", () => {
+  const p = page(); const focus = createSearchFocus();
+  let query = "";
+  const home = Object.assign(p.field("home", false), { type: (t: string) => { query = t; } });
+  focus.register(home);
+  focus.request();
+  for (const k of ["a", "c", "x"]) assert.equal(focus.typeAhead(k), true);
+  assert.equal(focus.typeAhead("Backspace"), true);
+  assert.equal(focus.typeAhead("Backspace"), true);
+  assert.equal(focus.typeAhead("Backspace"), true);
+  assert.equal(focus.typeAhead("Backspace"), false, "nothing left to erase: Backspace is the developer's again");
+  for (const k of ["a", "c", "m", "e"]) focus.typeAhead(k);
+  home.visible = true; focus.changed();
+  assert.equal(p.caret(), "home");
+  assert.equal(query, "acme");
+  assert.equal(focus.typeAhead("x"), false, "landed: the field types for itself");
+});
+
+test("a cancelled request drops what was typed ahead, and a new request starts empty", () => {
+  const p = page(); const focus = createSearchFocus();
+  let query = "";
+  const home = Object.assign(p.field("home", false), { type: (t: string) => { query = t; } });
+  focus.register(home);
+  focus.request(); focus.typeAhead("a"); focus.cancel();
+  assert.equal(focus.typeAhead("b"), false, "no request held");
+  focus.request(); focus.typeAhead("z");
+  home.visible = true; focus.changed();
+  assert.equal(query, "z");
+});
+
+test("type-ahead lasts TYPE_AHEAD_MS: if no search came on screen by then, a key is the developer's again", () => {
+  let t = 1000;
+  const p = page(); const focus = createSearchFocus(() => t);
+  focus.register(p.field("never-shown", false));
+  focus.request();
+  assert.equal(focus.typeAhead("a"), true);
+  t += TYPE_AHEAD_MS + 1;
+  assert.equal(focus.typeAhead("b"), false, "the caller then ends the request: the keys are no longer eaten");
+});
+
 const root = join(import.meta.dirname, "..");
 test("every way to ask goes through the one owner: no global flag, no timer, no route-only shortcut", async () => {
   const key = await readFile(join(root, "client/search-key.ts"), "utf8");
@@ -133,7 +173,7 @@ test("every way to ask goes through the one owner: no global flag, no timer, no 
   assert.match(key, /requestSearch\(open\.focus,/, "the search key");
   assert.match(entry, /`Follow-up: Search[\s\S]{0,400}requestSearch\(extras\.searchFocus,/, "⌘K Follow-up: Search");
   assert.match(chrome, /if \(omnibox\.focusSearch\(\)\) e\.preventDefault\(\)/, "`/` asks only when a Home search is on screen");
-  assert.match(chrome, /useSearchFocusField\(sources\.extras\.searchFocus, inputRef\)/);
+  assert.match(chrome, /useSearchFocusField\(sources\.extras\.searchFocus, inputRef, setQuery\)/, "typed-ahead characters become the query");
   assert.equal((chrome.match(/onLayout=\{omnibox\.onSearchLayout\}/g) ?? []).length, 2, "both search layouts retry on layout");
   for (const [name, src] of [["search-key", key], ["home-view", view], ["home-chrome", chrome]] as const) {
     assert.doesNotMatch(src, /takeFocus|focusToken|onHomeRoute/, `${name}: main's one-shot flag and route check are gone`);
@@ -143,7 +183,8 @@ test("every way to ask goes through the one owner: no global flag, no timer, no 
   assert.doesNotMatch(adapter, /setTimeout|setInterval|requestAnimationFrame/, "no timer or retry loop");
   assert.match(adapter, /surfaceVisible\(/, "shown means laid out on the visible page");
   assert.match(adapter, /overlayOver\(/, "a menu or modal over the search makes the request wait");
-  assert.match(adapter, /"keydown", "pointerdown", "click", "wheel", "touchstart", "input"/, "every way the developer acts ends the request");
+  assert.match(adapter, /"pointerdown", "click", "wheel", "touchstart", "input"/, "every way the developer acts ends the request");
+  assert.match(adapter, /addEventListener!\("keydown", onKey/, "a key ends it unless it is the request's own (keyActs)");
   assert.match(adapter, /\(pointer: coarse\)/, "a touch screen never gets an unasked focus()");
   // The route never decides: Catch up, PR stats, the queue and the log share Home's route, and a phone's Home route can
   // show a row's detail; Home's list opens whenever no Home search is on screen.
