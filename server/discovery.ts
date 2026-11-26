@@ -158,6 +158,8 @@ export function applyDiscovery(state: State, discovered: DiscoveredWorkspace[], 
     // A new main agent, or a new message to the gone one, means its conversation can be tried again.
     if (w.goneAgent && (w.goneAgent.agentId !== w.mainAgentId || (row.messageAt && row.messageAt > w.goneAgent.at))) w.goneAgent = null;
     if (row.contributorAgentIds) w.contributorAgentIds = row.contributorAgentIds;
+    // What an agent said it is working on leaves with the agent (shared/now.ts).
+    if (w.milestones) for (const id of Object.keys(w.milestones)) if (id !== w.mainAgentId && !w.contributorAgentIds?.includes(id)) delete w.milestones[id];
     if (!w.enable_tracking && followsByDefault(state, row)) { w.enable_auto_sends = startsWithAutoSend(state, w); w.enable_tracking = true; }
     if (!w.inventory) {
       w.inventory = { revision: 1, syncedRevision: 0, candidates: [], historyComplete: false, historyError: null, scannedMessageAt: null };

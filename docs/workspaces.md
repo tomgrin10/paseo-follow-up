@@ -256,6 +256,43 @@ The invariants in `shared/status-invariants.ts` check these over a grid of state
 (`tests/status-invariants.test.ts`). After each refresh the worker runs `violations()` and appends changes to
 `plugin-data/follow-up/status-diagnostics.jsonl` (`server/status-check.ts`, rotated at 256 KB).
 
+## What each agent is working on
+
+The panel and Home show each agent's line: what it is working on toward the workspace's goal, then its state.
+"Capping the retry gap · 2 of 4", under it "Main agent · working 6m". One pure function builds it, `nowOf` in
+[shared/now.ts](../shared/now.ts), for every surface and for agents (`workspace_now`), so they never disagree. The
+line never shows a tool, file, command or to-do step, and it has no name on screen: no label, no placeholder. When
+nothing is known, the state is the whole line.
+
+**The work**, the first source that has one (`NOW_SOURCES`, invariant `the-line-takes-its-first-source`):
+
+| # | Source | Example |
+| --- | --- | --- |
+| 1 | Work Follow-up handed the agent and it hasn't settled (a sent repair or task batch, while it runs) | "Fixing CI on #412", "Checking the work is finished" |
+| 2 | What the agent stated: `sync_workspace` `milestone {now, done?, next?}` | "Capping the retry gap", 2 of 4 |
+| 3 | The task it is working on (status working, `workingAgentId`, its agent working per `taskAgents`) | "E2E for the 60 s window" |
+| 4 | Its one open PR, only when it owns exactly one | "Shipping #77" |
+| 5 | A contributor's Paseo title (never the main agent's: that is the workspace) | "Retry tests" |
+
+"2 of 4" comes only from the agent's own list: `done.length + 1` of `done + 1 + next`, no index to get wrong. Work
+Follow-up sent is the line with nothing added. Not sources: the to-do list's in-progress item (the micro step, and
+not every provider keeps one), a model call, and `sync_workspace`'s `summary` (a receipt).
+
+**The state**: a pending permission ("Wants your OK · …"), an open stop question ("Asking you: …"), compacting,
+working (since the turn started; "from Follow-up" on a turn it opened), a background job, waiting on CI for its PR,
+idle (since its last activity), or closed. Unknown stays unknown: no made-up "Idle".
+
+**Where it comes from.** The stated work is stored per agent on the workspace record (`milestones`), so the lists
+and the panel read it with the rest of the workspace; it is cleared at Done and when the agent leaves the workspace.
+The state reads the inbox row both the worker and the clients already hold (status, turn start, a permission,
+background jobs) and the record (`mainBusy` compacting, `taskAgents`). Nothing here subscribes to a stream, reads
+a timeline or wakes an agent. It works the same on every provider: the field rides the `sync_workspace` call (native
+tool or the CLI bridge), and everything else is Follow-up's own state.
+
+**Prompt cost.** About 40 words in `sync_workspace`'s schema (prompt-cached with the tool list) and one sentence in
+the turn-end sync instruction ("Pass milestone when the milestone you're on changed."), on the hook and on
+providers without one ([hooks.md](hooks.md)).
+
 ## Tasks (obligations)
 
 **The developer's view: Agent's tasks** (`shared/task-view.ts`, `client/tasks.tsx`, invariant `tasks-are-the-agent-s`).

@@ -136,7 +136,7 @@ export function toolRow(tool: FollowTool, status: "running" | "completed" | "fai
  * see on its own becomes a row or card. A new tool must be added here (tests/chat-grouping.test.ts fails otherwise).
  */
 export const TOOL_PRESENTATION: Record<string, "routine" | "moment"> = {
-  workspace_status: "routine", sync_workspace: "routine", enroll_workspace: "routine", register_pr: "routine", exclude_stack: "routine",
+  workspace_status: "routine", workspace_now: "routine", sync_workspace: "routine", enroll_workspace: "routine", register_pr: "routine", exclude_stack: "routine",
   update_obligation: "routine", acknowledge_batch: "routine", record_answer: "routine", withdraw_question: "routine", set_spec: "routine",
   workspace_about: "routine", agent_settings: "routine", needs_you: "routine", list_prs: "routine", add_reviewers: "routine",
   enable_merge_when_ready: "routine", disable_merge_when_ready: "routine", send_repairs: "routine", set_auto_send: "routine", clear_hold: "routine", snooze_workspace: "routine", ai_rename: "routine",

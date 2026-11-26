@@ -26,6 +26,7 @@ import { communicationSchema } from "./communication";
 import { taskTriggerInputSchema } from "./task-trigger";
 import { QUESTION_MODES, questionSchema } from "./questions";
 import { specSchema } from "./spec";
+import { milestoneInputSchema, NOW_SOURCES } from "./now";
 import { HOME_GROUPS } from "./home";
 import { prWorkflowViewSchema, setPrWorkflowInputSchema } from "./pr-workflow";
 import { setUpdatesInputSchema, updatesViewSchema } from "./updates";
@@ -51,7 +52,17 @@ export const getRpc = defineRpc({ name: "follow.get", input: z.object({ workspac
 export const agentStatusRpc = defineRpc({ name: "follow.agent-status", input: z.strictObject({ agentId: idSchema, detail: z.enum(["summary", "full"]).optional() }), output: workspaceSchema.extend({ /** The caller's own ask the developer dismissed (still standing): don't raise it again. */ dismissedAsk: z.object({ ask: z.string(), kind: z.string(), at: z.string() }).nullable().optional(), prWorkflow: z.object({ mode: z.enum(["graphite", "github"]), reviewFix: z.string().nullable() }).optional(), /** The next message: recipient, tasks, exact text, and when and why it goes (Preview's agent form). */ nextMessageInfo: z.object({ to: z.string(), tasks: z.array(z.string()), text: z.string(), reason: z.string(), eta: z.string().nullable() }).nullable().optional(),
   /** Home's Sending row for this workspace (shared/sending.ts): queued or sent, when and why, and whether Send now (send_repairs) would go through. */
   sending: sendingSchema.nullable().optional() }) });
-export const syncWorkspaceRpc = defineRpc({ name: "follow.sync", input: z.strictObject({ agentId: idSchema, summary: z.string().trim().min(1).max(1000) }), output: z.object({ workspaceId: idSchema, synced: z.literal(true) }) });
+export const syncWorkspaceRpc = defineRpc({ name: "follow.sync", input: z.strictObject({ agentId: idSchema, summary: z.string().trim().min(1).max(1000),
+  /** What the caller is working on toward the goal (shared/now.ts). Omitted keeps the last one; null clears it. */
+  milestone: milestoneInputSchema.optional() }), output: z.object({ workspaceId: idSchema, synced: z.literal(true) }) });
+const nowLineSchema = z.object({
+  agentId: idSchema, role: z.enum(["main", "contributor"]),
+  work: z.object({ text: z.string(), source: z.enum(NOW_SOURCES), done: z.array(z.string()), next: z.array(z.string()), position: z.object({ at: z.number().int(), of: z.number().int() }).nullable() }).nullable(),
+  state: z.object({ kind: z.string(), text: z.string(), since: z.string().nullable() }),
+  waitingOn: z.string().nullable(), needs: z.string().nullable(),
+});
+/** workspace_now: every agent's line in the caller's workspace, as the panel and Home draw it (shared/now.ts). */
+export const workspaceNowRpc = defineRpc({ name: "follow.workspace-now", input: z.strictObject({ agentId: idSchema }), output: z.object({ workspaceId: idSchema, agents: z.array(nowLineSchema) }) });
 export const enrollRpc = defineRpc({ name: "follow.enroll", input: z.strictObject({ workspaceId: idSchema.optional(), agentId: idSchema, goal: textSchema }), output: workspaceSchema });
 export const registerPrRpc = defineRpc({ name: "follow.register-pr", input: z.strictObject({ agentId: idSchema, repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/), number: z.number().int().positive(), stack: textSchema, parentNumber: z.number().int().positive().nullable().optional(), disposition: z.string().max(2000).optional(), agentMerges: z.boolean().optional() }), output: workspaceSchema });
 export const obligationRpc = defineRpc({ name: "follow.obligation", input: z.strictObject({ agentId: idSchema, workingAgentId: idSchema.optional(), id: idSchema.optional(), title: textSchema, status: z.enum(["pending", "waiting", "working", "blocked", "done", "waived"]), afterPrs: z.array(idSchema).optional(), dependencyStage: z.enum(["merged", "deployed"]).optional(), evidence: z.string().max(4000).optional(), ask: z.string().trim().min(1).max(1000).optional(), question: z.string().regex(/^Q\d+$/).optional(), need: z.enum(["decision", "action"]).optional(), enable_follow_up: z.boolean().optional(), communication: agentCommunicationSchema.optional(), trigger: taskTriggerInputSchema.strict().nullable().optional(), recheck: z.string().trim().min(1).max(40).optional(), new: z.boolean().optional() }), output: workspaceSchema.extend({ updatedObligationId: idSchema, note: z.string().optional() }) });

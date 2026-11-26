@@ -50,7 +50,7 @@ test("CLI retains full replies for existing scripts and offers compact calls plu
   const run=async(args:string[])=>JSON.parse((await exec(process.execPath,[resolve("server/mcp.mjs"),...args],{env:f.env})).stdout);
   assert.equal((await run(["call","workspace_status","{}"])) .obligations.length,2);
   assert.equal((await run(["call","workspace_status","{}","--compact"])).obligations.length,1);
-  assert.equal((await run(["list"])).tools.length, 122); // compass + compass_find + set_compass + read_compass + compass_note + why_suggested (Compass) + brief_sources + set_brief_sources (the brief's sources) + pr_stats + pr_stats_settings + set_pr_stats (PR statistics) + brief_settings + set_brief_settings + brief_plan + set_brief_plan + brief_chat_search (Settings → Morning brief) + linear_queue + sweep_queue (the Morning brief) + the 8 New tools (dispatch, dispatch_sources, dispatch_records, dispatch_undo, dispatch_actions, set_dispatch_actions, dispatch_settings, set_dispatch_settings) + wait_for_checks + dismiss_item + dismiss_question + context_reply + catch_up_deck + context_requests + ask_context + question_action (Catch up, Your questions) + queue_list + queue_action + ai_rename + report_issue + report_send + retry_move + 33 (link_item, unlink_item, snooze_workspace among them) + the Overseer's 5 routing tools + rerank + 42 parity tools (server/agent-parity.ts, release_notes, set_wait_for_jobs, the four Updates tools, link_items and set_linked_items among them) + make_main_agent
+  assert.equal((await run(["list"])).tools.length, 123); // workspace_now + compass + compass_find + set_compass + read_compass + compass_note + why_suggested (Compass) + brief_sources + set_brief_sources (the brief's sources) + pr_stats + pr_stats_settings + set_pr_stats (PR statistics) + brief_settings + set_brief_settings + brief_plan + set_brief_plan + brief_chat_search (Settings → Morning brief) + linear_queue + sweep_queue (the Morning brief) + the 8 New tools (dispatch, dispatch_sources, dispatch_records, dispatch_undo, dispatch_actions, set_dispatch_actions, dispatch_settings, set_dispatch_settings) + wait_for_checks + dismiss_item + dismiss_question + context_reply + catch_up_deck + context_requests + ask_context + question_action (Catch up, Your questions) + queue_list + queue_action + ai_rename + report_issue + report_send + retry_move + 33 (link_item, unlink_item, snooze_workspace among them) + the Overseer's 5 routing tools + rerank + 42 parity tools (server/agent-parity.ts, release_notes, set_wait_for_jobs, the four Updates tools, link_items and set_linked_items among them) + make_main_agent
   assert.ok((await exec(process.execPath,[resolve("server/mcp.mjs"),"--help"],{env:f.env})).stdout.includes("--compact"));
 });
 test("native discovery is silent outside tracked scope and recovery never gains main-only tools",async t=>{
@@ -59,7 +59,7 @@ test("native discovery is silent outside tracked scope and recovery never gains 
   f.w.enable_tracking=false;await f.save();assert.deepEqual((await f.rpc(list))[0].result.tools,[]);
   f.w.enable_tracking=true;f.w.archived=true;await f.save();assert.deepEqual((await f.rpc(list))[0].result.tools,[]);
   f.w.archived=false;f.w.batches=[{id:"recovery",state:"sent",settledAt:null,recipientAgentId:"helper",tasks:[{kind:"inventory"}]}] as any;await f.save();
-  const tools=(await f.rpc(list,{PASEO_AGENT_ID:"helper"}))[0].result.tools;assert.equal(tools.length,6);assert.ok(tools.every((t:any)=>!["declare_done","sync_workspace"].includes(t.name)));
+  const tools=(await f.rpc(list,{PASEO_AGENT_ID:"helper"}))[0].result.tools;assert.equal(tools.length,7);assert.ok(tools.every((t:any)=>!["declare_done","sync_workspace"].includes(t.name)));
   f.w.batches[0].settledAt=new Date().toISOString();await f.save();assert.deepEqual((await f.rpc(list,{PASEO_AGENT_ID:"helper"}))[0].result.tools,[]);
 });
 test("an already-open MCP connection announces activation changes without messaging the agent",async t=>{
@@ -72,13 +72,13 @@ test("an already-open MCP connection announces activation changes without messag
   assert.ok(output.includes('"listChanged":true'));f.w.enable_tracking=true;await f.save();
   for(let i=0;!output.includes("notifications/tools/list_changed")&&i<150;i++)await new Promise(r=>setTimeout(r,20));
   assert.ok(output.includes("notifications/tools/list_changed"));child.stdin.end(JSON.stringify({jsonrpc:"2.0",id:2,method:"tools/list"})+"\n");await done;
-  const result=output.trim().split("\n").map(l=>JSON.parse(l)).find(r=>r.id===2);assert.equal(result.result.tools.length,16);assert.equal(error,"");
+  const result=output.trim().split("\n").map(l=>JSON.parse(l)).find(r=>r.id===2);assert.equal(result.result.tools.length,17);assert.equal(error,"");
 });
 test("replacement recovery discovery can ask the authoritative status handler to validate a handoff",async t=>{
   const f=await fixture(t);
   f.w.batches=[{id:"recovery",state:"sent",settledAt:null,recipientAgentId:"old-helper",tasks:[{kind:"inventory"}]}] as any;await f.save();
   await writeFile(join(f.root,"client.mjs"),`import{readFileSync,writeFileSync}from'node:fs';export class DaemonClient{async connect(){}async close(){}async invokePluginRpc(plugin,method,input){if(method!=='follow.agent-status')throw new Error('Only authoritative status lookup expected');const path=${JSON.stringify(join(f.root,"plugin-data/follow-up/state.json"))};const state=JSON.parse(readFileSync(path,'utf8'));state.workspaces[0].batches[0].recipientAgentId=input.agentId;writeFileSync(path,JSON.stringify(state));return state.workspaces[0];}}`);
   const result=await f.rpc([{method:"tools/list"}],{PASEO_AGENT_ID:"replacement-helper",FOLLOW_UP_RECOVERY:"1"});
-  assert.equal(result[0].result.tools.length,6);assert.ok(result[0].result.tools.every((t:any)=>!["declare_done","sync_workspace"].includes(t.name)));
+  assert.equal(result[0].result.tools.length,7);assert.ok(result[0].result.tools.every((t:any)=>!["declare_done","sync_workspace"].includes(t.name)));
   const saved=JSON.parse(await readFile(join(f.root,"plugin-data/follow-up/state.json"),"utf8"));assert.equal(saved.workspaces[0].mainAgentId,"main-agent");
 });

@@ -802,6 +802,8 @@ export class Engine {
       w.declaration = null;
       const alreadyDone = !!w.completion;
       settleDoneChecks(w, this.now());
+      // Done: nobody is working toward the goal any more, so what each agent said it was on goes (shared/now.ts).
+      if (!alreadyDone) delete w.milestones;
       if (!alreadyDone) w.completion = { summary: message, declaredAt: new Date(this.now()).toISOString(), ...(gate.unconfirmed.length ? { unconfirmed: gate.unconfirmed } : {}) };
       return { workspace: w, blockers, unconfirmed: gate.unconfirmed, alreadyDone, next: doneGuidance(gate, alreadyDone) };
     });
@@ -929,6 +931,7 @@ function settleDoneChecks(w: Workspace, now: number): void {
 }
 /** Records a stored declaration as Done; the Done check it answers is no longer needed. */
 function acceptDeclaration(w: Workspace, gate: CompletionGate, now: number): void {
+  delete w.milestones;
   w.completion = { summary: w.declaration!.summary, declaredAt: new Date(now).toISOString(), ...(gate.unconfirmed.length ? { unconfirmed: gate.unconfirmed } : {}) };
   w.declaration = null;
   settleDoneChecks(w, now);

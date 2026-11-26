@@ -26,7 +26,7 @@ is missing from AGENTS.md or docs/, so add a line here when you add one.
 | Session | Tools |
 | --- | --- |
 | Tracked main agent | Core tools (below), the action tools, and `needs_you` while the inbox is on. |
-| Contributor (another root agent of a tracked workspace) | `workspace_status`, `register_pr`, `sync_workspace`, `link_item`, `unlink_item`, `wait_for_checks`, and `make_main_agent` (its claim rules apply). |
+| Contributor (another root agent of a tracked workspace) | `workspace_status`, `workspace_now`, `register_pr`, `sync_workspace`, `link_item`, `unlink_item`, `wait_for_checks`, and `make_main_agent` (its claim rules apply). |
 | Recovery agent | Core tools except `declare_done`, `sync_workspace`, the question tools, `set_spec`, `link_item` and `unlink_item`. No action tools. |
 | Untracked root agent | The action tools, `wait_for_checks` (it names where else to wait), and `needs_you` while the inbox is on. |
 | Overseer | `needs_you`, the action tools and the Overseer tools. |
@@ -43,7 +43,8 @@ is missing from AGENTS.md or docs/, so add a line here when you add one.
 | Tool | RPC | Use |
 | --- | --- | --- |
 | `workspace_status` | `follow.agent-status` | The workspace's goal, PRs, tasks and work queue. `detail=full` adds history. Includes the PR workflow, `nextMessage` (recipient, tasks, exact text, reason, eta: Preview's agent form), `heldTasks` and `githubWait` (while GitHub's budget is low, when Follow-up checks this workspace's PRs again; null otherwise). |
-| `sync_workspace` | `follow.sync` | Confirms the sidebar matches the work. The Stop hook asks for it after code-changing turns. |
+| `workspace_now` | `follow.workspace-now` | read. Every agent in the caller's workspace, main agent first: what it is working on toward the goal (`work`: text, source, the agent's own done/next and its place, "2 of 4") and its state (working, a permission, an ask, compacting, a background job, CI, idle), the same line the panel and Home draw (`nowOf`, [shared/now.ts](../shared/now.ts)). Built from the record and the inbox rows the worker holds; no daemon read, nothing woken. |
+| `sync_workspace` | `follow.sync` | Confirms the sidebar matches the work. The Stop hook asks for it after code-changing turns. Optional `milestone {now, done?, next?}`: what the agent is working on toward the goal, in a few words, with the milestones before and after it (each ≤80 chars, ≤8 per list). Stored per agent on the workspace record (`milestones`); omitted keeps the last one, null clears it; cleared at Done and when the agent leaves. The panel and Home show it as the agent's line (`workspace_now`). |
 | `enroll_workspace` | `follow.enroll` | Refines the goal of a workspace the developer activated. |
 | `register_pr` | `follow.register-pr` | Registers a submitted PR and its stack and parent. `agentMerges: true` marks a PR the agent merges itself: Follow-up never asks the developer to review or merge it. In a No review repository every PR counts as `agentMerges` unless the agent sets it false ([review mode](prs.md#review-mode)). |
 | `exclude_stack` | `follow.exclude-stack` | Removes a wrongly registered stack, with an audit (`server/exclusions.ts`). |

@@ -9,6 +9,7 @@ import { taskTriggerSchema } from "./task-trigger";
 import { blockedOnDeveloper, isOpen as questionOpen, questionSchema, waitsOnDeveloper } from "./questions";
 export { blockedOnDeveloper, waitsOnDeveloper };
 import { artifactSchema, specSchema } from "./spec";
+import { storedMilestoneSchema } from "./now";
 import type { ListPr, ListWorkspace } from "./list";
 
 /** Why a main-agent turn ended canceled (shared/status.ts cancelCause). */
@@ -251,6 +252,11 @@ export const workspaceSchema = z.object({
   taskRetries: z.record(z.string(), z.number().int().nonnegative()).optional(),
   /** The exact text of the next message (the pending batch's prompt without its id line), for Preview and workspace_status. */
   nextMessage: z.string().nullable().optional(),
+  /**
+   * What each agent said it is working on toward the goal (sync_workspace `milestone`), by agent id. Read by `nowOf`
+   * (shared/now.ts) for the line on every surface. Cleared at Done and when the agent leaves the workspace.
+   */
+  milestones: z.record(z.string(), storedMilestoneSchema).optional(),
 });
 export const stateSchema = z.object({
   version: z.literal(1), workspaces: z.array(workspaceSchema),
