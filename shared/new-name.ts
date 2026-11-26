@@ -21,5 +21,7 @@ export const NEW_ROW = {
    * 0.17 keeps which sidebar rows show per device in its own settings and gives plugins no way to change them or to
    * open that page (docs/dispatch.md#paseos-new-workspace), so this names the place instead of a button.
    */
+  /** Setup's tour: the same tip as one line (Q163). */
+  paseoShort: "To hide Paseo's own New workspace row, switch it off in Paseo Settings → Sidebar → Header.",
   paseo: `Paseo's own New workspace row starts an empty workspace; ${NEW_NAME} starts one from an issue, a PR or your words. To hide Paseo's row, switch off New workspace in Paseo Settings → Sidebar → Header, on each device.`,
 } as const;

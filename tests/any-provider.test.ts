@@ -147,11 +147,11 @@ test("recommendations: nothing fits gives the provider's default and a hint; not
 
 // ---------- checks ----------
 
-test("checks for a host with only OpenCode: the default helpers' Claude row fails and offers OpenCode; nothing names Claude or Codex as required", () => {
+test("checks for a host with only OpenCode: the default helpers' Claude row fails and offers OpenCode for the helpers that can move (never AI priority); nothing names Claude or Codex as required", () => {
   const catalog = { error: null, providers: [{ id: "opencode", label: "OpenCode", available: true, reason: null }] };
   let rows = providerChecks(catalog, { claude: ["the Overseer", "Summaries", "AI priority"] });
   const claude = rows.find(r => r.id === "provider-claude")!;
-  assert.equal(claude.state, "fail"); assert.match(claude.detail, /Paseo doesn't have it/); assert.match(claude.fix!.text, /switch those helpers to OpenCode/); assert.equal(claude.fix!.settings, "agents");
+  assert.equal(claude.state, "fail"); assert.match(claude.detail, /Paseo doesn't have it/); assert.match(claude.fix!.text, /switch the Overseer and Summaries to OpenCode/); assert.doesNotMatch(claude.fix!.text, /AI priority/); assert.equal(claude.fix!.settings, "agents");
   assert.equal(rows.find(r => r.id === "provider-opencode")!.state, "ok");
   assert.equal(rows.find(r => r.id === "provider-codex"), undefined, "an unused provider Paseo doesn't have stays out");
   assert.equal(rows.find(r => r.id === "providers"), undefined, "a provider is ready");
@@ -162,7 +162,8 @@ test("checks for a host with only OpenCode: the default helpers' Claude row fail
 
   rows = providerChecks({ error: null, providers: [{ id: "opencode", label: "OpenCode", available: false, reason: "Not installed" }] }, { opencode: ["Summaries"] });
   assert.equal(rows[0].id, "providers"); assert.doesNotMatch(rows[0].detail, /Claude|Codex/);
-  assert.match(rows.find(r => r.id === "provider-opencode")!.fix!.text, /Set up OpenCode/);
+  // No provider at all: the one Agents row says what to set up; no provider row under it (never a second alarm).
+  assert.deepEqual(rows.map(r => r.id), ["providers"]);
 
   const tools = toolsCheck({ config: { agents: { providers: { opencode: { paseoTools: { enabled: false } } } } }, nativeAgents: 1, hookError: null });
   assert.match(tools[0].detail, /off for OpenCode/);

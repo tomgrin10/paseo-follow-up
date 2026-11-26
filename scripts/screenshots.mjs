@@ -34,8 +34,10 @@ import { createRequire } from "node:module";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
 import { harness, spawnDaemon } from "./harness.mjs";
-import { daemonCrashes, harnessEnv, harnessConfig } from "./harness-env.mjs";
+import { PROVIDER_TOOLS, daemonCrashes, harnessEnv, harnessConfig } from "./harness-env.mjs";
 import { fakeGithub } from "./fake-github.mjs";
+// shared/onboarding.ts imports without extensions, which plain node can't load: read its step list as text.
+const ONBOARDING_STEPS = JSON.parse((await fs.readFile(new URL("../shared/onboarding.ts", import.meta.url), "utf8")).match(/ONBOARDING_STEPS = (\[[^\]]*\])/)[1]);
 import { openHome as openHomeAt, homeRow, homeUrl } from "./ui-home.mjs";
 
 const exec = promisify(execFile);
@@ -44,7 +46,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as 2.0.0-rc.0, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "gallery", "frames"];
+const REVIEW_SHOTS = ["tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "gallery", "frames", "onboarding"];
 /** Pasted images and their Add image button share one harness setup (an Overseer and the fixture provider taking images). */
 const PASTE_LIKE = only => only.includes("paste-images") || only.includes("attach-images");
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
@@ -57,6 +59,22 @@ const keep = argv.includes("--keep");
 const asVersion = arg("--as-version");
 if (asVersion && !/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(asVersion)) fail("--as-version is a version like 2.0.0");
 const log = (...a) => console.log("[shots]", ...a);
+/**
+ * `--only onboarding --variant <v>`: a stranger's first run, setup's every step from a packed tarball on a fresh
+ * PASEO_HOME with no mcpproxy (no Linear, Slack or Compass sources). One variant per run, because what the host has
+ * (gh, providers) is fixed when the daemon starts. `gh`: the fake signed-in gh, or none on PATH at all. `providers`:
+ * which Paseo providers can run (`claude` and `codex` are stand-in binaries Paseo finds on PATH; `fixture` is the
+ * plugin provider, standing in for any other provider such as an ACP one).
+ */
+const ONBOARDING_VARIANTS = {
+  "no-gh": { gh: false, providers: ["claude"] },
+  "claude": { gh: true, providers: ["claude"] },
+  "codex": { gh: true, providers: ["codex"] },
+  "other": { gh: true, providers: ["fixture"] },
+  "none": { gh: false, providers: [] },
+};
+const variantName = arg("--variant", "no-gh");
+const variant = only.includes("onboarding") ? ONBOARDING_VARIANTS[variantName] ?? fail(`unknown --variant "${variantName}" (known: ${Object.keys(ONBOARDING_VARIANTS).join(", ")})`) : null;
 function fail(message) { console.error(`screenshots: ${message}`); process.exit(1); }
 
 // ---------- preflight ----------
@@ -69,7 +87,7 @@ const paseo016 = /(^|\D)0\.1[6-9]\.\d+/.test(paseoVersion ?? "");
 if (only.includes("sidebar") && only.some(n => n !== "sidebar")) fail("shoot --only sidebar on its own, with HARNESS_PASEO=0.16");
 if (only.includes("sidebar") && !paseo016) fail(`the sidebar shot needs the Paseo CLI 0.16.x (found ${paseoVersion ?? "none"}); run with HARNESS_PASEO=0.16`);
 if (only.includes("feeds") && only.length > 1) fail("run --only feeds on its own (npm run test:feeds)");
-const paseoOk = only.includes("settings-tabs") || only.includes("new") || PASTE_LIKE(only) || only.includes("gallery") || only.includes("search-focus") || only.includes("frames") ? /(^|\D)0\.1[5-7]\.\d+/ : only.includes("sidebar") || only.includes("feeds") || only.includes("put-in-chat") || argv.includes("--sidebar-review") || argv.includes("--overseer-review") || argv.includes("--keys-review") || argv.includes("--rank-review") || argv.includes("--sortfoot-review") || argv.includes("--secsearch-review") || argv.includes("--github-wait-review") ? /(^|\D)0\.1[56]\.\d+/ : /(^|\D)0\.15\.\d+/;
+const paseoOk = only.includes("settings-tabs") || only.includes("new") || only.includes("onboarding") || PASTE_LIKE(only) || only.includes("gallery") || only.includes("search-focus") || only.includes("frames") ? /(^|\D)0\.1[5-7]\.\d+/ : only.includes("sidebar") || only.includes("feeds") || only.includes("put-in-chat") || argv.includes("--sidebar-review") || argv.includes("--overseer-review") || argv.includes("--keys-review") || argv.includes("--rank-review") || argv.includes("--sortfoot-review") || argv.includes("--secsearch-review") || argv.includes("--github-wait-review") ? /(^|\D)0\.1[56]\.\d+/ : /(^|\D)0\.15\.\d+/;
 if (!paseoVersion || !paseoOk.test(paseoVersion)) fail(`needs the Paseo CLI 0.15.x on PATH (found ${paseoVersion ?? "none"}); run through harness-slot or put ~/paseo-harness/cli/0.15.4/bin first`);
 if (changelogArg && !existsSync(changelogArg)) fail(`--whats-new-changelog: no file at ${changelogArg}`);
 const optimiser = await findOptimiser();
@@ -2901,6 +2919,86 @@ async function homeKeysShots({ shoot, out }) {
  * in the desktop app); the Display setting; Home's row with Undo. Dispatches run on this harness daemon only, into
  * Git projects of its own. Writes new.json with every check.
  */
+/**
+ * Setup as a stranger meets it (`--only onboarding --variant <v>`, ONBOARDING_VARIANTS): every step at desktop and
+ * 390x844, light and dark, the top of the step and, when it scrolls, its end. Checks on every frame: the step's
+ * title and a live Continue or Finish (nothing dead-ends), no horizontal overflow, and no text that reads as a bug.
+ * Writes onboarding-<variant>.json.
+ */
+async function shootOnboarding({ shoot, call }) {
+  const checks = [];
+  const check = (name, okay, detail = {}) => { checks.push({ name, ok: !!okay, ...detail }); if (!okay) failures.push(`onboarding: ${name}`); log(`onboarding check ${okay ? "ok" : "FAILED"}: ${name} ${JSON.stringify(detail)}`); };
+  // What the host looks like to setup, in the run's log and JSON: the evidence for each variant's frames.
+  const host = await call("follow.onboarding-checks", { fresh: true });
+  log("onboarding host:", host.checks.map(r => `${r.id}=${r.state}`).join(" "));
+  checks.push({ name: "host", ok: true, rows: host.checks.map(r => ({ id: r.id, state: r.state, detail: r.detail })) });
+  // The steps this host shows (shared/onboarding.ts setupSteps), from the same facts the client reads.
+  const ghRow = host.checks.find(r => r.id === "gh");
+  const repos = (await call("follow.pr-workflow", {})).repos.length;
+  const npm = (await call("follow.updates", {})).installKind === "npm";
+  const github = ghRow?.state === "ok" ? true : ghRow?.state === "off" ? false : null;
+  const noProvider = host.checks.some(r => r.id === "providers");
+  const steps = ONBOARDING_STEPS.filter(step => step === "shipping" ? github !== false && repos !== 0 : step === "reviewers" ? github !== false : step === "updates" ? npm : step === "helpers" ? !noProvider : true);
+  log("onboarding steps:", steps.join(" "));
+  checks.push({ name: "steps", ok: true, steps });
+  const BROKEN = /undefined|NaN|\[object|null\b|Error:|TypeError|Something went wrong|Couldn't read Paseo/;
+  for (const [i, step] of steps.entries()) {
+    for (const [device, vp] of [["desktop", DESKTOP], ["phone", PHONE]]) for (const theme of ["light", "dark"]) {
+      const name = `onb-${variantName}-${i + 1}-${step}-${device}-${theme}`;
+      let end = null;
+      await shoot(name, vp, theme, async page => {
+        await call("follow.set-onboarding", { action: "step", step });
+        await openHome(page, { keepDialogs: true });
+        if (vp.width < 768) await page.setViewportSize(vp);
+        await page.getByRole("progressbar", { name: `Step ${i + 1} of ${steps.length}` }).first().waitFor();
+        // The checks step reads the host once; wait for its answers, never the "Checking…" placeholder.
+        if (step === "checks") await page.getByText("Checking…").first().waitFor({ state: "hidden", timeout: 30000 }).catch(() => {});
+        await page.waitForTimeout(600);
+        const last = i === steps.length - 1;
+        const go = page.getByRole("button", { name: last ? "Finish" : /^Continue( anyway)?$/ }).filter({ visible: true });
+        check(`${name}: ${last ? "Finish" : "Continue"} is there and live`, await go.count() === 1 && await go.isEnabled());
+        const text = await page.evaluate(() => document.body.innerText);
+        const bad = text.match(BROKEN);
+        check(`${name}: nothing reads as a bug`, !bad, bad ? { found: bad[0], near: text.slice(Math.max(0, bad.index - 80), bad.index + 80) } : {});
+        const wide = await page.evaluate(() => [document.scrollingElement.scrollWidth, document.scrollingElement.clientWidth]);
+        check(`${name}: no horizontal overflow`, wide[0] <= wide[1], { wide });
+        // Does the step scroll? Its title's nearest scrolling ancestor.
+        end = await page.evaluate(() => {
+          const h = [...document.querySelectorAll('[role="heading"]')].find(e => e.getBoundingClientRect().height > 0 && getComputedStyle(e).fontSize === "20px");
+          let el = h?.parentElement;
+          while (el && !(el.scrollHeight > el.clientHeight + 4 && /auto|scroll/.test(getComputedStyle(el).overflowY))) el = el.parentElement;
+          return el ? el.scrollHeight - el.clientHeight : 0;
+        });
+      });
+      if (end > 40) await shoot(`${name}-end`, vp, theme, async page => {
+        await call("follow.set-onboarding", { action: "step", step });
+        await openHome(page, { keepDialogs: true });
+        if (vp.width < 768) await page.setViewportSize(vp);
+        await page.getByRole("progressbar", { name: `Step ${i + 1} of ${steps.length}` }).first().waitFor();
+        if (step === "checks") await page.getByText("Checking…").first().waitFor({ state: "hidden", timeout: 30000 }).catch(() => {});
+        await page.waitForTimeout(600);
+        await page.evaluate(() => {
+          const h = [...document.querySelectorAll('[role="heading"]')].find(e => e.getBoundingClientRect().height > 0 && getComputedStyle(e).fontSize === "20px");
+          let el = h?.parentElement;
+          while (el && !(el.scrollHeight > el.clientHeight + 4 && /auto|scroll/.test(getComputedStyle(el).overflowY))) el = el.parentElement;
+          el?.scrollTo(0, el.scrollHeight);
+        });
+        await page.waitForTimeout(300);
+      });
+    }
+  }
+  // Finish from the last step: Home, with nothing that reads broken.
+  await shoot(`onb-${variantName}-9-home-desktop-light`, DESKTOP, "light", async page => {
+    await call("follow.set-onboarding", { action: "finish" });
+    await openHome(page);
+    await page.waitForTimeout(800);
+    const text = await page.evaluate(() => document.body.innerText);
+    const bad = text.match(BROKEN);
+    check(`home after setup: nothing reads as a bug`, !bad, bad ? { found: bad[0] } : {});
+  });
+  await fs.writeFile(join(out, `onboarding-${variantName}.json`), JSON.stringify(checks, null, 2));
+}
+
 async function newShots({ shoot, call, out, home, billing }) {
   const checks = [];
   const check = (name, okay, detail = {}) => { checks.push({ name, ok: !!okay, ...detail }); if (!okay) failures.push(`new: ${name}`); log(`new check ${okay ? "ok" : "FAILED"}: ${name} ${JSON.stringify(detail)}`); };
@@ -5450,7 +5548,12 @@ try {
   await Promise.all([home, plugin, fixture, bin, out].map(p => fs.mkdir(p, { recursive: true })));
   const net = createServer(); await new Promise(r => net.listen(0, "127.0.0.1", r)); const port = net.address().port; await new Promise(r => net.close(r));
   const url = `ws://127.0.0.1:${port}/ws`;
-  await fs.writeFile(join(home, "config.json"), JSON.stringify(harnessConfig({ port, webUi: true })));
+  // A stranger's Paseo has its defaults: the agent MCP on, and Claude and Codex on, found on PATH or not. Each points at
+  // this run's own path (the stand-in, or nothing), so the host's real CLI is never found.
+  // Claude and Codex stay on (`real`) because their command is this run's own, never the host's.
+  const onboardingProviders = variant ? Object.keys(PROVIDER_TOOLS) : [];
+  await fs.writeFile(join(home, "config.json"), JSON.stringify(harnessConfig({ port, webUi: true, mcp: !!variant, real: onboardingProviders,
+    providers: Object.fromEntries(onboardingProviders.map(id => [id, { command: { mode: "replace", argv: [join(variant.providers.includes(id) ? bin : join(root, "not-installed"), id)] } }])) })));
   const packed = JSON.parse((await exec("npm", ["pack", "--json", "--pack-destination", root], { timeout: 120000 })).stdout)[0];
   await exec("tar", ["-xzf", join(root, packed.filename), "--strip-components=1", "-C", plugin]);
   if (asVersion) {
@@ -5463,15 +5566,27 @@ try {
   await fs.writeFile(join(home, "gh-fixture.json"), JSON.stringify({ ...pulls(), ...(only.includes("pr-scale") ? prScalePulls() : {}), ...(only.includes("pr-stats-settings") ? { _statsSearch: 1840 } : {}) }));
   if (only.includes("pr-stats-settings")) await seedPrStatsSettings(join(home, "plugin-data", "follow-up"));
   if (only.includes("pr-stats")) await seedPrStats(join(home, "plugin-data", "follow-up"));
-  await fs.writeFile(join(bin, "gh"), fakeGh(join(home, "gh-fixture.json"))); await fs.chmod(join(bin, "gh"), 0o700);
+  if (!variant || variant.gh) { await fs.writeFile(join(bin, "gh"), fakeGh(join(home, "gh-fixture.json"))); await fs.chmod(join(bin, "gh"), 0o700); }
+  // Stand-ins Paseo finds on PATH (it only checks the binary resolves): never the host's real CLI, and they never run a model.
+  for (const id of (variant?.providers ?? []).filter(p => p === "claude" || p === "codex")) { await fs.writeFile(join(bin, id), `#!/bin/sh\ncase "$1" in --version|-v) echo "${id} 1.0.0 (stand-in)"; exit 0;; esac\nexec cat >/dev/null\n`); await fs.chmod(join(bin, id), 0o700); }
   // PR reads go over HTTPS (server/github-api.ts) to this fake, which answers with the same fixture gh.
-  github = await fakeGithub({ dir: root, gh: join(bin, "gh") });
+  if (variant?.gh) {
+    // A stranger's gh is signed in with an active account (gh auth token answers without --user) and knows who it is.
+    await fs.rename(join(bin, "gh"), join(bin, "gh-fixture"));
+    await fs.writeFile(join(bin, "gh"), `#!/bin/sh\nif [ "$1" = api ] && [ "$2" = user ]; then echo '{"login":"alice-example"}'; exit 0; fi\nexec ${JSON.stringify(join(bin, "gh-fixture"))} "$@"\n`); await fs.chmod(join(bin, "gh"), 0o700);
+  }
+  github = await fakeGithub({ dir: root, gh: join(bin, "gh"), ...(variant?.gh ? { handle: ({ path }) => path === "user" ? { status: 200, body: { login: "alice-example" } } : null } : {}) });
+  if (variant?.gh) await fs.writeFile(join(root, "gh-auth"), `#!/bin/sh\n[ "$1" = auth ] && [ "$2" = token ] && echo fixture-token-example && exit 0\nexit 1\n`);
+  // No mcpproxy for a stranger: harnessEnv's stub, which exits like a missing tool.
+  const noMcpproxy = !!variant;
   await fs.writeFile(join(home, "linear-fixture.json"), JSON.stringify(linearIssues()));
   await fs.writeFile(join(home, "linear-list.json"), JSON.stringify(only.includes("new") || only.includes("compass-suggest") || only.includes("gallery") || only.includes("frames") ? newIssues() : []));
-  await fs.writeFile(join(bin, "mcpproxy"), fakeMcpproxy(join(home, "linear-fixture.json"), join(home, "linear-list.json"))); await fs.chmod(join(bin, "mcpproxy"), 0o700);
-  // A slip in the fake's template (an escape that lands as a real newline) fails every tool call as "couldn't run the
-  // read", far from its cause: check the fake parses before any shot uses it.
-  await exec(process.execPath, ["--check", join(bin, "mcpproxy")]);
+  if (!noMcpproxy) {
+    await fs.writeFile(join(bin, "mcpproxy"), fakeMcpproxy(join(home, "linear-fixture.json"), join(home, "linear-list.json"))); await fs.chmod(join(bin, "mcpproxy"), 0o700);
+    // A slip in the fake's template (an escape that lands as a real newline) fails every tool call as "couldn't run the
+    // read", far from its cause: check the fake parses before any shot uses it.
+    await exec(process.execPath, ["--check", join(bin, "mcpproxy")]);
+  }
   if (argv.includes("--rename-review")) { await fs.writeFile(join(bin, "claude"), fakeClaude(join(home, "claude-mode"))); await fs.chmod(join(bin, "claude"), 0o700); }
   else if (only.includes("morning-brief")) { await fs.writeFile(join(bin, "claude"), fakeAskClaude()); await fs.chmod(join(bin, "claude"), 0o700); }
   else if (only.includes("compass") || only.includes("compass-suggest") || only.includes("compass-readers")) { await fs.writeFile(join(bin, "claude"), fakeCompassClaude()); await fs.chmod(join(bin, "claude"), 0o700); }
@@ -5481,8 +5596,11 @@ try {
   // sending only: a fake cgroup at 10% of memory.high from the start (the governor finds its cgroup once), raised later.
   if (only.includes("sending") || only.includes("pr-stats-settings")) { process.env.FOLLOW_SHOTS_CGROUP = join(root, "cgroup.json"); await fs.writeFile(process.env.FOLLOW_SHOTS_CGROUP, JSON.stringify({ high: 1000, current: 100 })); }
 
-  const env = harnessEnv(root, { home, strip: github.strip, set: { ...github.env, ...(process.env.FOLLOW_SHOTS_CGROUP ? { FOLLOW_SHOTS_CGROUP: process.env.FOLLOW_SHOTS_CGROUP } : {}), ...(argv.includes("--overseer-review") || PASTE_LIKE(only) || only.includes("gallery") || only.includes("frames") ? { FOLLOW_UP_OVERSEER_PROVIDER: "followup-fixture/fixture" } : {}), ...(PASTE_LIKE(only) ? { FOLLOW_UP_HARNESS_IMAGE_PROVIDERS: "followup-fixture" } : {}), PASEO_DAEMON_URL: url, PASEO_SERVER_ID: "srv_followupshots", FIXTURE_MODEL_LABEL: "Agent", PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true", PATH: `${bin}:${process.env.PATH}`, FOLLOW_SHOTS_CLOCK: clockFile, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${join(root, "clock.cjs")}`.trim(), TZ: "UTC" } });
-  const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env, timeout: 120000, maxBuffer: 1 << 22 })).stdout);
+  const env = harnessEnv(root, { home, strip: github.strip, set: { ...github.env, ...(process.env.FOLLOW_SHOTS_CGROUP ? { FOLLOW_SHOTS_CGROUP: process.env.FOLLOW_SHOTS_CGROUP } : {}), ...(argv.includes("--overseer-review") || PASTE_LIKE(only) || only.includes("gallery") || only.includes("frames") ? { FOLLOW_UP_OVERSEER_PROVIDER: "followup-fixture/fixture" } : {}), ...(PASTE_LIKE(only) ? { FOLLOW_UP_HARNESS_IMAGE_PROVIDERS: "followup-fixture" } : {}), PASEO_DAEMON_URL: url, PASEO_SERVER_ID: "srv_followupshots", FIXTURE_MODEL_LABEL: "Agent", PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true", PATH: `${bin}:${process.env.PATH}`, ...(variant && !variant.gh ? { FOLLOW_UP_GH_BIN: join(root, "no-such-dir", "gh") } : {}), FOLLOW_SHOTS_CLOCK: clockFile, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${join(root, "clock.cjs")}`.trim(), TZ: "UTC" } });
+  // No gh at all: harnessEnv stubs it with an exit-127 script, and a stranger's host has none.
+  if (variant && !variant.gh) await fs.rm(join(root, ".harness-stubs", "gh"), { force: true });
+  // A plugin install builds the plugin, which takes minutes on a busy machine; everything else answers in seconds.
+  const cli = async (...args) => JSON.parse((await exec("paseo", ["--home", home, "--json", ...args], { env, timeout: args[1] === "install" ? 600000 : 120000, maxBuffer: 1 << 22 })).stdout);
   const daemonLog = openSync(join(root, "daemon.log"), "a");
   crashed = async () => daemonCrashes(await fs.readFile(join(root, "daemon.log"), "utf8").catch(() => ""))[0] ?? null;
   daemon = spawnDaemon(["daemon", "run", "--home", home], { env, stdio: ["ignore", daemonLog, daemonLog] });
@@ -5498,7 +5616,8 @@ try {
     try { await cli("workspace", "ls"); break; }
     catch { if (daemon.exitCode !== null) throw new Error(`isolated daemon exited; see ${join(root, "daemon.log")}`); if (i > 120) throw new Error("isolated daemon did not start"); await new Promise(r => setTimeout(r, 250)); }
   }
-  await cli("plugin", "install", fixture); await cli("plugin", "install", plugin);
+  if (!variant || variant.providers.includes("fixture")) await cli("plugin", "install", fixture);
+  await cli("plugin", "install", plugin);
   daemonUrl = url; await connect();
   // A plugin reload (What's new) can drop the connection too: Follow-up RPCs reconnect once.
   const call = async (method, input) => {
@@ -5531,12 +5650,15 @@ try {
     if (vp.width < 768) await page.setViewportSize(vp);
     await page.getByRole("progressbar", { name: /^Step 1 of \d+$/ }).first().waitFor();
   });
-  await call("follow.set-onboarding", { action: "finish" });
-  const seeded = await seed({ call, home });
-  log(`seeded ${seeded.workspaces.length} synthetic workspaces`);
-  if (keep) { console.log(JSON.stringify({ root, home, port, ...seeded })); log("--keep: daemon left running; Ctrl-C to stop it"); await new Promise(() => {}); }
-  await setDaemonClock(BASE + VIEW);
-  await shootAll({ shoot, seeded, call, plugin, home, cli });
+  if (variant) await shootOnboarding({ shoot, call });
+  else {
+    await call("follow.set-onboarding", { action: "finish" });
+    const seeded = await seed({ call, home });
+    log(`seeded ${seeded.workspaces.length} synthetic workspaces`);
+    if (keep) { console.log(JSON.stringify({ root, home, port, ...seeded })); log("--keep: daemon left running; Ctrl-C to stop it"); await new Promise(() => {}); }
+    await setDaemonClock(BASE + VIEW);
+    await shootAll({ shoot, seeded, call, plugin, home, cli });
+  }
   if (failures.length) throw new Error(`${failures.length} shot(s) failed: ${failures.join(", ")}`);
   log(`done: ${results.length} image(s) in ${out}`);
 } catch (error) {

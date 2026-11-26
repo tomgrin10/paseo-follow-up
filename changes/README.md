@@ -12,7 +12,8 @@ file names or internal terms, no emoji, no em dashes. Pure refactors, tests and 
 
 CI checks it (`scripts/check-release-note.mjs`, invariant `user-visible-change-has-a-note`): a PR that changes
 `server/`, `client/`, `shared/` or the entry files needs a fragment here, or the `no-release-note` label when users
-can't see or feel the change.
+can't see or feel the change. Once a stable's curated section is on main, a PR for that release writes its line in
+CHANGELOG.md instead, since a fragment here would only reach the next release.
 
 A beta's GitHub release shows its own fragments; the fragments stay here. At a stable release or a major's release
 candidate (`2.0.0-rc.0`), `npm run release:notes <version>` drafts that version's section in CHANGELOG.md from every

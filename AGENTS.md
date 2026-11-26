@@ -1470,6 +1470,26 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    the agent's start). No return in the session_open hook hands out the bridge without the tools. Before, discovery
    found no agent, and the hook returned the bridge alone: no tools until the next session. Guarded by
    `tests/first-session-tools.test.ts` and `scripts/check-native-tools.mjs` (`npm run test:native`, the real host).
+119. **Every setup step has something to do** (`every-setup-step-has-something-to-do`). Setup shows a step only when
+   this host gives it something to set (`setupSteps`, `shared/onboarding.ts`), from facts setup already reads: without
+   the GitHub CLI signed in, Shipping and Reviewers go (there's no PR to ship or review); with no repository seen,
+   Shipping goes; a copy not installed from npm skips Updates (it updates from its checkout); with no provider in Paseo,
+   Helper agents goes and the checks step's one Agents row says what to set up. A fact not known yet keeps the step
+   (invariant 7); the count ("2 of 5") and Back follow the steps shown, and a flow saved on a skipped step resumes on
+   the next one shown (`shownStep`). Everything a skipped step sets stays in Settings. Setup never reads as broken:
+   a provider Paseo is still loading is "still checking" (re-checked every 3 s for up to a minute), never "no provider
+   ready", and with none at all there's one note, not an alarm per provider. 2026-11-25, the developer: onboarding is
+   the gate before sharing Follow-up; tried as a stranger (a packed tarball on a fresh PASEO_HOME with no gh, no
+   mcpproxy, and Claude only, Codex only, another provider only or none), a host without GitHub walked two empty
+   GitHub steps and a host with no provider saw red on every helper. Guarded by `tests/onboarding.test.ts` and
+   `scripts/screenshots.mjs --only onboarding --variant <no-gh|claude|codex|other|none>` (every step shown, desktop
+   and 390×844, light and dark; writes `onboarding-<variant>.json`).
+
+120. **Release notes show what they're written with** (`release-notes-show-their-bold`). What's new and every
+   version's notes render a line's `**bold**` as semibold runs (`inlineRuns`, `shared/changelog.ts`), links read as
+   their label, and no markdown marker (`**`, a backtick) reaches the screen: not in a curated section, a bullets-only
+   note or a version's one-line preview. 2026-11-26, the developer: 2.4.0's bullets lead with bold, and What's new
+   showed them as plain text; a bullets-only note would have shown the asterisks. Guarded by `tests/changelog.test.ts`.
 
 ## Bugs
 

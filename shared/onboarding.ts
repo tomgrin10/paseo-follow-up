@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { providerName } from "./agent-settings";
+import { ROLE_INFO, guardedProvider, needsGuard, providerName, providerSettling as unsettled, type AgentRole } from "./agent-settings";
 import { GITHUB_ADDS, GITHUB_CLI_URL, GITHUB_LOGIN_COMMAND } from "./github-setup";
 
 /**
@@ -13,6 +13,40 @@ import { GITHUB_ADDS, GITHUB_CLI_URL, GITHUB_LOGIN_COMMAND } from "./github-setu
 export const ONBOARDING_STEPS = ["intro", "checks", "defaults", "shipping", "reviewers", "updates", "helpers", "tour"] as const;
 export type OnboardingStep = typeof ONBOARDING_STEPS[number];
 export const isStep = (v: unknown): v is OnboardingStep => typeof v === "string" && (ONBOARDING_STEPS as readonly string[]).includes(v);
+
+/**
+ * What this host has, for the steps that only mean something with it. `null` is not known yet, which keeps the step
+ * (unknown is not off, invariant 7).
+ */
+export type StepFacts = { github: boolean | null; repos: number | null; npm: boolean | null; providers?: boolean | null };
+/**
+ * The steps a developer walks on this host (every-setup-step-has-something-to-do): without the GitHub CLI signed in
+ * there's no PR to ship or review, so Shipping and Reviewers go; with no repository seen yet Shipping has nothing to
+ * pick; a copy not installed from npm updates from its checkout, so Updates goes; with no provider in Paseo there's no
+ * helper to pick a model for, so Helper agents goes (the checks step says what to set up). Everything a skipped step
+ * sets stays in Settings.
+ */
+export function setupSteps(facts: StepFacts): OnboardingStep[] {
+  return ONBOARDING_STEPS.filter(step => {
+    if (step === "shipping") return facts.github !== false && facts.repos !== 0;
+    if (step === "reviewers") return facts.github !== false;
+    if (step === "updates") return facts.npm !== false;
+    if (step === "helpers") return facts.providers !== false;
+    return true;
+  });
+}
+/** Whether Paseo has a provider ready, from the checks: the "Agents" row means none; any ready provider means yes. */
+export function providersReady(checks: readonly Check[] | null | undefined): boolean | null {
+  if (!checks) return null;
+  if (checks.some(c => c.id === "providers" && c.state !== "pending")) return false;
+  return checks.some(c => c.id.startsWith("provider-") && c.state === "ok") ? true : null;
+}
+/** Where a resumed or Back-ed flow lands when its saved step isn't shown here: the next one that is. */
+export function shownStep(step: OnboardingStep, steps: readonly OnboardingStep[]): OnboardingStep {
+  if (steps.includes(step)) return step;
+  const at = ONBOARDING_STEPS.indexOf(step);
+  return steps.find(s => ONBOARDING_STEPS.indexOf(s) > at) ?? steps.at(-1) ?? step;
+}
 
 /**
  * - `fresh`: no Follow-up data on this host when the worker first started with onboarding.
@@ -186,6 +220,7 @@ export function providerChecks(catalog: { providers: ProviderInfo[]; error: stri
   const ready = catalog.providers.filter(p => p.available).map(p => p.id).sort((x, y) => rank(x) - rank(y));
   const ids = [...new Set([...KNOWN_PROVIDERS.filter(id => use[id]?.length || catalog.providers.some(p => p.id === id)), ...Object.keys(use).filter(id => use[id]?.length), ...ready])];
   const rows: Check[] = [];
+  const pendingAny = catalog.providers.some(unsettled);
   for (const id of ids) {
     const p = catalog.providers.find(x => x.id === id);
     const label = nameOf(catalog, id);
@@ -193,16 +228,34 @@ export function providerChecks(catalog: { providers: ProviderInfo[]; error: stri
     const usedBy = users.length ? `Used by ${joinNames(users)}.` : "Not used by any helper right now.";
     if (p?.available) { rows.push({ id: `provider-${id}`, label, state: "ok", detail: `Available. ${usedBy}`, fix: null }); continue; }
     if (p?.reason === "Still loading") { rows.push({ id: `provider-${id}`, label, state: "pending", detail: "Paseo is still checking this provider.", fix: fix("Check again in a few seconds.") }); continue; }
-    const why = p?.reason ? ` (${p.reason})` : p ? "" : " (Paseo doesn't have it)";
-    if (!users.length) { rows.push({ id: `provider-${id}`, label, state: "off", detail: `Not available${why}. Optional: no helper uses it.`, fix: null }); continue; }
+    // Installed but not answering yet (a slow start, a timeout): not missing. Never "no provider", never optional.
+    if (p && unsettled(p)) { rows.push({ id: `provider-${id}`, label, state: "pending", detail: `Paseo couldn't reach it yet${p.reason ? ` (${p.reason})` : ""}.`, fix: fix("Check again in a moment. If it stays, check it in Paseo's settings.") }); continue; }
+    // Paseo's own reason when it gives one ("Not installed", "Turned off in Paseo"), said as the sentence it is.
+    const why = p?.reason ? sentenceStart(p.reason) : p ? "Not available" : "Paseo doesn't have it";
+    // No provider at all: the one "Agents" row says what to set up, so no provider gets a row of its own (never a second alarm).
+    if (!ready.length && !pendingAny) continue;
+    if (!users.length) { rows.push({ id: `provider-${id}`, label, state: "off", detail: `${why}. Optional: no helper uses it.`, fix: null }); continue; }
     const setup = PROVIDER_FIX[id] ?? { text: `Set up ${label} on the computer running Paseo, then check again.`, command: null };
-    const other = ready.find(x => x !== id);
-    rows.push({ id: `provider-${id}`, label, state: "fail", detail: `Not available${why}. ${sentenceStart(joinNames(users))} won't run until it is.`,
-      fix: other ? fix(`${setup.text} Or switch those helpers to ${nameOf(catalog, other)} in Settings → Agents.`, setup.command, "agents") : fix(setup.text, setup.command) });
+    // A job that runs only on Claude Code or Codex (AI priority) can't move to another provider, so it never offers to.
+    const guarded = users.filter(u => GUARDED_TITLES.includes(u));
+    const movable = users.filter(u => !GUARDED_TITLES.includes(u));
+    const other = ready.find(x => x !== id && (guarded.length && !movable.length ? guardedProvider(x) : true));
+    // Another provider runs everything else: missing this one only costs the guarded job, an optional extra.
+    if (!movable.length && ready.length && !ready.some(guardedProvider)) {
+      rows.push({ id: `provider-${id}`, label, state: "off", detail: `${why}. Optional: ${joinNames(guarded)} runs only on Claude Code or Codex.`, fix: fix(setup.text, setup.command) });
+      continue;
+    }
+    const switchable = guarded.length && other && !guardedProvider(other) ? movable : users;
+    rows.push({ id: `provider-${id}`, label, state: "fail", detail: `${why}. ${sentenceStart(joinNames(users))} won't run until it is.`,
+      fix: other && switchable.length ? fix(`${setup.text} Or switch ${switchable.length === users.length ? "those helpers" : joinNames(switchable)} to ${nameOf(catalog, other)} in Settings → Agents.`, setup.command, "agents") : fix(setup.text, setup.command) });
   }
-  if (!ready.length) rows.unshift({ id: "providers", label: "Helper agents", state: "fail", detail: "No provider in Paseo is ready, so the Overseer, Summaries and AI priority can't run. Following PRs and Needs you still work.", fix: null });
+  // A provider Paseo is still loading isn't missing: the rows say "still checking" and the step checks again.
+  if (rows.some(r => r.state === "pending")) return rows;
+  // None at all: Paseo itself has nothing to run agents on yet. Said as the next step, not as a failure of Follow-up.
+  if (!ready.length) rows.unshift({ id: "providers", label: "Agents", state: "warn", detail: "Paseo has no agent provider set up yet, so there are no agents to follow and the helper agents can't run.", fix: fix("Set one up in Paseo's settings (Claude Code, Codex or any other provider Paseo runs), then check again.") });
   return rows;
 }
+const GUARDED_TITLES = (Object.keys(ROLE_INFO) as AgentRole[]).filter(needsGuard).map(r => ROLE_INFO[r].title);
 const rank = (id: string) => { const i = KNOWN_PROVIDERS.indexOf(id); return i < 0 ? KNOWN_PROVIDERS.length : i; };
 
 export type ToolsInput = {
@@ -224,17 +277,20 @@ export function toolsCheck({ config, nativeAgents, hookError }: ToolsInput): Che
     row = { id: "tools", label, state: "warn", detail: `${why}, so each agent gets Follow-up's tools through a small extra process. It works, and uses a little more memory.`,
       fix: mcpOff ? fix("Optional. To serve them through Paseo instead, set this in Paseo's config.json (in Paseo's home folder) and restart Paseo.", `"daemon": { "mcp": { "enabled": true } }`) : fix("Optional. Turn Paseo tools back on for that provider in Paseo's config.json, under agents.providers.") };
   } else if (!nativeAgents) {
-    row = { id: "tools", label, state: "pending", detail: "Checked when your first agent starts. Nothing to do.", fix: null };
+    // Nothing to check or do until the first agent starts: no row (every row on the checks step says something).
+    return hookError ? [hooksRow(hookError)] : [];
   } else row = { id: "tools", label, state: "ok", detail: `Agents get Follow-up's tools through Paseo.${seen}`, fix: null };
   const rows = [row];
-  if (hookError) rows.push({ id: "hooks", label: "Agent instructions", state: "warn", detail: "Follow-up couldn't add its instructions for every provider. Following still works; agents just aren't reminded to report PRs.", fix: fix("Check your providers' hook settings (Claude Code and Codex have them), then restart Follow-up from Paseo's plugin settings.") });
+  if (hookError) rows.push(hooksRow(hookError));
   return rows;
 }
+const hooksRow = (_error: string): Check => ({ id: "hooks", label: "Agent instructions", state: "warn", detail: "Follow-up couldn't add its instructions for every provider. Following still works; agents just aren't reminded to report PRs.", fix: fix("Check your providers' hook settings (Claude Code and Codex have them), then restart Follow-up from Paseo's plugin settings.") });
 
 /** The rows the checks step leads with: the worst state first is the one to fix. */
 export function checksSummary(checks: readonly Check[]): { state: CheckState; line: string } {
   const fails = checks.filter(c => c.state === "fail").length;
   const warns = checks.filter(c => c.state === "warn").length;
+  if (checks.some(c => c.id === "providers")) return { state: "warn", line: "Set up an agent provider in Paseo to start" };
   if (fails) return { state: "fail", line: warns ? `${fails} to fix, ${warns} to look at` : `${fails} thing${fails === 1 ? "" : "s"} to fix` };
   if (warns) return { state: "warn", line: `Ready, with ${warns} note${warns === 1 ? "" : "s"}` };
   if (checks.some(c => c.state === "pending")) return { state: "pending", line: "Ready so far" };
@@ -257,6 +313,7 @@ export const CHOICE_WRITES = {
   overseer: { settings: "display", field: "enable_overseer" },
   ranker: { settings: "display", field: "enable_ranker" },
   trustBypass: { settings: "display", field: "enable_trust_bypass" },
+  newSidebarRow: { settings: "display", field: "enable_new_sidebar_row" },
   updatesMode: { rpc: "follow.set-updates", field: "mode" },
   updatesChannel: { rpc: "follow.set-updates", field: "channel" },
 } as const;

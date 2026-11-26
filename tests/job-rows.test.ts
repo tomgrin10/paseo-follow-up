@@ -16,8 +16,8 @@ test("both surfaces render the shared JobRows and nothing row-like of their own"
   for (const [name, s] of [["setup", setup], ["settings", settings]] as const) {
     const uses = [...s.matchAll(/<JobRows\b([^>]*)\/>/g)];
     assert.equal(uses.length, 1, `${name} renders JobRows once`);
-    // Only placement props may differ: which order, Settings' More, setup's preselect.
-    const props = [...uses[0][1].matchAll(/(\w+)=/g)].map(m => m[1]).filter(p => !["theme", "compact", "order", "extra", "preselect"].includes(p));
+    // Only placement props may differ: which order, Settings' More, setup's preselect and one-line rows (Q161).
+    const props = [...uses[0][1].matchAll(/(\w+)=/g)].map(m => m[1]).filter(p => !["theme", "compact", "order", "extra", "preselect", "brief"].includes(p));
     assert.deepEqual(props, [], `${name} passes no row content of its own`);
     assert.doesNotMatch(s, /label="Provider"|label="Model"|label="Effort"|"Recommended"|ROLE_NEED|function RoleCard|function JobRow\b/, `${name} builds no pickers, chip or need line itself`);
   }
@@ -125,3 +125,19 @@ test("New work copies the Overseer by default and says so; a pick of its own is 
   assert.equal(jobRow(view("dispatch"), codex).notice, null);
 });
 
+
+test("a provider Paseo is still loading: no row says it can't run, and the header says Paseo is still checking", () => {
+  const loading = (id: string) => ({ ...p(id, [], false), reason: "Still loading" });
+  const cat = catalog(loading("claude"), loading("codex"));
+  const rows = SETUP_ORDER.map(role => jobRow(view(role), cat));
+  assert.ok(rows.every(r => !r.notice && !r.blocked), JSON.stringify(rows.map(r => [r.role, r.notice, r.blocked])));
+  assert.deepEqual(jobsHeader(rows, cat, false), { text: "Paseo is still checking your providers…", tone: "muted", action: null, differ: 0 });
+});
+
+test("a provider Paseo lists but hasn't reached yet (a timeout) is unknown too: the header offers to check again", () => {
+  const cat = catalog({ ...p("codex", [], false), reason: "Timed out initializing Codex app-server" }, p("claude", [], false));
+  const rows = SETUP_ORDER.map(role => jobRow(view(role), cat));
+  assert.ok(rows.every(r => !r.notice && !r.blocked), JSON.stringify(rows.map(r => [r.role, r.notice, r.blocked])));
+  const header = jobsHeader(rows, cat, false);
+  assert.equal(header.action, "check"); assert.match(header.text, /^Paseo hasn't reached Codex yet/);
+});

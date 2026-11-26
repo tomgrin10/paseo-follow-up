@@ -108,6 +108,7 @@ test("phones: Home's search results use the list row, the offer sits after Needs
   assert.ok(!/GroupChip/.test(await source("client/home-chrome.tsx")), "no group pill: the state word already says it");
   const home = await source("client/home.tsx");
   assert.match(home, /afterNeeds=\{compact && model\.needs > 0 && props\.onboarding\?\.offer \? <SetupOffer/, "the slot only when there is an offer: an empty one left a gap above the next group");
-  assert.match(home, /emptyAction=\{compact \? <Button [^>]*title="Project settings"/);
+  // Nothing followed yet: the way to start is Dispatch, on phones and desktop alike (a first run lands here).
+  assert.match(home, /emptyAction=\{<Button [^>]*kind="primary"[^>]*title=\{NEW_NAME\}[^>]*onPress=\{\(\) => openNew\(\)\}/);
   assert.match(home, /\{!\(compact && nothing\) && <SortMenu/);
 });

@@ -2,16 +2,16 @@
 
 What changed in each version of Follow-up, newest first. Follow-up shows "What's new" after an update that brings new release notes: the curated part of each stable release since you last looked (betas install quietly; Settings → General can turn it off), and every version's notes from Home's version line.
 
-## 2.4.0 (2026-11-25)
+## 2.4.0 (2026-11-26)
 
 Start new work in one step, rank it by what the people you follow ask for, and use Follow-up with any agent provider, GitHub or not.
 
 - **Dispatch starts new work** from a Linear issue, a link or a sentence: Follow-up makes the workspace, starts the agent and tracks it. Agents and the Overseer can start work too once you agree.
-- **Compass ranks by what matters to your team.** Pick the people and sources whose words set your priorities. AI priority ranks by them, Why it matters shows the note behind a rank, and urgent work nobody started shows in Needs you.
-- **The morning brief shows what moved** in your Linear queue and what Compass heard since you last looked, with Create PR and Plan on urgent issues that have no workspace.
+- **Compass ranks by what matters to your team.** Pick the people and sources whose words set your priorities. AI priority ranks by them, and the morning brief shows what moved in your Linear queue.
 - **Any provider, GitHub optional:** agents on OpenCode, Pi, Copilot, Cursor and more get Follow-up's tools, and everything but the PR features works without the GitHub CLI.
-- **Paste or drop images** into replies, Dispatch and the Overseer, and see **PR statistics** for the repositories you turn on.
-- **Tasks come due on their own** when their PR merges or their date arrives, and long stacks stay fast and easy to scan. Plus many smaller fixes.
+- **PR statistics** show who opens, merges and reviews PRs, and how long PRs wait for a first review, for the repositories you turn on.
+- **Setup fits your machine:** it skips what you can't use, shows each helper agent on one line, and its tour covers Dispatch.
+- **Paste or drop images** into replies, Dispatch and the Overseer. Agents wait for CI without polling GitHub, and tasks come due on their own. Plus many smaller fixes.
 
 <details><summary>Full changelog since 2.3.0</summary>
 
@@ -80,6 +80,7 @@ Start new work in one step, rank it by what the people you follow ask for, and u
 - GitHub is now optional. Without the GitHub CLI, workspaces, Needs you, questions, Catch up, the Overseer, tasks and Compass all work, and setup offers GitHub instead of failing.
 - Each GitHub feature (PR status, merge, reviewers, waiting for checks, PR stats) says in one line what's missing and how to turn it on. Installing and signing in is picked up without a restart.
 - While GitHub is off, a workspace's Refresh checks for it again at once.
+- Setup skips steps with nothing to set on your machine, says Follow-up works with every agent Paseo runs, waits for a provider still loading, shows each helper as one line with Change, and its tour shows Dispatch.
 
 ### Home and Needs you
 
@@ -97,6 +98,7 @@ Start new work in one step, rank it by what the people you follow ask for, and u
 - On an action card, Add note and Reply instead fit beside Done in the narrow panel. Done keeps its Ctrl ⏎ hint where there's room, and Ctrl+Enter sends Done on the chat card too.
 - Sign off & next and `/ok next` skip the rows Needs you no longer shows.
 - Report an issue and Rename title with AI also open on the screen you're looking at.
+- Home with nothing followed offers Dispatch on desktop too.
 
 ### Agent's tasks
 
@@ -148,6 +150,7 @@ Start new work in one step, rank it by what the people you follow ask for, and u
 
 ### Fixes
 
+- What's new shows the bold in release notes, and a version's one-line preview no longer shows markdown.
 - Dispatch opens again after you visit Home a second time. It used to land on Home with nothing open.
 - Asking the Overseer to start workspaces in chat works again, including "create workspaces for these" with several issues. It no longer asks you again on a card.
 - Workspaces with very long stacks work again: PR status, Merge when ready and Add reviewers no longer fail with "Too big: expected array to have <=50 items" past 50 PRs.

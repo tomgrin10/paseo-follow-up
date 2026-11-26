@@ -26,7 +26,9 @@ export const isMajorRc = (version: string): boolean => notesVersion(version) !==
 /**
  * A note's content in order. `items` keeps the bullets alone (what betas and older notes are); `blocks` adds a curated
  * section's `###` headings, paragraphs, images and rules, so an announcement (2.0.0) reads as written. Inline markdown
- * is reduced to its text (links to their label, no backticks or bold).
+ * is reduced to its text (links to their label, no backticks or italics). Bold stays bold: a paragraph or bullet with
+ * `**bold**` in it carries `runs` beside its plain `text`, so What's new shows the bold leads the curated notes are
+ * written with (2026-11-26: 2.4.0's bullets showed as plain text, and a bullets-only note showed the asterisks).
  *
  * An image's `text` is its alt text and `url` where it loads from: the app may run on a phone away from the daemon's
  * host, so images load by URL, pinned to a commit (tests/changelog.test.ts). A `#<width>x<height>` fragment on the URL
@@ -35,7 +37,7 @@ export const isMajorRc = (version: string): boolean => notesVersion(version) !==
  * it shows.
  */
 export type NoteBlock =
-  | { kind: "heading" | "text" | "bullet" | "rule"; text: string }
+  | { kind: "heading" | "text" | "bullet" | "rule"; text: string; runs?: InlineRun[] }
   | { kind: "image"; text: string; url: string; aspect: number | null; width: number | null };
 const IMAGE = /^\s*!\[([^\]]*)\]\(\s*(\S+?)\s*\)\s*$/;
 /** An image line's block, or null. Only http(s) URLs: a relative path means nothing to the app. */
@@ -47,9 +49,29 @@ export function imageBlock(line: string): NoteBlock | null {
   return { kind: "image", text: plainInline(m[1]!), url: m[2]!.replace(/#.*$/, ""), aspect, width: size && aspect ? +size[1]! : null };
 }
 export type ReleaseNote = { version: string; date: string | null; items: string[]; blocks?: NoteBlock[] };
+/** Links to their label, no backticks or italics markers (bold is left to the caller). */
+const stripInline = (s: string): string =>
+  s.replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/`([^`]*)`/g, "$1").replace(/(^|\W)_([^_]+)_(?=\W|$)/g, "$1$2");
+const BOLD = /\*\*([^*]+)\*\*/g;
 /** Inline markdown to plain text: `[label](url)` to label, no backticks, bold or italics markers. */
-export const plainInline = (s: string): string =>
-  s.replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/`([^`]*)`/g, "$1").replace(/\*\*([^*]+)\*\*/g, "$1").replace(/(^|\W)_([^_]+)_(?=\W|$)/g, "$1$2").trim();
+export const plainInline = (s: string): string => stripInline(s).replace(BOLD, "$1").trim();
+/** A stretch of a line's text, bold or not. */
+export type InlineRun = { text: string; bold?: true };
+/** Inline markdown to runs: `**bold**` keeps its weight, everything else reads as plainInline has it. */
+export function inlineRuns(s: string): InlineRun[] {
+  const runs: InlineRun[] = []; const src = s.trim(); let last = 0;
+  const push = (text: string, bold: boolean) => { if (text) runs.push(bold ? { text, bold: true } : { text }); };
+  for (const m of src.matchAll(BOLD)) { push(stripInline(src.slice(last, m.index)), false); push(stripInline(m[1]!), true); last = m.index! + m[0].length; }
+  push(stripInline(src.slice(last)), false);
+  return runs;
+}
+/** Sets a paragraph's or bullet's text from its markdown: plain `text`, and `runs` only when something in it is bold. */
+function setInline(block: Exclude<NoteBlock, { kind: "image" }>, md: string): NoteBlock {
+  block.text = plainInline(md);
+  const runs = inlineRuns(md);
+  if (runs.some(r => r.bold)) block.runs = runs; else delete block.runs;
+  return block;
+}
 const HEADING = /^##\s+v?(\S+)(?:\s+\((\d{4}-\d{2}-\d{2})\))?\s*$/;
 
 export function parseChangelog(text: string): ReleaseNote[] {
@@ -57,6 +79,8 @@ export function parseChangelog(text: string): ReleaseNote[] {
   let current: ReleaseNote | null = null;
   /** The block a continuation line joins: the last bullet, or a paragraph still open (no blank line since). */
   let open: NoteBlock | null = null;
+  /** The open block's markdown so far, so a wrapped line keeps its bold. */
+  let md = "";
   /** Inside a <details> list (a section's "Full changelog", the 1.x archive): never shown, headings in it included. */
   let folded = false;
   for (const line of text.replace(/\r\n?/g, "\n").split("\n")) {
@@ -82,12 +106,12 @@ export function parseChangelog(text: string): ReleaseNote[] {
     const bullet = /^[-*]\s+(.*)$/.exec(line);
     if (bullet) {
       current.items.push(bullet[1]!.trim());
-      blocks.push(open = { kind: "bullet", text: plainInline(bullet[1]!) } as NoteBlock);
+      blocks.push(open = setInline({ kind: "bullet", text: "" }, md = bullet[1]!));
     } else if (/^\s+\S/.test(line) && open?.kind === "bullet") {
       current.items[current.items.length - 1] += ` ${line.trim()}`;
-      open.text = `${open.text} ${plainInline(line)}`;
-    } else if (open?.kind === "text") open.text = `${open.text} ${plainInline(line)}`;
-    else blocks.push(open = { kind: "text", text: plainInline(line) });
+      setInline(open, md = `${md.trim()} ${line.trim()}`);
+    } else if (open?.kind === "text") setInline(open, md = `${md.trim()} ${line.trim()}`);
+    else blocks.push(open = setInline({ kind: "text", text: "" }, md = line));
   }
   for (const n of notes) if (!n.blocks!.some(b => b.kind !== "bullet")) delete n.blocks; // bullets only: items says it all
   return notes.sort((a, b) => compareVersions(b.version, a.version));

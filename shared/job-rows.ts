@@ -1,4 +1,4 @@
-import { EMPTY_AGENT_SETTINGS, ROLE_DEFAULTS, guardedProvider, needsGuard, ROLE_INFO, SAME_LABEL, hasSame, isJobRole, labelsFor, resolveRole, roleSummary, type AgentRole, type AgentSettingsView, type Catalog, type RoleConfig, type SavedRole } from "./agent-settings";
+import { providerSettling, EMPTY_AGENT_SETTINGS, ROLE_DEFAULTS, guardedProvider, needsGuard, ROLE_INFO, SAME_LABEL, hasSame, isJobRole, labelsFor, resolveRole, roleSummary, type AgentRole, type AgentSettingsView, type Catalog, type RoleConfig, type SavedRole } from "./agent-settings";
 import { ROLE_NEED, isRecommended, recommend, type Recommendation } from "./recommend";
 import { guardAction } from "./provider-support";
 import { NEW_NAME } from "./new-name";
@@ -55,7 +55,8 @@ export function recLabel(rec: Recommendation, catalog: Catalog | null | undefine
 export function jobRow(r: RoleView, catalog: Catalog | null | undefined): JobRowModel {
   const role = r.role;
   const providers = catalog?.providers ?? [];
-  const known = providers.length > 0 && !catalog?.error;
+  // A provider Paseo is still loading (or hasn't reached yet) makes the whole catalog unknown, and unknown is not off: no "can't run" yet.
+  const known = providers.length > 0 && !catalog?.error && !stillLoading(catalog);
   const rec = known ? recommend(role, providers) : null;
   const usable = rec && rec.source !== "none" ? rec : null;
   const recommended = !!usable && isRecommended(r, usable);
@@ -119,11 +120,16 @@ export function isReset(r: RoleView, catalog: Catalog | null | undefined): boole
   return jobRow(r, catalog).recommended && r.dailyCap === d.dailyCap && r.maxPromptChars === d.maxPromptChars && r.cadenceMinutes === d.cadenceMinutes;
 }
 
+const stillLoading = (catalog: Catalog | null | undefined) => !!catalog?.providers.some(providerSettling);
+
 export type JobsHeader = { text: string; tone: "muted" | "warning"; action: "use" | "retry" | "check" | null; differ: number };
 /** The line above the rows, and its one action. */
 export function jobsHeader(rows: readonly JobRowModel[], catalog: Catalog | null | undefined, loading: boolean): JobsHeader {
   if (loading && !catalog) return { text: "Reading your providers…", tone: "muted", action: null, differ: 0 };
   if (catalog?.error && !catalog.providers.length) return { text: "Couldn't read Paseo's providers. The current picks still work.", tone: "warning", action: "retry", differ: 0 };
+  if (catalog?.providers.some(p => p.reason === "Still loading")) return { text: "Paseo is still checking your providers…", tone: "muted", action: null, differ: 0 };
+  const unreached = catalog?.providers.filter(providerSettling) ?? [];
+  if (unreached.length) return { text: `Paseo hasn't reached ${unreached.map(p => p.label).join(" or ")} yet, so these picks may change. Check again in a moment.`, tone: "muted", action: "check", differ: 0 };
   // Recovery and New work copy another agent, so they never decide whether any provider is ready.
   const picks = rows.filter(r => !hasSame(r.role));
   if (picks.length && picks.every(r => !r.rec)) return { text: "No provider in Paseo is ready, so these helpers can't run yet. Following PRs and Needs you still work.", tone: "warning", action: "check", differ: 0 };

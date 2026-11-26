@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, mkdtemp, mkdir, writeFile, cp, readdir } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { LEGACY_BASELINE, announcesUpdate, imageBlock, notesSince, notesVersion, parseChangelog, recentNotes, recentUpdate, whatsNew } from "../shared/changelog";
+import { LEGACY_BASELINE, announcesUpdate, imageBlock, inlineRuns, notesSince, notesVersion, parseChangelog, recentNotes, recentUpdate, whatsNew } from "../shared/changelog";
 // @ts-expect-error plain ESM script without types
 import { CURATED_MAX_BULLETS, DRAFT_MARKER, featuresInPatch, fragmentBullets, isMajor, lintBullet, nextVersion } from "../scripts/release-notes.mjs";
 
@@ -285,7 +286,7 @@ test("changelog: a <details> archive below the notes never reaches What's new; i
     { kind: "image", text: "Home", url: "https://example.com/home.png", aspect: null, width: null }, { kind: "bullet", text: "Home." }] }]);
 });
 
-test("changelog: a curated section's ### headings and paragraphs reach What's new as blocks, inline markdown as text, images and rules as their own blocks", () => {
+test("changelog: a curated section's ### headings and paragraphs reach What's new as blocks, inline markdown as text (bold as runs), images and rules as their own blocks", () => {
   const text = "## 2.0.0 (2026-11-11)\n\nFollow-up is a [Paseo](https://paseo.sh) plugin\nthat keeps track of `workspaces`.\n\n![Home **list**](https://example.com/h.png#1600x1000)\n\n### One list\n\nHome lists **every** workspace.\n\n- A bullet\n  that wraps.\n\n---\n\nThanks.\n\n![relative](docs/x.png)\n\n<details><summary>Full changelog</summary>\n\n### Fixes\n\n- Hidden.\n\n</details>\n";
   const [note] = parseChangelog(text);
   assert.deepEqual(note!.items, ["A bullet that wraps."]);
@@ -293,7 +294,7 @@ test("changelog: a curated section's ### headings and paragraphs reach What's ne
     { kind: "text", text: "Follow-up is a Paseo plugin that keeps track of workspaces." },
     { kind: "image", text: "Home list", url: "https://example.com/h.png", aspect: 1.6, width: 1600 },
     { kind: "heading", text: "One list" },
-    { kind: "text", text: "Home lists every workspace." },
+    { kind: "text", text: "Home lists every workspace.", runs: [{ text: "Home lists " }, { text: "every", bold: true }, { text: " workspace." }] },
     { kind: "bullet", text: "A bullet that wraps." },
     { kind: "rule", text: "" },
     { kind: "text", text: "Thanks." },
@@ -317,4 +318,30 @@ test("what's new: 1.x to 2.0.0-rc.0 shows 2.0's notes once; later rcs and 2.0.0 
   assert.equal(announcesUpdate("2.0.0-rc.0", "2.0.0"), true); assert.equal(announcesUpdate("1.4.0-beta.32", "2.0.0-rc.0"), false);
   assert.deepEqual(recentNotes({ version: "2.0.0-rc.0", previous: "2.0.0-rc.0", notes: majors }).map(n => n.version), ["2.0.0"], "opened by hand, the rc shows 2.0's notes");
   assert.equal(recentUpdate({ version: "2.0.0-rc.0", previous: "1.4.0-beta.32", updatedAt: 1, notes: majors }, 2), true, "Home's Updated to 2.0.0-rc.0 · What's new line");
+});
+
+// 2026-11-26: 2.4.0's curated bullets lead with **bold**, and What's new showed them as plain text (plainInline dropped
+// the markers); a bullets-only note showed the raw asterisks.
+test("changelog: bold in a curated bullet or paragraph reaches What's new as bold runs, also across a wrapped line", () => {
+  const [note] = parseChangelog("## 2.4.0 (2026-11-26)\n\nIntro with **one** lead.\n\n- **Dispatch starts new work** from a [link](https://x.test)\n  or a `sentence`, **twice**.\n- No bold here.\n");
+  assert.deepEqual(note!.blocks, [
+    { kind: "text", text: "Intro with one lead.", runs: [{ text: "Intro with " }, { text: "one", bold: true }, { text: " lead." }] },
+    { kind: "bullet", text: "Dispatch starts new work from a link or a sentence, twice.",
+      runs: [{ text: "Dispatch starts new work", bold: true }, { text: " from a link or a sentence, " }, { text: "twice", bold: true }, { text: "." }] },
+    { kind: "bullet", text: "No bold here." },
+  ]);
+  for (const b of note!.blocks!) if (b.kind !== "image" && b.runs) assert.equal(b.runs.map(r => r.text).join(""), b.text, "runs read as the plain text");
+  assert.deepEqual(inlineRuns("- raw"), [{ text: "- raw" }]);
+  assert.deepEqual(inlineRuns("**A** and `b`"), [{ text: "A", bold: true }, { text: " and b" }], "a bullets-only note's item, rendered without its markers");
+  const shipped = parseChangelog(readFileSync("CHANGELOG.md", "utf8")).find(n => n.version === "2.4.0")!;
+  assert.ok(shipped.blocks!.filter(b => b.kind === "bullet").every(b => b.kind !== "image" && b.runs?.[0]?.bold), "every 2.4.0 bullet opens bold");
+  // release-notes-show-their-bold: no markdown marker reaches the screen from any version's notes, whichever way it renders.
+  const marker = /\*\*|`/;
+  for (const n of parseChangelog(readFileSync("CHANGELOG.md", "utf8"))) {
+    for (const b of n.blocks ?? []) {
+      assert.doesNotMatch(b.text, marker, `${n.version}: ${b.text}`);
+      if (b.kind !== "image") for (const r of b.runs ?? []) assert.doesNotMatch(r.text, marker, `${n.version}: ${r.text}`);
+    }
+    for (const item of n.items) for (const r of inlineRuns(item)) assert.doesNotMatch(r.text, marker, `${n.version}: ${item}`);
+  }
 });

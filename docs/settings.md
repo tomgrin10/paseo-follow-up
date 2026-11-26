@@ -113,6 +113,8 @@ First, pick where it lives:
   - the count of `hook-state/native-*.json`.
 - **Choices** write through the same RPCs the Settings screen uses.
 - **Helper agents step and Settings → Agents share one component.** `client/job-rows.tsx` (`JobRows`) renders both;
+  setup passes `brief` (Q161), so each helper is one line (`JobLine`: its name, the model it will use, Change, which
+  opens the same pickers, and its switch), plus a line only when it can't run;
   `shared/job-rows.ts` decides what each row says (`jobRow`: what the job does, the current pick, the Recommended
   chip, the need line, an amber line when the saved provider can't run here), the header (`jobsHeader`, with Use
   recommended) and what Use recommended saves (`recommendedEntry`: provider, model and effort only; limits and
@@ -120,7 +122,23 @@ First, pick where it lives:
   (Permissions, limits, AI priority's schedule, Reset to defaults) and setup's `preselect`, which fills in a
   recommendation only for a job with nothing saved whose default can't run here. `tests/job-rows.test.ts` fails if
   either surface grows row content of its own.
-- **The tour** ("Where to find things") is its own last step.
+- **Which steps show** (`every-setup-step-has-something-to-do`, invariant 119): `setupSteps` keeps a step only when
+  the host gives it something to set: Shipping needs GitHub signed in and a repository seen, Reviewers needs GitHub,
+  Updates needs an npm install, Helper agents needs a provider in Paseo. The client reads the facts from the checks,
+  `follow.pr-workflow` and `follow.updates` (reads those steps make anyway); unknown keeps the step. The count and
+  Back follow the shown steps, and a saved step that isn't shown resumes on the next one (`shownStep`).
+- **Providers in the checks:** a provider Paseo is still loading is `pending` ("still checking"), and the step asks
+  again (`fresh`) every 3 s for up to a minute; with no provider at all there's one `warn` row, Agents, saying to set
+  one up in Paseo, and no provider row under it. When another provider runs the helpers, a missing Claude Code or
+  Codex that only AI priority uses is `off` (optional: AI priority runs only on those two), and its fix never offers
+  to switch AI priority to a provider it can't run on. The step's lead says Follow-up works with every agent
+  Paseo runs, and that agents on Claude Code or Codex also get turn-end reminders and Wait.
+- **The tour** ("Where to find things") is its own last step: Home, the workspace panel, Needs you, the Summary and
+  Dispatch, with Dispatch's sidebar-row switch and the tip about Paseo's New workspace as one line
+  (`NEW_ROW.paseoShort`, Q163; Settings → Dispatch keeps the full `NEW_ROW.paseo`, `new-row-is-optional`).
+- **Trying it as a stranger:** `node scripts/screenshots.mjs --only onboarding --variant <v>` packs the plugin, installs
+  it on a fresh PASEO_HOME with no mcpproxy and walks every shown step: `no-gh` (no GitHub CLI, Claude), `claude`,
+  `codex`, `other` (only a plugin provider, standing in for any other provider) and `none` (no provider, no gh).
 - **RPCs:** `follow.onboarding`, `follow.set-onboarding`, `follow.onboarding-checks`. **Tools:**
   `onboarding_status`, `onboarding_checks`, `set_onboarding`. **UI:** `client/onboarding.tsx`.
 

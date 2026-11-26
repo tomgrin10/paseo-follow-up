@@ -4,16 +4,19 @@ import { Pressable, Text } from "./text";
 import { openExternalUrl, useRpc, useSettings } from "@getpaseo/plugin/client";
 import { Icon, copyText, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { followSettingsRpc, onboardingChecksRpc, onboardingRpc, setFollowSettingsRpc, setOnboardingRpc } from "../shared/contracts";
+import { followSettingsRpc, onboardingChecksRpc, onboardingRpc, prWorkflowRpc, setFollowSettingsRpc, setOnboardingRpc } from "../shared/contracts";
 import { displayPreferences } from "../shared/display";
-import { ONBOARDING_STEPS, autoSendWrites, checksSummary, type Check, type OnboardingStep, type OnboardingView } from "../shared/onboarding";
+import { autoSendWrites, checksSummary, providersReady, setupSteps, shownStep, type Check, type Checks, type OnboardingStep, type OnboardingView } from "../shared/onboarding";
 import { Button, IconButton, errorText, text, type Theme } from "./kit";
 import { ReviewerSettings } from "./reviewers";
 import { JobRows } from "./job-rows";
 import { DockedPane } from "./docked-pane";
 import { SETUP_ORDER } from "../shared/job-rows";
-import { ShippingStep } from "./shipping";
-import { UpdatesStep } from "./updates";
+import { ShippingStep, shippingKey } from "./shipping";
+import { useNewRowSetting } from "./new-entry";
+import { isMac } from "../shared/search-key";
+import { NEW_NAME, NEW_ROW } from "../shared/new-name";
+import { UpdatesStep, useUpdates } from "./updates";
 import { Spinner, useReducedMotion } from "./motion";
 import { raised, runningColor, tint, withAlpha, type Colors } from "./theme";
 
@@ -60,24 +63,40 @@ function bottomPad(compact: boolean): ViewStyle {
 export function Setup({ theme, compact, view, deps }: { theme: Theme; compact: boolean; view: OnboardingView; deps: SetupDeps }) {
   const c = theme.colors; const t = text(c);
   const act = useRpc(setOnboardingRpc); const cache = useQueryClient(); const toast = useToast();
-  const [step, setStep] = useState<OnboardingStep>(view.step);
-  const index = ONBOARDING_STEPS.indexOf(step);
+  const [saved, setStep] = useState<OnboardingStep>(view.step);
   const scroll = useRef<NativeScrollView>(null);
   const follow = useFollowSettings();
   // Checks start on the first frame so step 2 usually opens with its answers in. One cached call, never polled.
   const checks = useChecks();
+  // Which steps this host has something for (setupSteps): GitHub signed in, repositories seen, an npm install. The
+  // reads are the ones those steps make anyway, started here so the count is right by the time they come up.
+  const readShipping = useRpc(prWorkflowRpc);
+  const shipping = useQuery({ queryKey: shippingKey, queryFn: () => readShipping({}), staleTime: 60_000 });
+  const updates = useUpdates();
+  const gh = checks.data?.checks.find(row => row.id === "gh");
+  const live = useMemo(() => setupSteps({
+    github: !gh ? null : gh.state === "ok" ? true : gh.state === "off" ? false : null,
+    repos: shipping.data ? shipping.data.repos.length : null,
+    npm: updates.data ? updates.data.installKind === "npm" : null,
+    providers: providersReady(checks.data?.checks),
+  }), [gh?.state, shipping.data?.repos.length, updates.data?.installKind, providersReady(checks.data?.checks)]);
+  // Once past the checks the list holds still: a late answer never takes away a step the developer is on or has seen.
+  const frozen = useRef<OnboardingStep[] | null>(null);
+  const steps = frozen.current ?? live;
+  const step = shownStep(saved, steps);
+  const index = steps.indexOf(step);
   const move = useMutation({
     mutationFn: (input: Parameters<typeof act>[0]) => act(input),
     onSuccess: next => { if (!next.show) cache.setQueryData(onboardingKey, next); },
     onError: error => toast.error(errorText(error)),
   });
-  const go = (next: OnboardingStep) => { setStep(next); scroll.current?.scrollTo({ y: 0, animated: false }); move.mutate({ action: "step", step: next }); };
+  const go = (next: OnboardingStep) => { if (step === "checks" && next !== "intro") frozen.current = steps; else if (next === "intro" || next === "checks") frozen.current = null; setStep(next); scroll.current?.scrollTo({ y: 0, animated: false }); move.mutate({ action: "step", step: next }); };
   const finish = () => move.mutate({ action: "finish" }, { onSuccess: () => {
     const n = follow.data?.workspaces.filter(w => w.enable_tracking && !w.optedOut).length ?? 0;
     toast.show(n ? `Set up. Following ${n} workspace${n === 1 ? "" : "s"}.` : "Set up. Follow-up starts with your next workspace.", { variant: "success" });
   } });
   const skip = () => move.mutate({ action: "skip" }, { onSuccess: () => toast.show("Setup skipped. Set it up any time from Follow-up settings, General.") });
-  const last = index === ONBOARDING_STEPS.length - 1;
+  const last = index === steps.length - 1;
   const failing = step === "checks" && checks.data ? checksSummary(checks.data.checks).state === "fail" : false;
 
   const body = step === "intro" ? <IntroStep theme={theme} compact={compact} follow={follow.data ?? null} />
@@ -90,32 +109,32 @@ export function Setup({ theme, compact, view, deps }: { theme: Theme; compact: b
     : <TourStep theme={theme} compact={compact} />;
   const lead: Record<OnboardingStep, string> = {
     intro: "It follows your agents' pull requests until the work is done, sends what needs fixing back to them as repairs, and asks you only for decisions.",
-    checks: "Helper agents run on the providers you pick. GitHub is optional: with the GitHub CLI, Follow-up also follows your PRs. Checking is free.",
+    checks: "Follow-up works with every agent Paseo runs. On Claude Code and Codex it also reminds agents at the end of each turn and can wait for their background jobs. GitHub is optional: with its CLI, Follow-up also follows your PRs.",
     defaults: "These are on now. Change anything here; it saves as you go, and Settings has the same switches.",
     shipping: "Follow-up merges and tracks PRs the way each repository already works. It picked these; change one if it's wrong.",
     reviewers: "When you press Add reviewers on a PR, Follow-up asks these people. Set a default for all repositories, or a list for one. Until then, PRs without reviewers show in Needs you.",
     updates: "New versions fix problems and add features. Follow-up can install them for you, at a moment when no agent is using it, and goes back to the old version if something breaks.",
     helpers: "Follow-up's own agents. They read, summarise and rank. They never change code or message anyone.",
-    tour: "Four places worth knowing. Everything else is in Settings.",
+    tour: "Five places worth knowing. Everything else is in Settings.",
   };
   const column: ViewStyle = { width: "100%", maxWidth: 560, alignSelf: "center", paddingHorizontal: compact ? 16 : 24 };
 
   return <DockedPane compact={compact} scrollRef={scroll} style={{ backgroundColor: c.surface0 }} contentContainerStyle={{ paddingBottom: 24 }}
     header={<View style={[column, { flexDirection: "row", alignItems: "center", gap: 12, paddingTop: compact ? 8 : 20, paddingBottom: 8 }]}>
-      <Progress theme={theme} index={index} onPick={i => i < index && go(ONBOARDING_STEPS[i])} />
+      <Progress theme={theme} index={index} steps={steps} onPick={i => i < index && go(steps[i])} />
       <Button theme={theme} compact={compact} kind="ghost" title="Skip setup" accessibilityHint="Leaves setup. Every setting keeps its current value." onPress={skip} disabled={move.isPending} />
     </View>}
     // While typing a reviewer on a phone the bar steps aside, so Continue never sits over the keyboard (DockedPane).
     dock={({ yields }) => !yields && <View style={[{ borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.surface0, paddingTop: 12 }, bottomPad(compact)]}>
       <View style={[column, { flexDirection: "row", alignItems: "center", gap: 8 }]}>
         {index > 0 && (compact
-          ? <IconButton theme={theme} compact icon="ChevronLeft" label="Back" onPress={() => go(ONBOARDING_STEPS[index - 1])} />
-          : <Button theme={theme} kind="ghost" icon="ChevronLeft" title="Back" onPress={() => go(ONBOARDING_STEPS[index - 1])} />)}
+          ? <IconButton theme={theme} compact icon="ChevronLeft" label="Back" onPress={() => go(steps[index - 1])} />
+          : <Button theme={theme} kind="ghost" icon="ChevronLeft" title="Back" onPress={() => go(steps[index - 1])} />)}
         {!compact && <View style={{ flex: 1 }} />}
-        {step === "reviewers" && <Button theme={theme} compact={compact} kind="ghost" title="Skip, set later" onPress={() => go(ONBOARDING_STEPS[index + 1])} />}
+        {step === "reviewers" && <Button theme={theme} compact={compact} kind="ghost" title="Skip, set later" onPress={() => go(steps[index + 1])} />}
         <Button theme={theme} compact={compact} grow={compact} kind="primary" icon={last ? "Check" : undefined}
           title={last ? "Finish" : failing ? "Continue anyway" : "Continue"} loading={last && move.isPending}
-          onPress={() => last ? finish() : go(ONBOARDING_STEPS[index + 1])} />
+          onPress={() => last ? finish() : go(steps[index + 1])} />
       </View>
     </View>}>
     <StepFade key={step} style={[column, { gap: compact ? 14 : 16, paddingTop: compact ? 8 : 20 }]}>
@@ -129,13 +148,13 @@ export function Setup({ theme, compact, view, deps }: { theme: Theme; compact: b
 }
 
 /** "2 of 5" and one short segment per step, drawn like the stack bar but in neutral ink: progress isn't a PR state. */
-function Progress({ theme, index, onPick }: { theme: Theme; index: number; onPick: (i: number) => void }) {
+function Progress({ theme, index, steps, onPick }: { theme: Theme; index: number; steps: readonly OnboardingStep[]; onPick: (i: number) => void }) {
   const c = theme.colors; const t = text(c);
-  return <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 10 }} accessibilityRole="progressbar" accessibilityLabel={`Step ${index + 1} of ${ONBOARDING_STEPS.length}`}
-    accessibilityValue={{ min: 1, max: ONBOARDING_STEPS.length, now: index + 1 }}>
-    <Text style={[t.small, { minWidth: 34 }]}>{`${index + 1} of ${ONBOARDING_STEPS.length}`}</Text>
+  return <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 10 }} accessibilityRole="progressbar" accessibilityLabel={`Step ${index + 1} of ${steps.length}`}
+    accessibilityValue={{ min: 1, max: steps.length, now: index + 1 }}>
+    <Text style={[t.small, { minWidth: 34 }]}>{`${index + 1} of ${steps.length}`}</Text>
     <View style={{ flex: 1, maxWidth: 220, flexDirection: "row", gap: 3 }}>
-      {ONBOARDING_STEPS.map((s, i) => <Pressable key={s} disabled={i >= index} onPress={() => onPick(i)} accessibilityLabel={i < index ? `Back to step ${i + 1}` : undefined}
+      {steps.map((s, i) => <Pressable key={s} disabled={i >= index} onPress={() => onPick(i)} accessibilityLabel={i < index ? `Back to step ${i + 1}` : undefined}
         hitSlop={{ top: 12, bottom: 12 }} style={{ flex: 1, height: 14, justifyContent: "center" }}>
         <View style={{ height: 3, borderRadius: 2, backgroundColor: i === index ? c.foreground : i < index ? withAlpha(c.foreground, 0.4) : c.border }} />
       </Pressable>)}
@@ -163,7 +182,15 @@ function useFollowSettings() {
 }
 function useChecks() {
   const read = useRpc(onboardingChecksRpc);
-  return useQuery({ queryKey: checksKey, queryFn: () => read({}), staleTime: 60_000, refetchOnWindowFocus: false, retry: false });
+  const pendingSince = useRef(0);
+  // While Paseo is still loading a provider, ask again every few seconds (fresh), at most a minute; never otherwise.
+  return useQuery({ queryKey: checksKey, queryFn: () => read(pendingSince.current ? { fresh: true } : {}), staleTime: 60_000, refetchOnWindowFocus: false, retry: false,
+    refetchInterval: q => {
+      const pending = !!(q.state.data as Checks | undefined)?.checks.some(row => row.state === "pending" && row.id.startsWith("provider-"));
+      if (!pending) { pendingSince.current = 0; return false; }
+      pendingSince.current ||= Date.now();
+      return Date.now() - pendingSince.current < 60_000 ? 3000 : false;
+    } });
 }
 
 const Panel = ({ c, children }: { c: Colors; children: ReactNode }) =>
@@ -172,7 +199,7 @@ const Panel = ({ c, children }: { c: Colors; children: ReactNode }) =>
 // ---------- 1. what it is ----------
 
 const EXAMPLE = [
-  { glyph: "CircleX", tone: "danger", line: "Checks failed on #418", caption: "Follow-up notices" },
+  { glyph: "CircleX", tone: "danger", line: "Checks failed on #418", caption: "Follow-up notices the failed checks" },
   { glyph: "spinner", tone: "running", line: "Repair sent to the agent · 2m", caption: "and sends it as a repair to the agent that made the PR" },
   { glyph: "CircleCheck", tone: "success", dot: "warning", line: "#418 approved", caption: "then asks you only for the decision" },
 ] as const;
@@ -261,17 +288,19 @@ function ChecksStep({ theme, compact, checks, deps }: { theme: Theme; compact: b
 const GLYPH: Record<Check["state"], string> = { ok: "CircleCheck", warn: "CircleAlert", fail: "CircleX", pending: "CircleDashed", off: "CircleMinus" };
 function CheckRow({ theme, compact, row, first, checking, deps }: { theme: Theme; compact: boolean; row: Check; first: boolean; checking: boolean; deps: SetupDeps }) {
   const c = theme.colors; const t = text(c); const toast = useToast();
-  const [open, setOpen] = useState(false);
+  // The row that blocks everything (no provider at all) opens with its fix; optional and note rows fold theirs.
+  const [open, setOpen] = useState(row.id === "providers");
+  const folds = row.state === "warn" || row.state === "off";
   const color = row.state === "ok" ? c.statusSuccess : row.state === "warn" ? c.statusWarning : row.state === "fail" ? c.statusDanger : c.foregroundMuted;
   return <View accessibilityLabel={`${row.label}: ${row.detail}`} style={{ flexDirection: "row", gap: 10, paddingHorizontal: compact ? 14 : 16, paddingVertical: 12, borderTopWidth: first ? 0 : 1, borderTopColor: c.border }}>
     <View style={{ paddingTop: 1 }}>{checking ? <Spinner color={c.foregroundMuted} size={16} /> : <Icon name={GLYPH[row.state]} size={16} color={color} />}</View>
     <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
       <Text style={t.label}>{row.label}</Text>
       <Text style={t.meta}>{row.detail}</Text>
-      {row.fix && row.state === "warn" && !open && <Pressable accessibilityRole="button" accessibilityState={{ expanded: false }} onPress={() => setOpen(true)} style={{ minHeight: compact ? 44 : 28, justifyContent: "center", alignSelf: "flex-start" }}>
-        <Text style={[t.meta, { color: c.foreground, textDecorationLine: "underline" }]}>How to fix</Text>
+      {row.fix && folds && !open && <Pressable accessibilityRole="button" accessibilityState={{ expanded: false }} onPress={() => setOpen(true)} style={{ minHeight: compact ? 44 : 28, justifyContent: "center", alignSelf: "flex-start" }}>
+        <Text style={[t.meta, { color: c.foreground, textDecorationLine: "underline" }]}>{row.state === "off" ? "How to turn it on" : "How to fix"}</Text>
       </Pressable>}
-      {row.fix && (row.state !== "warn" || open) && <View style={{ gap: 6, marginTop: 4 }}>
+      {row.fix && (!folds || open) && <View style={{ gap: 6, marginTop: 4 }}>
         <Text style={[t.meta, { color: c.foreground }]}>{row.fix.text}</Text>
         {row.fix.url && <Button theme={theme} compact={compact} kind="ghost" icon="ExternalLink" title="Get the GitHub CLI" accessibilityLabel={`Get the GitHub CLI at ${row.fix.url}`} onPress={() => { void openExternalUrl(row.fix!.url!).catch(() => toast.error("Couldn't open the link here")); }} />}
         {row.fix.command && <View style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", maxWidth: "100%", paddingLeft: 10, borderRadius: 6, backgroundColor: c.surface2 }}>
@@ -327,7 +356,7 @@ function DefaultsStep({ theme, compact, held }: { theme: Theme; compact: boolean
   return <View style={{ gap: 10 }}>
     {follow.error && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusDanger }]}>{errorText(follow.error)}</Text>}
     <Panel c={c}>
-      <SwitchRow first theme={theme} compact={compact} label="Follow every workspace" hint="New and existing workspaces, except any you turn off below." value={data?.enable_follow_every ?? null} disabled={change.isPending}
+      <SwitchRow first theme={theme} compact={compact} label="Follow every workspace" hint={list.length ? "New and existing workspaces, except any you turn off below." : "Every workspace, from the first one you create."} value={data?.enable_follow_every ?? null} disabled={change.isPending}
         onChange={v => change.mutate([{ enable_follow_every: v }])}>
         {list.length > 0 && <View style={{ paddingLeft: compact ? 14 : 16, paddingBottom: 6 }}>
           {shown.map(w => {
@@ -364,7 +393,7 @@ function DefaultsStep({ theme, compact, held }: { theme: Theme; compact: boolean
 function HelpersStep({ theme, compact, deps }: { theme: Theme; compact: boolean; deps: SetupDeps }) {
   const c = theme.colors; const t = text(c);
   return <View style={{ gap: 12 }}>
-    <Panel c={c}><JobRows theme={theme} compact={compact} order={SETUP_ORDER} preselect /></Panel>
+    <Panel c={c}><JobRows theme={theme} compact={compact} order={SETUP_ORDER} preselect brief /></Panel>
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center" }}>
       <Text style={t.meta}>Permissions and limits are in </Text>
       <Pressable accessibilityRole="link" accessibilityLabel="Open Follow-up settings, Agents" onPress={() => deps.openSettings("agents")} hitSlop={8} style={{ minHeight: compact ? 44 : 20, justifyContent: "center" }}>
@@ -382,6 +411,20 @@ function TourStep({ theme, compact }: { theme: Theme; compact: boolean }) {
       line={compact ? "Tap Follow-up at the top of any workspace: its PRs, tasks and what the agent is doing." : "The Follow-up button in a workspace's header docks its PRs, tasks and what the agent is doing beside the chat."} />
     <TourRow theme={theme} thumb={<ThumbNeeds c={theme.colors} />} title="Needs you" line="The decisions only you can make, one button each. A pill above the chat shows the same." />
     <TourRow theme={theme} thumb={<ThumbAbout c={theme.colors} />} title="Summary" line="One sentence under a workspace's title saying what it's for." />
+    <TourRow theme={theme} thumb={<ThumbNew c={theme.colors} />} title={NEW_NAME} line="Starts work from an issue, a PR, a link or your words: a workspace and an agent, already briefed." />
+    <NewRowChoice theme={theme} compact={compact} />
+  </View>;
+}
+
+/** The sidebar's Dispatch row (new-row-is-optional): the same switch and tip as Settings → Dispatch. */
+function NewRowChoice({ theme, compact }: { theme: Theme; compact: boolean }) {
+  const c = theme.colors; const t = text(c);
+  const row = useNewRowSetting();
+  return <View style={{ gap: 6, paddingTop: 6 }}>
+    <Panel c={c}>
+      <SwitchRow first theme={theme} compact={compact} label={NEW_ROW.label} hint={NEW_ROW.hint(row.key, isMac() ? "⌘K" : "Ctrl K")} value={row.value} disabled={row.saving} onChange={row.set} />
+    </Panel>
+    {row.value !== false && <Text style={t.meta}>{NEW_ROW.paseoShort}</Text>}
   </View>;
 }
 
@@ -399,6 +442,8 @@ const ThumbPanel = ({ c }: { c: Colors }) => <>{bar(c, "55%", c.foregroundMuted)
 const ThumbNeeds = ({ c }: { c: Colors }) => <View style={{ flex: 1, borderRadius: 4, borderWidth: 1, borderColor: c.statusWarning, padding: 4, gap: 3 }}>{bar(c, "70%")}<View style={{ width: 16, height: 5, borderRadius: 2, backgroundColor: c.accent }} /></View>;
 // The Summary: the title, then one quiet line under it.
 const ThumbAbout = ({ c }: { c: Colors }) => <>{bar(c, "60%", c.foregroundMuted, 4)}{bar(c, "90%")}{bar(c, "70%")}</>;
+// New: a + row at the top of a sidebar, then the list under it.
+const ThumbNew = ({ c }: { c: Colors }) => <><View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}><Icon name="Plus" size={8} color={c.foreground} />{bar(c, "45%", c.foregroundMuted, 4)}</View>{bar(c, "80%")}{bar(c, "65%")}</>;
 
 // ---------- existing installs ----------
 
