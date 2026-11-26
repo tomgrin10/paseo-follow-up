@@ -17,7 +17,8 @@ import type { State as FollowState, Workspace as FollowWorkspace } from "../shar
 import { reviewersAskStands } from "../shared/attention";
 import { followUpObligations } from "../shared/follow-up";
 import { configuredReviewers, reviewerLabel, withoutAuthor } from "../shared/reviewers";
-import { classify, finishedReply, turnPrompt, type Sources } from "./inbox-classifier";
+import { classify, compactionOnly, finishedReply, turnPrompt, type Sources } from "./inbox-classifier";
+import { isCompactCommand } from "../shared/status";
 import { STALE_BRIEF } from "../shared/errors";
 import type { Question } from "../shared/questions";
 import { briefAnswer, briefAsks, briefAnswers, briefOrigin, briefQuestionsEvent, briefStep, pickBrief, shouldReopen, validPick, type Brief, type BriefEvent, type BriefKind, type BriefSources, type NeedsYouRecord, type PrState } from "../shared/brief";
@@ -459,8 +460,10 @@ export class Inbox {
     const sender = prompt.from ?? await classify(prompt.message, agent.id, at, this.o.sources);
     // Only the developer's own message answers the open brief. Another agent's message, Follow-up's prompts, a
     // continuation after compaction or a schedule start a turn but leave the card open: its questions still are.
-    const brief: BriefEvent = sender === "tom" ? { type: "message", text: prompt.message?.text ?? null } : { type: "turn_start" };
-    await this.apply([{ agentId: root.rootId, event: { type: "message", from: sender === "tom" ? "tom" : "automation" }, brief: () => brief }]);
+    // A developer's /compact asks for a compaction, not an answer: the ask stays open (a-compaction-is-not-a-finish).
+    const answers = sender === "tom" && !isCompactCommand(prompt.message?.text);
+    const brief: BriefEvent = answers ? { type: "message", text: prompt.message?.text ?? null } : { type: "turn_start" };
+    await this.apply([{ agentId: root.rootId, event: { type: "message", from: answers ? "tom" : "automation" }, brief: () => brief }]);
   }
 
   async turnEnded(agent: { id: string; workspaceId: string | null; parentAgentId?: string | null }, outcome: { kind: "completed" } | { kind: "failed"; error: { message: string } } | { kind: "canceled"; reason: string }, turnId: string | null): Promise<void> {
@@ -483,6 +486,9 @@ export class Inbox {
     const stated = await this.sources(agent.id, since, turnId);
     if (outcome.kind === "completed") {
       const items = await (this.o.directory.turnItems?.(agent.id, turnId) ?? this.o.directory.tail(agent.id, 20)).catch(() => []);
+      // A turn that only compacted (/compact, Smart Session's request, a provider's auto-compaction) is not the agent
+      // finishing: no flag, no brief, and the ask from before stays open and current (a-compaction-is-not-a-finish).
+      if (compactionOnly(items)) return;
       // Never Follow-up's own bookkeeping continuation's reply (finishedReply).
       const saved = /^[\w-]+$/.test(agent.id) ? await readFile(join(this.hookState, `bookkeeping-${agent.id}.json`), "utf8").then(t => JSON.parse(t), () => null) : null;
       const reply = { text: finishedReply(items, saved, turnAt) };

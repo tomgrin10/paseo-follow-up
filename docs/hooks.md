@@ -79,7 +79,8 @@ provider id of its own.
   started (told from that turn's own prompt, so a worker restart in between can't start a loop), and only to the agent
   whose turn just ended (it is loaded). The `needs_you` nudge, free in-turn on a hook but a whole turn here, follows
   only a turn the developer started (their message or a card answer), never a repair, a recovery or another agent's
-  message. Due tasks share the hook's receipt.
+  message. Due tasks share the hook's receipt. A turn that only compacted is never checked (`compactionOnly`,
+  invariant 130).
 - **Wait** (`wait`): every provider with a shell tool. Outside Claude Code the prepared command detaches itself
   (`nohup … &`, its output in the job's `output.log`), so any shell tool can start it; see [wait.md](wait.md).
 - **Not there**: the per-turn context (the Overseer's digest, the demoted and detached notices, which the Overseer and

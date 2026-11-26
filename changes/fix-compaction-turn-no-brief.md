@@ -1,0 +1,1 @@
+- When an agent compacts its conversation, Follow-up no longer marks it finished or replaces its last ask. The ask stays open as it was.

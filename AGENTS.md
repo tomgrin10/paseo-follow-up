@@ -1555,6 +1555,18 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    by `tests/setup-popup.test.ts` and `scripts/screenshots.mjs --only setup-popup` (welcome, two steps, the tour, done;
    desktop and 390×844, light and dark).
 
+130. **A compaction is not a finish** (`a-compaction-is-not-a-finish`). A turn that only compacted (`/compact` typed
+   by the developer, Smart Session's request, a provider's own auto-compaction, on every provider) adds nothing: no
+   Finished flag, no brief, no superseded line, no turn-end check, and a developer's `/compact` answers nothing. The ask
+   from before stays exactly as it was, open and current; the agent's next real ask supersedes it as any new brief does.
+   One predicate decides it, `compactionOnly` (`server/inbox-classifier.ts`): the turn's timeline holds a compaction
+   item and nothing the agent produced (reply, reasoning, tool call, to-do list, error); the prompt, plugins' cards and
+   notifications don't count. An empty read is never a compaction (it may be a failed read), and a turn that compacted
+   and then worked is a normal finish. Paseo's divider and Smart Session's card are theirs and stay. 2026-11-26, the
+   developer: after an agent compacted, its timeline read "Earlier ask, the agent kept going: Nothing needed. …" and
+   "Finished · No ask stated", and on a provider without hooks Follow-up also sent the agent a turn-end check. Guarded
+   by `tests/compaction-turn.test.ts`.
+
 ## Bugs
 
 Every bug is fixed for its whole class:

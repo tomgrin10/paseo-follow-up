@@ -381,6 +381,13 @@ card beside a question list.
   (`resolveStaleFinish` in `shared/inbox.ts`, the quiet guard in `server/inbox.ts` `creator`). Only an ask the
   developer hasn't answered (`briefAsks`: a decision, action or review) outlives a later done (F7). Before this, an
   agent nobody messages kept its stale "No ask stated" flag for hours (2026-11-13). `rowViolations` checks it.
+- **A compaction is not a finish** (`a-compaction-is-not-a-finish`, AGENTS.md invariant 130). A turn that only
+  compacted (`compactionOnly`, `server/inbox-classifier.ts`: a compaction item and no reply, reasoning, tool call, to-do
+  list or error) ends without a turn_end event or a brief step (`Inbox.turnEnded`), and on a provider without hooks
+  without a turn-end check (`TurnEnd.turnEnded`, `server/turn-end.ts`); a developer's `/compact` starts the turn as
+  automation, so it answers nothing (`isCompactCommand`, `shared/status.ts`). The open brief and its flag stay as they
+  were. An empty turn read, or a turn whose only content is a plugin's or Follow-up's message, is still handled as
+  before: nothing there proves the agent did no work.
 - **One reviewers ask per PR** (`one-reviewers-ask-per-pr`). The "has no reviewers" row names whom Follow-up
   suggests (`suggestedReviewers`: the repository's or default reviewers minus the author) in the brief's own words,
   "Add reviewers to #240: Ravi" (`reviewersAsk` in `shared/reviewers.ts`). Follow-up's reviewers brief folds into that

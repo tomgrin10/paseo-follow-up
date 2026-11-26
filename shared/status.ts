@@ -31,12 +31,14 @@ export const turnIdOf = (activeTurn: unknown): string | null => {
  * compaction is never Follow-up's work), or neither (stop). Status invariant only-a-stop-holds.
  */
 export { CANCEL_CAUSES };
+/** A prompt that asks the agent to compact (`/compact`, with or without instructions): never an answer or Follow-up's work. */
+export const isCompactCommand = (prompt: string | null | undefined) => /^\/compact\b/.test((prompt ?? "").trimStart());
 export type CancelCause = typeof CANCEL_CAUSES[number];
 export function cancelCause(c: { reason: string | null | undefined; prompt?: string | null; newerTurn?: boolean; compaction?: boolean }): CancelCause {
   const reason = (c.reason ?? "").trim().toLowerCase();
   if (/\breload/.test(reason) || /\brestart/.test(reason)) return "reload";
   if (/\bclos/.test(reason)) return "closed";
-  if (c.compaction || /^\/compact\b/.test((c.prompt ?? "").trimStart())) return "compaction";
+  if (c.compaction || isCompactCommand(c.prompt)) return "compaction";
   if (c.newerTurn) return "replaced";
   return "stop";
 }
