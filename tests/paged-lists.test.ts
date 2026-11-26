@@ -161,3 +161,36 @@ test("every list pages: no 'Show all' or 'Show N more' that draws the whole list
   }
   assert.deepEqual(offenders, [], "a list that opens to every row: draw it with usePagedList or PagedRows (client/paged-list.tsx)");
 });
+
+// 2026-11-26, review: the pager sits under a 25-row page, so after Next the reader landed at the end of the new page.
+// A page turn brings the list's top (its card's header) back into view when it had scrolled above the panel.
+test("turning a page scrolls the list's card header back into view, and only when it is out of view", async () => {
+  const { toListStart, PAGED_TOP } = await import("../client/paged-list");
+  type Fake = { parentElement: Fake | null; top: number; attrs: Record<string, string>; scrolled: number; overflow: string; getBoundingClientRect(): { top: number }; getAttribute(n: string): string | null; scrollIntoView(): void };
+  const el = (parent: Fake | null, top: number, attrs: Record<string, string> = {}, overflow = "visible"): Fake => ({ parentElement: parent, top, attrs, scrolled: 0, overflow,
+    getBoundingClientRect() { return { top: this.top }; }, getAttribute(n) { return n in this.attrs ? this.attrs[n] : null; }, scrollIntoView() { this.scrolled++; } });
+  const panel = el(null, 100, {}, "auto");
+  const card = el(panel, -900, { [PAGED_TOP]: "1" });
+  const rows = el(card, -860);
+  const pager = el(rows, 700);
+  assert.equal(toListStart(pager, e => (e as Fake).overflow), true);
+  assert.equal(card.scrolled, 1, "the card (with its header) is what comes back, not the rows under it");
+  assert.equal(rows.scrolled, 0);
+  card.top = 140;
+  assert.equal(toListStart(pager, e => (e as Fake).overflow), false, "a header already in view stays put");
+  assert.equal(card.scrolled, 1);
+  const loose = el(panel, -50), pager2 = el(loose, 600);
+  assert.equal(toListStart(pager2, e => (e as Fake).overflow), true, "a list outside a card comes back by its own top");
+  assert.equal(loose.scrolled, 1);
+});
+
+test("every Card marks its top for the pager, and its icon never shrinks to a sliver", async () => {
+  const { Card } = await import("../client/kit");
+  const { Text } = await import("../client/text");
+  let r: ReturnType<typeof create>;
+  await act(async () => { r = create(createElement(Card, { theme, compact: false, icon: "Activity", title: "Activity", right: createElement(Text, null, "x".repeat(400)) }, null)); });
+  const root = r!.root.findAll(n => n.type === "View" && (n.props.dataSet as { pagedTop?: string } | undefined)?.pagedTop !== undefined);
+  assert.equal(root.length, 1, "the card carries data-paged-top");
+  const iconBox = r!.root.findAll(n => n.type === "View" && (n.props.style as { flexShrink?: number } | undefined)?.flexShrink === 0);
+  assert.ok(iconBox.length >= 1, "the header icon sits in a box that does not shrink");
+});

@@ -56,7 +56,7 @@ export function Pager({ theme, compact, info, onPage: setPage, onLess, noun, bus
   const self = useRef<View>(null);
   // A new page starts at its first row: when the list's top has scrolled out of view (a long page, the pager at the
   // bottom), bring it back, or the reader lands at the end of the page they asked for.
-  const onPage = (to: number) => { setPage(to); if (Platform.OS === "web") setTimeout(() => toListStart(self.current as unknown as El | null), 0); };
+  const onPage = (to: number) => { setPage(to); if (Platform.OS === "web") setTimeout(() => { const css = (globalThis as { getComputedStyle?(e: El): { overflowY: string } }).getComputedStyle; if (css) toListStart(self.current as unknown as El | null, e => css(e).overflowY); }, 0); };
   const size = compact ? 44 : 28;
   const arrow = (iconName: string, label: string, to: number, enabled: boolean) => <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled: !enabled }} aria-disabled={!enabled}
     disabled={!enabled} onPress={() => onPage(to)} hitSlop={compact ? 0 : 4}
@@ -82,17 +82,26 @@ export function Pager({ theme, compact, info, onPage: setPage, onLess, noun, bus
 }
 
 /** The few DOM calls toListStart makes (react-native-web hands a View's ref its element; the client has no DOM lib). */
-type El = { parentElement: El | null; getBoundingClientRect(): { top: number }; scrollIntoView?(o: { block: "start" }): void };
+export type El = { parentElement: El | null; getBoundingClientRect(): { top: number }; getAttribute?(name: string): string | null; scrollIntoView?(o: { block: "start" }): void };
 
-/** Scroll the pager's list (its parent) to its top when that top sits above its scroll container's view (web only). */
-function toListStart(pager: El | null) {
-  const list = pager?.parentElement;
-  const style = (globalThis as { getComputedStyle?(e: El): { overflowY: string } }).getComputedStyle;
-  if (!list || !style) return;
-  let box: El | null = list.parentElement;
-  while (box && !/(auto|scroll)/.test(style(box).overflowY)) box = box.parentElement;
-  const top = box ? box.getBoundingClientRect().top : 0;
-  if (list.getBoundingClientRect().top < top) list.scrollIntoView?.({ block: "start" });
+/** What marks a list's top: a Card sets it (`dataSet={{ pagedTop: "" }}`), so a page turn brings back the card's header. */
+export const PAGED_TOP = "data-paged-top";
+
+/**
+ * A new page starts at its top (web): the pager sits under 25 rows, so after Next the reader would land at the end of
+ * the new page. Find the list's top (the nearest card above the pager, else the pager's parent) and, when it has
+ * scrolled above its scroll container's view, scroll it back to the top of the view.
+ */
+export function toListStart(pager: El | null, overflowY: (e: El) => string) {
+  let top: El | null = pager?.parentElement ?? null;
+  for (let e = top; e; e = e.parentElement) if (e.getAttribute?.(PAGED_TOP) != null) { top = e; break; }
+  if (!top) return false;
+  let box: El | null = top.parentElement;
+  while (box && !/(auto|scroll)/.test(overflowY(box))) box = box.parentElement;
+  const viewTop = box ? box.getBoundingClientRect().top : 0;
+  if (top.getBoundingClientRect().top >= viewTop) return false;
+  top.scrollIntoView?.({ block: "start" });
+  return true;
 }
 
 /**

@@ -1,3 +1,3 @@
-- Long lists open in pages now. Show all on a busy workspace's Activity, its questions, tasks, pull requests and every long list in Home, Catch up, Settings, What's new and PR stats shows 25 at a time with Previous and Next, instead of drawing every row and stretching the sidebar.
+- Long lists open in pages now. Show all on Activity, tasks, pull requests and the long lists in Home, Settings and What's new shows 25 at a time with Previous and Next, instead of drawing every row and stretching the sidebar.
 - Searching a list still finds matches on every page.
 - Busy workspaces load faster: the app no longer downloads a workspace's whole question and message history to draw it.
