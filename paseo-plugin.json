@@ -2,7 +2,7 @@
   "id": "follow-up",
   "name": "Follow-up",
   "icon": "assets/icon.png",
-  "description": "Follow every workspace until the work is done: one Home for what needs you, questions you answer anywhere, and repairs that send themselves.",
+  "description": "Every agent, one inbox. Follow-up brings what all your coding agents need from you into one ranked list, and follows their work through merge, deploy and after.",
   "media": [
     "docs/screenshots/follow-up-slide-1-cover.png",
     "https://cdn.jsdelivr.net/gh/tomgrin10/paseo-follow-up@635e600d3390e23ea786492780755afda591bb45/docs/screenshots/follow-up-demo-v2.mp4",
