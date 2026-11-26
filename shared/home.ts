@@ -9,6 +9,7 @@ import { settled, summary } from "./model";
 import type { ListPr as Pr, ListWorkspace as Workspace } from "./list";
 import { isOpen as questionOpen } from "./questions";
 import { taskSchedule } from "./task-trigger";
+import { agentFacts, nowOf, positionText, type NowWorkspace } from "./now";
 import { freshPriorities, priorityRow, type Priority, type PrioritySourceKind } from "./priorities";
 import { DEFAULT_SORT, sortItems, type SortMode } from "./sort";
 import { messageSender, notificationText, senderLabel, workItems } from "./message-sender";
@@ -80,6 +81,11 @@ export type Workstream = {
   line: string;
   /** The decisive word for the line ("Permission", "Merge"), when there is one. */
   word: string | null;
+  /**
+   * What the row's agent is working on (shared/now.ts), drawn before the line in the title's colour, with its place
+   * when the agent listed its steps ("2/4"). Absent when nothing is known: the line alone, never a placeholder.
+   */
+  lead?: { text: string; position: string | null } | null;
   badges: Badge[];
   pr: PrChip | null;
   /** The age shown on the right. */
@@ -210,12 +216,26 @@ export function badges(input: { headline: Headline | null; row?: InboxRow; works
 }
 
 function sigOf(s: Omit<Workstream, "sig">): string {
-  return [s.group, s.tier, s.icon, s.tone, s.title, s.agent, s.line, s.word, s.at, s.wakeAt ?? "", s.readyToArchive, s.badges.map(b => b.text).join("|"), s.pr ? `${s.pr.label}:${s.pr.checks?.text}` : "",
+  return [s.group, s.tier, s.icon, s.tone, s.title, s.agent, s.lead ? `${s.lead.text}:${s.lead.position}` : "", s.line, s.word, s.at, s.wakeAt ?? "", s.readyToArchive, s.badges.map(b => b.text).join("|"), s.pr ? `${s.pr.label}:${s.pr.checks?.text}` : "",
     s.priority ? `${s.priority.reason}:${s.priority.source?.label}` : "", s.compass ?? "", s.sendNow ? `send:${s.sendNow.batchId}` : ""].join("\u0001");
 }
 const sendNowOf = (s: Sending) => s.state === "queued" && s.canSendNow ? { batchId: s.batchId, count: s.count, what: s.what } : null;
 const make = (s: Omit<Workstream, "sig">): Workstream => ({ ...s, sig: sigOf(s) });
 const stripSig = ({ sig: _sig, ...s }: Workstream): Omit<Workstream, "sig"> => s;
+const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
+/**
+ * A row's agent line (shared/now.ts nowOf, the panel's and workspace_now's): the work as `lead`, the state as `line`.
+ * `fallback` is the line when the state says nothing (unknown). `stated` keeps only what the agent said itself, for
+ * rows whose own line already says what they wait on.
+ */
+function agentLine(w: Workspace | undefined, agentId: string, row: InboxRow | undefined, now: number, fallback: string, stated = false): { lead: Workstream["lead"]; line: string } {
+  const ws: NowWorkspace = w ?? { mainAgentId: agentId, batches: [], obligations: [], prs: [] };
+  const role = ws.mainAgentId === agentId ? "main" : "contributor";
+  const n = nowOf(ws, agentFacts(ws, agentId, role, row), now);
+  const work = n.work && (!stated || n.work.source === "stated") ? n.work : null;
+  const state = stated || !n.state.text ? fallback : n.state.text;
+  return { lead: work ? { text: work.text, position: positionText(work, true) } : null, line: work && state ? lowerFirst(state) : state };
+}
 
 /** The Home group of a tracked workspace without an agent row: the order buildHome uses below. */
 export function trackedGroup(w: Workspace, now: number): HomeGroupId {
@@ -290,7 +310,7 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
       const sending = w && w.mainAgentId === row.agentId ? sendingOf(w, now, { held }) : null;
       if (sending) out.push(make({ ...base, group: "sending", tier: null, icon: sendingIcon(sending), tone: "running", word: null, line: sending.line, badges: [], pr: prChip(w), at: sending.state === "sent" ? sending.when ?? row.lastActivityAt : row.lastActivityAt, sendNow: sendNowOf(sending) }));
       else out.push(make({ ...base, group: "running", tier: null, icon: row.resumesAt ? "CirclePause" : "LoaderCircle", tone: "running",
-        word: null, line: row.resumesAt ? "Paused at the usage limit" : "Working", badges: [], pr: prChip(w), at: row.lastActivityAt }));
+        word: null, ...(row.resumesAt ? { line: "Paused at the usage limit" } : agentLine(w, row.agentId, row, now, "Working")), badges: [], pr: prChip(w), at: row.lastActivityAt }));
       if (row.workspaceId) covered.add(row.workspaceId);
     }
   }
@@ -316,9 +336,9 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
     const state = summary(w, now);
     const live = liveLine(w, now);
     if (sending) out.push(make({ ...base, group: "sending", tier: null, icon: sendingIcon(sending), tone: "running", word: null, line: sending.line, badges: [], pr: prChip(w), at: sending.state === "sent" ? sending.when : w.updatedAt, readyToArchive: false, sendNow: sendNowOf(sending) }));
-    else if (group === "running") out.push(make({ ...base, group: "running", tier: null, icon: "LoaderCircle", tone: "running", word: null, line: live.text, badges: [], pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
+    else if (group === "running") out.push(make({ ...base, group: "running", tier: null, icon: "LoaderCircle", tone: "running", word: null, ...agentLine(w, w.mainAgentId, undefined, now, live.text, true), badges: [], pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
     else if (state.status === "done") out.push(make({ ...base, group: "quiet", tier: null, icon: "CircleCheck", tone: "success", word: null, line: w.completion?.summary ?? "Done", badges: [], pr: prChip(w), at: w.completion?.declaredAt ?? w.updatedAt, readyToArchive: true }));
-    else if (group === "waiting") out.push(make({ ...base, group: "waiting", tier: null, icon: "Clock", tone: "muted", word: null, line: live.text, badges: badges({ headline: null, workspace: w, items }), pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
+    else if (group === "waiting") out.push(make({ ...base, group: "waiting", tier: null, icon: "Clock", tone: "muted", word: null, ...agentLine(w, w.mainAgentId, undefined, now, live.text, true), badges: badges({ headline: null, workspace: w, items }), pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
     else out.push(make({ ...base, group: "quiet", tier: null, icon: "Circle", tone: "muted", word: null, line: live.text, badges: [], pr: prChip(w), at: w.updatedAt, readyToArchive: false }));
   }
 

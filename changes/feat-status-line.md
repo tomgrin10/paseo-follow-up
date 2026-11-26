@@ -1,0 +1,2 @@
+- Every running workspace says what each agent is working on and what it's doing now, on Home and at the top of the panel: "Capping the retry gap 2/4 · working 6m".
+- Agents can name what they're working on, with the steps before and after it, when they sync. Nothing is shown when they haven't, and the line costs no AI.
