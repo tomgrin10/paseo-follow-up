@@ -143,7 +143,7 @@ test("workspace_status at the scale seed's size fits the budget with what the ha
     const w = JSON.parse(await readFile(join(dir, "state.json"), "utf8")).workspaces[0];
     assert.ok(JSON.stringify(w).length > 10 * TOOL_BUDGET, `the seeded workspace is busy (${JSON.stringify(w).length})`);
     // What follow.agent-status adds beside the workspace (dismissed items, the next message, the PR workflow): as much as CI saw.
-    const extra = { nextMessageInfo: { text: "x".repeat(6_000) } };
+    const extra = { nextMessageInfo: { to: "agent-big", tasks: ["checks:example/app#1"], text: "x".repeat(6_000), reason: "Waiting for the turn to end.", eta: null } };
     const view = agentView(w, {}, extra) as any;
     assert.ok(JSON.stringify(view).length <= TOOL_BUDGET, `summary: ${JSON.stringify(view).length} characters`);
     const open = w.questions.filter((q: any) => !q.answer && !q.closed).map((q: any) => q.id);
@@ -157,5 +157,14 @@ test("workspace_status at the scale seed's size fits the budget with what the ha
     assert.ok(JSON.stringify(page).length <= TOOL_BUDGET, `a 100-row page: ${JSON.stringify(page).length} characters`);
     assert.ok(page.history.prs.shown >= 1 && page.history.prs.more === 150 - page.history.prs.shown, "it shrinks to fit and says how many are left");
     assert.ok(page.prs.some((p: any) => p.snapshot?.state === "MERGED" && "reviewers" in p.snapshot), "a history page carries its PRs whole");
+    // CI 2026-11-26: the glance dropped fields the contract required, so the handler threw (handler_error). The reply,
+    // summary and every history page, validates with follow.agent-status's own response schema.
+    const { agentStatusRpc } = await import("../shared/contracts");
+    const { HISTORY_KINDS } = await import("../shared/paged");
+    for (const [label, v] of [["summary", view], ...HISTORY_KINDS.map(k => [`history=${k}`, agentView(w, { kind: k }, extra)] as const), ["history=batches limit 100", agentView(w, { kind: "batches", limit: 100 }, extra)]] as const) {
+      const r = agentStatusRpc.output.safeParse(v);
+      assert.ok(r.success, `${label} fails the response schema: ${r.success ? "" : r.error.issues.slice(0, 4).map(i => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+    }
+    assert.ok(view.prs.some((p: any) => p.glance) && view.questions.some((q: any) => q.glance) && view.batches.some((b: any) => b.glance), "the summary's finished items are glances, marked");
   } finally { await rm(dir, { recursive: true, force: true }); }
 });

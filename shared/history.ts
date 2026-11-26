@@ -4,7 +4,9 @@ import { activity, activityQuestions, type Activity } from "./activity";
 import { activityFields, questionFields } from "./section-search";
 import { filterItems, type ItemHit } from "./search";
 import { PAGE, TOOL_BUDGET, boundDone, newestFirst, window, type DoneInfo, type HistoryKind } from "./paged";
-import { settled } from "./model";
+import { z } from "zod";
+import { batchSchema, deploymentSchema, prObjectSchema, settled, snapshotSchema, taskSchema } from "./model";
+import { questionSchema } from "./questions";
 import type { ListWorkspace } from "./list";
 
 /**
@@ -95,16 +97,28 @@ function agentViewOf<W extends AgentW>(w: W, { kind, offset, limit, recent }: { 
     history: { prs: prs.done, tasks: tasks.done, questions: questions.done, batches: batches.done, prActions: prActions.done } };
 }
 
-const pick = (x: Record<string, any>, keys: string[]) => Object.fromEntries(keys.filter(k => k in x).map(k => [k, x[k]]));
 /**
  * A finished item at a glance: what it was and how it ended, without its evidence (a merged PR's checks and reviewers, a
- * settled question's options and background, a batch's task fingerprints). history=<kind> pages them whole.
+ * settled question's options and background, a batch's task fingerprints), marked `glance: true`; history=<kind> pages
+ * them whole. Each shape is picked from the stored item's own schema, and follow.agent-status's contract takes either
+ * (shared/contracts.ts), so what agentView builds and what the RPC validates are one definition.
  */
+const glance = z.literal(true);
+export const prGlanceSchema = prObjectSchema.pick({ key: true, repo: true, number: true, stack: true, parent: true, disposition: true }).extend({
+  snapshot: snapshotSchema.pick({ title: true, url: true, state: true, mergedAt: true, observedAt: true, mergeCommit: true })
+    .extend({ deployment: deploymentSchema.pick({ state: true, environment: true }).nullable().optional() }).nullable(),
+  glance,
+});
+export const questionGlanceSchema = questionSchema.pick({ id: true, title: true, prKey: true, taskId: true, askedBy: true, askedAt: true, mode: true, answer: true, closed: true }).extend({ glance });
+export const batchGlanceSchema = batchSchema.pick({ id: true, state: true, createdAt: true, sentAt: true, settledAt: true, result: true, recipientAgentId: true })
+  .extend({ tasks: z.array(taskSchema.pick({ key: true, kind: true, target: true, title: true })), glance });
+/** The glance of one item; an item its glance schema can't read (an older record) comes whole, which the contract takes too. */
+const brief = (schema: z.ZodTypeAny) => (x: Record<string, unknown>) => { const r = schema.safeParse({ ...x, glance: true }); return r.success ? r.data : x; };
 const BRIEF_DONE: Record<HistoryKind, (x: Record<string, any>) => unknown> = {
-  prs: p => ({ ...pick(p, ["key", "repo", "number", "stack", "parent", "disposition"]), snapshot: p.snapshot ? { ...pick(p.snapshot, ["title", "url", "state", "mergedAt", "observedAt", "mergeCommit"]), deployment: p.snapshot.deployment ? pick(p.snapshot.deployment, ["state", "environment"]) : null } : null }),
+  prs: brief(prGlanceSchema),
   tasks: o => o,
-  questions: q => pick(q, ["id", "title", "prKey", "taskId", "askedBy", "askedAt", "mode", "answer", "closed", "via"]),
-  batches: b => ({ ...pick(b, ["id", "state", "createdAt", "sentAt", "settledAt", "result", "recipientAgentId"]), tasks: (b.tasks ?? []).map((t: Record<string, any>) => pick(t, ["key", "kind", "target", "title"])) }),
+  questions: brief(questionGlanceSchema),
+  batches: brief(batchGlanceSchema),
   prActions: a => a,
 };
 
