@@ -114,7 +114,7 @@ export default function contribute(host: PluginClientContext) {
   let nextToken = 0;
   const openNext = (from: string | null) => client.openScreen({ screenId: OVERVIEW, params: { next: String(++nextToken), ...(from ? { from } : {}) } });
 
-  const removeDisplay = contributeDisplay(client, { id: "follow-up-overview", title: "Follow-up", Component: sidebarItem(sources, OVERVIEW) });
+  const removeDisplay = contributeDisplay(client, { id: "follow-up-overview", title: "Follow-up", Component: sidebarItem(sources, OVERVIEW, { openSettings: category => openSettings(category as SettingsCategory) }) });
   const briefDeps: BriefDeps = {
     signOff: agentId => void inbox.signOff([agentId]), openNext,
     openAgent: agentId => client.openScreen({ screenId: OVERVIEW, params: { next: String(++nextToken), open: agentId } }),

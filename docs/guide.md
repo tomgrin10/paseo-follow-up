@@ -16,10 +16,11 @@ the app, settings, updates and a few things for specific setups. Screenshots use
 
 ## Setup
 
-The first time you open Follow-up from the sidebar, a short setup takes Home's place. It takes about two minutes, and
-**Skip setup** leaves it at any point.
+The first time Follow-up loads, setup opens as a popup: a welcome page with what Follow-up does and **Set up
+Follow-up**, then a few steps, then a done page. It takes about two minutes, and **Skip setup** leaves it at any point.
+Close (X) puts it away without losing your place: Home shows **Finish setup**, which opens it again on the same step.
 
-<img alt="Follow-up's setup, first step: an example PR going from failed checks to a fix sent to its agent to a merge only you can approve" src="screenshots/follow-up-setup.png">
+<img alt="Follow-up's setup popup, welcome page: the Follow-up logo, a one-line pitch, four features and a Set up Follow-up button" src="screenshots/follow-up-setup.png">
 
 It shows what Follow-up does, checks the helper agents and GitHub (with the fix to copy for anything missing), and asks
 what Follow-up may do without asking you, how you ship PRs, who reviews, how it updates and which helpers to turn on.

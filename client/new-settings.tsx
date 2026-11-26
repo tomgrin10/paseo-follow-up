@@ -49,7 +49,7 @@ function SidebarSection({ theme, compact }: { theme: Theme; compact: boolean }) 
   const row = useNewRowSetting();
   return <SettingsSection title="Sidebar">
     <SettingsCard>
-      <SettingsSwitch label={NEW_ROW.label} hint={NEW_ROW.hint(row.key, isMac() ? "⌘K" : "Ctrl K")} value={row.value ?? true} disabled={row.value === null || row.saving} onValueChange={row.set} />
+      <SettingsSwitch label={NEW_ROW.label} hint={compact ? NEW_ROW.hint(null, null) : NEW_ROW.hint(row.key, isMac() ? "⌘K" : "Ctrl K")} value={row.value ?? true} disabled={row.value === null || row.saving} onValueChange={row.set} />
     </SettingsCard>
     {row.value !== false && <Text style={[t.meta, { paddingHorizontal: 4 }]}>{NEW_ROW.paseo}</Text>}
   </SettingsSection>;

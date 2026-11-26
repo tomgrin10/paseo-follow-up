@@ -58,7 +58,7 @@ Nothing polls while the app is hidden.
 
 | File | What it is |
 | --- | --- |
-| `client/home.tsx` | Home: the list and the detail pane, the Overseer card, the setup flow's place. `DisplaySplit` is a ResizableSplit whose width is a Display field (Home's right pane, Catch up's rail). |
+| `client/home.tsx` | Home: the list and the detail pane, the Overseer card, setup's Finish setup line. `DisplaySplit` is a ResizableSplit whose width is a Display field (Home's right pane, Catch up's rail). |
 | `client/catch-up.tsx` | Catch up ([needs-you.md](needs-you.md#catch-up)): Needs you one card at a time over the pure session in `shared/catch-up.ts`. Each card renders the shared components (QuestionBody, NeedsYouList, BriefCard, the permission block); More context asks through `follow.context-ask` and parks the workstream; answers arrive on Home's feed (`extras.context`). Phones: one card with the moves in thumb reach, swipe to skip or go back. Desktop: the queue rail in a `DisplaySplit` (`catch_up_rail_fraction`) and the keys. `CatchUpButton` is Home's way in. |
 | `client/image-attach.tsx` | Pasted images ([Pasted images](#pasted-images)): `useImageAttachments`, `ImageField`, `ImageAttachmentsRow`, `useImagePaste`. The one component every agent-bound field uses. |
 | `client/more-context.tsx` | More context for every question surface ([needs-you.md](needs-you.md#more-context)): `MorePanel`, `MoveResult` and `ContextAnswer` (Catch up's), and `QuestionMoreContext`, the quiet link `QuestionBody` draws on an open question outside Catch up. Reads the asks from one store, Home's extras (`setContextSource`, set in `index.client.tsx`). |
@@ -103,7 +103,8 @@ Nothing polls while the app is hidden.
 | `client/job-rows.tsx` | The job rows Settings → Agents and setup's Helper agents step share (`JobRows`, `RolePickers`). |
 | `client/shipping.tsx` | Settings → Following → Shipping PRs. |
 | `client/review-mode.tsx` | Per-repository review mode: the Settings Review row (its menu uses `MenuItemContent`), the Needs-you reviewers row's "Let the agent merge in <repo>" link, and the Undo toast both share. See [docs/prs.md](prs.md#review-mode). |
-| `client/onboarding.tsx` | Getting started. |
+| `client/onboarding.tsx` | Getting started: the steps and their moves. |
+| `client/setup-gate.tsx`, `client/setup-dialog.tsx`, `client/setup-ui.ts` | Setup's popup (`setup-is-one-popup`): `SetupGate` on the first surface to mount, Home's `FinishSetupLine`, the dialog/sheet frame with the welcome and done pages, and the session store. |
 | `client/updates.tsx` | Settings → General's Updates sections, Home's update notice, setup's Updates step ([updates.md](updates.md)). |
 | `client/release-notes.tsx` | What's new and the notes list. Home's version marker is `VersionMark` in `client/updates.tsx`. |
 | `client/image-viewer.tsx` | The image viewer a notes screenshot opens in (Paseo's SDK has none for plugins): dimmed, fitted to the window, never past the image's CSS width; closes on a click, Esc or the X. Its sizing is `fitImage` in `shared/image-fit.ts`. |

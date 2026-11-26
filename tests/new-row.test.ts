@@ -1,6 +1,7 @@
 import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { bundleStores, fakeHost, settle } from "./client-stores";
 import { displayPreferences } from "../shared/display";
@@ -64,6 +65,8 @@ test("off still leaves Dispatch reachable: Home's + New, ⌘K and the key open i
   const home = await readFile(join(root, "client/home.tsx"), "utf8");
   assert.ok(!/enable_new_sidebar_row/.test(home), "Home's + New never reads the row's switch");
   assert.match(NEW_ROW.hint("⌘⇧N"), /Home, under ⌘⇧N and in ⌘K/);
+  assert.equal(NEW_ROW.hint(null, null), "A row at the top of the sidebar that opens Dispatch. Off: Dispatch stays on Home.", "a phone names no keys");
+  for (const f of ["client/new-settings.tsx", "client/onboarding.tsx"]) assert.match(readFileSync(new URL(`../${f}`, import.meta.url), "utf8"), /hint=\{compact \? NEW_ROW\.hint\(null, null\) : NEW_ROW\.hint\(/, `${f}: no keys on a phone`);
 });
 
 /**

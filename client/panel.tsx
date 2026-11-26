@@ -38,6 +38,7 @@ import { LinkedItemsRow } from "./linked";
 import { mergedColor, tint } from "./theme";
 import { SummaryRow } from "./about";
 import { WhatsNewGate } from "./release-notes";
+import { SetupGate } from "./setup-gate";
 import { ViewSync } from "./view-store";
 import { RichText } from "./rich-text";
 import { ToastHost, useQuestionOpener } from "./toasts";
@@ -53,7 +54,7 @@ type PanelProps = PluginWorkspacePanelProps & PanelLinks & { inbox?: InboxStore;
  * tasks, questions, spec, activity and Details. What needs you elsewhere lives on Home.
  */
 export function FollowPanel(props: PanelProps) {
-  return <><ViewSync /><PanelBody {...props} /><WhatsNewGate surface="panel" theme={props.theme} compact={props.layout.compact} /><ToastHost theme={props.theme} compact={props.layout.compact} /></>;
+  return <><ViewSync /><PanelBody {...props} /><WhatsNewGate surface="panel" theme={props.theme} compact={props.layout.compact} /><SetupGate surface="panel" theme={props.theme} compact={props.layout.compact} deps={{ openSettings: props.openSettings, openHome: props.openOverview }} /><ToastHost theme={props.theme} compact={props.layout.compact} /></>;
 }
 
 function PanelBody(props: PanelProps) {

@@ -140,8 +140,17 @@ First, pick where it lives:
 - **Trying it as a stranger:** `node scripts/screenshots.mjs --only onboarding --variant <v>` packs the plugin, installs
   it on a fresh PASEO_HOME with no mcpproxy and walks every shown step: `no-gh` (no GitHub CLI, Claude), `claude`,
   `codex`, `other` (only a plugin provider, standing in for any other provider) and `none` (no provider, no gh).
+- **Setup is one popup** (`setup-is-one-popup`, invariant 123): a dialog on desktop, a sheet on a phone. The intro
+  step is its welcome page (the logo, the pitch, four features, Set up Follow-up, a quiet What's new link), the other
+  steps follow with "2 of N" and a progress rule, and Finish shows a done page. `SetupGate` (`client/setup-gate.tsx`)
+  draws it on whichever surface mounts first (Home, the panel, the sidebar item), once per app session. Close puts it
+  away on this device (`follow-up.setup.closed`, a view key) and tells the server nothing: setup stays on its step and
+  Home shows "Finish setup", which opens it there. Setup ending or Set up again clears the Close. The rules are
+  `shared/setup-popup.ts`; the frame, welcome and done pages are `client/setup-dialog.tsx`; the session (which surface
+  draws it, the done page) is `client/setup-ui.ts`. The desktop dialog keeps one height, so steps never resize it.
 - **RPCs:** `follow.onboarding`, `follow.set-onboarding`, `follow.onboarding-checks`. **Tools:**
-  `onboarding_status`, `onboarding_checks`, `set_onboarding`. **UI:** `client/onboarding.tsx`.
+  `onboarding_status`, `onboarding_checks`, `set_onboarding`. **UI:** `client/onboarding.tsx` (the steps),
+  `client/setup-gate.tsx`, `client/setup-dialog.tsx`.
 
 ## Release notes, What's new and updates
 
