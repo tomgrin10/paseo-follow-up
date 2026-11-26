@@ -234,6 +234,8 @@ export const releaseNotesViewSchema = z.object({
   enable_whats_new: z.boolean().default(true),
   /** Every shipped release note, newest first. */
   notes: z.array(releaseNoteSchema),
+  /** The GitHub release pages (`releasesUrl` of package.json's repository), where the full changelogs live; null if none. */
+  releases: z.string().nullable().default(null),
 });
 export type ReleaseNotesView = z.infer<typeof releaseNotesViewSchema>;
 
@@ -250,6 +252,37 @@ export function recentUpdate(view: Pick<ReleaseNotesView, "version" | "previous"
 export function recentNotes(view: Pick<ReleaseNotesView, "version" | "previous" | "notes">): ReleaseNote[] {
   const since = notesSince(view.notes, view.previous, view.version);
   return since.length ? since : view.notes.filter(n => n.version === notesVersion(view.version));
+}
+
+/** A version in the notes feed: its curated notes, and whether it is the one this host runs. */
+export type FeedNote = ReleaseNote & { installed: boolean };
+/**
+ * What's new and the release notes are one scroll, like Paseo's own (invariant 120, `notes-read-like-one-feed`): every
+ * stable version's curated notes, newest first, each with its number and date, the running version marked Installed.
+ * `notes` are the installed package's (none newer than it is shown from there); `pending` are an update's notes, from
+ * the updater, for versions out but not installed, shown above it. Betas never appear: they ship no curated notes, and
+ * what they carried reaches people in the next stable's section. A major's rc counts as its major (`notesVersion`).
+ */
+export function notesFeed(notes: readonly ReleaseNote[], installed: string, pending: readonly ReleaseNote[] = []): FeedNote[] {
+  const running = notesVersion(installed);
+  const stable = (n: ReleaseNote) => parseVersion(n.version)?.pre.length === 0 && hasContent(n);
+  const byVersion = new Map<string, ReleaseNote>();
+  for (const n of notes) if (stable(n) && compareVersions(n.version, running) <= 0) byVersion.set(n.version, n);
+  for (const n of pending) if (stable(n) && compareVersions(n.version, running) > 0 && !byVersion.has(n.version)) byVersion.set(n.version, n);
+  return [...byVersion.values()].sort((a, b) => compareVersions(b.version, a.version)).map(n => ({ ...n, installed: n.version === running }));
+}
+
+/**
+ * The GitHub release pages for a package.json `repository` (an object with `url`, or a string: a URL, `git@`, or the
+ * `github:owner/repo` and `owner/repo` shorthands), where each version's full changelog lives. null when it isn't GitHub.
+ */
+export function releasesUrl(repository: unknown): string | null {
+  const raw = typeof repository === "string" ? repository : typeof (repository as { url?: unknown } | null)?.url === "string" ? (repository as { url: string }).url : null;
+  if (!raw) return null;
+  const m = /^(?:git\+)?(?:https?:\/\/|git:\/\/|ssh:\/\/git@)github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(raw)
+    ?? /^git@github\.com:([\w.-]+)\/([\w.-]+?)(?:\.git)?$/.exec(raw)
+    ?? /^(?:github:)?([\w-][\w.-]*)\/([\w.-]+?)(?:\.git)?$/.exec(raw);
+  return m ? `https://github.com/${m[1]}/${m[2]}/releases` : null;
 }
 
 /** "just now", "12m ago", "2h ago", "3 days ago". */

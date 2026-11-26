@@ -1,0 +1,1 @@
+- What's new is one scroll: every version's changes, newest first, with its date and an Installed tag on yours. Nothing to open, and each version's full changelog is one click away on GitHub.

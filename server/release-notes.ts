@@ -3,7 +3,7 @@ import type { ZodType } from "zod";
 import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { compareVersions } from "../shared/version";
-import { parseChangelog, LEGACY_BASELINE, type InstallKind, type ReleaseNote } from "../shared/changelog";
+import { parseChangelog, releasesUrl, LEGACY_BASELINE, type InstallKind, type ReleaseNote } from "../shared/changelog";
 
 /**
  * Follow-up's own install, as Paseo describes it: where it lives, which version, and from what source. Read from the
@@ -24,12 +24,12 @@ export function describeSelf(rows: readonly PluginRow[]): Omit<SelfInstall, "ver
   return { id: row.id, path: row.path, version: row.installation?.currentRevision ?? null, installKind, status: row.status ?? null, error: row.error ?? null, registry };
 }
 
-/** The installed package's version, its display name (the manifest's `name`) and CHANGELOG.md, read from the plugin's own folder. */
-export async function readPackage(path: string): Promise<{ version: string | null; name: string | null; notes: ReleaseNote[] }> {
-  const pkg = await readFile(join(path, "package.json"), "utf8").then(t => JSON.parse(t) as { version?: string }, () => null);
+/** The installed package's version, its display name (the manifest's `name`), CHANGELOG.md and release pages, read from the plugin's own folder. */
+export async function readPackage(path: string): Promise<{ version: string | null; name: string | null; notes: ReleaseNote[]; releases: string | null }> {
+  const pkg = await readFile(join(path, "package.json"), "utf8").then(t => JSON.parse(t) as { version?: string; repository?: unknown }, () => null);
   const manifest = await readFile(join(path, "paseo-plugin.json"), "utf8").then(t => JSON.parse(t) as { name?: unknown }, () => null);
   const notes = await readFile(join(path, "CHANGELOG.md"), "utf8").then(parseChangelog, () => []);
-  return { version: pkg?.version ?? null, name: typeof manifest?.name === "string" && manifest.name.trim() ? manifest.name.trim() : null, notes };
+  return { version: pkg?.version ?? null, name: typeof manifest?.name === "string" && manifest.name.trim() ? manifest.name.trim() : null, notes, releases: releasesUrl(pkg?.repository) };
 }
 
 /** versions.json: which version this host runs, the one before it, and the host-wide What's new record. */

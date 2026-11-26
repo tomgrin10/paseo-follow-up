@@ -138,7 +138,7 @@ test("What's new on a phone and on desktop: every version in one scroll, nothing
     assert.ok(all.includes("One list") && all.includes("Home is one list."), "a curated section reads in full");
     assert.ok(all.includes("Change 10:"), "every bullet, no Show all");
     for (const gone of ["See all release notes", "Show all 10", "versions since you last looked"]) assert.ok(!all.some(t => t.includes(gone)), `no "${gone}"`);
-    assert.equal(r!.root.findAll(n => n.props["aria-expanded"] !== undefined || n.props.accessibilityState?.expanded !== undefined).length, 0, "no disclosure");
+    assert.equal(r!.root.findAll(n => n.props["aria-expanded"] !== undefined || (n.props.accessibilityState as { expanded?: boolean } | undefined)?.expanded !== undefined).length, 0, "no disclosure");
     const link = r!.root.findAll(n => n.props.accessibilityLabel === "Release notes on GitHub" && typeof n.props.onPress === "function")[0];
     assert.ok(link, "the release pages, one tap away");
     await act(async () => { (link!.props.onPress as () => void)(); });

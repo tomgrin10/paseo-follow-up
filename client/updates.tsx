@@ -14,9 +14,9 @@ import { Spinner } from "./motion";
 import { Disclosure } from "./settings-shell";
 import { withAlpha } from "./theme";
 import { OptionCard } from "./questions";
-import { ReleaseNotesSheet, VersionNotes, releaseNotesKey } from "./release-notes";
+import { ReleaseNotesSheet, VersionNotes, releaseNotesKey, updatesKey } from "./release-notes";
 
-export const updatesKey = ["follow-up", "updates"];
+export { updatesKey };
 
 /** The server's updates view. Reading it never asks the registry; `check` does (rate-limited on the server). */
 export function useUpdates(check?: "settings") {
@@ -140,8 +140,8 @@ export function UpdatesSections({ theme, compact }: { theme: Theme; compact: boo
   const c = theme.colors; const t = text(c);
   const query = useUpdates("settings");
   const write = useRpc(setUpdatesRpc); const cache = useQueryClient(); const toast = useToast();
-  // null: closed; false: What's new (since the last update); true: every version.
-  const [sheet, setSheet] = useState<boolean | null>(null);
+  // What's new: every version in one scroll, opened at the newest, from the status card or Release notes.
+  const [sheet, setSheet] = useState(false);
   // The What's new gate reads the switch from the release notes view, so a change refreshes that too.
   const save = useMutation({ mutationFn: (input: UpdatesChange) => write(input), onSuccess: (v, input) => { cache.setQueryData(updatesKey, v); if (input.enable_whats_new != null) void cache.invalidateQueries({ queryKey: releaseNotesKey }); }, onError: e => toast.error(errorText(e)) });
   const view = query.data;
@@ -149,7 +149,7 @@ export function UpdatesSections({ theme, compact }: { theme: Theme; compact: boo
   if (!view) return <SettingsSection title="Updates"><Text accessibilityRole="alert" style={{ color: c.statusDanger }}>{query.error ? errorText(query.error) : "Couldn't load updates."}</Text></SettingsSection>;
   return <View style={{ gap: 18 }}>
     <SettingsSection title="Updates">
-      <StatusCard view={view} theme={theme} compact={compact} onWhatsNew={() => setSheet(false)} />
+      <StatusCard view={view} theme={theme} compact={compact} onWhatsNew={() => setSheet(true)} />
       <MoveLine view={view} theme={theme} compact={compact} />
     </SettingsSection>
     <SettingsSection title={view.installKind === "npm" ? "How Follow-up updates" : "Release notes"}>
@@ -171,7 +171,7 @@ export function UpdatesSections({ theme, compact }: { theme: Theme; compact: boo
         {h.reason && <Text style={t.small}>{h.reason}</Text>}
       </View>)}
     </Disclosure>}
-    {sheet != null && <ReleaseNotesSheet theme={theme} compact={compact} all={sheet} onClose={() => setSheet(null)} />}
+    {sheet && <ReleaseNotesSheet theme={theme} compact={compact} onClose={() => setSheet(false)} />}
   </View>;
 }
 

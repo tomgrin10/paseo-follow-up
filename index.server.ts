@@ -1221,21 +1221,21 @@ export default function contribute(server: PluginServerContext) {
   // What's new and Settings → General. Follow-up's own install comes from Paseo's plugin list, read once per worker.
   const versions = new VersionsStore(directory);
   const updatesStore = new UpdatesStore(directory);
-  let self: Promise<SelfInstall & { name: string | null; notes: ReleaseNote[] }> | null = null;
+  let self: Promise<SelfInstall & { name: string | null; notes: ReleaseNote[]; releases: string | null }> | null = null;
   const selfInstall = () => self ??= withDaemon(async c => describeSelf(await c.listPlugins?.() ?? [])).then(async row => {
-    const pkg = row.path ? await readPackage(row.path) : { version: null, name: null, notes: [] };
+    const pkg = row.path ? await readPackage(row.path) : { version: null, name: null, notes: [], releases: null };
     const version = pkg.version ?? row.version;
     if (!version) throw new Error("Paseo's plugin list doesn't show Follow-up's version yet.");
     // Fresh or existing comes from setup's own record, decided once before anything else wrote state.
     const existing = await onboarding.init().then(f => f.install === "existing", () => true);
     await versions.started(version, existing).catch(() => undefined);
-    return { ...row, version, name: pkg.name, notes: pkg.notes };
+    return { ...row, version, name: pkg.name, notes: pkg.notes, releases: pkg.releases };
   }).catch(error => { self = null; throw error; });
   // Record the version at start (in the background), so "Updated to X 2h ago" counts from the reload, not first view.
   void ready.then(() => selfInstall()).catch(() => undefined);
   const releaseNotesView = async (): Promise<ReleaseNotesView> => {
     const [me, file, updates] = await Promise.all([selfInstall(), versions.read(), updatesStore.read()]);
-    return demoOverride(directory, "release-notes", releaseNotesViewSchema, { version: me.version, name: me.name ?? PLUGIN_NAME, installKind: me.installKind, previous: file.previous ?? null, updatedAt: file.startedAt ?? null, hostSeen: file.hostSeen ?? null, enable_whats_new: updates.enable_whats_new !== false, notes: me.notes });
+    return demoOverride(directory, "release-notes", releaseNotesViewSchema, { version: me.version, name: me.name ?? PLUGIN_NAME, installKind: me.installKind, previous: file.previous ?? null, updatedAt: file.startedAt ?? null, hostSeen: file.hostSeen ?? null, enable_whats_new: updates.enable_whats_new !== false, notes: me.notes, releases: me.releases });
   };
   handle(rpc.releaseNotesRpc, async () => releaseNotesView());
   handle(rpc.whatsNewSeenRpc, async ({ version }) => { await versions.seen(version); return releaseNotesView(); });
