@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Image, Platform, Modal as RNModal, View, useWindowDimensions, type ScrollView as NativeScrollView, type StyleProp, type ViewStyle } from "react-native";
 import { Pressable, Text } from "./text";
 import { openExternalUrl, useRpc } from "@getpaseo/plugin/client";
@@ -31,12 +31,6 @@ export function useReleaseNotes() {
 /** A version's date in full, as Paseo's notes write it: "November 26, 2026". */
 const fmtDate = (iso: string | null) => iso ? new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" }) : null;
 
-/**
- * The text measure in the wide dialog: text lines stop here (about 75 characters) while screenshots use the full
- * width. Unset (no cap) in the narrower dialog, on phones and in Settings' inline notes.
- */
-const MeasureContext = createContext<number | undefined>(undefined);
-const useMeasure = () => { const m = useContext(MeasureContext); return m ? { maxWidth: m } : null; };
 
 /** A line's text with its bold runs semibold (the weight headings use), or the plain text when nothing is bold. */
 const inline = (line: string, runs?: InlineRun[]): ReactNode =>
@@ -45,7 +39,7 @@ const inline = (line: string, runs?: InlineRun[]): ReactNode =>
 /** One bullet: a small dot and its text. */
 function Bullet({ text: line, runs, theme, compact }: { text: string; runs?: InlineRun[]; theme: Theme; compact: boolean }) {
   const c = theme.colors; const t = text(c, compact);
-  return <View style={[{ flexDirection: "row", gap: 8 }, useMeasure()]}>
+  return <View style={{ flexDirection: "row", gap: 8 }}>
     <View style={{ width: 4, height: 4, borderRadius: 2, marginTop: compact ? 8 : 7, backgroundColor: c.foregroundMuted }} />
     <Text style={[t.body, { flex: 1 }]}>{inline(line, runs)}</Text>
   </View>;
@@ -88,7 +82,6 @@ function NoteImage({ block, theme, compact }: { block: Extract<NoteBlock, { kind
 export function VersionNotes({ note, theme, compact = false, max = Infinity }: { note: ReleaseNote; theme: Theme; compact?: boolean; max?: number }) {
   const c = theme.colors; const t = text(c, compact);
   const [all, setAll] = useState(false);
-  const measure = useMeasure();
   if (note.blocks?.length) {
     const quietFrom = note.blocks.findIndex(b => b.kind === "rule");
     // Headings sit a step above body text and closer to the paragraph they open than to the one before.
@@ -99,8 +92,8 @@ export function VersionNotes({ note, theme, compact = false, max = Infinity }: {
         if (b.kind === "rule") return <View key={i} style={{ height: 1, backgroundColor: c.border, marginTop: 16, marginBottom: 4 }} />;
         // Section headings: body size, semibold (the label role), so in the feed the version number stays the strongest
         // line and a curated section's headings read as its parts, never as versions of their own.
-        if (b.kind === "heading") return <Text key={i} accessibilityRole="header" style={[quiet ? [t.meta, { fontWeight: "600" }] : [t.label, { marginTop: i ? 12 : 0 }], measure]}>{b.text}</Text>;
-        if (b.kind === "text") return <Text key={i} style={[quiet ? t.meta : t.body, measure]}>{inline(b.text, b.runs)}</Text>;
+        if (b.kind === "heading") return <Text key={i} accessibilityRole="header" style={[quiet ? [t.meta, { fontWeight: "600" }] : [t.label, { marginTop: i ? 12 : 0 }]]}>{b.text}</Text>;
+        if (b.kind === "text") return <Text key={i} style={[quiet ? t.meta : t.body]}>{inline(b.text, b.runs)}</Text>;
         return <Bullet key={i} text={b.text} runs={b.runs} theme={theme} compact={compact} />;
       })}
     </View>;
@@ -124,8 +117,7 @@ function VersionHeader({ note, theme, compact }: { note: FeedNote; theme: Theme;
   const c = theme.colors; const t = text(c, compact);
   const date = fmtDate(note.date);
   return <View accessibilityRole="header" accessibilityLabel={[note.version, note.installed ? "installed" : null, date].filter(Boolean).join(", ")}
-    // The header row keeps the text's measure, so its rule and date end where the lines below it do.
-    style={[{ flexDirection: "row", alignItems: "center", gap: 10, paddingBottom: compact ? 10 : 12, borderBottomWidth: 1, borderBottomColor: c.border }, useMeasure()]}>
+    style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingBottom: compact ? 10 : 12, borderBottomWidth: 1, borderBottomColor: c.border }}>
     <Text style={{ color: c.foreground, fontSize: compact ? 19 : 18, lineHeight: compact ? 25 : 24, fontWeight: "500", fontVariant: ["tabular-nums"] }}>{note.version}</Text>
     {note.installed && <View style={{ paddingHorizontal: 8, paddingVertical: 1, borderRadius: 999, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface2 }}>
       <Text style={[t.meta, { color: c.foregroundMuted }]}>Installed</Text>
@@ -178,10 +170,12 @@ const openReleases = (url: string) => { void openExternalUrl(url).catch(() => un
 const SHEET_INSET = 24;
 /**
  * Desktop draws the notes in a dialog of our own, so its header can carry the open-in-browser icon beside the X (the
- * host's Modal has a title and nothing else). From 1280px windows it widens so Home's screenshot isn't drawn at under
- * half its size, with text lines capped at a readable measure; below that, about the host's own dialog width.
+ * host's Modal has a title and nothing else). The dialog is as wide as the reading column plus its inset, and nothing
+ * inside caps itself: text, version rules, dates, screenshots, the credits' rule and the header's icons all share one
+ * right edge (2026-11-26: an 840px dialog capped only its text at 600px, leaving a dead band right of every line, the
+ * rules and icons past it). A screenshot shows larger in the image viewer.
  */
-const WIDE_FROM = 1280; const WIDE_CARD = 840; const CARD = 600; const TEXT_MEASURE = 600;
+const NOTES_COLUMN = 600; const DIALOG_INSET = 24;
 
 /**
  * The desktop dialog, drawn like the host's (same dim, card and X) with Paseo's What's new header: a gift, the title,
@@ -197,7 +191,7 @@ function NotesDialog({ title, open, onDismiss, theme, width, releases, openUrl, 
     <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: "rgba(0,0,0,0.55)" }}>
       <Pressable accessible={false} focusable={false} importantForAccessibility="no" onPress={onDismiss} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
       <View role="dialog" aria-modal aria-label={title} style={{ width, maxHeight: "85%", flexShrink: 1, minHeight: 0, overflow: "hidden", backgroundColor: c.surface0, borderRadius: 12, borderWidth: 1, borderColor: c.surface2 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingLeft: 24, paddingRight: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: c.surface2 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingLeft: DIALOG_INSET, paddingRight: DIALOG_INSET - 8, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: c.surface2 }}>
           <Icon name="Gift" size={16} color={c.foregroundMuted} />
           <Text role="heading" numberOfLines={1} style={{ flex: 1, minWidth: 0, color: c.foreground, fontSize: 14, fontWeight: "500" }}>{title}</Text>
           {releases && <Pressable accessibilityRole="link" accessibilityLabel="Release notes on GitHub" accessibilityHint="Every version's full changelog, in your browser" onPress={() => openUrl(releases)} style={state => headerButton(state as { hovered?: boolean })}>
@@ -207,7 +201,7 @@ function NotesDialog({ title, open, onDismiss, theme, width, releases, openUrl, 
             {state => <Icon name="X" size={16} color={state.pressed ? c.foreground : c.foregroundMuted} />}
           </Pressable>
         </View>
-        <NotesScroll theme={theme} style={{ flexShrink: 1, minHeight: 0 }} contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 24, paddingBottom: 32 }}>{children}</NotesScroll>
+        <NotesScroll theme={theme} style={{ flexShrink: 1, minHeight: 0 }} contentContainerStyle={{ paddingHorizontal: DIALOG_INSET, paddingTop: 24, paddingBottom: 32 }}>{children}</NotesScroll>
       </View>
       {overlay}
     </View>
@@ -227,18 +221,17 @@ export function WhatsNewSheet({ open, name, feed, releases, theme, compact, onCl
   const [viewing, setViewing] = useState<{ image: ViewedImage; from: unknown } | null>(null);
   const win = useWindowDimensions();
   if (!feed.length) return null;
-  const wide = !compact && win.width >= WIDE_FROM;
   const closeViewer = () => { const from = viewing?.from; setViewing(null); refocus(from); };
   const dismiss = () => { if (viewing) closeViewer(); else onClose(); };
   const viewer = viewing && <ImageViewer image={viewing.image} inline={viewerInline(compact)} onClose={closeViewer} />;
   const body = <ImageViewerContext.Provider value={(image, from) => setViewing({ image, from })}>
-    <MeasureContext.Provider value={wide ? TEXT_MEASURE : undefined}><NotesFeed feed={feed} theme={theme} compact={compact} /></MeasureContext.Provider>
+    <NotesFeed feed={feed} theme={theme} compact={compact} />
   </ImageViewerContext.Provider>;
   const title = notesTitle(name);
   // The viewer always sits outside the scroll view: react-native-web's ScrollView sets translateZ(0), which would trap
   // the viewer's fixed position inside the dialog.
   if (!compact) return <NotesDialog title={title} open={open} onDismiss={dismiss} theme={theme} releases={releases} openUrl={openUrl}
-    width={Math.min(wide ? WIDE_CARD : CARD, win.width - 48)} overlay={viewer}>{body}</NotesDialog>;
+    width={Math.min(NOTES_COLUMN + 2 * DIALOG_INSET, win.width - 48)} overlay={viewer}>{body}</NotesDialog>;
   return <Modal title={title} open={open} onOpenChange={next => { if (!next) dismiss(); }}>
     <Modal.Content scrollable={false} contentContainerStyle={{ padding: 0, gap: 0 }} style={{ flex: 1 }}>
       <NotesScroll theme={theme} style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: SHEET_INSET, paddingTop: 16, paddingBottom: 24 }}>{body}</NotesScroll>

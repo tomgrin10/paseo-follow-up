@@ -1966,7 +1966,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
         }
         await fs.rm(join(home, "plugin-data/follow-up/updates-demo.json"), { force: true });
       }
-      // Review evidence for the wide notes dialog (from 1280px windows) and the image viewer, both entry points.
+      // Review evidence for the notes dialog (one reading column at every window size) and the image viewer, both entry points.
       if (argv.includes("--notes-review")) {
         const BIG = { width: 2560, height: 1440 }; const NARROW = { width: 1180, height: 800 };
         const HOME_ALT = /^Follow-up Home: every workspace/; const PANEL_ALT = /^The Follow-up panel on a workspace/;
@@ -2041,7 +2041,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
         }
         await shoot("viewer-1440-panel", DESKTOP, "dark", viewer(whatsNewAt(DESKTOP), PANEL_ALT), { seen: WHATS_NEW_FROM });
         await shoot("viewer-release-notes-1440", DESKTOP, "dark", viewer(releaseNotesAt(DESKTOP), HOME_ALT), { seen: WHATS_NEW_TO });
-        // Below 1280 the host's own 520px dialog, with the viewer inside its focus scope.
+        // A narrower window: the same dialog, with the viewer inside its focus scope.
         if (!viewerOnly) await shoot("notes-1180", NARROW, "dark", whatsNewAt(NARROW), { seen: WHATS_NEW_FROM });
         await shoot("viewer-1180", NARROW, "dark", viewer(whatsNewAt(NARROW), HOME_ALT), { seen: WHATS_NEW_FROM });
         await shoot("esc-order-1440", DESKTOP, "dark", escOrder(whatsNewAt(DESKTOP)), { seen: WHATS_NEW_FROM });

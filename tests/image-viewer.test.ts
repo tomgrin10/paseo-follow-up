@@ -63,3 +63,14 @@ test("the notes' titles name the plugin from its manifest", async () => {
   const server = await readFile(join(import.meta.dirname, "..", "server", "release-notes.ts"), "utf8");
   assert.match(server, /paseo-plugin\.json/);
 });
+
+// notes-read-like-one-feed: 2026-11-26, the 840px desktop dialog capped only its text at 600px, so every line ended
+// ~240px before the version rules, the credits' rule and the header's icons. One column: the dialog is the column's
+// width plus its inset, and nothing inside caps itself.
+test("the notes dialog is as wide as its reading column, so everything in it shares one right edge", async () => {
+  const notes = await source("release-notes.tsx");
+  assert.doesNotMatch(notes, /MeasureContext|useMeasure|maxWidth: m\b|WIDE_CARD|TEXT_MEASURE/, "no text-only cap inside the dialog");
+  assert.match(notes, /width=\{Math\.min\(NOTES_COLUMN \+ 2 \* DIALOG_INSET, win\.width - 48\)\}/, "the dialog fits the column");
+  assert.match(notes, /paddingLeft: DIALOG_INSET, paddingRight: DIALOG_INSET - 8,/, "the header's icons (8px padding) end at the column's edge");
+  assert.match(notes, /contentContainerStyle=\{\{ paddingHorizontal: DIALOG_INSET,/, "the body uses the same inset");
+});
