@@ -1,6 +1,8 @@
 import { hookSource } from "./hook-source";
 import { pickNudges, type DueEntry, type NudgeReceipt } from "../shared/task-due";
 import { providerCaps } from "../shared/provider-support";
+import { messageSender } from "../shared/message-sender";
+import { startsTurn } from "./turn-timeline";
 
 /**
  * Turn-end checks for a provider without Follow-up's hook (an-agent-on-any-provider-gets-follow-up). Claude Code and
@@ -10,7 +12,10 @@ import { providerCaps } from "../shared/provider-support";
  *
  * The Stop hook blocks the stop; an event can't, so the checks go as one queued message (invariant 36) after the turn,
  * and only when something is due: a quiet turn sends nothing. It never loops: the turn that message starts is never
- * checked (one reply, like the hook's stop_hook_active). It never wakes a dormant agent: it runs only on a turn that
+ * checked (one reply, like the hook's stop_hook_active), told from the turn's own prompt, so a worker restart between
+ * the message and its reply can't start a loop. The needs_you nudge, which a hook gives in-turn for free but costs a
+ * whole turn here, follows only a turn the developer started (their message, or their answer from a card); never a
+ * repair, a recovery, another agent's message, or a turn whose prompt the read didn't reach. It never wakes a dormant agent: it runs only on a turn that
  * just ended, and the queue sends only to that loaded agent. Due tasks share the hook's receipt (at most 3 a turn end,
  * each at most twice and once a day).
  */
@@ -58,12 +63,25 @@ function changedSomething(items: readonly unknown[] | null): boolean {
   });
 }
 
+/** Who started the turn, from its prompt (the first item that starts a turn in the read); null when it isn't there. */
+export function turnPrompt(items: readonly unknown[] | null): "developer" | "turn-end" | "other" | null {
+  const first = (items ?? []).find(startsTurn) as { type?: string; text?: unknown } | undefined;
+  if (!first) return null;
+  if (first.type !== "user_message" || typeof first.text !== "string") return "other";
+  if (first.text.startsWith(TURN_END_PREFIX)) return "turn-end";
+  const sender = messageSender(first.text);
+  return sender.kind === "developer" || sender.kind === "follow-up" && sender.what === "answer" ? "developer" : "other";
+}
+
 /** What the turn end says, or null for nothing (the common case), and the due-task receipt to keep. Pure. */
 export function turnEndCheck(i: TurnEndInput): { text: string | null; receipt: NudgeReceipt | null } {
   if (providerCaps(i.provider).turnEnd !== "event" || !i.entry || i.entry.role === "recovery") return { text: null, receipt: null };
+  const prompt = turnPrompt(i.items);
+  // The reply to our own message is never checked (the loop guard that survives a restart).
+  if (prompt === "turn-end") return { text: null, receipt: null };
   const since = i.startedAt ?? i.now;
   const sync = changedSomething(i.items) && !(i.syncedAt !== null && i.syncedAt >= since);
-  const nudge = i.entry.role === "main" && i.nudge && !(i.needsYouAt !== null && i.needsYouAt >= since);
+  const nudge = i.entry.role === "main" && i.nudge && prompt === "developer" && !(i.needsYouAt !== null && i.needsYouAt >= since);
   const picked = i.entry.due?.length ? pickNudges(i.entry.due, i.receipt, i.now) : { lines: [], receipt: i.receipt };
   if (!sync && !nudge && !picked.lines.length) return { text: null, receipt: null };
   const parts = [

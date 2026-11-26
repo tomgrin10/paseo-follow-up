@@ -76,7 +76,10 @@ provider id of its own.
   `needs_you` nudge, due tasks) run from Paseo's turn-end event instead (`server/turn-end.ts`), with the hook's own
   words (`stopReason`, `nudgeReason`, `dueHeader`, `turnEndPrefix`, read from the hook's source). An event can't block a
   stop, so they go as one queued message after the turn, only when something is due, never for the turn that message
-  started, and only to the agent whose turn just ended (it is loaded). Due tasks share the hook's receipt.
+  started (told from that turn's own prompt, so a worker restart in between can't start a loop), and only to the agent
+  whose turn just ended (it is loaded). The `needs_you` nudge, free in-turn on a hook but a whole turn here, follows
+  only a turn the developer started (their message or a card answer), never a repair, a recovery or another agent's
+  message. Due tasks share the hook's receipt.
 - **Wait** (`wait`): every provider with a shell tool. Outside Claude Code the prepared command detaches itself
   (`nohup … &`, its output in the job's `output.log`), so any shell tool can start it; see [wait.md](wait.md).
 - **Not there**: the per-turn context (the Overseer's digest, the demoted and detached notices, which the Overseer and

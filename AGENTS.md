@@ -1413,7 +1413,9 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    it never received. ACP is decided from Paseo's config (`isAcp`, the `extends` chain), never from a list of ids alone.
    The Stop hook's checks (sync, `needs_you`, due tasks) run from Paseo's turn-end event for every provider without the
    hook (`server/turn-end.ts`): one queued message, only when something is due, never for the turn that message
-   started, only to the agent whose turn just ended. Wait attaches to every provider; outside Claude Code its command
+   started (told from its prompt, so it holds across a worker restart), only to the agent whose turn just ended; the
+   `needs_you` nudge only after a turn the developer started (2026-11-26, check-install: a repair's turn was nudged,
+   and a reload between a nudge and its reply let the next nudge through). Wait attaches to every provider; outside Claude Code its command
    detaches itself. A job that reads other people's words runs wherever the provider promises it no tools (Claude Code,
    Codex and Pi through their CLIs, OpenCode through a session with every permission denied) and nowhere else
    (invariant 81); `providerNotes` says in one block only what a provider the developer has can't do, with what to do,

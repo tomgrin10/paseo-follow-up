@@ -78,6 +78,7 @@ const base = (over: Partial<TurnEndInput> = {}): TurnEndInput => ({
   provider: "pi", entry: { role: "main", workspaceId: "w1" }, items: [], startedAt: 1000, syncedAt: null, needsYouAt: null, nudge: false, receipt: {}, now: 5000, ...over,
 });
 const edit = { type: "tool_call", name: "edit", callId: "c1" };
+const asked = { type: "user_message", text: "Fix the export, please." };
 
 test("turn-end checks without a hook: the hook's checks, only when something is due", () => {
   assert.equal(turnEndCheck(base()).text, null, "a quiet turn sends nothing");
@@ -89,9 +90,19 @@ test("turn-end checks without a hook: the hook's checks, only when something is 
   assert.equal(turnEndCheck(base({ entry: { role: "recovery", workspaceId: "w1" }, items: [edit] })).text, null);
   assert.equal(turnEndCheck(base({ entry: null, items: [edit] })).text, null);
   // needs_you: main agents only, while the inbox's nudge is on, and not when it was called this turn.
-  assert.match(turnEndCheck(base({ nudge: true })).text!, /call follow_needs_you once/);
-  assert.equal(turnEndCheck(base({ nudge: true, needsYouAt: 3000 })).text, null);
-  assert.equal(turnEndCheck(base({ nudge: true, entry: { role: "contributor", workspaceId: "w1" } })).text, null);
+  assert.match(turnEndCheck(base({ nudge: true, items: [asked] })).text!, /call follow_needs_you once/);
+  assert.match(turnEndCheck(base({ nudge: true, items: [{ type: "user_message", text: "Follow-up answer Q1 (B): ship it" }] })).text!, /follow_needs_you/, "the developer's answer from a card");
+  assert.equal(turnEndCheck(base({ nudge: true, items: [asked], needsYouAt: 3000 })).text, null);
+  assert.equal(turnEndCheck(base({ nudge: true, items: [asked], entry: { role: "contributor", workspaceId: "w1" } })).text, null);
+  // A hook nudges in-turn for free; here it costs a whole turn, so only a turn the developer started is nudged:
+  // never a repair Follow-up sent, nor a turn whose prompt the read didn't reach (2026-11-26, check-install).
+  const repair = { type: "user_message", text: "Follow-up batch b-1\n\n1. Resolve merge conflicts on example/app#1" };
+  assert.equal(turnEndCheck(base({ nudge: true, items: [repair] })).text, null, "a repair's turn gets no needs_you nudge");
+  assert.equal(turnEndCheck(base({ nudge: true })).text, null, "no prompt in the read: no nudge");
+  assert.ok(turnEndCheck(base({ items: [repair, edit] })).text, "a repair's turn that changed something still syncs (the hook's check)");
+  // The reply to a turn-end message is never checked, whatever the worker remembers (a restart in between).
+  const reply = { type: "user_message", text: `${TURN_END_PREFIX} your turn ended with this still open.` };
+  assert.equal(turnEndCheck(base({ nudge: true, items: [reply, edit] })).text, null);
   // Due tasks share the hook's receipt: at most twice for the same fact.
   const due = [{ id: "t1", key: "k", revision: 1, dueAt: "1970-01-01T00:00:00.000Z", line: "Check the export in production" }];
   const first = turnEndCheck(base({ entry: { role: "main", workspaceId: "w1", due } }));
