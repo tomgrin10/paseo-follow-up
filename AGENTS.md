@@ -1562,7 +1562,8 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    the caller) and always ends: `context_reply`, else the first turn end after delivery captures the agent's last
    message after the question from the turn read the worker already makes (`capturedAnswer`; `agent.turn_ended`, any
    provider, no hook and no read of its own), marked "from its chat"; without that read it is "answered in its chat"
-   with Open chat; a send that fails for good fails it; Withdraw settles it. Kept 30 days, at most 200 per workspace.
+   with Open chat; a turn that only compacted (`compactionOnly`, invariant 130) settles nothing; a send that fails for
+   good fails it; Withdraw settles it. Kept 30 days, at most 200 per workspace.
    2026-11-26, the developer (Q172): "I ask an agent something, and the answer gets lost in the chat"; More context
    answered only on a card, for 24 h, and an answer without `context_reply` said only "read its chat". Guarded by
    `tests/your-questions.test.ts`, `tests/context-requests.test.ts` and `tests/context-recipient.test.ts`.

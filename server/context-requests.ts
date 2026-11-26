@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { WriteBehind } from "./write-behind";
+import { compactionOnly } from "./inbox-classifier";
 import { CONTEXT_ANSWER_MAX, CONTEXT_VERSION, contextFileSchema, plainAnswer, pruneContext, sameCard, type ContextFile, type ContextRequest, type ContextTarget, type ContextVia } from "../shared/catch-up";
 import { capturedAnswer, migrateContext, newQuestionId } from "../shared/your-questions";
 
@@ -147,6 +148,8 @@ export class ContextRequests {
    * and nothing in memory is lost on a restart. No reads of its own.
    */
   async turnEnded(agentId: string, items: readonly unknown[] | null = null): Promise<void> {
+    // a-compaction-is-not-a-finish: a turn that only compacted answered nothing; the question waits for the next turn.
+    if (items && compactionOnly(items)) return;
     const owed = (await this.list()).filter(r => r.state === "asking" && r.askedOf === agentId && r.deliveredAt && Date.parse(r.deliveredAt) <= this.now());
     for (const r of owed) {
       const answer = capturedAnswer(items, r.id);

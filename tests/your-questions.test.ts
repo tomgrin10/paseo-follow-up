@@ -45,6 +45,16 @@ test("turn-end capture: the last assistant message after the question is the ans
   assert.ok(unreadAnswer(r));
 });
 
+test("a turn that only compacted answers nothing: the question keeps asking until a real turn ends (invariant 130)", async t => {
+  const { store } = await fixture(t);
+  const { request } = await store.ask(free, "developer", "a1");
+  await store.delivered(request.id, "2026-11-26T10:00:00.000Z");
+  await store.turnEnded("a1", [{ type: "user_message", text: "/compact" }, { type: "compaction", status: "completed", trigger: "manual" }]);
+  assert.equal((await store.get(request.id))!.state, "asking");
+  await store.turnEnded("a1", turn(request.id, { type: "assistant_message", text: "Because the gateway retries." }));
+  assert.equal((await store.get(request.id))!.answer, "Because the gateway retries.");
+});
+
 test("no items (the turn couldn't be read), or nothing said after the question: answered in its chat, no answer", async t => {
   const { store } = await fixture(t);
   const a = (await store.ask(free, "developer", "a1")).request;
