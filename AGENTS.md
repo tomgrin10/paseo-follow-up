@@ -8,8 +8,8 @@ Update the docs in the same PR as the code.
 Follow-up is a trusted Paseo plugin (unsandboxed, runs on the daemon host). It follows every workspace's PRs until
 the work is done, sends repair batches to each workspace's main agent, shows what needs the developer (Home, the
 panel, the pill, the Needs-you inbox), and gives agents tools for everything the developer can click.
-[README.md](README.md) is the short user-facing front page, [docs/guide.md](docs/guide.md) the full user guide, and [OVERVIEW.md](OVERVIEW.md) is the data-access statement shown in
-Paseo's plugin listing. [PRODUCT.md](PRODUCT.md) and [DESIGN.md](DESIGN.md) cover voice and the design system.
+[README.md](README.md) is the short user-facing front page, [docs/guide.md](docs/guide.md) the full user guide, [OVERVIEW.md](OVERVIEW.md) the
+short page Paseo's plugin listing shows (invariant 122), and [docs/data-access.md](docs/data-access.md) the full data-access statement. [PRODUCT.md](PRODUCT.md) and [DESIGN.md](DESIGN.md) cover voice and the design system.
 
 ## Hard rules
 
@@ -1498,6 +1498,17 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    weight: the harness browser's fonts come from `scripts/harness-fonts.conf` (set by `harness()`), and screenshots
    refuse to render when 600 draws like 400 (`fontWeightProblem`, `scripts/font-weights.mjs`). Guarded by
    `tests/changelog.test.ts` and `tests/harness-fonts.test.ts`.
+
+122. **The plugin page is short and current** (`plugin-page-is-current`). Paseo's plugin listing shows
+   `paseo-plugin.json`'s description and `OVERVIEW.md`. The description is one line, the same in `package.json` and
+   `paseo-plugin.json`, and opens with README's "Every agent, one inbox."; `OVERVIEW.md` is a page read in under a
+   minute (at most 450 words): what Follow-up is, its main features, install and requirements, with no version-tagged
+   labels ("(1.4 beta)"), no "beta" tags, no file names, state files or internals. The full data-access statement is
+   `docs/data-access.md`. 2026-11-26, the developer, on the listing: "Seems too long and not the newest". At 2.4.1
+   OVERVIEW still said "(1.4 beta)", led with repair batches, and had nothing on Dispatch, Compass, PR statistics or
+   other providers, and the two descriptions differed from each other and from README. Root cause: OVERVIEW doubled as
+   the data-access statement, so every feature added its data paragraph and nobody owned the pitch, and no release
+   step reread it. Guarded by `tests/plugin-page.test.ts` and docs/releasing.md's stable checklist.
 
 ## Bugs
 
