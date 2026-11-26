@@ -43,7 +43,7 @@ or waits for a permission, it moves to the top, under **Needs you**, and stays t
 You act on it right there, without opening the chat.
 
 Each running workspace's row, and the top of its panel, says what each agent is working on and what it's doing now:
-"Capping the retry gap 2/4 · working 6m". Agents say what they're working on, with the steps before and after it, when
+"Capping the retry gap 2 of 4 · working 6m". Agents say what they're working on, with the steps before and after it, when
 they sync with Follow-up; until one does, the line shows only what it's doing (working, waiting on your OK, waiting on
 CI, idle). It never shows tool calls or files, and it costs no AI.
 

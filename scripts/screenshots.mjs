@@ -4299,7 +4299,7 @@ async function nowLineShots({ shoot }) {
     { name: "steps", spec: NOW_LINE_STATES[0], line: "Capping the retry gap" },
     { name: "plain", spec: NOW_LINE_STATES[1], line: "Releasing the beta" },
     { name: "follow-up", spec: WORKSPACES.find(w => w.key === "invoices"), line: /^(Fixing CI on|Repairing|Answering review on|Resolving conflicts on|Restacking) #/ },
-    { name: "nothing", spec: WORKSPACES.find(w => w.key === "audit"), line: /^Working \S+$/ },
+    { name: "nothing", spec: WORKSPACES.find(w => w.key === "audit"), line: /^Main agent · working \S+$/ },
   ];
   const noSideways = name => async page => { if (await page.evaluate(() => document.documentElement.scrollWidth) > PHONE.width) throw new Error(`${name} scrolls sideways`); };
   const visible = (page, line) => page.getByText(line).filter({ visible: true }).first();

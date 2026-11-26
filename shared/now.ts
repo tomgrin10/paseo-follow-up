@@ -155,9 +155,8 @@ export function stateOf(w: NowWorkspace, agent: AgentFacts, now: number): { stat
   if (asking) return { state: { kind: "asking", text: `Asking you: "${asking.title}"`, since: null }, waitingOn: null, needs: `Answer ${asking.id}` };
   if (agent.compacting) return { state: { kind: "compacting", text: "Compacting its context", since: null }, waitingOn: null, needs: null };
   if (agent.status === "running") {
-    const handed = !!handedWork(w, agent);
     const took = since(agent.turnStartedAt, now);
-    return { state: { kind: "working", text: [took ? `Working ${took}` : "Working", handed ? "from Follow-up" : null].filter(Boolean).join(" · "), since: agent.turnStartedAt ?? null }, waitingOn: null, needs: null };
+    return { state: { kind: "working", text: took ? `Working ${took}` : "Working", since: agent.turnStartedAt ?? null }, waitingOn: null, needs: null };
   }
   if (agent.status === "closed") return { state: { kind: "closed", text: "Closed", since: null }, waitingOn: null, needs: null };
   if ((agent.backgroundWork ?? 0) > 0) return { state: { kind: "background", text: agent.backgroundWork === 1 ? "Its background job is running" : `${agent.backgroundWork} background jobs are running`, since: null }, waitingOn: null, needs: null };
@@ -177,9 +176,9 @@ export function nowOf(w: NowWorkspace, agent: AgentFacts, now: number): Now {
   return { agentId: agent.agentId, role: agent.role, work: workOf(w, agent), state: s.state, waitingOn: s.waitingOn, needs: s.needs };
 }
 
-/** "2 of 4", or "2/4" where space is short (Home rows). Null without the agent's own list. */
-export function positionText(work: NowWork | null, short = false): string | null {
-  return work?.position ? short ? `${work.position.at}/${work.position.of}` : `${work.position.at} of ${work.position.of}` : null;
+/** "2 of 4", the same words on every surface. Null without the agent's own list. */
+export function positionText(work: NowWork | null): string | null {
+  return work?.position ? `${work.position.at} of ${work.position.of}` : null;
 }
 
 /**
@@ -187,7 +186,7 @@ export function positionText(work: NowWork | null, short = false): string | null
  * then the state. Nothing known: the state alone. Never a label or placeholder for the work.
  */
 export function nowText(n: Now, short = false): string {
-  const pos = positionText(n.work, short);
+  const pos = positionText(n.work);
   const head = n.work ? [n.work.text, pos].filter(Boolean).join(" ") : null;
   const state = n.state.text ? short ? n.state.text.charAt(0).toLowerCase() + n.state.text.slice(1) : n.state.text : null;
   return [head, state].filter(Boolean).join(" · ");

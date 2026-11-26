@@ -279,7 +279,7 @@ Follow-up sent is the line with nothing added. Not sources: the to-do list's in-
 not every provider keeps one), a model call, and `sync_workspace`'s `summary` (a receipt).
 
 **The state**: a pending permission ("Wants your OK · …"), an open stop question ("Asking you: …"), compacting,
-working (since the turn started; "from Follow-up" on a turn it opened), a background job, waiting on CI for its PR,
+working (since the turn started), a background job, waiting on CI for its PR,
 idle (since its last activity), or closed. Unknown stays unknown: no made-up "Idle".
 
 **Where it comes from.** The stated work is stored per agent on the workspace record (`milestones`), so the lists

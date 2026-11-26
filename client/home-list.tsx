@@ -348,7 +348,7 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onOp
   // match (about 44 characters, the match near the start), so the highlight is never past the "…". Phones and the
   // sidebar view wrap to two lines and keep more.
   const shownLine = hit?.lineRanges ? (() => { const e = excerpt(s.line, hit.lineRanges, touch ? 140 : dense ? 90 : 44); return marks(e.text, e.ranges, c); })() : s.line;
-  // What the agent is working on (shared/now.ts) leads, in the title's colour; its place ("2/4") and the state stay muted.
+  // What the agent is working on (shared/now.ts) leads, in the title's colour; its place ("2 of 4") and the state stay muted.
   const lead = s.lead ? <><Text style={{ color: muted ? c.foregroundMuted : c.foreground }}>{s.lead.text}</Text>{s.lead.position ? `\u00a0${s.lead.position}` : ""}{s.line ? " · " : ""}</> : null;
   const line: ReactNode = s.word && s.group !== "needs" ? (s.line ? <>{s.word} · {lead}{shownLine}</> : s.word) : <>{lead}{shownLine}</>;
   const via = hit?.via ? (() => { const e = excerpt(hit.via.text, hit.via.ranges, touch ? 90 : dense ? 90 : 44); return <>{FIELD_LABEL[hit.via.field]} · {marks(e.text, e.ranges, c)}</>; })() : null;
@@ -362,7 +362,7 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onOp
   // A Later row says when it comes back on screen; the label also keeps how long it has waited.
   const wake = s.group === "later" && s.wakeAt ? wakeLabel({ until: s.wakeAt, at: s.at ?? new Date().toISOString() }, Date.now()) : "";
   const waited = s.group === "later" && s.at ? age(s.at, Date.now()) : "";
-  const label = [s.title + (s.agent ? ` › ${s.agent}` : ""), s.word, s.lead && [s.lead.text, s.lead.position?.replace("/", " of ")].filter(Boolean).join(" "), s.line, hit?.via && `${FIELD_LABEL[hit.via.field]}: ${hit.via.text}`,
+  const label = [s.title + (s.agent ? ` › ${s.agent}` : ""), s.word, s.lead && [s.lead.text, s.lead.position].filter(Boolean).join(" "), s.line, hit?.via && `${FIELD_LABEL[hit.via.field]}: ${hit.via.text}`,
     // Every chip, even one a narrow row hides (row-chips-never-cover-the-time).
     ...s.badges.map(b => b.text), s.pr && prChipSpoken(s.pr), wake && `Later until ${wake}`, waited && (waited === "now" ? "just now" : `waiting ${waited}`)].filter(Boolean).join(". ");
   return <Pressable ref={trigger.ref} nativeID={rowDomId(s.key)} accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={label} accessibilityHint={quickActionsHint(touch)}

@@ -83,7 +83,7 @@ export type Workstream = {
   word: string | null;
   /**
    * What the row's agent is working on (shared/now.ts), drawn before the line in the title's colour, with its place
-   * when the agent listed its steps ("2/4"). Absent when nothing is known: the line alone, never a placeholder.
+   * when the agent listed its steps ("2 of 4"). Absent when nothing is known: the line alone, never a placeholder.
    */
   lead?: { text: string; position: string | null } | null;
   badges: Badge[];
@@ -234,7 +234,7 @@ function agentLine(w: Workspace | undefined, agentId: string, row: InboxRow | un
   const n = nowOf(ws, agentFacts(ws, agentId, role, row), now);
   const work = n.work && (!stated || n.work.source === "stated") ? n.work : null;
   const state = stated || !n.state.text ? fallback : n.state.text;
-  return { lead: work ? { text: work.text, position: positionText(work, true) } : null, line: work && state ? lowerFirst(state) : state };
+  return { lead: work ? { text: work.text, position: positionText(work) } : null, line: work && state ? lowerFirst(state) : state };
 }
 
 /** The Home group of a tracked workspace without an agent row: the order buildHome uses below. */

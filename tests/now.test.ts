@@ -30,17 +30,17 @@ test("the stated work carries its place only from the agent's own list", () => {
   assert.equal(n.work?.text, "Capping the retry gap");
   assert.deepEqual(n.work?.position, { at: 2, of: 4 });
   assert.equal(nowText(n), "Capping the retry gap 2 of 4 · Working 6m");
-  assert.equal(nowText(n, true), "Capping the retry gap 2/4 · working 6m");
+  assert.equal(nowText(n, true), "Capping the retry gap 2 of 4 · working 6m");
   const alone = nowOf(workspace({ milestones: { "main-agent": { ...stated["main-agent"], done: [], next: [] } } }), main(), clock);
   assert.equal(alone.work?.position, null, "no list, no count");
   assert.equal(nowText(alone), "Capping the retry gap · Working 6m");
 });
 
-test("work Follow-up sent is the line, with nothing added; its turn says so", () => {
+test("work Follow-up sent is the line, with nothing added; its state adds nothing", () => {
   const n = nowOf(workspace({ milestones: stated, batches: [batch()] }), main(), clock);
   assert.equal(n.work?.text, "Fixing CI on #1");
   assert.equal(n.work?.position, null);
-  assert.equal(n.state.text, "Working 6m · from Follow-up");
+  assert.equal(n.state.text, "Working 6m", "nothing added to the state either");
   // Settled, or the agent idle: the batch no longer speaks for the turn.
   assert.equal(workOf(workspace({ milestones: stated, batches: [batch({ settledAt: at(0) })] }), main())?.source, "stated");
   assert.equal(workOf(workspace({ milestones: stated, batches: [batch()] }), main({ status: "idle" }))?.source, "stated");
