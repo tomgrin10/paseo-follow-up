@@ -58,23 +58,33 @@ hook leaves exactly those out, so the agent reads each once (`inPrompt`).
 
 ## Other providers
 
-Paseo runs agents on more than Claude Code and Codex (OpenCode, Pi, Copilot, Cursor, Kimi, Kiro, any ACP agent), and
-Follow-up's hook lives only in those two. What an agent on any other provider gets
-(`shared/provider-support.ts`, an-agent-on-any-provider-gets-follow-up):
+Paseo runs agents on more than Claude Code and Codex (OpenCode, Pi, Oh My Pi, Copilot, Cursor, Kimi, Kiro, any ACP
+agent), and Follow-up's hook lives only in those two. Every feature still works on every provider, from one capability
+model, `providerCaps` (`shared/provider-support.ts`, an-agent-on-any-provider-gets-follow-up); no feature checks a
+provider id of its own.
 
 - **Tools and `needs_you`**: the same as on Claude or Codex, native through Paseo's agent MCP (or the bridge).
-- **Instructions**: on Paseo 0.17 `withSystemPrompt` puts all of what the hook's SessionStart would add in the system
-  prompt (`hooklessParts`): the tracked workspace's instructions (`workspaceInstructions`, exported from the hook, which
-  the worker imports with `globalThis.followUpHookLibrary` set so its `main()` doesn't run), the role texts and the
-  checks line. `tests/session-prompt.test.ts` checks, for every role, that the prompt equals what the hook alone adds
-  on Claude. Paseo passes it to OpenCode, Pi and plugin providers; ACP agents don't take a plugin's system prompt yet,
-  so they get the tools and their descriptions only, and Follow-up sends them none (no `FOLLOW_UP_SYSTEM_PROMPT`
-  claim). Which providers are ACP comes from Paseo's config (`isAcp`): a built-in ACP id, or any provider whose
-  `extends` chain reaches one, so a generic ACP agent under the developer's own id counts.
-- **Not there**: the Stop checks (sync, `needs_you`, due tasks), the per-turn context, the polling nudge and Wait, all
-  hooks. `providerNotes` says so in Settings → Agents' one block under the helper rows, at most two short lines: what
-  works on those providers, then what needs Claude Code or Codex and the one thing to do (`guardAction`: use, turn on
-  or install, never a pick the developer can't make).
+- **Instructions** (`instructions`): on Paseo 0.17 `withSystemPrompt` puts all of what the hook's SessionStart would
+  add in the system prompt (`hooklessParts`): the tracked workspace's instructions (`workspaceInstructions`, exported
+  from the hook, which the worker imports with `globalThis.followUpHookLibrary` set so its `main()` doesn't run), the
+  role texts and the checks line. `tests/session-prompt.test.ts` checks, for every role, that the prompt equals what the
+  hook alone adds on Claude. Paseo passes it to OpenCode, Pi and plugin providers. ACP agents don't take a plugin's
+  system prompt yet, so the same text is a tool, `follow_session_instructions` (`instructionsTool`), whose description
+  tells the agent to read it first and after compaction; no `FOLLOW_UP_SYSTEM_PROMPT` claim. Which providers are ACP
+  comes from Paseo's config (`isAcp`): a built-in ACP id, or any provider whose `extends` chain reaches one.
+- **Turn-end checks** (`turnEnd: "event"`): the Stop hook's checks (sync after a turn that changed something, the
+  `needs_you` nudge, due tasks) run from Paseo's turn-end event instead (`server/turn-end.ts`), with the hook's own
+  words (`stopReason`, `nudgeReason`, `dueHeader`, `turnEndPrefix`, read from the hook's source). An event can't block a
+  stop, so they go as one queued message after the turn, only when something is due, never for the turn that message
+  started, and only to the agent whose turn just ended (it is loaded). Due tasks share the hook's receipt.
+- **Wait** (`wait`): every provider with a shell tool. Outside Claude Code the prepared command detaches itself
+  (`nohup … &`, its output in the job's `output.log`), so any shell tool can start it; see [wait.md](wait.md).
+- **Not there**: the per-turn context (the Overseer's digest, the demoted and detached notices, which the Overseer and
+  the tools' own results carry instead) and the polling nudge, which only a hook can add mid-turn.
+- **Read-only jobs** (`guard`): see [ai-roles.md](ai-roles.md). `providerNotes` says in Settings → Agents' one block
+  only what a provider the developer has can't do: an ACP agent's instructions come through a tool, and with Summaries
+  on a provider without a guard, its linked items, Compass and Ask don't read (`guardAction`: use, turn on or install
+  one that can, never a pick the developer can't make).
 
 ## Env flags
 

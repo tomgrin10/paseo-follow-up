@@ -149,8 +149,10 @@ what each uses and recommends a model from the providers you have, with **Use re
 | Overseer | One agent you ask about all your workspaces. Starts only when you click Start on Home | A Paseo agent, Claude by default |
 | Recovery | Rebuilds a workspace's tracking when Follow-up lost track of it. Runs only when you ask | The main agent's provider, or one you pick |
 
-Claude and Codex run a job directly. Other providers run it as a short hidden agent. AI priority reads Linear and
-Slack through read-only tools and never posts anything.
+Claude, Codex and Pi run a job directly. Other providers run it as a short hidden agent. A job that reads other
+people's words (AI priority, Compass, Ask, Summaries' linked items) runs only where it can have no tools at all:
+Claude, Codex, Pi, or OpenCode with every tool denied. AI priority reads Linear and Slack through read-only tools and
+never posts anything.
 
 ## Settings
 
@@ -195,7 +197,8 @@ paseo plugin install npm:paseo-follow-up@1.0.1
 Paseo plugins run trusted, unsandboxed code on the daemon's machine. Follow-up reads workspace metadata, agent history
 and GitHub PR status with your existing credentials, and keeps its state in `$PASEO_HOME/plugin-data/follow-up`. It
 gives agents scoped tools and installs reversible hooks for Claude Code and Codex. Agents on any other provider
-Paseo runs get the tools and, on Paseo 0.17, the instructions in their system prompt; see
+Paseo runs get every feature: the tools, the instructions (in their system prompt on Paseo 0.17, or through a tool on
+ACP agents), the turn-end reminders as a message and Wait; see
 [hooks.md](hooks.md#other-providers). [data-access.md](data-access.md) has
 the full data-access statement.
 

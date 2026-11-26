@@ -129,10 +129,11 @@ First, pick where it lives:
   Back follow the shown steps, and a saved step that isn't shown resumes on the next one (`shownStep`).
 - **Providers in the checks:** a provider Paseo is still loading is `pending` ("still checking"), and the step asks
   again (`fresh`) every 3 s for up to a minute; with no provider at all there's one `warn` row, Agents, saying to set
-  one up in Paseo, and no provider row under it. When another provider runs the helpers, a missing Claude Code or
-  Codex that only AI priority uses is `off` (optional: AI priority runs only on those two), and its fix never offers
-  to switch AI priority to a provider it can't run on. The step's lead says Follow-up works with every agent
-  Paseo runs, and that agents on Claude Code or Codex also get turn-end reminders and Wait.
+  one up in Paseo, and no provider row under it. Only providers that are there, still being checked or used by a helper get a row, so a developer with only Pi
+  never sees Claude Code and Codex as missing. When another provider runs the helpers, a missing provider that only AI
+  priority uses is `off` (optional: AI priority runs only where a job can have no tools: Claude Code, Codex, OpenCode
+  or Pi), and its fix never offers to switch AI priority to a provider it can't run on. The step's lead says Follow-up
+  works with every agent Paseo runs.
 - **The tour** ("Where to find things") is its own last step: Home, the workspace panel, Needs you, the Summary and
   Dispatch, with Dispatch's sidebar-row switch and the tip about Paseo's New workspace as one line
   (`NEW_ROW.paseoShort`, Q163; Settings → Dispatch keeps the full `NEW_ROW.paseo`, `new-row-is-optional`).
