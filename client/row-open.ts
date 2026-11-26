@@ -1,3 +1,12 @@
+import { useCallback, useRef } from "react";
+
+/** Rows keep one opener while Home's render callback changes; activation always reads the latest callback. */
+export function useRowOpen(open: ((key: string) => void) | undefined) {
+  const openRef = useRef(open); openRef.current = open;
+  const onOpen = useCallback((key: string) => openRef.current?.(key), []);
+  return open ? onOpen : undefined;
+}
+
 /** Desktop row activation. Native views have no DOM listener; touch keeps its single-tap selection. */
 type RowClick = { pointerType?: string; target?: { closest?(selector: string): unknown } };
 type RowNode = {
