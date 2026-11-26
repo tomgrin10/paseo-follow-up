@@ -232,3 +232,9 @@ test("pagedReplyVerdict: a panel read over its page budget is named; under it pa
   assert.equal(bad.over.length, 1);
   assert.match(bad.over[0], /follow\.get big/);
 });
+
+test("the scale check holds workspace_status to the agent tools' own TOOL_BUDGET", async () => {
+  const { PAGED_REPLY_BUDGET_BYTES } = await import("../scripts/scale-budget.mjs");
+  const { TOOL_BUDGET } = await import("../shared/paged");
+  assert.equal(PAGED_REPLY_BUDGET_BYTES["follow.agent-status"], TOOL_BUDGET);
+});

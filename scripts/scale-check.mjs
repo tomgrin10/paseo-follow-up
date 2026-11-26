@@ -383,7 +383,8 @@ try {
       const ws = created[0].workspaceId; const replies = [];
       for (const [method, label, input] of [["follow.get", "big workspace", { workspaceId: ws }], ["follow.activity", "timeline page 1", { workspaceId: ws, tab: "timeline", offset: 0, limit: 25 }],
         ["follow.activity", "timeline page 12", { workspaceId: ws, tab: "timeline", offset: 275, limit: 25 }], ["follow.activity", "questions page 4", { workspaceId: ws, tab: "questions", offset: 75, limit: 25 }],
-        ["follow.activity", "search", { workspaceId: ws, tab: "questions", query: "the", limit: 25 }]]) {
+        ["follow.activity", "search", { workspaceId: ws, tab: "questions", query: "the", limit: 25 }],
+        ["follow.agent-status", "workspace_status summary", { agentId: created[0].agentId, detail: "summary" }], ["follow.agent-status", "workspace_status full", { agentId: created[0].agentId, detail: "full" }]]) {
         const out = await client.invokePluginRpc("follow-up", method, input).catch(e => ({ error: String(e?.message ?? e) }));
         replies.push({ method, label, bytes: JSON.stringify(out ?? null).length, rows: method === "follow.activity" ? (out?.timeline?.length ?? 0) + (out?.questions?.length ?? 0) : out?.workspace?.questions?.length ?? null, total: out?.total ?? null, error: out?.error ?? null });
       }
