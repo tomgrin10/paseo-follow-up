@@ -93,8 +93,9 @@ test("a-focused-field-and-its-send-stay-in-view: every docked pane draws through
   assert.match(catchUp, /dock=\{\(\{ yields, typingInContent \}\) => compact && \(sheet && !typingInContent \|\| !yields\) && /, "an open sheet (More context, Later) stays above the keyboard; typing in the card hides it");
   assert.match(await src("client/more-context.tsx"), /<View \{\.\.\.PRIMARY_FORM\} style=\{\{ gap: 10 \}\}>\s*(?:<ImageField [^>]*>)?<TextInput accessibilityLabel="What do you want to know\?"/, "More context's ask box keeps its Ask buttons in view");
   assert.match(catchUp, /<View \{\.\.\.PRIMARY_FORM\}[^>]*>\s*<TextInput accessibilityLabel="Tell the agent something"/, "the note keeps its Send in view");
-  const setup = await src("client/onboarding.tsx");
-  assert.match(setup, /<DockedPane /);
+  // Setup's popup (setup-is-one-popup): its frame (client/setup-dialog.tsx) docks the moves on both layouts.
+  const setup = await src("client/onboarding.tsx") + await src("client/setup-dialog.tsx");
+  assert.match(setup, /dock=\{\(\{ yields \}\) => !yields && foot\}/, "on a phone the moves step aside while a field has focus");
   assert.doesNotMatch(setup, /useKeyboardUp/, "setup reads the keyboard through DockedPane");
   // The forms: QuestionBody's field with its actions (both layouts), and the brief card's answer and note fields.
   const questions = await src("client/questions.tsx");

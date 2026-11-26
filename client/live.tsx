@@ -14,6 +14,7 @@ import { useHomeModel, type HomeSources } from "./home-data";
 import { onVisible, whileVisible } from "./visibility";
 import { FOLLOW_UP_ICON, NEED_DOT, needDotBox } from "./follow-up-icon";
 import { WhatsNewGate } from "./release-notes";
+import { SetupGate } from "./setup-gate";
 import { ViewSync } from "./view-store";
 import { ToastHost } from "./toasts";
 import { newer, opened } from "./live-copies";
@@ -113,15 +114,15 @@ export function headerIcon(store: LiveStore) {
  * mounted, that view already lists the same agents right below, so the badge hides and the item stays as the
  * way into the full screen.
  */
-export function sidebarItem(sources: HomeSources, screenId: string) {
+export function sidebarItem(sources: HomeSources, screenId: string, links: { openSettings?: (category?: string) => void } = {}) {
   return function FollowSidebarItem({ currentScreen, openScreen, theme, layout }: PluginSidebarItemProps) {
     // The same counts as Home's status strip and the brief headline.
     const count = homeCounts(useHomeModel(sources)).needs;
     const inSidebarView = useSidebarViewActive();
     const c = theme.colors;
     const shown = count > 0 && !inSidebarView;
-    // What's new mounts here too (the sidebar is always there), so it shows even if you live in agent chats.
-    return <><ViewSync /><WhatsNewGate surface="sidebar" theme={theme} compact={layout.compact} /><ToastHost theme={theme} compact={layout.compact} /><SidebarRow icon={FOLLOW_UP_ICON} active={currentScreen?.screenId === screenId} onPress={() => openScreen({ screenId, params: { section: "needs" } })}
+    // What's new and setup's popup mount here too (the sidebar is always there), so they show even if you live in agent chats.
+    return <><ViewSync /><WhatsNewGate surface="sidebar" theme={theme} compact={layout.compact} /><SetupGate surface="sidebar" theme={theme} compact={layout.compact} deps={{ openSettings: links.openSettings, openHome: () => openScreen({ screenId }) }} /><ToastHost theme={theme} compact={layout.compact} /><SidebarRow icon={FOLLOW_UP_ICON} active={currentScreen?.screenId === screenId} onPress={() => openScreen({ screenId, params: { section: "needs" } })}
       trailing={shown ? <View accessibilityLabel={`${count} need${count === 1 ? "s" : ""} you`} style={{ minWidth: 18, height: 18, paddingHorizontal: 5, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: c.statusWarning }}>
         <Text style={{ color: c.surface0, fontSize: 11, lineHeight: 14, fontWeight: "700", fontVariant: ["tabular-nums"] }}>{count}</Text>
       </View> : undefined} /></>;

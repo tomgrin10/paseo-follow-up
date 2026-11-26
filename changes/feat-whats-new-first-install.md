@@ -1,0 +1,1 @@
+- A first install opens a welcome popup with what Follow-up does and a Set up button, and setup now runs inside it. Close it any time: Home shows Finish setup, which opens it again where you left off.

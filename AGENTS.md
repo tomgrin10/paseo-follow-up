@@ -92,7 +92,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | Provider hooks, static text in the system prompt, what each provider gets, turn-end checks without a hook | `server/agent-hooks.ts`, `server/agent-hook.mjs`, `server/session-prompt.ts`, `shared/provider-support.ts`, `server/turn-end.ts` | [hooks](docs/hooks.md) |
 | Wait for checks (one message when a PR's checks finish; the polling nudge) | `shared/check-watch.ts`, `server/check-watches.ts`, `server/wait-for-checks.ts` | [wait-for-checks](docs/wait-for-checks.md) |
 | Wait for background jobs | `server/wait.ts`, `server/host-features.ts`, `server/wait-jobs.ts`, `server/wait-runner.sh`, `shared/wait.ts` | [wait](docs/wait.md) |
-| Onboarding, release notes and What's new, display settings, trust bypass | `server/onboarding.ts`, `server/release-notes.ts`, `server/trust-bypass.ts`, `shared/onboarding.ts`, `shared/changelog.ts`, `shared/version.ts`, `shared/display.ts`, `shared/settings-nav.ts` | [settings](docs/settings.md) |
+| Onboarding, release notes and What's new, display settings, trust bypass | `server/onboarding.ts`, `server/release-notes.ts`, `server/trust-bypass.ts`, `shared/onboarding.ts`, `shared/setup-popup.ts`, `shared/changelog.ts`, `shared/version.ts`, `shared/display.ts`, `shared/settings-nav.ts` | [settings](docs/settings.md) |
 | Self-update (check, install, watchdog, rollback), 2.0's move from 1.x | `server/plugin-move.ts`, `server/data-move.ts`, `shared/plugin-move.ts`, `shared/legacy.ts`, `server/updater.ts`, `server/update-registry.ts`, `server/update-provenance.ts`, `server/update-watchdog.mjs`, `server/updates.ts`, `shared/updates.ts`, `shared/update-policy.ts`, `client/updates.tsx` | [updates](docs/updates.md) |
 | Resource governor, never waking agents, worker memory, usage meters | `server/governor.ts`, `server/memory.ts`, `server/agent-load.ts`, `server/usage.ts`, `shared/agent-load.ts`, `shared/resources.ts`, `shared/usage.ts` | [resources](docs/resources.md) |
 | UI | `index.client.tsx`, `client/`, `client/row-badges.tsx`, `shared/row-badges.ts`, `client/host-slot.tsx`, `client/scroll-allowlist.ts`, `client/split.tsx`, `shared/split.ts`, `client/pane-allowlist.ts`, `client/search-key.ts`, `shared/search-key.ts`, `client/search-focus.ts`, `shared/search-focus.ts`, `shared/home-keys.ts` | [client](docs/client.md) |
@@ -1539,6 +1539,21 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    other providers, and the two descriptions differed from each other and from README. Root cause: OVERVIEW doubled as
    the data-access statement, so every feature added its data paragraph and nobody owned the pitch, and no release
    step reread it. Guarded by `tests/plugin-page.test.ts` and docs/releasing.md's stable checklist.
+123. **Setup is one popup** (`setup-is-one-popup`). A first install opens setup as one popup, a dialog on desktop and a
+   sheet on a phone: a welcome page (the logo, the pitch, the main features, Set up Follow-up, What's new one quiet
+   link away), then the steps, then a done page. It opens on whichever Follow-up surface mounts first (Home, the
+   workspace panel, the sidebar item), once per app session, like What's new (`SetupGate`, `client/setup-gate.tsx`;
+   the rules are `setupPopup`, `finishSetupLine` and `setupOwner` in `shared/setup-popup.ts`). Close (X) puts it away on
+   this device only (`follow-up.setup.closed` in the device's view state): the server hears nothing, setup stays on its
+   step, and Home shows one "Finish setup" line that opens the popup again on that step. Setup ending (finished,
+   skipped, by the developer or an agent) and Set up again clear the Close. The steps keep their ids and moves, so
+   agents' `onboarding_status`, `onboarding_checks` and `set_onboarding` are unchanged; existing installs and upgrades
+   see no popup and keep What's new. The desktop dialog has one height for every page, so moving between steps never
+   resizes it; its copy names no agent provider. 2026-11-26, the developer: a first install should get "a proper,
+   professional welcome popup with the logo" instead of the plain release notes, and setup should live in that popup,
+   not Home's panel. Before, a first install saw setup take Home's place, with nothing on the other surfaces. Guarded
+   by `tests/setup-popup.test.ts` and `scripts/screenshots.mjs --only setup-popup` (welcome, two steps, the tour, done;
+   desktop and 390×844, light and dark).
 
 ## Bugs
 

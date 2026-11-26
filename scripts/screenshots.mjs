@@ -47,7 +47,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as the CHANGELOG's newest stable, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "gallery", "frames", "onboarding"];
+const REVIEW_SHOTS = ["tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "gallery", "frames", "onboarding", "setup-popup"];
 /** Pasted images and their Add image button share one harness setup (an Overseer and the fixture provider taking images). */
 const PASTE_LIKE = only => only.includes("paste-images") || only.includes("attach-images");
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
@@ -3014,13 +3014,16 @@ async function shootOnboarding({ shoot, call }) {
         await call("follow.set-onboarding", { action: "step", step });
         await openHome(page, { keepDialogs: true });
         if (vp.width < 768) await page.setViewportSize(vp);
-        await page.getByRole("progressbar", { name: `Step ${i + 1} of ${steps.length}` }).first().waitFor();
+        // Setup is one popup (setup-is-one-popup): the intro is its welcome page, then the steps count from 1 without it.
+        if (i === 0) await page.getByText("Welcome to Follow-up").first().waitFor();
+        else await page.getByRole("progressbar", { name: `Step ${i} of ${steps.length - 1}` }).first().waitFor();
         // The checks step reads the host once; wait for its answers, never the "Checking…" placeholder.
         if (step === "checks") await page.getByText("Checking…").first().waitFor({ state: "hidden", timeout: 30000 }).catch(() => {});
         await page.waitForTimeout(600);
         const last = i === steps.length - 1;
-        const go = page.getByRole("button", { name: last ? "Finish" : /^Continue( anyway)?$/ }).filter({ visible: true });
-        check(`${name}: ${last ? "Finish" : "Continue"} is there and live`, await go.count() === 1 && await go.isEnabled());
+        const move = i === 0 ? "Set up Follow-up" : last ? "Finish" : /^Continue( anyway)?$/;
+        const go = page.getByRole("button", { name: move }).filter({ visible: true });
+        check(`${name}: ${i === 0 ? "Set up Follow-up" : last ? "Finish" : "Continue"} is there and live`, await go.count() === 1 && await go.isEnabled());
         const text = await page.evaluate(() => document.body.innerText);
         const bad = text.match(BROKEN);
         check(`${name}: nothing reads as a bug`, !bad, bad ? { found: bad[0], near: text.slice(Math.max(0, bad.index - 80), bad.index + 80) } : {});
@@ -3038,7 +3041,8 @@ async function shootOnboarding({ shoot, call }) {
         await call("follow.set-onboarding", { action: "step", step });
         await openHome(page, { keepDialogs: true });
         if (vp.width < 768) await page.setViewportSize(vp);
-        await page.getByRole("progressbar", { name: `Step ${i + 1} of ${steps.length}` }).first().waitFor();
+        if (i === 0) await page.getByText("Welcome to Follow-up").first().waitFor();
+        else await page.getByRole("progressbar", { name: `Step ${i} of ${steps.length - 1}` }).first().waitFor();
         if (step === "checks") await page.getByText("Checking…").first().waitFor({ state: "hidden", timeout: 30000 }).catch(() => {});
         await page.waitForTimeout(600);
         await page.evaluate(() => {
@@ -5777,19 +5781,40 @@ try {
   if (fontProblem) throw new Error(fontProblem);
   const shoot = makeShooter({ browser, port, out, scheme, optimiser, results, crashed });
 
-  // setup: the first step of Getting started, on this fresh install, before anything is seeded.
+  // setup: setup's popup on this fresh install (its welcome page), before anything is seeded.
   if (only.includes("setup")) await shoot("setup", { width: 1440, height: 900 }, "dark", async page => {
     await openHome(page, { keepDialogs: true });
-    // The first step, by its progressbar ("Step 1 of N", N = ONBOARDING_STEPS.length): no hard-coded step count.
-    // Under reduced motion (the context's) StepFade shows the step at once, so there is no fade to wait out.
-    await page.getByRole("progressbar", { name: /^Step 1 of \d+$/ }).first().waitFor();
-    await page.getByText("Follow-up keeps your agents' PRs moving").waitFor();
+    // Under reduced motion (the context's) StepFade shows the page at once, so there is no fade to wait out.
+    await page.getByText("Welcome to Follow-up").first().waitFor();
   });
-  // The gallery's setup: the same first step, desktop light and phone dark.
+  // setup-popup: setup's popup on this fresh install: the welcome page, two steps, the tour (the sidebar's new-row choice) and the done page,
+  // desktop and 390x844, light and dark.
+  if (only.includes("setup-popup")) {
+    const frames = [["welcome", null], ["checks", "checks"], ["defaults", "defaults"], ["tour", "tour"], ["done", "tour"], ["closed", "defaults"]];
+    for (const [frame, step] of frames) for (const [device, vp] of [["desktop", DESKTOP], ["phone", PHONE]]) for (const theme of ["light", "dark"]) {
+      await shoot(`setup-popup-${frame}-${device}-${theme}`, vp, theme, async page => {
+        await call("follow.set-onboarding", { action: "restart" });
+        if (step) await call("follow.set-onboarding", { action: "step", step });
+        await openHome(page, { keepDialogs: true });
+        if (vp.width < 768) await page.setViewportSize(vp);
+        if (frame === "welcome") await page.getByText("Welcome to Follow-up").first().waitFor();
+        else await page.getByRole("progressbar").first().waitFor();
+        if (step === "checks") await page.getByText("Checking…").first().waitFor({ state: "hidden", timeout: 30000 }).catch(() => {});
+        // The tour ends on the sidebar's Dispatch switch (NewRowChoice): scroll it into view.
+        if (frame === "tour") await page.getByText(/^To hide Paseo/).filter({ visible: true }).last().scrollIntoViewIfNeeded();
+        // Close: the popup goes away and Home keeps its one Finish setup line.
+        if (frame === "closed") { await page.getByRole("button", { name: "Close" }).filter({ visible: true }).first().click(); await page.getByRole("button", { name: "Finish setup" }).filter({ visible: true }).first().waitFor(); }
+        if (frame === "done") { await page.getByRole("button", { name: "Finish" }).filter({ visible: true }).click(); await page.getByText("You're set up").first().waitFor(); }
+        await page.waitForTimeout(700);
+      });
+    }
+    await call("follow.set-onboarding", { action: "restart" });
+  }
+  // The gallery's setup: the same welcome page, desktop light and phone dark.
   if (only.includes("gallery")) for (const [surface, vp, theme] of [["desktop-light", DESKTOP, "light"], ["phone-dark", PHONE, "dark"]]) await shoot(`gallery-setup-${surface}`, vp, theme, async page => {
     await openHome(page, { keepDialogs: true });
     if (vp.width < 768) await page.setViewportSize(vp);
-    await page.getByRole("progressbar", { name: /^Step 1 of \d+$/ }).first().waitFor();
+    await page.getByText("Welcome to Follow-up").first().waitFor();
   });
   if (variant) await shootOnboarding({ shoot, call });
   else {

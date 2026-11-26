@@ -41,11 +41,14 @@ import { useHomeModel, useTick, type HomeSources } from "./home-data";
 import { laterLabel, useInbox, UndoBar, useNextRelay } from "./inbox";
 import { Spinner } from "./motion";
 import { Setup, SetupOffer, useOnboarding } from "./onboarding";
+import { FinishSetupLine, SetupGate } from "./setup-gate";
+import { reopenSetup, setupClosed } from "./setup-ui";
+import { finishSetupLine } from "../shared/setup-popup";
 import type { OnboardingView } from "../shared/onboarding";
 import { withAlpha, isLight, mergedColor, type Colors } from "./theme";
 import { UpdateNotice, VersionMark } from "./updates";
 import { WhatsNewGate } from "./release-notes";
-import { ViewSync } from "./view-store";
+import { ViewSync, useViewVersion } from "./view-store";
 import { CatchUp, CatchUpButton, KeysSheet } from "./catch-up";
 import { searchEnter } from "../shared/list-keys";
 import { HOME_KEYS } from "../shared/home-keys";
@@ -102,13 +105,15 @@ export type HomeDeps = {
 const PANE_PRIMARY = "follow-up-pane-primary";
 
 export function FollowHome(props: PluginScreenProps & { deps: HomeDeps }) {
-  // Getting started takes Home's place on a fresh install (or after "Set up Follow-up again") until finished or skipped.
+  // Setup is a popup over Home (setup-is-one-popup): Home keeps only its Finish setup line once Close puts it away.
   const onboarding = useOnboarding();
   // Opened from "Set up again": read the flow's state afresh.
   const { refetch } = onboarding;
-  useEffect(() => { if (props.params?.setup) void refetch(); }, [props.params?.setup, refetch]);
-  if (onboarding.data?.show) return <Setup theme={props.theme} compact={props.layout.compact} view={onboarding.data} deps={{ openSettings: props.deps.openSettings }} />;
-  return <HomeBody {...props} onboarding={onboarding.data} />;
+  useEffect(() => { if (props.params?.setup) { reopenSetup(); void refetch(); } }, [props.params?.setup, refetch]);
+  return <>
+    <HomeBody {...props} onboarding={onboarding.data} />
+    <SetupGate surface="home" theme={props.theme} compact={props.layout.compact} deps={{ openSettings: props.deps.openSettings, openHome: props.deps.openHome }} />
+  </>;
 }
 
 function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: OnboardingView | undefined }) {
@@ -120,6 +125,9 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
   // them on the home feed; the model counts them (model.raised) and they head the group. Catch up's deck and
   // model.needs stay workspaces.
   const model = useHomeModel(deps.sources);
+  // The setup row: an existing install's offer, or Finish setup once Close has put setup's popup away.
+  useViewVersion();
+  const setupRow = !!props.onboarding?.offer || !!finishSetupLine(props.onboarding, setupClosed());
   const queue = useSyncExternalStore(deps.sources.extras.subscribe, deps.sources.extras.queue, deps.sources.extras.queue);
   const raisedKeys = useMemo(() => new Set(queue.needs.map(r => r.key)), [queue.needs]);
   const omnibox = useOmnibox(model, deps.sources);
@@ -289,7 +297,7 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
       : undefined}
     // Phones: the setup offer goes after the Needs-you group when there is one, so the first ask stays high.
     raised={<NobodyRows theme={theme} compact={compact} data={queue} onDismissed={deps.sources.extras.refreshQueue} />}
-    afterNeeds={compact && model.needs > 0 && props.onboarding?.offer ? <SetupOffer theme={theme} compact view={props.onboarding} /> : undefined}
+    afterNeeds={compact && model.needs > 0 && setupRow ? <><SetupOffer theme={theme} compact view={props.onboarding} /><FinishSetupLine theme={theme} compact /></> : undefined}
     emptyAction={<Button theme={theme} compact={compact} kind="primary" icon="Plus" title={NEW_NAME} onPress={() => openNew()} />}
     top={<ListTop theme={theme} dense={compact} title={compact ? undefined : <ListHeader theme={theme} compact={compact} onSettings={deps.openSettings} onKeys={() => setKeysOpen(v => !v)} onStats={openStats} onNew={() => openNew()} newLabel={newLabel} />}>
       {/* zIndex: on web every View is its own stacking context, so the sort menu only paints and hit-tests above the
@@ -310,7 +318,7 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
       {!omnibox.results && dispatchRows}
       {!compact && !omnibox.results && <StatusStrip theme={theme} model={model} filter={filter} onFilter={setFilter} touch={compact} dense={compact} />}
       {!compact && !omnibox.results && <UsageMeters theme={theme} sources={deps.sources} dense={compact} hold={!!model.hold} />}
-      {!compact && !omnibox.results && <SetupOffer theme={theme} compact={compact} view={props.onboarding} />}
+      {!compact && !omnibox.results && <><SetupOffer theme={theme} compact={compact} view={props.onboarding} /><FinishSetupLine theme={theme} compact={compact} /></>}
     </ListTop>}
     // Phones: only the search row stays pinned; the status chips and the setup offer scroll away with the list, so a
     // scrolled list keeps the screen instead of sitting under a 250px block.
@@ -320,7 +328,7 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
       <StatusStrip theme={theme} model={model} filter={filter} onFilter={setFilter} touch dense />
       {model.needs > 0 && deps.openCatchUp && <View style={{ paddingHorizontal: 16 }}><CatchUpButton theme={theme} compact count={deckSize} onPress={deps.openCatchUp} /></View>}
       {updateNotice}
-      {model.needs === 0 && <SetupOffer theme={theme} compact view={props.onboarding} />}
+      {model.needs === 0 && <><SetupOffer theme={theme} compact view={props.onboarding} /><FinishSetupLine theme={theme} compact /></>}
     </View> : updateNotice} />;
 
   if (compact) return <View style={{ flex: 1, backgroundColor: c.surface0 }}>

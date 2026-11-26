@@ -1,5 +1,6 @@
 import { reviewerLabel, type ReviewerConfig, type ReviewerEntry } from "./reviewers";
 import { NEW_OF, NEW_WORK } from "./new-name";
+import { SETUP_CLOSED_KEY } from "./setup-popup";
 
 /**
  * The settings screen's categories, summaries and saved view state. Pure, so grouping, summaries and persistence are
@@ -97,7 +98,8 @@ export const homeGroupOpen = (group: string, store: KeyValue = deviceStorage): b
 };
 export const writeHomeGroupOpen = (group: string, open: boolean, store: KeyValue = deviceStorage) => { if (group !== "needs") store.set(homeFoldKey(group), open ? "1" : "0"); };
 /** Every key that is view state: what a device copies into its document the first time (never home_sort). */
-export const isViewKey = (key: string) => key === CATEGORY_KEY || key.startsWith("follow-up.settings.fold.") || (key.startsWith("follow-up.home.fold.") && key !== homeFoldKey("needs")) || key === "follow-up.whats-new.seen";
+// Setup's Close (shared/setup-popup.ts) is this device's: a put-away popup stays away after a reload.
+export const isViewKey = (key: string) => key === CATEGORY_KEY || key.startsWith("follow-up.settings.fold.") || (key.startsWith("follow-up.home.fold.") && key !== homeFoldKey("needs")) || key === "follow-up.whats-new.seen" || key === SETUP_CLOSED_KEY;
 
 const names = (list: readonly ReviewerEntry[], max = 3) => list.length <= max ? list.map(reviewerLabel).join(", ") : `${list.slice(0, max).map(reviewerLabel).join(", ")} +${list.length - max}`;
 /** Anything saved: then Reviewers starts collapsed, since it's set up. */

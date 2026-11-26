@@ -93,8 +93,8 @@ test("phones: the pill sheet has one primary; Sign off steps back while the work
 test("phones: only Home's search row stays pinned; the status chips and the setup offer scroll with the list", async () => {
   const home = await source("client/home.tsx");
   assert.match(home, /\{!compact && !omnibox\.results && <StatusStrip/);
-  assert.match(home, /\{!compact && !omnibox\.results && <SetupOffer/);
-  assert.match(home, /header=\{omnibox\.results \? undefined : compact \? <View[^>]*>[^]*?<StatusStrip[^]*?<SetupOffer theme=\{theme\} compact/, "the chips (and the version marker beside them) scroll in the list header");
+  assert.match(home, /\{!compact && !omnibox\.results && <><SetupOffer [^\n]*<FinishSetupLine /);
+  assert.match(home, /header=\{omnibox\.results \? undefined : compact \? <View[^>]*>[^]*?<StatusStrip[^]*?<SetupOffer theme=\{theme\} compact view=\{props\.onboarding\} \/><FinishSetupLine theme=\{theme\} compact/, "the chips (and the version marker beside them) scroll in the list header");
 });
 
 test("phones: every state word's hue is lifted to text contrast, not only success (Finished is the accent)", async () => {
@@ -107,7 +107,8 @@ test("phones: Home's search results use the list row, the offer sits after Needs
   assert.match(list, /case "result": return <Row /, "a result is the list's own Row (search-row-is-the-list-row), two-line 15px title and all");
   assert.ok(!/GroupChip/.test(await source("client/home-chrome.tsx")), "no group pill: the state word already says it");
   const home = await source("client/home.tsx");
-  assert.match(home, /afterNeeds=\{compact && model\.needs > 0 && props\.onboarding\?\.offer \? <SetupOffer/, "the slot only when there is an offer: an empty one left a gap above the next group");
+  assert.match(home, /afterNeeds=\{compact && model\.needs > 0 && setupRow \? <><SetupOffer /, "the slot only when there is an offer or Finish setup: an empty one left a gap above the next group");
+  assert.match(home, /const setupRow = !!props\.onboarding\?\.offer \|\| !!finishSetupLine\(props\.onboarding, setupClosed\(\)\);/);
   // Nothing followed yet: the way to start is Dispatch, on phones and desktop alike (a first run lands here).
   assert.match(home, /emptyAction=\{<Button [^>]*kind="primary"[^>]*title=\{NEW_NAME\}[^>]*onPress=\{\(\) => openNew\(\)\}/);
   assert.match(home, /\{!\(compact && nothing\) && <SortMenu/);

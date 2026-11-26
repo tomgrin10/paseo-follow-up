@@ -15,7 +15,10 @@ export const OLD_NAMES = ["new"] as const;
 /** The sidebar row's switch (Display `enable_new_sidebar_row`), in Settings → Dispatch. One copy for every place it shows. */
 export const NEW_ROW = {
   label: `${NEW_NAME} in the sidebar`,
-  hint: (key: string | null, palette = "⌘K") => `A row at the top of the sidebar that opens ${NEW_NAME}. Off: ${NEW_NAME} stays on Home${key ? `, under ${key}` : ""} and in ${palette}.`,
+  // A phone has no keyboard: `palette: null` (compact) names no shortcut and no palette, only Home.
+  hint: (key: string | null, palette: string | null = "⌘K") => palette === null
+    ? `A row at the top of the sidebar that opens ${NEW_NAME}. Off: ${NEW_NAME} stays on Home.`
+    : `A row at the top of the sidebar that opens ${NEW_NAME}. Off: ${NEW_NAME} stays on Home${key ? `, under ${key}` : ""} and in ${palette}.`,
   /**
    * Paseo's own "New workspace" row sits beside it and does less (an empty workspace, no issue or action). Paseo
    * 0.17 keeps which sidebar rows show per device in its own settings and gives plugins no way to change them or to
