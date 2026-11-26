@@ -37,7 +37,7 @@ test("boundDone keeps active items whole and the newest few finished ones, with 
   const b = boundDone(items, x => x.done, { newestFirst: (a, b) => b.n - a.n, hint: "pass offset" });
   assert.equal(b.items.filter(x => !x.done).length, 4);
   assert.deepEqual(b.items.filter(x => x.done).map(x => x.n), [295, 296, 297, 298, 299], "newest five, in the list's own order");
-  assert.deepEqual(b.done, { total: 296, shown: 5, more: 291, hint: "pass offset" });
+  assert.deepEqual(b.done, { total: 296, offset: 0, shown: 5, more: 291, hint: "pass offset" });
 });
 
 test("follow.get and follow.list carry live history in full and only the newest settled items", () => {

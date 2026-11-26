@@ -30,7 +30,7 @@ import { DISMISSED_ASK_NOTE, isTimeZone, sameAsk } from "./shared/inbox";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { activityPage, boundHistory } from "./shared/history";
+import { activityPage, agentView, boundHistory } from "./shared/history";
 import * as rpc from "./shared/contracts";
 import { LogRing } from "./server/report-issue/diagnostics";
 import { followUpReporter } from "./server/report-issue-adapter";
@@ -831,7 +831,8 @@ export default function contribute(server: PluginServerContext) {
     const rows = await inbox.list().then(list => list.rows, () => []);
     return { workspaceId: w.id, agents: workspaceNow(w, rows, Date.now()) };
   });
-  handle(rpc.agentStatusRpc, async ({ agentId }, { paseo }) => { await requireReady(); const workspaceId = await callerWorkspaceId(agentId, paseo); const w = agentWorkspace(await store.snapshot(), agentId, "read", workspaceId, "pr"); return { ...w, dismissed: dismissedNeeds(w, Date.now()), dismissedAsk: await inbox.dismissedAsk(agentId), prWorkflow: prWorkflow.agentWorkflow(workspaceRepo(w), touchedRepos(w)), nextMessageInfo: nextMessageInfo(w, Date.now()), sending: sendingOf(w, Date.now(), { held: !governor.allowsBackground() }) }; });
+  // Finished items are a count plus the newest few, paged by history/offset/limit (shared/history.ts agentView), summary and full alike.
+  handle(rpc.agentStatusRpc, async ({ agentId, history, offset, limit }, { paseo }) => { await requireReady(); const workspaceId = await callerWorkspaceId(agentId, paseo); const w = agentWorkspace(await store.snapshot(), agentId, "read", workspaceId, "pr"); return { ...agentView(w, { kind: history, offset, limit }), dismissed: dismissedNeeds(w, Date.now()), dismissedAsk: await inbox.dismissedAsk(agentId), prWorkflow: prWorkflow.agentWorkflow(workspaceRepo(w), touchedRepos(w)), nextMessageInfo: nextMessageInfo(w, Date.now()), sending: sendingOf(w, Date.now(), { held: !governor.allowsBackground() }) }; });
   handle(rpc.activateRpc, async ({ workspaceId }) => { await requireReady(); return engine.activate(workspaceId); });
   handle(rpc.sendRpc, async ({ workspaceId, batchId }) => { await requireReady(); return engine.sendPending(workspaceId, batchId); });
   handle(rpc.recoverRpc, async ({ workspaceId }) => { await requireReady(); return engine.startRecovery(workspaceId); });

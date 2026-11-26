@@ -2,7 +2,8 @@ import { isOpen, answerStatus } from "./questions";
 import { activity, activityQuestions, type Activity } from "./activity";
 import { activityFields, questionFields } from "./section-search";
 import { filterItems, type ItemHit } from "./search";
-import { PAGE, window } from "./paged";
+import { PAGE, boundDone, newestFirst, window, type DoneInfo, type HistoryKind } from "./paged";
+import { settled } from "./model";
 import type { ListWorkspace } from "./list";
 
 /**
@@ -43,6 +44,30 @@ export function boundHistory<W extends Hist>(w: W, keep = HISTORY_KEPT): W {
     batches: w.batches.filter(b => liveBatch(b) || keptB.has(b)),
     prActions: w.prActions.filter(a => a.state === "sending" || keptA.has(a)),
   };
+}
+
+export type AgentHistory = Record<HistoryKind, DoneInfo>;
+/** One short line, in the tool's own words: how an agent gets what was left out. */
+export const HISTORY_HINT = (kind: HistoryKind) => `workspace_status history=${kind} offset/limit pages these (newest first)`;
+
+type AgentW = Hist & { prs: readonly Parameters<typeof settled>[0][]; obligations: readonly { status: string; id: string; coveredBy?: string; finishedAt?: string }[] };
+
+/**
+ * workspace_status for an agent (summary and full alike): every live item in full, each finished kind as its newest
+ * `PAGE.recentDone` plus a count (`history`), or one page of one kind (`kind` with offset/limit, the others counts only). A busy workspace
+ * (350 merged PRs, 400 settled batches) made the summary ~207k characters, over a tool result's limit.
+ */
+export function agentView<W extends AgentW>(w: W, { kind, offset, limit }: { kind?: HistoryKind; offset?: number; limit?: number } = {}): W & { history: AgentHistory } {
+  const covers = new Set(w.obligations.filter(o => o.status !== "done" && o.status !== "waived").flatMap(o => [o.coveredBy, ...w.questions.filter(q => (q as { taskId?: string | null }).taskId === o.id).map(q => q.id)]).filter((x): x is string => !!x));
+  // A history page carries that kind's page; the other kinds' finished items are counts only on that call.
+  const page = (k: HistoryKind) => k === kind ? { offset: offset ?? 0, limit } : kind ? { recent: 0 } : {};
+  const prs = boundDone(w.prs, settled, { newestFirst: newestFirst(w.prs, p => at(p.snapshot?.mergedAt ?? p.snapshot?.observedAt)), hint: HISTORY_HINT("prs"), ...page("prs") });
+  const tasks = boundDone(w.obligations, o => o.status === "done" || o.status === "waived", { newestFirst: newestFirst(w.obligations, o => at(o.finishedAt)), hint: HISTORY_HINT("tasks"), ...page("tasks") });
+  const questions = boundDone(w.questions, q => !liveQuestion(q, covers), { newestFirst: newestFirst(w.questions, q => Math.max(at(q.askedAt), at(q.answer?.at), at(q.closed?.at))), hint: HISTORY_HINT("questions"), ...page("questions") });
+  const batches = boundDone(w.batches, b => !liveBatch(b), { newestFirst: newestFirst(w.batches, b => at(b.settledAt ?? b.sentAt ?? b.createdAt)), hint: HISTORY_HINT("batches"), ...page("batches") });
+  const prActions = boundDone(w.prActions, a => a.state !== "sending", { newestFirst: newestFirst(w.prActions, a => at(a.createdAt)), hint: HISTORY_HINT("prActions"), ...page("prActions") });
+  return { ...w, prs: prs.items, obligations: tasks.items, questions: questions.items, batches: batches.items, prActions: prActions.items,
+    history: { prs: prs.done, tasks: tasks.done, questions: questions.done, batches: batches.done, prActions: prActions.done } };
 }
 
 export type ActivityTab = "timeline" | "questions";

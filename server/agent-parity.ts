@@ -7,12 +7,15 @@ import { prStatsInputSchema, setPrStatsInputSchema, statsRepoName } from "../sha
 import { reviewerListSchema } from "../shared/reviewers";
 import { taskTriggerInputSchema } from "../shared/task-trigger";
 import { UPDATE_MODES } from "../shared/updates";
+import { unreadAnswer } from "../shared/your-questions";
 import { briefChoiceSchema, reportKindSchema } from "../shared/contracts";
 import { actionChangeSchema, settingsChangeSchema } from "../shared/dispatch";
 import { linearQueueInputSchema } from "../shared/contracts";
 import { briefPlanInputSchema, compassSetSchema, planChangeSchema, queueChangeSchema } from "../shared/morning-brief";
 import { sourcesChangeSchema } from "../shared/brief-sources";
 import { noteActionBase } from "../shared/compass";
+import { boundDone, newestFirst, pageInput } from "../shared/paged";
+import { compareVersions } from "../shared/version";
 
 /**
  * Agent parity, part 2 (1.4.0-beta.21): tools that are a developer RPC one-to-one. A read runs the RPC's handler; a
@@ -37,6 +40,8 @@ export type RpcTool = {
   /** A read RPC whose answer the dry run shows as `before`. */
   before?: { rpc: string; input?: (args: Record<string, any>) => unknown };
   guard?: (args: Record<string, any>, caller: string) => string | null;
+  /** A read's answer as the agent gets it, from the RPC's answer and the tool's arguments (bounding a list that grows). */
+  view?: (out: any, args: Record<string, any>) => unknown;
 };
 
 const id = z.string().trim().min(1).max(200);
@@ -88,7 +93,9 @@ export const RPC_TOOLS: readonly RpcTool[] = [
   { name: "overseer_ask", rpc: "follow.overseer-ask", kind: "planned", input: z.strictObject({ text: z.string().trim().min(1).max(2000).optional(), images: imagePaths, ...confirm }) },
   // Catch up's deck; Your questions and More context (ask, read, act); the asked agent answers with context_reply
   { name: "catch_up_deck", rpc: "follow.catch-up-deck", kind: "read", input: none },
-  { name: "context_requests", rpc: "follow.context-list", kind: "read", input: z.strictObject({ workspaceId: id.optional(), state: z.enum(["all", "open", "tasks"]).optional(), query: z.string().max(200).optional() }) },
+  // Open questions (asking, or an answer not yet read) in full; settled ones (answers up to 4000 characters) as the newest few and a count.
+  { name: "context_requests", rpc: "follow.context-list", kind: "read", input: z.strictObject({ workspaceId: id.optional(), state: z.enum(["all", "open", "tasks"]).optional(), query: z.string().max(200).optional(), ...pageInput }), toRpc: ({ offset: _o, limit: _l, ...a }) => a,
+    view: (out: { requests: { state: string; askedAt: string; settledAt: string | null; readAt?: string | null }[] }, a) => { const b = boundDone(out.requests, r => r.state !== "asking" && !unreadAnswer(r as never), { newestFirst: newestFirst(out.requests, r => Date.parse(r.settledAt ?? r.askedAt) || 0), hint: "context_requests offset/limit pages these (newest first)", offset: a.offset, limit: a.limit }); return { requests: b.items, settled: b.done }; } },
   { name: "ask_context", rpc: "follow.context-ask", kind: "planned", before: { rpc: "follow.context-list", input: a => ({ workspaceId: a.workspaceId ?? undefined }) },
     input: z.strictObject({ workspaceId: id.nullable().optional(), agentId: id.nullable().optional(), cardKey: z.string().min(1).max(400).optional(), card: z.string().trim().min(1).max(300).optional(),
       target: z.enum(["overseer", "agent"]).optional(), ask: z.string().trim().min(1).max(2000).optional(), images: imagePaths, ...confirm }),
@@ -139,7 +146,9 @@ export const RPC_TOOLS: readonly RpcTool[] = [
   { name: "pr_controls", rpc: "follow.pr-control-status", kind: "read", input: z.strictObject({ workspaceId: id, prKey: z.string().trim().regex(/^[\w.-]+\/[\w.-]+#\d+$/) }) },
   { name: "browser_status", rpc: "follow.browser-status", kind: "read", input: none },
   // What's new: the installed version, the one before it and when, and every shipped note (newest first)
-  { name: "release_notes", rpc: "follow.release-notes", kind: "read", input: none },
+// The notes since the version this host updated from in full; older ones (they only grow) as the newest few and a count.
+  { name: "release_notes", rpc: "follow.release-notes", kind: "read", input: z.strictObject({ ...pageInput }), toRpc: () => ({}),
+    view: (out: { previous: string | null; notes: { version: string }[] }, a) => { const b = boundDone(out.notes, n => !out.previous || compareVersions(n.version, out.previous) <= 0, { newestFirst: (x, y) => compareVersions(y.version, x.version), hint: "release_notes offset/limit pages these (newest first)", offset: a.offset, limit: a.limit }); return { ...out, notes: b.items, older: b.done }; } },
   // Settings → General: status (mode, channel, newest versions, phase, pending notes, history), Check now, mode/channel, Install now
   { name: "updates_status", rpc: "follow.updates", kind: "read", input: none },
   { name: "check_updates", rpc: "follow.updates", kind: "write", input: none, toRpc: () => ({ check: "manual" }) },

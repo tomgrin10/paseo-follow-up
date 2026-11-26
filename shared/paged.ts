@@ -13,6 +13,8 @@ export const PAGE = {
   preview: 5,
   /** Finished items an agent tool returns in full before it says "+N more" (paging or a filter gets the rest). */
   recentDone: 5,
+  /** Rows one page of an agent tool's finished items holds when the call names no limit (a page stays under TOOL_BUDGET). */
+  toolPage: 10,
   /** The most rows one paged read returns, whatever it asks for. */
   maxLimit: 100,
 } as const;
@@ -62,14 +64,33 @@ export function window<T>(items: readonly T[], offset = 0, limit: number = PAGE.
 }
 
 /**
- * An agent tool's list: what is still active in full, finished items as a count plus the most recent few
- * (`recent`, newest first as given). `more` says how many finished ones were left out and how to get them.
+ * An agent tool's list (every agent tool answers within `TOOL_BUDGET`): what is still active in full, finished items
+ * as a count plus the most recent few (`recent`, newest first). `offset`/`limit` page the finished ones instead (newest
+ * first, `window`, `PAGE.toolPage` a page by default). `done` says how many there are, which were shown and how to get the rest (`hint`).
  */
-export type Bounded<T> = { items: T[]; done: { total: number; shown: number; more: number; hint: string | null } };
-export function boundDone<T>(items: readonly T[], isDone: (item: T) => boolean, { recent = PAGE.recentDone, newestFirst, hint }: { recent?: number; newestFirst: (a: T, b: T) => number; hint: string }): Bounded<T> {
+export type DoneInfo = { total: number; offset: number; shown: number; more: number; hint: string | null };
+export type Bounded<T> = { items: T[]; done: DoneInfo };
+export function boundDone<T>(items: readonly T[], isDone: (item: T) => boolean, { recent = PAGE.recentDone, newestFirst, hint, offset, limit }: { recent?: number; newestFirst: (a: T, b: T) => number; hint: string; offset?: number; limit?: number }): Bounded<T> {
   const active = items.filter(x => !isDone(x));
   const done = items.filter(isDone).sort(newestFirst);
-  const kept = done.slice(0, Math.max(0, recent));
-  const keep = new Set<T>([...active, ...kept]);
-  return { items: items.filter(x => keep.has(x)), done: { total: done.length, shown: kept.length, more: done.length - kept.length, hint: done.length > kept.length ? hint : null } };
+  const paged = offset !== undefined || limit !== undefined;
+  const page = paged ? window(done, offset ?? 0, limit ?? PAGE.toolPage) : { items: done.slice(0, Math.max(0, recent)), offset: 0, more: Math.max(0, done.length - Math.max(0, recent)) };
+  const keep = new Set<T>([...active, ...page.items]);
+  return { items: items.filter(x => keep.has(x)), done: { total: done.length, offset: page.offset, shown: page.items.length, more: page.more, hint: page.more ? hint : null } };
 }
+
+/** Newest first by `when` (ms), ties and unknown times by position: later in the list is newer. */
+export function newestFirst<T>(items: readonly T[], when: (item: T) => number): (a: T, b: T) => number {
+  const index = new Map(items.map((x, i) => [x, i]));
+  return (a, b) => when(b) - when(a) || index.get(b)! - index.get(a)!;
+}
+
+/** The finished kinds workspace_status pages: merged or closed PRs, done or waived tasks, settled questions, batches and PR actions. */
+export const HISTORY_KINDS = ["prs", "tasks", "questions", "batches", "prActions"] as const;
+export type HistoryKind = typeof HISTORY_KINDS[number];
+
+/**
+ * The most an agent tool's answer may be, in JSON characters, with the busiest workspace's history
+ * (tests/bounded-tools.test.ts): well under a model's tool-result limit, so an agent can always read its own status.
+ */
+export const TOOL_BUDGET = 40_000;

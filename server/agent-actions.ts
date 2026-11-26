@@ -9,7 +9,7 @@ import { mergeBlockers } from "../shared/pr-actions";
 import { recoveryBatch } from "../shared/follow-up";
 import { prLink, type PrLink } from "../shared/presentation";
 import { flagHeadline } from "../shared/headline";
-import { resolveUntil, type InboxRow } from "../shared/inbox";
+import { resolveUntil, sectionOf, type InboxRow } from "../shared/inbox";
 import { needKey, needsYou } from "../shared/attention";
 import type { Pr, State, Workspace } from "../shared/model";
 import { configuredReviewers, reviewerLoginSchema, noReviewers, resolveReviewers, reviewerConfig, reviewerLabel, withoutAuthor, type ReviewerEntry } from "../shared/reviewers";
@@ -29,6 +29,7 @@ import { DISPLAY_KEYS, displayPreferences, HOME_DETAIL_DEFAULT, CATCH_UP_RAIL_DE
 import { DEFAULT_SEARCH_SHORTCUT, NEW_SHORTCUTS, SEARCH_SHORTCUTS } from "../shared/search-key";
 import { DEFAULT_SORT, SORT_MODES } from "../shared/sort";
 import { SCALE } from "../shared/scale";
+import { boundDone, newestFirst, pageInput } from "../shared/paged";
 import { dispatchInputSchema } from "../shared/dispatch";
 import type { DispatchInput, DispatchPlan } from "./dispatch";
 
@@ -177,7 +178,7 @@ const id = z.string().trim().min(1).max(200);
 const confirm = { planId: id.optional(), confirm: z.boolean().optional() };
 const agentIds = z.array(id).min(1).max(SCALE.agents);
 export const TOOL_INPUT = {
-  list_prs: z.strictObject({ workspace: id.optional(), needs_reviewers: z.boolean().optional(), ready_to_merge: z.boolean().optional(), include_closed: z.boolean().optional() }),
+  list_prs: z.strictObject({ workspace: id.optional(), needs_reviewers: z.boolean().optional(), ready_to_merge: z.boolean().optional(), include_closed: z.boolean().optional(), ...pageInput }),
   add_reviewers: z.strictObject({ prs: z.array(prKey).min(1).max(SCALE.perWorkspace).optional(), reviewers: z.array(login).min(1).max(15).optional(), ...confirm }),
   merge: z.strictObject({ pr: prKey.optional(), scope: z.enum(["target", "downstack"]).optional(), ...confirm }),
   enable_merge_when_ready: z.strictObject({ pr: prKey.optional(), scope: z.enum(["target", "downstack"]).optional(), ...confirm }),
@@ -187,7 +188,7 @@ export const TOOL_INPUT = {
   clear_hold: z.strictObject({ workspace: id }),
   retry_batch: z.strictObject({ workspace: id, batchId: id.optional(), task: z.string().max(400).optional() }).refine(a => !!a.batchId !== !!a.task, "retry_batch: give batchId or task, not both"),
   track: z.strictObject({ workspace: id }),
-  inbox_list: z.strictObject({ flagged_only: z.boolean().optional() }),
+  inbox_list: z.strictObject({ flagged_only: z.boolean().optional(), ...pageInput }),
   workspace_about: z.strictObject({ workspaceId: id, refresh: z.boolean().optional() }),
   agent_settings: z.strictObject({}),
   sign_off: z.strictObject({ agentIds: agentIds.optional(), ...confirm }),
@@ -310,11 +311,13 @@ export class AgentActions {
     const input = t.toRpc ? t.toRpc(given) : given;
     // Every RPC an agent tool runs carries the acting agent, so its handler never records the developer.
     const actor = agentActor(caller, await this.d.agentTitle?.(caller).catch(() => null));
-    if (t.kind === "read") return this.d.rpc.call(t.rpc, input, actor);
+    if (t.kind === "read") { const out = await this.d.rpc.call(t.rpc, input, actor); return t.view ? t.view(out, given) : out; }
     if (t.kind === "write") { const out = await this.d.rpc.call(t.rpc, input, actor); await this.note(caller, caller, t.name); return out; }
     // Planned: the RPC's own contract checks the arguments now, so a bad call fails at the dry run.
     const checked = await this.d.rpc.validate(t.rpc, input).catch((error: unknown) => { throw new Error(`${t.name}: ${error instanceof Error ? error.message : String(error)}`); });
-    const before = t.before ? await this.d.rpc.call(t.before.rpc, t.before.input ? t.before.input(given) : {}).catch(() => null) : undefined;
+    // `before` is what the read tool for the same RPC shows, bounded the same way (its view, first page).
+    const reader = t.before ? RPC_TOOLS.find(r => r.kind === "read" && r.rpc === t.before!.rpc && r.view) : undefined;
+    const before = t.before ? await this.d.rpc.call(t.before.rpc, t.before.input ? t.before.input(given) : {}).then(out => reader?.view ? reader.view(out, {}) : out).catch(() => null) : undefined;
     const planId = this.plan(caller, t.name as AgentTool, async () => { const out = await this.d.rpc!.call(t.rpc, checked, actor); await this.note(caller, caller, t.name); return out; });
     // The plan names the images by name and size, never their bytes.
     const shown = images ? { ...(checked as Record<string, unknown>), images: images.map(i => ({ name: i.name, mimeType: i.mimeType, bytes: base64Bytes(i.data) })) } : checked;
@@ -389,18 +392,21 @@ export class AgentActions {
       failedSources: r?.failed ?? [], error: view.error };
   }
 
-  private async listPrs(args: { workspace?: string; needs_reviewers?: boolean; ready_to_merge?: boolean; include_closed?: boolean }) {
+  private async listPrs(args: { workspace?: string; needs_reviewers?: boolean; ready_to_merge?: boolean; include_closed?: boolean; offset?: number; limit?: number }) {
     const state = await this.d.store.snapshot();
     const tracked = this.tracked(state);
     // Stable ids remain exact identities. Text queries share Home's layout-aware matcher.
     const exact = tracked.find(w => w.id === args.workspace);
     const workspaces = exact ? [exact] : searchRows(tracked, w => [{ field: "name", text: w.title }], args.workspace ?? "");
     if (args.workspace && !workspaces.length) throw new Error(`No tracked workspace matches ${args.workspace}.`);
-    const prs = workspaces.flatMap(w => w.prs.map(p => prRow(w, p)))
-      .filter(r => args.include_closed || !["MERGED", "CLOSED"].includes(r.state))
-      .filter(r => !args.needs_reviewers || r.needsReviewers)
-      .filter(r => !args.ready_to_merge || r.mergeable);
-    return { prs, workspaces: workspaces.map(w => ({ id: w.id, title: w.title, mainAgentId: w.mainAgentId, enable_auto_sends: w.enable_auto_sends, hold: w.hold, pendingBatches: w.batches.filter(b => b.state === "pending" && !recoveryBatch(b)).map(b => ({ id: b.id, tasks: b.tasks.length })), retryableBatches: w.batches.filter(b => ["blocked", "uncertain"].includes(b.state)).map(b => ({ id: b.id, state: b.state, result: b.result })) })) };
+    const closed = (r: { state: string }) => ["MERGED", "CLOSED"].includes(r.state);
+    const rows = workspaces.flatMap(w => w.prs.map(p => ({ p, r: prRow(w, p) })))
+      .filter(({ r }) => args.include_closed || !closed(r))
+      .filter(({ r }) => !args.needs_reviewers || r.needsReviewers)
+      .filter(({ r }) => !args.ready_to_merge || r.mergeable);
+    // Open PRs in full; merged and closed ones (include_closed) as the newest few and a count, paged by offset/limit.
+    const bounded = boundDone(rows, ({ r }) => closed(r), { newestFirst: newestFirst(rows, ({ p }) => Date.parse(p.snapshot?.mergedAt ?? p.snapshot?.observedAt ?? "") || 0), hint: "list_prs include_closed offset/limit pages these (newest first)", offset: args.offset, limit: args.limit });
+    return { prs: bounded.items.map(({ r }) => r), ...(args.include_closed ? { closed: bounded.done } : {}), workspaces: workspaces.map(w => ({ id: w.id, title: w.title, mainAgentId: w.mainAgentId, enable_auto_sends: w.enable_auto_sends, hold: w.hold, pendingBatches: w.batches.filter(b => b.state === "pending" && !recoveryBatch(b)).map(b => ({ id: b.id, tasks: b.tasks.length })), retryableBatches: w.batches.filter(b => ["blocked", "uncertain"].includes(b.state)).map(b => ({ id: b.id, state: b.state, result: b.result })) })) };
   }
 
   /** Dry run: who would be asked on each PR, and what stops it. The same checks the Add reviewers button makes. */
@@ -526,13 +532,16 @@ export class AgentActions {
     return { dryRun: true, planId, workspaceId: preview.id, snooze: preview.snooze ?? null, next: `Only on the developer's request: call snooze_workspace with confirm=true and planId=${planId}.` };
   }
 
-  private async inboxList(caller: string, args: { flagged_only?: boolean }) {
+  private async inboxList(caller: string, args: { flagged_only?: boolean; offset?: number; limit?: number }) {
     const { enabled, rows } = await this.d.inbox.list();
     const now = this.now();
     const state = await this.d.store.snapshot();
     const tracked = new Map(state.workspaces.map(w => [w.id, w]));
     const held = !!this.d.autoSendsHeld?.();
-    return { enabled, you: caller, rows: rows.filter(r => !args.flagged_only || r.needs && !r.snooze).map(r => {
+    // Flagged, snoozed, running and signed-off-today rows (and your own) in full; quiet ones as the newest few and a count.
+    const listed = rows.filter(r => !args.flagged_only || r.needs && !r.snooze);
+    const bounded = boundDone(listed, r => r.agentId !== caller && sectionOf(r, now) === null, { newestFirst: newestFirst(listed, r => Date.parse(r.lastActivityAt ?? "") || 0), hint: "inbox_list offset/limit pages these (newest first)", offset: args.offset, limit: args.limit });
+    return { enabled, you: caller, quiet: bounded.done, rows: bounded.items.map(r => {
       const head = flagHeadline(r, now);
       // Home's Sending row rides its workspace's main agent: queued or sent, when and why, and whether send_repairs would go through.
       const w = r.workspaceId ? tracked.get(r.workspaceId) : undefined;
