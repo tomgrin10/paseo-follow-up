@@ -7,7 +7,6 @@ import { prStatsInputSchema, setPrStatsInputSchema, statsRepoName } from "../sha
 import { reviewerListSchema } from "../shared/reviewers";
 import { taskTriggerInputSchema } from "../shared/task-trigger";
 import { UPDATE_MODES } from "../shared/updates";
-import { unreadAnswer } from "../shared/your-questions";
 import { briefChoiceSchema, reportKindSchema } from "../shared/contracts";
 import { actionChangeSchema, settingsChangeSchema } from "../shared/dispatch";
 import { linearQueueInputSchema } from "../shared/contracts";
@@ -93,9 +92,10 @@ export const RPC_TOOLS: readonly RpcTool[] = [
   { name: "overseer_ask", rpc: "follow.overseer-ask", kind: "planned", input: z.strictObject({ text: z.string().trim().min(1).max(2000).optional(), images: imagePaths, ...confirm }) },
   // Catch up's deck; Your questions and More context (ask, read, act); the asked agent answers with context_reply
   { name: "catch_up_deck", rpc: "follow.catch-up-deck", kind: "read", input: none },
-  // Open questions (asking, or an answer not yet read) in full; settled ones (answers up to 4000 characters) as the newest few and a count.
+  // Questions still asking in full; settled ones (answers up to 4000 characters, read or not) as the newest few and a count:
+  // 30 days of unread answers would run past TOOL_BUDGET. state=open narrows to the unread ones, and offset/limit pages them.
   { name: "context_requests", rpc: "follow.context-list", kind: "read", input: z.strictObject({ workspaceId: id.optional(), state: z.enum(["all", "open", "tasks"]).optional(), query: z.string().max(200).optional(), ...pageInput }), toRpc: ({ offset: _o, limit: _l, ...a }) => a,
-    view: (out: { requests: { state: string; askedAt: string; settledAt: string | null; readAt?: string | null }[] }, a) => { const b = boundDone(out.requests, r => r.state !== "asking" && !unreadAnswer(r as never), { newestFirst: newestFirst(out.requests, r => Date.parse(r.settledAt ?? r.askedAt) || 0), hint: "context_requests offset/limit pages these (newest first)", offset: a.offset, limit: a.limit }); return { requests: b.items, settled: b.done }; } },
+    view: (out: { requests: { state: string; askedAt: string; settledAt: string | null}[] }, a) => { const b = boundDone(out.requests, r => r.state !== "asking", { newestFirst: newestFirst(out.requests, r => Date.parse(r.settledAt ?? r.askedAt) || 0), hint: "context_requests offset/limit pages these (newest first)", offset: a.offset, limit: a.limit }); return { requests: b.items, settled: b.done }; } },
   { name: "ask_context", rpc: "follow.context-ask", kind: "planned", before: { rpc: "follow.context-list", input: a => ({ workspaceId: a.workspaceId ?? undefined }) },
     input: z.strictObject({ workspaceId: id.nullable().optional(), agentId: id.nullable().optional(), cardKey: z.string().min(1).max(400).optional(), card: z.string().trim().min(1).max(300).optional(),
       target: z.enum(["overseer", "agent"]).optional(), ask: z.string().trim().min(1).max(2000).optional(), images: imagePaths, ...confirm }),
