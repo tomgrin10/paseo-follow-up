@@ -50,7 +50,7 @@ and the developer decides when those go out.
 - **A watch never wakes a closed or archived agent** (`a-watch-never-wakes-a-closed-agent`). A closed or archived agent's
   watch ends with nothing sent, and the `checks` channel checks again when the message goes: closed or archived cancels,
   a running agent waits for its turn to end. An idle agent that asked is messaged even when Paseo has unloaded it: it
-  asked for exactly that message, like Paseo's background-work wake-up (the one exception to invariant 1).
+  asked for exactly that message, like Paseo's background-work wake-up (an exception to invariant 1, shared only with a scheduled task's message).
 - **A waited-for failure is sent once** (`a-waited-for-failure-is-sent-once`). When the agent waiting is the main agent,
   Auto-send is on and a repair batch carrying this PR's checks task is queued or out, the repair is the one message and
   the watch ends quietly (`coveredByRepair`). With Auto-send off, or a contributor waiting, the watch sends it.
