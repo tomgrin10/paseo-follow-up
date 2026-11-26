@@ -544,3 +544,19 @@ Follow-up holds:
 - A brief about a PR (review, action or decision with a linked PR, reviewers, a PR event) has an Open PR move.
 - `inbox_list` gives each row `prs`: its PR flags' and its Needs-you items' PRs with their urls (`rowPrs`,
   `server/agent-actions.ts`), so an agent can hand the developer the link.
+
+### Brief cards while an agent is unloaded
+
+`server/brief-timeline.ts` owns the inbox's timeline sink and the flush when a plugin session first appears.
+It holds a pending card per agent until discovery's shared directory says loaded, then confirms with a fresh
+metadata fetch before appending. Metadata never resumes an agent. Directory list refreshes, live metadata updates
+and lifecycle patches retry pending cards; there is no extra timer or agent subscription. A failed append (including
+an unload between metadata and append, or a missing plugin session) remains pending for the next signal. Before
+appending, it reads the inbox's current brief: a deferred replaced card is dropped and same-id edits use the latest state.
+An immediate collapsed update still replaces an older row while the agent is loaded, preserving chat history.
+Successful appends leave the pending map; concurrent signals share one append per agent. Pending delivery lives in
+the worker's memory, as the previous pre-session buffer did; this is not a durable timeline outbox.
+
+The unchecked append and lossy pre-session flush existed before 2.6.0-beta.1. That beta's provider turn-end checks
+can enqueue a follow-up message, but the available evidence does not establish that they caused the observed
+unknown-agent failures. The fix covers the proven append lifecycle gap without changing turn-end checks.

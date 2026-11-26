@@ -78,7 +78,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | Discovery, ownership, main agent | `server/discovery.ts`, `server/turn-events.ts`, `server/workspace-agent.ts`, `server/background-agents.ts`, `server/submissions.ts`, `server/pr-owner.ts`, `server/exclusions.ts`, `server/history-cache.ts`, `server/recovery-handoff.ts`, `server/recovery-config.ts`, `shared/settings.ts` | [workspaces](docs/workspaces.md) |
 | Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/send-decision.ts`, `shared/task-rows.ts`, `shared/send-words.ts`, `shared/task-status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/message-queue.ts`, `shared/queue.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/put-in-chat.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `server/scheduled-tasks.ts`, `shared/task-due.ts`, `shared/task-view.ts`, `shared/task-dup.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
 | What each agent is working on now (the agent line on the panel and Home rows; sync_workspace `milestone`, `workspace_now`) | `shared/now.ts`, `client/now-lines.tsx` | [workspaces](docs/workspaces.md#what-each-agent-is-working-on) |
-| Needs-you inbox, brief, Home | `server/inbox.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `server/turn-timeline.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/sending.ts`, `shared/needs-block.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts`, `server/dismiss.ts`, `client/dismiss.tsx`, `shared/catch-up.ts`, `client/catch-up.tsx`, `client/more-context.tsx`, `shared/dictation.ts`, `client/dictation.tsx`, `server/context-requests.ts`, `shared/your-questions.ts` | [needs-you](docs/needs-you.md) |
+| Needs-you inbox, brief, Home | `server/inbox.ts`, `server/brief-timeline.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `server/turn-timeline.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/sending.ts`, `shared/needs-block.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts`, `server/dismiss.ts`, `client/dismiss.tsx`, `shared/catch-up.ts`, `client/catch-up.tsx`, `client/more-context.tsx`, `shared/dictation.ts`, `client/dictation.tsx`, `server/context-requests.ts`, `shared/your-questions.ts` | [needs-you](docs/needs-you.md) |
 | Summary (internal id `about`), Rename title with AI | `server/about.ts`, `server/transcript.ts`, `shared/about.ts`, `server/rename.ts`, `shared/rename.ts` | [ai-roles](docs/ai-roles.md) |
 | Dispatch (New before 2.4): start work from an issue, PR, link or words | `shared/dispatch.ts`, `shared/issue-workspace.ts`, `shared/linear-issues.ts`, `shared/new-view.ts`, `server/dispatch.ts`, `server/linear-issues.ts`, `client/new.tsx`, `client/action-row.tsx`, `client/new-entry.tsx`, `shared/new-name.ts`, `shared/new-settings.ts`, `client/new-settings.tsx` | [dispatch](docs/dispatch.md) |
 | Morning brief: the whole Linear queue (sweep, snapshot, changes since you last read it), the brief's Since block, the queue screen, raised issues in Needs you | `shared/linear-queue.ts`, `server/linear-queue.ts`, `shared/brief-since.ts`, `client/brief-since.tsx` | [morning-brief](docs/morning-brief.md) |
@@ -1596,6 +1596,16 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    developer: after an agent compacted, its timeline read "Earlier ask, the agent kept going: Nothing needed. …" and
    "Finished · No ask stated", and on a provider without hooks Follow-up also sent the agent a turn-end check. Guarded
    by `tests/compaction-turn.test.ts`.
+
+131. **A brief waits for a loaded agent** (`a-brief-waits-for-a-loaded-agent`). Every brief timeline append, including
+   the startup session flush and the inbox's sink, goes through `BriefTimeline` (`server/brief-timeline.ts`). A card
+   waits when discovery has no loaded snapshot or fresh metadata no longer says loaded; neither a timeline read nor
+   a resume is used to deliver it. Discovery's shared directory updates and the first plugin session handle retry
+   pending cards, with no per-agent timer. A failed append stays pending for that same signal. Only the current
+   brief survives a wait, and same-id edits use its latest state; one agent's appends are serialized. An immediate
+   collapsed update still updates the previous row while loaded. Guarded by
+   `tests/brief-timeline.test.ts`. The unchecked append predates 2.6.0-beta.1; that beta added the provider turn-end
+   check path, but no evidence ties that path to the observed append failures.
 
 ## Bugs
 

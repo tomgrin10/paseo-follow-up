@@ -1,0 +1,1 @@
+- Brief cards wait until their agent is loaded again, and outdated cards are dropped while waiting.
