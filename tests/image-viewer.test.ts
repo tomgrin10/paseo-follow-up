@@ -8,11 +8,14 @@ const source = (file: string) => readFile(join(import.meta.dirname, "..", "clien
 
 // rc.1: a screenshot in the notes opened a browser tab. A tap shows it in Follow-up's own viewer, never a URL opener.
 test("a notes screenshot tap never calls a URL opener", async () => {
-  for (const file of ["release-notes.tsx", "image-viewer.tsx"]) {
-    const s = await source(file);
-    assert.doesNotMatch(s, /openExternalUrl|Linking\b|window\.open|\bhref=|openURL/, `${file} must not open a URL`);
-  }
+  assert.doesNotMatch(await source("image-viewer.tsx"), /openExternalUrl|Linking\b|window\.open|\bhref=|openURL/, "image-viewer.tsx must not open a URL");
   const notes = await source("release-notes.tsx");
+  assert.doesNotMatch(notes, /Linking\b|window\.open|\bhref=|openURL/);
+  // The one URL the notes open is the release pages, from the header's open-in-browser icon (notes-read-like-one-feed).
+  assert.deepEqual(notes.match(/openExternalUrl\([^)]*\)/g), ["openExternalUrl(url)"], "one opener");
+  assert.match(notes, /const openReleases = \(url: string\) =>/);
+  const image = notes.slice(notes.indexOf("function NoteImage"), notes.indexOf("function NoteImage") + 3000);
+  assert.doesNotMatch(image.slice(0, image.indexOf("\n}\n")), /openReleases|openExternalUrl/, "a screenshot never opens a URL");
   assert.match(notes, /role="button"[\s\S]{0,200}onPress=\{\(\) => \{ if \(viewer\) viewer\(image, self\.current\); else setOwn\(true\); \}\}/, "the tap opens the image viewer");
 });
 
@@ -42,7 +45,7 @@ test("the viewer fits the window and never draws an image past its CSS width", (
 test("the notes' scroll container keeps a styled, scoped scrollbar in every dialog", async () => {
   const { notesScrollbarCss, NOTES_SCROLL_ATTR } = await import("../shared/notes-scrollbar");
   const notes = await source("release-notes.tsx");
-  assert.equal((notes.match(/<NotesScroll theme=\{theme\}/g) ?? []).length, 3, "the wide dialog, the host dialog and the phone sheet");
+  assert.equal((notes.match(/<NotesScroll theme=\{theme\}/g) ?? []).length, 2, "the desktop dialog and the phone sheet");
   assert.doesNotMatch(notes, /<ScrollView style/, "no notes body scrolls without NotesScroll");
   assert.match(notes, /persistentScrollbar/, "Android keeps its bar");
   const css = notesScrollbarCss({ foregroundMuted: "#888888" });
@@ -53,9 +56,21 @@ test("the notes' scroll container keeps a styled, scoped scrollbar in every dial
 
 test("the notes' titles name the plugin from its manifest", async () => {
   const notes = await source("release-notes.tsx");
-  assert.match(notes, /export const notesTitle = \(name: string, version: string \| null\) => version \? `What's new in \$\{name\} \$\{version\}` : `\$\{name\} release notes`;/);
-  assert.match(notes, /const title = notesTitle\(name, full \? null : newest\.version\);/);
+  // One view, so one title: What's new and the release notes are the same scroll (notes-read-like-one-feed).
+  assert.match(notes, /export const notesTitle = \(name: string\) => `What's new in \$\{name\}`;/);
+  assert.match(notes, /const title = notesTitle\(name\);/);
   assert.equal((notes.match(/<WhatsNewSheet open name=\{view\.name\}/g) ?? []).length, 2, "What's new and Settings' Release notes");
   const server = await readFile(join(import.meta.dirname, "..", "server", "release-notes.ts"), "utf8");
   assert.match(server, /paseo-plugin\.json/);
+});
+
+// notes-read-like-one-feed: 2026-11-26, the 840px desktop dialog capped only its text at 600px, so every line ended
+// ~240px before the version rules, the credits' rule and the header's icons. One column: the dialog is the column's
+// width plus its inset, and nothing inside caps itself.
+test("the notes dialog is as wide as its reading column, so everything in it shares one right edge", async () => {
+  const notes = await source("release-notes.tsx");
+  assert.doesNotMatch(notes, /MeasureContext|useMeasure|maxWidth: m\b|WIDE_CARD|TEXT_MEASURE/, "no text-only cap inside the dialog");
+  assert.match(notes, /width=\{Math\.min\(NOTES_COLUMN \+ 2 \* DIALOG_INSET, win\.width - 48\)\}/, "the dialog fits the column");
+  assert.match(notes, /paddingLeft: DIALOG_INSET, paddingRight: DIALOG_INSET - 8,/, "the header's icons (8px padding) end at the column's edge");
+  assert.match(notes, /contentContainerStyle=\{\{ paddingHorizontal: DIALOG_INSET,/, "the body uses the same inset");
 });

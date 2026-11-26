@@ -283,8 +283,12 @@ PLAYWRIGHT_CORE=<playwright-core dir> CHROMIUM=<chromium binary> ~/paseo-harness
 - **`--whats-new-review`** (review evidence, not README images): the sheet after a minor update (`2.0.1` to `2.1.0`,
   this repo's own section) on desktop and phone, and Settings → General's "Show What's new after updates" switch on
   and off (set through `set_updates`), desktop and phone, into `--out`.
-- **What's new** is shot after a reinstall as `2.0.0-rc.0` over `1.4.0-beta.32`. It shows the repo's CHANGELOG.md
-  `## 2.0.0` section when there is one, else a built-in stand-in; `--whats-new-changelog <file>` uses that file instead.
+- **What's new** is shot after a reinstall as the CHANGELOG's newest stable over the stable before it
+  (`whatsNewStables`), opening at the newest version with its Installed pill. A `## 2.0.0` stand-in is added when the
+  CHANGELOG has none; `--whats-new-changelog <file>` uses that file instead. `--whats-new-all` adds light and phone,
+  an older version a scroll down (`whats-new-older*`), the end, and the Installed pill under a made-up next minor the
+  updater offers (`whats-new-pending*`, from Settings' Release notes, through the `updates-demo.json` override that
+  `FOLLOW_UP_UPDATES_DEMO=1` turns on for `--only whats-new` runs).
 - **Size** (aim under ~300 KB each). With `pngquant` (lossy palette) or `oxipng` on PATH, shots are taken at
   deviceScaleFactor 2 and optimised. Without either, desktop shots use deviceScaleFactor 1.25 and Playwright's own PNG
   (the phone shot stays at 2). `--scale <n>` sets the desktop factor.

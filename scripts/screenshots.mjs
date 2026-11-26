@@ -44,7 +44,7 @@ import { openHome as openHomeAt, homeRow, homeUrl } from "./ui-home.mjs";
 const exec = promisify(execFile);
 const argv = process.argv.slice(2);
 const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : fallback; };
-// What's new reinstalls the plugin as 2.0.0-rc.0, so it goes last: every other shot shows the version under test.
+// What's new reinstalls the plugin as the CHANGELOG's newest stable, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
 const REVIEW_SHOTS = ["tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "gallery", "frames", "onboarding"];
@@ -1878,23 +1878,59 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       const installed = (await cli("plugin", "ls")).find(row => row.id === "follow-up")?.path ?? plugin;
       const pkgPath = join(installed, "package.json");
       const pkg = JSON.parse(await fs.readFile(pkgPath, "utf8"));
+      const changelog = await whatsNewChangelog();
+      const stables = whatsNewStables(changelog);
+      // The update case: the newest stable over the one before it. The sheet lists every stable, so OLDER is a version
+      // a scroll down (the scrolled shots) and PENDING a made-up next minor the updater offers (the Installed pill
+      // sits under it). Synthetic: the notes say nothing about any real release.
+      [WHATS_NEW_TO, WHATS_NEW_FROM] = stables;
+      const older = stables[Math.min(3, stables.length - 1)];
       await fs.writeFile(pkgPath, JSON.stringify({ ...pkg, version: WHATS_NEW_TO }, null, 2));
-      await fs.writeFile(join(installed, "CHANGELOG.md"), await whatsNewChangelog());
+      await fs.writeFile(join(installed, "CHANGELOG.md"), changelog);
       await fs.writeFile(join(home, "plugin-data/follow-up/versions.json"), JSON.stringify({ running: WHATS_NEW_FROM, previous: null, startedAt: null, hostSeen: WHATS_NEW_FROM }));
       await cli("plugin", "reload", "follow-up");
       let seenVersion = null;
       await until(() => `the ${WHATS_NEW_TO} worker (it reports ${seenVersion})`, async () => (seenVersion = (await call("follow.release-notes", {}).catch(e => ({ version: `error: ${e.message.split("\n")[0]}` }))).version) === WHATS_NEW_TO, { tries: 120, every: 500 });
+      const header = version => page => page.getByRole("heading", { name: new RegExp(`^${version.replace(/\./g, "\\.")}(,|$)`) }).last();
       const sheet = phone => async page => {
         await openHome(page, { keepDialogs: true });
         if (phone) await page.setViewportSize(PHONE);
-        await page.getByRole("dialog").getByText("What's new in Follow-up 2.0.0").first().waitFor().catch(() => page.getByText("What's new in Follow-up 2.0.0").first().waitFor());
+        await page.getByText("What's new in Follow-up", { exact: true }).last().waitFor();
+        await header(WHATS_NEW_TO)(page).waitFor();
+        // It opens at the newest version, with the Installed pill on it.
+        if (!/, installed,/.test(await header(WHATS_NEW_TO)(page).getAttribute("aria-label") ?? "")) throw new Error(`${WHATS_NEW_TO} is not marked installed`);
         // The notes' screenshots load by URL: wait until each has loaded or failed (a failed one is left out).
         await page.waitForFunction(() => [...document.images].every(i => i.complete), null, { timeout: 30000 });
       };
-      /** The same sheet scrolled so `heading` is at the top: the panel's section and its image. */
-      const sheetAt = (phone, heading) => async page => {
+      /** The same sheet scrolled so `version`'s header row is at the top: an older version, a scroll away. */
+      const sheetAt = (phone, version) => async page => {
         await sheet(phone)(page);
-        await page.getByText(heading, { exact: true }).last().evaluate(el => el.scrollIntoView({ block: "start" }));
+        // Scroll only the notes' own body (scrollIntoView would move the phone's sheet too), leaving a little air above.
+        await header(version)(page).evaluate(el => {
+          const scroller = el.closest("[data-follow-up-notes-scroll]");
+          if (!scroller) throw new Error("the version header is outside the notes' scroll body");
+          scroller.scrollTop += el.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 16;
+        });
+        await page.waitForFunction(() => [...document.images].every(i => i.complete), null, { timeout: 30000 });
+      };
+      /**
+       * Settings → General's Release notes with an update out: the updater's pending notes (a demo override, read when
+       * Settings loads the updates view) sit above the installed version, which keeps the Installed pill.
+       */
+      const PENDING = (() => { const [major, minor] = WHATS_NEW_TO.split(".").map(Number); return `${major}.${minor + 1}.0`; })();
+      const pendingAt = phone => async page => {
+        // Settings → Plugins → Follow-up → General → Release notes, See all (as --notes-review's releaseNotesAt).
+        if (phone) await page.setViewportSize(PHONE);
+        await page.goto(`${ORIGIN}/settings/hosts/${SERVER_ID}/plugins/follow-up/projects`);
+        // The phone lists Follow-up's settings tabs first: open General, whose card holds Release notes.
+        const seeAll = page.getByRole("button", { name: "See all" }).filter({ visible: true }).first();
+        const general = page.getByText("General", { exact: true }).filter({ visible: true }).last();
+        await seeAll.or(general).first().waitFor({ state: "visible" });
+        if (phone && !(await seeAll.isVisible())) await general.click();
+        await seeAll.click();
+        await header(PENDING)(page).waitFor();
+        if (/installed/.test(await header(PENDING)(page).getAttribute("aria-label") ?? "")) throw new Error(`${PENDING} is pending, not installed`);
+        if (!/, installed,/.test(await header(WHATS_NEW_TO)(page).getAttribute("aria-label") ?? "")) throw new Error(`${WHATS_NEW_TO} lost its Installed pill`);
         await page.waitForFunction(() => [...document.images].every(i => i.complete), null, { timeout: 30000 });
       };
       /** The same sheet scrolled to its end: the last section and the credits. */
@@ -1908,17 +1944,29 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
         await page.waitForFunction(() => [...document.images].every(i => i.complete), null, { timeout: 30000 });
       };
       await shoot("whats-new", DESKTOP, "dark", sheet(false), { seen: WHATS_NEW_FROM });
-      // Review evidence for the sheet itself (not README images): light, and the phone's bottom sheet.
+      // Review evidence for the sheet itself (not README images): light and dark, desktop and the phone's bottom sheet;
+      // the update case, an older version a scroll down, the end, and the Installed pill under an update that's out.
       if (argv.includes("--whats-new-all")) {
         await shoot("whats-new-light", DESKTOP, "light", sheet(false), { seen: WHATS_NEW_FROM });
         await shoot("whats-new-phone", PHONE, "light", sheet(true), { seen: WHATS_NEW_FROM });
         await shoot("whats-new-phone-dark", PHONE, "dark", sheet(true), { seen: WHATS_NEW_FROM });
-        await shoot("whats-new-mid", DESKTOP, "dark", sheetAt(false, "A panel on every workspace"), { seen: WHATS_NEW_FROM });
-        await shoot("whats-new-phone-mid", PHONE, "dark", sheetAt(true, "A panel on every workspace"), { seen: WHATS_NEW_FROM });
+        for (const [scheme, sfx] of [["dark", ""], ["light", "-light"]]) {
+          await shoot(`whats-new-older${sfx}`, DESKTOP, scheme, sheetAt(false, older), { seen: WHATS_NEW_FROM });
+          await shoot(`whats-new-phone-older${sfx}`, PHONE, scheme, sheetAt(true, older), { seen: WHATS_NEW_FROM });
+        }
         await shoot("whats-new-end", DESKTOP, "dark", sheetEnd(false), { seen: WHATS_NEW_FROM });
         await shoot("whats-new-phone-end", PHONE, "light", sheetEnd(true), { seen: WHATS_NEW_FROM });
+        await fs.writeFile(join(home, "plugin-data/follow-up/updates-demo.json"), JSON.stringify({ pendingNotes: [{ version: PENDING, date: "2026-11-30", items: [
+          "**A made-up next release:** stands in for an update that is out but not installed.",
+          "**The Installed pill stays on yours:** the versions above it are what the update brings.",
+        ] }] }));
+        for (const [scheme, sfx] of [["dark", ""], ["light", "-light"]]) {
+          await shoot(`whats-new-pending${sfx}`, DESKTOP, scheme, pendingAt(false), { seen: WHATS_NEW_TO });
+          await shoot(`whats-new-phone-pending${sfx}`, PHONE, scheme, pendingAt(true), { seen: WHATS_NEW_TO });
+        }
+        await fs.rm(join(home, "plugin-data/follow-up/updates-demo.json"), { force: true });
       }
-      // Review evidence for the wide notes dialog (from 1280px windows) and the image viewer, both entry points.
+      // Review evidence for the notes dialog (one reading column at every window size) and the image viewer, both entry points.
       if (argv.includes("--notes-review")) {
         const BIG = { width: 2560, height: 1440 }; const NARROW = { width: 1180, height: 800 };
         const HOME_ALT = /^Follow-up Home: every workspace/; const PANEL_ALT = /^The Follow-up panel on a workspace/;
@@ -1926,7 +1974,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
         const whatsNewAt = vp => async page => {
           await openHome(page, { keepDialogs: true });
           await page.setViewportSize(vp);
-          await page.getByText("What's new in Follow-up 2.0.0").first().waitFor();
+          await page.getByText("What's new in Follow-up", { exact: true }).last().waitFor();
           await images(page);
         };
         /** Settings → Plugins → Follow-up → General → Release notes, See all. */
@@ -1934,7 +1982,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
           await page.setViewportSize(vp);
           await page.goto(`${ORIGIN}/settings/hosts/${SERVER_ID}/plugins/follow-up/projects`);
           await page.getByRole("button", { name: "See all" }).first().click();
-          await page.getByText("Follow-up release notes", { exact: true }).last().waitFor();
+          await page.getByText("What's new in Follow-up", { exact: true }).last().waitFor();
           await images(page);
         };
         const viewer = (base, alt) => async page => {
@@ -1993,7 +2041,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
         }
         await shoot("viewer-1440-panel", DESKTOP, "dark", viewer(whatsNewAt(DESKTOP), PANEL_ALT), { seen: WHATS_NEW_FROM });
         await shoot("viewer-release-notes-1440", DESKTOP, "dark", viewer(releaseNotesAt(DESKTOP), HOME_ALT), { seen: WHATS_NEW_TO });
-        // Below 1280 the host's own 520px dialog, with the viewer inside its focus scope.
+        // A narrower window: the same dialog, with the viewer inside its focus scope.
         if (!viewerOnly) await shoot("notes-1180", NARROW, "dark", whatsNewAt(NARROW), { seen: WHATS_NEW_FROM });
         await shoot("viewer-1180", NARROW, "dark", viewer(whatsNewAt(NARROW), HOME_ALT), { seen: WHATS_NEW_FROM });
         await shoot("esc-order-1440", DESKTOP, "dark", escOrder(whatsNewAt(DESKTOP)), { seen: WHATS_NEW_FROM });
@@ -5502,8 +5550,9 @@ async function findOptimiser() {
 }
 
 // ---------- What's new ----------
-const WHATS_NEW_FROM = "1.4.0-beta.32";
-const WHATS_NEW_TO = "2.0.0-rc.0";
+/** What's new is shot as an update to the CHANGELOG's newest stable from the stable before it (`whatsNewStables`). */
+let WHATS_NEW_FROM = "1.4.0-beta.32";
+let WHATS_NEW_TO = "2.0.0";
 /** A stand-in `## 2.0.0` section, used when the CHANGELOG has none yet. */
 const SAMPLE_2_0 = `## 2.0.0
 
@@ -5532,7 +5581,7 @@ async function whatsNewReview({ shoot, seeded, plugin, home, cli, call }) {
   const sheet = phone => async page => {
     await openHome(page, { keepDialogs: true });
     if (phone) await page.setViewportSize(PHONE);
-    await page.getByText(`What's new in Follow-up ${TO}`).first().waitFor();
+    await page.getByText("What's new in Follow-up", { exact: true }).last().waitFor();
     await page.waitForFunction(() => [...document.images].every(i => i.complete), null, { timeout: 30000 });
   };
   await shoot("whats-new-minor", DESKTOP, "dark", sheet(false), { seen: FROM });
@@ -5559,6 +5608,15 @@ async function whatsNewReview({ shoot, seeded, plugin, home, cli, call }) {
   await actPlanned(call, seeded.workspaces.find(w => w.key === "audit").agentId, "set_updates", { enable_whats_new: false });
   await shoot("whats-new-setting-off", DESKTOP, "dark", general(false), { seen: TO });
   await shoot("whats-new-setting-off-phone", PHONE, "light", general(true), { seen: TO });
+}
+
+/** The stable versions a CHANGELOG has sections for, newest first (betas ship none). */
+function whatsNewStables(changelog) {
+  const versions = [...changelog.matchAll(/^## v?(\d+)\.(\d+)\.(\d+)(?=[ \t(]|$)/gm)].map(m => [+m[1], +m[2], +m[3]]);
+  versions.sort((a, b) => b[0] - a[0] || b[1] - a[1] || b[2] - a[2]);
+  const out = [...new Set(versions.map(v => v.join(".")))];
+  if (out.length < 2) out.push(WHATS_NEW_FROM);
+  return out;
 }
 
 /** The CHANGELOG for the What's new shot: --whats-new-changelog, else this repo's with a `## 2.0.0` section in front if it has none. */
@@ -5676,7 +5734,7 @@ try {
   // sending only: a fake cgroup at 10% of memory.high from the start (the governor finds its cgroup once), raised later.
   if (only.includes("sending") || only.includes("pr-stats-settings")) { process.env.FOLLOW_SHOTS_CGROUP = join(root, "cgroup.json"); await fs.writeFile(process.env.FOLLOW_SHOTS_CGROUP, JSON.stringify({ high: 1000, current: 100 })); }
 
-  const env = harnessEnv(root, { home, strip: github.strip, set: { ...github.env, ...(process.env.FOLLOW_SHOTS_CGROUP ? { FOLLOW_SHOTS_CGROUP: process.env.FOLLOW_SHOTS_CGROUP } : {}), ...(argv.includes("--overseer-review") || PASTE_LIKE(only) || only.includes("gallery") || only.includes("frames") ? { FOLLOW_UP_OVERSEER_PROVIDER: "followup-fixture/fixture" } : {}), ...(PASTE_LIKE(only) ? { FOLLOW_UP_HARNESS_IMAGE_PROVIDERS: "followup-fixture" } : {}), PASEO_DAEMON_URL: url, PASEO_SERVER_ID: "srv_followupshots", FIXTURE_MODEL_LABEL: "Agent", PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true", PATH: `${bin}:${process.env.PATH}`, ...(variant && !variant.gh ? { FOLLOW_UP_GH_BIN: join(root, "no-such-dir", "gh") } : {}), FOLLOW_SHOTS_CLOCK: clockFile, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${join(root, "clock.cjs")}`.trim(), TZ: "UTC" } });
+  const env = harnessEnv(root, { home, strip: github.strip, set: { ...github.env, ...(process.env.FOLLOW_SHOTS_CGROUP ? { FOLLOW_SHOTS_CGROUP: process.env.FOLLOW_SHOTS_CGROUP } : {}), ...(argv.includes("--overseer-review") || PASTE_LIKE(only) || only.includes("gallery") || only.includes("frames") ? { FOLLOW_UP_OVERSEER_PROVIDER: "followup-fixture/fixture" } : {}), ...(PASTE_LIKE(only) ? { FOLLOW_UP_HARNESS_IMAGE_PROVIDERS: "followup-fixture" } : {}), ...(only.includes("whats-new") ? { FOLLOW_UP_UPDATES_DEMO: "1" } : {}), PASEO_DAEMON_URL: url, PASEO_SERVER_ID: "srv_followupshots", FIXTURE_MODEL_LABEL: "Agent", PASEO_RELAY_ENABLED: "false", PASEO_WEB_UI_ENABLED: "true", PATH: `${bin}:${process.env.PATH}`, ...(variant && !variant.gh ? { FOLLOW_UP_GH_BIN: join(root, "no-such-dir", "gh") } : {}), FOLLOW_SHOTS_CLOCK: clockFile, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${join(root, "clock.cjs")}`.trim(), TZ: "UTC" } });
   // No gh at all: harnessEnv stubs it with an exit-127 script, and a stranger's host has none.
   if (variant && !variant.gh) await fs.rm(join(root, ".harness-stubs", "gh"), { force: true });
   // A plugin install builds the plugin, which takes minutes on a busy machine; everything else answers in seconds.

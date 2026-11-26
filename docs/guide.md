@@ -129,8 +129,10 @@ Follow-up updates itself when nothing is busy, and rolls back if an update fails
 Home says when any newer stable version is available, including minor and patch releases. On the Beta channel, betas
 show only in Settings → General.
 
-After an update that brings new release notes, Follow-up shows **What's new** once. Betas install quietly. To stop it,
-turn off **Show What's new after updates** in Settings → General. Release notes are there too, and in
+After an update that brings new release notes, Follow-up shows **What's new** once: every version's changes in one
+scroll, newest first, each with its date and an **Installed** tag on the one you run. Scroll down for older versions;
+the open-in-browser icon shows each version's full changelog on GitHub. Betas install quietly and don't appear there.
+To stop it, turn off **Show What's new after updates** in Settings → General. Release notes are there too, and in
 [CHANGELOG.md](../CHANGELOG.md).
 
 Betas are on npm's `beta` dist-tag: `paseo plugin install npm:paseo-follow-up@beta`.

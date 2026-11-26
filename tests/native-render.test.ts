@@ -114,3 +114,36 @@ test("pasted images on a phone: the component draws nothing, and the fields it w
   assert.equal(more.error, null, `More context crashed on a phone: ${(more.error as Error)?.message}`);
   assert.ok(more.r!.root.findAll(n => n.props.accessibilityLabel === "What do you want to know?").length);
 });
+
+// notes-read-like-one-feed (invariant 120): What's new is one scroll like Paseo's own. Every version's number, date and
+// changes, the Installed pill on the running one, nothing to open, and the release pages one tap away.
+test("What's new on a phone and on desktop: every version in one scroll, nothing to open, the installed one marked", async () => {
+  const { WhatsNewSheet } = await import("../client/release-notes");
+  const { notesFeed, parseChangelog } = await import("../shared/changelog");
+  const many = Array.from({ length: 10 }, (_, i) => `- **Change ${i + 1}:** what it does.`).join("\n");
+  const log = parseChangelog(`## 2.4.2 (2026-11-26)\n\nIntro of 2.4.2.\n\n${many}\n\n## 2.4.1 (2026-11-25)\n\n- **Fix:** one.\n\n## 2.0.0 (2026-11-11)\n\nIntro of 2.0.\n\n### One list\n\n- Home is one list.\n`);
+  const feed = notesFeed(log, "2.4.1", parseChangelog(`## 2.4.2 (2026-11-26)\n\nIntro of 2.4.2.\n\n${many}\n`));
+  const texts = (r: NonNullable<Awaited<ReturnType<typeof render>>["r"]>) => r.root.findAll(n => n.type === "Text").map(n => [n.props.children].flat(Infinity).filter(x => typeof x === "string").join(""));
+  for (const compact of [true, false]) {
+    let opened: string | null = null;
+    const { r, error } = await render(createElement(WhatsNewSheet, { open: true, name: "Follow-up", feed, releases: "https://github.com/example/app/releases", theme, compact, onClose: () => {}, openUrl: (u: string) => { opened = u; } }));
+    assert.equal(error, null, `crashed (${compact ? "phone" : "desktop"}): ${(error as Error)?.message}`);
+    const all = texts(r!);
+    for (const v of ["2.4.2", "2.4.1", "2.0.0"]) assert.ok(all.includes(v), `${v}'s number shows`);
+    assert.ok(all.some(t => /November 26, 2026|26 November 2026/.test(t)), "each version's date, in full");
+    assert.equal(all.filter(t => t === "Installed").length, 1, "one Installed pill");
+    const header = r!.root.findAll(n => n.props.accessibilityRole === "header" && typeof n.props.accessibilityLabel === "string" && n.props.accessibilityLabel.startsWith("2.4.1"));
+    assert.match(String(header[0]?.props.accessibilityLabel), /installed/i, "the pill is on the installed version's header, and read aloud");
+    assert.ok(all.includes("Intro of 2.4.2.") && all.includes("Intro of 2.0."), "each intro is its version's first paragraph");
+    assert.ok(all.includes("One list") && all.includes("Home is one list."), "a curated section reads in full");
+    assert.ok(all.includes("Change 10:"), "every bullet, no Show all");
+    for (const gone of ["See all release notes", "Show all 10", "versions since you last looked"]) assert.ok(!all.some(t => t.includes(gone)), `no "${gone}"`);
+    assert.equal(r!.root.findAll(n => n.props["aria-expanded"] !== undefined || (n.props.accessibilityState as { expanded?: boolean } | undefined)?.expanded !== undefined).length, 0, "no disclosure");
+    const link = r!.root.findAll(n => n.props.accessibilityLabel === "Release notes on GitHub" && typeof n.props.onPress === "function")[0];
+    assert.ok(link, "the release pages, one tap away");
+    await act(async () => { (link!.props.onPress as () => void)(); });
+    assert.equal(opened, "https://github.com/example/app/releases");
+  }
+  const { r } = await render(createElement(WhatsNewSheet, { open: true, name: "Follow-up", feed, releases: null, theme, compact: true, onClose: () => {} }));
+  assert.equal(r!.root.findAll(n => n.props.accessibilityLabel === "Release notes on GitHub").length, 0, "no release pages known: no link");
+});

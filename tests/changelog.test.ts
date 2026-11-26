@@ -6,7 +6,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { LEGACY_BASELINE, announcesUpdate, imageBlock, inlineRuns, notesSince, releaseNoteSchema, notesVersion, parseChangelog, recentNotes, recentUpdate, whatsNew } from "../shared/changelog";
+import { LEGACY_BASELINE, announcesUpdate, imageBlock, inlineRuns, notesFeed, notesSince, releasesUrl, releaseNoteSchema, notesVersion, parseChangelog, recentNotes, recentUpdate, whatsNew } from "../shared/changelog";
 // @ts-expect-error plain ESM script without types
 import { CURATED_MAX_BULLETS, DRAFT_MARKER, featuresInPatch, fragmentBullets, isMajor, lintBullet, nextVersion } from "../scripts/release-notes.mjs";
 
@@ -347,4 +347,79 @@ test("changelog: bold in a curated bullet or paragraph reaches What's new as bol
     }
     for (const item of n.items) for (const r of inlineRuns(item)) assert.doesNotMatch(r.text, marker, `${n.version}: ${item}`);
   }
+});
+
+// notes-read-like-one-feed (invariant 120). 2026-11-26, the developer: "make the release notes more like paseo's own,
+// so no need to open any section in it, just release number and changes and I can scroll em all".
+const FEED_LOG = `# Release notes
+
+## 2.4.2 (2026-11-26)
+
+A shorter plugin page.
+
+- **The plugin page is current:** it says what Follow-up is today.
+
+<details><summary>Full changelog since 2.4.1</summary>
+
+- A line that stays on GitHub.
+
+</details>
+
+## 2.4.1 (2026-11-25)
+
+- **Two fixes.** One and two.
+
+## 2.4.0 (2026-11-24)
+
+- **Start new work:** in one step.
+
+## 2.0.0 (2026-11-11)
+
+Everything that needs you, in one place.
+
+### One list
+
+- Home is one list.
+`;
+
+test("the notes feed: every stable version's curated notes up to the installed one, newest first, the installed one marked", () => {
+  const feed = notesFeed(parseChangelog(FEED_LOG), "2.4.2");
+  assert.deepEqual(feed.map(n => n.version), ["2.4.2", "2.4.1", "2.4.0", "2.0.0"]);
+  assert.deepEqual(feed.map(n => n.installed), [true, false, false, false], "one Installed pill, on the installed version");
+  assert.deepEqual(feed.map(n => n.date), ["2026-11-26", "2026-11-25", "2026-11-24", "2026-11-11"], "each version keeps its date");
+  assert.ok(!JSON.stringify(feed).includes("stays on GitHub"), "the collapsed full changelog stays on the GitHub release pages");
+  assert.equal(feed[0]!.blocks?.[0]?.text, "A shorter plugin page.", "the intro line is the version's first paragraph");
+});
+
+test("the notes feed: a version past the installed one shows only from the update's pending notes, above, unmarked", () => {
+  const log = parseChangelog(FEED_LOG);
+  const feed = notesFeed(log, "2.4.1");
+  assert.deepEqual(feed.map(n => n.version), ["2.4.1", "2.4.0", "2.0.0"], "notes shipped ahead of the installed version stay out");
+  assert.equal(feed[0]!.installed, true);
+  const pending = parseChangelog("## 2.5.0 (2026-11-27)\n\n- **New:** thing.\n\n## 2.4.2 (2026-11-26)\n\n- **Dup.**");
+  const ahead = notesFeed(log, "2.4.1", pending);
+  assert.deepEqual(ahead.map(n => n.version), ["2.5.0", "2.4.2", "2.4.1", "2.4.0", "2.0.0"]);
+  assert.deepEqual(ahead.map(n => n.installed), [false, false, true, false, false], "Installed sits on the running version, below what's out");
+});
+
+test("the notes feed: betas never appear (they ship no curated notes); a beta or a major's rc install marks only what it carries", () => {
+  const log = parseChangelog(`${FEED_LOG}\n## 2.4.0-beta.3 (2026-11-23)\n\n- A beta's line.\n`);
+  assert.deepEqual(notesFeed(log, "2.4.2").map(n => n.version), ["2.4.2", "2.4.1", "2.4.0", "2.0.0"], "no beta section, even if one is in the file");
+  const onBeta = notesFeed(log, "2.5.0-beta.1");
+  assert.deepEqual(onBeta.map(n => n.version), ["2.4.2", "2.4.1", "2.4.0", "2.0.0"], "a beta install still reads every stable before it");
+  assert.ok(onBeta.every(n => !n.installed), "no stable section is the beta, so none says Installed");
+  const rc = notesFeed(parseChangelog(FEED_LOG), "2.0.0-rc.1");
+  assert.deepEqual(rc.map(n => [n.version, n.installed]), [["2.0.0", true]], "a major's rc carries the major's section");
+});
+
+test("the notes feed opens the release pages from the repository in package.json, or nowhere", () => {
+  assert.equal(releasesUrl({ type: "git", url: "git+https://github.com/example/app.git" }), "https://github.com/example/app/releases");
+  assert.equal(releasesUrl("https://github.com/example/app"), "https://github.com/example/app/releases");
+  assert.equal(releasesUrl("git@github.com:example/app.git"), "https://github.com/example/app/releases");
+  assert.equal(releasesUrl("github:example/app"), "https://github.com/example/app/releases");
+  assert.equal(releasesUrl("example/app"), "https://github.com/example/app/releases");
+  assert.equal(releasesUrl("https://gitlab.com/example/app.git"), null, "only GitHub has release pages we know the shape of");
+  assert.equal(releasesUrl(undefined), null);
+  const pkg = JSON.parse(readFileSync(join(import.meta.dirname, "..", "package.json"), "utf8")) as { repository: unknown };
+  assert.match(releasesUrl(pkg.repository) ?? "", /^https:\/\/github\.com\/[\w.-]+\/paseo-follow-up\/releases$/, "this package's own release pages");
 });

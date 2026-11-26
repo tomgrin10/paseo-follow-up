@@ -1496,8 +1496,16 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    puts `system-ui` first, the VM's `system-ui` was a regular-only font (WenQuanYi Zen Hei), and fontconfig synthesizes
    bold only from 700, so every semibold on a phone render (headings and buttons too) drew regular. A render shows
    weight: the harness browser's fonts come from `scripts/harness-fonts.conf` (set by `harness()`), and screenshots
-   refuse to render when 600 draws like 400 (`fontWeightProblem`, `scripts/font-weights.mjs`). Guarded by
-   `tests/changelog.test.ts` and `tests/harness-fonts.test.ts`.
+   refuse to render when 600 draws like 400 (`fontWeightProblem`, `scripts/font-weights.mjs`).
+   **The notes read like one feed** (`notes-read-like-one-feed`): What's new and the release notes are one scroll, like
+   Paseo's own: every stable version's curated notes, newest first (`notesFeed`), each under a header row with its
+   number, an Installed pill on the running version and its date, then its intro as the first paragraph and every
+   bullet, heading and image. Nothing folds: no "Show all", no folded older versions, no "See all release notes". It
+   opens at the newest; older versions are a scroll away. Betas never appear (they ship no curated notes). The full
+   changelog stays on the GitHub release pages, behind the header's open-in-browser icon (`releasesUrl`), the one URL
+   the notes open. 2026-11-26, the developer: "make the release notes more like paseo's own, so no need to open any
+   section in it, just release number and changes and I can scroll em all". Guarded by `tests/changelog.test.ts`,
+   `tests/native-render.test.ts`, `tests/image-viewer.test.ts` and `tests/harness-fonts.test.ts`.
 121. **A scheduled task arrives once, at its time** (`a-scheduled-task-arrives-once-at-its-time`). A task's trigger can
    be a time (`{event: "at", at}` with an offset, or `inMinutes`), set by the developer (At a time in Send on a
    schedule) or by the agent for its own check-back on something Follow-up can't see; the hook, tool and skill say so in
