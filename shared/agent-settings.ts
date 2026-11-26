@@ -1,3 +1,4 @@
+import { GUARDED_PHRASE, guardedProvider } from "./provider-support";
 import { z } from "zod";
 import { waitStatusSchema } from "./wait";
 import { NEW_NAME, NEW_WORK } from "./new-name";
@@ -18,20 +19,20 @@ import { NEW_NAME, NEW_WORK } from "./new-name";
 export const AGENT_ROLES = ["about", "overseer", "recovery", "ranker", "dispatch"] as const;
 export type AgentRole = typeof AGENT_ROLES[number];
 /**
- * One-shot jobs run on any Paseo provider. These two have a headless CLI fast path (server/ai-jobs.ts); every other
- * provider runs the job as a short-lived hidden agent (server/job-agent.ts).
+ * One-shot jobs run on any Paseo provider. Claude, Codex and Pi run through their own headless CLI (server/ai-jobs.ts);
+ * every other provider runs the job as a short-lived hidden agent (server/job-agent.ts).
  */
-export const CLI_JOB_PROVIDERS = ["claude", "codex"] as const;
+export const CLI_JOB_PROVIDERS = ["claude", "codex", "pi"] as const;
 export const isJobRole = (role: AgentRole) => role === "about" || role === "ranker";
 /**
- * Whether Follow-up can take every tool away from a job on this provider: Claude under the job guard's grant, Codex in
- * its read-only sandbox. Any other provider runs a job as a Paseo agent with its own tools
- * (a-job-that-reads-outside-content-can-only-read), so a job that reads words someone else wrote doesn't run there.
+ * Whether Follow-up can take every tool away from a job on this provider (shared/provider-support.ts providerCaps:
+ * Claude under the job guard, Codex in its read-only sandbox, Pi with no tools, OpenCode with every permission denied).
+ * On any other a job that reads words someone else wrote doesn't run (a-job-that-reads-outside-content-can-only-read).
  */
-export const guardedProvider = (provider: string) => (CLI_JOB_PROVIDERS as readonly string[]).includes(provider);
+export { guardedProvider };
 /** The one line a refused job leaves (Settings → Agents, the source, the job's error). */
 export const unguardedJobWhy = (providerLabel: string, what: string) =>
-  `${what} doesn't run on ${providerLabel}: it reads words other people wrote, and Follow-up can't take ${providerLabel}'s tools away. Pick Claude or Codex in Settings → Agents.`;
+  `${what} doesn't run on ${providerLabel}: it reads words other people wrote, and ${providerLabel} can't promise Follow-up a job with no tools. Pick ${GUARDED_PHRASE} in Settings → Agents.`;
 /**
  * A job whose whole work reads words other people wrote (AI priority), so it runs only on a guarded provider: it's never
  * recommended on any other, and with no guarded provider available its row says so and shows it off.

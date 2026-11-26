@@ -5,6 +5,7 @@ import { basename, dirname, join } from "node:path";
 import type { z } from "zod";
 import { guardFor, refusedCalls, type ToolGrant } from "./job-guard";
 import { guardedProvider } from "../shared/agent-settings";
+import { GUARDED_PHRASE } from "../shared/provider-support";
 
 /**
  * Small bounded model jobs: a prompt in, validated JSON out. Shared by Summaries and the Overseer ranker.
@@ -25,7 +26,7 @@ export type JobSpec<T> = {
   prompt: string;
   schema: z.ZodType<T>;
   system?: string;
-  /** Any Paseo provider id; "claude" (default) and "codex" run through their headless CLI, the rest as a hidden agent. */
+  /** Any Paseo provider id; "claude" (default), "codex" and "pi" run through their headless CLI, the rest as a hidden agent. */
   provider?: string;
   /** The provider's model: "haiku" (Claude's default here), "sonnet", "gpt-6-luna"… */
   model?: string;
@@ -40,7 +41,7 @@ export type JobSpec<T> = {
   runner?: Runner;
   /**
    * The prompt carries words someone else wrote (an issue, a thread, a chat, a plan, mail). Such a job runs only on a
-   * provider Follow-up can take every tool away from (`guardedProvider`); on any other it is refused before it starts
+   * provider Follow-up can take every tool away from (`guardedProvider`, shared/provider-support.ts); on any other it is refused before it starts
    * (a-job-that-reads-outside-content-can-only-read).
    */
   outside?: boolean;
@@ -87,7 +88,7 @@ export class AiJobs {
     if (this.stopped) return done({ ok: false, reason: "stopped", error: "Follow-up is stopping.", costUsd: null, durationMs: 0 });
     const provider = spec.provider ?? "claude";
     // Someone else's words never reach a model that has tools: refused before any runner, the tests' included.
-    if (spec.outside && !guardedProvider(provider)) return done({ ok: false, reason: "unguarded", error: `This job reads words other people wrote, and Follow-up can't take ${provider}'s tools away. Pick Claude or Codex in Settings → Agents.`, costUsd: null, durationMs: 0 });
+    if (spec.outside && !guardedProvider(provider)) return done({ ok: false, reason: "unguarded", error: `This job reads words other people wrote, and Follow-up can't take ${provider}'s tools away. Pick ${GUARDED_PHRASE} in Settings → Agents.`, costUsd: null, durationMs: 0 });
     // An injected runner (tests) always wins, so a job can never reach the real CLI from a test; then the job's own.
     const runner = this.opts.runner ?? spec.runner ?? this.opts.runners?.[provider] ?? defaultRunner(provider) ?? this.opts.generic;
     if (!runner) return done({ ok: false, reason: "failed", error: `${provider} can't run one-shot jobs here; pick another provider in Settings → Agents.`, costUsd: null, durationMs: 0 });
@@ -185,10 +186,30 @@ export function parseCodexEvents(stdout: string): RunOutput {
 }
 const codexError = (raw: string) => { try { const j = JSON.parse(raw); return String(j?.error?.message ?? raw).slice(0, 200); } catch { return raw.slice(0, 200); } };
 
-/** Claude's own default for jobs; Codex uses its CLI default when no model is set. */
+/**
+ * `pi -p` with no tools at all and nothing loaded from the developer's setup: no extensions, skills, prompt templates
+ * or context files, no saved session (flags from Pi's README). The prompt goes on stdin, which print mode merges into
+ * the message; the reply is the printed text. Pi reports no cost.
+ */
+export function piArgs(input: Pick<RunInput, "model" | "system"> & { thinking?: string | null }): string[] {
+  return ["-p", "--no-tools", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-context-files", "--no-session",
+    ...(input.model ? ["--model", input.model] : []), ...(input.thinking ? ["--thinking", input.thinking] : []), "--system-prompt", input.system,
+    "Answer the material below as the system prompt says."];
+}
+export function parsePiOutput(stdout: string): RunOutput {
+  if (!stdout.trim()) throw new Error("Pi returned no reply.");
+  return { text: stdout, costUsd: null, inputTokens: null, outputTokens: null };
+}
+/** Spawns `pi` the same way as the other CLIs: an argument array, the prompt on stdin, from the temp dir. */
+export function piRunner(command = "pi"): Runner {
+  return input => spawnJob(command, piArgs(input), input.prompt, parsePiOutput, input, childEnv({}, {}));
+}
+
+/** Claude's own default for jobs; Codex and Pi use their CLI default when no model is set. */
 export const DEFAULT_MODEL: Record<string, string> = { claude: "haiku" };
+/** The providers whose own CLI runs a job with no tools (shared/provider-support.ts CLI_GUARD_PROVIDERS). */
 export function defaultRunner(provider: string): Runner | null {
-  return provider === "claude" ? claudeRunner() : provider === "codex" ? codexRunner() : null;
+  return provider === "claude" ? claudeRunner() : provider === "codex" ? codexRunner() : provider === "pi" ? piRunner() : null;
 }
 
 /** The envelope of a one-turn reply is a few KB; anything near this is runaway output. */

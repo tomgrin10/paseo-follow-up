@@ -4,7 +4,7 @@ import type { Runner, RunInput } from "./ai-jobs";
 
 /**
  * One-shot jobs on any Paseo provider: the job runs as a short-lived agent in a background workspace, so it never shows
- * in the developer's workspace or agent lists, and is archived as soon as it answers. Claude and Codex keep their
+ * in the developer's workspace or agent lists, and is archived as soon as it answers. Claude, Codex and Pi keep their
  * headless CLI fast path (ai-jobs.ts); this is for every other provider.
  *
  * Paseo 0.15.2 refuses `internal` agents from clients ("create a background workspace instead"), so a background
@@ -33,6 +33,17 @@ export type JobAgentOptions = {
   directory: string;
 };
 
+/**
+ * A job agent gets no tools wherever its provider can be told so (shared/provider-support.ts SESSION_GUARD_PROVIDERS):
+ * OpenCode takes a session permission rule, and Paseo turns `permission: "deny"` into `*` denied for every tool, its
+ * own MCP tools included, before any prompt; Auto Accept stays off (Paseo turns it on for an unattended agent
+ * otherwise). A job never needs a tool, so every job there is locked, not only one that reads other people's words.
+ * Belt and braces: a job that still asks for a permission fails and is archived (status "permission").
+ */
+export function lockedConfig(provider: string): Record<string, unknown> {
+  return provider === "opencode" ? { providerOptions: { permission: "deny", auto_accept: false } } : {};
+}
+
 /** The provider string Paseo's agent config takes: "opencode/qwen3-coder", or the provider alone for its default model. */
 export const providerModel = (provider: string, model: string) => model ? `${provider}/${model}` : provider;
 
@@ -54,7 +65,7 @@ export function jobAgentRunner(opts: JobAgentOptions): Runner {
   };
   const create = async (paseo: JobPaseo, input: RunInput) => {
     const options = {
-      config: { provider: providerModel(input.provider, input.model), systemPrompt: input.system, ...(input.thinking ? { thinkingOptionId: input.thinking } : {}) },
+      config: { provider: providerModel(input.provider, input.model), systemPrompt: input.system, ...(input.thinking ? { thinkingOptionId: input.thinking } : {}), ...lockedConfig(input.provider) },
       title: `${JOBS_TITLE}: one-shot`, labels: { [JOB_LABEL]: "1" }, prompt: input.prompt, autoArchive: true,
     };
     // A saved workspace can be archived or gone (a fresh Paseo home): make a new one once, then give up.

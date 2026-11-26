@@ -1,6 +1,6 @@
 import { providerSettling, EMPTY_AGENT_SETTINGS, ROLE_DEFAULTS, guardedProvider, needsGuard, ROLE_INFO, SAME_LABEL, hasSame, isJobRole, labelsFor, resolveRole, roleSummary, type AgentRole, type AgentSettingsView, type Catalog, type RoleConfig, type SavedRole } from "./agent-settings";
 import { ROLE_NEED, isRecommended, recommend, type Recommendation } from "./recommend";
-import { guardAction } from "./provider-support";
+import { GUARDED_PHRASE, guardAction } from "./provider-support";
 import { NEW_NAME } from "./new-name";
 
 /**
@@ -67,12 +67,12 @@ export function jobRow(r: RoleView, catalog: Catalog | null | undefined): JobRow
   const title = ROLE_INFO[role].title;
   const blocked = known && needsGuard(role) && !providers.some(p => p.available && guardedProvider(p.id));
   if (blocked) {
-    notice = { tone: "warning", text: `${title} reads other people's messages, so it runs only on Claude Code or Codex, where Follow-up can keep it read-only. ${guardAction(providers)} to use it.` };
+    notice = { tone: "warning", text: `${title} reads other people's messages, so it runs only where Follow-up can keep it read-only (${GUARDED_PHRASE}). ${guardAction(providers)} to use it.` };
   } else if (broken) {
     const name = current?.label ?? roleSummary(r).split(" · ")[0];
     notice = { tone: "warning", text: `${name} isn't available here, so ${WONT_RUN[role]}.${recPick ? ` Recommended: ${recPick}.` : ""}` };
   } else if (known && needsGuard(role) && !r.same && !guardedProvider(r.provider)) {
-    notice = { tone: "warning", text: `${title} reads other people's messages, so it runs only on Claude Code or Codex, where Follow-up can keep it read-only.${recPick ? ` Recommended: ${recPick}.` : ""}` };
+    notice = { tone: "warning", text: `${title} reads other people's messages, so it runs only where Follow-up can keep it read-only (${GUARDED_PHRASE}).${recPick ? ` Recommended: ${recPick}.` : ""}` };
   } else if (recPick) notice = { tone: "muted", text: `Recommended: ${recPick}` };
   return {
     role, title: ROLE_INFO[role].title, does: ROLE_INFO[role].does, need: ROLE_NEED[role],
