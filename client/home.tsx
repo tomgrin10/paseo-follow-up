@@ -1,4 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { usePagedList } from "./paged-list";
 import { browserKey } from "./keys";
 import { Platform, TextInput, useWindowDimensions, View } from "react-native";
 import { AttachImageButton, ImageAttachmentsRow, ImageField, useImageAttachments } from "./image-attach";
@@ -981,6 +982,8 @@ function LogView({ theme, compact, sources, onHome, onOpen }: { theme: Theme; co
   const since = useMemo(() => days ? Date.now() - days * 86_400_000 : lastWorkdayEnd(Date.now()), [days]);
   const lines = useMemo(() => followUpLog(sources.live.all(), since), [version, since, sources.live]);
   const needs = sources.inbox.rows().filter(r => r.needs && !r.snooze).length;
+  // A week of a busy host is hundreds of lines: pages (client/paged-list.tsx), a new window starts at page 1.
+  const page = usePagedList({ items: lines, resetKey: String(days), theme, compact, noun: "lines" });
   return <ScrollView style={{ flex: 1, backgroundColor: c.surface0 }} contentContainerStyle={{ padding: compact ? 16 : 28, gap: 12, maxWidth: 820, width: "100%", alignSelf: "center" }}>
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       <Button theme={theme} compact={compact} kind="ghost" icon="House" title="Home" onPress={onHome} />
@@ -992,7 +995,8 @@ function LogView({ theme, compact, sources, onHome, onOpen }: { theme: Theme; co
       <Text style={[t.body, { flex: 1 }]}>{needs ? `${needs} thing${needs === 1 ? "" : "s"} it left for you are on Home.` : "Nothing is waiting for you on Home."}</Text>
       <Icon name="ChevronRight" size={14} color={c.foregroundMuted} />
     </Pressable>
-    {lines.length ? lines.map(l => <LogRow key={l.key} l={l} c={c} onOpen={() => onOpen(`agent:${l.agentId}`)} />) : <Text style={t.meta}>Nothing in this window.</Text>}
+    {lines.length ? page.shown.map(l => <LogRow key={l.key} l={l} c={c} onOpen={() => onOpen(`agent:${l.agentId}`)} />) : <Text style={t.meta}>Nothing in this window.</Text>}
+    {page.footer}
     {!days && <Button theme={theme} compact={compact} kind="ghost" title="Show the last 7 days" onPress={() => setDays(7)} />}
   </ScrollView>;
 }

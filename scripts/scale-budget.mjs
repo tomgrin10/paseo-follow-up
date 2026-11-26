@@ -210,3 +210,17 @@ export const DIRTY_REFRESH_MS = 60_000;
 export const SEND_DRAIN_QUIET_MS = DIRTY_REFRESH_MS + ENGINE_TICK_MS + 5_000;
 /** The drain before the idle window: after a busy window, its known re-read plus a tick of quiet; after the send phase alone, a re-read's whole wait. */
 export const drainPlan = ({ busyMs }) => busyMs > 0 ? { quietMs: DRAIN_QUIET_MS, awaitRelist: true } : { quietMs: SEND_DRAIN_QUIET_MS, awaitRelist: false };
+
+/**
+ * Every list pages (invariant pr-scale-lists-batch-not-throw): on the live-sized seed's big workspace (BIG_QUESTIONS
+ * questions, BIG_BATCHES sent batches, BIG_PRS PRs) one read the panel makes stays under these bytes, however much
+ * history it holds. follow.get carries live history plus the newest HISTORY_KEPT settled items of each kind
+ * (shared/history.ts); follow.activity one PAGE.size page. Measured 2026-11-26 before paging: follow.get ~680 KB for
+ * 175 questions and 400 batches. Enforced even with --budgets-report-only: a reply size isn't noise.
+ */
+// follow.agent-status is workspace_status: an agent tool's answer stays under TOOL_BUDGET (shared/paged.ts, 40,000).
+export const PAGED_REPLY_BUDGET_BYTES = Object.freeze({ "follow.get": 400_000, "follow.activity": 60_000, "follow.agent-status": 40_000 });
+export function pagedReplyVerdict(replies, budgets = PAGED_REPLY_BUDGET_BYTES) {
+  const over = replies.filter(r => budgets[r.method] !== undefined && r.bytes > budgets[r.method]).map(r => `${r.method} ${r.label}: ${r.bytes} bytes, over ${budgets[r.method]}`);
+  return { replies, over };
+}

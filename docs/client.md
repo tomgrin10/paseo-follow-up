@@ -77,6 +77,7 @@ Nothing polls while the app is hidden.
 | `client/header.tsx` | The stack bar and the header status. |
 | `client/stacks.tsx` | Stacks drawn top to base. |
 | `client/section-search.tsx`, `shared/section-search.ts` | Section search in the panel's Pull requests and Activity. See [Section search](#section-search). |
+| `client/paged-list.tsx`, `shared/paged.ts`, `shared/history.ts` | Every long list in pages, and a workspace's history bounded on the wire. See [Paged lists](#paged-lists). |
 | `client/pr-sheet.tsx`, `client/pr-controls.tsx` | One PR's sheet, with merge and reviewer controls. |
 | `client/reviewers.tsx` | Reviewer lists and the picker. |
 | `client/needs-you.tsx` | The workspace's one Needs you block: the asks (question cards, the brief), then the decision rows (Send repairs, Merge, Resume, Retry, Check). |
@@ -226,12 +227,40 @@ it. Esc or ✕ closes it, and focus returns to the icon. There's no key binding,
   (invariant 28) and keeps the list's own order. Matched words take the sidebar filter's hit style (`marks`).
 - **Agent's tasks has no search**: it is the agent's list, folded to one line, a handful of rows when open.
 - **Folds are ignored while a query is typed**: merged PRs, settled stacks and Activity's "Show all" show
-  their matches in place, done ones muted as usual. The next-message strip, held merges and in-flight lines step
+  their matches in place, done ones muted as usual, a page at a time ([Paged lists](#paged-lists)). Activity searches on
+  the worker (`follow.activity`), across its whole history. The next-message strip, held merges and in-flight lines step
   aside. Activity's tab chips move under the field and count their matches, so a hit in the other tab is never hidden.
 - Nothing matches: "No tasks match ‘x’" (or pull requests, activity).
 - **View state only.** The query lives in the card, per section, and belongs to the workspace it was typed in:
   another workspace opens with it closed (`queryFor`). Agents read the same lists whole through `workspace_status`
   and `list_prs` (`VIEW_PARITY`, `server/agent-parity.ts`).
+
+## Paged lists
+
+Every list that grows with use draws one page at a time (invariant `pr-scale-lists-batch-not-throw`, "every list
+pages"). One component, `client/paged-list.tsx`: `usePagedList` returns the rows to draw and the footer, and
+`PagedRows` is the same as an element, for a list inside a condition or a fold. Page math and copy are
+`shared/paged.ts` (`PAGE.size` 25 rows a page, `PAGE.preview` 5 folded).
+
+- **Folded**: a list with its own fold shows `preview` rows and "Show all N". **Opened**: one page and the pager:
+  Show less on the left, then Previous, "26–50 of 312" (read as "Rows 26 to 50 of 312 …, page 2 of 13", a polite
+  live region) and Next. A list without a fold of its own (a card that folds whole, a settings section) pages from
+  the first row with no Show all or Show less. The buttons are plain buttons: Tab reaches them, Enter or Space
+  presses them; 44 pt tall on phones.
+- **Search pages its hits** from the first page, with no fold. A new query, tab or filter (`resetKey`) goes back to
+  page 1; `follow` keeps a row's page in view (Catch up's rail follows the card on screen).
+- **Data is bounded too.** `follow.get` and `follow.list` carry what is live in full and the newest `HISTORY_KEPT`
+  settled questions, batches and PR actions (`boundHistory`, `shared/history.ts`); the Activity card reads its rows a
+  page at a time from `follow.activity` (`activityPage`), which searches the whole history on the worker. The panel's
+  own copy draws the first page until the worker answers. An old question opened from Activity draws from the page's
+  copy (`QuestionSheet`'s `fallback`).
+- **Every adopter**: Activity (timeline and questions), Agent's tasks, Messages to the agent, Needs you (items and
+  question cards), Pull requests (stacks, 10 a page, and each stack's rows), held merges, other agents, Catch up's
+  rail, Done while you were away, Settings → Following (projects, workspaces, repositories, PR statistics),
+  Reviewers (repositories, the default's chips), New work (rules, learned teams, bases), Compass's sources and
+  servers, the queue screen and Nobody's on it, What's new (5 versions a page; a preview's bullets), PR stats
+  (people, a person's PRs and reviews) and onboarding's workspaces. Linked items stay whole: the store keeps at most
+  50. `tests/paged-lists.test.ts` fails on a "Show all" or "Show N more" that draws every row anywhere else.
 
 ## Chat rows and Paseo's grouping
 

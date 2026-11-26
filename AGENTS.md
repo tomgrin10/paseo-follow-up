@@ -99,7 +99,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | UI | `index.client.tsx`, `client/`, `client/row-badges.tsx`, `shared/row-badges.ts`, `client/host-slot.tsx`, `client/scroll-allowlist.ts`, `client/split.tsx`, `shared/split.ts`, `client/pane-allowlist.ts`, `client/search-key.ts`, `shared/search-key.ts`, `client/search-focus.ts`, `shared/search-focus.ts`, `shared/home-keys.ts` | [client](docs/client.md) |
 | Chat card for agents and workspaces an agent creates | `shared/created.ts`, `server/created-items.ts`, `client/created.tsx` | [client](docs/client.md#created-agent-and-workspace-cards) |
 | Pasted images in every field whose words reach an agent (caps, the store, who takes them, the one component) | `shared/images.ts`, `server/image-store.ts`, `server/image-support.ts`, `client/image-attach.tsx`, `client/unsent-images.ts` | [client](docs/client.md#pasted-images), [rpcs-and-tools](docs/rpcs-and-tools.md#pasted-images) |
-| Shared copy and errors, scale bounds | `shared/presentation.ts`, `shared/errors.ts`, `shared/tool-result.ts`, `shared/scale.ts` | [client](docs/client.md) |
+| Shared copy and errors, scale bounds, paged lists | `shared/presentation.ts`, `shared/errors.ts`, `shared/tool-result.ts`, `shared/scale.ts`, `shared/paged.ts`, `shared/history.ts`, `client/paged-list.tsx` | [client](docs/client.md) |
 | Tests, checks and README screenshots | `tests/`, `scripts/`, `scripts/screenshots.mjs`, `button-visibility.test.mjs` | [testing](docs/testing.md) |
 | Report an issue (shared module, Follow-up's adapter, the sheet) | `server/report-issue/index.ts`, `server/report-issue/redact.ts`, `server/report-issue/render.ts`, `server/report-issue/github.ts`, `server/report-issue/diagnostics.ts`, `server/report-issue-adapter.ts`, `server/report-send.ts`, `shared/report-send.ts`, `client/report-issue.tsx`, `scripts/fake-github.d.mts` | [report-issue](docs/report-issue.md) |
 | Releases | `changes/`, `CHANGELOG.md`, `scripts/release-notes.mjs`, `scripts/publish-npm.mjs`, `scripts/release-body.mjs`, `scripts/backfill-release-notes.mjs`, `scripts/check-release-note.mjs`, `.github/workflows/` | [releasing](docs/releasing.md) |
@@ -907,6 +907,23 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    (`downstackScan`). Guarded by `tests/pr-scale.test.ts` (a 260-PR stack plus 12 repositories through status, Merge
    when ready, GitHub auto-merge, the panel, Home, pr-workspaces, agent tool inputs and the model replies) and
    `tests/check-linear.test.ts`.
+   **Every list pages** (`every-list-pages`): a list that grows with use never draws or sends every row. On screen it
+   draws through `usePagedList` or `PagedRows` (`client/paged-list.tsx`): folded, `PAGE.preview` rows and "Show all
+   N"; opened, one `PAGE.size` page with "26–50 of 312", Previous and Next (`shared/paged.ts`); a search pages its hits
+   and still finds across every page. On the wire, `follow.get` and `follow.list` carry live history whole and only the
+   newest `HISTORY_KEPT` settled questions, batches and PR actions (`boundHistory`, `shared/history.ts`), and the
+   Activity card reads `follow.activity` a page at a time, searched on the worker. 2026-11-26, Tom: "in this workspace
+   for example I have tons of timeline items and questions, when I click "Show all" in the timeline it lags a bit then
+   makes the whole sidebar scroll forever"; Activity drew every row, and follow.get carried ~680 KB for 175 questions
+   and 400 batches. Guarded by `tests/paged-lists.test.ts` (render bounds, paging, search across pages, the wire
+   bound, a scan for any "Show all" that draws every row) and `test:scale:live` (`pagedReplyVerdict`: the live-sized
+   seed's 300-question, 400-batch workspace, enforced). **An agent tool's answer stays under `TOOL_BUDGET`** whatever a
+   workspace's history: live items come whole, finished ones (merged or closed PRs, done tasks, settled questions,
+   batches, PR actions, quiet inbox rows, settled context asks, older release notes) come as the newest
+   `PAGE.recentDone` plus a count with one line saying how to page the rest (`boundDone`, `agentView`, `offset`/`limit`,
+   `history=<kind>`). 2026-11-26: a busy workspace's `workspace_status` summary was ~207k characters, 98% of it merged
+   PRs, and the agent couldn't read its own status. Guarded by `tests/bounded-tools.test.ts` and the same
+   `pagedReplyVerdict` (`follow.agent-status` summary and full on the live-sized seed).
 64. **A PR summary says the worst** (`a-pr-summary-says-the-worst`). A chip or line that sums up a workspace's PRs
    says the worst of its open PRs, never the first one's: Home's PR chip names the first open PR in stack order with
    the worst state and, at failing checks, counts the PRs failing ("#1058+125 ✗ 4", read aloud "Pull request #1058 and

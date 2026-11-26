@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { PagedRows } from "./paged-list";
 import type { SettingsCategory } from "../shared/settings-nav";
 import { recoveryActions } from "./recovery-actions";
 import { Platform, View, type ScrollView as NativeScrollView } from "react-native";
@@ -35,6 +36,7 @@ import { TasksCard } from "./tasks";
 import { MessagesCard } from "./messages";
 import { PrSheet } from "./pr-sheet";
 import { ActivityCard, QuestionSheet } from "./questions";
+import type { Question } from "../shared/questions";
 import { SpecRow, SpecSheet } from "./spec";
 import { LinkedItemsRow } from "./linked";
 import { mergedColor, tint } from "./theme";
@@ -231,7 +233,7 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
           {openAgent && <Button theme={theme} compact={compact} icon="MessageSquare" title="Open" accessibilityLabel="Open main agent" onPress={() => openAgent(w.mainAgentId)} />}
         </View>
         <MainChangeNotice workspace={w} theme={theme} compact={compact} />
-        {(w.contributorAgentIds ?? []).map(id => <OtherRootAgent key={id} agentId={id} workspace={w} theme={theme} compact={compact} openAgent={openAgent} mainAgentId={w.mainAgentId} />)}
+        <PagedRows items={w.contributorAgentIds ?? []} theme={theme} compact={compact} noun="agents" row={id => <OtherRootAgent key={id} agentId={id} workspace={w} theme={theme} compact={compact} openAgent={openAgent} mainAgentId={w.mainAgentId} />} />
       </CardRow>
       <CardRow theme={theme} compact={compact}>
         <View style={{ gap: 8 }}>
@@ -368,6 +370,8 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const wide = !compact && width >= WIDE_MIN;
   const [sheet, setSheet] = useState<{ key: string; intent: "merge" | "reviewers" | null } | null>(null);
   const [question, setQuestion] = useState<string | null>(null);
+  // An Activity row's question past what follow.get carries (shared/history.ts): the sheet draws the page's copy.
+  const [oldQuestion, setOldQuestion] = useState<Question | null>(null);
   useQuestionOpener(w.id, setQuestion);
   const [specOpen, setSpecOpen] = useState(false);
   const [moreMenu, setMoreMenu] = useState<ReactNode>(null);
@@ -409,7 +413,7 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const tasks = showWork && <TasksCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} onOpenQuestion={setQuestion} openAgent={openAgent} onShowActivity={showActivity} now={now} />;
   // The send queue (what Follow-up sends the main agent next, and the repairs in it) is Follow-up's, not the agent's to-do list.
   const messages = showWork && <MessagesCard workspace={w} theme={theme} compact={compact} openAgent={openAgent} now={now} />;
-  const log = <View ref={logRef} onLayout={e => { logY.current = e.nativeEvent.layout.y; }}><ActivityCard workspace={w} theme={theme} compact={compact} now={now} open={isOpen} toggle={toggle} onOpenQuestion={setQuestion} /></View>;
+  const log = <View ref={logRef} onLayout={e => { logY.current = e.nativeEvent.layout.y; }}><ActivityCard workspace={w} theme={theme} compact={compact} now={now} open={isOpen} toggle={toggle} onOpenQuestion={(id, q) => { setOldQuestion(q ?? null); setQuestion(id); }} /></View>;
   const extras = <WorkspaceCard workspace={w} theme={theme} compact={compact} open={isOpen} toggle={toggle} openAgent={openAgent} browserReady={browser.data ? browser.data.ready : null} openOverview={openOverview} editSpec={() => setSpecOpen(true)} />;
   return <View onLayout={event => setWidth(event.nativeEvent.layout.width)} style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>
     {/* Phones fold the top bar into the header's own row. */}
@@ -422,7 +426,7 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
       </View> : <>{agents}{shipped}{needs}{questions}{history}{messages}{stacks}{tasks}{log}{extras}</>}
     </ScrollView>
     <PrSheet workspace={w} prKey={sheet?.key ?? null} intent={sheet?.intent ?? null} theme={theme} compact={compact} browserReady={browser.data?.ready ?? false} onClose={() => setSheet(null)} />
-    <QuestionSheet workspace={w} questionId={question} theme={theme} compact={compact} openAgent={openAgent} onClose={() => setQuestion(null)} />
+    <QuestionSheet workspace={w} questionId={question} fallback={oldQuestion} theme={theme} compact={compact} openAgent={openAgent} onClose={() => setQuestion(null)} />
     <SpecSheet workspace={w} open={specOpen} theme={theme} compact={compact} onClose={() => setSpecOpen(false)} />
     {/* The More menu draws last, at the panel's root, so the panel's own content never paints over it. */}
     {moreMenu}

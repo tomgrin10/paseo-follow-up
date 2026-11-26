@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { usePagedList } from "./paged-list";
 import { Animated, Easing, Platform, View, type ViewStyle, type ScrollView as NativeScrollView } from "react-native";
 import { Pressable, Text } from "./text";
 import { openExternalUrl, useRpc, useSettings } from "@getpaseo/plugin/client";
@@ -279,7 +280,8 @@ function DefaultsStep({ theme, compact, held }: { theme: Theme; compact: boolean
   const data = follow.data;
   const list = data?.workspaces ?? [];
   const followed = list.filter(w => w.enable_tracking && !w.optedOut).length;
-  const shown = all || list.length <= 8 ? list : list.slice(0, 5);
+  // Eight or fewer show whole; more fold to five, and Show all opens pages (client/paged-list.tsx).
+  const page = usePagedList({ items: list, open: all, onToggle: () => setAll(v => !v), preview: list.length <= 8 ? 8 : 5, theme, compact, noun: "workspaces" });
   const trust = display.status === "ready" ? display.values.enable_trust_bypass : null;
   const saveDisplay = (patch: Partial<typeof displayPreferences.schema._output>) => {
     if (display.status !== "ready") return;
@@ -291,7 +293,7 @@ function DefaultsStep({ theme, compact, held }: { theme: Theme; compact: boolean
       <SwitchRow first theme={theme} compact={compact} label="Follow every workspace" hint={list.length ? "New and existing workspaces, except any you turn off below." : "Every workspace, from the first one you create."} value={data?.enable_follow_every ?? null} disabled={change.isPending}
         onChange={v => change.mutate([{ enable_follow_every: v }])}>
         {list.length > 0 && <View style={{ paddingLeft: compact ? 14 : 16, paddingBottom: 6 }}>
-          {shown.map(w => {
+          {page.shown.map(w => {
             const on = w.enable_tracking && !w.optedOut;
             return <Pressable key={w.id} accessibilityRole="checkbox" accessibilityState={{ checked: on }} aria-checked={on} accessibilityLabel={`Follow ${w.title}`} disabled={change.isPending}
               onPress={() => change.mutate([{ workspace: { workspaceId: w.id, follow: !on } }])}
@@ -303,9 +305,7 @@ function DefaultsStep({ theme, compact, held }: { theme: Theme; compact: boolean
               </View>
             </Pressable>;
           })}
-          {shown.length < list.length && <Pressable accessibilityRole="button" onPress={() => setAll(true)} style={{ minHeight: compact ? 44 : 32, justifyContent: "center", borderTopWidth: 1, borderTopColor: c.border }}>
-            <Text style={[t.meta, { color: c.foreground }]}>{`Show all ${list.length}`}</Text>
-          </Pressable>}
+          {page.footer}
         </View>}
       </SwitchRow>
       <SwitchRow theme={theme} compact={compact} label="Send repairs automatically" value={data?.enable_auto_sends_default ?? null} disabled={change.isPending}

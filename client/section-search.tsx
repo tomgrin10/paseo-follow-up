@@ -25,11 +25,13 @@ export type SectionSearch<T> = {
   button: ReactNode;
 };
 
-export function useSectionSearch<T>(workspaceId: string, section: SectionId, { theme, compact, items, fields }: {
+export function useSectionSearch<T>(workspaceId: string, section: SectionId, { theme, compact, items, fields, remote }: {
   theme: Theme; compact: boolean;
   /** Every item of the section, folded ones included, in the order the section draws them. */
   items: readonly T[];
   fields: (item: T) => readonly ItemField[];
+  /** The section searches on the worker (a paged list, follow.activity): no local matching, and "n of N" from its answer. */
+  remote?: { matches: number; total: number } | null;
 }): SectionSearch<T> {
   const [state, setState] = useState<SectionQuery>(null);
   const inputRef = useRef<TextInput | null>(null);
@@ -37,11 +39,11 @@ export function useSectionSearch<T>(workspaceId: string, section: SectionId, { t
   const placeholder = SECTION_PLACEHOLDER[section];
   const buttonId = `follow-section-search-${section}`;
   const close = () => { setState(null); focusSoon(buttonId); };
-  const results = query === null ? null : filterItems(items, fields, query);
+  const results = query === null || remote !== undefined ? null : filterItems(items, fields, query);
   const hits = results ? new Map(results.map(r => [r.item, r.hit])) : null;
   const header = query === null ? undefined : <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: compact ? 4 : 6, marginVertical: -4 }}>
     <QueryField theme={theme} value={query} onChange={q => setState({ workspaceId, query: q })} placeholder={placeholder} icon="Search" dense={compact}
-      inputRef={inputRef} slashHint={false} autoFocus onEscape={close} count={results ? matchCount(results.length, items.length) : ""} />
+      inputRef={inputRef} slashHint={false} autoFocus onEscape={close} count={results ? matchCount(results.length, items.length) : remote && query?.trim() ? matchCount(remote.matches, remote.total) : ""} />
     <IconButton icon="X" label={`Close ${placeholder.toLowerCase()}`} onPress={close} theme={theme} compact={compact} />
   </View>;
   const button = query === null ? <IconButton nativeID={buttonId} icon="Search" label={placeholder} tooltip onPress={() => setState({ workspaceId, query: "" })} theme={theme} compact={compact} /> : null;

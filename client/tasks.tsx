@@ -10,6 +10,7 @@ import { taskTriggerRpc } from "../shared/contracts";
 import { linkedQuestion, type TaskStatus } from "../shared/task-status";
 import { finishedParts, summaryParts, taskSummary, taskViewRows, type TaskViewRow } from "../shared/task-view";
 import { Button, Card, text, type Theme, SubmitScope } from "./kit";
+import { usePagedList } from "./paged-list";
 import { Spinner } from "./motion";
 import { staleColor, type Colors } from "./theme";
 import { RichText } from "./rich-text";
@@ -199,6 +200,8 @@ export function TasksCard({ workspace: w, theme, compact, open, toggle, onOpenQu
   // nothing), so the row, the live line and Home all read the same states.
   const rows = taskViewRows(w, w.taskAgents ?? {}, now);
   const sum = taskSummary(w, now, rows);
+  // Opened, the card pages its rows (client/paged-list.tsx): due and stale sort first, so page 1 holds what moves.
+  const page = usePagedList({ items: rows, theme, compact, noun: "tasks" });
   if (!rows.length && !sum.finished) return null;
   // Collapsed by default, in every state: the tasks are the agent's, and the line says whether it keeps up.
   const shown = open("tasks");
@@ -207,11 +210,12 @@ export function TasksCard({ workspace: w, theme, compact, open, toggle, onOpenQu
   const label = `${parts.neutral}${parts.stale ? ` · ${parts.stale}` : ""}`;
   return <Card theme={theme} compact={compact} icon="ListTodo" title="Agent's tasks" fold={{ open: shown, onToggle: () => toggle("tasks"), label }}
     right={<Text numberOfLines={1} style={{ flexShrink: 1, color: c.foregroundMuted, fontSize: 12, lineHeight: 17, fontVariant: ["tabular-nums"] }}>{parts.neutral}{parts.stale ? <Text style={{ color: staleColor(c), fontWeight: "600" }}>{` · ${parts.stale}`}</Text> : null}</Text>}>
-    {shown && rows.map(r => {
+    {shown && page.shown.map(r => {
       const q = linkedQuestion(r.o, w);
       return <TaskRow key={r.o.id} row={r} w={w} theme={theme} compact={compact} open={open(`task:${r.o.id}`)} openAgent={openAgent} onSchedule={() => setSchedule(r.o.id)}
         onPress={() => r.kind === "needs-you" && q && onOpenQuestion ? onOpenQuestion(q.id) : toggle(`task:${r.o.id}`)} />;
     })}
+    {shown && page.footer}
     {shown && !rows.length && <View style={{ paddingHorizontal: compact ? 14 : 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border }}>
       <Text style={t.meta}>Nothing open. The agent records work that outlives a merge here, like a migration to run or a production check.</Text>
     </View>}

@@ -1,3 +1,4 @@
+import { PagedRows } from "./paged-list";
 import { sendButton } from "../shared/send-words";
 import { FINISH_ASK } from "../shared/status";
 import { View, type StyleProp, type ViewStyle } from "react-native";
@@ -159,7 +160,7 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
     ? <Button theme={theme} compact={compact} kind="ghost" icon="RotateCcw" title={compact ? "Hand back" : "Hand back to agent"} accessibilityLabel={`Hand it back to ${agentName(w)}: ${item.title}`} loading={retryTask.isPending} disabled={busy} onPress={() => retryTask.mutate(item.taskKey)} />
     : null;
   return <PrLinksProvider prs={prLinksByNumber(w.prs)}><View>
-    {items.map((item, index) => {
+    <PagedRows items={items} theme={theme} compact={compact} noun="items" row={(item, index) => {
       const g = glyph(item, c);
       // A row about one PR opens it in one click, beside its action and never instead of it.
       // A person part's own action is Open #N, so it doesn't draw the link a second time.
@@ -219,7 +220,7 @@ export function NeedsYouList({ workspace: w, theme, compact, actions, now = Date
           <View style={{ marginTop: -3, marginRight: flush ? 2 : -5 }}>{x}</View>
         </RevealScope>
       </CardRow>;
-    })}
+    }} />
   </View></PrLinksProvider>;
 }
 
@@ -264,10 +265,10 @@ export function NeedsYouBlock({ workspace: w, theme, compact, actions, now, brie
   // In Later the block stays (its moves still work) but reads Later, without the attention border.
   const later = workspaceSnoozed(w, all, now) && w.snooze ? laterLabel(w.snooze.until, now) : null;
   return <Card theme={theme} compact={compact} icon={later ? "AlarmClock" : asked ? "Check" : "CircleAlert"} title={later ? `Later ${later}` : asked ? "Reviewers requested" : "Needs you"} tone={later || !count ? "plain" : "attention"} count={count || undefined} style={style}>
-    {block.cards.map(card => card.kind === "brief"
+    <PagedRows items={block.cards} theme={theme} compact={compact} noun="questions" row={card => card.kind === "brief"
       ? <View key="brief" style={{ borderTopWidth: 1, borderTopColor: theme.colors.border }}>{briefCard}</View>
       : <QuestionAsk key={card.questionId} workspace={w} questionId={card.questionId} context={card.brief ? brief?.context ?? null : null} theme={theme} compact={compact} now={now} openAgent={actions.openAgent}
-        open={openId === undefined ? card.expanded : openId === card.questionId} onToggle={() => setOpenId(id => (id === undefined ? (card.expanded ? card.questionId : null) : id) === card.questionId ? null : card.questionId)} />)}
+        open={openId === undefined ? card.expanded : openId === card.questionId} onToggle={() => setOpenId(id => (id === undefined ? (card.expanded ? card.questionId : null) : id) === card.questionId ? null : card.questionId)} />} />
     <NeedsYouList workspace={w} theme={theme} compact={compact} actions={actions} now={now} rows={block.rows} />
   </Card>;
 }

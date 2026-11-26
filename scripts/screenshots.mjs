@@ -47,7 +47,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as the CHANGELOG's newest stable, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "gallery", "frames", "onboarding", "setup-popup"];
+const REVIEW_SHOTS = ["tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "gallery", "frames", "onboarding", "setup-popup"];
 /** Pasted images and their Add image button share one harness setup (an Overseer and the fixture provider taking images). */
 const PASTE_LIKE = only => only.includes("paste-images") || only.includes("attach-images");
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
@@ -649,6 +649,25 @@ const PR_SCALE_STATES = [
       msg(`Opened example/app#${PR_SCALE.bottom} through #${PR_SCALE_TOP} as one stack, and three small stacks in example/web.`)] },
 ];
 
+/**
+ * paged-lists only (every list pages, pr-scale-lists-batch-not-throw): a busy workspace's history. The agent asks
+ * PAGED_QUESTIONS questions and answers each in chat (two timeline rows each), finishes PAGED_TASKS_DONE tasks and
+ * keeps PAGED_TASKS_OPEN open, so Activity, its Questions tab and the Tasks card each run to several pages.
+ */
+const PAGED_QUESTIONS = 140, PAGED_TASKS_DONE = 60, PAGED_TASKS_OPEN = 40;
+const PAGED_TOPICS = ["invoice retries", "webhook signatures", "export formats", "ledger rounding", "refund windows", "tax rounding", "receipt layout", "dunning emails", "currency display", "card updates", "proration", "trial ends", "seat limits", "usage alerts"];
+const PAGED_STATES = [
+  { key: "pl-billing", title: "Billing platform", minute: 183, flag: false, prompt: "APP-400: keep the billing platform moving; ask me whenever a call is mine.",
+    steps: [rpc("follow.enroll", { goal: "APP-400 Billing platform" }),
+      ...Array.from({ length: PAGED_QUESTIONS }, (_, i) => [
+        rpc("follow.ask-question", { title: `${PAGED_TOPICS[i % PAGED_TOPICS.length]}: call ${i + 1}`, question: `For ${PAGED_TOPICS[i % PAGED_TOPICS.length]} (case ${i + 1}), should the job retry once or fail fast?`, options: [{ letter: "A", label: "Retry once" }, { letter: "B", label: "Fail fast" }], recommend: "A" }),
+        rpc("follow.record-answer", { id: `Q${i + 1}`, choice: i % 3 ? "A" : "B" }),
+      ]).flat(),
+      ...Array.from({ length: PAGED_TASKS_DONE }, (_, i) => rpc("follow.obligation", { title: `Check ${PAGED_TOPICS[i % PAGED_TOPICS.length]} on staging, run ${i + 1}`, status: "done", evidence: "Ran it on staging; the numbers match.", new: true })),
+      ...Array.from({ length: PAGED_TASKS_OPEN }, (_, i) => rpc("follow.obligation", { title: `Backfill ${PAGED_TOPICS[i % PAGED_TOPICS.length]} for account group ${i + 1}`, status: "pending", new: true })),
+      msg(`Answered ${PAGED_QUESTIONS} calls in chat and finished ${PAGED_TASKS_DONE} checks; ${PAGED_TASKS_OPEN} backfills are next.`)] },
+];
+
 /** review-mode only (a-no-review-repo-never-asks-for-review-or-merge): a PR with no reviewers in a reviewed repository. */
 const REVIEW_MODE_STATES = [
   { key: "rm-audit", title: "Audit log export", minute: 180, prompt: "APP-190: export the audit log as CSV from the admin page.", flag: false,
@@ -709,7 +728,7 @@ async function seed({ call, home }) {
   if (only.includes("review-mode") || only.includes("pr-link")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }] });
   // reviewers-click: Ravi and Mina review example/app, so each PR's row reads "Add reviewers to #N: Ravi and Mina".
   if (only.includes("reviewers-click")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }, { login: "mina", name: "Mina" }] });
-  const specs = [...WORKSPACES.filter(w => !(argv.includes("--rename-fixup-review") || only.includes("local-titles")) || ["audit", "billing"].includes(w.key)), ...(only.includes("needs-you-states") || only.includes("tasks-view") || only.includes("own-answer") || only.includes("more-context") || only.includes("dismiss") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") || PASTE_LIKE(only) ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") || only.includes("dismiss") ? MERGE_CLICK_STATES : []), ...(only.includes("reviewers-click") ? REVIEWERS_CLICK_STATES : []), ...(only.includes("pr-scale") ? PR_SCALE_STATES : []), ...(only.includes("batch-churn") ? BATCH_CHURN_STATES : []), ...(only.includes("scheduled-tasks") ? SCHEDULED_STATES : []), ...(only.includes("now-line") ? NOW_LINE_STATES : [])];
+  const specs = [...WORKSPACES.filter(w => !(argv.includes("--rename-fixup-review") || only.includes("local-titles")) || ["audit", "billing"].includes(w.key)), ...(only.includes("needs-you-states") || only.includes("tasks-view") || only.includes("own-answer") || only.includes("more-context") || only.includes("dismiss") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") || PASTE_LIKE(only) ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") || only.includes("dismiss") ? MERGE_CLICK_STATES : []), ...(only.includes("reviewers-click") ? REVIEWERS_CLICK_STATES : []), ...(only.includes("pr-scale") ? PR_SCALE_STATES : []), ...(only.includes("batch-churn") ? BATCH_CHURN_STATES : []), ...(only.includes("scheduled-tasks") ? SCHEDULED_STATES : []), ...(only.includes("paged-lists") ? PAGED_STATES : []), ...(only.includes("now-line") ? NOW_LINE_STATES : [])];
   if (only.includes("layout-search")) {
     specs.splice(0, specs.length, ...specs.filter(w => ["audit", "billing"].includes(w.key)));
     specs.push(
@@ -2085,6 +2104,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   if (only.includes("home-keys")) await homeKeysShots({ shoot, out });
   if (only.includes("rowchips")) await rowChipShots({ shoot, out });
   if (only.includes("pr-scale")) await prScaleShots({ shoot });
+  if (only.includes("paged-lists")) await pagedListShots({ shoot });
   if (only.includes("pr-stats-settings")) await prStatsSettingsShots({ shoot, call, home });
   if (only.includes("pr-stats")) await prStatsShots({ shoot });
   if (only.includes("pr-stats-off")) await prStatsOffShots({ shoot });
@@ -2650,6 +2670,57 @@ async function prStatsSettingsShots({ shoot, call, home }) {
   });
   await fs.writeFile(fixture, JSON.stringify(d));
 }
+/**
+ * paged-lists (every list pages): PAGED_STATES' workspace. The panel's Activity folded, then its first page and a later
+ * one after Show all, the Questions tab's second page, a search's paged hits, and the Tasks card opened with its pager;
+ * the larger view on a phone, first and later page; light and dark. A shot fails on more rows than a page, a pager
+ * that doesn't say where it is, or a phone page that scrolls sideways.
+ */
+async function pagedListShots({ shoot }) {
+  const spec = PAGED_STATES[0];
+  const TALL = { width: DESKTOP.width, height: 1300 };
+  const activity = page => page.getByRole("button", { name: /^Show Show all \d+$/ }).filter({ visible: true }).first();
+  const check = async (page, vp, label) => {
+    const body = await page.evaluate(() => document.body.innerText);
+    const bad = body.match(/Too big|expected array|Invalid input|Something went wrong/i);
+    if (bad) throw new Error(`paged-lists: the page shows "${bad[0]}"`);
+    if (vp?.width === PHONE.width && await page.evaluate(() => document.documentElement.scrollWidth) > PHONE.width) throw new Error("paged-lists: the phone page scrolls sideways");
+    if (label && !(await page.getByText(label, { exact: true }).filter({ visible: true }).count())) throw new Error(`paged-lists: no pager reading "${label}"`);
+  };
+  const panel = async page => {
+    await page.setViewportSize(TALL); await openChat(page, spec.title, spec.prompt);
+    await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+    await activity(page).waitFor({ timeout: 90_000 });
+  };
+  const next = async (page, times) => { for (let i = 0; i < times; i++) { await page.getByRole("button", { name: "Next page", exact: true }).filter({ visible: true }).last().click(); await page.waitForTimeout(300); } };
+  const pager = page => page.getByText(/^\d+–\d+ of \d+$/).filter({ visible: true }).last();
+  const showAll = async page => { const b = activity(page); await b.click(); await pager(page).waitFor(); };
+  const into = async (page, loc) => { await loc.evaluate(el => el.scrollIntoView({ block: "center" })); await page.waitForTimeout(200); };
+  for (const theme of ["light", "dark"]) {
+    await shoot(`pl-activity-folded-${theme}`, TALL, theme, async page => { await panel(page); await into(page, activity(page)); await check(page); });
+    await shoot(`pl-activity-page1-${theme}`, TALL, theme, async page => { await panel(page); await showAll(page); await into(page, pager(page)); await check(page, null, await pager(page).innerText()); });
+    await shoot(`pl-activity-page4-${theme}`, TALL, theme, async page => { await panel(page); await showAll(page); await next(page, 3); await into(page, pager(page)); const l = await pager(page).innerText(); if (!l.startsWith("76–100")) throw new Error(`paged-lists: page 4 reads ${l}`); await check(page, null, l); });
+    await shoot(`pl-questions-page2-${theme}`, TALL, theme, async page => {
+      await panel(page); await page.getByRole("tab", { name: /^Questions/ }).filter({ visible: true }).first().click(); await showAll(page); await next(page, 1);
+      await into(page, pager(page)); await check(page, null, await pager(page).innerText());
+    });
+    await shoot(`pl-search-${theme}`, TALL, theme, async page => {
+      await panel(page); await page.getByRole("button", { name: "Search activity", exact: true }).filter({ visible: true }).first().click();
+      await page.keyboard.type("staging"); await page.waitForTimeout(800); await into(page, pager(page)); await check(page);
+    });
+    await shoot(`pl-tasks-${theme}`, TALL, theme, async page => {
+      await panel(page); await page.getByRole("button", { name: /^Agent's tasks: / }).filter({ visible: true }).first().click(); await pager(page).waitFor();
+      await next(page, 1); await into(page, pager(page)); await check(page, null, await pager(page).innerText());
+    });
+    const phone = async page => {
+      await panel(page); await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
+      await activity(page).waitFor({ timeout: 60_000 }); await page.setViewportSize(PHONE); await activity(page).waitFor({ timeout: 60_000 });
+    };
+    await shoot(`pl-phone-page1-${theme}`, PHONE, theme, async page => { await phone(page); await showAll(page); await into(page, pager(page)); await check(page, PHONE, await pager(page).innerText()); });
+    await shoot(`pl-phone-page3-${theme}`, PHONE, theme, async page => { await phone(page); await showAll(page); await next(page, 2); await into(page, pager(page)); await check(page, PHONE, await pager(page).innerText()); });
+  }
+}
+
 async function prScaleShots({ shoot }) {
   const spec = PR_SCALE_STATES[0];
   const TALL = { width: DESKTOP.width, height: 1100 };

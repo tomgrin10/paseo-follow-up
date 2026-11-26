@@ -35,3 +35,6 @@ export function drainState(polls: readonly { atMs: number; running: number; read
 export const DIRTY_REFRESH_MS: number;
 export const SEND_DRAIN_QUIET_MS: number;
 export function drainPlan(phase: { busyMs: number }): { quietMs: number; awaitRelist: boolean };
+export declare const PAGED_REPLY_BUDGET_BYTES: Readonly<Record<string, number>>;
+export type PagedReply = { method: string; label: string; bytes: number; rows?: number | null; total?: number | null; error?: string | null };
+export declare function pagedReplyVerdict(replies: PagedReply[], budgets?: Readonly<Record<string, number>>): { replies: PagedReply[]; over: string[] };

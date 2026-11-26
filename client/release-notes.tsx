@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { PagedRows, usePagedList } from "./paged-list";
 import { Image, Platform, Modal as RNModal, View, useWindowDimensions, type ScrollView as NativeScrollView, type StyleProp, type ViewStyle } from "react-native";
 import { Pressable, Text } from "./text";
 import { openExternalUrl, useRpc } from "@getpaseo/plugin/client";
@@ -82,6 +83,8 @@ function NoteImage({ block, theme, compact }: { block: Extract<NoteBlock, { kind
 export function VersionNotes({ note, theme, compact = false, max = Infinity }: { note: ReleaseNote; theme: Theme; compact?: boolean; max?: number }) {
   const c = theme.colors; const t = text(c, compact);
   const [all, setAll] = useState(false);
+  // A preview (`max`) folds behind "Show all N", which opens pages, never every bullet (client/paged-list.tsx).
+  const page = usePagedList({ items: note.items, open: all, onToggle: () => setAll(v => !v), preview: max, theme, compact, noun: "changes" });
   if (note.blocks?.length) {
     const quietFrom = note.blocks.findIndex(b => b.kind === "rule");
     // Headings sit a step above body text and closer to the paragraph they open than to the one before.
@@ -98,13 +101,9 @@ export function VersionNotes({ note, theme, compact = false, max = Infinity }: {
       })}
     </View>;
   }
-  const items = all ? note.items : note.items.slice(0, max);
   return <View style={{ gap: 8 }}>
-    {items.map((item, i) => { const runs = inlineRuns(item); return <Bullet key={i} text={plainInline(item)} runs={runs.some(r => r.bold) ? runs : undefined} theme={theme} compact={compact} />; })}
-    {!all && note.items.length > max && <Pressable accessibilityRole="button" onPress={() => setAll(true)} hitSlop={compact ? { top: 14, bottom: 14, left: 8, right: 8 } : 6}
-      style={{ minHeight: compact ? 44 : undefined, justifyContent: "center", alignSelf: "flex-start" }}>
-      <Text style={[t.label, { color: c.foreground, fontWeight: "600" }]}>{`Show all ${note.items.length}`}</Text>
-    </Pressable>}
+    {page.shown.map((item, i) => { const runs = inlineRuns(item); return <Bullet key={i} text={plainInline(item)} runs={runs.some(r => r.bold) ? runs : undefined} theme={theme} compact={compact} />; })}
+    {page.footer}
   </View>;
 }
 
@@ -127,13 +126,15 @@ function VersionHeader({ note, theme, compact }: { note: FeedNote; theme: Theme;
   </View>;
 }
 
-/** Every version in one scroll, newest first: each one's header and its notes, nothing folded. */
+/** A version can carry tens of blocks and screenshots: a page of the feed holds a few versions. */
+export const VERSIONS_PER_PAGE = 5;
+/** Every version, newest first: each one's header and its notes, nothing folded, `VERSIONS_PER_PAGE` versions a page. */
 export function NotesFeed({ feed, theme, compact }: { feed: readonly FeedNote[]; theme: Theme; compact: boolean }) {
   return <View style={{ gap: compact ? 32 : 36 }}>
-    {feed.map(n => <View key={n.version} style={{ gap: compact ? 14 : 16 }}>
+    <PagedRows items={feed} size={VERSIONS_PER_PAGE} theme={theme} compact={compact} noun="versions" row={n => <View key={n.version} style={{ gap: compact ? 14 : 16 }}>
       <VersionHeader note={n} theme={theme} compact={compact} />
       <VersionNotes note={n} theme={theme} compact={compact} />
-    </View>)}
+    </View>} />
   </View>;
 }
 

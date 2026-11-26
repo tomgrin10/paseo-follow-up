@@ -17,10 +17,12 @@ import { CONTEXT_ANSWER_MAX, CONTEXT_TARGETS, contextRequestSchema } from "./cat
 import { HISTORY_FILTERS, QUESTION_ACTIONS } from "./your-questions";
 import { ONBOARDING_ACTIONS, ONBOARDING_STEPS, checksSchema, onboardingViewSchema } from "./onboarding";
 import { z } from "zod";
+import { HISTORY_KINDS, pageInput } from "./paged";
+import { batchGlanceSchema, prGlanceSchema, questionGlanceSchema } from "./history";
 import { actionChangeSchema, dispatchActionSchema, dispatchInputSchema, dispatchRecordSchema, settingsChangeSchema } from "./dispatch";
 import { inboxRowSchema } from "./inbox";
 import { briefSchema } from "./brief";
-import { idSchema, textSchema, workspaceSchema } from "./model";
+import { batchSchema, idSchema, prSchema, textSchema, workspaceSchema } from "./model";
 import { listEntrySchema } from "./list";
 import { communicationSchema } from "./communication";
 import { taskTriggerInputSchema } from "./task-trigger";
@@ -48,8 +50,22 @@ const agentCommunicationSchema = z.strictObject({
  */
 export const listRpc = defineRpc({ name: "follow.list", input: z.object({ since: z.number().optional() }), output: z.object({ workspaces: z.array(listEntrySchema), error: z.string().nullable(), revision: z.number().optional(), full: z.boolean().optional(), removed: z.array(z.string()).optional() }) });
 export const getRpc = defineRpc({ name: "follow.get", input: z.object({ workspaceId: idSchema }), output: z.object({ workspace: workspaceSchema.nullable(), error: z.string().nullable() }) });
+const hitSchema = z.object({ ranges: z.array(z.array(z.tuple([z.number(), z.number()]))), via: z.object({ label: z.string(), text: z.string(), ranges: z.array(z.tuple([z.number(), z.number()])) }).nullable() }).nullable();
+const activityRowSchema = z.object({ key: z.string(), at: z.string(), icon: z.string(), tone: z.enum(["merged", "success", "warning", "danger", "muted"]), text: z.string(), detail: z.string().nullable(), took: z.string().nullable() });
+/**
+ * One page of a workspace's Activity card (shared/history.ts activityPage): the timeline or the questions tab, searched
+ * across every row on the worker (`query`), then [offset, offset + limit). follow.get carries only the newest settled
+ * history (boundHistory), so the card reads its rows here. A question row is the stored question, for the question dialog.
+ */
+export const activityRpc = defineRpc({ name: "follow.activity", input: z.object({ workspaceId: idSchema, tab: z.enum(["timeline", "questions"]), query: z.string().max(200).optional(), ...pageInput }),
+  output: z.object({ tab: z.enum(["timeline", "questions"]).optional(), timeline: z.array(z.object({ row: activityRowSchema, hit: hitSchema })), questions: z.array(z.object({ question: questionSchema, hit: hitSchema })), offset: z.number(), total: z.number(), counts: z.object({ timeline: z.number(), questions: z.number() }), all: z.number(), error: z.string().nullable() }) });
 /** `prWorkflow` (1.4.0-beta.14): how this workspace ships PRs (graphite | github) and its review-fix command (null: built-in steps). */
-export const agentStatusRpc = defineRpc({ name: "follow.agent-status", input: z.strictObject({ agentId: idSchema, detail: z.enum(["summary", "full"]).optional() }), output: workspaceSchema.extend({ /** The caller's own ask the developer dismissed (still standing): don't raise it again. */ dismissedAsk: z.object({ ask: z.string(), kind: z.string(), at: z.string() }).nullable().optional(), prWorkflow: z.object({ mode: z.enum(["graphite", "github"]), reviewFix: z.string().nullable() }).optional(), /** The next message: recipient, tasks, exact text, and when and why it goes (Preview's agent form). */ nextMessageInfo: z.object({ to: z.string(), tasks: z.array(z.string()), text: z.string(), reason: z.string(), eta: z.string().nullable() }).nullable().optional(),
+export const agentStatusRpc = defineRpc({ name: "follow.agent-status", input: z.strictObject({ agentId: idSchema, detail: z.enum(["summary", "full"]).optional(), history: z.enum(HISTORY_KINDS).optional(), ...pageInput }), output: workspaceSchema.extend({
+    /** Live items whole; the newest few finished ones at a glance (`glance: true`), whole on a history page of their kind (shared/history.ts). */
+    prs: z.array(z.union([prSchema, prGlanceSchema])), questions: z.array(z.union([questionSchema, questionGlanceSchema])), batches: z.array(z.union([batchSchema, batchGlanceSchema])),
+    /** The live PRs' keys, and how many the inventory ever considered. */
+    inventory: workspaceSchema.shape.inventory.unwrap().unwrap().extend({ candidatesTotal: z.number().optional() }).nullable().optional(),
+    /** Each finished kind: how many, which were shown, how to page the rest (shared/history.ts agentView). */ history: z.record(z.string(), z.object({ total: z.number(), offset: z.number(), shown: z.number(), more: z.number(), hint: z.string().nullable() })).optional(), /** The caller's own ask the developer dismissed (still standing): don't raise it again. */ dismissedAsk: z.object({ ask: z.string(), kind: z.string(), at: z.string() }).nullable().optional(), prWorkflow: z.object({ mode: z.enum(["graphite", "github"]), reviewFix: z.string().nullable() }).optional(), /** The next message: recipient, tasks, exact text, and when and why it goes (Preview's agent form). */ nextMessageInfo: z.object({ to: z.string(), tasks: z.array(z.string()), text: z.string(), reason: z.string(), eta: z.string().nullable() }).nullable().optional(),
   /** Home's Sending row for this workspace (shared/sending.ts): queued or sent, when and why, and whether Send now (send_repairs) would go through. */
   sending: sendingSchema.nullable().optional() }) });
 export const syncWorkspaceRpc = defineRpc({ name: "follow.sync", input: z.strictObject({ agentId: idSchema, summary: z.string().trim().min(1).max(1000),

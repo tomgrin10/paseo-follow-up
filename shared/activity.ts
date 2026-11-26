@@ -1,4 +1,5 @@
 import { sendItems } from "./send-words";
+import { newestId } from "./sort";
 import type { ListWorkspace as Workspace } from "./list";
 import { followUpObligations, recoveryBatch } from "./follow-up";
 import { shortRefs } from "./attention";
@@ -79,7 +80,7 @@ export function activity(w: Workspace): Activity[] {
   for (const o of followUpObligations(w)) if ((o.status === "done" || o.status === "waived") && o.finishedAt)
     rows.push({ key: `task:${o.id}`, at: o.finishedAt, icon: o.status === "done" ? "ListChecks" : "CircleSlash", tone: o.status === "done" ? "success" : "muted", text: `${o.status === "done" ? "Task done" : "Task waived"} · ${o.title}`, detail: o.evidence?.trim() || null, took: null });
   if (w.completion) rows.push({ key: "done", at: w.completion.declaredAt, icon: "CircleCheck", tone: "success", text: "Main agent declared Done", detail: null, took: null });
-  return rows.filter(r => Number.isFinite(Date.parse(r.at))).sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || a.key.localeCompare(b.key));
+  return rows.filter(r => Number.isFinite(Date.parse(r.at))).sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || newestId(a.key, b.key));
 }
 
 /** Whether a later message carried one of this batch's items: its "the next message says" has come true. */

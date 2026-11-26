@@ -130,6 +130,29 @@ test("Your questions on a phone renders under the phone's rules: the card in eve
   await act(async () => { setContextSource(null); });
 });
 
+// Every list pages (invariant pr-scale-lists-batch-not-throw): 30 days of questions open as pages of 25, not every row.
+test("Your questions' history draws one page of 25 threads, with the pager, and Next moves on", async () => {
+  const { QuestionHistory } = await import("../client/your-questions");
+  const requests = Array.from({ length: 60 }, (_, i) => ({ id: `h${i}`, workspaceId: "w1", agentId: "a1", cardKey: null, card: "", target: "agent", ask: `History question ${i}?`, state: "answered", askedOf: "a1",
+    askedAt: new Date(Date.parse("2026-11-20T10:00:00Z") + i * 60_000).toISOString(), settledAt: new Date(Date.parse("2026-11-20T10:01:00Z") + i * 60_000).toISOString(), deliveredAt: null, answer: "Yes.",
+    error: null, by: "developer", via: "field", parentId: null, readAt: "2026-11-21T00:00:00Z", done: null, task: null }));
+  await act(async () => { setContextSource({ context: () => requests as never, subscribe: () => () => {}, askContext: async () => ({ request: requests[0] as never }), questionAction: async () => ({ request: requests[0] as never }) }); });
+  const { r, error } = await render(createElement(QuestionHistory, { workspaceId: "w1", theme, compact: true }));
+  try {
+    assert.equal(error, null, `the history crashed: ${(error as Error)?.message}`);
+    const said = () => r!.root.findAll(n => typeof n.type === "string" && typeof n.props.children === "string").map(n => n.props.children as string);
+    const rows = () => said().filter(x => /^History question \d+\?$/.test(x));
+    assert.equal(rows().length, 25, `one page: ${rows().length} rows`);
+    assert.ok(said().includes("1–25 of 60"), "the pager says where it is");
+    const next = r!.root.findAll(n => n.props.accessibilityLabel === "Next page" && typeof n.props.onPress === "function")[0];
+    await act(async () => { (next.props.onPress as () => void)(); });
+    assert.ok(said().includes("26–50 of 60"));
+    assert.equal(rows().length, 25);
+  } finally {
+    await act(async () => { (r as unknown as { unmount(): void } | undefined)?.unmount(); setContextSource(null); });
+  }
+});
+
 test("the PR stats page on a phone renders under the phone's rules: the leaderboard, its empty period and a person", async () => {
   const { Leaderboard, PersonView } = await import("../client/pr-stats");
   const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { PagedRows } from "./paged-list";
 import { ActivityIndicator, Platform, View } from "react-native";
 import * as PluginClient from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
@@ -239,7 +240,7 @@ function DesktopTable({ theme, rows, max, sort, onSort, onPerson }: { theme: The
         </Pressable>;
       })}
     </View>
-    {rows.map((p, i) => <Pressable key={p.login} accessibilityRole="button" accessibilityLabel={`${p.login}: ${personWords(p)}. Opens their PRs and reviews.`} onPress={() => onPerson(p.login)}
+    <PagedRows items={rows} theme={theme} compact={false} noun="people" row={(p, i) => <Pressable key={p.login} accessibilityRole="button" accessibilityLabel={`${p.login}: ${personWords(p)}. Opens their PRs and reviews.`} onPress={() => onPerson(p.login)}
       style={({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) => ({ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, minHeight: 44, borderTopWidth: i ? 1 : 0, borderTopColor: c.border, backgroundColor: pressed ? c.surface2 : hovered ? withAlpha(c.foreground, 0.03) : "transparent" })}>
       <View style={{ flex: 1.2, minWidth: 140, flexDirection: "row", alignItems: "center", gap: 10 }}>
         <Avatar theme={theme} login={p.login} />
@@ -252,7 +253,7 @@ function DesktopTable({ theme, rows, max, sort, onSort, onPerson }: { theme: The
           <Hover text={cell.hover}><Text style={[t.body, { minWidth: 56, textAlign: "right", fontVariant: ["tabular-nums"], color: cell.value === null ? c.foregroundMuted : c.foreground }]}>{cell.text}</Text></Hover>
         </View>;
       })}
-    </Pressable>)}
+    </Pressable>} resetKey={sort} />
   </View>;
 }
 
@@ -269,7 +270,7 @@ function PhoneTable({ theme, rows, max, sort, onSort, onPerson }: { theme: Theme
         <Text style={t.label}>{col.long}</Text><Icon name="ChevronDown" size={14} color={c.foregroundMuted} />
       </Pressable>
     </View>
-    {rows.map((p, i) => {
+    <PagedRows items={rows} theme={theme} compact noun="people" resetKey={sort} row={(p, i) => {
       const cell = cellText(p, sort);
       return <Pressable key={p.login} accessibilityRole="button" accessibilityLabel={`${p.login}: ${personWords(p)}. Opens their PRs and reviews.`} onPress={() => onPerson(p.login)}
         style={({ pressed }: { pressed: boolean }) => ({ flexDirection: "row", alignItems: "center", gap: 12, paddingLeft: 16, paddingRight: 10, paddingVertical: 12, borderTopWidth: i ? 1 : 0, borderTopColor: c.border, backgroundColor: pressed ? c.surface2 : "transparent" })}>
@@ -284,7 +285,7 @@ function PhoneTable({ theme, rows, max, sort, onSort, onPerson }: { theme: Theme
         </View>
         <Icon name="ChevronRight" size={16} color={c.foregroundMuted} />
       </Pressable>;
-    })}
+    }} />
     {open && <Modal title="Sort by" open onOpenChange={next => { if (!next) setOpen(false); }}>
       <Modal.Content contentContainerStyle={{ padding: 8 }}>
         {COLUMNS.map(x => <Pressable key={x.key} accessibilityRole="radio" accessibilityState={{ checked: x.key === sort }} onPress={() => { setOpen(false); onSort(x.key); }}
@@ -325,8 +326,8 @@ export function PersonView({ theme, compact, out, login }: { theme: Theme; compa
   const d = out.person?.login === login ? out.person : null;
   const row = d?.row ?? out.model?.people.find(p => p.login === login) ?? null;
   const [all, setAll] = useState(false);
-  const prs = d ? (all ? d.prs : d.prs.slice(0, 8)) : [];
-  const reviewed = d ? (all ? d.reviewed : d.reviewed.slice(0, 8)) : [];
+  // Each list folds to its first 8; Show all opens pages, never every PR of a 25,000-record repository (client/paged-list.tsx).
+  const fold = { open: all, onToggle: () => setAll(v => !v), preview: 8, theme, compact } as const;
   const wait = row ? medianCell(row.wait) : null, turn = row ? medianCell(row.turnaround) : null;
   return <View style={{ gap: 14 }}>
     {row && <View style={{ gap: 4 }}>
@@ -337,13 +338,12 @@ export function PersonView({ theme, compact, out, login }: { theme: Theme; compa
     {!d && <ActivityIndicator color={c.foregroundMuted} style={{ alignSelf: "flex-start" }} />}
     {d && <>
       <Text style={t.section}>{`Opened by ${login}`}</Text>
-      {prs.length ? prs.map(p => <PrLine key={p.number} theme={theme} compact={compact} number={p.number} url={p.url} title={p.title}
-        line={p.waiting ? `waiting ${p.wait === null ? "" : durationWords(p.wait)} for a first review` : [p.wait === null ? "no review yet" : `first review ${durationWords(p.wait)}${p.firstResponder ? ` by ${p.firstResponder}` : ""}`, p.merged ? "merged" : p.state === "C" ? "closed" : "open", p.size].join(" · ")} />)
+      {d.prs.length ? <PagedRows items={d.prs} {...fold} noun="PRs" row={p => <PrLine key={p.number} theme={theme} compact={compact} number={p.number} url={p.url} title={p.title}
+        line={p.waiting ? `waiting ${p.wait === null ? "" : durationWords(p.wait)} for a first review` : [p.wait === null ? "no review yet" : `first review ${durationWords(p.wait)}${p.firstResponder ? ` by ${p.firstResponder}` : ""}`, p.merged ? "merged" : p.state === "C" ? "closed" : "open", p.size].join(" · ")} />} />
         : <Text style={t.meta}>None in this period.</Text>}
       <Text style={t.section}>{`Reviews by ${login}`}</Text>
-      {reviewed.length ? reviewed.map(r => <PrLine key={`r${r.number}`} theme={theme} compact={compact} number={r.number} url={r.url} title={r.title} line={`${r.author ? `by ${r.author} · ` : ""}${new Date(r.at * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: out.timeZone })}`} />)
+      {d.reviewed.length ? <PagedRows items={d.reviewed} {...fold} noun="reviews" row={r => <PrLine key={`r${r.number}`} theme={theme} compact={compact} number={r.number} url={r.url} title={r.title} line={`${r.author ? `by ${r.author} · ` : ""}${new Date(r.at * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: out.timeZone })}`} />} />
         : <Text style={t.meta}>None in this period.</Text>}
-      {!all && (d.prs.length > 8 || d.reviewed.length > 8) && <Button theme={theme} compact={compact} kind="ghost" title={`Show all (${d.prs.length} PRs, ${d.reviewed.length} reviews)`} onPress={() => setAll(true)} />}
     </>}
   </View>;
 }

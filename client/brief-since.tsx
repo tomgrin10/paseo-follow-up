@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { PagedRows } from "./paged-list";
 import { Platform, View } from "react-native";
 import { Pressable, Text } from "./text";
 import { useRpc } from "@getpaseo/plugin/client";
@@ -261,7 +262,7 @@ export function QueueScreen({ theme, compact, onHome, navigation }: { theme: The
     {view && !view.groups.length && <Text style={t.meta}>{filter === "all" ? "Nothing is assigned to you in the queue's states." : filter === "changed" ? "Nothing changed since you last read the brief." : "Every issue in your queue has a workspace."}</Text>}
     {view?.groups.map(g => <View key={g.priority} style={{ gap: 0 }}>
       <Text accessibilityRole="header" style={[t.section, { marginTop: 8 }]}>{g.name} · {g.count}</Text>
-      {g.issues.map(i => <QueueRow key={i.key} i={i} change={changes.get(i.key)} c={c} compact={compact} timeZone={tz} navigation={navigation} />)}
+      <PagedRows items={g.issues} resetKey={filter} theme={theme} compact={compact} noun="issues" row={i => <QueueRow key={i.key} i={i} change={changes.get(i.key)} c={c} compact={compact} timeZone={tz} navigation={navigation} />} />
     </View>)}
   </ScrollView>;
 }
@@ -281,7 +282,7 @@ export function NobodyRows({ theme, compact, data, onDismissed }: { theme: Theme
   // pushes the new list on the home feed; without the feed, onDismissed reads it once.
   const dismiss = useDismiss(onDismissed);
   const now = Date.now();
-  return <>{data.needs.map(r => {
+  return <PagedRows items={data.needs} theme={theme} compact={compact} noun="issues" row={r => {
     const row = nobodyRow(r, now, data.timeZone);
     const first = r.reasons[0]!;
     const reason = <PriorityLine reason={first.line} source={first.from === "compass" ? { kind: "compass", label: first.source } : { kind: "linear", label: first.source }} c={c} size={compact ? 12 : 11} lines={compact ? 2 : 1} />;
@@ -317,5 +318,5 @@ export function NobodyRows({ theme, compact, data, onDismissed }: { theme: Theme
         </View>
       </>}
     </RevealScope>;
-  })}</>;
+  }} />;
 }

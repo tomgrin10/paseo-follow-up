@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { PagedRows } from "./paged-list";
 import { ActivityIndicator, TextInput, View } from "react-native";
 import { Text } from "./text";
 import { useRpc } from "@getpaseo/plugin/client";
@@ -45,7 +46,7 @@ export function PrStatsSettings({ theme, compact, onPage = false }: { theme: The
     {query.error && <SettingsCard><SettingsAction label="Couldn't load PR statistics" hint={errorText(query.error)} actionLabel="Retry" onPress={() => void query.refetch()} /></SettingsCard>}
     {data && <>
       <SettingsCard>
-        {data.repos.map(row => <View key={row.repo}>
+        <PagedRows items={data.repos} theme={theme} compact={compact} noun="repositories" row={row => <View key={row.repo}>
           <SettingsSwitch label={row.repo} hint={statsRepoLine(row, data.timeZone)} value={row.state === "on"} disabled={change.isPending}
             onValueChange={on => {
               if (on && row.state === "paused") change.mutate({ repo: row.repo, enable: true, toast: `${row.repo}: PR statistics on` });
@@ -60,7 +61,7 @@ export function PrStatsSettings({ theme, compact, onPage = false }: { theme: The
           {row.state === "on" && <OptionsFold row={row} theme={theme} compact={compact}>
             <RepoOptions row={row} theme={theme} compact={compact} busy={change.isPending} set={(input, label) => change.mutate({ repo: row.repo, ...input, toast: `${row.repo}: ${label}` })} />
           </OptionsFold>}
-        </View>)}
+        </View>} />
         {/* A repository Follow-up hasn't seen yet. */}
         <SubmitScope enabled={addValid} onSubmit={() => setOptIn(adding.trim())} style={{ flexDirection: compact ? "column" : "row", alignItems: compact ? "stretch" : "center", gap: 8, paddingHorizontal: compact ? 16 : 14, paddingVertical: 10, borderTopWidth: data.repos.length ? 1 : 0, borderTopColor: c.border }}>
           <TextInput accessibilityLabel="Another repository, owner/repo" value={adding} onChangeText={setAdding} placeholder="Another repository: owner/repo" placeholderTextColor={c.foregroundMuted} autoCapitalize="none" autoCorrect={false}

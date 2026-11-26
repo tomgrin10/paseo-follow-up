@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { PagedRows } from "./paged-list";
 import { ActivityIndicator, TextInput, View } from "react-native";
 import { openExternalUrl, useRpc } from "@getpaseo/plugin/client";
 import { Icon, SettingsAction, SettingsCard, SettingsSection, SettingsSelect, SettingsSwitch, copyText, useToast } from "@getpaseo/plugin/client/ui";
@@ -100,7 +101,7 @@ function InputRows({ view, sources, theme, compact }: { view: BriefSettingsView;
     {used.length > 0 && <View style={{ paddingHorizontal: compact ? 14 : 12, paddingTop: 12, paddingBottom: 2, borderTopWidth: 1, borderTopColor: c.border }}>
       <Text style={[t.meta, { color: c.foreground, fontWeight: "600" }]}>Built in</Text>
     </View>}
-    {[...used, ...askable].map((row, i) => <View key={row.id}>
+    <PagedRows items={[...used, ...askable]} theme={theme} compact={compact} noun="sources" row={(row, i) => <View key={row.id}>
       {i === used.length && <View style={{ paddingHorizontal: compact ? 14 : 12, paddingTop: 12, paddingBottom: 2, borderTopWidth: 1, borderTopColor: c.border, gap: 2 }}>
         <Text style={[t.meta, { color: c.foreground, fontWeight: "600" }]}>Other servers on mcpproxy</Text>
         <Text style={t.meta}>No recipe fits these. Preview one to see what a fast model would pick out for you.</Text>
@@ -110,7 +111,7 @@ function InputRows({ view, sources, theme, compact }: { view: BriefSettingsView;
         previewing={data!.previewing.includes(row.id) || pending?.preview === row.id}
         onToggle={on => change.mutate({ on: { [row.id]: on } })} onRetry={() => change.mutate({ retry: row.id })} onCheck={() => change.mutate({ check: true })} onCopy={toastCopy}
         onPreview={() => change.mutate({ preview: row.id })} />
-    </View>)}
+    </View>} />
   </>;
 }
 
@@ -135,10 +136,10 @@ function ConnectionsSection({ sources, theme, compact }: { sources: SourcesState
         <Text style={t.meta}>{`${notRead.length} more on mcpproxy Follow-up can't read`}</Text>
         <Icon name={showNotRead ? "ChevronUp" : "ChevronDown"} size={13} color={c.foregroundMuted} />
       </Pressable>
-      {showNotRead && notRead.map(row => <View key={row.id} style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "baseline", columnGap: 6 }}>
+      {showNotRead && <PagedRows items={notRead} theme={theme} compact={compact} noun="servers" row={row => <View key={row.id} style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "baseline", columnGap: 6 }}>
         <Text style={[t.meta, MONO, { color: c.foreground }]}>{row.label}</Text>
         <Text style={t.meta}>{row.detail ?? row.adds}</Text>
-      </View>)}
+      </View>} />}
     </View>}
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
       <Button title="Check sources again" icon="RotateCcw" theme={theme} compact={compact} loading={checking} onPress={() => change.mutate({ check: true })} />

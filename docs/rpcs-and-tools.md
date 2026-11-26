@@ -42,7 +42,7 @@ is missing from AGENTS.md or docs/, so add a line here when you add one.
 
 | Tool | RPC | Use |
 | --- | --- | --- |
-| `workspace_status` | `follow.agent-status` | The workspace's goal, PRs, tasks and work queue. `detail=full` adds history. Includes the PR workflow, `nextMessage` (recipient, tasks, exact text, reason, eta: Preview's agent form), `heldTasks` and `githubWait` (while GitHub's budget is low, when Follow-up checks this workspace's PRs again; null otherwise). |
+| `workspace_status` | `follow.agent-status` | The workspace's goal, PRs, tasks and work queue. `detail=full` adds evidence. Finished items (merged or closed PRs, done or waived tasks, settled questions, batches and PR actions) are a count plus the newest few in both details (`history`); `history=<kind>` with `offset`/`limit` pages one kind (see [Bounded answers](#bounded-answers)). Includes the PR workflow, `nextMessage` (recipient, tasks, exact text, reason, eta: Preview's agent form), `heldTasks` and `githubWait` (while GitHub's budget is low, when Follow-up checks this workspace's PRs again; null otherwise). |
 | `workspace_now` | `follow.workspace-now` | read. Every agent in the caller's workspace, main agent first: what it is working on toward the goal (`work`: text, source, the agent's own done/next and its place, "2 of 4") and its state (working, a permission, an ask, compacting, a background job, CI, idle), the same line the panel and Home draw (`nowOf`, [shared/now.ts](../shared/now.ts)). Built from the record and the inbox rows the worker holds; no daemon read, nothing woken. |
 | `sync_workspace` | `follow.sync` | Confirms the sidebar matches the work. The Stop hook asks for it after code-changing turns. Optional `milestone {now, done?, next?}`: what the agent is working on toward the goal, in a few words, with the milestones before and after it (each ≤80 chars, ≤8 per list). Stored per agent on the workspace record (`milestones`); omitted keeps the last one, null clears it; cleared at Done and when the agent leaves. The panel and Home show it as the agent's line (`workspace_now`). |
 | `enroll_workspace` | `follow.enroll` | Refines the goal of a workspace the developer activated. |
@@ -129,7 +129,7 @@ the developer's; it never clears a Needs-you flag and never passes the Overseer'
 | `link_items`, `set_linked_items` | `follow.linked-items`, `follow.set-linked-items` (add, remove, undo) | read / planned. The Linked sheet calls both; `link_item` and `unlink_item` also count for `follow.set-linked-items`. |
 | `link_items` (per workspace) | `follow.linked-index` | read. Home's search over every workspace's linked keys and titles, fetched only while the search field has text. |
 | `pr_controls`, `browser_status` | `follow.pr-control-status`, `follow.browser-status` | read |
-| `release_notes` | `follow.release-notes` | read |
+| `release_notes` | `follow.release-notes` | read (notes since `previous` in full, older ones bounded: `older`, `offset`/`limit`) |
 | `updates_status`, `check_updates` | `follow.updates` | read / write (no plan) |
 | `set_updates`, `install_update` | `follow.set-updates`, `follow.install-update` | planned ([updates.md](updates.md)) |
 | `retry_move` | `follow.retry-move` | planned ([updates.md](updates.md#moving-from-1x)) |
@@ -149,6 +149,25 @@ Exempt in `PARITY`, with the reason recorded there:
 - `follow.check-pr-action`: the PR sheet's progress poll.
 - `follow.whats-new-seen`: a person closing What's new.
 - `follow.dismiss-update-notice`: a person hiding Home's update line.
+
+### Bounded answers
+
+Every list-returning agent tool answers within `TOOL_BUDGET` (`shared/paged.ts`), however big a workspace's history:
+what is live comes whole, what is finished comes as the newest `PAGE.recentDone` plus a count (`boundDone`), and
+`offset`/`limit` page the rest, newest first, `PAGE.toolPage` a page by default. 2026-11-26: `workspace_status`
+summary was ~207k characters in a busy workspace (357 PRs, almost all merged), over a tool result's limit.
+
+| Tool | Whole | Bounded (field) |
+| --- | --- | --- |
+| `workspace_status` | open PRs, open tasks, live questions and batches, sending PR actions | each finished kind (`history.<kind>`; page one with `history=<kind>`) |
+| `list_prs` | open PRs | merged and closed PRs with `include_closed` (`closed`) |
+| `inbox_list` | flagged, snoozed, running, signed off today, your own row | quiet rows (`quiet`) |
+| `context_requests` | asks still asking | answered, chat and failed asks (`settled`) |
+| `release_notes` | notes since `previous` | older notes (`older`) |
+
+`queue_list` (waiting items whole, at most `QUEUE_RECENT` sent ones with their text dropped), `dispatch_records`
+(`RECORDS_MAX`), `workstreams` (paged) and `linear_queue` (`limit`) were bounded already. Guarded by
+`tests/bounded-tools.test.ts`.
 
 ## Overseer tools
 
@@ -202,7 +221,7 @@ nothing. On 0.15 there is no `client.subscribe`, and the client polls the RPCs a
 
 | Surface | RPCs |
 | --- | --- |
-| Home, panel, larger view, pill | `follow.list`, `follow.get`, `follow.control`, `follow.send`, `follow.recover`, `follow.refresh`, `follow.answer-question`, `follow.dismiss`, `follow.workspace-spec`, `follow.set-task-trigger`, `follow.workspace-about`, `follow.rename-status`, `follow.rename-workspace`, `follow.priorities`, `follow.usage`, `follow.rank-status`, `follow.rank-now` |
+| Home, panel, larger view, pill | `follow.list`, `follow.get`, `follow.activity` (the Activity card's pages, `shared/history.ts`), `follow.control`, `follow.send`, `follow.recover`, `follow.refresh`, `follow.answer-question`, `follow.dismiss`, `follow.workspace-spec`, `follow.set-task-trigger`, `follow.workspace-about`, `follow.rename-status`, `follow.rename-workspace`, `follow.priorities`, `follow.usage`, `follow.rank-status`, `follow.rank-now` |
 | Needs-you inbox and brief card | `follow.inbox-list`, `follow.inbox-act`, `follow.inbox-brief`, `follow.brief-action` |
 | PR sheet | `follow.pr-control-status`, `follow.prepare-pr-action`, `follow.confirm-pr-action`, `follow.check-pr-action`, `follow.request-reviewers`, `follow.browser-status` |
 | Overseer card | `follow.overseer-status`, `follow.overseer-start`, `follow.overseer-restart`, `follow.overseer-ask` |
