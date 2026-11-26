@@ -2,7 +2,7 @@
 
 What changed in each version of Follow-up, newest first. Follow-up shows "What's new" after an update that brings new release notes: the curated part of each stable release since you last looked (betas install quietly; Settings → General can turn it off), and every version's notes from Home's version line.
 
-## 2.4.0 (2026-11-25)
+## 2.4.0 (2026-11-26)
 
 Start new work in one step, rank it by what the people you follow ask for, and use Follow-up with any agent provider, GitHub or not.
 
@@ -150,6 +150,7 @@ Start new work in one step, rank it by what the people you follow ask for, and u
 
 ### Fixes
 
+- What's new shows the bold in release notes, and a version's one-line preview no longer shows markdown.
 - Dispatch opens again after you visit Home a second time. It used to land on Home with nothing open.
 - Asking the Overseer to start workspaces in chat works again, including "create workspaces for these" with several issues. It no longer asks you again on a card.
 - Workspaces with very long stacks work again: PR status, Merge when ready and Add reviewers no longer fail with "Too big: expected array to have <=50 items" past 50 PRs.

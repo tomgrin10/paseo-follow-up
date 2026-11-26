@@ -1476,6 +1476,12 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    `scripts/screenshots.mjs --only onboarding --variant <no-gh|claude|codex|other|none>` (every step shown, desktop
    and 390×844, light and dark; writes `onboarding-<variant>.json`).
 
+120. **Release notes show what they're written with** (`release-notes-show-their-bold`). What's new and every
+   version's notes render a line's `**bold**` as semibold runs (`inlineRuns`, `shared/changelog.ts`), links read as
+   their label, and no markdown marker (`**`, a backtick) reaches the screen: not in a curated section, a bullets-only
+   note or a version's one-line preview. 2026-11-26, the developer: 2.4.0's bullets lead with bold, and What's new
+   showed them as plain text; a bullets-only note would have shown the asterisks. Guarded by `tests/changelog.test.ts`.
+
 ## Bugs
 
 Every bug is fixed for its whole class:
