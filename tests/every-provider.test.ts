@@ -22,7 +22,7 @@ import { messageSender } from "../shared/message-sender";
  */
 
 test("providerCaps: one model says what each provider gets", () => {
-  const caps = (id: string, config?: Parameters<typeof providerCaps>[1]["config"]) => providerCaps(id, { config });
+  const caps = (id: string, config?: NonNullable<Parameters<typeof providerCaps>[1]>["config"]) => providerCaps(id, { config });
   assert.deepEqual(caps("claude"), { hooks: true, instructions: "hook", turnEnd: "hook", wait: "background-bash", guard: "cli" });
   assert.deepEqual(caps("codex"), { hooks: true, instructions: "hook", turnEnd: "hook", wait: "detached", guard: "cli" });
   assert.deepEqual(caps("pi"), { hooks: false, instructions: "system-prompt", turnEnd: "event", wait: "detached", guard: "cli" });
@@ -145,7 +145,7 @@ test("an ACP agent reads Follow-up's instructions through a tool, and nothing cl
   const request = { agentId: "a1", provider: "copilot", purpose: "interactive", env: { FOLLOW_UP_TOOLS: "native", FOLLOW_UP_ROOT: "1", FOLLOW_UP_BRIEF: "copilot" }, tools: [] as { name: string; execute: (...a: never[]) => unknown }[] };
   const deps = { hostSupports: async () => true, providerSupports: async () => true, bridge: async () => ({ needsYouInstruction: "Call needs_you at the end.", actionInstruction: "Act with tools." }), workspace: async () => "Maintain this tracked workspace's Follow-up sidebar." };
   const out = await withSystemPrompt(request as never, deps) as typeof request & { appendSystemPrompt?: string[] };
-  assert.equal(out.appendSystemPrompt, undefined); assert.equal(out.env.FOLLOW_UP_SYSTEM_PROMPT, undefined);
+  assert.equal(out.appendSystemPrompt, undefined); assert.equal((out.env as Record<string, string>).FOLLOW_UP_SYSTEM_PROMPT, undefined);
   const tool = out.tools.find(t => t.name === INSTRUCTIONS_TOOL);
   assert.ok(tool, "the instructions tool is attached");
   const text = (await (tool as { execute: () => Promise<{ text: string }> | { text: string } }).execute()).text;

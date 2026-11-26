@@ -90,8 +90,8 @@ test("providerNotes: only what a provider the developer has can't do, at most tw
   // A new non-Claude user: only a generic ACP agent, Claude and Codex turned off, Summaries on the ACP agent.
   const acp = providerNotes([p("claude", "Claude", false, "Turned off in Paseo"), p("codex", "Codex", false, "Turned off in Paseo"), p("pi", "Pi", false, "Not installed"), { ...p("acme-acp", "Acme ACP"), acp: true }], "acme-acp");
   assert.deepEqual(acp, [
-    "Paseo doesn't pass Follow-up's instructions to Acme ACP yet, so it reads them through a tool at the start of each session.",
-    "Summaries' linked issues, Compass and Ask read other people's words, so they run only where Follow-up can take every tool away. Turn on Claude or Codex in Paseo for Summaries to use them.",
+    "Acme ACP reads Follow-up's instructions from a tool at the start of each session. Nothing to set up.",
+    "Compass, Ask and Summaries' linked issues read other people's messages, so they need Summaries on an agent Follow-up can keep read-only. Turn on Claude or Codex in Paseo's Providers settings for Summaries; until then Compass and Ask stay off and Summaries leave out linked issues.",
   ]);
   assert.doesNotMatch(acp.join(" "), /Pick Claude|hooks/, "no dead end, no mechanism words");
   assert.equal(guardAction([p("copilot", "Copilot")]), "Install Claude Code, Codex, OpenCode or Pi");
@@ -112,11 +112,11 @@ test("a helper that reads other people's words is never Recommended where it can
   assert.equal(blocked.blocked, true); assert.equal(blocked.recommended, false);
   assert.equal(blocked.pick, "No provider here can run it", "never a pick on a provider the developer lacks");
   assert.equal(blocked.notice?.tone, "warning");
-  assert.match(blocked.notice!.text, /^AI priority reads other people's messages, so it runs only where Follow-up can keep it read-only \(Claude Code, Codex, OpenCode or Pi\)\. Turn on Claude in Paseo to use it\.$/);
+  assert.match(blocked.notice!.text, /^AI priority reads other people's messages, so it runs only where Follow-up can keep it read-only\. Turn on Claude in Paseo's Providers settings to use it\.$/);
   const withCodex = cat(prov("codex"), prov("acme-acp"));
   const moved = jobRow(ranker({ provider: "acme-acp", model: null }), withCodex);
   assert.equal(moved.blocked, false); assert.equal(moved.recommended, false); assert.equal(moved.rec?.provider, "codex");
-  assert.match(moved.notice!.text, /^AI priority reads other people's messages, so it runs only where Follow-up can keep it read-only \(Claude Code, Codex, OpenCode or Pi\)\. Recommended: /);
+  assert.match(moved.notice!.text, /^AI priority reads other people's messages, so it runs only where Follow-up can keep it read-only\. Recommended: /);
 });
 
 test("isAcp follows Paseo's config: a provider that extends acp, directly or through another, is ACP", async () => {

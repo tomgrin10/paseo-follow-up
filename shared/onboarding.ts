@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { GUARDED_PHRASE } from "./provider-support";
 import { ROLE_INFO, guardedProvider, needsGuard, providerName, providerSettling as unsettled, type AgentRole } from "./agent-settings";
 import { GITHUB_ADDS, GITHUB_CLI_URL, GITHUB_LOGIN_COMMAND } from "./github-setup";
 
@@ -247,11 +246,9 @@ export function providerChecks(catalog: { providers: ProviderInfo[]; error: stri
     const guarded = users.filter(u => GUARDED_TITLES.includes(u));
     const movable = users.filter(u => !GUARDED_TITLES.includes(u));
     const other = ready.find(x => x !== id && (guarded.length && !movable.length ? guardedProvider(x) : true));
-    // Another provider runs everything else: missing this one only costs the guarded job, an optional extra.
-    if (!movable.length && ready.length && !ready.some(guardedProvider)) {
-      rows.push({ id: `provider-${id}`, label, state: "off", detail: `${why}. Optional: ${joinNames(guarded)} runs only on ${GUARDED_PHRASE}.`, fix: fix(setup.text, setup.command) });
-      continue;
-    }
+    // Another provider runs everything else and only a read-only job (AI priority) is left on this one: the helpers
+    // step already says why it can't run here and what to install, so no row names a provider the developer lacks.
+    if (!movable.length && ready.length && !ready.some(guardedProvider)) continue;
     const switchable = guarded.length && other && !guardedProvider(other) ? movable : users;
     rows.push({ id: `provider-${id}`, label, state: "fail", detail: `${why}. ${sentenceStart(joinNames(users))} won't run until it is.`,
       fix: other && switchable.length ? fix(`${setup.text} Or switch ${switchable.length === users.length ? "those helpers" : joinNames(switchable)} to ${nameOf(catalog, other)} in Settings → Agents.`, setup.command, "agents") : fix(setup.text, setup.command) });

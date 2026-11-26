@@ -97,14 +97,15 @@ export function guardAction(providers: readonly NoteProvider[]): string {
   const ready = guarded.filter(p => p.available).map(p => p.label);
   if (ready.length) return `Use ${list(ready, "or")}`;
   const off = guarded.filter(p => /turned off/i.test(p.reason ?? "")).map(p => p.label);
-  if (off.length) return `Turn on ${list(off, "or")} in Paseo`;
+  if (off.length) return `Turn on ${list(off, "or")} in Paseo's Providers settings`;
   return `Install ${list(GUARDED_NAMES, "or")}`;
 }
 
 /**
  * Settings → Agents' one block under the helper rows: only what a provider the developer has can't do, at most two
- * short lines. ACP agents read Follow-up's instructions through a tool (Paseo doesn't pass a plugin's system prompt to
- * them). `summariesOn` is the provider Summaries runs on: off a guarded provider it leaves out linked items, and
+ * short lines, one wording per rule (the rows say "reads other people's messages … read-only" too). ACP agents read
+ * Follow-up's instructions through a tool (Paseo doesn't pass a plugin's system prompt to them): said once, with
+ * nothing to do. `summariesOn` is the provider Summaries runs on: off a guarded provider it leaves out linked items, and
  * Compass and Ask read nothing (sources-are-read-only). Why AI priority can't run is on its row. Empty when every
  * feature works.
  */
@@ -112,7 +113,7 @@ export function providerNotes(providers: readonly NoteProvider[], summariesOn: s
   const acp = providers.filter(p => p.available && !hasHooks(p.id) && (p.acp ?? isAcp(p.id))).map(p => p.label);
   const needs = summariesOn && !guardedProvider(summariesOn) ? ["Summaries' linked issues", "Compass", "Ask"] : [];
   return [
-    acp.length ? `Paseo doesn't pass Follow-up's instructions to ${list(acp)} yet, so ${acp.length > 1 ? "they read them" : "it reads them"} through a tool at the start of each session.` : null,
-    needs.length ? `${list(needs)} read other people's words, so they run only where Follow-up can take every tool away. ${guardAction(providers)} for Summaries to use them.` : null,
+    acp.length ? `${list(acp)} ${acp.length > 1 ? "read" : "reads"} Follow-up's instructions from a tool at the start of each session. Nothing to set up.` : null,
+    needs.length ? `Compass, Ask and Summaries' linked issues read other people's messages, so they need Summaries on an agent Follow-up can keep read-only. ${guardAction(providers)} for Summaries; until then Compass and Ask stay off and Summaries leave out linked issues.` : null,
   ].filter((x): x is string => !!x);
 }

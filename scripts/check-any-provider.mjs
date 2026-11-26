@@ -127,7 +127,7 @@ try {
     try {
       await page.goto(`${ORIGIN}/settings/hosts/${SERVER_ID}/plugins/follow-up/agents`);
       await page.locator(`[data-testid="plugin-settings-tab-agents"]`).filter({ visible: true }).first().waitFor();
-      const line = page.getByText(/^Paseo doesn't pass Follow-up's instructions to /).first();
+      const line = page.getByText(/reads Follow-up's instructions from a tool/).first();
       await line.waitFor();
       await page.getByText(LABEL).first().waitFor();
       await line.scrollIntoViewIfNeeded();
@@ -135,8 +135,8 @@ try {
       const facts = await page.evaluate(() => {
         const vw = document.documentElement.clientWidth;
         const wide = [...document.querySelectorAll("body *")].filter(e => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e); return r.width > 0 && r.right > vw + 1 && s.visibility !== "hidden" && !e.closest('[style*="overflow"]'); }).map(e => `${e.tagName}.${(e.getAttribute("data-testid") ?? e.textContent ?? "").slice(0, 40)}`);
-        const leaf = [...document.querySelectorAll("div")].find(d => /^Paseo doesn't pass Follow-up's instructions to /.test(d.textContent ?? "") && d.children.length === 0);
-        let el = leaf?.parentElement && /read other people's words/.test(leaf.parentElement.textContent ?? "") ? leaf.parentElement : leaf;
+        const leaf = [...document.querySelectorAll("div")].find(d => /reads Follow-up's instructions from a tool/.test(d.textContent ?? "") && d.children.length === 0);
+        let el = leaf?.parentElement && /read other people's messages/.test(leaf.parentElement.textContent ?? "") ? leaf.parentElement : leaf;
         const r = el?.getBoundingClientRect();
         return { pageScrolls: document.scrollingElement.scrollWidth > vw + 1, wide: wide.slice(0, 5), line: el?.innerText ?? null, lineBox: r ? { left: r.left, right: r.right, width: Math.round(r.width), lines: Math.round(r.height / (parseFloat(getComputedStyle(el).lineHeight) || 20)), vw } : null, notes: [...document.querySelectorAll("div")].filter(d => d.children.length === 0 && /^(On Acme ACP, |Not available in Paseo|Your agents on )/.test(d.textContent ?? "")).map(d => ({ text: (d.textContent ?? "").slice(0, 40), width: Math.round(d.getBoundingClientRect().width) })), priority: (() => {
           const sw = document.querySelector('[role="switch"][aria-label="AI priority"]');
@@ -151,7 +151,7 @@ try {
       assertNoRealNames(facts.text, name);
       assert.equal(facts.pageScrolls, false, `${name}: the page scrolls sideways`);
       assert.ok(facts.lineBox && facts.lineBox.left >= 0 && facts.lineBox.right <= facts.lineBox.vw + 1, `${name}: the line overflows ${JSON.stringify(facts.lineBox)}`);
-      const claudePick = /\bClaude\b(?! Code)/.test(facts.text.split(/^Paseo doesn't pass /m)[0].replace(/with Claude, Haiku[^.]*\./, "").replace(/other than Claude or Codex/g, "").replace(/need[s]? Claude or Codex/g, ""));
+      const claudePick = /\bClaude\b(?! Code)/.test(facts.text.split(new RegExp(`^${LABEL} reads Follow-up`, "m"))[0].replace(/with Claude, Haiku[^.]*\./, "").replace(/other than Claude or Codex/g, "").replace(/need[s]? Claude or Codex/g, ""));
       assert.ok(facts.priority, `${name}: AI priority's switch is on the page`);
       assert.equal(facts.priority.label, "Unavailable", `${name}: AI priority's switch reads Unavailable`);
       assert.equal(facts.priority.disabled, true, `${name}: AI priority's switch is disabled with no guarded provider`);
@@ -178,8 +178,8 @@ try {
   for (const shot of report.shots) {
     const lines = (shot.line ?? "").split("\n").map(l => l.trim()).filter(Boolean);
     assert.equal(lines.length, 2, `${shot.name}: the notes block is two lines: ${JSON.stringify(shot.line)}`);
-    assert.match(lines[0], new RegExp(`^Paseo doesn't pass Follow-up's instructions to ${LABEL} yet, so it reads them through a tool`), `${shot.name}: first line ${JSON.stringify(lines[0])}`);
-    assert.match(lines[1], /^Summaries' linked issues, Compass and Ask read other people's words/, `${shot.name}: second line ${JSON.stringify(lines[1])}`);
+    assert.match(lines[0], new RegExp(`^${LABEL} reads Follow-up's instructions from a tool at the start of each session\\. Nothing to set up\\.$`), `${shot.name}: first line ${JSON.stringify(lines[0])}`);
+    assert.match(lines[1], /^Compass, Ask and Summaries' linked issues read other people's messages/, `${shot.name}: second line ${JSON.stringify(lines[1])}`);
   }
   assert.equal(report.instructions.inSessionNew || report.instructions.inPrompt, false, "no instruction text was claimed in the ACP session itself; it comes through the tool");
   assert.equal(report.instructions.followUpEnv.FOLLOW_UP_SYSTEM_PROMPT, undefined, "the session env claims no system-prompt text an ACP agent never gets");
