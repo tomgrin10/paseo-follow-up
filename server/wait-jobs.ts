@@ -34,6 +34,12 @@ const metadataSchema = z.object({ version: z.literal(1), id: z.string().uuid(), 
 const resultSchema = z.object({ exitCode: z.number().int().min(0).max(255), timedOut: z.literal(true).optional() }).strict();
 
 export interface Owner { id: string; cwd: string }
+/**
+ * How the agent's shell runs the job (shared/provider-support.ts providerCaps `wait`): Claude Code backgrounds it
+ * itself (native Bash run_in_background); any other provider runs a command that detaches itself and returns at once,
+ * its output in the job's `output.log`.
+ */
+export type WaitShell = "background-bash" | "detached";
 /** `timedOut`: the runner stopped the command at its time limit (exit 124). */
 export interface JobStatus { jobId: string; status: "prepared" | "running" | "completed" | "failed"; description: string; createdAt: string; exitCode?: number; timedOut?: true }
 export type WaitResult = JobStatus & { outcome: "completed" | "failed" | "still_pending" | "new_message"; waitedSeconds: number; instruction: string };
@@ -68,7 +74,7 @@ export class WaitJobs {
   }
 
   /** Writes the job record and returns the exact command to run. Runs nothing. */
-  async prepare(owner: Owner, raw: z.input<typeof prepareInput>) {
+  async prepare(owner: Owner, raw: z.input<typeof prepareInput>, shell: WaitShell = "background-bash") {
     const input = prepareInput.parse(raw);
     if (this.closed) throw new Error("Wait tools are stopping");
     const id = randomUUID();
@@ -82,9 +88,19 @@ export class WaitJobs {
     await writeFile(join(path, "job.json"), JSON.stringify(record), { mode: 0o600, flag: "wx" });
     const limit = input.timeoutSeconds ?? DEFAULT_JOB_TIMEOUT_SECONDS;
     await writeFile(join(path, "timeout"), String(limit), { mode: 0o600, flag: "wx" });
+    const run = ["sh", runner, path, owner.cwd, input.command].map(quote).join(" ");
+    if (shell === "detached") {
+      const output = join(path, "output.log");
+      return {
+        jobId: id,
+        bashCommand: `nohup ${run} > ${quote(output)} 2>&1 < /dev/null &`,
+        outputPath: output,
+        instruction: "Run bashCommand with your shell tool exactly as given: it starts the job in the background and returns at once. Then call wait_for_job. Its output is in outputPath. Preparing this job has not executed the command.",
+      };
+    }
     return {
       jobId: id,
-      bashCommand: ["sh", runner, path, owner.cwd, input.command].map(quote).join(" "),
+      bashCommand: run,
       instruction: "Run bashCommand using native Bash with run_in_background=true. Then call wait_for_job. Preparing this job has not executed the command.",
     };
   }

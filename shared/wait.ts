@@ -16,9 +16,9 @@ export const waitStatusSchema = z.object({
 export type WaitStatus = z.infer<typeof waitStatusSchema>;
 
 export const WAIT_TITLE = "Wait for background jobs";
-export const WAIT_HINT = "Claude agents keep working through long commands, checking at least once a minute instead of ending the turn. Applies to new sessions.";
+export const WAIT_HINT = "Agents keep working through long commands, checking at least once a minute instead of ending the turn. Applies to new sessions.";
 export const WAIT_STANDALONE_NOTE = "The separate Wait plugin is installed. Disable it to use Follow-up's built-in Wait.";
-export const WAIT_NO_TOOLS_NOTE = "Paseo's agent tools are off on this host (daemon.mcp in Paseo's config.json, or the Claude provider's Paseo tools). Turn them on, then open a new session.";
+export const WAIT_NO_TOOLS_NOTE = "Paseo's agent tools are off on this host (daemon.mcp in Paseo's config.json, or a provider's Paseo tools). Turn them on, then open a new session.";
 /**
  * Paseo 0.16 (reason `host`): the card leads with what the host does, shown whether the switch is on or off, and the
  * switch is named for what it still controls there: the hook's "background it, end the turn" guidance.

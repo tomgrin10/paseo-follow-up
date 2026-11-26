@@ -51,7 +51,10 @@ test("on a 0.16 host Wait attaches no tools and leaves Claude's MCP auto-backgro
   assert.equal(next.env.FOLLOW_UP_BACKGROUND_WORK, "1", "the hook gives the background-work guidance instead");
   assert.equal(next.env.KEEP, "yes");
   // The same opt-outs still mean nothing at all.
-  for (const patch of [{ purpose: "history" }, { provider: "codex" }, { labels: { "follow-up-wait/enabled": "false" } }] as Partial<PluginSessionOpenRequest>[]) {
+  // The host's background work is Claude Code's: another provider still gets Wait's own tools.
+  const codex = await wait.open(request(root, { provider: "codex" }));
+  assert.ok(codex.tools.some(t => t.name === "wait_for_job"), "Codex on a 0.16 host gets Wait's tools");
+  for (const patch of [{ purpose: "history" }, { labels: { "follow-up-wait/enabled": "false" } }] as Partial<PluginSessionOpenRequest>[]) {
     const r = request(root, patch); assert.equal(await wait.open(r), r, JSON.stringify(patch));
   }
   host = false;

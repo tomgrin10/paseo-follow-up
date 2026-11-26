@@ -48,7 +48,13 @@ test("Wait attaches its three native tools to interactive Claude sessions and ke
   assert.equal(next.env.KEEP, "yes"); assert.equal(next.env.CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS, "0"); assert.equal(next.env.FOLLOW_UP_WAIT, "1");
   assert.deepEqual((await wait.open(next)).tools.length, 3, "never attached twice");
   // Who doesn't get it.
-  const skipped: Partial<PluginSessionOpenRequest>[] = [{ purpose: "history" }, { provider: "codex" }, { labels: { "plugin-tools/enabled": "false" } }, { labels: { "paseo-wait/enabled": "false" } }, { labels: { "follow-up-wait/enabled": "false" } }];
+  // Any provider gets it (an-agent-on-any-provider-gets-follow-up); only Claude Code gets Claude's MCP setting.
+  for (const provider of ["codex", "opencode", "pi"]) {
+    const other = await wait.open(request(root, { provider }));
+    assert.ok(other.tools.some(t => t.name === "wait_for_job"), `${provider} gets Wait`);
+    assert.equal(other.env.FOLLOW_UP_WAIT, "1"); assert.equal(other.env.CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS, undefined);
+  }
+  const skipped: Partial<PluginSessionOpenRequest>[] = [{ purpose: "history" }, { labels: { "plugin-tools/enabled": "false" } }, { labels: { "paseo-wait/enabled": "false" } }, { labels: { "follow-up-wait/enabled": "false" } }];
   for (const patch of skipped) {
     const r = request(root, patch); assert.equal(await wait.open(r), r, JSON.stringify(patch));
   }
