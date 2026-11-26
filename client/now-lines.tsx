@@ -44,7 +44,7 @@ function AgentLine({ n, who, first, theme, compact, openAgent }: { n: Now; who: 
   const label = [who, n.work?.text, position, n.state.text].filter(Boolean).join(". ");
   return <Pressable accessibilityRole={openAgent ? "button" : undefined} accessibilityLabel={label} accessibilityHint={openAgent ? "Opens this agent's chat" : undefined} disabled={!openAgent}
     onPress={() => openAgent?.(n.agentId)}
-    style={state => ({ ...focusRing((state as { focused?: boolean }).focused, c, true), flexDirection: "row", gap: 10, paddingHorizontal: compact ? 14 : 12, paddingVertical: compact ? 12 : 9, minHeight: compact ? 56 : 0,
+    style={state => ({ ...focusRing((state as { focused?: boolean }).focused, c, true), flexDirection: "row", alignItems: meta ? "flex-start" : "center", gap: 10, paddingHorizontal: compact ? 14 : 12, paddingVertical: compact ? 12 : 9, minHeight: compact ? 56 : 0,
       borderTopWidth: first ? 0 : 1, borderTopColor: c.border, backgroundColor: (state as { hovered?: boolean }).hovered || state.pressed ? c.surface2 : "transparent" })}>
     <View style={{ width: 12, height: compact ? 20 : 18, alignItems: "center", justifyContent: "center" }}>
       {running ? <Spinner color={runningColor(c)} size={12} label="Running" /> : <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: tone }} />}
