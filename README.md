@@ -131,7 +131,6 @@ Steve Castaneda (questions with lettered options; MIT, see [THIRD_PARTY_NOTICES.
 
 [Defer](https://github.com/tomgrin10/paseo-defer),
 [Send to Paseo](https://github.com/tomgrin10/send-to-paseo),
-[Session Guard](https://github.com/tomgrin10/paseo-session-guard),
 [Smart Session](https://github.com/tomgrin10/paseo-smart-session),
 [Transcript Search](https://github.com/tomgrin10/paseo-transcript-search),
 [Transfer](https://github.com/tomgrin10/paseo-transfer),
