@@ -1,1 +1,0 @@
-- What's new shows the bold in release notes. 2.4.0's fix dropped it on the way to the app.

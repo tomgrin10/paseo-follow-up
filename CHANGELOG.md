@@ -2,6 +2,25 @@
 
 What changed in each version of Follow-up, newest first. Follow-up shows "What's new" after an update that brings new release notes: the curated part of each stable release since you last looked (betas install quietly; Settings → General can turn it off), and every version's notes from Home's version line.
 
+## 2.4.1 (2026-11-26)
+
+Two fixes for 2.4.0.
+
+- **The search key always lands in the search.** Holding it a moment or typing before Home has drawn no longer leaves the cursor outside Home's search, and what you type goes into it.
+- **What's new shows its bold.** The bold leads in release notes now reach the app, on desktop and on the phone.
+
+<details><summary>Full changelog since 2.4.0</summary>
+
+### Home and Needs you
+
+- The search key now always puts the cursor in Home's search, even when you hold it a moment or start typing before Home has drawn. What you type goes into the search.
+
+### Setup, Settings and updates
+
+- What's new shows the bold in release notes. 2.4.0's fix dropped it on the way to the app.
+
+</details>
+
 ## 2.4.0 (2026-11-26)
 
 Start new work in one step, rank it by what the people you follow ask for, and use Follow-up with any agent provider, GitHub or not.

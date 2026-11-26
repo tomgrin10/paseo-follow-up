@@ -1,1 +1,0 @@
-- The search key now always puts the cursor in Home's search, even when you hold it a moment or start typing before Home has drawn. What you type goes into the search.
