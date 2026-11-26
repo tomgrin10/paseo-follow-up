@@ -175,7 +175,8 @@ row, Home/End jump to the first or last, Enter (or O, Catch up's letter) opens. 
 then every row of an open group (a collapsed group and a closed Quiet fold are skipped; a filter walks only the
 matches). The focus moves with the keys, so the row shows the keyboard focus ring (`focusRing`, `client/kit.tsx`;
 never after a click) and the browser keeps it in view. On Home the selection follows the keys and the detail pane
-with it, and Enter opens the selected workspace's chat (Open full, whose button shows a quiet ↵), however it was
+with it. Double-clicking a workspace row (including a search result) opens its chat through the same callback as Enter
+(`client/row-open.ts`); nested buttons and menus keep their own actions, and touch taps still select. Enter opens the selected workspace's chat (Open full, whose button shows a quiet ↵), however it was
 selected: a focused row opens itself, and with nothing focused the selection opens (`enterTarget`, invariant
 `the-selected-workspace-opens-with-enter`). In Home's search the first Enter shows the active result in the pane and
 Enter again on that result opens it; Esc clears the search, a second Esc leaves it, and Enter then opens the selection

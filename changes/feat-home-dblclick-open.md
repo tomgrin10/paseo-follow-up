@@ -1,0 +1,1 @@
+- Double-click a workspace in Home to open its chat, including from search results.

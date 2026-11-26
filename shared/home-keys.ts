@@ -7,6 +7,7 @@ export const HOME_KEYS: readonly { key: string; what: string; when?: "search" | 
   { key: "↑ ↓ / J K", what: "Move through the list" },
   { key: "Home / End", what: "First or last row" },
   { key: "↵ / O", what: "Open the selected workspace's chat" },
+  { key: "Double-click", what: "Open a workspace's chat" },
   { key: "S", what: "Show the keys" },
   { key: "/", what: "Search", when: "search" },
   { key: "↑ / ↓", what: "Move through the results", when: "search" },
