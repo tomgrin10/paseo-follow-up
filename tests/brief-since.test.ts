@@ -194,7 +194,7 @@ test("nobody-s-on-it-is-needs-you: the sidebar badge counts the raised issues fr
   assert.match(live, /const count = homeCounts\(useHomeModel\(sources\)\)\.needs;/);
   const data = await readFile(new URL("../client/home-data.ts", import.meta.url), "utf8");
   assert.match(data, /extras\.queue\(\)\.needs\.length/);
-  assert.match(data, /buildHome\(\{[^}]*raised \}\)/);
+  assert.match(data, /buildHome\(\{[^}]*raised[,} ]/);
   const home = await readFile(new URL("../client/home.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(home, /useRaised|linearQueueRpc/, "Home reads no queue of its own for Needs you");
 });
