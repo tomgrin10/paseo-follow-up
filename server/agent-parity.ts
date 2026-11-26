@@ -5,7 +5,7 @@ import { ONBOARDING_ACTIONS, ONBOARDING_STEPS } from "../shared/onboarding";
 import { setPrWorkflowInputSchema } from "../shared/pr-workflow";
 import { prStatsInputSchema, setPrStatsInputSchema, statsRepoName } from "../shared/pr-stats-settings";
 import { reviewerListSchema } from "../shared/reviewers";
-import { taskTriggerSchema } from "../shared/task-trigger";
+import { taskTriggerInputSchema } from "../shared/task-trigger";
 import { UPDATE_MODES } from "../shared/updates";
 import { briefChoiceSchema, reportKindSchema } from "../shared/contracts";
 import { actionChangeSchema, settingsChangeSchema } from "../shared/dispatch";
@@ -126,7 +126,7 @@ export const RPC_TOOLS: readonly RpcTool[] = [
   { name: "set_workspace_spec", rpc: "follow.workspace-spec", kind: "planned",
     input: z.strictObject({ workspaceId: id.optional(), action: z.enum(["set", "remove", "reset"]).optional(), url: z.string().trim().min(1).max(2000).optional(), title: z.string().trim().max(120).nullable().optional(), ...confirm }) },
   { name: "set_task_trigger", rpc: "follow.set-task-trigger", kind: "planned",
-    input: z.strictObject({ workspaceId: id.optional(), obligationId: id.optional(), expectedRevision: z.number().int().nonnegative().optional(), trigger: taskTriggerSchema.nullable().optional(), afterPrs: z.array(id).optional(), ...confirm }),
+    input: z.strictObject({ workspaceId: id.optional(), obligationId: id.optional(), expectedRevision: z.number().int().nonnegative().optional(), trigger: taskTriggerInputSchema.strict().nullable().optional(), afterPrs: z.array(id).optional(), ...confirm }),
     toRpc: a => ({ workspaceId: a.workspaceId, obligationId: a.obligationId, expectedRevision: a.expectedRevision, trigger: a.trigger ?? null, afterPrs: a.afterPrs ?? [] }) },
   // Linked items: the list sheet (read, Add link, remove, Undo) for any workspace
   { name: "link_items", rpc: "follow.linked-items", kind: "read", input: z.strictObject({ workspaceId: id }) },

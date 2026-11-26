@@ -15,6 +15,7 @@ import { ACTIVE_SCOPE_MIGRATION, followsByDefault, migrateActiveScope } from "..
 import { replyRecorded } from "../shared/communication";
 import { DeliveryDeferred, ConversationGone } from "./delivery";
 import type { CheckWatches } from "./check-watches";
+import type { ScheduledTasks } from "./scheduled-tasks";
 import type { MessageQueue, Resolution, Target } from "./message-queue";
 import type { ImageRef } from "../shared/images";
 import { PASEO_UNREACHABLE, deliveryOf, type NewQueueItem, type QueueItem, type QueueItemInput } from "../shared/queue";
@@ -414,9 +415,12 @@ export class Engine {
    * never from a read of their own (waiting-for-checks-adds-no-github-read). A nudge's pass judges only its workspaces.
    */
   checkWatches: Pick<CheckWatches, "watched" | "evaluate"> | null = null;
+  /** Scheduled tasks (server/scheduled-tasks.ts): a task's time trigger fires from the pass its due time started. */
+  scheduledTasks: Pick<ScheduledTasks, "evaluate"> | null = null;
   private async afterPass(affected?: ReadonlySet<string>): Promise<void> {
-    if (!this.checkWatches || this.stopped) return;
-    await this.checkWatches.evaluate(affected).catch(error => console.warn(`[follow-up] couldn't check the waits for checks: ${error instanceof Error ? error.message : String(error)}`));
+    if (this.stopped) return;
+    if (this.checkWatches) await this.checkWatches.evaluate(affected).catch(error => console.warn(`[follow-up] couldn't check the waits for checks: ${error instanceof Error ? error.message : String(error)}`));
+    if (this.scheduledTasks && !this.stopped) await this.scheduledTasks.evaluate(affected).catch(error => console.warn(`[follow-up] couldn't send the scheduled tasks: ${error instanceof Error ? error.message : String(error)}`));
   }
   /**
    * A nudge's discovery (a-nudge-costs-its-workspace): only the nudged workspaces and their dirty agents (the kept turn

@@ -47,7 +47,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as 2.0.0-rc.0, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "gallery", "frames", "onboarding"];
+const REVIEW_SHOTS = ["tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "gallery", "frames", "onboarding"];
 /** Pasted images and their Add image button share one harness setup (an Overseer and the fixture provider taking images). */
 const PASTE_LIKE = only => only.includes("paste-images") || only.includes("attach-images");
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
@@ -595,6 +595,20 @@ const NEEDS_YOU_STATES = [
       msg("Retries with backoff are in #262.")] },
 ];
 
+/**
+ * scheduled-tasks only (a-scheduled-task-arrives-once-at-its-time): a workspace waiting on things Follow-up can't see,
+ * each task with its own check-back time: one still to send, one sent and one that couldn't go (the start-up edit in
+ * scheduledShots marks those two, as the worker would have).
+ */
+const SCHEDULED_STATES = [
+  { key: "sc-registry", title: "Registry publish", minute: 178, prompt: "PKG-31: publish 1.4.0 and confirm the CDN serves it.", flag: false,
+    steps: [rpc("follow.enroll", { goal: "PKG-31 Publish 1.4.0" }),
+      rpc("follow.obligation", { title: "Recheck the CDN serves 1.4.0", status: "waiting", evidence: "Published 1.4.0 to the registry; the CDN usually lags 30-60 minutes.", trigger: { event: "at", inMinutes: 45 } }),
+      rpc("follow.obligation", { title: "Tell the docs team 1.4.0 is out", status: "pending", trigger: { event: "at", inMinutes: 120 } }),
+      rpc("follow.obligation", { title: "Rerun the smoke test on the mirror", status: "waiting", trigger: { event: "at", inMinutes: 240 } }),
+      msg("1.4.0 is on the registry. I'll check the CDN at the scheduled time.")] },
+];
+
 /** pick-notes only (task 32deeb27): decision cards with no tracked question, one decision and two. */
 const PICK_NOTES = [
   { key: "pn-one", title: "Export encoding", minute: 176, prompt: "APP-190: export invoices as a spreadsheet finance can open.",
@@ -679,7 +693,7 @@ async function seed({ call, home }) {
   if (only.includes("review-mode") || only.includes("pr-link")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }] });
   // reviewers-click: Ravi and Mina review example/app, so each PR's row reads "Add reviewers to #N: Ravi and Mina".
   if (only.includes("reviewers-click")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }, { login: "mina", name: "Mina" }] });
-  const specs = [...WORKSPACES.filter(w => !(argv.includes("--rename-fixup-review") || only.includes("local-titles")) || ["audit", "billing"].includes(w.key)), ...(only.includes("needs-you-states") || only.includes("tasks-view") || only.includes("own-answer") || only.includes("more-context") || only.includes("dismiss") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") || PASTE_LIKE(only) ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") || only.includes("dismiss") ? MERGE_CLICK_STATES : []), ...(only.includes("reviewers-click") ? REVIEWERS_CLICK_STATES : []), ...(only.includes("pr-scale") ? PR_SCALE_STATES : []), ...(only.includes("batch-churn") ? BATCH_CHURN_STATES : [])];
+  const specs = [...WORKSPACES.filter(w => !(argv.includes("--rename-fixup-review") || only.includes("local-titles")) || ["audit", "billing"].includes(w.key)), ...(only.includes("needs-you-states") || only.includes("tasks-view") || only.includes("own-answer") || only.includes("more-context") || only.includes("dismiss") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") || PASTE_LIKE(only) ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") || only.includes("dismiss") ? MERGE_CLICK_STATES : []), ...(only.includes("reviewers-click") ? REVIEWERS_CLICK_STATES : []), ...(only.includes("pr-scale") ? PR_SCALE_STATES : []), ...(only.includes("batch-churn") ? BATCH_CHURN_STATES : []), ...(only.includes("scheduled-tasks") ? SCHEDULED_STATES : [])];
   if (only.includes("layout-search")) {
     specs.splice(0, specs.length, ...specs.filter(w => ["audit", "billing"].includes(w.key)));
     specs.push(
@@ -2159,6 +2173,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       });
     }
   }
+  if (only.includes("scheduled-tasks")) await scheduledShots({ shoot, seeded, call, cli });
   if (only.includes("own-answer")) await ownAnswerShots({ shoot });
   if (only.includes("more-context")) await moreContextShots({ shoot, call });
   if (only.includes("paste-images")) await pasteImagesShots({ shoot, call });
@@ -4202,6 +4217,64 @@ async function batchChurnShots({ shoot, seeded, call, home, cli }) {
   const healed = (await ws()).batches;
   if (healed.find(x => x.id === "shots-old-answer").state !== "blocked") throw new Error("the answered batch wasn't restored as blocked");
   await state("healed", { panel: "Messages to the agent", activity: /sent again/, home: spec.title });
+}
+/**
+ * Scheduled tasks (`--only scheduled-tasks`, a-scheduled-task-arrives-once-at-its-time): the Tasks card with a time
+ * still to send, one sent and one not sent (and why), the live line naming the check-back time; Send on a schedule's
+ * At a time (opened on the task's time, and a time it refuses); Home's Waiting row. Desktop and phone, light and dark.
+ * The sent and not-sent marks are written into state.json while the plugin is off, as the worker records them.
+ */
+async function scheduledShots({ shoot, seeded, call, cli }) {
+  const spec = SCHEDULED_STATES[0];
+  const w = seeded.workspaces.find(x => x.key === spec.key);
+  await cli("plugin", "disable", "follow-up");
+  await new Promise(r => setTimeout(r, 4000));
+  const stateFile = join(home, "plugin-data", "follow-up", "state.json");
+  const saved = JSON.parse(await fs.readFile(stateFile, "utf8"));
+  const stored = saved.workspaces.find(x => x.id === w.workspaceId);
+  const now = Date.parse(stored.updatedAt);
+  const iso = ms => new Date(ms).toISOString();
+  for (const o of stored.obligations) {
+    if (o.title.startsWith("Tell the docs team")) o.trigger = { event: "at", delayDays: 0, at: iso(now - 50 * 60_000), queuedAt: iso(now - 50 * 60_000), sentAt: iso(now - 49 * 60_000) };
+    if (o.title.startsWith("Rerun the smoke test")) o.trigger = { event: "at", delayDays: 0, at: iso(now - 20 * 60_000), notSent: "the agent was archived" };
+  }
+  await fs.writeFile(stateFile, JSON.stringify(saved));
+  await cli("plugin", "enable", "follow-up").catch(error => { if (!/DAEMON_REQUEST_TIMEOUT/.test(`${error?.stdout ?? ""}${error?.message ?? ""}`)) throw error; });
+  await until("Follow-up back with the scheduled marks", async () => {
+    try { const r = await call("follow.get", { workspaceId: w.workspaceId }); return r.workspace.obligations.some(o => o.trigger?.notSent); } catch { return false; }
+  }, { tries: 600, every: 500 });
+  const TALL = { width: DESKTOP.width, height: 1100 };
+  const fold = page => page.getByRole("button", { name: /^Agent's tasks: / }).filter({ visible: true }).last();
+  const expand = async page => {
+    await fold(page).waitFor({ timeout: 60_000 });
+    if ((await fold(page).getAttribute("aria-expanded")) !== "true") await fold(page).click();
+    await page.getByText(/^Didn't go out · /).filter({ visible: true }).first().waitFor({ timeout: 30_000 });
+  };
+  const panel = async page => { await page.setViewportSize(TALL); await openChat(page, spec.title, spec.prompt); await page.getByRole("button", { name: "Follow-up", exact: true }).last().click(); await expand(page); };
+  const larger = async page => {
+    await openChat(page, spec.title, spec.prompt);
+    await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+    await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
+    await page.setViewportSize(PHONE); await expand(page);
+  };
+  const sheet = async page => {
+    await page.getByRole("button", { name: /^Task: Recheck the CDN serves 1\.4\.0/ }).filter({ visible: true }).first().click();
+    await page.getByText("Send on a schedule…").filter({ visible: true }).first().click();
+    await page.getByRole("radio", { name: "At a time", exact: true }).filter({ visible: true }).first().waitFor();
+    await page.getByText(/^Sends .*, your time$/).filter({ visible: true }).first().waitFor();
+  };
+  const refuse = async page => { await page.getByLabel("Send at, date and time").filter({ visible: true }).first().fill("next tuesday"); await page.getByText(/^Write a time like 14:30/).filter({ visible: true }).first().waitFor(); };
+  const noSideways = name => async page => { if (await page.evaluate(() => document.documentElement.scrollWidth) > PHONE.width) throw new Error(`${name} scrolls sideways`); };
+  for (const theme of ["light", "dark"]) {
+    await shoot(`sc-panel-${theme}`, TALL, theme, async page => { await panel(page); await page.getByText(/checks back /).filter({ visible: true }).first().waitFor(); });
+    await shoot(`sc-phone-${theme}`, PHONE, theme, async page => { await larger(page); await fold(page).evaluate(el => el.scrollIntoView({ block: "start" })); await noSideways("sc-phone")(page); });
+    await shoot(`sc-sheet-${theme}`, TALL, theme, async page => { await panel(page); await sheet(page); });
+    await shoot(`sc-sheet-refused-${theme}`, TALL, theme, async page => { await panel(page); await sheet(page); await refuse(page); });
+    await shoot(`sc-sheet-phone-${theme}`, PHONE, theme, async page => { await larger(page); await sheet(page); await noSideways("sc-sheet-phone")(page); });
+    await shoot(`sc-sheet-refused-phone-${theme}`, PHONE, theme, async page => { await larger(page); await sheet(page); await refuse(page); });
+    await shoot(`sc-home-${theme}`, DESKTOP, theme, async page => { await openHome(page); await page.getByText(/Recheck the CDN serves 1\.4\.0 · checks back /).filter({ visible: true }).first().waitFor({ timeout: 60_000 }); });
+    await shoot(`sc-home-phone-${theme}`, PHONE, theme, async page => { await openHome(page); await page.setViewportSize(PHONE); const line = page.getByText(/checks back /).first(); await line.waitFor({ state: "attached", timeout: 60_000 }); await line.evaluate(el => el.scrollIntoView({ block: "center" })); await line.waitFor({ timeout: 10_000 }); await noSideways("sc-home-phone")(page); });
+  }
 }
 /**
  * Settings, one tab per category (Paseo 0.16+, client/settings-screens.ts), or Follow-up's own tabs on 0.15: every

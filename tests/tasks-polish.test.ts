@@ -23,7 +23,7 @@ test("stale is amber in light themes: readable as a 12px word on white, the host
   assert.equal(staleColor(dark), "#f5a524");
   assert.ok(contrast(STALE_LIGHT, "#ffffff")! >= 4.5, `the word passes as text: ${contrast(STALE_LIGHT, "#ffffff")}`);
   const tasks = await src("client/tasks.tsx");
-  assert.equal((tasks.match(/staleColor\(/g) ?? []).length, 3, "the dot, the Stale word and the folded count");
+  assert.equal((tasks.match(/staleColor\(/g) ?? []).length, 4, "the dot, the Stale word, the folded count and a scheduled time that didn't go out");
   assert.equal((tasks.match(/c\.statusWarning/g) ?? []).length, 1, "only the schedule sheet's \"Register a PR\" warning; stale never uses the brown token");
 });
 

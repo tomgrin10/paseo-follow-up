@@ -2,6 +2,7 @@ import type { Obligation, Workspace } from "./model";
 import type { ListObligation, ListWorkspace } from "./list";
 import { deployState } from "./follow-up";
 import { blockedOnDeveloper, waitsOnDeveloper } from "./questions";
+import { pendingAt } from "./task-trigger";
 
 // ---------- due by fact (invariant due-by-fact) ----------
 //
@@ -55,7 +56,8 @@ type Questions = Pick<ListWorkspace, "questions">["questions"];
 export function dueApplies(o: Pick<Obligation, "status" | "ask" | "coveredBy" | "enable_follow_up" | "trigger">, questions: Questions): boolean {
   if (o.status === "done" || o.status === "waived") return false;
   if (waitsOnDeveloper(o, questions)) return false;
-  return !(o.enable_follow_up && o.trigger);
+  // An at trigger that went out (or couldn't) hands the task back to due by fact: the agent heard, and its re-check stands.
+  return !(o.enable_follow_up && o.trigger) || o.trigger.event === "at" && !pendingAt(o.trigger);
 }
 
 /**
