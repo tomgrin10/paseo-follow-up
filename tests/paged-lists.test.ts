@@ -76,6 +76,22 @@ test("follow.activity pages the timeline and finds a match on the last page", ()
   assert.ok(found.questions[0].hit?.ranges[0].length, "with the match marked");
 });
 
+// 2026-11-26 review: Activity's timeline broke ties by key as a string, oldest first (a page ended "Q140, Q17"),
+// while its Questions tab went newest first by number. One tie-break now: newest first, numbers read as numbers.
+test("rows at the same time order newest first by number, in the timeline and the Questions tab alike", async () => {
+  const { newestId } = await import("../shared/sort");
+  assert.deepEqual(["Q9", "Q140", "Q17", "Q2"].sort(newestId), ["Q140", "Q17", "Q9", "Q2"]);
+  const w = big();
+  const at = "2026-01-02T00:00:00.000Z";
+  const same = { ...w, questions: w.questions.map(q => ({ ...q, askedAt: at, answer: q.answer ? { ...q.answer, at } : q.answer })) };
+  const { activity } = await import("../shared/activity");
+  const timeline = activity(same as never).map(r => r.key).filter(k => k.startsWith("asked:")).map(k => Number(k.slice("asked:Q".length)));
+  assert.ok(timeline.length > 20, `asked rows on the page: ${timeline.length}`);
+  assert.deepEqual(timeline, [...timeline].sort((a, b) => b - a), `the timeline's ties go newest first by number: ${timeline.slice(0, 12).join(", ")}`);
+  const qs = activityPage(same, { tab: "questions", offset: 0, limit: PAGE.maxLimit }).questions.filter(q => q.question.answer).map(q => Number(q.question.id.slice(1)));
+  assert.deepEqual(qs, [...qs].sort((a, b) => b - a), "the Questions tab the same way");
+});
+
 // The card itself, under the native stand-in (no DOM, Android rules), reading pages from a fake worker.
 register("./support/native/hooks.mjs", import.meta.url);
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

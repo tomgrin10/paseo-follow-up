@@ -1,4 +1,5 @@
 import { isOpen, answerStatus } from "./questions";
+import { newestId } from "./sort";
 import { activity, activityQuestions, type Activity } from "./activity";
 import { activityFields, questionFields } from "./section-search";
 import { filterItems, type ItemHit } from "./search";
@@ -90,7 +91,7 @@ export type ActivityPage<Qn> = {
 export function activityPage<W extends ListWorkspace>(w: W, { tab, query, offset = 0, limit = PAGE.size }: { tab: ActivityTab; query?: string | null; offset?: number; limit?: number }): ActivityPage<W["questions"][number]> {
   type Qn = W["questions"][number];
   const rows = activity(w);
-  const qs = activityQuestions(w.questions as Qn[]).sort((a, b) => Number(isOpen(b)) - Number(isOpen(a)) || Number(b.id.slice(1)) - Number(a.id.slice(1)));
+  const qs = activityQuestions(w.questions as Qn[]).sort((a, b) => Number(isOpen(b)) - Number(isOpen(a)) || newestId(a.id, b.id));
   const found = query?.trim() ? {
     timeline: (filterItems(rows, activityFields, query) ?? []).map(r => ({ row: r.item, hit: r.hit as ItemHit | null })),
     questions: (filterItems(qs, q => questionFields(q as never), query) ?? []).map(r => ({ question: r.item, hit: r.hit as ItemHit | null })),

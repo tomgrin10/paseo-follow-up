@@ -18,6 +18,13 @@ export const SORT_HINT: Record<SortMode, string> = {
 export const DEFAULT_SORT: SortMode = "priority";
 export const isSortMode = (v: unknown): v is SortMode => typeof v === "string" && (SORT_MODES as readonly string[]).includes(v);
 
+/**
+ * The one tie-break for rows at the same time (Activity's timeline and its Questions tab): newest first by id, numbers
+ * read as numbers, so Q140 comes before Q17 and Q17 before Q9. 2026-11-26 review: the timeline broke ties by key as a
+ * string, oldest first ("…Q140, Q17"), while the Questions tab went newest first by number.
+ */
+export const newestId = (a: string, b: string) => b.localeCompare(a, "en", { numeric: true });
+
 const time = (iso: string | null | undefined) => { const t = iso ? Date.parse(iso) : NaN; return Number.isFinite(t) ? t : null; };
 const oldestFirst = (a: string | null | undefined, b: string | null | undefined) => (time(a) ?? Infinity) - (time(b) ?? Infinity);
 const newestFirst = (a: string | null | undefined, b: string | null | undefined) => (time(b) ?? -Infinity) - (time(a) ?? -Infinity);
