@@ -223,3 +223,12 @@ test("scale-runner-facts: --retain-mb holds a synthetic regression in the plugin
   assert.equal(plugin.held, 20, "20 one-MB blocks"); assert.ok(plugin.heapMb >= 10, `half on V8's heap: ${plugin.heapMb}`);
   assert.equal(other.held, 0, "the daemon and agents hold nothing extra");
 });
+
+test("pagedReplyVerdict: a panel read over its page budget is named; under it passes", async () => {
+  const { pagedReplyVerdict, PAGED_REPLY_BUDGET_BYTES } = await import("../scripts/scale-budget.mjs");
+  const ok = pagedReplyVerdict([{ method: "follow.get", label: "big", bytes: 1000 }, { method: "follow.activity", label: "p1", bytes: 20_000 }]);
+  assert.deepEqual(ok.over, []);
+  const bad = pagedReplyVerdict([{ method: "follow.get", label: "big", bytes: PAGED_REPLY_BUDGET_BYTES["follow.get"] + 1 }]);
+  assert.equal(bad.over.length, 1);
+  assert.match(bad.over[0], /follow\.get big/);
+});

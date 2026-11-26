@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { usePagedList } from "./paged-list";
+import { PAGE } from "../shared/paged";
 import { useViewSync, useViewVersion } from "./view-store";
 import { ActivityIndicator, TextInput, View } from "react-native";
 import { Pressable, Text } from "./text";
@@ -115,16 +117,19 @@ function ProjectsFold({ theme, compact }: { theme: Theme; compact: boolean }) {
     onError: error => toast.error(errorText(error)),
   });
   const projects = query.data?.projects;
+  // A shared host lists hundreds of projects: pages (client/paged-list.tsx).
+  const page = usePagedList({ items: projects ?? [], theme, compact, noun: "projects" });
   if (query.isPending) return <ActivityIndicator accessibilityLabel="Loading projects" color={c.foregroundMuted} style={{ alignSelf: "flex-start", marginVertical: 8 }} />;
   if (query.error || !projects) return <SettingsCard><SettingsAction label="Couldn't load projects" hint={query.error ? errorText(query.error) : undefined} actionLabel="Retry" onPress={() => void query.refetch()} /></SettingsCard>;
   if (!projects.length) return <Text style={t.meta}>Projects appear here once you add them to Paseo.</Text>;
   return <Disclosure id="following.projects" title="Projects" summary={projectsSummary(projects)} defaultOpen={projectsOpenByDefault(projects.length)} theme={theme} compact={compact}>
       <Text style={[t.meta, { paddingHorizontal: 14, paddingTop: 10 }]}>With Follow every workspace on, a project that's off stops following its new workspaces; ones already followed stay followed (turn one off under Workspaces). With it off, only the projects on here are followed.</Text>
       <View style={{ padding: 8 }}><SettingsCard>
-        {projects.map(project => <SettingsSwitch key={project.id} label={project.name}
+        {page.shown.map(project => <SettingsSwitch key={project.id} label={project.name}
           hint={project.key.startsWith("remote:") ? project.key.slice(7) : project.path.split("/").filter(Boolean).slice(-2).join("/")}
           value={project.enable_default_tracking} disabled={change.isPending}
           onValueChange={value => change.mutate({ projectId: project.id, enable_default_tracking: value })} />)}
+        {page.footer}
       </SettingsCard></View>
     </Disclosure>;
 }
@@ -133,9 +138,10 @@ function WorkspacesFold({ theme, compact, all, autoDefault, busy, set }: { theme
   set: (w: { workspaceId: string; follow?: boolean; enable_auto_sends?: boolean }, toast?: string) => void }) {
   const c = theme.colors; const t = text(c, compact);
   const [q, setQ] = useState("");
-  const [cap, setCap] = useState(25);
   const [openId, setOpenId] = useState<string | null>(null);
-  const view = workspaceRows(all, autoDefault, q, cap);
+  // Every match, paged (client/paged-list.tsx): "Show 25 more" used to add rows until all of them were drawn.
+  const view = workspaceRows(all, autoDefault, q, Infinity);
+  const page = usePagedList({ items: view.rows, resetKey: q, size: PAGE.size, theme, compact, noun: "workspaces" });
   return <Disclosure id="following.workspaces" title="Workspaces" summary={workspacesSummary(all, autoDefault)} defaultOpen={workspacesOpenByDefault(view.exceptions)} theme={theme} compact={compact}>
     <View style={{ padding: 10, paddingBottom: 6 }}>
       <TextInput accessibilityLabel="Search workspaces" value={q} onChangeText={v => { setQ(v); setOpenId(null); }} placeholder={`Search ${all.length} workspaces`} placeholderTextColor={c.foregroundMuted}
@@ -143,7 +149,7 @@ function WorkspacesFold({ theme, compact, all, autoDefault, busy, set }: { theme
         style={{ minHeight: compact ? 44 : 32, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: c.border, color: c.foreground, fontSize: 13, backgroundColor: c.surface0 }} />
     </View>
     {!view.rows.length && <Text style={[t.meta, { paddingHorizontal: 14, paddingBottom: 12 }]}>{`No workspace matches "${q.trim()}".`}</Text>}
-    {view.rows.map(w => {
+    {page.shown.map(w => {
       const open = openId === w.id;
       const followed = !w.optedOut && w.enable_tracking;
       const exception = view.exceptions > 0 && (w.optedOut || !w.enable_tracking || (!w.parked && w.enable_auto_sends !== autoDefault));
@@ -168,10 +174,7 @@ function WorkspacesFold({ theme, compact, all, autoDefault, busy, set }: { theme
         </View>}
       </View>;
     })}
-    {view.hidden > 0 && <Pressable accessibilityRole="button" onPress={() => setCap(n => n + 25)}
-      style={state => ({ minHeight: compact ? 44 : 36, justifyContent: "center", paddingHorizontal: 14, borderTopWidth: 1, borderTopColor: c.border, backgroundColor: state.pressed ? c.surface2 : "transparent" })}>
-      <Text style={[t.meta, { color: c.foreground }]}>{`Show ${Math.min(25, view.hidden)} more (${view.hidden} left)`}</Text>
-    </Pressable>}
+    {page.footer}
   </Disclosure>;
 }
 

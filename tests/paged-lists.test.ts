@@ -122,3 +122,42 @@ test("the Activity card draws at most PAGE.preview rows folded and PAGE.size a p
   await c.press("Show less");
   assert.ok(c.rows() <= PAGE.preview, "Show less folds back");
 });
+
+test("PagedRows draws one page of a long list, and Next moves on", async () => {
+  const { PagedRows } = await import("../client/paged-list");
+  const { Text } = await import("../client/text");
+  const items = Array.from({ length: 312 }, (_, i) => `row ${i + 1}`);
+  let r: ReturnType<typeof create>;
+  const el = () => createElement(PagedRows, { items, theme, compact: true, noun: "rows", row: (x: string) => createElement(Text, { key: x }, x) });
+  await act(async () => { r = create(el()); });
+  const texts = () => r!.root.findAll(n => n.type === "Text").map(n => n.children.filter(ch => typeof ch === "string").join(""));
+  assert.equal(texts().filter(x => x.startsWith("row ")).length, PAGE.size);
+  assert.ok(texts().includes("1–25 of 312"));
+  const next = r!.root.findAll(n => n.props.accessibilityLabel === "Next page" && typeof n.props.onPress === "function")[0];
+  await act(async () => { (next.props.onPress as () => void)(); });
+  assert.ok(texts().includes("26–50 of 312"));
+  assert.equal(texts().filter(x => x.startsWith("row ")).length, PAGE.size);
+  assert.ok(texts().includes("row 26") && !texts().includes("row 1"));
+});
+
+/** Lists whose store caps them far below a page's worth of trouble, with the cap that bounds them. */
+const BOUNDED: Record<string, string> = {
+  "client/linked.tsx": "linked items: at most LIMITS.items (50) a workspace, pruned on insert (shared/linked.ts)",
+};
+
+test("every list pages: no 'Show all' or 'Show N more' that draws the whole list, outside the shared pager", async () => {
+  const { readdir, readFile } = await import("node:fs/promises");
+  const files = (await readdir("client")).filter(f => /\.tsx?$/.test(f) && f !== "paged-list.tsx");
+  const offenders: string[] = [];
+  for (const f of files) {
+    const src = await readFile(`client/${f}`, "utf8");
+    // The Activity card pages on the worker (follow.activity) and draws its own fold row; everything else uses usePagedList.
+    for (const m of src.matchAll(/`Show all \$\{|Show \$\{[^}]+\} more|setAll\(true\)|setCap\(/g)) {
+      const line = src.slice(0, m.index).split("\n").length;
+      if (f === "questions.tsx" && /Show all \$\{d\.total\}/.test(src.split("\n")[line - 1])) continue;
+      if (BOUNDED[`client/${f}`]) continue;
+      offenders.push(`client/${f}:${line}`);
+    }
+  }
+  assert.deepEqual(offenders, [], "a list that opens to every row: draw it with usePagedList or PagedRows (client/paged-list.tsx)");
+});

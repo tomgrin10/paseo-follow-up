@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { PagedRows } from "./paged-list";
 import type { SettingsCategory } from "../shared/settings-nav";
 import { recoveryActions } from "./recovery-actions";
 import { Platform, View, type ScrollView as NativeScrollView } from "react-native";
@@ -232,7 +233,7 @@ function WorkspaceCard({ workspace: w, theme, compact, open, toggle, openAgent, 
           {openAgent && <Button theme={theme} compact={compact} icon="MessageSquare" title="Open" accessibilityLabel="Open main agent" onPress={() => openAgent(w.mainAgentId)} />}
         </View>
         <MainChangeNotice workspace={w} theme={theme} compact={compact} />
-        {(w.contributorAgentIds ?? []).map(id => <OtherRootAgent key={id} agentId={id} workspace={w} theme={theme} compact={compact} openAgent={openAgent} mainAgentId={w.mainAgentId} />)}
+        <PagedRows items={w.contributorAgentIds ?? []} theme={theme} compact={compact} noun="agents" row={id => <OtherRootAgent key={id} agentId={id} workspace={w} theme={theme} compact={compact} openAgent={openAgent} mainAgentId={w.mainAgentId} />} />
       </CardRow>
       <CardRow theme={theme} compact={compact}>
         <View style={{ gap: 8 }}>

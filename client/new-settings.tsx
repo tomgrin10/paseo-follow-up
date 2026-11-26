@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { PagedRows } from "./paged-list";
 import { NEW_ROW } from "../shared/new-name";
 import { useNewRowSetting } from "./new-entry";
 import { ActivityIndicator, View } from "react-native";
@@ -165,7 +166,7 @@ function WhereSection({ theme, compact }: { theme: Theme; compact: boolean }) {
           options={[{ value: "last", label: "The project you used last" }, { value: "ask", label: "Ask which project" }]} onValueChange={noTeam => change.mutate({ noTeam })} />
       </SettingsCard>
       <SettingsCard>
-        {view.rules.map(rule => <View key={rule.team}>
+        <PagedRows items={view.rules} theme={theme} compact={compact} noun="rules" row={rule => <View key={rule.team}>
           <SettingsSelect label={`${rule.team} issues`} hint={rule.project ? undefined : "That project is gone: pick another or remove the rule."}
             value={rule.project ? rule.projectId : PICK} disabled={change.isPending}
             options={[...(rule.project ? [] : [{ value: PICK, label: "Pick a project" }]), ...projectOptions]}
@@ -179,7 +180,7 @@ function WhereSection({ theme, compact }: { theme: Theme; compact: boolean }) {
               </>
               : <Button theme={theme} compact={compact} kind="ghost" title="Remove" accessibilityLabel={`Remove ${rule.team}'s rule`} disabled={change.isPending} onPress={() => setRemoving(rule.team)} />}
           </View>
-        </View>)}
+        </View>} />
         {!view.rules.length && <View style={{ paddingHorizontal: 16, paddingVertical: 12 }}><Text style={t.meta}>No team rules yet. {NEW_NAME} learns from where each team's work went; add a rule to fix one.</Text></View>}
         {/* Three native rows, never one row of nested fields: a select squeezed beside an input cuts "Pick a project". */}
         <SettingsRow label="Add a rule" hint="A Linear team's key, like ACME.">
@@ -189,10 +190,10 @@ function WhereSection({ theme, compact }: { theme: Theme; compact: boolean }) {
         <SettingsAction label={!key ? "Type a team key and pick its project" : project === PICK ? `Pick ${key}'s project` : `${key} issues → ${projectOptions.find(o => o.value === project)?.label ?? project}`}
           actionLabel="Add rule" disabled={!key || project === PICK || change.isPending} onPress={add} />
       </SettingsCard>
-      {learnedTeams(view).map(l => <SettingsCard key={l.team}>
+      <PagedRows items={learnedTeams(view)} theme={theme} compact={compact} noun="teams" row={l => <SettingsCard key={l.team}>
         <SettingsAction label={`${l.team} → ${l.project}`} hint={`Learned: ${l.count} ${l.team} workspaces started there.`} actionLabel="Make it a rule" disabled={change.isPending}
           onPress={() => change.mutate({ rules: { [l.team]: l.projectId } })} />
-      </SettingsCard>)}
+      </SettingsCard>} />
     </>}
   </SettingsSection>;
 }
@@ -213,8 +214,8 @@ function BasesSection({ theme, compact }: { theme: Theme; compact: boolean }) {
   const worktrees = view.projects.filter(p => p.worktree);
   return <SettingsSection title="Bases" info="The branch a new worktree starts from. Empty: the repository's default branch. The dialog can change it for one start; that saves it here too.">
     <SettingsCard>
-      {worktrees.map(p => <BaseRow key={p.id} theme={theme} compact={compact} name={p.name} saved={view.bases.find(b => b.projectId === p.id)?.base ?? ""} busy={change.isPending}
-        onSave={(base, done) => change.mutate({ bases: { [p.id]: base || null } }, { onSuccess: done })} />)}
+      <PagedRows items={worktrees} theme={theme} compact={compact} noun="projects" row={p => <BaseRow key={p.id} theme={theme} compact={compact} name={p.name} saved={view.bases.find(b => b.projectId === p.id)?.base ?? ""} busy={change.isPending}
+        onSave={(base, done) => change.mutate({ bases: { [p.id]: base || null } }, { onSuccess: done })} />} />
       {!worktrees.length && <View style={{ paddingHorizontal: 16, paddingVertical: 12 }}><Text style={t.meta}>{`No project here is a git repository, so ${NEW_NAME} opens work in place.`}</Text></View>}
     </SettingsCard>
   </SettingsSection>;

@@ -31,7 +31,7 @@ import { harness, spawnDaemon } from "./harness.mjs";
 import { harnessEnv, harnessConfig } from "./harness-env.mjs";
 import { fakeGithub } from "./fake-github.mjs";
 import { scaleGh } from "./scale-github.mjs";
-import { ACK_READ_MS, BUSY_GROWTH_BUDGET_MB, BUSY_ITEM_BYTES, BUSY_TURN_ITEMS, BUSY_TURNS_PER_MIN, BURST_RETURN_BUDGET_MB, burstReturnVerdict, busyVerdict, DRAIN_BOUND_MS, DRAIN_QUIET_MS, drainPlan, drainState, idleBudgetMb, idleVerdict, peakBudgetMb, LIVE_MALLOC_ENV, REALISTIC_PEAK_BUDGET_MB, SEND_SETTLE_MS, settleBoundMs, settleState } from "./scale-budget.mjs";
+import { ACK_READ_MS, BUSY_GROWTH_BUDGET_MB, BUSY_ITEM_BYTES, BUSY_TURN_ITEMS, BUSY_TURNS_PER_MIN, BURST_RETURN_BUDGET_MB, burstReturnVerdict, busyVerdict, pagedReplyVerdict, DRAIN_BOUND_MS, DRAIN_QUIET_MS, drainPlan, drainState, idleBudgetMb, idleVerdict, peakBudgetMb, LIVE_MALLOC_ENV, REALISTIC_PEAK_BUDGET_MB, SEND_SETTLE_MS, settleBoundMs, settleState } from "./scale-budget.mjs";
 
 const exec = promisify(execFile);
 // The check drives a real Paseo daemon, so it needs the paseo CLI (CI installs @getpaseo/cli). Without it, local
@@ -378,6 +378,17 @@ try {
     const hostRss = rows.filter(r => tree.has(r.pid) && r.pid !== pid && /plugin-process/.test(r.args)).map(r => r.rssMb);
     if (cycleDiag) { await cycleDiag.readBeat(); console.log(`scale-burst-diag ${JSON.stringify({ edges: cycleDiag.edges, idleS: Math.round((started - cycleDiag.from) / 1000), gapsMb: cycles.map(c => c.gapSamplesMb), settles: [...cycleDiag.settles.values()], beats: [...cycleDiag.beats.values()] })}`); }
     worker = { pid, idleWindow: { from: started, to: Date.now() }, memory: memoryIdle, memoryAfterGc, hostPluginBaselineMb: hostRss.length ? Math.min(...hostRss) : null, rssMb: Math.round(await rss()), idleMedianRssMb: idleVerdict(idleSamples, 0).medianMb, idlePeakRssMb: idleVerdict(idleSamples, 0).peakMb, idleSamplesMb: idleSamples.map(Math.round), lifetimePeakRssMb: Math.round(await rss("VmHWM")), cpuPct, idleSeconds: IDLE_MS / 1000, ...(BUSY_MS > 0 ? { busy: { seconds: BUSY_MS / 1000, turns: busyTurns, ...busyVerdict(busySamples, 0), samplesMb: busySamples.map(Math.round) } } : {}), drain, ...(appBurst ? { appBurst: { ...appBurst, beforeMedianMb: idleVerdict(idleSamples.slice(0, appBurst.startSample), 0).medianMb, afterMedianMb: idleVerdict(idleSamples.slice(appBurst.endSample + 60), 0).medianMb } } : {}), ...(cycles ? { cycles: { spec: arg("cycles"), each: cycles.map(c => ({ k: c.k, turns: c.turns, rpcs: c.rpcs, rpcFailed: c.rpcFailed, asked: c.asked, answered: c.answered, burstPeakMb: Math.max(...c.burstSamplesMb), gapMedianMb: idleVerdict(c.gapSamplesMb, 0).medianMb, burstCpuS: c.burstCpuS, gapCpuS: c.gapCpuS, burstSamplesMb: c.burstSamplesMb, gapSamplesMb: c.gapSamplesMb })), ...burstReturnVerdict(cycles.map(c => c.gapSamplesMb), budget.burstReturnMb) } } : {}), stateWrites: writes, stateBytesBefore, stateBytesAfter: statSync(statePath).size, daemonRequestsPerMin: requests };
+    // --live-sized: the big workspace's panel reads stay one page, however long its history (pagedReplyVerdict).
+    if (LIVE_SIZED) {
+      const ws = created[0].workspaceId; const replies = [];
+      for (const [method, label, input] of [["follow.get", "big workspace", { workspaceId: ws }], ["follow.activity", "timeline page 1", { workspaceId: ws, tab: "timeline", offset: 0, limit: 25 }],
+        ["follow.activity", "timeline page 12", { workspaceId: ws, tab: "timeline", offset: 275, limit: 25 }], ["follow.activity", "questions page 4", { workspaceId: ws, tab: "questions", offset: 75, limit: 25 }],
+        ["follow.activity", "search", { workspaceId: ws, tab: "questions", query: "the", limit: 25 }]]) {
+        const out = await client.invokePluginRpc("follow-up", method, input).catch(e => ({ error: String(e?.message ?? e) }));
+        replies.push({ method, label, bytes: JSON.stringify(out ?? null).length, rows: method === "follow.activity" ? (out?.timeline?.length ?? 0) + (out?.questions?.length ?? 0) : out?.workspace?.questions?.length ?? null, total: out?.total ?? null, error: out?.error ?? null });
+      }
+      worker.pagedReplies = pagedReplyVerdict(replies);
+    }
   }
   tracing = false; await tracer;
   // The runner and the worker's memory map: what differs between a run's RSS level and another's (scale-runner-facts).
@@ -396,6 +407,9 @@ try {
   if (budget.idleRssMb && worker && idleVerdict(worker.idleSamplesMb, budget.idleRssMb).over) { over(`Worker idle RSS median ${worker.idleMedianRssMb} MB (peak ${worker.idlePeakRssMb}), over ${budget.idleRssMb} MB`); }
   // The busy window's growth (2026-11-13: live stepped 315 → 405 MB under agent turns while an idle check passed).
   if (worker?.busy && budget.busyGrowthMb && busyVerdict(worker.busy.samplesMb, budget.busyGrowthMb).over) { over(`Worker RSS grew ${worker.busy.growthMb} MB across the ${worker.busy.seconds} s busy window (${worker.busy.firstMb} → ${worker.busy.lastMb}), over ${budget.busyGrowthMb} MB`); }
+  // Every list pages: enforced even with --budgets-report-only (scripts/scale-budget.mjs PAGED_REPLY_BUDGET_BYTES).
+  if (worker?.pagedReplies?.over.length) { console.error(`A paged read outgrew its page: ${worker.pagedReplies.over.join("; ")}`); process.exitCode = 1; }
+  if (worker?.pagedReplies?.replies.some(r => r.error)) { console.error(`A paged read failed: ${worker.pagedReplies.replies.filter(r => r.error).map(r => `${r.method} ${r.label}: ${r.error}`).join("; ")}`); process.exitCode = 1; }
   // Derived and enforced even with --budgets-report-only (scripts/scale-budget.mjs BURST_RETURN_BUDGET_MB).
   if (worker?.cycles?.over) { console.error(`Worker RSS stayed at ${worker.cycles.lastMb} MB (median) in the gap after the last burst, over ${budget.burstReturnMb} MB: memory a burst grows didn't come back (gaps: ${worker.cycles.gapMediansMb.join(", ")} MB)`); process.exitCode = 1; }
   if (budget.rssMb && worker && worker.lifetimePeakRssMb > budget.rssMb) { over(`Worker RSS peaked at ${worker.lifetimePeakRssMb} MB (idle peak ${worker.idlePeakRssMb}), over ${budget.rssMb} MB`); }

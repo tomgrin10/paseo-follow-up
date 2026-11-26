@@ -9,6 +9,7 @@ import { controlRpc, sendRpc } from "../shared/contracts";
 import { messageStrip, repairRows, shortTitle, type MessageStrip, type RepairRow } from "../shared/task-rows";
 import { SETTLE_REASON } from "../shared/send-decision";
 import { Button, Card, Chip, Switch, text, type Theme } from "./kit";
+import { usePagedList } from "./paged-list";
 import { tint } from "./theme";
 import type { Colors } from "./theme";
 import { RichText } from "./rich-text";
@@ -153,12 +154,15 @@ export function MessagesCard({ workspace: w, theme, compact, openAgent, now = Da
   const [preview, setPreview] = useState(false);
   const strip = messageStrip(w, now);
   const repairs = repairRows(w);
+  // A broken stack can hold hundreds of repairs: page them (client/paged-list.tsx), the strip stays on top.
+  const page = usePagedList({ items: repairs.open, theme, compact, noun: "repairs" });
   if (!strip && !repairs.open.length) return null;
   const repairRow = repairs.open.find(r => r.task.key === repair) ?? null;
   // The card's title and icon say what it is; the strip under it says to whom, how many, when and why.
   return <Card theme={theme} compact={compact} icon="Send" title="Messages to the agent">
     {strip && <StripRow strip={strip} w={w} theme={theme} compact={compact} onPreview={() => setPreview(true)} openAgent={openAgent} />}
-    {repairs.open.map(r => <RepairTaskRow key={r.task.key} row={r} w={w} theme={theme} compact={compact} onOpen={() => setRepair(r.task.key)} />)}
+    {page.shown.map(r => <RepairTaskRow key={r.task.key} row={r} w={w} theme={theme} compact={compact} onOpen={() => setRepair(r.task.key)} />)}
+    {page.footer}
     <RepairSheet row={repairRow} w={w} strip={strip} theme={theme} compact={compact} onClose={() => setRepair(null)} />
     <PreviewSheet open={preview} w={w} strip={strip} theme={theme} compact={compact} onClose={() => setPreview(false)} />
   </Card>;

@@ -21,7 +21,9 @@ import { BRIEF_KINDS, BRIEF_SOURCES } from "../shared/brief";
 /** --live-sized: workspace 0 is the big one (BIG_*). Without it every workspace has the --realistic shape. */
 const LIVE_SIZED = process.argv.includes("--live-sized");
 const [out, createdPath, perArg, freshArg, inboxOut] = process.argv.slice(2).filter(a => a !== "--live-sized");
-export const BIG_PRS = 153, BIG_MERGED = 150, BIG_TASKS = 39, BIG_QUESTIONS = 52, INBOX_ENTRIES = 86;
+// BIG_QUESTIONS and BIG_BATCHES: 2026-11-26 live, one workspace held ~175 questions and a long activity log (every
+// list pages; scale-check's pagedReplyVerdict reads its panel at these sizes).
+export const BIG_PRS = 153, BIG_MERGED = 150, BIG_TASKS = 39, BIG_QUESTIONS = 300, BIG_BATCHES = 400, INBOX_ENTRIES = 86;
 const FRESH = Number(freshArg ?? 0);
 const created = JSON.parse(readFileSync(createdPath!, "utf8")) as { workspaceId: string; agentId: string; agentIds?: string[] }[];
 const PRS = Number(perArg ?? 3);
@@ -68,7 +70,7 @@ function workspace(i: number, { workspaceId, agentId }: { workspaceId: string; a
     ask: k % 5 === 3 ? sentence(i + 9, 10) : undefined, enable_follow_up: k % 5 === 3, revision: k + 1, previousTitles: k % 5 === 2 ? [sentence(i + 3, 5)] : undefined,
     ...(k % 5 === 2 ? { workingAgentId: agentId } : {}),
   }));
-  const batches = Array.from({ length: i < FRESH ? 0 : 3 }, (_, k) => ({
+  const batches = Array.from({ length: i < FRESH ? 0 : big ? BIG_BATCHES : 3 }, (_, k) => ({
     id: `b-${i}-${k}`, messageId: `m-${i}-${k}`, state: "completed" as const, createdAt: iso((k + 2) * D), sentAt: iso((k + 2) * D - 60_000), settledAt: iso((k + 2) * D - 30 * 60_000), attempts: 1,
     tasks: Array.from({ length: 3 }, (_, t) => ({ key: `${(["checks", "review", "conflict"] as const)[t]}:${prs[t % PRS]!.key}`, kind: (["checks", "review", "conflict"] as const)[t]!, target: prs[t % PRS]!.key, title: sentence(i * 12 + k * 3 + t, 7), fingerprint: sha(i * 100 + k * 3 + t).slice(0, 16) })),
     result: `Main agent finished: ${sentence(i + k, 9)}`, recipientAgentId: agentId, contextPath: null, activityAt: iso((k + 2) * D - 20 * 60_000), acknowledgmentError: null, recoveryHandoffs: [],
@@ -78,7 +80,7 @@ function workspace(i: number, { workspaceId, agentId }: { workspaceId: string; a
     options: ["A", "B", "C"].map((letter, n) => ({ letter, label: sentence(i + k + n, 6), consequence: sentence(i + k + n + 4, 8) })),
     recommend: "A", big: null, background: sentence(i + k + 5, 12), links: [{ url: `https://github.com/${repo}/pull/${prs[0]!.number}`, label: "PR" }],
     prKey: null, taskId: null, taskRevision: null, askedBy: agentId, askedAt: iso((k + 1) * D), mode: "keep-building" as const,
-    answer: big ? (k % 4 ? { choice: "A", at: iso(k * D + H), by: "developer" as const, delivery: { state: "sent" as const, to: agentId, messageId: `qa-${i}-${k}`, at: iso(k * D + H), reason: null } } : null) : k < 2 ? { choice: "A", at: iso(k * D + H), by: "developer" as const, delivery: { state: "sent" as const, to: agentId, messageId: `qa-${i}-${k}`, at: iso(k * D + H), reason: null } } : null,
+    answer: big ? (k % 4 || k >= 52 ? { choice: "A", at: iso(k * D + H), by: "developer" as const, delivery: { state: "sent" as const, to: agentId, messageId: `qa-${i}-${k}`, at: iso(k * D + H), reason: null } } : null) : k < 2 ? { choice: "A", at: iso(k * D + H), by: "developer" as const, delivery: { state: "sent" as const, to: agentId, messageId: `qa-${i}-${k}`, at: iso(k * D + H), reason: null } } : null,
     closed: null, via: "ask" as const,
   }));
   return {

@@ -48,7 +48,8 @@ test("the tasks footer's \"in Activity\" is a link to the Activity card", async 
 test("Activity's Questions tab lists and counts decisions; an action ask is in the Timeline only", async () => {
   const qs = [{ id: "Q1", need: "decision" }, { id: "Q2", need: "action" }, { id: "Q3" }];
   assert.deepEqual(activityQuestions(qs).map(q => q.id), ["Q1", "Q3"]);
-  assert.match(await src("client/questions.tsx"), /const questions = activityQuestions\(w\.questions\)/, "one rule for the list and its count");
+  // The card's rows and counts come from one page builder on the worker (shared/history.ts activityPage).
+  assert.match(await src("shared/history.ts"), /const qs = activityQuestions\(w\.questions/, "one rule for the list and its count");
 });
 
 test("the phone's Older explainer starts where the rows' text does", async () => {

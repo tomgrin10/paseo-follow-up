@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { PagedRows } from "./paged-list";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -97,9 +98,9 @@ export function HeldMerges({ workspace: w, theme, compact, now = Date.now(), fra
   if (!held.length) return null;
   const c = theme.colors; const t = text(c, compact);
   return <PrLinksProvider prs={prLinksByNumber(w.prs)}><View accessibilityRole="summary" style={framed ? { paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1, borderTopColor: c.border, gap: 6 } : { gap: 6 }}>
-    {held.map(h => <View key={h.pr.key} style={{ flexDirection: "row", gap: 8 }}>
+    <PagedRows items={held} theme={theme} compact={compact} noun="PRs" row={h => <View key={h.pr.key} style={{ flexDirection: "row", gap: 8 }}>
       <View style={{ paddingTop: 2 }}><Icon name="Clock" size={13} color={c.foregroundMuted} /></View>
       <RichText linkColor={c.foreground} style={[t.meta, { flex: 1 }]}>{h.line}</RichText>
-    </View>)}
+    </View>} />
   </View></PrLinksProvider>;
 }

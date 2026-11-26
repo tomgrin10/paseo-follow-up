@@ -16,30 +16,36 @@ import { PAGE, pageInfo, pageLabel, pageSpoken, type PageInfo } from "../shared/
  */
 export type Paged<T> = { shown: T[]; footer: ReactNode; info: PageInfo | null };
 
-export function usePagedList<T>({ items, open, onToggle, searching = false, resetKey = "", preview = PAGE.preview, size = PAGE.size, theme, compact, icon = "List", noun }: {
+export function usePagedList<T>({ items, open = true, onToggle, searching = false, resetKey = "", follow, preview = PAGE.preview, size = PAGE.size, theme, compact, icon = "List", noun }: {
   items: readonly T[];
-  /** The list's own fold state ("Show all" pressed). */
-  open: boolean; onToggle: () => void;
+  /**
+   * The list's own fold state ("Show all" pressed) and its toggle. Without `onToggle` the list has no fold of its own
+   * (a card that folds whole, a settings section): it pages from the first row, with no Show all or Show less.
+   */
+  open?: boolean; onToggle?: () => void;
   /** A search is narrowing the list: page its hits, no fold. */
   searching?: boolean;
   /** Anything that changes what the list is (a tab, the query): back to the first page. */
   resetKey?: string;
+  /** A row the list keeps in view (Catch up's card on screen): a reset lands on its page, not the first. */
+  follow?: number;
   preview?: number; size?: number; theme: Theme; compact: boolean; icon?: string;
   /** What a row is, for the spoken pager ("questions"). */
   noun?: string;
 }): Paged<T> {
   const [state, setState] = useState({ key: resetKey, page: 0 });
-  const page = state.key === resetKey ? state.page : 0;
+  const page = state.key === resetKey ? state.page : follow !== undefined && follow >= 0 ? Math.floor(follow / size) : 0;
   const setPage = (p: number) => setState({ key: resetKey, page: p });
   const c = theme.colors;
-  if (!searching && !open) {
-    const footer = items.length > preview ? <FoldRow theme={theme} compact={compact} open={false} onPress={onToggle} icon={icon} iconColor={c.foregroundMuted} label={`Show all ${items.length}`} /> : null;
+  const folds = !!onToggle && !searching;
+  if (folds && !open) {
+    const footer = items.length > preview ? <FoldRow theme={theme} compact={compact} open={false} onPress={onToggle!} icon={icon} iconColor={c.foregroundMuted} label={`Show all ${items.length}`} /> : null;
     return { shown: items.slice(0, preview), footer, info: null };
   }
   const info = pageInfo(items.length, page, size);
   const shown = items.slice(info.from, info.to);
-  const footer = info.pages > 1 || (!searching && items.length > preview)
-    ? <Pager theme={theme} compact={compact} info={info} onPage={setPage} onLess={searching ? undefined : () => { setPage(0); onToggle(); }} noun={noun} />
+  const footer = info.pages > 1 || (folds && items.length > preview)
+    ? <Pager theme={theme} compact={compact} info={info} onPage={setPage} onLess={folds ? () => { setPage(0); onToggle!(); } : undefined} noun={noun} />
     : null;
   return { shown, footer, info };
 }
@@ -69,4 +75,14 @@ export function Pager({ theme, compact, info, onPage, onLess, noun, busy = false
       {arrow("ChevronRight", "Next page", info.page + 1, info.page < info.pages - 1 && !busy)}
     </>}
   </View>;
+}
+
+/**
+ * A list drawn inside a condition or a fold (a settings section, a sheet): its rows and pager as one element, so it
+ * pages without a hook in its parent. `row` gets the item and its index in the whole list.
+ */
+export function PagedRows<T>({ items, row, ...opts }: { items: readonly T[]; row: (item: T, index: number) => ReactNode } & Omit<Parameters<typeof usePagedList<T>>[0], "items">) {
+  const page = usePagedList({ items, ...opts });
+  const from = page.info?.from ?? 0;
+  return <>{page.shown.map((x, i) => row(x, from + i))}{page.footer}</>;
 }

@@ -1,4 +1,5 @@
 import { View } from "react-native";
+import { PagedRows } from "./paged-list";
 import { Pressable, Text } from "./text";
 import { openExternalUrl } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/ui";
@@ -104,7 +105,8 @@ function StackRows({ name, prs, theme, open, toggle, onOpen, compact, showRepo, 
       <Text numberOfLines={1} style={[t.label, { flex: 1, fontSize: 12, lineHeight: 17 }]}>{name}</Text>
       <Text style={[t.small, { fontVariant: ["tabular-nums"] }]}>{settled ? `${prs.length} PR${prs.length === 1 ? "" : "s"}` : `${merged} of ${prs.length} merged`}</Text>
     </View>
-    {items.map((item, i) => {
+    {/* A stack's rows page (client/paged-list.tsx); the rail's ends are the stack's own, so it runs on across a page break. */}
+    <PagedRows items={items} resetKey={hits ? "search" : ""} theme={theme} compact={compact} noun="PRs" row={(item, i) => {
       const first = i === 0, last = i === items.length - 1 && !fold;
       if (item.kind === "pr") return <PrRow key={item.pr.key} pr={item.pr} theme={theme} first={first} last={last} showRepo={showRepo} onOpen={onOpen} compact={compact} wide={wide} hit={hits?.get(item.pr)} />;
       const expanded = open(item.key), n = item.prs.length;
@@ -124,7 +126,7 @@ function StackRows({ name, prs, theme, open, toggle, onOpen, compact, showRepo, 
           <Text style={[t.meta, { color: c.foreground, fontVariant: ["tabular-nums"] }]}>{expanded ? `Hide ${n} in review` : `+${n} in review`}<Text style={{ color: c.foregroundMuted }}>{` · #${item.prs[0]!.number}–#${item.prs.at(-1)!.number}`}</Text></Text>
         </View>
       </Pressable>;
-    })}
+    }} />
     {fold && <Pressable accessibilityRole="button" aria-expanded={showDone} accessibilityState={{ expanded: showDone }} accessibilityLabel={`${showDone ? "Hide" : "Show"} ${done.length} merged PR${done.length === 1 ? "" : "s"} in ${name}`} onPress={() => toggle(foldKey)}
       style={state => ({ flexDirection: "row", gap: 10, paddingHorizontal: 12, minHeight: compact ? 44 : 30, backgroundColor: state.pressed ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
       <View style={{ width: NODE, alignItems: "center" }}>
@@ -138,6 +140,9 @@ function StackRows({ name, prs, theme, open, toggle, onOpen, compact, showRepo, 
     <View style={{ height: 6 }} />
   </View>;
 }
+
+/** Stacks on one page of the Pull requests card; each stack pages its own rows. */
+export const STACKS_PER_PAGE = 10;
 
 export function StacksCard({ workspace: w, theme, compact, open, toggle, onOpen, wide = false }: { workspace: Workspace; theme: Theme; compact: boolean; open: (key: string) => boolean; toggle: (key: string) => void; onOpen: (key: string) => void; wide?: boolean }) {
   const c = theme.colors; const t = text(c);
@@ -155,7 +160,10 @@ export function StacksCard({ workspace: w, theme, compact, open, toggle, onOpen,
   // Every PR in the order the card draws them, settled stacks included: the search's "n of N" and its filter.
   const search = useSectionSearch(w.id, "prs", { theme, compact, items: [...active, ...settled].flatMap(s => stackOrder(s.prs).reverse()), fields: prFields });
   const hits = search.hits;
-  const stackRows = (list: typeof stacks, isSettled: boolean) => list.map(s => <StackRows key={s.name} name={s.name} prs={s.prs} theme={theme} open={open} toggle={toggle} onOpen={onOpen} compact={compact} showRepo={showRepo} settled={isSettled} wide={wide} hits={hits} />);
+  // Stacks page too (client/paged-list.tsx): a long-lived workspace keeps hundreds of settled ones. A search pages only
+  // the stacks with a hit, so no page is empty.
+  const stackRows = (list: typeof stacks, isSettled: boolean) => <PagedRows items={hits ? list.filter(s => s.prs.some(p => hits.has(p))) : list} size={STACKS_PER_PAGE} resetKey={search.query ?? ""} theme={theme} compact={compact} noun="stacks"
+    row={s => <StackRows key={s.name} name={s.name} prs={s.prs} theme={theme} open={open} toggle={toggle} onOpen={onOpen} compact={compact} showRepo={showRepo} settled={isSettled} wide={wide} hits={hits} />} />;
   return <Card theme={theme} compact={compact} icon="GitPullRequest" title="Pull requests" count={openCount ? `${openCount} open` : undefined} right={search.button} search={search.header}>
     {hits && !hits.size && <NoMatchRow section="prs" query={search.query!} theme={theme} compact={compact} />}
     {!hits && inFlight.map(a => <View key={a.id} style={{ flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1, borderTopColor: c.border }}>

@@ -2,6 +2,7 @@
 // renders the same components the panel and Home use (QuestionBody, NeedsYouList, BriefCard, the permission block), so
 // the answer flow is the shared one, never a fork (one-answer-flow-for-every-question). The deck's order and every
 // move are the pure session in shared/catch-up.ts (context-never-blocks-the-deck, the-card-on-screen-never-moves).
+import { usePagedList } from "./paged-list";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Animated, PanResponder, Platform, View } from "react-native";
 import { Pressable, Text } from "./text";
@@ -239,6 +240,8 @@ export function CatchUp({ theme, compact, deps, navigation, onExit }: { theme: T
   const reduced = useReducedMotion();
   const drag = useRef(new Animated.Value(0)).current;
   const [dragDir, setDragDir] = useState<"skip-workspace" | "back" | null>(null);
+  // The desktop rail pages (client/paged-list.tsx) and follows the card on screen: a deck of hundreds draws one page.
+  const railPage = usePagedList({ items: session.order, resetKey: String(session.pos), follow: session.pos, theme, compact, noun: "cards" });
   const width = useRef(390);
   const lock = useRef<"x" | "y" | null>(null);
   // The finger's own offset from where it went down: react-native-web's accumulated gestureState.dx runs ahead of a
@@ -311,7 +314,8 @@ export function CatchUp({ theme, compact, deps, navigation, onExit }: { theme: T
       onDone={() => settle("done")} onSkip={skip} onSkipWorkspace={wsLeft > 1 ? skipWs : undefined} wsLeft={wsLeft} onBack={session.pos > 0 ? back : undefined} onLater={() => settle("later")} /></DismissReveal.Provider>;
 
   const rail = <ScrollView {...({ dataSet: { catchUpRail: "1" } } as object)} contentContainerStyle={{ paddingVertical: 8 }}>
-    {session.order.map((k, i) => {
+    {railPage.shown.map((k, at) => {
+      const i = (railPage.info?.from ?? 0) + at;
       const x = cardOf(k); if (!x) return null;
       const xw = x.s.workspaceId ? live.get(x.s.workspaceId) : undefined;
       const o = session.outcomes[k]; const here = i === session.pos;
@@ -329,6 +333,7 @@ export function CatchUp({ theme, compact, deps, navigation, onExit }: { theme: T
         </Pressable>
       </View>;
     })}
+    {railPage.footer}
   </ScrollView>;
 
   // Under the dragged card: the one the release would show, so the drag says where it goes.

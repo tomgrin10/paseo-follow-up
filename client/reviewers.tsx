@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { PagedRows, usePagedList } from "./paged-list";
+import { PAGE } from "../shared/paged";
 import { View } from "react-native";
 import { Pressable, Text } from "./text";
 import { useRpc } from "@getpaseo/plugin/client";
@@ -131,11 +133,11 @@ export function ReviewerSettings({ theme, compact = false }: { theme: Theme; com
     </View>
     {data.repos.length > 0 ? <Disclosure id="reviewers.repos" title="Repositories" summary={reposSummary(data.repos, data.config)}
       defaultOpen={!reviewersConfigured(data.config)} theme={theme} compact={compact}>
-      {own.map((repo, i) => <View key={repo} style={{ borderTopWidth: i ? 1 : 0, borderTopColor: c.border }}>
+      <PagedRows items={own} theme={theme} compact={compact} noun="repositories" row={(repo, i) => <View key={repo} style={{ borderTopWidth: i ? 1 : 0, borderTopColor: c.border }}>
         <Disclosure framed={false} id={`reviewers.repo.${repo}`} title={repo} summary={repoSummary(data.config.repos[repo] ?? [], data.config.defaults)} defaultOpen={false} theme={theme} compact={compact}>
           <ReviewerList first titled={false} repo={repo} list={data.config.repos[repo] ?? []} theme={theme} compact={compact} fallback={fallback} />
         </Disclosure>
-      </View>)}
+      </View>} />
       {rest.length > 0 && <DefaultRepos repos={rest} defaults={data.config.defaults} theme={theme} compact={compact} first={!own.length} />}
     </Disclosure> : <Text style={t.meta}>Repositories show here once Follow-up has seen a PR in them.</Text>}
   </View>;
@@ -148,11 +150,13 @@ export function ReviewerSettings({ theme, compact = false }: { theme: Theme; com
 function DefaultRepos({ repos, defaults, theme, compact, first }: { repos: string[]; defaults: ReviewerEntry[]; theme: Theme; compact: boolean; first: boolean }) {
   const c = theme.colors; const t = text(c);
   const [editing, setEditing] = useState<string | null>(null);
+  // Chips wrap, so a page holds more of them than of rows.
+  const pageRepos = usePagedList({ items: repos, size: PAGE.size * 2, theme, compact, noun: "repositories" });
   return <View style={{ borderTopWidth: first ? 0 : 1, borderTopColor: c.border }}>
     <View style={{ paddingLeft: 36, paddingRight: 14, paddingVertical: 10, gap: 6 }}>
       <Text style={t.meta}>{`On the default${defaults.length ? ` (${defaults.map(reviewerLabel).join(", ")})` : ""}. Give one its own list:`}</Text>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-        {repos.map(repo => <Pressable key={repo} accessibilityRole="button" accessibilityLabel={`Give ${repo} its own list`} accessibilityState={{ selected: editing === repo }} onPress={() => setEditing(editing === repo ? null : repo)}
+        {pageRepos.shown.map(repo => <Pressable key={repo} accessibilityRole="button" accessibilityLabel={`Give ${repo} its own list`} accessibilityState={{ selected: editing === repo }} onPress={() => setEditing(editing === repo ? null : repo)}
           style={state => ({ flexDirection: "row", alignItems: "center", gap: 5, minHeight: compact ? 44 : 28, paddingHorizontal: 8, borderRadius: 6, borderWidth: 1, borderColor: editing === repo ? c.foregroundMuted : c.border, backgroundColor: state.pressed ? c.surface2 : "transparent" })}>
           <Icon name="GitPullRequest" size={12} color={c.foregroundMuted} />
           <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 12, lineHeight: 16 }}>{repo}</Text>
@@ -160,6 +164,7 @@ function DefaultRepos({ repos, defaults, theme, compact, first }: { repos: strin
         </Pressable>)}
       </View>
     </View>
+    {pageRepos.footer}
     {editing && <ReviewerList key={editing} repo={editing} list={[]} theme={theme} compact={compact} startAdding fallback="Add the first reviewer for this repository." />}
   </View>;
 }

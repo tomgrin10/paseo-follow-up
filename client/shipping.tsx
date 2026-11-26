@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { PagedRows } from "./paged-list";
 import { ActivityIndicator, TextInput, useWindowDimensions, View } from "react-native";
 import { Text } from "./text";
 import { useRpc } from "@getpaseo/plugin/client";
@@ -60,11 +61,11 @@ export function ShippingSettings({ theme, compact }: { theme: Theme; compact: bo
       {signInWarning(data) && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusWarning }]}>{signInWarning(data)}</Text>}
       {data.repos.length ? <Disclosure id="shipping.repos" title="Repositories" summary={reposShippingSummary(data.repos)}
         defaultOpen={data.repos.length <= 6} theme={theme} compact={compact}>
-        {data.repos.map((row, i) => <View key={row.repo} style={{ borderTopWidth: i ? 1 : 0, borderTopColor: c.border }}>
+        <PagedRows items={data.repos} theme={theme} compact={compact} noun="repositories" row={(row, i) => <View key={row.repo} style={{ borderTopWidth: i ? 1 : 0, borderTopColor: c.border }}>
           <Disclosure framed={false} id={`shipping.repo.${row.repo}`} title={row.repo} summary={repoShippingSummary(row)} defaultOpen={false} theme={theme} compact={compact}>
             <RepoShipping row={row} view={data} theme={theme} compact={compact} busy={change.isPending} set={(input, label) => change.mutate({ repo: row.repo, ...input, toast: `${row.repo}: ${label}` })} />
           </Disclosure>
-        </View>)}
+        </View>} />
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12, borderTopWidth: 1, borderTopColor: c.border, paddingHorizontal: compact ? 16 : 14, paddingVertical: 8 }}>
           <Text style={[t.meta, { flex: 1 }]}>{`${checked ? `Checked ${checked}` : "Not checked yet"} · looks at what's installed and how each repository is set up.`}</Text>
           <Button theme={theme} compact={compact} title={recheck.isPending ? "Checking…" : "Check again"} disabled={recheck.isPending} loading={recheck.isPending} onPress={() => recheck.mutate()} />
@@ -197,12 +198,12 @@ export function ShippingStep({ theme, compact }: { theme: Theme; compact: boolea
         onValueChange={value => change.mutate({ default: value })} />
     </SettingsCard>
     <Disclosure id="setup.shipping.repos" title="Show repositories" summary={`${rows.length} on GitHub`} defaultOpen={false} theme={theme} compact={compact}>
-      {rows.map((r, i) => <View key={r.repo} style={{ borderTopWidth: i ? 1 : 0, borderTopColor: c.border }}>{row(r)}</View>)}
+      <PagedRows items={rows} theme={theme} compact={compact} noun="repositories" row={(r, i) => <View key={r.repo} style={{ borderTopWidth: i ? 1 : 0, borderTopColor: c.border }}>{row(r)}</View>} />
     </Disclosure>
     {later}
   </View>;
   return <View style={{ gap: 10 }}>
-    <SettingsCard>{rows.map(row)}</SettingsCard>
+    <SettingsCard><PagedRows items={rows} theme={theme} compact={compact} noun="repositories" row={row} /></SettingsCard>
     {warning && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusWarning }]}>{warning}</Text>}
     {later}
   </View>;
