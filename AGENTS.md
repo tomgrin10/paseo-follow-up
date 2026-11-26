@@ -1556,18 +1556,6 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    not Home's panel. Before, a first install saw setup take Home's place, with nothing on the other surfaces. Guarded
    by `tests/setup-popup.test.ts` and `scripts/screenshots.mjs --only setup-popup` (welcome, two steps, the tour, done;
    desktop and 390×844, light and dark).
-128. **The line takes its first source** (`the-line-takes-its-first-source`). Each agent's line on the panel, Home's rows
-   and `workspace_now` is one pure `nowOf` (`shared/now.ts`): what the agent is working on toward the goal, then its
-   state. The work is the first of, in this order (`NOW_SOURCES`): work Follow-up handed it that it hasn't settled
-   (while it runs), what it stated (`sync_workspace` `milestone`), the task it is working on, its one open PR, a
-   contributor's title; else nothing, never a guess. "2 of 4" comes only from the agent's own `done`/`next`. No tool,
-   file, command or to-do step is ever on the line, and the line has no name on screen (no label, no placeholder: the
-   state alone when nothing is known). It reads only the record and the inbox row both sides hold: no stream, no
-   timeline read, no model call. The stated work is stored per agent on the record and cleared at Done and when the
-   agent leaves. 2026-11-26, the developer: the line should name the milestone the agent is working on, not the micro
-   task, and "the end UI simple", with no word for it. Before, the panel said only "Main agent is working". Guarded
-   by `tests/now.test.ts` and `tests/now-worker.test.ts`.
-
 124. **Your question always gets its answer** (`your-question-always-gets-its-answer`). A question the developer asks an
    agent (Your questions' field, `/ask` in its chat, More context, or an agent's `ask_context`) goes only to an agent
    that can answer it (`questionRecipient`, `contextRecipient`: a tracked workspace's main agent or a contributor, never
@@ -1585,6 +1573,18 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    still asking is only the row's line ("Asking · …"), never Needs you. Only the developer's act reads it: an agent's
    `question_action` (recorded `agent:<id>`) never takes it out of Needs you, and the agent it was asked of can't act on
    it at all. Q172 C=a. Guarded by `tests/your-questions.test.ts`.
+128. **The line takes its first source** (`the-line-takes-its-first-source`). Each agent's line on the panel, Home's rows
+   and `workspace_now` is one pure `nowOf` (`shared/now.ts`): what the agent is working on toward the goal, then its
+   state. The work is the first of, in this order (`NOW_SOURCES`): work Follow-up handed it that it hasn't settled
+   (while it runs), what it stated (`sync_workspace` `milestone`), the task it is working on, its one open PR, a
+   contributor's title; else nothing, never a guess. "2 of 4" comes only from the agent's own `done`/`next`. No tool,
+   file, command or to-do step is ever on the line, and the line has no name on screen (no label, no placeholder: the
+   state alone when nothing is known). It reads only the record and the inbox row both sides hold: no stream, no
+   timeline read, no model call. The stated work is stored per agent on the record and cleared at Done and when the
+   agent leaves. 2026-11-26, the developer: the line should name the milestone the agent is working on, not the micro
+   task, and "the end UI simple", with no word for it. Before, the panel said only "Main agent is working". Guarded
+   by `tests/now.test.ts` and `tests/now-worker.test.ts`.
+
 130. **A compaction is not a finish** (`a-compaction-is-not-a-finish`). A turn that only compacted (`/compact` typed
    by the developer, Smart Session's request, a provider's own auto-compaction, on every provider) adds nothing: no
    Finished flag, no brief, no superseded line, no turn-end check, and a developer's `/compact` answers nothing. The ask
