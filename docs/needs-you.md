@@ -351,8 +351,11 @@ about a card (`cardKey`), a free question has `cardKey: null`. Design: `DESIGN.m
   the workspace's main agent), `/ask <question>` in any agent's chat (`via: "slash"`, to *that* agent), More context
   (`via: "more"`, to the card's workspace main agent) and agents (`via: "tool"`). A free question goes only to an agent
   that can answer it (`questionRecipient`): a tracked workspace's main agent or one of its contributors, the roles with
-  `context_reply`; never the caller. It is a queued message (invariant 36) that starts with `QUESTION_PREFIX` and its
-  id (`agentQuestionPrompt`); the chat keeps it as a plain user message, so it starts its own turn (Paseo groups a chat into turns only at real user messages: a plugin card in its place folds into the turn before and, under "Collapse turns", out of sight). A plain
+  `context_reply`; never the caller. It is a queued message (invariant 36), human-first since the developer reads it in
+  that chat too (`agentQuestionPrompt`): one line, `Your question (ctx-3f9a2b1c) · answer with context_reply:`, then the
+  question as typed. How to answer (plain words, short, a question is not a task) is `context_reply`'s description, in
+  every session already. Ids are `ctx-` and 8 hex, unique in the file (`newQuestionId`); older long ids keep working,
+  and capture matches an id only as a whole word. The chat keeps it as a plain user message, so it starts its own turn (Paseo groups a chat into turns only at real user messages: a plugin card in its place folds into the turn before and, under "Collapse turns", out of sight). A plain
   question typed in the chat is not tracked (Q172 B=a).
 - **The answer, reliably** (`your-question-always-gets-its-answer`): `context_reply {requestId, text}` first (≤4000
   chars, a corrected reply wins). Else **turn-end capture**: the first turn end after delivery takes the agent's last
@@ -369,7 +372,7 @@ about a card (`cardKey`), a free question has `cardKey: null`. Design: `DESIGN.m
 - **Needs you** (Q172 C=a): an unread answer (`unreadAnswer`: answered, from its chat, or failed, not yet read) puts
   its workspace's row in Needs you at the lowest tier (`ANSWER_TIER`, below finished turns) as "Answer · <question>",
   unless the row already needs the developer for something louder; Catch up deals it as an `answer` card, last in its
-  workstream. A question still asking is the row's line ("Asking · …") and never Needs you. Home builds both from the
+  workstream; one that turns up mid-session joins its workstream too (`sync`), so the rail keeps one group each. A question still asking is the row's line ("Asking · …") and never Needs you. Home builds both from the
   home feed's `context` (`buildHome` `questions`), so nothing polls.
 - **Kept** (Q172 E=a): 30 days, at most 200 per workspace (`pruneContext`). History (in the card on desktop, a sheet on
   a phone) searches questions and answers (`questionHistory`), All / Open / Tasks, newest first.

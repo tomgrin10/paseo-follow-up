@@ -45,22 +45,35 @@ export function migrateContext(raw: unknown): { file: ContextFile; migrated: boo
 export function capturedAnswer(items: readonly unknown[] | null, requestId: string): string | null {
   if (!items) return null;
   const work = workItems(items) as { type?: unknown; text?: unknown }[];
-  const at = work.findLastIndex(i => i?.type === "user_message" && typeof i.text === "string" && i.text.includes(requestId));
+  const own = mentionsId(requestId);
+  const at = work.findLastIndex(i => i?.type === "user_message" && typeof i.text === "string" && own.test(i.text));
   if (at < 0) return null;
   const reply = work.slice(at + 1).findLast(i => i?.type === "assistant_message" && typeof i.text === "string" && i.text.trim());
   const text = typeof reply?.text === "string" ? plainAnswer(reply.text).slice(0, CONTEXT_ANSWER_MAX) : "";
   return text || null;
 }
 
-/** The message a free question (the field, `/ask`, an agent's ask, a Reply) puts in the asked agent's chat. */
+/**
+ * The id as a whole word: a short id (`ctx-3f9a2b1c`) never matches inside an older, longer one (`ctx-3f9a2b1c-…`).
+ */
+const mentionsId = (id: string) => new RegExp(`${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`);
+
+/** A new request id: short enough to read in a chat (`ctx-` and 8 hex), never one the file already has. */
+export function newQuestionId(taken: (id: string) => boolean, random: () => string): string {
+  for (;;) { const id = `ctx-${random()}`; if (!taken(id)) return id; }
+}
+
+/**
+ * The message a free question (the field, `/ask`, an agent's ask, a Reply) puts in the asked agent's chat: human-first
+ * and short, since the developer reads it in that chat too. One line with the id and the tool, then the question.
+ * How to answer (plain words, short, a question is not a task) lives in `context_reply`'s description, not here.
+ */
 export function agentQuestionPrompt(r: Pick<ContextRequest, "id" | "ask" | "by" | "parentId">, parent?: Pick<ContextRequest, "ask" | "answer"> | null): string {
-  const who = r.by === "developer" ? "The developer" : `Agent ${r.by.replace(/^agent:/, "")}, for the developer,`;
+  const from = r.by === "developer" ? "" : ` · asked by agent ${r.by.replace(/^agent:/, "")} for the developer`;
   return [
-    `${QUESTION_PREFIX} (${r.id})`,
-    ...(parent ? [`Following up their earlier question "${parent.ask.slice(0, 300)}"${parent.answer ? ` and your answer "${parent.answer.slice(0, 600)}"` : ""}:`] : []),
-    `${who} asks: "${r.ask}"`,
-    `Answer in plain words, short (under ${CONTEXT_ANSWER_MAX} characters). It's a question, not a task: don't change anything unless it asks you to.`,
-    `Reply with ${REPLY_TOOL} (follow_${REPLY_TOOL} as a native tool) and requestId "${r.id}" so the answer lands in Your questions, then end your turn.`,
+    `${QUESTION_PREFIX} (${r.id})${from} · answer with ${REPLY_TOOL}:`,
+    r.ask,
+    ...(parent ? [`(Following up "${questionLine(parent.ask, 160)}"${parent.answer ? `, you answered "${questionLine(parent.answer, 240)}"` : ""}.)`] : []),
   ].join("\n");
 }
 

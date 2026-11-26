@@ -1,9 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { WriteBehind } from "./write-behind";
 import { CONTEXT_ANSWER_MAX, CONTEXT_VERSION, contextFileSchema, plainAnswer, pruneContext, sameCard, type ContextFile, type ContextRequest, type ContextTarget, type ContextVia } from "../shared/catch-up";
-import { capturedAnswer, migrateContext } from "../shared/your-questions";
+import { capturedAnswer, migrateContext, newQuestionId } from "../shared/your-questions";
 
 export const CONTEXT_FILE = "context.json";
 
@@ -98,7 +98,7 @@ export class ContextRequests {
     const open = card ? requests.find(r => r.state === "asking" && sameCard(r, { workspaceId: input.workspaceId, cardKey: card })) : undefined;
     if (open) return { request: open, fresh: false };
     const request: ContextRequest = {
-      id: `ctx-${randomUUID()}`, ...input, via: input.via ?? "more", parentId: input.parentId ?? null, askedOf, state: "asking", answer: null, error: null,
+      id: newQuestionId(id => requests.some(r => r.id === id), () => randomBytes(4).toString("hex")), ...input, via: input.via ?? "more", parentId: input.parentId ?? null, askedOf, state: "asking", answer: null, error: null,
       askedAt: new Date(this.now()).toISOString(), settledAt: null, deliveredAt: null, by, readAt: null, done: null, task: null,
     };
     this.save([...requests, request]);

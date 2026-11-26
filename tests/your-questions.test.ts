@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ContextRequests, CONTEXT_FILE } from "../server/context-requests";
 import { CONTEXT_MAX, type ContextRequest } from "../shared/catch-up";
-import { agentQuestionPrompt, capturedAnswer, migrateContext, questionCounts, questionHistory, questionOutcome, questionsByWorkspace, questionTask, unreadAnswer } from "../shared/your-questions";
+import { agentQuestionPrompt, capturedAnswer, newQuestionId, migrateContext, questionCounts, questionHistory, questionOutcome, questionsByWorkspace, questionTask, unreadAnswer } from "../shared/your-questions";
 import { rm, trackPersistence } from "./support/store-temp-dir";
 
 const free = { workspaceId: "w1", agentId: "a1", cardKey: null, card: "", target: "agent" as const, ask: "Why does the retry use a fixed 30 s gap?", via: "field" as const };
@@ -155,14 +155,23 @@ test("per-workspace view, counts and history", async t => {
   assert.equal(questionHistory(list, { filter: "tasks" }).length, 0);
 });
 
-test("a free question's prompt carries its id and asks for context_reply; a reply carries its thread", () => {
-  const r = { id: "ctx-9", ask: "Which timezone?", by: "developer", parentId: null } as Pick<ContextRequest, "id" | "ask" | "by" | "parentId">;
-  const p = agentQuestionPrompt(r);
-  assert.match(p, /^Your question \(ctx-9\)/);
-  assert.match(p, /context_reply/);
-  assert.match(p, /requestId "ctx-9"/);
-  assert.match(agentQuestionPrompt({ ...r, parentId: "ctx-1" }, { ask: "Why?", answer: "Because." }), /Following up their earlier question "Why\?" and your answer "Because\."/);
-  assert.match(agentQuestionPrompt({ ...r, by: "agent:a7" }), /Agent a7, for the developer, asks/);
+test("a free question's message is human-first: one short line with its id and context_reply, then the question", () => {
+  const r = { id: "ctx-3f9a2b1c", ask: "Which timezone?", by: "developer", parentId: null } as Pick<ContextRequest, "id" | "ask" | "by" | "parentId">;
+  assert.equal(agentQuestionPrompt(r), "Your question (ctx-3f9a2b1c) · answer with context_reply:\nWhich timezone?");
+  assert.match(agentQuestionPrompt({ ...r, parentId: "ctx-1" }, { ask: "Why?", answer: "Because." }), /\(Following up "Why\?", you answered "Because\."\.\)$/);
+  assert.match(agentQuestionPrompt({ ...r, by: "agent:a7" }), /^Your question \(ctx-3f9a2b1c\) · asked by agent a7 for the developer · answer with context_reply:/);
+});
+
+test("new ids are short (ctx- and 8 hex) and unique in the file; an old long id is still captured, and never by its short prefix", async t => {
+  const { store } = await fixture(t);
+  const { request } = await store.ask(free, "developer", "a1");
+  assert.match(request.id, /^ctx-[0-9a-f]{8}$/);
+  const seq = ["aaaaaaaa", "aaaaaaaa", "bbbbbbbb"];
+  assert.equal(newQuestionId(id => id === "ctx-aaaaaaaa", () => seq.shift()!), "ctx-bbbbbbbb", "a taken id is drawn again");
+  const old = "ctx-3f9a2b1c-1111-4222-8333-444455556666";
+  const items = [{ type: "user_message", text: `Your question (${old})\nWhy?` }, { type: "assistant_message", text: "Because." }];
+  assert.equal(capturedAnswer(items, old), "Because.");
+  assert.equal(capturedAnswer(items, "ctx-3f9a2b1c"), null, "a short id never matches inside an older long one");
 });
 
 // Needs you (Q172 C=a): an unread answer is the lowest tier; a question asking is the row's line, never Needs you.

@@ -93,6 +93,16 @@ test("a live change keeps the second pass and Back after Skip workspace", () => 
   assert.equal(sync(x, cards("a|1", "a|2", "b|1", "d|1"), none).lapped, true, "sync never drops lapped");
 });
 
+test("a card that turns up mid-session joins its workstream, so the rail keeps one group each (Your questions' answer card)", () => {
+  let x = startSession(cards("a|1", "b|1", "b|2", "c|1"));
+  x = sync(x, cards("a|1", "b|1", "b|2", "b|ctx-1", "c|1", "d|1"), none);
+  assert.deepEqual(x.order, ["a|1", "b|1", "b|2", "b|ctx-1", "c|1", "d|1"], "last inside b, a new workstream last");
+  x = settle(settle(x, "done"), "done");
+  x = sync(x, cards("a|1", "a|ctx-2", "b|2", "b|ctx-1", "c|1", "d|1"), none);
+  assert.equal(x.order.at(-1), "a|ctx-2", "a workstream already behind the developer gets its new card at the end");
+  assert.equal(x.order[x.pos], "b|2", "the card on screen stays");
+});
+
 test("a left swipe skips the whole workspace; a right swipe goes Back to the card it was on", () => {
   let x = startSession(cards("a|1", "b|1", "b|2", "b|3", "c|1"));
   x = settle(x, "done");

@@ -179,7 +179,16 @@ export function park(s: Session, requestId: string, key = s.order[s.pos]): Sessi
 export function sync(s: Session, live: readonly Pick<DeckCard, "key">[], settled: (requestId: string) => boolean): Session {
   const liveKeys = new Set(live.map(c => c.key));
   const known = new Set(s.order);
-  let order = [...s.order, ...live.map(c => c.key).filter(k => !known.has(k))];
+  // A card that turns up mid-session joins its workstream (right after its last card, when that is still ahead of the
+  // developer), so the rail keeps one group per workstream; a new workstream, or one already behind, goes last.
+  let order = [...s.order];
+  for (const k of live.map(c => c.key).filter(k => !known.has(k))) {
+    const g = groupOf(k);
+    let last = -1;
+    for (let i = order.length - 1; i >= 0; i--) if (groupOf(order[i]) === g) { last = i; break; }
+    if (last >= s.pos) order.splice(last + 1, 0, k);
+    else order.push(k);
+  }
   const outcomes = { ...s.outcomes };
   for (const k of order) if (!liveKeys.has(k) && open({ ...s, outcomes }, k)) outcomes[k] = "gone";
   let pos = s.pos;
