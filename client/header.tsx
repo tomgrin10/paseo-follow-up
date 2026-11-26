@@ -69,7 +69,7 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
   more?: ReactNode;
   /** Why it matters' Ask the Overseer opens the Overseer's chat with the draft in it. */
   openAgent?: (agentId: string) => void;
-  /** Each agent's line is drawn below (client/now-lines.tsx), so "Main agent is working" isn't said twice. */
+  /** Each agent's line is drawn below (client/now-lines.tsx), so "Main agent is working (on 1 repair)" isn't said twice. */
   agentLines?: boolean;
 }) {
   const c = theme.colors; const t = text(c, compact);
@@ -85,7 +85,7 @@ export function WorkspaceHeader({ workspace: w, theme, compact, now, onSettings,
     <IconButton icon="Settings" label="Follow-up settings" onPress={() => onSettings()} theme={theme} compact={compact} />
   </View>;
   const tail = <>
-    {!(agentLines && live.icon === "spinner") && <View style={{ flexDirection: "row", gap: 6, marginTop: 2 }}>
+    {!(agentLines && (live.icon === "spinner" || live.icon === "sent")) && <View style={{ flexDirection: "row", gap: 6, marginTop: 2 }}>
       <View style={{ paddingTop: 3 }}><IconSwap swapKey={live.icon} size={12}><LiveGlyph icon={live.icon} colors={c} /></IconSwap></View>
       <Text accessibilityLiveRegion="polite" style={[t.meta, { flex: 1, color: live.icon === "spinner" || live.icon === "sent" ? c.foreground : c.foregroundMuted }]}>
         {live.text}{live.since ? <Text style={{ color: c.foregroundMuted }}>{` · ${ago(live.since, now)}`}</Text> : null}
