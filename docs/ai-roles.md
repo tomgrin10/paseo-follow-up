@@ -12,13 +12,14 @@
   `ProviderCatalog`.
   - The catalog is Paseo's provider snapshot. It's read only when the settings screen opens and cached for 10
     minutes.
-  - `providersFor` offers every provider in the catalog to every role. `CLI_JOB_PROVIDERS` (Claude, Codex) only
+  - `providersFor` offers every provider in the catalog to every role. `CLI_JOB_PROVIDERS` (Claude, Codex, Pi) only
     names the providers with a headless CLI fast path; any other provider runs jobs through `server/job-agent.ts`.
   - **Outside content stays on a guarded provider** (`a-job-that-reads-outside-content-can-only-read`, invariant 81).
     A job whose prompt carries words someone else wrote is marked `outside` (AI priority's `rank`, `rank-reasons` and
     `rank-plan`, Ask's `ask-plan` and `ask-items`, `compass-extract`, and a Summary with linked issues or threads).
-    `AiJobs.run` refuses it before any runner on a provider `guardedProvider` doesn't name (anything but Claude or
-    Codex), with reason `unguarded`, since a job agent there has its provider's own tools. The Summary leaves the linked
+    `AiJobs.run` refuses it before any runner on a provider without a guard (`providerCaps(...).guard`,
+    `shared/provider-support.ts`: Claude, Codex and Pi through their CLIs, OpenCode through a locked session; anything
+    else, ACP agents included, can't promise a job no tools), with reason `unguarded`. The Summary leaves the linked
     text out there and still runs on the workspace's own work. AI priority (`needsGuard`) is never recommended on such a
     provider, and with none available its row shows it off and says what to install or turn on; the Summary's
     linked items, Compass and Ask are named in the block under the rows (`providerNotes`), and the source's own row
@@ -60,6 +61,11 @@
   (`ARTIFACT_READ`, never with `out_dir`). A refused call doesn't fail the job: the model is told no and answers from
   what it read. The hook is Node with `-e` (the grant in `FOLLOW_UP_JOB_TOOLS`) and refuses what it can't parse.
 - **Codex:** `codex exec --ephemeral` with no user config, no shell and a read-only sandbox in an empty temp folder.
+- **Pi:** `pi -p --no-tools` with no extensions, skills, prompt templates or context files and no saved session
+  (`piArgs`); the prompt on stdin, from the temp folder.
+- **OpenCode:** a job agent (`server/job-agent.ts`) whose session carries `permission: "deny"` (every tool, Paseo's
+  MCP tools included, refused by OpenCode before it runs) and Auto Accept off (`lockedConfig`); a job that still asks
+  for a permission fails and is archived.
 - **Limits:** one turn, a 90 s timeout (the whole process group is killed), and one job at a time.
 - **Log:** each call’s duration and cost goes to `ai-jobs.jsonl`. A caller may attach a privacy-safe
   `validationReason` rule code through `diagnose`; never a reply, prompt, name or issue key. Calls the guard refused

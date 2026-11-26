@@ -113,14 +113,15 @@ test("a job that reads outside content never starts on a provider Follow-up can'
     let ran = 0;
     const jobs = new AiJobs({ logPath: join(dir, "ai-jobs.jsonl"), runner: async () => { ran++; return { text: "{\"ok\":true}", costUsd: null, inputTokens: null, outputTokens: null }; } });
     const spec = { name: "rank", prompt: "x", schema: z.object({ ok: z.boolean() }) };
-    const refused = await jobs.run({ ...spec, outside: true, provider: "opencode" });
+    // Copilot is an ACP agent: nothing it offers takes every tool away, so an outside job never starts there.
+    const refused = await jobs.run({ ...spec, outside: true, provider: "copilot" });
     assert.equal(refused.ok, false);
     assert.equal(!refused.ok && refused.reason, "unguarded");
-    assert.match(!refused.ok ? refused.error : "", /can't take opencode's tools away/);
+    assert.match(!refused.ok ? refused.error : "", /can't take copilot's tools away/);
     assert.equal(ran, 0, "refused before any runner, an injected one included");
-    assert.equal((await jobs.run({ ...spec, outside: true, provider: "claude" })).ok, true);
-    assert.equal((await jobs.run({ ...spec, outside: true, provider: "codex" })).ok, true);
-    assert.equal((await jobs.run({ ...spec, provider: "opencode" })).ok, true, "a job over Follow-up's own state still runs anywhere");
-    assert.equal(ran, 3);
+    // Every provider that promises a job no tools runs it (shared/provider-support.ts providerCaps).
+    for (const provider of ["claude", "codex", "pi", "opencode"]) assert.equal((await jobs.run({ ...spec, outside: true, provider })).ok, true, provider);
+    assert.equal((await jobs.run({ ...spec, provider: "copilot" })).ok, true, "a job over Follow-up's own state still runs anywhere");
+    assert.equal(ran, 5);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });

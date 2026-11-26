@@ -53,9 +53,14 @@ standalone check still apply. Everything below is Paseo 0.15. Delete Wait when F
 - **Ownership.** Each job is scoped by the daemon's agent id and cwd. A tool input with an `agentId` is rejected.
 - **Stop and new messages.** Stop cancels the wait, and a new message ends it with `new_message`. Neither kills the
   job.
-- **Claude only.** Wait sets `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0` and `FOLLOW_UP_WAIT=1` for the session.
-- **Guidance.** `waitInstruction` in `server/mcp.mjs` reaches the agent through the SessionStart hook
-  ([hooks.md](hooks.md)).
+- **Every provider.** Wait attaches to any interactive session (`providerCaps(...).wait`, `shared/provider-support.ts`)
+  and sets `FOLLOW_UP_WAIT=1`. Claude Code also gets `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0` and backgrounds the
+  command with native Bash `run_in_background`. Any other provider gets a command that detaches itself
+  (`wait_prepare_job` returns `nohup … &` and `outputPath`, the job's `output.log`), so any shell tool starts it and
+  returns at once; the receipt is the same `result.json`. The Paseo 0.16 host's own background work is Claude Code's,
+  so there only Claude sessions get `FOLLOW_UP_BACKGROUND_WORK` instead of the tools.
+- **Guidance.** `waitInstruction` in `server/mcp.mjs` reaches the agent through the SessionStart hook or the system
+  prompt ([hooks.md](hooks.md)), for either way of starting the command.
 
 ## When it's off
 

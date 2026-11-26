@@ -1,0 +1,3 @@
+- Every helper and agent feature now works with any agent provider Paseo runs, not only Claude Code and Codex. With only Pi or OpenCode you get AI priority, Compass, Summaries' linked items, turn-end reminders and waiting for long commands.
+- Agents on Copilot, Cursor, Kimi, Kiro and other ACP agents now get Follow-up's instructions too.
+- Setup lists only the providers you have or use, never Claude and Codex as missing.

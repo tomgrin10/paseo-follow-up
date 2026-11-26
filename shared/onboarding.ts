@@ -206,19 +206,25 @@ const joinNames = (names: string[]) => names.length > 1 ? `${names.slice(0, -1).
 /** Text that starts a sentence starts capitalised ("the Overseer, …" after a stop reads "The Overseer, …"). */
 export const sentenceStart = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
-/** Claude and Codex keep a row even when no helper uses them: they're the two most setups have. */
-const KNOWN_PROVIDERS = ["claude", "codex"];
+/**
+ * The order rows and switch offers prefer among providers that are there. No provider gets a row for being on this
+ * list: a provider no helper uses and that isn't ready isn't shown (an-agent-on-any-provider-gets-follow-up), so a
+ * developer with only Pi sees Pi, never Claude and Codex as missing.
+ */
+const PREFERRED = ["claude", "codex"];
 const nameOf = (catalog: { providers: ProviderInfo[] }, id: string) => providerName(id, catalog.providers.find(p => p.id === id)?.label);
 
 /**
- * One row per provider a helper uses (any provider id), plus a quiet row for each other provider that's ready and for
- * Claude and Codex. A provider no helper uses is optional: never a failure. A missing provider's fix offers to switch
- * its helpers to one that's ready, preferring Claude, then Codex, then the catalog's order.
+ * One row per provider a helper uses (any provider id), plus a quiet row for each other provider that's ready. A
+ * provider no helper uses and that isn't there gets no row. A missing provider's fix offers to switch its helpers to
+ * one that's ready, preferring Claude, then Codex, then the catalog's order.
  */
 export function providerChecks(catalog: { providers: ProviderInfo[]; error: string | null } | null, use: ProviderUse): Check[] {
   if (!catalog || (catalog.error && !catalog.providers.length)) return [{ id: "providers", label: "Helper agents", state: "warn", detail: catalog?.error ?? "Couldn't read Paseo's providers.", fix: fix("Check again in a moment.") }];
   const ready = catalog.providers.filter(p => p.available).map(p => p.id).sort((x, y) => rank(x) - rank(y));
-  const ids = [...new Set([...KNOWN_PROVIDERS.filter(id => use[id]?.length || catalog.providers.some(p => p.id === id)), ...Object.keys(use).filter(id => use[id]?.length), ...ready])];
+  // A provider Paseo is still checking keeps its row: it may be the one the developer has.
+  const checking = catalog.providers.filter(p => !p.available && (p.reason === "Still loading" || unsettled(p))).map(p => p.id);
+  const ids = [...new Set([...ready, ...checking, ...Object.keys(use).filter(id => use[id]?.length).sort((x, y) => rank(x) - rank(y))])];
   const rows: Check[] = [];
   const pendingAny = catalog.providers.some(unsettled);
   for (const id of ids) {
@@ -236,15 +242,13 @@ export function providerChecks(catalog: { providers: ProviderInfo[]; error: stri
     if (!ready.length && !pendingAny) continue;
     if (!users.length) { rows.push({ id: `provider-${id}`, label, state: "off", detail: `${why}. Optional: no helper uses it.`, fix: null }); continue; }
     const setup = PROVIDER_FIX[id] ?? { text: `Set up ${label} on the computer running Paseo, then check again.`, command: null };
-    // A job that runs only on Claude Code or Codex (AI priority) can't move to another provider, so it never offers to.
+    // A job that runs only where it can have no tools (AI priority) never moves to a provider that can't promise that.
     const guarded = users.filter(u => GUARDED_TITLES.includes(u));
     const movable = users.filter(u => !GUARDED_TITLES.includes(u));
     const other = ready.find(x => x !== id && (guarded.length && !movable.length ? guardedProvider(x) : true));
-    // Another provider runs everything else: missing this one only costs the guarded job, an optional extra.
-    if (!movable.length && ready.length && !ready.some(guardedProvider)) {
-      rows.push({ id: `provider-${id}`, label, state: "off", detail: `${why}. Optional: ${joinNames(guarded)} runs only on Claude Code or Codex.`, fix: fix(setup.text, setup.command) });
-      continue;
-    }
+    // Another provider runs everything else and only a read-only job (AI priority) is left on this one: the helpers
+    // step already says why it can't run here and what to install, so no row names a provider the developer lacks.
+    if (!movable.length && ready.length && !ready.some(guardedProvider)) continue;
     const switchable = guarded.length && other && !guardedProvider(other) ? movable : users;
     rows.push({ id: `provider-${id}`, label, state: "fail", detail: `${why}. ${sentenceStart(joinNames(users))} won't run until it is.`,
       fix: other && switchable.length ? fix(`${setup.text} Or switch ${switchable.length === users.length ? "those helpers" : joinNames(switchable)} to ${nameOf(catalog, other)} in Settings → Agents.`, setup.command, "agents") : fix(setup.text, setup.command) });
@@ -256,7 +260,7 @@ export function providerChecks(catalog: { providers: ProviderInfo[]; error: stri
   return rows;
 }
 const GUARDED_TITLES = (Object.keys(ROLE_INFO) as AgentRole[]).filter(needsGuard).map(r => ROLE_INFO[r].title);
-const rank = (id: string) => { const i = KNOWN_PROVIDERS.indexOf(id); return i < 0 ? KNOWN_PROVIDERS.length : i; };
+const rank = (id: string) => { const i = PREFERRED.indexOf(id); return i < 0 ? PREFERRED.length : i; };
 
 export type ToolsInput = {
   /** Paseo's config.json (or null when unreadable). */

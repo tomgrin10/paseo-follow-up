@@ -421,7 +421,10 @@ try {
   assert.equal((await call("follow.project-settings", {})).projects.find(p => p.id === trackedProject.id).enable_default_tracking, false);
   await call("follow.set-project-tracking", { projectId: trackedProject.id, enable_default_tracking: true });
   await waitUntil("Enabled project did not enroll its existing workspace", async () => { await call("follow.refresh", {}); return (await call("follow.get", { workspaceId: disabledWorkspace.id })).workspace; }, { baseMs: 10_000 });
-  assert.equal((await readFile(join(home, "fixture-receipts.jsonl"), "utf8")).trim().split("\n").length, priorReceipts, "default enrollment must not send or launch recovery");
+  const receiptsNow = (await readFile(join(home, "fixture-receipts.jsonl"), "utf8")).trim().split("\n");
+  const receiptText = l => { try { const r = JSON.parse(l); return { agentId: r.agentId, text: (r.input?.content ?? []).map(c => c.text ?? "").join(" ").slice(0, 200) }; } catch { return { agentId: null, text: l.slice(0, 200) }; } };
+  if (receiptsNow.length !== priorReceipts) for (const extra of receiptsNow.slice(priorReceipts).map(receiptText)) console.error("extra receipt", JSON.stringify(extra), "| that agent's earlier prompts:", JSON.stringify(receiptsNow.slice(0, priorReceipts).map(receiptText).filter(r => r.agentId === extra.agentId).slice(-3)));
+  assert.equal(receiptsNow.length, priorReceipts, `default enrollment must not send or launch recovery; new: ${receiptsNow.slice(priorReceipts).map(l => { try { const r = JSON.parse(l); return `${r.agentId}: ${JSON.stringify(r).slice(0, 600)}`; } catch { return l.slice(0, 300); } }).join(" | ")}`);
   console.log("PASS: project defaults enroll existing/new workspaces, expose the bridge on the first main session, persist off across reload and preserve records without any messages.");
   if (!process.argv.includes("--projects-only")) console.log("PASS: installation is inert; per-workspace activation, isolated recovery with inherited config, verified recipient handoff, durable scope exclusions, refused-ack diagnostics and a clean main conversation, manual repairs/completion, scoped opt-in Auto delivery, GH_REPO authentication context, unselected agents untouched, reload deduplication, Done label, reopening, and CLI bridge.");
   if (keep) {

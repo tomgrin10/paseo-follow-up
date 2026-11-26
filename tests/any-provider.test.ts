@@ -127,8 +127,9 @@ test("recommendations: OpenCode and Copilot go by the catalog's own wording firs
   const recs = recommendAll([COPILOT, OPENCODE]);
   assert.deepEqual([recs.about.provider, recs.about.model, recs.about.source], ["opencode", "qwen3-coder", "metadata"]);
   assert.deepEqual([recs.overseer.provider, recs.overseer.model, recs.overseer.source], ["opencode", "kimi-k2", "metadata"]);
-  // AI priority reads what other people wrote: never recommended off Claude and Codex (sources-are-read-only).
-  assert.deepEqual([recs.ranker.provider, recs.ranker.source], [null, "none"]);
+  // AI priority reads what other people wrote: recommended only where a job can have no tools (sources-are-read-only),
+  // which OpenCode can promise and Copilot (ACP) can't.
+  assert.equal(recs.ranker.provider, "opencode");
   // Copilot alone: names only; "gemini" is not "mini".
   const copilot = recommendAll([COPILOT]);
   assert.deepEqual([copilot.about.model, copilot.overseer.model, copilot.ranker.provider], ["gemini-2.5-flash", "gemini-2.5-pro", null]);
@@ -147,11 +148,11 @@ test("recommendations: nothing fits gives the provider's default and a hint; not
 
 // ---------- checks ----------
 
-test("checks for a host with only OpenCode: the default helpers' Claude row fails and offers OpenCode for the helpers that can move (never AI priority); nothing names Claude or Codex as required", () => {
+test("checks for a host with only OpenCode: the default helpers' Claude row fails and offers OpenCode for every helper, AI priority too; nothing names Claude or Codex as required", () => {
   const catalog = { error: null, providers: [{ id: "opencode", label: "OpenCode", available: true, reason: null }] };
   let rows = providerChecks(catalog, { claude: ["the Overseer", "Summaries", "AI priority"] });
   const claude = rows.find(r => r.id === "provider-claude")!;
-  assert.equal(claude.state, "fail"); assert.match(claude.detail, /Paseo doesn't have it/); assert.match(claude.fix!.text, /switch the Overseer and Summaries to OpenCode/); assert.doesNotMatch(claude.fix!.text, /AI priority/); assert.equal(claude.fix!.settings, "agents");
+  assert.equal(claude.state, "fail"); assert.match(claude.detail, /Paseo doesn't have it/); assert.match(claude.fix!.text, /switch those helpers to OpenCode/); assert.equal(claude.fix!.settings, "agents");
   assert.equal(rows.find(r => r.id === "provider-opencode")!.state, "ok");
   assert.equal(rows.find(r => r.id === "provider-codex"), undefined, "an unused provider Paseo doesn't have stays out");
   assert.equal(rows.find(r => r.id === "providers"), undefined, "a provider is ready");

@@ -70,6 +70,7 @@ import { Wait, waitStatus, type WaitPaseoConfig } from "./server/wait";
 import { removeGlobalRegistrations } from "./server/mcp-registrations";
 import { TrustBypass } from "./server/trust-bypass";
 import { scopes } from "./server/scopes";
+import { TurnEnd } from "./server/turn-end";
 import { updateObligation } from "./server/obligations";
 import { Inbox, INBOX_WRITE_MS, type GuardPause } from "./server/inbox";
 import { daemonDirectory, guardPath } from "./server/inbox-directory";
@@ -428,6 +429,31 @@ export default function contribute(server: PluginServerContext) {
     queue.enqueue({ id: `message:${agentId}:${messageId}`, kind: "message", key, ref: { agentId }, messageId, text, ...(by ? { by } : {}), ...(images.length ? { images } : {}), priority: "now", state: "queued" });
   };
   onDaemonReconnect(() => queue.reconnected());
+  // Turn-end checks for a provider without Follow-up's hook (server/turn-end.ts): the hook's checks, as one queued message.
+  const turnEnd = new TurnEnd({
+    input: async (agentId, _provider, _items, _startedAt) => {
+      const w = agentTrackedWorkspace(await store.snapshot(), agentId);
+      if (!w) return null;
+      // Only this workspace's scopes (a-nudge-costs-its-workspace), never the whole state's.
+      const entry = scopes({ workspaces: [w] } as unknown as Parameters<typeof scopes>[0])[agentId] ?? null;
+      const json = (name: string) => readFile(join(directory, "hook-state", name), "utf8").then(t => JSON.parse(t) as Record<string, unknown>, () => null);
+      const synced = await json(`sync-${agentId}.json`);
+      const called = await json(`needs-you-${agentId}.json`) as NeedsYouRecord | null;
+      const receipt = /^[\w-]+$/.test(w.id) ? await json(`task-nudges-${w.id}.json`) : null;
+      const settings = await inboxSettings();
+      return {
+        entry, receipt: (receipt ?? {}) as never,
+        syncedAt: synced && synced.workspaceId === w.id && typeof synced.at === "number" ? synced.at : null,
+        needsYouAt: typeof called?.at === "number" ? called.at : null,
+        nudge: settings.enable_inbox === true && settings.enable_brief_nudge === true && !inbox.pendingPermissions().includes(agentId),
+      };
+    },
+    saveReceipt: async (workspaceId, receipt) => { if (/^[\w-]+$/.test(workspaceId)) await writeFile(join(directory, "hook-state", `task-nudges-${workspaceId}.json`), JSON.stringify(receipt), { mode: 0o600 }); },
+    send: async (agentId, workspaceId, text, turnId) => {
+      const messageId = randomUUID();
+      queue.enqueue({ id: `turn-end:${agentId}:${turnId ?? messageId}`, kind: "message", key: workspaceId, ref: { agentId }, messageId, text, priority: "now", state: "queued" });
+    },
+  });
   /**
    * Stores a field's pasted images, runs the action with their refs, and removes any the action didn't queue (a
    * repeated answer, an ask already open, a refusal): only a queue item keeps an image file.
@@ -2113,6 +2139,7 @@ export default function contribute(server: PluginServerContext) {
     // The shared directory learns from events instead of polling Paseo (see DaemonDirectory). Registered first so the
     // handlers below read the patched rows.
     server.on("agent.turn_started", async event => gateway.directory.turnStarted(event.agent, event.turnId)),
+    server.on("agent.turn_started", async event => turnEnd.turnStarted(event.agent.id)),
     server.on("agent.turn_ended", async event => gateway.directory.turnEnded(event.agent, event.outcome)),
     server.on("agent.turn_ended", async event => contextRequests.turnEnded(event.agent.id)),
     server.on("agent.permission_requested", async event => gateway.directory.permissionRequested(event.agent.id, event.request as { id?: string })),
@@ -2219,6 +2246,8 @@ export default function contribute(server: PluginServerContext) {
       const compaction = event.outcome.kind === "canceled" && await compactionJustDelivered(event.agent.id, Date.parse(interruption!.at)).catch(() => false);
       const nudged = await turnEnded(store, event.agent.id, event.outcome, event.turnId ?? null, items, { interruption, guarded, newerTurn, compaction });
       if (nudged) void engine.nudge(nudged);
+      // A provider without the hook: the Stop hook's checks, from this same read (an-agent-on-any-provider-gets-follow-up).
+      await turnEnd.turnEnded(event.agent, event.outcome, event.turnId ?? null, items).catch(() => undefined);
     }),
     server.on("workspace.archived", async event => { await ready; if (!loadError && !stopped) await store.mutate(state => { const w = state.workspaces.find(w => w.id === event.workspace.id); if (w) w.archived = true; }); }),
   ];

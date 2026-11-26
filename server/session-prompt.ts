@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { z } from "zod";
+import type { AgentToolDefinition } from "@getpaseo/plugin/server";
 import { hookSource } from "./hook-source";
 import { hasHooks, isAcp } from "../shared/provider-support";
 
@@ -75,7 +77,23 @@ export function hooklessParts(env: Readonly<Record<string, string | undefined>>,
   return env.FOLLOW_UP_ROOT === "1" || tracked ? [...parts, "checks"] : parts;
 }
 
-type OpenRequest = { agentId?: string; provider: string; purpose: string; env: Record<string, string>; appendSystemPrompt?: string[] };
+type OpenRequest = { agentId?: string; provider: string; purpose: string; env: Record<string, string>; appendSystemPrompt?: string[]; tools?: AgentToolDefinition[] };
+
+/** The tool an ACP agent reads Follow-up's instructions through (Paseo doesn't pass a plugin's system prompt to ACP). */
+export const INSTRUCTIONS_TOOL = "follow_session_instructions";
+/**
+ * Follow-up's instructions as a tool: its description is in the agent's context on every turn (tool lists reach ACP
+ * agents through Paseo's MCP), and it tells the agent to read them first. The text is what the system prompt would
+ * have carried, fixed at session open like a system prompt.
+ */
+export function instructionsTool(text: string): AgentToolDefinition {
+  return {
+    name: INSTRUCTIONS_TOOL,
+    description: "Follow-up's instructions for this session. Call this once at the start of the session and again after compaction, before any other follow_ tool, and follow what it returns.",
+    input: z.object({}).strict(),
+    execute: () => ({ text }),
+  };
+}
 export type PromptDeps = {
   /** The host takes `appendSystemPrompt` from a session-open hook (Paseo 0.17+). */
   hostSupports(): Promise<boolean>;
@@ -102,12 +120,21 @@ export async function withSystemPrompt<R extends OpenRequest>(request: R, deps: 
   if (request.purpose !== "interactive") return request;
   const native = request.env.FOLLOW_UP_TOOLS === "native";
   const hooked = hasHooks(request.provider);
-  // An ACP agent never receives appendSystemPrompt (Paseo 0.17.4), so nothing is claimed as sent: no text, no env.
-  if (!hooked && await (deps.acp?.(request.provider) ?? Promise.resolve(isAcp(request.provider))).catch(() => isAcp(request.provider))) return request;
+  // An ACP agent never receives appendSystemPrompt (Paseo 0.17.4): the same text goes in a tool it is told to read
+  // first (instructionsTool), and no env claims a system prompt it never got.
+  const acp = !hooked && await (deps.acp?.(request.provider) ?? Promise.resolve(isAcp(request.provider))).catch(() => isAcp(request.provider));
   // Without a hook, the system prompt is the only way Follow-up's text reaches the agent (an-agent-on-any-provider-gets-follow-up).
   const workspace = hooked || request.env.FOLLOW_UP_RECOVERY === "1" || !request.agentId || !deps.workspace ? null : await deps.workspace(request.agentId, native).catch(() => null);
   const wanted = hooked ? promptParts(request.env) : hooklessParts(request.env, !!workspace);
   if (!wanted.length && !workspace) return request;
+  if (acp) {
+    if (!Array.isArray(request.tools) || request.tools.some(t => t.name === INSTRUCTIONS_TOOL)) return request;
+    const bridge = await deps.bridge().catch(() => null);
+    if (!bridge) return request;
+    const { parts, text } = promptText(wanted, bridge, native);
+    if (!parts.length && !workspace) return request;
+    return { ...request, tools: [...request.tools, instructionsTool([...(workspace ? [workspace] : []), ...text].join("\n\n"))] };
+  }
   if (!(await deps.hostSupports().catch(() => false))) return request;
   if (hooked && !(await deps.providerSupports(request.provider).catch(() => false))) return request;
   const bridge = await deps.bridge().catch(() => null);

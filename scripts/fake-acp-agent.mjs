@@ -63,9 +63,11 @@ async function prompt(id, params) {
   const text = (params.prompt ?? []).filter(b => b.type === "text").map(b => b.text).join("\n");
   record("prompt", { sessionId: params.sessionId, text, blocks: params.prompt?.length ?? 0 });
   let reply = "Fake ACP agent: nothing to do.";
-  const match = /\b(follow_[a-z_]+)\b/.exec(text);
+  // "call follow_x {json}": the JSON object after the tool's name (same line) is its arguments.
+  const match = /\b(follow_[a-z_]+)\b(?:[ \t]+(\{[^\n]*\}))?/.exec(text);
   if (match) {
-    const out = await callTool(sessions.get(params.sessionId)?.mcpServers ?? [], match[1]);
+    let args = {}; try { if (match[2]) args = JSON.parse(match[2]); } catch { /* not JSON: no arguments */ }
+    const out = await callTool(sessions.get(params.sessionId)?.mcpServers ?? [], match[1], args);
     record("mcp", { tool: match[1], ...out });
     reply = out.result ? `Called ${match[1]}: ${out.result.content?.[0]?.text?.slice(0, 200) ?? "(no text)"}` : `Couldn't call ${match[1]}${out.error ? `: ${out.error}` : ""}.`;
   }

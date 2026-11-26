@@ -89,7 +89,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | PR workflow (Graphite or GitHub), PR actions, reviewers, deployments, Send to Paseo | `server/pr-workflow.ts`, `server/github.ts`, `server/github-api.ts`, `shared/poll.ts`, `server/graphite.ts`, `server/pr-actions.ts`, `server/browser-bridge.ts`, `server/reviewer-config.ts`, `server/deployments.ts`, `server/deployment-anchor.ts`, `shared/pr-workflow.ts`, `shared/pr-actions.ts`, `shared/reviewers.ts`, `shared/reviewers-click.ts`, `shared/keep-in-place.ts`, `client/reviewers-button.tsx`, `server/github-setup.ts`, `shared/github-setup.ts` | [prs](docs/prs.md) |
 | PR statistics (records, store, sync, the GitHub budget gate, metrics, settings, tools and the page) | `shared/pr-stats-records.ts`, `shared/pr-stats.ts`, `shared/pr-stats-settings.ts`, `shared/pr-stats-page.ts`, `shared/workweek.ts`, `server/pr-stats.ts`, `client/pr-stats-settings.tsx`, `client/pr-stats.tsx`, `server/pr-stats-gate.ts`, `server/pr-stats-store.ts`, `server/pr-stats-sync.ts` | [pr-stats](docs/pr-stats.md) |
 | Agent tools and agent parity | `server/mcp.mjs`, `server/native-tools.ts`, `server/session-mcp.ts`, `server/agent-mcp.ts`, `server/mcp-registrations.ts`, `server/scopes.ts`, `server/agent-actions.ts`, `server/agent-parity.ts`, `shared/actor.ts`, `shared/chat.ts` | [rpcs-and-tools](docs/rpcs-and-tools.md) |
-| Provider hooks, static text in the system prompt, what each provider gets | `server/agent-hooks.ts`, `server/agent-hook.mjs`, `server/session-prompt.ts`, `shared/provider-support.ts` | [hooks](docs/hooks.md) |
+| Provider hooks, static text in the system prompt, what each provider gets, turn-end checks without a hook | `server/agent-hooks.ts`, `server/agent-hook.mjs`, `server/session-prompt.ts`, `shared/provider-support.ts`, `server/turn-end.ts` | [hooks](docs/hooks.md) |
 | Wait for checks (one message when a PR's checks finish; the polling nudge) | `shared/check-watch.ts`, `server/check-watches.ts`, `server/wait-for-checks.ts` | [wait-for-checks](docs/wait-for-checks.md) |
 | Wait for background jobs | `server/wait.ts`, `server/host-features.ts`, `server/wait-jobs.ts`, `server/wait-runner.sh`, `shared/wait.ts` | [wait](docs/wait.md) |
 | Onboarding, release notes and What's new, display settings, trust bypass | `server/onboarding.ts`, `server/release-notes.ts`, `server/trust-bypass.ts`, `shared/onboarding.ts`, `shared/changelog.ts`, `shared/version.ts`, `shared/display.ts`, `shared/settings-nav.ts` | [settings](docs/settings.md) |
@@ -1068,9 +1068,12 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    the job's grant before it runs, whatever `--allowedTools` or the text say; the default grant is nothing and the
    plan reader's (and Settings' title read) is the Artifact tool's `read` only. A refused call is logged by tool and
    action name only (`ai-jobs.jsonl` `refused`) and the job still completes on what it read. Codex jobs run in a
-   read-only sandbox without the shell tool. Compass's extraction runs only on those two: with Summaries on any other provider it reads nothing at all and says why (compass-text-is-data). A job on any other provider (`server/job-agent.ts`) runs as a Paseo agent
-   with that provider's own tools, so a job that reads outside content (`outside` on its spec: AI priority, Ask,
-   Compass, the plan reader, a Summary with linked issues or threads) never starts there: `AiJobs.run` refuses it
+   read-only sandbox without the shell tool, Pi jobs with `--no-tools` and nothing of the developer's loaded, and
+   OpenCode jobs as an agent whose session denies every permission (`lockedConfig`). Compass's extraction runs only on
+   those: with Summaries on any other provider it reads nothing at all and says why (compass-text-is-data). Any other
+   provider (ACP agents among them) runs a job as a Paseo agent with its own tools and can't promise otherwise, so a job
+   that reads outside content (`outside` on its spec: AI priority, Ask, Compass, the plan reader, a Summary with linked
+   issues or threads) never starts there: `AiJobs.run` refuses it
    before any runner (`guardedProvider`, reason `unguarded`), the Summary leaves the linked text out and runs on the
    workspace's own work, and Settings → Agents and the source say why in one line. 2026-11-23: the plan reader kept the
    Artifact tool read-only by its prompt alone. Guarded by `tests/brief-sources.test.ts` and
@@ -1399,25 +1402,33 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    "The "New" button on the left sidebar should be optional and configurable in the onboarding and settings, also
    recommend on its config to turn off the "New workspace" default button". Guarded by `tests/new-row.test.ts`.
 115. **An agent on any provider gets Follow-up** (`an-agent-on-any-provider-gets-follow-up`). Paseo runs agents on
-   Claude Code, Codex and many more (OpenCode, Pi, Copilot, Cursor, Kimi, Kiro, any ACP agent), and many developers
-   have neither Claude nor Codex. Every core feature works on any provider Paseo runs, or says in one line what needs
-   Claude or Codex and why (`providerNotes`, `shared/provider-support.ts`: one block in Settings → Agents, with what to do,
-   never a pick the developer can't make). A helper is never Recommended on a provider it can't run on; with no such
-   provider available, AI priority's row shows it off and says why (`needsGuard`). Tools, `needs_you` and the Overseer's tools
-   attach to every provider (`withTools`, `withSessionMcp`; `FOLLOW_UP_TOOL_PROVIDERS` narrows it for the harness
-   only). On Paseo 0.17 a provider without Follow-up's hook gets all of the hook's SessionStart text in its system
-   prompt (`hooklessParts`, `workspaceInstructions`); what only a hook can do (the Stop checks, per-turn context, the
-   polling nudge, Wait) is named, not faked. Settings says an ACP agent gets no instructions, and nothing claims text it
-   never received: ACP is decided from Paseo's config (`isAcp`, the `extends` chain), never from a list of ids, since a
-   generic ACP agent carries the developer's own id. Every helper left on its default runs on a provider Paseo has
-   (`runnableRole`: the same recommendation Settings → Agents and setup show), never one the developer lacks; a picked
-   one is never moved, and invariant 81 still refuses an outside-content job on an unguarded provider. Repairs,
-   auto-send, questions and the inbox never depended on the provider. 2026-11-25, the developer: "There are people
-   that have no claude and no codex, and use different providers too"; an OpenCode agent got no tools, no needs_you
-   and no instructions, and every helper defaulted to a Claude that wasn't installed. Guarded by
-   `tests/any-provider-core.test.ts` (the real worker with only OpenCode in Paseo's catalog and no claude or codex command:
-   nothing tries either) and `tests/session-prompt.test.ts` (every role, hookless: the system prompt is what the hook
-   alone adds on Claude).
+   Claude Code, Codex and many more (OpenCode, Pi, Oh My Pi, Copilot, Cursor, Kimi, Kiro, any ACP agent), and many
+   developers have neither Claude nor Codex. Every Follow-up feature works on every provider Paseo runs: one capability
+   model says how (`providerCaps`, `shared/provider-support.ts`: hooks, instructions, turn-end, Wait, read-only jobs),
+   and no feature checks a provider id of its own. Tools, `needs_you` and the Overseer's tools attach to every provider
+   (`withTools`, `withSessionMcp`; `FOLLOW_UP_TOOL_PROVIDERS` narrows it for the harness only). Instructions: a provider
+   without Follow-up's hook gets all of the hook's SessionStart text in its system prompt on Paseo 0.17 (`hooklessParts`,
+   `workspaceInstructions`); an ACP agent, which Paseo gives no plugin system prompt, gets the same text as the
+   `follow_session_instructions` tool it is told to read first (`instructionsTool`), and nothing claims a system prompt
+   it never received. ACP is decided from Paseo's config (`isAcp`, the `extends` chain), never from a list of ids alone.
+   The Stop hook's checks (sync, `needs_you`, due tasks) run from Paseo's turn-end event for every provider without the
+   hook (`server/turn-end.ts`): one queued message, only when something is due, never for the turn that message
+   started (told from its prompt, so it holds across a worker restart), only to the agent whose turn just ended; the
+   `needs_you` nudge only after a turn the developer started (2026-11-26, check-install: a repair's turn was nudged,
+   and a reload between a nudge and its reply let the next nudge through). Wait attaches to every provider; outside Claude Code its command
+   detaches itself. A job that reads other people's words runs wherever the provider promises it no tools (Claude Code,
+   Codex and Pi through their CLIs, OpenCode through a session with every permission denied) and nowhere else
+   (invariant 81); `providerNotes` says in one block only what a provider the developer has can't do, with what to do,
+   never a pick the developer can't make. Every helper left on its default runs on a provider Paseo has
+   (`runnableRole`), a picked one is never moved, and setup lists only providers that are there or in use, never
+   Claude and Codex as missing. What only a hook can add mid-turn (the per-turn context, the polling nudge) is named,
+   not faked. 2026-11-25, the developer: "There are people that have no claude and no codex, and use different
+   providers too"; 2026-11-26: "If a user doesn't have Claude and Codex, say he has Pi configured with a Gemini model,
+   he can use everything: all the helpers, all the agent features." Guarded by `tests/every-provider.test.ts` (each
+   capability, Pi's and OpenCode's read-only jobs, the turn-end checks and their loop guard, a detached Wait run to its
+   receipt, the ACP tool), `tests/any-provider-core.test.ts` (the real worker with only OpenCode in Paseo's catalog and
+   no claude or codex command: nothing tries either) and `tests/session-prompt.test.ts` (every role, hookless: the
+   system prompt is what the hook alone adds on Claude).
 116. **Every search request lands in the visible search** (`every-search-request-lands-in-the-visible-search`). Every
    way to ask for Home's search (the search key, ⌘K "Follow-up: Search", `/`) ends with the caret in the Home search
    field on screen, whatever was mounted, loading or focused before. One owner holds the request

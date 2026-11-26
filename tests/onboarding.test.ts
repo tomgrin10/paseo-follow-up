@@ -181,7 +181,8 @@ test("checks: a provider a helper uses is a failure; an unused one is optional; 
   assert.equal(claude.fix?.settings, "agents", "Codex works, so offer to switch the helpers"); assert.equal(claude.fix?.command, "claude");
 
   checks = (await new ReadinessChecks(deps({ catalog: async () => catalog(true, false) })).run()).checks;
-  assert.equal(byId(checks, "provider-codex").state, "off"); assert.equal(byId(checks, "provider-codex").fix, null);
+  // A provider no helper uses and that isn't there gets no row (an-agent-on-any-provider-gets-follow-up).
+  assert.equal(checks.find(c => c.id === "provider-codex"), undefined, "an unused missing provider is not listed");
 
   checks = (await new ReadinessChecks(deps({ catalog: async () => catalog(false, false), use: async () => ({ claude: ["the Overseer"], codex: ["AI priority"] }) })).run()).checks;
   // No provider at all is Paseo's next step, not Follow-up failing: a note that says what to set up.
@@ -393,11 +394,9 @@ test("checks: with no provider at all, the Agents row stands alone, even for pro
 test("checks: another provider runs the helpers, so a missing Claude only costs AI priority and never reads as broken", () => {
   const catalog = { providers: [{ id: "claude", label: "Claude", available: false, reason: "Not installed" }, { id: "codex", label: "Codex", available: false, reason: "Not installed" }, { id: "acme", label: "Acme agent", available: true, reason: null }], error: null };
   const rows = providerChecks(catalog, { claude: ["AI priority"], acme: ["the Overseer", "Summaries"] });
-  const claude = rows.find(r => r.id === "provider-claude")!;
-  assert.equal(claude.state, "off");
-  assert.match(claude.detail, /^Not installed\. Optional: AI priority runs only on Claude Code or Codex\.$/);
-  // AI priority can't move to Acme, so the fix never offers to.
-  assert.doesNotMatch(claude.fix?.text ?? "", /switch/i);
+  // Only AI priority is left on Claude and it can't run on Acme: the helpers step says so, so setup lists no Claude
+  // row (an-agent-on-any-provider-gets-follow-up: never a provider the developer lacks named as missing).
+  assert.equal(rows.find(r => r.id === "provider-claude"), undefined);
   assert.equal(checksSummary(rows).state, "ok");
   // A helper that can move still makes it a thing to fix, and only that helper is offered the switch.
   const mixed = providerChecks(catalog, { claude: ["the Overseer", "AI priority"], acme: ["Summaries"] }).find(r => r.id === "provider-claude")!;

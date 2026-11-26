@@ -22,7 +22,7 @@ you, in one place, ranked.
   It answers, or passes your words to the agent doing the work.
 - **Catch up** after a meeting or a morning away, one card at a time, on the desktop or your phone.
 - **PR statistics** show who opens, merges and reviews PRs, and how long PRs wait for a first review.
-- **Any provider:** agents on Claude Code, Codex, OpenCode, Pi, Copilot, Cursor and more get Follow-up's tools.
+- **Any provider:** agents on Claude Code, Codex, OpenCode, Pi, Copilot, Cursor and more get every Follow-up feature.
 
 It never merges, requests reviewers, archives, answers a question for you or wakes a resting agent on its own.
 

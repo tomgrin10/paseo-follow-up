@@ -65,7 +65,7 @@ const lowEffort = (m: CatalogModel) => m.thinking.find(t => /^(minimal|low)$/i.t
 export function recommend(role: AgentRole, catalog: readonly CatalogProvider[]): Recommendation {
   const tier = ROLE_TIER[role];
   if (tier === "same") return { role, same: true, provider: ROLE_DEFAULTS[role].provider, model: null, thinking: null, source: "same", hint: null };
-  // Never recommend a provider a job can't run on: AI priority only on Claude or Codex (sources-are-read-only).
+  // Never recommend a provider a job can't run on: AI priority only where a job can have no tools (sources-are-read-only).
   const providers = order(catalog).filter(p => !needsGuard(role) || guardedProvider(p.id));
   if (!providers.length) return { role, same: false, provider: null, model: null, thinking: null, source: "none", hint: null };
   if (providers[0].id === "claude") { const d = ROLE_DEFAULTS[role]; return { role, same: false, provider: d.provider, model: d.model, thinking: d.thinking, source: "default", hint: null }; }

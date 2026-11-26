@@ -56,6 +56,8 @@ export const HOOK_TEXT_PREFIXES = [
   "Follow-up was updated while this session was open",
   "Do routine bookkeeping silently.",
   "Maintain this tracked workspace's Follow-up sidebar",
+  // The same checks as one message, for a provider without the hook (server/turn-end.ts).
+  "Follow-up turn-end check:",
 ] as const;
 /** A provider's wrapper around hook feedback: Codex's `<hook_prompt …>` element or Claude Code's "Stop hook feedback:" line. */
 function hookBody(text: string): string | null {

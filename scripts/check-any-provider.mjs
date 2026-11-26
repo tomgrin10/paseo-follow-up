@@ -6,8 +6,13 @@
 // 1. Creates a tracked synthetic workspace with an agent on Acme ACP and prompts it to call follow_workspace_status;
 //    the fake agent records what Paseo gave it at session/new (mcpServers, any system prompt) and calls the tool through
 //    the Paseo MCP server it was handed. Asserts the follow_* tools are listed and the call answers for its own
-//    workspace; reports whether any Follow-up instruction text reached the agent (Paseo 0.17.4: none for ACP).
-// 2. Renders Settings → Agents at 1440×900 and 390×844, light and dark: the one notes block shows ("Works on …" / "Needs Claude Code or Codex: …"), saying Acme ACP gets no instructions, and AI priority shows off with why,
+//    workspace; then reads follow_session_instructions, the tool an ACP agent gets Follow-up's instructions through
+//    (Paseo 0.17.4 passes no plugin system prompt to ACP), and asserts it answers with them. Then the turn-end
+//    checks: a quiet turn gets no message; a turn that leaves a task due gets exactly one, and the turn that message
+//    starts gets none. (A Claude agent can't run here: the harness stubs its CLI and Paseo reserves the id, so the
+//    "hooked providers are skipped" case stays in tests/every-provider.test.ts.)
+// 2. Renders Settings → Agents at 1440×900 and 390×844, light and dark: the one notes block shows (Acme ACP reads its
+//    instructions through a tool; Summaries' linked items, Compass and Ask need a provider with no tools), and AI priority shows off with why,
 //    the helper rows show the fallback pick (Acme ACP, never Claude), nothing overflows horizontally.
 //
 //   PLAYWRIGHT_CORE=<dir> CHROMIUM=<bin> HARNESS_PASEO=system ~/paseo-harness/tools/harness-slot \
@@ -90,16 +95,52 @@ try {
   const status = JSON.parse(mcpRecord.result.content[0].text.replace(/^[^{]*/, ""));
   assert.equal(status.id, w.id, "the tool answers for the agent's own workspace (caller identity from the daemon)");
   report.call = { tool: "follow_workspace_status", workspaceId: status.id === w.id ? "own workspace" : status.id, detail: status.detail ?? null };
+  // The instructions an ACP agent can't get in its system prompt, through the tool every description points at.
+  assert.ok(allTools.includes("follow_session_instructions"), "the ACP agent is offered follow_session_instructions");
+  await client.sendAgentMessage(agent.id, "Read your instructions: call follow_session_instructions.");
+  const read = await waitUntil("the instructions tool call", async () => (await records()).find(r => r.kind === "mcp" && r.tool === "follow_session_instructions") ?? null, { baseMs: 60_000 });
+  const instructionsText = read.result?.content?.[0]?.text ?? "";
+  report.instructionsTool = { chars: instructionsText.length, start: instructionsText.slice(0, 80) };
+  assert.ok(read.result && !read.result.isError && /follow_needs_you|follow_wait_for_checks|follow_workspace_status/.test(instructionsText), `follow_session_instructions answered with Follow-up's instructions: ${instructionsText.slice(0, 200)}`);
+
+  // 1b. Turn-end checks on a real daemon for a provider without Follow-up's hook (server/turn-end.ts): one queued
+  // message only when something is due, never for the turn that message started. The worker's own messages start
+  // with the hook's turnEndPrefix; count them as the fake agent received them.
+  const TURN_END = /^Follow-up turn-end check:/;
+  const prompts = async () => (await records()).filter(r => r.kind === "prompt");
+  const turnEnds = async () => (await prompts()).filter(r => TURN_END.test(r.text));
+  // Settle: nothing new reaches the agent for `quietMs` (the queue sends within a tick; a reply's turn is never checked).
+  const settle = async (quietMs = 20_000) => { let last = -1; await waitUntil("the agent to settle", async () => { const n = (await prompts()).length; if (n === last) return true; last = n; await new Promise(r => setTimeout(r, quietMs)); return false; }, { baseMs: 180_000 }); };
+  await settle();
+  // A quiet turn: the agent reports with needs_you and nothing is due, so nothing is sent.
+  let before = (await turnEnds()).length;
+  await client.sendAgentMessage(agent.id, 'Wrap up: call follow_needs_you {"ask":"Nothing needed: checked the workspace.","kind":"done"}');
+  await waitUntil("the quiet turn", async () => (await records()).some(r => r.kind === "mcp" && r.tool === "follow_needs_you" && r.result && !r.result.isError) || null, { baseMs: 60_000 });
+  await settle();
+  const quiet = (await turnEnds()).length - before;
+  // A turn that leaves a task due (an overdue re-check date): exactly one message, naming it.
+  before = (await turnEnds()).length;
+  await client.sendAgentMessage(agent.id, 'Add the check: call follow_update_obligation {"title":"Check the export in production","status":"pending","recheck":"2020-01-01"}');
+  const sent = await waitUntil("the turn-end message", async () => { const t = (await turnEnds()).slice(before); return t.length ? t : null; }, { baseMs: 90_000 });
+  // The turn that message starts is never checked: no second message however long we wait.
+  await settle();
+  const due = (await turnEnds()).slice(before);
+  report.turnEnd = { quietTurn: quiet, dueTurn: due.length, namesTask: /Check the export in production/.test(sent[0].text), start: sent[0].text.slice(0, 120) };
+  log("turn-end on a real daemon:", JSON.stringify(report.turnEnd));
+  assert.equal(quiet, 0, "a quiet turn (needs_you called, nothing due) gets no turn-end message");
+  assert.equal(due.length, 1, `a turn that leaves a task due gets exactly one turn-end message, and its reply's turn none: ${due.map(d => d.text.slice(0, 80)).join(" | ")}`);
+  assert.ok(report.turnEnd.namesTask, "the message names the due task");
 
   // What instruction text reached the agent: the session/new params (any field but mcpServers), the prompts, the env.
   const FOLLOW_TEXT = /Follow-up|follow_workspace_status|needs_you|register_pr/;
   const sessionText = opened.map(r => JSON.stringify({ ...r.params, mcpServers: undefined })).join("\n");
-  const promptText = all.filter(r => r.kind === "prompt").map(r => r.text).join("\n");
+  // Only what Paseo put in the session itself: not our own prompts here, nor Follow-up's turn-end check messages.
+  const promptText = all.filter(r => r.kind === "prompt" && !/^Follow-up turn-end check:/.test(r.text)).map(r => r.text).join("\n");
   const spawnEnv = all.filter(r => r.kind === "spawn").map(r => r.followUpEnv);
   report.instructions = {
     sessionNewKeys: [...new Set(opened.flatMap(r => Object.keys(r.params)))],
     inSessionNew: FOLLOW_TEXT.test(sessionText),
-    inPrompt: FOLLOW_TEXT.test(promptText.replace("call follow_workspace_status.", "")),
+    inPrompt: FOLLOW_TEXT.test(promptText.replace("call follow_workspace_status.", "").replace("call follow_session_instructions.", "")),
     promptBlocks: all.filter(r => r.kind === "prompt").map(r => r.blocks),
     followUpEnv: spawnEnv.at(-1) ?? {},
   };
@@ -117,7 +158,7 @@ try {
     try {
       await page.goto(`${ORIGIN}/settings/hosts/${SERVER_ID}/plugins/follow-up/agents`);
       await page.locator(`[data-testid="plugin-settings-tab-agents"]`).filter({ visible: true }).first().waitFor();
-      const line = page.getByText(/^Works on /).first();
+      const line = page.getByText(/reads Follow-up's instructions from a tool/).first();
       await line.waitFor();
       await page.getByText(LABEL).first().waitFor();
       await line.scrollIntoViewIfNeeded();
@@ -125,8 +166,8 @@ try {
       const facts = await page.evaluate(() => {
         const vw = document.documentElement.clientWidth;
         const wide = [...document.querySelectorAll("body *")].filter(e => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e); return r.width > 0 && r.right > vw + 1 && s.visibility !== "hidden" && !e.closest('[style*="overflow"]'); }).map(e => `${e.tagName}.${(e.getAttribute("data-testid") ?? e.textContent ?? "").slice(0, 40)}`);
-        const leaf = [...document.querySelectorAll("div")].find(d => /^Works on /.test(d.textContent ?? "") && d.children.length === 0);
-        let el = leaf?.parentElement && /Needs Claude Code or Codex/.test(leaf.parentElement.textContent ?? "") ? leaf.parentElement : leaf;
+        const leaf = [...document.querySelectorAll("div")].find(d => /reads Follow-up's instructions from a tool/.test(d.textContent ?? "") && d.children.length === 0);
+        let el = leaf?.parentElement && /read other people's messages/.test(leaf.parentElement.textContent ?? "") ? leaf.parentElement : leaf;
         const r = el?.getBoundingClientRect();
         return { pageScrolls: document.scrollingElement.scrollWidth > vw + 1, wide: wide.slice(0, 5), line: el?.innerText ?? null, lineBox: r ? { left: r.left, right: r.right, width: Math.round(r.width), lines: Math.round(r.height / (parseFloat(getComputedStyle(el).lineHeight) || 20)), vw } : null, notes: [...document.querySelectorAll("div")].filter(d => d.children.length === 0 && /^(On Acme ACP, |Not available in Paseo|Your agents on )/.test(d.textContent ?? "")).map(d => ({ text: (d.textContent ?? "").slice(0, 40), width: Math.round(d.getBoundingClientRect().width) })), priority: (() => {
           const sw = document.querySelector('[role="switch"][aria-label="AI priority"]');
@@ -141,7 +182,7 @@ try {
       assertNoRealNames(facts.text, name);
       assert.equal(facts.pageScrolls, false, `${name}: the page scrolls sideways`);
       assert.ok(facts.lineBox && facts.lineBox.left >= 0 && facts.lineBox.right <= facts.lineBox.vw + 1, `${name}: the line overflows ${JSON.stringify(facts.lineBox)}`);
-      const claudePick = /\bClaude\b(?! Code)/.test(facts.text.split(/^Works on /m)[0].replace(/with Claude, Haiku[^.]*\./, "").replace(/other than Claude or Codex/g, "").replace(/need[s]? Claude or Codex/g, ""));
+      const claudePick = /\bClaude\b(?! Code)/.test(facts.text.split(new RegExp(`^${LABEL} reads Follow-up`, "m"))[0].replace(/with Claude, Haiku[^.]*\./, "").replace(/other than Claude or Codex/g, "").replace(/need[s]? Claude or Codex/g, ""));
       assert.ok(facts.priority, `${name}: AI priority's switch is on the page`);
       assert.equal(facts.priority.label, "Unavailable", `${name}: AI priority's switch reads Unavailable`);
       assert.equal(facts.priority.disabled, true, `${name}: AI priority's switch is disabled with no guarded provider`);
@@ -164,14 +205,14 @@ try {
   report.fallbackRoles = fallback;
   await fs.writeFile(join(out, "report.json"), JSON.stringify(report, null, 2) + "\n");
   console.log(JSON.stringify(report, null, 2));
-  // Paseo 0.17.4 passes no plugin instructions to an ACP agent (inSessionNew false above), so the line must say it gets no instructions.
+  // Paseo 0.17.4 passes no plugin instructions to an ACP agent (inSessionNew false above): the line says it reads them through a tool.
   for (const shot of report.shots) {
     const lines = (shot.line ?? "").split("\n").map(l => l.trim()).filter(Boolean);
     assert.equal(lines.length, 2, `${shot.name}: the notes block is two lines: ${JSON.stringify(shot.line)}`);
-    assert.match(lines[0], new RegExp(`^Works on ${LABEL}: .*Paseo doesn't pass Follow-up's instructions to ${LABEL} yet\\.`), `${shot.name}: first line ${JSON.stringify(lines[0])}`);
-    assert.match(lines[1], /^Needs Claude Code or Codex: /, `${shot.name}: second line ${JSON.stringify(lines[1])}`);
+    assert.match(lines[0], new RegExp(`^${LABEL} reads Follow-up's instructions from a tool at the start of each session\\. Nothing to set up\\.$`), `${shot.name}: first line ${JSON.stringify(lines[0])}`);
+    assert.match(lines[1], /^Compass, Ask and Summaries' linked issues read other people's messages/, `${shot.name}: second line ${JSON.stringify(lines[1])}`);
   }
-  assert.equal(report.instructions.inSessionNew || report.instructions.inPrompt, false, "no Follow-up instruction text reached the ACP agent");
+  assert.equal(report.instructions.inSessionNew || report.instructions.inPrompt, false, "no instruction text was claimed in the ACP session itself; it comes through the tool");
   assert.equal(report.instructions.followUpEnv.FOLLOW_UP_SYSTEM_PROMPT, undefined, "the session env claims no system-prompt text an ACP agent never gets");
 } catch (error) {
   console.error(error?.stack ?? error);

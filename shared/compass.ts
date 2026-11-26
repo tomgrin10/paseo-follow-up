@@ -2,6 +2,7 @@ import { z } from "zod";
 import { WEEKDAYS, zoned, type Clock, type Weekday } from "./linear-queue";
 import { issueKey, keysIn } from "./issue-workspace";
 import { guardedProvider } from "./agent-settings";
+import { GUARDED_PHRASE } from "./provider-support";
 
 /**
  * Compass (docs/compass.md): Follow-up takes the developer's priorities from where the developer takes them. A
@@ -330,13 +331,13 @@ export function defaultLabel(who: Who, places: readonly Place[]): string {
 // ---------- the guard: which providers a Compass job may run on ----------
 
 /**
- * Compass extraction reads other people's words, so it runs only where Follow-up can take every tool away: Claude
- * under the job guard's empty grant, Codex in its read-only sandbox (a-job-that-reads-outside-content-can-only-read).
- * Any other provider runs as a Paseo agent with its own tools, so Compass doesn't read there, and says why.
+ * Compass extraction reads other people's words, so it runs only where Follow-up can take every tool away
+ * (shared/provider-support.ts providerCaps guard; a-job-that-reads-outside-content-can-only-read). On any other provider
+ * Compass doesn't read, and says why.
  */
 export { guardedProvider };
 export const unguardedWhy = (providerLabel: string) =>
-  `Compass doesn't read on ${providerLabel}: Follow-up can't take its tools away. Pick Claude or Codex for Summaries in Settings → Agents.`;
+  `Compass doesn't read on ${providerLabel}: Follow-up can't take its tools away. Pick ${GUARDED_PHRASE} for Summaries in Settings → Agents.`;
 
 // ---------- notes ----------
 

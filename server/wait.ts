@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { AgentToolDefinition, AgentToolContext, PluginSessionOpenRequest } from "@getpaseo/plugin/server";
 import { WaitJobs, waitInput, prepareInput } from "./wait-jobs";
 import type { WaitStatus } from "../shared/wait";
+import { providerCaps } from "../shared/provider-support";
 
 /**
  * Wait: bounded foreground waits for finite background jobs, folded in from the standalone paseo-wait plugin
@@ -15,8 +16,10 @@ import type { WaitStatus } from "../shared/wait";
  * can't serve plugin tools (Paseo 0.14, daemon.mcp.injectIntoAgents=false, the provider's Paseo tools off) get no
  * Wait; the standalone plugin's loopback MCP was not carried over.
  *
- * Claude only: it sets CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0 so Claude Code doesn't move a long MCP call to the
- * background (this also applies to the session's other long MCP calls), and relies on Bash run_in_background.
+ * Every provider with a shell tool (an-agent-on-any-provider-gets-follow-up). On Claude Code it sets
+ * CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0 so Claude Code doesn't move a long MCP call to the background (this also
+ * applies to the session's other long MCP calls), and relies on Bash run_in_background; any other provider gets a
+ * command that detaches itself (wait-jobs.ts `detached`).
  */
 export const WAIT_TOOLS = ["wait_prepare_job", "wait_for_job", "wait_get_job"] as const;
 export const WAIT_LABEL = "follow-up-wait/enabled";
@@ -35,17 +38,17 @@ export function standaloneWaitInstalled(config: WaitPaseoConfig | null): boolean
   return !!entry && entry.enabled !== false;
 }
 
-/** Whether this host serves plugin tools to Claude agents at all (request.tools is checked per session). */
-function hostServesTools(config: WaitPaseoConfig | null): boolean {
+/** Whether this host serves plugin tools to this provider's agents at all (request.tools is checked per session). */
+function hostServesTools(config: WaitPaseoConfig | null, provider = "claude"): boolean {
   if (config?.daemon?.mcp?.enabled === false || config?.daemon?.mcp?.injectIntoAgents === false) return false;
-  const policy = config?.agents?.providers?.claude?.paseoTools;
+  const policy = config?.agents?.providers?.[provider]?.paseoTools;
   if (policy?.enabled === false) return false;
   return !policy?.disabledTools?.some(name => (WAIT_TOOLS as readonly string[]).includes(name));
 }
 
 /** What Settings → Agents shows: the switch, and why Wait is off when it is on. */
-export function waitStatus(enabled: boolean, config: WaitPaseoConfig | null, hostBackgroundWork = false): WaitStatus {
-  const reason = !enabled ? "off" : standaloneWaitInstalled(config) ? "standalone" : hostBackgroundWork ? "host" : !hostServesTools(config) ? "no-agent-tools" : null;
+export function waitStatus(enabled: boolean, config: WaitPaseoConfig | null, hostBackgroundWork = false, provider = "claude"): WaitStatus {
+  const reason = !enabled ? "off" : standaloneWaitInstalled(config) ? "standalone" : hostBackgroundWork ? "host" : !hostServesTools(config, provider) ? "no-agent-tools" : null;
   return { enable_wait: enabled, active: reason === null, reason, ...(hostBackgroundWork ? { host: true } : {}) };
 }
 
@@ -64,7 +67,7 @@ export class Wait {
         name: "wait_prepare_job",
         description: "For a finite shell command that may take a while and whose result you need before finishing (tests, builds, installs, deploy checks): prepare it here instead of running it directly. Returns jobId and bashCommand and runs nothing. Run that exact bashCommand with native Bash run_in_background=true, then call wait_for_job instead of ending your turn. The command is stopped after timeoutSeconds (default 3 hours, at most 12); a stopped job reports timedOut.",
         input: prepareInput,
-        execute: async (input, context) => { guard(context); return json(await this.jobs.prepare(owner(context), input as z.input<typeof prepareInput>)); },
+        execute: async (input, context) => { guard(context); return json(await this.jobs.prepare(owner(context), input as z.input<typeof prepareInput>, providerCaps(context.agent.provider).wait)); },
       },
       {
         name: "wait_get_job",
@@ -94,22 +97,24 @@ export class Wait {
   }
 
   /**
-   * Adds Wait's tools to an interactive Claude session, unless it's off, opted out, or the standalone plugin has it.
+   * Adds Wait's tools to an interactive session on any provider, unless it's off, opted out, or the standalone plugin has it.
    * On a Paseo 0.16 host (agentBackgroundWork) it attaches nothing and leaves Claude Code's MCP auto-background alone;
    * FOLLOW_UP_BACKGROUND_WORK=1 makes the hook say "run it in the background and end your turn" instead.
    */
   async open<R extends PluginSessionOpenRequest>(request: R, options: { background?: boolean } = {}): Promise<R> {
     // A Paseo 0.16 background agent is another plugin's helper: no Wait (server/background-agents.ts).
-    if (options.background || request.purpose !== "interactive" || request.provider !== "claude") return request;
+    if (options.background || request.purpose !== "interactive") return request;
+    const claude = request.provider === "claude";
     if (request.labels["plugin-tools/enabled"] === "false" || request.labels["paseo-wait/enabled"] === "false" || request.labels[WAIT_LABEL] === "false") return request;
     if (!(await this.deps.enabled())) return request;
     const config = await this.deps.config();
-    const status = waitStatus(true, config, await this.deps.hostBackgroundWork?.().catch(() => false));
+    // Paseo 0.16's own background work is Claude Code's (agentBackgroundWork); every other provider gets Wait's tools.
+    const status = waitStatus(true, config, claude && await this.deps.hostBackgroundWork?.().catch(() => false), request.provider);
     // Paseo 0.16: no plugin tools needed for the host's own background work, so this comes before the tool checks.
     if (status.reason === "host") return { ...request, env: { ...request.env, FOLLOW_UP_BACKGROUND_WORK: "1" } };
     if (!Array.isArray(request.tools) || request.tools.some(tool => (WAIT_TOOLS as readonly string[]).includes(tool.name))) return request;
     if (!status.active) return request;
-    return { ...request, env: { ...request.env, CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS: "0", FOLLOW_UP_WAIT: "1" }, tools: [...request.tools, ...this.tools] };
+    return { ...request, env: { ...request.env, ...(claude ? { CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS: "0" } : {}), FOLLOW_UP_WAIT: "1" }, tools: [...request.tools, ...this.tools] };
   }
 
   close() { this.jobs.close(); }
