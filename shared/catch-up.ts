@@ -7,28 +7,34 @@ import type { HomeModel, Workstream } from "./home";
 import type { InboxRow } from "./inbox";
 import type { NeedItem } from "./attention";
 
-export type CardKind = "permission" | "question" | "item" | "brief" | "finished";
+export type CardKind = "permission" | "question" | "item" | "brief" | "finished" | "answer";
 /**
  * One card: one thing to act on. A workspace with two questions and a merge is three cards, kept together so its
  * context is read once. `key` is stable across refreshes, so the deck can tell a card that went away from a new one.
  */
-export type DeckCard = { key: string; kind: CardKind; s: Workstream; questionId?: string; item?: NeedItem };
+export type DeckCard = { key: string; kind: CardKind; s: Workstream; questionId?: string; item?: NeedItem;
+  /** An `answer` card: the developer's question (Your questions) whose answer they haven't read. */
+  requestId?: string };
 
 type Source = {
   model: Pick<HomeModel, "groups">;
   rows: readonly Pick<InboxRow, "agentId" | "needs" | "brief">[];
   /** The workspace's Needs-you items in block order (stopped questions first), from `needsYou`. */
   items: (workspaceId: string) => readonly NeedItem[];
+  /** The workspace's unread answers to the developer's questions, newest first: one card each, last in the workstream. */
+  answers?: (workspaceId: string) => readonly { id: string }[];
 };
 
 const BRIEF_CARD_KINDS = ["decision", "action", "review"];
+/** Needs you's lowest tier: an answer to one of the developer's own questions (Your questions), to read. */
+export const ANSWER_TIER = 3 as const;
 
 /**
  * The deck, in Home's Needs-you order: the order the developer already sees in the list (blocking asks first, then
  * decisions, then finished turns; inside a tier the chosen sort, AI priority included). Inside a workstream: a pending
  * permission, then each open question, then every other item, then the agent's own ask when nothing above speaks for it.
  */
-export function deckCards({ model, rows, items }: Source): DeckCard[] {
+export function deckCards({ model, rows, items, answers }: Source): DeckCard[] {
   const needs = model.groups.find(g => g.id === "needs")?.items ?? [];
   const out: DeckCard[] = [];
   for (const s of needs) {
@@ -44,7 +50,10 @@ export function deckCards({ model, rows, items }: Source): DeckCard[] {
     const brief = row?.brief as { kind?: string; questionIds?: string[] } | null | undefined;
     const pointsAtQuestion = !!brief?.questionIds?.length && out.slice(before).some(c => c.kind === "question");
     if (brief && !pointsAtQuestion && BRIEF_CARD_KINDS.includes(brief.kind ?? "")) out.push({ key: `${s.key}|brief`, kind: "brief", s });
-    if (out.length === before) out.push({ key: `${s.key}|finished`, kind: "finished", s });
+    // An answer to read: the lowest tier (Q172 C=a), after everything else the workstream asks.
+    const read = s.workspaceId && answers ? answers(s.workspaceId) : [];
+    if (out.length === before && s.tier !== ANSWER_TIER) out.push({ key: `${s.key}|finished`, kind: "finished", s });
+    for (const a of read) out.push({ key: `${s.key}|${a.id}`, kind: "answer", s, requestId: a.id });
   }
   return out;
 }

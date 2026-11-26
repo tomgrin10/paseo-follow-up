@@ -32,7 +32,7 @@ const score = (s: Workstream, p: Map<string, Priority>) => s.workspaceId ? p.get
  */
 export function byUrgency(group: HomeGroupId) {
   return (a: Workstream, b: Workstream): number => {
-    if (group === "needs") return (a.tier ?? 3) - (b.tier ?? 3) || Number(b.urgent) - Number(a.urgent) || oldestFirst(a.due, b.due) || oldestFirst(a.at, b.at) || tie(a, b);
+    if (group === "needs") return (a.tier ?? 4) - (b.tier ?? 4) || Number(b.urgent) - Number(a.urgent) || oldestFirst(a.due, b.due) || oldestFirst(a.at, b.at) || tie(a, b);
     if (group === "waiting") return oldestFirst(a.at, b.at) || tie(a, b);
     if (group === "quiet") return Number(b.readyToArchive) - Number(a.readyToArchive) || newestFirst(a.activityAt ?? a.at, b.activityAt ?? b.at) || tie(a, b);
     return newestFirst(a.at, b.at) || tie(a, b);

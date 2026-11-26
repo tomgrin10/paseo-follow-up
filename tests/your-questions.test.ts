@@ -164,3 +164,32 @@ test("a free question's prompt carries its id and asks for context_reply; a repl
   assert.match(agentQuestionPrompt({ ...r, parentId: "ctx-1" }, { ask: "Why?", answer: "Because." }), /Following up their earlier question "Why\?" and your answer "Because\."/);
   assert.match(agentQuestionPrompt({ ...r, by: "agent:a7" }), /Agent a7, for the developer, asks/);
 });
+
+// Needs you (Q172 C=a): an unread answer is the lowest tier; a question asking is the row's line, never Needs you.
+test("an unread answer puts a quiet row in Needs you at the lowest tier; asking only changes its line", async () => {
+  const { buildHome } = await import("../shared/home");
+  const { deckCards, ANSWER_TIER } = await import("../shared/catch-up");
+  const { workspace } = await import("./fixtures");
+  const now = Date.parse("2026-11-26T10:00:00.000Z");
+  const a = workspace({ id: "w-a", title: "Billing retries", mainAgentId: "m-a" });
+  const b = workspace({ id: "w-b", title: "Usage export", mainAgentId: "m-b" });
+  const q = (id: string, workspaceId: string, state: ContextRequest["state"], over: Partial<ContextRequest> = {}): ContextRequest => ({ id, workspaceId, agentId: null, cardKey: null, card: "", target: "agent",
+    ask: `Question ${id}?`, askedOf: "m", state, answer: state === "answered" ? "Because." : null, error: null, askedAt: "2026-11-26T09:00:00.000Z", settledAt: state === "asking" ? null : "2026-11-26T09:30:00.000Z",
+    deliveredAt: null, by: "developer", via: "field", parentId: null, readAt: null, done: null, task: null, ...over });
+  const questions = [q("ctx-1", "w-a", "answered"), q("ctx-2", "w-b", "asking"), q("ctx-3", "w-a", "answered", { readAt: "2026-11-26T09:40:00.000Z" })];
+  const model = buildHome({ rows: [], tracked: [a, b], paseo: [], now, questions });
+  const needs = model.groups.find(g => g.id === "needs")!.items;
+  assert.equal(needs.length, 1);
+  assert.equal(needs[0].workspaceId, "w-a");
+  assert.equal(needs[0].tier, ANSWER_TIER);
+  assert.equal(needs[0].word, "Answer");
+  assert.equal(needs[0].line, "Question ctx-1?");
+  const asking = model.byKey.get("ws:w-b")!;
+  assert.notEqual(asking.group, "needs", "asking is never Needs you");
+  assert.equal(asking.line, "Asking · Question ctx-2?");
+  const cards = deckCards({ model, rows: [], items: () => [], answers: id => id === "w-a" ? [{ id: "ctx-1" }] : [] });
+  assert.deepEqual(cards.map(c => [c.kind, c.requestId]), [["answer", "ctx-1"]], "one answer card, no 'finished' card beside it");
+  // Read: the row leaves Needs you.
+  const read = buildHome({ rows: [], tracked: [a, b], paseo: [], now, questions: questions.map(x => ({ ...x, readAt: x.readAt ?? "2026-11-26T09:50:00.000Z" })) });
+  assert.equal(read.groups.find(g => g.id === "needs"), undefined);
+});

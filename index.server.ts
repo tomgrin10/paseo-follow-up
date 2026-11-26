@@ -18,7 +18,7 @@ import type { PluginServerContext, PluginHandlerContext, PluginHookContext, Plug
 import type { PluginRpcContract, PluginSubscriptionContract } from "@getpaseo/plugin";
 import { ValueFeed, WorkspacesFeed } from "./server/feeds";
 import { ContextRequests, contextRecipient, questionRecipient } from "./server/context-requests";
-import { agentQuestionPrompt, questionHistory, questionTask } from "./shared/your-questions";
+import { agentQuestionPrompt, questionHistory, questionsByWorkspace, questionTask } from "./shared/your-questions";
 import { agentContextPrompt, contextFor, deckCards, type ContextVia } from "./shared/catch-up";
 import { buildHome } from "./shared/home";
 import { needsYou } from "./shared/attention";
@@ -1264,8 +1264,9 @@ export default function contribute(server: PluginServerContext) {
     const [state, list, paseoList, priorities, settings, context] = await Promise.all([store.snapshot(), inbox.list(), paseoWorkspaces(), priorityStore.read(), inboxSettings(), contextRequests.list()]);
     const tracked = state.workspaces.filter(w => w.enable_tracking);
     const byId = new Map(tracked.map(w => [w.id, w]));
-    const model = buildHome({ rows: list.rows, tracked, paseo: paseoList, now: Date.now(), sort: (settings as { home_sort?: SortMode }).home_sort, priorities });
-    const cards = deckCards({ model, rows: list.rows, items: id => { const w = byId.get(id); return w ? needsYou(w) : []; } });
+    const model = buildHome({ rows: list.rows, tracked, paseo: paseoList, now: Date.now(), sort: (settings as { home_sort?: SortMode }).home_sort, priorities, questions: context });
+    const unread = questionsByWorkspace(context);
+    const cards = deckCards({ model, rows: list.rows, items: id => { const w = byId.get(id); return w ? needsYou(w) : []; }, answers: id => unread.get(id)?.unread ?? [] });
     return { cards: cards.map(c => {
       const r = contextFor(context, { workspaceId: c.s.workspaceId, cardKey: c.key });
       return { key: c.key, kind: c.kind, workspaceId: c.s.workspaceId, agentId: c.s.agentId, title: c.s.title, line: c.s.line, questionId: c.questionId ?? null,
