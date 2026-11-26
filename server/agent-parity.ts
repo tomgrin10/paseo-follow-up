@@ -86,15 +86,18 @@ export const RPC_TOOLS: readonly RpcTool[] = [
   { name: "overseer_start", rpc: "follow.overseer-start", kind: "planned", before: { rpc: "follow.overseer-status" }, input: z.strictObject({ ...confirm }) },
   { name: "overseer_restart", rpc: "follow.overseer-restart", kind: "planned", before: { rpc: "follow.overseer-status" }, input: z.strictObject({ ...confirm }) },
   { name: "overseer_ask", rpc: "follow.overseer-ask", kind: "planned", input: z.strictObject({ text: z.string().trim().min(1).max(2000).optional(), images: imagePaths, ...confirm }) },
-  // Catch up: the deck, and More context (ask, read the asks); the asked agent answers with context_reply
+  // Catch up's deck; Your questions and More context (ask, read, act); the asked agent answers with context_reply
   { name: "catch_up_deck", rpc: "follow.catch-up-deck", kind: "read", input: none },
-  { name: "context_requests", rpc: "follow.context-list", kind: "read", input: z.strictObject({ workspaceId: id.optional() }) },
+  { name: "context_requests", rpc: "follow.context-list", kind: "read", input: z.strictObject({ workspaceId: id.optional(), state: z.enum(["all", "open", "tasks"]).optional(), query: z.string().max(200).optional() }) },
   { name: "ask_context", rpc: "follow.context-ask", kind: "planned", before: { rpc: "follow.context-list", input: a => ({ workspaceId: a.workspaceId ?? undefined }) },
     input: z.strictObject({ workspaceId: id.nullable().optional(), agentId: id.nullable().optional(), cardKey: z.string().min(1).max(400).optional(), card: z.string().trim().min(1).max(300).optional(),
       target: z.enum(["overseer", "agent"]).optional(), ask: z.string().trim().min(1).max(2000).optional(), images: imagePaths, ...confirm }),
-    // target is accepted and ignored: the server sends every ask to the card's workspace main agent, and refuses an
-    // agent asking itself (an-ask-goes-only-to-an-agent-that-can-answer-it).
-    toRpc: a => ({ workspaceId: a.workspaceId ?? null, agentId: a.agentId ?? null, cardKey: a.cardKey, card: a.card, target: a.target, ask: a.ask, ...(a.images ? { images: a.images } : {}) }) },
+    // With cardKey: More context, to the card's workspace main agent (target accepted and ignored). Without: a free
+    // question to agentId, else the workspace's main agent. Never the caller itself (an-ask-goes-only-to-an-agent-that-can-answer-it).
+    toRpc: a => ({ workspaceId: a.workspaceId ?? null, agentId: a.agentId ?? null, cardKey: a.cardKey ?? null, ...(a.card ? { card: a.card } : {}), target: a.target, ask: a.ask, ...(a.images ? { images: a.images } : {}) }) },
+  { name: "question_action", rpc: "follow.question-action", kind: "planned", before: { rpc: "follow.context-list", input: () => ({}) },
+    input: z.strictObject({ id: z.string().min(1).max(80).optional(), action: z.enum(["done", "reply", "task", "withdraw"]).optional(), text: z.string().trim().min(1).max(2000).optional(), images: imagePaths, ...confirm }),
+    toRpc: a => ({ id: a.id, action: a.action, ...(a.text ? { text: a.text } : {}), ...(a.images ? { images: a.images } : {}) }) },
   // Needs-you: the brief card and the inbox's other actions
   // The message queue: what waits to go to agents, and Retry or Cancel on one item (a card's Retry, Needs you's message row).
   { name: "queue_list", rpc: "follow.queue-list", kind: "read", input: z.strictObject({ workspaceId: id.optional(), agentId: id.optional() }) },
@@ -255,6 +258,7 @@ export const PARITY: Record<string, { tools: readonly string[]; note?: string } 
   "follow.context-ask": { tools: ["ask_context"] },
   "follow.image-support": { exempt: "The field's warning before Send. An agent's tool passes image paths to the same RPCs, and the server leaves images off for a recipient that can't take them and says so in the message (imageSupport), so a tool never has to ask first." },
   "follow.context-list": { tools: ["context_requests"] },
+  "follow.question-action": { tools: ["question_action"] },
   "follow.inbox-brief": { tools: ["inbox_brief"] },
   "follow.queue-action": { tools: ["queue_action"] },
   "follow.inbox-act": { tools: ["sign_off", "snooze", "set_finish_flags", "inbox_act"] },

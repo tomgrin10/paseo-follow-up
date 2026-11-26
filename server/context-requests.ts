@@ -22,6 +22,26 @@ export function contextRecipient(workspace: { enable_tracking: boolean; mainAgen
   return { agentId: workspace.mainAgentId };
 }
 
+type TrackedLite = { id: string; enable_tracking: boolean; archived?: boolean; mainAgentId: string; contributorAgentIds?: string[] };
+/**
+ * an-ask-goes-only-to-an-agent-that-can-answer-it, for a free question (no card): who answers. A named agent (the one
+ * whose chat ran /ask, or an agent tool's `agentId`) is asked when it is a tracked workspace's main agent or one of its
+ * contributors, the roles that get context_reply; otherwise the workspace's main agent. Never the caller itself.
+ */
+export function questionRecipient(workspaces: readonly TrackedLite[], input: { workspaceId?: string | null; agentId?: string | null }, caller: string | null): { agentId: string; workspaceId: string } | { error: string } {
+  const live = workspaces.filter(w => w.enable_tracking && !w.archived);
+  if (input.agentId) {
+    const w = live.find(x => x.mainAgentId === input.agentId || x.contributorAgentIds?.includes(input.agentId!));
+    if (!w || (input.workspaceId && w.id !== input.workspaceId)) return { error: "Follow-up doesn't track this agent's workspace, so its answer can't land in Your questions. Ask in its chat instead." };
+    if (caller && caller === input.agentId) return { error: "You can't ask yourself; explain it in your reply." };
+    return { agentId: input.agentId, workspaceId: w.id };
+  }
+  const w = input.workspaceId ? live.find(x => x.id === input.workspaceId) : undefined;
+  if (!w?.mainAgentId) return { error: "Follow-up doesn't track this workspace, so no agent can answer in Your questions. Open its chat to ask there." };
+  if (caller && caller === w.mainAgentId) return { error: "You can't ask yourself; explain it in your reply." };
+  return { agentId: w.mainAgentId, workspaceId: w.id };
+}
+
 /**
  * Your questions and Catch up's More context requests (docs/needs-you.md#your-questions): what the developer asked about a card, who answers
  * (the card's workspace's main agent), and the answer once `context_reply` brings it. The value lives in memory and

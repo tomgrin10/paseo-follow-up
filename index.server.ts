@@ -17,8 +17,9 @@ import { agentSetSpec, developerSetSpec } from "./server/spec";
 import type { PluginServerContext, PluginHandlerContext, PluginHookContext, PluginSessionOpenRequest } from "@getpaseo/plugin/server";
 import type { PluginRpcContract, PluginSubscriptionContract } from "@getpaseo/plugin";
 import { ValueFeed, WorkspacesFeed } from "./server/feeds";
-import { ContextRequests, contextRecipient } from "./server/context-requests";
-import { agentContextPrompt, contextFor, deckCards } from "./shared/catch-up";
+import { ContextRequests, contextRecipient, questionRecipient } from "./server/context-requests";
+import { agentQuestionPrompt, questionHistory, questionTask } from "./shared/your-questions";
+import { agentContextPrompt, contextFor, deckCards, type ContextVia } from "./shared/catch-up";
 import { buildHome } from "./shared/home";
 import { needsYou } from "./shared/attention";
 import type { SortMode } from "./shared/sort";
@@ -1184,23 +1185,77 @@ export default function contribute(server: PluginServerContext) {
     if (running) return imageSupport(running);
     return imageSupport({ provider: (await overseer!.agentInfo()).configured.provider });
   });
-  // Catch up's More context: the ask is recorded and answered at once, and goes through the message queue (invariant
-  // 36) to the card's workspace's main agent, the only role with context_reply (an-ask-goes-only-to-an-agent-that-can-
-  // answer-it). Asking may wake it: the developer asked, the one exception to never-wake (invariant 1).
+  // Your questions and Catch up's More context: the question is recorded and answered at once, and goes through the
+  // message queue (invariant 36) to an agent that has context_reply (an-ask-goes-only-to-an-agent-that-can-answer-it):
+  // about a card, the card's workspace's main agent; a free question, the agent named (/ask's chat) or the main agent.
+  // Asking may wake it: the developer asked, the one exception to never-wake (invariant 1).
+  const askAgent = async (input: { workspaceId?: string | null; agentId?: string | null; cardKey?: string | null; card?: string; target?: "agent" | "overseer"; ask: string; via?: ContextVia; parentId?: string | null }, by: string, caller: string | null, images: ImageUpload[] | undefined) => {
+    // The worker's own snapshot, never a daemon read (an-ack-never-waits).
+    const state = await store.snapshot();
+    let to: { agentId: string; workspaceId: string | null };
+    if (input.cardKey) {
+      const w = input.workspaceId ? state.workspaces.find(x => x.id === input.workspaceId) : undefined;
+      const r = contextRecipient(w, caller);
+      if ("error" in r) throw new Error(r.error);
+      to = { agentId: r.agentId, workspaceId: input.workspaceId ?? null };
+    } else {
+      const r = questionRecipient(state.workspaces, input, caller);
+      if ("error" in r) throw new Error(r.error);
+      to = r;
+    }
+    const parent = input.parentId ? await contextRequests.get(input.parentId) : null;
+    return withImages(images, async refs => {
+      const out = await contextRequests.ask({ workspaceId: to.workspaceId, agentId: input.agentId ?? to.agentId, cardKey: input.cardKey ?? null, card: input.card ?? "", target: "agent", ask: input.ask,
+        via: caller ? "tool" : input.via ?? (input.cardKey ? "more" : "field"), parentId: input.parentId ?? null }, by, to.agentId);
+      if (out.fresh) enqueueMessage(to.agentId, out.request.cardKey ? agentContextPrompt(out.request) : agentQuestionPrompt(out.request, parent), out.request.id, by, refs);
+      return out;
+    });
+  };
   handle(rpc.contextAskRpc, async (input, context) => {
     await requireReady();
     const actor = actorOf(context);
-    // The worker's own snapshot, never a daemon read (an-ack-never-waits).
-    const w = input.workspaceId ? (await store.snapshot()).workspaces.find(x => x.id === input.workspaceId) : undefined;
-    const to = contextRecipient(w, actor.kind === "agent" ? actor.agentId : null);
-    if ("error" in to) throw new Error(to.error);
     const { images, ...ask } = input;
-    const out = await withImages(images, async refs => {
-      const out = await contextRequests.ask({ ...ask, target: "agent" }, actorBy(actor), to.agentId);
-      if (out.fresh) enqueueMessage(to.agentId, agentContextPrompt(out.request), out.request.id, actorBy(actor), refs);
-      return out;
-    });
+    const out = await askAgent(ask, actorBy(actor), actor.kind === "agent" ? actor.agentId : null, images);
     return input.target === "overseer" ? { ...out, note: "More context always asks the card's own main agent, which can answer on the card; the Overseer can't, so target is ignored." } : out;
+  });
+  // What happens to a question after it is asked (Your questions): every act is the developer's click or an agent's
+  // confirmed question_action, by the same path; an agent's never reads the answer for the developer.
+  handle(rpc.questionActionRpc, async ({ id, action, text, images }, context) => {
+    await requireReady();
+    const actor = actorOf(context);
+    const by = actorBy(actor);
+    const r = await contextRequests.get(id);
+    if (!r) throw new Error(`No question ${id}. It may have expired (questions are kept 30 days).`);
+    // Agents act on others, not themselves (invariant 4): the asked agent answers with context_reply, nothing more.
+    if (actor.kind === "agent" && actor.agentId === r.askedOf) throw new Error("This question was asked of you: answer it with context_reply; what happens to it next is the developer's call.");
+    if (action === "done") return { request: await contextRequests.done(id, by) };
+    if (action === "withdraw") {
+      const request = await contextRequests.withdraw(id, by);
+      // A message still queued is dropped; one already out stays (its answer, if any, is in the chat).
+      if (r.askedOf) await queue.cancel(`message:${r.askedOf}:${id}`, "The question was withdrawn.").catch(() => undefined);
+      return { request };
+    }
+    if (action === "reply") {
+      if (!text) throw new Error("Reply needs text: the follow-up question.");
+      if (r.state === "asking") throw new Error("This question is still asking; wait for its answer, or withdraw it.");
+      const out = await askAgent({ workspaceId: r.workspaceId, agentId: r.askedOf, ask: text, via: r.via === "slash" ? "slash" : "field", parentId: r.id }, by, actor.kind === "agent" ? actor.agentId : null, images);
+      const request = by === "developer" ? (await contextRequests.read(id)) ?? r : r;
+      return { request, reply: out.request };
+    }
+    // Make a task: update_obligation's server path, owned by the agent that answered, the Q&A as its note.
+    if (r.task) return { request: r, taskId: r.task.id };
+    if (r.state === "asking" || r.state === "withdrawn") throw new Error("Make a task needs an answer first.");
+    if (!r.workspaceId || !r.askedOf) throw new Error("This question has no workspace to hold a task.");
+    const { title, note } = questionTask(r);
+    const result = await store.mutate(state => {
+      const w = state.workspaces.find(x => x.id === r.workspaceId && x.enable_tracking);
+      if (!w) throw new Error("Follow-up no longer tracks this question's workspace, so it can't hold a task.");
+      const obligation = updateObligation(w, { title, status: "pending", note, caller: r.askedOf!, new: true });
+      syncTaskQuestions(w, Date.now());
+      changed(w); return { workspaceId: w.id, taskId: obligation.id };
+    });
+    void engine.nudge(result.workspaceId);
+    return { request: await contextRequests.tasked(id, result.taskId, by), taskId: result.taskId };
   });
   // Built when read (a-derived-view-is-built-when-read), from state the worker holds: no daemon request but the
   // directory's cached workspace list.
@@ -1217,7 +1272,10 @@ export default function contribute(server: PluginServerContext) {
         item: c.item && "title" in c.item ? String((c.item as { title?: unknown }).title ?? "") || null : null, context: r ? { id: r.id, state: r.state, target: r.target } : null };
     }) };
   });
-  handle(rpc.contextListRpc, async ({ workspaceId }) => ({ requests: await contextRequests.list(workspaceId ? { workspaceId } : {}) }));
+  handle(rpc.contextListRpc, async ({ workspaceId, state, query }) => {
+    const all = await contextRequests.list(workspaceId ? { workspaceId } : {});
+    return { requests: state || query ? questionHistory(all, { filter: state, query }).reverse() : all };
+  });
   // Paseo 0.17's own PR watch (subscribe_change_request): named only for PRs Follow-up can't see. No feature flag says
   // it's there; server_info's version does, read from the connection's last hello (no request).
   const hostVersion = async () => { try { return String(((await withDaemon(async client => (client as ServerInfoClient).getLastServerInfoMessage?.())) as { version?: unknown } | null)?.version ?? ""); } catch { return ""; } };
@@ -2141,7 +2199,6 @@ export default function contribute(server: PluginServerContext) {
     server.on("agent.turn_started", async event => gateway.directory.turnStarted(event.agent, event.turnId)),
     server.on("agent.turn_started", async event => turnEnd.turnStarted(event.agent.id)),
     server.on("agent.turn_ended", async event => gateway.directory.turnEnded(event.agent, event.outcome)),
-    server.on("agent.turn_ended", async event => contextRequests.turnEnded(event.agent.id)),
     server.on("agent.permission_requested", async event => gateway.directory.permissionRequested(event.agent.id, event.request as { id?: string })),
     server.on("agent.permission_resolved", async event => gateway.directory.permissionResolved(event.agent.id, event.requestId)),
     server.on("agent.archived", async event => gateway.directory.agentArchived(event.agent.id, event.archivedAt)),
@@ -2228,13 +2285,16 @@ export default function contribute(server: PluginServerContext) {
       if (assigned) {
         const guarded = interruption && await sessionGuardOwnsInterruption(event.agent.id, interruption).catch(() => false);
         if (["canceled", "failed"].includes(event.outcome.kind) && !guarded) await store.mutateWorkspace(assigned.id, w => { const b = w.batches.find(b => b.recipientAgentId === event.agent.id && ["sending", "sent", "uncertain"].includes(b.state)); if (b) { b.state = "blocked"; b.result = b.acknowledgmentError ? `Recovery acknowledgment was refused: ${b.acknowledgmentError.error}` : "Recovery stopped or failed. Check its agent before retrying."; } });
-        void engine.nudge(assigned.id); return;
+        void engine.nudge(assigned.id); await contextRequests.turnEnded(event.agent.id, null); return;
       }
-      if (!agentTrackedWorkspace(await store.snapshot(), event.agent.id)) return;
+      if (!agentTrackedWorkspace(await store.snapshot(), event.agent.id)) { await contextRequests.turnEnded(event.agent.id, null); return; }
       // Since Paseo 0.13 the lifecycle payload deliberately contains no history.
       // Read the ended turn through the plugin-owned API, outside the state lock: one read from the agent's cursor,
       // shared with the inbox's handler and with discovery, which the read is kept for (a-turn-s-timeline-is-read-once).
       const items = await inboxDirectory.turnItems!(event.agent.id, event.turnId ?? null).catch(() => null);
+      // Your questions' turn-end capture, from this same read on any provider: an ask this turn answered without
+      // context_reply takes the agent's last message after it as its answer (null items: "answered in its chat").
+      await contextRequests.turnEnded(event.agent.id, items).catch(() => undefined);
       gateway.markDirty(event.agent.id);
       if (signal.aborted || stopped) return;
       const guarded = !!interruption && await sessionGuardOwnsInterruption(event.agent.id, interruption).catch(() => false);
