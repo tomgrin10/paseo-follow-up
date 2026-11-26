@@ -3397,6 +3397,10 @@ async function searchFocusChecks({ shoot, out, billing }) {
       await page.goto(ORIGIN); await page.getByText("Follow-up", { exact: true }).first().waitFor();
       await composer(page);
       await press(page, `${device}: from a chat with Home never opened`);
+      // The caret in Home's search after the key from a chat, at the device's size (focus kept for the frame).
+      if (vp !== DESKTOP) { await page.setViewportSize(vp); await page.waitForTimeout(400); }
+      await shoot.now(`search-focus-caret-${device}`, page, "dark");
+      if (vp !== DESKTOP) { await page.setViewportSize(DESKTOP); await page.waitForTimeout(300); }
       // 2. A second press with the caret moved away.
       await page.evaluate(() => document.activeElement?.blur?.());
       await press(page, `${device}: a second press on Home`);
@@ -3465,6 +3469,7 @@ async function searchFocusChecks({ shoot, out, billing }) {
     await page.goto(ORIGIN); await page.getByText("Follow-up", { exact: true }).first().waitFor();
     await composer(page);
     await held(`${os}: the key held (auto-repeat) from a chat with Home never opened`);
+    await shoot.now(`search-focus-caret-held-${os}`, page, "dark");
     await appHome(page); await composer(page);
     await held(`${os}: the key held from a chat with Home in the history`);
     // Type-ahead: the chord, then a query typed at once (before Home has drawn).
@@ -3484,6 +3489,7 @@ async function searchFocusChecks({ shoot, out, billing }) {
       await act();
       const s = await landed(page);
       check(`${os}: the key ${what} from a running agent's chat composer`, s.focusedShown && (what === "held" || s.value === "acme"), s);
+      if (what !== "held") await shoot.now(`search-focus-caret-typed-${os}`, page, "dark");
     }
     // A workspace's Follow-up panel, focus on a control inside it.
     await openChat(page, billing.title, billing.prompt);
