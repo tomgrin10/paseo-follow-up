@@ -2,6 +2,20 @@
 
 What changed in each version of Follow-up, newest first. Follow-up shows "What's new" after an update that brings new release notes: the curated part of each stable release since you last looked (betas install quietly; Settings → General can turn it off), and every version's notes from Home's version line.
 
+## 2.4.2 (2026-11-26)
+
+A shorter, current plugin page.
+
+- **The plugin page says what Follow-up is today:** one inbox for every agent, what it does, how to install it, and a link to what it reads and writes.
+
+<details><summary>Full changelog since 2.4.1</summary>
+
+### More
+
+- The plugin page is short and current: what Follow-up does today, how to install it, and a link to what it reads and writes.
+
+</details>
+
 ## 2.4.1 (2026-11-26)
 
 Two fixes for 2.4.0.

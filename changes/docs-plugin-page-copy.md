@@ -1,1 +1,0 @@
-- The plugin page is short and current: what Follow-up does today, how to install it, and a link to what it reads and writes.
