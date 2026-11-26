@@ -39,7 +39,7 @@ const question: Question = questionSchema.parse({
 const w = workspace({ questions: [question] });
 
 const ask = (over: Partial<ContextRequest>): ContextRequest => ({ id: "ctx-1", workspaceId: w.id, agentId: "main-agent", cardKey: questionCardKey(w.id, "Q1"), card: "Q1 · Which retry policy?",
-  target: "agent", ask: CONTEXT_ASKS[0].text, askedOf: w.mainAgentId, state: "asking", answer: null, error: null, askedAt: new Date(clock).toISOString(), settledAt: null, deliveredAt: null, by: "developer", ...over });
+  target: "agent", ask: CONTEXT_ASKS[0].text, askedOf: w.mainAgentId, state: "asking", answer: null, error: null, askedAt: new Date(clock).toISOString(), settledAt: null, deliveredAt: null, by: "developer", via: "more", parentId: null, readAt: null, done: null, task: null, ...over });
 
 /** One store for every surface, like Home's extras: what it holds, who listens, and what was asked through it. */
 function source(requests: ContextRequest[] = [], fail: string | null = null) {

@@ -121,10 +121,12 @@ test("a failed send settles the ask as failed with the reason", async t => {
   assert.equal(r.error, "The agent was archived.");
 });
 
-test("asks expire after a day", async t => {
+test("questions are kept 30 days, then expire", async t => {
   const { store, tick } = await fixture(t);
   await store.ask(input, "developer", "a1");
-  tick(25 * 3_600_000);
+  tick(29 * 24 * 3_600_000);
+  assert.equal((await store.list()).length, 1, "kept as history past the old 24 h");
+  tick(2 * 24 * 3_600_000);
   assert.deepEqual(await store.list(), []);
 });
 

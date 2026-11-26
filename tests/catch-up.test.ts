@@ -203,12 +203,12 @@ test("context prompts carry the request id and never read as the developer's ans
   assert.match(agentContextPrompt(r), /isn't their answer/);
 });
 
-test("context requests are pruned by age and count", () => {
+test("context requests are pruned by age (30 days) and count (200 a workspace)", () => {
   const now = Date.parse("2026-11-18T12:00:00.000Z");
-  const old = request({ id: "old", askedAt: "2026-11-17T10:00:00.000Z" });
-  const young = Array.from({ length: 60 }, (_, i) => request({ id: `y${i}`, askedAt: new Date(now - (60 - i) * 1000).toISOString() }));
+  const old = request({ id: "old", askedAt: "2026-10-18T10:00:00.000Z" });
+  const young = Array.from({ length: 210 }, (_, i) => request({ id: `y${i}`, askedAt: new Date(now - (210 - i) * 1000).toISOString() }));
   const kept = pruneContext([old, ...young], now);
-  assert.equal(kept.length, 50);
+  assert.equal(kept.length, 200);
   assert.equal(kept[0].id, "y10");
   assert.ok(!kept.some(r => r.id === "old"));
 });

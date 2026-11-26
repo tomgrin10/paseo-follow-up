@@ -303,8 +303,12 @@ export const MODE = {
  */
 export const CONTEXT_TARGETS = ["overseer", "agent"] as const;
 export type ContextTarget = typeof CONTEXT_TARGETS[number];
-/** asking → answered (the reply came with context_reply), chat (the agent ended its turn without it: read its chat), failed. */
-export const CONTEXT_STATES = ["asking", "answered", "chat", "failed"] as const;
+/**
+ * asking → answered (the reply came with context_reply), chat (the agent ended its turn without it: its last message
+ * after the ask is the answer, "from its chat", or with no answer when its turn couldn't be read: read its chat),
+ * failed, withdrawn (the developer or an agent took the question back while it was asking).
+ */
+export const CONTEXT_STATES = ["asking", "answered", "chat", "failed", "withdrawn"] as const;
 export type ContextState = typeof CONTEXT_STATES[number];
 
 /**
@@ -319,15 +323,18 @@ export const CONTEXT_ASKS = [
 ] as const;
 
 export const CONTEXT_ANSWER_MAX = 4000;
+export const CONTEXT_VIA = ["more", "field", "slash", "tool"] as const;
+export type ContextVia = typeof CONTEXT_VIA[number];
 const iso = z.string().max(40);
 export const contextRequestSchema = z.object({
   id: z.string().min(1).max(80),
   workspaceId: z.string().nullable(),
   /** The card's agent (the one that asked); the request's own recipient is `askedOf`. */
   agentId: z.string().nullable(),
-  cardKey: z.string().min(1).max(400),
-  /** One line naming what the card asks ("Q12: Which retry policy?"), for the prompt and the agent tool. */
-  card: z.string().max(300),
+  /** The card asked about (More context); null for a free question (Your questions' field, `/ask`, an agent's ask). */
+  cardKey: z.string().min(1).max(400).nullable(),
+  /** One line naming what the card asks ("Q12: Which retry policy?"), for the prompt and the agent tool; "" when free. */
+  card: z.string().max(300).default(""),
   target: z.enum(CONTEXT_TARGETS),
   /** The developer's words, or a suggestion's text. */
   ask: z.string().min(1).max(2000),
@@ -346,14 +353,26 @@ export const contextRequestSchema = z.object({
   deliveredAt: iso.nullable().default(null),
   /** Who asked: "developer" or "agent:<id>" (agent parity). */
   by: z.string().max(120),
+  /** Where it was asked: Catch up's More context (`more`), Your questions' field, `/ask` in a chat, or an agent tool. */
+  via: z.enum(CONTEXT_VIA).default("more"),
+  /** The question this one follows up (Reply): the history reads as a thread. */
+  parentId: z.string().max(80).nullable().default(null),
+  /** When the developer read the answer (Done, Reply, Make a task). Only the developer's acts set it: an agent's never do. */
+  readAt: iso.nullable().default(null),
+  /** Done: who closed it, and when. An agent's Done closes it without reading it for the developer. */
+  done: z.object({ at: iso, by: z.string().max(120) }).nullable().default(null),
+  /** Make a task: the obligation it became, owned by the agent that answered. */
+  task: z.object({ id: z.string().max(80), at: iso, by: z.string().max(120) }).nullable().default(null),
 });
 export type ContextRequest = z.infer<typeof contextRequestSchema>;
-export const contextFileSchema = z.object({ requests: z.array(contextRequestSchema) });
+/** `context.json`. v1 (no `version`) had card-bound asks only; it is migrated on load (`migrateContext`). */
+export const CONTEXT_VERSION = 2 as const;
+export const contextFileSchema = z.object({ version: z.literal(CONTEXT_VERSION).optional(), requests: z.array(contextRequestSchema) });
 export type ContextFile = z.infer<typeof contextFileSchema>;
 
-/** Settled requests are kept this long (the card shows the answer when it returns), and at most this many. */
-export const CONTEXT_KEEP_MS = 24 * 3_600_000;
-export const CONTEXT_MAX = 50;
+/** Questions are kept this long (Your questions' history), and at most this many per workspace (Q172 E=a). */
+export const CONTEXT_KEEP_MS = 30 * 24 * 3_600_000;
+export const CONTEXT_MAX = 200;
 export const contextSettled = (r: Pick<ContextRequest, "state">) => r.state !== "asking";
 
 /** The tool an asked agent replies with (native tools carry the follow_ prefix; the stdio bridge doesn't). */
@@ -376,10 +395,12 @@ export function agentContextPrompt(r: Pick<ContextRequest, "id" | "card" | "ask"
  */
 export const CONTEXT_REPLY_ROLE = "main" as const;
 
-/** A request older than CONTEXT_KEEP_MS goes, then the oldest past CONTEXT_MAX; an asking one is kept while it is young. */
+/** A request older than CONTEXT_KEEP_MS goes, then each workspace's oldest past CONTEXT_MAX. Order is kept. */
 export function pruneContext(requests: readonly ContextRequest[], now: number): ContextRequest[] {
   const young = requests.filter(r => now - Date.parse(r.askedAt) < CONTEXT_KEEP_MS);
-  return young.slice(Math.max(0, young.length - CONTEXT_MAX));
+  const left = new Map<string | null, number>();
+  for (const r of young) left.set(r.workspaceId, (left.get(r.workspaceId) ?? 0) + 1);
+  return young.filter(r => { const n = left.get(r.workspaceId)!; left.set(r.workspaceId, n - 1); return n <= CONTEXT_MAX; });
 }
 
 /**
@@ -404,7 +425,8 @@ export function questionOfCard(cardKey: string): string | null {
   return /^Q\d+$/.test(subject) ? subject : null;
 }
 /** One card, whichever surface named it: the same key, or the same question of the same workspace. */
-export function sameCard(a: { workspaceId: string | null; cardKey: string }, b: { workspaceId: string | null; cardKey: string }): boolean {
+export function sameCard(a: { workspaceId: string | null; cardKey: string | null }, b: { workspaceId: string | null; cardKey: string | null }): boolean {
+  if (!a.cardKey || !b.cardKey) return false; // A free question is about no card.
   if (a.cardKey === b.cardKey) return true;
   const q = questionOfCard(a.cardKey);
   return !!q && !!a.workspaceId && a.workspaceId === b.workspaceId && q === questionOfCard(b.cardKey);
