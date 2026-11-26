@@ -13,6 +13,7 @@ import { marked } from "./rich-text";
 import { Spinner } from "./motion";
 import { Button, focusRing, rowDomId, type Theme } from "./kit";
 import { useListKeys } from "./list-keys";
+import { bindRowDoubleClick } from "./row-open";
 import { walkOrder } from "../shared/list-keys";
 import { BRIEF_KEY, OVERSEER_KEY, QUIET_PAGE, listEntries, type Entry } from "../shared/list-entries";
 import { RowMenu, useRowMenuTrigger, type OpenRowMenu, type RowMenuOpen } from "./row-menu";
@@ -139,7 +140,7 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
       case "hold": return <HoldLine theme={theme} text={item.text} dense={dense} touch={touch} />;
       // The list's own Row (search-row-is-the-list-row); the keyboard-active result wears the selected style.
       case "result": return <Row s={item.s} sig={item.s.sig} hit={item.hit} theme={theme} dense={dense} touch={touch} selected={item.index === activeResult} menuOpen={menuKey === item.s.key}
-        onSelect={pickResult} onMenu={item.archived ? noMenu : onMenu} />;
+        onSelect={pickResult} onOpen={keys?.onOpen} onMenu={item.archived ? noMenu : onMenu} />;
       case "ask": return <AskRow ask={item.ask} theme={theme} active={item.index === activeResult} dense={dense} touch={touch} sending={!!asking} onPress={() => onResult?.({ provider: "overseer", key: ASK_KEY, ask: item.ask })} />;
       case "brief": return <BriefRow theme={theme} line={briefLine ?? ""} selected={!touch && (selectedKey === null || selectedKey === BRIEF_KEY)} touch={touch} onSelect={onSelect} />;
       case "overseer": return overseer ? <OverseerRow theme={theme} o={overseer} selected={selectedKey === OVERSEER_KEY} touch={touch} stacked={stackOverseer} onSelect={onSelect} selectedBg={selectedBg} /> : null;
@@ -158,12 +159,12 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
       case "row": {
         const selected = selectedKey === item.key;
         return <View>
-          <Row s={item.s} theme={theme} dense={dense} touch={touch} selected={selected} onSelect={onSelect} sig={item.s.sig} onMenu={onMenu} menuOpen={menuKey === item.key} hit={item.hit} onSendNow={onSendNow} selectedBg={selectedBg} />
+          <Row s={item.s} theme={theme} dense={dense} touch={touch} selected={selected} onSelect={onSelect} onOpen={keys?.onOpen} sig={item.s.sig} onMenu={onMenu} menuOpen={menuKey === item.key} hit={item.hit} onSendNow={onSendNow} selectedBg={selectedBg} />
           {selected && renderExpanded ? renderExpanded(item.s) : null}
         </View>;
       }
     }
-  }, [theme, c, dense, touch, selectedKey, onSelect, briefLine, renderExpanded, toggle, toggleProject, activeResult, onResult, pickResult, model, overseer?.state, overseer?.line, overseer?.ranges, stackOverseer, asking, afterNeeds, raised, emptyAction, onMenu, menuKey, onSendNow, selectedBg]);
+  }, [theme, c, dense, touch, selectedKey, onSelect, briefLine, renderExpanded, toggle, toggleProject, activeResult, onResult, pickResult, model, overseer?.state, overseer?.line, overseer?.ranges, stackOverseer, asking, afterNeeds, raised, emptyAction, onMenu, menuKey, onSendNow, selectedBg, keys?.onOpen]);
 
   const listRef = useRef<NativeFlatList<Entry>>(null);
   const rootRef = useRef<View>(null);
@@ -327,10 +328,14 @@ export function marks(text: string, ranges: Range[] | null | undefined, c: Color
  * passes `hit`: the matched words are highlighted where they already are (title, "› agent", the ask line), and a match
  * in a field the row doesn't show replaces line 2 with "<Field> · excerpt", so a result is exactly as tall as the row.
  */
-type RowProps = { s: Workstream; sig: string; theme: Theme; dense: boolean; touch: boolean; selected: boolean; onSelect: (key: string) => void; onMenu: OpenRowMenu; menuOpen?: boolean; hit?: RowHit | null; onSendNow?: (s: Workstream) => Promise<void>; selectedBg?: string };
-const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onMenu, menuOpen = false, hit = null, onSendNow, selectedBg }: RowProps) {
+type RowProps = { s: Workstream; sig: string; theme: Theme; dense: boolean; touch: boolean; selected: boolean; onSelect: (key: string) => void; onOpen?: (key: string) => void; onMenu: OpenRowMenu; menuOpen?: boolean; hit?: RowHit | null; onSendNow?: (s: Workstream) => Promise<void>; selectedBg?: string };
+const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onOpen, onMenu, menuOpen = false, hit = null, onSendNow, selectedBg }: RowProps) {
   const c = theme.colors;
   const trigger = useRowMenuTrigger(s, onMenu, touch);
+  useEffect(() => {
+    if (touch || menuOpen || !onOpen) return;
+    return bindRowDoubleClick(trigger.ref.current as unknown as Parameters<typeof bindRowDoubleClick>[0], () => onOpen(s.key));
+  }, [touch, menuOpen, onOpen, s.key, trigger.ref]);
   const archived = s.icon === "Archive" && s.sig.startsWith("archived:");
   // An Older row is demoted at one level: its title muted, and its glyph and chips keep their hue at 60 % (still
   // readable as an error or a review), never full red beside a grey title.
@@ -404,7 +409,7 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onMe
     </View>{!!why && <View style={{ paddingRight: 40 }}><PriorityLine reason={why.reason} source={why.source} c={c} /></View>}</View>}
     {!touch && <RowTime s={s} c={c} size={dense ? 11 : 12} />}
   </Pressable>;
-}, (a, b) => a.sig === b.sig && a.selected === b.selected && a.theme === b.theme && a.dense === b.dense && a.touch === b.touch && a.onSelect === b.onSelect && a.onMenu === b.onMenu && a.menuOpen === b.menuOpen && a.hit === b.hit && a.onSendNow === b.onSendNow && a.selectedBg === b.selectedBg);
+}, (a, b) => a.sig === b.sig && a.selected === b.selected && a.theme === b.theme && a.dense === b.dense && a.touch === b.touch && a.onSelect === b.onSelect && a.onOpen === b.onOpen && a.onMenu === b.onMenu && a.menuOpen === b.menuOpen && a.hit === b.hit && a.onSendNow === b.onSendNow && a.selectedBg === b.selectedBg);
 
 /** The machine-wide auto-send hold, once above Sending's rows: the same words on every width (shared/sending.ts). */
 function HoldLine({ theme, text: line, dense, touch }: { theme: Theme; text: string; dense: boolean; touch: boolean }) {
