@@ -11,7 +11,7 @@ import { join } from "node:path";
  * repair the developer holds back ("Auto off", `manualTasks`) and the sweep's "manual" trigger are other things.
  */
 const AGENT_TEXT = [
-  "skills/follow-up/SKILL.md", "OVERVIEW.md", "PRODUCT.md",
+  "skills/follow-up/SKILL.md", "OVERVIEW.md", "docs/data-access.md", "PRODUCT.md",
   "server/mcp.mjs", "server/agent-hook.mjs", "server/overseer-prompt-source.ts", "server/overseer.ts",
   "server/tasks.ts", "server/recovery-config.ts", "server/agent-hooks.ts", "server/job-agent.ts",
 ];

@@ -41,6 +41,10 @@ stop.
      (`shared/changelog.ts`) maps an rc to that section, so 1.x → rc.0 shows What's new once, and rc.N → 2.0.0
      doesn't show it again. The parser skips each `<details>` list up to its `</details>`, so a full list never reaches What's new and every
      stable section above or below one still does.
+   - **Reread the plugin page** for a stable or a major's rc: `OVERVIEW.md` and the one description in `package.json`
+     and `paseo-plugin.json` are what Paseo's plugin listing shows. Do they name this section's headline features?
+     `tests/plugin-page.test.ts` (invariant 122) catches length, version labels and a second description, not a
+     missing feature.
    - `check:notes` also fails when a stable version or a major's rc has no section of its own. Never edit a released
      section, except to fix wording.
 3. In the same commit, bump the version in `package.json` and `package-lock.json` together, commit

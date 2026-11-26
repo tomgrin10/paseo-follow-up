@@ -58,4 +58,4 @@ Outside this folder, Follow-up reads (never writes):
 - Provider transcripts (`~/.claude/projects`, `~/.codex/sessions`).
 
 It writes its hook entries into `~/.claude/settings.json` and `~/.codex/hooks.json`, which is reversible: entries
-carry the `# paseo-follow-up-hook` marker. [OVERVIEW.md](../OVERVIEW.md) is the user-facing statement of this.
+carry the `# paseo-follow-up-hook` marker. [data-access.md](data-access.md) is the user-facing statement of this.

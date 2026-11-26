@@ -96,7 +96,7 @@ I built it for myself, to keep up with my own agents, and it made me a lot more 
 - Answer a question for you.
 - Wake a resting agent. It reads the transcript on disk instead.
 
-It runs on your machine with your own GitHub sign-in. [OVERVIEW.md](OVERVIEW.md) says exactly what it reads and
+It runs on your machine with your own GitHub sign-in. [Data and access](docs/data-access.md) says exactly what it reads and
 writes.
 
 ## On the pull request, too

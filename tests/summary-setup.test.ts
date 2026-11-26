@@ -11,7 +11,7 @@ const sources = async (dir: string): Promise<string[]> => (await readdir(resolve
   .filter(n => /\.(tsx?|mjs)$/.test(n)).map(n => join(dir, n));
 
 test("no user-facing or agent-facing string still says What's this about", async () => {
-  const files = [...await sources("client"), ...await sources("shared"), ...await sources("server"), "index.client.tsx", "index.server.ts", "README.md", "OVERVIEW.md", "DESIGN.md", "PRODUCT.md"];
+  const files = [...await sources("client"), ...await sources("shared"), ...await sources("server"), "index.client.tsx", "index.server.ts", "README.md", "OVERVIEW.md", "docs/data-access.md", "DESIGN.md", "PRODUCT.md"];
   const hits: string[] = [];
   for (const f of files) {
     const body = await readFile(resolve(f), "utf8").catch(() => "");
