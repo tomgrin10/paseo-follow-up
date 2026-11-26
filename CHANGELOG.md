@@ -2,6 +2,25 @@
 
 What changed in each version of Follow-up, newest first. Follow-up shows "What's new" after an update that brings new release notes: the curated part of each stable release since you last looked (betas install quietly; Settings → General can turn it off), and every version's notes from Home's version line.
 
+## 2.5.0 (2026-11-26)
+
+Send a task at the time you pick, and read every release in one scroll.
+
+- **Tasks can go out at a set time.** Pick At a time in Send on a schedule, or let an agent set its own check-back. The task reaches the agent once at that time, even with Auto-send off.
+- **What's new is one scroll, like Paseo's.** Every version newest first, with its date and an Installed tag on yours. Nothing to open, and each version's full changelog is one click away on GitHub.
+
+<details><summary>Full changelog since 2.4.2</summary>
+
+### Repairs and PRs
+
+- A task can be sent to its agent at a time: pick At a time in Send on a schedule, or let an agent set its own check-back. It arrives once at that time, even with Auto-send off.
+
+### Setup, Settings and updates
+
+- What's new is one scroll: every version's changes, newest first, with its date and an Installed tag on yours. Nothing to open, and each version's full changelog is one click away on GitHub.
+
+</details>
+
 ## 2.4.2 (2026-11-26)
 
 A shorter, current plugin page.
