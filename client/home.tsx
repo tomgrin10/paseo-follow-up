@@ -27,6 +27,7 @@ import type { NewKey } from "./search-key";
 import { DockedPane } from "./docked-pane";
 import type { DockState } from "./dock";
 import { NeedsYouBlock } from "./needs-you";
+import { YourQuestionsCard } from "./your-questions";
 import { HeldMerges } from "./merge-button";
 import { PrSheet } from "./pr-sheet";
 import { StatsPage, type StatsParams } from "./pr-stats";
@@ -53,6 +54,7 @@ import { CatchUp, CatchUpButton, KeysSheet } from "./catch-up";
 import { searchEnter } from "../shared/list-keys";
 import { HOME_KEYS } from "../shared/home-keys";
 import { deckCards } from "../shared/catch-up";
+import { questionsByWorkspace } from "../shared/your-questions";
 import { ResizableSplit } from "./split";
 import type { SearchKey } from "./search-key";
 
@@ -158,7 +160,9 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
   const tracked = useSyncExternalStore(deps.sources.live.subscribe, deps.sources.live.version, deps.sources.live.version);
   const rows = useInbox(inbox, () => inbox.rows());
   // Go through's count is its cards (one per ask), the same deck the mode opens on.
-  const deckSize = useMemo(() => deckCards({ model, rows, items: id => { const w = deps.sources.live.get(id); return w ? needsYou(w as never) : []; } }).length, [model, rows, tracked, deps.sources.live]);
+  // Your questions: each unread answer is a card too (shared deckCards), so the button counts what Catch up deals.
+  const questions = useSyncExternalStore(deps.sources.extras.subscribe, deps.sources.extras.context, deps.sources.extras.context);
+  const deckSize = useMemo(() => { const unread = questionsByWorkspace(questions); return deckCards({ model, rows, items: id => { const w = deps.sources.live.get(id); return w ? needsYou(w as never) : []; }, answers: id => unread.get(id)?.unread ?? [] }).length; }, [model, rows, tracked, deps.sources.live, questions]);
   const pane = useMemo(() => briefPane({ model, rows, tracked: deps.sources.live.all(), now: Date.now() }), [model, rows, tracked, deps.sources.live]);
   const rank = useSyncExternalStore(deps.sources.extras.subscribe, deps.sources.extras.rank, deps.sources.extras.rank);
   const overseerStatus = useSyncExternalStore(deps.sources.extras.subscribe, deps.sources.extras.overseer, deps.sources.extras.overseer);
@@ -694,6 +698,8 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
       {w && <NeedsYouBlock workspace={w} theme={theme} compact={compact} now={Date.now()} style={{ marginHorizontal: 0, marginTop: 0 }}
         brief={inBlock ? b : null} briefCard={inBlock && <BriefCard {...({ embedded: true, bare: true, item: { data: b }, theme, layout: { compact }, agentId: s.agentId, deps: deps.briefDeps } as unknown as Parameters<typeof BriefCard>[0])} />}
         actions={{ openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion, openAgent: () => openFull(s) }} />}
+      {w && <YourQuestionsCard workspaceId={w.id} mainAgentId={w.mainAgentId} theme={theme} compact={compact} style={{ marginHorizontal: 0, marginTop: 0 }}
+        openAgent={openAgent} />}
       {w && <HeldMerges workspace={w} theme={theme} compact={compact} />}
       {actionBar}
       {laterBlock}

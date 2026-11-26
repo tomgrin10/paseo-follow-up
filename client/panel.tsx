@@ -25,6 +25,7 @@ import { WorkspaceHeader } from "./header";
 import { PanelMore } from "./panel-menu";
 import type { HomeSources } from "./home-data";
 import { NeedsYouBlock, overviewKey, workspaceKey } from "./needs-you";
+import { YourQuestionsCard } from "./your-questions";
 import { browserKey } from "./keys";
 import { useWorkspace } from "./workspace-data";
 import type { LiveStore } from "./live";
@@ -382,6 +383,8 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
     more={sources ? <PanelMore w={w} sources={sources} theme={theme} compact={compact} openAgent={openAgent} openQuestion={setQuestion} showMenu={setMoreMenu} /> : undefined} />;
   const shipped = <ShippedCard workspace={w} theme={theme} compact={compact} now={now} />;
   const needs = <NeedsYouBlock workspace={w} theme={theme} compact={compact} now={now} brief={ask?.brief ?? null} briefCard={ask?.card ?? null} actions={{ openAgent, openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion }} />;
+  // Your questions (docs/needs-you.md#your-questions): under Needs you, the same card as Home's detail pane.
+  const questions = <YourQuestionsCard workspaceId={w.id} mainAgentId={w.mainAgentId} theme={theme} compact={compact} openAgent={openAgent} />;
   // Once shipped, the stack and tasks are history: one quiet fold instead of two near-empty cards.
   const history = done && <View style={{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.colors.border, overflow: "hidden" }}>
     <View style={{ marginTop: -1 }}><FoldRow theme={theme} compact={compact} open={isOpen("history")} onPress={() => toggle("history")} icon="History" iconColor={theme.colors.foregroundMuted} label={historyLabel(w)} /></View>
@@ -406,9 +409,9 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
     <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20, ...(large ? { maxWidth: 1240, width: "100%", alignSelf: "center", paddingHorizontal: 12 } : null) }}>
       {header}
       {wide ? <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
-        <View style={{ flex: 5, minWidth: 0 }}>{shipped}{needs}{history}{messages}{tasks}</View>
+        <View style={{ flex: 5, minWidth: 0 }}>{shipped}{needs}{questions}{history}{messages}{tasks}</View>
         <View style={{ flex: 6, minWidth: 0 }}>{stacks}{log}{extras}</View>
-      </View> : <>{shipped}{needs}{history}{messages}{stacks}{tasks}{log}{extras}</>}
+      </View> : <>{shipped}{needs}{questions}{history}{messages}{stacks}{tasks}{log}{extras}</>}
     </ScrollView>
     <PrSheet workspace={w} prKey={sheet?.key ?? null} intent={sheet?.intent ?? null} theme={theme} compact={compact} browserReady={browser.data?.ready ?? false} onClose={() => setSheet(null)} />
     <QuestionSheet workspace={w} questionId={question} theme={theme} compact={compact} openAgent={openAgent} onClose={() => setQuestion(null)} />

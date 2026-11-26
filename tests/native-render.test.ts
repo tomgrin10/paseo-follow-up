@@ -75,6 +75,46 @@ test("More context on a question outside Catch up (the panel, Home, the pill on 
   await act(async () => { setContextSource(null); });
 });
 
+// Your questions (docs/needs-you.md#your-questions): the card the panel and Home draw, its history sheet, and Catch up's
+// answer card, on a phone. Every state the card draws: an answer, one from its chat, one in its chat, a failure, asking.
+test("Your questions on a phone renders under the phone's rules: the card in every state, Reply, the history", async () => {
+  const { YourQuestionsCard, QuestionHistory, AnswerActions, AnswerView, ReplyForm } = await import("../client/your-questions");
+  const q = (id: string, state: string, extra: Record<string, unknown> = {}) => ({ id, workspaceId: "w1", agentId: "a1", cardKey: null, card: "", target: "agent", ask: `Why does ${id} retry?`, state, askedOf: "a1",
+    askedAt: "2026-11-26T10:00:00Z", settledAt: state === "asking" ? null : "2026-11-26T10:04:00Z", deliveredAt: "2026-11-26T10:00:05Z", answer: state === "answered" || id === "q2" ? "Because the gateway retries for 60 s." : null,
+    error: state === "failed" ? "The agent's chat is gone." : null, by: "developer", via: "field", parentId: null, readAt: null, done: null, task: null, ...extra });
+  const requests = [q("q0", "answered", { readAt: "2026-11-26T09:00:00Z", task: { id: "T1", at: "2026-11-26T09:00:00Z", by: "developer" } }), q("q1", "answered"), q("q2", "chat"), q("q3", "chat"), q("q4", "failed"), q("q5", "asking"), q("q6", "asking", { parentId: "q1" })];
+  const calls: unknown[] = [];
+  await act(async () => { setContextSource({ context: () => requests as never, subscribe: () => () => {}, askContext: async () => ({ request: requests[5] as never }), questionAction: async (input: unknown) => { calls.push(input); return { request: requests[1] as never }; } }); });
+  const card = await render(createElement(YourQuestionsCard, { workspaceId: "w1", mainAgentId: "a1", theme, compact: true, openAgent: () => {} }));
+  assert.equal(card.error, null, `the card crashed on a phone: ${(card.error as Error)?.message}`);
+  // Host views only: a composite component carries the same label as the view it draws.
+  const labels = card.r!.root.findAll(n => typeof n.type === "string" && typeof n.props.accessibilityLabel === "string").map(n => n.props.accessibilityLabel as string);
+  try {
+  assert.ok(labels.includes("Ask the main agent"), "the ask field");
+  assert.ok(labels.filter(l => l === "Done").length >= 4, "Done on every unread answer");
+  assert.equal(labels.filter(l => l === "Make a task").length, 2, "Make a task only where there is an answer (q1, q2)");
+  assert.ok(labels.some(l => l.startsWith("Withdraw")), "Withdraw on a question still asking");
+  // Done reaches the one request.
+  const done = card.r!.root.findAll(n => n.props.accessibilityLabel === "Done" && typeof n.props.onPress === "function")[0];
+  await act(async () => { (done.props.onPress as () => void)(); });
+  assert.deepEqual(calls[0], { id: "q4", action: "done" }, "the newest unread answer comes first");
+  } finally {
+    // The card keeps a clock (useNow): unmount it, so the test process can end.
+    await act(async () => { (card.r as unknown as { unmount(): void }).unmount(); });
+  }
+  for (const [name, el] of [
+    ["the history (its sheet's body)", createElement(QuestionHistory, { workspaceId: "w1", theme, compact: true })],
+    ["Reply's field", createElement(ReplyForm, { r: requests[1], theme, compact: true, onSent: () => {}, onCancel: () => {} })],
+    ["Catch up's answer card", createElement(AnswerView, { r: requests[1], theme, compact: true, now: Date.parse("2026-11-26T10:10:00Z"), big: true })],
+    ["Catch up's thumb bar", createElement(AnswerActions, { r: requests[1], theme, compact: true, bar: true, keys: true, busy: null, onDone: () => {}, onReply: () => {}, onTask: () => {}, onAskAgain: () => {}, openChat: () => {} })],
+  ] as const) {
+    const { r, error } = await render(el as never);
+    await act(async () => { (r as unknown as { unmount(): void } | undefined)?.unmount(); });
+    assert.equal(error, null, `${name} crashed on a phone: ${(error as Error)?.message}`);
+  }
+  await act(async () => { setContextSource(null); });
+});
+
 test("the PR stats page on a phone renders under the phone's rules: the leaderboard, its empty period and a person", async () => {
   const { Leaderboard, PersonView } = await import("../client/pr-stats");
   const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");

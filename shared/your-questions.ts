@@ -109,3 +109,12 @@ export function questionHistory(requests: readonly ContextRequest[], o: { worksp
     && (o.filter === "open" ? askingNow(r) || unreadAnswer(r) : o.filter === "tasks" ? !!r.task : true)
     && (!o.query || matchesQuestion(r, o.query))).reverse();
 }
+
+/** Where a question came from, for its history row ("from Catch up on Q12", "with /ask"). Empty for the field. */
+export function questionSource(r: Pick<ContextRequest, "via" | "card" | "by" | "parentId">): string {
+  if (r.parentId) return "a reply";
+  if (r.via === "more") return r.card ? `from Catch up on ${r.card.split(" · ")[0]}` : "from Catch up";
+  if (r.via === "slash") return "with /ask";
+  if (r.via === "tool" || r.by.startsWith("agent:")) return "asked by an agent";
+  return "";
+}

@@ -14,7 +14,7 @@ export type CardKind = "permission" | "question" | "item" | "brief" | "finished"
  */
 export type DeckCard = { key: string; kind: CardKind; s: Workstream; questionId?: string; item?: NeedItem;
   /** An `answer` card: the developer's question (Your questions) whose answer they haven't read. */
-  requestId?: string };
+  requestId?: string; /** An `answer` card: the question's words, its label in the rail and its fallback line. */ ask?: string };
 
 type Source = {
   model: Pick<HomeModel, "groups">;
@@ -22,7 +22,7 @@ type Source = {
   /** The workspace's Needs-you items in block order (stopped questions first), from `needsYou`. */
   items: (workspaceId: string) => readonly NeedItem[];
   /** The workspace's unread answers to the developer's questions, newest first: one card each, last in the workstream. */
-  answers?: (workspaceId: string) => readonly { id: string }[];
+  answers?: (workspaceId: string) => readonly { id: string; ask?: string }[];
 };
 
 const BRIEF_CARD_KINDS = ["decision", "action", "review"];
@@ -53,7 +53,7 @@ export function deckCards({ model, rows, items, answers }: Source): DeckCard[] {
     // An answer to read: the lowest tier (Q172 C=a), after everything else the workstream asks.
     const read = s.workspaceId && answers ? answers(s.workspaceId) : [];
     if (out.length === before && s.tier !== ANSWER_TIER) out.push({ key: `${s.key}|finished`, kind: "finished", s });
-    for (const a of read) out.push({ key: `${s.key}|${a.id}`, kind: "answer", s, requestId: a.id });
+    for (const a of read) out.push({ key: `${s.key}|${a.id}`, kind: "answer", s, requestId: a.id, ...(a.ask ? { ask: a.ask } : {}) });
   }
   return out;
 }
@@ -214,7 +214,7 @@ export function statsOf(s: Session): SessionStats {
  * anywhere presets. Paseo takes Shift+? (its shortcuts dialog) and Escape (interrupt agent) when focus is outside a
  * field, which is exactly when these fire, so the sheet is S and leaving is X.
  */
-export type CatchUpAction = "pick" | "own" | "send" | "skip" | "skip-workspace" | "back" | "more" | "chip" | "ask" | "note" | "later" | "chat" | "rail" | "rail-up" | "rail-down" | "keys" | "leave" | "dictate" | "dismiss";
+export type CatchUpAction = "pick" | "own" | "send" | "skip" | "skip-workspace" | "back" | "more" | "chip" | "ask" | "note" | "later" | "chat" | "rail" | "rail-up" | "rail-down" | "keys" | "leave" | "dictate" | "dismiss" | "done" | "reply" | "task";
 /**
  * a-move-bar-action-opens-in-view: where each move-bar action opens what it opens, so its result is where the eye
  * already is and never appended below the fold. `sheet`: drawn in the phone's dock, above the bar, kept above the
@@ -234,7 +234,7 @@ export const MOVE_OPENS: Readonly<Record<"more" | "later" | "note" | "chat" | "r
 /** A key as this platform spells it: ⌘ on a Mac, Ctrl elsewhere (as the Send button's own hint reads). */
 export const keyLabel = (key: string, mac: boolean) => mac ? key : key.replace("⌘", "Ctrl ");
 
-export const CATCH_UP_KEYS: readonly { key: string; what: string; action: CatchUpAction; combos: readonly string[]; when?: "more" | "rail";
+export const CATCH_UP_KEYS: readonly { key: string; what: string; action: CatchUpAction; combos: readonly string[]; when?: "more" | "rail" | "answer";
   /** Listed only on a host that has it: V is Paseo's dictation, on a Paseo with usePaseoDictation. */ needs?: "dictation" }[] = [
   { key: "A–H", what: "Pick an option", action: "pick", combos: ["A", "B", "C", "D", "E", "F", "G", "H"] },
   { key: "W", what: "Write your own answer", action: "own", combos: ["W"] },
@@ -254,6 +254,10 @@ export const CATCH_UP_KEYS: readonly { key: string; what: string; action: CatchU
   { key: "R", what: "Go to the queue, and back", action: "rail", combos: ["R"] },
   { key: "↑ / ↓", what: "Move in the queue (Enter opens)", action: "rail-up", combos: ["ArrowUp", "ArrowDown"], when: "rail" },
   { key: "S", what: "Show the keys", action: "keys", combos: ["S"] },
+  // An answer to one of your questions (Your questions) has no options, so D, W and T are its own: Done, Reply, Task.
+  { key: "D", what: "Done: the answer is read", action: "done", combos: ["D"], when: "answer" },
+  { key: "W", what: "Reply with a follow-up question", action: "reply", combos: ["W"], when: "answer" },
+  { key: "T", what: "Make a task of it", action: "task", combos: ["T"], when: "answer" },
   { key: "X", what: "Leave Catch up", action: "leave", combos: ["X"] },
 ];
 
@@ -263,7 +267,7 @@ export type KeyPress = { key: string; meta: boolean; ctrl: boolean; alt: boolean
  * map is tested without a DOM. `typing`: focus is in a text field, where only the More context box's ⌘↵ and ⌘⇧↵ act
  * (a card field's ⌘↵ is its own SubmitScope's). `inRail`: focus is in the queue.
  */
-export function catchUpKey(e: KeyPress, at: { typing: boolean; inMore: boolean; moreOpen: boolean; inRail: boolean }): { action: CatchUpAction; arg?: string } | null {
+export function catchUpKey(e: KeyPress, at: { typing: boolean; inMore: boolean; moreOpen: boolean; inRail: boolean; /** The card is an answer (Your questions). */ answer?: boolean }): { action: CatchUpAction; arg?: string } | null {
   if (e.composing || e.alt) return null;
   const mod = e.mac ? e.meta : e.ctrl;
   if (e.key === "Enter" && mod && (e.mac ? !e.ctrl : !e.meta)) {
@@ -280,6 +284,7 @@ export function catchUpKey(e: KeyPress, at: { typing: boolean; inMore: boolean; 
   if (e.shift && e.key.toLowerCase() === "d") return { action: "dismiss" };
   if (e.shift || e.key.length !== 1) return null;
   const k = e.key.toLowerCase();
+  if (at.answer && (k === "d" || k === "w" || k === "t")) return { action: k === "d" ? "done" : k === "w" ? "reply" : "task" };
   if (/^[a-h]$/.test(k)) return { action: "pick", arg: k.toUpperCase() };
   const byLetter: Record<string, CatchUpAction> = { w: "own", j: "skip", k: "back", m: "more", n: "note", l: "later", o: "chat", r: "rail", s: "keys", x: "leave", v: "dictate" };
   return byLetter[k] ? { action: byLetter[k] } : null;

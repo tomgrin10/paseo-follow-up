@@ -193,3 +193,11 @@ test("an unread answer puts a quiet row in Needs you at the lowest tier; asking 
   const read = buildHome({ rows: [], tracked: [a, b], paseo: [], now, questions: questions.map(x => ({ ...x, readAt: x.readAt ?? "2026-11-26T09:50:00.000Z" })) });
   assert.equal(read.groups.find(g => g.id === "needs"), undefined);
 });
+
+test("questionSource says where a question came from, for its history row", async () => {
+  const { questionSource } = await import("../shared/your-questions");
+  assert.equal(questionSource({ via: "more", card: "Q12 · Which retry policy?", by: "developer", parentId: null }), "from Catch up on Q12");
+  assert.equal(questionSource({ via: "slash", card: "", by: "developer", parentId: null }), "with /ask");
+  assert.equal(questionSource({ via: "field", card: "", by: "developer", parentId: "ctx-abc" }), "a reply");
+  assert.equal(questionSource({ via: "field", card: "", by: "developer", parentId: null }), "");
+});

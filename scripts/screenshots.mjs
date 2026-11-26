@@ -47,7 +47,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as the CHANGELOG's newest stable, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "gallery", "frames", "onboarding", "setup-popup"];
+const REVIEW_SHOTS = ["tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "gallery", "frames", "onboarding", "setup-popup"];
 /** Pasted images and their Add image button share one harness setup (an Overseer and the fixture provider taking images). */
 const PASTE_LIKE = only => only.includes("paste-images") || only.includes("attach-images");
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
@@ -88,7 +88,7 @@ const paseo016 = /(^|\D)0\.1[6-9]\.\d+/.test(paseoVersion ?? "");
 if (only.includes("sidebar") && only.some(n => n !== "sidebar")) fail("shoot --only sidebar on its own, with HARNESS_PASEO=0.16");
 if (only.includes("sidebar") && !paseo016) fail(`the sidebar shot needs the Paseo CLI 0.16.x (found ${paseoVersion ?? "none"}); run with HARNESS_PASEO=0.16`);
 if (only.includes("feeds") && only.length > 1) fail("run --only feeds on its own (npm run test:feeds)");
-const paseoOk = only.includes("settings-tabs") || only.includes("new") || only.includes("onboarding") || PASTE_LIKE(only) || only.includes("gallery") || only.includes("search-focus") || only.includes("frames") ? /(^|\D)0\.1[5-7]\.\d+/ : only.includes("sidebar") || only.includes("feeds") || only.includes("put-in-chat") || argv.includes("--sidebar-review") || argv.includes("--overseer-review") || argv.includes("--keys-review") || argv.includes("--rank-review") || argv.includes("--sortfoot-review") || argv.includes("--secsearch-review") || argv.includes("--github-wait-review") ? /(^|\D)0\.1[56]\.\d+/ : /(^|\D)0\.15\.\d+/;
+const paseoOk = only.includes("settings-tabs") || only.includes("new") || only.includes("onboarding") || PASTE_LIKE(only) || only.includes("gallery") || only.includes("search-focus") || only.includes("frames") || only.includes("your-questions") ? /(^|\D)0\.1[5-7]\.\d+/ : only.includes("sidebar") || only.includes("feeds") || only.includes("put-in-chat") || argv.includes("--sidebar-review") || argv.includes("--overseer-review") || argv.includes("--keys-review") || argv.includes("--rank-review") || argv.includes("--sortfoot-review") || argv.includes("--secsearch-review") || argv.includes("--github-wait-review") ? /(^|\D)0\.1[56]\.\d+/ : /(^|\D)0\.15\.\d+/;
 if (!paseoVersion || !paseoOk.test(paseoVersion)) fail(`needs the Paseo CLI 0.15.x on PATH (found ${paseoVersion ?? "none"}); run through harness-slot or put ~/paseo-harness/cli/0.15.4/bin first`);
 if (changelogArg && !existsSync(changelogArg)) fail(`--whats-new-changelog: no file at ${changelogArg}`);
 const optimiser = await findOptimiser();
@@ -901,7 +901,7 @@ function makeShooter({ browser, port, out, scheme: forced, optimiser, results, c
       if (ws) await context.routeWebSocket(/.*/, ws);
       const page = await context.newPage();
       // SHOTS_CONSOLE=1 prints the page's errors, to tell a real bug from a flaky frame.
-      if (process.env.SHOTS_CONSOLE) { page.on("console", m => { if (m.type() === "error") log(`${name} console:`, m.text().slice(0, 600)); }); page.on("pageerror", e => log(`${name} pageerror:`, e.message.slice(0, 600))); }
+      if (process.env.SHOTS_CONSOLE) { page.on("console", m => { if (m.type() === "error" || (process.env.SHOTS_CONSOLE === "all" && m.type() === "warning")) log(`${name} console:`, m.text().slice(0, 600)); }); page.on("pageerror", e => log(`${name} pageerror:`, e.message.slice(0, 600))); }
       await page.clock.setFixedTime(BASE + VIEW);
       page.setDefaultTimeout(30000);
       await page.goto(`http://127.0.0.1:${port}/`);
@@ -2224,6 +2224,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   if (only.includes("scheduled-tasks")) await scheduledShots({ shoot, seeded, call, cli });
   if (only.includes("own-answer")) await ownAnswerShots({ shoot });
   if (only.includes("more-context")) await moreContextShots({ shoot, call });
+  if (only.includes("your-questions")) await yourQuestionsShots({ shoot, call, seeded, home, cli });
   if (only.includes("paste-images")) await pasteImagesShots({ shoot, call });
   if (only.includes("attach-images")) await attachImagesShots({ shoot, call });
   if (only.includes("dismiss")) await dismissShots({ shoot, call });
@@ -4964,6 +4965,85 @@ async function moreContextShots({ shoot, call }) {
   await each("pending", async page => settle(page, visible(page.getByText(/the answer shows here when it comes/))));
   await call("follow.context-reply", { agentId: asked.askedOf, requestId: asked.id, text: "Both languages are missing the key only for strings added this sprint. **The English text** keeps the page readable for customers; **the key itself** makes the gap obvious to translators but shows raw ids like checkout.total to users. Most teams show English in production and the key in staging." });
   await each("replied", async page => settle(page, visible(page.getByText(/Most teams show English in production/))));
+}
+
+/**
+ * your-questions (docs/needs-you.md#your-questions): the Your questions card in the panel and Home's detail pane (an
+ * answer to read, one still asking, the history), Reply's field, the history (in the card on desktop, a sheet on a
+ * phone), Catch up's answer card and the chat's "Your question" chip, desktop and 390×844, light and dark. Seeded through
+ * follow.context-ask as the developer and follow.context-reply as the asked agent: three answered and closed (two Done,
+ * one a task), one to read, and one still asking.
+ */
+async function yourQuestionsShots({ shoot, call, seeded, home, cli }) {
+  const billing = seeded.workspaces.find(w => w.key === "billing");
+  const spec = WORKSPACES.find(w => w.key === "billing");
+  const TALL = { width: DESKTOP.width, height: 1100 };
+  const scriptsFile = join(home, "fixture-scripts.json");
+  const agentSays = async steps => { const scripts = JSON.parse(await fs.readFile(scriptsFile, "utf8")); scripts[`agent:${billing.agentId}`] = steps; await fs.writeFile(scriptsFile, JSON.stringify(scripts)); };
+  const question = async id => (await call("follow.context-list", { workspaceId: billing.workspaceId })).requests.find(r => r.id === id);
+  const ask = async text => (await call("follow.context-ask", { workspaceId: billing.workspaceId, ask: text, via: "field" })).request;
+  // The harness's crawling clock holds the queue's send, so each answer comes as the asked agent's context_reply (the
+  // path a real agent takes), and the chat gets the question's own message straight from the CLI (what the queue sends).
+  const answer = (r, text) => call("follow.context-reply", { agentId: r.askedOf, requestId: r.id, text });
+  for (const [text, reply, then] of [
+    ["Is the dead-letter queue shared with refunds?", "No. Refunds have their own queue (refunds-dlq); billing retries only ever write to charges-dlq.", "done"],
+    ["What happens to a charge that fails after the third try?", "It stays declined, the dunning email goes out, and the charge moves to charges-dlq for a person to look at.", "task"],
+    ["Which alert fires if the retry worker stops?", "RetryWorkerStalled, after 10 minutes without a heartbeat. It pages the billing on-call.", "done"],
+  ]) {
+    const r = await ask(text);
+    await answer(r, reply);
+    await call("follow.question-action", { id: r.id, action: then });
+  }
+  const A1 = "Because the payment gateway already retries for 60 s on its side. A fixed 30 s gap keeps us inside its idempotency window; exponential backoff would push the third try to 120 s, after the key expires, and could charge twice.\n\nIf you want exponential anyway, cap it at 45 s. That's a one-line change in `retry-policy.ts`.";
+  const q1 = await ask("Why does the retry use a fixed 30 s gap instead of exponential backoff?");
+  // The message agentQuestionPrompt writes (shared/your-questions.ts), as the chat receives it.
+  const prompt = r => [`Your question (${r.id})`, `The developer asks: "${r.ask}"`, "Answer in plain words, short (under 4000 characters). It's a question, not a task: don't change anything unless it asks you to.", `Reply with context_reply (follow_context_reply as a native tool) and requestId "${r.id}" so the answer lands in Your questions, then end your turn.`].join("\n");
+  await agentSays([{ item: { type: "assistant_message", text: A1 } }]);
+  const promptFile = join(home, "yq-prompt.txt");
+  await fs.writeFile(promptFile, prompt(q1));
+  await cli("send", billing.agentId, "--prompt-file", promptFile, "--no-wait");
+  await answer(q1, A1);
+  // Still asking: queued behind the agent's turn.
+  await ask("Does #143 need a data migration, or is the new column nullable?");
+  const visible = l => l.filter({ visible: true }).first();
+  const card = page => visible(page.locator("[data-your-questions]"));
+  const ready = async page => { await visible(page.getByText(/fixed 30 s gap keeps us/)).waitFor({ timeout: 60_000 }); };
+  const panel = async page => { await page.setViewportSize(TALL); await openChat(page, spec.title, spec.prompt); await page.getByRole("button", { name: "Follow-up", exact: true }).last().click(); await ready(page); await card(page).scrollIntoViewIfNeeded(); };
+  const panelPhone = async page => { await openChat(page, spec.title, spec.prompt); await page.getByRole("button", { name: "Follow-up", exact: true }).last().click(); await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click(); await page.setViewportSize(PHONE); await ready(page); await card(page).evaluate(el => el.scrollIntoView({ block: "start" })); };
+  const homeAt = async (page, vp) => { await openHome(page); if (vp === PHONE) await page.setViewportSize(PHONE); await (await homeRow(page, spec.title)).click(); await ready(page); await card(page).evaluate(el => el.scrollIntoView({ block: "start" })); };
+  const noOverflow = async (page, name) => { const o = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth); if (o > 1) throw new Error(`${name} scrolls sideways (${o}px)`); };
+  // keepFocus: the reply field keeps its focus for the shot, so the pane shows what typing looks like (the dock steps
+  // aside and the field with its Send scrolls into view, invariant 43).
+  const reply = async page => { page.keepFocus = true; await visible(page.getByRole("button", { name: "Reply", exact: true })).click(); await visible(page.getByLabel("Your reply")).fill("Cap it at 45 s and open a PR"); await page.waitForTimeout(800); };
+  const history = async page => { await visible(page.getByRole("button", { name: /^History, \d+ questions?/ })).click(); await visible(page.getByLabel("Search questions and answers")).waitFor(); await page.waitForTimeout(400); };
+  const catchUp = async (page, vp) => {
+    await openHome(page); if (vp === PHONE) await page.setViewportSize(PHONE);
+    await page.getByRole("button", { name: /^Catch up on \d+ things? that need you/ }).filter({ visible: true }).first().click();
+    await page.getByRole("heading", { name: /^Catch up/ }).filter({ visible: true }).first().waitFor();
+    for (let i = 0; !(await visible(page.locator("[data-catch-up-card]").getByText(/fixed 30 s gap keeps us/)).isVisible()); i++) {
+      if (i > 40) throw new Error("your-questions: no Catch up card shows the answer");
+      await page.getByRole("button", { name: /^Skip this (?!workspace)/ }).filter({ visible: true }).first().click();
+      await page.waitForTimeout(250);
+    }
+    await page.waitForTimeout(400);
+  };
+  // The question's message stays Paseo's own user row, so it starts its own turn and shows under "Collapse turns".
+  const chat = async (page, vp) => { await openChat(page, spec.title, spec.prompt); if (vp === PHONE) await page.setViewportSize(PHONE); const msg = visible(page.getByText(/The developer asks: "Why does the retry use a fixed 30 s gap/)); await msg.waitFor({ timeout: 60_000 }); await msg.evaluate(el => el.scrollIntoView({ block: "center" })); await page.waitForTimeout(400); };
+  for (const theme of ["light", "dark"]) {
+    const each = async (name, vp, drive) => shoot(`yq-${name}-${theme}`, vp, theme, async page => { await drive(page); await noOverflow(page, name); });
+    await each("panel-desktop", TALL, panel);
+    await each("panel-phone", PHONE, panelPhone);
+    await each("home-desktop", DESKTOP, page => homeAt(page, DESKTOP));
+    await each("home-phone", PHONE, page => homeAt(page, PHONE));
+    await each("reply-desktop", TALL, async page => { await panel(page); await reply(page); });
+    await each("reply-phone", PHONE, async page => { await homeAt(page, PHONE); await reply(page); });
+    await each("history-desktop", TALL, async page => { await panel(page); await history(page); });
+    await each("history-phone", PHONE, async page => { await homeAt(page, PHONE); await history(page); });
+    await each("catchup-desktop", DESKTOP, page => catchUp(page, DESKTOP));
+    await each("catchup-phone", PHONE, page => catchUp(page, PHONE));
+    await each("chat-desktop", DESKTOP, page => chat(page, DESKTOP));
+    await each("chat-phone", PHONE, page => chat(page, PHONE));
+  }
 }
 
 /**

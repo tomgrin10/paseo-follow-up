@@ -352,7 +352,7 @@ about a card (`cardKey`), a free question has `cardKey: null`. Design: `DESIGN.m
   (`via: "more"`, to the card's workspace main agent) and agents (`via: "tool"`). A free question goes only to an agent
   that can answer it (`questionRecipient`): a tracked workspace's main agent or one of its contributors, the roles with
   `context_reply`; never the caller. It is a queued message (invariant 36) that starts with `QUESTION_PREFIX` and its
-  id (`agentQuestionPrompt`); the chat shows it as the developer's question with a "Your question" chip. A plain
+  id (`agentQuestionPrompt`); the chat keeps it as a plain user message, so it starts its own turn (Paseo groups a chat into turns only at real user messages: a plugin card in its place folds into the turn before and, under "Collapse turns", out of sight). A plain
   question typed in the chat is not tracked (Q172 B=a).
 - **The answer, reliably** (`your-question-always-gets-its-answer`): `context_reply {requestId, text}` first (≤4000
   chars, a corrected reply wins). Else **turn-end capture**: the first turn end after delivery takes the agent's last
@@ -373,6 +373,13 @@ about a card (`cardKey`), a free question has `cardKey: null`. Design: `DESIGN.m
   home feed's `context` (`buildHome` `questions`), so nothing polls.
 - **Kept** (Q172 E=a): 30 days, at most 200 per workspace (`pruneContext`). History (in the card on desktop, a sheet on
   a phone) searches questions and answers (`questionHistory`), All / Open / Tasks, newest first.
+- **The client** (`client/your-questions.tsx`): `YourQuestionsCard` under Needs you in the panel (`WorkspaceView`) and
+  Home's detail pane; it reads the one store of questions (`useContextStore`, Home's extras kept by the home feed;
+  no polling) and acts through `extras.questionAction` (`follow.question-action`). Its fields (the ask, Reply) are
+  `DictationField` inside `ImageField`, marked `PRIMARY_FORM`. Only what the server takes is offered: no Done while
+  asking (Withdraw), no Make a task without an answer, Ask again for a failed ask. Catch up's `answer` card draws
+  `AnswerView` and `AnswerActions` (D Done, W Reply, T Make a task, O Open chat, J Skip: `CATCH_UP_KEYS` `when:
+  "answer"`); on a phone they are the thumb bar. `/ask` is an agent slash command (`index.client.tsx`).
 - **v1 → v2**: `context.json` gained `version: 2`; a v1 file is migrated on load (`migrateContext`): settled asks
   become history rows already read, an open one stays open.
 
