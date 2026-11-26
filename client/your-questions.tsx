@@ -3,6 +3,7 @@
 // full with Done · Reply · Make a task · ⋯, questions still asking, and the history. It reads the client's one store of
 // questions (Home's extras, kept current by the home feed; client/more-context.tsx), so nothing polls, and every act is
 // one request (`follow.question-action`, which the agent tool `question_action` also makes).
+import { PagedRows } from "./paged-list";
 import { useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Platform, View, type StyleProp, type TextStyle } from "react-native";
 import { Pressable, Text } from "./text";
@@ -314,7 +315,9 @@ export function QuestionHistory({ workspaceId, theme, compact }: { workspaceId: 
       </Pressable>)}
     </View>
     <View>
-      {roots.map(r => <HistoryRow key={r.id} r={r} replies={replies} theme={theme} compact={compact} now={now} />)}
+      {/* Pages of 25 threads (invariant pr-scale-lists-batch-not-throw, "every list pages"): 30 days of questions never draw at once. */}
+      <PagedRows items={roots} searching={!!query} resetKey={`${filter}|${query}`} theme={theme} compact={compact} noun="questions"
+        row={r => <HistoryRow key={r.id} r={r} replies={replies} theme={theme} compact={compact} now={now} />} />
       {!roots.length && <Text style={[t.meta, { paddingVertical: 12 }]}>{query ? "No question or answer has those words." : filter === "open" ? "Nothing open: every question has its answer read." : filter === "tasks" ? "No answer has become a task yet." : "No questions yet. Ask one above."}</Text>}
     </View>
   </View>;
