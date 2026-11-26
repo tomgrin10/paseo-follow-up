@@ -119,7 +119,11 @@ sidebar entry with the same title), and both throw with a screenshot instead of 
 
 `scripts/fixture-provider.ts` is the synthetic agent provider these daemons use. Its `fixture-scripts.json` mode
 plays a scripted turn (timeline items, Follow-up RPCs, a permission) for a given prompt, for `scripts/screenshots.mjs`.
-`scripts/harness.mjs` gives them their slot and cleanup (below). `scripts/daemon-counter.mjs` and
+`scripts/harness.mjs` gives them their slot and cleanup (below), and points the browser at
+`scripts/harness-fonts.conf` (`FONTCONFIG_FILE`): the machine's fonts with `system-ui` and `sans-serif` on a font that
+has a bold face. Paseo's phone layout puts `system-ui` first, and on a machine whose default sans has none every phone
+render drew semibold as regular. `scripts/font-weights.mjs` (`fontWeightProblem`) checks it in the page: screenshots
+refuse to render when 600 draws no heavier than 400. `scripts/daemon-counter.mjs` and
 `scripts/heap-summary.mjs` are measurement helpers ([resources.md](resources.md)).
 
 ## Rules for harness daemons
