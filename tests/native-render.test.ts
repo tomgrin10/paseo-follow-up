@@ -102,6 +102,21 @@ test("Your questions on a phone renders under the phone's rules: the card in eve
     // The card keeps a clock (useNow): unmount it, so the test process can end.
     await act(async () => { (card.r as unknown as { unmount(): void }).unmount(); });
   }
+  // Home's phone pane (its dock holds a reply field): the ask field is one line until tapped; a running workspace adds
+  // "the agent is mid-turn" to its asking rows, from the directory's state passed in (no read of the card's own).
+  const folded = await render(createElement(YourQuestionsCard, { workspaceId: "w1", mainAgentId: "a1", theme, compact: true, running: true, foldAsk: true }));
+  try {
+    assert.equal(folded.error, null, `the folded card crashed on a phone: ${(folded.error as Error)?.message}`);
+    const fields = () => folded.r!.root.findAll(n => typeof n.type === "string" && n.props.accessibilityLabel === "Ask the main agent" && "onChangeText" in n.props);
+    const said = () => folded.r!.root.findAll(n => typeof n.type === "string" && typeof n.props.children === "string").map(n => n.props.children as string);
+    assert.equal(fields().length, 0, "folded: no text field until tapped");
+    assert.ok(said().some(x => x.endsWith(" · the agent is mid-turn")), `the asking row says the agent is mid-turn: ${said().filter(x => x.startsWith("Asking")).join(" | ")}`);
+    const row = folded.r!.root.findAll(n => n.props.accessibilityLabel === "Ask the main agent" && typeof n.props.onPress === "function")[0];
+    await act(async () => { (row.props.onPress as () => void)(); });
+    assert.equal(fields().length, 1, "a tap opens the field");
+  } finally {
+    await act(async () => { (folded.r as unknown as { unmount(): void }).unmount(); });
+  }
   for (const [name, el] of [
     ["the history (its sheet's body)", createElement(QuestionHistory, { workspaceId: "w1", theme, compact: true })],
     ["Reply's field", createElement(ReplyForm, { r: requests[1], theme, compact: true, onSent: () => {}, onCancel: () => {} })],

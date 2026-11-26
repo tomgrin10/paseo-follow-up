@@ -27,7 +27,7 @@ import type { NewKey } from "./search-key";
 import { DockedPane } from "./docked-pane";
 import type { DockState } from "./dock";
 import { NeedsYouBlock } from "./needs-you";
-import { YourQuestionsCard } from "./your-questions";
+import { YourQuestionsCard, useWorkspaceRunning } from "./your-questions";
 import { HeldMerges } from "./merge-button";
 import { PrSheet } from "./pr-sheet";
 import { StatsPage, type StatsParams } from "./pr-stats";
@@ -680,6 +680,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
   // Only a real ask joins it (shared briefAsks): a done brief on a row flagged for something else stays out of the count.
   const inBlock = !!w && !!showBrief && !later && briefAsks(b, row);
 
+  const running = useWorkspaceRunning(deps.sources.paseo, w?.id ?? "");
   // Home's detail pane is the selected workspace: every x in it shows without hover (client/dismiss.tsx).
   return <DismissReveal.Provider value="always"><DockedPane compact={compact} header={header} style={{ backgroundColor: c.surface0 }} contentContainerStyle={{ padding: compact ? 16 : 20, gap: 16, paddingBottom: 24 }}
     dock={({ yields, typingInContent }) => s.agentId && !typingInContent && <View nativeID={compact ? TOAST_ANCHOR : undefined} style={[{ borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.surface0 }, bottomInset(compact)]}>
@@ -699,7 +700,7 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
         brief={inBlock ? b : null} briefCard={inBlock && <BriefCard {...({ embedded: true, bare: true, item: { data: b }, theme, layout: { compact }, agentId: s.agentId, deps: deps.briefDeps } as unknown as Parameters<typeof BriefCard>[0])} />}
         actions={{ openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion, openAgent: () => openFull(s) }} />}
       {w && <YourQuestionsCard workspaceId={w.id} mainAgentId={w.mainAgentId} theme={theme} compact={compact} style={{ marginHorizontal: 0, marginTop: 0 }}
-        openAgent={openAgent} />}
+        openAgent={openAgent} running={running} foldAsk={compact && !!s.agentId} />}
       {w && <HeldMerges workspace={w} theme={theme} compact={compact} />}
       {actionBar}
       {laterBlock}

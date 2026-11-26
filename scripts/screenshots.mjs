@@ -4996,8 +4996,9 @@ async function yourQuestionsShots({ shoot, call, seeded, home, cli }) {
   }
   const A1 = "Because the payment gateway already retries for 60 s on its side. A fixed 30 s gap keeps us inside its idempotency window; exponential backoff would push the third try to 120 s, after the key expires, and could charge twice.\n\nIf you want exponential anyway, cap it at 45 s. That's a one-line change in `retry-policy.ts`.";
   const q1 = await ask("Why does the retry use a fixed 30 s gap instead of exponential backoff?");
-  // The message agentQuestionPrompt writes (shared/your-questions.ts), as the chat receives it.
-  const prompt = r => [`Your question (${r.id})`, `The developer asks: "${r.ask}"`, "Answer in plain words, short (under 4000 characters). It's a question, not a task: don't change anything unless it asks you to.", `Reply with context_reply (follow_context_reply as a native tool) and requestId "${r.id}" so the answer lands in Your questions, then end your turn.`].join("\n");
+  // The message agentQuestionPrompt writes for a developer's first question (shared/your-questions.ts; this script runs
+  // under plain node, so it mirrors the one format here: keep the two in step).
+  const prompt = r => `Your question (${r.id}) · answer with context_reply:\n${r.ask}`;
   await agentSays([{ item: { type: "assistant_message", text: A1 } }]);
   const promptFile = join(home, "yq-prompt.txt");
   await fs.writeFile(promptFile, prompt(q1));
@@ -5010,12 +5011,14 @@ async function yourQuestionsShots({ shoot, call, seeded, home, cli }) {
   const ready = async page => { await visible(page.getByText(/fixed 30 s gap keeps us/)).waitFor({ timeout: 60_000 }); };
   const panel = async page => { await page.setViewportSize(TALL); await openChat(page, spec.title, spec.prompt); await page.getByRole("button", { name: "Follow-up", exact: true }).last().click(); await ready(page); await card(page).scrollIntoViewIfNeeded(); };
   const panelPhone = async page => { await openChat(page, spec.title, spec.prompt); await page.getByRole("button", { name: "Follow-up", exact: true }).last().click(); await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click(); await page.setViewportSize(PHONE); await ready(page); await card(page).evaluate(el => el.scrollIntoView({ block: "start" })); };
-  const homeAt = async (page, vp) => { await openHome(page); if (vp === PHONE) await page.setViewportSize(PHONE); await (await homeRow(page, spec.title)).click(); await ready(page); await card(page).evaluate(el => el.scrollIntoView({ block: "start" })); };
+  // `top`: Needs you's end above the card's start, so the pane's order shows (the workspace's own Needs you first).
+  const homeAt = async (page, vp, { top = false } = {}) => { await openHome(page); if (vp !== DESKTOP) await page.setViewportSize(vp); await (await homeRow(page, spec.title)).click(); await ready(page); await card(page).evaluate((el, top) => { el.scrollIntoView({ block: "start" }); if (!top) return; let p = el.parentElement; while (p && p.scrollHeight <= p.clientHeight) p = p.parentElement; if (p) p.scrollTop -= 360; }, top); };
   const noOverflow = async (page, name) => { const o = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth); if (o > 1) throw new Error(`${name} scrolls sideways (${o}px)`); };
   // keepFocus: the reply field keeps its focus for the shot, so the pane shows what typing looks like (the dock steps
   // aside and the field with its Send scrolls into view, invariant 43).
   const reply = async page => { page.keepFocus = true; await visible(page.getByRole("button", { name: "Reply", exact: true })).click(); await visible(page.getByLabel("Your reply")).fill("Cap it at 45 s and open a PR"); await page.waitForTimeout(800); };
-  const history = async page => { await visible(page.getByRole("button", { name: /^History, \d+ questions?/ })).click(); await visible(page.getByLabel("Search questions and answers")).waitFor(); await page.waitForTimeout(400); };
+  // Desktop unfolds the history in the card: scroll so its row is at the top and the opened list shows under it.
+  const history = async page => { const row = visible(page.getByRole("button", { name: /^History, \d+ questions?/ })); await row.click(); await visible(page.getByLabel("Search questions and answers")).waitFor(); if (page.viewportSize().width > PHONE.width) await row.evaluate(el => el.scrollIntoView({ block: "start" })); await page.waitForTimeout(400); };
   const catchUp = async (page, vp) => {
     await openHome(page); if (vp === PHONE) await page.setViewportSize(PHONE);
     await page.getByRole("button", { name: /^Catch up on \d+ things? that need you/ }).filter({ visible: true }).first().click();
@@ -5028,12 +5031,12 @@ async function yourQuestionsShots({ shoot, call, seeded, home, cli }) {
     await page.waitForTimeout(400);
   };
   // The question's message stays Paseo's own user row, so it starts its own turn and shows under "Collapse turns".
-  const chat = async (page, vp) => { await openChat(page, spec.title, spec.prompt); if (vp === PHONE) await page.setViewportSize(PHONE); const msg = visible(page.getByText(/The developer asks: "Why does the retry use a fixed 30 s gap/)); await msg.waitFor({ timeout: 60_000 }); await msg.evaluate(el => el.scrollIntoView({ block: "center" })); await page.waitForTimeout(400); };
+  const chat = async (page, vp) => { await openChat(page, spec.title, spec.prompt); if (vp === PHONE) await page.setViewportSize(PHONE); const msg = visible(page.getByText(/^Your question \(ctx-[0-9a-f]{8}\) · answer with context_reply:/)); await msg.waitFor({ timeout: 60_000 }); await msg.evaluate(el => el.scrollIntoView({ block: "center" })); await page.waitForTimeout(400); };
   for (const theme of ["light", "dark"]) {
     const each = async (name, vp, drive) => shoot(`yq-${name}-${theme}`, vp, theme, async page => { await drive(page); await noOverflow(page, name); });
     await each("panel-desktop", TALL, panel);
     await each("panel-phone", PHONE, panelPhone);
-    await each("home-desktop", DESKTOP, page => homeAt(page, DESKTOP));
+    await each("home-desktop", TALL, page => homeAt(page, TALL, { top: true }));
     await each("home-phone", PHONE, page => homeAt(page, PHONE));
     await each("reply-desktop", TALL, async page => { await panel(page); await reply(page); });
     await each("reply-phone", PHONE, async page => { await homeAt(page, PHONE); await reply(page); });
@@ -5044,6 +5047,18 @@ async function yourQuestionsShots({ shoot, call, seeded, home, cli }) {
     await each("chat-desktop", DESKTOP, page => chat(page, DESKTOP));
     await each("chat-phone", PHONE, page => chat(page, PHONE));
   }
+  // Last, since it changes the agent's state: the main agent mid-turn (a held turn), so Paseo's directory has the
+  // workspace running and the still-queued question says why it waits.
+  await agentSays([{ hold: true }]);
+  const holdFile = join(home, "yq-hold.txt");
+  await fs.writeFile(holdFile, "Carry on with the dunning email.");
+  await cli("send", billing.agentId, "--prompt-file", holdFile, "--no-wait");
+  for (const theme of ["light", "dark"]) await shoot(`yq-midturn-phone-${theme}`, PHONE, theme, async page => {
+    await panelPhone(page);
+    await visible(page.getByText(/· the agent is mid-turn$/)).waitFor({ timeout: 90_000 });
+    await visible(page.getByText(/· the agent is mid-turn$/)).evaluate(el => el.scrollIntoView({ block: "center" }));
+    await noOverflow(page, "midturn-phone");
+  });
 }
 
 /**

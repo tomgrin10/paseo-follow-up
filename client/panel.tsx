@@ -25,7 +25,7 @@ import { WorkspaceHeader } from "./header";
 import { PanelMore } from "./panel-menu";
 import type { HomeSources } from "./home-data";
 import { NeedsYouBlock, overviewKey, workspaceKey } from "./needs-you";
-import { YourQuestionsCard } from "./your-questions";
+import { YourQuestionsCard, useWorkspaceRunning } from "./your-questions";
 import { browserKey } from "./keys";
 import { useWorkspace } from "./workspace-data";
 import type { LiveStore } from "./live";
@@ -345,11 +345,13 @@ const folds = z.object({ open: z.array(z.string()) });
 /** Two columns from this content width: actions on the left, the stacks on the right. */
 export const WIDE_MIN = 820;
 
-export function WorkspaceView({ theme, layout, workspace: w, navigation, loadError, openSettings, openOverview, folds: { isOpen, toggle }, resize, large = false, top, ask, sources }: PluginHostProps & {
+export function WorkspaceView({ theme, layout, workspace: w, navigation, loadError, openSettings, openOverview, folds: { isOpen, toggle }, resize, large = false, top, ask, sources, paseo }: PluginHostProps & {
   navigation?: PluginWorkspacePanelProps["navigation"]; workspace: Workspace; loadError?: string | null; openSettings: (category?: SettingsCategory) => void; openOverview: () => void; top?: ReactNode; /** The main agent's open brief and its card, for the Needs you block. */ ask?: { brief: Brief; card: ReactNode } | null;
   folds: Folds; resize: { icon: "Maximize2" | "Minimize2"; label: string; onPress: () => void } | null; large?: boolean;
   /** Home's sources: the header's More menu (the row menu). Absent in the larger view. */
   sources?: HomeSources;
+  /** Paseo's workspace list where Home's sources aren't passed (the larger view): Your questions' running state. */
+  paseo?: HomeSources["paseo"];
 }) {
   const control = useRpc(controlRpc); const refresh = useRpc(refreshRpc); const browserRead = useRpc(browserStatusRpc);
   const cache = useQueryClient(); const toast = useToast();
@@ -381,10 +383,11 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const resizeShown = compact ? null : resize?.icon === "Maximize2" && wide ? null : resize;
   const header = <WorkspaceHeader workspace={w} theme={theme} compact={compact} now={now} onSettings={openSettings} onRefresh={() => update.mutate()} refreshing={update.isPending} onAuto={next => auto.mutate(next)} autoPending={auto.isPending} notice={loadError ?? null} onOpenPr={openPr} resize={resizeShown} hideTitle={large} onHome={compact ? openOverview : undefined} openAgent={openAgent}
     more={sources ? <PanelMore w={w} sources={sources} theme={theme} compact={compact} openAgent={openAgent} openQuestion={setQuestion} showMenu={setMoreMenu} /> : undefined} />;
+  const running = useWorkspaceRunning(sources?.paseo ?? paseo, w.id);
   const shipped = <ShippedCard workspace={w} theme={theme} compact={compact} now={now} />;
   const needs = <NeedsYouBlock workspace={w} theme={theme} compact={compact} now={now} brief={ask?.brief ?? null} briefCard={ask?.card ?? null} actions={{ openAgent, openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion }} />;
   // Your questions (docs/needs-you.md#your-questions): under Needs you, the same card as Home's detail pane.
-  const questions = <YourQuestionsCard workspaceId={w.id} mainAgentId={w.mainAgentId} theme={theme} compact={compact} openAgent={openAgent} />;
+  const questions = <YourQuestionsCard workspaceId={w.id} mainAgentId={w.mainAgentId} theme={theme} compact={compact} openAgent={openAgent} running={running} />;
   // Once shipped, the stack and tasks are history: one quiet fold instead of two near-empty cards.
   const history = done && <View style={{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.colors.border, overflow: "hidden" }}>
     <View style={{ marginTop: -1 }}><FoldRow theme={theme} compact={compact} open={isOpen("history")} onPress={() => toggle("history")} icon="History" iconColor={theme.colors.foregroundMuted} label={historyLabel(w)} /></View>

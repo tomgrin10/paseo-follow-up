@@ -3,7 +3,7 @@
 // full with Done · Reply · Make a task · ⋯, questions still asking, and the history. It reads the client's one store of
 // questions (Home's extras, kept current by the home feed; client/more-context.tsx), so nothing polls, and every act is
 // one request (`follow.question-action`, which the agent tool `question_action` also makes).
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Platform, View, type StyleProp, type TextStyle } from "react-native";
 import { Pressable, Text } from "./text";
 import { Icon, Modal, TextInput, copyText } from "@getpaseo/plugin/client/ui";
@@ -21,6 +21,7 @@ import { ImageField, useImageAttachments } from "./image-attach";
 import type { ImageTarget, ImageUpload } from "../shared/images";
 import { useContextStore } from "./more-context";
 import { notice } from "./toast-store";
+import type { PaseoWorkspaces } from "./home-data";
 
 export const ASK_HINT = "The answer lands here. In a chat, /ask does the same.";
 const FILTER_LABEL: Record<HistoryFilter, string> = { all: "All", open: "Open", tasks: "Tasks" };
@@ -102,8 +103,11 @@ export function AnswerActions({ r, theme, compact, onDone, onReply, onTask, onAs
 }) {
   const c = theme.colors; const t = text(c, compact);
   const [more, setMore] = useState(false);
-  // A narrow panel can't hold Done · Reply · Make a task · ⋯ on one line: Make a task reads "Task" there (its label stays whole).
-  const [narrow, setNarrow] = useState(false);
+  // A narrow row can't hold Done · Reply · Make a task · ⋯ on one line: Make a task reads "Task" there (its label stays
+  // whole), and narrower still (a phone's panel, ~306 pt) Done, Reply and Task drop their icons, so the row never wraps.
+  const [width, setWidth] = useState(0);
+  const narrow = width > 0 && width < (keys ? 440 : 380);
+  const tight = width > 0 && width < (compact ? 340 : 300);
   const failed = r.state === "failed";
   const k = (key: string) => keys && !compact ? ` (${key})` : "";
   const copy = () => { void copyText(r.answer ? `Q: ${r.ask}\nA: ${r.answer}` : r.ask).then(() => notice("Copied the question and its answer")).catch(() => undefined); setMore(false); };
@@ -114,12 +118,12 @@ export function AnswerActions({ r, theme, compact, onDone, onReply, onTask, onAs
   </View>;
   return <View style={{ gap: 8 }}>
     {/* ⋯ sits outside the wrapping group, so it stays at the row's end when the buttons wrap. */}
-    <View onLayout={e => setNarrow(e.nativeEvent.layout.width < (keys ? 440 : 380))} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+    <View onLayout={e => setWidth(e.nativeEvent.layout.width)} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
     <View style={{ flexDirection: "row", alignItems: "center", flexWrap: bar ? "nowrap" : "wrap", gap: 8, flexShrink: 1, minWidth: 0 }}>
-      <Button theme={theme} compact={compact} grow={bar} kind="primary" icon="Check" title={`Done${k("D")}`} accessibilityLabel={`Done${k("D")}`} accessibilityHint="Marks the answer read; it stays in the history" loading={busy === "done"} disabled={!!busy} onPress={onDone} />
+      <Button theme={theme} compact={compact} grow={bar} kind="primary" icon={tight ? undefined : "Check"} title={`Done${k("D")}`} accessibilityLabel={`Done${k("D")}`} accessibilityHint="Marks the answer read; it stays in the history" loading={busy === "done"} disabled={!!busy} onPress={onDone} />
       {failed ? <Button theme={theme} compact={compact} icon="RotateCcw" title="Ask again" loading={busy === "again"} disabled={!!busy} onPress={onAskAgain} />
-        : <Button theme={theme} compact={compact} icon="Reply" title={`Reply${k("W")}`} accessibilityLabel={`Reply${k("W")}`} accessibilityHint="Asks a follow-up question in the same thread" disabled={!!busy} onPress={onReply} />}
-      {!!r.answer && !failed && <Button theme={theme} compact={compact} icon="ListTodo" title={`${bar || narrow ? "Task" : "Make a task"}${k("T")}`} accessibilityLabel={`Make a task${k("T")}`} accessibilityHint="Adds a task for the agent that answered, with this question and answer as its note" loading={busy === "task"} disabled={!!busy} onPress={onTask} />}
+        : <Button theme={theme} compact={compact} icon={tight ? undefined : "Reply"} title={`Reply${k("W")}`} accessibilityLabel={`Reply${k("W")}`} accessibilityHint="Asks a follow-up question in the same thread" disabled={!!busy} onPress={onReply} />}
+      {!!r.answer && !failed && <Button theme={theme} compact={compact} icon={tight ? undefined : "ListTodo"} title={`${bar || narrow ? "Task" : "Make a task"}${k("T")}`} accessibilityLabel={`Make a task${k("T")}`} accessibilityHint="Adds a task for the agent that answered, with this question and answer as its note" loading={busy === "task"} disabled={!!busy} onPress={onTask} />}
       {!r.answer && r.state === "chat" && openChat && <Button theme={theme} compact={compact} icon="MessageSquare" title={`Open chat${k("O")}`} accessibilityLabel={`Open chat${k("O")}`} onPress={openChat} />}
     </View>
       <IconButton theme={theme} compact={compact} icon="Ellipsis" label={more ? "Fewer actions" : "More actions"} tooltip={!compact} onPress={() => setMore(v => !v)} />
@@ -136,9 +140,12 @@ function AgentField({ theme, compact, label, placeholder, value, onChange, disab
 }) {
   const c = theme.colors;
   const caret = useCaret();
+  // One focus ring: the field's own border turns accent; the browser's outline stays off (as in new-settings.tsx).
+  const [focused, setFocused] = useState(false);
   const field = (pad: FieldPad) => <TextInput accessibilityLabel={label} placeholder={placeholder} placeholderTextColor={c.foregroundMuted} value={value} onChangeText={onChange} onSelectionChange={caret.onSelectionChange}
-    multiline editable={!disabled} autoFocus={autoFocus} maxLength={2000}
-    style={[{ minHeight: compact ? 44 : lines > 1 ? 56 : 36, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: c.border, color: c.foreground, backgroundColor: c.surface0, fontSize: compact ? 15 : 13 }, pad]} />;
+    multiline editable={!disabled} autoFocus={autoFocus} maxLength={2000} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+    style={[{ minHeight: compact ? 44 : lines > 1 ? 56 : 36, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: focused ? c.accent : c.border, color: c.foreground, backgroundColor: c.surface0, fontSize: compact ? 15 : 13,
+      ...(Platform.OS === "web" ? { outlineStyle: "none" } as object : null) }, pad]} />;
   return <ImageField model={img} theme={theme} compact={compact}><View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8 }}>
     <View style={{ flex: 1, minWidth: 0 }}><DictationField theme={theme} compact={compact} field={field} disabled={disabled} onText={said => onChange(caret.insert(value, said, 2000))} /></View>
     {right}
@@ -193,14 +200,14 @@ function AnswerItem({ r, theme, compact, now, mainAgentId, openAgent }: { r: Con
 }
 
 /** A question still asking: spinner, when it was sent, and Withdraw (never Done: there is nothing to read yet). */
-function AskingItem({ r, theme, compact, now }: { r: ContextRequest; theme: Theme; compact: boolean; now: number }) {
+function AskingItem({ r, theme, compact, now, busyAgent }: { r: ContextRequest; theme: Theme; compact: boolean; now: number; /** The workspace is running (Paseo's directory): the question waits for the turn to end. */ busyAgent: boolean }) {
   const c = theme.colors; const t = text(c, compact);
   const acts = useQuestionActs();
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const withdraw = () => { setBusy(true); setError(null); acts.act(r.id, "withdraw").then(() => notice("Withdrawn · in History"), e => setError(errorText(e))).finally(() => { setBusy(false); setConfirm(false); }); };
-  const line = `Asking · ${r.deliveredAt ? `sent ${ago(r.deliveredAt, now)}` : `queued ${ago(r.askedAt, now)}`}`;
+  const line = `Asking · ${r.deliveredAt ? `sent ${ago(r.deliveredAt, now)}` : `queued ${ago(r.askedAt, now)}`}${busyAgent ? " · the agent is mid-turn" : ""}`;
   return <View {...({ dataSet: { yourQuestion: r.id } } as object)} style={{ gap: 6, paddingHorizontal: compact ? 14 : 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border }}>
     <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
       <Spinner color={c.foregroundMuted} size={12} label="Asking" />
@@ -221,8 +228,9 @@ function AskingItem({ r, theme, compact, now }: { r: ContextRequest; theme: Them
 }
 
 /** The ask field and its hint line: a free question to the workspace's main agent (follow.context-ask, no card). */
-function AskField({ workspaceId, theme, compact }: { workspaceId: string; theme: Theme; compact: boolean }) {
+function AskField({ workspaceId, theme, compact, folded = false }: { workspaceId: string; theme: Theme; compact: boolean; /** One line until tapped (Home's phone pane, under the dock's reply field). */ folded?: boolean }) {
   const c = theme.colors; const t = text(c, compact);
+  const [open, setOpen] = useState(!folded);
   const acts = useQuestionActs();
   const img = useImageAttachments({ target: { kind: "workspace", workspaceId } });
   const [words, setWords] = useState("");
@@ -235,8 +243,16 @@ function AskField({ workspaceId, theme, compact }: { workspaceId: string; theme:
     acts.ask({ workspaceId, ask: words.trim(), via: "field", images: img.uploads() }).then(() => { setWords(""); img.clear(); }, e => setError(errorText(e))).finally(() => setBusy(false));
   };
   const sendButton = (words.trim() || busy) ? <IconButton theme={theme} compact={compact} icon="Send" label="Ask the main agent" tooltip={!compact} spinning={busy} disabled={!words.trim() || busy || !!img.blocked} color={c.foreground} onPress={send} /> : null;
+  // Folded: one quiet row, so the pane shows one text field (the dock's) until you choose to ask.
+  if (!open && !words) return <View style={{ paddingHorizontal: compact ? 14 : 12, paddingBottom: 12 }}>
+    <Pressable accessibilityRole="button" accessibilityLabel="Ask the main agent" accessibilityHint="Opens a field for a question to the workspace's main agent" onPress={() => setOpen(true)}
+      style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 44, paddingHorizontal: 10, borderRadius: 6, backgroundColor: pressed ? c.surface2 : c.surface1 })}>
+      <Icon name="MessageSquarePlus" size={16} color={c.foregroundMuted} />
+      <Text style={[t.body, { color: c.foregroundMuted, flex: 1 }]}>Ask the main agent…</Text>
+    </Pressable>
+  </View>;
   return <View {...PRIMARY_FORM} style={{ gap: 6, paddingHorizontal: compact ? 14 : 12, paddingBottom: 12 }}>
-    <AgentField theme={theme} compact={compact} label="Ask the main agent" placeholder="Ask the main agent…" value={words} onChange={setWords} disabled={busy} img={img} right={sendButton} />
+    <AgentField theme={theme} compact={compact} label="Ask the main agent" placeholder="Ask the main agent…" value={words} onChange={setWords} disabled={busy} autoFocus={folded} img={img} right={sendButton} />
     {!!error && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusDanger }]}>{error}</Text>}
     <Text style={t.small}>{ASK_HINT}</Text>
   </View>;
@@ -304,11 +320,19 @@ export function QuestionHistory({ workspaceId, theme, compact }: { workspaceId: 
   </View>;
 }
 
+const noSubscribe = () => () => undefined;
+/** Whether Paseo's directory has the workspace running: the store Home and the panel already keep, no read of its own. */
+export function useWorkspaceRunning(paseo: PaseoWorkspaces | undefined, workspaceId: string): boolean {
+  return useSyncExternalStore(paseo?.subscribe ?? noSubscribe, () => !!paseo?.get(workspaceId)?.archive?.running, () => false);
+}
+
 /**
  * The card. `openAgent` opens an agent's chat (absent where there is no navigation). Phones open the history in a
  * sheet; desktop unfolds it in the card.
  */
-export function YourQuestionsCard({ workspaceId, mainAgentId, theme, compact, openAgent, style }: { workspaceId: string; mainAgentId: string | null; theme: Theme; compact: boolean; openAgent?: (agentId: string) => void; style?: object }) {
+export function YourQuestionsCard({ workspaceId, mainAgentId, theme, compact, openAgent, style, running = false, foldAsk = false }: { workspaceId: string; mainAgentId: string | null; theme: Theme; compact: boolean; openAgent?: (agentId: string) => void; style?: object;
+  /** Paseo's directory says the workspace is running (no read of its own): asking rows add "the agent is mid-turn". */ running?: boolean;
+  /** The pane has a docked reply field: the ask field stays one line until tapped. */ foldAsk?: boolean }) {
   const c = theme.colors; const t = text(c, compact);
   const now = useNow(30_000);
   const q = useWorkspaceQuestions(workspaceId);
@@ -320,7 +344,7 @@ export function YourQuestionsCard({ workspaceId, mainAgentId, theme, compact, op
     <Text accessibilityRole="header" style={[t.label, { flex: 1 }]}>Your questions</Text>
     {!!counts && <View accessibilityLabel={counts} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
       {!!q.unread.length && <View style={{ paddingHorizontal: 8, paddingVertical: 1, borderRadius: 999, backgroundColor: tint(c.statusWarning, c) }}><Text style={[t.meta, { color: c.statusWarning, fontWeight: "600" }]}>{`${q.unread.length} answer${q.unread.length === 1 ? "" : "s"}`}</Text></View>}
-      {!!q.asking.length && <Text style={t.meta}>{`${q.unread.length ? "· " : ""}${q.asking.length} asking`}</Text>}
+      {!!q.asking.length && <Text style={t.meta}>{`${q.asking.length} asking`}</Text>}
     </View>}
   </View>;
   const historyRow = total > 0 && <Pressable accessibilityRole="button" aria-expanded={compact ? undefined : history} accessibilityState={compact ? undefined : { expanded: history }} accessibilityLabel={`History, ${total} question${total === 1 ? "" : "s"}`} accessibilityHint="Search every question and answer, kept 30 days" onPress={() => setHistory(v => !v)}
@@ -333,9 +357,9 @@ export function YourQuestionsCard({ workspaceId, mainAgentId, theme, compact, op
   </Pressable>;
   return <View {...({ dataSet: { yourQuestions: workspaceId } } as object)} style={[{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 8, borderWidth: 1, borderColor: q.unread.length ? withAlpha(c.statusWarning, 0.45) : c.border, backgroundColor: c.surface0, overflow: "hidden" }, style]}>
     {header}
-    <AskField workspaceId={workspaceId} theme={theme} compact={compact} />
+    <AskField workspaceId={workspaceId} theme={theme} compact={compact} folded={foldAsk} />
     {q.unread.map(r => <AnswerItem key={r.id} r={r} theme={theme} compact={compact} now={now} mainAgentId={mainAgentId} openAgent={openAgent} />)}
-    {q.asking.map(r => <AskingItem key={r.id} r={r} theme={theme} compact={compact} now={now} />)}
+    {q.asking.map(r => <AskingItem key={r.id} r={r} theme={theme} compact={compact} now={now} busyAgent={!!running} />)}
     {historyRow}
     {!compact && history && <View style={{ paddingHorizontal: 12, paddingBottom: 12, paddingTop: 2 }}><QuestionHistory workspaceId={workspaceId} theme={theme} compact={false} /></View>}
     {compact && <Modal title="Your questions" icon={<Icon name="MessageSquareReply" size={18} color={c.foregroundMuted} />} open={history} onOpenChange={next => { if (!next) setHistory(false); }}>

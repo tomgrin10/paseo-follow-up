@@ -380,7 +380,12 @@ about a card (`cardKey`), a free question has `cardKey: null`. Design: `DESIGN.m
   Home's detail pane; it reads the one store of questions (`useContextStore`, Home's extras kept by the home feed;
   no polling) and acts through `extras.questionAction` (`follow.question-action`). Its fields (the ask, Reply) are
   `DictationField` inside `ImageField`, marked `PRIMARY_FORM`. Only what the server takes is offered: no Done while
-  asking (Withdraw), no Make a task without an answer, Ask again for a failed ask. Catch up's `answer` card draws
+  asking (Withdraw), no Make a task without an answer, Ask again for a failed ask. An asking row reads "queued Nm ago"
+  or "sent Nm ago" (`deliveredAt`), plus "· the agent is mid-turn" while Paseo's directory has the workspace running
+  (`useWorkspaceRunning` over the store Home and the panel already keep; no read of its own). Where the pane docks a
+  reply field (Home on a phone), the ask field is one "Ask the main agent…" row until tapped (`foldAsk`), so the pane
+  shows one text field. Done · Reply · Make a task · ⋯ stay on one row: "Task" on a narrow row, and Reply and Task
+  (and Done) drop their icons below ~340 pt (a phone's panel). Catch up's `answer` card draws
   `AnswerView` and `AnswerActions` (D Done, W Reply, T Make a task, O Open chat, J Skip: `CATCH_UP_KEYS` `when:
   "answer"`); on a phone they are the thumb bar. `/ask` is an agent slash command (`index.client.tsx`).
 - **v1 → v2**: `context.json` gained `version: 2`; a v1 file is migrated on load (`migrateContext`): settled asks
