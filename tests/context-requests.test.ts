@@ -106,7 +106,11 @@ test("after a restart an open ask is re-derived: delivered to an idle agent sett
 
 test("context asks ride the queue under the asker's own label, and the queue's settle is their delivery", async () => {
   const source = await readFile("index.server.ts", "utf8");
-  assert.match(source, /enqueueMessage\(to\.agentId, agentContextPrompt\(out\.request\), out\.request\.id, actorBy\(actor\)(, refs)?\)/, "an agent's ask_context isn't labelled the developer");
+  assert.match(source, /enqueueMessage\(to\.agentId, out\.request\.cardKey \? agentContextPrompt\(out\.request\) : agentQuestionPrompt\(out\.request, parent\), out\.request\.id, by, refs\)/, "an agent's ask_context isn't labelled the developer");
+  assert.match(source, /askAgent\(ask, actorBy\(actor\)/);
+  // Turn-end capture rides the worker's one turn read (a-turn-s-timeline-is-read-once), on any provider.
+  assert.match(source, /const items = await inboxDirectory\.turnItems![\s\S]{0,3000}turnEnd\.turnEnded\(event\.agent, event\.outcome, event\.turnId \?\? null, items\)[\s\S]{0,300}contextRequests\.turnEnded\(event\.agent\.id, items\)/);
+  assert.doesNotMatch(source, /server\.on\("agent\.turn_ended", async event => contextRequests\.turnEnded/, "no second turn-end handler that settles without the items");
   assert.match(source, /item\.messageId\?\.startsWith\("ctx-"\)[\s\S]{0,200}contextRequests\.delivered\(item\.messageId/);
   assert.match(source, /contextRequests\.reconcile\(/);
   assert.doesNotMatch(source, /contextRequests\.turnStarted/);
@@ -121,10 +125,12 @@ test("a failed send settles the ask as failed with the reason", async t => {
   assert.equal(r.error, "The agent was archived.");
 });
 
-test("asks expire after a day", async t => {
+test("questions are kept 30 days, then expire", async t => {
   const { store, tick } = await fixture(t);
   await store.ask(input, "developer", "a1");
-  tick(25 * 3_600_000);
+  tick(29 * 24 * 3_600_000);
+  assert.equal((await store.list()).length, 1, "kept as history past the old 24 h");
+  tick(2 * 24 * 3_600_000);
   assert.deepEqual(await store.list(), []);
 });
 

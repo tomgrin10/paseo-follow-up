@@ -19,7 +19,7 @@ import { CATCH_UP_RAIL_DEFAULT, CATCH_UP_RAIL_MAX, CATCH_UP_RAIL_MIN } from "../
 import { CATCH_UP_KEYS, MODE, catchUpKey, contextFor, keyLabel, deckCards, groupOf, openInWorkspace, park, prevPos, applySwipe, skipWorkspace, swipeLock, swipeOutcome, settle as settleCard, startSession, statsOf, sync, type ContextRequest, type DeckCard, type Outcome, type Session } from "../shared/catch-up";
 import type { Workspace } from "../shared/model";
 import type { ListWorkspace } from "../shared/list";
-import { bottomInset, Button, focusSoon, IconButton, SubmitScope, text, type Theme } from "./kit";
+import { bottomInset, Button, errorText, focusSoon, IconButton, SubmitScope, text, type Theme } from "./kit";
 import { glyphColor } from "./home-list";
 import { useHomeModel, type HomeSources } from "./home-data";
 import { useInbox } from "./inbox";
@@ -39,6 +39,8 @@ import { ownsKey, surfaceVisible } from "../shared/list-keys";
 import { useReducedMotion } from "./motion";
 import { PRIMARY_FORM } from "./dock";
 import { MorePanel, MoveResult, ContextAnswer } from "./more-context";
+import { AnswerActions, AnswerView, ReplyForm, useQuestionActs } from "./your-questions";
+import { questionLine, questionsByWorkspace } from "../shared/your-questions";
 
 export { MorePanel, MoveResult, ContextAnswer };
 
@@ -58,13 +60,18 @@ export function cardLabel(card: DeckCard, w: ListWorkspace | undefined): string 
   if (card.kind === "question") { const q = w?.questions.find(x => x.id === card.questionId); return q ? `${q.id} · ${q.title}` : card.questionId ?? "Question"; }
   if (card.kind === "item" && card.item) return card.item.title;
   if (card.kind === "brief") return card.s.line || card.s.word || "Ask";
+  if (card.kind === "answer") return card.ask || "Your question";
   return card.s.line || "Finished";
 }
 /** The card's own word: a workspace row's word names its first item, the card names its own. */
+/** "4m ago", or "just now" (never "now ago"); empty when there's no time. */
+const agoText = (a: string) => !a ? "" : a === "now" ? "just now" : `${a} ago`;
+
 function cardWord(card: DeckCard): string {
   if (card.kind === "permission") return "Permission";
   if (card.kind === "question") return card.item?.kind === "question" && card.item.state === "stopped" ? "Agent stopped" : "Question";
   if (card.kind === "finished") return "Finished";
+  if (card.kind === "answer") return "Your question";
   if (card.kind === "brief") return card.s.word ?? "Ask";
   switch (card.item?.kind) {
     case "merge": return "Merge"; case "reviewers": return "Add reviewers"; case "send": return "Send"; case "answer": return "Your answer";
@@ -73,14 +80,14 @@ function cardWord(card: DeckCard): string {
     default: return card.s.word ?? "Needs you";
   }
 }
-const cardIcon = (card: DeckCard) => card.kind === "permission" ? "ShieldQuestion" : card.kind === "question" ? "MessageCircleQuestion"
+const cardIcon = (card: DeckCard) => card.kind === "permission" ? "ShieldQuestion" : card.kind === "question" ? "MessageCircleQuestion" : card.kind === "answer" ? "MessageSquareReply"
   : card.item?.kind === "merge" ? "GitMerge" : card.item?.kind === "reviewers" ? "UserPlus" : card.item?.kind === "person" ? "UserRound" : card.item?.kind === "send" ? "Send" : card.kind === "finished" ? "Flag" : card.s.icon;
 /**
  * The card Skip names what it skips, so it never reads as the workspace (Tom, beta.3: "at first I thought it skips the
  * workspace"): the card's kind where one word says it, else "card", the deck's own word ("N skipped" counts cards).
  */
 export function skipNoun(card: Pick<DeckCard, "kind" | "item">): string {
-  return card.kind === "question" ? "question" : card.kind === "permission" ? "permission" : card.item?.kind === "merge" ? "merge" : "card";
+  return card.kind === "question" ? "question" : card.kind === "answer" ? "answer" : card.kind === "permission" ? "permission" : card.item?.kind === "merge" ? "merge" : "card";
 }
 /** The card Skip's tooltip and accessible name: what it does and that the card comes back. */
 export const skipCardHint = (noun: string) => `Skip this ${noun}. It comes back after the rest`;
@@ -96,8 +103,10 @@ export function CatchUp({ theme, compact, deps, navigation, onExit }: { theme: T
   const version = useSyncExternalStore(live.subscribe, live.version, live.version);
   const context = useSyncExternalStore(extras.subscribe, extras.context, extras.context);
   // Everything comes from what the client already holds: Home's model, the inbox rows, the listed workspaces.
-  const liveCards = useMemo(() => deckCards({ model, rows, items: id => { const w = live.get(id); return w ? needsYou(w as unknown as Workspace) : []; } }),
-    [model, rows, version, live]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Your questions: each unread answer is a card, last in its workstream (shared deckCards).
+  const unread = useMemo(() => questionsByWorkspace(context), [context]);
+  const liveCards = useMemo(() => deckCards({ model, rows, items: id => { const w = live.get(id); return w ? needsYou(w as unknown as Workspace) : []; }, answers: id => unread.get(id)?.unread ?? [] }),
+    [model, rows, version, live, unread]); // eslint-disable-line react-hooks/exhaustive-deps
   const byKey = useMemo(() => new Map(liveCards.map(x => [x.key, x])), [liveCards]);
   // A card that left Needs you keeps its last copy, so it can say "Handled elsewhere" in place.
   const seen = useRef(new Map<string, DeckCard>());
@@ -163,7 +172,7 @@ export function CatchUp({ theme, compact, deps, navigation, onExit }: { theme: T
       if (!r || !ownsKey({ inside: !!el && r.contains(el), onBody, claimBody: true, visible: onBody && surfaceVisible(r, doc) })) return;
       const typing = !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || !!el.isContentEditable);
       const hit = catchUpKey({ key: e.key, meta: e.metaKey, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, composing: e.isComposing, mac },
-        { typing, inMore: !!el?.closest?.("[data-catch-up-more]"), moreOpen: more, inRail: !!el?.closest?.("[data-catch-up-rail]") });
+        { typing, inMore: !!el?.closest?.("[data-catch-up-more]"), moreOpen: more, inRail: !!el?.closest?.("[data-catch-up-rail]"), answer: card?.kind === "answer" });
       if (!hit || finished && !["back", "keys", "leave", "rail"].includes(hit.action)) return;
       const click = (q: string) => { const b = r.querySelector(q); b?.click?.(); return !!b; };
       switch (hit.action) {
@@ -197,6 +206,10 @@ export function CatchUp({ theme, compact, deps, navigation, onExit }: { theme: T
         // Its sheet or popover takes focus itself (MoveResult).
         case "later": if (!click('[aria-label="Later (L)"]')) return; break;
         case "chat": if (!click('[aria-label="Open chat (O)"]')) return; break;
+        // An answer card's own buttons (AnswerActions), so the key does exactly what the click does.
+        case "done": if (!click('[data-catch-up-card] [aria-label="Done (D)"]')) return; break;
+        case "reply": if (!click('[data-catch-up-card] [aria-label="Reply (W)"]')) return; break;
+        case "task": if (!click('[data-catch-up-card] [aria-label="Make a task (T)"]')) return; break;
         case "chip": r.querySelectorAll("[data-catch-up-more] [role=\"radio\"]")[Number(hit.arg) - 1]?.click?.(); break;
         case "ask": if (!click('[data-catch-up-more] [data-ask-agent] [role="button"]')) return; break;
         case "rail": {
@@ -293,7 +306,7 @@ export function CatchUp({ theme, compact, deps, navigation, onExit }: { theme: T
       onSkipped={() => setSession(s => ({ ...s, pos: s.order.findIndex(k => s.outcomes[k] === "skipped"), lapped: true }))} />
     // The card on screen is the selected one: its x shows without hover (dismissing-anything-in-needs-you-sends-the-agent-nothing).
     : <DismissReveal.Provider value="always"><CardView key={card.key} card={card} w={w} theme={theme} compact={compact} deps={deps} navigation={navigation} gone={gone} more={more} setMore={setMore}
-      request={askFor(context, card)} waiting={!!session.parked[card.s.key]} onAsk={ask}
+      request={askFor(context, card)} answer={card.requestId ? context.find(r => r.id === card.requestId) ?? null : null} waiting={!!session.parked[card.s.key]} onAsk={ask}
       sameWorkspace={session.order.filter(k => cardOf(k)?.s.key === card.s.key)}
       onDone={() => settle("done")} onSkip={skip} onSkipWorkspace={wsLeft > 1 ? skipWs : undefined} wsLeft={wsLeft} onBack={session.pos > 0 ? back : undefined} onLater={() => settle("later")} /></DismissReveal.Provider>;
 
@@ -351,9 +364,9 @@ export function CatchUp({ theme, compact, deps, navigation, onExit }: { theme: T
 }
 
 /** One card: who and what, the ask through its own surface's component, then the deck's moves pinned to the bottom. */
-function CardView({ card, w, theme, compact, deps, navigation, gone, more, setMore, request, waiting, onAsk, sameWorkspace, onDone, onSkip, onSkipWorkspace, wsLeft, onBack, onLater }: {
+function CardView({ card, w, theme, compact, deps, navigation, gone, more, setMore, request, answer, waiting, onAsk, sameWorkspace, onDone, onSkip, onSkipWorkspace, wsLeft, onBack, onLater }: {
   card: DeckCard; w: ListWorkspace | undefined; theme: Theme; compact: boolean; deps: CatchUpDeps; navigation: Nav; gone: boolean; more: boolean; setMore: (v: boolean | ((v: boolean) => boolean)) => void;
-  request: ContextRequest | null; waiting: boolean; onAsk: (words: string, images?: ImageUpload[]) => Promise<void>;
+  request: ContextRequest | null; /** An `answer` card's question (Your questions). */ answer: ContextRequest | null; waiting: boolean; onAsk: (words: string, images?: ImageUpload[]) => Promise<void>;
   sameWorkspace: string[]; onDone: () => void; onSkip: () => void; onSkipWorkspace?: () => void; wsLeft: number; onBack?: () => void; onLater: () => void;
 }) {
   const c = theme.colors; const t = text(c, compact);
@@ -377,7 +390,7 @@ function CardView({ card, w, theme, compact, deps, navigation, gone, more, setMo
       <Icon name={cardIcon(card)} size={14} color={color} />
       <Text numberOfLines={1} style={[t.meta, { flex: 1 }]}>
         <Text style={{ color, fontWeight: "600" }}>{word}</Text>
-        {[s.at ? `${age(s.at, Date.now())} ago` : "", s.project].filter(Boolean).map(x => ` · ${x}`).join("")}
+        {[s.at ? agoText(age(s.at, Date.now())) : "", s.project].filter(Boolean).map(x => ` · ${x}`).join("")}
         {sameWorkspace.length > 1 ? ` · ${nth + 1} of ${sameWorkspace.length} here` : ""}
       </Text>
     </View>
@@ -406,7 +419,27 @@ function CardView({ card, w, theme, compact, deps, navigation, gone, more, setMo
     <Button theme={theme} compact={compact} kind="primary" icon="ArrowRight" title="Next" onPress={onSkip} />
   </View>;
 
-  const askBlock = card.kind === "question" && q && ws
+  const isAnswer = card.kind === "answer";
+  const acts = useQuestionActs();
+  const [replying, setReplying] = useState(false);
+  const [answerBusy, setAnswerBusy] = useState<"done" | "task" | "again" | null>(null);
+  const [answerError, setAnswerError] = useState<string | null>(null);
+  const answerRun = (what: "done" | "task" | "again", work: () => Promise<unknown>) => {
+    setAnswerBusy(what); setAnswerError(null);
+    work().then(onDone, e => setAnswerError(errorText(e))).finally(() => setAnswerBusy(null));
+  };
+  const answerChat = answer?.askedOf && navigation ? () => navigation.openAgent({ agentId: answer.askedOf! }) : openChat;
+  const answerActions = (bar: boolean) => answer && <AnswerActions r={answer} theme={theme} compact={compact} keys bar={bar} busy={answerBusy} openChat={bar ? answerChat : undefined}
+    onDone={() => answerRun("done", () => acts.act(answer.id, "done"))} onReply={() => setReplying(true)}
+    onTask={() => answerRun("task", () => acts.act(answer.id, "task"))}
+    onAskAgain={() => answerRun("again", async () => { await acts.ask({ workspaceId: answer.workspaceId, agentId: answer.cardKey ? answer.agentId : answer.askedOf, cardKey: answer.cardKey, card: answer.card || undefined, ask: answer.ask, via: answer.via === "slash" ? "slash" : answer.cardKey ? "more" : "field" }); await acts.act(answer.id, "done"); })}
+    extra={bar ? <Button theme={theme} compact kind="ghost" icon="ArrowRight" title={`Skip ${noun}`} accessibilityLabel={skipCardHint(noun)} onPress={onSkip} /> : undefined} />;
+  const askBlock = isAnswer ? answer ? <View style={{ gap: 14 }}>
+      <AnswerView r={answer} theme={theme} compact={compact} now={Date.now()} mainAgentId={full?.mainAgentId ?? w?.mainAgentId ?? null} big />
+      {replying ? <ReplyForm r={answer} theme={theme} compact={compact} onCancel={() => setReplying(false)} onSent={onDone} /> : !compact && answerActions(false)}
+      {!!answerError && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusDanger }]}>{answerError}</Text>}
+    </View> : <RichText selectable style={t.ask}>{card.ask || "Your question"}</RichText>
+    : card.kind === "question" && q && ws
     ? <View style={{ gap: 8 }}>
       <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
         <RichText plain style={[compact ? t.ask : [t.body, { fontSize: 15, lineHeight: 21, fontWeight: "600" }], { flex: 1, minWidth: 0 }]}>{`${q.id} · ${q.title}`}</RichText>
@@ -428,7 +461,7 @@ function CardView({ card, w, theme, compact, deps, navigation, gone, more, setMo
     </View>;
 
   // Add context without answering: every card that isn't a question has the agent's reply box (a question has its note).
-  const reply = card.kind !== "question" && s.agentId && <NoteRow theme={theme} compact={compact} agentId={s.agentId} />;
+  const reply = card.kind !== "question" && !isAnswer && s.agentId && <NoteRow theme={theme} compact={compact} agentId={s.agentId} />;
   const contextBlock = request && <ContextAnswer theme={theme} compact={compact} request={request} waiting={waiting} agent={agentName} openChat={openChat} openAgent={navigation ? id => navigation.openAgent({ agentId: id }) : undefined} />;
   // a-move-bar-action-opens-in-view (MOVE_OPENS): More context and Later open where the eye is, a sheet above the
   // phone's bar or a popover on their button on desktop, never appended below the card.
@@ -451,9 +484,11 @@ function CardView({ card, w, theme, compact, deps, navigation, gone, more, setMo
   const send = ready && (compact
     ? <View style={{ flex: 1 }}><Button theme={theme} compact grow kind="primary" icon="Send" title="Send" accessibilityLabel="Send to agent" shortcut disabled={ready.busy} onPress={ready.send} /></View>
     : <Button theme={theme} kind="primary" icon="Send" title="Send to agent" shortcut disabled={ready.busy} onPress={ready.send} />);
-  const moves = <View {...({ dataSet: { catchUpCardMoves: "1" } } as object)} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: compact ? 12 : 0, paddingTop: compact ? 10 : 4 }}>
+  // An answer on a phone: its own actions are the thumb bar (Done, Reply, Task, ⋯ with Open chat and Skip); swipes still move.
+  const moves = compact && isAnswer && answer && !replying ? <View {...({ dataSet: { catchUpCardMoves: "1" } } as object)} style={{ paddingHorizontal: 12, paddingTop: 10 }}>{answerActions(true)}</View>
+    : <View {...({ dataSet: { catchUpCardMoves: "1" } } as object)} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: compact ? 12 : 0, paddingTop: compact ? 10 : 4 }}>
     <IconButton theme={theme} compact={compact} icon="ChevronLeft" label={compact ? "Back" : "Back (K or ←)"} tooltip={!compact} disabled={!onBack} onPress={() => onBack?.()} />
-    {compact ? <IconButton theme={theme} compact icon="Sparkles" label="More context" onPress={toggleMore} />
+    {isAnswer ? null : compact ? <IconButton theme={theme} compact icon="Sparkles" label="More context" onPress={toggleMore} />
       : <View>{popover(moreBlock, "More context", 560)}<Tip label="More context (M)"><Button theme={theme} icon="Sparkles" title="More context" accessibilityHint="M" nativeID="catch-up-more" onPress={toggleMore} /></Tip></View>}
     <View>{!compact && popover(laterBlock, "Later", 380)}<IconButton theme={theme} compact={compact} icon="AlarmClock" label={compact ? "Later" : "Later (L)"} tooltip={!compact} disabled={!s.agentId} onPress={toggleLater} /></View>
     <IconButton theme={theme} compact={compact} icon="MessageSquare" label={compact ? "Open chat" : "Open chat (O)"} tooltip={!compact} disabled={!navigation} onPress={openChat} />
@@ -553,6 +588,7 @@ export function KeysSheet({ theme, onClose, label = "Catch up keys", sections: g
 /** Catch up's sheet: the dictation key only where the host has a mic. */
 const catchUpSections = (dictation: boolean): readonly KeySection[] => [
   { title: "On a card", keys: CATCH_UP_KEYS.filter(k => !k.when && (!k.needs || dictation)) },
+  { title: "On an answer to your question", keys: CATCH_UP_KEYS.filter(k => k.when === "answer") },
   { title: "In More context", keys: CATCH_UP_KEYS.filter(k => k.when === "more") },
   { title: "In the queue", keys: CATCH_UP_KEYS.filter(k => k.when === "rail") },
 ];

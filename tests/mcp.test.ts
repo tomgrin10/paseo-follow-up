@@ -44,7 +44,7 @@ test("recovery agents get metadata tools without completion authority", async ()
 
 test("other root sessions get actual PR registration tools while completion authority stays with the owner", async () => {
   const result = await handshake(true, false, true);
-  assert.deepEqual(result[1].result.tools.map((t: any) => t.name).sort(), ["link_item", "register_pr", "sync_workspace", "unlink_item", "wait_for_checks", "workspace_status"]);
+  assert.deepEqual(result[1].result.tools.map((t: any) => t.name).sort(), ["context_reply", "link_item", "register_pr", "sync_workspace", "unlink_item", "wait_for_checks", "workspace_status"]); // context_reply: only for questions asked of it (/ask)
   assert.match(result[0].result.instructions, /secondary git worktrees/);
   assert.match(result[0].result.instructions, /designated main agent/);
 });

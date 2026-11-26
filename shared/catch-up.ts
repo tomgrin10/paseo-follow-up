@@ -7,28 +7,34 @@ import type { HomeModel, Workstream } from "./home";
 import type { InboxRow } from "./inbox";
 import type { NeedItem } from "./attention";
 
-export type CardKind = "permission" | "question" | "item" | "brief" | "finished";
+export type CardKind = "permission" | "question" | "item" | "brief" | "finished" | "answer";
 /**
  * One card: one thing to act on. A workspace with two questions and a merge is three cards, kept together so its
  * context is read once. `key` is stable across refreshes, so the deck can tell a card that went away from a new one.
  */
-export type DeckCard = { key: string; kind: CardKind; s: Workstream; questionId?: string; item?: NeedItem };
+export type DeckCard = { key: string; kind: CardKind; s: Workstream; questionId?: string; item?: NeedItem;
+  /** An `answer` card: the developer's question (Your questions) whose answer they haven't read. */
+  requestId?: string; /** An `answer` card: the question's words, its label in the rail and its fallback line. */ ask?: string };
 
 type Source = {
   model: Pick<HomeModel, "groups">;
   rows: readonly Pick<InboxRow, "agentId" | "needs" | "brief">[];
   /** The workspace's Needs-you items in block order (stopped questions first), from `needsYou`. */
   items: (workspaceId: string) => readonly NeedItem[];
+  /** The workspace's unread answers to the developer's questions, newest first: one card each, last in the workstream. */
+  answers?: (workspaceId: string) => readonly { id: string; ask?: string }[];
 };
 
 const BRIEF_CARD_KINDS = ["decision", "action", "review"];
+/** Needs you's lowest tier: an answer to one of the developer's own questions (Your questions), to read. */
+export const ANSWER_TIER = 3 as const;
 
 /**
  * The deck, in Home's Needs-you order: the order the developer already sees in the list (blocking asks first, then
  * decisions, then finished turns; inside a tier the chosen sort, AI priority included). Inside a workstream: a pending
  * permission, then each open question, then every other item, then the agent's own ask when nothing above speaks for it.
  */
-export function deckCards({ model, rows, items }: Source): DeckCard[] {
+export function deckCards({ model, rows, items, answers }: Source): DeckCard[] {
   const needs = model.groups.find(g => g.id === "needs")?.items ?? [];
   const out: DeckCard[] = [];
   for (const s of needs) {
@@ -44,7 +50,10 @@ export function deckCards({ model, rows, items }: Source): DeckCard[] {
     const brief = row?.brief as { kind?: string; questionIds?: string[] } | null | undefined;
     const pointsAtQuestion = !!brief?.questionIds?.length && out.slice(before).some(c => c.kind === "question");
     if (brief && !pointsAtQuestion && BRIEF_CARD_KINDS.includes(brief.kind ?? "")) out.push({ key: `${s.key}|brief`, kind: "brief", s });
-    if (out.length === before) out.push({ key: `${s.key}|finished`, kind: "finished", s });
+    // An answer to read: the lowest tier (Q172 C=a), after everything else the workstream asks.
+    const read = s.workspaceId && answers ? answers(s.workspaceId) : [];
+    if (out.length === before && s.tier !== ANSWER_TIER) out.push({ key: `${s.key}|finished`, kind: "finished", s });
+    for (const a of read) out.push({ key: `${s.key}|${a.id}`, kind: "answer", s, requestId: a.id, ...(a.ask ? { ask: a.ask } : {}) });
   }
   return out;
 }
@@ -170,7 +179,16 @@ export function park(s: Session, requestId: string, key = s.order[s.pos]): Sessi
 export function sync(s: Session, live: readonly Pick<DeckCard, "key">[], settled: (requestId: string) => boolean): Session {
   const liveKeys = new Set(live.map(c => c.key));
   const known = new Set(s.order);
-  let order = [...s.order, ...live.map(c => c.key).filter(k => !known.has(k))];
+  // A card that turns up mid-session joins its workstream (right after its last card, when that is still ahead of the
+  // developer), so the rail keeps one group per workstream; a new workstream, or one already behind, goes last.
+  let order = [...s.order];
+  for (const k of live.map(c => c.key).filter(k => !known.has(k))) {
+    const g = groupOf(k);
+    let last = -1;
+    for (let i = order.length - 1; i >= 0; i--) if (groupOf(order[i]) === g) { last = i; break; }
+    if (last >= s.pos) order.splice(last + 1, 0, k);
+    else order.push(k);
+  }
   const outcomes = { ...s.outcomes };
   for (const k of order) if (!liveKeys.has(k) && open({ ...s, outcomes }, k)) outcomes[k] = "gone";
   let pos = s.pos;
@@ -205,7 +223,7 @@ export function statsOf(s: Session): SessionStats {
  * anywhere presets. Paseo takes Shift+? (its shortcuts dialog) and Escape (interrupt agent) when focus is outside a
  * field, which is exactly when these fire, so the sheet is S and leaving is X.
  */
-export type CatchUpAction = "pick" | "own" | "send" | "skip" | "skip-workspace" | "back" | "more" | "chip" | "ask" | "note" | "later" | "chat" | "rail" | "rail-up" | "rail-down" | "keys" | "leave" | "dictate" | "dismiss";
+export type CatchUpAction = "pick" | "own" | "send" | "skip" | "skip-workspace" | "back" | "more" | "chip" | "ask" | "note" | "later" | "chat" | "rail" | "rail-up" | "rail-down" | "keys" | "leave" | "dictate" | "dismiss" | "done" | "reply" | "task";
 /**
  * a-move-bar-action-opens-in-view: where each move-bar action opens what it opens, so its result is where the eye
  * already is and never appended below the fold. `sheet`: drawn in the phone's dock, above the bar, kept above the
@@ -225,7 +243,7 @@ export const MOVE_OPENS: Readonly<Record<"more" | "later" | "note" | "chat" | "r
 /** A key as this platform spells it: ⌘ on a Mac, Ctrl elsewhere (as the Send button's own hint reads). */
 export const keyLabel = (key: string, mac: boolean) => mac ? key : key.replace("⌘", "Ctrl ");
 
-export const CATCH_UP_KEYS: readonly { key: string; what: string; action: CatchUpAction; combos: readonly string[]; when?: "more" | "rail";
+export const CATCH_UP_KEYS: readonly { key: string; what: string; action: CatchUpAction; combos: readonly string[]; when?: "more" | "rail" | "answer";
   /** Listed only on a host that has it: V is Paseo's dictation, on a Paseo with usePaseoDictation. */ needs?: "dictation" }[] = [
   { key: "A–H", what: "Pick an option", action: "pick", combos: ["A", "B", "C", "D", "E", "F", "G", "H"] },
   { key: "W", what: "Write your own answer", action: "own", combos: ["W"] },
@@ -245,6 +263,10 @@ export const CATCH_UP_KEYS: readonly { key: string; what: string; action: CatchU
   { key: "R", what: "Go to the queue, and back", action: "rail", combos: ["R"] },
   { key: "↑ / ↓", what: "Move in the queue (Enter opens)", action: "rail-up", combos: ["ArrowUp", "ArrowDown"], when: "rail" },
   { key: "S", what: "Show the keys", action: "keys", combos: ["S"] },
+  // An answer to one of your questions (Your questions) has no options, so D, W and T are its own: Done, Reply, Task.
+  { key: "D", what: "Done: the answer is read", action: "done", combos: ["D"], when: "answer" },
+  { key: "W", what: "Reply with a follow-up question", action: "reply", combos: ["W"], when: "answer" },
+  { key: "T", what: "Make a task of it", action: "task", combos: ["T"], when: "answer" },
   { key: "X", what: "Leave Catch up", action: "leave", combos: ["X"] },
 ];
 
@@ -254,7 +276,7 @@ export type KeyPress = { key: string; meta: boolean; ctrl: boolean; alt: boolean
  * map is tested without a DOM. `typing`: focus is in a text field, where only the More context box's ⌘↵ and ⌘⇧↵ act
  * (a card field's ⌘↵ is its own SubmitScope's). `inRail`: focus is in the queue.
  */
-export function catchUpKey(e: KeyPress, at: { typing: boolean; inMore: boolean; moreOpen: boolean; inRail: boolean }): { action: CatchUpAction; arg?: string } | null {
+export function catchUpKey(e: KeyPress, at: { typing: boolean; inMore: boolean; moreOpen: boolean; inRail: boolean; /** The card is an answer (Your questions). */ answer?: boolean }): { action: CatchUpAction; arg?: string } | null {
   if (e.composing || e.alt) return null;
   const mod = e.mac ? e.meta : e.ctrl;
   if (e.key === "Enter" && mod && (e.mac ? !e.ctrl : !e.meta)) {
@@ -271,6 +293,7 @@ export function catchUpKey(e: KeyPress, at: { typing: boolean; inMore: boolean; 
   if (e.shift && e.key.toLowerCase() === "d") return { action: "dismiss" };
   if (e.shift || e.key.length !== 1) return null;
   const k = e.key.toLowerCase();
+  if (at.answer && (k === "d" || k === "w" || k === "t")) return { action: k === "d" ? "done" : k === "w" ? "reply" : "task" };
   if (/^[a-h]$/.test(k)) return { action: "pick", arg: k.toUpperCase() };
   const byLetter: Record<string, CatchUpAction> = { w: "own", j: "skip", k: "back", m: "more", n: "note", l: "later", o: "chat", r: "rail", s: "keys", x: "leave", v: "dictate" };
   return byLetter[k] ? { action: byLetter[k] } : null;
@@ -303,8 +326,12 @@ export const MODE = {
  */
 export const CONTEXT_TARGETS = ["overseer", "agent"] as const;
 export type ContextTarget = typeof CONTEXT_TARGETS[number];
-/** asking → answered (the reply came with context_reply), chat (the agent ended its turn without it: read its chat), failed. */
-export const CONTEXT_STATES = ["asking", "answered", "chat", "failed"] as const;
+/**
+ * asking → answered (the reply came with context_reply), chat (the agent ended its turn without it: its last message
+ * after the ask is the answer, "from its chat", or with no answer when its turn couldn't be read: read its chat),
+ * failed, withdrawn (the developer or an agent took the question back while it was asking).
+ */
+export const CONTEXT_STATES = ["asking", "answered", "chat", "failed", "withdrawn"] as const;
 export type ContextState = typeof CONTEXT_STATES[number];
 
 /**
@@ -319,15 +346,18 @@ export const CONTEXT_ASKS = [
 ] as const;
 
 export const CONTEXT_ANSWER_MAX = 4000;
+export const CONTEXT_VIA = ["more", "field", "slash", "tool"] as const;
+export type ContextVia = typeof CONTEXT_VIA[number];
 const iso = z.string().max(40);
 export const contextRequestSchema = z.object({
   id: z.string().min(1).max(80),
   workspaceId: z.string().nullable(),
   /** The card's agent (the one that asked); the request's own recipient is `askedOf`. */
   agentId: z.string().nullable(),
-  cardKey: z.string().min(1).max(400),
-  /** One line naming what the card asks ("Q12: Which retry policy?"), for the prompt and the agent tool. */
-  card: z.string().max(300),
+  /** The card asked about (More context); null for a free question (Your questions' field, `/ask`, an agent's ask). */
+  cardKey: z.string().min(1).max(400).nullable(),
+  /** One line naming what the card asks ("Q12: Which retry policy?"), for the prompt and the agent tool; "" when free. */
+  card: z.string().max(300).default(""),
   target: z.enum(CONTEXT_TARGETS),
   /** The developer's words, or a suggestion's text. */
   ask: z.string().min(1).max(2000),
@@ -346,14 +376,26 @@ export const contextRequestSchema = z.object({
   deliveredAt: iso.nullable().default(null),
   /** Who asked: "developer" or "agent:<id>" (agent parity). */
   by: z.string().max(120),
+  /** Where it was asked: Catch up's More context (`more`), Your questions' field, `/ask` in a chat, or an agent tool. */
+  via: z.enum(CONTEXT_VIA).default("more"),
+  /** The question this one follows up (Reply): the history reads as a thread. */
+  parentId: z.string().max(80).nullable().default(null),
+  /** When the developer read the answer (Done, Reply, Make a task). Only the developer's acts set it: an agent's never do. */
+  readAt: iso.nullable().default(null),
+  /** Done: who closed it, and when. An agent's Done closes it without reading it for the developer. */
+  done: z.object({ at: iso, by: z.string().max(120) }).nullable().default(null),
+  /** Make a task: the obligation it became, owned by the agent that answered. */
+  task: z.object({ id: z.string().max(80), at: iso, by: z.string().max(120) }).nullable().default(null),
 });
 export type ContextRequest = z.infer<typeof contextRequestSchema>;
-export const contextFileSchema = z.object({ requests: z.array(contextRequestSchema) });
+/** `context.json`. v1 (no `version`) had card-bound asks only; it is migrated on load (`migrateContext`). */
+export const CONTEXT_VERSION = 2 as const;
+export const contextFileSchema = z.object({ version: z.literal(CONTEXT_VERSION).optional(), requests: z.array(contextRequestSchema) });
 export type ContextFile = z.infer<typeof contextFileSchema>;
 
-/** Settled requests are kept this long (the card shows the answer when it returns), and at most this many. */
-export const CONTEXT_KEEP_MS = 24 * 3_600_000;
-export const CONTEXT_MAX = 50;
+/** Questions are kept this long (Your questions' history), and at most this many per workspace (Q172 E=a). */
+export const CONTEXT_KEEP_MS = 30 * 24 * 3_600_000;
+export const CONTEXT_MAX = 200;
 export const contextSettled = (r: Pick<ContextRequest, "state">) => r.state !== "asking";
 
 /** The tool an asked agent replies with (native tools carry the follow_ prefix; the stdio bridge doesn't). */
@@ -376,10 +418,12 @@ export function agentContextPrompt(r: Pick<ContextRequest, "id" | "card" | "ask"
  */
 export const CONTEXT_REPLY_ROLE = "main" as const;
 
-/** A request older than CONTEXT_KEEP_MS goes, then the oldest past CONTEXT_MAX; an asking one is kept while it is young. */
+/** A request older than CONTEXT_KEEP_MS goes, then each workspace's oldest past CONTEXT_MAX. Order is kept. */
 export function pruneContext(requests: readonly ContextRequest[], now: number): ContextRequest[] {
   const young = requests.filter(r => now - Date.parse(r.askedAt) < CONTEXT_KEEP_MS);
-  return young.slice(Math.max(0, young.length - CONTEXT_MAX));
+  const left = new Map<string | null, number>();
+  for (const r of young) left.set(r.workspaceId, (left.get(r.workspaceId) ?? 0) + 1);
+  return young.filter(r => { const n = left.get(r.workspaceId)!; left.set(r.workspaceId, n - 1); return n <= CONTEXT_MAX; });
 }
 
 /**
@@ -404,7 +448,8 @@ export function questionOfCard(cardKey: string): string | null {
   return /^Q\d+$/.test(subject) ? subject : null;
 }
 /** One card, whichever surface named it: the same key, or the same question of the same workspace. */
-export function sameCard(a: { workspaceId: string | null; cardKey: string }, b: { workspaceId: string | null; cardKey: string }): boolean {
+export function sameCard(a: { workspaceId: string | null; cardKey: string | null }, b: { workspaceId: string | null; cardKey: string | null }): boolean {
+  if (!a.cardKey || !b.cardKey) return false; // A free question is about no card.
   if (a.cardKey === b.cardKey) return true;
   const q = questionOfCard(a.cardKey);
   return !!q && !!a.workspaceId && a.workspaceId === b.workspaceId && q === questionOfCard(b.cardKey);

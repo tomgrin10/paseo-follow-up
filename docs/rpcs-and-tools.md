@@ -55,7 +55,7 @@ is missing from AGENTS.md or docs/, so add a line here when you add one.
 | `needs_you` | `follow.needs-you` | The end-of-turn brief: what the developer must do next. |
 | `declare_done` | `follow.done` | Declares the goal fulfilled and returns any blockers. |
 | `wait_for_checks` | `follow.wait-for-checks` | Waits for a PR's checks without polling: answers at once from the caller's own workspace read, then sends one message after the turn when the checks on the current head finish (or it merges, closes or conflicts). Every root agent (main, contributors, untracked); not recovery. PRs Follow-up can't see get the way on (Paseo's `subscribe_change_request` on 0.17+) ([wait-for-checks.md](wait-for-checks.md)). |
-| `context_reply` | `follow.context-reply` | Answers the developer's Catch up More context ask with the `requestId` the ask carried; only the agent it was asked of (or the Overseer, for its asks) may answer ([needs-you.md](needs-you.md#catch-up)). Not offered to recovery sessions or contributors. |
+| `context_reply` | `follow.context-reply` | Answers the developer's question (Your questions, More context) with the `requestId` the ask carried; only the agent it was asked of may answer ([needs-you.md](needs-you.md#your-questions)). Main agents and contributors get it (`/ask` can ask a contributor); recovery sessions don't. |
 
 ## Action tools (agent parity)
 
@@ -137,7 +137,7 @@ the developer's; it never clears a Needs-you flag and never passes the Overseer'
 | `workspace_status` | `follow.created-items` | read. The chat's created-agent / created-workspace cards: live states from the engine's cached directory rows and Follow-up's line for the workspace ([client.md](client.md#created-agent-and-workspace-cards)). |
 | `trust_bypass_status` | `follow.trust-bypass` | read |
 | `catch_up_deck` | `follow.catch-up-deck` | read. Catch up's deck as Home would deal it (one card per ask, Home's Needs-you order and `home_sort`), each card with its More context ask. Built when read from the worker's own state; the client deals the same deck from Home's model ([needs-you.md](needs-you.md#catch-up)). |
-| `context_requests`, `ask_context` | `follow.context-list`, `follow.context-ask` | read / planned. More context on a card: ask the Overseer (reads without waking anyone) or the card's agent (a queued message; it may wake, since the developer asked). `ask_context` refuses asking the caller about its own card. |
+| `context_requests`, `ask_context`, `question_action` | `follow.context-list`, `follow.context-ask`, `follow.question-action` | read / planned / planned. Your questions and More context: `ask_context` asks a workspace's main agent, a named agent (main or contributor of a tracked workspace) or, with `cardKey`, More context about a card (a queued message; it may wake, since the developer asked); never the caller. `context_requests` filters by `state` (all, open, tasks) and `query`. `question_action` is Done, Reply, Make a task or Withdraw, recorded as `agent:<id>`; it never reads an answer for the developer, and the asked agent can't act on its own question. |
 
 Features that change only one person's view (no RPC) are listed in `VIEW_PARITY` with the tools that read the
 same data: section search in the panel reads what `workspace_status` and `list_prs` return; Catch up's Skip and Back

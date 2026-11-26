@@ -88,7 +88,9 @@ export function useHomeModel(sources: HomeSources): HomeModel {
   // feed), so Home's header, strip and brief line and the sidebar badge (client/live.tsx) agree (nobody-s-on-it-is-needs-you).
   const raised = useSyncExternalStore(extras.subscribe, () => extras.queue().needs.length, () => 0);
   const compass = useSyncExternalStore(extras.subscribe, extras.compass, extras.compass);
-  return useMemo(() => buildHome({ rows: inbox.rows(), tracked: live.all(), paseo: paseo.all(), now: Date.now(), sort, priorities, hidden: overseer ? [overseer] : [], hold, compass, raised }), [a, b, c, now, sort, priorities, inbox, live, paseo, overseer, hold, raised, compass]);
+  // Your questions: an unread answer is a Needs-you row; a question asking is its row's line (the home feed's context).
+  const questions = useSyncExternalStore(extras.subscribe, extras.context, extras.context);
+  return useMemo(() => buildHome({ rows: inbox.rows(), tracked: live.all(), paseo: paseo.all(), now: Date.now(), sort, priorities, hidden: overseer ? [overseer] : [], hold, compass, raised, questions }), [a, b, c, now, sort, priorities, inbox, live, paseo, overseer, hold, raised, compass, questions]);
 }
 
 /** Rebuilds a value at most every `ms` while mounted (used for the brief pane's source ages). */

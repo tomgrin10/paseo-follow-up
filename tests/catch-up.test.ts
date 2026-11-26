@@ -93,6 +93,16 @@ test("a live change keeps the second pass and Back after Skip workspace", () => 
   assert.equal(sync(x, cards("a|1", "a|2", "b|1", "d|1"), none).lapped, true, "sync never drops lapped");
 });
 
+test("a card that turns up mid-session joins its workstream, so the rail keeps one group each (Your questions' answer card)", () => {
+  let x = startSession(cards("a|1", "b|1", "b|2", "c|1"));
+  x = sync(x, cards("a|1", "b|1", "b|2", "b|ctx-1", "c|1", "d|1"), none);
+  assert.deepEqual(x.order, ["a|1", "b|1", "b|2", "b|ctx-1", "c|1", "d|1"], "last inside b, a new workstream last");
+  x = settle(settle(x, "done"), "done");
+  x = sync(x, cards("a|1", "a|ctx-2", "b|2", "b|ctx-1", "c|1", "d|1"), none);
+  assert.equal(x.order.at(-1), "a|ctx-2", "a workstream already behind the developer gets its new card at the end");
+  assert.equal(x.order[x.pos], "b|2", "the card on screen stays");
+});
+
 test("a left swipe skips the whole workspace; a right swipe goes Back to the card it was on", () => {
   let x = startSession(cards("a|1", "b|1", "b|2", "b|3", "c|1"));
   x = settle(x, "done");
@@ -203,12 +213,12 @@ test("context prompts carry the request id and never read as the developer's ans
   assert.match(agentContextPrompt(r), /isn't their answer/);
 });
 
-test("context requests are pruned by age and count", () => {
+test("context requests are pruned by age (30 days) and count (200 a workspace)", () => {
   const now = Date.parse("2026-11-18T12:00:00.000Z");
-  const old = request({ id: "old", askedAt: "2026-11-17T10:00:00.000Z" });
-  const young = Array.from({ length: 60 }, (_, i) => request({ id: `y${i}`, askedAt: new Date(now - (60 - i) * 1000).toISOString() }));
+  const old = request({ id: "old", askedAt: "2026-10-18T10:00:00.000Z" });
+  const young = Array.from({ length: 210 }, (_, i) => request({ id: `y${i}`, askedAt: new Date(now - (210 - i) * 1000).toISOString() }));
   const kept = pruneContext([old, ...young], now);
-  assert.equal(kept.length, 50);
+  assert.equal(kept.length, 200);
   assert.equal(kept[0].id, "y10");
   assert.ok(!kept.some(r => r.id === "old"));
 });

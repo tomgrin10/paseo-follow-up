@@ -82,6 +82,8 @@ export const obligationSchema = z.object({
    * (one-ask-one-item). Set by update_obligation `need`; without it Follow-up reads the ask (shared/questions.ts taskNeed).
    */
   need: z.enum(["decision", "action"]).optional(),
+  /** Background the task carries for whoever works it: Make a task from Your questions puts the question and its answer here. */
+  note: z.string().max(2000).optional(),
   enable_follow_up: z.boolean().default(false), revision: z.number().int().nonnegative(),
   dependencyStage: z.enum(["merged", "deployed"]).optional(), category: z.enum(["follow_up", "pr_lifecycle"]).optional(),
   previousTitles: z.array(z.string()).optional(),

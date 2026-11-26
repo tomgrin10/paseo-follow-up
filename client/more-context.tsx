@@ -10,7 +10,7 @@ import { Pressable, Text } from "./text";
 import { Icon, TextInput } from "@getpaseo/plugin/client/ui";
 import { CONTEXT_ASKS, askHeadline, contextFor, keyLabel, questionCardKey, type ContextRequest } from "../shared/catch-up";
 import type { RpcInput } from "@getpaseo/plugin";
-import type { contextAskRpc } from "../shared/contracts";
+import type { contextAskRpc, questionActionRpc } from "../shared/contracts";
 import type { ListQuestion, ListWorkspace } from "../shared/list";
 import { errorText } from "../shared/errors";
 import { Button, IconButton, text, type Theme } from "./kit";
@@ -31,6 +31,8 @@ export type ContextSource = {
   context(): ContextRequest[];
   subscribe(listener: () => void): () => void;
   askContext(input: RpcInput<typeof contextAskRpc>): Promise<{ request: ContextRequest }>;
+  /** Your questions' acts (follow.question-action): the store takes the result at once. */
+  questionAction?(input: RpcInput<typeof questionActionRpc>): Promise<{ request: ContextRequest; reply?: ContextRequest; taskId?: string }>;
   /** Reads the asks once. A 0.15 host has no feed, and the store starts empty, so a fresh panel would miss an ask. */
   refreshContext?(): Promise<void>;
 };
@@ -42,11 +44,17 @@ export function setContextSource(next: ContextSource | null): void { source = ne
 const noAsks: ContextRequest[] = [];
 const idle = () => () => undefined;
 
-/** The newest ask about one question, from any surface, and the way to ask. Null `ask` when no source is set. */
-export function useQuestionContext(workspaceId: string, questionId: string): { request: ContextRequest | null; ask: ((words: string, card: string, agentId: string | null, images?: ImageUpload[]) => Promise<ContextRequest>) | null } {
+/** The one store (or null before the client set it), and every question in it, kept current by the home feed. */
+export function useContextStore(): { source: ContextSource | null; requests: ContextRequest[] } {
   const current = useSyncExternalStore(l => { sourceListeners.add(l); return () => { sourceListeners.delete(l); }; }, () => source, () => source);
   const requests = useSyncExternalStore(current?.subscribe ?? idle, current?.context ?? (() => noAsks), current?.context ?? (() => noAsks));
   useEffect(() => { if (current && !read.has(current)) { read.add(current); void current.refreshContext?.().catch(() => undefined); } }, [current]);
+  return { source: current, requests };
+}
+
+/** The newest ask about one question, from any surface, and the way to ask. Null `ask` when no source is set. */
+export function useQuestionContext(workspaceId: string, questionId: string): { request: ContextRequest | null; ask: ((words: string, card: string, agentId: string | null, images?: ImageUpload[]) => Promise<ContextRequest>) | null } {
+  const { source: current, requests } = useContextStore();
   const cardKey = questionCardKey(workspaceId, questionId);
   const request = contextFor(requests, { workspaceId, cardKey });
   return {
@@ -123,7 +131,12 @@ export function ContextAnswer({ theme, compact, request, waiting, agent, openCha
       <RichText plain style={[t.small, { flex: 1 }]}>{asking ? `Asked ${who === "Overseer" ? "the Overseer" : who === "The agent" ? "the agent" : who}${waiting ? " · this comes back as the next card when it answers. You can still act on it now" : onQuestion ? " · the answer shows here when it comes. You can still answer now" : ""}` : `${who} · you asked: ${askHeadline(request.ask)}`}</RichText>
     </View>
     {request.state === "answered" && request.answer && <RichText selectable style={t.body}>{request.answer}</RichText>}
-    {request.state === "chat" && <View style={{ gap: 8 }}>
+    {/* Turn-end capture: the agent ended its turn without context_reply, and its last message after the ask is the answer. */}
+    {request.state === "chat" && request.answer && <View style={{ gap: 4 }}>
+      <RichText selectable style={t.body}>{request.answer}</RichText>
+      <Text style={t.small}>From its chat: the agent answered there, not with a reply here.</Text>
+    </View>}
+    {request.state === "chat" && !request.answer && <View style={{ gap: 8 }}>
       <Text style={t.body}>{who === "Overseer" ? "The Overseer answered in its own chat, not here: it can't reply on a card." : `${who} answered in its chat.`}</Text>
       {/* A 2.2.0-beta.3 ask of the Overseer: its answer is in the Overseer's chat (an-ask-goes-only-to-an-agent-that-can-answer-it). */}
       <View style={{ flexDirection: "row" }}>{who === "Overseer"

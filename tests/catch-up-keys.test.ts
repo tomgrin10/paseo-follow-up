@@ -30,7 +30,7 @@ test("no Catch up key is a combo Paseo binds, Home's search key, or a search-fro
 });
 
 test("within Catch up, no two actions share a key in the same place", () => {
-  for (const when of [undefined, "more", "rail"] as const) {
+  for (const when of [undefined, "more", "rail", "answer"] as const) {
     const seen = new Map<string, string>();
     for (const k of CATCH_UP_KEYS.filter(x => x.when === when)) for (const c of k.combos) {
       assert.ok(!seen.has(c) || seen.get(c) === k.action, `${c}: ${seen.get(c)} and ${k.action}`);
@@ -41,8 +41,8 @@ test("within Catch up, no two actions share a key in the same place", () => {
 
 test("every action in the list is reachable through catchUpKey, and the handler reads only the list's actions", () => {
   const reached = new Set<string>();
-  const states = [idle, { ...idle, moreOpen: true }, { ...idle, inRail: true }, { ...idle, moreOpen: true, typing: true, inMore: true }];
-  const keys = ["a", "h", "w", "j", "k", "m", "n", "l", "o", "r", "s", "x", "v", "1", "4", "ArrowRight", "ArrowLeft", "ArrowUp", "ArrowDown", "Enter", "J", "D"];
+  const states = [idle, { ...idle, moreOpen: true }, { ...idle, inRail: true }, { ...idle, moreOpen: true, typing: true, inMore: true }, { ...idle, answer: true }];
+  const keys = ["a", "h", "w", "j", "k", "m", "n", "l", "o", "r", "s", "x", "v", "1", "4", "ArrowRight", "ArrowLeft", "ArrowUp", "ArrowDown", "Enter", "J", "D", "d", "t"];
   for (const at of states) for (const key of keys) for (const mods of [{}, { shift: true }, { meta: true }, { meta: true, shift: true }]) {
     const hit = catchUpKey(press(key, mods), at); if (hit) reached.add(hit.action);
   }
@@ -68,6 +68,16 @@ test("keys never fire while typing, except More context's ask; ⌘↵ follows th
   assert.equal(catchUpKey(press("2"), idle), null, "digits are More context's only while it is open");
   assert.deepEqual(catchUpKey(press("ArrowDown"), { ...idle, inRail: true }), { action: "rail-down" });
   assert.equal(catchUpKey(press("ArrowDown"), idle), null, "outside the queue the arrows scroll the card");
+  // An answer card (Your questions): D, W and T are Done, Reply and Make a task; elsewhere D picks and W writes.
+  const answer = { ...idle, answer: true };
+  assert.deepEqual(catchUpKey(press("d"), answer), { action: "done" });
+  assert.deepEqual(catchUpKey(press("w"), answer), { action: "reply" });
+  assert.deepEqual(catchUpKey(press("t"), answer), { action: "task" });
+  assert.deepEqual(catchUpKey(press("o"), answer), { action: "chat" });
+  assert.deepEqual(catchUpKey(press("j"), answer), { action: "skip" });
+  assert.deepEqual(catchUpKey(press("d"), idle), { action: "pick", arg: "D" });
+  assert.equal(catchUpKey(press("t"), idle), null);
+  assert.equal(catchUpKey(press("d"), { ...answer, typing: true }), null, "never while typing a reply");
 });
 
 test("Home's own keys are off while Catch up shows: its list isn't mounted and / doesn't reach for its search", async () => {

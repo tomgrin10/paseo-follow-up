@@ -38,7 +38,8 @@ import type { SettingsCategory } from "./shared/settings-nav";
 import { openReportSheet, ReportSheetHost, setReportFallback } from "./client/report-issue";
 import { openRename, RenameHost } from "./client/rename";
 import { setReportError } from "./client/toast-store";
-import { reportSendRpc } from "./shared/contracts";
+import { contextAskRpc, reportSendRpc } from "./shared/contracts";
+import { runAction } from "./client/toast-store";
 
 /** Home. The same screen id the Overview had, so the sidebar row, ⌘K and saved links land on Home. */
 const OVERVIEW = HOME_SCREEN;
@@ -125,7 +126,7 @@ export default function contribute(host: PluginClientContext) {
   const homeDeps = { sources, openSettings, openPanel, openLog, openQueue, openCatchUp, openStats, openHome: openOverview, openItem, briefDeps, searchKey, newKey };
   const Overview = (props: PluginScreenProps) => <><FollowHome {...props} deps={homeDeps} />{reportHost(props)}</>;
   const Panel = (props: PluginWorkspacePanelProps) => <><FollowPanel {...props} openSettings={openSettings} openOverview={openOverview} openLarge={openLarge} inbox={inbox} live={store} briefDeps={briefDeps} sources={sources} />{reportHost(props)}</>;
-  const Large = (props: PluginScreenProps) => <FollowLarge {...props} openSettings={openSettings} openOverview={openOverview} live={store} />;
+  const Large = (props: PluginScreenProps) => <FollowLarge {...props} openSettings={openSettings} openOverview={openOverview} live={store} paseo={paseoWorkspaces} />;
   const removers: (() => unknown)[] = [
     client.addScreen({ id: OVERVIEW, title: "Follow-up", Component: Overview }),
     client.addScreen({ id: LARGE_SCREEN, title: params => store.get(params.workspaceId ?? "")?.title ?? "Follow-up", Component: Large }),
@@ -154,6 +155,13 @@ export default function contribute(host: PluginClientContext) {
     client.addSlashCommand({ name: "report-issue", description: "Report a Follow-up bug, idea or feedback; this agent files it on GitHub after you OK it", argumentHint: "what happened", context: "agent", async onSubmit({ args, agent, workspace, rpc }) {
       if (args.trim()) await rpc(reportSendRpc, { kind: "bug", text: args.trim(), agentId: agent.id }).catch(() => openReportSheet({ agentId: agent.id, workspaceId: workspace.id }));
       else openReportSheet({ agentId: agent.id, workspaceId: workspace.id });
+    } }),
+    // /ask <question> (docs/needs-you.md#your-questions): asks *this* agent; the answer lands in Your questions. A
+    // refusal (an untracked workspace, no words) shows its error.
+    client.addSlashCommand({ name: "ask", description: "Ask this agent; Follow-up keeps the answer", argumentHint: "your question", context: "agent", async onSubmit({ args, agent, workspace, rpc }) {
+      const ask = args.trim();
+      await runAction({ label: "Ask", failure: "Couldn't ask", success: "Asked · the answer lands in Follow-up's Your questions",
+        run: async () => { if (!ask) throw new Error("Write the question after /ask."); return rpc(contextAskRpc, { workspaceId: workspace.id, agentId: agent.id, ask, via: "slash" }); } });
     } }),
     client.addSlashCommand({ name: "follow-up", description: "Open this workspace's PRs and remaining work", argumentHint: "", context: "agent", onSubmit({ openPanel }) { openPanel(PANEL, { location: location() }); } }),
     contributeChat(client),

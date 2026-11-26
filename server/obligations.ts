@@ -15,6 +15,8 @@ type Update = {
   question?: string;
   /** While blocked: what the ask wants of the developer, a decision or an action they take and report back. */
   need?: "decision" | "action";
+  /** Background for whoever works it (Make a task: the question and its answer). Kept when an update leaves it out. */
+  note?: string;
   dependencyStage?: "merged" | "deployed"; enable_follow_up?: boolean; communication?: Pick<Communication, "threadUrl" | "recipient"> & Partial<Communication>;
   trigger?: TaskTriggerInput | TaskTrigger | null;
   /** due-by-fact: when to look at it again, "YYYY-MM-DD" or an ISO time. An open task with no PRs gets RECHECK_DAYS out by default. */
@@ -101,8 +103,9 @@ export function updateObligation(w: Workspace, input: Update): Obligation {
     if (recheckAt) existing.recheckAt = recheckAt; else delete existing.recheckAt;
     if (finishedAt) existing.finishedAt = finishedAt; else delete existing.finishedAt;
     if (pointed && ask) existing.coveredBy = pointed.id;
+    if (input.note) existing.note = input.note;
     return existing;
   }
-  const added = { ...record, ...(recheckAt ? { recheckAt } : {}), ...(finishedAt ? { finishedAt } : {}), ...(ask ? { ask } : {}), ...(need ? { need } : {}), ...(pointed && ask ? { coveredBy: pointed.id } : {}), ...(input.caller ? { createdBy: input.caller } : {}), id: randomUUID(), revision: 0 };
+  const added = { ...record, ...(recheckAt ? { recheckAt } : {}), ...(finishedAt ? { finishedAt } : {}), ...(ask ? { ask } : {}), ...(need ? { need } : {}), ...(pointed && ask ? { coveredBy: pointed.id } : {}), ...(input.caller ? { createdBy: input.caller } : {}), ...(input.note ? { note: input.note } : {}), id: randomUUID(), revision: 0 };
   w.obligations.push(added); return added;
 }

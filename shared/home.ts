@@ -12,6 +12,8 @@ import { taskSchedule } from "./task-trigger";
 import { freshPriorities, priorityRow, type Priority, type PrioritySourceKind } from "./priorities";
 import { DEFAULT_SORT, sortItems, type SortMode } from "./sort";
 import { messageSender, notificationText, senderLabel, workItems } from "./message-sender";
+import { ANSWER_TIER, type ContextRequest } from "./catch-up";
+import { questionLine, questionsByWorkspace } from "./your-questions";
 
 /**
  * Home (design §3): every workstream in one list, grouped by what it needs from the developer. Pure, so the
@@ -25,8 +27,12 @@ export const GROUP_TITLE: Record<HomeGroupId, string> = {
   needs: "Needs you", older: "Older", sending: "Sending", running: "Running", waiting: "Waiting on others", later: "Later", quiet: "Quiet",
 };
 
-/** Inside Needs you: blocking asks first, then decisions only the developer makes, then finished turns to sign off. */
-export type Tier = 0 | 1 | 2;
+/**
+ * Inside Needs you: blocking asks first, then decisions only the developer makes, then finished turns to sign off, then
+ * answers to the developer's own questions (`ANSWER_TIER`, Your questions: something to read, never a blocker).
+ */
+export type Tier = 0 | 1 | 2 | 3;
+export { ANSWER_TIER };
 const TIER: Record<HeadlineKey, Tier> = {
   permission: 0, error: 0, paused: 0, blocked: 0, decision: 0, question: 0,
   action: 1, repairs: 1, finish: 1, merge: 1, reviewers: 1, review: 1, flagged: 1,
@@ -233,7 +239,9 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
   /** Decision Q8: how many raised Linear issues are in Needs you (the worker's count, on the home feed). */
   raised?: number;
   /** Each workspace's first live Compass note as one line (the worker's, with the priorities). */
-  compass?: Readonly<Record<string, string>> }): HomeModel {
+  compass?: Readonly<Record<string, string>>;
+  /** Your questions (the home feed's `context`): an unread answer is a Needs-you row, a question asking is the row's line. */
+  questions?: readonly ContextRequest[] }): HomeModel {
   const held = !!input.hold || !!input.autoSendsHeld;
   // Workspaces Follow-up keeps off the list (the Overseer's own): no row, no count.
   const hidden = new Set(input.hidden ?? []);
@@ -320,6 +328,24 @@ export function buildHome(input: { rows: InboxRow[]; tracked: Workspace[]; paseo
       icon: "Circle", tone: "muted", word: null, line: "", badges: [], pr: null, at: p.activityAt, readyToArchive: false }));
   }
 
+  // Your questions: an unread answer puts its workspace's row in Needs you as its lowest tier (Q172 C=a) unless the row
+  // already needs the developer for something louder; a question still asking is the row's line, never Needs you.
+  if (input.questions?.length) {
+    for (const [id, q] of questionsByWorkspace(input.questions)) {
+      if (hidden.has(id)) continue;
+      const w = tracked.get(id);
+      const i = out.findIndex(s => s.key === `ws:${id}`) >= 0 ? out.findIndex(s => s.key === `ws:${id}`)
+        : w ? out.findIndex(s => s.key === `agent:${w.mainAgentId}`) : -1;
+      const at = i >= 0 ? i : out.findIndex(s => s.workspaceId === id);
+      if (at < 0) continue;
+      const row = out[at];
+      if (row.group === "needs" || row.group === "later") continue;
+      const answer = q.unread[0];
+      if (answer) out[at] = make({ ...stripSig(row), group: "needs", tier: ANSWER_TIER, icon: "MessageSquareReply", tone: "warning", word: "Answer", line: questionLine(answer.ask), at: answer.settledAt ?? answer.askedAt, readyToArchive: false });
+      else if (q.asking[0]) out[at] = make({ ...stripSig(row), line: `Asking · ${questionLine(q.asking[0].ask)}` });
+    }
+  }
+
   // Facts the sorts read: latest activity, importance, deadlines and fresh external priorities.
   const lastActivity = new Map<string, string>();
   const bump = (key: string | null, at: string | null | undefined) => { if (key && at && (!lastActivity.has(key) || lastActivity.get(key)! < at)) lastActivity.set(key, at); };
@@ -372,7 +398,7 @@ export function homeCounts(model: Pick<HomeModel, "groups" | "raised">): HomeCou
 
 /** Needs you: tier, then the longest wait first, then key for a stable order. */
 export function compareNeedsItems(a: Pick<Workstream, "tier" | "at" | "key">, b: Pick<Workstream, "tier" | "at" | "key">): number {
-  return (a.tier ?? 3) - (b.tier ?? 3) || (a.at ?? "￿").localeCompare(b.at ?? "￿") || a.key.localeCompare(b.key);
+  return (a.tier ?? 4) - (b.tier ?? 4) || (a.at ?? "￿").localeCompare(b.at ?? "￿") || a.key.localeCompare(b.key);
 }
 
 /** "Sign off & next" inside Home: the top of Needs you that isn't the row just handled. */

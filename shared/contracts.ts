@@ -14,6 +14,7 @@ import { AGENT_ROLES, agentSettingsViewSchema, savedRoleSchema } from "./agent-s
 import { prStatsInputSchema, prStatsOutputSchema, setPrStatsInputSchema, statsRepoName, statsSettingsViewSchema, statsStatusSchema } from "./pr-stats-settings";
 import { defineRpc, type PluginSubscriptionContract } from "@getpaseo/plugin";
 import { CONTEXT_ANSWER_MAX, CONTEXT_TARGETS, contextRequestSchema } from "./catch-up";
+import { HISTORY_FILTERS, QUESTION_ACTIONS } from "./your-questions";
 import { ONBOARDING_ACTIONS, ONBOARDING_STEPS, checksSchema, onboardingViewSchema } from "./onboarding";
 import { z } from "zod";
 import { actionChangeSchema, dispatchActionSchema, dispatchInputSchema, dispatchRecordSchema, settingsChangeSchema } from "./dispatch";
@@ -250,15 +251,31 @@ export const overseerStartRpc = defineRpc({ name: "follow.overseer-start", input
 export const overseerAskRpc = defineRpc({ name: "follow.overseer-ask", input: z.strictObject({ text: z.string().trim().min(1).max(2000), images: imageUploadsSchema.optional() }), output: overseerStatusSchema });
 /** Whether a field's recipient takes pasted images (server/image-support.ts), asked once per target when the first image is added. */
 export const imageSupportRpc = defineRpc({ name: "follow.image-support", input: z.strictObject({ target: imageTargetSchema }), output: imageSupportSchema });
-// Catch up's More context (docs/needs-you.md#catch-up): ask the Overseer or the card's agent, list the asks, and the
-// asked agent's reply. The ask answers once it is recorded; the send to the agent goes through the message queue.
+// Your questions and Catch up's More context (docs/needs-you.md#your-questions): ask an agent, list the questions, act
+// on one, and the asked agent's reply. The ask answers once it is recorded; the send goes through the message queue.
+// With a cardKey it is More context about that card (its workspace's main agent answers); without one it is a free
+// question: to `agentId` when given (the agent whose chat ran /ask; a tracked workspace's main agent or contributor),
+// else to the workspace's main agent.
 export const contextAskRpc = defineRpc({ name: "follow.context-ask", input: z.strictObject({
-  workspaceId: z.string().min(1).max(200).nullable(), agentId: z.string().min(1).max(200).nullable(), cardKey: z.string().min(1).max(400),
-  card: z.string().trim().min(1).max(300),
+  workspaceId: z.string().min(1).max(200).nullable().optional(), agentId: z.string().min(1).max(200).nullable().optional(), cardKey: z.string().min(1).max(400).nullable().optional(),
+  card: z.string().trim().max(300).optional(),
+  /** Where the developer asked: Catch up's More context, Your questions' field, or /ask in a chat. Agents' asks are `tool`. */
+  via: z.enum(["more", "field", "slash"]).optional(),
   /** Ignored: every ask goes to the card's workspace's main agent. Still accepted, so older callers don't break. */
   target: z.enum(CONTEXT_TARGETS).optional(), ask: z.string().trim().min(1).max(2000), images: imageUploadsSchema.optional() }),
   output: z.object({ request: contextRequestSchema, fresh: z.boolean(), note: z.string().optional() }) });
-export const contextListRpc = defineRpc({ name: "follow.context-list", input: z.strictObject({ workspaceId: z.string().max(200).optional() }), output: z.object({ requests: z.array(contextRequestSchema) }) });
+export const contextListRpc = defineRpc({ name: "follow.context-list", input: z.strictObject({ workspaceId: z.string().max(200).optional(),
+  /** open: asking or an unread answer; tasks: made a task. */
+  state: z.enum(HISTORY_FILTERS).optional(), query: z.string().max(200).optional() }), output: z.object({ requests: z.array(contextRequestSchema) }) });
+/**
+ * What to do with a question (Your questions): Done (read; stays in history), Reply (a follow-up question in the same
+ * thread, to the same agent), Make a task (an obligation owned by the agent that answered, the Q&A as its note),
+ * Withdraw (while asking; a queued message is dropped). An agent's act is recorded as `agent:<id>` and never reads the
+ * answer for the developer.
+ */
+export const questionActionRpc = defineRpc({ name: "follow.question-action", input: z.strictObject({ id: z.string().min(1).max(80), action: z.enum(QUESTION_ACTIONS),
+  text: z.string().trim().min(1).max(2000).optional(), images: imageUploadsSchema.optional() }),
+  output: z.object({ request: contextRequestSchema, reply: contextRequestSchema.optional(), taskId: z.string().optional() }) });
 /** Catch up's deck as the developer's Home would deal it (agent parity: an agent sees what the developer goes through). */
 export const catchUpDeckRpc = defineRpc({ name: "follow.catch-up-deck", input: z.strictObject({}), output: z.object({
   cards: z.array(z.object({ key: z.string(), kind: z.string(), workspaceId: z.string().nullable(), agentId: z.string().nullable(), title: z.string(), line: z.string(),

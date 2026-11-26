@@ -108,7 +108,7 @@ try {
   };
   const native = await nativeMcp([{ method: "initialize", params: {} }, { method: "tools/list" }, { method: "tools/call", params: { name: "workspace_status", arguments: {} } }]);
   assert.equal(native[1].result.tools.length, 16); assert.equal(JSON.parse(native[2].result.content[0].text).detail, "summary");
-  assert.deepEqual((await nativeMcp([{ method: "tools/list" }], secondary.id))[0].result.tools.map(t => t.name).sort(), ["link_item", "register_pr", "sync_workspace", "unlink_item", "wait_for_checks", "workspace_status"]);
+  assert.deepEqual((await nativeMcp([{ method: "tools/list" }], secondary.id))[0].result.tools.map(t => t.name).sort(), ["context_reply", "link_item", "register_pr", "sync_workspace", "unlink_item", "wait_for_checks", "workspace_status"]);
   const fallbackEnv = { ...env, PASEO_AGENT_ID: agent.id }; delete fallbackEnv.FOLLOW_UP_CLIENT_ENTRY;
   const fallback = JSON.parse((await exec(process.execPath, [bridgePath, "call", "workspace_status", "{}"], { env: fallbackEnv })).stdout);
   assert.equal(fallback.id, w.id, "a dependency-free bridge resolves the installed CLI client without a session env override");

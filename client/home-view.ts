@@ -1,7 +1,7 @@
 import type { DispatchRecord } from "../shared/dispatch";
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import type { ImageUpload } from "../shared/images";
-import { contextAskRpc, contextListRpc, dispatchRecordsRpc, displayFeed, homeFeed, queueNeedsSchema, overseerAskRpc, overseerRestartRpc, overseerStartRpc, overseerStatusRpc, prioritiesRpc, prStatsSettingsRpc, rankNowRpc, rankStatusRpc, usageRpc } from "../shared/contracts";
+import { contextAskRpc, contextListRpc, questionActionRpc, dispatchRecordsRpc, displayFeed, homeFeed, queueNeedsSchema, overseerAskRpc, overseerRestartRpc, overseerStartRpc, overseerStatusRpc, prioritiesRpc, prStatsSettingsRpc, rankNowRpc, rankStatusRpc, usageRpc } from "../shared/contracts";
 import { openFeed } from "./feeds";
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type { Priority } from "../shared/priorities";
@@ -287,6 +287,13 @@ export function createHomeExtras(client: PluginClientContext) {
     async askContext(input: RpcInput<typeof contextAskRpc>) {
       const out = await client.rpc(contextAskRpc, input);
       setContext([...context.filter(r => r.id !== out.request.id), out.request]); emit();
+      return out;
+    },
+    /** Your questions: Done, Reply, Make a task, Withdraw. The question (and a reply's new one) show at once. */
+    async questionAction(input: RpcInput<typeof questionActionRpc>) {
+      const out = await client.rpc(questionActionRpc, input);
+      const next = context.map(r => r.id === out.request.id ? out.request : r);
+      setContext(out.reply ? [...next.filter(r => r.id !== out.reply!.id), out.reply] : next); emit();
       return out;
     },
     agents: () => [...agents.values()],
