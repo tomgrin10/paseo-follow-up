@@ -1,7 +1,7 @@
 {
   "name": "paseo-follow-up",
   "private": false,
-  "version": "2.4.2",
+  "version": "2.5.0",
   "description": "Every agent, one inbox. Follow-up brings what all your coding agents need from you into one ranked list, and follows their work through merge, deploy and after.",
   "type": "module",
   "files": [
