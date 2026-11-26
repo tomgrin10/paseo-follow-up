@@ -76,6 +76,23 @@ export function finishedReply(items: readonly unknown[], saved: { at?: unknown; 
   return typeof reply?.text === "string" ? reply.text : null;
 }
 
+/**
+ * The turn did nothing but compact (a-compaction-is-not-a-finish): its timeline shows a compaction and nothing the agent
+ * produced (no reply, reasoning, tool call, to-do list or error). The prompt (`/compact`, Smart Session's request, none
+ * for a provider's own auto-compaction), plugins' cards and notifications aren't the agent's work. An empty read proves
+ * nothing (the read may have failed), so it is never a compaction; neither is a tail that reaches an earlier turn's reply.
+ */
+const AGENT_WORK = new Set(["assistant_message", "reasoning", "tool_call", "todo", "error"]);
+export function compactionOnly(items: readonly unknown[]): boolean {
+  let compacted = false;
+  for (const item of items) {
+    const type = (item as { type?: unknown } | null)?.type;
+    if (type === "compaction") compacted = true;
+    else if (typeof type === "string" && AGENT_WORK.has(type)) return false;
+  }
+  return compacted;
+}
+
 /** Readers over the other plugins' plugin-data. Unknown versions or shapes read as "not theirs". */
 export function fileSources(paseoHome: string, ledger: () => Promise<Ledger>): Sources {
   const data = (...p: string[]) => join(paseoHome, "plugin-data", ...p);

@@ -3,6 +3,7 @@ import { pickNudges, type DueEntry, type NudgeReceipt } from "../shared/task-due
 import { providerCaps } from "../shared/provider-support";
 import { messageSender } from "../shared/message-sender";
 import { startsTurn } from "./turn-timeline";
+import { compactionOnly } from "./inbox-classifier";
 
 /**
  * Turn-end checks for a provider without Follow-up's hook (an-agent-on-any-provider-gets-follow-up). Claude Code and
@@ -116,6 +117,8 @@ export class TurnEnd {
     // The reply to our own message: never checked, so a check can't start a loop.
     if (this.answering.delete(agent.id)) return null;
     if (outcome.kind !== "completed") return null;
+    // A turn that only compacted isn't the agent finishing: nothing to check (a-compaction-is-not-a-finish).
+    if (items && compactionOnly(items)) return null;
     const base = await this.d.input(agent.id, agent.provider, items, startedAt);
     if (!base?.entry) return null;
     const now = (this.d.now ?? Date.now)();
