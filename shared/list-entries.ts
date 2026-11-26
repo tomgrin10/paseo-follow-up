@@ -85,9 +85,10 @@ export function listEntries({ model, closed, openProjects, pages, briefLine, res
       if (f.items.length > shown) out.push({ type: "more", key: `m:${f.project}`, project: f.project, left: f.items.length - shown });
     }
   }
-  // Phones: nothing followed yet says so and what fills the list, instead of a blank screen under the pinned rows.
+  // Nothing followed yet says so and how to start, instead of a blank list under the pinned rows (a first run lands here).
   if (hits && !out.some(e => e.type === "row")) out.push({ type: "label", key: "l:none", text: "No workspace matches." });
-  else if (touch && !filter && !hits && model.groups.every(g => !g.items.length)) out.push({ type: "empty", key: "l:nothing" });
+  // Only when the list has nothing at all: raised issues (Needs you's own rows) are something.
+  else if (!filter && !hits && model.groups.every(g => !g.items.length) && !raised) out.push({ type: "empty", key: "l:nothing" });
   return out;
   if (filter && !out.length) out.push({ type: "label", key: "l:empty", text: `Nothing in ${GROUP_TITLE[filter as HomeGroupId]} right now.` });
   return out;

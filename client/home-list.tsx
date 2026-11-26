@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { NEW_NAME } from "../shared/new-name";
 import { View, type FlatList as NativeFlatList } from "react-native";
 import { Pressable, Text } from "./text";
 import { Icon, FlatList } from "@getpaseo/plugin/client/ui";
@@ -130,7 +131,7 @@ export function HomeList({ model, theme, dense = false, touch, selectedKey, onSe
         letterSpacing: item.key === "l:archived" && !touch ? 0.6 : 0, textTransform: item.key === "l:archived" && !touch ? "uppercase" : "none", paddingHorizontal: dense ? 8 : 16, ...(item.key === "l:older" && touch ? { paddingLeft: TOUCH_ROW_TEXT } : null), paddingTop: 12, paddingBottom: 4 }}>{item.text}</Text>;
       case "empty": return <View accessibilityRole="summary" style={{ marginHorizontal: 16, marginTop: 20, gap: 6 }}>
         <Text accessibilityRole="header" style={{ color: c.foreground, fontSize: 17, lineHeight: 23, fontWeight: "600" }}>Nothing followed yet</Text>
-        <Text style={{ color: c.foregroundMuted, fontSize: 14, lineHeight: 20 }}>Follow a workspace from its Follow-up panel, or turn a project on in Settings so its workspaces join on their own. They show up here once their agents work.</Text>
+        <Text style={{ color: c.foregroundMuted, fontSize: 14, lineHeight: 20 }}>{`Workspaces show up here once their agents work. Start one with ${NEW_NAME}, from an issue, a PR or your words.`}</Text>
         {emptyAction ? <View style={{ flexDirection: "row", marginTop: 6 }}>{emptyAction}</View> : null}
       </View>;
       case "slot": return <View style={{ paddingVertical: 10 }}>{afterNeeds}</View>;

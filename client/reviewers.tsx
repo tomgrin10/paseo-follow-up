@@ -127,7 +127,7 @@ export function ReviewerSettings({ theme, compact = false }: { theme: Theme; com
   const fallback = data.config.defaults.length ? `Uses the default: ${data.config.defaults.map(reviewerLabel).join(", ")}` : null;
   return <View style={{ gap: 8 }}>
     <View style={{ borderRadius: 10, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1, overflow: "hidden" }}>
-      <ReviewerList first repo={null} list={data.config.defaults} theme={theme} compact={compact} fallback="Nobody. Repositories without their own list open the picker." />
+      <ReviewerList first repo={null} list={data.config.defaults} theme={theme} compact={compact} fallback="Nobody yet. Without a list, Add reviewers asks you who each time." />
     </View>
     {data.repos.length > 0 ? <Disclosure id="reviewers.repos" title="Repositories" summary={reposSummary(data.repos, data.config)}
       defaultOpen={!reviewersConfigured(data.config)} theme={theme} compact={compact}>

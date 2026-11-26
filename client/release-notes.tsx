@@ -5,7 +5,7 @@ import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, ScrollView } from "@getpaseo/plugin/client/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { releaseNotesRpc, whatsNewSeenRpc } from "../shared/contracts";
-import { LAST_SEEN_KEY, deviceSeenFrom, recentNotes, whatsNew, type NoteBlock, type ReleaseNote, type ReleaseNotesView } from "../shared/changelog";
+import { LAST_SEEN_KEY, deviceSeenFrom, inlineRuns, plainInline, recentNotes, whatsNew, type InlineRun, type NoteBlock, type ReleaseNote, type ReleaseNotesView } from "../shared/changelog";
 import { deviceStorage, viewStatus } from "../shared/settings-nav";
 import { useViewVersion } from "./view-store";
 import { Button, text, type Theme } from "./kit";
@@ -37,12 +37,16 @@ const Dot = ({ style }: { style: object }) => <Text style={style} accessibilityE
 const MeasureContext = createContext<number | undefined>(undefined);
 const useMeasure = () => { const m = useContext(MeasureContext); return m ? { maxWidth: m } : null; };
 
+/** A line's text with its bold runs semibold (the weight headings use), or the plain text when nothing is bold. */
+const inline = (line: string, runs?: InlineRun[]): ReactNode =>
+  runs ? runs.map((r, i) => r.bold ? <Text key={i} style={{ fontWeight: "600" }}>{r.text}</Text> : r.text) : line;
+
 /** One bullet: a small dot and its text. */
-function Bullet({ text: line, theme, compact }: { text: string; theme: Theme; compact: boolean }) {
+function Bullet({ text: line, runs, theme, compact }: { text: string; runs?: InlineRun[]; theme: Theme; compact: boolean }) {
   const c = theme.colors; const t = text(c, compact);
   return <View style={[{ flexDirection: "row", gap: 8 }, useMeasure()]}>
     <View style={{ width: 4, height: 4, borderRadius: 2, marginTop: compact ? 8 : 7, backgroundColor: c.foregroundMuted }} />
-    <Text style={[t.body, { flex: 1 }]}>{line}</Text>
+    <Text style={[t.body, { flex: 1 }]}>{inline(line, runs)}</Text>
   </View>;
 }
 
@@ -94,14 +98,14 @@ export function VersionNotes({ note, theme, compact = false, max = 8 }: { note: 
         if (b.kind === "rule") return <View key={i} style={{ height: 1, backgroundColor: c.border, marginTop: 16, marginBottom: 4 }} />;
         // Section headings: semibold, one step above body (body 13/14, heading 15/17, the title role), clearly headings.
         if (b.kind === "heading") return <Text key={i} accessibilityRole="header" style={[quiet ? [t.meta, { fontWeight: "600" }] : [t.title, { fontWeight: "600", marginTop: i ? 16 : 0 }], measure]}>{b.text}</Text>;
-        if (b.kind === "text") return <Text key={i} style={[quiet ? t.meta : i === 0 ? [t.body, lead] : t.body, measure]}>{b.text}</Text>;
-        return <Bullet key={i} text={b.text} theme={theme} compact={compact} />;
+        if (b.kind === "text") return <Text key={i} style={[quiet ? t.meta : i === 0 ? [t.body, lead] : t.body, measure]}>{inline(b.text, b.runs)}</Text>;
+        return <Bullet key={i} text={b.text} runs={b.runs} theme={theme} compact={compact} />;
       })}
     </View>;
   }
   const items = all ? note.items : note.items.slice(0, max);
   return <View style={{ gap: 6 }}>
-    {items.map((item, i) => <Bullet key={i} text={item} theme={theme} compact={compact} />)}
+    {items.map((item, i) => { const runs = inlineRuns(item); return <Bullet key={i} text={plainInline(item)} runs={runs.some(r => r.bold) ? runs : undefined} theme={theme} compact={compact} />; })}
     {!all && note.items.length > max && <Pressable accessibilityRole="button" onPress={() => setAll(true)} hitSlop={compact ? { top: 14, bottom: 14, left: 8, right: 8 } : 6}
       style={{ minHeight: compact ? 44 : undefined, justifyContent: "center", alignSelf: "flex-start" }}>
       <Text style={[t.label, { color: c.foreground, fontWeight: "600" }]}>{`Show all ${note.items.length}`}</Text>
@@ -131,7 +135,7 @@ function FoldedVersion({ note, theme, compact }: { note: ReleaseNote; theme: The
       <Icon name={open ? "ChevronDown" : "ChevronRight"} size={14} color={c.foregroundMuted} />
       <Text accessibilityRole="header" style={[t.label, { fontVariant: ["tabular-nums"], flexShrink: 0 }]}>{note.version}</Text>
       {note.date && <Text style={[t.meta, { flexShrink: 0 }]}>{fmtDate(note.date)}</Text>}
-      {!open && <Text numberOfLines={1} style={[t.meta, { flex: 1, minWidth: 0 }]}>{note.items[0] ?? note.blocks?.find(b => b.kind === "text" || b.kind === "bullet")?.text ?? ""}</Text>}
+      {!open && <Text numberOfLines={1} style={[t.meta, { flex: 1, minWidth: 0 }]}>{note.items[0] !== undefined ? plainInline(note.items[0]) : note.blocks?.find(b => b.kind === "text" || b.kind === "bullet")?.text ?? ""}</Text>}
     </Pressable>
     {open && <View style={{ paddingLeft: 22, paddingBottom: 12 }}><VersionNotes note={note} theme={theme} compact={compact} /></View>}
   </View>;

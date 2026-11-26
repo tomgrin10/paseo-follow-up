@@ -131,7 +131,7 @@ export function writeHeartbeat(file: string, patch: Record<string, unknown>): Pr
   return run;
 }
 
-export function watchMemory(o: { heartbeatFile: string; settler?: HeapSettler; sampleMs?: number; beatMs?: number }): { settler: HeapSettler; stop(): void } {
+export function watchMemory(o: { heartbeatFile: string; settler?: HeapSettler; sampleMs?: number; beatMs?: number }): { settler: HeapSettler; stop(): Promise<void> } {
   const settler = o.settler ?? new HeapSettler();
   let elu = performance.eventLoopUtilization();
   settler.observe(process.memoryUsage().rss / 1048576);
@@ -140,7 +140,9 @@ export function watchMemory(o: { heartbeatFile: string; settler?: HeapSettler; s
     settler.observe(process.memoryUsage().rss / 1048576, performance.eventLoopUtilization(next, elu).utilization);
     elu = next;
   }, o.sampleMs ?? 5_000);
-  const beat = setInterval(() => void writeHeartbeat(o.heartbeatFile, { memory: memoryBeat(settler) }).catch(() => undefined), o.beatMs ?? 60_000);
+  // The beat being written, so stop() resolves only once nothing more touches the heartbeat's folder.
+  let writing: Promise<unknown> = Promise.resolve();
+  const beat = setInterval(() => { writing = writeHeartbeat(o.heartbeatFile, { memory: memoryBeat(settler) }).catch(() => undefined); }, o.beatMs ?? 60_000);
   sample.unref?.(); beat.unref?.();
-  return { settler, stop: () => { clearInterval(sample); clearInterval(beat); } };
+  return { settler, stop: async () => { clearInterval(sample); clearInterval(beat); await writing; } };
 }

@@ -44,8 +44,10 @@ export function useAgentSettings() {
 /** Settings' per-row More: what its toggle says (it names what's inside) and what it shows. */
 export type JobExtra = { label: (r: RoleView) => string | null; render: (r: RoleView, save: (entry: SavedRole | null) => void, busy: boolean) => ReactNode };
 
-export function JobRows({ theme, compact, order, extra, preselect = false }: {
+export function JobRows({ theme, compact, order, extra, preselect = false, brief = false }: {
   theme: Theme; compact: boolean; order: readonly AgentRole[];
+  /** Setup only (Q161): one line per helper, its model and a Change link that opens the pickers. */
+  brief?: boolean;
   /** Settings only: controls behind each row's More (limits, schedule, permissions, Reset to defaults). */
   extra?: JobExtra;
   /** Setup only: fill in the recommendation for jobs with nothing saved whose default can't run here. */
@@ -104,7 +106,8 @@ export function JobRows({ theme, compact, order, extra, preselect = false }: {
     {roles.map((r, i) => {
       const field = SWITCH[r.role];
       const on = field && display.status === "ready" ? display.values[field] !== false : null;
-      return <JobRow key={r.role} first={i === 0} row={rows[i]} r={r} catalog={catalog?.providers ?? []} loading={!catalog} theme={theme} compact={compact} busy={busy}
+      const Line = brief ? JobLine : JobRow;
+      return <Line key={r.role} first={i === 0} row={rows[i]} r={r} catalog={catalog?.providers ?? []} loading={!catalog} theme={theme} compact={compact} busy={busy}
         open={open === r.role} onToggle={() => setOpen(open === r.role ? null : r.role)}
         // A job no available provider can run (needsGuard) shows off, and its notice says why; the setting is kept.
         enabled={field ? (rows[i]!.blocked ? false : on) : undefined} onEnable={field && display.status === "ready" && !rows[i]!.blocked ? v => void display.save({ ...display.values, [field]: v }, display.revision).catch(e => toast.error(errorText(e))) : undefined}
@@ -168,6 +171,47 @@ export function JobRow({ row, r, catalog, loading, theme, compact, busy, open, o
         {more && <View style={{ borderWidth: 1, borderColor: c.border, borderRadius: 10, overflow: "hidden" }}>{extra.render(r, save, busy)}</View>}
       </>}
     </View>
+  </View>;
+}
+
+/**
+ * Setup's row (Q161): the helper, the model it will use and Change, on one line on desktop (the switch at its end);
+ * a phone puts the model and Change under the name. Change opens the same pickers as Settings. Only a warning (it
+ * can't run) adds a line, with its one way back; what each helper does and needs stays in Settings → Agents.
+ */
+export function JobLine({ row, r, catalog, loading, theme, compact, busy, open, onToggle, enabled, onEnable, save, first }: Parameters<typeof JobRow>[0]) {
+  const c = theme.colors; const t = text(c, compact);
+  const off = enabled === false;
+  const use = row.rec && !row.recommended ? () => save(recommendedEntry(r, row.rec!)) : null;
+  const warning = row.notice?.tone === "warning" ? row.notice : null;
+  const pick = loading ? "Reading your providers…" : row.blocked ? row.pick : `${row.pick}${row.recommended ? " · Recommended" : ""}`;
+  const toggle = enabled !== undefined && <Switch theme={theme} compact={compact} label={row.blocked ? "Unavailable" : enabled ? "On" : "Off"} accessibilityLabel={row.title} hint={row.blocked ? row.notice?.text : undefined} value={enabled} disabled={!onEnable} onChange={v => onEnable?.(v)} />;
+  const change = !loading && !row.blocked && <Pressable accessibilityRole="button" accessibilityLabel={`${row.title} model: ${row.pick}. Change`} accessibilityState={{ expanded: open, disabled: busy }} aria-expanded={open}
+    disabled={busy && !open} onPress={onToggle} hitSlop={compact ? 12 : 8} style={{ minHeight: compact ? 32 : 24, justifyContent: "center" }}>
+    <Text style={[t.label, { fontSize: 13, textDecorationLine: "underline" }]}>{open ? "Done" : "Change"}</Text>
+  </Pressable>;
+  const model = <View style={{ flexDirection: "row", alignItems: "center", gap: 12, flex: 1, minWidth: 0, opacity: off ? 0.6 : 1 }}>
+    {loading && <Spinner color={c.foregroundMuted} size={12} />}
+    {/* Wraps, never cut: "Recommended" is what this line is for (Q161), and a provider's name can be long. */}
+    <Text numberOfLines={2} style={[t.meta, { flex: 1 }]}>{pick}</Text>
+    {change}
+  </View>;
+  return <View style={{ borderTopWidth: first ? 0 : 1, borderTopColor: c.border, paddingHorizontal: compact ? 14 : 16, paddingVertical: compact ? 6 : 12, gap: compact ? 0 : 6 }}>
+    {compact
+      ? <><View style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 40 }}><Text accessibilityRole="header" style={[t.label, { flex: 1 }]}>{row.title}</Text>{toggle}</View>{model}</>
+      : <View style={{ flexDirection: "row", alignItems: "center", gap: 12, minHeight: 32 }}>
+          <Text accessibilityRole="header" style={[t.label, { width: 104 }]}>{row.title}</Text>
+          {model}
+          {/* A fixed switch column, so every row's Change lines up whether or not it has a switch. */}
+          <View style={{ minWidth: 84, alignItems: "flex-end" }}>{toggle}</View>
+        </View>}
+    {warning && <View style={{ gap: 6, alignItems: "flex-start", paddingLeft: compact ? 0 : 116, paddingBottom: compact ? 8 : 0 }}>
+      <Text accessibilityRole="alert" style={[t.meta, { fontSize: 12, lineHeight: 16, color: c.statusWarning }]}>{warning.text}</Text>
+      {use && <Button theme={theme} compact={compact} kind="secondary" title="Use recommended" accessibilityLabel={`Use ${row.recPick} for ${row.title}`} disabled={busy} onPress={use} />}
+    </View>}
+    {open && !loading && <View style={{ marginTop: 4, marginLeft: compact ? 0 : 116, borderWidth: 1, borderColor: c.border, borderRadius: 10, overflow: "hidden" }}>
+      <RolePickers r={r} catalog={catalog} busy={busy} save={save} />
+    </View>}
   </View>;
 }
 

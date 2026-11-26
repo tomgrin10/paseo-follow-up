@@ -80,7 +80,7 @@ test("heartbeat.json gets the worker's memory and keeps what the installer reads
     assert.ok(m.youngMb === null || m.youngMb >= 0); assert.deepEqual(m.settles, []);
     assert.ok(m.utilization !== null && m.utilization >= 0 && m.utilization <= 1, `utilization ${m.utilization}`);
     assert.equal(m.quietSettles, 0); assert.equal(m.forcedSettles, 0);
-  } finally { watch.stop(); await rm(dir, { recursive: true, force: true }); }
+  } finally { await watch.stop(); await rm(dir, { recursive: true, force: true }); }
 });
 
 test("heartbeat-is-written-whole: overlapping beats never leave a partial heartbeat.json or drop each other's fields", async () => {
