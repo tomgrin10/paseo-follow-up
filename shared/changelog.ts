@@ -212,7 +212,8 @@ export type InstallKind = typeof INSTALL_KINDS[number];
 
 export const releaseNoteSchema = z.object({ version: z.string(), date: z.string().nullable(), items: z.array(z.string()),
   blocks: z.array(z.union([
-    z.object({ kind: z.enum(["heading", "text", "bullet", "rule"]), text: z.string() }),
+    z.object({ kind: z.enum(["heading", "text", "bullet", "rule"]), text: z.string(),
+      runs: z.array(z.object({ text: z.string(), bold: z.literal(true).optional() })).optional() }),
     z.object({ kind: z.literal("image"), text: z.string(), url: z.string(), aspect: z.number().nullable(), width: z.number().nullable() }),
   ])).optional() });
 /** `follow.release-notes`: this host's version record and every shipped note. Read once per app session; never polled. */

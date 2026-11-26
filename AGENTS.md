@@ -1489,7 +1489,15 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    version's notes render a line's `**bold**` as semibold runs (`inlineRuns`, `shared/changelog.ts`), links read as
    their label, and no markdown marker (`**`, a backtick) reaches the screen: not in a curated section, a bullets-only
    note or a version's one-line preview. 2026-11-26, the developer: 2.4.0's bullets lead with bold, and What's new
-   showed them as plain text; a bullets-only note would have shown the asterisks. Guarded by `tests/changelog.test.ts`.
+   showed them as plain text; a bullets-only note would have shown the asterisks. 2.4.0 still showed them plain: the
+   parser emitted the runs, but `follow.release-notes`' schema (`releaseNoteSchema`) didn't list them and zod dropped
+   them on the way to the app. Whatever the parser emits, the schema carries. Then the phone renders showed them plain
+   while desktop showed them bold, from the same component: the DOM had `font-weight: 600`, but Paseo's phone layout
+   puts `system-ui` first, the VM's `system-ui` was a regular-only font (WenQuanYi Zen Hei), and fontconfig synthesizes
+   bold only from 700, so every semibold on a phone render (headings and buttons too) drew regular. A render shows
+   weight: the harness browser's fonts come from `scripts/harness-fonts.conf` (set by `harness()`), and screenshots
+   refuse to render when 600 draws like 400 (`fontWeightProblem`, `scripts/font-weights.mjs`). Guarded by
+   `tests/changelog.test.ts` and `tests/harness-fonts.test.ts`.
 
 ## Bugs
 

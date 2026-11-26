@@ -13,7 +13,8 @@
 // including on SIGINT, SIGTERM and SIGHUP (a CI or `timeout` kill), so no daemon or plugin process outlives the run.
 import { execFileSync, spawn } from "node:child_process";
 import { accessSync, constants, mkdirSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { availableParallelism, loadavg } from "node:os";
 
 export const slotDirectory = (env = process.env) => env.HARNESS_SLOT_DIR || "/tmp/paseo-harness-slots";
@@ -105,16 +106,24 @@ export function checkPaseo({ log = line => console.error(line) } = {}) {
   return { file, version };
 }
 
+/**
+ * The harness browser's fontconfig (scripts/harness-fonts.conf): the machine's fonts, with system-ui and sans-serif on
+ * a font that has a bold face, so a phone render shows semibold (invariant 120; checked by scripts/font-weights.mjs).
+ */
+export const HARNESS_FONTS = join(dirname(fileURLToPath(import.meta.url)), "harness-fonts.conf");
+
 let held = null;
 /**
  * Waits for a harness slot (one "waiting for a harness slot" line while all are busy) and sets the harness env: local
- * speech off, so isolated daemons don't download and unpack a speech model on every run. Before waiting, it exits
+ * speech off, so isolated daemons don't download and unpack a speech model on every run, and the browser's fonts
+ * (`HARNESS_FONTS`), so semibold renders as semibold on every layout. Before waiting, it exits
  * (97, like the wrapper) when the paseo CLI on PATH is below the plugin's floor (checkPaseo). Call once, at the top.
  * Like the wrapper, a run already inside a slot skips the CLI check and the wait: whoever took the slot checked.
  */
 export async function harness({ log = line => console.error(line), pollMs = 5_000 } = {}) {
   process.env.PASEO_DICTATION_ENABLED = "false";
   process.env.PASEO_VOICE_MODE_ENABLED = "false";
+  process.env.FONTCONFIG_FILE = HARNESS_FONTS;
   const directory = slotDirectory();
   if (held || insideSlot(directory)) return { slot: held?.slot ?? null };
   try { checkPaseo({ log }); } catch (error) { log(error.message); process.exit(97); }

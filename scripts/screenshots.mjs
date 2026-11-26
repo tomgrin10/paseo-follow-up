@@ -34,6 +34,7 @@ import { createRequire } from "node:module";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPaseoApi } from "@getpaseo/client";
 import { harness, spawnDaemon } from "./harness.mjs";
+import { fontWeightProblem } from "./font-weights.mjs";
 import { PROVIDER_TOOLS, daemonCrashes, harnessEnv, harnessConfig } from "./harness-env.mjs";
 import { fakeGithub } from "./fake-github.mjs";
 // shared/onboarding.ts imports without extensions, which plain node can't load: read its step list as text.
@@ -5640,6 +5641,9 @@ try {
   const { chromium } = createRequire(join(process.env.PLAYWRIGHT_CORE, "package.json"))("playwright-core");
   // Headless Chromium hides scrollbars by default; the notes review shows them, as the notes' bar is part of the review.
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM, headless: true, ...(argv.includes("--notes-review") ? { ignoreDefaultArgs: ["--hide-scrollbars"] } : {}) });
+  // A font without a bold face drew every semibold regular on the phone (invariant 120): refuse to render on one.
+  const fontProblem = await fontWeightProblem(browser);
+  if (fontProblem) throw new Error(fontProblem);
   const shoot = makeShooter({ browser, port, out, scheme, optimiser, results, crashed });
 
   // setup: the first step of Getting started, on this fresh install, before anything is seeded.

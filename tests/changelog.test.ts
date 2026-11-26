@@ -6,7 +6,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { LEGACY_BASELINE, announcesUpdate, imageBlock, inlineRuns, notesSince, notesVersion, parseChangelog, recentNotes, recentUpdate, whatsNew } from "../shared/changelog";
+import { LEGACY_BASELINE, announcesUpdate, imageBlock, inlineRuns, notesSince, releaseNoteSchema, notesVersion, parseChangelog, recentNotes, recentUpdate, whatsNew } from "../shared/changelog";
 // @ts-expect-error plain ESM script without types
 import { CURATED_MAX_BULLETS, DRAFT_MARKER, featuresInPatch, fragmentBullets, isMajor, lintBullet, nextVersion } from "../scripts/release-notes.mjs";
 
@@ -335,6 +335,9 @@ test("changelog: bold in a curated bullet or paragraph reaches What's new as bol
   assert.deepEqual(inlineRuns("**A** and `b`"), [{ text: "A", bold: true }, { text: " and b" }], "a bullets-only note's item, rendered without its markers");
   const shipped = parseChangelog(readFileSync("CHANGELOG.md", "utf8")).find(n => n.version === "2.4.0")!;
   assert.ok(shipped.blocks!.filter(b => b.kind === "bullet").every(b => b.kind !== "image" && b.runs?.[0]?.bold), "every 2.4.0 bullet opens bold");
+  // 2026-11-26: 2.4.0 shipped the runs from the parser, but follow.release-notes' schema didn't list them, so zod
+  // dropped them on the way to the app and What's new stayed plain. What the parser emits is what the app receives.
+  assert.deepEqual(releaseNoteSchema.parse(shipped), shipped, "the RPC schema keeps every field the parser emits");
   // release-notes-show-their-bold: no markdown marker reaches the screen from any version's notes, whichever way it renders.
   const marker = /\*\*|`/;
   for (const n of parseChangelog(readFileSync("CHANGELOG.md", "utf8"))) {
