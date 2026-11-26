@@ -1,5 +1,5 @@
-import { Pressable, View } from "react-native";
-import { Text } from "./text";
+import { View } from "react-native";
+import { Pressable, Text } from "./text";
 import type { InboxStore } from "./inbox-store";
 import { useInbox } from "./inbox";
 import { focusRing, text, type Theme } from "./kit";
