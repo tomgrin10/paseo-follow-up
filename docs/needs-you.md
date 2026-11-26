@@ -340,6 +340,42 @@ surfaces by workspace (`questionCardKey`: `ws:<id>|Q3`), and every reader matche
 question card. So an ask made from the panel shows in Catch up and on Home, and the other way round. The client reads
 the asks from one store, Home's extras (`setContextSource`), which `follow.home-feed` keeps current, so nothing polls.
 
+## Your questions
+
+The developer asks an agent something, and the answer is kept where they can find it again: one **Your questions** card
+(the panel and Home's detail pane, the same component), Needs you, Catch up and phones. It is the same request as More
+context (`server/context-requests.ts`, `shared/your-questions.ts`, `context.json`): a More context ask is a question
+about a card (`cardKey`), a free question has `cardKey: null`. Design: `DESIGN.md` of the Your questions evidence.
+
+- **Asking** (`follow.context-ask`, what `ask_context` calls): the card's "Ask the main agent…" field (`via: "field"`, to
+  the workspace's main agent), `/ask <question>` in any agent's chat (`via: "slash"`, to *that* agent), More context
+  (`via: "more"`, to the card's workspace main agent) and agents (`via: "tool"`). A free question goes only to an agent
+  that can answer it (`questionRecipient`): a tracked workspace's main agent or one of its contributors, the roles with
+  `context_reply`; never the caller. It is a queued message (invariant 36) that starts with `QUESTION_PREFIX` and its
+  id (`agentQuestionPrompt`); the chat shows it as the developer's question with a "Your question" chip. A plain
+  question typed in the chat is not tracked (Q172 B=a).
+- **The answer, reliably** (`your-question-always-gets-its-answer`): `context_reply {requestId, text}` first (≤4000
+  chars, a corrected reply wins). Else **turn-end capture**: the first turn end after delivery takes the agent's last
+  assistant message after the question's own message in that turn (`capturedAnswer`), from the items the worker already
+  read for the turn end (`a-turn-s-timeline-is-read-once`; `agent.turn_ended` on every provider, no hook), and marks it
+  "from its chat". With no items (the turn couldn't be read) it is "answered in its chat" with Open chat. A send that
+  fails for good fails the question (Ask again); Withdraw while asking settles it as withdrawn and drops a message
+  still queued.
+- **After the answer** (`follow.question-action`, `question_action`): Done (read; stays in history), Reply (a follow-up
+  in the same thread, `parentId`, to the same agent), Make a task (an obligation through `update_obligation`'s path,
+  owned by the agent that answered, the Q&A as its `note`), Withdraw. Each records `by`; an agent's act never marks
+  the answer read for the developer (`readAt` is the developer's only), and the agent a question was asked of can't
+  act on it (it answers with `context_reply`).
+- **Needs you** (Q172 C=a): an unread answer (`unreadAnswer`: answered, from its chat, or failed, not yet read) puts
+  its workspace's row in Needs you at the lowest tier (`ANSWER_TIER`, below finished turns) as "Answer · <question>",
+  unless the row already needs the developer for something louder; Catch up deals it as an `answer` card, last in its
+  workstream. A question still asking is the row's line ("Asking · …") and never Needs you. Home builds both from the
+  home feed's `context` (`buildHome` `questions`), so nothing polls.
+- **Kept** (Q172 E=a): 30 days, at most 200 per workspace (`pruneContext`). History (in the card on desktop, a sheet on
+  a phone) searches questions and answers (`questionHistory`), All / Open / Tasks, newest first.
+- **v1 → v2**: `context.json` gained `version: 2`; a v1 file is migrated on load (`migrateContext`): settled asks
+  become history rows already read, an open one stays open.
+
 ## Answers waiting to be sent
 
 `an-answer-leaves-needs-you-only-when-delivered`. Copy and Put in chat move the developer's own words without

@@ -1,0 +1,2 @@
+- Your questions: ask an agent from the panel or Home, or type /ask in its chat, and the answer stays with Done, Reply and Make a task for 30 days.
+- An answer you haven't read shows in Needs you and Catch up. When the agent answers in its chat instead, Follow-up keeps its reply as the answer.
