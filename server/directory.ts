@@ -30,6 +30,8 @@ export const LOOKUP_MAX = 40;
  * agent (a timeline or subagent read) re-checks that one agent first: see `live`.
  */
 export class DaemonDirectory {
+  /** Discovery metadata changed; passive consumers can retry work for agents now loaded. */
+  onAgentsChanged: () => void = () => {};
   private rows: (DirectoryRows & { at: number; agentsAt: number; projectsAt: number }) | null = null;
   /**
    * In-flight reads, joined by every concurrent caller (concurrent-readers-share-one-request): one request per list,
@@ -106,6 +108,7 @@ export class DaemonDirectory {
       this.rememberArchived(this.rows?.agents); this.rememberArchived(fresh.agents);
       const at = this.now();
       this.rows = { ...fresh, at, agentsAt: at, projectsAt: at }; this.agentsTick = this.tick;
+      this.onAgentsChanged();
       if (failedProjects) this.projectsStale = true;
       return this.rows;
     } catch (error) { this.dirty = true; throw error; }
@@ -122,6 +125,7 @@ export class DaemonDirectory {
     const agents = await this.connect(client => this.list("fetch_agents_request", cursor => client.fetchAgents({ page: { limit: 100, ...(cursor ? { cursor } : {}) } })));
     this.rememberArchived(this.rows?.agents); this.rememberArchived(agents);
     if (this.rows) { this.rows.agents = agents; this.rows.agentsAt = this.now(); this.agentsTick = this.tick; }
+    this.onAgentsChanged();
     return this.rows!;
   }
   private refreshProjects(): Promise<DirectoryRows> {
@@ -201,6 +205,7 @@ export class DaemonDirectory {
       const i = this.rows.agents.findIndex(row => row.agent.id === id);
       if (i >= 0) this.rows.agents[i] = { agent }; else this.rows.agents.push({ agent });
     }
+    this.onAgentsChanged();
     return agent;
   }
 
@@ -220,6 +225,7 @@ export class DaemonDirectory {
     const agent = this.cached(id);
     if (!agent) { this.dirty = true; return false; }
     change(agent);
+    this.onAgentsChanged();
     return true;
   }
 

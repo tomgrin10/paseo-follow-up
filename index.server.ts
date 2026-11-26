@@ -75,6 +75,7 @@ import { scopes } from "./server/scopes";
 import { TurnEnd } from "./server/turn-end";
 import { updateObligation } from "./server/obligations";
 import { Inbox, INBOX_WRITE_MS, type GuardPause } from "./server/inbox";
+import { BriefTimeline } from "./server/brief-timeline";
 import { daemonDirectory, guardPath } from "./server/inbox-directory";
 import { fileSources } from "./server/inbox-classifier";
 import { onBeforeSend, onDaemonReconnect } from "./server/daemon";
@@ -92,7 +93,7 @@ import { projectRepo } from "./server/daemon";
 import { batchArchive, pruneUnsent } from "./server/batch-archive";
 import { statusCheck } from "./server/status-check";
 import { NO_USAGE, usageKey } from "./shared/usage";
-import { activeWindowMs, DEFAULT_ACTIVE_WINDOW_DAYS } from "./server/agent-load";
+import { isLoaded, activeWindowMs, DEFAULT_ACTIVE_WINDOW_DAYS } from "./server/agent-load";
 import { ACTIVE_SCOPE_MIGRATION, PRUNE_MIGRATION, autoSendsByDefault, FOLLOW_EVERY_MIGRATION, followsByDefault, followsEvery, migrateFollowEvery, optedOut } from "./shared/settings";
 import { Overseer, OVERSEER_TOOLS, type OverseerPaseo, type OverseerTool, providerModel } from "./server/overseer";
 import { OVERSEER_LABEL, isOverseerAgent } from "./shared/overseer";
@@ -145,7 +146,7 @@ import { busyAgents, type Busy } from "./shared/update-policy";
 import { VersionsStore, demoOverride, describeSelf, readPackage, type SelfInstall } from "./server/release-notes";
 import { updatesViewSchema, type UpdatesView } from "./shared/updates";
 import { PLUGIN_NAME, releaseNotesViewSchema, type ReleaseNote, type ReleaseNotesView } from "./shared/changelog";
-import { BRIEF_KIND, BRIEF_VERSION, prState, prStates, validateNeedsYou, type Brief, type NeedsYouRecord } from "./shared/brief";
+import { BRIEF_KIND, BRIEF_VERSION, prState, prStates, validateNeedsYou, type NeedsYouRecord } from "./shared/brief";
 import { foldedAsk } from "./shared/needs-block";
 import { ImageStore } from "./server/image-store";
 import type { ImageRef, ImageUpload } from "./shared/images";
@@ -311,18 +312,26 @@ export default function contribute(server: PluginServerContext) {
   // The brief's timeline rows need a plugin session; the handler contexts carry one. Rows wait until one is seen.
   type PaseoApi = PluginHandlerContext["paseo"];
   let api: PaseoApi | null = null;
-  const unsent = new Map<string, { agentId: string; brief: Brief }>();
-  const append = async (agentId: string, brief: Brief) => {
-    if (!api) { unsent.set(`${agentId}|${brief.id}`, { agentId, brief }); return; }
-    await api.agents.ref(agentId).timeline.append({ type: "plugin", id: brief.id, kind: BRIEF_KIND, version: BRIEF_VERSION, data: brief });
-  };
+  const briefTimeline = new BriefTimeline({
+    loaded: id => isLoaded(gateway.directory.cached(id))
+      ? withDaemon(async client => (await client.fetchAgent(id))?.agent ?? null)
+      : Promise.resolve(null),
+    current: id => inbox.brief(id),
+    append: async (agentId, brief) => {
+      if (!api) throw new Error("The plugin session isn't ready");
+      await api.agents.ref(agentId).timeline.append({ type: "plugin", id: brief.id, kind: BRIEF_KIND, version: BRIEF_VERSION, data: brief });
+    },
+  });
+  // Discovery already reads agent metadata. Its updates are the retry signal, including idle agents reloaded
+  // without a turn. No per-agent observer, poll or timeline read is added.
+  gateway.directory.onAgentsChanged = () => { void briefTimeline.changed(); };
   let catalogKicked = false;
   const seen = (paseo: PaseoApi) => {
     api = paseo;
     // The first Paseo handle: read the provider catalog once in the background, so a helper left on its default runs
     // on a provider Paseo has from its first job (runnableRole), without any RPC waiting on it.
     if (!catalogKicked) { catalogKicked = true; queueMicrotask(() => void providerCatalog.read().catch(() => undefined)); }
-    for (const [key, row] of unsent) { unsent.delete(key); void append(row.agentId, row.brief).catch(() => undefined); }
+    void briefTimeline.changed();
   };
   const needsYouPath = (agentId: string) => join(directory, "hook-state", `needs-you-${agentId}.json`);
   const trackedMain = async (agentId: string) => (await store.snapshot()).workspaces.find(w => w.enable_tracking && !w.archived && w.mainAgentId === agentId) ?? null;
@@ -342,7 +351,7 @@ export default function contribute(server: PluginServerContext) {
     enabled: inboxSettings,
     overseer: async () => (await overseer?.state())?.agentId ?? null,
     briefs: {
-      sink: append,
+      sink: (agentId, brief) => briefTimeline.sink(agentId, brief),
       async call(agentId) {
         if (!/^[\w-]+$/.test(agentId)) return null;
         try { return JSON.parse(await readFile(needsYouPath(agentId), "utf8")) as NeedsYouRecord; } catch { return null; }
@@ -2341,6 +2350,7 @@ export default function contribute(server: PluginServerContext) {
   const stop = () => stopping ??= (async () => {
     process.off("disconnect", hostGone);
     restoreConsole();
+    gateway.directory.onAgentsChanged = () => {};
     stopped = true; wait.close(); updater.stop(); pluginMove.stop(); governor.stop(); if (timer) clearTimeout(timer); if (aboutTimer) clearTimeout(aboutTimer); if (linkedTimer) clearTimeout(linkedTimer); if (titleTimer) clearTimeout(titleTimer); aiJobs.stop(); dispatcher.stop(); ranker = null; if (inboxTimer) clearTimeout(inboxTimer); inbox.stop(); queue.stop(); rpcTiming.stop(); if (hookTimer) clearInterval(hookTimer); if (dueTimer) clearInterval(dueTimer); memoryWatch?.stop(); displayOff?.(); usageWatch?.close(); removers.forEach(remove => remove());
     // One deadline for every wait (worker-stop-never-waits-on-a-stuck-pass, server/teardown.ts): start-up and the work
     // in flight may be stuck on a daemon or CLI that never answers. Work that ends inside the deadline is saved; what
