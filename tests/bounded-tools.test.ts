@@ -126,3 +126,36 @@ test("context_requests and release_notes: open or new in full, settled or older 
   const plan = await a.run("orchestrator", "ask_context", { cardKey: "q:Q1", ask: "Why?" }).catch(() => null) as any;
   if (plan?.before) assert.ok(size(plan.before) < TOOL_BUDGET, "a dry run's before is bounded like the read");
 });
+
+// 2026-11-26, CI scale-live: the live-sized seed's big workspace (153 PRs, 39 tasks, 300 questions with 13 open, 400
+// batches; scripts/scale-seed.ts) read 52,642 bytes from follow.agent-status, over TOOL_BUDGET, summary and full alike:
+// five whole merged PRs, settled questions with every option, and the inventory's every PR key. The finished glance comes
+// brief now, and the reply with what the handler adds beside it is fitted to the budget.
+test("workspace_status at the scale seed's size fits the budget with what the handler adds, and a 100-row page does too", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtemp, writeFile, readFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = await mkdtemp(join(tmpdir(), "scale-seed-"));
+  try {
+    await writeFile(join(dir, "created.json"), JSON.stringify([{ workspaceId: "ws-big", agentId: "agent-big" }, { workspaceId: "ws-2", agentId: "agent-2" }]));
+    execFileSync(process.execPath, ["--import", "tsx", "scripts/scale-seed.ts", join(dir, "state.json"), join(dir, "created.json"), "3", "0", join(dir, "inbox.json"), "--live-sized"], { stdio: "ignore" });
+    const w = JSON.parse(await readFile(join(dir, "state.json"), "utf8")).workspaces[0];
+    assert.ok(JSON.stringify(w).length > 10 * TOOL_BUDGET, `the seeded workspace is busy (${JSON.stringify(w).length})`);
+    // What follow.agent-status adds beside the workspace (dismissed items, the next message, the PR workflow): as much as CI saw.
+    const extra = { nextMessageInfo: { text: "x".repeat(6_000) } };
+    const view = agentView(w, {}, extra) as any;
+    assert.ok(JSON.stringify(view).length <= TOOL_BUDGET, `summary: ${JSON.stringify(view).length} characters`);
+    const open = w.questions.filter((q: any) => !q.answer && !q.closed).map((q: any) => q.id);
+    assert.ok(open.length >= 10 && open.every((id: string) => view.questions.some((q: any) => q.id === id && q.options)), "every open question whole, options and all");
+    assert.ok(view.prs.filter((p: any) => p.snapshot?.state === "OPEN").length >= 3, "the open PRs come");
+    const merged = view.prs.find((p: any) => p.snapshot?.state === "MERGED");
+    assert.ok(merged && !("reviewers" in merged.snapshot) && merged.snapshot.title, "a merged PR at a glance: title and state, not its review evidence");
+    assert.ok(view.inventory.candidates.length < 10 && view.inventory.candidatesTotal === 153, "the inventory's keys: the live ones and a count");
+    assert.equal(view.history.prs.total, 150);
+    const page = agentView(w, { kind: "prs", offset: 0, limit: 100 }, extra) as any;
+    assert.ok(JSON.stringify(page).length <= TOOL_BUDGET, `a 100-row page: ${JSON.stringify(page).length} characters`);
+    assert.ok(page.history.prs.shown >= 1 && page.history.prs.more === 150 - page.history.prs.shown, "it shrinks to fit and says how many are left");
+    assert.ok(page.prs.some((p: any) => p.snapshot?.state === "MERGED" && "reviewers" in p.snapshot), "a history page carries its PRs whole");
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

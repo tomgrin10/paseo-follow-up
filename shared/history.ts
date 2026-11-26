@@ -3,7 +3,7 @@ import { newestId } from "./sort";
 import { activity, activityQuestions, type Activity } from "./activity";
 import { activityFields, questionFields } from "./section-search";
 import { filterItems, type ItemHit } from "./search";
-import { PAGE, boundDone, newestFirst, window, type DoneInfo, type HistoryKind } from "./paged";
+import { PAGE, TOOL_BUDGET, boundDone, newestFirst, window, type DoneInfo, type HistoryKind } from "./paged";
 import { settled } from "./model";
 import type { ListWorkspace } from "./list";
 
@@ -58,18 +58,55 @@ type AgentW = Hist & { prs: readonly Parameters<typeof settled>[0][]; obligation
  * `PAGE.recentDone` plus a count (`history`), or one page of one kind (`kind` with offset/limit, the others counts only). A busy workspace
  * (350 merged PRs, 400 settled batches) made the summary ~207k characters, over a tool result's limit.
  */
-export function agentView<W extends AgentW>(w: W, { kind, offset, limit }: { kind?: HistoryKind; offset?: number; limit?: number } = {}): W & { history: AgentHistory } {
+export function agentView<W extends AgentW, X extends object = {}>(w: W, { kind, offset, limit }: { kind?: HistoryKind; offset?: number; limit?: number } = {}, extra?: X): W & X & { history: AgentHistory } {
+  // Every workspace_status answer fits TOOL_BUDGET (invariant 63). What is still live always comes whole, so when a busy
+  // workspace's live items and its finished glance run over, fewer finished items come (a history page shrinks), and
+  // `history` says how many were left out. 2026-11-26: scale-live's 153-PR workspace read 52k with five of each kind.
+  let recent: number = PAGE.recentDone, size = Math.min(limit ?? PAGE.toolPage, PAGE.maxLimit);
+  for (;;) {
+    // `extra`: what the reply carries beside the workspace (dismissed items, the next message, the PR workflow), measured with it.
+    const view = { ...agentViewOf(w, { kind, offset, limit: size, recent }), ...(extra ?? {}) } as W & X & { history: AgentHistory };
+    if (JSON.stringify(view).length <= TOOL_BUDGET || (kind ? size <= 1 : recent <= 0)) return view;
+    if (kind) size = Math.max(1, Math.floor(size / 2)); else recent--;
+  }
+}
+
+function agentViewOf<W extends AgentW>(w: W, { kind, offset, limit, recent }: { kind?: HistoryKind; offset?: number; limit: number; recent: number }): W & { history: AgentHistory } {
   const covers = new Set(w.obligations.filter(o => o.status !== "done" && o.status !== "waived").flatMap(o => [o.coveredBy, ...w.questions.filter(q => (q as { taskId?: string | null }).taskId === o.id).map(q => q.id)]).filter((x): x is string => !!x));
   // A history page carries that kind's page; the other kinds' finished items are counts only on that call.
-  const page = (k: HistoryKind) => k === kind ? { offset: offset ?? 0, limit } : kind ? { recent: 0 } : {};
-  const prs = boundDone(w.prs, settled, { newestFirst: newestFirst(w.prs, p => at(p.snapshot?.mergedAt ?? p.snapshot?.observedAt)), hint: HISTORY_HINT("prs"), ...page("prs") });
-  const tasks = boundDone(w.obligations, o => o.status === "done" || o.status === "waived", { newestFirst: newestFirst(w.obligations, o => at(o.finishedAt)), hint: HISTORY_HINT("tasks"), ...page("tasks") });
-  const questions = boundDone(w.questions, q => !liveQuestion(q, covers), { newestFirst: newestFirst(w.questions, q => Math.max(at(q.askedAt), at(q.answer?.at), at(q.closed?.at))), hint: HISTORY_HINT("questions"), ...page("questions") });
-  const batches = boundDone(w.batches, b => !liveBatch(b), { newestFirst: newestFirst(w.batches, b => at(b.settledAt ?? b.sentAt ?? b.createdAt)), hint: HISTORY_HINT("batches"), ...page("batches") });
-  const prActions = boundDone(w.prActions, a => a.state !== "sending", { newestFirst: newestFirst(w.prActions, a => at(a.createdAt)), hint: HISTORY_HINT("prActions"), ...page("prActions") });
-  return { ...w, prs: prs.items, obligations: tasks.items, questions: questions.items, batches: batches.items, prActions: prActions.items,
+  const page = (k: HistoryKind) => k === kind ? { offset: offset ?? 0, limit } : kind ? { recent: 0 } : { recent };
+  const done = {
+    prs: settled, tasks: (o: { status: string }) => o.status === "done" || o.status === "waived",
+    questions: (q: Q) => !liveQuestion(q, covers), batches: (b: B) => !liveBatch(b), prActions: (a: { state: string }) => a.state !== "sending",
+  };
+  const prs = boundDone(w.prs, done.prs, { newestFirst: newestFirst(w.prs, p => at(p.snapshot?.mergedAt ?? p.snapshot?.observedAt)), hint: HISTORY_HINT("prs"), ...page("prs") });
+  const tasks = boundDone(w.obligations, done.tasks, { newestFirst: newestFirst(w.obligations, o => at(o.finishedAt)), hint: HISTORY_HINT("tasks"), ...page("tasks") });
+  const questions = boundDone(w.questions, done.questions, { newestFirst: newestFirst(w.questions, q => Math.max(at(q.askedAt), at(q.answer?.at), at(q.closed?.at))), hint: HISTORY_HINT("questions"), ...page("questions") });
+  const batches = boundDone(w.batches, done.batches, { newestFirst: newestFirst(w.batches, b => at(b.settledAt ?? b.sentAt ?? b.createdAt)), hint: HISTORY_HINT("batches"), ...page("batches") });
+  const prActions = boundDone(w.prActions, done.prActions, { newestFirst: newestFirst(w.prActions, a => at(a.createdAt)), hint: HISTORY_HINT("prActions"), ...page("prActions") });
+  // The newest few finished items are a glance, so they come brief (BRIEF_DONE); a history page of their kind carries them whole.
+  const glance = <T>(k: HistoryKind, items: T[], isDone: (x: T) => boolean): T[] => k === kind ? items : items.map(x => isDone(x) ? BRIEF_DONE[k](x as Record<string, any>) as T : x);
+  const inventory = (w as { inventory?: { candidates?: string[] } | null }).inventory;
+  return { ...w,
+    prs: glance("prs", prs.items, done.prs), obligations: glance("tasks", tasks.items, done.tasks), questions: glance("questions", questions.items, done.questions),
+    batches: glance("batches", batches.items, done.batches), prActions: glance("prActions", prActions.items, done.prActions),
+    // Every PR key the inventory ever considered grows with the workspace: the live PRs' keys, and how many there were.
+    ...(inventory?.candidates ? { inventory: { ...inventory, candidates: inventory.candidates.filter(k => w.prs.some(p => p.key === k && !settled(p))), candidatesTotal: inventory.candidates.length } } : {}),
     history: { prs: prs.done, tasks: tasks.done, questions: questions.done, batches: batches.done, prActions: prActions.done } };
 }
+
+const pick = (x: Record<string, any>, keys: string[]) => Object.fromEntries(keys.filter(k => k in x).map(k => [k, x[k]]));
+/**
+ * A finished item at a glance: what it was and how it ended, without its evidence (a merged PR's checks and reviewers, a
+ * settled question's options and background, a batch's task fingerprints). history=<kind> pages them whole.
+ */
+const BRIEF_DONE: Record<HistoryKind, (x: Record<string, any>) => unknown> = {
+  prs: p => ({ ...pick(p, ["key", "repo", "number", "stack", "parent", "disposition"]), snapshot: p.snapshot ? { ...pick(p.snapshot, ["title", "url", "state", "mergedAt", "observedAt", "mergeCommit"]), deployment: p.snapshot.deployment ? pick(p.snapshot.deployment, ["state", "environment"]) : null } : null }),
+  tasks: o => o,
+  questions: q => pick(q, ["id", "title", "prKey", "taskId", "askedBy", "askedAt", "mode", "answer", "closed", "via"]),
+  batches: b => ({ ...pick(b, ["id", "state", "createdAt", "sentAt", "settledAt", "result", "recipientAgentId"]), tasks: (b.tasks ?? []).map((t: Record<string, any>) => pick(t, ["key", "kind", "target", "title"])) }),
+  prActions: a => a,
+};
 
 export type ActivityTab = "timeline" | "questions";
 export type ActivityPage<Qn> = {
