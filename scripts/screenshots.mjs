@@ -658,13 +658,13 @@ const PAGED_QUESTIONS = 140, PAGED_TASKS_DONE = 60, PAGED_TASKS_OPEN = 40;
 const PAGED_TOPICS = ["invoice retries", "webhook signatures", "export formats", "ledger rounding", "refund windows", "tax rounding", "receipt layout", "dunning emails", "currency display", "card updates", "proration", "trial ends", "seat limits", "usage alerts"];
 const PAGED_STATES = [
   { key: "pl-billing", title: "Billing platform", minute: 183, flag: false, prompt: "APP-400: keep the billing platform moving; ask me whenever a call is mine.",
-    steps: [rpc("follow.enroll", { goal: "APP-400 Billing platform" }), rpc("follow.register-pr", { repo: "example/app", number: 400, stack: "Billing platform" }),
+    steps: [rpc("follow.enroll", { goal: "APP-400 Billing platform" }),
       ...Array.from({ length: PAGED_QUESTIONS }, (_, i) => [
-        rpc("follow.ask-question", { title: `${PAGED_TOPICS[i % PAGED_TOPICS.length]}: call ${i + 1}`, question: `For ${PAGED_TOPICS[i % PAGED_TOPICS.length]} (case ${i + 1}), should the job retry once or fail fast?`, options: [{ label: "Retry once" }, { label: "Fail fast" }] }),
+        rpc("follow.ask-question", { title: `${PAGED_TOPICS[i % PAGED_TOPICS.length]}: call ${i + 1}`, question: `For ${PAGED_TOPICS[i % PAGED_TOPICS.length]} (case ${i + 1}), should the job retry once or fail fast?`, options: [{ letter: "A", label: "Retry once" }, { letter: "B", label: "Fail fast" }], recommend: "A" }),
         rpc("follow.record-answer", { id: `Q${i + 1}`, choice: i % 3 ? "A" : "B" }),
       ]).flat(),
-      ...Array.from({ length: PAGED_TASKS_DONE }, (_, i) => rpc("follow.obligation", { title: `Check ${PAGED_TOPICS[i % PAGED_TOPICS.length]} on staging, run ${i + 1}`, status: "done", evidence: "Ran it on staging; the numbers match." })),
-      ...Array.from({ length: PAGED_TASKS_OPEN }, (_, i) => rpc("follow.obligation", { title: `Backfill ${PAGED_TOPICS[i % PAGED_TOPICS.length]} for account group ${i + 1}`, status: "pending" })),
+      ...Array.from({ length: PAGED_TASKS_DONE }, (_, i) => rpc("follow.obligation", { title: `Check ${PAGED_TOPICS[i % PAGED_TOPICS.length]} on staging, run ${i + 1}`, status: "done", evidence: "Ran it on staging; the numbers match.", new: true })),
+      ...Array.from({ length: PAGED_TASKS_OPEN }, (_, i) => rpc("follow.obligation", { title: `Backfill ${PAGED_TOPICS[i % PAGED_TOPICS.length]} for account group ${i + 1}`, status: "pending", new: true })),
       msg(`Answered ${PAGED_QUESTIONS} calls in chat and finished ${PAGED_TASKS_DONE} checks; ${PAGED_TASKS_OPEN} backfills are next.`)] },
 ];
 
@@ -2706,7 +2706,7 @@ async function pagedListShots({ shoot }) {
     });
     await shoot(`pl-search-${theme}`, TALL, theme, async page => {
       await panel(page); await page.getByRole("button", { name: "Search activity", exact: true }).filter({ visible: true }).first().click();
-      await page.keyboard.type("refund"); await page.waitForTimeout(800); await into(page, pager(page)); await check(page);
+      await page.keyboard.type("staging"); await page.waitForTimeout(800); await into(page, pager(page)); await check(page);
     });
     await shoot(`pl-tasks-${theme}`, TALL, theme, async page => {
       await panel(page); await page.getByRole("button", { name: /^Agent's tasks: / }).filter({ visible: true }).first().click(); await pager(page).waitFor();

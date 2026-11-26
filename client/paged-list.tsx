@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from "react";
-import { View } from "react-native";
+import { useRef, useState, type ReactNode } from "react";
+import { Platform, View } from "react-native";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { Pressable, Text } from "./text";
 import { FoldRow, focusRing, type Theme } from "./kit";
@@ -51,8 +51,12 @@ export function usePagedList<T>({ items, open = true, onToggle, searching = fals
 }
 
 /** The pager row: Show less on the left; Previous, "26–50 of 312", Next on the right. A server-paged list draws it with its own PageInfo. */
-export function Pager({ theme, compact, info, onPage, onLess, noun, busy = false }: { theme: Theme; compact: boolean; info: PageInfo; onPage: (page: number) => void; onLess?: () => void; noun?: string; busy?: boolean }) {
+export function Pager({ theme, compact, info, onPage: setPage, onLess, noun, busy = false }: { theme: Theme; compact: boolean; info: PageInfo; onPage: (page: number) => void; onLess?: () => void; noun?: string; busy?: boolean }) {
   const c = theme.colors;
+  const self = useRef<View>(null);
+  // A new page starts at its first row: when the list's top has scrolled out of view (a long page, the pager at the
+  // bottom), bring it back, or the reader lands at the end of the page they asked for.
+  const onPage = (to: number) => { setPage(to); if (Platform.OS === "web") setTimeout(() => toListStart(self.current as unknown as El | null), 0); };
   const size = compact ? 44 : 28;
   const arrow = (iconName: string, label: string, to: number, enabled: boolean) => <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled: !enabled }} aria-disabled={!enabled}
     disabled={!enabled} onPress={() => onPage(to)} hitSlop={compact ? 0 : 4}
@@ -61,7 +65,7 @@ export function Pager({ theme, compact, info, onPage, onLess, noun, busy = false
     <Icon name={iconName} size={15} color={c.foregroundMuted} />
   </Pressable>;
   const spoken = `${pageSpoken(info)}${noun ? ` ${noun}` : ""}, page ${info.page + 1} of ${info.pages}`;
-  return <View style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: compact ? 8 : 6, paddingVertical: compact ? 2 : 4, minHeight: compact ? 48 : 36, borderTopWidth: 1, borderTopColor: c.border }}>
+  return <View ref={self} style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: compact ? 8 : 6, paddingVertical: compact ? 2 : 4, minHeight: compact ? 48 : 36, borderTopWidth: 1, borderTopColor: c.border }}>
     {onLess && <Pressable accessibilityRole="button" accessibilityLabel="Show less" onPress={onLess} hitSlop={compact ? 0 : 4}
       style={state => ({ flexDirection: "row", alignItems: "center", gap: 6, minHeight: size, paddingHorizontal: 8, borderRadius: 6,
         backgroundColor: state.pressed ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent", ...focusRing((state as { focused?: boolean }).focused, c) })}>
@@ -75,6 +79,20 @@ export function Pager({ theme, compact, info, onPage, onLess, noun, busy = false
       {arrow("ChevronRight", "Next page", info.page + 1, info.page < info.pages - 1 && !busy)}
     </>}
   </View>;
+}
+
+/** The few DOM calls toListStart makes (react-native-web hands a View's ref its element; the client has no DOM lib). */
+type El = { parentElement: El | null; getBoundingClientRect(): { top: number }; scrollIntoView?(o: { block: "start" }): void };
+
+/** Scroll the pager's list (its parent) to its top when that top sits above its scroll container's view (web only). */
+function toListStart(pager: El | null) {
+  const list = pager?.parentElement;
+  const style = (globalThis as { getComputedStyle?(e: El): { overflowY: string } }).getComputedStyle;
+  if (!list || !style) return;
+  let box: El | null = list.parentElement;
+  while (box && !/(auto|scroll)/.test(style(box).overflowY)) box = box.parentElement;
+  const top = box ? box.getBoundingClientRect().top : 0;
+  if (list.getBoundingClientRect().top < top) list.scrollIntoView?.({ block: "start" });
 }
 
 /**
