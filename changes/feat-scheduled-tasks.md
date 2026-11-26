@@ -1,1 +1,0 @@
-- A task can be sent to its agent at a time: pick At a time in Send on a schedule, or let an agent set its own check-back. It arrives once at that time, even with Auto-send off.
