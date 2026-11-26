@@ -1423,7 +1423,11 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    field on screen, whatever was mounted, loading or focused before. One owner holds the request
    (`createSearchFocus`, `shared/search-focus.ts`; the web adapter `client/search-focus.ts`): a request is held until
    the developer acts (a key, pointer, click, wheel, touch or typed input, heard on the window before the request's own
-   key), and while it holds the newest search field that is on screen (`surfaceVisible`) takes the caret, selecting
+   key), and only the developer's own act ends it, never the request's own key: a chord's auto-repeat and a modifier
+   pressed alone are not acts, and a plain character (AltGr's too) or Backspace typed before the caret lands is the
+   query, kept and typed into the field when it lands, with Enter held back (`typeAhead`, `keyActs`), so none reaches
+   the screen being left; only for `TYPE_AHEAD_MS` after the request, read from the key's own time (no timer), so keys
+   are never eaten when no search comes on screen. While it holds the newest search field that is on screen (`surfaceVisible`) takes the caret, selecting
    its query: at once, when a field mounts, when one lays out (a Home kept mounted behind comes forward, the field
    remounts when the Overseer's status arrives) and when focus moves without the developer (`focusMoved`). It never
    fights a dialog: under a menu or modal dialog (`overlayOver`) it waits, and goes on when the dialog hands focus back.
@@ -1441,7 +1445,12 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    Guarded by `tests/search-focus.test.ts` and `scripts/screenshots.mjs --only search-focus` (the key from a chat with
    Home never opened and with Home in the history, a second press, on Home with a row, a button or a text box focused,
    Home loading, Catch up, PR stats, the queue, the log, Settings, ⌘K and `/`, desktop and 390×844, and with Home as
-   the sidebar view; writes `search-focus.json`).
+   the sidebar view; writes `search-focus.json`). 2026-11-26, the developer on 2.4.0-rc.0 (Mac): "it goes to the follow
+   up home but not focuses the search box". 2.4.0-rc.0 ended a request on any keydown: a Mac repeats a held ⌘⇧K once
+   its key-repeat delay passes and a query typed while a large Home mounted ends it on its first letter, both before
+   the field was on screen, so Home opened with the caret nowhere. Guarded too by `tests/search-focus-keys.test.ts`
+   and `--only search-focus`'s keys shots (the key held, a query typed at once, the panel, Dispatch open; ⌘ as a Mac
+   and Ctrl).
 
 117. **A prompt says each thing once** (`a-prompt-says-each-thing-once`). Whatever the source (typed words, a Linear
    issue, a GitHub issue or PR, a link) and whatever the action, Dispatch's first message carries no text twice:
