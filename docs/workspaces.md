@@ -298,17 +298,33 @@ waiting one, and a waiting one says what moves it ("Check alert emails in stagin
   agent's exact whole title updates its task (a repeated write); a similar one (0.5 or more) is refused with up to 3 lines,
   `Similar open task: <id> "<title>" (<status>). Update it by id, or pass new=true for a separate task.`, and `new: true`
   adds it anyway. Clean writes add nothing. Renames keep the id and are never checked.
-- **Triggers** (`shared/task-trigger.ts`): `now`, `merge` or `deploy`, with an optional `delayDays`. Deploy state
-  comes from `server/deployments.ts` and `server/deployment-anchor.ts`, only for configured repositories; elsewhere
-  it stays unknown.
+- **Triggers** (`shared/task-trigger.ts`): `now`, `merge` or `deploy`, with an optional `delayDays`, or `at`, a time.
+  Deploy state comes from `server/deployments.ts` and `server/deployment-anchor.ts`, only for configured repositories;
+  elsewhere it stays unknown. now, merge and deploy join the next message as obligation tasks and follow Auto-send.
+- **Scheduled tasks** (`at`; `server/scheduled-tasks.ts`, invariant `a-scheduled-task-arrives-once-at-its-time`). The
+  agent passes `trigger: {event: "at", at: "<ISO time with offset>"}` or `{event: "at", inMinutes: N}` to
+  `update_obligation` or `set_task_trigger`; the developer picks At a time in the task's Send on a schedule sheet
+  (quick picks, or a date and time on their own clock). `storedTrigger` keeps it in UTC, at least a minute out and at
+  most 30 days (later is a `recheck` day); an offset is required, so the zone is never a guess. It needs no PRs. It is
+  never a batch task (`taskSchedule` is never ready for it): after each engine pass `ScheduledTasks.evaluate` finds
+  every due time, saves one `scheduled` queue message to the main agent (`Follow-up scheduled task <id>, set for
+  <ISO>: <title>`, then where it stood and what to do), and marks the trigger `queuedAt`; the queue's channel marks
+  `sentAt` when it leaves and `notSent` when it is cancelled. It goes whether Auto-send is on or not: someone named the
+  time (the developer, or the agent for its own check-back on a waiting task). A running turn is waited out; an idle
+  agent is messaged even unloaded (it asked, as with `wait_for_checks`); a closed or archived agent gets nothing and the
+  row reads "Didn't go out · the agent was closed" in amber. The engine's untouched-pass skip ends at the earliest due time
+  (`nextDue`), so it fires within a tick and never before; a worker down at the time fires it once on its first pass,
+  and the message says it is late. Paused with the rest of background work while the governor holds it. Developer
+  lines (row "Sends 12:15", then "Sent 12:15"; the live line and Home's Waiting row "<title> · checks back 12:15")
+  use the device's clock; what an agent reads is ISO. Once it went out, due by fact holds the task again.
 - **Due by fact** (`shared/task-due.ts`, invariant `due-by-fact`). Every open task knows what moves it, and none is
   "Manual". With `afterPrs` it comes due when every PR reaches `dependencyStage` (merged, or deployed; a repository
   with no deploy target counts its merge), or when one closes unmerged. With no PRs it comes due on `recheckAt`: the
   agent's `recheck` ("YYYY-MM-DD"), else 3 days (`RECHECK_DAYS`) after its last `update_obligation`; a later `recheck`
   also holds a PR-made fact. A task blocked on a question the developer already answered or closed (`coveredBy`,
   `waitsOnDeveloper`) comes due at that answer ("Due · Q7 answered"): the agent acts on it and moves the task. A task
-  still waiting on the developer (Needs you has it; it gets no default re-check) or on a developer-timed trigger (it
-  is sent as a message) is left out. Due is a nudge, never an auto-send and never a done: the worker lists each agent's
+  still waiting on the developer (Needs you has it; it gets no default re-check) or on a trigger that hasn't sent it
+  yet (it is sent as a message) is left out. Due is a nudge, never an auto-send and never a done: the worker lists each agent's
   due tasks in `scopes.json` (`dueByAgent`: the task's working contributor and the main agent, oldest first, at most
   5), and the Stop hook names at most 3 whose time passed (`pickNudges`), each at most twice for the same fact and
   revision and at most once a day, sharing `hook-state/task-nudges-<workspace>.json`: "Task <id> "<title, 60 chars>":

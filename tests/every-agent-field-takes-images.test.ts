@@ -42,6 +42,7 @@ const NOT_AGENT_BOUND: Record<string, string> = {
   "spec.tsx|\"Spec link\"": "a link",
   "spec.tsx|\"Spec name, optional\"": "a title",
   "tasks.tsx|\"Delay in days\"": "a number",
+  "tasks.tsx|\"Send at, date and time\"": "a date and time",
 };
 
 function fields(): { file: string; key: string }[] {

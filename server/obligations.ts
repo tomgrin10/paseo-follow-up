@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Obligation, Workspace } from "../shared/model";
 import { lifecycleOnly } from "../shared/follow-up";
 import { communicationKey, communicationSchema, replyRecorded, type Communication } from "../shared/communication";
-import type { TaskTrigger } from "../shared/task-trigger";
+import { storedTrigger, type TaskTrigger, type TaskTriggerInput } from "../shared/task-trigger";
 import { currentQuestion } from "../shared/questions";
 import { RECHECK_DAYS } from "../shared/task-due";
 import { sameTask, similarLines, similarOpen } from "../shared/task-dup";
@@ -16,7 +16,7 @@ type Update = {
   /** While blocked: what the ask wants of the developer, a decision or an action they take and report back. */
   need?: "decision" | "action";
   dependencyStage?: "merged" | "deployed"; enable_follow_up?: boolean; communication?: Pick<Communication, "threadUrl" | "recipient"> & Partial<Communication>;
-  trigger?: TaskTrigger | null;
+  trigger?: TaskTriggerInput | TaskTrigger | null;
   /** due-by-fact: when to look at it again, "YYYY-MM-DD" or an ISO time. An open task with no PRs gets RECHECK_DAYS out by default. */
   recheck?: string;
   /** The clock (tests); defaults to Date.now(). */
@@ -68,14 +68,16 @@ export function updateObligation(w: Workspace, input: Update): Obligation {
   const destination = communication ? communicationSchema.parse({ ...existing?.communication, ...communication }) : existing?.communication;
   if (destination?.replyUrl && !replyRecorded(destination)) throw new Error("The reply receipt must be a different message in the original Slack workspace/channel/thread.");
   if (destination && status === "done" && !replyRecorded(destination)) throw new Error("A draft is not a sent reply. Record communication.replyUrl before completing this task; use blocked when posting is unavailable or uncertain.");
-  const trigger = input.trigger === undefined ? existing?.trigger : input.trigger;
+  const now = input.now ?? Date.now();
+  // An at trigger's time is resolved and checked here (inMinutes from now, an ISO time with its offset); the same time
+  // again keeps whether it already went out (a-scheduled-task-arrives-once-at-its-time).
+  const trigger = input.trigger === undefined ? existing?.trigger : storedTrigger(input.trigger, existing?.trigger, now);
   if (trigger?.event === "now" && (afterPrs.length || trigger.delayDays)) throw new Error("Now requires no PR dependencies or delay. Choose a merge/deploy trigger for delayed work.");
-  if (trigger && trigger.event !== "now" && !afterPrs.length) throw new Error("Select at least one owned PR for a merge/deploy trigger.");
+  if (trigger && (trigger.event === "merge" || trigger.event === "deploy") && !afterPrs.length) throw new Error("Select at least one owned PR for a merge/deploy trigger.");
   const stage = trigger?.event === "merge" ? "merged" : trigger?.event === "deploy" ? "deployed" : dependencyStage ?? existing?.dependencyStage ?? "deployed";
   const followUp = enable_follow_up ?? (input.trigger !== undefined ? !!trigger : existing?.enable_follow_up ?? false);
   // due-by-fact: every open task knows what moves it. With no PRs that is a re-check date: the agent's, else
   // RECHECK_DAYS from this update (an update is the agent looking at it). A finished task records when.
-  const now = input.now ?? Date.now();
   const recheck = input.recheck === undefined ? undefined : /^\d{4}-\d{2}-\d{2}$/.test(input.recheck) ? Date.parse(`${input.recheck}T00:00:00Z`) : Date.parse(input.recheck);
   if (recheck !== undefined && !Number.isFinite(recheck)) throw new Error("recheck is a date: \"YYYY-MM-DD\" or an ISO time.");
   const finished = ["done", "waived"].includes(status);

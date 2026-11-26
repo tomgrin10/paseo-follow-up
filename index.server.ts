@@ -109,6 +109,7 @@ import { newWorkspaceTarget, sendReport, type ReportSendDeps } from "./server/re
 type ServerInfoClient = { getLastServerInfoMessage?: () => ServerInfo };
 import { inboxAnswer } from "./server/etag";
 import { CheckWatches } from "./server/check-watches";
+import { ScheduledTasks } from "./server/scheduled-tasks";
 import { githubOffChecksAnswer, waitForChecksAnswer } from "./server/wait-for-checks";
 import { jobAgentRunner, type JobPaseo } from "./server/job-agent";
 import { AiJobs } from "./server/ai-jobs";
@@ -265,6 +266,17 @@ export default function contribute(server: PluginServerContext) {
     },
   });
   engine.checkWatches = checkWatches;
+  // Scheduled tasks (a-scheduled-task-arrives-once-at-its-time): a task's time trigger goes out once, at its time,
+  // Auto-send or not; the agent is read the same way as for a checks verdict (no load).
+  const scheduledTasks = new ScheduledTasks({
+    snapshot: () => store.snapshot(),
+    mutateWorkspace: (id, work) => store.mutateWorkspace(id, work),
+    agent: async id => {
+      const a = gateway.directory.cached(id) ?? (await gateway.directory.read({ fresh: "agents" })).agents.find(r => r.agent.id === id)?.agent;
+      return a ? { status: a.status, archived: !!a.archivedAt, workspaceId: a.workspaceId ?? null } : null;
+    },
+  });
+  engine.scheduledTasks = scheduledTasks;
   engine.wording = { reviewFix: repo => commandName(prWorkflow.reviewFix(repo)) };
   actions.settleTasks = w => engine.settleTasks(w);
   const governor = new Governor();
@@ -379,6 +391,7 @@ export default function contribute(server: PluginServerContext) {
   const queue = new MessageQueue(directory, { deliverTo: (target, text, messageId, by, images) => gateway.deliverTo(target, text, messageId, by, images), arrived: (agentId, messageId, since, marker) => gateway.arrivedMessage(agentId, messageId, since, marker), probe: () => gateway.probe() }, { health: writeHealth, images: imageStore });
   engine.attachQueue(queue);
   checkWatches.attachQueue(queue);
+  scheduledTasks.attachQueue(queue);
   inbox.attachQueue(queue);
   // Overseer forwards and reports handed to an agent: no record of their own, so the queue item is their status
   // (follow_queue_list). Archived agents cancel, with the reason on the item.

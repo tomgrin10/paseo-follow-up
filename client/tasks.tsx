@@ -5,7 +5,7 @@ import { Icon, Modal, TextInput, useToast } from "@getpaseo/plugin/client/ui";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Obligation, Workspace } from "../shared/model";
-import type { TaskTrigger } from "../shared/task-trigger";
+import { atChoices, atProblem, clockLabel, DIDNT_GO_OUT, localTimeText, parseLocalTime, TRIGGER_HELP, type TaskTrigger } from "../shared/task-trigger";
 import { taskTriggerRpc } from "../shared/contracts";
 import { linkedQuestion, type TaskStatus } from "../shared/task-status";
 import { finishedParts, summaryParts, taskSummary, taskViewRows, type TaskViewRow } from "../shared/task-view";
@@ -24,28 +24,53 @@ function TriggerEditor({ obligation: o, workspace, theme, compact }: { obligatio
   const [event, setEvent] = useState<TaskTrigger["event"] | "manual">(o.enable_follow_up && o.trigger ? o.trigger.event : "manual");
   const [days, setDays] = useState(String(o.trigger?.delayDays ?? 0));
   const [prs, setPrs] = useState(o.afterPrs);
+  // At a time: a quick pick or a typed time, on the device's clock (the developer's zone). Opened with a time already
+  // set, the field starts there; else in 30 minutes.
+  const now = Date.now();
+  const choices = atChoices(now);
+  const [when, setWhen] = useState(() => localTimeText(o.trigger?.event === "at" && o.trigger.at && Date.parse(o.trigger.at) > now ? Date.parse(o.trigger.at) : choices[0].at));
+  const at = parseLocalTime(when, now);
+  const timeProblem = event === "at" ? atProblem(at, now) : null;
+  // A time that already went out (or couldn't): said once, so a new time reads as sending it again.
+  const before = o.trigger?.event === "at" ? o.trigger.notSent ? `${DIDNT_GO_OUT} at ${clockLabel(o.trigger.at ?? "", now)}: ${o.trigger.notSent}.` : o.trigger.sentAt ? `Went out ${clockLabel(o.trigger.sentAt, now)}.` : null : null;
   const rpc = useRpc(taskTriggerRpc); const cache = useQueryClient(); const toast = useToast();
   const gated = event === "merge" || event === "deploy";
-  const valid = !gated || prs.length > 0 && /^\d+$/.test(days) && Number(days) <= 3650;
+  const valid = event === "at" ? !timeProblem : !gated || prs.length > 0 && /^\d+$/.test(days) && Number(days) <= 3650;
   // Quick action: Save doesn't wait on the server; a toast confirms it, or says what failed with Retry.
   const save = { isPending: false, mutate: () => void runAction({
-    label: "Schedule", toast, run: () => rpc({ workspaceId: workspace.id, obligationId: o.id, expectedRevision: o.revision, afterPrs: event === "now" ? [] : prs, trigger: event === "manual" ? null : { event, delayDays: gated ? Number(days) : 0 } }),
+    label: "Schedule", toast, run: () => rpc({ workspaceId: workspace.id, obligationId: o.id, expectedRevision: o.revision, afterPrs: event === "now" ? [] : prs, trigger: event === "manual" ? null : event === "at" ? { event, delayDays: 0, at: new Date(at!).toISOString() } : { event, delayDays: gated ? Number(days) : 0 } }),
     success: () => ({ message: "Schedule saved" }), onSuccess: () => { void cache.invalidateQueries(); }, onError: () => { void cache.invalidateQueries(); },
     failure: `Schedule for ${o.title} not saved`,
   }) };
   const busy = save.isPending;
-  const options = [["manual", "Not sent"], ["now", "Now"], ["merge", "After merge"], ["deploy", "After deploy"]] as const;
+  const options = [["manual", "Not sent"], ["now", "Now"], ["at", "At a time"], ["merge", "After merge"], ["deploy", "After deploy"]] as const;
+  const chip = (selected: boolean) => ({ minHeight: compact ? 44 : 30, justifyContent: "center" as const, paddingHorizontal: 11, borderRadius: 999, borderWidth: 1, borderColor: selected ? c.accent : c.border, backgroundColor: selected ? c.accent : "transparent" });
   return <SubmitScope enabled={!busy && valid} onSubmit={() => save.mutate()} style={{ gap: 10 }}>
     <View style={{ gap: 4 }}>
       <Text style={t.label}>Send to the agent</Text>
-      <Text style={t.meta}>Not sent: the task comes due when its PRs merge or deploy, or on its re-check date, and the agent is reminded at the end of its turn. Scheduled tasks join the next message to the agent instead, and still follow your Auto-send choice.</Text>
+      <Text style={t.meta}>{TRIGGER_HELP[event]}</Text>
     </View>
     <View accessibilityRole="radiogroup" accessibilityLabel={`Send trigger for ${o.title}`} style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
       {options.map(([value, label]) => <Pressable key={value} accessibilityRole="radio" accessibilityLabel={label} aria-checked={event === value} accessibilityState={{ checked: event === value, disabled: busy }} disabled={busy} onPress={() => { setEvent(value); }}
-        style={{ minHeight: compact ? 44 : 30, justifyContent: "center", paddingHorizontal: 11, borderRadius: 999, borderWidth: 1, borderColor: event === value ? c.accent : c.border, backgroundColor: event === value ? c.accent : "transparent" }}>
+        style={chip(event === value)}>
         <Text style={{ fontSize: 12, fontWeight: "600", color: event === value ? c.accentForeground : c.foreground }}>{label}</Text>
       </Pressable>)}
     </View>
+    {event === "at" && <View style={{ gap: 8 }}>
+      {before && <Text style={t.meta}>{before} Pick a new time to send it again.</Text>}
+      {/* Quick picks fill the field: small outlined buttons, never a second selected state beside the trigger choice. */}
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+        {choices.map(ch => <Pressable key={ch.label} accessibilityRole="button" accessibilityLabel={`${ch.label}: fill in ${localTimeText(ch.at)}`} disabled={busy} hitSlop={compact ? 0 : 6} onPress={() => setWhen(localTimeText(ch.at))}
+          style={state => ({ minHeight: compact ? 44 : 26, justifyContent: "center", paddingHorizontal: 9, borderRadius: 6, borderWidth: 1, borderColor: c.border, opacity: state.pressed ? 0.6 : 1 })}>
+          <Text style={{ fontSize: 12, color: c.foreground, fontVariant: ["tabular-nums"] }}>{ch.label}</Text>
+        </Pressable>)}
+      </View>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <TextInput accessibilityLabel="Send at, date and time" value={when} editable={!busy} onChangeText={setWhen} autoCapitalize="none" autoCorrect={false}
+          style={{ width: 150, minHeight: compact ? 44 : 32, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: timeProblem ? c.statusDanger : c.border, color: c.foreground, backgroundColor: c.surface1, fontSize: 13, fontVariant: ["tabular-nums"] }} />
+        <Text style={[t.meta, timeProblem ? { color: c.statusDanger } : null]}>{timeProblem ?? `Sends ${clockLabel(new Date(at!).toISOString(), Date.now())}, your time`}</Text>
+      </View>
+    </View>}
     {gated && <>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <Text style={t.meta}>Wait</Text>
@@ -91,7 +116,12 @@ function TaskGlyph({ row, w, colors }: { row: TaskViewRow; w: Workspace; colors:
     case "blocked": return <Icon name="CirclePause" size={14} color={muted} />;
     case "after-pr": return <Icon name="GitPullRequest" size={14} color={muted} />;
     case "recheck": return <Icon name="CalendarClock" size={14} color={muted} />;
-    case "scheduled": return row.status.tone === "queued" || row.status.tone === "sent" ? <DeliveryGlyph state={row.status.tone} w={w} colors={colors} /> : <Icon name="Clock" size={14} color={muted} />;
+    case "scheduled":
+      if (row.status.tone === "queued" || row.status.tone === "sent") return <DeliveryGlyph state={row.status.tone} w={w} colors={colors} />;
+      // A time trigger that couldn't go out is the developer's to notice (amber, its own shape); one that went out is a send.
+      if (row.o.trigger?.event === "at" && row.o.trigger.notSent) return <Icon name="CircleAlert" size={14} color={staleColor(colors)} />;
+      if (row.o.trigger?.event === "at" && row.o.trigger.sentAt) return <Icon name="Send" size={14} color={muted} />;
+      return <Icon name="Clock" size={14} color={muted} />;
     case "needs-you": return <Icon name={linkedQuestion(row.o, w)?.need === "action" ? "Hand" : "MessageCircleQuestion"} size={14} color={muted} />;
     default: return <Dot color={muted} />;
   }
@@ -100,7 +130,7 @@ function TaskGlyph({ row, w, colors }: { row: TaskViewRow; w: Workspace; colors:
 /** The meta line: "Stale" in amber, the rest muted; everything else muted. */
 function MetaLine({ row, theme }: { row: TaskViewRow; theme: Theme }) {
   const c = theme.colors; const t = text(c);
-  if (row.kind !== "stale") return <Text style={[t.meta, { fontVariant: ["tabular-nums"] }]}>{row.meta}</Text>;
+  if (row.kind !== "stale" && !row.meta.startsWith(DIDNT_GO_OUT)) return <Text style={[t.meta, { fontVariant: ["tabular-nums"] }]}>{row.meta}</Text>;
   const [word, ...rest] = row.meta.split(" · ");
   return <Text style={[t.meta, { fontVariant: ["tabular-nums"] }]}><Text style={{ color: staleColor(c), fontWeight: "600" }}>{word}</Text>{rest.length ? ` · ${rest.join(" · ")}` : ""}</Text>;
 }

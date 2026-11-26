@@ -9,6 +9,7 @@ import { IDLE_REASON, MAIN_WAIT, NO_PROGRESS_CAP, QUIET_WAIT, holdsQueue, mainWa
 import { workingLine } from "./task-status";
 import { owedTask } from "./task-view";
 import { taskDue } from "./task-due";
+import { clockLabel, pendingAt } from "./task-trigger";
 import { followUpObligations, recoveryBatch } from "./follow-up";
 import { orderedStacks, prLink, settledForDisplay, type PrLink } from "./presentation";
 import { downstackScan, githubApproved, graphiteReady, isGithubFlow, mergeBlockers, prActionBlocks } from "./pr-actions";
@@ -502,6 +503,9 @@ export function liveLine(w: Workspace, now = Date.now()): { icon: LiveIcon; text
   // A wait the agent declared (a waiting task: a release, a reload window, a detached job) says what it waits on. The
   // waiting icon, Home's Waiting group and the brief's "Waiting on others" already say it waits, so the line doesn't.
   // With what moves it ("· after #232 merges"), so the line never reads as if that task were happening now.
+  // A wait with its own check-back time names the time (the soonest one): "Registry publish · checks back 12:15".
+  const timed = followUpObligations(w).filter(o => o.status === "waiting" && o.enable_follow_up && pendingAt(o.trigger)).sort((a, b) => a.trigger!.at!.localeCompare(b.trigger!.at!))[0];
+  if (timed) return { icon: "waiting", text: `${timed.title} · checks back ${clockLabel(timed.trigger!.at!, now)}`, since: null };
   const waiting = followUpObligations(w).find(o => o.status === "waiting");
   if (waiting) { const d = taskDue(waiting, w, now); const moves = d && !d.due ? d.label : null; return { icon: "waiting", text: moves ? `${waiting.title} · ${moves[0].toLowerCase()}${moves.slice(1)}` : waiting.title, since: null }; }
   // GitHub off (works-without-github): nothing is retrying and the statuses below are from before, so the line says
