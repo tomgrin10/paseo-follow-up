@@ -7,11 +7,11 @@ What changed in each version of Follow-up, newest first. Follow-up shows "What's
 Start new work in one step, rank it by what the people you follow ask for, and use Follow-up with any agent provider, GitHub or not.
 
 - **Dispatch starts new work** from a Linear issue, a link or a sentence: Follow-up makes the workspace, starts the agent and tracks it. Agents and the Overseer can start work too once you agree.
-- **Compass ranks by what matters to your team.** Pick the people and sources whose words set your priorities. AI priority ranks by them, Why it matters shows the note behind a rank, and urgent work nobody started shows in Needs you.
-- **The morning brief shows what moved** in your Linear queue and what Compass heard since you last looked, with Create PR and Plan on urgent issues that have no workspace.
+- **Compass ranks by what matters to your team.** Pick the people and sources whose words set your priorities. AI priority ranks by them, and the morning brief shows what moved in your Linear queue.
 - **Any provider, GitHub optional:** agents on OpenCode, Pi, Copilot, Cursor and more get Follow-up's tools, and everything but the PR features works without the GitHub CLI.
-- **Paste or drop images** into replies, Dispatch and the Overseer, and see **PR statistics** for the repositories you turn on.
-- **Tasks come due on their own** when their PR merges or their date arrives, and long stacks stay fast and easy to scan. Plus many smaller fixes.
+- **PR statistics** show who opens, merges and reviews PRs, and how long PRs wait for a first review, for the repositories you turn on.
+- **Setup fits your machine:** it skips what you can't use, shows each helper agent on one line, and its tour covers Dispatch.
+- **Paste or drop images** into replies, Dispatch and the Overseer. Agents wait for CI without polling GitHub, and tasks come due on their own. Plus many smaller fixes.
 
 <details><summary>Full changelog since 2.3.0</summary>
 
