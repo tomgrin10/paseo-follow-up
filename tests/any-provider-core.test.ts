@@ -91,7 +91,7 @@ test("providerNotes: only what a provider the developer has can't do, at most tw
   const acp = providerNotes([p("claude", "Claude", false, "Turned off in Paseo"), p("codex", "Codex", false, "Turned off in Paseo"), p("pi", "Pi", false, "Not installed"), { ...p("acme-acp", "Acme ACP"), acp: true }], "acme-acp");
   assert.deepEqual(acp, [
     "Paseo doesn't pass Follow-up's instructions to Acme ACP yet, so it reads them through a tool at the start of each session.",
-    "Summaries' linked issues, Compass and Ask read other people's words, so they run only where Follow-up can take every tool away (Claude Code, Codex, OpenCode or Pi). Turn on Claude or Codex in Paseo for Summaries to use them.",
+    "Summaries' linked issues, Compass and Ask read other people's words, so they run only where Follow-up can take every tool away. Turn on Claude or Codex in Paseo for Summaries to use them.",
   ]);
   assert.doesNotMatch(acp.join(" "), /Pick Claude|hooks/, "no dead end, no mechanism words");
   assert.equal(guardAction([p("copilot", "Copilot")]), "Install Claude Code, Codex, OpenCode or Pi");

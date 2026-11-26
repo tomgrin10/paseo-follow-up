@@ -113,6 +113,6 @@ export function providerNotes(providers: readonly NoteProvider[], summariesOn: s
   const needs = summariesOn && !guardedProvider(summariesOn) ? ["Summaries' linked issues", "Compass", "Ask"] : [];
   return [
     acp.length ? `Paseo doesn't pass Follow-up's instructions to ${list(acp)} yet, so ${acp.length > 1 ? "they read them" : "it reads them"} through a tool at the start of each session.` : null,
-    needs.length ? `${list(needs)} read other people's words, so they run only where Follow-up can take every tool away (${list(GUARDED_NAMES, "or")}). ${guardAction(providers)} for Summaries to use them.` : null,
+    needs.length ? `${list(needs)} read other people's words, so they run only where Follow-up can take every tool away. ${guardAction(providers)} for Summaries to use them.` : null,
   ].filter((x): x is string => !!x);
 }
