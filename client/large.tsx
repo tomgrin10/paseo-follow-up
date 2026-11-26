@@ -1,3 +1,4 @@
+import type { InboxStore } from "./inbox-store";
 import { useEffect } from "react";
 import { Platform, View } from "react-native";
 import { Text } from "./text";
@@ -16,7 +17,7 @@ export const LARGE_SCREEN = "follow-up-workspace";
  * The panel opened as a Paseo screen: the host supplies the page, header and close button, and the
  * layout switches to two columns. Collapse (or Esc) returns to the workspace, where the panel still is.
  */
-export function FollowLarge(props: PluginScreenProps & PanelLinks & { live?: LiveStore; /** Paseo's workspace list: the running state Your questions shows. */ paseo?: PaseoWorkspaces }) {
+export function FollowLarge(props: PluginScreenProps & PanelLinks & { live?: LiveStore; /** Paseo's workspace list: the running state Your questions shows. */ paseo?: PaseoWorkspaces; inbox?: InboxStore }) {
   const { theme, layout, params, navigation } = props;
   const workspaceId = params.workspaceId ?? "";
   const c = theme.colors;
@@ -53,7 +54,7 @@ export function FollowLarge(props: PluginScreenProps & PanelLinks & { live?: Liv
       </CardRow>
     </Card>
   </View>;
-  return <WorkspaceView theme={theme} layout={layout} host={props.host} navigation={navigation} workspace={w} large
+  return <WorkspaceView theme={theme} layout={layout} host={props.host} navigation={navigation} workspace={w} large inbox={props.inbox}
     loadError={query.error ? "Refresh failed. Showing the last saved state." : query.loadError}
     openSettings={props.openSettings} openOverview={props.openOverview} folds={folds} paseo={props.paseo}
     top={<PanelTop theme={theme} compact={layout.compact} openOverview={props.openOverview} openSettings={props.openSettings} />}

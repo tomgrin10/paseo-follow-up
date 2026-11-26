@@ -348,11 +348,13 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onOp
   // match (about 44 characters, the match near the start), so the highlight is never past the "…". Phones and the
   // sidebar view wrap to two lines and keep more.
   const shownLine = hit?.lineRanges ? (() => { const e = excerpt(s.line, hit.lineRanges, touch ? 140 : dense ? 90 : 44); return marks(e.text, e.ranges, c); })() : s.line;
-  const line: ReactNode = s.word && s.group !== "needs" ? (s.line ? <>{s.word} · {shownLine}</> : s.word) : shownLine;
+  // What the agent is working on (shared/now.ts) leads, in the title's colour; its place ("2 of 4") and the state stay muted.
+  const lead = s.lead ? <><Text style={{ color: muted ? c.foregroundMuted : c.foreground }}>{s.lead.text}</Text>{s.lead.position ? `\u00a0${s.lead.position}` : ""}{s.line ? " · " : ""}</> : null;
+  const line: ReactNode = s.word && s.group !== "needs" ? (s.line ? <>{s.word} · {lead}{shownLine}</> : s.word) : <>{lead}{shownLine}</>;
   const via = hit?.via ? (() => { const e = excerpt(hit.via.text, hit.via.ranges, touch ? 90 : dense ? 90 : 44); return <>{FIELD_LABEL[hit.via.field]} · {marks(e.text, e.ranges, c)}</>; })() : null;
   const title = <>{marks(s.title, hit?.titleRanges, c)}{s.agent ? <Text style={{ color: c.foregroundMuted, fontWeight: "400" }}>{" › "}{marks(s.agent, hit?.agentRanges, c)}</Text> : null}</>;
   // Phones: "Working" under every row of a "Running 9" group says nothing the header didn't; one line per row instead.
-  const generic = touch && !s.word && s.line === "Working";
+  const generic = touch && !s.word && !s.lead && s.line === "Working";
   // The reason line: AI priority's, else the workspace's first live Compass note (a live note is a reason).
   const why = s.priority?.reason ? { reason: s.priority.reason, source: s.priority.source } : s.compass ? { reason: s.compass, source: { kind: "compass" as const, label: "Compass" } } : null;
   // Send now: outlined (filled is only for what waits on the developer), and only where the server would take it.
@@ -360,7 +362,7 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onOp
   // A Later row says when it comes back on screen; the label also keeps how long it has waited.
   const wake = s.group === "later" && s.wakeAt ? wakeLabel({ until: s.wakeAt, at: s.at ?? new Date().toISOString() }, Date.now()) : "";
   const waited = s.group === "later" && s.at ? age(s.at, Date.now()) : "";
-  const label = [s.title + (s.agent ? ` › ${s.agent}` : ""), s.word, s.line, hit?.via && `${FIELD_LABEL[hit.via.field]}: ${hit.via.text}`,
+  const label = [s.title + (s.agent ? ` › ${s.agent}` : ""), s.word, s.lead && [s.lead.text, s.lead.position].filter(Boolean).join(" "), s.line, hit?.via && `${FIELD_LABEL[hit.via.field]}: ${hit.via.text}`,
     // Every chip, even one a narrow row hides (row-chips-never-cover-the-time).
     ...s.badges.map(b => b.text), s.pr && prChipSpoken(s.pr), wake && `Later until ${wake}`, waited && (waited === "now" ? "just now" : `waiting ${waited}`)].filter(Boolean).join(". ");
   return <Pressable ref={trigger.ref} nativeID={rowDomId(s.key)} accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={label} accessibilityHint={quickActionsHint(touch)}
@@ -379,7 +381,7 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onOp
         <View style={{ paddingTop: 2 }}><RowTime s={s} c={c} size={12} /></View>
       </View>
       {via ? <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>{via}</Text>
-        : (!!s.word || !!s.line) && !generic && <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>
+        : (!!s.word || !!s.line || !!s.lead) && !generic && <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>
         {s.word && s.group === "needs" ? <Text style={{ color, fontWeight: "600" }}>{s.word}</Text> : null}{s.word && s.group === "needs" && s.line ? " · " : ""}{line}
       </Text>}
       {!!why && <PriorityLine reason={why.reason} source={why.source} c={c} size={12} lines={2} />}
@@ -388,7 +390,7 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onOp
     </View> : dense ? <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
       <Text numberOfLines={1} style={{ color: muted ? c.foregroundMuted : c.foreground, fontSize: 13, lineHeight: 18, fontWeight: muted ? "400" : "500" }}>{title}</Text>
       {via ? <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>{via}</Text>
-        : (!!s.word || !!s.line) && <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>
+        : (!!s.word || !!s.line || !!s.lead) && <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16 }}>
         {s.word && s.group === "needs" ? <Text style={{ color, fontWeight: "600" }}>{s.word}</Text> : null}{s.word && s.group === "needs" && s.line ? " · " : ""}{line}
       </Text>}
       {!!why && <PriorityLine reason={why.reason} source={why.source} c={c} size={11} lines={2} />}

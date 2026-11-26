@@ -87,7 +87,7 @@ export function turnEndCheck(i: TurnEndInput): { text: string | null; receipt: N
   if (!sync && !nudge && !picked.lines.length) return { text: null, receipt: null };
   const parts = [
     picked.lines.length ? named(DUE_HEADER) + "\n" + picked.lines.map(l => `- ${l}`).join("\n") : null,
-    sync ? `${STOP_REASON} This is metadata bookkeeping only; do not start queued repairs or recovery. Call ${named("sync_workspace")} with a short summary.` : null,
+    sync ? `${STOP_REASON} This is metadata bookkeeping only; do not start queued repairs or recovery. Call ${named("sync_workspace")} with a short summary; pass milestone when the milestone you're on changed.` : null,
     nudge ? named(NUDGE_REASON) : null,
   ].filter(Boolean);
   return { text: `${TURN_END_PREFIX} your turn ended with this still open. Handle it, then stop without repeating your reply.\n\n${parts.join("\n\n")}`, receipt: picked.lines.length ? picked.receipt : null };

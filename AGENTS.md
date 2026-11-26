@@ -77,6 +77,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | Worker entry, RPC wiring, session attach, teardown | `index.server.ts`, `shared/contracts.ts`, `server/feeds.ts`, `server/rpc-timing.ts`, `server/teardown.ts`, `server/daemon.ts`, `server/shared-file.ts`, `server/directory.ts`, `server/request-trace.ts`, `server/store.ts`, `server/cow.ts`, `server/json-file-store.ts`, `server/write-behind.ts`, `server/list-cache.ts`, `shared/list.ts`, `server/etag.ts` | [architecture](docs/architecture.md) |
 | Discovery, ownership, main agent | `server/discovery.ts`, `server/turn-events.ts`, `server/workspace-agent.ts`, `server/background-agents.ts`, `server/submissions.ts`, `server/pr-owner.ts`, `server/exclusions.ts`, `server/history-cache.ts`, `server/recovery-handoff.ts`, `server/recovery-config.ts`, `shared/settings.ts` | [workspaces](docs/workspaces.md) |
 | Batches, repairs, tasks, questions, spec, Done, status invariants | `server/engine.ts`, `shared/status.ts`, `shared/send-decision.ts`, `shared/task-rows.ts`, `shared/send-words.ts`, `shared/task-status.ts`, `shared/status-invariants.ts`, `server/status-check.ts`, `server/tasks.ts`, `server/obligations.ts`, `server/batch-archive.ts`, `server/questions.ts`, `server/spec.ts`, `server/delivery.ts`, `server/message-queue.ts`, `shared/queue.ts`, `server/session-guard.ts`, `shared/follow-up.ts`, `shared/model.ts`, `shared/questions.ts`, `shared/put-in-chat.ts`, `shared/spec.ts`, `shared/task-trigger.ts`, `server/scheduled-tasks.ts`, `shared/task-due.ts`, `shared/task-view.ts`, `shared/task-dup.ts`, `shared/communication.ts`, `shared/activity.ts` | [workspaces](docs/workspaces.md) |
+| What each agent is working on now (the agent line on the panel and Home rows; sync_workspace `milestone`, `workspace_now`) | `shared/now.ts`, `client/now-lines.tsx` | [workspaces](docs/workspaces.md#what-each-agent-is-working-on) |
 | Needs-you inbox, brief, Home | `server/inbox.ts`, `server/inbox-classifier.ts`, `shared/message-sender.ts`, `server/inbox-directory.ts`, `server/turn-timeline.ts`, `shared/inbox.ts`, `shared/brief.ts`, `shared/headline.ts`, `shared/home.ts`, `shared/sending.ts`, `shared/needs-block.ts`, `shared/search.ts`, `shared/sort.ts`, `shared/attention.ts`, `server/dismiss.ts`, `client/dismiss.tsx`, `shared/catch-up.ts`, `client/catch-up.tsx`, `client/more-context.tsx`, `shared/dictation.ts`, `client/dictation.tsx`, `server/context-requests.ts`, `shared/your-questions.ts` | [needs-you](docs/needs-you.md) |
 | Summary (internal id `about`), Rename title with AI | `server/about.ts`, `server/transcript.ts`, `shared/about.ts`, `server/rename.ts`, `shared/rename.ts` | [ai-roles](docs/ai-roles.md) |
 | Dispatch (New before 2.4): start work from an issue, PR, link or words | `shared/dispatch.ts`, `shared/issue-workspace.ts`, `shared/linear-issues.ts`, `shared/new-view.ts`, `server/dispatch.ts`, `server/linear-issues.ts`, `client/new.tsx`, `client/action-row.tsx`, `client/new-entry.tsx`, `shared/new-name.ts`, `shared/new-settings.ts`, `client/new-settings.tsx` | [dispatch](docs/dispatch.md) |
@@ -282,7 +283,7 @@ These are product rules. Each has tests, and breaking one is a bug even when the
      agents already make with Paseo's `archive_workspace` tool, so its `ROW_ACTIONS` entry is an exemption naming it.
 4. **Agents act on others, not themselves.** An agent can't sign itself off, answer its own question through
    `answer_question`, or act on its own brief. Goal, tasks, questions and Done belong to the main agent.
-   Contributors get `workspace_status`, `register_pr`, `sync_workspace`, `link_item`, `unlink_item`, `wait_for_checks`,
+   Contributors get `workspace_status`, `workspace_now`, `register_pr`, `sync_workspace`, `link_item`, `unlink_item`, `wait_for_checks`,
    `context_reply` (only for questions asked of them) and `make_main_agent` (under its claim rules), plus `report_issue` (it changes nothing in Follow-up), and nothing else. `report_send` refuses to send a
    report to the calling agent itself.
 5. **Ownership comes from the daemon.** The caller is `context.agent.id` (native tools) or `PASEO_AGENT_ID` checked
@@ -1555,7 +1556,6 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    not Home's panel. Before, a first install saw setup take Home's place, with nothing on the other surfaces. Guarded
    by `tests/setup-popup.test.ts` and `scripts/screenshots.mjs --only setup-popup` (welcome, two steps, the tour, done;
    desktop and 390×844, light and dark).
-
 124. **Your question always gets its answer** (`your-question-always-gets-its-answer`). A question the developer asks an
    agent (Your questions' field, `/ask` in its chat, More context, or an agent's `ask_context`) goes only to an agent
    that can answer it (`questionRecipient`, `contextRecipient`: a tracked workspace's main agent or a contributor, never
@@ -1573,6 +1573,18 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    still asking is only the row's line ("Asking · …"), never Needs you. Only the developer's act reads it: an agent's
    `question_action` (recorded `agent:<id>`) never takes it out of Needs you, and the agent it was asked of can't act on
    it at all. Q172 C=a. Guarded by `tests/your-questions.test.ts`.
+128. **The line takes its first source** (`the-line-takes-its-first-source`). Each agent's line on the panel, Home's rows
+   and `workspace_now` is one pure `nowOf` (`shared/now.ts`): what the agent is working on toward the goal, then its
+   state. The work is the first of, in this order (`NOW_SOURCES`): work Follow-up handed it that it hasn't settled
+   (while it runs), what it stated (`sync_workspace` `milestone`), the task it is working on, its one open PR, a
+   contributor's title; else nothing, never a guess. "2 of 4" comes only from the agent's own `done`/`next`. No tool,
+   file, command or to-do step is ever on the line, and the line has no name on screen (no label, no placeholder: the
+   state alone when nothing is known). It reads only the record and the inbox row both sides hold: no stream, no
+   timeline read, no model call. The stated work is stored per agent on the record and cleared at Done and when the
+   agent leaves. 2026-11-26, the developer: the line should name the milestone the agent is working on, not the micro
+   task, and "the end UI simple", with no word for it. Before, the panel said only "Main agent is working". Guarded
+   by `tests/now.test.ts` and `tests/now-worker.test.ts`.
+
 130. **A compaction is not a finish** (`a-compaction-is-not-a-finish`). A turn that only compacted (`/compact` typed
    by the developer, Smart Session's request, a provider's own auto-compaction, on every provider) adds nothing: no
    Finished flag, no brief, no superseded line, no turn-end check, and a developer's `/compact` answers nothing. The ask

@@ -8,6 +8,7 @@ import { useAgent, useRpc, useTabState, openExternalUrl, type PluginHostProps, t
 import { z } from "zod";
 import type { InboxStore } from "./inbox-store";
 import { useInbox } from "./inbox";
+import { AgentLines } from "./now-lines";
 import { BriefCard, type BriefDeps } from "./brief";
 import { briefAsks, liveBrief, type Brief } from "../shared/brief";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -345,7 +346,9 @@ const folds = z.object({ open: z.array(z.string()) });
 /** Two columns from this content width: actions on the left, the stacks on the right. */
 export const WIDE_MIN = 820;
 
-export function WorkspaceView({ theme, layout, workspace: w, navigation, loadError, openSettings, openOverview, folds: { isOpen, toggle }, resize, large = false, top, ask, sources, paseo }: PluginHostProps & {
+export function WorkspaceView({ theme, layout, workspace: w, navigation, loadError, openSettings, openOverview, folds: { isOpen, toggle }, resize, large = false, top, ask, sources, paseo, inbox }: PluginHostProps & {
+  /** The inbox rows' store, for each agent's line (client/now-lines.tsx). Absent: the lines read the record alone. */
+  inbox?: InboxStore;
   navigation?: PluginWorkspacePanelProps["navigation"]; workspace: Workspace; loadError?: string | null; openSettings: (category?: SettingsCategory) => void; openOverview: () => void; top?: ReactNode; /** The main agent's open brief and its card, for the Needs you block. */ ask?: { brief: Brief; card: ReactNode } | null;
   folds: Folds; resize: { icon: "Maximize2" | "Minimize2"; label: string; onPress: () => void } | null; large?: boolean;
   /** Home's sources: the header's More menu (the row menu). Absent in the larger view. */
@@ -381,10 +384,12 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const openPr = (key: string) => setSheet({ key, intent: null });
   // The expand button only appears while the panel is narrow; a wide panel or the larger view keeps its collapse button.
   const resizeShown = compact ? null : resize?.icon === "Maximize2" && wide ? null : resize;
-  const header = <WorkspaceHeader workspace={w} theme={theme} compact={compact} now={now} onSettings={openSettings} onRefresh={() => update.mutate()} refreshing={update.isPending} onAuto={next => auto.mutate(next)} autoPending={auto.isPending} notice={loadError ?? null} onOpenPr={openPr} resize={resizeShown} hideTitle={large} onHome={compact ? openOverview : undefined} openAgent={openAgent}
+  const header = <WorkspaceHeader workspace={w} theme={theme} compact={compact} now={now} onSettings={openSettings} onRefresh={() => update.mutate()} refreshing={update.isPending} onAuto={next => auto.mutate(next)} autoPending={auto.isPending} notice={loadError ?? null} onOpenPr={openPr} resize={resizeShown} hideTitle={large} onHome={compact ? openOverview : undefined} openAgent={openAgent} agentLines={!done}
     more={sources ? <PanelMore w={w} sources={sources} theme={theme} compact={compact} openAgent={openAgent} openQuestion={setQuestion} showMenu={setMoreMenu} /> : undefined} />;
   const running = useWorkspaceRunning(sources?.paseo ?? paseo, w.id);
   const shipped = <ShippedCard workspace={w} theme={theme} compact={compact} now={now} />;
+  // What each agent is on now (shared/now.ts); once shipped nobody is working toward the goal.
+  const agents = !done && <AgentLines workspace={w} inbox={inbox} theme={theme} compact={compact} now={now} openAgent={openAgent} />;
   const needs = <NeedsYouBlock workspace={w} theme={theme} compact={compact} now={now} brief={ask?.brief ?? null} briefCard={ask?.card ?? null} actions={{ openAgent, openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion }} />;
   // Your questions (docs/needs-you.md#your-questions): under Needs you, the same card as Home's detail pane.
   const questions = <YourQuestionsCard workspaceId={w.id} mainAgentId={w.mainAgentId} theme={theme} compact={compact} openAgent={openAgent} running={running} />;
@@ -412,9 +417,9 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
     <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20, ...(large ? { maxWidth: 1240, width: "100%", alignSelf: "center", paddingHorizontal: 12 } : null) }}>
       {header}
       {wide ? <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
-        <View style={{ flex: 5, minWidth: 0 }}>{shipped}{needs}{questions}{history}{messages}{tasks}</View>
+        <View style={{ flex: 5, minWidth: 0 }}>{agents}{shipped}{needs}{questions}{history}{messages}{tasks}</View>
         <View style={{ flex: 6, minWidth: 0 }}>{stacks}{log}{extras}</View>
-      </View> : <>{shipped}{needs}{questions}{history}{messages}{stacks}{tasks}{log}{extras}</>}
+      </View> : <>{agents}{shipped}{needs}{questions}{history}{messages}{stacks}{tasks}{log}{extras}</>}
     </ScrollView>
     <PrSheet workspace={w} prKey={sheet?.key ?? null} intent={sheet?.intent ?? null} theme={theme} compact={compact} browserReady={browser.data?.ready ?? false} onClose={() => setSheet(null)} />
     <QuestionSheet workspace={w} questionId={question} theme={theme} compact={compact} openAgent={openAgent} onClose={() => setQuestion(null)} />

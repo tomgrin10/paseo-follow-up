@@ -47,7 +47,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as the CHANGELOG's newest stable, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "gallery", "frames", "onboarding", "setup-popup"];
+const REVIEW_SHOTS = ["tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "gallery", "frames", "onboarding", "setup-popup"];
 /** Pasted images and their Add image button share one harness setup (an Overseer and the fixture provider taking images). */
 const PASTE_LIKE = only => only.includes("paste-images") || only.includes("attach-images");
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
@@ -609,6 +609,22 @@ const SCHEDULED_STATES = [
       msg("1.4.0 is on the registry. I'll check the CDN at the scheduled time.")] },
 ];
 
+/**
+ * now-line only (the-line-takes-its-first-source): two running agents that stated what they're working on through
+ * sync_workspace's milestone, one with its steps before and after ("2 of 4") and one without. The default set already
+ * has the other two states: Invoice PDFs works on the repair Follow-up sent (after: "fix"), and Audit log export runs
+ * without having stated anything.
+ */
+const NOW_LINE_STATES = [
+  { key: "nl-steps", project: "app", title: "Charge retries", minute: 150, prompt: "APP-171: cap the gap between charge retries so a flaky gateway can't double-charge.", waitFor: "running",
+    steps: [rpc("follow.enroll", { goal: "APP-171 Cap the retry gap" }),
+      rpc("follow.sync", { summary: "Goal set; starting on the cap.", milestone: { now: "Capping the retry gap", done: ["Reading the gateway logs"], next: ["Shipping the fix", "Verifying in staging"] } }),
+      think("Cap the gap at 45 s and test the boundary."), bash("pnpm test retry-policy", "pass 22"), { hold: true }] },
+  { key: "nl-plain", project: "web", title: "Release train", minute: 155, prompt: "WEB-50: tag the beta and publish it.", waitFor: "running",
+    steps: [rpc("follow.enroll", { goal: "WEB-50 Publish the beta" }), rpc("follow.sync", { summary: "Tagging the beta.", milestone: { now: "Releasing the beta" } }),
+      bash("pnpm release --tag beta", "tagged v3.2.0-beta.1"), { hold: true }] },
+];
+
 /** pick-notes only (task 32deeb27): decision cards with no tracked question, one decision and two. */
 const PICK_NOTES = [
   { key: "pn-one", title: "Export encoding", minute: 176, prompt: "APP-190: export invoices as a spreadsheet finance can open.",
@@ -693,7 +709,7 @@ async function seed({ call, home }) {
   if (only.includes("review-mode") || only.includes("pr-link")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }] });
   // reviewers-click: Ravi and Mina review example/app, so each PR's row reads "Add reviewers to #N: Ravi and Mina".
   if (only.includes("reviewers-click")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }, { login: "mina", name: "Mina" }] });
-  const specs = [...WORKSPACES.filter(w => !(argv.includes("--rename-fixup-review") || only.includes("local-titles")) || ["audit", "billing"].includes(w.key)), ...(only.includes("needs-you-states") || only.includes("tasks-view") || only.includes("own-answer") || only.includes("more-context") || only.includes("dismiss") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") || PASTE_LIKE(only) ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") || only.includes("dismiss") ? MERGE_CLICK_STATES : []), ...(only.includes("reviewers-click") ? REVIEWERS_CLICK_STATES : []), ...(only.includes("pr-scale") ? PR_SCALE_STATES : []), ...(only.includes("batch-churn") ? BATCH_CHURN_STATES : []), ...(only.includes("scheduled-tasks") ? SCHEDULED_STATES : [])];
+  const specs = [...WORKSPACES.filter(w => !(argv.includes("--rename-fixup-review") || only.includes("local-titles")) || ["audit", "billing"].includes(w.key)), ...(only.includes("needs-you-states") || only.includes("tasks-view") || only.includes("own-answer") || only.includes("more-context") || only.includes("dismiss") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") || PASTE_LIKE(only) ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") || only.includes("dismiss") ? MERGE_CLICK_STATES : []), ...(only.includes("reviewers-click") ? REVIEWERS_CLICK_STATES : []), ...(only.includes("pr-scale") ? PR_SCALE_STATES : []), ...(only.includes("batch-churn") ? BATCH_CHURN_STATES : []), ...(only.includes("scheduled-tasks") ? SCHEDULED_STATES : []), ...(only.includes("now-line") ? NOW_LINE_STATES : [])];
   if (only.includes("layout-search")) {
     specs.splice(0, specs.length, ...specs.filter(w => ["audit", "billing"].includes(w.key)));
     specs.push(
@@ -2222,6 +2238,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
     }
   }
   if (only.includes("scheduled-tasks")) await scheduledShots({ shoot, seeded, call, cli });
+  if (only.includes("now-line")) await nowLineShots({ shoot });
   if (only.includes("own-answer")) await ownAnswerShots({ shoot });
   if (only.includes("more-context")) await moreContextShots({ shoot, call });
   if (only.includes("your-questions")) await yourQuestionsShots({ shoot, call, seeded, home, cli });
@@ -4270,6 +4287,45 @@ async function batchChurnShots({ shoot, seeded, call, home, cli }) {
   const healed = (await ws()).batches;
   if (healed.find(x => x.id === "shots-old-answer").state !== "blocked") throw new Error("the answered batch wasn't restored as blocked");
   await state("healed", { panel: "Messages to the agent", activity: /sent again/, home: spec.title });
+}
+/**
+ * What each agent is working on (`--only now-line`, the-line-takes-its-first-source): the panel's agent lines and Home's
+ * rows for the four states (stated with its steps, stated without, Follow-up's repair, nothing stated), desktop and
+ * phone, light and dark. Phones reach the panel through the larger view; nothing may scroll sideways.
+ */
+async function nowLineShots({ shoot }) {
+  const TALL = { width: DESKTOP.width, height: 1000 };
+  const states = [
+    { name: "steps", spec: NOW_LINE_STATES[0], line: "Capping the retry gap" },
+    { name: "plain", spec: NOW_LINE_STATES[1], line: "Releasing the beta" },
+    { name: "follow-up", spec: WORKSPACES.find(w => w.key === "invoices"), line: /^(Fixing CI on|Repairing|Answering review on|Resolving conflicts on|Restacking) #/ },
+    { name: "nothing", spec: WORKSPACES.find(w => w.key === "audit"), line: /^Main agent · working \S+$/ },
+  ];
+  const noSideways = name => async page => { if (await page.evaluate(() => document.documentElement.scrollWidth) > PHONE.width) throw new Error(`${name} scrolls sideways`); };
+  const visible = (page, line) => page.getByText(line).filter({ visible: true }).first();
+  for (const theme of ["light", "dark"]) {
+    for (const st of states) {
+      await shoot(`nl-panel-${st.name}-${theme}`, TALL, theme, async page => {
+        await openChat(page, st.spec.title, st.spec.prompt);
+        await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+        await visible(page, st.line).waitFor({ timeout: 60_000 });
+      });
+      await shoot(`nl-panel-${st.name}-phone-${theme}`, PHONE, theme, async page => {
+        await openChat(page, st.spec.title, st.spec.prompt);
+        await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+        await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
+        await page.setViewportSize(PHONE);
+        await visible(page, st.line).waitFor({ timeout: 60_000 });
+        await noSideways(`nl-panel-${st.name}-phone`)(page);
+      });
+    }
+    await shoot(`nl-home-${theme}`, DESKTOP, theme, async page => { await openHome(page); await visible(page, "Capping the retry gap").waitFor({ timeout: 60_000 }); });
+    await shoot(`nl-home-phone-${theme}`, PHONE, theme, async page => {
+      await openHome(page); await page.setViewportSize(PHONE);
+      const line = page.getByText("Capping the retry gap").first(); await line.waitFor({ state: "attached", timeout: 60_000 });
+      await line.evaluate(el => el.scrollIntoView({ block: "center" })); await noSideways("nl-home-phone")(page);
+    });
+  }
 }
 /**
  * Scheduled tasks (`--only scheduled-tasks`, a-scheduled-task-arrives-once-at-its-time): the Tasks card with a time

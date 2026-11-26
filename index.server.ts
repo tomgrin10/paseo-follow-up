@@ -21,6 +21,7 @@ import { ContextRequests, contextRecipient, questionRecipient } from "./server/c
 import { agentQuestionPrompt, questionHistory, questionsByWorkspace, questionTask } from "./shared/your-questions";
 import { agentContextPrompt, contextFor, deckCards, type ContextVia } from "./shared/catch-up";
 import { buildHome } from "./shared/home";
+import { workspaceNow } from "./shared/now";
 import { needsYou } from "./shared/attention";
 import type { SortMode } from "./shared/sort";
 import type { ZodType, output as zOutput } from "zod";
@@ -785,13 +786,31 @@ export default function contribute(server: PluginServerContext) {
   });
   handle(rpc.listRpc, async ({ since }) => { if (waiting) return { workspaces: [], full: false, removed: [], error: waiting }; await ready; return { ...listCache.answer(await store.snapshot(), since), error: loadError ?? hookError ?? writeHealth.message() ?? engine.error }; });
   handle(rpc.getRpc, async ({ workspaceId }) => { if (waiting) return { workspace: null, error: waiting }; await ready; return { workspace: (await store.snapshot()).workspaces.find(w => w.id === workspaceId && w.enable_tracking) ?? null, error: loadError ?? hookError ?? writeHealth.message() ?? engine.error }; });
-  handle(rpc.syncWorkspaceRpc, async ({ agentId, summary }, { paseo }) => {
+  handle(rpc.syncWorkspaceRpc, async ({ agentId, summary, milestone }, { paseo }) => {
     await requireReady();
     const workspaceId = await callerWorkspaceId(agentId, paseo, false);
     const w = agentWorkspace(await store.snapshot(), agentId, "write", workspaceId, "pr");
     if (w.archived) throw new Error(`Only an active workspace root agent can confirm sidebar sync: expected ${w.mainAgentId}, received ${agentId}.`);
+    // What the agent is working on (shared/now.ts): stored per agent on the record, so every surface reads it with
+    // the rest of the workspace. Omitted keeps the last one; null clears it; the same one again writes nothing.
+    if (milestone !== undefined) await store.mutateWorkspace(w.id, current => {
+      const before = current.milestones?.[agentId];
+      if (milestone === null) { if (before) delete current.milestones![agentId]; return; }
+      const next = { now: milestone.now, done: milestone.done ?? [], next: milestone.next ?? [] };
+      if (before && JSON.stringify([before.now, before.done, before.next]) === JSON.stringify([next.now, next.done, next.next])) return;
+      current.milestones = { ...current.milestones, [agentId]: { ...next, at: new Date().toISOString() } };
+    });
     await agentHooks.confirm(w.id, agentId, summary);
     return { workspaceId: w.id, synced: true as const };
+  });
+  handle(rpc.workspaceNowRpc, async ({ agentId }, { paseo }) => {
+    await requireReady();
+    const workspaceId = await callerWorkspaceId(agentId, paseo);
+    const w = agentWorkspace(await store.snapshot(), agentId, "read", workspaceId, "pr");
+    // The inbox rows the worker already holds (no daemon read, nothing woken): the same rows every client draws from.
+    // Before Paseo's agent list first loads there are none: each state then reads unknown, never a made-up idle.
+    const rows = await inbox.list().then(list => list.rows, () => []);
+    return { workspaceId: w.id, agents: workspaceNow(w, rows, Date.now()) };
   });
   handle(rpc.agentStatusRpc, async ({ agentId }, { paseo }) => { await requireReady(); const workspaceId = await callerWorkspaceId(agentId, paseo); const w = agentWorkspace(await store.snapshot(), agentId, "read", workspaceId, "pr"); return { ...w, dismissed: dismissedNeeds(w, Date.now()), dismissedAsk: await inbox.dismissedAsk(agentId), prWorkflow: prWorkflow.agentWorkflow(workspaceRepo(w), touchedRepos(w)), nextMessageInfo: nextMessageInfo(w, Date.now()), sending: sendingOf(w, Date.now(), { held: !governor.allowsBackground() }) }; });
   handle(rpc.activateRpc, async ({ workspaceId }) => { await requireReady(); return engine.activate(workspaceId); });
