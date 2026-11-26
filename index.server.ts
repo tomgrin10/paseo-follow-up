@@ -30,6 +30,7 @@ import { DISMISSED_ASK_NOTE, isTimeZone, sameAsk } from "./shared/inbox";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { activityPage, boundHistory } from "./shared/history";
 import * as rpc from "./shared/contracts";
 import { LogRing } from "./server/report-issue/diagnostics";
 import { followUpReporter } from "./server/report-issue-adapter";
@@ -794,7 +795,16 @@ export default function contribute(server: PluginServerContext) {
     return { tracked: true, ...view, workspaces: view.workspaces.map(w => ({ ...w, title: w.title.slice(0, 200), agentStatus: w.agentStatus.slice(0, 40), state: w.state.slice(0, 200) })) };
   });
   handle(rpc.listRpc, async ({ since }) => { if (waiting) return { workspaces: [], full: false, removed: [], error: waiting }; await ready; return { ...listCache.answer(await store.snapshot(), since), error: loadError ?? hookError ?? writeHealth.message() ?? engine.error }; });
-  handle(rpc.getRpc, async ({ workspaceId }) => { if (waiting) return { workspace: null, error: waiting }; await ready; return { workspace: (await store.snapshot()).workspaces.find(w => w.id === workspaceId && w.enable_tracking) ?? null, error: loadError ?? hookError ?? writeHealth.message() ?? engine.error }; });
+  // Settled history is bounded (shared/history.ts boundHistory); the Activity card pages the rest with follow.activity.
+  handle(rpc.getRpc, async ({ workspaceId }) => { if (waiting) return { workspace: null, error: waiting }; await ready; const w = (await store.snapshot()).workspaces.find(w => w.id === workspaceId && w.enable_tracking); return { workspace: w ? boundHistory(w) : null, error: loadError ?? hookError ?? writeHealth.message() ?? engine.error }; });
+  handle(rpc.activityRpc, async ({ workspaceId, tab, query, offset, limit }) => {
+    const empty = { timeline: [], questions: [], offset: 0, total: 0, counts: { timeline: 0, questions: 0 }, all: 0 };
+    if (waiting) return { ...empty, error: waiting };
+    await ready;
+    const w = (await store.snapshot()).workspaces.find(w => w.id === workspaceId && w.enable_tracking);
+    if (!w) return { ...empty, error: "This workspace isn't followed." };
+    return { ...activityPage(w, { tab, query, offset, limit }), error: null };
+  });
   handle(rpc.syncWorkspaceRpc, async ({ agentId, summary, milestone }, { paseo }) => {
     await requireReady();
     const workspaceId = await callerWorkspaceId(agentId, paseo, false);

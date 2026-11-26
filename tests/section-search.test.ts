@@ -111,7 +111,9 @@ test("folds are ignored while searching", async () => {
   const stacks = await src("stacks.tsx"), log = await src("questions.tsx");
   assert.match(stacks, /\{!hits && settled\.length > 0/, "PRs: no settled-stacks fold while searching");
   assert.match(stacks, /const fold = !hits && !settled && done\.length > 0/, "PRs: no merged fold while searching");
-  assert.match(log, /\{!hits && list\.length > LIMIT && <FoldRow/, "Activity: no 'Show all' while searching");
+  // Activity pages its hits instead (client/paged-list.tsx): a search is paged, so its Show all fold is gone.
+  assert.match(log, /const paged = all \|\| searching;/, "Activity: a search is paged");
+  assert.match(log, /!paged\s*\? d\.total > PAGE\.preview && <FoldRow/, "Activity: no 'Show all' while searching");
 });
 
 test("no global key and no React Native scroll views: Esc in the field only, Ctrl/Cmd+F stays the browser's", async () => {

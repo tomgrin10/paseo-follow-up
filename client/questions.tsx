@@ -1,13 +1,13 @@
 // The question dialog and its answer form. The layout of options with a recommendation, the
 // "what the agent does meanwhile" line and Copy are adapted from Progress
 // (@stevecastaneda/paseo-progress, MIT, © 2026 Steve Castaneda); see THIRD_PARTY_NOTICES.md.
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { View } from "react-native";
 import { Pressable, Text, copyable } from "./text";
 import { openExternalUrl, useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, ScrollView, TextInput, copyText, useToast } from "@getpaseo/plugin/client/ui";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { answerQuestionRpc } from "../shared/contracts";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { activityRpc, answerQuestionRpc } from "../shared/contracts";
 import { ImageField, useImageAttachments } from "./image-attach";
 import type { Workspace } from "../shared/model";
 import type { ListQuestion, ListWorkspace } from "../shared/list";
@@ -15,7 +15,10 @@ import { OTHER, OTHER_LABEL, closedLine, isDismissed, answerDraft, answerHeading
 import { ago } from "../shared/attention";
 import { RETRYING_DETAIL, deliveryStatus, receiptNote } from "../shared/queue";
 import { mootNote, sentence } from "../shared/errors";
-import { activity, activityQuestions, type ActivityTone } from "../shared/activity";
+import { type ActivityTone } from "../shared/activity";
+import { activityPage, type ActivityTab } from "../shared/history";
+import { PAGE, pageInfo } from "../shared/paged";
+import { Pager } from "./paged-list";
 import { Button, Card, CardRow, Chip, FoldRow, IconButton, SubmitScope, errorText, text, type Theme } from "./kit";
 import { Spinner } from "./motion";
 import { DictationField, useCaret, type FieldPad } from "./dictation";
@@ -23,7 +26,7 @@ import { NoteLink } from "./brief";
 import { QuestionMoreContext } from "./more-context";
 import { PRIMARY_FORM } from "./dock";
 import { mergedColor, tint, withAlpha, type Colors } from "./theme";
-import { overviewKey, workspaceKey } from "./keys";
+import { activityKey, overviewKey, workspaceKey } from "./keys";
 import { PrLinksProvider, RichText } from "./rich-text";
 import { prLinksByNumber } from "../shared/presentation";
 import { notice, openQuestion, runAction } from "./toasts";
@@ -31,8 +34,7 @@ import { DismissX, useDismiss } from "./dismiss";
 import { putInChatOrCopy } from "../shared/put-in-chat";
 import { useChatComposer } from "./put-in-chat";
 import { Marked, NoMatchRow, useSectionSearch } from "./section-search";
-import { activityFields, questionFields, questionStatus } from "../shared/section-search";
-import type { Activity } from "../shared/activity";
+import { questionStatus } from "../shared/section-search";
 import { answerImagesKey, clearPendingAnswer, failPendingAnswer, pendingKey, setPendingAnswer, usePendingAnswer, usePendingAnswers, type PendingAnswer } from "./pending-answers";
 
 const who = (w: Pick<ListWorkspace, "mainAgentId">, agentId: string | null) => !agentId || agentId === w.mainAgentId ? "the main agent" : "a root session";
@@ -416,9 +418,11 @@ function hostOf(url: string): string {
 }
 
 /** The question dialog: a sheet on phones, a dialog on desktop. */
-export function QuestionSheet({ workspace: w, questionId, theme, compact, onClose, openAgent }: { workspace: Workspace; questionId: string | null; theme: Theme; compact: boolean; onClose: () => void; openAgent?: (agentId: string) => void }) {
+export function QuestionSheet({ workspace: w, questionId, theme, compact, onClose, openAgent, fallback }: { workspace: Workspace; questionId: string | null; theme: Theme; compact: boolean; onClose: () => void; openAgent?: (agentId: string) => void;
+  /** The question as an Activity page carried it: an old settled one follow.get no longer sends (shared/history.ts). */
+  fallback?: Question | null }) {
   const c = theme.colors;
-  const q = questionId ? w.questions.find(x => x.id === questionId) ?? null : null;
+  const q = questionId ? w.questions.find(x => x.id === questionId) ?? (fallback?.id === questionId ? fallback : null) : null;
   const color = !q ? c.foregroundMuted : q.answer ? c.statusSuccess : q.closed ? c.foregroundMuted : c.statusWarning;
   return <Modal title={q ? `${q.id} · ${q.title}` : "Question"} icon={<Icon name={q?.answer ? "MessageCircleReply" : "MessageCircleQuestion"} size={18} color={color} />} open={!!q} onOpenChange={next => { if (!next) onClose(); }}>
     <Modal.Content contentContainerStyle={{ padding: compact ? 16 : 20 }}>
@@ -459,20 +463,38 @@ export function QuestionStepper({ workspace: w, theme, compact, openAgent, onAns
 
 const toneColor = (c: Colors, tone: ActivityTone) => tone === "merged" ? mergedColor(c) : tone === "success" ? c.statusSuccess : tone === "warning" ? c.statusWarning : tone === "danger" ? c.statusDanger : c.foregroundMuted;
 
-/** The workspace's log: a timeline of what happened, and every question under its ref. */
-export function ActivityCard({ workspace: w, theme, compact, now, open, toggle, onOpenQuestion }: { workspace: Workspace; theme: Theme; compact: boolean; now: number; open: (key: string) => boolean; toggle: (key: string) => void; onOpenQuestion: (id: string) => void }) {
+/**
+ * The workspace's log: a timeline of what happened, and every question under its ref. Paged (client/paged-list.tsx):
+ * folded it shows the newest few, "Show all N" opens pages of PAGE.size, and a search finds across every page. Its rows
+ * come a page at a time from follow.activity (the worker holds the whole history; follow.get carries only the newest,
+ * shared/history.ts), with the panel's own copy drawn until the first page answers.
+ */
+export function ActivityCard({ workspace: w, theme, compact, now, open, toggle, onOpenQuestion }: { workspace: Workspace; theme: Theme; compact: boolean; now: number; open: (key: string) => boolean; toggle: (key: string) => void; onOpenQuestion: (id: string, question?: Question) => void }) {
   const c = theme.colors; const t = text(c);
-  const rows = activity(w);
-  const questions = activityQuestions(w.questions).sort((a, b) => Number(isOpen(b)) - Number(isOpen(a)) || Number(b.id.slice(1)) - Number(a.id.slice(1)));
-  const [tab, setTab] = useState<"timeline" | "questions">("timeline");
-  // Activity searches both tabs at once; each tab chip then counts its own matches.
-  const search = useSectionSearch<Activity | Question>(w.id, "activity", { theme, compact, items: [...rows, ...questions], fields: x => "askedAt" in x ? questionFields(x) : activityFields(x) });
-  const hits = search.hits;
-  if (!rows.length && !questions.length) return null;
+  const [tab, setTab] = useState<ActivityTab>("timeline");
+  const [page, setPage] = useState({ key: "", at: 0 });
   const all = open("activity");
-  const LIMIT = 5;
-  const found = { timeline: hits ? rows.filter(r => hits.has(r)) : rows, questions: hits ? questions.filter(q => hits.has(q)) : questions };
-  const tabButton = (id: "timeline" | "questions", label: string, count?: number) => {
+  const read = useRpc(activityRpc);
+  const [remote, setRemote] = useState<{ matches: number; total: number } | null>(null);
+  // Activity searches both tabs at once on the worker; each tab chip then counts its own matches.
+  const search = useSectionSearch<never>(w.id, "activity", { theme, compact, items: [], fields: () => [], remote });
+  const query = search.query?.trim() ?? "";
+  const searching = !!query;
+  const paged = all || searching;
+  const key = `${tab}|${query}|${paged}`;
+  const at = page.key === key ? page.at : 0;
+  const limit = paged ? PAGE.size : PAGE.preview;
+  const input = { workspaceId: w.id, tab, ...(query ? { query } : {}), offset: at * limit, limit };
+  const local = useMemo(() => ({ ...activityPage(w, input), error: null }), [w, tab, query, at, limit]); // eslint-disable-line react-hooks/exhaustive-deps
+  const reply = useQuery({ queryKey: activityKey(w.id, w.updatedAt, tab, query, at * limit, limit), queryFn: () => read(input), placeholderData: keepPreviousData, staleTime: 15_000, refetchOnWindowFocus: false });
+  // Until the worker answers this workspace's first page, the panel's own (bounded) copy draws it.
+  const d = reply.data && !reply.data.error && reply.data.tab === tab ? reply.data : local;
+  const counts = d.counts;
+  useEffect(() => { const next = searching ? { matches: counts.timeline + counts.questions, total: d.all } : null; setRemote(r => r?.matches === next?.matches && r?.total === next?.total ? r : next); }, [searching, counts.timeline, counts.questions, d.all]);
+  const info = pageInfo(d.total, at, limit);
+  if (!d.all && !searching) return null;
+  const hasQuestions = searching ? counts.questions > 0 || counts.timeline > 0 : d.counts.questions > 0;
+  const tabButton = (id: ActivityTab, label: string, count?: number) => {
     const selected = tab === id;
     return <Pressable key={id} accessibilityRole="tab" aria-selected={selected} accessibilityState={{ selected }} accessibilityLabel={count !== undefined ? `${label}, ${count}` : label} onPress={() => setTab(id)} hitSlop={4}
       style={state => ({ flexDirection: "row", alignItems: "center", gap: 5, minHeight: compact ? 36 : 24, paddingHorizontal: 9, borderRadius: 999, backgroundColor: selected ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
@@ -480,28 +502,30 @@ export function ActivityCard({ workspace: w, theme, compact, now, open, toggle, 
       {count !== undefined && <Text style={{ color: c.foregroundMuted, fontSize: 12, fontVariant: ["tabular-nums"] }}>{count}</Text>}
     </Pressable>;
   };
-  const list = found[tab];
-  // While searching, "Show all" is ignored: every match shows.
-  const shown = all || hits ? list : list.slice(0, LIMIT);
-  const tabs = (counts: boolean) => <View accessibilityRole="tablist" style={{ flexDirection: "row", gap: 2, marginVertical: -4 }}>{tabButton("timeline", "Timeline", counts ? found.timeline.length : undefined)}{tabButton("questions", "Questions", found.questions.length)}</View>;
+  const tabs = (withCounts: boolean) => <View accessibilityRole="tablist" style={{ flexDirection: "row", gap: 2, marginVertical: -4 }}>{tabButton("timeline", "Timeline", withCounts ? counts.timeline : undefined)}{tabButton("questions", "Questions", counts.questions)}</View>;
+  const rows = d.timeline, questions = d.questions;
+  const empty = tab === "timeline" ? !rows.length : !questions.length;
+  const footer = !paged
+    ? d.total > PAGE.preview && <FoldRow theme={theme} compact={compact} open={false} onPress={() => toggle("activity")} icon="History" iconColor={c.foregroundMuted} label={`Show all ${d.total}`} />
+    : (info.pages > 1 || !searching) && <Pager theme={theme} compact={compact} info={info} busy={reply.isFetching && reply.isPlaceholderData} noun={tab === "timeline" ? "events" : "questions"}
+      onPage={p => setPage({ key, at: p })} onLess={searching ? undefined : () => { setPage({ key, at: 0 }); toggle("activity"); }} />;
   return <Card theme={theme} compact={compact} icon="Activity" title="Activity" search={search.header}
-    right={<View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>{questions.length ? tabs(false) : null}{search.button}</View>}>
+    right={<View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>{hasQuestions ? tabs(false) : null}{search.button}</View>}>
     {/* Searching: the tabs move under the field and count their matches, so a hit in the other tab is never hidden. */}
-    {search.header && questions.length > 0 && <View style={{ flexDirection: "row", paddingHorizontal: compact ? 14 : 12, paddingTop: 6, paddingBottom: 10 }}>{tabs(!!hits)}</View>}
-    {hits && !hits.size && <NoMatchRow section="activity" query={search.query!} theme={theme} compact={compact} />}
-    {hits && hits.size > 0 && !list.length && <View style={{ paddingHorizontal: compact ? 14 : 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border }}>
-      <Text style={t.meta}>{`Nothing in ${tab === "timeline" ? "Timeline" : "Questions"} matches. ${found[tab === "timeline" ? "questions" : "timeline"].length} in ${tab === "timeline" ? "Questions" : "Timeline"}.`}</Text>
+    {search.header && <View style={{ flexDirection: "row", paddingHorizontal: compact ? 14 : 12, paddingTop: 6, paddingBottom: 10 }}>{tabs(searching)}</View>}
+    {searching && !counts.timeline && !counts.questions && <NoMatchRow section="activity" query={query} theme={theme} compact={compact} />}
+    {searching && (counts.timeline > 0 || counts.questions > 0) && empty && <View style={{ paddingHorizontal: compact ? 14 : 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border }}>
+      <Text style={t.meta}>{`Nothing in ${tab === "timeline" ? "Timeline" : "Questions"} matches. ${tab === "timeline" ? counts.questions : counts.timeline} in ${tab === "timeline" ? "Questions" : "Timeline"}.`}</Text>
     </View>}
     {/* The timeline is drawn on the same rail as the stacks: a 2px line through 16px state nodes. */}
-    {!list.length ? null : tab === "timeline" ? <View style={{ paddingHorizontal: 12, paddingTop: 4, paddingBottom: 6, borderTopWidth: 1, borderTopColor: c.border }}>
-      {(shown as typeof rows).map((r, i, all) => {
+    {empty ? null : tab === "timeline" ? <View style={{ paddingHorizontal: 12, paddingTop: 4, paddingBottom: 6, borderTopWidth: 1, borderTopColor: c.border }}>
+      {rows.map(({ row: r, hit }, i) => {
         const color = toneColor(c, r.tone);
-        const hit = hits?.get(r);
         return <View key={r.key} style={{ flexDirection: "row", gap: 10 }}>
           <View style={{ width: 16, alignItems: "center" }}>
-            <View style={{ width: 2, height: 8, backgroundColor: i === 0 ? "transparent" : c.border }} />
+            <View style={{ width: 2, height: 8, backgroundColor: i === 0 && info.page === 0 ? "transparent" : c.border }} />
             <View style={{ width: 16, height: 16, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: tint(color, c) }}><Icon name={r.icon} size={10} color={color} /></View>
-            <View style={{ width: 2, flex: 1, minHeight: 4, backgroundColor: i === all.length - 1 ? "transparent" : c.border }} />
+            <View style={{ width: 2, flex: 1, minHeight: 4, backgroundColor: i === rows.length - 1 && info.page === info.pages - 1 ? "transparent" : c.border }} />
           </View>
           <View style={{ flex: 1, minWidth: 0, gap: 2, paddingTop: 6, paddingBottom: 8 }}>
             <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
@@ -512,14 +536,13 @@ export function ActivityCard({ workspace: w, theme, compact, now, open, toggle, 
           </View>
         </View>;
       })}
-    </View> : (shown as typeof questions).map(q => {
+    </View> : questions.map(({ question: q, hit }) => {
       // Until it reached the agent the row says where it is, in muted, like every other surface (answerStatus).
       const s = answerStatus(q);
       const status = questionStatus(q);
-      const hit = hits?.get(q);
       const icon = q.answer ? "MessageCircleReply" : q.closed ? "MessageCircleOff" : "MessageCircleQuestion";
       const color = s?.delivered ? c.statusSuccess : q.answer || q.closed ? c.foregroundMuted : c.statusWarning;
-      return <CardRow key={q.id} theme={theme} onPress={() => onOpenQuestion(q.id)} accessibilityLabel={`${q.id}, ${q.title}. ${status}. Open`}>
+      return <CardRow key={q.id} theme={theme} onPress={() => onOpenQuestion(q.id, q as Question)} accessibilityLabel={`${q.id}, ${q.title}. ${status}. Open`}>
         <View style={{ flexDirection: "row", gap: 9 }}>
           <View style={{ paddingTop: 2 }}><Icon name={icon} size={13} color={color} /></View>
           <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
@@ -533,6 +556,6 @@ export function ActivityCard({ workspace: w, theme, compact, now, open, toggle, 
         </View>
       </CardRow>;
     })}
-    {!hits && list.length > LIMIT && <FoldRow theme={theme} compact={compact} open={all} onPress={() => toggle("activity")} icon="History" iconColor={c.foregroundMuted} label={all ? "Show less" : `Show all ${list.length}`} />}
+    {footer || null}
   </Card>;
 }

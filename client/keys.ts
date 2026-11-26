@@ -1,6 +1,8 @@
 /** React Query keys shared by every surface that reads Follow-up state. */
 export const workspaceKey = (id: string) => ["follow-up", "workspace", id];
 export const overviewKey = ["follow-up", "overview"];
+/** One page of a workspace's Activity card (follow.activity), keyed by the workspace's revision so a change re-reads it. */
+export const activityKey = (id: string, rev: string, tab: string, query: string, offset: number, limit: number) => ["follow-up", "activity", id, rev, tab, query, offset, limit];
 /** The browser extension's connection status: one shared query, read when a PR sheet, the panel or the pill opens (never polled). */
 export const browserKey = ["follow-up", "browser"];
 /** An agent's live brief (follow.inbox-brief): one query per agent, shared by every brief card in its chat. */

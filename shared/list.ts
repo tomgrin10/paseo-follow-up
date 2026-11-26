@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { batchSchema, deploymentSchema, obligationSchema, prObjectSchema, snapshotSchema, workspaceSchema, type Workspace } from "./model";
 import { isOpen, questionSchema } from "./questions";
+import { boundHistory } from "./history";
 
 /**
  * What follow.list and the workspaces feed carry: each followed workspace as the list views draw it (Home, the pill,
@@ -64,7 +65,9 @@ const drop = <T extends object, K extends string>(value: T, keys: Readonly<Recor
 };
 
 /** The list form of one stored workspace. Pure; ListCache keeps one per saved workspace object, so an unchanged workspace isn't projected again. */
-export function listEntry(w: Workspace): ListEntry {
+export function listEntry(whole: Workspace): ListEntry {
+  // Settled history beyond the newest few goes out only as follow.activity pages (shared/history.ts).
+  const w = boundHistory(whole);
   if (w.archived) return { id: w.id, title: w.title, updatedAt: w.updatedAt, archived: true, enable_tracking: w.enable_tracking,
     prs: w.prs.map(p => ({ key: p.key, number: p.number, stack: p.stack, snapshot: p.snapshot ? { title: p.snapshot.title } : null })) };
   return {
