@@ -2293,9 +2293,6 @@ export default function contribute(server: PluginServerContext) {
       // Read the ended turn through the plugin-owned API, outside the state lock: one read from the agent's cursor,
       // shared with the inbox's handler and with discovery, which the read is kept for (a-turn-s-timeline-is-read-once).
       const items = await inboxDirectory.turnItems!(event.agent.id, event.turnId ?? null).catch(() => null);
-      // Your questions' turn-end capture, from this same read on any provider: an ask this turn answered without
-      // context_reply takes the agent's last message after it as its answer (null items: "answered in its chat").
-      await contextRequests.turnEnded(event.agent.id, items).catch(() => undefined);
       gateway.markDirty(event.agent.id);
       if (signal.aborted || stopped) return;
       const guarded = !!interruption && await sessionGuardOwnsInterruption(event.agent.id, interruption).catch(() => false);
@@ -2309,6 +2306,9 @@ export default function contribute(server: PluginServerContext) {
       if (nudged) void engine.nudge(nudged);
       // A provider without the hook: the Stop hook's checks, from this same read (an-agent-on-any-provider-gets-follow-up).
       await turnEnd.turnEnded(event.agent, event.outcome, event.turnId ?? null, items).catch(() => undefined);
+      // Your questions' turn-end capture, from this same read (any provider): an ask this turn answered without
+      // context_reply takes the agent's last message after it as its answer (null items: "answered in its chat").
+      await contextRequests.turnEnded(event.agent.id, items).catch(() => undefined);
     }),
     server.on("workspace.archived", async event => { await ready; if (!loadError && !stopped) await store.mutate(state => { const w = state.workspaces.find(w => w.id === event.workspace.id); if (w) w.archived = true; }); }),
   ];
