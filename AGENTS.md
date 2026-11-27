@@ -1658,7 +1658,7 @@ These are product rules. Each has tests, and breaking one is a bug even when the
 
 133. **Auto-send runs a few turns at a time** (`auto-send-runs-a-few-turns-at-a-time`). At most `maxAutoSends` turns
    that Auto-send started run at once across every workspace (default `DEFAULT_MAX_AUTO_SENDS` = 2, 1-10 in Settings →
-   Advanced, `set_follow_settings maxAutoSends`), loaded agents or not, so waking many agents never floods Paseo. A
+   Following → Advanced, `set_follow_settings maxAutoSends`), loaded agents or not, so waking many agents never floods Paseo. A
    turn counts from its dispatch (`Batch.automatic`) until its batch is acknowledged or the main agent's turn ends
    (`autoTurnRunning`, `shared/send-decision.ts`). The rest wait as `sendWait` `limit` ("waits until another
    workspace's repair finishes", waiting on Follow-up) and take turns oldest batch first as they free

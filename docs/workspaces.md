@@ -86,7 +86,7 @@ Tests: `tests/main-claim.test.ts`, `tests/main-handover.test.ts`.
    (`mainBusy`, `runtimeReason`, `sendWait`, PR reads, the batch's last refusal). It sends when:
    - Auto-send is on, nothing is held, and the agent isn't dormant or gone.
    - The batch has no completion check.
-   - The developer messaged the main agent within the active window (`activeWindowDays`, Settings → Advanced; else
+   - The developer messaged the main agent within the active window (`activeWindowDays`, Settings → Following → Advanced; else
      `sendWait` is `stale` and it waits for their Send). Whether Paseo has it loaded doesn't matter (Q177): the send
      resumes it.
    - Fewer than `maxAutoSends` Auto-send turns run across all workspaces (invariant 133; else `sendWait` is `limit`,

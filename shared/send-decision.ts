@@ -37,13 +37,13 @@ export type SendDecision = {
 };
 
 /**
- * Past the active window (Settings → Advanced, `activeWindowDays`): the developer hasn't messaged the main agent in that
+ * Past the active window (Settings → Following → Advanced, `activeWindowDays`): the developer hasn't messaged the main agent in that
  * long, so a repair waits for their Send (Q177). Loaded or not never decides this: that is Paseo's detail.
  */
 export const STALE_REASON = "you haven't messaged this agent lately, so it waits for you";
 /** Invariant 133: as many Follow-up-started turns as the limit already run; it goes, oldest first, as one ends. */
 export const LIMIT_REASON = "waits until another workspace's repair finishes";
-/** The most Follow-up-started turns running at once, machine-wide (Settings → Advanced, `maxAutoSends`). */
+/** The most Follow-up-started turns running at once, machine-wide (Settings → Following → Advanced, `maxAutoSends`). */
 export const DEFAULT_MAX_AUTO_SENDS = 2;
 export const MAX_AUTO_SENDS_RANGE = { min: 1, max: 10 } as const;
 /** After a send, how long the turn counts before Paseo has reported it running (the next refresh reads mainBusy). */

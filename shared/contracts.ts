@@ -116,9 +116,9 @@ export const setProjectTrackingRpc = defineRpc({ name: "follow.set-project-track
 /** Following (1.3.0-beta.2): the two global switches and the per-workspace exceptions, for Settings only. */
 const followSettingsSchema = z.object({
   enable_follow_every: z.boolean(), enable_auto_sends_default: z.boolean(),
-  /** Days without a user message before a followed workspace goes dormant and its repairs wait for Send (Settings → Advanced). */
+  /** Days without a user message before a followed workspace goes dormant and its repairs wait for Send (Settings → Following → Advanced). */
   activeWindowDays: z.number().int().optional(),
-  /** Invariant 133: the most Auto-send turns running at once, machine-wide (Settings → Advanced). */
+  /** Invariant 133: the most Auto-send turns running at once, machine-wide (Settings → Following → Advanced). */
   maxAutoSends: z.number().int().optional(),
   workspaces: z.array(z.object({ id: idSchema, title: z.string(), enable_tracking: z.boolean(), enable_auto_sends: z.boolean(), optedOut: z.boolean(), dormant: z.boolean().optional(), parked: z.boolean().optional() })),
 });

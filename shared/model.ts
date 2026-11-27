@@ -280,10 +280,10 @@ export const stateSchema = z.object({
   migrations: z.array(z.string()).optional(),
   /**
    * Days without a user message to the main agent before a followed workspace goes dormant and its repairs wait for the
-   * developer's Send (Q177; Settings → Advanced). Absent means 3.
+   * developer's Send (Q177; Settings → Following → Advanced). Absent means 3.
    */
   activeWindowDays: z.number().int().min(1).max(60).optional(),
-  /** Invariant 133: the most Auto-send turns running at once, machine-wide (Settings → Advanced). Absent means 2. */
+  /** Invariant 133: the most Auto-send turns running at once, machine-wide (Settings → Following → Advanced). Absent means 2. */
   maxAutoSends: z.number().int().min(1).max(10).optional(),
   /** Workspaces whose auto-send the active-scope migration turned off; it turns back on when they become active. */
   autoSendsParked: z.array(idSchema).optional(),

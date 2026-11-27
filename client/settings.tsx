@@ -62,7 +62,7 @@ function QuestionSettings({ theme }: Pick<PluginSurfaceProps, "theme">) {
 const followKey = ["follow-up", "follow-settings"];
 
 /**
- * Following: the three switches, then Projects and Workspaces as folds. Both lists are exceptions to "Follow every
+ * Following: the three switches, then Projects and Workspaces as folds, then Advanced. Both lists are exceptions to "Follow every
  * workspace", so they stay next to it. Workspaces replaces the old 100-option select: search, exceptions first,
  * one row open at a time, 25 rows and "Show more".
  */
@@ -95,38 +95,29 @@ function FollowingCategory({ theme, compact }: { theme: Theme; compact: boolean 
       ? <WorkspacesFold theme={theme} compact={compact} all={data.workspaces} autoDefault={data.enable_auto_sends_default} busy={change.isPending}
         set={(workspace, label) => change.mutate({ workspace }, { onSuccess: () => { if (label) toast.show(label, { variant: "success" }); } })} />
       : <Text style={t.meta}>Workspaces appear here once they have an agent.</Text>)}
+    {data && <AdvancedSection data={data} busy={change.isPending} set={input => change.mutate(input)} />}
   </>;
 }
 
 /**
- * Advanced (Q177): when a workspace counts as resting, and how many repairs go out on their own at once. Both are the
- * Following settings' own fields (follow.set-follow-settings, set_follow_settings), so agents set them the same way.
+ * Following → Advanced (Q177): how long Auto-send keeps going without a message from the developer, and how many repairs
+ * go out on their own at once. Last in Following so most developers never meet it. Both are the Following settings' own
+ * fields (follow.set-follow-settings, set_follow_settings), so agents set them the same way.
  */
-function AdvancedCategory({ theme }: { theme: Theme; compact: boolean }) {
-  const c = theme.colors;
-  const read = useRpc(followSettingsRpc); const write = useRpc(setFollowSettingsRpc); const cache = useQueryClient(); const toast = useToast();
-  const query = useQuery({ queryKey: followKey, queryFn: () => read({}), refetchInterval: 30000 });
-  const change = useMutation({
-    mutationFn: (input: Parameters<typeof write>[0]) => write(input),
-    onSuccess: value => { cache.setQueryData(followKey, value); void cache.invalidateQueries({ queryKey: settingsKey }); },
-    onError: error => toast.error(errorText(error)),
-  });
-  const data = query.data;
-  const days = data?.activeWindowDays ?? 3;
-  const atOnce = data?.maxAutoSends ?? DEFAULT_MAX_AUTO_SENDS;
-  return <SettingsSection title="Repairs">
-    {query.isPending && <ActivityIndicator accessibilityLabel="Loading advanced settings" color={c.foregroundMuted} style={{ alignSelf: "flex-start", marginVertical: 8 }} />}
-    {query.error && <SettingsCard><SettingsAction label="Couldn't load advanced settings" hint={errorText(query.error)} actionLabel="Retry" onPress={() => void query.refetch()} /></SettingsCard>}
-    {data && <SettingsCard>
+function AdvancedSection({ data, busy, set }: { data: { activeWindowDays?: number; maxAutoSends?: number }; busy: boolean; set: (input: { activeWindowDays?: number; maxAutoSends?: number }) => void }) {
+  const days = data.activeWindowDays ?? 3;
+  const atOnce = data.maxAutoSends ?? DEFAULT_MAX_AUTO_SENDS;
+  return <SettingsSection title="Advanced">
+    <SettingsCard>
       <SettingsSelect label="Pause auto-send after" hint="If you haven't messaged a workspace's agent in this long, its repairs wait for your Send. Without an open PR the workspace also rests until you start a turn there."
-        value={String(days)} disabled={change.isPending}
+        value={String(days)} disabled={busy}
         options={[...new Set([1, 3, 7, 14, days])].sort((a, b) => a - b).map(d => ({ value: String(d), label: d === 1 ? "1 day" : `${d} days` }))}
-        onValueChange={value => change.mutate({ activeWindowDays: Number(value) })} />
+        onValueChange={value => set({ activeWindowDays: Number(value) })} />
       <SettingsSelect label="Repairs at once" hint="How many repairs Follow-up sends on its own at the same time, across all workspaces. The rest go out, oldest first, as those finish. Your own Send never waits."
-        value={String(atOnce)} disabled={change.isPending}
+        value={String(atOnce)} disabled={busy}
         options={Array.from({ length: MAX_AUTO_SENDS_RANGE.max - MAX_AUTO_SENDS_RANGE.min + 1 }, (_, i) => i + MAX_AUTO_SENDS_RANGE.min).map(n => ({ value: String(n), label: String(n) }))}
-        onValueChange={value => change.mutate({ maxAutoSends: Number(value) })} />
-    </SettingsCard>}
+        onValueChange={value => set({ maxAutoSends: Number(value) })} />
+    </SettingsCard>
   </SettingsSection>;
 }
 
@@ -307,7 +298,6 @@ export function FollowSettings({ theme, layout, openSetup, openReport, openSetti
     </View>
     : category === "agents" ? <AgentsCategory theme={theme} compact={compact} />
     : category === "brief" ? <MorningBriefCategory theme={theme} compact={compact} />
-    : category === "advanced" ? <AdvancedCategory theme={theme} compact={compact} />
     // settings-link-lands-on-its-category: under Paseo's tabs the link opens the Agents screen; on 0.15 it picks the tab.
     : category === "new" ? <NewWorkCategory theme={theme} compact={compact} openAgents={() => openSettings ? openSettings("agents") : pick("agents")} />
     : <DisplaySections theme={theme} />;

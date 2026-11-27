@@ -152,6 +152,9 @@ function pulls() {
     151: { repo: "example/web", title: "Saved search filters", state: "OPEN", author: "dana", approved: true, reviewed: ["ravi"], checks: [ok("test"), ok("lint")] },
     247: { title: "Checkout button copy", state: "OPEN", author: "dana", conflict: true, threads: 1, reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
     248: { title: "Refund reason codes", state: "OPEN", author: "dana", conflict: true, reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
+    // sending only (invariant 133): Tax rates' repair runs on its own while Coupon codes' waits for a free turn.
+    244: { title: "Read tax rates from the rates table", state: "OPEN", author: "dana", conflict: true, reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
+    245: { title: "One coupon code per checkout", state: "OPEN", author: "dana", conflict: true, reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
     160: { title: "Welcome email template", state: "OPEN", author: "dana", conflict: true, threads: 2, reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
     170: { title: "APP-160: Sign webhook payloads", state: "OPEN", author: "dana", reviewers: ["ravi"], checks: [ok("test"), ok("lint")] },
     181: { repo: "example/web", title: "Dark mode color tokens", state: "MERGED", author: "dana", checks: [ok("test"), ok("lint")] },
@@ -531,6 +534,12 @@ const SENDING_STATES = [
     steps: [rpc("follow.enroll", { goal: "APP-190 Refund reason codes" }), rpc("follow.register-pr", { repo: "example/app", number: 248, stack: "Refund reasons" }),
       msg("Opened example/app#248. The backfill needs a one-off script on staging."),
       { permission: { name: "Bash", title: "Run the refund backfill on staging", input: { command: "pnpm refunds:backfill --env staging" } } }] },
+  // Invariant 133: with Repairs at once at 1, Tax rates' agent works on the repair Auto-send sent (its turn held open),
+  // so Coupon codes' repair waits for that turn.
+  { key: "sd-hold", title: "Tax rates", minute: 149, prompt: "APP-192: read tax rates from the new rates table.", flag: false,
+    steps: [rpc("follow.enroll", { goal: "APP-192 Tax rates table" }), rpc("follow.register-pr", { repo: "example/app", number: 244, stack: "Tax rates" }), msg("Opened example/app#244.")] },
+  { key: "sd-limit", title: "Coupon codes", minute: 152, prompt: "APP-194: let customers apply one coupon code at checkout.", flag: false,
+    steps: [rpc("follow.enroll", { goal: "APP-194 Coupon codes" }), rpc("follow.register-pr", { repo: "example/app", number: 245, stack: "Coupon codes" }), msg("Opened example/app#245.")] },
 ];
 
 /**
@@ -1203,8 +1212,8 @@ const DESKTOP = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };
 /** Paseo 0.16+ draws Follow-up's settings categories as its own tabs, one screen each (client/settings-screens.ts). */
 const nativeSettingsTabs = !/(^|\D)0\.15\.\d+/.test(paseoVersion ?? "");
-const SETTINGS_SCREENS = { general: "projects", following: "following", reviewers: "reviewers", agents: "agents", new: "new", display: "display", brief: "brief", advanced: "advanced" };
-const SETTINGS_TITLES = { general: "General", following: "Following", reviewers: "Reviewers", agents: "Agents", new: "New work", display: "Inbox & display", brief: "Compass", advanced: "Advanced" };
+const SETTINGS_SCREENS = { general: "projects", following: "following", reviewers: "reviewers", agents: "agents", new: "new", display: "display", brief: "brief" };
+const SETTINGS_TITLES = { general: "General", following: "Following", reviewers: "Reviewers", agents: "Agents", new: "New work", display: "Inbox & display", brief: "Compass" };
 /** Settings → Follow-up → a category, on either host: 0.16+ opens its screen; 0.15 picks Follow-up's own tab (phone: its row). */
 async function openSettingsAt(page, category, vp = page.viewportSize()) {
   if (nativeSettingsTabs) {
@@ -4221,20 +4230,45 @@ async function sendingShots({ shoot, seeded, call, home }) {
   await shoot("sending-hold-home-light", DESKTOP, "light", shown([...held, "You haven't messaged this agent lately, so it waits for you"]));
   await shoot("sending-hold-home-phone-light", PHONE, "light", shown(held, true));
   await fs.writeFile(process.env.FOLLOW_SHOTS_CGROUP, JSON.stringify({ high: 1000, current: 100 }));
+  await until("the governor lets auto-sends go", async () => (await call("follow.usage", {})).resources?.level !== "constrained", { tries: 120, every: 500 });
+  // 3. Invariant 133: Repairs at once at 1. Tax rates' repair goes out on its own and its agent keeps working on it, so
+  //    Coupon codes' repair waits for that turn: Home's detail and the panel's Messages strip, light and dark, a phone dark.
+  await call("follow.set-follow-settings", { maxAutoSends: 1 });
+  const holder = ws("sd-hold"); const queued = ws("sd-limit");
+  const scriptsFile = join(home, "fixture-scripts.json");
+  const scripts = JSON.parse(await fs.readFile(scriptsFile, "utf8"));
+  scripts[`agent:${holder.agentId}`] = [think("Rebase on main, then move the rate lookup to the new table."), { hold: true }];
+  await fs.writeFile(scriptsFile, JSON.stringify(scripts));
+  const record = async w => (await call("follow.list", {})).workspaces.find(x => x.id === w.workspaceId);
+  await call("follow.control", { workspaceId: holder.workspaceId, enable_auto_sends: true });
+  await until("Tax rates' repair goes out on its own", async () => { await call("follow.refresh", {}); return (await record(holder))?.batches.some(b => b.state === "sent" && b.automatic); }, { tries: 240, every: 500 });
+  await call("follow.control", { workspaceId: queued.workspaceId, enable_auto_sends: true });
+  await until("Coupon codes waits for a free turn", async () => { await call("follow.refresh", {}); return (await record(queued))?.sendWait === "limit"; }, { tries: 240, every: 500 });
+  const limitLine = /waits until another workspace's repair finishes/;
+  const limitSpec = SENDING_STATES.find(w => w.key === "sd-limit");
+  for (const theme of ["light", "dark"]) {
+    await shoot(`limit-home-${theme}`, DESKTOP, theme, async page => { await openHome(page); await (await homeRow(page, limitSpec.title)).click(); await see(page, limitLine); });
+    await shoot(`limit-panel-${theme}`, TALL_PANEL, theme, async page => { await page.setViewportSize(TALL_PANEL); await openChat(page, limitSpec.title, limitSpec.prompt); await page.getByRole("button", { name: "Follow-up", exact: true }).last().click(); await see(page, limitLine); });
+  }
+  await shoot("limit-phone-dark", PHONE, "dark", async page => { await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, limitSpec.title)).click(); await see(page, limitLine); });
 }
 /**
- * advanced (Q177, invariant 133): Settings → Advanced (when Auto-send stops, repairs at once), desktop light and dark
- * and a phone dark. Desktop crops from Paseo's "Back to plugins" (0.16+), else Follow-up's pane.
+ * advanced (Q177, invariant 133): Settings → Following's Advanced section (when Auto-send pauses, repairs at once),
+ * desktop light and dark and a phone dark, scrolled to it. Desktop crops from Paseo's "Back to plugins" (0.16+), else
+ * Follow-up's pane.
  */
 async function advancedShots({ shoot }) {
   const pane = async (page, vp) => {
     await page.setViewportSize(vp);
-    await openSettingsAt(page, "advanced", vp);
-    await page.getByText("Repairs at once", { exact: true }).filter({ visible: true }).first().waitFor();
+    await openSettingsAt(page, "following", vp);
+    const row = page.getByText("Repairs at once", { exact: true }).filter({ visible: true }).first();
+    await row.waitFor();
+    await row.evaluate(el => el.scrollIntoView({ block: "center" }));
+    await page.waitForTimeout(300);
     if (vp.width < 768) return undefined;
     const back = nativeSettingsTabs ? await page.getByText("Back to plugins").filter({ visible: true }).first().boundingBox({ timeout: 15000 }) : null;
     const x = back ? Math.max(0, Math.floor(back.x) - 32) : 400;
-    return { x, y: 0, width: vp.width - x, height: Math.min(vp.height, 640) };
+    return { x, y: 0, width: vp.width - x, height: vp.height };
   };
   await shoot("advanced-desktop-light", DESKTOP, "light", page => pane(page, DESKTOP));
   await shoot("advanced-desktop-dark", DESKTOP, "dark", page => pane(page, DESKTOP));

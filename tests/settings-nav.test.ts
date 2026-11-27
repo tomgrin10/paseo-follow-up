@@ -8,12 +8,13 @@ import {
 
 const store = (): KeyValue & { data: Map<string, string> } => { const data = new Map<string, string>(); return { data, get: k => data.get(k) ?? null, set: (k, v) => { data.set(k, v); } }; };
 
-test("categories: eight, General first, in order; every setting the old page had is still rendered (moved, not dropped)", async () => {
-  assert.deepEqual(SETTINGS_CATEGORIES.map(c => c.id), ["general", "following", "reviewers", "agents", "new", "display", "brief", "advanced"]);
+test("categories: seven, General first, in order; every setting the old page had is still rendered (moved, not dropped)", async () => {
+  assert.deepEqual(SETTINGS_CATEGORIES.map(c => c.id), ["general", "following", "reviewers", "agents", "new", "display", "brief"]);
   const source = (await Promise.all(["client/settings.tsx", "client/display.tsx", "client/reviewers.tsx", "client/agents.tsx", "client/job-rows.tsx"].map(f => readFile(f, "utf8")))).join("\n");
   for (const label of ["Follow every workspace", "Send repairs automatically", "Pause auto-send after", "Repairs at once", "Follow this workspace", "While a question is open", "Sidebar item", "Workspace header button", "Composer pill",
     "Needs-you inbox", "Flag merged and closed PRs", "Ask agents to state what they need", "Default for all repos", "Add reviewer", "Trust bypass agents"]) assert.ok(source.includes(label), label);
   assert.ok(/<PermissionsSection theme=\{theme\} \/>[\s\S]*<ProjectsFold/.test(source), "Permissions sits in Following, after Defaults");
+  assert.ok(/<WorkspacesFold[\s\S]*<AdvancedSection[\s\S]*\n  <\/>;/.test(source), "Q177: Advanced is Following's last section, no tab of its own");
   assert.ok(!/title="Permissions"[\s\S]{0,400}title="Needs-you inbox"|DisplaySections[\s\S]*<PermissionsSection/.test(source.slice(source.indexOf("export function DisplaySections"))), "and not under Inbox & display");
   for (const field of ["enable_overseer", "enable_ranker"]) assert.ok(source.includes(`"${field}"`), `${field} switch sits in its job row`);
   // Same RPCs as before: UI only.
