@@ -4382,7 +4382,8 @@ async function prNowShots({ shoot, call, seeded }) {
   const visible = (page, line) => page.getByText(line, { exact: true }).filter({ visible: true }).first();
   for (const theme of ["light", "dark"]) {
     for (const [i, spec] of PR_NOW_STATES.entries()) {
-      const line = `${i < 2 ? "" : "acme/widgets"}#${8801 + i} · ${i % 2 ? "Checks running" : "In review"}`;
+      if (argv.includes("--pr-now-revision") && ![1, 3].includes(i)) continue;
+      const line = `${i < 2 ? "" : "acme/widgets"}#${8801 + i} · ${i % 2 ? "Checking" : "In review"}`;
       for (const [device, viewport] of [["desktop", { width: DESKTOP.width, height: 1000 }], ["phone", PHONE]]) {
         await shoot(`pr-now-panel-${8801 + i}-${device}-${theme}`, viewport, theme, async page => {
           await openChat(page, spec.title, spec.prompt);
@@ -4390,11 +4391,15 @@ async function prNowShots({ shoot, call, seeded }) {
           if (device === "phone") await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
           await page.setViewportSize(viewport);
           await visible(page, line).waitFor({ timeout: 60_000 });
+          const row = page.getByRole("button", { name: new RegExp(`^Pull request ${8801 + i}: `) }).filter({ visible: true }).first();
+          const words = await row.innerText();
+          if (!words.includes(line.split(" · ")[0]) || !words.includes(line.split(" · ")[1])) throw new Error("PR row and agent line disagree");
           if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error("PR line overflows");
         });
       }
     }
     for (const [device, viewport] of [["desktop", DESKTOP], ["phone", PHONE]]) {
+      if (argv.includes("--pr-now-revision") && device === "phone" && theme === "light") continue;
       await shoot(`pr-now-home-${device}-${theme}`, viewport, theme, async page => {
         await openHome(page);
         await page.setViewportSize(viewport);

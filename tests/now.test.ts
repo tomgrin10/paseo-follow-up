@@ -112,11 +112,11 @@ test("the PR fallback names its repository only outside the workspace repository
 test("the PR fallback uses the PR row's words for every known stage", () => {
   const stages: [Partial<Snapshot>, string][] = [
     [{ conflict: true }, "Conflicts"],
-    [{ threads: [{ id: "thread", updatedAt: at(1) }] }, "1 review thread"],
+    [{ threads: [{ id: "thread", updatedAt: at(1) }] }, "1 thread"],
     [{ failedChecks: ["lint"] }, "Checks failed"],
     [{ otherFailedChecks: ["preview"] }, "Optional check failed"],
     [{ draft: true }, "Draft"],
-    [{ checksPending: true }, "Checks running"],
+    [{ checksPending: true }, "Checking"],
     [{ reviewDecision: "CHANGES_REQUESTED" }, "Changes requested"],
     [{ reviewDecision: "REVIEW_REQUIRED" }, "In review"],
     [{ reviewDecision: "APPROVED" }, "Approved"],
@@ -129,5 +129,5 @@ test("the PR fallback uses the PR row's words for every known stage", () => {
   assert.equal(workOf(unknown, main())?.text, "Shipping #1");
   assert.equal(workOf({ ...unknown, repo: "acme/widgets" }, main())?.text, "Shipping example/app#1");
   const stale = { ...workspace({ prs: [pr({ error: "Read timed out", snapshot: snapshot({ checksPending: true }) })] }), repo: "example/app" };
-  assert.equal(workOf(stale, main())?.text, "#1 · Checks running", "a failed read keeps the last complete status");
+  assert.equal(workOf(stale, main())?.text, "#1 · Checking", "a failed read keeps the last complete status");
 });

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { prPresentation } from "./pr-status";
+import { prRowStatus, prReference } from "./pr-status";
 import type { ListPr } from "./list";
 import type { Batch, Obligation, Task } from "./model";
 import type { Question } from "./questions";
@@ -136,8 +136,8 @@ export function workOf(w: NowWorkspace, agent: AgentFacts): NowWork | null {
   const open = ownedPrs(w, agent).filter(isOpenPr);
   if (open.length === 1) {
     const pr = open[0]!;
-    const ref = `${w.repo?.toLowerCase() === pr.repo.toLowerCase() ? "" : pr.repo}#${pr.number}`;
-    const status = prPresentation(pr);
+    const ref = prReference(pr, w.repo);
+    const status = prRowStatus(pr);
     return { text: pr.snapshot?.complete ? `${ref} · ${status.label}` : `Shipping ${ref}`, source: "pr", done: [], next: [], position: null };
   }
   const title = agent.role === "contributor" ? (agent.title ?? w.taskAgents?.[agent.agentId]?.title ?? "").trim() : "";

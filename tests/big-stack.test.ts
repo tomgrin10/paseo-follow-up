@@ -41,7 +41,7 @@ test("a-pr-summary-says-the-worst: threads beat a clear stack; an unknown PR nev
   const clear = prChip(bigStack(10))!;
   assert.deepEqual([clear.label, clear.checks], ["#1001+9", { text: "✓", tone: "success", spoken: "checks passed" }]);
   // One open PR keeps its own words.
-  assert.deepEqual(prChip(bigStack(1, () => ({ checksPending: true })))!.checks, { text: "running", tone: "muted" });
+  assert.deepEqual(prChip(bigStack(1, () => ({ checksPending: true })))!.checks, { text: "Checking", tone: "muted" });
 });
 
 test("a-pr-summary-says-the-worst: the invariant catches the old first-PR chip and running-over-failing line", () => {

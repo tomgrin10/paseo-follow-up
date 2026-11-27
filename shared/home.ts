@@ -1,3 +1,4 @@
+import { PR_CHECKING_WORD } from "./pr-status";
 import { finishedTask } from "./finished";
 import type { ArchiveFacts } from "./row-menu";
 import { sendingOf, type Sending } from "./sending";
@@ -135,7 +136,7 @@ function prChecks(s: Pr["snapshot"]): ChipChecks | null {
     : s.state === "MERGED" ? { text: "merged", tone: "merged" }
     : s.state === "CLOSED" ? { text: "closed", tone: "muted" }
     : s.failedChecks?.length ? { text: `✗ ${s.failedChecks.length}`, tone: "danger", spoken: plural(s.failedChecks.length, "failed check") }
-    : s.checksPending ? { text: "running", tone: "muted" }
+    : s.checksPending ? { text: PR_CHECKING_WORD, tone: "muted" }
     : s.draft ? { text: "draft", tone: "muted" }
     : s.threads?.length ? { text: plural(s.threads.length, "thread"), tone: "warning" }
     : { text: "✓", tone: "success", spoken: "checks passed" };

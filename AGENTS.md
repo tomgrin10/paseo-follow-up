@@ -1620,7 +1620,8 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    and `workspace_now` is one pure `nowOf` (`shared/now.ts`): what the agent is working on toward the goal, then its
    state. The work is the first of, in this order (`NOW_SOURCES`): work Follow-up handed it that it hasn't settled
    (while it runs), what it stated (`sync_workspace` `milestone`), the task it is working on, its one open PR, a
-   contributor's title; else nothing, never a guess. The PR source uses the PR row's status wording, with
+   contributor's title; else nothing, never a guess. The PR source and PR list row use `prRowStatus` and
+   `prReference` (`shared/pr-status.ts`) for exactly the same status word and reference on wide and compact layouts, with
    Shipping only when no complete status is known. Its reference is #N only in the workspace project's repository
    (discovered from Paseo's project, stored as `repo`), otherwise owner/repo#N, including when that repo is unknown. "2 of 4" comes only from the agent's own `done`/`next`. No tool,
    file, command or to-do step is ever on the line, and the line has no name on screen (no label, no placeholder: the
@@ -1628,7 +1629,7 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    timeline read, no model call. The stated work is stored per agent on the record and cleared at Done and when the
    agent leaves. 2026-11-26, the developer: the line should name the milestone the agent is working on, not the micro
    task, and "the end UI simple", with no word for it. Before, the panel said only "Main agent is working". Guarded
-   by `tests/now.test.ts` and `tests/now-worker.test.ts`.
+   by `tests/now.test.ts`, `tests/pr-row-now.test.ts` (every known open stage against the actual row), and `tests/now-worker.test.ts`.
 
 130. **A compaction is not a finish** (`a-compaction-is-not-a-finish`). A turn that only compacted (`/compact` typed
    by the developer, Smart Session's request, a provider's own auto-compaction, on every provider) adds nothing: no

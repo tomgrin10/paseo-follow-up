@@ -319,3 +319,6 @@ asserting it passes. PNGs are review artifacts and are not committed.
 
 `node scripts/screenshots.mjs --only pr-now` renders the PR fallback on Panel and Home, own and other repositories,
 in review and checks running, desktop and phone, light and dark. Its git project and PR data are fictional.
+
+Add `--pr-now-revision` to capture the checks-running panels for both repositories and themes, Home desktop
+in both themes, and Home phone dark (the gallery pair). The capture also checks the actual PR row agrees with the agent line.

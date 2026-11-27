@@ -27,7 +27,7 @@ export function prLinksByNumber(prs: readonly Pick<Pr, "key" | "repo" | "number"
   return out;
 }
 
-export { prPresentation } from "./pr-status";
+export { prPresentation, compactPrStatus } from "./pr-status";
 import { prPresentation } from "./pr-status";
 export function settledForDisplay(pr: Pr): boolean {
   return statusKnown(pr) && !!settled(pr) && (!pr.snapshot.deployment?.environment || deployed(pr));
@@ -35,11 +35,6 @@ export function settledForDisplay(pr: Pr): boolean {
 /** The quiet line a known PR gets when its latest read failed: when its status was last read. Null otherwise. */
 export function staleHint(pr: Pr, ago: (iso: string) => string): string | null {
   return pr.error && statusKnown(pr) ? `Last checked ${ago(pr.snapshot!.observedAt)}` : null;
-}
-export function compactPrStatus(pr: Pr): ReturnType<typeof prPresentation> {
-  const status = prPresentation(pr);
-  if (status.label !== "Merged" || !pr.snapshot?.deployment) return { ...status, label: status.label.replace("Status unavailable", "Unknown").replace(/review thread/, "thread").replace("Checks running", "Checking") };
-  return { label: deployed(pr) ? "Deployed" : "Merged", tone: "merged" };
 }
 export function orderedStacks<P extends Pr>(prs: P[]): { name: string; prs: P[] }[] {
   const groups = new Map<string, P[]>();

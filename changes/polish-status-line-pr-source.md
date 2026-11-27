@@ -1,1 +1,1 @@
-- Agent lines show the PR’s current status and name its repository when it belongs to another project.
+- Agent lines and pull request rows share the same status words and name the repository for PRs outside the workspace’s own repository.
