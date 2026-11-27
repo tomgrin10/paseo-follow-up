@@ -454,7 +454,13 @@ export class Engine {
     const live = state.workspaces.filter(w => w.enable_tracking && !w.archived && !w.dormant);
     const ahead = live.filter(w => w.id !== workspaceId && w.sendWait === "limit" && w.enable_auto_sends &&
       w.batches.some(b => b.state === "pending" && !isRecovery(b) && !b.automatic && b.createdAt < batch.createdAt)).length;
-    return runningAutoTurns(live, now) + ahead < limit;
+    // In flight: Follow-up's queue still moves it. Without a queue (never in the daemon) a dispatched batch counts until it's out.
+    const inFlight = (w: { id: string }, b: { id: string; state: string }) => {
+      if (!this.queue) return b.state === "pending" || b.state === "sending";
+      const item = this.queue.get(repairItemId(w.id, b.id));
+      return !!item && ["queued", "sending", "uncertain"].includes(item.state);
+    };
+    return runningAutoTurns(live, now, inFlight) + ahead < limit;
   }
   async activate(workspaceId: string): Promise<Workspace> {
     if (this.stopped || !this.gateway.discover) throw new Error("Workspace tracking is unavailable");
@@ -678,7 +684,8 @@ export class Engine {
         case "uncertain": b.state = "uncertain"; b.result = "Delivery wasn't confirmed. Follow-up reads the agent's chat before sending it again, so it never arrives twice."; break;
         case "failed":
           if (item.gone) { b.state = "pending"; b.result = ""; b.recipientAgentId = null; w.goneAgent = { agentId: item.gone, at, reason: item.reason ?? "" }; w.runtimeReason = GONE_REASON; }
-          else { b.state = "uncertain"; b.result = "Follow-up couldn't confirm the agent got it. Check the agent's chat, then retry."; }
+          // It waits on the developer now, so it no longer holds an Auto-send turn (invariant 133).
+          else { b.state = "uncertain"; b.result = "Follow-up couldn't confirm the agent got it. Check the agent's chat, then retry."; delete b.automatic; }
           break;
         case "cancelled":
           if (isRecovery(b) && b.state !== "cancelled") { b.state = "blocked"; b.result = item.reason ?? "Recovery couldn't start."; }

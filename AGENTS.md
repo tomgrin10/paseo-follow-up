@@ -1659,8 +1659,10 @@ These are product rules. Each has tests, and breaking one is a bug even when the
 133. **Auto-send runs a few turns at a time** (`auto-send-runs-a-few-turns-at-a-time`). At most `maxAutoSends` turns
    that Auto-send started run at once across every workspace (default `DEFAULT_MAX_AUTO_SENDS` = 2, 1-10 in Settings →
    Following → Advanced, `set_follow_settings maxAutoSends`), loaded agents or not, so waking many agents never floods Paseo. A
-   turn counts from its dispatch (`Batch.automatic`) until its batch is acknowledged or the main agent's turn ends
-   (`autoTurnRunning`, `shared/send-decision.ts`). The rest wait as `sendWait` `limit` ("waits until another
+   turn counts from its dispatch (`Batch.automatic`) only while Follow-up's queue still moves it (queued, sending,
+   or uncertain while it reconciles the chat) and, once out, until its batch is acknowledged or the main agent's turn
+   ends (`autoTurnRunning`, `shared/send-decision.ts`). A batch that waits on the developer (a failed send's "check the
+   agent's chat, then retry", a refusal, a hold) never holds a turn, so failures can't stop Auto-send. The rest wait as `sendWait` `limit` ("waits until another
    workspace's repair finishes", waiting on Follow-up) and take turns oldest batch first as they free
    (`Engine.turnFree`). The developer's Send, a repair riding along with an answer and messages an agent asked for
    (time triggers, `wait_for_checks`) are never held by it and never count. The governor and budgets of invariant 2

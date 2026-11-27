@@ -138,3 +138,25 @@ test("invariant 133: the developer's Send and messages an agent asked for are ne
   h.advance(61_000); await h.tick();
   assert.deepEqual(h.sends.sort(), ["a1", "a2", "a3", "requested:w4"]);
 });
+
+test("invariant 133: a batch that waits on the developer never holds a turn (two failed Auto-sends, a third still sends)", async t => {
+  const f = await fixture(t, [conflicted("w1"), conflicted("w2"), conflicted("w3", { enable_auto_sends: false })]);
+  await f.pass();
+  assert.deepEqual(f.sends, ["w1", "w2"]);
+  // Both sends fail the way the queue reports a failure: "check the agent's chat, then retry" waits on the developer.
+  // The record still says Auto-send dispatched them (an older release left the flag), and their turns ended.
+  await f.store.mutate(s => { for (const w of s.workspaces.filter(w => w.id !== "w3")) Object.assign(w.batches[0], { state: "uncertain", automatic: true, result: "Follow-up couldn't confirm the agent got it. Check the agent's chat, then retry." }); });
+  f.end("w1"); f.end("w2");
+  await f.store.mutateWorkspace("w3", w => { w.enable_auto_sends = true; });
+  await f.pass();
+  assert.deepEqual(f.sends, ["w1", "w2", "w3"], "the queue no longer moves them, so they hold no turn");
+  assert.equal((await f.get("w3")).sendWait ?? null, null);
+
+  // The failure itself hands the batch to the developer: Batch.automatic goes with it.
+  const w1 = await f.get("w1");
+  await f.store.mutateWorkspace("w1", w => { w.batches[0].state = "pending"; w.batches[0].automatic = true; });
+  await (f.engine as unknown as { projectRepair(item: unknown): Promise<void> }).projectRepair({ state: "failed", gone: null, reason: null, ref: { workspaceId: "w1", batchId: w1.batches[0].id } });
+  const failed = (await f.get("w1")).batches[0];
+  assert.equal(failed.state, "uncertain");
+  assert.equal(failed.automatic, undefined);
+});

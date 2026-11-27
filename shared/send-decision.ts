@@ -49,22 +49,29 @@ export const MAX_AUTO_SENDS_RANGE = { min: 1, max: 10 } as const;
 /** After a send, how long the turn counts before Paseo has reported it running (the next refresh reads mainBusy). */
 export const TURN_START_MS = 30_000;
 /**
- * Invariant 133: an Auto-send's turn is running. It took a turn when it was dispatched (`Batch.automatic`), and holds it
- * while it goes out, and once out until the batch is acknowledged (it leaves `sent`) or the main agent's turn ends
- * (no main-agent wait, past TURN_START_MS since the send's last activity). The developer's Send, a ride-along and the
- * messages an agent asked for (time triggers, wait_for_checks) never set `automatic`, so they never count.
+ * Invariant 133: an Auto-send's turn is running. It took a turn when it was dispatched (`Batch.automatic`) and holds it
+ * only while Follow-up itself is moving it or the main agent works on it:
+ * - not out yet (pending, sending, uncertain): only while Follow-up's queue still has it in flight (`inFlight`: queued,
+ *   sending, or uncertain while it reconciles the chat). A batch that waits on the developer (a failed send's "check the
+ *   agent's chat, then retry", a refusal, a hold) is the developer's, never a turn: two of them would otherwise stop
+ *   Auto-send everywhere at the default limit;
+ * - out (sent): until the batch is acknowledged (it leaves `sent`) or the main agent's turn ends (no main-agent wait,
+ *   past TURN_START_MS since the send's last activity).
+ * The developer's Send, a ride-along and the messages an agent asked for (time triggers, wait_for_checks) never set
+ * `automatic`, so they never count.
  */
-export function autoTurnRunning(w: Pick<Workspace, "mainBusy" | "runtimeBusy" | "backgroundBusy" | "enable_tracking" | "archived" | "dormant">, b: Pick<Batch, "automatic" | "state" | "sentAt" | "activityAt">, now: number): boolean {
+export type InFlight = (w: Pick<Workspace, "id">, b: Pick<Batch, "id" | "state">) => boolean;
+export function autoTurnRunning(w: Pick<Workspace, "id" | "mainBusy" | "runtimeBusy" | "backgroundBusy" | "enable_tracking" | "archived" | "dormant">, b: Pick<Batch, "id" | "automatic" | "state" | "sentAt" | "activityAt">, now: number, inFlight: InFlight): boolean {
   if (!b.automatic || !w.enable_tracking || w.archived || w.dormant) return false;
-  if (["pending", "sending", "uncertain"].includes(b.state)) return true;
+  if (["pending", "sending", "uncertain"].includes(b.state)) return inFlight(w, b);
   if (b.state !== "sent") return false;
   if (mainWait(w)) return true;
   const at = Date.parse(b.activityAt ?? b.sentAt ?? "");
   return Number.isFinite(at) && now - at < TURN_START_MS;
 }
 /** Invariant 133: Auto-send turns running now, across every workspace. */
-export const runningAutoTurns = (ws: readonly Workspace[], now: number) =>
-  ws.reduce((n, w) => n + w.batches.filter(b => !recoveryBatch(b) && autoTurnRunning(w, b, now)).length, 0);
+export const runningAutoTurns = (ws: readonly Workspace[], now: number, inFlight: InFlight) =>
+  ws.reduce((n, w) => n + w.batches.filter(b => !recoveryBatch(b) && autoTurnRunning(w, b, now, inFlight)).length, 0);
 const iso = (ms: number) => new Date(ms).toISOString();
 /** The reason the settle gives: why "in a minute" and not now (Tom, 2026-11-12: "sending in a moment? why not now?"). */
 export const SETTLE_REASON = "waits a minute so new changes join the same message";
