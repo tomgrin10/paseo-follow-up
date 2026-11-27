@@ -305,7 +305,7 @@ try {
   const syntheticReplyUrl = "https://example.slack.com/archives/C123/p1767261660000000?thread_ts=1767261600.000000";
   await call("follow.obligation", { ...replyInput, id: replyTask.id, title: "Update requester", status: "done", evidence: "Synthetic receipt; no Slack write performed", communication: { ...communication, replyUrl: syntheticReplyUrl } });
   await cli("plugin", "reload", "follow-up");
-  const savedReply = (await call("follow.agent-status", { agentId: agent.id })).obligations.find(o => o.id === replyTask.id);
+  const savedReply = (await call("follow.agent-status", { agentId: agent.id, detail: "full", history: "tasks" })).obligations.find(o => o.id === replyTask.id);
   assert.equal(savedReply.communication.replyUrl, syntheticReplyUrl); assert.equal(savedReply.status, "done");
   assert.equal((await receiptsForBatches()).length, 4, "recording communication evidence never posts to Slack or messages an agent");
   console.log("PASS: communication RPC/CLI schemas preserve exact destinations, deduplicate drafts, reject unsent completion and retain reply receipts after reload; no external Slack write.");
