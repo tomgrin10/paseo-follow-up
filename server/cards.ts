@@ -3,7 +3,7 @@ import { lstat, mkdir, open, readdir, realpath, rm, stat, writeFile } from "node
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { sniffImageType } from "../shared/images";
 import {
-  CARD_LIMITS, MEDIA_EXTENSIONS, cardsFileSchema, changedRows, capRefusal, emptyCardsFile, isVideo, mediaPaths, showInputSchema, workspaceCardsSchema,
+  CARD_LIMITS, MEDIA_EXTENSIONS, cardsFileSchema, changedRows, capRefusal, emptyCardsFile, isVideo, mediaPaths, recommendColumn, showInputSchema, workspaceCardsSchema,
   type Block, type BlockInput, type Card, type CardsFile, type MediaRef, type MediaSource, type MediaType, type ShowInput, type WorkspaceCards,
 } from "../shared/cards";
 import { JsonFileStore } from "./json-file-store";
@@ -131,7 +131,8 @@ export class Cards {
           items.push({ path: i.path!, ...(i.label ? { label: i.label } : {}), ...(i.note ? { note: i.note } : {}), ...(found.ok ? { bytes: found.bytes } : { gone: true }), ...(media ? { media } : {}) });
         }
         out.push({ type: "files", id, items });
-      } else out.push({ ...b, id } as Block);
+      } else if (b.type === "table" && b.recommend !== undefined) out.push({ ...b, id, recommend: recommendColumn(b.columns, b.recommend)! } as Block);
+      else out.push({ ...b, id } as Block);
     }
     void previous;
     return out;
