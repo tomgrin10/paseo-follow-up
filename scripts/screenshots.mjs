@@ -465,6 +465,7 @@ const WORKSPACES = [
       rpc("follow.register-pr", { repo: "example/app", number: 142, stack: "Billing retries" }),
       rpc("follow.register-pr", { repo: "example/app", number: 143, stack: "Billing retries", parentNumber: 142 }),
       rpc("follow.obligation", { title: "Check retries in staging after the deploy", status: "waiting", afterPrs: ["example/app#143"] }),
+      rpc("follow.obligation", { title: "Watch the dunning email rate for a day after the deploy", status: "waiting", afterPrs: ["example/app#143"] }),
       // Linked items: a spec and what the agent linked, each with why (Linear keys are confirmed by the fake mcpproxy).
       rpc("follow.set-spec", { url: "https://example.com/docs/billing/retry-spec", title: "Charge retry spec" }),
       rpc("follow.link-item", { ref: "APP-142", why: "The issue this workspace delivers" }),
@@ -5724,7 +5725,7 @@ function pick(key) { const w = [...NEEDS_YOU_STATES, ...PICK_NOTES, ...MERGE_CLI
  * frames (README images, `npm run shots:readme`): 16:9 frames of the app in context, Paseo's sidebar visible, as
  * light/dark pairs (`frame-<surface>-<theme>`: Home, the sidebar view, the Overseer, a task waiting on a deploy), the
  * the README's Catch up on a phone (`catch-up-phone-<theme>`), and the slide set's sources for scripts/cover.mjs
- * (`cover-home`, Home in light, and the `slide-*` crops).
+ * (`cover-home`, Home in dark, and the `slide-*` crops, all dark).
  */
 const FRAME = { width: 1600, height: 900 };
 async function galleryShots({ shoot, call, home, billing }) {
@@ -5791,11 +5792,11 @@ async function galleryShots({ shoot, call, home, billing }) {
   };
   await both("home", homeDrive);
   await pair("home", homeDrive);
-  // The cover's Home: the Follow-up pane alone (Paseo's sidebar cropped off) in a 1280×800 window, Billing retries'
-  // question open beside the list, down to the end of the Needs you group. At 4×, so the cover can show it larger than
+  // The cover's Home: the Follow-up pane alone (Paseo's sidebar cropped off) in a 1280×1100 window, Billing retries'
+  // question open beside the list, including Sending and Running below Needs you. At 4×, so the cover can show it larger than
   // 1:1 without stretching it, and its text still reads when the whole cover is scaled to a README column (about 830 px).
-  const COVER = { width: 1280, height: 800 };
-  if (F) await shoot("cover-home", COVER, "light", async page => {
+  const COVER = { width: 1280, height: 1100 };
+  if (F) await shoot("cover-home", COVER, "dark", async page => {
     await homeDrive(page, COVER);
     const pane = await page.getByRole("textbox", { name: /^Search,? or ask the Overseer$/ }).first().evaluate(el => {
       for (let up = el.parentElement; up; up = up.parentElement) {
@@ -5805,28 +5806,55 @@ async function galleryShots({ shoot, call, home, billing }) {
       return null;
     });
     if (!pane || pane.x < 100) throw new Error(`cover-home: no Follow-up pane: ${JSON.stringify(pane)}`);
-    // It ends with the Needs you group, just above the Sending header, so the cover's sheet ends on a whole row.
-    const sending = await page.evaluate(() => {
+    // Sending, Running and Waiting all show below Needs you; the decision pane stays whole.
+    const waiting = await page.evaluate(() => {
       const own = e => [...e.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join("").trim();
-      return [...document.querySelectorAll("body *")].findLast(e => e.checkVisibility() && /^Sending$/i.test(own(e)))?.getBoundingClientRect().top ?? null;
+      // The group header ("Waiting on others"), never the strip's "4 Waiting" count above the list.
+      const header = [...document.querySelectorAll("body *")].find(e => e.checkVisibility() && /^Waiting on others$/i.test(own(e)));
+      return header?.getBoundingClientRect().top ?? null;
     });
-    if (sending === null || sending - pane.y < 300) throw new Error(`cover-home: no Sending header below the Needs you group (${sending})`);
-    return { ...pane, height: Math.round(sending - 10 - pane.y) };
+    if (waiting === null || waiting - pane.y < 500) throw new Error(`cover-home: no Waiting header below Sending and Running (${waiting})`);
+    // The whole pane: the slide cuts it at its bottom edge, so the list runs off the slide through Waiting.
+    return pane;
   }, { scale: 4 });
   // Slide sources: one element each, cropped tight at 8× so a slide can zoom it about 4× (filling the slide's sheet, as
   // Home fills the cover) and it still reads in Paseo's 288×180 media tile. Phone width where the element has a narrow form.
   const SLIDE = { scale: 8 };
   // A tall phone window, so the whole element fits above the bottom dock.
   const TALL = { width: PHONE.width, height: 1600 };
-  // The decision card as the agent's chat shows it: one bordered card, question, lettered options and the pick.
-  if (F) await shoot("slide-decision", { width: 900, height: 900 }, "light", async page => {
-    await narrow(page, { width: 900, height: 900 });
-    await openChat(page, "Billing retries", billing.prompt);
-    await page.getByText("Only network failures").first().waitFor();
-    return cardAround(page, "Should charges that fail with card_declined retry, or only network failures?", { minWidth: 360 });
-  }, SLIDE);
+  // The decision as Home's pane shows it: the Needs you box, its Q1 card's question and lettered options, A marked
+  // Recommended. (The chat folds its copy once Follow-up's turn-end check starts a new turn, and a folded card reads
+  // without Recommended.) The card's context lines (the hold note, background, links) are hidden so the options fit.
+  const DECISION = { width: 1920, height: 1300 };
+  if (F) await shoot("slide-decision", DECISION, "dark", async page => {
+    await homeDrive(page, DECISION);
+    const question = "Should charges that fail with card_declined retry, or only network failures?";
+    await page.getByText(question, { exact: true }).filter({ visible: true }).first().waitFor();
+    await page.getByText("Recommended", { exact: true }).filter({ visible: true }).first().waitFor();
+    return page.evaluate(question => {
+      const own = e => [...e.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join("").trim();
+      const all = [...document.querySelectorAll("body *")].filter(e => e.checkVisibility());
+      const q = all.find(e => own(e) === question);
+      if (!q) throw new Error("slide-decision: no question");
+      let box = q; while (box && !/^Needs you/.test(box.innerText ?? "")) box = box.parentElement;
+      if (!box) throw new Error("slide-decision: no Needs you box around the question");
+      const keep = e => e.contains(q) || /Only network failures/.test(e.innerText);
+      for (const start of [/^The agent holds/, /^card_declined is about/, /^Retry notes/, /^About/, /^More context/]) {
+        const el = all.find(e => box.contains(e) && start.test(own(e)));
+        if (!el) continue;
+        let row = el; while (row.parentElement && !keep(row.parentElement)) row = row.parentElement;
+        row.style.display = "none";
+      }
+      const c = [...box.querySelectorAll("*")].find(e => e.checkVisibility() && own(e).startsWith("Highest recovery"));
+      if (!c) throw new Error("slide-decision: no option C");
+      const rb = box.getBoundingClientRect();
+      let opt = c; while (opt.parentElement && opt.getBoundingClientRect().width < rb.width * 0.9) opt = opt.parentElement;
+      const pad = 10, x = Math.max(0, rb.left - pad), y = Math.max(0, rb.top - pad);
+      return { x, y, width: Math.min(innerWidth - x, rb.width + 2 * pad), height: opt.getBoundingClientRect().bottom + 5 - y };
+    }, question);
+  }, { scale: 4.5 });
   // Automatic repairs: Home's Sending group, each workspace's main agent already working on the repairs sent to it.
-  if (F) await shoot("slide-repairs", TALL, "light", async page => {
+  if (F) await shoot("slide-repairs", TALL, "dark", async page => {
     await openHome(page); await narrow(page, TALL); await homeRow(page, "Saved views");
     return region(page, "Sending", "Main agent is working on", { minWidth: 360, padBottom: 38, last: true, lastBottom: true });
   }, SLIDE);
@@ -5862,7 +5890,7 @@ async function galleryShots({ shoot, call, home, billing }) {
     await page.waitForTimeout(300);
   };
   await pair("deploy", deployDrive);
-  if (F) await shoot("slide-deploy", DESKTOP, "light", async page => { await tasksDrive(page, DESKTOP, { task: "Check retries in staging after the deploy", billingPanel: true }); return region(page, "Agent's tasks", "Check retries in staging after the deploy", { minWidth: 280, padX: 10, padBottom: 34 }); }, SLIDE);
+  if (F) await shoot("slide-deploy", DESKTOP, "dark", async page => { await tasksDrive(page, DESKTOP, { task: "Check retries in staging after the deploy", billingPanel: true }); return region(page, "Agent's tasks", "After #143 deploys", { minWidth: 280, padX: 10, padBottom: 34, lastBottom: true }); }, SLIDE);
   // The question as a decision card: Home's detail pane (desktop) and the phone's full-height detail.
   await both("decision-card", async (page, vp) => {
     await openHome(page); await narrow(page, vp);
@@ -5907,7 +5935,7 @@ async function galleryShots({ shoot, call, home, billing }) {
   await both("catch-up", catchUp);
   // The README's Catch up phone image is a light/dark <picture> pair; slide 6 takes its own sharper render below.
   if (F) for (const theme of ["light", "dark"]) await shoot(`catch-up-phone-${theme}`, PHONE, theme, page => catchUp(page, PHONE));
-  if (F) await shoot("slide-catch-up", PHONE, "light", page => catchUp(page, PHONE), { scale: 5 });
+  if (F) await shoot("slide-catch-up", PHONE, "dark", page => catchUp(page, PHONE), { scale: 5 });
   // Settings → General.
   await both("settings", async (page, vp) => { await narrow(page, vp); await openSettingsAt(page, "general", vp); await page.waitForTimeout(600); });
   // New, from Home: the Linear list and the first issue's preview.
@@ -5971,7 +5999,7 @@ async function galleryShots({ shoot, call, home, billing }) {
   };
   await both("overseer", overseerDrive);
   await pair("overseer", overseerDrive);
-  if (F) await shoot("slide-overseer", PHONE, "light", async page => { await overseerDrive(page, PHONE); return region(page, question, "Two workspaces wait on review", { minWidth: 340, padTop: 44, padBottom: 28 }); }, SLIDE);
+  if (F) await shoot("slide-overseer", PHONE, "dark", async page => { await overseerDrive(page, PHONE); return region(page, question, "Two workspaces wait on review", { minWidth: 340, padTop: 44, padBottom: 28 }); }, SLIDE);
 }
 
 async function optimise(path, tool) {
