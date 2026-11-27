@@ -44,6 +44,8 @@ test("a card is created, replaced by id, and a block with an id replaces only th
   assert.equal(card!.blocks.length, 2, "the text block stays");
   assert.deepEqual(card!.changed, { grid: [1] }, "only the changed row is marked");
   assert.equal(cardSummary(card!), "1 of 2 done · 1 failed");
+  await cards.show("w1", author, { id: "pick", title: "Pick", blocks: [{ type: "table", columns: ["", "A", "B"], rows: [["Cost", 1, 2]], recommend: "B" }] });
+  assert.equal(((await cards.list("w1")).cards.find(c => c.id === "pick")!.blocks[0] as { recommend?: number }).recommend, 2, "stored as the column number the view draws");
   assert.notEqual(card!.createdAt, card!.updatedAt);
 });
 
@@ -107,6 +109,11 @@ test("limits refuse with the limit named", () => {
   assert.equal(parse([{ type: "chart", kind: "line", labels: ["a", "b"], series: [{ name: "s", values: [1] }] }]).success, false, "a value per label");
   assert.equal(showInputSchema.safeParse({ id: "a", title: "x".repeat(81), blocks: [] }).success, false, "80-char title");
   assert.equal(parse([{ type: "table", columns: ["a"], rows: Array.from({ length: 50 }, () => ["a"]) }]).success, true);
+  // What agents wrote in the live scenarios: a blank row-label header, and the recommended column by its header.
+  assert.equal(parse([{ type: "table", columns: ["", "A", "B"], rows: [["Cost", 1, 2]], recommend: "a" }]).success, true);
+  assert.equal(parse([{ type: "table", columns: ["", "A", "B"], rows: [], recommend: "C" }]).success, false, "recommend names an option column");
+  assert.equal(parse([{ type: "table", columns: ["", "A", "B"], rows: [], recommend: 3 }]).success, false, "1 and 2 are the option columns");
+  assert.equal(parse([{ type: "table", columns: [""], rows: [] }]).success, false, "at least one header");
 });
 
 test("removal is undoable for a while; a removed card's media stays until then", async t => {

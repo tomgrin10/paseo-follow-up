@@ -46,12 +46,24 @@ const fileItemInput = z.strictObject({ path: relPath.optional(), url: safeUrl.op
   .refine(f => !!f.path !== !!f.url, "a files item has a path or a url, not both");
 const listItem = z.strictObject({ text: text(300), detail: optText(500), state: z.enum(ITEM_STATES).optional(), tag: optText(30), refs: z.array(z.string().trim().min(1).max(500)).max(6).optional(), at: optText(40) });
 
+/**
+ * The recommended option column of a table: its header as written ("B", case-insensitive) or its number counted after
+ * the row-label column (1 = the second column). Null when it names no option column.
+ */
+export function recommendColumn(columns: readonly string[], recommend: number | string): number | null {
+  if (typeof recommend === "number") return recommend >= 1 && recommend < columns.length ? recommend : null;
+  const i = columns.findIndex(c => c.trim().toLowerCase() === recommend.trim().toLowerCase());
+  return i >= 1 ? i : null;
+}
+
 /** Blocks as the agent writes them. */
 export const blockInputSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("text"), ...blockId, md: text(CARD_LIMITS.text) }),
   z.strictObject({ type: z.literal("media"), ...blockId, items: z.array(mediaItemInput).min(1).max(CARD_LIMITS.media), layout: z.enum(["pairs", "grid", "single"]).optional() }),
-  z.strictObject({ type: z.literal("table"), ...blockId, columns: z.array(text(60)).min(1).max(CARD_LIMITS.columns), rows: z.array(z.array(cellSchema).max(CARD_LIMITS.columns)).max(CARD_LIMITS.rows), highlight: z.number().int().min(0).optional(), recommend: z.number().int().min(1).optional() })
-    .refine(t => t.rows.every(r => r.length <= t.columns.length), "a row has more cells than columns"),
+  z.strictObject({ type: z.literal("table"), ...blockId, columns: z.array(z.string().trim().max(60)).min(1).max(CARD_LIMITS.columns), rows: z.array(z.array(cellSchema).max(CARD_LIMITS.columns)).max(CARD_LIMITS.rows), highlight: z.number().int().min(0).optional(), recommend: z.union([z.number().int().min(1), z.string().trim().min(1).max(60)]).optional() })
+    .refine(t => t.rows.every(r => r.length <= t.columns.length), "a row has more cells than columns")
+    .refine(t => t.columns.some(c => c !== ""), "a table needs at least one column header")
+    .refine(t => t.recommend === undefined || recommendColumn(t.columns, t.recommend) !== null, "recommend is an option column: its header (\"B\") or its number, 1 for the first column after the row labels"),
   z.strictObject({ type: z.literal("facts"), ...blockId, items: z.array(z.union([z.tuple([text(40), text(80)]), z.tuple([text(40), text(80), z.enum(TONES)])])).min(1).max(CARD_LIMITS.facts) }),
   z.strictObject({ type: z.literal("list"), ...blockId, items: z.array(listItem).min(1).max(CARD_LIMITS.list), ranked: z.boolean().optional() }),
   z.strictObject({ type: z.literal("chart"), ...blockId, kind: z.enum(["bars", "line"]), labels: z.array(text(40)).min(1).max(CARD_LIMITS.points), series: z.array(z.strictObject({ name: text(40), values: z.array(z.number().finite()).min(1).max(CARD_LIMITS.points) })).min(1).max(CARD_LIMITS.series), unit: optText(12), better: z.enum(["lower", "higher"]).optional() })
