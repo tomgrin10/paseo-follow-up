@@ -8,7 +8,8 @@ import { Icon, ScrollView, useToast } from "@getpaseo/plugin/client/ui";
 import { homeCounts, type HomeGroupId, type HomeModel } from "../shared/home";
 import { layoutHint, filterHome, homeSearchDocs, indexDocs, defaultActive, omniboxResults, overseerProvider, workspaceProvider, type OmniboxItem, type OmniboxProvider } from "../shared/search";
 import { LayoutCapture, type LayoutKey } from "../shared/layout-swap";
-import { DEFAULT_SORT, SORT_HINT, SORT_LABEL, SORT_MODES, type SortMode } from "../shared/sort";
+import { DEFAULT_SORT, isMenuSort, MENU_SORTS, SORT_HINT, SORT_LABEL, type SortMode } from "../shared/sort";
+import { GROUPING_LABEL, GROUPINGS, homeViewFiltered, SHOW_ITEMS, SHOW_LABEL, TITLE_LABEL, TITLE_SOURCES, type HomeView } from "../shared/home-arrange";
 import { PRIORITY_SOURCE_LABEL } from "../shared/priorities";
 import { rankFooter } from "../shared/ranker";
 import { meters, meterText, type Meter } from "../shared/usage";
@@ -234,22 +235,31 @@ export function LayoutNotice({ theme, query, dense }: { theme: Theme; query?: st
   return <Text accessibilityLiveRegion="polite" numberOfLines={2} style={{ ...text(theme.colors, dense).meta, ...(query ? { paddingTop: 4 } : { height: 0 }) }}>{query ? `Showing results for “\u2068${query}\u2069”` : ""}</Text>;
 }
 
-// ---------- sort ----------
+// ---------- display (sort, grouping, filters) ----------
 
 export type RankState = { enabled: boolean; running: boolean; healthLine: string; error: string | null; costUsd?: number | null; last?: { ok: boolean; skipped: string | null; provider: string | null } | null } | null;
 
 
-export function SortMenu({ theme, mode, onChange, rankedAt, touch, rank = null, onRerank, compact = touch }: { theme: Theme; mode: SortMode; onChange: (m: SortMode) => void; rankedAt: string | null; touch: boolean; rank?: RankState; onRerank?: () => Promise<{ ok: boolean; skipped: string | null; error: string | null; top?: { title: string }[] }>;
-  /** An icon without the mode's name (phones, and the sidebar view's narrow column). */ compact?: boolean;
-  }) {
+type Rerank = () => Promise<{ ok: boolean; skipped: string | null; error: string | null; top?: { title: string }[] }>;
+type DisplayPage = "root" | "grouping" | "sort" | "title" | "show" | "projects" | "labels";
+
+/**
+ * Home's and the sidebar view's Display menu: Paseo's sidebar options button and menu shape (one row per decision with
+ * its current value, its options a page down), over the one setting both lists share (`home_sort` + `home_view`,
+ * shared/home-arrange.ts). Sort keeps Follow-up's orders with Re-rank now and the ranking's age; Project and Labels
+ * filter, and appear once there is something to filter by (or a filter is on). A filter on shows as a dot.
+ */
+export function DisplayMenu({ theme, mode, onSort, view, onView, projects, labels, rankedAt, touch, rank = null, onRerank }: { theme: Theme; mode: SortMode; onSort: (m: SortMode) => void;
+  view: HomeView; onView: (patch: Partial<HomeView>) => void; projects: readonly string[]; labels: readonly string[]; rankedAt: string | null; touch: boolean; rank?: RankState; onRerank?: Rerank }) {
   const c = theme.colors;
-  const [open, setOpen] = useState(false);
+  const [page, setPage] = useState<DisplayPage | null>(null);
   const now = useMinute();
   const toast = useToast();
   const running = !!rank?.running;
+  const close = () => setPage(null);
   const rerank = async () => {
     if (!onRerank || running) return;
-    setOpen(false);
+    close();
     try {
       const r = await onRerank();
       if (!r.ok) toast.error(r.error ?? "Couldn't re-rank.");
@@ -259,37 +269,86 @@ export function SortMenu({ theme, mode, onChange, rankedAt, touch, rank = null, 
   };
   // "Ranked 12m ago": only when the ranking last ran (and a failed run's reason); never its cost.
   const note = rankFooter({ rankedAt, now, rank });
+  const filtered = homeViewFiltered(view);
+  const sort = isMenuSort(mode) ? mode : DEFAULT_SORT;
+  const item = (key: string, label: string, onPress: () => void, opts: { glyph?: string | ReactNode | null; hint?: string | null; value?: string | null; next?: boolean; selected?: boolean; disabled?: boolean; muted?: boolean } = {}) =>
+    <Pressable key={key} accessibilityRole="menuitem" accessibilityState={{ selected: opts.selected, disabled: opts.disabled }} disabled={opts.disabled} onPress={onPress}
+      style={state => ({ ...menuItemRow(touch), minHeight: touch ? 48 : 34, paddingHorizontal: touch ? 12 : 10, backgroundColor: (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
+      <MenuItemContent theme={theme} touch={touch} glyph={opts.glyph ?? null} label={label} hint={opts.hint} muted={opts.muted} quietGlyph={!!opts.next || key === "background"}
+        trailing={opts.value !== undefined || opts.next ? <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0, maxWidth: "55%" }}>
+          {!!opts.value && <Text numberOfLines={1} style={{ flexShrink: 1, color: c.foregroundMuted, fontSize: touch ? 14 : 12 }}>{opts.value}</Text>}
+          {opts.next && <Icon name="ChevronRight" size={touch ? 16 : 13} color={c.foregroundMuted} />}
+        </View> : undefined} />
+    </Pressable>;
+  const sep = (key: string) => <View key={key} style={{ height: 1, backgroundColor: c.border, marginVertical: 4 }} />;
+  const back = (title: string) => <Pressable key="back" accessibilityRole="menuitem" accessibilityLabel={`Back from ${title}`} onPress={() => setPage("root")}
+    style={state => ({ ...menuItemRow(touch), minHeight: touch ? 44 : 30, paddingHorizontal: touch ? 12 : 10, backgroundColor: (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
+    <MenuItemContent theme={theme} touch={touch} glyph="ChevronLeft" quietGlyph label={title} muted />
+  </Pressable>;
+  const choose = <T extends string>(key: string, current: readonly T[] | T, value: T, label: string, set: () => void, hint?: string) =>
+    item(key, label, set, { glyph: (Array.isArray(current) ? current.includes(value) : current === value) ? "Check" : null, hint, selected: Array.isArray(current) ? current.includes(value) : current === value });
+  const toggleIn = (list: readonly string[], v: string) => list.includes(v) ? list.filter(x => x !== v) : [...list, v];
+  const filterValue = (list: readonly string[], all: string) => !list.length ? all : list.length === 1 ? list[0]! : `${list.length} selected`;
+  const showProjects = projects.length > 1 || view.projects.length > 0;
+  const showLabels = labels.length > 0 || view.labels.length > 0;
+  const shown = SHOW_ITEMS.filter(k => view.show[k]).map(k => SHOW_LABEL[k]);
+  let body: ReactNode;
+  switch (page) {
+    case "grouping": body = <>{back("Grouping")}{GROUPINGS.map(g => choose(g, view.grouping, g, GROUPING_LABEL[g], () => { onView({ grouping: g }); close(); }))}</>; break;
+    case "sort": body = <>{back("Sort")}{MENU_SORTS.map(m => choose(m, sort, m, SORT_LABEL[m], () => { onSort(m); close(); }, SORT_HINT[m]))}
+      {(rank?.enabled && onRerank || note) && sep("s1")}
+      {rank?.enabled && onRerank && item("rerank", running ? "Ranking…" : "Re-rank now", () => void rerank(), { glyph: running ? <Spinner color={c.foregroundMuted} size={menuGlyph(touch).size - 2} label="Ranking" /> : "RefreshCw", disabled: running, muted: running })}
+      {note && <Text style={{ color: c.foregroundMuted, fontSize: 11, paddingHorizontal: touch ? 12 : 10, paddingTop: 4, paddingBottom: 6 }}>{note}</Text>}</>; break;
+    case "title": body = <>{back("Title")}{TITLE_SOURCES.map(t => choose(t, view.title, t, TITLE_LABEL[t], () => { onView({ title: t }); close(); }))}</>; break;
+    // Show's items toggle in place: the menu stays open so several can change at once.
+    case "show": body = <>{back("Show")}{SHOW_ITEMS.map(k => item(k, SHOW_LABEL[k], () => onView({ show: { ...view.show, [k]: !view.show[k] } }), { glyph: view.show[k] ? "Check" : null, selected: view.show[k] }))}</>; break;
+    case "projects": body = <>{back("Project")}{item("all", "All projects", () => onView({ projects: [] }), { glyph: view.projects.length ? null : "Check", selected: !view.projects.length })}{sep("p1")}
+      <ScrollView style={{ maxHeight: touch ? 360 : 280 }}>{[...new Set([...projects, ...view.projects])].map(p => choose(`p:${p}`, view.projects, p, p, () => onView({ projects: toggleIn(view.projects, p) })))}</ScrollView></>; break;
+    case "labels": body = <>{back("Labels")}{item("all", "All labels", () => onView({ labels: [] }), { glyph: view.labels.length ? null : "Check", selected: !view.labels.length })}{sep("l1")}
+      <ScrollView style={{ maxHeight: touch ? 360 : 280 }}>{[...new Set([...labels, ...view.labels])].map(l => choose(`l:${l}`, view.labels, l, l, () => onView({ labels: toggleIn(view.labels, l) })))}</ScrollView></>; break;
+    default: body = <>
+      {item("grouping", "Grouping", () => setPage("grouping"), { glyph: "LayoutList", value: GROUPING_LABEL[view.grouping], next: true })}
+      {item("sort", "Sort", () => setPage("sort"), { glyph: "ArrowUpDown", value: SORT_LABEL[sort], next: true })}
+      {item("title", "Title", () => setPage("title"), { glyph: "Type", value: TITLE_LABEL[view.title], next: true })}
+      {item("show", "Show", () => setPage("show"), { glyph: "Eye", value: shown.length === SHOW_ITEMS.length ? "All" : shown.length ? `${shown.length} on` : "None", next: true })}
+      {(showProjects || showLabels) && sep("r1")}
+      {showProjects && item("projects", "Project", () => setPage("projects"), { glyph: "Folder", value: filterValue(view.projects, "All"), next: true })}
+      {showLabels && item("labels", "Labels", () => setPage("labels"), { glyph: "Tag", value: filterValue(view.labels, "All"), next: true })}
+      {sep("r2")}
+      {/* A setting, not a command: its state reads On or Off like the rows above show their values. */}
+      {item("background", "Show background", () => onView({ show_background: !view.show_background }), { glyph: view.show_background ? "Eye" : "EyeOff", value: view.show_background ? "On" : "Off", selected: view.show_background })}
+    </>;
+  }
   return <View style={{ position: "relative", zIndex: 20 }}>
-    <Pressable accessibilityRole="button" accessibilityLabel={`Sort: ${SORT_LABEL[mode]}${running ? ", ranking" : ""}`} aria-expanded={open} accessibilityState={{ expanded: open }} onPress={() => setOpen(o => !o)}
-      style={state => ({ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, height: touch ? 44 : compact ? 32 : 30, minWidth: touch ? 44 : compact ? 32 : undefined, paddingHorizontal: compact ? 0 : 8, borderRadius: touch ? 8 : 6, backgroundColor: open || (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
-      {/* Phones and the sidebar view: an icon; the mode's name lives in the menu (and the accessible name). */}
-      {running ? <Spinner color={c.foreground} size={12} label="Ranking" /> : <Icon name="ArrowUpDown" size={touch ? 18 : compact ? 14 : 13} color={compact && mode !== DEFAULT_SORT ? c.foreground : c.foregroundMuted} />}
-      {/* The icon carries no label, so a non-default sort shows as a dot on it. */}
-      {compact && mode !== DEFAULT_SORT && <View style={{ position: "absolute", top: touch ? 9 : 5, right: touch ? 9 : 5, width: 7, height: 7, borderRadius: 4, backgroundColor: c.accent }} />}
-      {!compact && <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 12 }}>{SORT_LABEL[mode]}</Text>}
-      {!compact && <Icon name="ChevronDown" size={12} color={c.foregroundMuted} />}
+    <Pressable accessibilityRole="button" accessibilityLabel={`Display: grouping ${GROUPING_LABEL[view.grouping]}, sort ${SORT_LABEL[sort]}${filtered ? ", filtered" : ""}${running ? ", ranking" : ""}`}
+      aria-expanded={!!page} accessibilityState={{ expanded: !!page }} onPress={() => setPage(p => p ? null : "root")}
+      style={state => ({ alignItems: "center", justifyContent: "center", height: touch ? 44 : 32, width: touch ? 44 : 32, borderRadius: touch ? 8 : 6, backgroundColor: page || (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
+      {running ? <Spinner color={c.foreground} size={12} label="Ranking" /> : <Icon name="Settings2" size={touch ? 18 : 14} color={page ? c.foreground : c.foregroundMuted} />}
+      {/* A filter narrows the list: a neutral dot, as Paseo marks its own filtered sidebar. */}
+      {filtered && <View style={{ position: "absolute", top: touch ? 9 : 5, right: touch ? 9 : 5, width: 6, height: 6, borderRadius: 3, backgroundColor: c.foreground }} />}
     </Pressable>
-    {open && <FloatingSurface role="menu" label="Sort workspaces" width={touch ? 240 : 220} onClose={() => setOpen(false)} style={{ paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1,
-      shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 8 }}>
-      {SORT_MODES.map(m => <Pressable key={m} accessibilityRole="menuitem" accessibilityState={{ selected: m === mode }} onPress={() => { onChange(m); setOpen(false); }}
-        style={state => ({ ...menuItemRow(touch), minHeight: touch ? 48 : 34, paddingHorizontal: touch ? 12 : 10, backgroundColor: (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
-        <MenuItemContent theme={theme} touch={touch} glyph={m === mode ? "Check" : null} label={SORT_LABEL[m]} hint={SORT_HINT[m]} />
-      </Pressable>)}
-      <View style={{ marginTop: 4, borderTopWidth: 1, borderTopColor: c.border, paddingTop: 2 }}>
-        {rank?.enabled && onRerank && <Pressable accessibilityRole="menuitem" accessibilityState={{ busy: running, disabled: running }} disabled={running} onPress={() => void rerank()}
-          style={state => ({ ...menuItemRow(touch), minHeight: touch ? 48 : 34, paddingHorizontal: touch ? 12 : 10, backgroundColor: (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
-          <MenuItemContent theme={theme} touch={touch} glyph={running ? <Spinner color={c.foregroundMuted} size={menuGlyph(touch).size - 2} label="Ranking" /> : "RefreshCw"} label={running ? "Ranking…" : "Re-rank now"} muted={running} />
-        </Pressable>}
-        {note && <Text style={{ color: c.foregroundMuted, fontSize: 11, paddingHorizontal: touch ? 12 : 10, paddingTop: 4, paddingBottom: 6 }}>{note}</Text>}
-      </View>
-    </FloatingSurface>}
+    {page && <FloatingSurface role="menu" label="Display" width={touch ? 280 : 232} onClose={close} style={{ padding: 4, borderRadius: 8, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1,
+      shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 8 }}>{body}</FloatingSurface>}
+  </View>;
+}
+
+/** One line above the list while a Project or Labels filter is on: what narrows it, and Clear. */
+export function FilterLine({ theme, view, onView, touch }: { theme: Theme; view: HomeView; onView: (patch: Partial<HomeView>) => void; touch: boolean }) {
+  const c = theme.colors;
+  if (!homeViewFiltered(view)) return null;
+  const parts = [view.projects.length && `Project: ${view.projects.join(", ")}`, view.labels.length && `Labels: ${view.labels.join(", ")}`].filter(Boolean).join(" · ");
+  return <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: touch ? 8 : 6 }}>
+    <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, color: c.foregroundMuted, fontSize: touch ? 13 : 12 }}>{parts}</Text>
+    <Pressable accessibilityRole="button" accessibilityLabel="Clear filters" onPress={() => onView({ projects: [], labels: [] })} hitSlop={8}>
+      <Text style={{ color: c.foreground, fontSize: touch ? 13 : 12, fontWeight: "500" }}>Clear</Text>
+    </Pressable>
   </View>;
 }
 
 // ---------- status strip ----------
 
 const STRIP: { id: HomeGroupId; label: string }[] = [
-  { id: "needs", label: "Needs you" }, { id: "sending", label: "Sending" }, { id: "running", label: "Running" }, { id: "waiting", label: "Waiting" }, { id: "quiet", label: "Quiet" },
+  { id: "needs", label: "Needs you" }, { id: "sending", label: "Sending" }, { id: "running", label: "Working" }, { id: "waiting", label: "Waiting" }, { id: "quiet", label: "Quiet" },
 ];
 
 /**

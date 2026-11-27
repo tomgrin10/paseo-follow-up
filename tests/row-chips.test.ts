@@ -16,7 +16,7 @@ test("the desktop row draws its chips through one rail, never loose beside the l
   const s = await src();
   const row = block(s, "const Row = memo(");
   const desktop = row.slice(row.indexOf("</View> : <View style={{ flex: 1"));
-  assert.match(desktop, /<ChipRail s=\{s\} c=\{c\} dim=\{older\} \/>/);
+  assert.match(desktop, /<ChipRail s=\{rail\} c=\{c\} dim=\{older\} \/>/);
   assert.doesNotMatch(desktop, /<BadgeView|<PrChipView/, "a chip outside the rail can't yield");
 });
 

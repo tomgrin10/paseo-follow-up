@@ -206,6 +206,8 @@ test("pr-scale: prRefs and browserBatches", () => {
  * until someone decides which it is (invariant pr-scale-lists-batch-not-throw).
  */
 const FIXED_CAPS: Record<string, string> = {
+  "shared/home-arrange.ts:projects:200": "Display filter the developer picks by hand (home_view); bounds a bad set_display, never grows with a workspace",
+  "shared/home-arrange.ts:labels:100": "Display filter the developer picks by hand (home_view); bounds a bad set_display, never grows with a workspace",
   "shared/about.ts:links:40": "producer slices to 40 (workspaceLinks, extractLinks)",
   "shared/about.ts:issues:20": "model output about one agent; producer keeps 5",
   "shared/about.ts:failed:6": "one per link source",

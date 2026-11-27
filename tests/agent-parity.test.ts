@@ -1,3 +1,4 @@
+import { DEFAULT_HOME_VIEW } from "../shared/home-arrange";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { AgentActions, AGENT_TOOLS, PLANNED_TOOLS, READ_ONLY_TOOLS, SELF_PLANNED_TOOLS, type AgentActionDeps } from "../server/agent-actions";
@@ -98,7 +99,7 @@ test("never on yourself: an agent can't answer its own brief or act on its own i
 
 test("set_display: trust bypass and the other Display switches, planned, merged into the current document", async () => {
   const f = rpcFixture();
-  assert.deepEqual((await f.agent.run("a", "display_settings", {}) as { values: unknown }).values, { home_sort: "priority", home_detail_fraction: 0.42, catch_up_rail_fraction: 0.28, search_shortcut: "mod-shift-k", open_workspace_on: "view", enable_trust_bypass: true, enable_inbox: true });
+  assert.deepEqual((await f.agent.run("a", "display_settings", {}) as { values: unknown }).values, { home_sort: "priority", home_view: DEFAULT_HOME_VIEW, home_detail_fraction: 0.42, catch_up_rail_fraction: 0.28, search_shortcut: "mod-shift-k", open_workspace_on: "view", enable_trust_bypass: true, enable_inbox: true });
   await assert.rejects(f.agent.run("a", "set_display", { values: { enable_everything: true } }), /unknown setting/);
   const same = await f.agent.run("a", "set_display", { values: { enable_inbox: true } }) as { planId: string | null };
   assert.equal(same.planId, null, "nothing changes, nothing to confirm");
@@ -113,6 +114,21 @@ test("set_display: trust bypass and the other Display switches, planned, merged 
  * Home's order is a Display setting (2.1): the sort menu and set_display write the same host document, so an agent
  * can set it when asked and the developer's order follows them across devices (home-sort-is-a-display-setting).
  */
+/**
+ * Display's arrangement (2.5, sidebar-view-is-paseo-s-sidebar-plus-follow-up-s-line): Grouping, Title, Show and the
+ * filters are one Display value, home_view, that set_display sets like the menu does. A partial value merges, so an
+ * agent asked to group by project never clears the developer's filters.
+ */
+test("home_view round-trips through set_display, and a partial value merges", async () => {
+  const f = rpcFixture();
+  await assert.rejects(f.agent.run("a", "set_display", { values: { home_view: { grouping: "loudest" } } }), /home_view/);
+  const plan = await f.agent.run("a", "set_display", { values: { home_view: { grouping: "project", show: { branch: true } } } }) as { planId: string; changes: { key: string; to: unknown }[] };
+  assert.deepEqual(plan.changes.map(c => c.key), ["home_view"]);
+  assert.deepEqual(plan.changes[0]!.to, { ...DEFAULT_HOME_VIEW, grouping: "project", show: { ...DEFAULT_HOME_VIEW.show, branch: true } }, "the rest keeps its value; Show merges item by item");
+  await f.agent.run("a", "set_display", { confirm: true, planId: plan.planId });
+  assert.equal(((f.writes.at(-1) as { values: { home_view: { grouping: string } } }).values).home_view.grouping, "project");
+});
+
 test("home_sort round-trips through set_display and display_settings", async () => {
   const f = rpcFixture();
   await assert.rejects(f.agent.run("a", "set_display", { values: { home_sort: "loudest" } }), /home_sort/);

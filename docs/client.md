@@ -65,7 +65,7 @@ Nothing polls while the app is hidden.
 | `client/more-context.tsx` | More context for every question surface ([needs-you.md](needs-you.md#more-context)): `MorePanel`, `MoveResult` and `ContextAnswer` (Catch up's), and `QuestionMoreContext`, the quiet link `QuestionBody` draws on an open question outside Catch up. Reads the asks from one store, Home's extras (`setContextSource`, set in `index.client.tsx`). |
 | `client/feeds.ts` | `openFeed`, `hasFeeds`: the stores subscribe to the worker's feeds on Paseo 0.16 (resubscribing after a worker restart) and poll on 0.15. See [Feeds](#feeds). |
 | `client/home-list.tsx`, `shared/list-entries.ts` | The one virtualised list, used by Home and the sidebar view; `listEntries` builds what it draws, in order. A desktop row's badges and PR chip sit in `ChipRail`, which yields (shrinks, drops the last chip in `railChips`' red-amber-green-grey order, truncates) before the time column moves (invariant `row-chips-never-cover-the-time`, `tests/row-chips.test.ts`). |
-| `client/home-chrome.tsx` | Omnibox, sort menu, status strip, provider and memory meters. |
+| `client/home-chrome.tsx` | Omnibox, Display menu (`DisplayMenu`) and its filter line, status strip, provider and memory meters. |
 | `client/list-keys.ts`, `shared/list-keys.ts` | The keyboard walk through a list's rows, for Home and the sidebar view. See [Keyboard walk](#keyboard-walk). |
 | `client/row-menu.tsx`, `client/menu-item.tsx`, `client/row-actions.ts`, `shared/row-menu.ts`, `client/panel-menu.tsx`, `client/rename.tsx` | The row menu: right-click, long-press or the menu key (Shift+F10) on a Home row or search result. See [Row menu](#row-menu). |
 | `client/home-view.ts` | Home's derived model: sort choice, priorities, titles for search, limits. |
@@ -157,11 +157,17 @@ archives by itself (invariants 6 and 87, `tests/archive-on-click.test.ts`).
 The same menu opens from the workspace panel header's More button (`client/panel-menu.tsx`, the workspace's own
 `ws:<id>` row) and from the rows of Follow-up's sidebar view (`client/sidebar-view.tsx`), so there is one menu
 everywhere. Rename title with AI… opens the rename dialog (`client/rename.tsx`, [ai-roles](ai-roles.md#rename-title-with-ai)).
-The sidebar view's top row is "Filter workspaces" and Home's sort as an icon (invariant 8 on phones: a 44px field
+The sidebar view's top row is "Filter workspaces" and Home's Display menu as an icon (invariant 8 on phones: a 44px field
 and a 44px icon, nothing else). The filter narrows the list in place with Home search's matcher and rank (`useListFilter`,
 `FilterField` in `client/home-chrome.tsx`): inside each group a title match comes first, then linked items, branch
 and PR, then the second line and the rest, and a tie keeps the list's order; it never says "Search" or takes a shortcut, because Paseo's own sidebar
-Search opens the Command Center (⌘K). The sort menu (the same `SortMenu` as Home's) ends with one footer line,
+Search opens the Command Center (⌘K). The Display menu (`DisplayMenu`, the same one as Home's, Paseo's Settings2 icon
+and menu shape) holds Grouping (Status, Project, None), Sort, Title (title or branch name), Show (branch, project, pull
+request, labels, last activity), the Project and Labels filters and Show background. It is one Display field,
+`home_view` (`shared/home-arrange.ts`), shared with Home; a filter on puts a neutral dot on the icon and one
+"Project: acme/app · Clear" line above the list. Paseo's pins (`pinnedAt`) are the Pinned section on top, the Overseer
+first; a host without pins draws none (invariant `sidebar-view-is-paseo-s-sidebar-plus-follow-up-s-line`). Its Sort
+page ends with one footer line,
 `rankFooter` in `shared/ranker.ts`: when the ranking last ran ("Ranked 1h ago"), "Not ranked yet", "Ranking now" before
 the first run, or a failed run's short reason. It never shows a run's cost (agents read it from `rank_status`).
 In the sidebar view there is no omnibox, so Ask the Overseer is left out (not shown disabled), and Open and Answer
@@ -208,7 +214,7 @@ Rules:
   checks every `<HomeList>` in `client/` passes the shared `useRowMenu`.
 - **Parity.** Each action is a `ROW_ACTIONS` entry that names its agent tool, or why it needs none (open, copy,
   pre-fill). Every pick goes through `runAction` and the RPC its usual button calls. Both are tested.
-- **One item layout** (`menu-glyphs-center-on-their-item`). Every menu item, here and in Home's sort menu, renders
+- **One item layout** (`menu-glyphs-center-on-their-item`). Every menu item, here and in the Display menu, renders
   `MenuItemContent` from `client/menu-item.tsx`: the leading glyph's slot is centred on the item (a check beside a
   two-line option, not at its top) and the glyph grows on touch with the text. `tests/menu-glyph.test.ts` fails on a
   menu item that builds its own glyph slot.

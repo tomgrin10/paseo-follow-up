@@ -34,6 +34,8 @@ export const ROW_ACTIONS = {
   copy_branch: { exempt: "Copies text to the clipboard and changes nothing." },
   rewrite_summary: { tool: "workspace_about" },
   rename_ai: { tool: "ai_rename" },
+  pin: { tool: "pin_workspace", note: "pinned=true." },
+  unpin: { tool: "pin_workspace", note: "pinned=false." },
   make_main: { tool: "make_main_agent" },
   stop_following: { tool: "set_follow_settings" },
   archive: { exempt: "Paseo's own archive_workspace tool archives a workspace for an agent; this item sends Paseo that same request." },
@@ -144,13 +146,18 @@ export type RowMenuInput = {
    * the confirm line names. Absent: no Archive item.
    */
   archive?: ArchiveFacts | null;
+  /**
+   * Paseo's pin for the workspace (shared with Paseo's sidebar): an ISO time when pinned, null when not. Absent on a
+   * host without pins: no Pin item.
+   */
+  pinnedAt?: string | null;
 };
 
 const MAX_ANSWERS = 2;
 
 /** The row's menu, in sections: triage, answer, fix, go, copy and tidy. Only what applies to this row is listed. */
 export function rowMenu(input: RowMenuInput): RowMenuSection[] {
-  const { s, flagged, snoozedUntil, w, needs = [], branch, canAsk, workspaceLater, archive, now = new Date() } = input;
+  const { s, flagged, snoozedUntil, w, needs = [], branch, canAsk, workspaceLater, archive, pinnedAt, now = new Date() } = input;
   const sections: RowMenuSection[] = [];
   const add = (key: string, items: (RowMenuItem | null | false | undefined)[]) => {
     const kept = items.filter((x): x is RowMenuItem => !!x);
@@ -195,6 +202,8 @@ export function rowMenu(input: RowMenuInput): RowMenuSection[] {
   add("go", [
     !!(s.agentId || s.workspaceId) && { key: "open_chat", action: "open_chat", label: s.agentId ? "Open chat" : "Open workspace", icon: "PanelRightOpen" },
     canAsk && { key: "ask_overseer", action: "ask_overseer", label: "Ask the Overseer", icon: "MessagesSquare" },
+    // Paseo's own words and pin: it shows in Paseo's sidebar and in Follow-up's Pinned alike.
+    !!s.workspaceId && pinnedAt !== undefined && (pinnedAt ? { key: "unpin", action: "unpin", label: "Unpin", icon: "PinOff" } : { key: "pin", action: "pin", label: "Pin to top", icon: "Pin" }),
   ]);
 
   // 5. Copy and tidy.

@@ -1,6 +1,7 @@
 import { defineSettings, settingsRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import { DEFAULT_SORT, isSortMode, SORT_MODES, type SortMode } from "./sort";
+import { homeViewSchema, parseHomeView, type HomeView } from "./home-arrange";
 import { DEFAULT_SEARCH_SHORTCUT, NEW_SHORTCUTS, SEARCH_SHORTCUTS } from "./search-key";
 
 /** Home's right pane as a share of Home's width: the default and the range set_display and the divider accept. */
@@ -54,6 +55,9 @@ export const displayPreferences = defineSettings({
     // devices and set_display covers it. Absent until first chosen: the first client to load writes the order it kept
     // per device before (client/home-view.ts), then everyone reads it from here.
     home_sort: z.enum(SORT_MODES).optional(),
+    // 2.5: how Home and the sidebar view arrange their rows (shared/home-arrange.ts): Grouping, Title, Show, the Project
+    // and Labels filters and Show background, the choices of Paseo's own sidebar menu. One value for both lists.
+    home_view: homeViewSchema.optional(),
     // 2.1: the share of Home's width the right pane (the brief or the selected item) takes, set by dragging the divider
     // (client/split.tsx). A fraction, so it carries across window sizes; absent means HOME_DETAIL_DEFAULT.
     home_detail_fraction: z.number().min(HOME_DETAIL_MIN).max(HOME_DETAIL_MAX).optional(),
@@ -112,18 +116,31 @@ export async function writeDisplay(client: DisplayClient, patch: Record<string, 
  * device's); with none stored yet, this device's old per-device choice becomes everyone's, once. `write` saves an
  * order, re-reading once when another write got there first.
  */
-export function homeSortSync(client: DisplayClient, current: () => SortMode, adopt: (sort: SortMode) => void) {
+export function homeSortSync(client: DisplayClient, current: () => SortMode, adopt: (sort: SortMode) => void, view?: { current: () => HomeView; adopt: (v: HomeView) => void }) {
   const call = (contract: unknown, input: unknown) => client.rpc(contract as never, input as never);
   const write = async (next: SortMode) => { await writeDisplay(client, { home_sort: next }); };
-  /** Applies a Display document (read, or pushed by follow.display-feed): true when this device's order changed. */
+  /** Applies a Display document (read, or pushed by follow.display-feed): true when this device's order or view changed. */
   const apply = async (doc: { status: string; values?: unknown }): Promise<boolean> => {
     if (doc.status !== "ready") return false;
-    const stored = (doc.values as { home_sort?: unknown }).home_sort;
-    if (!isSortMode(stored)) { if (current() !== DEFAULT_SORT) await write(current()); return false; }
-    const changed = stored !== current();
+    const values = doc.values as { home_sort?: unknown; home_view?: unknown };
+    let stored = values.home_sort;
+    let storedView = values.home_view === undefined ? undefined : parseHomeView(values.home_view);
+    // "By project" was a sort until 2.5; it is Grouping › Project now, with Priority inside each project.
+    const legacy = legacyProjectSort(values);
+    if (legacy) { stored = legacy.home_sort; storedView = legacy.home_view; await writeDisplay(client, legacy); }
+    let changed = false;
+    if (view && storedView && JSON.stringify(storedView) !== JSON.stringify(view.current())) { view.adopt(storedView); changed = true; }
+    if (!isSortMode(stored)) { if (current() !== DEFAULT_SORT) await write(current()); return changed; }
+    changed = changed || stored !== current();
     adopt(stored);
     return changed;
   };
   const read = async (): Promise<boolean> => apply(await call(displayRpc.read, {}) as { status: string; values: unknown });
   return { read, write, apply };
+}
+
+/** A saved `home_sort: "project"` (before 2.5) as the patch that replaces it: Grouping › Project, Priority inside. */
+export function legacyProjectSort(values: { home_sort?: unknown; home_view?: unknown }): { home_sort: SortMode; home_view: HomeView } | null {
+  if (values.home_sort !== "project") return null;
+  return { home_sort: DEFAULT_SORT, home_view: { ...parseHomeView(values.home_view), grouping: "project" } };
 }

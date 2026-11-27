@@ -2,6 +2,7 @@ import { autoSendHold } from "../shared/sending";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { buildHome, type HomeModel, type PaseoWorkspaceLite } from "../shared/home";
+import { arrangeHome, type ArrangedHome, type HomeView } from "../shared/home-arrange";
 import type { ArchiveFacts } from "../shared/row-menu";
 import type { InboxStore } from "./inbox-store";
 import type { LiveStore } from "./live";
@@ -9,13 +10,16 @@ import type { HomeExtras } from "./home-view";
 
 type Descriptor = { id: string; name?: string | null; title?: string | null; projectDisplayName?: string | null; projectCustomName?: string | null; activityAt?: string | null; archivingAt?: string | null;
   workspaceKind?: ArchiveFacts["kind"]; status?: string | null; diffStat?: { additions: number; deletions: number } | null;
+  pinnedAt?: string | null; labels?: string[] | null; background?: boolean | null;
   gitRuntime?: { currentBranch?: string | null; isPaseoOwnedWorktree?: boolean; isDirty?: boolean | null; aheadOfOrigin?: number | null } | null; githubRuntime?: { pullRequest?: { number?: number; title?: string } | null } | null };
 const lite = (w: Descriptor): PaseoWorkspaceLite => {
   const pr = w.githubRuntime?.pullRequest;
   return { id: w.id, name: w.title || w.name || "Workspace", project: w.projectCustomName || w.projectDisplayName || null, activityAt: w.activityAt ?? null,
     branch: w.gitRuntime?.currentBranch ?? null, pr: pr?.title ? { number: pr.number ?? null, title: pr.title } : null,
     archive: { kind: w.workspaceKind ?? null, ownedWorktree: w.gitRuntime?.isPaseoOwnedWorktree ?? null, dirty: w.gitRuntime?.isDirty ?? null, diff: w.diffStat ?? null,
-      ahead: w.gitRuntime?.aheadOfOrigin ?? null, running: w.status === "running" } };
+      ahead: w.gitRuntime?.aheadOfOrigin ?? null, running: w.status === "running" },
+    // Absent on a host without pins, so the lists draw no Pinned section there (shared/home-arrange.ts).
+    ...("pinnedAt" in w ? { pinnedAt: w.pinnedAt ?? null } : {}), labels: w.labels ?? [], background: !!w.background };
 };
 
 /**
@@ -91,6 +95,19 @@ export function useHomeModel(sources: HomeSources): HomeModel {
   // Your questions: an unread answer is a Needs-you row; a question asking is its row's line (the home feed's context).
   const questions = useSyncExternalStore(extras.subscribe, extras.context, extras.context);
   return useMemo(() => buildHome({ rows: inbox.rows(), tracked: live.all(), paseo: paseo.all(), now: Date.now(), sort, priorities, hidden: overseer ? [overseer] : [], hold, compass, raised, questions }), [a, b, c, now, sort, priorities, inbox, live, paseo, overseer, hold, raised, compass, questions]);
+}
+
+/**
+ * The Display arrangement over a model (shared/home-arrange.ts): Home and the sidebar view call this with the model
+ * they draw, so both show the same Pinned, grouping and filters. `facts` reads Paseo's descriptor (pins, labels).
+ */
+export function useArranged(sources: HomeSources, model: HomeModel): { arranged: ArrangedHome; view: HomeView; facts: (id: string) => PaseoWorkspaceLite | undefined } {
+  const { paseo, extras } = sources;
+  const view = useSyncExternalStore(extras.subscribe, extras.view, extras.view);
+  const c = useSyncExternalStore(paseo.subscribe, paseo.version, paseo.version);
+  const facts = useMemo(() => (id: string) => paseo.get(id), [paseo, c]);
+  const arranged = useMemo(() => arrangeHome(model, view, facts), [model, view, facts]);
+  return { arranged, view, facts };
 }
 
 /** Rebuilds a value at most every `ms` while mounted (used for the brief pane's source ages). */

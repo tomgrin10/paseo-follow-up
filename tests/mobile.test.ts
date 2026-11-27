@@ -111,5 +111,5 @@ test("phones: Home's search results use the list row, the offer sits after Needs
   assert.match(home, /const setupRow = !!props\.onboarding\?\.offer \|\| !!finishSetupLine\(props\.onboarding, setupClosed\(\)\);/);
   // Nothing followed yet: the way to start is Dispatch, on phones and desktop alike (a first run lands here).
   assert.match(home, /emptyAction=\{<Button [^>]*kind="primary"[^>]*title=\{NEW_NAME\}[^>]*onPress=\{\(\) => openNew\(\)\}/);
-  assert.match(home, /\{!\(compact && nothing\) && <SortMenu/);
+  assert.match(home, /\{!\(compact && nothing\) && <DisplayMenu/);
 });

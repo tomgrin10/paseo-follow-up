@@ -66,7 +66,7 @@ test("every row carries the tone Home paints it with, so the browser never parse
   const w = workspace();
   const view = (patch: Partial<Workspace>, agent: object = idle) => { const v = browserWorkspaceState({ ...w, ...patch }, { ...idle, ...agent }, clock); return [v.state, v.tone]; };
   assert.deepEqual(view({}), ["Waiting on others · Waiting on review and merges", "muted"]);
-  assert.deepEqual(view({}, { status: "running" }), ["Running", "accent"]);
+  assert.deepEqual(view({}, { status: "running" }), ["Working", "accent"]);
   assert.deepEqual(view({}, { pendingPermissions: [{}] }), ["Needs you · Permission", "attention"]);
   assert.deepEqual(view({}, { status: "error" }), ["Needs you · Error", "danger"]);
   assert.deepEqual(view({}, { requiresAttention: true, attentionReason: "finished" }), ["Needs you · Finished", "accent"]);
@@ -83,12 +83,12 @@ test("the one-line state follows Follow-up's groups and the main agent's live at
   const w = workspace();
   const state = (patch: Partial<Workspace>, agent: object = idle) => browserWorkspaceState({ ...w, ...patch }, { ...idle, ...agent }, clock).state;
   assert.equal(state({}), "Waiting on others · Waiting on review and merges");
-  assert.equal(state({}, { status: "running" }), "Running");
+  assert.equal(state({}, { status: "running" }), "Working");
   assert.equal(state({}, { pendingPermissions: [{}] }), "Needs you · Permission");
   assert.equal(state({}, { status: "error" }), "Needs you · Error");
   assert.equal(state({}, { requiresAttention: true, attentionReason: "finished" }), "Needs you · Finished");
-  // 2026-11-10: Paseo's attention reason outlives the failed turn; a running agent reads Running, a stopped one Error.
-  assert.equal(state({}, { status: "running", requiresAttention: true, attentionReason: "error" }), "Running");
+  // 2026-11-10: Paseo's attention reason outlives the failed turn; a running agent reads Working, a stopped one Error.
+  assert.equal(state({}, { status: "running", requiresAttention: true, attentionReason: "error" }), "Working");
   assert.equal(state({}, { requiresAttention: true, attentionReason: "error" }), "Needs you · Error");
   const threads = pr({ snapshot: snapshot({ threads: [{ id: "t1", updatedAt: "x" }, { id: "t2", updatedAt: "x" }, { id: "t3", updatedAt: "x" }] }) });
   const batch = { id: "b1", state: "sent", tasks: [{ id: "t", title: "Fix threads" }], attempts: 1, createdAt: new Date(clock).toISOString(), sentAt: new Date(clock).toISOString() };

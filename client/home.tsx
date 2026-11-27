@@ -38,8 +38,9 @@ import { DismissReveal } from "./dismiss";
 import { Age, BadgeView, BRIEF_KEY, glyphColor, HomeList, OVERSEER_KEY, PrChipView, PrSummaryText, type OverseerRowState } from "./home-list";
 import { answerLine, overseerRowState } from "../shared/overseer";
 import type { OmniboxItem } from "../shared/search";
-import { LayoutNotice, ListTop, SearchField, SortMenu, StatusStrip, UsageMeters, useOmnibox, useSlashToFocus } from "./home-chrome";
-import { useHomeModel, useTick, type HomeSources } from "./home-data";
+import { DisplayMenu, FilterLine, LayoutNotice, ListTop, SearchField, StatusStrip, UsageMeters, useOmnibox, useSlashToFocus } from "./home-chrome";
+import { homeViewFiltered } from "../shared/home-arrange";
+import { useArranged, useHomeModel, useTick, type HomeSources } from "./home-data";
 import { laterLabel, useInbox, UndoBar, useNextRelay } from "./inbox";
 import { Spinner } from "./motion";
 import { Setup, SetupOffer, useOnboarding } from "./onboarding";
@@ -135,6 +136,8 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
   // them on the home feed; the model counts them (model.raised) and they head the group. Catch up's deck and
   // model.needs stay workspaces.
   const model = useHomeModel(deps.sources);
+  // Display's Pinned, grouping and filters: the same arrangement the sidebar view draws (shared/home-arrange.ts).
+  const { arranged, view, facts } = useArranged(deps.sources, model);
   // The setup row: an existing install's offer, or Finish setup once Close has put setup's popup away.
   useViewVersion();
   const setupRow = !!props.onboarding?.offer || !!finishSetupLine(props.onboarding, setupClosed());
@@ -299,7 +302,7 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
   const [keysOpen, setKeysOpen] = useState(false);
   const list = <HomeList model={model} theme={theme} dense={compact} touch={compact} selectedKey={selected} onSelect={onSelect} briefLine={briefLine}
     keys={{ mode: "select", onOpen: openKey, onKeys: () => setKeysOpen(v => !v), scope: homeRef, claimBody: true }}
-    results={omnibox.results} activeResult={omnibox.active} onResult={item => void pick(item)} filter={filter} overseer={overseer} asking={asking} menu={rowMenu} onSendNow={sendNow}
+    results={omnibox.results} activeResult={omnibox.active} onResult={item => void pick(item)} filter={filter} arranged={arranged} view={view} facts={facts} overseer={overseer} asking={asking} menu={rowMenu} onSendNow={sendNow}
     // Phones: the host header already says Follow-up, so no "Home" title row; search, sort and settings share one row and
     // the meters move to the end of the list.
     footer={omnibox.results ? undefined : compact
@@ -317,10 +320,11 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
       <View style={{ zIndex: 2, flexDirection: "row", alignItems: "center", gap: compact ? 2 : 6, paddingLeft: compact ? 16 : 16, paddingRight: compact ? 6 : 16 }}>
         <SearchField theme={theme} omnibox={omnibox} dense={compact} onEnter={item => void pick(item)} anywhereKey={anywhereKey} />
         {compact && <IconButton theme={theme} compact icon="Plus" label={NEW_NAME} onPress={() => openNew()} />}
-        {!(compact && nothing) && <SortMenu theme={theme} mode={model.sort} onChange={deps.sources.extras.setSort} rankedAt={model.rankedAt} touch={compact} rank={rank} onRerank={deps.sources.extras.rankNow} />}
+        {!(compact && nothing) && <DisplayMenu theme={theme} mode={model.sort} onSort={deps.sources.extras.setSort} view={view} onView={deps.sources.extras.setView} projects={arranged.projects} labels={arranged.labels} rankedAt={model.rankedAt} touch={compact} rank={rank} onRerank={deps.sources.extras.rankNow} />}
         {compact && openStats && <IconButton theme={theme} compact icon="ChartNoAxesColumn" label="PR stats" onPress={openStats} />}
         {compact && <IconButton theme={theme} compact icon="Settings" label="Follow-up settings" onPress={deps.openSettings} />}
       </View>
+      {homeViewFiltered(view) && !omnibox.results && <View style={{ paddingHorizontal: 16 }}><FilterLine theme={theme} view={view} onView={deps.sources.extras.setView} touch={compact} /></View>}
       {/* Images pasted on the search ride the Overseer ask; their own line, so the search row stays one line. */}
       {(!!omnibox.images.images.length || !!omnibox.images.refusal) && <View style={{ paddingHorizontal: 16, gap: 4 }}>
         <ImageAttachmentsRow model={omnibox.images} theme={theme} compact={compact} />

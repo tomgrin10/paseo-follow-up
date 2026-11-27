@@ -32,7 +32,7 @@ test("no cost and no 'Home uses this order too' ever reaches the sort menu's foo
     assert.doesNotMatch(s, /\$|cost|subscription|Home uses/i, s);
   }
   const src = await readFile(new URL("../client/home-chrome.tsx", import.meta.url), "utf8");
-  const menu = src.slice(src.indexOf("export function SortMenu"), src.indexOf("// ---------- status strip"));
+  const menu = src.slice(src.indexOf("export function DisplayMenu"), src.indexOf("export function FilterLine"));
   assert.match(menu, /rankFooter\(/, "the footer's text comes from rankFooter");
   assert.doesNotMatch(menu, /rankCost|costUsd|uses this order too|Priority: /);
 });

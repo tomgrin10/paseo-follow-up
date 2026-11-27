@@ -68,7 +68,7 @@ test("Needs you: blocking asks first, then decisions only the developer makes, t
   assert.equal(nextNeeds(model, "agent:err-old")!.key, "agent:decision");
 });
 
-test("a running main agent working on Follow-up's repairs shows under Sending, not Running", () => {
+test("a running main agent working on Follow-up's repairs shows under Sending, not Working", () => {
   const model = buildHome({ now: NOW, rows: [row("agent-x", { workspaceId: "x", status: "running" })], tracked: [ws("x", { batches: [batch()] })], paseo: [] });
   assert.equal(groupOf(model, "agent:agent-x"), "sending");
   assert.equal(model.groups.length, 1);

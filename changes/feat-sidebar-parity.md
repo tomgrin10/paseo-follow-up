@@ -1,0 +1,3 @@
+- The sidebar view looks and works like Paseo's sidebar: your Paseo pins are a Pinned section on top, with the Overseer first, and each row adds Follow-up's line under the title.
+- Home and the sidebar view share one Display menu: group by status, project or nothing, sort, show the branch name as the title, pick what each row shows, and filter by project or label.
+- Pin to top and Unpin are in each row's menu, and the Running group is now called Working.
