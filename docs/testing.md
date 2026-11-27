@@ -309,3 +309,10 @@ PLAYWRIGHT_CORE=<playwright-core dir> CHROMIUM=<chromium binary> ~/paseo-harness
 
 Render every state you touched with headless Playwright against `npm run preview`: desktop and 390×844, light and
 dark, no horizontal overflow. Run `/impeccable critique` and apply its findings.
+
+Menu visibility regression (invariant 134): run `scripts/screenshots.mjs --only menu-bounds` through `harness-slot`
+with `HARNESS_PASEO=0.16`. Desktop light/dark captures put the row menu near the sidebar's top and bottom and reserve
+64 px for a synthetic host footer sibling. `menu-bounds.json` records hit testing of each menu item's center: the
+run fails when host chrome covers an item or it is offscreen. `--menus-before` restores `client/` from
+`--menus-baseline-ref` (default `origin/main`) only in the isolated packed plugin and captures the old behavior without
+asserting it passes. PNGs are review artifacts and are not committed.

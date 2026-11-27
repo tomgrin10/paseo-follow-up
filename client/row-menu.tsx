@@ -1,8 +1,9 @@
+import { FloatingSurface } from "./floating-surface";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Platform, useWindowDimensions, View, type ViewStyle } from "react-native";
+import { Platform, View, type ViewStyle } from "react-native";
 import { Pressable, Text } from "./text";
 import { Icon, Modal } from "@getpaseo/plugin/client/ui";
-import { flatItems, isMenuKey, moveFocus, placeMenu, sheetArmed, type RowMenuItem, type RowMenuSection } from "../shared/row-menu";
+import { flatItems, isMenuKey, moveFocus, sheetArmed, type RowMenuItem, type RowMenuSection } from "../shared/row-menu";
 import type { Workstream } from "../shared/home";
 import { Button, text, type Theme } from "./kit";
 import { isLight, readable, withAlpha, type Colors } from "./theme";
@@ -87,7 +88,6 @@ type BodyProps = { menu: RowMenuOpen; theme: Theme; expanded: string | null; set
 
 function Popover({ menu, theme, expanded, setExpanded, confirm, setConfirm, choose, close, anchor }: BodyProps & { anchor: { x: number; y: number } }) {
   const c = theme.colors;
-  const viewport = useWindowDimensions();
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   const items = flatItems(menu.sections, expanded);
   const [active, setActive] = useState(menu.keyboard ? 0 : -1);
@@ -135,24 +135,9 @@ function Popover({ menu, theme, expanded, setExpanded, confirm, setConfirm, choo
     return () => d?.removeEventListener("keydown", onKey, true);
   });
 
-  // `fixed` is relative to the nearest transformed ancestor (the workspace panel is one), not always the window: the
-  // overlay measures where it really starts and how big it is, and the menu is placed in that box.
-  const overlay = useRef<DomNode | null>(null);
-  const [box, setBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
-  useLayoutEffect(() => {
-    const r = (overlay.current as unknown as { getBoundingClientRect?: () => { left: number; top: number; width: number; height: number } } | null)?.getBoundingClientRect?.();
-    if (r && r.width > 0) setBox({ x: r.left, y: r.top, width: r.width, height: r.height });
-  }, [viewport.width, viewport.height]);
-  const local = box ? { x: anchor.x - box.x, y: anchor.y - box.y } : anchor;
-  // Drawn invisibly once to measure, then placed inside the box (flipped up or left near an edge).
-  const at = size ? placeMenu(local, size, box ?? viewport) : { left: local.x, top: local.y };
-  const fixed = { position: web ? "fixed" : "absolute" } as unknown as ViewStyle;
-  return <View ref={overlay as never} style={[fixed, { top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000 }]}>
-    {/* Outside the menu: a click or another right-click closes it. */}
-    <Pressable accessible={false} onPress={close} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
-    <View role={confirm ? "alertdialog" : "menu"} aria-label={confirm ? confirm.label.replace(/…$/, "") : `Actions for ${menu.s.title}`}
-      onLayout={e => { const { width, height } = e.nativeEvent.layout; if (!size || size.height !== height || size.width !== width) setSize({ width, height }); }}
-      style={{ position: "absolute", left: at.left, top: at.top, opacity: size ? 1 : 0, width: 256, maxHeight: (box ?? viewport).height - 16, paddingVertical: 4, borderRadius: 8, backgroundColor: c.surface1, ...floating(c) }}>
+  return <FloatingSurface anchor={anchor} onClose={close} dismissOnEscape={false} role={confirm ? "alertdialog" : "menu"}
+    label={confirm ? confirm.label.replace(/…$/, "") : `Actions for ${menu.s.title}`} onSize={next => setSize(old => old?.width === next.width && old.height === next.height ? old : next)}
+    style={{ paddingVertical: 4, borderRadius: 8, backgroundColor: c.surface1, ...floating(c) }}>
       {confirm ? <ConfirmBody theme={theme} item={confirm} onCancel={() => setConfirm(null)} onConfirm={() => choose(confirm)} cancelRef={confirmRef} /> : menu.sections.map((sec, si) => <View key={sec.key} style={si ? { marginTop: 4, paddingTop: 4, borderTopWidth: 1, borderTopColor: c.border } : undefined}>
         {sec.items.map(item => {
           const open = expanded === item.key;
@@ -164,8 +149,7 @@ function Popover({ menu, theme, expanded, setExpanded, confirm, setConfirm, choo
           return <View key={item.key}>{row(item, false)}{open && item.children && <View role="group" aria-label={item.label}>{item.children.map(ch => row(ch, true))}</View>}</View>;
         })}
       </View>)}
-    </View>
-  </View>;
+  </FloatingSurface>;
 }
 
 function Sheet({ menu, theme, expanded, confirm, setConfirm, choose: pick, close }: BodyProps) {

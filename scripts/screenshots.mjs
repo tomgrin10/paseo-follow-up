@@ -47,7 +47,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as the CHANGELOG's newest stable, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "gallery", "frames", "onboarding", "setup-popup"];
+const REVIEW_SHOTS = ["menu-bounds", "tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "gallery", "frames", "onboarding", "setup-popup"];
 /** Pasted images and their Add image button share one harness setup (an Overseer and the fixture provider taking images). */
 const PASTE_LIKE = only => only.includes("paste-images") || only.includes("attach-images");
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
@@ -88,7 +88,7 @@ const paseo016 = /(^|\D)0\.1[6-9]\.\d+/.test(paseoVersion ?? "");
 if (only.includes("sidebar") && only.some(n => n !== "sidebar")) fail("shoot --only sidebar on its own, with HARNESS_PASEO=0.16");
 if (only.includes("sidebar") && !paseo016) fail(`the sidebar shot needs the Paseo CLI 0.16.x (found ${paseoVersion ?? "none"}); run with HARNESS_PASEO=0.16`);
 if (only.includes("feeds") && only.length > 1) fail("run --only feeds on its own (npm run test:feeds)");
-const paseoOk = only.includes("settings-tabs") || only.includes("new") || only.includes("onboarding") || PASTE_LIKE(only) || only.includes("gallery") || only.includes("search-focus") || only.includes("frames") || only.includes("your-questions") ? /(^|\D)0\.1[5-7]\.\d+/ : only.includes("sidebar") || only.includes("feeds") || only.includes("put-in-chat") || argv.includes("--sidebar-review") || argv.includes("--overseer-review") || argv.includes("--keys-review") || argv.includes("--rank-review") || argv.includes("--sortfoot-review") || argv.includes("--secsearch-review") || argv.includes("--github-wait-review") ? /(^|\D)0\.1[56]\.\d+/ : /(^|\D)0\.15\.\d+/;
+const paseoOk = only.includes("menu-bounds") || only.includes("settings-tabs") || only.includes("new") || only.includes("onboarding") || PASTE_LIKE(only) || only.includes("gallery") || only.includes("search-focus") || only.includes("frames") || only.includes("your-questions") ? /(^|\D)0\.1[5-7]\.\d+/ : only.includes("sidebar") || only.includes("feeds") || only.includes("put-in-chat") || argv.includes("--sidebar-review") || argv.includes("--overseer-review") || argv.includes("--keys-review") || argv.includes("--rank-review") || argv.includes("--sortfoot-review") || argv.includes("--secsearch-review") || argv.includes("--github-wait-review") ? /(^|\D)0\.1[56]\.\d+/ : /(^|\D)0\.15\.\d+/;
 if (!paseoVersion || !paseoOk.test(paseoVersion)) fail(`needs the Paseo CLI 0.15.x on PATH (found ${paseoVersion ?? "none"}); run through harness-slot or put ~/paseo-harness/cli/0.15.4/bin first`);
 if (changelogArg && !existsSync(changelogArg)) fail(`--whats-new-changelog: no file at ${changelogArg}`);
 const optimiser = await findOptimiser();
@@ -729,6 +729,8 @@ async function seed({ call, home }) {
   // reviewers-click: Ravi and Mina review example/app, so each PR's row reads "Add reviewers to #N: Ravi and Mina".
   if (only.includes("reviewers-click")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }, { login: "mina", name: "Mina" }] });
   const specs = [...WORKSPACES.filter(w => !(argv.includes("--rename-fixup-review") || only.includes("local-titles")) || ["audit", "billing"].includes(w.key)), ...(only.includes("needs-you-states") || only.includes("tasks-view") || only.includes("own-answer") || only.includes("more-context") || only.includes("dismiss") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") || PASTE_LIKE(only) ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") || only.includes("dismiss") ? MERGE_CLICK_STATES : []), ...(only.includes("reviewers-click") ? REVIEWERS_CLICK_STATES : []), ...(only.includes("pr-scale") ? PR_SCALE_STATES : []), ...(only.includes("batch-churn") ? BATCH_CHURN_STATES : []), ...(only.includes("scheduled-tasks") ? SCHEDULED_STATES : []), ...(only.includes("paged-lists") ? PAGED_STATES : []), ...(only.includes("now-line") ? NOW_LINE_STATES : [])];
+  // Geometry checks need one question, one repair and one permission row, not the full README inventory.
+  if (only.includes("menu-bounds")) specs.splice(0, specs.length, ...specs.filter(w => ["billing", "email", "search"].includes(w.key)));
   if (only.includes("layout-search")) {
     specs.splice(0, specs.length, ...specs.filter(w => ["audit", "billing"].includes(w.key)));
     specs.push(
@@ -774,7 +776,7 @@ async function seed({ call, home }) {
   }
   // AI priority off: the ranker would call a real model (and Home would show its spinner). Through the agent tool,
   // planned then confirmed, like any agent would.
-  const caller = workspaces.find(w => w.key === "audit").agentId;
+  const caller = (workspaces.find(w => w.key === "audit") ?? workspaces[0]).agentId;
   await actPlanned(call, caller, "set_display", { values: { enable_ranker: false } });
   // PR snapshots from the fake gh, then Done for the shipped workspace.
   let missing = [];
@@ -1402,6 +1404,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
     });
     return;
   }
+  if (only.includes("menu-bounds")) return menuBoundsShots({ shoot });
   if (only.includes("feeds")) return checkFeeds({ seeded, call, cli, home });
   if (argv.includes("--whats-new-review")) return whatsNewReview({ shoot, seeded, plugin, home, cli, call });
   const billing = WORKSPACES.find(w => w.key === "billing");
@@ -5920,6 +5923,12 @@ try {
     providers: Object.fromEntries(onboardingProviders.map(id => [id, { command: { mode: "replace", argv: [join(variant.providers.includes(id) ? bin : join(root, "not-installed"), id)] } }])) })));
   const packed = JSON.parse((await exec("npm", ["pack", "--json", "--pack-destination", root], { timeout: 120000 })).stdout)[0];
   await exec("tar", ["-xzf", join(root, packed.filename), "--strip-components=1", "-C", plugin]);
+  if (argv.includes("--menus-before")) {
+    // Only the isolated packed copy changes: preserve main's original UI for before evidence while developing the fix.
+    const archive = join(root, "menus-baseline.tar");
+    await exec("git", ["archive", "--format=tar", `--output=${archive}`, arg("--menus-baseline-ref", "origin/main"), "client"]);
+    await exec("tar", ["-xf", archive, "-C", plugin]);
+  }
   if (asVersion) {
     const pkgPath = join(plugin, "package.json");
     await fs.writeFile(pkgPath, JSON.stringify({ ...JSON.parse(await fs.readFile(pkgPath, "utf8")), version: asVersion }, null, 2));
@@ -6061,3 +6070,146 @@ try {
 }
 // Something (a held fixture turn's socket, the fake GitHub server) can keep the loop alive after the daemon is gone.
 process.exit(process.exitCode ?? 0);
+
+/** Menus at both sidebar edges, with host footer chrome present; --menus-before captures the regression. */
+async function menuBoundsShots({ shoot }) {
+  const results = [];
+  for (const theme of ["light", "dark"]) for (const edge of ["bottom", "top"]) {
+    await shoot(`menus-${argv.includes("--menus-before") ? "before" : "after"}-${edge}-${theme}`, { width: 1280, height: 720 }, theme, async page => {
+      await page.setViewportSize({ width: 1280, height: 720 });
+      await page.goto(`${ORIGIN}/settings/sidebar`);
+      await page.getByText("Default view", { exact: true }).first().click();
+      await page.getByText("Follow-up: Needs you", { exact: true }).last().click();
+      await openHome(page);
+      const view = page.getByTestId("plugin-sidebar-view");
+      const row = view.getByRole("button", { name: /^Billing retries/ }).first();
+      await row.waitFor();
+      await view.getByPlaceholder("Filter workspaces").fill("billing");
+      await row.waitFor();
+      // A synthetic footer sibling reserves the same space as a plugin footer, without installing another plugin.
+      await view.evaluate(el => {
+        const footer = document.createElement("div"); footer.dataset.menuTestFooter = "1";
+        footer.textContent = "CPU 24%     RAM 48%     Disk 32%";
+        footer.style.cssText = "height:64px;flex-shrink:0;position:relative;z-index:1;display:flex;align-items:center;justify-content:center;background:var(--unused, #777);color:white;font:12px system-ui";
+        el.parentElement.appendChild(footer);
+      });
+      if (edge === "bottom") {
+        await row.click({ button: "right", position: { x: 40, y: 12 } });
+        const first = page.getByRole("menu", { name: "Actions for Billing retries" });
+        await first.waitFor();
+        const height = (await first.boundingBox()).height;
+        await page.keyboard.press("Escape");
+        await first.waitFor({ state: "hidden" });
+        await page.clock.setFixedTime(BASE + VIEW + 1000); // A fresh gesture under this harness's frozen clock.
+        await row.evaluate((el, height) => {
+          const view = el.closest('[data-testid="plugin-sidebar-view"]').getBoundingClientRect();
+          const r = el.getBoundingClientRect();
+          // A real row click that fits in the window but whose old menu ran over the footer.
+          const target = Math.min(view.bottom - 64, innerHeight - height - 24);
+          el.style.marginTop = `${Math.max(0, target - r.y)}px`;
+        }, height);
+      }
+      await row.scrollIntoViewIfNeeded();
+      await row.click({ button: "right", position: { x: 40, y: 12 } });
+      const menu = page.getByRole("menu", { name: "Actions for Billing retries" });
+      await menu.waitFor();
+      await page.waitForTimeout(200);
+      const result = await menu.evaluate(el => {
+        const r = el.getBoundingClientRect();
+        const items = [...el.querySelectorAll('[role="menuitem"]')];
+        return { rect: { x:r.x, y:r.y, right:r.right, bottom:r.bottom }, items: items.map(item => {
+          const r = item.getBoundingClientRect(); const x = r.x + r.width/2, y = r.y + r.height/2;
+          return { label:item.textContent, reachable: x >= 0 && y >= 0 && x < innerWidth && y < innerHeight && item.contains(document.elementFromPoint(x,y)) };
+        }) };
+      });
+      results.push({ theme, edge, ...result });
+      page.keepFocus = true;
+    });
+  }
+  if (!argv.includes("--menus-before")) {
+    const bounded = async (page, popup, name) => {
+      await popup.waitFor();
+      await page.waitForFunction(el => {
+        const r = el.getBoundingClientRect();
+        return getComputedStyle(el).opacity === "1" && r.x >= 0 && r.y >= 0 && r.right <= innerWidth + 1 && r.bottom <= innerHeight + 1;
+      }, await popup.elementHandle(), { timeout: 5000 });
+      const r = await popup.boundingBox(); const vp = page.viewportSize();
+      if (r.x < 0 || r.y < 0 || r.x + r.width > vp.width + 1 || r.y + r.height > vp.height + 1) throw new Error(`${name} overflows: ${JSON.stringify(r)}`);
+      results.push({ name, rect: r });
+    };
+    await shoot("menus-resize-dark", { width: 1280, height: 720 }, "dark", async page => {
+      await openHome(page);
+      const row = await homeRow(page, "Billing retries");
+      await row.click({ button: "right", position: { x: 40, y: 12 } });
+      const menu = page.getByRole("menu", { name: "Actions for Billing retries" });
+      await bounded(page, menu, "Home row");
+      await menu.getByRole("menuitem", { name: "Later", exact: true }).click();
+      await bounded(page, menu, "expanded Later");
+      await page.setViewportSize({ width: 900, height: 300 });
+      await page.waitForTimeout(200);
+      await bounded(page, menu, "resized expanded menu");
+      const archive = menu.getByRole("menuitem", { name: "Archive workspace…" });
+      await archive.scrollIntoViewIfNeeded();
+      await archive.click();
+      const confirm = page.getByRole("alertdialog", { name: "Archive workspace" });
+      await bounded(page, confirm, "archive confirm");
+      await page.keyboard.press("Escape");
+      await menu.waitFor(); // Escape backs out of confirmation, rather than dismissing the entire menu.
+      await page.keyboard.press("Escape");
+      await menu.waitFor({ state: "hidden" });
+      await page.clock.setFixedTime(BASE + VIEW + 1000);
+      await row.click({ button: "right", position: { x: 40, y: 12 } });
+      await bounded(page, menu, "resized menu capture");
+    });
+    await shoot("menus-sort-light", { width: 1280, height: 720 }, "light", async page => {
+      await openHome(page);
+      await page.getByRole("button", { name: /^Sort:/ }).first().click();
+      const sort = page.getByRole("menu", { name: "Sort workspaces" });
+      await bounded(page, sort, "Home sort");
+      await page.keyboard.press("Escape");
+      await sort.waitFor({ state: "hidden" });
+      const spec = WORKSPACES.find(w => w.key === "billing");
+      await openChat(page, "Billing retries", spec.prompt);
+      await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+      await page.getByRole("button", { name: "More actions for this workspace" }).first().click();
+      await bounded(page, page.getByRole("menu", { name: "Actions for Billing retries" }), "panel More");
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
+      await page.getByRole("button", { name: "More actions for this workspace" }).filter({ visible: true }).first().click();
+      await bounded(page, page.getByRole("menu", { name: "Actions for Billing retries" }), "main tab More");
+      await page.keyboard.press("Escape");
+      await openHome(page);
+      await page.getByRole("button", { name: /^Sort:/ }).first().click();
+      await bounded(page, page.getByRole("menu", { name: "Sort workspaces" }), "Home sort capture");
+    });
+    await shoot("menus-catch-up-dark", DESKTOP, "dark", async page => {
+      await openHome(page);
+      await page.getByRole("button", { name: /^Catch up on \d+ things? that need you/ }).filter({ visible: true }).first().click();
+      await page.getByRole("heading", { name: /^Catch up/ }).filter({ visible: true }).first().waitFor();
+      await page.getByRole("button", { name: "More context", exact: true }).filter({ visible: true }).first().click();
+      await bounded(page, page.getByRole("dialog", { name: "More context", exact: true }), "Catch up More context");
+      await page.keyboard.press("2");
+      await page.waitForFunction(el => el.value === "Why does this matter, and what happens if it waits?",
+        await page.getByLabel("What do you want to know?").elementHandle(), { timeout: 5000 });
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: "Later (L)", exact: true }).click();
+      await bounded(page, page.getByRole("dialog", { name: "Later", exact: true }), "Catch up Later");
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: "Show the keys (S)", exact: true }).click();
+      await bounded(page, page.getByRole("dialog", { name: "Catch up keys", exact: true }), "Catch up keys");
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: "More context", exact: true }).filter({ visible: true }).first().click();
+      await bounded(page, page.getByRole("dialog", { name: "More context", exact: true }), "Catch up More context capture");
+    });
+    await shoot("menus-review-light", DESKTOP, "light", async page => {
+      await openSettingsAt(page, "following", DESKTOP);
+      const header = page.getByRole("button", { name: /^example\/app, / }).filter({ visible: true }).first();
+      await header.waitFor();
+      if (await header.getAttribute("aria-expanded") !== "true") await header.click();
+      await page.getByRole("button", { name: /^Review for example\/app/ }).filter({ visible: true }).first().click();
+      await bounded(page, page.getByRole("menu", { name: "Review for example/app" }), "settings review");
+    });
+  }
+  await fs.writeFile(join(out, "menu-bounds.json"), JSON.stringify(results, null, 2));
+  if (!argv.includes("--menus-before") && results.some(r => r.items?.some(i => !i.reachable))) throw new Error("a menu item is hidden by host chrome or outside the viewport; see menu-bounds.json");
+}

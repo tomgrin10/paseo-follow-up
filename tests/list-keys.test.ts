@@ -109,7 +109,7 @@ test("an open row menu or its confirm step keeps every key, even while focus sit
   for (const role of ['[role="menu"]', '[role="alertdialog"]', '[aria-modal="true"]']) assert.ok(overlays.includes(role), `${role} owns its keys`);
   // Home's keys sheet is a non-modal dialog beside the list: S must still close it (home-keys "S again hides them").
   assert.ok(!overlays.split(",").includes('[role="dialog"]'), "a non-modal dialog leaves the list its keys");
-  assert.match(await src("catch-up.tsx"), /<View role="dialog" accessibilityLabel=\{label\}/, "the keys sheet is that non-modal dialog");
+  assert.match(await src("catch-up.tsx"), /<FloatingSurface modal=\{false\}[^>]*label=\{label\}/, "the keys sheet is that non-modal dialog");
   assert.match(hook, /overlayOpen: overlayOver\(doc\.querySelectorAll\?\.\(OVERLAYS\) \?\? \[\], root\)/, "the walk asks whether one is over the list on every key");
   assert.match(await src("row-menu.tsx"), /role=\{confirm \? "alertdialog" : "menu"\}/, "the row menu's two roles are the ones listed");
 });

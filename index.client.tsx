@@ -126,7 +126,7 @@ export default function contribute(host: PluginClientContext) {
   const homeDeps = { sources, openSettings, openPanel, openLog, openQueue, openCatchUp, openStats, openHome: openOverview, openItem, briefDeps, searchKey, newKey };
   const Overview = (props: PluginScreenProps) => <><FollowHome {...props} deps={homeDeps} />{reportHost(props)}</>;
   const Panel = (props: PluginWorkspacePanelProps) => <><FollowPanel {...props} openSettings={openSettings} openOverview={openOverview} openLarge={openLarge} inbox={inbox} live={store} briefDeps={briefDeps} sources={sources} />{reportHost(props)}</>;
-  const Large = (props: PluginScreenProps) => <FollowLarge {...props} openSettings={openSettings} openOverview={openOverview} live={store} paseo={paseoWorkspaces} inbox={inbox} />;
+  const Large = (props: PluginScreenProps) => <FollowLarge sources={sources} {...props} openSettings={openSettings} openOverview={openOverview} live={store} paseo={paseoWorkspaces} inbox={inbox} />;
   const removers: (() => unknown)[] = [
     client.addScreen({ id: OVERVIEW, title: "Follow-up", Component: Overview }),
     client.addScreen({ id: LARGE_SCREEN, title: params => store.get(params.workspaceId ?? "")?.title ?? "Follow-up", Component: Large }),

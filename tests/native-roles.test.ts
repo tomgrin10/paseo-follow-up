@@ -49,5 +49,8 @@ test("Catch up's More context and Later sheets (MoveResult) and the keys sheet a
   const s = await readFile(join(root, "client/catch-up.tsx"), "utf8");
   const shared = await readFile(join(root, "client/more-context.tsx"), "utf8");
   assert.match(shared, /function MoveResult[\s\S]*?role="dialog" accessibilityLabel=\{label\}/);
-  assert.match(s, /function KeysSheet[\s\S]*?<View role="dialog" accessibilityLabel=\{label\}/);
+  const floating = await readFile(join(root, "client/floating-surface.tsx"), "utf8");
+  assert.match(floating, /role = "dialog"/);
+  assert.match(floating, /<View[^>]*role=\{role\} aria-label=\{label\}/);
+  assert.match(s, /function KeysSheet[\s\S]*?<FloatingSurface[^>]*label=\{label\}/);
 });

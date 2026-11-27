@@ -1,3 +1,4 @@
+import { FloatingSurface } from "./floating-surface";
 // More context, the one component and the one request path for every surface that answers a question
 // (more-context-is-the-same-on-every-surface, docs/needs-you.md#more-context): Catch up's card (its move bar opens
 // MorePanel), and QuestionBody everywhere else: the panel's Needs you card, Home's detail pane, the question dialog, the
@@ -97,7 +98,7 @@ export function QuestionMoreContext({ workspace: w, question: q, theme, compact,
  * Where a move's result opens (MOVE_OPENS, a-move-bar-action-opens-in-view): a sheet in the phone's dock or a popover
  * on its desktop button. Focus moves into it (its first choice), and on the web it scrolls into view the least distance.
  */
-export function MoveResult({ place, theme, label, width, inset = false, children }: { place: "sheet" | "popover"; theme: Theme; label: string; width?: number; /** Inside a card: no margins of its own. */ inset?: boolean; children: ReactNode }) {
+export function MoveResult({ place, theme, label, width, inset = false, children, onClose }: { place: "sheet" | "popover"; theme: Theme; label: string; width?: number; /** Inside a card: no margins of its own. */ inset?: boolean; children: ReactNode; onClose?: () => void }) {
   const c = theme.colors;
   const ref = useRef<View>(null);
   useEffect(() => {
@@ -110,11 +111,11 @@ export function MoveResult({ place, theme, label, width, inset = false, children
     }, 0);
     return () => clearTimeout(t);
   }, []);
+  if (place === "popover") return <FloatingSurface side="above" dataSet={{ moveResult: place }} width={width} onClose={onClose} label={label} contentRef={ref}
+    style={{ padding: 16, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1, shadowColor: "#000", shadowOpacity: 0.22, shadowRadius: 16, shadowOffset: { width: 0, height: 6 } }}>{children}</FloatingSurface>;
   return <View ref={ref} {...({ dataSet: { moveResult: place } } as object)} role="dialog" accessibilityLabel={label}
-    style={[{ padding: place === "sheet" ? 14 : 16, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1 },
-      place === "sheet"
-        ? inset ? {} : { marginHorizontal: 12, marginTop: 12 }
-        : { position: "absolute", zIndex: 20, left: 0, bottom: "100%", marginBottom: 8, width, shadowColor: "#000", shadowOpacity: 0.22, shadowRadius: 16, shadowOffset: { width: 0, height: 6 } }]}>
+    style={[{ padding: 14, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1 },
+      inset ? {} : { marginHorizontal: 12, marginTop: 12 }]}>
     {children}
   </View>;
 }

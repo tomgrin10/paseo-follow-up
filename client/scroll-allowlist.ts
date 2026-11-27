@@ -5,5 +5,6 @@
  * inside a host sheet or popover. Guarded by tests/sheet-scroll.test.ts.
  */
 export const NATIVE_SCROLL_ALLOWED: Record<string, string> = {
+  "client/floating-surface.tsx:ScrollView": "Menus are in their own React Native Modal, outside the host sheet, so need their own native scroller. Nonmodal keys help is desktop-only, bounded inside its screen pane, never a host sheet.",
   "client/image-viewer.tsx:ScrollView": "The zoom view inside the viewer's own React Native Modal, above every sheet: it needs native pinch zoom (maximumZoomScale), and the kit would swap in the sheet's scroller when the viewer opens from a sheet (release notes), although the Modal is outside it.",
 };

@@ -30,7 +30,7 @@ test("Catch up finds every control inside its own root, never the first one in t
 
 test("Catch up takes a key only when focus is inside it, or on nothing while it is on screen", async () => {
   const s = await source();
-  assert.match(s, /ownsKey\(\{ inside: !!el && r\.contains\(el\), onBody, claimBody: true, visible: onBody && surfaceVisible\(r, doc\) \}\)/);
+  assert.match(s, /ownsKey\(\{ inside: !!el && scopes\(\)\.some\(s => s\.contains\(el\)\), onBody, claimBody: true, visible: onBody && surfaceVisible\(r, doc\) \}\)/);
   // The rule itself: inside always; the page itself only while visible; focus elsewhere (Paseo's sidebar, a list) never.
   assert.equal(ownsKey({ inside: true, onBody: false, claimBody: true, visible: false }), true);
   assert.equal(ownsKey({ inside: false, onBody: true, claimBody: true, visible: true }), true);
