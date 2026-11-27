@@ -29,7 +29,8 @@ const ROLES = {
 const listed = (role: keyof typeof ROLES, overseer = false) => [...toolList(...ROLES[role]), ...(overseer ? overseerTools : [])];
 
 // Budgets in tokens, with room for a sentence or two. Raising one is a decision: say why in the PR.
-const BUDGET = { main: 6200, contributor: 2400, recovery: 2800, untracked: 1500, overseer: 2500, nativeRoot: 6600 };
+// contributor 2400 → 2700 (2.6): contributors show what they find too (show_card, ~380 tokens); main pays for it by trimming its hook text.
+const BUDGET = { main: 6200, contributor: 2700, recovery: 2800, untracked: 1500, overseer: 2500, nativeRoot: 6600 };
 
 test("each role's tool list stays inside its token budget", () => {
   const measured = {

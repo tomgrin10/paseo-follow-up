@@ -1,3 +1,4 @@
+import { CardsStore } from "../server/cards";
 import { testStore, rm } from "./support/store-temp-dir";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -49,6 +50,12 @@ const COPY_ON_ACCESS: Record<string, Collected> = {
     items: v => rec(v, "workspaces"),
     touch: (v, id) => { v.workspaces[id].candidates.push({ key: "ACME-1", seen: 1, firstSeen: "2026-11-13T00:00:00.000Z", retryAt: null, failures: 0, strong: true }); },
   },
+  "server/json-file-store.ts (cards.json)": {
+    make: async dir => testStore(CardsStore, dir) as never,
+    seed: (v, n) => { for (let i = 0; i < n; i++) v.workspaces[`w${i}`] = { cards: [], removed: [] }; },
+    items: v => rec(v, "workspaces"),
+    touch: (v, id) => { v.workspaces[id].cards.push({ id: "c", title: "C", blocks: [{ type: "text", id: "b1", md: "x" }], by: "a", byTitle: null, createdAt: "2026-11-27T00:00:00.000Z", updatedAt: "2026-11-27T00:00:00.000Z", changed: {}, keep: false }); },
+  },
   "server/json-file-store.ts (about.json)": {
     make: async dir => testStore(AboutStore, dir) as never,
     seed: (v, n) => { for (let i = 0; i < n; i++) v.entries[`w${i}`] = { workspaceId: `w${i}`, inputsHash: `h${i}`, generatedAt: "2026-11-13T00:00:00.000Z", gist: `Synthetic summary ${i}.`, overview: "", links: [], basis: { chat: true, source: "live", prs: 1, issues: [] }, failed: [], costUsd: null }; },
@@ -66,6 +73,7 @@ const EXEMPT: Record<string, string> = {
   "server/agent-settings.ts": "Settings → Agents (a few hundred bytes), written on the developer's change",
   "server/background-agents.ts": "a list of background agent ids, written when one appears",
   "server/daemon.ts": "a recovery context file, written once per recovery batch",
+  "server/cards.ts": "media a card shows, one content-addressed file written once (never mutated), not a JSON store; cards.json is a JsonFileStore (row above)",
   "server/image-store.ts": "pasted images, one file written once per image (write-once, never mutated), not a JSON store",
   "server/history-cache.ts": "one write per discovery pass that found new history (tens of KB), not per mutation",
   "server/job-agent.ts": "an AI job's prompt file, once per job",

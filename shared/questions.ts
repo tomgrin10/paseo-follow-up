@@ -49,8 +49,9 @@ export function questionState(q: Pick<Question, "mode" | "big" | "recommend">): 
 const text = z.string().trim().min(1);
 const httpUrl = z.string().url().refine(v => /^https?:\/\//i.test(v), "Use an HTTP or HTTPS link");
 export const questionOptionSchema = z.object({ letter: z.string().regex(/^[A-Z]$/), label: text.max(200), consequence: z.string().trim().max(600).optional() });
-export const questionLinkSchema = z.object({ url: httpUrl.optional(), path: z.string().trim().min(1).max(1000).optional(), label: z.string().trim().max(200).optional() })
-  .refine(link => !!link.url !== !!link.path, "Give a link or a file path");
+// card: a card the asking agent showed in the workspace view (shared/cards.ts); the question card points at it.
+export const questionLinkSchema = z.object({ url: httpUrl.optional(), path: z.string().trim().min(1).max(1000).optional(), card: z.string().trim().min(1).max(40).optional(), label: z.string().trim().max(200).optional() })
+  .refine(link => [link.url, link.path, link.card].filter(Boolean).length === 1, "Give a link, a file path or a card id");
 export const answerSchema = z.object({
   choice: z.string().trim().max(200),
   words: z.string().trim().max(2000).optional(),

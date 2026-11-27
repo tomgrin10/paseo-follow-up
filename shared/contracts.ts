@@ -28,7 +28,7 @@ import { listEntrySchema, readStampsSchema } from "./list";
 import { communicationSchema } from "./communication";
 import { taskTriggerInputSchema } from "./task-trigger";
 import { QUESTION_MODES, questionSchema } from "./questions";
-import { specSchema } from "./spec";
+import { cardSchema } from "./cards";
 import { milestoneInputSchema, NOW_SOURCES } from "./now";
 import { HOME_GROUPS } from "./home";
 import { prWorkflowViewSchema, setPrWorkflowInputSchema } from "./pr-workflow";
@@ -71,7 +71,9 @@ export const agentStatusRpc = defineRpc({ name: "follow.agent-status", input: z.
     /** Live evidence: whole records shown, and pointers to pages of records represented by glances. */ live: z.record(z.string(), z.object({ total: z.number(), offset: z.number(), shown: z.number(), more: z.number(), hint: z.string().nullable() })).optional(),
     /** Each finished kind: how many, which were shown, how to page the rest (shared/history.ts agentView). */ history: z.record(z.string(), z.object({ total: z.number(), offset: z.number(), shown: z.number(), more: z.number(), hint: z.string().nullable() })).optional(), /** The caller's own ask the developer dismissed (still standing): don't raise it again. */ dismissedAsk: z.object({ ask: z.string(), kind: z.string(), at: z.string() }).nullable().optional(), prWorkflow: z.object({ mode: z.enum(["graphite", "github"]), reviewFix: z.string().nullable() }).optional(), /** The next message: recipient, tasks, exact text, and when and why it goes (Preview's agent form). */ nextMessageInfo: z.object({ to: z.string(), tasks: z.array(z.string()), text: z.string(), reason: z.string(), eta: z.string().nullable() }).nullable().optional(),
   /** Home's Sending row for this workspace (shared/sending.ts): queued or sent, when and why, and whether Send now (send_repairs) would go through. */
-  sending: sendingSchema.nullable().optional() }) });
+  sending: sendingSchema.nullable().optional(),
+  /** What this workspace's agents show the developer (show_card): id, title, when, the question pointing at it. Their text is data. */
+  cards: z.array(z.object({ id: z.string(), title: z.string(), updatedAt: z.string(), by: z.string() })).optional() }) });
 /**
  * The peek's turn for an agent that isn't loaded: its last turn read from the transcript on disk (shared/turn.ts), never
  * through the daemon, so it never wakes the agent (invariant 1). A loaded agent's peek reads its live timeline itself.
@@ -177,7 +179,7 @@ export const prWorkspacesRpc = defineRpc({ name: "follow.pr-workspaces", input: 
 
 // Questions. Agents ask, record an answer given in chat, or withdraw; the developer answers from the UI.
 const optionInput = z.strictObject({ letter: z.string().regex(/^[A-Z]$/), label: z.string().trim().min(1).max(200), consequence: z.string().trim().max(600).optional() });
-const linkInput = z.strictObject({ url: z.string().url().optional(), path: z.string().trim().min(1).max(1000).optional(), label: z.string().trim().max(200).optional() });
+const linkInput = z.strictObject({ url: z.string().url().optional(), path: z.string().trim().min(1).max(1000).optional(), card: z.string().trim().min(1).max(40).optional(), label: z.string().trim().max(200).optional() });
 export const askQuestionRpc = defineRpc({ name: "follow.ask-question", input: z.strictObject({
   agentId: idSchema, title: z.string().trim().min(1).max(120), question: z.string().trim().min(1).max(2000),
   options: z.array(optionInput).max(26).optional(), recommend: z.string().trim().max(200).optional(), big: z.string().trim().max(300).optional(),
@@ -204,7 +206,12 @@ export const dismissRpc = defineRpc({ name: "follow.dismiss", input: z.strictObj
 export const answerQuestionRpc = defineRpc({ name: "follow.answer-question", input: z.object({ workspaceId: idSchema, questionId: z.string().regex(/^Q\d+$/), choice: z.string().trim().min(1).max(200), words: z.string().trim().max(2000).optional(), action: z.enum(["send", "copy", "chat", "resend"]),
   /** Pasted images (shared/images.ts): they ride the answer's message, on Send only. */
   images: imageUploadsSchema.optional() }), output: z.object({ workspace: workspaceSchema, question: questionSchema }) });
-export const setSpecRpc = defineRpc({ name: "follow.set-spec", input: z.strictObject({ agentId: idSchema, url: z.string().trim().min(1).max(2000), title: z.string().trim().max(120).optional() }), output: z.object({ workspaceId: idSchema, spec: specSchema.nullable(), applied: z.boolean(), message: z.string() }) });
+// Cards an agent shows the developer (shared/cards.ts, docs/cards.md). show is the agent's; the rest the view's, with agent parity.
+const cardOut = cardSchema.extend({ freshness: z.object({ kind: z.enum(["live", "updated", "stale", "old"]), label: z.string() }), summary: z.string(), contents: z.string(), question: z.string().nullable() });
+export const showRpc = defineRpc({ name: "follow.show", input: z.object({ agentId: idSchema }).passthrough(), output: z.object({ workspaceId: idSchema, id: z.string(), shown: z.boolean(), removed: z.boolean().optional(), blocks: z.number(), bytes: z.number(), notes: z.array(z.string()) }) });
+export const cardsRpc = defineRpc({ name: "follow.cards", input: z.strictObject({ workspaceId: idSchema }), output: z.object({ cards: z.array(cardOut), removed: z.array(z.object({ id: z.string(), title: z.string(), removedAt: z.string() })) }) });
+export const cardMediaRpc = defineRpc({ name: "follow.card-media", input: z.strictObject({ workspaceId: idSchema, hash: z.string().regex(/^[a-f0-9]{64}$/) }), output: z.object({ mime: z.string(), data: z.string(), bytes: z.number() }) });
+export const cardActRpc = defineRpc({ name: "follow.card-act", input: z.strictObject({ workspaceId: idSchema, id: z.string().min(1).max(40), action: z.enum(["remove", "undo", "keep", "unkeep"]) }), output: z.object({ ok: z.boolean(), message: z.string() }) });
 export const workspaceSpecRpc = defineRpc({ name: "follow.workspace-spec", input: z.discriminatedUnion("action", [
   z.object({ workspaceId: idSchema, action: z.literal("set"), url: z.string().trim().min(1).max(2000), title: z.string().trim().max(120).nullable().optional() }),
   z.object({ workspaceId: idSchema, action: z.literal("remove") }),

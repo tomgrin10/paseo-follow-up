@@ -1,0 +1,2 @@
+- Agents show you what they want you to see right in the workspace view: before and after renders, options side by side, benchmarks, a test matrix, migration steps or a report. It reads on phones too and stays current.
+- A question can point at what it is about, so the evidence sits right under it.

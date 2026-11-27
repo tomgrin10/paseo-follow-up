@@ -4,7 +4,7 @@ import { z } from "zod";
 import { toolResult } from "./tool-result";
 
 /** Follow-up's own messages and tool calls, recognised in agent chats so they render as compact rows. */
-export const FOLLOW_TOOLS = ["workspace_status", "sync_workspace", "enroll_workspace", "register_pr", "exclude_stack", "update_obligation", "acknowledge_batch", "declare_done", "ask_question", "record_answer", "withdraw_question", "set_spec"] as const;
+export const FOLLOW_TOOLS = ["workspace_status", "sync_workspace", "enroll_workspace", "register_pr", "exclude_stack", "update_obligation", "acknowledge_batch", "declare_done", "ask_question", "record_answer", "withdraw_question", "set_spec", "show_card"] as const;
 export type FollowTool = (typeof FOLLOW_TOOLS)[number];
 
 /**
@@ -69,11 +69,12 @@ const RUNNING: Record<FollowTool, string> = {
   register_pr: "Registering a PR…", exclude_stack: "Excluding a stack…", update_obligation: "Updating a task…",
   acknowledge_batch: "Reporting back on the message…", declare_done: "Checking whether the work is done…",
   ask_question: "Asking you a question…", record_answer: "Recording your answer…", withdraw_question: "Withdrawing a question…", set_spec: "Saving the spec link…",
+  show_card: "Showing it in Follow-up…",
 };
 const NAMES: Record<FollowTool, string> = {
   workspace_status: "Follow-up status", sync_workspace: "Follow-up sync", enroll_workspace: "Goal update", register_pr: "PR registration",
   exclude_stack: "Stack exclusion", update_obligation: "Task update", acknowledge_batch: "Message report", declare_done: "Done check",
-  ask_question: "Question", record_answer: "Answer record", withdraw_question: "Question withdrawal", set_spec: "Spec link",
+  ask_question: "Question", record_answer: "Answer record", withdraw_question: "Question withdrawal", set_spec: "Spec link", show_card: "Shown in Follow-up",
 };
 
 /** One line for a finished Follow-up tool call, plus the text it opens to. */
@@ -114,6 +115,11 @@ export function toolRow(tool: FollowTool, status: "running" | "completed" | "fai
       const kept = result?.applied === false;
       return { ...base, state: "done", line: kept ? "Spec link kept · the developer chose it" : `Spec link: ${firstLine(str(input.title)) || specHost(str(input.url))}`, more: str(result?.message) || more };
     }
+    case "show_card": {
+      // set_spec (retired in 2.6) still reads from old transcripts above; show_card says what the developer now sees.
+      if (input.remove === true) return { ...base, state: "done", line: `Removed from the workspace view: ${firstLine(str(input.id))}`, more };
+      return { ...base, state: "done", line: `In the workspace view: ${firstLine(str(input.title)) || firstLine(str(input.id))}`, more: Array.isArray(result?.notes) ? result!.notes.map(str).join("\n") || more : more };
+    }
     case "declare_done": {
       // Only a reply Follow-up wrote can show Done: never the agent's own summary when the result is missing or unreadable.
       const blockers = Array.isArray(result?.blockers) ? result!.blockers.map(str).filter(Boolean) : [];
@@ -137,7 +143,7 @@ export function toolRow(tool: FollowTool, status: "running" | "completed" | "fai
  */
 export const TOOL_PRESENTATION: Record<string, "routine" | "moment"> = {
   workspace_status: "routine", workspace_now: "routine", sync_workspace: "routine", enroll_workspace: "routine", register_pr: "routine", exclude_stack: "routine",
-  update_obligation: "routine", acknowledge_batch: "routine", record_answer: "routine", withdraw_question: "routine", set_spec: "routine",
+  update_obligation: "routine", acknowledge_batch: "routine", record_answer: "routine", withdraw_question: "routine", show_card: "routine", workspace_cards: "routine", card_action: "routine",
   workspace_about: "routine", agent_settings: "routine", needs_you: "routine", list_prs: "routine", add_reviewers: "routine",
   enable_merge_when_ready: "routine", disable_merge_when_ready: "routine", send_repairs: "routine", set_auto_send: "routine", clear_hold: "routine", snooze_workspace: "routine", ai_rename: "routine", pin_workspace: "routine",
   linear_queue: "routine", brief_settings: "routine", set_brief_settings: "routine", brief_plan: "routine", set_brief_plan: "routine", brief_chat_search: "routine", brief_sources: "routine", set_brief_sources: "routine", compass_find: "routine", compass_note: "routine", why_suggested: "routine", set_compass: "routine", read_compass: "routine", sweep_queue: "routine", dispatch_sources: "routine", dispatch_records: "routine", dispatch_undo: "routine", dispatch_actions: "routine", set_dispatch_actions: "routine", dispatch_settings: "routine", set_dispatch_settings: "routine",
