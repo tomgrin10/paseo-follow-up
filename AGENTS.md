@@ -36,6 +36,10 @@ short page Paseo's plugin listing shows (invariant 122), and [docs/data-access.m
 - Every script that starts a Paseo daemon or a browser calls `await harness()` (`scripts/harness.mjs`) first, a
   machine-wide slot shared with the `harness-slot` wrapper, and starts daemons with `spawnDaemon` so none outlives it
   ([docs/testing.md](docs/testing.md#rules-for-harness-daemons)).
+- In-process test daemons enable only the providers their check uses: pass `harnessDaemonProviders` from
+  `scripts/harness-env.mjs` to `createPaseoDaemon`, using the installed CLI's built-in provider list and the env's
+  same `REAL` list. Writing `harnessConfig` to disk alone does not configure that entry point. The Codex stub
+  rejects app-server requests safely and records accidental launches; `assertProviderStubsUnused` fails the check.
 
 ## Architecture map
 
