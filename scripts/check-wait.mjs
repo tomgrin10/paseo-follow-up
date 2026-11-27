@@ -145,7 +145,9 @@ async function runCase(workspaceId, label, command, maxWait, action) {
     const terminal = calls.filter(i => i.name.endsWith("wait_for_job") || i.name.endsWith("wait_get_job")).map(receipt).findLast(r => r?.status === "completed" || r?.status === "failed");
     assert.equal(terminal?.status, label === "failure" ? "failed" : "completed", "completion must be observed through a receipt");
     if (codex) {
-      assert.ok(calls.some(i => i.name.endsWith("exec_command")), "a real Codex exec_command launches the job");
+      // Paseo 0.15 normalizes Codex's commandExecution items to shell.
+      assert.ok(calls.some(i => (i.name.endsWith("exec_command") || i.name === "shell")
+        && i.detail?.command === prepared.bashCommand), "Codex launches the exact prepared command");
       assert.ok(prepared.outputPath, "Codex gets detached output");
       assert.match(await readFile(prepared.outputPath, "utf8"), /WAIT_CODEX_COMPLETE/);
     }
