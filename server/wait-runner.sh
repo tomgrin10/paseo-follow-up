@@ -23,7 +23,7 @@ finish() {
 }
 trap finish EXIT
 trap 'exit 130' INT
-trap 'exit 143' TERM
+trap 'exit 143' TERM HUP
 cd "$working_directory" || exit 126
 # A time limit (seconds) written at prepare: the command is stopped after it (TERM, then KILL 30 s later), so a
 # job that never finishes (an unbounded poll loop) can't keep the machine busy forever. Exit 124 means it hit the

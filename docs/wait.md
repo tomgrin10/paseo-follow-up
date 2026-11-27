@@ -20,8 +20,14 @@ standalone check still apply. Everything below is Paseo 0.15. Delete Wait when F
 
 1. `wait_prepare_job({description, command, timeoutSeconds?})` records a job and returns the exact `bashCommand`.
    It runs nothing. The time limit defaults to 3 h (at most 12 h) and is written to the job's `timeout` file.
-2. The agent runs that command with native Bash and `run_in_background=true`. The command is the runner
-   (`wait/run-job.sh`, from `server/wait-runner.sh`) wrapping the agent's command.
+2. The agent runs that command with native Bash and `run_in_background=true`. The command uses `nodeRuntime()` from
+   `server/job-guard.ts` to select the executable and environment: Node on a CLI host; `ELECTRON_RUN_AS_NODE=1`
+   on Electron, using the stable AppImage path when present. It spawns the runner
+   (`wait/run-job.sh`, from `server/wait-runner.sh`) in a new session
+   (`spawn` with `detached: true`), on Linux and macOS without a `setsid` binary. Claude's launcher streams output
+   and returns the runner's exit code; other shells return at once and supply `outputPath`. The runner survives
+   the launch shell exiting or its process group receiving SIGKILL. In native Bash mode, TERM, INT and HUP are
+   deliberately forwarded to the runner's group, and the launcher waits for its receipt and exit.
 3. `wait_for_job({jobId, max_wait_seconds})` holds for up to 60 s (default 30). It returns `completed` or `failed`
    with the exit code, `still_pending`, or `new_message`.
 4. `wait_get_job({jobId})` reads a job's status.
@@ -48,15 +54,20 @@ standalone check still apply. Everything below is Paseo 0.15. Delete Wait when F
   `wait_for_job` says the command was stopped, not that it finished. A command that itself exits 124 reads as timed
   out too. Without `timeout(1)` (macOS) commands run unbounded, as before.
 - **No escaped jobs.** GNU `timeout` moves the job into its own process group, so the runner starts it in the
-  background and forwards TERM, INT and HUP to it. A TERM to the runner or to its whole group (Stop, Claude Code
-  killing the background task) stops the job and still writes a receipt. The job's stdin is `/dev/null`.
+  background and forwards TERM, INT and HUP to it. A TERM to the runner or to its own group
+  stops the job and still writes a receipt. Claude's native launcher forwards TERM, INT and HUP to the runner's
+  group, so deliberately killing its background task stops the command too, including without timeout on PATH.
+  The runner handles HUP on that fallback path as well. SIGKILL cannot be forwarded: killing the launch group
+  that way leaves the runner alive to write the command's receipt. Detached launchers return at once; their
+  runner is independent of later launch-shell cleanup. The job's stdin is `/dev/null`.
 - **Ownership.** Each job is scoped by the daemon's agent id and cwd. A tool input with an `agentId` is rejected.
 - **Stop and new messages.** Stop cancels the wait, and a new message ends it with `new_message`. Neither kills the
   job.
 - **Every provider.** Wait attaches to any interactive session (`providerCaps(...).wait`, `shared/provider-support.ts`)
   and sets `FOLLOW_UP_WAIT=1`. Claude Code also gets `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0` and backgrounds the
   command with native Bash `run_in_background`. Any other provider gets a command that detaches itself
-  (`wait_prepare_job` returns `nohup … &` and `outputPath`, the job's `output.log`), so any shell tool starts it and
+  (a short Node launcher detaches the runner, redirects output to the job's `output.log`, and calls `unref()`;
+  `wait_prepare_job` returns `outputPath`), so any shell tool starts it and
   returns at once; the receipt is the same `result.json`. The Paseo 0.16 host's own background work is Claude Code's,
   so there only Claude sessions get `FOLLOW_UP_BACKGROUND_WORK` instead of the tools.
 - **Guidance.** `waitInstruction` in `server/mcp.mjs` reaches the agent through the SessionStart hook or the system
@@ -82,5 +93,8 @@ standalone check still apply. Everything below is Paseo 0.15. Delete Wait when F
   - It skips with exit 0 when there are no Claude credentials or Paseo is below 0.15 (CI).
   - `npm run test:wait-live` fails instead of skipping.
   - `--cases a,b` re-runs single cases.
+  - `npm run test:wait-live -- --codex --cases codex` adds a real Codex agent in full-access mode. It copies
+    only auth.json into an isolated Codex home, launches the prepared command through exec_command, and checks
+    the output and terminal receipt. The default test:install check uses Claude only; Codex is opt-in.
   - Keep the adoption prompt free of Wait's tool names.
 - **Client:** `client/agents.tsx` (`WaitSettings`).

@@ -1,22 +1,46 @@
 // Ported from the standalone paseo-wait plugin (tests/jobs.test.ts) when Follow-up absorbed Wait.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile, symlink, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, symlink, readFile, access, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { nodeRuntime } from '../server/job-guard';
 import { WaitJobs, waitInput, DEFAULT_WAIT_SECONDS, HARD_MAX_WAIT_SECONDS, DEFAULT_JOB_TIMEOUT_SECONDS, MAX_JOB_TIMEOUT_SECONDS } from '../server/wait-jobs';
 
-async function fixture() {
+async function fixture(runtime?: (directory: string) => ReturnType<typeof nodeRuntime>) {
   const directory = await mkdtemp(join(tmpdir(), 'follow-wait-unit-'));
   const owner = { id: 'test-agent', cwd: directory };
-  const jobs = new WaitJobs(directory);
+  const jobs = new WaitJobs(directory, null, runtime?.(directory));
   return { directory, owner, jobs, async close() { jobs.close(); await rm(directory, { recursive: true, force: true }); } };
 }
 function run(command: string) {
   const child = spawn('bash', ['-c', command], { stdio: 'pipe' });
   const finished = new Promise<number | null>((resolve, reject) => { child.once('error', reject); child.once('exit', resolve); });
   return { child, finished };
+}
+
+async function waitForFile(path: string) {
+  const deadline = Date.now() + 10_000;
+  while (!await access(path).then(() => true, () => false)) {
+    assert.ok(Date.now() < deadline, 'the command starts');
+    await new Promise(r => setTimeout(r, 25));
+  }
+}
+async function shellEnv(directory: string, noTimeout: boolean) {
+  const env = { ...process.env };
+  if (noTimeout) {
+    // Exercise macOS's runner path on Linux: no timeout or setsid binary on PATH.
+    const bin = join(directory, 'bin');
+    await mkdir(bin);
+    for (const name of ['sh', 'bash', 'mkdir', 'cat', 'mv', 'sleep']) {
+      const found = spawnSync('sh', ['-c', 'command -v "$1"', 'sh', name], { encoding: 'utf8' });
+      assert.equal(found.status, 0);
+      await symlink(found.stdout.trim(), join(bin, name));
+    }
+    env.PATH = bin;
+  }
+  return env;
 }
 
 test('a finite job periodically wakes the caller, completes, and survives store recreation', async () => {
@@ -134,7 +158,8 @@ test('a TERM to the runner, or to its process group, stops the timed job and sti
       const marker = `follow-wait-term-${target}-${process.pid}`;
       const job = await f.jobs.prepare(f.owner, { description: target, command: `: ${marker}; while :; do sleep 0.2; done`, timeoutSeconds: 600 });
       // detached: the runner leads its own process group, as under Claude Code's background Bash.
-      const child = spawn('bash', ['-c', job.bashCommand], { stdio: 'ignore', detached: true });
+      // Signal the runner itself: killing the launcher is shell cleanup and must leave the runner alone.
+      const child = spawn('sh', [join(f.directory, 'run-job.sh'), join(f.directory, 'jobs', f.owner.id, job.jobId), f.owner.cwd, `: ${marker}; while :; do sleep 0.2; done`], { stdio: 'ignore', detached: true });
       const exited = new Promise<number | null>(ok => child.once('exit', (code, signal) => ok(code ?? (signal ? 128 : null))));
       while (!(await readFile(join(f.directory, 'jobs', f.owner.id, job.jobId, 'started'), 'utf8').then(() => true, e => e.code === 'EISDIR'))) await new Promise(r => setTimeout(r, 50));
       await new Promise(r => setTimeout(r, 300));
@@ -156,3 +181,94 @@ test('a TERM to the runner, or to its process group, stops the timed job and sti
     assert.ok(Date.now() - started < 5000);
   } finally { await f.close(); }
 });
+
+// A shell tool may kill its entire launch group after returning (Codex exec_command).
+// The runner must survive too, not only GNU timeout's separately grouped command.
+for (const [shell, native, noTimeout] of [['sh', false, false], ['bash', false, false], ['bash', true, false], ['sh', false, true], ['bash', true, true]] as const) {
+  test(`the runner survives ${shell} launch-group cleanup (${native ? 'background Bash' : 'detached'}${noTimeout ? ', without timeout' : ''})`, async () => {
+    const f = await fixture();
+    const ready = join(f.directory, 'ready');
+    const release = join(f.directory, 'release');
+    let launcher: ReturnType<typeof spawn> | undefined;
+    try {
+      const job = await f.jobs.prepare(f.owner, {
+        description: 'survive shell cleanup', timeoutSeconds: 5,
+        command: `printf ready > '${ready}'; while ! test -e '${release}'; do sleep 0.05; done; printf survived; exit 7`,
+      }, native ? 'background-bash' : 'detached');
+      const env = await shellEnv(f.directory, noTimeout);
+      launcher = spawn(shell, ['-c', job.bashCommand], { detached: true, stdio: 'ignore', env });
+      const exited = new Promise(resolve => launcher!.once('exit', resolve));
+      if (!native) await exited; // The detached launch command has returned, as in exec_command.
+      await waitForFile(ready);
+      try { process.kill(-launcher.pid!, 'SIGKILL'); } catch (error) {
+        assert.equal((error as NodeJS.ErrnoException).code, 'ESRCH', 'the launch group may already be empty');
+      }
+      await writeFile(release, 'go');
+      const receipt = await f.jobs.wait(f.owner, { jobId: job.jobId, max_wait_seconds: 2 });
+      assert.equal(receipt.outcome, 'failed');
+      assert.equal(receipt.exitCode, 7, 'the runner survives and records the actual command exit');
+      if (!native) {
+        assert.ok(job.outputPath, 'detached jobs expose their output');
+        assert.equal(await readFile(job.outputPath, 'utf8'), 'survived');
+      }
+    } finally {
+      await writeFile(release, 'go');
+      if (launcher?.pid) { try { process.kill(-launcher.pid, 'SIGKILL'); } catch {} }
+      await f.close();
+    }
+  });
+}
+
+for (const appImage of [false, true]) for (const mode of ['background-bash', 'detached'] as const) {
+  test(`Wait launches Electron as Node (${appImage ? 'AppImage' : 'desktop'}, ${mode})`, async () => {
+    const executable = "Paseo's desktop.AppImage";
+    const f = await fixture(directory => nodeRuntime({
+      execPath: appImage ? '/runtime/transient/paseo' : join(directory, executable),
+      electron: '40.0.0', appImage: appImage ? join(directory, executable) : undefined,
+    }));
+    try {
+      const node = "'" + process.execPath.replaceAll("'", "'\\''") + "'";
+      await writeFile(join(f.directory, executable), `#!/bin/sh
+[ "$ELECTRON_RUN_AS_NODE" = 1 ] || exit 91
+exec ${node} "$@"
+`, { mode: 0o700 });
+      const job = await f.jobs.prepare(f.owner, { description: 'desktop runner', command: 'printf desktop; exit 7' }, mode);
+      assert.match(job.bashCommand, /^'env' 'ELECTRON_RUN_AS_NODE=1'/);
+      assert.equal(await run(job.bashCommand).finished, mode === 'detached' ? 0 : 7);
+      const receipt = await f.jobs.wait(f.owner, { jobId: job.jobId, max_wait_seconds: 5 });
+      assert.equal(receipt.exitCode, 7);
+      if (mode === 'detached') {
+        assert.ok(job.outputPath);
+        assert.equal(await readFile(job.outputPath, 'utf8'), 'desktop');
+      }
+    } finally { await f.close(); }
+  });
+}
+
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) for (const group of [false, true]) for (const noTimeout of [false, true]) {
+  test(`native launcher forwards ${signal} (${group ? 'group' : 'process'}${noTimeout ? ', without timeout' : ''})`, async () => {
+    const f = await fixture();
+    let launcher: ReturnType<typeof spawn> | undefined;
+    try {
+      const ready = join(f.directory, 'ready'); const stopped = join(f.directory, 'stopped');
+      const job = await f.jobs.prepare(f.owner, {
+        description: 'native termination', timeoutSeconds: 15,
+        command: `trap 'printf stopped > "${stopped}"; exit 143' TERM INT HUP; printf ready > "${ready}"; sleep 8; printf escaped > "${stopped}"`,
+      }, 'background-bash');
+      launcher = spawn('bash', ['-c', job.bashCommand], { detached: true, stdio: 'ignore', cwd: f.owner.cwd, env: await shellEnv(f.directory, noTimeout) });
+      const exited = new Promise<number | null>((resolve, reject) => { launcher!.once('exit', resolve); launcher!.once('error', reject); });
+      await waitForFile(ready);
+      process.kill(group ? -launcher.pid! : launcher.pid!, signal);
+      const receipt = await f.jobs.wait(f.owner, { jobId: job.jobId, max_wait_seconds: 5 });
+      assert.equal(receipt.outcome, 'failed');
+      assert.equal(receipt.exitCode, noTimeout && signal === 'SIGINT' ? 130 : 143);
+      assert.equal(receipt.timedOut, undefined, 'deliberate termination is not a timeout');
+      assert.equal(await exited, receipt.exitCode, 'native Bash gets the runner exit');
+      await waitForFile(stopped);
+      assert.equal(await readFile(stopped, 'utf8'), 'stopped', 'the command receives the signal and exits');
+    } finally {
+      if (launcher?.pid) { try { process.kill(-launcher.pid, 'SIGKILL'); } catch {} }
+      await f.close();
+    }
+  });
+}

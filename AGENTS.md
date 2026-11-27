@@ -1453,7 +1453,14 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    started (told from its prompt, so it holds across a worker restart), only to the agent whose turn just ended; the
    `needs_you` nudge only after a turn the developer started (2026-11-26, check-install: a repair's turn was nudged,
    and a reload between a nudge and its reply let the next nudge through). Wait attaches to every provider; outside Claude Code its command
-   detaches itself. A job that reads other people's words runs wherever the provider promises it no tools (Claude Code,
+   detaches itself. On every shell, the runner starts in its own session using Node's detached spawn
+   (Linux and macOS), so launch-group SIGKILL cannot kill the receipt writer. `nodeRuntime` selects the executable
+   and Electron's run-as-Node environment, including the stable AppImage path. Claude's launcher streams output,
+   forwards TERM, INT and HUP to the runner's group, and reports its exit; a deliberate background-task kill stops
+   the command and writes a receipt. SIGKILL cannot be forwarded, so the runner survives it. Other shells return
+   at once with outputPath. Guarded by `tests/wait-jobs.test.ts` (Electron/AppImage launch, native signals to the
+   launcher and group, and launch-group SIGKILL, with and without timeout). A job that reads other people's words
+   runs wherever the provider promises it no tools (Claude Code,
    Codex and Pi through their CLIs, OpenCode through a session with every permission denied) and nowhere else
    (invariant 81); `providerNotes` says in one block only what a provider the developer has can't do, with what to do,
    never a pick the developer can't make. Every helper left on its default runs on a provider Paseo has
