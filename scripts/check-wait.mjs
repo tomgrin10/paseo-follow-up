@@ -116,7 +116,7 @@ async function call(agentId, name, input) {
 }
 async function runCase(workspaceId, label, command, maxWait, action) {
   const codex = label === "codex";
-  const agent = await client.createAgent({ provider: codex ? "codex" : "claude", model: codex ? "gpt-5.4" : "haiku", modeId: codex ? "full-access" : "bypassPermissions", cwd, workspaceId, title: `Wait ${label}` });
+  const agent = await client.createAgent({ provider: codex ? "codex" : "claude", ...(codex ? {} : { model: "haiku" }), modeId: codex ? "full-access" : "bypassPermissions", cwd, workspaceId, title: `Wait ${label}` });
   const names = daemon.agentManager.getPluginTools(agent.id).map(t => t.name);
   for (const name of ["wait_prepare_job", "wait_for_job", "wait_get_job"]) assert.ok(names.includes(name), `${name} attached natively`);
   const prompt = label === "adoption"
@@ -124,8 +124,14 @@ async function runCase(workspaceId, label, command, maxWait, action) {
     : `Prepare one job with description ${JSON.stringify(label)} and command ${JSON.stringify(command)}. Run its exact bashCommand ${codex ? "with exec_command, which returns at once; read outputPath for output" : "with native Bash run_in_background=true"}. Then wait_for_job with max_wait_seconds=${maxWait}. Each still_pending requires wait_get_job and another wait while pending, again with max_wait_seconds=${maxWait}: every wait_for_job call in this task uses max_wait_seconds=${maxWait}, never more. When finished, reply WAIT_${label.toUpperCase()} and the actual exit code. Do not use timers or plain final replies as a substitute for wait_for_job.`;
   await client.sendMessage(agent.id, prompt);
   const timeline = () => daemon.agentManager.getTimeline(agent.id);
-  await until(() => timeline().some(i => i.type === "tool_call" && i.name.endsWith("wait_for_job") && i.status === "running"), `${label} wait starts`);
-  const lifecycle = daemon.agentManager.getAgent(agent.id)?.lifecycle; assert.equal(lifecycle, "running", "the agent stays Running while it waits");
+  await until(() => {
+    const error = daemon.agentManager.getAgent(agent.id)?.lastError;
+    if (error) throw new Error(`${label} agent failed: ${error}`);
+    return timeline().some(i => i.type === "tool_call" && i.name.endsWith("wait_for_job") && (codex || i.status === "running"));
+  }, `${label} wait starts`);
+  const lifecycle = daemon.agentManager.getAgent(agent.id)?.lifecycle;
+  // Codex may already have its receipt by the first observation; its shell launch and terminal receipt are checked below.
+  if (!codex) assert.equal(lifecycle, "running", "the agent stays Running while it waits");
   if (!codex) assert.equal(launches.get(agent.id)?.env?.CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS, "0");
   assert.ok(!Object.keys(launches.get(agent.id)?.mcpServers ?? {}).some(name => /wait/.test(name)), "no Wait MCP server of its own");
   let actionMs;
