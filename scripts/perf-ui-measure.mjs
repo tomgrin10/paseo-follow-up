@@ -56,7 +56,7 @@ try {
   const scripts = new Map();
   page.on("response", async r => { const u = r.url(); if (/\.(m?js)(\?|$)|plugin/.test(u) && r.request().resourceType() === "script") { const b = await r.body().catch(() => null); scripts.set(u, b ? b.length : null); } });
   await s.browser.startTracing(page, { categories: ["devtools.timeline", "v8", "disabled-by-default-devtools.timeline"] });
-  await step("home-first-open", () => measure("home-first-open", () => page.goto(homeUrl(info.origin, info.serverId)), visible(page.getByRole("toolbar", { name: "Status", exact: true })), { settleMs: 4000 }));
+  await step("home-first-open", () => measure("home-first-open", () => page.goto(homeUrl(info.origin, info.serverId)), visible(page.getByRole("textbox", { name: /^Search/ })), { settleMs: 4000 }));
   const trace = JSON.parse((await s.browser.stopTracing()).toString());
   const evals = {};
   for (const e of trace.traceEvents) {
@@ -83,6 +83,8 @@ try {
   await step("home-pane-q", () => measure("home-pane-q (open a question in Home's decision pane)", () => btn(/^Show Q5:/).first().click(), visible(page.getByRole("radiogroup", { name: "Options for Q5" }))));
   if (phone) { await page.goBack().catch(() => {}); await page.waitForTimeout(2000); }
   const search = page.getByRole("textbox", { name: /^Search/ }).first();
+  // With --only, the phone's goBack()s above undo row opens that never ran and leave Home: come back to it first.
+  if (!await search.isVisible().catch(() => false)) { await page.goto(homeUrl(info.origin, info.serverId)); await search.waitFor({ timeout: 30_000 }); await page.waitForTimeout(2000); }
   await step("home-search", () => measure("home-search (type 'ledger')", async () => { await search.click(); await search.pressSequentially("ledger", { delay: 60 }); }, null));
   await step("home-search-clear", () => measure("home-search-clear", async () => { await search.fill(""); }, null));
   await page.keyboard.press("Escape").catch(() => {});
