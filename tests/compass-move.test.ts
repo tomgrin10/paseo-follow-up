@@ -8,7 +8,7 @@ import { mkdtemp, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AiJobs } from "../server/ai-jobs";
-import { Compass, CompassStore } from "../server/compass";
+import { CompassStore } from "../server/compass";
 import { MorningBriefStore } from "../server/morning-brief";
 import { RPC_TOOLS } from "../server/agent-parity";
 import { SETTINGS_CATEGORIES } from "../shared/settings-nav";
@@ -16,7 +16,7 @@ import { emptyCompass, type CompassSettings } from "../shared/compass";
 import { compassSetSchema, matchPlan, moveToCompass, planSettingsSchema, type PlanSettings } from "../shared/morning-brief";
 import { inputLabel, inputRole } from "../shared/brief-sources";
 import { rm, testStore } from "./support/store-temp-dir";
-import { AVI, CHAT_TOOLS, DANA, DEV, fakeMcpproxy, fakeModel, historyText, type Msg } from "./support/compass-fakes";
+import { AVI, CHAT_TOOLS, DANA, DEV, fakeMcpproxy, fakeModel, testCompass, historyText, type Msg } from "./support/compass-fakes";
 
 const NOW = Date.parse("2026-11-24T09:00:00Z");
 const ids = () => { let n = 0; return () => `s-moved${++n}`; };
@@ -76,7 +76,7 @@ test("plans come from Compass on arrival: a plan source's newest claude.ai artif
     const model = fakeModel(() => ({ notes: [], retracts: [], nothing: true }));
     const plans: unknown[] = [];
     const store = testStore(CompassStore, dir);
-    const compass = new Compass({
+    const compass = testCompass(dir, {
       settings: testStore(MorningBriefStore, dir), store, tools: mcp.tools, jobs: new AiJobs({ runner: model.runner, logPath: join(dir, "ai-jobs.jsonl") }),
       role: async () => ({ provider: "claude", model: "haiku", thinking: null, label: "Claude" }),
       clock: async () => ({ timeZone: "UTC", workdays: ["Mon", "Tue", "Wed", "Thu", "Fri"] }), sweepAt: async () => "08:00",

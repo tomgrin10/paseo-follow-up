@@ -8,10 +8,10 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AiJobs } from "../server/ai-jobs";
-import { Compass, CompassStore } from "../server/compass";
+import { CompassStore } from "../server/compass";
 import { MorningBriefStore } from "../server/morning-brief";
 import { rm, testStore } from "./support/store-temp-dir";
-import { CHAT_TOOLS, DEV, fakeMcpproxy, fakeModel, historyText, type Msg } from "./support/compass-fakes";
+import { CHAT_TOOLS, DEV, fakeMcpproxy, fakeModel, testCompass, historyText, type Msg } from "./support/compass-fakes";
 import type { CompassNote, Place } from "../shared/compass";
 
 const NOW = Date.parse("2026-11-24T09:00:00Z"); // a Tuesday
@@ -26,7 +26,7 @@ function harness(opts: { dir: string; tools: unknown[]; answer: (tool: string, a
   const model = fakeModel(opts.reply);
   const github: { calls: string[]; rest: (repo: string, path: string) => Promise<unknown> } = { calls: [], rest: async (repo, path) => { github.calls.push(path); return opts.github?.(repo, path) ?? []; } };
   let n = 0;
-  const compass = new Compass({
+  const compass = testCompass(opts.dir, {
     settings: testStore(MorningBriefStore, opts.dir), store: testStore(CompassStore, opts.dir), tools: mcp.tools, jobs: new AiJobs({ runner: model.runner, logPath: join(opts.dir, "ai-jobs.jsonl") }),
     role: async () => ({ provider: opts.provider ?? "claude", model: "fast", thinking: null, label: opts.provider === "codex" ? "Codex" : "Claude" }),
     clock: async () => CLOCK, sweepAt: async () => "08:00",
