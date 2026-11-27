@@ -39,9 +39,10 @@ const RUNS = Number(arg("--runs", "2"));
 const PARALLEL = Number(arg("--parallel", "3"));
 const ONLY = arg("--only") ? new Set(arg("--only").split(",")) : null;
 const MODELS = { claude: arg("--claude-model", "opus"), codex: arg("--codex-model", "") };
+const DUMP = arg("--dump") ? resolve(arg("--dump")) : null;
 const out = resolve(arg("--out", join(tmpdir(), `cards-scenarios-${Date.now()}`)));
 const REAL = PROVIDERS;
-const LINE = "and link the question to it; don't build a separate page";
+const LINE = "not a chat table or page; link the question to it";
 const exists = path => fs.access(path).then(() => true, () => false);
 const liveClaude = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
 const harnessCodexLogin = join(homedir(), "paseo-harness", "logins", "codex");
@@ -199,6 +200,13 @@ try {
     const failed = i => i.status === "failed" || i.status === "error" || !!i.error || /"isError":\s*true/.test(JSON.stringify(i.detail ?? {}));
     const cards = await call("follow.cards", { workspaceId: w.id });
     const ws = (await call("follow.get", { workspaceId: w.id })).workspace;
+    if (DUMP) {
+      // Raw answers and Follow-up's data files, for debugging what the view reads (--dump <dir>).
+      const d = join(DUMP, name); await fs.mkdir(d, { recursive: true });
+      await fs.writeFile(join(d, "follow.cards.json"), JSON.stringify(cards, null, 2));
+      await fs.writeFile(join(d, "follow.get.json"), JSON.stringify(await call("follow.get", { workspaceId: w.id }), null, 2));
+      await fs.cp(join(home, "plugin-data", "follow-up"), join(d, "plugin-data"), { recursive: true, filter: src => !/\/(images|cards-media|wait)(\/|$)/.test(src) || /cards-media/.test(src) });
+    }
     const questions = (ws?.questions ?? []).map(q => ({ id: q.id, title: q.title, links: q.links ?? [], answered: !!q.answer, closed: q.closed ?? null, mode: q.mode ?? null }));
     const linked = questions.some(q => q.links.some(l => l.card && cards.cards.some(c => c.id === l.card)));
     const untracked = (await exec("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: dir })).stdout.split("\n").filter(Boolean).map(l => l.slice(3));
