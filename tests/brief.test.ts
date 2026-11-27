@@ -499,7 +499,9 @@ test("R2: the nudge decision covers called, not called, already nudged, permissi
   assert.equal(shouldNudge({ ...base, brief: { ...base.brief, enable_brief_nudge: false } }), false, "setting off");
   assert.equal(shouldNudge({ ...base, brief: { ...base.brief, enable_inbox: false } }), false, "inbox off");
   assert.equal(shouldNudge({ ...base, brief: null }), false, "unknown state never nudges");
-  assert.equal(shouldNudge({ ...base, provider: "codex" }), false, "Codex gets the instruction only");
+  // one-turn-end-decision: the provider never decides the nudge. Until 2.6 a Codex root agent got the instruction only,
+  // from the hook and the event alike, so it was never nudged (Codex's Stop hook blocks like Claude's).
+  for (const provider of ["codex", "opencode", "copilot"]) assert.equal(shouldNudge({ ...base, provider }), true, `${provider} root agents are nudged like Claude's`);
   assert.equal(shouldNudge({ ...base, turn: null }), false, "no turn marker, no nudge");
 });
 
