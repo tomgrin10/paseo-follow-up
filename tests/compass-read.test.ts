@@ -3,14 +3,14 @@
 // take every tool away from. Fake mcpproxy (a chat server found by shape) and a fake model; fictional people only.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AiJobs } from "../server/ai-jobs";
-import { Compass, CompassStore } from "../server/compass";
+import { CompassStore } from "../server/compass";
 import { MorningBriefStore } from "../server/morning-brief";
 import { rm, testStore } from "./support/store-temp-dir";
-import { AVI, CHAT_TOOLS, DANA, DEV, fakeMcpproxy, fakeModel, historyText, type Msg } from "./support/compass-fakes";
+import { AVI, CHAT_TOOLS, DANA, DEV, fakeMcpproxy, fakeModel, testCompass, historyText, type Msg } from "./support/compass-fakes";
 import type { CompassChange } from "../shared/compass";
 
 const NOW = Date.parse("2026-11-24T09:00:00Z"); // a Tuesday
@@ -22,7 +22,7 @@ const MSGS: Msg[] = [
   { by: AVI, name: "Avi", at: "2026-11-23T14:06:00Z", text: "lunch?" },
 ];
 
-async function setup(opts: { provider?: string; history?: boolean; msgs?: Msg[]; reply?: (p: string) => unknown } = {}) {
+async function setup(opts: { provider?: string; history?: boolean; msgs?: Msg[]; reply?: (p: string) => unknown; beforeExtract?: () => Promise<void> } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "compass-"));
   const mcp = fakeMcpproxy({ tools: CHAT_TOOLS(opts.history ?? true), answer: () => historyText(opts.msgs ?? MSGS) });
   const model = fakeModel(opts.reply ?? (() => ({ notes: [{ item: "m1", what: "ACME-12 invoice export", keys: ["ACME-12"], kind: "issue", strength: "high", untilWords: "tomorrow", until: null, quote: "ACME-12 invoice export is really important" }], retracts: [], nothing: false })));
@@ -30,8 +30,8 @@ async function setup(opts: { provider?: string; history?: boolean; msgs?: Msg[];
   const settings = testStore(MorningBriefStore, dir);
   const store = testStore(CompassStore, dir);
   const changes: string[] = [];
-  const compass = new Compass({
-    settings, store, tools: mcp.tools, jobs: new AiJobs({ runner: model.runner, logPath: join(dir, "ai-jobs.jsonl") }),
+  const compass = testCompass(dir, {
+    settings, store, tools: mcp.tools, jobs: new AiJobs({ runner: async input => { await opts.beforeExtract?.(); return model.runner(input); }, logPath: join(dir, "ai-jobs.jsonl") }),
     role: async () => ({ provider: opts.provider ?? "claude", model: "haiku", thinking: null, label: opts.provider === "gemini" ? "Gemini" : "Claude" }),
     clock: async () => ({ timeZone: "UTC", workdays: ["Mon", "Tue", "Wed", "Thu", "Fri"] }), sweepAt: async () => "08:00",
     index: async () => ({ workspaces: [{ id: "ws-invoice", title: "Invoice export for acme", branch: "acme-12-invoice-export" }], issueWorkspace: k => k === "ACME-12" ? "ws-invoice" : null }),
@@ -139,8 +139,36 @@ test("a source added while another's first read runs still gets its own first re
     // Two sources added back to back: before the fix the second's "added" read joined the first's, which read only the first.
     await t.compass.set(DANA_SOURCE, "developer");
     await t.compass.set({ source: { label: "Avi", who: { kind: "person", person: { id: AVI, name: "Avi" } }, places: [{ kind: "conversation", sub: "dm", id: AVI, name: "Avi" }], roles: ["priorities"] } }, "developer");
-    for (let i = 0; i < 200 && !(await t.compass.view()).places[`conversation:${AVI}`]; i++) await new Promise(r => setTimeout(r, 5));
+    await t.compass.idle();
     const v = await t.compass.view();
     assert.ok(v.places[`conversation:${DANA}`] && v.places[`conversation:${AVI}`], "both new places were read over the last week");
   } finally { await rm(t.dir, { recursive: true, force: true }); }
+});
+
+test("temp-dir cleanup waits for an active background read and its queued read", async () => {
+  let release!: () => void;
+  let entered!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const t = await setup({ beforeExtract: async () => { entered(); await gate; } });
+  let queued: Promise<unknown> | undefined;
+  let cleanup: Promise<void> | undefined;
+  try {
+    await t.compass.set(DANA_SOURCE, "developer");
+    await started;
+    queued = t.compass.read("manual");
+    let removed = false;
+    cleanup = rm(t.dir, { recursive: true, force: true }).then(() => { removed = true; });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(removed, false, "cleanup waits while the background read can still write");
+    release();
+    await Promise.all([cleanup, queued]);
+    await assert.rejects(stat(t.dir), { code: "ENOENT" });
+    await t.compass.idle(); // already idle is safe too
+  } finally {
+    release();
+    await queued;
+    if (cleanup) await cleanup;
+    else await rm(t.dir, { recursive: true, force: true });
+  }
 });

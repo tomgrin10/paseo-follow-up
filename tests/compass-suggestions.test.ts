@@ -11,10 +11,10 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AiJobs } from "../server/ai-jobs";
-import { Compass, CompassStore } from "../server/compass";
+import { CompassStore } from "../server/compass";
 import { MorningBriefStore } from "../server/morning-brief";
 import { rm, testStore } from "./support/store-temp-dir";
-import { CHAT_TOOLS, DANA, fakeMcpproxy, fakeModel, historyText } from "./support/compass-fakes";
+import { CHAT_TOOLS, DANA, fakeMcpproxy, fakeModel, testCompass, historyText } from "./support/compass-fakes";
 import { compassSettingsSchema, type CompassChange, type CompassNote } from "../shared/compass";
 import { compassSince, heardWords, nobodyNeeds, nobodyRow, suggestions, whyText, workdaysUntil } from "../shared/nobody";
 import { sinceBlock } from "../shared/brief-since";
@@ -156,7 +156,7 @@ async function setup(open: { value: boolean }) {
   const mcp = fakeMcpproxy({ tools: CHAT_TOOLS(true), answer: () => { reads++; return historyText([{ by: DANA, name: "Dana", at: "2026-11-24T07:30:00Z", text: "ACME-18 has to be ready for the renewal call Thursday" }]); } });
   const model = fakeModel(() => ({ notes: [{ item: "m1", what: "renewal call", keys: ["ACME-18"], kind: "issue", strength: "high", untilWords: "Thursday", until: null, quote: "ACME-18 has to be ready for the renewal call" }], retracts: [], nothing: false }));
   let clock = NOW; let n = 0;
-  const compass = new Compass({
+  const compass = testCompass(dir, {
     settings: testStore(MorningBriefStore, dir), store: testStore(CompassStore, dir), tools: mcp.tools,
     jobs: new AiJobs({ runner: model.runner, logPath: join(dir, "ai-jobs.jsonl") }),
     role: async () => ({ provider: "claude", model: "haiku", thinking: null, label: "Claude" }),
@@ -197,7 +197,7 @@ test("the-brief-has-one-timer: the daytime read runs every cadence only while th
   const t = await setup(open);
   try {
     await t.compass.set(DANA_SOURCE, "developer");
-    await new Promise(r => setTimeout(r, 50)); // the new place's week read
+    await t.compass.idle(); // the new place's week read
     const base = t.reads();
     // The morning read (09:00, after the 08:00 sweep) runs with the app closed: it's the brief's own read.
     await t.compass.tick();

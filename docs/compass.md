@@ -97,6 +97,8 @@ key is its issue, its workspace by the one predicate Dispatch reads), and the ca
 
 ## Reading
 
+`Compass.idle()` drains active and queued reads before their dependencies are disposed; callers stop starting new work first.
+
 - **When:** once a workday after the sweep time, from the worker's 15 s loop (`Compass.tick`, the-brief-has-one-timer),
   while the governor allows background work; then the **daytime read** every `cadence` (default 2 h) from the same
   loop, only while an app client is open (a home-feed subscriber, or on Paseo 0.15 a priorities poll in the last 2

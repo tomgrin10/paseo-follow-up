@@ -1,3 +1,5 @@
+import { Compass } from "../../server/compass";
+import { trackPersistence } from "./store-temp-dir";
 import { SourceDirectory } from "../../server/source-tools";
 import type { Runner } from "../../server/ai-jobs";
 
@@ -41,4 +43,11 @@ export function fakeModel(reply: (prompt: string) => unknown): { runner: Runner;
   const prompts: string[] = [];
   const runner: Runner = async input => { prompts.push(input.prompt); return { text: JSON.stringify(reply(input.prompt)), costUsd: 0, inputTokens: 10, outputTokens: 10 }; };
   return { runner, prompts };
+}
+
+/** Keep background reads alive until completion before the shared temp-dir helper removes their files. */
+export function testCompass(directory: string, deps: ConstructorParameters<typeof Compass>[0]): Compass {
+  const compass = new Compass(deps);
+  trackPersistence(directory, { flush: () => compass.idle() });
+  return compass;
 }

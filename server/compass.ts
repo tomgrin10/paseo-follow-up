@@ -236,6 +236,11 @@ export class Compass {
     if (trigger === "morning" || trigger === "day") return this.reading;
     return this.queued ??= this.reading.catch(() => undefined).then(() => { this.queued = null; return this.read(trigger, opts.plans ? opts : {}); });
   }
+  /** Drain active and queued reads before disposing of their dependencies. Callers must stop starting new work. */
+  async idle(): Promise<void> {
+    while (this.reading || this.queued) await Promise.allSettled([this.reading, this.queued]);
+  }
+
   /** Read now, waiting at most `ms`; then `running` (read_compass). */
   async readWithin(trigger: "manual" | "agent", ms = COMPASS.waitMs): Promise<{ running: true } | { running: false; lastRead: CompassFile["lastRead"] }> {
     const p = this.read(trigger);
