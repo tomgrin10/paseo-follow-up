@@ -40,6 +40,9 @@ import { setReportError } from "./client/toast-store";
 import { contextAskRpc, reportSendRpc } from "./shared/contracts";
 import { runAction } from "./client/toast-store";
 import { KeyboardRoom } from "./client/keyboard";
+import { ToastHost } from "./client/toasts";
+import { CardScreen } from "./client/shown-cards";
+import { bindOpenLarge } from "./client/card-data";
 
 /** Home. The same screen id the Overview had, so the sidebar row, ⌘K and saved links land on Home. */
 const OVERVIEW = HOME_SCREEN;
@@ -50,6 +53,8 @@ const OVERVIEW = HOME_SCREEN;
  */
 const PANEL = "follow-up";
 const VIEW = "follow-up-view";
+/** A card an agent shows, larger: its own screen, `{ workspaceId, card }`. */
+const CARD_SCREEN = "follow-up-card";
 /** Old settings screen ids, kept only so saved links and restored routes still open the one settings page. */
 const LEGACY_SETTINGS_SCREENS = [LEGACY_SETTINGS_SCREEN, "project-settings", "display-settings"];
 
@@ -134,9 +139,14 @@ export default function contribute(host: PluginClientContext) {
   const Panel = (props: PluginWorkspacePanelProps) => <KeyboardRoom compact={props.layout.compact}><FollowPanel {...props} place="panel" openSettings={openSettings} openOverview={openOverview} openView={openPanel} inbox={inbox} live={store} briefDeps={briefDeps} sources={sources} />{reportHost(props)}</KeyboardRoom>;
   const ViewTab = (props: PluginWorkspacePanelProps) => <KeyboardRoom compact={props.layout.compact}><FollowPanel {...props} place="tab" openSettings={openSettings} openOverview={openOverview} inbox={inbox} live={store} briefDeps={briefDeps} sources={sources} />{reportHost(props)}</KeyboardRoom>;
   const Large = (props: PluginScreenProps) => <KeyboardRoom compact={props.layout.compact}><LargeRedirect {...props} openView={openPanel} /></KeyboardRoom>;
+  // A card an agent shows, on its own screen (client/shown-cards.tsx): Open large, and a phone's tap on a question's card row.
+  const CardLarge = (props: PluginScreenProps) => <KeyboardRoom compact={props.layout.compact}><CardScreen {...props} live={store} /><ToastHost theme={props.theme} compact={props.layout.compact} /></KeyboardRoom>;
+  bindOpenLarge((workspaceId, card) => client.openScreen({ screenId: CARD_SCREEN, params: { workspaceId, card } }));
   const removers: (() => unknown)[] = [
     client.addScreen({ id: OVERVIEW, title: "Follow-up", Component: Overview }),
     client.addScreen({ id: LARGE_SCREEN, title: params => store.get(params.workspaceId ?? "")?.title ?? "Follow-up", Component: Large }),
+    client.addScreen({ id: CARD_SCREEN, title: params => { const w = store.get(params.workspaceId ?? ""); return (w && "shownCards" in w ? w.shownCards?.find(x => x.id === params.card)?.title : null) ?? "Follow-up"; }, Component: CardLarge }),
+    () => bindOpenLarge(null),
     ...LEGACY_SETTINGS_SCREENS.map(id => client.addScreen({ id, title: "Follow-up settings", Component: Settings })),
     settings.remove,
     client.addWorkspacePanel({ id: PANEL, title: "Follow-up", icon: FOLLOW_UP_ICON, locations: ["explorer", "workspace"], Component: Panel }),

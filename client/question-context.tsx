@@ -11,6 +11,9 @@ import { text, type Theme } from "./kit";
 import { mergedColor } from "./theme";
 import { PrLinksProvider, RichText } from "./rich-text";
 import { QuestionMoreContext } from "./more-context";
+import { CardLinkRow } from "./shown-cards";
+import { CardHere } from "./card-data";
+import { useContext } from "react";
 
 export function hostOf(url: string): string {
   try { return new URL(url).host.replace(/^www\./, ""); } catch { return ""; }
@@ -26,14 +29,17 @@ export function hasQuestionContext(w: Pick<ListWorkspace, "prs" | "obligations">
 }
 
 /** The note, links, PR line and task line. `dense` (the pill) keeps only a 3-line note: its Open button has the rest. */
-export function QuestionContext({ workspace: w, question: q, theme, dense = false, inline = false }: { workspace: Pick<ListWorkspace, "prs" | "obligations">; question: ListQuestion; theme: Theme; dense?: boolean; inline?: boolean }) {
+export function QuestionContext({ workspace: w, question: q, theme, dense = false, inline = false, compact = false }: { workspace: Pick<ListWorkspace, "prs" | "obligations"> & Partial<Pick<ListWorkspace, "id" | "shownCards">>; question: ListQuestion; theme: Theme; compact?: boolean; dense?: boolean; inline?: boolean }) {
+  const here = useContext(CardHere);
   if (!hasQuestionContext(w, q, inline)) return null;
   const c = theme.colors; const t = text(c);
   const pr = q.prKey ? w.prs.find(p => p.key === q.prKey) : null;
   const task = q.taskId ? w.obligations.find(o => o.id === q.taskId) : null;
   return <View style={{ gap: 8 }}>
     {!!q.background && <RichText selectable linkColor={c.foreground} numberOfLines={dense ? 3 : undefined} style={t.meta}>{q.background}</RichText>}
-    {!dense && q.links?.map((link, i) => <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+    {/* A card the agent showed in the view: one row (its thumbnail, title, what it holds, "below"); dense, one line. */}
+    {w.id && q.links?.filter(link => link.card && link.card !== here).map((link, i) => <CardLinkRow key={`card${i}`} workspace={{ id: w.id!, shownCards: w.shownCards }} cardId={link.card!} theme={theme} compact={compact} dense={dense} />)}
+    {!dense && q.links?.filter(link => !link.card).map((link, i) => <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       <Icon name={link.url ? "Globe" : "FileText"} size={13} color={c.foregroundMuted} />
       {link.url ? <Pressable accessibilityRole="link" accessibilityLabel={`Open ${link.label || link.url}`} onPress={() => { void openExternalUrl(link.url!).catch(() => undefined); }} hitSlop={4}
         style={state => ({ flexShrink: 1, flexDirection: "row", alignItems: "baseline", gap: 8, opacity: state.pressed ? 0.7 : 1 })}>
@@ -57,7 +63,7 @@ export function QuestionContext({ workspace: w, question: q, theme, dense = fals
 /** The context, then More context while the question is open: what QuestionBody and the brief card draw under the ask. */
 export function QuestionContextBlock({ workspace: w, question: q, theme, compact, dense = false, inline = false, open, moreContext = true, openAgent }: { workspace: ListWorkspace; question: ListQuestion; theme: Theme; compact: boolean; dense?: boolean; inline?: boolean; open: boolean; moreContext?: boolean; openAgent?: (agentId: string) => void }) {
   return <>
-    <QuestionContext workspace={w} question={q} theme={theme} dense={dense} inline={inline} />
+    <QuestionContext workspace={w} question={q} theme={theme} compact={compact} dense={dense} inline={inline} />
     {open && moreContext && <QuestionMoreContext workspace={w} question={q} theme={theme} compact={compact} openAgent={openAgent} />}
   </>;
 }

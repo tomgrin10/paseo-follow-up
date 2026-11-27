@@ -1,0 +1,3 @@
+- What an agent shows sits in the workspace view under its own title: a question's evidence right under Needs you, the rest after your questions. Each one folds, can be opened large, kept or removed with Undo.
+- Before and after images compare at a glance on a phone: one switch flips them in place, or press and hold the image.
+- You can see at a glance whether it is still current: a live dot while the agent works, an amber note when it stopped, and a thin edge on rows that just changed.

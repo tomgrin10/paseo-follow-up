@@ -10,6 +10,12 @@ with the evidence for the feature PRs.
 | --- | --- |
 | `shared/cards.ts` | The block schemas (input and stored), limits (`CARD_LIMITS`), `changedRows`, the folded summary (`cardSummary`), what a card holds (`cardContents`), `freshness` and `CARDS_NOTE`. |
 | `server/cards.ts` | `CardsStore` (`cards.json`), `Cards`: show (create, replace, replace blocks by id, remove), media copied by hash into `cards-media/`, `resolveInside` (paths stay inside the workspace after symlinks), Undo, Keep, the sweep, `forget` and the one-time spec migration. |
+| `shared/card-view.ts` | The view's layout math, pure and unit-tested (`tests/card-view.test.ts`): `cardMode` (pairs side by side from 520 px, freshness in the subtitle under 440), `tableLayout` (fit, or scroll with the first column pinned), `fitInto`/`singleBox` (never cropped, never blown up past 2×), `textClips`, `barFractions`, `linePoints`, `foldedBudget`, `stableOrder`, `pointedCards`, `startsFolded`, `freshLabel`. |
+| `shared/card-md.ts` | `parseMd`: a text block's Markdown (paragraphs, lists, headings, bold, italic, code, http(s) links); raw HTML stays text. |
+| `client/card-data.ts` | `useCards` (re-read `follow.cards` when the workspace's `shownCards` stamp moves; never a poll), `useCardAct`, `useMediaData` (bytes by hash, the newest 48 kept in memory), `readVideo`, and going to a card (`goToCard`: scroll on desktop, its own screen on a phone). |
+| `client/card-blocks.tsx` | The eight blocks (`BlockView`), each at its limits: clipped text with Read all, pairs and grids, tables with a pinned first column and edge fades, facts, lists, bar and line charts, files (Copy path), code. |
+| `client/card-viewer.tsx` | `MediaViewer`: an image large inside Paseo; a pair side by side from 900 px, else one Before/After switch and press-and-hold to flip. |
+| `client/shown-cards.tsx` | `ShownCard` (head, fold, freshness, ⋯ menu), `useShownCards` (pointed vs. the rest, stable order), `CardLinkRow` (a question's "below" row), `CardScreen` (Open large: the `follow-up-card` screen, the question's answers docked) and `SpecCardChip`. |
 
 ## Blocks
 
@@ -46,6 +52,29 @@ with how to show it first. `follow.cards` returns each card with `question`: the
 `freshness` (shared): `live` while the agent that wrote it is in a turn and updated it in that turn; `stale` when it
 still says something is running but its agent is idle or gone ("agent idle · 3 h"); `old` after 7 days without an
 update unless kept; else "Updated 25 m ago". Never a ticking clock.
+
+## In the view
+
+- The server stamps the workspace with its cards' ids and `updatedAt` (`shownCards`, which moves the workspace's own
+  `updatedAt`), so the view learns of a change with the workspace it already reads and fetches `follow.cards` then.
+- Placement: a card an open question links to sits right under Needs you, with an amber edge; the rest come after
+  Your questions in one column, and each takes its own slot in the movable pool with two or three. Newest first when
+  the view opens, then stable: an update never moves a card under the developer's eye.
+- Each card folds on its own, per device (`panel.card.<id>`); a folded card is its title and `cardSummary`, within
+  `foldedBudget` (76 px, 96 on a phone). A card not updated for 7 days starts folded with its date, unless kept.
+- ⋯: Open large (the card as its own screen; full screen on a phone), Keep, Remove (confirmed in place, then a toast
+  with Undo). They go through `runCardAction` (`client/row-actions.ts`), like a row's.
+- Freshness: a live dot, "Updated 25 m ago", amber "agent idle" for a stale card (its running cells turn to an amber
+  clock, "was running" in the legend); under 440 px it moves into the subtitle. Rows or items that changed get a thin
+  blue edge, cleared after 3 s on screen.
+- The question's card row (thumbnail, title, contents, "below") scrolls to the card on desktop; on a phone it opens
+  the card's screen with the answers docked. Only the card the question points at docks its answers; any other card's
+  screen has a reply box to its agent.
+- Couldn't build with the plugin SDK: a video player on phones (the poster says "Play on your computer"), opening a
+  file in Paseo's file panel, and viewing Markdown or PDF files (only images and videos are copied): file rows offer
+  Copy path.
+- The harness (`scripts/screenshots.mjs --only cards`) renders every block at its limits at 360/390, 400, 1000, 1440,
+  1900 and Home's pane, light and dark, and fails on any horizontal overflow or a folded card past its budget.
 
 ## Agents and parity
 

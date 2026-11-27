@@ -39,6 +39,10 @@ export const ROW_ACTIONS = {
   make_main: { tool: "make_main_agent" },
   stop_following: { tool: "set_follow_settings" },
   archive: { exempt: "Paseo's own archive_workspace tool archives a workspace for an agent; this item sends Paseo that same request." },
+  // A card's ⋯ menu (client/shown-cards.tsx): what an agent showed the developer.
+  card_open: { exempt: "Navigation: shows the card on its own screen and changes nothing." },
+  card_keep: { tool: "card_action", note: "action: \"keep\" or \"unkeep\"; an agent can also keep it current by showing it again." },
+  card_remove: { tool: "card_action", note: "action: \"remove\", and \"undo\" for its Undo; the card's own agent removes with show_card remove: true." },
 } as const satisfies Record<string, { tool: string; note?: string } | { exempt: string }>;
 export type RowActionId = keyof typeof ROW_ACTIONS;
 

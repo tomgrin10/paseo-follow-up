@@ -184,9 +184,9 @@ export function cardContents(card: Pick<Card, "blocks">): string {
   if (images) parts.push(`${images} image${images === 1 ? "" : "s"}`);
   if (videos) parts.push(videos === 1 ? "a video" : `${videos} videos`);
   for (const b of card.blocks) {
-    if (b.type === "table") parts.push(`a table of ${(b as { rows: unknown[] }).rows.length}`);
+    if (b.type === "table") { const n = (b as { rows: unknown[] }).rows.length; parts.push(`${n} row${n === 1 ? "" : "s"}`); }
     else if (b.type === "chart") parts.push("a chart");
-    else if (b.type === "list") parts.push(`${(b as { items: unknown[] }).items.length} items`);
+    else if (b.type === "list") { const n = (b as { items: unknown[] }).items.length; parts.push(`${n} ${(b as { ranked?: boolean }).ranked ? "ranked " : ""}item${n === 1 ? "" : "s"}`); }
     else if (b.type === "files") parts.push(`${b.items.length} file${b.items.length === 1 ? "" : "s"}`);
   }
   return [...new Set(parts)].slice(0, 3).join(" · ");
@@ -211,7 +211,9 @@ export function freshness(card: Pick<Card, "updatedAt" | "blocks" | "keep">, age
   const since = now - at;
   if (agent?.running && agent.since !== null && at >= agent.since) return { kind: "live", label: `live · ${ago(since)} ago` };
   const running = (stateCounts(card)?.running ?? 0) > 0;
-  if (running) return { kind: "stale", label: agent ? `agent idle · ${ago(agent.since !== null ? now - Math.max(agent.since, at) : since)}` : "agent gone" };
+  // Stale only when the agent stopped (or is gone): a running agent that hasn't touched this card yet this turn may
+  // still be working on it, so its running cells keep spinning (2026-11-27 critique: "agent idle" during a live run).
+  if (running && !agent?.running) return { kind: "stale", label: agent ? `agent idle · ${ago(agent.since !== null ? now - Math.max(agent.since, at) : since)}` : "agent gone" };
   if (!card.keep && since > CARD_LIMITS.oldMs) return { kind: "old", label: `${ago(since)} ago` };
   return { kind: "updated", label: `Updated ${ago(since)} ago` };
 }

@@ -288,6 +288,10 @@ export const PARITY: Record<string, { tools: readonly string[]; note?: string } 
   "follow.rename-workspace": { tools: ["ai_rename"], note: "confirm=true renames; undo=true plans Undo." },
   "follow.linked-items": { tools: ["link_items"] },
   "follow.set-linked-items": { tools: ["set_linked_items", "link_item", "unlink_item"] },
+  // What agents show in the workspace view (client/shown-cards.tsx, docs/cards.md).
+  "follow.cards": { tools: ["workspace_cards"] },
+  "follow.card-act": { tools: ["card_action", "show_card"], note: "The card's ⋯ menu: Remove (with Undo) and Keep are card_action's remove, undo, keep and unkeep; the card's own agent removes it with show_card remove: true and keeps it current by showing it again." },
+  "follow.card-media": { exempt: "The image and video bytes a card draws. An agent reads the card with workspace_cards and has the source files it showed." },
   "follow.linked-index": { tools: ["link_items"], note: "Home's search over every workspace's links; an agent reads them per workspace with link_items." },
   "follow.workspace-spec": { tools: ["set_workspace_spec"] },
   "follow.set-task-trigger": { tools: ["set_task_trigger", "update_obligation"] },

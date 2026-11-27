@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { SpecCardChip } from "./shown-cards";
 import { Platform, View, type TextInput as NativeTextInput } from "react-native";
 import { Pressable, Text } from "./text";
 import { openExternalUrl, useRpc } from "@getpaseo/plugin/client";
@@ -108,11 +109,13 @@ export function ReferencesLine({ workspace: w, theme, compact }: { workspace: Wo
   const query = useLinked(w.id);
   const sheets = useLinkedSheets(w, theme, compact);
   const counts = query.data?.counts as LinkedView["counts"] | undefined;
-  if (!referencesShown(w.spec?.url, counts)) return sheets.element;
+  // The agent keeps its spec as the card `spec` (docs/cards.md): the header's spec link goes to that card.
+  const specCard = !!w.shownCards?.some(s => s.id === "spec");
+  if (!referencesShown(w.spec?.url || (specCard ? "card" : null), counts)) return sheets.element;
   const model = linkedChip(counts, compact ? CHIP_MAX.phone : CHIP_MAX.desktop);
   return <>
     <View style={{ flexDirection: "row", alignItems: "center", gap: compact ? 6 : 8, flexWrap: "wrap", marginTop: 2 }}>
-      {!!w.spec?.url && <SpecChip workspace={w} theme={theme} compact={compact} />}
+      {specCard ? <SpecCardChip workspace={w} theme={theme} compact={compact} /> : !!w.spec?.url && <SpecChip workspace={w} theme={theme} compact={compact} />}
       {model && <LinkedChip model={model} theme={theme} compact={compact} onPress={sheets.open} />}
     </View>
     {sheets.element}

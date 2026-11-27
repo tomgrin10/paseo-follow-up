@@ -949,6 +949,14 @@ export default function contribute(server: PluginServerContext) {
     });
   });
   // Cards (server/cards.ts): what an agent shows the developer in the workspace view. Main agents and contributors.
+  /** The workspace's copy of its card list (`shownCards`): a change moves its updatedAt, so open views read the cards again. */
+  const stampCards = async (workspaceId: string) => {
+    const shown = (await cards.list(workspaceId)).cards.map(c => ({ id: c.id, title: c.title, updatedAt: c.updatedAt, by: c.by, keep: c.keep }));
+    await store.mutateWorkspace(workspaceId, w => {
+      if (JSON.stringify(w.shownCards ?? []) === JSON.stringify(shown)) return;
+      w.shownCards = shown; w.updatedAt = new Date().toISOString();
+    }).catch(e => console.warn("[follow-up] couldn't note a workspace's cards:", e));
+  };
   handle(rpc.showRpc, async ({ agentId, ...input }, { paseo }) => {
     await requireReady();
     const workspaceId = await callerWorkspaceId(agentId, paseo);
@@ -956,6 +964,7 @@ export default function contribute(server: PluginServerContext) {
     const agent = (await paseo.agents.ref(agentId).refresh())?.agent;
     if (!agent?.cwd) throw new Error("show_card: can't find your workspace's folder.");
     const out = await cards.show(w.id, { agentId, title: agent.title ?? null, root: agent.cwd }, input);
+    await stampCards(w.id);
     feeds.workspaces();
     return { workspaceId: w.id, ...out };
   });
@@ -988,6 +997,7 @@ export default function contribute(server: PluginServerContext) {
     if (action === "remove") { const ok = await cards.remove(w.id, id); result = { ok, message: ok ? "Removed." : "That card is already gone." }; }
     else if (action === "undo") result = await cards.undo(w.id, id);
     else { const ok = await cards.keep(w.id, id, action === "keep"); result = { ok, message: ok ? (action === "keep" ? "Kept." : "No longer kept.") : "That card is gone." }; }
+    await stampCards(w.id);
     feeds.workspaces();
     if (action === "remove") void cards.sweep().catch(() => undefined);
     return result;
@@ -1654,6 +1664,8 @@ export default function contribute(server: PluginServerContext) {
     if (moved) console.warn(`[follow-up] moved ${moved} agent spec link${moved === 1 ? "" : "s"} into spec cards`);
     await cards.forget(new Set(state.workspaces.map(w => w.id)));
     await cards.sweep();
+    // The workspace's copy of its card list, for cards shown before it existed (or a migrated spec card).
+    for (const w of state.workspaces) if (w.shownCards?.length || (await cards.list(w.id)).cards.length) await stampCards(w.id);
   }).catch(() => undefined);
   // Settings → Morning brief (server/morning-brief.ts): the queue's settings, the brief's clock and this week's plan
   // link. The plan reader is the ranker's (built below); the skill registry is imported once.

@@ -55,6 +55,7 @@ import { SetupGate } from "./setup-gate";
 import { ViewSync } from "./view-store";
 import { RichText } from "./rich-text";
 import { ToastHost, useQuestionOpener } from "./toasts";
+import { useShownCards } from "./shown-cards";
 
 export { overviewKey, workspaceKey };
 
@@ -481,6 +482,11 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const workspaceCard = <WorkspaceCard workspace={w} theme={theme} compact={compact} openAgent={openAgent} browserReady={browser.data ? browser.data.ready : null} openOverview={openOverview} editSpec={() => setSpecOpen(true)} />;
   // Home is a screen, with no client state (useAgent throws there): agent titles read the short id.
   const extras = place === "home" ? <AgentTitleSource.Provider value={noClientState}>{workspaceCard}</AgentTitleSource.Provider> : workspaceCard;
+  // What the agents show (client/shown-cards.tsx): a card a question points at right under Needs you, the rest after
+  // Your questions in one column and in the movable pool in more.
+  const shown = useShownCards(w, { theme, compact, now, openQuestion: setQuestion });
+  const pointedCards = shown.pointed;
+  const shownCards = shown.others.length ? <>{shown.others.map(x => <View key={x.id}>{x.node}</View>)}</> : null;
   // Measured heights and the last placement (so a card whose height changes with its column doesn't flip back and forth).
   const [heights, setHeights] = useState<Record<string, number>>({});
   const placed = useRef<Record<string, number>>({});
@@ -493,14 +499,17 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const right = lay.columns === 2 ? 1 : undefined;
   const agentCol = waiting ? 1 : 0;
   const cards: { key: string; node: ReactNode; column?: number }[] = [
-    { key: "shipped", node: shipped, column: 0 }, ...(waiting ? [{ key: "needs", node: needs, column: 0 }] : []),
+    { key: "shipped", node: shipped, column: 0 }, ...(waiting ? [{ key: "needs", node: needs, column: 0 }, { key: "pointed", node: pointedCards, column: 0 }] : []),
     { key: "agent", node: agentCard, column: agentCol }, { key: "messages", node: messages, column: agentCol }, { key: "history", node: history, column: agentCol },
-    ...(waiting ? [] : [{ key: "needs", node: needs, column: right }]), { key: "questions", node: questions, column: right }, { key: "stacks", node: stacks, column: right },
-    { key: "tasks", node: tasks, column: right }, { key: "log", node: log }, { key: "extras", node: extras },
+    ...(waiting ? [] : [{ key: "needs", node: needs, column: right }, { key: "pointed", node: pointedCards, column: right }]), { key: "questions", node: questions, column: right }, { key: "stacks", node: stacks, column: right },
+    { key: "tasks", node: tasks, column: right },
+    // Each card its own slot in the pool (the shorter column); in one column they read together after Your questions.
+    ...(multi ? shown.others.map(x => ({ key: `card:${x.id}`, node: x.node })) : [{ key: "shown", node: shownCards }]),
+    { key: "log", node: log }, { key: "extras", node: extras },
   ].filter(x => !!x.node);
   const where = placeCards(cards, lay.columns, heights, placed.current);
   placed.current = where;
-  const one = <>{shipped}{needs}{agentCard}{messages}{questions}{history}{stacks}{tasks}{log}{extras}</>;
+  const one = <>{shipped}{needs}{pointedCards}{agentCard}{messages}{questions}{shownCards}{history}{stacks}{tasks}{log}{extras}</>;
   const columns = multi && <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
     {Array.from({ length: lay.columns }, (_, col) => <View key={col} style={{ flex: lay.columns === 2 ? (col === 0 ? AGENT_SHARE : 1 - AGENT_SHARE) : 1, minWidth: 0 }}>
       {cards.filter(x => where[x.key] === col).map(x => <Slot key={x.key} id={x.key} onHeight={onHeight}>{x.node}</Slot>)}

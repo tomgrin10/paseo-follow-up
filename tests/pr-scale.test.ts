@@ -221,6 +221,7 @@ const FIXED_CAPS: Record<string, string> = {
   "shared/cards.ts:rows:CARD_LIMITS.rows": "a card an agent writes (show_card): refused with the limit named, never grows with a workspace",
   "shared/cards.ts:series:CARD_LIMITS.series": "a card an agent writes (show_card): refused with the limit named, never grows with a workspace",
   "shared/cards.ts:values:CARD_LIMITS.points": "a card an agent writes (show_card): refused with the limit named, never grows with a workspace",
+  "shared/model.ts:shownCards:CARD_LIMITS.cards": "the workspace's own list of its cards: the card store refuses past CARD_LIMITS.cards (12)",
   "shared/about.ts:links:40": "producer slices to 40 (workspaceLinks, extractLinks)",
   "shared/about.ts:issues:20": "model output about one agent; producer keeps 5",
   "shared/about.ts:failed:6": "one per link source",

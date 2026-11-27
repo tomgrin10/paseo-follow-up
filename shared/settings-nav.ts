@@ -100,6 +100,8 @@ export const PANEL_FOLDS = {
   workspace: "panel.workspace",
   /** The agent card's Recent steps (and its reply box): open by default, folded by default in the side panel. */
   steps: "panel.steps",
+  /** What an agent shows (client/shown-cards.tsx): one fold per card, `panel.card.<id>`; a card a week old starts folded. */
+  cards: "panel.card",
 } as const;
 export type PanelFold = keyof typeof PANEL_FOLDS;
 

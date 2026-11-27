@@ -47,7 +47,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as the CHANGELOG's newest stable, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["menu-bounds", "tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "keyboard-room", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "peek", "pr-now", "panel-folds", "optimistic-answers", "workspace-view", "question-links", "gallery", "frames", "onboarding", "setup-popup", "advanced"];
+const REVIEW_SHOTS = ["menu-bounds", "tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "keyboard-room", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "peek", "pr-now", "panel-folds", "optimistic-answers", "workspace-view", "cards", "question-links", "gallery", "frames", "onboarding", "setup-popup", "advanced"];
 /** Pasted images and their Add image button share one harness setup (an Overseer and the fixture provider taking images). */
 const PASTE_LIKE = only => only.includes("paste-images") || only.includes("attach-images");
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
@@ -88,7 +88,7 @@ const paseo016 = /(^|\D)0\.1[6-9]\.\d+/.test(paseoVersion ?? "");
 if (only.includes("sidebar") && only.some(n => n !== "sidebar")) fail("shoot --only sidebar on its own, with HARNESS_PASEO=0.16");
 if (only.includes("sidebar") && !paseo016) fail(`the sidebar shot needs the Paseo CLI 0.16.x (found ${paseoVersion ?? "none"}); run with HARNESS_PASEO=0.16`);
 if (only.includes("feeds") && only.length > 1) fail("run --only feeds on its own (npm run test:feeds)");
-const paseoOk = only.includes("menu-bounds") || only.includes("settings-tabs") || only.includes("new") || only.includes("onboarding") || PASTE_LIKE(only) || only.includes("gallery") || only.includes("search-focus") || only.includes("frames") || only.includes("your-questions") || only.includes("peek") || only.includes("keyboard-room") || argv.includes("--parity-review") ? /(^|\D)0\.1[5-7]\.\d+/ : only.includes("sidebar") || only.includes("feeds") || only.includes("put-in-chat") || argv.includes("--sidebar-review") || argv.includes("--overseer-review") || argv.includes("--keys-review") || argv.includes("--rank-review") || argv.includes("--sortfoot-review") || argv.includes("--secsearch-review") || argv.includes("--github-wait-review") ? /(^|\D)0\.1[56]\.\d+/ : /(^|\D)0\.15\.\d+/;
+const paseoOk = only.includes("menu-bounds") || only.includes("settings-tabs") || only.includes("new") || only.includes("onboarding") || PASTE_LIKE(only) || only.includes("gallery") || only.includes("search-focus") || only.includes("frames") || only.includes("your-questions") || only.includes("cards") || only.includes("peek") || only.includes("keyboard-room") || argv.includes("--parity-review") ? /(^|\D)0\.1[5-7]\.\d+/ : only.includes("sidebar") || only.includes("feeds") || only.includes("put-in-chat") || argv.includes("--sidebar-review") || argv.includes("--overseer-review") || argv.includes("--keys-review") || argv.includes("--rank-review") || argv.includes("--sortfoot-review") || argv.includes("--secsearch-review") || argv.includes("--github-wait-review") ? /(^|\D)0\.1[56]\.\d+/ : /(^|\D)0\.15\.\d+/;
 if (!paseoVersion || !paseoOk.test(paseoVersion)) fail(`needs the Paseo CLI 0.15.x on PATH (found ${paseoVersion ?? "none"}); run through harness-slot or put ~/paseo-harness/cli/0.15.4/bin first`);
 if (changelogArg && !existsSync(changelogArg)) fail(`--whats-new-changelog: no file at ${changelogArg}`);
 const optimiser = await findOptimiser();
@@ -468,8 +468,8 @@ const WORKSPACES = [
       rpc("follow.register-pr", { repo: "example/app", number: 143, stack: "Billing retries", parentNumber: 142 }),
       rpc("follow.obligation", { title: "Check retries in staging after the deploy", status: "waiting", afterPrs: ["example/app#143"] }),
       rpc("follow.obligation", { title: "Watch the dunning email rate for a day after the deploy", status: "waiting", afterPrs: ["example/app#143"] }),
-      // Linked items: a spec and what the agent linked, each with why (Linear keys are confirmed by the fake mcpproxy).
-      rpc("follow.set-spec", { url: "https://example.com/docs/billing/retry-spec", title: "Charge retry spec" }),
+      // Linked items: a spec (the agent's `spec` card; set_spec retired in 2.6) and what the agent linked, each with why (Linear keys are confirmed by the fake mcpproxy).
+      rpc("follow.show", { id: "spec", title: "Charge retry spec", blocks: [{ type: "text", md: "Retry soft declines 3 times with backoff (1 h, 6 h, 24 h), then send the dunning email once." }, { type: "files", items: [{ url: "https://example.com/docs/billing/retry-spec", label: "Charge retry spec" }] }] }),
       rpc("follow.link-item", { ref: "APP-142", why: "The issue this workspace delivers" }),
       rpc("follow.link-item", { ref: "APP-139", why: "Retries must not double-charge; this was the last time they did" }),
       rpc("follow.link-item", { ref: "https://example.slack.com/archives/C0BILLING1/p1772614800000100", title: "#billing: which declines are soft?", why: "Where support asked for declined-card retries" }),
@@ -796,7 +796,7 @@ async function seed({ call, home }) {
   if (only.includes("review-mode") || only.includes("pr-link")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }] });
   // reviewers-click: Ravi and Mina review example/app, so each PR's row reads "Add reviewers to #N: Ravi and Mina".
   if (only.includes("reviewers-click")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }, { login: "mina", name: "Mina" }] });
-  const specs = [...WORKSPACES.filter(w => !only.includes("pr-now") || ["audit", "billing"].includes(w.key)).filter(w => !(argv.includes("--rename-fixup-review") || only.includes("local-titles")) || ["audit", "billing"].includes(w.key)), ...(only.includes("needs-you-states") || only.includes("panel-folds") || only.includes("tasks-view") || only.includes("own-answer") || only.includes("optimistic-answers") || only.includes("keyboard-room") || only.includes("more-context") || only.includes("dismiss") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") || PASTE_LIKE(only) ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") || only.includes("optimistic-answers") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") || only.includes("dismiss") ? MERGE_CLICK_STATES : []), ...(only.includes("reviewers-click") ? REVIEWERS_CLICK_STATES : []), ...(only.includes("pr-scale") ? PR_SCALE_STATES : []), ...(only.includes("batch-churn") ? BATCH_CHURN_STATES : []), ...(only.includes("scheduled-tasks") ? SCHEDULED_STATES : []), ...(only.includes("paged-lists") ? PAGED_STATES : []), ...(only.includes("now-line") ? NOW_LINE_STATES : []), ...(only.includes("peek") ? PEEK_STATES : []), ...(only.includes("pr-now") ? PR_NOW_STATES : []), ...(only.includes("question-links") ? QL_STATES : [])];
+  const specs = [...WORKSPACES.filter(w => !only.includes("pr-now") || ["audit", "billing"].includes(w.key)).filter(w => !(argv.includes("--rename-fixup-review") || only.includes("local-titles")) || ["audit", "billing"].includes(w.key)), ...(only.includes("needs-you-states") || only.includes("panel-folds") || only.includes("tasks-view") || only.includes("own-answer") || only.includes("optimistic-answers") || only.includes("keyboard-room") || only.includes("more-context") || only.includes("dismiss") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") || PASTE_LIKE(only) ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") || only.includes("optimistic-answers") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") || only.includes("dismiss") ? MERGE_CLICK_STATES : []), ...(only.includes("reviewers-click") ? REVIEWERS_CLICK_STATES : []), ...(only.includes("pr-scale") ? PR_SCALE_STATES : []), ...(only.includes("batch-churn") ? BATCH_CHURN_STATES : []), ...(only.includes("scheduled-tasks") ? SCHEDULED_STATES : []), ...(only.includes("paged-lists") ? PAGED_STATES : []), ...(only.includes("now-line") ? NOW_LINE_STATES : []), ...(only.includes("peek") ? PEEK_STATES : []), ...(only.includes("pr-now") ? PR_NOW_STATES : []), ...(only.includes("question-links") ? QL_STATES : []), ...(only.includes("cards") ? CARD_STATES : [])];
   // Keyboard shots need the answer workspace and the Home fixtures, without unrelated held repair turns.
   if (only.includes("keyboard-room")) specs.splice(0, specs.length, ...specs.filter(w => ["audit", "billing", "ny-lone"].includes(w.key)));
   // Geometry checks need one question, one repair and one permission row, not the full README inventory.
@@ -2397,6 +2397,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   if (only.includes("panel-folds")) await panelFoldShots({ shoot });
   if (only.includes("question-links")) await questionLinksShots({ shoot, call, seeded, home });
   if (only.includes("workspace-view")) await workspaceViewShots({ shoot, call, seeded });
+  if (only.includes("cards")) await cardsShots({ shoot, call, seeded });
   if (only.includes("own-answer")) await ownAnswerShots({ shoot });
   if (only.includes("optimistic-answers")) await optimisticAnswerShots({ shoot });
   if (only.includes("keyboard-room")) await keyboardRoomShots({ shoot, call, home });
@@ -4705,6 +4706,230 @@ async function nowLineShots({ shoot }) {
     });
   }
 }
+/**
+ * cards only (what an agent shows the developer, docs/cards.md): two workspaces. "Checkout redesign" (idle agent) holds
+ * the seven use cases of the design and a card at every limit; a question points at its renders card. "Browser matrix
+ * run" holds a running turn, so its matrix reads live. All data fictional; images are drawn here (fictional renders).
+ */
+const CARD_STATES = [
+  { key: "cards-checkout", project: "app", title: "Checkout redesign", minute: 196, prompt: "APP-230: redesign checkout and show me the evidence as you go.",
+    steps: [rpc("follow.enroll", { goal: "APP-230 Checkout redesign" }), bash("pnpm test checkout", "pass 212"), msg("The renders, the benchmark, the matrix and the findings are in the view.")] },
+  { key: "cards-live", project: "app", title: "Browser matrix run", minute: 197, prompt: "APP-231: run the browser matrix for the new checkout.",
+    steps: [rpc("follow.enroll", { goal: "APP-231 Browser matrix for checkout" }), think("Running the matrix one browser at a time."), tool("Bash", { type: "shell", command: "pnpm e2e --project=matrix" }, "running"), { hold: true }], waitFor: "running" },
+];
+
+/** A PNG of `width` x `height` from filled rectangles (no dependencies): a fictional screenshot. */
+async function drawPng(width, height, rects, bg) {
+  const { deflateSync } = await import("node:zlib");
+  const row = 1 + width * 3; const raw = Buffer.alloc(row * height);
+  const fill = (x0, y0, w, h, [r, g, b]) => { for (let y = Math.max(0, y0); y < Math.min(height, y0 + h); y++) for (let x = Math.max(0, x0); x < Math.min(width, x0 + w); x++) { const o = y * row + 1 + x * 3; raw[o] = r; raw[o + 1] = g; raw[o + 2] = b; } };
+  fill(0, 0, width, height, bg);
+  for (const [x, y, w, h, color] of rects) fill(Math.round(x), Math.round(y), Math.round(w), Math.round(h), color);
+  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = buf => { let c = 0xffffffff; for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type, data) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const td = Buffer.concat([Buffer.from(type), data]); const c = Buffer.alloc(4); c.writeUInt32BE(crc(td)); return Buffer.concat([len, td, c]); };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(width, 0); ihdr.writeUInt32BE(height, 4); ihdr[8] = 8; ihdr[9] = 2;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
+}
+const PALETTES = { old: { bg: [246, 244, 239], fg: [43, 43, 43], mu: [170, 165, 155], ac: [58, 125, 92], card: [255, 255, 255] }, new: { bg: [13, 17, 23], fg: [232, 237, 243], mu: [70, 84, 100], ac: [57, 211, 160], card: [22, 29, 39] } };
+/** A fictional slide: a title, a list panel and a bar chart, varied by `n`. */
+const slideRects = (W, H, p, n) => {
+  const u = W / 320;
+  const r = [[18 * u, 18 * u, (110 + n * 7) * u, 10 * u, p.fg], [18 * u, 34 * u, 90 * u, 5 * u, p.mu], [18 * u, 54 * u, 140 * u, 108 * u, p.card], [172 * u, 54 * u, 130 * u, 108 * u, p.card]];
+  for (let i = 0; i < 4; i++) r.push([28 * u, (66 + i * 23) * u, 7 * u, 7 * u, i === n % 4 ? p.ac : p.mu], [42 * u, (66 + i * 23) * u, (60 + (n * 13 + i * 17) % 50) * u, 6 * u, p.fg]);
+  for (let i = 0; i < 6; i++) { const h = (20 + (n * 19 + i * 23) % 60) * u; r.push([(184 + i * 18) * u, 150 * u - h, 11 * u, h, i === 4 ? p.ac : p.mu]); }
+  return r;
+};
+async function writeCardFixtures(dir) {
+  await fs.mkdir(join(dir, "ui"), { recursive: true });
+  const put = async (name, png) => fs.writeFile(join(dir, "ui", name), png);
+  for (let n = 1; n <= 12; n++) {
+    await put(`before-${n}.png`, await drawPng(960, 540, slideRects(960, 540, PALETTES.old, n), PALETTES.old.bg));
+    await put(`after-${n}.png`, await drawPng(960, 540, slideRects(960, 540, PALETTES.new, n), PALETTES.new.bg));
+  }
+  // The limits: a tall phone screenshot, a wide banner, a tiny icon.
+  const p = PALETTES.new;
+  await put("tall.png", await drawPng(390, 2400, Array.from({ length: 30 }, (_, i) => [16, 40 + i * 78, 358, 60, i % 5 ? p.card : p.ac]), p.bg));
+  await put("wide.png", await drawPng(2400, 160, Array.from({ length: 12 }, (_, i) => [20 + i * 198, 30, 170, 100, i % 3 ? p.card : p.ac]), p.bg));
+  await put("tiny.png", await drawPng(24, 24, [[4, 4, 16, 16, p.ac]], p.bg));
+  // A video: an MP4's first box is enough for the card's poster (it plays on desktop only when real).
+  await put("demo.mp4", Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from("ftypisom"), Buffer.alloc(2048, 1)]));
+  await fs.writeFile(join(dir, "ui", "load-test-report.md"), "# Load test\n\nFictional report.\n".repeat(40));
+  await fs.writeFile(join(dir, "ui", "k6-results.zip"), Buffer.alloc(40_000, 7));
+}
+
+const LONG_WORD = "unbrokenidentifierthatkeepsgoingwithoutanyspaceorhyphenatall_".repeat(2);
+const cardSpecs = () => {
+  const slides = ["Cover", "Answer in seconds", "The overview", "Repairs", "It keeps going", "Catch up"];
+  const st = s => ({ state: s });
+  return [
+    { id: "renders", title: "README slides, dark look", blocks: [
+      { type: "text", md: "All six slides redone in the dark look with made-up data. **2 and 5 changed this round**; the rest are as you saw them." },
+      { type: "media", layout: "pairs", items: slides.map((s, i) => ({ src: `ui/after-${i + 1}.png`, before: `ui/before-${i + 1}.png`, label: `${i + 1} · ${s}`, ...([1, 4].includes(i) ? { caption: "changed" } : {}) })) },
+      { type: "media", items: [{ src: "ui/demo.mp4", label: "Demo video", caption: "recorded before slide 5's second task" }] }] },
+    { id: "queue", title: "Email sends: three ways to queue them", blocks: [
+      { type: "table", columns: ["", "A · Postgres table", "B · Redis stream", "C · Managed queue"], recommend: 1,
+        rows: [["Monthly cost", "$0", "$18", "$40–60"], ["Send delay, p95", "4 s", "0.3 s", "1 s"], ["New things to run", "none", "Redis", "an account"], ["Retries", "we write them", "we write them", "built in"], ["Work", "1 day", "2 days", "1 day"]] },
+      { type: "text", md: "Costs at today's 40k sends a day. A is enough until about 500k a day." }] },
+    { id: "perf", title: "Checkout API latency, before and after the cache", blocks: [
+      { type: "chart", kind: "bars", labels: ["p50", "p95", "p99"], series: [{ name: "Before (main)", values: [182, 640, 1310] }, { name: "After (#412)", values: [96, 301, 512] }], unit: "ms", better: "lower" },
+      { type: "table", columns: ["Endpoint", "Before p95", "After p95", "Change"], rows: [["POST /checkout", "640 ms", "301 ms", { value: "−53%", tone: "good" }], ["GET /cart", "210 ms", "118 ms", { value: "−44%", tone: "good" }], ["POST /coupon", "95 ms", "102 ms", { value: "+7%", tone: "bad" }]] },
+      { type: "files", items: [{ url: "https://example.com/acme/flame-after", label: "Flame graph, after", note: "Interactive page" }] }] },
+    { id: "matrix", title: "Browser and OS matrix for the new checkout", blocks: [
+      { type: "table", columns: ["", "Chrome", "Firefox", "Safari", "Edge"], rows: [["macOS 15", st("done"), st("done"), st("done"), st("done")], ["Windows 11", st("done"), st("done"), st("skipped"), st("done")], ["Ubuntu 24", st("done"), st("failed"), st("skipped"), st("running")], ["iOS 18", st("skipped"), st("skipped"), st("running"), st("skipped")], ["Android 15", st("running"), st("todo"), st("skipped"), st("todo")], ["iPadOS 18", st("skipped"), st("skipped"), st("todo"), st("skipped")]] },
+      { type: "text", md: "Firefox on Ubuntu: the coupon field loses focus after the first key. Looking at it now." }] },
+    { id: "migrate", title: "Moving invoices to the new schema", blocks: [
+      { type: "list", items: [{ state: "done", text: "Snapshot the invoices table", at: "09:02" }, { state: "done", text: "Dual-write on", detail: "Both schemas get every new invoice", at: "09:10" }, { state: "running", text: "Backfill old rows", detail: "812,400 of 1,204,000 · 2,100 rows a second · 0 errors" }, { state: "todo", text: "Compare both schemas on 10k random rows" }, { state: "todo", text: "Switch reads, then stop dual-write", detail: "Waits for you: Q1" }] },
+      { type: "chart", kind: "line", labels: ["09:10", "09:20", "09:30", "09:40", "09:50", "10:00", "10:10", "10:20", "10:30", "10:40", "10:50", "11:00", "now"], series: [{ name: "Rows moved", values: [0, 40, 95, 160, 230, 300, 380, 450, 520, 600, 680, 745, 812] }], unit: "k" }] },
+    { id: "findings", title: "Why some customers were charged twice", blocks: [
+      { type: "list", ranked: true, items: [
+        { text: "The retry fires before the gateway's answer arrives", tag: "likely", detail: "The timeout is 8 s; the gateway answers in 9–12 s under load. 41 of 43 doubles match.", refs: ["src/charge.ts:88", "https://example.com/acme/logs/charge-doubles"] },
+        { text: "No idempotency key on retries", tag: "adds to it", detail: "Each retry is a new charge to the gateway.", refs: ["src/gateway/client.ts:140"] },
+        { text: "Webhook replays after deploys", tag: "rare", detail: "2 of 43 doubles, both within a minute of a deploy.", refs: ["src/webhooks/charge.ts:31"] }] },
+      { type: "code", ref: "src/charge.ts:84-92", lang: "ts", mark: [88], text: "const res = await withTimeout(gateway.charge(card, amount), 8_000)\n  .catch(async (e) => {\n    if (e instanceof TimeoutError) {\n      log.warn(\"charge timed out, retrying\")\n      return gateway.charge(card, amount) // no key: a second charge\n    }\n    throw e\n  })\nreturn res" }] },
+    { id: "report", title: "Load test report, Black Friday traffic", blocks: [
+      { type: "text", md: ("At 3× last year's peak (1,800 checkouts a minute) the new checkout held: p95 stayed under 400 ms and nothing failed. **The coupon service is the next limit**: it saturates at about 2,100 a minute.\n\nWhat I'd do before the sale: raise the coupon service to 4 instances and cache coupon lookups for 30 s.\n\n") + "Method: k6 from three regions, a 40 minute ramp, 20 minutes at peak, then a soak. Each region ran the same script against a staging copy of checkout with production-shaped data. ".repeat(14) },
+      { type: "media", items: [{ src: "ui/demo.mp4", label: "The run", caption: "sped up 10× with the live dashboard" }] },
+      { type: "files", items: [{ path: "ui/load-test-report.md", label: "load-test-report.md", note: "The full report" }, { path: "ui/k6-results.zip", note: "Raw results from the three regions" }, { path: "ui/after-1.png", label: "Dashboard at peak" }, { path: "ui/gone.csv", label: "Per-minute export" }] }] },
+    { id: "limits", title: `Every block at its limit, with a title long enough to wrap ${LONG_WORD}`.slice(0, 80), blocks: [
+      { type: "text", md: (`${LONG_WORD} `.repeat(3) + "A paragraph that goes on. ".repeat(160)).slice(0, 4000) },
+      { type: "media", layout: "pairs", items: Array.from({ length: 12 }, (_, i) => ({ src: `ui/after-${i + 1}.png`, before: `ui/before-${i + 1}.png`, label: `Pair ${i + 1} ${i === 3 ? LONG_WORD : ""}`.trim().slice(0, 80) })) },
+      { type: "media", layout: "grid", items: [{ src: "ui/tall.png", label: "A tall screenshot" }, { src: "ui/wide.png", label: "A wide banner" }, { src: "ui/tiny.png", label: "A tiny icon" }, { src: "ui/missing.png", label: "Moved since" }, ...Array.from({ length: 8 }, (_, i) => ({ src: `ui/after-${i + 1}.png`, label: `Screen ${i + 1}` }))] },
+      { type: "table", columns: ["Row", ...Array.from({ length: 7 }, (_, j) => `Option ${j + 1} with a longer header`)], rows: Array.from({ length: 50 }, (_, i) => [`Row ${i + 1} ${i === 2 ? LONG_WORD : ""}`.trim(), ...Array.from({ length: 7 }, (_, j) => j === 2 ? { state: ["done", "failed", "running", "todo", "skipped", "warning"][i % 6] } : j === 5 ? (i * 37.5).toFixed(1) + " ms" : `cell ${i}.${j}`)]) },
+      { type: "facts", items: Array.from({ length: 12 }, (_, i) => [`Fact ${i + 1}${i === 4 ? ` ${LONG_WORD}` : ""}`.slice(0, 40), i === 2 ? LONG_WORD.slice(0, 80) : `${(i + 1) * 1234} rows`, i % 4 === 0 ? "good" : i % 4 === 1 ? "bad" : undefined].filter(Boolean)) },
+      { type: "list", items: Array.from({ length: 30 }, (_, i) => ({ text: `Step ${i + 1}${i === 1 ? ` ${LONG_WORD}` : ""}`.slice(0, 300), state: ["done", "running", "failed", "warning", "todo", "skipped"][i % 6], detail: i % 3 ? undefined : "Some detail about the step.", refs: i === 1 ? [`src/${LONG_WORD}.ts:12`, "https://example.com/acme/a/very/long/path/that/keeps/going/on/and/on"] : undefined, tag: i === 0 ? "tag" : undefined, at: i % 2 ? "09:0" + (i % 10) : undefined })) },
+      { type: "chart", kind: "line", labels: Array.from({ length: 60 }, (_, i) => `t${i}`), series: [{ name: "Rows", values: Array.from({ length: 60 }, (_, i) => Math.round(1000 * Math.sin(i / 8) ** 2 + i * 20)) }], unit: "rows" },
+      { type: "code", ref: "src/long.ts:1-60", lang: "ts", diff: true, mark: [5], text: Array.from({ length: 60 }, (_, i) => i === 3 ? `+ const ${LONG_WORD} = ${LONG_WORD}` : i % 7 === 0 ? `- old line ${i}` : `  line ${i} of the excerpt`).join("\n") },
+      { type: "files", items: Array.from({ length: 20 }, (_, i) => i === 0 ? { url: "https://example.com/acme/a/very/long/path/that/keeps/going/on/and/on/and/on/and/on/report", label: LONG_WORD.slice(0, 120) } : { path: i === 1 ? "ui/gone-for-good.md" : `ui/after-${(i % 12) + 1}.png`, note: i === 2 ? LONG_WORD.slice(0, 200) : undefined }) }] },
+  ];
+};
+
+/**
+ * What an agent shows (`--only cards`, docs/cards.md): every card at every width the workspace view supports (phones
+ * 360 and 390, the side panel at 400, the tab at about 1000, 1440 and 1900, Home's pane), light and dark; folded; the
+ * ⋯ menu and Remove; Open large; a phone opening the pointed card from its question with the answers docked; the phone
+ * before/after viewer. Each shot runs the guard: no page or card overflows sideways, nothing inside a card runs past
+ * its edge (a table's own scroller aside), every folded card fits its height budget. Writes cards.json.
+ */
+async function cardsShots({ shoot, call, seeded }) {
+  const checkout = seeded.workspaces.find(w => w.key === "cards-checkout");
+  const live = seeded.workspaces.find(w => w.key === "cards-live");
+  const spec = CARD_STATES[0];
+  await writeCardFixtures(join(tmpdir(), "follow-up-shots-fixture", "app"));
+  // The old card first, nine days back (it starts folded with its date); then every other card now.
+  const clock = JSON.parse(await fs.readFile(clockFile, "utf8")); const nowFake = Math.round(clock.fake + (Date.now() - clock.real) * clock.rate);
+  await setDaemonClock(nowFake - 9 * 24 * 3600_000);
+  await call("follow.show", { agentId: checkout.agentId, id: "notes", title: "Release notes draft", blocks: [{ type: "text", md: "The notes for the checkout release, as of last week." }, { type: "list", items: [{ state: "done", text: "Draft" }, { state: "done", text: "Review" }] }] });
+  await setDaemonClock(nowFake);
+  for (const c of cardSpecs()) { const r = await call("follow.show", { agentId: checkout.agentId, ...c }); log(`cards: showed ${c.id} (${r.blocks} blocks, ${r.bytes} bytes${r.notes.length ? `; ${r.notes.join("; ")}` : ""})`); }
+  await call("follow.ask-question", { agentId: checkout.agentId, title: "Ship the dark slides", question: "Ship the dark slides?", options: [{ letter: "A", label: "Ship it" }, { letter: "B", label: "Changes first" }], recommend: "A", links: [{ card: "renders" }] });
+  // The live matrix: its agent is in a turn, and it changed a row (the blue edge).
+  const matrix = cardSpecs().find(c => c.id === "matrix");
+  await call("follow.show", { agentId: live.agentId, id: "matrix", title: matrix.title, blocks: matrix.blocks });
+  await call("follow.show", { agentId: live.agentId, id: "matrix", blocks: [{ ...matrix.blocks[0], id: matrix.blocks[0].id ?? "b1" }] }).catch(() => undefined);
+  const results = [];
+  const guard = name => async page => {
+    await page.waitForTimeout(600);
+    const g = await page.evaluate(() => {
+      const vw = document.documentElement.clientWidth;
+      const cards = [];
+      for (const card of document.querySelectorAll("[data-shown-card]")) {
+        if (!card.getClientRects().length || !card.checkVisibility()) continue;
+        const r = card.getBoundingClientRect();
+        const view = card.closest('[data-testid^="follow-up-view-"]') ?? document.body; const vr = view.getBoundingClientRect();
+        let worst = 0, who = null;
+        for (const el of card.querySelectorAll("*")) {
+          if (!el.getClientRects().length) continue;
+          let p = el.parentElement, clipped = false;
+          while (p && p !== card) { const s = getComputedStyle(p); if (["auto", "scroll", "hidden", "clip"].includes(s.overflowX)) { clipped = true; break; } p = p.parentElement; }
+          if (clipped) continue;
+          const over = el.getBoundingClientRect().right - r.right;
+          if (over > worst) { worst = over; who = `${el.tagName} ${(el.textContent || "").slice(0, 40)}`; }
+        }
+        // Where the worst one sits: each ancestor up to the card with its width and overflow, so a failure says which box let it out.
+        let chain = "";
+        if (worst > 1) { const el = [...card.querySelectorAll("*")].find(e => `${e.tagName} ${(e.textContent || "").slice(0, 40)}` === who && Math.abs(e.getBoundingClientRect().right - r.right - worst) < 0.5); for (let p = el?.parentElement, n = 0; p && p !== card && n < 8; p = p.parentElement, n++) { const s = getComputedStyle(p); chain += ` < ${p.tagName}[w${Math.round(p.getBoundingClientRect().width)} ox:${s.overflowX} ${s.display}${s.flexDirection === "row" ? " row" : ""}]`; } }
+        // A table marked as scrolling sideways must hold a real scroller whose content is wider than it (else its last columns are cut, unreachable).
+        const stuck = [...card.querySelectorAll('[aria-label$="scrolls sideways"]')].filter(t => ![...t.querySelectorAll("*")].some(e => ["auto", "scroll"].includes(getComputedStyle(e).overflowX) && e.scrollWidth > e.clientWidth + 1)).length;
+        cards.push({ id: card.dataset.shownCard, folded: card.dataset.folded === "1", budget: Number(card.dataset.budget), width: Math.round(r.width), height: Math.round(r.height), past: Math.round(r.right - Math.min(vr.right, vw)), overflow: Math.round(worst), who: who && `${who}${chain}`, stuck });
+      }
+      return { page: document.documentElement.scrollWidth - vw, cards };
+    });
+    const bad = [];
+    if (g.page > 0) bad.push(`the page scrolls sideways by ${g.page}px`);
+    for (const c of g.cards) {
+      if (c.past > 1) bad.push(`${c.id} runs ${c.past}px past the view`);
+      if (c.overflow > 1) bad.push(`${c.id}: ${c.who} runs ${c.overflow}px past the card`);
+      if (c.stuck) bad.push(`${c.id}: ${c.stuck} wide table(s) can't scroll sideways`);
+      if (c.folded && c.height > c.budget) bad.push(`${c.id} is ${c.height}px tall folded (budget ${c.budget})`);
+    }
+    results.push({ shot: name, cards: g.cards.length, ok: !bad.length, bad, sizes: g.cards.map(c => `${c.id}:${c.width}x${c.height}${c.folded ? " folded" : ""}`) });
+    log(`cards ${name}: ${g.cards.length} cards ${bad.length ? `FAILED ${bad.join("; ")}` : "ok"}`);
+    if (!g.cards.length) throw new Error(`${name}: no card on screen`);
+  };
+  const card = (page, id) => page.locator(`[data-shown-card="${id}"]`).filter({ visible: true }).first();
+  const toCard = async (page, id) => { await card(page, id).waitFor({ timeout: 60_000 }); await card(page, id).evaluate(el => el.scrollIntoView({ block: "start" })); await page.waitForTimeout(500); };
+  const foldAll = async (page, want) => {
+    for (const b of await page.locator("[data-shown-card] [aria-expanded]").all()) if (await b.isVisible() && (await b.getAttribute("aria-expanded")) !== String(want)) { await b.click(); await page.waitForTimeout(80); }
+  };
+  const tab = async (page, width) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await openChat(page, spec.title, spec.prompt);
+    await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+    await card(page, "renders").waitFor({ timeout: 60_000 });
+  };
+  const sidePanel = async page => {
+    await page.setViewportSize({ ...DESKTOP, height: 1000 });
+    await openChat(page, spec.title, spec.prompt);
+    await page.keyboard.press("Control+k"); await page.keyboard.type("Follow-up: open in the side panel");
+    await page.getByText("Follow-up: open in the side panel").first().waitFor(); await page.keyboard.press("Enter");
+    await card(page, "renders").waitFor({ timeout: 60_000 });
+  };
+  const phoneHome = async (page, size) => {
+    await openHome(page); await page.setViewportSize(size); await (await homeRow(page, spec.title)).click();
+    await card(page, "renders").waitFor({ timeout: 60_000 });
+  };
+  const IDS = ["renders", "queue", "perf", "matrix", "migrate", "findings", "report", "limits", "notes"];
+  for (const theme of ["light", "dark"]) {
+    // The tab: window less Paseo's sidebar (320): about 1000, 1440 and 1900 wide (two, two and three columns).
+    for (const width of [1320, 1760, 2220]) {
+      await shoot(`cards-tab-${width - 320}-${theme}`, { width, height: 1000 }, theme, async page => { await tab(page, width); await guard(`tab-${width - 320}-${theme}`)(page); });
+      await shoot(`cards-tab-${width - 320}-folded-${theme}`, { width, height: 1000 }, theme, async page => { await tab(page, width); await foldAll(page, false); await guard(`tab-${width - 320}-folded-${theme}`)(page); await foldAll(page, true); });
+    }
+    for (const id of ["limits", "report", "findings"]) await shoot(`cards-tab-1000-${id}-${theme}`, { width: 1320, height: 1000 }, theme, async page => { await tab(page, 1320); await toCard(page, id); await guard(`tab-1000-${id}-${theme}`)(page); });
+    await shoot(`cards-panel-${theme}`, { ...DESKTOP, height: 1000 }, theme, async page => { await sidePanel(page); await guard(`panel-${theme}`)(page); });
+    for (const id of IDS) await shoot(`cards-panel-${id}-${theme}`, { ...DESKTOP, height: 1000 }, theme, async page => { await sidePanel(page); await toCard(page, id); await guard(`panel-${id}-${theme}`)(page); });
+    await shoot(`cards-panel-folded-${theme}`, { ...DESKTOP, height: 1000 }, theme, async page => { await sidePanel(page); await foldAll(page, false); await guard(`panel-folded-${theme}`)(page); await foldAll(page, true); });
+    await shoot(`cards-home-${theme}`, { ...DESKTOP, height: 1000 }, theme, async page => { await openHome(page); await (await homeRow(page, spec.title)).click(); await card(page, "renders").waitFor({ timeout: 60_000 }); await guard(`home-${theme}`)(page); });
+    for (const phone of [{ width: 360, height: 780 }, PHONE]) for (const id of IDS) {
+      await shoot(`cards-phone-${phone.width}-${id}-${theme}`, phone, theme, async page => { await phoneHome(page, phone); await toCard(page, id); await guard(`phone-${phone.width}-${id}-${theme}`)(page); });
+    }
+    await shoot(`cards-phone-360-folded-${theme}`, { width: 360, height: 780 }, theme, async page => { await phoneHome(page, { width: 360, height: 780 }); await foldAll(page, false); await toCard(page, "renders"); await guard(`phone-360-folded-${theme}`)(page); await foldAll(page, true); });
+    // The live matrix (green "live"), on the workspace whose agent is in a turn.
+    await shoot(`cards-live-${theme}`, { ...DESKTOP, height: 1000 }, theme, async page => {
+      await page.setViewportSize({ ...DESKTOP, height: 1000 });
+      await openChat(page, CARD_STATES[1].title, CARD_STATES[1].prompt);
+      await page.keyboard.press("Control+k"); await page.keyboard.type("Follow-up: open in the side panel");
+      await page.getByText("Follow-up: open in the side panel").first().waitFor(); await page.keyboard.press("Enter");
+      await toCard(page, "matrix"); await guard(`live-${theme}`)(page);
+    });
+    // The ⋯ menu, then Remove's confirm in place.
+    await shoot(`cards-menu-${theme}`, { ...DESKTOP, height: 1000 }, theme, async page => { await sidePanel(page); await toCard(page, "perf"); await page.getByRole("button", { name: /^More actions for Checkout API latency/ }).first().click(); await page.getByText("Open large").first().waitFor(); });
+    await shoot(`cards-remove-confirm-${theme}`, { ...DESKTOP, height: 1000 }, theme, async page => { await sidePanel(page); await toCard(page, "perf"); await page.getByRole("button", { name: /^More actions for Checkout API latency/ }).first().click(); await page.getByText("Remove", { exact: true }).first().click(); await page.getByText(/The agent isn't told/).first().waitFor(); });
+    // Open large: the card's own screen, with the question docked under it.
+    await shoot(`cards-large-${theme}`, { ...DESKTOP, height: 1000 }, theme, async page => { await sidePanel(page); await page.getByRole("button", { name: /^More actions for README slides/ }).first().click(); await page.getByText("Open large").first().click(); await page.locator('[data-shown-card="renders"]').filter({ visible: true }).first().waitFor({ timeout: 60_000 }); await page.waitForTimeout(800); await guard(`large-${theme}`)(page); });
+    // A phone: the question's card row opens the card full screen, its answers docked.
+    await shoot(`cards-phone-question-${theme}`, PHONE, theme, async page => { await phoneHome(page, PHONE); await page.getByRole("link", { name: /^README slides, dark look/ }).filter({ visible: true }).first().click(); await page.locator('[data-shown-card="renders"]').filter({ visible: true }).first().waitFor({ timeout: 60_000 }); await page.waitForTimeout(800); await guard(`phone-question-${theme}`)(page); });
+    // The phone viewer: a pair, then held to see the before.
+    await shoot(`cards-phone-viewer-${theme}`, { width: 360, height: 780 }, theme, async page => { await phoneHome(page, { width: 360, height: 780 }); await toCard(page, "renders"); await page.getByRole("button", { name: /^2 · Answer in seconds, after/ }).filter({ visible: true }).first().click(); await page.getByText("Press and hold the image").first().waitFor(); await page.waitForTimeout(800); });
+    await shoot(`cards-phone-viewer-before-${theme}`, { width: 360, height: 780 }, theme, async page => { await phoneHome(page, { width: 360, height: 780 }); await toCard(page, "renders"); await page.getByRole("button", { name: /^2 · Answer in seconds, after/ }).filter({ visible: true }).first().click(); await page.getByRole("radio", { name: "Before" }).last().click(); await page.waitForTimeout(800); });
+  }
+  await fs.writeFile(join(out, "cards.json"), JSON.stringify(results, null, 2));
+  const failed = results.filter(r => !r.ok);
+  log(`cards: ${results.length - failed.length}/${results.length} guard checks passed`);
+  if (failed.length) throw new Error(`cards guard: ${failed.map(f => `${f.shot}: ${f.bad.join("; ")}`).join(" | ")}`);
+}
+
 /**
  * The workspace view (`--only workspace-view`, one-workspace-view): one view in Home's pane, the side panel and the main
  * tab, every width tier (Home's pane at 430, 600, 820 and 1280; the tab at about 850, 1000, 1250 and 1900; the side
