@@ -1,3 +1,4 @@
+import { callableTools, findActions } from "../server/mcp.mjs";
 import { testStore, rm } from "./support/store-temp-dir";
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
@@ -178,12 +179,16 @@ test("the bridge offers action tools to Paseo-launched root agents only, honestl
   });
   const on = await ask({ FOLLOW_UP_ROOT: "1" });
   const tools = on[1].result.tools;
-  assert.ok(["list_prs", "add_reviewers", "merge", "sign_off", "inbox_list", "send_repairs", "track"].every(n => tools.some((x: any) => x.name === n)));
-  const hint = (n: string) => tools.find((x: any) => x.name === n).annotations;
-  assert.deepEqual(hint("merge"), { readOnlyHint: false, destructiveHint: true });
-  assert.deepEqual(hint("list_prs"), { readOnlyHint: true, destructiveHint: false });
-  assert.deepEqual(hint("add_reviewers"), { readOnlyHint: false, destructiveHint: false });
-  assert.match(tools.find((x: any) => x.name === "add_reviewers").description, /Only when the developer asked/);
+  // agent-tools-by-role: the actions are behind the lookup, not listed; find_action carries their hints and text.
+  assert.ok(["find_action", "run_action"].every(n => tools.some((x: any) => x.name === n)));
+  assert.ok(!tools.some((x: any) => ["list_prs", "add_reviewers", "merge", "sign_off"].includes(x.name)), "the long tail isn't listed");
+  assert.deepEqual(tools.find((x: any) => x.name === "find_action").annotations, { readOnlyHint: true, destructiveHint: false });
+  const found = findActions({ names: ["list_prs", "add_reviewers", "merge", "sign_off", "inbox_list", "send_repairs", "track"] }, callableTools(false, false, false, true, true));
+  assert.equal(found.actions.length, 7);
+  const hint = (n: string) => found.actions.find(x => x.name === n)!;
+  assert.equal(hint("merge").destructive, true); assert.equal(hint("list_prs").readOnly, true);
+  assert.equal(hint("add_reviewers").readOnly, undefined); assert.equal(hint("add_reviewers").destructive, undefined);
+  assert.match(String(hint("add_reviewers").description), /Only when the developer asked/);
   assert.match(on[0].result.instructions, /assign reviewers on all/);
   assert.deepEqual(JSON.parse((await readFile(calls, "utf8")).trim()), { method: "follow.agent-act", input: { tool: "list_prs", args: { needs_reviewers: true }, agentId: "orchestrator" } });
   for (const env of [{}, { FOLLOW_UP_ROOT: "1", FOLLOW_UP_RECOVERY: "1" }] as Record<string, string>[]) assert.deepEqual((await ask(env))[1].result.tools, [], "no tools for a subagent, an outside session or recovery");
