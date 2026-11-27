@@ -1,0 +1,1 @@
+- Recent workspace history stays visible when unfinished tasks retain answers to earlier questions.

@@ -55,15 +55,15 @@ type AgentW = Hist & { prs: readonly ListPr[]; obligations: readonly { status: s
  * `PAGE.recentDone` plus a count (`history`), or one page of one kind (`kind` with offset/limit, the others counts only). A busy workspace
  * (350 merged PRs, 400 settled batches) made the summary ~207k characters, over a tool result's limit.
  */
-export function agentView<W extends AgentW, X extends object = {}>(w: W, { kind, offset, limit }: { kind?: HistoryKind; offset?: number; limit?: number } = {}, extra?: X): W & X & { history: AgentHistory } {
-  // Every workspace_status answer fits TOOL_BUDGET (invariant 63). What is still live always comes whole, so when a busy
+export function agentView<W extends AgentW, X extends object = {}>(w: W, { kind, offset, limit }: { kind?: HistoryKind; offset?: number; limit?: number } = {}, extra?: X, sent: (view: W & X & { history: AgentHistory }) => unknown = view => view): W & X & { history: AgentHistory } {
+  // Budget the final sent representation, after summary compaction (invariant 63). Pending work stays whole; when a busy
   // workspace's live items and its finished glance run over, fewer finished items come (a history page shrinks), and
   // `history` says how many were left out. 2026-11-26: scale-live's 153-PR workspace read 52k with five of each kind.
   let recent: number = PAGE.recentDone, size = Math.min(limit ?? PAGE.toolPage, PAGE.maxLimit);
   for (;;) {
     // `extra`: what the reply carries beside the workspace (dismissed items, the next message, the PR workflow), measured with it.
     const view = { ...agentViewOf(w, { kind, offset, limit: size, recent }), ...(extra ?? {}) } as W & X & { history: AgentHistory };
-    if (JSON.stringify(view).length <= TOOL_BUDGET || (kind ? size <= 1 : recent <= 0)) return view;
+    if (JSON.stringify(sent(view)).length <= TOOL_BUDGET || (kind ? size <= 1 : recent <= 0)) return view;
     if (kind) size = Math.max(1, Math.floor(size / 2)); else recent--;
   }
 }
@@ -81,11 +81,13 @@ function agentViewOf<W extends AgentW>(w: W, { kind, offset, limit, recent }: { 
   const questions = boundDone(w.questions, done.questions, { newestFirst: newestFirst(w.questions, q => Math.max(at(q.askedAt), at(q.answer?.at), at(q.closed?.at))), hint: HISTORY_HINT("questions"), ...page("questions") });
   const batches = boundDone(w.batches, done.batches, { newestFirst: newestFirst(w.batches, b => at(b.settledAt ?? b.sentAt ?? b.createdAt)), hint: HISTORY_HINT("batches"), ...page("batches") });
   const prActions = boundDone(w.prActions, done.prActions, { newestFirst: newestFirst(w.prActions, a => at(a.createdAt)), hint: HISTORY_HINT("prActions"), ...page("prActions") });
-  // The newest few finished items are a glance, so they come brief (BRIEF_DONE); a history page of their kind carries them whole.
+  // The newest few finished items are a glance; history pages carry them whole. Delivered answers retained
+  // for live tasks are compact context too: keep the answer and task link, without old options/background.
+  // Pending delivery is never compacted.
   const glance = <T>(k: HistoryKind, items: T[], isDone: (x: T) => boolean): T[] => k === kind ? items : items.map(x => isDone(x) ? BRIEF_DONE[k](x as Record<string, any>) as T : x);
   const inventory = (w as { inventory?: { candidates?: string[] } | null }).inventory;
   return { ...w,
-    prs: glance("prs", prs.items, done.prs), obligations: glance("tasks", tasks.items, done.tasks), questions: glance("questions", questions.items, done.questions),
+    prs: glance("prs", prs.items, done.prs), obligations: glance("tasks", tasks.items, done.tasks), questions: glance("questions", questions.items, done.questions).map(q => !done.questions(q) && finishedQuestion(q) ? BRIEF_DONE.questions(q) as typeof q : q),
     batches: glance("batches", batches.items, done.batches), prActions: glance("prActions", prActions.items, done.prActions),
     // Every PR key the inventory ever considered grows with the workspace: the live PRs' keys, and how many there were.
     ...(inventory?.candidates ? { inventory: { ...inventory, candidates: inventory.candidates.filter(k => w.prs.some(p => p.key === k && !finishedPr(p))), candidatesTotal: inventory.candidates.length } } : {}),

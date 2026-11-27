@@ -180,6 +180,8 @@ disposition (`settled` in `shared/model.ts`), so paging a PR never declares its 
 and superseded batches are finished even without settlement timestamps; a blocked batch without settlement or
 supersession remains live.
 
+Delivered answers kept as context for unfinished tasks retain their answer, delivery and task link in compact question records; pending questions and pending deliveries stay whole. The budget measures the final summary after compaction, or the full reply for `detail=full`, including the handler’s extra fields.
+
 Every list-returning agent tool answers within `TOOL_BUDGET` (`shared/paged.ts`), however big a workspace's history:
 what is live comes whole, what is finished comes as the newest `PAGE.recentDone` plus a count (`boundDone`), and
 `offset`/`limit` page the rest, newest first, `PAGE.toolPage` a page by default. 2026-11-26: `workspace_status`

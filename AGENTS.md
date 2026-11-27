@@ -964,6 +964,9 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    check, since a closed PR can still need a disposition. On 2026-11-27, closed unanswered questions consumed the
    live budget and reduced every recent-history glance to zero. The regression seed must retain `PAGE.recentDone`
    of every kind while fitting `TOOL_BUDGET`, and history pages must remain usable.
+   2026-11-27: budget the representation actually sent, after summary compaction, never the larger intermediate RPC.
+   Delivered answers retained as live-task context use compact question records (answer, delivery and task link);
+   pending questions and pending deliveries stay whole. Old options/background must not erase recent history.
    2026-11-26: a busy workspace's `workspace_status` summary was ~207k characters, 98% of it merged
    PRs, and the agent couldn't read its own status. Guarded by `tests/bounded-tools.test.ts` and the same
    `pagedReplyVerdict` (`follow.agent-status` summary and full on the live-sized seed).

@@ -15,6 +15,7 @@ import { agentStatusRpc } from "../shared/contracts";
 import { finishedPr, finishedTask, finishedQuestion, finishedBatch, finishedPrAction } from "../shared/finished";
 import { bigHistory, closedHistory } from "./support/big-history";
 import { clock, pr, snapshot } from "./fixtures";
+import { questionSchema } from "../shared/questions";
 
 const iso = (m: number) => new Date(clock + m * 60_000).toISOString();
 const size = (value: unknown) => JSON.stringify(value).length;
@@ -33,7 +34,7 @@ function busy(): Workspace {
 
 /** workspace_status as the agent gets it: the handler's view, then the summary (compact) or the whole view (full). */
 const status = (w: Workspace, input: Record<string, unknown> = {}) => {
-  const view = agentView(w, { kind: input.history as never, offset: input.offset as number | undefined, limit: input.limit as number | undefined });
+  const view = agentView(w, { kind: input.history as never, offset: input.offset as number | undefined, limit: input.limit as number | undefined }, undefined, input.detail === "full" ? undefined : view => compact("workspace_status", input, view));
   return input.detail === "full" ? view : compact("workspace_status", input, view);
 };
 
@@ -223,4 +224,55 @@ test("closed PR history agrees with list_prs while completion still requires its
   const out = await a.run("orchestrator", "list_prs", { include_closed: true }) as any;
   assert.equal(out.closed.total, w.prs.length);
   assert.equal(out.closed.shown, PAGE.recentDone);
+});
+
+// Delivered answers remain task context, but their old options/background must not consume the history budget.
+test("delivered task context preserves answers without starving recent history", () => {
+  const w = workspaceSchema.parse(closedHistory());
+  const context = bigHistory({ questions: 11, batches: 0, open: 0 }).questions.map((q, i) => ({ ...q,
+    id: `Q${1000 + i}`, taskId: `live-${i}`, question: "Which retry policy should the invoice queue use? ".repeat(12),
+    background: "The invoice worker must recover safely after a timeout. ".repeat(12),
+  }));
+  const pending = { ...context[0], id: "Q2000", answer: { ...context[0].answer!, delivery: { ...context[0].answer!.delivery, state: "failed" as const } } };
+  w.questions.push(...context, pending);
+  w.obligations = [
+    ...w.obligations.filter(finishedTask),
+    ...Array.from({ length: 24 }, (_, i) => ({ id: `live-${i}`, title: `Verify invoice retry ${i}`,
+      status: "waiting" as const, afterPrs: [], evidence: "Checked invoice retries and the queue after a timeout. ".repeat(11),
+      enable_follow_up: true, revision: 0 })),
+  ];
+  const extra = { nextMessageInfo: { to: "main-agent", tasks: [], text: "Check the invoice queue. ".repeat(100), reason: "Waiting", eta: null } };
+  const view = agentView(w, {}, extra);
+  for (const kind of ["prs", "tasks", "questions", "batches", "prActions"] as const) {
+    assert.equal(view.history[kind].shown, PAGE.recentDone, `${kind}: context leaves room for the glance`);
+  }
+  assert.ok(size(view) <= TOOL_BUDGET, `${size(view)} characters`);
+  assert.ok(agentStatusRpc.output.safeParse(view).success);
+  const summary = compact("workspace_status", {}, agentView(w, {}, extra, view => compact("workspace_status", {}, view))) as any;
+  assert.ok(size(summary) <= TOOL_BUDGET);
+  for (const kind of ["prs", "tasks", "questions", "batches", "prActions"] as const) assert.equal(summary.history[kind].shown, PAGE.recentDone, kind);
+  for (const q of context) {
+    const kept = view.questions.find(x => x.id === q.id)!;
+    assert.deepEqual(kept.answer, questionSchema.parse(q).answer, "delivery and answer stay available");
+    assert.equal(kept.taskId, q.taskId);
+  }
+  assert.deepEqual(agentView(w).questions.find(q => q.id === pending.id), pending, "pending delivery retains its complete question");
+  for (const kind of ["prs", "tasks", "questions", "batches", "prActions"] as const) {
+    const page = agentView(w, { kind, limit: 5 }, extra);
+    assert.ok(size(page) <= TOOL_BUDGET, `${kind}: page fits`);
+    assert.ok(page.history[kind].shown >= 1, `${kind}: history remains accessible`);
+    assert.ok(agentStatusRpc.output.safeParse(page).success);
+    if (kind === "questions") assert.ok(page.questions.some(q => finishedQuestion(q) && "options" in q), "paged history keeps complete evidence");
+  }
+});
+
+// The full RPC envelope can be large even when the actual summary is small. Fit the sent representation.
+test("summary budget is measured after compaction, independently of full-only metadata", () => {
+  const w = workspaceSchema.parse(closedHistory());
+  const extra = { mainAgentTitle: "Invoice queue history ".repeat(2500) };
+  const view = agentView(w, {}, extra, view => compact("workspace_status", {}, view));
+  assert.ok(size(view) > TOOL_BUDGET, "the intermediate full response is intentionally larger");
+  const sent = compact("workspace_status", {}, view) as any;
+  assert.ok(size(sent) <= TOOL_BUDGET);
+  for (const kind of ["prs", "tasks", "questions", "batches", "prActions"] as const) assert.equal(sent.history[kind].shown, PAGE.recentDone, kind);
 });
