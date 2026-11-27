@@ -223,7 +223,10 @@ panel-sections-fold):
 - **The header is the button**: the icon, title, count and a chevron at the end, with its expanded state for screen
   readers; a click or Enter toggles it (Space never reaches a plugin's button in Paseo's web app, whose window
   listener takes it first). Controls in the header (search, Activity's tabs) sit beside the button
-  and show only while the section is open.
+  and show only while the section is open. Only `FoldButton` draws the chevron: one size and color, in a box that
+  never shrinks, last in the button, so it always sits at the right just before the section's own controls.
+- **The larger view** shows the same folds. It is a screen without Paseo's panel-only client state, so Spec, agent
+  and recovery reads agent titles there through `AgentTitleSource` (short ids) instead of `useAgent`, which throws.
 - **Folded**, the body unmounts and the header keeps its count, plus a short plain line where it helps: Needs you's
   first ask, the next message ("2 repairs queued"), the PRs ("6 PRs in 2 stacks") when the open count doesn't say it,
   Activity's latest event, the tasks' line (shown open too). No new labels.

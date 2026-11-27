@@ -497,7 +497,7 @@ export function ActivityCard({ workspace: w, theme, compact, now, open, toggle, 
   const tabButton = (id: ActivityTab, label: string, count?: number) => {
     const selected = tab === id;
     return <Pressable key={id} accessibilityRole="tab" aria-selected={selected} accessibilityState={{ selected }} accessibilityLabel={count !== undefined ? `${label}, ${count}` : label} onPress={() => setTab(id)} hitSlop={4}
-      style={state => ({ flexDirection: "row", alignItems: "center", gap: 5, minHeight: compact ? 36 : 24, paddingHorizontal: 7, borderRadius: 999, backgroundColor: selected ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
+      style={state => ({ flexDirection: "row", alignItems: "center", gap: 5, minHeight: compact ? 36 : 24, paddingHorizontal: 6, borderRadius: 999, backgroundColor: selected ? c.surface2 : (state as { hovered?: boolean }).hovered ? c.surface1 : "transparent" })}>
       <Text style={{ color: selected ? c.foreground : c.foregroundMuted, fontSize: 12, fontWeight: "600" }}>{label}</Text>
       {count !== undefined && <Text style={{ color: c.foregroundMuted, fontSize: 12, fontVariant: ["tabular-nums"] }}>{count}</Text>}
     </Pressable>;

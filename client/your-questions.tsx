@@ -349,7 +349,7 @@ export function YourQuestionsCard({ workspaceId, mainAgentId, theme, compact, op
   const headStyle = { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8, paddingHorizontal: compact ? 14 : 12, paddingTop: 12, paddingBottom: 10, minHeight: compact ? 44 : undefined } as const;
   const headInner = <>
     <Icon name="MessageSquareReply" size={compact ? 16 : 14} color={c.foregroundMuted} />
-    <Text accessibilityRole={fold ? undefined : "header"} style={[t.label, { flex: 1 }]}>Your questions</Text>
+    <Text accessibilityRole={fold ? undefined : "header"} numberOfLines={fold ? 1 : undefined} style={[t.label, { flex: 1, minWidth: 0 }]}>Your questions</Text>
     {!!counts && <View accessibilityLabel={counts} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
       {!!q.unread.length && <View style={{ paddingHorizontal: 8, paddingVertical: 1, borderRadius: 999, backgroundColor: tint(c.statusWarning, c) }}><Text style={[t.meta, { color: c.statusWarning, fontWeight: "600" }]}>{`${q.unread.length} answer${q.unread.length === 1 ? "" : "s"}`}</Text></View>}
       {!!q.asking.length && <Text style={t.meta}>{`${q.asking.length} asking`}</Text>}
@@ -357,7 +357,7 @@ export function YourQuestionsCard({ workspaceId, mainAgentId, theme, compact, op
   </>;
   const header = fold
     ? <View accessibilityRole="header"><FoldButton open={open} onToggle={folding.toggle} label={counts ? `Your questions, ${counts}` : "Your questions"} theme={theme} chevron="end"
-        style={(hovered, pressed) => [headStyle, { paddingTop: 10, paddingBottom: open ? 8 : 10, backgroundColor: pressed ? c.surface2 : hovered ? c.surface1 : "transparent" }]}>{headInner}</FoldButton></View>
+        style={(hovered, pressed) => [headStyle, { flexWrap: "nowrap", paddingTop: 10, paddingBottom: open ? 8 : 10, backgroundColor: pressed ? c.surface2 : hovered ? c.surface1 : "transparent" }]}>{headInner}</FoldButton></View>
     : <View style={headStyle}>{headInner}</View>;
   const historyRow = total > 0 && <Pressable accessibilityRole="button" aria-expanded={compact ? undefined : history} accessibilityState={compact ? undefined : { expanded: history }} accessibilityLabel={`History, ${total} question${total === 1 ? "" : "s"}`} accessibilityHint="Search every question and answer, kept 30 days" onPress={() => setHistory(v => !v)}
     style={state => ({ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: compact ? 14 : 12, minHeight: compact ? 48 : 38, borderTopWidth: 1, borderTopColor: c.border,

@@ -4515,7 +4515,8 @@ async function nowLineShots({ shoot }) {
 }
 /**
  * Every panel section folds (`--only panel-folds`, panel-sections-fold): one workspace's panel with every section
- * open, every one folded, and a mix, desktop light and dark, and the phone (larger view) dark. Enter folds and opens
+ * open (also from the top), every one folded, and a mix, desktop light and dark, and the phone (larger view) dark.
+ * Every fold arrow has one size, color and place. Enter folds and opens
  * a header, and a fold survives a reload. Folds are set by the header buttons' own aria-expanded.
  */
 async function panelFoldShots({ shoot }) {
@@ -4532,23 +4533,53 @@ async function panelFoldShots({ shoot }) {
       await page.waitForFunction(([name, v]) => [...document.querySelectorAll("[aria-expanded]")].some(el => (el.getAttribute("aria-label") ?? "").startsWith(name) && el.getAttribute("aria-expanded") === v), [title, String(open)]);
     }
   };
+  // capture opens every page at DESKTOP: the tall desktop shots resize here (the phone ones resize after).
   const panel = async page => {
+    await page.setViewportSize(TALL);
     await openChat(page, spec.title, spec.prompt);
     await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
     await header(page, "Needs you").waitFor({ timeout: 60_000 });
   };
   const noSideways = name => async page => { if (await page.evaluate(() => document.documentElement.scrollWidth) > PHONE.width) throw new Error(`${name} scrolls sideways`); };
+  // Every fold arrow alike and in one place (panel-sections-fold): the same size and color, at the button's end, the
+  // same distance from its right edge, so it sits just before any controls the section has (Activity's tabs).
+  const sameArrows = name => async page => {
+    const arrows = await page.evaluate(() => [...document.querySelectorAll('[data-fold-chevron="end"]')].filter(el => el.getClientRects().length).map(el => {
+      const r = el.getBoundingClientRect(), b = el.closest("[aria-expanded]").getBoundingClientRect();
+      return { label: el.closest("[aria-expanded]").getAttribute("aria-label"), w: r.width, h: r.height, gap: Math.round(b.right - r.right), color: getComputedStyle(el.querySelector("svg") ?? el).color + (el.querySelector("svg")?.getAttribute("stroke") ?? "") };
+    }));
+    const cut = await page.evaluate(() => [...document.querySelectorAll("[aria-expanded] div")].filter(el => el.getClientRects().length && el.closest('[aria-expanded]').querySelector('[data-fold-chevron="end"]') && !el.children.length && el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).fontWeight === "600").map(el => el.textContent));
+    // A title cut to "Acti…" by its header's controls (a summary may ellipsize by design).
+    if (cut.length) throw new Error(`${name}: a fold header's title is cut: ${cut.join(", ")}`);
+    if (arrows.length < 5) throw new Error(`${name}: only ${arrows.length} fold arrows`);
+    for (const a of arrows) if (Math.abs(a.w - 14) > 0.5 || Math.abs(a.h - 14) > 0.5 || a.gap !== arrows[0].gap || a.color !== arrows[0].color)
+      throw new Error(`${name}: ${a.label}'s arrow differs (${JSON.stringify(a)} vs ${JSON.stringify(arrows[0])})`);
+  };
+  // The panel from its top: its scroll area back to 0.
+  const toTop = async page => {
+    await page.evaluate(() => { for (let el = document.querySelector('[data-fold-chevron="end"]'); el; el = el.parentElement) if (el.scrollHeight > el.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(el).overflowY)) el.scrollTop = 0; });
+    await page.waitForTimeout(300);
+  };
   const MIX = { all: false, "Needs you": true, "Agent's tasks": true, "Pull requests": true };
   for (const theme of ["light", "dark"]) {
-    await shoot(`pf-open-${theme}`, TALL, theme, async page => { await panel(page); await setFolds(page, { all: true }); });
+    await shoot(`pf-open-${theme}`, TALL, theme, async page => { await panel(page); await setFolds(page, { all: true }); await sameArrows("pf-open")(page); });
+    // From the top, open: Needs you, Your questions and Pull requests.
+    await shoot(`pf-open-top-${theme}`, TALL, theme, async page => {
+      await panel(page); await setFolds(page, { all: true }); await toTop(page);
+      for (const title of ["Needs you", "Your questions", "Pull requests"]) {
+        const box = await header(page, title).boundingBox();
+        if (!box || box.y < 0 || box.y + box.height > TALL.height) throw new Error(`pf-open-top: ${title} isn't in view (${JSON.stringify(box)})`);
+      }
+    });
     await shoot(`pf-folded-${theme}`, TALL, theme, async page => { await panel(page); await setFolds(page, { all: false }); });
-    await shoot(`pf-mix-${theme}`, TALL, theme, async page => { await panel(page); await setFolds(page, MIX); });
+    await shoot(`pf-mix-${theme}`, TALL, theme, async page => { await panel(page); await setFolds(page, MIX); await sameArrows("pf-mix")(page); });
   }
   await shoot("pf-phone-dark", PHONE, "dark", async page => {
     await panel(page);
     await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
     await page.setViewportSize(PHONE);
     await header(page, "Needs you").waitFor({ timeout: 60_000 });
+    await setFolds(page, { all: true }); await sameArrows("pf-phone")(page);
     await setFolds(page, { all: false, "Needs you": true });
     await noSideways("pf-phone")(page);
   });

@@ -1,2 +1,3 @@
 - Every section of the workspace panel now collapses, like Agent's tasks, Needs you included.
 - A collapsed section still shows its count and a short line, and stays as you left it on this device.
+- The larger view no longer fails when Spec, agent and recovery is open.

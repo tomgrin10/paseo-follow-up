@@ -1,5 +1,5 @@
 import { finishedTask } from "../shared/finished";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { PagedRows } from "./paged-list";
 import type { SettingsCategory } from "../shared/settings-nav";
 import { recoveryActions } from "./recovery-actions";
@@ -265,9 +265,18 @@ function WorkspaceCard({ workspace: w, theme, compact, openAgent, browserReady, 
   </Card>;
 }
 
-/** An agent's title from Paseo's client state (no fetch), or a short id while it loads or once it's gone. */
+/**
+ * How an agent's title is read: Paseo's client state (no fetch) inside a workspace panel. The larger view is a screen
+ * with no client state, where useAgent throws ("Plugin state hooks must run inside a workspace panel"): there the
+ * title is the short id. Once Spec, agent and recovery's fold was remembered per device, opening it in the panel
+ * crashed the larger view on its next open.
+ */
+const AgentTitleSource = createContext<(agentId: string) => string | null | undefined>((agentId: string) => useAgent(agentId, a => a.title));
+const noClientState = () => null;
+
+/** An agent's title, or a short id while it loads, once it's gone, or in the larger view. */
 function useAgentTitle(agentId: string): string {
-  return useAgent(agentId, a => a.title) || `Agent ${agentId.slice(0, 8)}`;
+  return useContext(AgentTitleSource)(agentId) || `Agent ${agentId.slice(0, 8)}`;
 }
 
 /**
@@ -414,7 +423,8 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   // The send queue (what Follow-up sends the main agent next, and the repairs in it) is Follow-up's, not the agent's to-do list.
   const messages = showWork && <MessagesCard workspace={w} theme={theme} compact={compact} openAgent={openAgent} now={now} />;
   const log = <View ref={logRef} onLayout={e => { logY.current = e.nativeEvent.layout.y; }}><ActivityCard workspace={w} theme={theme} compact={compact} now={now} open={isOpen} toggle={toggle} onOpenQuestion={(id, q) => { setOldQuestion(q ?? null); setQuestion(id); }} /></View>;
-  const extras = <WorkspaceCard workspace={w} theme={theme} compact={compact} openAgent={openAgent} browserReady={browser.data ? browser.data.ready : null} openOverview={openOverview} editSpec={() => setSpecOpen(true)} />;
+  const workspaceCard = <WorkspaceCard workspace={w} theme={theme} compact={compact} openAgent={openAgent} browserReady={browser.data ? browser.data.ready : null} openOverview={openOverview} editSpec={() => setSpecOpen(true)} />;
+  const extras = large ? <AgentTitleSource.Provider value={noClientState}>{workspaceCard}</AgentTitleSource.Provider> : workspaceCard;
   return <View onLayout={event => setWidth(event.nativeEvent.layout.width)} style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>
     {/* Phones fold the top bar into the header's own row. */}
     {!compact && top}

@@ -205,7 +205,8 @@ export function Card({ theme, icon, title, tone = "plain", count, right, childre
     const button = <FoldButton open={open} onToggle={state.toggle} label={spoken ? `${title}, ${spoken}` : title} theme={theme} chevron="end"
       style={(hovered, pressed) => [row, pad, { flex: 1, minWidth: 0, backgroundColor: pressed ? c.surface2 : hovered ? c.surface1 : "transparent" }]}>
       {glyph}{titled}
-      <View style={{ flex: 1, minWidth: 0, flexDirection: "row", justifyContent: "flex-end" }}>{summaryNode}</View>
+      {/* With no summary the spacer takes no gap of its own, so a header with controls (Activity's tabs) keeps room. */}
+      <View style={{ flex: 1, minWidth: 0, flexDirection: "row", justifyContent: "flex-end", marginLeft: summaryNode ? 0 : -row.gap }}>{summaryNode}</View>
     </FoldButton>;
     // The section's heading for screen readers wraps the button, as a disclosure's heading does.
     head = open && right ? <View style={{ flexDirection: "row", alignItems: "center" }}>

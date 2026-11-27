@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import { type StyleProp, type ViewStyle } from "react-native";
+import { View, type StyleProp, type ViewStyle } from "react-native";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { Pressable } from "./text";
 import { readOpen, writeOpen } from "../shared/settings-nav";
@@ -23,19 +23,26 @@ export function useFold(id: string | null, defaultOpen: boolean): { open: boolea
  * A fold's header: a button with its expanded state, toggled by a click or Enter (React Native Web's press; Space
  * never reaches it in Paseo, whose window listener takes it first). `label` is what a screen
  * reader hears (the title, then the summary or count). `chevron`: "lead" draws a right/down chevron first (settings),
- * "end" an up/down chevron last (the panel's cards).
+ * "end" an up/down chevron last (the panel's cards). Only FoldButton draws a fold's chevron, always the same size and
+ * color in a box that never shrinks, so every header shows it in the same place: the end of the button, just before
+ * the section's own controls (a narrow header squeezed Activity's to a faint sliver between its title and tabs).
  */
+export const FOLD_CHEVRON_SIZE = 14;
 export function FoldButton({ open, onToggle, label, theme, chevron, style, children }: {
   open: boolean; onToggle: () => void; label: string; theme: Theme; chevron: "lead" | "end";
   style: (hovered: boolean, pressed: boolean) => StyleProp<ViewStyle>; children: ReactNode;
 }) {
   const c = theme.colors;
+  const mark = (name: string) => <View {...({ dataSet: { foldChevron: chevron } } as object)}
+    style={{ flexShrink: 0, width: FOLD_CHEVRON_SIZE, height: FOLD_CHEVRON_SIZE, alignItems: "center", justifyContent: "center" }}>
+    <Icon name={name} size={FOLD_CHEVRON_SIZE} color={c.foregroundMuted} />
+  </View>;
   return <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} aria-expanded={open}
     accessibilityLabel={label} accessibilityHint={open ? "Collapses" : "Expands"} onPress={onToggle}
     style={state => style(!!(state as { hovered?: boolean }).hovered, state.pressed)}>
-    {chevron === "lead" && <Icon name={open ? "ChevronDown" : "ChevronRight"} size={14} color={c.foregroundMuted} />}
+    {chevron === "lead" && mark(open ? "ChevronDown" : "ChevronRight")}
     {children}
-    {chevron === "end" && <Icon name={open ? "ChevronUp" : "ChevronDown"} size={14} color={c.foregroundMuted} />}
+    {chevron === "end" && mark(open ? "ChevronUp" : "ChevronDown")}
   </Pressable>;
 }
 

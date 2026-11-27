@@ -77,3 +77,27 @@ test("panel-sections-fold: per device and per section, never per workspace; open
   assert.equal(readOpen(PANEL_FOLDS.prs, true, store), true, "one section's choice is its own");
   assert.equal(mem.get(collapseKey(PANEL_FOLDS.needs)), "0");
 });
+
+test("panel-sections-fold: one arrow, in one place: only FoldButton draws a fold's chevron, fixed and last in the button", async () => {
+  // Activity's arrow once shrank to a faint sliver between its title and tabs. The chevron sits in a box that never
+  // shrinks, at one size and color, last in the button; the section's own controls come after the button.
+  const fold = await source("client/fold.tsx");
+  assert.match(fold, /style=\{\{ flexShrink: 0, width: FOLD_CHEVRON_SIZE, height: FOLD_CHEVRON_SIZE/, "a box that never shrinks");
+  assert.match(fold, /<Icon name=\{name\} size=\{FOLD_CHEVRON_SIZE\} color=\{c\.foregroundMuted\} \/>/, "one size and color");
+  assert.match(fold, /\{children\}\s*\{chevron === "end" && mark\(/, "last in the button");
+  const kit = await source("client/kit.tsx");
+  const head = kit.slice(kit.indexOf("let head: ReactNode;"), kit.indexOf("// dataSet: a paged list inside"));
+  assert.doesNotMatch(head, /Chevron|<Icon /, "Card's header draws no arrow of its own");
+  assert.match(head, /\{button\}<\/View>\s*<View[^>]*>\{right\}<\/View>/, "the section's controls follow the button, so the arrow sits just before them");
+  const questions = await source("client/your-questions.tsx");
+  const inner = questions.slice(questions.indexOf("const headInner"), questions.indexOf("const historyRow"));
+  assert.doesNotMatch(inner, /Chevron/, "Your questions' header draws no arrow of its own");
+  assert.match(inner, /flexWrap: "nowrap"/, "and never wraps its arrow to a line of its own");
+});
+
+test("panel-sections-fold: the larger view opens Spec, agent and recovery without Paseo's panel-only state", async () => {
+  // Remembered per device, a section opened in the panel opens in the larger view too, a screen where useAgent throws.
+  const panel = await source("client/panel.tsx");
+  assert.match(panel, /const extras = large \? <AgentTitleSource\.Provider value=\{noClientState\}>\{workspaceCard\}/);
+  assert.equal([...panel.matchAll(/\buseAgent\(/g)].length, 1, "useAgent is read only through AgentTitleSource");
+});
