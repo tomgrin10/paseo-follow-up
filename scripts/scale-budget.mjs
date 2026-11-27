@@ -110,17 +110,43 @@ export function busyVerdict(samplesMb, budgetMb) {
 
 /**
  * Memory returns after a burst (memory-returns-after-a-burst, server/memory.ts): test:scale:live's --cycles end each
- * burst (agent turns, an open app's reads, PR and check updates, an ask) with a gap, and the last gap's median RSS must
- * be at most this. Enforced even with --budgets-report-only: derived, not pending. Harness 2026-11-16, live-sized seed,
- * 3-minute bursts: 2.1.0-beta.2 held 320–369 MB after every burst (V8's young generation at its 128 MB cap, its pages
- * kept); with the settler the gaps were 195–208 MB. 260 sits between the two with ~50 MB to spare on either side.
+ * burst (agent turns, an open app's reads, PR and check updates, an ask) with a gap, and the last gap must come back
+ * to where this run's worker stood before the bursts. Enforced even with --budgets-report-only: derived, not pending.
+ *
+ * Judged relative to the run's own baseline, never an absolute level (`burst-return-is-judged-against-the-run`): the
+ * baseline is the worker's settled RSS before the first burst (the last settle `after` its heartbeat reports, the
+ * HeapSettler's own floor), and the gap is read at its lower quartile (`floorMb`), the level it settles to: about a
+ * third of a gap is the minute before the settle, so its median moved with when the settle landed. 74 CI runs of
+ * scale-live (2026-11-23 to 27, tests/fixtures/ci-burst-return.txt, every runner CPU): the last gap's median read
+ * 219-271 MB on the same server code and failed a client-only PR at 270 against the old absolute 260; the floor over
+ * the baseline read 26-58 MB (mean 37.7, sd 5.9). Harness 2026-11-16: 2.1.0-beta.2 without the settler held its gaps
+ * at 320-369 MB over a ~190 MB settled floor, +130 or more. BURST_RETURN_GROWTH_MB sits between them: 17 MB over the
+ * worst CI run (~3 sd) and 55 under the bug. Without a baseline (no settle reported before the bursts) the floor is
+ * judged against BURST_RETURN_BUDGET_MB, the old level, now read at the floor (CI's floors: 214-257).
  */
+export const BURST_RETURN_GROWTH_MB = 75;
 export const BURST_RETURN_BUDGET_MB = 260;
-/** The burst-return verdict: each gap's median RSS; the last one is judged. */
-export function burstReturnVerdict(gapsMb, budgetMb) {
+const quantile = (xs, p) => { const a = [...xs].sort((x, y) => x - y); return a.length ? a[Math.floor(p * (a.length - 1))] : 0; };
+/** The pre-burst baseline: the last settle before the first burst (`s` < 0, seconds from the first burst). */
+export function burstBaselineMb(settles) {
+  const before = (settles ?? []).filter(x => x.s < 0 && Number.isFinite(x.after)).sort((a, b) => a.s - b.s);
+  return before.length ? before[before.length - 1].after : null;
+}
+/**
+ * The burst-return verdict: each gap's median (reported) and the last gap's floor (its lower quartile), judged as growth
+ * over `baselineMb` when there is one, else against the absolute `budgetMb`. `opts` may be a number (the old absolute
+ * budget, kept for --burst-return-budget).
+ */
+export function burstReturnVerdict(gapsMb, opts = {}) {
+  const { baselineMb = null, growthBudgetMb = BURST_RETURN_GROWTH_MB, budgetMb = BURST_RETURN_BUDGET_MB } = typeof opts === "number" ? { budgetMb: opts } : opts;
   const medians = gapsMb.map(g => Math.round(median(g)));
+  const last = gapsMb.length ? gapsMb[gapsMb.length - 1] : [];
   const lastMb = medians.length ? medians[medians.length - 1] : 0;
-  return { gapMediansMb: medians, lastMb, over: !!budgetMb && medians.length > 0 && lastMb > budgetMb };
+  const floorMb = Math.round(quantile(last, 0.25));
+  const returnMb = baselineMb === null ? null : floorMb - baselineMb;
+  const judged = last.length > 0 && (returnMb !== null ? !!growthBudgetMb : !!budgetMb);
+  const over = judged && (returnMb !== null ? returnMb > growthBudgetMb : floorMb > budgetMb);
+  return { gapMediansMb: medians, lastMb, floorMb, baselineMb, returnMb, growthBudgetMb, budgetMb, over };
 }
 
 /** The idle verdict: the window's median against the budget. The peak is reported, never judged. */

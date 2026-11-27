@@ -516,7 +516,13 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    (gaps 315-342 MB): the worker's ticks spike once or twice a minute (6-12 % over a 0.1-0.3 % floor), so a quiet
    minute's mean read 1.2-1.6 % and the settle ran 98-133 s into a 180 s gap or not at all. Guarded by
    `tests/memory-settle.test.ts` (harness traces of a quiet gap and a burst) and `test:scale:live`'s `--cycles`
-   (`BURST_RETURN_BUDGET_MB`, enforced; its `scale-burst-diag` line shows each gap's samples, settles and minutes).
+   (`burstReturnVerdict`, enforced; its `scale-burst-diag` line shows each gap's samples, settles and minutes).
+   **A burst's return is judged against the run** (`burst-return-is-judged-against-the-run`): the last gap's floor (its
+   lower quartile) may sit at most `BURST_RETURN_GROWTH_MB` over the worker's own settled RSS before the first burst
+   (the last settle the heartbeat reports), never an absolute level, which moves with the runner. 2026-11-27: the
+   absolute 260 MB on the gap's median failed a client-only PR at 270 while the same server code read 219-271 across
+   CI runs; the floor over the baseline read 26-58 MB in all 74 runs (`tests/fixtures/ci-burst-return.txt`, replayed
+   by `tests/scale-budget.test.ts`), and `--leak-mb-per-min <n>` is the synthetic leak that proves it still fails.
 31. **Committed workspaces are owned** (`committed-workspaces-are-owned`). A workspace a store commit changed is the
    store's own copy from that commit on: `Store.own` (`server/store.ts`) parses it (`workspaceSchema`) and
    deep-freezes it before the commit lands, so it never aliases an object a caller still holds (an observation's
