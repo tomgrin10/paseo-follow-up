@@ -34,7 +34,8 @@ import { putInChatOrCopy } from "../shared/put-in-chat";
 import { useChatComposer } from "./put-in-chat";
 import { Marked, NoMatchRow, useSectionSearch } from "./section-search";
 import { questionStatus } from "../shared/section-search";
-import { answerImagesKey, clearPendingAnswer, confirmPendingAnswer, failPendingAnswer, markSentHere, retryPendingAnswer, setPendingAnswer, usePendingAnswer, type PendingAnswer } from "./pending-answers";
+import { answerImagesKey, clearPendingAnswer, confirmPendingAnswer, failPendingAnswer, markSentHere, pendingKey, retryPendingAnswer, setPendingAnswer, usePendingAnswer, usePendingAnswers, type PendingAnswer } from "./pending-answers";
+import { inFlight } from "../shared/optimistic-answers";
 
 const who = (w: Pick<ListWorkspace, "mainAgentId">, agentId: string | null) => !agentId || agentId === w.mainAgentId ? "the main agent" : "a root session";
 
@@ -114,6 +115,9 @@ export type SendReady = { send: () => void; busy: boolean };
  * (the dialog, Needs you on Home and in the panel, the pill, phones): what its field means comes from answerDraft
  * (`one-answer-flow-for-every-question`), never from the surface.
  */
+/** The DOM id of a card's Not sent line, so a failure toast can tell whether the card already says it. */
+const notSentId = (workspaceId: string, questionId: string) => `fu-not-sent-${workspaceId}-${questionId}`;
+
 export function QuestionBody({ workspace: w, question: q, theme, compact, now = Date.now(), dense = false, bodyMaxHeight, openAgent, onAnswered, onDetails, onClose, inline = false, onSendReady, dictate = false, moreContext = true, dismissAt = inline ? "host" : "top", afterAsk }: {
   /** What the host card says about the ask (the brief's context, what the agent does meanwhile), right under the ask: the ask reads first on every surface. */
   afterAsk?: ReactNode;
@@ -244,6 +248,8 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
       reconcile: e => { clearPendingAnswer(w.id, q.id); refresh(); notice(mootNote(e, free || isOther(answer)), toast); },
       // Short, so a phone's toast shows it whole beside Retry and Open; the card says why.
       failure: `${q.id} not sent`, open: () => openQuestion(w.id, q.id),
+      // The card that says it (Not sent · Retry) is on screen: no toast over it repeating the same thing.
+      shownBy: notSentId(w.id, q.id),
     });
     onClose?.(); onAnswered?.();
   };
@@ -322,7 +328,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
         <Text style={[t.meta, { flex: 1, color: deliveryColor }]}>{delivery.text}</Text>
       </View>}
     </View>}
-    {unsent && <View accessibilityRole="alert" style={{ flexDirection: "row", gap: 6 }}>
+    {unsent && <View nativeID={notSentId(w.id, q.id)} accessibilityRole="alert" style={{ flexDirection: "row", gap: 6 }}>
       <View style={{ paddingTop: 2 }}><Icon name="CircleAlert" size={12} color={c.statusDanger} /></View>
       <Text style={[t.meta, { flex: 1, color: c.statusDanger }]}>Not sent · {unsent.error}</Text>
       <Pressable accessibilityRole="button" accessibilityLabel={`Retry sending your ${q.id} answer`} hitSlop={6} disabled={!answer} onPress={() => quick("send")}>
@@ -468,8 +474,16 @@ export function ActivityCard({ workspace: w, theme, compact, now, open, toggle, 
   const input = { workspaceId: w.id, tab, ...(query ? { query } : {}), offset: at * limit, limit };
   const local = useMemo(() => ({ ...activityPage(w, input), error: null }), [w, tab, query, at, limit]); // eslint-disable-line react-hooks/exhaustive-deps
   const reply = useQuery({ queryKey: activityKey(w.id, w.updatedAt, tab, query, at * limit, limit), queryFn: () => read(input), placeholderData: keepPreviousData, staleTime: 15_000, refetchOnWindowFocus: false });
-  // Until the worker answers this workspace's first page, the panel's own (bounded) copy draws it.
-  const d = reply.data && !reply.data.error && reply.data.tab === tab ? reply.data : local;
+  // Until the worker answers this workspace's first page, the panel's own (bounded) copy draws it. So does an answer
+  // in flight (answering-is-optimistic): the panel's copy has it answered, the worker's page doesn't yet. And when only
+  // the workspace moved on (same page, newer copy), the previous page is staler than the panel's own until it lands.
+  const pending = usePendingAnswers();
+  const answering = (w.questions ?? []).some(q => inFlight(pending[pendingKey(w.id, q.id)]));
+  const samePage = useRef("");
+  const pageKey = `${tab}|${query}|${at * limit}|${limit}`;
+  if (reply.data && !reply.isPlaceholderData) samePage.current = pageKey;
+  const stale = reply.isPlaceholderData && samePage.current === pageKey;
+  const d = !answering && !stale && reply.data && !reply.data.error && reply.data.tab === tab ? reply.data : local;
   const counts = d.counts;
   useEffect(() => { const next = searching ? { matches: counts.timeline + counts.questions, total: d.all } : null; setRemote(r => r?.matches === next?.matches && r?.total === next?.total ? r : next); }, [searching, counts.timeline, counts.questions, d.all]);
   const info = pageInfo(d.total, at, limit);

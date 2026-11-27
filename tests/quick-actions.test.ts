@@ -111,6 +111,27 @@ test("runAction: success becomes a toast; with no ToastHost mounted it goes to t
   } finally { hosts.splice(hosts.indexOf(99), 1); for (const t of toastsNow()) dismissToast(t.id); }
 });
 
+test("runAction: no failure toast over a card already on screen saying Not sent with its Retry; a toast when it is off screen", async () => {
+  const { runAction, toastsNow, hosts, dismissToast } = await store();
+  const g = globalThis as Record<string, unknown>;
+  const saved = { document: g.document, innerWidth: g.innerWidth, innerHeight: g.innerHeight };
+  let rect = { width: 300, height: 18, top: 400, left: 10, bottom: 418, right: 310 };
+  g.document = { querySelectorAll: (q: string) => q === '[id="fu-not-sent-w-Q1"]' ? [{ getBoundingClientRect: () => rect }] : [] };
+  g.innerWidth = 1200; g.innerHeight = 800;
+  hosts.push(97);
+  const fail = () => runAction({ label: "x", run: async () => { throw new Error("connection lost"); }, success: () => null, failure: "Q1 not sent", open: () => undefined, shownBy: "fu-not-sent-w-Q1" });
+  try {
+    await fail();
+    assert.equal(toastsNow().filter(t => t.tone === "error").length, 0, "the card says it, with Retry: no toast covering it");
+    rect = { ...rect, top: 900, bottom: 918 };
+    await fail();
+    assert.equal(toastsNow().filter(t => t.tone === "error").at(-1)?.message, "Q1 not sent", "scrolled away: the toast says it");
+  } finally {
+    hosts.splice(hosts.indexOf(97), 1); for (const t of toastsNow()) dismissToast(t.id);
+    for (const [k, v] of Object.entries(saved)) if (v === undefined) delete g[k]; else g[k] = v;
+  }
+});
+
 test("runAction: a failure keeps Retry and Open, stays until dismissed, and Retry runs the work again", async () => {
   const { runAction, toastsNow, hosts, dismissToast } = await store();
   hosts.push(98);

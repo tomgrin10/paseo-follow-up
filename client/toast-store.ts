@@ -91,6 +91,12 @@ export type ActionSpec<T> = {
   reopen?: () => void;
   /** The host toast, from `useToast()` where the action started; otherwise the one a surface bound (bindToast). */
   toast?: ToastApi;
+  /**
+   * The id (nativeID) of the line that says this failure with its own Retry ("Not sent · <reason> · Retry"). When that
+   * line is on screen once the card has redrawn, the toast would only repeat it and cover what is under it, so it is
+   * skipped; when it is scrolled away, folded or on another screen, the toast says it.
+   */
+  shownBy?: string;
   /** Runs after a failure, before the toast: keep the input, mark the card. */
   onError?: (error: unknown) => void;
   onSuccess?: (result: T) => void;
@@ -118,6 +124,21 @@ export function notice(message: string, toast?: ToastApi): void {
   else (toast ?? boundToast)?.show(message);
 }
 
+/** Whether an element with this id is drawn inside the viewport, read a moment later so the card has redrawn. Web only. */
+type Rect = { width: number; height: number; top: number; left: number; bottom: number; right: number };
+type Dom = { document?: { querySelectorAll(q: string): ArrayLike<{ getBoundingClientRect(): Rect }> }; innerWidth?: number; innerHeight?: number };
+function onScreen(id: string): Promise<boolean> {
+  const g = globalThis as Dom;
+  if (!g.document || !g.innerHeight || !g.innerWidth) return Promise.resolve(false);
+  return new Promise(resolve => setTimeout(() => {
+    const seen = Array.from(g.document!.querySelectorAll(`[id="${id.replace(/"/g, "")}"]`)).some(el => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < g.innerHeight! && r.left < g.innerWidth!;
+    });
+    resolve(seen);
+  }, 150));
+}
+
 export async function runAction<T>(opts: ActionSpec<T>, key?: string): Promise<boolean> {
   if (key !== undefined) { if (inflight.has(key)) return false; inflight.add(key); }
   const toast = opts.toast ?? boundToast ?? undefined;
@@ -136,6 +157,7 @@ export async function runAction<T>(opts: ActionSpec<T>, key?: string): Promise<b
     opts.onError?.(error);
     const failure = typeof opts.failure === "function" ? opts.failure(error) : opts.failure ?? `${opts.label} didn't work`;
     const reason = errorText(error);
+    if (opts.shownBy && await onScreen(opts.shownBy)) { opts.reopen?.(); return false; }
     if (hasToastHost()) {
       const actions: ToastAction[] = [{ label: "Retry", onPress: () => void runAction(opts, key) }];
       if (opts.open) actions.push({ label: "Open", onPress: opts.open });

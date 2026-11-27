@@ -1784,11 +1784,13 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    resolves the same way (`withSettledBrief`, read inside the inbox store's one view via `settleWith`), and a brief-only
    chat answer holds its row (`holdAnswered`). A sent answer also drops its agent's flag, as the delivered message does
    on the worker (rule #11, the developer's message clears it), so the pill and the sidebar badge go with the card;
-   Copy and Put in chat keep it (nothing sent yet). A reply
+   Copy and Put in chat keep it (nothing sent yet). The panel's Activity draws its own overlaid copy while an
+   answer is in flight, not the worker's page. A reply
    confirms the entry, kept overlaid until the client's copy shows it; the server's copy settles it (recorded, or
    answered or withdrawn elsewhere: no error, the card shows the recorded answer). A failure (an RPC error, offline, a
    timeout) drops the overlay: the question is back where it was with the pick, words, note and images, "Not sent ·
-   <reason>" with Retry on the card, and the toast says it with Retry (in flight again) and Open. A reload mid-send
+   <reason>" with Retry on the card, and the toast says it with Retry (in flight again) and Open, unless that card is on screen
+   already saying it (`shownBy`: no toast covering the card that has its own Retry). A reload mid-send
    keeps the answer in flight for `RELOAD_GRACE_MS`, then brings it back as not sent unless the server's copy has it.
    The delay was never the worker: `follow.answer-question` records and replies without waiting on delivery
    (invariant 36); the card waited for the reply and then a `follow.get` refetch, two relay round trips. 2026-11-27, the

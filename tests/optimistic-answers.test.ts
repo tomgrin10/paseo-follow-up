@@ -16,6 +16,7 @@ import { withPendingAnswers, settledAnswers, withSettledBrief, type InFlightAnsw
 import { activeNeeds, needsYou } from "../shared/attention";
 import { buildHome, homeCounts } from "../shared/home";
 import { pillState } from "../shared/headline";
+import { activity } from "../shared/activity";
 import { listEntry, type ListWorkspace } from "../shared/list";
 import type { InboxRow } from "../shared/inbox";
 import type { Workspace } from "../shared/model";
@@ -113,6 +114,15 @@ test("a sent answer clears its agent's flag even when no brief named the questio
   const later = row({ ...noAsk, needs: { ...noAsk.needs!, since: new Date(clock + 60_000).toISOString() } });
   assert.ok(withSettledBrief(later, withPendingAnswers(ws(), entry(), key)).needs, "a flag raised after the answer stays");
   assert.ok(withSettledBrief(row({ ...noAsk, agentId: "helper" }), withPendingAnswers(ws(), entry(), key)).needs, "another agent's flag stays");
+});
+
+test("Activity reads the answer in flight too: the timeline gains the answer row, as the server's page will", () => {
+  const rows = (w: Workspace) => activity(w).filter(r => r.text.startsWith("Q5")).map(r => r.key);
+  assert.deepEqual(rows(ws()), ["asked:Q5"]);
+  const live = withPendingAnswers(ws(), entry(), key);
+  assert.deepEqual(rows(live), rows(recorded("send")), "the same rows the worker's copy will draw");
+  assert.ok(rows(live).includes("answered:Q5"));
+  assert.deepEqual(rows(withPendingAnswers(ws(), entry({ error: "offline" }), key)), ["asked:Q5"], "a failure takes it back");
 });
 
 test("the server's copy settles what it has: recorded, answered or withdrawn elsewhere", () => {
