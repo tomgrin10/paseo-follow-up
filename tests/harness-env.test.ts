@@ -118,7 +118,7 @@ test("harnessEnv resolves no external tool to a real binary outside the harness 
     assert.ok((await which("mcpproxy", live.PATH))?.startsWith(root), "everything else stays stubbed");
     const optOuts: string[] = [];
     for (const name of (await readdir("scripts")).filter(n => n.endsWith(".mjs") && n !== "harness-env.mjs")) if (/\breal:\s*(\[|REAL\b)/.test(await readFile(join("scripts", name), "utf8"))) optOuts.push(name);
-    assert.deepEqual(optOuts, ["check-wait-for-checks.mjs", "check-wait.mjs"], "only the opt-in live-model checks keep a real tool");
+    assert.deepEqual(optOuts, ["check-cards-scenarios.mjs", "check-wait-for-checks.mjs", "check-wait.mjs"], "only the opt-in live-model checks keep a real tool");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
