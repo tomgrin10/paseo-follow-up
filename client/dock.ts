@@ -68,3 +68,34 @@ export const KEYBOARD_MIN = 150;
  * dataSet into data-* attributes (dataset.primaryForm); its types don't list dataSet, hence the spread.
  */
 export const PRIMARY_FORM = { dataSet: { primaryForm: "1" } } as object;
+
+/**
+ * Native (`the-keyboard-never-covers-a-field`): what to do so the focused field shows above the keyboard. Window
+ * coordinates throughout. `room`: what stays clear under the field (its Send, for a primary form). With a scroll view
+ * around the field, scroll it (as far as its content goes), and lift the whole room by what scrolling can't cover,
+ * never so far that the field's top leaves the screen. A field that already shows does nothing.
+ */
+export function revealPlan(i: {
+  fieldTop: number; fieldBottom: number; keyboardTop: number; room: number;
+  scroll?: { top: number; bottom: number; offset: number; maxOffset: number } | null;
+}): { scrollTo: number | null; lift: number } {
+  const s = i.scroll ?? null;
+  const visibleBottom = Math.min(i.keyboardTop, s ? s.bottom : Infinity);
+  const visibleTop = s ? s.top : 0;
+  if (i.fieldBottom <= visibleBottom && i.fieldTop >= visibleTop) return { scrollTo: null, lift: 0 };
+  // Above the scroll view's top edge (the field scrolled away): bring its top back under the edge.
+  if (s && i.fieldTop < visibleTop) {
+    const up = Math.min(s.offset, visibleTop + REVEAL_GAP - i.fieldTop);
+    return { scrollTo: up > 0 ? Math.round(s.offset - up) : null, lift: 0 };
+  }
+  const want = i.fieldBottom - (visibleBottom - Math.max(REVEAL_GAP, i.room));
+  const take = s ? Math.max(0, Math.min(want, s.maxOffset - s.offset)) : 0;
+  const top = i.fieldTop - take, bottom = i.fieldBottom - take;
+  const covered = bottom - (i.keyboardTop - REVEAL_GAP);
+  const lift = bottom > i.keyboardTop ? Math.max(0, Math.min(covered, top - REVEAL_GAP)) : 0;
+  return { scrollTo: take > 0 ? Math.round(s!.offset + take) : null, lift: Math.round(lift) };
+}
+
+/** How much of a room (its bottom edge at `roomBottom`) the keyboard covers; 0 with no keyboard. Window coordinates. */
+export const roomOverlap = (roomBottom: number | null, keyboardTop: number | null): number =>
+  roomBottom === null || keyboardTop === null ? 0 : Math.max(0, Math.round(roomBottom - keyboardTop));

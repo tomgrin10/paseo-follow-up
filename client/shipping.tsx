@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { PagedRows } from "./paged-list";
-import { ActivityIndicator, TextInput, useWindowDimensions, View } from "react-native";
+import { ActivityIndicator, useWindowDimensions, View } from "react-native";
 import { Text } from "./text";
 import { useRpc } from "@getpaseo/plugin/client";
 import { SettingsAction, SettingsCard, SettingsRow, SettingsSection, SettingsSelect, useToast } from "@getpaseo/plugin/client/ui";
@@ -16,6 +16,7 @@ import { Disclosure } from "./settings-shell";
 import { ReviewModeRow } from "./review-mode";
 import { reviewerSettingsKey } from "./reviewers";
 import { overviewKey } from "./keys";
+import { Field } from "./field";
 
 export const shippingKey = ["follow-up", "pr-workflow"];
 type Write = z.input<typeof setPrWorkflowInputSchema>;
@@ -154,7 +155,7 @@ function ReviewFixSelect({ label, value, inherited, theme, compact, busy, onSave
       onValueChange={next => { if (next === "command") { setEditing(true); return; } setEditing(false); onSave(next === "inherit" ? null : { kind: "builtin" }); }} />
     {/* Phones: the field gets the full width and Save / Cancel split the row under it. */}
     {editing && <SubmitScope enabled={valid && !busy} onSubmit={() => { onSave({ kind: "command", command: draft.trim() }); setEditing(false); }} style={compact ? { gap: 8, paddingHorizontal: 16, paddingBottom: 12 } : { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingBottom: 12 }}>
-      <TextInput accessibilityLabel="Skill or command for review comments" value={draft} onChangeText={setDraft} placeholder="/fix-pr" placeholderTextColor={c.foregroundMuted} autoCapitalize="none" autoCorrect={false} autoFocus
+      <Field accessibilityLabel="Skill or command for review comments" value={draft} onChangeText={setDraft} placeholder="/fix-pr" placeholderTextColor={c.foregroundMuted} autoCapitalize="none" autoCorrect={false} autoFocus
         style={{ flex: 1, minWidth: 0, minHeight: compact ? 44 : 32, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: draft && !valid ? c.statusDanger : c.border, color: c.foreground, fontSize: compact ? 15 : 13, backgroundColor: c.surface0, fontFamily: "monospace", ...(compact ? { flex: undefined } : {}) }} />
       <View style={{ flexDirection: "row", gap: 8 }}>
         <Button shortcut theme={theme} compact={compact} grow={compact} kind="primary" title="Save" disabled={!valid || busy} onPress={() => { onSave({ kind: "command", command: draft.trim() }); setEditing(false); }} />

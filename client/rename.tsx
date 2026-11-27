@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { View, type TextInput as NativeTextInput } from "react-native";
 import { Pressable, Text } from "./text";
 import { useRpc } from "@getpaseo/plugin/client";
-import { Icon, Modal, TextInput, useToast } from "@getpaseo/plugin/client/ui";
+import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { renameStatusRpc, renameWorkspaceRpc } from "../shared/contracts";
 import { checkName, NAME_MAX_CHARS, NAME_RULE, type RenameStatus } from "../shared/rename";
@@ -13,6 +13,7 @@ import { overviewKey } from "./keys";
 import { Spinner } from "./motion";
 import { hasToastHost, pushToast, runAction } from "./toast-store";
 import { createHostSlot } from "./host-slot";
+import { Field } from "./field";
 
 /**
  * Rename title with AI (docs/ai-roles.md#rename-title-with-ai): one dialog for every entry point (row menus, the panel's More
@@ -114,7 +115,7 @@ export function RenameDialog({ request, theme, compact, onClose }: { request: Re
             {showCounter && <Text style={[t.small, { fontVariant: ["tabular-nums"] }, counter > NAME_MAX_CHARS ? { color: c.statusDanger } : null]}>{counter}/{NAME_MAX_CHARS}</Text>}
           </View>
           <View>
-            <TextInput ref={input} accessibilityLabel="New name" accessibilityHint="Suggested from the Summary, PRs and linked items" value={name} autoFocus={!compact} selectTextOnFocus
+            <Field ref={input} accessibilityLabel="New name" accessibilityHint="Suggested from the Summary, PRs and linked items" value={name} autoFocus={!compact} selectTextOnFocus
               placeholder={waiting ? "" : "Type a name"} placeholderTextColor={c.foregroundMuted}
               onChangeText={v => { typed.current = true; setName(v); setEdited(true); }} autoCapitalize="sentences" maxLength={NAME_MAX_CHARS + 20} style={field} />
             {waiting && <View pointerEvents="none" accessibilityLiveRegion="polite" style={{ position: "absolute", left: 10, top: 0, bottom: 0, flexDirection: "row", alignItems: "center", gap: 8 }}>

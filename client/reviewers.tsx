@@ -4,7 +4,7 @@ import { PAGE } from "../shared/paged";
 import { View } from "react-native";
 import { Pressable, Text } from "./text";
 import { useRpc } from "@getpaseo/plugin/client";
-import { Icon, SettingsAction, SettingsCard, useToast, TextInput } from "@getpaseo/plugin/client/ui";
+import { Icon, SettingsAction, SettingsCard, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { reviewerSettingsRpc, reviewerSuggestionsRpc, saveReviewersRpc } from "../shared/contracts";
 import { MAX_REVIEWERS, TEAM_SLUG, USER_LOGIN, isTeam, resolveReviewers, reviewerConfig, reviewerLabel, sameLogin, setReviewerConfig, type ReviewerEntry } from "../shared/reviewers";
@@ -12,6 +12,7 @@ import { noReviewRepoList, noReviewReposVersion, onNoReviewRepos, setNoReviewRep
 import { Button, Switch, errorText, text, type Theme, SubmitScope } from "./kit";
 import { Disclosure } from "./settings-shell";
 import { repoSummary, reposSummary, reviewersConfigured } from "../shared/settings-nav";
+import { Field } from "./field";
 
 export const reviewerSettingsKey = ["follow-up", "reviewer-settings"];
 
@@ -69,7 +70,7 @@ function AddReviewer({ repo, theme, compact, taken, onAdd }: { repo: string | nu
   const typed = !!q && valid(q) && !taken.some(l => sameLogin(l, q));
   return <View style={{ gap: 6 }}>
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-      <TextInput accessibilityLabel={repo ? `Add a reviewer for ${repo}` : "Add a default reviewer"} value={value} placeholder="Login or org/team" placeholderTextColor={c.foregroundMuted}
+      <Field accessibilityLabel={repo ? `Add a reviewer for ${repo}` : "Add a default reviewer"} value={value} placeholder="Login or org/team" placeholderTextColor={c.foregroundMuted}
         autoCapitalize="none" autoCorrect={false} onFocus={() => { setFocused(true); setOpen(true); }} onBlur={() => setTimeout(() => setOpen(false), 150)}
         onKeyPress={e => { if (e.nativeEvent.key === "Escape") setOpen(false); }} onChangeText={v => { setValue(v); setOpen(true); }} onSubmitEditing={() => { if (typed) add({ login: q, name: null }); }}
         style={{ flex: 1, minWidth: 0, minHeight: compact ? 44 : 32, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: c.border, color: c.foreground, fontSize: 13, backgroundColor: c.surface0 }} />

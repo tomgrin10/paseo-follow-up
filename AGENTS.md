@@ -104,7 +104,7 @@ Paseo app (web, desktop, phone)          Paseo daemon (host)                    
 | Self-update (check, install, watchdog, rollback), 2.0's move from 1.x | `server/plugin-move.ts`, `server/data-move.ts`, `shared/plugin-move.ts`, `shared/legacy.ts`, `server/updater.ts`, `server/update-registry.ts`, `server/update-provenance.ts`, `server/update-watchdog.mjs`, `server/updates.ts`, `shared/updates.ts`, `shared/update-policy.ts`, `client/updates.tsx` | [updates](docs/updates.md) |
 | Resource governor, never waking agents, worker memory, usage meters | `server/governor.ts`, `server/memory.ts`, `server/agent-load.ts`, `server/usage.ts`, `shared/agent-load.ts`, `shared/resources.ts`, `shared/usage.ts` | [resources](docs/resources.md) |
 | The workspace view (Home's pane, side panel, tab), its agent card and section hints | `client/panel.tsx`, `client/agent-card.tsx`, `client/hint.tsx`, `shared/workspace-layout.ts`, `client/large.tsx` | [client](docs/client.md#the-workspace-view) |
-| UI | `index.client.tsx`, `client/`, `client/row-badges.tsx`, `shared/row-badges.ts`, `client/host-slot.tsx`, `client/scroll-allowlist.ts`, `client/split.tsx`, `shared/split.ts`, `client/pane-allowlist.ts`, `client/search-key.ts`, `shared/search-key.ts`, `client/search-focus.ts`, `shared/search-focus.ts`, `shared/home-keys.ts` | [client](docs/client.md) |
+| UI | `index.client.tsx`, `client/`, `client/row-badges.tsx`, `shared/row-badges.ts`, `client/host-slot.tsx`, `client/field.tsx`, `client/keyboard.tsx`, `client/scroll-allowlist.ts`, `client/split.tsx`, `shared/split.ts`, `client/pane-allowlist.ts`, `client/search-key.ts`, `shared/search-key.ts`, `client/search-focus.ts`, `shared/search-focus.ts`, `shared/home-keys.ts` | [client](docs/client.md) |
 | Chat card for agents and workspaces an agent creates | `shared/created.ts`, `server/created-items.ts`, `client/created.tsx` | [client](docs/client.md#created-agent-and-workspace-cards) |
 | Pasted images in every field whose words reach an agent (caps, the store, who takes them, the one component) | `shared/images.ts`, `server/image-store.ts`, `server/image-support.ts`, `client/image-attach.tsx`, `client/unsent-images.ts` | [client](docs/client.md#pasted-images), [rpcs-and-tools](docs/rpcs-and-tools.md#pasted-images) |
 | Shared copy and errors, scale bounds, paged lists | `shared/presentation.ts`, `shared/errors.ts`, `shared/tool-result.ts`, `shared/scale.ts`, `shared/paged.ts`, `shared/history.ts`, `shared/finished.ts`, `client/paged-list.tsx` | [client](docs/client.md) |
@@ -1809,6 +1809,17 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    seems, I want the ux to be instant and optimistic, if the send fails handle it well." Guarded by
    `tests/optimistic-answers.test.ts` (the overlay against the server's own `developerAnswer` on every count, the live
    store, the real `QuestionBody` hidden in flight and restored on failure) and `tests/quick-actions.test.ts`.
+
+143. **The keyboard never covers a field** (`the-keyboard-never-covers-a-field`). On a phone (iOS, Android, and the web
+   at phone width), the field you type in stays above the on-screen keyboard, on every screen, panel and sheet. Paseo
+   draws edge to edge, so the window never shrinks for the keyboard; it moves only its own composer and positions
+   fields in its sheets. Every text field is `Field` (`client/field.tsx`, the SDK's `TextInput`), never a raw one, and
+   every surface (Home and the Overseer, the larger view, the workspace panel, every settings screen) and `DockedPane`
+   is a `KeyboardRoom` (`client/keyboard.tsx`): it stops above the keyboard by what the keyboard covers of it, then
+   scrolls the focused field into view (with room for its Send in a docked pane) and lifts by what scrolling can't
+   cover. One keyboard reader for the whole client, events only. 2026-11-27, the developer: "when writing something,
+   for example in the overseer, the keyboard opens over the text area." Guarded by `tests/keyboard-field.test.ts`
+   (no raw `TextInput` in the client, every surface in a room, the reveal math).
 
 144. **The sidebar view is Paseo's sidebar plus Follow-up's line** (`sidebar-view-is-paseo-s-sidebar-plus-follow-up-s-line`).
    Home and the sidebar view arrange their rows with one model (`arrangeHome`, `shared/home-arrange.ts`) from one

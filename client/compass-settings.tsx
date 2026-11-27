@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ActivityIndicator, TextInput, View } from "react-native";
+import { ActivityIndicator, View } from "react-native";
 import { openExternalUrl, useRpc } from "@getpaseo/plugin/client";
 import { Icon, SettingsSection, SettingsSelect, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -14,6 +14,7 @@ import {
 } from "../shared/compass";
 import { type PlanView } from "../shared/morning-brief";
 import { NEW_NAME, NEW_OF } from "../shared/new-name";
+import { Field } from "./field";
 
 export const compassKey = ["follow-up", "compass"];
 
@@ -353,13 +354,13 @@ function SourceEditor({ view, source, first, busy, onSave, onCancel, onRemove, t
     </View>
     {!ruled && <View style={{ gap: 6 }}>
       <Text style={[t.meta, { color: c.foreground, fontWeight: "600" }]}>How to read this</Text>
-      <TextInput accessibilityLabel="How to read this source" multiline value={notes} onChangeText={v => setNotes(v.slice(0, COMPASS.sourceInstructions))} placeholder={kind === "doc" ? "Lines under 'This week' are the plan. A line starting with ! is urgent." : "P0 means today, P1 this week. Ignore hiring talk."}
+      <Field accessibilityLabel="How to read this source" multiline value={notes} onChangeText={v => setNotes(v.slice(0, COMPASS.sourceInstructions))} placeholder={kind === "doc" ? "Lines under 'This week' are the plan. A line starting with ! is urgent." : "P0 means today, P1 this week. Ignore hiring talk."}
         placeholderTextColor={c.foregroundMuted} style={{ minHeight: 64, padding: 10, borderRadius: 6, borderWidth: 1, borderColor: c.border, color: c.foreground, fontSize: 13, backgroundColor: c.surface0, textAlignVertical: "top" }} />
       <Text style={t.meta}>{`Your words for the model that reads it. They change how it is read, never what is read. ${notes.length}/${COMPASS.sourceInstructions}`}</Text>
     </View>}
     <View style={row}>
       {labelCol("Name")}
-      <TextInput accessibilityLabel="Source name" value={label} onChangeText={setLabel} placeholder={kind === "tracker" ? "priority/high" : kind === "doc" ? "Now" : kind === "calendar" ? "Calendar deadlines" : "Dana · product"} placeholderTextColor={c.foregroundMuted}
+      <Field accessibilityLabel="Source name" value={label} onChangeText={setLabel} placeholder={kind === "tracker" ? "priority/high" : kind === "doc" ? "Now" : kind === "calendar" ? "Calendar deadlines" : "Dana · product"} placeholderTextColor={c.foregroundMuted}
         style={{ flex: 1, minWidth: 160, minHeight: compact ? 44 : 32, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: c.border, color: c.foreground, fontSize: 13, backgroundColor: c.surface0 }} />
     </View>
     <View style={[row, { justifyContent: "space-between" }]}>
@@ -400,7 +401,7 @@ function FindPicker({ kind, onPick, onCancel, theme, compact }: { kind: FindKind
   return <SubmitScope enabled={file && q.trim().length >= 2} onSubmit={() => setDebounced(q.trim())} style={{ borderWidth: 1, borderColor: c.border, borderRadius: 8, backgroundColor: c.surface0, overflow: "hidden" }}>
     <View style={{ flexDirection: "row", gap: 8, padding: 8, alignItems: "center" }}>
       {auto ? <Text style={[t.meta, { flex: 1 }]}>{results.isFetching ? "Looking…" : "The calendars your calendar tool lists"}</Text>
-        : <TextInput autoFocus accessibilityLabel={copy.label} value={q} onChangeText={setQ} placeholder={copy.placeholder}
+        : <Field autoFocus accessibilityLabel={copy.label} value={q} onChangeText={setQ} placeholder={copy.placeholder}
           placeholderTextColor={c.foregroundMuted} autoCapitalize="none" autoCorrect={false}
           style={{ flex: 1, minWidth: 0, minHeight: compact ? 44 : 32, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: c.border, color: c.foreground, fontSize: 13, backgroundColor: c.surface1, ...(file && q ? { fontFamily: "ui-monospace, Menlo, monospace" } : {}) }} />}
       {file && <Button title="Check" theme={theme} compact={compact} disabled={q.trim().length < 2} loading={results.isFetching} onPress={() => setDebounced(q.trim())} />}
@@ -425,7 +426,7 @@ function ReadingNotes({ value, busy, onSave, theme, compact }: { value: string; 
   useEffect(() => setDraft(value), [value]);
   const dirty = draft.trim() !== value.trim();
   return <SubmitScope enabled={dirty && !busy} onSubmit={() => onSave(draft)} style={{ gap: 6 }}>
-    <TextInput accessibilityLabel="How to read your Compass" multiline value={draft} onChangeText={v => setDraft(v.slice(0, COMPASS.instructions))} placeholder="P0 means today. 'The renewal' is the acme renewal. Customer asks wait for the plan unless they name a date."
+    <Field accessibilityLabel="How to read your Compass" multiline value={draft} onChangeText={v => setDraft(v.slice(0, COMPASS.instructions))} placeholder="P0 means today. 'The renewal' is the acme renewal. Customer asks wait for the plan unless they name a date."
       placeholderTextColor={c.foregroundMuted} style={{ minHeight: 72, padding: 10, borderRadius: 6, borderWidth: 1, borderColor: c.border, color: c.foreground, fontSize: 13, backgroundColor: c.surface0, textAlignVertical: "top" }} />
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
       <Text style={[t.meta, { flex: 1, minWidth: 180 }]}>{`For every source. ${draft.length}/${COMPASS.instructions}`}</Text>
@@ -454,9 +455,9 @@ function Glossary({ entries, busy, onSave, theme, compact }: { entries: Glossary
       </Pressable>
     </View>)}
     {entries.length < COMPASS.glossary && <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-      <TextInput accessibilityLabel="Word" value={words} onChangeText={setWords} placeholder="Phoenix" placeholderTextColor={c.foregroundMuted} style={[field, { flexGrow: 1, flexBasis: 120, minWidth: 0 }]} />
+      <Field accessibilityLabel="Word" value={words} onChangeText={setWords} placeholder="Phoenix" placeholderTextColor={c.foregroundMuted} style={[field, { flexGrow: 1, flexBasis: 120, minWidth: 0 }]} />
       <Icon name="ArrowRight" size={12} color={c.foregroundMuted} />
-      <TextInput accessibilityLabel="Issue key" value={key} onChangeText={setKey} placeholder="ACME-40" autoCapitalize="characters" placeholderTextColor={c.foregroundMuted} style={[field, { flexGrow: 1, flexBasis: 100, minWidth: 0, fontFamily: "ui-monospace, Menlo, monospace" }]} />
+      <Field accessibilityLabel="Issue key" value={key} onChangeText={setKey} placeholder="ACME-40" autoCapitalize="characters" placeholderTextColor={c.foregroundMuted} style={[field, { flexGrow: 1, flexBasis: 100, minWidth: 0, fontFamily: "ui-monospace, Menlo, monospace" }]} />
       <Button title="Add" icon="Plus" theme={theme} compact={compact} loading={busy} disabled={words.trim().length < 2 || key.trim().length < 3} onPress={add} />
     </View>}
   </View>;

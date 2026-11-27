@@ -8,7 +8,7 @@ import { FloatingSurface } from "./floating-surface";
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Platform, View } from "react-native";
 import { Pressable, Text } from "./text";
-import { Icon, TextInput } from "@getpaseo/plugin/client/ui";
+import { Icon } from "@getpaseo/plugin/client/ui";
 import { CONTEXT_ASKS, askHeadline, contextFor, keyLabel, questionCardKey, type ContextRequest } from "../shared/catch-up";
 import type { RpcInput } from "@getpaseo/plugin";
 import type { contextAskRpc, questionActionRpc } from "../shared/contracts";
@@ -20,6 +20,7 @@ import { RichText } from "./rich-text";
 import { PRIMARY_FORM } from "./dock";
 import { ImageField, useImageAttachments } from "./image-attach";
 import type { ImageTarget, ImageUpload } from "../shared/images";
+import { Field } from "./field";
 
 const CATCH_UP_FOOTNOTE = "This workspace steps aside while you keep going, and comes back as your next card with the answer. Back reaches it any time.";
 const isMac = () => typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test((navigator as { platform?: string }).platform ?? "");
@@ -183,7 +184,7 @@ export function MorePanel({ theme, compact, onClose, onAsk, footnote = CATCH_UP_
       </Pressable>)}
     </View>
     <View {...PRIMARY_FORM} style={{ gap: 10 }}>
-    <ImageField model={img} theme={theme} compact={compact}><TextInput accessibilityLabel="What do you want to know?" placeholder="What do you want to know?" placeholderTextColor={c.foregroundMuted} value={words} multiline
+    <ImageField model={img} theme={theme} compact={compact}><Field accessibilityLabel="What do you want to know?" placeholder="What do you want to know?" placeholderTextColor={c.foregroundMuted} value={words} multiline
       onChangeText={v => { setWords(v); setPicked(CONTEXT_ASKS.find(x => x.text === v)?.id ?? ""); }}
       style={{ minHeight: compact ? 84 : 76, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: c.border, color: c.foreground, backgroundColor: c.surface0 }} /></ImageField>
     {!!error && <Text accessibilityRole="alert" style={[t.meta, { color: c.statusDanger }]}>{error}</Text>}

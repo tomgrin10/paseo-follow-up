@@ -2,7 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { Platform, View } from "react-native";
 import { Pressable, Text } from "./text";
 import { openExternalUrl, useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
-import { Icon, Modal, ScrollView, TextInput } from "@getpaseo/plugin/client/ui";
+import { Icon, Modal, ScrollView } from "@getpaseo/plugin/client/ui";
 import { reportLinkRpc, reportSendRpc, reportTargetsRpc } from "../shared/contracts";
 import { NEW_AGENT, NEW_WORKSPACE, PICKER_MAX, defaultChoice, pickerScrolls, newAgentLines, pickerRows, targetLines, type PickerRow, type SendTargets } from "../shared/report-send";
 import { errorText } from "../shared/errors";
@@ -11,6 +11,7 @@ import { Button, SubmitScope, text } from "./kit";
 import { Spinner } from "./motion";
 import { tint, type Theme } from "./theme";
 import { createHostSlot } from "./host-slot";
+import { Field } from "./field";
 
 /**
  * Report a bug: the small sheet behind Settings → General → Report a bug, ⌘K, /report-issue and every error toast's
@@ -138,7 +139,7 @@ export function ReportSheet({ request, theme, layout, openAgent, onClose }: { re
         </View>
         <Pressable accessibilityRole="button" accessibilityLabel="Remove the error" hitSlop={8} onPress={() => setError(null)}><Icon name="X" size={14} color={c.foregroundMuted} /></Pressable>
       </View>}
-      <TextInput value={words} onChangeText={setWords} multiline autoFocus={!compact} placeholder={placeholder} placeholderTextColor={c.foregroundMuted} accessibilityLabel="Describe it"
+      <Field value={words} onChangeText={setWords} multiline autoFocus={!compact} placeholder={placeholder} placeholderTextColor={c.foregroundMuted} accessibilityLabel="Describe it"
         style={{ minHeight: compact ? 132 : 112, borderWidth: 1, borderColor: c.border, borderRadius: 8, backgroundColor: c.surface0, paddingHorizontal: 12, paddingVertical: 10, color: c.foreground, fontSize: compact ? 14 : 13, lineHeight: compact ? 20 : 18, textAlignVertical: "top" }} />
       {nowhere ? <View style={{ flexDirection: "row", gap: 10, padding: 12, borderRadius: 8, backgroundColor: c.surface2 }}>
         <Icon name="Info" size={14} color={c.foregroundMuted} />

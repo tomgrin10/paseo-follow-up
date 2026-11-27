@@ -93,7 +93,7 @@ test("one-answer-flow-for-every-question: every question surface draws QuestionB
   const dir = join(ROOT, "client");
   for (const f of (await readdir(dir)).filter(f => f.endsWith(".tsx") && !["questions.tsx", "brief.tsx"].includes(f))) {
     const s = await readFile(join(dir, f), "utf8");
-    assert.doesNotMatch(s, /<TextInput[^>]*(Your answer|Note for the agent)/, `${f} draws its own answer field; use QuestionBody`);
+    assert.doesNotMatch(s, /<Field[^>]*(Your answer|Note for the agent)/, `${f} draws its own answer field; use QuestionBody`);
   }
   // Inside QuestionBody the field's role, label, placeholder and visibility come from answerDraft, the same in every
   // mode (dense, inline, pinned): no surface decides on its own that the field is a note.
@@ -106,7 +106,7 @@ test("one-answer-flow-for-every-question: every question surface draws QuestionB
   assert.match(body, /const answer = draft\.answer;/);
   // The brief card's decisions follow the same shape: the answer field only on Something else, a note only on Add note.
   const brief = await src("client/brief.tsx");
-  assert.match(brief, /\{!readonly && isOther\(picks\[d\.id\]\) && <View (?:\{\.\.\.PRIMARY_FORM\} )?style=\{\{ gap: 8 \}\}>\s*(?:<WithImages [^>]*>)?<TextInput accessibilityLabel=\{`Your answer/);
+  assert.match(brief, /\{!readonly && isOther\(picks\[d\.id\]\) && <View (?:\{\.\.\.PRIMARY_FORM\} )?style=\{\{ gap: 8 \}\}>\s*(?:<WithImages [^>]*>)?<Field accessibilityLabel=\{`Your answer/);
   assert.match(brief, /\{!readonly && !isOther\(picks\[d\.id\]\) && \(notesOpen\[d\.id\] \? <View/);
   assert.match(brief, /\{OWN_ANSWER_HINT\}/, "one hint for a Something else without words");
 });

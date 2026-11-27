@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { PagedRows } from "./paged-list";
-import { ActivityIndicator, TextInput, View } from "react-native";
+import { ActivityIndicator, View } from "react-native";
 import { Text } from "./text";
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, SettingsAction, SettingsCard, SettingsSection, SettingsSelect, SettingsSwitch, useToast } from "@getpaseo/plugin/client/ui";
@@ -9,6 +9,7 @@ import { prStatsSettingsRpc, setPrStatsRpc } from "../shared/contracts";
 import { estimateBlocked, estimateLines, sizeWords, statsRepoLine, statsRepoWait, statsRepoWaitTone, type SetPrStatsInput, type StatsSettingsView, type StatsTeam } from "../shared/pr-stats-settings";
 import { Button, errorText, SubmitScope, text, type Theme } from "./kit";
 import { Pressable } from "./text";
+import { Field } from "./field";
 
 export const prStatsSettingsKey = ["follow-up", "pr-stats-settings"];
 type Row = StatsSettingsView["repos"][number];
@@ -64,7 +65,7 @@ export function PrStatsSettings({ theme, compact, onPage = false }: { theme: The
         </View>} />
         {/* A repository Follow-up hasn't seen yet. */}
         <SubmitScope enabled={addValid} onSubmit={() => setOptIn(adding.trim())} style={{ flexDirection: compact ? "column" : "row", alignItems: compact ? "stretch" : "center", gap: 8, paddingHorizontal: compact ? 16 : 14, paddingVertical: 10, borderTopWidth: data.repos.length ? 1 : 0, borderTopColor: c.border }}>
-          <TextInput accessibilityLabel="Another repository, owner/repo" value={adding} onChangeText={setAdding} placeholder="Another repository: owner/repo" placeholderTextColor={c.foregroundMuted} autoCapitalize="none" autoCorrect={false}
+          <Field accessibilityLabel="Another repository, owner/repo" value={adding} onChangeText={setAdding} placeholder="Another repository: owner/repo" placeholderTextColor={c.foregroundMuted} autoCapitalize="none" autoCorrect={false}
             style={{ flex: compact ? undefined : 1, minWidth: 0, minHeight: compact ? 44 : 32, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: c.border, color: c.foreground, fontSize: compact ? 15 : 13, backgroundColor: c.surface0 }} />
           {!!adding.trim() && <Button theme={theme} compact={compact} grow={compact} icon="Plus" title="Add" disabled={!addValid} onPress={() => setOptIn(adding.trim())} />}
         </SubmitScope>
@@ -175,7 +176,7 @@ function RepoOptions({ row, theme, compact, busy, set }: { row: Row; theme: Them
       options={[{ value: "everyone", label: "Everyone" }, { value: "people", label: "Picked people" }, { value: "github", label: "A GitHub team" }]}
       onValueChange={v => { setTeamKind(v); setTeamDraft(v === s.team.kind ? (s.team.kind === "people" ? s.team.logins.join(", ") : s.team.kind === "github" ? s.team.team : "") : ""); if (v === "everyone") set({ team: { kind: "everyone" } }, "team: everyone"); }} />
     {teamKind !== "everyone" && <SubmitScope enabled={!busy && teamChanged} onSubmit={saveTeam} style={[pad, { flexDirection: "row", alignItems: "center", gap: 8 }]}>
-      <TextInput accessibilityLabel={teamKind === "people" ? "Team logins" : "GitHub team, org/slug"} value={teamDraft} onChangeText={setTeamDraft} placeholder={teamKind === "people" ? "alice, bob, carol" : "example/backend"} placeholderTextColor={c.foregroundMuted} autoCapitalize="none" autoCorrect={false} style={field} />
+      <Field accessibilityLabel={teamKind === "people" ? "Team logins" : "GitHub team, org/slug"} value={teamDraft} onChangeText={setTeamDraft} placeholder={teamKind === "people" ? "alice, bob, carol" : "example/backend"} placeholderTextColor={c.foregroundMuted} autoCapitalize="none" autoCorrect={false} style={field} />
       <Button theme={theme} compact={compact} title="Save" disabled={busy || !teamChanged} onPress={saveTeam} />
     </SubmitScope>}
     {teamKind !== "everyone" && (teamProblem || teamKind !== s.team.kind) && <Text style={[t.meta, { paddingHorizontal: compact ? 16 : 14, paddingBottom: 10, marginTop: -4, color: teamProblem ? c.statusDanger : c.foregroundMuted }]}>{teamProblem ?? "Not saved yet: stats show the saved team until you Save."}</Text>}
@@ -185,7 +186,7 @@ function RepoOptions({ row, theme, compact, busy, set }: { row: Row; theme: Them
       <Text style={t.meta}>Bots are always hidden. Add service accounts that look like people; * matches anything.</Text>
     </View>
     <SubmitScope enabled={!busy && hiddenChanged} onSubmit={() => set({ ignore: logins(hidden) }, logins(hidden).length ? `${logins(hidden).length} hidden` : "nobody hidden")} style={[pad, { paddingTop: 8, flexDirection: "row", alignItems: "center", gap: 8 }]}>
-      <TextInput accessibilityLabel="Hidden from stats, logins" value={hidden} onChangeText={setHidden} placeholder="deploy-robot, release-*" placeholderTextColor={c.foregroundMuted} autoCapitalize="none" autoCorrect={false} style={field} />
+      <Field accessibilityLabel="Hidden from stats, logins" value={hidden} onChangeText={setHidden} placeholder="deploy-robot, release-*" placeholderTextColor={c.foregroundMuted} autoCapitalize="none" autoCorrect={false} style={field} />
       <Button theme={theme} compact={compact} title="Save" disabled={busy || !hiddenChanged} onPress={() => set({ ignore: logins(hidden) }, logins(hidden).length ? `${logins(hidden).length} hidden` : "nobody hidden")} />
     </SubmitScope>
   </View>;

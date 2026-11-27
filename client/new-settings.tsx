@@ -4,7 +4,7 @@ import { NEW_ROW } from "../shared/new-name";
 import { useNewRowSetting } from "./new-entry";
 import { ActivityIndicator, View } from "react-native";
 import { useRpc } from "@getpaseo/plugin/client";
-import { Icon, SettingsAction, SettingsCard, SettingsRow, SettingsSection, SettingsSelect, SettingsSwitch, TextInput, useToast } from "@getpaseo/plugin/client/ui";
+import { Icon, SettingsAction, SettingsCard, SettingsRow, SettingsSection, SettingsSelect, SettingsSwitch, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Text } from "./text";
 import { Button, IconButton, SubmitScope, Switch, errorText, text, type Theme } from "./kit";
@@ -16,6 +16,7 @@ import type { z } from "zod";
 import type { DispatchAction, actionChangeSchema, settingsChangeSchema } from "../shared/dispatch";
 import { actionRows, learnedTeams, teamKey, type ActionRowModel, type SettingsView } from "../shared/new-settings";
 import { NEW_NAME, NEW_OF, NEW_WORK } from "../shared/new-name";
+import { Field } from "./field";
 
 export const newActionsKey = ["follow-up", "dispatch-actions"];
 export const newSettingsKey = ["follow-up", "dispatch-settings"];
@@ -200,7 +201,7 @@ function WhereSection({ theme, compact }: { theme: Theme; compact: boolean }) {
 
 function TeamInput({ theme, compact, value, onChange }: { theme: Theme; compact: boolean; value: string; onChange: (v: string) => void }) {
   const c = theme.colors; const [focused, setFocused] = useState(false);
-  return <TextInput value={value} onChangeText={onChange} placeholder="Team key" placeholderTextColor={c.foregroundMuted} accessibilityLabel="Team key" autoCapitalize="characters" autoCorrect={false}
+  return <Field value={value} onChangeText={onChange} placeholder="Team key" placeholderTextColor={c.foregroundMuted} accessibilityLabel="Team key" autoCapitalize="characters" autoCorrect={false}
     onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
     style={{ minWidth: 120, minHeight: compact ? 44 : 32, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1, borderColor: focused ? c.accent : c.border, color: c.foreground, backgroundColor: c.surface0, fontSize: compact ? 15 : 13, ...focusRing(c, false) }} />;
 }
@@ -231,7 +232,7 @@ function BaseRow({ theme, compact, name, saved, busy, onSave }: { theme: Theme; 
   const save = () => { if (dirty) onSave(draft!.trim(), () => setDraft(null)); else setDraft(null); };
   return <SettingsRow label={name}>
     <SubmitScope enabled={dirty && !busy} onSubmit={save} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-      <TextInput value={value} onChangeText={setDraft} placeholder="Repository default" placeholderTextColor={c.foregroundMuted} accessibilityLabel={`Base for ${name}`} autoCapitalize="none" autoCorrect={false}
+      <Field value={value} onChangeText={setDraft} placeholder="Repository default" placeholderTextColor={c.foregroundMuted} accessibilityLabel={`Base for ${name}`} autoCapitalize="none" autoCorrect={false}
         onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} onSubmitEditing={save}
         style={{ minWidth: compact ? 140 : 180, minHeight: compact ? 44 : 32, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1, borderColor: focused ? c.accent : c.border, color: c.foreground, backgroundColor: c.surface0, fontSize: compact ? 15 : 13, fontFamily: "ui-monospace, Menlo, monospace" }} />
       {dirty && <Button theme={theme} compact={compact} kind="primary" shortcut title="Save" disabled={busy} onPress={save} />}

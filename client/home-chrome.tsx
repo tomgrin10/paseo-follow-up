@@ -1,6 +1,6 @@
 import { FloatingSurface } from "./floating-surface";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { Platform, TextInput, View } from "react-native";
+import { Platform, View, type TextInput } from "react-native";
 import { AttachImageButton, ImageField, useImageAttachments, type ImageAttachments } from "./image-attach";
 import { OVERSEER_ASK_KEY } from "./unsent-images";
 import { Pressable, Text } from "./text";
@@ -22,6 +22,7 @@ import { text, type Theme } from "./kit";
 import { MenuItemContent, menuGlyph, menuItemRow } from "./menu-item";
 import { useSearchFocusField } from "./search-focus";
 import { useLinkedIndex } from "./linked";
+import { Field } from "./field";
 
 /**
  * Home's chrome above the list (1.3.0-beta.2): the omnibox, the sort menu, the status strip and the provider
@@ -160,7 +161,7 @@ export function QueryField({ theme, value, onChange, placeholder, icon, dense, i
   return <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: dense ? 8 : 6, height: dense ? 44 : 32, paddingHorizontal: dense ? 12 : 8, borderRadius: dense ? 12 : 6,
     borderWidth: 1, borderColor: focused ? withAlpha(c.foreground, 0.35) : c.border, backgroundColor: c.surface1 }}>
     <Icon name={icon as never} size={dense ? 16 : 13} color={c.foregroundMuted} />
-    <TextInput ref={inputRef} onLayout={onLayout} value={value} onChangeText={q => { onLayoutQuery?.(capture.current.change(q)); onChange(q); }} placeholder={placeholder} placeholderTextColor={c.foregroundMuted}
+    <Field ref={inputRef} onLayout={onLayout} value={value} onChangeText={q => { onLayoutQuery?.(capture.current.change(q)); onChange(q); }} placeholder={placeholder} placeholderTextColor={c.foregroundMuted}
       accessibilityLabel={placeholder} autoFocus={autoFocus} autoCorrect={false} autoCapitalize="none" spellCheck={false} returnKeyType="go"
       {...(listKeys || onLayout ? { dataSet: { ...(listKeys ? { listKeys: "1" } : {}), ...(onLayout ? { followUpSearch: "1" } : {}) } } as object : {})}
       onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}

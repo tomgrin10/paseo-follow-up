@@ -3,7 +3,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import { Platform, View, useWindowDimensions, type ViewStyle } from "react-native";
 import { Pressable, Text } from "./text";
 import { useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
-import { Icon, ScrollView, TextInput } from "@getpaseo/plugin/client/ui";
+import { Icon } from "@getpaseo/plugin/client/ui";
+import { ScrollView } from "./keyboard";
+import { Field as TextField } from "./field";
 import { AttachImageButton, ImageField, useImageAttachments, type ImageAttachments } from "./image-attach";
 import { imagesWord } from "../shared/images";
 import { agentSettingsRpc, dispatchPreviewRpc, dispatchRecordsRpc, dispatchRpc, dispatchSettingsRpc, dispatchSourcesRpc, dispatchUndoRpc, setDispatchSettingsRpc } from "../shared/contracts";
@@ -86,7 +88,7 @@ function Chip({ label, icon, onPress, c, compact, dashed, mono, accessibilityLab
 
 function EditLine({ value, onDone, c, compact, mono, label }: { value: string; onDone: (next: string | null) => void; c: Colors; compact: boolean; mono?: boolean; label: string }) {
   const [text, setText] = useState(value);
-  return <TextInput autoFocus value={text} onChangeText={setText} accessibilityLabel={label} onSubmitEditing={() => onDone(text.trim() || null)} onBlur={() => onDone(text.trim() || null)}
+  return <TextField autoFocus value={text} onChangeText={setText} accessibilityLabel={label} onSubmitEditing={() => onDone(text.trim() || null)} onBlur={() => onDone(text.trim() || null)}
     blurOnSubmit selectTextOnFocus
     style={{ minHeight: compact ? 44 : 30, borderWidth: 1, borderColor: c.accent, borderRadius: 6, paddingHorizontal: 8, color: c.foreground, backgroundColor: c.surface0, fontSize: mono ? 12 : compact ? 14 : 13, fontFamily: mono ? MONO : undefined, flex: 1 }} />;
 }
@@ -209,7 +211,7 @@ function Preview({ plan, overrides, setOverrides, c, compact, busy, catalog, loa
         </ScrollView>
         <Text style={{ color: c.foregroundMuted, fontSize: 12 }}>Follow-up then adds its usual workspace instructions.</Text>
       </View>}
-      {open === "note" || overrides.note ? <ImageField model={img} theme={{ colors: c }} compact={compact} row={compact}><TextInput multiline autoFocus={open === "note"} value={overrides.note ?? ""} onChangeText={note => set({ note })} placeholder="A note for the agent" placeholderTextColor={c.foregroundMuted} accessibilityLabel="Note for the agent"
+      {open === "note" || overrides.note ? <ImageField model={img} theme={{ colors: c }} compact={compact} row={compact}><TextField multiline autoFocus={open === "note"} value={overrides.note ?? ""} onChangeText={note => set({ note })} placeholder="A note for the agent" placeholderTextColor={c.foregroundMuted} accessibilityLabel="Note for the agent"
         style={{ minHeight: 64, borderWidth: 1, borderColor: c.border, borderRadius: 8, padding: 10, color: c.foreground, backgroundColor: c.surface0, fontSize: 13, textAlignVertical: "top" }} /></ImageField>
         : <Pressable accessibilityRole="button" accessibilityLabel="Add a note for the agent" onPress={() => setOpen("note")} style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 44 }}>
           <Icon name="Plus" size={15} color={c.foregroundMuted} />
@@ -340,7 +342,7 @@ function TaskField({ query, setQuery, img, c, compact }: { query: string; setQue
   }, [query, compact]); // eslint-disable-line react-hooks/exhaustive-deps
   return <ImageField model={img} theme={{ colors: c }} compact={compact} attach="inline">
     <View style={{ borderWidth: focused ? 2 : 1, borderColor: focused ? c.accent : c.border, borderRadius: 10, padding: focused ? 0 : 1, backgroundColor: c.surface0 }}>
-      <TextInput ref={input as never} nativeID="follow-up-new-field" value={query} onChangeText={setQuery} autoFocus={!compact} multiline placeholder="Describe the task, or paste a link" placeholderTextColor={c.foregroundMuted}
+      <TextField ref={input as never} nativeID="follow-up-new-field" value={query} onChangeText={setQuery} autoFocus={!compact} multiline placeholder="Describe the task, or paste a link" placeholderTextColor={c.foregroundMuted}
         accessibilityLabel="Task" accessibilityHint={FIELD_HINT.desktop} autoCorrect={false} autoCapitalize="none" blurOnSubmit={false} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
         onContentSizeChange={e => { if (Platform.OS !== "web") fit(e.nativeEvent.contentSize.height + 16); }}
         style={{ height, color: c.foreground, fontSize: compact ? 16 : 15, lineHeight: 22, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 4, textAlignVertical: "top", ...(Platform.OS === "web" ? { outlineStyle: "none", resize: "none" } as object : {}) }} />
