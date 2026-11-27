@@ -311,6 +311,8 @@ export const PARITY: Record<string, { tools: readonly string[]; note?: string } 
   "follow.set-dispatch-actions": { tools: ["set_dispatch_actions"], note: "Settings → New work's move, show/hide, reset, delete and reset-all, the same changes set_dispatch_actions makes." },
   "follow.linear-queue": { tools: ["linear_queue"], note: "The brief's Since block, the queue screen and its raised Needs-you items. Only the developer's brief pane passes open (it marks the read \"since\" stands on), so linear_queue never moves it." },
   "follow.sweep-queue": { tools: ["sweep_queue"], note: "The queue screen's Sweep now." },
+  // The peek (client/turn-view.tsx): read-only, draws what an agent's chat already shows.
+  "follow.agent-turn": { exempt: "The peek draws an unloaded agent's last turn from its transcript on disk; it changes nothing. An agent reads another agent's activity with Paseo's own get_agent_activity, and what it is on with workspace_now." },
 };
 
 /**
@@ -320,5 +322,6 @@ export const PARITY: Record<string, { tools: readonly string[]; note?: string } 
  */
 export const VIEW_PARITY: Record<string, { tools: readonly string[]; note: string }> = {
   "catch-up": { tools: ["catch_up_deck", "answer_question", "dismiss_question", "dismiss_item", "brief_action", "inbox_act", "snooze", "ask_context"], note: "Catch up deals Needs you one card at a time; moving between cards (Skip, Skip workspace, Back, the phone's drag) changes only the developer's view, so it has no server state and no tool. catch_up_deck reads the same deck, and every act on a card is a tool: answer_question, brief_action, inbox_act and snooze (Later), ask_context (More context). A permission is Paseo's own respond_to_permission." },
+  "agent-peek": { tools: ["workspace_now"], note: "Resting on an agent's line shows a small live view of its chat; it changes nothing and has no server state. workspace_now gives the same line, Paseo's get_agent_activity the agent's recent activity, and Allow/Deny in it is Paseo's own respond_to_permission." },
   "section-search": { tools: ["workspace_status", "list_prs"], note: "The panel's Pull requests, Tasks and Activity search filters lists an agent already reads whole: workspace_status returns the workspace's PRs (title, branch, failed checks), tasks with their evidence, questions with their answers, and the sends, merges and PR actions the timeline is drawn from; list_prs returns every tracked PR with its checks." },
 };

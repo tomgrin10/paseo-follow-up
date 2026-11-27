@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { userStep, type TailStep } from "../shared/home";
 import { developerWords, messageSender, workItems } from "../shared/message-sender";
+import { foldTurn, type Turn, type TurnItem } from "../shared/turn";
 
 /**
  * An unloaded agent's recent steps, read from its provider's transcript on disk. Read-only and never
@@ -273,5 +274,72 @@ export async function readTranscript(paseoHome: string, agentId: string, limit: 
     // Follow-up's hook feedback and the agent's bookkeeping after it are not the work (workItems).
     const items = workItems(tail.flatMap(parseLine)).filter(i => i.type !== "user_message" || (i.text && messageSender(i.text).kind !== "system"));
     return { first, tail: items.slice(-limit) };
+  } catch { return null; }
+}
+
+// The peek (shared/turn.ts): an unloaded agent's last turn from disk, as timeline-like items with each tool's input, so
+// foldTurn draws it like the live timeline. Read-only, never through the daemon (invariant 1).
+
+/** A provider tool call as a timeline tool call: the typed detail Paseo would give it. */
+export function toolItem(name: string, input: unknown): TurnItem {
+  const o = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const s = (v: unknown) => typeof v === "string" ? v : undefined;
+  const lower = name.toLowerCase();
+  const cmd = s(o.command) ?? s(o.cmd) ?? (Array.isArray(o.command) ? (o.command as unknown[]).map(String).join(" ") : undefined);
+  const detail: Record<string, unknown> | null =
+    lower === "bash" || lower === "shell" || lower === "exec_command" || lower === "local_shell" ? { type: "shell", command: cmd ?? "" }
+    : lower === "read" ? { type: "read", filePath: s(o.file_path) ?? s(o.path) }
+    : lower === "edit" || lower === "multiedit" || lower === "apply_patch" || lower === "notebookedit" ? { type: "edit", filePath: s(o.file_path) ?? s(o.path) ?? s(o.notebook_path) }
+    : lower === "write" ? { type: "write", filePath: s(o.file_path) ?? s(o.path) }
+    : lower === "grep" || lower === "glob" ? { type: "search", pattern: s(o.pattern) }
+    : lower === "websearch" ? { type: "search", query: s(o.query) }
+    : lower === "webfetch" ? { type: "fetch", url: s(o.url) }
+    : lower === "task" || lower === "agent" ? { type: "sub_agent", description: s(o.description) ?? s(o.prompt) }
+    : null;
+  return { type: "tool_call", name: lower === "websearch" ? "web_search" : name, status: "completed", detail };
+}
+
+/** Transcript lines (Claude Code or Codex rollout) as the peek's items, oldest first, and when the last line was written. */
+export function transcriptTurnItems(lines: string[]): { items: TurnItem[]; at: string | null } {
+  const items: TurnItem[] = []; let at: string | null = null;
+  for (const line of lines) {
+    let j: any; try { j = JSON.parse(line); } catch { continue; }
+    if (!j || typeof j !== "object") continue;
+    if (typeof j.timestamp === "string") at = j.timestamp;
+    if ((j.type === "user" || j.type === "assistant") && j.message && (!j.isMeta || hookFeedback(j)) && !j.isSidechain) {
+      const user = j.type === "user"; const content = j.message.content;
+      if (typeof content === "string") { items.push({ type: user ? "user_message" : "assistant_message", text: content }); continue; }
+      if (!Array.isArray(content)) continue;
+      for (const c of content) {
+        if (c?.type === "text" && typeof c.text === "string") items.push({ type: user ? "user_message" : "assistant_message", text: c.text });
+        else if (c?.type === "thinking") items.push({ type: "reasoning", text: "" });
+        else if (c?.type === "tool_use" && typeof c.name === "string") {
+          if (c.name === "TodoWrite" && Array.isArray(c.input?.todos)) items.push({ type: "todo", items: c.input.todos.map((t: any) => ({ text: String(t?.content ?? ""), status: String(t?.status ?? "") })) });
+          else items.push(toolItem(c.name, c.input));
+        } else if (c?.type === "tool_result" && c.is_error) { const last = items.findLast(i => i.type === "tool_call"); if (last) last.status = "failed"; }
+      }
+      continue;
+    }
+    const p = j.type === "response_item" ? j.payload : null;
+    if (p?.type === "message" && (p.role === "user" || p.role === "assistant") && Array.isArray(p.content)) {
+      for (const c of p.content) if (typeof c?.text === "string") items.push({ type: p.role === "user" ? "user_message" : "assistant_message", text: c.text });
+    } else if (p?.type === "reasoning") items.push({ type: "reasoning", text: "" });
+    else if (p?.type === "function_call" || p?.type === "custom_tool_call" || p?.type === "local_shell_call") {
+      let args: unknown = p.arguments ?? p.input ?? p.action;
+      if (typeof args === "string") { try { args = JSON.parse(args); } catch { /* a patch or plain text */ } }
+      items.push(toolItem(p.name ?? "shell", args));
+    }
+  }
+  return { items, at };
+}
+
+/** An unloaded agent's last turn from its transcript on disk, or null when there is no readable transcript. */
+export async function transcriptTurn(paseoHome: string, agentId: string, roots?: TranscriptRoots): Promise<{ turn: Turn; at: string | null } | null> {
+  try {
+    const record = await agentRecord(paseoHome, agentId);
+    const file = record && await transcriptFile(record, roots);
+    if (!file) return null;
+    const { items, at } = transcriptTurnItems(await tailLines(file));
+    return { turn: foldTurn(items, false), at };
   } catch { return null; }
 }

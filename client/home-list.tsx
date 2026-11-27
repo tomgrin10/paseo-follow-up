@@ -20,6 +20,7 @@ import { RowMenu, useRowMenuTrigger, type OpenRowMenu, type RowMenuOpen } from "
 import type { RowMenuItem, RowMenuSection } from "../shared/row-menu";
 import { homeGroupOpen, writeHomeGroupOpen } from "../shared/settings-nav";
 import { useViewVersion } from "./view-store";
+import { usePeekLine } from "./turn-view";
 
 /**
  * The one list: Home's left side and (on hosts that have it) the sidebar
@@ -333,6 +334,8 @@ type RowProps = { s: Workstream; sig: string; theme: Theme; dense: boolean; touc
 const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onOpen, onMenu, menuOpen = false, hit = null, onSendNow, selectedBg }: RowProps) {
   const c = theme.colors;
   const trigger = useRowMenuTrigger(s, onMenu, touch);
+  // Desktop rows with an agent peek at its turn under a PeekHost (Home); touch rows keep opening the detail pane.
+  const peek = usePeekLine(touch ? null : s.agentId, () => trigger.ref.current);
   useEffect(() => {
     if (touch || menuOpen || !onOpen) return;
     return bindRowDoubleClick(trigger.ref.current as unknown as Parameters<typeof bindRowDoubleClick>[0], () => onOpen(s.key));
@@ -366,7 +369,7 @@ const Row = memo(function Row({ s, theme, dense, touch, selected, onSelect, onOp
     // Every chip, even one a narrow row hides (row-chips-never-cover-the-time).
     ...s.badges.map(b => b.text), s.pr && prChipSpoken(s.pr), wake && `Later until ${wake}`, waited && (waited === "now" ? "just now" : `waiting ${waited}`)].filter(Boolean).join(". ");
   return <Pressable ref={trigger.ref} nativeID={rowDomId(s.key)} accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={label} accessibilityHint={quickActionsHint(touch)}
-    onPress={() => onSelect(s.key)} onLongPress={trigger.onLongPress} delayLongPress={450}
+    {...peek} onPress={() => onSelect(s.key)} onLongPress={trigger.onLongPress} delayLongPress={450}
     style={state => ({ ...focusRing((state as { focused?: boolean }).focused, c, true), flexDirection: "row", alignItems: dense ? "flex-start" : "center", gap: touch ? 10 : dense ? 8 : 10, minHeight: touch ? 56 : dense ? 36 : 38, paddingLeft: touch ? 14 : dense ? 8 : 16, paddingRight: touch ? 16 : dense ? 8 : 16, paddingVertical: touch ? 12 : dense ? 6 : 0,
       ...(touch ? { borderBottomWidth: 1, borderBottomColor: withAlpha(c.border, 0.6) } : {}),
       borderLeftWidth: 2, borderLeftColor: blocking ? withAlpha(color, 0.9) : "transparent",

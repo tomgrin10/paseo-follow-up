@@ -57,6 +57,8 @@ import { HOME_KEYS } from "../shared/home-keys";
 import { deckCards } from "../shared/catch-up";
 import { questionsByWorkspace } from "../shared/your-questions";
 import { ResizableSplit } from "./split";
+import { PeekHost } from "./turn-view";
+import { useMarkTimelineOnScreen } from "./on-screen";
 import type { SearchKey } from "./search-key";
 
 import { displayPreferences, displayRpc, writeDisplay, HOME_DETAIL_DEFAULT, HOME_DETAIL_MAX, HOME_DETAIL_MIN, type DisplayClient } from "../shared/display";
@@ -343,11 +345,14 @@ function HomeBody(props: PluginScreenProps & { deps: HomeDeps; onboarding: Onboa
     {newHost}
   </View>;
   return <View ref={homeRef} style={{ flex: 1, flexDirection: "row", backgroundColor: c.surface0 }}>
+    {/* A row with an agent peeks at its turn beside it (client/turn-view.tsx), except the selected one: its pane shows it. */}
+    <PeekHost where="main" theme={theme} compact={false} openAgent={navigation ? agentId => navigation.openAgent({ agentId }) : undefined} names={id => inbox.rows().find(r => r.agentId === id)?.title ?? "Agent"}>
     <HomeSplit theme={theme} detail={detail} main={<View style={{ flex: 1, minWidth: 0 }}>
       {list}
       {updateSheets}
       <View style={{ position: "absolute", left: 12, right: 12, bottom: 12 }}><UndoBar store={inbox} theme={theme} touch={false} /></View>
     </View>} />
+    </PeekHost>
     {keysOpen && <KeysSheet theme={theme} label="Home keys" keyWidth={104} onClose={() => setKeysOpen(false)} sections={[
       { title: "In the list", keys: HOME_KEYS.filter(k => !k.when) },
       { title: "In the search", keys: HOME_KEYS.filter(k => k.when === "search").map(k => k.key === "/" && anywhereKey ? { ...k, key: `/ or ${anywhereKey}` } : k) },
@@ -514,6 +519,8 @@ function DetailPane({ s, model, theme, compact, deps, openFull, signOffNext, ask
   const listed = useSyncExternalStore(live.subscribe, () => s.workspaceId ? live.get(s.workspaceId) : undefined, () => undefined);
   const w: ListWorkspace | undefined = openRowCopy<ListWorkspace>(listed, full);
   const agent = useAgentLive(s.agentId);
+  // This pane draws the agent's Recent steps, so its row doesn't peek (shared/peek.ts timelineOnScreen).
+  useMarkTimelineOnScreen(s.agentId);
   const readBrief = useRpc(inboxBriefRpc);
   const control = useRpc(controlRpc);
   const brief = useQuery({ queryKey: ["follow-up", "home-brief", s.agentId, row?.seq ?? 0], queryFn: () => readBrief({ agentId: s.agentId! }), enabled: !!s.agentId && !!row?.brief });
@@ -723,6 +730,7 @@ function OverseerPane({ theme, compact, o, focus = 0, pending = null, agentId, m
   const { inbox, extras } = deps.sources;
   const row = useInbox(inbox, () => inbox.overseer());
   const agent = useAgentLive(agentId);
+  useMarkTimelineOnScreen(agentId);
   const tail = useTail(agent.handle, `${row?.seq ?? 0}:${agent.status ?? ""}`, 8);
   const readBrief = useRpc(inboxBriefRpc);
   const brief = useQuery({ queryKey: ["follow-up", "overseer-brief", agentId, row?.seq ?? 0], queryFn: () => readBrief({ agentId: agentId! }), enabled: !!agentId && !!row?.brief });
@@ -820,29 +828,30 @@ function permissionText(p: Permission): string {
   return typeof v === "string" ? v : p.description ?? "";
 }
 
-export function PermissionBlock({ p, theme, compact, busy, primary, onRespond }: { p: Permission; theme: Theme; compact: boolean; busy: boolean; primary: boolean; onRespond: (r: { behavior: "allow" | "deny"; selectedActionId?: string; message?: string }) => void }) {
+/** `note`: the line under the command; null drops it (the peek has no reply box to point at). `flat`: no card of its own (inside the peek). */
+export function PermissionBlock({ p, theme, compact, busy, primary, onRespond, note, flat }: { p: Permission; theme: Theme; compact: boolean; busy: boolean; primary: boolean; note?: string | null; flat?: boolean; onRespond: (r: { behavior: "allow" | "deny"; selectedActionId?: string; message?: string }) => void }) {
   const c = theme.colors; const t = text(c, compact);
   const command = permissionText(p);
   // Provider-defined choices ("Always for this session") show as extra secondaries; Allow and Deny always exist.
   const extra = (p.actions ?? []).filter(a => !/^(allow|deny|reject)$/i.test(a.label.trim()));
-  return <View accessibilityRole="alert" style={{ padding: 14, gap: 10, borderRadius: 10, borderWidth: 1, borderColor: withAlpha(c.statusWarning, 0.5), backgroundColor: withAlpha(c.statusWarning, isLight(c) ? 0.06 : 0.08) }}>
+  return <View accessibilityRole="alert" style={flat ? { gap: 8 } : { padding: 14, gap: 10, borderRadius: 10, borderWidth: 1, borderColor: withAlpha(c.statusWarning, 0.5), backgroundColor: withAlpha(c.statusWarning, isLight(c) ? 0.06 : 0.08) }}>
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       <Icon name="ShieldQuestion" size={15} color={c.statusWarning} />
       <Text style={[t.label, { color: c.statusWarning, flex: 1 }]}>{p.title || `Wants to use ${p.name}`}</Text>
     </View>
-    {!!command && <View style={{ padding: 10, borderRadius: 7, backgroundColor: c.surface0 }}><Text selectable style={[t.body, { fontFamily: mono }]}>{command}</Text></View>}
+    {!!command && <View style={{ padding: 10, borderRadius: 7, backgroundColor: flat ? c.surface2 : c.surface0 }}><Text selectable style={[t.body, { fontFamily: mono }, Platform.OS === "web" ? { whiteSpace: "pre-wrap", overflowWrap: "anywhere", wordBreak: "break-all" } as object : null]}>{command}</Text></View>}
     {compact ? <>
-      <Text style={t.meta}>Allow runs it once. Deny stops it; reply below with what to do instead.</Text>
+      {note !== null && <Text style={t.meta}>{note ?? "Allow runs it once. Deny stops it; reply below with what to do instead."}</Text>}
       {extra.map(a => <Button key={a.id} theme={theme} compact grow title={a.label} disabled={busy} onPress={() => onRespond({ behavior: a.behavior, selectedActionId: a.id })} />)}
       <View style={{ flexDirection: "row", gap: 8 }}>
         <View style={{ flex: 1 }}><Button theme={theme} compact grow title="Deny" disabled={busy} onPress={() => onRespond({ behavior: "deny" })} /></View>
-        <View style={{ flex: 1 }}><Button theme={theme} compact grow kind={primary ? "primary" : "secondary"} icon="Check" title="Allow" loading={busy} onPress={() => onRespond({ behavior: "allow" })} /></View>
+        <View style={{ flex: 1 }}><Button theme={theme} compact grow kind={primary ? "primary" : "secondary"} icon={primary ? "Check" : undefined} title="Allow" loading={busy} onPress={() => onRespond({ behavior: "allow" })} /></View>
       </View>
     </> : <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-      <Text style={[t.meta, { flex: 1, minWidth: 180 }]}>Allow runs it once. Deny stops it; write below what to do instead.</Text>
+      {note === null ? <View style={{ flex: 1 }} /> : <Text style={[t.meta, { flex: 1, minWidth: 180 }]}>{note ?? "Allow runs it once. Deny stops it; write below what to do instead."}</Text>}
       <Button theme={theme} compact={compact} title="Deny" disabled={busy} onPress={() => onRespond({ behavior: "deny" })} />
       {extra.map(a => <Button key={a.id} theme={theme} compact={compact} title={a.label} disabled={busy} onPress={() => onRespond({ behavior: a.behavior, selectedActionId: a.id })} />)}
-      <Button theme={theme} compact={compact} kind={primary ? "primary" : "secondary"} icon="Check" title="Allow" loading={busy} onPress={() => onRespond({ behavior: "allow" })} />
+      <Button theme={theme} compact={compact} kind={primary ? "primary" : "secondary"} icon={primary ? "Check" : undefined} title="Allow" loading={busy} onPress={() => onRespond({ behavior: "allow" })} />
     </View>}
   </View>;
 }

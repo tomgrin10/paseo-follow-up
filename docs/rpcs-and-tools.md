@@ -256,6 +256,7 @@ nothing. On 0.15 there is no `client.subscribe`, and the client polls the RPCs a
 | Settings | `follow.follow-settings`, `follow.set-follow-settings`, `follow.project-settings`, `follow.set-project-tracking`, `follow.reviewer-settings`, `follow.save-reviewers`, `follow.reviewer-suggestions`, `follow.agent-settings`, `follow.set-agent-setting`, `follow.set-wait`, `follow.pr-workflow`, `follow.set-pr-workflow`, `follow.trust-bypass` |
 | Getting started | `follow.onboarding`, `follow.set-onboarding`, `follow.onboarding-checks` |
 | Chat: created agent and workspace cards | `follow.created-items` |
+| Agent peek (panel lines, Home rows) | `follow.agent-turn` (an unloaded agent's current turn from its saved transcript, never the daemon; a loaded agent is read through Paseo's own timeline) |
 | Report a bug (Settings → General → Help, ⌘K, `/report-issue`, error toasts) | `follow.report-issue-targets`, `follow.report-issue-send`, `follow.report-issue-link` |
 | Release notes and updates | `follow.release-notes`, `follow.whats-new-seen`, `follow.updates`, `follow.set-updates`, `follow.install-update`, `follow.retry-move`, `follow.dismiss-update-notice` |
 

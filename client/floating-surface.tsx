@@ -15,7 +15,7 @@ type Browser = Events & { visualViewport?: Events & { offsetLeft: number; offset
  */
 export function FloatingSurface({ children, anchor, side = "below", width = 256, onClose, role = "dialog", label, style, contentRef, onSize, dismissOnEscape = true, dataSet, modal = true }: {
   children: ReactNode; anchor?: { x: number; y: number }; side?: FloatSide; width?: number; onClose?: () => void;
-  role?: "menu" | "dialog" | "alertdialog"; label?: string; style?: ViewStyle; dataSet?: Record<string, string>;
+  role?: "menu" | "dialog" | "alertdialog" | "region"; label?: string; style?: ViewStyle; dataSet?: Record<string, string>;
   modal?: boolean; dismissOnEscape?: boolean; contentRef?: { current: unknown }; onSize?: (s: { width: number; height: number }) => void;
 }) {
   const win = useWindowDimensions();

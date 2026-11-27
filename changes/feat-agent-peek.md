@@ -1,0 +1,1 @@
+- Rest the pointer on an agent's line in the panel or on Home to see what it is doing right now: its current steps, its latest reply and any permission waiting on you. On a phone, tap the line.

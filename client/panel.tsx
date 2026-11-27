@@ -10,6 +10,7 @@ import { useAgent, useRpc, useTabState, openExternalUrl, type PluginHostProps, t
 import { z } from "zod";
 import type { InboxStore } from "./inbox-store";
 import { useInbox } from "./inbox";
+import { PeekHost } from "./turn-view";
 import { AgentLines } from "./now-lines";
 import { BriefCard, type BriefDeps } from "./brief";
 import { briefAsks, liveBrief, type Brief } from "../shared/brief";
@@ -402,8 +403,9 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const running = useWorkspaceRunning(sources?.paseo ?? paseo, w.id);
   const shipped = <ShippedCard workspace={w} theme={theme} compact={compact} now={now} />;
   // What each agent is on now (shared/now.ts); once shipped nobody is working toward the goal.
-  const agents = !done && <AgentLines workspace={w} inbox={inbox} theme={theme} compact={compact} now={now} openAgent={openAgent} />;
+  const agents = !done && <AgentLines workspace={w} inbox={inbox} theme={theme} compact={compact} now={now} openAgent={openAgent} peek />;
   const needs = <NeedsYouBlock workspace={w} theme={theme} compact={compact} now={now} brief={ask?.brief ?? null} briefCard={ask?.card ?? null} actions={{ openAgent, openPr: (key, intent) => setSheet({ key, intent }), openQuestion: setQuestion }} fold />;
+  const agentName = (id: string) => id === w.mainAgentId ? "Main agent" : w.taskAgents?.[id]?.title?.trim() || "Agent";
   // Your questions (docs/needs-you.md#your-questions): under Needs you, the same card as Home's detail pane.
   const questions = <YourQuestionsCard workspaceId={w.id} mainAgentId={w.mainAgentId} theme={theme} compact={compact} openAgent={openAgent} running={running} fold />;
   // Once shipped, the stack and tasks are history: one quiet fold instead of two near-empty cards.
@@ -428,6 +430,8 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   return <View onLayout={event => setWidth(event.nativeEvent.layout.width)} style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>
     {/* Phones fold the top bar into the header's own row. */}
     {!compact && top}
+    {/* Agent lines peek at their agent's turn (client/turn-view.tsx): under the line here, beside it in the larger view. */}
+    <PeekHost where={large ? "main" : "panel"} theme={theme} compact={compact} openAgent={openAgent} names={agentName}>
     <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20, ...(large ? { maxWidth: 1240, width: "100%", alignSelf: "center", paddingHorizontal: 12 } : null) }}>
       {header}
       {wide ? <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
@@ -435,6 +439,7 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
         <View style={{ flex: 6, minWidth: 0 }}>{stacks}{log}{extras}</View>
       </View> : <>{agents}{shipped}{needs}{questions}{history}{messages}{stacks}{tasks}{log}{extras}</>}
     </ScrollView>
+    </PeekHost>
     <PrSheet workspace={w} prKey={sheet?.key ?? null} intent={sheet?.intent ?? null} theme={theme} compact={compact} browserReady={browser.data?.ready ?? false} onClose={() => setSheet(null)} />
     <QuestionSheet workspace={w} questionId={question} fallback={oldQuestion} theme={theme} compact={compact} openAgent={openAgent} onClose={() => setQuestion(null)} />
     <SpecSheet workspace={w} open={specOpen} theme={theme} compact={compact} onClose={() => setSpecOpen(false)} />

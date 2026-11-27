@@ -47,7 +47,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as the CHANGELOG's newest stable, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["menu-bounds", "tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "pr-now", "panel-folds", "question-links", "gallery", "frames", "onboarding", "setup-popup", "advanced"];
+const REVIEW_SHOTS = ["menu-bounds", "tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "peek", "pr-now", "panel-folds", "question-links", "gallery", "frames", "onboarding", "setup-popup", "advanced"];
 /** Pasted images and their Add image button share one harness setup (an Overseer and the fixture provider taking images). */
 const PASTE_LIKE = only => only.includes("paste-images") || only.includes("attach-images");
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
@@ -88,7 +88,7 @@ const paseo016 = /(^|\D)0\.1[6-9]\.\d+/.test(paseoVersion ?? "");
 if (only.includes("sidebar") && only.some(n => n !== "sidebar")) fail("shoot --only sidebar on its own, with HARNESS_PASEO=0.16");
 if (only.includes("sidebar") && !paseo016) fail(`the sidebar shot needs the Paseo CLI 0.16.x (found ${paseoVersion ?? "none"}); run with HARNESS_PASEO=0.16`);
 if (only.includes("feeds") && only.length > 1) fail("run --only feeds on its own (npm run test:feeds)");
-const paseoOk = only.includes("menu-bounds") || only.includes("settings-tabs") || only.includes("new") || only.includes("onboarding") || PASTE_LIKE(only) || only.includes("gallery") || only.includes("search-focus") || only.includes("frames") || only.includes("your-questions") ? /(^|\D)0\.1[5-7]\.\d+/ : only.includes("sidebar") || only.includes("feeds") || only.includes("put-in-chat") || argv.includes("--sidebar-review") || argv.includes("--overseer-review") || argv.includes("--keys-review") || argv.includes("--rank-review") || argv.includes("--sortfoot-review") || argv.includes("--secsearch-review") || argv.includes("--github-wait-review") ? /(^|\D)0\.1[56]\.\d+/ : /(^|\D)0\.15\.\d+/;
+const paseoOk = only.includes("menu-bounds") || only.includes("settings-tabs") || only.includes("new") || only.includes("onboarding") || PASTE_LIKE(only) || only.includes("gallery") || only.includes("search-focus") || only.includes("frames") || only.includes("your-questions") || only.includes("peek") ? /(^|\D)0\.1[5-7]\.\d+/ : only.includes("sidebar") || only.includes("feeds") || only.includes("put-in-chat") || argv.includes("--sidebar-review") || argv.includes("--overseer-review") || argv.includes("--keys-review") || argv.includes("--rank-review") || argv.includes("--sortfoot-review") || argv.includes("--secsearch-review") || argv.includes("--github-wait-review") ? /(^|\D)0\.1[56]\.\d+/ : /(^|\D)0\.15\.\d+/;
 if (!paseoVersion || !paseoOk.test(paseoVersion)) fail(`needs the Paseo CLI 0.15.x on PATH (found ${paseoVersion ?? "none"}); run through harness-slot or put ~/paseo-harness/cli/0.15.4/bin first`);
 if (changelogArg && !existsSync(changelogArg)) fail(`--whats-new-changelog: no file at ${changelogArg}`);
 const optimiser = await findOptimiser();
@@ -638,6 +638,26 @@ const NOW_LINE_STATES = [
       bash("pnpm release --tag beta", "tagged v3.2.0-beta.1"), { hold: true }] },
 ];
 
+/**
+ * peek only (a-peek-is-bounded-and-never-wakes): agents whose turn the peek shows. A live run with a running step, a
+ * waiting permission, and a finished turn with a failed step. Fictional repositories only.
+ */
+const tool = (name, detail, status = "completed") => ({ item: { type: "tool_call", callId: `call-${name}-${JSON.stringify(detail).length}-${status}`, name, status, error: status === "failed" ? { message: "exit 1" } : null, detail } });
+const PEEK_STATES = [
+  { key: "pk-live", project: "app", title: "Retry cap", minute: 160, prompt: "APP-212: cap the gap between charge retries in example/app.", waitFor: "running",
+    steps: [rpc("follow.enroll", { goal: "APP-212 Cap the retry gap" }), rpc("follow.sync", { summary: "Capping the gap.", milestone: { now: "Capping the retry gap", next: ["Verifying in staging"] } }),
+      think("The gap comes from the gateway's backoff; cap it at 45 s."), tool("Read", { type: "read", filePath: "src/billing/retry-policy.ts" }), tool("Grep", { type: "search", query: "maxBackoff" }),
+      tool("Edit", { type: "edit", filePath: "src/billing/retry-policy.ts" }), bash("pnpm test retry-policy", "pass 22"), msg("The cap holds in unit tests. Running the gateway suite next."),
+      tool("Bash", { type: "shell", command: "pnpm test gateway --runInBand --reporter=dot" }, "running"), { hold: true }] },
+  { key: "pk-perm", project: "web", title: "Widget build", minute: 161, prompt: "WEB-61: rebuild the widgets bundle for acme/widgets.", waitFor: "permission",
+    steps: [rpc("follow.enroll", { goal: "WEB-61 Rebuild the widgets bundle" }), rpc("follow.sync", { summary: "Rebuilding.", milestone: { now: "Rebuilding the bundle" } }),
+      tool("Read", { type: "read", filePath: "packages/widgets/package.json" }), { permission: { kind: "tool", name: "Bash", title: "Run a command", input: { command: "rm -rf packages/widgets/dist && pnpm --filter @acme/widgets build" } } }] },
+  { key: "pk-done", project: "app", title: "Flaky test", minute: 162, prompt: "APP-215: fix the flaky invoice test in example/app.",
+    steps: [rpc("follow.enroll", { goal: "APP-215 Fix the flaky invoice test" }), rpc("follow.sync", { summary: "Fixed.", milestone: { now: "Fixing the flaky test" } }),
+      tool("Bash", { type: "shell", command: "pnpm test invoices" }, "failed"), think("The test races the timer."), tool("Edit", { type: "edit", filePath: "src/invoices/invoice.test.ts" }),
+      bash("pnpm test invoices", "pass 31"), msg("Fixed: the test now waits for the timer instead of racing it. 31 tests pass.")] },
+];
+
 /** PR fallback review: own and other repositories, in review and checking (invariant 128). */
 const PR_NOW_STATES = [8801, 8802, 8803, 8804].map((number, i) => ({
   key: `pr-now-${number}`, project: "app", title: ["Review retry cap", "Check retry cap", "Review widget retry", "Check widget retry"][i],
@@ -776,7 +796,7 @@ async function seed({ call, home }) {
   if (only.includes("review-mode") || only.includes("pr-link")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }] });
   // reviewers-click: Ravi and Mina review example/app, so each PR's row reads "Add reviewers to #N: Ravi and Mina".
   if (only.includes("reviewers-click")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }, { login: "mina", name: "Mina" }] });
-  const specs = [...WORKSPACES.filter(w => !only.includes("pr-now") || ["audit", "billing"].includes(w.key)).filter(w => !(argv.includes("--rename-fixup-review") || only.includes("local-titles")) || ["audit", "billing"].includes(w.key)), ...(only.includes("needs-you-states") || only.includes("panel-folds") || only.includes("tasks-view") || only.includes("own-answer") || only.includes("more-context") || only.includes("dismiss") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") || PASTE_LIKE(only) ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") || only.includes("dismiss") ? MERGE_CLICK_STATES : []), ...(only.includes("reviewers-click") ? REVIEWERS_CLICK_STATES : []), ...(only.includes("pr-scale") ? PR_SCALE_STATES : []), ...(only.includes("batch-churn") ? BATCH_CHURN_STATES : []), ...(only.includes("scheduled-tasks") ? SCHEDULED_STATES : []), ...(only.includes("paged-lists") ? PAGED_STATES : []), ...(only.includes("now-line") ? NOW_LINE_STATES : []), ...(only.includes("pr-now") ? PR_NOW_STATES : []), ...(only.includes("question-links") ? QL_STATES : [])];
+  const specs = [...WORKSPACES.filter(w => !only.includes("pr-now") || ["audit", "billing"].includes(w.key)).filter(w => !(argv.includes("--rename-fixup-review") || only.includes("local-titles")) || ["audit", "billing"].includes(w.key)), ...(only.includes("needs-you-states") || only.includes("panel-folds") || only.includes("tasks-view") || only.includes("own-answer") || only.includes("more-context") || only.includes("dismiss") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") || PASTE_LIKE(only) ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") || only.includes("dismiss") ? MERGE_CLICK_STATES : []), ...(only.includes("reviewers-click") ? REVIEWERS_CLICK_STATES : []), ...(only.includes("pr-scale") ? PR_SCALE_STATES : []), ...(only.includes("batch-churn") ? BATCH_CHURN_STATES : []), ...(only.includes("scheduled-tasks") ? SCHEDULED_STATES : []), ...(only.includes("paged-lists") ? PAGED_STATES : []), ...(only.includes("now-line") ? NOW_LINE_STATES : []), ...(only.includes("peek") ? PEEK_STATES : []), ...(only.includes("pr-now") ? PR_NOW_STATES : []), ...(only.includes("question-links") ? QL_STATES : [])];
   // Geometry checks need one question, one repair and one permission row, not the full README inventory.
   if (only.includes("menu-bounds")) specs.splice(0, specs.length, ...specs.filter(w => ["billing", "email", "search"].includes(w.key)));
   if (only.includes("layout-search")) {
@@ -2311,6 +2331,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   }
   if (only.includes("scheduled-tasks")) await scheduledShots({ shoot, seeded, call, cli });
   if (only.includes("now-line")) await nowLineShots({ shoot });
+  if (only.includes("peek")) await peekShots({ shoot });
   if (only.includes("pr-now")) await prNowShots({ shoot, call, seeded });
   if (only.includes("panel-folds")) await panelFoldShots({ shoot });
   if (only.includes("question-links")) await questionLinksShots({ shoot, call, seeded, home });
@@ -4717,6 +4738,56 @@ async function panelFoldShots({ shoot }) {
     if (!await header(page, "Needs you").count()) await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
     await header(page, "Pull requests").waitFor({ timeout: 60_000 });
     if ((await header(page, "Pull requests").getAttribute("aria-expanded")) !== "false") throw new Error("the Pull requests fold didn't survive a reload");
+  });
+}
+/**
+ * The agent peek (`--only peek`, invariant 137): the panel's agent line and Home's row, hovered for the 350 ms intent,
+ * show the agent's turn; a permission shows Deny and Allow; a finished turn reads Idle; Home's selected row has no peek
+ * (its pane shows the turn); a phone's tap opens the sheet with one Open chat. Light and dark.
+ */
+async function peekShots({ shoot }) {
+  const TALL = { width: DESKTOP.width, height: 1000 };
+  const peek = page => page.locator("[data-follow-peek]").first();
+  const hoverOpen = async (page, target) => {
+    await target.waitFor({ timeout: 60_000 });
+    page.keepPointer = true; // the peek closes when the pointer leaves its line, as it should
+    await target.hover();
+    await peek(page).waitFor({ timeout: 15_000 }).catch(async error => {
+      const seen = await page.evaluate(() => ({ floating: document.querySelectorAll("[data-floating-owner]").length, peek: document.querySelectorAll("[data-follow-peek]").length }));
+      throw new Error(`no peek after hovering (${JSON.stringify(seen)}): ${error.message}`);
+    });
+    await page.waitForTimeout(1200);
+    if (!await peek(page).isVisible()) throw new Error("the peek closed by itself while the pointer rested on its line");
+  };
+  const line = (page, text) => page.getByText(text).filter({ visible: true }).first();
+  const panel = async (page, spec) => { await openChat(page, spec.title, spec.prompt); await page.getByRole("button", { name: "Follow-up", exact: true }).last().click(); };
+  for (const theme of ["light", "dark"]) {
+    await shoot(`peek-panel-live-${theme}`, TALL, theme, async page => { await panel(page, PEEK_STATES[0]); await hoverOpen(page, line(page, "Capping the retry gap")); });
+    await shoot(`peek-panel-permission-${theme}`, TALL, theme, async page => {
+      await panel(page, PEEK_STATES[1]); await hoverOpen(page, line(page, "Rebuilding the bundle"));
+      await peek(page).getByText("Allow", { exact: true }).waitFor({ timeout: 30_000 });
+    });
+    await shoot(`peek-panel-done-${theme}`, TALL, theme, async page => { await panel(page, PEEK_STATES[2]); await hoverOpen(page, line(page, "Fixing the flaky test")); });
+    await shoot(`peek-home-${theme}`, DESKTOP, theme, async page => {
+      await openHome(page);
+      await hoverOpen(page, await homeRow(page, PEEK_STATES[0].title));
+    });
+    await shoot(`peek-panel-phone-${theme}`, PHONE, theme, async page => {
+      await panel(page, PEEK_STATES[0]);
+      await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
+      await page.setViewportSize(PHONE);
+      const target = line(page, "Capping the retry gap"); await target.waitFor({ timeout: 60_000 }); await target.click();
+      await page.getByRole("button", { name: "Open chat" }).filter({ visible: true }).first().waitFor({ timeout: 30_000 });
+      await page.waitForTimeout(1200);
+      if (await page.getByRole("button", { name: "Open chat" }).filter({ visible: true }).count() !== 1) throw new Error("the phone sheet shows Open chat more than once");
+    });
+  }
+  // Q180 A: the selected row's pane already draws its turn, so hovering it opens nothing.
+  await shoot("peek-home-selected-light", DESKTOP, "light", async page => {
+    await openHome(page);
+    const row = await homeRow(page, PEEK_STATES[0].title);
+    await row.click(); await page.waitForTimeout(800); await row.hover(); await page.waitForTimeout(1200);
+    if (await page.locator("[data-follow-peek]").count()) throw new Error("the selected row peeked although its pane shows its turn");
   });
 }
 /**
