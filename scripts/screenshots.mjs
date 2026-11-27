@@ -47,7 +47,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as the CHANGELOG's newest stable, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["menu-bounds", "tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "pr-now", "gallery", "frames", "onboarding", "setup-popup"];
+const REVIEW_SHOTS = ["menu-bounds", "tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "pr-now", "gallery", "frames", "onboarding", "setup-popup", "advanced"];
 /** Pasted images and their Add image button share one harness setup (an Overseer and the fixture provider taking images). */
 const PASTE_LIKE = only => only.includes("paste-images") || only.includes("attach-images");
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
@@ -1203,8 +1203,8 @@ const DESKTOP = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };
 /** Paseo 0.16+ draws Follow-up's settings categories as its own tabs, one screen each (client/settings-screens.ts). */
 const nativeSettingsTabs = !/(^|\D)0\.15\.\d+/.test(paseoVersion ?? "");
-const SETTINGS_SCREENS = { general: "projects", following: "following", reviewers: "reviewers", agents: "agents", new: "new", display: "display", brief: "brief" };
-const SETTINGS_TITLES = { general: "General", following: "Following", reviewers: "Reviewers", agents: "Agents", new: "New work", display: "Inbox & display", brief: "Compass" };
+const SETTINGS_SCREENS = { general: "projects", following: "following", reviewers: "reviewers", agents: "agents", new: "new", display: "display", brief: "brief", advanced: "advanced" };
+const SETTINGS_TITLES = { general: "General", following: "Following", reviewers: "Reviewers", agents: "Agents", new: "New work", display: "Inbox & display", brief: "Compass", advanced: "Advanced" };
 /** Settings → Follow-up → a category, on either host: 0.16+ opens its screen; 0.15 picks Follow-up's own tab (phone: its row). */
 async function openSettingsAt(page, category, vp = page.viewportSize()) {
   if (nativeSettingsTabs) {
@@ -2124,6 +2124,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   if (only.includes("archive")) await archiveShots({ shoot, call });
   if (only.includes("put-in-chat")) await putInChatShots({ shoot, seeded, call, billing });
   if (only.includes("sending")) await sendingShots({ shoot, seeded, call, home });
+  if (only.includes("advanced")) await advancedShots({ shoot });
   if (only.includes("batch-churn")) await batchChurnShots({ shoot, seeded, call, home, cli });
   if (only.includes("needs-you-states")) {
     // One Needs you block per surface: each state on the panel (desktop) and Home's detail pane (desktop and phone),
@@ -4220,6 +4221,24 @@ async function sendingShots({ shoot, seeded, call, home }) {
   await shoot("sending-hold-home-light", DESKTOP, "light", shown([...held, "You haven't messaged this agent lately, so it waits for you"]));
   await shoot("sending-hold-home-phone-light", PHONE, "light", shown(held, true));
   await fs.writeFile(process.env.FOLLOW_SHOTS_CGROUP, JSON.stringify({ high: 1000, current: 100 }));
+}
+/**
+ * advanced (Q177, invariant 133): Settings → Advanced (when Auto-send stops, repairs at once), desktop light and dark
+ * and a phone dark. Desktop crops from Paseo's "Back to plugins" (0.16+), else Follow-up's pane.
+ */
+async function advancedShots({ shoot }) {
+  const pane = async (page, vp) => {
+    await page.setViewportSize(vp);
+    await openSettingsAt(page, "advanced", vp);
+    await page.getByText("Repairs at once", { exact: true }).filter({ visible: true }).first().waitFor();
+    if (vp.width < 768) return undefined;
+    const back = nativeSettingsTabs ? await page.getByText("Back to plugins").filter({ visible: true }).first().boundingBox({ timeout: 15000 }) : null;
+    const x = back ? Math.max(0, Math.floor(back.x) - 32) : 400;
+    return { x, y: 0, width: vp.width - x, height: Math.min(vp.height, 640) };
+  };
+  await shoot("advanced-desktop-light", DESKTOP, "light", page => pane(page, DESKTOP));
+  await shoot("advanced-desktop-dark", DESKTOP, "dark", page => pane(page, DESKTOP));
+  await shoot("advanced-phone-dark", PHONE, "dark", page => pane(page, PHONE));
 }
 /**
  * batch-churn (a-changed-review-updates-never-cancels): Webhook signatures in three states, each as the panel (Messages

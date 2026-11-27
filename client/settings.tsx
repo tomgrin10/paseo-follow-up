@@ -118,7 +118,7 @@ function AdvancedCategory({ theme }: { theme: Theme; compact: boolean }) {
     {query.isPending && <ActivityIndicator accessibilityLabel="Loading advanced settings" color={c.foregroundMuted} style={{ alignSelf: "flex-start", marginVertical: 8 }} />}
     {query.error && <SettingsCard><SettingsAction label="Couldn't load advanced settings" hint={errorText(query.error)} actionLabel="Retry" onPress={() => void query.refetch()} /></SettingsCard>}
     {data && <SettingsCard>
-      <SettingsSelect label="Stop sending on its own after" hint="If you haven't messaged a workspace's agent in this long, its repairs wait for your Send. Without an open PR the workspace also rests until you start a turn there."
+      <SettingsSelect label="Pause auto-send after" hint="If you haven't messaged a workspace's agent in this long, its repairs wait for your Send. Without an open PR the workspace also rests until you start a turn there."
         value={String(days)} disabled={change.isPending}
         options={[...new Set([1, 3, 7, 14, days])].sort((a, b) => a - b).map(d => ({ value: String(d), label: d === 1 ? "1 day" : `${d} days` }))}
         onValueChange={value => change.mutate({ activeWindowDays: Number(value) })} />
