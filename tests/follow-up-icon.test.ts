@@ -65,7 +65,7 @@ test("Follow-up's own surfaces use the mark, never GitPullRequest", async () => 
   assert.match(sidebar, /<SidebarRow icon=\{FOLLOW_UP_ICON\}/, "sidebar row");
   assert.doesNotMatch(sidebar.slice(0, sidebar.indexOf("</>;")), /GitPullRequest/);
   const large = await readFile("client/large.tsx", "utf8");
-  assert.match(large, /icon=\{FOLLOW_UP_ICON\} title="Nothing to show here"/, "the larger view's empty state");
+  assert.match(large, /icon=\{FOLLOW_UP_ICON\} title="Nothing to show here"/, "the retired larger view's empty state (a link with no workspace)");
 });
 
 test("the header's Needs-you dot stays whole inside the icon box, on the end dot as near as fits", () => {

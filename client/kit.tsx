@@ -6,6 +6,7 @@ import { openExternalUrl, type PluginSvgIcon } from "@getpaseo/plugin/client";
 import { PressScale, Spinner } from "./motion";
 import { raised, tint, withAlpha, type Colors, type Theme } from "./theme";
 import { FoldButton, PANEL_FOLDS, useFold, type PanelFold } from "./fold";
+import { HintBubble, HintIcon, useHint } from "./hint";
 
 export type { Theme } from "./theme";
 
@@ -177,13 +178,17 @@ export type CardTone = "plain" | "attention" | "success";
  * button (client/fold.tsx), remembered per device per section; folded, the body unmounts and the header keeps the
  * count and `summary`. Controls in `right` (search, tabs) sit outside the button and show only while open.
  */
-export function Card({ theme, icon, title, tone = "plain", count, right, children, compact = false, style, search, fold }: {
+export function Card({ theme, icon, title, tone = "plain", count, right, children, compact = false, style, search, fold, hint }: {
   theme: Theme; icon: string | PluginSvgIcon; title: string; tone?: CardTone; count?: string | number; right?: ReactNode; children: ReactNode; compact?: boolean; style?: StyleProp<ViewStyle>; search?: ReactNode;
+  /** The section's help text, behind a ? after the title (client/hint.tsx); never in the body. */
+  hint?: string;
   fold?: { id: PanelFold; defaultOpen?: boolean; /** Shown while folded. */ summary?: ReactNode; /** Shown while open (the tasks' line). */ openSummary?: ReactNode; /** What a screen reader hears after the title; else the count. */ label?: string };
 }) {
   const c = theme.colors;
   const state = useFold(fold ? PANEL_FOLDS[fold.id] : null, fold?.defaultOpen ?? true);
   const open = !fold || state.open;
+  const [hintOpen, setHintOpen] = useState(false);
+  const help = useHint(setHintOpen);
   const accent = tone === "attention" ? c.statusWarning : tone === "success" ? c.statusSuccess : null;
   const pad = { paddingHorizontal: compact ? 14 : 12, paddingTop: 10, paddingBottom: open ? 8 : 10, minHeight: compact ? 44 : undefined } as const;
   const row = { flexDirection: "row", alignItems: "center", gap: compact ? 8 : 7 } as const;
@@ -192,6 +197,7 @@ export function Card({ theme, icon, title, tone = "plain", count, right, childre
   const glyph = <View style={{ flexShrink: 0 }}>{typeof icon === "string" ? <Icon name={icon} size={compact ? 16 : 14} color={accent ?? c.foregroundMuted} /> : <Icon icon={icon} size={compact ? 16 : 14} color={accent ?? c.foregroundMuted} />}</View>;
   const titled = <>
     <Text accessibilityRole={fold ? undefined : "header"} numberOfLines={1} style={{ flexShrink: 0, color: accent ?? c.foreground, fontSize: compact ? 14 : 13, lineHeight: compact ? 20 : 18, fontWeight: "600" }}>{title}</Text>
+    {!!hint && <HintIcon hint={help} text={hint} theme={theme} compact={compact} />}
     {count !== undefined && count !== "" && <Chip theme={theme} color={accent ?? c.foregroundMuted} label={String(count)} />}
   </>;
   const summary = fold ? (open ? fold.openSummary : fold.summary) : null;
@@ -215,9 +221,10 @@ export function Card({ theme, icon, title, tone = "plain", count, right, childre
     </View> : <View accessibilityRole="header">{button}</View>;
   }
   // dataSet: a paged list inside turns its page back to this card's header (client/paged-list.tsx, toListStart).
-  return <View {...({ dataSet: { pagedTop: "1" } } as object)} style={[{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 8, overflow: "hidden", backgroundColor: c.surface0 },
+  // An open hint draws over the card's content and past its edge, so the card stops clipping and sits above its neighbours.
+  return <View {...({ dataSet: { pagedTop: "1" } } as object)} style={[{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 8, overflow: hintOpen ? "visible" : "hidden", zIndex: hintOpen ? 30 : undefined, backgroundColor: c.surface0 },
     accent ? { borderWidth: 1, borderColor: withAlpha(accent, 0.7) } : raised(c), style]}>
-    {head}
+    <View style={{ zIndex: hintOpen ? 30 : undefined }}>{head}{!!hint && <HintBubble hint={help} text={hint} theme={theme} />}</View>
     {open && children}
   </View>;
 }

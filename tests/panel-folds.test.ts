@@ -19,7 +19,7 @@ const SECTIONS: Record<string, { fold: keyof typeof PANEL_FOLDS; file: string; m
   tasks: { fold: "tasks", file: "client/tasks.tsx", mark: /fold=\{\{ id: "tasks"/ },
   log: { fold: "activity", file: "client/questions.tsx", mark: /fold=\{\{ id: "activity"/ },
   extras: { fold: "workspace", file: "client/panel.tsx", mark: /fold=\{\{ id: "workspace"/ },
-  agents: { exempt: "each agent's one line (invariant the-line-takes-its-first-source): a status line, not a section with a body" },
+  agentCard: { fold: "steps", file: "client/agent-card.tsx", mark: /useFold\(PANEL_FOLDS\.steps, place !== "panel"\)/ },
   shipped: { exempt: "the Shipped notice once the work is done: one moment, not a list to fold" },
   history: { exempt: "itself a fold, once shipped: it brings back the Pull requests and tasks sections, which fold on their own" },
 };
@@ -27,8 +27,10 @@ const SECTIONS: Record<string, { fold: keyof typeof PANEL_FOLDS; file: string; m
 test("panel-sections-fold: every element the panel lays out is a folded section or exempt with a reason", async () => {
   const panel = await source("client/panel.tsx");
   const view = panel.slice(panel.indexOf("export function WorkspaceView"));
-  const layout = view.slice(view.indexOf("{header}"), view.indexOf("</ScrollView>"));
+  // The one-column order lists every card; more columns place the same cards (invariant 135).
+  const layout = view.slice(view.indexOf("const one = <>"), view.indexOf("</>;", view.indexOf("const one = <>")));
   const names = [...new Set([...layout.matchAll(/\{(\w+)\}/g)].map(m => m[1]).filter(n => n !== "header"))];
+  for (const name of names) assert.match(view, new RegExp(`node: ${name}\\b`), `${name} is placed in the columns too`);
   assert.ok(names.length >= 8, `the layout lines were found (${names.join(", ")})`);
   for (const name of names) assert.ok(SECTIONS[name], `${name} is drawn in the panel: give it a fold (client/fold.tsx PANEL_FOLDS) or an exemption with a reason here`);
   for (const [name, s] of Object.entries(SECTIONS)) {
@@ -95,9 +97,9 @@ test("panel-sections-fold: one arrow, in one place: only FoldButton draws a fold
   assert.match(inner, /flexWrap: "nowrap"/, "and never wraps its arrow to a line of its own");
 });
 
-test("panel-sections-fold: the larger view opens Spec, agent and recovery without Paseo's panel-only state", async () => {
-  // Remembered per device, a section opened in the panel opens in the larger view too, a screen where useAgent throws.
+test("panel-sections-fold: Home's pane opens Spec, agent and recovery without Paseo's panel-only state", async () => {
+  // Remembered per device, a section opened in the panel opens in Home's pane too, a screen where useAgent throws.
   const panel = await source("client/panel.tsx");
-  assert.match(panel, /const extras = large \? <AgentTitleSource\.Provider value=\{noClientState\}>\{workspaceCard\}/);
+  assert.match(panel, /const extras = place === "home" \? <AgentTitleSource\.Provider value=\{noClientState\}>\{workspaceCard\}/);
   assert.equal([...panel.matchAll(/\buseAgent\(/g)].length, 1, "useAgent is read only through AgentTitleSource");
 });

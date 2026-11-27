@@ -12,6 +12,23 @@ export const CATCH_UP_RAIL_DEFAULT = 0.28;
 export const CATCH_UP_RAIL_MIN = 0.16;
 export const CATCH_UP_RAIL_MAX = 0.5;
 
+/** Where opening a workspace lands (Display `open_workspace_on`): its workspace view's tab, or its main agent's chat. */
+export const OPEN_WORKSPACE_ON = ["view", "chat"] as const;
+export type OpenWorkspaceOn = typeof OPEN_WORKSPACE_ON[number];
+export const DEFAULT_OPEN_WORKSPACE_ON: OpenWorkspaceOn = "view";
+
+/**
+ * Where a picked row opens (Display `open_workspace_on`, invariant 135): a row with a workspace opens it on its
+ * workspace view's tab (the default) or its agent's chat; Cmd/Ctrl-click opens the other one. A row with no workspace
+ * opens its chat.
+ */
+export function rowOpens(row: { agentId: string | null; workspaceId: string | null }, setting: OpenWorkspaceOn | undefined, modified: boolean): "view" | "chat" | null {
+  if (!row.workspaceId) return row.agentId ? "chat" : null;
+  const want = setting ?? DEFAULT_OPEN_WORKSPACE_ON;
+  const pick = modified ? (want === "view" ? "chat" : "view") : want;
+  return pick === "chat" && !row.agentId ? "view" : pick;
+}
+
 export const displayPreferences = defineSettings({
   id: "display",
   scope: "host",
@@ -51,7 +68,10 @@ export const displayPreferences = defineSettings({
     new_shortcut: z.enum(NEW_SHORTCUTS).optional(),
     // 2.4: the sidebar's New row (client/new-entry.tsx). Off removes the row; New stays on Home, in ⌘K and on its key
     // (new-row-is-optional). Settings → New work and setup's tour show it; set_display sets it.
-    enable_new_sidebar_row: z.boolean().default(true) }),
+    enable_new_sidebar_row: z.boolean().default(true),
+    // 2.x (invariant 135): what opening a workspace from Follow-up's sidebar list (and Home's Open) shows: its
+    // workspace view as a tab in the main area ("view", the default when absent) or its main agent's chat ("chat").
+    open_workspace_on: z.enum(OPEN_WORKSPACE_ON).optional() }),
 });
 
 /** Every Display key, set or not: what set_display accepts. */

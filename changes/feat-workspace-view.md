@@ -1,0 +1,3 @@
+- One workspace view in Home's pane, the right side panel and a new main-area tab, laid out from its width (one to three columns). Each agent's recent steps and the reply box sit together, read without waking the agent.
+- Opening a workspace from Follow-up's sidebar list opens its view or its main agent's chat (Settings → Inbox & display → Opening a workspace); Cmd/Ctrl-click opens the other.
+- Permissions appear in Needs you with Allow and Deny; amber now marks only what needs you, and section help sits behind a ? icon.

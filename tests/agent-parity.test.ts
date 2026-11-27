@@ -98,7 +98,7 @@ test("never on yourself: an agent can't answer its own brief or act on its own i
 
 test("set_display: trust bypass and the other Display switches, planned, merged into the current document", async () => {
   const f = rpcFixture();
-  assert.deepEqual((await f.agent.run("a", "display_settings", {}) as { values: unknown }).values, { home_sort: "priority", home_detail_fraction: 0.42, catch_up_rail_fraction: 0.28, search_shortcut: "mod-shift-k", enable_trust_bypass: true, enable_inbox: true });
+  assert.deepEqual((await f.agent.run("a", "display_settings", {}) as { values: unknown }).values, { home_sort: "priority", home_detail_fraction: 0.42, catch_up_rail_fraction: 0.28, search_shortcut: "mod-shift-k", open_workspace_on: "view", enable_trust_bypass: true, enable_inbox: true });
   await assert.rejects(f.agent.run("a", "set_display", { values: { enable_everything: true } }), /unknown setting/);
   const same = await f.agent.run("a", "set_display", { values: { enable_inbox: true } }) as { planId: string | null };
   assert.equal(same.planId, null, "nothing changes, nothing to confirm");

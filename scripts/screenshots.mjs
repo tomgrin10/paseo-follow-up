@@ -47,7 +47,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as the CHANGELOG's newest stable, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["menu-bounds", "tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "peek", "pr-now", "panel-folds", "question-links", "gallery", "frames", "onboarding", "setup-popup", "advanced"];
+const REVIEW_SHOTS = ["menu-bounds", "tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "peek", "pr-now", "panel-folds", "workspace-view", "question-links", "gallery", "frames", "onboarding", "setup-popup", "advanced"];
 /** Pasted images and their Add image button share one harness setup (an Overseer and the fixture provider taking images). */
 const PASTE_LIKE = only => only.includes("paste-images") || only.includes("attach-images");
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
@@ -1629,7 +1629,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
     const shots = [
       ["secsearch-tasks", "light", async page => { await panel(page); await tasksDunning(page); }],
       ["secsearch-tasks", "dark", async page => { await panel(page); await tasksDunning(page); }],
-      // A merged PR from the "merged below" fold, found by its title.
+      // A merged PR from the "more merged" fold, found by its title.
       ["secsearch-prs", "light", async page => { await panel(page); await searchIn("Search pull requests", "schedule", p => p.getByText("1 of 3").last().waitFor())(page); }],
       // A failing check's name: line 2 becomes "Check · test".
       ["secsearch-prs", "dark", async page => { await panel(page); await searchIn("Search pull requests", "test", p => p.getByText(/^Check · /).last().waitFor())(page); }],
@@ -1645,7 +1645,6 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
     for (const [name, scheme, drive] of shots) await shoot(`${name}-${scheme}`, DESKTOP, scheme, drive);
     await shoot("secsearch-phone-light", PHONE, "light", async page => {
       await panel(page);
-      await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
       await page.getByRole("button", { name: "Search tasks", exact: true }).last().waitFor({ timeout: 60000 });
       await page.setViewportSize(PHONE);
       await tasksDunning(page);
@@ -1672,7 +1671,6 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
     });
     for (const scheme of ["light", "dark"]) await shoot(`github-wait-phone-${scheme}`, PHONE, scheme, async page => {
       await panel(page);
-      await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
       await page.setViewportSize(PHONE);
       const line = page.getByText(/^GitHub limit low/).last();
       await line.waitFor({ timeout: 60000 });
@@ -1897,7 +1895,6 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       // open it from the panel at desktop size, then narrow to the phone.
       if (name === "tasks-phone") await shoot("tasks-phone", PHONE, "light", async page => {
         await open(page);
-        await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
         await page.getByText(/^Next message to /).last().waitFor({ timeout: 60000 });
         await page.setViewportSize(PHONE);
         const strip = page.getByText(/^Next message to /).last();
@@ -2220,7 +2217,6 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       if (s.state === "tasks") await shoot(`ny-tasks-phone-${theme}`, PHONE, theme, async page => {
         await openChat(page, s.title, s.prompt);
         await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
-        await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
         { const f = page.getByRole("button", { name: /^Agent's tasks, / }).last(); await f.waitFor({ timeout: 60000 }); if (await f.getAttribute("aria-expanded") !== "true") await f.click(); }
         const due = page.getByText(/^Due since /).last();
         await due.waitFor({ timeout: 60000 });
@@ -2309,7 +2305,6 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
       await shoot(`tv-phone-${theme}`, PHONE, theme, async page => {
         await openChat(page, spec.title, spec.prompt);
         await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
-        await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
         await fold(page).waitFor({ timeout: 60_000 });
         await page.setViewportSize(PHONE);
         await setFold(page, true);
@@ -2335,6 +2330,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   if (only.includes("pr-now")) await prNowShots({ shoot, call, seeded });
   if (only.includes("panel-folds")) await panelFoldShots({ shoot });
   if (only.includes("question-links")) await questionLinksShots({ shoot, call, seeded, home });
+  if (only.includes("workspace-view")) await workspaceViewShots({ shoot, call, seeded });
   if (only.includes("own-answer")) await ownAnswerShots({ shoot });
   if (only.includes("more-context")) await moreContextShots({ shoot, call });
   if (only.includes("your-questions")) await yourQuestionsShots({ shoot, call, seeded, home, cli });
@@ -2789,7 +2785,7 @@ async function pagedListShots({ shoot }) {
       await next(page, 1); await into(page, pager(page)); await check(page, null, await pager(page).innerText());
     });
     const phone = async page => {
-      await panel(page); await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
+      await panel(page);
       await activity(page).waitFor({ timeout: 60_000 }); await page.setViewportSize(PHONE); await activity(page).waitFor({ timeout: 60_000 });
     };
     await shoot(`pl-phone-page1-${theme}`, PHONE, theme, async page => { await phone(page); await showAll(page); await into(page, pager(page)); await check(page, PHONE, await pager(page).innerText()); });
@@ -2857,7 +2853,7 @@ async function prScaleShots({ shoot }) {
     await shoot(`ps-bar-${theme}`, TALL, theme, async page => { await panel(page); await healthy(page); return barClip(page); }, { scale: 2 });
     // The panel on a phone: the larger view (Paseo's screen), opened at desktop then narrowed.
     const phonePanel = async page => {
-      await panel(page); await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
+      await panel(page);
       await row(page, SHOWN).waitFor({ timeout: 60_000 }); await page.setViewportSize(PHONE); await row(page, SHOWN).waitFor({ timeout: 60_000 });
     };
     await shoot(`ps-panel-phone-${theme}`, PHONE, theme, async page => { await phonePanel(page); await page.evaluate(() => window.scrollTo(0, 0)); await healthy(page, PHONE); });
@@ -2880,7 +2876,7 @@ async function prScaleShots({ shoot }) {
     await shoot(`ps-small-panel-${theme}`, TALL, theme, async page => { await smallPanel(page); await noFold(page); await healthy(page); });
     await shoot(`ps-small-bar-${theme}`, TALL, theme, async page => { await smallPanel(page); return barClip(page); }, { scale: 2 });
     await shoot(`ps-small-panel-phone-${theme}`, PHONE, theme, async page => {
-      await smallPanel(page); await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
+      await smallPanel(page);
       await row(page, 142).waitFor({ timeout: 60_000 }); await page.setViewportSize(PHONE); await row(page, 142).waitFor({ timeout: 60_000 }); await noFold(page); await healthy(page, PHONE);
     });
     const smallHome = async (page, vp) => { await openHome(page); if (vp) await page.setViewportSize(vp); await (await homeRow(page, small.title)).click(); await page.getByText("Only network failures").filter({ visible: true }).first().waitFor(); };
@@ -4404,7 +4400,6 @@ async function batchChurnShots({ shoot, seeded, call, home, cli }) {
   const panelPhone = (scroll, words) => async page => {
     await openChat(page, spec.title, spec.prompt);
     await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
-    await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
     await showAllActivity(page, scroll);
     await page.getByText(words).filter({ visible: true }).first().waitFor({ timeout: 90000 });
     await page.setViewportSize(PHONE);
@@ -4501,7 +4496,6 @@ async function prNowShots({ shoot, call, seeded }) {
         await shoot(`pr-now-panel-${8801 + i}-${device}-${theme}`, viewport, theme, async page => {
           await openChat(page, spec.title, spec.prompt);
           await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
-          if (device === "phone") await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
           await page.setViewportSize(viewport);
           await visible(page, line).waitFor({ timeout: 60_000 });
           const row = page.getByRole("button", { name: new RegExp(`^Pull request ${8801 + i}: `) }).filter({ visible: true }).first();
@@ -4630,7 +4624,6 @@ async function nowLineShots({ shoot }) {
       await shoot(`nl-panel-${st.name}-phone-${theme}`, PHONE, theme, async page => {
         await openChat(page, st.spec.title, st.spec.prompt);
         await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
-        await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
         await page.setViewportSize(PHONE);
         await visible(page, st.line).waitFor({ timeout: 60_000 });
         await noSideways(`nl-panel-${st.name}-phone`)(page);
@@ -4643,6 +4636,62 @@ async function nowLineShots({ shoot }) {
       await line.evaluate(el => el.scrollIntoView({ block: "center" })); await noSideways("nl-home-phone")(page);
     });
   }
+}
+/**
+ * The workspace view (`--only workspace-view`, one-workspace-view): one view in Home's pane, the side panel and the main
+ * tab, every width tier (Home's pane at 430, 600, 820 and 1280; the tab at about 850, 1000, 1250 and 1900; the side
+ * panel), light and dark, and the phone. Each shot reads the view's own width and fails when its tier's column count
+ * or Recent steps are missing, or the page scrolls sideways.
+ */
+async function workspaceViewShots({ shoot, call, seeded }) {
+  const spec = WORKSPACES.find(w => w.key === "billing");
+  const agent = seeded.workspaces.find(w => w.key === "billing").agentId;
+  const view = (page, place) => page.locator(`[data-testid="follow-up-view-${place}"]`).filter({ visible: true }).first();
+  const check = (name, place) => async page => {
+    const v = view(page, place); await v.waitFor({ timeout: 60_000 });
+    await page.getByRole("button", { name: /^Recent steps/ }).filter({ visible: true }).first().waitFor({ timeout: 60_000 });
+    await page.waitForTimeout(800);
+    const width = Math.round((await v.boundingBox()).width);
+    console.log(`${name}: ${place} view ${width}px wide`);
+    if (await page.evaluate(() => document.documentElement.scrollWidth) > page.viewportSize().width) throw new Error(`${name} scrolls sideways`);
+  };
+  const homePane = async (page, want) => {
+    await openHome(page); await (await homeRow(page, "Billing retries")).click();
+    const split = await page.locator('[data-testid="follow-up-home-split"]').boundingBox();
+    const fraction = Math.min(0.8, Math.max(0.2, want / split.width));
+    await actPlanned(call, agent, "set_display", { values: { home_detail_fraction: Number(fraction.toFixed(3)) } });
+    // The width applies on the next load (Home reads Display once as it opens).
+    await page.waitForTimeout(800); await openHome(page); await (await homeRow(page, "Billing retries")).click();
+  };
+  for (const theme of ["light", "dark"]) {
+    // Home's list keeps its minimum width, so the wider panes need a wider window.
+    for (const [want, width] of [[430, 1440], [600, 1440], [820, 1720], [1280, 2140]]) {
+      const size = { width, height: 1000 };
+      await shoot(`wv-home-${want}-${theme}`, size, theme, async page => { await page.setViewportSize(size); await homePane(page, want); await check(`wv-home-${want}`, "home")(page); });
+    }
+    await shoot(`wv-panel-${theme}`, { ...DESKTOP, height: 1000 }, theme, async page => {
+      await page.setViewportSize({ ...DESKTOP, height: 1000 });
+      await openChat(page, spec.title, spec.prompt);
+      // The header button opens the tab; the side panel is its own command.
+      await page.keyboard.press("Control+k"); await page.keyboard.type("Follow-up: open in the side panel");
+      await page.getByText("Follow-up: open in the side panel").first().waitFor(); await page.keyboard.press("Enter");
+      await check("wv-panel", "panel")(page);
+    });
+    // The tab is the window less Paseo's sidebar (320).
+    for (const width of [1170, 1320, 1570, 2220]) {
+      await shoot(`wv-tab-${width}-${theme}`, { width, height: 1000 }, theme, async page => {
+        await page.setViewportSize({ width, height: 1000 });
+        await openChat(page, spec.title, spec.prompt);
+        await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+        await check(`wv-tab-${width}`, "tab")(page);
+      });
+    }
+    await shoot(`wv-home-phone-${theme}`, PHONE, theme, async page => {
+      await openHome(page); await page.setViewportSize(PHONE); await (await homeRow(page, "Billing retries")).click();
+      await check("wv-home-phone", "home")(page);
+    });
+  }
+  await actPlanned(call, agent, "set_display", { values: { home_detail_fraction: 0.42 } });
 }
 /**
  * Every panel section folds (`--only panel-folds`, panel-sections-fold): one workspace's panel with every section
@@ -4707,7 +4756,6 @@ async function panelFoldShots({ shoot }) {
   }
   await shoot("pf-phone-dark", PHONE, "dark", async page => {
     await panel(page);
-    await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
     await page.setViewportSize(PHONE);
     await header(page, "Needs you").waitFor({ timeout: 60_000 });
     await setFolds(page, { all: true }); await sameArrows("pf-phone")(page);
@@ -4716,7 +4764,6 @@ async function panelFoldShots({ shoot }) {
   });
   await shoot("pf-phone-folded-dark", PHONE, "dark", async page => {
     await panel(page);
-    await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
     await page.setViewportSize(PHONE);
     await header(page, "Needs you").waitFor({ timeout: 60_000 });
     await setFolds(page, { all: false });
@@ -4826,7 +4873,6 @@ async function scheduledShots({ shoot, seeded, call, cli }) {
   const larger = async page => {
     await openChat(page, spec.title, spec.prompt);
     await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
-    await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
     await page.setViewportSize(PHONE); await expand(page);
   };
   const sheet = async page => {
@@ -5529,7 +5575,7 @@ async function yourQuestionsShots({ shoot, call, seeded, home, cli }) {
   const card = page => visible(page.locator("[data-your-questions]"));
   const ready = async page => { await visible(page.getByText(/fixed 30 s gap keeps us/)).waitFor({ timeout: 60_000 }); };
   const panel = async page => { await page.setViewportSize(TALL); await openChat(page, spec.title, spec.prompt); await page.getByRole("button", { name: "Follow-up", exact: true }).last().click(); await ready(page); await card(page).scrollIntoViewIfNeeded(); };
-  const panelPhone = async page => { await openChat(page, spec.title, spec.prompt); await page.getByRole("button", { name: "Follow-up", exact: true }).last().click(); await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click(); await page.setViewportSize(PHONE); await ready(page); await card(page).evaluate(el => el.scrollIntoView({ block: "start" })); };
+  const panelPhone = async page => { await openChat(page, spec.title, spec.prompt); await page.getByRole("button", { name: "Follow-up", exact: true }).last().click(); await page.setViewportSize(PHONE); await ready(page); await card(page).evaluate(el => el.scrollIntoView({ block: "start" })); };
   // `top`: Needs you's end above the card's start, so the pane's order shows (the workspace's own Needs you first).
   const homeAt = async (page, vp, { top = false } = {}) => { await openHome(page); if (vp !== DESKTOP) await page.setViewportSize(vp); await (await homeRow(page, spec.title)).click(); await ready(page); await card(page).evaluate((el, top) => { el.scrollIntoView({ block: "start" }); if (!top) return; let p = el.parentElement; while (p && p.scrollHeight <= p.clientHeight) p = p.parentElement; if (p) p.scrollTop -= 360; }, top); };
   const noOverflow = async (page, name) => { const o = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth); if (o > 1) throw new Error(`${name} scrolls sideways (${o}px)`); };
@@ -6081,7 +6127,6 @@ async function galleryShots({ shoot, call, home, billing }) {
   // The workspace panel beside the chat; phones read a workspace in the larger view.
   await both("panel", async page => { await openPanel(page); }, { phoneDrive: async (page, vp) => {
     await openPanel(page);
-    await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
     await page.getByRole("button", { name: /^Pull request 142: / }).last().waitFor();
     await page.setViewportSize(vp); await page.waitForTimeout(500);
   } });
@@ -6590,7 +6635,6 @@ async function menuBoundsShots({ shoot }) {
       await page.getByRole("button", { name: "More actions for this workspace" }).first().click();
       await bounded(page, page.getByRole("menu", { name: "Actions for Billing retries" }), "panel More");
       await page.keyboard.press("Escape");
-      await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
       await page.getByRole("button", { name: "More actions for this workspace" }).filter({ visible: true }).first().click();
       await bounded(page, page.getByRole("menu", { name: "Actions for Billing retries" }), "main tab More");
       await page.keyboard.press("Escape");

@@ -20,9 +20,15 @@ const NO_ROWS: readonly InboxRow[] = [];
  * working 6m"). Nothing stated: one line, who and the state ("Main agent · working 1h"). No label, no placeholder, no live stream: it reads the
  * record and the inbox rows the panel already has. A row opens that agent's chat.
  */
-export function AgentLines({ workspace: w, inbox, theme, compact, now, openAgent, peek = false }: { workspace: Workspace; inbox?: InboxStore; theme: Theme; compact: boolean; now: number; openAgent?: (agentId: string) => void;
+export function AgentLines({ workspace: w, inbox, theme, compact, now, openAgent, peek = false, bare = false, selected = null, onSelect }: { workspace: Workspace; inbox?: InboxStore; theme: Theme; compact: boolean; now: number; openAgent?: (agentId: string) => void;
   /** Lines peek at their agent's turn (client/turn-view.tsx), under a PeekHost. */
-  peek?: boolean }) {
+  peek?: boolean;
+  /** Inside the workspace view's agent card (client/agent-card.tsx): no frame of its own. */
+  bare?: boolean;
+  /** The agent card's selected agent (its Recent steps and reply box); its row is marked. */
+  selected?: string | null;
+  /** A row's press in the agent card: switches the card to that agent; Cmd/Ctrl (`chat`) opens its chat. */
+  onSelect?: (agentId: string, chat: boolean) => void }) {
   const c = theme.colors;
   const rows = useInbox(inbox ?? NO_INBOX, () => inbox?.rows() ?? NO_ROWS);
   // A contributor that has closed has nothing to say here; the main agent always has its row.
@@ -30,12 +36,14 @@ export function AgentLines({ workspace: w, inbox, theme, compact, now, openAgent
   const lines = workspaceNow(w, rows, now).filter(n => (n.role === "main" || n.state.kind !== "closed") && (n.work || n.state.text));
   const names = new Map(rows.map(r => [r.agentId, r.title]));
   if (!lines.length) return null;
-  return <View style={{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 8, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1, overflow: "hidden" }}>
-    {lines.map((n, i) => <AgentLine key={n.agentId} n={n} who={n.role === "main" ? "Main agent" : names.get(n.agentId)?.trim() || w.taskAgents?.[n.agentId]?.title?.trim() || "Another agent"} first={i === 0} theme={theme} compact={compact} openAgent={openAgent} peek={peek} />)}
-  </View>;
+  const many = lines.length > 1;
+  const drawn = lines.map((n, i) => <AgentLine key={n.agentId} n={n} who={n.role === "main" ? "Main agent" : names.get(n.agentId)?.trim() || w.taskAgents?.[n.agentId]?.title?.trim() || "Another agent"} first={i === 0} theme={theme} compact={compact} openAgent={openAgent} peek={peek}
+    selected={many && selected === n.agentId} onSelect={onSelect} />);
+  if (bare) return <View>{drawn}</View>;
+  return <View style={{ marginHorizontal: compact ? 16 : 12, marginTop: 12, borderRadius: 8, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1, overflow: "hidden" }}>{drawn}</View>;
 }
 
-function AgentLine({ n, who, first, theme, compact, openAgent, peek }: { n: Now; who: string; first: boolean; theme: Theme; compact: boolean; openAgent?: (agentId: string) => void; peek: boolean }) {
+function AgentLine({ n, who, first, theme, compact, openAgent, peek, selected = false, onSelect }: { n: Now; who: string; first: boolean; theme: Theme; compact: boolean; openAgent?: (agentId: string) => void; peek: boolean; selected?: boolean; onSelect?: (agentId: string, chat: boolean) => void }) {
   const c = theme.colors; const t = text(c, compact);
   const ref = useRef<View>(null);
   // Desktop: hover or focus shows the agent's turn; a phone's tap opens it in a sheet with Open chat. Click still opens the chat.
@@ -50,10 +58,14 @@ function AgentLine({ n, who, first, theme, compact, openAgent, peek }: { n: Now;
   const meta = n.work ? [who, state].filter(Boolean).join(" · ") : null;
   const label = [who, n.work?.text, position, n.state.text].filter(Boolean).join(". ");
   const tap = peeks?.onPress;
-  return <Pressable ref={ref} accessibilityRole={openAgent || tap ? "button" : undefined} accessibilityLabel={label} accessibilityHint={tap ? "Shows what this agent is doing" : openAgent ? "Opens this agent's chat" : undefined} disabled={!openAgent && !tap}
-    {...peeks} onPress={tap ?? (() => openAgent?.(n.agentId))}
+  // In the agent card a row selects its agent; Cmd/Ctrl-click (web) opens its chat instead.
+  const select = onSelect ? (e: { nativeEvent?: unknown }) => { const k = (e?.nativeEvent ?? {}) as { metaKey?: boolean; ctrlKey?: boolean }; onSelect(n.agentId, !!(k.metaKey || k.ctrlKey)); } : null;
+  return <Pressable ref={ref} accessibilityRole={openAgent || tap || select ? "button" : undefined} accessibilityLabel={label} accessibilityState={onSelect ? { selected } : undefined}
+    accessibilityHint={select ? "Shows this agent's recent steps here. Cmd or Ctrl opens its chat" : tap ? "Shows what this agent is doing" : openAgent ? "Opens this agent's chat" : undefined} disabled={!openAgent && !tap && !select}
+    {...peeks} onPress={select ?? tap ?? (() => openAgent?.(n.agentId))}
     style={state => ({ ...focusRing((state as { focused?: boolean }).focused, c, true), flexDirection: "row", alignItems: meta ? "flex-start" : "center", gap: 10, paddingHorizontal: compact ? 14 : 12, paddingVertical: compact ? 12 : 9, minHeight: compact ? 56 : 0,
-      borderTopWidth: first ? 0 : 1, borderTopColor: c.border, backgroundColor: (state as { hovered?: boolean }).hovered || state.pressed ? c.surface2 : "transparent" })}>
+      borderTopWidth: first ? 0 : 1, borderTopColor: c.border, borderLeftWidth: onSelect ? 2 : 0, borderLeftColor: selected ? c.foregroundMuted : "transparent",
+      backgroundColor: (state as { hovered?: boolean }).hovered || state.pressed ? c.surface2 : selected ? c.surface1 : "transparent" })}>
     <View style={{ width: 12, height: compact ? 20 : 18, alignItems: "center", justifyContent: "center" }}>
       {running ? <Spinner color={runningColor(c)} size={12} label="Running" /> : <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: tone }} />}
     </View>

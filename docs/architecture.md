@@ -95,7 +95,7 @@ Answers that the client polls are kept small:
   stored schema minus named detail fields: deployment evidence and commits; a snapshot's base, trunk and head branch;
   a merged PR's checks, threads and reviewers; task evidence except while the task is blocked; an answered or closed
   question's background and links; the inventory, excluded stacks and the next message. An archived workspace is only
-  a search hit: its name and its PRs' numbers, titles and stacks. Detail surfaces (the panel, the larger view, the PR
+  a search hit: its name and its PRs' numbers, titles and stacks. Detail surfaces (the workspace view, the PR
   sheet and question sheet from Home, the pill and briefs) read the full workspace with `follow.get` (`useWorkspace`,
   `client/workspace-data.ts`). Home's open row and the pill's popover paint from the list form at once and then draw
   the newer of the two copies (`openRowCopy`); a sheet waiting on the read shows the error toast if it fails

@@ -243,11 +243,13 @@ function QuestionState({ workspace: w, questionId, theme }: { workspace: Workspa
  * a question becomes that question's section, carrying the brief's context; a brief that points at none keeps its own
  * card (`briefCard`, drawn bare inside the frame). Questions answer in place through follow.answer-question.
  */
-export function NeedsYouBlock({ workspace: w, theme, compact, actions, now, brief = null, briefCard = null, style, fold = false }: {
+export function NeedsYouBlock({ workspace: w, theme, compact, actions, now, brief = null, briefCard = null, style, fold = false, permissions = null }: {
   workspace: Workspace; theme: Theme; compact: boolean; actions: NeedActions; now: number;
   /** The agent's open brief this surface shows, or null. */ brief?: Pick<Brief, "questionIds" | "context" | "kind" | "moves"> | null;
   /** That brief's own card, drawn when it points at no open question. */ briefCard?: ReactNode; style?: StyleProp<ViewStyle>;
   /** The workspace panel's section: it folds (client/fold.tsx), and folded its header names the first ask. */ fold?: boolean;
+  /** The agents' pending permissions with Allow and Deny (client/agent-card.tsx), first in the block and in its count. */
+  permissions?: { count: number; node: ReactNode } | null;
 }) {
   useReviewerSettings(); // re-renders on a No review change, so the block's rows and count drop the asks at once
   // Held before grouping: a clicked reviewers row keeps its place, and the brief it folds stays folded.
@@ -258,15 +260,17 @@ export function NeedsYouBlock({ workspace: w, theme, compact, actions, now, brie
   // counted. Mid-run the number matches the rows on screen; once every held row is done the card says so.
   const held = all.filter(i => !live.includes(i));
   const inFlight = held.filter(i => i.kind === "reviewers" && reviewerClick(w.id, i.prKey)?.running).length;
-  const count = block.count - held.length + inFlight;
+  const asks = permissions?.count ?? 0;
+  const count = block.count - held.length + inFlight + asks;
   const asked = !count && held.length > 0 && held.every(i => i.kind === "reviewers");
   // An accordion: one question open at a time (the block's first by default); its header closes it again.
   const [openId, setOpenId] = useState<string | null | undefined>(undefined);
-  if (!block.count) return null; // held rows keep the block drawn after its last ask is done
+  if (!block.count && !asks) return null; // held rows keep the block drawn after its last ask is done
   // In Later the block stays (its moves still work) but reads Later, without the attention border.
   const later = workspaceSnoozed(w, all, now) && w.snooze ? laterLabel(w.snooze.until, now) : null;
   return <Card theme={theme} compact={compact} icon={later ? "AlarmClock" : asked ? "Check" : "CircleAlert"} title={later ? `Later ${later}` : asked ? "Reviewers requested" : "Needs you"} tone={later || !count ? "plain" : "attention"} count={count || undefined} style={style}
-    fold={fold ? { id: "needs", summary: firstAsk(block, w), label: `${count || block.count} open` } : undefined}>
+    fold={fold ? { id: "needs", summary: asks ? "Wants your OK" : firstAsk(block, w), label: `${count || block.count} open` } : undefined}>
+    {!!asks && permissions!.node}
     <PagedRows items={block.cards} theme={theme} compact={compact} noun="questions" row={card => card.kind === "brief"
       ? <View key="brief" style={{ borderTopWidth: 1, borderTopColor: theme.colors.border }}>{briefCard}</View>
       : <QuestionAsk key={card.questionId} workspace={w} questionId={card.questionId} context={card.brief ? brief?.context ?? null : null} theme={theme} compact={compact} now={now} openAgent={actions.openAgent}
