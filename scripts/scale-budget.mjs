@@ -235,6 +235,14 @@ export function pagedReplyVerdict(replies, budgets = PAGED_REPLY_BUDGET_BYTES) {
  * (full) answer, as { bytes, full }.
  */
 export const FEED_IDLE_BUDGET_KB = 120;
+/**
+ * One answer of the client's follow.list poll (Paseo 0.15, no plugin subscriptions), as a feedIdleVerdict event: judged
+ * on the entries it resends and the ids it removes; its stamps ride every poll by design, so they're counted apart.
+ */
+export function listPollEvent(out) {
+  return { bytes: JSON.stringify([out?.workspaces ?? [], out?.removed ?? []]).length, readsBytes: JSON.stringify(out?.reads ?? {}).length, full: out?.full !== false };
+}
+/** `events`: every answer in the window, the first (full) one included; full answers count as answered, not as churn. */
 export function feedIdleVerdict(events, windowMs, budgetKb = FEED_IDLE_BUDGET_KB) {
   const diffs = events.filter(e => !e.full);
   const kb = diffs.reduce((a, e) => a + e.bytes, 0) / 1024;

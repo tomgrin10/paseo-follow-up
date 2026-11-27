@@ -31,7 +31,7 @@ import { harness, spawnDaemon } from "./harness.mjs";
 import { harnessEnv, harnessConfig } from "./harness-env.mjs";
 import { fakeGithub } from "./fake-github.mjs";
 import { scaleGh } from "./scale-github.mjs";
-import { ACK_READ_MS, BUSY_GROWTH_BUDGET_MB, BUSY_ITEM_BYTES, BUSY_TURN_ITEMS, BUSY_TURNS_PER_MIN, BURST_RETURN_BUDGET_MB, burstReturnVerdict, busyVerdict, feedIdleVerdict, pagedReplyVerdict, DRAIN_BOUND_MS, DRAIN_QUIET_MS, drainPlan, drainState, idleBudgetMb, idleVerdict, peakBudgetMb, LIVE_MALLOC_ENV, REALISTIC_PEAK_BUDGET_MB, SEND_SETTLE_MS, settleBoundMs, settleState } from "./scale-budget.mjs";
+import { ACK_READ_MS, BUSY_GROWTH_BUDGET_MB, BUSY_ITEM_BYTES, BUSY_TURN_ITEMS, BUSY_TURNS_PER_MIN, BURST_RETURN_BUDGET_MB, burstReturnVerdict, busyVerdict, feedIdleVerdict, listPollEvent, pagedReplyVerdict, DRAIN_BOUND_MS, DRAIN_QUIET_MS, drainPlan, drainState, idleBudgetMb, idleVerdict, peakBudgetMb, LIVE_MALLOC_ENV, REALISTIC_PEAK_BUDGET_MB, SEND_SETTLE_MS, settleBoundMs, settleState } from "./scale-budget.mjs";
 
 const exec = promisify(execFile);
 // The check drives a real Paseo daemon, so it needs the paseo CLI (CI installs @getpaseo/cli). Without it, local
@@ -349,7 +349,7 @@ try {
       client.observePluginRpc("follow-up", "follow.workspaces-feed", {}, { signal: feedAbort.signal }).ready?.catch?.(() => { if (!feedAbort.signal.aborted) toPoll(); });
     } catch { toPoll(); }
     const pollList = () => { if (feedMode !== "poll" || Date.now() < nextListPoll) return; nextListPoll += 15_000;
-      void client.invokePluginRpc("follow-up", "follow.list", listSince === undefined ? {} : { since: listSince }).then(out => { if (out?.revision !== undefined) listSince = out.revision; feedEvents.push({ at: Date.now(), bytes: JSON.stringify([out?.workspaces ?? [], out?.removed ?? []]).length, readsBytes: JSON.stringify(out?.reads ?? {}).length, full: out?.full !== false }); }, () => undefined); };
+      void client.invokePluginRpc("follow-up", "follow.list", listSince === undefined ? {} : { since: listSince }).then(out => { if (out?.revision !== undefined) listSince = out.revision; feedEvents.push({ at: Date.now(), ...listPollEvent(out) }); }, () => undefined); };
     const idleSamples = [await rss()];
     // --live-mix <turns/min>,<rpcs/min>: the idle window carries live's load instead of none: awake agents end turns
     // with live-sized timelines (turn hooks read their tails) and an app reads the usual RPCs. Compare with a plain run.
@@ -379,7 +379,7 @@ try {
     const requests = ratePerMinute(requestsBefore, counter.snapshot(), "follow-up-worker", Date.now() - started);
     feedAbort.abort(); if (typeof offFeed === "function") offFeed();
     // Live load (--live-mix, --app-burst) changes workspaces on purpose: then the feed is reported, not judged.
-    const feed = { mode: feedMode, ...feedIdleVerdict(feedEvents.slice(feedEvents.findIndex(e => e.full) + 1), Date.now() - started), readsKb: Math.round(feedEvents.reduce((a, e) => a + (e.readsBytes ?? 0), 0) / 1024), judged: !mix && !burst };
+    const feed = { mode: feedMode, ...feedIdleVerdict(feedEvents, Date.now() - started), readsKb: Math.round(feedEvents.reduce((a, e) => a + (e.readsBytes ?? 0), 0) / 1024), judged: !mix && !burst };
     const cpuPct = Math.round(((await ticks()) - t0) / hz / ((Date.now() - started) / 1000) * 1000) / 10;
     // The worker's own breakdown (heap vs native), from the governor's sample in follow.usage.
     const memory = async () => { try { return (await client.invokePluginRpc("follow-up", "follow.usage", {}))?.resources?.worker ?? null; } catch { return null; } };

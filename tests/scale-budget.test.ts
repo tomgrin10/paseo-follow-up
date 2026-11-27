@@ -249,3 +249,20 @@ test("read-stamps-never-count: the idle feed budget passes a stamps push a minut
   assert.equal(churn.over, true); assert.ok(churn.kbPerMin > 10 * FEED_IDLE_BUDGET_KB);
   assert.equal(feedIdleVerdict([{ bytes: 2_000_000, full: true }], 90_000).over, false, "a full answer (a resubscribe) isn't idle churn");
 });
+
+test("read-stamps-never-count: on a host without plugin subscriptions the list poll's first full answer counts as answered, its stamps apart", async () => {
+  const { feedIdleVerdict, listPollEvent } = await import("../scripts/scale-budget.mjs");
+  const entry = { id: "w1", title: "One", prs: [] };
+  const stamps = { w1: { "example/app#1": ["2026-11-27T12:00:00.000Z"] } };
+  // 2026-11-27 CI (Paseo 0.15.2): the window's first poll is the full list, then diffs carrying stamps alone.
+  const polls = [{ revision: 1, full: true, workspaces: [entry], removed: [], reads: stamps }, ...Array.from({ length: 5 }, (_, i) => ({ revision: 1, full: false, workspaces: [], removed: [], reads: i ? {} : stamps }))].map(listPollEvent);
+  assert.deepEqual(polls[0]!.full, true); assert.ok(polls[1]!.readsBytes > 2, "stamps are reported apart");
+  const quiet = feedIdleVerdict(polls, 90_000);
+  assert.equal(quiet.fullPushes, 1, "the first full answer is an answer"); assert.equal(quiet.pushes, 5); assert.equal(quiet.over, false);
+  assert.ok(quiet.kbPerMin < 1, `stamps never count as resent entries (${quiet.kbPerMin} KB a minute)`);
+  // A poll that resends the 153-PR workspace every 15 s is churn.
+  const big = { ...entry, prs: Array.from({ length: 153 }, (_, i) => ({ key: `example/app#${i}`, snapshot: { title: "x".repeat(1000) } })) };
+  const churn = feedIdleVerdict([polls[0]!, ...Array.from({ length: 6 }, () => listPollEvent({ full: false, workspaces: [big], removed: [] }))], 90_000);
+  assert.equal(churn.over, true);
+  assert.equal(feedIdleVerdict([], 90_000).fullPushes, 0, "no answer at all is still caught");
+});

@@ -40,3 +40,4 @@ export type PagedReply = { method: string; label: string; bytes: number; rows?: 
 export declare function pagedReplyVerdict(replies: PagedReply[], budgets?: Readonly<Record<string, number>>): { replies: PagedReply[]; over: string[] };
 export declare const FEED_IDLE_BUDGET_KB: number;
 export declare function feedIdleVerdict(events: { bytes: number; full: boolean }[], windowMs: number, budgetKb?: number): { pushes: number; fullPushes: number; kbPerMin: number; maxPushKb: number; budgetKb: number; over: boolean };
+export declare function listPollEvent(out: unknown): { bytes: number; readsBytes: number; full: boolean };
