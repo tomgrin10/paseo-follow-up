@@ -1,0 +1,1 @@
+- Typing in Home's search keeps up with you: each key shows at once, and only the results whose highlight changed are drawn again.

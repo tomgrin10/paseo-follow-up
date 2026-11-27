@@ -1,5 +1,5 @@
 import { FloatingSurface } from "./floating-surface";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Platform, View, type TextInput } from "react-native";
 import { AttachImageButton, ImageField, useImageAttachments, type ImageAttachments } from "./image-attach";
 import { OVERSEER_ASK_KEY } from "./unsent-images";
@@ -36,9 +36,11 @@ export type Omnibox = {
   setQuery(q: string): void;
   setPhysical?: (q: string | null) => void;
   layoutHint?: string | null;
-  /** null while the query is empty: the list shows its groups. */
+  /** null while the query is empty: the list shows its groups. They may trail `query` by a key (useDeferredValue). */
   results: OmniboxItem[] | null;
   active: number;
+  /** What Enter takes: the active result for the query as typed, even when the list hasn't caught up with it yet. */
+  enterItem(): OmniboxItem | null;
   move(delta: number): void;
   inputRef: React.RefObject<TextInput | null>;
   /** The search field's onLayout: a waiting search request tries again when the field comes on screen. */
@@ -67,7 +69,10 @@ export function useOmnibox(model: HomeModel, sources: HomeSources, extraProvider
   const live = useSyncExternalStore(sources.live.subscribe, sources.live.version, sources.live.version);
   const paseo = useSyncExternalStore(sources.paseo.subscribe, sources.paseo.version, sources.paseo.version);
   const extras = useSyncExternalStore(sources.extras.subscribe, sources.extras.version, sources.extras.version);
-  const searching = query.trim().length > 0;
+  // typing-never-redraws-unchanged-rows (invariant 148): the field takes each key at once; the results follow the
+  // typed query at low priority, so a key never waits on the list, and a newer key drops a list render still running.
+  const shown = useDeferredValue(query);
+  const searching = shown.trim().length > 0;
   const overseer = useSyncExternalStore(sources.extras.subscribe, sources.extras.overseer, sources.extras.overseer);
   const askOn = !!overseer?.enabled;
   // An ask Paseo hasn't taken yet keeps its images under OVERSEER_ASK_KEY (client/unsent-images.ts).
@@ -75,11 +80,14 @@ export function useOmnibox(model: HomeModel, sources: HomeSources, extraProvider
   // Linked keys and titles: fetched only while there's a query (client/linked.tsx explains why).
   const linked = useLinkedIndex(searching);
   // Built lazily: nothing is indexed until the developer types.
-  const index = useMemo(() => searching ? indexDocs(homeSearchDocs({ model, paseo: sources.paseo.all(), tracked: sources.live.all(), archived: sources.live.archived(), agents: sources.extras.agents(), linked })) : null,
+  const buildIndex = () => indexDocs(homeSearchDocs({ model, paseo: sources.paseo.all(), tracked: sources.live.all(), archived: sources.live.archived(), agents: sources.extras.agents(), linked }));
+  const index = useMemo(() => searching ? buildIndex() : null,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [searching, model, live, paseo, extras, linked]);
-  const providers = useMemo(() => index ? [workspaceProvider(index, Date.now(), physical), ...extraProviders, overseerProvider(askOn)] : [], [index, extraProviders, askOn, physical]);
-  const results = useMemo(() => searching ? omniboxResults(providers, query) : null, [providers, query, searching]);
+  const providersOf = (i: ReturnType<typeof indexDocs>) => [workspaceProvider(i, Date.now(), physical), ...extraProviders, overseerProvider(askOn)];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const providers = useMemo(() => index ? providersOf(index) : [], [index, extraProviders, askOn, physical]);
+  const results = useMemo(() => searching ? omniboxResults(providers, shown) : null, [providers, shown, searching]);
   const setQuery = useCallback((q: string) => { setQueryState(q); setActive(null); }, []);
   const fallback = defaultActive(results);
   const current = active ?? fallback;
@@ -90,7 +98,16 @@ export function useOmnibox(model: HomeModel, sources: HomeSources, extraProvider
   const onSearchLayout = useSearchFocusField(sources.extras.searchFocus, inputRef, setQuery);
   const focusSearch = useCallback(() => { const f = sources.extras.searchFocus; if (!f.shown()) return false; f.request(); return true; }, [sources.extras.searchFocus]);
   const hint = layoutHint((results ?? []).flatMap(r => r.hit ? [r.hit] : []));
-  return { query, setQuery, setPhysical, layoutHint: hint, results, active: Math.min(current, Math.max(0, (results?.length ?? 1) - 1)), move, inputRef, onSearchLayout, focusSearch, askOn, images };
+  const shownActive = Math.min(current, Math.max(0, (results?.length ?? 1) - 1));
+  // Enter right after a key: the list may still show the query before it, so Enter reads the typed query's own results
+  // (Ask the Overseer sends what was typed, never the query a key earlier).
+  const enterItem = (): OmniboxItem | null => {
+    if (shown === query) return results?.[shownActive] ?? null;
+    if (!query.trim()) return null;
+    const fresh = omniboxResults(providersOf(index ?? buildIndex()), query);
+    return fresh[defaultActive(fresh)] ?? null;
+  };
+  return { query, setQuery, setPhysical, layoutHint: hint, results, active: shownActive, enterItem, move, inputRef, onSearchLayout, focusSearch, askOn, images };
 }
 
 type DomKey = { key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; target: unknown; preventDefault(): void };
@@ -193,16 +210,16 @@ export function QueryField({ theme, value, onChange, placeholder, icon, dense, i
  */
 /** `onEnter`: the active result, or null when the query is empty (Home then opens its selection). */
 export function SearchField({ theme, omnibox, dense, onEnter, anywhereKey }: { theme: Theme; omnibox: Omnibox; dense: boolean; onEnter: (item: OmniboxItem | null) => void; anywhereKey?: string | null }) {
-  const { query, setQuery, results, active, move, inputRef, askOn } = omnibox;
+  const { query, setQuery, move, inputRef, askOn } = omnibox;
   const placeholder = askOn ? dense ? "Search or ask the Overseer" : "Search, or ask the Overseer" : "Search workspaces, branches, PRs";
   // The bar stays one line: a paste or drop lands here, and Home draws the thumbnails on their own line under it.
   if (askOn) return <ImageField model={omnibox.images} theme={theme} compact={dense} row={false} attach="inline" style={{ flex: 1, minWidth: 0 }}><QueryField theme={theme} onLayoutQuery={omnibox.setPhysical} value={query} onChange={setQuery} placeholder={placeholder} icon="Search" dense={dense} inputRef={inputRef} onLayout={omnibox.onSearchLayout} slashHint={anywhereKey || "/"}
     trailing={<AttachImageButton model={omnibox.images} theme={theme} compact={dense} label="Add image for the Overseer" />}
     slashTitle={anywhereKey ? `${anywhereKey} from anywhere · / on Home` : "/ focuses the search"}
-    onSubmit={() => { const item = results?.[active]; if (item || !query.trim()) onEnter(item ?? null); }} onArrow={move} listKeys={!query.trim()} /></ImageField>;
+    onSubmit={() => { const item = omnibox.enterItem(); if (item || !query.trim()) onEnter(item ?? null); }} onArrow={move} listKeys={!query.trim()} /></ImageField>;
   return <QueryField theme={theme} onLayoutQuery={omnibox.setPhysical} value={query} onChange={setQuery} placeholder={placeholder} icon="Search" dense={dense} inputRef={inputRef} onLayout={omnibox.onSearchLayout} slashHint={anywhereKey || "/"}
     slashTitle={anywhereKey ? `${anywhereKey} from anywhere · / on Home` : "/ focuses the search"}
-    onSubmit={() => { const item = results?.[active]; if (item || !query.trim()) onEnter(item ?? null); }} onArrow={move} listKeys={!query.trim()} />;
+    onSubmit={() => { const item = omnibox.enterItem(); if (item || !query.trim()) onEnter(item ?? null); }} onArrow={move} listKeys={!query.trim()} />;
 }
 
 /**
