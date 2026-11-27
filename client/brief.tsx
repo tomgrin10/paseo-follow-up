@@ -31,7 +31,7 @@ import { PrSheet } from "./pr-sheet";
 import { isLight, withAlpha, type Colors } from "./theme";
 import { dismissToast, notice, runAction, runUndoable } from "./toasts";
 import { DismissX, RevealScope, useDismiss } from "./dismiss";
-import { confirmPendingAnswer, failPendingAnswer, markSentHere, setPendingAnswer } from "./pending-answers";
+import { clearPendingAnswer, confirmPendingAnswer, failPendingAnswer, markSentHere, setPendingAnswer } from "./pending-answers";
 
 /**
  * The brief card (design §2): the ask in one line, decisions as option rows, only the context needed, and the one
@@ -489,11 +489,17 @@ function BriefCardBody({ item, theme, layout, agentId, deps, embedded = false, s
     if (busy || marked) return;
     setError(null); setSent(false); setMarked(new Date().toISOString());
     const doneId = newAnswerId();
-    const id = runUndoable("Telling the agent it's done", { label: "Done", toast, run: async (): Promise<unknown> => doneQ && workspace ? answerQuestion({ workspaceId: workspace.id, questionId: doneQ.id, choice: TASK_DONE.letter, ...(notesOpen[doneQ.id] && notes[doneQ.id]?.trim() ? { words: notes[doneQ.id].trim() } : {}), ...withImages(), action: "send" })
+    // answering-is-optimistic: the action card it answers reads as answered everywhere from the click; Undo (nothing
+    // sent) or a failure brings it back.
+    const words = doneQ && notesOpen[doneQ.id] && notes[doneQ.id]?.trim() ? notes[doneQ.id].trim() : undefined;
+    const card = doneQ && workspace ? { wid: workspace.id, qid: doneQ.id } : null;
+    if (card) { setPendingAnswer(card.wid, card.qid, { choice: TASK_DONE.letter, words }); markSentHere(card.wid, card.qid); }
+    const undone = () => { setMarked(null); if (card) clearPendingAnswer(card.wid, card.qid); };
+    const id = runUndoable("Telling the agent it's done", { label: "Done", toast, run: async (): Promise<unknown> => card ? answerQuestion({ workspaceId: card.wid, questionId: card.qid, choice: TASK_DONE.letter, ...(words ? { words } : {}), ...withImages(), action: "send" })
       : act({ agentId, briefId: b.id, move: "done", answerId: doneId }), success: "Marked done. The agent has it.",
-      failure: "Done not sent", open: () => deps.openAgent(agentId), onSuccess: () => setSent(true), onError: e => { setMarked(null); setError(errorText(e)); }, reconcile: e => { setMarked(null); reconcile(e); } }, () => setMarked(null), `done:${b.id}`, () => deps.endDone?.(agentId));
+      failure: "Done not sent", open: () => deps.openAgent(agentId), onSuccess: () => { setSent(true); if (card) confirmPendingAnswer(card.wid, card.qid); }, onError: e => { undone(); setError(errorText(e)); }, reconcile: e => { undone(); reconcile(e); } }, undone, `done:${b.id}`, () => deps.endDone?.(agentId));
     // The pill's Undo is this toast's Undo: it closes the toast (so nothing is sent) and reopens the card.
-    if (id !== null) deps.noteDone?.(agentId, () => { dismissToast(id); setMarked(null); });
+    if (id !== null) deps.noteDone?.(agentId, () => { dismissToast(id); undone(); });
   };
   // A merge move reads what its click merges ("Merge 3 PRs"), then "Merging…".
   // An add-reviewers move that names whom it asks reads "Add reviewers", "Requesting…", then "Requested"

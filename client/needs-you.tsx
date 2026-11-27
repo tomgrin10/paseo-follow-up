@@ -301,7 +301,9 @@ function QuestionAsk({ workspace: w, questionId, context, theme, compact, now, o
   const dismiss = useDismiss();
   const q = w.questions.find(x => x.id === questionId);
   if (!q) return null;
-  const state = meanwhile(w, q, pending);
+  // The open card's body says a failed send itself (Not sent · Retry, by the answer): the line above it stays on what
+  // the agent does, so the failure is said once (answering-is-optimistic renders).
+  const state = meanwhile(w, q, pending?.error ? null : pending);
   // "Q1 · title" (DESIGN.md): the chip leads so a long title wraps under itself, and the age stays on the right.
   const header = <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
     <View style={{ paddingTop: 2 }}><Icon name={questionState(q) === "stopped" ? "CirclePause" : q.need === "action" ? "Hand" : "MessageCircleQuestion"} size={compact ? 16 : 14} color={c.statusWarning} /></View>

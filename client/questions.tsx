@@ -242,7 +242,8 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
       onError: error => { failPendingAnswer(w.id, q.id, errorText(error)); refresh(); },
       // Answered or withdrawn elsewhere first: nothing to retry. Drop the unsent copy; the card shows the recorded answer.
       reconcile: e => { clearPendingAnswer(w.id, q.id); refresh(); notice(mootNote(e, free || isOther(answer)), toast); },
-      failure: `Answer to ${q.id} not sent`, open: () => openQuestion(w.id, q.id),
+      // Short, so a phone's toast shows it whole beside Retry and Open; the card says why.
+      failure: `${q.id} not sent`, open: () => openQuestion(w.id, q.id),
     });
     onClose?.(); onAnswered?.();
   };

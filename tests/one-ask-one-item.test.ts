@@ -148,7 +148,7 @@ test("one-done-button: the panel and the chat card draw one Done, and a brief's 
   assert.match(chat, /!done && d\.options\.map\(o => <OptionRow/, "the chat card draws no 'A Done' row beside its Done button");
   assert.match(chat, /doneMove \? \(\) => press\(doneMove\) : null/, "Ctrl+Enter sends Done on the chat card too");
   assert.match(chat, /shortcut=\{m === doneMove\}/, "the chat card's Done carries the Ctrl ⏎ hint");
-  assert.match(chat, /doneQ && workspace \? answerQuestion\(\{ workspaceId: workspace\.id, questionId: doneQ\.id, choice: TASK_DONE\.letter/, "Done answers the card, never a second message");
+  assert.match(chat, /const card = doneQ && workspace \? \{ wid: workspace\.id, qid: doneQ\.id \} : null;[\s\S]*card \? answerQuestion\(\{ workspaceId: card\.wid, questionId: card\.qid, choice: TASK_DONE\.letter/, "Done answers the card, never a second message");
 });
 
 test("one-ask-one-item: a card from before the fix closes on the next sync when the agent asked the same task itself", () => {
