@@ -26,11 +26,7 @@ you, in one place, ranked.
 
 It never merges, requests reviewers, archives, answers a question for you or wakes a resting agent on its own.
 
-## Install
-
-```sh
-paseo plugin install npm:paseo-follow-up
-```
+## Requirements
 
 You need Paseo 0.15 or later and Node 22+ on the machine Paseo runs on. A signed-in GitHub CLI there is optional and
 turns on the PR features. Then open Follow-up in Paseo's sidebar: a two-minute setup walks you through the rest.

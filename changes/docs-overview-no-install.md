@@ -1,0 +1,1 @@
+- The plugin listing keeps requirements and setup guidance without repeating installation instructions.
