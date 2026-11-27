@@ -19,7 +19,7 @@ import { HISTORY_FILTERS, QUESTION_ACTIONS } from "./your-questions";
 import { ONBOARDING_ACTIONS, ONBOARDING_STEPS, checksSchema, onboardingViewSchema } from "./onboarding";
 import { z } from "zod";
 import { HISTORY_KINDS, pageInput } from "./paged";
-import { batchGlanceSchema, prGlanceSchema, questionGlanceSchema } from "./history";
+import { batchGlanceSchema, prGlanceSchema, questionGlanceSchema, taskGlanceSchema, prActionGlanceSchema } from "./history";
 import { actionChangeSchema, dispatchActionSchema, dispatchInputSchema, dispatchRecordSchema, settingsChangeSchema } from "./dispatch";
 import { inboxRowSchema } from "./inbox";
 import { briefSchema } from "./brief";
@@ -61,11 +61,14 @@ const activityRowSchema = z.object({ key: z.string(), at: z.string(), icon: z.st
 export const activityRpc = defineRpc({ name: "follow.activity", input: z.object({ workspaceId: idSchema, tab: z.enum(["timeline", "questions"]), query: z.string().max(200).optional(), ...pageInput }),
   output: z.object({ tab: z.enum(["timeline", "questions"]).optional(), timeline: z.array(z.object({ row: activityRowSchema, hit: hitSchema })), questions: z.array(z.object({ question: questionSchema, hit: hitSchema })), offset: z.number(), total: z.number(), counts: z.object({ timeline: z.number(), questions: z.number() }), all: z.number(), error: z.string().nullable() }) });
 /** `prWorkflow` (1.4.0-beta.14): how this workspace ships PRs (graphite | github) and its review-fix command (null: built-in steps). */
-export const agentStatusRpc = defineRpc({ name: "follow.agent-status", input: z.strictObject({ agentId: idSchema, detail: z.enum(["summary", "full"]).optional(), history: z.enum(HISTORY_KINDS).optional(), ...pageInput }), output: workspaceSchema.extend({
-    /** Live items whole; the newest few finished ones at a glance (`glance: true`), whole on a history page of their kind (shared/history.ts). */
+export const agentStatusRpc = defineRpc({ name: "follow.agent-status", input: z.strictObject({ agentId: idSchema, detail: z.enum(["summary", "full"]).optional(), history: z.enum(HISTORY_KINDS).optional(), live: z.enum(HISTORY_KINDS).optional(), ...pageInput }).refine(input => !(input.history && input.live), { message: "Choose history or live, not both.", path: ["live"] }), output: workspaceSchema.extend({
+    /** Live items whole while they fit, otherwise glances with live evidence page pointers; finished ones at a glance (`glance: true`), whole on a history page of their kind (shared/history.ts). */
+    prActions: z.array(z.union([workspaceSchema.shape.prActions.unwrap().element, prActionGlanceSchema])),
+    obligations: z.array(z.union([workspaceSchema.shape.obligations.element, taskGlanceSchema])),
     prs: z.array(z.union([prSchema, prGlanceSchema])), questions: z.array(z.union([questionSchema, questionGlanceSchema])), batches: z.array(z.union([batchSchema, batchGlanceSchema])),
     /** The live PRs' keys, and how many the inventory ever considered. */
     inventory: workspaceSchema.shape.inventory.unwrap().unwrap().extend({ candidatesTotal: z.number().optional() }).nullable().optional(),
+    /** Live evidence: whole records shown, and pointers to pages of records represented by glances. */ live: z.record(z.string(), z.object({ total: z.number(), offset: z.number(), shown: z.number(), more: z.number(), hint: z.string().nullable() })).optional(),
     /** Each finished kind: how many, which were shown, how to page the rest (shared/history.ts agentView). */ history: z.record(z.string(), z.object({ total: z.number(), offset: z.number(), shown: z.number(), more: z.number(), hint: z.string().nullable() })).optional(), /** The caller's own ask the developer dismissed (still standing): don't raise it again. */ dismissedAsk: z.object({ ask: z.string(), kind: z.string(), at: z.string() }).nullable().optional(), prWorkflow: z.object({ mode: z.enum(["graphite", "github"]), reviewFix: z.string().nullable() }).optional(), /** The next message: recipient, tasks, exact text, and when and why it goes (Preview's agent form). */ nextMessageInfo: z.object({ to: z.string(), tasks: z.array(z.string()), text: z.string(), reason: z.string(), eta: z.string().nullable() }).nullable().optional(),
   /** Home's Sending row for this workspace (shared/sending.ts): queued or sent, when and why, and whether Send now (send_repairs) would go through. */
   sending: sendingSchema.nullable().optional() }) });

@@ -1,0 +1,1 @@
+- Recent workspace history stays visible even when current tasks and questions carry long notes. Complete evidence stays available a page at a time.

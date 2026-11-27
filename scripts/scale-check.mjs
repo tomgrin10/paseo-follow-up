@@ -16,6 +16,7 @@
 // the paseo CLI is missing, except under CI. Run it inside a memory-capped scope, e.g.
 //   systemd-run --user --scope -p MemoryMax=4G node scripts/scale-check.mjs
 import assert from "node:assert/strict";
+import { compact } from "../server/mcp.mjs";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, mkdir, appendFile, readFile, writeFile, readdir, rm } from "node:fs/promises";
@@ -403,7 +404,9 @@ try {
         ["follow.activity", "search", { workspaceId: ws, tab: "questions", query: "the", limit: 25 }],
         ["follow.agent-status", "workspace_status summary", { agentId: created[0].agentId, detail: "summary" }], ["follow.agent-status", "workspace_status full", { agentId: created[0].agentId, detail: "full" }]]) {
         const out = await client.invokePluginRpc("follow-up", method, input).catch(e => ({ error: String(e?.message ?? e) }));
-        replies.push({ method, label, bytes: JSON.stringify(out ?? null).length, rows: method === "follow.activity" ? (out?.timeline?.length ?? 0) + (out?.questions?.length ?? 0) : out?.workspace?.questions?.length ?? null, total: out?.total ?? null, error: out?.error ?? null });
+        // Match the agent transport: the summary is compacted after the RPC, full is sent as-is.
+        const sent = method === "follow.agent-status" && input.detail !== "full" && out && !out.error ? compact("workspace_status", input, out) : out;
+        replies.push({ method, label, bytes: JSON.stringify(sent ?? null).length, rows: method === "follow.activity" ? (out?.timeline?.length ?? 0) + (out?.questions?.length ?? 0) : out?.workspace?.questions?.length ?? null, total: out?.total ?? null, error: out?.error ?? null });
       }
       worker.pagedReplies = pagedReplyVerdict(replies);
     }
