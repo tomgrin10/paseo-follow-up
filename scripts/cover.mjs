@@ -58,7 +58,7 @@ const icon = `data:image/svg+xml;base64,${readFileSync(new URL("../assets/icon.s
 const headline = h => { const [a, b = ""] = h.split("|"); return `<h1>${esc(a)}${b ? ` <em>${esc(b)}</em>` : ""}</h1>`; };
 
 const SHEET = 1440; // CSS px: the feature slides' sheet
-const COVER_SHEET = 1600; // CSS px: the cover's sheet, Home's Follow-up pane (960 px wide) shown at 5/3
+const COVER_SHEET = 1320; // CSS px: keep three extra status rows readable below Needs you
 const PHONE_SHEET = 760;
 const STRETCH = 1.15; // the most a source is enlarged past its own pixels
 const SIDE = 80; // the headline keeps this clear of each edge
@@ -72,7 +72,11 @@ const css = `
   .brand { display: flex; align-items: center; gap: 14px; font-size: 30px; font-weight: 600; letter-spacing: -0.01em; }
   .brand img { width: 52px; height: 52px; border-radius: 12px; }
   h1 { margin-top: 26px; font: 400 140px/1.04 "Instrument Serif", Georgia, serif; letter-spacing: -0.02em; white-space: nowrap; }
-  .cover h1 { font-size: 156px; }
+  body.cover { padding-top: 20px; }
+  .cover h1 { margin-top: 8px; font-size: 156px; }
+  .cover .line { margin-top: 12px; }
+  .cover .stage { margin-top: 16px; }
+  .cover .sheet { min-height: calc(100% + 32px); border-radius: 20px 20px 0 0; }
   h1 em { font-style: italic; color: var(--accent); }
   .line { margin-top: 30px; font-size: 34px; line-height: 1.3; font-weight: 500; color: var(--muted); white-space: nowrap; }
   .stage { margin-top: 56px; flex: 1 0 0; width: 100%; display: flex; justify-content: center; align-items: flex-start; }
