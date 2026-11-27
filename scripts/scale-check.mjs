@@ -337,11 +337,19 @@ try {
       }
     }
     const t0 = await ticks(); const started = Date.now(); const requestsBefore = counter.snapshot();
-    // An open client's workspaces feed through the idle window (feedIdleVerdict, read-stamps-never-count): with
-    // nothing on screen changing it carries read stamps alone, at most once a minute. Its first answer is the full list.
-    const feedEvents = []; const feedAbort = new AbortController();
-    const offFeed = client.subscribeRawMessages(m => { const e = m?.type === "plugin.rpc.event" ? m.payload?.event : null; if (e && Array.isArray(e.workspaces) && "revision" in e) feedEvents.push({ at: Date.now(), bytes: JSON.stringify(e).length, full: e.full === true }); });
-    client.observePluginRpc("follow-up", "follow.workspaces-feed", {}, { signal: feedAbort.signal });
+    // An open client's list through the idle window (feedIdleVerdict, read-stamps-never-count): with nothing on screen
+    // changing, it carries read stamps alone. On a host with plugin subscriptions (Paseo 0.16+) it's the workspaces
+    // feed, judged whole (its first answer is the full list); on 0.15 (CI's floor) it's the client's poll, follow.list
+    // with its revision every 15 s, judged on the entries it resends (stamps ride every poll there, by design).
+    const feedEvents = []; const feedAbort = new AbortController(); let feedMode = "feed"; let offFeed = null; let listSince; let nextListPoll = Date.now();
+    const toPoll = () => { feedMode = "poll"; nextListPoll = Date.now(); if (typeof offFeed === "function") offFeed(); offFeed = null; };
+    try {
+      if (client.lastServerInfoMessage?.features?.pluginSubscriptions !== true) throw new Error("no plugin subscriptions");
+      offFeed = client.subscribeRawMessages(m => { const e = m?.type === "plugin.rpc.event" ? m.payload?.event : null; if (e && Array.isArray(e.workspaces) && "revision" in e) feedEvents.push({ at: Date.now(), bytes: JSON.stringify(e).length, full: e.full === true }); });
+      client.observePluginRpc("follow-up", "follow.workspaces-feed", {}, { signal: feedAbort.signal }).ready?.catch?.(() => { if (!feedAbort.signal.aborted) toPoll(); });
+    } catch { toPoll(); }
+    const pollList = () => { if (feedMode !== "poll" || Date.now() < nextListPoll) return; nextListPoll += 15_000;
+      void client.invokePluginRpc("follow-up", "follow.list", listSince === undefined ? {} : { since: listSince }).then(out => { if (out?.revision !== undefined) listSince = out.revision; feedEvents.push({ at: Date.now(), bytes: JSON.stringify([out?.workspaces ?? [], out?.removed ?? []]).length, readsBytes: JSON.stringify(out?.reads ?? {}).length, full: out?.full !== false }); }, () => undefined); };
     const idleSamples = [await rss()];
     // --live-mix <turns/min>,<rpcs/min>: the idle window carries live's load instead of none: awake agents end turns
     // with live-sized timelines (turn hooks read their tails) and an app reads the usual RPCs. Compare with a plain run.
@@ -357,6 +365,7 @@ try {
     const appBurst = burst ? { perSecond: burst[0], seconds: burst[1], startSample: 0, endSample: 0, calls: 0, failed: 0, bytes: {} } : null;
     while (Date.now() - started < IDLE_MS) {
       await sleep(500); idleSamples.push(await rss());
+      pollList();
       if (appBurst && Date.now() >= nextBurst && Date.now() < burstAt + burst[1] * 1000) {
         if (!appBurst.startSample) appBurst.startSample = idleSamples.length;
         appBurst.endSample = idleSamples.length;
@@ -370,7 +379,7 @@ try {
     const requests = ratePerMinute(requestsBefore, counter.snapshot(), "follow-up-worker", Date.now() - started);
     feedAbort.abort(); if (typeof offFeed === "function") offFeed();
     // Live load (--live-mix, --app-burst) changes workspaces on purpose: then the feed is reported, not judged.
-    const feed = { ...feedIdleVerdict(feedEvents.slice(feedEvents.findIndex(e => e.full) + 1), Date.now() - started), judged: !mix && !burst };
+    const feed = { mode: feedMode, ...feedIdleVerdict(feedEvents.slice(feedEvents.findIndex(e => e.full) + 1), Date.now() - started), readsKb: Math.round(feedEvents.reduce((a, e) => a + (e.readsBytes ?? 0), 0) / 1024), judged: !mix && !burst };
     const cpuPct = Math.round(((await ticks()) - t0) / hz / ((Date.now() - started) / 1000) * 1000) / 10;
     // The worker's own breakdown (heap vs native), from the governor's sample in follow.usage.
     const memory = async () => { try { return (await client.invokePluginRpc("follow-up", "follow.usage", {}))?.resources?.worker ?? null; } catch { return null; } };
@@ -420,8 +429,8 @@ try {
   if (worker?.pagedReplies?.over.length) { console.error(`A paged read outgrew its page: ${worker.pagedReplies.over.join("; ")}`); process.exitCode = 1; }
   if (worker?.pagedReplies?.replies.some(r => r.error)) { console.error(`A paged read failed: ${worker.pagedReplies.replies.filter(r => r.error).map(r => `${r.method} ${r.label}: ${r.error}`).join("; ")}`); process.exitCode = 1; }
   // Read stamps never count: enforced even with --budgets-report-only (scripts/scale-budget.mjs FEED_IDLE_BUDGET_KB).
-  if (worker?.feed?.judged && worker.feed.over) { console.error(`The workspaces feed sent ${worker.feed.kbPerMin} KB a minute while nothing changed (${worker.feed.pushes} pushes, largest ${worker.feed.maxPushKb} KB), over ${worker.feed.budgetKb} KB: something that moves on every read is in the list form (read-stamps-never-count)`); process.exitCode = 1; }
-  if (worker?.feed && !worker.feed.fullPushes) { console.error("The workspaces feed never answered in the idle window"); process.exitCode = 1; }
+  if (worker?.feed?.judged && worker.feed.over) { console.error(`The ${worker.feed.mode === "poll" ? "list poll (follow.list)" : "workspaces feed"} sent ${worker.feed.kbPerMin} KB a minute while nothing changed (${worker.feed.pushes} pushes, largest ${worker.feed.maxPushKb} KB), over ${worker.feed.budgetKb} KB: something that moves on every read is in the list form (read-stamps-never-count)`); process.exitCode = 1; }
+  if (worker?.feed && !worker.feed.fullPushes) { console.error(`The ${worker.feed.mode === "poll" ? "list poll" : "workspaces feed"} never answered in the idle window`); process.exitCode = 1; }
   // Derived and enforced even with --budgets-report-only (scripts/scale-budget.mjs BURST_RETURN_BUDGET_MB).
   if (worker?.cycles?.over) { console.error(`Worker RSS stayed at ${worker.cycles.lastMb} MB (median) in the gap after the last burst, over ${budget.burstReturnMb} MB: memory a burst grows didn't come back (gaps: ${worker.cycles.gapMediansMb.join(", ")} MB)`); process.exitCode = 1; }
   if (budget.rssMb && worker && worker.lifetimePeakRssMb > budget.rssMb) { over(`Worker RSS peaked at ${worker.lifetimePeakRssMb} MB (idle peak ${worker.idlePeakRssMb}), over ${budget.rssMb} MB`); }

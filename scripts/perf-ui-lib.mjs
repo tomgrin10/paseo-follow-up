@@ -4,6 +4,10 @@ import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { harness } from "./harness.mjs";
+
+// The callers take the slot first; this is re-entrant (HARNESS_SLOT_HELD), so a direct import still queues.
+await harness();
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const PROFILES = {

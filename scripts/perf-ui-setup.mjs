@@ -4,7 +4,7 @@
 // Writes { origin, serverId, home, root, created } to <info.json> once the worker has loaded the seed; holds until SIGTERM.
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, readFile, writeFile, readdir, chmod } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, readdir, chmod, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:net";
@@ -73,4 +73,6 @@ for (let i = 0; i < 240; i++) { const r = await client.invokePluginRpc("follow-u
 const serverId = (await readFile(join(home, "server-id"), "utf8")).trim();
 await writeFile(infoPath, JSON.stringify({ origin: `http://127.0.0.1:${port}`, port, serverId, home, root, created }));
 console.log(`ready ${infoPath} http://127.0.0.1:${port}`);
-await new Promise(() => {});
+// Held until SIGTERM or SIGINT; then the daemon, the fake GitHub and the temp root go.
+await new Promise(resolve => { process.once("SIGTERM", resolve); process.once("SIGINT", resolve); });
+await stop().catch(() => {}); await Promise.resolve().then(() => github.close()).catch(() => {}); await rm(root, { recursive: true, force: true }).catch(() => {});

@@ -1736,7 +1736,8 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    GitHub probe moved `observedAt`, so the feed resent whole workspaces for nothing on screen, 342 KB every ~15 s (the
    153-PR workspace's entry alone 317 KB) and 2 MB about once a minute; an open panel spent 1.6-2.4 s of script a
    minute on a phone (6x CPU) re-rendering it, and a tap that landed on a push took twice as long. Guarded by
-   `tests/read-stamps.test.ts` and `test:scale`'s idle feed bytes (`feedIdleVerdict`, `FEED_IDLE_BUDGET_KB`).
+   `tests/read-stamps.test.ts` and `test:scale`'s idle feed bytes (`feedIdleVerdict`, `FEED_IDLE_BUDGET_KB`: the
+   workspaces feed on a host with plugin subscriptions, else the entries the client's 15 s `follow.list` poll resends).
 
 135. **One workspace view** (`one-workspace-view`). Home's detail pane, the right side panel (`follow-up`) and the
    main-area tab (`follow-up-view`) draw one `WorkspaceView` (`client/panel.tsx`), its layout from its own width only
