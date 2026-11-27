@@ -353,3 +353,10 @@ export function raisedNeeds(file: Pick<QueueFile, "log" | "sweeps" | "dismissed"
     .filter(c => !file.dismissed.some(d => d.key === c.key && d.at >= c.at))
     .map(c => ({ key: c.key, title: c.title, url: c.url, priority: c.priority, priorityBefore: c.priorityBefore, due: c.due, at: c.at }));
 }
+
+/**
+ * Whether the home feed's queue revision moved since the pane's read (one-read-per-key-at-mount): the first revision
+ * the feed brings after the pane mounted is not a change (the pane's own read is newer than "none yet"), so Home's first
+ * open reads the queue once, not again when the feed arrives.
+ */
+export const queueMoved = (seen: string, next: string): boolean => seen !== "" && seen !== next;

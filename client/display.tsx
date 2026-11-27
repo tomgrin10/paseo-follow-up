@@ -8,6 +8,7 @@ import { isMac, searchShortcutOf, searchShortcutOptions, type SearchShortcut , i
 import { useEffect } from "react";
 import { ActivityIndicator, Platform, View } from "react-native";
 import { Text } from "./text";
+import { sharedRead } from "./shared-read";
 import { DEFAULT_OPEN_WORKSPACE_ON, displayPreferences, displayRpc, trustCountText, type OpenWorkspaceOn } from "../shared/display";
 import { sidebarVisibility } from "./sidebar-visibility";
 import { appVisible, onVisible } from "./visibility";
@@ -149,7 +150,7 @@ export function contributeDisplay(client: PluginClientContext, item: PluginSideb
     pending = true;
     const currentGeneration = generation;
     try {
-      const result = await client.rpc(displayRpc.read, {});
+      const result = await sharedRead("settings.display.read", () => client.rpc(displayRpc.read, {}));
       if (generation === currentGeneration) apply(result);
     } catch {
       // Retain the last valid preference through temporary disconnects.

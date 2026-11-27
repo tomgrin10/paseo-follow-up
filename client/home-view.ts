@@ -3,10 +3,11 @@ import type { PluginClientContext } from "@getpaseo/plugin/client";
 import type { ImageUpload } from "../shared/images";
 import { contextAskRpc, contextListRpc, questionActionRpc, dispatchRecordsRpc, displayFeed, homeFeed, queueNeedsSchema, overseerAskRpc, overseerRestartRpc, overseerStartRpc, overseerStatusRpc, prioritiesRpc, prStatsSettingsRpc, rankNowRpc, rankStatusRpc, usageRpc } from "../shared/contracts";
 import { openFeed } from "./feeds";
+import { sharedRead, USAGE_SHARED_MS } from "./shared-read";
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type { Priority } from "../shared/priorities";
 import { DEFAULT_SORT, isSortMode, type SortMode } from "../shared/sort";
-import { homeSortSync, writeDisplay } from "../shared/display";
+import { displayRpc, homeSortSync, writeDisplay } from "../shared/display";
 import { DEFAULT_HOME_VIEW, parseHomeView, type HomeView } from "../shared/home-arrange";
 import type { AgentLite } from "../shared/search";
 import { NO_USAGE, USAGE_POLL_MS, type Usage } from "../shared/usage";
@@ -47,7 +48,8 @@ export function createHomeExtras(client: PluginClientContext) {
   let view: HomeView = (() => { try { const v = storage.get(VIEW_KEY); return v ? parseHomeView(JSON.parse(v)) : DEFAULT_HOME_VIEW; } catch { return DEFAULT_HOME_VIEW; } })();
   const keepView = (next: HomeView) => { view = next; storage.set(VIEW_KEY, JSON.stringify(next)); };
   const sync = homeSortSync(client, () => sort, next => { sort = next; storage.set(SORT_KEY, next); }, { current: () => view, adopt: keepView });
-  const writeSort = sync.write, readSort = sync.read;
+  // The order's read joins the other modules' Display read at mount (sharedRead); a write never goes through it.
+  const writeSort = sync.write, readSort = () => sharedRead("settings.display.read", () => client.rpc(displayRpc.read, {})).then(doc => sync.apply(doc as { status: string; values?: unknown }));
   // Ranker runs this client started ("Re-rank now"), resolved when the feed says the run is over.
   const rankWaiters = new Set<() => void>();
   let priorities: Priority[] = [];
@@ -133,7 +135,7 @@ export function createHomeExtras(client: PluginClientContext) {
     pollUsage(),
   ]);
   const pollUsage = () => poll(USAGE_POLL_MS, async () => {
-    const next = await client.rpc(usageRpc, {});
+    const next = await sharedRead("follow.usage", () => client.rpc(usageRpc, {}), USAGE_SHARED_MS);
     if (JSON.stringify(next) === JSON.stringify(usage)) return false;
     usage = next; return true;
   });
@@ -167,8 +169,9 @@ export function createHomeExtras(client: PluginClientContext) {
   }) : null;
   const stopFeeds = () => { home?.stop(); display?.stop(); for (const off of [homePolls, sortPolls, usagePolls]) off?.(); homePolls = sortPolls = usagePolls = null; };
   if (home) {
-    void readSort().then(changed => { if (changed) emit(); }).catch(() => undefined);
-    void client.rpc(usageRpc, {}).then(next => { usage = { ...next, accounts: usage.accounts.length ? usage.accounts : next.accounts }; emit(); }).catch(() => undefined);
+    // The Display feed's first event is the document (ValueFeed sends the current value first), so the order and the
+    // old-choice migration apply from it (sync.apply): no read of its own at open (one-read-per-key-at-mount).
+    void sharedRead("follow.usage", () => client.rpc(usageRpc, {}), USAGE_SHARED_MS).then(next => { usage = { ...next, accounts: usage.accounts.length ? usage.accounts : next.accounts }; emit(); }).catch(() => undefined);
   } else {
     homePolls = pollHome(); sortPolls = pollSort();
     // 0.15 (no home feed): whether Home shows the PR stats icon, read once when the app starts (Settings' read; no poll).
