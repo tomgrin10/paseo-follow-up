@@ -255,8 +255,9 @@ PLAYWRIGHT_CORE=<playwright-core dir> CHROMIUM=<chromium binary> ~/paseo-harness
   the Sending and Running groups. `scripts/cover.mjs` then composes the 16:10 slides (1920×1200 at 2×,
   `follow-up-slide-<n>-<name>.png`): the cover carries the headline
   and the purpose line (`--headline "a|b"`, `--subline`, or `COVER_HEADLINE`/`COVER_SUBLINE`), each other slide a
-  short feature headline, one plain line and its crop filling a white sheet of one width (a tall one runs off the
-  slide's bottom), to read on Paseo's 288×180 tiles. `paseo-plugin.json`
+  short feature headline, one plain line and its crop filling a sheet of one width (a tall one runs off the
+  slide's bottom), to read on Paseo's 288×180 tiles. Every slide is dark: its screen in Follow-up's dark theme on a
+  violet-black ground with a faint grid. `paseo-plugin.json`
   `media` lists the slides, cover first, so they ship in the npm package; the demo video sits right after the cover as an absolute jsDelivr URL pinned to a commit, because the npm package leaves the video out (a relative path would point into it), and the README links the video's poster; nothing at runtime reads `docs/screenshots/`, and the README, the guide and the release notes load their images from GitHub, so `package.json` `files` ships the slides (`follow-up-slide-*.png`) and nothing else from that folder. Everything goes through `harness-slot` and is
   shown as the latest stable tag. Re-run it whenever Home's rows, the panel's copy or the fixture change, then read
   every image, and each slide at 288×180, before committing.
@@ -287,7 +288,7 @@ PLAYWRIGHT_CORE=<playwright-core dir> CHROMIUM=<chromium binary> ~/paseo-harness
   caption), eased over 1.6 s, with an eased pointer, click rings and captions that animate word by word. Two steps,
   both through `harness-slot`: `npm run video:v2:take -- --as-version <stable>` (the bare app at 2560×1600 and
   `take.json`: pointer path, presses, beats, the Follow-up pane's box and the shots, into `video/public/take/`), then
-  `npm --prefix video ci && (cd video && node render.mjs)` (writes `follow-up-demo-v2.mp4`, `-poster.png`, `.webp`,
+  `npm --prefix video ci && (cd video && node render.mjs)` (renders in 90-frame chunks, each a fresh browser with a timeout and retries, because one long render livelocks on a busy VM; writes `follow-up-demo-v2.mp4`, `-poster.png`, `.webp`,
   a review frame every second and `contact-sheet.png` to `video/out/`; `node stills.mjs <seconds…>` renders single
   frames, `npx remotion studio src/index.ts` previews). Needs `PLAYWRIGHT_CORE` and `CHROMIUM` (the render uses
   `CHROMIUM` too) and, for the take, `FFMPEG` (video/'s `ffmpeg-static` works). The committed copies sit beside v1's

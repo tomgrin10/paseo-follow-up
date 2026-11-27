@@ -63,7 +63,7 @@ const INIT = () => {
 const MODEL_LABEL = () => {
   const swap = root => {
     const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    for (let n = walk.nextNode(); n; n = walk.nextNode()) if (/Followup-fixture/i.test(n.data)) n.data = n.data.replace(/Followup-fixture · Fixture|Followup-fixture/gi, "Claude · Opus");
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) if (/Followup-fixture|Follow-up test agent/i.test(n.data)) n.data = n.data.replace(/Follow-up test agent · \w+|Follow-up test agent|Followup-fixture · Fixture|Followup-fixture/gi, "Claude · Opus");
   };
   const start = () => { swap(document.body); new MutationObserver(ms => { for (const m of ms) swap(m.target.nodeType === 3 ? m.target.parentNode : m.target); }).observe(document.body, { subtree: true, childList: true, characterData: true }); };
   if (document.body) start(); else addEventListener("DOMContentLoaded", start, { once: true });
@@ -198,7 +198,7 @@ try {
 
   const { chromium } = createRequire(join(process.env.PLAYWRIGHT_CORE, "package.json"))("playwright-core");
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM, headless: true });
-  const context = await browser.newContext({ viewport: VIEW, deviceScaleFactor: SCALE, colorScheme: "light", timezoneId: "UTC", locale: "en-US" });
+  const context = await browser.newContext({ viewport: VIEW, deviceScaleFactor: SCALE, colorScheme: "dark", timezoneId: "UTC", locale: "en-US" });
   for (const script of [INIT, MODEL_LABEL, HIDE_HARNESS_PROJECT]) await context.addInitScript(script);
   const page = await context.newPage();
   page.setDefaultTimeout(30000);
@@ -296,6 +296,9 @@ try {
   await fs.writeFile(join(home, "fixture-gate-overseer"), "");
   const answer = visible(page.getByText(/^Billing retries is waiting on you/));
   await answer.waitFor({ timeout: 30000 });
+  // The Overseer's header names its provider: the fixture's test label must read as a real model on screen.
+  const shown = await page.evaluate(() => document.body.innerText);
+  if (/test agent|Followup-fixture|Claude · Opus · /i.test(shown)) throw new Error("the Overseer's header still shows the fixture provider's label");
   await frame(visible(page.getByText(QUESTION)), answer);
   await glide(page, (await answer.boundingBox()).x + 120, (await answer.boundingBox()).y + 110, 900);
   await rest(page, 3000);

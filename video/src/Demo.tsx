@@ -14,12 +14,13 @@ export type Take = {
 };
 
 // ---------- the stage ----------
-// 1920×1200. The app floats as a window on a dark, slowly moving field; the camera moves the whole stage, the caption
+// 1920×1200. The app (in its dark theme) floats as a window on the slides' ground: violet-black, lit by slowly moving
+// lilac light, with the slides' faint 48px grid fading out toward the edges; the camera moves the whole stage, the caption
 // stays put in screen space under it.
 const W = 1920, H = 1200;
 // The window fills most of the frame (a thin margin of field around it) and the caption sits in the band below it.
 const WIN = { x: 120, y: 24, w: 1680, h: 1050 };
-const INK = "#F4F2F7", LILAC = "#B79CF0", FIELD = "#141318";
+const INK = "#F2EFF8", LILAC = "#B79CF0", FIELD = "#0B0A10";
 
 const CAPTIONS: { beat: string; words: string; accent: string }[] = [
   { beat: "home", words: "Every agent, one inbox.", accent: "one inbox." },
@@ -87,9 +88,15 @@ const Field = ({ t }: { t: number }) => {
   const bx = 80 + Math.cos(t * 0.31) * 7, by = 88 + Math.sin(t * 0.24) * 5;
   return (
     <AbsoluteFill style={{
-      background: `radial-gradient(60% 55% at ${ax}% ${ay}%, rgba(183,156,240,0.20), rgba(183,156,240,0) 70%),
-        radial-gradient(55% 50% at ${bx}% ${by}%, rgba(120,140,255,0.13), rgba(120,140,255,0) 70%), ${FIELD}`,
-    }} />
+      background: `radial-gradient(60% 55% at ${ax}% ${ay}%, rgba(183,156,240,0.17), rgba(183,156,240,0) 70%),
+        radial-gradient(55% 50% at ${bx}% ${by}%, rgba(122,85,214,0.16), rgba(122,85,214,0) 70%), ${FIELD}`,
+    }}>
+      <AbsoluteFill style={{
+        backgroundImage: "linear-gradient(rgba(183,156,240,.075) 1px, transparent 1px), linear-gradient(90deg, rgba(183,156,240,.075) 1px, transparent 1px)",
+        backgroundSize: "48px 48px", backgroundPosition: "center -1px",
+        WebkitMaskImage: "radial-gradient(75% 70% at 50% 45%, #000 35%, transparent 85%)",
+      }} />
+    </AbsoluteFill>
   );
 };
 
@@ -162,7 +169,7 @@ const Caption = ({ take, t, zoom, fps }: { take: Take; t: number; zoom: number; 
   return (
     <AbsoluteFill style={{ pointerEvents: "none" }}>
       <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 300, opacity: scrim,
-        background: "linear-gradient(to top, rgba(14,13,18,0.92) 0%, rgba(14,13,18,0.75) 40%, rgba(14,13,18,0) 100%)" }} />
+        background: "linear-gradient(to top, rgba(11,10,16,0.94) 0%, rgba(11,10,16,0.78) 40%, rgba(11,10,16,0) 100%)" }} />
       <div style={{ position: "absolute", left: 0, right: 0, bottom: 22, height: 92, display: "flex", alignItems: "center", justifyContent: "center", gap: 26 }}>
         <div style={{ transform: `scale(${pop}) rotate(${(1 - pop) * -40}deg)` }}><Mark size={66} /></div>
         <div style={{ fontFamily, fontSize: 56, fontWeight: 600, letterSpacing: "-0.028em", color: INK, whiteSpace: "nowrap", display: "flex", gap: "0.26em" }}>
@@ -195,7 +202,7 @@ export const Demo = ({ take }: { take: Take | null }) => {
       <AbsoluteFill style={{ transformOrigin: "0 0", transform: `translate(${W / 2}px, ${H / 2}px) scale(${cam.s}) translate(${-cam.x}px, ${-cam.y}px)` }}>
         <Field t={t} />
         <div style={{ position: "absolute", left: WIN.x, top: WIN.y, width: WIN.w, height: WIN.h, borderRadius: 18, overflow: "hidden",
-          boxShadow: `0 ${40 * shadow}px ${120 * shadow}px rgba(0,0,0,${0.55 * shadow}), 0 0 0 1px rgba(255,255,255,0.09)`, background: "#fff" }}>
+          boxShadow: `0 ${40 * shadow}px ${120 * shadow}px rgba(0,0,0,${0.7 * shadow}), 0 0 0 1px rgba(183,156,240,0.22)`, background: "#1b1c1c" }}>
           <OffthreadVideo src={staticFile("take/raw.mp4")} style={video} muted />
           {loopFade > 0 && (
             <Freeze frame={0}><div style={{ ...video, opacity: loopFade }}><OffthreadVideo src={staticFile("take/raw.mp4")} style={video} muted /></div></Freeze>
