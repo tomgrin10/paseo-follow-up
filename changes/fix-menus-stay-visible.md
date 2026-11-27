@@ -1,0 +1,1 @@
+- Menus and popovers stay visible above the sidebar footer and other app chrome, flip at window edges, and scroll when space is tight.

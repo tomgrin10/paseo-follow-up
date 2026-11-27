@@ -401,3 +401,32 @@ checks every search preset and modified Catch up/Home key, and lists collisions 
 Run it when Paseo ships, then review and refresh the snapshot union in `shared/search-key.ts`. A missing or
 unreadable bundle fails the check rather than claiming compatibility. There is no schedule or CI network check.
 Home’s search chip sets its hover title on its DOM node because React Native Web drops the Text title prop.
+
+### Floating menus and popovers
+
+Invariant 134 (`menus-stay-visible`): `client/floating-surface.tsx` is the shared overlay for row menus (including
+panel More), sort, repository review choices, Catch up's keys, Later and More context. `shared/floating.ts` places
+it in viewport coordinates, flips at edges, shifts it inside the visual viewport (including keyboard/zoom offsets),
+and limits its width and scrollable height. An offscreen anchor still produces an onscreen menu.
+
+The old row overlay measured a fixed containing block, not the visible sidebar slot. The installed host renders
+its footer after `SidebarViewSlot` as a sibling; Vitals contributes a normal footer row with no elevated z-index.
+A transformed ancestor changes
+that containing block, and the host sidebar can clip its descendants and paint its footer above them. A local z-index
+cannot escape either boundary. The shared React Native Modal portals to the document body on web, retaining plugin
+context and drawing above host chrome on sidebar, panel, Home and main tabs. The probe remains with the opener and
+is remeasured on window/visual viewport resize, opener resize and captured scroll; listeners and observers exist only while open.
+Each popup links to its opener probe (`floatingScopes`), so Catch up keeps its scoped More context shortcuts across
+the portal without claiming another surface's popup. A hidden opener closes its popup. Native uses the same Modal
+and its own scroller, outside a host sheet's gesture context. Host-owned modals/popovers
+and inline sheet bodies keep the host's positioning. Use this shared component for future custom popovers.
+
+The larger workspace view (`client/large.tsx`) receives the same `HomeSources` as the panel, so its existing shared
+More menu is available and uses the same bounded portal on the main tab.
+
+Web Escape is handled on keydown. React Native Web's modal keyup callback is disabled so the same Escape cannot
+back out of a row confirmation and then close its restored menu. Native hardware Back still closes the modal.
+
+Keys help uses `modal={false}`: it stays a nonmodal ARIA dialog so Home's keyboard walk keeps working. Without a
+public context-preserving nonmodal portal, it is clamped to the intersection of its pane and the visual viewport
+and scrolls there, instead of drawing into host chrome. Action menus and popovers retain the modal portal.

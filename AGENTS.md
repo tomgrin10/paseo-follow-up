@@ -1650,6 +1650,14 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    `tests/brief-timeline.test.ts`. The unchecked append predates 2.6.0-beta.1; that beta added the provider turn-end
    check path, but no evidence ties that path to the observed append failures.
 
+134. **Menus stay visible** (`menus-stay-visible`). Every custom menu and popover uses `FloatingSurface`:
+   a context-preserving React Native modal portal above host chrome, with one placement function that flips or shifts
+   within the visual viewport and caps the width and scrollable height. Nonmodal keys help is instead bounded to
+   its visible pane so the list behind it keeps its keys. The opener stays in its surface; resize and
+   scroll remeasure it only while open. No menu relies on a plugin's local z-index or its fixed overlay's rectangle.
+   On the sidebar, that rectangle could include the host footer while the host clipped and painted over the menu.
+   Guarded by `tests/floating-surface.test.ts` and `scripts/screenshots.mjs --only menu-bounds`.
+
 ## Bugs
 
 Every bug is fixed for its whole class:

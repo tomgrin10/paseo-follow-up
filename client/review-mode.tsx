@@ -1,3 +1,4 @@
+import { FloatingSurface } from "./floating-surface";
 import { useState } from "react";
 import { View } from "react-native";
 import { Pressable, Text } from "./text";
@@ -85,13 +86,13 @@ export function ReviewModeRow({ repo, value, theme, compact, busy, onChange }: {
           <Text numberOfLines={1} style={{ color: c.foreground, fontSize: compact ? 15 : 14 }}>{REVIEW_MODE_LABELS[value].label}</Text>
           <Icon name="ChevronDown" size={compact ? 16 : 12} color={c.foregroundMuted} />
         </Pressable>
-        {open && <View accessibilityRole="menu" accessibilityLabel={`Review for ${repo}`} style={{ position: "absolute", top: compact ? 50 : 38, ...(compact ? { left: 0, width: 264 } : { right: 0, width: 340 }), paddingVertical: 4,
+        {open && <FloatingSurface role="menu" label={`Review for ${repo}`} width={compact ? 264 : 340} onClose={() => setOpen(false)} style={{ paddingVertical: 4,
           borderRadius: 8, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1, shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 8 }}>
           {REVIEW_MODES.map(mode => <Pressable key={mode} accessibilityRole="menuitem" accessibilityState={{ selected: mode === value }} onPress={() => { setOpen(false); if (mode !== value) onChange(mode); }}
             style={state => ({ ...menuItemRow(compact), minHeight: compact ? 56 : 44, paddingHorizontal: compact ? 12 : 10, paddingVertical: 6, backgroundColor: (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
             <MenuItemContent theme={theme} touch={compact} glyph={mode === value ? "Check" : null} label={REVIEW_MODE_LABELS[mode].label} hint={REVIEW_MODE_LABELS[mode].hint} hintLines={compact ? 2 : 1} />
           </Pressable>)}
-        </View>}
+        </FloatingSurface>}
       </View>
     </SettingsRow>
   </View>;

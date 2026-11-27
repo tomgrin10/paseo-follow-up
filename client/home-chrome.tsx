@@ -1,3 +1,4 @@
+import { FloatingSurface } from "./floating-surface";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Platform, TextInput, View } from "react-native";
 import { AttachImageButton, ImageField, useImageAttachments, type ImageAttachments } from "./image-attach";
@@ -268,7 +269,7 @@ export function SortMenu({ theme, mode, onChange, rankedAt, touch, rank = null, 
       {!compact && <Text numberOfLines={1} style={{ color: c.foreground, fontSize: 12 }}>{SORT_LABEL[mode]}</Text>}
       {!compact && <Icon name="ChevronDown" size={12} color={c.foregroundMuted} />}
     </Pressable>
-    {open && <View accessibilityRole="menu" style={{ position: "absolute", top: touch ? 48 : compact ? 36 : 34, right: 0, minWidth: touch ? 240 : 220, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1,
+    {open && <FloatingSurface role="menu" label="Sort workspaces" width={touch ? 240 : 220} onClose={() => setOpen(false)} style={{ paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1,
       shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 8 }}>
       {SORT_MODES.map(m => <Pressable key={m} accessibilityRole="menuitem" accessibilityState={{ selected: m === mode }} onPress={() => { onChange(m); setOpen(false); }}
         style={state => ({ ...menuItemRow(touch), minHeight: touch ? 48 : 34, paddingHorizontal: touch ? 12 : 10, backgroundColor: (state as { hovered?: boolean }).hovered ? c.surface2 : "transparent" })}>
@@ -281,7 +282,7 @@ export function SortMenu({ theme, mode, onChange, rankedAt, touch, rank = null, 
         </Pressable>}
         {note && <Text style={{ color: c.foregroundMuted, fontSize: 11, paddingHorizontal: touch ? 12 : 10, paddingTop: 4, paddingBottom: 6 }}>{note}</Text>}
       </View>
-    </View>}
+    </FloatingSurface>}
   </View>;
 }
 

@@ -1,3 +1,5 @@
+import { floatingScopes } from "../shared/floating";
+import { FloatingSurface } from "./floating-surface";
 // Catch up: everything in Needs you, one card at a time (docs/design/catch-up.md, docs/needs-you.md#catch-up). It
 // renders the same components the panel and Home use (QuestionBody, NeedsYouList, BriefCard, the permission block), so
 // the answer flow is the shared one, never a fork (one-answer-flow-for-every-question). The deck's order and every
@@ -164,18 +166,20 @@ export function CatchUp({ theme, compact, deps, navigation, onExit }: { theme: T
     if (!doc || typeof win.addEventListener !== "function") return;
     const mac = isMac();
     const root = () => rootRef.current as unknown as Root | null;
-    const inCard = (q: string) => root()?.querySelector(`[data-catch-up-card] ${q}`) ?? null;
+    const scopes = () => { const r = root(); return r ? floatingScopes(r, doc) : []; };
+    const inCard = (q: string) => scopes().map(r => r.querySelector(`[data-catch-up-card] ${q}`)).find(Boolean) ?? null;
     const railItems = () => Array.from(root()?.querySelectorAll("[data-catch-up-rail] [role=\"button\"]") ?? []);
     const onKey = (e: Ev) => {
       const el = e.target as El | null;
       const r = root();
       const onBody = !el || el === doc.body;
-      if (!r || !ownsKey({ inside: !!el && r.contains(el), onBody, claimBody: true, visible: onBody && surfaceVisible(r, doc) })) return;
+      if (!r || !ownsKey({ inside: !!el && scopes().some(s => s.contains(el)), onBody, claimBody: true, visible: onBody && surfaceVisible(r, doc) })) return;
       const typing = !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || !!el.isContentEditable);
       const hit = catchUpKey({ key: e.key, meta: e.metaKey, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, composing: e.isComposing, mac },
         { typing, inMore: !!el?.closest?.("[data-catch-up-more]"), moreOpen: more, inRail: !!el?.closest?.("[data-catch-up-rail]"), answer: card?.kind === "answer" });
       if (!hit || finished && !["back", "keys", "leave", "rail"].includes(hit.action)) return;
-      const click = (q: string) => { const b = r.querySelector(q); b?.click?.(); return !!b; };
+      const query = (q: string) => scopes().map(s => s.querySelector(q)).find(Boolean) ?? null;
+      const click = (q: string) => { const b = query(q); b?.click?.(); return !!b; };
       switch (hit.action) {
         case "skip": skip(); break;
         case "skip-workspace": if (wsLeft < 2) return; skipWs(); break;
@@ -211,7 +215,7 @@ export function CatchUp({ theme, compact, deps, navigation, onExit }: { theme: T
         case "done": if (!click('[data-catch-up-card] [aria-label="Done (D)"]')) return; break;
         case "reply": if (!click('[data-catch-up-card] [aria-label="Reply (W)"]')) return; break;
         case "task": if (!click('[data-catch-up-card] [aria-label="Make a task (T)"]')) return; break;
-        case "chip": r.querySelectorAll("[data-catch-up-more] [role=\"radio\"]")[Number(hit.arg) - 1]?.click?.(); break;
+        case "chip": scopes().flatMap(s => Array.from(s.querySelectorAll("[data-catch-up-more] [role=\"radio\"]")))[Number(hit.arg) - 1]?.click?.(); break;
         case "ask": if (!click('[data-catch-up-more] [data-ask-agent] [role="button"]')) return; break;
         case "rail": {
           const items = railItems();
@@ -481,7 +485,7 @@ function CardView({ card, w, theme, compact, deps, navigation, gone, more, setMo
   </View>;
   const toggleMore = () => { setLaterOpen(false); setMore(v => !v); };
   const toggleLater = () => { setMore(false); setLaterOpen(v => !v); };
-  const popover = (open: ReactNode, label: string, width: number) => open && <MoveResult place="popover" theme={theme} label={label} width={width}>{open}</MoveResult>;
+  const popover = (open: ReactNode, label: string, width: number) => open && <MoveResult place="popover" theme={theme} label={label} width={width} onClose={() => { setMore(false); setLaterOpen(false); }}>{open}</MoveResult>;
 
   // The deck's moves: in thumb reach on phones, under the card on desktop. Once the card has an answer to send, Send to
   // agent takes the bar's primary slot: the question's own Send (onSendReady), so one click, one flow. Icon-only moves
@@ -573,6 +577,14 @@ export type KeySection = { title: string; keys: readonly { key: string; what: st
  * over the screen; S or its X closes it.
  */
 export function KeysSheet({ theme, onClose, label = "Catch up keys", sections: given, keyWidth = 64 }: { theme: Theme; onClose: () => void; label?: string; sections?: readonly KeySection[]; /** The key column, wide enough for the list's longest key so every description lines up. */ keyWidth?: number }) {
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    type Key = { key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; preventDefault(): void; stopPropagation(): void };
+    const win = globalThis as unknown as { addEventListener?(t: string, f: (e: Key) => void): void; removeEventListener?(t: string, f: (e: Key) => void): void };
+    const key = (e: Key) => { if (e.key.toLowerCase() === "s" && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); e.stopPropagation(); onClose(); } };
+    win.addEventListener?.("keydown", key);
+    return () => win.removeEventListener?.("keydown", key);
+  }, [onClose]);
   const dictation = !!hostDictation();
   const sections = given ?? catchUpSections(dictation);
   const c = theme.colors; const t = text(c, false);
@@ -580,7 +592,7 @@ export function KeysSheet({ theme, onClose, label = "Catch up keys", sections: g
     <View style={{ width: keyWidth }}><Text style={[t.meta, { alignSelf: "flex-start", paddingHorizontal: 6, borderRadius: 4, borderWidth: 1, borderColor: c.border, color: c.foreground, fontVariant: ["tabular-nums"] }]}>{keyLabel(k.key, isMac())}</Text></View>
     <Text style={[t.meta, { flex: 1, minWidth: 0 }]}>{k.what}</Text>
   </View>;
-  return <View role="dialog" accessibilityLabel={label} style={{ position: "absolute", zIndex: 10, right: 20, top: 8, width: 236 + keyWidth, padding: 16, gap: 12, borderRadius: 10, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1, shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 12 }}>
+  return <FloatingSurface modal={false} side="top-right" label={label} width={236 + keyWidth} onClose={onClose} style={{ padding: 16, gap: 12, borderRadius: 10, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1, shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 12 }}>
     <View style={{ flexDirection: "row", alignItems: "center" }}>
       <Text style={[t.label, { flex: 1, fontWeight: "600" }]}>Keys</Text>
       <IconButton theme={theme} compact={false} icon="X" label="Close the keys (S)" tooltip onPress={onClose} />
@@ -588,7 +600,7 @@ export function KeysSheet({ theme, onClose, label = "Catch up keys", sections: g
     {sections.filter(s => s.keys.length).map(s => <View key={s.title} style={{ gap: 6 }}>
       <Text style={[t.small, { fontWeight: "600" }]}>{s.title}</Text>{s.keys.map(row)}
     </View>)}
-  </View>;
+  </FloatingSurface>;
 }
 /** Catch up's sheet: the dictation key only where the host has a mic. */
 const catchUpSections = (dictation: boolean): readonly KeySection[] => [
