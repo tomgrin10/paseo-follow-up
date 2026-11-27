@@ -152,6 +152,16 @@ refuse to render when 600 draws no heavier than 400. `scripts/daemon-counter.mjs
   its provider on, a browser's provider refresh wrote to the dead stub and Paseo 0.15.4's worker crashed on the EPIPE,
   so every shot after the first landed on the welcome screen. `tests/harness-env.test.ts` fails when a script writes
   its own config or a stubbed provider stays on.
+- **In-process daemons use explicit provider options.** `createPaseoDaemon` does not load the provider settings
+  written to `config.json`. `check-wait.mjs` and `check-wait-for-checks.mjs` pass
+  `harnessDaemonProviders({ builtinProviderIds: BUILTIN_PROVIDER_IDS, real: REAL, settings })` as daemon options:
+  `providerOverrides` disables every built-in except the providers the check uses, and `agentProviderSettings`
+  carries only those providers' runtime settings. Read `BUILTIN_PROVIDER_IDS` from the installed CLI's protocol
+  package, so a new built-in stays off too. Both checks refresh the catalog and call `assertProviderStubsUnused`
+  before creating agents and before reporting success. The Codex stub (`scripts/harness-codex-stub.cjs`, copied
+  into the isolated PATH) records invocations and rejects app-server JSON-RPC requests while keeping stdin open;
+  a stray probe fails the check without racing a write to a closed pipe. Other Codex commands still exit 127.
+  `tests/harness-env.test.ts` covers the provider allowlist, both in-process call sites, and repeated stub requests.
 - **A crashed worker fails the run.** `screenshots.mjs` checks the daemon's log after every shot (`daemonCrashes`:
   "Uncaught exception", a worker restart) and fails at that shot with the log line, not with timeouts after it.
 - **A fictional host name, `dev-box`.** Paseo labels its host with `os.hostname()` (the phone header, `server_info`)

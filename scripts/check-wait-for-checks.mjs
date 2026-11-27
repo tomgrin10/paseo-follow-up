@@ -17,7 +17,7 @@ import { tmpdir, homedir } from "node:os";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { createServer } from "node:net";
 import { harness, onShutdown } from "./harness.mjs";
-import { harnessEnv, applyEnv, harnessConfig } from "./harness-env.mjs";
+import { harnessEnv, applyEnv, harnessConfig, harnessDaemonProviders, assertProviderStubsUnused } from "./harness-env.mjs";
 
 import { fakeGithub } from "./fake-github.mjs";
 
@@ -44,6 +44,7 @@ if (!cli) throw new Error("The installed Paseo CLI is required");
 const requireInstalled = createRequire(cli);
 const load = async name => import(pathToFileURL(requireInstalled.resolve(name)).href);
 const { createPaseoDaemon } = await load("@getpaseo/server");
+const { BUILTIN_PROVIDER_IDS } = await load("@getpaseo/protocol/provider-manifest");
 const { DaemonClient } = await load("@getpaseo/client/internal/daemon-client");
 const serverRoot = dirname(requireInstalled.resolve("@getpaseo/server"));
 const { ClaudeAgentClient } = await import(pathToFileURL(join(serverRoot, "agent/providers/claude/agent.js")).href);
@@ -98,15 +99,18 @@ try {
   await exec("tar", ["-xzf", join(root, packageInfo.filename), "--strip-components=1", "-C", packedDirectory]);
   const logger = pino({ level: "warn" }, pino.destination(join(root, "daemon.log")));
   const hook = join(home, "plugin-data", pluginId, "agent-hook.mjs");
-  const claude = new ClaudeAgentClient({ logger, runtimeSettings: { env: { CLAUDE_CONFIG_DIR: actualClaude } }, queryFactory(input) {
+  const providerConfig = harnessDaemonProviders({ builtinProviderIds: BUILTIN_PROVIDER_IDS, real: REAL, settings: { claude: { env: { CLAUDE_CONFIG_DIR: actualClaude } } } });
+  const claude = new ClaudeAgentClient({ logger, runtimeSettings: providerConfig.agentProviderSettings.claude, queryFactory(input) {
     return query({ ...input, options: { ...input.options, settingSources: [], strictMcpConfig: true, hooks: undefined,
       settings: { hooks: { SessionStart: [{ hooks: [{ type: "command", command: `node '${hook}'`, timeout: 10 }] }], PostToolUse: [{ hooks: [{ type: "command", command: `node '${hook}'`, timeout: 10 }] }] } },
       systemPrompt: { type: "preset", preset: "claude_code", append: "This is an isolated synthetic test. There is no real repository or network; do not inspect unrelated files, modify configuration, or create agents." } } });
   } });
-  daemon = await createPaseoDaemon({ listen: `127.0.0.1:${port}`, paseoHome: home, daemonVersion: "0.15.2", corsAllowedOrigins: [], hostnames: true, mcpEnabled: true, mcpInjectIntoAgents: true, browserToolsEnabled: false, relayEnabled: false, staticDir: root, mcpDebug: false, agentStoragePath: join(home, "agents"), agentClients: { claude }, providerCatalogRefreshTimeoutMs: 2000, metadataGeneration: { providers: [] }, pluginsEnabled: true, plugins: { [pluginId]: { source: "directory", path: packedDirectory, enabled: true } } }, logger);
+  daemon = await createPaseoDaemon({ ...providerConfig, listen: `127.0.0.1:${port}`, paseoHome: home, daemonVersion: "0.15.2", corsAllowedOrigins: [], hostnames: true, mcpEnabled: true, mcpInjectIntoAgents: true, browserToolsEnabled: false, relayEnabled: false, staticDir: root, mcpDebug: false, agentStoragePath: join(home, "agents"), agentClients: { claude }, providerCatalogRefreshTimeoutMs: 2000, metadataGeneration: { providers: [] }, pluginsEnabled: true, plugins: { [pluginId]: { source: "directory", path: packedDirectory, enabled: true } } }, logger);
   await daemon.start();
   client = new DaemonClient({ url, clientId: "follow-wait-checks-test", clientType: "cli", appVersion: "0.15.2", reconnect: { enabled: false } });
   await client.connect(); await client.fetchAgents({ subscribe: {} });
+  await client.refreshProvidersSnapshot();
+  assertProviderStubsUnused(root);
   assert.equal((await client.listPlugins()).find(p => p.id === pluginId)?.status, "running");
   await until(async () => { try { return !!JSON.parse(await readFile(join(home, "plugin-data", pluginId, "hooks-enabled.json"), "utf8")).clientEntry; } catch { return false; } }, "Follow-up writes its hook");
   result.host = client.getLastServerInfoMessage?.()?.version ?? null;
@@ -145,6 +149,7 @@ try {
   assert.equal(messages().length, 1, "exactly one message");
   assert.match(JSON.stringify(messages()[0]), /all checks passed/);
   result.messages = messages().length;
+  assertProviderStubsUnused(root);
   log("PASS", result);
 } catch (error) {
   result.error = error.stack; log("FAIL", { message: error.message, root, result }); process.exitCode = 1;

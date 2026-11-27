@@ -150,6 +150,50 @@ test("every harness daemon's config.json comes from harnessConfig, with the same
   assert.deepEqual(offenders, []);
 });
 
+test("in-process harness daemons enable only the providers the check uses", async () => {
+  const { harnessDaemonProviders } = await import(resolve("scripts/harness-env.mjs"));
+  const settings = { claude: { env: { FIXTURE_MARKER: "isolated" } }, codex: { env: { UNUSED: "off" } } };
+  const config = harnessDaemonProviders({ builtinProviderIds: ["claude", "codex", "another-provider"], real: ["claude"], settings });
+  assert.deepEqual(config.providerOverrides, { claude: { enabled: true }, codex: { enabled: false }, "another-provider": { enabled: false } });
+  assert.deepEqual(config.agentProviderSettings, { claude: settings.claude });
+  assert.deepEqual(harnessDaemonProviders({ builtinProviderIds: ["codex"] }).providerOverrides, { codex: { enabled: false } });
+  for (const file of (await readdir("scripts")).filter(f => f.endsWith(".mjs") && f !== "harness-env.mjs")) {
+    const src = await readFile(join("scripts", file), "utf8");
+    if (!src.includes("createPaseoDaemon(")) continue;
+    assert.match(src, /harnessDaemonProviders\(\{ builtinProviderIds: BUILTIN_PROVIDER_IDS, real: REAL/, `${file}: use the installed daemon's full built-in list and the env's real providers`);
+    assert.match(src, /createPaseoDaemon\(\{[^\n]*\.\.\.providerConfig/, `${file}: pass provider overrides and settings to the in-process entry point`);
+    assert.match(src, /assertProviderStubsUnused\(root\)/, `${file}: fail if a disabled provider's stub was launched`);
+  }
+});
+
+test("the Codex stub rejects app-server requests without closing its input pipe", async () => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { spawn } = await import("node:child_process");
+  const { createInterface } = await import("node:readline");
+  const { assertProviderStubsUnused } = await import(resolve("scripts/harness-env.mjs"));
+  const root = await mkdtemp(join(tmpdir(), "follow-codex-stub-"));
+  const env = harnessEnv(root);
+  const child = spawn(join(root, ".harness-stubs", "codex"), ["app-server"], { env, stdio: ["pipe", "pipe", "pipe"] });
+  child.stdin.on("error", () => {}); // The old stub closes stdin immediately; report the failed assertion below.
+  const exited = new Promise<number | null>((ok, fail) => { child.once("error", fail); child.once("exit", ok); });
+  const lines = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
+  try {
+    for (const id of [1, 2]) {
+      child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method: id === 1 ? "initialize" : "model/list", params: {} }) + "\n");
+      const line = await lines.next();
+      assert.equal(line.done, false, "the stub stays alive for the next request");
+      const response = JSON.parse(line.value!);
+      assert.equal(response.id, id);
+      assert.match(response.error.message, /codex is stubbed/);
+      assert.equal(response.result, undefined, "never pretend a real provider succeeded");
+    }
+    child.stdin.end();
+    assert.equal(await exited, 0);
+    assert.throws(() => assertProviderStubsUnused(root), /codex/, "an accidental provider launch fails the harness");
+  } finally { child.kill(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("daemonCrashes reads a worker crash out of a harness daemon's log", async () => {
   const { daemonCrashes } = await import(resolve("scripts/harness-env.mjs"));
   const log = [

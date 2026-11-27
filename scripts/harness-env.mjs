@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, relative, isAbsolute, resolve, delimiter, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ENV_PREFIX, LEGACY_ENV_PREFIX } from "../shared/legacy.ts";
@@ -25,7 +25,8 @@ import { ENV_PREFIX, LEGACY_ENV_PREFIX } from "../shared/legacy.ts";
  *
  * 2026-11-12: a realistic scale run's ranker shelled out to the host's real `mcpproxy` (Linear and Slack reads as the
  * developer); it failed only because the harness HOME had no proxy config. Every tool the plugin, its AI jobs or a
- * daemon provider could reach on the host (STUBBED_TOOLS) resolves to a stub in <root>/.harness-stubs that exits 127.
+ * daemon provider could reach on the host (STUBBED_TOOLS) resolves to a rejecting stub in <root>/.harness-stubs.
+ * Commands exit 127, except Codex app-server requests, which receive JSON-RPC errors without closing stdin.
  * The stubs sit after any PATH entries inside the root (a script's own fake gh or mcpproxy still wins) and before the
  * host's dirs. The Paseo CLI stays real. tests/harness-env.test.ts fails when one resolves outside the root.
  * `real` keeps named tools unstubbed: only the opt-in live-model check (check-wait, `claude`) passes it.
@@ -49,6 +50,7 @@ export const HARNESS_DEFAULTS = { PASEO_DICTATION_ENABLED: "false", PASEO_VOICE_
 /** The host name every harness process reports (os.hostname(), HOSTNAME, Paseo's host label). */
 export const HARNESS_HOST = "dev-box";
 const HOSTNAME_PRELOAD = join(dirname(fileURLToPath(import.meta.url)), "harness-hostname.cjs");
+const CODEX_STUB = join(dirname(fileURLToPath(import.meta.url)), "harness-codex-stub.cjs");
 export const SESSION_KEYS = new RegExp(`^(PASEO_|CODEX_|${ENV_PREFIX}|${LEGACY_ENV_PREFIX})|^CLAUDE_(CONFIG_DIR|SESSION_ID|PROJECT_DIR|CODE_ENTRYPOINT|CODE_SSE_PORT)$|^CLAUDECODE$`);
 const ISOLATED = ["HOME", "XDG_CONFIG_HOME", "PASEO_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"];
 /**
@@ -95,6 +97,22 @@ export function harnessConfig({ port, mcp = false, webUi = false, real = [], pro
   };
 }
 
+/** createPaseoDaemon does not read config.json's agents.providers. Pass these options explicitly.
+ * Use the installed daemon's BUILTIN_PROVIDER_IDS so newly installed providers are off too.
+ * Extra fixture clients are supplied separately through agentClients; they need no built-in enabled.
+ */
+export function harnessDaemonProviders({ builtinProviderIds, real = [], settings = {} }) {
+  return {
+    providerOverrides: Object.fromEntries(builtinProviderIds.map(id => [id, { enabled: real.includes(id) }])),
+    agentProviderSettings: Object.fromEntries(Object.entries(settings).filter(([id]) => real.includes(id))),
+  };
+}
+
+/** A disabled provider must not be probed, even if its stub can reject a request safely. */
+export function assertProviderStubsUnused(root) {
+  if (existsSync(join(root, ".harness-stubs", "codex.calls.jsonl"))) throw new Error("harness: the disabled codex provider launched its stub");
+}
+
 /**
  * The lines of a harness daemon's log that say its worker died: an uncaught exception, or the supervisor restarting a
  * crashed worker. A browser run checks this after each shot and fails with the line, rather than timing out later on
@@ -111,7 +129,7 @@ function stubbedPath(top, path, tools) {
   const stubs = join(top, ".harness-stubs");
   mkdirSync(stubs, { recursive: true });
   rmSync(stubs, { recursive: true, force: true }); mkdirSync(stubs, { recursive: true });
-  for (const tool of tools) writeFileSync(join(stubs, tool), `#!/bin/sh\necho "harness: ${tool} is stubbed; a harness run never reaches the host's real ${tool} (scripts/harness-env.mjs)" >&2\nexit 127\n`, { mode: 0o755 });
+  for (const tool of tools) writeFileSync(join(stubs, tool), tool === "codex" ? readFileSync(CODEX_STUB) : `#!/bin/sh\necho "harness: ${tool} is stubbed; a harness run never reaches the host's real ${tool} (scripts/harness-env.mjs)" >&2\nexit 127\n`, { mode: 0o755 });
   const entries = path.split(delimiter).filter(e => e && e !== stubs);
   const inside = e => { const r = relative(top, resolve(e)); return !r.startsWith("..") && !isAbsolute(r); };
   return [...entries.filter(inside), stubs, ...entries.filter(e => !inside(e))].join(delimiter);
