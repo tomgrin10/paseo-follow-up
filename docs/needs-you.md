@@ -164,7 +164,7 @@
   - **Superseded briefs.** A superseded brief never closes a question asked with `ask_question`. Dedupe rules are in
     [workspaces.md](workspaces.md#questions). The bridge records it in
   `hook-state/needs-you-<agent>.json`.
-  - The Stop hook nudges a root Claude session that ended a turn without calling it, once per turn (Settings →
+  - The Stop hook (Claude Code, Codex) or the turn-end check (every other provider) nudges a root agent that ended a turn without calling it, once per turn (Settings →
     Display `enable_brief_nudge`).
   - `NEEDS_YOU_INSTRUCTION` in `shared/brief.ts` must match `needsYouInstruction` in `server/mcp.mjs`; a test
     checks this.

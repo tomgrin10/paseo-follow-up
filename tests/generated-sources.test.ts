@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
+import { resolve } from "node:path";
+// @ts-expect-error plain JS build helper
+import { inlineShared } from "../scripts/inline.mjs";
 
 /**
  * scripts/build.mjs copies these sources into the TypeScript modules the plugin ships. A source edited without a
@@ -23,11 +26,11 @@ test("every server/*-source.ts is a known generated file", async () => {
 for (const [source, generated, name] of GENERATED) {
   test(`${generated} equals ${source} (run node scripts/build.mjs)`, async () => {
     const mod = await import(`../${generated}`);
-    assert.equal(mod[name], await readFile(source, "utf8"));
+    assert.equal(mod[name], inlineShared(resolve(source)));
   });
 
   test(`${generated} has one line per source line, so it merges like ${source}`, async () => {
-    const sourceLines = (await readFile(source, "utf8")).split("\n").length;
+    const sourceLines = inlineShared(resolve(source)).split("\n").length;
     const generatedLines = (await readFile(generated, "utf8")).split("\n").length;
     assert.ok(generatedLines >= sourceLines, `${generated} has ${generatedLines} lines for ${sourceLines} source lines`);
   });

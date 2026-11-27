@@ -1,0 +1,1 @@
+- Codex agents are now reminded to say what they need from you when a turn ends, the same as Claude Code agents.

@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { z } from "zod";
 import type { AgentToolDefinition } from "@getpaseo/plugin/server";
-import { hookSource } from "./hook-source";
+import { checksLine, named } from "../shared/agent-text.mjs";
 import { hasHooks, isAcp } from "../shared/provider-support";
 
 /**
@@ -18,19 +18,10 @@ export const SYSTEM_PROMPT_ENV = "FOLLOW_UP_SYSTEM_PROMPT";
 export const PROMPT_PARTS = ["needsYou", "action", "overseer", "wait", "backgroundWork", "checks"] as const;
 export type PromptPart = typeof PROMPT_PARTS[number];
 
-/** The bridge's texts (server/mcp.mjs, as written to the data directory), the ones the hook reads too. */
+/** The role and Wait texts (shared/agent-text.mjs), the ones the hook adds too. */
 export type BridgeTexts = { needsYouInstruction?: string; actionInstruction?: string; overseerInstruction?: string; waitInstruction?: string; backgroundWorkInstruction?: string };
 
-// One source for the hook's wording and tool names: read out of the hook's own source.
-const literal = <T>(name: string): T => {
-  const m = hookSource.match(new RegExp(`export const ${name} = (.+?);\\n`));
-  if (!m) throw new Error(`session-prompt: the hook no longer exports ${name}`);
-  return JSON.parse(m[1]!) as T;
-};
-export const checksLine = literal<string>("checksLine");
-const toolPattern = new RegExp(`(?<![\\w])(${literal<string[]>("TOOL_NAMES").join("|")})(?![\\w])`, "g");
-/** The hook's `named`: Follow-up's tools under the names a native session has them (follow_<name>). */
-export const named = (text: string, native: boolean) => native ? text.replace(toolPattern, "follow_$1") : text;
+export { checksLine, named };
 
 /**
  * Which parts a session gets in its system prompt, from the env Follow-up launched it with. Mirrors the hook's

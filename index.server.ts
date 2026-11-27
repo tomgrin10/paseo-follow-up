@@ -62,6 +62,7 @@ import { PrActions } from "./server/pr-actions";
 import { AgentActions, AGENT_TOOLS, controlWorkspace, type AgentTool } from "./server/agent-actions";
 import { PaseoGateway, paseoHome, clientEntry, daemonOptions, closeConnections, sessionGuardOwnsInterruption, compactionJustDelivered } from "./server/daemon";
 import { mcpSource } from "./server/mcp-source";
+import * as agentText from "./shared/agent-text.mjs";
 import { excludeStack } from "./server/exclusions";
 import { applyDiscovery, mainWorkDue, markMainWork } from "./server/discovery";
 import { lifecycleOnly, recoveryBatch } from "./shared/follow-up";
@@ -2230,15 +2231,13 @@ export default function contribute(server: PluginServerContext) {
     acp: async provider => isAcp(provider, await paseoConfig() as Parameters<typeof isAcp>[1]),
     hostSupports: hostPrompt,
     providerSupports: async provider => provider === "claude" || provider === "codex" && await (codexPrompt ??= codexVersion().then(v => atLeast(v, CODEX_PROMPT_MIN))),
-    bridge: async () => await import(pathToFileURL(join(directory, "mcp.mjs")).href) as BridgeTexts,
-    // A provider without Follow-up's hook gets the tracked workspace's instructions in its system prompt: the hook's own
-    // text (agent-hook.mjs workspaceInstructions), for this agent's role in the store as it is now.
+    bridge: async () => agentText as BridgeTexts,
+    // A provider without Follow-up's hook gets the tracked workspace's instructions in its system prompt: the text the
+    // hook adds (shared/agent-text.mjs workspaceText), for this agent's role in the store as it is now.
     workspace: async (agentId, native) => {
       const entry = scopes(await store.snapshot(), w => prWorkflow.agentWorkflow(workspaceRepo(w), touchedRepos(w)))[agentId];
       if (!entry || entry.role === "recovery") return null;
-      (globalThis as { followUpHookLibrary?: boolean }).followUpHookLibrary = true;
-      const hook = await import(pathToFileURL(join(directory, "agent-hook.mjs")).href) as { workspaceInstructions?: (o: Record<string, unknown>) => string };
-      return hook.workspaceInstructions?.({ contributor: entry.role === "contributor", workflow: entry.workflow, native, clientEntry: clientEntry() }) ?? null;
+      return agentText.workspaceText({ contributor: entry.role === "contributor", workflow: entry.workflow, native, clientEntry: clientEntry(), bridge: join(directory, "mcp.mjs") });
     },
   };
   const withWait = (handler: SessionOpen): SessionOpen => async (input, context) => {

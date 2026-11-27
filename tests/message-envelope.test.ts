@@ -17,7 +17,7 @@ const answer = answerMessage({ id: "Q3", title: "Retry policy", mode: "work-arou
 const batch = `${BATCH_PREFIX} 6f1c2a9e-0000-4000-8000-000000000001\n\n1. Fix the failing lint check on #12.\n\n---\n\nThat rule is noisy; keep it.`;
 
 // The hook runs as its own script (importing it would start it), so its text is read from the source.
-const hookSource = readFile(new URL("../server/agent-hook.mjs", import.meta.url), "utf8");
+const hookSource = readFile(new URL("../shared/agent-text.mjs", import.meta.url), "utf8");
 const guidance = async () => JSON.parse(/export const ENVELOPE_GUIDANCE = ("(?:[^"\\]|\\.)*");/.exec(await hookSource)![1]!) as string;
 
 test("the hook's guidance names the separator and the headers the queue sends", async () => {
@@ -34,8 +34,7 @@ test("the hook's guidance names the separator and the headers the queue sends", 
 test("the guidance reaches the agent: SessionStart text and the batch instructions", async () => {
   const hook = await hookSource;
   assert.match(hook, /Withdraw questions that stop mattering\. " \+ ENVELOPE_GUIDANCE/);
-  const mcp = await readFile(new URL("../server/mcp.mjs", import.meta.url), "utf8");
-  assert.match(mcp, /A batch can arrive as one part of a message, after an answer, separated by a line holding only ---/);
+  assert.match(hook, /A batch can arrive as one part of a message, after an answer, separated by a line holding only ---/);
 });
 
 test("an envelope splits back into its parts, and a part's own --- stays in it", () => {

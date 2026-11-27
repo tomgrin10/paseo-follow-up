@@ -1,25 +1,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { HOOK_TEXT_PREFIXES, messageSender } from "../shared/message-sender";
 import { tailSteps } from "../shared/home";
 import { parseLine, transcriptSteps } from "../server/transcript";
 import { tailLines } from "../server/about";
 import { finishedReply } from "../server/inbox-classifier";
 import { followUpTextViolations } from "../shared/status-invariants";
+import { quietInstruction, stopReason } from "../shared/agent-text.mjs";
+import { shipped } from "./support/shipped";
 
 /**
  * Invariant `no-follow-up-text-as-work`: Follow-up's Stop hook continues a turn with "Silently complete this
  * workspace's sidebar bookkeeping…", and the agent answers it ("The sidebar sync is done"). Neither is the agent's
  * work: no Summary input, Finished reason or Recent step may carry them. The fixtures hold the exact hook text, read
- * from server/agent-hook.mjs, in the forms the providers record it (Claude Code: an isMeta "Stop hook feedback:" line;
+ * from shared/agent-text.mjs (what the shipped hook says), in the forms the providers record it (Claude Code: an isMeta "Stop hook feedback:" line;
  * Codex: a `<hook_prompt>` user message).
  */
 
-const hookSource = readFileSync(new URL("../server/agent-hook.mjs", import.meta.url), "utf8");
-const constant = (name: string) => JSON.parse(new RegExp(`const ${name} = ("(?:[^"\\\\]|\\\\.)*");`).exec(hookSource)![1]) as string;
-const STOP_REASON = constant("stopReason");
-const QUIET = constant("quietInstruction");
+const hookSource = shipped("agent-hook.mjs");
+const STOP_REASON = stopReason;
+const QUIET = quietInstruction;
 const HOOK_TEXT = `${STOP_REASON} This is metadata bookkeeping only; do not start queued repairs or recovery.\n\nMaintain this tracked workspace's Follow-up sidebar as part of your normal work; do not wait for a developer reminder.\n\n${QUIET}`;
 const WORK = "Fixed the export: rows over 10k now stream in pages and the last page is kept.";
 const BOOKKEEPING = "The sidebar sync is done. The background check finished earlier and reported FINISHED.";

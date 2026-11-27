@@ -8,10 +8,12 @@ import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { briefStep, collapsedLine, nothingNeededLine, extrasFit, isTight, FALLBACK_ASK, matchOption, NEEDS_YOU_INSTRUCTION, NEEDS_YOU_NUDGE, pickBrief, prState, validateNeedsYou, type Brief, type BriefContent, type NeedsYouCall, type NeedsYouRecord, type PrState } from "../shared/brief";
+import { briefStep, collapsedLine, nothingNeededLine, extrasFit, isTight, FALLBACK_ASK, matchOption, pickBrief, prState, validateNeedsYou, type Brief, type BriefContent, type NeedsYouCall, type NeedsYouRecord, type PrState } from "../shared/brief";
 import { classify, type Sources } from "../server/inbox-classifier";
 import { briefShare, finishIsQuiet, Inbox, type AgentInfo, type Directory, type GuardPause } from "../server/inbox";
 import { pr, snapshot, workspace } from "./fixtures";
+import { shipped } from "./support/shipped";
+import { needsYouInstruction as NEEDS_YOU_INSTRUCTION, nudgeReason as NEEDS_YOU_NUDGE } from "../shared/agent-text.mjs";
 
 const T0 = "2026-11-08T10:00:00.000Z";
 const at = (min: number) => new Date(Date.parse(T0) + min * 60_000).toISOString();
@@ -499,14 +501,16 @@ test("R2: the nudge decision covers called, not called, already nudged, permissi
   assert.equal(shouldNudge({ ...base, brief: { ...base.brief, enable_brief_nudge: false } }), false, "setting off");
   assert.equal(shouldNudge({ ...base, brief: { ...base.brief, enable_inbox: false } }), false, "inbox off");
   assert.equal(shouldNudge({ ...base, brief: null }), false, "unknown state never nudges");
-  assert.equal(shouldNudge({ ...base, provider: "codex" }), false, "Codex gets the instruction only");
+  // one-turn-end-decision: the provider never decides the nudge. Until 2.6 a Codex root agent got the instruction only,
+  // from the hook and the event alike, so it was never nudged (Codex's Stop hook blocks like Claude's).
+  for (const provider of ["codex", "opencode", "copilot"]) assert.equal(shouldNudge({ ...base, provider }), true, `${provider} root agents are nudged like Claude's`);
   assert.equal(shouldNudge({ ...base, turn: null }), false, "no turn marker, no nudge");
 });
 
 async function hookHome(t: { after: (f: () => Promise<void>) => void }, brief: object) {
   const root = await mkdtemp(join(tmpdir(), "brief-hook-")); t.after(() => rm(root, { recursive: true, force: true }));
   const directory = join(root, "plugin-data/follow-up"); await mkdir(join(directory, "hook-state"), { recursive: true });
-  await writeFile(join(directory, "agent-hook.mjs"), await readFile(resolve("server/agent-hook.mjs"), "utf8"));
+  await writeFile(join(directory, "agent-hook.mjs"), shipped("agent-hook.mjs"));
   await writeFile(join(directory, "hooks-enabled.json"), JSON.stringify({ expiresAt: Date.now() + 60_000, clientEntry: "/fixture/client.js" }));
   await writeFile(join(directory, "state.json"), JSON.stringify({ workspaces: [] }));
   await writeFile(join(directory, "brief.json"), JSON.stringify(brief));
@@ -531,6 +535,14 @@ test("R2: the installed hook nudges an untracked Claude Code root agent once per
   assert.equal(await h.fire({ hook_event_name: "UserPromptSubmit", prompt: "x" }, { FOLLOW_UP_BRIEF: "" }), "");
   assert.equal(await h.fire({ hook_event_name: "Stop" }, { FOLLOW_UP_BRIEF: "" }), "", "not launched as a brief root (subagent or contributor): nothing");
   assert.equal(await h.fire({ hook_event_name: "Stop", agent_id: "task-1" }), "", "Claude Code subagents never");
+});
+test("one-turn-end-decision: the installed hook nudges an untracked Codex root agent too, once per turn", async t => {
+  const h = await hookHome(t, { enable_inbox: true, enable_brief_nudge: true, pending: [] });
+  const codex = { FOLLOW_UP_BRIEF: "codex", FOLLOW_UP_PROVIDER: "codex" };
+  await h.fire({ hook_event_name: "UserPromptSubmit", prompt: "do it", turn_id: "t1" }, codex);
+  const first = JSON.parse(await h.fire({ hook_event_name: "Stop", turn_id: "t1", stop_hook_active: false, last_assistant_message: "Done." }, codex));
+  assert.equal(first.decision, "block"); assert.equal(first.reason, NEEDS_YOU_NUDGE);
+  assert.equal(await h.fire({ hook_event_name: "Stop", turn_id: "t1", stop_hook_active: true }, codex), "", "Codex's continuation stops");
 });
 test("R2: setting off or inbox off means the hook stays silent for untracked agents", async t => {
   for (const brief of [{ enable_inbox: true, enable_brief_nudge: false }, { enable_inbox: false, enable_brief_nudge: true }]) {

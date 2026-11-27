@@ -13,6 +13,7 @@ import { QUEUE_KINDS, type NewQueueItem } from "../shared/queue";
 import { testQueue } from "./support/queue";
 import type { Channel } from "../server/message-queue";
 import { tools, toolList } from "../server/mcp.mjs";
+import { shipped } from "./support/shipped";
 
 process.env.FOLLOW_UP_HOOK_IMPORT = "1";
 // @ts-expect-error plain JS hook, generated into hook-source.ts
@@ -211,7 +212,7 @@ test("the polling matcher: every polling shape, no single look", () => {
 test("the polling nudge never blocks a command and comes at most once per turn", async t => {
   const root = await mkdtemp(join(tmpdir(), "poll-nudge-")); t.after(() => rm(root, { recursive: true, force: true }));
   const directory = join(root, "plugin-data/follow-up"); await mkdir(join(directory, "hook-state"), { recursive: true });
-  for (const file of ["agent-hook.mjs", "mcp.mjs"]) await writeFile(join(directory, file), await readFile(resolve("server", file), "utf8"));
+  for (const file of ["agent-hook.mjs", "mcp.mjs"]) await writeFile(join(directory, file), shipped(file));
   await writeFile(join(directory, "hooks-enabled.json"), JSON.stringify({ expiresAt: Date.now() + 60_000, clientEntry: "/fixture/client.js" }));
   await writeFile(join(directory, "scopes.json"), JSON.stringify({ agents: { a1: { role: "main", workspaceId: "w1" } } }));
   const fire = (agent: string, event: object) => new Promise<string>((ok, bad) => {

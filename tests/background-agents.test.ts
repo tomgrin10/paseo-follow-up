@@ -13,6 +13,7 @@ import { Inbox, type AgentInfo, type Directory } from "../server/inbox";
 import type { Sources } from "../server/inbox-classifier";
 import { Wait } from "../server/wait";
 import type { Agent, Daemon, withDaemon } from "../server/daemon";
+import { shipped } from "./support/shipped";
 
 /*
  * Invariant: a background agent (Paseo 0.16 `background: true`, a helper another plugin runs for itself) never gets
@@ -115,7 +116,7 @@ test("session open asks about background before giving any root treatment", asyn
 test("the hook stays silent for a listed background agent: no context, no Stop-hook nudge", async t => {
   const root = await mkdtemp(join(tmpdir(), "follow-bg-hook-")); t.after(() => rm(root, { recursive: true, force: true }));
   const directory = join(root, "plugin-data/follow-up"); await mkdir(join(directory, "hook-state"), { recursive: true });
-  await writeFile(join(directory, "agent-hook.mjs"), await readFile(resolve("server/agent-hook.mjs"), "utf8"));
+  await writeFile(join(directory, "agent-hook.mjs"), shipped("agent-hook.mjs"));
   await writeFile(join(directory, "hooks-enabled.json"), JSON.stringify({ expiresAt: Date.now() + 60_000, clientEntry: "/fixture/client.js" }));
   await writeFile(join(directory, "state.json"), JSON.stringify({ workspaces: [] }));
   await writeFile(join(directory, "brief.json"), JSON.stringify({ enable_inbox: true, enable_brief_nudge: true, pending: [] }));

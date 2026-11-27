@@ -4,17 +4,14 @@
  * Follow-up's turn-end needs_you nudge must not make the agent ask it again as a second card. An ask is told by its
  * input's shape, never by a list of tool names: a question with choices, either `{question, options[]}` or
  * `{questions: [{question, options[]}, …]}`. A bare `question` with no choices is a lookup (a docs or code search
- * tool), not an ask. server/agent-hook.mjs keeps a copy (`isAskInput`; the hook imports nothing), and
- * tests/other-ask.test.ts checks both agree.
+ * tool), not an ask. The rule itself is `isAskInput` in shared/turn-checks.mjs, which the build
+ * inlines into the agent hook, so the hook and the turn-end event read one copy.
  */
 const record = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-const asks = (v: unknown): boolean => record(v) && typeof v.question === "string" && v.question.trim().length > 0 && Array.isArray(v.options) && v.options.length > 0;
 
-/** Whether a tool call's input asks the developer a question with choices. */
-export function isAskInput(input: unknown): boolean {
-  if (asks(input)) return true;
-  return record(input) && Array.isArray(input.questions) && input.questions.length > 0 && input.questions.every(asks);
-}
+/** Whether a tool call's input asks the developer a question with choices (shared/turn-checks.mjs, the hook's too). */
+export { isAskInput } from "./turn-checks.mjs";
+import { isAskInput } from "./turn-checks.mjs";
 
 /** Follow-up's own tool, under any spelling (native, bridge, legacy server). Its asks are its own cards already. */
 export const FOLLOW_UP_TOOL = /(^|[._/])follow_[a-z_]+$|^wait_|^(?:mcp__)?follow-up(?:__|[.:/])/;

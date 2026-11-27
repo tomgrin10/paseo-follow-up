@@ -11,11 +11,13 @@ import type { AgentToolContext, PluginSessionOpenRequest } from "@getpaseo/plugi
 import { Wait, WAIT_TOOLS, standaloneWaitInstalled, waitStatus, type WaitPaseoConfig } from "../server/wait";
 import { AgentSettingsStore } from "../server/agent-settings";
 import { AgentActions, PLANNED_TOOLS, READ_ONLY_TOOLS, TOOL_INPUT, type AgentActionDeps } from "../server/agent-actions";
-import { actionTools, waitInstruction } from "../server/mcp.mjs";
+import { actionTools } from "../server/mcp.mjs";
+import { waitInstruction } from "../shared/agent-text.mjs";
 import { WAIT_STANDALONE_NOTE, waitNote } from "../shared/wait";
 import { setWaitRpc } from "../shared/contracts";
 import { PARITY } from "../server/agent-parity";
 import { parseAgentSettings } from "../shared/agent-settings";
+import { shipped } from "./support/shipped";
 /** Paseo 0.16 requires `metadata` on hook agents and session requests; spread, so 0.15's types accept it too. */
 const withMetadata = { metadata: {} };
 
@@ -190,7 +192,7 @@ test("agent parity: set_wait_for_jobs is the switch's RPC, planned first; agent_
 test("the agent hook gives Wait's guidance once at SessionStart to any Claude session with FOLLOW_UP_WAIT", async t => {
   const root = await dir(t, "follow-wait-hook-");
   const directory = join(root, "plugin-data/follow-up"); await mkdir(join(directory, "hook-state"), { recursive: true });
-  for (const file of ["agent-hook.mjs", "mcp.mjs"]) await writeFile(join(directory, file), await readFile(resolve("server", file), "utf8"));
+  for (const file of ["agent-hook.mjs", "mcp.mjs"]) await writeFile(join(directory, file), shipped(file));
   await writeFile(join(directory, "hooks-enabled.json"), JSON.stringify({ expiresAt: Date.now() + 60_000, clientEntry: "/fixture/client.js" }));
   await writeFile(join(directory, "scopes.json"), JSON.stringify({ agents: { main: { role: "main", workspaceId: "w1" } } }));
   const fire = (agentId: string, event: object, env: Record<string, string>) => new Promise<string>((ok, bad) => {

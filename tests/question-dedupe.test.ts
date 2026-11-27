@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { askQuestion, developerAnswer, needsYouQuestions, answerRecipients } from "../server/questions";
 import { collapseDuplicateQuestions, compareQuestions, duplicateOpenQuestions, isOpen, questionSchema, type Question } from "../shared/questions";
-import { NEEDS_YOU_INSTRUCTION, NEEDS_YOU_NUDGE, validateNeedsYou } from "../shared/brief";
+import { validateNeedsYou } from "../shared/brief";
+import { needsYouInstruction as NEEDS_YOU_INSTRUCTION, nudgeReason as NEEDS_YOU_NUDGE } from "../shared/agent-text.mjs";
 import { stateSchema } from "../shared/model";
 import { clock, workspace } from "./fixtures";
 
@@ -134,7 +135,7 @@ test("migration: open duplicates collapse to the oldest; answered ones are untou
 
 test("the agent-facing texts say to point at an open question instead of restating it", async () => {
   assert.match(NEEDS_YOU_INSTRUCTION, /questions=\[\\?"Q18\\?"\]/); assert.match(NEEDS_YOU_NUDGE, /questions=\[/);
-  const [mcp, hook] = await Promise.all([readFile("server/mcp.mjs", "utf8"), readFile("server/agent-hook.mjs", "utf8")]);
+  const [mcp, hook] = await Promise.all([readFile("server/mcp.mjs", "utf8"), readFile("shared/agent-text.mjs", "utf8")]);
   assert.match(mcp, /Already open as Q18/); assert.match(mcp, /supersedes/); assert.match(mcp, /questions: \{ type: "array", maxItems: 3/);
   assert.match(hook, /Ask each decision once/);
 });

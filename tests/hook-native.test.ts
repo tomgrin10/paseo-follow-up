@@ -5,23 +5,24 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { overseerTools, toolList } from "../server/mcp.mjs";
-import { NEEDS_YOU_NUDGE } from "../shared/brief";
+import { nudgeReason as NEEDS_YOU_NUDGE, TOOL_NAMES, named } from "../shared/agent-text.mjs";
+import { shipped } from "./support/shipped";
 
 process.env.FOLLOW_UP_HOOK_IMPORT = "1";
 // @ts-expect-error plain JS hook, generated into hook-source.ts
-const hook = await import("../server/agent-hook.mjs") as { TOOL_NAMES: string[]; named: (text: string, native?: boolean) => string; isFollowTool: (tool: string) => boolean; isBridgeCall: (args: string, path: string) => boolean; toolsDetached: (native: boolean, current: unknown, mine: unknown) => boolean; shouldRepeat: (provider: string | undefined, turn: unknown, hash: string) => boolean };
+const hook = await import("../server/agent-hook.mjs") as { isFollowTool: (tool: string) => boolean; isBridgeCall: (args: string, path: string) => boolean; toolsDetached: (native: boolean, current: unknown, mine: unknown) => boolean; shouldRepeat: (provider: string | undefined, turn: unknown, hash: string) => boolean };
 
-test("the hook's tool-name list is every underscore tool a session can list (agent-tools-by-role)", () => {
+test("the tool-name list is every underscore tool a session can list (agent-tools-by-role)", () => {
   // Action names stay bare in prose: they run through run_action, so naming one follow_<name> would name no tool.
   const roles = [[false, false, true, false, true], [false, true, true, false, true], [false, false, true, true, true], [true, false, false, false, false]] as const;
   const bridge = [...roles.flatMap(r => toolList(...r)), ...overseerTools].map(t => t[0]).filter(name => name.includes("_"));
-  assert.deepEqual([...hook.TOOL_NAMES].sort(), [...new Set(bridge)].sort());
+  assert.deepEqual([...TOOL_NAMES].sort(), [...new Set(bridge)].sort());
 });
 
 test("text names the set the agent has; both sets count as Follow-up's own calls", () => {
-  assert.equal(hook.named(NEEDS_YOU_NUDGE, false), NEEDS_YOU_NUDGE, "pre-upgrade sessions keep mcp__follow-up__ names");
-  assert.match(hook.named(NEEDS_YOU_NUDGE, true), /call follow_needs_you once/);
-  assert.equal(hook.named("Merge/deploy triggers; set_spec and follow_set_spec", true), "Merge/deploy triggers; follow_set_spec and follow_set_spec", "prose and already-prefixed names untouched");
+  assert.equal(named(NEEDS_YOU_NUDGE, false), NEEDS_YOU_NUDGE, "pre-upgrade sessions keep mcp__follow-up__ names");
+  assert.match(named(NEEDS_YOU_NUDGE, true), /call follow_needs_you once/);
+  assert.equal(named("Merge/deploy triggers; set_spec and follow_set_spec", true), "Merge/deploy triggers; follow_set_spec and follow_set_spec", "prose and already-prefixed names untouched");
   for (const name of ["mcp__follow-up__needs_you", "follow-up.register_pr", "mcp__paseo__follow_needs_you", "paseo.follow_register_pr"]) assert.equal(hook.isFollowTool(name), true, name);
   for (const name of ["mcp__paseo__list_agents", "Bash", "mcp__other__follow_x"]) assert.equal(hook.isFollowTool(name), false, name);
 });
@@ -40,7 +41,7 @@ test("bridge calls are recognised however they're spelled; detached tools are to
 async function home(t: { after: (f: () => Promise<void>) => void }) {
   const root = await mkdtemp(join(tmpdir(), "hook-native-")); t.after(() => rm(root, { recursive: true, force: true }));
   const directory = join(root, "plugin-data/follow-up"); await mkdir(join(directory, "hook-state"), { recursive: true });
-  for (const file of ["agent-hook.mjs", "mcp.mjs"]) await writeFile(join(directory, file), await readFile(resolve("server", file), "utf8"));
+  for (const file of ["agent-hook.mjs", "mcp.mjs"]) await writeFile(join(directory, file), shipped(file));
   await writeFile(join(directory, "hooks-enabled.json"), JSON.stringify({ expiresAt: Date.now() + 60_000, clientEntry: "/fixture/client.js" }));
   await writeFile(join(directory, "scopes.json"), JSON.stringify({ agents: { a1: { role: "main", workspaceId: "w1" } } }));
   await writeFile(join(directory, "brief.json"), JSON.stringify({ enable_inbox: true, enable_brief_nudge: true, pending: [] }));

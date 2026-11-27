@@ -155,23 +155,11 @@ export function dueByAgent(w: Workspace, now: number, limit = 5): Record<string,
 export type NudgeReceipt = Record<string, { key: string; revision: number; count: number; at: string }>;
 
 /**
- * The hook's pick at a turn end: due entries (dueAt passed) not nudged NUDGE_CAP times for this fact and revision, and
- * not within a day, oldest first, at most NUDGES_PER_TURN. The receipt it returns counts them. Pure: the hook and the
- * tests share it (server/agent-hook.mjs carries a copy; tests/due-by-fact.test.ts keeps them equal).
+ * The pick at a turn end: due entries (dueAt passed) not nudged NUDGE_CAP times for this fact and revision, and not
+ * within a day, oldest first, at most NUDGES_PER_TURN. One implementation for the Stop hook and the turn-end event
+ * (shared/turn-checks.mjs, which the build inlines into the hook); tests/due-by-fact.test.ts holds it to these bounds.
  */
-export function pickNudges(entries: readonly DueEntry[], receipt: NudgeReceipt, now: number): { lines: string[]; receipt: NudgeReceipt } {
-  const next = { ...receipt };
-  const lines: string[] = [];
-  for (const e of [...entries].sort((x, y) => x.dueAt.localeCompare(y.dueAt))) {
-    if (lines.length >= NUDGES_PER_TURN || Date.parse(e.dueAt) > now) continue;
-    const r = receipt[e.id];
-    const same = r && r.key === e.key && r.revision === e.revision;
-    if (same && (r.count >= NUDGE_CAP || now - Date.parse(r.at) < NUDGE_GAP_MS)) continue;
-    next[e.id] = { key: e.key, revision: e.revision, count: same ? r.count + 1 : 1, at: new Date(now).toISOString() };
-    lines.push(e.line);
-  }
-  return { lines, receipt: next };
-}
+export { pickNudges } from "./turn-checks.mjs";
 
 /**
  * The worker's periodic pass over one workspace, a check first (`apply` false) and then the change:
