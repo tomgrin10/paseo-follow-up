@@ -311,7 +311,8 @@ test("oversized live sections keep every glance and page their complete evidence
   workspaceSchema.parse(w);
   const extra = { nextMessageInfo: { to: "main-agent", tasks: [], text: "Check invoice receipts. ".repeat(260), reason: "Waiting", eta: null } };
   assert.ok(size(w.obligations.filter(o => !finishedTask(o))) > TOOL_BUDGET, "live tasks alone overflow the old budget");
-  assert.throws(() => agentView(w, { live: "tasks", kind: "tasks" }), /Choose history or live/);
+  assert.equal(agentStatusRpc.input.safeParse({ agentId: "main-agent", live: "tasks", history: "tasks" }).success, false);
+  assert.doesNotThrow(() => agentView(w, { live: "tasks", kind: "tasks" }));
   const view = agentView(w, {}, extra);
   assert.ok(size(view) <= TOOL_BUDGET, `${size(view)} chars`);
   assert.ok(agentStatusRpc.output.safeParse(view).success);
@@ -330,9 +331,12 @@ test("oversized live sections keep every glance and page their complete evidence
       assert.ok(agentStatusRpc.output.safeParse(page).success, `${kind}: page contract`);
       const info = page.live[kind];
       assert.ok(info.shown > 0, `${kind}: evidence page progresses`);
-      for (const original of active.slice(offset, offset + info.shown)) {
-        const id = "key" in original ? original.key : original.id;
-        assert.deepEqual(page[key].find((x: any) => (x.key ?? x.id) === id), original, `${kind}: exact full record`);
+      const whole = page[key].filter((item: any) => !item.glance);
+      assert.equal(whole.length, info.shown);
+      for (const item of whole) {
+        const id = item.key ?? item.id;
+        assert.deepEqual(item, active.find(original => ("key" in original ? original.key : original.id) === id), `${kind}: exact full record`);
+        assert.ok(!seen.has(id), `${kind}: stable paging does not repeat records`);
         seen.add(id);
       }
       for (const k of ["prs", "tasks", "questions", "batches", "prActions"] as const) assert.equal(page.history[k].shown, PAGE.recentDone, `${kind} page keeps ${k} history`);
@@ -349,4 +353,58 @@ test("oversized live sections keep every glance and page their complete evidence
   assert.ok(summary.prs.filter((p: any) => p.state === "OPEN").every((p: any) => p.glance && p.failedChecksCount === 1), "summary glances retain failure counts");
   assert.ok(summary.openQuestions.every((q: any) => q.glance), "summary labels compact pending questions");
   for (const kind of ["prs", "tasks", "questions", "batches", "prActions"] as const) assert.equal(summary.history[kind].shown, PAGE.recentDone, kind);
+});
+
+
+// A large live queue must remain readable even after shortening every individual glance.
+test("hundreds of live tasks and questions cap their glances without losing access to any record", () => {
+  const seed = workspaceSchema.parse(closedHistory());
+  seed.obligations = [...seed.obligations.filter(finishedTask), ...Array.from({ length: 500 }, (_, i) => ({
+    id: `live-${i}`, title: `Verify invoice retry for worker ${i}`, status: i === 0 ? "blocked" as const : "pending" as const,
+    afterPrs: [], evidence: "Checked invoice receipts and retries. ".repeat(10), enable_follow_up: true, revision: 0,
+  }))];
+  const questions = bigHistory({ questions: 200, batches: 0, open: 200 }).questions.map((q, i) => ({ ...q, id: `Q${10_000 + i}` }));
+  seed.questions.push(...questions);
+  const w = workspaceSchema.parse(seed), expected = new Map(w.obligations.filter(o => !finishedTask(o)).map(o => [o.id, o]));
+  const liveQuestions = new Set(questions.map(q => q.id));
+  for (const detail of ["summary", "full"] as const) {
+    const view = agentView(w, {}, undefined, detail === "full" ? undefined : v => compact("workspace_status", {}, v));
+    const sent = detail === "full" ? view : compact("workspace_status", {}, view);
+    assert.ok(size(sent) <= TOOL_BUDGET, `${detail}: ${size(sent)} characters`);
+    assert.ok(agentStatusRpc.output.safeParse(view).success);
+    const tasks = view.obligations.filter(o => !finishedTask(o)), qs = view.questions.filter(q => liveQuestions.has(q.id));
+    assert.ok(tasks.length > 0 && tasks.length < 500, "live task glance is capped, never empty");
+    assert.ok(qs.length > 0 && qs.length < 200, "live question glance is capped, never empty");
+    assert.equal(tasks[0].id, "live-0", "the oldest but blocked task comes first");
+    assert.equal(tasks[1].id, "live-499", "equally urgent tasks come newest first");
+    assert.equal(qs[0].id, "Q10199", "the newest open question comes first");
+    assert.equal(view.live!.tasks.total, 500);
+    assert.equal(view.live!.questions.total, 200);
+    assert.match(view.live!.tasks.hint!, /detail=full live=tasks/);
+    assert.match(view.live!.questions.hint!, /detail=full live=questions/);
+    for (const kind of ["prs", "tasks", "questions", "batches", "prActions"] as const) assert.equal(view.history[kind].shown, PAGE.recentDone, kind);
+  }
+  const seen = new Set<string>();
+  for (let offset = 0; ;) {
+    const page = agentView(w, { live: "tasks", offset, limit: 100 });
+    assert.ok(size(page) <= TOOL_BUDGET, `page at ${offset}: ${size(page)} characters`);
+    assert.ok(agentStatusRpc.output.safeParse(page).success);
+    const whole = page.obligations.filter(o => !finishedTask(o) && !(o as any).glance);
+    assert.equal(whole.length, page.live!.tasks.shown);
+    assert.ok(whole.length > 0, "every page makes progress");
+    if (offset === 0) {
+      assert.equal(whole[0].id, "live-0", "pages use the preview's urgency order");
+      if (whole.length > 1) assert.equal(whole[1].id, "live-499", "pages use the preview's newest-first ties");
+    }
+    for (const task of whole) {
+      assert.deepEqual(task, expected.get(task.id), "evidence pages retain exact full task records");
+      assert.ok(!seen.has(task.id), "stable paging does not repeat tasks");
+      seen.add(task.id);
+    }
+    assert.ok(page.questions.some(q => liveQuestions.has(q.id)), "task pages retain the question glance");
+    for (const kind of ["prs", "tasks", "questions", "batches", "prActions"] as const) assert.equal(page.history[kind].shown, PAGE.recentDone, kind);
+    if (!page.live!.tasks.more) break;
+    offset += page.live!.tasks.shown;
+  }
+  assert.equal(seen.size, 500, "paging reaches every live task");
 });

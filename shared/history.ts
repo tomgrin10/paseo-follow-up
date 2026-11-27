@@ -57,21 +57,25 @@ type AgentW = Hist & { prs: readonly ListPr[]; obligations: readonly { status: s
  * (350 merged PRs, 400 settled batches) made the summary ~207k characters, over a tool result's limit.
  */
 export function agentView<W extends AgentW, X extends object = {}>(w: W, { kind, live, offset, limit }: { kind?: HistoryKind; live?: HistoryKind; offset?: number; limit?: number } = {}, extra?: X, sent: (view: W & X & { history: AgentHistory; live?: AgentHistory }) => unknown = view => view): W & X & { history: AgentHistory; live?: AgentHistory } {
-  if (kind && live) throw new Error("Choose history or live, not both.");
-  let size = Math.min(limit ?? PAGE.toolPage, PAGE.maxLimit), compactLive = !!live, glanceChars = 250;
+  // RPC validation rejects ambiguous selectors; direct readers still receive useful state.
+  if (kind) live = undefined;
+  const requested = Math.min(limit ?? PAGE.toolPage, PAGE.maxLimit);
+  let size = requested, compactLive = !!live, glanceChars = 250, liveGlances = Infinity;
   for (;;) {
-    const view = { ...agentViewOf(w, { kind, live, offset, limit: size, compactLive, glanceChars }), ...(extra ?? {}) } as W & X & { history: AgentHistory; live?: AgentHistory };
+    const view = { ...agentViewOf(w, { kind, live, offset, limit: size, compactLive, glanceChars, liveGlances }), ...(extra ?? {}) } as W & X & { history: AgentHistory; live?: AgentHistory };
     // Measure what the transport sends. Compact all live sections before shrinking an evidence page;
     // each other section keeps its glance, including all five recent records of every finished kind.
     if (JSON.stringify(sent(view)).length <= TOOL_BUDGET) return view;
     if (!compactLive) { compactLive = true; continue; }
     if ((kind || live) && size > 1) { size = Math.max(1, Math.floor(size / 2)); continue; }
     if (glanceChars > 60) { glanceChars = Math.floor(glanceChars / 2); continue; }
-    throw new Error("Workspace status evidence exceeds the tool budget even at its smallest page.");
+    if (!Number.isFinite(liveGlances)) { liveGlances = PAGE.toolPage; size = requested; continue; }
+    if (liveGlances > 1) { liveGlances = Math.max(1, Math.floor(liveGlances / 2)); continue; }
+    return view; // A budget error must never replace the agent's entire workspace state.
   }
 }
 
-function agentViewOf<W extends AgentW>(w: W, { kind, live, offset, limit, compactLive, glanceChars }: { kind?: HistoryKind; live?: HistoryKind; offset?: number; limit: number; compactLive: boolean; glanceChars: number }): W & { history: AgentHistory; live?: AgentHistory } {
+function agentViewOf<W extends AgentW>(w: W, { kind, live, offset, limit, compactLive, glanceChars, liveGlances }: { kind?: HistoryKind; live?: HistoryKind; offset?: number; limit: number; compactLive: boolean; glanceChars: number; liveGlances: number }): W & { history: AgentHistory; live?: AgentHistory } {
   const covers = new Set(w.obligations.filter(o => !finishedTask(o)).flatMap(o => [o.coveredBy, ...w.questions.filter(q => (q as { taskId?: string | null }).taskId === o.id).map(q => q.id)]).filter((x): x is string => !!x));
   // An evidence page never removes another section's recent glance.
   const page = (k: HistoryKind) => k === kind ? { offset: offset ?? 0, limit } : { recent: PAGE.recentDone };
@@ -87,15 +91,32 @@ function agentViewOf<W extends AgentW>(w: W, { kind, live, offset, limit, compac
   const liveInfo = {} as AgentHistory;
   const glance = <T>(k: HistoryKind, items: T[], isDone: (x: T) => boolean): T[] => {
     const active = items.filter(x => !isDone(x));
-    const selected = live === k ? window(active, offset ?? 0, limit) : null;
-    const whole = selected ? new Set(selected.items) : null;
-    const result = items.map(x => {
+    const capped = Number.isFinite(liveGlances);
+    const latest = newestFirst(active, x => {
+      const item = x as Record<string, any>;
+      return Math.max(at(item.askedAt), at(item.createdAt), at(item.updatedAt), at(item.snapshot?.observedAt));
+    });
+    const urgency = (x: T) => {
+      const item = x as Record<string, any>;
+      if (k === "tasks") return ({ blocked: 0, working: 1, pending: 2, waiting: 3 } as Record<string, number>)[item.status] ?? 4;
+      if (k === "questions") return !item.answer ? 0 : finishedQuestion(item as Q) ? 2 : 1;
+      if (k === "prs") return item.error || item.snapshot?.conflict || item.snapshot?.failedChecks?.length ? 0 : 1;
+      return item.state === "blocked" || item.state === "uncertain" ? 0 : 1;
+    };
+    // Use the same stable urgency/newest order for the preview and its full-record pages.
+    const ordered = capped || live === k ? [...active].sort((a, b) => urgency(a) - urgency(b) || latest(a, b)) : active;
+    const selected = live === k ? window(ordered, offset ?? 0, limit) : null;
+    const whole = new Set(selected?.items ?? []);
+    const preview = new Set(ordered.slice(0, liveGlances));
+    const visible = capped || live === k ? [...ordered.filter(x => preview.has(x) || whole.has(x)), ...items.filter(isDone)] : items;
+    const result = visible.map(x => {
       if (isDone(x)) return k === kind ? x : BRIEF_DONE[k](x as Record<string, any>, glanceChars) as T;
-      if (whole?.has(x)) return x;
+      if (whole.has(x)) return x;
       if (compactLive || k === "questions" && finishedQuestion(x as Q)) return BRIEF_DONE[k](x as Record<string, any>, glanceChars) as T;
       return x;
     });
-    const shown = selected?.items.length ?? result.filter((x, i) => !isDone(items[i]) && x === items[i]).length;
+    const activeSet = new Set(active);
+    const shown = selected?.items.length ?? result.filter(x => activeSet.has(x)).length;
     liveInfo[k] = { total: active.length, offset: selected?.offset ?? 0, shown, more: active.length - (selected?.offset ?? 0) - shown,
       hint: shown < active.length ? LIVE_HINT(k) : null };
     return result;

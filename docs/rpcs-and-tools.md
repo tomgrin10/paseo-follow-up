@@ -184,7 +184,9 @@ Delivered answers kept as context for unfinished tasks retain their answer, deli
 question records; pending questions and pending deliveries stay whole while they fit. When live evidence exceeds
 the budget, every
 section keeps its glance and `detail=full live=<kind>` with `offset`/`limit` pages the complete original records.
-`live.<kind>` counts the complete records shown and carries the page pointer. A page keeps the other sections’
+`live.<kind>` counts the complete records shown and carries the page pointer. If shortened glances still exceed
+the budget, each live section keeps a bounded urgent/newest preview and its page pointer instead of failing.
+The preview and its full-record pages use the same stable ordering. A page keeps the other sections’
 glances and all recent history; `history` and `live` select alternative evidence pages. The budget measures the
 final summary after
 compaction, or the full reply for `detail=full`, including the handler’s extra fields. Finished-task glances omit

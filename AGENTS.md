@@ -969,7 +969,9 @@ These are product rules. Each has tests, and breaking one is a bug even when the
    pending questions and pending deliveries stay whole while they fit. When live evidence exceeds the budget,
    every live section keeps schema-backed glances with `detail=full live=<kind>` offset/limit pointers to complete
    records. Compact evidence before fitting pages; never empty another section's live or recent-history glance.
-   Shorten glance text further when needed; pages retain exact original text. Old options/background must not erase history.
+   Shorten glance text further when needed, then cap each live section’s glances, urgent/newest first, with live
+   page pointers for the rest. A large live queue must return state rather than throw a budget error (500 live tasks
+   and 200 open questions; paging still reaches every full record). Pages retain exact original text.
    Finished tasks also use a schema-backed glance without evidence or notes; `history=tasks` returns their full
    records. Both summary and full must retain five of every kind with handler extras, even when the live-only
    payload exceeds `TOOL_BUDGET` (the 8-PR, 24-task, 13-question evidence-heavy regression).
