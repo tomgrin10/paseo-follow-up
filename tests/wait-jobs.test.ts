@@ -198,7 +198,10 @@ for (const [shell, native, noTimeout] of [['sh', false, false], ['bash', false, 
       const receipt = await f.jobs.wait(f.owner, { jobId: job.jobId, max_wait_seconds: 2 });
       assert.equal(receipt.outcome, 'failed');
       assert.equal(receipt.exitCode, 7, 'the runner survives and records the actual command exit');
-      if ('outputPath' in job) assert.equal(await readFile(job.outputPath, 'utf8'), 'survived');
+      if (!native) {
+        assert.ok(job.outputPath, 'detached jobs expose their output');
+        assert.equal(await readFile(job.outputPath, 'utf8'), 'survived');
+      }
     } finally {
       await writeFile(release, 'go');
       if (launcher?.pid) { try { process.kill(-launcher.pid, 'SIGKILL'); } catch {} }
