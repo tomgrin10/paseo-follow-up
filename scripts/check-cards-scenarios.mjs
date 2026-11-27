@@ -233,7 +233,7 @@ try {
       used: shows.length > 0, right: scenario.should ? shows.length > 0 : shows.length === 0,
       firstValid: shows.length ? !failed(shows[0]) : null, showCalls: shows.length, showErrors: shows.filter(failed).map(i => JSON.stringify(i.error ?? i.detail).slice(0, 600)),
       asked: asks.length, linked: asks.length ? linked : null, pages, untracked,
-      cards: cards.cards.map(c => ({ id: c.id, title: c.title, blocks: (c.blocks ?? []).map(b => b.type), question: c.question?.id ?? null })),
+      cards: cards.cards.map(c => ({ id: c.id, title: c.title, blocks: (c.blocks ?? []).map(b => b.type), question: c.question ?? null })),
       questions, toolNames: [...new Set(tools.map(i => i.name))], lineReached,
       seconds: Math.round((Date.now() - started) / 1000), usage, finalText: text,
       firstShowInput: shows[0] ? JSON.stringify(shows[0].detail?.input ?? shows[0].detail ?? {}).slice(0, 3000) : null,
