@@ -1,13 +1,14 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { usePagedList } from "./paged-list";
 import { browserKey } from "./keys";
-import { Platform, TextInput, useWindowDimensions, View } from "react-native";
+import { Platform, useWindowDimensions, View, type TextInput } from "react-native";
 import { AttachImageButton, ImageAttachmentsRow, ImageField, useImageAttachments } from "./image-attach";
 import { imageTargetKey, type ImageTarget } from "../shared/images";
 import { dropUnsent, keepUnsent, OVERSEER_ASK_KEY, unsent } from "./unsent-images";
 import { Pressable, Text } from "./text";
 import { usePaseo, useRpc, useSettings, type PluginScreenProps } from "@getpaseo/plugin/client";
-import { Icon, ScrollView, Modal, useToast } from "@getpaseo/plugin/client/ui";
+import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
+import { ScrollView } from "./keyboard";
 import { useQuery } from "@tanstack/react-query";
 import { browserStatusRpc, controlRpc, inboxBriefRpc, sendRpc } from "../shared/contracts";
 import { needsYou, workspaceSnoozed } from "../shared/attention";
@@ -76,6 +77,7 @@ import { TOAST_ANCHOR, ToastHost, useQuestionOpener } from "./toasts";
 import { openRowCopy, useDetailGate, useWorkspace } from "./workspace-data";
 import type { ListWorkspace } from "../shared/list";
 import { NEW_NAME } from "../shared/new-name";
+import { Field } from "./field";
 
 /** Home without a search key (tests, older wiring): no subscription, no label. */
 const noSubscribe = () => () => undefined;
@@ -940,7 +942,7 @@ export function ReplyBox({ theme, compact, agentName, onSend, placeholder = "Ans
     <View style={{ borderRadius: compact ? 12 : 10, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface1 }}>
     {(!!img.images.length || !!img.refusal) && <View style={{ paddingHorizontal: 12, paddingTop: 10 }}><ImageAttachmentsRow model={img} theme={theme} compact={compact} /></View>}
     <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, paddingLeft: 12, paddingRight: compact ? 1 : 6, paddingVertical: compact ? 0 : 6 }}>
-      <TextInput ref={inputRef} accessibilityLabel={`Reply to ${agentName}`} accessibilityHint={compact && hint ? hint : undefined} onFocus={() => onFocusChange?.(true)} onBlur={() => onFocusChange?.(false)} value={value} onChangeText={setValue} placeholder={placeholder} placeholderTextColor={c.foregroundMuted} multiline
+      <Field ref={inputRef} accessibilityLabel={`Reply to ${agentName}`} accessibilityHint={compact && hint ? hint : undefined} onFocus={() => onFocusChange?.(true)} onBlur={() => onFocusChange?.(false)} value={value} onChangeText={setValue} placeholder={placeholder} placeholderTextColor={c.foregroundMuted} multiline
         numberOfLines={compact ? 1 : undefined}
         onKeyPress={e => { const k = e.nativeEvent as unknown as { key: string; metaKey?: boolean; ctrlKey?: boolean }; if (k.key === "Enter" && (k.metaKey || k.ctrlKey)) void send(); }}
         style={{ flex: 1, minHeight: compact ? 46 : 36, maxHeight: 140, color: c.foreground, fontSize: 14, lineHeight: 20, paddingVertical: compact ? 13 : 6, ...(Platform.OS === "web" ? { outlineStyle: "none" } as object : {}) }} />

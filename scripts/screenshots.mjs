@@ -47,7 +47,7 @@ const arg = (name, fallback) => { const i = argv.indexOf(name); return i >= 0 ? 
 // What's new reinstalls the plugin as the CHANGELOG's newest stable, so it goes last: every other shot shows the version under test.
 const SHOTS = ["setup", "home", "sidebar", "panel", "questions", "pill", "pr-sheet", "phone", "linked-items", "notes-home", "notes-panel", "tasks", "tasks-sheet", "tasks-phone", "whats-new"];
 /** Opt-in review sets, never part of the README run: they seed extra workspaces of their own. */
-const REVIEW_SHOTS = ["menu-bounds", "tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "peek", "pr-now", "panel-folds", "optimistic-answers", "workspace-view", "question-links", "gallery", "frames", "onboarding", "setup-popup", "advanced"];
+const REVIEW_SHOTS = ["menu-bounds", "tasks-view", "settings-tabs", "dictation", "local-titles", "shortcut", "search-focus", "split", "rowchips", "needs-you-states", "own-answer", "dock-in-view", "keyboard-room", "done-brief", "pick-notes", "review-mode", "deploy-check", "feeds", "put-in-chat", "sending", "pr-link", "merge-click", "reviewers-click", "catch-up", "icon", "home-keys", "more-context", "dismiss", "layout-search", "pr-scale", "paged-lists", "pr-stats-settings", "morning-brief", "older-briefs", "new", "pr-stats", "pr-stats-off", "archive", "paste-images", "attach-images", "compass", "compass-suggest", "compass-readers", "batch-churn", "scheduled-tasks", "your-questions", "now-line", "peek", "pr-now", "panel-folds", "optimistic-answers", "workspace-view", "question-links", "gallery", "frames", "onboarding", "setup-popup", "advanced"];
 /** Pasted images and their Add image button share one harness setup (an Overseer and the fixture provider taking images). */
 const PASTE_LIKE = only => only.includes("paste-images") || only.includes("attach-images");
 const only = arg("--only") ? arg("--only").split(",").map(s => s.trim()).filter(Boolean) : SHOTS;
@@ -88,7 +88,7 @@ const paseo016 = /(^|\D)0\.1[6-9]\.\d+/.test(paseoVersion ?? "");
 if (only.includes("sidebar") && only.some(n => n !== "sidebar")) fail("shoot --only sidebar on its own, with HARNESS_PASEO=0.16");
 if (only.includes("sidebar") && !paseo016) fail(`the sidebar shot needs the Paseo CLI 0.16.x (found ${paseoVersion ?? "none"}); run with HARNESS_PASEO=0.16`);
 if (only.includes("feeds") && only.length > 1) fail("run --only feeds on its own (npm run test:feeds)");
-const paseoOk = only.includes("menu-bounds") || only.includes("settings-tabs") || only.includes("new") || only.includes("onboarding") || PASTE_LIKE(only) || only.includes("gallery") || only.includes("search-focus") || only.includes("frames") || only.includes("your-questions") || only.includes("peek") || argv.includes("--parity-review") ? /(^|\D)0\.1[5-7]\.\d+/ : only.includes("sidebar") || only.includes("feeds") || only.includes("put-in-chat") || argv.includes("--sidebar-review") || argv.includes("--overseer-review") || argv.includes("--keys-review") || argv.includes("--rank-review") || argv.includes("--sortfoot-review") || argv.includes("--secsearch-review") || argv.includes("--github-wait-review") ? /(^|\D)0\.1[56]\.\d+/ : /(^|\D)0\.15\.\d+/;
+const paseoOk = only.includes("menu-bounds") || only.includes("settings-tabs") || only.includes("new") || only.includes("onboarding") || PASTE_LIKE(only) || only.includes("gallery") || only.includes("search-focus") || only.includes("frames") || only.includes("your-questions") || only.includes("peek") || only.includes("keyboard-room") || argv.includes("--parity-review") ? /(^|\D)0\.1[5-7]\.\d+/ : only.includes("sidebar") || only.includes("feeds") || only.includes("put-in-chat") || argv.includes("--sidebar-review") || argv.includes("--overseer-review") || argv.includes("--keys-review") || argv.includes("--rank-review") || argv.includes("--sortfoot-review") || argv.includes("--secsearch-review") || argv.includes("--github-wait-review") ? /(^|\D)0\.1[56]\.\d+/ : /(^|\D)0\.15\.\d+/;
 if (!paseoVersion || !paseoOk.test(paseoVersion)) fail(`needs the Paseo CLI 0.15.x on PATH (found ${paseoVersion ?? "none"}); run through harness-slot or put ~/paseo-harness/cli/0.15.4/bin first`);
 if (changelogArg && !existsSync(changelogArg)) fail(`--whats-new-changelog: no file at ${changelogArg}`);
 const optimiser = await findOptimiser();
@@ -796,7 +796,9 @@ async function seed({ call, home }) {
   if (only.includes("review-mode") || only.includes("pr-link")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }] });
   // reviewers-click: Ravi and Mina review example/app, so each PR's row reads "Add reviewers to #N: Ravi and Mina".
   if (only.includes("reviewers-click")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }, { login: "mina", name: "Mina" }] });
-  const specs = [...WORKSPACES.filter(w => !only.includes("pr-now") || ["audit", "billing"].includes(w.key)).filter(w => !(argv.includes("--rename-fixup-review") || only.includes("local-titles")) || ["audit", "billing"].includes(w.key)), ...(only.includes("needs-you-states") || only.includes("panel-folds") || only.includes("tasks-view") || only.includes("own-answer") || only.includes("optimistic-answers") || only.includes("more-context") || only.includes("dismiss") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") || PASTE_LIKE(only) ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") || only.includes("optimistic-answers") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") || only.includes("dismiss") ? MERGE_CLICK_STATES : []), ...(only.includes("reviewers-click") ? REVIEWERS_CLICK_STATES : []), ...(only.includes("pr-scale") ? PR_SCALE_STATES : []), ...(only.includes("batch-churn") ? BATCH_CHURN_STATES : []), ...(only.includes("scheduled-tasks") ? SCHEDULED_STATES : []), ...(only.includes("paged-lists") ? PAGED_STATES : []), ...(only.includes("now-line") ? NOW_LINE_STATES : []), ...(only.includes("peek") ? PEEK_STATES : []), ...(only.includes("pr-now") ? PR_NOW_STATES : []), ...(only.includes("question-links") ? QL_STATES : [])];
+  const specs = [...WORKSPACES.filter(w => !only.includes("pr-now") || ["audit", "billing"].includes(w.key)).filter(w => !(argv.includes("--rename-fixup-review") || only.includes("local-titles")) || ["audit", "billing"].includes(w.key)), ...(only.includes("needs-you-states") || only.includes("panel-folds") || only.includes("tasks-view") || only.includes("own-answer") || only.includes("optimistic-answers") || only.includes("keyboard-room") || only.includes("more-context") || only.includes("dismiss") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") || PASTE_LIKE(only) ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") || only.includes("optimistic-answers") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") || only.includes("dismiss") ? MERGE_CLICK_STATES : []), ...(only.includes("reviewers-click") ? REVIEWERS_CLICK_STATES : []), ...(only.includes("pr-scale") ? PR_SCALE_STATES : []), ...(only.includes("batch-churn") ? BATCH_CHURN_STATES : []), ...(only.includes("scheduled-tasks") ? SCHEDULED_STATES : []), ...(only.includes("paged-lists") ? PAGED_STATES : []), ...(only.includes("now-line") ? NOW_LINE_STATES : []), ...(only.includes("peek") ? PEEK_STATES : []), ...(only.includes("pr-now") ? PR_NOW_STATES : []), ...(only.includes("question-links") ? QL_STATES : [])];
+  // Keyboard shots need the answer workspace and the Home fixtures, without unrelated held repair turns.
+  if (only.includes("keyboard-room")) specs.splice(0, specs.length, ...specs.filter(w => ["audit", "billing", "ny-lone"].includes(w.key)));
   // Geometry checks need one question, one repair and one permission row, not the full README inventory.
   // optimistic-answers needs one lone question and one chat card; the clock only moves forward (pn-one sits before the last needs-you states).
   if (only.includes("optimistic-answers")) specs.splice(0, specs.length, ...specs.filter(w => !NEEDS_YOU_STATES.includes(w) && !PICK_NOTES.includes(w) || ["ny-lone", "pn-one"].includes(w.key)));
@@ -2397,6 +2399,7 @@ async function shootAll({ shoot, seeded, plugin, home, cli, call }) {
   if (only.includes("workspace-view")) await workspaceViewShots({ shoot, call, seeded });
   if (only.includes("own-answer")) await ownAnswerShots({ shoot });
   if (only.includes("optimistic-answers")) await optimisticAnswerShots({ shoot });
+  if (only.includes("keyboard-room")) await keyboardRoomShots({ shoot, call, home });
   if (only.includes("more-context")) await moreContextShots({ shoot, call });
   if (only.includes("your-questions")) await yourQuestionsShots({ shoot, call, seeded, home, cli });
   if (only.includes("paste-images")) await pasteImagesShots({ shoot, call });
@@ -6054,6 +6057,67 @@ async function dockInViewShots({ shoot }) {
     await shoot(name(`own-${kb}-${theme}`), frame, theme, async page => { await open(lone, "Missing keys")(page); await own(page); await keyboard(page, kb === "kb-up"); });
     await shoot(name(`note-${kb}-${theme}`), frame, theme, async page => { await open(lone, "Missing keys")(page); await note(page); await keyboard(page, kb === "kb-up"); });
     await shoot(name(`card-${kb}-${theme}`), frame, theme, async page => { await open(card, "Which encoding should the export use?")(page); await cardOwn(page); await keyboard(page, kb === "kb-up"); });
+  }
+}
+
+/**
+ * keyboard-room (the-keyboard-never-covers-a-field): a phone keyboard that overlays the page, as iOS and Android do in
+ * Paseo's edge-to-edge app: the visual viewport shrinks to 508 over an unchanged 390x844 page, and a block stands in
+ * for the keys. The Overseer's reply box, and an answer field in the workspace view's tab at phone width.
+ * `--keyboard-before` names the shots `before-`.
+ */
+async function keyboardRoomShots({ shoot, call, home }) {
+  const before = argv.includes("--keyboard-before");
+  const name = n => `${before ? "before-" : ""}kb-${n}`;
+  const KEYS_TOP = 508;
+  const visible = l => l.filter({ visible: true }).first();
+  const keys = async page => {
+    page.keepFocus = true;
+    await page.evaluate(top => {
+      Object.defineProperty(VisualViewport.prototype, "height", { configurable: true, get() { return top; } });
+      const k = document.createElement("div");
+      k.setAttribute("aria-hidden", "true");
+      Object.assign(k.style, { position: "fixed", left: "0", right: "0", top: `${top}px`, bottom: "0", zIndex: "2147483647", pointerEvents: "none",
+        background: "repeating-linear-gradient(90deg, #8e8e93 0 34px, #6c6c70 34px 39px)", opacity: "0.94", display: "flex", alignItems: "center", justifyContent: "center",
+        color: "#fff", font: "600 15px system-ui" });
+      k.textContent = "keyboard";
+      document.body.appendChild(k);
+      window.visualViewport.dispatchEvent(new Event("resize"));
+    }, KEYS_TOP);
+    await page.waitForTimeout(900);
+  };
+  // The Overseer, asked from Home's search, its answer scripted (as the gallery does).
+  const started = await call("follow.overseer-start", {});
+  const scripts = JSON.parse(await fs.readFile(join(home, "fixture-scripts.json"), "utf8").catch(() => "{}"));
+  scripts[`agent:${started.agentId}`] = [{ item: { type: "assistant_message", text: "Two workspaces wait on review. Billing retries needs a fix first; Onboarding email has a merge conflict." } }];
+  await fs.writeFile(join(home, "fixture-scripts.json"), JSON.stringify(scripts));
+  let asked = false;
+  const overseer = async page => {
+    await openHome(page); await page.setViewportSize(PHONE);
+    if (!asked) {
+      const search = visible(page.getByPlaceholder(/^Search/));
+      await search.click(); await search.fill("What's blocked on review?");
+      await visible(page.getByRole("button", { name: "Ask the Overseer: What's blocked on review?" })).click();
+      asked = true;
+    } else await visible(page.getByRole("button", { name: /^Overseer\. / })).click();
+    await visible(page.getByText(/^Two workspaces wait on review/)).waitFor({ timeout: 60000 });
+    await visible(page.getByLabel(/^Reply to /)).fill("And which one should I review first?");
+    await keys(page);
+  };
+  const lone = pick("ny-lone");
+  const view = async page => {
+    await openChat(page, lone.title, lone.prompt);
+    await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
+    await page.setViewportSize(PHONE);
+    await visible(page.getByTestId("follow-up-view-tab")).waitFor();
+    await visible(page.getByText("Missing keys")).waitFor();
+    await visible(page.getByRole("radio", { name: /^Something else/ })).click();
+    await visible(page.getByLabel("Your answer to Q1, required")).fill("Show the key itself, and log it so we add the translation.");
+    await keys(page);
+  };
+  for (const theme of ["light", "dark"]) {
+    await shoot(name(`overseer-${theme}`), PHONE, theme, overseer);
+    await shoot(name(`view-${theme}`), PHONE, theme, view);
   }
 }
 

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { View } from "react-native";
 import { Pressable, Text } from "./text";
 import { openExternalUrl, useRpc } from "@getpaseo/plugin/client";
-import { Icon, Modal, TextInput, useToast } from "@getpaseo/plugin/client/ui";
+import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { workspaceSpecRpc } from "../shared/contracts";
 import type { ListWorkspace as Workspace } from "../shared/list";
@@ -11,6 +11,7 @@ import { ago } from "../shared/attention";
 import { Button, CardRow, text, type Theme, SubmitScope } from "./kit";
 import { overviewKey, workspaceKey } from "./keys";
 import { runAction } from "./toasts";
+import { Field } from "./field";
 
 const openUrl = (url: string) => { void openExternalUrl(url).catch(() => undefined); };
 
@@ -91,13 +92,13 @@ export function SpecSheet({ workspace: w, open, theme, compact, onClose }: { wor
       {w.spec?.url && <Text style={t.small}>{specSource(w)} {ago(w.spec.at)}</Text>}
       <View style={{ gap: 6 }}>
         <Text style={t.label}>Link</Text>
-        <TextInput accessibilityLabel="Spec link" placeholder="https://claude.ai/code/artifact/…" placeholderTextColor={c.foregroundMuted} value={url} onChangeText={setUrl} autoCapitalize="none" autoCorrect={false} inputMode="url"
+        <Field accessibilityLabel="Spec link" placeholder="https://claude.ai/code/artifact/…" placeholderTextColor={c.foregroundMuted} value={url} onChangeText={setUrl} autoCapitalize="none" autoCorrect={false} inputMode="url"
           style={[field, url && !valid ? { borderColor: c.statusDanger } : null]} />
         {!!url && !valid && <Text style={[t.small, { color: c.statusDanger }]}>Use a full https:// link.</Text>}
       </View>
       <View style={{ gap: 6 }}>
         <Text style={t.label}>Name <Text style={{ color: c.foregroundMuted, fontWeight: "400" }}>(optional)</Text></Text>
-        <TextInput accessibilityLabel="Spec name, optional" placeholder="Invoice retry spec" placeholderTextColor={c.foregroundMuted} value={title} onChangeText={setTitle} maxLength={120} style={field} />
+        <Field accessibilityLabel="Spec name, optional" placeholder="Invoice retry spec" placeholderTextColor={c.foregroundMuted} value={title} onChangeText={setTitle} maxLength={120} style={field} />
       </View>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
         <Button shortcut theme={theme} compact={compact} kind="primary" icon="Check" title="Save" disabled={!valid} onPress={() => act({ action: "set", url, title: title.trim() || null })} />

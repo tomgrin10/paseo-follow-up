@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import { usePagedList } from "./paged-list";
 import { PAGE } from "../shared/paged";
 import { useViewSync, useViewVersion } from "./view-store";
-import { ActivityIndicator, TextInput, View } from "react-native";
+import { ActivityIndicator, View } from "react-native";
 import { Pressable, Text } from "./text";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useRpc, useSettings } from "@getpaseo/plugin/client";
-import { Icon, ScrollView, SettingsAction, SettingsCard, SettingsSection, SettingsSelect, SettingsSwitch, useToast } from "@getpaseo/plugin/client/ui";
+import { Icon, SettingsAction, SettingsCard, SettingsSection, SettingsSelect, SettingsSwitch, useToast } from "@getpaseo/plugin/client/ui";
+import { ScrollView } from "./keyboard";
 import { QUESTION_MODES, QUESTION_MODE_RULES, questionPreferences, type QuestionMode } from "../shared/questions";
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { followSettingsRpc, projectSettingsRpc, setFollowSettingsRpc, setProjectTrackingRpc } from "../shared/contracts";
@@ -35,6 +36,7 @@ import {
 import type { AgentSettingsView } from "../shared/agent-settings";
 import { jobRow, jobsHeader } from "../shared/job-rows";
 import type { ReviewerConfig } from "../shared/reviewers";
+import { Field } from "./field";
 
 const settingsKey = ["follow-up", "project-settings"];
 
@@ -163,7 +165,7 @@ function WorkspacesFold({ theme, compact, all, autoDefault, busy, set }: { theme
   const page = usePagedList({ items: view.rows, resetKey: q, size: PAGE.size, theme, compact, noun: "workspaces" });
   return <Disclosure id="following.workspaces" title="Workspaces" summary={workspacesSummary(all, autoDefault)} defaultOpen={workspacesOpenByDefault(view.exceptions)} theme={theme} compact={compact}>
     <View style={{ padding: 10, paddingBottom: 6 }}>
-      <TextInput accessibilityLabel="Search workspaces" value={q} onChangeText={v => { setQ(v); setOpenId(null); }} placeholder={`Search ${all.length} workspaces`} placeholderTextColor={c.foregroundMuted}
+      <Field accessibilityLabel="Search workspaces" value={q} onChangeText={v => { setQ(v); setOpenId(null); }} placeholder={`Search ${all.length} workspaces`} placeholderTextColor={c.foregroundMuted}
         autoCapitalize="none" autoCorrect={false}
         style={{ minHeight: compact ? 44 : 32, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: c.border, color: c.foreground, fontSize: 13, backgroundColor: c.surface0 }} />
     </View>

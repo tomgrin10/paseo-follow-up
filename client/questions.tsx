@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { View } from "react-native";
 import { Pressable, Text, copyable } from "./text";
 import { useRpc } from "@getpaseo/plugin/client";
-import { Icon, Modal, ScrollView, TextInput, copyText, useToast } from "@getpaseo/plugin/client/ui";
+import { Icon, Modal, ScrollView, copyText, useToast } from "@getpaseo/plugin/client/ui";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { activityRpc, answerQuestionRpc } from "../shared/contracts";
 import { ImageField, useImageAttachments } from "./image-attach";
@@ -36,6 +36,7 @@ import { Marked, NoMatchRow, useSectionSearch } from "./section-search";
 import { questionStatus } from "../shared/section-search";
 import { answerImagesKey, clearPendingAnswer, confirmPendingAnswer, failPendingAnswer, markSentHere, pendingKey, retryPendingAnswer, setPendingAnswer, usePendingAnswer, usePendingAnswers, type PendingAnswer } from "./pending-answers";
 import { inFlight } from "../shared/optimistic-answers";
+import { Field } from "./field";
 
 const who = (w: Pick<ListWorkspace, "mainAgentId">, agentId: string | null) => !agentId || agentId === w.mainAgentId ? "the main agent" : "a root session";
 
@@ -278,7 +279,7 @@ export function QuestionBody({ workspace: w, question: q, theme, compact, now = 
   const input = draft.field && <View style={{ gap: 6 }}>
     {!!draft.heading && <Text style={[t.small, { fontWeight: "600" }]}>{draft.heading}</Text>}
     {(() => {
-      const field = (pad: FieldPad) => <TextInput key={draft.field} accessibilityLabel={draft.label} placeholder={draft.placeholder} placeholderTextColor={c.foregroundMuted}
+      const field = (pad: FieldPad) => <Field key={draft.field} accessibilityLabel={draft.label} placeholder={draft.placeholder} placeholderTextColor={c.foregroundMuted}
         multiline value={words} editable={!run.isPending} onChangeText={setWords} onSelectionChange={caret.onSelectionChange} maxLength={2000} autoFocus={!free && (other || noteOpen)} style={[inputStyle(c, compact, draft.field === "answer" && !dense ? 3 : 2), pad]} />;
       // Dictated words land in this same field's words (what-you-typed-is-what-gets-sent), at the caret, never sent.
       return <ImageField model={img} theme={theme} compact={compact}>{dictate ? <DictationField key={draft.field} theme={theme} compact={compact} keyHint field={field} disabled={run.isPending}

@@ -1,0 +1,1 @@
+- On a phone, the keyboard no longer covers what you're typing: the Overseer's reply box, Home, the workspace panel and Settings move up above it, like Paseo's own message box.

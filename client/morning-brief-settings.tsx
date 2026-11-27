@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { PagedRows } from "./paged-list";
-import { ActivityIndicator, TextInput, View } from "react-native";
+import { ActivityIndicator, View } from "react-native";
 import { openExternalUrl, useRpc } from "@getpaseo/plugin/client";
 import { Icon, SettingsAction, SettingsCard, SettingsSection, SettingsSelect, SettingsSwitch, copyText, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -15,6 +15,7 @@ import { QUEUE_STATE_TYPES, WEEKDAYS, defaultWorkdays, isZone, type Weekday } fr
 import {
   PLAN_MODES, planCard, queueStateLabel, type BriefSettingsView, type PlanChange, type PlanMode, type PlanView, type QueueChange,
 } from "../shared/morning-brief";
+import { Field } from "./field";
 
 export const briefSettingsKey = ["follow-up", "brief-settings"];
 export const briefSourcesKey = ["follow-up", "brief-sources"];
@@ -346,7 +347,7 @@ function LinkField({ initial, busy, onUse, theme, compact, placeholder = "https:
   useEffect(() => setValue(initial), [initial]);
   const dirty = value.trim() !== initial && value.trim().length > 0;
   return <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-    <TextInput accessibilityLabel="The plan's link" value={value} onChangeText={setValue} placeholder={placeholder} placeholderTextColor={c.foregroundMuted} autoCapitalize="none" autoCorrect={false}
+    <Field accessibilityLabel="The plan's link" value={value} onChangeText={setValue} placeholder={placeholder} placeholderTextColor={c.foregroundMuted} autoCapitalize="none" autoCorrect={false}
       onSubmitEditing={() => dirty && onUse(value.trim())} style={field(theme, compact, value.length > 0)} />
     {/* Shown once there's something new to use: then it's the screen's one primary action. */}
     {dirty && <Button title="Use it" kind="primary" theme={theme} compact={compact} loading={busy} onPress={() => onUse(value.trim())} />}
@@ -442,7 +443,7 @@ function ZoneField({ view, zoneFrom, busy, onChange, theme, compact }: { view: B
   return <View style={{ gap: 6 }}>
     <Text style={t.meta}>{`Time zone: ${view.clock.timeZone} (${zoneFrom})`}</Text>
     <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-      <TextInput accessibilityLabel="Time zone" value={value} onChangeText={setValue} placeholder="Automatic: this device's zone" placeholderTextColor={c.foregroundMuted} autoCapitalize="none" autoCorrect={false}
+      <Field accessibilityLabel="Time zone" value={value} onChangeText={setValue} placeholder="Automatic: this device's zone" placeholderTextColor={c.foregroundMuted} autoCapitalize="none" autoCorrect={false}
         onSubmitEditing={() => valid && dirty && onChange(v || null)} style={field(theme, compact)} />
       {dirty && <Button title={v ? "Save" : "Use automatic"} theme={theme} compact={compact} disabled={!valid} loading={busy} onPress={() => onChange(v || null)} />}
     </View>

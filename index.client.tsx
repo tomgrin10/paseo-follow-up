@@ -39,6 +39,7 @@ import { openRename, RenameHost } from "./client/rename";
 import { setReportError } from "./client/toast-store";
 import { contextAskRpc, reportSendRpc } from "./shared/contracts";
 import { runAction } from "./client/toast-store";
+import { KeyboardRoom } from "./client/keyboard";
 
 /** Home. The same screen id the Overview had, so the sidebar row, ⌘K and saved links land on Home. */
 const OVERVIEW = HOME_SCREEN;
@@ -81,7 +82,7 @@ export default function contribute(host: PluginClientContext) {
   setReportFallback(() => client.openScreen({ screenId: OVERVIEW }));
   setReportError((message, at) => openReportSheet({ kind: "bug", error: message, at }));
   const reportHost = (props: PluginSurfaceProps | PluginWorkspacePanelProps) => <><ReportSheetHost theme={props.theme} layout={props.layout} openAgent={props.navigation ? agentId => props.navigation!.openAgent({ agentId }) : undefined} /><RenameHost theme={props.theme} compact={props.layout.compact} /></>;
-  const Settings = (props: PluginSurfaceProps & { category?: SettingsCategory }) => <><FollowSettings {...props} openSetup={openSetup} openReport={() => openReportSheet()} openSettings={category => openSettings(category)} />{reportHost(props)}</>;
+  const Settings = (props: PluginSurfaceProps & { category?: SettingsCategory }) => <KeyboardRoom compact={props.layout.compact}><FollowSettings {...props} openSetup={openSetup} openReport={() => openReportSheet()} openSettings={category => openSettings(category)} />{reportHost(props)}</KeyboardRoom>;
   // Paseo 0.16: one settings screen per category (its own tabs); 0.15: one screen with Follow-up's tabs (client/settings-screens.ts).
   const settings = createSettings(client, Settings);
   const openSettings = settings.open;
@@ -129,10 +130,10 @@ export default function contribute(host: PluginClientContext) {
   };
   const openItem = (key: string, extra: { question?: string } = {}) => client.openScreen({ screenId: OVERVIEW, params: { item: key, ...(extra.question ? { question: extra.question } : {}) } });
   const homeDeps = { sources, openSettings, openPanel, openLog, openQueue, openCatchUp, openStats, openHome: openOverview, openItem, briefDeps, searchKey, newKey };
-  const Overview = (props: PluginScreenProps) => <><FollowHome {...props} deps={homeDeps} />{reportHost(props)}</>;
-  const Panel = (props: PluginWorkspacePanelProps) => <><FollowPanel {...props} place="panel" openSettings={openSettings} openOverview={openOverview} openView={openPanel} inbox={inbox} live={store} briefDeps={briefDeps} sources={sources} />{reportHost(props)}</>;
-  const ViewTab = (props: PluginWorkspacePanelProps) => <><FollowPanel {...props} place="tab" openSettings={openSettings} openOverview={openOverview} inbox={inbox} live={store} briefDeps={briefDeps} sources={sources} />{reportHost(props)}</>;
-  const Large = (props: PluginScreenProps) => <LargeRedirect {...props} openView={openPanel} />;
+  const Overview = (props: PluginScreenProps) => <KeyboardRoom compact={props.layout.compact}><FollowHome {...props} deps={homeDeps} />{reportHost(props)}</KeyboardRoom>;
+  const Panel = (props: PluginWorkspacePanelProps) => <KeyboardRoom compact={props.layout.compact}><FollowPanel {...props} place="panel" openSettings={openSettings} openOverview={openOverview} openView={openPanel} inbox={inbox} live={store} briefDeps={briefDeps} sources={sources} />{reportHost(props)}</KeyboardRoom>;
+  const ViewTab = (props: PluginWorkspacePanelProps) => <KeyboardRoom compact={props.layout.compact}><FollowPanel {...props} place="tab" openSettings={openSettings} openOverview={openOverview} inbox={inbox} live={store} briefDeps={briefDeps} sources={sources} />{reportHost(props)}</KeyboardRoom>;
+  const Large = (props: PluginScreenProps) => <KeyboardRoom compact={props.layout.compact}><LargeRedirect {...props} openView={openPanel} /></KeyboardRoom>;
   const removers: (() => unknown)[] = [
     client.addScreen({ id: OVERVIEW, title: "Follow-up", Component: Overview }),
     client.addScreen({ id: LARGE_SCREEN, title: params => store.get(params.workspaceId ?? "")?.title ?? "Follow-up", Component: Large }),

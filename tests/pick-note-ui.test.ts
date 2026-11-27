@@ -34,14 +34,14 @@ test("a re-render, an inbox tick or a remount keeps the note: it lives in a modu
 
 test("focus never jumps: only the copy whose Add note was pressed focuses the field", () => {
   assert.match(source, /autoFocus=\{focusNote === d\.id\}/, "the note field focuses only where it was opened");
-  assert.doesNotMatch(source, /<TextInput[^>]*key=\{[^}]*notes/, "the field is never re-keyed by its text (a remount would drop the caret)");
+  assert.doesNotMatch(source, /<Field[^>]*key=\{[^}]*notes/, "the field is never re-keyed by its text (a remount would drop the caret)");
 });
 
 test("Enter in the note field never sends; Ctrl+Enter (Cmd+Enter on a Mac) still does", () => {
   assert.equal(submitKey(key({}), { tag: "TEXTAREA" }, false), false, "plain Enter in the multiline note adds a line");
   assert.equal(submitKey(key({ ctrlKey: true }), { tag: "TEXTAREA" }, false), true);
   assert.equal(submitKey(key({ metaKey: true }), { tag: "TEXTAREA" }, true), true);
-  assert.match(source, /<TextInput accessibilityLabel=\{`Note for the agent[^]*?multiline/, "the note field is multiline");
+  assert.match(source, /<Field accessibilityLabel=\{`Note for the agent[^]*?multiline/, "the note field is multiline");
   // Multi: the keyboard's Send is Send all, carrying the notes; a single card's keyboard Send stays Something else's.
   assert.match(source, /const keySend = multi \? \(sendBar\(b, sendable\)\.ready \? \(\) => sendAll\(\)/);
   assert.match(source, /const sendAll = \(\) => void run\("answers", async answerId => \{ await answer\(cardPicks\(sendable, words, openNotes\), answerId\); clearCard\(b\.id\); \}\);/);

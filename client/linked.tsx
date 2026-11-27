@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Platform, View, type TextInput as NativeTextInput } from "react-native";
 import { Pressable, Text } from "./text";
 import { openExternalUrl, useRpc } from "@getpaseo/plugin/client";
-import { Icon, Modal, TextInput, copyText, useToast } from "@getpaseo/plugin/client/ui";
+import { Icon, Modal, copyText, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { linkedIndexRpc, linkedItemsRpc, setLinkedItemsRpc } from "../shared/contracts";
 import type { LinkedKind, LinkedView, LinkedViewItem } from "../shared/linked";
@@ -13,6 +13,7 @@ import { Button, CardRow, IconButton, errorText, space, text, type Theme } from 
 import { Skeleton } from "./motion";
 import { SpecChip, SpecSheet } from "./spec";
 import type { Colors } from "./theme";
+import { Field } from "./field";
 
 /**
  * Linked items on screen (design §5): the references line (Spec and Linked chips) under the Summary, the Linked
@@ -192,7 +193,7 @@ export function LinkedSheet({ workspace: w, theme, compact, open, onClose, onEdi
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: compact ? 44 : 34, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1,
           borderColor: error ? c.statusDanger : focused ? c.foregroundMuted : c.border, backgroundColor: c.surface1 }}>
           <Icon name="Search" size={compact ? 16 : 14} color={c.foregroundMuted} />
-          <TextInput ref={field} accessibilityLabel="Filter, or paste a link or key" placeholder="Filter, or paste a link or key" placeholderTextColor={c.foregroundMuted}
+          <Field ref={field} accessibilityLabel="Filter, or paste a link or key" placeholder="Filter, or paste a link or key" placeholderTextColor={c.foregroundMuted}
             value={filter} onChangeText={v => { setFilter(v); setError(null); setNote(null); }} onSubmitEditing={add} blurOnSubmit={false} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} autoCapitalize="none" autoCorrect={false} returnKeyType={paste?.action === "add" ? "done" : "search"}
             style={[t.body, { flex: 1, minWidth: 0, paddingVertical: 6, ...(Platform.OS === "web" ? { outlineStyle: "none" } as object : null) }]} />
           {!!filter && <IconButton theme={theme} compact={compact} icon="X" label="Clear" onPress={() => { setFilter(""); setError(null); field.current?.focus(); }} />}

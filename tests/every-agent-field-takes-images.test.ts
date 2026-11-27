@@ -51,7 +51,10 @@ function fields(): { file: string; key: string }[] {
   const out: { file: string; key: string }[] = [];
   for (const file of readdirSync("client").filter(f => f.endsWith(".tsx"))) {
     const s = readFileSync(`client/${file}`, "utf8");
-    for (const m of s.matchAll(/<TextInput\s(?!\|)/g)) {
+    // Every field is client/field.tsx's Field, under the name the file imports it as (new.tsx has a Field of its own).
+    const name = s.match(/import \{ Field(?: as (\w+))? \} from "\.\/field"/);
+    if (!name) continue;
+    for (const m of s.matchAll(new RegExp(`<${name[1] ?? "Field"}\\s(?!\\|)`, "g"))) {
       const chunk = s.slice(m.index!, m.index! + 800);
       const label = chunk.match(/accessibilityLabel=(\{`[^`]*`\}|"[^"]*"|\{[^}]*\})/) ?? chunk.match(/placeholder=("[^"]*"|\{[^}]*\})/);
       out.push({ file, key: `${file}|${label?.[1] ?? "?"}` });

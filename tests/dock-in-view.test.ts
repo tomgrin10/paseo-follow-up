@@ -91,8 +91,8 @@ test("a-focused-field-and-its-send-stay-in-view: every docked pane draws through
   assert.equal((catchUp.match(/<DockedPane /g) ?? []).length, 1, "Catch up's card draws through DockedPane");
   assert.match(catchUp, /\{!yields && moves\}/, "the bar steps aside while a field has focus or the keyboard is up");
   assert.match(catchUp, /dock=\{\(\{ yields, typingInContent \}\) => compact && \(sheet && !typingInContent \|\| !yields\) && /, "an open sheet (More context, Later) stays above the keyboard; typing in the card hides it");
-  assert.match(await src("client/more-context.tsx"), /<View \{\.\.\.PRIMARY_FORM\} style=\{\{ gap: 10 \}\}>\s*(?:<ImageField [^>]*>)?<TextInput accessibilityLabel="What do you want to know\?"/, "More context's ask box keeps its Ask buttons in view");
-  assert.match(catchUp, /<View \{\.\.\.PRIMARY_FORM\}[^>]*>\s*<TextInput accessibilityLabel="Tell the agent something"/, "the note keeps its Send in view");
+  assert.match(await src("client/more-context.tsx"), /<View \{\.\.\.PRIMARY_FORM\} style=\{\{ gap: 10 \}\}>\s*(?:<ImageField [^>]*>)?<Field accessibilityLabel="What do you want to know\?"/, "More context's ask box keeps its Ask buttons in view");
+  assert.match(catchUp, /<View \{\.\.\.PRIMARY_FORM\}[^>]*>\s*<Field accessibilityLabel="Tell the agent something"/, "the note keeps its Send in view");
   // Setup's popup (setup-is-one-popup): its frame (client/setup-dialog.tsx) docks the moves on both layouts.
   const setup = await src("client/onboarding.tsx") + await src("client/setup-dialog.tsx");
   assert.match(setup, /dock=\{\(\{ yields \}\) => !yields && foot\}/, "on a phone the moves step aside while a field has focus");

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { View } from "react-native";
 import { Pressable, Text } from "./text";
-import { Icon, Modal, TextInput, useToast } from "@getpaseo/plugin/client/ui";
+import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
 import { useRpc } from "@getpaseo/plugin/client";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Obligation, Workspace } from "../shared/model";
@@ -16,6 +16,7 @@ import type { Colors } from "./theme";
 import { RichText } from "./rich-text";
 import { runAction } from "./toasts";
 import { DeliveryGlyph } from "./messages";
+import { Field } from "./field";
 
 // The agent's tasks, as the developer sees them (invariant tasks-are-the-agent-s, shared/task-view.ts): one collapsed
 // line by default, a row per open task saying what moves it, stale and due first, finished tasks in Activity.
@@ -67,7 +68,7 @@ function TriggerEditor({ obligation: o, workspace, theme, compact }: { obligatio
         </Pressable>)}
       </View>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <TextInput accessibilityLabel="Send at, date and time" value={when} editable={!busy} onChangeText={setWhen} autoCapitalize="none" autoCorrect={false}
+        <Field accessibilityLabel="Send at, date and time" value={when} editable={!busy} onChangeText={setWhen} autoCapitalize="none" autoCorrect={false}
           style={{ width: 150, minHeight: compact ? 44 : 32, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: timeProblem ? c.statusDanger : c.border, color: c.foreground, backgroundColor: c.surface1, fontSize: 13, fontVariant: ["tabular-nums"] }} />
         <Text style={[t.meta, timeProblem ? { color: c.statusDanger } : null]}>{timeProblem ?? `Sends ${clockLabel(new Date(at!).toISOString(), Date.now())}, your time`}</Text>
       </View>
@@ -75,7 +76,7 @@ function TriggerEditor({ obligation: o, workspace, theme, compact }: { obligatio
     {gated && <>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <Text style={t.meta}>Wait</Text>
-        <TextInput accessibilityLabel="Delay in days" inputMode="numeric" value={days} editable={!busy} onChangeText={setDays} style={{ width: 64, minHeight: compact ? 44 : 32, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: valid ? c.border : c.statusDanger, color: c.foreground, backgroundColor: c.surface1, fontSize: 13, fontVariant: ["tabular-nums"] }} />
+        <Field accessibilityLabel="Delay in days" inputMode="numeric" value={days} editable={!busy} onChangeText={setDays} style={{ width: 64, minHeight: compact ? 44 : 32, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: valid ? c.border : c.statusDanger, color: c.foreground, backgroundColor: c.surface1, fontSize: 13, fontVariant: ["tabular-nums"] }} />
         <Text style={t.meta}>days after every selected PR {event === "merge" ? "merges" : "deploys"}</Text>
       </View>
       {!workspace.prs.length && <Text style={[t.meta, { color: c.statusWarning }]}>Register a PR before scheduling this task.</Text>}

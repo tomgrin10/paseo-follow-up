@@ -7,7 +7,7 @@ import { PagedRows } from "./paged-list";
 import { useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Platform, View, type StyleProp, type TextStyle } from "react-native";
 import { Pressable, Text } from "./text";
-import { Icon, Modal, TextInput, copyText } from "@getpaseo/plugin/client/ui";
+import { Icon, Modal, copyText } from "@getpaseo/plugin/client/ui";
 import type { ContextRequest } from "../shared/catch-up";
 import { HISTORY_FILTERS, askingNow, questionCounts, questionHistory, questionOutcome, questionSource, unreadAnswer, type HistoryFilter, type QuestionAction } from "../shared/your-questions";
 import { ago } from "../shared/attention";
@@ -24,6 +24,7 @@ import type { ImageTarget, ImageUpload } from "../shared/images";
 import { useContextStore } from "./more-context";
 import { notice } from "./toast-store";
 import type { PaseoWorkspaces } from "./home-data";
+import { Field } from "./field";
 
 export const ASK_HINT = "The answer lands here. In a chat, /ask does the same.";
 const FILTER_LABEL: Record<HistoryFilter, string> = { all: "All", open: "Open", tasks: "Tasks" };
@@ -144,7 +145,7 @@ function AgentField({ theme, compact, label, placeholder, value, onChange, disab
   const caret = useCaret();
   // One focus ring: the field's own border turns accent; the browser's outline stays off (as in new-settings.tsx).
   const [focused, setFocused] = useState(false);
-  const field = (pad: FieldPad) => <TextInput accessibilityLabel={label} placeholder={placeholder} placeholderTextColor={c.foregroundMuted} value={value} onChangeText={onChange} onSelectionChange={caret.onSelectionChange}
+  const field = (pad: FieldPad) => <Field accessibilityLabel={label} placeholder={placeholder} placeholderTextColor={c.foregroundMuted} value={value} onChangeText={onChange} onSelectionChange={caret.onSelectionChange}
     multiline editable={!disabled} autoFocus={autoFocus} maxLength={2000} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
     style={[{ minHeight: compact ? 44 : lines > 1 ? 56 : 36, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: focused ? c.accent : c.border, color: c.foreground, backgroundColor: c.surface0, fontSize: compact ? 15 : 13,
       ...(Platform.OS === "web" ? { outlineStyle: "none" } as object : null) }, pad]} />;
@@ -305,7 +306,7 @@ export function QuestionHistory({ workspaceId, theme, compact }: { workspaceId: 
   return <View style={{ gap: 10 }}>
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10, minHeight: compact ? 44 : 34, borderRadius: 6, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface0 }}>
       <Icon name="Search" size={14} color={c.foregroundMuted} />
-      <TextInput accessibilityLabel="Search questions and answers" placeholder="Search questions and answers" placeholderTextColor={c.foregroundMuted} value={query} onChangeText={setQuery}
+      <Field accessibilityLabel="Search questions and answers" placeholder="Search questions and answers" placeholderTextColor={c.foregroundMuted} value={query} onChangeText={setQuery}
         style={{ flex: 1, minWidth: 0, paddingVertical: 6, color: c.foreground, fontSize: compact ? 15 : 13, outlineStyle: "none" } as object} />
       {!!query && <IconButton theme={theme} compact={compact} icon="X" label="Clear the search" onPress={() => setQuery("")} />}
     </View>

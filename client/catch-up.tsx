@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactN
 import { Animated, PanResponder, Platform, View } from "react-native";
 import { Pressable, Text } from "./text";
 import { useRpc } from "@getpaseo/plugin/client";
-import { Icon, ScrollView, TextInput } from "@getpaseo/plugin/client/ui";
+import { Icon, ScrollView } from "@getpaseo/plugin/client/ui";
 import { ImageField, useImageAttachments } from "./image-attach";
 import type { ImageUpload } from "../shared/images";
 import { useQuery } from "@tanstack/react-query";
@@ -44,6 +44,7 @@ import { PRIMARY_FORM } from "./dock";
 import { MorePanel, MoveResult, ContextAnswer } from "./more-context";
 import { AnswerActions, AnswerView, ReplyForm, useQuestionActs } from "./your-questions";
 import { questionLine, questionsByWorkspace } from "../shared/your-questions";
+import { Field } from "./field";
 
 export { MorePanel, MoveResult, ContextAnswer };
 
@@ -640,7 +641,7 @@ function NoteRow({ theme, compact, agentId }: { theme: Theme; compact: boolean; 
     void agent.handle?.send(words.trim(), images ? { images } : undefined); setWords(""); img.clear();
   };
   return <ImageField model={img} theme={theme} compact={compact}><View {...PRIMARY_FORM} style={{ flexDirection: "row", alignItems: "flex-end", gap: 8 }}>
-    <TextInput accessibilityLabel="Tell the agent something" placeholder="Tell the agent something" placeholderTextColor={c.foregroundMuted} value={words} onChangeText={setWords} multiline
+    <Field accessibilityLabel="Tell the agent something" placeholder="Tell the agent something" placeholderTextColor={c.foregroundMuted} value={words} onChangeText={setWords} multiline
       style={{ flex: 1, minHeight: compact ? 44 : 36, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: c.border, color: c.foreground, backgroundColor: c.surface0 }} />
     <IconButton theme={theme} compact={compact} icon="Send" label="Send to the agent" tooltip={!compact} disabled={!words.trim() || !!img.blocked} onPress={send} />
   </View></ImageField>;

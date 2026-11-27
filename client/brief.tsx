@@ -5,7 +5,7 @@ import { Pressable, Text } from "./text";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { openExternalUrl, useRpc, type PluginClientContext, type PluginTimelineItemProps } from "@getpaseo/plugin/client";
 import { deliveryStatus } from "../shared/queue";
-import { Icon, TextInput, copyText, useToast } from "@getpaseo/plugin/client/ui";
+import { Icon, copyText, useToast } from "@getpaseo/plugin/client/ui";
 import { BRIEF_KIND, briefCardAsk, BRIEF_VERSION, askedDecisions, cardPicks, decisionQuestion, notedCount, pickedCount, briefSchema, collapsedLine, outcomeLabel, extrasFit, hasOriginal, nothingNeededLine, isTight, pastRows, pastTone, selectsFirst, sendBar, shownBrief, pastAsk, liveBrief, newAnswerId, answeredOutcome, type Brief, type BriefDecision, type BriefMove } from "../shared/brief";
 import { needsYou } from "../shared/attention";
 import { age, briefOutlived } from "../shared/inbox";
@@ -32,6 +32,7 @@ import { isLight, withAlpha, type Colors } from "./theme";
 import { dismissToast, notice, runAction, runUndoable } from "./toasts";
 import { DismissX, RevealScope, useDismiss } from "./dismiss";
 import { clearPendingAnswer, confirmPendingAnswer, failPendingAnswer, markSentHere, setPendingAnswer } from "./pending-answers";
+import { Field } from "./field";
 
 /**
  * The brief card (design §2): the ask in one line, decisions as option rows, only the context needed, and the one
@@ -215,7 +216,7 @@ export function BriefBody({ b, c, compact, tight, embedded, height, mode, picks,
           onPress={() => onPick(d.id, OTHER)} c={c} compact={compact} />}
         {/* Something else's field with its Send answer, kept on screen together while typing (DockedPane). */}
         {!readonly && isOther(picks[d.id]) && <View {...PRIMARY_FORM} style={{ gap: 8 }}>
-          <WithImages img={img} c={c} compact={compact} row={rowAt === d.id}><TextInput accessibilityLabel={`Your answer${numbered ? ` to question ${i + 1}` : ""}, required`} placeholder="Your answer (required)" placeholderTextColor={c.foregroundMuted} autoFocus multiline maxLength={2000}
+          <WithImages img={img} c={c} compact={compact} row={rowAt === d.id}><Field accessibilityLabel={`Your answer${numbered ? ` to question ${i + 1}` : ""}, required`} placeholder="Your answer (required)" placeholderTextColor={c.foregroundMuted} autoFocus multiline maxLength={2000}
             value={words[d.id] ?? ""} editable={!busy} onChangeText={t => onWords?.(d.id, t)}
             style={{ minHeight: compact ? 66 : 58, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: words[d.id]?.trim() ? c.border : withAlpha(c.accent, 0.7), color: c.foreground, backgroundColor: c.surface0, fontSize: 14, lineHeight: 20, textAlignVertical: "top" }} /></WithImages>
           {mode === "send" && <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
@@ -226,7 +227,7 @@ export function BriefBody({ b, c, compact, tight, embedded, height, mode, picks,
         {/* A note on a lettered pick ("A, but…"): quiet until asked for, never in the way of the one-tap answer. */}
         {!readonly && !isOther(picks[d.id]) && (notesOpen[d.id] ? <View {...PRIMARY_FORM} style={{ gap: 6, marginTop: 2 }}>
           <Text style={{ color: c.foregroundMuted, fontSize: 12, lineHeight: 16, fontWeight: "600" }}>Note</Text>
-          <WithImages img={img} c={c} compact={compact} row={rowAt === d.id}><TextInput accessibilityLabel={`Note for the agent${numbered ? ` on decision ${i + 1}` : ""}, optional`} placeholder={mode === "select" ? "Sent with your pick for this decision" : "Sent with the option you tap"}
+          <WithImages img={img} c={c} compact={compact} row={rowAt === d.id}><Field accessibilityLabel={`Note for the agent${numbered ? ` on decision ${i + 1}` : ""}, optional`} placeholder={mode === "select" ? "Sent with your pick for this decision" : "Sent with the option you tap"}
             placeholderTextColor={c.foregroundMuted} autoFocus={focusNote === d.id} multiline maxLength={2000} value={notes[d.id] ?? ""} editable={!busy} onChangeText={t => onNote?.(d.id, t)}
             style={{ minHeight: compact ? 66 : 58, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: c.border, color: c.foreground, backgroundColor: c.surface0, fontSize: 14, lineHeight: 20, textAlignVertical: "top" }} /></WithImages>
           <NoteLink icon="X" label="Remove note" a11y={`Remove the note${numbered ? ` on decision ${i + 1}` : ""}`} disabled={!!busy} onPress={() => { onNote?.(d.id, ""); onNoteOpen?.(d.id, false); setFocusNote(null); }} c={c} compact={compact} />

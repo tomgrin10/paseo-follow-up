@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { TextInput, View } from "react-native";
+import { View } from "react-native";
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, copyText, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -12,6 +12,7 @@ import { compassNoteRpc, compassRpc, listRpc } from "../shared/contracts";
 import { HAND_LABEL, HAND_SOURCE, STRENGTHS, noteWho, type CompassNote, type CompassSource, type NoteAction, type Place } from "../shared/compass";
 import { PRIORITY_SOURCE_LABEL, type PrioritySourceKind } from "../shared/priorities";
 import { compassKey } from "./compass-settings";
+import { Field } from "./field";
 
 type View_ = {
   settings: { sources: CompassSource[] };
@@ -179,7 +180,7 @@ function MovePicker({ current, busy, onPick, onCancel, theme, compact }: { curre
   const found = (all.data ?? []).filter(w => w.title.toLowerCase().includes(q.trim().toLowerCase())).slice(0, 6);
   return <View style={{ gap: 6, paddingTop: 4 }}>
     <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-      <TextInput autoFocus accessibilityLabel="Search workspaces" value={q} onChangeText={setQ} placeholder="Move to which workspace?" placeholderTextColor={c.foregroundMuted}
+      <Field autoFocus accessibilityLabel="Search workspaces" value={q} onChangeText={setQ} placeholder="Move to which workspace?" placeholderTextColor={c.foregroundMuted}
         style={{ flex: 1, minWidth: 0, minHeight: compact ? 44 : 32, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: c.border, color: c.foreground, fontSize: 13, backgroundColor: c.surface0 }} />
       <Button title="Cancel" kind="ghost" theme={theme} compact={compact} onPress={onCancel} />
     </View>
