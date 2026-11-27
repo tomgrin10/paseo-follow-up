@@ -797,6 +797,8 @@ async function seed({ call, home }) {
   // reviewers-click: Ravi and Mina review example/app, so each PR's row reads "Add reviewers to #N: Ravi and Mina".
   if (only.includes("reviewers-click")) await call("follow.save-reviewers", { repo: "example/app", reviewers: [{ login: "ravi", name: "Ravi" }, { login: "mina", name: "Mina" }] });
   const specs = [...WORKSPACES.filter(w => !only.includes("pr-now") || ["audit", "billing"].includes(w.key)).filter(w => !(argv.includes("--rename-fixup-review") || only.includes("local-titles")) || ["audit", "billing"].includes(w.key)), ...(only.includes("needs-you-states") || only.includes("panel-folds") || only.includes("tasks-view") || only.includes("own-answer") || only.includes("optimistic-answers") || only.includes("keyboard-room") || only.includes("more-context") || only.includes("dismiss") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") || PASTE_LIKE(only) ? NEEDS_YOU_STATES : []), ...(only.includes("done-brief") ? DONE_BRIEF : []), ...(only.includes("pick-notes") || only.includes("optimistic-answers") || only.includes("dock-in-view") || only.includes("catch-up") || only.includes("dictation") ? PICK_NOTES : []), ...(only.includes("review-mode") || only.includes("pr-link") ? REVIEW_MODE_STATES : []), ...(only.includes("sending") ? SENDING_STATES : []), ...(only.includes("merge-click") || only.includes("dismiss") ? MERGE_CLICK_STATES : []), ...(only.includes("reviewers-click") ? REVIEWERS_CLICK_STATES : []), ...(only.includes("pr-scale") ? PR_SCALE_STATES : []), ...(only.includes("batch-churn") ? BATCH_CHURN_STATES : []), ...(only.includes("scheduled-tasks") ? SCHEDULED_STATES : []), ...(only.includes("paged-lists") ? PAGED_STATES : []), ...(only.includes("now-line") ? NOW_LINE_STATES : []), ...(only.includes("peek") ? PEEK_STATES : []), ...(only.includes("pr-now") ? PR_NOW_STATES : []), ...(only.includes("question-links") ? QL_STATES : [])];
+  // Keyboard shots need the answer workspace and the Home fixtures, without unrelated held repair turns.
+  if (only.includes("keyboard-room")) specs.splice(0, specs.length, ...specs.filter(w => ["audit", "billing", "ny-lone"].includes(w.key)));
   // Geometry checks need one question, one repair and one permission row, not the full README inventory.
   // optimistic-answers needs one lone question and one chat card; the clock only moves forward (pn-one sits before the last needs-you states).
   if (only.includes("optimistic-answers")) specs.splice(0, specs.length, ...specs.filter(w => !NEEDS_YOU_STATES.includes(w) && !PICK_NOTES.includes(w) || ["ny-lone", "pn-one"].includes(w.key)));
@@ -6061,7 +6063,7 @@ async function dockInViewShots({ shoot }) {
 /**
  * keyboard-room (the-keyboard-never-covers-a-field): a phone keyboard that overlays the page, as iOS and Android do in
  * Paseo's edge-to-edge app: the visual viewport shrinks to 508 over an unchanged 390x844 page, and a block stands in
- * for the keys. The Overseer's reply box, and an answer field in the larger view (the workspace panel on a phone).
+ * for the keys. The Overseer's reply box, and an answer field in the workspace view's tab at phone width.
  * `--keyboard-before` names the shots `before-`.
  */
 async function keyboardRoomShots({ shoot, call, home }) {
@@ -6103,11 +6105,11 @@ async function keyboardRoomShots({ shoot, call, home }) {
     await keys(page);
   };
   const lone = pick("ny-lone");
-  const larger = async page => {
+  const view = async page => {
     await openChat(page, lone.title, lone.prompt);
     await page.getByRole("button", { name: "Follow-up", exact: true }).last().click();
-    await page.getByRole("button", { name: "Open the larger view", exact: true }).last().click();
     await page.setViewportSize(PHONE);
+    await visible(page.getByTestId("follow-up-view-tab")).waitFor();
     await visible(page.getByText("Missing keys")).waitFor();
     await visible(page.getByRole("radio", { name: /^Something else/ })).click();
     await visible(page.getByLabel("Your answer to Q1, required")).fill("Show the key itself, and log it so we add the translation.");
@@ -6115,7 +6117,7 @@ async function keyboardRoomShots({ shoot, call, home }) {
   };
   for (const theme of ["light", "dark"]) {
     await shoot(name(`overseer-${theme}`), PHONE, theme, overseer);
-    await shoot(name(`larger-${theme}`), PHONE, theme, larger);
+    await shoot(name(`view-${theme}`), PHONE, theme, view);
   }
 }
 
