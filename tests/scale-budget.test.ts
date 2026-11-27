@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { ACK_READ_MS, idleVerdict, median, PR_READ_MS, SEND_ROUNDS, SEND_SETTLE_MS, settleBoundMs, settleState } from "../scripts/scale-budget.mjs";
 import { NO_PROGRESS_CAP, SETTLE_MS } from "../shared/send-decision";
 import { POLL_IDLE_MS } from "../shared/poll";
@@ -75,16 +76,40 @@ test("the busy window is judged on growth: last fifth's median over the first fi
   assert.ok(v.over && v.growthMb > BUSY_GROWTH_BUDGET_MB, `a steady climb fails (grew ${v.growthMb} MB)`);
 });
 
-test("memory-returns-after-a-burst: the last gap's median RSS is judged, and the budget sits between the two builds", async () => {
-  const { burstReturnVerdict, BURST_RETURN_BUDGET_MB } = await import("../scripts/scale-budget.mjs");
-  // Harness 2026-11-16, live-sized, 3-minute bursts: 2.1.0-beta.2's gaps 320–369 MB, the settler's 195–208.
+test("memory-returns-after-a-burst: the last gap's floor is judged against the run's own settled baseline", async () => {
+  const { burstBaselineMb, burstReturnVerdict, BURST_RETURN_BUDGET_MB, BURST_RETURN_GROWTH_MB } = await import("../scripts/scale-budget.mjs");
+  // Harness 2026-11-16, live-sized, 3-minute bursts: 2.1.0-beta.2's gaps 320-369 MB over a ~190 MB settled floor.
   const kept = [Array.from({ length: 36 }, (_, i) => 325 + (i % 5)), Array.from({ length: 36 }, (_, i) => 329 + (i % 4))];
   const returned = [Array.from({ length: 36 }, (_, i) => (i < 12 ? 316 : 197) + (i % 3)), Array.from({ length: 36 }, (_, i) => (i < 12 ? 318 : 199) + (i % 3))];
-  const v = burstReturnVerdict(kept, BURST_RETURN_BUDGET_MB);
-  assert.ok(v.over && v.lastMb > BURST_RETURN_BUDGET_MB, `memory held after the bursts fails (${v.gapMediansMb})`);
-  assert.equal(burstReturnVerdict(returned, BURST_RETURN_BUDGET_MB).over, false, "a gap that settles a minute in passes on its median");
-  assert.equal(burstReturnVerdict([], BURST_RETURN_BUDGET_MB).over, false, "no cycles, no verdict");
-  assert.ok(BURST_RETURN_BUDGET_MB >= 208 + 40 && BURST_RETURN_BUDGET_MB <= 320 - 40, "the budget keeps a margin on both sides of the measured builds");
+  const v = burstReturnVerdict(kept, { baselineMb: 190 });
+  assert.ok(v.over && v.returnMb! > BURST_RETURN_GROWTH_MB, `memory held after the bursts fails (${v.floorMb} MB over a 190 MB baseline)`);
+  assert.equal(burstReturnVerdict(returned, { baselineMb: 190 }).over, false, "a gap that settles a minute in passes on its floor");
+  assert.equal(burstReturnVerdict([], { baselineMb: 190 }).over, false, "no cycles, no verdict");
+  // A constant level the worker holds from its start (--retain-mb) moves the baseline and the gap alike: not a leak.
+  assert.equal(burstReturnVerdict(returned.map(g => g.map(x => x + 40)), { baselineMb: 230 }).over, false);
+  // A leak (--leak-mb-per-min 8, ~12 minutes from the baseline's settle to the last gap's floor) fails.
+  assert.equal(burstReturnVerdict(returned.map(g => g.map(x => x + 96)), { baselineMb: 190 }).over, true);
+  // No settle before the bursts: the floor against the old absolute level.
+  assert.equal(burstReturnVerdict(kept).over, true); assert.equal(burstReturnVerdict(returned).over, false);
+  assert.equal(burstReturnVerdict(returned, BURST_RETURN_BUDGET_MB).over, false, "the old numeric argument still reads as the absolute budget");
+  assert.equal(burstBaselineMb([{ s: -321, after: 188 }, { s: -40, after: 192 }, { s: 174, after: 203 }]), 192, "the last settle before the first burst");
+  assert.equal(burstBaselineMb([{ s: 174, after: 203 }]), null);
+});
+
+// burst-return-is-judged-against-the-run. 2026-11-27: the absolute 260 MB gate failed #360, a client-only PR, at 270 MB
+// while the same server code read 219-271 across CI runs. Every scale-live run of 2026-11-23 to 27 (74, every runner
+// CPU; tests/fixtures/ci-burst-return.txt: the pre-burst settled baseline, then the last gap's 5 s samples) passes the
+// gate, with room, and the same runs shifted by the 2.1.0-beta.2 bug's retention fail.
+test("burst-return-is-judged-against-the-run: every recorded CI run passes, and the same runs fail with memory kept", async () => {
+  const { burstReturnVerdict, BURST_RETURN_GROWTH_MB } = await import("../scripts/scale-budget.mjs");
+  const runs = (await readFile("tests/fixtures/ci-burst-return.txt", "utf8")).split("\n").filter(Boolean).map(l => { const [base, gap] = l.split(" "); return { baselineMb: Number(base), gap: gap!.split(",").map(Number) }; });
+  assert.ok(runs.length >= 70, `${runs.length} recorded runs`);
+  const verdicts = runs.map(r => burstReturnVerdict([r.gap], { baselineMb: r.baselineMb }));
+  const worst = Math.max(...verdicts.map(v => v.returnMb!));
+  assert.deepEqual(verdicts.filter(v => v.over).map(v => `${v.floorMb}/${v.baselineMb}`), [], "no recorded run fails");
+  assert.ok(BURST_RETURN_GROWTH_MB - worst >= 15, `the worst run (+${worst} MB) is at least 15 MB inside the budget`);
+  // The bug's retention (gaps held 130+ MB over the settled floor) fails every one of them.
+  assert.ok(runs.every(r => burstReturnVerdict([r.gap.map(x => Math.max(x, r.baselineMb + 130))], { baselineMb: r.baselineMb }).over));
 });
 
 /**
