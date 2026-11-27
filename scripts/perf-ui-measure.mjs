@@ -31,8 +31,11 @@ const topFns = profile => {
   profile.samples.forEach((id, i) => { const n = byId.get(id); const f = n.callFrame; if (["(idle)", "(program)", "(garbage collector)"].includes(f.functionName) && f.functionName !== "(garbage collector)") return; const k = `${f.functionName || "(anon)"} ${(f.url || "").split("/").pop().slice(0, 40)}:${f.lineNumber + 1}`; self.set(k, (self.get(k) || 0) + (dt[i] || 0) / 1000); total += (dt[i] || 0) / 1000; });
   return { totalMs: Math.round(total), top: [...self].sort((a, b) => b[1] - a[1]).slice(0, 30).map(([k, v]) => [k, Math.round(v)]) };
 };
+// Whether the last step() ran: with --only, a phone goes back only from a screen a step actually opened.
+let ran = false;
 const step = async (name, fn) => {
-  if (ONLY && !ONLY.some(o => name.startsWith(o))) return;
+  ran = !ONLY || ONLY.some(o => name.startsWith(o));
+  if (!ran) return;
   const prof = PROF.some(p => name.startsWith(p));
   if (prof) { await s.cdp.send("Profiler.enable"); await s.cdp.send("Profiler.setSamplingInterval", { interval: 200 }); await s.cdp.send("Profiler.start"); }
   try { const r = await fn(); if (prof) { const { profile: cp } = await s.cdp.send("Profiler.stop"); r.cpu = topFns(cp); writeFileSync(join(shots, `${profile}-${name}.cpuprofile`), JSON.stringify(cp)); } if (r) { results.steps.push(r); console.log(`${name}: paint ${r.toPaintMs} ms, script ${r.scriptMs} ms, commits ${r.commits}, rendered ${r.renderedTotal}+${r.mountedTotal} mounted, rpc ${r.rpc.map(x => `${x.key}×${x.sent || x.recv} ${x.downBytes}B`).slice(0, 4).join("; ")}`); } }
@@ -75,13 +78,13 @@ try {
   const rows = page.getByRole("button", { name: /^Synthetic workspace \d+ (›|\.)/ });
   await step("home-row-1", () => measure("home-row-1 (open row 1)", () => rows.nth(0).click(), null));
   await page.screenshot({ path: join(shots, `${profile}-home-row1.png`) });
-  if (phone) { await page.goBack().catch(() => {}); await page.waitForTimeout(2000); }
+  if (phone && ran) { await page.goBack().catch(() => {}); await page.waitForTimeout(2000); }
   await step("home-row-2", () => measure("home-row-2 (switch to row 2)", () => rows.nth(1).click(), null));
-  if (phone) { await page.goBack().catch(() => {}); await page.waitForTimeout(2000); }
-  await step("home-row-ws0", () => measure("home-row-ws0 (open the 300-question workspace's row)", () => page.getByRole("button", { name: /^Synthetic workspace 0 › / }).first().click(), null, { settleMs: 2500 }));
+  if (phone && ran) { await page.goBack().catch(() => {}); await page.waitForTimeout(2000); }
+  await step("home-row-ws0", () => measure("home-row-ws0 (open the 300-question workspace's row)", () => page.getByRole("button", { name: /^Synthetic workspace 0( ›|\.)/ }).first().click(), null, { settleMs: 2500 }));
   await page.screenshot({ path: join(shots, `${profile}-home-ws0.png`) });
   await step("home-pane-q", () => measure("home-pane-q (open a question in Home's decision pane)", () => btn(/^Show Q5:/).first().click(), visible(page.getByRole("radiogroup", { name: "Options for Q5" }))));
-  if (phone) { await page.goBack().catch(() => {}); await page.waitForTimeout(2000); }
+  if (phone && ran) { await page.goBack().catch(() => {}); await page.waitForTimeout(2000); }
   const search = page.getByRole("textbox", { name: /^Search/ }).first();
   // With --only, the phone's goBack()s above undo row opens that never ran and leave Home: come back to it first.
   if (!await search.isVisible().catch(() => false)) { await page.goto(homeUrl(info.origin, info.serverId)); await search.waitFor({ timeout: 30_000 }); await page.waitForTimeout(2000); }
@@ -97,7 +100,7 @@ try {
   await step("home-idle", () => idle("home-idle"));
 
   // ---------- Catch up, New, Settings ----------
-  await step("catch-up", () => measure("catch-up (open)", () => btn(/^Catch up on/).first().click(), null, { settleMs: 2500 }));
+  await step("catch-up", () => measure("catch-up (open)", () => btn(/^Catch up/).first().click(), null, { settleMs: 2500 }));
   await page.screenshot({ path: join(shots, `${profile}-catchup.png`) });
   await page.goto(homeUrl(info.origin, info.serverId)); await page.getByRole("toolbar", { name: "Status", exact: true }).first().waitFor({ timeout: 30_000 }); await page.waitForTimeout(2000);
   await step("new", () => measure("new (open Dispatch)", () => btn(/^Dispatch/).first().click(), null, { settleMs: 2500 }));

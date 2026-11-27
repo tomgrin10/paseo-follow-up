@@ -1,5 +1,5 @@
 import { finishedTask } from "../shared/finished";
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { PagedRows } from "./paged-list";
 import type { SettingsCategory } from "../shared/settings-nav";
 import { recoveryActions } from "./recovery-actions";
@@ -373,6 +373,26 @@ function Slot({ id, onHeight, children }: { id: string; onHeight: (id: string, h
   return <View onLayout={e => onHeight(id, Math.round(e.nativeEvent.layout.height))}>{children}</View>;
 }
 
+type PanelCard = { key: string; node: ReactNode; column?: number };
+/**
+ * The cards in columns, placed from their measured heights (invariant 149, a-card-resize-redraws-no-other-card). The
+ * heights live here, not in WorkspaceView: a card that grows or shrinks (a question picked or closed in Needs you)
+ * redraws these columns alone, and every card in them is the same element as before, so React skips it.
+ */
+function Columns({ cards, columns }: { cards: readonly PanelCard[]; columns: number }) {
+  // Measured heights and the last placement (so a card whose height changes with its column doesn't flip back and forth).
+  const [heights, setHeights] = useState<Record<string, number>>({});
+  const placed = useRef<Record<string, number>>({});
+  const onHeight = useCallback((id: string, h: number) => setHeights(prev => prev[id] === h ? prev : { ...prev, [id]: h }), []);
+  const where = placeCards(cards, columns, heights, placed.current);
+  placed.current = where;
+  return <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
+    {Array.from({ length: columns }, (_, col) => <View key={col} style={{ flex: columns === 2 ? (col === 0 ? AGENT_SHARE : 1 - AGENT_SHARE) : 1, minWidth: 0 }}>
+      {cards.filter(x => where[x.key] === col).map(x => <Slot key={x.key} id={x.key} onHeight={onHeight}>{x.node}</Slot>)}
+    </View>)}
+  </View>;
+}
+
 /** A pending permission of one agent in the workspace, with Allow and Deny, in Needs you (`permissions`). */
 function AgentPermissions({ agentId, theme, compact }: { agentId: string; theme: Theme; compact: boolean }) {
   const agent = useAgentLive(agentId);
@@ -481,10 +501,6 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const workspaceCard = <WorkspaceCard workspace={w} theme={theme} compact={compact} openAgent={openAgent} browserReady={browser.data ? browser.data.ready : null} openOverview={openOverview} editSpec={() => setSpecOpen(true)} />;
   // Home is a screen, with no client state (useAgent throws there): agent titles read the short id.
   const extras = place === "home" ? <AgentTitleSource.Provider value={noClientState}>{workspaceCard}</AgentTitleSource.Provider> : workspaceCard;
-  // Measured heights and the last placement (so a card whose height changes with its column doesn't flip back and forth).
-  const [heights, setHeights] = useState<Record<string, number>>({});
-  const placed = useRef<Record<string, number>>({});
-  const onHeight = (id: string, h: number) => setHeights(prev => prev[id] === h ? prev : { ...prev, [id]: h });
   // Priority order. The left column (the wide one in two) is the agent's, or Needs you's while anything waits on the
   // developer: it reads first, as in one column, and the agent card moves to the next column. In two columns the
   // decisions and PRs stay right and the record joins the shorter column; in three every other card goes to the
@@ -492,26 +508,19 @@ export function WorkspaceView({ theme, layout, workspace: w, navigation, loadErr
   const waiting = needsYou(w, now).length > 0 || !!permissions || !!ask?.card;
   const right = lay.columns === 2 ? 1 : undefined;
   const agentCol = waiting ? 1 : 0;
-  const cards: { key: string; node: ReactNode; column?: number }[] = [
+  const cards: PanelCard[] = [
     { key: "shipped", node: shipped, column: 0 }, ...(waiting ? [{ key: "needs", node: needs, column: 0 }] : []),
     { key: "agent", node: agentCard, column: agentCol }, { key: "messages", node: messages, column: agentCol }, { key: "history", node: history, column: agentCol },
     ...(waiting ? [] : [{ key: "needs", node: needs, column: right }]), { key: "questions", node: questions, column: right }, { key: "stacks", node: stacks, column: right },
     { key: "tasks", node: tasks, column: right }, { key: "log", node: log }, { key: "extras", node: extras },
   ].filter(x => !!x.node);
-  const where = placeCards(cards, lay.columns, heights, placed.current);
-  placed.current = where;
   const one = <>{shipped}{needs}{agentCard}{messages}{questions}{history}{stacks}{tasks}{log}{extras}</>;
-  const columns = multi && <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
-    {Array.from({ length: lay.columns }, (_, col) => <View key={col} style={{ flex: lay.columns === 2 ? (col === 0 ? AGENT_SHARE : 1 - AGENT_SHARE) : 1, minWidth: 0 }}>
-      {cards.filter(x => where[x.key] === col).map(x => <Slot key={x.key} id={x.key} onHeight={onHeight}>{x.node}</Slot>)}
-    </View>)}
-  </View>;
   return <View testID={`follow-up-view-${place}`} onLayout={event => setWidth(event.nativeEvent.layout.width)} style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>
     {/* Agent rows peek at their agent's turn on hover (client/turn-view.tsx), where Recent steps start folded. */}
     <PeekHost where={place === "panel" ? "panel" : "main"} theme={theme} compact={compact} openAgent={openAgent} names={agentName} enabled={place === "panel"}>
     <DockedPane compact={compact} scrollRef={scrollRef as never} header={!compact || place !== "panel" ? top : undefined} dock={dock} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20 }}>
       {header}
-      {multi ? columns : one}
+      {multi ? <Columns cards={cards} columns={lay.columns} /> : one}
     </DockedPane>
     </PeekHost>
     <PrSheet workspace={w} prKey={sheet?.key ?? null} intent={sheet?.intent ?? null} theme={theme} compact={compact} browserReady={browser.data?.ready ?? false} onClose={() => setSheet(null)} />
